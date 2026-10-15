@@ -180,6 +180,7 @@ import { NewsList, NewsThread } from './NewsThread';
 import { loadNewsMode, saveNewsMode, type NewsItem } from './bnews';
 import { AllFeedsSheet, FeedPicker } from './FeedPicker';
 import { BrandFeed } from './BrandFeed';
+import { BradioFeed } from '../bradio/BradioFeed';
 import { authorProfileUrl, authorRef, fetchAuthorPage, fetchAuthorProfile, type AuthorProfile } from './authorFeed';
 import { FeaturedAlbum } from './FeaturedAlbum';
 import {
@@ -2062,6 +2063,8 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
                 <BmoviesReel key={feed} brand={feed} />
               </Suspense>
             </>
+          ) : feed === 'bradio' ? (
+            <BradioFeed />
           ) : !hasCustomView(feed) ? (
             <BrandFeed slug={feed} />
           ) : news ? (

@@ -63,7 +63,9 @@ export const deviceBody = (o: {
 // ── Tap → where to go ──────────────────────────────────────────────────────────────────────────
 
 /** 'signins' = Settings › Chat › Recent sign-ins (the "New sign-in to bChat" alert); ticker is ''. */
-export type PushRoute = { segment: 'rooms' | 'dms' | 'signins'; ticker: string };
+/** `space`: ticker is the Space slug (push kind space_live → bwalletx://space/<slug>). */
+export type PushRoute = { segment: 'rooms' | 'dms' | 'signins' | 'space'; ticker: string };
+const SPACE_SLUG_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 const TICKER_RE = /^[A-Z0-9_.-]{1,64}$/;
 const normTicker = (t: unknown): string | null => {
@@ -82,6 +84,12 @@ export const routeFromData = (data: Record<string, unknown> | null | undefined):
   if (!data || typeof data !== 'object') return null;
   if (data.kind === 'call') return null;
   if (data.kind === 'sign_in') return { segment: 'signins', ticker: '' };
+  if (data.kind === 'space_live') {
+    // Prefer url (bwalletx://space/<slug>), fall back to slug.
+    const fromUrl = typeof data.url === 'string' ? /^bwalletx:\/\/space\/([^/?#]+)\/?$/.exec(data.url)?.[1] : undefined;
+    const slug = fromUrl ?? data.slug;
+    return typeof slug === 'string' && SPACE_SLUG_RE.test(slug) ? { segment: 'space', ticker: slug } : null;
+  }
   let ticker = normTicker(data.ticker) ?? normTicker(data.room);
   if (!ticker && typeof data.url === 'string') {
     const m = /\/room\/([^/?#]+)/.exec(data.url);
@@ -96,6 +104,8 @@ export const routeToQuery = (r: PushRoute) => `push=${r.segment}:${encodeURIComp
 export const routeFromQuery = (search: string): PushRoute | null => {
   const v = new URLSearchParams(search).get('push');
   if (v === 'signins:' || v === 'signins') return { segment: 'signins', ticker: '' };
+  const sp = v ? /^space:([A-Za-z0-9_-]{1,64})$/.exec(v) : null;
+  if (sp) return { segment: 'space', ticker: sp[1] };
   const m = v ? /^(rooms|dms):(.+)$/.exec(v) : null;
   const ticker = m ? normTicker(m[2]) : null;
   return m && ticker ? { segment: m[1] as PushRoute['segment'], ticker } : null;

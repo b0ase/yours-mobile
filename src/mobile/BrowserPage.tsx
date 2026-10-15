@@ -9,7 +9,7 @@ import {
 } from './storeBuild';
 import { TAB_TAP } from './tabs/tabs';
 import { createPortal } from 'react-dom';
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { lazy, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, Suspense } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { FAV_KEY, FAVOURITES_CHANGED, mergeFavouriteExtras } from './phone/homeFavourites';
@@ -64,6 +64,18 @@ import bgVideo from './brand/bg/liquid-gold.mp4';
 import bgPoster from './brand/bg/liquid-gold.jpg';
 import { VideoBackground } from './ui/VideoBackground';
 import { IS_EXTENSION } from './extension';
+
+/** Home's "Live now" Spaces row: bWalletX only, a lazy chunk behind the inlined flag. */
+const LiveSpacesBarLazy = BSPACES_ENABLED
+  ? lazy(() => import('./bradio/LiveSpacesBar').then((m) => ({ default: m.LiveSpacesBar })))
+  : null;
+const LiveSpacesBar = LiveSpacesBarLazy
+  ? () => (
+      <Suspense fallback={null}>
+        <LiveSpacesBarLazy />
+      </Suspense>
+    )
+  : null;
 import { useKeyboardInset } from './ui/keyboardInset';
 import { usePhoneLayout } from './phone/flag';
 import { PHONE_ADD_TO_DOCK } from './phone/events';
@@ -970,6 +982,7 @@ const BrowserPage = ({
     if (i === 0) {
       return (
         <>
+          {LiveSpacesBar && !arranging && <LiveSpacesBar />}
           {arranging && favouriteTiles.length > 0 ? (
             <div className="flex flex-col gap-3">
               <div className="flex items-center justify-between">
