@@ -7,17 +7,29 @@ import { fmtSats } from '../money/money';
 import { buyOpnsListing } from '../names/opnsBuy';
 import { canBulkMint } from '../names/bulkAccess';
 import { OPNS_MINT_ROUTE } from '../names/opnsBatch';
-import { fetchOpnsListings, filterListings, ownedForSale, type OpnsListing, usdOrSats } from '../names/opnsSell';
+import { fetchAllOpnsListings, filterListings, ownedForSale, type OpnsListing, usdOrSats } from '../names/opnsSell';
 import { OpnsBuySheet } from '../names/OpnsSheets';
+import {
+  DEFAULT_CATEGORIES,
+  NAME_CATEGORIES,
+  type NameCategory,
+  classifyName,
+  countByCategory,
+  relistCount,
+  sortByCategory,
+  tierUsd,
+} from '../names/market/nameCategories';
 
 /**
- * Exchange › Names: every OpNS name listed on the 1Sat order book (ours and anyone's), searchable, cheapest
- * first. Buy goes through the same buyOrdinal OpNS path as Get your name (opnsBuy.ts). The Exchange itself is
+ * Exchange › Names: every OpNS name listed on the 1Sat order book (ours and anyone's), grouped into categories
+ * newcomers want (First names and Cool words first; tickers last), sorted by category then name. Each row
+ * shows its tier price as a label; Buy always pays the on-chain listing price. Search covers every category. Buy goes through the same buyOrdinal OpNS path as Get your name (opnsBuy.ts). The Exchange itself is
  * bWalletX only (MARKET_ENABLED), so this tab never ships in the store edition.
  */
 const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 const f = (u: string, i?: RequestInit) => fetch(u, i);
+const BUYER_TERMS = "Names are sold as on-chain text. Don't use a name to impersonate a person or company.";
 
 export const OpnsMarket = ({ rate }: { rate: number }) => {
   const { apiContext, chromeStorageService } = useServiceContext();
@@ -25,6 +37,7 @@ export const OpnsMarket = ({ rate }: { rate: number }) => {
   const [list, setList] = useState<OpnsListing[] | null>(null);
   const [err, setErr] = useState('');
   const [q, setQ] = useState('');
+  const [cats, setCats] = useState<Set<NameCategory>>(new Set(DEFAULT_CATEGORIES));
   const [mine, setMine] = useState<Set<string>>(new Set());
   const [buy, setBuy] = useState<OpnsListing | null>(null);
   const [busy, setBusy] = useState('');
@@ -34,7 +47,7 @@ export const OpnsMarket = ({ rate }: { rate: number }) => {
   useEffect(() => {
     let live = true;
     setErr('');
-    fetchOpnsListings(f)
+    fetchAllOpnsListings(f)
       .then((l) => live && setList(l))
       .catch((e: unknown) => {
         if (!live) return;
@@ -54,11 +67,20 @@ export const OpnsMarket = ({ rate }: { rate: number }) => {
       .catch(() => undefined);
   }, [apiContext, reload]);
 
-  // Ours first (owner: the store leads with what we mine), then cheapest.
+  const counts = useMemo(() => countByCategory((list ?? []).map((l) => l.name)), [list]);
+  // Search looks across every category; otherwise only the chosen chips. Category order, then name.
   const shown = useMemo(() => {
     const hits = filterListings(list ?? [], q);
-    return [...hits.filter((l) => mine.has(l.name)), ...hits.filter((l) => !mine.has(l.name))];
-  }, [list, q, mine]);
+    return q.trim() ? hits : sortByCategory(hits.filter((l) => cats.has(classifyName(l.name))));
+  }, [list, q, cats]);
+  const offTier = useMemo(() => (bulk && list ? relistCount(list, rate) : 0), [bulk, list, rate]);
+  const toggle = (c: NameCategory) =>
+    setCats((s) => {
+      const n = new Set(s);
+      if (n.has(c) && n.size > 1) n.delete(c);
+      else n.add(c);
+      return n;
+    });
 
   const purchase = async (l: OpnsListing) => {
     setBuy(null);
@@ -99,6 +121,29 @@ export const OpnsMarket = ({ rate }: { rate: number }) => {
         )}
       </div>
 
+      <div className="flex gap-2 flex-wrap" role="group" aria-label="Name categories">
+        {NAME_CATEGORIES.map((c) => {
+          const on = cats.has(c.id);
+          return (
+            <button
+              key={c.id}
+              type="button"
+              aria-pressed={on}
+              onClick={() => toggle(c.id)}
+              className="rounded-full px-3 py-1.5 text-xs font-bold border cursor-pointer focus-visible:outline focus-visible:outline-2"
+              style={
+                on
+                  ? { background: '#2a2100', borderColor: GOLD, color: GOLD }
+                  : { background: 'transparent', borderColor: '#2b2f36', color: MUTED }
+              }
+            >
+              {c.label}
+              {list ? ` · ${counts[c.id]}` : ''}
+            </button>
+          );
+        })}
+      </div>
+
       {list === null ? (
         <p className="text-sm text-center py-8" style={{ color: MUTED }}>
           Loading names for sale…
@@ -110,7 +155,9 @@ export const OpnsMarket = ({ rate }: { rate: number }) => {
               ? `${err}.`
               : q.trim()
                 ? `No listed names match “${q.trim()}”.`
-                : 'No OpNS names are listed right now.'}
+                : list.length
+                  ? 'No names in these categories. Try another chip.'
+                  : 'No OpNS names are listed right now.'}
           </p>
           {err ? (
             <button
@@ -147,6 +194,9 @@ export const OpnsMarket = ({ rate }: { rate: number }) => {
                   <tr key={l.outpoint} className="border-t border-[#2b2f36]">
                     <td className="py-2.5 pl-3">
                       <span className="font-bold text-white break-all">{l.name}</span>
+                      <span className="ml-2 text-[10px] align-middle" style={{ color: MUTED }}>
+                        Tier ${tierUsd(l.name)}
+                      </span>
                       {ours && (
                         <span
                           className="ml-2 rounded-full px-2 py-0.5 text-[10px] font-bold align-middle"
@@ -195,8 +245,15 @@ export const OpnsMarket = ({ rate }: { rate: number }) => {
         </p>
       )}
       <p className="text-[11px] m-0" style={{ color: MUTED }}>
-        OpNS names listed on the 1Sat order book (OrdLock v2). Prices in sats; dollars at the live rate.
+        OpNS names listed on the 1Sat order book (OrdLock v2). Prices in sats; dollars at the live rate. The tier is a
+        guide price; you always pay the listed price.
       </p>
+      {offTier > 0 && (
+        <p className="text-[11px] m-0" style={{ color: MUTED }}>
+          Seller note: {offTier} of {list?.length ?? 0} listings are more than 10% away from their tier price. Relisting
+          is an on-chain step and is not done here.
+        </p>
+      )}
 
       {buy && (
         <OpnsBuySheet
@@ -204,6 +261,7 @@ export const OpnsMarket = ({ rate }: { rate: number }) => {
           priceSats={buy.priceSats}
           rate={rate}
           site="Exchange · OpNS names"
+          terms={BUYER_TERMS}
           onAllow={() => void purchase(buy)}
           onClose={() => setBuy(null)}
         />

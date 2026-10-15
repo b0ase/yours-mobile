@@ -3,6 +3,7 @@ import type { WalletOutput } from '@bsv/sdk';
 import type { Fetch } from './names';
 import { checkNames, newBatch, runBatch, type KV } from './opnsBatch';
 import {
+  fetchAllOpnsListings,
   fetchOpnsListings,
   filterListings,
   listingSats,
@@ -308,6 +309,28 @@ describe('order book', () => {
     expect(filterListings(l, '').length).toBe(2);
     const bad = (async () => new Response('x', { status: 502 })) as Fetch;
     await expect(fetchOpnsListings(bad)).rejects.toThrow('502');
+  });
+
+  test('fetchAllOpnsListings follows the from=<score> cursor until a page adds nothing', async () => {
+    const row = (name: string, score: number) => ({
+      outpoint: `${TX}_${score}`,
+      score,
+      data: { ordlock: { name, price: 10 } },
+    });
+    const pages: Record<string, unknown[]> = {
+      '': [row('a', 30), row('b', 20)],
+      '20': [row('b', 20), row('c', 10)],
+      '10': [row('c', 10)],
+    };
+    const urls: string[] = [];
+    const f = (async (u: string) => {
+      urls.push(u);
+      const from = /from=(\d+)/.exec(u)?.[1] ?? '';
+      return new Response(JSON.stringify(pages[from] ?? []), { status: 200 });
+    }) as Fetch;
+    const l = await fetchAllOpnsListings(f);
+    expect(l.map((x) => x.name)).toEqual(['a', 'b', 'c']);
+    expect(urls.length).toBe(3);
   });
 });
 
