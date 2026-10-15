@@ -14,7 +14,12 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { FAV_KEY, FAVOURITES_CHANGED, mergeFavouriteExtras } from './phone/homeFavourites';
 import {
+  APP_SCREENS_KEY,
   defaultScreens,
+  gatherBapps,
+  ownIconsFirst,
+  parseScreens,
+  serialiseScreens,
   moveToScreen,
   removeKey,
   renameScreen,
@@ -39,6 +44,7 @@ import bspacesGlyph from './brand/bspaces-glyph.svg';
 import bpicsGlyph from './brand/bpics-glyph.svg';
 import { ArrowRight, Clock, Github, Globe, Lock, Plus, Search, Star, X } from 'lucide-react';
 import { BAPP_GROUPS, bappsIn, type BApp } from './bapps';
+import { ALL_BAPP_ICON_SLUGS, bappIconUrl } from './brand/bappIcons';
 import { RADAR_APPS, RADAR_GROUPS } from './radarApps';
 import { GAME_SOURCES, gamesFor } from './games/gamesCatalog';
 import { AddAppSheet } from './apps/AddAppSheet';
@@ -241,6 +247,12 @@ const BPICS_TILE: Tile = { key: 'sys:bpics', name: 'bPics', url: '/m/bpics', ico
 const SYS_TILES: Tile[] = BSPACES_ENABLED ? [AGENT_TILE, BPICS_TILE, BSPACES_TILE] : [AGENT_TILE, BPICS_TILE];
 /** Wallet screens rather than web apps: they open by route. */
 const isSys = (t: Tile) => t.key.startsWith('sys:');
+/** Generated bApp-icon-set images (gold b badge); a tile without an icon also draws a gold-b monogram. */
+const B_ICON_URLS = new Set(ALL_BAPP_ICON_SLUGS.map((slug) => bappIconUrl(slug)));
+/** Own artwork vs the gold-b icon set (owner, 15 Oct 2026: group them in the one bApps section). Ask b is the b. */
+const hasOwnIcon = (t: Tile) => t.key !== AGENT_KEY && !!t.icon && !B_ICON_URLS.has(t.icon);
+/** Every bApp, own-artwork icons first, then the gold-b ones (each group in catalogue order). */
+const BAPPS_GROUPED: Tile[] = ownIconsFirst([...SYS_TILES, ...BAPP_TILES], hasOwnIcon);
 const OTHER_TILES: Tile[] = apps.map((a) => ({ key: `o:${a.link}`, name: a.name, url: a.link, icon: a.icon }));
 
 // BSVRadar + Metanet app store apps, grouped, minus any host already in OTHER_TILES.
@@ -944,7 +956,7 @@ const BrowserPage = ({
       </div>
       {/* The catalogue: every app not on a screen or in the dock. Touch and hold to place one. */}
       {[
-        { label: 'More bApps', tiles: BAPP_TILES },
+        { label: 'More bApps', tiles: BAPPS_GROUPED.filter((t) => !SYS_TILES.includes(t)) },
         { label: 'More apps', tiles: OTHER_TILES },
         ...RADAR_SECTIONS.map((g) => ({ label: g.label, tiles: g.tiles })),
       ]
@@ -1063,7 +1075,10 @@ const BrowserPage = ({
     if (i === 1) {
       return (
         <>
-          {grid(1, [...SYS_TILES, ...notHome(BAPP_TILES)])}
+          {grid(
+            1,
+            BAPPS_GROUPED.filter((t) => SYS_TILES.includes(t) || !favourites.includes(t.url)),
+          )}
           {note(
             `Touch and hold an app for details${phone ? ' or to add it to the Dock' : ''}. Grey dot = demo. ${UNOFFICIAL_NOTICE}`,
           )}
@@ -1424,11 +1439,32 @@ const BrowserPage = ({
 };
 
 // The first app-screens layout (or the migration from Home favourites + the bApps and Games pages).
+/** Screen key of a bApp tile: the wallet's own tiles (Ask b, bPics, bSpaces) by key, bApps by URL (keyTile). */
+const screenKeyOf = (t: Tile) => (SYS_TILES.includes(t) ? t.key : t.url);
+const BAPP_KEYS = BAPPS_GROUPED.map(screenKeyOf);
+const OWN_ICON_KEYS = new Set(BAPPS_GROUPED.filter(hasOwnIcon).map(screenKeyOf));
+const oneBappsSection = (s: ReturnType<typeof defaultScreens>) =>
+  gatherBapps(s, BAPP_KEYS, (k) => OWN_ICON_KEYS.has(k));
+
+// Existing layouts: all bApps into the one bApps section, once (owner, 15 Oct 2026). Runs before the store reads.
+const ONE_SECTION_FLAG = 'bwallet:bapps-one-section:v1';
+try {
+  if (!localStorage.getItem(ONE_SECTION_FLAG)) {
+    const saved = parseScreens(localStorage.getItem(APP_SCREENS_KEY));
+    if (saved) localStorage.setItem(APP_SCREENS_KEY, serialiseScreens(oneBappsSection(saved)));
+    localStorage.setItem(ONE_SECTION_FLAG, '1');
+  }
+} catch {
+  /* storage unavailable: the default layout below already has one bApps section */
+}
+
 setDefaultBuilder(() =>
-  defaultScreens(
-    readFavourites(),
-    BAPP_TILES.map((t) => t.url),
-    GAME_SECTIONS.flatMap((s) => s.tiles.map((t) => t.url)),
+  oneBappsSection(
+    defaultScreens(
+      readFavourites(),
+      BAPP_TILES.map((t) => t.url),
+      GAME_SECTIONS.flatMap((s) => s.tiles.map((t) => t.url)),
+    ),
   ),
 );
 
