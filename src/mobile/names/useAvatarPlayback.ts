@@ -1,5 +1,12 @@
 import { useEffect, useState } from 'react';
-import { type AvatarPlace, mayBeAnimated, prefersReducedMotion, shouldAnimate, stillFrame } from './animatedAvatar';
+import {
+  type AvatarPlace,
+  bitsignStillUrl,
+  mayBeAnimated,
+  prefersReducedMotion,
+  shouldAnimate,
+  stillFrame,
+} from './animatedAvatar';
 
 /**
  * The src to draw for an avatar under the playback policy (./animatedAvatar.ts): the picture itself when it may
@@ -13,6 +20,8 @@ export function useAvatarPlayback(src: string | null | undefined, place: AvatarP
   const s = src || '';
   const animate = shouldAnimate(place, reduced, active);
   const wantPoster = !animate && mayBeAnimated(s);
+  // bit-sign pictures: the server's own still (`?still=1`); other hosts: a canvas first frame.
+  const serverStill = wantPoster ? bitsignStillUrl(s) : null;
   useEffect(() => {
     let mq: MediaQueryList | null = null;
     try {
@@ -25,13 +34,13 @@ export function useAvatarPlayback(src: string | null | undefined, place: AvatarP
     return () => mq!.removeEventListener?.('change', on);
   }, []);
   useEffect(() => {
-    if (!wantPoster) return;
+    if (!wantPoster || serverStill) return;
     let live = true;
     void stillFrame(s).then((p) => live && setPoster(p));
     return () => {
       live = false;
     };
-  }, [s, wantPoster]);
+  }, [s, wantPoster, serverStill]);
   useEffect(() => setPoster(''), [s]);
   const handlers =
     place === 'list'
@@ -43,5 +52,5 @@ export function useAvatarPlayback(src: string | null | undefined, place: AvatarP
           onPointerCancel: () => setActive(false),
         }
       : {};
-  return { src: wantPoster && poster ? poster : s, handlers };
+  return { src: serverStill ?? (wantPoster && poster ? poster : s), handlers };
 }

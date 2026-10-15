@@ -15,6 +15,7 @@ import {
   type FollowStatus,
 } from '../wallet/bchatFollow';
 import { followBchat } from '../wallet/useBchatFollow';
+import { BioField } from './BioField';
 
 const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
@@ -161,6 +162,7 @@ export const BchatAccountSettings = () => {
           </button>
         </div>
       )}
+      {pref.mode !== 'off' && session && <BioField session={session} />}
       {failed && (
         <div className="mt-1 flex items-center gap-2 text-xs" style={{ color: RED }}>
           <span className="min-w-0 flex-1 select-text">Couldn't sign in to bChatX: {status.error}</span>

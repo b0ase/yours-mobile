@@ -15,10 +15,16 @@ import { listPaymails, type WalletName } from '../names/paymail';
  */
 
 export type PaymailPublic = { name?: string; avatar?: string; pubkey?: string };
-export type BitsignPublic = { handle: string; displayName: string | null; avatarUrl: string | null };
+export type BitsignPublic = {
+  handle: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  /** Self-declared (bit-sign PR #270); shown as "says …". */
+  bio?: string | null;
+};
 export type OpnsCheck = { name: string; pubkey?: string };
 /** A company role. `verified` only when it was read from a public register we can check. */
-export type BusinessRole = { company: string; role: string; verified: boolean };
+export type BusinessRole = { company: string; role: string; verified: boolean; url?: string };
 
 export type CardInputs = {
   contact: Contact;
@@ -29,9 +35,9 @@ export type CardInputs = {
   opns?: OpnsCheck[];
   /** Hook: a Twetch account they claimed. Nothing supplies it yet, so nothing shows. */
   twetch?: string | null;
-  /** Hook: no public per-person officer lookup exists yet, so nothing supplies it. */
+  /** Officer roles from bit-sign's public registers (GET /api/public/profile/<handle>/roles). */
   businesses?: BusinessRole[];
-  /** Hook: no public bio field exists yet. */
+  /** Overrides the bit-sign profile bio (self-declared either way). */
   bio?: string | null;
 };
 
@@ -45,7 +51,7 @@ export type CardView = {
   /** X handle proven by an X sign-in (a `name.x` paymail is only claimable after Continue with X). */
   x: string | null;
   twetch: string | null;
-  businesses: { label: string; verified: boolean }[];
+  businesses: { label: string; verified: boolean; url: string | null }[];
   bio: string | null;
   identityKey: string | null;
 };
@@ -75,7 +81,7 @@ export const opnsCandidates = (c: Contact, paymails: WalletName[] = []): string[
 };
 
 export const businessLabel = (b: BusinessRole) =>
-  b.verified ? `${b.role}, ${b.company}` : `says ${b.role}, ${b.company}`;
+  b.verified ? `${b.role} · ${b.company}` : `says ${b.role} · ${b.company}`;
 
 export const buildCard = (i: CardInputs): CardView => {
   const c = i.contact;
@@ -105,8 +111,12 @@ export const buildCard = (i: CardInputs): CardView => {
     twetch: clean(i.twetch) || null,
     businesses: (i.businesses ?? [])
       .filter((b) => clean(b.company) && clean(b.role))
-      .map((b) => ({ label: businessLabel(b), verified: b.verified })),
-    bio: clean(i.bio) || null,
+      .map((b) => ({
+        label: businessLabel(b),
+        verified: b.verified,
+        url: /^https:\/\//i.test(clean(b.url)) ? clean(b.url) : null,
+      })),
+    bio: clean(i.bio) || clean(i.profile?.bio) || null,
     identityKey: key,
   };
 };
@@ -139,7 +149,38 @@ export const parseBitsignPublic = (d: unknown): BitsignPublic | null => {
   const o = d && typeof d === 'object' ? (d as Record<string, unknown>) : null;
   const handle = str(o?.handle);
   if (!handle) return null;
-  return { handle, displayName: str(o?.displayName) ?? null, avatarUrl: str(o?.avatarUrl) ?? null };
+  return {
+    handle,
+    displayName: str(o?.displayName) ?? null,
+    avatarUrl: str(o?.avatarUrl) ?? null,
+    bio: str(o?.bio) ?? null,
+  };
+};
+
+/** bit-sign roles JSON → verified rows (serving officers in public rooms, read from the register). */
+export const parseRoles = (d: unknown): BusinessRole[] => {
+  const roles = d && typeof d === 'object' ? (d as { roles?: unknown }).roles : null;
+  if (!Array.isArray(roles)) return [];
+  const out: BusinessRole[] = [];
+  for (const x of roles) {
+    const o = x && typeof x === 'object' ? (x as Record<string, unknown>) : {};
+    const company = clean(str(o.name) ?? str(o.ticker));
+    const role = clean(str(o.office_label) ?? str(o.office));
+    if (!company || !role) continue;
+    const url = clean(str(o.register_url));
+    out.push({ company, role, verified: true, ...(/^https:\/\//i.test(url) ? { url } : {}) });
+  }
+  return out;
+};
+
+/** Roles without credentials (CORS allows the wallet origins); any failure, 404 included, means none. */
+export const fetchRoles = async (f: Fetch, handle: string): Promise<BusinessRole[]> => {
+  try {
+    const r = await f(`${BITSIGN_PUBLIC}/${encodeURIComponent(handle)}/roles`, { credentials: 'omit' });
+    return r.ok ? parseRoles(await r.json()) : [];
+  } catch {
+    return [];
+  }
 };
 
 export type GetJson = (url: string) => Promise<unknown>;
@@ -147,11 +188,12 @@ export type GetJson = (url: string) => Promise<unknown>;
 /** Everything public about one contact, in parallel; any source that fails is simply left out. */
 export const loadCardInputs = async (c: Contact, f: Fetch, getJson: GetJson): Promise<CardInputs> => {
   const safe = <T>(p: Promise<T>, d: T) => p.catch(() => d);
-  const [profile, paymailProfile] = await Promise.all([
+  const [profile, paymailProfile, businesses] = await Promise.all([
     c.handle
       ? safe(getJson(`${BITSIGN_PUBLIC}/${encodeURIComponent(c.handle)}`).then(parseBitsignPublic), null)
       : Promise.resolve(null),
     c.paymail ? fetchPaymailPublic(f, c.paymail) : Promise.resolve(null),
+    c.handle ? fetchRoles(f, c.handle) : Promise.resolve([] as BusinessRole[]),
   ]);
   const key = identityKeyOf({ contact: c, paymailProfile });
   const paymails = key ? await safe(listPaymails(f, key), [] as WalletName[]) : [];
@@ -165,5 +207,5 @@ export const loadCardInputs = async (c: Contact, f: Fetch, getJson: GetJson): Pr
         ),
       )
     : [];
-  return { contact: c, profile, paymailProfile, paymails, opns };
+  return { contact: c, profile, paymailProfile, paymails, opns, businesses };
 };

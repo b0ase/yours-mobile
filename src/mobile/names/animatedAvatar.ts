@@ -153,7 +153,7 @@ export function mayBeAnimated(src: string | null | undefined): boolean {
   if (s.startsWith('data:')) return /^data:image\/(gif|webp|png|apng)[;,]/i.test(s);
   if (/\.(jpe?g|svg)(\?|#|$)/i.test(s)) return false;
   // .gif/.webp/.png/.apng links, and on-chain content (ORDFS) whose type the URL doesn't say.
-  return /\.(gif|webp|a?png)(\?|#|$)/i.test(s) || /\/content\/[0-9a-f]{64}_\d+/i.test(s);
+  return /\.(gif|webp|a?png)(\?|#|$)/i.test(s) || /\/content\/[0-9a-f]{64}_\d+/i.test(s) || bitsignStillUrl(s) !== null;
 }
 
 export const prefersReducedMotion = () => {
@@ -196,4 +196,24 @@ export function stillFrame(src: string): Promise<string> {
     posters.set(src, p);
   }
   return p;
+}
+
+/** Hosts that serve bit-sign's public pictures (bit-sign PR #269: `?still=1` returns the first frame as PNG). */
+const BITSIGN_HOST = /(^|\.)(bitcoinchat\.online|bit-sign\.online)$/i;
+
+/**
+ * The server-made still of a bit-sign avatar or cover (`/api/public/avatar|cover/<file>?still=1`), or null for
+ * any other picture (those keep the canvas first frame). No canvas, so no CORS failure for these.
+ */
+export function bitsignStillUrl(src: string | null | undefined): string | null {
+  let u: URL;
+  try {
+    u = new URL(String(src || ''));
+  } catch {
+    return null;
+  }
+  if (u.protocol !== 'https:' || !BITSIGN_HOST.test(u.hostname)) return null;
+  if (!/^\/api\/public\/(avatar|cover)\/[^/]+$/.test(u.pathname)) return null;
+  u.searchParams.set('still', '1');
+  return u.toString();
 }
