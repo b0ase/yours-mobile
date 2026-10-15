@@ -7,10 +7,12 @@
  *        started_at, ended_at, page ('/s/<slug>' | null), reason ('following' | 'joined' | 'popular')
  *   GET  {BCHATX_ORIGIN}/api/public/podcasts?cursor=          → { items: Podcast[], next }
  *        (hostIdKey, previewUrl, nft may be null)
- *   GET  {BCHATX_ORIGIN}/api/public/podcasts/<id>/audio/challenge → { nonce, expiresAt }   (not live yet: 404)
- *   GET  {BCHATX_ORIGIN}/api/public/podcasts/<id>/audio  with x-bwx-origin, x-bwx-pubkey, x-bwx-sig
- *        (signature over `bwx-podcast:<id>:<nonce>` by the key holding the NFT) → { url }
- *        Today 403 {error:'owner-only'} or 404 → play the preview instead, quietly.
+ *   GET  {BCHATX_ORIGIN}/api/public/podcasts/<id>/audio/challenge → { nonce, expiresAt }   (2 min, single use)
+ *   GET  {BCHATX_ORIGIN}/api/public/podcasts/<id>/audio  with x-bwx-origin (txid_vout), x-bwx-pubkey (compressed
+ *        hex), x-bwx-sig (DER hex; wallet createSignature({data}) = sha256 of `bwx-podcast:<id>:<nonce>`, signed by
+ *        the key whose P2PKH holds the NFT's current outpoint), x-bwx-nonce → { url } (10-min presigned).
+ *        404 = unknown or excluded (recordings < 60 s). Any other refusal → one fresh challenge, then preview.
+ *        Listed items (OrdLock) are refused by the server; the signer throws PodcastListedError first.
  * A podcast NFT's inscription is a JSON manifest (MAP app=bwalletx, type=podcast), not the audio.
  * Pure parsers are tested against fixtures (podcasts.test.ts).
  */
@@ -189,34 +191,46 @@ export const fetchLiveSpaces = async (f: Fetch, handle: string, bearer?: string)
   }
 };
 
+/** Thrown by the signer when the NFT sits in an OrdLock listing (not P2PKH to our key): the server refuses it. */
+export class PodcastListedError extends Error {
+  constructor() {
+    super('Listed for sale — cancel the listing to play in full');
+    this.name = 'PodcastListedError';
+  }
+}
+
 /** What signs the ownership proof: the wallet key that holds the NFT. */
 export type OwnerSigner = (message: string) => Promise<{ pubKey: string; sig: string }>;
 
 export const podcastProofMessage = (id: string, nonce: string) => `bwx-podcast:${id}:${nonce}`;
 
 /**
- * Full audio for a podcast you own: fresh challenge → sign → signed URL. Null on any refusal (403 until the
- * server proof is live, expired nonce, not owned), so the caller plays the preview. Every call takes a new
- * challenge (single use), so a retry after the URL expires just calls this again.
+ * Full audio for a podcast you own: fresh challenge → sign → signed URL. Null on refusal, so the caller plays the
+ * preview. Nonces are single use: on a failure other than 404 it takes one fresh challenge and tries again.
+ * Rethrows PodcastListedError (the NFT is listed for sale) so the caller can say why.
  */
 export const fetchOwnedAudio = async (f: Fetch, p: Podcast, sign: OwnerSigner): Promise<string | null> => {
   if (!p.nft) return null;
-  try {
-    const base = `${PODCASTS_API}/${encodeURIComponent(p.id)}/audio`;
-    // No challenge route yet (404) or any refusal → straight to the preview, no signing prompt.
-    const ch = await getJson(f, `${base}/challenge`);
-    const nonce = str(rec(ch.data).nonce);
-    if (ch.status !== 200 || !nonce) return null;
-    const { pubKey, sig } = await sign(podcastProofMessage(p.id, nonce));
-    const r = await getJson(f, base, {
-      'x-bwx-origin': p.nft.origin,
-      'x-bwx-pubkey': pubKey,
-      'x-bwx-sig': sig,
-    });
-    if (r.status !== 200) return null;
-    const d = rec(r.data);
-    return httpsUrl(d.url);
-  } catch {
-    return null;
+  const base = `${PODCASTS_API}/${encodeURIComponent(p.id)}/audio`;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const ch = await getJson(f, `${base}/challenge`);
+      if (ch.status === 404) return null;
+      const nonce = str(rec(ch.data).nonce);
+      if (ch.status !== 200 || !nonce) continue;
+      const { pubKey, sig } = await sign(podcastProofMessage(p.id, nonce));
+      const r = await getJson(f, base, {
+        'x-bwx-origin': p.nft.origin,
+        'x-bwx-pubkey': pubKey,
+        'x-bwx-sig': sig,
+        'x-bwx-nonce': nonce,
+      });
+      if (r.status === 404) return null;
+      const url = r.status === 200 ? httpsUrl(rec(r.data).url) : null;
+      if (url) return url;
+    } catch (e) {
+      if (e instanceof PodcastListedError) throw e;
+    }
   }
+  return null;
 };
