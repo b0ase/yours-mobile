@@ -21,6 +21,8 @@ export type SwipeAction = {
   label: string;
   icon?: ReactNode;
   color: string;
+  /** Label/icon colour on the tray (default white): theme packs pass e.g. var(--bw-on-accent). */
+  fg?: string;
   onPress: () => void;
   /** The action takes the row out of this list: a full swipe animates it away first. */
   removes?: boolean;
@@ -270,7 +272,7 @@ export const SwipeRow = ({
       tabIndex={offset ? 0 : -1}
       onClick={() => run(a, false)}
       className="flex h-full flex-col items-center justify-center gap-1 text-[11px] font-semibold text-white"
-      style={{ background: a.color, width: flex ? undefined : ACTION_W, flex: flex ? 1 : undefined }}
+      style={{ background: a.color, color: a.fg, width: flex ? undefined : ACTION_W, flex: flex ? 1 : undefined }}
     >
       {a.icon}
       <span>{a.label}</span>

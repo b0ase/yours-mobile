@@ -23,6 +23,8 @@ import { useTabHome } from '../tabs/useTabHome';
 import { TradeView } from './TradeView';
 import { groupByTicker, normTicker, shortTokenId } from '../tokens/tokenIdentity';
 import { TokenIcon } from './TokenIcon';
+import { TokenSwipeRow } from './TokenRowActions';
+import { useTokenRowActions } from './useTokenRowActions';
 import { Sparkline } from './PriceChart';
 import { chartSeries } from './chartSeries';
 import { OpnsMarket } from './OpnsMarket';
@@ -67,6 +69,9 @@ const Loading = ({ text }: { text: string }) => (
 const GREEN = '#A1FF8B';
 const RED = '#FF6B6B';
 const MUTED = '#98A2B3';
+/** Markets row columns: favourite · token · price · 24h (+ volume · for sale from md). */
+const ROW_GRID =
+  'grid items-center gap-x-2 grid-cols-[36px_minmax(0,1fr)_96px_56px] md:grid-cols-[36px_minmax(0,1fr)_120px_64px_110px_80px]';
 
 type RowStats = { floor: number | null; live: number; stats: DayStats; trades: Trade[] };
 
@@ -164,6 +169,7 @@ const Markets = ({
     navigate(`${pathname}${s ? `?${s}` : ''}`, { replace: true });
   };
   const [shown, setShown] = useState(40);
+  const rowActions = useTokenRowActions();
 
   const all = useMemo(() => board ?? [], [board]);
   const labels = useMemo(() => (registry ? all.map((r) => registry.labels(r.ref.id)) : []), [all, registry]);
@@ -282,91 +288,100 @@ const Markets = ({
               {onlyFavs ? 'Star a token to keep it here.' : 'No tokens match.'}
             </p>
           ) : (
-            <div className="rounded-2xl bg-[var(--bw-surface)] border border-[#2b2f36] overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-xs" style={{ color: MUTED }}>
-                    <th className="w-8" />
-                    <th className="text-left font-semibold py-2">Token</th>
-                    <th className="text-right font-semibold">Price / token</th>
-                    <th className="text-right font-semibold">24h</th>
-                    <th className="text-right font-semibold hidden md:table-cell">24h volume</th>
-                    <th className="text-right font-semibold hidden md:table-cell pr-3">For sale</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visible.map((r) => {
-                    const x = extra[r.ref.id];
-                    const price = x?.stats?.last ?? x?.floor ?? null;
-                    const ch = x?.stats?.change ?? null;
-                    const fav = favs.includes(r.ref.id);
-                    return (
-                      <tr
-                        key={r.ref.id}
-                        onClick={() => navigate(tradeRoute(r.ref.id))}
-                        className="border-t border-[#2b2f36] cursor-pointer hover:bg-[#1e2127]"
+            <div className="rounded-2xl bg-[var(--bw-surface)] border border-[#2b2f36] overflow-hidden">
+              <div className="w-full text-sm" role="list" aria-label="Tokens">
+                <div className={`${ROW_GRID} text-xs font-semibold py-2`} style={{ color: MUTED }} aria-hidden>
+                  <span />
+                  <span className="text-left">Token</span>
+                  <span className="text-right">Price / token</span>
+                  <span className="text-right">24h</span>
+                  <span className="text-right hidden md:block">24h volume</span>
+                  <span className="text-right hidden md:block pr-3">For sale</span>
+                </div>
+                {visible.map((r) => {
+                  const x = extra[r.ref.id];
+                  const price = x?.stats?.last ?? x?.floor ?? null;
+                  const ch = x?.stats?.change ?? null;
+                  const fav = favs.includes(r.ref.id);
+                  return (
+                    <div key={r.ref.id} role="listitem" className="border-t border-[#2b2f36]">
+                      <TokenSwipeRow
+                        actions={rowActions.actionsFor(r.ref.id, r.title)}
+                        title={r.title}
+                        rowId={r.ref.id}
                       >
-                        <td className="pl-2">
-                          <button
-                            type="button"
-                            aria-label={fav ? 'Remove from favourites' : 'Add to favourites'}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onFav(r.ref.id);
-                            }}
-                            className="w-7 h-7 grid place-items-center bg-transparent border-0 cursor-pointer"
-                          >
-                            <Star size={15} color={GOLD} fill={fav ? GOLD : 'none'} />
-                          </button>
-                        </td>
-                        <td className="py-2">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <TokenIcon icon={r.icon} sym={r.title} size={28} />
-                            <span className="flex flex-col min-w-0">
-                              <span className="font-bold text-white truncate max-w-[160px]">{r.title}</span>
-                              {shared.has(normTicker(r.title)) && (
-                                <span className="text-[10px] font-mono" style={{ color: MUTED }}>
-                                  {shortTokenId(r.ref.id)}
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => navigate(tradeRoute(r.ref.id))}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') navigate(tradeRoute(r.ref.id));
+                          }}
+                          className={`${ROW_GRID} cursor-pointer bg-[var(--bw-surface)] hover:bg-[#1e2127]`}
+                        >
+                          <span className="pl-2">
+                            <button
+                              type="button"
+                              data-swipe-ignore
+                              aria-label={fav ? 'Remove from favourites' : 'Add to favourites'}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onFav(r.ref.id);
+                              }}
+                              className="w-7 h-7 grid place-items-center bg-transparent border-0 cursor-pointer"
+                            >
+                              <Star size={15} color={GOLD} fill={fav ? GOLD : 'none'} />
+                            </button>
+                          </span>
+                          <span className="py-2 min-w-0">
+                            <span className="flex items-center gap-2 min-w-0">
+                              <TokenIcon icon={r.icon} sym={r.title} size={28} />
+                              <span className="flex flex-col min-w-0">
+                                <span className="font-bold text-white truncate max-w-[160px]">{r.title}</span>
+                                {shared.has(normTicker(r.title)) && (
+                                  <span className="text-[10px] font-mono" style={{ color: MUTED }}>
+                                    {shortTokenId(r.ref.id)}
+                                  </span>
+                                )}
+                              </span>
+                              {x && (
+                                <span className="ml-auto hidden sm:inline-flex">
+                                  <Sparkline series={chartSeries(x.trades.slice(-30), { lowestAsk: x.floor })} />
+                                </span>
+                              )}
+                              {registry && (
+                                <span className="text-[11px] hidden md:inline" style={{ color: MUTED }}>
+                                  {categoryLabel(registry.labels(r.ref.id).category)}
                                 </span>
                               )}
                             </span>
-                            {x && (
-                              <span className="ml-auto hidden sm:inline-flex">
-                                <Sparkline series={chartSeries(x.trades.slice(-30), { lowestAsk: x.floor })} />
+                          </span>
+                          <span className="text-right text-white whitespace-nowrap">
+                            {x ? (price === null ? '—' : unitPriceLabel(price)) : '…'}
+                            {price !== null && fiatLabel(price, rate) && (
+                              <span className="block text-[11px]" style={{ color: MUTED }}>
+                                {fiatLabel(price, rate)}
                               </span>
                             )}
-                            {registry && (
-                              <span className="text-[11px] hidden md:inline" style={{ color: MUTED }}>
-                                {categoryLabel(registry.labels(r.ref.id).category)}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="text-right text-white whitespace-nowrap">
-                          {x ? (price === null ? '—' : unitPriceLabel(price)) : '…'}
-                          {price !== null && fiatLabel(price, rate) && (
-                            <div className="text-[11px]" style={{ color: MUTED }}>
-                              {fiatLabel(price, rate)}
-                            </div>
-                          )}
-                        </td>
-                        <td
-                          className="text-right font-semibold whitespace-nowrap"
-                          style={{ color: ch === null ? MUTED : ch >= 0 ? GREEN : RED }}
-                        >
-                          {x ? changeLabel(ch) : '…'}
-                        </td>
-                        <td className="text-right text-white whitespace-nowrap hidden md:table-cell">
-                          {x?.stats ? (x.stats.volume ? bsvLabel(x.stats.volume) : '—') : '…'}
-                        </td>
-                        <td className="text-right whitespace-nowrap hidden md:table-cell pr-3" style={{ color: MUTED }}>
-                          {x ? x.live : '…'}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                          </span>
+                          <span
+                            className="text-right font-semibold whitespace-nowrap"
+                            style={{ color: ch === null ? MUTED : ch >= 0 ? GREEN : RED }}
+                          >
+                            {x ? changeLabel(ch) : '…'}
+                          </span>
+                          <span className="text-right text-white whitespace-nowrap hidden md:block">
+                            {x?.stats ? (x.stats.volume ? bsvLabel(x.stats.volume) : '—') : '…'}
+                          </span>
+                          <span className="text-right whitespace-nowrap hidden md:block pr-3" style={{ color: MUTED }}>
+                            {x ? x.live : '…'}
+                          </span>
+                        </div>
+                      </TokenSwipeRow>
+                    </div>
+                  );
+                })}
+              </div>
               {list.length > shown && (
                 <button
                   type="button"
@@ -380,8 +395,10 @@ const Markets = ({
             </div>
           )}
           <p className="text-[11px]" style={{ color: MUTED }}>
-            Prices are live 1Sat listings and recent trades. 24h = the last 144 blocks.
+            Prices are live 1Sat listings and recent trades. 24h = the last 144 blocks. Swipe a row left (or long-press
+            it) for Chat, Buy and Info.
           </p>
+          {rowActions.sheet}
         </>
       )}
     </div>
@@ -392,6 +409,7 @@ const Markets = ({
 const Orders = () => {
   const navigate = useNavigate();
   const buys = loadHistory();
+  const rowActions = useTokenRowActions();
   const swaps = SWAP_ENABLED ? loadSwaps() : [];
   return (
     <div className="flex flex-col gap-4 w-full max-w-[720px]">
@@ -407,19 +425,28 @@ const Orders = () => {
           </p>
         ) : (
           buys.slice(0, 30).map((b) => (
-            <button
-              type="button"
+            <TokenSwipeRow
               key={b.txid}
-              onClick={() => navigate(tradeRoute(b.tokenId))}
-              className="flex justify-between items-center rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36] px-3 py-2.5 text-left cursor-pointer"
+              actions={rowActions.actionsFor(b.tokenId, b.amountLabel)}
+              title={b.amountLabel}
+              rowId={b.txid}
             >
-              <span className="text-sm text-white">{b.amountLabel}</span>
-              <span className="text-xs" style={{ color: MUTED }}>
-                {bsvLabel(b.totalSats)} · {new Date(b.at).toLocaleDateString()}
-              </span>
-            </button>
+              <button
+                type="button"
+                onClick={() => navigate(tradeRoute(b.tokenId))}
+                className="w-full flex justify-between items-center rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36] px-3 py-2.5 text-left cursor-pointer"
+              >
+                <span className="text-sm text-white min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+                  {b.amountLabel}
+                </span>
+                <span className="text-xs shrink-0" style={{ color: MUTED }}>
+                  {bsvLabel(b.totalSats)} · {new Date(b.at).toLocaleDateString()}
+                </span>
+              </button>
+            </TokenSwipeRow>
           ))
         )}
+        {rowActions.sheet}
       </section>
       {SWAP_ENABLED && (
         <section className="flex flex-col gap-2">
