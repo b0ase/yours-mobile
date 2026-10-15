@@ -1,5 +1,6 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send } from 'lucide-react';
+import { AlertTriangle, Send } from 'lucide-react';
+import type { PayeeNote } from '../mobile/wallet/send/payee';
 import { Theme } from '../theme.types';
 import { Button } from './Button';
 import { Show } from './Show';
@@ -8,7 +9,23 @@ import { PageLoader } from './PageLoader';
 export type SendLineItem = {
   address: string;
   amount: string; // pre-formatted display string (e.g. "0.005 BSV", "$1.50 MNEE", "100 TOKEN")
+  /** Who this is (name, bAvatar, key fingerprint) plus first-payment / look-alike notes. */
+  payee?: PayeeNote;
 };
+
+const GOLD = '#d4af37';
+
+const Avatar = ({ src, name, size }: { src?: string; name: string; size: number }) =>
+  src ? (
+    <img src={src} alt="" className="rounded-full object-cover shrink-0" style={{ width: size, height: size }} />
+  ) : (
+    <span
+      className="rounded-full flex items-center justify-center font-bold shrink-0"
+      style={{ width: size, height: size, fontSize: size * 0.42, background: 'rgba(212,175,55,0.15)', color: GOLD }}
+    >
+      {name.replace(/^\$/, '').slice(0, 1).toUpperCase()}
+    </span>
+  );
 
 export type SendConfirmationProps = {
   show: boolean;
@@ -114,15 +131,71 @@ export const SendConfirmation = (props: SendConfirmationProps) => {
                   {lineItems.map((item, i) => (
                     <div
                       key={i}
-                      className="flex justify-between items-center px-3 py-2 rounded-lg text-sm"
+                      className="flex flex-col gap-2 px-3 py-2 rounded-lg text-sm text-left"
                       style={{ backgroundColor: `${contrast}08` }}
                     >
-                      <span className="font-mono" style={{ color: gray }}>
-                        {truncateAddress(item.address)}
-                      </span>
-                      <span className="font-semibold" style={{ color: contrast }}>
-                        {item.amount}
-                      </span>
+                      <div className="flex justify-between items-center gap-2">
+                        <span className="flex items-center gap-2 min-w-0">
+                          {item.payee && (
+                            <Avatar src={item.payee.avatar} name={item.payee.name || item.address} size={28} />
+                          )}
+                          <span className="flex flex-col min-w-0">
+                            {item.payee?.name && item.payee.name !== item.address && (
+                              <span className="font-semibold truncate" style={{ color: contrast }}>
+                                {item.payee.name}
+                              </span>
+                            )}
+                            <span className="font-mono truncate" style={{ color: gray }}>
+                              {truncateAddress(item.address)}
+                            </span>
+                            {item.payee?.fingerprint && (
+                              <span className="font-mono text-[10px]" style={{ color: gray }}>
+                                Key {item.payee.fingerprint}
+                              </span>
+                            )}
+                          </span>
+                        </span>
+                        <span className="font-semibold shrink-0" style={{ color: contrast }}>
+                          {item.amount}
+                        </span>
+                      </div>
+                      {item.payee?.lookalike && (
+                        <div
+                          role="alert"
+                          className="flex flex-col gap-2 p-2 rounded-lg text-xs"
+                          style={{ background: 'rgba(255,68,68,0.12)', color: '#ff6b6b' }}
+                        >
+                          <span className="flex items-center gap-1 font-bold">
+                            <AlertTriangle size={13} /> Look-alike name
+                          </span>
+                          <div className="flex items-center justify-around gap-2">
+                            <span className="flex flex-col items-center gap-1 min-w-0">
+                              <Avatar src={item.payee.lookalike.avatar} name={item.payee.lookalike.name} size={32} />
+                              <span className="truncate max-w-[7rem]" style={{ color: contrast }}>
+                                {item.payee.lookalike.name}
+                              </span>
+                              <span style={{ color: gray }}>paid before</span>
+                            </span>
+                            <span style={{ color: gray }}>≠</span>
+                            <span className="flex flex-col items-center gap-1 min-w-0">
+                              <Avatar src={item.payee.avatar} name={item.payee.name || item.address} size={32} />
+                              <span className="truncate max-w-[7rem]" style={{ color: contrast }}>
+                                {item.payee.name || item.address}
+                              </span>
+                              <span style={{ color: gray }}>this payment</span>
+                            </span>
+                          </div>
+                          <span>
+                            You've paid {item.payee.lookalike.name} before; this is {item.payee.name || item.address}, a
+                            different person. Check before you send.
+                          </span>
+                        </div>
+                      )}
+                      {item.payee?.firstTime && (
+                        <span className="text-xs" style={{ color: gray }}>
+                          First payment to {item.address}
+                        </span>
+                      )}
                     </div>
                   ))}
                 </div>
