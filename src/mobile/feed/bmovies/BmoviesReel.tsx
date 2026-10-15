@@ -28,7 +28,12 @@ import {
   findPoster,
   firstFrameUrl,
   type Clip,
+  clipTweetId,
+  registerUrl,
 } from './bmovies';
+import { RegisterSheet } from './RegisterSheet';
+import { applyClaims, checkClaim, claimTicker, fetchClaims, registerClip, xConnectUrl } from './claim';
+import { useServiceContext } from '../../../hooks/useServiceContext';
 import {
   BMOVIES_SWIPE_TRADE_MOCK,
   BMOVIES_SWIPE_TRADE_ENABLED,
@@ -69,8 +74,6 @@ type Theme = {
   onAccent: string;
   backdrop: string;
   ticker: string;
-  buy: string;
-  buyEdge: string;
   home: string;
   sources: readonly VideoSource[];
 };
@@ -84,8 +87,6 @@ const THEMES: Record<'bmovies' | 'bmusic', Theme> = {
     onAccent: '#1a1300',
     backdrop: 'radial-gradient(circle at 50% 35%, #3a2a00 0%, #120d00 55%, #010101 100%)',
     ticker: BM_YELLOW,
-    buy: BM_GREEN,
-    buyEdge: BM_GREEN_EDGE,
     home: `${BMOVIES_ORIGIN}/feed`,
     sources: [{ id: 'bmovies', label: 'bMovies', url: FEED_URL, enabled: true }],
   },
@@ -95,8 +96,6 @@ const THEMES: Record<'bmovies' | 'bmusic', Theme> = {
     onAccent: '#04122b',
     backdrop: 'radial-gradient(circle at 50% 35%, #0c2a5c 0%, #050f22 55%, #010101 100%)',
     ticker: BMUSIC_BLUE,
-    buy: BMUSIC_BLUE,
-    buyEdge: 'rgba(62,139,255,0.8)',
     home: `${BMOVIES_ORIGIN}/bmusic`,
     sources: BMUSIC_SOURCES,
   },
@@ -201,6 +200,9 @@ const Slide = ({
   muted,
   onToggleSound,
   onTrade,
+  onRegister,
+  notYours,
+  registering,
   t,
 }: {
   t: Theme;
@@ -210,6 +212,10 @@ const Slide = ({
   muted: boolean;
   onToggleSound: () => void;
   onTrade: (c: Clip, side: Side) => void;
+  onRegister: (c: Clip) => void;
+  /** The original poster's X handle once the server said this viewer is not them. */
+  notYours?: string;
+  registering?: boolean;
 }) => {
   const [poster, setPoster] = useState<string | null>(c.poster);
   const [posterBroken, setPosterBroken] = useState(false);
@@ -259,7 +265,7 @@ const Slide = ({
     const s0 = start.current;
     const p = e.changedTouches[0];
     start.current = null;
-    if (!BMOVIES_SWIPE_TRADE_ENABLED || !s0 || !p || !c.ticker) return;
+    if (!BMOVIES_SWIPE_TRADE_ENABLED || !s0 || !p || !c.ticker || !c.registered) return;
     const side = tradeSide(p.clientX - s0.x, p.clientY - s0.y);
     if (side) onTrade(c, side);
   };
@@ -366,7 +372,7 @@ const Slide = ({
           <span className="block text-[30px] uppercase leading-none tracking-[0.03em] text-white line-clamp-2">
             {c.title}
           </span>
-          {c.ticker && (
+          {c.ticker && c.registered && (
             <span
               className="mt-1 block text-[22px] uppercase leading-none tracking-[0.03em]"
               style={{ color: t.ticker }}
@@ -376,34 +382,48 @@ const Slide = ({
           )}
         </button>
         <div className="mt-3 flex items-center gap-2">
-          {/* Tap: the clip's trade page on bmovies.app. Long-press (or swipe →/←): a 1p quick trade. */}
-          <button
-            {...pressProps('buy')}
-            aria-label={c.ticker ? `Buy $${c.ticker} on ${t.name}` : `Open on ${t.name}`}
-            className="flex-1 select-none overflow-hidden text-ellipsis whitespace-nowrap rounded-md px-3 py-2 text-center text-[18px] uppercase tracking-[0.06em] active:opacity-70"
-            style={{ fontFamily: BEBAS, background: '#0c0c0c', border: `1px solid ${t.buyEdge}`, color: t.buy }}
-          >
-            {c.ticker ? (
-              <>
-                Buy <span style={{ opacity: 0.8 }}>${c.ticker}</span>
-              </>
-            ) : (
-              `Open on ${t.name}`
-            )}
-          </button>
-          {c.ticker && (
-            <button
-              {...pressProps('sell')}
-              aria-label={`Sell $${c.ticker} on ${t.name}`}
-              className="select-none rounded-md px-4 py-2 text-center text-[18px] uppercase tracking-[0.06em] active:opacity-70"
-              style={{
-                fontFamily: BEBAS,
-                background: 'transparent',
-                border: `1px solid ${BM_RED_EDGE}`,
-                color: BM_RED,
-              }}
+          {c.registered && c.ticker ? (
+            <>
+              {/* Tap: the clip's trade page on bmovies.app. Long-press (or swipe →/←): a 1p quick trade. */}
+              <button
+                {...pressProps('buy')}
+                aria-label={`Buy $${c.ticker} on ${t.name}`}
+                className="min-w-0 flex-1 basis-0 select-none overflow-hidden text-ellipsis whitespace-nowrap rounded-md px-3 py-2 text-center text-[18px] uppercase tracking-[0.06em] active:opacity-70"
+                style={{
+                  fontFamily: BEBAS,
+                  background: '#0c0c0c',
+                  border: `1px solid ${BM_GREEN_EDGE}`,
+                  color: BM_GREEN,
+                }}
+              >
+                Buy
+              </button>
+              <button
+                {...pressProps('sell')}
+                aria-label={`Sell $${c.ticker} on ${t.name}`}
+                className="min-w-0 flex-1 basis-0 select-none overflow-hidden text-ellipsis whitespace-nowrap rounded-md px-3 py-2 text-center text-[18px] uppercase tracking-[0.06em] active:opacity-70"
+                style={{ fontFamily: BEBAS, background: '#0c0c0c', border: `1px solid ${BM_RED_EDGE}`, color: BM_RED }}
+              >
+                Sell
+              </button>
+            </>
+          ) : notYours ? (
+            <span
+              aria-disabled="true"
+              className="min-w-0 flex-1 select-none overflow-hidden text-ellipsis whitespace-nowrap rounded-md px-3 py-2 text-center text-[18px] uppercase tracking-[0.06em]"
+              style={{ fontFamily: BEBAS, background: '#0c0c0c', border: `1px solid ${BM_YELLOW}`, color: BM_YELLOW }}
             >
-              Sell
+              Only @{notYours} can register this
+            </span>
+          ) : (
+            <button
+              onClick={() => onRegister(c)}
+              disabled={registering}
+              aria-label="Is this yours? Register it on chain"
+              className="min-w-0 flex-1 select-none overflow-hidden text-ellipsis whitespace-nowrap rounded-md px-3 py-2 text-center text-[18px] uppercase tracking-[0.06em] active:opacity-70 disabled:opacity-60"
+              style={{ fontFamily: BEBAS, background: BM_YELLOW, color: '#1a1300' }}
+            >
+              {registering ? 'Checking…' : 'Register'}
             </button>
           )}
           <button
@@ -415,9 +435,13 @@ const Slide = ({
             <Share2 size={16} color="#fff" />
           </button>
         </div>
-        {BMOVIES_SWIPE_TRADE_ENABLED && c.ticker && (
+        {BMOVIES_SWIPE_TRADE_ENABLED && c.registered && c.ticker ? (
           <p className="mt-2 text-center text-[10px]" style={{ color: MUTED }}>
             Swipe → buy 1p · ← sell 1p{BMOVIES_SWIPE_TRADE_MOCK ? ' · practice mode, no money moves' : ''}
+          </p>
+        ) : (
+          <p className="mt-2 text-center text-[11px]" style={{ color: MUTED }}>
+            Is this yours? Sign in with X to prove it, then register it on chain.
           </p>
         )}
         {/* Scrubber: fills left to right as the clip plays (white on white/25, 3px). */}
@@ -447,6 +471,13 @@ const BmoviesReel = ({ brand = 'bmovies' }: { brand?: keyof typeof THEMES }) => 
   const [asking, setAsking] = useState<{ c: Clip; side: Side } | null>(null);
   const [showSwipes, setShowSwipes] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // REGISTER (claim.ts): who the server said a clip belongs to, the clip being checked, the sheet.
+  const { apiContext } = useServiceContext();
+  const [notYours, setNotYours] = useState<Record<string, string>>({});
+  const [checking, setChecking] = useState<string | null>(null);
+  const [registerAsk, setRegisterAsk] = useState<{ c: Clip; tweetId: string; author: string } | null>(null);
+  const [registerBusy, setRegisterBusy] = useState('');
+  const [registerError, setRegisterError] = useState('');
   const budgetRef = useRef(budget);
   const setBudget = (b: Budget) => {
     budgetRef.current = b;
@@ -466,8 +497,59 @@ const BmoviesReel = ({ brand = 'bmovies' }: { brand?: keyof typeof THEMES }) => 
   };
   useEffect(() => () => void (toastTimer.current && clearTimeout(toastTimer.current)), []);
 
+  const markRegistered = (id: string, ticker: string) =>
+    setClips(
+      (have) => have?.map((x) => (x.id === id ? { ...x, registered: true, ticker: ticker || x.ticker } : x)) ?? have,
+    );
+
+  /** REGISTER: ask bit-sign what this viewer may do with this clip (see claim.ts). */
+  const onRegister = async (c: Clip) => {
+    const tweetId = clipTweetId(c);
+    // No X post behind it (a bMovies original): its own claim page on bmovies.app, as before.
+    if (!tweetId) return void openDappBrowser(registerUrl(c));
+    setChecking(c.id);
+    try {
+      const e = await checkClaim(apiContext, tweetId);
+      if (e.status === 'claimed') {
+        markRegistered(c.id, e.claim.ticker);
+        flash({ text: `Already registered as $${e.claim.ticker}`, tone: 'info' });
+      } else if (e.status === 'not_author') {
+        setNotYours((m) => ({ ...m, [c.id]: e.author }));
+      } else if (e.status === 'connect_x' || e.status === 'sign_in') {
+        flash({ text: `Sign in with X as @${e.author} to prove it's yours, then tap Register again.`, tone: 'info' });
+        void openDappBrowser(await xConnectUrl(apiContext));
+      } else if (e.status === 'eligible') {
+        setRegisterError('');
+        setRegisterAsk({ c, tweetId, author: e.author });
+      } else {
+        flash({ text: "X doesn't know this post any more.", tone: 'info' });
+      }
+    } catch (err) {
+      flash({ text: err instanceof Error ? err.message : "Couldn't check just now.", tone: 'info' });
+    } finally {
+      setChecking(null);
+    }
+  };
+
+  const allowRegister = async () => {
+    if (!registerAsk || registerBusy) return;
+    setRegisterBusy('Registering on chain…');
+    setRegisterError('');
+    try {
+      const k = await registerClip(apiContext, registerAsk.c, registerAsk.tweetId);
+      markRegistered(registerAsk.c.id, k.ticker);
+      setRegisterAsk(null);
+      haptic('medium');
+      flash({ text: `Registered as $${k.ticker}. BUY / SELL are live.`, tone: 'buy' });
+    } catch (err) {
+      setRegisterError(err instanceof Error ? err.message : 'Registration did not complete');
+    } finally {
+      setRegisterBusy('');
+    }
+  };
+
   const doTrade = async (c: Clip, side: Side, b: Budget) => {
-    if (!c.ticker) return;
+    if (!c.ticker || !c.registered) return;
     const now = Date.now();
     const trade = await executeTrade(c.ticker, side, now);
     setBudget(spend(b, now));
@@ -516,7 +598,10 @@ const BmoviesReel = ({ brand = 'bmovies' }: { brand?: keyof typeof THEMES }) => 
       loading.current = true;
       try {
         const page = await fetchMerged(t.sources, cursors ?? {});
-        setClips((have) => (cursors && have ? appendPage(have, page.clips) : page.clips));
+        // Clips their original poster registered through bWalletX (bit-sign claims) trade too.
+        const claims = await fetchClaims(page.clips.map(clipTweetId).filter((x): x is string => !!x));
+        const clipsNow = applyClaims(page.clips, claims, clipTweetId);
+        setClips((have) => (cursors && have ? appendPage(have, clipsNow) : clipsNow));
         setNext(page.more ? page.cursors : null);
         setError('');
       } catch {
@@ -599,6 +684,9 @@ const BmoviesReel = ({ brand = 'bmovies' }: { brand?: keyof typeof THEMES }) => 
             muted={muted}
             onToggleSound={() => setMuted((m) => !m)}
             onTrade={onTrade}
+            onRegister={(x) => void onRegister(x)}
+            notYours={notYours[c.id]}
+            registering={checking === c.id}
           />
         ))}
       </div>
@@ -616,6 +704,17 @@ const BmoviesReel = ({ brand = 'bmovies' }: { brand?: keyof typeof THEMES }) => 
         >
           <History size={14} /> {trades.length}
         </button>
+      )}
+      {registerAsk && (
+        <RegisterSheet
+          title={registerAsk.c.title}
+          ticker={claimTicker(registerAsk.c)}
+          author={registerAsk.author}
+          busy={registerBusy}
+          error={registerError}
+          onAllow={() => void allowRegister()}
+          onCancel={() => !registerBusy && setRegisterAsk(null)}
+        />
       )}
       {toast && (
         <div

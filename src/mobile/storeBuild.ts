@@ -389,3 +389,15 @@ export const BPICS_MARKET_ENABLED: boolean = !(
   import.meta.env.VITE_CHANNEL === 'ios-store' ||
   import.meta.env.VITE_CHANNEL === 'android-play'
 );
+
+/**
+ * Feed › bExchange (the token reel: price, 24h change, sparkline, BUY / SELL): bWalletX only, absent from a store
+ * build even as code (exchange functionality, Apple 3.1.5(iii); the same rejection as the Market). Literal env
+ * check so Vite inlines it and Rollup drops feed/reels/BexReel and its Feed picker entry. Feed › bApps stays in
+ * every build, but its Tokenise button (Launchpad) is behind MARKET_ENABLED. Same env as STORE_BUILD.
+ */
+export const BEX_REEL_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);

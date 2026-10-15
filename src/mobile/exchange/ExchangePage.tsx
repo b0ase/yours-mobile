@@ -24,6 +24,7 @@ import { Sparkline } from './PriceChart';
 import { chartSeries } from './chartSeries';
 import { PeopleMarket } from './PeopleMarket';
 import { OpnsMarket } from './OpnsMarket';
+import { PodcastMarket } from './PodcastMarket';
 import { LaunchpadPanel } from '../market/launchpad/LaunchpadPanel';
 import { LaunchCoin } from './launch/LaunchCoin';
 import { FilterBar, PlatformPage, PlatformsView } from './Categories';
@@ -468,6 +469,7 @@ const ExchangePage = () => {
     ...(SwapFlow ? [{ id: 'swap', label: 'Swap', to: `${EXCHANGE_ROUTE}/swap` }] : []),
     { id: 'platforms', label: 'Platforms', to: platformRoute() },
     { id: 'names', label: 'Names', to: `${EXCHANGE_ROUTE}/names` },
+    { id: 'podcasts', label: 'Podcasts', to: `${EXCHANGE_ROUTE}/podcasts` },
     { id: 'launchpad', label: 'Launchpad', to: `${EXCHANGE_ROUTE}/launchpad` },
     { id: 'orders', label: 'My orders', to: `${EXCHANGE_ROUTE}/orders` },
     { id: 'more', label: 'Collectibles', to: `${EXCHANGE_ROUTE}/collectibles` },
@@ -545,6 +547,7 @@ const ExchangePage = () => {
         )}
         {view.tab === 'orders' && <Orders />}
         {view.tab === 'names' && <OpnsMarket rate={rate} />}
+        {view.tab === 'podcasts' && <PodcastMarket rate={rate} />}
         {/* In-app launchpad (owner, 14 Oct 2026: the Exchange must not send people to tokenblaster.lol). */}
         {view.tab === 'launchpad' && <LaunchpadPanel />}
         {view.tab === 'launch' && <LaunchCoin />}
