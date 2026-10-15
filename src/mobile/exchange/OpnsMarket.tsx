@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Search } from 'lucide-react';
+import { Info, Search, ShoppingCart } from 'lucide-react';
+import type { SwipeAction } from '../swipe/SwipeRow';
+import { TokenSwipeRow } from './TokenRowActions';
+import { TRAY, openExternal } from './useTokenRowActions';
+import { opnsActionIds, txInfoUrl } from './rowActions';
 import { listOpns } from '@1sat/actions';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { fmtSats } from '../money/money';
@@ -81,6 +85,30 @@ export const OpnsMarket = ({ rate }: { rate: number }) => {
       else n.add(c);
       return n;
     });
+
+  // Swipe left (or long-press / "…"): Buy · Info. No "Make an offer": the app has no offers yet.
+  const actionsFor = (l: OpnsListing, ours: boolean): SwipeAction[] =>
+    opnsActionIds({ canBuy: !ours && !!apiContext, outpoint: l.outpoint }).map(
+      (id): SwipeAction =>
+        id === 'buy'
+          ? {
+              id,
+              label: 'Buy',
+              icon: <ShoppingCart size={18} />,
+              ...TRAY.primary,
+              onPress: () => !busy && setBuy(l),
+            }
+          : {
+              id,
+              label: 'Info',
+              icon: <Info size={18} />,
+              ...TRAY.plain,
+              onPress: () => {
+                const u = txInfoUrl(l.outpoint);
+                if (u) openExternal(u);
+              },
+            },
+    );
 
   const purchase = async (l: OpnsListing) => {
     setBuy(null);
@@ -177,22 +205,20 @@ export const OpnsMarket = ({ rate }: { rate: number }) => {
           )}
         </div>
       ) : (
-        <div className="rounded-2xl bg-[var(--bw-surface)] border border-[#2b2f36] overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-xs" style={{ color: MUTED }}>
-                <th className="text-left font-semibold py-2 pl-3">Name</th>
-                <th className="text-right font-semibold">Price</th>
-                <th className="text-right font-semibold hidden md:table-cell">Seller</th>
-                <th className="pr-3" />
-              </tr>
-            </thead>
-            <tbody>
-              {shown.map((l) => {
-                const ours = mine.has(l.name);
-                return (
-                  <tr key={l.outpoint} className="border-t border-[#2b2f36]">
-                    <td className="py-2.5 pl-3">
+        <div className="rounded-2xl bg-[var(--bw-surface)] border border-[#2b2f36] overflow-hidden" role="list">
+          <div className="flex items-center gap-2 px-3 py-2 text-xs font-semibold" style={{ color: MUTED }}>
+            <span className="flex-1">Name</span>
+            <span className="text-right">Price</span>
+            <span className="hidden md:block w-28 text-right">Seller</span>
+            <span className="w-24" />
+          </div>
+          {shown.map((l) => {
+            const ours = mine.has(l.name);
+            return (
+              <div role="listitem" key={l.outpoint} className="border-t border-[#2b2f36]">
+                <TokenSwipeRow actions={actionsFor(l, ours)} title={l.name} rowId={l.outpoint}>
+                  <div className="flex items-center gap-2 px-3 py-2.5 text-sm">
+                    <div className="flex-1 min-w-0">
                       <span className="font-bold text-white break-all">{l.name}</span>
                       <span className="ml-2 text-[10px] align-middle" style={{ color: MUTED }}>
                         Tier ${tierUsd(l.name)}
@@ -200,22 +226,22 @@ export const OpnsMarket = ({ rate }: { rate: number }) => {
                       {ours && (
                         <span
                           className="ml-2 rounded-full px-2 py-0.5 text-[10px] font-bold align-middle"
-                          style={{ background: '#2a2100', color: GOLD }}
+                          style={{ background: 'var(--bw-accent-lo)', color: GOLD }}
                         >
                           Yours
                         </span>
                       )}
-                    </td>
-                    <td className="text-right whitespace-nowrap">
+                    </div>
+                    <div className="text-right whitespace-nowrap">
                       <span className="text-white font-semibold">{usdOrSats(l.priceSats, rate)}</span>
                       <div className="text-[11px]" style={{ color: MUTED }}>
                         {fmtSats(l.priceSats)}
                       </div>
-                    </td>
-                    <td className="text-right text-xs font-mono hidden md:table-cell" style={{ color: MUTED }}>
+                    </div>
+                    <div className="hidden md:block w-28 text-right text-xs font-mono" style={{ color: MUTED }}>
                       {l.seller ? `${l.seller.slice(0, 6)}…${l.seller.slice(-4)}` : '—'}
-                    </td>
-                    <td className="text-right pr-3">
+                    </div>
+                    <div className="w-24 text-right">
                       {ours ? (
                         <Link to={OPNS_MINT_ROUTE} className="text-xs font-bold no-underline" style={{ color: MUTED }}>
                           Manage
@@ -226,17 +252,17 @@ export const OpnsMarket = ({ rate }: { rate: number }) => {
                           disabled={!apiContext || !!busy}
                           onClick={() => setBuy(l)}
                           className="rounded-lg px-3 py-1.5 text-xs font-bold border-0 cursor-pointer hover:brightness-110 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2"
-                          style={{ background: GOLD, color: '#000' }}
+                          style={{ background: GOLD, color: 'var(--bw-on-accent)' }}
                         >
                           {busy === l.name ? 'Buying…' : `Buy for ${usdOrSats(l.priceSats, rate)}`}
                         </button>
                       )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                    </div>
+                  </div>
+                </TokenSwipeRow>
+              </div>
+            );
+          })}
         </div>
       )}
       {msg && (
