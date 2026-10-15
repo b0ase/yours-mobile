@@ -288,6 +288,29 @@ POST /presign/refunds               { rawTx(es) signed by payer via Lock branch 
 
 Server rules: claims stop at `T − 6`. One claim per `(setId, xUserId)`. All broadcasts are idempotent on txid. The pre-sigs and the service signer are separate processes, with an audit log of every `sigS`. The claim recipient key comes from the recipient's bWalletX identity (`handle@bwalletx.com` paymail → BRC-29 derived P2PKH). A new user gets a wallet at sign-in.
 
+### 5.1 Agreed with bit-sign (review of #109)
+
+These override anything above that conflicts with them.
+
+```
+  X OAuth callback ──enqueue──► x.login.verified ──► bit-sign (Vercel)
+        (never signs)                                  records event, reserves claim
+                                                       UNIQUE(set_id, x_user_id), row → 'claiming'
+                                                              │ job
+                                                              ▼
+                                         Hetzner signer worker (holds S + fee-pool key)
+                                         builds claim → BSV-21 check → audit row → sigS → ARC
+```
+
+1. **Key placement.** The service key `S` lives only on a **separate Hetzner signer worker**. It is held in env/Keychain and provisioned by the owner. bit-sign on Vercel never holds `S`. It only records rule events and reserves claims: `UNIQUE(set_id, x_user_id)`, with the row set to `'claiming'` before any signing.
+2. **Fee pool.** Claim fees come from a **service fee UTXO pool with its own key**, which is separate from `S`. The owner funds it at about 50 sats per claim. Each set gets a fee budget, and claims stop when the budget runs out.
+3. **Auth on `/presign/*`.** The session's bound bwallet credential **must equal `payerIdentityKey`**, and every request carries a **BRC-103 body signature**.
+4. **Limits** (fixed): 50 NONE slots per set, $20 open per payer, 7-day default deadline (30 max). Claims stop at `T − 6` blocks.
+5. **Recipient.** The recipient output is the P2PKH from the `name@bwalletx.com` **BRC-29 p2p destination**. The X match uses the **OAuth user id pinned at set creation**, never the handle.
+6. **Idempotency + audit.** The claim is reserved before signing, and there is **one audit row per signature** (set, slot, sighash, txid, worker, time).
+7. **Never sign inline.** The X OAuth callback only enqueues `x.login.verified`.
+8. **Two products.** Named Invites (this primitive) and **Open Drops** (the live x-invites bearer links) are **separate products, and both stay**. §3.3 describes Open Drops for comparison only and does not replace them.
+
 ---
 
 ## 6. Migration sketch
