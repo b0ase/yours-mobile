@@ -28,3 +28,22 @@ describe('b3D feed', () => {
     expect(b3dItems(items, (n) => n.name !== 'blocked').map((n) => n.outpoint)).toEqual(['g_0']);
   });
 });
+
+describe('b3D pinned sources', () => {
+  it('keeps only model/* rows and marks them not for sale', async () => {
+    const { rowsToItems, B3D_SOURCES } = await import('./b3dSources');
+    expect(B3D_SOURCES.map((s) => s.label)).toEqual(['3DOrdi', 'Zoide']);
+    const coll = { id: 'c_0', name: 'Coll' };
+    const out = rowsToItems(
+      [
+        {
+          outpoint: 'a_0',
+          origin: { outpoint: 'a_0', data: { insc: { file: { type: 'model/gltf-binary' } }, map: { name: 'Red' } } },
+        },
+        { outpoint: 'b_0', origin: { outpoint: 'b_0', data: { insc: { file: { type: 'image/png' } } } } },
+      ],
+      coll,
+    );
+    expect(out.map((n) => [n.name, n.priceSats, n.collectionId])).toEqual([['Red', 0, 'c_0']]);
+  });
+});

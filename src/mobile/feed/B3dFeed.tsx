@@ -1,5 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
-import { Box, Image as ImageIcon } from 'lucide-react';
+import { Box, ExternalLink, Image as ImageIcon } from 'lucide-react';
+import { openDappBrowser } from '../dappBrowser';
+import { B3D_SOURCES, sourceItems } from './b3dSources';
 import { contentUrls } from '../market/indexer';
 import { nftFeed, type NftListing } from '../market/classify';
 import { b3dItems } from './b3dItems';
@@ -19,6 +21,7 @@ import { feedColor } from './feeds';
 const ModelViewer = lazy(() => import('../three3d/ModelViewer'));
 
 const Card = ({
+  seenKey,
   item,
   active,
   live3d,
@@ -26,6 +29,7 @@ const Card = ({
   onToggle,
   onOpen,
 }: {
+  seenKey: string;
   item: NftListing;
   active: boolean;
   live3d: boolean;
@@ -37,12 +41,12 @@ const Card = ({
   useEffect(() => {
     const el = ref.current;
     if (!el || typeof IntersectionObserver === 'undefined') return;
-    const io = new IntersectionObserver((es) => es.forEach((e) => onSeen(item.outpoint, e.isIntersecting)), {
+    const io = new IntersectionObserver((es) => es.forEach((e) => onSeen(seenKey, e.isIntersecting)), {
       threshold: 0.6,
     });
     io.observe(el);
     return () => io.disconnect();
-  }, [item.outpoint, onSeen]);
+  }, [seenKey, onSeen]);
   const url = contentUrls(item.origin)[0];
   const poster = item.collectionIcon ? (
     <img src={contentUrls(item.collectionIcon)[0]} alt={item.name} className="w-full h-full object-cover" />
@@ -85,7 +89,7 @@ const Card = ({
           <div className="text-xs text-[#98A2B3] truncate">{item.collectionName ?? 'No collection'}</div>
         </div>
         <span className="text-xs font-semibold" style={{ color: feedColor('b3d') }}>
-          {item.priceLabel}
+          {item.priceSats ? item.priceLabel : 'View'}
         </span>
       </button>
     </div>
@@ -94,6 +98,7 @@ const Card = ({
 
 export const B3dFeed = () => {
   const [items, setItems] = useState<NftListing[] | null>(null);
+  const [pinned, setPinned] = useState<Record<string, NftListing[]>>({});
   const [error, setError] = useState('');
   const [live3d, setLive3d] = useState(true);
   const [active, setActive] = useState<string | null>(null);
@@ -105,41 +110,64 @@ export const B3dFeed = () => {
     nftFeed(300, (partial) => live && setItems(b3dItems(partial)))
       .then((f) => live && setItems(b3dItems(f.items)))
       .catch((e) => live && setError(e instanceof Error ? e.message : String(e)));
+    for (const src of B3D_SOURCES)
+      void sourceItems(src).then((list) => live && setPinned((p) => ({ ...p, [src.id]: b3dItems(list) })));
     return () => {
       live = false;
     };
   }, []);
 
-  // The first card that is at least 60% on screen is the one that renders live.
-  const onSeen = useRef((outpoint: string, isVisible: boolean) => {
+  // The first card that is at least 60% on screen is the one that renders live (keys are section-scoped).
+  const onSeen = useRef((key: string, isVisible: boolean) => {
     visible.current = isVisible
-      ? [...visible.current.filter((o) => o !== outpoint), outpoint]
-      : visible.current.filter((o) => o !== outpoint);
+      ? [...visible.current.filter((o) => o !== key), key]
+      : visible.current.filter((o) => o !== key);
     setActive(visible.current[0] ?? null);
   }).current;
 
-  const open = (n: NftListing) => {
+  const open = (n: NftListing, site?: string) => {
+    if (!n.priceSats && site) return void openDappBrowser(site);
     requestMarketNft(n);
     handleSelect(asMenuItem('market'));
   };
 
-  if (error && !items?.length) return <p className="text-xs text-[#F97066] text-center py-8">{error}</p>;
-  if (items === null) return <p className="text-xs text-[#98A2B3] text-center py-8">Loading 3D NFTs…</p>;
-  if (items.length === 0)
-    return <p className="text-xs text-[#98A2B3] text-center py-8">No 3D NFTs listed right now.</p>;
-  return (
-    <div className="flex flex-col gap-3 px-3 py-3">
-      {items.map((n) => (
+  const cards = (list: readonly NftListing[], section: string, site?: string) =>
+    list.map((n) => {
+      const key = `${section}:${n.outpoint}`;
+      return (
         <Card
-          key={n.outpoint}
+          key={key}
+          seenKey={key}
           item={n}
-          active={active === n.outpoint}
+          active={active === key}
           live3d={live3d}
           onSeen={onSeen}
           onToggle={() => setLive3d((v) => !v)}
-          onOpen={() => open(n)}
+          onOpen={() => open(n, site)}
         />
+      );
+    });
+
+  return (
+    <div className="flex flex-col gap-3 px-3 py-3">
+      {B3D_SOURCES.map((src) => (
+        <section key={src.id} className="flex flex-col gap-3">
+          <button
+            type="button"
+            onClick={() => openDappBrowser(src.site)}
+            className="self-start flex items-center gap-1.5 h-8 px-3 rounded-full text-xs font-semibold"
+            style={{ background: `${feedColor('b3d')}22`, color: feedColor('b3d') }}
+          >
+            <Box size={14} /> {src.label} <ExternalLink size={12} />
+          </button>
+          {cards(pinned[src.id] ?? [], src.id, src.site)}
+        </section>
       ))}
+      <div className="text-xs font-semibold text-[#98A2B3] pt-2">On the Exchange</div>
+      {error && !items?.length && <p className="text-xs text-[#F97066] text-center py-8">{error}</p>}
+      {items === null && !error && <p className="text-xs text-[#98A2B3] text-center py-8">Loading 3D NFTs…</p>}
+      {items?.length === 0 && <p className="text-xs text-[#98A2B3] text-center py-8">No 3D NFTs listed right now.</p>}
+      {cards(items ?? [], 'market')}
     </div>
   );
 };
