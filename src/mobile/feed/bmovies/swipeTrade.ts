@@ -9,6 +9,9 @@
 
 /** No real trade happens while this is on: trades are recorded locally only. */
 export const BMOVIES_SWIPE_TRADE_MOCK = true;
+/** Release switch (5.2.22): swipe trading, "My swipes" and the long-press quick trade stay hidden
+ * until real trades exist. Buy/Sell still open bmovies.app. */
+export const BMOVIES_SWIPE_TRADE_ENABLED = false;
 
 export type Side = 'buy' | 'sell';
 

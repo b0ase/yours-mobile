@@ -160,11 +160,27 @@ import feedBg from '../brand/bg/feed-waves.mp4';
 import feedPoster from '../brand/bg/feed-waves.jpg';
 import { fmtSats, fmtUsd, hasRate, money, moneyNow, satsNote, usdToSats, useBsvUsd } from '../money/money';
 import { celebrateSend } from '../../components/sent/sent';
+import {
+  chosenDests,
+  DEST_LABEL,
+  destSummary,
+  TIP_MESSAGE_MAX,
+  tipDestinations,
+  tipMailBody,
+  toggleDest,
+  validateTipMessage,
+  willSendMessage,
+  type TipDest,
+} from './tipMessage';
+import { resolvePaymail } from '../names/names';
+import { sendMail } from '../bmail/client';
+import type { WalletInterface } from '@bsv/sdk';
 import { ErrorActions } from '../errors/ErrorActions';
 import { NewsList, NewsThread } from './NewsThread';
 import { loadNewsMode, saveNewsMode, type NewsItem } from './bnews';
 import { AllFeedsSheet, FeedPicker } from './FeedPicker';
 import { BrandFeed } from './BrandFeed';
+import { BradioFeed } from '../bradio/BradioFeed';
 import { authorProfileUrl, authorRef, fetchAuthorPage, fetchAuthorProfile, type AuthorProfile } from './authorFeed';
 import { FeaturedAlbum } from './FeaturedAlbum';
 import {
@@ -193,7 +209,7 @@ const NewsVideos = BMOVIES_FEED_ENABLED ? lazy(() => import('./bmovies/NewsVideo
  * Every post and media ref passes the market safety filter; syndicated images, video posters
  * and previews stay blurred until tapped.
  */
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#121316';
 const LINE = '#1f2127';
 const MUTED = '#8a8f98';
@@ -450,7 +466,7 @@ const Layer = ({
 }) => {
   useBackClose(true, onBack);
   return createPortal(
-    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#010101' }}>
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: 'var(--bw-bg)' }}>
       <div
         className="flex items-center gap-2 px-2 pb-2"
         style={{ paddingTop: 'max(env(safe-area-inset-top), 12px)', borderBottom: `1px solid ${LINE}` }}
@@ -1142,13 +1158,58 @@ const TipSheet = ({
   const dest = payDestination(post);
   const sats = picked ?? presets[1];
   const likeSats = loadPrefs().paidLikeSats;
+  // Optional message with the tip, and where it goes (tipMessage.ts).
+  const [message, setMessage] = useState('');
+  const [dests, setDests] = useState(() => tipDestinations(post));
+  const msgError = validateTipMessage(message);
+  const sendingMessage = willSendMessage(message, dests);
+  /** Deliver the message after the tip landed. Returns what failed (the tip itself already went). */
+  const deliverMessage = async (tipLabel: string): Promise<string[]> => {
+    const failed: string[] = [];
+    const text = message.trim();
+    for (const k of chosenDests(dests)) {
+      try {
+        if (k === 'reply') {
+          await publish(
+            apiContext,
+            buildPostScript({
+              text,
+              replyTo: post.txid,
+              threadId: post.source === 'treechat' ? post.threadId : null,
+            }),
+            'Feed reply',
+            ['app:bWallet', 'type:post', 'context:tx', `contextValue:${post.txid}`],
+          );
+        } else {
+          const r = await resolvePaymail(fetch.bind(globalThis), post.author.paymail!);
+          if (!r.pubkey) throw new Error('no key');
+          await sendMail(apiContext.wallet as unknown as WalletInterface, {
+            to: r.pubkey,
+            toLabel: post.author.paymail!,
+            sealed: tipMailBody(text, tipLabel, post.txid),
+            sats: 0,
+            replyPaidSats: 0,
+          });
+        }
+      } catch (e) {
+        if (e instanceof PostCancelledError) failed.push(`${DEST_LABEL[k]} (cancelled)`);
+        else failed.push(DEST_LABEL[k]);
+      }
+    }
+    return failed;
+  };
   const pay = async (kind: PayKind, n: number) => {
     const bad = validateAmount(n);
     if (bad) return setError(bad);
+    if (kind === 'tip' && msgError) return setError(msgError);
     setBusy(true);
     setError('');
     try {
       const txid = await sendPayment(apiContext, post, n, kind);
+      if (kind === 'tip' && sendingMessage) {
+        const failed = await deliverMessage(money(n, rate));
+        if (failed.length) addSnackbar(`Tip sent. Your message did not reach: ${failed.join(', ')}`, 'info');
+      }
       const shown = celebrateSend(txid, {
         amount: { kind: 'bsv', sats: n },
         recipients: [safeName(post.author.name)],
@@ -1245,6 +1306,43 @@ const TipSheet = ({
           </p>
         ) : null;
       })()}
+      <textarea
+        value={message}
+        onChange={(e) => setMessage(e.target.value)}
+        placeholder="Say something (optional)"
+        rows={2}
+        maxLength={TIP_MESSAGE_MAX + 20}
+        className="mt-3 w-full rounded-xl px-3 py-2 text-sm text-white outline-none resize-none"
+        style={{ background: PANEL, border: `1px solid ${msgError ? RED : LINE}` }}
+        aria-label="Message with your tip"
+      />
+      <div className="flex items-center justify-between text-[11px]" style={{ color: msgError ? RED : MUTED }}>
+        <span>{msgError ?? ''}</span>
+        <span>
+          {[...message.trim()].length}/{TIP_MESSAGE_MAX}
+        </span>
+      </div>
+      {message.trim() && (
+        <div className="mt-1 flex flex-wrap gap-1.5">
+          {(['reply', 'bmail', 'note'] as TipDest[])
+            .filter((k) => dests[k].available)
+            .map((k) => (
+              <button
+                key={k}
+                onClick={() => setDests((d) => toggleDest(d, k))}
+                className="rounded-full px-3 py-1 text-[11px] font-bold"
+                style={
+                  dests[k].on
+                    ? { background: GOLD, color: '#1a1300' }
+                    : { background: PANEL, color: 'white', border: `1px solid ${LINE}` }
+                }
+                aria-pressed={dests[k].on}
+              >
+                {DEST_LABEL[k]}
+              </button>
+            ))}
+        </div>
+      )}
       {error && (
         <div className="flex flex-col gap-1.5">
           <p className="text-xs mt-2" style={{ color: RED }}>
@@ -1253,13 +1351,32 @@ const TipSheet = ({
           <ErrorActions message={String(error)} />
         </div>
       )}
+      <div className="mt-3 rounded-xl px-3 py-2 text-xs" style={{ background: PANEL, border: `1px solid ${LINE}` }}>
+        <div className="font-bold text-white">Tip {money(sats, rate)}</div>
+        {sendingMessage ? (
+          <>
+            <div className="mt-1 text-white break-words">“{message.trim()}”</div>
+            <div className="mt-1" style={{ color: MUTED }}>
+              {destSummary(dests)}
+              {dests.reply.on ? ' · the reply is public, on chain, in its own transaction' : ''}
+            </div>
+          </>
+        ) : (
+          message.trim() &&
+          !msgError && (
+            <div className="mt-1" style={{ color: MUTED }}>
+              No destination picked: only the tip is sent.
+            </div>
+          )
+        )}
+      </div>
       <button
         onClick={() => void pay('tip', sats)}
-        disabled={busy}
+        disabled={busy || !!msgError}
         className="mt-3 w-full rounded-2xl py-3 text-sm font-bold disabled:opacity-40"
         style={{ background: GOLD, color: '#1a1300' }}
       >
-        {busy ? 'Sending…' : `Tip ${money(sats, rate)}`}
+        {busy ? 'Sending…' : sendingMessage ? `Tip ${money(sats, rate)} + message` : `Tip ${money(sats, rate)}`}
       </button>
       <button
         onClick={() => void pay('like', likeSats)}
@@ -1840,7 +1957,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
   return (
     <div
       className="isolate flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36"
-      style={{ height: '100%', background: '#010101' }}
+      style={{ height: '100%', background: 'var(--bw-bg)' }}
     >
       <PullToRefresh onRefresh={() => load(tab)} />
       <VideoBackground src={feedBg} poster={feedPoster} scrim="dark" position="fixed" />
@@ -1946,6 +2063,8 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
                 <BmoviesReel key={feed} brand={feed} />
               </Suspense>
             </>
+          ) : feed === 'bradio' ? (
+            <BradioFeed />
           ) : !hasCustomView(feed) ? (
             <BrandFeed slug={feed} />
           ) : news ? (
@@ -2559,7 +2678,7 @@ const PostThread = ({
           <PostCard post={p} a={a} />
         </div>
       ))}
-      <div style={{ background: 'rgba(255,210,77,0.04)' }}>
+      <div style={{ background: 'rgb(var(--bw-accent-hi-rgb) / 0.04)' }}>
         <PostCard post={focus} a={{ ...a, onOpen: () => undefined }} />
       </div>
       <PostList
@@ -2649,7 +2768,7 @@ const Leaderboard = ({
     </div>
   );
   const rowStyle = (mine: boolean) => ({
-    background: mine ? 'rgba(255,210,77,0.08)' : BOARD_PANEL,
+    background: mine ? 'rgb(var(--bw-accent-hi-rgb) / 0.08)' : BOARD_PANEL,
     border: `1px solid ${mine ? GOLD : BOARD_LINE}`,
   });
   const rank = (n: number) => (

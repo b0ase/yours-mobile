@@ -97,7 +97,7 @@ const coverFrom = async (file: File): Promise<File> => {
  * List-for-sale is NOT offered: upstream has OrdLock listing creation disabled
  * (ORDLOCK_LISTING_DISABLED in src/utils/cancelOrdLockListings.ts). Re-add once it returns.
  */
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#17191E';
 const BORDER = '#3a2f0c';
 

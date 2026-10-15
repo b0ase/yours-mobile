@@ -51,7 +51,7 @@ import { NAME_TIERS, nameTierUsd, offerHref } from './tiers';
  */
 
 const BG = '#07080a';
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const TEXT = '#f4f1e8';
 const MUTED = 'rgba(244,241,232,0.82)';
 const FAINT = 'rgba(244,241,232,0.64)';
@@ -395,7 +395,7 @@ export const NameStorePage = () => {
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-x-0 top-0 h-[520px]"
-        style={{ background: 'radial-gradient(60% 60% at 50% 0%, rgba(245,184,0,0.10), transparent 70%)' }}
+        style={{ background: 'radial-gradient(60% 60% at 50% 0%, rgb(var(--bw-accent-rgb) / 0.10), transparent 70%)' }}
       />
       <div id="name-store-top" className="relative w-full max-w-5xl mx-auto px-4 sm:px-8 pt-12 sm:pt-20 pb-40">
         {/* Hero */}
@@ -413,7 +413,7 @@ export const NameStorePage = () => {
 
         <form onSubmit={submit} className="mt-8 sm:mt-10 mx-auto max-w-2xl" role="search">
           <label
-            className="flex items-center gap-3 rounded-2xl px-4 sm:px-5 h-16 transition-shadow duration-200 focus-within:shadow-[0_0_0_1px_#F5B800,0_12px_40px_rgba(245,184,0,0.12)]"
+            className="flex items-center gap-3 rounded-2xl px-4 sm:px-5 h-16 transition-shadow duration-200 focus-within:shadow-[0_0_0_1px_var(--bw-accent),0_12px_40px_rgb(var(--bw-accent-rgb) / 0.12)]"
             style={{ background: '#0f1013', boxShadow: `0 0 0 1px ${HAIR}, 0 12px 40px rgba(0,0,0,0.4)` }}
           >
             <Search size={20} color={FAINT} aria-hidden="true" />
@@ -680,7 +680,7 @@ const ResultCard = (p: {
           type="checkbox"
           checked={p.giving}
           onChange={(e) => p.setGiving(e.target.checked)}
-          className="accent-[#F5B800] w-4 h-4"
+          className="accent-[color:var(--bw-accent)] w-4 h-4"
         />
         <Gift size={14} aria-hidden="true" /> Give it to someone
       </label>
@@ -691,7 +691,7 @@ const ResultCard = (p: {
           placeholder="Their $handle or paymail"
           aria-label="Who is it for? Their $handle or paymail"
           autoCapitalize="none"
-          className="h-11 rounded-xl px-4 text-sm outline-none focus-visible:shadow-[0_0_0_1px_#F5B800]"
+          className="h-11 rounded-xl px-4 text-sm outline-none focus-visible:shadow-[0_0_0_1px_var(--bw-accent)]"
           style={{ background: '#0b0c0f', color: TEXT, boxShadow: `inset 0 0 0 1px ${HAIR}` }}
         />
       )}
@@ -748,7 +748,7 @@ const ResultCard = (p: {
                     placeholder={String(tier ?? 15)}
                     inputMode="decimal"
                     aria-label="Asking price in US dollars"
-                    className="h-11 w-24 rounded-xl px-3 text-sm outline-none focus-visible:shadow-[0_0_0_1px_#F5B800]"
+                    className="h-11 w-24 rounded-xl px-3 text-sm outline-none focus-visible:shadow-[0_0_0_1px_var(--bw-accent)]"
                     style={{ background: '#0b0c0f', color: TEXT, boxShadow: `inset 0 0 0 1px ${HAIR}` }}
                   />
                 </label>
@@ -931,7 +931,7 @@ const ResultCard = (p: {
                     key={s}
                     type="button"
                     onClick={() => p.onPick(s)}
-                    className="h-9 px-3.5 rounded-full text-sm border-0 cursor-pointer transition-colors duration-150 hover:bg-[rgba(245,184,0,0.12)] focus-visible:outline focus-visible:outline-2"
+                    className="h-9 px-3.5 rounded-full text-sm border-0 cursor-pointer transition-colors duration-150 hover:bg-[rgb(var(--bw-accent-rgb) / 0.12)] focus-visible:outline focus-visible:outline-2"
                     style={{
                       background: 'transparent',
                       color: TEXT,
@@ -955,7 +955,8 @@ const Preview = ({ name }: { name: string }) => (
   <div
     className="rounded-3xl p-6 sm:p-8 flex flex-col gap-5"
     style={{
-      background: 'linear-gradient(160deg, rgba(245,184,0,0.10), rgba(245,184,0,0.02) 55%), rgba(7,8,10,0.74)',
+      background:
+        'linear-gradient(160deg, rgb(var(--bw-accent-rgb) / 0.10), rgb(var(--bw-accent-rgb) / 0.02) 55%), rgba(7,8,10,0.74)',
       boxShadow: `inset 0 0 0 1px ${HAIR}`,
     }}
   >

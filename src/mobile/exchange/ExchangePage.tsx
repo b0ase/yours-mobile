@@ -20,8 +20,11 @@ import { SWAP_ENABLED } from '../storeBuild';
 import { useTabHome } from '../tabs/useTabHome';
 import { TradeView } from './TradeView';
 import { TokenIcon } from './TokenIcon';
+import { Sparkline } from './PriceChart';
+import { chartSeries } from './chartSeries';
 import { PeopleMarket } from './PeopleMarket';
 import { OpnsMarket } from './OpnsMarket';
+import { PodcastMarket } from './PodcastMarket';
 import { LaunchpadPanel } from '../market/launchpad/LaunchpadPanel';
 import { LaunchCoin } from './launch/LaunchCoin';
 import { FilterBar, PlatformPage, PlatformsView } from './Categories';
@@ -44,6 +47,7 @@ import {
   tradeRoute,
   unitPriceLabel,
   type DayStats,
+  type Trade,
 } from './exchangeData';
 
 // Swap into BSV: its chunk is dropped from a store build (SWAP_ENABLED), like the wallet's Swap card.
@@ -51,7 +55,7 @@ const SwapFlow = SWAP_ENABLED ? lazy(() => import('../swap/SwapFlow')) : null;
 // NFTs, collections, tickets, strategies and contracts keep their screens (the old Market page).
 const MarketPage = lazy(() => import('../market/MarketPage'));
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const Loading = ({ text }: { text: string }) => (
   <p className="text-sm text-center py-8" style={{ color: '#98A2B3' }}>
     {text}
@@ -61,7 +65,7 @@ const GREEN = '#A1FF8B';
 const RED = '#FF6B6B';
 const MUTED = '#98A2B3';
 
-type RowStats = { floor: number | null; live: number; stats: DayStats };
+type RowStats = { floor: number | null; live: number; stats: DayStats; trades: Trade[] };
 
 /** Live BSV price (USD per BSV), re-read every minute while the Exchange is open. */
 const useRate = () => {
@@ -194,7 +198,7 @@ const Markets = ({
           if (!live) return;
           setExtra((e) => ({
             ...e,
-            [ref.id]: { floor: m?.floorSats ?? null, live: m?.live ?? 0, stats: dayStats(trades, tip) },
+            [ref.id]: { floor: m?.floorSats ?? null, live: m?.live ?? 0, stats: dayStats(trades, tip), trades },
           }));
         }
       };
@@ -210,7 +214,7 @@ const Markets = ({
   return (
     <div className="flex flex-col gap-3 w-full">
       <div className="flex gap-2 items-center">
-        <label className="flex-1 flex items-center gap-2 rounded-xl bg-[#17191E] border border-[#2b2f36] px-3 py-2">
+        <label className="flex-1 flex items-center gap-2 rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36] px-3 py-2">
           <Search size={16} color={MUTED} />
           <input
             value={q}
@@ -268,7 +272,7 @@ const Markets = ({
               {onlyFavs ? 'Star a token to keep it here.' : 'No tokens match.'}
             </p>
           ) : (
-            <div className="rounded-2xl bg-[#17191E] border border-[#2b2f36] overflow-x-auto">
+            <div className="rounded-2xl bg-[var(--bw-surface)] border border-[#2b2f36] overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-xs" style={{ color: MUTED }}>
@@ -309,6 +313,11 @@ const Markets = ({
                           <div className="flex items-center gap-2 min-w-0">
                             <TokenIcon icon={r.icon} sym={r.title} size={28} />
                             <span className="font-bold text-white truncate max-w-[160px]">{r.title}</span>
+                            {x && (
+                              <span className="ml-auto hidden sm:inline-flex">
+                                <Sparkline series={chartSeries(x.trades.slice(-30), { lowestAsk: x.floor })} />
+                              </span>
+                            )}
                             {registry && (
                               <span className="text-[11px] hidden md:inline" style={{ color: MUTED }}>
                                 {categoryLabel(registry.labels(r.ref.id).category)}
@@ -385,7 +394,7 @@ const Orders = () => {
               type="button"
               key={b.txid}
               onClick={() => navigate(tradeRoute(b.tokenId))}
-              className="flex justify-between items-center rounded-xl bg-[#17191E] border border-[#2b2f36] px-3 py-2.5 text-left cursor-pointer"
+              className="flex justify-between items-center rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36] px-3 py-2.5 text-left cursor-pointer"
             >
               <span className="text-sm text-white">{b.amountLabel}</span>
               <span className="text-xs" style={{ color: MUTED }}>
@@ -406,7 +415,7 @@ const Orders = () => {
             swaps.slice(0, 30).map((s) => (
               <div
                 key={s.id}
-                className="flex justify-between items-center rounded-xl bg-[#17191E] border border-[#2b2f36] px-3 py-2.5"
+                className="flex justify-between items-center rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36] px-3 py-2.5"
               >
                 <span className="text-sm text-white">
                   {s.amount} {s.label} → BSV
@@ -456,6 +465,7 @@ const ExchangePage = () => {
     ...(SwapFlow ? [{ id: 'swap', label: 'Swap', to: `${EXCHANGE_ROUTE}/swap` }] : []),
     { id: 'platforms', label: 'Platforms', to: platformRoute() },
     { id: 'names', label: 'Names', to: `${EXCHANGE_ROUTE}/names` },
+    { id: 'podcasts', label: 'Podcasts', to: `${EXCHANGE_ROUTE}/podcasts` },
     { id: 'launchpad', label: 'Launchpad', to: `${EXCHANGE_ROUTE}/launchpad` },
     { id: 'orders', label: 'My orders', to: `${EXCHANGE_ROUTE}/orders` },
     { id: 'more', label: 'Collectibles', to: `${EXCHANGE_ROUTE}/collectibles` },
@@ -472,7 +482,7 @@ const ExchangePage = () => {
   return (
     <div
       className="flex w-full flex-col items-center overflow-y-auto pb-36"
-      style={{ height: '100%', background: '#010101' }}
+      style={{ height: '100%', background: 'var(--bw-bg)' }}
     >
       <div className="w-full max-w-[1100px] px-4 pt-4 flex flex-col gap-4">
         <div className="flex items-end justify-between gap-3 flex-wrap">
@@ -532,6 +542,7 @@ const ExchangePage = () => {
         )}
         {view.tab === 'orders' && <Orders />}
         {view.tab === 'names' && <OpnsMarket rate={rate} />}
+        {view.tab === 'podcasts' && <PodcastMarket rate={rate} />}
         {/* In-app launchpad (owner, 14 Oct 2026: the Exchange must not send people to tokenblaster.lol). */}
         {view.tab === 'launchpad' && <LaunchpadPanel />}
         {view.tab === 'launch' && <LaunchCoin />}

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { MicOff } from 'lucide-react';
 import { levelToBars } from './levelMeter';
 
-const BAR_GOLD = '#F5B800';
+const BAR_GOLD = 'var(--bw-accent)';
 const reducedMotion = () =>
   typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 

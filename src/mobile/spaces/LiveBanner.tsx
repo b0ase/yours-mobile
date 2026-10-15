@@ -26,7 +26,7 @@ import { BSPACES_ENABLED } from '../storeBuild';
 // Paid entry is bWalletX only: a lazy chunk behind the inlined flag, so a store build never contains it.
 const DoorKeeper = BSPACES_ENABLED ? lazy(() => import('./DoorKeeper').then((m) => ({ default: m.DoorKeeper }))) : null;
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const MUTED = '#8a8f98';
 const POLL_MS = 20_000;
 
@@ -136,7 +136,10 @@ export const LiveBanner = ({
         <button
           onClick={() => setOpen({ always: true })}
           className="mx-3 mt-2 flex items-center gap-3 rounded-xl px-3 py-2 text-left"
-          style={{ background: 'linear-gradient(90deg, #2a1d05, #1a1408)', border: `1px solid ${GOLD}55` }}
+          style={{
+            background: 'linear-gradient(90deg, #2a1d05, #1a1408)',
+            border: `1px solid color-mix(in srgb, ${GOLD} 33%, transparent)`,
+          }}
         >
           <span
             className="flex h-8 w-8 items-center justify-center rounded-full"
@@ -161,7 +164,10 @@ export const LiveBanner = ({
         <button
           onClick={() => setOpen({})}
           className="mx-3 mt-2 flex items-center gap-3 rounded-xl px-3 py-2 text-left"
-          style={{ background: 'linear-gradient(90deg, #2a1d05, #1a1408)', border: `1px solid ${GOLD}55` }}
+          style={{
+            background: 'linear-gradient(90deg, #2a1d05, #1a1408)',
+            border: `1px solid color-mix(in srgb, ${GOLD} 33%, transparent)`,
+          }}
         >
           <span
             className="relative flex h-8 w-8 items-center justify-center rounded-full"
@@ -190,7 +196,7 @@ export const LiveBanner = ({
         host && (
           <div
             className="flex items-center gap-3 px-3 py-2"
-            style={{ background: '#0d0b04', borderBottom: `1px solid ${GOLD}33` }}
+            style={{ background: '#0d0b04', borderBottom: `1px solid color-mix(in srgb, ${GOLD} 20%, transparent)` }}
           >
             <Mic size={16} color={GOLD} />
             <span className="flex-1 text-[13px] font-semibold text-white">Start a Space</span>

@@ -6,7 +6,7 @@ import { isAgentAccount } from '../agents/agentAccounts';
 import { makeGrant, type AgentGrant, type AgentScope } from './agentPairing';
 import { describeMintLimits, makeMintLimits, MAX_MINT_ITEMS, MAX_MINT_USD } from './mintScope';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 const PANEL = '#17191E';
 
@@ -91,7 +91,10 @@ export const CliPairConfirm = ({
 
   return (
     <div className="mt-6 flex flex-col items-center text-center">
-      <span className="grid h-14 w-14 place-items-center rounded-2xl" style={{ background: 'rgba(245,184,0,0.12)' }}>
+      <span
+        className="grid h-14 w-14 place-items-center rounded-2xl"
+        style={{ background: 'rgb(var(--bw-accent-rgb) / 0.12)' }}
+      >
         <Terminal size={28} color={GOLD} />
       </span>
       <p className="mt-4 text-xl font-bold text-white">Pair the bWalletX CLI</p>

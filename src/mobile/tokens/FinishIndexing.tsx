@@ -32,11 +32,11 @@ export const FinishIndexing = ({
   return (
     <div
       className={`flex flex-col gap-2 rounded-2xl ${compact ? 'px-3 py-2.5' : 'px-4 py-3'}`}
-      style={{ background: '#17191E', border: '1px solid #3a2f0c' }}
+      style={{ background: 'var(--bw-surface)', border: '1px solid #3a2f0c' }}
     >
       <div className="flex items-center gap-2">
-        <Sparkles size={15} color="#FFD24D" />
-        <span className="text-sm font-bold" style={{ color: '#FFD24D' }}>
+        <Sparkles size={15} color="var(--bw-accent-hi)" />
+        <span className="text-sm font-bold" style={{ color: 'var(--bw-accent-hi)' }}>
           Set up ${ticker}'s room
         </span>
       </div>
@@ -46,7 +46,7 @@ export const FinishIndexing = ({
         stays as ${ticker}'s balance there and pays for its transfers.
       </p>
       {s.needs && s.freeNote && (
-        <p className="text-[11px] font-semibold m-0" style={{ color: '#FFD24D' }}>
+        <p className="text-[11px] font-semibold m-0" style={{ color: 'var(--bw-accent-hi)' }}>
           {s.freeNote}
         </p>
       )}
@@ -57,7 +57,7 @@ export const FinishIndexing = ({
             disabled={s.busy}
             onClick={s.start}
             className="flex-1 h-10 rounded-xl text-sm font-bold border-0 cursor-pointer disabled:opacity-40"
-            style={{ background: '#FFD24D', color: '#000' }}
+            style={{ background: 'var(--bw-accent-hi)', color: '#000' }}
           >
             {`Set up · ${money(s.total.totalSats, s.rate)}`}
           </button>

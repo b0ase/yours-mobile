@@ -37,7 +37,7 @@ import { localLaunches, mergeLaunches, type Launch } from '../../exchange/launch
 import { registryLaunches } from '../../exchange/launch/launchNet';
 
 const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const LINE = '#2b2f36';
 const FEE_PCT = `${(Number(HOUSE_BPS + ROUTE_BPS) / 100).toFixed(1)}%`;
 
@@ -108,7 +108,7 @@ export const LaunchpadPanel = () => {
           <button
             onClick={load}
             className="rounded-full px-4 py-2 text-sm font-semibold"
-            style={{ background: '#F5B800', color: '#010101' }}
+            style={{ background: 'var(--bw-accent)', color: '#010101' }}
           >
             Retry
           </button>
@@ -122,7 +122,7 @@ export const LaunchpadPanel = () => {
           <button
             key={c.token_id}
             onClick={() => setOpen(c)}
-            className="flex items-center gap-3 rounded-xl bg-[#17191E] px-3 py-3 text-left"
+            className="flex items-center gap-3 rounded-xl bg-[var(--bw-surface)] px-3 py-3 text-left"
           >
             <span className="w-6 text-[11px] font-semibold text-[#667085]">{i + 1}</span>
             <CoinArt id={c.token_id} />
@@ -181,7 +181,7 @@ const OurLaunches = ({ onOpen }: { onOpen: (id: string) => void }) => {
         <button
           key={l.tokenId}
           onClick={() => onOpen(l.tokenId)}
-          className="flex items-center gap-3 rounded-xl bg-[#17191E] px-3 py-3 text-left"
+          className="flex items-center gap-3 rounded-xl bg-[var(--bw-surface)] px-3 py-3 text-left"
         >
           {l.icon ? (
             <img
@@ -333,7 +333,7 @@ const CoinSheet = ({
     </div>
   );
   const input =
-    'w-full h-11 rounded-xl px-3 text-base text-white outline-none border bg-[#0F1013] focus:border-[#FFD24D]';
+    'w-full h-11 rounded-xl px-3 text-base text-white outline-none border bg-[#0F1013] focus:border-[color:var(--bw-accent-hi)]';
   const picks =
     side === 'buy' ? BUY_PICKS : held && held > 0n ? [25n, 50n, 100n].map((p) => ((held * p) / 100n).toString()) : [];
 
@@ -344,7 +344,7 @@ const CoinSheet = ({
         aria-label={`$${coin.sym}`}
         className="w-full max-h-[90vh] overflow-y-auto rounded-t-2xl px-5 pt-5 flex flex-col gap-3 border-t"
         style={{
-          background: '#17191E',
+          background: 'var(--bw-surface)',
           borderColor: LINE,
           paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.25rem)',
         }}

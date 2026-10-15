@@ -17,7 +17,7 @@ import {
 import { CONTRACT_DISCLAIMER, contractEnvelope, contractSaleProblems, parseDescriptor } from './contractNft';
 import { ErrorActions } from '../errors/ErrorActions';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 const CARD = '#17191E';
 const LINE = '#2b2f36';
@@ -177,7 +177,7 @@ export const ContractsMarket = ({ tab = 'all', onTab }: { tab?: ContractsTab; on
         type="button"
         onClick={() => setPublishing(true)}
         className="flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-bold border-0"
-        style={{ background: '#F5B80022', color: GOLD }}
+        style={{ background: 'rgb(var(--bw-accent-rgb)/0.13)', color: GOLD }}
       >
         <Plus size={15} /> Publish a contract
       </button>
@@ -319,7 +319,7 @@ const PublishContract = ({
   const [problems, setProblems] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const input = 'rounded-lg px-3 py-2 text-sm text-white outline-none border w-full';
-  const style = { background: '#010101', borderColor: LINE };
+  const style = { background: 'var(--bw-bg)', borderColor: LINE };
 
   const go = async () => {
     const d = parseDescriptor(json);

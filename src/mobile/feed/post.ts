@@ -276,6 +276,8 @@ export type Author = {
   bapId: string | null;
   name: string;
   avatar: string | null;
+  /** The paymail the post declared (MAP `paymail`), when it looks like one. Unverified: resolve before use. */
+  paymail?: string;
   /** Where this author was read from (unset = bChat / bmap). Picks the profile's post source. */
   source?: Source;
   /** That source's own id: Twetch user id, Peck signer key, Treechat username, Fwetch address. */
@@ -447,7 +449,15 @@ export function parseBmapPost(
     source,
     threadId: isThreadId(threadId) ? threadId.toLowerCase() : null,
     replyTo: isTxid(parent) ? parent.toLowerCase() : null,
-    author: { address, bapId, name, avatar: signer?.avatar ?? null },
+    author: {
+      address,
+      bapId,
+      name,
+      avatar: signer?.avatar ?? null,
+      ...(/^[a-z0-9._+-]{1,64}@[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(asStr(map.paymail).trim())
+        ? { paymail: asStr(map.paymail).trim().toLowerCase() }
+        : {}),
+    },
     at: ts > 1e12 ? ts : ts * 1000,
     likes: Number(m.likes) || 0,
     replies: Number(m.replies) || 0,

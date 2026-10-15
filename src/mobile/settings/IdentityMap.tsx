@@ -19,7 +19,7 @@ import { useKyc } from '../kyc/useKyc';
  * Public values only: never a private key, never the seed.
  */
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 const CARD = '#17191E';
 
@@ -51,11 +51,18 @@ type NodeProps = {
 const Node = ({ title, what, value, shown, depth = 0, badge, children, copy, copied }: NodeProps) => (
   <div style={{ marginLeft: depth * 14 }} className="relative">
     {depth > 0 && (
-      <span aria-hidden className="absolute -left-[9px] top-0 bottom-0" style={{ borderLeft: `1px solid ${GOLD}55` }} />
+      <span
+        aria-hidden
+        className="absolute -left-[9px] top-0 bottom-0"
+        style={{ borderLeft: `1px solid color-mix(in srgb, ${GOLD} 33%, transparent)` }}
+      />
     )}
     <div
       className="rounded-xl px-3 py-2.5 mb-2"
-      style={{ background: CARD, border: depth === 0 ? `1px solid ${GOLD}66` : '1px solid #ffffff10' }}
+      style={{
+        background: CARD,
+        border: depth === 0 ? `1px solid color-mix(in srgb, ${GOLD} 40%, transparent)` : '1px solid #ffffff10',
+      }}
     >
       <div className="flex items-center gap-2">
         <span className="text-[13px] font-semibold text-white">{title}</span>
@@ -136,7 +143,7 @@ export const IdentityMap = ({ onClose }: { onClose: () => void }) => {
   const p = { copy, copied };
 
   return createPortal(
-    <div className="fixed inset-0 z-[80] flex flex-col" style={{ background: '#010101' }}>
+    <div className="fixed inset-0 z-[80] flex flex-col" style={{ background: 'var(--bw-bg)' }}>
       <div
         className="flex items-center gap-2 px-2 pb-2"
         style={{ paddingTop: 'max(env(safe-area-inset-top), 12px)', borderBottom: '1px solid #ffffff14' }}

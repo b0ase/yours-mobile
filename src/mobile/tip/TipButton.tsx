@@ -5,7 +5,7 @@ import { TipSheet } from './TipSheet';
 import { useMe } from './useMe';
 import { isSelf, tipRoute, type TipContext, type TipRecipient } from './tip';
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 
 /**
  * The shared Tip button (owner, 12 Oct 2026: tip buttons everywhere by default). Small gold-outline coin + "Tip".
@@ -42,7 +42,11 @@ export const TipButton = ({
         aria-label={`Tip ${to.name}`}
         title={`Send a tip to ${to.name}`}
         className={`inline-flex shrink-0 items-center gap-1 rounded-full text-xs font-semibold ${compact ? 'p-1' : 'px-2 py-0.5'} ${className}`}
-        style={{ border: `1px solid ${GOLD}66`, color: GOLD, background: 'transparent' }}
+        style={{
+          border: `1px solid color-mix(in srgb, ${GOLD} 40%, transparent)`,
+          color: GOLD,
+          background: 'transparent',
+        }}
       >
         <Coins size={compact ? 13 : 14} />
         {!compact && 'Tip'}

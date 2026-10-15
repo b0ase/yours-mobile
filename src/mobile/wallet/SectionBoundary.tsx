@@ -32,7 +32,7 @@ export class SectionBoundary extends Component<
             type="button"
             onClick={() => window.location.reload()}
             className="rounded-xl px-5 py-2 text-sm font-bold border-0"
-            style={{ background: '#F5B800', color: '#000' }}
+            style={{ background: 'var(--bw-accent)', color: '#000' }}
           >
             Reload
           </button>

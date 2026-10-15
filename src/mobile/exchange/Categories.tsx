@@ -21,7 +21,7 @@ import {
 import type { Registry } from './registry/registry';
 import { useRegistry } from './registry/useRegistry';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 const PAGE = 50;
 
@@ -198,7 +198,7 @@ export const LabelChips = ({ l, registry }: { l: TokenLabels; registry: Registry
           key={t}
           type="button"
           onClick={() => navigate(`/m/exchange?tag=${encodeURIComponent(t)}`)}
-          className="rounded-full px-2 py-0.5 border-0 bg-[#17191E] cursor-pointer"
+          className="rounded-full px-2 py-0.5 border-0 bg-[var(--bw-surface)] cursor-pointer"
           style={{ color: MUTED }}
         >
           #{t}
@@ -220,7 +220,7 @@ export const PlatformsView = ({ registry, board }: { registry: Registry; board: 
           key={p.slug}
           type="button"
           onClick={() => navigate(platformRoute(p.slug))}
-          className="flex justify-between items-center gap-3 rounded-xl bg-[#17191E] border border-[#2b2f36] px-3 py-3 text-left cursor-pointer"
+          className="flex justify-between items-center gap-3 rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36] px-3 py-3 text-left cursor-pointer"
         >
           <span className="min-w-0">
             <span className="block text-sm font-bold text-white">{p.name}</span>
@@ -287,7 +287,7 @@ export const PlatformPage = ({
           type="button"
           onClick={() => navigate(platformRoute())}
           aria-label="All platforms"
-          className="w-9 h-9 grid place-items-center rounded-full bg-[#17191E] border-0 cursor-pointer"
+          className="w-9 h-9 grid place-items-center rounded-full bg-[var(--bw-surface)] border-0 cursor-pointer"
         >
           <ArrowLeft size={18} color="#fff" />
         </button>
@@ -311,7 +311,7 @@ export const PlatformPage = ({
           No tokens from this platform.
         </p>
       ) : (
-        <div className="rounded-2xl bg-[#17191E] border border-[#2b2f36]">
+        <div className="rounded-2xl bg-[var(--bw-surface)] border border-[#2b2f36]">
           {visible.map((id) => {
             const r = byId.get(id);
             const m = meta[id];

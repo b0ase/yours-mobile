@@ -18,7 +18,7 @@ export const PhoneLayoutToggle = () => {
         aria-label="Classic layout"
         onClick={() => setPhoneLayout(classic)}
         className="relative h-7 w-12 shrink-0 rounded-full border-0 transition-colors"
-        style={{ background: classic ? '#FFD24D' : '#2b2f36' }}
+        style={{ background: classic ? 'var(--bw-accent-hi)' : '#2b2f36' }}
       >
         <span
           className="absolute top-0.5 h-6 w-6 rounded-full bg-white transition-all"

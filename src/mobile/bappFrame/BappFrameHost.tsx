@@ -172,7 +172,7 @@ export const BappFrameHost = () => {
           style={{
             top: 'calc(var(--wallet-inset-top, 0px) + 3.5rem)',
             bottom: 'var(--dock-h, 3.75rem)',
-            background: '#010101',
+            background: 'var(--bw-bg)',
             visibility: visible ? 'visible' : 'hidden',
             pointerEvents: visible ? 'auto' : 'none',
           }}

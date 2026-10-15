@@ -18,7 +18,7 @@ export const TesterSettings = () => {
     setStatus(await checkIn(true));
     setBusy(false);
   };
-  const box = { background: '#17191E', border: '1px solid #2b2f36' };
+  const box = { background: 'var(--bw-surface)', border: '1px solid #2b2f36' };
   return (
     <div className="px-4 py-3 text-sm text-white">
       {link ? (

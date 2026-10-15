@@ -8,7 +8,7 @@ import { mentionParts, QUICK_REACTIONS } from './social';
  * $mention chips, reaction chips, the long-press reaction bar, typing row, reply preview and the
  * mention picker. Styling matches ChatPage (gold on near-black).
  */
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#121316';
 const LINE = '#1f2127';
 const MUTED = '#8a8f98';
@@ -39,7 +39,8 @@ export const MessageText = ({ body, mine, me }: { body: string; mine: boolean; m
           className="font-semibold rounded px-[2px]"
           style={{
             color: mine ? '#3d2a00' : GOLD,
-            background: p.mention === me.replace(/^\$/, '').toLowerCase() ? 'rgba(255,210,77,0.22)' : 'transparent',
+            background:
+              p.mention === me.replace(/^\$/, '').toLowerCase() ? 'rgb(var(--bw-accent-hi-rgb) / 0.22)' : 'transparent',
           }}
         >
           {p.text}
@@ -79,7 +80,7 @@ export const ReactionChips = ({
             className="h-[22px] px-[7px] rounded-full text-[12px] flex items-center gap-1"
             style={{
               background: minePick ? '#3a300c' : '#1b1c20',
-              border: `1px solid ${minePick ? `${GOLD}88` : LINE}`,
+              border: `1px solid ${minePick ? `color-mix(in srgb, ${GOLD} 53%, transparent)` : LINE}`,
               color: '#f2f2f2',
             }}
           >

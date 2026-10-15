@@ -10,7 +10,7 @@ import { Capacitor } from '@capacitor/core';
 import { switchBackHint } from './doneHint';
 import { Scanner } from '../scan/Scanner';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 const PANEL = '#17191E';
 
@@ -49,7 +49,7 @@ export default function PairSheet({ onClose, initial }: { onClose: () => void; i
   }, []);
 
   return createPortal(
-    <div className="fixed inset-0 z-[420] flex flex-col" style={{ background: '#010101' }}>
+    <div className="fixed inset-0 z-[420] flex flex-col" style={{ background: 'var(--bw-bg)' }}>
       <div className="flex items-center gap-2 px-2 pb-2" style={{ paddingTop: 'max(env(safe-area-inset-top), 12px)' }}>
         <button onClick={close} aria-label="Back" className="p-2">
           <ArrowLeft size={20} color="white" />
@@ -130,7 +130,7 @@ export default function PairSheet({ onClose, initial }: { onClose: () => void; i
           <div className="mt-8 flex flex-col items-center text-center">
             <span
               className="grid h-14 w-14 place-items-center rounded-2xl"
-              style={{ background: 'rgba(245,184,0,0.12)' }}
+              style={{ background: 'rgb(var(--bw-accent-rgb) / 0.12)' }}
             >
               <ShieldCheck size={28} color={GOLD} />
             </span>

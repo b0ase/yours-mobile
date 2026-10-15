@@ -18,7 +18,7 @@ import { APP_NAME } from '../storeBuild';
 
 const PairSheet = lazy(() => import('../pair/PairSheet'));
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 const PANEL = '#17191E';
 const SATS = 100_000_000;
@@ -104,7 +104,7 @@ export default function ScanSheet({
   const big = 'flex w-full min-h-[48px] items-center justify-center gap-2 rounded-xl py-3 font-bold border-0';
 
   return createPortal(
-    <div className="fixed inset-0 z-[420] flex flex-col" style={{ background: '#010101' }}>
+    <div className="fixed inset-0 z-[420] flex flex-col" style={{ background: 'var(--bw-bg)' }}>
       <div className="flex items-center gap-2 px-2 pb-2" style={{ paddingTop: 'max(env(safe-area-inset-top), 12px)' }}>
         <button
           onClick={stage.k === 'scan' ? onClose : () => setStage({ k: 'scan' })}

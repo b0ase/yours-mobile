@@ -37,7 +37,7 @@ export const FindTokensButton = ({ style, onFound }: { style?: React.CSSProperti
     <motion.button
       whileTap={{ scale: 0.98 }}
       onClick={busy ? undefined : run}
-      className="flex items-center gap-3 w-full px-4 py-3 rounded-xl border text-left cursor-pointer outline-none transition-colors duration-150 bg-[#17191E] hover:bg-[#1f2128]"
+      className="flex items-center gap-3 w-full px-4 py-3 rounded-xl border text-left cursor-pointer outline-none transition-colors duration-150 bg-[var(--bw-surface)] hover:bg-[#1f2128]"
       style={style}
     >
       {busy ? (

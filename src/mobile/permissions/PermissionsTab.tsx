@@ -42,14 +42,14 @@ export const PermissionsTab = () => {
           For Spaces and calls. Chrome can only ask in a tab, so tap Allow and choose Allow when Chrome asks.
         </p>
         {state === 'done' ? (
-          <p style={{ marginTop: 20, fontWeight: 600, color: '#FFD24D' }}>Done. Go back to bWalletX.</p>
+          <p style={{ marginTop: 20, fontWeight: 600, color: 'var(--bw-accent-hi)' }}>Done. Go back to bWalletX.</p>
         ) : (
           <button
             onClick={() => void allow()}
             disabled={state === 'asking'}
             style={{
               marginTop: 20,
-              background: '#FFD24D',
+              background: 'var(--bw-accent-hi)',
               color: '#010101',
               border: 0,
               borderRadius: 999,

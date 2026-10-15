@@ -37,9 +37,9 @@ import {
 import { dial } from './store';
 import { useCalls } from './useCalls';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const f = (u: string, i?: RequestInit) => fetch(u, i);
-const INPUT = 'rounded-xl bg-[#17191E] border border-[#2b2f36] px-3 py-2 text-sm text-white outline-none';
+const INPUT = 'rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36] px-3 py-2 text-sm text-white outline-none';
 
 const Seg = <T extends string>({
   value,

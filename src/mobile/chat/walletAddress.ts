@@ -13,3 +13,13 @@ export const walletAddressMessage = (address: string, handle: string): string =>
 /** What was last reported for an account, so we post again only when the handle or address changes. */
 export const reportedKey = (handle: string, address: string) => `${handle.replace(/^\$/, '').toLowerCase()}|${address}`;
 export const REPORTED_STORAGE_PREFIX = 'bwallet.bchat.walletAddress.';
+
+/** After bChatX refuses the report (403: the account has no bWalletX sign-in yet), wait this long before asking again. */
+export const REFUSED_RETRY_MS = 24 * 60 * 60 * 1000;
+/** Stored value for a refused report: the same key, marked refused, with when. */
+export const refusedMark = (key: string, now: number) => `refused|${now}|${key}`;
+/** True when `stored` says this exact key was refused less than REFUSED_RETRY_MS ago. */
+export const refusedRecently = (stored: string | null, key: string, now: number): boolean => {
+  const m = stored?.match(/^refused\|(\d+)\|(.*)$/);
+  return !!m && m[2] === key && now - Number(m[1]) < REFUSED_RETRY_MS;
+};

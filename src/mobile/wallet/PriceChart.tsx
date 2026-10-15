@@ -1,3 +1,4 @@
+import { fetchSeries } from '../portfolio/market';
 import { useEffect, useState } from 'react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { fetchExchangeRate } from '../../utils/wallet';
@@ -16,7 +17,7 @@ const usd = (dollars: number) => {
   return v >= 1 ? `${s}${v.toFixed(2)}` : v >= 0.01 ? `${s}${v.toFixed(4)}` : `${s}${v.toPrecision(2)}`;
 };
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const UP = '#2ecc71';
 const DOWN = '#F04438';
 const MUTED = '#98A2B3';
@@ -88,7 +89,10 @@ const Ranges = <T extends string>({
         type="button"
         onClick={() => onChange(o)}
         className="flex-1 py-1 rounded-lg text-[11px] font-bold border-0 cursor-pointer"
-        style={{ background: o === value ? `${GOLD}22` : 'transparent', color: o === value ? GOLD : MUTED }}
+        style={{
+          background: o === value ? `color-mix(in srgb, ${GOLD} 13%, transparent)` : 'transparent',
+          color: o === value ? GOLD : MUTED,
+        }}
       >
         {o}
       </button>
@@ -177,25 +181,16 @@ export const PriceChart = ({ tokenId }: { tokenId: string }) => {
 const BSV_RANGES = { '7D': 7, '30D': 30 } as const;
 type BsvRange = keyof typeof BSV_RANGES;
 
-/** BSV in dollars over the last 30 days (WhatsOnChain daily rates), on the BSV page. */
+/** BSV in dollars over the last 30 days (CoinGecko, WhatsOnChain fallback), on the BSV page. */
 export const BsvPriceChart = () => {
-  const [rates, setRates] = useState<number[] | null>(null);
+  const [rates, setRates] = useState<{ t: number; p: number }[] | null>(null);
   const [range, setRange] = useState<BsvRange>('30D');
   useEffect(() => {
     let alive = true;
-    const now = Math.floor(Date.now() / 1000);
-    fetch(`https://api.whatsonchain.com/v1/bsv/main/exchangerate/historical?from=${now - 30 * 86400}&to=${now}`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then(
-        (rows: { rate: number; time: number }[]) =>
-          alive &&
-          setRates(
-            rows
-              .sort((a, b) => a.time - b.time)
-              .map((r) => r.rate)
-              .filter((r) => r > 0),
-          ),
-      )
+    // CoinGecko first (CORS open), WhatsOnChain as fallback, cached 5 min (portfolio/market.ts). A direct WoC
+    // call from the web wallet was CORS-blocked whenever WoC answered with an error (rate limit) without headers.
+    fetchSeries('bsv', '1M', Date.now() - 30 * 86400_000)
+      .then((pts) => alive && setRates(pts))
       .catch(() => alive && setRates([]));
     return () => {
       alive = false;
@@ -215,7 +210,9 @@ export const BsvPriceChart = () => {
       </div>
     );
 
-  const ys = rates.slice(-Math.max(2, BSV_RANGES[range] + 1));
+  const since = Date.now() - (BSV_RANGES[range] + 1) * 86400_000;
+  const inRange = rates.filter((x) => x.t >= since).map((x) => x.p);
+  const ys = inRange.length >= 2 ? inRange : rates.slice(-2).map((x) => x.p);
   const change = ((ys[ys.length - 1] - ys[0]) / ys[0]) * 100;
   return (
     <div>

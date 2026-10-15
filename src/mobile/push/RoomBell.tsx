@@ -11,7 +11,7 @@ import { ErrorActions } from '../errors/ErrorActions';
  * Chat room header bell: All / Mentions / Off for this group (PUT /v1/rooms/:ticker/prefs). Groups
  * default to Mentions; DMs always notify, so they get no bell.
  */
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const MUTED = '#8a8f98';
 const PANEL = '#121316';
 const LINE = '#1f2127';

@@ -18,7 +18,7 @@ const IconButton = ({ action }: { action: Action }) => (
       action.onClick();
     }}
     className="flex-shrink-0 w-10 h-10 mr-2 max-[379px]:mr-1.5 rounded-full border flex items-center justify-center bg-transparent cursor-pointer"
-    style={{ borderColor: '#F5B800', color: '#F5B800' }}
+    style={{ borderColor: 'var(--bw-accent)', color: 'var(--bw-accent)' }}
   >
     {action.icon}
   </button>
@@ -45,8 +45,8 @@ const GradientButton = ({
     className={`text-xs font-bold px-4 py-2 rounded-xl cursor-pointer outline-none ${outlined ? 'border bg-transparent' : 'border-0 min-w-[7rem] max-[379px]:min-w-0 max-[379px]:px-3'}`}
     style={
       outlined
-        ? { borderColor: '#F5B80088', color: '#F5B800' }
-        : { background: 'linear-gradient(135deg, #de973f, #f9dd63)', color: theme.color.global.row }
+        ? { borderColor: 'rgb(var(--bw-accent-rgb)/0.53)', color: 'var(--bw-accent)' }
+        : { background: 'linear-gradient(135deg, var(--bw-accent-lo), var(--bw-accent-hi))', color: theme.color.global.row }
     }
   >
     {action.label}
@@ -161,7 +161,7 @@ export const AssetRow = (props: AssetRowProps) => {
                       textSecondary.onClick();
                     }}
                     className="text-[11px] font-bold px-2.5 py-0.5 rounded-full border cursor-pointer bg-transparent"
-                    style={{ borderColor: '#F5B80088', color: '#F5B800' }}
+                    style={{ borderColor: 'rgb(var(--bw-accent-rgb)/0.53)', color: 'var(--bw-accent)' }}
                   >
                     {textSecondary.label}
                   </button>
@@ -173,7 +173,7 @@ export const AssetRow = (props: AssetRowProps) => {
                   button.onClick();
                 }}
                 className="text-[11px] font-bold px-2.5 py-0.5 rounded-full border-0 cursor-pointer"
-                style={{ background: 'linear-gradient(135deg, #de973f, #f9dd63)', color: '#1a1300' }}
+                style={{ background: 'linear-gradient(135deg, var(--bw-accent-lo), var(--bw-accent-hi))', color: 'var(--bw-on-accent)' }}
               >
                 {button.label}
               </button>

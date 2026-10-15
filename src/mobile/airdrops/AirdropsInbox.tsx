@@ -30,7 +30,7 @@ import { ErrorActions } from '../errors/ErrorActions';
 
 const CARD = '#17191E';
 const MUTED = '#98A2B3';
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const short = (s: string) => (s.length > 16 ? `${s.slice(0, 6)}…${s.slice(-6)}` : s);
 
 /** The issuer: avatar + $handle (verified badge for tokens) or a short address. */
