@@ -3,17 +3,17 @@ import { createPortal } from 'react-dom';
 import { useBackClose } from '../backStack';
 import { parseUsdInput } from '../money/money';
 import { POT_NAME_PLACEHOLDER, SUBSCRIPTIONS_ENABLED } from '../storeBuild';
-import { OWN_SERVICE_PAYEES, addSubscription, subProblem, type NewSub, type Period } from './pots';
+import { ownServicePayees, addSubscription, subProblem, type NewSub, type Period } from './pots';
 import { reschedulePotReminders } from './notifyPots';
 import { clearSubscribeRequest, requestLabel, type SubscribeRequest } from './subscribeLink';
 import { ErrorActions } from '../errors/ErrorActions';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 const LINE = '#2b2f36';
 const CARD = '#17191E';
 const input = 'rounded-lg px-3 py-2 text-sm text-white outline-none border w-full';
-const field = { background: '#010101', borderColor: LINE };
+const field = { background: 'var(--bw-bg)', borderColor: LINE };
 
 const Sheet = ({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) => {
   useBackClose(true, onClose);
@@ -98,7 +98,8 @@ export const AddOrderSheet = ({
   const [max, setMax] = useState('');
   const [error, setError] = useState('');
 
-  const svc = OWN_SERVICE_PAYEES.find((p) => p.service === service);
+  const servicePayees = ownServicePayees();
+  const svc = servicePayees.find((p) => p.service === service);
   const recipient = to.trim();
   const payee = svc
     ? { name: svc.name, service: svc.service }
@@ -141,9 +142,9 @@ export const AddOrderSheet = ({
           {requestLabel(req)} asked for this subscription. Check the amount, then Set up. Nothing is paid until you do.
         </p>
       )}
-      {SUBSCRIPTIONS_ENABLED && OWN_SERVICE_PAYEES.length > 0 && (
+      {SUBSCRIPTIONS_ENABLED && servicePayees.length > 0 && (
         <div className="flex gap-2 flex-wrap">
-          {[{ service: '', name: 'A person' }, ...OWN_SERVICE_PAYEES].map((p) => (
+          {[{ service: '', name: 'A person' }, ...servicePayees].map((p) => (
             <button
               key={p.service || 'person'}
               type="button"

@@ -199,9 +199,9 @@ export const ApprovalCard = (p: ApprovalCardProps) => {
               borderRadius: 20,
               fontSize: 22,
               fontWeight: 800,
-              background: red ? CARD.redInk : 'linear-gradient(180deg, #FFD24D, #F5B800)',
+              background: red ? CARD.redInk : 'linear-gradient(180deg, var(--bw-accent-hi), var(--bw-accent))',
               color: red ? CARD.redBg : CARD.bg,
-              boxShadow: red ? undefined : '0 12px 40px rgba(245,184,0,0.35)',
+              boxShadow: red ? undefined : '0 12px 40px rgb(var(--bw-accent-rgb) / 0.35)',
               opacity: p.primary.disabled ? 0.6 : 1,
             }}
           >

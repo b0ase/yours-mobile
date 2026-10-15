@@ -32,6 +32,13 @@ import {
   type CardArtLook,
 } from './cardFrontArt';
 import { CardDesigner } from './CardDesigner';
+import { ThemeSheet } from '../theme/ThemeSheet';
+import { switchToAccountAccent } from '../theme/accent';
+import { useAccentId } from '../theme/useAccent';
+import { accentById } from '../theme/accents';
+import { CARD_DESIGN_EVENT, loadCardDesign, saveCardDesign, type CardDesign } from './cardDesign';
+import { loadCardArt, type CardArtModule } from './cardArtLoader';
+import { patternUri } from './cardPatterns';
 
 // Edition colour (owner, 10 Oct 2026): bWallet's card is yellow with black text, like its app icon; bWalletX keeps
 // the black card that turns gold with the balance. One card, two palettes (.bw-wcard.is-yellow in mobile.css).
@@ -226,12 +233,18 @@ const WalletCardInner = ({
   const since = memberSince((account as { createdAt?: number } | undefined)?.createdAt);
 
   // The front's art: the account's bAvatar (bWalletX only; bWallet keeps its yellow card). Cached per key.
+  const accentId = useAccentId();
   const bavatarArt = useMemo(
     () => cardFrontArtUri(account?.pubKeys?.identityPubKey, YELLOW_CARD),
-    [account?.pubKeys?.identityPubKey],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the art is tinted to the current accent
+    [account?.pubKeys?.identityPubKey, accentId],
   );
   // How the art sits: the account's own adjustment, else bright art dimmed and its core moved top-right.
   const artKey = account?.pubKeys?.identityPubKey ?? '';
+  // App accent (Theme → App colours) follows the open account; the boot key already painted the last one.
+  useEffect(() => {
+    if (artKey) switchToAccountAccent(artKey);
+  }, [artKey]);
   // The account's own picture, when it chose one in the card designer (owner, 12 Oct 2026); bWalletX only.
   const [cardImage, setCardImage] = useState<string | null>(() => (bavatarArt ? loadCardImage(artKey) : null));
   useEffect(() => {
@@ -240,11 +253,41 @@ const WalletCardInner = ({
     window.addEventListener(CARD_IMG_EVENT, read);
     return () => window.removeEventListener(CARD_IMG_EVENT, read);
   }, [artKey, bavatarArt]);
-  const frontArt = (bavatarArt && cardImage) || bavatarArt;
+  // Patterns / Art / Collections / Subscribe (cardDesign.ts): what the front shows when there is no own picture.
+  const [design, setDesign] = useState<CardDesign | null>(() => (bavatarArt ? loadCardDesign(artKey) : null));
+  useEffect(() => {
+    const read = () => setDesign(bavatarArt ? loadCardDesign(artKey) : null);
+    read();
+    window.addEventListener(CARD_DESIGN_EVENT, read);
+    return () => window.removeEventListener(CARD_DESIGN_EVENT, read);
+  }, [artKey, bavatarArt]);
+  const [artMod, setArtMod] = useState<CardArtModule | null>(null);
+  useEffect(() => {
+    if (design && design.kind !== 'pattern' && !artMod) void loadCardArt().then(setArtMod);
+  }, [design, artMod]);
+  const designArt = useMemo(() => {
+    if (!design) return null;
+    if (design.kind === 'pattern') {
+      const colour = design.follow ? accentById(accentId).accent : accentById(design.colour).accent;
+      return { src: patternUri(design.id, colour), attribution: '' };
+    }
+    const r = artMod?.resolveArt(design);
+    return r ? { src: r.src, attribution: r.line } : null;
+  }, [design, artMod, accentId]);
+  const frontArt = (bavatarArt && (cardImage || designArt?.src)) || bavatarArt;
+  const artAttribution = !cardImage && designArt?.attribution ? designArt.attribution : '';
   const setImage = (uri: string | null) => {
     if (!saveCardImage(artKey, uri)) return false;
     setCardImage(uri);
+    saveCardDesign(artKey, null);
     return true;
+  };
+  const pickDesign = (d: CardDesign | null) => {
+    if (cardImage) {
+      saveCardImage(artKey, null);
+      setCardImage(null);
+    }
+    saveCardDesign(artKey, d);
   };
   const [luma, setLuma] = useState<number | null>(null);
   useEffect(() => {
@@ -642,21 +685,20 @@ const WalletCardInner = ({
                 </span>
               </div>
             )}
-            {frontArt && (
-              <button
-                type="button"
-                className="bw-wcard-design"
-                aria-label="Design your card"
-                title="Design your card"
-                tabIndex={flipped ? 0 : -1}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setAdjusting(true);
-                }}
-              >
-                <SlidersHorizontal size={16} aria-hidden="true" />
-              </button>
-            )}
+            {/* Theme (owner, 14 Oct 2026): App colours + Design your card. Shown on every card, store builds too. */}
+            <button
+              type="button"
+              className="bw-wcard-design"
+              aria-label="Theme"
+              title="Theme"
+              tabIndex={flipped ? 0 : -1}
+              onClick={(e) => {
+                e.stopPropagation();
+                setAdjusting(true);
+              }}
+            >
+              <SlidersHorizontal size={16} aria-hidden="true" />
+            </button>
           </div>
           <div className="bw-wcard-backbody">
             <div className={`bw-wcard-qr${artQr ? ' is-art' : ''}`}>
@@ -710,6 +752,24 @@ const WalletCardInner = ({
               </div>
             </div>
           </div>
+          {artAttribution && (
+            <p className="bw-wcard-attrib">
+              {artAttribution}
+              {design?.kind === 'sub' && design.active && (
+                <button
+                  type="button"
+                  className="bw-wcard-attrib-stop"
+                  tabIndex={flipped ? 0 : -1}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    pickDesign({ ...design, active: false });
+                  }}
+                >
+                  Stop
+                </button>
+              )}
+            </p>
+          )}
           {/* Swivel, same spot as the front's pen (owner, 12 Oct 2026: pen on the front, swivel on the back): flips back to the front. On Android the
               back's copy targets used to swallow every tap, so this is the reliable way home. */}
           <button
@@ -729,24 +789,39 @@ const WalletCardInner = ({
       </div>
       {/* History moved to the wallet's top row (wallet/BuyBsv.tsx BsvPriceBar, owner round 6). */}
       {handleOpen && <HandleFlow onClose={() => setHandleOpen(false)} />}
-      {adjusting && frontArt && (
-        <CardDesigner
-          art={frontArt}
-          look={look}
-          isDefault={!savedLook && !cardImage}
-          handle={t.tag || cardPaymail(names.paymail)}
-          balance={unit === 'usd' ? formatUSD(animUsd) : cardBsv(animSats)}
-          sub={unit === 'usd' ? cardSats(animSats) : formatUSD(animUsd)}
-          onChange={setLook}
-          onReset={() => {
-            setLook(null);
-            setImage(null);
-          }}
+      {adjusting && (
+        <ThemeSheet
+          account={artKey}
           onClose={() => setAdjusting(false)}
-          customImage={!!cardImage}
-          onImage={setImage}
-          libraryKey={artKey}
-          currentImage={cardImage}
+          card={
+            frontArt
+              ? (tabs) => (
+                  <CardDesigner
+                    title="Theme"
+                    tabs={tabs}
+                    art={frontArt}
+                    look={look}
+                    isDefault={!savedLook && !cardImage && !design}
+                    handle={t.tag || cardPaymail(names.paymail)}
+                    balance={unit === 'usd' ? formatUSD(animUsd) : cardBsv(animSats)}
+                    sub={unit === 'usd' ? cardSats(animSats) : formatUSD(animUsd)}
+                    onChange={setLook}
+                    onReset={() => {
+                      setLook(null);
+                      setImage(null);
+                    }}
+                    onClose={() => setAdjusting(false)}
+                    customImage={!!cardImage || !!design}
+                    onImage={setImage}
+                    design={design}
+                    onDesign={pickDesign}
+                    accentId={accentId}
+                    libraryKey={artKey}
+                    currentImage={cardImage}
+                  />
+                )
+              : undefined
+          }
         />
       )}
       {sig.ui}

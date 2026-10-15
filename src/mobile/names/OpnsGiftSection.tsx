@@ -8,7 +8,7 @@ import type { OwnedForSale } from './opnsSell';
  * Store edition Owned names: Gift only. Sending a name is an NFT send, which the store edition allows; listing
  * for sale is the market, which it does not have (OpnsSellSection, bWalletX only).
  */
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const TEXT = '#f4f1e8';
 const MUTED = 'rgba(244,241,232,0.58)';
 const HAIR = 'rgba(255,255,255,0.08)';
@@ -61,7 +61,7 @@ export const OpnsGiftSection = (p: {
                 checked={picked.has(o.name)}
                 disabled={!!gifting}
                 onChange={() => toggle(o.name)}
-                className="w-4 h-4 shrink-0 accent-[#FFD24D] cursor-pointer disabled:cursor-not-allowed"
+                className="w-4 h-4 shrink-0 accent-[color:var(--bw-accent-hi)] cursor-pointer disabled:cursor-not-allowed"
                 aria-label={`Select ${o.name}`}
               />
               <span className="font-medium break-all" style={{ color: TEXT }}>

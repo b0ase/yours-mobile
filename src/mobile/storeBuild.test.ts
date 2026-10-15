@@ -153,6 +153,9 @@ describe('TOKENBLASTER_ENABLED: tokenblaster.lol data and the 1Sat Ordnance 3D c
     const b = src('./BrowserPage.tsx');
     expect(b).toContain("...(TOKENBLASTER_ENABLED ? ['TokenBlaster'] : [])");
     expect(b).toMatch(/HOME_ADDITIONS[^=]*= TOKENBLASTER_ENABLED\s*\?/);
+    expect(src('./feed/feeds.ts')).toContain(
+      "...(TOKENBLASTER_ENABLED ? ([['tokenblaster', 'TokenBlaster']] as Entry[]) : [])",
+    );
   });
   test('no static import of the Ordnance catalogue outside three3d/', () => {
     for (const f of ['./market/MarketPage.tsx', './media/MediaSection.tsx']) {
@@ -193,7 +196,7 @@ describe('pots and subscriptions: pots + person standing orders everywhere, serv
     expect(cond(s, 'BILLING_ENABLED')).toBe(cond(s, 'STORE_BUILD'));
   });
   test('own-service payees are data only behind SUBSCRIPTIONS_ENABLED', () => {
-    expect(src('./pots/pots.ts')).toMatch(/OWN_SERVICE_PAYEES[^=]*= SUBSCRIPTIONS_ENABLED\s*\?/);
+    expect(src('./pots/pots.ts')).toMatch(/ownServicePayees[^=]*=[^=]*=>\s*SUBSCRIPTIONS_ENABLED\s*\?/);
   });
 });
 

@@ -45,8 +45,11 @@ describe('feed list', () => {
     expect(FEEDS.slice(0, 5).map((f) => f.id)).toEqual(['home', 'bapps', 'bmovies', 'bnews', 'bmusic']);
     const groups = feedGroups();
     expect(groups.map((g) => g.label)).toEqual(['bApps', 'Other']);
-    for (const id of ['bradio', 'bgame', 'b3d', 'bphotos', 'bbooks', 'writer', 'bmail', 'bsocial'])
+    for (const id of ['bradio', 'bgame', 'b3d', 'bphotos', 'bbooks', 'writer', 'bsocial'])
       expect(groups[0].feeds.map((f) => f.id)).toContain(id);
+    // bMail is mail (top-bar mailbox), never a feed.
+    expect(FEEDS.map((f) => f.id)).not.toContain('bmail');
+    expect(FEEDS.map((f) => f.id)).not.toContain('bdrive');
     expect(groups[1].feeds.map((f) => f.id)).toContain('vexvoid');
     expect(
       groups[1].feeds.some((f) => f.id.startsWith('b') && f.id !== 'bcorp' && f.id !== 'bitgit' && f.id !== 'bsvex'),
@@ -71,17 +74,21 @@ describe('feed row', () => {
     expect(row.slice(FIXED_ROW.length, FIXED_ROW.length + 4)).toEqual(['bradio', 'bgame', 'b3d', 'bphotos']);
     expect(row).not.toContain('vexvoid');
     expect(row.slice(FIXED_ROW.length)).toEqual(bappRowOrder());
-    expect(cleanPins(['following', 'bradio', 'bradio', 'nope', 'cherryx', 'bmail'])).toEqual(['bradio', 'bmail']);
+    expect(cleanPins(['following', 'bradio', 'bradio', 'nope', 'cherryx', 'bmail', 'bsocial'])).toEqual([
+      'bradio',
+      'bsocial',
+    ]);
     expect(cleanPins('junk')).toEqual([]);
   });
   test('pinning moves a bApp to the front without a duplicate; a venture joins the row', () => {
-    const row = rowFeeds(['bmail', 'vexvoid', 'bnews']);
-    expect(row.slice(0, FIXED_ROW.length + 2)).toEqual([...FIXED_ROW, 'bmail', 'vexvoid']);
-    expect(row.filter((id) => id === 'bmail')).toHaveLength(1);
+    const row = rowFeeds(['bsocial', 'vexvoid', 'bnews']);
+    expect(row.slice(0, FIXED_ROW.length + 2)).toEqual([...FIXED_ROW, 'bsocial', 'vexvoid']);
+    expect(row.filter((id) => id === 'bsocial')).toHaveLength(1);
     expect(new Set(row).size).toBe(row.length);
-    // Unpinned: bMail drops back to its place; the venture leaves.
-    const after = rowFeeds(togglePin(togglePin(['bmail', 'vexvoid'], 'bmail'), 'vexvoid'));
+    // Unpinned: bSocial drops back to its place; the venture leaves.
+    const after = rowFeeds(togglePin(togglePin(['bsocial', 'vexvoid'], 'bsocial'), 'vexvoid'));
     expect(after).toEqual(rowFeeds([]));
+    expect(rowFeeds(['bmail'])).not.toContain('bmail');
   });
   test('pin, unpin and reorder', () => {
     expect(togglePin([], 'bnews')).toEqual([]);
@@ -107,14 +114,17 @@ describe('feed row', () => {
   test('pins persist per device', () => {
     const store = memory();
     expect(loadPins(store)).toEqual([]);
-    savePins(['bradio', 'bmail'], store);
-    expect(store.getItem(PINS_KEY)).toBe('["bradio","bmail"]');
-    expect(loadPins(store)).toEqual(['bradio', 'bmail']);
+    savePins(['bradio', 'bsocial'], store);
+    expect(store.getItem(PINS_KEY)).toBe('["bradio","bsocial"]');
+    expect(loadPins(store)).toEqual(['bradio', 'bsocial']);
+    // Old saved bMail / bDrive pins are dropped (mailbox and personal storage, not feeds).
+    store.setItem(PINS_KEY, '["bmail","bdrive","bradio"]');
+    expect(loadPins(store)).toEqual(['bradio']);
   });
   test('swiping steps through the full row, plus the open feed when it is not in it', () => {
     expect(stepFeed([], 'home', 1)).toBe(rowFeeds([])[1]);
     expect(stepFeed([], 'home', -1)).toBeNull();
-    expect(stepFeed(['bmail'], 'bmusic', 1)).toBe('bmail');
+    expect(stepFeed(['bsocial'], 'bmusic', 1)).toBe('bsocial');
     const row = rowFeeds([]);
     expect(stepFeed([], row[row.length - 1], 1)).toBeNull();
     // The swipe walks the full row.

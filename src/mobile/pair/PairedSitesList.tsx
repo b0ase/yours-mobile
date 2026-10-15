@@ -29,7 +29,7 @@ export function PairedSitesList({ onScan }: { onScan: () => void }) {
         </p>
       )}
       {sites.map((s) => (
-        <div key={s.c} className="mb-2 rounded-xl p-3" style={{ background: '#17191E' }}>
+        <div key={s.c} className="mb-2 rounded-xl p-3" style={{ background: 'var(--bw-surface)' }}>
           <div className="flex items-center gap-3">
             {s.agent ? <Terminal size={18} color="#BDB4FE" /> : <Globe size={18} color={MUTED} />}
             <div className="min-w-0 flex-1">
@@ -76,7 +76,7 @@ export function PairedSitesList({ onScan }: { onScan: () => void }) {
       <button
         onClick={onScan}
         className="mt-4 w-full rounded-xl py-3 font-bold"
-        style={{ background: '#F5B800', color: '#000' }}
+        style={{ background: 'var(--bw-accent)', color: '#000' }}
       >
         Scan to connect
       </button>

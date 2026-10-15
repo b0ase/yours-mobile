@@ -112,7 +112,7 @@ export const ManageTokens = (props: ManageTokensProps) => {
           whileTap={{ scale: 0.9 }}
           onClick={onBack}
           className="flex h-8 w-8 items-center justify-center rounded-lg flex-shrink-0 outline-none border-none cursor-pointer"
-          style={{ backgroundColor: '#17191E' }}
+          style={{ backgroundColor: 'var(--bw-surface)' }}
         >
           <ArrowLeft size={16} style={{ color: '#FFFFFF' }} />
         </motion.button>

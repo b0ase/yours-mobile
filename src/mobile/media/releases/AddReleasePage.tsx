@@ -35,7 +35,7 @@ import {
  * through the normal mint path (mintMedia) inside RepeatGuard, so a slow broadcast is never paid twice.
  * Price: Free only — there is no sale path for releases yet.
  */
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#111216';
 const LINE = '#2b2f36';
 const MUTED = '#98A2B3';
@@ -179,10 +179,10 @@ const AddReleasePage = () => {
   const label = 'text-[11px] font-bold uppercase tracking-widest';
 
   return (
-    <div className="fixed inset-0 z-[150] overflow-y-auto" style={{ background: '#010101' }}>
+    <div className="fixed inset-0 z-[150] overflow-y-auto" style={{ background: 'var(--bw-bg)' }}>
       <div
         className="sticky top-0 z-10 flex items-center gap-2 px-2 py-2"
-        style={{ background: '#010101', borderBottom: `1px solid ${LINE}` }}
+        style={{ background: 'var(--bw-bg)', borderBottom: `1px solid ${LINE}` }}
       >
         <button aria-label="Back" onClick={close} className="p-2">
           <ArrowLeft size={20} color="#fff" />
@@ -220,7 +220,7 @@ const AddReleasePage = () => {
                 border: `1px dashed ${cover ? 'transparent' : GOLD}`,
                 background: cover
                   ? '#000'
-                  : 'radial-gradient(circle at 30% 30%, #FFE58A, #D9A520 30%, #3a2a05 70%, #000)',
+                  : 'radial-gradient(circle at 30% 30%, var(--bw-accent-hi), #D9A520 30%, #3a2a05 70%, #000)',
               }}
             >
               {cover ? (

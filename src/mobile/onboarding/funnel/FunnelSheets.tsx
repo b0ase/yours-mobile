@@ -13,7 +13,7 @@ import { logStep, satsToUsd, usdLabel, type FunnelProduct } from './funnel';
  * paid thing. Gold on black. Only what works today: swap other crypto into BSV, or receive to the wallet's address.
  * No card on-ramp until one is live (Ramp is pending), so no card row and no "coming soon".
  */
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#0b0b0d';
 const LINE = '#3a2f12';
 const MUTED = '#c9b98a';
@@ -31,7 +31,7 @@ const Sheet = ({ onClose, children }: { onClose: () => void; children: React.Rea
         aria-modal="true"
         className="w-full max-w-[440px] p-5 flex flex-col gap-4 rounded-t-2xl md:rounded-2xl"
         style={{
-          background: `radial-gradient(120% 80% at 50% 0%, rgba(255,210,77,0.14), ${PANEL} 60%)`,
+          background: `radial-gradient(120% 80% at 50% 0%, rgb(var(--bw-accent-hi-rgb) / 0.14), ${PANEL} 60%)`,
           border: `1px solid ${LINE}`,
           paddingBottom: 'max(env(safe-area-inset-bottom), 20px)',
         }}
@@ -60,7 +60,11 @@ const Gold = ({
     disabled={disabled}
     onClick={onClick}
     className="w-full py-3 rounded-full text-base font-extrabold"
-    style={{ background: 'linear-gradient(135deg, #de973f, #f9dd63)', color: '#1a1300', opacity: disabled ? 0.6 : 1 }}
+    style={{
+      background: 'linear-gradient(135deg, var(--bw-accent-lo), var(--bw-accent-hi))',
+      color: 'var(--bw-on-accent)',
+      opacity: disabled ? 0.6 : 1,
+    }}
   >
     {children}
   </button>
@@ -233,7 +237,7 @@ const Row = ({
     type="button"
     onClick={onClick}
     className="flex items-center gap-3 w-full p-3 rounded-xl text-left"
-    style={{ background: 'rgba(255,210,77,0.06)', border: `1px solid ${LINE}`, color: '#fff' }}
+    style={{ background: 'rgb(var(--bw-accent-hi-rgb) / 0.06)', border: `1px solid ${LINE}`, color: '#fff' }}
   >
     <span style={{ color: GOLD }}>{icon}</span>
     <span className="flex-1 min-w-0">

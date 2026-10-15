@@ -17,7 +17,7 @@ export const Sheet = ({ label, onClose, children }: { label: string; onClose: ()
         role="dialog"
         aria-modal="true"
         aria-label={label}
-        className="w-full rounded-t-3xl bg-[#17191E] px-5 pt-5 flex flex-col gap-3"
+        className="w-full rounded-t-3xl bg-[var(--bw-surface)] px-5 pt-5 flex flex-col gap-3"
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.25rem)', borderTop: '1px solid #2b2f36' }}
         onClick={(e) => e.stopPropagation()}
       >

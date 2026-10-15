@@ -13,7 +13,7 @@ import { OpnsGiftSheet } from './OpnsSheets';
  * Owned names › Gift: "Send <name> to…" with the shared recipient box ($handle, paymail or 1… address), the
  * resolved ordinals destination, an optional note, then ONE approval. Listed names are taken off sale first.
  */
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const TEXT = '#f4f1e8';
 const MUTED = 'rgba(244,241,232,0.58)';
 const HAIR = 'rgba(255,255,255,0.08)';

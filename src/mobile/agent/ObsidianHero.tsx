@@ -65,7 +65,9 @@ export const ObsidianHero = ({
         width={mark}
         height={mark}
         className="relative"
-        style={{ filter: 'drop-shadow(0 0 36px rgba(245,184,0,.5)) drop-shadow(0 8px 24px rgba(0,0,0,.85))' }}
+        style={{
+          filter: 'drop-shadow(0 0 36px rgb(var(--bw-accent-rgb) / .5)) drop-shadow(0 8px 24px rgba(0,0,0,.85))',
+        }}
       />
       <button
         type="button"

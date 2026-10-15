@@ -1,8 +1,27 @@
 import { hueTurnFor, shownHueFor } from './cardHue';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ImagePlus, X } from 'lucide-react';
 import { CardNftGrid } from './CardNftGrid';
+import type { CardDesign } from './cardDesign';
+import type { AccentId } from '../theme/accents';
+import { CARD_ART_ENABLED } from './cardArtLoader';
+import { ArtPanel, CollectionsPanel, PatternsPanel, SubscribePanel } from './CardDesignPanels';
+
+type DesignTab = 'pictures' | 'nfts' | 'patterns' | 'art' | 'collections' | 'subscribe';
+/** Tabs: Art, Collections and the Subscribe mock are bWalletX only (never in store builds). */
+const DESIGN_TABS: readonly { id: DesignTab; label: string }[] = [
+  { id: 'pictures', label: 'My pictures' },
+  { id: 'nfts', label: 'My NFTs' },
+  { id: 'patterns', label: 'Patterns' },
+  ...(CARD_ART_ENABLED
+    ? ([
+        { id: 'art', label: 'Art' },
+        { id: 'collections', label: 'Collections' },
+        // 'Subscribe (demo)' hidden for release (mock: nothing is paid).
+      ] as const)
+    : []),
+];
 import { CardFramePicker } from './CardFramePicker';
 import type { MediaItem } from '../media/useWalletMedia';
 import {
@@ -50,6 +69,11 @@ export function CardDesigner({
   onImage,
   libraryKey,
   currentImage,
+  title = 'Design your card',
+  tabs,
+  design = null,
+  onDesign,
+  accentId = 'gold',
 }: {
   art: string;
   look: CardArtLook;
@@ -68,8 +92,16 @@ export function CardDesigner({
   libraryKey: string;
   /** The picture now on the card (data URI), for outlining it in My pictures. */
   currentImage: string | null;
+  /** Heading: "Theme" when opened as the Theme page's Design your card tab (theme/ThemeSheet.tsx). */
+  title?: string;
+  /** The Theme page's tab bar, shown under the heading. */
+  tabs?: ReactNode;
+  /** Pattern / Art / Collections / Subscribe choice (cardDesign.ts), and how to change it. */
+  design?: CardDesign | null;
+  onDesign?: (d: CardDesign | null) => void;
+  accentId?: AccentId;
 }) {
-  const [tab, setTab] = useState<'pictures' | 'nfts'>('pictures');
+  const [tab, setTab] = useState<DesignTab>('pictures');
   const [library, setLibrary] = useState<CardPicture[]>(() => loadCardLibrary(libraryKey));
   useEffect(() => setLibrary(loadCardLibrary(libraryKey)), [libraryKey]);
   const [nftSel, setNftSel] = useState<string | null>(null);
@@ -160,11 +192,12 @@ export function CardDesigner({
   return createPortal(
     <div className="bw-cdes" role="dialog" aria-modal="true" aria-label="Card designer">
       <div className="bw-cdes-top">
-        <b>Design your card</b>
+        <b>{title}</b>
         <button ref={closeRef} type="button" className="bw-cdes-x" aria-label="Close card designer" onClick={onClose}>
           <X size={20} aria-hidden="true" />
         </button>
       </div>
+      {tabs}
       <div
         className="bw-cdes-card"
         role="img"
@@ -263,27 +296,29 @@ export function CardDesigner({
             {imgErr}
           </p>
         )}
-        <div className="bw-cdes-seg" role="tablist" aria-label="Picture source">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === 'pictures'}
-            className={tab === 'pictures' ? 'on' : ''}
-            onClick={() => setTab('pictures')}
-          >
-            My pictures
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === 'nfts'}
-            className={tab === 'nfts' ? 'on' : ''}
-            onClick={() => setTab('nfts')}
-          >
-            My NFTs
-          </button>
+        <div className="bw-cdes-seg bw-cdes-seg-wrap" role="tablist" aria-label="Picture source">
+          {DESIGN_TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === t.id}
+              className={tab === t.id ? 'on' : ''}
+              onClick={() => setTab(t.id)}
+            >
+              {t.label}
+            </button>
+          ))}
         </div>
-        {tab === 'pictures' ? (
+        {tab === 'patterns' && onDesign ? (
+          <PatternsPanel design={design} accentId={accentId} onDesign={onDesign} />
+        ) : tab === 'art' && onDesign ? (
+          <ArtPanel design={design} onDesign={onDesign} />
+        ) : tab === 'collections' && onDesign ? (
+          <CollectionsPanel design={design} onDesign={onDesign} />
+        ) : tab === 'subscribe' && onDesign ? (
+          <SubscribePanel design={design} onDesign={onDesign} />
+        ) : tab === 'pictures' ? (
           library.length ? (
             <div className="bw-cdes-lib" aria-label="My pictures">
               {library.map((p) => (

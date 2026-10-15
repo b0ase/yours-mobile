@@ -99,7 +99,7 @@ const MenuRow = ({ icon, title, description, onClick, trailingIcon }: MenuRowPro
     variants={itemVariants}
     whileTap={{ scale: 0.985 }}
     onClick={onClick}
-    className="flex w-full items-center gap-3 rounded-xl px-4 py-3.5 text-left transition-colors duration-150 bg-[#17191E] hover:bg-[#1f2128]"
+    className="flex w-full items-center gap-3 rounded-xl px-4 py-3.5 text-left transition-colors duration-150 bg-[var(--bw-surface)] hover:bg-[#1f2128]"
   >
     <span style={{ color: '#A1FF8B' }} className="shrink-0">
       {icon}
@@ -605,7 +605,7 @@ export const AppsAndTools = () => {
                 key={app.name + idx}
                 whileTap={{ scale: 0.985 }}
                 onClick={() => window.open(app.link, '_blank')}
-                className="flex w-full items-center justify-between rounded-xl px-4 py-3 text-left transition-colors duration-150 bg-[#17191E] hover:bg-[#1f2128]"
+                className="flex w-full items-center justify-between rounded-xl px-4 py-3 text-left transition-colors duration-150 bg-[var(--bw-surface)] hover:bg-[#1f2128]"
               >
                 <div className="flex items-center gap-3">
                   <img src={app.icon} alt={app.name} className="h-10 w-10 rounded-lg object-cover" />

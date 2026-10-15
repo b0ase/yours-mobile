@@ -24,6 +24,8 @@ import { marketTradingEnabled } from '../storeBuild';
 import { useBackClose } from '../backStack';
 import { purchaseError } from './purchase';
 import { TokenIcon } from './TokenIcon';
+import { PriceChart } from './PriceChart';
+import { chartSeries } from './chartSeries';
 import { TokenLabelsRow } from './Categories';
 import { LAUNCH_DISCLAIMER, localLaunches } from './launch/launch';
 import { registryLaunches } from './launch/launchNet';
@@ -40,11 +42,11 @@ import {
   type Trade,
 } from './exchangeData';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const GREEN = '#A1FF8B';
 const RED = '#FF6B6B';
 const MUTED = '#98A2B3';
-const CARD = 'rounded-2xl bg-[#17191E] border border-[#2b2f36]';
+const CARD = 'rounded-2xl bg-[var(--bw-surface)] border border-[#2b2f36]';
 const TRADING = marketTradingEnabled();
 
 /** Both units: "0.0012 BSV · $0.06". */
@@ -55,38 +57,6 @@ const Money = ({ sats, rate }: { sats: number; rate: number }) => {
       {bsvLabel(sats)}
       {f && <span style={{ color: MUTED }}> · {f}</span>}
     </>
-  );
-};
-
-/** Whole-token price line of past trades (oldest → newest). */
-const PriceChart = ({ trades }: { trades: Trade[] }) => {
-  if (trades.length < 2)
-    return (
-      <div className="h-40 grid place-items-center text-xs" style={{ color: MUTED }}>
-        {trades.length ? 'One trade so far: the chart starts with the next one.' : 'No trades yet.'}
-      </div>
-    );
-  const W = 600;
-  const H = 160;
-  const ys = trades.map((t) => t.satsPerToken);
-  const min = Math.min(...ys);
-  const max = Math.max(...ys);
-  const span = max - min || max || 1;
-  const pts = trades.map((t, i) => [(i / (trades.length - 1)) * W, H - 8 - ((t.satsPerToken - min) / span) * (H - 16)]);
-  const line = pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
-  const up = ys[ys.length - 1] >= ys[0];
-  const color = up ? GREEN : RED;
-  return (
-    <svg
-      viewBox={`0 0 ${W} ${H}`}
-      className="w-full h-40"
-      preserveAspectRatio="none"
-      role="img"
-      aria-label="Price chart"
-    >
-      <polygon points={`0,${H} ${line} ${W},${H}`} fill={color} opacity={0.08} />
-      <polyline points={line} fill="none" stroke={color} strokeWidth={2} vectorEffect="non-scaling-stroke" />
-    </svg>
   );
 };
 
@@ -218,7 +188,7 @@ export const TradeView = ({
           type="button"
           onClick={onBack}
           aria-label="All markets"
-          className="w-9 h-9 grid place-items-center rounded-full bg-[#17191E] border-0 cursor-pointer"
+          className="w-9 h-9 grid place-items-center rounded-full bg-[var(--bw-surface)] border-0 cursor-pointer"
         >
           <ArrowLeft size={18} color="#fff" />
         </button>
@@ -236,7 +206,7 @@ export const TradeView = ({
           type="button"
           onClick={onFav}
           aria-label={fav ? 'Remove from favourites' : 'Add to favourites'}
-          className="w-9 h-9 grid place-items-center rounded-full bg-[#17191E] border-0 cursor-pointer"
+          className="w-9 h-9 grid place-items-center rounded-full bg-[var(--bw-surface)] border-0 cursor-pointer"
         >
           <Star size={18} color={GOLD} fill={fav ? GOLD : 'none'} />
         </button>
@@ -274,9 +244,9 @@ export const TradeView = ({
         <div className="flex flex-col gap-4 min-w-0">
           <div className={`${CARD} p-3`}>
             <div className="text-xs font-bold mb-1" style={{ color: MUTED }}>
-              Price per token, last {trades.length} trades
+              {trades.length >= 2 ? `Price per token, last ${trades.length} trades` : 'Price per token'}
             </div>
-            <PriceChart trades={trades} />
+            <PriceChart series={chartSeries(trades, { lowestAsk: market?.floorSats })} priceLabel={unitPriceLabel} />
           </div>
 
           {/* Order book: sell orders (live listings), cheapest first */}
@@ -450,7 +420,7 @@ export const TradeView = ({
           onClick={() => !busy && setPending(null)}
         >
           <div
-            className="w-full md:max-w-[420px] rounded-t-2xl md:rounded-2xl bg-[#17191E] px-5 pt-5 flex flex-col gap-3"
+            className="w-full md:max-w-[420px] rounded-t-2xl md:rounded-2xl bg-[var(--bw-surface)] px-5 pt-5 flex flex-col gap-3"
             style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.25rem)' }}
             onClick={(e) => e.stopPropagation()}
           >

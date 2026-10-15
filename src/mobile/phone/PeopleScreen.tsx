@@ -5,11 +5,11 @@ import { TopNav } from '../../components/TopNav';
 const PeopleScreen = () => (
   <div
     className="relative w-full h-full flex flex-col items-center justify-center gap-3 px-8 text-center"
-    style={{ background: '#010101' }}
+    style={{ background: 'var(--bw-bg)' }}
   >
     <TopNav />
-    <span className="h-16 w-16 rounded-3xl flex items-center justify-center bg-[#17191E] border border-[#2b2f36]">
-      <Users size={28} color="#FFD24D" />
+    <span className="h-16 w-16 rounded-3xl flex items-center justify-center bg-[var(--bw-surface)] border border-[#2b2f36]">
+      <Users size={28} color="var(--bw-accent-hi)" />
     </span>
     <h1 className="text-lg font-bold text-white">People</h1>
     <p className="text-sm text-[#98A2B3]">

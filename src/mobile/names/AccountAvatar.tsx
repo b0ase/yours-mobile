@@ -37,7 +37,7 @@ export const AccountAvatar = ({
       width={size}
       height={size}
       className="rounded-full object-cover shrink-0 box-border"
-      style={{ width: size, height: size, ...(photo && ring ? { border: '1.5px solid #F5B800' } : {}) }}
+      style={{ width: size, height: size, ...(photo && ring ? { border: '1.5px solid var(--bw-accent)' } : {}) }}
     />
   );
 };

@@ -12,7 +12,7 @@ import { unreadCount, type NotifyItem, type NotifyKind, type NotifyTarget } from
 import { clearItems, getItems, readAll, readOne, subscribeItems } from './store';
 import { askNotifyPermissionOnce, pollNow } from './engine';
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const LINE = '#2b2f36';
 const MUTED = '#98A2B3';
 
@@ -108,7 +108,7 @@ const NotificationsSheet = ({
     handleSelect(asMenuItem(t.type === 'room' ? 'chat' : 'bsv'));
   };
   return createPortal(
-    <div className="fixed inset-0 z-[150] flex flex-col" style={{ background: '#010101' }}>
+    <div className="fixed inset-0 z-[150] flex flex-col" style={{ background: 'var(--bw-bg)' }}>
       <div
         className="flex items-center gap-2 px-2 pb-2"
         style={{ paddingTop: 'max(env(safe-area-inset-top), 12px)', borderBottom: `1px solid ${LINE}` }}
@@ -142,7 +142,7 @@ const NotificationsSheet = ({
               className="w-full flex items-start gap-3 px-4 py-3 text-left"
               style={{
                 borderBottom: `1px solid ${LINE}`,
-                background: i.read ? 'transparent' : 'rgba(255,210,77,0.05)',
+                background: i.read ? 'transparent' : 'rgb(var(--bw-accent-hi-rgb) / 0.05)',
               }}
             >
               <Icon size={18} color={i.read ? MUTED : GOLD} className="mt-0.5 shrink-0" />

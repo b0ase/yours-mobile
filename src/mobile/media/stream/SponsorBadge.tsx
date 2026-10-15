@@ -1,7 +1,7 @@
 import type { SponsorStatus } from './api';
 import { sponsorName } from './useAlbum';
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const MUTED = '#98A2B3';
 
 /** spentSats / capSats as a small gold bar. */

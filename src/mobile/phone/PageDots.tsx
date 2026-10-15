@@ -38,7 +38,7 @@ export const PageDots = ({
               <span
                 data-testid="page-title"
                 className="rounded-full px-2 text-[10px] font-bold leading-[14px] whitespace-nowrap"
-                style={{ background: '#FFD24D', color: '#010101' }}
+                style={{ background: 'var(--bw-accent-hi)', color: '#010101' }}
               >
                 {title}
               </span>

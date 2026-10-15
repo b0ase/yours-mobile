@@ -9,7 +9,7 @@
 import { faceArtUrl, fallBackToLocal } from './faceArt';
 import { ANON_EXPLAINER, RECORDING_NOTICE, audienceLine, greenRoomPrimary, type GreenRoom } from './model';
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const MUTED = '#8a8f98';
 const LINE = '#1f2127';
 

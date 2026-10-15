@@ -71,7 +71,7 @@ export const FriendToken = ({ c, held }: { c: Contact; held: Bsv21Balance[] }) =
   const btn = 'text-[11px] font-semibold rounded-md px-2 py-0.5 border-0 cursor-pointer';
   return (
     <div className="flex items-center gap-2 mt-1.5 text-[11px]">
-      <span className="font-bold" style={{ color: '#F5B800' }}>
+      <span className="font-bold" style={{ color: 'var(--bw-accent)' }}>
         ${ticker}
       </span>
       <span style={{ color: '#98A2B3' }}>{mine ? `you hold ${amount.toLocaleString()}` : "you don't hold any"}</span>
@@ -79,7 +79,7 @@ export const FriendToken = ({ c, held }: { c: Contact; held: Bsv21Balance[] }) =
         <button
           type="button"
           className={btn}
-          style={{ background: '#F5B80022', color: '#F5B800' }}
+          style={{ background: 'rgb(var(--bw-accent-rgb)/0.13)', color: 'var(--bw-accent)' }}
           onClick={() => {
             const key = tokenKey('bsv21', tokenId);
             if (key) requestChatRoom(key);
@@ -92,7 +92,7 @@ export const FriendToken = ({ c, held }: { c: Contact; held: Bsv21Balance[] }) =
         <button
           type="button"
           className={btn}
-          style={{ background: '#F5B80022', color: '#F5B800' }}
+          style={{ background: 'rgb(var(--bw-accent-rgb)/0.13)', color: 'var(--bw-accent)' }}
           onClick={() => {
             requestMarketToken({ kind: 'bsv21', id: tokenId });
             handleSelect(asMenuItem('market'));

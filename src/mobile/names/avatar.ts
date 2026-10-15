@@ -1,4 +1,6 @@
 import { bavatarSvg } from '../bavatar/bavatar';
+import { currentAccentId } from '../theme/accent';
+import { tintSvg } from '../theme/tint';
 /**
  * Account avatar. Shown next to the handle in the identity row under the TopNav, the account
  * drawer and the handle flow. Sources, first one set wins:
@@ -127,10 +129,13 @@ const bavatarCache = new Map<string, string>();
 export function bavatarDataUri(identityPubKey: string | null | undefined): string {
   const key = String(identityPubKey || '').toLowerCase();
   if (!/^0[23][0-9a-f]{64}$/.test(key)) return '';
-  let uri = bavatarCache.get(key);
+  // Shown in the app accent (Theme → App colours); gold leaves the art as drawn.
+  const accent = currentAccentId();
+  const ck = accent + ':' + key;
+  let uri = bavatarCache.get(ck);
   if (!uri) {
-    uri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(bavatarSvg(key, { size: 128 }));
-    bavatarCache.set(key, uri);
+    uri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(tintSvg(bavatarSvg(key, { size: 128 }), accent));
+    bavatarCache.set(ck, uri);
   }
   return uri;
 }

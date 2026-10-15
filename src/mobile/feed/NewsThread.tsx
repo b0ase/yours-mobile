@@ -22,7 +22,7 @@ import {
   type NewsItem,
 } from './bnews';
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#121316';
 const LINE = '#1f2127';
 const MUTED = '#8a8f98';
@@ -55,7 +55,7 @@ const NewsCard = ({
       <button
         className="relative w-full text-left flex gap-3 px-4 py-3"
         style={{
-          background: '#010101',
+          background: 'var(--bw-bg)',
           transform: `translateX(${dx}px)`,
           transition: start.current ? 'none' : 'transform 160ms ease-out',
         }}
@@ -231,7 +231,7 @@ export const NewsThread = ({
   );
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#010101' }}>
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: 'var(--bw-bg)' }}>
       <div
         className="flex items-center gap-2 px-2 pb-2"
         style={{ paddingTop: 'max(env(safe-area-inset-top), 12px)', borderBottom: `1px solid ${LINE}` }}

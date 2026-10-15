@@ -11,8 +11,11 @@
  * local for now; GET https://www.bchatx.com/api/public/bapps will replace it (see BAPPS_API).
  * bMovies is bWalletX only: its entry is behind BMOVIES_FEED_ENABLED so a store build has none of it.
  * Adult-leaning brands (cherryx, aigf) are left out of every build.
+ * bMail and bDrive are not feeds: bMail is personal (or spam-filtered commercial) mail, in the top-bar mailbox
+ * only; bDrive is personal storage (a public file-download feed is a malware risk). Old saved 'bmail' /
+ * 'bdrive' pins are dropped by cleanPins because they are no longer FeedIds in FEEDS.
  */
-import { BEX_REEL_ENABLED, BMOVIES_FEED_ENABLED } from '../storeBuild';
+import { BEX_REEL_ENABLED, BMOVIES_FEED_ENABLED, TOKENBLASTER_ENABLED } from '../storeBuild';
 
 /** A feed id: the built-in 'home' (Following | For you inside) or a bApp's bChatX brand slug ('bnews', 'bmusic', …). */
 export type FeedId = string;
@@ -45,10 +48,12 @@ export const FEED_COLORS: Record<FeedId, string> = {
   b3d: '#12A594',
   bbooks: '#A18072',
   writer: '#E2B6FF',
+  // bMail is not a feed (it lives in the top-bar mailbox); its colour stays for its icon.
   bmail: '#0090FF',
   bsocial: '#D6409F',
   bphotos: '#FFB224',
   bpaint: '#FF8DCC',
+  // Not a feed either (personal storage); colour kept for its icon.
   bdrive: '#7CE2FE',
   bsheets: '#46A758',
   bcal: '#FF6369',
@@ -87,10 +92,8 @@ const BAPP_ENTRIES: Entry[] = [
   ['bphotos', 'bPhotos'],
   ['bbooks', 'bBooks'],
   ['writer', 'bWriter'],
-  ['bmail', 'bMail'],
   ['bsocial', 'bSocial'],
   ['bpaint', 'bPaint'],
-  ['bdrive', 'bDrive'],
   ['bsheets', 'bSheets'],
   ['bcal', 'bCal'],
   ['bmaps', 'bMaps'],
@@ -137,7 +140,8 @@ const OTHER_ENTRIES: Entry[] = [
   ['scrollpay', 'ScrollPay'],
   ['senseii', 'Senseii'],
   ['tinycapital', 'Tiny Capital'],
-  ['tokenblaster', 'TokenBlaster'],
+  // Not in store builds (TokenBlaster sells guns and runs a coin launchpad; docs/STORE-AUDIT.md).
+  ...(TOKENBLASTER_ENABLED ? ([['tokenblaster', 'TokenBlaster']] as Entry[]) : []),
   ['tribeswallet', 'Tribes Wallet'],
   ['tribify', 'Tribify'],
   ['vexvoid', 'VexVoid'],
@@ -179,12 +183,10 @@ export const BAPP_ROW_ORDER: readonly FeedId[] = [
   'bphotos',
   'bbooks',
   'writer',
-  'bmail',
   'bsocial',
   'bchatx',
   'bexchange',
   'bjobs',
-  'bdrive',
   'bsheets',
   'bcal',
   'bitcoincode',

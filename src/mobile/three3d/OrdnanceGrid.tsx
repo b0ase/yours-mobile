@@ -17,7 +17,7 @@ export const WeaponTile = ({ weapon, onOpen, sub }: { weapon: Weapon; onOpen: ()
   <button
     type="button"
     onClick={onOpen}
-    className="relative rounded-xl overflow-hidden bg-[#17191E] text-left p-0"
+    className="relative rounded-xl overflow-hidden bg-[var(--bw-surface)] text-left p-0"
     style={{ aspectRatio: '1/1', border: `1px solid ${RARITY_COLOR[weapon.rarity]}55` }}
   >
     {weapon.image ? (
@@ -41,7 +41,7 @@ export const WeaponTile = ({ weapon, onOpen, sub }: { weapon: Weapon; onOpen: ()
     )}
     <span
       className="absolute top-1.5 right-1.5 flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10px] font-bold"
-      style={{ background: '#000000aa', color: '#F5B800' }}
+      style={{ background: '#000000aa', color: 'var(--bw-accent)' }}
     >
       <Box size={10} /> 3D
     </span>

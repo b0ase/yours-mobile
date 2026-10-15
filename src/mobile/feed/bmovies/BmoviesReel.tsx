@@ -36,6 +36,7 @@ import { applyClaims, checkClaim, claimTicker, fetchClaims, registerClip, xConne
 import { useServiceContext } from '../../../hooks/useServiceContext';
 import {
   BMOVIES_SWIPE_TRADE_MOCK,
+  BMOVIES_SWIPE_TRADE_ENABLED,
   DEFAULT_DAILY_BUDGET_PENCE,
   UNDO_MS,
   addTrade,
@@ -264,7 +265,7 @@ const Slide = ({
     const s0 = start.current;
     const p = e.changedTouches[0];
     start.current = null;
-    if (!s0 || !p || !c.ticker || !c.registered) return;
+    if (!BMOVIES_SWIPE_TRADE_ENABLED || !s0 || !p || !c.ticker || !c.registered) return;
     const side = tradeSide(p.clientX - s0.x, p.clientY - s0.y);
     if (side) onTrade(c, side);
   };
@@ -272,6 +273,7 @@ const Slide = ({
   const press = useRef<{ timer: ReturnType<typeof setTimeout>; fired: boolean } | null>(null);
   const pressProps = (side: Side) => ({
     onPointerDown: () => {
+      if (!BMOVIES_SWIPE_TRADE_ENABLED) return;
       const st = {
         fired: false,
         timer: setTimeout(() => {
@@ -293,9 +295,9 @@ const Slide = ({
   return (
     <div
       data-i={i}
-      data-trade-reel
-      onTouchStart={onTouchStart}
-      onTouchEnd={onTouchEnd}
+      data-trade-reel={BMOVIES_SWIPE_TRADE_ENABLED || undefined}
+      onTouchStart={BMOVIES_SWIPE_TRADE_ENABLED ? onTouchStart : undefined}
+      onTouchEnd={BMOVIES_SWIPE_TRADE_ENABLED ? onTouchEnd : undefined}
       className="relative w-full overflow-hidden"
       style={{ height: '100%', scrollSnapAlign: 'start' }}
     >
@@ -433,7 +435,7 @@ const Slide = ({
             <Share2 size={16} color="#fff" />
           </button>
         </div>
-        {c.registered && c.ticker ? (
+        {BMOVIES_SWIPE_TRADE_ENABLED && c.registered && c.ticker ? (
           <p className="mt-2 text-center text-[10px]" style={{ color: MUTED }}>
             Swipe → buy 1p · ← sell 1p{BMOVIES_SWIPE_TRADE_MOCK ? ' · practice mode, no money moves' : ''}
           </p>
@@ -689,18 +691,20 @@ const BmoviesReel = ({ brand = 'bmovies' }: { brand?: keyof typeof THEMES }) => 
         ))}
       </div>
       {/* My swipes: top-right. */}
-      <button
-        onClick={() => setShowSwipes(true)}
-        aria-label="My swipes"
-        className="absolute right-3 top-3 flex h-9 items-center gap-1 rounded-full px-3 text-[12px] font-semibold text-white"
-        style={{
-          background: 'rgba(0,0,0,0.4)',
-          border: '1px solid rgba(255,255,255,0.2)',
-          backdropFilter: 'blur(12px)',
-        }}
-      >
-        <History size={14} /> {trades.length}
-      </button>
+      {BMOVIES_SWIPE_TRADE_ENABLED && (
+        <button
+          onClick={() => setShowSwipes(true)}
+          aria-label="My swipes"
+          className="absolute right-3 top-3 flex h-9 items-center gap-1 rounded-full px-3 text-[12px] font-semibold text-white"
+          style={{
+            background: 'rgba(0,0,0,0.4)',
+            border: '1px solid rgba(255,255,255,0.2)',
+            backdropFilter: 'blur(12px)',
+          }}
+        >
+          <History size={14} /> {trades.length}
+        </button>
+      )}
       {registerAsk && (
         <RegisterSheet
           title={registerAsk.c.title}

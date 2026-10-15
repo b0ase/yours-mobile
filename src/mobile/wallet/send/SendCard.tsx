@@ -56,7 +56,7 @@ type Props = {
   onSubmit: (e: FormEvent<HTMLFormElement>) => void;
 };
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const RED = '#ff4444';
 
 export const SendCard = (p: Props) => {
@@ -149,7 +149,7 @@ export const SendCard = (p: Props) => {
               p.onMax();
             }}
             className="text-xs font-bold px-2.5 py-1 rounded-full border-0 cursor-pointer"
-            style={{ background: `${GOLD}20`, color: GOLD }}
+            style={{ background: `color-mix(in srgb, ${GOLD} 13%, transparent)`, color: GOLD }}
           >
             Max
           </button>
@@ -179,7 +179,7 @@ export const SendCard = (p: Props) => {
                   type="button"
                   onClick={() => void paste(r.id)}
                   className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full border-0 cursor-pointer"
-                  style={{ background: `${GOLD}18`, color: GOLD }}
+                  style={{ background: `color-mix(in srgb, ${GOLD} 9%, transparent)`, color: GOLD }}
                 >
                   <ClipboardPaste size={12} /> Paste
                 </button>
@@ -189,7 +189,7 @@ export const SendCard = (p: Props) => {
                   title="Scan to pay"
                   onClick={() => setScanFor(r.id)}
                   className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full border-0 cursor-pointer"
-                  style={{ background: `${GOLD}18`, color: GOLD }}
+                  style={{ background: `color-mix(in srgb, ${GOLD} 9%, transparent)`, color: GOLD }}
                 >
                   <ScanLine size={12} /> Scan
                 </button>
@@ -245,7 +245,7 @@ export const SendCard = (p: Props) => {
                     ) : (
                       <span
                         className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold"
-                        style={{ background: `${GOLD}22`, color: GOLD }}
+                        style={{ background: `color-mix(in srgb, ${GOLD} 13%, transparent)`, color: GOLD }}
                       >
                         {k.label.replace(/^\$/, '').slice(0, 1).toUpperCase()}
                       </span>

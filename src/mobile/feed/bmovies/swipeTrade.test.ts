@@ -82,3 +82,15 @@ describe('mock trades', () => {
     expect(loadTrades(s)).toEqual(list);
   });
 });
+
+describe('release switch', () => {
+  test('ships with swipe trading hidden', async () => {
+    const m = await import('./swipeTrade');
+    expect(m.BMOVIES_SWIPE_TRADE_ENABLED).toBe(false);
+  });
+  test('ships without the card-art Subscribe (demo) tab', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../../wallet/CardDesigner.tsx', import.meta.url), 'utf8');
+    expect(src).not.toMatch(/label: 'Subscribe \(demo\)'/);
+  });
+});

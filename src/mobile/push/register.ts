@@ -218,10 +218,11 @@ const b64urlToBytes = (s: string) => {
   return Uint8Array.from(bin, (c) => c.charCodeAt(0));
 };
 
-/** Web wallet: ./push-sw.js (vite.config.web.ts). Extension: its background service worker. */
+/** Web wallet: /push-sw.js at the site root (vite.config.web.ts), so a deep page like /bapp/bchatx registers the same
+ * worker. Extension: its background service worker. */
 const swRegistration = async (): Promise<ServiceWorkerRegistration> => {
   if (PUSH_PLATFORM === 'extension') return navigator.serviceWorker.ready;
-  return navigator.serviceWorker.register('./push-sw.js', { scope: './' });
+  return navigator.serviceWorker.register('/push-sw.js', { scope: '/' });
 };
 
 const webSubscription = async (): Promise<WebPushSubscriptionJson> => {

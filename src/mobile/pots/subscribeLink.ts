@@ -6,7 +6,7 @@
  *   https://web.bwalletx.com/m/settings?subscribe=bchat&plan=plus&usd=0.01&period=day&ref=…   (web wallet)
  *
  * ⚠ THE LINK NAMES A SERVICE, NEVER AN ADDRESS. The payee is the wallet's own address for that service
- * (OWN_SERVICE_PAYEES); a link that could carry an address would let any page redirect a daily payment.
+ * (ownServicePayees()); a link that could carry an address would let any page redirect a daily payment.
  * The user still picks the pot, sees the amount and taps Set up: nothing is paid by opening a link.
  *
  * `ref` is written into an OP_RETURN of each payment (potSend.signFromPot memo) so the service can tie the

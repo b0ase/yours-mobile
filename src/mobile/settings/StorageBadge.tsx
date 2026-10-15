@@ -5,7 +5,7 @@ import { useStorageRepair } from '../../hooks/useStorageRepair';
 import { ErrorActions } from '../errors/ErrorActions';
 import { SYNC_HEALTH_KEY, storageLabel, syncHealthLabel, type SyncHealth } from '../../services/storageHealth';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 const RED = '#F97066';
 const oneLine = 'block overflow-hidden text-ellipsis whitespace-nowrap';
@@ -64,7 +64,7 @@ export const StorageBadge = () => {
       {open && (
         <div
           className="mt-1 rounded-xl p-3 text-xs leading-relaxed select-text"
-          style={{ background: '#17191E', color: '#D0D5DD' }}
+          style={{ background: 'var(--bw-surface)', color: '#D0D5DD' }}
         >
           <p className="m-0 font-bold text-white">{label.title}</p>
           <p className="m-0 mt-0.5" style={{ color: label.warn ? RED : MUTED }}>

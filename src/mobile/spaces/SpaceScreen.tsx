@@ -106,7 +106,7 @@ import { PAID_LISTENING_ENABLED } from './paidListen';
 const PaidListening = PAID_LISTENING_ENABLED ? lazy(() => import('./PaidListening')) : null;
 import { isBlocked, TERMS_URL } from '../ugc/ugc';
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const MUTED = '#8a8f98';
 const LINE = '#1f2127';
 const POLL_MS = 4_000;
@@ -1423,7 +1423,10 @@ const SpaceScreenInner = ({
             setNote(next ? 'Screen stays on' : 'Screen can sleep');
           }}
           className="relative shrink-0 flex items-center justify-center rounded-full h-9 w-9"
-          style={{ background: awakeOn ? 'rgba(255,210,77,.14)' : 'transparent', opacity: awakeOn ? 1 : 0.5 }}
+          style={{
+            background: awakeOn ? 'rgb(var(--bw-accent-hi-rgb) / .14)' : 'transparent',
+            opacity: awakeOn ? 1 : 0.5,
+          }}
         >
           <Smartphone size={18} color={awakeOn ? GOLD : MUTED} />
           {!awakeOn && (

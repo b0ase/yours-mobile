@@ -548,7 +548,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
               aria-label="Lock BSV"
               onClick={() => navigate('/m/lock')}
             >
-              <LockCoin color="currentColor" accent="#F5B800" />
+              <LockCoin color="currentColor" accent="var(--bw-accent)" />
             </button>
           </div>
         </header>

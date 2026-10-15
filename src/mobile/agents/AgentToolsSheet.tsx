@@ -5,7 +5,7 @@ import { useBackClose } from '../backStack';
 import { openDappBrowser } from '../dappBrowser';
 
 const MUTED = '#98A2B3';
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 
 const MCP_CONFIG = `{
   "mcpServers": {
@@ -18,7 +18,7 @@ const Code = ({ text }: { text: string }) => {
   return (
     <div
       className="relative rounded-xl p-3 pr-10 font-mono text-[12px] whitespace-pre-wrap break-all"
-      style={{ background: '#17191E', color: '#E4E7EC' }}
+      style={{ background: 'var(--bw-surface)', color: '#E4E7EC' }}
     >
       {text}
       <button
@@ -69,7 +69,7 @@ export const AgentToolsSheet = ({
 }) => {
   useBackClose(true, onClose);
   return createPortal(
-    <div className="fixed inset-0 z-[400] flex flex-col" style={{ background: '#010101' }}>
+    <div className="fixed inset-0 z-[400] flex flex-col" style={{ background: 'var(--bw-bg)' }}>
       <div className="flex items-center gap-2 px-4 pb-2" style={{ paddingTop: 'max(env(safe-area-inset-top), 14px)' }}>
         <Terminal size={18} color={GOLD} />
         <span className="flex-1 text-base font-bold text-white">{AGENT_TOOLS_TITLE}</span>

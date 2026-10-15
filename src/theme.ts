@@ -3,7 +3,7 @@ import { Theme } from './theme.types';
 export const theme: Theme = {
   color: {
     component: {
-      bottomMenuBackground: '#010101',
+      bottomMenuBackground: 'var(--bw-bg, #010101)',
       bottomMenuText: '#FFFFFF',
       ordinalSelectedBorder: '#A1FF8B',
       ordinalTypeJson: '#34D399',
@@ -43,7 +43,7 @@ export const theme: Theme = {
       neutral: '#000000',
       gray: '#98A2B3',
       row: '#17191E',
-      walletBackground: '#010101',
+      walletBackground: 'var(--bw-bg, #010101)',
       contrast: '#FFFFFF',
     },
   },

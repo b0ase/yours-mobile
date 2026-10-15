@@ -317,7 +317,7 @@ export const GetYourName = ({
   const gray = theme.color.global.gray;
   const fg = theme.color.global.contrast;
   const row = theme.color.global.row;
-  const gold = '#FFD24D';
+  const gold = 'var(--bw-accent-hi)';
   const btn = 'px-3 py-1 rounded-lg text-xs font-semibold border-0 cursor-pointer disabled:opacity-50';
 
   // A render helper, not a component: a nested component would remount and drop input focus.

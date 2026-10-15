@@ -7,7 +7,7 @@ import { publishStrategy } from './market';
 import { rememberStrategy } from './myStrategies';
 import { publishProblems, sealStrategy, SPEC_LABELS, STRATEGY_DISCLAIMER } from './strategyNft';
 
-const GOLD = '#F5B800';
+const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 const LINE = '#2b2f36';
 const RISKS = ['Low', 'Medium', 'High', 'Experimental'] as const;
@@ -54,7 +54,7 @@ export const PublishStrategy = ({ strategy, onClose }: { strategy: Strategy; onC
   };
 
   const input = 'rounded-lg px-3 py-2 text-sm text-white outline-none border w-full';
-  const style = { background: '#010101', borderColor: LINE };
+  const style = { background: 'var(--bw-bg)', borderColor: LINE };
   if (done)
     return (
       <div className="flex flex-col gap-2">

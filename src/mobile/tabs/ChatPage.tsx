@@ -228,7 +228,7 @@ import { LIST_TYPES, THREAD_TYPES, useLive, useLiveHealth, useLiveTyping } from 
  * bChat's wallet-login challenge (../chat/api.ts). Live updates by polling
  * (4s in an open conversation, 30s on the list) until realtime lands in v2.
  */
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const BG = '#010101';
 const PANEL = '#121316';
 const LINE = '#1f2127';
@@ -955,7 +955,7 @@ const Conversation = ({
                     borderRadius: 18,
                     borderBottomRightRadius: it.mine ? 6 : 18,
                     borderBottomLeftRadius: it.mine ? 18 : 6,
-                    background: it.mine ? 'linear-gradient(160deg, #FFD24D 0%, #E9B21A 100%)' : PANEL,
+                    background: it.mine ? 'linear-gradient(160deg, var(--bw-accent-hi) 0%, #E9B21A 100%)' : PANEL,
                     color: it.mine ? '#1a1300' : '#f2f2f2',
                     border: it.mine ? 'none' : `1px solid ${LINE}`,
                     opacity: it.message.pending && !it.message.failed ? 0.75 : 1,
@@ -1181,7 +1181,11 @@ const Conversation = ({
               onClick={askB}
               aria-label={`Ask $b, the ${APP_NAME} assistant`}
               className="h-10 px-3 rounded-full flex items-center justify-center shrink-0 font-bold text-[14px]"
-              style={{ background: '#1a1608', color: GOLD, border: `1px solid ${GOLD}55` }}
+              style={{
+                background: '#1a1608',
+                color: GOLD,
+                border: `1px solid color-mix(in srgb, ${GOLD} 33%, transparent)`,
+              }}
             >
               /b
             </button>
@@ -1781,7 +1785,7 @@ const useBountyBadge = (client: BchatClient, ticker: string, me: string) => {
 
 const STATUS_COLOR: Record<string, string> = {
   open: '#32D583',
-  claimed: '#FFD24D',
+  claimed: 'var(--bw-accent-hi)',
   merged: '#53B1FD',
   paid: '#8a8f98',
 };

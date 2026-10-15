@@ -24,7 +24,7 @@ const Sync = () => {
  */
 const GuestMusic = ({ route, onWallet }: { route: string; onWallet: () => void }) =>
   createPortal(
-    <div className="fixed inset-0 z-[500]" style={{ background: '#010101' }}>
+    <div className="fixed inset-0 z-[500]" style={{ background: 'var(--bw-bg)' }}>
       <GuestCtx.Provider value={onWallet}>
         <MemoryRouter initialEntries={[route]}>
           <Sync />

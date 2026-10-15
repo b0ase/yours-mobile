@@ -21,7 +21,7 @@ import {
   type ScheduleSlot,
 } from './schedule';
 
-const GOLD = '#FFD24D';
+const GOLD = 'var(--bw-accent-hi)';
 const INK = '#0B0A08';
 const MUTED = '#8a8f98';
 const LINE = '#1f2127';
