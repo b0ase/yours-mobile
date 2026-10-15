@@ -1,3 +1,4 @@
+import { useAvatarPlayback } from '../names/useAvatarPlayback';
 import {
   lazy,
   Suspense,
@@ -403,19 +404,24 @@ const Avatar = ({
   author,
   size = 40,
   source,
+  place = 'list',
 }: {
   author: Pick<Author, 'name' | 'avatar' | 'address'> & { bapId?: string | null };
   size?: number;
+  place?: 'full' | 'list';
   source?: Source;
 }) => {
   const [broken, setBroken] = useState(false);
+  // Feeds: a still first frame of an animated picture, played on press/hover (names/animatedAvatar.ts).
+  const play = useAvatarPlayback(author.avatar, place);
   const h = hue(avatarSeed({ bapId: null, ...author }, source));
   // Treechat exposes no public avatar API, so its authors get a per-username initial with a Treechat-purple ring.
   const ring = source === 'treechat' ? `2px solid ${SOURCE_REGISTRY.treechat.color}` : undefined;
   if (author.avatar && !broken)
     return (
       <img
-        src={author.avatar}
+        {...play.handlers}
+        src={play.src}
         alt=""
         loading="lazy"
         decoding="async"
@@ -2435,7 +2441,7 @@ const ProfileView = ({
       >
         {/* Tap to turn it over: their pay code, an Art QR of their payable address (public data only). */}
         <FlipBavatar
-          front={<Avatar author={author} size={80} />}
+          front={<Avatar author={author} size={80} place="full" />}
           artSeed={author.address}
           address={isPayAddress(author.address) ? author.address : ''}
           caption={safeName(author.name)}

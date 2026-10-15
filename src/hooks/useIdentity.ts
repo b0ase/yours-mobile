@@ -1,3 +1,4 @@
+import { keepAnimated } from '../mobile/names/animatedAvatar';
 import { useCallback, useEffect, useState } from 'react';
 import {
   computeBapId,
@@ -168,7 +169,11 @@ export const useIdentity = (apiContext: OneSatContext, chromeStorageService?: Ch
    * without inscribing. Use this to show cost before committing.
    */
   const prepareAvatar = useCallback(async (file: File) => {
-    const { base64, mimeType } = await resizeImage(file, 256, 0.85);
+    // Animated GIF / WebP / APNG: kept byte for byte (a canvas would keep only the first frame); over the cap → throws.
+    const moving = await keepAnimated(file);
+    const { base64, mimeType } = moving
+      ? { base64: moving.base64, mimeType: moving.mime }
+      : await resizeImage(file, 256, 0.85);
     // base64 string → decoded byte count
     const byteSize = Math.ceil((base64.length * 3) / 4);
     return { base64, mimeType, byteSize };
