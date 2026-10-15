@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Github } from 'lucide-react';
 import { useTheme } from '../../hooks/useTheme';
 import { UNOFFICIAL_NOTICE } from '../brandText';
@@ -9,6 +9,12 @@ import { AppsAndTools } from '../../pages/AppsAndTools';
 import { Settings } from '../../pages/Settings';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { versionLabel } from '../channel';
+import { DIRECT_UPDATE_ENABLED } from '../storeBuild';
+
+// Android direct APK only: the in-app updater (update/), not even built into other channels.
+const DirectUpdateCard = DIRECT_UPDATE_ENABLED
+  ? lazy(() => import('../update/UpdateCard').then((m) => ({ default: m.DirectUpdateCard })))
+  : null;
 
 /**
  * Settings tab: upstream Settings, plus upstream Tools (locks, sweep, decoder,
@@ -24,11 +30,11 @@ const SettingsHub = () => {
   const { selected, query, handleSelect } = useBottomMenu();
   const { theme } = useTheme();
   const [section, setSection] = useState<Section>(
-    NEW_QUERIES.includes(query) ? 'new' : selected === 'tools' ? 'tools' : 'settings',
+    query === 'about' ? 'about' : NEW_QUERIES.includes(query) ? 'new' : selected === 'tools' ? 'tools' : 'settings',
   );
   // Drawer deep links: create / restore account open New; the others are Settings pages.
   useEffect(() => {
-    if (query) setSection(NEW_QUERIES.includes(query) ? 'new' : 'settings');
+    if (query) setSection(query === 'about' ? 'about' : NEW_QUERIES.includes(query) ? 'new' : 'settings');
   }, [query]);
 
   const choose = (id: Section) => {
@@ -80,6 +86,11 @@ const SettingsHub = () => {
               <div className="text-sm font-semibold text-white">{theme.settings.displayName}</div>
               <div className="text-[11px] text-[#98A2B3]">Version {versionLabel(__MOBILE_VERSION__)}</div>
             </div>
+            {DirectUpdateCard && (
+              <Suspense fallback={null}>
+                <DirectUpdateCard />
+              </Suspense>
+            )}
             <button
               onClick={() => void openDappBrowser(theme.settings.repo)}
               className="flex items-center gap-3 rounded-xl bg-[var(--bw-surface)] px-4 py-3 text-left"
