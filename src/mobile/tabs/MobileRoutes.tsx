@@ -2,9 +2,11 @@ import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { TermsGate } from '../ugc/UgcSheets';
 import { SectionBoundary } from '../wallet/SectionBoundary';
+import { useBottomMenu } from '../../hooks/useBottomMenu';
 import {
   ARTIST_PROGRAMME_ENABLED,
   BSPACES_ENABLED,
+  DIRECT_UPDATE_ENABLED,
   MARKET_ENABLED,
   PAY_STREAM_ENABLED,
   PLACEMENT_ENABLED,
@@ -13,6 +15,14 @@ import {
 
 /** Mobile-only tab routes, mounted by vite.config.mobile.ts at /m/* in App.tsx. */
 const SettingsHub = lazy(() => import('./SettingsHub'));
+// Android direct APK only: once-per-version "update available" banner (update/UpdateCard.tsx).
+const DirectUpdateBanner = DIRECT_UPDATE_ENABLED
+  ? lazy(() => import('../update/UpdateCard').then((m) => ({ default: m.DirectUpdateBanner })))
+  : null;
+const UpdateBanner = () => {
+  const { handleSelect } = useBottomMenu();
+  return DirectUpdateBanner ? <DirectUpdateBanner onOpen={() => handleSelect('settings', 'about')} /> : null;
+};
 // bSpaces (Apps › bSpaces): bWalletX only, not even built into a store edition.
 const SpacesPage = BSPACES_ENABLED ? lazy(() => import('../spaces/SpacesPage')) : null;
 // No Market in a store build (storeBuild.ts MARKET_ENABLED): the chunk is not even built.
@@ -71,6 +81,7 @@ const LockVerify = () => <LockScreen initialVerify={new URLSearchParams(window.l
 const MobileRoutes = () => (
   <SectionBoundary name="mobile tab" screen>
     <Suspense fallback={null}>
+      {DirectUpdateBanner && <UpdateBanner />}
       <Routes>
         <Route path="settings" element={<SettingsHub />} />
         {/* The top bar's Play button: music & video. */}

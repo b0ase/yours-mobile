@@ -421,3 +421,11 @@ export const BALANCE_CARDS_ENABLED: boolean = !(
   import.meta.env.VITE_CHANNEL === 'ios-store' ||
   import.meta.env.VITE_CHANNEL === 'android-play'
 );
+
+/**
+ * In-app "Update" for the Android direct APK (update/directUpdate.ts). Only the site
+ * APK needs it: Play, the App Store, Ad Hoc iOS and the extension update themselves, and a store app may
+ * not install code from outside the store. Literal env check so Vite inlines it and Rollup drops the
+ * updater from every other build (STORE-AUDIT.md lists its strings for the store grep).
+ */
+export const DIRECT_UPDATE_ENABLED: boolean = import.meta.env.VITE_CHANNEL === 'android-direct';
