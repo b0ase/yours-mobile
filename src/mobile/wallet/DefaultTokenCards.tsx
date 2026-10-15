@@ -7,6 +7,7 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { useTheme } from '../../hooks/useTheme';
 import { AssetRow } from '../../components/AssetRow';
 import { getPersonalLink, onPersonalChange } from '../names/personalToken';
+import { publishBalance } from './balanceStore';
 import { PNEE_DECIMALS, PNEE_ICON, PNEE_TOKEN_ID, unindexedPnee } from '../notes/pnee';
 import { BACK_PNEE_LABEL, BACK_PNEE_ROUTE } from '../notes/backPnee';
 import { Lock } from 'lucide-react';
@@ -62,6 +63,7 @@ export const DefaultTokenCards = () => {
     };
   }, [indexed, addrs?.bsvAddress, addrs?.ordAddress, addrs?.identityAddress]); // eslint-disable-line react-hooks/exhaustive-deps
   const pnee = indexed > 0 ? indexed : pending;
+  useEffect(() => publishBalance('pnee', pnee, 'PNEEs'), [pnee]);
   const mine = link ? of(link.tokenId) : undefined;
   const sub = (text: string) => (
     <span className="text-xs mt-0.5" style={{ color: theme.color.global.gray }}>

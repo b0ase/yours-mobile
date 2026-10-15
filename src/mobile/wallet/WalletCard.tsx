@@ -67,6 +67,10 @@ import { requestBackupThen } from '../backup/backupState';
 import { useCardSignature } from '../signature/useCardSignature';
 import { cardGoldLevel } from './cardGold';
 import { keyFingerprint } from './identityLine';
+
+/** The card back's ID KEY: longer than the shared fingerprint (owner, 15 Oct 2026). */
+const stripeKey = (key: string) =>
+  keyFingerprint(key) ? `${key.trim().toLowerCase().slice(0, 10)}…${key.trim().toLowerCase().slice(-8)}` : key;
 import { useBchatFollow } from './useBchatFollow';
 import { useChatIdentity } from './useChatIdentity';
 import { BottomMenuContext } from '../../contexts/BottomMenuContext';
@@ -685,7 +689,7 @@ const WalletCardInner = ({
                 <span className="bw-wcard-stripe-text">
                   <span className="bw-wcard-stripe-label">ID KEY:</span>
                   <span className="bw-wcard-stripe-hex" title={backKey}>
-                    {keyFingerprint(backKey) || backKey}
+                    {stripeKey(backKey)}
                   </span>
                 </span>
               </div>

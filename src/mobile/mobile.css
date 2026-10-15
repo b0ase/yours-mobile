@@ -1785,19 +1785,20 @@ button.bw-mail-card:active {
   display: flex;
   flex-direction: row;
   align-items: baseline;
-  gap: 4px;
+  justify-content: flex-end;
+  gap: 6px;
   min-width: 0;
   white-space: nowrap;
 }
 .bw-wcard-stripe-label {
-  font-size: 7px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.12em;
   color: #8e8e89;
 }
 .bw-wcard-stripe-hex {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 8px;
+  font-size: 12px;
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2288,19 +2289,20 @@ button.bw-mail-card:active {
   display: flex;
   flex-direction: row;
   align-items: baseline;
-  gap: 4px;
+  justify-content: flex-end;
+  gap: 6px;
   min-width: 0;
   white-space: nowrap;
 }
 .bw-wcard-stripe-label {
-  font-size: 7px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.12em;
   color: #8e8e89;
 }
 .bw-wcard-stripe-hex {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 8px;
+  font-size: 12px;
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;

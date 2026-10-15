@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { BCREDITS_ENABLED, PLACEMENT_ENABLED } from '../storeBuild';
+import { BCREDITS_ENABLED, PLACEMENT_ENABLED, STORE_BUILD } from '../storeBuild';
+import { PNEE_ICON } from '../notes/pnee';
+import { requestWalletAction } from '../phone/walletAction';
 import { MNEE_ICON_URL } from '../../utils/constants';
 import { setWalletKind } from './walletKind';
 import { CardBalance, CardSkin } from './CardSkin';
@@ -12,11 +14,13 @@ import './balanceCards.css';
 
 /**
  * Balance cards: the wallet card as a swipe carousel, one card
- * per REAL balance. No mock money anywhere: the BSV card is the real WalletCard; bCredits opens the real Credits view
+ * per kind of balance, always shown with its REAL balance (0 included). No mock money anywhere: the BSV card is the real WalletCard; bCredits opens the real Credits view
  * (real top-up); MNEE shows the wallet's real MNEE balance and only appears once one is known; bShares appears
  * only for a member on bit-sign's register and opens the real bShares bApp. Long-press opens All cards.
  * Nothing here signs or spends; every money action happens in the real screens it opens.
  */
+
+const TICKETS_CARD_ENABLED = !STORE_BUILD;
 
 const readMnee = (): number | null => {
   try {
@@ -211,36 +215,72 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
     return () => window.removeEventListener('bwallet:mnee-balance', read);
   }, []);
 
+  // Every kind of balance always has its card (owner, 15 Oct 2026), showing the real balance, 0 included; each opens
+  // the real screen for it. Top up opens the real Receive screen.
   const cards: CardDef[] = [
     { id: 'bsv', title: 'BSV', sub: 'Your wallet', colour: '#16161a', logo: '₿', open: () => setWalletKind('tokens') },
+    {
+      id: 'tokens',
+      title: 'Tokens',
+      sub: 'Your tokens',
+      colour: '#14161f',
+      logo: '◎',
+      open: () => setWalletKind('tokens'),
+    },
   ];
+  if (TICKETS_CARD_ENABLED)
+    cards.push({
+      id: 'btickets',
+      title: 'bTickets',
+      sub: 'Your tickets',
+      colour: '#1f1414',
+      logo: '✦',
+      open: () => setWalletKind('tickets'),
+    });
+  if (PLACEMENT_ENABLED)
+    cards.push({
+      id: 'bshares',
+      title: 'bShares',
+      sub: shares.me ? 'The Bitcoin Corporation' : 'No shares yet',
+      colour: '#23200f',
+      logo: '§',
+      open: () => navigate('/m/bshares'),
+    });
   if (BCREDITS_ENABLED)
     cards.push({
       id: 'bcredits',
       title: 'bCredits',
       sub: 'Tap to top up',
       colour: '#1a1608',
-      logo: 'b',
+      logo: '¢',
       open: () => setWalletKind('credits'),
     });
-  if (mnee !== null && mnee > 0)
-    cards.push({
+  cards.push(
+    {
       id: 'mnee',
       title: 'MNEE',
-      sub: `${mnee.toFixed(2)} MNEE`,
+      sub: `${(mnee ?? 0).toFixed(2)} MNEE`,
       colour: '#0f2a1f',
       logo: <img src={MNEE_ICON_URL} alt="" width={22} height={22} style={{ borderRadius: 11 }} />,
       open: () => setWalletKind('tokens'),
-    });
-  if (PLACEMENT_ENABLED && shares.me)
-    cards.push({
-      id: 'bshares',
-      title: 'bShares',
-      sub: 'The Bitcoin Corporation',
-      colour: '#23200f',
-      logo: '§',
-      open: () => navigate('/m/bshares'),
-    });
+    },
+    {
+      id: 'pnee',
+      title: 'PNEEs',
+      sub: '0 PNEEs',
+      colour: '#1d1430',
+      logo: <img src={PNEE_ICON} alt="" width={22} height={22} style={{ borderRadius: 11 }} />,
+      open: () => setWalletKind('tokens'),
+    },
+    {
+      id: 'topup',
+      title: 'Top up',
+      sub: 'Add BSV to your wallet',
+      colour: '#2a2208',
+      logo: '+',
+      open: () => requestWalletAction('receive'),
+    },
+  );
 
   const goTo = useCallback((i: number) => {
     const el = track.current;
