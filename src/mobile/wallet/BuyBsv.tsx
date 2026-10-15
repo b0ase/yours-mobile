@@ -1,6 +1,7 @@
 import { fetchSeries } from '../portfolio/market';
 import { BetaLine } from '../sweep/BetaLine';
-import { APP_NAME, BUY_CRYPTO_ENABLED, SWAP_ENABLED } from '../storeBuild';
+import { APP_NAME, BALANCE_CARDS_ENABLED, BUY_CRYPTO_ENABLED, SWAP_ENABLED } from '../storeBuild';
+import { requestAllCards, swapRowButtons } from './allCardsOpen';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { useSwapWatcher } from '../swap/useSwapWatcher';
@@ -12,7 +13,7 @@ const PortfolioScreen = lazy(() => import('../portfolio/PortfolioScreen'));
 const SwapFlow = SWAP_ENABLED ? lazy(() => import('../swap/SwapFlow')) : null;
 const SwapPromo = SWAP_ENABLED ? lazy(() => import('../swap/SwapPromo')) : null;
 import { createPortal } from 'react-dom';
-import { ArrowDownToLine, CreditCard, ExternalLink, Users, X } from 'lucide-react';
+import { ArrowDownToLine, ChevronRight, CreditCard, ExternalLink, Layers, Users, X } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { openDappBrowser } from '../dappBrowser';
 import { cachedExchangeRate, fetchExchangeRate } from '../../utils/wallet';
@@ -145,7 +146,32 @@ const PriceCell = ({ rate, onOpen, change }: { rate: number; onOpen: () => void;
 );
 
 /** Same box and margins as the promo card, so nothing jumps when the chunk loads. */
-const SwapPromoSkeleton = () => <div className="w-[92%] min-h-[52px] -mb-1" aria-hidden="true" />;
+const SwapPromoSkeleton = () => <div className="flex-1 min-w-0 min-h-[52px]" aria-hidden="true" />;
+
+/**
+ * "All cards" (owner, 15 Oct 2026): left of the Swap card, the same height and look, half the width each (like the
+ * Address book | Airdrops row). Opens the carousel's All cards browser; long-pressing a card still works too.
+ * bWalletX only (BALANCE_CARDS_ENABLED): the store has no browser, so no button.
+ */
+const AllCardsButtonImpl = () => (
+  <button
+    type="button"
+    onClick={() => requestAllCards()}
+    className="flex-1 min-w-0 min-h-[52px] px-3 py-2 rounded-xl border flex items-center gap-3 text-left cursor-pointer"
+    style={{ background: 'var(--bw-surface)', borderColor: 'var(--bw-line)' }}
+  >
+    <Layers size={18} color="var(--bw-accent-hi)" aria-hidden="true" className="shrink-0" />
+    <span
+      className="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[14px] font-bold"
+      style={{ color: 'var(--bw-text)' }}
+    >
+      All cards
+    </span>
+    <ChevronRight size={18} color="var(--bw-muted)" aria-hidden="true" className="shrink-0" />
+  </button>
+);
+// The store build drops the button's code entirely (inlined flag), not just its render.
+const AllCardsButton = BALANCE_CARDS_ENABLED ? AllCardsButtonImpl : () => null;
 
 /**
  * Wallet top row (owner, rounds 6–7; price restored 10 Oct 2026): price · Buy BSV · History, three equal columns.
@@ -183,6 +209,7 @@ export const BsvPriceBar = ({
     else if (s.stage === 'failed') addSnackbar('A swap needs attention. Open Swap to see it.', 'error');
   });
   const swapOn = SWAP_ENABLED && !!SwapFlow && !!getAddress;
+  const row = swapRowButtons(swapOn && !!SwapPromo, BALANCE_CARDS_ENABLED);
   const openSwap = () => {
     setResume(active[0] ?? (swaps[0] && !swaps[0].notified ? swaps[0] : null));
     setSwapOpen(true);
@@ -206,13 +233,24 @@ export const BsvPriceBar = ({
         </button>
         <HistoryButton className={CELL} />
       </div>
-      {swapOn && SwapPromo && (
-        // Equal 8px above and below the promo: the row's mb-2 above; below, the card's own 12px top margin less 4px.
-        <Suspense fallback={<SwapPromoSkeleton />}>
-          <SwapPromo active={active[0] ?? null} onOpen={openSwap} />
-        </Suspense>
+      {row.length > 0 ? (
+        // Equal 8px above and below the row: the price row's mb-2 above; below, the next card's 12px top margin less 4px.
+        <div className="w-[92%] -mb-1 flex gap-2">
+          {row.map((b) =>
+            b === 'allCards' ? (
+              <AllCardsButton key={b} />
+            ) : (
+              SwapPromo && (
+                <Suspense key={b} fallback={<SwapPromoSkeleton />}>
+                  <SwapPromo active={active[0] ?? null} onOpen={openSwap} />
+                </Suspense>
+              )
+            ),
+          )}
+        </div>
+      ) : (
+        <div className="mb-2" />
       )}
-      {!swapOn && <div className="mb-2" />}
       {open && (
         <BuyBsvSheet
           onClose={() => setOpen(false)}
