@@ -24,6 +24,7 @@ import {
   amountLabel,
   formatRaw,
   parseLookup,
+  spaceStartLine,
   spendLabel,
   spendEnforced,
   SPEND_ENFORCED_NOTE,
@@ -275,6 +276,9 @@ export const RoomSettingsSheet = ({
             </p>
           )}
           <Row label="Admin" value={issuerLine} />
+          {spaceStartLine(look.spaceStart) && (
+            <p className="text-sm mt-3 text-white">{spaceStartLine(look.spaceStart)}</p>
+          )}
           <p className="text-xs mt-3" style={{ color: MUTED }}>
             Only the token's issuer can change these rules.
           </p>
@@ -294,6 +298,7 @@ export const RoomSettingsSheet = ({
 
       {look && isIssuer && (
         <div className="flex flex-col gap-3">
+          {spaceStartLine(look.spaceStart) && <p className="text-sm text-white">{spaceStartLine(look.spaceStart)}</p>}
           <HistoryToggle client={client} ticker={ticker} />
           <label className="text-xs" style={{ color: MUTED }}>
             Title

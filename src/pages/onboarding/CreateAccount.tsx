@@ -16,6 +16,7 @@ import { YoursIcon } from '../../components/YoursIcon';
 import { saveAccountDataToChromeStorage } from '../../utils/chromeStorageHelpers';
 import { copySecret } from '../../mobile/secretClipboard';
 import { BackupStep } from '../../mobile/backup/BackupStep';
+import { clearHelpDeskUnpin } from '../../mobile/chat/helpDeskPin';
 import { isWebApp } from '../../mobile/webApp';
 
 export type CreateAccountProps = {
@@ -79,6 +80,8 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
         return;
       }
       setSeedWords(keys.mnemonic.split(' '));
+      // A new wallet starts with the bWallet Help Desk pinned (its unpin is per device only).
+      clearHelpDeskUnpin();
 
       if (!keys.identityAddress) {
         addSnackbar('An error occurred while getting the identity address!', 'error');

@@ -26,6 +26,7 @@ import { SupportedWalletImports } from '../../services/types/keys.types';
 import { SettingsPage } from '../Settings';
 import { saveAccountDataToChromeStorage } from '../../utils/chromeStorageHelpers';
 import { normalizePhrase, phraseProblem, restoreErrorMessage } from './restoreHelpers';
+import { clearHelpDeskUnpin } from '../../mobile/chat/helpDeskPin';
 
 export type RestoreAccountProps = {
   onNavigateBack: (page: SettingsPage) => void;
@@ -145,6 +146,8 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
       }
 
       console.log('[restore] keys stored at', at());
+      // A fresh restore pins the bWallet Help Desk again (its unpin is per device only).
+      clearHelpDeskUnpin();
       const chromeObject = await chromeStorageService.getAndSetStorage();
       if (!chromeObject?.accounts) throw new Error('No accounts found!');
       const objKeys = Object.keys(chromeObject.accounts);

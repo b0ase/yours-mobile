@@ -36,7 +36,7 @@ describe('always-open rooms', () => {
     ]);
   });
   test('copy and rules', () => {
-    expect(alwaysOpenBarText('LOUNGE', 'Lounge')).toBe('Join the Lounge · Open 24/7');
+    expect(alwaysOpenBarText('LOUNGE', 'Lounge')).toBe('Join the Help Desk · Open 24/7');
     expect(alwaysOpenBarText('ABC', 'ABC room')).toBe('Join ABC room · Open 24/7');
     expect(alwaysHereCaption({ handle: 'b', kind: 'agent', label: 'b' })).toBe('bWalletX agent · always here');
     expect(mayEndSpace({ isHost: true, alwaysOpen: true })).toBe(false);

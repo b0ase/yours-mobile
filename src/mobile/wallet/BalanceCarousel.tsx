@@ -21,6 +21,8 @@ import { publishBalance } from './balanceStore';
 import { useBshares } from '../placement/useBshares';
 import { requestCreditsSheet } from '../credits/creditsNav';
 import { BuyBsvSheet } from './BuyBsv';
+import { holdersRoomsEnabled, openHoldersRoom, type HoldersCoin } from './holdersRoom';
+import { routeFor } from '../tabs/tabs';
 import './balanceCards.css';
 
 /**
@@ -466,6 +468,11 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
   // Every kind of balance always has its card (owner, 15 Oct 2026), showing the real balance (0.00 included). Tap or
   // the pen flips it; the back says what it is and its buttons open the real screens. Nothing here signs or spends.
   const showTokens = () => setWalletKind('tokens');
+  // MNEE / PNEEs holders' rooms (bWalletX; a store build has no token rooms).
+  const holdersBtn = (coin: HoldersCoin): BackButton[] =>
+    holdersRoomsEnabled()
+      ? [{ label: 'Holders room', run: () => openHoldersRoom(coin, () => navigate(routeFor('chat') ?? '/m/chat')) }]
+      : [];
   const cards: CardDef[] = [
     {
       id: 'bsv',
@@ -567,6 +574,7 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
       backButtons: [
         { label: 'Send', run: () => requestWalletAction('send'), primary: true },
         { label: 'Receive', run: () => requestWalletAction('receive') },
+        ...holdersBtn('mnee'),
       ],
     },
     {
@@ -580,6 +588,7 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
       backButtons: [
         { label: 'Send', run: () => requestWalletAction('send'), primary: true },
         { label: 'Receive', run: () => requestWalletAction('receive') },
+        ...holdersBtn('pnee'),
       ],
     },
     {
