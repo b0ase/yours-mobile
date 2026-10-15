@@ -400,6 +400,19 @@ export const BCREDITS_ENABLED: boolean = !(
 );
 
 /**
+ * bPics market (owner, 15 Oct 2026: a photographers' market, opt-in only): selling photos (mint with a price,
+ * sealed full resolution), buying them (pay the photographer, bit-sign releases the key), tips on photos, claiming
+ * chain photos, the Art rail and Exchange › Photos. bWalletX only, absent from a store build even as code (selling
+ * digital content in-app: Apple 3.1.1, Play Payments). Literal env check so Vite inlines it and Rollup drops the
+ * lazy market chunk (bpics/market/*). The store edition keeps phase 1 (mint a picture, the opt-in free library).
+ */
+export const BPICS_MARKET_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+
+/**
  * Feed › bExchange (the token reel: price, 24h change, sparkline, BUY / SELL): bWalletX only, absent from a store
  * build even as code (exchange functionality, Apple 3.1.5(iii); the same rejection as the Market). Literal env
  * check so Vite inlines it and Rollup drops feed/reels/BexReel and its Feed picker entry. Feed › bApps stays in

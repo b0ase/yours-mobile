@@ -16,7 +16,7 @@ import { safety, refreshSafety } from '../market/safety';
 import { requestMarketToken, takeMarketToken } from '../chat/nav';
 import { MyTokenListings } from '../sell/MyTokenListings';
 import { loadSwaps } from '../swap/swapApi';
-import { PLACEMENT_ENABLED, SWAP_ENABLED } from '../storeBuild';
+import { BPICS_MARKET_ENABLED, PLACEMENT_ENABLED, SWAP_ENABLED } from '../storeBuild';
 /** Exchange › Shares: restricted, no trading (bShares). bWalletX only; dropped from the store bundle. */
 const SharesMarket = PLACEMENT_ENABLED ? lazy(() => import('../placement/SharesMarket')) : null;
 import { useTabHome } from '../tabs/useTabHome';
@@ -54,6 +54,10 @@ import {
 
 // Swap into BSV: its chunk is dropped from a store build (SWAP_ENABLED), like the wallet's Swap card.
 const SwapFlow = SWAP_ENABLED ? lazy(() => import('../swap/SwapFlow')) : null;
+// Exchange › Photos: the bPics photographers' market, ranked by total paid to the artist (bWalletX only).
+const PhotosFeed = BPICS_MARKET_ENABLED
+  ? lazy(() => import('../bpics/market/MarketPage').then((m) => ({ default: m.PhotosFeed })))
+  : null;
 // NFTs, collections, tickets, strategies and contracts keep their screens (the old Market page).
 const MarketPage = lazy(() => import('../market/MarketPage'));
 
@@ -487,6 +491,7 @@ const ExchangePage = () => {
     { id: 'launchpad', label: 'Launchpad', to: `${EXCHANGE_ROUTE}/launchpad` },
     { id: 'orders', label: 'My orders', to: `${EXCHANGE_ROUTE}/orders` },
     { id: 'more', label: 'Collectibles', to: `${EXCHANGE_ROUTE}/collectibles` },
+    ...(PhotosFeed ? [{ id: 'photos', label: 'Photos', to: `${EXCHANGE_ROUTE}/photos` }] : []),
   ];
   const active =
     view.tab === 'trade'
@@ -564,6 +569,11 @@ const ExchangePage = () => {
         {/* In-app launchpad (owner, 14 Oct 2026: the Exchange must not send people to tokenblaster.lol). */}
         {view.tab === 'launchpad' && <LaunchpadPanel />}
         {view.tab === 'launch' && <LaunchCoin />}
+        {view.tab === 'photos' && PhotosFeed && (
+          <Suspense fallback={<Loading text="Loading photos…" />}>
+            <PhotosFeed />
+          </Suspense>
+        )}
       </div>
       {view.tab === 'more' && (
         <div className="w-full flex-1 min-h-[70vh]">

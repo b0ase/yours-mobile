@@ -4,6 +4,7 @@ import { TermsGate } from '../ugc/UgcSheets';
 import { SectionBoundary } from '../wallet/SectionBoundary';
 import {
   ARTIST_PROGRAMME_ENABLED,
+  BPICS_MARKET_ENABLED,
   BSPACES_ENABLED,
   MARKET_ENABLED,
   PAY_STREAM_ENABLED,
@@ -19,6 +20,8 @@ const SpacesPage = BSPACES_ENABLED ? lazy(() => import('../spaces/SpacesPage')) 
 const ExchangePage = MARKET_ENABLED ? lazy(() => import('../exchange/ExchangePage')) : null;
 // bPics (Apps › bPics): picture ordinals; mint, shared library, mine.
 const BPicsPage = lazy(() => import('../bpics/BPicsPage'));
+// bPics market (sell / buy / claim / Art): bWalletX only, not even built into a store edition.
+const BPicsMarketPage = BPICS_MARKET_ENABLED ? lazy(() => import('../bpics/market/MarketPage')) : null;
 const FeedTab = lazy(() => import('../feed/FeedTab'));
 const ChatPage = lazy(() => import('./ChatPage'));
 const MediaPage = lazy(() => import('../media/MediaPage'));
@@ -85,6 +88,16 @@ const MobileRoutes = () => (
             </TermsGate>
           }
         />
+        {BPicsMarketPage && (
+          <Route
+            path="bpics/market/*"
+            element={
+              <TermsGate>
+                <BPicsMarketPage />
+              </TermsGate>
+            }
+          />
+        )}
         {/* The top bar's centre b: the b agent. */}
         <Route path="ask-b" element={<AgentPage />} />
         {/* Old links (/agent, /m/agent) keep working (renamed Ask b, 12 Oct 2026). */}
