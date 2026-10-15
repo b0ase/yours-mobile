@@ -40,6 +40,7 @@ import { isBlocked, onUgcChange } from '../ugc/ugc';
 import { useWalletMedia } from '../media/useWalletMedia';
 import { prepareCardImage, saveCardImage } from '../wallet/cardFrontArt';
 import { shareLink } from '../chat/shareLink';
+import { BPICS_MARKET_ENABLED } from '../storeBuild';
 import {
   base64Bytes,
   buildPicMap,
@@ -355,6 +356,16 @@ const BPicsPage = () => {
               )}
             </label>
           </div>
+          {BPICS_MARKET_ENABLED && (
+            <button
+              type="button"
+              onClick={() => navigate('/m/bpics/market')}
+              className="px-3.5 py-2 rounded-full text-sm font-semibold cursor-pointer border"
+              style={{ borderColor: GOLD, color: GOLD, background: 'transparent' }}
+            >
+              Photo market
+            </button>
+          )}
           <GoldButton onClick={() => setMinting(true)}>
             <ImagePlus size={16} /> Mint a picture
           </GoldButton>

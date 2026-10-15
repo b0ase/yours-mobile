@@ -625,3 +625,49 @@ describe('BMOVIES_FEED_ENABLED: the bMovies feed is not in a store build', () =>
     );
   });
 });
+
+/** bPics market (selling / buying / tips on photos, claims, Art, Exchange › Photos): bWalletX only. */
+describe('BPICS_MARKET_ENABLED: the bPics photo market is not in a store build', () => {
+  const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  const cond = (text: string, name: string) =>
+    (new RegExp(`export const ${name}: boolean =\\s*!?\\(?([^;]*?)\\)?;`, 's').exec(text)?.[1] ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  test('inverse of STORE_BUILD, from the same literal env', async () => {
+    const { BPICS_MARKET_ENABLED } = await import('./storeBuild');
+    expect(BPICS_MARKET_ENABLED).toBe(!STORE_BUILD);
+    const s = src('./storeBuild.ts');
+    expect(cond(s, 'BPICS_MARKET_ENABLED')).toBe(cond(s, 'STORE_BUILD'));
+  });
+  const flagFor = (env: Record<string, string>) => {
+    const expr = /export const BPICS_MARKET_ENABLED: boolean = ([^;]*);/s
+      .exec(src('./storeBuild.ts'))![1]
+      .replace(/import\.meta\.env/g, 'env');
+    return new Function('env', `return ${expr};`)(env) as boolean;
+  };
+  test.each([
+    [{ VITE_STORE_BUILD: '1' }, false],
+    [{ VITE_CHANNEL: 'ios-store' }, false],
+    [{ VITE_CHANNEL: 'android-play' }, false],
+    [{}, true],
+  ])('%o → %p', (env, enabled) => {
+    expect(flagFor(env)).toBe(enabled);
+  });
+  test('the market is only reached through lazy imports behind the flag', () => {
+    expect(src('./tabs/MobileRoutes.tsx')).toMatch(
+      /BPICS_MARKET_ENABLED \? lazy\(\(\) => import\('\.\.\/bpics\/market\/MarketPage'\)\) : null/,
+    );
+    expect(src('./exchange/ExchangePage.tsx')).toMatch(
+      /BPICS_MARKET_ENABLED\s*\?\s*lazy\(\(\) => import\('\.\.\/bpics\/market\/MarketPage'\)/,
+    );
+    expect(src('./bpics/BPicsPage.tsx')).toContain('{BPICS_MARKET_ENABLED && (');
+    // No static import of the market anywhere outside its own folder.
+    for (const f of ['./tabs/MobileRoutes.tsx', './exchange/ExchangePage.tsx', './bpics/BPicsPage.tsx'])
+      expect(src(f)).not.toMatch(/^import (?!type )[^;]*from '[./]*bpics\/market\//m);
+  });
+  test('the store audit lists the bPics market grep strings', () => {
+    expect(readFileSync(new URL('../../docs/STORE-AUDIT.md', import.meta.url), 'utf8')).toContain(
+      'bPics market|Mint and list|api/bitsign/bpics|bwallet.bpics.bought|Paid to the photographer',
+    );
+  });
+});
