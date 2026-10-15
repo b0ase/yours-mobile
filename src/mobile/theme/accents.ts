@@ -1,21 +1,30 @@
+import { contrast, rgbTriplet } from './colour';
+
+export { contrast, rgbTriplet };
+
 /**
- * App themes (Theme → App colours). Owner, 14 Oct 2026: first a short accent list, then "a bit lame", so the top row
- * is now four full THEMES (Classic, Executive, Cyberpunk, Pastel), each a complete look made of CSS variables plus
- * a theme id on <html data-bw-theme>: accent, page and surface colours, trim, glow, type for numbers and headings,
- * and the card pattern it suggests. The plain accents stay under "More colours". No forked components: every screen
- * reads the same variables. Each entry keeps WCAG AA (accents.test.ts): accent/hi/lo and white text on its page
- * colour, and its on-accent text on accent/hi/lo, all at least 4.5:1.
+ * App themes (Theme → App colours). Owner, 14–15 Oct 2026: first a short accent list, then "a bit lame", then
+ * "just a few pastel button colours": so the top row is now THEME PACKS that restyle the whole app (page,
+ * surfaces, text, muted text, lines, nav, inputs, buttons, accent, success/danger, shadows, corners, heading
+ * weight), each a complete token set written to CSS variables on <html> plus <html data-bw-theme / data-bw-pack>.
+ * No forked components: every screen reads the same variables (src/themes.css maps the common utility classes).
+ * Gold sets nothing, so the default look is byte-for-byte the one before packs. The plain accents stay under
+ * "More colours" and change the accent only. The colour mixer (mixer.ts) derives a 'custom' pack at runtime.
+ * Every pack keeps WCAG AA (accents.test.ts): text, muted text and accent on page and surfaces, and on-accent on
+ * the accent stops, all at least 4.5:1.
  */
-export type AccentId =
+export type PackId =
   | 'gold'
   | 'executive'
   | 'cyber'
-  | 'pastel'
-  | 'silver'
-  | 'rose'
-  | 'emerald'
-  | 'sapphire'
-  | 'violet';
+  | 'paper'
+  | 'midnight'
+  | 'forest'
+  | 'sunset'
+  | 'monolight'
+  | 'contrast'
+  | 'pastel';
+export type AccentId = PackId | 'silver' | 'rose' | 'emerald' | 'sapphire' | 'violet' | 'custom';
 
 export type CardPatternId =
   | 'topo'
@@ -33,10 +42,12 @@ export type CardPatternId =
 export interface Accent {
   id: AccentId;
   label: string;
-  /** 'theme' = a full look (top row); 'colour' = accent only (More colours). */
-  kind: 'theme' | 'colour';
-  /** One line under the theme's name. */
+  /** 'theme' = a full pack (top row); 'colour' = accent only (More colours); 'custom' = the colour mixer. */
+  kind: 'theme' | 'colour' | 'custom';
+  /** One line under the pack's name. */
   blurb?: string;
+  /** Light or dark base (sets color-scheme for form controls and scrollbars). */
+  scheme: 'dark' | 'light';
   /** Main accent: buttons, active tabs, icons. */
   accent: string;
   /** Lighter stop: gradient tops, bright text, hover. */
@@ -47,8 +58,22 @@ export interface Accent {
   on: string;
   /** Page background. */
   bg: string;
-  /** Raised surfaces: sheets, rows, inputs. */
+  /** Raised surfaces: sheets, rows, cards, inputs. */
   surface: string;
+  /** Second surface: hover, chips, nested fills. */
+  surface2: string;
+  /** Tab bar and top bars. */
+  nav: string;
+  /** Body text. */
+  text: string;
+  /** Secondary text. */
+  muted: string;
+  /** Hairlines and outlines. */
+  line: string;
+  success: string;
+  danger: string;
+  /** Shadow under raised things. */
+  shadow: string;
   /** Border on cards and buttons ('transparent' = none). */
   trim: string;
   /** Extra glow on accent buttons ('none' = none). */
@@ -57,28 +82,44 @@ export interface Accent {
   fontNum: string;
   /** Font for headings. */
   fontHead: string;
+  /** Heading weight. */
+  weightHead: number;
   /** Corner radius of buttons. */
   radius: string;
-  /** The card pattern this theme suggests (Design your card › Patterns). */
+  /** Corner radius of cards and sheets. */
+  radiusCard: string;
+  /** The card pattern this pack suggests (Design your card › Patterns). */
   pattern: CardPatternId;
 }
 
 export const DEFAULT_ACCENT: AccentId = 'gold';
 
 const SANS = 'inherit';
-const MONO = "ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
+const MONO = "'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
 const SERIF = "'Cormorant Garamond', 'Iowan Old Style', Georgia, 'Times New Roman', serif";
-const BASE = {
+/** The Gold look (today's app), the base every pack starts from. */
+const BASE: Omit<Accent, 'id' | 'label' | 'accent' | 'hi' | 'lo'> = {
+  kind: 'colour',
+  scheme: 'dark',
+  on: '#010101',
   bg: '#010101',
   surface: '#17191E',
+  surface2: '#1F2128',
+  nav: '#000000',
+  text: '#FFFFFF',
+  muted: '#98A2B3',
+  line: '#2B2F36',
+  success: '#3DDC97',
+  danger: '#F97066',
+  shadow: '0 10px 30px rgb(0 0 0 / 0.5)',
   trim: 'transparent',
   glow: 'none',
   fontNum: SANS,
   fontHead: SANS,
+  weightHead: 700,
   radius: '12px',
-  pattern: 'topo' as CardPatternId,
-  kind: 'colour' as const,
-  on: '#010101',
+  radiusCard: '16px',
+  pattern: 'topo',
 };
 
 // Never use upstream's greens (#A1FF8B, #9EFF8A, #34D399) here: vite.brand.ts bcorpColours rewrites them to
@@ -88,8 +129,8 @@ export const ACCENTS: readonly Accent[] = [
     ...BASE,
     id: 'gold',
     kind: 'theme',
-    label: 'Classic',
-    blurb: 'Gold on black',
+    label: 'Gold',
+    blurb: 'Black and gold, the original',
     accent: '#F5B800',
     hi: '#FFD24D',
     lo: '#EAB300',
@@ -99,15 +140,26 @@ export const ACCENTS: readonly Accent[] = [
     id: 'executive',
     kind: 'theme',
     label: 'Executive',
-    blurb: 'Gloss black, gold trim',
-    accent: '#D9B45A',
-    hi: '#F0D58C',
-    lo: '#C9A24A',
-    bg: '#050506',
-    surface: '#111114',
-    trim: 'rgb(217 180 90 / 0.55)',
-    fontHead: SERIF,
-    radius: '6px',
+    blurb: 'Crisp black and white',
+    accent: '#FFFFFF',
+    hi: '#FFFFFF',
+    lo: '#E4E4E4',
+    on: '#000000',
+    bg: '#000000',
+    surface: '#0E0E0E',
+    surface2: '#191919',
+    nav: '#000000',
+    text: '#FFFFFF',
+    muted: '#A3A3A3',
+    line: '#2E2E2E',
+    success: '#7EE2A8',
+    danger: '#FF8A80',
+    shadow: 'none',
+    trim: 'rgb(255 255 255 / 0.28)',
+    fontNum: MONO,
+    weightHead: 600,
+    radius: '2px',
+    radiusCard: '4px',
     pattern: 'guilloche',
   },
   {
@@ -115,18 +167,184 @@ export const ACCENTS: readonly Accent[] = [
     id: 'cyber',
     kind: 'theme',
     label: 'Cyberpunk',
-    blurb: 'Matrix green, cyphertext',
-    accent: '#00FF66',
-    hi: '#7DFFA8',
-    lo: '#00D957',
-    bg: '#020604',
-    surface: '#08140D',
-    trim: 'rgb(0 255 102 / 0.45)',
-    glow: '0 0 12px rgb(0 255 102 / 0.45)',
+    blurb: 'Neon magenta and cyan',
+    accent: '#FF2BD6',
+    hi: '#FF8AEB',
+    lo: '#F000C8',
+    on: '#07040F',
+    bg: '#07040F',
+    surface: '#130A24',
+    surface2: '#1D0F35',
+    nav: '#05020B',
+    text: '#F5F0FF',
+    muted: '#A99BD1',
+    line: '#3B2163',
+    success: '#3DF5FF',
+    danger: '#FF5C7A',
+    shadow: '0 0 24px rgb(255 43 214 / 0.18)',
+    trim: 'rgb(0 240 255 / 0.55)',
+    glow: '0 0 14px rgb(255 43 214 / 0.55), 0 0 2px rgb(0 240 255 / 0.9)',
     fontNum: MONO,
     fontHead: MONO,
-    radius: '4px',
-    pattern: 'cypher',
+    weightHead: 700,
+    radius: '3px',
+    radiusCard: '6px',
+    pattern: 'circuit',
+  },
+  {
+    ...BASE,
+    id: 'paper',
+    kind: 'theme',
+    label: 'Paper',
+    blurb: 'Warm off-white and ink',
+    scheme: 'light',
+    accent: '#23395B',
+    hi: '#34507E',
+    lo: '#1A2B45',
+    on: '#FFFDF8',
+    bg: '#F6F1E7',
+    surface: '#FFFDF8',
+    surface2: '#EDE6D8',
+    nav: '#FBF7EF',
+    text: '#1C1A17',
+    muted: '#655E52',
+    line: '#DCD2C0',
+    success: '#1E6B45',
+    danger: '#B42318',
+    shadow: '0 8px 24px rgb(60 40 10 / 0.12)',
+    trim: 'rgb(28 26 23 / 0.12)',
+    fontHead: SERIF,
+    weightHead: 600,
+    radius: '10px',
+    radiusCard: '14px',
+    pattern: 'waves',
+  },
+  {
+    ...BASE,
+    id: 'midnight',
+    kind: 'theme',
+    label: 'Midnight',
+    blurb: 'Deep navy, cool blue',
+    accent: '#6EA8FF',
+    hi: '#A5C8FF',
+    lo: '#5B9BFA',
+    on: '#060B1A',
+    bg: '#060B1A',
+    surface: '#0E1730',
+    surface2: '#16213F',
+    nav: '#050916',
+    text: '#E8EEFF',
+    muted: '#93A3C8',
+    line: '#22325A',
+    success: '#5EE6B0',
+    danger: '#FF8A8A',
+    shadow: '0 12px 32px rgb(0 0 0 / 0.55)',
+    trim: 'rgb(110 168 255 / 0.25)',
+    pattern: 'topo',
+  },
+  {
+    ...BASE,
+    id: 'forest',
+    kind: 'theme',
+    label: 'Forest',
+    blurb: 'Pine, moss and fern',
+    accent: '#8FD19E',
+    hi: '#B9E6C3',
+    lo: '#7CC48D',
+    on: '#07110C',
+    bg: '#07110C',
+    surface: '#0F1E16',
+    surface2: '#17291F',
+    nav: '#050D09',
+    text: '#EAF4EC',
+    muted: '#9DB5A5',
+    line: '#24392C',
+    success: '#8FD19E',
+    danger: '#FF8F7A',
+    shadow: '0 12px 30px rgb(0 0 0 / 0.5)',
+    trim: 'rgb(143 209 158 / 0.22)',
+    radiusCard: '18px',
+    pattern: 'hex',
+  },
+  {
+    ...BASE,
+    id: 'sunset',
+    kind: 'theme',
+    label: 'Sunset',
+    blurb: 'Coral, plum and amber',
+    accent: '#FF8A5B',
+    hi: '#FFB38A',
+    lo: '#FF7A5C',
+    on: '#1A0B12',
+    bg: '#1A0B12',
+    surface: '#2A1220',
+    surface2: '#36182A',
+    nav: '#140810',
+    text: '#FFF1EA',
+    muted: '#D9AFA9',
+    line: '#4A2235',
+    success: '#7FE0B0',
+    danger: '#FF8080',
+    shadow: '0 12px 32px rgb(40 0 20 / 0.5)',
+    trim: 'rgb(255 138 91 / 0.28)',
+    glow: '0 6px 20px rgb(255 120 80 / 0.35)',
+    radius: '999px',
+    radiusCard: '20px',
+    pattern: 'starburst',
+  },
+  {
+    ...BASE,
+    id: 'monolight',
+    kind: 'theme',
+    label: 'Mono light',
+    blurb: 'Clean white, black ink',
+    scheme: 'light',
+    accent: '#18181B',
+    hi: '#3F3F46',
+    lo: '#000000',
+    on: '#FFFFFF',
+    bg: '#FFFFFF',
+    surface: '#F4F4F5',
+    surface2: '#E9E9EC',
+    nav: '#FFFFFF',
+    text: '#09090B',
+    muted: '#5F5F69',
+    line: '#E2E2E6',
+    success: '#15803D',
+    danger: '#B91C1C',
+    shadow: '0 6px 20px rgb(0 0 0 / 0.08)',
+    trim: 'rgb(0 0 0 / 0.1)',
+    fontNum: MONO,
+    weightHead: 600,
+    radius: '8px',
+    radiusCard: '12px',
+    pattern: 'halftone',
+  },
+  {
+    ...BASE,
+    id: 'contrast',
+    kind: 'theme',
+    label: 'High contrast',
+    blurb: 'Maximum legibility',
+    accent: '#FFE600',
+    hi: '#FFF27A',
+    lo: '#FFD600',
+    on: '#000000',
+    bg: '#000000',
+    surface: '#000000',
+    surface2: '#1A1A1A',
+    nav: '#000000',
+    text: '#FFFFFF',
+    muted: '#E6E6E6',
+    line: '#FFFFFF',
+    success: '#7CFFB2',
+    danger: '#FF9E9E',
+    shadow: 'none',
+    trim: '#FFFFFF',
+    weightHead: 800,
+    radius: '8px',
+    radiusCard: '10px',
+    pattern: 'chevron',
   },
   {
     ...BASE,
@@ -140,8 +358,17 @@ export const ACCENTS: readonly Accent[] = [
     on: '#1E1A33',
     bg: '#1E1A33',
     surface: '#2B2647',
+    surface2: '#363056',
+    nav: '#1A1630',
+    text: '#F7F3FF',
+    muted: '#C8BFE6',
+    line: '#463F6E',
+    success: '#A8EBCF',
+    danger: '#FFA3B5',
+    shadow: '0 12px 30px rgb(10 0 30 / 0.45)',
     trim: 'rgb(255 209 227 / 0.35)',
     radius: '999px',
+    radiusCard: '22px',
     pattern: 'clouds',
   },
   { ...BASE, id: 'silver', label: 'Silver', accent: '#C3CAD4', hi: '#E6EAF0', lo: '#A7B0BC' },
@@ -154,14 +381,17 @@ export const ACCENTS: readonly Accent[] = [
 export const THEMES = ACCENTS.filter((a) => a.kind === 'theme');
 export const MORE_COLOURS = ACCENTS.filter((a) => a.kind === 'colour');
 
-export const accentById = (id: string | null | undefined): Accent =>
-  ACCENTS.find((a) => a.id === id) ?? (ACCENTS[0] as Accent);
-
-/** "#F5B800" → "245 184 0", for rgb(var(--bw-accent-rgb) / a). */
-export const rgbTriplet = (hex: string): string => {
-  const h = hex.replace('#', '');
-  return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)).join(' ');
+let custom: Accent | null = null;
+/** The colour mixer's current pack (accent.ts sets it); accentById('custom') returns it. */
+export const setCustomAccent = (a: Accent | null): void => {
+  custom = a;
 };
+
+export const accentById = (id: string | null | undefined): Accent =>
+  (id === 'custom' && custom) || ACCENTS.find((a) => a.id === id) || (ACCENTS[0] as Accent);
+
+/** The Gold look every pack and the mixer start from (for tests and the mixer). */
+export const BASE_LOOK = BASE;
 
 /** The CSS custom properties for one accent (src/accent.css holds the gold defaults). */
 export const accentVars = (a: Accent): Record<string, string> => ({
@@ -181,17 +411,27 @@ export const accentVars = (a: Accent): Record<string, string> => ({
   '--bw-radius-btn': a.radius,
 });
 
-/** WCAG relative-luminance contrast ratio between two #rrggbb colours. */
-export const contrast = (a: string, b: string): number => {
-  const lum = (hex: string) => {
-    const [r, g, bl] = rgbTriplet(hex)
-      .split(' ')
-      .map((n) => {
-        const c = Number(n) / 255;
-        return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-      }) as [number, number, number];
-    return 0.2126 * r + 0.7152 * g + 0.0722 * bl;
-  };
-  const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p) as [number, number];
-  return (x + 0.05) / (y + 0.05);
-};
+/**
+ * The full pack: accentVars plus the whole-app tokens. Only full packs and the mixer set these; Gold and the
+ * accent-only colours leave them unset so every var(--bw-text, <old colour>) falls back to today's look.
+ */
+export const packVars = (a: Accent): Record<string, string> => ({
+  ...accentVars(a),
+  '--bw-pack-bg': a.bg,
+  '--bw-bg-rgb': rgbTriplet(a.bg),
+  '--bw-card': a.surface,
+  '--bw-card2': a.surface2,
+  '--bw-nav': a.nav,
+  '--bw-text': a.text,
+  '--bw-text-rgb': rgbTriplet(a.text),
+  '--bw-muted': a.muted,
+  '--bw-line': a.line,
+  '--bw-success': a.success,
+  '--bw-danger': a.danger,
+  '--bw-shadow': a.shadow,
+  '--bw-radius-card': a.radiusCard,
+  '--bw-weight-head': String(a.weightHead),
+});
+
+/** Every variable any pack may set (so switching packs can clear the previous one's). */
+export const ALL_VARS = Object.keys(packVars(ACCENTS[0] as Accent));

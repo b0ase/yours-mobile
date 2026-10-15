@@ -106,7 +106,7 @@ kbd {
   padding: 3px 5px;
   border-radius: 5px;
   border: 1px solid var(--ww-line-2);
-  background: rgba(255, 255, 255, 0.04);
+  background: rgb(var(--bw-text-rgb, 255 255 255) / 0.04);
   color: var(--ww-muted);
 }
 
@@ -140,7 +140,7 @@ kbd {
   padding: 9px 10px;
   border-radius: 12px;
   border: 1px solid var(--ww-line);
-  background: rgba(255, 255, 255, 0.03);
+  background: rgb(var(--bw-text-rgb, 255 255 255) / 0.03);
   margin-bottom: 14px;
 }
 .ww-account:hover {
@@ -157,10 +157,10 @@ kbd {
   gap: 11px;
   padding: 8px 10px;
   border-radius: 9px;
-  color: #c9c9c4;
+  color: var(--bw-text, #c9c9c4);
 }
 .ww-nav button:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgb(var(--bw-text-rgb, 255 255 255) / 0.05);
   color: var(--ww-text);
 }
 .ww-nav button.on {
@@ -208,7 +208,7 @@ kbd {
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.06em;
-  color: #fff;
+  color: var(--bw-text, #fff);
   background: #ef4444;
   padding: 2px 6px;
   border-radius: 4px;
@@ -238,7 +238,7 @@ kbd {
   padding: 9px 12px !important;
   border-radius: 10px !important;
   border: 1px solid var(--ww-line) !important;
-  background: rgba(255, 255, 255, 0.04) !important;
+  background: rgb(var(--bw-text-rgb, 255 255 255) / 0.04) !important;
   color: var(--ww-muted) !important;
 }
 .ww-top-right {
@@ -254,7 +254,7 @@ kbd {
   height: 36px;
   border-radius: 10px;
   border: 1px solid var(--ww-line) !important;
-  background: rgba(255, 255, 255, 0.03) !important;
+  background: rgb(var(--bw-text-rgb, 255 255 255) / 0.03) !important;
   position: relative;
 }
 .ww-icon-btn:hover {
@@ -274,7 +274,7 @@ kbd {
   padding: 3px;
   border-radius: 10px;
   border: 1px solid var(--ww-line);
-  background: rgba(255, 255, 255, 0.03);
+  background: rgb(var(--bw-text-rgb, 255 255 255) / 0.03);
 }
 .ww-seg button {
   padding: 5px 10px;
@@ -283,7 +283,7 @@ kbd {
   color: var(--ww-muted);
 }
 .ww-seg button.on {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgb(var(--bw-text-rgb, 255 255 255) / 0.1);
   color: var(--ww-text);
 }
 .ww-btn {
@@ -294,12 +294,12 @@ kbd {
   padding: 9px 14px !important;
   border-radius: 10px !important;
   border: 1px solid var(--ww-line-2) !important;
-  background: rgba(255, 255, 255, 0.05) !important;
+  background: rgb(var(--bw-text-rgb, 255 255 255) / 0.05) !important;
   font-weight: 600 !important;
   white-space: nowrap;
 }
 .ww-btn:hover {
-  background: rgba(255, 255, 255, 0.09) !important;
+  background: rgb(var(--bw-text-rgb, 255 255 255) / 0.09) !important;
 }
 .ww-btn.gold {
   background: linear-gradient(180deg, #ffe08a, var(--ww-gold) 45%, var(--ww-gold-2)) !important;
@@ -354,7 +354,7 @@ kbd {
   padding: 2px 7px;
   border-radius: 6px;
   border: 1px solid var(--ww-line-2);
-  color: #d6d6d0;
+  color: var(--bw-text, #d6d6d0);
   white-space: nowrap;
   margin-left: 6px;
 }
@@ -372,7 +372,7 @@ kbd {
   border-radius: 50%;
   font-weight: 700;
   font-size: 13px;
-  background: linear-gradient(135deg, #3a3a3e, #1a1a1c);
+  background: linear-gradient(135deg, var(--bw-card2, #3a3a3e), var(--bw-card, #1a1a1c));
   border: 1px solid var(--ww-line-2);
 }
 .ww-av.lg {
@@ -437,7 +437,7 @@ kbd {
     12px ui-monospace,
     Menlo,
     monospace;
-  color: var(--bw-wcard-muted, #8e8e89);
+  color: var(--bw-wcard-muted, var(--bw-muted, #8e8e89));
 }
 .ww-hero-chart {
   display: flex;
@@ -488,11 +488,11 @@ kbd {
 }
 .ww-table td {
   padding: 11px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgb(var(--bw-text-rgb, 255 255 255) / 0.04);
   white-space: nowrap;
 }
 .ww-table tbody tr:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgb(var(--bw-text-rgb, 255 255 255) / 0.03);
 }
 .ww-table tbody tr:last-child td {
   border-bottom: 0;
@@ -519,7 +519,7 @@ kbd {
   align-items: center;
   gap: 12px;
   padding: 9px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgb(var(--bw-text-rgb, 255 255 255) / 0.04);
 }
 .ww-act-dot {
   display: grid;
@@ -541,7 +541,7 @@ kbd {
   height: 6px;
   margin-top: 6px;
   border-radius: 3px;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgb(var(--bw-text-rgb, 255 255 255) / 0.06);
 }
 .ww-bar i {
   display: block;
@@ -582,11 +582,11 @@ kbd {
   justify-content: space-between;
   padding: 8px 10px;
   border-radius: 8px;
-  color: #c9c9c4;
+  color: var(--bw-text, #c9c9c4);
   cursor: pointer;
 }
 .ww-folder:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgb(var(--bw-text-rgb, 255 255 255) / 0.05);
 }
 .ww-folder.on {
   background: rgb(var(--bw-accent-hi-rgb) / 0.1);
@@ -605,11 +605,11 @@ kbd {
   gap: 4px;
   width: 100%;
   padding: 12px 16px !important;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+  border-bottom: 1px solid rgb(var(--bw-text-rgb, 255 255 255) / 0.05) !important;
   position: relative;
 }
 .ww-mail:hover {
-  background: rgba(255, 255, 255, 0.03) !important;
+  background: rgb(var(--bw-text-rgb, 255 255 255) / 0.03) !important;
 }
 .ww-mail.on {
   background: rgb(var(--bw-accent-hi-rgb) / 0.07) !important;
@@ -665,7 +665,7 @@ kbd {
 .ww-body {
   flex: 1;
   line-height: 1.65;
-  color: #dcdcd6;
+  color: var(--bw-text, #dcdcd6);
   max-width: 680px;
 }
 .ww-replybox {
@@ -696,7 +696,7 @@ kbd {
   gap: 10px;
   width: 100%;
   padding: 11px 16px !important;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04) !important;
+  border-bottom: 1px solid rgb(var(--bw-text-rgb, 255 255 255) / 0.04) !important;
 }
 .ww-room.on {
   background: rgb(var(--bw-accent-hi-rgb) / 0.07) !important;
@@ -755,7 +755,7 @@ kbd {
 .ww-pin {
   padding: 9px 10px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgb(var(--bw-text-rgb, 255 255 255) / 0.04);
   font-size: 13px;
 }
 .ww-empty {
@@ -991,9 +991,9 @@ html.ww-on:not(.ww-onb)
   width: auto !important;
   height: auto !important;
   max-width: none !important;
-  background-color: #050505;
-  border-left: 1px solid rgba(255, 255, 255, 0.08);
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background-color: var(--bw-pack-bg, #050505);
+  border-left: 1px solid rgb(var(--bw-text-rgb, 255 255 255) / 0.08);
+  border-top: 1px solid rgb(var(--bw-text-rgb, 255 255 255) / 0.08);
   border-top-left-radius: 16px;
   padding-left: max(24px, calc((100% - 760px) / 2)) !important;
   padding-right: max(24px, calc((100% - 760px) / 2)) !important;
@@ -1026,7 +1026,7 @@ html.ww-on body > .fixed.inset-0.items-end > * {
   max-height: calc(100vh - 64px) !important;
   overflow-y: auto;
   border-radius: 24px !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border: 1px solid rgb(var(--bw-text-rgb, 255 255 255) / 0.1) !important;
   padding-bottom: 20px !important;
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
   animation: ww-page-in 0.16s ease-out;
@@ -1163,7 +1163,7 @@ html.ww-on body > .fixed.inset-0.items-end > * {
 /* Chat: the open room (ChatPage Conversation, portalled) is the middle column; room details the third. */
 html.ww-on:not(.ww-onb) body > .fixed.right-0.z-\[110\] {
   border-radius: var(--ww-radius, 16px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgb(var(--bw-text-rgb, 255 255 255) / 0.08);
   overflow: hidden;
 }
 .ww-room-details {
@@ -1178,15 +1178,15 @@ html.ww-on:not(.ww-onb) body > .fixed.right-0.z-\[110\] {
   flex-direction: column;
   gap: 0;
   border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: #0b0b0d;
-  color: #f2f2f0;
+  border: 1px solid rgb(var(--bw-text-rgb, 255 255 255) / 0.08);
+  background: var(--bw-card, #0b0b0d);
+  color: var(--bw-text, #f2f2f0);
   font-family: Inter, system-ui, sans-serif;
   font-size: 13px;
 }
 .ww-room-details section {
   padding: 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgb(var(--bw-text-rgb, 255 255 255) / 0.08);
 }
 .ww-room-details section:last-child {
   border-bottom: 0;
@@ -1197,7 +1197,7 @@ html.ww-on:not(.ww-onb) body > .fixed.right-0.z-\[110\] {
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #8e8e89;
+  color: var(--bw-muted, #8e8e89);
 }
 .ww-rd-title {
   font-size: 16px;
@@ -1205,7 +1205,7 @@ html.ww-on:not(.ww-onb) body > .fixed.right-0.z-\[110\] {
 }
 .ww-rd-sub,
 .ww-rd-note {
-  color: #8e8e89;
+  color: var(--bw-muted, #8e8e89);
   font-size: 12px;
   margin-top: 2px;
 }
@@ -1220,7 +1220,7 @@ html.ww-on:not(.ww-onb) body > .fixed.right-0.z-\[110\] {
   margin: 0;
 }
 .ww-rd-dl dt {
-  color: #8e8e89;
+  color: var(--bw-muted, #8e8e89);
 }
 .ww-rd-dl dd {
   margin: 0;

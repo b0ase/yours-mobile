@@ -25,33 +25,222 @@
   border-color: var(--bw-trim);
 }
 
-/* Executive: gloss black with a gold hairline and a soft sheen; small caps for headings. */
-:root[data-bw-theme='executive'] body {
-  background-image: linear-gradient(160deg, rgb(255 255 255 / 0.05), transparent 38%, rgb(255 255 255 / 0.02) 70%);
-  background-attachment: fixed;
+/* ── Theme packs (owner, 15 Oct 2026: "restyle the WHOLE app, not just buttons") ─────────────────────────
+   src/mobile/theme/accents.ts sets data-bw-pack="dark|light" on <html> for a full pack or a mix, plus the token
+   variables (--bw-text, --bw-muted, --bw-line, --bw-card, --bw-card2, --bw-nav, --bw-success, --bw-danger …).
+   Most screens are Tailwind utility classes with fixed colours; these rules move the common ones onto the
+   tokens. Gold never sets data-bw-pack, so none of this applies to it. */
+:root[data-bw-pack] body {
+  background-color: var(--bw-pack-bg);
+  color: var(--bw-text);
 }
-:root[data-bw-theme='executive'] .bw-cdes-top b,
-:root[data-bw-theme='executive'] h1,
-:root[data-bw-theme='executive'] h2 {
-  font-variant: small-caps;
-  letter-spacing: 0.04em;
+:root[data-bw-pack] .text-white,
+:root[data-bw-pack] .text-\[\#F2F2F0\],
+:root[data-bw-pack] .text-\[\#f4f1e8\],
+:root[data-bw-pack] .text-\[\#ddd\],
+:root[data-bw-pack] .text-\[\#D0D5DD\],
+:root[data-bw-pack] .text-\[\#c9ccd1\] {
+  color: var(--bw-text);
 }
-:root[data-bw-theme='executive'] .bw-wcard-face {
-  box-shadow:
-    0 18px 40px rgb(0 0 0 / 0.6),
-    inset 0 1px 0 rgb(255 255 255 / 0.18),
-    inset 0 0 0 1px var(--bw-trim);
+:root[data-bw-pack] .text-\[\#98A2B3\],
+:root[data-bw-pack] .text-\[\#667085\],
+:root[data-bw-pack] .text-\[\#8a8f98\],
+:root[data-bw-pack] .text-\[\#a3a8b1\],
+:root[data-bw-pack] .text-\[\#6b7079\],
+:root[data-bw-pack] .text-\[\#5b6069\],
+:root[data-bw-pack] .text-gray-400,
+:root[data-bw-pack] .text-gray-500,
+:root[data-bw-pack] .text-white\/60,
+:root[data-bw-pack] .text-white\/70,
+:root[data-bw-pack] .text-white\/80 {
+  color: var(--bw-muted);
+}
+:root[data-bw-pack] .text-\[\#F97066\],
+:root[data-bw-pack] .text-\[\#ff6b6b\],
+:root[data-bw-pack] .text-\[\#b42318\] {
+  color: var(--bw-danger);
+}
+:root[data-bw-pack] .text-\[\#2ecc71\] {
+  color: var(--bw-success);
+}
+:root[data-bw-pack] .bg-black,
+:root[data-bw-pack] .bg-\[\#010101\],
+:root[data-bw-pack] .bg-\[\#000\],
+:root[data-bw-pack] .bg-\[\#08090b\] {
+  background-color: var(--bw-pack-bg);
+}
+:root[data-bw-pack] .bg-\[\#17191E\],
+:root[data-bw-pack] .bg-\[\#0b0c0f\],
+:root[data-bw-pack] .bg-\[\#111\],
+:root[data-bw-pack] .bg-\[\#111216\],
+:root[data-bw-pack] .bg-\[\#101114\],
+:root[data-bw-pack] .bg-\[\#0F1013\],
+:root[data-bw-pack] .bg-\[\#0f1013\],
+:root[data-bw-pack] .bg-\[\#121316\],
+:root[data-bw-pack] .bg-\[\#111113\],
+:root[data-bw-pack] .bg-\[\#0d0f12\],
+:root[data-bw-pack] .bg-\[\#0d0e11\] {
+  background-color: var(--bw-card);
+}
+:root[data-bw-pack] .bg-\[\#1f2128\],
+:root[data-bw-pack] .bg-\[\#22252c\],
+:root[data-bw-pack] .bg-\[\#1e2127\],
+:root[data-bw-pack] .bg-\[\#1d2026\],
+:root[data-bw-pack] .hover\:bg-\[\#1f2128\]:hover {
+  background-color: var(--bw-card2);
+}
+:root[data-bw-pack] .bg-\[\#2b2f36\] {
+  background-color: var(--bw-line);
+}
+:root[data-bw-pack] .bg-white\/5 {
+  background-color: rgb(var(--bw-text-rgb) / 0.05);
+}
+:root[data-bw-pack] .bg-white\/10 {
+  background-color: rgb(var(--bw-text-rgb) / 0.1);
+}
+:root[data-bw-pack] .border-\[\#2b2f36\],
+:root[data-bw-pack] .border-\[\#1f2127\],
+:root[data-bw-pack] .border-\[\#1C1C1E\],
+:root[data-bw-pack] .border-white\/5,
+:root[data-bw-pack] .border-white\/10,
+:root[data-bw-pack] .divide-white\/10 > * + * {
+  border-color: var(--bw-line);
+}
+:root[data-bw-pack] input,
+:root[data-bw-pack] textarea,
+:root[data-bw-pack] select {
+  color: var(--bw-text);
+}
+:root[data-bw-pack] input::placeholder,
+:root[data-bw-pack] textarea::placeholder {
+  color: var(--bw-muted);
+}
+:root[data-bw-pack] h1,
+:root[data-bw-pack] h2,
+:root[data-bw-pack] h3 {
+  font-weight: var(--bw-weight-head);
+}
+/* Sheets, cards and the tab bar: the pack's corners, shadow and nav colour. */
+:root[data-bw-pack] .yours-sheet {
+  background: var(--bw-card);
+  color: var(--bw-text);
+  border-radius: var(--bw-radius-card) var(--bw-radius-card) 0 0;
+  box-shadow: var(--bw-shadow);
+  border-top: 1px solid var(--bw-line);
+}
+:root[data-bw-pack] .rounded-xl,
+:root[data-bw-pack] .rounded-2xl {
+  border-radius: var(--bw-radius-card);
+}
+:root[data-bw-pack] .yours-sheet-secondary,
+:root[data-bw-pack] .bw-pill-outline {
+  border-color: var(--bw-line) !important;
+  color: var(--bw-text) !important;
+}
+:root[data-bw-pack] .yours-toast {
+  background: var(--bw-card2);
+  color: var(--bw-text);
+}
+/* Text on photos, video and dark scrims stays white whatever the pack. */
+:root[data-bw-pack]
+  :is(.bg-black\/50, .bg-black\/60, .bg-black\/65, .bg-black\/70, .bg-black\/80, [class*='bg-gradient-to'])
+  .text-white,
+:root[data-bw-pack] :is(.bg-black\/50, .bg-black\/60, .bg-black\/65, .bg-black\/70, .bg-black\/80).text-white {
+  color: #fff;
+}
+/* Light packs: white-on-dark artwork (logos) stays legible, scrollbars and pickers go light. */
+:root[data-bw-pack='light'] img[src*='white-logo'] {
+  filter: invert(1);
+}
+:root[data-bw-pack='light'] .bg-black\/60,
+:root[data-bw-pack='light'] .bg-black\/70 {
+  backdrop-filter: blur(6px);
 }
 
-/* Cyberpunk: monospaced labels, glowing green edges. */
+/* Executive: crisp black and white, like b0ase.com. Hairline borders, square corners, mono numbers, tracking. */
+:root[data-bw-theme='executive'] h1,
+:root[data-bw-theme='executive'] h2,
+:root[data-bw-theme='executive'] .bw-cdes-top b {
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+:root[data-bw-theme='executive'] .bw-wcard-face {
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.35);
+}
+:root[data-bw-theme='executive'] .bw-pill-gold,
+:root[data-bw-theme='executive'] .yours-sheet-primary {
+  background: #fff !important;
+  color: #000 !important;
+}
+
+/* Cyberpunk: neon magenta with a cyan edge, scanlines on the page, squarer corners. */
+:root[data-bw-theme='cyber'] body {
+  background-image:
+    repeating-linear-gradient(0deg, rgb(255 255 255 / 0.025) 0 1px, transparent 1px 3px),
+    radial-gradient(120% 60% at 100% 0%, rgb(255 43 214 / 0.12), transparent 60%),
+    radial-gradient(90% 50% at 0% 100%, rgb(0 240 255 / 0.1), transparent 60%);
+  background-attachment: fixed;
+}
 :root[data-bw-theme='cyber'] .bw-pill-outline {
   border-color: var(--bw-trim) !important;
-  box-shadow: 0 0 8px rgb(0 255 102 / 0.25);
+  box-shadow: 0 0 8px rgb(0 240 255 / 0.35);
 }
 :root[data-bw-theme='cyber'] .bw-wcard-face {
   box-shadow:
-    0 0 18px rgb(0 255 102 / 0.18),
+    0 0 22px rgb(255 43 214 / 0.3),
     inset 0 0 0 1px var(--bw-trim);
+}
+:root[data-bw-theme='cyber'] h1,
+:root[data-bw-theme='cyber'] h2 {
+  text-shadow: 0 0 10px rgb(255 43 214 / 0.55);
+}
+@media (prefers-reduced-motion: no-preference) {
+  :root[data-bw-theme='cyber'] .bw-pill-gold {
+    animation: bw-cyber-pulse 2.4s ease-in-out infinite;
+  }
+}
+@keyframes bw-cyber-pulse {
+  50% {
+    box-shadow:
+      0 0 22px rgb(255 43 214 / 0.75),
+      0 0 4px rgb(0 240 255 / 1);
+  }
+}
+
+/* Paper: soft paper grain and an ink hairline under the bars. */
+:root[data-bw-theme='paper'] body {
+  background-image: radial-gradient(rgb(120 90 40 / 0.06) 1px, transparent 1px);
+  background-size: 4px 4px;
+}
+
+/* Sunset: a warm horizon glow behind everything. */
+:root[data-bw-theme='sunset'] body {
+  background-image: radial-gradient(140% 70% at 50% 0%, rgb(255 120 80 / 0.16), transparent 65%);
+  background-attachment: fixed;
+}
+/* Midnight: faint starfield. */
+:root[data-bw-theme='midnight'] body {
+  background-image:
+    radial-gradient(1px 1px at 20% 30%, rgb(255 255 255 / 0.35), transparent),
+    radial-gradient(1px 1px at 70% 12%, rgb(255 255 255 / 0.25), transparent),
+    radial-gradient(1px 1px at 85% 60%, rgb(255 255 255 / 0.3), transparent),
+    radial-gradient(120% 60% at 50% 0%, rgb(110 168 255 / 0.1), transparent 60%);
+  background-attachment: fixed;
+}
+
+/* High contrast: solid outlines on every control, underlined links, no faint fills. */
+:root[data-bw-theme='contrast'] button,
+:root[data-bw-theme='contrast'] input,
+:root[data-bw-theme='contrast'] .rounded-xl {
+  outline: 1px solid rgb(255 255 255 / 0.85);
+  outline-offset: -1px;
+}
+:root[data-bw-theme='contrast'] a {
+  text-decoration: underline;
+}
+:root[data-bw-theme='contrast'] :focus-visible {
+  outline: 3px solid var(--bw-accent) !important;
+  outline-offset: 2px;
 }
 
 /* Pastel: soft rounded everything and a cloud/star/rainbow corner on the card (our own SVG). */
@@ -70,13 +259,37 @@
   background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 44 28'><path d='M4 22a8 8 0 0 1 16 0' fill='none' stroke='%23FFD1E3' stroke-width='2.5'/><path d='M7 22a5 5 0 0 1 10 0' fill='none' stroke='%23A8EBCF' stroke-width='2.5'/><path d='M10 22a2 2 0 0 1 4 0' fill='none' stroke='%239FD8FF' stroke-width='2.5'/><path d='M24 22h14a4 4 0 0 0 0-8 6 6 0 0 0-11-2 4 4 0 0 0-3 10z' fill='%23fff'/><path d='M36 3l1.2 2.8L40 7l-2.8 1.2L36 11l-1.2-2.8L32 7l2.8-1.2z' fill='%23FFF3A8'/></svg>")
     no-repeat center / contain;
 }
-@media (prefers-reduced-motion: no-preference) {
-  :root[data-bw-theme='cyber'] .bw-pill-gold {
-    animation: bw-cyber-pulse 2.4s ease-in-out infinite;
-  }
+
+/* Screens drawn over the animated obsidian canvas (unlock, onboarding) keep Gold's light-on-dark tokens, so
+   text never lands dark on the dark art in a light pack. */
+:root[data-bw-pack] div:has(> canvas.absolute.inset-0) {
+  --bw-text: #ffffff;
+  --bw-text-rgb: 255 255 255;
+  --bw-muted: #98a2b3;
+  --bw-card: #17191e;
+  --bw-card2: #1f2128;
+  --bw-line: #2b2f36;
+  color: #fff;
 }
-@keyframes bw-cyber-pulse {
-  50% {
-    box-shadow: 0 0 18px rgb(0 255 102 / 0.6);
-  }
+/* Icons coloured by attribute (lucide color="#fff"): CSS outranks the presentation attribute. */
+:root[data-bw-pack] svg:is([stroke='#fff'], [stroke='#FFFFFF'], [stroke='#F2F2F0'], [stroke='white']) {
+  stroke: var(--bw-text);
+}
+:root[data-bw-pack] svg:is([stroke='#98A2B3'], [stroke='#8a8f98'], [stroke='#aaa']) {
+  stroke: var(--bw-muted);
+}
+:root[data-bw-pack] :is(.bg-black\/50, .bg-black\/60, .bg-black\/70, .bg-black\/80) svg[stroke='#fff'] {
+  stroke: #fff;
+}
+/* Text on accent fills. */
+:root[data-bw-pack] .bw-pill-gold,
+:root[data-bw-pack] .yours-sheet-primary {
+  color: var(--bw-on-accent) !important;
+}
+/* The obsidian ambient video behind Wallet / Apps belongs to Gold; packs show their own page instead. */
+:root[data-bw-pack] .bw-videobg {
+  display: none;
+}
+:root[data-bw-pack] .ww-bg {
+  display: none;
 }

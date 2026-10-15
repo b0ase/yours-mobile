@@ -1,5 +1,6 @@
 import { bavatarSvg } from '../bavatar/bavatar';
 import { currentAccentId } from '../theme/accent';
+import { accentById } from '../theme/accents';
 import { tintSvg } from '../theme/tint';
 /**
  * Account avatar. Shown next to the handle in the identity row under the TopNav, the account
@@ -131,7 +132,7 @@ export function bavatarDataUri(identityPubKey: string | null | undefined): strin
   if (!/^0[23][0-9a-f]{64}$/.test(key)) return '';
   // Shown in the app accent (Theme → App colours); gold leaves the art as drawn.
   const accent = currentAccentId();
-  const ck = accent + ':' + key;
+  const ck = accent + accentById(accent).accent + ':' + key;
   let uri = bavatarCache.get(ck);
   if (!uri) {
     uri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(tintSvg(bavatarSvg(key, { size: 128 }), accent));
