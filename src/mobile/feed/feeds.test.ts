@@ -42,7 +42,7 @@ describe('feed colours', () => {
 
 describe('feed list', () => {
   test('bWalletX build: core, then bApps led by bMovies, bNews, bMusic, then Other', () => {
-    expect(FEEDS.slice(0, 4).map((f) => f.id)).toEqual(['home', 'bmovies', 'bnews', 'bmusic']);
+    expect(FEEDS.slice(0, 5).map((f) => f.id)).toEqual(['home', 'bapps', 'bmovies', 'bnews', 'bmusic']);
     const groups = feedGroups();
     expect(groups.map((g) => g.label)).toEqual(['bApps', 'Other']);
     for (const id of ['bradio', 'bgame', 'b3d', 'bphotos', 'bbooks', 'writer', 'bsocial'])
@@ -82,7 +82,7 @@ describe('feed row', () => {
   });
   test('pinning moves a bApp to the front without a duplicate; a venture joins the row', () => {
     const row = rowFeeds(['bsocial', 'vexvoid', 'bnews']);
-    expect(row.slice(0, 6)).toEqual([...FIXED_ROW, 'bsocial', 'vexvoid']);
+    expect(row.slice(0, FIXED_ROW.length + 2)).toEqual([...FIXED_ROW, 'bsocial', 'vexvoid']);
     expect(row.filter((id) => id === 'bsocial')).toHaveLength(1);
     expect(new Set(row).size).toBe(row.length);
     // Unpinned: bSocial drops back to its place; the venture leaves.

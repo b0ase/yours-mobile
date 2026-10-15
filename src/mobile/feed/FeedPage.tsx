@@ -196,13 +196,18 @@ import {
   movePin,
   type FeedId,
 } from './feeds';
-import { BMOVIES_FEED_ENABLED, TOKENBLASTER_ENABLED } from '../storeBuild';
+import { BEX_REEL_ENABLED, BMOVIES_FEED_ENABLED, TOKENBLASTER_ENABLED } from '../storeBuild';
 
 // bWalletX only: the store build has no bMovies reel, not even as code (storeBuild.ts).
 const BmoviesReel = BMOVIES_FEED_ENABLED ? lazy(() => import('./bmovies/BmoviesReel')) : null;
 // Feed › b3D: the Exchange's 3D listings with live models. bWalletX only (no 3D market in a store build).
 const B3dFeed = TOKENBLASTER_ENABLED ? lazy(() => import('./B3dFeed')) : null;
 const NewsVideos = BMOVIES_FEED_ENABLED ? lazy(() => import('./bmovies/NewsVideos')) : null;
+// Feed › bApps (every build) and Feed › bExchange (bWalletX only: BEX_REEL_ENABLED drops the chunk from a store build).
+const BappsReel = lazy(() => import('./reels/BappsReel'));
+const BexReel = BEX_REEL_ENABLED ? lazy(() => import('./reels/BexReel')) : null;
+/** Full-screen reels: a horizontal swipe doesn't change feed there and the Post button is hidden. */
+const isReel = (f: FeedId) => f === 'bmovies' || f === 'bmusic' || f === 'bapps' || f === 'bexchange';
 
 /**
  * Chat → Feed: a Twitter-style timeline over Bitcoin Schema posts (B + MAP + AIP), read from
@@ -1678,7 +1683,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
     // bNews cards close on a left swipe, so there only a right swipe changes feed.
     if (!dir || (news && dir === 1 && (e.target as HTMLElement).closest?.('[data-news-card]'))) return;
     // In the bMovies / bMusic reel a horizontal swipe is a 1p buy/sell; feeds change via the chips there.
-    if (feed === 'bmovies' || feed === 'bmusic') return;
+    if (isReel(feed)) return;
     const to = stepFeed(pins, feed, dir);
     if (to) pickFeed(to);
   };
@@ -2065,6 +2070,14 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
                 <BmoviesReel key={feed} brand={feed} />
               </Suspense>
             </>
+          ) : feed === 'bapps' ? (
+            <Suspense fallback={null}>
+              <BappsReel />
+            </Suspense>
+          ) : feed === 'bexchange' && BexReel ? (
+            <Suspense fallback={null}>
+              <BexReel />
+            </Suspense>
           ) : feed === 'b3d' && B3dFeed ? (
             <Suspense fallback={null}>
               <B3dFeed />
@@ -2124,8 +2137,8 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
         />
       )}
 
-      {/* No Post button over the bMovies / bMusic reel: it covered BUY / SELL / REGISTER. */}
-      {!(feed === 'bmovies' || feed === 'bmusic') && (
+      {/* No Post button over a reel (bMovies, bMusic, bApps, bExchange): it covered the card's buttons. */}
+      {!isReel(feed) && (
         <button
           onClick={() => setComposing({ replyTo: null })}
           aria-label="New post"

@@ -27,6 +27,8 @@ import { TokenIcon } from './TokenIcon';
 import { PriceChart } from './PriceChart';
 import { chartSeries } from './chartSeries';
 import { TokenLabelsRow } from './Categories';
+import { LAUNCH_DISCLAIMER, localLaunches } from './launch/launch';
+import { registryLaunches } from './launch/launchNet';
 import {
   addHistory,
   bsvLabel,
@@ -61,6 +63,20 @@ const Money = ({ sats, rate }: { sats: number; rate: number }) => {
 type Pending = { listing: Listing; perToken: number };
 
 /** /exchange/<token>: chart, order book (live 1Sat listings), buy + sell, your listings and buys. */
+/** A coin made on our Launchpad (this device's or the shared registry's launches) shows the Launchpad disclaimer. */
+const useLaunched = (id: string): boolean => {
+  const [launched, setLaunched] = useState(() => localLaunches().some((l) => l.tokenId === id.toLowerCase()));
+  useEffect(() => {
+    let live = true;
+    if (launched) return;
+    void registryLaunches().then((r) => live && r.some((l) => l.tokenId === id.toLowerCase()) && setLaunched(true));
+    return () => {
+      live = false;
+    };
+  }, [id, launched]);
+  return launched;
+};
+
 export const TradeView = ({
   id,
   rate,
@@ -78,6 +94,7 @@ export const TradeView = ({
   const { addSnackbar } = useSnackbar();
   const ref = useMemo(() => ({ kind: 'bsv21' as const, id, key: `bsv21:${id}` }), [id]);
   const [meta, setMeta] = useState<RoomMeta | null | undefined>(undefined);
+  const launched = useLaunched(id);
   const [market, setMarket] = useState<RoomMarket | null>(null);
   const [trades, setTrades] = useState<Trade[]>([]);
   const [tip, setTip] = useState(0);
@@ -194,6 +211,11 @@ export const TradeView = ({
           <Star size={18} color={GOLD} fill={fav ? GOLD : 'none'} />
         </button>
       </div>
+      {launched && (
+        <p className="text-[11px] m-0" style={{ color: MUTED }}>
+          Launched on the bWalletX Launchpad. {LAUNCH_DISCLAIMER}
+        </p>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
         {[

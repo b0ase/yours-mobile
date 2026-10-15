@@ -625,3 +625,53 @@ describe('BMOVIES_FEED_ENABLED: the bMovies feed is not in a store build', () =>
     );
   });
 });
+
+/** Feed › bExchange (the token reel) is bWalletX only; Feed › bApps is in every build without Tokenise in a store build. */
+describe('BEX_REEL_ENABLED: the bExchange reel is not in a store build', () => {
+  const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  const cond = (text: string, name: string) =>
+    (new RegExp(`export const ${name}: boolean =\\s*!?\\(?([^;]*?)\\)?;`, 's').exec(text)?.[1] ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  const feedIds = (env: Record<string, string>) => {
+    const r = Bun.spawnSync(
+      [
+        'bun',
+        '-e',
+        "const f = await import('./src/mobile/feed/feeds.ts'); console.log(JSON.stringify(f.FEEDS.map((x) => x.id)));",
+      ],
+      { env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env } },
+    );
+    return JSON.parse(r.stdout.toString()) as string[];
+  };
+  test('inverse of STORE_BUILD, from the same literal env', async () => {
+    const { BEX_REEL_ENABLED } = await import('./storeBuild');
+    expect(BEX_REEL_ENABLED).toBe(!STORE_BUILD);
+    const s = src('./storeBuild.ts');
+    expect(cond(s, 'BEX_REEL_ENABLED')).toBe(cond(s, 'STORE_BUILD'));
+  });
+  test('store builds list bApps but no bExchange feed; bWalletX lists both, bApps right after Home', () => {
+    for (const env of [{ VITE_STORE_BUILD: '1' }, { VITE_CHANNEL: 'ios-store' }, { VITE_CHANNEL: 'android-play' }]) {
+      const ids = feedIds(env);
+      expect(ids).not.toContain('bexchange');
+      expect(ids.slice(0, 2)).toEqual(['home', 'bapps']);
+    }
+    const x = feedIds({});
+    expect(x).toContain('bexchange');
+    expect(x.slice(0, 2)).toEqual(['home', 'bapps']);
+  });
+  test('the reel is a lazy chunk behind the flag; Tokenise is behind MARKET_ENABLED', () => {
+    const page = src('./feed/FeedPage.tsx');
+    expect(page).toMatch(/const BexReel = BEX_REEL_ENABLED \? lazy\(\(\) => import\('\.\/reels\/BexReel'\)\) : null;/);
+    expect(page).not.toMatch(/^import (?!type )[^;]*from '\.\/reels\//m);
+    expect(src('./feed/feeds.ts')).toContain("BEX_REEL_ENABLED ? [['bexchange', 'bExchange'");
+    const bapps = src('./feed/reels/BappsReel.tsx');
+    expect(bapps).toContain("const LAUNCH_ROUTE = MARKET_ENABLED ? '/m/exchange/launchpad/new' : '';");
+    expect(bapps).not.toMatch(/from '\.\.\/\.\.\/exchange\//);
+  });
+  test('the store audit lists the bExchange reel grep strings', () => {
+    expect(readFileSync(new URL('../../docs/STORE-AUDIT.md', import.meta.url), 'utf8')).toContain(
+      'Advert made by the creator|Tokens can lose all their value|Every token, one card each',
+    );
+  });
+});

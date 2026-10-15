@@ -49,6 +49,7 @@ describe('launch', () => {
       'Create token',
       'Supply to your wallet',
       'Inscribe icon',
+      'Coin card on-chain',
       "Open holders' room",
       'Network fee',
       'Launch fee (flat)',
@@ -69,6 +70,8 @@ import {
   cleanOptions,
   defaultLaunchOptions,
   hasMapExtras,
+  LAUNCH_DISCLAIMER,
+  launchPrefill,
   launchMapFields,
   mergeLaunches,
   parseLaunchList,
@@ -81,9 +84,24 @@ const CATS = ['games', 'memes'];
 const opts = (o: Partial<ReturnType<typeof defaultLaunchOptions>>) => ({ ...defaultLaunchOptions(), ...o });
 
 describe('advanced options', () => {
-  it('defaults are valid and add nothing on-chain', () => {
+  it('defaults are valid; the coin card (with the disclaimer) is always written', () => {
     expect(validateOptions(defaultLaunchOptions(), CATS)).toBeNull();
-    expect(hasMapExtras(defaultLaunchOptions())).toBe(false);
+    expect(hasMapExtras(defaultLaunchOptions())).toBe(true);
+    const f = { ...emptyLaunchForm(), name: 'Frog', ticker: 'FROG' };
+    expect(launchMapFields(f, defaultLaunchOptions()).slice(-2)).toEqual(['disclaimer', LAUNCH_DISCLAIMER]);
+  });
+
+  it('carries the owner-approved no-promises disclaimer', () => {
+    expect(LAUNCH_DISCLAIMER).toBe(
+      'No returns, dividends or price rises are promised. There is no promise the money will be spent on the project, that it will succeed, or that it will become a company.',
+    );
+  });
+
+  it('prefills from a query string (a bApp Tokenise), dropping bad values', () => {
+    const p = launchPrefill('?name=bWriter&description=Write%20and%20sell&website=https%3A%2F%2Fx.app&category=apps');
+    expect(p.form).toEqual({ name: 'bWriter', description: 'Write and sell' });
+    expect(p.options).toEqual({ website: 'https://x.app', category: 'apps' });
+    expect(launchPrefill('?website=http%3A%2F%2Fx.app&category=Bad%20Cat').options).toEqual({});
   });
 
   it('validates links, handles, category and room entry', () => {
@@ -118,6 +136,8 @@ describe('advanced options', () => {
       'frog',
       'category',
       'memes',
+      'disclaimer',
+      LAUNCH_DISCLAIMER,
     ]);
   });
 
@@ -150,5 +170,13 @@ describe('launch list', () => {
     const m = mergeLaunches(reg, local);
     expect(m.map((l) => l.ticker)).toEqual(['B', 'A']);
     expect(m[1].name).toBe('reg');
+  });
+  it('keeps an https advert video only', () => {
+    const [a, b] = parseLaunchList([
+      { token_id: id('a'), ticker: 'A', video: 'https://v.example/ad.mp4' },
+      { token_id: id('b'), ticker: 'B', video: 'javascript:alert(1)' },
+    ]);
+    expect(a.video).toBe('https://v.example/ad.mp4');
+    expect(b.video).toBeNull();
   });
 });
