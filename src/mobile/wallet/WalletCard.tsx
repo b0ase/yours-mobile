@@ -52,7 +52,6 @@ import { usePictureReturn } from './pictureReturn';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { formatUSD } from '../../utils/format';
-import { fiatSymbol } from '../../utils/displayCurrency';
 import { useDisplayCurrency } from '../../hooks/useDisplayCurrency';
 import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
@@ -84,7 +83,9 @@ import { displayedSats, refreshDelay } from './live/liveLogic';
 import { useCountUp } from './live/useCountUp';
 import { BALANCE_CARDS_ENABLED } from '../storeBuild';
 import { AddressBookPull } from './AddressBook';
-import { cardSats, memberSince, cardBsv, loadCardUnit, saveCardUnit, type CardUnit } from './walletCardText';
+import { cardSats, memberSince, cardBsv } from './walletCardText';
+import { useCardUnit } from './cardValue';
+import { CardUnitSwitch } from './CardUnitSwitch';
 /** Balance cards: a lazy chunk, absent from store builds (storeBuild.ts). */
 const BalanceCarousel = BALANCE_CARDS_ENABLED
   ? lazy(() => import('./BalanceCarousel').then((m) => ({ default: m.BalanceCarousel })))
@@ -216,12 +217,8 @@ const WalletCardInner = ({
   const { chromeStorageService } = useServiceContext();
   const { addSnackbar } = useSnackbar();
   const [flipped, setFlipped] = useState(false);
-  const [unit, setUnit] = useState<CardUnit>(loadCardUnit);
-  const pickUnit = (u: CardUnit) => (e: MouseEvent) => {
-    e.stopPropagation();
-    setUnit(u);
-    saveCardUnit(u);
-  };
+  // Shared with every balance card (cardValue.ts): flipping it here flips them all.
+  const unit = useCardUnit();
   const [handleOpen, setHandleOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
   // Tap the avatar: "Your picture" (X / Google photo, an NFT, or the bAvatar). Back from X / Google lands here.
@@ -651,19 +648,7 @@ const WalletCardInner = ({
                   )}
                 </div>
                 {/* $/BSV switch: same row as the address, right (owner, 9 Oct 2026). */}
-                <div className="bw-wcard-unit" role="group" aria-label="Balance unit">
-                  {(['usd', 'bsv'] as const).map((u) => (
-                    <button
-                      key={u}
-                      type="button"
-                      aria-pressed={unit === u}
-                      className={unit === u ? 'is-on' : undefined}
-                      onClick={pickUnit(u)}
-                    >
-                      {u === 'usd' ? fiatSymbol(fx) : 'BSV'}
-                    </button>
-                  ))}
-                </div>
+                <CardUnitSwitch fx={fx} />
               </div>
               {since && (
                 <div className="bw-wcard-since">
