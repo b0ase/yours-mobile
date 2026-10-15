@@ -93,7 +93,8 @@ import { OrdinalsAddress } from '../mobile/wallet/OrdinalsAddress';
 import { useTabHome } from '../mobile/tabs/useTabHome';
 import { SendCard } from '../mobile/wallet/send/SendCard';
 import { isMainnetAddress } from '../mobile/names/address';
-import { rememberSent } from '../mobile/wallet/send/sendLogic';
+import { pendingMeta, rememberSent } from '../mobile/wallet/send/sendLogic';
+import { payeeNote } from '../mobile/wallet/send/payee';
 import { TokenSwipe } from '../mobile/wallet/TokenSwipe';
 import { CoinRow } from '../mobile/wallet/CoinRow';
 import { IS_EXTENSION } from '../mobile/extension';
@@ -1001,6 +1002,8 @@ export const BsvWallet = () => {
     const lineItems: SendLineItem[] = addressOrder.map((addr) => ({
       address: addr,
       amount: `${formatNumberWithCommasAndDecimals(consolidated.get(addr)! / BSV_DECIMAL_CONVERSION, 8)} BSV`,
+      // Payee safety (15 Oct 2026): name, bAvatar, key fingerprint, first payment, look-alike warning.
+      payee: payeeNote(identityAddress, addr, pendingMeta(addr)),
     }));
 
     setSendConfirmation({
