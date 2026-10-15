@@ -1175,25 +1175,83 @@ export const Settings = () => {
     }
   };
 
+  // Live step + elapsed seconds for the two recovery buttons (owner, 15 Oct 2026: "Checking…" forever).
+  const [recoverStep, setRecoverStep] = useState<{ mined?: string; txid?: string }>({});
+  const [recoverStartedAt, setRecoverStartedAt] = useState<{ mined?: number; txid?: number }>({});
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const onMsg = (m: { action?: string; data?: { kind?: 'mined' | 'txid'; step?: string } }) => {
+      if (m?.action !== 'RECOVER_PROGRESS' || !m.data?.kind) return;
+      const { kind, step } = m.data;
+      setRecoverStep((p) => ({ ...p, [kind]: step }));
+    };
+    chrome.runtime.onMessage.addListener(onMsg);
+    return () => chrome.runtime.onMessage.removeListener(onMsg);
+  }, []);
+  useEffect(() => {
+    if (!recoverStartedAt.mined && !recoverStartedAt.txid) return;
+    const t = window.setInterval(() => setTick((n) => n + 1), 1000);
+    return () => window.clearInterval(t);
+  }, [recoverStartedAt]);
+  const elapsed = (k: 'mined' | 'txid') =>
+    recoverStartedAt[k] ? ` (${Math.floor((Date.now() - recoverStartedAt[k]!) / 1000)} s)` : '';
+  const [recoverFailedMined, setRecoverFailedMined] = useState(false);
+  const [recoverFailedTxid, setRecoverFailedTxid] = useState(false);
   const [recovering, setRecovering] = useState(false);
   const [recoverResult, setRecoverResult] = useState('');
   const handleRecoverMined = async () => {
     if (recovering) return;
     setRecovering(true);
     setRecoverResult('');
+    setRecoverFailedMined(false);
+    setRecoverStep((p) => ({ ...p, mined: 'Starting…' }));
+    setRecoverStartedAt((p) => ({ ...p, mined: Date.now() }));
     try {
       const r = await sendMessageAsync<{ success: boolean; error?: string; data?: { summary?: string } }>({
         action: 'STORAGE_RECOVER_MINED',
       });
-      const text = r?.data?.summary ?? r?.error ?? 'Nothing to restore';
+      const text = r?.data?.summary ?? r?.error ?? 'No answer from the wallet. Try again.';
       setRecoverResult(text);
+      setRecoverFailedMined(!r?.success);
       addSnackbar(text, r?.success ? 'success' : 'error');
     } catch (error) {
       const text = error instanceof Error ? error.message : 'Check failed';
       setRecoverResult(text);
+      setRecoverFailedMined(true);
       addSnackbar(text, 'error');
     } finally {
       setRecovering(false);
+      setRecoverStartedAt((p) => ({ ...p, mined: undefined }));
+    }
+  };
+
+  const [recoverTxid, setRecoverTxid] = useState('');
+  const [recoveringTxid, setRecoveringTxid] = useState(false);
+  const [recoverTxidResult, setRecoverTxidResult] = useState('');
+  const handleRecoverTxid = async () => {
+    if (recoveringTxid) return;
+    setRecoveringTxid(true);
+    setRecoverTxidResult('');
+    setRecoverFailedTxid(false);
+    setRecoverStep((p) => ({ ...p, txid: 'Starting…' }));
+    setRecoverStartedAt((p) => ({ ...p, txid: Date.now() }));
+    try {
+      const r = await sendMessageAsync<{ success: boolean; error?: string; data?: { summary?: string } }>({
+        action: 'STORAGE_RECOVER_TXID',
+        txid: recoverTxid.trim(),
+      });
+      const text = r?.data?.summary ?? r?.error ?? 'No answer from the wallet. Try again.';
+      setRecoverTxidResult(text);
+      setRecoverFailedTxid(!r?.success && !/not mined|isn’t|belongs|already/i.test(text));
+      addSnackbar(text, r?.success ? 'success' : 'error');
+    } catch (error) {
+      const text = error instanceof Error ? error.message : 'Check failed';
+      setRecoverTxidResult(text);
+      setRecoverFailedTxid(true);
+      addSnackbar(text, 'error');
+    } finally {
+      setRecoveringTxid(false);
+      setRecoverStartedAt((p) => ({ ...p, txid: undefined }));
     }
   };
 
@@ -1248,7 +1306,7 @@ export const Settings = () => {
           <Divider />
           <SettingRow
             icon={<Wrench size={16} />}
-            label={recovering ? 'Checking…' : 'Find mined payments'}
+            label={recovering ? `${recoverStep.mined ?? 'Checking…'}${elapsed('mined')}` : recoverFailedMined ? 'Find mined payments · Try again' : 'Find mined payments'}
             description={
               recoverResult ||
               'Money sent or swept that is on chain but not showing (an interrupted send or sweep): check and restore it'
@@ -1285,10 +1343,48 @@ export const Settings = () => {
               />
               <Button
                 theme={theme}
-                type="secondary"
+                type="primary"
                 label="Search"
                 disabled={!missingTokenValid || repairOutcome === 'running'}
                 onClick={() => void handleRepairSync([missingTokenId.trim()])}
+              />
+            </div>
+          </div>
+          <Divider />
+          <div className="flex flex-col gap-2 px-4 py-3">
+            <span className="text-sm font-semibold">Recover a payment by transaction ID</span>
+            <span
+              className={
+                !recoveringTxid && /^(Checked|Restored|Found)/.test(recoverTxidResult ?? '')
+                  ? 'text-xs font-semibold'
+                  : 'text-xs opacity-70'
+              }
+              style={
+                !recoveringTxid && /^(Checked|Restored|Found)/.test(recoverTxidResult ?? '')
+                  ? { color: '#22c55e' }
+                  : undefined
+              }
+            >
+              {recoveringTxid
+                ? `${recoverStep.txid ?? 'Checking…'}${elapsed('txid')}`
+                : recoverTxidResult ||
+                'Money on chain that never showed up here (a sweep or send from this wallet)? Paste the transaction ID. Only coins this wallet’s records prove are yours are added.'}
+            </span>
+            <div className="flex gap-2">
+              <Input
+                theme={theme}
+                id="recover-txid"
+                placeholder="Transaction ID"
+                value={recoverTxid}
+                onChange={(e) => setRecoverTxid(e.target.value)}
+                style={{ flex: 1, margin: 0 }}
+              />
+              <Button
+                theme={theme}
+                type="primary"
+                label={recoveringTxid ? 'Checking…' : recoverFailedTxid ? 'Try again' : 'Recover'}
+                disabled={!/^[0-9a-fA-F]{64}$/.test(recoverTxid.trim()) || recoveringTxid}
+                onClick={() => void handleRecoverTxid()}
               />
             </div>
           </div>

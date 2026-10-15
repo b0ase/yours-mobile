@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { playQueue } from '../media/player';
 import { ownedOrigins, ownerSigner } from './ownership';
-import { fetchOwnedAudio, fetchPodcasts, type Podcast } from './podcasts';
+import { fetchOwnedAudio, fetchPodcasts, PodcastListedError, type Podcast } from './podcasts';
 
 const f = (u: string, i?: RequestInit) => fetch(u, i);
 
@@ -57,10 +57,17 @@ export const playPodcast = async (
   owned: boolean,
   ctx: ReturnType<typeof useServiceContext>['apiContext'],
   onExpand?: () => void,
-): Promise<'full' | 'preview' | 'none'> => {
-  const full = owned && ctx && p.nft ? await fetchOwnedAudio(f, p, ownerSigner(ctx, p.nft.origin)) : null;
+): Promise<'full' | 'preview' | 'listed' | 'none'> => {
+  let listed = false;
+  const full =
+    owned && ctx && p.nft
+      ? await fetchOwnedAudio(f, p, ownerSigner(ctx, p.nft.origin)).catch((e: unknown) => {
+          listed = e instanceof PodcastListedError;
+          return null;
+        })
+      : null;
   const url = full ?? p.previewUrl;
-  if (!url) return 'none';
+  if (!url) return listed ? 'listed' : 'none';
   playQueue(
     [
       {
@@ -76,5 +83,5 @@ export const playPodcast = async (
     ],
     0,
   );
-  return full ? 'full' : 'preview';
+  return full ? 'full' : listed ? 'listed' : 'preview';
 };

@@ -9,7 +9,7 @@
   gap: 8px;
   padding: 4px 4px 4px 4px;
   border-radius: 999px;
-  background: #050505;
+  background: var(--bw-pack-bg, #050505);
   border: 1px solid rgb(var(--bw-accent-hi-rgb) / 0.35);
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.7);
 }
@@ -24,14 +24,14 @@
   background: transparent;
   border: 0;
   outline: none;
-  color: #fff;
+  color: var(--bw-text, #fff);
   font-size: 14px;
   line-height: 20px;
   padding: 6px 4px;
   max-height: 120px;
 }
 .askb-input::placeholder {
-  color: #98a2b3;
+  color: var(--bw-muted, #98a2b3);
 }
 .askb-send {
   flex-shrink: 0;
@@ -112,14 +112,14 @@ html.ww-on .askb-chips {
 .askb-bubble.b {
   align-self: flex-start;
   background: rgba(16, 17, 20, 0.96);
-  color: #f2f2f0;
-  border: 1px solid #2b2f36;
+  color: var(--bw-text, #f2f2f0);
+  border: 1px solid var(--bw-line, #2b2f36);
 }
 .askb-bubble.note {
   align-self: flex-start;
   background: rgba(16, 17, 20, 0.96);
-  color: #98a2b3;
-  border: 1px solid #2b2f36;
+  color: var(--bw-muted, #98a2b3);
+  border: 1px solid var(--bw-line, #2b2f36);
   font-size: 12px;
 }
 .askb-bubble.err {

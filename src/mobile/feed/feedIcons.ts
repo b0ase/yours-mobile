@@ -5,6 +5,7 @@
  * its initial on its own colour.
  */
 import tokenblasterIcon from '../brand/apps/tokenblaster.png';
+import { TOKENBLASTER_ENABLED } from '../storeBuild';
 import { bappIconDef } from '../brand/bappIcons';
 import { feedDef, isFeedId, type FeedId } from './feeds';
 
@@ -16,7 +17,8 @@ export type FeedIcon =
   | { kind: 'letter'; letter: string };
 
 /** Ventures keep their own art; $b* apps use the bApp icon set (brand/bappIcons). */
-const APP_ICONS: Partial<Record<FeedId, string>> = { tokenblaster: tokenblasterIcon };
+// TokenBlaster's icon ships only where its feed does (TOKENBLASTER_ENABLED; store bundle carries neither).
+const APP_ICONS: Partial<Record<FeedId, string>> = TOKENBLASTER_ENABLED ? { tokenblaster: tokenblasterIcon } : {};
 
 const GLYPHS: Partial<Record<FeedId, FeedGlyph>> = { home: 'home' };
 
