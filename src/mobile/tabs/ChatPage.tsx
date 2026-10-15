@@ -1,4 +1,6 @@
 import { TipButton } from '../tip/TipButton';
+import type { AvatarPlace } from '../names/animatedAvatar';
+import { useAvatarPlayback } from '../names/useAvatarPlayback';
 import { claimIssuerAdmin } from '../chat/autoClaim';
 import { WIDE_ON } from '../wide/flag';
 import { RoomDetails } from '../wide/RoomDetails';
@@ -289,9 +291,12 @@ const Avatar = ({
   roomKey,
   src,
   issuer,
+  place = 'list',
 }: {
   title: string;
   size?: number;
+  /** Playback (names/animatedAvatar.ts): lists show a still frame; the open chat header animates. */
+  place?: AvatarPlace;
   roomKey?: string | null;
   /** A picture to use as is: a room's metadata.icon, a person's avatar. */
   src?: string | null;
@@ -306,9 +311,11 @@ const Avatar = ({
   );
   const [failed, setFailed] = useState<Set<string>>(() => new Set());
   const icon = candidates.find((u) => !failed.has(u)) ?? candidates[candidates.length - 1];
+  const play = useAvatarPlayback(icon, place);
   return (
     <img
-      src={icon}
+      {...play.handlers}
+      src={play.src}
       alt=""
       onError={() => setFailed((cur) => (cur.has(icon) ? cur : new Set(cur).add(icon)))}
       loading="lazy"
@@ -746,7 +753,7 @@ const Conversation = ({
         <button onClick={onBack} className="p-2 rounded-full active:opacity-60" aria-label="Back">
           <ArrowLeft size={22} color={GOLD} />
         </button>
-        <Avatar title={title} size={38} roomKey={entry?.key} src={roomIcon(room)} />
+        <Avatar title={title} size={38} roomKey={entry?.key} src={roomIcon(room)} place="full" />
         <div className="flex-1 min-w-0">
           <div className={`text-[15px] font-semibold text-white ${ELLIPSIS}`}>{title}</div>
           <div className="text-[11px]" style={{ color: MUTED }}>
