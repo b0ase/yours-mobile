@@ -27,6 +27,8 @@ export const OpnsBuySheet = (p: {
   priceSats: number;
   rate: number;
   site: string;
+  /** Optional buyer-terms line under the chips (Exchange › Names). */
+  terms?: string;
   onAllow: () => void;
   onClose: () => void;
 }) => (
@@ -50,6 +52,7 @@ export const OpnsBuySheet = (p: {
         <Chip>Plus a small network fee</Chip>
         <Chip>Locked to your wallet</Chip>
       </div>
+      {p.terms && <p className="text-xs mt-3 mb-0 opacity-80">{p.terms}</p>}
     </ApprovalCard>
   </Sheet>
 );
