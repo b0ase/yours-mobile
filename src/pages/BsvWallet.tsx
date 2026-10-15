@@ -47,6 +47,7 @@ import { sleep } from '../utils/sleep';
 import { isUri } from '../utils/uri';
 import { AssetRow } from '../components/AssetRow';
 import { DefaultTokenCards } from '../mobile/wallet/DefaultTokenCards';
+import { BSV_LOCK_ROUTE, tokenLockNotice } from '../mobile/wallet/rowLock';
 import { BackupPromo } from '../components/BackupPromo';
 import lockIcon from '../assets/lock.svg';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -1098,6 +1099,9 @@ export const BsvWallet = () => {
     navigate('/sweep');
   };
 
+  /** Token rows' Lock: one small handler so token locks (feat/token-locks) can swap it out. */
+  const lockToken = (t: Bsv21Balance) => addSnackbar(tokenLockNotice(t.sym), 'info', 2500);
+
   const handleTokenClick = (token: Bsv21Balance) => {
     if (token.all.pending > 0n) {
       addSnackbar('Pending tokens cannot be sent!', 'error', 2000);
@@ -1542,7 +1546,7 @@ export const BsvWallet = () => {
             onSend={() => setPageState('send')}
             onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))}
             onChat={() => handleSelect(asMenuItem('chat'))}
-            onLock={() => handleSelect('tools', 'lock')}
+            onLock={() => navigate(BSV_LOCK_ROUTE)}
           >
           <AssetRow
             still={!IS_EXTENSION}
@@ -1616,7 +1620,16 @@ export const BsvWallet = () => {
             </TokenSwipe>
           </Show>
           </CoinRow>
-          <DefaultTokenCards />
+          <DefaultTokenCards
+            onSendToken={(id) => {
+              const t = filteredTokens.find((x) => x.id === id);
+              if (!t) return addSnackbar('PNEEs can be sent once indexed.', 'info', 2500);
+              setSendSource('main');
+              handleTokenClick(t);
+            }}
+            onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))}
+            onChat={() => handleSelect(asMenuItem('chat'))}
+          />
           <CoinRow id="locks">
           {lockData && (
             <Show when={services.locks && lockData.totalLocked > 0}>
@@ -1655,9 +1668,7 @@ export const BsvWallet = () => {
                 }}
                 onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))}
                 onChat={(t: Bsv21Balance) => openTicketRoomInChat(t.id, handleSelect)}
-                onLock={(t: Bsv21Balance) =>
-                  addSnackbar(`Locking ${t.sym || 'this token'} isn’t available yet.`, 'info', 2500)
-                }
+                onLock={lockToken}
               />
             )}
           </motion.div>
