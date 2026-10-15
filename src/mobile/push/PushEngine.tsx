@@ -9,6 +9,7 @@ import { isNative } from '../native';
 import { onSocialChange, socialReturnWaiting } from '../social/socialLogin';
 import { routeFromQuery, type PushRoute } from './logic';
 import { onPushRoute, syncPush, takeRouteFrom } from './register';
+import { offerAppLink } from '../spaces/inviteLinks';
 
 /**
  * App-wide, renders nothing (mounted next to NotifyEngine, vite.config.mobile.ts): keeps this device's
@@ -52,6 +53,8 @@ const PushEngine = () => {
         requestSignIns();
         return;
       }
+      // space_live: the same path as a bwalletx://space/<slug> link (dropped where Spaces are off).
+      if (r.segment === 'space') return offerAppLink(`bwalletx://space/${r.ticker}`);
       handleSelect(asMenuItem('chat'));
       requestRoomByTicker(r.ticker, r.segment === 'dms');
     };

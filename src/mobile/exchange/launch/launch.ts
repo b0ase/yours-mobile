@@ -65,6 +65,31 @@ export function validateLaunch(f: TokenForm, s: SafetyFilter = safety()): string
   return validateToken(f, s) ?? (hasReturnsWording(`${f.name} ${f.description}`) ? RETURNS_BLOCK : null);
 }
 
+/**
+ * The Launchpad's default disclaimer (owner, 15 Oct 2026): on every token page it creates (the on-chain MAP card,
+ * the launch form, the done screen and the token's Exchange page). Creators may sell named tokens to fund named
+ * things only on these terms.
+ */
+export const LAUNCH_DISCLAIMER =
+  'No returns, dividends or price rises are promised. There is no promise the money will be spent on the project, that it will succeed, or that it will become a company.';
+
+/** Launchpad prefill from a query string (?name=&description=&website=&category=), e.g. a bApp's Tokenise. */
+export const launchPrefill = (search: string): { form: Partial<TokenForm>; options: Partial<LaunchOptions> } => {
+  const sp = new URLSearchParams(search);
+  const get = (k: string, max: number) => (sp.get(k) ?? '').trim().slice(0, max);
+  const form: Partial<TokenForm> = {};
+  const options: Partial<LaunchOptions> = {};
+  const name = get('name', 64);
+  if (name) form.name = name;
+  const description = get('description', 1000);
+  if (description) form.description = description;
+  const website = get('website', 200);
+  if (/^https:\/\/[^\s]+$/i.test(website)) options.website = website;
+  const category = get('category', 32);
+  if (/^[a-z0-9-]+$/.test(category)) options.category = category;
+  return { form, options };
+};
+
 /** Shown on the approval sheet (replaces tokenblaster's "I understand" checkbox: nothing to tick). */
 export const LAUNCH_NOTICE =
   'This is a real BSV transaction from your wallet, signed with your key. Coins are for fun and can be worth nothing.';
@@ -84,7 +109,9 @@ export function approvalLines(
     { label: 'Create token', value: `$${ticker}` },
     { label: 'Supply to your wallet', value: supply },
     ...(hasIcon ? [{ label: 'Inscribe icon', value: 'On-chain image' }] : []),
-    ...(hasMapExtras(o) ? [{ label: 'Coin card on-chain', value: 'Links and category' }] : []),
+    ...(hasMapExtras(o)
+      ? [{ label: 'Coin card on-chain', value: 'Links, category and the no-promises disclaimer' }]
+      : []),
     { label: "Open holders' room", value: `Hold ${BigInt(c.roomMin).toLocaleString('en-US')} to enter` },
     ...(cost.indexSats > 0 ? [{ label: 'Indexing fund', value: fmt(cost.indexSats) }] : []),
     { label: 'Network fee', value: fmt(cost.networkSats) },
@@ -174,6 +201,7 @@ export function launchMapFields(f: TokenForm, o: LaunchOptions): string[] {
   if (c.x) pairs.push(['x', c.x]);
   if (c.telegram) pairs.push(['telegram', c.telegram]);
   if (c.category) pairs.push(['category', c.category]);
+  pairs.push(['disclaimer', LAUNCH_DISCLAIMER]);
   return pairs.flat();
 }
 
@@ -188,10 +216,8 @@ export function launchMapScript(f: TokenForm, o: LaunchOptions): LockingScript {
 export const mapBytes = (f: TokenForm, o: LaunchOptions): number =>
   hasMapExtras(o) ? 60 + launchMapFields(f, o).reduce((n, x) => n + x.length + 2, 0) : 0;
 
-export const hasMapExtras = (o: LaunchOptions): boolean => {
-  const c = cleanOptions(o);
-  return !!(c.website || c.x || c.telegram || c.category);
-};
+/** Every launch writes the MAP card now: it always carries the Launchpad disclaimer. */
+export const hasMapExtras = (_o: LaunchOptions): boolean => true;
 
 // ── Launched in bWalletX: this device's launches + the shared registry (bit-sign /api/bitsign/launches) ──
 
@@ -203,11 +229,18 @@ export interface Launch {
   category: string | null;
   roomTicker: string | null;
   createdAt: number;
+  /** A creator-made advert video (https), from the registry; shown labelled "made by the creator". */
+  video?: string | null;
 }
 
 const TOKEN_ID = /^[0-9a-f]{64}_\d{1,6}$/i;
 const str = (v: unknown, max = 200): string | null =>
   typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null;
+
+const httpsUrl = (v: unknown): string | null => {
+  const u = str(v, 500);
+  return u && /^https:\/\/[^\s"'<>]+$/i.test(u) ? u : null;
+};
 
 export const parseLaunch = (r: unknown): Launch | null => {
   const o = (r ?? {}) as Record<string, unknown>;
@@ -224,6 +257,7 @@ export const parseLaunch = (r: unknown): Launch | null => {
     category: str(o.category, 32),
     roomTicker: str(o.room_ticker ?? o.roomTicker, 64),
     createdAt: Number.isFinite(at) ? at : 0,
+    video: httpsUrl(o.video ?? o.advert_video),
   };
 };
 

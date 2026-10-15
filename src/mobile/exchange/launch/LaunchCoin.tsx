@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Check, ChevronDown, ImagePlus, MessageCircle, Rocket } from 'lucide-react';
 import { useServiceContext } from '../../../hooks/useServiceContext';
 import { useBackClose } from '../../backStack';
@@ -18,7 +18,9 @@ import { useBottomMenu } from '../../../hooks/useBottomMenu';
 import { asMenuItem } from '../../tabs/tabs';
 import { CATEGORIES } from '../registry/catalog';
 import {
+  LAUNCH_DISCLAIMER,
   LAUNCH_NOTICE,
+  launchPrefill,
   approvalLines,
   defaultLaunchOptions,
   emptyLaunchForm,
@@ -48,15 +50,21 @@ const MUTED = '#98A2B3';
 export const LaunchCoin = () => {
   const { apiContext, chromeStorageService } = useServiceContext();
   const navigate = useNavigate();
+  const { search } = useLocation();
   const rate = useBsvUsd();
-  const [form, setForm] = useState<TokenForm>(emptyLaunchForm);
+  // A bApp's Tokenise (Feed › bApps) opens this screen prefilled (?name=&description=&website=&category=).
+  const [prefill] = useState(() => launchPrefill(search));
+  const [form, setForm] = useState<TokenForm>(() => {
+    const f = { ...emptyLaunchForm(), ...prefill.form };
+    return f.name ? { ...f, ticker: suggestTicker(f.name) } : f;
+  });
   const [tickerTouched, setTickerTouched] = useState(false);
   const [icon, setIcon] = useState<{ file: File; url: string } | null>(null);
   const [error, setError] = useState('');
   const [sheet, setSheet] = useState(false);
   const [busy, setBusy] = useState('');
   const [done, setDone] = useState<Done | null>(null);
-  const [opts, setOpts] = useState<LaunchOptions>(defaultLaunchOptions);
+  const [opts, setOpts] = useState<LaunchOptions>(() => ({ ...defaultLaunchOptions(), ...prefill.options }));
   const [advanced, setAdvanced] = useState(false);
   const { handleSelect } = useBottomMenu();
   const setOpt = <K extends keyof LaunchOptions>(k: K, v: LaunchOptions[K]) => setOpts((o) => ({ ...o, [k]: v }));
@@ -135,6 +143,9 @@ export const LaunchCoin = () => {
         </p>
         <p className="text-[11px] break-all m-0" style={{ color: MUTED }}>
           {l.tokenId}
+        </p>
+        <p className="text-xs m-0" style={{ color: MUTED }}>
+          {LAUNCH_DISCLAIMER}
         </p>
         <p className="text-xs m-0" style={{ color: MUTED }}>
           {done.roomError
@@ -259,6 +270,10 @@ export const LaunchCoin = () => {
         maxLength={1000}
         onChange={(e) => set('description')(e.target.value)}
       />
+      {/* The Launchpad's default disclaimer: written into the coin's on-chain card and shown on its page. */}
+      <p className="text-[11px] m-0" style={{ color: MUTED }}>
+        {LAUNCH_DISCLAIMER}
+      </p>
       <button
         type="button"
         onClick={() => setAdvanced((a) => !a)}
@@ -431,7 +446,7 @@ const ApproveSheet = ({
           ))}
         </ul>
         <p className="text-[11px] m-0" style={{ color: MUTED }}>
-          {LAUNCH_NOTICE}
+          {LAUNCH_NOTICE} {LAUNCH_DISCLAIMER}
         </p>
         <div className="flex items-center justify-between border-t pt-3 text-sm" style={{ borderColor: LINE }}>
           <span style={{ color: MUTED }}>Total</span>

@@ -37,6 +37,11 @@ export type Clip = {
   /** https poster, or null until one is found. */
   poster: string | null;
   at: number;
+  /**
+   * Registered on chain: bMovies minted a token for it (`tokenised` / `mintTxid` on the feed item),
+   * so BUY / SELL trade something real. False for syndicated X clips nobody has registered yet.
+   */
+  registered: boolean;
   /** The source it came from, for the "via …" credit and its share page (default: bMovies). */
   via?: string;
   /** The bmovies.app skin its share page opens in (e.g. 'bmusic'), or undefined for plain bMovies. */
@@ -128,7 +133,29 @@ export const toClip = (raw: unknown): Clip | null => {
     src,
     poster: absUrl(r.art),
     at,
+    registered: isRegistered(r),
   };
+};
+
+/**
+ * Whether a bmovies.app feed item is tradeable: `tokenised: true` (bMovies sets it only when
+ * token_mint_txid is recorded) or a mint txid present. A ticker alone is not enough: unminted
+ * clips carry a display ticker (their channel's, or one derived from the title).
+ */
+export const isRegistered = (r: Record<string, unknown>): boolean =>
+  r.tokenised === true || /^[0-9a-f]{64}$/i.test(str(r.mintTxid));
+
+/**
+ * Where REGISTER goes on bmovies.app. A scouted tweet (`tweet-<id>`): /tweet/<id>, which sends an
+ * untokenised tweet to the convert tool. An unminted offer: /claim/<offerId>, the Sign-in-with-X
+ * claim (the X handle must match the source tweet's author) and then the mint.
+ */
+export const registerUrl = (c: Pick<Clip, 'id' | 'offerId' | 'tweetUrl'>): string => {
+  if (/^(?:tweet|convert)-/.test(c.id)) {
+    const tid = clipTweetId(c);
+    if (tid) return `${BMOVIES_ORIGIN}/tweet/${tid}`;
+  }
+  return `${BMOVIES_ORIGIN}/claim/${encodeURIComponent(c.offerId)}`;
 };
 
 /** The API's `{ items, nextCursor }` → unique, screened clips (see screen.ts), newest first. */
