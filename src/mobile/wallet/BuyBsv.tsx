@@ -1,7 +1,7 @@
 import { fetchSeries } from '../portfolio/market';
 import { BetaLine } from '../sweep/BetaLine';
-import { APP_NAME, BALANCE_CARDS_ENABLED, BUY_CRYPTO_ENABLED, SWAP_ENABLED } from '../storeBuild';
-import { requestAllCards, swapRowButtons } from './allCardsOpen';
+import { APP_NAME, BUY_CRYPTO_ENABLED, SWAP_ENABLED } from '../storeBuild';
+import { swapRowButtons } from './allCardsOpen';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { useSwapWatcher } from '../swap/useSwapWatcher';
@@ -13,7 +13,7 @@ const PortfolioScreen = lazy(() => import('../portfolio/PortfolioScreen'));
 const SwapFlow = SWAP_ENABLED ? lazy(() => import('../swap/SwapFlow')) : null;
 const SwapPromo = SWAP_ENABLED ? lazy(() => import('../swap/SwapPromo')) : null;
 import { createPortal } from 'react-dom';
-import { ArrowDownToLine, CreditCard, ExternalLink, Layers, Users, X } from 'lucide-react';
+import { ArrowDownToLine, CreditCard, ExternalLink, Users, X } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { openDappBrowser } from '../dappBrowser';
 import { cachedExchangeRate, fetchExchangeRate } from '../../utils/wallet';
@@ -149,28 +149,6 @@ const PriceCell = ({ rate, onOpen, change }: { rate: number; onOpen: () => void;
 const SwapPromoSkeleton = () => <div className="flex-1 min-w-0 min-h-[52px]" aria-hidden="true" />;
 
 /**
- * "All cards" (owner, 15 Oct 2026): an icon-only button left of the Swap card. Its width matches the price cell
- * directly above (PriceCell: one of three `flex-1 basis-0` cells with gap-2, so (100% - 2 x 8px) / 3) and the row
- * stretches it to the Swap card's height (min-h-[52px]). It never grows, so with Swap off it stays icon-sized.
- * Opens the carousel's All cards browser; long-pressing a card still works too.
- * bWalletX only (BALANCE_CARDS_ENABLED): the store has no browser, so no button.
- */
-const AllCardsButtonImpl = () => (
-  <button
-    type="button"
-    onClick={() => requestAllCards()}
-    aria-label="All cards"
-    title="All cards"
-    className="shrink-0 grow-0 w-[calc((100%-1rem)/3)] min-h-[52px] rounded-xl flex items-center justify-center cursor-pointer"
-    style={{ background: 'var(--bw-surface)' }}
-  >
-    <Layers size={22} color="var(--bw-accent-hi)" aria-hidden="true" />
-  </button>
-);
-// The store build drops the button's code entirely (inlined flag), not just its render.
-const AllCardsButton = BALANCE_CARDS_ENABLED ? AllCardsButtonImpl : () => null;
-
-/**
  * Wallet top row (owner, rounds 6–7; price restored 10 Oct 2026): price · Buy BSV · History, three equal columns.
  * The store edition has the same row with Receive in place of Buy BSV and no Swap card (store parity, 10 Oct 2026).
  * The price opens the BSV view (`onPrice`, the BSV card's own handler). The "Swap into BSV" promo card below the row
@@ -206,7 +184,7 @@ export const BsvPriceBar = ({
     else if (s.stage === 'failed') addSnackbar('A swap needs attention. Open Swap to see it.', 'error');
   });
   const swapOn = SWAP_ENABLED && !!SwapFlow && !!getAddress;
-  const row = swapRowButtons(swapOn && !!SwapPromo, BALANCE_CARDS_ENABLED);
+  const row = swapRowButtons(swapOn && !!SwapPromo, false);
   const openSwap = () => {
     setResume(active[0] ?? (swaps[0] && !swaps[0].notified ? swaps[0] : null));
     setSwapOpen(true);
@@ -234,15 +212,13 @@ export const BsvPriceBar = ({
         // Equal 8px above and below the row: the price row's mb-2 above; below, the next card's 12px top margin less 4px.
         <div className="w-[92%] -mb-1 flex items-stretch gap-2">
           {row.map((b) =>
-            b === 'allCards' ? (
-              <AllCardsButton key={b} />
-            ) : (
-              SwapPromo && (
-                <Suspense key={b} fallback={<SwapPromoSkeleton />}>
-                  <SwapPromo active={active[0] ?? null} onOpen={openSwap} />
-                </Suspense>
-              )
-            ),
+            b === 'allCards'
+              ? null
+              : SwapPromo && (
+                  <Suspense key={b} fallback={<SwapPromoSkeleton />}>
+                    <SwapPromo active={active[0] ?? null} onOpen={openSwap} />
+                  </Suspense>
+                ),
           )}
         </div>
       ) : (
