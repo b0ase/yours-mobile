@@ -7,6 +7,7 @@ import { collectPaymailInbox, deletePaymail, lookupPaymail, paymailEnabled } fro
 import type { Fetch } from '../names/names';
 import { clearConsents } from '../agent/consent';
 import { clearUgcLocal, normHandle } from '../ugc/ugc';
+import { clearHelpDeskUnpin } from '../chat/helpDeskPin';
 
 /**
  * Settings › Delete account (Apple 5.1.1(v); Google Play account deletion).
@@ -110,6 +111,7 @@ export const deleteAccount = async (
   saveSession(null);
   clearConsents();
   clearUgcLocal();
+  clearHelpDeskUnpin();
   for (const k of localKeysFor(identityKey)) {
     try {
       localStorage.removeItem(k);

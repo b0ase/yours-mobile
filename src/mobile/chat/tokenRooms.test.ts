@@ -4,6 +4,9 @@ import {
   amountLabel,
   atLeast,
   buildTokenRoomList,
+  holdingFromLookup,
+  parseSpaceStart,
+  spaceStartLine,
   defaultMinRaw,
   derivationOf,
   formatRaw,
@@ -149,5 +152,36 @@ describe('UI state from server refusals', () => {
       address: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT',
     });
     expect(parseInvitee('not a handle!')).toBeNull();
+  });
+});
+
+describe('space_start rule and server-checked holdings (15 Oct 2026)', () => {
+  const gate = { key: `bsv21:${'a'.repeat(64)}_0`, symbol: 'MNEE', dec: 5, min_raw: '1', min: '0.00001' };
+  test('space_start text is shown as-is, with its label', () => {
+    const look = parseLookup({
+      key: gate.key,
+      room: null,
+      space_start: { mode: 'any', value: null, text: 'Anyone in the room.', need_raw: null },
+    });
+    expect(look?.spaceStart?.text).toBe('Anyone in the room.');
+    expect(spaceStartLine(look?.spaceStart)).toBe('Starting a Space: Anyone in the room.');
+    expect(parseLookup({ key: gate.key, room: null })?.spaceStart).toBeNull();
+    expect(parseSpaceStart({ mode: 'pct', text: '  ' })).toBeNull();
+    expect(spaceStartLine(null)).toBeNull();
+  });
+  test('a balance only bit-sign sees (MNEE) becomes a holding', () => {
+    const look = parseLookup({ key: gate.key, room: null, gate, held_raw: '250000' });
+    expect(holdingFromLookup(look)).toEqual({
+      kind: 'bsv21',
+      id: `${'a'.repeat(64)}_0`,
+      symbol: 'MNEE',
+      dec: 5,
+      amountRaw: '250000',
+    });
+    expect(holdingFromLookup(parseLookup({ key: gate.key, room: null, gate, held_raw: '0' }))).toBeNull();
+    expect(
+      holdingFromLookup(parseLookup({ key: gate.key, room: null, gate, held_raw: null, member: true }))?.amountRaw,
+    ).toBe('1');
+    expect(holdingFromLookup(null)).toBeNull();
   });
 });
