@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { PenLine, X } from 'lucide-react';
+import { BookUser, CalendarDays, PenLine, X } from 'lucide-react';
 import { BCREDITS_ENABLED, BUY_CRYPTO_ENABLED, PLACEMENT_ENABLED, STORE_BUILD } from '../storeBuild';
 import { PNEE_ICON } from '../notes/pnee';
 import { requestWalletAction } from '../phone/walletAction';
@@ -27,6 +27,7 @@ import { routeFor } from '../tabs/tabs';
 import { AddressBook } from './AddressBook';
 import { allCardsSwipe, opensAddressBook } from './addressBookGesture';
 import { BCal } from './BCal';
+import { subscribeAllCards } from './allCardsOpen';
 import './balanceCards.css';
 
 /**
@@ -475,6 +476,18 @@ const TimeMachine = ({
             );
           })}
         </div>
+        {/* Visible doors (owner, 15 Oct 2026): Address book on the left (a right pull opens it), bCal on the right
+            (a left swipe), so the buttons teach the swipe directions. Theme tokens only. */}
+        <div className="bw-tm-doors">
+          <button type="button" onClick={onBook}>
+            <BookUser size={16} aria-hidden="true" />
+            <span>Address book</span>
+          </button>
+          <button type="button" onClick={onCalendar}>
+            <CalendarDays size={16} aria-hidden="true" />
+            <span>Calendar</span>
+          </button>
+        </div>
         <p className="bw-tm-hint">
           Swipe up and down to fly through · tap a card to land on it · swipe sideways for Friends or bCal
         </p>
@@ -724,6 +737,8 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
     press.current = null;
   };
   useEffect(() => () => endPress(), []);
+  // The Wallet's "All cards" button (BuyBsv.tsx) opens the browser too; the long-press stays.
+  useEffect(() => subscribeAllCards(() => setTm(true)), []);
 
   return (
     <div className="bw-bcar">
