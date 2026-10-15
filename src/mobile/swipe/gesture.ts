@@ -12,10 +12,13 @@ export const ACTION_W = 72;
 
 export type Axis = 'x' | 'y' | null;
 
+/** Horizontal must clearly dominate: a diagonal scroll stays a scroll (rows never slide while scrolling). */
+export const X_DOMINANCE = 1.5;
+
 /** Decide the gesture axis once movement passes the lock distance; null while undecided. */
 export const lockAxis = (dx: number, dy: number, lock = AXIS_LOCK_PX): Axis => {
   if (Math.abs(dx) < lock && Math.abs(dy) < lock) return null;
-  return Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+  return Math.abs(dx) > X_DOMINANCE * Math.abs(dy) ? 'x' : 'y';
 };
 
 export type SideSpec = { count: number; hasFull: boolean };

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { sendBsv } from '@1sat/actions';
+import { publishBalance } from '../wallet/balanceStore';
 import { History, X } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
@@ -179,6 +180,9 @@ export default function CreditsPanel() {
 
   // The tick-down: a short flash when the balance drops.
   const balance = info?.balance ?? 0;
+  useEffect(() => {
+    if (info && info.enabled) publishBalance('bcredits', info.balance, 'bCredits');
+  }, [info]);
   useEffect(() => {
     if (prevBalance.current !== null && balance < prevBalance.current) {
       setTick(true);
