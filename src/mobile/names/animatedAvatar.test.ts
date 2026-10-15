@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
   ANIMATED_AVATAR_MAX_BYTES,
+  bitsignStillUrl,
   checkAnimatedAvatar,
   dataUrlMime,
   mayBeAnimated,
@@ -134,5 +135,24 @@ describe('avatar upload helpers', () => {
     expect(uploadErrorMessage(503, 'x')).toEqual({ unavailable: true, message: AVATAR_UPLOADS_COMING });
     expect(uploadErrorMessage(400, 'Too large')).toEqual({ unavailable: false, message: 'Too large' });
     expect(uploadErrorMessage(404, 'Set up your identity first.').message).toBe('Set up your identity first.');
+  });
+});
+
+describe('bitsignStillUrl', () => {
+  it('bit-sign avatars and covers get ?still=1', () => {
+    expect(bitsignStillUrl('https://www.bitcoinchat.online/api/public/avatar/abc.gif')).toBe(
+      'https://www.bitcoinchat.online/api/public/avatar/abc.gif?still=1',
+    );
+    expect(bitsignStillUrl('https://bit-sign.online/api/public/cover/x?v=2')).toBe(
+      'https://bit-sign.online/api/public/cover/x?v=2&still=1',
+    );
+    expect(mayBeAnimated('https://www.bitcoinchat.online/api/public/avatar/abc')).toBe(true);
+  });
+  it('other hosts and paths keep the canvas path', () => {
+    expect(bitsignStillUrl('https://example.com/api/public/avatar/abc.gif')).toBeNull();
+    expect(bitsignStillUrl('http://www.bitcoinchat.online/api/public/avatar/a.gif')).toBeNull();
+    expect(bitsignStillUrl('https://www.bitcoinchat.online/api/public/profile/alice')).toBeNull();
+    expect(bitsignStillUrl('data:image/gif;base64,AAAA')).toBeNull();
+    expect(bitsignStillUrl(null)).toBeNull();
   });
 });
