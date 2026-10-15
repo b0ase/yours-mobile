@@ -6,6 +6,7 @@ import { ADDRESS_RESYNC_ALARM, ADDRESS_RESYNC_PERIOD_MINUTES, pageHidden, should
 import { balanceWithDeposits } from './services/depositBalance';
 import { arrivingSats } from './services/receiveGuard';
 import { recoverySummary } from './services/recoverFailed';
+import { txidRecoverySummary } from './services/recoverByTxid';
 import { paymailRestoreSummary } from './mobile/names/paymail';
 import { isEmpty, summarizeActive, switchToLocalVerified, type SwitchDeps } from './services/restoreFromRemote';
 import { insufficientFundsMessage, isInsufficientFunds, prepareFunding, type FundingSnapshot } from './services/fundingPrep';
@@ -1670,6 +1671,9 @@ if (isInServiceWorker) {
         case 'STORAGE_RECOVER_MINED':
           processRecoverMined(sendResponse);
           return true;
+        case 'STORAGE_RECOVER_TXID':
+          processRecoverTxid(typeof message.txid === 'string' ? message.txid : '', sendResponse);
+          return true;
         case 'STORAGE_RESTORE_BACKUP':
           processRestoreBackup(sendResponse);
           return true;
@@ -2061,13 +2065,68 @@ if (isInServiceWorker) {
    * Settings › Troubleshooting › Find mined payments: the same mined-but-stuck repair the worker runs at startup
    * (services/recoverFailed.ts), on demand, with a one-line result (dkg sweep, 14 Oct 2026).
    */
+  /** Settings › Troubleshooting › Recover a payment by transaction ID (services/recoverByTxid.ts). */
+  const processRecoverTxid = async (txid: string, sendResponse: CallbackResponse) => {
+    try {
+      await ensureWallet(true);
+      if (!accountContext) throw new Error('Wallet not initialized');
+      const report = await accountContext.recoverTxid(txid);
+      console.log('[STORAGE_RECOVER_TXID]', report);
+      sendResponse({
+        type: 'STORAGE_RECOVER_TXID',
+        success: report.result === 'restored' || report.result === 'already',
+        data: { report, summary: txidRecoverySummary(report) },
+      });
+    } catch (err) {
+      sendResponse({ type: 'STORAGE_RECOVER_TXID', success: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  };
+
   const processRecoverMined = async (sendResponse: CallbackResponse) => {
     try {
       await ensureWallet(true);
       if (!accountContext) throw new Error('Wallet not initialized');
-      const report = await accountContext.recoverFailed();
-      console.log('[STORAGE_RECOVER_MINED]', report);
-      sendResponse({ type: 'STORAGE_RECOVER_MINED', success: !report.error, data: { report, summary: recoverySummary(report) } });
+      const ctx = accountContext;
+      let report = await ctx.recoverFailed();
+      let switchNote = '';
+      // Remote-active wallets were skipped (the repair needs this device's store). Copy the backup in, verified,
+      // and run again on the device's store (dkg, 15 Oct 2026: a restored account starts remote-active).
+      if (report.skipped) {
+        const { account } = chromeStorageService.getCurrentAccountObject();
+        const config = account?.storageConfig as (StorageConfig & { localFirst?: boolean }) | undefined;
+        const remoteUrl = config?.activeRemote || config?.remotes?.[0];
+        if (account && config && remoteUrl) {
+          const r = await switchToLocalVerified(restoreDeps(ctx, remoteUrl));
+          console.log('[STORAGE_RECOVER_MINED] verified switch', r);
+          if (r.ok) {
+            const remotes = config.remotes?.includes(remoteUrl) ? config.remotes : [...(config.remotes ?? []), remoteUrl];
+            await chromeStorageService.updateNested('accounts', {
+              [account.addresses.identityAddress]: {
+                storageConfig: { ...config, activeRemote: undefined, remotes, localFirst: true },
+              } as unknown as Account,
+            });
+            report = await ctx.recoverFailed();
+          } else {
+            // Say exactly what stopped the switch (owner to dkg, 15 Oct 2026). The by-txid pass below still runs:
+            // it repairs in this device's store and merges into the remote with the toolbox's sync.
+            switchNote = `This device's storage couldn't take over from the backup: ${r.reason}.`;
+          }
+        }
+      }
+      // Sweeps in this wallet's own records whose output storage never recorded as ours (dkg 9f66943b): try each by
+      // txid; recoverByTxid only adds an output a stored derivation proves is ours.
+      const extra: string[] = [];
+      const done = new Set([...report.restored, ...(report.notRestored ?? []).map((n) => n.txid)]);
+      for (const txid of await ctx.sweepCandidates().catch(() => [] as string[])) {
+        if (done.has(txid)) continue;
+        const t = await ctx.recoverTxid(txid);
+        if (t.result === 'restored' || t.result === 'error') extra.push(txidRecoverySummary(t));
+      }
+      const base = switchNote && report.skipped ? '' : recoverySummary(report);
+      const parts = [switchNote, base === 'Nothing to restore' && (extra.length || switchNote) ? '' : base, ...extra];
+      const summary = parts.filter(Boolean).join(' ') || 'Nothing to restore';
+      console.log('[STORAGE_RECOVER_MINED]', report, extra);
+      sendResponse({ type: 'STORAGE_RECOVER_MINED', success: !report.error, data: { report, summary } });
     } catch (err) {
       sendResponse({
         type: 'STORAGE_RECOVER_MINED',
