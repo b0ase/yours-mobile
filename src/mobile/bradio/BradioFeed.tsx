@@ -3,6 +3,7 @@ import { MARKET_ENABLED } from '../storeBuild';
 import { EXCHANGE_ROUTE } from '../exchange/exchangeData';
 import { isOwned } from './podcasts';
 import { PodcastCard } from './PodcastCard';
+import { PublicPodcasts } from './PublicPodcasts';
 import { RECORDING_NOTE, usePodcasts } from './usePodcasts';
 
 const MUTED = '#98A2B3';
@@ -14,6 +15,7 @@ export const BradioFeed = () => {
   const open = () => navigate('/m/feed');
   return (
     <div className="flex flex-col gap-3 px-4 py-3">
+      <PublicPodcasts onExpand={open} />
       {items === null ? (
         <p className="text-sm text-center py-8 m-0" style={{ color: MUTED }}>
           Loading podcasts…
