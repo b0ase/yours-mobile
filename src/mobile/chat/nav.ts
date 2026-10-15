@@ -3,10 +3,16 @@
  * and "Buy in Market" (a locked room) → that token's Market page. The target tab takes the
  * request when it mounts, or hears it if it is already mounted.
  */
+import type { NftListing } from '../market/classify';
+
 export type TokenRef = { kind: 'bsv21' | 'coll'; id: string };
 
 const EVENT = 'bwallet:token-nav';
-const pending: { chat: string | null; market: TokenRef | null } = { chat: null, market: null };
+const pending: { chat: string | null; market: TokenRef | null; nft: NftListing | null } = {
+  chat: null,
+  market: null,
+  nft: null,
+};
 
 const fire = () => {
   try {
@@ -36,6 +42,17 @@ export const takeMarketToken = (): TokenRef | null => {
   const r = pending.market;
   pending.market = null;
   return r;
+};
+
+/** Ask the Market tab to open one NFT listing's preview (Feed › b3D → Exchange). */
+export const requestMarketNft = (listing: NftListing) => {
+  pending.nft = listing;
+  fire();
+};
+export const takeMarketNft = (): NftListing | null => {
+  const n = pending.nft;
+  pending.nft = null;
+  return n;
 };
 
 export const onTokenNav = (fn: () => void) => {
