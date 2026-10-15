@@ -45,6 +45,8 @@ export type Settings = {
    * the encrypted backup file carries them and a restore brings them back. The coins never depend on them.
    */
   lockPlans?: unknown[];
+  /** Token (BSV-21) lock records (locks/tokenLocks.ts). The tokens never depend on them. */
+  tokenLocks?: unknown[];
 };
 
 /**

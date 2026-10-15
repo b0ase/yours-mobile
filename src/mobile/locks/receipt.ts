@@ -15,6 +15,7 @@ export const RECEIPT_TYPE = 'lock-receipt';
 export const VERIFY_URL = 'https://bwalletx.com/lock/verify';
 
 export type ReceiptMode = 'date' | 'bsv' | 'usd-target' | 'percent';
+export type TokenRef = { id: string; amt: string; dec: number; sym?: string };
 export type ReceiptIdentity = { handle?: string; paymail?: string; idKey?: string; address: string };
 export type Receipt = {
   app: 'bwalletx';
@@ -31,6 +32,13 @@ export type Receipt = {
   pctBase?: 'original' | 'remaining';
   /** Gradual schedules shaped by an unlock curve (absent = linear). */
   curve?: Curve;
+  /**
+   * Token lock (BSV-21): the token and amount in the lock output. Absent for a BSV lock. The schedule's
+   * sats are the output's 1 sat; the token amount is what is locked. amt is in base units (no decimals).
+   */
+  token?: TokenRef;
+  /** What the lock is for ("Vesting"), as the user typed it. Optional. */
+  label?: string;
   /** The address whose key can claim the locks (inside every lock script). */
   lockAddress: string;
   schedule: { vout: number; height: number; sats: number }[];
@@ -50,6 +58,8 @@ export function buildReceipt(o: {
   pct?: number;
   pctBase?: 'original' | 'remaining';
   curve?: Curve;
+  token?: TokenRef;
+  label?: string;
   now?: Date;
 }): Receipt {
   const amountSats = o.pieces.reduce((s, p) => s + p.sats, 0);
@@ -59,10 +69,12 @@ export function buildReceipt(o: {
     v: 1,
     mode: o.mode,
     amountSats,
-    ...(o.rate && o.rate > 0 ? { usdAtLock: Math.round((amountSats / 1e8) * o.rate * 100) / 100 } : {}),
+    ...(o.rate && o.rate > 0 && !o.token ? { usdAtLock: Math.round((amountSats / 1e8) * o.rate * 100) / 100 } : {}),
     ...(o.mode === 'usd-target' ? { usdPerPayout: o.usdPerPayout, bufferPct: o.bufferPct } : {}),
     ...(o.mode === 'percent' ? { pct: o.pct, pctBase: o.pctBase } : {}),
     ...(o.curve && o.curve.kind !== 'linear' ? { curve: o.curve } : {}),
+    ...(o.token ? { token: o.token } : {}),
+    ...(o.label?.trim() ? { label: o.label.trim().slice(0, 60) } : {}),
     lockAddress: o.lockAddress,
     // Lock outputs come first, in schedule order (vout 0..n-1); the receipt follows them.
     schedule: o.pieces.map((p, i) => ({ vout: i, height: p.height, sats: p.sats })),
@@ -72,6 +84,24 @@ export function buildReceipt(o: {
   };
 }
 
+/** "1,250.5 VEX": a token amount in base units shown with its decimals. */
+export const fmtToken = (t: Pick<TokenRef, 'amt' | 'dec' | 'sym'>): string =>
+  `${fmtUnits(t.amt, t.dec)} ${t.sym || 'tokens'}`;
+
+/** Base units as a plain decimal ("1250.5"), or with thousands separators when `group`. */
+export function fmtUnits(amt: string | bigint, decimals: number, group = true): string {
+  const dec = Math.max(0, Math.min(18, decimals || 0));
+  const raw = BigInt(amt);
+  const base = 10n ** BigInt(dec);
+  const whole = group ? (raw / base).toLocaleString('en-US') : (raw / base).toString();
+  const frac = dec ? (raw % base).toString().padStart(dec, '0').replace(/0+$/, '') : '';
+  return `${whole}${frac ? `.${frac}` : ''}`;
+}
+
+/** The headline amount: tokens for a token lock, BSV otherwise. */
+export const amountText = (r: Pick<Receipt, 'amountSats' | 'token'>) =>
+  r.token ? fmtToken(r.token) : fmtBsv(r.amountSats);
+
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 /** One-line schedule summary for the card. */
@@ -80,6 +110,7 @@ export function scheduleLine(r: Receipt): string {
   const first = r.schedule[0]?.height;
   const last = r.schedule[n - 1]?.height;
   if (n === 1) return `Unlocks at block ${first}`;
+  if (r.token) return `${n} unlocks, blocks ${first}–${last}`;
   if (r.curve) return `${n} payouts, blocks ${first}–${last}`;
   const per =
     r.mode === 'usd-target' && r.usdPerPayout ? `${fmtUsd(r.usdPerPayout)} target` : fmtBsv(r.schedule[0].sats);
@@ -94,24 +125,28 @@ export const curveText = (r: Pick<Receipt, 'curve'>): string =>
 export const describeReceipt = (r: Receipt): string => [modeText(r), curveText(r)].filter(Boolean).join(' · ');
 
 export const modeText = (r: Receipt): string =>
-  r.mode === 'date'
-    ? 'One unlock date'
-    : r.mode === 'usd-target'
-      ? `Dollar target ${fmtUsd(r.usdPerPayout ?? 0)} ${r.curve ? 'average ' : ''}per payout (${r.bufferPct ?? 0}% buffer)`
-      : r.mode === 'percent'
-        ? `${r.pct}% of ${r.pctBase === 'remaining' ? 'what is left' : 'the original'} per payout`
-        : r.curve
-          ? `${fmtBsv(Math.round(r.amountSats / Math.max(1, r.schedule.length)))} average per payout`
-          : `${fmtBsv(r.schedule[0]?.sats ?? 0)} per payout`;
+  r.token
+    ? `Token lock · ${r.token.sym || 'BSV-21'} · ${r.token.id.slice(0, 8)}…${r.token.id.slice(-4)}`
+    : r.mode === 'date'
+      ? 'One unlock date'
+      : r.mode === 'usd-target'
+        ? `Dollar target ${fmtUsd(r.usdPerPayout ?? 0)} ${r.curve ? 'average ' : ''}per payout (${r.bufferPct ?? 0}% buffer)`
+        : r.mode === 'percent'
+          ? `${r.pct}% of ${r.pctBase === 'remaining' ? 'what is left' : 'the original'} per payout`
+          : r.curve
+            ? `${fmtBsv(Math.round(r.amountSats / Math.max(1, r.schedule.length)))} average per payout`
+            : `${fmtBsv(r.schedule[0]?.sats ?? 0)} per payout`;
 
 /** The card: amount, USD at lock time, mode and target, schedule, and every identity field the account has. */
 export function receiptSvg(r: Receipt): string {
   const lines: [string, number, string][] = [];
   const add = (text: string, size = 17, color = '#F2F2F0') => lines.push([text, size, color]);
+  if (r.label) add(r.label, 20, '#F5B800');
   if (r.usdAtLock != null) add(`≈ ${fmtUsd(r.usdAtLock)} at lock time`, 18, '#98A2B3');
   add(modeText(r));
   if (r.curve) add(curveText(r), 17, '#F5B800');
   add(scheduleLine(r));
+  if (r.token) add(`Token ${r.token.id}`, 11, '#98A2B3');
   if (r.identity.handle) add(`Locked by ${r.identity.handle}`);
   if (r.identity.paymail) add(`Paymail ${r.identity.paymail}`, 15, '#98A2B3');
   if (r.identity.idKey) add(`Identity key ${r.identity.idKey}`, 11, '#98A2B3');
@@ -125,7 +160,7 @@ export function receiptSvg(r: Receipt): string {
     })
     .join('');
   const h = y + 70;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="${h}" viewBox="0 0 640 ${h}"><metadata id="lock-receipt">${esc(JSON.stringify(r))}</metadata><rect width="640" height="${h}" rx="28" fill="#0b0b0c"/><rect x="10" y="10" width="620" height="${h - 20}" rx="22" fill="none" stroke="#F5B800" stroke-width="2"/><g font-family="Helvetica,Arial,sans-serif"><text x="40" y="70" fill="#F5B800" font-size="22" font-weight="700">bWalletX · Lock receipt</text><text x="40" y="135" fill="#F2F2F0" font-size="46" font-weight="800">${esc(fmtBsv(r.amountSats))}</text>${body}<text x="40" y="${h - 50}" fill="#F5B800" font-size="16">Verify at bwalletx.com/lock/verify</text><text x="40" y="${h - 28}" fill="#667085" font-size="13">Nobody can unlock these coins before the heights in this receipt.</text></g></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="${h}" viewBox="0 0 640 ${h}"><metadata id="lock-receipt">${esc(JSON.stringify(r))}</metadata><rect width="640" height="${h}" rx="28" fill="#0b0b0c"/><rect x="10" y="10" width="620" height="${h - 20}" rx="22" fill="none" stroke="#F5B800" stroke-width="2"/><g font-family="Helvetica,Arial,sans-serif"><text x="40" y="70" fill="#F5B800" font-size="22" font-weight="700">bWalletX · Lock receipt</text><text x="40" y="135" fill="#F2F2F0" font-size="46" font-weight="800">${esc(amountText(r))}</text>${body}<text x="40" y="${h - 50}" fill="#F5B800" font-size="16">Verify at bwalletx.com/lock/verify</text><text x="40" y="${h - 28}" fill="#667085" font-size="13">Nobody can unlock ${r.token ? 'these tokens' : 'these coins'} before the heights in this receipt.</text></g></svg>`;
 }
 
 /** MAP fields for the inscription (MAP values are strings). */

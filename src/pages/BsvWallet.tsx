@@ -8,7 +8,7 @@ import { loadTokenCache, saveTokenCache } from '../mobile/wallet/tokenCache';
 import { requestBackupThen as gateReceive } from '../mobile/backup/backupState';
 import { MyFlipBavatar } from '../mobile/bavatar/FlipBavatar';
 import { notifyMinted } from '../mobile/mint/mint';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   List,
@@ -96,6 +96,8 @@ import { isMainnetAddress } from '../mobile/names/address';
 import { pendingMeta, rememberSent } from '../mobile/wallet/send/sendLogic';
 import { payeeNote } from '../mobile/wallet/send/payee';
 import { TokenSwipe } from '../mobile/wallet/TokenSwipe';
+// Swipe › Lock on a token row (BSV-21 time-locks with receipts, locks/tokenLocks.ts).
+const TokenLockSheet = lazy(() => import('../mobile/locks/TokenLockSheet'));
 import { CoinRow } from '../mobile/wallet/CoinRow';
 import { IS_EXTENSION } from '../mobile/extension';
 import { useTokenRows } from '../mobile/wallet/tokenRows';
@@ -703,6 +705,7 @@ export const BsvWallet = () => {
 
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [getBsvOpen, setGetBsvOpen] = useState(false);
+  const [tokenLock, setTokenLock] = useState<Bsv21Balance | null>(null);
 
   /**
    * Re-sync addresses, then reload BSV, MNEE, and BSV-21 balances.
@@ -1568,6 +1571,15 @@ export const BsvWallet = () => {
           />
           </TokenSwipe>
           </CoinRow>
+          {tokenLock && (
+            <Suspense fallback={null}>
+              <TokenLockSheet
+                token={tokenLock}
+                onClose={() => setTokenLock(null)}
+                onDone={() => void refreshUtxos().then(() => setRandomKey(Math.random()))}
+              />
+            </Suspense>
+          )}
           {BUY_CRYPTO_ENABLED && getBsvOpen && (
             <BuyBsvSheet
               onClose={() => setGetBsvOpen(false)}
@@ -1655,9 +1667,7 @@ export const BsvWallet = () => {
                 }}
                 onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))}
                 onChat={(t: Bsv21Balance) => openTicketRoomInChat(t.id, handleSelect)}
-                onLock={(t: Bsv21Balance) =>
-                  addSnackbar(`Locking ${t.sym || 'this token'} isn’t available yet.`, 'info', 2500)
-                }
+                onLock={(t: Bsv21Balance) => setTokenLock(t)}
               />
             )}
           </motion.div>
