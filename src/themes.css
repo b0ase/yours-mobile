@@ -164,7 +164,7 @@
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
-:root[data-bw-theme='executive'] .bw-wcard-face {
+:root[data-bw-theme='executive'] .bw-wcard-face.is-themed {
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.35);
 }
 :root[data-bw-theme='executive'] .bw-pill-gold,
@@ -185,7 +185,7 @@
   border-color: var(--bw-trim) !important;
   box-shadow: 0 0 8px rgb(0 240 255 / 0.35);
 }
-:root[data-bw-theme='cyber'] .bw-wcard-face {
+:root[data-bw-theme='cyber'] .bw-wcard-face.is-themed {
   box-shadow:
     0 0 22px rgb(255 43 214 / 0.3),
     inset 0 0 0 1px var(--bw-trim);
@@ -244,10 +244,10 @@
 }
 
 /* Pastel: soft rounded everything and a cloud/star/rainbow corner on the card (our own SVG). */
-:root[data-bw-theme='pastel'] .bw-wcard-face {
+:root[data-bw-theme='pastel'] .bw-wcard-face.is-themed {
   border-radius: 22px;
 }
-:root[data-bw-theme='pastel'] .bw-wcard-front::after {
+:root[data-bw-theme='pastel'] .bw-wcard-front.is-themed::after {
   content: '';
   position: absolute;
   right: 10px;
@@ -338,7 +338,22 @@
   color: var(--bw-accent);
   stroke: currentColor;
 }
-:root[data-bw-tone='mono'] .bw-wcard-face {
+/* Theme-follow (owner, 15 Oct 2026, wallet/cardLook.ts): every UNcustomised card wears the active pack; a card the
+   user customised has no .is-themed and keeps its own look. Duo / Tri: the pack's surfaces with a glow of its hue. */
+:root[data-bw-pack] .bw-wcard-face.is-themed {
+  background:
+    radial-gradient(120% 90% at 100% 0%, rgb(var(--bw-accent-rgb) / 0.3) 0%, transparent 60%),
+    linear-gradient(160deg, var(--bw-card) 0%, var(--bw-card2) 100%);
+  color: var(--bw-text);
+}
+:root[data-bw-pack] .bw-bc.is-themed {
+  background:
+    radial-gradient(120% 90% at 100% 0%, rgb(var(--bw-accent-rgb) / 0.3), transparent 60%),
+    linear-gradient(145deg, var(--bw-card), var(--bw-card2) 140%) !important;
+  color: var(--bw-text) !important;
+  --bc-ink: var(--bw-text);
+}
+:root[data-bw-tone='mono'] .bw-wcard-face.is-themed {
   background:
     radial-gradient(120% 90% at 100% 0%, var(--bw-tint) 0%, transparent 60%),
     linear-gradient(160deg, #ffffff 0%, #ffffff 60%, var(--bw-tint) 140%);
@@ -348,30 +363,30 @@
   --bw-wcard-muted: var(--bw-muted);
   --bw-wcard-ok: var(--bw-success);
 }
-:root[data-bw-tone='mono'] .bw-wcard-art {
+:root[data-bw-tone='mono'] .is-themed .bw-wcard-art {
   opacity: 0.28;
   filter: none !important;
 }
-:root[data-bw-tone='mono'] .bw-wcard-art-shade {
+:root[data-bw-tone='mono'] .is-themed .bw-wcard-art-shade {
   background: none;
 }
-:root[data-bw-tone='mono'] .bw-bc {
+:root[data-bw-tone='mono'] .bw-bc.is-themed {
   background: #ffffff !important;
   color: var(--bw-text) !important;
   --bc-ink: var(--bw-text);
   border: 1px solid var(--bw-line) !important;
   box-shadow: var(--bw-shadow);
 }
-:root[data-bw-tone='mono'] .bw-skin-art {
+:root[data-bw-tone='mono'] .is-themed > .bw-skin .bw-skin-art {
   opacity: 0.18;
 }
-:root[data-bw-tone='mono'] .bw-skin-fx {
+:root[data-bw-tone='mono'] .is-themed > .bw-skin .bw-skin-fx {
   display: none;
 }
-:root[data-bw-tone='mono'] .bw-skin ~ * :is(b, small) {
+:root[data-bw-tone='mono'] .is-themed > .bw-skin ~ * :is(b, small) {
   text-shadow: none;
 }
-:root[data-bw-tone='mono'] .bw-bc-contact {
+:root[data-bw-tone='mono'] .bw-bc.is-themed .bw-bc-contact {
   background: #ffffff;
   color: var(--bw-accent);
   border: 1px solid var(--bw-trim);

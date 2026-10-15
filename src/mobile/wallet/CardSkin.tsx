@@ -4,6 +4,7 @@ import { skinFor } from './cardSkins';
 import { useCardBalance } from './balanceStore';
 import { accentById } from '../theme/accents';
 import { useAccentId } from '../theme/useAccent';
+import { cardPatternColour, useCardCustomised } from './cardLook';
 import './cardSkins.css';
 
 /**
@@ -13,9 +14,9 @@ import './cardSkins.css';
  */
 export const CardSkin = memo(function CardSkin({ id, colour }: { id: string; colour?: string }) {
   const s = skinFor(id, colour);
-  // Mono packs draw every card's pattern in the pack's hue (on a white card, themes.css).
+  // An uncustomised card follows the theme: its pattern is drawn in the pack's hue (cardLook.ts, themes.css).
   const pack = accentById(useAccentId());
-  const c = pack.group === 'mono' ? pack.accent : s.colour;
+  const c = cardPatternColour(pack, useCardCustomised(id), s.colour);
   return (
     <span className={`bw-skin bw-skin--${s.finish}`} aria-hidden="true" style={{ ['--skin-c' as string]: c }}>
       <img className="bw-skin-art" src={patternUri(s.pattern, c)} alt="" draggable={false} decoding="async" />
