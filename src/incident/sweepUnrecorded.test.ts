@@ -325,7 +325,7 @@ describe('reproduced: sweep mined, its output not in the device store; 5.2.21 sa
     const before = await ownedSnapshot(dev2);
     const again = await recoverTxid(dev2, services, txid);
     expect(again.result).toBe('already');
-    expect(txidRecoverySummary(again)).toMatch(/already in your wallet/);
+    expect(txidRecoverySummary(again)).toMatch(/is in your wallet \(586\.14198569 BSV/);
     expect(await ownedSnapshot(dev2)).toEqual(before);
   }, 60000);
 
@@ -525,5 +525,26 @@ describe('local active with an INCOMPLETE copy (sweep row only on wallet.1sat.ap
     expect(backupRowsAfter).toBeGreaterThanOrEqual(backupRowsBefore);
     expect((await recoverTxid(dev2, services, txid)).result).toBe('already');
     expect(await balance(dev2)).toBe(REAL_OUTPUT);
+  }, 60000);
+});
+
+describe('fast path (owner, 15 Oct 2026: d2be946f… already in the wallet showed "Checking…" forever)', () => {
+  test('a payment in the wallet answers from local records in under 1 s with no network or remote calls', async () => {
+    const { w, services } = await sweep('success');
+    const txid = await sweepTxid(w);
+    const offline = new Proxy(services as object, {
+      get(t, p) {
+        if (p === 'getRawTx' || p === 'getMerklePath' || p === 'getUtxoStatus')
+          return async () => {
+            throw new Error(`network called: ${String(p)}`);
+          };
+        return (t as Record<string | symbol, unknown>)[p];
+      },
+    });
+    const t0 = Date.now();
+    const r = await recoverTxid(w, offline, txid);
+    expect(Date.now() - t0).toBeLessThan(1000);
+    expect(r.result).toBe('already');
+    expect(txidRecoverySummary(r)).toMatch(/^Checked: .* is in your wallet \(586\.14198569 BSV/);
   }, 60000);
 });

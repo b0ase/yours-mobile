@@ -147,7 +147,7 @@ export interface AccountContext {
   /** Restore actions storage marked failed whose transaction is mined (services/recoverFailed.ts). */
   recoverFailed: () => Promise<RecoverReport>;
   /** Recover one mined payment by txid from the derivation any reachable store holds (services/recoverByTxid.ts). */
-  recoverTxid: (txid: string) => Promise<TxidRecoverReport>;
+  recoverTxid: (txid: string, progress?: (step: string) => void) => Promise<TxidRecoverReport>;
   /** Sweep txids from this wallet's own records, for Find mined payments (recoverByTxidWiring.ts). */
   sweepCandidates: () => Promise<string[]>;
   /** Re-internalize paymail receipts the server recorded that this device lacks (restore from seed, 14 Oct 2026). */
@@ -864,10 +864,11 @@ export const initWallet = async (
         for (const txid of r.restored) internalizeBackoff.clear(txid);
         return r;
       }),
-    recoverTxid: (txid: string) =>
+    recoverTxid: (txid: string, progress?: (step: string) => void) =>
       recoverPaymentByTxid(
         txid,
         makeTxidRecoverDeps({
+          progress,
           storage,
           wallet: baseWallet as never,
           services: toolboxServices as never,

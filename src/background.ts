@@ -6,7 +6,7 @@ import { ADDRESS_RESYNC_ALARM, ADDRESS_RESYNC_PERIOD_MINUTES, pageHidden, should
 import { balanceWithDeposits } from './services/depositBalance';
 import { arrivingSats } from './services/receiveGuard';
 import { recoverySummary } from './services/recoverFailed';
-import { txidRecoverySummary } from './services/recoverByTxid';
+import { timedStep, txidRecoverySummary } from './services/recoverByTxid';
 import { paymailRestoreSummary } from './mobile/names/paymail';
 import { isEmpty, summarizeActive, switchToLocalVerified, type SwitchDeps } from './services/restoreFromRemote';
 import { insufficientFundsMessage, isInsufficientFunds, prepareFunding, type FundingSnapshot } from './services/fundingPrep';
@@ -2065,12 +2065,17 @@ if (isInServiceWorker) {
    * Settings › Troubleshooting › Find mined payments: the same mined-but-stuck repair the worker runs at startup
    * (services/recoverFailed.ts), on demand, with a one-line result (dkg sweep, 14 Oct 2026).
    */
+  /** Live step text for Settings › Troubleshooting (owner, 15 Oct 2026: no more silent "Checking…"). */
+  const sendRecoverProgress = (kind: 'txid' | 'mined', step: string) => {
+    chrome.runtime.sendMessage({ action: 'RECOVER_PROGRESS', data: { kind, step } }).catch(() => undefined);
+  };
+
   /** Settings › Troubleshooting › Recover a payment by transaction ID (services/recoverByTxid.ts). */
   const processRecoverTxid = async (txid: string, sendResponse: CallbackResponse) => {
     try {
       await ensureWallet(true);
       if (!accountContext) throw new Error('Wallet not initialized');
-      const report = await accountContext.recoverTxid(txid);
+      const report = await accountContext.recoverTxid(txid, (step) => sendRecoverProgress('txid', step));
       console.log('[STORAGE_RECOVER_TXID]', report);
       sendResponse({
         type: 'STORAGE_RECOVER_TXID',
@@ -2087,7 +2092,11 @@ if (isInServiceWorker) {
       await ensureWallet(true);
       if (!accountContext) throw new Error('Wallet not initialized');
       const ctx = accountContext;
-      let report = await ctx.recoverFailed();
+      const say = (step: string) => sendRecoverProgress('mined', step);
+      say('Checking payments that didn’t finish…');
+      let report = await timedStep('find mined', 60_000, 'Checking unfinished payments took too long', () =>
+        ctx.recoverFailed(),
+      );
       let switchNote = '';
       // Remote-active wallets were skipped (the repair needs this device's store). Copy the backup in, verified,
       // and run again on the device's store (dkg, 15 Oct 2026: a restored account starts remote-active).
@@ -2096,7 +2105,13 @@ if (isInServiceWorker) {
         const config = account?.storageConfig as (StorageConfig & { localFirst?: boolean }) | undefined;
         const remoteUrl = config?.activeRemote || config?.remotes?.[0];
         if (account && config && remoteUrl) {
-          const r = await switchToLocalVerified(restoreDeps(ctx, remoteUrl));
+          say('Copying your backup to this device…');
+          const r = await timedStep(
+            'switch to device',
+            90_000,
+            'Copying the backup to this device took too long',
+            () => switchToLocalVerified(restoreDeps(ctx, remoteUrl)),
+          ).catch((e: unknown) => ({ ok: false as const, reason: e instanceof Error ? e.message : String(e) }));
           console.log('[STORAGE_RECOVER_MINED] verified switch', r);
           if (r.ok) {
             const remotes = config.remotes?.includes(remoteUrl) ? config.remotes : [...(config.remotes ?? []), remoteUrl];
@@ -2105,7 +2120,10 @@ if (isInServiceWorker) {
                 storageConfig: { ...config, activeRemote: undefined, remotes, localFirst: true },
               } as unknown as Account,
             });
-            report = await ctx.recoverFailed();
+            say('Checking payments that didn’t finish…');
+            report = await timedStep('find mined (device)', 60_000, 'Checking unfinished payments took too long', () =>
+              ctx.recoverFailed(),
+            );
           } else {
             // Say exactly what stopped the switch (owner to dkg, 15 Oct 2026). The by-txid pass below still runs:
             // it repairs in this device's store and merges into the remote with the toolbox's sync.
@@ -2117,9 +2135,13 @@ if (isInServiceWorker) {
       // txid; recoverByTxid only adds an output a stored derivation proves is ours.
       const extra: string[] = [];
       const done = new Set([...report.restored, ...(report.notRestored ?? []).map((n) => n.txid)]);
-      for (const txid of await ctx.sweepCandidates().catch(() => [] as string[])) {
+      say('Looking for sweeps in your history…');
+      const cands = await timedStep('sweep candidates', 20_000, 'Reading your sweeps took too long', () =>
+        ctx.sweepCandidates(),
+      ).catch(() => [] as string[]);
+      for (const [i, txid] of cands.entries()) {
         if (done.has(txid)) continue;
-        const t = await ctx.recoverTxid(txid);
+        const t = await ctx.recoverTxid(txid, (step) => say(`Sweep ${i + 1} of ${cands.length}: ${step}`));
         if (t.result === 'restored' || t.result === 'error') extra.push(txidRecoverySummary(t));
       }
       const base = switchNote && report.skipped ? '' : recoverySummary(report);

@@ -5,7 +5,7 @@
 import { Beef, Hash, MerklePath, Transaction, Utils } from '@bsv/sdk';
 import type { KeyDeriver } from '@bsv/sdk';
 import type { StorageProvider, Wallet, WalletStorageManager } from '@bsv/wallet-toolbox-client';
-import type { Derivation, TxidRecoverDeps } from './recoverByTxid';
+import { timedStep, type Derivation, type TxidRecoverDeps } from './recoverByTxid';
 
 type Row = {
   outputId: number;
@@ -55,6 +55,9 @@ export type TxidWiring = {
   };
   legacyAddresses?: { label: string; address: string }[];
   log?: (msg: string) => void;
+  progress?: (step: string) => void;
+  /** Per-store search timeout (ms), default 20 s. */
+  stepTimeoutMs?: number;
 };
 
 /** Active, backup and conflicting stores of the manager (toolbox internals; read only). */
@@ -114,34 +117,93 @@ export function makeTxidRecoverDeps(w: TxidWiring): TxidRecoverDeps {
     findDerivations: async ({ txid, satoshis }) => {
       const sats = new Set(satoshis);
       const out: Derivation[] = [];
+      const unreachable: string[] = [];
       for (const { name, m } of managedStores(storage)) {
         if (!m.user) continue;
         const auth = { userId: m.user.userId, identityKey };
+        const remote = !(m as { isStorageProvider?: boolean }).isStorageProvider;
+        const url = (m.storage as unknown as { endpointUrl?: string }).endpointUrl;
+        const host = url ? url.replace(/^https?:\/\//, '').replace(/\/.*$/, '') : '';
+        const label = remote ? `the 1Sat backup${host ? ` (${host})` : ''}` : 'this device';
+        w.progress?.(remote ? 'Searching the 1Sat backup…' : 'Searching this device…');
         try {
-          for (let offset = 0; ; offset += PAGE) {
-            const page = await m.storage.findOutputsAuth(auth, {
-              partial: {},
-              noScript: true,
-              paged: { limit: PAGE, offset },
-            });
-            for (const o of page)
-              if (o.derivationPrefix && o.derivationSuffix && (o.txid === txid || sats.has(o.satoshis)))
-                out.push({
-                  derivationPrefix: o.derivationPrefix,
-                  derivationSuffix: o.derivationSuffix,
-                  senderIdentityKey: o.senderIdentityKey || undefined,
-                  satoshis: o.satoshis,
-                  txid: o.txid,
-                  store: name,
+          await timedStep(
+            `search ${name}`,
+            w.stepTimeoutMs ?? 20_000,
+            `Couldn’t reach ${label}`,
+            async () => {
+              for (let offset = 0; offset < 200_000; offset += PAGE) {
+                const page = await m.storage.findOutputsAuth(auth, {
+                  partial: {},
+                  noScript: true,
+                  paged: { limit: PAGE, offset },
                 });
-            if (page.length < PAGE) break;
-          }
+                for (const o of page)
+                  if (o.derivationPrefix && o.derivationSuffix && (o.txid === txid || sats.has(o.satoshis)))
+                    out.push({
+                      derivationPrefix: o.derivationPrefix,
+                      derivationSuffix: o.derivationSuffix,
+                      senderIdentityKey: o.senderIdentityKey || undefined,
+                      satoshis: o.satoshis,
+                      txid: o.txid,
+                      store: name,
+                    });
+                if (page.length < PAGE) break;
+              }
+            },
+            w.log,
+          );
         } catch (e) {
+          unreachable.push(label);
           w.log?.(`[recoverTxid] couldn't read ${name}: ${e instanceof Error ? e.message : String(e)}`);
         }
       }
-      return out;
+      return { derivations: out, unreachable };
     },
+    localRecord: async (txid) => {
+      // This device's store, read directly (no manager lock, no network).
+      const s = storage as unknown as { _active?: Managed & { isStorageProvider?: boolean } };
+      const dev =
+        s._active?.isStorageProvider && s._active.user
+          ? { sp: s._active.storage as unknown as SP, userId: s._active.user.userId }
+          : deviceStore(storage);
+      if (!dev) return undefined;
+      const [t] = (await dev.sp.findTransactions({
+        partial: { userId: dev.userId, txid },
+        noRawTx: true,
+      })) as unknown as (TxRow & { satoshis?: number; created_at?: Date | string })[];
+      let hiddenOutputs = 0;
+      if (t) {
+        // An output of ours held unspendable with no settled spender of ours (dkg's state) is not "in the wallet".
+        const outs = (await dev.sp.findOutputs({
+          partial: { userId: dev.userId, transactionId: t.transactionId },
+          noScript: true,
+        })) as unknown as Row[];
+        for (const o of outs) {
+          if (o.spendable) continue;
+          if (o.spentBy == null || o.spentBy === t.transactionId) {
+            hiddenOutputs++;
+            continue;
+          }
+          const [sp] = (await dev.sp.findTransactions({
+            partial: { userId: dev.userId, transactionId: o.spentBy },
+            noRawTx: true,
+          })) as unknown as TxRow[];
+          if (!sp || !['completed', 'unproven', 'sending', 'nosend', 'unsigned', 'unprocessed'].includes(sp.status))
+            hiddenOutputs++;
+        }
+      }
+      return t
+        ? {
+            hiddenOutputs,
+            status: t.status,
+            satoshis: t.satoshis,
+            createdAt: t.created_at ? new Date(t.created_at).getTime() : undefined,
+          }
+        : undefined;
+    },
+    progress: w.progress,
+    stepTimeoutMs: w.stepTimeoutMs,
     activeRows: async (txid) =>
       withRepairStore(storage, async (sp, userId) => {
         const [t] = (await sp.findTransactions({ partial: { userId, txid }, noRawTx: true })) as unknown as TxRow[];
