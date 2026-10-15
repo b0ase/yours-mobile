@@ -1,3 +1,4 @@
+import { useAvatarPlayback } from '../names/useAvatarPlayback';
 import {
   lazy,
   Suspense,
@@ -403,9 +404,11 @@ const Avatar = ({
   author,
   size = 40,
   source,
+  place = 'list',
 }: {
   author: Pick<Author, 'name' | 'avatar' | 'address'> & { bapId?: string | null };
   size?: number;
+  place?: 'full' | 'list';
   source?: Source;
 }) => {
   const [broken, setBroken] = useState(false);
@@ -413,9 +416,13 @@ const Avatar = ({
   // seeded by username, with a Treechat-purple ring. Never a bare letter.
   const ring = source === 'treechat' ? `2px solid ${SOURCE_REGISTRY.treechat.color}` : `1px solid ${LINE}`;
   const photo = avatarUrl(author.avatar);
-  const src = photo && !broken ? photo : bavatarSeedDataUri(avatarSeed({ bapId: null, ...author }, source));
+  // Feeds: a still first frame of an animated picture, played on press/hover (names/animatedAvatar.ts).
+  const play = useAvatarPlayback(photo, place);
+  const real = photo && !broken;
+  const src = real ? play.src : bavatarSeedDataUri(avatarSeed({ bapId: null, ...author }, source));
   return (
     <img
+      {...(real ? play.handlers : {})}
       src={src}
       alt=""
       loading="lazy"
@@ -2422,7 +2429,7 @@ const ProfileView = ({
       >
         {/* Tap to turn it over: their pay code, an Art QR of their payable address (public data only). */}
         <FlipBavatar
-          front={<Avatar author={author} size={80} />}
+          front={<Avatar author={author} size={80} place="full" />}
           artSeed={author.address}
           address={isPayAddress(author.address) ? author.address : ''}
           caption={safeName(author.name)}

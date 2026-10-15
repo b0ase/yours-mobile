@@ -1,3 +1,4 @@
+import { keepAnimated } from './animatedAvatar';
 import { bavatarSvg } from '../bavatar/bavatar';
 import { currentAccentId } from '../theme/accent';
 import { accentById } from '../theme/accents';
@@ -109,8 +110,14 @@ export const onAvatarChange = (cb: () => void) => {
   return () => window.removeEventListener(EVENT, cb);
 };
 
-/** Resize a picked photo to ~256 px (JPEG) and return it as a data URL. Browser only. */
+/**
+ * Resize a picked photo to ~256 px (JPEG) and return it as a data URL. Browser only. An animated GIF / WebP / APNG
+ * is kept byte for byte instead (a canvas keeps only its first frame), or refused over the cap
+ * (AvatarTooBigError, message shown as is): see ./animatedAvatar.ts.
+ */
 export async function resizeAvatar(file: File, max = 256, quality = 0.85): Promise<string> {
+  const moving = await keepAnimated(file);
+  if (moving) return moving.dataUrl;
   const bmp = await createImageBitmap(file);
   const { w, h } = fitWithin(bmp.width, bmp.height, max);
   const canvas = document.createElement('canvas');

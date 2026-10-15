@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { Camera } from 'lucide-react';
 import { resizeAvatar, resolveAvatarUrl, toAvatarUri } from './avatar';
+import { AvatarTooBigError } from './animatedAvatar';
 import { ErrorActions } from '../errors/ErrorActions';
 
 /**
@@ -20,8 +21,8 @@ export const AccountIconField = ({ value, onChange }: { value: string; onChange:
     try {
       onChange(await resizeAvatar(file));
       setError('');
-    } catch {
-      setError('Couldn’t read that image. Try another.');
+    } catch (e) {
+      setError(e instanceof AvatarTooBigError ? e.message : 'Couldn’t read that image. Try another.');
     }
   };
 
