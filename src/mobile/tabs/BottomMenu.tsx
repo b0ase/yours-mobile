@@ -7,7 +7,7 @@ import { asMenuItem, TAB_ORDER, TAB_TAP, tabFor } from './tabs';
 import { usePhoneLayout } from '../phone/flag';
 import { WIDE_ON } from '../wide/flag';
 import { onTabRetap } from './tabRetap';
-import { badgeLabel, badgeText } from './tabBadges';
+import { badgeLabel, badgeText, walletBadgeLabel } from './tabBadges';
 import { useTabBadges } from './useTabBadges';
 
 /**
@@ -65,7 +65,11 @@ export const BottomMenu = ({ selected, handleSelect, theme }: BottomMenuProps) =
               if (again) onTabRetap();
             }}
             isSelected={active === t.id}
-            ariaLabel={badgeLabel(t.label, count(t.id))}
+            ariaLabel={
+              t.id === 'bsv' && pending && indexingEnabled()
+                ? walletBadgeLabel(t.label, pending)
+                : badgeLabel(t.label, count(t.id))
+            }
             badge={
               t.id === 'bsv' && pending && indexingEnabled() ? String(pending) : badgeText(count(t.id)) || undefined
             }

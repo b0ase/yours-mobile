@@ -8,7 +8,7 @@ import { usePendingIndexing } from '../tokens/pendingIndexing';
 import { indexingEnabled } from '../storeBuild';
 import { TAB_TAP } from '../tabs/tabs';
 import { onTabRetap } from '../tabs/tabRetap';
-import { badgeText } from '../tabs/tabBadges';
+import { badgeText, walletBadgeLabel } from '../tabs/tabBadges';
 import { useTabBadges } from '../tabs/useTabBadges';
 import { setWalletKind } from '../wallet/walletKind';
 import { AddToDockSheet } from './AddToDockSheet';
@@ -525,6 +525,10 @@ const Shell = () => {
           labels={LABELS}
           activeKey={current ? dockKey({ kind: 'screen', id: current.id }) : null}
           badges={badges}
+          badgeLabels={{
+            'screen:wallet':
+              pending && indexingEnabled() ? walletBadgeLabel(LABELS.wallet ?? 'Wallet', pending) : undefined,
+          }}
           onOpen={open}
           onHome={goHome}
           onAgent={() => navigate('/m/ask-b')}

@@ -29,6 +29,8 @@ type Props = {
   labels: Record<string, string>;
   activeKey: string | null;
   badges: Record<string, string | undefined>;
+  /** Accessible names for badged tiles (default "<label>, N unread"). */
+  badgeLabels?: Record<string, string | undefined>;
   onOpen: (item: DockItem) => void;
   onHome: () => void;
   /** Open the b agent page (after a hold: with the spoken request, or a note and the keyboard). */
@@ -46,6 +48,7 @@ const Tile = ({
   label,
   active,
   badge,
+  badgeLabel,
   arranging,
   picked,
   alt,
@@ -57,6 +60,7 @@ const Tile = ({
   label: string;
   active: boolean;
   badge?: string;
+  badgeLabel?: string;
   arranging: boolean;
   picked: boolean;
   alt: boolean;
@@ -85,7 +89,7 @@ const Tile = ({
           arranging
             ? `${label}${picked ? ', selected' : ''}. Tap to select for moving`
             : badge
-              ? `${label}, ${badge} unread`
+              ? (badgeLabel ?? `${label}, ${badge} unread`)
               : label
         }
         aria-current={active ? 'page' : undefined}
@@ -240,6 +244,7 @@ export const Dock = ({
   labels,
   activeKey,
   badges,
+  badgeLabels,
   onOpen,
   onHome,
   onAgent,
@@ -322,6 +327,7 @@ export const Dock = ({
         label={itemLabel(item, labels)}
         active={k === activeKey}
         badge={badges[k]}
+        badgeLabel={badgeLabels?.[k]}
         arranging={arranging}
         picked={picked === k}
         alt={i % 2 === 1}

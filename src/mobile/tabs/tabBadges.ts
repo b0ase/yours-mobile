@@ -116,6 +116,10 @@ export const badgeText = tabBadgeText;
 /** Accessible label, e.g. "Chat, 3 unread". */
 export const badgeLabel = (label: string, n: number): string => (n > 0 ? `${label}, ${badgeText(n)} unread` : label);
 
+/** Wallet's count is not unread: "Wallet, 2 rooms to set up". */
+export const walletBadgeLabel = (label: string, n: number): string =>
+  n > 0 ? `${label}, ${n} room${n === 1 ? '' : 's'} to set up` : label;
+
 /** Tests only. */
 export const resetBadgesForTest = () => {
   chat = new Map();

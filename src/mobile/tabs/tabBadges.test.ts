@@ -10,6 +10,7 @@ import {
   markFeedViewed,
   mergeChatRooms,
   resetBadgesForTest,
+  walletBadgeLabel,
   setChatRooms,
   setFeedLatest,
   subscribeBadges,
@@ -42,6 +43,9 @@ describe('badge text and labels', () => {
     expect(badgeLabel('Chat', 3)).toBe('Chat, 3 unread');
     expect(badgeLabel('Chat', 0)).toBe('Chat');
     expect(badgeLabel('Feed', 250)).toBe('Feed, 99+ unread');
+    expect(walletBadgeLabel('Wallet', 2)).toBe('Wallet, 2 rooms to set up');
+    expect(walletBadgeLabel('Wallet', 1)).toBe('Wallet, 1 room to set up');
+    expect(walletBadgeLabel('Wallet', 0)).toBe('Wallet');
   });
 });
 
