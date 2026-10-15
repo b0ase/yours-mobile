@@ -17,7 +17,8 @@ import { fetchExchangeRate } from '../utils/wallet';
 import { AssetRow } from './AssetRow';
 import { Show } from './Show';
 import { IS_EXTENSION } from '../mobile/extension';
-import { ArchivedTokens, TokenSwipe } from '../mobile/wallet/TokenSwipe';
+import { TokenSwipe } from '../mobile/wallet/TokenSwipe';
+import { UndoToastHost } from '../mobile/swipe/undo';
 import { arrange, useTokenRows } from '../mobile/wallet/tokenRows';
 import { useListCoin } from '../mobile/wallet/useListCoin';
 import { rowMatchesCoin } from '../mobile/wallet/cardFilter';
@@ -245,9 +246,8 @@ export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
             />
           </div>
         ))}
-        <ArchivedTokens
-          rows={groups.archived.map((t) => ({ id: t.id, node: <TokenAssetRow t={t} usdBalance={usdOf(t)} /> }))}
-        />
+        {/* Archived rows live in Wallet › Hidden tokens (HiddenTokens.tsx). */}
+        <UndoToastHost />
       </div>
     );
   }
