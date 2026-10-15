@@ -110,3 +110,17 @@ export const tokeniseQuery = (c: Pick<AppCard, 'name' | 'verb' | 'url' | 'intern
 
 /** Where Comment goes: the app's discussion on bChatX. */
 export const commentUrl = (c: Pick<AppCard, 'id'>) => `https://www.bchatx.com/u/${encodeURIComponent(c.id)}`;
+
+/**
+ * Live previews need storage: most web apps (Next.js especially) throw "Application error" when a sandbox without
+ * allow-same-origin blocks localStorage/cookies (owner, 15 Oct 2026). A site on ANOTHER origin keeps its own
+ * origin and still can't reach ours, so it may have it; anything on our own origin stays script-only.
+ */
+export const previewSandbox = (url: string, here: string = typeof location === 'undefined' ? '' : location.origin) => {
+  try {
+    const o = new URL(url).origin;
+    return o !== here && o.startsWith('https://') ? 'allow-scripts allow-same-origin' : 'allow-scripts';
+  } catch {
+    return 'allow-scripts';
+  }
+};
