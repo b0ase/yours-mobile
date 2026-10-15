@@ -44,6 +44,10 @@ const BappLinkPage = lazy(() => import('../bappFrame/BappLinkPage'));
 const LockScreen = lazy(() => import('../locks/LockScreen'));
 // Desktop sidebar › Tickets / Credits (wide/WalletKindPages.tsx).
 const TicketsPage = lazy(() => import('../wide/WalletKindPages').then((m) => ({ default: m.TicketsPage })));
+const MyNamesPage = lazy(() => import('../wide/WalletKindPages').then((m) => ({ default: m.MyNamesPage })));
+// Wallet › Friends is the address book notebook (wallet/AddressBook.tsx, owner 15 Oct 2026); /m/friends/<slug> keeps
+// a friend's own page.
+const AddressBookPage = lazy(() => import('../wallet/AddressBook').then((m) => ({ default: m.AddressBookPage })));
 const CreditsPage = lazy(() => import('../wide/WalletKindPages').then((m) => ({ default: m.CreditsPage })));
 // Wallet › NFTs library (Desktop /wallet/nfts[/<outpoint>], docs/NFT-LIBRARY.md).
 const NftLibraryPage = lazy(() => import('../nfts/NftLibraryPage'));
@@ -105,7 +109,8 @@ const MobileRoutes = () => (
         <Route path="nfts/:outpoint" element={<NftLibraryPage />} />
         <Route path="tickets" element={<TicketsPage />} />
         <Route path="credits" element={<CreditsPage />} />
-        <Route path="friends" element={<FriendsPage />} />
+        <Route path="my-names" element={<MyNamesPage />} />
+        <Route path="friends" element={<AddressBookPage />} />
         <Route path="friends/:slug" element={<FriendsPage />} />
         <Route path="home" element={<HomeScreen />} />
         <Route path="apps" element={<BrowserPage only="apps" />} />

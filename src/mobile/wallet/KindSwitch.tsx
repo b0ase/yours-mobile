@@ -5,13 +5,13 @@ import { WalletTabs } from '../nfts/WalletTabs';
 
 const useWalletKind = () => useSyncExternalStore(subscribeWalletKind, getWalletKind, getWalletKind);
 
-// Tokens | NFTs | Friends (address book, owner 4 Oct 2026). Tickets are ordinary tokens that get burned on entry, so they sit under Tokens
+// Tokens | NFTs | Names (owner, 15 Oct 2026: Names replaces Friends; Friends is the address book, AddressBook.tsx). Tickets are ordinary tokens that get burned on entry, so they sit under Tokens
 // (owner, 3 Oct 2026); the Tickets view (WalletKindGate kind="tickets") is kept but nothing opens it.
 // Credits (bCredits) are shelved the same way (2 Oct 2026).
 const KINDS: [WalletKind, string][] = walletKindsFor<[WalletKind, string]>([
   ['tokens', 'Tokens'],
   ['nfts', 'NFTs'],
-  ['friends', 'Friends'], // back to Friends (owner, 6 Oct 2026)
+  ['names', 'Names'],
 ]);
 // Views with no chip that a balance card opens (tickets, credits, shares; 15 Oct 2026). Store builds drop them.
 const SHOWN = new Set<WalletKind>([

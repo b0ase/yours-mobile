@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { PenLine, X } from 'lucide-react';
+import { BookUser, PenLine, X } from 'lucide-react';
 import { BCREDITS_ENABLED, BUY_CRYPTO_ENABLED, PLACEMENT_ENABLED, STORE_BUILD } from '../storeBuild';
 import { PNEE_ICON } from '../notes/pnee';
 import { requestWalletAction } from '../phone/walletAction';
@@ -23,6 +23,8 @@ import { requestCreditsSheet } from '../credits/creditsNav';
 import { BuyBsvSheet } from './BuyBsv';
 import { holdersRoomsEnabled, openHoldersRoom, type HoldersCoin } from './holdersRoom';
 import { routeFor } from '../tabs/tabs';
+import { AddressBook } from './AddressBook';
+import { opensAddressBook } from './addressBookGesture';
 import './balanceCards.css';
 
 /**
@@ -439,6 +441,9 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
   const [active, setActive] = useState(0);
   const [tm, setTm] = useState(false);
   const [buyOpen, setBuyOpen] = useState(false);
+  // Address book (owner, 15 Oct 2026): pull right past the first card, or the notebook button.
+  const [book, setBook] = useState(false);
+  const pull0 = useRef<{ x: number; y: number; left: number } | null>(null);
   const [mnee, setMnee] = useState<number | null>(readMnee);
   const track = useRef<HTMLDivElement>(null);
   const shares = useBshares();
@@ -688,8 +693,18 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
           className="bw-bcar-track"
           style={focused ? { visibility: 'hidden' } : undefined}
           onScroll={onScroll}
-          onTouchStart={startPress}
-          onTouchEnd={endPress}
+          onTouchStart={(e) => {
+            pull0.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, left: e.currentTarget.scrollLeft };
+            startPress();
+          }}
+          onTouchEnd={(e) => {
+            endPress();
+            const p = pull0.current;
+            pull0.current = null;
+            if (!p || focused) return;
+            const t = e.changedTouches[0];
+            if (opensAddressBook(p.left, { dx: t.clientX - p.x, dy: t.clientY - p.y })) setBook(true);
+          }}
           onTouchMove={endPress}
           onContextMenu={(e) => {
             e.preventDefault();
@@ -735,19 +750,31 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
           </div>
         )}
       </div>
-      {cards.length > 1 && (
-        <div className="bw-bcar-dots" aria-label={`Card ${active + 1} of ${cards.length}`}>
-          {cards.map((c, i) => (
-            <button
-              type="button"
-              key={c.id}
-              aria-label={c.title}
-              className={i === active ? 'is-on' : ''}
-              onClick={() => goTo(i)}
-            />
-          ))}
-        </div>
-      )}
+      <div style={{ position: 'relative', minHeight: 26 }}>
+        <button
+          type="button"
+          className="bw-abook-open"
+          aria-label="Address book"
+          title="Address book"
+          onClick={() => setBook(true)}
+        >
+          <BookUser size={16} aria-hidden="true" />
+        </button>
+        {cards.length > 1 && (
+          <div className="bw-bcar-dots" aria-label={`Card ${active + 1} of ${cards.length}`}>
+            {cards.map((c, i) => (
+              <button
+                type="button"
+                key={c.id}
+                aria-label={c.title}
+                className={i === active ? 'is-on' : ''}
+                onClick={() => goTo(i)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+      {book && <AddressBook onClose={() => setBook(false)} />}
       {BUY_CRYPTO_ENABLED && buyOpen && (
         <BuyBsvSheet
           onClose={() => setBuyOpen(false)}

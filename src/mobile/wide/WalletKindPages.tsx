@@ -8,6 +8,7 @@ import { CreditsRow } from '../credits/CreditsRow';
 import { BCREDITS_ENABLED } from '../storeBuild';
 import { WideEmpty } from './WidePage';
 import { WalletTabs } from '../nfts/WalletTabs';
+import { NamesSection } from '../wallet/NamesSection';
 
 const Intro = ({ children }: { children: React.ReactNode }) => (
   <p className="px-[4%] pt-5 pb-3 m-0 text-sm" style={{ color: '#a3a9b3' }}>
@@ -39,3 +40,15 @@ export const CreditsPage = () =>
   ) : (
     <WideEmpty title="Credits" body="Credits are not part of this edition." />
   );
+
+/** Desktop Wallet › Names (/m/my-names): the phone's Names view as its own page. */
+export const MyNamesPage = () => (
+  <div className="bs-spaces min-h-full flex flex-col overflow-y-auto pb-10" style={{ color: '#fff' }}>
+    <WalletTabs active="names" />
+    <Intro>
+      Names this wallet holds: your $handle paymail and your OpNS names. Bind a name to your identity, sell it or give
+      it away.
+    </Intro>
+    <NamesSection />
+  </div>
+);
