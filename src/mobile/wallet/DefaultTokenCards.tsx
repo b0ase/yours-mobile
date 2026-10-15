@@ -12,6 +12,7 @@ import { PNEE_DECIMALS, PNEE_ICON, PNEE_TOKEN_ID, unindexedPnee } from '../notes
 import { BACK_PNEE_LABEL, BACK_PNEE_ROUTE } from '../notes/backPnee';
 import { Lock } from 'lucide-react';
 import bGlyph from '../brand/bwallet-glyph.svg';
+import { CoinRow } from './CoinRow';
 
 type Bal = { id: string; amount: number; icon: string | null };
 
@@ -75,40 +76,44 @@ export const DefaultTokenCards = () => {
 
   return (
     <>
-      <AssetRow
-        icon={PNEE_ICON}
-        ticker="PNEEs · USD¢"
-        balance={pnee}
-        decimals={PNEE_DECIMALS}
-        usdBalance={pnee}
-        showPointer={false}
-        subline={indexed === 0 && pending > 0 ? sub('Indexing · can send once indexed') : undefined}
-        // Get PNEEs on the right, like Get MNEE, once the token exists (Exchange › Bonds lists notes and vaults).
-        // Store build: no Market, so nothing to get PNEEs from, and no backing (minting against a vault) either.
-        action={
-          PNEE_TOKEN_ID && MARKET_ENABLED
-            ? { label: 'Get PNEEs', onClick: () => navigate(routeFor('market') ?? '/m/exchange') }
-            : undefined
-        }
-        // Back PNEEs: a round lock icon (owner, 10 Oct 2026; the text button covered "USD¢"). Opens the Lock screen
-        // in Back PNEEs mode: how much BSV to lock, then the Back PNEEs flow.
-        secondaryAction={
-          MARKET_ENABLED
-            ? { label: BACK_PNEE_LABEL, icon: <Lock size={18} />, onClick: () => navigate(BACK_PNEE_ROUTE) }
-            : undefined
-        }
-      />
+      <CoinRow id="pnee">
+        <AssetRow
+          icon={PNEE_ICON}
+          ticker="PNEEs · USD¢"
+          balance={pnee}
+          decimals={PNEE_DECIMALS}
+          usdBalance={pnee}
+          showPointer={false}
+          subline={indexed === 0 && pending > 0 ? sub('Indexing · can send once indexed') : undefined}
+          // Get PNEEs on the right, like Get MNEE, once the token exists (Exchange › Bonds lists notes and vaults).
+          // Store build: no Market, so nothing to get PNEEs from, and no backing (minting against a vault) either.
+          action={
+            PNEE_TOKEN_ID && MARKET_ENABLED
+              ? { label: 'Get PNEEs', onClick: () => navigate(routeFor('market') ?? '/m/exchange') }
+              : undefined
+          }
+          // Back PNEEs: a round lock icon (owner, 10 Oct 2026; the text button covered "USD¢"). Opens the Lock screen
+          // in Back PNEEs mode: how much BSV to lock, then the Back PNEEs flow.
+          secondaryAction={
+            MARKET_ENABLED
+              ? { label: BACK_PNEE_LABEL, icon: <Lock size={18} />, onClick: () => navigate(BACK_PNEE_ROUTE) }
+              : undefined
+          }
+        />
+      </CoinRow>
       {/* Held tokens already have a row in the token list below (with the issuer badge): only show it here at 0. */}
       {link && !(mine && mine.amount > 0) && (
-        <AssetRow
-          icon={mine?.icon ?? bGlyph}
-          ticker={`$${link.ticker.replace(/^\$/, '')}`}
-          balance={mine?.amount ?? 0}
-          decimals={0}
-          usdBalance={0}
-          showPointer={false}
-          subline={sub('Your token')}
-        />
+        <CoinRow id={link.tokenId}>
+          <AssetRow
+            icon={mine?.icon ?? bGlyph}
+            ticker={`$${link.ticker.replace(/^\$/, '')}`}
+            balance={mine?.amount ?? 0}
+            decimals={0}
+            usdBalance={0}
+            showPointer={false}
+            subline={sub('Your token')}
+          />
+        </CoinRow>
       )}
     </>
   );

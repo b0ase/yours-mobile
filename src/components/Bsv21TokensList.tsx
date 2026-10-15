@@ -19,6 +19,9 @@ import { Show } from './Show';
 import { IS_EXTENSION } from '../mobile/extension';
 import { ArchivedTokens, TokenSwipe } from '../mobile/wallet/TokenSwipe';
 import { arrange, useTokenRows } from '../mobile/wallet/tokenRows';
+import { useListCoin } from '../mobile/wallet/useListCoin';
+import { rowMatchesCoin } from '../mobile/wallet/cardFilter';
+import { hasFocusHost, setFocusedToken } from '../mobile/wallet/cardFocus';
 
 const resolveIcon = (icon: string) => (isUri(icon) ? icon : `${ONESAT_MAINNET_CONTENT_URL}/${icon}`);
 
@@ -150,13 +153,32 @@ export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
     await chromeStorageService.updateNested(key, update);
   };
 
-  const confirmedTokens = tokens.filter((t) => t.all.confirmed > 0n);
-  const pendingTokens = tokensProp.filter((d) => d.all.pending > 0n);
+  // The MNEE / PNEEs balance card narrows the list to its coin (mobile/wallet/cardFilter.ts).
+  const coin = useListCoin();
+  const confirmedTokens = tokens.filter((t) => t.all.confirmed > 0n && rowMatchesCoin(t.id, coin));
+  const pendingTokens = tokensProp.filter((d) => d.all.pending > 0n && rowMatchesCoin(d.id, coin));
   const rowsState = useTokenRows();
   const usdOf = (t: Bsv21Balance) =>
     (priceData.find((p) => p.id === t.id)?.satPrice ?? 0) *
     (exchangeRate / BSV_DECIMAL_CONVERSION) *
     Number(showAmount(t.all.confirmed, t.dec));
+
+  // Tap a row: with the balance cards on screen it becomes the front card (owner, 15 Oct 2026; × or a swipe puts
+  // the normal card back, the list stays where it is). Otherwise the old tap (the token's send screen).
+  const openRow = (t: Bsv21Balance) => {
+    if (!hasFocusHost()) return onTokenClick(t);
+    const name = getTokenName(t);
+    setFocusedToken({
+      id: t.id,
+      name,
+      icon: t.icon ? resolveIcon(t.icon) : GENERIC_TOKEN_ICON,
+      amount: `${showAmount(t.all.confirmed, t.dec)} ${t.sym || name}`,
+      onSend: () => onTokenClick(t),
+      onReceive: props.onReceive,
+      onLock: props.onLock ? () => props.onLock?.(t) : undefined,
+      onRoom: props.onChat ? () => props.onChat?.(t) : undefined,
+    });
+  };
 
   // Phone / web wallet: swipe actions, pinned group, archive, iPhone-style reorder (owner, 15 Oct 2026).
   if (!IS_EXTENSION && tokens.length > 0) {
@@ -173,7 +195,7 @@ export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
       >
         <div
           style={{ display: 'flex', justifyContent: 'center', width: '100%' }}
-          onClick={() => onTokenClick(t)}
+          onClick={() => openRow(t)}
         >
           <TokenAssetRow t={t} usdBalance={usdOf(t)} still />
         </div>

@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
 import { getWalletKind, setWalletKind, subscribeWalletKind, type WalletKind } from './walletKind';
-import { walletKindsFor } from '../storeBuild';
+import { PLACEMENT_ENABLED, walletKindsFor } from '../storeBuild';
 import { WalletTabs } from '../nfts/WalletTabs';
 
 const useWalletKind = () => useSyncExternalStore(subscribeWalletKind, getWalletKind, getWalletKind);
@@ -13,7 +13,15 @@ const KINDS: [WalletKind, string][] = walletKindsFor<[WalletKind, string]>([
   ['nfts', 'NFTs'],
   ['friends', 'Friends'], // back to Friends (owner, 6 Oct 2026)
 ]);
-const SHOWN = new Set(KINDS.map(([k]) => k));
+// Views with no chip that a balance card opens (tickets, credits, shares; 15 Oct 2026). Store builds drop them.
+const SHOWN = new Set<WalletKind>([
+  ...KINDS.map(([k]) => k),
+  ...walletKindsFor<[WalletKind]>([
+    ['tickets'],
+    ['credits'],
+    ...(PLACEMENT_ENABLED ? [['shares'] as [WalletKind]] : []),
+  ]).map(([k]) => k),
+]);
 
 /** Tokens | NFTs (sized so four fit a 320px phone), styled like Market's type switch (market/MarketPage.tsx). */
 export const WalletKindSwitch = () => {

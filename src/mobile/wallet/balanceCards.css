@@ -382,3 +382,30 @@
   font-size: 16px;
   font-weight: 700;
 }
+
+/* A tapped token row on the card (cardFocus.ts): over the hidden track, so nothing below moves. */
+.bw-bcar-stage {
+  position: relative;
+}
+.bw-bcar-focus {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+}
+.bw-bcar-unfocus {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  z-index: 3;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 0.6);
+  color: #fff;
+  cursor: pointer;
+}

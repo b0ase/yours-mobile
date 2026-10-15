@@ -27,7 +27,7 @@ export const STORE_AGENT_NOTE = 'Use your own AI provider key';
 export const bcorpFeeAddress = (address: string, store = STORE_BUILD): string => (store ? '' : address);
 
 /** Wallet tab switch: no Tickets (token-gated rooms) or Credits (prepaid bCorp credits) in a store build. */
-export const STORE_HIDDEN_WALLET_KINDS: readonly string[] = ['tickets', 'credits'];
+export const STORE_HIDDEN_WALLET_KINDS: readonly string[] = ['tickets', 'credits', 'shares'];
 export const walletKindsFor = <T extends readonly [string, ...unknown[]]>(
   kinds: readonly T[],
   store = STORE_BUILD,
