@@ -1,5 +1,15 @@
 import { describe, expect, test } from 'bun:test';
-import { ACCENTS, THEMES, accentById, accentVars, contrast, packVars, rgbTriplet } from './accents';
+import {
+  ACCENTS,
+  DUO_PACKS,
+  SINGLE_PACKS,
+  THEMES,
+  accentById,
+  accentVars,
+  contrast,
+  packVars,
+  rgbTriplet,
+} from './accents';
 
 describe('app accents and packs', () => {
   test('gold is first and the default', () => {
@@ -48,4 +58,36 @@ test('every pack maps to a complete variable set', () => {
     expect(Object.keys(v).sort()).toEqual(keys);
     for (const val of Object.values(v)) expect(val.length).toBeGreaterThan(0);
   }
+});
+
+test('single tones and cross-overs exist, come first after Gold, and pass AA', () => {
+  const singles = ['white', 'black', 'blue', 'red', 'green', 'purple', 'orange', 'pink', 'blackwhite', 'whiteblack'];
+  const ids = THEMES.map((t) => t.id);
+  expect(ids[0]).toBe('gold');
+  expect(ids.slice(1, 1 + singles.length).sort()).toEqual([...singles].sort());
+  expect(SINGLE_PACKS[0]?.id).toBe('gold');
+  expect(DUO_PACKS.map((t) => t.id)).toContain('executive');
+  for (const id of singles) {
+    const a = accentById(id);
+    expect(a.id).toBe(id);
+    for (const g of [a.bg, a.surface, a.surface2]) {
+      expect(contrast(a.text, g)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(a.muted, g)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(a.accent, g)).toBeGreaterThanOrEqual(4.5);
+    }
+    for (const c of [a.accent, a.hi, a.lo]) expect(contrast(a.on, c)).toBeGreaterThanOrEqual(4.5);
+  }
+  // White is white, Black is black.
+  expect(accentById('white').bg).toBe('#FFFFFF');
+  expect(accentById('black').bg).toBe('#000000');
+  expect(accentById('blackwhite').accent).toBe('#FFFFFF');
+  expect(accentById('whiteblack').accent).toBe('#000000');
+});
+
+test('Paper keeps its page but white controls', () => {
+  const p = accentById('paper');
+  expect(p.bg).toBe('#F6F1E7');
+  expect(p.surface).toBe('#FFFFFF');
+  expect(contrast(p.text, p.surface2)).toBeGreaterThanOrEqual(4.5);
+  expect(contrast(p.muted, p.surface2)).toBeGreaterThanOrEqual(4.5);
 });

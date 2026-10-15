@@ -128,3 +128,13 @@ export function mixFromPack(a: Accent): MixSpec {
     pattern: a.pattern,
   });
 }
+
+/**
+ * Mix your own's open state. Only the header's toggle closes it; picking a pack, Shuffle, sliders, base and
+ * corners leave it as it is (owner, 15 Oct 2026: "keeps closing its panel while I'm changing stuff").
+ */
+export function nextMixerOpen(open: boolean, action: 'toggle' | 'open' | 'pick'): boolean {
+  if (action === 'toggle') return !open;
+  if (action === 'open') return true;
+  return open;
+}
