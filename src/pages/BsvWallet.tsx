@@ -28,6 +28,7 @@ import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { PageLoader } from '../components/PageLoader';
 import { QrCode } from '../components/QrCode';
+import { BetaLine } from '../mobile/sweep/BetaLine';
 import { MainContent } from '../components/Reusable';
 import { Show } from '../components/Show';
 import { TopNav } from '../components/TopNav';
@@ -1163,6 +1164,8 @@ export const BsvWallet = () => {
           Tap your bAvatar to flip it
         </span>
       </div>
+
+      <BetaLine className="mb-3" />
 
       {/* QR code */}
       <QrCode address={receiveAddress} onClick={handleCopyToClipboard} />
