@@ -179,6 +179,30 @@ export interface SocialProfile {
   suggested_handle?: string | null;
 }
 
+export type HandlesInfo = {
+  handles: { handle: string; primary: boolean }[];
+  max: number;
+  nextFee: { pence: number; sats: number; to: string } | null;
+};
+
+/** bit-sign GET /me/handles → HandlesInfo. Pure. */
+export function parseHandlesInfo(v: { handles?: unknown; max?: unknown; next_fee?: unknown } | null): HandlesInfo {
+  const handles = (Array.isArray(v?.handles) ? v.handles : [])
+    .map((h: { handle?: unknown; primary?: unknown }) => ({
+      handle: String(h?.handle ?? '')
+        .replace(/^\$/, '')
+        .toLowerCase(),
+      primary: h?.primary === true,
+    }))
+    .filter((h) => !!h.handle);
+  const f = v?.next_fee as { pence?: unknown; sats?: unknown; to?: unknown } | null | undefined;
+  const nextFee =
+    f && Number(f.sats) > 0 && typeof f.to === 'string' && f.to
+      ? { pence: Number(f.pence) || 0, sats: Math.ceil(Number(f.sats)), to: f.to }
+      : null;
+  return { handles, max: Number(v?.max) > 0 ? Number(v?.max) : 5, nextFee };
+}
+
 export class BchatClient {
   constructor(
     private readonly http: Http,
@@ -352,6 +376,35 @@ export class BchatClient {
     if (!this.session || !r.handle) throw new ChatApiError('bChat handle update failed', 500);
     this.session = { ...this.session, handle: r.handle, token: r.token || this.session.token };
     void this.reportWalletAddress();
+    return this.session;
+  }
+
+  // ── Several names per account (bit-sign /me/handles; owner, 15 Oct 2026) ──
+
+  /** This account's names, the max, and what the next extra name costs (null = free). */
+  async listHandles(): Promise<HandlesInfo> {
+    const r = await this.call<{ handles?: unknown; max?: unknown; next_fee?: unknown }>(
+      'GET',
+      '/api/bitsign/me/handles',
+    );
+    return parseHandlesInfo(r);
+  }
+
+  /** Add a name. Without `beef` bit-sign answers 402 `payment_required` with what to pay (ChatApiError.data). */
+  async addHandle(handle: string, beef?: string): Promise<void> {
+    await this.call('POST', '/api/bitsign/me/handles', { handle, ...(beef ? { beef } : {}) });
+  }
+
+  /** Remove a name (not the primary); bit-sign holds it for 90 days. */
+  async removeHandle(handle: string): Promise<void> {
+    await this.call('DELETE', '/api/bitsign/me/handles', { handle });
+  }
+
+  /** Make a name primary (30-day cooldown on bit-sign). Keeps the new session token it returns. */
+  async setPrimaryHandle(handle: string): Promise<ChatSession> {
+    const r = await this.call<{ token?: string; handle?: string }>('POST', '/api/bitsign/me/handle', { handle });
+    if (!this.session) throw new ChatApiError('Not signed in to bChat', 401);
+    this.session = { ...this.session, handle: r.handle || handle, token: r.token || this.session.token };
     return this.session;
   }
 

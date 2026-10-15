@@ -145,6 +145,35 @@ export const unlinkPaymail = async (
   await postJson(f, api('unlink'), await signRequest(wallet, 'unlink', { alias: paymail.split('@')[0] }));
 };
 
+type NameSigner = Pick<WalletInterface, 'getPublicKey' | 'createSignature'>;
+const aliasOf = (paymail: string) => paymail.split('@')[0].toLowerCase();
+
+/** Add an extra plain name to this wallet (it receives too; the main name stays main). Pay on bit-sign first (extraNames.ts). */
+export const addPaymail = async (f: Fetch, wallet: NameSigner, alias: string): Promise<string> => {
+  if (!paymailEnabled()) throw new Error('Paymail is not configured');
+  const a = alias.trim().toLowerCase();
+  if (!PAYMAIL_ALIAS_RE.test(a)) throw new Error('Use a-z, 0-9, - or _ (up to 32)');
+  const signed = await signRequest(wallet, 'names-add', { alias: a });
+  // The server checks with bit-sign that this identity key owns (has paid for) the name.
+  const j = await postJson(f, api('names-add'), signed);
+  return String(j.added);
+};
+
+/** Make one of this wallet's plain names the main one (what payments and the card show). */
+export const makeMainPaymail = async (f: Fetch, wallet: NameSigner, paymail: string): Promise<string> => {
+  const j = await postJson(
+    f,
+    api('names-primary'),
+    await signRequest(wallet, 'names-primary', { alias: aliasOf(paymail) }),
+  );
+  return String(j.main);
+};
+
+/** Remove an extra name: it forwards to the main name for 90 days, then is released. */
+export const removePaymail = async (f: Fetch, wallet: NameSigner, paymail: string): Promise<void> => {
+  await postJson(f, api('names-remove'), await signRequest(wallet, 'names-remove', { alias: aliasOf(paymail) }));
+};
+
 /** Apps › Add app: this wallet's own app list, kept on the paymail server so a restore brings it back. */
 export type SavedApp = { url: string; name: string };
 type Signer = Pick<WalletInterface, 'getPublicKey' | 'createSignature'>;
