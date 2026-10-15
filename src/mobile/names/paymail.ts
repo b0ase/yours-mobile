@@ -331,3 +331,69 @@ export const paymailConfig = async (f: Fetch): Promise<{ nameFee: NameFee | null
 
 /** A legacy .gmail name shows the owner's Gmail address: the app asks them to choose a name. */
 export const isGmailName = (paymail: string | null | undefined) => /\.gmail@/.test(paymail ?? '');
+
+/** Display names (owner, 15 Oct 2026): a person's name beside the paymail, never blank. Same rules as site/lib/displayName.js. */
+export const DISPLAY_NAME_MAX = 64;
+const NAME_PLACEHOLDER_RE = /^(account\s*\d*|anonymous|anon|bwallet|bwalletx|yours|wallet|unknown|user)$/i;
+const NAME_CONTROL_RE = /[\p{Cc}\p{Cf}\u2028\u2029]/gu;
+const NAME_IMPERSONATE_RES = [
+  /@\s*\S*/g,
+  /\b[\w-]+\.(com|net|org|io|app|xyz|online|website|me|co|uk)\b/gi,
+  /\bb?wallet\s*x\b/gi,
+  /\bverified\b/gi,
+  /\bofficial\b/gi,
+  /\b(admin|support|staff|moderator)\b/gi,
+  /[\u2713\u2714\u2705\u2611\u{1F512}\u{1F6E1}]/gu,
+];
+
+/** A name as typed → what the server stores ('' = nothing usable, e.g. "Anonymous" or "@bwalletx"). */
+export const cleanDisplayName = (raw: string | null | undefined): string => {
+  let s = String(raw ?? '')
+    .normalize('NFC')
+    .replace(NAME_CONTROL_RE, '');
+  for (const re of NAME_IMPERSONATE_RES) s = s.replace(re, ' ');
+  s = s
+    .replace(/[<>]/g, '')
+    .replace(/[([{]\s*[)\]}]/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s\-–—·|:,.]+|[\s\-–—·|:,.]+$/g, '')
+    .trim();
+  if (NAME_PLACEHOLDER_RE.test(s)) return '';
+  return Array.from(s).slice(0, DISPLAY_NAME_MAX).join('').trim();
+};
+
+/** The alias as a name: "mike" → "Mike". */
+export const defaultDisplayName = (alias: string): string => {
+  const base = String(alias || '')
+    .split('@')[0]
+    .replace(/\.(x|gmail)$/i, '')
+    .replace(/[_-]+/g, ' ')
+    .trim();
+  return base ? base.charAt(0).toUpperCase() + base.slice(1) : '';
+};
+
+/** Set this wallet's display name on every one of its paymails (signed). Returns the name as stored. */
+export const setDisplayName = async (
+  f: Fetch,
+  wallet: Pick<WalletInterface, 'getPublicKey' | 'createSignature'>,
+  name: string,
+): Promise<string> => {
+  if (!paymailEnabled()) throw new Error('Paymail is not configured');
+  const clean = cleanDisplayName(name);
+  if (!clean) throw new Error('Type a name (letters, not a paymail)');
+  const j = await postJson(f, api('set-name'), await signRequest(wallet, 'set-name', { name: clean }));
+  return String(j.name ?? clean);
+};
+
+/** The public display name of one of our paymails ('' when unknown). Never throws. */
+export const fetchDisplayName = async (f: Fetch, paymail: string): Promise<string> => {
+  if (!paymailEnabled() || !paymail) return '';
+  try {
+    const r = await f(`${api('profile')}/${encodeURIComponent(paymail)}`);
+    if (!r.ok) return '';
+    const j = await r.json().catch(() => null);
+    return cleanDisplayName(typeof j?.name === 'string' ? j.name : '');
+  } catch {
+    return '';
+  }
+};
