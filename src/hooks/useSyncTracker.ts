@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { YoursEventName } from '../inject';
 import { useTheme } from './useTheme';
+import { BALANCE_REFRESH_EVENT } from './balanceRefresh';
 
 export type SyncStatusMessage = {
   action: YoursEventName.SYNC_STATUS_UPDATE;
@@ -21,6 +22,9 @@ export const useSyncTracker = () => {
   const { theme } = useTheme();
   const [pendingCount, setPendingCount] = useState(0);
   const [updateBalance, setUpdateBalance] = useState(false);
+  /** Bumped on every finished sync and every requestBalanceRefresh(). `updateBalance` latches at true after the
+   *  first sync, so later quiet resyncs never re-ran the balance read through it (latency audit, 15 Oct 2026). */
+  const [balanceTick, setBalanceTick] = useState(0);
   // Default to false — the spinner should only appear if we actively observe
   // a sync happening. Otherwise the UI can get stuck when the popup mounts
   // after the service worker already finished (or dropped) its `complete` event.
@@ -49,6 +53,7 @@ export const useSyncTracker = () => {
 
     const finishSync = () => {
       setUpdateBalance(true);
+      setBalanceTick((n) => n + 1);
       setIsSyncing(false);
       setPendingCount(0);
       clearAllTimers();
@@ -104,9 +109,12 @@ export const useSyncTracker = () => {
     };
 
     chrome.runtime.onMessage.addListener(handleMessage);
+    const onRefresh = () => setBalanceTick((n) => n + 1);
+    window.addEventListener(BALANCE_REFRESH_EVENT, onRefresh);
 
     return () => {
       chrome.runtime.onMessage.removeListener(handleMessage);
+      window.removeEventListener(BALANCE_REFRESH_EVENT, onRefresh);
       clearAllTimers();
     };
   }, []);
@@ -114,6 +122,7 @@ export const useSyncTracker = () => {
   return {
     pendingCount,
     updateBalance,
+    balanceTick,
     theme,
     isSyncing,
     restoreMessage,

@@ -131,7 +131,7 @@ export const BsvWallet = () => {
   const { theme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
-  const { updateBalance, isSyncing, restoreMessage } = useSyncTracker();
+  const { updateBalance, balanceTick, isSyncing, restoreMessage } = useSyncTracker();
   const urlParams = new URLSearchParams(location.search);
   const { handleSelect, query } = useBottomMenu();
   const tokenRows = useTokenRows();
@@ -606,6 +606,14 @@ export const BsvWallet = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [updateBalance]);
+
+  // Every finished sync / paymail receipt, not just the first (updateBalance latches at true).
+  useEffect(() => {
+    if (!balanceTick) return;
+    getAndSetBsvBalance();
+    loadLocks();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [balanceTick]);
 
   useEffect(() => {
     if (isReload) window.location.reload();
