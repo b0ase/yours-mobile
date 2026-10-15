@@ -1,7 +1,7 @@
 /** Wallet entry point to the Airdrops inbox, with a badge for new items since it was last opened. */
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BookUser, ChevronRight, Gift, Layers } from 'lucide-react';
+import { BookUser, Gift, Layers } from 'lucide-react';
 import { useAirdrops } from './useAirdrops';
 import { AddressBook } from '../wallet/AddressBook';
 import { requestAllCards } from '../wallet/allCardsOpen';
@@ -12,7 +12,7 @@ import { BALANCE_CARDS_ENABLED } from '../storeBuild';
 // above and 36px off the tabs). Owner, 15 Oct 2026: split in two, Addresses on the left (it replaced the small
 // notebook icon under the cards) and Airdrops on the right, each half the width; then a small square All cards icon
 // between them (moved here from beside Swap, which gets its full width back).
-const HALF = 'flex-1 min-w-0 flex items-center gap-3 rounded-2xl px-4 py-3 border text-left cursor-pointer';
+const HALF = 'flex-1 min-w-0 flex items-center gap-2 rounded-2xl px-3 py-3 border text-left cursor-pointer';
 const LOOK = { background: 'var(--bw-surface)', borderColor: '#2b2f36' };
 const LABEL = 'flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-sm font-semibold text-white';
 
@@ -24,8 +24,8 @@ const AllCardsSquareImpl = () => (
     onClick={() => requestAllCards()}
     aria-label="All cards"
     title="All cards"
-    className="shrink-0 aspect-square self-stretch flex items-center justify-center rounded-2xl cursor-pointer"
-    style={{ background: 'var(--bw-surface)' }}
+    className="shrink-0 aspect-square self-stretch flex items-center justify-center rounded-2xl border cursor-pointer"
+    style={LOOK}
   >
     <Layers size={18} color="var(--bw-accent-hi)" aria-hidden="true" />
   </button>
@@ -41,7 +41,6 @@ export const AirdropsRow = () => {
       <button type="button" onClick={() => setBook(true)} className={HALF} style={LOOK}>
         <BookUser size={16} color="var(--bw-accent-hi)" />
         <span className={LABEL}>Addresses</span>
-        <ChevronRight size={16} color="#98A2B3" />
       </button>
       <AllCardsSquare />
       <button type="button" onClick={() => navigate('/m/bmail?tab=quarantine')} className={HALF} style={LOOK}>
@@ -58,7 +57,6 @@ export const AirdropsRow = () => {
         ) : (
           visible.length > 0 && <span className="text-xs text-[#98A2B3]">{visible.length}</span>
         )}
-        <ChevronRight size={16} color="#98A2B3" />
       </button>
       {book && <AddressBook onClose={() => setBook(false)} />}
     </div>
