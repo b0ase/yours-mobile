@@ -35,16 +35,74 @@ export const createBackupFile = async (cs: ChromeStorageService, password: strin
   return new File([sealed as Uint8Array<ArrayBuffer>], backupFileName(), { type: 'application/zip' });
 };
 
-export type SaveRoute = 'share' | 'download' | 'none';
+export type SaveRoute = 'share' | 'native' | 'download' | 'none';
 
-/** Share sheet with a file where the browser supports it, else a normal download (not in native WebViews). */
+/**
+ * In the app: the OS share sheet through Capacitor Filesystem + Share (Android's WebView has no Web Share with files,
+ * which left Android on "isn't available in this app yet": owner, 15 Oct 2026). In a browser: the Web Share sheet
+ * with a file where supported, else a normal download.
+ */
 export const saveRoute = (file: File, native: boolean): SaveRoute => {
+  // In the app the native sheet always: it needs no fresh tap, so making the file and sharing it is one step.
+  if (native) return 'native';
   try {
     if (typeof navigator !== 'undefined' && navigator.canShare?.({ files: [file] })) return 'share';
   } catch {
     /* canShare throws on some browsers */
   }
-  return native ? 'none' : 'download';
+  return 'download';
+};
+
+const toBase64 = async (file: Blob): Promise<string> => {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+};
+
+/** The two Capacitor calls the native route needs; injectable for tests. */
+export type NativeFileShare = {
+  write: (path: string, base64: string) => Promise<string>;
+  share: (uri: string, name: string) => Promise<void>;
+  /** Empties the app-private folder the share copies live in. */
+  clear: () => Promise<void>;
+};
+
+const SHARE_DIR = 'backup-share';
+
+const capacitorFileShare = async (): Promise<NativeFileShare> => {
+  const [{ Filesystem, Directory }, { Share }] = await Promise.all([
+    import('@capacitor/filesystem'),
+    import('@capacitor/share'),
+  ]);
+  return {
+    write: async (path, data) =>
+      (await Filesystem.writeFile({ path, data, directory: Directory.Cache, recursive: true })).uri,
+    share: async (uri, name) => {
+      await Share.share({ title: name, files: [uri], dialogTitle: 'Save your backup' });
+    },
+    clear: () => Filesystem.rmdir({ path: SHARE_DIR, directory: Directory.Cache, recursive: true }),
+  };
+};
+
+const cancelled = (e: unknown) => /cancel/i.test(e instanceof Error ? e.message : String(e));
+
+/**
+ * The file (already sealed with the wallet password) goes to the app's private cache, the OS share sheet offers
+ * Files / Drive / Mail. The previous share copy is cleared first (the receiving app may still be reading the latest
+ * one when the sheet closes, so it stays until the next save). Nothing is uploaded by the app itself.
+ */
+export const shareNativeFile = async (file: File, io?: NativeFileShare): Promise<boolean> => {
+  const fs = io ?? (await capacitorFileShare());
+  await fs.clear().catch(() => undefined);
+  const uri = await fs.write(`${SHARE_DIR}/${file.name}`, await toBase64(file));
+  try {
+    await fs.share(uri, file.name);
+    return true;
+  } catch (e) {
+    if (cancelled(e)) return false;
+    throw e;
+  }
 };
 
 /** Must run inside a tap (iOS needs a user gesture for navigator.share). Resolves false if cancelled. */
@@ -68,6 +126,7 @@ export const saveBackupFile = async (file: File, route: SaveRoute): Promise<bool
     }
     throw last;
   }
+  if (route === 'native') return shareNativeFile(file);
   if (route === 'download') {
     const url = URL.createObjectURL(file);
     const a = document.createElement('a');

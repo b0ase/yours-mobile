@@ -133,8 +133,11 @@ export const BackupStep = ({ exit, web, onComplete, onExit, start }: Props) => {
       const f = await createBackupFile(chromeStorageService, password);
       setPassword('');
       setFile(f);
-      setRoute(saveRoute(f, isNative));
+      const r = saveRoute(f, isNative);
+      setRoute(r);
       setPage('file-ready');
+      // In the app one tap does both: the share sheet opens as soon as the file is made.
+      if (r === 'native') await saveFile(f, r);
     } catch (e) {
       setError(e instanceof WrongPasswordError ? 'Incorrect password' : 'Could not make the backup. Try again.');
     } finally {
@@ -142,18 +145,18 @@ export const BackupStep = ({ exit, web, onComplete, onExit, start }: Props) => {
     }
   };
 
-  const saveFile = async () => {
-    if (!file) return;
+  async function saveFile(f: File | null = file, r: SaveRoute = route) {
+    if (!f) return;
     setError('');
     try {
-      const ok = await saveBackupFile(file, route);
+      const ok = await saveBackupFile(f, r);
       if (ok) setSavedOnce(true);
     } catch (e) {
       const why = e instanceof Error ? `${e.name}${e.message ? `: ${e.message}` : ''}` : String(e);
       setError(`The share sheet didn't open (${why.slice(0, 120)}).`);
       setShareFailed(true);
     }
-  };
+  }
 
   const revealPhrase = async () => {
     setBusy(true);
@@ -375,15 +378,16 @@ export const BackupStep = ({ exit, web, onComplete, onExit, start }: Props) => {
   } else if (page === 'file-password') {
     body = (
       <>
-        {header('Encrypted backup', home)}
-        {accountChip}
+        {header('Save encrypted backup', home)}
         <div className="flex flex-col px-5 pb-10">
-          <p className="text-sm mt-2 mb-2" style={{ color: MUTED }}>
-            Enter your wallet password. The backup file is locked with it, so you'll need the same password to restore
-            from the file.{others > 0 ? ` The file holds all ${others + 1} accounts.` : ''}
+          <p className="text-sm mt-2 mb-1 text-white" data-testid="backup-why">
+            Lose this phone, and this file plus your password bring your wallet back.
           </p>
-          {passwordNote}
-          {passwordForm('Make backup file', () => void makeFile())}
+          <p className="text-xs mt-0 mb-4" style={{ color: MUTED }}>
+            Type your wallet password (the one you unlock with) to lock the file.
+            {others > 0 ? ` It holds all ${others + 1} accounts.` : ''}
+          </p>
+          {passwordForm(isNative ? 'Save encrypted backup' : 'Make backup file', () => void makeFile())}
           {password && <StrengthMeter password={password} />}
         </div>
       </>
@@ -423,24 +427,32 @@ export const BackupStep = ({ exit, web, onComplete, onExit, start }: Props) => {
             <FileLock2 size={22} color={GOLD} />
             <span className="text-sm text-white break-all">{file?.name}</span>
           </div>
-          {route === 'none' ? (
-            <p className="text-sm mt-4" style={{ color: RED }}>
-              Saving files isn't available in this app yet. Go back and write down the recovery phrase instead.
-            </p>
-          ) : (
+          {
             <>
               <p className="text-sm mt-4" style={{ color: MUTED }}>
-                {route === 'share'
-                  ? 'Tap Save, then choose Save to Files, Mail (send it to yourself) or AirDrop. Somewhere off this phone is best.'
-                  : 'Tap Save to download the file. Keep a copy somewhere other than this device.'}
+                {savedOnce
+                  ? 'Saved somewhere off this phone? Then you are done.'
+                  : route === 'download'
+                    ? 'Tap Save to download the file. Keep a copy somewhere other than this device.'
+                    : 'Tap Save, then pick Drive, Files or email it to yourself. Somewhere off this phone is best.'}
               </p>
-              <button
-                onClick={() => void saveFile()}
-                className="mt-5 w-full rounded-xl py-3 font-bold border-0"
-                style={primary()}
-              >
-                {savedOnce ? 'Save another copy' : 'Save backup file'}
-              </button>
+              {savedOnce ? (
+                <button
+                  onClick={() => void finish('file')}
+                  className="mt-5 w-full rounded-xl py-3 font-bold border-0"
+                  style={primary()}
+                >
+                  I've saved it
+                </button>
+              ) : (
+                <button
+                  onClick={() => void saveFile()}
+                  className="mt-5 w-full rounded-xl py-3 font-bold border-0"
+                  style={primary()}
+                >
+                  Save backup file
+                </button>
+              )}
               {error && (
                 <div className="flex flex-col gap-1.5">
                   <p className="text-xs mt-2" style={{ color: RED }}>
@@ -477,15 +489,15 @@ export const BackupStep = ({ exit, web, onComplete, onExit, start }: Props) => {
               )}
               {savedOnce && (
                 <button
-                  onClick={() => void finish('file')}
-                  className="mt-3 w-full rounded-xl py-3 font-bold border-0"
-                  style={{ background: '#2A2E36', color: 'white' }}
+                  onClick={() => void saveFile()}
+                  className="mt-3 bg-transparent border-0 text-sm underline self-center"
+                  style={{ color: MUTED }}
                 >
-                  I've saved it
+                  Save another copy
                 </button>
               )}
             </>
-          )}
+          }
         </div>
       </>
     );
