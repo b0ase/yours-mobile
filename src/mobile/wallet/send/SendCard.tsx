@@ -19,6 +19,7 @@ import {
   notePending,
   parseAmount,
   pastedRecipient,
+  QUICK_BSV,
   QUICK_USD,
   rowSats,
   rowUsd,
@@ -331,11 +332,11 @@ export const SendCard = (p: Props) => {
                   {isUsd ? fiatCode(fx) : 'BSV'} <ArrowUpDown size={10} />
                 </span>
               </button>
-              {p.rate > 0 && (
+              {isUsd && p.rate > 0 && (
                 <div className="flex gap-2 mt-1">
                   {QUICK_USD.map((n) => {
                     const usdN = fiatToUsd(n, fx);
-                    const on = isUsd && !!r.usdSendAmount && Math.abs(r.usdSendAmount - usdN) < 1e-9;
+                    const on = !!r.usdSendAmount && Math.abs(r.usdSendAmount - usdN) < 1e-9;
                     return (
                       <button
                         key={n}
@@ -343,7 +344,6 @@ export const SendCard = (p: Props) => {
                         onClick={() => {
                           setDrafts((d) => ({ ...d, [r.id]: undefined }));
                           p.onAmountEdited();
-                          if (!isUsd) p.onUpdate(r.id, 'amountType', 'usd');
                           p.onUpdate(r.id, 'usdSendAmount', usdN);
                         }}
                         className="px-3 py-1.5 rounded-full text-xs font-semibold cursor-pointer"
@@ -355,6 +355,33 @@ export const SendCard = (p: Props) => {
                       >
                         {fiatSymbol(fx)}
                         {n}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {!isUsd && (
+                <div className="flex gap-2 mt-1">
+                  {QUICK_BSV.map((n) => {
+                    const satN = Math.round(n * SATS_PER_BSV);
+                    const on = r.satSendAmount === satN;
+                    return (
+                      <button
+                        key={n}
+                        type="button"
+                        onClick={() => {
+                          setDrafts((d) => ({ ...d, [r.id]: undefined }));
+                          p.onAmountEdited();
+                          p.onUpdate(r.id, 'satSendAmount', satN);
+                        }}
+                        className="px-3 py-1.5 rounded-full text-xs font-semibold cursor-pointer"
+                        style={{
+                          background: on ? GOLD : 'transparent',
+                          color: on ? '#000' : fg,
+                          border: `1px solid ${on ? GOLD : gray + '50'}`,
+                        }}
+                      >
+                        {n} BSV
                       </button>
                     );
                   })}
