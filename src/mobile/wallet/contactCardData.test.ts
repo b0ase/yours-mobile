@@ -1,6 +1,14 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import type { Contact } from '../chat/contacts';
-import { buildCard, businessLabel, identityKeyOf, opnsCandidates, parseBitsignPublic } from './contactCardData';
+import {
+  buildCard,
+  businessLabel,
+  fetchRoles,
+  identityKeyOf,
+  opnsCandidates,
+  parseBitsignPublic,
+  parseRoles,
+} from './contactCardData';
 import { contactNoteKey, isEmptyNotes, loadNotes, saveNotes } from './contactNotes';
 
 const KEY = '02' + 'a'.repeat(64);
@@ -75,8 +83,8 @@ describe('contact card: merging', () => {
   });
 
   test('businesses: verified from a register, else "says …"', () => {
-    expect(businessLabel({ company: 'Acme Ltd', role: 'Director', verified: true })).toBe('Director, Acme Ltd');
-    expect(businessLabel({ company: 'Acme Ltd', role: 'CEO', verified: false })).toBe('says CEO, Acme Ltd');
+    expect(businessLabel({ company: 'Acme Ltd', role: 'Director', verified: true })).toBe('Director · Acme Ltd');
+    expect(businessLabel({ company: 'Acme Ltd', role: 'CEO', verified: false })).toBe('says CEO · Acme Ltd');
     expect(buildCard({ contact: contact() }).businesses).toEqual([]);
   });
 
@@ -96,7 +104,9 @@ describe('contact card: merging', () => {
   });
 
   test('bit-sign public profile parsing', () => {
+    expect(parseBitsignPublic({ handle: 'alice', displayName: 'A', avatarUrl: null, bio: 'hi' })?.bio).toBe('hi');
     expect(parseBitsignPublic({ handle: 'alice', displayName: 'A', avatarUrl: null })).toEqual({
+      bio: null,
       handle: 'alice',
       displayName: 'A',
       avatarUrl: null,
@@ -154,5 +164,64 @@ describe('contact notes: local only', () => {
     expect(isEmptyNotes(loadNotes('a', 'c'))).toBe(true);
     expect(saveNotes('a', 'c', { email: 'e', phone: '', text: '' })).toBe(false);
     expect(saveNotes(undefined, 'c', { email: 'e', phone: '', text: '' })).toBe(false);
+  });
+});
+
+describe('roles and bio', () => {
+  const json = {
+    handle: 'alice',
+    roles: [
+      {
+        ticker: 'BCORP',
+        name: 'The Bitcoin Corporation Ltd',
+        office: 'secretary',
+        office_label: 'Company Secretary',
+        appointed_at: '2026-10-01',
+        register_url: 'https://www.bitcoinchat.online/r/bcorp',
+      },
+      { ticker: 'X', name: '', office: '' },
+      { ticker: 'EVIL', name: 'Evil', office_label: 'Director', register_url: 'javascript:alert(1)' },
+    ],
+  };
+
+  test('roles → verified rows with register links (https only)', () => {
+    const rows = parseRoles(json);
+    expect(rows).toHaveLength(2);
+    const v = buildCard({ contact: { handle: 'alice' } as never, businesses: rows });
+    expect(v.businesses[0]).toEqual({
+      label: 'Company Secretary · The Bitcoin Corporation Ltd',
+      verified: true,
+      url: 'https://www.bitcoinchat.online/r/bcorp',
+    });
+    expect(v.businesses[1].url).toBeNull();
+    expect(parseRoles({ roles: [] })).toEqual([]);
+    expect(parseRoles(null)).toEqual([]);
+  });
+
+  test('roles fetch: no credentials; 404 and network errors mean none', async () => {
+    let init: RequestInit | undefined;
+    const ok = (async (_u: string, i?: RequestInit) => {
+      init = i;
+      return new Response(JSON.stringify(json));
+    }) as never;
+    expect(await fetchRoles(ok, 'alice')).toHaveLength(2);
+    expect(init?.credentials).toBe('omit');
+    expect(await fetchRoles((async () => new Response('', { status: 404 })) as never, 'a')).toEqual([]);
+    expect(
+      await fetchRoles(
+        (async () => {
+          throw new Error('offline');
+        }) as never,
+        'a',
+      ),
+    ).toEqual([]);
+  });
+
+  test('bio comes from the bit-sign profile', () => {
+    const v = buildCard({
+      contact: { handle: 'alice' } as never,
+      profile: { handle: 'alice', displayName: null, avatarUrl: null, bio: '  builder  ' },
+    });
+    expect(v.bio).toBe('builder');
   });
 });

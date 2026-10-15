@@ -571,6 +571,20 @@ export class BchatClient {
     return this.call('PUT', '/api/bitsign/me/avatar', { avatar: dataUrl });
   }
 
+  /** My public bio (bit-sign GET /api/bitsign/me/bio, PR #270). 404 until that ships: the caller hides the field. */
+  async getBio(): Promise<string | null> {
+    const r = await this.call<{ bio?: string | null }>('GET', '/api/bitsign/me/bio');
+    return typeof r.bio === 'string' && r.bio ? r.bio : null;
+  }
+
+  /** Set my public bio (≤ 160 chars; '' clears). Returns what the server stored. */
+  async setBio(bio: string): Promise<string | null> {
+    const r = await this.call<{ ok?: boolean; bio?: string | null }>('PUT', '/api/bitsign/me/bio', {
+      bio: bio.trim() || null,
+    });
+    return typeof r.bio === 'string' && r.bio ? r.bio : null;
+  }
+
   /** Publish my X / Google picture so other people's chat bubbles show it (bit-sign keeps a chosen photo). */
   async publishAvatar(url: string): Promise<void> {
     await this.call('POST', '/api/bitsign/avatars', { url });

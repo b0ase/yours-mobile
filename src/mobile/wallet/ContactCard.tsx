@@ -156,13 +156,28 @@ export const ContactCard = ({ c, account, onBack }: { c: Contact; account?: stri
         <Line label="Work">
           {card.businesses.map((b) => (
             <div key={b.label} className="flex items-center gap-1">
-              <span style={b.verified ? undefined : { color: MUTED }}>{b.label}</span>
+              {b.url ? (
+                <a href={b.url} target="_blank" rel="noopener noreferrer" className="underline">
+                  {b.label}
+                </a>
+              ) : (
+                <span style={b.verified ? undefined : { color: MUTED }}>{b.label}</span>
+              )}
               {b.verified && <Verified title="From a public register" />}
             </div>
           ))}
         </Line>
       )}
-      {card.bio && <p className="bw-abook-card-bio">{card.bio}</p>}
+      {card.bio && (
+        <Line label="Bio">
+          <p className="bw-abook-card-bio m-0">
+            <span className="text-[10px]" style={{ color: MUTED }}>
+              says{' '}
+            </span>
+            {card.bio}
+          </p>
+        </Line>
+      )}
 
       <section className="bw-abook-card-private" aria-label="Private notes">
         <div className="flex items-center gap-1 text-xs font-bold" style={{ color: 'var(--bw-accent)' }}>
