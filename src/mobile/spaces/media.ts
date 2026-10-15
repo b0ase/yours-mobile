@@ -13,6 +13,7 @@ import {
 } from 'livekit-client';
 import { isNative, YoursNative } from '../native';
 import { ensureMediaAccess, setAudioSession } from '../permissions/ensureMediaAccess';
+import { normIdentity, screenFeeds, screenKey, type ScreenFeed } from './stageTiles';
 
 export type Facing = 'user' | 'environment';
 
@@ -34,6 +35,8 @@ export interface SpaceMediaCallbacks {
    * `handle.screen` identity (bit-sign `device: 'screen'`), so the phone keeps the voice.
    */
   onScreen?: (owner: string | null) => void;
+  /** Every live screen share, lead first (stageTiles.screenFeeds). One tile each. */
+  onScreens?: (feeds: ScreenFeed[]) => void;
   /** My own broadcast (Broadcast › Share a tab or screen) started or stopped, incl. the browser's own Stop sharing. */
   onBroadcast?: (on: boolean) => void;
 }
@@ -45,9 +48,7 @@ export interface SpaceMediaCallbacks {
 export const canBroadcastScreen = () =>
   !isNative && typeof navigator !== 'undefined' && typeof navigator.mediaDevices?.getDisplayMedia === 'function';
 
-/** bit-sign's screen-device identity suffix: `alice.screen` is alice's laptop. */
-const SCREEN_SUFFIX = '.screen';
-export const ownerOfIdentity = (id: string) => (id.endsWith(SCREEN_SUFFIX) ? id.slice(0, -SCREEN_SUFFIX.length) : id);
+export { ownerOfIdentity } from './stageTiles';
 
 /**
  * LiveKit media for one bSpace (many people, one SFU room). bit-sign mints the token from the
@@ -63,9 +64,12 @@ export class SpaceMedia {
   private audio = new Map<string, HTMLMediaElement>();
   private videos = new Map<string, VideoTrack>();
   private bound = new Map<string, HTMLVideoElement>();
-  /** Shared screens by publishing identity; the newest is shown. */
+  /** Normalised identity → LiveKit's own identity (for getParticipantByIdentity). */
+  private raw = new Map<string, string>();
+  /** Shared screens by normalised publishing identity, in arrival order. ALL are shown. */
   private screens = new Map<string, VideoTrack>();
-  private screenEl: HTMLVideoElement | null = null;
+  /** Screen tiles' <video> by screenKey. */
+  private screenEls = new Map<string, HTMLVideoElement>();
   private cb: SpaceMediaCallbacks | null = null;
   /** "Mute the room" for me: every incoming voice silenced locally (my mic is separate). */
   private deaf = false;
@@ -117,25 +121,29 @@ export class SpaceMedia {
           document.body.appendChild(el);
           this.audio.set(`${who.identity}:${pub.trackSid}`, el);
         } else if (track.kind === Track.Kind.Video && pub.source === Track.Source.ScreenShare) {
-          this.screens.delete(who.identity);
-          this.screens.set(who.identity, track as VideoTrack);
+          const id = this.keyOf(who.identity);
+          this.screens.delete(id);
+          this.screens.set(id, track as VideoTrack);
           this.emitScreen();
-        } else if (track.kind === Track.Kind.Video && pub.source === Track.Source.Camera) {
-          this.videos.set(who.identity, track as VideoTrack);
-          this.reattach(who.identity);
+        } else if (track.kind === Track.Kind.Video) {
+          // Camera (or an untagged video source): one tile per identity.
+          const id = this.keyOf(who.identity);
+          this.videos.set(id, track as VideoTrack);
+          this.reattach(id);
           this.emitVideos();
         }
       })
       .on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack, pub: RemoteTrackPublication, who: RemoteParticipant) => {
-        if (track.kind === Track.Kind.Video && this.screens.get(who.identity) === track) {
+        const id = normIdentity(who.identity);
+        if (track.kind === Track.Kind.Video && this.screens.get(id) === track) {
           track.detach();
-          this.screens.delete(who.identity);
+          this.screens.delete(id);
           this.emitScreen();
           return;
         }
         if (track.kind === Track.Kind.Video) {
           track.detach();
-          if (this.videos.get(who.identity) === track) this.videos.delete(who.identity);
+          if (this.videos.get(id) === track) this.videos.delete(id);
           this.emitVideos();
           return;
         }
@@ -160,8 +168,9 @@ export class SpaceMedia {
         }
       })
       .on(RoomEvent.ParticipantDisconnected, (who: RemoteParticipant) => {
-        if (this.videos.delete(who.identity)) this.emitVideos();
-        if (this.screens.delete(who.identity)) this.emitScreen();
+        const id = normIdentity(who.identity);
+        if (this.videos.delete(id)) this.emitVideos();
+        if (this.screens.delete(id)) this.emitScreen();
       })
       .on(RoomEvent.ActiveSpeakersChanged, (speakers: LkParticipant[]) =>
         this.cb?.onSpeakers(speakers.map((p) => p.identity)),
@@ -177,7 +186,7 @@ export class SpaceMedia {
       .on(RoomEvent.Reconnected, () => this.room === room && this.cb?.onReconnected?.())
       .on(RoomEvent.Disconnected, () => this.room === room && this.cb?.onDisconnected());
     await room.connect(url, token, { autoSubscribe: true });
-    this.me = room.localParticipant.identity;
+    this.me = this.keyOf(room.localParticipant.identity);
     await room.startAudio().catch(() => undefined);
     if (isNative) await YoursNative.audioSetSpeaker({ on: true }).catch(() => undefined);
   }
@@ -209,6 +218,19 @@ export class SpaceMedia {
     this.emitScreen();
   }
 
+  private keyOf(identity: string) {
+    const id = normIdentity(identity);
+    this.raw.set(id, identity);
+    return id;
+  }
+
+  private participant(handle: string) {
+    const room = this.room;
+    if (!room) return undefined;
+    const id = normIdentity(handle);
+    return id === this.me ? room.localParticipant : room.getParticipantByIdentity(this.raw.get(id) ?? handle);
+  }
+
   private localVideo(): LocalVideoTrack | null {
     const pub = this.room?.localParticipant.getTrackPublication(Track.Source.Camera);
     const t = (pub?.track as LocalVideoTrack | undefined) ?? null;
@@ -227,40 +249,55 @@ export class SpaceMedia {
     return (pub?.track as VideoTrack | undefined) ?? null;
   }
 
-  private currentScreen(): [string, VideoTrack] | null {
-    // My own broadcast first: the host sees exactly what the room sees.
+  /** Every live screen share, lead first (my own broadcast, then newest). */
+  screenFeeds(): ScreenFeed[] {
+    return screenFeeds([...this.screens.keys()], this.me, !!this.localScreen());
+  }
+
+  private screenTrack(key: string): VideoTrack | null {
     const mine = this.localScreen();
-    if (mine) return [this.me, mine];
-    const all = [...this.screens.entries()];
-    return all.length ? all[all.length - 1] : null;
+    if (mine && key === screenKey(this.me)) return mine;
+    for (const [id, t] of this.screens) if (screenKey(id) === key) return t;
+    return null;
   }
 
   private emitScreen() {
-    const cur = this.currentScreen();
-    this.cb?.onScreen?.(cur ? ownerOfIdentity(cur[0]) : null);
-    if (cur && this.screenEl && !cur[1].attachedElements.includes(this.screenEl)) cur[1].attach(this.screenEl);
+    const feeds = this.screenFeeds();
+    this.cb?.onScreen?.(feeds[0]?.owner ?? null);
+    this.cb?.onScreens?.(feeds);
+    for (const f of feeds) this.reattachScreen(f.key);
   }
 
-  /** The big screen tile hands in its <video> (or null when it unmounts). */
-  bindScreen(el: HTMLVideoElement | null) {
-    const cur = this.currentScreen();
-    if (this.screenEl && this.screenEl !== el) cur?.[1].detach(this.screenEl);
-    this.screenEl = el;
-    if (el && cur && !cur[1].attachedElements.includes(el)) cur[1].attach(el);
+  private reattachScreen(key: string) {
+    const el = this.screenEls.get(key);
+    const t = this.screenTrack(key);
+    if (el && t && !t.attachedElements.includes(el)) t.attach(el);
+  }
+
+  /** A screen tile (keyed `screen:<identity>`) hands in its <video> (or null when it unmounts). */
+  bindScreen(key: string, el: HTMLVideoElement | null) {
+    const old = this.screenEls.get(key);
+    if (old && old !== el) this.screenTrack(key)?.detach(old);
+    if (el) this.screenEls.set(key, el);
+    else this.screenEls.delete(key);
+    this.reattachScreen(key);
   }
 
   private trackOf(handle: string): VideoTrack | null {
-    return handle === this.me ? this.localVideo() : (this.videos.get(handle) ?? null);
+    const id = normIdentity(handle);
+    return id === this.me ? this.localVideo() : (this.videos.get(id) ?? null);
   }
 
-  private reattach(handle: string) {
+  private reattach(who: string) {
+    const handle = normIdentity(who);
     const el = this.bound.get(handle);
     const t = this.trackOf(handle);
     if (el && t && !t.attachedElements.includes(el)) t.attach(el);
   }
 
   /** A stage tile hands in its <video> (or null when it unmounts). */
-  bindVideo(handle: string, el: HTMLVideoElement | null) {
+  bindVideo(who: string, el: HTMLVideoElement | null) {
+    const handle = normIdentity(who);
     const old = this.bound.get(handle);
     if (old && old !== el) this.trackOf(handle)?.detach(old);
     if (el) this.bound.set(handle, el);
@@ -276,8 +313,8 @@ export class SpaceMedia {
    * is ignored while adaptiveStream is on).
    */
   setVideoLive(handle: string, live: boolean) {
-    if (handle === this.me) return;
-    const pub = this.room?.getParticipantByIdentity(handle)?.getTrackPublication(Track.Source.Camera) as
+    if (normIdentity(handle) === this.me) return;
+    const pub = this.participant(handle)?.getTrackPublication(Track.Source.Camera) as
       | RemoteTrackPublication
       | undefined;
     if (pub && pub.isEnabled !== live) pub.setEnabled(live);
@@ -285,10 +322,7 @@ export class SpaceMedia {
 
   /** Audio level 0..1 for a handle (LiveKit's smoothed participant level), read by the stage tiles' meters. */
   levelOf(handle: string): number {
-    const room = this.room;
-    if (!room) return 0;
-    const who = handle === this.me ? room.localParticipant : room.getParticipantByIdentity(handle);
-    return who?.audioLevel ?? 0;
+    return this.participant(handle)?.audioLevel ?? 0;
   }
 
   get broadcasting() {
@@ -369,7 +403,8 @@ export class SpaceMedia {
     this.videos.clear();
     this.bound.clear();
     this.screens.clear();
-    this.screenEl = null;
+    this.screenEls.clear();
+    this.raw.clear();
     if (isNative) await YoursNative.audioSetSpeaker({ on: false }).catch(() => undefined);
     // Disconnecting stops local tracks, which releases the mic and camera (and their indicators).
     await room?.disconnect().catch(() => undefined);

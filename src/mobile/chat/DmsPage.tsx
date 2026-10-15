@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react';
+import { mergeChatRooms } from '../tabs/tabBadges';
 import { createPortal } from 'react-dom';
 import { MessageCircle, Plus, Search, Users, WifiOff, X } from 'lucide-react';
 import { isBlocked, onUgcChange } from '../ugc/ugc';
@@ -107,6 +108,10 @@ export const DmsPage = ({
   const [authError, setAuthError] = useState('');
   // Cache first, like the room list: the last DMs list shows at once (chat/sharedRooms.ts writes it).
   const [rooms, setRooms] = useState<ChatRoom[] | null>(() => readListCache<ChatRoom>(dmsCacheKey(identityAddress)));
+  // Chat tab badge: a DM opened or marked read clears at once.
+  useEffect(() => {
+    if (rooms) mergeChatRooms(rooms);
+  }, [rooms]);
   useEffect(() => onRooms(setRooms), []);
   const [listError, setListError] = useState('');
   const [bchatContacts, setBchatContacts] = useState<BchatContact[]>([]);

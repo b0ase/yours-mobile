@@ -19,7 +19,8 @@ import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { useAccountNames } from '../names/accountNames';
 import { setWalletKind, getWalletKind, subscribeWalletKind, type WalletKind } from '../wallet/walletKind';
 import { BSPACES_ENABLED, MARKET_ENABLED, marketLabel, STORE_HIDDEN_WALLET_KINDS, STORE_BUILD } from '../storeBuild';
-import { useBMailUnread } from '../bmail/useBMail';
+import { badgeLabel, badgeText } from '../tabs/tabBadges';
+import { useTabBadges } from '../tabs/useTabBadges';
 import { NotificationsBell } from '../notify/NotificationsPanel';
 import { CALLS_ROUTE } from '../calls/route';
 import {
@@ -263,7 +264,9 @@ const WideShell = ({ children }: { children: ReactNode }) => {
   const { chromeStorageService, lockWallet } = useServiceContext();
   const { handleSelect } = useBottomMenu();
   const ccy = useCurrency();
-  const mail = useBMailUnread();
+  // bMail = airdrops + mail (same as the top-bar mailbox); Chat and Feed unread (tabs/tabBadges.ts).
+  const unread = useTabBadges();
+  const mail = unread.bmail;
   const kind = useSyncExternalStore(subscribeWalletKind, getWalletKind, getWalletKind);
   const feed = useWalletFeed();
   const account = chromeStorageService.getCurrentAccountObject().account;
@@ -328,7 +331,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
       title: 'Talk',
       items: [
         { id: 'bmail', label: 'bMail', icon: I.mail, to: '/m/bmail', badge: mail },
-        { id: 'chat', label: 'bChat', icon: I.chat, to: '/m/chat' },
+        { id: 'chat', label: 'bChat', icon: I.chat, to: '/m/chat', badge: unread.chat },
         { id: 'calls', label: 'bPhone', icon: I.calls, to: CALLS_ROUTE },
         { id: 'people', label: 'People', icon: I.people, to: '/m/people' },
         { id: 'spaces', label: 'Spaces', icon: I.spaces, to: '/m/spaces', hidden: !BSPACES_ENABLED },
@@ -337,7 +340,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
     {
       title: 'Discover',
       items: [
-        { id: 'feed', label: 'bChatX Feed', icon: I.feed, to: '/m/feed' },
+        { id: 'feed', label: 'bChatX Feed', icon: I.feed, to: '/m/feed', badge: unread.feed },
         { id: 'media', label: 'bMusic', icon: I.media, to: '/m/media' },
         { id: 'apps', label: 'bApps', icon: I.apps, to: '/m/apps' },
         { id: 'games', label: 'bGames', icon: I.games, to: '/m/games' },
@@ -459,10 +462,19 @@ const WideShell = ({ children }: { children: ReactNode }) => {
   };
   const navBtn = (it: Item) =>
     it.hidden ? null : (
-      <button key={it.id} className={isOn(it) ? 'on' : ''} onClick={() => go(it)}>
+      <button
+        key={it.id}
+        className={isOn(it) ? 'on' : ''}
+        onClick={() => go(it)}
+        aria-label={badgeLabel(it.label, it.badge ?? 0)}
+      >
         <Icon d={it.icon} />
         <span className="ww-grow">{it.label}</span>
-        {!!it.badge && <span className="ww-badge">{it.badge}</span>}
+        {!!it.badge && (
+          <span className="ww-badge" aria-hidden>
+            {badgeText(it.badge)}
+          </span>
+        )}
       </button>
     );
 

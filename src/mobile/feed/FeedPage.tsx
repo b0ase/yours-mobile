@@ -1,4 +1,5 @@
 import { useAvatarPlayback } from '../names/useAvatarPlayback';
+import { setFeedLatest } from '../tabs/tabBadges';
 import {
   lazy,
   Suspense,
@@ -1733,6 +1734,8 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
         const posts = which === 'foryou' ? await fetchForYou() : await fetchFollowing(follows);
         setRaw((r) => ({ ...r, [which]: posts }));
         writeListCache(`feed:${which}`, posts);
+        // Feed tab badge: the newest posts known (cleared by viewing the Feed route, useTabBadges.ts).
+        if (which === 'foryou') setFeedLatest(posts.map((x) => x.at));
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         setRaw((r) => ({ ...r, [which]: r[which] ?? [] }));
