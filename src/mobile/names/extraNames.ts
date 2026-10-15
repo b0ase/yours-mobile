@@ -9,7 +9,7 @@ import type { Fetch } from './names';
 /**
  * Several names per wallet, one main (owner, 15 Oct 2026). bit-sign is where a name is paid for
  * (1p per extra name, its 402 flow, PR #272); the paymail server then adds the matching alias after
- * checking bit-sign lists it. Paid ONCE, on bit-sign.
+ * checking with bit-sign's public owner lookup that the same identity key owns it. Paid ONCE, on bit-sign.
  */
 
 /** bit-sign's 402 `payment_required` body. Pure. */
@@ -66,8 +66,7 @@ export async function addExtraName(ctx: OneSatContext, f: Fetch, alias: string):
       throw err;
     }
   }
-  const token = c.current?.token ?? '';
-  return addPaymail(f, ctx.wallet, alias, { bitsign: token });
+  return addPaymail(f, ctx.wallet, alias);
 }
 
 /** Make a name main on bit-sign (30-day cooldown; new session kept) and on the paymail server. */

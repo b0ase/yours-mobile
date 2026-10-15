@@ -351,27 +351,30 @@ async function bitsignRenamed(alias, env = process.env, f = fetch) {
 
 const MAX_PLAIN_NAMES = 5;
 /**
- * The names bit-sign lists for this session token (Settings › Identity › Add another name pays there).
- * Env: BITSIGN_PUBLIC_URL (optional, default https://www.bitcoinchat.online).
- * Returns lower-case names, null for a missing / refused token; throws when bit-sign is unreachable.
+ * Does `identityKey` own the bit-sign name `alias`? Public GET
+ * /api/public/handles/owner?handle=<name>&key=<pubkey> → {handle, matches, active, primary}; it never
+ * returns the key. Env: BITSIGN_PUBLIC_URL (optional, default https://www.bitcoinchat.online).
+ * Returns { matches, active } (both false for a JSON 404 = no such name). Throws on anything else
+ * (unreachable, 400, 5xx, an HTML 404 while the route isn't shipped, a wrong answer): callers fail closed.
  */
-async function bitsignListHandles(token, env = process.env, f = fetch) {
-  if (!/^[A-Za-z0-9._~+/=-]{16,4096}$/.test(token || '')) return null;
+async function bitsignHandleOwner(alias, identityKey, env = process.env, f = fetch) {
   const base = String(env.BITSIGN_PUBLIC_URL || 'https://www.bitcoinchat.online').replace(/\/$/, '');
-  const r = await f(`${base}/api/bitsign/me/handles`, {
-    headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
-    signal: AbortSignal.timeout(5000),
-  });
-  if (r.status === 401 || r.status === 403) return null;
+  const r = await f(
+    `${base}/api/public/handles/owner?handle=${encodeURIComponent(alias)}&key=${encodeURIComponent(identityKey)}`,
+    { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(5000) },
+  );
+  if (r.status === 404) {
+    const j404 = await r.json().catch(() => null);
+    if (j404 && typeof j404 === 'object') return { matches: false, active: false };
+    throw new Error('bit-sign: owner lookup unavailable');
+  }
   if (!r.ok) throw new Error(`bit-sign ${r.status}`);
   const j = await r.json();
-  return (Array.isArray(j?.handles) ? j.handles : [])
-    .map((h) =>
-      String(h?.handle || '')
-        .replace(/^\$/, '')
-        .toLowerCase(),
-    )
-    .filter(Boolean);
+  const handle = String(j?.handle || '')
+    .replace(/^\$/, '')
+    .toLowerCase();
+  if (handle !== alias || typeof j?.matches !== 'boolean') throw new Error('bit-sign: bad owner answer');
+  return { matches: j.matches === true, active: j.active === true };
 }
 
 function makeHandlers({
@@ -388,9 +391,8 @@ function makeHandlers({
   opns = env.NODE_ENV === 'test' || process.env.NODE_ENV === 'test' ? async () => null : makeOpnsResolver(),
   // Chain access for the 1 cent name fee (lib/nameFee.js); tests inject a mock.
   feeChain = nameFee.chain,
-  // bit-sign's names for a session token (GET /api/bitsign/me/handles): string[] | null (bad token);
-  // throws when bit-sign can't be reached. Tests inject their own.
-  bitsignHandles = (token) => bitsignListHandles(token, env),
+  // Owner of a bit-sign name (lib: bitsignHandleOwner). Tests inject their own.
+  handleOwner = (alias, identityKey) => bitsignHandleOwner(alias, identityKey, env),
 }) {
   // Aliases are unique across all our domains (the store is keyed by alias alone).
   const handleOf = (alias, d = domain(env)) => `${alias}@${d}`;
@@ -831,10 +833,10 @@ function makeHandlers({
       const plain = (store.listByKey ? await store.listByKey(key) : []).filter((r) => (r.kind ?? 'plain') === 'plain');
       if (plain.length >= MAX_PLAIN_NAMES) return [409, { error: `A wallet can have up to ${MAX_PLAIN_NAMES} names` }];
       // Paid once, on bit-sign (owner, 15 Oct 2026: 1p per extra name through its 402 flow). Here we only
-      // accept a name that bit-sign already lists for the caller's session; no second fee.
-      const listed = await bitsignHandles(String(body.bitsign || '')).catch(() => undefined);
-      if (listed === undefined) return [503, { error: "Couldn't check your bChatX names. Try again in a minute." }];
-      if (!listed || !listed.includes(alias)) return [402, { error: 'Add (and pay for) the name in bChatX first' }];
+      // accept a name bit-sign says this same identity key owns. Fails closed when bit-sign can't answer.
+      const owner = await handleOwner(alias, key).catch(() => undefined);
+      if (!owner) return [503, { error: "Couldn't check your bChatX names. Try again in a minute." }];
+      if (!owner.matches || !owner.active) return [402, { error: 'Add (and pay for) the name in bChatX first' }];
       let row;
       try {
         row = await store.insertExtraAlias({ alias, identity_key: key });
@@ -1050,7 +1052,7 @@ module.exports = {
   validAlias,
   TOMB_RE,
   MAX_PLAIN_NAMES,
-  bitsignListHandles,
+  bitsignHandleOwner,
   dotRefusal,
   SYSTEM_TLDS,
   signedMessage,

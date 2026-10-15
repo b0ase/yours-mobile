@@ -142,7 +142,7 @@ const setup = () => {
   const h = pm.makeHandlers({
     store,
     env: { PAYMAIL_DOMAIN: 'pay.test', NODE_ENV: 'test' },
-    bitsignHandles: async () => ['one', 'two', 'bob', 'held', 'other', 'changed'],
+    handleOwner: async (_a, k) => ({ matches: k === u.identityKey, active: true }),
   });
   const u = user();
   store.aliases.set('one', { alias: 'one', identity_key: u.identityKey, kind: 'plain', is_primary: true });
@@ -249,44 +249,80 @@ describe('several names per wallet', () => {
 });
 
 describe('extra names are paid on bit-sign, checked here', () => {
-  const withHandles = (listed) => {
+  const withOwner = (answer) => {
     const store = memStore();
     const u = user();
     store.aliases.set('one', { alias: 'one', identity_key: u.identityKey, kind: 'plain', is_primary: true });
-    const seen = [];
+    const asked = [];
     const h = pm.makeHandlers({
       store,
       env: { PAYMAIL_DOMAIN: 'pay.test', NODE_ENV: 'test' },
-      bitsignHandles: async (t) => {
-        seen.push(t);
-        if (listed === 'down') throw new Error('bit-sign 502');
-        return t === 'good-session-token-123' ? listed : null;
+      handleOwner: async (alias, key) => {
+        asked.push([alias, key]);
+        if (answer === 'down') throw new Error('bit-sign 502');
+        return answer;
       },
     });
-    return { store, h, u, seen };
+    return { store, h, u, asked };
   };
-  const add = async (h, u, alias, bitsign = 'good-session-token-123') =>
-    h['names-add']({}, { ...(await u.sign('names-add', { alias })), bitsign });
+  const add = async (h, u, alias) => h['names-add']({}, await u.sign('names-add', { alias }));
 
-  test('accepts a name bit-sign lists for the session, with no fee of its own', async () => {
-    const { h, u, seen } = withHandles(['one', 'two']);
+  test('accepts when bit-sign says the signing key owns it (no fee here); asks with the signer key', async () => {
+    const { h, u, asked } = withOwner({ matches: true, active: true });
     expect((await add(h, u, 'two'))[0]).toBe(200);
-    expect(seen).toEqual(['good-session-token-123']);
+    expect(asked).toEqual([['two', u.identityKey]]);
   });
-  test('refuses a name bit-sign does not list, or a bad session', async () => {
-    const { store, h, u } = withHandles(['one']);
-    expect((await add(h, u, 'two'))[0]).toBe(402);
-    expect((await add(h, u, 'two', 'nope'))[0]).toBe(402);
+  test('refuses no match, inactive, or unknown', async () => {
+    for (const o of [
+      { matches: false, active: true },
+      { matches: true, active: false },
+      { matches: false, active: false },
+    ]) {
+      const { store, h, u } = withOwner(o);
+      expect((await add(h, u, 'two'))[0]).toBe(402);
+      expect(store.aliases.has('two')).toBe(false);
+    }
+  });
+  test('fails closed (503) when bit-sign errors', async () => {
+    const { store, h, u } = withOwner('down');
+    expect((await add(h, u, 'two'))[0]).toBe(503);
     expect(store.aliases.has('two')).toBe(false);
   });
-  test('503 when bit-sign is unreachable', async () => {
-    const { h, u } = withHandles('down');
-    expect((await add(h, u, 'two'))[0]).toBe(503);
-  });
   test('max 5 plain names', async () => {
-    const { store, h, u } = withHandles(['six']);
+    const { store, h, u } = withOwner({ matches: true, active: true });
     for (const a of ['b', 'c', 'd', 'e'])
       store.aliases.set(a, { alias: a, identity_key: u.identityKey, kind: 'plain', is_primary: false });
     expect((await add(h, u, 'six'))[0]).toBe(409);
+  });
+});
+
+describe('bitsignHandleOwner (fake fetch)', () => {
+  const KEY = '02' + 'a'.repeat(64);
+  const fake = (status, json) => {
+    const calls = [];
+    const f = async (url) => (calls.push(String(url)), { ok: status < 300, status, json: async () => json });
+    return { f, calls };
+  };
+  test('sends handle + key, reads {handle, matches, active, primary}', async () => {
+    const { f, calls } = fake(200, { handle: 'two', matches: true, active: true, primary: false });
+    expect(await pm.bitsignHandleOwner('two', KEY, { BITSIGN_PUBLIC_URL: 'https://bs.test/' }, f)).toEqual({
+      matches: true,
+      active: true,
+    });
+    expect(calls[0]).toBe(`https://bs.test/api/public/handles/owner?handle=two&key=${KEY}`);
+  });
+  test('JSON 404 = not found; 400, 5xx, HTML 404 (route not shipped) and odd answers throw', async () => {
+    expect(await pm.bitsignHandleOwner('two', KEY, {}, fake(404, { error: 'not_found' }).f)).toEqual({
+      matches: false,
+      active: false,
+    });
+    const html = async () => ({ ok: false, status: 404, json: async () => JSON.parse('<!doctype html>') });
+    await expect(pm.bitsignHandleOwner('two', KEY, {}, html)).rejects.toThrow();
+    await expect(pm.bitsignHandleOwner('two', KEY, {}, fake(400, { error: 'bad' }).f)).rejects.toThrow();
+    await expect(pm.bitsignHandleOwner('two', KEY, {}, fake(500, {}).f)).rejects.toThrow();
+    await expect(
+      pm.bitsignHandleOwner('two', KEY, {}, fake(200, { handle: 'other', matches: true, active: true }).f),
+    ).rejects.toThrow();
+    await expect(pm.bitsignHandleOwner('two', KEY, {}, fake(200, { handle: 'two' }).f)).rejects.toThrow();
   });
 });

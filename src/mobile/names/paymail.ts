@@ -149,18 +149,13 @@ type NameSigner = Pick<WalletInterface, 'getPublicKey' | 'createSignature'>;
 const aliasOf = (paymail: string) => paymail.split('@')[0].toLowerCase();
 
 /** Add an extra plain name to this wallet (it receives too; the main name stays main). Pay on bit-sign first (extraNames.ts). */
-export const addPaymail = async (
-  f: Fetch,
-  wallet: NameSigner,
-  alias: string,
-  /** bit-sign session token: the server checks bit-sign lists (so has been paid for) this name. */
-  proof: { bitsign: string },
-): Promise<string> => {
+export const addPaymail = async (f: Fetch, wallet: NameSigner, alias: string): Promise<string> => {
   if (!paymailEnabled()) throw new Error('Paymail is not configured');
   const a = alias.trim().toLowerCase();
   if (!PAYMAIL_ALIAS_RE.test(a)) throw new Error('Use a-z, 0-9, - or _ (up to 32)');
   const signed = await signRequest(wallet, 'names-add', { alias: a });
-  const j = await postJson(f, api('names-add'), { ...signed, bitsign: proof.bitsign });
+  // The server checks with bit-sign that this identity key owns (has paid for) the name.
+  const j = await postJson(f, api('names-add'), signed);
   return String(j.added);
 };
 
