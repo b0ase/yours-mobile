@@ -15,7 +15,7 @@ import { useNavigate } from 'react-router-dom';
 import { App as CapApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { BSPACES_ENABLED, tokenRoomsEnabled, XINVITES_ENABLED } from '../storeBuild';
-import { offerXInvite, parseXInviteLink } from '../chat/xInvites';
+import { offerXInvite, openXInviteInBrowser, parseXInviteLink } from '../chat/xInvites';
 import { BchatClient, defaultHttp, loadSession } from '../chat/api';
 import { requestChatRoom } from '../chat/nav';
 import { isNative } from '../native';
@@ -31,6 +31,10 @@ const listeners = new Set<() => void>();
 /** Accepts a link if this build handles its kind. */
 export const offerAppLink = (url?: string | null) => {
   // Room X invite (…/i/x/<code>#k=…): the key stays in memory until the Chat claim screen takes it.
+  // A build without X invites (Play / App Store) never swallows one: bchatx.com's web page opens instead.
+  if (!XINVITES_ENABLED) {
+    if (url && openXInviteInBrowser(url)) return;
+  }
   const x = XINVITES_ENABLED ? parseXInviteLink(url) : null;
   if (x) {
     offerXInvite(x);
@@ -54,7 +58,8 @@ export const takeAppLink = () => {
 
 export const onAppLink = (l: () => void) => (listeners.add(l), () => void listeners.delete(l));
 
-if (LINKS_ON && Capacitor.isNativePlatform()) {
+// Always listen on device: even a build without these screens must hand /i/x/ links to the browser.
+if (Capacitor.isNativePlatform()) {
   void CapApp.addListener('appUrlOpen', ({ url }) => offerAppLink(url));
   void CapApp.getLaunchUrl().then((r) => offerAppLink(r?.url));
 }

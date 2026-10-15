@@ -7,6 +7,8 @@ import {
   inviteLink,
   inviteOutputs,
   inviteSats,
+  openXInviteInBrowser,
+  xInviteWebUrl,
   loadStoredInvites,
   MIN_INVITE_SATS,
   newInviteKey,
@@ -138,5 +140,22 @@ describe('amount per invite', () => {
     expect(inviteAmountRaw({ minRaw: '', dec: 10 })).toBe(BigInt('10000000000'));
     expect(inviteAmountRaw({ minRaw: '5', dec: 10 })).toBe(BigInt('10000000000'));
     expect(inviteAmountRaw({ minRaw: '30000000000', dec: 10 })).toBe(BigInt('30000000000'));
+  });
+});
+
+describe('builds without X invites hand the link to the browser', () => {
+  test('opens the bchatx.com page with the fragment intact', () => {
+    const wif = newInviteKey().toWif();
+    const link = inviteLink(BASE, wif, TXID);
+    const opened: [string, string][] = [];
+    expect(openXInviteInBrowser(link, (u, t) => opened.push([u, t]))).toBe(true);
+    expect(opened).toEqual([[link, '_system']]);
+    // The deep-link form goes to the same web page, key still only in the fragment.
+    expect(xInviteWebUrl(`bwalletx://xinvite/AbC123#k=${wif}&t=${TXID}`)).toBe(`${BASE}#k=${wif}&t=${TXID}`);
+  });
+  test('anything else is left alone', () => {
+    const opened: unknown[] = [];
+    expect(openXInviteInBrowser('https://www.bchatx.com/s/abc', (u) => opened.push(u))).toBe(false);
+    expect(opened).toEqual([]);
   });
 });

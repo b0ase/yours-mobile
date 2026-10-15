@@ -109,6 +109,29 @@ export function parseXInviteLink(url: string | null | undefined): XInviteLink | 
   }
 }
 
+/**
+ * The bchatx.com web page for an invite link, fragment (key) intact: what a build without X invites
+ * (Play / App Store) opens in the system browser instead of swallowing the link.
+ */
+export function xInviteWebUrl(url: string): string | null {
+  const x = parseXInviteLink(url);
+  if (!x) return null;
+  const u = new URL(url.trim());
+  if (u.protocol === 'https:') return url.trim();
+  return `${INVITE_URL_BASE}${encodeURIComponent(x.code)}${u.hash}`;
+}
+
+/** Hand an invite link to the system browser (Capacitor opens `_system` outside the app). */
+export function openXInviteInBrowser(
+  url: string,
+  open: (u: string, target: string) => unknown = (u, t) => window.open(u, t),
+): boolean {
+  const web = xInviteWebUrl(url);
+  if (!web) return false;
+  open(web, '_system');
+  return true;
+}
+
 // ── how many sats per invite ──
 
 /**
