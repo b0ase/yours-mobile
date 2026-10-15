@@ -319,13 +319,25 @@ export const BackupStep = ({ exit, web, onComplete, onExit, start }: Props) => {
               </span>
             </span>
           </button>
+          {/* A real button, not a text link (owner, 15 Oct 2026): people who restored from their own saved phrase or
+              backup file already have one, so this marks the wallet backed up. Same size as the primary choices. */}
           <button
+            type="button"
             onClick={() => void finish('imported')}
-            className="mt-4 text-sm underline bg-transparent border-0 self-center"
-            style={{ color: MUTED }}
+            data-testid="backup-already-have"
+            aria-describedby="backup-already-have-hint"
+            className="mt-3 w-full rounded-xl py-3 font-bold"
+            style={{
+              background: 'transparent',
+              color: GOLD,
+              border: `1px solid color-mix(in srgb, ${GOLD} 53%, transparent)`,
+            }}
           >
-            I restored this wallet from my own phrase or backup
+            I already have a backup
           </button>
+          <p id="backup-already-have-hint" className="text-xs text-center mt-1.5 mb-0" style={{ color: MUTED }}>
+            You restored this wallet from your own saved recovery phrase or backup file.
+          </p>
           {error && (
             <div className="flex flex-col gap-1.5">
               <p className="text-xs mt-2 text-center" style={{ color: RED }}>

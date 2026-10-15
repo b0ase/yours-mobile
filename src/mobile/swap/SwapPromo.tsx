@@ -64,7 +64,7 @@ export const SwapPromo = ({ active, onOpen }: { active: SwapRecord | null; onOpe
   const title = active ? 'Swap in progress' : 'Swap into BSV';
   const sub = active ? stageLabel(active.stage) : 'From BTC, ETH, USDT and 1,000+ coins';
   return (
-    // Sits in the All cards | Swap row (BuyBsv.tsx), which sets the width: half each, or full when alone.
+    // Sits in the All cards | Swap row (BuyBsv.tsx), which sets the width: Swap takes all the width beside the icon-only All cards button.
     <div className="flex-1 min-w-0">
       <button
         type="button"
