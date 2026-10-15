@@ -3189,8 +3189,22 @@ button.bw-mail-card:active {
   cursor: pointer;
 }
 .bw-theme .bw-pack-grid {
-  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 6px;
+}
+.bw-theme-group {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--bw-muted, #a6a6a1);
+}
+/* flex-basis: 100% in the column sheet resolved to the sheet's full height: a phone-high blank under the note
+   (owner bug, 15 Oct 2026, measured 846px at 400×860). Inside the sheet it is just a paragraph. */
+.bw-cdes > .bw-cdes-note,
+.bw-cdes > .bw-cdes-imgerr {
+  flex-basis: auto;
 }
 .bw-theme .bw-pack {
   gap: 4px;
