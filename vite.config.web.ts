@@ -14,7 +14,7 @@ import { installStaleBuildCheck } from './src/web/staleBuild';
  * docs/WEB-WALLET.md.
  */
 
-const BANNER = 'Web wallet beta — your keys stay in this browser. Connecting other websites is coming soon.';
+const BANNER = 'Web wallet beta — test with small amounts. Your keys stay in this browser.';
 /** Newer build pick-up without reloading under the user: src/web/staleBuild.ts (inlined, self-contained). */
 const STALE_BUILD = `(${installStaleBuildCheck.toString()})();`;
 
