@@ -64,3 +64,18 @@ describe('Create password: the generated password is selectable text', () => {
     expect(src).toContain("{copied ? 'Copied' : 'Copy'}");
   });
 });
+
+describe('saveRoute on desktop and in the extension (owner, 15 Oct 2026)', () => {
+  test('a non-touch browser downloads instead of sharing', () => {
+    const file = new File(['x'], 'a.zip');
+    const g = globalThis as { matchMedia?: unknown };
+    const prev = g.matchMedia;
+    g.matchMedia = () => ({ matches: false });
+    try {
+      expect(saveRoute(file, false)).toBe('download');
+      expect(saveRoute(file, true)).toBe('native');
+    } finally {
+      g.matchMedia = prev;
+    }
+  });
+});
