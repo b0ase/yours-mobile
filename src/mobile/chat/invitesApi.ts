@@ -30,7 +30,7 @@ export interface CreatedInvite {
 }
 
 export interface PublicInvite {
-  room: { ticker: string; name: string | null; icon: string | null };
+  room: { ticker: string; name: string | null; icon: string | null; gate_symbol: string | null };
   x_handle: string;
   status: XInviteStatus;
 }
@@ -87,7 +87,12 @@ export function parsePublicInvite(v: unknown): PublicInvite | null {
   const r = o?.room as Record<string, unknown> | undefined;
   if (!o || !r || !str(r.ticker)) return null;
   return {
-    room: { ticker: str(r.ticker), name: str(r.name) || null, icon: str(r.icon) || null },
+    room: {
+      ticker: str(r.ticker),
+      name: str(r.name) || null,
+      icon: str(r.icon) || null,
+      gate_symbol: str(r.gate_symbol).replace(/^\$/, '') || null,
+    },
     x_handle: str(o.x_handle).replace(/^@/, ''),
     status: status(o.status),
   };
@@ -105,6 +110,25 @@ export const createBody = (
 });
 export const sweptBody = (txid: string) => ({ txid });
 export const revokeBody = (sweep_txid?: string | null) => (sweep_txid ? { sweep_txid } : {});
+
+/** The claim screen's warning: "1 SCAM" from the public lookup's gate_symbol, else "1 token". */
+export const forwardWarning = (symbol: string | null | undefined) =>
+  `Whoever opens this link can take the 1 ${symbol ? symbol.replace(/^\$/, '') : 'token'} it holds, so don't forward it.`;
+
+/** Verify refusals that mean "sign in with the invited X account". */
+export const X_SIGN_IN_CODES: readonly string[] = ['x_mismatch', 'x_not_linked'];
+
+export type VerifyResult = { ok: true } | { ok: false; reason: 'signed_out' | 'x' | 'refused'; message?: string };
+
+/** 401 = not signed in; 403 x_mismatch / x_not_linked = offer Sign in with X; anything else is shown as is. */
+export function verifyRefusal(e: unknown): VerifyResult | null {
+  if (!(e instanceof ChatApiError)) return null;
+  if (e.status === 401) return { ok: false, reason: 'signed_out' };
+  const code = str((e.data as { code?: unknown } | null)?.code);
+  if (e.status === 403 && X_SIGN_IN_CODES.includes(code)) return { ok: false, reason: 'x' };
+  if (e.status === 403) return { ok: false, reason: 'refused', message: e.message };
+  return null;
+}
 
 export class InvitesApi {
   constructor(private readonly call: Caller) {}
@@ -137,9 +161,15 @@ export class InvitesApi {
   }
 
   /** Signed in; bit-sign checks the account's linked X is the invited handle. */
-  async verify(code: string): Promise<{ ok: boolean }> {
-    const r = (await this.call('POST', `${codePath(code)}/verify`, {})) as { ok?: unknown };
-    return { ok: r?.ok === true };
+  async verify(code: string): Promise<VerifyResult> {
+    try {
+      const r = (await this.call('POST', `${codePath(code)}/verify`, {})) as { ok?: unknown };
+      return r?.ok === true ? { ok: true } : { ok: false, reason: 'refused' };
+    } catch (e) {
+      const refused = verifyRefusal(e);
+      if (refused) return refused;
+      throw e;
+    }
   }
 
   async swept(code: string, txid: string): Promise<void> {

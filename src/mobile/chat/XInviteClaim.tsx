@@ -8,8 +8,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import type { OneSatContext } from '@1sat/actions';
-import { ChatApiError, type BchatClient } from './api';
-import { InvitesApi, type PublicInvite } from './invitesApi';
+import type { BchatClient } from './api';
+import { forwardWarning, InvitesApi, type PublicInvite } from './invitesApi';
 import { sweepInvite, type XInviteLink } from './xInvites';
 import { useBackClose } from '../backStack';
 import { SocialSignIn } from '../social/SocialSignIn';
@@ -19,8 +19,6 @@ const GOLD = 'var(--bw-accent-hi)';
 const MUTED = '#8a8f98';
 const LINE = '#1f2127';
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
-
-export const FORWARD_WARNING = "Whoever opens this link can take the 1 token it holds, so don't forward it.";
 
 export const XInviteClaim = ({
   client,
@@ -62,14 +60,14 @@ export const XInviteClaim = ({
       // Record this wallet's X sign-in on the bChat account (the existing Continue with X proof).
       const proof = socialProof(identityAddress);
       if (proof?.profile.provider === 'x') await client.socialClaim(proof.ticket, proof.secret).catch(() => undefined);
-      const v = await api.verify(link.code).catch((e) => {
-        if (e instanceof ChatApiError && (e.status === 401 || e.status === 403)) return null;
-        throw e;
-      });
-      if (!v?.ok) {
-        setNeedX(true);
-        setError(`Sign in with the X account @${inv.x_handle} to accept this invite.`);
-        return;
+      const v = await api.verify(link.code);
+      if (!v.ok) {
+        if (v.reason === 'signed_out') return setError('Open Chat once to sign in, then open this link again.');
+        if (v.reason === 'x') {
+          setNeedX(true);
+          return setError(`Sign in with the X account @${inv.x_handle} to accept this invite.`);
+        }
+        return setError(v.message || 'This invite was refused.');
       }
       setNeedX(false);
       setBusy('Collecting your invite…');
@@ -142,7 +140,7 @@ export const XInviteClaim = ({
             ) : (
               <>
                 <p className="text-xs mb-4" style={{ color: '#F5B94A' }}>
-                  {FORWARD_WARNING}
+                  {forwardWarning(inv.room.gate_symbol)}
                 </p>
                 {needX && (
                   <div className="mb-3">

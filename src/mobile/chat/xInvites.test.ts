@@ -3,6 +3,7 @@ import { LockingScript, P2PKH, PrivateKey, Transaction, Utils } from '@bsv/sdk';
 import {
   addressOf,
   claimPlan,
+  inviteAmountRaw,
   inviteLink,
   inviteOutputs,
   inviteSats,
@@ -128,5 +129,14 @@ describe('links on this device', () => {
     const raw = [...mem.values()].join('');
     expect(raw).not.toContain(wif);
     expect(await loadStoredInvites(wallet, 'scammerscartel', store)).toEqual([inv]);
+  });
+});
+
+describe('amount per invite', () => {
+  test('at least the gate minimum, never under one whole token', () => {
+    expect(inviteAmountRaw({ minRaw: '10000000000', dec: 10 })).toBe(BigInt('10000000000'));
+    expect(inviteAmountRaw({ minRaw: '', dec: 10 })).toBe(BigInt('10000000000'));
+    expect(inviteAmountRaw({ minRaw: '5', dec: 10 })).toBe(BigInt('10000000000'));
+    expect(inviteAmountRaw({ minRaw: '30000000000', dec: 10 })).toBe(BigInt('30000000000'));
   });
 });

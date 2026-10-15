@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { ChatApiError } from './api';
-import { InvitesApi, createBody, revokeBody, sweptBody, type Caller } from './invitesApi';
+import { InvitesApi, createBody, forwardWarning, revokeBody, sweptBody, type Caller } from './invitesApi';
 import { addressOf, newInviteKey } from './xInvites';
 
 const recorder = (reply: (path: string) => unknown) => {
@@ -79,4 +79,33 @@ describe('invites API', () => {
     expect((await api.lookup('c'))?.room.ticker).toBe('SCAMMERSCARTEL');
     expect(calls[0]).toMatchObject({ method: 'GET', path: '/api/public/x-invites/c', auth: false });
   });
+});
+
+describe('server confirmations (15 Oct)', () => {
+  test('public lookup carries the gate symbol', async () => {
+    const { api } = recorder(() => ({
+      room: { ticker: 'SCAMMERSCARTEL', name: null, icon: null, gate_symbol: '$SCAM' },
+      x_handle: 'a',
+      status: 'open',
+    }));
+    expect((await api.lookup('c'))?.room.gate_symbol).toBe('SCAM');
+  });
+
+  test('verify: 401 signed out; 403 x_mismatch / x_not_linked → sign in with X; other 403 refused', async () => {
+    const run = async (e: unknown) => recorder(() => e).api.verify('c');
+    expect(await run(new ChatApiError('no', 401))).toEqual({ ok: false, reason: 'signed_out' });
+    expect(await run(new ChatApiError('no', 403, { code: 'x_mismatch' }))).toEqual({ ok: false, reason: 'x' });
+    expect(await run(new ChatApiError('no', 403, { code: 'x_not_linked' }))).toEqual({ ok: false, reason: 'x' });
+    expect(await run(new ChatApiError('Revoked', 403, { code: 'revoked' }))).toEqual({
+      ok: false,
+      reason: 'refused',
+      message: 'Revoked',
+    });
+    expect(await run({ ok: true })).toEqual({ ok: true });
+  });
+});
+
+test('claim warning names the gate token', () => {
+  expect(forwardWarning('SCAM')).toBe("Whoever opens this link can take the 1 SCAM it holds, so don't forward it.");
+  expect(forwardWarning(null)).toContain('the 1 token it holds');
 });

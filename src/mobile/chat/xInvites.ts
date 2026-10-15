@@ -124,10 +124,14 @@ export const inviteSats = (overlayFeePerOutput: number | null | undefined) =>
 
 // ── the funding transaction ──
 
-/** 1 whole token unless the room's gate asks for a different amount. */
+/**
+ * Per invite: at least the room's gate minimum (minAmountRaw; 10^10 raw = 1 SCAM), and never less
+ * than one whole token, so the invitee always clears the gate.
+ */
 export const inviteAmountRaw = (gate: { minRaw: string; dec: number }): bigint => {
   const min = /^\d+$/.test(gate.minRaw || '') ? BigInt(gate.minRaw) : BigInt(0);
-  return min > BigInt(0) ? min : BigInt(10) ** BigInt(gate.dec || 0);
+  const whole = BigInt(10) ** BigInt(gate.dec || 0);
+  return min > whole ? min : whole;
 };
 
 export interface PlannedOutput {
