@@ -2,7 +2,7 @@
  * Wallet token rows with Telegram-style swipe actions (owner, 15 Oct 2026), on the shared SwipeRow.
  *  - Swipe LEFT: Send · Receive · Chat (full swipe = Send).
  *  - Swipe RIGHT: Pin · Lock · Archive (full swipe = Archive, with an Undo toast).
- *  - Long-press: the same actions as a menu (SwipeRow's default).
+ *  - No long-press menu (owner, 15 Oct 2026): the swipes give every action. The tray matches the row's height.
  * Pins and archive are per device (tokenRows.ts). Not in the browser extension (no Chat tab there).
  */
 import { useState, type ReactNode } from 'react';
@@ -59,7 +59,7 @@ export const TokenSwipe = (p: TokenSwipeProps) => {
       },
     });
   return (
-    <div className="w-full relative">
+    <div className="bw-token-swipe relative">
       <SwipeRow
         label={p.label}
         rowId={`token-${p.id}`}
@@ -67,6 +67,7 @@ export const TokenSwipe = (p: TokenSwipeProps) => {
         rightActions={right}
         fullSwipeLeft="send"
         fullSwipeRight={p.noArchive ? undefined : 'archive'}
+        noMenu
       >
         {p.children}
       </SwipeRow>

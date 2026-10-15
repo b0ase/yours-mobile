@@ -47,6 +47,8 @@ export type SwipeRowProps = {
   onLongPress?: () => void;
   /** Swipes off (reorder mode): the row is a plain child. */
   disabled?: boolean;
+  /** No long-press or right-click menu: the swipes are the actions (Wallet token rows). "…" on hover stays. */
+  noMenu?: boolean;
 };
 
 const reducedMotion = () => {
@@ -78,6 +80,7 @@ export const SwipeRow = ({
   rowId,
   onLongPress,
   disabled,
+  noMenu,
 }: SwipeRowProps) => {
   const wrap = useRef<HTMLDivElement>(null);
   const [offset, setOffset] = useState(0);
@@ -171,7 +174,7 @@ export const SwipeRow = ({
     s.moved = false;
     s.armed = false;
     clearLong();
-    if (e.pointerType !== 'mouse')
+    if (e.pointerType !== 'mouse' && (onLongPress || !noMenu))
       s.long = setTimeout(() => {
         if (!s.moved && s.id === e.pointerId) {
           s.moved = true; // swallow the click that follows
@@ -283,6 +286,7 @@ export const SwipeRow = ({
       onContextMenu={(e) => {
         if (!all.length) return;
         e.preventDefault();
+        if (noMenu) return;
         menuAt(e.clientX, e.clientY);
       }}
       onKeyDown={(e) => {

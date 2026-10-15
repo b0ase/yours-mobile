@@ -1,11 +1,30 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, Moon, Palette, SlidersHorizontal, Sun, X } from 'lucide-react';
+import { Check, Dices, Moon, Palette, Shuffle, SlidersHorizontal, Sun, X } from 'lucide-react';
 import { DEFAULT_ACCENT, MORE_COLOURS, THEMES, accentById, type Accent, type AccentId } from './accents';
 import { loadAccent, loadMix, previewMix, saveAccent, saveMix } from './accent';
 import { deriveMix, mixFromPack, type MixSpec } from './mixer';
 
 type ThemeTab = 'colours' | 'card';
+
+// Corners for a mix (owner, 15 Oct 2026: fill the Theme page with real options). Buttons · cards.
+const CORNERS = [
+  { id: 'sharp', label: 'Sharp', radius: '3px', radiusCard: '6px' },
+  { id: 'soft', label: 'Soft', radius: '12px', radiusCard: '16px' },
+  { id: 'round', label: 'Round', radius: '999px', radiusCard: '22px' },
+] as const;
+const rnd = (lo: number, hi: number) => Math.round(lo + Math.random() * (hi - lo));
+/** A random mix: any hues, colour and depth kept in ranges that look designed. Contrast is still enforced by deriveMix. */
+const surpriseMix = (prev: MixSpec): MixSpec => ({
+  ...prev,
+  base: Math.random() < 0.7 ? 'dark' : 'light',
+  sh: rnd(0, 360),
+  ss: rnd(0, 45),
+  sd: rnd(0, 60),
+  ah: rnd(0, 360),
+  as: rnd(55, 100),
+  al: rnd(35, 75),
+});
 
 /**
  * Theme (owner, 14 Oct 2026): the page behind the sliders icon on the card back, which was "Design your card".
@@ -77,6 +96,16 @@ function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNo
     else previewMix(next);
   };
   const derived = useMemo(() => deriveMix(mix), [mix]);
+  // Shuffle: another pack at random (never the one on). Surprise: a random mix, opened so it can be tuned.
+  const shuffle = () => {
+    const others = THEMES.filter((a) => a.id !== current);
+    pick(others[Math.floor(Math.random() * others.length)].id);
+  };
+  const surprise = () => {
+    setMixing(true);
+    slide(surpriseMix(mix), true);
+  };
+  const corner = CORNERS.find((c) => c.radiusCard === derived.radiusCard)?.id;
 
   return createPortal(
     <div className="bw-cdes bw-theme" role="dialog" aria-modal="true" aria-label="Theme">
@@ -87,7 +116,17 @@ function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNo
         </button>
       </div>
       {tabs}
-      <p className="bw-theme-more">Theme packs</p>
+      <div className="bw-theme-head">
+        <p className="bw-theme-more">Theme packs</p>
+        <button type="button" className="bw-theme-chip" onClick={shuffle}>
+          <Shuffle size={14} aria-hidden="true" />
+          Shuffle
+        </button>
+        <button type="button" className="bw-theme-chip" onClick={surprise}>
+          <Dices size={14} aria-hidden="true" />
+          Surprise me
+        </button>
+      </div>
       <div className="bw-pack-grid" role="radiogroup" aria-label="Theme packs">
         {THEMES.map((a) => (
           <PackTile key={a.id} a={a} on={current === a.id} onPick={() => pick(a.id)} />
@@ -123,6 +162,21 @@ function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNo
                 >
                   {b === 'dark' ? <Moon size={16} aria-hidden="true" /> : <Sun size={16} aria-hidden="true" />}
                   {b === 'dark' ? 'Dark' : 'Light'}
+                </button>
+              ))}
+            </div>
+            <div className="bw-mixer-base bw-mixer-corners" role="radiogroup" aria-label="Corners">
+              {CORNERS.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={corner === c.id}
+                  className={corner === c.id ? 'on' : ''}
+                  onClick={() => slide({ ...mix, radius: c.radius, radiusCard: c.radiusCard }, true)}
+                >
+                  <i aria-hidden="true" style={{ borderRadius: c.id === 'round' ? 9 : c.id === 'soft' ? 5 : 1 }} />
+                  {c.label}
                 </button>
               ))}
             </div>
@@ -165,8 +219,7 @@ function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNo
         ))}
       </div>
       <p className="bw-cdes-note">
-        A pack restyles the whole app: page, cards, text, lines, buttons and the card pattern it suggests. Accent only
-        keeps Gold&apos;s black and changes the highlights. The b stays. Kept for this account on this device.
+        Packs restyle the whole app; Accent only keeps Gold&apos;s black. Kept for this account on this device.
       </p>
       <div className="bw-cdes-actions">
         <button
