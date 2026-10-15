@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { BookUser, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { FriendsSection } from './FriendsSection';
 import { closesAddressBook, opensAddressBook } from './addressBookGesture';
 import './addressBook.css';
@@ -78,11 +78,6 @@ export const AddressBookPull = ({ children }: { children: ReactNode }) => {
         }}
       >
         {children}
-      </div>
-      <div className="bw-abook-row">
-        <button type="button" className="bw-abook-open" aria-label="Address book" onClick={() => setOpen(true)}>
-          <BookUser size={16} aria-hidden="true" />
-        </button>
       </div>
       {open && <AddressBook onClose={() => setOpen(false)} />}
     </>

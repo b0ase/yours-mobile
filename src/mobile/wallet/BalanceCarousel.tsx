@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { BookUser, PenLine, X } from 'lucide-react';
+import { PenLine, X } from 'lucide-react';
 import { BCREDITS_ENABLED, BUY_CRYPTO_ENABLED, PLACEMENT_ENABLED, STORE_BUILD } from '../storeBuild';
 import { PNEE_ICON } from '../notes/pnee';
 import { requestWalletAction } from '../phone/walletAction';
@@ -751,15 +751,6 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
         )}
       </div>
       <div style={{ position: 'relative', minHeight: 26 }}>
-        <button
-          type="button"
-          className="bw-abook-open"
-          aria-label="Address book"
-          title="Address book"
-          onClick={() => setBook(true)}
-        >
-          <BookUser size={16} aria-hidden="true" />
-        </button>
         {cards.length > 1 && (
           <div className="bw-bcar-dots" aria-label={`Card ${active + 1} of ${cards.length}`}>
             {cards.map((c, i) => (
