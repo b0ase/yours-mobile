@@ -32,6 +32,25 @@ describe('allowlist gate', () => {
     expect(c.allowedCollection(FOX.replace('_', '.'))).not.toBeNull();
     expect(c.allowedCollection(FOX.toUpperCase())).not.toBeNull();
   });
+  test('approved collections are on it; failed and unapproved ones are not', () => {
+    expect(c.ALLOWED_COLLECTIONS).toHaveLength(11);
+    expect(c.allowedCollection('8c8df50610401e6f92d91c8f26f08e1f69acea0e82b23bca7a30660ce372a2a4_0')?.name).toBe(
+      'Dragon Army',
+    );
+    expect(
+      c.allowedCollection('bb945bc7b07ed24dcf145a1db67ba8d3158d7bb944d8152e05e09d5e20f1d775_0')?.description,
+    ).toContain('Not made, endorsed');
+    // Rizzler, The BSV Kongs (failed the image check), Zombies (not approved)
+    for (const id of [
+      '0faa778fa5fe38b0b5ca8fd13f5f835e43cdf22e5782796f302029f943944387_0',
+      '179d8c1d79326c7d01104d26253bebc0aa32037cf1293bf38e13946d5c864dba_0',
+      '8aff0b8e3b4ea966cf200d26b30cd24412a2ab1efa30c5dcac2a22e5e414365b_0',
+    ])
+      expect(c.allowedCollection(id)).toBeNull();
+    const ids = c.ALLOWED_COLLECTIONS.map((x) => x.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const x of c.ALLOWED_COLLECTIONS) expect(x.description).not.toMatch(/fuck|shit|bitch/i);
+  });
   test('anything else is refused', () => {
     expect(c.allowedCollection(OTHER)).toBeNull();
     expect(c.allowedCollection('')).toBeNull();
