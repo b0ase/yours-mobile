@@ -1185,7 +1185,7 @@ export const Settings = () => {
       const r = await sendMessageAsync<{ success: boolean; error?: string; data?: { summary?: string } }>({
         action: 'STORAGE_RECOVER_MINED',
       });
-      const text = r?.data?.summary ?? r?.error ?? 'Nothing to restore';
+      const text = r?.data?.summary ?? r?.error ?? 'No answer from the wallet. Try again.';
       setRecoverResult(text);
       addSnackbar(text, r?.success ? 'success' : 'error');
     } catch (error) {
@@ -1194,6 +1194,30 @@ export const Settings = () => {
       addSnackbar(text, 'error');
     } finally {
       setRecovering(false);
+    }
+  };
+
+  const [recoverTxid, setRecoverTxid] = useState('');
+  const [recoveringTxid, setRecoveringTxid] = useState(false);
+  const [recoverTxidResult, setRecoverTxidResult] = useState('');
+  const handleRecoverTxid = async () => {
+    if (recoveringTxid) return;
+    setRecoveringTxid(true);
+    setRecoverTxidResult('');
+    try {
+      const r = await sendMessageAsync<{ success: boolean; error?: string; data?: { summary?: string } }>({
+        action: 'STORAGE_RECOVER_TXID',
+        txid: recoverTxid.trim(),
+      });
+      const text = r?.data?.summary ?? r?.error ?? 'No answer from the wallet. Try again.';
+      setRecoverTxidResult(text);
+      addSnackbar(text, r?.success ? 'success' : 'error');
+    } catch (error) {
+      const text = error instanceof Error ? error.message : 'Check failed';
+      setRecoverTxidResult(text);
+      addSnackbar(text, 'error');
+    } finally {
+      setRecoveringTxid(false);
     }
   };
 
@@ -1289,6 +1313,31 @@ export const Settings = () => {
                 label="Search"
                 disabled={!missingTokenValid || repairOutcome === 'running'}
                 onClick={() => void handleRepairSync([missingTokenId.trim()])}
+              />
+            </div>
+          </div>
+          <Divider />
+          <div className="flex flex-col gap-2 px-4 py-3">
+            <span className="text-sm font-semibold">Recover a payment by transaction ID</span>
+            <span className="text-xs opacity-70">
+              {recoverTxidResult ||
+                'Money on chain that never showed up here (a sweep or send from this wallet)? Paste the transaction ID. Only coins this wallet’s records prove are yours are added.'}
+            </span>
+            <div className="flex gap-2">
+              <Input
+                theme={theme}
+                id="recover-txid"
+                placeholder="Transaction ID"
+                value={recoverTxid}
+                onChange={(e) => setRecoverTxid(e.target.value)}
+                style={{ flex: 1, margin: 0 }}
+              />
+              <Button
+                theme={theme}
+                type="secondary"
+                label={recoveringTxid ? 'Checking…' : 'Recover'}
+                disabled={!/^[0-9a-fA-F]{64}$/.test(recoverTxid.trim()) || recoveringTxid}
+                onClick={() => void handleRecoverTxid()}
               />
             </div>
           </div>
