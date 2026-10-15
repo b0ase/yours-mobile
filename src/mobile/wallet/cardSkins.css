@@ -7,7 +7,7 @@
   border-radius: inherit;
   pointer-events: none;
 }
-.bw-skin ~ * {
+.bw-skin ~ *:not(.bw-wcard-penflip) {
   position: relative;
   z-index: 1;
 }
