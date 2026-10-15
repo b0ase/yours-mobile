@@ -9,7 +9,8 @@
 import type { ChromeStorageService } from '../../services/ChromeStorage.service';
 import { derivePasswordKey } from '../../services/passKey';
 import { sealBackup } from '../../utils/backupEnvelope';
-import { backupFileName } from './backupState';
+import { masterBackupFileName } from '../../utils/masterExporter';
+import { accountNamesFor } from '../names/accountNames';
 
 export class WrongPasswordError extends Error {
   constructor() {
@@ -20,7 +21,7 @@ export class WrongPasswordError extends Error {
 
 export const createBackupFile = async (cs: ChromeStorageService, password: string): Promise<File> => {
   if (!password || !(await cs.verifyPassword(password))) throw new WrongPasswordError();
-  const { salt } = cs.getCurrentAccountObject();
+  const { salt, account } = cs.getCurrentAccountObject();
   // Derived here: runtime messages fan out to every page, so the password itself never leaves this one.
   const passwordKey = salt ? derivePasswordKey(password, salt) : undefined;
   const res = (await chrome.runtime.sendMessage({ action: 'MASTER_BACKUP', passwordKey })) as
@@ -32,7 +33,10 @@ export const createBackupFile = async (cs: ChromeStorageService, password: strin
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   const sealed = await sealBackup(bytes, password);
   bytes.fill(0);
-  return new File([sealed as Uint8Array<ArrayBuffer>], backupFileName(), { type: 'application/zip' });
+  // Named for the account like Settings › Backup ($handle + identity key start): owner, 15 Oct 2026.
+  const names = accountNamesFor(account?.addresses?.identityAddress, account?.name ?? '');
+  const name = masterBackupFileName(names.payable || names.displayName, account?.pubKeys?.identityPubKey);
+  return new File([sealed as Uint8Array<ArrayBuffer>], name, { type: 'application/zip' });
 };
 
 export type SaveRoute = 'share' | 'native' | 'download' | 'none';
@@ -45,6 +49,10 @@ export type SaveRoute = 'share' | 'native' | 'download' | 'none';
 export const saveRoute = (file: File, native: boolean): SaveRoute => {
   // In the app the native sheet always: it needs no fresh tap, so making the file and sharing it is one step.
   if (native) return 'native';
+  // Desktop browsers and the Chrome extension download: the file is made after an await (password check, sealing),
+  // which ends Chrome's tap, so navigator.share fails with NotAllowedError there (owner, 15 Oct 2026). Only touch
+  // phones get the share sheet.
+  if (typeof matchMedia === 'undefined' || !matchMedia('(pointer: coarse)').matches) return 'download';
   try {
     if (typeof navigator !== 'undefined' && navigator.canShare?.({ files: [file] })) return 'share';
   } catch {
@@ -121,6 +129,8 @@ export const saveBackupFile = async (file: File, route: SaveRoute): Promise<bool
         return true;
       } catch (e) {
         if (e instanceof Error && e.name === 'AbortError') return false;
+        // The tap expired before the file was ready: download instead of failing.
+        if (e instanceof Error && e.name === 'NotAllowedError') return saveBackupFile(file, 'download');
         last = e;
       }
     }
