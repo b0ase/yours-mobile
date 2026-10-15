@@ -30,6 +30,7 @@ import {
   tokeniseQuery,
   type AppCard,
   type AppSort,
+  previewSandbox,
 } from './bappsCards';
 import { useReel } from './useReel';
 import { inReelWindow, useAppVisible } from '../reelMemory';
@@ -121,7 +122,7 @@ const AppSlide = ({
         <iframe
           title={`${c.name} preview`}
           src={c.url}
-          sandbox="allow-scripts"
+          sandbox={previewSandbox(c.url)}
           referrerPolicy="no-referrer"
           loading="lazy"
           tabIndex={-1}

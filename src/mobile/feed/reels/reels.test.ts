@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { BANNED_PROMO, RISK_LINE, TOKEN_SORTS, mergeTokens, sortTokens, sparkPath, sparkline } from './bexCards';
-import { APP_SORTS, appCards, contributeLinks, isBuilder, sortApps, tokeniseQuery } from './bappsCards';
+import { APP_SORTS, appCards, contributeLinks, isBuilder, sortApps, tokeniseQuery, previewSandbox } from './bappsCards';
 import type { BApp } from '../../bapps';
 
 const id = (c: string) => `${c.repeat(64)}_0`;
@@ -126,4 +126,11 @@ describe('bApps reel', () => {
       category: 'apps',
     });
   });
+});
+
+it('bApps previews: other https origins get storage, our own origin and non-https stay script-only', () => {
+  expect(previewSandbox('https://bmovies.app/', 'capacitor://localhost')).toBe('allow-scripts allow-same-origin');
+  expect(previewSandbox('https://web.bwalletx.com/x', 'https://web.bwalletx.com')).toBe('allow-scripts');
+  expect(previewSandbox('http://example.com/', 'capacitor://localhost')).toBe('allow-scripts');
+  expect(previewSandbox('not a url', 'capacitor://localhost')).toBe('allow-scripts');
 });
