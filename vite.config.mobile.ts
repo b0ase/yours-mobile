@@ -497,11 +497,11 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       'const favs = account?.settings?.favoriteTokens ?? [];\n    const hidden = (account?.settings as { hiddenTokens?: string[] } | undefined)?.hiddenTokens ?? [];\n    const held = bsv21s.filter((t) => t.id && (favs.includes(t.id) || (BigInt(t.amt || "0") > 0n && !hidden.includes(t.id))));\n    const filtered = [...held].sort((a, b) => (favs.indexOf(a.id!) + 1 || 1e9) - (favs.indexOf(b.id!) + 1 || 1e9));',
     ],
   ],
-  // Wallet tab: Tokens | NFTs | Tickets | Credits (like Market). NFTs is the media library (src/mobile/wallet, src/mobile/media).
+  // Wallet tab: Tokens | NFTs | Names (+ Tickets | Credits | Shares from the cards). NFTs is the media library (src/mobile/wallet, src/mobile/media).
   'src/pages/BsvWallet.tsx#kinds': [
     [
       "import { ManageTokens } from '../components/ManageTokens';",
-      "import { ManageTokens } from '../components/ManageTokens';\nimport { WalletKindGate, WalletKindSwitch } from '../mobile/wallet/KindSwitch';\nimport { MediaSection } from '../mobile/media/MediaSection';\nimport { TicketsSection } from '../mobile/wallet/TicketsSection';\nimport { FriendsSection } from '../mobile/wallet/FriendsSection';\nimport { SharesSection } from '../mobile/wallet/SharesSection';",
+      "import { ManageTokens } from '../components/ManageTokens';\nimport { WalletKindGate, WalletKindSwitch } from '../mobile/wallet/KindSwitch';\nimport { MediaSection } from '../mobile/media/MediaSection';\nimport { TicketsSection } from '../mobile/wallet/TicketsSection';\nimport { NamesSection } from '../mobile/wallet/NamesSection';\nimport { SharesSection } from '../mobile/wallet/SharesSection';",
     ],
     [
       '        {/* ── Assets section ── */}',
@@ -509,7 +509,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       '        {/* Bottom breathing room */}',
-      '</SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="nfts">\n          <SectionBoundary name="NFTs"><MediaSection /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="friends">\n          <SectionBoundary name="Friends"><FriendsSection /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="tickets">\n          <SectionBoundary name="Tickets"><TicketsSection /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="credits">\n          <SectionBoundary name="Credits"><CreditsRow /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="shares">\n          <SectionBoundary name="Shares"><SharesSection /></SectionBoundary>\n        </WalletKindGate>\n        {/* Bottom breathing room */}',
+      '</SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="nfts">\n          <SectionBoundary name="NFTs"><MediaSection /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="names">\n          <SectionBoundary name="Names"><NamesSection /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="tickets">\n          <SectionBoundary name="Tickets"><TicketsSection /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="credits">\n          <SectionBoundary name="Credits"><CreditsRow /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="shares">\n          <SectionBoundary name="Shares"><SharesSection /></SectionBoundary>\n        </WalletKindGate>\n        {/* Bottom breathing room */}',
     ],
     // The switch replaces the section label and its top margin.
     [

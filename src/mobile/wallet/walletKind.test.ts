@@ -19,3 +19,9 @@ test('tickets is a wallet kind', () => {
   expect(getWalletKind()).toBe('tickets');
   setWalletKind('tokens');
 });
+
+test('names is a wallet kind (Friends moved to the address book, 15 Oct 2026)', () => {
+  setWalletKind('names');
+  expect(getWalletKind()).toBe('names');
+  setWalletKind('tokens');
+});

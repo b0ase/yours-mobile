@@ -36,7 +36,7 @@ const HOME: Partial<Record<WalletKind, string>> = {
 
 /**
  * The card index the carousel should scroll to for a list view, or null to stay put: the current card already
- * shows that view, the view has no card (NFTs, Friends), or its card is not in this build.
+ * shows that view, the view has no card (NFTs, Names), or its card is not in this build.
  */
 export const cardForView = (view: CardFilter, cardIds: readonly string[], currentId?: string): number | null => {
   if (currentId !== undefined) {
