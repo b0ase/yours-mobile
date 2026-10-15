@@ -1,4 +1,5 @@
 import { defineConfig, loadEnv, mergeConfig, type Plugin } from 'vite';
+import { themeTokens } from './vite.theme';
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import { resolve } from 'path';
 import { copyFileSync, existsSync, readFileSync, renameSync } from 'fs';
@@ -804,7 +805,7 @@ const bwalletxIcons = (): Plugin => ({
 export default mergeConfig(
   baseConfig,
   defineConfig({
-    plugins: [brand(), mobileText(), bcorpText(), bcorpColours(), mobilePages(), bwalletxIcons()],
+    plugins: [brand(), mobileText(), themeTokens(), bcorpText(), bcorpColours(), mobilePages(), bwalletxIcons()],
     build: {
       outDir: 'build-mobile',
       target: 'es2022',

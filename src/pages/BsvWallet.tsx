@@ -98,6 +98,7 @@ import { IS_EXTENSION } from '../mobile/extension';
 import { useTokenRows } from '../mobile/wallet/tokenRows';
 import { openTicketRoomInChat } from '../mobile/tickets/ticketRoom';
 import { asMenuItem } from '../mobile/tabs/tabs';
+import { publishBalance } from '../mobile/wallet/balanceStore';
 import {
   BALANCE_TIMEOUT_MS,
   RATE_TIMEOUT_MS,
@@ -527,6 +528,7 @@ export const BsvWallet = () => {
   const applyBalance = (satoshis: number) => {
     setBsvBalance(satoshis / 100_000_000);
     saveLastBalance(identityAddress, satoshis);
+    publishBalance('bsv', satoshis / 100_000_000, 'BSV');
     setBalanceKnown(true);
     setBalanceFailed(false);
     setBalanceLoading(false);

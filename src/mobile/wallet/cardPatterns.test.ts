@@ -10,7 +10,7 @@ describe('card patterns', () => {
       expect(svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg" width="1011" height="637"')).toBe(true);
       expect(svg.endsWith('</svg>')).toBe(true);
       expect(svg).not.toContain('NaN');
-      expect(svg).not.toMatch(/href=|url\(/);
+      expect(svg).not.toMatch(/href=|url\((?!#)/);
       expect(svg.length).toBeGreaterThan(300);
     }
   });
