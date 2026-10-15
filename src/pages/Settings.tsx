@@ -1,3 +1,4 @@
+import { AvatarTooBigError } from '../mobile/names/animatedAvatar';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -577,8 +578,8 @@ export const Settings = () => {
         `Inscribing your avatar will cost approximately ${estimatedSats.toLocaleString()} sats. Proceed?`,
       );
       setShowSpeedBump(true);
-    } catch {
-      addSnackbar('Failed to process image', 'error');
+    } catch (e) {
+      addSnackbar(e instanceof AvatarTooBigError ? e.message : 'Failed to process image', 'error');
       setAvatarPreview(null);
     }
   };

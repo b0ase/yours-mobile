@@ -62,6 +62,7 @@ export const AccountRow = ({
             size={size}
             ring={false}
             id={id}
+            place="list"
             src={resolveAvatarUrl(
               pickAvatar({
                 local: getLocalAvatar(id),
