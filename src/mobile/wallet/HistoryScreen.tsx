@@ -1,6 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowDownLeft, ArrowUpRight, Download, ExternalLink, FileText, RefreshCw, Repeat, X } from 'lucide-react';
+import {
+  ArrowDownLeft,
+  ArrowUpRight,
+  Check,
+  Copy,
+  Download,
+  ExternalLink,
+  FileText,
+  RefreshCw,
+  Repeat,
+  X,
+} from 'lucide-react';
+import { copyLink } from '../chat/shareLink';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { isNative } from '../native';
 import { saveTextFile } from '../agents/saveText';
@@ -516,6 +528,7 @@ const Row = ({ r }: { r: HistoryRow }) => {
           {r.txid.slice(0, 12)}…{r.txid.slice(-6)} <ExternalLink size={11} />
           {r.confirmations === 0 && <span style={{ color: MUTED }}> · unconfirmed</span>}
         </a>
+        <CopyTxid txid={r.txid} />
       </div>
     </div>
   );
@@ -579,6 +592,7 @@ const TxTable = ({ rows, all }: { rows: HistoryRow[]; all: HistoryRow[] }) => {
                   >
                     {r.txid.slice(0, 12)}…{r.txid.slice(-6)} <ExternalLink size={11} />
                   </a>
+                  <CopyTxid txid={r.txid} />
                 </td>
                 <td className={`${td} text-right whitespace-nowrap font-mono`} style={{ color }}>
                   {r.amountSats > 0 ? '+' : ''}
@@ -602,6 +616,27 @@ const TxTable = ({ rows, all }: { rows: HistoryRow[]; all: HistoryRow[] }) => {
         </tbody>
       </table>
     </div>
+  );
+};
+
+/** Copy a transaction ID in one tap (for Settings › Troubleshooting › Recover a payment by transaction ID). */
+const CopyTxid = ({ txid }: { txid: string }) => {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-label="Copy transaction ID"
+      title="Copy transaction ID"
+      className="text-xs inline-flex items-center gap-1 ml-2"
+      style={{ color: MUTED }}
+      onClick={async () => {
+        if ((await copyLink(txid)) !== 'copied') return;
+        setDone(true);
+        setTimeout(() => setDone(false), 1500);
+      }}
+    >
+      {done ? <Check size={11} /> : <Copy size={11} />} {done ? 'Copied' : 'Copy ID'}
+    </button>
   );
 };
 
