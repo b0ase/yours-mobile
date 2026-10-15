@@ -254,14 +254,16 @@ export const bcorpText = (extra: Swaps = {}): Plugin => {
 const a2 = (hh: string) => +(parseInt(hh, 16) / 255).toFixed(2);
 // Theme (owner, 14 Oct 2026): the greens become the app accent as CSS variables (src/accent.css, mobile/theme/accent.ts),
 // gold by default, so Settings → Theme → App colours can swap it at runtime. Tailwind arbitrary classes ([#A1FF8B]) stay
-// a fixed gold: Tailwind scans the source, not this transform, so a class rewritten here would have no CSS.
+// a fixed gold: Tailwind scans the source, not this transform, so a class rewritten here would have no CSS. Tailwind's
+// generated selectors escape the hash (.text-\[\#A1FF8B\]), so `\#` is skipped too: rewriting it made `.text-\[\var(…)\]`,
+// an invalid selector (esbuild warning) that matched nothing.
 const BCORP_COLOURS: [RegExp, string | ((...m: string[]) => string)][] = [
   [
-    /(?<!\[)#(?:A1FF8B|9EFF8A)([0-9a-f]{2})?(?![0-9a-f])/gi,
+    /(?<![[\\])#(?:A1FF8B|9EFF8A)([0-9a-f]{2})?(?![0-9a-f])/gi,
     (_m, hh) => (hh ? `rgb(var(--bw-accent-hi-rgb)/${a2(hh)})` : 'var(--bw-accent-hi)'),
   ],
   [
-    /(?<!\[)#34D399([0-9a-f]{2})?(?![0-9a-f])/gi,
+    /(?<![[\\])#34D399([0-9a-f]{2})?(?![0-9a-f])/gi,
     (_m, hh) => (hh ? `rgb(var(--bw-accent-lo-rgb)/${a2(hh)})` : 'var(--bw-accent-lo)'),
   ],
   [/#A1FF8B/gi, '#FFD24D'],
