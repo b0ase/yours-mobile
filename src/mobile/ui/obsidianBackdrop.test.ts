@@ -36,3 +36,13 @@ describe('ObsidianBackdrop', () => {
     expect(strip(TINT_FRAG)).toBe(strip(FRAG));
   });
 });
+
+describe('pool precision (Android 16-bit mediump)', () => {
+  test('every pool shader asks for highp when the GPU has it', async () => {
+    const { GOLD_FRAG, PRECISION } = await import('./obsidianPool');
+    for (const src of [FRAG, GOLD_FRAG, TINT_FRAG]) {
+      expect(src.startsWith(PRECISION)).toBe(true);
+      expect(src).toContain('precision highp float;');
+    }
+  });
+});
