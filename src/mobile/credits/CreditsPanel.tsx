@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { sendBsv } from '@1sat/actions';
 import { publishBalance } from '../wallet/balanceStore';
 import { History, X } from 'lucide-react';
+import { onCreditsSheet, takeCreditsSheet } from './creditsNav';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { getErrorMessage } from '../../utils/tools';
@@ -119,6 +120,15 @@ export default function CreditsPanel() {
   const [stopped, setStopped] = useState(creditsStopped);
   const [tick, setTick] = useState(false);
   const prevBalance = useRef<number | null>(null);
+  // The bCredits card's back opens Top up or History here (creditsNav.ts).
+  useEffect(() => {
+    const take = () => {
+      const s = takeCreditsSheet();
+      if (s) setSheet(s);
+    };
+    take();
+    return onCreditsSheet(take);
+  }, []);
 
   const updatePending = (fn: (p: Pending) => Pending) =>
     setPending((p) => {

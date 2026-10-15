@@ -4,6 +4,7 @@ import { MessageCircle, RefreshCw, Tag, Ticket as TicketIcon } from 'lucide-reac
 import { SellSheet, type SellTarget } from '../sell/SellSheet';
 import { MyTokenListings } from '../sell/MyTokenListings';
 import { SELL_ENABLED, onListingsChanged } from '../sell/sell';
+import { publishBalance } from './balanceStore';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { isUri } from '../../utils/uri';
@@ -74,6 +75,7 @@ export const TicketsSection = () => {
       .then((rows) => {
         if (!live) return;
         rememberTicketIds(rows.map((r) => r.tokenId));
+        publishBalance('btickets', rows.length, 'tickets');
         setState({ status: 'ready', rows });
       })
       .catch((e: unknown) => {

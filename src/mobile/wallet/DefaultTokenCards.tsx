@@ -36,6 +36,8 @@ export const DefaultTokenCards = () => {
     void heldBsv21Balances(apiContext)
       .then((rows) => {
         if (!live) return;
+        // The Tokens card's real count: BSV-21 tokens this wallet holds (published only after a successful fetch).
+        publishBalance('tokens', rows.filter((r) => r.id && Number(r.all.confirmed) > 0).length, 'tokens');
         setBals(
           rows
             .filter((r) => r.id)
