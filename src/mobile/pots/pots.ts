@@ -29,7 +29,7 @@ export type Payee = {
   name: string;
   /** Requesting app (v2 Subscribe requests). */
   origin?: string;
-  /** One of OWN_SERVICE_PAYEES (bChat, $b agent). Absent = a person / paymail standing order. */
+  /** One of ownServicePayees() (bChat, $b agent). Absent = a person / paymail standing order. */
   service?: string;
 };
 
@@ -66,17 +66,19 @@ export const MAX_CATCH_UP = 3;
  * store build has none. They pay bCorp's fee address (a build-time define); with none configured there are none.
  */
 declare const __MARKET_FEE_ADDRESS__: string | undefined;
-const BCORP_ADDRESS = typeof __MARKET_FEE_ADDRESS__ === 'string' ? __MARKET_FEE_ADDRESS__.trim() : '';
+// Read when asked, not at module load, so the answer never depends on import order (tests set the define late).
+const bcorpAddress = () => (typeof __MARKET_FEE_ADDRESS__ === 'string' ? __MARKET_FEE_ADDRESS__.trim() : '');
 export type ServicePayee = { service: string; name: string; address: string };
-export const OWN_SERVICE_PAYEES: readonly ServicePayee[] = SUBSCRIPTIONS_ENABLED
-  ? [
-      { service: 'bchat', name: 'bChat', address: BCORP_ADDRESS },
-      { service: 'b-agent', name: '$b agent', address: BCORP_ADDRESS },
-      // Back bWalletX (pots/fund.ts): monthly support for development, memo bwalletx-fund:<hash160>.
-      { service: 'bwalletx-fund', name: 'bWalletX development fund', address: BCORP_ADDRESS },
-    ].filter((p) => p.address)
-  : [];
-export const servicePayee = (service?: string) => OWN_SERVICE_PAYEES.find((p) => p.service === service) ?? null;
+export const ownServicePayees = (): readonly ServicePayee[] =>
+  SUBSCRIPTIONS_ENABLED
+    ? [
+        { service: 'bchat', name: 'bChat', address: bcorpAddress() },
+        { service: 'b-agent', name: '$b agent', address: bcorpAddress() },
+        // Back bWalletX (pots/fund.ts): monthly support for development, memo bwalletx-fund:<hash160>.
+        { service: 'bwalletx-fund', name: 'bWalletX development fund', address: bcorpAddress() },
+      ].filter((p) => p.address)
+    : [];
+export const servicePayee = (service?: string) => ownServicePayees().find((p) => p.service === service) ?? null;
 
 const read = <T>(k: string, fallback: T): T => {
   try {
