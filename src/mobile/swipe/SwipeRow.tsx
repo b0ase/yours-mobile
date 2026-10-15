@@ -43,6 +43,10 @@ export type SwipeRowProps = {
   onSelect?: (on: boolean) => void;
   /** data-attribute so list keyboard shortcuts can find rows. */
   rowId?: string;
+  /** Replaces the long-press menu (e.g. the Wallet token list enters reorder mode); "…" still opens the menu. */
+  onLongPress?: () => void;
+  /** Swipes off (reorder mode): the row is a plain child. */
+  disabled?: boolean;
 };
 
 const reducedMotion = () => {
@@ -72,6 +76,8 @@ export const SwipeRow = ({
   selected,
   onSelect,
   rowId,
+  onLongPress,
+  disabled,
 }: SwipeRowProps) => {
   const wrap = useRef<HTMLDivElement>(null);
   const [offset, setOffset] = useState(0);
@@ -170,7 +176,8 @@ export const SwipeRow = ({
         if (!s.moved && s.id === e.pointerId) {
           s.moved = true; // swallow the click that follows
           haptic('light');
-          menuAt(s.x0, s.y0);
+          if (onLongPress) onLongPress();
+          else menuAt(s.x0, s.y0);
         }
       }, LONG_PRESS_MS);
   };
@@ -267,6 +274,7 @@ export const SwipeRow = ({
     </button>
   );
 
+  if (disabled) return <>{children}</>;
   return (
     <div
       ref={wrap}

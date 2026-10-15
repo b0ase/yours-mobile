@@ -1,0 +1,14 @@
+/* Wallet token rows: pin mark. src/mobile/wallet/TokenSwipe.tsx */
+.bw-pin-mark {
+  position: absolute;
+  top: 6px;
+  left: 18px;
+  z-index: 2;
+  color: var(--bw-accent-hi, #ffd24d);
+  pointer-events: none;
+  transform: rotate(35deg);
+}
+/* Balances update in place without nudging the row: fixed-width digits. */
+.bw-swipe-face {
+  font-variant-numeric: tabular-nums;
+}
