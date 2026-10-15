@@ -14,7 +14,8 @@ import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { App as CapApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
-import { BSPACES_ENABLED, tokenRoomsEnabled } from '../storeBuild';
+import { BSPACES_ENABLED, tokenRoomsEnabled, XINVITES_ENABLED } from '../storeBuild';
+import { offerXInvite, parseXInviteLink } from '../chat/xInvites';
 import { BchatClient, defaultHttp, loadSession } from '../chat/api';
 import { requestChatRoom } from '../chat/nav';
 import { isNative } from '../native';
@@ -24,10 +25,19 @@ const ROOM_LINKS = tokenRoomsEnabled();
 const LINKS_ON = BSPACES_ENABLED || ROOM_LINKS;
 
 let pending: AppLink | null = null;
+let xPending = false;
 const listeners = new Set<() => void>();
 
 /** Accepts a link if this build handles its kind. */
 export const offerAppLink = (url?: string | null) => {
+  // Room X invite (…/i/x/<code>#k=…): the key stays in memory until the Chat claim screen takes it.
+  const x = XINVITES_ENABLED ? parseXInviteLink(url) : null;
+  if (x) {
+    offerXInvite(x);
+    xPending = true;
+    listeners.forEach((l) => l());
+    return;
+  }
   const link = parseAppLink(url);
   if (!link) return;
   if (link.kind === 'space' && !BSPACES_ENABLED) return;
@@ -77,6 +87,11 @@ export const useSpaceInviteLinks = (enabled = true) => {
   useEffect(() => {
     if (!LINKS_ON || !enabled) return;
     const go = () => {
+      if (xPending) {
+        xPending = false;
+        navigate('/m/chat');
+        return;
+      }
       const link = takeAppLink();
       if (!link) return;
       if (link.kind === 'space') return navigate(`/m/spaces?space=${link.slug}`);
