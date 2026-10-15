@@ -1,5 +1,5 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useContext, useEffect, useState, useSyncExternalStore } from 'react';
+import { UNSAFE_LocationContext } from 'react-router-dom';
 import { useAirdrops } from '../airdrops/useAirdrops';
 import { useBMailUnread } from '../bmail/useBMail';
 import { loadSession, SESSION_EVENT } from '../chat/api';
@@ -21,7 +21,10 @@ const useChatHandle = () => {
 export const useTabBadges = () => {
   const v = useSyncExternalStore(subscribeBadges, badgesVersion);
   // On the Feed: everything known is seen (and stays seen as new posts load there).
-  const onFeed = useLocation().pathname.startsWith('/m/feed');
+  // The classic tab bar (BottomMenu) is rendered by BottomMenuProvider, ABOVE <Router>: the location hook throws there
+  // (react-router invariant), which blanked the whole wallet right after unlock (owner, 16 Oct 2026). The context
+  // read is null outside a router instead of throwing.
+  const onFeed = (useContext(UNSAFE_LocationContext)?.location.pathname ?? '').startsWith('/m/feed');
   useEffect(() => {
     if (onFeed) markFeedViewed();
   }, [onFeed, v]);

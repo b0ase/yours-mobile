@@ -2,7 +2,7 @@
 
 Status: **design draft, 15 Oct 2026** · Branch `bwallet` · Docs only, no code
 First use: **Named Invites** (1 SCAM to each invited X account on verified sign-in)
-Related: `POTS-SUBSCRIPTIONS-PLAN.md` (v2 presigned nLockTime), `TIME-LOCK-PLAN.md` (the Lock covenant we reuse), memory rule *locks-non-custodial*.
+Related: `POTS-SUBSCRIPTIONS-PLAN.md` (v2 presigned nLockTime), `TIME-LOCK-PLAN.md` (the Lock covenant we reuse), memory rule _locks-non-custodial_.
 
 ## 0. Summary
 
@@ -18,8 +18,8 @@ The verdict, in plain words:
 1. **The 2-of-2 core is sound for what it promises**: the payer cannot pull the money back early, so an invite really is funded. The payer keeps recovery without our server.
 2. **The payer's pre-signature does not constrain the service.** With `NONE|ANYONECANPAY`, the payer's signature commits to no outputs at all. Once the payer has signed, the service key alone decides where every open slot goes. A service-key compromise means losing **all open slots, up to the deadline**. This is a delegated key, and we should say so.
 3. **`SINGLE` can bind one exact output (script and amount)**. It cannot bind "any recipient from a set" or "at most X". Use it when the payee is known at signing time (subscriptions, royalties, splits). Don't use it for invites.
-4. **Change one thing in the proposal**: replace the pre-signed nLockTime refund *transaction* with a **refund branch in the script**. That branch is the same OP_PUSH_TX nLockTime check as our existing Lock (`TIME-LOCK-PLAN.md`), with the payer key derived from the seed. A pre-signed refund tx is a file you must never lose. A script branch is recovered from the seed alone, which matches the owner's rule exactly.
-5. **Recommendation:** ship **2-of-2 + covenant refund branch** for Named Invites, with hard per-set caps. Plan an **oracle-covenant** upgrade (the service signs a *message*, not a spend) for anything above pocket money. See §3.
+4. **Change one thing in the proposal**: replace the pre-signed nLockTime refund _transaction_ with a **refund branch in the script**. That branch is the same OP_PUSH_TX nLockTime check as our existing Lock (`TIME-LOCK-PLAN.md`), with the payer key derived from the seed. A pre-signed refund tx is a file you must never lose. A script branch is recovered from the seed alone, which matches the owner's rule exactly.
+5. **Recommendation:** ship **2-of-2 + covenant refund branch** for Named Invites, with hard per-set caps. Plan an **oracle-covenant** upgrade (the service signs a _message_, not a spend) for anything above pocket money. See §3.
 
 ```
             creation (payer online, one approval)
@@ -44,11 +44,11 @@ nVersion | hashPrevouts | hashSequence | outpoint | scriptCode | value | nSequen
          | hashOutputs | nLockTime | sighashType
 ```
 
-| Flag (with FORKID 0x40) | Byte | Commits to | Leaves open |
-|---|---|---|---|
-| `ALL` | 0x41 | all inputs, all outputs | nothing |
-| `NONE\|ANYONECANPAY` | 0xC2 | **own input only** (outpoint, script, value, own nSequence) + nLockTime | other inputs, **every output** |
-| `SINGLE\|ANYONECANPAY` | 0xC3 | own input + **the output at the same index** + nLockTime | other inputs, other outputs |
+| Flag (with FORKID 0x40) | Byte | Commits to                                                              | Leaves open                    |
+| ----------------------- | ---- | ----------------------------------------------------------------------- | ------------------------------ |
+| `ALL`                   | 0x41 | all inputs, all outputs                                                 | nothing                        |
+| `NONE\|ANYONECANPAY`    | 0xC2 | **own input only** (outpoint, script, value, own nSequence) + nLockTime | other inputs, **every output** |
+| `SINGLE\|ANYONECANPAY`  | 0xC3 | own input + **the output at the same index** + nLockTime                | other inputs, other outputs    |
 
 Two consequences:
 
@@ -57,18 +57,18 @@ Two consequences:
 
 ### 1.2 Answers to the three questions
 
-**Does NONE|ANYONECANPAY let the service redirect change?** Yes, and more: it lets the service redirect **everything**. A slot has no change of its own, because the slot *is* the payment. The whole slot value can go anywhere the service likes, including to itself. The only change in a claim tx belongs to the service's own fee input, and the service signs that input `ALL`. So nothing of the payer's is at risk *beyond the slot*. Inside the slot, the payer's signature provides no protection.
+**Does NONE|ANYONECANPAY let the service redirect change?** Yes, and more: it lets the service redirect **everything**. A slot has no change of its own, because the slot _is_ the payment. The whole slot value can go anywhere the service likes, including to itself. The only change in a claim tx belongs to the service's own fee input, and the service signs that input `ALL`. So nothing of the payer's is at risk _beyond the slot_. Inside the slot, the payer's signature provides no protection.
 
 **Can SINGLE bind part of it?** It binds **exactly one output, completely**: the locking script and the value at the same index as the slot input. It cannot bind "half" an output, an amount range, or a script pattern. Use it like this:
 
-- *Known payee* (subscription merchant, royalty address, Space speaker): `SINGLE|ACP` binds `output[i] = payee script, amount`. The service can only decide **whether and when**, not **where**. This is the strong version, and it should be the default for every later use that knows its payee.
-- *Unknown payee* (invites): SINGLE needs a script, and the recipient's key does not exist yet at signing time. So SINGLE cannot be used.
+- _Known payee_ (subscription merchant, royalty address, Space speaker): `SINGLE|ACP` binds `output[i] = payee script, amount`. The service can only decide **whether and when**, not **where**. This is the strong version, and it should be the default for every later use that knows its payee.
+- _Unknown payee_ (invites): SINGLE needs a script, and the recipient's key does not exist yet at signing time. So SINGLE cannot be used.
 
 **Can the payer's pre-signature commit to a recipient set or an amount cap?**
 
-- *Recipient set*: only by enumeration. Pre-sign one `SINGLE|ACP` variant per candidate script. That works for a small set of known keys (for example 3 co-hosts). It does not work for "whoever the X account @alice turns out to be".
-- *Amount cap*: the **slot value is the cap**. A signature cannot express "≤ X of this slot". If you want a smaller cap, make smaller slots.
-- *Anything richer* ("pay the key that bit-sign attests is @alice") needs a **covenant** that reads the outputs from the preimage. See §3.1.
+- _Recipient set_: only by enumeration. Pre-sign one `SINGLE|ACP` variant per candidate script. That works for a small set of known keys (for example 3 co-hosts). It does not work for "whoever the X account @alice turns out to be".
+- _Amount cap_: the **slot value is the cap**. A signature cannot express "≤ X of this slot". If you want a smaller cap, make smaller slots.
+- _Anything richer_ ("pay the key that bit-sign attests is @alice") needs a **covenant** that reads the outputs from the preimage. See §3.1.
 
 ### 1.3 Plain BSV slot
 
@@ -125,14 +125,14 @@ Rules that matter:
 
 ### 1.5 Which sighash per use
 
-| Use | Payee known at signing? | Payer pre-sig | Service decides |
-|---|---|---|---|
-| Named Invites | no | `NONE\|ACP` | who + when |
-| Open Drops (claim link) | no | `NONE\|ACP` | who + when |
-| Subscription / allowance | yes | `SINGLE\|ACP` (+ nLockTime per period) | when |
-| Booking deposit | two outcomes | two `SINGLE\|ACP` variants (to host / back to payer) | which outcome |
-| Creator / royalty payout | yes | `SINGLE\|ACP` | when |
-| Paid-Space split | yes (on-stage keys) | `SINGLE\|ACP` per speaker variant | which speakers |
+| Use                      | Payee known at signing? | Payer pre-sig                                        | Service decides |
+| ------------------------ | ----------------------- | ---------------------------------------------------- | --------------- |
+| Named Invites            | no                      | `NONE\|ACP`                                          | who + when      |
+| Open Drops (claim link)  | no                      | `NONE\|ACP`                                          | who + when      |
+| Subscription / allowance | yes                     | `SINGLE\|ACP` (+ nLockTime per period)               | when            |
+| Booking deposit          | two outcomes            | two `SINGLE\|ACP` variants (to host / back to payer) | which outcome   |
+| Creator / royalty payout | yes                     | `SINGLE\|ACP`                                        | when            |
+| Paid-Space split         | yes (on-stage keys)     | `SINGLE\|ACP` per speaker variant                    | which speakers  |
 
 The rule: **use the narrowest flag that still works.** Every move from SINGLE to NONE hands "where the money goes" to the service.
 
@@ -147,18 +147,18 @@ The rule: **use the narrowest flag that still works.** Every move from SINGLE to
   * because the payer's NONE pre-signature is already in the service's hands
 ```
 
-| Threat | Outcome | Mitigation |
-|---|---|---|
-| **Service-key compromise** | The attacker holds the payer pre-sigs and can derive `S`, so it can claim **every open NONE slot** to itself before T. SINGLE slots can only be pushed to their bound payee early, not stolen. | Cap exposure: per-set and per-payer limits (§4). Short default deadlines (7 days for invites). Keep the service key out of the web tier (signer process; HSM later). Monitor: an alarm fires if claims exceed rule events. Keep pre-sigs encrypted at rest, separate from the key. Long term: the oracle covenant (§3.1). |
-| **Pre-sig database leak, key safe** | No loss. A pre-sig is useless without `sigS`. | Encrypt anyway. |
-| **Payer double-spend** | Impossible before T. Every path except the refund needs `S`. This is why invites are *guaranteed*. | — |
-| **Refund race vs claim** | After T, both branches are valid, and the first one mined wins. The chain cannot express "claim expires at T": nLockTime only gives a *lower* bound. | The service stops co-signing at `T − 6 blocks` (policy, published). The wallet's auto-refund broadcasts at `T + 1`. A legit claim landing in the gap is a fair outcome: the payer got the invite they paid for. |
-| **Replay** | Chain level: none. Each slot is one UTXO spent once, and the sigs commit to the outpoint. App level: the same X account claiming twice, or one verification event used for two slots. | The rule engine keys idempotency on `(setId, recipientId)`, with a unique DB index. A claim row is reserved *before* signing. A slot is marked `claiming` atomically. Broadcast failures retry the **same** tx and never build a second one. |
-| **Fee funding** | Claims: the service pays (a cost of the service, metered per set). Refunds: the payer pays. NONE lets the service add any fee input it likes. | Wallet keeps ~1000 sats unspendable for refunds while slots are open. Shown as "kept for refunds". |
-| **Service vanishes** | Nothing is lost. At T, the wallet refunds every open slot using seed-derived `R` and the Lock branch. No server, no stored tx. The outpoints are found by scanning the payer's own creation txs (they are in wallet history, and a seed restore rediscovers them through the `presign` basket + BRC-42 keyIDs). | Restore test in CI: wipe the wallet, restore from the seed, refund. |
-| **Malicious / buggy service mis-builds a token claim** | The token is burned, or goes to the wrong key. | Pre-broadcast BSV-21 validation. The service signs `ALL` only after the check passes. Bug bounty. |
-| **Recipient impersonation** (wrong X account) | Paid to the wrong person. | The rule requires X OAuth on the **exact handle and the X user id** (ids are stable; handles can be renamed). It is bound at invite creation. |
-| **Payer wallet compromise** | The attacker can refund open slots after T (to the payer's key, which they also control). Before T, they can't move slots. | — |
+| Threat                                                 | Outcome                                                                                                                                                                                                                                                                                                         | Mitigation                                                                                                                                                                                                                                                                                                                |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Service-key compromise**                             | The attacker holds the payer pre-sigs and can derive `S`, so it can claim **every open NONE slot** to itself before T. SINGLE slots can only be pushed to their bound payee early, not stolen.                                                                                                                  | Cap exposure: per-set and per-payer limits (§4). Short default deadlines (7 days for invites). Keep the service key out of the web tier (signer process; HSM later). Monitor: an alarm fires if claims exceed rule events. Keep pre-sigs encrypted at rest, separate from the key. Long term: the oracle covenant (§3.1). |
+| **Pre-sig database leak, key safe**                    | No loss. A pre-sig is useless without `sigS`.                                                                                                                                                                                                                                                                   | Encrypt anyway.                                                                                                                                                                                                                                                                                                           |
+| **Payer double-spend**                                 | Impossible before T. Every path except the refund needs `S`. This is why invites are _guaranteed_.                                                                                                                                                                                                              | —                                                                                                                                                                                                                                                                                                                         |
+| **Refund race vs claim**                               | After T, both branches are valid, and the first one mined wins. The chain cannot express "claim expires at T": nLockTime only gives a _lower_ bound.                                                                                                                                                            | The service stops co-signing at `T − 6 blocks` (policy, published). The wallet's auto-refund broadcasts at `T + 1`. A legit claim landing in the gap is a fair outcome: the payer got the invite they paid for.                                                                                                           |
+| **Replay**                                             | Chain level: none. Each slot is one UTXO spent once, and the sigs commit to the outpoint. App level: the same X account claiming twice, or one verification event used for two slots.                                                                                                                           | The rule engine keys idempotency on `(setId, recipientId)`, with a unique DB index. A claim row is reserved _before_ signing. A slot is marked `claiming` atomically. Broadcast failures retry the **same** tx and never build a second one.                                                                              |
+| **Fee funding**                                        | Claims: the service pays (a cost of the service, metered per set). Refunds: the payer pays. NONE lets the service add any fee input it likes.                                                                                                                                                                   | Wallet keeps ~1000 sats unspendable for refunds while slots are open. Shown as "kept for refunds".                                                                                                                                                                                                                        |
+| **Service vanishes**                                   | Nothing is lost. At T, the wallet refunds every open slot using seed-derived `R` and the Lock branch. No server, no stored tx. The outpoints are found by scanning the payer's own creation txs (they are in wallet history, and a seed restore rediscovers them through the `presign` basket + BRC-42 keyIDs). | Restore test in CI: wipe the wallet, restore from the seed, refund.                                                                                                                                                                                                                                                       |
+| **Malicious / buggy service mis-builds a token claim** | The token is burned, or goes to the wrong key.                                                                                                                                                                                                                                                                  | Pre-broadcast BSV-21 validation. The service signs `ALL` only after the check passes. Bug bounty.                                                                                                                                                                                                                         |
+| **Recipient impersonation** (wrong X account)          | Paid to the wrong person.                                                                                                                                                                                                                                                                                       | The rule requires X OAuth on the **exact handle and the X user id** (ids are stable; handles can be renamed). It is bound at invite creation.                                                                                                                                                                             |
+| **Payer wallet compromise**                            | The attacker can refund open slots after T (to the payer's key, which they also control). Before T, they can't move slots.                                                                                                                                                                                      | —                                                                                                                                                                                                                                                                                                                         |
 
 ---
 
@@ -166,7 +166,7 @@ The rule: **use the narrowest flag that still works.** Every move from SINGLE to
 
 ### 3.1 sCrypt / OP_PUSH_TX oracle covenant
 
-The slot script checks `out[0]` from the preimage. It requires `out[0] == transfer(1) → P2PKH(pk)`, and it requires an **oracle signature over `(slotOutpoint, pk)`** from bit-sign (a Rabin or ECDSA message signature, checked in-script). Nobody needs a payer pre-sig at all, and the service key holds **no spend power**. It can only *attest* "this pk is @alice". A stolen oracle key can still attest the attacker's own pk, so the theft cap is the same. The difference is that the attestation is a public, one-shot, auditable signed message per slot. Mixing in a second oracle (2-of-2 attest: bit-sign + X-verification provider) makes theft need two compromises.
+The slot script checks `out[0]` from the preimage. It requires `out[0] == transfer(1) → P2PKH(pk)`, and it requires an **oracle signature over `(slotOutpoint, pk)`** from bit-sign (a Rabin or ECDSA message signature, checked in-script). Nobody needs a payer pre-sig at all, and the service key holds **no spend power**. It can only _attest_ "this pk is @alice". A stolen oracle key can still attest the attacker's own pk, so the theft cap is the same. The difference is that the attestation is a public, one-shot, auditable signed message per slot. Mixing in a second oracle (2-of-2 attest: bit-sign + X-verification provider) makes theft need two compromises.
 
 - Pros: no delegated spend key, outputs enforced on chain, burn bugs impossible.
 - Cons: about 2–4 KB scripts (cents per slot, fine). Real script engineering and audit. Indexer acceptance of large token locks needs testing. Weeks of work, not days.
@@ -177,7 +177,7 @@ The slot is locked to a known `r`. Whoever knows the nonce `k` can sign any tx. 
 
 ### 3.3 Simple bearer slots (Open Drops)
 
-Each slot is P2PKH to a fresh key, and the private key goes in a claim link or QR. Whoever has it sweeps it. There is no identity check, and anyone who sees the link can front-run. The payer refunds by sweeping first (the key is derived from the seed). This is great for "first 100 people in the room". It **can't** do "only @alice". Keep it as a separate, simpler product: *Open Drops*.
+Each slot is P2PKH to a fresh key, and the private key goes in a claim link or QR. Whoever has it sweeps it. There is no identity check, and anyone who sees the link can front-run. The payer refunds by sweeping first (the key is derived from the seed). This is great for "first 100 people in the room". It **can't** do "only @alice". Keep it as a separate, simpler product: _Open Drops_.
 
 ### 3.4 Server-held pot (custodial)
 
@@ -185,16 +185,16 @@ The host sends N SCAM to a bit-sign address, and bit-sign pays on rule. This is 
 
 ### 3.5 Comparison
 
-| | Invite guaranteed? | Recover w/o server | Service can steal open slots | Recipient bound on chain | Build effort |
-|---|---|---|---|---|---|
-| **2-of-2 + covenant refund** (rec.) | yes | yes (seed) | yes, capped | no | small |
-| 2-of-2 + pre-signed refund tx | yes | only if tx kept | yes, capped | no | small |
-| Oracle covenant | yes | yes | only by forging an attestation | **yes** | large |
-| R-puzzle | no | yes | yes | no | small |
-| Bearer / Open Drop | no | yes | n/a (link = money) | no | trivial |
-| Custodial pot | yes | **no** | yes, uncapped | no | trivial |
+|                                     | Invite guaranteed? | Recover w/o server | Service can steal open slots   | Recipient bound on chain | Build effort |
+| ----------------------------------- | ------------------ | ------------------ | ------------------------------ | ------------------------ | ------------ |
+| **2-of-2 + covenant refund** (rec.) | yes                | yes (seed)         | yes, capped                    | no                       | small        |
+| 2-of-2 + pre-signed refund tx       | yes                | only if tx kept    | yes, capped                    | no                       | small        |
+| Oracle covenant                     | yes                | yes                | only by forging an attestation | **yes**                  | large        |
+| R-puzzle                            | no                 | yes                | yes                            | no                       | small        |
+| Bearer / Open Drop                  | no                 | yes                | n/a (link = money)             | no                       | trivial      |
+| Custodial pot                       | yes                | **no**             | yes, uncapped                  | no                       | trivial      |
 
-**Recommendation.** Build **2-of-2 + covenant refund branch** now. It is honest, small, and meets the non-custodial rule. Present it truthfully: *"bit-sign can send these to whoever it verifies until the deadline, and you can take back whatever is left after."* Use `SINGLE` wherever the payee is known. Cap NONE slots hard. Move to the **oracle covenant** before any NONE use goes above about $50 per set.
+**Recommendation.** Build **2-of-2 + covenant refund branch** now. It is honest, small, and meets the non-custodial rule. Present it truthfully: _"bit-sign can send these to whoever it verifies until the deadline, and you can take back whatever is left after."_ Use `SINGLE` wherever the payee is known. Cap NONE slots hard. Move to the **oracle covenant** before any NONE use goes above about $50 per set.
 
 ---
 
@@ -202,7 +202,7 @@ The host sends N SCAM to a bit-sign address, and bit-sign pays on rule. This is 
 
 ### 4.1 One approval sheet ("Set aside for invites")
 
-Following *one-sheet-permissions* and *visual-prompts*: one OG-style card, one Allow.
+Following _one-sheet-permissions_ and _visual-prompts_: one OG-style card, one Allow.
 
 ```
 ┌─────────────────────────────────────────┐
@@ -239,18 +239,18 @@ Invites · 10 SCAM · back to you 22 Oct (in 6 days)
 
 ### 4.3 Refunds
 
-- **Auto-return at the deadline** (default ON): on any app open after T, the wallet broadcasts refunds for open slots. Optional: hand the bit-sign *refund broadcast fallback* (§5) a refund that the wallet signed with `R`. That is safe, because it can only pay the payer.
-- **"Take back now" before T** is not possible on chain. The UI offers **"Cancel invites"** instead: bit-sign stops co-signing, and the slots return at T. A cooperative early refund is possible: bit-sign co-signs a `SINGLE|ACP` claim whose `out[i]` is the payer. That is instant, *if the server is up*.
+- **Auto-return at the deadline** (default ON): on any app open after T, the wallet broadcasts refunds for open slots. Optional: hand the bit-sign _refund broadcast fallback_ (§5) a refund that the wallet signed with `R`. That is safe, because it can only pay the payer.
+- **"Take back now" before T** is not possible on chain. The UI offers **"Cancel invites"** instead: bit-sign stops co-signing, and the slots return at T. A cooperative early refund is possible: bit-sign co-signs a `SINGLE|ACP` claim whose `out[i]` is the payer. That is instant, _if the server is up_.
 - Deadline choices: 1 day, 7 days (default), 30 days. Longer deadlines mean more exposure, and the sheet says so.
 
 ### 4.4 Limits (baked in, no unticking)
 
-| Limit | Default | Why |
-|---|---|---|
-| NONE slots per set | 50 | caps the service-key blast radius per host |
-| Value open in NONE slots per payer | $20 equiv | same |
-| Deadline max (NONE) | 30 days | exposure window |
-| Refund fee reserve | 1000 sats | refunds must never fail for lack of fee |
+| Limit                              | Default   | Why                                        |
+| ---------------------------------- | --------- | ------------------------------------------ |
+| NONE slots per set                 | 50        | caps the service-key blast radius per host |
+| Value open in NONE slots per payer | $20 equiv | same                                       |
+| Deadline max (NONE)                | 30 days   | exposure window                            |
+| Refund fee reserve                 | 1000 sats | refunds must never fail for lack of fee    |
 
 ---
 
@@ -325,14 +325,14 @@ These override anything above that conflicts with them.
 
 ## 7. Rollout
 
-| Step | What | Gate |
-|---|---|---|
-| 0 | Script + sighash unit tests with `@bsv/sdk` interpreter: claim ok, payer-alone fails before T, refund ok after T, refund with wrong key fails, NONE output swap ok (documented), SINGLE output swap fails | tests green |
-| 1 | Mainnet dry run: 1 SCAM slot, claim to a test key; 1 SCAM slot, refund after T via seed-restored wallet with bit-sign stopped | indexer shows balances right; nothing burned |
-| 2 | **Named Invites, owner only**: 10 × 1 SCAM to known handles, 7-day deadline | all claims or refunds correct |
-| 3 | Named Invites for all bWalletX users, limits from §4.4 on, monitoring alarm on claims ≠ events | a week clean |
-| 4 | SINGLE uses: subscriptions/allowances (absorb Pots v2), creator payouts, Space splits | per-use plan |
-| 5 | Oracle covenant v2, required for NONE sets above the cap | audit done |
+| Step | What                                                                                                                                                                                                      | Gate                                         |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| 0    | Script + sighash unit tests with `@bsv/sdk` interpreter: claim ok, payer-alone fails before T, refund ok after T, refund with wrong key fails, NONE output swap ok (documented), SINGLE output swap fails | tests green                                  |
+| 1    | Mainnet dry run: 1 SCAM slot, claim to a test key; 1 SCAM slot, refund after T via seed-restored wallet with bit-sign stopped                                                                             | indexer shows balances right; nothing burned |
+| 2    | **Named Invites, owner only**: 10 × 1 SCAM to known handles, 7-day deadline                                                                                                                               | all claims or refunds correct                |
+| 3    | Named Invites for all bWalletX users, limits from §4.4 on, monitoring alarm on claims ≠ events                                                                                                            | a week clean                                 |
+| 4    | SINGLE uses: subscriptions/allowances (absorb Pots v2), creator payouts, Space splits                                                                                                                     | per-use plan                                 |
+| 5    | Oracle covenant v2, required for NONE sets above the cap                                                                                                                                                  | audit done                                   |
 
 Open items to resolve before step 1:
 
@@ -349,13 +349,13 @@ The goal is to answer the two blocking questions on mainnet, at a total cost of 
 
 ### 8.1 Setup
 
-| Item | Value |
-|---|---|
-| Test payer `P`, refund `R` | BRC-42 from the test seed, `protocolID [2,'bwalletx presign']`, keyIDs `proof:0`, `proof:0:refund` |
-| Test service `S` | separate throwaway key (stands in for the signer worker) |
-| Recipient | a test bWalletX identity's BRC-29 P2PKH |
-| Funding | 3 SCAM in one UTXO + 5,000 sats P2PKH to the test payer |
-| Deadline | `T = currentHeight + 3` for slot B (short, so the test finishes in about 30 min); `T = currentHeight + 1000` for slot A |
+| Item                       | Value                                                                                                                   |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Test payer `P`, refund `R` | BRC-42 from the test seed, `protocolID [2,'bwalletx presign']`, keyIDs `proof:0`, `proof:0:refund`                      |
+| Test service `S`           | separate throwaway key (stands in for the signer worker)                                                                |
+| Recipient                  | a test bWalletX identity's BRC-29 P2PKH                                                                                 |
+| Funding                    | 3 SCAM in one UTXO + 5,000 sats P2PKH to the test payer                                                                 |
+| Deadline                   | `T = currentHeight + 3` for slot B (short, so the test finishes in about 30 min); `T = currentHeight + 1000` for slot A |
 
 Slot lock (from §1.3), with the BSV-21 envelope prefixed:
 
@@ -405,19 +405,19 @@ nLockTime = T
 
 Broadcast TX2 **before T** to:
 
-| Endpoint | Expected (to confirm) | Record |
-|---|---|---|
-| ARC `POST /v1/tx` | rejected as non-final (e.g. status 4xx, "non-final" / txStatus REJECTED), **not** stored to be mined later | exact HTTP status + body |
-| WhatsOnChain `POST /v1/bsv/main/tx/raw` | rejected (non-final / 64) | exact response |
-| Then re-query both after T | TX2 is **not** known to either (proves no silent holding) | GET tx by id |
+| Endpoint                                | Expected (to confirm)                                                                                      | Record                   |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------ |
+| ARC `POST /v1/tx`                       | rejected as non-final (e.g. status 4xx, "non-final" / txStatus REJECTED), **not** stored to be mined later | exact HTTP status + body |
+| WhatsOnChain `POST /v1/bsv/main/tx/raw` | rejected (non-final / 64)                                                                                  | exact response           |
+| Then re-query both after T              | TX2 is **not** known to either (proves no silent holding)                                                  | GET tx by id             |
 
-If either endpoint *holds* the tx and later mines it, that is still safe, because the covenant forbids mining it before T. But the wallet must then treat "broadcast before T" as allowed and track it. Write this down in the doc.
+If either endpoint _holds_ the tx and later mines it, that is still safe, because the covenant forbids mining it before T. But the wallet must then treat "broadcast before T" as allowed and track it. Write this down in the doc.
 
 **TX2b (local negative).** The same tx with `nLockTime = T − 1` fails the covenant in the interpreter. Expected: rejected locally.
 
 **TX3 (refund after T).** The same as TX2, rebuilt and broadcast at height `≥ T` by a **wallet restored from the test seed with the bit-sign signer stopped**. Expected: accepted and mined. The indexer shows 1 SCAM back with the payer. This proves recovery needs no server.
 
-**TX4 (race note, optional).** After T, try the claim for slot B (2-of-2 path) *after* TX3 is mined. Expected: rejected as a double-spend. This documents that first-mined wins.
+**TX4 (race note, optional).** After T, try the claim for slot B (2-of-2 path) _after_ TX3 is mined. Expected: rejected as a double-spend. This documents that first-mined wins.
 
 ### 8.3 Pass criteria
 
