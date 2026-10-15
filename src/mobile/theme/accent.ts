@@ -53,6 +53,9 @@ export function applyAccent(id: string | null | undefined): AccentId {
   const full = !gold && a.kind !== 'colour';
   if (full) root.dataset.bwPack = a.scheme;
   else delete root.dataset.bwPack;
+  // Mono / Duo / Tri: themes.css paints Mono's white cards and tinted buttons from this.
+  if (full && a.group) root.dataset.bwTone = a.group;
+  else delete root.dataset.bwTone;
   const s = root.style;
   for (const k of ALL_VARS) s.removeProperty(k);
   if (!gold) for (const [k, v] of Object.entries(full ? packVars(a) : accentVars(a))) s.setProperty(k, v);

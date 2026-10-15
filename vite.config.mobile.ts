@@ -5,6 +5,7 @@ import { resolve } from 'path';
 import { copyFileSync, existsSync, readFileSync, renameSync } from 'fs';
 import baseConfig from './vite.config.base';
 import { BRAND, brand as sharedBrand, bcorpText, bcorpColours, brandDefines } from './vite.brand';
+import { splashScript } from './src/mobile/theme/splash';
 
 // The app's name in build-time text patches: bWallet in a store build, bWalletX otherwise (src/mobile/storeBuild.ts).
 const STORE_APP_NAME =
@@ -735,6 +736,8 @@ const mobilePages = (): Plugin => ({
       );
       // Upstream's PWA manifest link points at extension icons; not used in-app.
       out = out.replace(/\s*<link rel="manifest"[^>]*>/, '');
+      // The in-app splash follows the saved theme pack (src/mobile/theme/splash.ts); Gold paints nothing.
+      if (isShell) out = out.replace('</head>', `    ${splashScript()}\n  </head>`);
       if (!isShell) {
         out = out.replace('<head>', `<head>\n    ${FRAME_SHIM}`);
         out = out.replace('</head>', '    <link rel="stylesheet" href="./src/mobile/mobile.css" />\n  </head>');

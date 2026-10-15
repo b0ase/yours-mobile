@@ -4,6 +4,17 @@
  */
 export { BAPP_ICONS, bappIconDef, hasGlyph, initialOf, type BappIconDef } from './registry';
 export { GLYPHS, type GlyphSlug } from './glyphs';
-export { ICON_SIZES, badgeColors, iconDataUrl, iconSvg, layout, type IconContent } from './render';
+export {
+  ICON_SIZES,
+  badgeColors,
+  iconDataUrl,
+  iconSvg,
+  isSetIcon,
+  layout,
+  themedIconUrl,
+  type IconContent,
+  type IconLook,
+} from './render';
+export { iconLookFor, useIconLook, useThemedIcon } from './theme';
 export { ALL_BAPP_ICON_SLUGS, bappIconContent, bappIconSvg, bappIconUrl } from './api';
 export { BappIcon } from './BappIcon';

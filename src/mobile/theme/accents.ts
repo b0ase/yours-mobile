@@ -17,15 +17,13 @@ export type PackId =
   | 'gold'
   | 'executive'
   | 'cyber'
-  | 'paper'
   | 'midnight'
   | 'forest'
   | 'sunset'
-  | 'monolight'
   | 'contrast'
   | 'pastel'
+  | 'nautical'
   | 'white'
-  | 'black'
   | 'blackwhite'
   | 'whiteblack'
   | 'blue'
@@ -33,7 +31,8 @@ export type PackId =
   | 'green'
   | 'purple'
   | 'orange'
-  | 'pink';
+  | 'pink'
+  | 'teal';
 export type AccentId = PackId | 'silver' | 'rose' | 'emerald' | 'sapphire' | 'violet' | 'custom';
 
 export type CardPatternId =
@@ -54,8 +53,10 @@ export interface Accent {
   label: string;
   /** 'theme' = a full pack (top row); 'colour' = accent only (More colours); 'custom' = the colour mixer. */
   kind: 'theme' | 'colour' | 'custom';
-  /** Packs only: 'single' = one tone throughout (Single tones); 'duo' = two-colour packs (Duo-tones). */
-  group?: 'single' | 'duo';
+  /** Packs only: 'mono' = one hue on white; 'duo' = two-colour packs; 'tri' = three-colour palettes. */
+  group?: 'mono' | 'duo' | 'tri';
+  /** Mono packs: the light hue tint behind buttons, selected tabs and chips (defaults to surface2). */
+  tint?: string;
   /** One line under the pack's name. */
   blurb?: string;
   /** Light or dark base (sets color-scheme for form controls and scrollbars). */
@@ -135,111 +136,67 @@ const BASE: Omit<Accent, 'id' | 'label' | 'accent' | 'hi' | 'lo'> = {
 };
 
 /**
- * Single tones (owner, 15 Oct 2026: "single tone is really simple and nice"): one hue throughout, so page,
- * surfaces, lines and accent are all the same colour family. Text, muted text, the accent stops and success/danger
- * are derived with ensureContrast so each pack passes AA by construction (accents.test.ts checks it again).
+ * MONO (owner, 15 Oct 2026: "a fully white mono-tone theme with NO dark elements"): one hue on white. Page
+ * white or near-white, surfaces white, the balance cards white with a faint hue pattern, buttons a light hue
+ * tint with hue ink and a hairline (themes.css, [data-bw-tone='mono']). Text, muted text and the accent stops are
+ * derived with ensureContrast so each pack passes AA on the page, the surfaces and the tint by construction
+ * (accents.test.ts checks it again).
  */
-function singleTone(id: PackId, label: string, blurb: string, h: number, s: number, pattern: CardPatternId): Accent {
-  const bg = hslToHex({ h, s, l: 7 });
-  const surface = hslToHex({ h, s, l: 12 });
-  const surface2 = hslToHex({ h, s, l: 17 });
-  const grounds = [bg, surface, surface2];
-  const accent = ensureContrast(hslToHex({ h, s: 90, l: 62 }), grounds, 4.5);
-  const hi = ensureContrast(hslToHex({ h, s: 95, l: 76 }), grounds, 4.5);
-  const lo = ensureContrast(hslToHex({ h, s: 85, l: 56 }), grounds, 4.5);
+function mono(id: PackId, label: string, blurb: string, h: number, s: number, pattern: CardPatternId): Accent {
+  const bg = s ? hslToHex({ h, s: s * 0.5, l: 98.5 }) : '#FFFFFF';
+  const surface = '#FFFFFF';
+  const surface2 = hslToHex({ h, s: s * 0.6, l: 97 });
+  const tint = hslToHex({ h, s: Math.min(s, 90), l: 94 });
+  const grounds = [bg, surface, surface2, tint];
+  const accent = ensureContrast(hslToHex({ h, s, l: 45 }), grounds, 4.5);
+  const hi = ensureContrast(hslToHex({ h, s, l: 42 }), grounds, 4.5);
+  const lo = ensureContrast(hslToHex({ h, s, l: 36 }), grounds, 4.5);
   return {
     ...BASE,
     id,
     kind: 'theme',
-    group: 'single',
+    group: 'mono',
     label,
     blurb,
+    scheme: 'light',
     accent,
     hi,
     lo,
-    on: pickReadable([bg, '#000000', '#FFFFFF'], [accent, hi, lo]),
+    on: pickReadable(['#FFFFFF', '#000000'], [accent, hi, lo]),
     bg,
     surface,
     surface2,
-    nav: hslToHex({ h, s, l: 5 }),
-    text: ensureContrast(hslToHex({ h, s: 40, l: 95 }), grounds, 7),
-    muted: ensureContrast(hslToHex({ h, s: 30, l: 74 }), grounds, 4.5),
-    line: hslToHex({ h, s: s * 0.7, l: 24 }),
-    success: ensureContrast('#7FE0B0', grounds, 4.5),
-    danger: ensureContrast('#FF8A80', grounds, 4.5),
-    shadow: '0 10px 30px rgb(0 0 0 / 0.5)',
-    trim: `hsl(${h} 90% 62% / 0.25)`,
+    tint,
+    nav: '#FFFFFF',
+    text: ensureContrast(hslToHex({ h, s: s * 0.4, l: 12 }), grounds, 7),
+    muted: ensureContrast(hslToHex({ h, s: s * 0.25, l: 42 }), grounds, 4.5),
+    line: hslToHex({ h, s: s * 0.5, l: 90 }),
+    success: ensureContrast('#15803D', grounds, 4.5),
+    danger: ensureContrast('#B91C1C', grounds, 4.5),
+    shadow: '0 1px 2px rgb(0 0 0 / 0.04), 0 6px 18px rgb(0 0 0 / 0.06)',
+    trim: s ? `hsl(${h} ${s}% 40% / 0.22)` : 'rgb(0 0 0 / 0.1)',
     pattern,
   };
 }
 
-const SINGLE_TONES: readonly Accent[] = [
-  {
-    ...BASE,
-    id: 'white',
-    kind: 'theme',
-    group: 'single',
-    label: 'White',
-    blurb: 'All white, soft grey ink',
-    scheme: 'light',
-    accent: '#52525B',
-    hi: '#3F3F46',
-    lo: '#46464E',
-    on: '#FFFFFF',
-    bg: '#FFFFFF',
-    surface: '#FAFAFA',
-    surface2: '#F2F2F3',
-    nav: '#FFFFFF',
-    text: '#27272A',
-    muted: '#62626B',
-    line: '#E8E8EA',
-    success: '#15803D',
-    danger: '#B91C1C',
-    shadow: '0 4px 16px rgb(0 0 0 / 0.06)',
-    trim: 'rgb(0 0 0 / 0.06)',
-    radius: '12px',
-    radiusCard: '16px',
-    pattern: 'clouds',
-  },
-  {
-    ...BASE,
-    id: 'black',
-    kind: 'theme',
-    group: 'single',
-    label: 'Black',
-    blurb: 'True black, grey light',
-    accent: '#A1A1AA',
-    hi: '#D4D4D8',
-    lo: '#8E8E96',
-    on: '#000000',
-    bg: '#000000',
-    surface: '#0A0A0A',
-    surface2: '#141414',
-    nav: '#000000',
-    text: '#F4F4F5',
-    muted: '#A1A1AA',
-    line: '#222222',
-    success: '#7EE2A8',
-    danger: '#FF8A80',
-    shadow: 'none',
-    trim: 'rgb(255 255 255 / 0.08)',
-    pattern: 'topo',
-  },
-  singleTone('blue', 'Blue', 'Blue on blue', 218, 70, 'waves'),
-  singleTone('red', 'Red', 'Red on red', 356, 65, 'starburst'),
-  singleTone('green', 'Green', 'Green on green', 145, 55, 'hex'),
-  singleTone('purple', 'Purple', 'Purple on purple', 272, 60, 'clouds'),
-  singleTone('orange', 'Orange', 'Orange on orange', 26, 70, 'chevron'),
-  singleTone('pink', 'Pink', 'Pink on pink', 328, 65, 'halftone'),
+const MONO_TONES: readonly Accent[] = [
+  mono('white', 'White', 'All white, grey ink', 220, 0, 'clouds'),
+  mono('blue', 'Blue', 'White and blue', 218, 75, 'waves'),
+  mono('pink', 'Pink', 'White and pink', 330, 70, 'halftone'),
+  mono('green', 'Green', 'White and green', 150, 55, 'hex'),
+  mono('purple', 'Purple', 'White and purple', 270, 60, 'clouds'),
+  mono('orange', 'Orange', 'White and orange', 24, 85, 'chevron'),
+  mono('red', 'Red', 'White and red', 356, 70, 'starburst'),
+  mono('teal', 'Teal', 'White and teal', 178, 65, 'topo'),
 ];
 
-/** Cross-overs: black surfaces with a white accent, and the reverse. Square-ish and stark. */
+/** Duo cross-overs: black surfaces with a white accent, and the reverse. Square-ish and stark. */
 const CROSS_OVERS: readonly Accent[] = [
   {
     ...BASE,
     id: 'blackwhite',
     kind: 'theme',
-    group: 'single',
+    group: 'duo',
     label: 'Black/White',
     blurb: 'Black, white buttons',
     accent: '#FFFFFF',
@@ -265,7 +222,7 @@ const CROSS_OVERS: readonly Accent[] = [
     ...BASE,
     id: 'whiteblack',
     kind: 'theme',
-    group: 'single',
+    group: 'duo',
     label: 'White/Black',
     blurb: 'White, black buttons',
     scheme: 'light',
@@ -297,13 +254,14 @@ export const ACCENTS: readonly Accent[] = [
     ...BASE,
     id: 'gold',
     kind: 'theme',
+    group: 'duo',
     label: 'Gold',
     blurb: 'Black and gold, the original',
     accent: '#F5B800',
     hi: '#FFD24D',
     lo: '#EAB300',
   },
-  ...SINGLE_TONES,
+  ...MONO_TONES,
   ...CROSS_OVERS,
   {
     ...BASE,
@@ -365,36 +323,6 @@ export const ACCENTS: readonly Accent[] = [
   },
   {
     ...BASE,
-    id: 'paper',
-    kind: 'theme',
-    group: 'duo',
-    label: 'Paper',
-    blurb: 'Warm off-white and ink',
-    scheme: 'light',
-    accent: '#23395B',
-    hi: '#34507E',
-    lo: '#1A2B45',
-    on: '#FFFDF8',
-    bg: '#F6F1E7',
-    // Owner, 15 Oct 2026: keep the paper page, but controls, rows and chips white with crisp edges.
-    surface: '#FFFFFF',
-    surface2: '#FFFEFB',
-    nav: '#FBF7EF',
-    text: '#1C1A17',
-    muted: '#655E52',
-    line: '#D2C6B0',
-    success: '#1E6B45',
-    danger: '#B42318',
-    shadow: '0 1px 2px rgb(60 40 10 / 0.08), 0 6px 18px rgb(60 40 10 / 0.08)',
-    trim: 'rgb(28 26 23 / 0.18)',
-    fontHead: SERIF,
-    weightHead: 600,
-    radius: '10px',
-    radiusCard: '14px',
-    pattern: 'waves',
-  },
-  {
-    ...BASE,
     id: 'midnight',
     kind: 'theme',
     group: 'duo',
@@ -446,7 +374,7 @@ export const ACCENTS: readonly Accent[] = [
     ...BASE,
     id: 'sunset',
     kind: 'theme',
-    group: 'duo',
+    group: 'tri',
     label: 'Sunset',
     blurb: 'Coral, plum and amber',
     accent: '#FF8A5B',
@@ -468,35 +396,6 @@ export const ACCENTS: readonly Accent[] = [
     radius: '999px',
     radiusCard: '20px',
     pattern: 'starburst',
-  },
-  {
-    ...BASE,
-    id: 'monolight',
-    kind: 'theme',
-    group: 'duo',
-    label: 'Mono light',
-    blurb: 'Clean white, black ink',
-    scheme: 'light',
-    accent: '#18181B',
-    hi: '#3F3F46',
-    lo: '#000000',
-    on: '#FFFFFF',
-    bg: '#FFFFFF',
-    surface: '#F4F4F5',
-    surface2: '#E9E9EC',
-    nav: '#FFFFFF',
-    text: '#09090B',
-    muted: '#5F5F69',
-    line: '#E2E2E6',
-    success: '#15803D',
-    danger: '#B91C1C',
-    shadow: '0 6px 20px rgb(0 0 0 / 0.08)',
-    trim: 'rgb(0 0 0 / 0.1)',
-    fontNum: MONO,
-    weightHead: 600,
-    radius: '8px',
-    radiusCard: '12px',
-    pattern: 'halftone',
   },
   {
     ...BASE,
@@ -529,7 +428,7 @@ export const ACCENTS: readonly Accent[] = [
     ...BASE,
     id: 'pastel',
     kind: 'theme',
-    group: 'duo',
+    group: 'tri',
     label: 'Pastel',
     blurb: 'Mint, baby blue, blush',
     accent: '#9FD8FF',
@@ -551,6 +450,35 @@ export const ACCENTS: readonly Accent[] = [
     radiusCard: '22px',
     pattern: 'clouds',
   },
+  {
+    ...BASE,
+    id: 'nautical',
+    kind: 'theme',
+    group: 'tri',
+    label: 'Nautical',
+    blurb: 'White, navy and signal red',
+    scheme: 'light',
+    accent: '#C8102E',
+    hi: '#B00E28',
+    lo: '#9E0C24',
+    on: '#FFFFFF',
+    bg: '#F7F9FC',
+    surface: '#FFFFFF',
+    surface2: '#EEF3FA',
+    nav: '#FFFFFF',
+    text: '#0B1B33',
+    muted: '#4A5B75',
+    line: '#D6E0EE',
+    success: '#0F6B3E',
+    danger: '#B42318',
+    shadow: '0 1px 2px rgb(11 27 51 / 0.06), 0 6px 18px rgb(11 27 51 / 0.08)',
+    trim: 'rgb(11 27 51 / 0.18)',
+    fontHead: SERIF,
+    weightHead: 600,
+    radius: '10px',
+    radiusCard: '14px',
+    pattern: 'stripes',
+  },
   { ...BASE, id: 'silver', label: 'Silver', accent: '#C3CAD4', hi: '#E6EAF0', lo: '#A7B0BC' },
   { ...BASE, id: 'rose', label: 'Rose', accent: '#FF7AA2', hi: '#FFA8C2', lo: '#F2588A' },
   { ...BASE, id: 'emerald', label: 'Emerald', accent: '#3DDC97', hi: '#6EE7B7', lo: '#1FBF83' },
@@ -559,9 +487,20 @@ export const ACCENTS: readonly Accent[] = [
 ];
 
 export const THEMES = ACCENTS.filter((a) => a.kind === 'theme');
-/** Single tones first (after Gold), then the duo-tones. */
-export const SINGLE_PACKS = THEMES.filter((a) => a.group !== 'duo');
+/** The Theme sheet's three groups: Mono (one hue on white), Duo (Gold first) and Tri. */
+export const MONO_PACKS = THEMES.filter((a) => a.group === 'mono');
 export const DUO_PACKS = THEMES.filter((a) => a.group === 'duo');
+export const TRI_PACKS = THEMES.filter((a) => a.group === 'tri');
+
+/**
+ * Packs removed in the Mono/Duo/Tri tidy (15 Oct 2026) and the closest pack that replaced each, so an account
+ * that saved one lands somewhere sensible. The old dark single tones kept their ids (blue, red …) as Mono packs.
+ */
+export const RETIRED_PACKS: Readonly<Record<string, AccentId>> = {
+  paper: 'white',
+  monolight: 'white',
+  black: 'blackwhite',
+};
 export const MORE_COLOURS = ACCENTS.filter((a) => a.kind === 'colour');
 
 let custom: Accent | null = null;
@@ -570,8 +509,10 @@ export const setCustomAccent = (a: Accent | null): void => {
   custom = a;
 };
 
-export const accentById = (id: string | null | undefined): Accent =>
-  (id === 'custom' && custom) || ACCENTS.find((a) => a.id === id) || (ACCENTS[0] as Accent);
+export const accentById = (id: string | null | undefined): Accent => {
+  const want = (id && RETIRED_PACKS[id]) || id;
+  return (want === 'custom' && custom) || ACCENTS.find((a) => a.id === want) || (ACCENTS[0] as Accent);
+};
 
 /** The Gold look every pack and the mixer start from (for tests and the mixer). */
 export const BASE_LOOK = BASE;
@@ -614,6 +555,7 @@ export const packVars = (a: Accent): Record<string, string> => ({
   '--bw-shadow': a.shadow,
   '--bw-radius-card': a.radiusCard,
   '--bw-weight-head': String(a.weightHead),
+  '--bw-tint': a.tint ?? a.surface2,
 });
 
 /** Every variable any pack may set (so switching packs can clear the previous one's). */

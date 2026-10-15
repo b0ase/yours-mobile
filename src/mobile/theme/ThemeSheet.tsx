@@ -5,7 +5,8 @@ import {
   DEFAULT_ACCENT,
   DUO_PACKS,
   MORE_COLOURS,
-  SINGLE_PACKS,
+  MONO_PACKS,
+  TRI_PACKS,
   THEMES,
   accentById,
   type Accent,
@@ -141,14 +142,14 @@ function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNo
           Surprise me
         </button>
       </div>
-      <p className="bw-theme-group">Single tones</p>
-      <div className="bw-pack-grid" role="radiogroup" aria-label="Single tones">
-        {SINGLE_PACKS.map((a) => (
+      <p className="bw-theme-group">Mono</p>
+      <div className="bw-pack-grid" role="radiogroup" aria-label="Mono">
+        {MONO_PACKS.map((a) => (
           <PackTile key={a.id} a={a} on={current === a.id} onPick={() => pick(a.id)} />
         ))}
       </div>
-      <p className="bw-theme-group">Duo-tones</p>
-      <div className="bw-pack-grid" role="radiogroup" aria-label="Duo-tones">
+      <p className="bw-theme-group">Duo</p>
+      <div className="bw-pack-grid" role="radiogroup" aria-label="Duo">
         {DUO_PACKS.map((a) => (
           <PackTile key={a.id} a={a} on={current === a.id} onPick={() => pick(a.id)} />
         ))}
@@ -160,6 +161,12 @@ function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNo
             slide(mix, true);
           }}
         />
+      </div>
+      <p className="bw-theme-group">Tri</p>
+      <div className="bw-pack-grid" role="radiogroup" aria-label="Tri">
+        {TRI_PACKS.map((a) => (
+          <PackTile key={a.id} a={a} on={current === a.id} onPick={() => pick(a.id)} />
+        ))}
       </div>
       <div className="bw-mixer" data-open={mixing ? '' : undefined}>
         <button type="button" className="bw-mixer-head" aria-expanded={mixing} onClick={() => setMixing('toggle')}>
@@ -316,6 +323,8 @@ function MixGroup({
 
 /** A tappable pack preview: a mini wallet screen drawn in that pack's own colours. */
 function PackTile({ a, on, onPick }: { a: Accent; on: boolean; onPick: () => void }) {
+  // Mono packs preview as they paint: a white card and a tinted button, no dark fills.
+  const mono = a.group === 'mono';
   return (
     <button
       type="button"
@@ -340,8 +349,11 @@ function PackTile({ a, on, onPick }: { a: Accent; on: boolean; onPick: () => voi
         <span
           className="bw-pack-card"
           style={{
-            background: `linear-gradient(135deg, ${a.hi}, ${a.accent} 50%, ${a.lo})`,
-            color: a.on,
+            background: mono
+              ? `linear-gradient(135deg, #FFFFFF, ${a.tint ?? a.surface2})`
+              : `linear-gradient(135deg, ${a.hi}, ${a.accent} 50%, ${a.lo})`,
+            color: mono ? a.accent : a.on,
+            border: mono ? `1px solid ${a.line}` : undefined,
             borderRadius: Math.min(parseInt(a.radiusCard) || 12, 10),
             boxShadow: a.glow !== 'none' ? a.glow : undefined,
           }}
@@ -357,7 +369,15 @@ function PackTile({ a, on, onPick }: { a: Accent; on: boolean; onPick: () => voi
           <small style={{ color: a.success }}>+2.4%</small>
         </span>
         <span className="bw-pack-btns">
-          <span style={{ background: a.accent, color: a.on, borderRadius: a.radius }}>Send</span>
+          <span
+            style={
+              mono
+                ? { background: a.tint, color: a.accent, borderColor: a.trim, borderRadius: a.radius }
+                : { background: a.accent, color: a.on, borderRadius: a.radius }
+            }
+          >
+            Send
+          </span>
           <span style={{ borderColor: a.line, color: a.text, borderRadius: a.radius, background: a.surface2 }}>
             Receive
           </span>

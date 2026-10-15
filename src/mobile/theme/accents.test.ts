@@ -2,7 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import {
   ACCENTS,
   DUO_PACKS,
-  SINGLE_PACKS,
+  MONO_PACKS,
+  RETIRED_PACKS,
+  TRI_PACKS,
   THEMES,
   accentById,
   accentVars,
@@ -21,7 +23,7 @@ describe('app accents and packs', () => {
   });
   test('at least 8 full packs', () => {
     expect(THEMES.length).toBeGreaterThanOrEqual(8);
-    for (const id of ['gold', 'executive', 'cyber', 'paper', 'midnight', 'forest', 'sunset', 'monolight', 'contrast'])
+    for (const id of ['gold', 'executive', 'cyber', 'midnight', 'forest', 'sunset', 'contrast', 'white', 'blue'])
       expect(THEMES.some((t) => t.id === id)).toBe(true);
   });
   test('every pack passes WCAG AA: text, muted and accent on page and surfaces; on-accent on the accent', () => {
@@ -60,34 +62,41 @@ test('every pack maps to a complete variable set', () => {
   }
 });
 
-test('single tones and cross-overs exist, come first after Gold, and pass AA', () => {
-  const singles = ['white', 'black', 'blue', 'red', 'green', 'purple', 'orange', 'pink', 'blackwhite', 'whiteblack'];
-  const ids = THEMES.map((t) => t.id);
-  expect(ids[0]).toBe('gold');
-  expect(ids.slice(1, 1 + singles.length).sort()).toEqual([...singles].sort());
-  expect(SINGLE_PACKS[0]?.id).toBe('gold');
-  expect(DUO_PACKS.map((t) => t.id)).toContain('executive');
-  for (const id of singles) {
-    const a = accentById(id);
-    expect(a.id).toBe(id);
-    for (const g of [a.bg, a.surface, a.surface2]) {
-      expect(contrast(a.text, g)).toBeGreaterThanOrEqual(4.5);
-      expect(contrast(a.muted, g)).toBeGreaterThanOrEqual(4.5);
-      expect(contrast(a.accent, g)).toBeGreaterThanOrEqual(4.5);
-    }
-    for (const c of [a.accent, a.hi, a.lo]) expect(contrast(a.on, c)).toBeGreaterThanOrEqual(4.5);
-  }
-  // White is white, Black is black.
+test('Mono, Duo and Tri groups: Mono is one hue on white with no dark grounds', () => {
+  expect(MONO_PACKS.map((t) => t.id)).toEqual(['white', 'blue', 'pink', 'green', 'purple', 'orange', 'red', 'teal']);
+  expect(DUO_PACKS[0]?.id).toBe('gold');
+  expect(DUO_PACKS.map((t) => t.id)).toEqual(
+    expect.arrayContaining(['executive', 'blackwhite', 'whiteblack', 'cyber']),
+  );
+  expect(TRI_PACKS.length).toBeGreaterThanOrEqual(3);
+  expect(MONO_PACKS.length + DUO_PACKS.length + TRI_PACKS.length).toBe(THEMES.length);
   expect(accentById('white').bg).toBe('#FFFFFF');
-  expect(accentById('black').bg).toBe('#000000');
-  expect(accentById('blackwhite').accent).toBe('#FFFFFF');
-  expect(accentById('whiteblack').accent).toBe('#000000');
+  for (const a of MONO_PACKS) {
+    expect(a.scheme).toBe('light');
+    expect(a.surface).toBe('#FFFFFF');
+    expect(a.nav).toBe('#FFFFFF');
+    // Every ground (page, surfaces, button tint) is light: no dark elements.
+    for (const g of [a.bg, a.surface, a.surface2, a.tint as string]) expect(contrast(g, '#000000')).toBeGreaterThan(15);
+    // AA everywhere: text, muted and every accent stop on page, surfaces and tint (buttons are accent on tint).
+    for (const g of [a.bg, a.surface, a.surface2, a.tint as string]) {
+      expect(contrast(a.text, g)).toBeGreaterThanOrEqual(7);
+      expect(contrast(a.muted, g)).toBeGreaterThanOrEqual(4.5);
+      for (const c of [a.accent, a.hi, a.lo, a.success, a.danger]) expect(contrast(c, g)).toBeGreaterThanOrEqual(4.5);
+    }
+  }
 });
 
-test('Paper keeps its page but white controls', () => {
-  const p = accentById('paper');
-  expect(p.bg).toBe('#F6F1E7');
-  expect(p.surface).toBe('#FFFFFF');
-  expect(contrast(p.text, p.surface2)).toBeGreaterThanOrEqual(4.5);
-  expect(contrast(p.muted, p.surface2)).toBeGreaterThanOrEqual(4.5);
+test('every pack passes AA on its second surface too', () => {
+  for (const a of THEMES) {
+    expect(contrast(a.text, a.surface2)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(a.muted, a.surface2)).toBeGreaterThanOrEqual(4.5);
+  }
+});
+
+test('retired packs fall back to the closest new pack', () => {
+  expect(RETIRED_PACKS).toEqual({ paper: 'white', monolight: 'white', black: 'blackwhite' });
+  for (const [old, now] of Object.entries(RETIRED_PACKS)) {
+    expect(THEMES.some((t) => t.id === old)).toBe(false);
+    expect(accentById(old).id).toBe(now);
+  }
 });

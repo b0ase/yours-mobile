@@ -33,6 +33,7 @@ import {
 } from './cardFrontArt';
 import { CardDesigner } from './CardDesigner';
 import { ThemeSheet } from '../theme/ThemeSheet';
+import { onThemeSheetRequest } from '../theme/themeNav';
 import { switchToAccountAccent } from '../theme/accent';
 import { useAccentId } from '../theme/useAccent';
 import { accentById } from '../theme/accents';
@@ -316,6 +317,8 @@ const WalletCardInner = ({
   );
   const look = savedLook ?? defaultLook;
   const [adjusting, setAdjusting] = useState(false);
+  // Settings › Appearance › Theme opens this same sheet (theme/themeNav.ts).
+  useEffect(() => onThemeSheetRequest(() => setAdjusting(true)), []);
   const setLook = (l: CardArtLook | null) => {
     const v = l && clampLook(l);
     setSavedLook(v);

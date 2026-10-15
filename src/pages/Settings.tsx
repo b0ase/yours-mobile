@@ -1,6 +1,8 @@
+import { requestThemeSheet } from '../mobile/theme/themeNav';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
+  Palette,
   Users,
   UserCircle,
   Shield,
@@ -152,7 +154,7 @@ const SettingRow = ({ icon, label, description, right, onClick, isFirst, isLast,
       variants={rowVariant}
       whileTap={onClick ? { scale: 0.985 } : undefined}
       onClick={onClick}
-      className={`flex items-center justify-between px-4 py-3 bg-[var(--bw-surface)] ${onClick ? 'cursor-pointer hover:bg-[#1f2128]' : ''} ${isFirst ? 'rounded-t-xl' : ''} ${isLast ? 'rounded-b-xl' : ''} transition-colors duration-150`}
+      className={`flex items-center justify-between px-4 py-3 bg-[var(--bw-surface)] ${onClick ? 'cursor-pointer hover:bg-[var(--bw-card2,#1f2128)]' : ''} ${isFirst ? 'rounded-t-xl' : ''} ${isLast ? 'rounded-b-xl' : ''} transition-colors duration-150`}
     >
       <div className="flex items-center gap-3 flex-1 min-w-0">
         <div
@@ -162,11 +164,11 @@ const SettingRow = ({ icon, label, description, right, onClick, isFirst, isLast,
           <span style={{ color: danger ? '#ef4444' : '#A1FF8B' }}>{icon}</span>
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold leading-tight truncate" style={{ color: danger ? '#ef4444' : '#FFFFFF' }}>
+          <p className="text-sm font-semibold leading-tight truncate" style={{ color: danger ? '#ef4444' : 'var(--bw-text, #FFFFFF)' }}>
             {label}
           </p>
           {description && (
-            <p className="text-xs mt-0.5 leading-tight" style={{ color: '#98A2B3' }}>
+            <p className="text-xs mt-0.5 leading-tight" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
               {description}
             </p>
           )}
@@ -201,7 +203,7 @@ type SectionProps = {
 
 const Section = ({ title, children }: SectionProps) => (
   <motion.div variants={rowVariant} className="w-full mb-4">
-    <p className="text-xs font-semibold uppercase tracking-widest mb-2 px-1" style={{ color: '#98A2B3' }}>
+    <p className="text-xs font-semibold uppercase tracking-widest mb-2 px-1" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
       {title}
     </p>
     <div className="rounded-xl overflow-hidden" style={{ border: '1px solid rgba(152,162,179,0.12)' }}>
@@ -247,7 +249,7 @@ const SubPageHeader = ({ title, onBack }: SubPageHeaderProps) => (
     >
       <ChevronLeft size={18} color="#FFFFFF" />
     </motion.button>
-    <h2 className="text-base font-bold" style={{ color: '#FFFFFF' }}>
+    <h2 className="text-base font-bold" style={{ color: 'var(--bw-text, #FFFFFF)' }}>
       {title}
     </h2>
   </div>
@@ -922,6 +924,21 @@ export const Settings = () => {
       exit="exit"
       className="w-full px-4 pb-20"
     >
+      {/* Appearance (owner, 15 Oct 2026): the same Theme sheet the card's sliders icon opens. */}
+      <Section title="Appearance">
+        <SettingRow
+          icon={<Palette size={16} />}
+          label="Theme"
+          description="App colours and your card design"
+          onClick={() => {
+            requestThemeSheet();
+            handleSelect('bsv');
+          }}
+          isFirst
+          isLast
+        />
+      </Section>
+
       {/* Account section */}
       <Section title="Account">
         <SettingRow
@@ -1482,7 +1499,7 @@ export const Settings = () => {
           >
             <QrCode address={exportKeysQrData} />
           </div>
-          <p className="text-xs text-center" style={{ color: '#98A2B3' }}>
+          <p className="text-xs text-center" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
             This QR code will disappear in 10 seconds.
           </p>
         </motion.div>
@@ -1494,7 +1511,7 @@ export const Settings = () => {
           >
             <QrCodeIcon size={22} color="#ef4444" />
           </div>
-          <p className="text-sm" style={{ color: '#98A2B3' }}>
+          <p className="text-sm" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
             Timed out. Please try again.
           </p>
         </div>
@@ -1532,14 +1549,14 @@ export const Settings = () => {
                 <Database size={18} color="#A1FF8B" />
               </div>
               <div className="flex-1">
-                <p className="text-sm font-semibold" style={{ color: '#FFFFFF' }}>
+                <p className="text-sm font-semibold" style={{ color: 'var(--bw-text, #FFFFFF)' }}>
                   Remote Backup
                 </p>
-                <p className="text-[10px] mt-0.5" style={{ color: '#98A2B3' }}>
+                <p className="text-[10px] mt-0.5" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
                   Your wallet is automatically backed up. Manage storage, upgrade, or change providers.
                 </p>
               </div>
-              <ChevronRight size={16} style={{ color: '#98A2B3' }} />
+              <ChevronRight size={16} style={{ color: 'var(--bw-muted, #98A2B3)' }} />
             </div>
           </motion.button>
         </motion.div>
@@ -1618,7 +1635,7 @@ export const Settings = () => {
 
       {identity.loading && !identity.bapId ? (
         <div className="flex items-center justify-center py-8">
-          <Loader2 size={24} className="animate-spin" style={{ color: '#98A2B3' }} />
+          <Loader2 size={24} className="animate-spin" style={{ color: 'var(--bw-muted, #98A2B3)' }} />
         </div>
       ) : (
         <motion.div variants={stagger} initial="initial" animate="animate" className="w-full space-y-3">
@@ -1627,7 +1644,7 @@ export const Settings = () => {
             <motion.p
               variants={rowVariant}
               className="text-xs text-center"
-              style={{ color: '#98A2B3', lineHeight: 1.5 }}
+              style={{ color: 'var(--bw-muted, #98A2B3)', lineHeight: 1.5 }}
             >
               Set up your posting profile so apps and other users can recognize you. Your profile is stored permanently
               on the blockchain.
@@ -1655,7 +1672,7 @@ export const Settings = () => {
                 )}
                 {avatarUploading && (
                   <div className="absolute inset-0 rounded-full flex items-center justify-center bg-black/60">
-                    <Loader2 size={20} className="animate-spin" style={{ color: '#fff' }} />
+                    <Loader2 size={20} className="animate-spin" style={{ color: 'var(--bw-text, #fff)' }} />
                   </div>
                 )}
               </div>
@@ -1753,7 +1770,7 @@ export const Settings = () => {
               setEnteredAccountIcon(account.icon);
               setPage('edit-account');
             }}
-            className="flex items-center justify-between px-4 py-3 rounded-xl cursor-pointer transition-colors duration-150 bg-[var(--bw-surface)] hover:bg-[#1f2128]"
+            className="flex items-center justify-between px-4 py-3 rounded-xl cursor-pointer transition-colors duration-150 bg-[var(--bw-surface)] hover:bg-[var(--bw-card2,#1f2128)]"
             style={{
               border: '1px solid rgba(152,162,179,0.12)',
             }}
@@ -1764,7 +1781,7 @@ export const Settings = () => {
                 className="w-9 h-9 rounded-full object-cover flex-shrink-0"
                 alt={account.name}
               />
-              <p className="text-sm font-semibold truncate" style={{ color: '#FFFFFF' }}>
+              <p className="text-sm font-semibold truncate" style={{ color: 'var(--bw-text, #FFFFFF)' }}>
                 {account.name}
               </p>
             </div>
@@ -1794,7 +1811,7 @@ export const Settings = () => {
 
       <motion.div variants={stagger} initial="initial" animate="animate" className="w-full space-y-4">
         <motion.div variants={rowVariant}>
-          <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#98A2B3' }}>
+          <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
             Account Label
           </label>
           <Input
@@ -1806,7 +1823,7 @@ export const Settings = () => {
           />
         </motion.div>
         <motion.div variants={rowVariant}>
-          <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#98A2B3' }}>
+          <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
             Icon URL
           </label>
           <Input
@@ -1860,15 +1877,15 @@ export const Settings = () => {
                   <Usb size={18} color="#A1FF8B" />
                 </div>
                 <div>
-                  <p className="text-sm font-semibold" style={{ color: '#FFFFFF' }}>
+                  <p className="text-sm font-semibold" style={{ color: 'var(--bw-text, #FFFFFF)' }}>
                     USB security key
                   </p>
-                  <p className="text-[10px] mt-0.5" style={{ color: '#98A2B3' }}>
+                  <p className="text-[10px] mt-0.5" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
                     Two-factor unlock: your password plus a USB drive
                   </p>
                 </div>
               </div>
-              <p className="text-xs leading-relaxed" style={{ color: '#98A2B3' }}>
+              <p className="text-xs leading-relaxed" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
                 Any USB drive works. Unlocking needs it plugged in, so your password alone is never enough. You get a
                 recovery code in case the drive is lost.
               </p>
@@ -2183,10 +2200,10 @@ export const Settings = () => {
           >
             <YoursIcon width="3rem" />
 
-            <h2 className="text-lg font-bold mt-4 mb-1 text-center" style={{ color: '#FFFFFF' }}>
+            <h2 className="text-lg font-bold mt-4 mb-1 text-center" style={{ color: 'var(--bw-text, #FFFFFF)' }}>
               {backupDone ? 'Backup Complete' : backupError ? 'Backup Failed' : 'Backing Up All Accounts'}
             </h2>
-            <p className="text-xs mb-5 text-center" style={{ color: '#98A2B3' }}>
+            <p className="text-xs mb-5 text-center" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
               {backupDone
                 ? 'Your backup file has been downloaded.'
                 : backupError
@@ -2208,7 +2225,7 @@ export const Settings = () => {
                     className="w-7 h-7 rounded-full object-cover flex-shrink-0"
                     alt=""
                   />
-                  <span className="text-sm flex-1 truncate" style={{ color: '#FFFFFF' }}>
+                  <span className="text-sm flex-1 truncate" style={{ color: 'var(--bw-text, #FFFFFF)' }}>
                     {acct.name}
                   </span>
                   {acct.status === 'done' && <CheckCircle2 size={16} color="#A1FF8B" />}
@@ -2241,7 +2258,7 @@ export const Settings = () => {
 
             {/* Status message */}
             {!backupDone && !backupError && (
-              <p className="text-xs text-center" style={{ color: '#98A2B3' }}>
+              <p className="text-xs text-center" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
                 {masterBackupEventText}
               </p>
             )}

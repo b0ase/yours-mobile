@@ -369,10 +369,24 @@ const TopNavBar = () => {
               aria-label="Lock BSV"
               onClick={() => (onLock ? navigate(-1) : navigate('/m/lock'))}
               aria-pressed={onLock}
-              className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
+              className="relative w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
               style={{ border: RING }}
             >
-              <LockCoin color={ICON} accent={ACCENT} />
+              {/* Owner, 15 Oct 2026: a clear padlock like its neighbours (the coin badge read as a smudge on light
+                  themes); the coin is now a small corner dot that leaves the shape alone. */}
+              <Lock size={16} color={ACCENT} strokeWidth={2.25} />
+              <span
+                aria-hidden
+                className="absolute rounded-full"
+                style={{
+                  top: 3,
+                  right: 3,
+                  width: 7,
+                  height: 7,
+                  background: ACCENT,
+                  boxShadow: '0 0 0 1.5px var(--bw-pack-bg, #010101)',
+                }}
+              />
             </button>
           </div>,
           document.body,

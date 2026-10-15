@@ -44,7 +44,7 @@ import bspacesGlyph from './brand/bspaces-glyph.svg';
 import bpicsGlyph from './brand/bpics-glyph.svg';
 import { ArrowRight, Clock, Github, Globe, Lock, Plus, Search, Star, X } from 'lucide-react';
 import { BAPP_GROUPS, bappsIn, type BApp } from './bapps';
-import { ALL_BAPP_ICON_SLUGS, bappIconUrl } from './brand/bappIcons';
+import { ALL_BAPP_ICON_SLUGS, bappIconUrl, useThemedIcon } from './brand/bappIcons';
 import { RADAR_APPS, RADAR_GROUPS } from './radarApps';
 import { GAME_SOURCES, gamesFor } from './games/gamesCatalog';
 import { AddAppSheet } from './apps/AddAppSheet';
@@ -172,6 +172,8 @@ const ONE_LINE = 'overflow-hidden text-ellipsis whitespace-nowrap';
 /** Home-screen icon: the site's icon, else a monogram ("b" in gold for bApps). */
 const TileIcon = ({ tile }: { tile: Tile }) => {
   const [failed, setFailed] = useState(false);
+  // Theme packs redraw the set icons; Mono puts own artwork on a white paper tile (themes.css .bw-paper-icon).
+  const themed = useThemedIcon(tile.icon);
   if (tile.screen) {
     const Icon = SCREEN_ICON[tile.screen];
     return (
@@ -183,7 +185,7 @@ const TileIcon = ({ tile }: { tile: Tile }) => {
   if (tile.icon && !failed) {
     return (
       <img
-        src={tile.icon}
+        src={themed.src}
         alt=""
         draggable={false}
         onError={() => setFailed(true)}
@@ -191,7 +193,7 @@ const TileIcon = ({ tile }: { tile: Tile }) => {
         loading="lazy"
         width={60}
         height={60}
-        className={`${ICON} object-cover bg-[var(--bw-surface)]`}
+        className={`${ICON} object-cover bg-[var(--bw-surface)]${themed.paper ? ' bw-paper-icon' : ''}`}
       />
     );
   }
