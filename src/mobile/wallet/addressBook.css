@@ -82,7 +82,7 @@
   border: 0;
   cursor: pointer;
   background: rgba(255, 255, 255, 0.06);
-  color: #fff;
+  color: var(--bw-text, #fff);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -107,7 +107,7 @@
   padding: 0;
   cursor: pointer;
   background: transparent;
-  color: #98a2b3;
+  color: var(--bw-muted, #98a2b3);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -128,7 +128,7 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  color: #fff;
+  color: var(--bw-text, #fff);
   font-size: 13px;
 }
 .bw-abook-card-back {
@@ -195,7 +195,7 @@
 .bw-abook-card-label {
   width: 52px;
   flex-shrink: 0;
-  color: #98a2b3;
+  color: var(--bw-muted, #98a2b3);
   font-size: 11px;
 }
 .bw-abook-card-bio {
@@ -217,7 +217,7 @@
   border-radius: 8px;
   border: 1px solid #2b2f36;
   background: var(--bw-surface);
-  color: #fff;
+  color: var(--bw-text, #fff);
   padding: 8px 10px;
   font-size: 13px;
   outline: none;
@@ -230,4 +230,26 @@
   cursor: pointer;
   text-align: left;
   color: inherit;
+}
+
+/* Theme packs (owner, 15 Oct 2026): the notebook follows the pack instead of staying black. The cover takes the
+   pack hue, the page and ink take the pack's card and text tokens; Gold (no data-bw-pack) keeps the leather. */
+:root[data-bw-pack] .bw-abook-cover {
+  background:
+    radial-gradient(120% 80% at 30% 0%, rgba(255, 255, 255, 0.25), transparent 60%), rgb(var(--bw-accent-rgb) / 0.22);
+  box-shadow:
+    inset 0 0 0 1px rgb(var(--bw-accent-rgb) / 0.35),
+    0 18px 50px rgba(0, 0, 0, 0.18);
+}
+:root[data-bw-pack] .bw-abook-page {
+  background: var(--bw-card);
+  color: var(--bw-text);
+  box-shadow: inset 6px 0 10px -6px rgb(var(--bw-text-rgb) / 0.2);
+}
+:root[data-bw-pack] .bw-abook-close,
+:root[data-bw-pack] .bw-abook [class*='text-white'] {
+  color: var(--bw-text) !important;
+}
+:root[data-bw-pack] .bw-abook :is([class*='text-[#98A2B3]'], [class*='text-[#98a2b3]']) {
+  color: var(--bw-muted) !important;
 }
