@@ -73,6 +73,7 @@ import {
   quoteText,
   estimatePostFee,
   avatarSeed,
+  avatarUrl,
   feedTimeLabel,
   filterFeed,
   MAX_INLINE_IMAGE_BYTES,
@@ -173,6 +174,7 @@ import {
   type TipDest,
 } from './tipMessage';
 import { resolvePaymail } from '../names/names';
+import { bavatarSeedDataUri } from '../names/avatar';
 import { sendMail } from '../bmail/client';
 import type { WalletInterface } from '@bsv/sdk';
 import { ErrorActions } from '../errors/ErrorActions';
@@ -397,8 +399,6 @@ const useOnline = () => {
   return online;
 };
 
-const hue = (s: string) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
-
 const Avatar = ({
   author,
   size = 40,
@@ -409,35 +409,22 @@ const Avatar = ({
   source?: Source;
 }) => {
   const [broken, setBroken] = useState(false);
-  const h = hue(avatarSeed({ bapId: null, ...author }, source));
-  // Treechat exposes no public avatar API, so its authors get a per-username initial with a Treechat-purple ring.
-  const ring = source === 'treechat' ? `2px solid ${SOURCE_REGISTRY.treechat.color}` : undefined;
-  if (author.avatar && !broken)
-    return (
-      <img
-        src={author.avatar}
-        alt=""
-        loading="lazy"
-        decoding="async"
-        onError={() => setBroken(true)}
-        className="rounded-full object-cover shrink-0"
-        style={{ width: size, height: size, border: `1px solid ${LINE}` }}
-      />
-    );
+  // Treechat exposes no avatar (not on chain, not in the overlay): its authors get a gold bAvatar
+  // seeded by username, with a Treechat-purple ring. Never a bare letter.
+  const ring = source === 'treechat' ? `2px solid ${SOURCE_REGISTRY.treechat.color}` : `1px solid ${LINE}`;
+  const photo = avatarUrl(author.avatar);
+  const src = photo && !broken ? photo : bavatarSeedDataUri(avatarSeed({ bapId: null, ...author }, source));
   return (
-    <div
-      className="rounded-full flex items-center justify-center shrink-0 font-bold"
-      style={{
-        width: size,
-        height: size,
-        fontSize: size * 0.42,
-        color: `hsl(${h} 70% 82%)`,
-        background: `linear-gradient(145deg, hsl(${h} 35% 26%), hsl(${h} 30% 14%))`,
-        border: ring,
-      }}
-    >
-      {(safeName(author.name) || '?').replace(/^\$/, '').charAt(0).toUpperCase()}
-    </div>
+    <img
+      src={src}
+      alt=""
+      loading="lazy"
+      decoding="async"
+      referrerPolicy="no-referrer"
+      onError={() => setBroken(true)}
+      className="rounded-full object-cover shrink-0"
+      style={{ width: size, height: size, border: ring, background: '#16181c' }}
+    />
   );
 };
 

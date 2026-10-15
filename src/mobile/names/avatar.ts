@@ -140,3 +140,21 @@ export function bavatarDataUri(identityPubKey: string | null | undefined): strin
   }
   return uri;
 }
+
+/**
+ * A gold bAvatar for any seed (a username, an address): for feed authors with no picture and no
+ * identity key, e.g. Treechat users, whose posts carry no avatar on chain or in the overlay.
+ */
+export function bavatarSeedDataUri(seed: string | null | undefined): string {
+  const s = String(seed || '').trim();
+  if (!s) return '';
+  if (/^0[23][0-9a-f]{64}$/i.test(s)) return bavatarDataUri(s);
+  const accent = currentAccentId();
+  const ck = accent + accentById(accent).accent + ':seed:' + s;
+  let uri = bavatarCache.get(ck);
+  if (!uri) {
+    uri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(tintSvg(bavatarSvg(s, { size: 128 }), accent));
+    bavatarCache.set(ck, uri);
+  }
+  return uri;
+}
