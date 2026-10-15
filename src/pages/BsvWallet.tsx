@@ -98,6 +98,7 @@ import { isMainnetAddress } from '../mobile/names/address';
 import { pendingMeta, rememberSent } from '../mobile/wallet/send/sendLogic';
 import { payeeNote } from '../mobile/wallet/send/payee';
 import { TokenSwipe } from '../mobile/wallet/TokenSwipe';
+import { openHoldersRoom } from '../mobile/wallet/holdersRoom';
 // Swipe › Lock on a token row (BSV-21 time-locks with receipts, locks/tokenLocks.ts).
 const TokenLockSheet = lazy(() => import('../mobile/locks/TokenLockSheet'));
 import { CoinRow } from '../mobile/wallet/CoinRow';
@@ -1607,7 +1608,7 @@ export const BsvWallet = () => {
                 setPageState('sendMNEE');
               }}
               onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))}
-              onChat={() => handleSelect(asMenuItem('chat'))}
+              onChat={() => openHoldersRoom('mnee', () => handleSelect(asMenuItem('chat')))}
               onLock={() => addSnackbar('Locking MNEE isn’t available yet.', 'info', 2500)}
             >
             <AssetRow
@@ -1642,7 +1643,7 @@ export const BsvWallet = () => {
               handleTokenClick(t);
             }}
             onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))}
-            onChat={() => handleSelect(asMenuItem('chat'))}
+            onChat={() => openHoldersRoom('pnee', () => handleSelect(asMenuItem('chat')))}
           />
           <CoinRow id="locks">
           {lockData && (

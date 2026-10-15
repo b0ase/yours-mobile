@@ -1,4 +1,4 @@
-import { contrast, rgbTriplet } from './colour';
+import { contrast, ensureContrast, hslToHex, pickReadable, rgbTriplet } from './colour';
 
 export { contrast, rgbTriplet };
 
@@ -23,7 +23,17 @@ export type PackId =
   | 'sunset'
   | 'monolight'
   | 'contrast'
-  | 'pastel';
+  | 'pastel'
+  | 'white'
+  | 'black'
+  | 'blackwhite'
+  | 'whiteblack'
+  | 'blue'
+  | 'red'
+  | 'green'
+  | 'purple'
+  | 'orange'
+  | 'pink';
 export type AccentId = PackId | 'silver' | 'rose' | 'emerald' | 'sapphire' | 'violet' | 'custom';
 
 export type CardPatternId =
@@ -44,6 +54,8 @@ export interface Accent {
   label: string;
   /** 'theme' = a full pack (top row); 'colour' = accent only (More colours); 'custom' = the colour mixer. */
   kind: 'theme' | 'colour' | 'custom';
+  /** Packs only: 'single' = one tone throughout (Single tones); 'duo' = two-colour packs (Duo-tones). */
+  group?: 'single' | 'duo';
   /** One line under the pack's name. */
   blurb?: string;
   /** Light or dark base (sets color-scheme for form controls and scrollbars). */
@@ -122,6 +134,162 @@ const BASE: Omit<Accent, 'id' | 'label' | 'accent' | 'hi' | 'lo'> = {
   pattern: 'topo',
 };
 
+/**
+ * Single tones (owner, 15 Oct 2026: "single tone is really simple and nice"): one hue throughout, so page,
+ * surfaces, lines and accent are all the same colour family. Text, muted text, the accent stops and success/danger
+ * are derived with ensureContrast so each pack passes AA by construction (accents.test.ts checks it again).
+ */
+function singleTone(id: PackId, label: string, blurb: string, h: number, s: number, pattern: CardPatternId): Accent {
+  const bg = hslToHex({ h, s, l: 7 });
+  const surface = hslToHex({ h, s, l: 12 });
+  const surface2 = hslToHex({ h, s, l: 17 });
+  const grounds = [bg, surface, surface2];
+  const accent = ensureContrast(hslToHex({ h, s: 90, l: 62 }), grounds, 4.5);
+  const hi = ensureContrast(hslToHex({ h, s: 95, l: 76 }), grounds, 4.5);
+  const lo = ensureContrast(hslToHex({ h, s: 85, l: 56 }), grounds, 4.5);
+  return {
+    ...BASE,
+    id,
+    kind: 'theme',
+    group: 'single',
+    label,
+    blurb,
+    accent,
+    hi,
+    lo,
+    on: pickReadable([bg, '#000000', '#FFFFFF'], [accent, hi, lo]),
+    bg,
+    surface,
+    surface2,
+    nav: hslToHex({ h, s, l: 5 }),
+    text: ensureContrast(hslToHex({ h, s: 40, l: 95 }), grounds, 7),
+    muted: ensureContrast(hslToHex({ h, s: 30, l: 74 }), grounds, 4.5),
+    line: hslToHex({ h, s: s * 0.7, l: 24 }),
+    success: ensureContrast('#7FE0B0', grounds, 4.5),
+    danger: ensureContrast('#FF8A80', grounds, 4.5),
+    shadow: '0 10px 30px rgb(0 0 0 / 0.5)',
+    trim: `hsl(${h} 90% 62% / 0.25)`,
+    pattern,
+  };
+}
+
+const SINGLE_TONES: readonly Accent[] = [
+  {
+    ...BASE,
+    id: 'white',
+    kind: 'theme',
+    group: 'single',
+    label: 'White',
+    blurb: 'All white, soft grey ink',
+    scheme: 'light',
+    accent: '#52525B',
+    hi: '#3F3F46',
+    lo: '#46464E',
+    on: '#FFFFFF',
+    bg: '#FFFFFF',
+    surface: '#FAFAFA',
+    surface2: '#F2F2F3',
+    nav: '#FFFFFF',
+    text: '#27272A',
+    muted: '#62626B',
+    line: '#E8E8EA',
+    success: '#15803D',
+    danger: '#B91C1C',
+    shadow: '0 4px 16px rgb(0 0 0 / 0.06)',
+    trim: 'rgb(0 0 0 / 0.06)',
+    radius: '12px',
+    radiusCard: '16px',
+    pattern: 'clouds',
+  },
+  {
+    ...BASE,
+    id: 'black',
+    kind: 'theme',
+    group: 'single',
+    label: 'Black',
+    blurb: 'True black, grey light',
+    accent: '#A1A1AA',
+    hi: '#D4D4D8',
+    lo: '#8E8E96',
+    on: '#000000',
+    bg: '#000000',
+    surface: '#0A0A0A',
+    surface2: '#141414',
+    nav: '#000000',
+    text: '#F4F4F5',
+    muted: '#A1A1AA',
+    line: '#222222',
+    success: '#7EE2A8',
+    danger: '#FF8A80',
+    shadow: 'none',
+    trim: 'rgb(255 255 255 / 0.08)',
+    pattern: 'topo',
+  },
+  singleTone('blue', 'Blue', 'Blue on blue', 218, 70, 'waves'),
+  singleTone('red', 'Red', 'Red on red', 356, 65, 'starburst'),
+  singleTone('green', 'Green', 'Green on green', 145, 55, 'hex'),
+  singleTone('purple', 'Purple', 'Purple on purple', 272, 60, 'clouds'),
+  singleTone('orange', 'Orange', 'Orange on orange', 26, 70, 'chevron'),
+  singleTone('pink', 'Pink', 'Pink on pink', 328, 65, 'halftone'),
+];
+
+/** Cross-overs: black surfaces with a white accent, and the reverse. Square-ish and stark. */
+const CROSS_OVERS: readonly Accent[] = [
+  {
+    ...BASE,
+    id: 'blackwhite',
+    kind: 'theme',
+    group: 'single',
+    label: 'Black/White',
+    blurb: 'Black, white buttons',
+    accent: '#FFFFFF',
+    hi: '#FFFFFF',
+    lo: '#EDEDED',
+    on: '#000000',
+    bg: '#000000',
+    surface: '#0B0B0B',
+    surface2: '#161616',
+    nav: '#000000',
+    text: '#FFFFFF',
+    muted: '#B3B3B3',
+    line: '#2A2A2A',
+    success: '#7EE2A8',
+    danger: '#FF8A80',
+    shadow: 'none',
+    trim: 'rgb(255 255 255 / 0.2)',
+    radius: '6px',
+    radiusCard: '8px',
+    pattern: 'stripes',
+  },
+  {
+    ...BASE,
+    id: 'whiteblack',
+    kind: 'theme',
+    group: 'single',
+    label: 'White/Black',
+    blurb: 'White, black buttons',
+    scheme: 'light',
+    accent: '#000000',
+    hi: '#262626',
+    lo: '#000000',
+    on: '#FFFFFF',
+    bg: '#FFFFFF',
+    surface: '#F7F7F7',
+    surface2: '#EEEEEE',
+    nav: '#FFFFFF',
+    text: '#0A0A0A',
+    muted: '#5C5C5C',
+    line: '#DEDEDE',
+    success: '#15803D',
+    danger: '#B91C1C',
+    shadow: '0 4px 16px rgb(0 0 0 / 0.08)',
+    trim: 'rgb(0 0 0 / 0.14)',
+    radius: '6px',
+    radiusCard: '8px',
+    pattern: 'stripes',
+  },
+];
+
 // Never use upstream's greens (#A1FF8B, #9EFF8A, #34D399) here: vite.brand.ts bcorpColours rewrites them to
 // the accent variables at build time, which would make an accent point at itself.
 export const ACCENTS: readonly Accent[] = [
@@ -135,10 +303,13 @@ export const ACCENTS: readonly Accent[] = [
     hi: '#FFD24D',
     lo: '#EAB300',
   },
+  ...SINGLE_TONES,
+  ...CROSS_OVERS,
   {
     ...BASE,
     id: 'executive',
     kind: 'theme',
+    group: 'duo',
     label: 'Executive',
     blurb: 'Crisp black and white',
     accent: '#FFFFFF',
@@ -166,6 +337,7 @@ export const ACCENTS: readonly Accent[] = [
     ...BASE,
     id: 'cyber',
     kind: 'theme',
+    group: 'duo',
     label: 'Cyberpunk',
     blurb: 'Neon magenta and cyan',
     accent: '#FF2BD6',
@@ -195,6 +367,7 @@ export const ACCENTS: readonly Accent[] = [
     ...BASE,
     id: 'paper',
     kind: 'theme',
+    group: 'duo',
     label: 'Paper',
     blurb: 'Warm off-white and ink',
     scheme: 'light',
@@ -203,16 +376,17 @@ export const ACCENTS: readonly Accent[] = [
     lo: '#1A2B45',
     on: '#FFFDF8',
     bg: '#F6F1E7',
-    surface: '#FFFDF8',
-    surface2: '#EDE6D8',
+    // Owner, 15 Oct 2026: keep the paper page, but controls, rows and chips white with crisp edges.
+    surface: '#FFFFFF',
+    surface2: '#FFFEFB',
     nav: '#FBF7EF',
     text: '#1C1A17',
     muted: '#655E52',
-    line: '#DCD2C0',
+    line: '#D2C6B0',
     success: '#1E6B45',
     danger: '#B42318',
-    shadow: '0 8px 24px rgb(60 40 10 / 0.12)',
-    trim: 'rgb(28 26 23 / 0.12)',
+    shadow: '0 1px 2px rgb(60 40 10 / 0.08), 0 6px 18px rgb(60 40 10 / 0.08)',
+    trim: 'rgb(28 26 23 / 0.18)',
     fontHead: SERIF,
     weightHead: 600,
     radius: '10px',
@@ -223,6 +397,7 @@ export const ACCENTS: readonly Accent[] = [
     ...BASE,
     id: 'midnight',
     kind: 'theme',
+    group: 'duo',
     label: 'Midnight',
     blurb: 'Deep navy, cool blue',
     accent: '#6EA8FF',
@@ -246,6 +421,7 @@ export const ACCENTS: readonly Accent[] = [
     ...BASE,
     id: 'forest',
     kind: 'theme',
+    group: 'duo',
     label: 'Forest',
     blurb: 'Pine, moss and fern',
     accent: '#8FD19E',
@@ -270,6 +446,7 @@ export const ACCENTS: readonly Accent[] = [
     ...BASE,
     id: 'sunset',
     kind: 'theme',
+    group: 'duo',
     label: 'Sunset',
     blurb: 'Coral, plum and amber',
     accent: '#FF8A5B',
@@ -296,6 +473,7 @@ export const ACCENTS: readonly Accent[] = [
     ...BASE,
     id: 'monolight',
     kind: 'theme',
+    group: 'duo',
     label: 'Mono light',
     blurb: 'Clean white, black ink',
     scheme: 'light',
@@ -324,6 +502,7 @@ export const ACCENTS: readonly Accent[] = [
     ...BASE,
     id: 'contrast',
     kind: 'theme',
+    group: 'duo',
     label: 'High contrast',
     blurb: 'Maximum legibility',
     accent: '#FFE600',
@@ -350,6 +529,7 @@ export const ACCENTS: readonly Accent[] = [
     ...BASE,
     id: 'pastel',
     kind: 'theme',
+    group: 'duo',
     label: 'Pastel',
     blurb: 'Mint, baby blue, blush',
     accent: '#9FD8FF',
@@ -379,6 +559,9 @@ export const ACCENTS: readonly Accent[] = [
 ];
 
 export const THEMES = ACCENTS.filter((a) => a.kind === 'theme');
+/** Single tones first (after Gold), then the duo-tones. */
+export const SINGLE_PACKS = THEMES.filter((a) => a.group !== 'duo');
+export const DUO_PACKS = THEMES.filter((a) => a.group === 'duo');
 export const MORE_COLOURS = ACCENTS.filter((a) => a.kind === 'colour');
 
 let custom: Accent | null = null;

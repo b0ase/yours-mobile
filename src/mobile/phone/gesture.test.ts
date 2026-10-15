@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  B_CLOSE_BOTTOM_ZONE,
+  bCloseProgress,
+  bCloseReached,
+  bCloseStartOk,
   B_HOLD_MS,
   bHold,
   B_HOLD_IDLE,
@@ -164,5 +168,29 @@ describe('b hold timing (owner, 10 Oct 2026)', () => {
   });
   test('a late timer after release does nothing', () => {
     expect(at([{ type: 'down', x: 0, y: 0 }, { type: 'up' }, { type: 'timer' }]).fx).toEqual(['home']);
+  });
+});
+
+describe('swipe up to close b (owner, 15 Oct 2026)', () => {
+  const at = (y: number, scroll: { top: number; height: number; client: number } | null, onField = false) =>
+    bCloseStartOk({ y, viewportH: 800, scroll, onField });
+  test('starts with no chat scroller, or the chat already at its bottom', () => {
+    expect(at(300, null)).toBe(true);
+    expect(at(300, { top: 600, height: 1000, client: 400 })).toBe(true);
+    expect(at(300, { top: 599, height: 1000, client: 400 })).toBe(true); // rounding slack
+    expect(at(300, { top: 0, height: 300, client: 400 })).toBe(true); // short chat, nothing to scroll
+  });
+  test('never steals a scroll, a text field or the composer zone', () => {
+    expect(at(300, { top: 200, height: 1000, client: 400 })).toBe(false);
+    expect(at(300, null, true)).toBe(false);
+    expect(at(800 - B_CLOSE_BOTTOM_ZONE + 1, null)).toBe(false);
+  });
+  test('same distance as the pull-down that opened it', () => {
+    expect(bCloseReached(-PULL_THRESHOLD)).toBe(true);
+    expect(bCloseReached(-PULL_THRESHOLD + 1)).toBe(false);
+    expect(bCloseReached(PULL_THRESHOLD)).toBe(false);
+    expect(bCloseProgress(-PULL_THRESHOLD / 2)).toBeCloseTo(0.5);
+    expect(bCloseProgress(40)).toBe(0);
+    expect(bCloseProgress(-500)).toBe(1);
   });
 });

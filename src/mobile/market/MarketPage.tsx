@@ -2,7 +2,7 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } fro
 import { assertOrdLockV2 } from './ordlockVersion';
 import { purchaseError } from '../exchange/purchase';
 import { useTabHome } from '../tabs/useTabHome';
-import { xAccountRows } from './xAccounts';
+import { cachedExchangeRate } from '../../utils/wallet';
 import { useBackClose } from '../backStack';
 import { IssuerBadge, SharedTickerNote } from '../issuer/IssuerBadge';
 import { duplicateTickers, sharedTickerWarning } from '../issuer/issuerVerify';
@@ -125,11 +125,12 @@ type View = 'collections' | NftCategory;
  * Curve coins = bonding-curve coins (./launchpad/tile.ts), not in a store build.
  * Tickets = rooms you can buy into (src/mobile/tickets/TicketsPanel.tsx).
  */
-type TokenFilter = 'all' | 'social' | 'bapps' | typeof CURVE_FILTER | 'tickets';
+type TokenFilter = 'all' | 'names' | 'bapps' | typeof CURVE_FILTER | 'tickets';
 // Store build: no Tickets or curve coins (storeBuild.ts).
 const TOKEN_FILTERS: [TokenFilter, string, boolean][] = marketFiltersFor<[TokenFilter, string, boolean]>([
   ['all', 'All tokens', true],
-  ['social', 'Friends', true], // shown as Friends (owner, 6 Oct 2026); id stays 'social'
+  // Names (owner, 15 Oct 2026; replaces Friends: people aren't bought and sold, names are): the OpNS names market.
+  ['names', 'Names', true],
   ['bapps', 'bApps', true],
   ...(CURVE_COINS_ENABLED ? [[CURVE_FILTER, CURVE_LABEL, true] as [TokenFilter, string, boolean]] : []),
   ['tickets', 'Tickets', true],
@@ -138,6 +139,8 @@ const TRADING = marketTradingEnabled();
 // Curve coins load on demand and only outside a store build: CURVE_COINS_ENABLED folds to false there
 // and Rollup drops ./launchpad/* entirely (code, strings and sourcemap sources).
 const CurvePanel = CURVE_COINS_ENABLED ? lazy(loadCurvePanel) : null;
+// The Names tile shows the Exchange's OpNS names market (the same screen as Exchange › Names).
+const OpnsMarket = lazy(() => import('../exchange/OpnsMarket').then((m) => ({ default: m.OpnsMarket })));
 // three.js viewer for a 3D (GLB) listing: same gate as the 3D tab, so three.js stays out of a store build.
 const ModelPreview = TOKENBLASTER_ENABLED
   ? lazy(() => import('../three3d/Cabinet').then((m) => ({ default: m.ModelPreview })))
@@ -396,7 +399,7 @@ const MarketPage = () => {
   type Cat = { id: string; label: string; kind: Kind; token?: TokenFilter; view?: View; soon?: boolean };
   const CATS: Cat[] = [
     { id: 'tokens', label: 'Tokens', kind: 'tokens', token: 'all' },
-    { id: 'social', label: 'Friends', kind: 'tokens', token: 'social' },
+    { id: 'names', label: 'Names', kind: 'tokens', token: 'names' },
     { id: 'music', label: 'Music', kind: 'nfts', view: 'music' },
     { id: 'video', label: 'Video', kind: 'nfts', view: 'video' },
     { id: 'images', label: 'Images', kind: 'nfts', view: 'images' },
@@ -585,25 +588,12 @@ const MarketPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [rooms, directory, safetyRev],
   );
-  // Friends: people's personal tokens (xAccounts.ts), loaded when the filter opens.
-  const [xRows, setXRows] = useState<HotRoom[] | null>(null);
-  useEffect(() => {
-    if (tokenFilter !== 'social') return;
-    let live = true;
-    xAccountRows(tokenRows)
-      .then((r) => live && setXRows(r))
-      .catch(() => live && setXRows([]));
-    return () => {
-      live = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tokenFilter, tokenRows.length]);
   // Search (owner, 5 Oct 2026): ticker or token id, across every token whatever the filter.
   const query = q.trim().replace(/^\$/, '').toLowerCase();
   const searched = useMemo(() => {
     if (!query) return null;
     const all = new Map<string, HotRoom>();
-    for (const r of [...tokenRows, ...(xRows ?? [])]) all.set(r.ref.key, r);
+    for (const r of tokenRows) all.set(r.ref.key, r);
     const hits = [...all.values()].filter(
       (r) => r.title.replace(/^\$/, '').toLowerCase().includes(query) || r.ref.id.toLowerCase() === query,
     );
@@ -626,14 +616,12 @@ const MarketPage = () => {
         heat: 0,
       });
     return hits;
-  }, [query, q, tokenRows, xRows]);
+  }, [query, q, tokenRows]);
   const filteredTokens = searched
     ? searched
     : tokenFilter === 'bapps'
       ? tokenRows.filter((r) => isBappToken(r.ref.id))
-      : tokenFilter === 'social'
-        ? (xRows ?? [])
-        : tokenRows;
+      : tokenRows;
   const visibleTokens = filteredTokens.slice(0, shown);
   // Tickers are not unique: flag every ticker more than one token id uses (issuer check on those rows).
   const dupTickers = useMemo(
@@ -708,14 +696,6 @@ const MarketPage = () => {
           <ErrorActions message={String(error)} />
         </div>
       )}
-      {tokenFilter === 'social' && xRows === null && (
-        <p className="text-xs text-[#98A2B3] text-center py-8">Loading people's tokens…</p>
-      )}
-      {tokenFilter === 'social' && xRows !== null && xRows.length === 0 && (
-        <p className="text-xs text-[#98A2B3] text-center py-8">
-          No personal tokens yet. Claim your name and mint your $NAME token to be the first.
-        </p>
-      )}
       {searched?.length === 0 && (
         <p className="text-xs text-[#98A2B3] text-center py-8">No token matches “{q.trim()}”.</p>
       )}
@@ -740,7 +720,6 @@ const MarketPage = () => {
       {!searched &&
         !directoryFailed &&
         tokenFilter !== 'bapps' &&
-        tokenFilter !== 'social' &&
         filteredTokens.length === 0 &&
         rooms !== null &&
         directory !== null &&
@@ -1090,6 +1069,10 @@ const MarketPage = () => {
           tokenFilter === CURVE_FILTER && CurvePanel ? (
             <Suspense fallback={null}>
               <CurvePanel />
+            </Suspense>
+          ) : tokenFilter === 'names' ? (
+            <Suspense fallback={null}>
+              <OpnsMarket rate={cachedExchangeRate()} />
             </Suspense>
           ) : tokenFilter === 'tickets' ? (
             <TicketsPanel

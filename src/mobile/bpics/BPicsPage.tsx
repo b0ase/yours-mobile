@@ -59,6 +59,8 @@ import {
   withRepeatGuard,
   type Pic,
 } from './bpics';
+import { ALLOWED_COLLECTIONS, fetchCollectionPage, COLLECTION_PAGE, ordfsUrl, type ChainPic } from './collections';
+import { MARKET_ENABLED } from '../storeBuild';
 
 /**
  * bPics (Apps › bPics, /m/bpics; Desktop /bpics): a photo app for picture ordinals.
@@ -73,7 +75,7 @@ const MUTED = '#98A2B3';
 const GOLD_BG = 'linear-gradient(135deg, #2a2207, #0b0b0b)';
 const GOLD_BTN = 'linear-gradient(135deg, #FFE27A, #E0A800)';
 
-type Tab = 'library' | 'mine';
+type Tab = 'chain' | 'library' | 'mine';
 
 /** One picture as the grid and the lightbox see it, from either tab. */
 type Item = {
@@ -92,6 +94,10 @@ type Item = {
   pending?: boolean;
   pic?: Pic;
   walletUrl?: string;
+  /** On-chain collection items: collection name, item number, listing price (sats; 0 = not listed). */
+  collection?: string;
+  number?: string;
+  price?: number;
 };
 
 const txidOf = (origin: string) => origin.slice(0, 64);
@@ -286,7 +292,7 @@ type JustMinted = { txid: string; uri: string; title: string; share: boolean };
 
 const BPicsPage = () => {
   const navigate = useNavigate();
-  const [tab, setTab] = useState<Tab>('library');
+  const [tab, setTab] = useState<Tab>('chain');
   const [minting, setMinting] = useState(false);
   const [query, setQuery] = useState('');
   const [justMinted, setJustMinted] = useState<JustMinted[]>([]);
@@ -315,7 +321,7 @@ const BPicsPage = () => {
             style={{ borderColor: BORDER, background: '#111' }}
             role="tablist"
           >
-            {(['library', 'mine'] as Tab[]).map((t) => (
+            {(['chain', 'library', 'mine'] as Tab[]).map((t) => (
               <button
                 key={t}
                 type="button"
@@ -327,7 +333,7 @@ const BPicsPage = () => {
                   tab === t ? { background: GOLD, color: '#1a1400' } : { background: 'transparent', color: '#ccc' }
                 }
               >
-                {t === 'library' ? 'Public library' : 'My pics'}
+                {t === 'chain' ? 'On chain' : t === 'library' ? 'Shared' : 'My pics'}
               </button>
             ))}
           </div>
@@ -340,7 +346,13 @@ const BPicsPage = () => {
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder={tab === 'library' ? 'Search titles or $handles' : 'Search my pics'}
+                placeholder={
+                  tab === 'mine'
+                    ? 'Search my pics'
+                    : tab === 'chain'
+                      ? 'Search names or numbers'
+                      : 'Search titles or $handles'
+                }
                 className="bg-transparent border-0 outline-none text-sm text-white w-full"
               />
               {query && (
@@ -361,7 +373,9 @@ const BPicsPage = () => {
         </div>
       </div>
       <div className="max-w-[1600px] mx-auto px-4 pt-4 pb-24">
-        {tab === 'library' ? (
+        {tab === 'chain' ? (
+          <OnChain q={q} />
+        ) : tab === 'library' ? (
           <Library q={q} onMint={() => setMinting(true)} />
         ) : (
           <Mine q={q} justMinted={justMinted} onMint={() => setMinting(true)} />
@@ -380,6 +394,142 @@ const BPicsPage = () => {
   );
 };
 export default BPicsPage;
+
+// ── On chain (allowlisted collections only; see collections.ts) ──
+
+const toItem = (p: ChainPic, collection: string): Item => ({
+  key: p.origin,
+  origin: p.origin,
+  urls: contentUrls(p.origin),
+  name: p.name,
+  description: '',
+  contentType: p.contentType,
+  height: p.height || undefined,
+  owner: p.owner,
+  who: p.owner ? `${p.owner.slice(0, 6)}…` : undefined,
+  collection,
+  number: p.number,
+  price: p.price,
+});
+
+const OnChain = ({ q }: { q: string }) => (
+  <>
+    <p className="text-sm mb-4" style={{ color: MUTED }}>
+      Picture collections already public on Bitcoin, chosen by bWalletX. Only checked collections appear here.
+    </p>
+    {ALLOWED_COLLECTIONS.map((c) => (
+      <CollectionSection key={c.id} id={c.id} name={c.name} artist={c.artist} description={c.description} q={q} />
+    ))}
+  </>
+);
+
+const CollectionSection = ({
+  id,
+  name,
+  artist,
+  description,
+  q,
+}: {
+  id: string;
+  name: string;
+  artist: string;
+  description: string;
+  q: string;
+}) => {
+  const [pics, setPics] = useState<ChainPic[]>([]);
+  const [offset, setOffset] = useState(0);
+  const [more, setMore] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [open, setOpen] = useState<number | null>(null);
+  const busy = useRef(false);
+  const load = useCallback(
+    async (from: number) => {
+      if (busy.current) return;
+      busy.current = true;
+      setLoading(true);
+      setError('');
+      try {
+        const page = await fetchCollectionPage(id, from);
+        setPics((prev) => {
+          const all = from === 0 ? page.pics : [...prev, ...page.pics];
+          const seen = new Set<string>();
+          return all.filter((p) => !seen.has(p.origin) && !!seen.add(p.origin));
+        });
+        setOffset(from + page.rawCount);
+        setMore(page.rawCount === COLLECTION_PAGE);
+      } catch {
+        setError(`Couldn't load ${name}. Check your connection and try again.`);
+      } finally {
+        busy.current = false;
+        setLoading(false);
+      }
+    },
+    [id, name],
+  );
+  useEffect(() => void load(0), [load]);
+  const items = pics
+    .map((p) => toItem(p, name))
+    .filter((it) => matches(it, q) || (!!it.number && it.number.includes(q)));
+  return (
+    <section className="mb-8">
+      <div className="flex items-baseline gap-2 flex-wrap mb-1">
+        <h2 className="font-bold text-lg m-0" style={{ color: GOLD }}>
+          {name}
+        </h2>
+        <span className="text-sm" style={{ color: '#ccc' }}>
+          by {artist}
+        </span>
+        <a
+          href={ordfsUrl(id)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs inline-flex items-center gap-1 no-underline ml-auto"
+          style={{ color: GOLD }}
+        >
+          Collection on chain <ExternalLink size={11} />
+        </a>
+      </div>
+      {description && (
+        <p className="text-sm mt-0 mb-3" style={{ color: MUTED }}>
+          {description}
+        </p>
+      )}
+      {items.length > 0 || loading ? (
+        <Masonry>
+          <Grid items={items} onOpen={setOpen} />
+          {loading && <Skeletons n={pics.length ? 4 : 8} />}
+        </Masonry>
+      ) : (
+        !error && (
+          <Empty
+            title="Nothing to show"
+            text={q ? `Nothing in ${name} matches “${q}”.` : `No pictures from ${name} right now.`}
+          />
+        )
+      )}
+      {error && (
+        <div className="flex flex-col items-center gap-2 mt-4">
+          <p className="text-sm" style={{ color: '#ff6b6b' }}>
+            {error}
+          </p>
+          <button
+            type="button"
+            onClick={() => void load(pics.length ? offset : 0)}
+            className="px-4 py-2 rounded-full text-sm font-semibold border bg-transparent cursor-pointer"
+            style={{ borderColor: BORDER, color: GOLD }}
+          >
+            Try again
+          </button>
+        </div>
+      )}
+      <Sentinel active={more && !loading && !error && pics.length > 0} onMore={() => void load(offset)} />
+      {open !== null && items[open] && (
+        <Lightbox items={items} index={open} onIndex={setOpen} onClose={() => setOpen(null)} />
+      )}
+    </section>
+  );
+};
 
 // ── Library ──
 
@@ -887,6 +1037,9 @@ const Lightbox = ({
               {size.w} × {size.h}
             </Row>
           )}
+          {it.collection && <Row label="Collection">{it.collection}</Row>}
+          {it.number && <Row label="Item">#{it.number}</Row>}
+          {MARKET_ENABLED && !!it.price && <Row label="Listed at">{moneyWithSats(it.price, cachedExchangeRate())}</Row>}
           {it.contentType && <Row label="Type">{it.contentType.replace('image/', '').toUpperCase()}</Row>}
           <Row label="Transaction">
             <a
@@ -907,6 +1060,17 @@ const Lightbox = ({
           <ActionButton icon={<Download size={15} />} label="Download" onClick={() => void download()} />
           {extra?.(it)}
         </div>
+        {it.collection && (
+          <a
+            href={ordfsUrl(it.origin)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-sm no-underline"
+            style={{ color: GOLD }}
+          >
+            View on chain <ExternalLink size={12} />
+          </a>
+        )}
         {note && (
           <p className="text-sm" style={{ color: GOLD }}>
             {note}

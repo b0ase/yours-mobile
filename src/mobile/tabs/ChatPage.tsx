@@ -52,7 +52,17 @@ import {
   type ChatRowInfo,
   type RowCommands,
 } from '../chat/ChatRowActions';
-import { arrange, isMarked, isMuted, isPinned, roomKeyOf, setMarked, settle, useListPrefs } from '../chat/listPrefs';
+import {
+  arrange,
+  isMarked,
+  isMuted,
+  isPinned,
+  roomKeyOf,
+  setMarked,
+  setPinned as setPrefPinned,
+  settle,
+  useListPrefs,
+} from '../chat/listPrefs';
 import { UndoToastHost } from '../swipe/undo';
 import { fetchRooms, onRooms, roomsCacheKey, sharedChatClient } from '../chat/sharedRooms';
 import { peekThread, readThread, warmThreadCache, writeThread } from '../chat/threadCache';
@@ -106,7 +116,8 @@ import {
 } from '../storeBuild';
 import { LiveBanner } from '../spaces/LiveBanner';
 import { LoungeCard } from '../chat/LoungeCard';
-import { isLounge, LOUNGE_TICKER } from '../chat/loungeInfo';
+import { HELP_DESK_NAME, isLounge, LOUNGE_TICKER } from '../chat/loungeInfo';
+import { setHelpDeskUnpinned, useHelpDeskPinned } from '../chat/helpDeskPin';
 import { roomSpaceOpen } from '../spaces/model';
 import { RoomFilterChips, SpacesRoomList, type RoomFilter } from '../spaces/SpacesFilter';
 
@@ -120,6 +131,7 @@ const NewSpaceSheet = BSPACES_ENABLED
 import {
   amountLabel,
   buildTokenRoomList,
+  holdingFromLookup,
   holdingsFromRooms,
   holdLine,
   parseGateRefusal,
@@ -308,7 +320,7 @@ const Avatar = ({
   );
 };
 
-/** A room's own picture (metadata.icon, https only), e.g. the bWallet Lounge's (owner, 6 Oct 2026). */
+/** A room's own picture (metadata.icon, https only), e.g. the bWallet Help Desk's (owner, 6 Oct 2026). */
 const roomIcon = (room: ChatRoom): string | null => {
   const icon = (room.metadata as { icon?: unknown } | null | undefined)?.icon;
   return typeof icon === 'string' && /^https:\/\//.test(icon) ? icon : null;
@@ -906,7 +918,7 @@ const Conversation = ({
                 style={{ background: '#0c2433', color: '#e6f4ff', border: '1px solid #1d4d6b' }}
               >
                 <div className="flex items-center gap-1.5 text-[11px] mb-1" style={{ color: '#8fcdf5' }}>
-                  <span className="font-semibold">{String(it.message.event_payload?.name || 'Lounge bot')}</span>
+                  <span className="font-semibold">{String(it.message.event_payload?.name || 'Help Desk bot')}</span>
                   <span className="text-[9px] font-bold px-1 rounded" style={{ background: '#1f6d9c', color: '#fff' }}>
                     BOT
                   </span>
@@ -2503,6 +2515,14 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   const tokenOther = shown.filter(({ e }) => e.status !== 'member');
   // Telegram-style list (chat/listPrefs.ts): pinned first, then newest activity; archived in one group.
   const [prefs, updatePrefs] = useListPrefs(handle);
+  const helpDeskPinned = useHelpDeskPinned();
+  // Pinning the unpinned Help Desk row brings back its card (and drops the ordinary pin).
+  useEffect(() => {
+    const k = roomKeyOf(LOUNGE_TICKER);
+    if (helpDeskPinned || !isPinned(prefs, k)) return;
+    updatePrefs((p) => setPrefPinned(p, k, false));
+    setHelpDeskUnpinned(false);
+  }, [helpDeskPinned, prefs, updatePrefs]);
   const arranged = useMemo(() => {
     const roomOf = (x: { kind: 'open'; room: ChatRoom } | { kind: 'token'; item: (typeof shown)[number] }) =>
       x.kind === 'open' ? x.room : x.item.e.room;
@@ -2510,9 +2530,10 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
       ...[...myOpen].sort(byActivity).map((room) => ({ kind: 'open' as const, room })),
       ...(ROOMS ? tokenMine.map((item) => ({ kind: 'token' as const, item })) : []),
     ];
-    // The bWallet Lounge is the yellow card above this list (LoungeCard, pinned as before), so it isn't a row here.
+    // The bWallet Help Desk is the yellow card above this list (LoungeCard) while pinned, so it isn't a row
+    // here. Unpinned on this device, it's an ordinary row (helpDeskPin.ts).
     return arrange(
-      list.filter((x) => !(x.kind === 'open' && isLounge(x.room.ticker))),
+      helpDeskPinned ? list.filter((x) => !(x.kind === 'open' && isLounge(x.room.ticker))) : list,
       prefs,
       (x) => roomKeyOf(roomOf(x)?.ticker ?? (x.kind === 'token' ? x.item.e.key : '')),
       (x) => {
@@ -2520,7 +2541,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
         return r ? roomActivity(r) : 0;
       },
     );
-  }, [myOpen, tokenMine, prefs]);
+  }, [myOpen, tokenMine, prefs, helpDeskPinned]);
   const yours = arranged.main;
   // A new message brings an archived (not muted) or deleted chat back: record that.
   useEffect(() => {
@@ -2586,14 +2607,14 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     setHidden(new Set());
     setOpen({ room, entry: null, joinSpace });
   };
-  /** The pinned Lounge card: open (or first join) the Lounge, optionally straight into its Space. */
+  /** The pinned Help Desk card: open (or first join) the Help Desk, optionally straight into its Space. */
   const openLounge = async (joinSpace: boolean) => {
     const mine = (rooms ?? []).find((r) => isLounge(r.ticker));
     if (mine) return openOpenRoom(mine, joinSpace);
     try {
       await client.joinOpenRoom({ ticker: LOUNGE_TICKER });
       openOpenRoom(
-        stubRoom(LOUNGE_TICKER, 'bWallet Lounge', {
+        stubRoom(LOUNGE_TICKER, HELP_DESK_NAME, {
           metadata: { kind: 'open', open: { visibility: 'public', official: true } },
         }),
         joinSpace,
@@ -2716,7 +2737,9 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
       );
       await prove(key);
       const look = parseLookup(await client.tokenRoom(key).catch(() => null));
-      const list = buildTokenRoomList(held, rooms ?? [], look ? { [key]: look } : {});
+      // MNEE isn't in the 1Sat index: when the wallet sees nothing, trust bit-sign's own check.
+      const fromServer = held.length ? null : holdingFromLookup(look);
+      const list = buildTokenRoomList(fromServer ? [fromServer] : held, rooms ?? [], look ? { [key]: look } : {});
       if (list[0]) return void openEntry(list[0]);
       // Not held (or below the minimum): show the lock with the room's real terms.
       const gate = look?.gate ?? { key, symbol: held[0]?.symbol ?? 'TOKEN', dec: held[0]?.dec ?? 0, minRaw: '1' };
@@ -2934,15 +2957,15 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           <div className="px-4 pb-1 flex gap-2">
             <button
               onClick={() => setNewRoom(true)}
-              className="rounded-2xl px-4 py-2 text-sm font-bold inline-flex items-center gap-1"
+              className="flex-1 rounded-2xl px-4 py-2 text-sm font-bold inline-flex items-center justify-center gap-1"
               style={{ background: GOLD, color: '#1a1300' }}
             >
-              <Plus size={16} strokeWidth={2.6} /> New room
+              <Plus size={16} strokeWidth={2.6} /> New Room
             </button>
             {BSPACES_ENABLED && (
               <button
                 onClick={() => setNewSpace(true)}
-                className="rounded-2xl px-4 py-2 text-sm font-bold inline-flex items-center gap-1"
+                className="flex-1 rounded-2xl px-4 py-2 text-sm font-bold inline-flex items-center justify-center gap-1"
                 style={{ border: `1px solid ${GOLD}`, color: GOLD }}
               >
                 <Plus size={16} strokeWidth={2.6} /> New Space
@@ -2975,8 +2998,9 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
         )}
 
         {BSPACES_ENABLED && ROOMS && handle && rooms && <RoomFilterChips value={roomFilter} onChange={setRoomFilter} />}
-        {BSPACES_ENABLED && ROOMS && handle && rooms && roomFilter === 'spaces' && (
+        {BSPACES_ENABLED && ROOMS && handle && rooms && roomFilter !== 'rooms' && (
           <SpacesRoomList
+            quiet={roomFilter === 'all'}
             client={client}
             me={handle}
             items={tokenMine.flatMap(({ e }) =>
@@ -2991,19 +3015,22 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           />
         )}
 
-        {handle && rooms && (!BSPACES_ENABLED || roomFilter === 'all') && (
+        {handle && rooms && (!BSPACES_ENABLED || roomFilter !== 'spaces') && (
           <>
-            <LoungeCard
-              client={client}
-              room={(rooms ?? []).find((r) => isLounge(r.ticker)) ?? null}
-              me={handle}
-              preview={(() => {
-                const r = (rooms ?? []).find((x) => isLounge(x.ticker));
-                return r ? previewText(r, handle) : '';
-              })()}
-              onOpen={() => void openLounge(false)}
-              onJoin={() => void openLounge(true)}
-            />
+            {helpDeskPinned && (
+              <LoungeCard
+                client={client}
+                room={(rooms ?? []).find((r) => isLounge(r.ticker)) ?? null}
+                me={handle}
+                preview={(() => {
+                  const r = (rooms ?? []).find((x) => isLounge(x.ticker));
+                  return r ? previewText(r, handle) : '';
+                })()}
+                onOpen={() => void openLounge(false)}
+                onJoin={() => void openLounge(true)}
+                onUnpin={() => setHelpDeskUnpinned(true)}
+              />
+            )}
             <ListLabel>Your rooms</ListLabel>
             {yours.length === 0 && arranged.archived.length === 0 && (
               <p className="px-4 pb-2 text-xs" style={{ color: MUTED }}>

@@ -39,6 +39,14 @@ import {
   type TokenSort,
 } from './bexCards';
 import { useReel } from './useReel';
+import {
+  isActiveOnMarket,
+  marketActivity,
+  withTokenEvidence,
+  type MarketActivity,
+} from '../../exchange/marketActivity';
+import { inReelWindow, useAppVisible, useReelDevLog, useReelVideo } from '../reelMemory';
+import { useInPeek } from '../../phone/pageEl';
 
 const GOLD = '#FFD24D';
 const MUTED = '#a3a8b0';
@@ -76,45 +84,52 @@ const Spark = ({ trades, up }: { trades: Trade[]; up: boolean }) => {
   );
 };
 
-const Art = ({ c, playing }: { c: TokenCard; playing: boolean }) => (
-  <div className="absolute inset-0 flex items-center justify-center" style={{ background: BACKDROP }}>
-    {c.icon?.startsWith('https://') ? (
-      <img src={c.icon} alt="" className="h-36 w-36 rounded-full object-cover" />
-    ) : (
-      <TokenIcon icon={c.icon} sym={c.ticker} size={144} />
-    )}
-    {c.video && playing && (
-      <>
-        <video
-          src={c.video}
-          autoPlay
-          muted
-          loop
-          playsInline
-          preload="metadata"
-          className="absolute inset-0 h-full w-full object-cover"
-        />
-        <span
-          className="absolute left-3 top-14 rounded-full px-2.5 py-1 text-[11px] font-semibold text-white"
-          style={{ background: 'rgba(0,0,0,0.55)' }}
-        >
-          Advert made by the creator
-        </span>
-      </>
-    )}
-  </div>
-);
+/** Art only within the reel window (reelMemory.ts); further away the card is just its backdrop. */
+const Art = ({ c, near, playing }: { c: TokenCard; near: boolean; playing: boolean }) => {
+  const video = useReelVideo(playing);
+  return (
+    <div className="absolute inset-0 flex items-center justify-center" style={{ background: BACKDROP }}>
+      {!near ? null : c.icon?.startsWith('https://') ? (
+        <img src={c.icon} alt="" decoding="async" className="h-36 w-36 rounded-full object-cover" />
+      ) : (
+        <TokenIcon icon={c.icon} sym={c.ticker} size={144} />
+      )}
+      {c.video && playing && (
+        <>
+          <video
+            ref={video}
+            src={c.video}
+            autoPlay
+            muted
+            loop
+            playsInline
+            preload="metadata"
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+          <span
+            className="absolute left-3 top-14 rounded-full px-2.5 py-1 text-[11px] font-semibold text-white"
+            style={{ background: 'rgba(0,0,0,0.55)' }}
+          >
+            Advert made by the creator
+          </span>
+        </>
+      )}
+    </div>
+  );
+};
 
 const TokenSlide = ({
   c,
   i,
   active,
+  shown,
   live,
   rate,
 }: {
   c: TokenCard;
   i: number;
   active: number;
+  shown: boolean;
   live: Live | undefined;
   rate: number;
 }) => {
@@ -126,7 +141,7 @@ const TokenSlide = ({
     'min-w-0 flex-1 basis-0 select-none rounded-md px-3 py-2.5 text-center text-[16px] font-extrabold uppercase tracking-[0.06em] active:opacity-70';
   return (
     <div data-i={i} className="relative w-full overflow-hidden" style={{ height: '100%', scrollSnapAlign: 'start' }}>
-      <Art c={c} playing={i === active} />
+      <Art c={c} near={inReelWindow(i, active, shown)} playing={shown && i === active} />
       <div
         className="pointer-events-none absolute inset-x-0 bottom-0 h-[60%]"
         style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.94), rgba(0,0,0,0))' }}
@@ -193,6 +208,33 @@ const BexReel = () => {
   const people = usePeopleTokens();
   const [live, setLive] = useState<Record<string, Live>>({});
   const [statsDone, setStatsDone] = useState(0);
+  // Default: only tokens with an active listing or a trade in the last 30 days on 1sat.market.
+  const [activeOnly, setActiveOnly] = useState(true);
+  const [activity, setActivity] = useState<MarketActivity | null | 'error'>(null);
+
+  useEffect(() => {
+    let on = true;
+    void marketActivity()
+      .then((a) => on && setActivity(a))
+      .catch(() => on && setActivity('error'));
+    return () => {
+      on = false;
+    };
+  }, []);
+
+  // A card's own live data (a floor or its trades) also counts as activity.
+  useEffect(() => {
+    setActivity((a) => {
+      if (!a || a === 'error') return a;
+      let next = a;
+      for (const [id, l] of Object.entries(live))
+        next = withTokenEvidence(next, id, {
+          listed: l.floor !== null,
+          lastTradeHeight: l.trades.length ? l.trades[l.trades.length - 1].height : null,
+        });
+      return next;
+    });
+  }, [live]);
 
   useEffect(() => {
     let on = true;
@@ -211,7 +253,7 @@ const BexReel = () => {
     };
   }, []);
 
-  const cards = useMemo(
+  const allCards = useMemo(
     () =>
       mergeTokens(
         (board ?? []).map((r) => ({ id: r.ref.id, title: r.title, icon: r.icon, outputs: r.outputs })),
@@ -220,6 +262,13 @@ const BexReel = () => {
       ),
     [board, launches, people],
   );
+  // When 1sat.market can't be reached, show everything rather than nothing (and say so).
+  const filtering = activeOnly && activity !== 'error';
+  const cards = useMemo(
+    () => (!filtering ? allCards : activity ? allCards.filter((c) => isActiveOnMarket(c.id, activity)) : []),
+    [allCards, filtering, activity],
+  );
+  const waiting = board === null || (filtering && activity === null);
 
   // 24h stats for the first cards (once each, cached by the indexer), so change / volume sorts have data.
   const statsKey = cards
@@ -251,6 +300,10 @@ const BexReel = () => {
   const byId = useMemo(() => new Map(cards.map((c) => [c.id, c])), [cards]);
   const sorted = order.map((id) => byId.get(id)).filter((c): c is TokenCard => !!c);
   const { box, style, active, toTop } = useReel(sorted.length);
+  const offScreen = useInPeek();
+  const appVisible = useAppVisible();
+  const shown = !offScreen && appVisible;
+  useReelDevLog('bExchange', shown ? sorted.filter((_, i) => inReelWindow(i, active)).length : 0);
 
   // Only the card on screen refreshes its price.
   const activeId = sorted[active]?.id;
@@ -272,14 +325,14 @@ const BexReel = () => {
   return (
     <div className="relative w-full">
       <div ref={box} className="w-full overflow-y-auto" style={style}>
-        {board === null && <div className="h-full w-full animate-pulse" style={{ background: BACKDROP }} />}
-        {board !== null && !sorted.length && (
-          <p className="pt-20 text-center text-sm" style={{ color: MUTED }}>
-            No tokens to show yet.
+        {waiting && <div className="h-full w-full animate-pulse" style={{ background: BACKDROP }} />}
+        {!waiting && !sorted.length && (
+          <p className="pt-24 text-center text-sm" style={{ color: MUTED }}>
+            {filtering ? 'No tokens active on 1sat.market right now.' : 'No tokens to show yet.'}
           </p>
         )}
         {sorted.map((c, i) => (
-          <TokenSlide key={c.id} c={c} i={i} active={active} live={live[c.id]} rate={rate} />
+          <TokenSlide key={c.id} c={c} i={i} active={active} shown={shown} live={live[c.id]} rate={rate} />
         ))}
       </div>
       <div className="absolute inset-x-0 top-0 flex gap-2 overflow-x-auto px-3 pt-3" role="tablist" aria-label="Sort">
@@ -307,6 +360,39 @@ const BexReel = () => {
             {s.label}
           </button>
         ))}
+      </div>
+      <div className="absolute inset-x-0 top-12 flex items-center gap-2 px-3" role="group" aria-label="Filter">
+        {[
+          { on: true, label: 'Active on 1sat.market' },
+          { on: false, label: 'Show all' },
+        ].map((f) => (
+          <button
+            key={f.label}
+            aria-pressed={activeOnly === f.on}
+            onClick={() => {
+              setActiveOnly(f.on);
+              toTop();
+            }}
+            className="shrink-0 rounded-full px-3 py-1 text-[11px] font-semibold"
+            style={
+              activeOnly === f.on
+                ? { background: 'rgba(255,210,77,0.18)', border: `1px solid ${GOLD}`, color: GOLD }
+                : {
+                    background: 'rgba(0,0,0,0.45)',
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    color: '#fff',
+                    backdropFilter: 'blur(12px)',
+                  }
+            }
+          >
+            {f.label}
+          </button>
+        ))}
+        {activeOnly && activity === 'error' && (
+          <span className="text-[11px]" style={{ color: MUTED }}>
+            1sat.market unreachable, showing all
+          </span>
+        )}
       </div>
     </div>
   );

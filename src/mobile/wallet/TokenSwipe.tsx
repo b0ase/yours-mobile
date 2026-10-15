@@ -75,7 +75,7 @@ export const TokenSwipe = (p: TokenSwipeProps) => {
       </SwipeRow>
       {p.pinned && (
         <span className="bw-pin-mark" aria-label="Pinned">
-          <Pin size={11} />
+          <Pin size={11} fill="currentColor" />
         </span>
       )}
     </div>

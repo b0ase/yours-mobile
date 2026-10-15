@@ -14,9 +14,11 @@ const LINE = '#1f2127';
 const PANEL = '#121316';
 const CLIP = 'overflow-hidden text-ellipsis whitespace-nowrap';
 
-export type RoomFilter = 'all' | 'spaces';
+// All = live Spaces on top, then every room; Rooms = rooms only; Spaces = Spaces only (owner, 15 Oct 2026).
+export type RoomFilter = 'all' | 'rooms' | 'spaces';
 const CHIPS: [RoomFilter, string][] = [
   ['all', 'All'],
+  ['rooms', 'Rooms'],
   ['spaces', 'Spaces'],
 ];
 
@@ -55,11 +57,14 @@ export const SpacesRoomList = ({
   me,
   items,
   onOpen,
+  quiet = false,
 }: {
   client: BchatClient;
   me: string;
   items: SpaceRoomItem[];
   onOpen: (key: string) => void;
+  /** Under All: show only live Spaces, with no empty or loading notes. */
+  quiet?: boolean;
 }) => {
   const states = useRoomSpaces(
     client,
@@ -67,6 +72,7 @@ export const SpacesRoomList = ({
     me,
     true,
   );
+  if (quiet && (items.length === 0 || !states)) return null;
   if (items.length === 0)
     return (
       <p className="px-4 pt-4 text-xs" style={{ color: MUTED }}>
@@ -82,7 +88,7 @@ export const SpacesRoomList = ({
   const rows = roomsWithSpaces(items.filter((i) => states[i.ticker]).map((i) => ({ ...i, state: states[i.ticker] })));
   return (
     <>
-      {rows.length === 0 && (
+      {rows.length === 0 && !quiet && (
         <p className="px-4 pt-4 text-xs" style={{ color: MUTED }}>
           No spaces on in your rooms right now. This list refreshes every 30 seconds.
         </p>
