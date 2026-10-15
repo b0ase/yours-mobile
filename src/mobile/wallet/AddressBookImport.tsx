@@ -15,6 +15,10 @@ import {
   type ParseResult,
   type PreviewRow,
 } from './abookParse';
+import { friendsProblemText, friendsToEntries } from '../social/handcashCore';
+import { HandCashFriendsError, fetchHandCashFriends, handcashAvailable } from '../social/handcashLogin';
+import { HandCashSignIn } from '../social/HandCashSignIn';
+import { HANDCASH_SIGNIN_ENABLED } from '../storeBuild';
 
 const f = (u: string, i?: RequestInit) => fetch(u, i);
 const LOOKUPS_AT_ONCE = 4;
@@ -51,6 +55,28 @@ export const AddressBookImport = ({
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
   const run = useRef(0);
+  const [hcBusy, setHcBusy] = useState(false);
+  const [hcSignIn, setHcSignIn] = useState(false);
+
+  // "Bring in my HandCash friends": the same preview as a file, fed from bit-sign's HandCash friends list.
+  const bringHandCash = async () => {
+    if (!HANDCASH_SIGNIN_ENABLED) return;
+    setMsg('');
+    setHcBusy(true);
+    try {
+      const entries = friendsToEntries(await fetchHandCashFriends());
+      setHcSignIn(false);
+      setDomain(null);
+      if (!entries.length) setMsg('No HandCash friends to bring in.');
+      else setParsed({ entries, invalid: [] });
+    } catch (e) {
+      const problem = e instanceof HandCashFriendsError ? e.problem : 'failed';
+      setHcSignIn(problem === 'signin' || problem === 'no_handcash' || problem === 'no_permission');
+      setMsg(friendsProblemText[problem]);
+    } finally {
+      setHcBusy(false);
+    }
+  };
 
   // The book as it was when the preview was built: a refresh after saving must not restart the lookups.
   const book = useRef(contacts);
@@ -185,6 +211,16 @@ export const AddressBookImport = ({
           <button type="button" className={btn} style={primary} disabled={!text.trim()} onClick={preview}>
             Preview
           </button>
+          {HANDCASH_SIGNIN_ENABLED && handcashAvailable() && (
+            <>
+              <button type="button" className={btn} style={box} disabled={hcBusy} onClick={() => void bringHandCash()}>
+                <span style={{ color: 'var(--bw-text)' }}>
+                  {hcBusy ? 'Asking HandCash…' : 'Bring in my HandCash friends'}
+                </span>
+              </button>
+              {hcSignIn && <HandCashSignIn onHandle={() => setHcSignIn(false)} />}
+            </>
+          )}
         </>
       )}
 

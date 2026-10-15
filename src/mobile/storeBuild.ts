@@ -207,6 +207,15 @@ export const APP_NAME = appNameFor();
  */
 // Literal env checks (like the gates above): `!STORE_BUILD` was not folded, so the Buy BSV sheet and its provider
 // list were still in the store bundle (store parity, 10 Oct 2026).
+/**
+ * Sign in with HandCash + "Bring in my HandCash friends" (15 Oct 2026): the same store gate as Continue with X
+ * (socialLoginEnabled, guideline 4.8: no Sign in with Apple beside it), as a literal so the store bundle drops it.
+ */
+export const HANDCASH_SIGNIN_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
 export const BUY_CRYPTO_ENABLED: boolean = !(
   import.meta.env.VITE_STORE_BUILD === '1' ||
   import.meta.env.VITE_CHANNEL === 'ios-store' ||

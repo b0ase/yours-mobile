@@ -9,6 +9,10 @@ import { handleState } from '../names/handlePrompt';
 import { listPaymails, type WalletName } from '../names/paymail';
 import { SocialSignIn } from '../social/SocialSignIn';
 import { onSocialChange, socialProof } from '../social/socialLogin';
+import { useHandCashHandle } from '../social/useHandCashHandle';
+import { BWALLET_PAYMAIL_DOMAIN } from '../names/config';
+import { toAlias } from '../names/paymail';
+import { HANDCASH_SIGNIN_ENABLED } from '../storeBuild';
 
 /**
  * Settings › Identity › Connect X / Google. Signing in proves the account (photo, display name); it
@@ -23,6 +27,10 @@ export const ConnectSocial = ({ onClose }: { onClose: () => void }) => {
   const identityAddress = account?.addresses?.identityAddress ?? '';
   const [proof, setProof] = useState(() => socialProof(identityAddress));
   const [choosing, setChoosing] = useState(false);
+  // Signed in with HandCash: offer the matching name@bwalletx.com through the normal claim (HandleFlow).
+  const hcHandle = useHandCashHandle();
+  const hcAlias = hcHandle ? toAlias(hcHandle) : '';
+  const [suggest, setSuggest] = useState('');
   useEffect(() => onSocialChange(() => setProof(socialProof(identityAddress))), [identityAddress]);
   // The paymail server decides whether this account already has a handle; the cache only paints until it
   // answers. Until then the screen never offers "Choose your handle" (owner, 11 Oct 2026).
@@ -42,7 +50,13 @@ export const ConnectSocial = ({ onClose }: { onClose: () => void }) => {
   const state = handleState(getPaymail(identityAddress), names);
 
   if (choosing)
-    return <HandleFlow onClose={onClose} title={state === 'has' ? 'Change handle' : 'Choose your handle'} />;
+    return (
+      <HandleFlow
+        onClose={onClose}
+        title={state === 'has' ? 'Change handle' : 'Choose your handle'}
+        suggest={suggest || undefined}
+      />
+    );
 
   return createPortal(
     <div className="fixed inset-0 z-[400] flex flex-col" style={{ background: 'var(--bw-bg)' }}>
@@ -50,7 +64,9 @@ export const ConnectSocial = ({ onClose }: { onClose: () => void }) => {
         <button onClick={onClose} aria-label="Back" className="p-2 bg-transparent border-0">
           <ArrowLeft size={20} color="white" />
         </button>
-        <span className="text-[16px] font-bold text-white">Connect X or Google</span>
+        <span className="text-[16px] font-bold text-white">
+          {HANDCASH_SIGNIN_ENABLED ? 'Connect X, Google or HandCash' : 'Connect X or Google'}
+        </span>
       </div>
       <div className="flex flex-col items-center px-5 pb-10 overflow-y-auto">
         <p className="text-sm text-center mt-4 mb-5" style={{ color: '#98A2B3' }}>
@@ -64,6 +80,18 @@ export const ConnectSocial = ({ onClose }: { onClose: () => void }) => {
           .
         </p>
         <SocialSignIn owner={identityAddress} onProfile={() => setProof(socialProof(identityAddress))} />
+        {HANDCASH_SIGNIN_ENABLED && state === 'none' && hcAlias && BWALLET_PAYMAIL_DOMAIN && (
+          <button
+            onClick={() => (setSuggest(hcAlias), setChoosing(true))}
+            className="mt-2 w-[92%] flex flex-col items-center justify-center rounded-xl py-3 font-bold border-0"
+            style={{ background: 'var(--bw-accent)', color: '#000' }}
+          >
+            <span>
+              Claim {hcAlias}@{BWALLET_PAYMAIL_DOMAIN}
+            </span>
+            <span className="text-[11px] font-normal">First claim on your HandCash name</span>
+          </button>
+        )}
         {state !== 'loading' && (proof || current) && (
           <button
             onClick={() => setChoosing(true)}
