@@ -19,6 +19,9 @@ import {
   PAYMAIL_ALIAS_RE,
   SOCIAL_ALIAS_RE,
   toAlias,
+  DISPLAY_NAME_MAX,
+  cleanDisplayName,
+  defaultDisplayName,
 } from './paymail';
 import { clearSocial, socialProof } from '../social/socialLogin';
 import { BWALLET_PAYMAIL_API, BWALLET_PAYMAIL_DOMAIN } from './config';
@@ -82,6 +85,8 @@ export const HandleFlow = ({
   const profileName = account?.settings?.socialProfile?.displayName ?? '';
   const [paymail, setPm] = useState(getPaymail(identityAddress));
   const [alias, setAlias] = useState(() => suggestHandle(profileName, account?.name ?? ''));
+  // Optional "Your name" (owner, 15 Oct 2026): shown to people who pay the paymail. Blank → the server uses the handle.
+  const [yourName, setYourName] = useState(() => cleanDisplayName(profileName));
   const [state, setState] = useState<AliasState>('idle');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
@@ -129,7 +134,7 @@ export const HandleFlow = ({
   // Continue with X / Google: nothing is registered for the user (owner, 9 Oct 2026: users choose their
   // handle). X prefills its @name as a suggestion they can change; Google suggests nothing (an email-derived
   // name published the address). Old servers send only `alias` (b0asex.x): its X part is the suggestion.
-  const [suggested] = useState<string | null>(() => {
+  const [_suggested] = useState<string | null>(() => {
     const p = socialProof(identityAddress)?.profile;
     if (!p || p.provider !== 'x') return null;
     const a = toAlias(p.suggested_handle || p.name || '');
@@ -275,7 +280,11 @@ export const HandleFlow = ({
       const proof = socialProof(identityAddress);
       const pm = await claimPaymail(f, apiContext.wallet, alias, {
         ordAddress,
-        name: proof?.profile.display || profileName || (suggested ?? undefined),
+        name:
+          cleanDisplayName(yourName) ||
+          cleanDisplayName(proof?.profile.display) ||
+          cleanDisplayName(profileName) ||
+          undefined,
         avatar: paymailAvatar(proof?.profile.avatar || account?.settings?.socialProfile?.avatar),
         ...fee,
       });
@@ -400,6 +409,17 @@ export const HandleFlow = ({
               <p className="text-xs" style={{ color: GRAY }}>
                 {blocked}
               </p>
+            )}
+            {!paymail && (
+              <input
+                value={yourName}
+                maxLength={DISPLAY_NAME_MAX}
+                placeholder={`Your name (optional), e.g. ${defaultDisplayName(alias) || 'Mike Smith'}`}
+                aria-label="Your name"
+                onChange={(e) => setYourName(e.target.value)}
+                className="rounded-xl px-3 h-11 outline-none text-sm text-white"
+                style={{ background: '#0b0c0f', border: `1px solid ${BORDER}` }}
+              />
             )}
             {/* With a paymail already, offer "Change to" only once a different name is typed (owner, 11 Oct 2026). */}
             {!owned && !blocked && (!paymail || (!!alias && `${alias}@${BWALLET_PAYMAIL_DOMAIN}` !== paymail)) && (

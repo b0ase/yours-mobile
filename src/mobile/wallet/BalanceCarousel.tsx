@@ -1,9 +1,19 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { PenLine, X } from 'lucide-react';
+import { BookUser, CalendarDays, PenLine, X } from 'lucide-react';
 import { BCREDITS_ENABLED, BUY_CRYPTO_ENABLED, PLACEMENT_ENABLED, STORE_BUILD } from '../storeBuild';
-import { PNEE_ICON } from '../notes/pnee';
+import { PNEE_ICON, PNEE_TOKEN_ID } from '../notes/pnee';
 import { requestWalletAction } from '../phone/walletAction';
 import { MNEE_ICON_URL } from '../../utils/constants';
 import { getListCoin, getWalletKind, setWalletKind, setWalletView, subscribeWalletKind } from './walletKind';
@@ -16,6 +26,23 @@ import {
   type FocusedToken,
 } from './cardFocus';
 import { CardBalance, CardSkin } from './CardSkin';
+import { useCardBalance } from './balanceStore';
+import {
+  EMPTY_VALUE,
+  cardValueText,
+  creditsUsd,
+  sumHoldings,
+  unpricedNote,
+  useCardUnit,
+  useHeldTokens,
+  type CardValue,
+} from './cardValue';
+import { CardUnitSwitch } from './CardUnitSwitch';
+import { useDisplayCurrency } from '../../hooks/useDisplayCurrency';
+import { latestUsdPerGbp, type Fx } from '../../utils/displayCurrency';
+import { cachedExchangeRate, fetchExchangeRate } from '../../utils/wallet';
+import { useServiceContext } from '../../hooks/useServiceContext';
+import { tokenTrades } from '../exchange/exchangeData';
 import { useCardThemed } from './cardLook';
 import { skinFor } from './cardSkins';
 import { publishBalance } from './balanceStore';
@@ -27,6 +54,7 @@ import { routeFor } from '../tabs/tabs';
 import { AddressBook } from './AddressBook';
 import { allCardsSwipe, opensAddressBook } from './addressBookGesture';
 import { BCal } from './BCal';
+import { subscribeAllCards } from './allCardsOpen';
 import './balanceCards.css';
 
 /**
@@ -69,14 +97,80 @@ type CardDef = {
   agreement?: Agreement;
   /** A tapped token's card: its real balance, already formatted (instead of balanceStore). */
   amount?: string;
+  /** A tapped token's card: its value (whole units at the last sale), for the fiat/BSV line. */
+  value?: CardValue;
 };
 
+/** Cards whose front is a balance (all but Top up): they show a fiat/BSV value and the shared switch. */
+const VALUED = new Set(['tokens', 'btickets', 'bshares', 'bcredits', 'mnee', 'pnee']);
+
+/** What the card fronts need to price a balance: BSV price, display currency, the Tokens card's sum. */
+type ValueCtx = { rate: number; fx: Fx; tokens: CardValue | null };
+const CardValueContext = createContext<ValueCtx>({ rate: 0, fx: { currency: 'USD', usdPerUnit: 1 }, tokens: null });
+
+/**
+ * A card's value from its real balance (balanceStore): MNEE and PNEEs are dollars, a bCredit is 1p, Tokens is the
+ * sum of each held token at its last sale. Tickets and bShares have no price here, so they count as unpriced.
+ */
+const valueFor = (id: string, amount: number, tokens: CardValue | null): CardValue => {
+  switch (id) {
+    case 'mnee':
+    case 'pnee':
+      return { ...EMPTY_VALUE, usd: Math.max(0, amount) };
+    case 'bcredits': {
+      const usd = creditsUsd(amount, latestUsdPerGbp()?.rate ?? null);
+      return usd === null ? { ...EMPTY_VALUE, unpriced: 1 } : { ...EMPTY_VALUE, usd };
+    }
+    case 'tokens':
+      return tokens ?? EMPTY_VALUE;
+    case 'btickets':
+      return { ...EMPTY_VALUE, unpriced: Math.max(0, Math.round(amount)) };
+    case 'bshares':
+      return { ...EMPTY_VALUE, unpriced: amount > 0 ? 1 : 0 };
+    default:
+      return EMPTY_VALUE;
+  }
+};
+
+/**
+ * The value block, laid out exactly like the BSV card (WalletCard): the amount left-aligned on the middle row
+ * (.bw-wcard-centre / .bw-wcard-usd, "N unpriced" in .bw-wcard-sats under it) and the fiat/BSV switch bottom-right
+ * (.bw-wcard-bottom › .bw-wcard-addrline › .bw-wcard-unit).
+ */
+const CardValueFront = ({ id, live, value }: { id: string; live: boolean; value?: CardValue }) => {
+  const ctx = useContext(CardValueContext);
+  const unit = useCardUnit();
+  const bal = useCardBalance(id, live);
+  const v = value ?? valueFor(id, bal?.amount ?? 0, ctx.tokens);
+  const text = cardValueText(v, unit, ctx.rate, ctx.fx);
+  const note = unpricedNote(v);
+  return (
+    <>
+      <span className="bw-wcard-centre" style={{ position: 'relative' }}>
+        <span className={`bw-wcard-usd${unit === 'bsv' ? ' is-bsv' : ''}`}>{text}</span>
+        {note && <span className="bw-wcard-sats">{note}</span>}
+      </span>
+      <span className="bw-wcard-bottom" style={{ position: 'relative' }}>
+        <span className="bw-wcard-bl">
+          <span className="bw-wcard-addrline">
+            <span className="bw-wcard-addrslot" />
+            <CardUnitSwitch fx={ctx.fx} />
+          </span>
+        </span>
+      </span>
+    </>
+  );
+};
+
+type Prices = Record<string, number | null | undefined>;
+
 /** A tapped token row as a card: real balance and icon; the back's buttons are the row's existing actions. */
-const tokenCard = (t: FocusedToken): CardDef => ({
+const tokenCard = (t: FocusedToken, prices: Prices): CardDef => ({
   id: `tok-${t.id}`,
   title: t.name,
   sub: t.amount,
   amount: t.amount,
+  value: sumHoldings([{ amount: t.qty ?? 0, usdEach: t.id === PNEE_TOKEN_ID ? 1 : null, satsEach: prices[t.id] }]),
   issuer: 'BSV-21 token',
   colour: '#14161f',
   logo: <img src={t.icon} alt="" width={22} height={22} style={{ borderRadius: 11 }} />,
@@ -143,13 +237,17 @@ const CardFront = ({ c, live = true, onFlip }: { c: CardDef; live?: boolean; onF
     <CardSkin id={c.id} colour={c.colour} />
     {onFlip && <FlipBtn onFlip={onFlip} back={false} />}
     <CardHead c={c} />
-    <span style={{ position: 'relative' }}>
-      {c.amount !== undefined ? (
-        <span className="bw-skin-bal bw-bc-amt">{c.amount}</span>
-      ) : (
-        <CardBalance id={c.id} live={live} fallback={c.sub} className="bw-skin-bal bw-bc-amt" />
-      )}
-    </span>
+    {c.value || (c.amount === undefined && VALUED.has(c.id)) ? (
+      <CardValueFront id={c.id} live={live} value={c.value} />
+    ) : (
+      <span style={{ position: 'relative' }}>
+        {c.amount !== undefined ? (
+          <span className="bw-skin-bal bw-bc-amt">{c.amount}</span>
+        ) : (
+          <CardBalance id={c.id} live={live} fallback={c.sub} className="bw-skin-bal bw-bc-amt" />
+        )}
+      </span>
+    )}
   </>
 );
 
@@ -475,6 +573,18 @@ const TimeMachine = ({
             );
           })}
         </div>
+        {/* Visible doors (owner, 15 Oct 2026): Address book on the left (a right pull opens it), bCal on the right
+            (a left swipe), so the buttons teach the swipe directions. Theme tokens only. */}
+        <div className="bw-tm-doors">
+          <button type="button" onClick={onBook}>
+            <BookUser size={16} aria-hidden="true" />
+            <span>Address book</span>
+          </button>
+          <button type="button" onClick={onCalendar}>
+            <CalendarDays size={16} aria-hidden="true" />
+            <span>Calendar</span>
+          </button>
+        </div>
         <p className="bw-tm-hint">
           Swipe up and down to fly through · tap a card to land on it · swipe sideways for Friends or bCal
         </p>
@@ -496,6 +606,55 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
   const [mnee, setMnee] = useState<number | null>(readMnee);
   const track = useRef<HTMLDivElement>(null);
   const shares = useBshares();
+
+  // Card values (owner, 15 Oct 2026): the BSV price and Settings › Currency the BSV card uses, and each held
+  // token's last sale on the 1Sat market (exchangeData.ts) for the Tokens card's sum. No price → unpriced.
+  const fx = useDisplayCurrency();
+  const { apiContext } = useServiceContext();
+  const [rate, setRate] = useState(cachedExchangeRate);
+  useEffect(() => {
+    if (!apiContext) return;
+    let on = true;
+    void fetchExchangeRate(apiContext.chain, apiContext.wocApiKey)
+      .then((r) => on && r > 0 && setRate(r))
+      .catch(() => undefined);
+    return () => {
+      on = false;
+    };
+  }, [apiContext]);
+  const held = useHeldTokens();
+  const focusedNow = useSyncExternalStore(subscribeFocusedToken, getFocusedToken, getFocusedToken);
+  const [prices, setPrices] = useState<Prices>({});
+  const priceIds = [...(held ?? []).map((h) => h.id), ...(focusedNow ? [focusedNow.id] : [])]
+    .filter((id) => id !== PNEE_TOKEN_ID)
+    .join(',');
+  useEffect(() => {
+    if (!priceIds) return;
+    let on = true;
+    for (const id of priceIds.split(',')) {
+      void tokenTrades(id, 1).then((t) => {
+        const last = t[t.length - 1]?.satsPerToken;
+        if (on) setPrices((p) => (id in p ? p : { ...p, [id]: last && last > 0 ? last : null }));
+      });
+    }
+    return () => {
+      on = false;
+    };
+  }, [priceIds]);
+  const tokensValue = useMemo(
+    () =>
+      held
+        ? sumHoldings(
+            held.map((h) => ({
+              amount: h.amount,
+              usdEach: h.id === PNEE_TOKEN_ID ? 1 : null,
+              satsEach: prices[h.id],
+            })),
+          )
+        : null,
+    [held, prices],
+  );
+  const valueCtx = useMemo(() => ({ rate, fx, tokens: tokensValue }), [rate, fx, tokensValue]);
 
   // MNEE: the wallet's real balance (BsvWallet shares the last fetch), read only.
   useEffect(() => {
@@ -724,118 +883,122 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
     press.current = null;
   };
   useEffect(() => () => endPress(), []);
+  // The Wallet's "All cards" button (BuyBsv.tsx) opens the browser too; the long-press stays.
+  useEffect(() => subscribeAllCards(() => setTm(true)), []);
 
   return (
-    <div className="bw-bcar">
-      <div className="bw-bcar-stage">
-        <div
-          ref={track}
-          className="bw-bcar-track"
-          style={focused ? { visibility: 'hidden' } : undefined}
-          onScroll={onScroll}
-          onTouchStart={(e) => {
-            pull0.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, left: e.currentTarget.scrollLeft };
-            startPress();
-          }}
-          onTouchEnd={(e) => {
-            endPress();
-            const p = pull0.current;
-            pull0.current = null;
-            if (!p || focused) return;
-            const t = e.changedTouches[0];
-            if (opensAddressBook(p.left, { dx: t.clientX - p.x, dy: t.clientY - p.y })) setBook(true);
-          }}
-          onTouchMove={endPress}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            setTm(true);
-          }}
-        >
-          {cards.map((c) => (
-            <div className="bw-bcar-slide" key={c.id}>
-              {c.id === 'bsv' ? (
-                <div className="bw-bcar-bsv">{bsvCard}</div>
-              ) : (
-                <div className="bw-bcar-wrap">
-                  <FlipCard c={c} />
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-        {focused && (
+    <CardValueContext.Provider value={valueCtx}>
+      <div className="bw-bcar">
+        <div className="bw-bcar-stage">
           <div
-            className="bw-bcar-focus"
-            onTouchStart={(e) => (swipe0.current = { x: e.touches[0].clientX, y: e.touches[0].clientY })}
+            ref={track}
+            className="bw-bcar-track"
+            style={focused ? { visibility: 'hidden' } : undefined}
+            onScroll={onScroll}
+            onTouchStart={(e) => {
+              pull0.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, left: e.currentTarget.scrollLeft };
+              startPress();
+            }}
             onTouchEnd={(e) => {
-              const s0 = swipe0.current;
-              swipe0.current = null;
-              if (!s0) return;
-              const dx = e.changedTouches[0].clientX - s0.x;
-              const dy = e.changedTouches[0].clientY - s0.y;
-              if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) clearFocusedToken();
+              endPress();
+              const p = pull0.current;
+              pull0.current = null;
+              if (!p || focused) return;
+              const t = e.changedTouches[0];
+              if (opensAddressBook(p.left, { dx: t.clientX - p.x, dy: t.clientY - p.y })) setBook(true);
+            }}
+            onTouchMove={endPress}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setTm(true);
             }}
           >
-            <div className="bw-bcar-wrap">
-              <FlipCard key={focused.id} c={tokenCard(focused)} />
-            </div>
-            <button
-              type="button"
-              className="bw-bcar-unfocus"
-              aria-label="Back to your cards"
-              onClick={clearFocusedToken}
-            >
-              <X size={14} aria-hidden="true" />
-            </button>
-          </div>
-        )}
-      </div>
-      <div style={{ position: 'relative', minHeight: 26 }}>
-        {cards.length > 1 && (
-          <div className="bw-bcar-dots" aria-label={`Card ${active + 1} of ${cards.length}`}>
-            {cards.map((c, i) => (
-              <button
-                type="button"
-                key={c.id}
-                aria-label={c.title}
-                className={i === active ? 'is-on' : ''}
-                onClick={() => goTo(i)}
-              />
+            {cards.map((c) => (
+              <div className="bw-bcar-slide" key={c.id}>
+                {c.id === 'bsv' ? (
+                  <div className="bw-bcar-bsv">{bsvCard}</div>
+                ) : (
+                  <div className="bw-bcar-wrap">
+                    <FlipCard c={c} />
+                  </div>
+                )}
+              </div>
             ))}
           </div>
+          {focused && (
+            <div
+              className="bw-bcar-focus"
+              onTouchStart={(e) => (swipe0.current = { x: e.touches[0].clientX, y: e.touches[0].clientY })}
+              onTouchEnd={(e) => {
+                const s0 = swipe0.current;
+                swipe0.current = null;
+                if (!s0) return;
+                const dx = e.changedTouches[0].clientX - s0.x;
+                const dy = e.changedTouches[0].clientY - s0.y;
+                if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) clearFocusedToken();
+              }}
+            >
+              <div className="bw-bcar-wrap">
+                <FlipCard key={focused.id} c={tokenCard(focused, prices)} />
+              </div>
+              <button
+                type="button"
+                className="bw-bcar-unfocus"
+                aria-label="Back to your cards"
+                onClick={clearFocusedToken}
+              >
+                <X size={14} aria-hidden="true" />
+              </button>
+            </div>
+          )}
+        </div>
+        <div style={{ position: 'relative', minHeight: 26 }}>
+          {cards.length > 1 && (
+            <div className="bw-bcar-dots" aria-label={`Card ${active + 1} of ${cards.length}`}>
+              {cards.map((c, i) => (
+                <button
+                  type="button"
+                  key={c.id}
+                  aria-label={c.title}
+                  className={i === active ? 'is-on' : ''}
+                  onClick={() => goTo(i)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+        {book && <AddressBook onClose={() => setBook(false)} />}
+        {cal && <BCal onClose={() => setCal(false)} />}
+        {BUY_CRYPTO_ENABLED && buyOpen && (
+          <BuyBsvSheet
+            onClose={() => setBuyOpen(false)}
+            onReceive={() => {
+              setBuyOpen(false);
+              requestWalletAction('receive');
+            }}
+          />
+        )}
+        {tm && (
+          <TimeMachine
+            cards={cards}
+            bsvCard={bsvCard}
+            start={active}
+            onBook={() => {
+              setTm(false);
+              setBook(true);
+            }}
+            onCalendar={() => {
+              setTm(false);
+              setCal(true);
+            }}
+            onClose={() => setTm(false)}
+            onPick={(i) => {
+              setTm(false);
+              window.setTimeout(() => goTo(i), 60);
+            }}
+          />
         )}
       </div>
-      {book && <AddressBook onClose={() => setBook(false)} />}
-      {cal && <BCal onClose={() => setCal(false)} />}
-      {BUY_CRYPTO_ENABLED && buyOpen && (
-        <BuyBsvSheet
-          onClose={() => setBuyOpen(false)}
-          onReceive={() => {
-            setBuyOpen(false);
-            requestWalletAction('receive');
-          }}
-        />
-      )}
-      {tm && (
-        <TimeMachine
-          cards={cards}
-          bsvCard={bsvCard}
-          start={active}
-          onBook={() => {
-            setTm(false);
-            setBook(true);
-          }}
-          onCalendar={() => {
-            setTm(false);
-            setCal(true);
-          }}
-          onClose={() => setTm(false)}
-          onPick={(i) => {
-            setTm(false);
-            window.setTimeout(() => goTo(i), 60);
-          }}
-        />
-      )}
-    </div>
+    </CardValueContext.Provider>
   );
 };

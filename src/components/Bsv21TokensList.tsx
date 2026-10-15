@@ -174,6 +174,7 @@ export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
       name,
       icon: t.icon ? resolveIcon(t.icon) : GENERIC_TOKEN_ICON,
       amount: `${showAmount(t.all.confirmed, t.dec)} ${t.sym || name}`,
+      qty: Number(t.all.confirmed) / 10 ** (t.dec ?? 0),
       onSend: () => onTokenClick(t),
       onReceive: props.onReceive,
       onLock: props.onLock ? () => props.onLock?.(t) : undefined,

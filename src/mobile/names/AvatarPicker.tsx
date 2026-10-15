@@ -91,7 +91,7 @@ export const AvatarPicker = ({ displayName }: { displayName: string }) => {
       if (pm && paymailEnabled() && httpsUrl) {
         await claimPaymail(f, apiContext.wallet, bareName(pm), {
           ordAddress: account?.addresses?.ordAddress,
-          name: identity.profile.name || displayName,
+          // No name: a picture change keeps the display name set in Settings › Identity.
           avatar: httpsUrl,
         }).catch(() => undefined);
       }

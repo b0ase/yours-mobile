@@ -3,6 +3,7 @@ import { PublicKey, type WalletOutput } from '@bsv/sdk';
 import { getMyName, setMyName } from './myName';
 import { collectPaymailInbox, lookupPaymail, paymailEnabled } from './paymail';
 import { syncBchatHandle } from './bchatHandle';
+import { requestBalanceRefresh } from '../../hooks/balanceRefresh';
 
 /**
  * Per-account naming. One identity key per account; each account has:
@@ -98,6 +99,30 @@ export const payableLabel = (displayName: string, handle: string, paymail: strin
 
 const lastSync = new Map<string, number>();
 
+let inboxFlight: Promise<number> | null = null;
+/**
+ * Collect the paymail inbox now (one run at a time) and refresh the balance when anything came in.
+ * The paymail server records a p2p payment (with its BEEF) the moment the sender delivers it, so the
+ * wallet can internalize it straight away as unconfirmed; this used to run only inside the 150 s
+ * name sync, and the balance then waited for the next address resync (latency audit, 15 Oct 2026).
+ */
+export const collectPaymailNow = (ctx: OneSatContext): Promise<number> => {
+  if (!paymailEnabled()) return Promise.resolve(0);
+  if (inboxFlight) return inboxFlight;
+  const f = (u: string, i?: RequestInit) => fetch(u, i);
+  inboxFlight = collectPaymailInbox(f, ctx.wallet, async (txid) =>
+    ctx.services ? (await ctx.services.getBeefForTxid(txid)).toBinary() : undefined,
+  )
+    .then((r) => {
+      if (r.collected > 0) requestBalanceRefresh();
+      return r.collected;
+    })
+    .finally(() => {
+      inboxFlight = null;
+    });
+  return inboxFlight;
+};
+
 /**
  * The identity address the wallet context actually signs as. Right after Add account / a switch, the
  * top bar already shows the new account while `apiContext` can still be the previous account's wallet;
@@ -158,9 +183,7 @@ export const syncAccountNames = async (
       if (p) {
         // One identity: a bChat session still on its `yours-*` default takes the paymail name.
         void syncBchatHandle(ctx, p);
-        await collectPaymailInbox(f, ctx.wallet, async (txid) =>
-          ctx.services ? (await ctx.services.getBeefForTxid(txid)).toBinary() : undefined,
-        );
+        await collectPaymailNow(ctx);
       }
     })(),
   ]);
