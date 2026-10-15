@@ -51,14 +51,6 @@
                 <data android:scheme="bwalletx" android:host="room" />
                 <data android:scheme="bwalletx" android:host="xinvite" />
             </intent-filter>
-            <!-- Room X invites: www.bchatx.com/i/x/<code>#k=… opens the claim screen (src/mobile/chat/xInvites.ts).
-                 Verified by bchatx.com/.well-known/assetlinks.json. The store build ignores the link (XINVITES_ENABLED). -->
-            <intent-filter android:autoVerify="true">
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="www.bchatx.com" android:pathPrefix="/i/x/" />
-            </intent-filter>
 
         </activity>
 
