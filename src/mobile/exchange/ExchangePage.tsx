@@ -21,6 +21,7 @@ import { PLACEMENT_ENABLED, SWAP_ENABLED } from '../storeBuild';
 const SharesMarket = PLACEMENT_ENABLED ? lazy(() => import('../placement/SharesMarket')) : null;
 import { useTabHome } from '../tabs/useTabHome';
 import { TradeView } from './TradeView';
+import { groupByTicker, normTicker, shortTokenId } from '../tokens/tokenIdentity';
 import { TokenIcon } from './TokenIcon';
 import { Sparkline } from './PriceChart';
 import { chartSeries } from './chartSeries';
@@ -185,6 +186,13 @@ const Markets = ({
     return [...hits.filter((r) => favs.includes(r.ref.id)), ...hits.filter((r) => !favs.includes(r.ref.id))];
   }, [all, labels, filter, q, onlyFavs, favs]);
   const visible = list.slice(0, shown);
+  // Tickers more than one token uses: those rows show their short token id so copies can be told apart.
+  const shared = useMemo(() => {
+    const out = new Set<string>();
+    for (const [t, g] of groupByTicker(all.map((r) => ({ id: r.ref.id, ticker: r.title }))))
+      if (g.length > 1) out.add(t);
+    return out;
+  }, [all]);
 
   // Price, listings and 24h stats for the rows on screen, a few at a time (cached by the indexer).
   const visibleKey = visible.map((r) => r.ref.id).join(',');
@@ -313,7 +321,14 @@ const Markets = ({
                         <td className="py-2">
                           <div className="flex items-center gap-2 min-w-0">
                             <TokenIcon icon={r.icon} sym={r.title} size={28} />
-                            <span className="font-bold text-white truncate max-w-[160px]">{r.title}</span>
+                            <span className="flex flex-col min-w-0">
+                              <span className="font-bold text-white truncate max-w-[160px]">{r.title}</span>
+                              {shared.has(normTicker(r.title)) && (
+                                <span className="text-[10px] font-mono" style={{ color: MUTED }}>
+                                  {shortTokenId(r.ref.id)}
+                                </span>
+                              )}
+                            </span>
                             {x && (
                               <span className="ml-auto hidden sm:inline-flex">
                                 <Sparkline series={chartSeries(x.trades.slice(-30), { lowestAsk: x.floor })} />
@@ -526,6 +541,7 @@ const ExchangePage = () => {
             fav={favs.includes(view.id)}
             onFav={() => onFav(view.id)}
             onBack={() => navigate(EXCHANGE_ROUTE)}
+            onPick={(id) => navigate(tradeRoute(id))}
           />
         )}
         {view.tab === 'swap' && (

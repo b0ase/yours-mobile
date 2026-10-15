@@ -24,6 +24,7 @@ import { marketTradingEnabled } from '../storeBuild';
 import { useBackClose } from '../backStack';
 import { purchaseError } from './purchase';
 import { TokenIcon } from './TokenIcon';
+import { TokenIdentity } from '../tokens/TokenIdPanel';
 import { PriceChart } from './PriceChart';
 import { chartSeries } from './chartSeries';
 import { TokenLabelsRow } from './Categories';
@@ -83,12 +84,15 @@ export const TradeView = ({
   fav,
   onFav,
   onBack,
+  onPick,
 }: {
   id: string;
   rate: number;
   fav: boolean;
   onFav: () => void;
   onBack: () => void;
+  /** Open another token by id (ticker-collision picker). */
+  onPick: (id: string) => void;
 }) => {
   const { apiContext, chromeStorageService } = useServiceContext();
   const { addSnackbar } = useSnackbar();
@@ -195,9 +199,6 @@ export const TradeView = ({
         <TokenIcon icon={meta?.icon} sym={sym} size={36} />
         <div className="min-w-0 flex-1">
           <div className="text-lg font-extrabold text-white">{meta === null ? 'Unknown token' : `$${sym}`}</div>
-          <div className="text-xs truncate" style={{ color: MUTED }}>
-            {id}
-          </div>
           <div className="mt-1">
             <TokenLabelsRow id={id} />
           </div>
@@ -211,6 +212,7 @@ export const TradeView = ({
           <Star size={18} color={GOLD} fill={fav ? GOLD : 'none'} />
         </button>
       </div>
+      <TokenIdentity tokenId={id} ticker={meta?.sym ?? null} onPick={onPick} />
       {launched && (
         <p className="text-[11px] m-0" style={{ color: MUTED }}>
           Launched on the bWalletX Launchpad. {LAUNCH_DISCLAIMER}
