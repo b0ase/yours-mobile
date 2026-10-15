@@ -10,6 +10,7 @@ import { useHoldToTalk } from '../agent/useHoldToTalk';
 import { HoldRing, TalkSheetView } from '../agent/TalkVisuals';
 import { DOCK_LONG_PRESS_MS, edgeFade, fadeMask, longPressCancelled } from './gesture';
 import { itemIcon, itemLabel } from './icons';
+import { useThemedIcon } from '../brand/bappIcons';
 
 /**
  * The phone layout's dock (docs/PHONE-LAYOUT-PLAN.md §5, §14): left slots · the b · right slots, which scroll
@@ -65,6 +66,8 @@ const Tile = ({
   const Icon = itemIcon(item);
   const isApp = item.kind === 'app';
   const [iconFailed, setIconFailed] = useState(false);
+  // The bApp icon set follows the theme pack, like the Apps grid (brand/bappIcons/theme.ts).
+  const themed = useThemedIcon(isApp ? item.icon : undefined);
   const timer = useRef<number | null>(null);
   const start = useRef<{ x: number; y: number } | null>(null);
   const fired = useRef(false);
@@ -119,11 +122,11 @@ const Tile = ({
         >
           {isApp && item.icon && !iconFailed ? (
             <img
-              src={item.icon}
+              src={themed.src}
               alt=""
               draggable={false}
               onError={() => setIconFailed(true)}
-              className="h-10 w-10 rounded-[11px] object-cover"
+              className={`h-10 w-10 rounded-[11px] object-cover${themed.paper ? ' bw-paper-icon' : ''}`}
             />
           ) : (
             <Icon size={isApp ? 18 : 20} color={isApp || active ? GOLD : '#F2F2F0'} />

@@ -2,6 +2,7 @@ import { BAPPS as WALLET_BAPPS } from '../bapps';
 import bvideoIcon from '../brand/bvideo-icon.png';
 import tokenblasterIcon from '../brand/apps/tokenblaster.png';
 import { TOKENBLASTER_ENABLED } from '../storeBuild';
+import { useThemedIcon } from '../brand/bappIcons';
 
 /** Real tile icons from the wallet's own bApps list. */
 const ico = (name: string) => WALLET_BAPPS.find((a) => a.name === name)?.icon as string | undefined;
@@ -70,14 +71,23 @@ export const BAPPS: Bapp[] = [
     : []),
 ];
 
-export const BappIcon = ({ app, size }: { app: Bapp; size: number }) =>
-  app.icon ? (
-    <img className="bx-ico" src={app.icon} alt="" width={size} height={size} />
+export const BappIcon = ({ app, size }: { app: Bapp; size: number }) => {
+  // The bApp icon set follows the theme pack (brand/bappIcons/theme.ts); own artwork gets Mono's paper tile.
+  const themed = useThemedIcon(app.icon);
+  return themed.src ? (
+    <img
+      className={`bx-ico${themed.paper ? ' bw-paper-icon' : ''}`}
+      src={themed.src}
+      alt=""
+      width={size}
+      height={size}
+    />
   ) : (
     <span className="bx-ico bx-mono" style={{ width: size, height: size, fontSize: size * 0.36 }}>
       {app.mono}
     </span>
   );
+};
 
 export default function BappsDock({
   current,

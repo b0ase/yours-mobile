@@ -80,7 +80,7 @@ const itemVariants = {
 
 const SectionLabel = ({ children }: { children: React.ReactNode }) => (
   <div className="px-1 pb-1.5 pt-4 first:pt-0">
-    <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: '#98A2B3' }}>
+    <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
       {children}
     </span>
   </div>
@@ -99,22 +99,22 @@ const MenuRow = ({ icon, title, description, onClick, trailingIcon }: MenuRowPro
     variants={itemVariants}
     whileTap={{ scale: 0.985 }}
     onClick={onClick}
-    className="flex w-full items-center gap-3 rounded-xl px-4 py-3.5 text-left transition-colors duration-150 bg-[var(--bw-surface)] hover:bg-[#1f2128]"
+    className="flex w-full items-center gap-3 rounded-xl px-4 py-3.5 text-left transition-colors duration-150 bg-[var(--bw-surface)] hover:bg-[var(--bw-card2,#1f2128)]"
   >
     <span style={{ color: '#A1FF8B' }} className="shrink-0">
       {icon}
     </span>
     <span className="flex min-w-0 flex-1 flex-col">
-      <span className="text-sm font-semibold" style={{ color: '#FFFFFF' }}>
+      <span className="text-sm font-semibold" style={{ color: 'var(--bw-text, #FFFFFF)' }}>
         {title}
       </span>
       {description && (
-        <span className="truncate text-xs leading-snug" style={{ color: '#98A2B3' }}>
+        <span className="truncate text-xs leading-snug" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
           {description}
         </span>
       )}
     </span>
-    {trailingIcon ?? <ChevronRight size={16} style={{ color: '#98A2B3' }} className="shrink-0" />}
+    {trailingIcon ?? <ChevronRight size={16} style={{ color: 'var(--bw-muted, #98A2B3)' }} className="shrink-0" />}
   </motion.button>
 );
 
@@ -130,9 +130,9 @@ const BackHeader = ({ title, onBack }: { title: string; onBack: () => void }) =>
       className="flex h-8 w-8 items-center justify-center rounded-lg"
       style={{ background: '#17191E' }}
     >
-      <ArrowLeft size={16} style={{ color: '#FFFFFF' }} />
+      <ArrowLeft size={16} style={{ color: 'var(--bw-text, #FFFFFF)' }} />
     </motion.button>
-    <span className="text-base font-bold" style={{ color: '#FFFFFF' }}>
+    <span className="text-base font-bold" style={{ color: 'var(--bw-text, #FFFFFF)' }}>
       {title}
     </span>
   </div>
@@ -456,7 +456,7 @@ export const AppsAndTools = () => {
             title="Contribute or Integrate"
             description="All the tools you need to get involved"
             onClick={() => window.open(theme.settings.repo, '_blank')}
-            trailingIcon={<ExternalLink size={14} style={{ color: '#98A2B3' }} className="shrink-0" />}
+            trailingIcon={<ExternalLink size={14} style={{ color: 'var(--bw-muted, #98A2B3)' }} className="shrink-0" />}
           />
         </RowGroup>
       </motion.div>
@@ -474,7 +474,7 @@ export const AppsAndTools = () => {
       className="flex w-full flex-col"
     >
       <BackHeader title="Lock BSV" onBack={() => setPage('main')} />
-      <p className="mb-4 text-xs leading-relaxed" style={{ color: '#98A2B3' }}>
+      <p className="mb-4 text-xs leading-relaxed" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
         Lock your BSV for a set period of time. This will prevent you from spending them until the lock expires.
       </p>
       <div className="flex flex-col gap-3">
@@ -524,7 +524,7 @@ export const AppsAndTools = () => {
       {/* Table header */}
       <div
         className="mb-1 grid grid-cols-3 rounded-lg px-4 py-2 text-[10px] font-semibold uppercase tracking-wider"
-        style={{ color: '#98A2B3', background: '#17191E' }}
+        style={{ color: 'var(--bw-muted, #98A2B3)', background: '#17191E' }}
       >
         <span className="text-left">TxID</span>
         <span className="text-center">Blocks Left</span>
@@ -541,9 +541,9 @@ export const AppsAndTools = () => {
               <div
                 key={u.outpoint}
                 className="grid grid-cols-3 rounded-xl px-4 py-3 text-sm"
-                style={{ background: '#17191E', color: '#FFFFFF' }}
+                style={{ background: '#17191E', color: 'var(--bw-text, #FFFFFF)' }}
               >
-                <span className="text-left font-mono text-xs" style={{ color: '#98A2B3' }}>
+                <span className="text-left font-mono text-xs" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
                   {truncate(txid, 4, 4)}
                 </span>
                 <span className="text-center text-xs font-semibold" style={{ color: '#A1FF8B' }}>
@@ -580,15 +580,15 @@ export const AppsAndTools = () => {
         when={featuredApps.length > 0}
         whenFalseContent={
           <div className="flex flex-col items-center justify-center py-16">
-            <Compass size={40} style={{ color: '#98A2B3' }} className="mb-3" />
-            <span className="text-sm" style={{ color: '#98A2B3' }}>
+            <Compass size={40} style={{ color: 'var(--bw-muted, #98A2B3)' }} className="mb-3" />
+            <span className="text-sm" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
               No apps listed yet
             </span>
           </div>
         }
       >
         <>
-          <p className="mb-3 text-xs leading-relaxed" style={{ color: '#98A2B3' }}>
+          <p className="mb-3 text-xs leading-relaxed" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
             If your app has integrated {theme.settings.displayName ?? `${theme.settings.walletName} Wallet`} but is not
             listed,{' '}
             <a
@@ -607,15 +607,15 @@ export const AppsAndTools = () => {
                 key={app.name + idx}
                 whileTap={{ scale: 0.985 }}
                 onClick={() => window.open(app.link, '_blank')}
-                className="flex w-full items-center justify-between rounded-xl px-4 py-3 text-left transition-colors duration-150 bg-[var(--bw-surface)] hover:bg-[#1f2128]"
+                className="flex w-full items-center justify-between rounded-xl px-4 py-3 text-left transition-colors duration-150 bg-[var(--bw-surface)] hover:bg-[var(--bw-card2,#1f2128)]"
               >
                 <div className="flex items-center gap-3">
                   <img src={app.icon} alt={app.name} className="h-10 w-10 rounded-lg object-cover" />
-                  <span className="text-sm font-semibold" style={{ color: '#FFFFFF' }}>
+                  <span className="text-sm font-semibold" style={{ color: 'var(--bw-text, #FFFFFF)' }}>
                     {app.name}
                   </span>
                 </div>
-                <ExternalLink size={14} style={{ color: '#98A2B3' }} />
+                <ExternalLink size={14} style={{ color: 'var(--bw-muted, #98A2B3)' }} />
               </motion.button>
             ))}
           </div>
@@ -637,7 +637,7 @@ export const AppsAndTools = () => {
       <BackHeader title="Support Project" onBack={() => setPage('main')} />
       <div className="flex flex-col items-center">
         <img src={yoursLogo} alt="Wallet Logo" className="mb-3 h-12 w-12 rounded-xl" />
-        <p className="mb-4 text-center text-xs leading-relaxed" style={{ color: '#98A2B3' }}>
+        <p className="mb-4 text-center text-xs leading-relaxed" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
           Yours is an open-source initiative. Consider supporting its continued development.
         </p>
       </div>
@@ -698,12 +698,13 @@ export const AppsAndTools = () => {
           className="mt-4 w-full rounded-xl p-4"
           style={{ background: 'rgba(52,211,153,0.06)', border: '1px solid rgba(52,211,153,0.15)' }}
         >
-          <p className="text-sm font-semibold text-center mb-2" style={{ color: '#FFFFFF' }}>
+          <p className="text-sm font-semibold text-center mb-2" style={{ color: 'var(--bw-text, #FFFFFF)' }}>
             Confirm Donation
           </p>
-          <p className="text-xs text-center leading-relaxed mb-4" style={{ color: '#98A2B3' }}>
-            You are about to send <span style={{ color: '#FFFFFF', fontWeight: 600 }}>${pendingSupportAmount}</span>{' '}
-            worth of BSV to support the Yours Wallet project. This transaction cannot be reversed.
+          <p className="text-xs text-center leading-relaxed mb-4" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
+            You are about to send{' '}
+            <span style={{ color: 'var(--bw-text, #FFFFFF)', fontWeight: 600 }}>${pendingSupportAmount}</span> worth of
+            BSV to support the Yours Wallet project. This transaction cannot be reversed.
           </p>
           <div className="flex gap-2">
             <Button
@@ -728,7 +729,7 @@ export const AppsAndTools = () => {
 
       <div
         className="my-4 w-full rounded-xl p-4 text-xs leading-relaxed"
-        style={{ background: '#17191E', color: '#98A2B3' }}
+        style={{ background: '#17191E', color: 'var(--bw-muted, #98A2B3)' }}
       >
         Give monthly through Yours Wallet's transparent Open Collective (formerly Panda Wallet).
       </div>
@@ -760,10 +761,10 @@ export const AppsAndTools = () => {
       >
         <Heart size={28} style={{ color: '#010101' }} fill="#010101" />
       </motion.div>
-      <h2 className="mb-2 text-xl font-bold" style={{ color: '#FFFFFF' }}>
+      <h2 className="mb-2 text-xl font-bold" style={{ color: 'var(--bw-text, #FFFFFF)' }}>
         Thank You
       </h2>
-      <p className="mb-6 text-center text-sm" style={{ color: '#98A2B3' }}>
+      <p className="mb-6 text-center text-sm" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
         Your contribution has been received.
       </p>
       <Button theme={theme} type="primary" label="Done" onClick={() => setPage('main')} />
@@ -781,7 +782,7 @@ export const AppsAndTools = () => {
       className="flex w-full flex-col"
     >
       <BackHeader title="TX Decoder" onBack={() => setPage('main')} />
-      <p className="mb-3 text-xs leading-relaxed" style={{ color: '#98A2B3' }}>
+      <p className="mb-3 text-xs leading-relaxed" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
         Paste a raw transaction to decode and inspect its inputs and outputs.
       </p>
 
@@ -830,7 +831,7 @@ export const AppsAndTools = () => {
       className="flex w-full flex-col"
     >
       <BackHeader title="Sweep Private Key" onBack={handleResetSweep} />
-      <p className="mb-3 text-xs leading-relaxed" style={{ color: '#98A2B3' }}>
+      <p className="mb-3 text-xs leading-relaxed" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
         Enter a WIF private key to scan for assets. This will open the sweep tool in a new tab where you can review and
         transfer any funds or ordinals found.
       </p>
@@ -866,7 +867,7 @@ export const AppsAndTools = () => {
       <BackHeader title="Decoded Transaction" onBack={() => setPage('tx-decoder')} />
       <TxPreview txData={txData} />
       <Show when={satsOut > 0}>
-        <p className="text-center text-xs" style={{ color: '#98A2B3' }}>
+        <p className="text-center text-xs" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
           Net outflow from your addresses: {satsOut / BSV_DECIMAL_CONVERSION} BSV
         </p>
       </Show>

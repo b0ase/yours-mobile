@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { FRAG, POOL_SCALE, poolMode } from './obsidianPool';
+import { FRAG, POOL_SCALE, TINT_FRAG, poolMode } from './obsidianPool';
 
 describe('ObsidianBackdrop', () => {
   test('no WebGL shows the static gradient, whatever the motion setting', () => {
@@ -26,5 +26,13 @@ describe('ObsidianBackdrop', () => {
     expect(hero).toContain("from '../ui/ObsidianBackdrop'");
     expect(hero).toContain('<ObsidianBackdrop');
     expect(hero).not.toContain('gl_FragColor');
+  });
+  test('the themed pool is the original shader with its colours as uniforms', () => {
+    expect(TINT_FRAG).not.toBe(FRAG);
+    for (const u of ['cB+cS*sheen+cP*spec*.7', 'col+=cG*exp(', 'col=mix(cE,col,smoothstep(1.25,.25,d));'])
+      expect(TINT_FRAG).toContain(u);
+    // Everything but the colours is untouched.
+    const strip = (f: string) => f.split('void main(){')[1]?.split('float d=length(uv);')[0];
+    expect(strip(TINT_FRAG)).toBe(strip(FRAG));
   });
 });

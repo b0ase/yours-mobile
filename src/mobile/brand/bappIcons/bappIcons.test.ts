@@ -9,6 +9,9 @@ import {
   GLYPHS,
   ICON_SIZES,
   badgeColors,
+  iconDataUrl,
+  isSetIcon,
+  themedIconUrl,
   layout,
 } from '.';
 
@@ -116,4 +119,17 @@ describe('bApp icon set', () => {
       expect(f).toBeLessThanOrEqual(0.46);
     }
   });
+});
+
+test('theme looks: Mono redraws a set icon on a white tile with line art; Gold and own artwork are unchanged', () => {
+  const gold = iconDataUrl({ glyph: Object.keys(GLYPHS)[0] as never, color: '#3D8EF0' }, 64, 'x');
+  expect(isSetIcon(gold)).toBe(true);
+  expect(themedIconUrl(gold, null)).toBe(gold);
+  const look = { mono: true, tile: '#FFFFFF', edge: '#E0E6F0', ink: '#1D4ED8', hi: '#1E40AF', lo: '#1E3A8A' };
+  const mono = decodeURIComponent(themedIconUrl(gold, look));
+  expect(mono).toContain('fill="#FFFFFF"');
+  expect(mono).not.toContain('#0B0B0D');
+  expect(mono).toContain('stroke="#1D4ED8"');
+  expect(themedIconUrl(gold, look)).toBe(themedIconUrl(gold, look)); // cached
+  expect(themedIconUrl('data:image/png;base64,AAAA', look)).toBe('data:image/png;base64,AAAA');
 });

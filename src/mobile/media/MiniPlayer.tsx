@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Music, Pause, Play, SkipBack, SkipForward, X } from 'lucide-react';
 import { getState, next, previous, seek, stop, subscribe, toggle } from './player';
 
@@ -10,10 +10,31 @@ const MiniPlayer = () => {
   const [s, setS] = useState(getState);
   useEffect(() => subscribe(setS), []);
   const track = s.queue[s.index];
+  // Publishes the bar's height as --bw-mini-h, so what sits at the foot of a page (the Ask b composer) lifts
+  // above it instead of hiding under it (owner, 15 Oct 2026).
+  const box = useRef<HTMLDivElement>(null);
+  const shown = !!track;
+  useEffect(() => {
+    const root = document.documentElement;
+    const el = box.current;
+    if (!shown || !el) {
+      root.style.removeProperty('--bw-mini-h');
+      return;
+    }
+    const set = () => root.style.setProperty('--bw-mini-h', `${Math.ceil(el.getBoundingClientRect().height) + 8}px`);
+    set();
+    const ro = new ResizeObserver(set);
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      root.style.removeProperty('--bw-mini-h');
+    };
+  }, [shown]);
   if (!track) return null;
   const btn = 'p-2 rounded-full active:bg-[#2b2f36]';
   return (
     <div
+      ref={box}
       className="absolute left-2 right-2 z-[101] rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36] px-3 pt-2 pb-1"
       style={{ bottom: '4rem' }}
     >

@@ -2,6 +2,8 @@ import { memo } from 'react';
 import { patternUri } from './cardPatterns';
 import { skinFor } from './cardSkins';
 import { useCardBalance } from './balanceStore';
+import { accentById } from '../theme/accents';
+import { useAccentId } from '../theme/useAccent';
 import './cardSkins.css';
 
 /**
@@ -11,9 +13,12 @@ import './cardSkins.css';
  */
 export const CardSkin = memo(function CardSkin({ id, colour }: { id: string; colour?: string }) {
   const s = skinFor(id, colour);
+  // Mono packs draw every card's pattern in the pack's hue (on a white card, themes.css).
+  const pack = accentById(useAccentId());
+  const c = pack.group === 'mono' ? pack.accent : s.colour;
   return (
-    <span className={`bw-skin bw-skin--${s.finish}`} aria-hidden="true" style={{ ['--skin-c' as string]: s.colour }}>
-      <img className="bw-skin-art" src={patternUri(s.pattern, s.colour)} alt="" draggable={false} decoding="async" />
+    <span className={`bw-skin bw-skin--${s.finish}`} aria-hidden="true" style={{ ['--skin-c' as string]: c }}>
+      <img className="bw-skin-art" src={patternUri(s.pattern, c)} alt="" draggable={false} decoding="async" />
       <span className="bw-skin-fx" />
     </span>
   );

@@ -293,3 +293,178 @@
 :root[data-bw-pack] .ww-bg {
   display: none;
 }
+
+/* ── Mono (owner, 15 Oct 2026: "a fully white mono-tone theme with NO dark elements") ─────────────────────
+   One hue on white. Accent fills become a light hue tint with hue ink and a hairline; the wallet card and every
+   balance card turn white with a faint hue pattern. Ink colours come from the pack (accents.ts), so AA holds:
+   --bw-accent on --bw-tint, --bw-text and --bw-muted on white are all checked in accents.test.ts. */
+:root[data-bw-tone='mono']
+  :is(
+    .bw-pill-gold,
+    .yours-sheet-primary,
+    .bw-bc-stop,
+    [style*='var(--bw-accent-hi), var(--bw-accent-lo)'],
+    [style*='var(--bw-accent-lo), var(--bw-accent-hi)'],
+    [style*='var(--bw-accent-hi) 0%, var(--bw-accent-lo)'],
+    [style*='var(--bw-accent-lo) 0%, var(--bw-accent-hi)'],
+    [style*='background: var(--bw-accent)'],
+    [style*='background: var(--bw-accent-hi)'],
+    [style*='background: var(--bw-accent-lo)'],
+    [style*='background-color: var(--bw-accent)'],
+    [style*='background-color: var(--bw-accent-hi)'],
+    [style*='background-color: var(--bw-accent-lo)'],
+    .bg-\[var\(--bw-accent\)\],
+    .bg-\[var\(--bw-accent-hi\)\],
+    .bg-\[var\(--bw-accent-lo\)\],
+    .bw-wcard-getname,
+    .askb-send,
+    .askb-bubble.user,
+    .bw-cdes-done,
+    .bw-idwarn-go,
+    .bw-mixer-base button.on,
+    .bw-sigpad-btns .is-primary,
+    .bw-bc-logo,
+    .bw-wcard-unit button.is-on
+  ) {
+  background: var(--bw-tint) !important;
+  color: var(--bw-accent) !important;
+  border: 1px solid var(--bw-trim) !important;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04) !important;
+  text-shadow: none !important;
+}
+:root[data-bw-tone='mono'] :is(.bw-pill-gold, .yours-sheet-primary, .bw-bc-stop) svg,
+:root[data-bw-tone='mono'] [style*='var(--bw-accent-hi), var(--bw-accent-lo)'] svg,
+:root[data-bw-tone='mono'] [style*='var(--bw-accent-lo), var(--bw-accent-hi)'] svg {
+  color: var(--bw-accent);
+  stroke: currentColor;
+}
+:root[data-bw-tone='mono'] .bw-wcard-face {
+  background:
+    radial-gradient(120% 90% at 100% 0%, var(--bw-tint) 0%, transparent 60%),
+    linear-gradient(160deg, #ffffff 0%, #ffffff 60%, var(--bw-tint) 140%);
+  border: 1px solid var(--bw-line);
+  box-shadow: var(--bw-shadow);
+  color: var(--bw-text);
+  --bw-wcard-muted: var(--bw-muted);
+  --bw-wcard-ok: var(--bw-success);
+}
+:root[data-bw-tone='mono'] .bw-wcard-art {
+  opacity: 0.28;
+  filter: none !important;
+}
+:root[data-bw-tone='mono'] .bw-wcard-art-shade {
+  background: none;
+}
+:root[data-bw-tone='mono'] .bw-bc {
+  background: #ffffff !important;
+  color: var(--bw-text) !important;
+  --bc-ink: var(--bw-text);
+  border: 1px solid var(--bw-line) !important;
+  box-shadow: var(--bw-shadow);
+}
+:root[data-bw-tone='mono'] .bw-skin-art {
+  opacity: 0.18;
+}
+:root[data-bw-tone='mono'] .bw-skin-fx {
+  display: none;
+}
+:root[data-bw-tone='mono'] .bw-skin ~ * :is(b, small) {
+  text-shadow: none;
+}
+:root[data-bw-tone='mono'] .bw-bc-contact {
+  background: #ffffff;
+  color: var(--bw-accent);
+  border: 1px solid var(--bw-trim);
+}
+/* Own-artwork app icons on a Mono pack: a white paper tile with padding, so the grid matches the redrawn set. */
+:root[data-bw-tone='mono'] .bw-paper-icon {
+  background: #ffffff !important;
+  padding: 8px;
+  object-fit: contain !important;
+  border: 1px solid var(--bw-line);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.04),
+    0 4px 12px rgb(0 0 0 / 0.05);
+}
+
+/* A themed panel (drawer, sheet, dialog) sitting on a dark scrim takes the pack's ink again: only text right on
+   the scrim, photo or video stays white. Owner, 15 Oct 2026: account names, menu labels and Settings titles were
+   white on white in light packs. */
+:root[data-bw-pack]
+  :is(.bg-black\/50, .bg-black\/60, .bg-black\/65, .bg-black\/70, .bg-black\/80)
+  :is(
+    .bg-black,
+    .bg-\[\#010101\],
+    .bg-\[\#000\],
+    .bg-\[\#08090b\],
+    .bg-\[\#17191E\],
+    .bg-\[\#0b0c0f\],
+    .bg-\[\#111\],
+    .bg-\[\#111216\],
+    .bg-\[\#101114\],
+    .bg-\[\#0F1013\],
+    .bg-\[\#0f1013\],
+    .bg-\[\#121316\],
+    .bg-\[\#111113\],
+    .bg-\[\#0d0f12\],
+    .bg-\[\#0d0e11\],
+    .yours-sheet,
+    [role='dialog']
+  )
+  :is(.text-white, .text-\[\#F2F2F0\], .text-\[\#f4f1e8\], .text-\[\#ddd\]) {
+  color: var(--bw-text);
+}
+:root[data-bw-pack]
+  :is(.bg-black\/50, .bg-black\/60, .bg-black\/65, .bg-black\/70, .bg-black\/80)
+  :is(.bg-\[\#17191E\], .bg-\[\#101114\], .bg-\[\#0b0c0f\], .bg-\[\#111216\], .bg-\[\#010101\], .bg-black, .yours-sheet)
+  svg:is([stroke='#fff'], [stroke='#FFFFFF'], [stroke='#F2F2F0'], [stroke='white']) {
+  stroke: var(--bw-text);
+}
+/* Mono sweep: inline white text (style={{ color: '#fff' }}) on the pack's white panels and pages takes the ink.
+   Mono has no dark fills (accent fills become a light tint above), so this cannot land dark on dark; text on photos,
+   video and scrims keeps its white. */
+:root[data-bw-tone='mono']
+  :is([style*='color: rgb(255, 255, 255)'], [style*='color: rgb(242, 242, 240)'], [style*='color: white']):not(
+    :is(.bg-black\/50, .bg-black\/60, .bg-black\/65, .bg-black\/70, .bg-black\/80, .bw-videobg, .bw-pack) *
+  ):not(.bw-pack):not([style*='background: rgb(240, 68, 56)']):not([style*='background-color: rgb(240, 68, 56)']) {
+  color: var(--bw-text) !important;
+}
+/* Screens over the dark obsidian pool (unlock, welcome, create, restore; ui/ObsidianBackdrop without a pack) keep
+   Gold's light-on-dark ink in every pack, so headings and labels never land dark on the dark art. */
+:root[data-bw-pack] :has(> [data-pool-dark]) {
+  --bw-pack-bg: #010101;
+  --bw-bg: #010101;
+  --bw-surface: #17191e;
+  --bw-tint: #1f2128;
+  --bw-text: #ffffff;
+  --bw-text-rgb: 255 255 255;
+  --bw-muted: #98a2b3;
+  --bw-card: #17191e;
+  --bw-card2: #1f2128;
+  --bw-line: #2b2f36;
+  color: #fff;
+}
+/* …and their accent buttons keep a solid accent fill with white ink (a Mono tint would carry white text). */
+:root[data-bw-tone='mono']
+  /* attribute repeated: outranks the Mono tint rule's :is() (its most specific entry is 0,2,1) */
+  :has(> [data-pool-dark][data-pool-dark][data-pool-dark])
+  :is(
+    .bw-pill-gold,
+    .yours-sheet-primary,
+    [style*='var(--bw-accent-hi), var(--bw-accent-lo)'],
+    [style*='var(--bw-accent-lo), var(--bw-accent-hi)'],
+    [style*='background: var(--bw-accent)'],
+    [style*='background: var(--bw-accent-hi)'],
+    [style*='background: var(--bw-accent-lo)']
+  ) {
+  background: var(--bw-accent) !important;
+  color: var(--bw-on-accent) !important;
+  border-color: transparent !important;
+}
+:root[data-bw-tone='mono']
+  /* attribute repeated: outranks the Mono tint rule's :is() (its most specific entry is 0,2,1) */
+  :has(> [data-pool-dark][data-pool-dark][data-pool-dark])
+  :is(.bw-pill-gold, .yours-sheet-primary, [style*='background: var(--bw-accent'])
+  * {
+  color: var(--bw-on-accent) !important;
+}

@@ -17,6 +17,10 @@
 .askb-bar.place-page {
   margin: 0 12px 10px;
 }
+/* The mini player (media/MiniPlayer.tsx) floats over the page foot: lift the composer above it. */
+.askb-bar.place-page {
+  margin-bottom: calc(10px + var(--bw-mini-h, 0px));
+}
 .askb-input {
   flex: 1;
   min-width: 0;

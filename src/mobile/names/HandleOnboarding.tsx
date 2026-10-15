@@ -118,14 +118,14 @@ export const HandleOnboarding = () => {
   return (
     <div
       className="relative flex items-center gap-3 w-[92%] mt-4 rounded-2xl px-4 py-3 cursor-pointer"
-      style={{ background: 'var(--bw-surface)', border: '1px solid #3a2f0c' }}
+      style={{ background: 'var(--bw-surface)', border: '1px solid var(--bw-line, #3a2f0c)' }}
       onClick={() => setOpen(true)}
       role="button"
       aria-label="Get your $name"
     >
       <span
         className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
-        style={{ background: '#2a2410' }}
+        style={{ background: 'var(--bw-tint, #2a2410)' }}
       >
         <Sparkles size={16} color="var(--bw-accent-hi)" />
       </span>
@@ -133,7 +133,7 @@ export const HandleOnboarding = () => {
         <div className="text-sm font-bold" style={{ color: 'var(--bw-accent-hi)' }}>
           {handleCardTitle(hasName, importSym)}
         </div>
-        <div className="text-[11px]" style={{ color: '#98A2B3' }}>
+        <div className="text-[11px]" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
           {handleCardText(hasName)}
         </div>
       </div>
