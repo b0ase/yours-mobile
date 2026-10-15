@@ -19,14 +19,15 @@ export const CardSkin = memo(function CardSkin({ id, colour }: { id: string; col
   );
 });
 
-const fmt = (n: number, unit: string) =>
-  unit === '$'
-    ? `$${n.toFixed(2)}`
-    : `${n.toLocaleString(undefined, { maximumFractionDigits: n < 1 ? 8 : 2 })} ${unit}`;
+/** A balance in its unit, always with two decimals (0.00 on an empty card); sub-unit amounts keep their precision. */
+const fmtCardBalance = (n: number, unit: string) => {
+  const digits = { minimumFractionDigits: 2, maximumFractionDigits: n > 0 && n < 1 ? 8 : 2 };
+  return unit === '$' ? `$${n.toLocaleString('en-US', digits)}` : `${n.toLocaleString('en-US', digits)} ${unit}`;
+};
 
 /**
  * A card's balance: live (from balanceStore, published by screens that already have it) while `live`, the last
- * known value otherwise; `fallback` covers cards with no published balance (mock cards). Renders nothing if
+ * known value otherwise; `fallback` covers a card whose balance has not been read yet (a 0.00 in its unit, or a short label for cards that are not balances). Renders nothing if
  * neither is known.
  */
 export const CardBalance = memo(function CardBalance({
@@ -41,7 +42,7 @@ export const CardBalance = memo(function CardBalance({
   className?: string;
 }) {
   const b = useCardBalance(id, live);
-  const text = b ? fmt(b.amount, b.unit) : fallback;
+  const text = b ? fmtCardBalance(b.amount, b.unit) : fallback;
   if (!text) return null;
   return <span className={className}>{text}</span>;
 });
