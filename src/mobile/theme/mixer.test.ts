@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { THEMES } from './accents';
 import { contrast, ensureContrast, hexToHsl, hslToHex, pickReadable } from './colour';
-import { GOLD_MIX, deriveMix, mixFromPack, normaliseMix, type MixSpec } from './mixer';
+import { GOLD_MIX, deriveMix, mixFromPack, nextMixerOpen, normaliseMix, type MixSpec } from './mixer';
 
 const aa = (fg: string, bg: string) => contrast(fg, bg) >= 4.5;
 
@@ -62,4 +62,13 @@ describe('colour mixer', () => {
       expect(contrast(d.bg, t.bg)).toBeLessThan(1.35);
     }
   });
+});
+
+test('Mix your own only closes from its own toggle', () => {
+  expect(nextMixerOpen(true, 'pick')).toBe(true);
+  expect(nextMixerOpen(true, 'open')).toBe(true);
+  expect(nextMixerOpen(false, 'open')).toBe(true);
+  expect(nextMixerOpen(true, 'toggle')).toBe(false);
+  expect(nextMixerOpen(false, 'toggle')).toBe(true);
+  expect(nextMixerOpen(false, 'pick')).toBe(false);
 });
