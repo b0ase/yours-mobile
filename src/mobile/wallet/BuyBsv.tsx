@@ -13,7 +13,7 @@ const PortfolioScreen = lazy(() => import('../portfolio/PortfolioScreen'));
 const SwapFlow = SWAP_ENABLED ? lazy(() => import('../swap/SwapFlow')) : null;
 const SwapPromo = SWAP_ENABLED ? lazy(() => import('../swap/SwapPromo')) : null;
 import { createPortal } from 'react-dom';
-import { ArrowDownToLine, ChevronRight, CreditCard, ExternalLink, Layers, Users, X } from 'lucide-react';
+import { ArrowDownToLine, CreditCard, ExternalLink, Layers, Users, X } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { openDappBrowser } from '../dappBrowser';
 import { cachedExchangeRate, fetchExchangeRate } from '../../utils/wallet';
@@ -149,25 +149,22 @@ const PriceCell = ({ rate, onOpen, change }: { rate: number; onOpen: () => void;
 const SwapPromoSkeleton = () => <div className="flex-1 min-w-0 min-h-[52px]" aria-hidden="true" />;
 
 /**
- * "All cards" (owner, 15 Oct 2026): left of the Swap card, the same height and look, half the width each (like the
- * Address book | Airdrops row). Opens the carousel's All cards browser; long-pressing a card still works too.
+ * "All cards" (owner, 15 Oct 2026): an icon-only button left of the Swap card. Its width matches the price cell
+ * directly above (PriceCell: one of three `flex-1 basis-0` cells with gap-2, so (100% - 2 x 8px) / 3) and the row
+ * stretches it to the Swap card's height (min-h-[52px]). It never grows, so with Swap off it stays icon-sized.
+ * Opens the carousel's All cards browser; long-pressing a card still works too.
  * bWalletX only (BALANCE_CARDS_ENABLED): the store has no browser, so no button.
  */
 const AllCardsButtonImpl = () => (
   <button
     type="button"
     onClick={() => requestAllCards()}
-    className="flex-1 min-w-0 min-h-[52px] px-3 py-2 rounded-xl border flex items-center gap-3 text-left cursor-pointer"
+    aria-label="All cards"
+    title="All cards"
+    className="shrink-0 grow-0 w-[calc((100%-1rem)/3)] min-h-[52px] rounded-xl border flex items-center justify-center cursor-pointer"
     style={{ background: 'var(--bw-surface)', borderColor: 'var(--bw-line)' }}
   >
-    <Layers size={18} color="var(--bw-accent-hi)" aria-hidden="true" className="shrink-0" />
-    <span
-      className="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[14px] font-bold"
-      style={{ color: 'var(--bw-text)' }}
-    >
-      All cards
-    </span>
-    <ChevronRight size={18} color="var(--bw-muted)" aria-hidden="true" className="shrink-0" />
+    <Layers size={22} color="var(--bw-accent-hi)" aria-hidden="true" />
   </button>
 );
 // The store build drops the button's code entirely (inlined flag), not just its render.
@@ -235,7 +232,7 @@ export const BsvPriceBar = ({
       </div>
       {row.length > 0 ? (
         // Equal 8px above and below the row: the price row's mb-2 above; below, the next card's 12px top margin less 4px.
-        <div className="w-[92%] -mb-1 flex gap-2">
+        <div className="w-[92%] -mb-1 flex items-stretch gap-2">
           {row.map((b) =>
             b === 'allCards' ? (
               <AllCardsButton key={b} />
