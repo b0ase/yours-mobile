@@ -36,11 +36,18 @@ const PostCard = ({ p, color }: { p: BrandPost; color: string }) => {
       {p.text && <p className="whitespace-pre-wrap break-words text-sm text-white">{p.text}</p>}
       {m &&
         (m.kind === 'image' ? (
-          <img src={m.src} alt="" loading="lazy" className="mt-2 w-full rounded-xl object-cover" />
+          <img src={m.src} alt="" loading="lazy" decoding="async" className="mt-2 w-full rounded-xl object-cover" />
         ) : m.kind === 'video' ? (
-          <video src={m.src} poster={m.thumb ?? undefined} controls playsInline className="mt-2 w-full rounded-xl" />
+          <video
+            src={m.src}
+            poster={m.thumb ?? undefined}
+            controls
+            playsInline
+            preload="none"
+            className="mt-2 w-full rounded-xl"
+          />
         ) : (
-          <audio src={m.src} controls className="mt-2 w-full" />
+          <audio src={m.src} controls preload="none" className="mt-2 w-full" />
         ))}
       <p className="mt-2 text-[11px]" style={{ color: MUTED }}>
         {when(p.at)}

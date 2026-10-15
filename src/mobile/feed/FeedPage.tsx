@@ -180,10 +180,12 @@ import { NewsList, NewsThread } from './NewsThread';
 import { loadNewsMode, saveNewsMode, type NewsItem } from './bnews';
 import { AllFeedsSheet, FeedPicker } from './FeedPicker';
 import { BrandFeed } from './BrandFeed';
+import { rememberFeed, takeCrashFeed } from '../url/crashResume';
 import { BradioFeed } from '../bradio/BradioFeed';
 import { authorProfileUrl, authorRef, fetchAuthorPage, fetchAuthorProfile, type AuthorProfile } from './authorFeed';
 import { FeaturedAlbum } from './FeaturedAlbum';
 import {
+  FEED_COLORS,
   feedColor,
   feedDef,
   hasCustomView,
@@ -415,6 +417,8 @@ const Avatar = ({
       <img
         src={author.avatar}
         alt=""
+        loading="lazy"
+        decoding="async"
         onError={() => setBroken(true)}
         className="rounded-full object-cover shrink-0"
         style={{ width: size, height: size, border: `1px solid ${LINE}` }}
@@ -1651,7 +1655,12 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
     quote?: FeedPost;
     link?: { url: string; title: string };
   } | null>(null);
-  const [feed, setFeed] = useState<FeedId>(() => (loadNewsMode() ? 'bnews' : 'home'));
+  const [feed, setFeed] = useState<FeedId>(() => {
+    // After iOS killed the web view (crashResume.ts): back on the sub-feed that was open.
+    const crashed = takeCrashFeed();
+    if (crashed && crashed in FEED_COLORS) return migrateFeedId(crashed as FeedId);
+    return loadNewsMode() ? 'bnews' : 'home';
+  });
   const [pins, setPins] = useState<FeedId[]>(loadPins);
   const [allFeeds, setAllFeeds] = useState(false);
   const news = feed === 'bnews';
@@ -1660,6 +1669,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
     setFeed(id);
     setAllFeeds(false);
     saveNewsMode(id === 'bnews');
+    rememberFeed(id);
   };
   // Home's two filters (Following | For you), remembered per device as the Feed setting's default
   // (For you keeps "Latest" when that was the setting).

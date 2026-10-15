@@ -1,6 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Search, Star, Users } from 'lucide-react';
+import { AtSign, Search, Star } from 'lucide-react';
 import { cachedExchangeRate, fetchExchangeRate } from '../../utils/wallet';
 import { sendMessageAsync } from '../../utils/chromeHelpers';
 import { YoursEventName } from '../../inject';
@@ -24,7 +24,6 @@ import { TradeView } from './TradeView';
 import { TokenIcon } from './TokenIcon';
 import { Sparkline } from './PriceChart';
 import { chartSeries } from './chartSeries';
-import { PeopleMarket } from './PeopleMarket';
 import { OpnsMarket } from './OpnsMarket';
 import { PodcastMarket } from './PodcastMarket';
 import { LaunchpadPanel } from '../market/launchpad/LaunchpadPanel';
@@ -152,19 +151,11 @@ const Markets = ({
   const [extra, setExtra] = useState<Record<string, RowStats>>({});
   const [q, setQ] = useState('');
   const [onlyFavs, setOnlyFavs] = useState(false);
-  const people = new URLSearchParams(search).get('people') === '1';
-  const setPeople = (on: boolean) => {
-    const sp = new URLSearchParams(search);
-    sp.delete('shares');
-    if (on) sp.set('people', '1');
-    else sp.delete('people');
-    const s = sp.toString();
-    navigate(`${pathname}${s ? `?${s}` : ''}`, { replace: true });
-  };
+  // Names replaces the old Friends filter (owner, 15 Oct 2026): names are the market, people aren't.
+  const openNames = () => navigate(`${EXCHANGE_ROUTE}/names`);
   const shares = !!SharesMarket && new URLSearchParams(search).get('shares') === '1';
   const setShares = (on: boolean) => {
     const sp = new URLSearchParams(search);
-    sp.delete('people');
     if (on) sp.set('shares', '1');
     else sp.delete('shares');
     const s = sp.toString();
@@ -250,16 +241,11 @@ const Markets = ({
         </button>
         <button
           type="button"
-          onClick={() => setPeople(!people)}
-          aria-pressed={people}
+          onClick={openNames}
           className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold border cursor-pointer"
-          style={{
-            background: people ? '#2a2100' : '#17191E',
-            borderColor: people ? GOLD : '#2b2f36',
-            color: GOLD,
-          }}
+          style={{ background: '#17191E', borderColor: '#2b2f36', color: GOLD }}
         >
-          <Users size={14} color={GOLD} /> Friends
+          <AtSign size={14} color={GOLD} /> Names
         </button>
       </div>
 
@@ -269,8 +255,7 @@ const Markets = ({
           filter={filter}
           registry={registry}
           onChange={setFilter}
-          people={people}
-          onPeople={setPeople}
+          onNames={openNames}
           shares={shares}
           onShares={SharesMarket ? setShares : undefined}
         />
@@ -279,8 +264,6 @@ const Markets = ({
         <Suspense fallback={null}>
           <SharesMarket />
         </Suspense>
-      ) : people ? (
-        <PeopleMarket rate={rate} q={q} />
       ) : (
         <>
           {loading ? (
