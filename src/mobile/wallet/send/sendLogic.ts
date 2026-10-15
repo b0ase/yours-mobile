@@ -1,5 +1,6 @@
 import { parseRecipient } from '../../names/names';
 import { formatFiat } from '../../../utils/displayCurrency';
+import { recordPaid } from './payee';
 
 /**
  * Pure logic for the Send card (SendCard.tsx): dollar amounts, the one Send button's wording,
@@ -119,6 +120,8 @@ export type RecentRecipient = {
   input: string;
   label: string;
   avatar?: string;
+  /** Identity key from PKI, when the name resolved one (not shown in quick picks). */
+  pubkey?: string;
   at: number;
 };
 
@@ -164,6 +167,9 @@ export const notePending = (target: string, meta: Omit<RecentRecipient, 'at'>) =
   if (target) pending.set(target, meta);
 };
 
+/** The resolved name seen for a destination in this session (confirm sheet). */
+export const pendingMeta = (target: string) => pending.get(target);
+
 /** After a successful send: remember who was paid. `targets` are the paymails / addresses sent to. */
 export const rememberSent = (acct: string, targets: string[], now = Date.now(), s: Store | null = storage()) => {
   if (!acct || !s) return;
@@ -171,6 +177,12 @@ export const rememberSent = (acct: string, targets: string[], now = Date.now(), 
     const m = pending.get(t);
     return m ? { ...m, at: now } : { input: t, label: shortTarget(t), at: now };
   });
+  recordPaid(
+    acct,
+    targets.filter(Boolean).map((t, i) => ({ paymail: t, label: add[i].label, avatar: add[i].avatar })),
+    now,
+    s,
+  );
   try {
     s.setItem(KEY(acct), JSON.stringify(addRecents(loadRecents(acct, s), add)));
   } catch {

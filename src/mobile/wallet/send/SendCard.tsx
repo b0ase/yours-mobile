@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, useState, type FormEvent } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { motion } from 'framer-motion';
 import { useDisplayCurrency } from '../../../hooks/useDisplayCurrency';
 import { fiatCode, fiatSymbol, fiatToUsd, usdToFiat } from '../../../utils/displayCurrency';
@@ -9,6 +9,7 @@ import type { Theme } from '../../../theme.types';
 import { NameInput } from '../../names/NameInput';
 import { useContacts } from '../../chat/useContacts';
 import { payTarget } from '../../chat/contacts';
+import { noteContacts } from './payee';
 import {
   balanceLine,
   fmtBsv,
@@ -90,6 +91,16 @@ export const SendCard = (p: Props) => {
     }
     return out.slice(0, 10);
   }, [recents, contacts]);
+  // The confirm sheet's look-alike check compares against saved contacts too (payee.ts).
+  useEffect(() => {
+    noteContacts(
+      contacts.flatMap((c) =>
+        c.paymail
+          ? [{ paymail: c.paymail, label: c.handle ? `$${c.handle}` : c.name, avatar: c.avatar ?? undefined }]
+          : [],
+      ),
+    );
+  }, [contacts]);
 
   const btn = sendButton({
     rows: p.rows,
@@ -221,7 +232,12 @@ export const SendCard = (p: Props) => {
                   : '';
                 setNames((n) => ({ ...n, [r.id]: label }));
                 if (s === 'ready' && resolved) {
-                  notePending(resolved.target, { input: resolved.input, label, avatar: resolved.avatar });
+                  notePending(resolved.target, {
+                    input: resolved.input,
+                    label,
+                    avatar: resolved.avatar,
+                    pubkey: resolved.pubkey,
+                  });
                 }
               }}
               style={{ width: '100%', margin: '0' }}
