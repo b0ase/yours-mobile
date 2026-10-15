@@ -22,7 +22,7 @@ export const BetaGate = ({ children }: { children: ReactNode }) => {
         type="button"
         onClick={() => setOk(true)}
         className="rounded-xl px-8 py-3 text-sm font-bold border-0 cursor-pointer"
-        style={{ background: 'var(--bw-accent-hi)', color: '#1a1300' }}
+        style={{ background: 'var(--bw-accent-hi, #E8C15A)', color: '#1a1300' }}
       >
         Continue
       </button>
