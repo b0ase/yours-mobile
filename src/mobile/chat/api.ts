@@ -227,7 +227,7 @@ export class BchatClient {
   }
 
   protected async call<T>(
-    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     path: string,
     body?: unknown,
     auth = true,
@@ -560,6 +560,15 @@ export class BchatClient {
   async shareBAnswer(ticker: string, id: string): Promise<ChatMessage | null> {
     const r = await this.call<{ message?: ChatMessage }>('POST', `${BchatClient.path(ticker)}/b-share`, { id });
     return r.message ?? null;
+  }
+
+  /**
+   * Upload my own picture (bit-sign PUT /api/bitsign/me/avatar, PR #264): the file's original bytes as a data URL,
+   * animated GIF / WebP / APNG kept as they are. The server checks type (magic bytes), ≤ 512 px and ≤ 2 MB, stores
+   * it and sets my avatar_url. 503 until its migration runs: the caller treats that as "not available yet".
+   */
+  async uploadAvatar(dataUrl: string): Promise<AvatarUploaded> {
+    return this.call('PUT', '/api/bitsign/me/avatar', { avatar: dataUrl });
   }
 
   /** Publish my X / Google picture so other people's chat bubbles show it (bit-sign keeps a chosen photo). */
@@ -1144,4 +1153,13 @@ export type BavatarMine = {
   edition: number;
   minted: { txid: string; outpoint: string } | null;
   sponsored: boolean;
+};
+
+export type AvatarUploaded = {
+  ok?: boolean;
+  avatar_url: string;
+  mime?: string;
+  width?: number;
+  height?: number;
+  animated?: boolean;
 };

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { useAvatarPlayback } from '../names/useAvatarPlayback';
 import { MessageCircle, Phone, Star, Trash2, Wallet } from 'lucide-react';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { asMenuItem } from '../tabs/tabs';
@@ -16,9 +17,17 @@ const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
 
 export const Avatar = ({ title, src, size = 48 }: { title: string; src?: string | null; size?: number }) => {
   const hue = avatarHue(title);
+  // Contact lists: a still first frame of an animated picture, played on press/hover (names/animatedAvatar.ts).
+  const play = useAvatarPlayback(src, 'list');
   if (src)
     return (
-      <img src={src} alt="" className="rounded-full object-cover shrink-0" style={{ width: size, height: size }} />
+      <img
+        {...play.handlers}
+        src={play.src}
+        alt=""
+        className="rounded-full object-cover shrink-0"
+        style={{ width: size, height: size }}
+      />
     );
   return (
     <div
