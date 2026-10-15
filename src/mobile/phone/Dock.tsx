@@ -11,6 +11,7 @@ import { HoldRing, TalkSheetView } from '../agent/TalkVisuals';
 import { DOCK_LONG_PRESS_MS, edgeFade, fadeMask, longPressCancelled } from './gesture';
 import { itemIcon, itemLabel } from './icons';
 import { useThemedIcon } from '../brand/bappIcons';
+import { TabBadge } from '../../components/TabBadge';
 
 /**
  * The phone layout's dock (docs/PHONE-LAYOUT-PLAN.md §5, §14): left slots · the b · right slots, which scroll
@@ -80,7 +81,13 @@ const Tile = ({
     <div className="relative shrink-0 flex justify-center" style={{ width: 74 }}>
       <button
         type="button"
-        aria-label={arranging ? `${label}${picked ? ', selected' : ''}. Tap to select for moving` : label}
+        aria-label={
+          arranging
+            ? `${label}${picked ? ', selected' : ''}. Tap to select for moving`
+            : badge
+              ? `${label}, ${badge} unread`
+              : label
+        }
         aria-current={active ? 'page' : undefined}
         onPointerDown={(e) => {
           fired.current = false;
@@ -131,11 +138,7 @@ const Tile = ({
           ) : (
             <Icon size={isApp ? 18 : 20} color={isApp || active ? GOLD : '#F2F2F0'} />
           )}
-          {badge && (
-            <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-[#F04438] text-[9px] font-bold text-white flex items-center justify-center">
-              {badge}
-            </span>
-          )}
+          {badge && <TabBadge text={badge} />}
         </span>
         <span
           className="w-full overflow-hidden text-ellipsis whitespace-nowrap text-center text-[10px] leading-tight"

@@ -3,6 +3,7 @@ import { MenuItems } from '../contexts/BottomMenuContext';
 import { Show } from './Show';
 import { Wallet, Layers, Globe, Wrench, Settings, LucideIcon } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { TabBadge } from './TabBadge';
 
 export type BottomMenuProps = {
   selected: MenuItems | null;
@@ -12,6 +13,8 @@ export type BottomMenuProps = {
 
 export type MenuProps = {
   badge?: string;
+  /** Accessible name, e.g. "Chat, 3 unread" (defaults to the label). */
+  ariaLabel?: string;
   icon: LucideIcon;
   label: string;
   onClick: (e: React.MouseEvent<HTMLDivElement>) => void;
@@ -20,7 +23,7 @@ export type MenuProps = {
 };
 
 const Menu = (props: MenuProps) => {
-  const { theme, label, onClick, isSelected, icon: IconComponent, badge } = props;
+  const { theme, label, onClick, isSelected, icon: IconComponent, badge, ariaLabel } = props;
 
   const activeColor = theme.color.component.primaryButtonLeftGradient || '#A1FF8B';
   const inactiveColor = theme.color.component.bottomMenuText + '80';
@@ -29,6 +32,9 @@ const Menu = (props: MenuProps) => {
     <div
       className="flex flex-col items-center justify-center flex-1 relative cursor-pointer py-2 select-none"
       onClick={onClick}
+      role="button"
+      aria-label={ariaLabel ?? label}
+      aria-current={isSelected ? 'page' : undefined}
     >
       {/* Active indicator dot */}
       {isSelected && (
@@ -60,14 +66,7 @@ const Menu = (props: MenuProps) => {
       </motion.div>
 
       {/* Badge */}
-      {badge && (
-        <span
-          className="absolute top-1 right-2 text-[8px] font-bold px-1 py-0.5 rounded-full leading-none"
-          style={{ backgroundColor: '#bf4f74', color: '#fff' }}
-        >
-          {badge}
-        </span>
-      )}
+      {badge && <TabBadge text={badge} className="top-1 left-1/2 ml-1.5" />}
     </div>
   );
 };

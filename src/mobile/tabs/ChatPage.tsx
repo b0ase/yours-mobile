@@ -1,4 +1,5 @@
 import { TipButton } from '../tip/TipButton';
+import { mergeChatRooms } from './tabBadges';
 import type { AvatarPlace } from '../names/animatedAvatar';
 import { useAvatarPlayback } from '../names/useAvatarPlayback';
 import { claimIssuerAdmin } from '../chat/autoClaim';
@@ -2265,6 +2266,10 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   const [rooms, setRooms] = useState<ChatRoom[] | null>(() => readListCache<ChatRoom>(roomsCacheKey(identityAddress)));
   // Either segment's rooms() fetch updates this list too (chat/sharedRooms.ts).
   useEffect(() => onRooms(setRooms), []);
+  // Chat tab badge: this list's unread counts (a room opened or marked read clears at once).
+  useEffect(() => {
+    if (rooms) mergeChatRooms(rooms);
+  }, [rooms]);
   // My X / Google picture (names/socialAvatar.ts) goes to bit-sign once, so other people's bubbles show it
   // instead of my initial; bit-sign keeps a photo chosen there. Remembered per handle + picture.
   const socialAvatar = chromeStorageService.getCurrentAccountObject().account?.settings?.socialProfile?.avatar ?? '';
