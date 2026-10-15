@@ -112,7 +112,7 @@ export const AssetRow = (props: AssetRowProps) => {
       whileHover={animate && !still ? { scale: 1.015, x: 2 } : {}}
       whileTap={showPointer && !still ? { scale: 0.985 } : {}}
       transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-      className="flex flex-wrap items-center justify-between w-[92%] mx-auto rounded-xl px-0 py-3 mb-1.5"
+      className="bw-asset-row flex flex-wrap items-center justify-between w-[92%] mx-auto rounded-xl px-0 py-3 mb-1.5"
       style={{
         backgroundColor: theme.color.global.row,
         cursor: showPointer ? 'pointer' : 'default',

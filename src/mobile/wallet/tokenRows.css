@@ -2,7 +2,7 @@
 .bw-pin-mark {
   position: absolute;
   top: 6px;
-  left: 18px;
+  left: 6px;
   z-index: 2;
   color: var(--bw-accent-hi, #ffd24d);
   pointer-events: none;
