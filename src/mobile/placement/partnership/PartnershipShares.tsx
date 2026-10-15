@@ -13,7 +13,7 @@ import { BsharesApi } from '../api';
 import { identityKey } from '../company';
 import { broadcastProposal, lockUp, partnerKey, proposeMove, signProposal } from './actions';
 import { PARTNER_SIGN_PROTOCOL, lockKeyKeyID, lockKeyMessage, type PartnerLockState } from './lockState';
-import { isReady, parsePartnerLock, partnershipLabel, type Holding } from './partnerLock';
+import { RULE_WARNING, isReady, parsePartnerLock, partnershipLabel, type Holding } from './partnerLock';
 
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
@@ -125,6 +125,11 @@ function Partnership({ api, ticker, name }: { api: BsharesApi; ticker: string; n
         <p className="m-0 text-xs" style={{ color: MUTED }}>
           Moves only with {ks.m} of {ks.pubKeys.length || s.keys.length} partners’ signatures. Profits still pay
           straight to your wallet.
+        </p>
+      )}
+      {s.rule && (
+        <p className="m-0 text-xs" style={{ color: MUTED }}>
+          {RULE_WARNING[s.rule.kind]}
         </p>
       )}
       {!s.myKey && (

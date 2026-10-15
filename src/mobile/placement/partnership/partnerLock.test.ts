@@ -2,7 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import { BigNumber, ECDSA, Hash, P2PKH, PrivateKey, Transaction } from '@bsv/sdk';
 import { BSV21 } from '@1sat/templates';
 import {
+  RULE_WARNING,
   addSignatures,
+  defaultRule,
   exportProposal,
   feeFor,
   finalize,
@@ -89,6 +91,19 @@ const make = async (p: MovePlan) => propose(p, feeUtxo(feeFor(p)), signFee);
 
 const k2of3 = keysetFor({ kind: 'majority', m: 2 }, [pub(ann), pub(ben), pub(cat)]);
 const k3of3 = keysetFor({ kind: 'unanimous' }, [pub(cat), pub(ann), pub(ben)]);
+
+describe('default rule', () => {
+  test('smallest majority by default; warnings in plain words', () => {
+    expect([3, 4, 5].map((n) => defaultRule(n))).toEqual([
+      { kind: 'majority', m: 2 },
+      { kind: 'majority', m: 3 },
+      { kind: 'majority', m: 3 },
+    ]);
+    expect(keysetFor(defaultRule(3), [pub(ann), pub(ben), pub(cat)]).m).toBe(2);
+    expect(RULE_WARNING.unanimous).toContain('stuck for good');
+    expect(RULE_WARNING.majority).toContain('lost phone never freezes');
+  });
+});
 
 describe('script build / verify', () => {
   test('unanimous = n-of-n, majority = M-of-N, keys canonical', () => {

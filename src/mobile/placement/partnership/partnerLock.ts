@@ -48,6 +48,15 @@ export const FEE_RATE_SATS_PER_KB = 100;
 export const MIN_FEE_SATS = 50;
 
 export type TransferRule = { kind: 'unanimous' } | { kind: 'majority'; m: number };
+/** Owner default (15 Oct): MAJORITY, the smallest true majority (2-of-3, 3-of-4, 3-of-5). Unanimous stays selectable. */
+export const defaultRule = (partners: number): TransferRule => ({ kind: 'majority', m: Math.floor(partners / 2) + 1 });
+/** Plain warnings for the setup screen. KEEP IN STEP with bit-sign partnership.ts RULE_WARNING (agreement text). */
+export const RULE_WARNING = {
+  majority:
+    'Majority: if most partners agree, shares can move even without one partner — and a lost phone never freezes the business.',
+  unanimous: 'Unanimous: every partner must sign; if one partner loses their 12 words, the shares are stuck for good.',
+} as const;
+
 /** Signatures a move needs. Same rule as bit-sign src/lib/partnership.ts signaturesForTransfer. */
 export const signaturesNeeded = (rule: TransferRule, partners: number) =>
   rule.kind === 'unanimous' ? partners : Math.min(Math.max(1, rule.m), partners);
