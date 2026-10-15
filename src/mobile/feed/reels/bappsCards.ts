@@ -1,7 +1,7 @@
 /**
  * Feed › bApps: a full-screen reel with one card per app in the bApps store (bapps.ts). Pure helpers here; the
- * view is BappsReel.tsx. Owner, 15 Oct 2026: apps are the meta. Each card shows the app (live preview or its
- * art), its builder and one line, then Open (the wallet's restricted bApp frame), Comment, Tip, Contribute
+ * view is BappsReel.tsx. Owner, 15 Oct 2026: apps are the meta. Each card shows the app (static: icon, plain
+ * line, facts, and pages to swipe sideways; no live site in the reel), its builder and one line, then Open (the wallet's restricted bApp frame), Comment, Tip, Contribute
  * (open-source apps only) and Tokenise (the builder only, to the Launchpad prefilled).
  *
  * Sorts are neutral and user-chosen: New, Most paid to builder (rank-by-paying-artists: the total paid to the
@@ -32,6 +32,8 @@ export type AppCard = {
   /** Sats paid to the builder through tips on this app (server tally; 0 until reported). */
   paidSats: number;
   demo: boolean;
+  /** Plain-English line: what the app does (BAPP_ABOUT; falls back to the verb). */
+  about: string;
 };
 
 export type AppSort = 'new' | 'paid' | 'az';
@@ -65,6 +67,7 @@ export const appCards = (apps: readonly BApp[], paid: Record<string, number> = {
       order: i,
       paidSats: Math.max(0, Number(paid[id]) || 0),
       demo: a.status === 'demo',
+      about: BAPP_ABOUT[a.name] ?? a.verb,
     };
   });
 
@@ -112,15 +115,89 @@ export const tokeniseQuery = (c: Pick<AppCard, 'name' | 'verb' | 'url' | 'intern
 export const commentUrl = (c: Pick<AppCard, 'id'>) => `https://www.bchatx.com/u/${encodeURIComponent(c.id)}`;
 
 /**
- * Live previews need storage: most web apps (Next.js especially) throw "Application error" when a sandbox without
- * allow-same-origin blocks localStorage/cookies (owner, 15 Oct 2026). A site on ANOTHER origin keeps its own
- * origin and still can't reach ours, so it may have it; anything on our own origin stays script-only.
+ * Plain-English "what it does" for each bApp in the store (bapps.ts), shown on its reel card. One short line each,
+ * kept to what the app does today (no promises). Keyed by the app's name; a test checks every bApp has one.
  */
-export const previewSandbox = (url: string, here: string = typeof location === 'undefined' ? '' : location.origin) => {
-  try {
-    const o = new URL(url).origin;
-    return o !== here && o.startsWith('https://') ? 'allow-scripts allow-same-origin' : 'allow-scripts';
-  } catch {
-    return 'allow-scripts';
-  }
+export const BAPP_ABOUT: Readonly<Record<string, string>> = {
+  bChatX: 'Group chats, live audio Spaces and feeds, with a room for every token.',
+  bChat: 'A chat app with voice and video messages and group chats you can tokenise.',
+  bMovies: 'A feed of films and trailers you can watch, and back by buying their tokens.',
+  bMusic: 'Put your tracks on Bitcoin as tokens; fans who hold them help make the video.',
+  bMint: 'Design and mint your own tokens, notes and media, inside this wallet.',
+  // Restricted, bWalletX only: the same literal env check as bapps.ts so the store bundle never carries it.
+  ...(!(
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+  )
+    ? { ['b' + 'Shares']: 'The share placement for registered Bitcoin Corp shareholders. Members only.' }
+    : {}),
+  Names: 'Pick a name on Bitcoin that people can pay and find you by.',
+  bWriter: 'A word processor that saves your documents on Bitcoin.',
+  bSheets: 'Spreadsheets that save to Bitcoin.',
+  bMail: 'Email where senders can attach a payment and you can set a price to reach you.',
+  bDrive: 'Upload files to Bitcoin and share them.',
+  bCal: 'A calendar whose events are stored on Bitcoin.',
+  bCode: 'A code editor for building apps on Bitcoin.',
+  bJobs: 'Post jobs and find work, paid in BSV.',
+  bID: 'See and manage your on-chain identity.',
+  bSearch: 'Search content stored on Bitcoin.',
+  bDNS: 'Register names on Bitcoin and trade them.',
+  bVideo: 'Watch videos and publish your own.',
+  bRadio: 'Listen to Bitcoin radio stations, or run one.',
+  bPhotos: 'Turn your photos into NFTs that can be traded.',
+  bArt: 'Collect on-chain art and show it in a gallery.',
+  bPaint: 'A paint app that inscribes what you make on Bitcoin.',
+  b3D: 'Make 3D models and own them on Bitcoin.',
+  bBooks: 'Read books, or publish your own.',
+  bEdu: 'Take courses, or teach one. Still a demo.',
+  bAgents: 'Set up AI agents and give each one a budget to spend.',
+  bSocial: 'Post and follow people on Bitcoin.',
+  bGames: 'Play games where you can stake BSV.',
+  bExchange: 'Trade tokens, with prices from several exchanges in one place.',
+  bMaps: 'A map of places that accept Bitcoin.',
+};
+
+/** One static page of a card's horizontal carousel. */
+export type AppPage = { id: 'about' | 'do' | 'start'; title: string; lines: string[] };
+
+/** Short facts under the name: where it runs, open source, demo, who built it. */
+export const appFacts = (c: AppCard): string[] => {
+  const f = [c.internal ? 'Inside your wallet' : c.frameable ? 'Opens in the wallet' : 'Opens full screen'];
+  f.push('Free to open');
+  if (c.source) f.push('Open source');
+  if (c.demo) f.push('Demo');
+  return f;
+};
+
+/** The carousel pages for one app: built from the registry, nothing made up. 3 pages each. */
+export const appPages = (c: AppCard): AppPage[] => [
+  { id: 'about', title: 'What it is', lines: [c.about, `Built by ${c.builder.name}.`] },
+  {
+    id: 'do',
+    title: 'What you can do',
+    lines: [c.verb + '.', c.source ? 'The code is public: you can read it and suggest changes.' : 'Closed source.'],
+  },
+  {
+    id: 'start',
+    title: 'How to start',
+    lines: [
+      'Tap Open.',
+      c.internal
+        ? 'It opens as a page in this wallet.'
+        : 'It signs in with this wallet. You approve anything it asks for on one sheet.',
+      'Opening is free. Anything that costs BSV asks you first.',
+    ],
+  },
+];
+
+/**
+ * Which way a touch is moving, once it has moved far enough: 'x' (browse an app's pages), 'y' (next app), or
+ * null (too small to tell). Horizontal wins only when clearly horizontal, so diagonal drags keep scrolling apps.
+ */
+export const swipeAxis = (dx: number, dy: number, threshold = 10): 'x' | 'y' | null => {
+  const ax = Math.abs(dx);
+  const ay = Math.abs(dy);
+  if (Math.max(ax, ay) < threshold) return null;
+  return ax > ay * 1.2 ? 'x' : 'y';
 };
