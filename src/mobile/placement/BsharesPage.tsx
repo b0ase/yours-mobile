@@ -1,6 +1,6 @@
 /**
- * bShares (/m/bshares): The Bitcoin Corporation share placement, RESTRICTED to registered members and the director
- * (docs/BCORP-PLACEMENT.md). Never in a store build: the route is lazy and dropped there (PLACEMENT_ENABLED).
+ * bShares (/m/bshares): any company's register + private placements, RESTRICTED to that company's registered
+ * members and directors (bCorp is the first; docs/BCORP-PLACEMENT.md). Company switcher at the top. Never in a store build: the route is lazy and dropped there (PLACEMENT_ENABLED).
  * Tranche size, price and the BSV rate are typed in by the director; nothing here is a cap-table number.
  */
 import { useEffect, useState } from 'react';
@@ -23,7 +23,8 @@ import {
   type PlacementOffer,
 } from './placement';
 import { DEFAULT_LOCK_MONTHS, shareLabel } from './scripts';
-import { useBshares } from './useBshares';
+import { useBshares, useCompanies } from './useBshares';
+import { CompanySetup, CreateCompany } from './CompanySetup';
 import type { BsharesApi } from './api';
 
 const GOLD = '#F5B800';
@@ -36,8 +37,8 @@ export const RestrictedNotice = () => (
       <Lock size={16} color={GOLD} aria-hidden="true" /> Restricted: for registered shareholders
     </div>
     <p className="m-0 text-sm" style={{ color: MUTED }}>
-      bShares opens for members on The Bitcoin Corporation&apos;s register of members and its directors. Shares are not
-      offered publicly.
+      bShares opens for members on a company&apos;s register of members and its directors. Shares are not offered
+      publicly.
     </p>
   </div>
 );
@@ -332,7 +333,7 @@ export const Holdings = ({ me, height }: { me: BsharesMe; height: number }) => (
       <div key={i} className="text-sm text-white">
         {h.token
           ? shareLabel(h.shares, h.token.unlockHeight, height)
-          : `bCorp shares · ${h.shares.toLocaleString('en-GB')}`}
+          : `${me.company.name} · ${h.shareClass} · ${h.shares.toLocaleString('en-GB')}`}
         {h.token && (
           <span className="block text-xs" style={{ color: MUTED }}>
             Yours alone from block {h.token.unlockHeight.toLocaleString('en-GB')}
@@ -349,7 +350,42 @@ export const Holdings = ({ me, height }: { me: BsharesMe; height: number }) => (
 export const BsharesPage = () => {
   const navigate = useNavigate();
   const { apiContext } = useServiceContext();
-  const { api, me, loading, reload } = useBshares();
+  const { companies, reload: reloadCompanies } = useCompanies();
+  const [ticker, setTicker] = useState<string | undefined>(undefined);
+  const { api, me, loading, reload } = useBshares(ticker);
+  const [creating, setCreating] = useState(false);
+  const switcher = (
+    <div className="flex flex-wrap gap-2" role="tablist" aria-label="Company">
+      {companies.map((c) => (
+        <button
+          key={c.ticker}
+          type="button"
+          role="tab"
+          aria-selected={(ticker ?? me?.company.ticker) === c.ticker}
+          onClick={() => {
+            setCreating(false);
+            setTicker(c.ticker);
+          }}
+          className="rounded-full px-3 py-1 text-xs font-bold border cursor-pointer"
+          style={
+            (ticker ?? me?.company.ticker) === c.ticker
+              ? { background: GOLD, color: '#1a1300', borderColor: GOLD }
+              : { background: 'transparent', color: 'white', borderColor: '#2b2f36' }
+          }
+        >
+          {c.name}
+        </button>
+      ))}
+      <button
+        type="button"
+        onClick={() => setCreating(true)}
+        className="rounded-full px-3 py-1 text-xs font-bold border cursor-pointer bg-transparent"
+        style={{ color: GOLD, borderColor: GOLD }}
+      >
+        + Create your company
+      </button>
+    </div>
+  );
   const [height, setHeight] = useState(0);
   useEffect(() => {
     void apiContext.services?.chaintracks
@@ -358,7 +394,18 @@ export const BsharesPage = () => {
       .catch(() => undefined);
   }, [apiContext]);
   let body: React.ReactNode;
-  if (loading) body = <p style={{ color: MUTED }}>Checking the register…</p>;
+  if (creating)
+    body = (
+      <CreateCompany
+        api={api}
+        onOpen={(t) => {
+          setCreating(false);
+          setTicker(t);
+          void reloadCompanies();
+        }}
+      />
+    );
+  else if (loading) body = <p style={{ color: MUTED }}>Checking the register…</p>;
   else if (!me || !mayOpenBshares(me)) body = <RestrictedNotice />;
   else
     body = (
@@ -371,6 +418,9 @@ export const BsharesPage = () => {
           </span>
         </div>
         <Holdings me={me} height={height} />
+        {me.role === 'director' && (!me.company.treasury || !(me.company.shareClasses ?? []).length) && (
+          <CompanySetup api={api} me={me} onDone={reload} />
+        )}
         {me.role === 'director' && <NewTranche api={api} onDone={reload} />}
         {me.offers.map((o) => (
           <OfferCard key={o.id} offer={o} me={me} api={api} onDone={reload} />
@@ -384,8 +434,9 @@ export const BsharesPage = () => {
               server and no director: your key comes back from your seed and the offer id.
             </li>
             <li>
-              Payments go to the company treasury, a 2-of-3 multisig. The director holds the three keys on separate
-              devices, so losing one device does not lock the treasury.
+              Payments go to the company treasury
+              {me.company.treasury ? `, a ${me.company.treasury.m}-of-${me.company.treasury.n} multisig` : ''} across
+              the directors&apos; keys, each restorable from that director&apos;s own backup.
             </li>
             <li>
               If the director loses their share-lock key, nothing is lost: you can still move your shares alone after
@@ -407,7 +458,10 @@ export const BsharesPage = () => {
   return (
     <div className="px-4 pb-24">
       <TopNav />
-      <div className="mt-14 flex flex-col gap-3">{body}</div>
+      <div className="mt-14 flex flex-col gap-3">
+        {switcher}
+        {body}
+      </div>
     </div>
   );
 };

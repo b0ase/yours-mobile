@@ -2,6 +2,7 @@
 import { BCHAT_ORIGIN, ChatApiError, type ChatSession, type Http } from '../chat/api';
 import type { ExcessChoice } from './minute';
 import type { BsharesMe, PlacementOffer } from './placement';
+import type { CompanyListing } from './company';
 
 export type NewOffer = {
   investorHandle: string;
@@ -11,20 +12,37 @@ export type NewOffer = {
   rateDate: string;
   lockMonths: number;
   expiresAt: string;
+  shareClassId?: string;
 };
+
+type Signed = { at: string; signature: string };
 
 export class BsharesApi {
   constructor(
     private readonly http: Http,
     private readonly session: ChatSession | null,
+    /** Which company (room ticker). Undefined = bCorp, as phase 1. */
+    readonly company?: string,
     private readonly origin = BCHAT_ORIGIN,
   ) {}
 
-  private async call<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
+  /** Same client, another company. */
+  forCompany = (ticker: string) => new BsharesApi(this.http, this.session, ticker, this.origin);
+
+  private async call<T>(
+    method: 'GET' | 'POST',
+    path: string,
+    body?: unknown,
+    base = '/api/bitsign/bshares',
+  ): Promise<T> {
     if (!this.session) throw new ChatApiError('Sign in to bChatX first', 401);
+    const q =
+      this.company && base === '/api/bitsign/bshares' && !path.startsWith('/companies')
+        ? `${path.includes('?') ? '&' : '?'}company=${encodeURIComponent(this.company)}`
+        : '';
     const res = await this.http({
       method,
-      url: `${this.origin}/api/bitsign/bshares${path}`,
+      url: `${this.origin}${base}${path}${q}`,
       headers: { Accept: 'application/json', Authorization: `Bearer ${this.session.token}` },
       body,
     });
@@ -36,6 +54,49 @@ export class BsharesApi {
   }
 
   me = () => this.call<BsharesMe>('GET', '/me');
+
+  // ── Companies (the room is the company) ────────────────────────────────────────────
+  companies = () => this.call<{ companies: CompanyListing[] }>('GET', '/companies');
+  private co = (t: string, rest: string) => `/companies/${encodeURIComponent(t)}${rest}`;
+  /** Incorporate: set the token room's constitution to company (existing bChatX rule: majority holder). */
+  incorporate = (ticker: string) =>
+    this.call<{ ok?: boolean; error?: string }>(
+      'POST',
+      `/rooms/${encodeURIComponent(ticker)}/constitution`,
+      { to: 'company' },
+      '/api/bitsign',
+    );
+  setDetails = (
+    t: string,
+    d: {
+      companyNumber: string;
+      jurisdiction: string;
+      authorisedShares: number | null;
+      authorisedArticle: string | null;
+    },
+  ) => this.call<{ ok: true }>('POST', this.co(t, '/details'), d);
+  addShareClass = (t: string, c: { name: string; nominalNanoPounds: number; authorised: number | null }) =>
+    this.call<{ ok: true; id: string }>('POST', this.co(t, '/classes'), c);
+  contributeKeys = (t: string, k: { identityKey: string; treasuryPubkey: string } & Signed) =>
+    this.call<{ ok: true }>('POST', this.co(t, '/keys'), k);
+  approveDirector = (t: string, a: { subject: string } & Signed) =>
+    this.call<{ ok: true; signed: number; need: number; approved: boolean }>('POST', this.co(t, '/directors'), a);
+  /** Appointment itself goes through bChatX's officers route (it checks the signed approvals). */
+  appointDirector = (t: string, handle: string, personName: string) =>
+    this.call<{ ok: true }>(
+      'POST',
+      `/rooms/${encodeURIComponent(t)}/officers`,
+      { handle, office: 'director', person_name: personName },
+      '/api/bitsign',
+    );
+  /** Directors only: the treasury keys in slot order (what a treasury approval signs). */
+  treasuryKeys = () =>
+    this.call<{ pubkeys: string[]; complete: boolean; m: number | null }>(
+      'GET',
+      this.co(this.company ?? 'bcorp', '/treasury'),
+    );
+  signTreasury = (t: string, a: { m: number } & Signed) =>
+    this.call<{ ok: true; adopted: boolean; signed: number; need: number }>('POST', this.co(t, '/treasury'), a);
   createOffer = (o: NewOffer) => this.call<PlacementOffer>('POST', '/offers', o);
   accept = (id: string, investorPubKey: string) =>
     this.call<PlacementOffer>('POST', `/offers/${encodeURIComponent(id)}/accept`, { investorPubKey });
