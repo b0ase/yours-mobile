@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { useAvatarPlayback } from '../names/useAvatarPlayback';
 import { MessageCircle, Phone, Star, Trash2, Wallet } from 'lucide-react';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { asMenuItem } from '../tabs/tabs';
@@ -16,9 +17,17 @@ const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
 
 export const Avatar = ({ title, src, size = 48 }: { title: string; src?: string | null; size?: number }) => {
   const hue = avatarHue(title);
+  // Contact lists: a still first frame of an animated picture, played on press/hover (names/animatedAvatar.ts).
+  const play = useAvatarPlayback(src, 'list');
   if (src)
     return (
-      <img src={src} alt="" className="rounded-full object-cover shrink-0" style={{ width: size, height: size }} />
+      <img
+        {...play.handlers}
+        src={play.src}
+        alt=""
+        className="rounded-full object-cover shrink-0"
+        style={{ width: size, height: size }}
+      />
     );
   return (
     <div
@@ -82,7 +91,13 @@ export const ContactRow = ({
   fav,
   onLeave,
   extra,
+  onOpen,
+  messageLabel = 'Message',
 }: {
+  /** Opens this contact's card (Wallet › address book). */
+  onOpen?: (c: Contact) => void;
+  /** The DM button's label ("Chat" in the address book). */
+  messageLabel?: string;
   /** Shown under the actions (Wallet › Friends: their personal token). */
   extra?: ReactNode;
   c: Contact;
@@ -98,10 +113,31 @@ export const ContactRow = ({
   const pay = payTarget(c);
   return (
     <li className="flex items-center gap-3 py-2" style={{ borderBottom: `1px solid ${LINE}` }}>
-      <Avatar title={c.name} src={c.avatar} size={40} />
+      {onOpen ? (
+        <button
+          type="button"
+          className="bw-abook-row-open shrink-0"
+          aria-label={`Open ${c.name}`}
+          onClick={() => onOpen(c)}
+        >
+          <Avatar title={c.name} src={c.avatar} size={40} />
+        </button>
+      ) : (
+        <Avatar title={c.name} src={c.avatar} size={40} />
+      )}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <span className={`text-[14px] font-semibold text-white ${ELLIPSIS}`}>{c.name}</span>
+          {onOpen ? (
+            <button
+              type="button"
+              className={`bw-abook-row-open text-[14px] font-semibold text-white ${ELLIPSIS}`}
+              onClick={() => onOpen(c)}
+            >
+              {c.name}
+            </button>
+          ) : (
+            <span className={`text-[14px] font-semibold text-white ${ELLIPSIS}`}>{c.name}</span>
+          )}
           <SourceBadges c={c} />
         </div>
         <div className={`text-[11px] ${ELLIPSIS}`} style={{ color: MUTED }}>
@@ -109,7 +145,7 @@ export const ContactRow = ({
         </div>
         <div className="flex gap-1 mt-1">
           <ActionBtn
-            label="Message"
+            label={messageLabel}
             icon={<MessageCircle size={12} />}
             disabled={!canMessage(c) || busy}
             onClick={() => onMessage(c)}

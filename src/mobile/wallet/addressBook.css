@@ -120,3 +120,114 @@
   height: 26px;
   margin: 0 auto;
 }
+/* Contact card (wallet/ContactCard.tsx): sits on the same ruled page. */
+.bw-abook-card {
+  width: 92%;
+  margin: 0 auto;
+  padding-bottom: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  color: #fff;
+  font-size: 13px;
+}
+.bw-abook-card-back {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  color: var(--bw-accent);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+}
+.bw-abook-card-thumbs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+}
+.bw-abook-card-thumbs button {
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+  background: transparent;
+  cursor: pointer;
+}
+.bw-abook-card-thumbs button[aria-pressed='true'] {
+  border-color: var(--bw-accent);
+}
+.bw-abook-card-thumbs img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.bw-abook-card-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 10px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid rgb(var(--bw-accent-rgb) / 0.35);
+  background: rgb(var(--bw-accent-rgb) / 0.13);
+  color: var(--bw-accent);
+  cursor: pointer;
+}
+.bw-abook-card-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.bw-abook-card-line {
+  display: flex;
+  gap: 10px;
+  line-height: 28px;
+}
+.bw-abook-card-label {
+  width: 52px;
+  flex-shrink: 0;
+  color: #98a2b3;
+  font-size: 11px;
+}
+.bw-abook-card-bio {
+  margin: 0;
+  line-height: 28px;
+  white-space: pre-wrap;
+}
+.bw-abook-card-private {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px dashed rgb(var(--bw-accent-rgb) / 0.35);
+  background: rgba(0, 0, 0, 0.25);
+}
+.bw-abook-card-private input,
+.bw-abook-card-private textarea {
+  border-radius: 8px;
+  border: 1px solid #2b2f36;
+  background: var(--bw-surface);
+  color: #fff;
+  padding: 8px 10px;
+  font-size: 13px;
+  outline: none;
+  resize: vertical;
+}
+.bw-abook-row-open {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+}
