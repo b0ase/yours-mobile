@@ -36,6 +36,8 @@ const ROUTES = {
   'bphone-book': ['POST', 'bphone-book'],
   'bphone-bookings': ['POST', 'bphone-bookings'],
   'bphone-book-act': ['POST', 'bphone-book-act'],
+  // Settings › Identity › Your name (signed): one display name for every paymail on the key.
+  'set-name': ['POST', 'set-name'],
 };
 
 const hits = new Map();

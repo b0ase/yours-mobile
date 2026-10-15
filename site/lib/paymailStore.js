@@ -191,6 +191,13 @@ function supabaseStore(env = process.env, f = fetch) {
     // Unlink one name: its payment records go too (FK on alias). Callers refuse while any is uncollected.
     countUncollected: async (alias) =>
       ((await req(`bwallet_paymail_payments?alias=eq.${q(alias)}&status=eq.received&select=reference`)) ?? []).length,
+    // One display name per wallet: every paymail on this identity key shows the same name.
+    setDisplayNameByKey: (k, name) =>
+      req(`bwallet_paymail_aliases?identity_key=eq.${q(k)}`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({ display_name: name, updated_at: new Date().toISOString() }),
+      }),
     deleteAlias: async (alias) => {
       await req(`bwallet_paymail_payments?alias=eq.${q(alias)}`, {
         method: 'DELETE',

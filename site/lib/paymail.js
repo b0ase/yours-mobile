@@ -51,6 +51,7 @@ const aliasOk = (a) => ALIAS_RE.test(a) || SOCIAL_RE.test(a);
  */
 const { openTicket, socialAliasFor } = require('./social');
 const { makeOpnsResolver } = require('./opnsResolve');
+const { cleanDisplayName, defaultDisplayName, shownDisplayName } = require('./displayName');
 async function ticketSocialCheck(alias, proof, env = process.env) {
   if (!proof || !proof.ticket || !proof.secret) return 'Continue with X or Google first';
   const p = openTicket(proof.ticket, proof.secret, env);
@@ -438,7 +439,7 @@ function makeHandlers({
         (/^0[23][0-9a-f]{64}$/.test(row.identity_key || '')
           ? `https://www.bchatx.com/api/bavatar/${row.identity_key}.png`
           : '');
-      return [200, { name: row.display_name || row.alias, avatar }];
+      return [200, { name: shownDisplayName(row.display_name, row.alias), avatar }];
     },
 
     verify: async ({ handle, pubkey }) => {
@@ -619,9 +620,18 @@ function makeHandlers({
         identity_key: identityKey,
         ord_address: f.ordAddress || null,
         // Keep what's there when an update leaves a field out.
-        display_name: String(f.name || '').slice(0, 64) || (ownsIt ? taken.display_name : null) || null,
+        // A display name is never blank (owner, 15 Oct 2026): what they typed, else the wallet's
+        // current name (every name on one key shares it), else the alias as typed ("mike" → "Mike").
+        display_name:
+          cleanDisplayName(f.name) ||
+          cleanDisplayName(ownsIt ? taken.display_name : '') ||
+          cleanDisplayName((await store.getAliasByKey(identityKey))?.display_name) ||
+          defaultDisplayName(alias),
         avatar: String(f.avatar || '').slice(0, 512) || (ownsIt ? taken.avatar : null) || null,
       });
+      // A name they typed is the wallet's name on every one of its paymails.
+      if (cleanDisplayName(f.name) && store.setDisplayNameByKey)
+        await store.setDisplayNameByKey(identityKey, row.display_name);
       if (newName) {
         // Legacy .gmail names published the owner's email: once the wallet has a plain name, the
         // .gmail one forwards to it for 90 days, then is released (migrations/20261010_retire_gmail_names.sql).
@@ -636,6 +646,18 @@ function makeHandlers({
         });
       }
       return [200, { paymail: handleOf(row.alias), pubkey: identityKey, ...(fee ? { feeTxid: fee } : {}) }];
+    },
+
+    // Settings › Identity › Your name: one display name per wallet, written to every name on the key.
+    'set-name': async (_q, body) => {
+      const sigErr = await verifySigned(body || {}, 'set-name', now());
+      if (sigErr) return [401, { error: sigErr }];
+      const key = String(body.identityKey).toLowerCase();
+      const row = await store.getAliasByKey(key);
+      if (!row) return [404, { error: 'Claim a name first' }];
+      const name = cleanDisplayName(body.fields?.name) || defaultDisplayName(row.alias);
+      await store.setDisplayNameByKey(key, name);
+      return [200, { name }];
     },
 
     // Market › Social: names whose owners may have a personal token. provider=all → every kind.
@@ -877,7 +899,11 @@ function makeHandlers({
       (await store.getAliasByKeyKind?.(key, 'gmail')) ||
       (await store.getAliasByKey(key));
     return row
-      ? { paymail: handleOf(row.alias), name: row.display_name || null, avatar: row.avatar || null }
+      ? {
+          paymail: handleOf(row.alias),
+          name: shownDisplayName(row.display_name, row.alias),
+          avatar: row.avatar || null,
+        }
       : { paymail: null, name: null, avatar: null };
   }
 }
