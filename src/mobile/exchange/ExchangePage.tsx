@@ -27,6 +27,7 @@ import { Sparkline } from './PriceChart';
 import { chartSeries } from './chartSeries';
 import { OpnsMarket } from './OpnsMarket';
 import { PodcastMarket } from './PodcastMarket';
+import { MoviesMarket } from './MoviesMarket';
 import { LaunchpadPanel } from '../market/launchpad/LaunchpadPanel';
 import { LaunchCoin } from './launch/LaunchCoin';
 import { FilterBar, PlatformPage, PlatformsView } from './Categories';
@@ -481,6 +482,7 @@ const ExchangePage = () => {
     ...(SwapFlow ? [{ id: 'swap', label: 'Swap', to: `${EXCHANGE_ROUTE}/swap` }] : []),
     { id: 'platforms', label: 'Platforms', to: platformRoute() },
     { id: 'names', label: 'Names', to: `${EXCHANGE_ROUTE}/names` },
+    { id: 'movies', label: 'Movies', to: `${EXCHANGE_ROUTE}/movies` },
     { id: 'podcasts', label: 'Podcasts', to: `${EXCHANGE_ROUTE}/podcasts` },
     { id: 'launchpad', label: 'Launchpad', to: `${EXCHANGE_ROUTE}/launchpad` },
     { id: 'orders', label: 'My orders', to: `${EXCHANGE_ROUTE}/orders` },
@@ -559,6 +561,7 @@ const ExchangePage = () => {
         )}
         {view.tab === 'orders' && <Orders />}
         {view.tab === 'names' && <OpnsMarket rate={rate} />}
+        {view.tab === 'movies' && <MoviesMarket rate={rate} />}
         {view.tab === 'podcasts' && <PodcastMarket rate={rate} />}
         {/* In-app launchpad (owner, 14 Oct 2026: the Exchange must not send people to tokenblaster.lol). */}
         {view.tab === 'launchpad' && <LaunchpadPanel />}
