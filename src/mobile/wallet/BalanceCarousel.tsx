@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { BCREDITS_ENABLED, PLACEMENT_ENABLED, STORE_BUILD } from '../storeBuild';
+import { BCREDITS_ENABLED, PLACEMENT_ENABLED } from '../storeBuild';
 import { MNEE_ICON_URL } from '../../utils/constants';
 import { setWalletKind } from './walletKind';
 import { CardBalance, CardSkin } from './CardSkin';
@@ -17,8 +17,6 @@ import './balanceCards.css';
  * only for a member on bit-sign's register and opens the real bShares bApp. Long-press opens All cards.
  * Nothing here signs or spends; every money action happens in the real screens it opens.
  */
-/** Never in store builds. */
-export const BALANCE_CARDS_ENABLED = !STORE_BUILD;
 
 const readMnee = (): number | null => {
   try {

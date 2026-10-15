@@ -410,3 +410,14 @@ export const BEX_REEL_ENABLED: boolean = !(
   import.meta.env.VITE_CHANNEL === 'ios-store' ||
   import.meta.env.VITE_CHANNEL === 'android-play'
 );
+
+/**
+ * Balance cards (src/mobile/wallet/BalanceCarousel.tsx): the swipe carousel of real balances and the All cards
+ * browser. bWalletX only; a lazy chunk behind this inlined flag, so the store bundle has none of it (not even its CSS).
+ * Store grep: `bwCardLayer|bw-bcar-`.
+ */
+export const BALANCE_CARDS_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);

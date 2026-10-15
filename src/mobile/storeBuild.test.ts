@@ -708,3 +708,10 @@ describe('BCREDITS_ENABLED: bCredits are bWalletX only', () => {
     expect(agent).toContain('BCREDITS_ENABLED ? useAgentCredits : useNoAgentCredits');
   });
 });
+
+describe('BALANCE_CARDS_ENABLED: balance cards are bWalletX only', () => {
+  test('off exactly when the store flag is on', async () => {
+    const { BALANCE_CARDS_ENABLED } = await import('./storeBuild');
+    expect(BALANCE_CARDS_ENABLED).toBe(!STORE_BUILD);
+  });
+});

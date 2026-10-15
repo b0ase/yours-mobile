@@ -76,8 +76,12 @@ import { LiveTicker } from './live/LiveTicker';
 import { noteBalance, useLive } from './live/liveBus';
 import { displayedSats, refreshDelay } from './live/liveLogic';
 import { useCountUp } from './live/useCountUp';
-import { BalanceCarousel, BALANCE_CARDS_ENABLED } from './BalanceCarousel';
+import { BALANCE_CARDS_ENABLED } from '../storeBuild';
 import { cardSats, memberSince, cardBsv, loadCardUnit, saveCardUnit, type CardUnit } from './walletCardText';
+/** Balance cards: a lazy chunk, absent from store builds (storeBuild.ts). */
+const BalanceCarousel = BALANCE_CARDS_ENABLED
+  ? lazy(() => import('./BalanceCarousel').then((m) => ({ default: m.BalanceCarousel })))
+  : null;
 
 export type WalletCardProps = {
   /** Total in US dollars (BSV at the current rate, plus MNEE when enabled). */
@@ -890,4 +894,10 @@ const RealWalletCard = (p: WalletCardProps) => (
 
 // Balance cards (bWalletX only, never in store builds): the real card becomes the first slide of a multi-balance carousel.
 export const WalletCard = (p: WalletCardProps) =>
-  BALANCE_CARDS_ENABLED ? <BalanceCarousel bsvCard={<RealWalletCard {...p} />} /> : <RealWalletCard {...p} />;
+  BalanceCarousel ? (
+    <Suspense fallback={<RealWalletCard {...p} />}>
+      <BalanceCarousel bsvCard={<RealWalletCard {...p} />} />
+    </Suspense>
+  ) : (
+    <RealWalletCard {...p} />
+  );
