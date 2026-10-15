@@ -15,6 +15,7 @@
  *                                           /media/… links are redirected to /bmusic/… by src/web/vercel.json)
  *   /m/nfts[/<outpoint>]  ↔ /wallet/nfts[/<outpoint>]   (NFT library, nfts/NftLibraryPage.tsx)
  *   /m/bapp/<slug>?to=<path> ↔ /bapp/<slug>?to=<path>   (a bApp in the wallet frame, bappFrame/bappLink.ts)
+ *   /m/my-names            ↔ /wallet/my-names   (Wallet › Names, wallet/NamesSection.tsx)
  *   /m/tickets, /m/credits ↔ /wallet/tickets, /wallet/credits   (old /tickets, /credits 308 there, vercel.json)
  * Other top-level app routes (/settings, …) keep their own path.
  */
@@ -29,7 +30,7 @@ export const ONBOARDING = new Set(['/create-wallet', '/restore-wallet', '/import
 /** In-app artist screens (media/artists/ArtistsPage.tsx). */
 const ARTISTS_ROUTE = '/m/media/artists';
 /** Wallet pages with their own route: /m/<page>[/…] ↔ /wallet/<page>[/…]. */
-const WALLET_PAGES = /^\/(nfts|friends|tickets|credits)(?=\/|$)/;
+const WALLET_PAGES = /^\/(nfts|friends|my-names|tickets|credits)(?=\/|$)/;
 const albumById = (id: string) => SHARE_ALBUMS.find((a) => a.id === id);
 const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/i;
 

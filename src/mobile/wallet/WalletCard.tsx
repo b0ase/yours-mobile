@@ -81,6 +81,7 @@ import { noteBalance, useLive } from './live/liveBus';
 import { displayedSats, refreshDelay } from './live/liveLogic';
 import { useCountUp } from './live/useCountUp';
 import { BALANCE_CARDS_ENABLED } from '../storeBuild';
+import { AddressBookPull } from './AddressBook';
 import { cardSats, memberSince, cardBsv, loadCardUnit, saveCardUnit, type CardUnit } from './walletCardText';
 /** Balance cards: a lazy chunk, absent from store builds (storeBuild.ts). */
 const BalanceCarousel = BALANCE_CARDS_ENABLED
@@ -903,5 +904,7 @@ export const WalletCard = (p: WalletCardProps) =>
       <BalanceCarousel bsvCard={<RealWalletCard {...p} />} />
     </Suspense>
   ) : (
-    <RealWalletCard {...p} />
+    <AddressBookPull>
+      <RealWalletCard {...p} />
+    </AddressBookPull>
   );

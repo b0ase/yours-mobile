@@ -1,12 +1,12 @@
 /**
  * Wallet tab's top switch: Tokens (fungible: BSV, MNEE, locks, BSV21) | NFTs (non-fungible,
- * shown as the media library: music, video, images) | Tickets (tokens that open rooms) | Credits (prepaid bCredits)
+ * shown as the media library: music, video, images) | Names (OpNS names + $handle paymails, NamesSection.tsx) | Tickets (tokens that open rooms) | Credits (prepaid bCredits)
  * | Shares (bShares holdings, from the balance card). A tiny shared store so the bottom bar,
  * deep links (upstream 'ords'), the balance cards and the Wallet page agree on the view.
  *
  * `coin` narrows the Tokens list to one coin's row (the MNEE or PNEEs balance card, 15 Oct 2026); null = every token.
  */
-export type WalletKind = 'tokens' | 'nfts' | 'friends' | 'tickets' | 'credits' | 'shares';
+export type WalletKind = 'tokens' | 'nfts' | 'names' | 'tickets' | 'credits' | 'shares';
 export type ListCoin = 'mnee' | 'pnee' | null;
 
 let kind: WalletKind = 'tokens';

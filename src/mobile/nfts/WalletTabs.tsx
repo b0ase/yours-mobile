@@ -3,14 +3,14 @@ import { setWalletKind, type WalletKind } from '../wallet/walletKind';
 import { STORE_BUILD, STORE_HIDDEN_WALLET_KINDS } from '../storeBuild';
 
 /**
- * Desktop Wallet section tabs (owner, 12 Oct 2026): Tokens | NFTs | Friends | Tickets | Credits. Tokens is
- * a view of /wallet (walletKind.ts); NFTs, Friends, Tickets and Credits are their own pages at /wallet/nfts, /wallet/friends, /wallet/tickets and
+ * Desktop Wallet section tabs (owner, 12 Oct 2026): Tokens | NFTs | Names | Tickets | Credits. Tokens is
+ * a view of /wallet (walletKind.ts); NFTs, Names, Tickets and Credits are their own pages at /wallet/nfts, /wallet/my-names, /wallet/tickets and
  * /wallet/credits (url/publicUrl.ts). Kinds a store edition hides stay hidden.
  */
 const TABS: { id: WalletKind; label: string; to: string }[] = [
   { id: 'tokens', label: 'Tokens', to: '/bsv-wallet' },
   { id: 'nfts', label: 'NFTs', to: '/m/nfts' },
-  { id: 'friends', label: 'Friends', to: '/m/friends' },
+  { id: 'names', label: 'Names', to: '/m/my-names' },
   { id: 'tickets', label: 'Tickets', to: '/m/tickets' },
   { id: 'credits', label: 'Credits', to: '/m/credits' },
 ];

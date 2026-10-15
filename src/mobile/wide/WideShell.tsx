@@ -301,8 +301,11 @@ const WideShell = ({ children }: { children: ReactNode }) => {
         { id: 'nfts', label: 'NFTs', icon: I.nfts, to: '/m/nfts' },
         // Every mint type in one place (bmint/BmintPage.tsx, owner 13 Oct 2026).
         { id: 'bmint', label: 'bMint', icon: I.mint, to: '/m/bmint' },
-        // Its own page with a deep link per friend (/wallet/friends/<handle>, owner 12 Oct 2026).
-        { id: 'friends', label: 'Friends', icon: I.friends, to: '/m/friends' },
+        // Names replaces Friends (owner, 15 Oct 2026): OpNS names + $handle paymails (wallet/NamesSection.tsx).
+        { id: 'names', label: 'Names', icon: I.friends, to: '/m/my-names' },
+        // Friends live in the address book notebook (/wallet/friends, wallet/AddressBook.tsx); a friend's own page
+        // stays at /wallet/friends/<handle>.
+        { id: 'friends', label: 'Address book', icon: I.friends, to: '/m/friends' },
         {
           id: 'tickets',
           label: 'Tickets',
@@ -422,7 +425,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
 
   const bapp = bappFromPath(pathname);
   // NFTs and Friends take the whole area right of the menu (owner, 11 Oct 2026); the holdings pane is for Wallet.
-  const fullWallet = onWallet && (kind === 'nfts' || kind === 'friends');
+  const fullWallet = onWallet && (kind === 'nfts' || kind === 'names');
   const view = bapp
     ? 'bapp'
     : pathname.startsWith('/m/bmail')
