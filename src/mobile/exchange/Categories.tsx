@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, BadgeCheck, Lock, SlidersHorizontal, Users } from 'lucide-react';
+import { ArrowLeft, AtSign, BadgeCheck, Lock, SlidersHorizontal } from 'lucide-react';
 import { ONESAT, cached, roomMeta, type HotRoom } from '../market/indexer';
 import { TokenIcon } from './TokenIcon';
 import { platformRoute, tradeRoute } from './exchangeData';
@@ -39,7 +39,7 @@ const Chip = ({ on, onClick, children }: { on: boolean; onClick: () => void; chi
 
 /**
  * The one filter button (owner, 14 Oct 2026: "4×4 filters… but only one large yellow button that stretches the whole
- * width"): a full-width gold button naming the current filter, opening a 4×4 grid: All, People, and the 14
+ * width"): a full-width gold button naming the current filter, opening a 4×4 grid: All, Names, and the 14
  * categories (Games and Apps among them), each with its count. Platforms and the active tag stay below as before.
  */
 export const FilterBar = ({
@@ -47,8 +47,7 @@ export const FilterBar = ({
   filter,
   registry,
   onChange,
-  people,
-  onPeople,
+  onNames,
   shares,
   onShares,
 }: {
@@ -56,9 +55,8 @@ export const FilterBar = ({
   filter: Filter;
   registry: Registry;
   onChange: (f: Filter) => void;
-  /** The People (friends' tokens) view, when the page offers it. */
-  people?: boolean;
-  onPeople?: (on: boolean) => void;
+  /** Opens the Names (OpNS) market, when the page offers it (owner, 15 Oct 2026: replaces People/Friends). */
+  onNames?: () => void;
   /** The restricted Shares view (bShares; never offered for sale), when the page offers it (not in a store build). */
   shares?: boolean;
   onShares?: (on: boolean) => void;
@@ -67,8 +65,8 @@ export const FilterBar = ({
   const total = [...cats.values()].reduce((a, b) => a + b, 0);
   const platforms = registry.platforms.filter((p) => (plats.get(p.slug) ?? 0) > 0 || filter.platforms.includes(p.slug));
   const [grid, setGrid] = useState(false);
-  const current = shares ? 'Shares' : people ? 'People' : filter.cat ? categoryLabel(filter.cat) : 'All markets';
-  const currentCount = people || shares ? null : filter.cat ? (cats.get(filter.cat) ?? 0) : total;
+  const current = shares ? 'Shares' : filter.cat ? categoryLabel(filter.cat) : 'All markets';
+  const currentCount = shares ? null : filter.cat ? (cats.get(filter.cat) ?? 0) : total;
   const cell = (on: boolean, label: string, count: number | null, onClick: () => void, icon?: React.ReactNode) => (
     <button
       key={label}
@@ -126,18 +124,15 @@ export const FilterBar = ({
             >
               <p className="m-0 px-1 pt-1 text-sm font-bold text-white">Show which markets?</p>
               <div className="grid grid-cols-4 gap-1.5">
-                {cell(!people && !shares && !filter.cat, 'All', total, () => {
-                  onPeople?.(false);
+                {cell(!shares && !filter.cat, 'All', total, () => {
                   onShares?.(false);
                   onChange({ ...filter, cat: null });
                 })}
-                {onPeople &&
-                  cell(!!people, 'People', null, () => onPeople(true), <Users size={14} aria-hidden="true" />)}
+                {onNames && cell(false, 'Names', null, onNames, <AtSign size={14} aria-hidden="true" />)}
                 {onShares &&
                   cell(!!shares, 'Shares', null, () => onShares(true), <Lock size={14} aria-hidden="true" />)}
                 {CATEGORIES.map((c) =>
-                  cell(!people && !shares && filter.cat === c.slug, c.label, cats.get(c.slug) ?? 0, () => {
-                    onPeople?.(false);
+                  cell(!shares && filter.cat === c.slug, c.label, cats.get(c.slug) ?? 0, () => {
                     onShares?.(false);
                     onChange({ ...filter, cat: c.slug });
                   }),
