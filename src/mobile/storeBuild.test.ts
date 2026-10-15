@@ -571,6 +571,13 @@ describe('BMINT_NOTES_ENABLED: the bMint banknote designer is bWalletX only', ()
   });
 });
 
+describe('PLACEMENT_ENABLED: bShares (securities) is bWalletX only', () => {
+  test('off exactly when the store flag is on', async () => {
+    const { PLACEMENT_ENABLED } = await import('./storeBuild');
+    expect(PLACEMENT_ENABLED).toBe(!STORE_BUILD);
+  });
+});
+
 /** Feed › bMovies (tokenised clip pitches) is bWalletX only: no reel, no feed entry in a store build. */
 describe('BMOVIES_FEED_ENABLED: the bMovies feed is not in a store build', () => {
   const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');

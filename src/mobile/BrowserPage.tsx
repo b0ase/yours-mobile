@@ -37,7 +37,7 @@ import { useInPeek } from './phone/pageEl';
 import bGlyph from './brand/bwallet-glyph.svg';
 import bspacesGlyph from './brand/bspaces-glyph.svg';
 import bpicsGlyph from './brand/bpics-glyph.svg';
-import { ArrowRight, Clock, Github, Globe, Plus, Search, Star, X } from 'lucide-react';
+import { ArrowRight, Clock, Github, Globe, Lock, Plus, Search, Star, X } from 'lucide-react';
 import { BAPP_GROUPS, bappsIn, type BApp } from './bapps';
 import { RADAR_APPS, RADAR_GROUPS } from './radarApps';
 import { GAME_SOURCES, gamesFor } from './games/gamesCatalog';
@@ -147,6 +147,8 @@ type Tile = {
   url: string;
   icon?: string;
   demo?: boolean;
+  /** Restricted bApp (bShares): its badge text; the app itself checks membership. Absent from store bundles. */
+  restricted?: string;
   bapp?: BApp;
   /** One-line tagline for third-party apps (from BSVRadar or the Metanet app store). */
   desc?: string;
@@ -219,6 +221,7 @@ const bappTile = (a: BApp): Tile => ({
   url: a.url,
   icon: a.icon,
   demo: a.status === 'demo',
+  restricted: a.restricted,
   bapp: a,
 });
 
@@ -335,6 +338,16 @@ const AppTile = ({
             style={{ background: '#98A2B3' }}
             aria-label="Demo"
           />
+        )}
+        {tile.restricted && (
+          <span
+            className="absolute -top-1 -right-1 h-4 w-4 rounded-full border-2 border-[#010101] flex items-center justify-center"
+            style={{ background: '#F5B800' }}
+            aria-label={tile.restricted}
+            title={tile.restricted}
+          >
+            <Lock size={8} color="#1a1300" aria-hidden="true" />
+          </span>
         )}
       </div>
       {label && (
@@ -1267,7 +1280,7 @@ const BrowserPage = ({
                               : { background: 'rgb(var(--bw-accent-lo-rgb)/0.13)', color: 'var(--bw-accent-hi)' }
                           }
                         >
-                          {info.demo ? 'Demo' : 'Live'}
+                          {info.restricted ? info.restricted : info.demo ? 'Demo' : 'Live'}
                         </span>
                       )}
                     </div>

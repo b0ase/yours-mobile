@@ -366,6 +366,17 @@ export const BMINT_NOTES_ENABLED: boolean = !(
 );
 
 /**
+ * bShares, the bCorp share placement (docs/BCORP-PLACEMENT.md): the /m/bshares bApp, the Lock page Vault and the
+ * Exchange "Shares" filter. Securities never ship in a store build, not even as code: the lazy imports are dropped.
+ * Store grep: `bShares|BCORP-PLACEMENT|bcorp-placement|Restricted · not offered publicly|locked 2-of-2`.
+ */
+export const PLACEMENT_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+
+/**
  * bMovies feed (Feed › bMovies: the vertical clip reel from bmovies.app): bWalletX only (web, desktop,
  * direct APK). Clips are tokenised pitches ("Tokenise this"), so the store build leaves it out even
  * as code. Literal env check so Vite inlines it and Rollup drops feed/bmovies/* and its registry
@@ -395,17 +406,6 @@ export const BCREDITS_ENABLED: boolean = !(
  * every build, but its Tokenise button (Launchpad) is behind MARKET_ENABLED. Same env as STORE_BUILD.
  */
 export const BEX_REEL_ENABLED: boolean = !(
-  import.meta.env.VITE_STORE_BUILD === '1' ||
-  import.meta.env.VITE_CHANNEL === 'ios-store' ||
-  import.meta.env.VITE_CHANNEL === 'android-play'
-);
-
-/**
- * bShares, the bCorp share placement (docs/BCORP-PLACEMENT.md): the /m/bshares bApp, the Lock page Vault and the
- * Exchange "Shares" filter. Securities never ship in a store build, not even as code: the lazy imports are dropped.
- * Store grep: `bShares|BCORP-PLACEMENT|bcorp-placement|Restricted · not offered publicly|locked 2-of-2`.
- */
-export const PLACEMENT_ENABLED: boolean = !(
   import.meta.env.VITE_STORE_BUILD === '1' ||
   import.meta.env.VITE_CHANNEL === 'ios-store' ||
   import.meta.env.VITE_CHANNEL === 'android-play'
