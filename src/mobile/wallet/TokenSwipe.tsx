@@ -25,7 +25,8 @@ export type TokenSwipeProps = {
   onSend: () => void;
   onReceive: () => void;
   onChat: () => void;
-  onLock: () => void;
+  /** Omitted: no Lock in the tray (rows that can't lock in this build). */
+  onLock?: () => void;
   children: ReactNode;
 };
 
@@ -44,8 +45,9 @@ export const TokenSwipe = (p: TokenSwipeProps) => {
       icon: p.pinned ? <PinOff size={18} /> : <Pin size={18} />,
       onPress: () => setPinned(togglePin(readPinned(), p.id)),
     },
-    { id: 'lock', label: 'Lock', color: '#7c5cff', icon: <Lock size={18} />, onPress: p.onLock },
   ];
+  if (p.onLock)
+    right.push({ id: 'lock', label: 'Lock', color: '#7c5cff', icon: <Lock size={18} />, onPress: p.onLock });
   if (!p.noArchive)
     right.push({
       id: 'archive',
