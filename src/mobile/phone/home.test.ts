@@ -42,7 +42,7 @@ describe('HOME', () => {
     expect([...order].sort((x, y) => x - y)).toEqual(order);
     expect(top).toContain('{!phone && <AccountStrip />}');
     const apps = readFileSync(join(import.meta.dir, '../BrowserPage.tsx'), 'utf8');
-    expect(apps).toContain('[...SYS_TILES, ...notHome(BAPP_TILES)]');
+    expect(apps).toContain('ownIconsFirst([...SYS_TILES, ...BAPP_TILES], hasOwnIcon)');
   });
 
   test('HOME is a fixed 4 × 6 page with Your apps and Recents below', () => {
