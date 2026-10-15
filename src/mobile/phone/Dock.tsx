@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Minus, Plus } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Minus, Plus, RotateCcw } from 'lucide-react';
 import { useReducedMotion } from 'framer-motion';
 import bGlyph from '../brand/bwallet-glyph.svg';
 import { useBackClose } from '../backStack';
-import { dockKey, moveInDock, removeFromDock, splitDock, type DockItem } from './dockModel';
+import { dockKey, isDefaultDock, moveInDock, removeFromDock, resetDock, splitDock, type DockItem } from './dockModel';
 import { setAgentNote, setAgentVoice } from '../agent/handoff';
 import { voiceNote } from '../agent/voiceText';
 import { useHoldToTalk } from '../agent/useHoldToTalk';
@@ -16,7 +16,8 @@ import { itemIcon, itemLabel } from './icons';
  * sideways when there are more, with a fade on the side that has more. A sibling of the page, never inside it,
  * so its sideways scroll can't turn into a page swipe (PhoneShell also ignores touches that start here).
  * The big b in the centre: tap = HOME (the app grid), press and hold = talk to b (HomeButton).
- * Long-press a tile to arrange: tap a tile to pick it, then move it left/right or remove it; + adds.
+ * Long-press a tile to arrange: tap a tile to pick it, then move it left/right or remove it; + adds; Reset
+ * restores the default. An empty dock shows a dashed + tile, so arranging is never out of reach (owner, 15 Oct 2026).
  */
 const GOLD = 'var(--bw-accent-hi)';
 const MUTED = '#98A2B3';
@@ -244,11 +245,13 @@ export const Dock = ({
   const reduce = useReducedMotion();
   const [arranging, setArranging] = useState(false);
   const [picked, setPicked] = useState<string | null>(null);
+  const [confirmReset, setConfirmReset] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   const [fade, setFade] = useState({ left: false, right: false });
   const done = () => {
     setArranging(false);
     setPicked(null);
+    setConfirmReset(false);
   };
   useBackClose(arranging, done);
   // Arranging ends on a page change or when the app goes to the background (same rules as Apps › Home).
@@ -276,6 +279,33 @@ export const Dock = ({
     if (pickedIndex < 0) return;
     onChange(moveInDock(items, pickedIndex, pickedIndex + dir));
   };
+
+  const empty = items.length === 0;
+  const atDefault = isDefaultDock(items);
+  const addTile = (
+    <div className="relative shrink-0 flex justify-center" style={{ width: 74 }}>
+      <button
+        type="button"
+        aria-label="Add to the dock"
+        data-testid="dock-add-empty"
+        onClick={() => {
+          setArranging(true);
+          onAdd();
+        }}
+        className="flex flex-col items-center gap-1 w-full py-1 bg-transparent border-0 select-none"
+      >
+        <span
+          className="flex h-10 w-10 items-center justify-center rounded-2xl"
+          style={{ border: `1.5px dashed ${GOLD}` }}
+        >
+          <Plus size={20} color={GOLD} />
+        </span>
+        <span className="text-[10px] leading-tight" style={{ color: GOLD, fontWeight: 600 }}>
+          Add
+        </span>
+      </button>
+    </div>
+  );
 
   const tile = (item: DockItem, i: number) => {
     const k = dockKey(item);
@@ -306,66 +336,112 @@ export const Dock = ({
     <>
       {arranging && (
         <div
-          className="absolute left-0 right-0 z-[101] px-3 pb-2 flex items-center gap-2"
+          className="absolute left-0 right-0 z-[101] px-3 pb-2 flex flex-col gap-1.5"
           style={{ bottom: 'var(--dock-h)' }}
           role="toolbar"
           aria-label="Arrange the dock"
         >
-          <div
-            className="flex-1 flex items-center gap-1.5 rounded-2xl px-2 py-1.5 backdrop-blur-md"
-            style={{ background: 'rgba(23,25,30,0.92)', border: '1px solid #2b2f36' }}
+          <p
+            className="m-0 self-center rounded-full px-3 py-1 text-center text-[11px] leading-tight backdrop-blur-md"
+            style={{ color: MUTED, background: 'rgba(23,25,30,0.92)' }}
           >
-            <button
-              type="button"
-              aria-label="Move left"
-              disabled={pickedIndex <= 0}
-              onClick={() => move(-1)}
-              className="h-8 w-8 rounded-full flex items-center justify-center bg-[#2b2f36] border-0 disabled:opacity-30"
+            {confirmReset && pickedIndex < 0
+              ? `Put back ${resetDock()
+                  .map((i) => itemLabel(i, labels))
+                  .join(', ')}?`
+              : 'Tap an icon to move or remove it · Add · Reset · Done'}
+          </p>
+          <div className="flex items-center gap-2">
+            <div
+              className="flex-1 flex items-center gap-1.5 rounded-2xl px-2 py-1.5 backdrop-blur-md"
+              style={{ background: 'rgba(23,25,30,0.92)', border: '1px solid #2b2f36' }}
             >
-              <ChevronLeft size={16} color="#fff" />
-            </button>
-            <button
-              type="button"
-              aria-label="Move right"
-              disabled={pickedIndex < 0 || pickedIndex >= items.length - 1}
-              onClick={() => move(1)}
-              className="h-8 w-8 rounded-full flex items-center justify-center bg-[#2b2f36] border-0 disabled:opacity-30"
-            >
-              <ChevronRight size={16} color="#fff" />
-            </button>
-            <span className="flex-1 min-w-0 text-[11px] leading-tight" style={{ color: MUTED }}>
-              {pickedIndex >= 0 ? itemLabel(items[pickedIndex], labels) : 'Tap an item'}
-            </span>
-            {pickedIndex >= 0 ? (
-              // Touch and hold › Remove from Dock: it goes back to the Home grid (owner, round 4).
               <button
                 type="button"
-                onClick={() => {
-                  onChange(removeFromDock(items, items[pickedIndex]));
-                  setPicked(null);
-                }}
-                className="h-8 rounded-full px-3 flex items-center gap-1 text-[12px] font-bold border-0 bg-[#2b2f36] text-white"
+                aria-label="Move left"
+                disabled={pickedIndex <= 0}
+                onClick={() => move(-1)}
+                className="h-8 w-8 rounded-full flex items-center justify-center bg-[#2b2f36] border-0 disabled:opacity-30"
               >
-                <Minus size={14} /> Remove from Dock
+                <ChevronLeft size={16} color="#fff" />
               </button>
-            ) : (
               <button
                 type="button"
-                onClick={onAdd}
-                className="h-8 rounded-full px-3 flex items-center gap-1 text-[12px] font-bold border-0 bg-[#2b2f36] text-white"
+                aria-label="Move right"
+                disabled={pickedIndex < 0 || pickedIndex >= items.length - 1}
+                onClick={() => move(1)}
+                className="h-8 w-8 rounded-full flex items-center justify-center bg-[#2b2f36] border-0 disabled:opacity-30"
               >
-                <Plus size={14} /> Add
+                <ChevronRight size={16} color="#fff" />
               </button>
-            )}
+              <span className="flex-1 min-w-0 text-[11px] leading-tight" style={{ color: MUTED }}>
+                {pickedIndex >= 0 ? itemLabel(items[pickedIndex], labels) : ''}
+              </span>
+              {pickedIndex >= 0 ? (
+                // Touch and hold › Remove from Dock: it goes back to the Home grid (owner, round 4).
+                <button
+                  type="button"
+                  onClick={() => {
+                    onChange(removeFromDock(items, items[pickedIndex]));
+                    setPicked(null);
+                  }}
+                  className="h-8 rounded-full px-3 flex items-center gap-1 text-[12px] font-bold border-0 bg-[#2b2f36] text-white"
+                >
+                  <Minus size={14} /> Remove from Dock
+                </button>
+              ) : confirmReset ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmReset(false)}
+                    className="h-8 rounded-full px-3 text-[12px] font-bold border-0 bg-[#2b2f36] text-white"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="dock-reset-confirm"
+                    onClick={() => {
+                      onChange(resetDock());
+                      setConfirmReset(false);
+                    }}
+                    className="h-8 rounded-full px-3 text-[12px] font-bold border-0"
+                    style={{ background: GOLD, color: '#010101' }}
+                  >
+                    Reset
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={onAdd}
+                    className="h-8 rounded-full px-3 flex items-center gap-1 text-[12px] font-bold border-0 bg-[#2b2f36] text-white"
+                  >
+                    <Plus size={14} /> Add
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Reset the dock to default"
+                    data-testid="dock-reset"
+                    disabled={atDefault}
+                    onClick={() => setConfirmReset(true)}
+                    className="h-8 rounded-full px-3 flex items-center gap-1 text-[12px] font-bold border-0 bg-[#2b2f36] text-white disabled:opacity-30"
+                  >
+                    <RotateCcw size={13} /> Reset
+                  </button>
+                </>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={done}
+              className="rounded-full px-4 py-2 text-[13px] font-bold border-0"
+              style={{ background: GOLD, color: '#010101' }}
+            >
+              Done
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={done}
-            className="rounded-full px-4 py-2 text-[13px] font-bold border-0"
-            style={{ background: GOLD, color: '#010101' }}
-          >
-            Done
-          </button>
         </div>
       )}
       <nav
@@ -379,11 +455,7 @@ export const Dock = ({
         <div className="flex-1 min-h-0 flex items-center px-1">
           <div className="flex-1 flex items-center justify-around min-w-0">
             {left.map((it, i) => tile(it, i))}
-            {left.length === 0 && arranging && (
-              <span className="text-[10px]" style={{ color: MUTED }}>
-                Empty
-              </span>
-            )}
+            {empty && addTile}
           </div>
           <HomeButton onHome={onHome} onAgent={onAgent} disabled={arranging} />
           <div
