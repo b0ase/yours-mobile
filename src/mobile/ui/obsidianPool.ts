@@ -8,9 +8,16 @@ import { useEffect, useState } from 'react';
  */
 
 const VERT = `attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}`;
+/**
+ * highp where the GPU has it. The hash below (fract(sin(x)*43758.5)) needs 32-bit floats: Android's Mali / Adreno
+ * GPUs honour mediump as 16-bit, and the pool then draws as small striped blocks ("broken images", "static"; owner,
+ * 15 Oct 2026, Android 5.2.23). Desktop and iOS GPUs already run mediump at full precision, so nothing else changes.
+ */
+export const PRECISION =
+  '#ifdef GL_FRAGMENT_PRECISION_HIGH\nprecision highp float;\n#else\nprecision mediump float;\n#endif\n';
 // Domain-warped noise as a height field, lit like polished volcanic glass: near-black body, soft white sheen,
 // and a faint warm glow where the gold b sits. Do not change: bwalletx-site/ask-b.html carries the same shader.
-export const FRAG = `precision mediump float;
+export const FRAG = `${PRECISION}
 uniform vec2 r;uniform float t;
 float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
@@ -35,7 +42,7 @@ gl_FragColor=vec4(col,1.);}`;
  * lighting as FRAG, but a molten-gold body, warm highlights and a dusting of sparkle. A separate shader so the
  * original obsidian stays untouched.
  */
-export const GOLD_FRAG = `precision mediump float;
+export const GOLD_FRAG = `${PRECISION}
 uniform vec2 r;uniform float t;
 float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
