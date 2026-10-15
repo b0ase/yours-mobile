@@ -109,6 +109,7 @@ export const TokenLinks = ({
           <p className="text-xs text-white m-0 break-all">
             Open {NAME[ask.kind]} <b>{ask.label}</b>?
           </p>
+          <p className="text-[11px] text-[#D0D5DD] m-0 break-all font-mono">{ask.url}</p>
           <p className="text-[11px] text-[#98A2B3] m-0">
             The token&apos;s issuer set this link. It&apos;s an outside site that bWalletX hasn&apos;t checked; never
             enter your recovery phrase there.

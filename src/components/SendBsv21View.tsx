@@ -47,6 +47,8 @@ import { activeQuarantine } from '../mobile/airdrops/inbox';
 import { normId } from '../mobile/airdrops/quarantine';
 import { cleanNote, noteOutput, withExtraOutput } from '../mobile/airdrops/note';
 import { celebrateSend } from './sent/sent';
+import { P2PKH } from '@bsv/sdk';
+import { maxOverlayFee, withTokenSendGuard, type OverlayFee } from '../mobile/wallet/send/tokenFee';
 
 export interface Token {
   isConfirmed: boolean;
@@ -205,6 +207,9 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
     setIsProcessing(false);
   };
 
+  /** The indexer fee the user saw on the confirm sheet: the send may pay no more, and no one else (tokenFee.ts). */
+  const confirmedFeeRef = useRef<OverlayFee | null>(null);
+
   const handleSendBSV21 = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     await sleep(25);
@@ -249,6 +254,11 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
       address: addr,
       amount: `${showAmount(tokenConsolidated.get(addr)!, token.info.dec)} ${tokenName}`,
     }));
+    // sendBsv21 also pays the token's indexer per token output (fee_address, fee_per_output): show it to confirm.
+    const details = await refreshOverlayStatus();
+    const fee = maxOverlayFee(details?.status?.fee_address, details?.status?.fee_per_output, sendRecipients.length);
+    confirmedFeeRef.current = fee;
+    if (fee) lineItems.push({ address: fee.address, amount: `up to ${fee.sats} sats (indexer fee)` });
 
     const tokenIcon = token.info.icon
       ? isUri(token.info.icon)
@@ -291,9 +301,15 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
         addSnackbar('The note must be 1–280 characters of plain text.', 'error');
         return;
       }
-      const ctx = text
-        ? { ...apiContext, wallet: withExtraOutput(apiContext.wallet, noteOutput(text, token.info.id!)) }
-        : apiContext;
+      const fee = confirmedFeeRef.current;
+      const guarded = withTokenSendGuard(
+        apiContext.wallet,
+        fee ? { feeScript: new P2PKH().lock(fee.address).toHex(), maxSats: fee.sats } : null,
+      );
+      const ctx = {
+        ...apiContext,
+        wallet: text ? withExtraOutput(guarded, noteOutput(text, token.info.id!)) : guarded,
+      };
       // Journal: open before the send, closed as soon as a txid (or a clean refusal) comes back. A page suspended
       // in between leaves it open, and the next start heals this token (tokenSendHeal.ts).
       journalId = await journalSendStart(chromeJournalStore, token.info.id!).catch(() => undefined);
