@@ -124,6 +124,7 @@ export const BAPP_ABOUT: Readonly<Record<string, string>> = {
   bMovies: 'A feed of films and trailers you can watch, and back by buying their tokens.',
   bMusic: 'Put your tracks on Bitcoin as tokens; fans who hold them help make the video.',
   bMint: 'Design and mint your own tokens, notes and media, inside this wallet.',
+  bPositive: 'Take a journey one day at a time, with three friends as witnesses. Private by default.',
   // Restricted, bWalletX only: the same literal env check as bapps.ts so the store bundle never carries it.
   ...(!(
     import.meta.env.VITE_STORE_BUILD === '1' ||
