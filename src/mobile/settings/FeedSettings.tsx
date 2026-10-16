@@ -28,6 +28,7 @@ import {
   LogOut,
   Network,
   AtSign,
+  Eye,
 } from 'lucide-react';
 import { openDappBrowser } from '../dappBrowser';
 import { ChangePassword } from './ChangePassword';
@@ -44,6 +45,7 @@ import { AgentsScreen } from '../agents/AgentsScreen';
 import { WalletNames } from './WalletNames';
 import { DisplayNameField } from './DisplayNameField';
 import { IdentityMap } from './IdentityMap';
+import { ShareFact } from '../kyc/ShareFact';
 import {
   B_AGENT_DESC,
   MY_TOKENS_DESC,
@@ -503,6 +505,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
     | 'bweb'
     | 'websites'
     | 'idmap'
+    | 'sharefact'
     | 'signins'
     | null
   >(null);
@@ -600,6 +603,13 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
             label="Verify your identity"
             description="A two-minute ID check. Shows a Verified identity badge on contracts you sign and unlocks higher limits"
             onClick={() => void openDappBrowser(KYC_URL)}
+          />
+          <Divider />
+          <Row
+            icon={<Eye size={16} />}
+            label="Share one fact"
+            description="Prove one thing, like your country, to one app, and nothing else"
+            onClick={() => setScreen('sharefact')}
             isLast
           />
         </Section>
@@ -1074,6 +1084,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
       {screen === 'social' && <ConnectSocial onClose={closeSocial} />}
       {handleOpen && <HandleFlow title="Change handle" onClose={() => setHandleOpen(false)} />}
       {screen === 'idmap' && <IdentityMap onClose={() => setScreen(null)} />}
+      {screen === 'sharefact' && <ShareFact onClose={() => setScreen(null)} />}
       {screen === 'agents' && <AgentsScreen onClose={() => setScreen(null)} />}
       {screen === 'paired' && (
         <Screen title="Paired websites" onBack={() => setScreen(null)}>
