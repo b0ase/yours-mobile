@@ -31,6 +31,8 @@ import {
   EMPTY_VALUE,
   cardValueText,
   creditsUsd,
+  formatTokenAmount,
+  hasNoPrice,
   sumHoldings,
   unpricedNote,
   useCardUnit,
@@ -99,6 +101,23 @@ type CardDef = {
   amount?: string;
   /** A tapped token's card: its value (whole units at the last sale), for the fiat/BSV line. */
   value?: CardValue;
+  /** A tapped token's card: its balance in its own units, for the line under the value. */
+  units?: Units;
+};
+
+/** A balance in its own units: whole-unit amount, symbol and decimals ("1,000 SCAM" under the value). */
+type Units = { qty: number; symbol: string; decimals: number };
+
+/** Decimals each built-in card's own units show with (counts are whole; MNEE and PNEEs are cents). */
+const UNIT_DECIMALS: Record<string, number> = { mnee: 2, pnee: 2 };
+/** Unit names when a card has not published its balance yet. */
+const UNIT_NAMES: Record<string, string> = {
+  tokens: 'tokens',
+  btickets: 'tickets',
+  bshares: 'shares',
+  bcredits: 'bCredits',
+  mnee: 'MNEE',
+  pnee: 'PNEEs',
 };
 
 /** Cards whose front is a balance (all but Top up): they show a fiat/BSV value and the shared switch. */
@@ -137,17 +156,37 @@ const valueFor = (id: string, amount: number, tokens: CardValue | null): CardVal
  * (.bw-wcard-centre / .bw-wcard-usd, "N unpriced" in .bw-wcard-sats under it) and the fiat/BSV switch bottom-right
  * (.bw-wcard-bottom › .bw-wcard-addrline › .bw-wcard-unit).
  */
-const CardValueFront = ({ id, live, value }: { id: string; live: boolean; value?: CardValue }) => {
+const CardValueFront = ({
+  id,
+  live,
+  value,
+  units,
+}: {
+  id: string;
+  live: boolean;
+  value?: CardValue;
+  units?: Units;
+}) => {
   const ctx = useContext(CardValueContext);
   const unit = useCardUnit();
   const bal = useCardBalance(id, live);
   const v = value ?? valueFor(id, bal?.amount ?? 0, ctx.tokens);
-  const text = cardValueText(v, unit, ctx.rate, ctx.fx);
-  const note = unpricedNote(v);
+  const own = units ?? {
+    qty: bal?.amount ?? 0,
+    symbol: bal?.unit || UNIT_NAMES[id] || '',
+    decimals: UNIT_DECIMALS[id] ?? 0,
+  };
+  const amountLine = formatTokenAmount(own.qty, own.symbol, own.decimals);
+  // The rule (owner, 16 Oct 2026): big line = value ($ or BSV per the switch), the token amount always under it.
+  // No price at all → the token amount is the big line and "No price yet" sits under it.
+  const noPrice = hasNoPrice(v);
+  const text = noPrice ? amountLine : cardValueText(v, unit, ctx.rate, ctx.fx);
+  const note = noPrice ? '' : unpricedNote(v);
   return (
     <>
       <span className="bw-wcard-centre" style={{ position: 'relative' }}>
-        <span className={`bw-wcard-usd${unit === 'bsv' ? ' is-bsv' : ''}`}>{text}</span>
+        <span className={`bw-wcard-usd${unit === 'bsv' && !noPrice ? ' is-bsv' : ''}`}>{text}</span>
+        <span className="bw-wcard-sats bw-bc-units">{noPrice ? 'No price yet' : amountLine}</span>
         {note && <span className="bw-wcard-sats">{note}</span>}
       </span>
       <span className="bw-wcard-bottom" style={{ position: 'relative' }}>
@@ -171,6 +210,7 @@ const tokenCard = (t: FocusedToken, prices: Prices): CardDef => ({
   sub: t.amount,
   amount: t.amount,
   value: sumHoldings([{ amount: t.qty ?? 0, usdEach: t.id === PNEE_TOKEN_ID ? 1 : null, satsEach: prices[t.id] }]),
+  units: { qty: t.qty ?? 0, symbol: t.symbol ?? t.name, decimals: t.decimals ?? 0 },
   issuer: 'BSV-21 token',
   colour: '#14161f',
   logo: <img src={t.icon} alt="" width={22} height={22} style={{ borderRadius: 11 }} />,
@@ -238,7 +278,7 @@ const CardFront = ({ c, live = true, onFlip }: { c: CardDef; live?: boolean; onF
     {onFlip && <FlipBtn onFlip={onFlip} back={false} />}
     <CardHead c={c} />
     {c.value || (c.amount === undefined && VALUED.has(c.id)) ? (
-      <CardValueFront id={c.id} live={live} value={c.value} />
+      <CardValueFront id={c.id} live={live} value={c.value} units={c.units} />
     ) : (
       <span style={{ position: 'relative' }}>
         {c.amount !== undefined ? (
