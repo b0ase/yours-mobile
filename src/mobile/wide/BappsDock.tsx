@@ -2,6 +2,7 @@ import { BAPPS as WALLET_BAPPS } from '../bapps';
 import tokenblasterIcon from '../brand/apps/tokenblaster.png';
 import { TOKENBLASTER_ENABLED } from '../storeBuild';
 import { useThemedIcon } from '../brand/bappIcons';
+import { useBWeb } from '../bweb/useBWeb';
 
 /** Real tile icons from the wallet's own bApps list. */
 const ico = (name: string) => WALLET_BAPPS.find((a) => a.name === name)?.icon as string | undefined;
@@ -97,10 +98,12 @@ export default function BappsDock({
   running: string[];
   onPick: (id: string) => void;
 }) {
+  // bWeb (Settings › bWeb): bApps you hid stay out of the dock; the one you have open always shows.
+  const [bweb] = useBWeb();
   return (
     <div className="bx-dockwrap">
       <nav className="bx-dock" aria-label="bApps dock">
-        {BAPPS.map((a) => (
+        {BAPPS.filter((a) => a.id === current || !bweb.dockHidden.includes(a.id)).map((a) => (
           <button
             key={a.id}
             className={`bx-item${a.soon ? ' soon' : ''}${current === a.id ? ' on' : ''}`}
