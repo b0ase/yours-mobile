@@ -37,3 +37,14 @@ test('Light packs: typed text in inputs takes the pack ink (no white on white)',
     /data-bw-pack='light'\][^{]*textarea[^{]*\{[^}]*color: var\(--bw-text\) !important;[^}]*-webkit-text-fill-color: var\(--bw-text\)/,
   );
 });
+
+test('No dark cards on White: every dark hex in src/ has a mono sweep selector (run bun scripts/dark-fills.ts)', async () => {
+  const { darkFills, renderBlock } = await import('../../../scripts/dark-fills');
+  const css = readFileSync(new URL('../../themes.css', import.meta.url), 'utf8');
+  const fills = darkFills(new URL('../../', import.meta.url).pathname);
+  // New lock's "start small" card (#2a1d00), Pots/Subscriptions panels (#17191E), Launchpad (#0F1013) and friends.
+  for (const c of ['42, 29, 0', '23, 25, 30', '15, 16, 19', '11, 12, 15']) expect(fills).toContain(c);
+  const missing = fills.filter((c) => !css.includes(`[style*='background: rgb(${c})']`));
+  expect(missing).toEqual([]);
+  expect(css).toContain(renderBlock(fills));
+});

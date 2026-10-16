@@ -500,3 +500,21 @@ export const takeXInvite = () => {
 };
 export const peekXInvite = () => pendingClaim;
 export const onXInvite = (l: () => void) => (claimListeners.add(l), () => void claimListeners.delete(l));
+
+// ── handoff from Friends › "Invite the rest" (wallet/XFollowsImport) ──
+
+let invitePrefill: string[] = [];
+
+/** Queue @handles for the next Invites sheet (your room); it opens straight on its confirm with the cost. */
+export const requestInvitePrefill = (handles: readonly string[]) => {
+  invitePrefill = parseHandles(handles.join(' '));
+};
+
+/** Take the queued handles once, at most one batch; the rest stay queued for the next batch. */
+export const takeInvitePrefill = (): string[] => {
+  const batch = invitePrefill.slice(0, MAX_INVITES_PER_BATCH);
+  invitePrefill = invitePrefill.slice(MAX_INVITES_PER_BATCH);
+  return batch;
+};
+
+export const hasInvitePrefill = () => invitePrefill.length > 0;
