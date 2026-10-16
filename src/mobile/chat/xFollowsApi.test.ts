@@ -2,6 +2,8 @@ import { describe, expect, it } from 'bun:test';
 import { ChatApiError } from './api';
 import {
   absoluteUrl,
+  filterUnmatched,
+  parseUnmatched,
   blockedReason,
   estimateLines,
   explainError,
@@ -12,7 +14,8 @@ import {
   parseResult,
   XFollowsApi,
 } from './xFollowsApi';
-import { addMatch, openReauth } from '../wallet/XFollowsImport';
+import { addMatch, inviteNote, openReauth } from '../wallet/XFollowsImport';
+import { hasInvitePrefill, requestInvitePrefill, takeInvitePrefill } from './xInvites';
 
 const est = {
   accounts: 850,
@@ -73,7 +76,7 @@ describe('X follows import client', () => {
       last_import_at: '2026-10-16T00:00:00Z',
     });
     expect(r.matched).toEqual([{ handle: 'mike', xUsername: 'mike_x' }]);
-    expect(parseResult(null)).toEqual({ imported: 0, matched: [], capped: false, lastImportAt: null });
+    expect(parseResult(null)).toEqual({ imported: 0, matched: [], unmatched: [], capped: false, lastImportAt: null });
   });
 
   it('turns every refusal into a plain message', () => {
@@ -132,5 +135,37 @@ describe('X follows import client', () => {
     await expect(addMatch({ handle: 'nobody', xUsername: '' }, async () => null)).rejects.toThrow(
       'no bWalletX paymail',
     );
+  });
+
+  it('parses the people not on bChatX and searches them', () => {
+    const u = parseUnmatched([
+      { x_username: '@Alice', x_id: '1' },
+      { x_username: 'alice', x_id: '1' },
+      { x_username: 'bad name', x_id: '2' },
+      { x_username: 'bob_99', x_id: '3' },
+    ]);
+    expect(u).toEqual([
+      { xUsername: 'Alice', xId: '1' },
+      { xUsername: 'bob_99', xId: '3' },
+    ]);
+    expect(parseUnmatched(Array.from({ length: 1200 }, (_, i) => ({ x_username: `u${i}` }))).length).toBe(1000);
+    expect(filterUnmatched(u, '@ALI').map((x) => x.xUsername)).toEqual(['Alice']);
+    expect(filterUnmatched(u, '  ').length).toBe(2);
+    expect(parseResult({ unmatched: [{ x_username: 'z', x_id: '9' }] }).unmatched).toEqual([
+      { xUsername: 'z', xId: '9' },
+    ]);
+  });
+
+  it('hands the chosen @handles to your room Invites, one batch at a time', () => {
+    requestInvitePrefill(Array.from({ length: 60 }, (_, i) => `u${i}`));
+    expect(hasInvitePrefill()).toBe(true);
+    const first = takeInvitePrefill();
+    expect(first.length).toBe(50);
+    expect(first[0]).toBe('u0');
+    expect(takeInvitePrefill().length).toBe(10);
+    expect(hasInvitePrefill()).toBe(false);
+    expect(takeInvitePrefill()).toEqual([]);
+    expect(inviteNote(3)).toContain('show the cost and ask you once');
+    expect(inviteNote(60)).toContain('first 50');
   });
 });

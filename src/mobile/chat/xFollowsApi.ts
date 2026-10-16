@@ -41,9 +41,16 @@ export interface XFollowMatch {
   xUsername: string;
 }
 
+/** Someone you follow who isn't on bChatX yet (server: excludes you, deduped, sorted, max 1,000). */
+export interface XFollowUnmatched {
+  xUsername: string;
+  xId: string;
+}
+
 export interface XFollowsResult {
   imported: number;
   matched: XFollowMatch[];
+  unmatched: XFollowUnmatched[];
   capped: boolean;
   lastImportAt: string | null;
 }
@@ -94,11 +101,36 @@ export function parseMatches(v: unknown): XFollowMatch[] {
   return out;
 }
 
+export const MAX_UNMATCHED = 1000;
+
+export function parseUnmatched(v: unknown): XFollowUnmatched[] {
+  if (!Array.isArray(v)) return [];
+  const seen = new Set<string>();
+  const out: XFollowUnmatched[] = [];
+  for (const x of v) {
+    const o = (x ?? {}) as Record<string, unknown>;
+    const name = str(o.x_username).replace(/^@/, '').trim();
+    const key = name.toLowerCase();
+    if (!/^[a-z0-9_]{1,15}$/i.test(name) || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ xUsername: name, xId: str(o.x_id) });
+    if (out.length >= MAX_UNMATCHED) break;
+  }
+  return out;
+}
+
+/** Search the unmatched list by @name (case-insensitive, leading @ ignored). */
+export const filterUnmatched = (list: readonly XFollowUnmatched[], q: string) => {
+  const s = q.trim().replace(/^@/, '').toLowerCase();
+  return s ? list.filter((u) => u.xUsername.toLowerCase().includes(s)) : [...list];
+};
+
 export function parseResult(v: unknown): XFollowsResult {
   const o = (v ?? {}) as Record<string, unknown>;
   return {
     imported: num(o.imported),
     matched: parseMatches(o.matched),
+    unmatched: parseUnmatched(o.unmatched),
     capped: o.capped === true,
     lastImportAt: str(o.last_import_at) || null,
   };

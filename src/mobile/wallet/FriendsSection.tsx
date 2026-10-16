@@ -131,11 +131,14 @@ export const FriendsSection = () => {
           <XFollowsImport
             onInviteRest={
               me
-                ? () => {
-                    // Open Drops live in your room › Invites (chat/XInvitesSheet).
-                    const key = tokenKey('bsv21', me.tokenId);
-                    if (key) requestChatRoom(key);
-                    handleSelect(asMenuItem('chat'));
+                ? (handles: string[]) => {
+                    // Open Drops live in your room › Invites (chat/XInvitesSheet), which opens on its confirm.
+                    void import('../chat/xInvites').then((m) => {
+                      m.requestInvitePrefill(handles);
+                      const key = tokenKey('bsv21', me.tokenId);
+                      if (key) requestChatRoom(key);
+                      handleSelect(asMenuItem('chat'));
+                    });
                   }
                 : null
             }

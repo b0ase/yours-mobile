@@ -14,6 +14,7 @@ import {
   blockedReason,
   estimateLines,
   explainError,
+  filterUnmatched,
   usd,
   XFollowsApi,
   type XFollowMatch,
@@ -23,6 +24,7 @@ import {
 import { lookupBwalletx } from './useJoinMatch';
 import { resolveCallee } from '../calls/peer';
 import { addFriend } from '../calls/friends';
+import { MAX_INVITES_PER_BATCH } from '../chat/xInvites';
 
 const f = (u: string, i?: RequestInit) => fetch(u, i);
 const MUTED = '#98A2B3';
@@ -54,6 +56,14 @@ export const addMatch = async (
   return paymail;
 };
 
+/** What happens next, in plain words: your room's Invites shows the cost and asks once. */
+export const inviteNote = (n: number, batch = MAX_INVITES_PER_BATCH) =>
+  n === 0
+    ? 'Choose who to invite. Each invite is an Open Drop from your room.'
+    : n > batch
+      ? `Your room's Invites will show the cost and ask once for the first ${batch}; then invite the next ${batch}.`
+      : `Your room's Invites will show the cost and ask you once.`;
+
 type View =
   | { kind: 'idle' }
   | { kind: 'loading' }
@@ -61,7 +71,7 @@ type View =
   | { kind: 'confirm'; e: XFollowsEstimate }
   | { kind: 'importing' };
 
-export const XFollowsImport = ({ onInviteRest }: { onInviteRest: (() => void) | null }) => {
+export const XFollowsImport = ({ onInviteRest }: { onInviteRest: ((handles: string[]) => void) | null }) => {
   const api = useMemo(
     () =>
       new XFollowsApi((m, p, b) => {
@@ -77,6 +87,10 @@ export const XFollowsImport = ({ onInviteRest }: { onInviteRest: (() => void) | 
   const [added, setAdded] = useState<Record<string, string>>({});
   const [adding, setAdding] = useState(false);
   const [awaitingReauth, setAwaitingReauth] = useState(false);
+  // "Invite the rest": pick who to invite from the people you follow who aren't on bChatX yet.
+  const [picking, setPicking] = useState(false);
+  const [query, setQuery] = useState('');
+  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
 
   const fail = useCallback((e: unknown) => {
     const x = explainError(e);
@@ -171,6 +185,8 @@ export const XFollowsImport = ({ onInviteRest }: { onInviteRest: (() => void) | 
     try {
       await api.remove();
       setResult(null);
+      setPicking(false);
+      setPicked(new Set());
       setAdded({});
       setMsg('Imported list removed. Friends you added stay.');
     } catch (e) {
@@ -180,7 +196,25 @@ export const XFollowsImport = ({ onInviteRest }: { onInviteRest: (() => void) | 
 
   if (hidden) return null;
   const busy = view.kind === 'loading' || view.kind === 'importing';
-  const rest = result ? Math.max(0, result.imported - result.matched.length) : 0;
+  const rest = result?.unmatched ?? [];
+  const shownRest = filterUnmatched(rest, query);
+  const allShownPicked = shownRest.length > 0 && shownRest.every((u) => picked.has(u.xUsername));
+  const toggle = (name: string) =>
+    setPicked((p) => {
+      const n = new Set(p);
+      if (n.has(name)) n.delete(name);
+      else n.add(name);
+      return n;
+    });
+  const toggleAllShown = () =>
+    setPicked((p) => {
+      const n = new Set(p);
+      for (const u of shownRest) {
+        if (allShownPicked) n.delete(u.xUsername);
+        else n.add(u.xUsername);
+      }
+      return n;
+    });
 
   return (
     <div className="flex flex-col gap-2 rounded-xl px-3 py-3" style={card}>
@@ -344,10 +378,55 @@ export const XFollowsImport = ({ onInviteRest }: { onInviteRest: (() => void) | 
               None of the people you follow are on bWalletX yet.
             </p>
           )}
-          {rest > 0 && onInviteRest && (
-            <button type="button" className={btn} style={primary} onClick={onInviteRest}>
-              Invite the rest ({rest.toLocaleString()})
+          {rest.length > 0 && onInviteRest && !picking && (
+            <button type="button" className={btn} style={primary} onClick={() => setPicking(true)}>
+              Invite the rest ({rest.length.toLocaleString()})
             </button>
+          )}
+          {rest.length > 0 && onInviteRest && picking && (
+            <div className="flex flex-col gap-2">
+              <span className="text-xs font-bold text-white">Not on bChatX yet ({rest.length.toLocaleString()})</span>
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search @names"
+                aria-label="Search people to invite"
+                autoCapitalize="none"
+                autoCorrect="off"
+                className="rounded-xl bg-[var(--bw-bg,#000)] border border-[#2b2f36] px-3 py-2 text-sm text-white outline-none"
+              />
+              <label className="flex items-center gap-2 text-xs text-white">
+                <input type="checkbox" checked={allShownPicked} onChange={toggleAllShown} />
+                {query.trim() ? `Select all ${shownRest.length.toLocaleString()} shown` : 'Select all'}
+              </label>
+              <ul className="m-0 p-0 list-none flex flex-col gap-1 max-h-64 overflow-y-auto">
+                {shownRest.map((u) => (
+                  <li key={u.xUsername}>
+                    <label className="flex items-center gap-2 text-sm text-white">
+                      <input type="checkbox" checked={picked.has(u.xUsername)} onChange={() => toggle(u.xUsername)} />@
+                      {u.xUsername}
+                    </label>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-xs m-0" style={{ color: MUTED }}>
+                {inviteNote(picked.size)}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className={btn}
+                  style={{ ...primary, opacity: picked.size ? 1 : 0.4 }}
+                  disabled={!picked.size}
+                  onClick={() => onInviteRest(rest.map((u) => u.xUsername).filter((n) => picked.has(n)))}
+                >
+                  Invite {picked.size.toLocaleString()}
+                </button>
+                <button type="button" className={btn} style={soft} onClick={() => setPicking(false)}>
+                  Cancel
+                </button>
+              </div>
+            </div>
           )}
           <button
             type="button"
