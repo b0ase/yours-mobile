@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, Check } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -13,13 +13,15 @@ import {
   factAvailable,
   factPreview,
   isAppKey,
-  loadGrants,
+  appNames,
+  factOfGrant,
+  listGrants,
+  nameApp,
   revokeGrant,
-  saveGrants,
   sendGrant,
   shortKey,
   type Fact,
-  type StoredGrant,
+  type ServerGrant,
 } from './factShare';
 
 /**
@@ -48,11 +50,29 @@ export const ShareFact = ({ onClose }: { onClose: () => void }) => {
   const [sheet, setSheet] = useState(false);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
-  const [grants, setGrants] = useState<StoredGrant[]>([]);
+  const [grants, setGrants] = useState<ServerGrant[]>([]);
+  const [listNote, setListNote] = useState('');
+
+  const refresh = useCallback(async () => {
+    const session = loadSession();
+    if (!session) return setListNote('Open Chat once to sign in to see your shares.');
+    const r = await listGrants(defaultHttp(isNative), session.token);
+    if (r.ok) {
+      setGrants(r.grants);
+      setListNote('');
+    } else
+      setListNote(
+        r.reason === 'unavailable'
+          ? 'Not available yet.'
+          : r.reason === 'signin'
+            ? 'Open Chat once to sign in to see your shares.'
+            : 'Could not load your shares.',
+      );
+  }, []);
 
   useEffect(() => {
-    if (identityKey) setGrants(loadGrants(identityKey));
-  }, [identityKey]);
+    if (identityKey) void refresh();
+  }, [identityKey, refresh]);
 
   const ready = !!fact && factAvailable(fact) && isAppKey(appKey) && !!kyc;
   const app = appName.trim() || 'This app';
@@ -74,19 +94,8 @@ export const ShareFact = ({ onClose }: { onClose: () => void }) => {
         setNote(r.message);
         return;
       }
-      const next = [
-        ...grants,
-        {
-          owner: grant.identity_key,
-          grantee: grant.grantee,
-          appName: app,
-          factId: fact.id,
-          signedAt: grant.signed_at,
-          expiresAt: grant.expires_at,
-        },
-      ];
-      setGrants(next);
-      saveGrants(grant.identity_key, next);
+      if (appName.trim()) nameApp(grant.grantee, appName.trim());
+      void refresh();
       setNote(`Shared ${fact.label.toLowerCase()} with ${app}.`);
       setFact(null);
       setAppKey('');
@@ -99,17 +108,22 @@ export const ShareFact = ({ onClose }: { onClose: () => void }) => {
     }
   };
 
-  const stop = async (g: StoredGrant) => {
+  const stop = async (g: ServerGrant) => {
     const session = loadSession();
-    const ok = session ? await revokeGrant(defaultHttp(isNative), session.token, g) : false;
-    if (!ok) {
-      setNote(`Stopping early is not available yet. This share ends on ${fmt(g.expiresAt)}.`);
-      return;
+    if (!session || !apiContext) return setNote('Open Chat once to sign in, then try again.');
+    try {
+      const r = await revokeGrant({
+        http: defaultHttp(isNative),
+        token: session.token,
+        ctx: apiContext,
+        grantId: g.id,
+      });
+      if (!r.ok) return setNote(r.message);
+      setNote(`Stopped sharing with ${appNames()[g.grantee.toLowerCase()] ?? shortKey(g.grantee)}.`);
+      void refresh();
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : 'Could not sign. Still sharing.');
     }
-    const next = grants.filter((x) => x !== g);
-    setGrants(next);
-    saveGrants(g.owner, next);
-    setNote(`Stopped sharing with ${g.appName}.`);
   };
 
   return createPortal(
@@ -217,19 +231,19 @@ export const ShareFact = ({ onClose }: { onClose: () => void }) => {
         )}
 
         <div className="text-[12px] font-semibold mt-6 mb-1.5">Active shares</div>
-        {grants.length === 0 ? (
+        {listNote || grants.length === 0 ? (
           <p className="m-0 text-[12px]" style={muted}>
-            You are not sharing anything.
+            {listNote || 'You are not sharing anything.'}
           </p>
         ) : (
           grants.map((g) => (
-            <div key={`${g.grantee}${g.signedAt}`} className="rounded-xl p-3 mb-2 flex items-center gap-2" style={card}>
+            <div key={g.id} className="rounded-xl p-3 mb-2 flex items-center gap-2" style={card}>
               <div className="flex-1 min-w-0">
                 <div className="text-[13px] font-semibold truncate">
-                  {FACTS.find((f) => f.id === g.factId)?.label} → {g.appName}
+                  {factOfGrant(g)?.label ?? g.fields.join(', ')} → {appNames()[g.grantee.toLowerCase()] ?? 'App'}
                 </div>
                 <div className="text-[11px]" style={muted}>
-                  {shortKey(g.grantee)} · until {fmt(g.expiresAt)}
+                  {shortKey(g.grantee)} · until {fmt(g.expires_at)}
                 </div>
               </div>
               <button

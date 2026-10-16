@@ -69,3 +69,42 @@ describe('factShare', () => {
     expect(await sendGrant(async () => ({ status: 201, data: { ok: true } }), 't', {} as never)).toEqual({ ok: true });
   });
 });
+
+describe('revoke', () => {
+  test('signs bit-sign revoke message under the revoke protocol and posts to /grants/<id>', async () => {
+    const { revokeGrant, shareRevokeMessage, SHARE_REVOKE_PROTOCOL } = await import('./factShare');
+    const wallet = new ProtoWallet(PrivateKey.fromRandom());
+    const ctx = { wallet } as unknown as OneSatContext;
+    let seen: { url: string; body: { identity_key: string; signed_at: string; signature: string } } | null = null;
+    const http = async (req: { url: string; body?: unknown }) => {
+      seen = req as never;
+      return { status: 200, data: { ok: true } };
+    };
+    const r = await revokeGrant({ http: http as never, token: 't', ctx, grantId: 'ABC', origin: 'https://x' });
+    expect(r).toEqual({ ok: true });
+    expect(seen!.url).toBe('https://x/api/bitsign/identity/cert/grants/ABC');
+    const b = seen!.body;
+    const { valid } = await new ProtoWallet('anyone').verifySignature({
+      data: Utils.toArray(
+        shareRevokeMessage({ ownerPubkey: b.identity_key, grantId: 'ABC', signedAt: b.signed_at }),
+        'utf8',
+      ),
+      signature: Utils.toArray(b.signature, 'hex'),
+      protocolID: SHARE_REVOKE_PROTOCOL,
+      keyID: '1',
+      counterparty: b.identity_key,
+    });
+    expect(valid).toBe(true);
+    expect(shareRevokeMessage({ ownerPubkey: 'o', grantId: 'ABC', signedAt: 's' })).toBe(
+      'bit-sign kyc share revoke\nidentity_key:o\ngrant_id:abc\nsigned_at:s',
+    );
+  });
+
+  test('list 503 is unavailable', async () => {
+    const { listGrants } = await import('./factShare');
+    expect(await listGrants(async () => ({ status: 503, data: null }), 't')).toEqual({
+      ok: false,
+      reason: 'unavailable',
+    });
+  });
+});

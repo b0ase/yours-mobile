@@ -178,49 +178,94 @@ export const sendGrant = async (
   return { ok: false, reason: 'error', message: errorText(res.data, `Could not share (${res.status}).`) };
 };
 
-/** Ask the server to end a grant early. Any non-2xx means it is still live until its end date. */
-export const revokeGrant = async (
-  http: Http,
-  token: string,
-  g: StoredGrant,
-  origin = BCHAT_ORIGIN,
-): Promise<boolean> => {
-  try {
-    const res = await http({
-      method: 'DELETE',
-      url: `${origin}${GRANTS_PATH}`,
-      headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
-      body: { identity_key: g.owner, grantee: g.grantee, signed_at: g.signedAt },
-    });
-    return res.status >= 200 && res.status < 300;
-  } catch {
-    return false;
-  }
-};
+export const SHARE_REVOKE_PROTOCOL: [2, string] = [2, 'bitsign kyc share revoke'];
 
-export interface StoredGrant {
-  owner: string;
+/** Byte-for-byte bit-sign shareRevokeMessage. */
+export const shareRevokeMessage = (r: { ownerPubkey: string; grantId: string; signedAt: string }) =>
+  `bit-sign kyc share revoke\nidentity_key:${r.ownerPubkey}\ngrant_id:${r.grantId.toLowerCase()}\nsigned_at:${r.signedAt}`;
+
+/** One active grant as bit-sign GET /identity/cert/grants returns it. */
+export interface ServerGrant {
+  id: string;
   grantee: string;
-  appName: string;
-  factId: FactId;
-  signedAt: string;
-  expiresAt: string;
+  fields: string[];
+  expires_at: string;
+  signed_at: string;
 }
 
-const STORE = (owner: string) => `bwallet.factGrants:${owner}`;
+export type ListResult =
+  | { ok: true; grants: ServerGrant[] }
+  | { ok: false; reason: 'unavailable' | 'signin' | 'error' };
 
-export const loadGrants = (owner: string, now = Date.now()): StoredGrant[] => {
+export const listGrants = async (http: Http, token: string, origin = BCHAT_ORIGIN): Promise<ListResult> => {
   try {
-    const all = JSON.parse(localStorage.getItem(STORE(owner)) || '[]') as StoredGrant[];
-    return Array.isArray(all) ? all.filter((g) => Date.parse(g.expiresAt) > now) : [];
+    const res = await http({
+      method: 'GET',
+      url: `${origin}${GRANTS_PATH}`,
+      headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+    });
+    if (res.status === 503 || res.status === 404) return { ok: false, reason: 'unavailable' };
+    if (res.status === 401) return { ok: false, reason: 'signin' };
+    const grants = (res.data as { grants?: unknown })?.grants;
+    if (res.status !== 200 || !Array.isArray(grants)) return { ok: false, reason: 'error' };
+    return { ok: true, grants: grants as ServerGrant[] };
   } catch {
-    return [];
+    return { ok: false, reason: 'error' };
   }
 };
 
-export const saveGrants = (owner: string, grants: StoredGrant[]) => {
+/** The fact a grant shares (grants made here name one field). */
+export const factOfGrant = (g: ServerGrant): Fact | undefined =>
+  FACTS.find((f) => f.fields.length > 0 && f.fields.every((x) => g.fields.includes(x)));
+
+/** Sign and send a revocation. POST /identity/cert/grants/<id>. */
+export const revokeGrant = async (args: {
+  http: Http;
+  token: string;
+  ctx: OneSatContext;
+  grantId: string;
+  now?: number;
+  origin?: string;
+}): Promise<SendResult> => {
+  const ownerPubkey = (await args.ctx.wallet.getPublicKey({ identityKey: true })).publicKey;
+  const signedAt = new Date(args.now ?? Date.now()).toISOString();
+  const { signature } = await args.ctx.wallet.createSignature({
+    data: Utils.toArray(shareRevokeMessage({ ownerPubkey, grantId: args.grantId, signedAt }), 'utf8'),
+    protocolID: SHARE_REVOKE_PROTOCOL,
+    keyID: SHARE_GRANT_KEY_ID,
+    counterparty: 'anyone',
+  });
+  let res;
   try {
-    localStorage.setItem(STORE(owner), JSON.stringify(grants));
+    res = await args.http({
+      method: 'POST',
+      url: `${args.origin ?? BCHAT_ORIGIN}${GRANTS_PATH}/${encodeURIComponent(args.grantId)}`,
+      headers: { Accept: 'application/json', Authorization: `Bearer ${args.token}` },
+      body: { identity_key: ownerPubkey, signed_at: signedAt, signature: Utils.toHex(signature) },
+    });
+  } catch {
+    return { ok: false, reason: 'error', message: 'No connection. Still sharing.' };
+  }
+  if (res.status >= 200 && res.status < 300) return { ok: true };
+  if (res.status === 503) return { ok: false, reason: 'unavailable', message: 'Not available yet. Still sharing.' };
+  if (res.status === 401) return { ok: false, reason: 'signin', message: 'Open Chat once to sign in, then try again.' };
+  return { ok: false, reason: 'error', message: errorText(res.data, `Could not stop sharing (${res.status}).`) };
+};
+
+/** Your own labels for app keys. Names only; the list itself comes from bit-sign. */
+const NAMES = 'bwallet.factGrantNames';
+
+export const appNames = (): Record<string, string> => {
+  try {
+    return (JSON.parse(localStorage.getItem(NAMES) || '{}') as Record<string, string>) ?? {};
+  } catch {
+    return {};
+  }
+};
+
+export const nameApp = (grantee: string, name: string) => {
+  try {
+    localStorage.setItem(NAMES, JSON.stringify({ ...appNames(), [grantee.toLowerCase()]: name }));
   } catch {
     /* storage unavailable */
   }
