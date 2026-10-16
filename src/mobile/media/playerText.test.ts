@@ -9,7 +9,10 @@ const css = readFileSync(join(import.meta.dir, '../../themes.css'), 'utf8');
 test('player text uses theme tokens: no hard-coded white or grey ink', () => {
   for (const f of PLAYER) {
     const src = read(f);
-    expect({ f, hits: src.match(/color="#fff"|text-\[#98A2B3\]|'#98A2B3'|'#2b2f36'|'#111216'/gi) }).toEqual({ f, hits: null });
+    expect({ f, hits: src.match(/color="#fff"|text-\[#98A2B3\]|'#98A2B3'|'#2b2f36'|'#111216'/gi) }).toEqual({
+      f,
+      hits: null,
+    });
   }
 });
 
