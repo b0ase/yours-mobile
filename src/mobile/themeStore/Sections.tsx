@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom';
 import { BCREDITS_ENABLED, THEME_ORDERS_ENABLED } from '../storeBuild';
 import {
   ALLOWED_CATEGORIES,
-  EXAMPLE_SUBSCRIPTIONS,
   PROHIBITED,
   draftToListing,
   feeSplitLabel,
@@ -14,7 +13,7 @@ import {
   type Period,
 } from './bstore';
 import { S } from './styles';
-import { StatusList } from './ui';
+import { Empty, StatusList } from './ui';
 
 // The existing "Get your own edition" order flow ($99 a year), itself bWalletX only.
 const ThemeOrderSheet = THEME_ORDERS_ENABLED ? lazy(() => import('../themeOrder/ThemeOrderSheet')) : null;
@@ -78,18 +77,21 @@ function ListingCard({ l, onReport }: { l: Listing; onReport?: () => void }) {
 }
 
 function Subscriptions() {
-  // No subscription listings come from the server yet, so the seeds show (labelled Example).
+  // Listings come from the server once it exists (docs/BSTORE.md); none yet, and no placeholder items.
   const live: Listing[] = [];
-  const shown = live.length ? live : EXAMPLE_SUBSCRIPTIONS;
   return (
     <>
       <p style={S.sub}>Pay per day, week or month. Prices in USD, settled in BSV. Cancel anytime.</p>
       {fee}
-      <div style={S.grid}>
-        {shown.map((l) => (
-          <ListingCard key={l.id} l={l} />
-        ))}
-      </div>
+      {live.length ? (
+        <div style={S.grid}>
+          {live.map((l) => (
+            <ListingCard key={l.id} l={l} />
+          ))}
+        </div>
+      ) : (
+        <Empty title="No subscriptions yet">Sellers list memberships and plans here once selling opens.</Empty>
+      )}
       <StatusList
         items={[
           ['Subscription listings (seller, price per period, perks)', true],
@@ -118,8 +120,9 @@ function Credits() {
 function Stickers() {
   return (
     <>
-      <p style={S.empty}>Sticker and emoji packs for chat, from bCorp and from creators.</p>
+      <p style={S.sub}>Sticker and emoji packs for chat, from bCorp and from creators.</p>
       {fee}
+      <Empty title="No sticker packs yet">Packs appear here when they go on sale.</Empty>
       <StatusList
         items={[
           ['Sticker & emoji packs', false],
@@ -187,7 +190,7 @@ function Community({ account }: { account: string }) {
           ))}
         </div>
       ) : (
-        <p style={S.empty}>No community listings yet. Be the first.</p>
+        <Empty title="No community listings yet">Be the first: tap Sell something.</Empty>
       )}
       {reported && <p style={S.muted}>Reported. b will take a look.</p>}
       {selling && <SellSheet account={account} onClose={() => setSelling(false)} />}

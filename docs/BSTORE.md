@@ -38,8 +38,16 @@ Listing {
 - Only `live` listings are shown to buyers (`visible`).
 - `draftToListing` validates a sell-flow draft (category allowed, title 3–80, description 10–2000, price
   $0.01–$10,000, period for subscriptions, ≤ 6 images, ≤ 8 perks) and returns a `pending` listing.
-- Seed subscriptions (`EXAMPLE_SUBSCRIPTIONS`: b Plus, Room membership, Creator fan club) are labelled
-  **Example** and show only while the server returns none.
+- Seed subscriptions (`EXAMPLE_SUBSCRIPTIONS`) stay in the model for tests but are not shown (owner, 17 Oct 2026:
+  no fake items). Sections with no live listings show an empty state.
+
+## Look (17 Oct 2026)
+
+Sticky header with `safe-area-inset-top`. Each theme card is a mini wallet (top bar, balance card with the pack's
+card art, two rows, accent button, tab bar) painted from that pack's own tokens (`ui.tsx` `MiniWallet`), so a theme
+looks like itself whatever theme is in use. The current theme has an **In use** badge and its button is disabled.
+Free packs say Free, premium packs show their price. Tapping a preview opens a sheet with a larger preview and the
+same action. Everything else uses `var(--bw-*)` tokens.
 
 ## Allowed categories
 
@@ -98,7 +106,7 @@ non-custodial: bStore never holds buyer funds.
 ## Live vs Coming
 
 Live (this PR): bStore name, section tiles, Themes (as before), Names and Credits links, Services (edition order,
-business agent link), subscription listings view with Example seeds, Sell something draft (validated, saved on the device only) with the
+business agent link), subscription listings view (empty state until live listings), Sell something draft (validated, saved on the device only) with the
 prohibited list, fee split shown, store-build gating.
 
 Coming: buying or subscribing (buttons show "Coming"), submitting to the server (the button says "Selling opens soon"; Save
