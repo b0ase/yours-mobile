@@ -37,9 +37,9 @@ export type Headline = { playing: boolean; duration?: number; onPlay: () => void
  * popups. Stop, leaving, or 60 s hidden returns what's left to the wallet.
  */
 const GOLD = 'var(--bw-accent-hi)';
-const PANEL = '#111216';
-const LINE = '#2b2f36';
-const MUTED = '#98A2B3';
+const PANEL = 'var(--bw-card)';
+const LINE = 'var(--bw-line)';
+const MUTED = 'var(--bw-muted)';
 const HIDDEN_STOP_MS = 60_000;
 
 /** A paid session (funded budget, swept on stop) or a sponsored one (the pot pays; nothing to sweep). */
