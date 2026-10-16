@@ -3,6 +3,7 @@ import { BCHAT_ORIGIN, ChatApiError, type ChatSession, type Http } from '../chat
 import type { ExcessChoice } from './minute';
 import type { BsharesMe, PlacementOffer } from './placement';
 import type { CompanyListing } from './company';
+import type { PartnerLockState, PartnerLockAction } from './partnership/lockState';
 
 export type NewOffer = {
   investorHandle: string;
@@ -30,7 +31,7 @@ export class BsharesApi {
   forCompany = (ticker: string) => new BsharesApi(this.http, this.session, ticker, this.origin);
 
   private async call<T>(
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'DELETE',
     path: string,
     body?: unknown,
     base = '/api/bitsign/bshares',
@@ -132,4 +133,50 @@ export class BsharesApi {
     this.call<PlacementOffer>('POST', `/offers/${encodeURIComponent(id)}/decline`, { reason });
   refund = (id: string, refundTxid: string) =>
     this.call<PlacementOffer>('POST', `/offers/${encodeURIComponent(id)}/refund`, { refundTxid });
+
+  // ── Partnership shares partner lock (pending approvals mailbox; it never holds a key) ─────────────
+  myPartnerships = () =>
+    this.call<{ partnerships: { ticker: string; name: string; version: number }[] }>(
+      'GET',
+      '',
+      undefined,
+      '/api/bitsign/bshares/partnership',
+    );
+  partnerLock = (ticker: string) =>
+    this.call<PartnerLockState>(
+      'GET',
+      `/${encodeURIComponent(ticker)}/lock`,
+      undefined,
+      '/api/bitsign/bshares/partnership',
+    );
+  /** Withdraw the open partnership draft (anyone it names, or a current partner). 404 none · 409 changed meanwhile. */
+  withdrawPartnershipDraft = (ticker: string) =>
+    this.call<{ ok: true; withdrawn: number }>(
+      'DELETE',
+      `/${encodeURIComponent(ticker)}`,
+      undefined,
+      '/api/bitsign/bshares/partnership',
+    );
+  /**
+   * Report a move the wallet has ALREADY broadcast. The server reads the tx from WhatsOnChain and checks it is the
+   * agreed move; "isn't visible on chain yet" (409) is retried with backoff.
+   */
+  reportBroadcast = async (ticker: string, id: string, txid: string, waits = [2000, 4000, 8000, 15000]) => {
+    for (let i = 0; ; i++) {
+      try {
+        return await this.partnerLockAction(ticker, { action: 'broadcast', id, txid });
+      } catch (e) {
+        const notYet = e instanceof ChatApiError && e.status === 409 && /visible on chain/i.test(e.message);
+        if (!notYet || i >= waits.length) throw e;
+        await new Promise((r) => setTimeout(r, waits[i]));
+      }
+    }
+  };
+  partnerLockAction = (ticker: string, body: PartnerLockAction) =>
+    this.call<{ ok: true; id?: string }>(
+      'POST',
+      `/${encodeURIComponent(ticker)}/lock`,
+      body,
+      '/api/bitsign/bshares/partnership',
+    );
 }
