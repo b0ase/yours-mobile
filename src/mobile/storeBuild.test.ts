@@ -377,7 +377,7 @@ describe('store build has no Market', () => {
     const x = src('./exchangeAppsX.ts');
     expect(x).toMatch(/EXCHANGE_BAPPS[^=]*= MARKET_ENABLED\s*\?/);
     expect(x).toMatch(/MARKET_APPS[^=]*= MARKET_ENABLED\s*\?/);
-    expect(x).toContain("'./brand/apps/bexchange.png'");
+    expect(x).toContain("bappIconUrl('bexchange')");
     const st = src('./exchangeAppsX.store.ts');
     expect(st).not.toMatch(/bExchange|bexchange|Markets|\.png/);
     expect(st).toContain('EXCHANGE_BAPPS: BApp[] = []');
