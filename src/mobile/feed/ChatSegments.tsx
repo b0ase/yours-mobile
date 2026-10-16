@@ -78,8 +78,8 @@ export const SegmentSwitch = ({
           {n > 0 && (
             <span
               data-testid={`seg-badge-${s.id}`}
-              className="min-w-[18px] h-[18px] px-[5px] rounded-full text-[11px] leading-[18px] text-center"
-              style={on ? { background: '#1a1300', color: GOLD } : { background: GOLD, color: '#1a1300' }}
+              className="bw-unread-badge min-w-[18px] h-[18px] px-[5px] rounded-full text-[11px] font-bold leading-[18px] text-center"
+              style={{ background: '#E5242B', color: '#FFFFFF' }}
             >
               {badgeText(n)}
             </span>
