@@ -4,6 +4,7 @@ import { Check, Dices, Moon, Palette, Shuffle, SlidersHorizontal, Sun, X } from 
 import {
   DEFAULT_ACCENT,
   DUO_PACKS,
+  EDITION_PACKS,
   MORE_COLOURS,
   MONO_PACKS,
   TRI_PACKS,
@@ -170,6 +171,12 @@ function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNo
       <p className="bw-theme-group">Tri</p>
       <div className="bw-pack-grid" role="radiogroup" aria-label="Tri">
         {TRI_PACKS.map((a) => (
+          <PackTile key={a.id} a={a} on={current === a.id} onPick={() => pick(a.id)} />
+        ))}
+      </div>
+      <p className="bw-theme-group">Editions</p>
+      <div className="bw-pack-grid" role="radiogroup" aria-label="Editions">
+        {EDITION_PACKS.map((a) => (
           <PackTile key={a.id} a={a} on={current === a.id} onPick={() => pick(a.id)} />
         ))}
       </div>
@@ -424,6 +431,11 @@ function PackTile({ a, on, onPick }: { a: Accent; on: boolean; onPick: () => voi
       <small className="bw-pack-blurb" style={{ color: a.muted }}>
         {a.blurb}
       </small>
+      {a.edition && (
+        <small className="bw-pack-credit" style={{ color: a.muted, fontSize: 10, letterSpacing: '0.04em' }}>
+          {a.edition}
+        </small>
+      )}
     </button>
   );
 }

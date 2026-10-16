@@ -32,7 +32,11 @@ export type PackId =
   | 'purple'
   | 'orange'
   | 'pink'
-  | 'teal';
+  | 'teal'
+  | 'yellow'
+  | 'vexvoid'
+  | 'npg'
+  | 'npgx';
 export type AccentId = PackId | 'silver' | 'rose' | 'emerald' | 'sapphire' | 'violet' | 'custom';
 
 export type CardPatternId =
@@ -58,7 +62,10 @@ export type CardPatternId =
   | 'arcs'
   | 'dotgrid'
   | 'horizon'
-  | 'contour';
+  | 'contour'
+  | 'vexfield'
+  | 'npg'
+  | 'npgx';
 
 export interface Accent {
   id: AccentId;
@@ -66,7 +73,11 @@ export interface Accent {
   /** 'theme' = a full pack (top row); 'colour' = accent only (More colours); 'custom' = the colour mixer. */
   kind: 'theme' | 'colour' | 'custom';
   /** Packs only: 'mono' = one hue on white; 'duo' = two-colour packs; 'tri' = three-colour palettes. */
-  group?: 'mono' | 'duo' | 'tri';
+  group?: 'mono' | 'duo' | 'tri' | 'edition';
+  /** Edition packs: the artist credit shown in Theme (e.g. "VexVoid edition"). */
+  edition?: string;
+  /** Mono packs on coloured paper stock (Pink, Blue, Yellow): the page is the colour, cards stay white. */
+  paper?: boolean;
   /** Mono packs: the light hue tint behind buttons, selected tabs and chips (defaults to surface2). */
   tint?: string;
   /** One line under the pack's name. */
@@ -210,15 +221,146 @@ const WHITE: Accent = {
   trim: 'rgb(0 0 0 / 0.35)',
 };
 
+/**
+ * Paper stock (owner, 16 Oct 2026): the whole page is a solid colour, like coloured paper; ink is near-black, cards
+ * and buttons are white paper with black hairlines (themes.css Mono rules), card art is the White designs. They
+ * replace the old one-hue Pink and Blue tints (same ids, so saved choices carry over).
+ */
+function paperPack(id: PackId, label: string, blurb: string, bg: string, pattern: CardPatternId): Accent {
+  return {
+    ...WHITE,
+    id,
+    label,
+    blurb,
+    paper: true,
+    bg,
+    nav: bg,
+    surface: '#FFFFFF',
+    surface2: '#FFFFFF',
+    tint: '#FFFFFF',
+    accent: '#111111',
+    hi: '#111111',
+    lo: '#000000',
+    on: '#FFFFFF',
+    text: '#111111',
+    muted: '#3D3D3D',
+    line: '#111111',
+    trim: '#111111',
+    success: '#06401C',
+    danger: '#6E0B0B',
+    pattern,
+  };
+}
+
 const MONO_TONES: readonly Accent[] = [
   WHITE,
-  mono('blue', 'Blue', 'White and blue', 218, 75, 'waves'),
-  mono('pink', 'Pink', 'White and pink', 330, 70, 'halftone'),
+  paperPack('pink', 'Pink', 'Pink paper, black ink', '#F4A7C0', 'arcs'),
+  paperPack('blue', 'Blue', 'Blue paper, black ink', '#8EC5F0', 'lines'),
+  paperPack('yellow', 'Yellow', 'Yellow paper, black ink', '#F7DA4A', 'bauhaus'),
   mono('green', 'Green', 'White and green', 150, 55, 'hex'),
   mono('purple', 'Purple', 'White and purple', 270, 60, 'clouds'),
   mono('orange', 'Orange', 'White and orange', 24, 85, 'chevron'),
   mono('red', 'Red', 'White and red', 356, 70, 'starburst'),
   mono('teal', 'Teal', 'White and teal', 178, 65, 'topo'),
+];
+
+/**
+ * Artist editions (owner, 16 Oct 2026): VexVoid, Ninja Punk Girls and NPGX. Dark packs with their own card art
+ * (cardPatternsEdition.ts: a still VexVoid point field, official NPG art, the official NPGX red X logo) and a credit in Theme.
+ * No gold anywhere. The owner's own art, so they ship in every build (store included).
+ */
+const EDITIONS: readonly Accent[] = [
+  {
+    ...BASE,
+    id: 'vexvoid',
+    kind: 'theme',
+    group: 'edition',
+    edition: 'VexVoid edition',
+    label: 'VexVoid',
+    blurb: 'White ink on true black',
+    accent: '#FFFFFF',
+    hi: '#FFFFFF',
+    lo: '#E6E6E6',
+    on: '#000000',
+    bg: '#000000',
+    surface: '#000000',
+    surface2: '#0D0D0D',
+    nav: '#000000',
+    text: '#FFFFFF',
+    muted: '#B3B3B3',
+    line: '#5C5C5C',
+    success: '#E6E6E6',
+    danger: '#FF8A80',
+    shadow: 'none',
+    trim: 'rgb(255 255 255 / 0.7)',
+    glow: 'none',
+    fontNum: MONO,
+    fontHead: MONO,
+    weightHead: 500,
+    radius: '0px',
+    radiusCard: '2px',
+    pattern: 'vexfield',
+  },
+  {
+    ...BASE,
+    id: 'npg',
+    kind: 'theme',
+    group: 'edition',
+    edition: 'Ninja Punk Girls edition',
+    label: 'Ninja Punk Girls',
+    blurb: 'Hot pink neon on black',
+    accent: '#FF2E93',
+    hi: '#FF6BB5',
+    lo: '#F2167F',
+    on: '#000000',
+    bg: '#000000',
+    surface: '#12060D',
+    surface2: '#1C0A15',
+    nav: '#000000',
+    text: '#FFFFFF',
+    muted: '#E0B3CB',
+    line: '#4A1834',
+    success: '#7CFFB2',
+    danger: '#FF8A80',
+    shadow: '0 0 24px rgb(255 46 147 / 0.18)',
+    trim: 'rgb(255 46 147 / 0.65)',
+    glow: '0 0 16px rgb(255 46 147 / 0.65), 0 0 3px rgb(255 46 147 / 0.95)',
+    weightHead: 800,
+    radius: '8px',
+    radiusCard: '12px',
+    pattern: 'npg',
+  },
+  {
+    ...BASE,
+    id: 'npgx',
+    kind: 'theme',
+    group: 'edition',
+    edition: 'NPGX edition',
+    label: 'NPGX',
+    blurb: 'Black and red',
+    accent: '#FF2D3A',
+    hi: '#FF5A63',
+    lo: '#F0202E',
+    on: '#000000',
+    bg: '#000000',
+    surface: '#0D0506',
+    surface2: '#170809',
+    nav: '#000000',
+    text: '#FFFFFF',
+    muted: '#C9C9C9',
+    line: '#5A1A1E',
+    success: '#7EE2A8',
+    danger: '#FF8A80',
+    shadow: '0 0 24px rgb(255 45 58 / 0.15)',
+    trim: 'rgb(255 45 58 / 0.7)',
+    glow: '0 0 16px rgb(255 45 58 / 0.65), 0 0 3px rgb(255 45 58 / 0.95)',
+    fontNum: MONO,
+    fontHead: MONO,
+    weightHead: 800,
+    radius: '2px',
+    radiusCard: '4px',
+    pattern: 'npgx',
+  },
 ];
 
 /** Duo cross-overs: black surfaces with a white accent, and the reverse. Square-ish and stark. */
@@ -294,6 +436,7 @@ export const ACCENTS: readonly Accent[] = [
   },
   ...MONO_TONES,
   ...CROSS_OVERS,
+  ...EDITIONS,
   {
     ...BASE,
     id: 'executive',
@@ -522,6 +665,8 @@ export const THEMES = ACCENTS.filter((a) => a.kind === 'theme');
 export const MONO_PACKS = THEMES.filter((a) => a.group === 'mono');
 export const DUO_PACKS = THEMES.filter((a) => a.group === 'duo');
 export const TRI_PACKS = THEMES.filter((a) => a.group === 'tri');
+/** Artist editions (Theme › Editions), each with its credit. */
+export const EDITION_PACKS = THEMES.filter((a) => a.group === 'edition');
 
 /**
  * Packs removed in the Mono/Duo/Tri tidy (15 Oct 2026) and the closest pack that replaced each, so an account

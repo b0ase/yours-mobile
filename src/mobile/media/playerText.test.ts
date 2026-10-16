@@ -21,7 +21,7 @@ test('text-white is remapped to theme ink in packs, including over the stills ba
   expect(css).toMatch(/:root\[data-bw-pack='light'\] \.bw-stills \.text-white \{\s*color: var\(--bw-text\)/);
   // the scrim under titles turns to paper on light packs, so ink is legible over (inverted) art
   expect(css).toMatch(/:root\[data-bw-pack='light'\] \.bw-stills-scrim \{[^}]*--bw-paper-rgb[^}]*0\.92/);
-  expect(css).toMatch(/:root\[data-bw-theme='white'\] \.bw-stills-img \{\s*filter: invert\(1\)/);
+  expect(css).toMatch(/:root\[data-bw-paper\] \.bw-stills-img \{\s*filter: invert\(1\)/);
   const banner = read('featured/StillsBanner.tsx');
   for (const c of ['bw-stills ', 'bw-stills-img', 'bw-stills-scrim']) expect(banner).toContain(c);
 });
