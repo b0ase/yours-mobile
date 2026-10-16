@@ -1,4 +1,15 @@
-import { ALL_VARS, DEFAULT_ACCENT, accentById, accentVars, packVars, setCustomAccent, type AccentId } from './accents';
+import {
+  ALL_VARS,
+  BASE_LOOK,
+  DEFAULT_ACCENT,
+  RETIRED_PACKS,
+  THEMES,
+  accentById,
+  accentVars,
+  packVars,
+  setCustomAccent,
+  type AccentId,
+} from './accents';
 import { deriveMix, normaliseMix, type MixSpec } from './mixer';
 
 /**
@@ -60,7 +71,75 @@ export function applyAccent(id: string | null | undefined): AccentId {
   for (const k of ALL_VARS) s.removeProperty(k);
   if (!gold) for (const [k, v] of Object.entries(full ? packVars(a) : accentVars(a))) s.setProperty(k, v);
   s.colorScheme = full && a.scheme === 'light' ? 'light' : '';
+  // The browser / installed web-app bar follows the pack (Gold keeps the base black).
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', full ? a.bg : BASE_LOOK.bg);
   return a.id;
+}
+
+/**
+ * ?theme=<pack> links (web.bwalletx.com and web-app installs): the first time each distinct value is seen it
+ * becomes the user's theme; the param is then stripped. A value already seen is ignored, so a theme the user
+ * picks later is never overridden by an old bookmarked link. Unknown values are ignored.
+ */
+const URL_SEEN_KEY = 'bwx.theme.url.seen';
+/** The URL's pack, waiting for the account to open so it can be saved as that account's choice. */
+const URL_PENDING_KEY = 'bwx.accent.pending';
+const URL_ALIASES: Readonly<Record<string, AccentId>> = { dark: 'gold', light: 'white' };
+
+/** A ?theme value → pack id, or null when it names no pack. */
+export const packFromThemeParam = (raw: string | null | undefined): AccentId | null => {
+  const v = (raw ?? '').trim().toLowerCase();
+  if (!v) return null;
+  if (URL_ALIASES[v]) return URL_ALIASES[v];
+  if (RETIRED_PACKS[v]) return RETIRED_PACKS[v];
+  return THEMES.some((a) => a.id === v) ? (v as AccentId) : null;
+};
+
+/** Colours with their own install manifest in the web build (vite.config.web.ts THEME_INSTALLS). */
+export const LINKED_INSTALLS: readonly string[] = ['white'];
+
+/** Points the manifest and apple-touch-icon at the colour's install files, so Add to Home Screen is themed. */
+export function swapInstallLinks(colour: string): boolean {
+  if (!LINKED_INSTALLS.includes(colour) || typeof document === 'undefined') return false;
+  const base = `/themes/${colour}/`;
+  document.querySelector('link[rel="manifest"]')?.setAttribute('href', `${base}manifest.json`);
+  document.querySelector('link[rel="apple-touch-icon"]')?.setAttribute('href', `${base}icon-180.png`);
+  return true;
+}
+
+/** Reads ?theme once at startup; returns the pack it newly applied, if any. */
+export function applyThemeParam(): AccentId | null {
+  if (typeof window === 'undefined' || !window.location) return null;
+  let url: URL;
+  try {
+    url = new URL(window.location.href);
+  } catch {
+    return null;
+  }
+  if (!url.searchParams.has('theme')) return null;
+  const raw = (url.searchParams.get('theme') ?? '').trim().toLowerCase();
+  url.searchParams.delete('theme');
+  try {
+    window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
+  } catch {
+    /* no history API: the param stays, harmless */
+  }
+  swapInstallLinks(raw);
+  const id = packFromThemeParam(raw);
+  if (!id) return null;
+  let seen: string[] = [];
+  try {
+    const v = JSON.parse(read(URL_SEEN_KEY) ?? '[]') as unknown;
+    if (Array.isArray(v)) seen = v.filter((x): x is string => typeof x === 'string');
+  } catch {
+    /* corrupt: start again */
+  }
+  if (seen.includes(raw)) return null;
+  write(URL_SEEN_KEY, JSON.stringify([...seen, raw].slice(-50)));
+  write(BOOT_KEY, id === DEFAULT_ACCENT ? null : id);
+  write(MIX_BOOT_KEY, null);
+  write(URL_PENDING_KEY, id);
+  return id;
 }
 
 const readMix = (k: string): MixSpec | null => {
@@ -76,6 +155,7 @@ const primeMix = (m: MixSpec | null) => setCustomAccent(m ? deriveMix(m) : null)
 
 /** Startup: paint the last-used accent before the first frame. */
 export const applyBootAccent = (): AccentId => {
+  applyThemeParam();
   primeMix(readMix(MIX_BOOT_KEY));
   return applyAccent(read(BOOT_KEY));
 };
@@ -88,6 +168,12 @@ export const loadAccent = (account: string): AccentId => accentById(read(keyFor(
 /** Applies an account's accent and remembers it for the next startup. */
 export function switchToAccountAccent(account: string): AccentId {
   const before = applied;
+  const pending = read(URL_PENDING_KEY);
+  if (account && pending) {
+    // A ?theme link opened before the account did: it becomes this account's choice.
+    write(keyFor(account), pending === DEFAULT_ACCENT ? null : pending);
+    write(URL_PENDING_KEY, null);
+  }
   const m = readMix(account ? mixKeyFor(account) : MIX_BOOT_KEY);
   primeMix(m);
   const id = applyAccent(account ? read(keyFor(account)) : read(BOOT_KEY));
