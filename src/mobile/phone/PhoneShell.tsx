@@ -13,8 +13,6 @@ import { useTabBadges } from '../tabs/useTabBadges';
 import { setWalletKind } from '../wallet/walletKind';
 import { AddToDockSheet } from './AddToDockSheet';
 import { Dock } from './Dock';
-import { BappBar } from './BappBar';
-import { bappBarForPath } from './bappBarModel';
 import { addToDock, dockKey, type DockItem } from './dockModel';
 import { useDock } from './dockStore';
 import { APPS_PAGED, usePhoneLayout } from './flag';
@@ -95,9 +93,9 @@ export const PhoneShell = () => {
 
 const Shell = () => {
   const navigate = useNavigate();
-  const { pathname, search } = useLocation();
-  /** A bApp with a real screen here (bMail, bMint, bMusic, bPics): its five-button bar replaces the dock. */
-  const bapp = bappBarForPath(pathname);
+  // The wallet dock stays on every page, bApps included (owner, 16 Oct 2026: a bApp bar in its place left bMail
+  // with four greyed slots, so the dock looked dead). The bApp's sections open from its icon in the top bar.
+  const { pathname } = useLocation();
   const menu = useContext(BottomMenuContext);
   const { apiContext, chromeStorageService } = useServiceContext();
   const { pairLink, clearPairLink } = useAppServices();
@@ -523,17 +521,7 @@ const Shell = () => {
 
   return (
     <>
-      {visible && bapp && (
-        <BappBar
-          def={bapp}
-          pathname={pathname}
-          search={search}
-          onGo={(route) => navigate(route, { replace: true })}
-          onHome={goHome}
-          onAgent={() => navigate('/m/ask-b')}
-        />
-      )}
-      {visible && !bapp && (
+      {visible && (
         <Dock
           items={dock}
           labels={LABELS}
