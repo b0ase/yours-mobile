@@ -37,8 +37,8 @@ export const RestrictedNotice = () => (
       <Lock size={16} color={GOLD} aria-hidden="true" /> Restricted: for registered shareholders
     </div>
     <p className="m-0 text-sm" style={{ color: MUTED }}>
-      bShares keeps share registers for any company: register of members, director approvals and locked shares. It
-      opens for members and directors of a company on bShares. Shares are not offered publicly.
+      bShares keeps share registers for any company: register of members, director approvals and locked shares. It opens
+      for members and directors of a company on bShares. Shares are not offered publicly.
     </p>
   </div>
 );

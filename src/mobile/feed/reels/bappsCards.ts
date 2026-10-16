@@ -131,7 +131,10 @@ export const BAPP_ABOUT: Readonly<Record<string, string>> = {
     import.meta.env.VITE_CHANNEL === 'ios-store' ||
     import.meta.env.VITE_CHANNEL === 'android-play'
   )
-    ? { ['b' + 'Shares']: 'Share registers for any company: register of members, director approvals, locked shares. Members only.' }
+    ? {
+        ['b' + 'Shares']:
+          'Share registers for any company: register of members, director approvals, locked shares. Members only.',
+      }
     : {}),
   Names: 'Pick a name on Bitcoin that people can pay and find you by.',
   bWriter: 'A word processor that saves your documents on Bitcoin.',
