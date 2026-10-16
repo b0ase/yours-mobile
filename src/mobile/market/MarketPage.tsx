@@ -10,7 +10,20 @@ import { isPersonalTokenId, knownPersonal, tickerLabel } from '../names/personal
 import type { WalletOutput } from '@bsv/sdk';
 import { buyBsv21, buyOrdinal, cancelOrdinalListing, listOrdinals } from '@1sat/actions';
 import { readAssetIdTag } from '@1sat/types';
-import { ArrowLeft, Coins, Flag, Flame, Image as ImageIcon, Rocket, Search, ShieldCheck, Tag, X } from 'lucide-react';
+import {
+  ArrowLeft,
+  Coins,
+  Flag,
+  Flame,
+  Image as ImageIcon,
+  Palette,
+  Rocket,
+  Search,
+  ShieldCheck,
+  Tag,
+  X,
+} from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { TopNav } from '../../components/TopNav';
 import { PageLoader } from '../../components/PageLoader';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -447,18 +460,28 @@ const MarketPage = () => {
   const launchOn = CURVE_COINS_ENABLED && activeCat === CURVE_FILTER;
   const categoryTiles = (
     <div className="flex flex-col gap-1.5">
-      {CURVE_COINS_ENABLED && (
-        <button
-          type="button"
-          aria-pressed={launchOn}
-          onClick={() => pick({ id: CURVE_FILTER, label: CURVE_LABEL, kind: 'tokens', token: CURVE_FILTER })}
-          className="bw-pill bw-pill-gold flex min-h-[44px] w-full items-center justify-center gap-2 py-2.5 text-sm font-bold"
-          style={launchOn ? { boxShadow: '0 0 0 2px #010101, 0 0 0 4px var(--bw-accent)' } : { opacity: 0.85 }}
+      {/* Launchpad (left half, never in a store build) + Theme Store (right half, or the full width alone). */}
+      <div className="flex gap-1.5">
+        {CURVE_COINS_ENABLED && (
+          <button
+            type="button"
+            aria-pressed={launchOn}
+            onClick={() => pick({ id: CURVE_FILTER, label: CURVE_LABEL, kind: 'tokens', token: CURVE_FILTER })}
+            className="bw-pill bw-pill-gold flex min-h-[44px] flex-1 basis-0 items-center justify-center gap-2 py-2.5 text-sm font-bold"
+            style={launchOn ? { boxShadow: '0 0 0 2px #010101, 0 0 0 4px var(--bw-accent)' } : { opacity: 0.85 }}
+          >
+            <Rocket size={16} /> {CURVE_LABEL}
+            {launchOn && <span className="text-[10px] font-semibold uppercase tracking-wide">· open</span>}
+          </button>
+        )}
+        <Link
+          to="/m/store"
+          className="bw-pill bw-pill-gold flex min-h-[44px] flex-1 basis-0 items-center justify-center gap-2 py-2.5 text-sm font-bold no-underline"
+          style={{ opacity: 0.85 }}
         >
-          <Rocket size={16} /> {CURVE_LABEL}
-          {launchOn && <span className="text-[10px] font-semibold uppercase tracking-wide">· open</span>}
-        </button>
-      )}
+          <Palette size={16} /> Store
+        </Link>
+      </div>
       <div className="grid grid-cols-4 gap-1.5" role="tablist" aria-label="What's for sale">
         {CATS.map((c) => {
           const on = !c.soon && activeCat === c.id;

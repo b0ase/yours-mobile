@@ -441,7 +441,9 @@
 :root[data-bw-tone='mono']
   :is([style*='color: rgb(255, 255, 255)'], [style*='color: rgb(242, 242, 240)'], [style*='color: white']):not(
     :is(.bg-black\/50, .bg-black\/60, .bg-black\/65, .bg-black\/70, .bg-black\/80, .bw-videobg, .bw-pack) *
-  ):not(.bw-pack):not([style*='background: rgb(240, 68, 56)']):not([style*='background-color: rgb(240, 68, 56)']) {
+  ):not(.bw-pack):not(.bw-unread-badge):not([style*='background: rgb(240, 68, 56)']):not(
+    [style*='background-color: rgb(240, 68, 56)']
+  ) {
   color: var(--bw-text) !important;
 }
 /* Screens over the dark obsidian pool (unlock, welcome, create, restore; ui/ObsidianBackdrop without a pack) keep
@@ -1320,4 +1322,27 @@ input:-webkit-autofill {
 }
 :root[data-bw-tone='mono'] :is(.bw-feed-sort, .bw-feed-chip.is-on) * {
   color: var(--bw-text) !important;
+}
+
+/* Light and paper packs: an open room's header and message list drop the gold/black gradient and radial scrim
+   (owner, 16 Oct 2026, White theme screenshot). Flat paper, 1px hairline, black text. Gold and dark keep theirs. */
+:root[data-bw-pack='light'] .bw-room-head {
+  background: var(--bw-pack-bg) !important;
+  border-bottom: 1px solid rgb(0 0 0 / 0.12) !important;
+  box-shadow: none !important;
+}
+:root[data-bw-pack='light'] .bw-room-head .text-white {
+  color: var(--bw-text) !important;
+}
+:root[data-bw-pack='light'] .bw-room-list {
+  background: var(--bw-pack-bg) !important;
+}
+
+/* Unread count badges (tab bar, chat filter chips, chat rows) are always red with white bold text, in every theme
+   and pack: the colour never comes from the accent. */
+.bw-unread-badge {
+  background: #e5242b !important;
+  background-color: #e5242b !important;
+  color: #ffffff !important;
+  font-weight: 700 !important;
 }
