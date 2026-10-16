@@ -787,13 +787,13 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
   if (BCREDITS_ENABLED)
     cards.push({
       id: 'bcredits',
-      title: 'bCredits',
+      title: 'Credits',
       sub: '0.00 bCredits',
-      issuer: 'The Bitcoin Corporation Ltd',
+      issuer: 'bCredits — pay for b · The Bitcoin Corporation Ltd',
       colour: '#1a1608',
       logo: '¢',
       backLines: [
-        'Prepaid credit for b, the bWalletX agent. 1 bCredit = 1p.',
+        'Credits: one card for every credit type. bCredits — pay for b: prepay for b, the bWalletX agent. 1 bCredit = 1p.',
         'Each b reply costs what it costs to run × 1.35. Top-ups up to £20. No expiry.',
       ],
       backButtons: [

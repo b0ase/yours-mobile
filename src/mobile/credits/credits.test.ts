@@ -204,3 +204,12 @@ describe('Ask b from bCredits', () => {
     expect(parseGeckoGbp({})).toBeNull();
   });
 });
+
+describe('creditLines', () => {
+  test('lists bCredits as one type on the Credits card', async () => {
+    const { creditLines, CREDITS_CARD_TITLE } = await import('./credits');
+    expect(CREDITS_CARD_TITLE).toBe('Credits');
+    expect(creditLines(12.7)).toEqual([{ type: 'bcredits', label: 'bCredits — pay for b', balance: 12 }]);
+    expect(creditLines(-3)[0].balance).toBe(0);
+  });
+});
