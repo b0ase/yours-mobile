@@ -1,6 +1,6 @@
-import { lazy, Suspense, useContext, useEffect, useState } from 'react';
+import { lazy, Suspense, useContext, useState } from 'react';
 import { createPortal } from 'react-dom';
-import * as qr from 'qrcode';
+import { MyFlipBavatar } from '../bavatar/FlipBavatar';
 import { ArrowLeft, Copy, Mail, QrCode, ScanLine, Send } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -12,7 +12,6 @@ import { requestBackupThen } from '../backup/backupState';
 import { useAccountNames } from '../names/accountNames';
 import { Scanner } from './Scanner';
 import { parseScan, type Scan } from './parseScan';
-import { myPayUri } from './payUri';
 import { offerAppLink } from '../spaces/inviteLinks';
 import { parseXInviteLink } from '../chat/xInvites';
 import { APP_NAME, XINVITES_ENABLED } from '../storeBuild';
@@ -49,20 +48,9 @@ export default function ScanSheet({
   const account = chromeStorageService.getCurrentAccountObject().account;
   const myAddress = receiveAddress || account?.addresses?.bsvAddress || '';
   const names = useAccountNames(account?.addresses?.identityAddress, account?.name ?? '', '', false);
-  const [qrUrl, setQrUrl] = useState<string | null>(null);
 
   useBackClose(true, onClose);
 
-  useEffect(() => {
-    if (stage.k !== 'mine' || !myAddress) return;
-    qr.toDataURL(
-      myPayUri(myAddress),
-      { margin: 1, width: 260, color: { dark: '#000000', light: '#ffffff' } },
-      (e, u) => {
-        if (!e) setQrUrl(u);
-      },
-    );
-  }, [stage.k, myAddress]);
 
   const pay = (to: string, amountSats?: number) => {
     if (onPay) onPay(to, amountSats);
@@ -162,19 +150,14 @@ export default function ScanSheet({
 
         {stage.k === 'mine' && (
           <div className="mt-6 flex flex-col items-center text-center">
-            <div className="rounded-2xl bg-white p-3">
-              {qrUrl ? (
-                <img src={qrUrl} alt="My payment code" width={240} height={240} />
-              ) : (
-                <div style={{ width: 240, height: 240 }} />
-              )}
-            </div>
+            {/* Owner, 17 Oct 2026: show the bAvatar; tap it to turn over to the pay code (FlipBavatar). */}
+            <MyFlipBavatar address={myAddress} size={200} backSize={260} />
             {names.paymail && <p className="mt-4 text-base font-bold text-white">{names.paymail}</p>}
             <p className="mt-2 break-all font-mono text-xs" style={{ color: MUTED }}>
               {myAddress}
             </p>
             <p className="mt-4 text-sm" style={{ color: MUTED }}>
-              Another bWallet can scan this to pay you.
+              Tap your bAvatar to show your code. Another bWallet can scan it to pay you.
             </p>
             <button onClick={() => copy(myAddress)} className={`${big} mt-6 text-white`} style={{ background: PANEL }}>
               <Copy size={16} /> {copied ? 'Copied' : 'Copy address'}
