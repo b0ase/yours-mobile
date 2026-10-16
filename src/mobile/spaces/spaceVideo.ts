@@ -13,6 +13,10 @@ export type SpaceVideoItem = {
   poster?: string;
 };
 
+/** An Album Space: an ordered run of videos; `index` is the one playing, `repeat` wraps to the first. */
+export type SpaceAlbum = { items: SpaceVideoItem[]; index: number; repeat: boolean };
+export const ALBUM_MAX = 50;
+
 export type SpaceVideoState = 'playing' | 'paused' | 'stopped';
 
 export type SpaceVideo = {
@@ -22,6 +26,8 @@ export type SpaceVideo = {
   pausedAtMs: number;
   loop: boolean;
   version: number;
+  /** Album Space: the host's ordered run of videos (bit-sign `space_video.album`), or null. */
+  album: SpaceAlbum | null;
   serverNow: number;
   /** server_now − local clock when this copy arrived (ms). Add to Date.now() to get server time. */
   skew: number;
@@ -99,10 +105,94 @@ export const parseSpaceVideo = (raw: unknown, receivedAt: number): SpaceVideo | 
     pausedAtMs: Math.max(0, num(v.paused_at_ms) ?? 0),
     loop: v.loop === true,
     version,
+    album: parseAlbum(v.album),
     serverNow,
     skew: serverNow - receivedAt,
   };
 };
+
+const parseAlbum = (raw: unknown): SpaceAlbum | null => {
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Record<string, unknown>;
+  if (!Array.isArray(o.items)) return null;
+  const items = o.items
+    .slice(0, ALBUM_MAX)
+    .map(parseItem)
+    .filter((i): i is SpaceVideoItem => !!i);
+  if (!items.length) return null;
+  const i = num(o.index);
+  const index = i !== undefined && Number.isInteger(i) && i >= 0 && i < items.length ? i : 0;
+  return { items, index, repeat: o.repeat === true };
+};
+
+/** Timed album: every item has duration_ms, so the current track follows from the clock alone. */
+export const isTimedAlbum = (a: SpaceAlbum | null | undefined): boolean =>
+  !!a && a.items.every((i) => !!i.durationMs && i.durationMs > 0);
+
+export type AlbumCursor = { index: number; ms: number; stopped: boolean };
+
+/**
+ * Where an album is now (bit-sign #297): started_at is when the current track (album.index) was at 0.
+ * Timed albums walk forward through the durations, wrapping on repeat; untimed ones stay on album.index.
+ */
+export const albumCursor = (v: SpaceVideo, localNow: number): AlbumCursor | null => {
+  const a = v.album;
+  if (!a) return null;
+  if (v.state === 'stopped') return { index: a.index, ms: 0, stopped: true };
+  if (v.state === 'paused') return { index: a.index, ms: v.pausedAtMs, stopped: false };
+  let e = Math.max(0, localNow + v.skew - v.startedAt);
+  if (!isTimedAlbum(a)) return { index: a.index, ms: e, stopped: false };
+  const d = a.items.map((i) => i.durationMs as number);
+  const total = d.reduce((x, y) => x + y, 0);
+  let i = a.index;
+  // Skip whole laps on repeat so a long-running room doesn't loop many times.
+  if (a.repeat && total > 0) {
+    const toEnd = d.slice(i).reduce((x, y) => x + y, 0);
+    if (e >= toEnd) {
+      e = (e - toEnd) % total;
+      i = 0;
+    }
+  }
+  while (e >= (d[i] as number)) {
+    e -= d[i] as number;
+    i++;
+    if (i >= d.length) {
+      if (!a.repeat) return { index: d.length - 1, ms: d[d.length - 1] as number, stopped: true };
+      i = 0;
+    }
+  }
+  return { index: i, ms: e, stopped: false };
+};
+
+/** "Now playing n/N" (1-based), or null when the Space is not running an album. */
+export const nowPlaying = (
+  v: SpaceVideo | null,
+  localNow = Date.now(),
+): { n: number; total: number; title: string; index: number } | null => {
+  const a = v?.album;
+  if (!a || !v) return null;
+  const index = albumCursor(v, localNow)?.index ?? a.index;
+  const it = a.items[index];
+  return { n: index + 1, total: a.items.length, title: it?.title || `Video ${index + 1}`, index };
+};
+
+/** Where the album goes when the current video ends: the next index, wrap on repeat, or null at the end. */
+export const nextAlbumIndex = (a: SpaceAlbum): number | null => {
+  if (a.index + 1 < a.items.length) return a.index + 1;
+  return a.repeat ? 0 : null;
+};
+
+/** Move one entry of the host's draft list (reorder UI). Out-of-range moves return the list unchanged. */
+export const moveItem = <T>(list: readonly T[], from: number, to: number): T[] => {
+  const out = list.slice();
+  if (from < 0 || from >= out.length || to < 0 || to >= out.length || from === to) return out;
+  const [x] = out.splice(from, 1);
+  out.splice(to, 0, x as T);
+  return out;
+};
+
+/** A draft album entry → the item the server takes (`play`/`set_album` item shape). */
+export type AlbumDraftItem = { kind: 'url' | 'ordinal'; src: string; outpoint?: string; title?: string };
 
 /** Keep the newer copy: only a strictly higher version replaces what we have. */
 export const newerVideo = (have: SpaceVideo | null, next: SpaceVideo | null): SpaceVideo | null => {
@@ -155,7 +245,14 @@ export type VideoAction =
   | { action: 'resume' }
   | { action: 'seek'; position_ms: number }
   | { action: 'stop' }
-  | { action: 'set_loop'; loop: boolean };
+  | { action: 'set_loop'; loop: boolean }
+  /** Album Space (bit-sign #297): replace the run and start at `index` (default 0). */
+  | { action: 'set_album'; items: AlbumDraftItem[]; repeat: boolean; index?: number }
+  /** Album Space: jump to a track (also how a staff phone advances when a video ends). */
+  | { action: 'album_goto'; index: number }
+  /** Any viewer, on <video> 'ended' of an untimed track. 409 stale_index / too_early are ignored. */
+  | { action: 'album_next'; from_index: number }
+  | { action: 'clear_album' };
 
 /** ORDFS content URL for an owned ordinal (origin `<txid>_<n>` or `.n`). */
 export const ordinalSrc = (origin: string) => `https://ordfs.network/content/${origin.replace('.', '_')}`;
