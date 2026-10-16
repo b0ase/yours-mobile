@@ -276,6 +276,12 @@ export const EXAMPLES: ExampleMail[] = [
 
 const HIDE_KEY = 'bw-bmail-examples-hidden';
 
+/**
+ * Phone builds show no example mail (owner, 15 Oct 2026: no mocks on the phone; real or removed).
+ * Examples stay on web/extension, where they were asked for (9 Oct 2026).
+ */
+export const examplesAllowed = (native: boolean): boolean => !native;
+
 export const examplesHidden = (): boolean => {
   try {
     return globalThis.localStorage?.getItem(HIDE_KEY) === '1';

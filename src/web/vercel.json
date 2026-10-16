@@ -28,6 +28,10 @@
       "destination": "/agents.html"
     },
     {
+      "source": "/white",
+      "destination": "/white.html"
+    },
+    {
       "source": "/desktop",
       "destination": "/desktop.html"
     },
