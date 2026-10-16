@@ -2,6 +2,7 @@
  * Pure chat logic for the native Chat tab: message merge/ordering, day
  * separators, room titles and previews. No I/O, so it is unit-tested directly.
  */
+import { isLounge } from './loungeInfo';
 
 /** A bChat room message as returned by /api/bitsign/rooms/[ticker]/messages. */
 export interface ChatMessage {
@@ -243,7 +244,11 @@ export const isDirectRoom = (room: Pick<ChatRoom, 'name'>) => /↔/.test(room.na
 
 export const roomInitial = (title: string) => (title.replace(/^\$/, '').trim()[0] || '?').toUpperCase();
 
+/** The Help Desk row always reads "Ask b", never its last message or join events. */
+export const HELP_DESK_PREVIEW = 'Ask b';
+
 export const previewText = (room: ChatRoom, me: string) => {
+  if (isLounge(room.ticker)) return HELP_DESK_PREVIEW;
   const m = room.last_message;
   if (!m) return room.access_note || 'No messages yet';
   const body = (m.body || '').replace(/\s+/g, ' ').trim() || (m.kind === 'event' ? 'Room update' : 'Attachment');

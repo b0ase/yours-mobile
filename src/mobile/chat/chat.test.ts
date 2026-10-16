@@ -173,6 +173,7 @@ describe('rooms', () => {
   test('preview, sort and search', () => {
     expect(previewText(rooms[0], 'me')).toBe('You: yo');
     expect(previewText(rooms[1], 'me')).toBe('No messages yet');
+    expect(previewText({ ...rooms[0], ticker: 'LOUNGE' }, 'me')).toBe('Ask b');
     expect(sortRooms(rooms).map((r) => r.id)).toEqual(['2', '1']);
     expect(filterRooms(rooms, '$bo', 'me').map((r) => r.id)).toEqual(['1']);
     expect(filterRooms(rooms, 'ninja', 'me').map((r) => r.id)).toEqual(['2']);
