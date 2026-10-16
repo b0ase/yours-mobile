@@ -79,6 +79,63 @@ async function startNative(h: VoiceHandlers): Promise<VoiceStart> {
   };
 }
 
+/**
+ * Safari (and Chrome on Android) only let recognition start inside a user gesture, and the hold timer
+ * fires outside it. So on the web the press itself primes a recogniser: created and start()ed synchronously
+ * in pointerdown/touchstart, nothing awaited first. A tap or cancel aborts it; a hold hands it to startWeb.
+ * Results that arrive before startWeb takes over are buffered.
+ */
+type Primed = { rec: Rec; text: string; error: string | null; ended: boolean; onEnd: (() => void) | null };
+let primed: Primed | null = null;
+const canPrime = () => !isNative && !IS_EXTENSION && !!RecCtor();
+
+/** Call synchronously from the press handler. Returns false when nothing was primed. */
+export function primeVoice(): boolean {
+  unprimeVoice();
+  if (!canPrime()) return false;
+  const Ctor = RecCtor()!;
+  try {
+    const rec = new Ctor();
+    rec.lang = navigator.language || 'en-US';
+    rec.continuous = true;
+    rec.interimResults = true;
+    const p: Primed = { rec, text: '', error: null, ended: false, onEnd: null };
+    rec.onresult = (e) => {
+      p.text = Array.from(e.results, (r) => r[0]?.transcript ?? '')
+        .join('')
+        .trim();
+    };
+    rec.onerror = (e) => {
+      p.error = e.error;
+    };
+    rec.onend = () => {
+      p.ended = true;
+      p.onEnd?.();
+    };
+    rec.start();
+    primed = p;
+    return true;
+  } catch {
+    primed = null;
+    return false;
+  }
+}
+
+/** Tap, cancel or unmount before the hold: drop the primed recogniser. */
+export function unprimeVoice() {
+  const p = primed;
+  primed = null;
+  if (!p) return;
+  try {
+    p.rec.abort();
+  } catch {
+    /* already stopped */
+  }
+}
+
+const recError = (e: string | null): VoiceFail | null =>
+  e === 'not-allowed' || e === 'service-not-allowed' ? 'denied' : e === 'audio-capture' ? 'unavailable' : null;
+
 async function startWeb(h: VoiceHandlers): Promise<VoiceStart> {
   const Ctor = RecCtor();
   if (!Ctor) return fail('unavailable');
@@ -86,29 +143,50 @@ async function startWeb(h: VoiceHandlers): Promise<VoiceStart> {
     openPermissionTab(['mic'], { once: true });
     return fail('asked');
   }
-  let stream: MediaStream;
+  const pre = primed;
+  primed = null;
+  if (pre) {
+    const bad = recError(pre.error);
+    if (bad) return fail(bad);
+  }
+  // The level bars are optional: a second mic stream can fail (or be refused) while speech still works.
+  let stream: MediaStream | null = null;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (e) {
-    return fail(isPermissionDenied(e) ? 'denied' : 'unavailable');
+    if (!pre) return fail(isPermissionDenied(e) ? 'denied' : 'unavailable');
   }
+  if (pre) return runWeb(h, pre.rec, stream, pre);
+  return runWeb(h, new Ctor(), stream, null);
+}
+
+function runWeb(h: VoiceHandlers, rec: Rec, stream: MediaStream | null, pre: Primed | null): VoiceStart {
   // Bars: an analyser on the mic (Web Speech gives no level).
-  const ctx = new AudioContext();
-  const an = ctx.createAnalyser();
-  an.fftSize = 512;
-  ctx.createMediaStreamSource(stream).connect(an);
-  const buf = new Float32Array(an.fftSize);
-  const tick = window.setInterval(() => {
-    an.getFloatTimeDomainData(buf);
-    let sum = 0;
-    for (const v of buf) sum += v * v;
-    h.onLevel(Math.min(1, Math.sqrt(sum / buf.length) * 4));
-  }, 80);
-  const rec = new Ctor();
+  let ctx: AudioContext | null = null;
+  let tick = 0;
+  if (stream) {
+    try {
+      const c = new AudioContext();
+      ctx = c;
+      const an = c.createAnalyser();
+      an.fftSize = 512;
+      c.createMediaStreamSource(stream).connect(an);
+      const buf = new Float32Array(an.fftSize);
+      tick = window.setInterval(() => {
+        an.getFloatTimeDomainData(buf);
+        let sum = 0;
+        for (const v of buf) sum += v * v;
+        h.onLevel(Math.min(1, Math.sqrt(sum / buf.length) * 4));
+      }, 80);
+    } catch {
+      /* no bars */
+    }
+  }
   rec.lang = navigator.language || 'en-US';
   rec.continuous = true;
   rec.interimResults = true;
-  let text = '';
+  let text = pre?.text ?? '';
+  if (text) h.onText(text);
   let ended: (() => void) | null = null;
   rec.onresult = (e) => {
     text = Array.from(e.results, (r) => r[0]?.transcript ?? '')
@@ -120,14 +198,17 @@ async function startWeb(h: VoiceHandlers): Promise<VoiceStart> {
   rec.onend = () => ended?.();
   const release = () => {
     window.clearInterval(tick);
-    stream.getTracks().forEach((t) => t.stop());
-    void ctx.close().catch(() => undefined);
+    stream?.getTracks().forEach((t) => t.stop());
+    void ctx?.close().catch(() => undefined);
   };
-  try {
-    rec.start();
-  } catch {
-    release();
-    return fail('unavailable');
+  // A primed recogniser is already running (started inside the press); otherwise start one now.
+  if (!pre) {
+    try {
+      rec.start();
+    } catch {
+      release();
+      return fail('unavailable');
+    }
   }
   return {
     ok: true,

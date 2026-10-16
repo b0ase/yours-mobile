@@ -6,7 +6,7 @@ import { B_OUTLINE_D, B_OUTLINE_VIEWBOX } from '../brand/bOutline';
 import { useBackClose } from '../backStack';
 import { dockKey, isDefaultDock, moveInDock, removeFromDock, resetDock, splitDock, type DockItem } from './dockModel';
 import { setAgentNote, setAgentVoice } from '../agent/handoff';
-import { voiceNote } from '../agent/voiceText';
+import { firstNoVoiceNote, voiceNote } from '../agent/voiceText';
 import { useHoldToTalk } from '../agent/useHoldToTalk';
 import { HoldRing, TalkSheetView } from '../agent/TalkVisuals';
 import { DOCK_LONG_PRESS_MS, edgeFade, fadeMask, longPressCancelled } from './gesture';
@@ -192,7 +192,7 @@ export const HomeButton = ({
     onListen: (ok) => {
       // Owner, 10 Oct 2026: the hold opens b's chat at once; keep holding to talk, the reply lands there.
       onAgent();
-      if (!ok) setAgentNote(voiceNote('unavailable', 'web'));
+      if (!ok && firstNoVoiceNote()) setAgentNote(voiceNote('unavailable', 'web'));
     },
     // Still inside the user's gesture: iOS lets the composer take focus (and show the keyboard) here.
     onUnsupportedRelease: focusComposer,
@@ -241,6 +241,7 @@ export const HomeButton = ({
           height={30}
           draggable={false}
           className="bw-dock-b-gold pointer-events-none"
+          style={{ WebkitTouchCallout: 'none', userSelect: 'none' }}
         />
         {/* White theme only (themes.css swaps them): the shared outline b, black on white. */}
         <svg

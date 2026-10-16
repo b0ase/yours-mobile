@@ -16,8 +16,29 @@ export function voiceNote(reason: VoiceFail, platform: VoicePlatform): string {
       return 'Voice is off for bWallet. Allow the microphone in Android Settings › Apps › bWallet › Permissions. You can type to b meanwhile.';
     return 'The microphone is blocked here. Allow it in your browser’s site settings, or type to b.';
   }
+  if (platform === 'web') return 'Voice isn’t available in this browser; type instead.';
   return 'Voice isn’t available on this device. Type to b instead.';
 }
 
 /** A transcript worth sending: something other than spaces. */
 export const usableTranscript = (t: string) => t.replace(/\s+/g, ' ').trim();
+
+/** The "no voice in this browser" note shows once per device; after that a hold just opens b with the keyboard. */
+const NO_VOICE_SEEN = 'bw.noVoiceNote';
+export function firstNoVoiceNote(store: Pick<Storage, 'getItem' | 'setItem'> | null = safeLocal()): boolean {
+  try {
+    if (!store) return true;
+    if (store.getItem(NO_VOICE_SEEN)) return false;
+    store.setItem(NO_VOICE_SEEN, '1');
+  } catch {
+    /* storage blocked: show it */
+  }
+  return true;
+}
+const safeLocal = () => {
+  try {
+    return localStorage;
+  } catch {
+    return null;
+  }
+};
