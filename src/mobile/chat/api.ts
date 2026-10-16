@@ -277,7 +277,12 @@ export class BchatClient {
   }
 
   /** One JSON call for small feature clients (chat/invitesApi.ts) that keep their own routes. */
-  request(method: 'GET' | 'POST', path: string, body?: Record<string, unknown>, auth = true): Promise<unknown> {
+  request(
+    method: 'GET' | 'POST' | 'DELETE',
+    path: string,
+    body?: Record<string, unknown>,
+    auth = true,
+  ): Promise<unknown> {
     return this.call(method, path, body, auth);
   }
 
@@ -662,6 +667,16 @@ export class BchatClient {
   /** join | heartbeat | leave | end | hand | role | step_down (bit-sign rooms/[ticker]/space). */
   async spaceAction(ticker: string, body: Record<string, unknown>): Promise<unknown> {
     return this.call('POST', `${BchatClient.path(ticker)}/space`, body);
+  }
+
+  /** Synced Space video (bit-sign rooms/[ticker]/space-video): item + clock, or item null. */
+  async spaceVideo(ticker: string): Promise<unknown> {
+    return this.call('GET', `${BchatClient.path(ticker)}/space-video`);
+  }
+
+  /** Staff only: play | pause | resume | seek | stop | set_loop, with optional if_version (409 when stale). */
+  async spaceVideoAction(ticker: string, body: Record<string, unknown>): Promise<unknown> {
+    return this.call('PATCH', `${BchatClient.path(ticker)}/space-video`, body);
   }
 
   /** Paid listening (bit-sign rooms/[ticker]/space/paid): config, my paid time and the next minute's signed plan. */

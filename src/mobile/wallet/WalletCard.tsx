@@ -1,4 +1,5 @@
 import * as qr from 'qrcode';
+import { isLightPattern } from './cardPatternsLight';
 import { cardArtQrSvg, cardPaymail, svgDataUri } from './cardBackQr';
 import {
   Component,
@@ -290,9 +291,17 @@ const WalletCardInner = ({
   const flagged = useCardCustomised(`bsv:${artKey}`);
   const savedLookNow = loadCardArtLook(artKey);
   const customised = flagged || !!cardImage || !!design || !!savedLookNow;
-  const themed = !!bavatarArt && cardFollowsTheme(pack, customised);
-  const themeArt = themed ? patternUri(pack.pattern, pack.accent) : null;
-  const frontArt = (bavatarArt && (cardImage || designArt?.src)) || themeArt || bavatarArt;
+  // Light packs (owner, 16 Oct 2026) never show dark card art: only an own picture or a chosen Art design (e.g. the
+  // Great Wave, which washes out well) is kept; a dark pattern or a saved look alone gives way to the white card.
+  const light = pack.scheme === 'light';
+  const ownArt = !!cardImage || (!!design && design.kind !== 'pattern');
+  const lightPick = design?.kind === 'pattern' && isLightPattern(design.id) ? design.id : null;
+  const themed =
+    !!bavatarArt && (light ? !ownArt && cardFollowsTheme(pack, false) : cardFollowsTheme(pack, customised));
+  const themeArt = themed ? patternUri(lightPick ?? pack.pattern, pack.accent, artKey) : null;
+  const frontArt = light
+    ? (bavatarArt && ownArt && (cardImage || designArt?.src)) || themeArt || bavatarArt
+    : (bavatarArt && (cardImage || designArt?.src)) || themeArt || bavatarArt;
   const artAttribution = !cardImage && designArt?.attribution ? designArt.attribution : '';
   const setImage = (uri: string | null) => {
     if (!saveCardImage(artKey, uri)) return false;

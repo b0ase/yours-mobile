@@ -22,6 +22,7 @@ import {
   parseHandles,
   rememberInvites,
   saveStoredInvites,
+  takeInvitePrefill,
   sweepInvite,
   type StoredInvite,
 } from './xInvites';
@@ -71,14 +72,23 @@ export const XInvitesSheet = ({ client, ctx, ticker, roomName, gate, onClose }: 
   }, [api, ctx.wallet, ticker]);
   useEffect(() => void load(), [load]);
 
+  // Friends › "Invite the rest": handles chosen there open straight on the confirm, with the cost.
+  const [prefill] = useState(takeInvitePrefill);
+  useEffect(() => {
+    if (!prefill.length) return;
+    setChips(prefill);
+    void review(prefill);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill]);
+
   const addTyped = (text: string) => {
     const hs = parseHandles(text);
     if (hs.length) setChips((c) => [...c, ...hs.filter((h) => !c.includes(h))].slice(0, MAX_INVITES_PER_BATCH));
     setTyped('');
   };
 
-  const review = async () => {
-    const handles = [...chips, ...parseHandles(typed).filter((h) => !chips.includes(h))];
+  const review = async (given?: string[]) => {
+    const handles = given ?? [...chips, ...parseHandles(typed).filter((h) => !chips.includes(h))];
     if (!handles.length) return setError('Add at least one @handle');
     setError('');
     setStep({ kind: 'busy', line: 'Checking…' });

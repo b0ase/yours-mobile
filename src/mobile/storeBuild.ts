@@ -71,6 +71,28 @@ export const TOKENBLASTER_ENABLED: boolean = !(
 );
 
 /**
+ * Airdrop to holders (issuer tool, 16 Oct 2026, `holderDrop/`): send a token or BSV to every holder of a token
+ * in one go. bWalletX only: a token airdrop to a token's holders rewards holding it (STORE-AUDIT 2), so the
+ * sheet is a lazy chunk behind this literal env check and not in the store bundle. Same env as STORE_BUILD.
+ */
+export const HOLDER_DROP_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+
+/**
+ * bPositive (/m/bpositive, site /bpositive, bit-sign PR #299): journeys with witnesses and pledges between
+ * friends. bWalletX only, as the site page says ("Not in the store edition"): a lazy chunk behind this literal
+ * env check, with its Apps tile behind the same check, so the store bundle has none of it. Same env as STORE_BUILD.
+ */
+export const BPOSITIVE_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+
+/**
  * Owner apps left out of a store build: TokenBlaster sells guns and runs a coin launchpad, so a store
  * app linking to it would point users at outside buying (Apple 3.1.1/3.1.5, Play Payments).
  */
@@ -446,6 +468,28 @@ export const DIRECT_UPDATE_ENABLED: boolean = import.meta.env.VITE_CHANNEL === '
  * inlines it and Rollup drops the lazy chunks. Store grep: `x-invites|Whoever opens this link|bwx.xinvites`.
  */
 export const XINVITES_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+
+/**
+ * "Find people you follow on X" (wallet/XFollowsImport.tsx): on by default in bWalletX builds (bit-sign #295 live,
+ * owner flag + cap set). VITE_X_FOLLOWS_IMPORT=0 turns it off; never in a store build. Still hides on a 404 'disabled'. Literal env
+ * check so Vite inlines it and Rollup drops the lazy chunk. Store grep: `x-follows|Find people you follow on X`.
+ */
+export const X_FOLLOWS_IMPORT_ENABLED: boolean =
+  import.meta.env.VITE_X_FOLLOWS_IMPORT !== '0' &&
+  import.meta.env.VITE_STORE_BUILD !== '1' &&
+  import.meta.env.VITE_CHANNEL !== 'ios-store' &&
+  import.meta.env.VITE_CHANNEL !== 'android-play';
+
+/**
+ * Get your own theme (16 Oct 2026, `themeOrder/`): order a custom theme edition, $99 a year paid in BSV to bCorp.
+ * Paying bCorp for a digital good is Apple 3.1.1 / Play Payments, so it is bWalletX only: the sheet is a lazy
+ * chunk behind this literal env check and the store bundle has none of it. Same env as STORE_BUILD.
+ */
+export const THEME_ORDERS_ENABLED: boolean = !(
   import.meta.env.VITE_STORE_BUILD === '1' ||
   import.meta.env.VITE_CHANNEL === 'ios-store' ||
   import.meta.env.VITE_CHANNEL === 'android-play'

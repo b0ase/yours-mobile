@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
+import { X_FOLLOWS_IMPORT_ENABLED } from '../storeBuild';
 import { heldBsv21Balances } from '../airdrops/heldBalances';
 import { type Bsv21Balance } from '@1sat/actions';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -8,6 +9,8 @@ import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { asMenuItem } from '../tabs/tabs';
 import { requestDm } from '../chat/segmentNav';
 import { useContacts } from '../chat/useContacts';
+import { useJoinMatch } from './useJoinMatch';
+import { handleOf } from './joinMatch';
 import { ContactRow } from '../chat/ContactViews';
 import { filterContacts } from '../chat/contacts';
 import { resolveCallee } from '../calls/peer';
@@ -20,13 +23,19 @@ import { ContactCard } from './ContactCard';
 
 const f = (u: string, i?: RequestInit) => fetch(u, i);
 
+// On by default outside store builds (VITE_X_FOLLOWS_IMPORT=0 turns it off).
+const XFollowsImport = X_FOLLOWS_IMPORT_ENABLED
+  ? lazy(() => import('./XFollowsImport').then((m) => ({ default: m.XFollowsImport })))
+  : null;
+
 /**
  * Wallet › Friends (owner, 4 Oct 2026): the one address book (Calls friends, bChat contacts, Feed
  * follows, merged in chat/contacts.ts) with Message · Call · Pay. A friend needs only a name or
  * paymail; a token or room is optional.
  */
 export const FriendsSection = () => {
-  const contacts = useContacts();
+  const joined = useJoinMatch(useContacts());
+  const contacts = joined.contacts;
   const { apiContext, chromeStorageService } = useServiceContext();
   const [held, setHeld] = useState<Bsv21Balance[]>([]);
   useEffect(() => {
@@ -117,11 +126,50 @@ export const FriendsSection = () => {
           <UserPlus size={16} />
         </button>
       </form>
+      {XFollowsImport && (
+        <Suspense fallback={null}>
+          <XFollowsImport
+            onInviteRest={
+              me
+                ? (handles: string[]) => {
+                    // Open Drops live in your room › Invites (chat/XInvitesSheet), which opens on its confirm.
+                    void import('../chat/xInvites').then((m) => {
+                      m.requestInvitePrefill(handles);
+                      const key = tokenKey('bsv21', me.tokenId);
+                      if (key) requestChatRoom(key);
+                      handleSelect(asMenuItem('chat'));
+                    });
+                  }
+                : null
+            }
+          />
+        </Suspense>
+      )}
       {msg && (
         <p className="text-xs m-0" style={{ color: '#98A2B3' }}>
           {msg}
         </p>
       )}
+      {joined.notices.map((n) => (
+        <div
+          key={n.name}
+          role="status"
+          className="flex items-center justify-between gap-2 rounded-xl border border-[#3a3220] bg-[var(--bw-surface)] px-3 py-2 text-sm text-white"
+        >
+          <span>
+            <span style={{ color: '#E6B84C' }}>Joined bWalletX</span> · {n.who} joined: {handleOf(n.paymail)}
+          </span>
+          <button
+            type="button"
+            className="text-xs"
+            style={{ color: '#98A2B3' }}
+            aria-label={`Dismiss ${n.who} joined`}
+            onClick={() => joined.dismiss(n.name)}
+          >
+            OK
+          </button>
+        </div>
+      ))}
       {contacts.length > 6 && (
         <input
           value={query}

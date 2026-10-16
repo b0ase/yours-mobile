@@ -18,6 +18,8 @@ interface ImportMetaEnv {
   readonly VITE_ARTIST_PROGRAMME?: string;
   /** '1' = ask the fee pot to pay network fees (off by default; needs the server). */
   readonly VITE_FEE_POT?: string;
+  /** '1' = show "Find people you follow on X" (off by default; needs bit-sign #295 turned on). */
+  readonly VITE_X_FOLLOWS_IMPORT?: string;
 }
 
 interface ImportMeta {

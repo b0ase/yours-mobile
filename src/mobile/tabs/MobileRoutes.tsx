@@ -5,6 +5,7 @@ import { SectionBoundary } from '../wallet/SectionBoundary';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import {
   ARTIST_PROGRAMME_ENABLED,
+  BPOSITIVE_ENABLED,
   BSPACES_ENABLED,
   DIRECT_UPDATE_ENABLED,
   MARKET_ENABLED,
@@ -25,6 +26,8 @@ const UpdateBanner = () => {
 };
 // bSpaces (Apps › bSpaces): bWalletX only, not even built into a store edition.
 const SpacesPage = BSPACES_ENABLED ? lazy(() => import('../spaces/SpacesPage')) : null;
+// bPositive (bpositive/): bWalletX only, not even built into a store edition.
+const BPositivePage = BPOSITIVE_ENABLED ? lazy(() => import('../bpositive/BPositivePage')) : null;
 // No Market in a store build (storeBuild.ts MARKET_ENABLED): the chunk is not even built.
 const ExchangePage = MARKET_ENABLED ? lazy(() => import('../exchange/ExchangePage')) : null;
 // bPics (Apps › bPics): picture ordinals; mint, shared library, mine.
@@ -133,6 +136,7 @@ const MobileRoutes = () => (
         {/* The Exchange (was Market, 12 Oct 2026): /m/exchange, /m/exchange/swap, /m/exchange/<token>… */}
         {ExchangePage && <Route path="exchange/*" element={<ExchangePage />} />}
         {ExchangePage && <Route path="market/*" element={<Navigate to="/m/exchange" replace />} />}
+        {BPositivePage && <Route path="bpositive" element={<BPositivePage />} />}
         {SpacesPage && <Route path="spaces" element={<SpacesPage />} />}
         {/* Shared spaces: the terms (zero tolerance, Apple 1.2) are agreed once before first use. */}
         <Route

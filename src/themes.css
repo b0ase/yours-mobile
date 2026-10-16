@@ -483,3 +483,812 @@
   * {
   color: var(--bw-on-accent) !important;
 }
+
+/* White (owner, 16 Oct 2026): a real white card set. The White designs (wallet/cardPatternsLight.ts) are already
+   off-white and faint, so they show at full strength; every balance card is white with a hairline and soft shadow. */
+:root[data-bw-paper] .is-themed .bw-wcard-art {
+  opacity: 1;
+}
+:root[data-bw-paper] :is(.bw-wcard-face.is-themed, .bw-bc.is-themed) {
+  border: 1px solid rgb(0 0 0 / 0.14) !important;
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.05),
+    0 8px 22px rgb(0 0 0 / 0.07) !important;
+}
+
+/* Mono sweep for hard-coded dark fills (owner, 16 Oct 2026, Exchange › Names: selected chips were near-black pills).
+   Inline dark / dark-gold backgrounds (#2a2100 chips, #0b0c0f panels …) take the white surface, the pack's ink and
+   a dark hairline, so a selected chip reads as a white pill with a dark outline. Gold and dark packs are untouched. */
+:root[data-bw-tone='mono']
+  :is(
+    [style*='background: rgb(11, 11, 13)'],
+    [style*='background-color: rgb(11, 11, 13)'],
+    [style*='background: rgb(11, 12, 15)'],
+    [style*='background-color: rgb(11, 12, 15)'],
+    [style*='background: rgb(15, 16, 19)'],
+    [style*='background-color: rgb(15, 16, 19)'],
+    [style*='background: rgb(42, 33, 0)'],
+    [style*='background-color: rgb(42, 33, 0)'],
+    [style*='background: rgb(13, 14, 17)'],
+    [style*='background-color: rgb(13, 14, 17)'],
+    [style*='background: rgb(5, 5, 6)'],
+    [style*='background-color: rgb(5, 5, 6)'],
+    [style*='background: rgb(58, 47, 12)'],
+    [style*='background-color: rgb(58, 47, 12)'],
+    [style*='background: rgb(42, 36, 16)'],
+    [style*='background-color: rgb(42, 36, 16)'],
+    [style*='background: rgb(42, 20, 8)'],
+    [style*='background-color: rgb(42, 20, 8)'],
+    [style*='background: rgb(34, 37, 43)'],
+    [style*='background-color: rgb(34, 37, 43)'],
+    [style*='background: rgb(23, 25, 30)'],
+    [style*='background-color: rgb(23, 25, 30)'],
+    [style*='background: rgb(22, 24, 29)'],
+    [style*='background-color: rgb(22, 24, 29)'],
+    [style*='background: rgb(17, 17, 20)'],
+    [style*='background-color: rgb(17, 17, 20)'],
+    [style*='background: rgb(11, 11, 11)'],
+    [style*='background-color: rgb(11, 11, 11)'],
+    [style*='background: rgb(7, 8, 10)'],
+    [style*='background-color: rgb(7, 8, 10)'],
+    [style*='background: rgb(26, 20, 5)'],
+    [style*='background-color: rgb(26, 20, 5)']
+  ):not(:is(.bg-black\/50, .bg-black\/60, .bg-black\/65, .bg-black\/70, .bg-black\/80, .bw-videobg) *) {
+  background: var(--bw-surface) !important;
+  color: var(--bw-text) !important;
+  border-color: var(--bw-text) !important;
+}
+
+/* White: the swipe actions beside a row (Pin · Lock · Archive, Chat · Receive · Send) are white with black ink and a
+   thin outline instead of coloured fills (owner, 16 Oct 2026). */
+:root[data-bw-paper] .bw-swipe-action {
+  background: #ffffff !important;
+  color: #0a0a0a !important;
+  border: 1px solid rgb(0 0 0 / 0.18);
+}
+/* White: balance cards (front and back) show their white design at full strength; no glaze, no text shadow. */
+:root[data-bw-paper] .bw-skin-art {
+  opacity: 1 !important;
+  filter: none !important;
+}
+:root[data-bw-paper] .bw-skin-fx {
+  display: none !important;
+}
+:root[data-bw-paper] .bw-bc :is(b, small, span) {
+  text-shadow: none !important;
+}
+:root[data-bw-paper] .bw-bc {
+  color: var(--bw-text) !important;
+  --bc-ink: var(--bw-text);
+}
+:root[data-bw-paper] .bw-bc :is(.bw-bc-contact, .bw-bc-stop) {
+  background: #ffffff !important;
+  color: #0a0a0a !important;
+  border: 1px solid rgb(0 0 0 / 0.35) !important;
+}
+/* Cover art an artist opted in to invert on White (media/invertOnLight.ts; VexVoid only). */
+:root[data-bw-paper] .bw-invert-on-light {
+  filter: invert(1) hue-rotate(180deg);
+}
+:root[data-bw-paper] .bw-swipe-action[data-danger] {
+  color: var(--bw-danger, #b91c1c) !important;
+}
+
+/* White: bMail and bPhone cards, hero, segmented control and bars are white with black ink and a hairline
+   (owner, 16 Oct 2026: "No black cards in white theme please"). */
+:root[data-bw-paper] :is(.bw-mail-card, .bw-mail-card.is-unread, .bw-mail-hero, .bw-mail-seg) {
+  background: #ffffff !important;
+  color: var(--bw-text) !important;
+  border: 1px solid rgb(0 0 0 / 0.14) !important;
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.04),
+    0 6px 16px rgb(0 0 0 / 0.05) !important;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+:root[data-bw-paper] .bw-mail-card.is-unread {
+  border-color: rgb(0 0 0 / 0.4) !important;
+}
+:root[data-bw-paper] .bw-mail-hero::after {
+  display: none;
+}
+:root[data-bw-paper] .bw-mail-bar {
+  background: rgb(255 255 255 / 0.92) !important;
+  color: var(--bw-text);
+  border-bottom: 1px solid var(--bw-line);
+}
+:root[data-bw-paper] .bw-mail-stamp {
+  background: color-mix(in srgb, currentColor 22%, #ffffff);
+}
+/* White: Ask b's quick-start chips are white with black ink and a thin outline. */
+:root[data-bw-paper] .askb-chips button {
+  background: #ffffff !important;
+  color: #0a0a0a !important;
+  border: 1px solid rgb(0 0 0 / 0.3) !important;
+}
+
+/* Light packs: typed text is never white on white (owner, 16 Oct 2026, token lock fields). Inputs, textareas and
+   selects take the pack's ink, caret and muted placeholder, whatever hard-coded text-white / #fff they carry.
+   Screens over the dark obsidian pool keep their light ink. */
+:root[data-bw-pack='light']
+  :is(input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']), textarea, select):not(
+    :is([data-pool-dark], .bg-black\/50, .bg-black\/60, .bg-black\/65, .bg-black\/70, .bg-black\/80) *
+  ) {
+  color: var(--bw-text) !important;
+  -webkit-text-fill-color: var(--bw-text) !important;
+  caret-color: var(--bw-text);
+}
+:root[data-bw-pack='light'] :is(input, textarea)::placeholder {
+  color: var(--bw-muted) !important;
+  -webkit-text-fill-color: var(--bw-muted) !important;
+  opacity: 1;
+}
+
+/* White (owner, 16 Oct 2026): chat bubbles are black text on white. Mine: very light grey fill; theirs: white with a
+   thin outline. Never a dark fill. Applies to DMs, rooms and Ask b. */
+:root[data-bw-paper] :is(.bw-chat-bubble, .askb-bubble.b, .askb-bubble.note) {
+  background: #ffffff !important;
+  color: #0a0a0a !important;
+  border: 1px solid rgb(0 0 0 / 0.18) !important;
+  box-shadow: none !important;
+}
+:root[data-bw-paper] :is(.bw-chat-bubble.is-mine, .askb-bubble.user) {
+  background: #f4f4f4 !important;
+  color: #0a0a0a !important;
+  border: 1px solid transparent !important;
+}
+:root[data-bw-paper] :is(.bw-chat-bubble, .askb-bubble) :is(div, span, small, p) {
+  color: inherit;
+}
+:root[data-bw-paper] :is(.bw-chat-bubble, .askb-bubble) a {
+  color: #0a0a0a !important;
+  text-decoration: underline;
+}
+/* Help Desk card and the live Space banner: white cards. */
+:root[data-bw-paper] :is(.bw-helpdesk-card, .bw-live-banner) {
+  background: #ffffff !important;
+  color: #0a0a0a !important;
+  border: 1px solid rgb(0 0 0 / 0.18) !important;
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.04),
+    0 6px 16px rgb(0 0 0 / 0.05) !important;
+}
+:root[data-bw-paper] :is(.bw-helpdesk-card, .bw-live-banner) :is(span, b) {
+  color: #0a0a0a !important;
+}
+/* Account drawer scrim: a light veil, so no grey strip shows under the dock / home indicator. */
+:root[data-bw-paper] .bw-drawer-scrim {
+  background: rgb(255 255 255 / 0.6) !important;
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+:root[data-bw-paper] body {
+  background: var(--bw-pack-bg, #ffffff);
+}
+/* Scroll fades (Feed bApps bar) fade to the page, not to black. */
+:root[data-bw-paper] {
+  --bw-fade-rgb: var(--bw-bg-rgb, 255 255 255);
+}
+
+/* Dock centre b: the gold filled b everywhere, the shared outline b on a white button with a thin black ring in
+   White (owner, 16 Oct 2026). */
+.bw-dock-b-outline {
+  display: none;
+}
+:root[data-bw-paper] .bw-dock-b-gold {
+  display: none;
+}
+:root[data-bw-paper] .bw-dock-b-outline {
+  display: block;
+}
+:root[data-bw-paper] .bw-dock-b {
+  background: #ffffff !important;
+  box-shadow:
+    0 0 0 1.5px #0a0a0a,
+    0 4px 12px rgb(0 0 0 / 0.08) !important;
+}
+/* bPhone / Calls: text-white inside the (now white) cards takes the ink; the Off pill is light. */
+:root[data-bw-paper] :is(.bw-mail-card.text-white, .bw-mail-card .text-white) {
+  color: var(--bw-text) !important;
+}
+:root[data-bw-paper] .bw-mail-card [style*='background: rgba(0, 0, 0, 0.45)'] {
+  background: #f2f2f2 !important;
+}
+
+/* dark-fills:begin (generated by scripts/dark-fills.ts; do not edit by hand) */
+:root[data-bw-tone='mono']
+  :is(
+    [style*='background: rgb(0, 0, 17)'],
+    [style*='background-color: rgb(0, 0, 17)'],
+    [style*='background: rgb(0, 0, 51)'],
+    [style*='background-color: rgb(0, 0, 51)'],
+    [style*='background: rgb(10, 0, 16)'],
+    [style*='background-color: rgb(10, 0, 16)'],
+    [style*='background: rgb(10, 0, 32)'],
+    [style*='background-color: rgb(10, 0, 32)'],
+    [style*='background: rgb(10, 0, 40)'],
+    [style*='background-color: rgb(10, 0, 40)'],
+    [style*='background: rgb(10, 10, 10)'],
+    [style*='background-color: rgb(10, 10, 10)'],
+    [style*='background: rgb(10, 10, 12)'],
+    [style*='background-color: rgb(10, 10, 12)'],
+    [style*='background: rgb(10, 10, 26)'],
+    [style*='background-color: rgb(10, 10, 26)'],
+    [style*='background: rgb(10, 10, 46)'],
+    [style*='background-color: rgb(10, 10, 46)'],
+    [style*='background: rgb(10, 11, 13)'],
+    [style*='background-color: rgb(10, 11, 13)'],
+    [style*='background: rgb(10, 26, 10)'],
+    [style*='background-color: rgb(10, 26, 10)'],
+    [style*='background: rgb(10, 8, 0)'],
+    [style*='background-color: rgb(10, 8, 0)'],
+    [style*='background: rgb(11, 10, 8)'],
+    [style*='background-color: rgb(11, 10, 8)'],
+    [style*='background: rgb(11, 11, 11)'],
+    [style*='background-color: rgb(11, 11, 11)'],
+    [style*='background: rgb(11, 11, 12)'],
+    [style*='background-color: rgb(11, 11, 12)'],
+    [style*='background: rgb(11, 11, 13)'],
+    [style*='background-color: rgb(11, 11, 13)'],
+    [style*='background: rgb(11, 12, 14)'],
+    [style*='background-color: rgb(11, 12, 14)'],
+    [style*='background: rgb(11, 12, 15)'],
+    [style*='background-color: rgb(11, 12, 15)'],
+    [style*='background: rgb(11, 27, 51)'],
+    [style*='background-color: rgb(11, 27, 51)'],
+    [style*='background: rgb(12, 12, 12)'],
+    [style*='background-color: rgb(12, 12, 12)'],
+    [style*='background: rgb(12, 36, 51)'],
+    [style*='background-color: rgb(12, 36, 51)'],
+    [style*='background: rgb(12, 42, 28)'],
+    [style*='background-color: rgb(12, 42, 28)'],
+    [style*='background: rgb(13, 11, 4)'],
+    [style*='background-color: rgb(13, 11, 4)'],
+    [style*='background: rgb(13, 13, 13)'],
+    [style*='background-color: rgb(13, 13, 13)'],
+    [style*='background: rgb(13, 13, 15)'],
+    [style*='background-color: rgb(13, 13, 15)'],
+    [style*='background: rgb(13, 14, 16)'],
+    [style*='background-color: rgb(13, 14, 16)'],
+    [style*='background: rgb(13, 14, 17)'],
+    [style*='background-color: rgb(13, 14, 17)'],
+    [style*='background: rgb(13, 5, 6)'],
+    [style*='background-color: rgb(13, 5, 6)'],
+    [style*='background: rgb(13, 6, 6)'],
+    [style*='background-color: rgb(13, 6, 6)'],
+    [style*='background: rgb(14, 14, 14)'],
+    [style*='background-color: rgb(14, 14, 14)'],
+    [style*='background: rgb(14, 23, 48)'],
+    [style*='background-color: rgb(14, 23, 48)'],
+    [style*='background: rgb(15, 15, 15)'],
+    [style*='background-color: rgb(15, 15, 15)'],
+    [style*='background: rgb(15, 16, 18)'],
+    [style*='background-color: rgb(15, 16, 18)'],
+    [style*='background: rgb(15, 16, 19)'],
+    [style*='background-color: rgb(15, 16, 19)'],
+    [style*='background: rgb(15, 17, 21)'],
+    [style*='background-color: rgb(15, 17, 21)'],
+    [style*='background: rgb(15, 30, 22)'],
+    [style*='background-color: rgb(15, 30, 22)'],
+    [style*='background: rgb(15, 42, 29)'],
+    [style*='background-color: rgb(15, 42, 29)'],
+    [style*='background: rgb(15, 42, 31)'],
+    [style*='background-color: rgb(15, 42, 31)'],
+    [style*='background: rgb(15, 46, 24)'],
+    [style*='background-color: rgb(15, 46, 24)'],
+    [style*='background: rgb(16, 17, 20)'],
+    [style*='background-color: rgb(16, 17, 20)'],
+    [style*='background: rgb(17, 0, 34)'],
+    [style*='background-color: rgb(17, 0, 34)'],
+    [style*='background: rgb(17, 17, 17)'],
+    [style*='background-color: rgb(17, 17, 17)'],
+    [style*='background: rgb(17, 17, 20)'],
+    [style*='background-color: rgb(17, 17, 20)'],
+    [style*='background: rgb(17, 18, 21)'],
+    [style*='background-color: rgb(17, 18, 21)'],
+    [style*='background: rgb(17, 18, 22)'],
+    [style*='background-color: rgb(17, 18, 22)'],
+    [style*='background: rgb(17, 34, 51)'],
+    [style*='background-color: rgb(17, 34, 51)'],
+    [style*='background: rgb(18, 13, 0)'],
+    [style*='background-color: rgb(18, 13, 0)'],
+    [style*='background: rgb(18, 16, 10)'],
+    [style*='background-color: rgb(18, 16, 10)'],
+    [style*='background: rgb(18, 18, 18)'],
+    [style*='background-color: rgb(18, 18, 18)'],
+    [style*='background: rgb(18, 19, 22)'],
+    [style*='background-color: rgb(18, 19, 22)'],
+    [style*='background: rgb(18, 19, 23)'],
+    [style*='background-color: rgb(18, 19, 23)'],
+    [style*='background: rgb(18, 19, 24)'],
+    [style*='background-color: rgb(18, 19, 24)'],
+    [style*='background: rgb(18, 6, 13)'],
+    [style*='background-color: rgb(18, 6, 13)'],
+    [style*='background: rgb(18, 61, 36)'],
+    [style*='background-color: rgb(18, 61, 36)'],
+    [style*='background: rgb(19, 10, 36)'],
+    [style*='background-color: rgb(19, 10, 36)'],
+    [style*='background: rgb(2, 2, 3)'],
+    [style*='background-color: rgb(2, 2, 3)'],
+    [style*='background: rgb(20, 20, 20)'],
+    [style*='background-color: rgb(20, 20, 20)'],
+    [style*='background: rgb(20, 21, 24)'],
+    [style*='background-color: rgb(20, 21, 24)'],
+    [style*='background: rgb(20, 22, 26)'],
+    [style*='background-color: rgb(20, 22, 26)'],
+    [style*='background: rgb(20, 22, 31)'],
+    [style*='background-color: rgb(20, 22, 31)'],
+    [style*='background: rgb(20, 8, 16)'],
+    [style*='background-color: rgb(20, 8, 16)'],
+    [style*='background: rgb(21, 19, 11)'],
+    [style*='background-color: rgb(21, 19, 11)'],
+    [style*='background: rgb(21, 19, 12)'],
+    [style*='background-color: rgb(21, 19, 12)'],
+    [style*='background: rgb(21, 32, 43)'],
+    [style*='background-color: rgb(21, 32, 43)'],
+    [style*='background: rgb(22, 20, 12)'],
+    [style*='background-color: rgb(22, 20, 12)'],
+    [style*='background: rgb(22, 22, 22)'],
+    [style*='background-color: rgb(22, 22, 22)'],
+    [style*='background: rgb(22, 22, 26)'],
+    [style*='background-color: rgb(22, 22, 26)'],
+    [style*='background: rgb(22, 24, 28)'],
+    [style*='background-color: rgb(22, 24, 28)'],
+    [style*='background: rgb(22, 24, 29)'],
+    [style*='background-color: rgb(22, 24, 29)'],
+    [style*='background: rgb(22, 33, 63)'],
+    [style*='background-color: rgb(22, 33, 63)'],
+    [style*='background: rgb(23, 15, 4)'],
+    [style*='background-color: rgb(23, 15, 4)'],
+    [style*='background: rgb(23, 20, 14)'],
+    [style*='background-color: rgb(23, 20, 14)'],
+    [style*='background: rgb(23, 25, 30)'],
+    [style*='background-color: rgb(23, 25, 30)'],
+    [style*='background: rgb(23, 41, 31)'],
+    [style*='background-color: rgb(23, 41, 31)'],
+    [style*='background: rgb(23, 8, 9)'],
+    [style*='background-color: rgb(23, 8, 9)'],
+    [style*='background: rgb(25, 25, 25)'],
+    [style*='background-color: rgb(25, 25, 25)'],
+    [style*='background: rgb(26, 0, 0)'],
+    [style*='background-color: rgb(26, 0, 0)'],
+    [style*='background: rgb(26, 10, 10)'],
+    [style*='background-color: rgb(26, 10, 10)'],
+    [style*='background: rgb(26, 10, 26)'],
+    [style*='background-color: rgb(26, 10, 26)'],
+    [style*='background: rgb(26, 11, 18)'],
+    [style*='background-color: rgb(26, 11, 18)'],
+    [style*='background: rgb(26, 13, 12)'],
+    [style*='background-color: rgb(26, 13, 12)'],
+    [style*='background: rgb(26, 15, 10)'],
+    [style*='background-color: rgb(26, 15, 10)'],
+    [style*='background: rgb(26, 16, 0)'],
+    [style*='background-color: rgb(26, 16, 0)'],
+    [style*='background: rgb(26, 19, 0)'],
+    [style*='background-color: rgb(26, 19, 0)'],
+    [style*='background: rgb(26, 20, 0)'],
+    [style*='background-color: rgb(26, 20, 0)'],
+    [style*='background: rgb(26, 20, 5)'],
+    [style*='background-color: rgb(26, 20, 5)'],
+    [style*='background: rgb(26, 20, 8)'],
+    [style*='background-color: rgb(26, 20, 8)'],
+    [style*='background: rgb(26, 21, 5)'],
+    [style*='background-color: rgb(26, 21, 5)'],
+    [style*='background: rgb(26, 22, 10)'],
+    [style*='background-color: rgb(26, 22, 10)'],
+    [style*='background: rgb(26, 22, 48)'],
+    [style*='background-color: rgb(26, 22, 48)'],
+    [style*='background: rgb(26, 22, 8)'],
+    [style*='background-color: rgb(26, 22, 8)'],
+    [style*='background: rgb(26, 24, 18)'],
+    [style*='background-color: rgb(26, 24, 18)'],
+    [style*='background: rgb(26, 26, 26)'],
+    [style*='background-color: rgb(26, 26, 26)'],
+    [style*='background: rgb(26, 27, 31)'],
+    [style*='background-color: rgb(26, 27, 31)'],
+    [style*='background: rgb(26, 8, 8)'],
+    [style*='background-color: rgb(26, 8, 8)'],
+    [style*='background: rgb(27, 22, 8)'],
+    [style*='background-color: rgb(27, 22, 8)'],
+    [style*='background: rgb(27, 28, 32)'],
+    [style*='background-color: rgb(27, 28, 32)'],
+    [style*='background: rgb(28, 10, 21)'],
+    [style*='background-color: rgb(28, 10, 21)'],
+    [style*='background: rgb(28, 22, 6)'],
+    [style*='background-color: rgb(28, 22, 6)'],
+    [style*='background: rgb(28, 28, 30)'],
+    [style*='background-color: rgb(28, 28, 30)'],
+    [style*='background: rgb(29, 15, 53)'],
+    [style*='background-color: rgb(29, 15, 53)'],
+    [style*='background: rgb(29, 20, 48)'],
+    [style*='background-color: rgb(29, 20, 48)'],
+    [style*='background: rgb(29, 22, 6)'],
+    [style*='background-color: rgb(29, 22, 6)'],
+    [style*='background: rgb(29, 30, 35)'],
+    [style*='background-color: rgb(29, 30, 35)'],
+    [style*='background: rgb(29, 32, 37)'],
+    [style*='background-color: rgb(29, 32, 37)'],
+    [style*='background: rgb(29, 32, 38)'],
+    [style*='background-color: rgb(29, 32, 38)'],
+    [style*='background: rgb(29, 41, 57)'],
+    [style*='background-color: rgb(29, 41, 57)'],
+    [style*='background: rgb(3, 6, 5)'],
+    [style*='background-color: rgb(3, 6, 5)'],
+    [style*='background: rgb(30, 25, 15)'],
+    [style*='background-color: rgb(30, 25, 15)'],
+    [style*='background: rgb(30, 26, 51)'],
+    [style*='background-color: rgb(30, 26, 51)'],
+    [style*='background: rgb(31, 20, 20)'],
+    [style*='background-color: rgb(31, 20, 20)'],
+    [style*='background: rgb(31, 26, 10)'],
+    [style*='background-color: rgb(31, 26, 10)'],
+    [style*='background: rgb(31, 33, 39)'],
+    [style*='background-color: rgb(31, 33, 39)'],
+    [style*='background: rgb(31, 33, 40)'],
+    [style*='background-color: rgb(31, 33, 40)'],
+    [style*='background: rgb(34, 29, 12)'],
+    [style*='background-color: rgb(34, 29, 12)'],
+    [style*='background: rgb(34, 34, 34)'],
+    [style*='background-color: rgb(34, 34, 34)'],
+    [style*='background: rgb(34, 37, 43)'],
+    [style*='background-color: rgb(34, 37, 43)'],
+    [style*='background: rgb(34, 37, 44)'],
+    [style*='background-color: rgb(34, 37, 44)'],
+    [style*='background: rgb(35, 11, 11)'],
+    [style*='background-color: rgb(35, 11, 11)'],
+    [style*='background: rgb(35, 32, 15)'],
+    [style*='background-color: rgb(35, 32, 15)'],
+    [style*='background: rgb(35, 36, 46)'],
+    [style*='background-color: rgb(35, 36, 46)'],
+    [style*='background: rgb(35, 38, 44)'],
+    [style*='background-color: rgb(35, 38, 44)'],
+    [style*='background: rgb(36, 57, 44)'],
+    [style*='background-color: rgb(36, 57, 44)'],
+    [style*='background: rgb(38, 38, 38)'],
+    [style*='background-color: rgb(38, 38, 38)'],
+    [style*='background: rgb(38, 39, 43)'],
+    [style*='background-color: rgb(38, 39, 43)'],
+    [style*='background: rgb(4, 18, 43)'],
+    [style*='background-color: rgb(4, 18, 43)'],
+    [style*='background: rgb(4, 33, 15)'],
+    [style*='background-color: rgb(4, 33, 15)'],
+    [style*='background: rgb(42, 15, 15)'],
+    [style*='background-color: rgb(42, 15, 15)'],
+    [style*='background: rgb(42, 16, 16)'],
+    [style*='background-color: rgb(42, 16, 16)'],
+    [style*='background: rgb(42, 18, 18)'],
+    [style*='background-color: rgb(42, 18, 18)'],
+    [style*='background: rgb(42, 18, 21)'],
+    [style*='background-color: rgb(42, 18, 21)'],
+    [style*='background: rgb(42, 18, 32)'],
+    [style*='background-color: rgb(42, 18, 32)'],
+    [style*='background: rgb(42, 20, 20)'],
+    [style*='background-color: rgb(42, 20, 20)'],
+    [style*='background: rgb(42, 20, 8)'],
+    [style*='background-color: rgb(42, 20, 8)'],
+    [style*='background: rgb(42, 23, 8)'],
+    [style*='background-color: rgb(42, 23, 8)'],
+    [style*='background: rgb(42, 29, 0)'],
+    [style*='background-color: rgb(42, 29, 0)'],
+    [style*='background: rgb(42, 29, 11)'],
+    [style*='background-color: rgb(42, 29, 11)'],
+    [style*='background: rgb(42, 29, 5)'],
+    [style*='background-color: rgb(42, 29, 5)'],
+    [style*='background: rgb(42, 33, 0)'],
+    [style*='background-color: rgb(42, 33, 0)'],
+    [style*='background: rgb(42, 34, 7)'],
+    [style*='background-color: rgb(42, 34, 7)'],
+    [style*='background: rgb(42, 34, 8)'],
+    [style*='background-color: rgb(42, 34, 8)'],
+    [style*='background: rgb(42, 36, 16)'],
+    [style*='background-color: rgb(42, 36, 16)'],
+    [style*='background: rgb(42, 37, 27)'],
+    [style*='background-color: rgb(42, 37, 27)'],
+    [style*='background: rgb(42, 38, 24)'],
+    [style*='background-color: rgb(42, 38, 24)'],
+    [style*='background: rgb(42, 42, 42)'],
+    [style*='background-color: rgb(42, 42, 42)'],
+    [style*='background: rgb(42, 42, 44)'],
+    [style*='background-color: rgb(42, 42, 44)'],
+    [style*='background: rgb(42, 43, 48)'],
+    [style*='background-color: rgb(42, 43, 48)'],
+    [style*='background: rgb(42, 45, 51)'],
+    [style*='background-color: rgb(42, 45, 51)'],
+    [style*='background: rgb(42, 45, 53)'],
+    [style*='background-color: rgb(42, 45, 53)'],
+    [style*='background: rgb(42, 46, 54)'],
+    [style*='background-color: rgb(42, 46, 54)'],
+    [style*='background: rgb(43, 38, 71)'],
+    [style*='background-color: rgb(43, 38, 71)'],
+    [style*='background: rgb(43, 47, 54)'],
+    [style*='background-color: rgb(43, 47, 54)'],
+    [style*='background: rgb(46, 37, 16)'],
+    [style*='background-color: rgb(46, 37, 16)'],
+    [style*='background: rgb(46, 46, 46)'],
+    [style*='background-color: rgb(46, 46, 46)'],
+    [style*='background: rgb(5, 13, 9)'],
+    [style*='background-color: rgb(5, 13, 9)'],
+    [style*='background: rgb(5, 15, 34)'],
+    [style*='background-color: rgb(5, 15, 34)'],
+    [style*='background: rgb(5, 18, 31)'],
+    [style*='background-color: rgb(5, 18, 31)'],
+    [style*='background: rgb(5, 2, 11)'],
+    [style*='background-color: rgb(5, 2, 11)'],
+    [style*='background: rgb(5, 4, 3)'],
+    [style*='background-color: rgb(5, 4, 3)'],
+    [style*='background: rgb(5, 5, 5)'],
+    [style*='background-color: rgb(5, 5, 5)'],
+    [style*='background: rgb(5, 5, 6)'],
+    [style*='background-color: rgb(5, 5, 6)'],
+    [style*='background: rgb(5, 9, 22)'],
+    [style*='background-color: rgb(5, 9, 22)'],
+    [style*='background: rgb(51, 51, 51)'],
+    [style*='background-color: rgb(51, 51, 51)'],
+    [style*='background: rgb(54, 24, 42)'],
+    [style*='background-color: rgb(54, 24, 42)'],
+    [style*='background: rgb(58, 16, 16)'],
+    [style*='background-color: rgb(58, 16, 16)'],
+    [style*='background: rgb(58, 20, 20)'],
+    [style*='background-color: rgb(58, 20, 20)'],
+    [style*='background: rgb(58, 26, 23)'],
+    [style*='background-color: rgb(58, 26, 23)'],
+    [style*='background: rgb(58, 31, 31)'],
+    [style*='background-color: rgb(58, 31, 31)'],
+    [style*='background: rgb(58, 42, 0)'],
+    [style*='background-color: rgb(58, 42, 0)'],
+    [style*='background: rgb(58, 42, 5)'],
+    [style*='background-color: rgb(58, 42, 5)'],
+    [style*='background: rgb(58, 42, 8)'],
+    [style*='background-color: rgb(58, 42, 8)'],
+    [style*='background: rgb(58, 44, 5)'],
+    [style*='background-color: rgb(58, 44, 5)'],
+    [style*='background: rgb(58, 45, 8)'],
+    [style*='background-color: rgb(58, 45, 8)'],
+    [style*='background: rgb(58, 47, 12)'],
+    [style*='background-color: rgb(58, 47, 12)'],
+    [style*='background: rgb(58, 47, 18)'],
+    [style*='background-color: rgb(58, 47, 18)'],
+    [style*='background: rgb(58, 48, 12)'],
+    [style*='background-color: rgb(58, 48, 12)'],
+    [style*='background: rgb(58, 61, 68)'],
+    [style*='background-color: rgb(58, 61, 68)'],
+    [style*='background: rgb(6, 0, 18)'],
+    [style*='background-color: rgb(6, 0, 18)'],
+    [style*='background: rgb(6, 11, 26)'],
+    [style*='background-color: rgb(6, 11, 26)'],
+    [style*='background: rgb(6, 36, 15)'],
+    [style*='background-color: rgb(6, 36, 15)'],
+    [style*='background: rgb(6, 64, 28)'],
+    [style*='background-color: rgb(6, 64, 28)'],
+    [style*='background: rgb(61, 42, 0)'],
+    [style*='background-color: rgb(61, 42, 0)'],
+    [style*='background: rgb(61, 48, 0)'],
+    [style*='background-color: rgb(61, 48, 0)'],
+    [style*='background: rgb(61, 61, 61)'],
+    [style*='background-color: rgb(61, 61, 61)'],
+    [style*='background: rgb(68, 68, 68)'],
+    [style*='background-color: rgb(68, 68, 68)'],
+    [style*='background: rgb(7, 17, 12)'],
+    [style*='background-color: rgb(7, 17, 12)'],
+    [style*='background: rgb(7, 4, 15)'],
+    [style*='background-color: rgb(7, 4, 15)'],
+    [style*='background: rgb(7, 8, 10)'],
+    [style*='background-color: rgb(7, 8, 10)'],
+    [style*='background: rgb(74, 24, 52)'],
+    [style*='background-color: rgb(74, 24, 52)'],
+    [style*='background: rgb(74, 34, 53)'],
+    [style*='background-color: rgb(74, 34, 53)'],
+    [style*='background: rgb(74, 56, 6)'],
+    [style*='background-color: rgb(74, 56, 6)'],
+    [style*='background: rgb(74, 63, 37)'],
+    [style*='background-color: rgb(74, 63, 37)']
+  ):not(
+    :is(.bg-black\/50, .bg-black\/60, .bg-black\/65, .bg-black\/70, .bg-black\/80, .bw-videobg, [data-pool-dark]) *
+  ) {
+  background: var(--bw-surface) !important;
+  color: var(--bw-text) !important;
+  border-color: rgb(0 0 0 / 0.18) !important;
+}
+:root[data-bw-tone='mono']
+  :is(
+    .bg-\[\#08090b\],
+    .bg-\[\#0B0B0D\],
+    .bg-\[\#0F1013\],
+    .bg-\[\#0b0c0f\],
+    .bg-\[\#0d0e11\],
+    .bg-\[\#0d0f12\],
+    .bg-\[\#0f1013\],
+    .bg-\[\#101114\],
+    .bg-\[\#111113\],
+    .bg-\[\#111216\],
+    .bg-\[\#121316\],
+    .bg-\[\#17191E\]
+  ):not(
+    :is(.bg-black\/50, .bg-black\/60, .bg-black\/65, .bg-black\/70, .bg-black\/80, .bw-videobg, [data-pool-dark]) *
+  ) {
+  background: var(--bw-surface) !important;
+  color: var(--bw-text) !important;
+}
+:root[data-bw-tone='mono']
+  :is(
+    .active\:bg-\[\#111\]:active,
+    .bg-\[\#1d2026\],
+    .bg-\[\#22252c\],
+    .bg-\[\#2b2f36\],
+    .focus\:bg-\[\#2b2f36\]:focus,
+    .hover\:bg-\[\#1e2127\]:hover,
+    .hover\:bg-\[\#1f2128\]:hover,
+    .hover\:bg-\[\#22252c\]:hover,
+    .hover\:bg-\[\#2b2f36\]:hover
+  ):not(
+    :is(.bg-black\/50, .bg-black\/60, .bg-black\/65, .bg-black\/70, .bg-black\/80, .bw-videobg, [data-pool-dark]) *
+  ) {
+  background: var(--bw-tint) !important;
+  color: var(--bw-text) !important;
+}
+/* dark-fills:end */
+
+/* White: dark gradient cards (bChat token cards, credits cards, bMovies register banner) go white with a hairline.
+   Full-screen stages (Spaces, Calls, Sent) and artwork placeholders keep their dark art. */
+:root[data-bw-tone='mono']
+  :is(
+    [style*='rgb(42, 34, 8), rgb(13, 11, 4)'],
+    [style*='rgb(27, 22, 8) 0%, rgb(11, 10, 8) 60%'],
+    [style*='rgb(58, 42, 0) 0%, rgb(18, 13, 0) 70%'],
+    [style*='rgb(22, 20, 12) 0%, rgb(11, 11, 11) 100%']
+  ) {
+  background: var(--bw-surface) !important;
+  color: var(--bw-text) !important;
+  border-color: rgb(0 0 0 / 0.18) !important;
+}
+
+/* ── Artist editions (owner, 16 Oct 2026): VexVoid, Ninja Punk Girls, NPGX ─────────────────────────────────
+   Dark packs with their own card art (cardPatternsEdition.ts). No gold: the dock b is the shared outline b in the
+   pack's ink (white for VexVoid, pink for NPG, red for NPGX); NPG and NPGX glow on primary buttons and the
+   selected tab. */
+:root[data-bw-tone='edition'] .bw-dock-b-gold {
+  display: none;
+}
+:root[data-bw-tone='edition'] .bw-dock-b-outline {
+  display: block;
+  stroke: var(--bw-accent);
+}
+:root[data-bw-tone='edition'] .bw-dock-b {
+  background: #000000 !important;
+  box-shadow:
+    0 0 0 1.5px var(--bw-accent),
+    var(--bw-glow) !important;
+}
+:root[data-bw-tone='edition'] [aria-current='page'] {
+  text-shadow: 0 0 8px rgb(var(--bw-accent-rgb) / 0.7);
+}
+:root[data-bw-tone='edition'] input,
+:root[data-bw-tone='edition'] textarea,
+:root[data-bw-tone='edition'] select {
+  color: var(--bw-text) !important;
+  -webkit-text-fill-color: var(--bw-text);
+  caret-color: var(--bw-accent);
+}
+:root[data-bw-tone='edition'] :is(input, textarea)::placeholder {
+  color: var(--bw-muted);
+  -webkit-text-fill-color: var(--bw-muted);
+}
+/* VexVoid: hairline white outlines, mono labels, a faint grain. */
+:root[data-bw-theme='vexvoid'] body {
+  background-image: radial-gradient(rgb(255 255 255 / 0.05) 1px, transparent 1px);
+  background-size: 3px 3px;
+}
+:root[data-bw-theme='vexvoid'] .bw-wcard-face.is-themed {
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.7);
+}
+:root[data-bw-theme='vexvoid'] :is(.bw-pill-gold, .yours-sheet-primary) {
+  background: #ffffff !important;
+  color: #000000 !important;
+}
+:root[data-bw-theme='vexvoid'] :is(h1, h2, .bw-cdes-top b) {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+/* NPG: hot-pink neon. */
+:root[data-bw-theme='npg'] body {
+  background-image: radial-gradient(120% 60% at 100% 0%, rgb(255 46 147 / 0.14), transparent 60%);
+  background-attachment: fixed;
+}
+:root[data-bw-theme='npg'] .bw-wcard-face.is-themed {
+  box-shadow:
+    0 0 22px rgb(255 46 147 / 0.35),
+    inset 0 0 0 1px var(--bw-trim);
+}
+:root[data-bw-theme='npg'] :is(h1, h2) {
+  text-shadow: 0 0 10px rgb(255 46 147 / 0.6);
+}
+/* NPGX: black and red (the brand: red tech font, red X), red hairlines and glow. */
+:root[data-bw-theme='npgx'] body {
+  background-image: radial-gradient(110% 55% at 100% 0%, rgb(255 45 58 / 0.12), transparent 60%);
+  background-attachment: fixed;
+}
+:root[data-bw-theme='npgx'] .bw-wcard-face.is-themed {
+  box-shadow:
+    0 0 20px rgb(255 45 58 / 0.3),
+    inset 0 0 0 1px var(--bw-trim);
+}
+:root[data-bw-theme='npgx'] :is(h1, h2) {
+  letter-spacing: 0.04em;
+  text-shadow: 0 0 10px rgb(255 45 58 / 0.55);
+}
+
+/* Media player on light packs (owner, 16 Oct 2026): track titles over the VexVoid stills banner were dark ink on
+   dark art (text-white maps to --bw-text in every pack). Light packs get a paper scrim so ink reads at >=4.5:1;
+   White also inverts the stills (VexVoid opted in to inversion, see media/invertOnLight.ts). */
+:root[data-bw-pack='light'] .bw-stills {
+  background: var(--bw-pack-bg) !important;
+}
+:root[data-bw-pack='light'] .bw-stills-scrim {
+  background: linear-gradient(
+    90deg,
+    rgb(var(--bw-paper-rgb, 255 255 255) / 0.92) 0%,
+    rgb(var(--bw-paper-rgb, 255 255 255) / 0.85) 60%,
+    rgb(var(--bw-paper-rgb, 255 255 255) / 0.7) 100%
+  ) !important;
+}
+:root[data-bw-paper] .bw-stills-img {
+  filter: invert(1) hue-rotate(180deg);
+}
+:root[data-bw-pack='light'] .bw-stills .text-white {
+  color: var(--bw-text);
+}
+:root[data-bw-pack='light'] .bw-stills .text-white\/80 {
+  color: var(--bw-muted);
+}
+
+/* White and paper packs: stylesheet cards that were hard-coded dark (owner, 16 Oct 2026: the Hidden tokens head card
+   stayed black). The sweep in scripts/dark-fills.ts only reads inline hex, so cardPatternsLight.test.ts now also fails
+   on any dark background in src/*.css without a pack override here (or a CSS_KEEP reason for scrims and stages). */
+:root[data-bw-tone='mono']
+  :is(
+    .bw-hid,
+    .bw-hid-head,
+    .askb-tools button,
+    .bp-page input,
+    .bw-pull-cue[data-ready='1'],
+    .bw-ag,
+    .bw-ag-doc,
+    .bwx-bapp-sections,
+    .bx-dock,
+    .bx-tip,
+    .ww-card,
+    .ww-cmd,
+    .ww-sidebar
+  ) {
+  background: var(--bw-surface) !important;
+  color: var(--bw-text) !important;
+}
+:root[data-bw-tone='mono'] :is(.bw-hid-head, .ww-card, .ww-cmd, .bx-tip, .bw-pull-cue[data-ready='1']) {
+  border: 1px solid rgb(0 0 0 / 0.14);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.05),
+    0 8px 22px rgb(0 0 0 / 0.07) !important;
+}
+:root[data-bw-tone='mono'] .bw-hid {
+  background: var(--bw-bg) !important;
+}
+:root[data-bw-tone='mono'] :is(.ww-sidebar, .bx-dock, .bwx-bapp-sections) {
+  border-color: rgb(0 0 0 / 0.12) !important;
+}
+:root[data-bw-tone='mono'] .bw-hid-sub {
+  color: var(--bw-muted);
+}
+:root[data-bw-tone='mono'] .bw-hid-close {
+  color: var(--bw-text);
+  background: rgb(0 0 0 / 0.06);
+}
+/* White and paper packs: the Feed's sort pill and selected filter chips (All, bChat, Twetch…, timeframes) are a
+   white pill with black ink and a dark outline, never a dark or accent fill (owner, 16 Oct 2026). */
+:root[data-bw-tone='mono'] :is(.bw-feed-sort, .bw-feed-chip.is-on) {
+  background: var(--bw-surface) !important;
+  color: var(--bw-text) !important;
+  border: 1.5px solid var(--bw-text) !important;
+}
+:root[data-bw-tone='mono'] :is(.bw-feed-sort, .bw-feed-chip.is-on) * {
+  color: var(--bw-text) !important;
+}

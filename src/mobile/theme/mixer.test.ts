@@ -57,6 +57,7 @@ describe('colour mixer', () => {
   });
   test('start from a pack: the mix lands close to the pack', () => {
     for (const t of THEMES) {
+      if (t.paper) continue; // paper stock is a fixed colour, not a hue the mixer derives
       const d = deriveMix(mixFromPack(t));
       expect(d.scheme).toBe(t.scheme);
       expect(contrast(d.bg, t.bg)).toBeLessThan(1.35);

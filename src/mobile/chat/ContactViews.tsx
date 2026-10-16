@@ -1,11 +1,10 @@
 import type { ReactNode } from 'react';
-import { useAvatarPlayback } from '../names/useAvatarPlayback';
+import { ChatAvatar } from './ChatAvatar';
 import { MessageCircle, Phone, Star, Trash2, Wallet } from 'lucide-react';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { asMenuItem } from '../tabs/tabs';
 import { dial } from '../calls/store';
 import { requestPay } from '../wallet/payNav';
-import { avatarHue, roomInitial } from './messages';
 import { canCall, canMessage, contactLine, payTarget, SOURCE_LABEL, type Contact } from './contacts';
 
 /** Shared contact UI for Chat › DMs › Contacts and Chat › Calls › Contacts / Favourites. */
@@ -15,36 +14,10 @@ const LINE = '#1f2127';
 const MUTED = '#8a8f98';
 const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
 
-export const Avatar = ({ title, src, size = 48 }: { title: string; src?: string | null; size?: number }) => {
-  const hue = avatarHue(title);
-  // Contact lists: a still first frame of an animated picture, played on press/hover (names/animatedAvatar.ts).
-  const play = useAvatarPlayback(src, 'list');
-  if (src)
-    return (
-      <img
-        {...play.handlers}
-        src={play.src}
-        alt=""
-        className="rounded-full object-cover shrink-0"
-        style={{ width: size, height: size }}
-      />
-    );
-  return (
-    <div
-      className="rounded-full flex items-center justify-center shrink-0 font-bold"
-      style={{
-        width: size,
-        height: size,
-        fontSize: size * 0.42,
-        color: `hsl(${hue} 70% 82%)`,
-        background: `linear-gradient(145deg, hsl(${hue} 35% 26%), hsl(${hue} 30% 14%))`,
-        border: `1px solid hsl(${hue} 30% 30% / 0.6)`,
-      }}
-    >
-      {roomInitial(title)}
-    </div>
-  );
-};
+/** A contact's picture; with none (or a broken one), their gold bAvatar, never a letter disc (ChatAvatar). */
+export const Avatar = ({ title, src, size = 48 }: { title: string; src?: string | null; size?: number }) => (
+  <ChatAvatar title={title} src={src} size={size} />
+);
 
 export const SourceBadges = ({ c }: { c: Contact }) => (
   <span className="flex gap-1 shrink-0">

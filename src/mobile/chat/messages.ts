@@ -232,6 +232,13 @@ export const roomTitle = (room: Pick<ChatRoom, 'name' | 'ticker'>, me: string) =
   return name || `$${room.ticker}`;
 };
 
+/**
+ * The other person's handle in a DM ("$me ↔ $other"), bare and lower-case; null for any other room.
+ * The avatar lookups key on this: the raw room name or the viewer's own handle found nobody's picture.
+ */
+export const dmPeer = (room: Pick<ChatRoom, 'name' | 'ticker'>, me: string): string | null =>
+  isDirectRoom(room) ? roomTitle(room, me).replace(/^\$/, '') || null : null;
+
 export const isDirectRoom = (room: Pick<ChatRoom, 'name'>) => /↔/.test(room.name || '');
 
 export const roomInitial = (title: string) => (title.replace(/^\$/, '').trim()[0] || '?').toUpperCase();

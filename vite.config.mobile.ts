@@ -455,8 +455,8 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       "        style={{ minHeight: '100%' }}\n      >\n<PullToRefresh onRefresh={() => refreshUtxos({ notifyIfUnchanged: true })} />\n<WalletRefreshListener onRefresh={() => refreshUtxos()} />\n<VideoBackground src={walletBg} poster={walletPoster} scrim='dark' position='fixed' />\n        {/* ── BSV price + Buy BSV (owner, 6 Oct 2026); the migration banner moved below the token buttons ── */}",
     ],
     [
-      'className="flex flex-col items-center w-full pt-14 pb-16 overflow-y-auto"',
-      'className="isolate flex flex-col items-center w-full pt-14 pb-16 overflow-y-auto"',
+      'className="flex flex-col items-center w-full pt-14 pb-16 overflow-y-auto bw-dock-pad"',
+      'className="isolate flex flex-col items-center w-full pt-14 pb-16 overflow-y-auto bw-dock-pad"',
     ],
     [
       // Phone: pull to refresh instead. Extension (no pull gesture): keep the button.
@@ -785,25 +785,33 @@ export const MOBILE_DEFINES = {
  * public/ is the extension's folder and still carries the Yours favicon and logos, so a browser tab on the
  * mobile build showed the Yours icon (owner, 7 Oct 2026). Overwrite them with the bWalletX icons after the copy.
  */
-const bwalletxIcons = (): Plugin => ({
-  name: 'bwalletx-icons',
-  apply: 'build',
-  closeBundle() {
-    // Only the bcorp brand: bWalletX (non-store) gets the bWalletX set, the store bWallet its own
-    // (black b on yellow); other brands keep public/. Missing icons skip instead of failing the build.
-    if (BRAND !== 'bcorp') return;
-    const store =
-      process.env.VITE_STORE_BUILD === '1' || ['ios-store', 'android-play'].includes(process.env.VITE_CHANNEL ?? '');
-    const dir = store ? 'assets/bwallet-ext' : 'assets/bwalletx-ext';
-    const from = (f: string) => resolve(__dirname, dir, f);
-    const to = (f: string) => resolve(__dirname, 'build-mobile', f);
-    const copy = (a: string, b: string) => existsSync(from(a)) && copyFileSync(from(a), to(b));
-    copy('favicon.ico', 'favicon.ico');
-    copy('icon192.png', 'logo192.png');
-    copy('icon512.png', 'logo512.png');
-    for (const f of ['icon16.png', 'icon48.png', 'icon128.png', 'icon192.png']) copy(f, `icons/${f}`);
-  },
-});
+const bwalletxIcons = (): Plugin => {
+  // The resolved outDir, not a hardcoded build-mobile/: vite.config.web.ts reuses these plugins with
+  // outDir build-web, and in a fresh worktree build-mobile/ does not exist, so the copy failed (ENOENT).
+  let outDir = resolve(__dirname, 'build-mobile');
+  return {
+    name: 'bwalletx-icons',
+    apply: 'build',
+    configResolved(config) {
+      outDir = resolve(config.root, config.build.outDir);
+    },
+    closeBundle() {
+      // Only the bcorp brand: bWalletX (non-store) gets the bWalletX set, the store bWallet its own
+      // (black b on yellow); other brands keep public/. Missing icons skip instead of failing the build.
+      if (BRAND !== 'bcorp') return;
+      const store =
+        process.env.VITE_STORE_BUILD === '1' || ['ios-store', 'android-play'].includes(process.env.VITE_CHANNEL ?? '');
+      const dir = store ? 'assets/bwallet-ext' : 'assets/bwalletx-ext';
+      const from = (f: string) => resolve(__dirname, dir, f);
+      const to = (f: string) => resolve(outDir, f);
+      const copy = (a: string, b: string) => existsSync(from(a)) && copyFileSync(from(a), to(b));
+      copy('favicon.ico', 'favicon.ico');
+      copy('icon192.png', 'logo192.png');
+      copy('icon512.png', 'logo512.png');
+      for (const f of ['icon16.png', 'icon48.png', 'icon128.png', 'icon192.png']) copy(f, `icons/${f}`);
+    },
+  };
+};
 
 export default mergeConfig(
   baseConfig,

@@ -1,7 +1,5 @@
 import { TipButton } from '../tip/TipButton';
 import { mergeChatRooms } from './tabBadges';
-import type { AvatarPlace } from '../names/animatedAvatar';
-import { useAvatarPlayback } from '../names/useAvatarPlayback';
 import { claimIssuerAdmin } from '../chat/autoClaim';
 import { WIDE_ON } from '../wide/flag';
 import { RoomDetails } from '../wide/RoomDetails';
@@ -40,7 +38,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { InviteLinksPanel } from '../chat/InviteLinksPanel';
 import { copyLink, shareLink } from '../chat/shareLink';
 import { DEFAULT_EXPIRY, parsePage, parseSpaceInvite } from '../spaces/invite';
-import { onXInvite, takeXInvite, type XInviteLink } from '../chat/xInvites';
+import { hasInvitePrefill, onXInvite, takeXInvite, type XInviteLink } from '../chat/xInvites';
 import { InvitesApi } from '../chat/invitesApi';
 import { BuyTokenButton } from '../chat/OpenTokenRoomButton';
 import { TopNav } from '../../components/TopNav';
@@ -76,7 +74,7 @@ import { isNative } from '../native';
 import { BchatClient, ChatApiError, loadSession, needsHandle, saveSession, SESSION_EVENT } from '../chat/api';
 import { HandleFlow } from '../names/HandleFlow';
 import { avatarFor, B_AVATAR, pendingBQuestions, rememberAvatar, useAvatars } from '../chat/avatars';
-import { defaultPictures } from '../chat/roomArt';
+import { ChatAvatar as Avatar } from '../chat/ChatAvatar';
 import { roomSetupState, shouldOfferRoomSetup } from '../chat/roomSetupPrompt';
 import type { ReplyRef } from '../chat/api';
 import {
@@ -103,6 +101,8 @@ import {
   ReplyQuote,
   TypingRow,
 } from '../chat/BubbleExtras';
+import { BDraftCard, BDraftSheet } from '../chat/BDraftCard';
+import { bDraftInfo, canAskBDraft } from '../chat/bDraft';
 import { AttachButton, MessageVideo, RoomMediaBubble } from '../chat/RoomMedia';
 import { mediaPayload } from '../chat/roomMediaInfo';
 import { walletSigner } from '../chat/signer';
@@ -184,7 +184,6 @@ import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { getErrorMessage } from '../../utils/tools';
 import { asMenuItem, TAB_TAP } from './tabs';
-import { useRoomIcon } from '../chat/roomIcon';
 import { ChatTabs, SegmentRow, SegmentTitle } from '../feed/ChatSegments';
 import { useChatDisplayName } from '../feed/chatDisplayName';
 import {
@@ -199,6 +198,7 @@ import {
   oldestCursor,
   previewText,
   roomActivity,
+  dmPeer,
   roomTitle,
   threadItems,
   timeLabel,
@@ -295,48 +295,6 @@ const usePoll = (fn: () => void, ms: number, enabled: boolean) => {
       document.removeEventListener('visibilitychange', tick);
     };
   }, [ms, enabled]);
-};
-
-const Avatar = ({
-  title,
-  size = 48,
-  roomKey,
-  src,
-  issuer,
-  place = 'list',
-}: {
-  title: string;
-  size?: number;
-  /** Playback (names/animatedAvatar.ts): lists show a still frame; the open chat header animates. */
-  place?: AvatarPlace;
-  roomKey?: string | null;
-  /** A picture to use as is: a room's metadata.icon, a person's avatar. */
-  src?: string | null;
-  /** A token room's issuer handle, when known: its default picture is theirs. */
-  issuer?: string | null;
-}) => {
-  // Token / collection rooms show the token's icon; with none, the issuer's photo or gold bAvatar (chat/roomArt.ts).
-  const tokenIcon = useRoomIcon(src ? null : roomKey);
-  const candidates = useMemo(
-    () => [...[src || tokenIcon].filter((u): u is string => !!u), ...defaultPictures(title, issuer)],
-    [src, tokenIcon, title, issuer],
-  );
-  const [failed, setFailed] = useState<Set<string>>(() => new Set());
-  const icon = candidates.find((u) => !failed.has(u)) ?? candidates[candidates.length - 1];
-  const play = useAvatarPlayback(icon, place);
-  return (
-    <img
-      {...play.handlers}
-      src={play.src}
-      alt=""
-      onError={() => setFailed((cur) => (cur.has(icon) ? cur : new Set(cur).add(icon)))}
-      loading="lazy"
-      decoding="async"
-      referrerPolicy="no-referrer"
-      className="rounded-full object-cover shrink-0"
-      style={{ width: size, height: size, background: '#16181c' }}
-    />
-  );
 };
 
 /** A room's own picture (metadata.icon, https only), e.g. the bWallet Help Desk's (owner, 6 Oct 2026). */
@@ -731,14 +689,13 @@ const Conversation = ({
   const direct = false;
   const members = room.party_count ?? entry?.members ?? 0;
   // Bubble avatars (chat/avatars.ts) and "$b is thinking…" under /b questions not yet answered.
-  useAvatars(
-    client,
-    messages.map((m) => m.author_handle),
-  );
+  useAvatars(client, [peer, ...messages.map((m) => m.author_handle)]);
   const waitingForB = pendingBQuestions(messages);
   const mq = mentionQuery(draft);
   const mentions = mq === null ? [] : mentionSuggestions(messages, mq, me);
   const composer = useRef<HTMLTextAreaElement>(null);
+  const [drafting, setDrafting] = useState(false);
+  const draftable = canAskBDraft(room, !!entry) && !isOfficialRoom(room);
   const askB = () => {
     setDraft((d) => (/^\/b(\s|$)/i.test(d) ? d : `/b ${d}`));
     requestAnimationFrame(() => composer.current?.focus());
@@ -770,7 +727,7 @@ const Conversation = ({
         <button onClick={onBack} className="p-2 rounded-full active:opacity-60" aria-label="Back">
           <ArrowLeft size={22} color={GOLD} />
         </button>
-        <Avatar title={title} size={38} roomKey={entry?.key} src={roomIcon(room)} place="full" />
+        <Avatar title={title} size={38} roomKey={entry?.key} src={roomIcon(room)} issuer={peer} place="full" />
         <div className="flex-1 min-w-0">
           <div className={`text-[15px] font-semibold text-white ${ELLIPSIS}`}>{title}</div>
           <div className="text-[11px]" style={{ color: MUTED }}>
@@ -960,6 +917,15 @@ const Conversation = ({
                 <div className="whitespace-pre-line break-words">{it.message.body}</div>
               </div>
             </div>
+          ) : bDraftInfo(it.message) ? (
+            <BDraftCard
+              key={it.key}
+              message={it.message}
+              client={client}
+              ticker={room.ticker}
+              me={me}
+              onChanged={poll}
+            />
           ) : it.message.kind === 'event' ? (
             <div key={it.key} className="flex justify-center my-2">
               <span
@@ -995,7 +961,7 @@ const Conversation = ({
                         label: `Message from ${it.mine ? 'you' : `$${it.message.author_handle || 'someone'}`}. Tap for reactions, hold to reply, swipe left to report or block`,
                       })
                     : {})}
-                  className="max-w-[80%] px-3 py-[7px] text-[15px] leading-snug select-none"
+                  className={`bw-chat-bubble${it.mine ? ' is-mine' : ''} max-w-[80%] px-3 py-[7px] text-[15px] leading-snug select-none`}
                   style={{
                     borderRadius: 18,
                     borderBottomRightRadius: it.mine ? 6 : 18,
@@ -1162,6 +1128,9 @@ const Conversation = ({
         )}
       </div>
 
+      {drafting && (
+        <BDraftSheet client={client} ticker={room.ticker} onClose={() => setDrafting(false)} onPosted={poll} />
+      )}
       {openRoom?.closed ? (
         <div
           className="px-4 pt-3 text-center text-xs shrink-0"
@@ -1234,6 +1203,19 @@ const Conversation = ({
             >
               /b
             </button>
+            {draftable && (
+              <button
+                type="button"
+                onClick={() => setDrafting(true)}
+                disabled={!online}
+                aria-label="Ask b to draft an agreement or summarise terms"
+                title="Ask b to draft"
+                className="h-10 px-3 rounded-full flex items-center justify-center shrink-0 text-[13px]"
+                style={{ background: '#111', color: GOLD, border: `1px solid ${LINE}` }}
+              >
+                Draft
+              </button>
+            )}
             <textarea
               ref={composer}
               value={draft}
@@ -2277,7 +2259,12 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     // GET the host list: 200 = this user manages the room; 403 / 404 (not deployed yet) = hide the entry.
     void new InvitesApi((m, p, b, a) => client.request(m, p, b, a))
       .list(xTicker)
-      .then((r) => live && r !== null && setXManage(xTicker))
+      .then((r) => {
+        if (!live || r === null) return;
+        setXManage(xTicker);
+        // Friends › "Invite the rest" queued handles for this room: open Invites on its confirm.
+        if (hasInvitePrefill()) setXInvites(true);
+      })
       .catch(() => undefined);
     return () => {
       live = false;
@@ -3370,7 +3357,7 @@ const DmConversation = (p: DmConversationProps) => (
     onBans={null}
     onBounties={null}
     bell={false}
-    peer={/↔/.test(p.room.name || '') ? roomTitle(p.room, p.me).replace(/^\$/, '') : null}
+    peer={dmPeer(p.room, p.me)}
   />
 );
 

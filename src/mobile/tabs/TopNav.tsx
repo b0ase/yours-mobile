@@ -19,7 +19,6 @@ import {
   ChevronRight,
   Lock,
   LogOut,
-  Menu,
   Phone,
   Play,
   Plus,
@@ -31,6 +30,8 @@ import {
 } from 'lucide-react';
 import { agentMenuTarget, showAgentInMenu } from './agentEntry';
 import { phoneLayoutOn, usePhoneLayout } from '../phone/flag';
+import { BappAppButton } from '../phone/BappBar';
+import { bappBarForPath } from '../phone/bappBarModel';
 import { startAgentCreate } from '../agents/agentCreate';
 import { AGENT_TOOLS_TITLE, AgentToolsSheet } from '../agents/AgentToolsSheet';
 import { AirdropsNavButton } from '../airdrops/AirdropsNavButton';
@@ -52,6 +53,7 @@ import { HandleFlow } from '../names/HandleFlow';
 
 const BavatarMintSheet = lazy(() => import('../bavatar/BavatarMintSheet'));
 import { useLocation, useNavigate } from 'react-router-dom';
+import { MenuAvatarButton } from './MenuAvatarButton';
 import { WIDE_ON, WW_OPEN, type WwOpen } from '../wide/flag';
 
 /**
@@ -104,6 +106,8 @@ const TopNavBar = () => {
   const [handleOpen, setHandleOpen] = useState(false);
   // bPhone Calls opens in the content area (/m/calls, owner 9 Oct 2026, as bMail); tapping the button again leaves.
   const onCalls = pathname.startsWith(CALLS_ROUTE);
+  /** In a bApp (phone layout): its icon sits after the bPhone button and opens the app's sections. bPhone stays put. */
+  const bapp = phone ? bappBarForPath(pathname) : null;
   const [toolsOpen, setToolsOpen] = useState(false);
   const [mintOpen, setMintOpen] = useState(false);
   const [pairOpen, setPairOpen] = useState(false);
@@ -330,14 +334,12 @@ const TopNavBar = () => {
             className="grid grid-cols-5 items-center justify-items-center fixed top-0 w-full z-10 px-2 h-14"
             style={{ backgroundColor: BAR_BG ?? theme.color.global.walletBackground, top: 'var(--wallet-inset-top)' }}
           >
-            <button
-              type="button"
-              onClick={() => setDrawer(true)}
-              className="w-9 h-9 flex items-center justify-center bg-transparent"
-              aria-label="Accounts menu"
-            >
-              <Menu size={22} color={ICON} />
-            </button>
+            <MenuAvatarButton
+              identityAddress={current}
+              ring={RING}
+              onOpen={() => setDrawer(true)}
+              onLongPress={() => setSheet('accounts')}
+            />
             <button
               type="button"
               aria-label="Calls"
@@ -351,6 +353,7 @@ const TopNavBar = () => {
             >
               <Phone size={16} color={ACCENT} />
             </button>
+            {bapp && <BappAppButton def={bapp} onGo={(route) => navigate(route, { replace: true })} />}
             {/* Owner, 8 Oct 2026: the airdrops inbox takes the b's slot (the agent stays on the dock b and pull-down). */}
             <AirdropsNavButton color={ACCENT} ring={RING} />
             <button
@@ -397,14 +400,12 @@ const TopNavBar = () => {
           className="grid grid-cols-5 items-center fixed top-0 w-full z-10 px-2 h-14 justify-items-center"
           style={{ backgroundColor: BAR_BG ?? theme.color.global.walletBackground, top: 'var(--wallet-inset-top)' }}
         >
-          <button
-            type="button"
-            onClick={() => setDrawer(true)}
-            className="w-9 h-9 flex items-center justify-center bg-transparent"
-            aria-label="Accounts menu"
-          >
-            <Menu size={22} color={ICON} />
-          </button>
+          <MenuAvatarButton
+            identityAddress={current}
+            ring={RING}
+            onOpen={() => setDrawer(true)}
+            onLongPress={() => setSheet('accounts')}
+          />
           <button
             type="button"
             aria-label="Calls"
@@ -448,7 +449,7 @@ const TopNavBar = () => {
       <AnimatePresence>
         {drawer && !WIDE_ON && (
           <motion.div
-            className="fixed inset-0 z-[300] bg-black/60"
+            className="bw-drawer-scrim fixed inset-0 z-[300] bg-black/60"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}

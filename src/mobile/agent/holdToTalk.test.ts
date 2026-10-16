@@ -1,10 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { createHoldToTalk, type HoldToTalkOptions, type HoldToTalkResult } from './holdToTalk';
 import type { VoiceHandlers, VoiceStart } from './voice';
+import { firstNoVoiceNote, voiceNote } from './voiceText';
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
-function rig(opts: { supported?: boolean | null; transcript?: string; fail?: string } = {}) {
+function rig(opts: { supported?: boolean | null; transcript?: string; fail?: string; prime?: boolean } = {}) {
   const log: string[] = [];
   const results: HoldToTalkResult[] = [];
   let fire: (() => void) | null = null;
@@ -17,6 +18,8 @@ function rig(opts: { supported?: boolean | null; transcript?: string; fail?: str
     onCancel: () => log.push('cancel'),
     onChange: () => {},
     haptic: () => log.push('haptic'),
+    prime: opts.prime ? () => log.push('prime') : undefined,
+    unprime: opts.prime ? () => log.push('unprime') : undefined,
     supported: () => (opts.supported === undefined ? true : opts.supported),
     start: (h): Promise<VoiceStart> => {
       handlers = h;
@@ -130,5 +133,76 @@ describe('hold to talk', () => {
     r.c.move(50, 0);
     r.c.up();
     expect(r.log).toEqual([]);
+  });
+
+  describe('web: recogniser primed inside the press (Safari user-gesture rule)', () => {
+    test('prime runs synchronously in down(), before the hold timer', () => {
+      const r = rig({ prime: true });
+      r.c.down(0, 0);
+      expect(r.log).toEqual(['prime']);
+    });
+
+    test('a tap drops the primed recogniser before going home', () => {
+      const r = rig({ prime: true });
+      r.c.down(0, 0);
+      r.c.up();
+      expect(r.log).toEqual(['prime', 'unprime', 'tap']);
+    });
+
+    test('a hold hands the primed recogniser to start (no unprime)', async () => {
+      const r = rig({ transcript: 'hi b', prime: true });
+      r.hold();
+      r.c.up();
+      await flush();
+      await flush();
+      expect(r.log.filter((l) => l === 'unprime')).toEqual([]);
+      expect(r.log.slice(0, 4)).toEqual(['prime', 'haptic', 'listen:true', 'start']);
+      expect(r.results).toEqual([{ text: 'hi b' }]);
+    });
+
+    test('sliding away before the hold drops it', () => {
+      const r = rig({ prime: true });
+      r.c.down(0, 0);
+      r.c.move(50, 0);
+      expect(r.log).toEqual(['prime', 'unprime']);
+    });
+
+    test('no prime when the device is known to have no voice', () => {
+      const r = rig({ supported: false, prime: true });
+      r.c.down(0, 0);
+      expect(r.log).toEqual([]);
+    });
+
+    test('dispose drops it', () => {
+      const r = rig({ prime: true });
+      r.c.down(0, 0);
+      r.c.dispose();
+      expect(r.log).toContain('unprime');
+    });
+  });
+});
+
+describe('no-voice fallback note', () => {
+  const mem = () => {
+    const m = new Map<string, string>();
+    return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) };
+  };
+  test('shows once per device, then not again', () => {
+    const s = mem();
+    expect(firstNoVoiceNote(s)).toBe(true);
+    expect(firstNoVoiceNote(s)).toBe(false);
+  });
+  test('shows when storage is missing or throws', () => {
+    expect(firstNoVoiceNote(null)).toBe(true);
+    const bad = {
+      getItem: () => {
+        throw new Error('blocked');
+      },
+      setItem: () => undefined,
+    };
+    expect(firstNoVoiceNote(bad)).toBe(true);
+  });
+  test('web wording asks to type instead', () => {
+    expect(voiceNote('unavailable', 'web')).toBe('Voice isn’t available in this browser; type instead.');
   });
 });

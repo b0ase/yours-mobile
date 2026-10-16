@@ -42,8 +42,10 @@ export type Bsv21OverlayPromptProps = {
   onFund: (sats: number) => void;
   /** Fetch the funding template again. */
   onRetryFunding?: () => void;
-  /** stale: drop spent records, import valid change, send again. */
+  /** stale: drop spent records, import valid change, send again. unseen: submit/rebroadcast unknown outputs, send again. */
   onFixAndSend?: () => void;
+  /** unseen: the outpoints (txid.vout) the overlay doesn't know, listed under Details. */
+  unseenOutpoints?: string[];
   /** unreachable: try the send again. */
   onRetry?: () => void;
   onSendUnverified: () => void;
@@ -51,6 +53,9 @@ export type Bsv21OverlayPromptProps = {
 };
 
 const WARN = '#F79009';
+
+/** "8353949b…8804 #1" */
+const shortOutpoint = (txid: string, vout: string | number) => `${txid.slice(0, 8)}…${txid.slice(-4)} #${vout}`;
 
 const copy = (issue: Bsv21OverlayIssue, tokenName: string) => {
   switch (issue) {
@@ -72,7 +77,7 @@ const copy = (issue: Bsv21OverlayIssue, tokenName: string) => {
     case 'unseen':
       return {
         title: 'Not validated yet',
-        body: `The overlay hasn't picked up some of your ${tokenName} yet. This is normal right after tokens arrive or the overlay is funded. Wait a few minutes and try again.`,
+        body: `The overlay hasn't picked up some of your ${tokenName}. Usually the transfer that brought them was never passed to it, or never reached the chain. Fix and send passes it on (or broadcasts it again), then sends.`,
       };
     case 'stale':
       return {
@@ -105,6 +110,7 @@ export const Bsv21OverlayPrompt = (props: Bsv21OverlayPromptProps) => {
     onFund,
     onRetryFunding,
     onFixAndSend,
+    unseenOutpoints,
     onRetry,
     onSendUnverified,
     onCancel,
@@ -231,7 +237,7 @@ export const Bsv21OverlayPrompt = (props: Bsv21OverlayPromptProps) => {
                         <Button theme={theme} type="secondary-outline" label="Cancel" onClick={onCancel} />
                       </>
                     )
-                  ) : issue === 'stale' && onFixAndSend ? (
+                  ) : (issue === 'stale' || issue === 'unseen') && onFixAndSend ? (
                     <>
                       <Button theme={theme} type="primary" label="Fix and send" onClick={onFixAndSend} />
                       <Button theme={theme} type="secondary-outline" label="Cancel" onClick={onCancel} />
@@ -245,6 +251,32 @@ export const Bsv21OverlayPrompt = (props: Bsv21OverlayPromptProps) => {
                     <Button theme={theme} type="primary" label="OK" onClick={onCancel} />
                   )}
                 </div>
+
+                <Show when={issue === 'unseen' && !!unseenOutpoints?.length}>
+                  <details className="w-full mt-4 text-left">
+                    <summary className="text-xs cursor-pointer" style={{ color: gray }}>
+                      Details: {unseenOutpoints?.length} output{unseenOutpoints?.length === 1 ? '' : 's'} the indexer
+                      doesn't know
+                    </summary>
+                    <ul className="mt-2 flex flex-col gap-1">
+                      {(unseenOutpoints ?? []).map((op) => {
+                        const [txid, vout] = op.replace('_', '.').split('.');
+                        return (
+                          <li key={op} className="text-[11px] font-mono">
+                            <a
+                              href={`https://whatsonchain.com/tx/${txid}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{ color: contrast, textDecoration: 'underline' }}
+                            >
+                              {shortOutpoint(txid, vout)}
+                            </a>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </details>
+                </Show>
 
                 <div className="w-full mt-5 pt-4" style={{ borderTop: `1px solid ${gray}22` }}>
                   <p className="text-[11px] mb-2 leading-relaxed" style={{ color: gray }}>

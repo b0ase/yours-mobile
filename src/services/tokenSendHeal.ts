@@ -328,3 +328,289 @@ export const journalSendEnd = async (store: JournalStore, id: string, txid?: str
   // A txid means the send went out and sendBsv21 recorded it; no txid (an error before broadcast) means nothing went out.
   await store.set(entries.map((e) => (e.id === id ? { ...e, ...(txid ? { txid } : {}), done: true } : e)));
 };
+
+// ---------------------------------------------------------------------------------------------------------------
+
+/**
+ * Token outputs the wallet lists but the overlay reports 'unknown' (SCAM, 16 Oct 2026; NAKAMOTO/TERANODE before).
+ * The overlay only learns a transfer when someone submits it. sendBsv21 submits after broadcast, but only best
+ * effort: a failed submit, or a tab suspended between the broadcast and the submit, leaves the change unknown for
+ * good. Likewise a received or recovered transfer whose sender never submitted it, or a send the wallet signed and
+ * kept but never got onto the chain. Each case per transaction:
+ * - on chain: submit its BEEF to the overlay ('submitted');
+ * - not on chain: rebroadcast the BEEF the wallet stored, then submit ('rebroadcast');
+ * - the rebroadcast is refused because its inputs are already spent: the outputs can never exist, relinquish them
+ *   ('dropped').
+ */
+export type UnseenOutput = LocalTokenOutput;
+
+export type UnseenHealReport = {
+  /** Outputs the overlay did not know when the pass began. */
+  unseen: UnseenOutput[];
+  /** Txids found on chain and submitted to the overlay. */
+  submitted: string[];
+  /** Txids that were never on chain, broadcast again from the wallet's copy, then submitted. */
+  rebroadcast: string[];
+  /** Outputs of transactions that can never be mined (inputs spent elsewhere), relinquished. */
+  dropped: UnseenOutput[];
+  /** Outputs still unknown to the overlay after the pass. */
+  stillUnseen: UnseenOutput[];
+  /** Key pass run first: outputs whose record named the wrong key, refiled or relinquished. */
+  keysRepaired?: number;
+  keysDropped?: number;
+  errors: string[];
+};
+
+export type BroadcastOutcome = { ok: true } | { ok: false; inputsSpent: boolean; error: string };
+
+export interface UnseenHealDeps {
+  localOutputs(tokenId?: string): Promise<LocalTokenOutput[]>;
+  overlayStatus(tokenId: string, outpoints: string[]): Promise<Map<string, string | undefined>>;
+  /** BEEF of txid from the chain indexer, or null when the chain has no such transaction. */
+  chainBeef(txid: string): Promise<number[] | null>;
+  /** BEEF of txid as this wallet stored it, or null. */
+  localBeef(txid: string): Promise<number[] | null>;
+  broadcast(beef: number[], txid: string): Promise<BroadcastOutcome>;
+  submitOverlay(beef: number[], tokenId: string): Promise<void>;
+  relinquish(outpoint: string): Promise<void>;
+  log?(msg: string): void;
+}
+
+export const isUnseenState = (state: string | undefined): boolean => state === undefined || state === 'unknown';
+
+/** Broadcast errors that mean the transaction can never be mined. */
+export const INPUTS_SPENT_ERROR =
+  /double.?spen|missing.?inputs|inputs.?(?:already )?spent|txn-mempool-conflict|already spent|competing/i;
+
+export async function healUnseenTokenOutputs(
+  deps: UnseenHealDeps,
+  opts: { tokenId?: string } = {},
+): Promise<UnseenHealReport> {
+  const report: UnseenHealReport = {
+    unseen: [],
+    submitted: [],
+    rebroadcast: [],
+    dropped: [],
+    stillUnseen: [],
+    errors: [],
+  };
+  const log = deps.log ?? (() => {});
+  const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+  let local: LocalTokenOutput[];
+  try {
+    local = (await deps.localOutputs(opts.tokenId)).map((o) => ({ ...o, outpoint: normOutpoint(o.outpoint) }));
+  } catch (e) {
+    report.errors.push(`listOutputs: ${msg(e)}`);
+    return report;
+  }
+  if (opts.tokenId) local = local.filter((o) => normId(o.tokenId) === normId(opts.tokenId!));
+  const byToken = new Map<string, LocalTokenOutput[]>();
+  for (const o of local) byToken.set(o.tokenId, [...(byToken.get(o.tokenId) ?? []), o]);
+
+  const unseenOf = async (tokenId: string, outs: LocalTokenOutput[]) => {
+    const states = await deps.overlayStatus(
+      tokenId,
+      outs.map((o) => o.outpoint),
+    );
+    return outs.filter((o) => isUnseenState(states.get(o.outpoint)));
+  };
+
+  for (const [tokenId, outs] of byToken) {
+    let unseen: LocalTokenOutput[];
+    try {
+      unseen = await unseenOf(tokenId, outs);
+    } catch (e) {
+      report.errors.push(`overlay ${tokenId.slice(0, 8)}: ${msg(e)}`);
+      continue;
+    }
+    if (!unseen.length) continue;
+    report.unseen.push(...unseen);
+
+    const touched: LocalTokenOutput[] = [];
+    for (const txid of [...new Set(unseen.map((o) => o.outpoint.split('.')[0]))]) {
+      const outsOfTx = unseen.filter((o) => o.outpoint.startsWith(`${txid}.`));
+      try {
+        const onChain = await deps.chainBeef(txid);
+        if (onChain) {
+          await deps.submitOverlay(onChain, tokenId);
+          report.submitted.push(txid);
+          touched.push(...outsOfTx);
+          log(`submitted ${txid} (${tokenId}) to the overlay`);
+          continue;
+        }
+        const stored = await deps.localBeef(txid);
+        if (!stored) {
+          report.errors.push(`${txid.slice(0, 8)}: not on chain and no stored copy`);
+          continue;
+        }
+        const sent = await deps.broadcast(stored, txid);
+        if (sent.ok) {
+          report.rebroadcast.push(txid);
+          touched.push(...outsOfTx);
+          log(`rebroadcast ${txid} (${tokenId})`);
+          try {
+            await deps.submitOverlay(stored, tokenId);
+          } catch (e) {
+            report.errors.push(`${txid.slice(0, 8)} overlay: ${msg(e)}`);
+          }
+          continue;
+        }
+        if (!sent.inputsSpent) {
+          report.errors.push(`${txid.slice(0, 8)} broadcast: ${sent.error}`);
+          continue;
+        }
+        for (const o of outsOfTx) {
+          try {
+            await deps.relinquish(o.outpoint);
+            report.dropped.push(o);
+            log(`relinquished ${o.outpoint}: ${txid} can never be mined (${sent.error})`);
+          } catch (e) {
+            report.errors.push(`relinquish ${o.outpoint}: ${msg(e)}`);
+          }
+        }
+      } catch (e) {
+        report.errors.push(`${txid.slice(0, 8)}: ${msg(e)}`);
+      }
+    }
+
+    // What the overlay still doesn't know (it may need a moment after a submit).
+    const dropped = new Set(report.dropped.map((o) => o.outpoint));
+    const rest = unseen.filter((o) => !dropped.has(o.outpoint));
+    if (!rest.length) continue;
+    try {
+      report.stillUnseen.push(...(touched.length ? await unseenOf(tokenId, rest) : rest));
+    } catch {
+      report.stillUnseen.push(...rest);
+    }
+  }
+  return report;
+}
+
+/** "Sent 1 transfer to the indexer, removed 1 record that can never confirm". */
+export const describeUnseenHeal = (
+  r: Pick<UnseenHealReport, 'submitted' | 'rebroadcast' | 'dropped' | 'unseen'>,
+): string => {
+  const parts: string[] = [];
+  const s = r.submitted.length;
+  const b = r.rebroadcast.length;
+  const d = r.dropped.length;
+  if (s) parts.push(`sent ${s} transfer${s === 1 ? '' : 's'} to the indexer`);
+  if (b) parts.push(`broadcast ${b} unfinished transfer${b === 1 ? '' : 's'} again`);
+  if (d) parts.push(`removed ${d} record${d === 1 ? '' : 's'} that can never confirm`);
+  if (!parts.length)
+    return r.unseen.length
+      ? "Couldn't fix the unvalidated tokens"
+      : 'Nothing to fix: the indexer knows all your tokens';
+  const text = parts.join(', ');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+};
+
+// ---------------------------------------------------------------------------------------------------------------
+
+/**
+ * Token outputs the wallet cannot sign (SCAM, 16 Oct 2026, 5.2.25: "inputs[0].unlockScript ... OP_DUP requires at
+ * least one item to be on the stack"). The output's custom instructions name a key (protocolID, keyID,
+ * counterparty) that does not derive the address in its locking script, so the signer leaves the unlock empty and
+ * the whole send fails. For each output: derive the key the record names and compare it with the script's P2PKH
+ * hash. On a mismatch try the usual slips (keyID outpoint written txid.vout vs txid_vout, counterparty self vs
+ * anyone); if one matches, file the output again with the corrected record, else relinquish it so no send ever
+ * picks it.
+ */
+export type KeyedTokenOutput = LocalTokenOutput & {
+  /** P2PKH hash160 the locking script pays, or null when it is not P2PKH (skipped). */
+  hash160: string | null;
+  /** Plaintext custom instructions, or undefined when unreadable (skipped). */
+  customInstructions?: string;
+  tags?: string[];
+};
+
+export type KeyRef = { protocolID: [number, string]; keyID: string; counterparty: string };
+
+export interface KeyCheckDeps {
+  localOutputs(tokenId?: string): Promise<KeyedTokenOutput[]>;
+  /** hash160 (hex) of the wallet's public key for this derivation (forSelf). */
+  derive(key: KeyRef): Promise<string>;
+  /** Replace the output's record with corrected custom instructions. */
+  refile(output: KeyedTokenOutput, customInstructions: string): Promise<void>;
+  relinquish(outpoint: string): Promise<void>;
+  log?(msg: string): void;
+}
+
+export type KeyCheckReport = {
+  checked: number;
+  repaired: KeyedTokenOutput[];
+  dropped: KeyedTokenOutput[];
+  errors: string[];
+};
+
+const parseKeyRef = (ci: string | undefined): (KeyRef & { raw: Record<string, unknown> }) | null => {
+  if (!ci) return null;
+  try {
+    const raw = JSON.parse(ci) as Record<string, unknown>;
+    const { protocolID, keyID } = raw;
+    if (!Array.isArray(protocolID) || protocolID.length !== 2 || typeof keyID !== 'string' || !keyID) return null;
+    const counterparty = typeof raw.counterparty === 'string' && raw.counterparty ? raw.counterparty : 'self';
+    return { protocolID: protocolID as [number, string], keyID, counterparty, raw };
+  } catch {
+    return null;
+  }
+};
+
+/** The record's own key first, then the slips seen in practice. */
+export const keyCandidates = (k: KeyRef): KeyRef[] => {
+  const ids = [k.keyID];
+  const m = /^(.*-[0-9a-f]{64})([._])(\d+)$/i.exec(k.keyID);
+  if (m) ids.push(`${m[1]}${m[2] === '.' ? '_' : '.'}${m[3]}`);
+  const parties = [...new Set([k.counterparty, 'self', 'anyone'])];
+  const out: KeyRef[] = [];
+  for (const keyID of ids)
+    for (const counterparty of parties) out.push({ protocolID: k.protocolID, keyID, counterparty });
+  return out;
+};
+
+export async function repairUnsignableTokenOutputs(
+  deps: KeyCheckDeps,
+  opts: { tokenId?: string } = {},
+): Promise<KeyCheckReport> {
+  const report: KeyCheckReport = { checked: 0, repaired: [], dropped: [], errors: [] };
+  const log = deps.log ?? (() => {});
+  const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+  let local: KeyedTokenOutput[];
+  try {
+    local = await deps.localOutputs(opts.tokenId);
+  } catch (e) {
+    report.errors.push(`listOutputs: ${msg(e)}`);
+    return report;
+  }
+  if (opts.tokenId) local = local.filter((o) => normId(o.tokenId) === normId(opts.tokenId!));
+  for (const o of local) {
+    const ref = parseKeyRef(o.customInstructions);
+    if (!ref || !o.hash160) continue; // unreadable record or not P2PKH: not ours to judge
+    report.checked++;
+    try {
+      const want = o.hash160.toLowerCase();
+      let match: KeyRef | undefined;
+      for (const c of keyCandidates(ref)) {
+        if ((await deps.derive(c)).toLowerCase() === want) {
+          match = c;
+          break;
+        }
+      }
+      if (match && match.keyID === ref.keyID && match.counterparty === ref.counterparty) continue;
+      if (match) {
+        const fixed = JSON.stringify({ ...ref.raw, keyID: match.keyID, counterparty: match.counterparty });
+        await deps.refile(o, fixed);
+        report.repaired.push(o);
+        log(`refiled ${o.outpoint} with keyID ${match.keyID} (${match.counterparty})`);
+      } else {
+        await deps.relinquish(normOutpoint(o.outpoint));
+        report.dropped.push(o);
+        log(`relinquished ${o.outpoint}: no key of this wallet signs it`);
+      }
+    } catch (e) {
+      report.errors.push(`${o.outpoint}: ${msg(e)}`);
+    }
+  }
+  return report;
+}

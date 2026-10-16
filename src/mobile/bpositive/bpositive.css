@@ -1,0 +1,191 @@
+/* bPositive (/m/bpositive). Gold on obsidian; calm, roomy. */
+.bp-page {
+  --bp-gold: var(--bw-accent-hi, #f5b800);
+  --bp-card: #121316;
+  --bp-line: rgba(255, 255, 255, 0.08);
+  --bp-muted: #8e8e89;
+  color: var(--bw-text, #f2f2f0);
+  height: 100%;
+  overflow-y: auto;
+  padding: 16px 16px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 640px;
+  margin: 0 auto;
+  box-sizing: border-box;
+  width: 100%;
+}
+.ww-col .bp-page {
+  padding-top: calc(3.5rem + 16px);
+}
+.bp-page h1 {
+  margin: 4px 0 0;
+  font-size: 1.6rem;
+}
+.bp-muted {
+  color: var(--bp-muted);
+}
+.bp-small {
+  font-size: 13px;
+}
+.bp-gold {
+  color: var(--bp-gold);
+}
+.bp-card {
+  background: var(--bp-card);
+  border: 1px solid var(--bp-line);
+  border-radius: 16px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: inherit;
+  text-align: left;
+  min-width: 0;
+}
+.bp-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-direction: row;
+  min-width: 0;
+}
+.bp-row > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.bp-btn {
+  background: var(--bp-gold);
+  color: #000;
+  border: 0;
+  border-radius: 999px;
+  padding: 11px 18px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.bp-btn.ghost {
+  background: transparent;
+  color: var(--bp-gold);
+  border: 1px solid var(--bp-gold);
+}
+.bp-btn.small {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+.bp-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.bp-link {
+  background: none;
+  border: 0;
+  color: var(--bp-gold);
+  padding: 4px 0;
+  cursor: pointer;
+  align-self: flex-start;
+}
+.bp-tabs,
+.bp-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.bp-tabs button,
+.bp-chips button {
+  background: transparent;
+  color: inherit;
+  border: 1px solid var(--bp-line);
+  border-radius: 999px;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+.bp-tabs button.on,
+.bp-chips button.on {
+  border-color: var(--bp-gold);
+  color: var(--bp-gold);
+}
+.bp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.bp-field > span {
+  font-weight: 600;
+}
+.bp-page input {
+  background: #0c0d0f;
+  color: inherit;
+  border: 1px solid var(--bp-line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  min-width: 0;
+  font: inherit;
+}
+.bp-two {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+.bp-two:has(> label + label),
+.bp-two:has(> input + input) {
+  grid-template-columns: 1fr 1fr;
+}
+.bp-hero {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.bp-ring {
+  position: relative;
+  width: 132px;
+  height: 132px;
+  flex: none;
+}
+.bp-ring-track {
+  fill: none;
+  stroke: var(--bp-line);
+  stroke-width: 10;
+}
+.bp-ring-fill {
+  fill: none;
+  stroke: var(--bp-gold);
+  stroke-width: 10;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.6s ease;
+}
+.bp-ring-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.bp-ring-text strong {
+  font-size: 1.8rem;
+}
+.bp-ring-text span {
+  font-size: 12px;
+  color: var(--bp-muted);
+}
+.bp-promise {
+  margin: 0;
+  font-size: 13px;
+  color: var(--bp-gold);
+}
+.bp-actions {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+.bp-witness,
+.bp-outcome {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--bp-line);
+  padding-top: 8px;
+}

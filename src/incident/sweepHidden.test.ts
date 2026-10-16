@@ -44,6 +44,8 @@ type Chain = {
   spent: Map<string, string>;
   /** the UTXO oracle: the shipped OneSatServices parser (bug B) or the fixed one */
   utxo: 'fixed' | 'shipped';
+  /** called when a broadcast reaches the network in 'hang' mode (the tx is now stuck in flight) */
+  onHang?: () => void;
 };
 
 let dbn = 0;
@@ -110,7 +112,10 @@ function makeServices(chain: Chain) {
     getRawTx: async (txid: string) => ({ txid, name: 'mock', rawTx: undefined }),
     getMerklePath: async (txid: string) => (chain.mined.has(txid) ? proofFor(txid) : { name: 'mock', notes: [] }),
     postBeef: async (_beef: Beef, txids: string[]) => {
-      if (chain.post === 'hang') return new Promise(() => undefined);
+      if (chain.post === 'hang') {
+        chain.onHang?.();
+        return new Promise(() => undefined);
+      }
       const res = (name: string, r: Record<string, unknown>) => ({
         name,
         status: r.status,
@@ -220,7 +225,9 @@ async function sweep(post: PostMode, opts: { backupDb?: string; utxo?: Chain['ut
   );
   const r = (
     post === 'hang'
-      ? await Promise.race([run, new Promise<{ hung: true }>((ok) => setTimeout(() => ok({ hung: true }), 1500))])
+      ? // Wait until the broadcast is actually in flight, not a guessed 1.5s: under load the sweep could reach
+        // postBeef after the caller had flipped chain.post to 'success', finishing in the background mid-test.
+        await Promise.race([run, new Promise<{ hung: true }>((ok) => (chain.onHang = () => ok({ hung: true })))])
       : await run
   ) as { txid?: string; error?: string; hung?: true };
   return { r, w, root, dbName, services, chain, inputs: coins.inputs };

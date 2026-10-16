@@ -54,3 +54,10 @@ select optgroup {
   color: var(--bw-text, #fff);
   background-color: var(--bw-card, #1a1a1a);
 }
+
+/* Scroll end clears the bottom bar: the phone Dock / classic tab bar (--dock-h, mobile.css) plus the
+   iPhone home indicator plus a small gap, so a list's last rows can scroll fully above the bar.
+   Unlayered, so it wins over any Tailwind pb-* utility left on the same element. */
+.bw-dock-pad {
+  padding-bottom: calc(var(--dock-h, 3.75rem) + env(safe-area-inset-bottom, 0px) + 1rem);
+}
