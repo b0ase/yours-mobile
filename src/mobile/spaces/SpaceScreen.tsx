@@ -102,9 +102,12 @@ import { shareText } from '../chat/shareLink';
 import { ErrorActions } from '../errors/ErrorActions';
 import { UserSafetyButton } from '../ugc/UserSafety';
 import { PAID_LISTENING_ENABLED } from './paidListen';
+import { PAY_TO_SPEAK_ENABLED, type LiveKitGrant } from './paySpeak';
 
 /** Paid listening: bWalletX only. A literal-false constant in store builds, so Vite drops the chunk. */
 const PaidListening = PAID_LISTENING_ENABLED ? lazy(() => import('./PaidListening')) : null;
+/** Pay to speak: bWalletX only, dropped from store builds the same way. */
+const PayToSpeak = PAY_TO_SPEAK_ENABLED ? lazy(() => import('./PayToSpeak')) : null;
 import { isBlocked, TERMS_URL } from '../ugc/ugc';
 
 const GOLD = 'var(--bw-accent-hi)';
@@ -785,6 +788,23 @@ const SpaceScreenInner = ({
       void media.close();
     }
   };
+
+  /** A paid stage seat was claimed: reconnect with the speaker token so the mic can publish. */
+  const upgradeToSpeaker = useCallback(
+    async (lk: LiveKitGrant | null) => {
+      const tok = lk ?? parseSpaceToken(await client.spaceToken(ticker));
+      if (!tok) throw new Error('No speaker token');
+      await media.rejoin(tok.url, tok.token, { mic: false, camera: camRef.current, facing: facingRef.current });
+      setMicOn(media.micOn);
+      client
+        .space(ticker)
+        .then((d) => apply(parseSpaceState(d, me)))
+        .catch(() => undefined);
+      setNote('You’re on stage, muted. Tap Unmute to talk.');
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [client, ticker, media, me],
+  );
 
   useEffect(() => {
     micRef.current = micOn;
@@ -1512,6 +1532,11 @@ const SpaceScreenInner = ({
           {PaidListening && phase === 'live' && !anon && (
             <Suspense fallback={null}>
               <PaidListening client={client} ticker={ticker} role={myRole} />
+            </Suspense>
+          )}
+          {PayToSpeak && phase === 'live' && !anon && (
+            <Suspense fallback={null}>
+              <PayToSpeak client={client} ticker={ticker} role={myRole} onSeat={upgradeToSpeaker} />
             </Suspense>
           )}
           {body}
