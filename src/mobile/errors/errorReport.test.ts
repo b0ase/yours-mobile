@@ -55,3 +55,24 @@ describe('askBMessage / errorReportText', () => {
     expect(errorReportText(`password: secret123`, ctx)).not.toContain('secret123');
   });
 });
+
+describe('Ask b bug report', () => {
+  const ctx = {
+    screen: '/m/send',
+    version: '5.2.26',
+    edition: 'bWalletX',
+    channel: 'android',
+    time: '2026-10-16T10:00:00.000Z',
+  };
+  test('is framed as a bug report with screen, version, channel and time', () => {
+    const m = askBMessage('Broadcast failed', ctx);
+    expect(m.startsWith('Bug report:')).toBe(true);
+    for (const s of ['/m/send', '5.2.26', 'android', '2026-10-16T10:00:00.000Z']) expect(m).toContain(s);
+  });
+  test('redacts WIF, xprv, hex keys, seed words and balances from the report', () => {
+    const xprv =
+      'xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi';
+    const m = askBMessage(`failed ${WIF} ${xprv} ${HEX} ${PHRASE12} balance 1.5 BSV`, ctx);
+    for (const s of [WIF, xprv, HEX, 'abandon', '1.5']) expect(m).not.toContain(s);
+  });
+});
