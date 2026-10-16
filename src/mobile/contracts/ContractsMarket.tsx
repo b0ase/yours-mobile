@@ -1,5 +1,6 @@
 import { StrategiesMarket } from '../strategies/StrategiesMarket';
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
+import { PLACEMENT_ENABLED } from '../storeBuild';
 import { createPortal } from 'react-dom';
 import { FileCode2, Loader2, Plus, X } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -46,16 +47,21 @@ const Row = ({ k, v }: { k: string; v: string }) => (
   </div>
 );
 
-export type ContractsTab = 'all' | 'bonds' | 'strategies';
+/** Contracts › Shares: restricted, no trading (bShares). bWalletX only; dropped from the store bundle (PLACEMENT_ENABLED). */
+const SharesMarket = PLACEMENT_ENABLED ? lazy(() => import('../placement/SharesMarket')) : null;
+
+export type ContractsTab = 'all' | 'bonds' | 'strategies' | 'shares';
 const TABS: [ContractsTab, string][] = [
   ['all', 'All'],
   ['bonds', 'Bonds'],
   ['strategies', 'Strategies'],
+  ...(SharesMarket ? [['shares', 'Shares'] as [ContractsTab, string]] : []),
 ];
 
 /**
  * Exchange › Contracts, with sub-tabs All / Bonds / Strategies (Bonds was its own Exchange filter until 7 Oct 2026;
- * Strategies joined 17 Oct 2026 and reuses StrategiesMarket, which also stays under the Strategies filter). bWalletX only.
+ * Strategies joined 17 Oct 2026 and reuses StrategiesMarket, which also stays under the Strategies filter; Shares joined
+ * 17 Oct 2026 and reuses the restricted bShares SharesMarket, which also stays on the Exchange page's filter bar). bWalletX only.
  */
 export const ContractsMarket = ({ tab = 'all', onTab }: { tab?: ContractsTab; onTab?: (t: ContractsTab) => void }) => {
   const filter = tab === 'bonds' ? 'bond' : undefined;
@@ -124,6 +130,15 @@ export const ContractsMarket = ({ tab = 'all', onTab }: { tab?: ContractsTab; on
       ))}
     </div>
   );
+  if (tab === 'shares' && SharesMarket)
+    return (
+      <section className="flex flex-col gap-3">
+        {tabBar}
+        <Suspense fallback={null}>
+          <SharesMarket />
+        </Suspense>
+      </section>
+    );
   if (tab === 'strategies')
     return (
       <section className="flex flex-col gap-3">
