@@ -161,7 +161,6 @@ export const BAPPS: BApp[] = [
   {
     name: 'bDrive',
     url: 'https://bitcoin-drive.vercel.app',
-    noFrame: true,
     verb: 'Store and share files on-chain',
     group: 'work',
     status: 'live',
