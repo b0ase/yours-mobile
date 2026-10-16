@@ -356,7 +356,7 @@
 :root[data-bw-tone='mono'] .bw-wcard-face.is-themed {
   background:
     radial-gradient(120% 90% at 100% 0%, var(--bw-tint) 0%, transparent 60%),
-    linear-gradient(160deg, #ffffff 0%, #ffffff 60%, var(--bw-tint) 140%);
+    linear-gradient(160deg, var(--bw-card) 0%, var(--bw-card) 60%, var(--bw-tint) 140%);
   border: 1px solid var(--bw-line);
   box-shadow: var(--bw-shadow);
   color: var(--bw-text);
@@ -371,7 +371,7 @@
   background: none;
 }
 :root[data-bw-tone='mono'] .bw-bc.is-themed {
-  background: #ffffff !important;
+  background: var(--bw-card) !important;
   color: var(--bw-text) !important;
   --bc-ink: var(--bw-text);
   border: 1px solid var(--bw-line) !important;
@@ -387,13 +387,13 @@
   text-shadow: none;
 }
 :root[data-bw-tone='mono'] .bw-bc.is-themed .bw-bc-contact {
-  background: #ffffff;
+  background: var(--bw-card);
   color: var(--bw-accent);
   border: 1px solid var(--bw-trim);
 }
 /* Own-artwork app icons on a Mono pack: a white paper tile with padding, so the grid matches the redrawn set. */
 :root[data-bw-tone='mono'] .bw-paper-icon {
-  background: #ffffff !important;
+  background: var(--bw-card) !important;
   padding: 8px;
   object-fit: contain !important;
   border: 1px solid var(--bw-line);
@@ -544,8 +544,8 @@
 /* White: the swipe actions beside a row (Pin · Lock · Archive, Chat · Receive · Send) are white with black ink and a
    thin outline instead of coloured fills (owner, 16 Oct 2026). */
 :root[data-bw-paper] .bw-swipe-action {
-  background: #ffffff !important;
-  color: #0a0a0a !important;
+  background: var(--bw-card) !important;
+  color: var(--bw-text) !important;
   border: 1px solid rgb(0 0 0 / 0.18);
 }
 /* White: balance cards (front and back) show their white design at full strength; no glaze, no text shadow. */
@@ -564,8 +564,8 @@
   --bc-ink: var(--bw-text);
 }
 :root[data-bw-paper] .bw-bc :is(.bw-bc-contact, .bw-bc-stop) {
-  background: #ffffff !important;
-  color: #0a0a0a !important;
+  background: var(--bw-card) !important;
+  color: var(--bw-text) !important;
   border: 1px solid rgb(0 0 0 / 0.35) !important;
 }
 /* Cover art an artist opted in to invert on White (media/invertOnLight.ts; VexVoid only). */
@@ -579,7 +579,7 @@
 /* White: bMail and bPhone cards, hero, segmented control and bars are white with black ink and a hairline
    (owner, 16 Oct 2026: "No black cards in white theme please"). */
 :root[data-bw-paper] :is(.bw-mail-card, .bw-mail-card.is-unread, .bw-mail-hero, .bw-mail-seg) {
-  background: #ffffff !important;
+  background: var(--bw-card) !important;
   color: var(--bw-text) !important;
   border: 1px solid rgb(0 0 0 / 0.14) !important;
   box-shadow:
@@ -595,17 +595,17 @@
   display: none;
 }
 :root[data-bw-paper] .bw-mail-bar {
-  background: rgb(255 255 255 / 0.92) !important;
+  background: color-mix(in srgb, var(--bw-card) 92%, transparent) !important;
   color: var(--bw-text);
   border-bottom: 1px solid var(--bw-line);
 }
 :root[data-bw-paper] .bw-mail-stamp {
-  background: color-mix(in srgb, currentColor 22%, #ffffff);
+  background: color-mix(in srgb, currentColor 22%, var(--bw-card));
 }
 /* White: Ask b's quick-start chips are white with black ink and a thin outline. */
 :root[data-bw-paper] .askb-chips button {
-  background: #ffffff !important;
-  color: #0a0a0a !important;
+  background: var(--bw-card) !important;
+  color: var(--bw-text) !important;
   border: 1px solid rgb(0 0 0 / 0.3) !important;
 }
 
@@ -629,38 +629,38 @@
 /* White (owner, 16 Oct 2026): chat bubbles are black text on white. Mine: very light grey fill; theirs: white with a
    thin outline. Never a dark fill. Applies to DMs, rooms and Ask b. */
 :root[data-bw-paper] :is(.bw-chat-bubble, .askb-bubble.b, .askb-bubble.note) {
-  background: #ffffff !important;
-  color: #0a0a0a !important;
+  background: var(--bw-card) !important;
+  color: var(--bw-text) !important;
   border: 1px solid rgb(0 0 0 / 0.18) !important;
   box-shadow: none !important;
 }
 :root[data-bw-paper] :is(.bw-chat-bubble.is-mine, .askb-bubble.user) {
-  background: #f4f4f4 !important;
-  color: #0a0a0a !important;
+  background: var(--bw-card2) !important;
+  color: var(--bw-text) !important;
   border: 1px solid transparent !important;
 }
 :root[data-bw-paper] :is(.bw-chat-bubble, .askb-bubble) :is(div, span, small, p) {
   color: inherit;
 }
 :root[data-bw-paper] :is(.bw-chat-bubble, .askb-bubble) a {
-  color: #0a0a0a !important;
+  color: var(--bw-text) !important;
   text-decoration: underline;
 }
 /* Help Desk card and the live Space banner: white cards. */
 :root[data-bw-paper] :is(.bw-helpdesk-card, .bw-live-banner) {
-  background: #ffffff !important;
-  color: #0a0a0a !important;
+  background: var(--bw-card) !important;
+  color: var(--bw-text) !important;
   border: 1px solid rgb(0 0 0 / 0.18) !important;
   box-shadow:
     0 1px 2px rgb(0 0 0 / 0.04),
     0 6px 16px rgb(0 0 0 / 0.05) !important;
 }
 :root[data-bw-paper] :is(.bw-helpdesk-card, .bw-live-banner) :is(span, b) {
-  color: #0a0a0a !important;
+  color: var(--bw-text) !important;
 }
 /* Account drawer scrim: a light veil, so no grey strip shows under the dock / home indicator. */
 :root[data-bw-paper] .bw-drawer-scrim {
-  background: rgb(255 255 255 / 0.6) !important;
+  background: color-mix(in srgb, var(--bw-card) 60%, transparent) !important;
   -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
 }
@@ -684,7 +684,7 @@
   display: block;
 }
 :root[data-bw-paper] .bw-dock-b {
-  background: #ffffff !important;
+  background: var(--bw-card) !important;
   box-shadow:
     0 0 0 1.5px #0a0a0a,
     0 4px 12px rgb(0 0 0 / 0.08) !important;
@@ -694,7 +694,7 @@
   color: var(--bw-text) !important;
 }
 :root[data-bw-paper] .bw-mail-card [style*='background: rgba(0, 0, 0, 0.45)'] {
-  background: #f2f2f2 !important;
+  background: var(--bw-tint) !important;
 }
 
 /* dark-fills:begin (generated by scripts/dark-fills.ts; do not edit by hand) */
@@ -1253,14 +1253,14 @@
    The pool is the pack's pale silk (ObsidianBackdrop picks the light pack), the Unlock button is black with white
    ink, and Safari / Chrome autofill keeps the field's own fill and the pack's ink instead of yellow + white. */
 :root[data-bw-paper] .bw-unlock-btn {
-  background-color: #0a0a0a !important;
-  color: #ffffff !important;
+  background-color: var(--bw-accent) !important;
+  color: var(--bw-on-accent) !important;
 }
 :root[data-bw-pack='light'] input:is(:-webkit-autofill, :autofill) {
   -webkit-text-fill-color: var(--bw-text) !important;
   caret-color: var(--bw-text);
-  -webkit-box-shadow: 0 0 0 1000px #ffffff inset !important;
-  box-shadow: 0 0 0 1000px #ffffff inset !important;
+  -webkit-box-shadow: 0 0 0 1000px var(--bw-card) inset !important;
+  box-shadow: 0 0 0 1000px var(--bw-card) inset !important;
 }
 /* Every pack, Gold too: autofill never paints a pale fill under light ink. */
 input:-webkit-autofill {

@@ -131,7 +131,7 @@ export default function CreditsPanel() {
   const ink = light ? '#111111' : CARD.ink;
   const muted = light ? '#555555' : CARD.muted;
   const soft = light ? '#333333' : CARD.soft;
-  const chip = light ? '#EDEDED' : CARD.chip;
+  const chip = light ? 'var(--bw-tint, #EDEDED)' : CARD.chip;
   // The bCredits card's back opens Top up or History here (creditsNav.ts).
   useEffect(() => {
     const take = () => {
@@ -230,7 +230,7 @@ export default function CreditsPanel() {
           onKeyDown={(e) => e.key === 'Enter' && enabled && setFlipped((f) => !f)}
           className="rounded-3xl px-5 py-4"
           style={{
-            background: light ? '#FFFFFF' : 'linear-gradient(135deg, #1b1608 0%, #0b0a08 60%)',
+            background: light ? 'var(--bw-card, #FFFFFF)' : 'linear-gradient(135deg, #1b1608 0%, #0b0a08 60%)',
             border: `1px solid ${light ? '#D6D6D6' : CARD.goldLo}`,
             minHeight: 168,
             cursor: enabled ? 'pointer' : 'default',

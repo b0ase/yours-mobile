@@ -84,11 +84,11 @@ test('Mono, Duo and Tri groups: Mono is one hue on white with no dark grounds', 
   expect(accentById('white').bg).toBe('#FFFFFF');
   for (const a of MONO_PACKS) {
     expect(a.scheme).toBe('light');
-    expect(a.surface).toBe('#FFFFFF');
+    if (!a.paper) expect(a.surface).toBe('#FFFFFF');
     expect(a.nav).toBe(a.paper ? a.bg : '#FFFFFF');
     // Every ground (page, surfaces, button tint) is light: no dark elements (paper stock is coloured, still light).
     for (const g of [a.bg, a.surface, a.surface2, a.tint as string])
-      expect(contrast(g, '#000000')).toBeGreaterThan(a.paper && g === a.bg ? 10 : 15);
+      expect(contrast(g, '#000000')).toBeGreaterThan(a.paper ? 9 : 15);
     // AA everywhere: text, muted and every accent stop on page, surfaces and tint (buttons are accent on tint).
     for (const g of [a.bg, a.surface, a.surface2, a.tint as string]) {
       expect(contrast(a.text, g)).toBeGreaterThanOrEqual(7);
@@ -114,7 +114,7 @@ test('retired packs fall back to the closest new pack', () => {
 });
 
 describe('paper packs (Pink, Blue, Yellow)', () => {
-  test('solid coloured page, white cards and buttons, near-black ink, AA everywhere', () => {
+  test('solid coloured page, cards and buttons in shades of the paper, near-black ink, AA everywhere', () => {
     for (const [id, bg] of [
       ['pink', '#F4A7C0'],
       ['blue', '#8EC5F0'],
@@ -123,12 +123,13 @@ describe('paper packs (Pink, Blue, Yellow)', () => {
       const a = accentById(id);
       expect(a.paper).toBe(true);
       expect(a.bg).toBe(bg);
-      expect(a.surface).toBe('#FFFFFF');
-      expect(a.tint).toBe('#FFFFFF');
+      expect(a.surface).not.toBe('#FFFFFF');
+      expect(a.tint).not.toBe('#FFFFFF');
+      expect(a.on).toBe(bg);
       expect(a.text).toBe('#111111');
       expect(a.accent).toBe('#111111');
       expect(a.line).toBe('#111111');
-      for (const g of [a.bg, a.surface]) {
+      for (const g of [a.bg, a.surface, a.surface2, a.tint as string]) {
         expect(contrast(a.text, g)).toBeGreaterThanOrEqual(7);
         expect(contrast(a.muted, g)).toBeGreaterThanOrEqual(4.5);
       }
@@ -162,4 +163,17 @@ describe('artist editions', () => {
     for (const v of Object.values(packVars(accentById('npgx'))))
       expect(/C6FF1A|FF2BD6|00F0FF|0 240 255|255 43 214/i.test(v)).toBe(false);
   });
+});
+
+test('Pink, Blue and Yellow paper packs resolve no surface token to white', () => {
+  const isWhite = (v: string) => /^#(f{3}|f{6})$/i.test(v.trim()) || /^white$/i.test(v.trim());
+  for (const id of ['pink', 'blue', 'yellow'] as const) {
+    const a = accentById(id);
+    expect(a.paper).toBe(true);
+    for (const k of ['bg', 'surface', 'surface2', 'tint', 'nav'] as const) {
+      expect(isWhite(String(a[k])), `${id}.${k} = ${a[k]}`).toBe(false);
+    }
+    expect(a.text).toBe('#111111');
+    expect(a.accent).toBe('#111111');
+  }
 });
