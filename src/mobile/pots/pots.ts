@@ -52,6 +52,15 @@ export type Subscription = {
   /** Service reference put in an OP_RETURN of each payment (subscribeLink.ts), e.g. bChatX Plus. */
   memo?: string;
   lastError?: string;
+  /**
+   * 'latest' (app subscriptions, appSubscribe.ts): missed periods never stack up. A missed payment is paid once on
+   * the next open and the older periods are skipped. Absent = the standing-order catch-up (up to MAX_CATCH_UP).
+   */
+  catchUp?: 'latest';
+  /** What the app said it is for (app subscriptions). */
+  description?: string;
+  /** The last payment that went through: the receipt the Subscriptions list and status call show. */
+  lastReceipt?: { at: number; txid: string; usd: number; sats: number };
 };
 
 const POTS = 'bwallet.pots';
@@ -273,6 +282,8 @@ export type PendingPayment = {
   rawTx: string;
   txid: string;
   usd: number;
+  /** Total sats paid (absent on records written before receipts). */
+  sats?: number;
   at: number;
 };
 export const getPending = (subId: string): PendingPayment | null =>
@@ -307,7 +318,7 @@ const uuid = () => {
 };
 
 export type NewSub = Pick<Subscription, 'potId' | 'payee' | 'amount' | 'period' | 'start' | 'maxCount'> &
-  Partial<Pick<Subscription, 'memo'>>;
+  Partial<Pick<Subscription, 'memo' | 'catchUp' | 'description' | 'requestId'>>;
 
 /** A payment memo: only on a service subscription, `<name>:<hex>`, one short OP_RETURN push. */
 export const SUB_MEMO_RE = /^[a-z][a-z0-9-]{1,23}:[0-9a-f]{8,64}$/;
