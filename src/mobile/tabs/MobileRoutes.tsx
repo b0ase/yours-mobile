@@ -66,6 +66,8 @@ const FriendsPage = lazy(() => import('../friends/FriendsPage'));
 // bMint (/m/bmint/*: Notes, OpNS names…), bmint/BmintPage.tsx; OpNS names renders inside it at /m/bmint/opns.
 // Old /opns-mint links redirect there, keeping ?mint=.
 const BmintPage = lazy(() => import('../bmint/BmintPage'));
+// bTrust (/m/btrust): recovery slices, passing on, important papers. btrust/BTrustPage.tsx.
+const BTrustPage = lazy(() => import('../btrust/BTrustPage'));
 // bShares (/m/bshares, docs/BCORP-PLACEMENT.md): restricted share placement; bWalletX only, dropped from the store bundle.
 const BsharesPage = PLACEMENT_ENABLED ? lazy(() => import('../placement/BsharesPage')) : null;
 // The Name Store (/m/names, public /names): search, buy, claim and give names (names/store/).
@@ -106,6 +108,7 @@ const MobileRoutes = () => (
         <Route path="agent" element={<Navigate to="/m/ask-b" replace />} />
         <Route path="bmail" element={<BMailPage />} />
         <Route path="bmint/*" element={<BmintPage />} />
+        <Route path="btrust" element={<BTrustPage />} />
         {BsharesPage && <Route path="bshares" element={<BsharesPage />} />}
         <Route path="opns-mint" element={<ToOpnsMint />} />
         <Route path="names" element={<NameStorePage />} />
