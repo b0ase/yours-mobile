@@ -38,7 +38,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { InviteLinksPanel } from '../chat/InviteLinksPanel';
 import { copyLink, shareLink } from '../chat/shareLink';
 import { DEFAULT_EXPIRY, parsePage, parseSpaceInvite } from '../spaces/invite';
-import { onXInvite, takeXInvite, type XInviteLink } from '../chat/xInvites';
+import { hasInvitePrefill, onXInvite, takeXInvite, type XInviteLink } from '../chat/xInvites';
 import { InvitesApi } from '../chat/invitesApi';
 import { BuyTokenButton } from '../chat/OpenTokenRoomButton';
 import { TopNav } from '../../components/TopNav';
@@ -2259,7 +2259,12 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     // GET the host list: 200 = this user manages the room; 403 / 404 (not deployed yet) = hide the entry.
     void new InvitesApi((m, p, b, a) => client.request(m, p, b, a))
       .list(xTicker)
-      .then((r) => live && r !== null && setXManage(xTicker))
+      .then((r) => {
+        if (!live || r === null) return;
+        setXManage(xTicker);
+        // Friends › "Invite the rest" queued handles for this room: open Invites on its confirm.
+        if (hasInvitePrefill()) setXInvites(true);
+      })
       .catch(() => undefined);
     return () => {
       live = false;

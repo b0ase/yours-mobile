@@ -277,7 +277,12 @@ export class BchatClient {
   }
 
   /** One JSON call for small feature clients (chat/invitesApi.ts) that keep their own routes. */
-  request(method: 'GET' | 'POST', path: string, body?: Record<string, unknown>, auth = true): Promise<unknown> {
+  request(
+    method: 'GET' | 'POST' | 'DELETE',
+    path: string,
+    body?: Record<string, unknown>,
+    auth = true,
+  ): Promise<unknown> {
     return this.call(method, path, body, auth);
   }
 
