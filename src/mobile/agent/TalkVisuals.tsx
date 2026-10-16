@@ -4,6 +4,9 @@ import type { TalkSheet } from './holdToTalk';
 
 const GOLD = 'var(--bw-accent-hi)';
 const MUTED = '#98A2B3';
+// Talk sheet ink on its near-black card (Gold and dark packs); light packs swap to the pack's ink (themes.css).
+const SHEET_INK = '#EDE6D3';
+const SHEET_HINT = 'rgba(255, 255, 255, 0.7)';
 
 /** The talk sheet above a held b: level bars, live transcript and the hint line (Dock and Ask b composer). */
 export const TalkSheetView = ({
@@ -43,10 +46,13 @@ export const TalkSheetView = ({
             />
           ))}
         </div>
-        <p className="bw-talk-text m-0 text-center text-[15px] leading-snug text-white min-h-[1.4em] max-h-24 overflow-hidden">
+        <p
+          className="bw-talk-text m-0 text-center text-[15px] leading-snug min-h-[1.4em] max-h-24 overflow-hidden"
+          style={{ color: SHEET_INK }}
+        >
           {sheet.note ?? (sheet.text || (sheet.sending ? '' : idleText))}
         </p>
-        <p className="bw-talk-hint m-0 text-[11px]" style={{ color: cancelling ? '#F04438' : MUTED }}>
+        <p className="bw-talk-hint m-0 text-[11px]" style={{ color: cancelling ? '#F04438' : SHEET_HINT }}>
           {sheet.sending ? sendingHint : sheet.note ? noteHint : cancelling ? 'Let go to cancel' : hint}
         </p>
       </div>

@@ -62,6 +62,8 @@ export type Holding = {
 };
 
 export type Company = {
+  /** The company's bChatX room id (the room is the company). */
+  id?: string;
   ticker: string;
   name: string;
   /** From the register (sum of the class's shares in issue). Never hardcoded. */
@@ -73,13 +75,21 @@ export type Company = {
   /** Company number at Companies House, for the minute. */
   companyNumber?: string;
   treasury: { m: number; n: number; lockingScriptHex: string } | null;
+  incorporated?: boolean;
+  jurisdiction?: string;
+  treasuryM?: number;
+  shareClasses?: { id: string; name: string; nominalNanoPounds: number; authorised?: number; sharesInIssue: number }[];
 };
 
 export type BsharesMe = {
   company: Company;
   role: 'director' | 'member' | null;
+  /** The signed-in handle, as bit-sign resolved it. */
+  viewer?: string;
   holdings: Holding[];
   offers: PlacementOffer[];
+  /** Directors only: the board, and whether each director has contributed keys. */
+  board?: { id: string; handle: string; name: string; office: string; hasKeys: boolean }[];
 };
 
 /** Who may open bShares: a registered member (holds shares on the register) or a serving director. */
