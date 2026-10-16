@@ -20,7 +20,8 @@ const body = (o: Record<string, unknown> = {}) => ({
   position_ms: 0,
   ...o,
 });
-const v = (o: Record<string, unknown> = {}, receivedAt = 1_000_000) => parseSpaceVideo(body(o), receivedAt) as SpaceVideo;
+const v = (o: Record<string, unknown> = {}, receivedAt = 1_000_000) =>
+  parseSpaceVideo(body(o), receivedAt) as SpaceVideo;
 
 describe('position maths', () => {
   test('stopped → 0, paused → paused_at_ms', () => {

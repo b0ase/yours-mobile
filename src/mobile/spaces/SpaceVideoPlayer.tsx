@@ -243,7 +243,10 @@ const HostControls = ({
   };
 
   return (
-    <div className="px-3 py-2 flex flex-col gap-2" style={{ background: 'var(--bw-card)', borderTop: '1px solid var(--bw-line)' }}>
+    <div
+      className="px-3 py-2 flex flex-col gap-2"
+      style={{ background: 'var(--bw-card)', borderTop: '1px solid var(--bw-line)' }}
+    >
       <div className="flex gap-2">
         <input
           value={url}
@@ -291,7 +294,12 @@ const HostControls = ({
             >
               +10s
             </button>
-            <button disabled={busy} onClick={() => void run({ action: 'seek', position_ms: 0 })} className={btn} style={btnStyle}>
+            <button
+              disabled={busy}
+              onClick={() => void run({ action: 'seek', position_ms: 0 })}
+              className={btn}
+              style={btnStyle}
+            >
               Restart
             </button>
             <button disabled={busy} onClick={() => void run({ action: 'stop' })} className={btn} style={btnStyle}>
@@ -322,7 +330,11 @@ const HostControls = ({
         <OrdinalPicker
           onPick={(origin, title) => {
             setPicking(false);
-            void run({ action: 'play', item: { kind: 'ordinal', src: ordinalSrc(origin), outpoint: origin.replace('.', '_'), title }, loop });
+            void run({
+              action: 'play',
+              item: { kind: 'ordinal', src: ordinalSrc(origin), outpoint: origin.replace('.', '_'), title },
+              loop,
+            });
           }}
         />
       )}
@@ -334,7 +346,12 @@ const HostControls = ({
 const OrdinalPicker = ({ onPick }: { onPick: (origin: string, title: string) => void }) => {
   const { items, loading, error } = useWalletMedia();
   const vids = items.filter((i) => i.kind === 'video' && !i.pending && !i.flagged);
-  if (error) return <p className="text-xs m-0" style={{ color: 'var(--bw-muted)' }}>{error}</p>;
+  if (error)
+    return (
+      <p className="text-xs m-0" style={{ color: 'var(--bw-muted)' }}>
+        {error}
+      </p>
+    );
   if (!vids.length)
     return (
       <p className="text-xs m-0" style={{ color: 'var(--bw-muted)' }}>

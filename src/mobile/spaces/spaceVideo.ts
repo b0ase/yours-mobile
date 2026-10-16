@@ -121,7 +121,9 @@ export const positionOf = (v: SpaceVideo, localNow: number, mediaDurationMs?: nu
   if (!v.item || v.state === 'stopped') return { ms: 0, ended: false };
   if (v.state === 'paused') return { ms: v.pausedAtMs, ended: false };
   const e = Math.max(0, localNow + v.skew - v.startedAt);
-  const d = v.item.durationMs ?? (mediaDurationMs && Number.isFinite(mediaDurationMs) && mediaDurationMs > 0 ? mediaDurationMs : undefined);
+  const d =
+    v.item.durationMs ??
+    (mediaDurationMs && Number.isFinite(mediaDurationMs) && mediaDurationMs > 0 ? mediaDurationMs : undefined);
   if (!d) return { ms: e, ended: false };
   if (v.loop) return { ms: e % d, ended: false };
   return e >= d ? { ms: d, ended: true } : { ms: e, ended: false };
@@ -144,7 +146,11 @@ export const parseVideoPacket = (topic: string | undefined, payload: Uint8Array,
 };
 
 export type VideoAction =
-  | { action: 'play'; item: { kind: 'url' | 'ordinal'; src: string; outpoint?: string; title?: string }; loop?: boolean }
+  | {
+      action: 'play';
+      item: { kind: 'url' | 'ordinal'; src: string; outpoint?: string; title?: string };
+      loop?: boolean;
+    }
   | { action: 'pause' }
   | { action: 'resume' }
   | { action: 'seek'; position_ms: number }
