@@ -114,7 +114,12 @@ export const ObsidianHero = ({
           opacity: shown || still ? 1 : 0,
           filter: shown || still ? 'blur(0)' : 'blur(6px)',
           transition: `opacity ${FADE_MS}ms ease, filter ${FADE_MS}ms ease`,
-          minHeight: '1.6em',
+          // Fixed 3-line slot, top-aligned: a wrapping or rotating question never moves the b above it.
+          height: '3.75em',
+          overflow: 'hidden',
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'center',
         }}
       >
         {line.label}

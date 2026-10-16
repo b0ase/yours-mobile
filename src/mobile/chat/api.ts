@@ -664,6 +664,16 @@ export class BchatClient {
     return this.call('POST', `${BchatClient.path(ticker)}/space`, body);
   }
 
+  /** Synced Space video (bit-sign rooms/[ticker]/space-video): item + clock, or item null. */
+  async spaceVideo(ticker: string): Promise<unknown> {
+    return this.call('GET', `${BchatClient.path(ticker)}/space-video`);
+  }
+
+  /** Staff only: play | pause | resume | seek | stop | set_loop, with optional if_version (409 when stale). */
+  async spaceVideoAction(ticker: string, body: Record<string, unknown>): Promise<unknown> {
+    return this.call('PATCH', `${BchatClient.path(ticker)}/space-video`, body);
+  }
+
   /** Paid listening (bit-sign rooms/[ticker]/space/paid): config, my paid time and the next minute's signed plan. */
   async spacePaid(ticker: string): Promise<unknown> {
     return this.call('GET', `${BchatClient.path(ticker)}/space/paid`);

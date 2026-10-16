@@ -20,7 +20,9 @@ import { useInPeek } from '../phone/pageEl';
 import { SkeletonRows } from './SkeletonRows';
 import { HandleFlow } from '../names/HandleFlow';
 import { walletSigner } from './signer';
-import { listTimeLabel, previewText, roomActivity, roomTitle, type ChatRoom } from './messages';
+import { dmPeer, listTimeLabel, previewText, roomActivity, roomTitle, type ChatRoom } from './messages';
+import { ChatAvatar } from './ChatAvatar';
+import { useAvatars } from './avatars';
 import { ArchivedGroup, ChatSwipeRow, MutedMark, RowBadge, type RowCommands } from './ChatRowActions';
 import { arrange, isMarked, isMuted, isPinned, roomKeyOf, setMarked, settle, useListPrefs } from './listPrefs';
 import { Avatar, ContactRow, SourceBadges } from './ContactViews';
@@ -222,6 +224,11 @@ export const DmsPage = ({
     () => (rooms ? dmRooms(rooms).filter((r) => !isBlocked(roomTitle(r, handle || ''))) : null),
     [rooms, handle, blockTick], // eslint-disable-line react-hooks/exhaustive-deps
   );
+  // Each row's face: the other person's photo (bit-sign avatars), else their gold bAvatar (ChatAvatar).
+  useAvatars(
+    client,
+    (allDms ?? []).map((r) => dmPeer(r, handle || '')),
+  );
   // Telegram-style list (listPrefs.ts): pinned first, newest activity, archived in one group.
   const [prefs, updatePrefs] = useListPrefs(handle);
   const arranged = useMemo(
@@ -342,7 +349,7 @@ export const DmsPage = ({
             className="w-full flex items-center gap-3 px-4 py-[10px] text-left active:bg-[#111]"
             style={{ background: BG }}
           >
-            <Avatar title={title} />
+            <ChatAvatar title={title} issuer={dmPeer(r, handle || '')} />
             <div className="flex-1 min-w-0 pb-[10px] -mb-[10px]" style={{ borderBottom: `1px solid ${LINE}` }}>
               <div className="flex items-baseline gap-2">
                 <span className={`flex-1 flex items-center gap-1 text-[15px] font-semibold text-white ${ELLIPSIS}`}>

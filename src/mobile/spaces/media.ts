@@ -71,9 +71,17 @@ export class SpaceMedia {
   /** Screen tiles' <video> by screenKey. */
   private screenEls = new Map<string, HTMLVideoElement>();
   private cb: SpaceMediaCallbacks | null = null;
+  /** Data-packet listeners (topic, payload): survive a rejoin, since the room object is replaced. */
+  private dataListeners = new Set<(topic: string | undefined, payload: Uint8Array) => void>();
   /** "Mute the room" for me: every incoming voice silenced locally (my mic is separate). */
   private deaf = false;
   me = '';
+
+  /** Listen for LiveKit data packets (e.g. topic 'space-video'). Returns the unsubscribe. */
+  onData(fn: (topic: string | undefined, payload: Uint8Array) => void): () => void {
+    this.dataListeners.add(fn);
+    return () => this.dataListeners.delete(fn);
+  }
 
   get deafened() {
     return this.deaf;
@@ -149,6 +157,10 @@ export class SpaceMedia {
         }
         track.detach().forEach((el) => el.remove());
         this.audio.delete(`${who.identity}:${pub.trackSid}`);
+      })
+      .on(RoomEvent.DataReceived, (payload: Uint8Array, _who?: RemoteParticipant, _kind?: unknown, topic?: string) => {
+        if (this.room !== room) return;
+        this.dataListeners.forEach((f) => f(topic, payload));
       })
       .on(RoomEvent.TrackMuted, () => this.emitVideos())
       .on(RoomEvent.TrackUnmuted, () => this.emitVideos())

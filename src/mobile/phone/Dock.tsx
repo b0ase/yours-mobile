@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Minus, Plus, RotateCcw } from 'lucide-react';
 import { useReducedMotion } from 'framer-motion';
 import bGlyph from '../brand/bwallet-glyph.svg';
+import { B_OUTLINE_D, B_OUTLINE_VIEWBOX } from '../brand/bOutline';
 import { useBackClose } from '../backStack';
 import { dockKey, isDefaultDock, moveInDock, removeFromDock, resetDock, splitDock, type DockItem } from './dockModel';
 import { setAgentNote, setAgentVoice } from '../agent/handoff';
@@ -221,7 +222,7 @@ export const HomeButton = ({
         data-testid="dock-b"
         {...handlers}
         // Snug in the bar, centred, ring fully inside (owner, 8 Oct 2026; bChatX copies it).
-        className="relative shrink-0 h-[52px] w-[52px] rounded-full flex items-center justify-center border-0 select-none transition-transform disabled:opacity-40"
+        className="bw-dock-b relative shrink-0 h-[52px] w-[52px] rounded-full flex items-center justify-center border-0 select-none transition-transform disabled:opacity-40"
         style={{
           background: 'var(--bw-bg)',
           boxShadow: `0 0 0 2px ${GOLD}, 0 6px 18px rgba(0,0,0,0.6)`,
@@ -233,7 +234,29 @@ export const HomeButton = ({
         }}
       >
         <HoldRing phase={phase} />
-        <img src={bGlyph} alt="" width={30} height={30} draggable={false} className="pointer-events-none" />
+        <img
+          src={bGlyph}
+          alt=""
+          width={30}
+          height={30}
+          draggable={false}
+          className="bw-dock-b-gold pointer-events-none"
+        />
+        {/* White theme only (themes.css swaps them): the shared outline b, black on white. */}
+        <svg
+          className="bw-dock-b-outline pointer-events-none"
+          width={30}
+          height={30}
+          viewBox={B_OUTLINE_VIEWBOX}
+          fill="none"
+          stroke="#0A0A0A"
+          strokeWidth={2}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          aria-hidden="true"
+        >
+          <path d={B_OUTLINE_D} vectorEffect="non-scaling-stroke" />
+        </svg>
       </button>
     </>
   );
