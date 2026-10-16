@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   PAY_URI_RE,
@@ -10,6 +10,10 @@ import {
   paymailPayload,
 } from './flipQr';
 import { jsqr, rasterise, zbar, zxing } from './flipQr.testkit';
+
+// These tests rasterise QR codes with sharp and decode them with several scanners; under a full parallel
+// test run that can pass bun's 5s default, so give them room (a timeout once failed a run on 16 Oct 2026).
+setDefaultTimeout(30_000);
 
 const ADDR = '1BoatSLRHtKNngkdXEeobR76b53LETtpyT';
 const ADDR2 = '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa';
