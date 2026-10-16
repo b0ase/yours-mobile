@@ -3,4 +3,18 @@
      next verified release (ApkUpdatePlugin.java). Never in the Play build. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <application>
+        <!-- Room X invites: www.bchatx.com/i/x/<code>#k=… opens the claim screen (src/mobile/chat/xInvites.ts).
+             Direct APK only, so the Play app never claims these links (a store build has no claim screen).
+             Merged into MainActivity; verified by bchatx.com/.well-known/assetlinks.json. -->
+        <activity android:name="org.yours.wallet.MainActivity">
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="www.bchatx.com" android:pathPrefix="/i/x/" />
+            </intent-filter>
+        </activity>
+    </application>
 </manifest>

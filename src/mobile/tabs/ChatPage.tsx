@@ -40,6 +40,8 @@ import { useTheme } from '../../hooks/useTheme';
 import { InviteLinksPanel } from '../chat/InviteLinksPanel';
 import { copyLink, shareLink } from '../chat/shareLink';
 import { DEFAULT_EXPIRY, parsePage, parseSpaceInvite } from '../spaces/invite';
+import { onXInvite, takeXInvite, type XInviteLink } from '../chat/xInvites';
+import { InvitesApi } from '../chat/invitesApi';
 import { BuyTokenButton } from '../chat/OpenTokenRoomButton';
 import { TopNav } from '../../components/TopNav';
 import { useInPeek } from '../phone/pageEl';
@@ -105,12 +107,13 @@ import { AttachButton, MessageVideo, RoomMediaBubble } from '../chat/RoomMedia';
 import { mediaPayload } from '../chat/roomMediaInfo';
 import { walletSigner } from '../chat/signer';
 import { proveHoldings, walletHoldings } from '../chat/holdings';
-import { onTokenNav, requestMarketToken, takeChatRoom } from '../chat/nav';
+import { onTokenNav, requestChatRoom, requestMarketToken, takeChatRoom } from '../chat/nav';
 import { onRoomTicker, takeDmDraft, takeRoomTicker } from '../chat/segmentNav';
 import { RoomBell } from '../push/RoomBell';
 import {
   APP_NAME,
   BSPACES_ENABLED,
+  XINVITES_ENABLED,
   roomSpacesAllowed,
   MARKET_ENABLED,
   STORE_ROOM_NOTE,
@@ -128,6 +131,13 @@ import { RoomFilterChips, SpacesRoomList, type RoomFilter } from '../spaces/Spac
 const ROOMS = tokenRoomsEnabled();
 // New Space picks any of your rooms and can open paid entry: bWalletX only, a lazy chunk behind the inlined
 // flag so a store build never contains it (the store starts a free Space from an open room's banner).
+// Room X invites (host Invites sheet + the claim screen): bWalletX only, lazy chunks behind the inlined flag.
+const XInvitesSheet = XINVITES_ENABLED
+  ? lazy(() => import('../chat/XInvitesSheet').then((m) => ({ default: m.XInvitesSheet })))
+  : null;
+const XInviteClaim = XINVITES_ENABLED
+  ? lazy(() => import('../chat/XInviteClaim').then((m) => ({ default: m.XInviteClaim })))
+  : null;
 const NewSpaceSheet = BSPACES_ENABLED
   ? lazy(() => import('../spaces/NewSpaceSheet').then((m) => ({ default: m.NewSpaceSheet })))
   : null;
@@ -352,6 +362,7 @@ const Conversation = ({
   entry,
   onLocked,
   onInvite,
+  onXInvites = null,
   onBans,
   onBounties,
   peer = null,
@@ -371,6 +382,8 @@ const Conversation = ({
   /** The server refused: you no longer hold enough (or never did). */
   onLocked: (refusal: GateRefusal) => void;
   onInvite: (() => void) | null;
+  /** Room host (bit-sign says can manage): the X Invites sheet. Null hides the button. */
+  onXInvites?: (() => void) | null;
   /** Room admin: the ban list. */
   onBans: (() => void) | null;
   /** Null hides the Bounties button (1:1 DMs). */
@@ -803,6 +816,15 @@ const Conversation = ({
             to={{ name: `$${room.created_by_handle}`, paymail: `$${room.created_by_handle}` }}
             context={{ kind: 'room', room: room.ticker }}
           />
+        )}
+        {onXInvites && (
+          <button
+            onClick={onXInvites}
+            className="px-2.5 py-1 rounded-full text-xs font-semibold active:opacity-60"
+            style={{ border: `1px solid ${GOLD}`, color: GOLD }}
+          >
+            Invites
+          </button>
         )}
         {onInvite && (
           <button onClick={onInvite} className="p-2 rounded-full active:opacity-60" aria-label="Invite">
@@ -2242,6 +2264,25 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     null,
   );
   const [inviting, setInviting] = useState(false);
+  // Room X invites: shown only once bit-sign answers that this user manages the open room.
+  const [xManage, setXManage] = useState<string | null>(null);
+  const [xInvites, setXInvites] = useState(false);
+  const [xClaim, setXClaim] = useState<XInviteLink | null>(() => (XINVITES_ENABLED ? takeXInvite() : null));
+  useEffect(() => (XINVITES_ENABLED ? onXInvite(() => setXClaim(takeXInvite())) : undefined), []);
+  const xTicker = XINVITES_ENABLED && handle && open?.entry?.key.startsWith('bsv21:') ? open.room.ticker : null;
+  useEffect(() => {
+    setXManage(null);
+    if (!xTicker) return;
+    let live = true;
+    // GET the host list: 200 = this user manages the room; 403 / 404 (not deployed yet) = hide the entry.
+    void new InvitesApi((m, p, b, a) => client.request(m, p, b, a))
+      .list(xTicker)
+      .then((r) => live && r !== null && setXManage(xTicker))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [client, xTicker]);
   const [banning, setBanning] = useState(false);
   // Token room settings / rules: only the token's issuer can change them (RoomSettingsSheet).
   const [roomSettings, setRoomSettings] = useState(false);
@@ -3167,6 +3208,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           online={online}
           onAuthLost={authLost}
           onInvite={open.entry && open.entry.key.startsWith('bsv21:') ? () => setInviting(true) : null}
+          onXInvites={xManage && xManage === open.room.ticker ? () => setXInvites(true) : null}
           onBans={!openTicker && open.entry ? () => setRoomSettings(true) : null}
           onBounties={openTicker ? null : () => setShowBounties(true)}
           openRoom={
@@ -3269,6 +3311,41 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           me={handle}
           onClose={() => setShowBounties(false)}
         />
+      )}
+      {XInvitesSheet && xInvites && open?.entry && xManage === open.room.ticker && (
+        <Suspense fallback={null}>
+          <XInvitesSheet
+            client={client}
+            ctx={apiContext}
+            ticker={open.room.ticker}
+            roomName={roomTitle(open.room, handle ?? '')}
+            gate={open.entry.gate}
+            onClose={() => setXInvites(false)}
+          />
+        </Suspense>
+      )}
+      {XInviteClaim && xClaim && (
+        <Suspense fallback={null}>
+          <XInviteClaim
+            client={client}
+            ctx={apiContext}
+            link={xClaim}
+            identityAddress={identityAddress ?? ''}
+            onClose={() => setXClaim(null)}
+            onOpenRoom={(ticker) => {
+              setXClaim(null);
+              refresh();
+              void client
+                .roomPage(ticker)
+                .then(parsePage)
+                .then((p) => {
+                  const key = p?.kind === 'room' ? p.gate?.key : null;
+                  if (key) requestChatRoom(key);
+                })
+                .catch(() => undefined);
+            }}
+          />
+        </Suspense>
       )}
       {inviting && open?.entry && (
         <InviteSheet

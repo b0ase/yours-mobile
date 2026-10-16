@@ -276,6 +276,11 @@ export class BchatClient {
     return res.data as T;
   }
 
+  /** One JSON call for small feature clients (chat/invitesApi.ts) that keep their own routes. */
+  request(method: 'GET' | 'POST', path: string, body?: Record<string, unknown>, auth = true): Promise<unknown> {
+    return this.call(method, path, body, auth);
+  }
+
   /** Challenge → wallet BSM signature → verify. Returns (and keeps) the session. */
   async signIn(signer: ChatSigner): Promise<ChatSession> {
     this.signer = signer;

@@ -126,12 +126,12 @@ export const App = () => {
                 <SentHost />
                 {IS_EXTENSION && <PanelPrompt />}
                 {showGuest && guestNames && guest && (
-                  <Suspense fallback={null}>
+                  <Suspense fallback={<PageLoader message="Loading..." theme={theme} />}>
                     <GuestNames route={guest} onWallet={() => setGuest(null)} />
                   </Suspense>
                 )}
                 {showGuest && !guestNames && GuestMusic && guest && (
-                  <Suspense fallback={null}>
+                  <Suspense fallback={<PageLoader message="Loading..." theme={theme} />}>
                     <GuestMusic route={guest} onWallet={() => setGuest(null)} />
                   </Suspense>
                 )}
@@ -169,7 +169,7 @@ export const App = () => {
                           <Route
                             path="/browser"
                             element={
-                              <Suspense fallback={null}>
+                              <Suspense fallback={<PageLoader message="Loading..." theme={theme} />}>
                                 <BrowserPage />
                               </Suspense>
                             }

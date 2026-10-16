@@ -693,7 +693,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       '<Route path="/settings" element={<Settings />} />',
-      '<Route path="/settings" element={<Settings />} />\n<Route path="/m/*" element={<Suspense fallback={null}><MobileRoutes /></Suspense>} />',
+      '<Route path="/settings" element={<Settings />} />\n<Route path="/m/*" element={<Suspense fallback={<PageLoader message="Loading..." theme={theme} />}><MobileRoutes /></Suspense>} />',
     ],
     // Media (Wallet › NFTs) now-playing bar, app-wide so audio controls follow every tab.
     // bWallet calls: incoming / in-call screens above every tab (mobile/calls/CallScreen).
