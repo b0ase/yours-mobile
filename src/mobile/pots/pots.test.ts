@@ -122,7 +122,7 @@ describe('funds', () => {
     expect(amountSats({ value: 5, currency: 'USD' }, 50)).toBe(10_000_000);
     expect(amountSats({ value: 5, currency: 'USD' }, 0)).toBeNull();
     expect(amountSats({ value: 1234, currency: 'SAT' }, 0)).toBe(1234);
-    expect(amountSats({ value: 1, currency: 'PNEE' }, 50)).toBeNull();
+    expect(amountSats({ value: 100, currency: 'PNEE' }, 50)).toBeNull();
   });
   test('potCovers pays in due order across orders; low funds below 2', () => {
     const a = sub({ id: 'a', amount: { value: 1000, currency: 'SAT' }, period: 'day', start: 0 });
