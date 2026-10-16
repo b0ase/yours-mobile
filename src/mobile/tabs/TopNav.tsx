@@ -19,7 +19,6 @@ import {
   ChevronRight,
   Lock,
   LogOut,
-  Menu,
   Phone,
   Play,
   Plus,
@@ -54,6 +53,7 @@ import { HandleFlow } from '../names/HandleFlow';
 
 const BavatarMintSheet = lazy(() => import('../bavatar/BavatarMintSheet'));
 import { useLocation, useNavigate } from 'react-router-dom';
+import { MenuAvatarButton } from './MenuAvatarButton';
 import { WIDE_ON, WW_OPEN, type WwOpen } from '../wide/flag';
 
 /**
@@ -334,14 +334,12 @@ const TopNavBar = () => {
             className="grid grid-cols-5 items-center justify-items-center fixed top-0 w-full z-10 px-2 h-14"
             style={{ backgroundColor: BAR_BG ?? theme.color.global.walletBackground, top: 'var(--wallet-inset-top)' }}
           >
-            <button
-              type="button"
-              onClick={() => setDrawer(true)}
-              className="w-9 h-9 flex items-center justify-center bg-transparent"
-              aria-label="Accounts menu"
-            >
-              <Menu size={22} color={ICON} />
-            </button>
+            <MenuAvatarButton
+              identityAddress={current}
+              ring={RING}
+              onOpen={() => setDrawer(true)}
+              onLongPress={() => setSheet('accounts')}
+            />
             <button
               type="button"
               aria-label="Calls"
@@ -402,14 +400,12 @@ const TopNavBar = () => {
           className="grid grid-cols-5 items-center fixed top-0 w-full z-10 px-2 h-14 justify-items-center"
           style={{ backgroundColor: BAR_BG ?? theme.color.global.walletBackground, top: 'var(--wallet-inset-top)' }}
         >
-          <button
-            type="button"
-            onClick={() => setDrawer(true)}
-            className="w-9 h-9 flex items-center justify-center bg-transparent"
-            aria-label="Accounts menu"
-          >
-            <Menu size={22} color={ICON} />
-          </button>
+          <MenuAvatarButton
+            identityAddress={current}
+            ring={RING}
+            onOpen={() => setDrawer(true)}
+            onLongPress={() => setSheet('accounts')}
+          />
           <button
             type="button"
             aria-label="Calls"
