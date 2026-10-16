@@ -1,5 +1,5 @@
 import * as bip39 from 'bip39';
-import { AGENT_HANDOFF_EVENT, setAgentDraft } from '../agent/handoff';
+import { setAgentVoice } from '../agent/handoff';
 
 /**
  * Every error the wallet shows gets "Copy" and "Ask b" (owner, 10 Oct 2026). Ask b opens the b agent
@@ -62,7 +62,7 @@ export const redactSecrets = (text: string): string =>
       .replace(MONEY, '[amount]'),
   ).slice(0, 1200);
 
-export type ErrorContext = { screen?: string; version?: string; edition?: string };
+export type ErrorContext = { screen?: string; version?: string; edition?: string; channel?: string; time?: string };
 
 export const errorContext = (): ErrorContext => {
   let version = 'dev';
@@ -71,6 +71,21 @@ export const errorContext = (): ErrorContext => {
   } catch {
     /* not the extension */
   }
+  try {
+    if (version === 'dev' && typeof __BUILD_COMMIT__ === 'string' && __BUILD_COMMIT__)
+      version = `dev ${__BUILD_COMMIT__}`;
+  } catch {
+    /* not stamped (tests) */
+  }
+  let channel = '';
+  try {
+    channel = import.meta.env?.VITE_CHANNEL ?? '';
+  } catch {
+    /* no env */
+  }
+  const g = globalThis as { Capacitor?: { getPlatform?: () => string } };
+  const native = g.Capacitor?.getPlatform?.();
+  if (!channel) channel = native && native !== 'web' ? native : version.startsWith('dev') ? 'web' : 'extension';
   let edition = 'bWalletX';
   try {
     if (/bwallet\b/i.test(document.title) && !/bwalletx/i.test(document.title)) edition = 'bWallet';
@@ -83,30 +98,33 @@ export const errorContext = (): ErrorContext => {
   } catch {
     /* unknown */
   }
-  return { screen, version, edition };
+  return { screen, version, edition, channel, time: new Date().toISOString() };
 };
+
+const contextLine = (ctx: ErrorContext): string =>
+  [
+    ctx.screen && `Screen: ${ctx.screen}`,
+    ctx.version && `Version: ${ctx.version}`,
+    ctx.edition && `Edition: ${ctx.edition}`,
+    ctx.channel && `Channel: ${ctx.channel}`,
+    ctx.time && `Time: ${ctx.time}`,
+  ]
+    .filter(Boolean)
+    .map((part) => redactSecrets(part as string))
+    .join(' · ');
 
 /** The text Copy puts on the clipboard: the error plus where it happened, redacted. */
 export const errorReportText = (error: string, ctx: ErrorContext = errorContext()): string => {
-  const where = [
-    ctx.screen && `Screen: ${ctx.screen}`,
-    ctx.version && `Version: ${ctx.version}`,
-    ctx.edition && `Edition: ${ctx.edition}`,
-  ]
-    .filter(Boolean)
-    .join(' · ');
+  const where = contextLine(ctx);
   return `${redactSecrets(error)}${where ? `\n${where}` : ''}`;
 };
 
-/** b's first message: what went wrong, where, and the question. */
+/**
+ * b's first message: a bug report. It starts with "Bug report:" so b logs it with the platform
+ * (bit-sign lib/b-feedback.ts, the b bug loop) as well as explaining the error and how to fix it.
+ */
 export const askBMessage = (error: string, ctx: ErrorContext = errorContext()): string =>
-  `I got this error in bWalletX:\n"${redactSecrets(error)}"\n${[
-    ctx.screen && `Screen: ${ctx.screen}`,
-    ctx.version && `Version: ${ctx.version}`,
-    ctx.edition && `Edition: ${ctx.edition}`,
-  ]
-    .filter(Boolean)
-    .join(' · ')}\nWhat does it mean and how do I fix it?`;
+  `Bug report: I got this error in bWalletX.\nError: "${redactSecrets(error)}"\n${contextLine(ctx)}\nPlease log this as a bug report, then tell me what it means and how to fix it.`;
 
 // ── Navigation to b: the snackbar lives outside the router, so a bridge inside it registers navigate. ──
 let navigateTo: ((path: string) => void) | null = null;
@@ -125,10 +143,12 @@ const currentScreen = () => (screenOf ? screenOf() : '');
 
 export const AGENT_PATH = '/m/ask-b';
 
-/** Open b with the error typed in (the person still presses send). */
+/**
+ * Open b with the bug report attached and sent: the same path as hold-to-talk (setAgentVoice), so b's page
+ * sends it through its normal send(), which still shows the consent sheet / price confirm when needed.
+ */
 export const askB = (error: string) => {
-  setAgentDraft(askBMessage(error));
-  queueMicrotask(() => window.dispatchEvent(new Event(AGENT_HANDOFF_EVENT)));
+  setAgentVoice(askBMessage(error));
   navigateTo?.(AGENT_PATH);
 };
 
