@@ -2,8 +2,8 @@
  * One bApp icon, drawn for a given pixel size: a black tile, the glyph (or a fallback initial) in the
  * app colour, and the b (the real flag-top b from logo.svg) on its own in the top-right corner, in the
  * same app colour with a light-to-deep gradient and a thin dark outline so it reads over the glyph. No
- * disc or ring. The layout is size-aware: below 64px the b grows (~32% of the tile at 64px, ~43% at
- * 28px), the glyph's strokes thicken, and the glyph shrinks and shifts down-left. Every def id is
+ * disc or ring. The b is kept small and quiet (minimal set, 16 Oct 2026); below 64px it grows a little
+ * (24% of the tile at 64px, ~32% at 28px), the glyph's single thin stroke thickens slightly, and the glyph shrinks and shifts down-left. Every def id is
  * unique per icon, size and render, so many icons can share one document. 64-unit viewBox.
  */
 import { GLYPHS, type GlyphSlug } from './glyphs';
@@ -19,7 +19,7 @@ const esc = (s: string) => s.replace(/[<>&"']/g, (c) => `&#${c.charCodeAt(0)};`)
 /** The layout numbers for a pixel size (exported for tests). */
 export const layout = (size: number) => {
   const t = clamp01((64 - size) / 44); // 0 at 64px+, 1 at 20px and below
-  const h = (0.32 + 0.14 * t) * 64; // the b's height: ~32% of the tile at 64px, ~43% at 28px, 46% at 20px
+  const h = (0.24 + 0.1 * t) * 64; // the b's height: 24% of the tile at 64px, ~32% at 28px, 34% at 20px (subtle)
   const w = h * 0.74; // logo.svg viewBox is 74 × 100
   const inset = 4 - 2 * t;
   const px = 64 / Math.max(size, 1); // viewBox units per screen pixel
@@ -27,7 +27,8 @@ export const layout = (size: number) => {
     t,
     // outline: a thin dark edge (about 1px on screen) so the b reads over the glyph, in the b's own units
     badge: { x: 64 - inset - w, y: inset, w, h, outline: 2 * 1.1 * px * (100 / h) },
-    glyph: { scale: 1.25 - 0.2 * t, shift: 3.5 * t, stroke: 2 + 0.7 * t },
+    // one thin stroke: 1.5 units on the 24 grid (≈1.5px at 24px), a touch heavier at the smallest sizes
+    glyph: { scale: 1.2 - 0.15 * t, shift: 2 * t, stroke: 1.5 + 0.4 * t },
   };
 };
 
@@ -71,10 +72,10 @@ export type IconLook = {
 const badge = (size: number, color: string, id: string, look: IconLook = null) => {
   if (look?.mono) {
     const { badge: b } = layout(size);
-    const sw = r(Math.max(b.outline * 1.4, 5));
+    const sw = r(Math.max(b.outline * 0.6, 3)); // a hairline outline b (about 1px on screen)
     return (
       `<svg x="${r(b.x)}" y="${r(b.y)}" width="${r(b.w)}" height="${r(b.h)}" viewBox="23 8 74 100" overflow="visible">` +
-      `<g fill="none" stroke="${esc(look.ink)}" stroke-width="${sw}" stroke-linejoin="round"><polygon points="45,12 45,76 27,76 27,30"/><circle cx="60" cy="72" r="31"/><circle cx="60" cy="72" r="15"/></g></svg>`
+      `<g fill="none" stroke="${esc(look.ink)}" stroke-opacity=".7" stroke-width="${sw}" stroke-linejoin="round"><polygon points="45,12 45,76 27,76 27,30"/><circle cx="60" cy="72" r="31"/><circle cx="60" cy="72" r="15"/></g></svg>`
     );
   }
   const k = look ? { top: look.hi, mid: look.ink, bottom: look.lo } : badgeColors(color);

@@ -6,7 +6,7 @@
 import { MARKET_ENABLED } from './storeBuild';
 import type { BApp } from './bapps';
 import type { RadarApp } from './radarApps';
-import app_bexchangeIcon from './brand/apps/bexchange.png';
+import { bappIconUrl } from './brand/bappIcons';
 import r_3dordiio from './brand/apps/radar/3dordiio.png';
 import r_zoide from './brand/apps/radar/zoide.png';
 import r_mintpage from './brand/apps/radar/mintpage.png';
@@ -32,7 +32,7 @@ export const EXCHANGE_BAPPS: BApp[] = MARKET_ENABLED
         verb: 'Trade tokens across exchanges',
         group: 'social',
         status: 'live',
-        icon: app_bexchangeIcon,
+        icon: bappIconUrl('bexchange'),
         source: 'https://github.com/bitcoin-apps-suite/bitcoin-exchange',
       },
     ]

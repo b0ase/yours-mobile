@@ -1,5 +1,4 @@
 import { BAPPS as WALLET_BAPPS } from '../bapps';
-import bvideoIcon from '../brand/bvideo-icon.png';
 import tokenblasterIcon from '../brand/apps/tokenblaster.png';
 import { TOKENBLASTER_ENABLED } from '../storeBuild';
 import { useThemedIcon } from '../brand/bappIcons';
@@ -54,8 +53,8 @@ export const BAPPS: Bapp[] = [
     mono: 'bD',
     newTab: true,
   },
-  { id: 'bvideo', name: 'Bitcoin Video', icon: bvideoIcon, mono: 'bV', soon: true },
-  { id: 'bchatx', name: 'bChatX', url: 'https://bchatx.com', icon: ico('bChat'), mono: 'bC', newTab: true },
+  { id: 'bvideo', name: 'Bitcoin Video', icon: ico('bVideo'), mono: 'bV', soon: true },
+  { id: 'bchatx', name: 'bChatX', url: 'https://bchatx.com', icon: ico('bChatX'), mono: 'bC', newTab: true },
   // Never in a store build (storeBuild.ts TOKENBLASTER_ENABLED folds the entry and its icon out).
   ...(TOKENBLASTER_ENABLED
     ? [
