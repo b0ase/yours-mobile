@@ -1334,6 +1334,7 @@ input:-webkit-autofill {
 }
 :root[data-bw-pack='light'] .bw-room-list {
   background: var(--bw-pack-bg) !important;
+}
 
 /* Unread count badges (tab bar, chat filter chips, chat rows) are always red with white bold text, in every theme
    and pack: the colour never comes from the accent. */
