@@ -191,6 +191,37 @@ describe('pay to speak: error mapping', () => {
   });
 });
 
+describe('pay to speak: error codes', () => {
+  it('maps every bit-sign code, ahead of the text', () => {
+    const keep = [
+      'unauthenticated',
+      'rate_limited',
+      'not_seen',
+      'broadcast_failed',
+      'internal',
+      'stage_full',
+      'not_joined',
+    ];
+    const drop = ['underpaid', 'no_memo', 'txid_used', 'space_ended', 'quote_expired', 'quote_invalid'];
+    for (const code of keep) expect(claimErrorFor(409, { code, error: 'txid used' }).action).toBe('retry');
+    for (const code of drop) expect(claimErrorFor(409, { code, error: 'stage full' }).action).toBe('drop');
+    expect(claimErrorFor(402, { code: 'underpaid', reasons: ['short'] }).message).toMatch(/less/);
+  });
+
+  it('a stage_full claim keeps the payment', async () => {
+    const out = await claimPending(
+      { speakQuote: async () => ({}), speakClaim: async () => Promise.reject(err(409, { code: 'stage_full' })) },
+      pend,
+      { wait: async () => undefined, kv: memKV() },
+    );
+    expect(!out.ok && out.failure.action).toBe('retry');
+  });
+
+  it('a 200 quote with enabled:false and a code hides the button', () => {
+    expect(parseSpeakQuote({ enabled: false, reason: 'stage full', code: 'stage_full' }).enabled).toBe(false);
+  });
+});
+
 describe('pay to speak: store build', () => {
   it('is gated by a literal env check and lazy-loaded', () => {
     const src = readFileSync(new URL('./paySpeak.ts', import.meta.url), 'utf8');

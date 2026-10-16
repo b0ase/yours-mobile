@@ -178,7 +178,33 @@ const codeOf = (data: unknown): string => {
   return String(d.code ?? d.error ?? d.reason ?? '').toLowerCase();
 };
 
+const KEEP = (message: string): ClaimFailure => ({ message, action: 'retry' });
+const DROP = (message: string): ClaimFailure => ({ message, action: 'drop' });
+
+/** bit-sign #289's machine `code` in every error body. */
+const BY_CODE: Record<string, ClaimFailure> = {
+  unauthenticated: KEEP('Sign in to bChat again, then retry. Your payment is kept.'),
+  rate_limited: KEEP('Too many tries. Waiting a moment…'),
+  room_not_found: KEEP('bChat couldn’t find this room. Your payment is kept; retry later.'),
+  bad_tx: KEEP('The payment could not be read. Try again.'),
+  not_seen: KEEP('The network hasn’t seen your payment yet. Retrying…'),
+  broadcast_failed: KEEP('bChat couldn’t broadcast the payment just now. Retrying…'),
+  internal: KEEP('bChat had a problem. Your payment is kept; retrying…'),
+  not_enabled: KEEP('Pay to speak is off in this Space right now. Your payment is kept.'),
+  stage_full: KEEP('The stage is full. Your payment is kept; retry when a seat opens.'),
+  not_joined: KEEP('Join the Space first, then retry. Your payment is kept.'),
+  space_ended: DROP('This Space has ended.'),
+  quote_expired: DROP('That quote has expired.'),
+  quote_invalid: DROP('That quote isn’t valid.'),
+  txid_used: DROP('That payment has already bought a seat.'),
+  underpaid: DROP('The payment was less than the price.'),
+  no_memo: DROP('The payment had no memo, so it can’t buy a seat.'),
+};
+
 export function claimErrorFor(status: number, data: unknown): ClaimFailure {
+  const code = String(obj(data).code ?? '').toLowerCase();
+  if (BY_CODE[code]) return BY_CODE[code];
+  // Fallback for bodies without a code: match the status and text.
   const c = codeOf(data);
   switch (status) {
     case 400:
