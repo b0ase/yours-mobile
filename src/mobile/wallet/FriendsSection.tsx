@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
+import { X_FOLLOWS_IMPORT_ENABLED } from '../storeBuild';
 import { heldBsv21Balances } from '../airdrops/heldBalances';
 import { type Bsv21Balance } from '@1sat/actions';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -21,6 +22,11 @@ import type { Contact } from '../chat/contacts';
 import { ContactCard } from './ContactCard';
 
 const f = (u: string, i?: RequestInit) => fetch(u, i);
+
+// Off by default (VITE_X_FOLLOWS_IMPORT=1): waits on bit-sign #295 and the owner's cost decision.
+const XFollowsImport = X_FOLLOWS_IMPORT_ENABLED
+  ? lazy(() => import('./XFollowsImport').then((m) => ({ default: m.XFollowsImport })))
+  : null;
 
 /**
  * Wallet › Friends (owner, 4 Oct 2026): the one address book (Calls friends, bChat contacts, Feed
@@ -120,6 +126,22 @@ export const FriendsSection = () => {
           <UserPlus size={16} />
         </button>
       </form>
+      {XFollowsImport && (
+        <Suspense fallback={null}>
+          <XFollowsImport
+            onInviteRest={
+              me
+                ? () => {
+                    // Open Drops live in your room › Invites (chat/XInvitesSheet).
+                    const key = tokenKey('bsv21', me.tokenId);
+                    if (key) requestChatRoom(key);
+                    handleSelect(asMenuItem('chat'));
+                  }
+                : null
+            }
+          />
+        </Suspense>
+      )}
       {msg && (
         <p className="text-xs m-0" style={{ color: '#98A2B3' }}>
           {msg}
