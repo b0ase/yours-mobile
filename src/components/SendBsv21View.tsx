@@ -1,5 +1,5 @@
 import validate from 'bitcoin-address-validation';
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { useServiceContext } from '../hooks/useServiceContext';
 import { useSnackbar } from '../hooks/useSnackbar';
 import { useTheme } from '../hooks/useTheme';
@@ -49,6 +49,10 @@ import { cleanNote, noteOutput, withExtraOutput } from '../mobile/airdrops/note'
 import { celebrateSend } from './sent/sent';
 import { P2PKH } from '@bsv/sdk';
 import { maxOverlayFee, withTokenSendGuard, type OverlayFee } from '../mobile/wallet/send/tokenFee';
+import { HOLDER_DROP_ENABLED } from '../mobile/storeBuild';
+
+// Issuer tools › Airdrop to holders: bWalletX only, a lazy chunk the store build drops (storeBuild.ts).
+const HolderDropSheet = HOLDER_DROP_ENABLED ? lazy(() => import('../mobile/holderDrop/HolderDropSheet')) : null;
 
 export interface Token {
   isConfirmed: boolean;
@@ -121,6 +125,7 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
   const sentAtomicRef = useRef<bigint>(0n);
   const [copied, setCopied] = useState(false);
   const [selling, setSelling] = useState(false);
+  const [dropping, setDropping] = useState(false);
   // Recipient fields stay hidden until the owner taps Send (owner, 5 Oct 2026).
   const [composing, setComposing] = useState(!!prefill);
   // Airdrop note (src/mobile/airdrops/note.ts): optional, written on chain in the same tx.
@@ -645,6 +650,22 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
             <TokenIndexButton tokenId={token.info.id!} ticker={tokenName} />
           </Show>
 
+          {HOLDER_DROP_ENABLED && HolderDropSheet && !!token.info.id && (
+            <div className="mx-4 mb-4 flex items-center justify-between gap-2 rounded-2xl px-4 py-3" style={{ background: row }}>
+              <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: '#98A2B3' }}>
+                Issuer tools
+              </span>
+              <button
+                type="button"
+                onClick={() => setDropping(true)}
+                className="rounded-lg px-3 py-1.5 text-xs font-bold border-0 cursor-pointer"
+                style={{ background: 'rgb(var(--bw-accent-rgb)/0.13)', color: 'var(--bw-accent)' }}
+              >
+                Airdrop to holders
+              </button>
+            </div>
+          )}
+
           {/* Send form */}
           <form noValidate onSubmit={(e) => handleSendBSV21(e)} className="flex flex-col w-full px-4 gap-3">
             {composing && (<>
@@ -828,6 +849,15 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
         onConfirm={() => sendConfirmation?.onConfirm()}
         onCancel={() => setSendConfirmation(null)}
       />
+      {HOLDER_DROP_ENABLED && HolderDropSheet && dropping && token.info.id && (
+        <Suspense fallback={null}>
+          <HolderDropSheet
+            token={{ id: token.info.id, dec: token.info.dec, symbol: tokenName }}
+            heldRaw={maxAmount}
+            onClose={() => setDropping(false)}
+          />
+        </Suspense>
+      )}
       {SELL_ENABLED && selling && token && (
         <SellSheet
           target={{ tokenId: token.info.id, symbol: getTokenName(token.info), dec: token.info.dec, heldRaw: maxAmount }}
