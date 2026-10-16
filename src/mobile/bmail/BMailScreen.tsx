@@ -51,6 +51,7 @@ import {
   EXAMPLE_SWIPE,
   EXAMPLES,
   EXAMPLES_BELOW,
+  examplesAllowed,
   examplesHidden,
   filterExamples,
   fmtCents,
@@ -81,6 +82,7 @@ import { PULL_THRESHOLD, usePullToRefresh } from './usePullToRefresh';
 import { BMAIL_OFFLINE_ACTION, friendlyMailError } from './friendlyError';
 import { ErrorActions } from '../errors/ErrorActions';
 import { APP_NAME } from '../storeBuild';
+import { isNative } from '../native';
 
 const MUTED = '#98A2B3';
 const GOLD = 'var(--bw-accent-hi)';
@@ -901,7 +903,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
     m.state.received.map((r) => r.from),
     m.state.sent,
   );
-  const showEx = !hideEx && m.state.received.length + m.state.sent.length < EXAMPLES_BELOW;
+  const showEx = examplesAllowed(isNative) && !hideEx && m.state.received.length + m.state.sent.length < EXAMPLES_BELOW;
   const hideExamples = () => {
     setExamplesHidden(true);
     setHideEx(true);
