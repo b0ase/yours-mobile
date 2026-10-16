@@ -150,8 +150,8 @@ export const BAPPS: BApp[] = [
   },
   {
     name: 'bMail',
-    url: 'https://bitcoin-email.vercel.app',
-    noFrame: true,
+    // In the wallet (bmail/BMailScreen.tsx), not the bitcoin-email site: a path opens by route (BrowserPage bappTile).
+    url: '/m/bmail',
     verb: 'Send email that pays and gets paid',
     group: 'work',
     status: 'live',
