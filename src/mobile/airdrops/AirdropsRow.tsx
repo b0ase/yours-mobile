@@ -15,7 +15,12 @@ import { BALANCE_CARDS_ENABLED } from '../storeBuild';
 // Owner, 16 Oct 2026: [Addresses] [square] [Airdrops], content-sized and centred as a group (no flex-grow), all
 // h-12. The border colour is a theme variable: an inline hex beat every theme override, so White/Gold never changed it.
 const PILL = 'shrink-0 h-12 flex items-center gap-2 rounded-2xl px-4 border cursor-pointer';
-const LOOK = { background: 'var(--bw-surface)', borderColor: 'var(--bw-line, #2b2f36)', borderWidth: 1, borderStyle: 'solid' as const };
+const LOOK = {
+  background: 'var(--bw-surface)',
+  borderColor: 'var(--bw-line, #2b2f36)',
+  borderWidth: 1,
+  borderStyle: 'solid' as const,
+};
 const LABEL = 'whitespace-nowrap text-sm font-semibold text-white';
 
 // bWalletX only: the All cards browser lives in the balance carousel, which the store build leaves out, so the
