@@ -494,3 +494,14 @@ export const THEME_ORDERS_ENABLED: boolean = !(
   import.meta.env.VITE_CHANNEL === 'ios-store' ||
   import.meta.env.VITE_CHANNEL === 'android-play'
 );
+
+/**
+ * Theme Store tabs beyond Free (16 Oct 2026, docs/THEME-STORE-PLAN.md): Premium (prices), Holders (token-gated
+ * unlocks) and Editions (the $99 order link). Owner: store builds show Free themes only. `themeStore/PaidTabs.tsx`
+ * is a lazy chunk behind this literal env check, so the store bundle has none of its text. Same env as STORE_BUILD.
+ */
+export const THEME_STORE_PAID_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);

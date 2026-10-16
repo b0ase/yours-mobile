@@ -73,6 +73,8 @@ const BmintPage = lazy(() => import('../bmint/BmintPage'));
 const BsharesPage = PLACEMENT_ENABLED ? lazy(() => import('../placement/BsharesPage')) : null;
 // The Name Store (/m/names, public /names): search, buy, claim and give names (names/store/).
 const NameStorePage = lazy(() => import('../names/store/NameStorePage'));
+// Theme Store (/m/store, themeStore/): Free themes; bWalletX also Premium, Holders, Editions (THEME_STORE_PAID_ENABLED).
+const ThemeStorePage = lazy(() => import('../themeStore/ThemeStorePage'));
 // /names/store: the shop's stock (listed by tier, other sellers, held unlisted), names/store/StockPage.tsx.
 const StockPage = MARKET_ENABLED ? lazy(() => import('../names/store/StockPage')) : null;
 const ToOpnsMint = () => <Navigate to={`/m/bmint/opns${useLocation().search}`} replace />;
@@ -112,6 +114,7 @@ const MobileRoutes = () => (
         {BsharesPage && <Route path="bshares" element={<BsharesPage />} />}
         <Route path="opns-mint" element={<ToOpnsMint />} />
         <Route path="names" element={<NameStorePage />} />
+        <Route path="store" element={<ThemeStorePage />} />
         {StockPage && <Route path="names/store" element={<StockPage />} />}
         <Route path="calls" element={<CallsPage />} />
         <Route path="notifications" element={<NotificationsPage />} />

@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { Link } from 'react-router-dom';
 import { Check, Dices, Moon, Palette, Shuffle, SlidersHorizontal, Sun, X } from 'lucide-react';
 import {
   DEFAULT_ACCENT,
@@ -260,6 +261,11 @@ function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNo
       </div>
       <p className="bw-cdes-note">
         Packs restyle the whole app; Accent only keeps Gold&apos;s black. Kept for this account on this device.
+      </p>
+      <p className="bw-theme-more">
+        <Link to="/m/store" onClick={onClose} style={{ color: 'var(--bw-accent)' }}>
+          More in the Theme Store
+        </Link>
       </p>
       {THEME_ORDERS_ENABLED && ThemeOrderSheet && (
         <p className="bw-theme-more">
