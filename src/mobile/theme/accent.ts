@@ -11,6 +11,7 @@ import {
   type AccentId,
 } from './accents';
 import { deriveMix, normaliseMix, type MixSpec } from './mixer';
+import { accentOfPack, parseThemePack, type ThemePack } from './themePack';
 
 /**
  * Applies and stores the app accent (Theme → App colours). Per account on this device only, nothing leaves it.
@@ -21,6 +22,9 @@ const BOOT_KEY = 'bwx.accent.boot';
 const keyFor = (account: string) => `bwx.accent.${account}`;
 const MIX_BOOT_KEY = 'bwx.mix.boot';
 const mixKeyFor = (account: string) => `bwx.mix.${account}`;
+// A store pack that is not bundled (holder / premium, docs/THEME-STORE-PLAN.md): kept as its validated JSON.
+const PACK_BOOT_KEY = 'bwx.pack.boot';
+const packKeyFor = (account: string) => `bwx.pack.${account}`;
 export const ACCENT_EVENT = 'bwx-accent';
 
 let applied: AccentId = DEFAULT_ACCENT;
@@ -161,11 +165,24 @@ const readMix = (k: string): MixSpec | null => {
 };
 /** Loads a mix into the 'custom' pack so accentById('custom') can paint it. */
 const primeMix = (m: MixSpec | null) => setCustomAccent(m ? deriveMix(m) : null);
+const readPack = (k: string): ThemePack | null => {
+  try {
+    const v = read(k);
+    return v ? parseThemePack(JSON.parse(v)) : null;
+  } catch {
+    return null;
+  }
+};
+/** 'custom' is the mix when there is one, otherwise a saved store pack. */
+const primeCustom = (m: MixSpec | null, p: ThemePack | null) => {
+  if (m) primeMix(m);
+  else setCustomAccent(p ? accentOfPack(p) : null);
+};
 
 /** Startup: paint the last-used accent before the first frame. */
 export const applyBootAccent = (): AccentId => {
   applyThemeParam();
-  primeMix(readMix(MIX_BOOT_KEY));
+  primeCustom(readMix(MIX_BOOT_KEY), readPack(PACK_BOOT_KEY));
   return applyAccent(read(BOOT_KEY));
 };
 
@@ -184,10 +201,12 @@ export function switchToAccountAccent(account: string): AccentId {
     write(URL_PENDING_KEY, null);
   }
   const m = readMix(account ? mixKeyFor(account) : MIX_BOOT_KEY);
-  primeMix(m);
+  const pk = m ? null : readPack(account ? packKeyFor(account) : PACK_BOOT_KEY);
+  primeCustom(m, pk);
   const id = applyAccent(account ? read(keyFor(account)) : read(BOOT_KEY));
   write(BOOT_KEY, id === DEFAULT_ACCENT ? null : id);
   write(MIX_BOOT_KEY, id === 'custom' && m ? JSON.stringify(m) : null);
+  write(PACK_BOOT_KEY, id === 'custom' && pk ? JSON.stringify(pk) : null);
   if (id !== before) announce();
   return id;
 }
@@ -198,7 +217,22 @@ export function saveMix(account: string, mix: MixSpec): void {
   const json = JSON.stringify(m);
   if (account) write(mixKeyFor(account), json);
   write(MIX_BOOT_KEY, json);
+  if (account) write(packKeyFor(account), null);
+  write(PACK_BOOT_KEY, null);
   primeMix(m);
+  saveAccent(account, 'custom');
+}
+
+/** Saves and applies a store pack that is not bundled (it becomes the account's 'custom' pack; any mix is dropped). */
+export function saveStorePack(account: string, pack: ThemePack): void {
+  const json = JSON.stringify(pack);
+  if (account) {
+    write(packKeyFor(account), json);
+    write(mixKeyFor(account), null);
+  }
+  write(PACK_BOOT_KEY, json);
+  write(MIX_BOOT_KEY, null);
+  setCustomAccent(accentOfPack(pack));
   saveAccent(account, 'custom');
 }
 

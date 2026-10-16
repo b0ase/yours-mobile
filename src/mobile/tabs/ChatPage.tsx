@@ -30,6 +30,7 @@ import {
   WifiOff,
   X,
   Loader2,
+  Store,
 } from 'lucide-react';
 import { sendBsv, sendBsv21, type Bsv21Balance } from '@1sat/actions';
 import { SendBsv21View } from '../../components/SendBsv21View';
@@ -102,6 +103,8 @@ import {
   TypingRow,
 } from '../chat/BubbleExtras';
 import { BDraftCard, BDraftSheet } from '../chat/BDraftCard';
+import { AiLabel, BusinessSheet, OrderCard } from '../chat/BusinessAgentViews';
+import { isBusinessAgentMessage, orderCardInfo, orderStatuses, useBusinessPresence } from '../chat/businessAgent';
 import { bDraftInfo, canAskBDraft } from '../chat/bDraft';
 import { AttachButton, MessageVideo, RoomMediaBubble } from '../chat/RoomMedia';
 import { mediaPayload } from '../chat/roomMediaInfo';
@@ -360,6 +363,13 @@ const Conversation = ({
   autoJoinSpace?: boolean;
 }) => {
   const bountyBadge = useBountyBadge(client, room.ticker, me);
+  // Business agent (bit-sign lib/business-agent.ts): the shop button for its customers and the host's setup.
+  const hasBusiness = useBusinessPresence(
+    client,
+    room.ticker,
+    String((room as { created_by_handle?: unknown }).created_by_handle ?? '') === me,
+  );
+  const [bizOpen, setBizOpen] = useState(false);
   const title = entryTitle(entry, room) ?? roomTitle(room, me);
   useBackClose(true, onBack);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -686,6 +696,7 @@ const Conversation = ({
     return threadItems(hidden?.size ? shown.filter((m) => !hidden.has(m.id)) : shown, me);
   }, [messages, me, hidden, blockTick]); // eslint-disable-line react-hooks/exhaustive-deps
   const reactions = useMemo(() => reactionsByMessage(messages), [messages]);
+  const orderStatus = useMemo(() => orderStatuses(messages), [messages]);
   const direct = false;
   const members = room.party_count ?? entry?.members ?? 0;
   // Bubble avatars (chat/avatars.ts) and "$b is thinking…" under /b questions not yet answered.
@@ -717,7 +728,7 @@ const Conversation = ({
       }}
     >
       <div
-        className="flex items-center gap-3 px-2 pb-2 shrink-0"
+        className="bw-room-head flex items-center gap-3 px-2 pb-2 shrink-0"
         style={{
           paddingTop: 8,
           background: 'linear-gradient(180deg, #16140c 0%, #0b0b0b 100%)',
@@ -752,6 +763,15 @@ const Conversation = ({
           <button onClick={onBans} className="p-2 rounded-full active:opacity-60" aria-label="Room settings">
             {/* Gold for the room's issuer (known once set-up was offered), so they can find their controls. */}
             <Settings size={18} color={['done', 'later'].includes(roomSetupState(room.ticker) ?? '') ? GOLD : MUTED} />
+          </button>
+        )}
+        {hasBusiness && (
+          <button
+            onClick={() => setBizOpen(true)}
+            className="p-2 rounded-full active:opacity-60"
+            aria-label="Business agent and orders"
+          >
+            <Store size={19} color={GOLD} />
           </button>
         )}
         {onBounties && (
@@ -856,7 +876,7 @@ const Conversation = ({
       <div
         ref={scroller}
         onScroll={onScroll}
-        className="flex-1 overflow-y-auto px-3 py-2"
+        className="bw-room-list flex-1 overflow-y-auto px-3 py-2"
         style={{ background: 'radial-gradient(120% 60% at 50% 0%, #15130b 0%, #050505 60%)' }}
       >
         {loadingOlder && (
@@ -917,6 +937,16 @@ const Conversation = ({
                 <div className="whitespace-pre-line break-words">{it.message.body}</div>
               </div>
             </div>
+          ) : orderCardInfo(it.message) ? (
+            <OrderCard
+              key={it.key}
+              info={orderCardInfo(it.message)!}
+              status={orderStatus.get(orderCardInfo(it.message)!.orderId) ?? 'proposed'}
+              client={client}
+              ticker={room.ticker}
+              me={me}
+              onChanged={poll}
+            />
           ) : bDraftInfo(it.message) ? (
             <BDraftCard
               key={it.key}
@@ -985,6 +1015,11 @@ const Conversation = ({
                           context={{ kind: 'room', room: room.ticker, message: it.message.id }}
                         />
                       )}
+                    </div>
+                  )}
+                  {isBusinessAgentMessage(it.message) && (
+                    <div className="mb-[3px]">
+                      <AiLabel />
                     </div>
                   )}
                   {replyOf(it.message) && <ReplyQuote reply={replyOf(it.message)!} mine={it.mine} />}
@@ -1131,6 +1166,7 @@ const Conversation = ({
       {drafting && (
         <BDraftSheet client={client} ticker={room.ticker} onClose={() => setDrafting(false)} onPosted={poll} />
       )}
+      {bizOpen && <BusinessSheet client={client} ticker={room.ticker} me={me} onClose={() => setBizOpen(false)} />}
       {openRoom?.closed ? (
         <div
           className="px-4 pt-3 text-center text-xs shrink-0"

@@ -780,3 +780,29 @@ describe('THEME_ORDERS_ENABLED: Get your own theme ($99 a year to bCorp) is bWal
     expect(src('../pages/Settings.tsx')).not.toMatch(/^import .*themeOrder/m);
   });
 });
+
+describe('THEME_STORE_PAID_ENABLED: store builds show Free themes only', () => {
+  const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  const cond = (text: string, name: string) =>
+    (new RegExp(`export const ${name}: boolean =\\s*!?\\(?([^;]*?)\\)?;`, 's').exec(text)?.[1] ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  test('inverse of STORE_BUILD, from the same env', async () => {
+    const { THEME_STORE_PAID_ENABLED } = await import('./storeBuild');
+    expect(THEME_STORE_PAID_ENABLED).toBe(!STORE_BUILD);
+    const s = src('./storeBuild.ts');
+    expect(cond(s, 'THEME_STORE_PAID_ENABLED')).toBe(cond(s, 'STORE_BUILD'));
+  });
+  test('Premium, Holders and Editions are only a lazy chunk behind the flag', () => {
+    const page = src('./themeStore/ThemeStorePage.tsx');
+    expect(page).toContain("THEME_STORE_PAID_ENABLED ? lazy(() => import('./PaidTabs')) : null");
+    expect(page).not.toMatch(/^import .*PaidTabs/m);
+    expect(page).not.toMatch(/Coming soon|\$99|Unlocks for/);
+  });
+  test('bStore paid sections are only a lazy chunk behind the flag', () => {
+    const page = src('./themeStore/ThemeStorePage.tsx');
+    expect(page).toContain("THEME_STORE_PAID_ENABLED ? lazy(() => import('./Sections')) : null");
+    expect(page).not.toMatch(/^import .*Sections/m);
+    expect(page).not.toMatch(/Sell something|Selling opens soon|Seller gets/);
+  });
+});

@@ -1,4 +1,4 @@
-import { contrast, ensureContrast, hslToHex, pickReadable, rgbTriplet } from './colour';
+import { contrast, ensureContrast, hexToHsl, hslToHex, pickReadable, rgbTriplet } from './colour';
 
 export { contrast, rgbTriplet };
 
@@ -76,7 +76,7 @@ export interface Accent {
   group?: 'mono' | 'duo' | 'tri' | 'edition';
   /** Edition packs: the artist credit shown in Theme (e.g. "VexVoid edition"). */
   edition?: string;
-  /** Mono packs on coloured paper stock (Pink, Blue, Yellow): the page is the colour, cards stay white. */
+  /** Mono packs on coloured paper stock (Pink, Blue, Yellow): page, cards and buttons are all shades of the colour. */
   paper?: boolean;
   /** Mono packs: the light hue tint behind buttons, selected tabs and chips (defaults to surface2). */
   tint?: string;
@@ -223,10 +223,14 @@ const WHITE: Accent = {
 
 /**
  * Paper stock (owner, 16 Oct 2026): the whole page is a solid colour, like coloured paper; ink is near-black, cards
- * and buttons are white paper with black hairlines (themes.css Mono rules), card art is the White designs. They
+ * and buttons are the same paper (shades of it) with black hairlines (themes.css Mono rules), card art is the White designs. They
  * replace the old one-hue Pink and Blue tints (same ids, so saved choices carry over).
  */
 function paperPack(id: PackId, label: string, blurb: string, bg: string, pattern: CardPatternId): Accent {
+  // Owner, 16 Oct 2026: never white surfaces on paper. White's structure with the paper replacing white: cards and
+  // sheets a touch lighter than the page, inset fills and tint buttons a touch darker, #111 ink and hairlines.
+  const p = hexToHsl(bg);
+  const shade = (dl: number) => hslToHex({ ...p, l: p.l + dl });
   return {
     ...WHITE,
     id,
@@ -235,13 +239,13 @@ function paperPack(id: PackId, label: string, blurb: string, bg: string, pattern
     paper: true,
     bg,
     nav: bg,
-    surface: '#FFFFFF',
-    surface2: '#FFFFFF',
-    tint: '#FFFFFF',
+    surface: shade(6),
+    surface2: shade(-4),
+    tint: shade(-6),
     accent: '#111111',
     hi: '#111111',
     lo: '#000000',
-    on: '#FFFFFF',
+    on: bg,
     text: '#111111',
     muted: '#3D3D3D',
     line: '#111111',

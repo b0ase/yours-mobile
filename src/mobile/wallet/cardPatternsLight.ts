@@ -124,9 +124,10 @@ function art(id: LightPatternId, c: string): string {
 }
 
 /** A white design as a full SVG string (off-white ground + the study in `colour`). */
-export function lightPatternSvg(id: LightPatternId, colour: string): string {
+/** `ground` replaces the off-white for paper packs (Pink, Blue, Yellow), so their cards are the paper, never white. */
+export function lightPatternSvg(id: LightPatternId, colour: string, ground: string = LIGHT_GROUND): string {
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">` +
-    `<rect width="${W}" height="${H}" fill="${LIGHT_GROUND}"/>${art(id, colour)}</svg>`
+    `<rect width="${W}" height="${H}" fill="${ground}"/>${art(id, colour)}</svg>`
   );
 }

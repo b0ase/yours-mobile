@@ -1,37 +1,47 @@
 /**
- * Exchange › Shares: RESTRICTED. No buy or sell, no public offer. Shows the company card and only what the register
- * says the viewer holds, with a link into bShares. Never in a store build (lazy, PLACEMENT_ENABLED).
+ * Exchange › Shares: RESTRICTED. No buy or sell, no public offer. One card per company the viewer is a director of
+ * or holds shares in (any company, bCorp first), each linking into bShares. Never in a store build (lazy,
+ * PLACEMENT_ENABLED).
  */
 import { useNavigate } from 'react-router-dom';
 import { Lock } from 'lucide-react';
-import { mayOpenBshares } from './placement';
-import { useBshares } from './useBshares';
+import { useCompanies } from './useBshares';
 
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
 
 export const SharesMarket = () => {
   const navigate = useNavigate();
-  const { me, loading } = useBshares();
-  return (
-    <div className="rounded-2xl bg-[#17191E] border border-[#2b2f36] p-4 flex flex-col gap-2">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-white font-bold">{me?.company.name ?? 'bShares · share registers for any company'}</span>
-        <span
-          className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold"
-          style={{ background: '#2a2100', color: GOLD }}
-        >
-          <Lock size={10} aria-hidden="true" /> Restricted · not offered publicly
-        </span>
-      </div>
-      {loading ? (
+  const { companies, loading } = useCompanies();
+  if (loading)
+    return (
+      <p className="m-0 text-sm" style={{ color: MUTED }}>
+        Checking the registers…
+      </p>
+    );
+  if (!companies.length)
+    return (
+      <div className="rounded-2xl bg-[#17191E] border border-[#2b2f36] p-4">
         <p className="m-0 text-sm" style={{ color: MUTED }}>
-          Checking the register…
+          Restricted: for registered shareholders. You hold no shares on a bShares register.
         </p>
-      ) : me && mayOpenBshares(me) ? (
-        <>
-          <p className="m-0 text-sm text-white">
-            You hold {me.holdings.reduce((a, h) => a + h.shares, 0).toLocaleString('en-GB')} shares on the register.
+      </div>
+    );
+  return (
+    <div className="flex flex-col gap-2">
+      {companies.map((c) => (
+        <div key={c.ticker} className="rounded-2xl bg-[#17191E] border border-[#2b2f36] p-4 flex flex-col gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-white font-bold">{c.name}</span>
+            <span
+              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold"
+              style={{ background: '#2a2100', color: GOLD }}
+            >
+              <Lock size={10} aria-hidden="true" /> Restricted · not offered publicly
+            </span>
+          </div>
+          <p className="m-0 text-xs" style={{ color: MUTED }}>
+            {c.role === 'director' ? 'You are a director.' : 'You are on the register.'} No buying or selling here.
           </p>
           <button
             type="button"
@@ -41,12 +51,8 @@ export const SharesMarket = () => {
           >
             Open bShares
           </button>
-        </>
-      ) : (
-        <p className="m-0 text-sm" style={{ color: MUTED }}>
-          Restricted: for registered shareholders.
-        </p>
-      )}
+        </div>
+      ))}
     </div>
   );
 };
