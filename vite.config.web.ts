@@ -219,7 +219,22 @@ export const editionEntryHtml = (html: string, id: string): string =>
     .replace(
       /<meta name="apple-mobile-web-app-title" content="[^"]*" \/>/,
       '<meta name="apple-mobile-web-app-title" content="bWallet" />',
+    )
+    .replace(
+      /<meta name="color-scheme" content="[^"]*" \/>/,
+      `<meta name="color-scheme" content="${editionScheme(id)}" />`,
+    )
+    // Status bar, safe-area strip and page follow the edition from the first paint (owner, 16 Oct 2026: a black bar
+    // across the top of White). Paper editions: the default (light) iOS bar on the paper; dark editions: black.
+    .replace(
+      '</head>',
+      [
+        `    <meta name="apple-mobile-web-app-status-bar-style" content="${editionScheme(id) === 'light' ? 'default' : 'black'}" />`,
+        `    <style>html,body{background:${THEME_INSTALLS[id]}}</style>`,
+        '  </head>',
+      ].join('\n'),
     );
+const editionScheme = (id: string): 'light' | 'dark' => (THEME_INSTALLS[id] === '#000000' ? 'dark' : 'light');
 export const whiteEntryHtml = (html: string): string => editionEntryHtml(html, 'white');
 
 const editionEntries = (): Plugin => ({

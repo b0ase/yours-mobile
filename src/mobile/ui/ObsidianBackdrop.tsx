@@ -11,7 +11,8 @@ import {
   usePool,
   type PoolColours,
 } from './obsidianPool';
-import type { Accent } from '../theme/accents';
+import { DEFAULT_ACCENT, accentById, type Accent } from '../theme/accents';
+import { useAccentId } from '../theme/useAccent';
 
 /**
  * Full-screen pool behind a screen's content. Put it first inside a container with `isolation: isolate` (it sits at
@@ -26,9 +27,10 @@ export const ObsidianBackdrop = ({
   className = '',
   style,
   variant = 'obsidian',
-  pack = null,
+  pack,
 }: {
-  /** Paint the obsidian pool in this theme pack's colours (same shader, TINT_FRAG); null = the original. */
+  /** Paint the pool in this pack's colours (same shader, TINT_FRAG); null = the original. Left out: the current pack
+   *  when it is a light one (White, Pink, Blue, Yellow …), so unlock and onboarding are paper, not obsidian. */
   pack?: Accent | null;
   /** 'gold' = the molten-gold pool (Name Store); default the obsidian pool. */
   variant?: 'obsidian' | 'gold';
@@ -43,6 +45,9 @@ export const ObsidianBackdrop = ({
   style?: CSSProperties;
 }) => {
   const canvas = useRef<HTMLCanvasElement>(null);
+  const current = accentById(useAccentId());
+  if (pack === undefined)
+    pack = current.id !== DEFAULT_ACCENT && current.kind !== 'colour' && current.scheme === 'light' ? current : null;
   const [still] = useState(prefersReducedMotion);
   // A background, not the show: 30 fps and still while typing by default (phones, the extension popup).
   const gold = variant === 'gold';

@@ -1203,3 +1203,27 @@
 :root[data-bw-pack='light'] .bw-stills .text-white\/80 {
   color: var(--bw-muted);
 }
+
+/* Unlock and onboarding on paper (owner, 16 Oct 2026: White lock screen had a yellow field with white text).
+   The pool is the pack's pale silk (ObsidianBackdrop picks the light pack), the Unlock button is black with white
+   ink, and Safari / Chrome autofill keeps the field's own fill and the pack's ink instead of yellow + white. */
+:root[data-bw-paper] .bw-unlock-btn {
+  background-color: #0a0a0a !important;
+  color: #ffffff !important;
+}
+:root[data-bw-pack='light'] input:is(:-webkit-autofill, :autofill) {
+  -webkit-text-fill-color: var(--bw-text) !important;
+  caret-color: var(--bw-text);
+  -webkit-box-shadow: 0 0 0 1000px #ffffff inset !important;
+  box-shadow: 0 0 0 1000px #ffffff inset !important;
+}
+/* Every pack, Gold too: autofill never paints a pale fill under light ink. */
+input:-webkit-autofill {
+  transition: background-color 600000s 0s;
+}
+/* The web beta banner on paper: the page's paper and ink with a hairline, not a black accent bar. */
+:root[data-bw-paper] .bwallet-web-banner {
+  background: var(--bw-pack-bg);
+  color: var(--bw-text);
+  border-bottom: 1px solid rgb(0 0 0 / 0.12);
+}
