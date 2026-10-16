@@ -101,6 +101,8 @@ import {
   ReplyQuote,
   TypingRow,
 } from '../chat/BubbleExtras';
+import { BDraftCard, BDraftSheet } from '../chat/BDraftCard';
+import { bDraftInfo, canAskBDraft } from '../chat/bDraft';
 import { AttachButton, MessageVideo, RoomMediaBubble } from '../chat/RoomMedia';
 import { mediaPayload } from '../chat/roomMediaInfo';
 import { walletSigner } from '../chat/signer';
@@ -692,6 +694,8 @@ const Conversation = ({
   const mq = mentionQuery(draft);
   const mentions = mq === null ? [] : mentionSuggestions(messages, mq, me);
   const composer = useRef<HTMLTextAreaElement>(null);
+  const [drafting, setDrafting] = useState(false);
+  const draftable = canAskBDraft(room, !!entry) && !isOfficialRoom(room);
   const askB = () => {
     setDraft((d) => (/^\/b(\s|$)/i.test(d) ? d : `/b ${d}`));
     requestAnimationFrame(() => composer.current?.focus());
@@ -913,6 +917,15 @@ const Conversation = ({
                 <div className="whitespace-pre-line break-words">{it.message.body}</div>
               </div>
             </div>
+          ) : bDraftInfo(it.message) ? (
+            <BDraftCard
+              key={it.key}
+              message={it.message}
+              client={client}
+              ticker={room.ticker}
+              me={me}
+              onChanged={poll}
+            />
           ) : it.message.kind === 'event' ? (
             <div key={it.key} className="flex justify-center my-2">
               <span
@@ -1115,6 +1128,9 @@ const Conversation = ({
         )}
       </div>
 
+      {drafting && (
+        <BDraftSheet client={client} ticker={room.ticker} onClose={() => setDrafting(false)} onPosted={poll} />
+      )}
       {openRoom?.closed ? (
         <div
           className="px-4 pt-3 text-center text-xs shrink-0"
@@ -1187,6 +1203,19 @@ const Conversation = ({
             >
               /b
             </button>
+            {draftable && (
+              <button
+                type="button"
+                onClick={() => setDrafting(true)}
+                disabled={!online}
+                aria-label="Ask b to draft an agreement or summarise terms"
+                title="Ask b to draft"
+                className="h-10 px-3 rounded-full flex items-center justify-center shrink-0 text-[13px]"
+                style={{ background: '#111', color: GOLD, border: `1px solid ${LINE}` }}
+              >
+                Draft
+              </button>
+            )}
             <textarea
               ref={composer}
               value={draft}
