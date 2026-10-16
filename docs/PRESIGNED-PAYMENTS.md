@@ -1,6 +1,6 @@
 # Pre-signed Payments (design, not built)
 
-Status: **design draft, 15 Oct 2026** · Branch `bwallet` · Docs only, no code
+Status: **design draft, 15 Oct 2026** · Branch `bwallet` · Library + tests in `src/mobile/presign/` (16 Oct); §8 proof script `scripts/presign-proof.ts` written, not yet run
 First use: **Named Invites** (1 SCAM to each invited X account on verified sign-in)
 Related: `POTS-SUBSCRIPTIONS-PLAN.md` (v2 presigned nLockTime), `TIME-LOCK-PLAN.md` (the Lock covenant we reuse), memory rule _locks-non-custodial_.
 
@@ -346,6 +346,15 @@ Open items to resolve before step 1:
 ## 8. Step 1: mainnet proofs
 
 The goal is to answer the two blocking questions on mainnet, at a total cost of **3 SCAM and about 5,000 sats**, before any user funds are involved. Everything runs from a test script (`scripts/presign-proof.ts`, not shipped) using `@bsv/sdk` and `@1sat/templates`. Its keys come from a **fresh throwaway test seed** that is never used elsewhere. Keys come from env at runtime and are never committed.
+
+To run (owner, after funding the address printed by `address`):
+
+```
+PRESIGN_RECIPIENT=<test recipient P2PKH address> bun scripts/presign-proof.ts all --dry-run   # builds + checks locally
+PRESIGN_RECIPIENT=<test recipient P2PKH address> bun scripts/presign-proof.ts all
+```
+
+Keys are read from `~/.bwalletx/presign-test/payer.wif` and `service.wif` (created if missing); results go to `~/.bwalletx/presign-test/state.json`.
 
 ### 8.1 Setup
 
