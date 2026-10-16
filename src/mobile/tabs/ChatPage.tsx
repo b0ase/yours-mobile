@@ -1,7 +1,5 @@
 import { TipButton } from '../tip/TipButton';
 import { mergeChatRooms } from './tabBadges';
-import type { AvatarPlace } from '../names/animatedAvatar';
-import { useAvatarPlayback } from '../names/useAvatarPlayback';
 import { claimIssuerAdmin } from '../chat/autoClaim';
 import { WIDE_ON } from '../wide/flag';
 import { RoomDetails } from '../wide/RoomDetails';
@@ -76,7 +74,7 @@ import { isNative } from '../native';
 import { BchatClient, ChatApiError, loadSession, needsHandle, saveSession, SESSION_EVENT } from '../chat/api';
 import { HandleFlow } from '../names/HandleFlow';
 import { avatarFor, B_AVATAR, pendingBQuestions, rememberAvatar, useAvatars } from '../chat/avatars';
-import { defaultPictures } from '../chat/roomArt';
+import { ChatAvatar as Avatar } from '../chat/ChatAvatar';
 import { roomSetupState, shouldOfferRoomSetup } from '../chat/roomSetupPrompt';
 import type { ReplyRef } from '../chat/api';
 import {
@@ -184,7 +182,6 @@ import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { getErrorMessage } from '../../utils/tools';
 import { asMenuItem, TAB_TAP } from './tabs';
-import { useRoomIcon } from '../chat/roomIcon';
 import { ChatTabs, SegmentRow, SegmentTitle } from '../feed/ChatSegments';
 import { useChatDisplayName } from '../feed/chatDisplayName';
 import {
@@ -199,6 +196,7 @@ import {
   oldestCursor,
   previewText,
   roomActivity,
+  dmPeer,
   roomTitle,
   threadItems,
   timeLabel,
@@ -295,48 +293,6 @@ const usePoll = (fn: () => void, ms: number, enabled: boolean) => {
       document.removeEventListener('visibilitychange', tick);
     };
   }, [ms, enabled]);
-};
-
-const Avatar = ({
-  title,
-  size = 48,
-  roomKey,
-  src,
-  issuer,
-  place = 'list',
-}: {
-  title: string;
-  size?: number;
-  /** Playback (names/animatedAvatar.ts): lists show a still frame; the open chat header animates. */
-  place?: AvatarPlace;
-  roomKey?: string | null;
-  /** A picture to use as is: a room's metadata.icon, a person's avatar. */
-  src?: string | null;
-  /** A token room's issuer handle, when known: its default picture is theirs. */
-  issuer?: string | null;
-}) => {
-  // Token / collection rooms show the token's icon; with none, the issuer's photo or gold bAvatar (chat/roomArt.ts).
-  const tokenIcon = useRoomIcon(src ? null : roomKey);
-  const candidates = useMemo(
-    () => [...[src || tokenIcon].filter((u): u is string => !!u), ...defaultPictures(title, issuer)],
-    [src, tokenIcon, title, issuer],
-  );
-  const [failed, setFailed] = useState<Set<string>>(() => new Set());
-  const icon = candidates.find((u) => !failed.has(u)) ?? candidates[candidates.length - 1];
-  const play = useAvatarPlayback(icon, place);
-  return (
-    <img
-      {...play.handlers}
-      src={play.src}
-      alt=""
-      onError={() => setFailed((cur) => (cur.has(icon) ? cur : new Set(cur).add(icon)))}
-      loading="lazy"
-      decoding="async"
-      referrerPolicy="no-referrer"
-      className="rounded-full object-cover shrink-0"
-      style={{ width: size, height: size, background: '#16181c' }}
-    />
-  );
 };
 
 /** A room's own picture (metadata.icon, https only), e.g. the bWallet Help Desk's (owner, 6 Oct 2026). */
@@ -731,10 +687,7 @@ const Conversation = ({
   const direct = false;
   const members = room.party_count ?? entry?.members ?? 0;
   // Bubble avatars (chat/avatars.ts) and "$b is thinking…" under /b questions not yet answered.
-  useAvatars(
-    client,
-    messages.map((m) => m.author_handle),
-  );
+  useAvatars(client, [peer, ...messages.map((m) => m.author_handle)]);
   const waitingForB = pendingBQuestions(messages);
   const mq = mentionQuery(draft);
   const mentions = mq === null ? [] : mentionSuggestions(messages, mq, me);
@@ -770,7 +723,7 @@ const Conversation = ({
         <button onClick={onBack} className="p-2 rounded-full active:opacity-60" aria-label="Back">
           <ArrowLeft size={22} color={GOLD} />
         </button>
-        <Avatar title={title} size={38} roomKey={entry?.key} src={roomIcon(room)} place="full" />
+        <Avatar title={title} size={38} roomKey={entry?.key} src={roomIcon(room)} issuer={peer} place="full" />
         <div className="flex-1 min-w-0">
           <div className={`text-[15px] font-semibold text-white ${ELLIPSIS}`}>{title}</div>
           <div className="text-[11px]" style={{ color: MUTED }}>
@@ -3370,7 +3323,7 @@ const DmConversation = (p: DmConversationProps) => (
     onBans={null}
     onBounties={null}
     bell={false}
-    peer={/↔/.test(p.room.name || '') ? roomTitle(p.room, p.me).replace(/^\$/, '') : null}
+    peer={dmPeer(p.room, p.me)}
   />
 );
 

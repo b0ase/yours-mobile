@@ -11,9 +11,11 @@ import { tabBadgeText } from '../../components/tabBadgeText';
 
 const FEED_SEEN = 'bwallet.feed.seenAt';
 
-type Room = { ticker: string; unread?: number | null };
+type Room = { ticker: string; unread?: number | null; name?: string | null };
 
 let chat = new Map<string, number>();
+/** Rooms known to be DMs (named "$a ↔ $b"), for the Chat segment badges. */
+let dms = new Set<string>();
 let feedLatest: number[] = [];
 let version = 0;
 const listeners = new Set<() => void>();
@@ -30,11 +32,13 @@ export const subscribeBadges = (fn: () => void) => {
 };
 export const badgesVersion = () => version;
 
+const isDm = (r: Room) => /↔/.test(r.name || '');
 const key = (ticker: string) => ticker.replace(/^\$/, '').toUpperCase();
 
 /** The full room list from the server: replaces every count. */
 export const setChatRooms = (rooms: readonly Room[]) => {
   chat = new Map(rooms.map((r) => [key(r.ticker), Math.max(0, Number(r.unread) || 0)]));
+  dms = new Set(rooms.filter(isDm).map((r) => key(r.ticker)));
   emit();
 };
 
@@ -43,6 +47,10 @@ export const mergeChatRooms = (rooms: readonly Room[]) => {
   let changed = false;
   const next = new Map(chat);
   for (const r of rooms) {
+    if (isDm(r) && !dms.has(key(r.ticker))) {
+      dms = new Set(dms).add(key(r.ticker));
+      changed = true;
+    }
     const n = Math.max(0, Number(r.unread) || 0);
     if (next.get(key(r.ticker)) !== n) {
       next.set(key(r.ticker), n);
@@ -57,6 +65,7 @@ export const mergeChatRooms = (rooms: readonly Room[]) => {
 export const clearChatBadges = () => {
   if (!chat.size) return;
   chat = new Map();
+  dms = new Set();
   emit();
 };
 
@@ -65,6 +74,57 @@ export const chatUnread = (muted: (ticker: string) => boolean = () => false): nu
   let n = 0;
   for (const [t, c] of chat) if (!muted(t)) n += c;
   return n;
+};
+
+/** The Chat tab's top filters: unread DMs and unread group / room messages, muted rooms left out. */
+export const chatUnreadSplit = (muted: (ticker: string) => boolean = () => false): { dms: number; rooms: number } => {
+  const out = { dms: 0, rooms: 0 };
+  for (const [t, c] of chat) if (!muted(t)) out[dms.has(t) ? 'dms' : 'rooms'] += c;
+  return out;
+};
+
+// ── Missed calls (Chat › Calls filter): missed since the Calls filter was last opened ──
+
+const CALLS_SEEN = 'bwallet.calls.seenAt';
+type CallLike = { direction: string; status: string; answered_at: string | null; created_at: string; id: string };
+const missed = (c: CallLike) =>
+  c.direction === 'incoming' && !c.answered_at && c.status !== 'ringing' && c.status !== 'active';
+
+/** Missed calls newer than the cursor, skipping ones hidden on this device. No cursor yet: none (no badge for history). */
+export const missedCallsSince = (
+  calls: readonly CallLike[],
+  seenAt: number | null,
+  hidden: ReadonlySet<string> = new Set(),
+): number =>
+  seenAt === null ? 0 : calls.filter((c) => missed(c) && !hidden.has(c.id) && Date.parse(c.created_at) > seenAt).length;
+
+export const readCallsSeen = (): number | null => readAt(CALLS_SEEN);
+
+/** The Calls filter was opened: everything up to now is seen. */
+export const markCallsSeen = (now = Date.now()) => {
+  writeAt(CALLS_SEEN, now);
+  emit();
+};
+
+/** First sight of the call log on this device: start the cursor there (history earns no badge). */
+export const initCallsSeen = (now = Date.now()) => {
+  if (readCallsSeen() === null) writeAt(CALLS_SEEN, now);
+};
+
+const readAt = (k: string): number | null => {
+  try {
+    const v = Number(localStorage.getItem(k));
+    return Number.isFinite(v) && v > 0 ? v : null;
+  } catch {
+    return null;
+  }
+};
+const writeAt = (k: string, at: number) => {
+  try {
+    localStorage.setItem(k, String(at));
+  } catch {
+    // storage unavailable
+  }
 };
 
 const readSeen = (): number | null => {
@@ -123,6 +183,7 @@ export const walletBadgeLabel = (label: string, n: number): string =>
 /** Tests only. */
 export const resetBadgesForTest = () => {
   chat = new Map();
+  dms = new Set();
   feedLatest = [];
   version = 0;
 };
