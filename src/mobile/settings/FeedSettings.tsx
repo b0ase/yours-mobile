@@ -201,7 +201,7 @@ const Screen = ({ title, onBack, children }: { title: string; onBack: () => void
         </button>
         <span className="text-[16px] font-bold text-white">{title}</span>
       </div>
-      <div className="flex-1 overflow-y-auto p-4 pb-24">{children}</div>
+      <div className="flex-1 overflow-y-auto p-4 bw-dock-pad">{children}</div>
     </div>,
     document.body,
   );

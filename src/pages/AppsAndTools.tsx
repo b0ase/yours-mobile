@@ -879,7 +879,7 @@ export const AppsAndTools = () => {
 
   return (
     <div
-      className="bw-75h flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-20"
+      className="bw-75h flex w-full flex-col items-center overflow-x-hidden overflow-y-auto bw-dock-pad"
       style={{ height: 'calc(75%)', background: '#010101' }}
     >
       <TopNav />

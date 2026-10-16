@@ -153,7 +153,7 @@ export const IdentityMap = ({ onClose }: { onClose: () => void }) => {
         </button>
         <span className="text-[16px] font-bold text-white">Identity map</span>
       </div>
-      <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 pb-24">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 bw-dock-pad">
         <p className="m-0 mb-3 text-[12px] leading-snug" style={{ color: MUTED }}>
           One key is you. Everything else is derived from it, and names are labels that point at those keys. This
           account, as it is right now:
