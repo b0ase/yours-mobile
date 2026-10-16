@@ -78,8 +78,9 @@ const square = async (svg: string) =>
   );
 
 describe('two-sided mint', () => {
-  test('front art by default, back Art QR of the paymail, public data only, under the cap', async () => {
-    for (const name of ['b0asex', 'vexvoid', 'a-longer_name.x', 'nova']) {
+  // One test per name: four renders + decodes in one test sat near the 5s default and timed out under load.
+  for (const name of ['b0asex', 'vexvoid', 'a-longer_name.x', 'nova']) {
+    test(`front art by default, back Art QR of the paymail, public data only, under the cap: ${name}`, async () => {
       const key = '02' + createHash('sha256').update(name).digest('hex');
       const svg = bavatarMintSvg(key, name, 12);
       expect(new TextEncoder().encode(svg).length).toBeLessThan(MAX_BAVATAR_BYTES);
@@ -95,6 +96,6 @@ describe('two-sided mint', () => {
         const z = await zbar(back, px);
         if (z !== undefined) expect(z).toBe(pm);
       }
-    }
-  });
+    });
+  }
 });
