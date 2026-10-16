@@ -995,7 +995,7 @@ const Conversation = ({
                         label: `Message from ${it.mine ? 'you' : `$${it.message.author_handle || 'someone'}`}. Tap for reactions, hold to reply, swipe left to report or block`,
                       })
                     : {})}
-                  className="max-w-[80%] px-3 py-[7px] text-[15px] leading-snug select-none"
+                  className={`bw-chat-bubble${it.mine ? ' is-mine' : ''} max-w-[80%] px-3 py-[7px] text-[15px] leading-snug select-none`}
                   style={{
                     borderRadius: 18,
                     borderBottomRightRadius: it.mine ? 6 : 18,

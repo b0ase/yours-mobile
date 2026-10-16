@@ -74,7 +74,7 @@ export const LoungeCard = ({
         aria-label={`Open the ${HELP_DESK_NAME}`}
         onClick={onOpen}
         onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onOpen()}
-        className="w-full flex items-center gap-3 rounded-2xl px-4 py-3 text-left cursor-pointer active:opacity-90"
+        className="bw-helpdesk-card w-full flex items-center gap-3 rounded-2xl px-4 py-3 text-left cursor-pointer active:opacity-90"
         style={{ background: '#F5C542', color: INK, boxShadow: '0 6px 24px rgba(245,197,66,0.18)' }}
       >
         <span
