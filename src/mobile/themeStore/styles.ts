@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react';
 
-// Theme Store look: every colour is a theme variable, so light packs get light cards and black text.
+// bStore look: every colour is a theme variable, so light packs get light cards and black text.
 export const S = {
   page: {
     minHeight: '100%',
@@ -38,6 +38,29 @@ export const S = {
     borderRadius: 'var(--bw-radius-btn, 12px)',
     padding: '8px 12px',
     font: 'inherit',
+  } as CSSProperties,
+  tiles: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 } as CSSProperties,
+  tile: {
+    background: 'var(--bw-card, #17191e)',
+    color: 'var(--bw-text, #f2f2f0)',
+    border: '1px solid var(--bw-line, #2b2f36)',
+    borderRadius: 'var(--bw-radius-btn, 12px)',
+    padding: '12px 10px',
+    font: 'inherit',
+    fontWeight: 600,
+    textAlign: 'left',
+    cursor: 'pointer',
+  } as CSSProperties,
+  tileOn: {
+    background: 'var(--bw-accent)',
+    color: 'var(--bw-on-accent, #010101)',
+    border: '1px solid var(--bw-accent)',
+    borderRadius: 'var(--bw-radius-btn, 12px)',
+    padding: '12px 10px',
+    font: 'inherit',
+    fontWeight: 700,
+    textAlign: 'left',
+    cursor: 'pointer',
   } as CSSProperties,
   empty: { padding: '24px 4px', color: 'var(--bw-muted, #98a2b3)', fontSize: 14 } as CSSProperties,
 };
