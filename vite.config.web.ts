@@ -40,13 +40,17 @@ const DESKTOP_SHARE = [
   `    <meta name="twitter:image" content="${DESKTOP_OG}" />`,
 ];
 
-/** Colour installs served under /themes/<colour>/ (only white is linked from the app for now). */
-const THEME_INSTALLS: Record<string, string> = {
+/** Edition installs served under /themes/<id>/, each with a web.bwalletx.com/<id> entry page (accent.ts LINKED_INSTALLS). */
+export const THEME_INSTALLS: Record<string, string> = {
   white: '#f7f6f2',
-  pink: '#fbeef1',
-  blue: '#edf2f9',
-  yellow: '#fbf5dc',
+  pink: '#F4A7C0',
+  blue: '#8EC5F0',
+  yellow: '#F7DA4A',
+  vexvoid: '#000000',
+  npg: '#000000',
+  npgx: '#000000',
 };
+const INSTALL_NAMES: Record<string, string> = { npg: 'NPG', npgx: 'NPGX', vexvoid: 'VexVoid' };
 
 const webShell = (): Plugin => ({
   name: 'bwallet-web-shell',
@@ -136,7 +140,7 @@ const webShell = (): Plugin => ({
           fileName: `themes/${colour}/icon-${size}.png`,
           source: readFileSync(resolve(__dirname, `src/web/themes/icon-${colour}-${size}.png`)),
         });
-      const name = `bWallet ${colour[0].toUpperCase()}${colour.slice(1)}`;
+      const name = `bWallet ${INSTALL_NAMES[colour] ?? colour[0].toUpperCase() + colour.slice(1)}`;
       this.emitFile({
         type: 'asset',
         fileName: `themes/${colour}/manifest.json`,
@@ -145,7 +149,7 @@ const webShell = (): Plugin => ({
             id: `/bwallet-${colour}`,
             name,
             short_name: 'bWallet',
-            start_url: colour === 'white' ? '/white' : `/?theme=${colour}`,
+            start_url: `/${colour}`,
             scope: '/',
             display: 'standalone',
             background_color: bg,
@@ -197,33 +201,36 @@ const webShell = (): Plugin => ({
 });
 
 /**
- * web.bwalletx.com/white: the same wallet (same origin, same data) with the White edition's head, so Add to Home
- * Screen installs the white icon (iOS reads apple-touch-icon from the page at that moment) and the White manifest.
- * vercel.json rewrites /white to white.html; accent.ts treats /white like ?theme=white on first open.
+ * web.bwalletx.com/<edition> (/white, /pink, /vexvoid, /npg …): the same wallet (same origin, same data) with that
+ * edition's head, so Add to Home Screen installs its icon (iOS reads apple-touch-icon from the page at that moment)
+ * and manifest. vercel.json rewrites /<id> to <id>.html; accent.ts treats /<id> like ?theme=<id> on first open.
  */
-export const whiteEntryHtml = (html: string): string =>
+export const editionEntryHtml = (html: string, id: string): string =>
   html
-    .replace(/<link rel="manifest" href="[^"]*" \/>/, '<link rel="manifest" href="/themes/white/manifest.json" />')
+    .replace(/<link rel="manifest" href="[^"]*" \/>/, `<link rel="manifest" href="/themes/${id}/manifest.json" />`)
     .replace(
       /<link rel="apple-touch-icon" href="[^"]*" \/>/,
-      '<link rel="apple-touch-icon" href="/themes/white/icon-180.png" />',
+      `<link rel="apple-touch-icon" href="/themes/${id}/icon-180.png" />`,
     )
     .replace(
       /<meta name="theme-color" content="[^"]*" \/>/,
-      `<meta name="theme-color" content="${THEME_INSTALLS.white}" />`,
+      `<meta name="theme-color" content="${THEME_INSTALLS[id]}" />`,
     )
     .replace(
       /<meta name="apple-mobile-web-app-title" content="[^"]*" \/>/,
       '<meta name="apple-mobile-web-app-title" content="bWallet" />',
     );
+export const whiteEntryHtml = (html: string): string => editionEntryHtml(html, 'white');
 
-const whiteEntry = (): Plugin => ({
-  name: 'bwallet-white-entry',
+const editionEntries = (): Plugin => ({
+  name: 'bwallet-edition-entries',
   closeBundle() {
     if (DESKTOP) return;
     const index = resolve(__dirname, 'build-web/index.html');
-    if (existsSync(index))
-      writeFileSync(resolve(__dirname, 'build-web/white.html'), whiteEntryHtml(readFileSync(index, 'utf8')));
+    if (!existsSync(index)) return;
+    const html = readFileSync(index, 'utf8');
+    for (const id of Object.keys(THEME_INSTALLS))
+      writeFileSync(resolve(__dirname, `build-web/${id}.html`), editionEntryHtml(html, id));
   },
 });
 
@@ -251,7 +258,7 @@ const webCss = (): Plugin => ({
 export default mergeConfig(
   mobileConfig,
   defineConfig({
-    plugins: [webShell(), webCss(), albumPages(), whiteEntry()],
+    plugins: [webShell(), webCss(), albumPages(), editionEntries()],
     // public/ is the extension's (Yours manifest and sprout icons); the web wallet emits its own.
     publicDir: false,
     // Both web hosts serve index.html for deep paths (/lock/subscriptions, /m/market, /bapp/bchatx): relative ./assets/

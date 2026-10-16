@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { PATTERNS, patternSvg, patternUri } from './cardPatterns';
 import { THEMES, accentById } from '../theme/accents';
+import { editionArtUri, isEditionPattern, vexFieldSvg } from './cardPatternsEdition';
 
 describe('card patterns', () => {
   test('every pattern is valid, card-sized SVG with no NaN and no external refs', () => {
@@ -20,6 +21,32 @@ describe('card patterns', () => {
     expect(patternUri('hex', violet)).toContain(encodeURIComponent(violet));
   });
   test('each theme suggests a real pattern', () => {
-    for (const t of THEMES) expect(PATTERNS.some((p) => p.id === t.pattern)).toBe(true);
+    for (const t of THEMES) expect(PATTERNS.some((p) => p.id === t.pattern) || isEditionPattern(t.pattern)).toBe(true);
+  });
+});
+
+describe('edition card art', () => {
+  test('VexVoid still: white points on true black, small, no NaN', () => {
+    for (const v of [0, 1, 2]) {
+      const svg = vexFieldSvg(v);
+      expect(svg).toContain('fill="#000000"');
+      expect(svg).toContain('stroke="#FFFFFF"');
+      expect(svg).not.toContain('NaN');
+      expect(svg.length).toBeGreaterThan(5_000);
+      expect(svg.length).toBeLessThan(80_000);
+    }
+    expect(patternUri('vexfield', '#fff', 'a')).toStartWith('data:image/svg+xml');
+  });
+  test('NPG and NPGX use bundled art, steady per card', () => {
+    expect(editionArtUri('npg', 'card-1')).toBe(editionArtUri('npg', 'card-1'));
+    expect(String(editionArtUri('npg', 'x'))).toMatch(/npg-card-/);
+    expect(String(editionArtUri('npgx', 'x'))).toMatch(/npgx-card-/);
+  });
+  test('edition art files stay under 120 KB', async () => {
+    const { readdirSync, statSync } = await import('node:fs');
+    const dir = new URL('./editionArt/', import.meta.url).pathname;
+    const files = readdirSync(dir);
+    expect(files.length).toBe(5);
+    for (const f of files) expect(statSync(dir + f).size).toBeLessThan(120_000);
   });
 });

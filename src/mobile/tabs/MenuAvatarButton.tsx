@@ -1,3 +1,4 @@
+import { accentById } from '../theme/accents';
 import { useRef, useState } from 'react';
 import { Menu } from 'lucide-react';
 import { AccountAvatar } from '../names/AccountAvatar';
@@ -24,7 +25,8 @@ export const MenuAvatarButton = ({
   onLongPress: () => void;
 }) => {
   const src = useAvatar(identityAddress);
-  const white = useAccentId() === 'white';
+  const accentId = useAccentId();
+  const white = accentId === 'white' || !!accentById(accentId).paper;
   const [hint, setHint] = useState(showMenuHint);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longFired = useRef(false);

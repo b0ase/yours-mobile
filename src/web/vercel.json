@@ -28,6 +28,30 @@
       "destination": "/agents.html"
     },
     {
+      "source": "/pink",
+      "destination": "/pink.html"
+    },
+    {
+      "source": "/blue",
+      "destination": "/blue.html"
+    },
+    {
+      "source": "/yellow",
+      "destination": "/yellow.html"
+    },
+    {
+      "source": "/vexvoid",
+      "destination": "/vexvoid.html"
+    },
+    {
+      "source": "/npg",
+      "destination": "/npg.html"
+    },
+    {
+      "source": "/npgx",
+      "destination": "/npgx.html"
+    },
+    {
       "source": "/white",
       "destination": "/white.html"
     },

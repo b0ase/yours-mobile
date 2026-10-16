@@ -6,8 +6,8 @@ import { isSponsoredTrack } from './keySource';
 import { sponsorName, useManifest, useSponsor } from './useAlbum';
 
 const GOLD = 'var(--bw-accent-hi)';
-const LINE = '#2b2f36';
-const MUTED = '#98A2B3';
+const LINE = 'var(--bw-line)';
+const MUTED = 'var(--bw-muted)';
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
 
 /**

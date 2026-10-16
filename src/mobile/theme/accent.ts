@@ -67,6 +67,9 @@ export function applyAccent(id: string | null | undefined): AccentId {
   // Mono / Duo / Tri: themes.css paints Mono's white cards and tinted buttons from this.
   if (full && a.group) root.dataset.bwTone = a.group;
   else delete root.dataset.bwTone;
+  // White and the paper packs (Pink, Blue, Yellow) share White's rules (themes.css [data-bw-paper]).
+  if (full && (a.id === 'white' || a.paper)) root.dataset.bwPaper = '';
+  else delete root.dataset.bwPaper;
   const s = root.style;
   for (const k of ALL_VARS) s.removeProperty(k);
   if (!gold) for (const [k, v] of Object.entries(full ? packVars(a) : accentVars(a))) s.setProperty(k, v);
@@ -96,7 +99,7 @@ export const packFromThemeParam = (raw: string | null | undefined): AccentId | n
 };
 
 /** Colours with their own install manifest in the web build (vite.config.web.ts THEME_INSTALLS). */
-export const LINKED_INSTALLS: readonly string[] = ['white'];
+export const LINKED_INSTALLS: readonly string[] = ['white', 'pink', 'blue', 'yellow', 'vexvoid', 'npg', 'npgx'];
 
 /** Points the manifest and apple-touch-icon at the colour's install files, so Add to Home Screen is themed. */
 export function swapInstallLinks(colour: string): boolean {
@@ -116,10 +119,11 @@ export function applyThemeParam(): AccentId | null {
   } catch {
     return null;
   }
-  // web.bwalletx.com/white (the White edition's install entry) counts as ?theme=white and opens the wallet home.
-  const edition = url.pathname.replace(/\/+$/, '') === '/white';
+  // web.bwalletx.com/white, /pink, /vexvoid … (each edition's install entry) counts as ?theme=<id> and opens home.
+  const path = url.pathname.replace(/\/+$/, '').slice(1).toLowerCase();
+  const edition = LINKED_INSTALLS.includes(path);
   if (!edition && !url.searchParams.has('theme')) return null;
-  const raw = edition ? 'white' : (url.searchParams.get('theme') ?? '').trim().toLowerCase();
+  const raw = edition ? path : (url.searchParams.get('theme') ?? '').trim().toLowerCase();
   url.searchParams.delete('theme');
   if (edition) url.pathname = '/';
   try {

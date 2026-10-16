@@ -1,6 +1,7 @@
 import { requestThemeSheet } from '../mobile/theme/themeNav';
+import { THEME_ORDERS_ENABLED } from '../mobile/storeBuild';
 import { AvatarTooBigError } from '../mobile/names/animatedAvatar';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Palette,
@@ -78,6 +79,8 @@ import ProgressBar from '@ramonak/react-progress-bar';
 import { derivePasswordKey } from '../services/passKey';
 import { ToggleSwitch } from '../components/ToggleSwitch';
 import { MAX_LOCK_TIMEOUT_MINUTES, lockTimeoutMinutes } from '../utils/lockTimeout';
+
+const ThemeOrderSheet = THEME_ORDERS_ENABLED ? lazy(() => import('../mobile/themeOrder/ThemeOrderSheet')) : null;
 
 const LOCK_TIMEOUT_CHOICES = [1, 5, 10, 15, 30, 60, 240, 1440];
 import { getDisplayCurrency, setDisplayCurrency, type DisplayCurrency } from '../utils/displayCurrency';
@@ -302,6 +305,7 @@ export const Settings = () => {
   const { record: repairRecord, outcome: repairOutcome, runRepair } = useStorageRepair();
   const { query, handleSelect } = useBottomMenu();
   const [showSpeedBump, setShowSpeedBump] = useState(false);
+  const [themeOrderOpen, setThemeOrderOpen] = useState(false);
   const { chromeStorageService, keysService, lockWallet, apiContext } = useServiceContext();
   // The USB Security Key page is reachable from two places; back returns to whichever opened it.
   const [usbBackTo, setUsbBackTo] = useState<SettingsPage>('main');
@@ -938,9 +942,27 @@ export const Settings = () => {
             handleSelect('bsv');
           }}
           isFirst
-          isLast
+          isLast={!(THEME_ORDERS_ENABLED && ThemeOrderSheet)}
         />
+        {/* Get your own theme (16 Oct 2026, $99 a year): bWalletX only, a lazy chunk never in a store build. */}
+        {THEME_ORDERS_ENABLED && ThemeOrderSheet && (
+          <>
+            <Divider />
+            <SettingRow
+              icon={<Palette size={16} />}
+              label="Get your own edition"
+              description="Your colours and art as a bWalletX theme · $99 a year"
+              onClick={() => setThemeOrderOpen(true)}
+              isLast
+            />
+          </>
+        )}
       </Section>
+      {THEME_ORDERS_ENABLED && ThemeOrderSheet && themeOrderOpen && (
+        <Suspense fallback={null}>
+          <ThemeOrderSheet onClose={() => setThemeOrderOpen(false)} />
+        </Suspense>
+      )}
 
       {/* Account section */}
       <Section title="Account">
