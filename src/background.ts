@@ -1356,6 +1356,7 @@ if (isInServiceWorker) {
       'STORAGE_RECOVER_TXID',
       'STORAGE_RESTORE_BACKUP',
       'BSV21_FIX_STALE',
+      'BSV21_FIX_UNSEEN',
       'STORAGE_SET_ACTIVE_STORAGE',
       'STORAGE_ADD_REMOTE',
       'STORAGE_REMOVE_REMOTE',
@@ -1680,6 +1681,13 @@ if (isInServiceWorker) {
           return true;
         case 'BSV21_FIX_STALE':
           processBsv21FixStale(typeof message.tokenId === 'string' ? message.tokenId : '', sendResponse);
+          return true;
+        case 'BSV21_FIX_UNSEEN':
+          processBsv21FixUnseen(
+            typeof message.tokenId === 'string' ? message.tokenId : '',
+            message.keysOnly === true,
+            sendResponse,
+          );
           return true;
         case 'STORAGE_SET_ACTIVE_STORAGE':
           processStorageSetActiveStorage(message.target, sendResponse);
@@ -2250,7 +2258,19 @@ if (isInServiceWorker) {
           console.error('[STORAGE_REPAIR_SYNC] token spend pass failed:', err);
           errors.push(`spend pass: ${err instanceof Error ? err.message : String(err)}`);
         }
-        return { recovered, staleDropped, ...(errors.length ? { errors } : {}) };
+        // Outputs the overlay has never seen: submit mined ones, rebroadcast unfinished ones (SCAM, 16 Oct 2026).
+        let unseenFixed = 0;
+        try {
+          const u = await accountContext!.healUnseenTokens();
+          unseenFixed = u.submitted.length + u.rebroadcast.length + (u.keysRepaired ?? 0);
+          staleDropped = [...staleDropped, ...u.dropped];
+          if (u.keysDropped) errors.push(`${u.keysDropped} token output(s) this wallet can't sign were removed`);
+          errors.push(...u.errors);
+        } catch (err) {
+          console.error('[STORAGE_REPAIR_SYNC] unseen token pass failed:', err);
+          errors.push(`unseen pass: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        return { recovered, staleDropped, ...(unseenFixed ? { unseenFixed } : {}), ...(errors.length ? { errors } : {}) };
       };
       // The Repair Log shows the token pass too; without a remote it is the whole record.
       const saveTokenRecord = async (tokens: NonNullable<ReconcileRecord['tokens']>, base?: ReconcileRecord) => {
@@ -2301,6 +2321,27 @@ if (isInServiceWorker) {
       console.error('[STORAGE_REPAIR_SYNC] reconcile failed:', error);
       sendResponse({
         type: 'STORAGE_REPAIR_SYNC',
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
+  /** "Fix and send" (SendBsv21View unseen prompt): get this token's unknown outputs in front of the overlay. */
+  const processBsv21FixUnseen = async (tokenId: string, keysOnly: boolean, sendResponse: CallbackResponse) => {
+    if (!/^[0-9a-f]{64}[._]\d+$/i.test(tokenId)) {
+      sendResponse({ type: 'BSV21_FIX_UNSEEN', success: false, error: 'Invalid token ID' });
+      return;
+    }
+    try {
+      await ensureWallet(true);
+      if (!accountContext) throw new Error('Wallet not initialized');
+      const data = await accountContext.healUnseenTokens(tokenId, keysOnly);
+      sendResponse({ type: 'BSV21_FIX_UNSEEN', success: true, data });
+    } catch (error) {
+      console.error('[BSV21_FIX_UNSEEN] failed:', error);
+      sendResponse({
+        type: 'BSV21_FIX_UNSEEN',
         success: false,
         error: error instanceof Error ? error.message : String(error),
       });
