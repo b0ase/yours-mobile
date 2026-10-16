@@ -623,3 +623,49 @@
   -webkit-text-fill-color: var(--bw-muted) !important;
   opacity: 1;
 }
+
+/* White (owner, 16 Oct 2026): chat bubbles are black text on white. Mine: very light grey fill; theirs: white with a
+   thin outline. Never a dark fill. Applies to DMs, rooms and Ask b. */
+:root[data-bw-theme='white'] :is(.bw-chat-bubble, .askb-bubble.b, .askb-bubble.note) {
+  background: #ffffff !important;
+  color: #0a0a0a !important;
+  border: 1px solid rgb(0 0 0 / 0.18) !important;
+  box-shadow: none !important;
+}
+:root[data-bw-theme='white'] :is(.bw-chat-bubble.is-mine, .askb-bubble.user) {
+  background: #f4f4f4 !important;
+  color: #0a0a0a !important;
+  border: 1px solid transparent !important;
+}
+:root[data-bw-theme='white'] :is(.bw-chat-bubble, .askb-bubble) :is(div, span, small, p) {
+  color: inherit;
+}
+:root[data-bw-theme='white'] :is(.bw-chat-bubble, .askb-bubble) a {
+  color: #0a0a0a !important;
+  text-decoration: underline;
+}
+/* Help Desk card and the live Space banner: white cards. */
+:root[data-bw-theme='white'] :is(.bw-helpdesk-card, .bw-live-banner) {
+  background: #ffffff !important;
+  color: #0a0a0a !important;
+  border: 1px solid rgb(0 0 0 / 0.18) !important;
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.04),
+    0 6px 16px rgb(0 0 0 / 0.05) !important;
+}
+:root[data-bw-theme='white'] :is(.bw-helpdesk-card, .bw-live-banner) :is(span, b) {
+  color: #0a0a0a !important;
+}
+/* Account drawer scrim: a light veil, so no grey strip shows under the dock / home indicator. */
+:root[data-bw-theme='white'] .bw-drawer-scrim {
+  background: rgb(255 255 255 / 0.6) !important;
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+:root[data-bw-theme='white'] body {
+  background: #ffffff;
+}
+/* Scroll fades (Feed bApps bar) fade to the page, not to black. */
+:root[data-bw-theme='white'] {
+  --bw-fade-rgb: 255 255 255;
+}

@@ -456,7 +456,7 @@ const TopNavBar = () => {
       <AnimatePresence>
         {drawer && !WIDE_ON && (
           <motion.div
-            className="fixed inset-0 z-[300] bg-black/60"
+            className="bw-drawer-scrim fixed inset-0 z-[300] bg-black/60"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
