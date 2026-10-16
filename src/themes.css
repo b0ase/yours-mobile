@@ -1179,3 +1179,27 @@
   letter-spacing: 0.04em;
   text-shadow: 0 0 10px rgb(255 45 58 / 0.55);
 }
+
+/* Media player on light packs (owner, 16 Oct 2026): track titles over the VexVoid stills banner were dark ink on
+   dark art (text-white maps to --bw-text in every pack). Light packs get a paper scrim so ink reads at >=4.5:1;
+   White also inverts the stills (VexVoid opted in to inversion, see media/invertOnLight.ts). */
+:root[data-bw-pack='light'] .bw-stills {
+  background: var(--bw-pack-bg) !important;
+}
+:root[data-bw-pack='light'] .bw-stills-scrim {
+  background: linear-gradient(
+    90deg,
+    rgb(var(--bw-paper-rgb, 255 255 255) / 0.92) 0%,
+    rgb(var(--bw-paper-rgb, 255 255 255) / 0.85) 60%,
+    rgb(var(--bw-paper-rgb, 255 255 255) / 0.7) 100%
+  ) !important;
+}
+:root[data-bw-paper] .bw-stills-img {
+  filter: invert(1) hue-rotate(180deg);
+}
+:root[data-bw-pack='light'] .bw-stills .text-white {
+  color: var(--bw-text);
+}
+:root[data-bw-pack='light'] .bw-stills .text-white\/80 {
+  color: var(--bw-muted);
+}

@@ -33,6 +33,7 @@ const primary = { background: 'var(--bw-accent)', color: '#000' };
 const soft = { background: 'rgb(var(--bw-accent-rgb)/0.13)', color: 'var(--bw-accent)' };
 
 /** Hand the X permission page to the browser: the system browser on the phone, a new tab on the web. */
+// eslint-disable-next-line react-refresh/only-export-components -- exported for xFollowsApi.test
 export const openReauth = (
   url: string,
   native = isNative,
@@ -42,6 +43,7 @@ export const openReauth = (
 };
 
 /** Add one match as a friend: handle → paymail through the join-match resolver, then its identity key. */
+// eslint-disable-next-line react-refresh/only-export-components -- exported for xFollowsApi.test
 export const addMatch = async (
   m: XFollowMatch,
   lookup: (name: string) => Promise<string | null> = lookupBwalletx,
@@ -56,6 +58,7 @@ export const addMatch = async (
 };
 
 /** What happens next, in plain words: your room's Invites shows the cost and asks once. */
+// eslint-disable-next-line react-refresh/only-export-components -- exported for xFollowsApi.test
 export const inviteNote = (n: number, batch = MAX_INVITES_PER_BATCH) =>
   n === 0
     ? 'Choose who to invite. Each invite is an Open Drop from your room.'

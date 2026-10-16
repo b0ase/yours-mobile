@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, Dices, Moon, Palette, Shuffle, SlidersHorizontal, Sun, X } from 'lucide-react';
 import {
@@ -15,6 +15,10 @@ import {
 } from './accents';
 import { loadAccent, loadMix, previewMix, saveAccent, saveMix } from './accent';
 import { deriveMix, mixFromPack, nextMixerOpen, type MixSpec } from './mixer';
+import { THEME_ORDERS_ENABLED } from '../storeBuild';
+
+// Get your own theme ($99 a year): bWalletX only, a lazy chunk never in a store build.
+const ThemeOrderSheet = THEME_ORDERS_ENABLED ? lazy(() => import('../themeOrder/ThemeOrderSheet')) : null;
 
 // Mix your own is open by default (owner, 15 Oct 2026: found it by accident when collapsed) and remembers the
 // user's own collapse for this session, so a remount of the sheet never snaps it shut mid-edit.
@@ -93,6 +97,7 @@ function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNo
   const setMixing = (act: Parameters<typeof nextMixerOpen>[1]) =>
     setMixingState((open) => (mixerOpen = nextMixerOpen(open, act)));
   const closeRef = useRef<HTMLButtonElement>(null);
+  const [ordering, setOrdering] = useState(false);
   useEffect(() => {
     closeRef.current?.focus();
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -256,6 +261,29 @@ function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNo
       <p className="bw-cdes-note">
         Packs restyle the whole app; Accent only keeps Gold&apos;s black. Kept for this account on this device.
       </p>
+      {THEME_ORDERS_ENABLED && ThemeOrderSheet && (
+        <p className="bw-theme-more">
+          <button
+            type="button"
+            onClick={() => setOrdering(true)}
+            style={{
+              background: 'none',
+              border: 0,
+              padding: 0,
+              color: 'var(--bw-accent)',
+              font: 'inherit',
+              cursor: 'pointer',
+            }}
+          >
+            Get your own edition · $99 a year
+          </button>
+        </p>
+      )}
+      {THEME_ORDERS_ENABLED && ThemeOrderSheet && ordering && (
+        <Suspense fallback={null}>
+          <ThemeOrderSheet onClose={() => setOrdering(false)} />
+        </Suspense>
+      )}
       <div className="bw-cdes-actions">
         <button
           type="button"
