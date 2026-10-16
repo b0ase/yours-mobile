@@ -47,6 +47,8 @@ export interface Issuer {
   topupEnabled: boolean;
   /** Plain-words terms, when the issuer sends any. */
   terms: string | null;
+  /** https link to reach the issuer (contact_url), or null. */
+  contactUrl: string | null;
 }
 
 const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
@@ -54,6 +56,18 @@ const ADDRESS_RE = /^1[1-9A-HJ-NP-Za-km-z]{25,34}$/;
 const TOKEN_ID_RE = /^[0-9a-f]{64}[._]\d+$/i;
 const ISSUER_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
 const ASSETS = new Set<CreditAsset>(['BSV', 'MNEE', 'PNEE']);
+
+/** Only https:// (or mailto:) links from the server are opened. */
+export const safeUrl = (v: unknown): string | null => {
+  const u = str(v);
+  if (!u || u.length > 500) return null;
+  try {
+    const p = new URL(u);
+    return p.protocol === 'https:' || p.protocol === 'mailto:' ? p.toString() : null;
+  } catch {
+    return null;
+  }
+};
 
 export const isAddress = (a: unknown): a is string => typeof a === 'string' && ADDRESS_RE.test(a);
 export const normTokenId = (id: string) => id.replace('.', '_').toLowerCase();
@@ -108,6 +122,7 @@ export function parseIssuers(data: unknown): Issuer[] {
       accepts,
       topupEnabled: r.topup_enabled === true,
       terms: str(r.terms)?.slice(0, 2000) ?? null,
+      contactUrl: safeUrl(r.contact_url),
     });
   }
   return out;
@@ -510,3 +525,67 @@ export const recordBalance = (id: string, prev: number | null, next: number) => 
 /** The tick-down: the balance shown `t` (0..1) of the way from `from` to `to`, whole credits. */
 export const tickValue = (from: number, to: number, t: number) =>
   Math.round(from + (to - from) * Math.min(1, Math.max(0, t)));
+
+// ── History + pause (bit-sign #296); device-only fallback when the server answers 404/503 ──
+
+export interface IssuerHistoryEntry {
+  id: string;
+  kind: string;
+  /** Signed: negative for spends, positive for top-ups. */
+  units: number;
+  balanceAfter: number | null;
+  txid: string | null;
+  ref: string | null;
+  createdAt: string;
+}
+
+export interface IssuerHistory {
+  entries: IssuerHistoryEntry[];
+  spentTotal: number;
+  toppedUpTotal: number;
+  paused: boolean;
+  nextBefore: string | null;
+}
+
+const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
+export function parseHistory(data: unknown): IssuerHistory | null {
+  if (!data || typeof data !== 'object') return null;
+  const o = data as Record<string, unknown>;
+  if (!Array.isArray(o.entries)) return null;
+  const entries: IssuerHistoryEntry[] = [];
+  for (const r of o.entries as Record<string, unknown>[]) {
+    const units = num(r?.units);
+    if (!r || units === null || !Number.isInteger(units)) continue;
+    entries.push({
+      id: String(r.id ?? entries.length),
+      kind: str(r.kind) ?? (units < 0 ? 'debit' : 'topup'),
+      units,
+      balanceAfter: num(r.balance_after),
+      txid: str(r.txid),
+      ref: str(r.ref),
+      createdAt: str(r.created_at) ?? '',
+    });
+  }
+  return {
+    entries,
+    spentTotal: Math.max(0, Math.abs(num(o.spent_total) ?? 0)),
+    toppedUpTotal: Math.max(0, num(o.topped_up_total) ?? 0),
+    paused: o.paused === true,
+    nextBefore: str(o.next_before),
+  };
+}
+
+/** /balance now carries paused; null when the server doesn't say. */
+export const parsePaused = (data: unknown): boolean | null => {
+  const p = data && typeof data === 'object' ? (data as { paused?: unknown }).paused : undefined;
+  return typeof p === 'boolean' ? p : null;
+};
+
+/** Server endpoints not there yet (404) or not configured (503 not_configured): fall back to this device. */
+export const isUnavailable = (status: number) => status === 404 || status === 503;
+
+export const historyLabel = (e: IssuerHistoryEntry) =>
+  e.units > 0 ? 'Top up' : e.ref ? e.ref : e.kind === 'debit' ? 'Spent' : e.kind;
+export const historyAmount = (e: IssuerHistoryEntry) =>
+  `${e.units > 0 ? '+' : '−'}${Math.abs(e.units).toLocaleString('en-US')}`;

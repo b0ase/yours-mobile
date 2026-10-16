@@ -16,6 +16,13 @@ import {
   QuoteError,
   claimWithRetry,
   fmtIssuerCredits,
+  historyAmount,
+  historyLabel,
+  isUnavailable,
+  parseHistory,
+  parsePaused,
+  type IssuerHistory,
+  type IssuerHistoryEntry,
   issuerStopped,
   loadPendingClaims,
   parseBalance,
@@ -152,6 +159,34 @@ export default function IssuerCreditCards({ onCards }: { onCards: (cards: Issuer
   const [spent, setSpent] = useState<Record<string, number>>({});
   const [stopped, setStopped] = useState<Record<string, boolean>>({});
   const [topUp, setTopUp] = useState<Issuer | null>(null);
+  const [serverSpent, setServerSpent] = useState<Record<string, number>>({});
+  const [history, setHistory] = useState<Record<string, IssuerHistory>>({});
+  const [historyFor, setHistoryFor] = useState<Issuer | null>(null);
+
+  /** Stop/Resume: the server's pause (#296); device-only when it answers 404/503 not_configured. */
+  const togglePause = async (i: Issuer, want: boolean) => {
+    let r: { status: number; body: unknown } | null = null;
+    try {
+      if (apiContext) r = await (await signedInClient(apiContext)).issuerPause(i.id, want);
+    } catch {
+      r = null;
+    }
+    if (r && r.status === 200) {
+      const p = (r.body as { paused?: unknown } | null)?.paused;
+      const now = typeof p === 'boolean' ? p : want;
+      setIssuerStopped(i.id, now);
+      setStopped((x) => ({ ...x, [i.id]: now }));
+      addSnackbar(now ? `${i.name} credits paused` : `${i.name} credits resumed`, 'success');
+      return;
+    }
+    if (!r || isUnavailable(r.status)) {
+      setIssuerStopped(i.id, want);
+      setStopped((x) => ({ ...x, [i.id]: want }));
+      addSnackbar(want ? 'Stopped on this device' : 'Resumed on this device', 'info');
+      return;
+    }
+    addSnackbar((r.body as { error?: string } | null)?.error ?? "Couldn't change that. Try again.", 'error');
+  };
   const prev = useRef<Record<string, number>>({});
 
   useEffect(() => {
@@ -180,12 +215,29 @@ export default function IssuerCreditCards({ onCards }: { onCards: (cards: Issuer
       return;
     }
     const next: Record<string, number> = {};
+    const server: Record<string, number> = {};
+    const paused: Record<string, boolean> = {};
+    const histories: Record<string, IssuerHistory> = {};
     await Promise.all(
       issuers.map(async (i) => {
-        const b = parseBalance(await client.issuerBalance(i.id).catch(() => null));
+        const raw = await client.issuerBalance(i.id).catch(() => null);
+        const b = parseBalance(raw);
         if (b !== null) next[i.id] = b;
+        const p = parsePaused(raw);
+        if (p !== null) paused[i.id] = p;
+        // #296: the server's spent total and history; 404/503 (not live / not migrated) keeps the device count.
+        const h = await client.issuerHistory(i.id).catch(() => null);
+        const hist = h && h.status === 200 ? parseHistory(h.body) : null;
+        if (hist) {
+          server[i.id] = hist.spentTotal;
+          histories[i.id] = hist;
+          paused[i.id] = hist.paused;
+        }
       }),
     );
+    setServerSpent((x) => ({ ...x, ...server }));
+    setHistory((x) => ({ ...x, ...histories }));
+    setStopped((x) => ({ ...x, ...paused }));
     const s: Record<string, number> = {};
     for (const [id, b] of Object.entries(next)) s[id] = recordBalance(id, prev.current[id] ?? null, b);
     prev.current = { ...prev.current, ...next };
@@ -232,14 +284,16 @@ export default function IssuerCreditCards({ onCards }: { onCards: (cards: Issuer
     onCards(
       issuers.map((i): IssuerCardDef => {
         const accepts = topUpAccepts(i);
-        const contact = i.handle
-          ? [
-              {
-                label: 'Contact issuer',
-                run: () => window.open(`https://bchatx.com/u/${encodeURIComponent(i.handle!)}`, '_blank'),
-              },
-            ]
-          : [];
+        const contact = i.contactUrl
+          ? [{ label: 'Contact issuer', run: () => window.open(i.contactUrl!, '_blank', 'noopener') }]
+          : i.handle
+            ? [
+                {
+                  label: 'Contact issuer',
+                  run: () => window.open(`https://bchatx.com/u/${encodeURIComponent(i.handle!)}`, '_blank'),
+                },
+              ]
+            : [];
         return {
           id: `issuer:${i.id}`,
           title: `${i.name} credits`,
@@ -251,28 +305,41 @@ export default function IssuerCreditCards({ onCards }: { onCards: (cards: Issuer
           backLines: [
             i.terms ?? `Prepaid credits for ${i.name}. Spent only with ${i.name}; they can't be sent or cashed out.`,
             ...i.accepts.map(rateLine),
-            `Spent so far: ${fmtIssuerCredits(spent[i.id] ?? 0)}`,
-            ...(stopped[i.id] ? ['Stopped: this device will not spend these credits.'] : []),
+            `Spent so far: ${fmtIssuerCredits(serverSpent[i.id] ?? spent[i.id] ?? 0)}${i.id in serverSpent ? '' : ' (this device)'}`,
+            ...(stopped[i.id]
+              ? [
+                  i.id in serverSpent
+                    ? 'Paused: nothing can be spent until you resume.'
+                    : 'Stopped: this device will not spend these credits.',
+                ]
+              : []),
           ],
           backButtons: [
             ...(accepts.length ? [{ label: 'Top up', primary: true, run: () => setTopUp(i) }] : []),
             {
               label: stopped[i.id] ? 'Resume' : 'Stop',
-              run: () => {
-                const s = !stopped[i.id];
-                setIssuerStopped(i.id, s);
-                setStopped((x) => ({ ...x, [i.id]: s }));
-              },
+              run: () => void togglePause(i, !stopped[i.id]),
             },
+            ...(history[i.id] ? [{ label: 'History', run: () => setHistoryFor(i) }] : []),
             ...contact,
           ],
         };
       }),
     );
-  }, [issuers, shown, spent, stopped, onCards]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- togglePause reads current state via its args
+  }, [issuers, shown, spent, serverSpent, history, stopped, onCards]);
 
   useEffect(() => () => onCards([]), [onCards]);
 
+  if (historyFor && apiContext)
+    return (
+      <IssuerHistorySheet
+        issuer={historyFor}
+        ctx={apiContext}
+        first={history[historyFor.id]}
+        onClose={() => setHistoryFor(null)}
+      />
+    );
   if (!topUp || !apiContext) return null;
   return (
     <IssuerTopUpSheet
@@ -287,6 +354,82 @@ export default function IssuerCreditCards({ onCards }: { onCards: (cards: Issuer
     />
   );
 }
+
+const IssuerHistorySheet = ({
+  issuer,
+  ctx,
+  first,
+  onClose,
+}: {
+  issuer: Issuer;
+  ctx: OneSatContext;
+  first?: IssuerHistory;
+  onClose: () => void;
+}) => {
+  const [rows, setRows] = useState<IssuerHistoryEntry[]>(first?.entries ?? []);
+  const [next, setNext] = useState<string | null>(first?.nextBefore ?? null);
+  const [busy, setBusy] = useState(false);
+  const more = async () => {
+    if (!next) return;
+    setBusy(true);
+    try {
+      const r = await (await signedInClient(ctx)).issuerHistory(issuer.id, next);
+      const h = r.status === 200 ? parseHistory(r.body) : null;
+      if (h) {
+        setRows((x) => [...x, ...h.entries]);
+        setNext(h.nextBefore);
+      } else setNext(null);
+    } catch {
+      /* keep what we have */
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Sheet title={`${issuer.name} credits history`} onClose={onClose}>
+      {first && (
+        <div className="text-xs mb-2" style={{ color: 'var(--bw-muted)' }}>
+          Spent {fmtIssuerCredits(first.spentTotal)} · topped up {fmtIssuerCredits(first.toppedUpTotal)}
+        </div>
+      )}
+      {!rows.length && (
+        <div className="text-sm py-6 text-center" style={{ color: 'var(--bw-muted)' }}>
+          Nothing yet.
+        </div>
+      )}
+      {rows.map((r) => (
+        <div
+          key={r.id}
+          className="flex items-center justify-between py-2"
+          style={{ borderBottom: '1px solid var(--bw-line)' }}
+        >
+          <div className="min-w-0">
+            <div className="text-sm truncate">{historyLabel(r)}</div>
+            <div className="text-[11px]" style={{ color: 'var(--bw-muted)' }}>
+              {r.createdAt ? new Date(r.createdAt).toLocaleString() : ''}
+            </div>
+          </div>
+          <div
+            className="text-sm font-semibold"
+            style={{ color: r.units > 0 ? 'var(--bw-success)' : 'var(--bw-text)' }}
+          >
+            {historyAmount(r)}
+          </div>
+        </div>
+      ))}
+      {next && (
+        <button
+          onClick={() => void more()}
+          disabled={busy}
+          className="w-full rounded-2xl py-2 mt-3 text-sm font-semibold"
+          style={{ background: 'var(--bw-surface)', color: 'var(--bw-text)', border: '1px solid var(--bw-line)' }}
+        >
+          {busy ? 'Loading…' : 'Show more'}
+        </button>
+      )}
+    </Sheet>
+  );
+};
 
 type Approve = { quote: Quote; accept: IssuerAccept; credits: number; fee: OverlayFee | null };
 

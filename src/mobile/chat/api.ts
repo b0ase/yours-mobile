@@ -957,6 +957,26 @@ export class BchatClient {
     return this.call('POST', `/api/bitsign/credits/issuers/${encodeURIComponent(issuerId)}/topup/quote`, body);
   }
 
+  /** Status + body for the #296 endpoints, so a 404/503 can fall back to device-only. */
+  private async statusCall(method: 'GET' | 'POST', path: string, body?: unknown) {
+    try {
+      return { status: 200, body: (await this.call(method, path, body)) as unknown };
+    } catch (e) {
+      if (e instanceof ChatApiError) return { status: e.status, body: e.data };
+      throw e;
+    }
+  }
+
+  async issuerHistory(issuerId: string, before?: string, limit = 50) {
+    const q = new URLSearchParams({ limit: String(limit) });
+    if (before) q.set('before', before);
+    return this.statusCall('GET', `/api/bitsign/credits/issuers/${encodeURIComponent(issuerId)}/history?${q}`);
+  }
+
+  async issuerPause(issuerId: string, paused: boolean) {
+    return this.statusCall('POST', `/api/bitsign/credits/issuers/${encodeURIComponent(issuerId)}/pause`, { paused });
+  }
+
   /** Status and body, so the caller can tell 202 not_indexed (retry) from a refusal (402/409/422). */
   async issuerClaim(
     issuerId: string,

@@ -9,6 +9,10 @@ import {
   claimWithRetry,
   memoScriptHex,
   nextSpent,
+  parseHistory,
+  parsePaused,
+  isUnavailable,
+  historyAmount,
   parseIssuers,
   parseQuote,
   quoteSummary,
@@ -265,5 +269,38 @@ describe('flag', () => {
     expect(ISSUER_CREDITS_ENABLED).toBe(false);
     const car = readFileSync(new URL('../wallet/BalanceCarousel.tsx', import.meta.url), 'utf8');
     expect(car).toContain("ISSUER_CREDITS_ENABLED ? lazy(() => import('../credits/IssuerCreditCards')) : null");
+  });
+});
+
+describe('history + pause (#296)', () => {
+  test('parses history; spent so far is spent_total', () => {
+    const h = parseHistory({
+      entries: [
+        { id: 'a', kind: 'debit', units: -5, balance_after: 95, ref: 'mandala reply', created_at: '2026-10-16' },
+        { id: 'b', kind: 'topup', units: 100, balance_after: 100, txid: 'ab'.repeat(32), created_at: '2026-10-15' },
+        { id: 'c', units: 'x' },
+      ],
+      spent_total: 5,
+      topped_up_total: 100,
+      paused: true,
+      next_before: 'cur',
+    });
+    expect(h?.entries).toHaveLength(2);
+    expect(h).toMatchObject({ spentTotal: 5, toppedUpTotal: 100, paused: true, nextBefore: 'cur' });
+    expect(historyAmount(h!.entries[0])).toBe('−5');
+    expect(historyAmount(h!.entries[1])).toBe('+100');
+    expect(parseHistory({ error: 'x' })).toBeNull();
+  });
+  test('paused from /balance; 404/503 fall back to device-only', () => {
+    expect(parsePaused({ balance: 1, paused: false })).toBe(false);
+    expect(parsePaused({ balance: 1 })).toBeNull();
+    expect([404, 503, 409, 200].map(isUnavailable)).toEqual([true, true, false, false]);
+  });
+  test('contact_url: https only', () => {
+    const base = { id: 'x', name: 'X', accepts: [] };
+    expect(parseIssuers({ issuers: [{ ...base, contact_url: 'https://x.com/a' }] })[0].contactUrl).toBe(
+      'https://x.com/a',
+    );
+    expect(parseIssuers({ issuers: [{ ...base, contact_url: 'javascript:alert(1)' }] })[0].contactUrl).toBeNull();
   });
 });
