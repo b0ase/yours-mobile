@@ -943,6 +943,38 @@ export class BchatClient {
     return this.call('POST', '/api/bitsign/credits/deposit', { txid });
   }
 
+  // ── Credits from other issuers (bit-sign PR #294; src/mobile/credits/issuerCredits.ts, behind ISSUER_CREDITS_ENABLED) ──
+
+  async creditIssuers(): Promise<unknown> {
+    return this.call('GET', '/api/bitsign/credits/issuers', undefined, false);
+  }
+
+  async issuerBalance(issuerId: string): Promise<unknown> {
+    return this.call('GET', `/api/bitsign/credits/issuers/${encodeURIComponent(issuerId)}/balance`);
+  }
+
+  async issuerQuote(issuerId: string, body: { asset: string; credits: number }): Promise<unknown> {
+    return this.call('POST', `/api/bitsign/credits/issuers/${encodeURIComponent(issuerId)}/topup/quote`, body);
+  }
+
+  /** Status and body, so the caller can tell 202 not_indexed (retry) from a refusal (402/409/422). */
+  async issuerClaim(
+    issuerId: string,
+    body: { quote_id: string; txid: string; rawtx?: string },
+  ): Promise<{ status: number; body: unknown }> {
+    try {
+      const data = await this.call(
+        'POST',
+        `/api/bitsign/credits/issuers/${encodeURIComponent(issuerId)}/topup/claim`,
+        body,
+      );
+      return { status: 200, body: data };
+    } catch (e) {
+      if (e instanceof ChatApiError) return { status: e.status, body: e.data };
+      throw e;
+    }
+  }
+
   // ── Verified identity (src/mobile/kyc) ──
 
   /** Ask bit-sign for a BRC-52 KYC certificate for this identity key (needs approved Veriff). */
