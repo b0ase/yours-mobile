@@ -92,7 +92,10 @@ export const SentScreen = ({
         )}
         {to && (
           <div className="mt-5 text-sm" style={{ color: MUTED }}>
-            to <span className="font-semibold break-all" style={{ color: TEXT }}>{to}</span>
+            to{' '}
+            <span className="font-semibold break-all" style={{ color: TEXT }}>
+              {to}
+            </span>
           </div>
         )}
         <a
