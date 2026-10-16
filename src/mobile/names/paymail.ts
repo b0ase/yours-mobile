@@ -124,7 +124,15 @@ export const lookupPaymail = async (f: Fetch, identityKey: string): Promise<stri
   return typeof j?.paymail === 'string' ? j.paymail : undefined;
 };
 
-export type WalletName = { paymail: string; kind: 'plain' | 'x' | 'gmail'; main: boolean };
+export type WalletName = {
+  paymail: string;
+  kind: 'plain' | 'x' | 'gmail';
+  main: boolean;
+  /** Set when the handle is an NFT (docs/HANDLE-NFTS.md): its origin outpoint. */
+  nftOrigin?: string;
+  /** The NFT moved without a binding (or is frozen): the handle answers nothing until claimed. */
+  nftUnbound?: boolean;
+};
 
 /** Every paymail that receives for this identity key, main one flagged (public lookup). */
 export const listPaymails = async (f: Fetch, identityKey: string): Promise<WalletName[]> => {
