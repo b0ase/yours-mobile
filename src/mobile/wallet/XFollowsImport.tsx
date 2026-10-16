@@ -1,7 +1,6 @@
 /**
  * Wallet › Friends › "Find people you follow on X" (roadmap; site /invite). Behind
- * X_FOLLOWS_IMPORT_ENABLED, off by default: the server (bit-sign #295) is not live and the owner
- * hasn't decided who pays X's ~1¢ per account. Hidden whenever the server says 'disabled' (404).
+ * X_FOLLOWS_IMPORT_ENABLED: on by default outside store builds (bit-sign #295 live, owner cap set). Hidden whenever the server says 'disabled' (404).
  *
  * Flow: estimate → (Allow X, if the X sign-in lacks follows.read) → one confirm sheet with count and
  * cost → import → matches become friends with paymails (join-match lookup) → "Invite the rest"

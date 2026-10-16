@@ -463,12 +463,12 @@ export const XINVITES_ENABLED: boolean = !(
 );
 
 /**
- * "Find people you follow on X" (wallet/XFollowsImport.tsx): off by default until bit-sign #295, its migration
- * and the owner's cost decision land. VITE_X_FOLLOWS_IMPORT=1 turns it on; never in a store build. Literal env
+ * "Find people you follow on X" (wallet/XFollowsImport.tsx): on by default in bWalletX builds (bit-sign #295 live,
+ * owner flag + cap set). VITE_X_FOLLOWS_IMPORT=0 turns it off; never in a store build. Still hides on a 404 'disabled'. Literal env
  * check so Vite inlines it and Rollup drops the lazy chunk. Store grep: `x-follows|Find people you follow on X`.
  */
 export const X_FOLLOWS_IMPORT_ENABLED: boolean =
-  import.meta.env.VITE_X_FOLLOWS_IMPORT === '1' &&
+  import.meta.env.VITE_X_FOLLOWS_IMPORT !== '0' &&
   import.meta.env.VITE_STORE_BUILD !== '1' &&
   import.meta.env.VITE_CHANNEL !== 'ios-store' &&
   import.meta.env.VITE_CHANNEL !== 'android-play';

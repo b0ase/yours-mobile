@@ -23,7 +23,7 @@ import { ContactCard } from './ContactCard';
 
 const f = (u: string, i?: RequestInit) => fetch(u, i);
 
-// Off by default (VITE_X_FOLLOWS_IMPORT=1): waits on bit-sign #295 and the owner's cost decision.
+// On by default outside store builds (VITE_X_FOLLOWS_IMPORT=0 turns it off).
 const XFollowsImport = X_FOLLOWS_IMPORT_ENABLED
   ? lazy(() => import('./XFollowsImport').then((m) => ({ default: m.XFollowsImport })))
   : null;
