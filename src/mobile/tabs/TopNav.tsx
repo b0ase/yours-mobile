@@ -31,6 +31,8 @@ import {
 } from 'lucide-react';
 import { agentMenuTarget, showAgentInMenu } from './agentEntry';
 import { phoneLayoutOn, usePhoneLayout } from '../phone/flag';
+import { BappAppButton } from '../phone/BappBar';
+import { bappBarForPath } from '../phone/bappBarModel';
 import { startAgentCreate } from '../agents/agentCreate';
 import { AGENT_TOOLS_TITLE, AgentToolsSheet } from '../agents/AgentToolsSheet';
 import { AirdropsNavButton } from '../airdrops/AirdropsNavButton';
@@ -104,6 +106,8 @@ const TopNavBar = () => {
   const [handleOpen, setHandleOpen] = useState(false);
   // bPhone Calls opens in the content area (/m/calls, owner 9 Oct 2026, as bMail); tapping the button again leaves.
   const onCalls = pathname.startsWith(CALLS_ROUTE);
+  /** In a bApp (phone layout): its icon sits next to ☰, in the Calls slot (bApp bar, phone/bappBarModel.ts). */
+  const bapp = phone ? bappBarForPath(pathname) : null;
   const [toolsOpen, setToolsOpen] = useState(false);
   const [mintOpen, setMintOpen] = useState(false);
   const [pairOpen, setPairOpen] = useState(false);
@@ -338,19 +342,23 @@ const TopNavBar = () => {
             >
               <Menu size={22} color={ICON} />
             </button>
-            <button
-              type="button"
-              aria-label="Calls"
-              aria-pressed={onCalls}
-              onClick={() => (onCalls ? navigate(-1) : navigate(CALLS_ROUTE))}
-              className="w-9 h-9 rounded-full flex items-center justify-center cursor-pointer"
-              style={{
-                border: onCalls ? `1px solid ${ACCENT}` : RING,
-                background: onCalls ? `color-mix(in srgb, ${ACCENT} 20%, transparent)` : 'transparent',
-              }}
-            >
-              <Phone size={16} color={ACCENT} />
-            </button>
+            {bapp ? (
+              <BappAppButton def={bapp} onGo={(route) => navigate(route, { replace: true })} />
+            ) : (
+              <button
+                type="button"
+                aria-label="Calls"
+                aria-pressed={onCalls}
+                onClick={() => (onCalls ? navigate(-1) : navigate(CALLS_ROUTE))}
+                className="w-9 h-9 rounded-full flex items-center justify-center cursor-pointer"
+                style={{
+                  border: onCalls ? `1px solid ${ACCENT}` : RING,
+                  background: onCalls ? `color-mix(in srgb, ${ACCENT} 20%, transparent)` : 'transparent',
+                }}
+              >
+                <Phone size={16} color={ACCENT} />
+              </button>
+            )}
             {/* Owner, 8 Oct 2026: the airdrops inbox takes the b's slot (the agent stays on the dock b and pull-down). */}
             <AirdropsNavButton color={ACCENT} ring={RING} />
             <button
