@@ -1,0 +1,29 @@
+{
+  "format": "bwalletx.strategy/1",
+  "name": "Launch nibbler",
+  "version": "1.0",
+  "description": "Takes a very small, capped position in one new token: 50 cents a buy, $2 a day, $10 in total, and only under a price you set. Replace NEWTOKEN with the ticker or BSV-21 id, and buyBelowUsd with your limit, before loading. New tokens often go to zero; treat the $10 as gone.",
+  "goals": "Buy tiny amounts of the named new token, only at or under the buy limit, never more than $0.50 at once. Do not chase the price after a jump.",
+  "rules": {
+    "tokens": ["NEWTOKEN"],
+    "actions": ["buy"],
+    "buyBelowUsd": 0.001,
+    "maxPerTradeUsd": 0.5,
+    "maxPerDayUsd": 2,
+    "maxTotalUsd": 10
+  },
+  "spec": {
+    "trades": "One new BSV-21 token you name",
+    "risk": "Experimental",
+    "spends": "$0.50 a buy, $2/day, $10 total",
+    "often": "A few times a day at most",
+    "stops": "$10 spent; never above your price",
+    "needs": "The token's ticker or id and your price before loading"
+  },
+  "changelog": [
+    {
+      "version": "1.0",
+      "note": "First version"
+    }
+  ]
+}

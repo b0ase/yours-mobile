@@ -1,0 +1,29 @@
+{
+  "format": "bwalletx.strategy/1",
+  "name": "Dip buyer: $NPG",
+  "version": "1.0",
+  "description": "Places nothing ahead of time: it only buys $NPG listings when the price is at or below a set level, like a standing limit order. At most $2 a buy, $6 a day, $50 in total. Edit buyBelowUsd to your own level before loading. It can lose money: token prices can fall and listings can be thin. A price that has dipped can keep falling.",
+  "goals": "Watch $NPG. Buy only when a listing is at or below the buy limit. Prefer the cheapest listing. If nothing is cheap enough, do nothing.",
+  "rules": {
+    "tokens": ["NPG"],
+    "actions": ["buy"],
+    "buyBelowUsd": 0.5,
+    "maxPerTradeUsd": 2,
+    "maxPerDayUsd": 6,
+    "maxTotalUsd": 50
+  },
+  "spec": {
+    "trades": "$NPG only (BSV-21), at or below $0.50 a token",
+    "risk": "High",
+    "spends": "$2 a buy, $6/day, $50 total",
+    "often": "Only when a listing is at or under the limit",
+    "stops": "$50 spent; never buys above $0.50",
+    "needs": "Agent account with at least $10 of BSV"
+  },
+  "changelog": [
+    {
+      "version": "1.0",
+      "note": "First version"
+    }
+  ]
+}

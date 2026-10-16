@@ -1,0 +1,32 @@
+{
+  "format": "bwalletx.strategy/1",
+  "name": "Dollar stack: MNEE",
+  "version": "1.0",
+  "description": "Moves a little BSV into MNEE (a dollar stablecoin) at a time, and only when MNEE is listed at or under $1.01, so it never pays much over the peg. At most $5 a buy, $10 a day, $100 in total. It can lose money: market fees, the BSV price at the moment of buying, and the stablecoin itself all carry risk.",
+  "goals": "Hold part of this account's value in MNEE. Buy MNEE in $5 steps, only at $1.01 or less per token. Stop at $100.",
+  "rules": {
+    "tokens": ["MNEE"],
+    "actions": ["buy"],
+    "buyBelowUsd": 1.01,
+    "maxPerTradeUsd": 5,
+    "maxPerDayUsd": 10,
+    "maxTotalUsd": 100,
+    "stop": {
+      "holdTokens": 100
+    }
+  },
+  "spec": {
+    "trades": "MNEE only, at $1.01 or less",
+    "risk": "Low",
+    "spends": "$5 a buy, $10/day, $100 total",
+    "often": "Up to twice a day",
+    "stops": "Holds 100 MNEE, or $100 spent",
+    "needs": "Agent account with at least $20 of BSV; MNEE listings on the market"
+  },
+  "changelog": [
+    {
+      "version": "1.0",
+      "note": "First version"
+    }
+  ]
+}

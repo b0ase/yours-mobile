@@ -197,7 +197,7 @@ const MarketPage = () => {
   const [market, setMarket] = useState<RoomMarket | null>(null);
   const [strategiesOpen, setStrategiesOpen] = useState(false);
   // Strategies / Contracts / Bonds: panels that replace the token list (bWalletX only).
-  const [panel, setPanel] = useState<'contracts' | 'bonds' | null>(null);
+  const [panel, setPanel] = useState<'contracts' | 'bonds' | 'strategies' | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const [busy, setBusy] = useState('');
   const [mine, setMine] = useState<WalletOutput[] | null>(null);
@@ -440,7 +440,7 @@ const MarketPage = () => {
       : []),
     ...(TRADING && TOKENBLASTER_ENABLED ? [{ id: '3d', label: '3D', kind: 'nfts' as Kind, view: '3d' as View }] : []),
   ];
-  // Bonds is a tab inside Contracts (owner, 7 Oct 2026): panel 'bonds' means Contracts › Bonds.
+  // Bonds and Strategies are tabs inside Contracts (owner, 7 / 17 Oct 2026): panel 'bonds' means Contracts › Bonds.
   const activeCat =
     (panel ? 'contracts' : null) ??
     (strategiesOpen ? 'strategies' : null) ??
@@ -1098,8 +1098,8 @@ const MarketPage = () => {
           <StrategiesMarket />
         ) : panel && !room ? (
           <ContractsMarket
-            tab={panel === 'bonds' ? 'bonds' : 'all'}
-            onTab={(t) => setPanel(t === 'bonds' ? 'bonds' : 'contracts')}
+            tab={panel === 'contracts' ? 'all' : panel}
+            onTab={(t) => setPanel(t === 'all' ? 'contracts' : t)}
           />
         ) : room ? (
           roomView

@@ -1,0 +1,29 @@
+{
+  "format": "bwalletx.strategy/1",
+  "name": "Weekly allowance",
+  "version": "1.0",
+  "description": "Pays a fixed pocket-money amount in BSV to one person (address or paymail) you set: $5 at a time, at most $5 a day and $20 in total, so roughly a month of weekly payments. Replace the placeholder in sendTo before loading. Sending is final.",
+  "goals": "Once a week, send $5 of BSV to the allowance address. Never more than once a day, never to anyone else.",
+  "rules": {
+    "tokens": ["BSV"],
+    "actions": ["send"],
+    "sendTo": ["allowance@paymail.example"],
+    "maxPerTradeUsd": 5,
+    "maxPerDayUsd": 5,
+    "maxTotalUsd": 20
+  },
+  "spec": {
+    "trades": "BSV only, sent to one person you set",
+    "risk": "Low",
+    "spends": "$5 a send, $5/day, $20 total",
+    "often": "Once a week",
+    "stops": "$20 sent (4 payments)",
+    "needs": "The recipient in sendTo before loading"
+  },
+  "changelog": [
+    {
+      "version": "1.0",
+      "note": "First version"
+    }
+  ]
+}

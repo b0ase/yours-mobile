@@ -1,0 +1,28 @@
+{
+  "format": "bwalletx.strategy/1",
+  "name": "Two-token basket",
+  "version": "1.0",
+  "description": "Builds a small, even position in two tokens, $B0ASEX and $NPG, by buying whichever one it holds less of, in $1 steps. At most $4 a day and $40 in total. It can lose money: token prices can fall and listings can be thin. Two tokens is not diversification.",
+  "goals": "Keep roughly equal dollar amounts of $B0ASEX and $NPG. Each time, buy $1 of the one this account holds less of (by value). Never sell.",
+  "rules": {
+    "tokens": ["B0ASEX", "NPG"],
+    "actions": ["buy"],
+    "maxPerTradeUsd": 1,
+    "maxPerDayUsd": 4,
+    "maxTotalUsd": 40
+  },
+  "spec": {
+    "trades": "$B0ASEX and $NPG (BSV-21)",
+    "risk": "Medium",
+    "spends": "$1 a buy, $4/day, $40 total",
+    "often": "Up to 4 times a day",
+    "stops": "$40 spent",
+    "needs": "Agent account with at least $10 of BSV"
+  },
+  "changelog": [
+    {
+      "version": "1.0",
+      "note": "First version"
+    }
+  ]
+}
