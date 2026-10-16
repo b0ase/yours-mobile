@@ -1,9 +1,8 @@
 /** Wallet entry point to the Airdrops inbox, with a badge for new items since it was last opened. */
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { BookUser, Gift, Layers } from 'lucide-react';
-import { useAirdrops } from './useAirdrops';
+import { BookUser, CalendarDays, Layers } from 'lucide-react';
 import { AddressBook } from '../wallet/AddressBook';
+import { BCal } from '../wallet/BCal';
 import { requestAllCards } from '../wallet/allCardsOpen';
 import { BALANCE_CARDS_ENABLED } from '../storeBuild';
 
@@ -13,7 +12,8 @@ import { BALANCE_CARDS_ENABLED } from '../storeBuild';
 // notebook icon under the cards) and Airdrops on the right, each half the width; then a small square All cards icon
 // between them (moved here from beside Swap, which gets its full width back).
 // Owner, 16 Oct 2026: [Addresses] [square] [Airdrops], content-sized and centred as a group (no flex-grow), all
-// h-12. The border colour is a theme variable: an inline hex beat every theme override, so White/Gold never changed it.
+// h-12. Owner, 17 Oct 2026: Airdrops became Calendar (opens bCal, as the All cards sheet does), and the middle
+// All cards button is wider. Airdrops are still in bMail › Quarantine. The border colour is a theme variable: an inline hex beat every theme override, so White/Gold never changed it.
 const PILL = 'shrink-0 h-12 flex items-center gap-2 rounded-2xl px-4 border cursor-pointer';
 const LOOK = {
   background: 'var(--bw-surface)',
@@ -31,7 +31,7 @@ const AllCardsSquareImpl = () => (
     onClick={() => requestAllCards()}
     aria-label="All cards"
     title="All cards"
-    className="shrink-0 h-12 w-12 flex items-center justify-center rounded-2xl border cursor-pointer"
+    className="shrink-0 h-12 w-24 flex items-center justify-center rounded-2xl border cursor-pointer"
     style={LOOK}
   >
     <Layers size={18} color="var(--bw-accent-hi)" aria-hidden="true" />
@@ -40,9 +40,8 @@ const AllCardsSquareImpl = () => (
 const AllCardsSquare = BALANCE_CARDS_ENABLED ? AllCardsSquareImpl : () => null;
 
 export const AirdropsRow = () => {
-  const { badge, visible } = useAirdrops();
-  const navigate = useNavigate();
   const [book, setBook] = useState(false);
+  const [cal, setCal] = useState(false);
   return (
     <div className="w-[92%] mx-auto mt-4 flex justify-center items-center gap-3">
       <button type="button" onClick={() => setBook(true)} className={PILL} style={LOOK}>
@@ -50,22 +49,12 @@ export const AirdropsRow = () => {
         <span className={LABEL}>Addresses</span>
       </button>
       <AllCardsSquare />
-      <button type="button" onClick={() => navigate('/m/bmail?tab=quarantine')} className={PILL} style={LOOK}>
-        <Gift size={16} color="var(--bw-accent-hi)" />
-        <span className={LABEL}>Airdrops</span>
-        {badge > 0 ? (
-          <span
-            aria-label={`${badge} new`}
-            className="min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-bold flex items-center justify-center"
-            style={{ background: '#F04438', color: '#fff' }}
-          >
-            {badge > 99 ? '99+' : badge}
-          </span>
-        ) : (
-          visible.length > 0 && <span className="text-xs text-[#98A2B3]">{visible.length}</span>
-        )}
+      <button type="button" onClick={() => setCal(true)} className={PILL} style={LOOK}>
+        <CalendarDays size={16} color="var(--bw-accent-hi)" />
+        <span className={LABEL}>Calendar</span>
       </button>
       {book && <AddressBook onClose={() => setBook(false)} />}
+      {cal && <BCal onClose={() => setCal(false)} />}
     </div>
   );
 };
