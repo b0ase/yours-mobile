@@ -7,7 +7,8 @@
  *   - BusinessSheet: the host's "Set up your business agent" (paste a link → review the draft →
  *     publish) and the Orders list (refund = a normal send from the host's own wallet).
  */
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { BIZ_AGENT_ACCOUNT_ENABLED } from '../storeBuild';
 import { createPortal } from 'react-dom';
 import { sendBsv } from '@1sat/actions';
 import { Bot, Plus, Trash2, X } from 'lucide-react';
@@ -53,6 +54,11 @@ const GOLD = '#d4af37';
 const MUTED = '#8a8576';
 const LINE = '#2a2618';
 const PANEL = '#161410';
+// Business agent account (capped, Stop): bWalletX only, a lazy chunk behind the inlined flag (STORE-AUDIT.md).
+const BizAgentAccount = BIZ_AGENT_ACCOUNT_ENABLED ? lazy(() => import('../agents/business/BizAgentAccount')) : null;
+const AgentRefundButton = BIZ_AGENT_ACCOUNT_ENABLED
+  ? lazy(() => import('../agents/business/BizAgentAccount').then((m) => ({ default: m.AgentRefundButton })))
+  : null;
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const sats = (n: number) => `${n.toLocaleString('en-US')} sats`;
 
@@ -544,6 +550,31 @@ const OrdersList = ({ client, ticker, me }: { client: BchatClient; ticker: strin
                 {busy === o.id ? 'Refunding…' : 'Refund from my wallet'}
               </button>
             )}
+            {AgentRefundButton && isOwner && o.status === 'paid' && o.refund_to && (
+              <Suspense fallback={null}>
+                <AgentRefundButton
+                  ticker={ticker}
+                  resolve={async () => {
+                    const c = refundCheck(await getOrder(client, ticker, o.id), me);
+                    if (!c.ok) throw new Error(c.why);
+                    return { address: c.address, data: c.data };
+                  }}
+                  sats={Number(o.sats)}
+                  label={`Refund $${o.customer_handle}`}
+                  disabled={!!busy}
+                  onPaid={async (txid) => {
+                    const ok = await recordWithRetry(() => recordRefund(client, ticker, o.id, txid));
+                    addSnackbar(
+                      ok
+                        ? `Refunded $${o.customer_handle}`
+                        : 'Refund sent; recording it failed. Try again from Orders.',
+                      ok ? 'success' : 'error',
+                    );
+                    await load();
+                  }}
+                />
+              </Suspense>
+            )}
           </div>
         );
       })}
@@ -566,7 +597,7 @@ export const BusinessSheet = ({
   useBackClose(true, onClose);
   const { addSnackbar } = useSnackbar();
   const [state, setState] = useState<BizState | null>(null);
-  const [tab, setTab] = useState<'about' | 'setup' | 'orders'>('about');
+  const [tab, setTab] = useState<'about' | 'setup' | 'orders' | 'agent'>('about');
   const [url, setUrl] = useState('');
   const [draft, setDraft] = useState<BizProfile | null>(null);
   const [busy, setBusy] = useState('');
@@ -625,14 +656,29 @@ export const BusinessSheet = ({
           </button>
         </div>
         <div className="flex gap-2 mb-3">
-          {(['about', ...(canEdit ? ['setup'] : []), 'orders'] as const).map((t) => (
+          {(
+            [
+              'about',
+              ...(canEdit ? ['setup'] : []),
+              'orders',
+              ...(canEdit && BizAgentAccount ? ['agent'] : []),
+            ] as const
+          ).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t as typeof tab)}
               className="px-3 py-1 rounded-full text-xs font-semibold"
               style={tab === t ? { background: GOLD, color: '#1a1300' } : { border: `1px solid ${LINE}`, color: MUTED }}
             >
-              {t === 'about' ? 'What they sell' : t === 'setup' ? 'Set up' : canEdit ? 'Orders' : 'My orders'}
+              {t === 'about'
+                ? 'What they sell'
+                : t === 'setup'
+                  ? 'Set up'
+                  : t === 'agent'
+                    ? 'Agent account'
+                    : canEdit
+                      ? 'Orders'
+                      : 'My orders'}
             </button>
           ))}
         </div>
@@ -671,6 +717,12 @@ export const BusinessSheet = ({
                 : 'This room has no business agent.'}
             </div>
           ))}
+
+        {state && tab === 'agent' && canEdit && BizAgentAccount && (
+          <Suspense fallback={null}>
+            <BizAgentAccount ticker={ticker} />
+          </Suspense>
+        )}
 
         {state && tab === 'setup' && canEdit && (
           <div>

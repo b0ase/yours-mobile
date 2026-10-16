@@ -505,3 +505,15 @@ export const THEME_STORE_PAID_ENABLED: boolean = !(
   import.meta.env.VITE_CHANNEL === 'ios-store' ||
   import.meta.env.VITE_CHANNEL === 'android-play'
 );
+
+/**
+ * Business agent account (agents/business/): a capped account derived from the owner's seed that a room's
+ * business agent pays refunds from, with a daily limit and Stop. It moves money without a per-payment approval,
+ * so it is bWalletX only and off in every store build (STORE-AUDIT.md). Literal env check so Vite inlines it and
+ * Rollup drops the lazy BizAgentAccount chunk.
+ */
+export const BIZ_AGENT_ACCOUNT_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
