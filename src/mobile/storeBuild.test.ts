@@ -803,6 +803,6 @@ describe('THEME_STORE_PAID_ENABLED: store builds show Free themes only', () => {
     const page = src('./themeStore/ThemeStorePage.tsx');
     expect(page).toContain("THEME_STORE_PAID_ENABLED ? lazy(() => import('./Sections')) : null");
     expect(page).not.toMatch(/^import .*Sections/m);
-    expect(page).not.toMatch(/Sell something|Submitted for review|Seller gets/);
+    expect(page).not.toMatch(/Sell something|Selling opens soon|Seller gets/);
   });
 });

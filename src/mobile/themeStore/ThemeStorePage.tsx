@@ -15,7 +15,7 @@ const PaidTabs = THEME_STORE_PAID_ENABLED ? lazy(() => import('./PaidTabs')) : n
 const Sections = THEME_STORE_PAID_ENABLED ? lazy(() => import('./Sections')) : null;
 
 type Section = 'themes' | 'names' | 'subscriptions' | 'credits' | 'stickers' | 'services' | 'community';
-// A 2-column grid of category tiles (no sideways-scrolling filter row). Store builds: Themes and Names only.
+// A 2-column grid of category tiles (no sideways-scrolling filter row). Store builds: free Themes only (owner), no tiles.
 const SECTIONS: readonly (readonly [Section, string])[] = THEME_STORE_PAID_ENABLED
   ? [
       ['themes', 'Themes'],
@@ -26,10 +26,7 @@ const SECTIONS: readonly (readonly [Section, string])[] = THEME_STORE_PAID_ENABL
       ['services', 'Services'],
       ['community', 'Community'],
     ]
-  : [
-      ['themes', 'Themes'],
-      ['names', 'Names'],
-    ];
+  : [['themes', 'Themes']];
 
 export type StoreTab = 'free' | 'premium' | 'holders' | 'editions';
 const TABS: readonly (readonly [StoreTab, string])[] = THEME_STORE_PAID_ENABLED
@@ -66,20 +63,22 @@ export default function ThemeStorePage() {
     <div style={S.page}>
       <h1 style={S.h1}>bStore</h1>
       <p style={S.sub}>Things for your wallet, paid in BSV.</p>
-      <div role="tablist" aria-label="bStore sections" style={S.tiles}>
-        {SECTIONS.map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            role="tab"
-            aria-selected={section === id}
-            style={section === id ? S.tileOn : S.tile}
-            onClick={() => setSection(id)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      {SECTIONS.length > 1 && (
+        <div role="tablist" aria-label="bStore sections" style={S.tiles}>
+          {SECTIONS.map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={section === id}
+              style={section === id ? S.tileOn : S.tile}
+              onClick={() => setSection(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
       {section === 'names' && (
         <>
           <p style={S.sub}>Search, buy, claim and give names.</p>

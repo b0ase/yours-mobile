@@ -193,7 +193,7 @@ function Community({ account }: { account: string }) {
       {selling && <SellSheet account={account} onClose={() => setSelling(false)} />}
       <StatusList
         items={[
-          ['Draft a listing', true],
+          ['Draft a listing (saved on this device)', true],
           ['Submit for review by b', false],
           ['Live community listings', false],
           ['Report a listing', false],
@@ -226,13 +226,19 @@ function SellSheet({ account, onClose }: { account: string; onClose: () => void 
     type: 'one-off',
   });
   const [errors, setErrors] = useState<string[]>([]);
-  const [done, setDone] = useState(false);
+  const [saved, setSaved] = useState(false);
   const set = (p: Partial<Draft>) => setD((x) => ({ ...x, ...p }));
-  const submit = () => {
+  const saveDraft = () => {
     const r = draftToListing(d, `draft-${Date.now()}`);
     setErrors(r.errors);
-    // POST /api/bitsign/bstore/listings is a spec (docs/BSTORE.md); the draft stays on this device for now.
-    if (r.listing) setDone(true);
+    if (!r.listing) return;
+    // Nothing is sent: the server (docs/BSTORE.md) does not exist yet. The draft is kept on this device only.
+    try {
+      localStorage.setItem('bwallet.bstore.draft', JSON.stringify(r.listing));
+      setSaved(true);
+    } catch {
+      setErrors(['Could not save the draft on this device.']);
+    }
   };
   return (
     <div
@@ -262,116 +268,109 @@ function SellSheet({ account, onClose }: { account: string; onClose: () => void 
         }}
       >
         <h2 style={{ margin: '0 0 8px', fontSize: 20 }}>Sell something</h2>
-        {done ? (
-          <>
-            <p style={{ ...S.sub, color: 'var(--bw-text, #f2f2f0)' }}>
-              Submitted for review. b checks every listing before it goes live.
-            </p>
-            <button type="button" style={S.btn} onClick={onClose}>
-              Done
+        <>
+          <p style={S.muted}>Digital goods and services only. {feeSplitLabel()}.</p>
+          <div style={{ ...S.card, margin: '12px 0' }}>
+            <b>Not allowed</b>
+            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
+              {PROHIBITED.map((p) => (
+                <li key={p}>{p}</li>
+              ))}
+            </ul>
+          </div>
+          <select
+            aria-label="Category"
+            style={field}
+            value={d.category}
+            onChange={(e) => set({ category: e.target.value })}
+          >
+            <option value="">Category…</option>
+            {ALLOWED_CATEGORIES.map(([id, label]) => (
+              <option key={id} value={id}>
+                {label}
+              </option>
+            ))}
+          </select>
+          <input
+            aria-label="Title"
+            placeholder="Title"
+            style={field}
+            value={d.title}
+            onChange={(e) => set({ title: e.target.value })}
+          />
+          <textarea
+            aria-label="Description"
+            placeholder="What buyers get"
+            rows={4}
+            style={field}
+            value={d.description}
+            onChange={(e) => set({ description: e.target.value })}
+          />
+          <div className="bw-cdes-seg" role="tablist" aria-label="Type" style={{ marginBottom: 10 }}>
+            {(['one-off', 'subscription'] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                role="tab"
+                aria-selected={d.type === t}
+                className={d.type === t ? 'on' : ''}
+                onClick={() => set({ type: t })}
+              >
+                {t === 'one-off' ? 'One-off' : 'Subscription'}
+              </button>
+            ))}
+          </div>
+          <input
+            aria-label="Price in USD"
+            placeholder="Price (USD, paid in BSV)"
+            inputMode="decimal"
+            style={field}
+            value={d.price}
+            onChange={(e) => set({ price: e.target.value })}
+          />
+          {d.type === 'subscription' && (
+            <>
+              <select
+                aria-label="Period"
+                style={field}
+                value={d.period ?? ''}
+                onChange={(e) => set({ period: (e.target.value || undefined) as Period | undefined })}
+              >
+                <option value="">Per…</option>
+                <option value="day">day</option>
+                <option value="week">week</option>
+                <option value="month">month</option>
+              </select>
+              <textarea
+                aria-label="Perks"
+                placeholder="Perks, one per line"
+                rows={3}
+                style={field}
+                value={d.perks ?? ''}
+                onChange={(e) => set({ perks: e.target.value })}
+              />
+            </>
+          )}
+          {saved && <p style={S.muted}>Draft saved on this device. Not sent: selling opens soon.</p>}
+          {errors.length > 0 && (
+            <ul role="alert" style={{ margin: '0 0 10px', paddingLeft: 18, fontSize: 13 }}>
+              {errors.map((e) => (
+                <li key={e}>{e}</li>
+              ))}
+            </ul>
+          )}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" style={S.btn} onClick={saveDraft}>
+              Save draft
             </button>
-          </>
-        ) : (
-          <>
-            <p style={S.muted}>Digital goods and services only. {feeSplitLabel()}.</p>
-            <div style={{ ...S.card, margin: '12px 0' }}>
-              <b>Not allowed</b>
-              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
-                {PROHIBITED.map((p) => (
-                  <li key={p}>{p}</li>
-                ))}
-              </ul>
-            </div>
-            <select
-              aria-label="Category"
-              style={field}
-              value={d.category}
-              onChange={(e) => set({ category: e.target.value })}
-            >
-              <option value="">Category…</option>
-              {ALLOWED_CATEGORIES.map(([id, label]) => (
-                <option key={id} value={id}>
-                  {label}
-                </option>
-              ))}
-            </select>
-            <input
-              aria-label="Title"
-              placeholder="Title"
-              style={field}
-              value={d.title}
-              onChange={(e) => set({ title: e.target.value })}
-            />
-            <textarea
-              aria-label="Description"
-              placeholder="What buyers get"
-              rows={4}
-              style={field}
-              value={d.description}
-              onChange={(e) => set({ description: e.target.value })}
-            />
-            <div className="bw-cdes-seg" role="tablist" aria-label="Type" style={{ marginBottom: 10 }}>
-              {(['one-off', 'subscription'] as const).map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  role="tab"
-                  aria-selected={d.type === t}
-                  className={d.type === t ? 'on' : ''}
-                  onClick={() => set({ type: t })}
-                >
-                  {t === 'one-off' ? 'One-off' : 'Subscription'}
-                </button>
-              ))}
-            </div>
-            <input
-              aria-label="Price in USD"
-              placeholder="Price (USD, paid in BSV)"
-              inputMode="decimal"
-              style={field}
-              value={d.price}
-              onChange={(e) => set({ price: e.target.value })}
-            />
-            {d.type === 'subscription' && (
-              <>
-                <select
-                  aria-label="Period"
-                  style={field}
-                  value={d.period ?? ''}
-                  onChange={(e) => set({ period: (e.target.value || undefined) as Period | undefined })}
-                >
-                  <option value="">Per…</option>
-                  <option value="day">day</option>
-                  <option value="week">week</option>
-                  <option value="month">month</option>
-                </select>
-                <textarea
-                  aria-label="Perks"
-                  placeholder="Perks, one per line"
-                  rows={3}
-                  style={field}
-                  value={d.perks ?? ''}
-                  onChange={(e) => set({ perks: e.target.value })}
-                />
-              </>
-            )}
-            {errors.length > 0 && (
-              <ul role="alert" style={{ margin: '0 0 10px', paddingLeft: 18, fontSize: 13 }}>
-                {errors.map((e) => (
-                  <li key={e}>{e}</li>
-                ))}
-              </ul>
-            )}
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button type="button" style={S.btn} onClick={submit}>
-                Submit for review
-              </button>
-              <button type="button" style={S.ghost} onClick={onClose}>
-                Cancel
-              </button>
-            </div>
-          </>
-        )}
+            <button type="button" style={S.ghost} disabled>
+              Selling opens soon
+            </button>
+            <button type="button" style={S.ghost} onClick={onClose}>
+              Close
+            </button>
+          </div>
+        </>
       </div>
     </div>
   );

@@ -14,13 +14,13 @@ A 2-column grid of category tiles at the top. No sideways-scrolling filter row.
 | ---------------- | -------------------------------------------------------------------------- | ----------- |
 | Themes           | Free / Premium / Holders / Editions (the old Theme Store tabs)             | Free only   |
 | Subscriptions    | Open listing type: seller, price per day/week/month, perks, cancel anytime | Hidden      |
-| Names            | Links the Name Store (`/m/names`)                                          | Shown       |
+| Names            | Links the Name Store (`/m/names`)                                          | Hidden      |
 | Credits          | Links the bCredits top-up (`/m/credits`, `BCREDITS_ENABLED`)               | Hidden      |
 | Stickers & emoji | Sticker and emoji packs (bCorp and creators)                               | Hidden      |
 | Services         | Theme edition order ($99 a year, existing flow), business agent in a room  | Hidden      |
 | Community        | Third-party listings, Sell something, Report                               | Hidden      |
 
-Store builds (App Store / Play): everything except Themes (Free) and Names is in `Sections.tsx` / `PaidTabs.tsx`,
+Store builds (App Store / Play): everything except free Themes is in `Sections.tsx` / `PaidTabs.tsx`,
 lazy chunks behind the inlined `THEME_STORE_PAID_ENABLED`, so the bundle has none of the text. See
 `docs/STORE-AUDIT.md` for the grep strings.
 
@@ -62,7 +62,7 @@ Shown in the sell flow. b rejects any listing that is or offers:
 
 ## Moderation
 
-1. Seller drafts a listing in the app (Sell something) and submits it. Status `pending`.
+1. Seller drafts a listing in the app (Sell something) and submits it (once the server exists). Status `pending`.
 2. b reviews it against the allowed categories and the prohibited list (text, images, price sanity). Unsure
    cases go to a human queue.
 3. Approved → `live`. Rejected → seller is told why in chat.
@@ -98,9 +98,9 @@ non-custodial: bStore never holds buyer funds.
 ## Live vs Coming
 
 Live (this PR): bStore name, section tiles, Themes (as before), Names and Credits links, Services (edition order,
-business agent link), subscription listings view with Example seeds, Sell something draft with validation and
-the prohibited list, fee split shown, store-build gating.
+business agent link), subscription listings view with Example seeds, Sell something draft (validated, saved on the device only) with the
+prohibited list, fee split shown, store-build gating.
 
-Coming: buying or subscribing (buttons show "Coming"), submitting to the server (the app shows "Submitted for
-review" but the draft stays on the device), b review queue, live community listings, reports reaching the
+Coming: buying or subscribing (buttons show "Coming"), submitting to the server (the button says "Selling opens soon"; Save
+draft keeps it on the device and says so), b review queue, live community listings, reports reaching the
 server, sticker packs, renewals.
