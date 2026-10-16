@@ -106,3 +106,17 @@ describe('themed installs', () => {
     g.document = prev;
   });
 });
+
+describe('/white edition entry', () => {
+  test('counts as ?theme=white once and lands on /', () => {
+    store.clear();
+    replaced.length = 0;
+    href = 'https://web.bwalletx.com/white';
+    expect(applyThemeParam()).toBe('white');
+    expect(replaced).toEqual(['/']);
+    store.set('bwx.accent.boot', 'cyber');
+    href = 'https://web.bwalletx.com/white/';
+    expect(applyThemeParam()).toBeNull();
+    expect(store.get('bwx.accent.boot')).toBe('cyber');
+  });
+});

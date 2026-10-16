@@ -116,9 +116,12 @@ export function applyThemeParam(): AccentId | null {
   } catch {
     return null;
   }
-  if (!url.searchParams.has('theme')) return null;
-  const raw = (url.searchParams.get('theme') ?? '').trim().toLowerCase();
+  // web.bwalletx.com/white (the White edition's install entry) counts as ?theme=white and opens the wallet home.
+  const edition = url.pathname.replace(/\/+$/, '') === '/white';
+  if (!edition && !url.searchParams.has('theme')) return null;
+  const raw = edition ? 'white' : (url.searchParams.get('theme') ?? '').trim().toLowerCase();
   url.searchParams.delete('theme');
+  if (edition) url.pathname = '/';
   try {
     window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
   } catch {
