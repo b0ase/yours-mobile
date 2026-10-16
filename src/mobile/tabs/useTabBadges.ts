@@ -4,10 +4,10 @@ import { useAirdrops } from '../airdrops/useAirdrops';
 import { useBMailUnread } from '../bmail/useBMail';
 import { loadSession, SESSION_EVENT } from '../chat/api';
 import { roomKeyOf, useListPrefs } from '../chat/listPrefs';
-import { badgesVersion, chatUnread, feedNew, markFeedViewed, subscribeBadges } from './tabBadges';
+import { badgesVersion, chatUnread, chatUnreadSplit, feedNew, markFeedViewed, subscribeBadges } from './tabBadges';
 
 /** The signed-in chat handle (null when signed out), live across sign in / out. */
-const useChatHandle = () => {
+export const useChatHandle = () => {
   const [handle, setHandle] = useState<string | null>(() => loadSession()?.handle ?? null);
   useEffect(() => {
     const on = () => setHandle(loadSession()?.handle ?? null);
@@ -39,4 +39,13 @@ export const useTabBadges = () => {
 export const useBMailBadge = () => {
   const { badge: drops } = useAirdrops();
   return drops + useBMailUnread();
+};
+
+/** Chat tab top filters: unread DMs and unread group / room messages (muted left out). Calls are counted in ChatSegments. */
+export const useChatSplitBadges = (): { dms: number; rooms: number } => {
+  useSyncExternalStore(subscribeBadges, badgesVersion);
+  const handle = useChatHandle();
+  const [prefs] = useListPrefs(handle);
+  const muted = new Set(prefs.muted);
+  return handle ? chatUnreadSplit((t) => muted.has(roomKeyOf(t))) : { dms: 0, rooms: 0 };
 };

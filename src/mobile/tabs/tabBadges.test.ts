@@ -4,6 +4,8 @@ import {
   badgeText,
   badgesVersion,
   chatUnread,
+  chatUnreadSplit,
+  missedCallsSince,
   clearChatBadges,
   countNewSince,
   feedNew,
@@ -101,5 +103,34 @@ describe('feed new posts', () => {
     const v = badgesVersion();
     markFeedViewed();
     expect(badgesVersion()).toBe(v);
+  });
+});
+
+describe('Chat filter badges', () => {
+  test('splits unread into DMs and rooms, muted left out', () => {
+    setChatRooms([
+      { ticker: 'DM1', name: '$me ↔ $alice', unread: 2 },
+      { ticker: 'DM2', name: '$me ↔ $bob', unread: 1 },
+      { ticker: '$LOUNGE', name: 'Lounge', unread: 4 },
+      { ticker: 'VEX', unread: 3 },
+    ]);
+    expect(chatUnreadSplit()).toEqual({ dms: 3, rooms: 7 });
+    expect(chatUnreadSplit((t) => t === 'DM2' || t === 'VEX')).toEqual({ dms: 2, rooms: 4 });
+    mergeChatRooms([{ ticker: 'DM3', name: '$me ↔ $carol', unread: 5 }]);
+    expect(chatUnreadSplit().dms).toBe(8);
+  });
+  test('missed calls: incoming, unanswered, after the cursor', () => {
+    const at = (s: string) => `2026-10-16T0${s}:00:00Z`;
+    const calls = [
+      { id: 'a', direction: 'incoming', status: 'missed', answered_at: null, created_at: at('2') },
+      { id: 'b', direction: 'incoming', status: 'ended', answered_at: at('3'), created_at: at('3') },
+      { id: 'c', direction: 'outgoing', status: 'missed', answered_at: null, created_at: at('4') },
+      { id: 'd', direction: 'incoming', status: 'ringing', answered_at: null, created_at: at('5') },
+      { id: 'e', direction: 'incoming', status: 'cancelled', answered_at: null, created_at: at('1') },
+    ];
+    expect(missedCallsSince(calls, Date.parse(at('0')))).toBe(2);
+    expect(missedCallsSince(calls, Date.parse(at('1')))).toBe(1);
+    expect(missedCallsSince(calls, Date.parse(at('0')), new Set(['a']))).toBe(1);
+    expect(missedCallsSince(calls, null)).toBe(0);
   });
 });
