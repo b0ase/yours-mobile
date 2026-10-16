@@ -71,6 +71,17 @@ export const TOKENBLASTER_ENABLED: boolean = !(
 );
 
 /**
+ * Airdrop to holders (issuer tool, 16 Oct 2026, `holderDrop/`): send a token or BSV to every holder of a token
+ * in one go. bWalletX only: a token airdrop to a token's holders rewards holding it (STORE-AUDIT 2), so the
+ * sheet is a lazy chunk behind this literal env check and not in the store bundle. Same env as STORE_BUILD.
+ */
+export const HOLDER_DROP_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+
+/**
  * Owner apps left out of a store build: TokenBlaster sells guns and runs a coin launchpad, so a store
  * app linking to it would point users at outside buying (Apple 3.1.1/3.1.5, Play Payments).
  */
