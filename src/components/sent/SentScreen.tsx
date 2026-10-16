@@ -6,8 +6,13 @@ import { loadPrefs } from '../../mobile/settings/prefs';
 import { playChime, primeChime } from './chime';
 import { formatRecipients, formatSentAmount, getSent, onSent, setSent, txUrl, type SentInfo } from './sent';
 
-const GOLD = 'var(--bw-accent-hi)';
-const GOLD_DEEP = '#E0A800';
+// Theme tokens (owner, 17 Oct 2026: the white theme showed a black/gold screen). Follows the active
+// theme, falling back to the original dark-and-gold look when no theme is set.
+const BG = 'var(--bw-bg, #0b0b0b)';
+const TEXT = 'var(--bw-text, #fff)';
+const MUTED = 'var(--bw-muted, rgba(255,255,255,0.6))';
+const ACCENT = 'var(--bw-accent, #E0A800)';
+const ON_ACCENT = 'var(--bw-on-accent, #111)';
 const AUTO_DISMISS_MS = 4500;
 
 /** The Sent! moment itself (presentational; SentHost mounts it app-wide). */
@@ -37,10 +42,10 @@ export const SentScreen = ({
       className="fixed inset-0 flex flex-col items-center justify-center px-6"
       style={{
         zIndex: 2147483000,
-        background: 'radial-gradient(120% 80% at 50% 30%, #1d1606 0%, #0b0b0b 55%, #000 100%)',
+        background: BG,
         paddingTop: 'env(safe-area-inset-top)',
         paddingBottom: 'env(safe-area-inset-bottom)',
-        color: '#fff',
+        color: TEXT,
       }}
     >
       <motion.div
@@ -51,14 +56,14 @@ export const SentScreen = ({
         style={{
           width: 120,
           height: 120,
-          background: `linear-gradient(145deg, ${GOLD} 0%, ${GOLD_DEEP} 100%)`,
-          boxShadow: `0 0 0 10px rgb(var(--bw-accent-hi-rgb) / 0.12), 0 0 60px rgb(var(--bw-accent-hi-rgb) / 0.35)`,
+          background: ACCENT,
+          boxShadow: `0 0 0 10px color-mix(in srgb, ${ACCENT} 14%, transparent)`,
         }}
       >
         <svg width="64" height="64" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <motion.path
             d="M5 12.5l4.5 4.5L19 7.5"
-            stroke="#111"
+            stroke={ON_ACCENT}
             strokeWidth={2.6}
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -76,18 +81,18 @@ export const SentScreen = ({
         className="flex flex-col items-center text-center w-full"
         style={{ maxWidth: 360 }}
       >
-        <h1 id="sent-title" className="mt-7 text-3xl font-bold" style={{ color: GOLD }}>
+        <h1 id="sent-title" className="mt-7 text-3xl font-bold" style={{ color: TEXT }}>
           {info.title ?? 'Sent!'}
         </h1>
         <div className="mt-4 text-4xl font-semibold tracking-tight break-all">{primary}</div>
         {secondary && (
-          <div className="mt-1 text-sm" style={{ color: 'rgba(255,255,255,0.6)' }}>
+          <div className="mt-1 text-sm" style={{ color: MUTED }}>
             {secondary}
           </div>
         )}
         {to && (
-          <div className="mt-5 text-sm" style={{ color: 'rgba(255,255,255,0.75)' }}>
-            to <span className="font-semibold text-white break-all">{to}</span>
+          <div className="mt-5 text-sm" style={{ color: MUTED }}>
+            to <span className="font-semibold break-all" style={{ color: TEXT }}>{to}</span>
           </div>
         )}
         <a
@@ -95,7 +100,7 @@ export const SentScreen = ({
           target="_blank"
           rel="noopener noreferrer"
           className="mt-6 inline-flex items-center gap-1.5 text-sm font-medium"
-          style={{ color: GOLD }}
+          style={{ color: TEXT }}
         >
           View transaction <ExternalLink size={14} />
         </a>
@@ -104,7 +109,7 @@ export const SentScreen = ({
           autoFocus
           onClick={onDone}
           className="mt-8 w-full rounded-2xl py-3.5 text-base font-semibold"
-          style={{ background: `linear-gradient(90deg, ${GOLD} 0%, ${GOLD_DEEP} 100%)`, color: '#111' }}
+          style={{ background: ACCENT, color: ON_ACCENT }}
         >
           Done
         </button>

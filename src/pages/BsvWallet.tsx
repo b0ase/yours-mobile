@@ -2076,18 +2076,6 @@ export const BsvWallet = () => {
         </div>
       </div>
 
-      {/* BSV price, last 30 days */}
-      <div className="w-full mb-5 rounded-2xl p-4" style={{ background: theme.color.global.row }}>
-        <BsvPriceChart />
-      </div>
-      {/* Buy BSV under the chart (owner, 6 Oct 2026). */}
-      {BUY_CRYPTO_ENABLED && (
-        <BuyBsvButton
-          className="w-full mb-5"
-          onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))}
-        />
-      )}
-
       {/* Send card (src/mobile/wallet/send): recipient first, dollars first, one clear button. */}
       <SendCard
         theme={theme}
@@ -2104,6 +2092,21 @@ export const BsvWallet = () => {
         onAmountEdited={() => setSatSendAmount(null)}
         onSubmit={(e) => handleSendBsv(e)}
       />
+
+      {/* Price chart and Buy BSV go BELOW the form (owner, 17 Oct 2026: "No one wants to see the price
+          chart when they press send"), so Send opens on who you're paying. */}
+      {/* BSV price, last 30 days */}
+      <div className="w-full mt-5 mb-5 rounded-2xl p-4" style={{ background: theme.color.global.row }}>
+        <BsvPriceChart />
+      </div>
+      {/* Buy BSV under the chart (owner, 6 Oct 2026). */}
+      {BUY_CRYPTO_ENABLED && (
+        <BuyBsvButton
+          className="w-full mb-5"
+          onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))}
+        />
+      )}
+
 
       <div className="w-full px-4">
         <CoinHistory filter={{ type: 'bsv' }} refreshKey={bsvHistoryRefreshKey} />
