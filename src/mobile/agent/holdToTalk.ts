@@ -27,6 +27,10 @@ export type HoldToTalkOptions = {
   /** null = not known yet (treated as supported; startVoice reports the real reason). */
   supported: () => boolean | null;
   haptic: () => void;
+  /** Web: start the recogniser synchronously inside the press (Safari needs the user gesture). */
+  prime?: () => void;
+  /** Drop the primed recogniser (tap, cancel, unmount). */
+  unprime?: () => void;
   platform?: VoicePlatform;
   holdMs?: number;
   setTimer?: (fn: () => void, ms: number) => unknown;
@@ -72,9 +76,12 @@ export function createHoldToTalk(o: HoldToTalkOptions) {
 
   const dispatch = (e: BHoldEvent) => {
     const r = bHold(hold, e);
+    const was = hold.phase;
     hold = r.state;
     if (hold.phase === 'idle') stopTimer();
     emit();
+    // Back to idle without a voice session (tap, cancel, no-voice release): drop any primed recogniser.
+    if (was !== 'idle' && hold.phase === 'idle' && !voice) o.unprime?.();
     switch (r.effect) {
       case 'home':
         return o.onTap();
@@ -105,6 +112,8 @@ export function createHoldToTalk(o: HoldToTalkOptions) {
     sheet: () => sheet,
     down(x: number, y: number) {
       if (hold.phase !== 'idle') return;
+      // Synchronous, before anything is awaited: this is still the user's gesture.
+      if (o.supported() !== false) o.prime?.();
       dispatch({ type: 'down', x, y });
       stopTimer();
       timer = setT(() => {
@@ -118,6 +127,7 @@ export function createHoldToTalk(o: HoldToTalkOptions) {
     dispose() {
       stopTimer();
       cancelVoice();
+      o.unprime?.();
       alive = false;
     },
   };
