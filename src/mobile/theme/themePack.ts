@@ -87,8 +87,9 @@ export const BUNDLED_PACKS: readonly ThemePack[] = THEMES.map(packOfAccent);
 /** Light themes: white/light cards and black text (house rule), at AA contrast. The page may be paper-coloured. */
 export const lightLookOk = (l: ThemeLook): boolean =>
   luminance(l.bg) > 0.4 &&
-  luminance(l.surface) > 0.6 &&
-  luminance(l.surface2) > 0.5 &&
+  // Paper stock (Pink, Blue, Yellow): cards are shades of the page colour, never white, so the bar is the page's own.
+  luminance(l.surface) > Math.min(0.6, luminance(l.bg)) &&
+  luminance(l.surface2) > Math.min(0.5, luminance(l.bg) * 0.8) &&
   luminance(l.text) < 0.05 &&
   contrast(l.text, l.surface) >= 4.5 &&
   contrast(l.text, l.bg) >= 4.5;
