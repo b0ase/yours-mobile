@@ -51,7 +51,6 @@ export default function ScanSheet({
 
   useBackClose(true, onClose);
 
-
   const pay = (to: string, amountSats?: number) => {
     if (onPay) onPay(to, amountSats);
     else {
