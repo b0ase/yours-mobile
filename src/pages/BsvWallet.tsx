@@ -1169,7 +1169,7 @@ export const BsvWallet = () => {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -12 }}
       transition={{ duration: 0.28, ease: 'easeOut' }}
-      className="flex flex-col items-center w-full pt-14 pb-20 px-4 overflow-y-auto overflow-x-hidden self-start"
+      className="flex flex-col items-center w-full pt-14 px-4 overflow-y-auto bw-dock-pad overflow-x-hidden self-start"
       style={{ height: '100%', backgroundColor: theme.color.global.walletBackground }}
     >
       {/* Header row */}
@@ -1392,7 +1392,7 @@ export const BsvWallet = () => {
           hidden: {},
           visible: { transition: { staggerChildren: 0.07 } },
         }}
-        className="flex flex-col items-center w-full pt-14 pb-16 overflow-y-auto"
+        className="flex flex-col items-center w-full pt-14 pb-16 overflow-y-auto bw-dock-pad"
         style={{ minHeight: '100%' }}
       >
         {/* ── BSV price + Buy BSV (owner, 6 Oct 2026); the migration banner moved below the token buttons ── */}
@@ -1812,7 +1812,7 @@ export const BsvWallet = () => {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -12 }}
       transition={{ duration: 0.28, ease: 'easeOut' }}
-      className="flex flex-col items-center w-full pt-14 pb-20 px-4 overflow-y-auto overflow-x-hidden self-start"
+      className="flex flex-col items-center w-full pt-14 px-4 overflow-y-auto bw-dock-pad overflow-x-hidden self-start"
       style={{ height: '100%', backgroundColor: theme.color.global.walletBackground }}
     >
       {/* Header */}
@@ -1996,7 +1996,7 @@ export const BsvWallet = () => {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -12 }}
       transition={{ duration: 0.28, ease: 'easeOut' }}
-      className="flex flex-col items-center w-full pt-14 pb-20 px-4 overflow-y-auto overflow-x-hidden self-start"
+      className="flex flex-col items-center w-full pt-14 px-4 overflow-y-auto bw-dock-pad overflow-x-hidden self-start"
       style={{ height: '100%', backgroundColor: theme.color.global.walletBackground }}
     >
       {/* Header */}
@@ -2052,7 +2052,7 @@ export const BsvWallet = () => {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -12 }}
       transition={{ duration: 0.28, ease: 'easeOut' }}
-      className="flex flex-col items-center w-full pt-14 pb-20 px-4 overflow-y-auto overflow-x-hidden self-start"
+      className="flex flex-col items-center w-full pt-14 px-4 overflow-y-auto bw-dock-pad overflow-x-hidden self-start"
       style={{ height: '100%', backgroundColor: theme.color.global.walletBackground }}
     >
       {/* Header */}
