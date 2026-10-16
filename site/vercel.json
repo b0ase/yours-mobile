@@ -1,6 +1,34 @@
 {
   "rewrites": [
     {
+      "source": "/authorize",
+      "destination": "/api/auth?op=authorize"
+    },
+    {
+      "source": "/token",
+      "destination": "/api/auth?op=token"
+    },
+    {
+      "source": "/userinfo",
+      "destination": "/api/auth?op=userinfo"
+    },
+    {
+      "source": "/wallet",
+      "destination": "/api/auth?op=wallet"
+    },
+    {
+      "source": "/.well-known/openid-configuration",
+      "destination": "/api/auth?op=discovery"
+    },
+    {
+      "source": "/.well-known/jwks.json",
+      "destination": "/api/auth?op=jwks"
+    },
+    {
+      "source": "/api/auth/:op",
+      "destination": "/api/auth?op=:op"
+    },
+    {
       "source": "/pair",
       "destination": "/pair.html"
     },

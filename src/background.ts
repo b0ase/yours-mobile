@@ -4272,3 +4272,36 @@ chrome.tabs?.onUpdated?.addListener((tabId, info, tab) => {
   if (sp?.open) Promise.resolve(sp.open({ tabId, windowId: tab.windowId })).catch(nudge);
   else nudge();
 });
+
+// ─── Sign in with bWalletX ───────────────────────────────────
+// auth.bwalletx.com/authorize's "Use the Chrome extension" button opens auth.bwalletx.com/wallet?id=<32 hex>.
+// Hand the URL to the side panel (src/mobile/auth/authLink.ts reads AUTH_LINK_KEY), which shows the one-sheet
+// approval. Only the request id travels; the panel fetches the request from the server it trusts.
+const AUTH_LINK_KEY = 'bwalletxPendingAuthLink';
+const isAuthUrl = (url?: string) => {
+  if (!url) return false;
+  try {
+    const u = new URL(url);
+    return u.origin === 'https://auth.bwalletx.com' && u.pathname === '/wallet' && /^[0-9a-f]{32}$/.test(u.searchParams.get('id') ?? '');
+  } catch {
+    return false;
+  }
+};
+const seenAuthLinks = new Set<string>();
+chrome.tabs?.onUpdated?.addListener((tabId, info, tab) => {
+  const url = info.url ?? (info.status === 'loading' ? tab.url : undefined);
+  if (!isAuthUrl(url) || seenAuthLinks.has(url!)) return;
+  seenAuthLinks.add(url!);
+  void chrome.storage.local.set({ [AUTH_LINK_KEY]: url });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sp = (chrome as any).sidePanel;
+  const nudge = () =>
+    chrome.notifications?.create('bwalletx-auth', {
+      type: 'basic',
+      iconUrl: 'icons/icon128.png',
+      title: 'Sign-in request',
+      message: 'Open bWalletX (toolbar icon) to approve.',
+    });
+  if (sp?.open) Promise.resolve(sp.open({ tabId, windowId: tab.windowId })).catch(nudge);
+  else nudge();
+});
