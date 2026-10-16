@@ -93,6 +93,8 @@ export const PhoneShell = () => {
 
 const Shell = () => {
   const navigate = useNavigate();
+  // The wallet dock stays on every page, bApps included (owner, 16 Oct 2026: a bApp bar in its place left bMail
+  // with four greyed slots, so the dock looked dead). The bApp's sections open from its icon in the top bar.
   const { pathname } = useLocation();
   const menu = useContext(BottomMenuContext);
   const { apiContext, chromeStorageService } = useServiceContext();

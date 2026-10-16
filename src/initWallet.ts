@@ -39,11 +39,12 @@ import { showOneSatPrompt } from './services/oneSatPrompt';
 import {
   runSpendPass,
   runStaleFix,
+  runUnseenHeal,
   runStartupTokenHeal,
   runTokenRecovery,
   type TokenHealArgs,
 } from './services/tokenRecoveryWallet';
-import type { HealAction, SpendPassReport, StaleFixResult } from './services/tokenSendHeal';
+import type { HealAction, SpendPassReport, StaleFixResult, UnseenHealReport } from './services/tokenSendHeal';
 import { planAddressScan, resetSyncCursor } from './services/addressScan';
 import {
   checkReceiveAddresses,
@@ -134,6 +135,8 @@ export interface AccountContext {
   fixStaleToken: (tokenId: string) => Promise<StaleFixResult>;
   /** Repair Sync's final pass: relinquish token outputs the overlay or chain reports spent. */
   dropSpentTokens: () => Promise<SpendPassReport>;
+  /** Token outputs the overlay doesn't know: submit, rebroadcast, or relinquish (all tokens, or one). */
+  healUnseenTokens: (tokenId?: string, keysOnly?: boolean) => Promise<UnseenHealReport>;
   /** Run the address sync now, or join the run already in flight (services/addressResync.ts). Quiet = no spinner. */
   resyncAddresses: (options?: { quiet?: boolean }) => Promise<void>;
   /** When the last address sync finished (ms since epoch), 0 before the first. */
@@ -506,6 +509,8 @@ export const initWallet = async (
   };
   const fixStaleToken = (tokenId: string) => runStaleFix(tokenHealArgs, tokenId);
   const dropSpentTokens = () => runSpendPass(tokenHealArgs);
+  const healUnseenTokens = (tokenId?: string, keysOnly?: boolean) =>
+    runUnseenHeal(tokenHealArgs, { tokenId, keysOnly });
   let tokenHealDone = false;
   /** Once per open: token sends broadcast but left unfinished (a suspended Safari tab), then the usual walk. */
   const startupTokenHeal = async () => {
@@ -844,6 +849,7 @@ export const initWallet = async (
     recoverTokens,
     fixStaleToken,
     dropSpentTokens,
+    healUnseenTokens,
     resyncAddresses,
     lastAddressSyncAt: addressSync.lastFinishedAt,
     addressSyncBusy: addressSync.busy,

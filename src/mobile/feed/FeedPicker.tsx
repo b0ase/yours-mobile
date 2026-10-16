@@ -131,7 +131,10 @@ export const FeedPicker = ({
       <div
         aria-hidden
         className="pointer-events-none absolute inset-y-0 right-0 w-10"
-        style={{ background: 'linear-gradient(to right, rgba(0,0,0,0), rgba(0,0,0,0.85))' }}
+        style={{
+          background:
+            'linear-gradient(to right, rgb(var(--bw-fade-rgb, 0 0 0) / 0), rgb(var(--bw-fade-rgb, 0 0 0) / 0.85))',
+        }}
       />
     </div>
   );

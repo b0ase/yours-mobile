@@ -167,6 +167,25 @@ describe('TOKENBLASTER_ENABLED: tokenblaster.lol data and the 1Sat Ordnance 3D c
   });
 });
 
+describe('HOLDER_DROP_ENABLED: Airdrop to holders is bWalletX only', () => {
+  const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  const cond = (text: string, name: string) =>
+    (new RegExp(`export const ${name}: boolean =\\s*!?\\(?([^;]*?)\\)?;`, 's').exec(text)?.[1] ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  test('inverse of STORE_BUILD, from the same env', async () => {
+    const { HOLDER_DROP_ENABLED } = await import('./storeBuild');
+    expect(HOLDER_DROP_ENABLED).toBe(!STORE_BUILD);
+    const s = src('./storeBuild.ts');
+    expect(cond(s, 'HOLDER_DROP_ENABLED')).toBe(cond(s, 'STORE_BUILD'));
+  });
+  test('the sheet is only a lazy import behind the flag', () => {
+    const v = src('../components/SendBsv21View.tsx');
+    expect(v).not.toMatch(/^import [^;]*holderDrop\//m);
+    expect(v).toMatch(/HOLDER_DROP_ENABLED\s*\?\s*lazy\(\(\) => import\('\.\.\/mobile\/holderDrop\/HolderDropSheet'\)/);
+  });
+});
+
 describe('pots and subscriptions: pots + person standing orders everywhere, services and billing bWalletX only', () => {
   const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
   const cond = (text: string, name: string) =>
@@ -358,7 +377,7 @@ describe('store build has no Market', () => {
     const x = src('./exchangeAppsX.ts');
     expect(x).toMatch(/EXCHANGE_BAPPS[^=]*= MARKET_ENABLED\s*\?/);
     expect(x).toMatch(/MARKET_APPS[^=]*= MARKET_ENABLED\s*\?/);
-    expect(x).toContain("'./brand/apps/bexchange.png'");
+    expect(x).toContain("bappIconUrl('bexchange')");
     const st = src('./exchangeAppsX.store.ts');
     expect(st).not.toMatch(/bExchange|bexchange|Markets|\.png/);
     expect(st).toContain('EXCHANGE_BAPPS: BApp[] = []');

@@ -1,18 +1,3 @@
-import bdnsIcon from './brand/bdns-icon.png';
-import bsearchIcon from './brand/bsearch-icon.png';
-import bidIcon from './brand/bid-icon.png';
-import bjobsIcon from './brand/apps/bjobs.png';
-import bcodeIcon from './brand/apps/bcode.png';
-import bdriveIcon from './brand/apps/bdrive.png';
-import bvideoIcon from './brand/bvideo-icon.png';
-import bcalIcon from './brand/apps/bcal.png';
-import bsheetsIcon from './brand/apps/bsheets.png';
-import bmintIcon from './brand/bmint-icon.png';
-import app_bchatIcon from './brand/apps/bchat.png';
-import app_bpaintIcon from './brand/apps/bpaint.png';
-import app_beduIcon from './brand/apps/bedu.png';
-import app_bmapsIcon from './brand/apps/bmaps.png';
-import app_bagentsIcon from './brand/apps/bagents.png';
 import { bappIconUrl } from './brand/bappIcons';
 import { STORE_BUILD } from './storeBuild';
 import { EXCHANGE_BAPPS } from './exchangeAppsX';
@@ -20,10 +5,7 @@ import { EXCHANGE_BAPPS } from './exchangeAppsX';
  * The bApps store (Apps › bApps): The Bitcoin Corporation's own apps. Edit here.
  * status: 'live' = the site answered 200 with a real page when checked
  * (2026-10-01); 'demo' = not yet live. Demo apps are shown, labelled Demo.
- * icon: the bApp icon set (brand/bappIcons) for apps it covers; else the app's original icon where it
- * has a distinctive one, else a bCorp flag-cut b
- * (src/mobile/brand: 1st app of a colour = coloured b on black, 2nd = black b on the
- * colour, 3rd = white b on the colour, 4th = coloured b on white).
+ * icon: every bApp uses the minimal line icon set (brand/bappIcons), so the grid reads as one family.
  */
 export type BAppGroup = 'featured' | 'work' | 'media' | 'social';
 
@@ -88,7 +70,7 @@ export const BAPPS: BApp[] = [
     verb: 'Chat, voice and video messages, tokenised group chats',
     group: 'featured',
     status: 'live',
-    icon: app_bchatIcon,
+    icon: bappIconUrl('bchat'),
   },
   {
     name: 'bMovies',
@@ -115,7 +97,7 @@ export const BAPPS: BApp[] = [
     verb: 'Design, stamp and mint tokens, currency and media on-chain',
     group: 'featured',
     status: 'live',
-    icon: bmintIcon,
+    icon: bappIconUrl('bmint'),
   },
   // bShares (docs/BCORP-PLACEMENT.md): The Bitcoin Corporation share placement for registered members and the
   // director. Restricted, never in the store edition (no route or tile there: PLACEMENT_ENABLED).
@@ -132,7 +114,7 @@ export const BAPPS: BApp[] = [
           verb: 'Restricted: for registered bCorp shareholders',
           group: 'featured' as const,
           status: 'live' as const,
-          icon: bmintIcon,
+          icon: bappIconUrl('bshares'),
           privateOnly: true,
           restricted: 'Restricted · members only',
         },
@@ -145,7 +127,7 @@ export const BAPPS: BApp[] = [
     verb: 'Get your name on Bitcoin. Yours forever',
     group: 'featured',
     status: 'live',
-    icon: bmintIcon,
+    icon: bappIconUrl('names'),
   },
   {
     name: 'bWriter',
@@ -163,7 +145,7 @@ export const BAPPS: BApp[] = [
     verb: 'Spreadsheets saved on-chain',
     group: 'work',
     status: 'live',
-    icon: bsheetsIcon,
+    icon: bappIconUrl('bsheets'),
     source: suite('bitcoin-spreadsheet'),
   },
   {
@@ -183,7 +165,7 @@ export const BAPPS: BApp[] = [
     verb: 'Store and share files on-chain',
     group: 'work',
     status: 'live',
-    icon: bdriveIcon,
+    icon: bappIconUrl('bdrive'),
     source: suite('bitcoin-drive'),
   },
   {
@@ -192,7 +174,7 @@ export const BAPPS: BApp[] = [
     verb: 'Keep a calendar on Bitcoin',
     group: 'work',
     status: 'live',
-    icon: bcalIcon,
+    icon: bappIconUrl('bcal'),
     source: suite('bitcoin-calendar'),
   },
   {
@@ -201,7 +183,7 @@ export const BAPPS: BApp[] = [
     verb: 'Build apps on Bitcoin',
     group: 'work',
     status: 'live',
-    icon: bcodeIcon,
+    icon: bappIconUrl('bcode'),
     source: suite('bitcoin-code'),
   },
   {
@@ -210,7 +192,7 @@ export const BAPPS: BApp[] = [
     verb: 'Find work and hire, paid in BSV',
     group: 'work',
     status: 'live',
-    icon: bjobsIcon,
+    icon: bappIconUrl('bjobs'),
     source: suite('bitcoin-jobs'),
   },
   {
@@ -219,7 +201,7 @@ export const BAPPS: BApp[] = [
     verb: 'Manage your on-chain identity',
     group: 'work',
     status: 'live',
-    icon: bidIcon,
+    icon: bappIconUrl('bid'),
     source: suite('bitcoin-identity'),
   },
   {
@@ -228,7 +210,7 @@ export const BAPPS: BApp[] = [
     verb: 'Search what lives on-chain',
     group: 'work',
     status: 'live',
-    icon: bsearchIcon,
+    icon: bappIconUrl('bsearch'),
     source: suite('bitcoin-search'),
   },
   {
@@ -237,7 +219,7 @@ export const BAPPS: BApp[] = [
     verb: 'Register and trade names on Bitcoin',
     group: 'work',
     status: 'live',
-    icon: bdnsIcon,
+    icon: bappIconUrl('bdns'),
     source: suite('bitcoin_dns'),
   },
   // Media
@@ -247,7 +229,7 @@ export const BAPPS: BApp[] = [
     verb: 'Watch and publish video',
     group: 'media',
     status: 'live',
-    icon: bvideoIcon,
+    icon: bappIconUrl('bvideo'),
     source: suite('bitcoin-video'),
   },
   {
@@ -283,7 +265,7 @@ export const BAPPS: BApp[] = [
     verb: 'Paint and inscribe your work',
     group: 'media',
     status: 'live',
-    icon: app_bpaintIcon,
+    icon: bappIconUrl('bpaint'),
     source: suite('bitcoin-paint'),
   },
   {
@@ -310,7 +292,7 @@ export const BAPPS: BApp[] = [
     verb: 'Learn and teach courses',
     group: 'media',
     status: 'demo',
-    icon: app_beduIcon,
+    icon: bappIconUrl('bedu'),
     source: suite('bitcoin-education'),
   },
   // Social & money
@@ -322,7 +304,7 @@ export const BAPPS: BApp[] = [
     verb: 'Run your AI agents and their budgets',
     group: 'featured',
     status: 'live',
-    icon: app_bagentsIcon,
+    icon: bappIconUrl('bagents'),
     privateOnly: true,
   },
   {
@@ -351,7 +333,7 @@ export const BAPPS: BApp[] = [
     verb: 'Find places that take Bitcoin',
     group: 'social',
     status: 'live',
-    icon: app_bmapsIcon,
+    icon: bappIconUrl('bmaps'),
     source: suite('bitcoin-maps'),
   },
 ];

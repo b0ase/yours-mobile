@@ -269,9 +269,10 @@ export const SwipeRow = ({
       key={a.id}
       type="button"
       data-swipe-ignore
+      data-danger={/delete|block|spam|leave|remove|report|burn/i.test(a.id) || undefined}
       tabIndex={offset ? 0 : -1}
       onClick={() => run(a, false)}
-      className="flex h-full flex-col items-center justify-center gap-1 text-[11px] font-semibold text-white"
+      className="bw-swipe-action flex h-full flex-col items-center justify-center gap-1 text-[11px] font-semibold text-white"
       style={{ background: a.color, color: a.fg, width: flex ? undefined : ACTION_W, flex: flex ? 1 : undefined }}
     >
       {a.icon}

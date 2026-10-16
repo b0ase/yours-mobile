@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { B_OUTLINE_D, B_OUTLINE_VIEWBOX } from '../brand/bOutline';
 import bGlyph from '../brand/bwalletx-glyph.svg';
 import { IDEAS, ideaPrompt, shuffled } from './ideas';
 import { ObsidianBackdrop } from '../ui/ObsidianBackdrop';
@@ -72,7 +73,7 @@ export const ObsidianHero = ({
           aria-label="Ask b"
           width={mark}
           height={mark}
-          viewBox="20 6 80 104"
+          viewBox={B_OUTLINE_VIEWBOX}
           fill="none"
           stroke={pack.group === 'mono' ? pack.text : pack.accent}
           strokeWidth={4}
@@ -82,9 +83,8 @@ export const ObsidianHero = ({
             filter: `drop-shadow(0 0 28px rgb(${pack.group === 'mono' ? '0 0 0 / .08' : 'var(--bw-accent-rgb) / .35'}))`,
           }}
         >
-          <polygon points="45,12 45,76 27,76 27,30" />
-          <circle cx="60" cy="72" r="31" />
-          <circle cx="60" cy="72" r="15" />
+          {/* One unioned outline + the counter (brand/bOutline.ts): no stem lines inside the bowl. */}
+          <path d={B_OUTLINE_D} vectorEffect="non-scaling-stroke" strokeLinecap="round" />
         </svg>
       ) : (
         <img

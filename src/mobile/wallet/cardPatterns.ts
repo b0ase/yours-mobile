@@ -1,5 +1,6 @@
 import type { CardPatternId } from '../theme/accents';
 import { hexToHsl, hslToHex, mix } from '../theme/colour';
+import { LIGHT_PATTERNS, isLightPattern, lightPatternSvg } from './cardPatternsLight';
 
 /**
  * Card patterns (Design your card › Patterns, owner 14 Oct 2026): for people with no picture they want to use.
@@ -21,6 +22,8 @@ export const PATTERNS: readonly { id: CardPatternId; label: string }[] = [
   { id: 'circuit', label: 'Circuit' },
   { id: 'chevron', label: 'Chevrons' },
   { id: 'starburst', label: 'Starburst' },
+  // White designs (cardPatternsLight.ts): off-white modernist studies for the White theme.
+  ...LIGHT_PATTERNS,
 ];
 
 const W = PATTERN_W;
@@ -300,11 +303,14 @@ function finish(id: CardPatternId, c: string): Finish {
           VIGNETTE,
         over: `<rect width="${W}" height="${H}" fill="url(#glaze)"/>` + vigRect + EDGE,
       };
+    default: // White designs draw their own ground (cardPatternsLight.ts).
+      return { ground: '', defs: '', over: '' };
   }
 }
 
 /** The pattern as an SVG string: the pattern in `colour` on its own art-directed ground and finish. */
 export function patternSvg(id: CardPatternId, colour: string): string {
+  if (isLightPattern(id)) return lightPatternSvg(id, colour);
   const f = finish(id, colour);
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">` +

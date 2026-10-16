@@ -5,7 +5,15 @@ import { useCardBalance } from './balanceStore';
 import { accentById } from '../theme/accents';
 import { useAccentId } from '../theme/useAccent';
 import { cardPatternColour, useCardCustomised } from './cardLook';
+import { LIGHT_PATTERN_IDS } from './cardPatternsLight';
 import './cardSkins.css';
+
+/** White theme: each card gets one of the white designs, picked steadily from its id. */
+const whiteArtFor = (id: string) => {
+  let h = 0;
+  for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return LIGHT_PATTERN_IDS[h % LIGHT_PATTERN_IDS.length];
+};
 
 /**
  * The art layer for a balance card (carousel, All cards browser). Drop it as the first child of any card box
@@ -19,7 +27,13 @@ export const CardSkin = memo(function CardSkin({ id, colour }: { id: string; col
   const c = cardPatternColour(pack, useCardCustomised(id), s.colour);
   return (
     <span className={`bw-skin bw-skin--${s.finish}`} aria-hidden="true" style={{ ['--skin-c' as string]: c }}>
-      <img className="bw-skin-art" src={patternUri(s.pattern, c)} alt="" draggable={false} decoding="async" />
+      <img
+        className="bw-skin-art"
+        src={patternUri(pack.id === 'white' ? whiteArtFor(id) : s.pattern, pack.id === 'white' ? pack.accent : c)}
+        alt=""
+        draggable={false}
+        decoding="async"
+      />
       <span className="bw-skin-fx" />
     </span>
   );

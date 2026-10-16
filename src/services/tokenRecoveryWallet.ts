@@ -3,9 +3,9 @@
  * See tokenRecovery.ts for what it does and why.
  */
 import { BSV21_BASKET, P1SAT_PROTOCOL } from '@1sat/types';
-import { bsv21FieldsFromOutput, internalizeBeef } from '@1sat/actions';
+import { bsv21FieldsFromOutput, ensurePlaintextCi, internalizeBeef } from '@1sat/actions';
 import type { OneSatServices } from '@1sat/wallet-browser';
-import { KeyDeriver, PrivateKey, PublicKey, Script, Transaction, Utils, type WalletInterface } from '@bsv/sdk';
+import { Beef, KeyDeriver, PrivateKey, PublicKey, Script, Transaction, Utils, type WalletInterface } from '@bsv/sdk';
 import { buildKeySearchSetup, invoicePrefixFor, searchMsKeyIDs } from './tokenKeySearch';
 import {
   normOutpoint,
@@ -18,8 +18,13 @@ import {
 import {
   TOKEN_SEND_JOURNAL_KEY,
   dropSpentTokenOutputs,
+  INPUTS_SPENT_ERROR,
   fixStaleToken,
   healTokenSends,
+  healUnseenTokenOutputs,
+  repairUnsignableTokenOutputs,
+  type KeyCheckReport,
+  type KeyedTokenOutput,
   openJournalTokens,
   type HealAction,
   type LocalTokenOutput,
@@ -27,6 +32,7 @@ import {
   type StaleFixResult,
   type TokenSendHealReport,
   type TokenSendJournalEntry,
+  type UnseenHealReport,
 } from './tokenSendHeal';
 
 /** Pull the BSV-21 transfer/mint data and the P2PKH owner out of one output script. */
@@ -514,3 +520,162 @@ export const runStartupTokenHeal = async (args: TokenHealArgs & { addresses?: ()
   }
   return { ...healed, journalled };
 };
+
+/**
+ * Token outputs the overlay reports 'unknown': submit mined ones to the overlay, rebroadcast ones that never reached
+ * the chain from the wallet's stored BEEF, relinquish ones whose rebroadcast is refused as a double spend.
+ */
+export const runUnseenHeal = async (
+  args: { wallet: WalletInterface; services: OneSatServices },
+  opts: { tokenId?: string; keysOnly?: boolean } = {},
+): Promise<UnseenHealReport> => {
+  const { wallet, services } = args;
+  let stored: Beef | undefined;
+  const walletBeef = async () => {
+    if (!stored) {
+      const list = await wallet.listOutputs({ basket: BSV21_BASKET, include: 'entire transactions', limit: 10000 });
+      stored = list.BEEF?.length ? Beef.fromBinary(Array.from(list.BEEF)) : new Beef();
+    }
+    return stored;
+  };
+  const beefOf = async (txid: string): Promise<number[] | null> => {
+    try {
+      return Array.from(await services.beef.getBeef(txid));
+    } catch {
+      const beef = await walletBeef();
+      return beef.findTxid(txid) ? beef.toBinaryAtomic(txid) : null;
+    }
+  };
+  const keys = await runKeyCheck(args, opts, beefOf).catch(
+    (e): KeyCheckReport => ({ checked: 0, repaired: [], dropped: [], errors: [`keys: ${String(e)}`] }),
+  );
+  stored = undefined; // the key pass may have changed the wallet's outputs
+  if (opts.keysOnly) {
+    return {
+      unseen: [],
+      submitted: [],
+      rebroadcast: [],
+      dropped: [],
+      stillUnseen: [],
+      keysRepaired: keys.repaired.length,
+      keysDropped: keys.dropped.length,
+      errors: keys.errors,
+    };
+  }
+  const r = await healUnseenTokenOutputs(
+    {
+      localOutputs: () => localTokenOutputs(wallet),
+      overlayStatus: (tokenId, outpoints) => overlayStates(services, tokenId, outpoints),
+      async chainBeef(txid) {
+        try {
+          return Array.from(await services.beef.getBeef(txid));
+        } catch {
+          return null;
+        }
+      },
+      async localBeef(txid) {
+        const beef = await walletBeef();
+        return beef.findTxid(txid) ? beef.toBinaryAtomic(txid) : null;
+      },
+      async broadcast(beef, txid) {
+        const results = await services.postBeef(Beef.fromBinary(beef), [txid]);
+        if (results.some((r) => r.status === 'success')) return { ok: true };
+        const r = results[0];
+        const t = r?.txidResults?.[0] as { doubleSpend?: boolean; data?: { txStatus?: string } } | undefined;
+        const error = r?.error?.message ?? 'broadcast failed';
+        const inputsSpent = !!t?.doubleSpend || (t?.data?.txStatus === 'REJECTED' && INPUTS_SPENT_ERROR.test(error));
+        return { ok: false, inputsSpent, error };
+      },
+      async submitOverlay(beef, tokenId) {
+        await services.overlay.submitBsv21(beef, tokenId.replace('.', '_'));
+      },
+      async relinquish(outpoint) {
+        await wallet.relinquishOutput({ basket: BSV21_BASKET, output: outpoint });
+      },
+      log: (m) => console.log(`[tokenUnseenHeal] ${m}`),
+    },
+    opts,
+  );
+  return {
+    ...r,
+    keysRepaired: keys.repaired.length,
+    keysDropped: keys.dropped.length,
+    errors: [...keys.errors, ...r.errors],
+  };
+};
+
+/** Outputs whose record names a key that doesn't sign them: refile with the right key, or relinquish. */
+const runKeyCheck = (
+  { wallet }: { wallet: WalletInterface },
+  opts: { tokenId?: string },
+  beefOf: (txid: string) => Promise<number[] | null>,
+): Promise<KeyCheckReport> =>
+  repairUnsignableTokenOutputs(
+    {
+      async localOutputs() {
+        const list = await wallet.listOutputs({
+          basket: BSV21_BASKET,
+          include: 'locking scripts',
+          includeTags: true,
+          includeCustomInstructions: true,
+          limit: 10000,
+        });
+        const out: KeyedTokenOutput[] = [];
+        for (const o of list.outputs) {
+          const f = bsv21FieldsFromOutput({
+            tags: o.tags,
+            customInstructions: o.customInstructions,
+            outpoint: o.outpoint,
+          });
+          if (!f.tokenId || !f.amt) continue;
+          const m = /76a914([0-9a-f]{40})88ac/i.exec(o.lockingScript ?? '');
+          let ci: string | undefined;
+          try {
+            ci = await ensurePlaintextCi(wallet, o.customInstructions);
+          } catch {
+            ci = undefined;
+          }
+          out.push({
+            outpoint: normOutpoint(o.outpoint),
+            tokenId: f.tokenId,
+            amt: String(f.amt),
+            hash160: m ? m[1] : null,
+            customInstructions: ci,
+            tags: o.tags,
+          });
+        }
+        return out;
+      },
+      async derive(key) {
+        const { publicKey } = await wallet.getPublicKey({
+          protocolID: key.protocolID as [0 | 1 | 2, string],
+          keyID: key.keyID,
+          counterparty: key.counterparty,
+          forSelf: true,
+        });
+        return PublicKey.fromString(publicKey).toHash('hex') as string;
+      },
+      async refile(o, customInstructions) {
+        const [txid, vout] = o.outpoint.split('.');
+        const beef = await beefOf(txid);
+        if (!beef) throw new Error('no copy of the transaction to refile from');
+        await wallet.relinquishOutput({ basket: BSV21_BASKET, output: o.outpoint });
+        await wallet.internalizeAction({
+          tx: beef,
+          description: 'Token key record fixed',
+          outputs: [
+            {
+              outputIndex: Number(vout),
+              protocol: 'basket insertion',
+              insertionRemittance: { basket: BSV21_BASKET, tags: o.tags ?? [], customInstructions },
+            },
+          ],
+        });
+      },
+      async relinquish(outpoint) {
+        await wallet.relinquishOutput({ basket: BSV21_BASKET, output: outpoint });
+      },
+      log: (m) => console.log(`[tokenKeyCheck] ${m}`),
+    },
+    opts,
+  );

@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useState, type FormEvent } from 're
 import { motion } from 'framer-motion';
 import { useDisplayCurrency } from '../../../hooks/useDisplayCurrency';
 import { fiatCode, fiatSymbol, fiatToUsd, usdToFiat } from '../../../utils/displayCurrency';
-import { ArrowUpDown, ClipboardPaste, Mail, Plus, ScanLine, Trash2 } from 'lucide-react';
+import { ClipboardPaste, Plus, ScanLine, Trash2, Users } from 'lucide-react';
 
 const ScanSheet = lazy(() => import('../../scan/ScanSheet'));
 import type { Theme } from '../../../theme.types';
@@ -72,6 +72,7 @@ export const SendCard = (p: Props) => {
   const [drafts, setDrafts] = useState<Record<string, string | undefined>>({});
   const [pasteMsg, setPasteMsg] = useState<Record<string, string>>({});
   const [scanFor, setScanFor] = useState<string | null>(null);
+  const [picksOpen, setPicksOpen] = useState<Record<string, boolean | undefined>>({});
   const contacts = useContacts();
   const recents = useMemo(() => loadRecents(p.account), [p.account]);
 
@@ -146,22 +147,36 @@ export const SendCard = (p: Props) => {
     return r.satSendAmount ? String(r.satSendAmount / SATS_PER_BSV) : '';
   };
 
+  const chip =
+    'flex items-center justify-center gap-1.5 min-h-[44px] px-3 rounded-xl text-sm font-semibold cursor-pointer';
+  const chipStyle = {
+    background: `color-mix(in srgb, ${GOLD} 10%, transparent)`,
+    color: GOLD,
+    border: `1px solid color-mix(in srgb, ${GOLD} 30%, transparent)`,
+  };
+  const step = (n: number, label: string) => (
+    <span className="text-xs font-bold uppercase tracking-widest" style={{ color: gray }}>
+      <span style={{ color: GOLD }}>{n}</span> · {label}
+    </span>
+  );
+
   return (
-    <form noValidate onSubmit={p.onSubmit} className="flex flex-col w-full gap-3">
-      {/* Balance: dollars first, BSV small, Max */}
+    <form noValidate onSubmit={p.onSubmit} className="flex flex-col w-full gap-3" aria-label="Send BSV">
+      {/* Available balance: small, clear, Max as a chip */}
       <div className="flex items-center justify-between w-full px-1">
         <span className="text-xs" style={{ color: gray }}>
-          Balance <span style={{ color: fg, fontWeight: 600 }}>{balanceLine(p.balanceBsv, p.rate)}</span>
+          Available <span style={{ color: fg, fontWeight: 600 }}>{balanceLine(p.balanceBsv, p.rate)}</span>
         </span>
         {!multi && (
           <button
             type="button"
+            aria-label="Send everything (Max)"
             onClick={() => {
               setDrafts({});
               p.onMax();
             }}
-            className="text-xs font-bold px-2.5 py-1 rounded-full border-0 cursor-pointer"
-            style={{ background: `color-mix(in srgb, ${GOLD} 13%, transparent)`, color: GOLD }}
+            className="min-h-[36px] text-xs font-bold px-3 rounded-full cursor-pointer"
+            style={p.sendAll ? { background: GOLD, color: '#000', border: `1px solid ${GOLD}` } : chipStyle}
           >
             Max
           </button>
@@ -172,6 +187,13 @@ export const SendCard = (p: Props) => {
         const sats = rowSats(r, p.rate);
         const usd = rowUsd(r, p.rate);
         const isUsd = r.amountType === 'usd';
+        const showPicks = picksOpen[r.id] ?? !r.address;
+        const setUnit = (unit: 'usd' | 'bsv') => {
+          if (unit === r.amountType) return;
+          setDrafts((d) => ({ ...d, [r.id]: undefined }));
+          p.onAmountEdited();
+          p.onUpdate(r.id, 'amountType', unit);
+        };
         return (
           <motion.div
             key={r.id}
@@ -181,47 +203,50 @@ export const SendCard = (p: Props) => {
             className="w-full rounded-2xl p-4 flex flex-col gap-3"
             style={{ background: row }}
           >
-            {/* To */}
+            {/* 1 · Who */}
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: gray }}>
-                {multi ? `To · ${idx + 1}` : 'To'}
-              </span>
-              <div className="flex items-center gap-2">
+              {step(1, multi ? `Who · recipient ${idx + 1}` : 'Who are you paying?')}
+              {multi && (
                 <button
                   type="button"
-                  onClick={() => void paste(r.id)}
-                  className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full border-0 cursor-pointer"
-                  style={{ background: `color-mix(in srgb, ${GOLD} 9%, transparent)`, color: GOLD }}
+                  aria-label={`Remove recipient ${idx + 1}`}
+                  onClick={() => p.onRemove(r.id)}
+                  className="flex items-center justify-center w-11 h-11 rounded-full border-0 cursor-pointer"
+                  style={{ background: `${RED}15`, color: RED }}
                 >
-                  <ClipboardPaste size={12} /> Paste
+                  <Trash2 size={16} />
                 </button>
-                <button
-                  type="button"
-                  aria-label="Scan a QR code"
-                  title="Scan to pay"
-                  onClick={() => setScanFor(r.id)}
-                  className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full border-0 cursor-pointer"
-                  style={{ background: `color-mix(in srgb, ${GOLD} 9%, transparent)`, color: GOLD }}
-                >
-                  <ScanLine size={12} /> Scan
-                </button>
-                {multi && (
-                  <button
-                    type="button"
-                    aria-label="Remove recipient"
-                    onClick={() => p.onRemove(r.id)}
-                    className="flex items-center justify-center w-6 h-6 rounded-full border-0 cursor-pointer"
-                    style={{ background: `${RED}15`, color: RED }}
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                )}
-              </div>
+              )}
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <button type="button" onClick={() => void paste(r.id)} className={chip} style={chipStyle}>
+                <ClipboardPaste size={16} /> Paste
+              </button>
+              <button
+                type="button"
+                aria-label="Scan a QR code"
+                onClick={() => setScanFor(r.id)}
+                className={chip}
+                style={chipStyle}
+              >
+                <ScanLine size={16} /> Scan
+              </button>
+              <button
+                type="button"
+                aria-label="Choose from contacts"
+                aria-expanded={showPicks}
+                onClick={() => setPicksOpen((m) => ({ ...m, [r.id]: !showPicks }))}
+                className={chip}
+                style={chipStyle}
+              >
+                <Users size={16} /> Contacts
+              </button>
             </div>
             <NameInput
               theme={theme}
               asset="bsv"
               autoConfirm
+              big
               value={r.address}
               onChange={(v) => p.onUpdate(r.id, 'address', v)}
               onStatus={(s, resolved) => {
@@ -244,30 +269,39 @@ export const SendCard = (p: Props) => {
               style={{ width: '100%', margin: '0' }}
             />
             {pasteMsg[r.id] && (
-              <p className="text-[11px] -mt-1" style={{ color: gray }}>
+              <p role="status" className="text-xs -mt-1" style={{ color: gray }}>
                 {pasteMsg[r.id]}
               </p>
             )}
-            {!r.address && status[r.id] !== 'loading' && picks.length > 0 && (
+            {showPicks && status[r.id] !== 'loading' && picks.length === 0 && (
+              <p className="text-xs" style={{ color: gray }}>
+                No contacts yet. Paste or scan to pay someone new.
+              </p>
+            )}
+            {showPicks && status[r.id] !== 'loading' && picks.length > 0 && (
               <div className="flex gap-2 overflow-x-auto -mx-1 px-1 pb-1" style={{ scrollbarWidth: 'none' }}>
                 {picks.map((k) => (
                   <button
                     key={k.input}
                     type="button"
-                    onClick={() => setAddress(r.id, k.input)}
-                    className="flex flex-col items-center gap-1 shrink-0 w-14 border-0 bg-transparent cursor-pointer p-0"
+                    aria-label={`Pay ${k.label}`}
+                    onClick={() => {
+                      setPicksOpen((m) => ({ ...m, [r.id]: false }));
+                      setAddress(r.id, k.input);
+                    }}
+                    className="flex flex-col items-center gap-1 shrink-0 w-16 border-0 bg-transparent cursor-pointer p-0"
                   >
                     {k.avatar ? (
-                      <img src={k.avatar} alt="" className="w-10 h-10 rounded-full object-cover" />
+                      <img src={k.avatar} alt="" className="w-12 h-12 rounded-full object-cover" />
                     ) : (
                       <span
-                        className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold"
+                        className="w-12 h-12 rounded-full flex items-center justify-center text-base font-bold"
                         style={{ background: `color-mix(in srgb, ${GOLD} 13%, transparent)`, color: GOLD }}
                       >
                         {k.label.replace(/^\$/, '').slice(0, 1).toUpperCase()}
                       </span>
                     )}
-                    <span className="text-[10px] w-full truncate text-center" style={{ color: gray }}>
+                    <span className="text-[11px] w-full truncate text-center" style={{ color: gray }}>
                       {k.label}
                     </span>
                   </button>
@@ -275,15 +309,41 @@ export const SendCard = (p: Props) => {
               </div>
             )}
             {r.error && (
-              <p className="text-xs" style={{ color: RED }}>
+              <p role="alert" className="text-xs" style={{ color: RED }}>
                 {r.error}
               </p>
             )}
 
-            {/* Amount: big dollars */}
-            <div className="flex flex-col items-center gap-1 pt-1">
+            {/* 2 · How much */}
+            <div className="flex items-center justify-between pt-2">
+              {step(2, 'How much?')}
+              <div
+                role="radiogroup"
+                aria-label="Amount unit"
+                className="flex rounded-full p-0.5"
+                style={{ border: `1px solid ${gray}50` }}
+              >
+                {(['usd', 'bsv'] as const).map((u) => {
+                  const on = r.amountType === u;
+                  return (
+                    <button
+                      key={u}
+                      type="button"
+                      role="radio"
+                      aria-checked={on}
+                      onClick={() => setUnit(u)}
+                      className="min-h-[36px] min-w-[52px] px-3 rounded-full text-xs font-bold border-0 cursor-pointer"
+                      style={{ background: on ? GOLD : 'transparent', color: on ? '#000' : fg }}
+                    >
+                      {u === 'usd' ? fiatCode(fx) : 'BSV'}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="flex flex-col items-center gap-1">
               <div className="flex items-center justify-center gap-1 w-full">
-                <span className="font-bold" style={{ color: fg, fontSize: multi ? 24 : 40 }}>
+                <span className="font-bold" style={{ color: fg, fontSize: multi ? 28 : 44 }}>
                   {isUsd ? fiatSymbol(fx) : ''}
                 </span>
                 <input
@@ -300,7 +360,7 @@ export const SendCard = (p: Props) => {
                   className="bg-transparent border-0 outline-none font-bold text-left min-w-0 p-0"
                   style={{
                     color: fg,
-                    fontSize: multi ? 24 : 40,
+                    fontSize: multi ? 28 : 44,
                     width: `${Math.max(amountText(r).length, isUsd ? 4 : 5) + 0.5}ch`,
                     maxWidth: '70%',
                   }}
@@ -311,80 +371,67 @@ export const SendCard = (p: Props) => {
                   </span>
                 )}
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setDrafts((d) => ({ ...d, [r.id]: undefined }));
-                  p.onAmountEdited();
-                  p.onUpdate(r.id, 'amountType', isUsd ? 'bsv' : 'usd');
-                }}
-                className="flex items-center gap-1 text-[11px] border-0 bg-transparent cursor-pointer"
-                style={{ color: gray }}
-              >
+              <p className="text-xs" style={{ color: gray }} aria-live="polite">
                 {sats > 0
                   ? isUsd
                     ? `≈ ${fmtBsv(sats)} BSV · ${fmtSats(sats)}`
                     : `${p.rate > 0 ? `≈ ${fmtUsd(usd)} · ` : ''}${fmtSats(sats)}`
                   : isUsd
-                    ? 'Enter an amount'
-                    : 'Enter BSV'}
-                <span className="flex items-center gap-0.5 font-bold ml-1" style={{ color: GOLD }}>
-                  {isUsd ? fiatCode(fx) : 'BSV'} <ArrowUpDown size={10} />
-                </span>
-              </button>
-              {isUsd && p.rate > 0 && (
-                <div className="flex gap-2 mt-1">
-                  {QUICK_USD.map((n) => {
-                    const usdN = fiatToUsd(n, fx);
-                    const on = !!r.usdSendAmount && Math.abs(r.usdSendAmount - usdN) < 1e-9;
-                    return (
-                      <button
-                        key={n}
-                        type="button"
-                        onClick={() => {
-                          setDrafts((d) => ({ ...d, [r.id]: undefined }));
-                          p.onAmountEdited();
-                          p.onUpdate(r.id, 'usdSendAmount', usdN);
-                        }}
-                        className="px-3 py-1.5 rounded-full text-xs font-semibold cursor-pointer"
-                        style={{
-                          background: on ? GOLD : 'transparent',
-                          color: on ? '#000' : fg,
-                          border: `1px solid ${on ? GOLD : gray + '50'}`,
-                        }}
-                      >
-                        {fiatSymbol(fx)}
-                        {n}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-              {!isUsd && (
-                <div className="flex gap-2 mt-1">
-                  {QUICK_BSV.map((n) => {
-                    const satN = Math.round(n * SATS_PER_BSV);
-                    const on = r.satSendAmount === satN;
-                    return (
-                      <button
-                        key={n}
-                        type="button"
-                        onClick={() => {
-                          setDrafts((d) => ({ ...d, [r.id]: undefined }));
-                          p.onAmountEdited();
-                          p.onUpdate(r.id, 'satSendAmount', satN);
-                        }}
-                        className="px-3 py-1.5 rounded-full text-xs font-semibold cursor-pointer"
-                        style={{
-                          background: on ? GOLD : 'transparent',
-                          color: on ? '#000' : fg,
-                          border: `1px solid ${on ? GOLD : gray + '50'}`,
-                        }}
-                      >
-                        {n} BSV
-                      </button>
-                    );
-                  })}
+                    ? 'Type an amount or tap a chip'
+                    : 'Type an amount in BSV'}
+              </p>
+              {(!isUsd || p.rate > 0) && (
+                <div className="flex flex-wrap justify-center gap-2 mt-1">
+                  {isUsd
+                    ? QUICK_USD.map((n) => {
+                        const usdN = fiatToUsd(n, fx);
+                        const on = !!r.usdSendAmount && Math.abs(r.usdSendAmount - usdN) < 1e-9;
+                        return (
+                          <button
+                            key={n}
+                            type="button"
+                            aria-pressed={on}
+                            onClick={() => {
+                              setDrafts((d) => ({ ...d, [r.id]: undefined }));
+                              p.onAmountEdited();
+                              p.onUpdate(r.id, 'usdSendAmount', usdN);
+                            }}
+                            className="min-h-[40px] px-4 rounded-full text-sm font-semibold cursor-pointer"
+                            style={{
+                              background: on ? GOLD : 'transparent',
+                              color: on ? '#000' : fg,
+                              border: `1px solid ${on ? GOLD : gray + '50'}`,
+                            }}
+                          >
+                            {fiatSymbol(fx)}
+                            {n}
+                          </button>
+                        );
+                      })
+                    : QUICK_BSV.map((n) => {
+                        const satN = Math.round(n * SATS_PER_BSV);
+                        const on = r.satSendAmount === satN;
+                        return (
+                          <button
+                            key={n}
+                            type="button"
+                            aria-pressed={on}
+                            onClick={() => {
+                              setDrafts((d) => ({ ...d, [r.id]: undefined }));
+                              p.onAmountEdited();
+                              p.onUpdate(r.id, 'satSendAmount', satN);
+                            }}
+                            className="min-h-[40px] px-4 rounded-full text-sm font-semibold cursor-pointer"
+                            style={{
+                              background: on ? GOLD : 'transparent',
+                              color: on ? '#000' : fg,
+                              border: `1px solid ${on ? GOLD : gray + '50'}`,
+                            }}
+                          >
+                            {n} BSV
+                          </button>
+                        );
+                      })}
                 </div>
               )}
             </div>
@@ -392,35 +439,24 @@ export const SendCard = (p: Props) => {
         );
       })}
 
-      <div className="flex items-center justify-between px-1">
-        {!p.sendAll ? (
-          <button
-            type="button"
-            onClick={p.onAdd}
-            className="flex items-center gap-1 text-xs font-semibold border-0 bg-transparent cursor-pointer p-0"
-            style={{ color: GOLD }}
-          >
-            <Plus size={12} /> Add recipient
-          </button>
-        ) : (
-          <span />
-        )}
-        {/* TODO(bMail): attach a note, delivered to the recipient as a bMail. */}
-        <span className="flex items-center gap-1 text-[11px]" style={{ color: gray }} title="Coming soon">
-          <Mail size={11} /> Add a message · soon via bMail
-        </span>
-      </div>
+      {/* Secondary: a quiet outline button. The bMail note stays hidden until it works (live features only). */}
+      {!p.sendAll && (
+        <button
+          type="button"
+          onClick={p.onAdd}
+          className="self-start flex items-center gap-1.5 min-h-[44px] px-4 rounded-xl text-sm font-semibold bg-transparent cursor-pointer"
+          style={{ color: fg, border: `1px solid ${gray}50` }}
+        >
+          <Plus size={16} /> Add another recipient
+        </button>
+      )}
 
+      {/* 3 · Send: one big primary button that says what happens next */}
       <button
         type="submit"
         disabled={btn.disabled}
-        className="w-full h-12 rounded-2xl font-bold text-[15px] border-0 cursor-pointer disabled:cursor-not-allowed"
-        style={{
-          background: btn.disabled
-            ? `${gray}30`
-            : `linear-gradient(135deg, ${theme.color.component.primaryButtonLeftGradient}, ${theme.color.component.primaryButtonRightGradient})`,
-          color: btn.disabled ? gray : theme.color.component.primaryButtonText,
-        }}
+        className="yours-sheet-primary w-full cursor-pointer disabled:cursor-not-allowed"
+        style={{ height: 56, fontSize: 16, fontWeight: 700, borderRadius: 16, opacity: btn.disabled ? 0.45 : 1 }}
       >
         {btn.label}
       </button>

@@ -1,5 +1,5 @@
 import validate from 'bitcoin-address-validation';
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { useServiceContext } from '../hooks/useServiceContext';
 import { useSnackbar } from '../hooks/useSnackbar';
 import { useTheme } from '../hooks/useTheme';
@@ -28,6 +28,9 @@ import { fundOverlayExact, fundingTotal, formatBsvAmount, transfersCovered } fro
 import {
   chromeJournalStore,
   describeStaleFix,
+  describeUnseenHeal,
+  isUnseenState,
+  type UnseenHealReport,
   journalSendEnd,
   journalSendStart,
   type StaleFixResult,
@@ -49,6 +52,10 @@ import { cleanNote, noteOutput, withExtraOutput } from '../mobile/airdrops/note'
 import { celebrateSend } from './sent/sent';
 import { P2PKH } from '@bsv/sdk';
 import { maxOverlayFee, withTokenSendGuard, type OverlayFee } from '../mobile/wallet/send/tokenFee';
+import { HOLDER_DROP_ENABLED } from '../mobile/storeBuild';
+
+// Issuer tools › Airdrop to holders: bWalletX only, a lazy chunk the store build drops (storeBuild.ts).
+const HolderDropSheet = HOLDER_DROP_ENABLED ? lazy(() => import('../mobile/holderDrop/HolderDropSheet')) : null;
 
 export interface Token {
   isConfirmed: boolean;
@@ -117,10 +124,13 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
     fundingError?: string;
   } | null>(null);
   const [overlayProcessing, setOverlayProcessing] = useState<string | undefined>();
+  /** Outpoints (txid.vout) the overlay reported 'unknown' on the last re-check, shown in the unseen prompt. */
+  const [unseenOutpoints, setUnseenOutpoints] = useState<string[]>([]);
   const [confirmUnverified, setConfirmUnverified] = useState(false);
   const sentAtomicRef = useRef<bigint>(0n);
   const [copied, setCopied] = useState(false);
   const [selling, setSelling] = useState(false);
+  const [dropping, setDropping] = useState(false);
   // Recipient fields stay hidden until the owner taps Send (owner, 5 Oct 2026).
   const [composing, setComposing] = useState(!!prefill);
   // Airdrop note (src/mobile/airdrops/note.ts): optional, written on chain in the same tx.
@@ -379,6 +389,7 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
         owned.map((o) => o.outpoint),
       );
       const states = new Map(statuses.map((s) => [s.outpoint, s.state as string]));
+      setUnseenOutpoints(owned.filter((o) => isUnseenState(states.get(o.outpoint))).map((o) => o.outpoint));
       const shortfall = classifyBsv21Shortfall(
         owned.map((o) => ({ amount: o.amount, state: states.get(o.outpoint) })),
         total,
@@ -485,6 +496,37 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
     }
   };
 
+  /** Unseen prompt: submit mined transfers to the overlay, rebroadcast unfinished ones, drop dead ones, send again. */
+  const handleFixUnseenAndSend = async () => {
+    if (!overlayPrompt) return;
+    const { recipients: rs, total } = overlayPrompt;
+    setOverlayProcessing('Sending your tokens to the indexer...');
+    try {
+      const res = await sendMessageAsync<{ success: boolean; error?: string; data?: UnseenHealReport }>({
+        action: 'BSV21_FIX_UNSEEN',
+        tokenId: token.info.id,
+      });
+      if (!res?.success || !res.data) {
+        addSnackbar(res?.error ?? "Couldn't fix this. Try Settings › Troubleshooting › Repair Sync.", 'error');
+        return;
+      }
+      const d = res.data;
+      const changed = d.submitted.length + d.rebroadcast.length + d.dropped.length > 0;
+      addSnackbar(describeUnseenHeal(d), changed ? 'success' : 'info');
+      if (d.submitted.length || d.rebroadcast.length) {
+        // The overlay validates a submitted transfer in a moment.
+        setOverlayProcessing('Waiting for the indexer...');
+        await new Promise((r) => setTimeout(r, 4000));
+      }
+      setOverlayProcessing('Sending...');
+      await runSend(rs, total, true);
+    } catch (error) {
+      addSnackbar(getErrorMessage(error), 'error');
+    } finally {
+      setOverlayProcessing(undefined);
+    }
+  };
+
   const handleRetrySend = async () => {
     if (!overlayPrompt) return;
     const { recipients: rs, total } = overlayPrompt;
@@ -498,8 +540,16 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
 
   const handleSendUnverified = async () => {
     if (!overlayPrompt) return;
-    setOverlayProcessing('Sending...');
+    setOverlayProcessing('Checking your token keys...');
     try {
+      // Never sign with a record whose key doesn't match its output: the unlock would be empty (5.2.25, SCAM).
+      const keys = await sendMessageAsync<{ success: boolean; data?: UnseenHealReport }>({
+        action: 'BSV21_FIX_UNSEEN',
+        tokenId: token.info.id,
+        keysOnly: true,
+      }).catch(() => undefined);
+      if (keys?.data && (keys.data.keysRepaired || keys.data.keysDropped)) addSnackbar(describeUnseenHeal(keys.data), 'info');
+      setOverlayProcessing('Sending...');
       await runSend(overlayPrompt.recipients, overlayPrompt.total, false);
     } finally {
       setOverlayProcessing(undefined);
@@ -644,6 +694,22 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
           <Show when={!!token.info.id}>
             <TokenIndexButton tokenId={token.info.id!} ticker={tokenName} />
           </Show>
+
+          {HOLDER_DROP_ENABLED && HolderDropSheet && !!token.info.id && (
+            <div className="mx-4 mb-4 flex items-center justify-between gap-2 rounded-2xl px-4 py-3" style={{ background: row }}>
+              <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: '#98A2B3' }}>
+                Issuer tools
+              </span>
+              <button
+                type="button"
+                onClick={() => setDropping(true)}
+                className="rounded-lg px-3 py-1.5 text-xs font-bold border-0 cursor-pointer"
+                style={{ background: 'rgb(var(--bw-accent-rgb)/0.13)', color: 'var(--bw-accent)' }}
+              >
+                Airdrop to holders
+              </button>
+            </div>
+          )}
 
           {/* Send form */}
           <form noValidate onSubmit={(e) => handleSendBSV21(e)} className="flex flex-col w-full px-4 gap-3">
@@ -828,6 +894,15 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
         onConfirm={() => sendConfirmation?.onConfirm()}
         onCancel={() => setSendConfirmation(null)}
       />
+      {HOLDER_DROP_ENABLED && HolderDropSheet && dropping && token.info.id && (
+        <Suspense fallback={null}>
+          <HolderDropSheet
+            token={{ id: token.info.id, dec: token.info.dec, symbol: tokenName }}
+            heldRaw={maxAmount}
+            onClose={() => setDropping(false)}
+          />
+        </Suspense>
+      )}
       {SELL_ENABLED && selling && token && (
         <SellSheet
           target={{ tokenId: token.info.id, symbol: getTokenName(token.info), dec: token.info.dec, heldRaw: maxAmount }}
@@ -846,7 +921,8 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
         processingMessage={overlayProcessing}
         onFund={(sats) => void handleFundOverlay(sats)}
         onRetryFunding={() => void handleRetryFunding()}
-        onFixAndSend={() => void handleFixAndSend()}
+        onFixAndSend={() => void (overlayPrompt?.issue === 'unseen' ? handleFixUnseenAndSend() : handleFixAndSend())}
+        unseenOutpoints={overlayPrompt?.issue === 'unseen' ? unseenOutpoints : undefined}
         onRetry={() => void handleRetrySend()}
         onSendUnverified={() => setConfirmUnverified(true)}
         onCancel={() => setOverlayPrompt(null)}

@@ -39,6 +39,7 @@ import {
   type TokenSort,
 } from './bexCards';
 import { useReel } from './useReel';
+import { FundLike } from './FundLike';
 import {
   isActiveOnMarket,
   marketActivity,
@@ -175,6 +176,7 @@ const TokenSlide = ({
           <Spark trades={live?.trades ?? []} up={(ch ?? 0) >= 0} />
         </div>
         <div className="mt-2 flex items-center gap-2">
+          <FundLike tokenId={c.id} ticker={c.ticker} rate={rate} />
           <button
             onClick={trade}
             aria-label={`Buy $${c.ticker}`}
