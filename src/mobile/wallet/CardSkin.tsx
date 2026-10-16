@@ -34,7 +34,7 @@ export const CardSkin = memo(function CardSkin({ id, colour }: { id: string; col
         className="bw-skin-art"
         src={
           whiteArt
-            ? patternUri(whiteArtFor(id), pack.accent)
+            ? patternUri(whiteArtFor(id), pack.accent, '', pack.paper ? pack.surface : undefined)
             : edition
               ? patternUri(pack.pattern, pack.accent, id)
               : patternUri(s.pattern, c)

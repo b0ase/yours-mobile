@@ -310,8 +310,8 @@ function finish(id: CardPatternId, c: string): Finish {
 }
 
 /** The pattern as an SVG string: the pattern in `colour` on its own art-directed ground and finish. */
-export function patternSvg(id: CardPatternId, colour: string): string {
-  if (isLightPattern(id)) return lightPatternSvg(id, colour);
+export function patternSvg(id: CardPatternId, colour: string, ground?: string): string {
+  if (isLightPattern(id)) return lightPatternSvg(id, colour, ground);
   if (id === 'vexfield') return vexFieldSvg(0);
   const f = finish(id, colour);
   return (
@@ -323,12 +323,12 @@ export function patternSvg(id: CardPatternId, colour: string): string {
 
 const cache = new Map<string, string>();
 /** `key` picks a steady variant for the artist editions (VexVoid stills, NPG characters, NPGX slices). */
-export function patternUri(id: CardPatternId, colour: string, key = ''): string {
+export function patternUri(id: CardPatternId, colour: string, key = '', ground?: string): string {
   if (isEditionPattern(id)) return editionArtUri(id, key);
-  const k = id + colour;
+  const k = id + colour + (ground ?? '');
   let u = cache.get(k);
   if (!u) {
-    u = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(patternSvg(id, colour));
+    u = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(patternSvg(id, colour, ground));
     cache.set(k, u);
   }
   return u;
