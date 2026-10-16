@@ -770,17 +770,17 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
       id: 'bshares',
       title: 'bShares',
       sub: '0.00 shares',
-      issuer: 'The Bitcoin Corporation Ltd',
+      issuer: 'Share registers for any company',
       colour: '#23200f',
       logo: '§',
       backLines: shares.me
         ? [
-            'Your shares in The Bitcoin Corporation Ltd, as recorded on its Register of Members (bit-sign).',
+            `Your shares in ${shares.me.company.name}, as recorded on its Register of Members (bit-sign).`,
             'Restricted: not offered publicly.',
           ]
         : [
-            'Shares in The Bitcoin Corporation Ltd, as recorded on its Register of Members (bit-sign).',
-            'You are not on the register.',
+            'Share registers for any company: register of members, director approvals, locked shares.',
+            'You are not on a register yet.',
           ],
       backButtons: shares.me ? [{ label: 'Open register', run: () => navigate('/m/bshares'), primary: true }] : [],
     });
