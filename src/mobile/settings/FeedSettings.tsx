@@ -63,6 +63,7 @@ import { INDEX_AUTOPAY_USD, ONE_CLICK_LIMITS, PAID_LIKE_OPTIONS, type DefaultFee
 import { MAX_PER_MINUTE } from './oneClick';
 import { usePrefs } from './usePrefs';
 import { AgentSettings } from './AgentSettings';
+import { AddOnsSection, BWebSettings } from '../bweb/BWebSettings';
 import { PushSettings } from '../push/PushSettings';
 import { onPushState, pushEnabled, setPushEnabled } from '../push/register';
 import { loadSession } from '../chat/api';
@@ -499,6 +500,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
     | 'payments'
     | 'indexing'
     | 'bagent'
+    | 'bweb'
     | 'websites'
     | 'idmap'
     | 'signins'
@@ -710,6 +712,13 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
               label="Ask b"
               description={B_AGENT_DESC}
               onClick={() => setScreen('bagent')}
+            />
+            <Divider />
+            <Row
+              icon={<Globe size={16} />}
+              label="bWeb"
+              description="Your dock, your Feed's bApps, what b can see, add-ons"
+              onClick={() => setScreen('bweb')}
             />
             <Divider />
             <Row
@@ -957,6 +966,18 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
       {screen === 'bagent' && (
         <Screen title="Ask b" onBack={() => setScreen(null)}>
           <AgentSettings Section={Section} Row={Row} Divider={Divider} />
+          <AddOnsSection Section={Section} Row={Row} Divider={Divider} Toggle={Toggle} />
+        </Screen>
+      )}
+      {screen === 'bweb' && (
+        <Screen title="bWeb" onBack={() => setScreen(null)}>
+          <BWebSettings
+            Section={Section}
+            Row={Row}
+            Divider={Divider}
+            Toggle={Toggle}
+            onIdentities={() => setScreen('idmap')}
+          />
         </Screen>
       )}
       {screen === 'websites' && (
