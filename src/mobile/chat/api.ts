@@ -674,6 +674,16 @@ export class BchatClient {
     return this.call('POST', `${BchatClient.path(ticker)}/space/paid`, body);
   }
 
+  /** Pay to speak (bit-sign rooms/[ticker]/speak/quote): the price and outputs, or `{ enabled:false, reason }`. */
+  async speakQuote(ticker: string): Promise<unknown> {
+    return this.call('GET', `${BchatClient.path(ticker)}/speak/quote`);
+  }
+
+  /** Claim a paid stage seat: `{ ok, txid, role, livekit }`. */
+  async speakClaim(ticker: string, body: { quote_id: string; txid: string; rawtx: string }): Promise<unknown> {
+    return this.call('POST', `${BchatClient.path(ticker)}/speak/claim`, body);
+  }
+
   /** LiveKit join token. The server mints it from your participant row, never from the request. */
   async spaceToken(ticker: string): Promise<unknown> {
     return this.call('POST', `${BchatClient.path(ticker)}/space/token`, {});
