@@ -297,6 +297,10 @@ export const CompanySetup = ({ api, me, onDone }: { api: BsharesApi; me: Bshares
                   const { pubkeys } = await api.forCompany(t).treasuryKeys();
                   const act = { kind: 'treasury' as const, roomId, ticker: t, m, pubkeys, at };
                   const r = await api.signTreasury(t, { m, at, signature: await signAct(apiContext, act) });
+                  if (r.alreadySet) {
+                    addSnackbar('The treasury is already set. Reloading.', 'info');
+                    return;
+                  }
                   if (!r.adopted) throw new Error(`Signed. ${r.signed} of ${r.need} directors so far.`);
                 })
               }
