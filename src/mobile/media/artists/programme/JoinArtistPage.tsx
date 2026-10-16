@@ -131,7 +131,7 @@ const JoinArtistPage = () => {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Artist name"
-              className="flex-1 px-3 py-2 rounded-lg bg-black text-white"
+              className="flex-1 px-3 py-2 rounded-lg bg-[#0b0c0f] text-white"
               style={{ border: `1px solid ${LINE}` }}
             />
             <button
@@ -178,7 +178,7 @@ const JoinArtistPage = () => {
                   onChange={(e) =>
                     setChoice(t.origin, { priceSats: Math.max(0, Math.floor(Number(e.target.value) || 0)) })
                   }
-                  className="w-24 px-2 py-1 rounded bg-black text-white text-right"
+                  className="w-24 px-2 py-1 rounded bg-[#0b0c0f] text-white text-right"
                   style={{ border: `1px solid ${LINE}` }}
                   aria-label="Price in sats"
                 />
