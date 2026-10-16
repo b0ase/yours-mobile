@@ -85,6 +85,7 @@ import {
   type GreenRoom,
 } from './model';
 import { ModeratorsSheet } from './ModeratorsSheet';
+import { SpaceVideoPlayer } from './SpaceVideoPlayer';
 import { ScreenAwake, wakeLockSupported } from './wakeLock';
 import {
   alwaysHereCaption,
@@ -1513,6 +1514,15 @@ const SpaceScreenInner = ({
             <Suspense fallback={null}>
               <PaidListening client={client} ticker={ticker} role={myRole} />
             </Suspense>
+          )}
+          {phase === 'live' && (
+            <SpaceVideoPlayer
+              client={client}
+              ticker={ticker}
+              media={media}
+              transport={state.space?.transport ?? 'sfu'}
+              staff={moderator}
+            />
           )}
           {body}
         </div>
