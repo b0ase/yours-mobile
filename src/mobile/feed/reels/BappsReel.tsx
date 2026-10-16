@@ -14,6 +14,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { Code2, Flag, Lightbulb, MessageCircle, Play, Rocket } from 'lucide-react';
 import { BAPPS } from '../../bapps';
+import { useBWeb } from '../../bweb/useBWeb';
 import { openBapp } from '../../bappFrame/bappFrame';
 import { openDappBrowser } from '../../dappBrowser';
 import { IS_EXTENSION } from '../../extension';
@@ -263,7 +264,17 @@ const AppSlide = ({
 const BappsReel = () => {
   const [sort, setSort] = useState<AppSort>('new');
   const me = useMe();
-  const cards = useMemo(() => sortApps(appCards(BAPPS.filter((a) => !(STORE_BUILD && a.privateOnly))), sort), [sort]);
+  // bWeb (Settings › bWeb): bApps you hid stay out of this reel.
+  const [bweb] = useBWeb();
+  const hidden = bweb.feedHidden.join('\n');
+  const cards = useMemo(
+    () =>
+      sortApps(
+        appCards(BAPPS.filter((a) => !(STORE_BUILD && a.privateOnly) && !hidden.split('\n').includes(a.name))),
+        sort,
+      ),
+    [sort, hidden],
+  );
   const { box, style, active, toTop } = useReel(cards.length);
   const offScreen = useInPeek();
   const appVisible = useAppVisible();
