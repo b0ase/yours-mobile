@@ -73,7 +73,7 @@ const BmintPage = lazy(() => import('../bmint/BmintPage'));
 const BsharesPage = PLACEMENT_ENABLED ? lazy(() => import('../placement/BsharesPage')) : null;
 // The Name Store (/m/names, public /names): search, buy, claim and give names (names/store/).
 const NameStorePage = lazy(() => import('../names/store/NameStorePage'));
-// Theme Store (/m/store, themeStore/): Free themes; bWalletX also Premium, Holders, Editions (THEME_STORE_PAID_ENABLED).
+// bStore (/m/store, themeStore/, docs/BSTORE.md): Themes + Names everywhere; bWalletX also paid themes, Subscriptions, Credits, Stickers, Services, Community (THEME_STORE_PAID_ENABLED).
 const ThemeStorePage = lazy(() => import('../themeStore/ThemeStorePage'));
 // /names/store: the shop's stock (listed by tier, other sellers, held unlisted), names/store/StockPage.tsx.
 const StockPage = MARKET_ENABLED ? lazy(() => import('../names/store/StockPage')) : null;
