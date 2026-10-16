@@ -8,7 +8,7 @@ import { loadTokenCache, saveTokenCache } from '../mobile/wallet/tokenCache';
 import { requestBackupThen as gateReceive } from '../mobile/backup/backupState';
 import { MyFlipBavatar } from '../mobile/bavatar/FlipBavatar';
 import { notifyMinted } from '../mobile/mint/mint';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   List,
@@ -47,7 +47,7 @@ import { sleep } from '../utils/sleep';
 import { isUri } from '../utils/uri';
 import { AssetRow } from '../components/AssetRow';
 import { DefaultTokenCards } from '../mobile/wallet/DefaultTokenCards';
-import { BSV_LOCK_ROUTE, tokenLockNotice } from '../mobile/wallet/rowLock';
+import { BSV_LOCK_ROUTE } from '../mobile/wallet/rowLock';
 import { BackupPromo } from '../components/BackupPromo';
 import lockIcon from '../assets/lock.svg';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -99,6 +99,8 @@ import { pendingMeta, rememberSent } from '../mobile/wallet/send/sendLogic';
 import { payeeNote } from '../mobile/wallet/send/payee';
 import { TokenSwipe } from '../mobile/wallet/TokenSwipe';
 import { openHoldersRoom } from '../mobile/wallet/holdersRoom';
+// Swipe › Lock on a token row (BSV-21 time-locks with receipts, locks/tokenLocks.ts).
+const TokenLockSheet = lazy(() => import('../mobile/locks/TokenLockSheet'));
 import { CoinRow } from '../mobile/wallet/CoinRow';
 import { IS_EXTENSION } from '../mobile/extension';
 import { useTokenRows } from '../mobile/wallet/tokenRows';
@@ -714,6 +716,7 @@ export const BsvWallet = () => {
 
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [getBsvOpen, setGetBsvOpen] = useState(false);
+  const [tokenLock, setTokenLock] = useState<Bsv21Balance | null>(null);
 
   /**
    * Re-sync addresses, then reload BSV, MNEE, and BSV-21 balances.
@@ -1110,7 +1113,8 @@ export const BsvWallet = () => {
   };
 
   /** Token rows' Lock: one small handler so token locks (feat/token-locks) can swap it out. */
-  const lockToken = (t: Bsv21Balance) => addSnackbar(tokenLockNotice(t.sym), 'info', 2500);
+  // Token rows' Lock: the token-lock sheet (locks/TokenLockSheet.tsx).
+  const lockToken = (t: Bsv21Balance) => setTokenLock(t);
 
   const handleTokenClick = (token: Bsv21Balance) => {
     if (token.all.pending > 0n) {
@@ -1582,6 +1586,15 @@ export const BsvWallet = () => {
           />
           </TokenSwipe>
           </CoinRow>
+          {tokenLock && (
+            <Suspense fallback={null}>
+              <TokenLockSheet
+                token={tokenLock}
+                onClose={() => setTokenLock(null)}
+                onDone={() => void refreshUtxos().then(() => setRandomKey(Math.random()))}
+              />
+            </Suspense>
+          )}
           {BUY_CRYPTO_ENABLED && getBsvOpen && (
             <BuyBsvSheet
               onClose={() => setGetBsvOpen(false)}
