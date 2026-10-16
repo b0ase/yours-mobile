@@ -35,7 +35,9 @@ import {
   Radio,
   Receipt,
   Coins,
+  Smartphone,
 } from 'lucide-react';
+import { PhoneSettings } from '../mobile/sms/PhoneSettings';
 import { Capacitor } from '@capacitor/core';
 import { requestIgnoreBattery } from '../mobile/spaces/battery';
 import { FaEnvelope } from 'react-icons/fa';
@@ -110,7 +112,8 @@ export type SettingsPage =
   | 'storage'
   | 'permissions'
   | 'usb-security'
-  | 'troubleshooting';
+  | 'troubleshooting'
+  | 'phone';
 
 type DecisionType =
   | 'sign-out'
@@ -1030,6 +1033,13 @@ export const Settings = () => {
           description="Your on-chain name and photo that sign your posts"
           onClick={() => setPage('identity')}
           isFirst
+        />
+        <Divider />
+        <SettingRow
+          icon={<Smartphone size={16} />}
+          label="Phone"
+          description="Verify your number, find friends by number"
+          onClick={() => setPage('phone')}
         />
         <Divider />
         <SettingRow
@@ -2117,6 +2127,8 @@ export const Settings = () => {
           {/* Page transitions */}
           <AnimatePresence mode="wait">
             {page === 'main' && mainPage}
+
+            {page === 'phone' && <PhoneSettings onBack={() => setPage('main')} />}
 
             {page === 'manage-accounts' && manageAccountsPage}
 

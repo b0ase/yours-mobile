@@ -105,6 +105,8 @@ import { useTokenRows } from '../mobile/wallet/tokenRows';
 import { openTicketRoomInChat } from '../mobile/tickets/ticketRoom';
 import { asMenuItem } from '../mobile/tabs/tabs';
 import { publishBalance } from '../mobile/wallet/balanceStore';
+import { SendByTextSheet } from '../mobile/sms/SendByTextSheet';
+import { SEND_BY_TEXT_ENABLED } from '../mobile/sms/sendByText';
 import {
   BALANCE_TIMEOUT_MS,
   RATE_TIMEOUT_MS,
@@ -148,6 +150,7 @@ export const BsvWallet = () => {
     return resolveImageUrl(identityProfile.image, apiContext);
   }, [identityProfile.image, apiContext]);
   const [avatarReady, setAvatarReady] = useState(false);
+  const [byText, setByText] = useState(false);
 
   // Embedder hook (platform.ts): the wallet home is showing.
   useEffect(() => {
@@ -2104,6 +2107,13 @@ export const BsvWallet = () => {
         onAmountEdited={() => setSatSendAmount(null)}
         onSubmit={(e) => handleSendBsv(e)}
       />
+      {/* Send by text (src/mobile/sms): off until bit-sign switches SMS on; the sheet also hides on 503. */}
+      {SEND_BY_TEXT_ENABLED && (
+        <button type="button" onClick={() => setByText(true)} className="w-full mt-2 py-2 text-sm text-[#98A2B3] bg-transparent border-0">
+          Send by text instead
+        </button>
+      )}
+      {byText && <SendByTextSheet ctx={apiContext} onClose={() => setByText(false)} />}
 
       <div className="w-full px-4">
         <CoinHistory filter={{ type: 'bsv' }} refreshKey={bsvHistoryRefreshKey} />
