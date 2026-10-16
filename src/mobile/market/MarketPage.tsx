@@ -81,6 +81,7 @@ import { openDappBrowser } from '../dappBrowser';
 import { MODULE_FINISHES, purchaseContext, walletOutpoint } from './walletOutpoint';
 import { StrategiesMarket } from '../strategies/StrategiesMarket';
 import { ContractsMarket } from '../contracts/ContractsMarket';
+import { GamesMarket } from '../games/GamesMarket';
 import { ErrorActions } from '../errors/ErrorActions';
 
 /**
@@ -196,8 +197,9 @@ const MarketPage = () => {
   const [room, setRoom] = useState<HotRoom | null>(null);
   const [market, setMarket] = useState<RoomMarket | null>(null);
   const [strategiesOpen, setStrategiesOpen] = useState(false);
+  const [gamesOpen, setGamesOpen] = useState(false);
   // Strategies / Contracts / Bonds: panels that replace the token list (bWalletX only).
-  const [panel, setPanel] = useState<'contracts' | 'bonds' | 'strategies' | null>(null);
+  const [panel, setPanel] = useState<'contracts' | 'bonds' | 'strategies' | 'shares' | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const [busy, setBusy] = useState('');
   const [mine, setMine] = useState<WalletOutput[] | null>(null);
@@ -434,6 +436,9 @@ const MarketPage = () => {
       ? [
           { id: 'strategies', label: 'Strategies', kind: 'tokens' as Kind },
           { id: 'contracts', label: 'Contracts', kind: 'tokens' as Kind },
+          // Games (owner, 17 Oct 2026): our games + game tokens. bWalletX only: the cards open tokenblaster.lol
+          // (per-action fees, TOKENBLASTER_ENABLED) and the tokens open trading rooms, so a store build would be empty.
+          { id: 'games', label: 'Games', kind: 'tokens' as Kind },
           // 3D NFTs: 1Sat Ordnance game guns from tokenblaster.lol as spinning models (owner, 6 Oct 2026).
           // bWalletX only: buying sends you to an outside store, which the app stores reject.
         ]
@@ -443,12 +448,14 @@ const MarketPage = () => {
   // Bonds and Strategies are tabs inside Contracts (owner, 7 / 17 Oct 2026): panel 'bonds' means Contracts › Bonds.
   const activeCat =
     (panel ? 'contracts' : null) ??
+    (gamesOpen ? 'games' : null) ??
     (strategiesOpen ? 'strategies' : null) ??
     (kind === 'tokens' ? (tokenFilter === 'all' ? 'tokens' : tokenFilter) : view);
   // A grid of square filter buttons, all visible at once: no sideways scrolling, so nothing (e.g. Bonds) is
   // hidden (owner, 5 Oct 2026). Four across, wrapping onto more rows as categories are added.
   const pick = (c: Cat) => {
     setStrategiesOpen(c.id === 'strategies');
+    setGamesOpen(c.id === 'games');
     setPanel(c.id === 'contracts' ? 'contracts' : null);
     setKind(c.kind);
     if (c.token) setTokenFilter(c.token);
@@ -1096,6 +1103,8 @@ const MarketPage = () => {
           mineView
         ) : strategiesOpen && !room ? (
           <StrategiesMarket />
+        ) : gamesOpen && !room ? (
+          <GamesMarket tokens={tokenRows} onOpenToken={(r) => void openRoom(r)} />
         ) : panel && !room ? (
           <ContractsMarket
             tab={panel === 'contracts' ? 'all' : panel}
