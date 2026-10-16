@@ -482,7 +482,7 @@ const Layer = ({
         </button>
         <span className="text-[16px] font-bold text-white truncate">{title}</span>
       </div>
-      <div className="flex-1 overflow-y-auto pb-24">
+      <div className="flex-1 overflow-y-auto bw-dock-pad">
         {onRefresh && <PullToRefresh onRefresh={onRefresh} />}
         {children}
       </div>

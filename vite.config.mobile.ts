@@ -455,8 +455,8 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       "        style={{ minHeight: '100%' }}\n      >\n<PullToRefresh onRefresh={() => refreshUtxos({ notifyIfUnchanged: true })} />\n<WalletRefreshListener onRefresh={() => refreshUtxos()} />\n<VideoBackground src={walletBg} poster={walletPoster} scrim='dark' position='fixed' />\n        {/* ── BSV price + Buy BSV (owner, 6 Oct 2026); the migration banner moved below the token buttons ── */}",
     ],
     [
-      'className="flex flex-col items-center w-full pt-14 pb-16 overflow-y-auto"',
-      'className="isolate flex flex-col items-center w-full pt-14 pb-16 overflow-y-auto"',
+      'className="flex flex-col items-center w-full pt-14 pb-16 overflow-y-auto bw-dock-pad"',
+      'className="isolate flex flex-col items-center w-full pt-14 pb-16 overflow-y-auto bw-dock-pad"',
     ],
     [
       // Phone: pull to refresh instead. Extension (no pull gesture): keep the button.
