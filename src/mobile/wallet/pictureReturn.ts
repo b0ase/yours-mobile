@@ -17,7 +17,7 @@ export async function publishPaymailAvatar(ctx: OneSatContext | undefined, stora
   if (!url || !pm || !ctx?.wallet || !paymailEnabled()) return;
   await claimPaymail(f, ctx.wallet, bareName(pm), {
     ordAddress: account?.addresses?.ordAddress,
-    name: account?.settings?.socialProfile?.displayName || account?.name,
+    // No name: a picture change keeps the display name set in Settings › Identity.
     avatar: url,
   }).catch(() => undefined);
 }

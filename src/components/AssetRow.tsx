@@ -61,6 +61,8 @@ export type AssetRowProps = {
   showPointer: boolean;
   isMNEE?: boolean;
   animate?: boolean;
+  /** No hover/press motion (swipeable rows on phones: a press-scale during scroll made rows jitter). */
+  still?: boolean;
   isLock?: boolean;
   nextUnlock?: number;
   /** Decimal places for balance display. Defaults to 3. */
@@ -88,6 +90,7 @@ export const AssetRow = (props: AssetRowProps) => {
     showPointer,
     onGetMneeClick,
     animate = false,
+    still = false,
     decimals,
     subline,
     action,
@@ -106,10 +109,10 @@ export const AssetRow = (props: AssetRowProps) => {
 
   return (
     <motion.div
-      whileHover={animate ? { scale: 1.015, x: 2 } : {}}
-      whileTap={showPointer ? { scale: 0.985 } : {}}
+      whileHover={animate && !still ? { scale: 1.015, x: 2 } : {}}
+      whileTap={showPointer && !still ? { scale: 0.985 } : {}}
       transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-      className="flex flex-wrap items-center justify-between w-[92%] mx-auto rounded-xl px-0 py-3 mb-1.5"
+      className="bw-asset-row flex flex-wrap items-center justify-between w-[92%] mx-auto rounded-xl px-0 py-3 mb-1.5"
       style={{
         backgroundColor: theme.color.global.row,
         cursor: showPointer ? 'pointer' : 'default',

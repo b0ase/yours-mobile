@@ -203,17 +203,29 @@ function attach(l: Live) {
   };
 }
 
+/** Channels whose key is being derived for a reconnect (the socket isn't in `live` until that finishes). */
+const connecting = new Set<string>();
+
 /** Reopen the relay socket for a stored session. */
 function connect(c: string) {
   const old = live.get(c);
   if (old && old.ws.readyState <= WebSocket.OPEN) return;
+  // initPairing and the foreground listener (or two quick visibility changes) can both ask while the key is still
+  // being derived; without this each opened its own socket and the later one silently replaced the earlier in `live`.
+  if (connecting.has(c)) return;
   const stored = load().find((s) => s.c === c);
   if (!stored) return;
+  connecting.add(c);
   void (async () => {
-    const { key } = await deriveSession(PrivateKey.fromHex(stored.phoneKey), stored.sitePub, stored.c);
-    const sealer = new Sealer(key, 'wallet');
-    sealer.restore({ sent: stored.sent, lastSeen: stored.lastSeen });
-    attach({ ws: new WebSocket(relaySocketUrl(stored.r, stored.c, 'wallet')), sealer, stored });
+    try {
+      const { key } = await deriveSession(PrivateKey.fromHex(stored.phoneKey), stored.sitePub, stored.c);
+      if (!load().some((s) => s.c === c)) return; // forgotten meanwhile
+      const sealer = new Sealer(key, 'wallet');
+      sealer.restore({ sent: stored.sent, lastSeen: stored.lastSeen });
+      attach({ ws: new WebSocket(relaySocketUrl(stored.r, stored.c, 'wallet')), sealer, stored });
+    } finally {
+      connecting.delete(c);
+    }
   })();
 }
 

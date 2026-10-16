@@ -4,11 +4,13 @@
  * player at a time (tap a card to play it; any other stops), creator credit only when the original
  * post is theirs, clips screened by screen.ts in parseFeed. Hidden when no source answers.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Play } from 'lucide-react';
 import { openDappBrowser } from '../../dappBrowser';
 import { appendPage, clipPageUrl, creditedHandle, findPoster, firstFrameUrl, type Clip } from './bmovies';
 import { BNEWS_SOURCES, fetchMerged, type Cursors } from './videoSources';
+import { phonePoster, useAppVisible, useNearView, useReelVideo } from '../reelMemory';
+import { useInPeek } from '../../phone/pageEl';
 
 const GREEN = '#30A46C';
 const MUTED = '#8a8f98';
@@ -16,26 +18,42 @@ const LINE = '#1f2127';
 
 const when = (at: number) => new Date(at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 
-const Card = ({ c, playing, onPlay }: { c: Clip; playing: boolean; onPlay: () => void }) => {
+const Card = ({
+  c,
+  playing: picked,
+  onPlay,
+  onStop,
+}: {
+  c: Clip;
+  playing: boolean;
+  onPlay: () => void;
+  onStop: () => void;
+}) => {
   const [poster, setPoster] = useState<string | null>(c.poster);
-  const video = useRef<HTMLVideoElement>(null);
   const handle = creditedHandle(c);
+  // Media only near the screen; the player stops when scrolled far away, the page is hidden or the app is.
+  const [box, near] = useNearView<HTMLDivElement>();
+  const offScreen = useInPeek();
+  const appVisible = useAppVisible();
+  const shown = near && !offScreen && appVisible;
+  const playing = picked && shown;
+  const video = useReelVideo(playing);
+  useEffect(() => {
+    if (picked && !shown) onStop();
+  }, [picked, shown, onStop]);
 
   useEffect(() => {
-    if (poster) return;
+    if (poster || !near) return;
     let live = true;
     void findPoster(c).then((p) => live && p && setPoster(p));
     return () => {
       live = false;
     };
-  }, [c, poster]);
-
-  useEffect(() => {
-    if (!playing) video.current?.pause();
-  }, [playing]);
+  }, [c, poster, near]);
 
   return (
     <div
+      ref={box}
       className="mx-4 mb-3 overflow-hidden rounded-2xl"
       style={{ background: '#0d0d0f', border: `1px solid ${LINE}` }}
     >
@@ -44,7 +62,7 @@ const Card = ({ c, playing, onPlay }: { c: Clip; playing: boolean; onPlay: () =>
           <video
             ref={video}
             src={c.src}
-            poster={poster ?? undefined}
+            poster={poster ? phonePoster(poster) : undefined}
             autoPlay
             controls
             playsInline
@@ -52,8 +70,14 @@ const Card = ({ c, playing, onPlay }: { c: Clip; playing: boolean; onPlay: () =>
           />
         ) : (
           <button onClick={onPlay} aria-label={`Play ${c.title}`} className="absolute inset-0 h-full w-full">
-            {poster ? (
-              <img src={poster} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" />
+            {!shown ? null : poster ? (
+              <img
+                src={phonePoster(poster)}
+                alt=""
+                loading="lazy"
+                decoding="async"
+                className="absolute inset-0 h-full w-full object-cover"
+              />
             ) : (
               <video
                 src={firstFrameUrl(c.src)}
@@ -88,6 +112,7 @@ const NewsVideos = () => {
   const [next, setNext] = useState<Cursors | null>(null);
   const [playing, setPlaying] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const stop = useCallback(() => setPlaying(null), []);
 
   const load = useCallback(async (cursors: Cursors | null) => {
     setBusy(true);
@@ -113,7 +138,7 @@ const NewsVideos = () => {
         Video
       </p>
       {clips.map((c) => (
-        <Card key={c.id} c={c} playing={playing === c.id} onPlay={() => setPlaying(c.id)} />
+        <Card key={c.id} c={c} playing={playing === c.id} onPlay={() => setPlaying(c.id)} onStop={stop} />
       ))}
       {next && (
         <button

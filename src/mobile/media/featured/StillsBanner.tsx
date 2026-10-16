@@ -30,7 +30,7 @@ export function StillsBanner({
     <div
       // `relative` only when the caller didn't position it: "relative absolute" lets relative win, and an
       // absolute backdrop with no children then collapses to zero height (the invisible Desktop banner).
-      className={`${/\b(absolute|fixed)\b/.test(className ?? '') ? '' : 'relative '}overflow-hidden ${className ?? ''}`}
+      className={`bw-stills ${/\b(absolute|fixed)\b/.test(className ?? '') ? '' : 'relative '}overflow-hidden ${className ?? ''}`}
       style={{ background: 'radial-gradient(circle at 25% 30%, #5a420a 0%, #1c1606 45%, #000 100%)' }}
     >
       <style>{KEYFRAMES}</style>
@@ -41,7 +41,7 @@ export function StillsBanner({
           alt=""
           aria-hidden
           loading={n === 0 ? 'eager' : 'lazy'}
-          className="bwx-kb absolute inset-0 w-full h-full object-cover"
+          className="bwx-kb bw-stills-img absolute inset-0 w-full h-full object-cover"
           style={{
             opacity: n === i ? 1 : 0,
             transition: 'opacity 1.6s ease-in-out',
@@ -50,7 +50,7 @@ export function StillsBanner({
         />
       ))}
       <div
-        className="absolute inset-0"
+        className="bw-stills-scrim absolute inset-0"
         style={{
           background: 'linear-gradient(90deg, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.45) 50%, rgba(0,0,0,0.15) 100%)',
         }}

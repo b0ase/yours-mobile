@@ -15,6 +15,10 @@ import { claimPaymail, paymailEnabled } from './paymail';
 import { getPaymail } from './accountName';
 import { bareName } from './names';
 import { moneyNow } from '../money/money';
+import { AvatarTooBigError, dataUrlMime } from './animatedAvatar';
+import { uploadOwnAvatar } from './avatarUpload';
+import { BchatClient, defaultHttp, loadSession } from '../chat/api';
+import { isNative } from '../native';
 
 /** BAP profile update tx (~400 B) on top of the image inscription. */
 const PROFILE_TX_SATS = 60;
@@ -54,8 +58,16 @@ export const AvatarPicker = ({ displayName }: { displayName: string }) => {
           .catch(() => undefined);
       }
       setMsg('Saved on this phone. Publish it to show it to others.');
-    } catch {
-      setMsg("Couldn't read that photo.");
+      // Also to bChatX (bit-sign), when signed in there: original bytes, so a GIF still moves for others.
+      const session = loadSession();
+      if (session) {
+        const up = await uploadOwnAvatar(new BchatClient(defaultHttp(isNative), session), dataUrl);
+        if (up.ok) setMsg('Saved, and shared with bChatX. Publish it on-chain to put it on your public profile.');
+        else if (up.unavailable) setMsg(`Saved on this phone. ${up.message}; bChatX keeps your current picture.`);
+        else setMsg(`Saved on this phone. bChatX: ${up.message}`);
+      }
+    } catch (e) {
+      setMsg(e instanceof AvatarTooBigError ? e.message : "Couldn't read that photo.");
     }
   };
 
@@ -64,7 +76,7 @@ export const AvatarPicker = ({ displayName }: { displayName: string }) => {
     setMsg('');
     try {
       const b64 = local.split(',')[1] ?? '';
-      const ins = await identity.inscribeAvatar(b64, 'image/jpeg');
+      const ins = await identity.inscribeAvatar(b64, dataUrlMime(local) || 'image/jpeg');
       if (!ins.url) throw new Error(ins.error || 'Inscription failed');
       const res = await identity.saveProfile({
         name: identity.profile.name || displayName,
@@ -79,7 +91,7 @@ export const AvatarPicker = ({ displayName }: { displayName: string }) => {
       if (pm && paymailEnabled() && httpsUrl) {
         await claimPaymail(f, apiContext.wallet, bareName(pm), {
           ordAddress: account?.addresses?.ordAddress,
-          name: identity.profile.name || displayName,
+          // No name: a picture change keeps the display name set in Settings › Identity.
           avatar: httpsUrl,
         }).catch(() => undefined);
       }
@@ -111,7 +123,7 @@ export const AvatarPicker = ({ displayName }: { displayName: string }) => {
       <input
         ref={input}
         type="file"
-        accept="image/*"
+        accept="image/png,image/jpeg,image/webp,image/gif,image/apng"
         className="hidden"
         onChange={(e) => {
           void pick(e.target.files?.[0]);

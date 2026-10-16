@@ -1785,19 +1785,20 @@ button.bw-mail-card:active {
   display: flex;
   flex-direction: row;
   align-items: baseline;
-  gap: 4px;
+  justify-content: flex-end;
+  gap: 6px;
   min-width: 0;
   white-space: nowrap;
 }
 .bw-wcard-stripe-label {
-  font-size: 7px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.12em;
   color: #8e8e89;
 }
 .bw-wcard-stripe-hex {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 8px;
+  font-size: 12px;
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2288,19 +2289,20 @@ button.bw-mail-card:active {
   display: flex;
   flex-direction: row;
   align-items: baseline;
-  gap: 4px;
+  justify-content: flex-end;
+  gap: 6px;
   min-width: 0;
   white-space: nowrap;
 }
 .bw-wcard-stripe-label {
-  font-size: 7px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.12em;
   color: #8e8e89;
 }
 .bw-wcard-stripe-hex {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 8px;
+  font-size: 12px;
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3154,4 +3156,159 @@ button.bw-mail-card:active {
   border-radius: 50%;
   background: #fff;
   border: 3px solid rgb(0 0 0 / 0.55);
+}
+
+/* Theme › App colours, tightened (owner, 15 Oct 2026: "a lot of space"). Three packs a row; blurbs live in the
+   tile's label; Shuffle / Surprise me sit on the section heading; accent dots in one compact grid. */
+.bw-cdes.bw-theme {
+  gap: 10px;
+}
+.bw-theme-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  max-width: 520px;
+}
+.bw-theme-head .bw-theme-more {
+  flex: 1;
+  margin: 0;
+}
+.bw-theme-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgb(var(--bw-accent-rgb) / 0.4);
+  background: rgb(var(--bw-accent-rgb) / 0.08);
+  color: var(--bw-accent-hi);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.bw-theme .bw-pack-grid {
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 6px;
+}
+.bw-theme-group {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--bw-muted, #a6a6a1);
+}
+/* flex-basis: 100% in the column sheet resolved to the sheet's full height: a phone-high blank under the note
+   (owner bug, 15 Oct 2026, measured 846px at 400×860). Inside the sheet it is just a paragraph. */
+.bw-cdes > .bw-cdes-note,
+.bw-cdes > .bw-cdes-imgerr {
+  flex-basis: auto;
+}
+.bw-theme .bw-pack {
+  gap: 4px;
+  padding: 6px 6px 8px;
+}
+.bw-theme .bw-pack-card {
+  height: 34px;
+  font-size: 11px;
+}
+.bw-theme .bw-pack-nav {
+  margin: 0 -6px;
+}
+.bw-theme .bw-pack-name {
+  font-size: 12px;
+}
+.bw-theme .bw-pack-blurb {
+  display: none;
+}
+.bw-theme .bw-mixer-head {
+  padding: 10px 12px;
+}
+.bw-theme .bw-mixer-body {
+  gap: 12px;
+  padding: 0 12px 12px;
+}
+.bw-mixer-corners {
+  grid-template-columns: repeat(3, 1fr);
+}
+.bw-mixer-corners i {
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+}
+.bw-theme .bw-theme-swatches {
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: 6px;
+  width: 100%;
+  max-width: 520px;
+}
+.bw-theme .bw-theme-swatch {
+  gap: 4px;
+  padding: 8px 4px;
+  border-radius: 12px;
+}
+.bw-theme .bw-theme-dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 14px;
+}
+.bw-theme .bw-theme-name {
+  font-size: 11px;
+}
+
+/* Wallet token rows (owner, 15 Oct 2026): the swipe tray is exactly the row's height and corners. The wrapper
+   takes the row's width and gap, so the row inside fills it edge to edge and the tray sits flush behind it. */
+.bw-token-swipe {
+  width: 92%;
+  margin: 0 auto 8px;
+}
+.bw-token-swipe .bw-asset-row {
+  width: 100%;
+  margin: 0;
+}
+/* Phone rows are raised .bw-card (18px): the clip takes the same corners, and the hairline ring moves inside so
+   overflow:hidden never shaves it off. */
+.bw-token-swipe .bw-swipe:has(.bw-card) {
+  border-radius: 18px;
+}
+.bw-token-swipe .bw-asset-row.bw-card {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    inset 0 0 0 1px #23252b;
+}
+
+/* Optional bAvatar shimmer (names/bavatarShimmer.ts): a soft gold sweep, transform only; still with reduced motion. */
+.bw-bavatar-shimmer {
+  position: relative;
+  display: inline-block;
+  overflow: hidden;
+  border-radius: 9999px;
+  flex-shrink: 0;
+  line-height: 0;
+}
+.bw-bavatar-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 35%, rgba(255, 236, 170, 0.35) 50%, transparent 65%);
+  transform: translateX(-100%);
+  animation: bw-bavatar-sweep 3.6s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes bw-bavatar-sweep {
+  0%,
+  55% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bw-bavatar-shimmer::after {
+    animation: none;
+    display: none;
+  }
 }

@@ -9,6 +9,8 @@
 	<key>com.apple.developer.associated-domains</key>
 	<array>
 		<string>applinks:www.bwallet.space</string>
+		<!-- Room X invites: www.bchatx.com/i/x/* (bchatx.com/.well-known/apple-app-site-association). -->
+		<string>applinks:www.bchatx.com</string>
 		<!-- Passwords: iOS offers and saves a strong wallet password (iCloud Keychain). -->
 		<string>webcredentials:www.bwallet.space</string>
 	</array>

@@ -6,6 +6,8 @@ import {
   DEFAULT_DOCK,
   defaultDock,
   DOCK_MAX,
+  isDefaultDock,
+  resetDock,
   OLD_DEFAULT_DOCK,
   moveInDock,
   normaliseDock,
@@ -137,5 +139,17 @@ describe('phone dock model', () => {
     expect(choices).not.toContainEqual({ kind: 'screen', id: 'exchange' });
     expect(choices).toContainEqual({ kind: 'screen', id: 'games' });
     expect(addable([], stripFor(false, true))).toContainEqual({ kind: 'action', id: 'sendReceive' });
+  });
+
+  test('reset: an emptied dock comes back as the default; isDefaultDock says when there is nothing to reset', () => {
+    let items = defaultDock(false);
+    for (const i of defaultDock(false)) items = removeFromDock(items, i);
+    expect(items).toEqual([]);
+    expect(isDefaultDock(items, false)).toBe(false);
+    expect(resetDock(false)).toEqual(defaultDock(false));
+    expect(isDefaultDock(resetDock(false), false)).toBe(true);
+    expect(isDefaultDock(moveInDock(defaultDock(false), 0, 1), false)).toBe(false);
+    expect(resetDock(true)).toEqual(defaultDock(true));
+    expect(isDefaultDock(resetDock(true), true)).toBe(true);
   });
 });

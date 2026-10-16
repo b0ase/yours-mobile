@@ -17,7 +17,7 @@ describe('HOME', () => {
     }
   });
 
-  test('dock b: tap = Home, hold = the agent page; top bar is Accounts · Calls · Airdrops · Media · Lock BSV', () => {
+  test('dock b: tap = Home, hold = the agent page; top bar is bAvatar menu · Calls · Airdrops · Media · Lock BSV', () => {
     const dock = readFileSync(join(import.meta.dir, 'Dock.tsx'), 'utf8');
     // Hold-to-talk lives in one shared hook (agent/useHoldToTalk + holdToTalk), used by the Dock and Ask b.
     const hook = readFileSync(join(import.meta.dir, '../agent/useHoldToTalk.ts'), 'utf8');
@@ -32,7 +32,7 @@ describe('HOME', () => {
     const top = readFileSync(join(import.meta.dir, '../tabs/TopNav.tsx'), 'utf8');
     const row = top.slice(top.indexOf('owner round 3'));
     const order = [
-      'aria-label="Accounts menu"',
+      '<MenuAvatarButton',
       'aria-label="Calls"',
       '<AirdropsNavButton',
       'aria-label="Media"',
@@ -42,7 +42,7 @@ describe('HOME', () => {
     expect([...order].sort((x, y) => x - y)).toEqual(order);
     expect(top).toContain('{!phone && <AccountStrip />}');
     const apps = readFileSync(join(import.meta.dir, '../BrowserPage.tsx'), 'utf8');
-    expect(apps).toContain('[...SYS_TILES, ...notHome(BAPP_TILES)]');
+    expect(apps).toContain('ownIconsFirst([...SYS_TILES, ...BAPP_TILES], hasOwnIcon)');
   });
 
   test('HOME is a fixed 4 × 6 page with Your apps and Recents below', () => {

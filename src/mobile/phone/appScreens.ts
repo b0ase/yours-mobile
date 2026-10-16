@@ -108,3 +108,34 @@ export const defaultScreens = (home: readonly string[], bapps: readonly string[]
     { title: 'Games', items: games.filter((k) => !onHome.has(k)) },
   ]);
 };
+
+/** Stable split: tiles with their own artwork first, then the ones using the generated gold-b icon set. */
+export const ownIconsFirst = <T>(items: readonly T[], hasOwnIcon: (x: T) => boolean): T[] => [
+  ...items.filter(hasOwnIcon),
+  ...items.filter((x) => !hasOwnIcon(x)),
+];
+
+export const BAPPS_TITLE = 'bApps';
+
+/**
+ * All bApps in one section (owner, 15 Oct 2026): every key in `bapps` (in that order) comes off whatever screen
+ * it is on and goes into the "bApps" screen (made at position 2 if missing), own-artwork icons first, then the
+ * gold-b ones. Keys in `skip` (the dock) stay where they are. Other tiles and screens are untouched.
+ */
+export const gatherBapps = (
+  s: AppScreensState,
+  bapps: readonly string[],
+  hasOwnIcon: (key: string) => boolean,
+  skip: ReadonlySet<string> = new Set(),
+): AppScreensState => {
+  const keys = bapps.filter((k) => !skip.has(k));
+  const move = new Set(keys);
+  const screens = s.screens.map((x) => ({ ...x, items: x.items.filter((k) => !move.has(k)) }));
+  let i = screens.findIndex((x) => x.title?.trim().toLowerCase() === BAPPS_TITLE.toLowerCase());
+  if (i < 0) {
+    i = Math.min(1, screens.length);
+    screens.splice(i, 0, { title: BAPPS_TITLE, items: [] });
+  }
+  screens[i] = { ...screens[i], items: [...ownIconsFirst(keys, hasOwnIcon), ...screens[i].items] };
+  return state(screens);
+};

@@ -1,6 +1,7 @@
 import { fetchSeries } from '../portfolio/market';
 import { BetaLine } from '../sweep/BetaLine';
 import { APP_NAME, BUY_CRYPTO_ENABLED, SWAP_ENABLED } from '../storeBuild';
+import { swapRowButtons } from './allCardsOpen';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { useSwapWatcher } from '../swap/useSwapWatcher';
@@ -145,7 +146,7 @@ const PriceCell = ({ rate, onOpen, change }: { rate: number; onOpen: () => void;
 );
 
 /** Same box and margins as the promo card, so nothing jumps when the chunk loads. */
-const SwapPromoSkeleton = () => <div className="w-[92%] min-h-[52px] -mb-1" aria-hidden="true" />;
+const SwapPromoSkeleton = () => <div className="flex-1 min-w-0 min-h-[52px]" aria-hidden="true" />;
 
 /**
  * Wallet top row (owner, rounds 6–7; price restored 10 Oct 2026): price · Buy BSV · History, three equal columns.
@@ -183,6 +184,7 @@ export const BsvPriceBar = ({
     else if (s.stage === 'failed') addSnackbar('A swap needs attention. Open Swap to see it.', 'error');
   });
   const swapOn = SWAP_ENABLED && !!SwapFlow && !!getAddress;
+  const row = swapRowButtons(swapOn && !!SwapPromo, false);
   const openSwap = () => {
     setResume(active[0] ?? (swaps[0] && !swaps[0].notified ? swaps[0] : null));
     setSwapOpen(true);
@@ -206,13 +208,22 @@ export const BsvPriceBar = ({
         </button>
         <HistoryButton className={CELL} />
       </div>
-      {swapOn && SwapPromo && (
-        // Equal 8px above and below the promo: the row's mb-2 above; below, the card's own 12px top margin less 4px.
-        <Suspense fallback={<SwapPromoSkeleton />}>
-          <SwapPromo active={active[0] ?? null} onOpen={openSwap} />
-        </Suspense>
+      {row.length > 0 ? (
+        // Equal 8px above and below the row: the price row's mb-2 above; below, the next card's 12px top margin less 4px.
+        <div className="w-[92%] -mb-1 flex items-stretch gap-2">
+          {row.map((b) =>
+            b === 'allCards'
+              ? null
+              : SwapPromo && (
+                  <Suspense key={b} fallback={<SwapPromoSkeleton />}>
+                    <SwapPromo active={active[0] ?? null} onOpen={openSwap} />
+                  </Suspense>
+                ),
+          )}
+        </div>
+      ) : (
+        <div className="mb-2" />
       )}
-      {!swapOn && <div className="mb-2" />}
       {open && (
         <BuyBsvSheet
           onClose={() => setOpen(false)}

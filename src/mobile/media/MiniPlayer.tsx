@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Music, Pause, Play, SkipBack, SkipForward, X } from 'lucide-react';
 import { getState, next, previous, seek, stop, subscribe, toggle } from './player';
 
@@ -10,11 +10,32 @@ const MiniPlayer = () => {
   const [s, setS] = useState(getState);
   useEffect(() => subscribe(setS), []);
   const track = s.queue[s.index];
+  // Publishes the bar's height as --bw-mini-h, so what sits at the foot of a page (the Ask b composer) lifts
+  // above it instead of hiding under it (owner, 15 Oct 2026).
+  const box = useRef<HTMLDivElement>(null);
+  const shown = !!track;
+  useEffect(() => {
+    const root = document.documentElement;
+    const el = box.current;
+    if (!shown || !el) {
+      root.style.removeProperty('--bw-mini-h');
+      return;
+    }
+    const set = () => root.style.setProperty('--bw-mini-h', `${Math.ceil(el.getBoundingClientRect().height) + 8}px`);
+    set();
+    const ro = new ResizeObserver(set);
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      root.style.removeProperty('--bw-mini-h');
+    };
+  }, [shown]);
   if (!track) return null;
-  const btn = 'p-2 rounded-full active:bg-[#2b2f36]';
+  const btn = 'p-2 rounded-full active:bg-[var(--bw-line)]';
   return (
     <div
-      className="absolute left-2 right-2 z-[101] rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36] px-3 pt-2 pb-1"
+      ref={box}
+      className="absolute left-2 right-2 z-[101] rounded-xl bg-[var(--bw-surface)] border border-[var(--bw-line)] px-3 pt-2 pb-1"
       style={{ bottom: '4rem' }}
     >
       <div className="flex items-center gap-2">
@@ -31,8 +52,8 @@ const MiniPlayer = () => {
           disabled={!track.onExpand}
           aria-label={track.onExpand ? `Open ${track.title}` : undefined}
         >
-          <div className="text-xs font-semibold text-white truncate">{track.title}</div>
-          <div className="text-[10px] text-[#98A2B3] truncate">
+          <div className="text-xs font-semibold text-[var(--bw-text)] truncate">{track.title}</div>
+          <div className="text-[10px] text-[var(--bw-muted)] truncate">
             {fmt(s.time)} / {fmt(s.duration)}
             {s.queue.length > 1 ? ` · ${s.index + 1} of ${s.queue.length}` : ''}
             {track.subtitle ? ` · ${track.subtitle}` : ''}
@@ -40,16 +61,16 @@ const MiniPlayer = () => {
           </div>
         </button>
         <button aria-label="Previous" className={btn} onClick={previous}>
-          <SkipBack size={16} color="#fff" />
+          <SkipBack size={16} color="var(--bw-text)" />
         </button>
         <button aria-label={s.playing ? 'Pause' : 'Play'} className={btn} onClick={toggle}>
-          {s.playing ? <Pause size={18} color="#fff" /> : <Play size={18} color="#fff" />}
+          {s.playing ? <Pause size={18} color="var(--bw-text)" /> : <Play size={18} color="var(--bw-text)" />}
         </button>
         <button aria-label="Next" className={btn} onClick={next}>
-          <SkipForward size={16} color="#fff" />
+          <SkipForward size={16} color="var(--bw-text)" />
         </button>
         <button aria-label="Close player" className={btn} onClick={stop}>
-          <X size={16} color="#98A2B3" />
+          <X size={16} color="var(--bw-muted)" />
         </button>
       </div>
       <input

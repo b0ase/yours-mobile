@@ -19,7 +19,8 @@ import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { useAccountNames } from '../names/accountNames';
 import { setWalletKind, getWalletKind, subscribeWalletKind, type WalletKind } from '../wallet/walletKind';
 import { BSPACES_ENABLED, MARKET_ENABLED, marketLabel, STORE_HIDDEN_WALLET_KINDS, STORE_BUILD } from '../storeBuild';
-import { useBMailUnread } from '../bmail/useBMail';
+import { badgeLabel, badgeText } from '../tabs/tabBadges';
+import { useTabBadges } from '../tabs/useTabBadges';
 import { NotificationsBell } from '../notify/NotificationsPanel';
 import { CALLS_ROUTE } from '../calls/route';
 import {
@@ -263,7 +264,9 @@ const WideShell = ({ children }: { children: ReactNode }) => {
   const { chromeStorageService, lockWallet } = useServiceContext();
   const { handleSelect } = useBottomMenu();
   const ccy = useCurrency();
-  const mail = useBMailUnread();
+  // bMail = airdrops + mail (same as the top-bar mailbox); Chat and Feed unread (tabs/tabBadges.ts).
+  const unread = useTabBadges();
+  const mail = unread.bmail;
   const kind = useSyncExternalStore(subscribeWalletKind, getWalletKind, getWalletKind);
   const feed = useWalletFeed();
   const account = chromeStorageService.getCurrentAccountObject().account;
@@ -301,8 +304,11 @@ const WideShell = ({ children }: { children: ReactNode }) => {
         { id: 'nfts', label: 'NFTs', icon: I.nfts, to: '/m/nfts' },
         // Every mint type in one place (bmint/BmintPage.tsx, owner 13 Oct 2026).
         { id: 'bmint', label: 'bMint', icon: I.mint, to: '/m/bmint' },
-        // Its own page with a deep link per friend (/wallet/friends/<handle>, owner 12 Oct 2026).
-        { id: 'friends', label: 'Friends', icon: I.friends, to: '/m/friends' },
+        // Names replaces Friends (owner, 15 Oct 2026): OpNS names + $handle paymails (wallet/NamesSection.tsx).
+        { id: 'names', label: 'Names', icon: I.friends, to: '/m/my-names' },
+        // Friends live in the address book notebook (/wallet/friends, wallet/AddressBook.tsx); a friend's own page
+        // stays at /wallet/friends/<handle>.
+        { id: 'friends', label: 'Address book', icon: I.friends, to: '/m/friends' },
         {
           id: 'tickets',
           label: 'Tickets',
@@ -325,7 +331,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
       title: 'Talk',
       items: [
         { id: 'bmail', label: 'bMail', icon: I.mail, to: '/m/bmail', badge: mail },
-        { id: 'chat', label: 'bChat', icon: I.chat, to: '/m/chat' },
+        { id: 'chat', label: 'bChat', icon: I.chat, to: '/m/chat', badge: unread.chat },
         { id: 'calls', label: 'bPhone', icon: I.calls, to: CALLS_ROUTE },
         { id: 'people', label: 'People', icon: I.people, to: '/m/people' },
         { id: 'spaces', label: 'Spaces', icon: I.spaces, to: '/m/spaces', hidden: !BSPACES_ENABLED },
@@ -334,7 +340,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
     {
       title: 'Discover',
       items: [
-        { id: 'feed', label: 'bChatX Feed', icon: I.feed, to: '/m/feed' },
+        { id: 'feed', label: 'bChatX Feed', icon: I.feed, to: '/m/feed', badge: unread.feed },
         { id: 'media', label: 'bMusic', icon: I.media, to: '/m/media' },
         { id: 'apps', label: 'bApps', icon: I.apps, to: '/m/apps' },
         { id: 'games', label: 'bGames', icon: I.games, to: '/m/games' },
@@ -422,7 +428,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
 
   const bapp = bappFromPath(pathname);
   // NFTs and Friends take the whole area right of the menu (owner, 11 Oct 2026); the holdings pane is for Wallet.
-  const fullWallet = onWallet && (kind === 'nfts' || kind === 'friends');
+  const fullWallet = onWallet && (kind === 'nfts' || kind === 'names');
   const view = bapp
     ? 'bapp'
     : pathname.startsWith('/m/bmail')
@@ -456,10 +462,19 @@ const WideShell = ({ children }: { children: ReactNode }) => {
   };
   const navBtn = (it: Item) =>
     it.hidden ? null : (
-      <button key={it.id} className={isOn(it) ? 'on' : ''} onClick={() => go(it)}>
+      <button
+        key={it.id}
+        className={isOn(it) ? 'on' : ''}
+        onClick={() => go(it)}
+        aria-label={badgeLabel(it.label, it.badge ?? 0)}
+      >
         <Icon d={it.icon} />
         <span className="ww-grow">{it.label}</span>
-        {!!it.badge && <span className="ww-badge">{it.badge}</span>}
+        {!!it.badge && (
+          <span className="ww-badge" aria-hidden>
+            {badgeText(it.badge)}
+          </span>
+        )}
       </button>
     );
 

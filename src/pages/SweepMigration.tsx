@@ -20,6 +20,7 @@ import type { SweepStep, SweepSelection, SweepTxResult, AddressScanStatus } from
 import { motion } from 'framer-motion';
 import { Shield, Lock, AlertTriangle, CheckCircle, ExternalLink, Loader2, Coins, Image, Check, X } from 'lucide-react';
 import { checkUsbPresence } from '../services/usbPresence';
+import { IS_EXTENSION } from '../mobile/extension';
 
 const EXPLORER_BASE = 'https://bananablocks.com/tx/';
 
@@ -445,7 +446,10 @@ export const SweepMigration = () => {
                 label="Launch Tool"
                 onClick={() => {
                   void persistSweepFlag('sweepStarted');
-                  chrome.tabs.create({ url: chrome.runtime.getURL('sweep-tab.html') });
+                  // Only the extension has a real tab to open; the web wallet and the phone apps run the tool here
+                  // (dkg, 15 Oct 2026: the web wallet's Launch Tool opened a blank page).
+                  if (IS_EXTENSION) chrome.tabs.create({ url: chrome.runtime.getURL('sweep-tab.html') });
+                  else setStep('password');
                 }}
               />
               <Button theme={theme} type="secondary-outline" label="Back" onClick={() => navigate(-1)} />

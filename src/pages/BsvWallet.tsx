@@ -47,6 +47,7 @@ import { sleep } from '../utils/sleep';
 import { isUri } from '../utils/uri';
 import { AssetRow } from '../components/AssetRow';
 import { DefaultTokenCards } from '../mobile/wallet/DefaultTokenCards';
+import { BSV_LOCK_ROUTE, tokenLockNotice } from '../mobile/wallet/rowLock';
 import { BackupPromo } from '../components/BackupPromo';
 import lockIcon from '../assets/lock.svg';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -88,12 +89,21 @@ import { withTimeout } from '../mobile/withTimeout';
 import { onPay, takePay, takePayAmount } from '../mobile/wallet/payNav';
 import { onWalletAction, takeWalletAction } from '../mobile/phone/walletAction';
 import { FindTokensButton } from '../mobile/wallet/FindTokensButton';
+import { HiddenTokens } from '../mobile/wallet/HiddenTokens';
 import { BsvPriceChart } from '../mobile/wallet/PriceChart';
 import { OrdinalsAddress } from '../mobile/wallet/OrdinalsAddress';
 import { useTabHome } from '../mobile/tabs/useTabHome';
 import { SendCard } from '../mobile/wallet/send/SendCard';
 import { isMainnetAddress } from '../mobile/names/address';
-import { rememberSent } from '../mobile/wallet/send/sendLogic';
+import { pendingMeta, rememberSent } from '../mobile/wallet/send/sendLogic';
+import { payeeNote } from '../mobile/wallet/send/payee';
+import { TokenSwipe } from '../mobile/wallet/TokenSwipe';
+import { openHoldersRoom } from '../mobile/wallet/holdersRoom';
+import { CoinRow } from '../mobile/wallet/CoinRow';
+import { IS_EXTENSION } from '../mobile/extension';
+import { useTokenRows } from '../mobile/wallet/tokenRows';
+import { openTicketRoomInChat } from '../mobile/tickets/ticketRoom';
+import { asMenuItem } from '../mobile/tabs/tabs';
 import { publishBalance } from '../mobile/wallet/balanceStore';
 import {
   BALANCE_TIMEOUT_MS,
@@ -121,9 +131,10 @@ export const BsvWallet = () => {
   const { theme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
-  const { updateBalance, isSyncing, restoreMessage } = useSyncTracker();
+  const { updateBalance, balanceTick, isSyncing, restoreMessage } = useSyncTracker();
   const urlParams = new URLSearchParams(location.search);
   const { handleSelect, query } = useBottomMenu();
+  const tokenRows = useTokenRows();
   const isReload = urlParams.get('reload') === 'true' || query === 'reload';
   urlParams.delete('reload');
   const [pageState, setPageState] = useState<PageState>('main');
@@ -397,6 +408,13 @@ export const BsvWallet = () => {
       const addresses = [...seen];
       setMneeAddresses(addresses.length ? addresses : [receiveAddress]);
       setMneeBalance(totalDecimal);
+      // Share the last MNEE balance with the wallet card (the balance cards read it; nothing writes back).
+      try {
+        localStorage.setItem('bwallet:mnee-balance', String(totalDecimal));
+        window.dispatchEvent(new Event('bwallet:mnee-balance'));
+      } catch {
+        /* storage unavailable */
+      }
 
       // Update MNEE balance in Chrome storage
       const { account } = chromeStorageService.getCurrentAccountObject();
@@ -588,6 +606,14 @@ export const BsvWallet = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [updateBalance]);
+
+  // Every finished sync / paymail receipt, not just the first (updateBalance latches at true).
+  useEffect(() => {
+    if (!balanceTick) return;
+    getAndSetBsvBalance();
+    loadLocks();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [balanceTick]);
 
   useEffect(() => {
     if (isReload) window.location.reload();
@@ -987,6 +1013,8 @@ export const BsvWallet = () => {
     const lineItems: SendLineItem[] = addressOrder.map((addr) => ({
       address: addr,
       amount: `${formatNumberWithCommasAndDecimals(consolidated.get(addr)! / BSV_DECIMAL_CONVERSION, 8)} BSV`,
+      // Payee safety (15 Oct 2026): name, bAvatar, key fingerprint, first payment, look-alike warning.
+      payee: payeeNote(identityAddress, addr, pendingMeta(addr)),
     }));
 
     setSendConfirmation({
@@ -1081,6 +1109,9 @@ export const BsvWallet = () => {
     navigate('/sweep');
   };
 
+  /** Token rows' Lock: one small handler so token locks (feat/token-locks) can swap it out. */
+  const lockToken = (t: Bsv21Balance) => addSnackbar(tokenLockNotice(t.sym), 'info', 2500);
+
   const handleTokenClick = (token: Bsv21Balance) => {
     if (token.all.pending > 0n) {
       addSnackbar('Pending tokens cannot be sent!', 'error', 2000);
@@ -1138,7 +1169,7 @@ export const BsvWallet = () => {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -12 }}
       transition={{ duration: 0.28, ease: 'easeOut' }}
-      className="flex flex-col items-center w-full pt-14 pb-20 px-4 overflow-y-auto overflow-x-hidden self-start"
+      className="flex flex-col items-center w-full pt-14 px-4 overflow-y-auto bw-dock-pad overflow-x-hidden self-start"
       style={{ height: '100%', backgroundColor: theme.color.global.walletBackground }}
     >
       {/* Header row */}
@@ -1161,7 +1192,7 @@ export const BsvWallet = () => {
 
       {/* Your bAvatar: tap to turn it over to the same address as a pay code (flip bAvatar, 14 Oct 2026). */}
       <div className="mb-4 flex flex-col items-center gap-1">
-        <MyFlipBavatar address={receiveAddress} size={72} backSize={180} />
+        <MyFlipBavatar address={receiveAddress} size={144} backSize={200} />
         <span className="text-[11px]" style={{ color: theme.color.global.gray }}>
           Tap your bAvatar to flip it
         </span>
@@ -1361,7 +1392,7 @@ export const BsvWallet = () => {
           hidden: {},
           visible: { transition: { staggerChildren: 0.07 } },
         }}
-        className="flex flex-col items-center w-full pt-14 pb-16 overflow-y-auto"
+        className="flex flex-col items-center w-full pt-14 pb-16 overflow-y-auto bw-dock-pad"
         style={{ minHeight: '100%' }}
       >
         {/* ── BSV price + Buy BSV (owner, 6 Oct 2026); the migration banner moved below the token buttons ── */}
@@ -1516,7 +1547,19 @@ export const BsvWallet = () => {
             <div className="flex-1 ml-3 h-px opacity-20" style={{ backgroundColor: theme.color.global.gray }} />
           </div>
 
+          <CoinRow id="bsv">
+          <TokenSwipe
+            id="bsv"
+            noArchive
+            label="BSV"
+            pinned={tokenRows.pinned.includes('bsv')}
+            onSend={() => setPageState('send')}
+            onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))}
+            onChat={() => handleSelect(asMenuItem('chat'))}
+            onLock={() => navigate(BSV_LOCK_ROUTE)}
+          >
           <AssetRow
+            still={!IS_EXTENSION}
             balance={bsvBalance}
             icon={bsvCoin}
             ticker="BSV"
@@ -1537,6 +1580,8 @@ export const BsvWallet = () => {
                 : undefined
             }
           />
+          </TokenSwipe>
+          </CoinRow>
           {BUY_CRYPTO_ENABLED && getBsvOpen && (
             <BuyBsvSheet
               onClose={() => setGetBsvOpen(false)}
@@ -1546,8 +1591,23 @@ export const BsvWallet = () => {
               }}
             />
           )}
+          <CoinRow id="mnee">
           <Show when={services.mnee}>
+            <TokenSwipe
+              id="mnee"
+              noArchive
+              label="MNEE USD"
+              pinned={tokenRows.pinned.includes('mnee')}
+              onSend={() => {
+                setSendSource('main');
+                setPageState('sendMNEE');
+              }}
+              onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))}
+              onChat={() => openHoldersRoom('mnee', () => handleSelect(asMenuItem('chat')))}
+              onLock={() => addSnackbar('Locking MNEE isn’t available yet.', 'info', 2500)}
+            >
             <AssetRow
+              still={!IS_EXTENSION}
               balance={mneeBalance}
               icon={MNEE_ICON_URL}
               ticker="MNEE USD"
@@ -1567,8 +1627,20 @@ export const BsvWallet = () => {
                 }
               }}
             />
+            </TokenSwipe>
           </Show>
-          <DefaultTokenCards />
+          </CoinRow>
+          <DefaultTokenCards
+            onSendToken={(id) => {
+              const t = filteredTokens.find((x) => x.id === id);
+              if (!t) return addSnackbar('PNEEs can be sent once indexed.', 'info', 2500);
+              setSendSource('main');
+              handleTokenClick(t);
+            }}
+            onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))}
+            onChat={() => openHoldersRoom('pnee', () => handleSelect(asMenuItem('chat')))}
+          />
+          <CoinRow id="locks">
           {lockData && (
             <Show when={services.locks && lockData.totalLocked > 0}>
               <AssetRow
@@ -1584,6 +1656,7 @@ export const BsvWallet = () => {
               />
             </Show>
           )}
+          </CoinRow>
         </motion.div>
 
         {/* ── Favorite tokens ── */}
@@ -1603,6 +1676,9 @@ export const BsvWallet = () => {
                   setSendSource('main');
                   handleTokenClick(t);
                 }}
+                onReceive={() => void gateReceive(chromeStorageService, () => setPageState('receive'))}
+                onChat={(t: Bsv21Balance) => openTicketRoomInChat(t.id, handleSelect)}
+                onLock={lockToken}
               />
             )}
           </motion.div>
@@ -1630,6 +1706,7 @@ export const BsvWallet = () => {
               style={listItemStyle}
               onFound={() => void refreshUtxos().then(() => setRandomKey(Math.random()))}
             />
+            <HiddenTokens tokens={bsv21s} style={listItemStyle} />
           </motion.div>
         </Show>
 
@@ -1735,7 +1812,7 @@ export const BsvWallet = () => {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -12 }}
       transition={{ duration: 0.28, ease: 'easeOut' }}
-      className="flex flex-col items-center w-full pt-14 pb-20 px-4 overflow-y-auto overflow-x-hidden self-start"
+      className="flex flex-col items-center w-full pt-14 px-4 overflow-y-auto bw-dock-pad overflow-x-hidden self-start"
       style={{ height: '100%', backgroundColor: theme.color.global.walletBackground }}
     >
       {/* Header */}
@@ -1919,7 +1996,7 @@ export const BsvWallet = () => {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -12 }}
       transition={{ duration: 0.28, ease: 'easeOut' }}
-      className="flex flex-col items-center w-full pt-14 pb-20 px-4 overflow-y-auto overflow-x-hidden self-start"
+      className="flex flex-col items-center w-full pt-14 px-4 overflow-y-auto bw-dock-pad overflow-x-hidden self-start"
       style={{ height: '100%', backgroundColor: theme.color.global.walletBackground }}
     >
       {/* Header */}
@@ -1975,7 +2052,7 @@ export const BsvWallet = () => {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -12 }}
       transition={{ duration: 0.28, ease: 'easeOut' }}
-      className="flex flex-col items-center w-full pt-14 pb-20 px-4 overflow-y-auto overflow-x-hidden self-start"
+      className="flex flex-col items-center w-full pt-14 px-4 overflow-y-auto bw-dock-pad overflow-x-hidden self-start"
       style={{ height: '100%', backgroundColor: theme.color.global.walletBackground }}
     >
       {/* Header */}

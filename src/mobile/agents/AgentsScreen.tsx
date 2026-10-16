@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, Bot, Check, ChevronRight, Copy, Plus } from 'lucide-react';
+import { ArrowLeft, Bot, Check, ChevronRight, Copy, Plus, Server } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
@@ -25,6 +25,8 @@ import { sweepBack } from './sweepBack';
 import { StrategySection } from './StrategySection';
 import { ExportForCli } from './ExportForCli';
 import { IS_EXTENSION } from '../extension';
+import { STORE_BUILD } from '../storeBuild';
+import { REMOTE_AGENTS, isRemoteAgentReady, remoteAgentBalanceSats, type RemoteAgent } from './remoteAgents';
 
 const PairSheet = lazy(() => import('../pair/PairSheet'));
 
@@ -152,6 +154,7 @@ export const AgentsScreen = ({ onClose }: { onClose: () => void }) => {
             </button>
           );
         })}
+        {!STORE_BUILD && REMOTE_AGENTS.map((r) => <RemoteAgentCard key={r.name} agent={r} />)}
         <button
           type="button"
           onClick={newAgent}
@@ -164,6 +167,48 @@ export const AgentsScreen = ({ onClose }: { onClose: () => void }) => {
       {open && <AgentAccountScreen id={open} onClose={() => setOpen(null)} />}
     </div>,
     document.body,
+  );
+};
+
+/** Read-only card for an agent that runs on a server (its keys live there, never in this phone). */
+const RemoteAgentCard = ({ agent }: { agent: RemoteAgent }) => {
+  const ready = isRemoteAgentReady(agent);
+  const [sats, setSats] = useState<number | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (!ready) return;
+    let live = true;
+    remoteAgentBalanceSats(agent.receiveAddress)
+      .then((s) => live && setSats(s))
+      .catch(() => live && setFailed(true));
+    return () => {
+      live = false;
+    };
+  }, [ready, agent.receiveAddress]);
+  const balance = !ready
+    ? 'Waiting for setup'
+    : failed
+      ? 'Balance unavailable'
+      : sats === null
+        ? 'Reading balance…'
+        : `${(sats / 1e8).toFixed(8)} BSV`;
+  return (
+    <div className="flex items-start gap-3 rounded-2xl p-3" style={{ background: CARD }}>
+      <Server size={20} color="#BDB4FE" />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-bold text-white">{agent.name}</span>
+          <AgentBadge label="RUNS ON A SERVER" />
+        </div>
+        <div className="text-[11px]" style={{ color: MUTED }}>
+          Owner {agent.owner} · cap ${agent.dailyCapUsd.toFixed(2)}/day · approval above $
+          {agent.approvalAboveUsd.toFixed(2)}
+        </div>
+        <div className="text-[11px]" style={{ color: ready ? 'white' : MUTED }}>
+          {balance}
+        </div>
+      </div>
+    </div>
   );
 };
 

@@ -7,7 +7,7 @@
   border-radius: inherit;
   pointer-events: none;
 }
-.bw-skin ~ * {
+.bw-skin ~ *:not(.bw-wcard-penflip) {
   position: relative;
   z-index: 1;
 }
@@ -83,7 +83,7 @@
 .bw-skin ~ * small {
   text-shadow: 0 1px 6px rgb(0 0 0 / 0.6);
 }
-/* The All cards browser (mock/balance-cards .bw-tm) follows the theme pack. */
+/* The All cards browser (.bw-tm) follows the theme pack. */
 .bw-tm {
   background: radial-gradient(
     120% 80% at 50% 110%,

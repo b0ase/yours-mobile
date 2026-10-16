@@ -53,6 +53,7 @@ import { rejoinWithBackoff, SpaceOverError } from './reconnect';
 import { useOnResume } from '../permissions/useOnResume';
 import { MediaPermissionNote } from '../permissions/MediaPermissionNote';
 import { SpeakerGrid } from './SpeakerGrid';
+import { offStageCameras, type ScreenFeed } from './stageTiles';
 import { isPermissionDenied, type MediaKind } from '../permissions/mediaPermission';
 import {
   audienceCount,
@@ -84,6 +85,7 @@ import {
   type GreenRoom,
 } from './model';
 import { ModeratorsSheet } from './ModeratorsSheet';
+import { SpaceVideoPlayer } from './SpaceVideoPlayer';
 import { ScreenAwake, wakeLockSupported } from './wakeLock';
 import {
   alwaysHereCaption,
@@ -142,7 +144,39 @@ const useLandscape = () => {
  * pinch-zoom, and iOS only fullscreens the <video> itself (`webkitEnterFullscreen`).
  */
 const ScreenTile = ({
+  feed,
+  media,
+  small = false,
+  deaf,
+  onSound,
+  onStop,
+}: {
+  feed: ScreenFeed;
+  media: SpaceMedia;
+  /** A second (or later) share: a grid cell, not the lead tile. */
+  small?: boolean;
+  deaf: boolean;
+  onSound: () => void;
+  onStop?: () => void;
+}) => (
+  <ScreenTileInner
+    owner={feed.owner}
+    screenKey={feed.key}
+    label={feed.label}
+    small={small}
+    media={media}
+    mine={feed.mine}
+    deaf={deaf}
+    onSound={onSound}
+    onStop={onStop}
+  />
+);
+
+const ScreenTileInner = ({
   owner,
+  screenKey,
+  label,
+  small,
   media,
   mine = false,
   deaf,
@@ -150,6 +184,9 @@ const ScreenTile = ({
   onStop,
 }: {
   owner: string;
+  screenKey: string;
+  label: string;
+  small: boolean;
   media: SpaceMedia;
   /** My own broadcast: LIVE badge, Stop, and where it plays. */
   mine?: boolean;
@@ -160,9 +197,9 @@ const ScreenTile = ({
   const ref = useRef<HTMLVideoElement>(null);
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    media.bindScreen(ref.current);
-    return () => media.bindScreen(null);
-  }, [media, owner]);
+    media.bindScreen(screenKey, ref.current);
+    return () => media.bindScreen(screenKey, null);
+  }, [media, screenKey]);
   const full = () => {
     const v = ref.current as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | null;
     const b = box.current;
@@ -172,8 +209,9 @@ const ScreenTile = ({
   return (
     <div
       ref={box}
-      className="relative mb-3 overflow-hidden rounded-2xl bg-black"
-      style={{ boxShadow: `0 0 0 1px ${LINE}` }}
+      className={`relative overflow-hidden rounded-2xl bg-black ${small ? '' : 'mb-3'}`}
+      style={{ boxShadow: `0 0 0 1px ${LINE}`, ...(small ? { aspectRatio: '16 / 9' } : {}) }}
+      data-space-screen={screenKey}
     >
       <video
         ref={ref}
@@ -181,8 +219,8 @@ const ScreenTile = ({
         playsInline
         muted
         onDoubleClick={full}
-        className="block w-full object-contain"
-        style={{ maxHeight: '70vh' }}
+        className={`block w-full object-contain ${small ? 'h-full' : ''}`}
+        style={small ? undefined : { maxHeight: '70vh' }}
       />
       {mine ? (
         <span
@@ -194,7 +232,7 @@ const ScreenTile = ({
         </span>
       ) : (
         <span className="absolute left-2 top-2 flex items-center gap-1 rounded-full bg-black/70 px-2 py-0.5 text-[11px] text-white">
-          <Monitor size={12} /> ${owner}&rsquo;s broadcast
+          <Monitor size={12} /> {label}
         </span>
       )}
       {mine && onStop && (
@@ -566,7 +604,7 @@ const SpaceScreenInner = ({
   const [state, setState] = useState<SpaceState>({ space: null, participants: [], me: null });
   const prev = useRef<SpaceState | null>(null);
   const [videos, setVideos] = useState<string[]>([]);
-  const [screenOwner, setScreenOwner] = useState<string | null>(null);
+  const [screens, setScreens] = useState<ScreenFeed[]>([]);
   /** My own tab/screen broadcast is live (Broadcast button). */
   const [broadcasting, setBroadcasting] = useState(false);
   const [broadcastSheet, setBroadcastSheet] = useState(false);
@@ -666,7 +704,7 @@ const SpaceScreenInner = ({
         if (!tok) throw new Error('Could not get into the space.');
         await media.connect(tok.url, tok.token, {
           onVideos: (v) => mounted.current && setVideos(v),
-          onScreen: (o) => mounted.current && setScreenOwner(o),
+          onScreens: (f) => mounted.current && setScreens(f),
           onBroadcast: (on) => mounted.current && setBroadcasting(on),
           onSpeakers: (s) => mounted.current && setSpeakers(s),
           onCanPublish: () => undefined,
@@ -705,7 +743,7 @@ const SpaceScreenInner = ({
       if (!tok) throw new Error('Could not get into the space.');
       await media.connect(tok.url, tok.token, {
         onVideos: (v) => mounted.current && setVideos(v),
-        onScreen: (o) => mounted.current && setScreenOwner(o),
+        onScreens: (f) => mounted.current && setScreens(f),
         onBroadcast: (on) => mounted.current && setBroadcasting(on),
         onSpeakers: (s) => mounted.current && setSpeakers(s),
         onCanPublish: (can) => {
@@ -979,6 +1017,10 @@ const SpaceScreenInner = ({
       }),
     [],
   );
+  const offStage = offStageCameras(
+    videos,
+    stage.map((p) => p.handle),
+  );
   const focus = phase === 'live' ? pipFocus({ stage, videos, speaking: speakers, me: myHandle }) : null;
   useEffect(() => {
     bg.update({ live: phase === 'live', title, onStage, micOn, focus });
@@ -1101,17 +1143,48 @@ const SpaceScreenInner = ({
       </Centered>
     ) : (
       <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4">
-        {screenOwner && (
+        {screens[0] && (
           <ScreenTile
-            owner={screenOwner}
+            key={screens[0].key}
+            feed={screens[0]}
             media={media}
-            mine={broadcasting && screenOwner === media.me}
             deaf={deaf}
             onSound={() => setDeaf((d) => !d)}
             onStop={() => void stopBroadcast()}
           />
         )}
+        {screens.length > 1 && (
+          <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2" data-space-screen-grid="">
+            {screens.slice(1).map((f) => (
+              <ScreenTile
+                key={f.key}
+                feed={f}
+                small
+                media={media}
+                deaf={deaf}
+                onSound={() => setDeaf((d) => !d)}
+                onStop={() => void stopBroadcast()}
+              />
+            ))}
+          </div>
+        )}
         {stageView}
+        {offStage.length > 0 && (
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3" data-space-offstage="">
+            {offStage.map((h) => (
+              <div
+                key={`camera:${h}`}
+                className="relative overflow-hidden rounded-2xl bg-black"
+                style={{ aspectRatio: '16 / 9' }}
+              >
+                <PipVideo media={media} handle={h} />
+                <span className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-0.5 text-[11px] text-white">
+                  ${h}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
         {roomMeta.alwaysHere.map((a) => (
           <AlwaysHereTile key={a.handle} agent={a} />
         ))}
@@ -1441,6 +1514,15 @@ const SpaceScreenInner = ({
             <Suspense fallback={null}>
               <PaidListening client={client} ticker={ticker} role={myRole} />
             </Suspense>
+          )}
+          {phase === 'live' && (
+            <SpaceVideoPlayer
+              client={client}
+              ticker={ticker}
+              media={media}
+              transport={state.space?.transport ?? 'sfu'}
+              staff={moderator}
+            />
           )}
           {body}
         </div>

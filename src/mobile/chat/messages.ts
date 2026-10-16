@@ -2,6 +2,7 @@
  * Pure chat logic for the native Chat tab: message merge/ordering, day
  * separators, room titles and previews. No I/O, so it is unit-tested directly.
  */
+import { isLounge } from './loungeInfo';
 
 /** A bChat room message as returned by /api/bitsign/rooms/[ticker]/messages. */
 export interface ChatMessage {
@@ -232,11 +233,22 @@ export const roomTitle = (room: Pick<ChatRoom, 'name' | 'ticker'>, me: string) =
   return name || `$${room.ticker}`;
 };
 
+/**
+ * The other person's handle in a DM ("$me ↔ $other"), bare and lower-case; null for any other room.
+ * The avatar lookups key on this: the raw room name or the viewer's own handle found nobody's picture.
+ */
+export const dmPeer = (room: Pick<ChatRoom, 'name' | 'ticker'>, me: string): string | null =>
+  isDirectRoom(room) ? roomTitle(room, me).replace(/^\$/, '') || null : null;
+
 export const isDirectRoom = (room: Pick<ChatRoom, 'name'>) => /↔/.test(room.name || '');
 
 export const roomInitial = (title: string) => (title.replace(/^\$/, '').trim()[0] || '?').toUpperCase();
 
+/** The Help Desk row always reads "Ask b", never its last message or join events. */
+export const HELP_DESK_PREVIEW = 'Ask b';
+
 export const previewText = (room: ChatRoom, me: string) => {
+  if (isLounge(room.ticker)) return HELP_DESK_PREVIEW;
   const m = room.last_message;
   if (!m) return room.access_note || 'No messages yet';
   const body = (m.body || '').replace(/\s+/g, ' ').trim() || (m.kind === 'event' ? 'Room update' : 'Attachment');

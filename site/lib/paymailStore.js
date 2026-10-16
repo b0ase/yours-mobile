@@ -23,14 +23,46 @@ function supabaseStore(env = process.env, f = fetch) {
   return {
     getAlias: (alias) => one(`bwallet_paymail_aliases?alias=eq.${q(alias)}&limit=1`),
     // A wallet's plain name first; a verified social name (kind x / gmail) only if it has no plain one.
+    // Only the primary name of each kind (migration STEP A: is_primary; extra plain names are false).
     getAliasByKey: async (k) =>
-      (await one(`bwallet_paymail_aliases?identity_key=eq.${q(k)}&kind=eq.plain&limit=1`)) ??
-      one(`bwallet_paymail_aliases?identity_key=eq.${q(k)}&limit=1`),
+      (await one(`bwallet_paymail_aliases?identity_key=eq.${q(k)}&kind=eq.plain&is_primary=is.true&limit=1`)) ??
+      one(`bwallet_paymail_aliases?identity_key=eq.${q(k)}&is_primary=is.true&limit=1`),
     // Every name that receives for this wallet (Settings › Identity shows them all).
     listByKey: async (k) =>
-      (await req(`bwallet_paymail_aliases?identity_key=eq.${q(k)}&select=alias,kind&order=created_at.asc&limit=50`)) ||
-      [],
-    getAliasByKeyKind: (k, kind) => one(`bwallet_paymail_aliases?identity_key=eq.${q(k)}&kind=eq.${q(kind)}&limit=1`),
+      // Removed extra names are renamed to an rm-… tombstone (they keep their payment history); hide them.
+      (await req(
+        `bwallet_paymail_aliases?identity_key=eq.${q(k)}&alias=not.like.rm-*&select=alias,kind,is_primary&order=created_at.asc&limit=50`,
+      )) || [],
+    getAliasByKeyKind: (k, kind) =>
+      one(`bwallet_paymail_aliases?identity_key=eq.${q(k)}&kind=eq.${q(kind)}&is_primary=is.true&limit=1`),
+    // An extra plain name (never primary). A plain INSERT: a clash (taken name, or the old
+    // UNIQUE(identity_key, kind) index before STEP B) fails with 409 instead of merging.
+    insertExtraAlias: async (row) =>
+      (
+        await req('bwallet_paymail_aliases', {
+          method: 'POST',
+          headers: { Prefer: 'return=representation' },
+          body: JSON.stringify({ ...row, kind: 'plain', is_primary: false, updated_at: new Date().toISOString() }),
+        })
+      )?.[0] ?? null,
+    // Make `to` the primary plain name. The partial unique index allows one primary per (key, kind),
+    // so the old one is cleared first; if setting the new one fails, the old one is put back so the
+    // wallet never ends up with no primary name.
+    setPrimary: async (k, from, to) => {
+      const patch = (alias, v) =>
+        req(`bwallet_paymail_aliases?alias=eq.${q(alias)}&identity_key=eq.${q(k)}`, {
+          method: 'PATCH',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({ is_primary: v, updated_at: new Date().toISOString() }),
+        });
+      if (from) await patch(from, false);
+      try {
+        await patch(to, true);
+      } catch (e) {
+        if (from) await patch(from, true);
+        throw e;
+      }
+    },
     // Verified social names (alias ends .x / .gmail), for the bWalletX Market "X Accounts" filter.
     listSocial: async (suffix) =>
       (await req(`bwallet_paymail_aliases?kind=eq.${q(suffix)}&select=alias,display_name&limit=5000`)) || [],
@@ -191,6 +223,13 @@ function supabaseStore(env = process.env, f = fetch) {
     // Unlink one name: its payment records go too (FK on alias). Callers refuse while any is uncollected.
     countUncollected: async (alias) =>
       ((await req(`bwallet_paymail_payments?alias=eq.${q(alias)}&status=eq.received&select=reference`)) ?? []).length,
+    // One display name per wallet: every paymail on this identity key shows the same name.
+    setDisplayNameByKey: (k, name) =>
+      req(`bwallet_paymail_aliases?identity_key=eq.${q(k)}`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({ display_name: name, updated_at: new Date().toISOString() }),
+      }),
     deleteAlias: async (alias) => {
       await req(`bwallet_paymail_payments?alias=eq.${q(alias)}`, {
         method: 'DELETE',

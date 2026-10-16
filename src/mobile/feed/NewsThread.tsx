@@ -101,6 +101,7 @@ const NewsCard = ({
             src={item.image}
             alt=""
             loading="lazy"
+            decoding="async"
             referrerPolicy="no-referrer"
             className="h-[72px] w-[72px] shrink-0 rounded-xl object-cover"
             style={{ background: PANEL }}
@@ -241,7 +242,7 @@ export const NewsThread = ({
         </button>
         <span className="text-[16px] font-bold text-white truncate">bNews thread</span>
       </div>
-      <div className="flex-1 overflow-y-auto pb-24">
+      <div className="flex-1 overflow-y-auto bw-dock-pad">
         <PullToRefresh onRefresh={load} />
         <div className="px-4 pt-4 pb-3" style={{ borderBottom: `1px solid ${LINE}` }}>
           {story.image && (

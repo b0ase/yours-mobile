@@ -14,7 +14,12 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { FAV_KEY, FAVOURITES_CHANGED, mergeFavouriteExtras } from './phone/homeFavourites';
 import {
+  APP_SCREENS_KEY,
   defaultScreens,
+  gatherBapps,
+  ownIconsFirst,
+  parseScreens,
+  serialiseScreens,
   moveToScreen,
   removeKey,
   renameScreen,
@@ -39,6 +44,7 @@ import bspacesGlyph from './brand/bspaces-glyph.svg';
 import bpicsGlyph from './brand/bpics-glyph.svg';
 import { ArrowRight, Clock, Github, Globe, Lock, Plus, Search, Star, X } from 'lucide-react';
 import { BAPP_GROUPS, bappsIn, type BApp } from './bapps';
+import { ALL_BAPP_ICON_SLUGS, bappIconUrl, useThemedIcon } from './brand/bappIcons';
 import { RADAR_APPS, RADAR_GROUPS } from './radarApps';
 import { GAME_SOURCES, gamesFor } from './games/gamesCatalog';
 import { AddAppSheet } from './apps/AddAppSheet';
@@ -81,6 +87,14 @@ import { usePhoneLayout } from './phone/flag';
 import { PHONE_ADD_TO_DOCK } from './phone/events';
 import type { DockItem } from './phone/dockModel';
 import { ErrorActions } from './errors/ErrorActions';
+import { accentById } from './theme/accents';
+import { useAccentId } from './theme/useAccent';
+
+// The VexVoid live set heads the Music (Media) section (owner, 16 Oct 2026); its own chunk, loaded on demand.
+const VexVoidHero = lazy(() => import('./media/vexvoid/VexVoidHero'));
+/** bRacer goes white with black edges on light themes (owner, 16 Oct 2026); the game reads ?theme=white. */
+const BRACER = '/arcade/bracer';
+const useLightScheme = () => accentById(useAccentId()).scheme === 'light';
 
 /**
  * Apps tab (theme.settings.services.browser), laid out like a phone home
@@ -166,6 +180,9 @@ const ONE_LINE = 'overflow-hidden text-ellipsis whitespace-nowrap';
 /** Home-screen icon: the site's icon, else a monogram ("b" in gold for bApps). */
 const TileIcon = ({ tile }: { tile: Tile }) => {
   const [failed, setFailed] = useState(false);
+  // Theme packs redraw the set icons; Mono puts own artwork on a white paper tile (themes.css .bw-paper-icon).
+  const themed = useThemedIcon(tile.icon);
+  const light = useLightScheme();
   if (tile.screen) {
     const Icon = SCREEN_ICON[tile.screen];
     return (
@@ -177,7 +194,7 @@ const TileIcon = ({ tile }: { tile: Tile }) => {
   if (tile.icon && !failed) {
     return (
       <img
-        src={tile.icon}
+        src={themed.src}
         alt=""
         draggable={false}
         onError={() => setFailed(true)}
@@ -185,7 +202,9 @@ const TileIcon = ({ tile }: { tile: Tile }) => {
         loading="lazy"
         width={60}
         height={60}
-        className={`${ICON} object-cover bg-[var(--bw-surface)]`}
+        className={`${ICON} object-cover bg-[var(--bw-surface)]${themed.paper ? ' bw-paper-icon' : ''}`}
+        // bRacer's neon-on-black cover turns white with black edges (GPU filter, no extra asset).
+        style={light && tile.url.includes(BRACER) ? { filter: 'grayscale(1) invert(1) contrast(1.6)' } : undefined}
       />
     );
   }
@@ -241,6 +260,12 @@ const BPICS_TILE: Tile = { key: 'sys:bpics', name: 'bPics', url: '/m/bpics', ico
 const SYS_TILES: Tile[] = BSPACES_ENABLED ? [AGENT_TILE, BPICS_TILE, BSPACES_TILE] : [AGENT_TILE, BPICS_TILE];
 /** Wallet screens rather than web apps: they open by route. */
 const isSys = (t: Tile) => t.key.startsWith('sys:');
+/** Generated bApp-icon-set images (gold b badge); a tile without an icon also draws a gold-b monogram. */
+const B_ICON_URLS = new Set(ALL_BAPP_ICON_SLUGS.map((slug) => bappIconUrl(slug)));
+/** Own artwork vs the gold-b icon set (owner, 15 Oct 2026: group them in the one bApps section). Ask b is the b. */
+const hasOwnIcon = (t: Tile) => t.key !== AGENT_KEY && !!t.icon && !B_ICON_URLS.has(t.icon);
+/** Every bApp, own-artwork icons first, then the gold-b ones (each group in catalogue order). */
+const BAPPS_GROUPED: Tile[] = ownIconsFirst([...SYS_TILES, ...BAPP_TILES], hasOwnIcon);
 const OTHER_TILES: Tile[] = apps.map((a) => ({ key: `o:${a.link}`, name: a.name, url: a.link, icon: a.icon }));
 
 // BSVRadar + Metanet app store apps, grouped, minus any host already in OTHER_TILES.
@@ -582,6 +607,7 @@ const BrowserPage = ({
 } = {}) => {
   const phone = usePhoneLayout();
   const navigate = useNavigate();
+  const lightScheme = useLightScheme();
   const only: Only | undefined = onlyProp ?? (phone ? 'apps' : undefined);
   const keyboard = useKeyboardInset();
   const reduce = useReducedMotion();
@@ -727,6 +753,8 @@ const BrowserPage = ({
     // typed addresses open full screen.
     const tile = ALL_TILES.find((t) => t.url === url);
     const name = bapp?.name ?? tile?.name;
+    // bRacer in a light theme: ask the game for its white palette (gameplay unchanged; ignored until it ships).
+    if (lightScheme && url.includes(BRACER)) url += `${url.includes('?') ? '&' : '?'}theme=white`;
     // Chrome extension: Chrome is the browser, so apps open in a normal tab and connect to the extension.
     if (IS_EXTENSION) return void chrome.tabs.create({ url });
     (name ? openBapp(name, url) : openDappBrowser(url)).catch((e: unknown) =>
@@ -944,7 +972,7 @@ const BrowserPage = ({
       </div>
       {/* The catalogue: every app not on a screen or in the dock. Touch and hold to place one. */}
       {[
-        { label: 'More bApps', tiles: BAPP_TILES },
+        { label: 'More bApps', tiles: BAPPS_GROUPED.filter((t) => !SYS_TILES.includes(t)) },
         { label: 'More apps', tiles: OTHER_TILES },
         ...RADAR_SECTIONS.map((g) => ({ label: g.label, tiles: g.tiles })),
       ]
@@ -969,6 +997,11 @@ const BrowserPage = ({
         <div key={i} data-apps-section={i} className="flex flex-col gap-3">
           {/* The Games section opens with the bGames hero (owner, 11 Oct 2026). */}
           {/^games$/i.test(screenTitle(x, i).trim()) && <BGamesHero top={false} />}
+          {/^(music|media)$/i.test(screenTitle(x, i).trim()) && (
+            <Suspense fallback={<div className="-mx-4" style={{ height: 200, background: 'var(--bw-bg)' }} />}>
+              <VexVoidHero />
+            </Suspense>
+          )}
           <button
             type="button"
             onClick={() => {
@@ -1063,7 +1096,10 @@ const BrowserPage = ({
     if (i === 1) {
       return (
         <>
-          {grid(1, [...SYS_TILES, ...notHome(BAPP_TILES)])}
+          {grid(
+            1,
+            BAPPS_GROUPED.filter((t) => SYS_TILES.includes(t) || !favourites.includes(t.url)),
+          )}
           {note(
             `Touch and hold an app for details${phone ? ' or to add it to the Dock' : ''}. Grey dot = demo. ${UNOFFICIAL_NOTICE}`,
           )}
@@ -1424,11 +1460,32 @@ const BrowserPage = ({
 };
 
 // The first app-screens layout (or the migration from Home favourites + the bApps and Games pages).
+/** Screen key of a bApp tile: the wallet's own tiles (Ask b, bPics, bSpaces) by key, bApps by URL (keyTile). */
+const screenKeyOf = (t: Tile) => (SYS_TILES.includes(t) ? t.key : t.url);
+const BAPP_KEYS = BAPPS_GROUPED.map(screenKeyOf);
+const OWN_ICON_KEYS = new Set(BAPPS_GROUPED.filter(hasOwnIcon).map(screenKeyOf));
+const oneBappsSection = (s: ReturnType<typeof defaultScreens>) =>
+  gatherBapps(s, BAPP_KEYS, (k) => OWN_ICON_KEYS.has(k));
+
+// Existing layouts: all bApps into the one bApps section, once (owner, 15 Oct 2026). Runs before the store reads.
+const ONE_SECTION_FLAG = 'bwallet:bapps-one-section:v1';
+try {
+  if (!localStorage.getItem(ONE_SECTION_FLAG)) {
+    const saved = parseScreens(localStorage.getItem(APP_SCREENS_KEY));
+    if (saved) localStorage.setItem(APP_SCREENS_KEY, serialiseScreens(oneBappsSection(saved)));
+    localStorage.setItem(ONE_SECTION_FLAG, '1');
+  }
+} catch {
+  /* storage unavailable: the default layout below already has one bApps section */
+}
+
 setDefaultBuilder(() =>
-  defaultScreens(
-    readFavourites(),
-    BAPP_TILES.map((t) => t.url),
-    GAME_SECTIONS.flatMap((s) => s.tiles.map((t) => t.url)),
+  oneBappsSection(
+    defaultScreens(
+      readFavourites(),
+      BAPP_TILES.map((t) => t.url),
+      GAME_SECTIONS.flatMap((s) => s.tiles.map((t) => t.url)),
+    ),
   ),
 );
 

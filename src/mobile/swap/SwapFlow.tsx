@@ -31,6 +31,7 @@ import {
 } from './swapApi';
 import { pickGate, type AddressState } from './pickGate';
 import { ErrorActions } from '../errors/ErrorActions';
+import { askB } from '../errors/errorReport';
 
 /** Black / gold, as the approved design (bWalletX palette). */
 const C = {
@@ -774,7 +775,12 @@ const Track = ({
         {swap.stage === 'done' ? <Cta onClick={onBack}>Back to wallet</Cta> : null}
         <button
           type="button"
-          onClick={() => navigate('/m/ask-b')}
+          onClick={() =>
+            // A failed or stuck swap goes to b as a bug report with the swap id and stage attached.
+            ['failed', 'on_hold', 'expired'].includes(swap.stage)
+              ? askB(`Swap ${swap.stage} (${tick} to BSV, ChangeNOW swap id ${swap.id})`)
+              : navigate('/m/ask-b')
+          }
           className="w-full h-12 rounded-2xl text-[15px] font-bold cursor-pointer bg-transparent"
           style={{ border: `1px solid ${C.chip}`, color: C.text }}
         >

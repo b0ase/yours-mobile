@@ -1,22 +1,26 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Minus, Plus } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Minus, Plus, RotateCcw } from 'lucide-react';
 import { useReducedMotion } from 'framer-motion';
 import bGlyph from '../brand/bwallet-glyph.svg';
+import { B_OUTLINE_D, B_OUTLINE_VIEWBOX } from '../brand/bOutline';
 import { useBackClose } from '../backStack';
-import { dockKey, moveInDock, removeFromDock, splitDock, type DockItem } from './dockModel';
+import { dockKey, isDefaultDock, moveInDock, removeFromDock, resetDock, splitDock, type DockItem } from './dockModel';
 import { setAgentNote, setAgentVoice } from '../agent/handoff';
-import { voiceNote } from '../agent/voiceText';
+import { firstNoVoiceNote, voiceNote } from '../agent/voiceText';
 import { useHoldToTalk } from '../agent/useHoldToTalk';
 import { HoldRing, TalkSheetView } from '../agent/TalkVisuals';
 import { DOCK_LONG_PRESS_MS, edgeFade, fadeMask, longPressCancelled } from './gesture';
 import { itemIcon, itemLabel } from './icons';
+import { useThemedIcon } from '../brand/bappIcons';
+import { TabBadge } from '../../components/TabBadge';
 
 /**
  * The phone layout's dock (docs/PHONE-LAYOUT-PLAN.md §5, §14): left slots · the b · right slots, which scroll
  * sideways when there are more, with a fade on the side that has more. A sibling of the page, never inside it,
  * so its sideways scroll can't turn into a page swipe (PhoneShell also ignores touches that start here).
  * The big b in the centre: tap = HOME (the app grid), press and hold = talk to b (HomeButton).
- * Long-press a tile to arrange: tap a tile to pick it, then move it left/right or remove it; + adds.
+ * Long-press a tile to arrange: tap a tile to pick it, then move it left/right or remove it; + adds; Reset
+ * restores the default. An empty dock shows a dashed + tile, so arranging is never out of reach (owner, 15 Oct 2026).
  */
 const GOLD = 'var(--bw-accent-hi)';
 const MUTED = '#98A2B3';
@@ -26,6 +30,8 @@ type Props = {
   labels: Record<string, string>;
   activeKey: string | null;
   badges: Record<string, string | undefined>;
+  /** Accessible names for badged tiles (default "<label>, N unread"). */
+  badgeLabels?: Record<string, string | undefined>;
   onOpen: (item: DockItem) => void;
   onHome: () => void;
   /** Open the b agent page (after a hold: with the spoken request, or a note and the keyboard). */
@@ -43,6 +49,7 @@ const Tile = ({
   label,
   active,
   badge,
+  badgeLabel,
   arranging,
   picked,
   alt,
@@ -54,6 +61,7 @@ const Tile = ({
   label: string;
   active: boolean;
   badge?: string;
+  badgeLabel?: string;
   arranging: boolean;
   picked: boolean;
   alt: boolean;
@@ -64,6 +72,8 @@ const Tile = ({
   const Icon = itemIcon(item);
   const isApp = item.kind === 'app';
   const [iconFailed, setIconFailed] = useState(false);
+  // The bApp icon set follows the theme pack, like the Apps grid (brand/bappIcons/theme.ts).
+  const themed = useThemedIcon(isApp ? item.icon : undefined);
   const timer = useRef<number | null>(null);
   const start = useRef<{ x: number; y: number } | null>(null);
   const fired = useRef(false);
@@ -76,7 +86,13 @@ const Tile = ({
     <div className="relative shrink-0 flex justify-center" style={{ width: 74 }}>
       <button
         type="button"
-        aria-label={arranging ? `${label}${picked ? ', selected' : ''}. Tap to select for moving` : label}
+        aria-label={
+          arranging
+            ? `${label}${picked ? ', selected' : ''}. Tap to select for moving`
+            : badge
+              ? (badgeLabel ?? `${label}, ${badge} unread`)
+              : label
+        }
         aria-current={active ? 'page' : undefined}
         onPointerDown={(e) => {
           fired.current = false;
@@ -118,20 +134,16 @@ const Tile = ({
         >
           {isApp && item.icon && !iconFailed ? (
             <img
-              src={item.icon}
+              src={themed.src}
               alt=""
               draggable={false}
               onError={() => setIconFailed(true)}
-              className="h-10 w-10 rounded-[11px] object-cover"
+              className={`h-10 w-10 rounded-[11px] object-cover${themed.paper ? ' bw-paper-icon' : ''}`}
             />
           ) : (
             <Icon size={isApp ? 18 : 20} color={isApp || active ? GOLD : '#F2F2F0'} />
           )}
-          {badge && (
-            <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-[#F04438] text-[9px] font-bold text-white flex items-center justify-center">
-              {badge}
-            </span>
-          )}
+          {badge && <TabBadge text={badge} />}
         </span>
         <span
           className="w-full overflow-hidden text-ellipsis whitespace-nowrap text-center text-[10px] leading-tight"
@@ -180,7 +192,7 @@ export const HomeButton = ({
     onListen: (ok) => {
       // Owner, 10 Oct 2026: the hold opens b's chat at once; keep holding to talk, the reply lands there.
       onAgent();
-      if (!ok) setAgentNote(voiceNote('unavailable', 'web'));
+      if (!ok && firstNoVoiceNote()) setAgentNote(voiceNote('unavailable', 'web'));
     },
     // Still inside the user's gesture: iOS lets the composer take focus (and show the keyboard) here.
     onUnsupportedRelease: focusComposer,
@@ -210,7 +222,7 @@ export const HomeButton = ({
         data-testid="dock-b"
         {...handlers}
         // Snug in the bar, centred, ring fully inside (owner, 8 Oct 2026; bChatX copies it).
-        className="relative shrink-0 h-[52px] w-[52px] rounded-full flex items-center justify-center border-0 select-none transition-transform disabled:opacity-40"
+        className="bw-dock-b relative shrink-0 h-[52px] w-[52px] rounded-full flex items-center justify-center border-0 select-none transition-transform disabled:opacity-40"
         style={{
           background: 'var(--bw-bg)',
           boxShadow: `0 0 0 2px ${GOLD}, 0 6px 18px rgba(0,0,0,0.6)`,
@@ -222,7 +234,30 @@ export const HomeButton = ({
         }}
       >
         <HoldRing phase={phase} />
-        <img src={bGlyph} alt="" width={30} height={30} draggable={false} className="pointer-events-none" />
+        <img
+          src={bGlyph}
+          alt=""
+          width={30}
+          height={30}
+          draggable={false}
+          className="bw-dock-b-gold pointer-events-none"
+          style={{ WebkitTouchCallout: 'none', userSelect: 'none' }}
+        />
+        {/* White theme only (themes.css swaps them): the shared outline b, black on white. */}
+        <svg
+          className="bw-dock-b-outline pointer-events-none"
+          width={30}
+          height={30}
+          viewBox={B_OUTLINE_VIEWBOX}
+          fill="none"
+          stroke="#0A0A0A"
+          strokeWidth={2}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          aria-hidden="true"
+        >
+          <path d={B_OUTLINE_D} vectorEffect="non-scaling-stroke" />
+        </svg>
       </button>
     </>
   );
@@ -233,6 +268,7 @@ export const Dock = ({
   labels,
   activeKey,
   badges,
+  badgeLabels,
   onOpen,
   onHome,
   onAgent,
@@ -244,11 +280,13 @@ export const Dock = ({
   const reduce = useReducedMotion();
   const [arranging, setArranging] = useState(false);
   const [picked, setPicked] = useState<string | null>(null);
+  const [confirmReset, setConfirmReset] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   const [fade, setFade] = useState({ left: false, right: false });
   const done = () => {
     setArranging(false);
     setPicked(null);
+    setConfirmReset(false);
   };
   useBackClose(arranging, done);
   // Arranging ends on a page change or when the app goes to the background (same rules as Apps › Home).
@@ -277,6 +315,33 @@ export const Dock = ({
     onChange(moveInDock(items, pickedIndex, pickedIndex + dir));
   };
 
+  const empty = items.length === 0;
+  const atDefault = isDefaultDock(items);
+  const addTile = (
+    <div className="relative shrink-0 flex justify-center" style={{ width: 74 }}>
+      <button
+        type="button"
+        aria-label="Add to the dock"
+        data-testid="dock-add-empty"
+        onClick={() => {
+          setArranging(true);
+          onAdd();
+        }}
+        className="flex flex-col items-center gap-1 w-full py-1 bg-transparent border-0 select-none"
+      >
+        <span
+          className="flex h-10 w-10 items-center justify-center rounded-2xl"
+          style={{ border: `1.5px dashed ${GOLD}` }}
+        >
+          <Plus size={20} color={GOLD} />
+        </span>
+        <span className="text-[10px] leading-tight" style={{ color: GOLD, fontWeight: 600 }}>
+          Add
+        </span>
+      </button>
+    </div>
+  );
+
   const tile = (item: DockItem, i: number) => {
     const k = dockKey(item);
     return (
@@ -286,6 +351,7 @@ export const Dock = ({
         label={itemLabel(item, labels)}
         active={k === activeKey}
         badge={badges[k]}
+        badgeLabel={badgeLabels?.[k]}
         arranging={arranging}
         picked={picked === k}
         alt={i % 2 === 1}
@@ -306,66 +372,112 @@ export const Dock = ({
     <>
       {arranging && (
         <div
-          className="absolute left-0 right-0 z-[101] px-3 pb-2 flex items-center gap-2"
+          className="absolute left-0 right-0 z-[101] px-3 pb-2 flex flex-col gap-1.5"
           style={{ bottom: 'var(--dock-h)' }}
           role="toolbar"
           aria-label="Arrange the dock"
         >
-          <div
-            className="flex-1 flex items-center gap-1.5 rounded-2xl px-2 py-1.5 backdrop-blur-md"
-            style={{ background: 'rgba(23,25,30,0.92)', border: '1px solid #2b2f36' }}
+          <p
+            className="m-0 self-center rounded-full px-3 py-1 text-center text-[11px] leading-tight backdrop-blur-md"
+            style={{ color: MUTED, background: 'rgba(23,25,30,0.92)' }}
           >
-            <button
-              type="button"
-              aria-label="Move left"
-              disabled={pickedIndex <= 0}
-              onClick={() => move(-1)}
-              className="h-8 w-8 rounded-full flex items-center justify-center bg-[#2b2f36] border-0 disabled:opacity-30"
+            {confirmReset && pickedIndex < 0
+              ? `Put back ${resetDock()
+                  .map((i) => itemLabel(i, labels))
+                  .join(', ')}?`
+              : 'Tap an icon to move or remove it · Add · Reset · Done'}
+          </p>
+          <div className="flex items-center gap-2">
+            <div
+              className="flex-1 flex items-center gap-1.5 rounded-2xl px-2 py-1.5 backdrop-blur-md"
+              style={{ background: 'rgba(23,25,30,0.92)', border: '1px solid #2b2f36' }}
             >
-              <ChevronLeft size={16} color="#fff" />
-            </button>
-            <button
-              type="button"
-              aria-label="Move right"
-              disabled={pickedIndex < 0 || pickedIndex >= items.length - 1}
-              onClick={() => move(1)}
-              className="h-8 w-8 rounded-full flex items-center justify-center bg-[#2b2f36] border-0 disabled:opacity-30"
-            >
-              <ChevronRight size={16} color="#fff" />
-            </button>
-            <span className="flex-1 min-w-0 text-[11px] leading-tight" style={{ color: MUTED }}>
-              {pickedIndex >= 0 ? itemLabel(items[pickedIndex], labels) : 'Tap an item'}
-            </span>
-            {pickedIndex >= 0 ? (
-              // Touch and hold › Remove from Dock: it goes back to the Home grid (owner, round 4).
               <button
                 type="button"
-                onClick={() => {
-                  onChange(removeFromDock(items, items[pickedIndex]));
-                  setPicked(null);
-                }}
-                className="h-8 rounded-full px-3 flex items-center gap-1 text-[12px] font-bold border-0 bg-[#2b2f36] text-white"
+                aria-label="Move left"
+                disabled={pickedIndex <= 0}
+                onClick={() => move(-1)}
+                className="h-8 w-8 rounded-full flex items-center justify-center bg-[#2b2f36] border-0 disabled:opacity-30"
               >
-                <Minus size={14} /> Remove from Dock
+                <ChevronLeft size={16} color="#fff" />
               </button>
-            ) : (
               <button
                 type="button"
-                onClick={onAdd}
-                className="h-8 rounded-full px-3 flex items-center gap-1 text-[12px] font-bold border-0 bg-[#2b2f36] text-white"
+                aria-label="Move right"
+                disabled={pickedIndex < 0 || pickedIndex >= items.length - 1}
+                onClick={() => move(1)}
+                className="h-8 w-8 rounded-full flex items-center justify-center bg-[#2b2f36] border-0 disabled:opacity-30"
               >
-                <Plus size={14} /> Add
+                <ChevronRight size={16} color="#fff" />
               </button>
-            )}
+              <span className="flex-1 min-w-0 text-[11px] leading-tight" style={{ color: MUTED }}>
+                {pickedIndex >= 0 ? itemLabel(items[pickedIndex], labels) : ''}
+              </span>
+              {pickedIndex >= 0 ? (
+                // Touch and hold › Remove from Dock: it goes back to the Home grid (owner, round 4).
+                <button
+                  type="button"
+                  onClick={() => {
+                    onChange(removeFromDock(items, items[pickedIndex]));
+                    setPicked(null);
+                  }}
+                  className="h-8 rounded-full px-3 flex items-center gap-1 text-[12px] font-bold border-0 bg-[#2b2f36] text-white"
+                >
+                  <Minus size={14} /> Remove from Dock
+                </button>
+              ) : confirmReset ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmReset(false)}
+                    className="h-8 rounded-full px-3 text-[12px] font-bold border-0 bg-[#2b2f36] text-white"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="dock-reset-confirm"
+                    onClick={() => {
+                      onChange(resetDock());
+                      setConfirmReset(false);
+                    }}
+                    className="h-8 rounded-full px-3 text-[12px] font-bold border-0"
+                    style={{ background: GOLD, color: '#010101' }}
+                  >
+                    Reset
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={onAdd}
+                    className="h-8 rounded-full px-3 flex items-center gap-1 text-[12px] font-bold border-0 bg-[#2b2f36] text-white"
+                  >
+                    <Plus size={14} /> Add
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Reset the dock to default"
+                    data-testid="dock-reset"
+                    disabled={atDefault}
+                    onClick={() => setConfirmReset(true)}
+                    className="h-8 rounded-full px-3 flex items-center gap-1 text-[12px] font-bold border-0 bg-[#2b2f36] text-white disabled:opacity-30"
+                  >
+                    <RotateCcw size={13} /> Reset
+                  </button>
+                </>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={done}
+              className="rounded-full px-4 py-2 text-[13px] font-bold border-0"
+              style={{ background: GOLD, color: '#010101' }}
+            >
+              Done
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={done}
-            className="rounded-full px-4 py-2 text-[13px] font-bold border-0"
-            style={{ background: GOLD, color: '#010101' }}
-          >
-            Done
-          </button>
         </div>
       )}
       <nav
@@ -379,11 +491,7 @@ export const Dock = ({
         <div className="flex-1 min-h-0 flex items-center px-1">
           <div className="flex-1 flex items-center justify-around min-w-0">
             {left.map((it, i) => tile(it, i))}
-            {left.length === 0 && arranging && (
-              <span className="text-[10px]" style={{ color: MUTED }}>
-                Empty
-              </span>
-            )}
+            {empty && addTile}
           </div>
           <HomeButton onHome={onHome} onAgent={onAgent} disabled={arranging} />
           <div

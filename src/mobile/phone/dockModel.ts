@@ -117,6 +117,15 @@ export const addToDock = (items: readonly DockItem[], item: DockItem, store = ST
 export const removeFromDock = (items: readonly DockItem[], item: DockItem): DockItem[] =>
   items.filter((i) => !sameItem(i, item));
 
+/** Arrange › Reset to default: the default dock, cleaned for this build. */
+export const resetDock = (store = STORE_BUILD): DockItem[] => cleanDock(defaultDock(store), store);
+
+/** True when the dock already is the default (Reset has nothing to do). */
+export const isDefaultDock = (items: readonly DockItem[], store = STORE_BUILD): boolean => {
+  const d = resetDock(store);
+  return items.length === d.length && items.every((i, n) => sameItem(i, d[n]));
+};
+
 export const moveInDock = (items: readonly DockItem[], from: number, to: number): DockItem[] =>
   moveItem(items, from, to);
 

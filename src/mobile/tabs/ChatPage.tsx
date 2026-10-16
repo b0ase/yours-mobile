@@ -1,4 +1,5 @@
 import { TipButton } from '../tip/TipButton';
+import { mergeChatRooms } from './tabBadges';
 import { claimIssuerAdmin } from '../chat/autoClaim';
 import { WIDE_ON } from '../wide/flag';
 import { RoomDetails } from '../wide/RoomDetails';
@@ -29,6 +30,7 @@ import {
   WifiOff,
   X,
   Loader2,
+  Store,
 } from 'lucide-react';
 import { sendBsv, sendBsv21, type Bsv21Balance } from '@1sat/actions';
 import { SendBsv21View } from '../../components/SendBsv21View';
@@ -37,6 +39,8 @@ import { useTheme } from '../../hooks/useTheme';
 import { InviteLinksPanel } from '../chat/InviteLinksPanel';
 import { copyLink, shareLink } from '../chat/shareLink';
 import { DEFAULT_EXPIRY, parsePage, parseSpaceInvite } from '../spaces/invite';
+import { hasInvitePrefill, onXInvite, takeXInvite, type XInviteLink } from '../chat/xInvites';
+import { InvitesApi } from '../chat/invitesApi';
 import { BuyTokenButton } from '../chat/OpenTokenRoomButton';
 import { TopNav } from '../../components/TopNav';
 import { useInPeek } from '../phone/pageEl';
@@ -52,7 +56,17 @@ import {
   type ChatRowInfo,
   type RowCommands,
 } from '../chat/ChatRowActions';
-import { arrange, isMarked, isMuted, isPinned, roomKeyOf, setMarked, settle, useListPrefs } from '../chat/listPrefs';
+import {
+  arrange,
+  isMarked,
+  isMuted,
+  isPinned,
+  roomKeyOf,
+  setMarked,
+  setPinned as setPrefPinned,
+  settle,
+  useListPrefs,
+} from '../chat/listPrefs';
 import { UndoToastHost } from '../swipe/undo';
 import { fetchRooms, onRooms, roomsCacheKey, sharedChatClient } from '../chat/sharedRooms';
 import { peekThread, readThread, warmThreadCache, writeThread } from '../chat/threadCache';
@@ -61,7 +75,7 @@ import { isNative } from '../native';
 import { BchatClient, ChatApiError, loadSession, needsHandle, saveSession, SESSION_EVENT } from '../chat/api';
 import { HandleFlow } from '../names/HandleFlow';
 import { avatarFor, B_AVATAR, pendingBQuestions, rememberAvatar, useAvatars } from '../chat/avatars';
-import { defaultPictures } from '../chat/roomArt';
+import { ChatAvatar as Avatar } from '../chat/ChatAvatar';
 import { roomSetupState, shouldOfferRoomSetup } from '../chat/roomSetupPrompt';
 import type { ReplyRef } from '../chat/api';
 import {
@@ -88,16 +102,21 @@ import {
   ReplyQuote,
   TypingRow,
 } from '../chat/BubbleExtras';
+import { BDraftCard, BDraftSheet } from '../chat/BDraftCard';
+import { AiLabel, BusinessSheet, OrderCard } from '../chat/BusinessAgentViews';
+import { isBusinessAgentMessage, orderCardInfo, orderStatuses, useBusinessPresence } from '../chat/businessAgent';
+import { bDraftInfo, canAskBDraft } from '../chat/bDraft';
 import { AttachButton, MessageVideo, RoomMediaBubble } from '../chat/RoomMedia';
 import { mediaPayload } from '../chat/roomMediaInfo';
 import { walletSigner } from '../chat/signer';
 import { proveHoldings, walletHoldings } from '../chat/holdings';
-import { onTokenNav, requestMarketToken, takeChatRoom } from '../chat/nav';
+import { onTokenNav, requestChatRoom, requestMarketToken, takeChatRoom } from '../chat/nav';
 import { onRoomTicker, takeDmDraft, takeRoomTicker } from '../chat/segmentNav';
 import { RoomBell } from '../push/RoomBell';
 import {
   APP_NAME,
   BSPACES_ENABLED,
+  XINVITES_ENABLED,
   roomSpacesAllowed,
   MARKET_ENABLED,
   STORE_ROOM_NOTE,
@@ -106,7 +125,8 @@ import {
 } from '../storeBuild';
 import { LiveBanner } from '../spaces/LiveBanner';
 import { LoungeCard } from '../chat/LoungeCard';
-import { isLounge, LOUNGE_TICKER } from '../chat/loungeInfo';
+import { HELP_DESK_NAME, isLounge, LOUNGE_TICKER } from '../chat/loungeInfo';
+import { setHelpDeskUnpinned, useHelpDeskPinned } from '../chat/helpDeskPin';
 import { roomSpaceOpen } from '../spaces/model';
 import { RoomFilterChips, SpacesRoomList, type RoomFilter } from '../spaces/SpacesFilter';
 
@@ -114,12 +134,20 @@ import { RoomFilterChips, SpacesRoomList, type RoomFilter } from '../spaces/Spac
 const ROOMS = tokenRoomsEnabled();
 // New Space picks any of your rooms and can open paid entry: bWalletX only, a lazy chunk behind the inlined
 // flag so a store build never contains it (the store starts a free Space from an open room's banner).
+// Room X invites (host Invites sheet + the claim screen): bWalletX only, lazy chunks behind the inlined flag.
+const XInvitesSheet = XINVITES_ENABLED
+  ? lazy(() => import('../chat/XInvitesSheet').then((m) => ({ default: m.XInvitesSheet })))
+  : null;
+const XInviteClaim = XINVITES_ENABLED
+  ? lazy(() => import('../chat/XInviteClaim').then((m) => ({ default: m.XInviteClaim })))
+  : null;
 const NewSpaceSheet = BSPACES_ENABLED
   ? lazy(() => import('../spaces/NewSpaceSheet').then((m) => ({ default: m.NewSpaceSheet })))
   : null;
 import {
   amountLabel,
   buildTokenRoomList,
+  holdingFromLookup,
   holdingsFromRooms,
   holdLine,
   parseGateRefusal,
@@ -159,7 +187,6 @@ import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { getErrorMessage } from '../../utils/tools';
 import { asMenuItem, TAB_TAP } from './tabs';
-import { useRoomIcon } from '../chat/roomIcon';
 import { ChatTabs, SegmentRow, SegmentTitle } from '../feed/ChatSegments';
 import { useChatDisplayName } from '../feed/chatDisplayName';
 import {
@@ -174,6 +201,7 @@ import {
   oldestCursor,
   previewText,
   roomActivity,
+  dmPeer,
   roomTitle,
   threadItems,
   timeLabel,
@@ -217,6 +245,7 @@ import { RoomSettingsSheet } from '../chat/RoomSettingsSheet';
 import { celebrateSend } from '../../components/sent/sent';
 import { ErrorActions } from '../errors/ErrorActions';
 import { LIST_TYPES, THREAD_TYPES, useLive, useLiveHealth, useLiveTyping } from '../chat/live';
+import { useRoomFeed } from '../chat/roomFeed';
 
 /**
  * Chat › Chatrooms: open rooms (no token, every build) + token rooms (docs/TOKEN-ROOMS.md); 1:1 DMs + contacts live in the DMs
@@ -271,44 +300,7 @@ const usePoll = (fn: () => void, ms: number, enabled: boolean) => {
   }, [ms, enabled]);
 };
 
-const Avatar = ({
-  title,
-  size = 48,
-  roomKey,
-  src,
-  issuer,
-}: {
-  title: string;
-  size?: number;
-  roomKey?: string | null;
-  /** A picture to use as is: a room's metadata.icon, a person's avatar. */
-  src?: string | null;
-  /** A token room's issuer handle, when known: its default picture is theirs. */
-  issuer?: string | null;
-}) => {
-  // Token / collection rooms show the token's icon; with none, the issuer's photo or gold bAvatar (chat/roomArt.ts).
-  const tokenIcon = useRoomIcon(src ? null : roomKey);
-  const candidates = useMemo(
-    () => [...[src || tokenIcon].filter((u): u is string => !!u), ...defaultPictures(title, issuer)],
-    [src, tokenIcon, title, issuer],
-  );
-  const [failed, setFailed] = useState<Set<string>>(() => new Set());
-  const icon = candidates.find((u) => !failed.has(u)) ?? candidates[candidates.length - 1];
-  return (
-    <img
-      src={icon}
-      alt=""
-      onError={() => setFailed((cur) => (cur.has(icon) ? cur : new Set(cur).add(icon)))}
-      loading="lazy"
-      decoding="async"
-      referrerPolicy="no-referrer"
-      className="rounded-full object-cover shrink-0"
-      style={{ width: size, height: size, background: '#16181c' }}
-    />
-  );
-};
-
-/** A room's own picture (metadata.icon, https only), e.g. the bWallet Lounge's (owner, 6 Oct 2026). */
+/** A room's own picture (metadata.icon, https only), e.g. the bWallet Help Desk's (owner, 6 Oct 2026). */
 const roomIcon = (room: ChatRoom): string | null => {
   const icon = (room.metadata as { icon?: unknown } | null | undefined)?.icon;
   return typeof icon === 'string' && /^https:\/\//.test(icon) ? icon : null;
@@ -331,6 +323,7 @@ const Conversation = ({
   entry,
   onLocked,
   onInvite,
+  onXInvites = null,
   onBans,
   onBounties,
   peer = null,
@@ -350,6 +343,8 @@ const Conversation = ({
   /** The server refused: you no longer hold enough (or never did). */
   onLocked: (refusal: GateRefusal) => void;
   onInvite: (() => void) | null;
+  /** Room host (bit-sign says can manage): the X Invites sheet. Null hides the button. */
+  onXInvites?: (() => void) | null;
   /** Room admin: the ban list. */
   onBans: (() => void) | null;
   /** Null hides the Bounties button (1:1 DMs). */
@@ -368,6 +363,13 @@ const Conversation = ({
   autoJoinSpace?: boolean;
 }) => {
   const bountyBadge = useBountyBadge(client, room.ticker, me);
+  // Business agent (bit-sign lib/business-agent.ts): the shop button for its customers and the host's setup.
+  const hasBusiness = useBusinessPresence(
+    client,
+    room.ticker,
+    String((room as { created_by_handle?: unknown }).created_by_handle ?? '') === me,
+  );
+  const [bizOpen, setBizOpen] = useState(false);
   const title = entryTitle(entry, room) ?? roomTitle(room, me);
   useBackClose(true, onBack);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -513,6 +515,8 @@ const Conversation = ({
     enabled: !loading && !offScreen,
   });
   usePoll(poll, threadMs, !loading && !offScreen);
+  // Realtime inserts for this room (chat/roomFeed.ts): messages and join/leave events re-read now.
+  useRoomFeed(room.id, poll, !loading && !offScreen);
   // "I'm typing": at most every 3 s while the draft changes (bit-sign keeps it 6 s).
   const pingTyping = (text: string) => {
     if (!text.trim() || /^\/b(\s|$)/i.test(text.trim()) || Date.now() - lastTypingPing.current < 3_000) return;
@@ -692,17 +696,17 @@ const Conversation = ({
     return threadItems(hidden?.size ? shown.filter((m) => !hidden.has(m.id)) : shown, me);
   }, [messages, me, hidden, blockTick]); // eslint-disable-line react-hooks/exhaustive-deps
   const reactions = useMemo(() => reactionsByMessage(messages), [messages]);
+  const orderStatus = useMemo(() => orderStatuses(messages), [messages]);
   const direct = false;
   const members = room.party_count ?? entry?.members ?? 0;
   // Bubble avatars (chat/avatars.ts) and "$b is thinking…" under /b questions not yet answered.
-  useAvatars(
-    client,
-    messages.map((m) => m.author_handle),
-  );
+  useAvatars(client, [peer, ...messages.map((m) => m.author_handle)]);
   const waitingForB = pendingBQuestions(messages);
   const mq = mentionQuery(draft);
   const mentions = mq === null ? [] : mentionSuggestions(messages, mq, me);
   const composer = useRef<HTMLTextAreaElement>(null);
+  const [drafting, setDrafting] = useState(false);
+  const draftable = canAskBDraft(room, !!entry) && !isOfficialRoom(room);
   const askB = () => {
     setDraft((d) => (/^\/b(\s|$)/i.test(d) ? d : `/b ${d}`));
     requestAnimationFrame(() => composer.current?.focus());
@@ -724,7 +728,7 @@ const Conversation = ({
       }}
     >
       <div
-        className="flex items-center gap-3 px-2 pb-2 shrink-0"
+        className="bw-room-head flex items-center gap-3 px-2 pb-2 shrink-0"
         style={{
           paddingTop: 8,
           background: 'linear-gradient(180deg, #16140c 0%, #0b0b0b 100%)',
@@ -734,7 +738,7 @@ const Conversation = ({
         <button onClick={onBack} className="p-2 rounded-full active:opacity-60" aria-label="Back">
           <ArrowLeft size={22} color={GOLD} />
         </button>
-        <Avatar title={title} size={38} roomKey={entry?.key} src={roomIcon(room)} />
+        <Avatar title={title} size={38} roomKey={entry?.key} src={roomIcon(room)} issuer={peer} place="full" />
         <div className="flex-1 min-w-0">
           <div className={`text-[15px] font-semibold text-white ${ELLIPSIS}`}>{title}</div>
           <div className="text-[11px]" style={{ color: MUTED }}>
@@ -761,6 +765,15 @@ const Conversation = ({
             <Settings size={18} color={['done', 'later'].includes(roomSetupState(room.ticker) ?? '') ? GOLD : MUTED} />
           </button>
         )}
+        {hasBusiness && (
+          <button
+            onClick={() => setBizOpen(true)}
+            className="p-2 rounded-full active:opacity-60"
+            aria-label="Business agent and orders"
+          >
+            <Store size={19} color={GOLD} />
+          </button>
+        )}
         {onBounties && (
           <button onClick={onBounties} className="relative p-2 rounded-full active:opacity-60" aria-label="Bounties">
             <Trophy size={20} color={GOLD} />
@@ -780,6 +793,15 @@ const Conversation = ({
             to={{ name: `$${room.created_by_handle}`, paymail: `$${room.created_by_handle}` }}
             context={{ kind: 'room', room: room.ticker }}
           />
+        )}
+        {onXInvites && (
+          <button
+            onClick={onXInvites}
+            className="px-2.5 py-1 rounded-full text-xs font-semibold active:opacity-60"
+            style={{ border: `1px solid ${GOLD}`, color: GOLD }}
+          >
+            Invites
+          </button>
         )}
         {onInvite && (
           <button onClick={onInvite} className="p-2 rounded-full active:opacity-60" aria-label="Invite">
@@ -854,7 +876,7 @@ const Conversation = ({
       <div
         ref={scroller}
         onScroll={onScroll}
-        className="flex-1 overflow-y-auto px-3 py-2"
+        className="bw-room-list flex-1 overflow-y-auto px-3 py-2"
         style={{ background: 'radial-gradient(120% 60% at 50% 0%, #15130b 0%, #050505 60%)' }}
       >
         {loadingOlder && (
@@ -906,7 +928,7 @@ const Conversation = ({
                 style={{ background: '#0c2433', color: '#e6f4ff', border: '1px solid #1d4d6b' }}
               >
                 <div className="flex items-center gap-1.5 text-[11px] mb-1" style={{ color: '#8fcdf5' }}>
-                  <span className="font-semibold">{String(it.message.event_payload?.name || 'Lounge bot')}</span>
+                  <span className="font-semibold">{String(it.message.event_payload?.name || 'Help Desk bot')}</span>
                   <span className="text-[9px] font-bold px-1 rounded" style={{ background: '#1f6d9c', color: '#fff' }}>
                     BOT
                   </span>
@@ -915,6 +937,25 @@ const Conversation = ({
                 <div className="whitespace-pre-line break-words">{it.message.body}</div>
               </div>
             </div>
+          ) : orderCardInfo(it.message) ? (
+            <OrderCard
+              key={it.key}
+              info={orderCardInfo(it.message)!}
+              status={orderStatus.get(orderCardInfo(it.message)!.orderId) ?? 'proposed'}
+              client={client}
+              ticker={room.ticker}
+              me={me}
+              onChanged={poll}
+            />
+          ) : bDraftInfo(it.message) ? (
+            <BDraftCard
+              key={it.key}
+              message={it.message}
+              client={client}
+              ticker={room.ticker}
+              me={me}
+              onChanged={poll}
+            />
           ) : it.message.kind === 'event' ? (
             <div key={it.key} className="flex justify-center my-2">
               <span
@@ -950,7 +991,7 @@ const Conversation = ({
                         label: `Message from ${it.mine ? 'you' : `$${it.message.author_handle || 'someone'}`}. Tap for reactions, hold to reply, swipe left to report or block`,
                       })
                     : {})}
-                  className="max-w-[80%] px-3 py-[7px] text-[15px] leading-snug select-none"
+                  className={`bw-chat-bubble${it.mine ? ' is-mine' : ''} max-w-[80%] px-3 py-[7px] text-[15px] leading-snug select-none`}
                   style={{
                     borderRadius: 18,
                     borderBottomRightRadius: it.mine ? 6 : 18,
@@ -974,6 +1015,11 @@ const Conversation = ({
                           context={{ kind: 'room', room: room.ticker, message: it.message.id }}
                         />
                       )}
+                    </div>
+                  )}
+                  {isBusinessAgentMessage(it.message) && (
+                    <div className="mb-[3px]">
+                      <AiLabel />
                     </div>
                   )}
                   {replyOf(it.message) && <ReplyQuote reply={replyOf(it.message)!} mine={it.mine} />}
@@ -1117,6 +1163,10 @@ const Conversation = ({
         )}
       </div>
 
+      {drafting && (
+        <BDraftSheet client={client} ticker={room.ticker} onClose={() => setDrafting(false)} onPosted={poll} />
+      )}
+      {bizOpen && <BusinessSheet client={client} ticker={room.ticker} me={me} onClose={() => setBizOpen(false)} />}
       {openRoom?.closed ? (
         <div
           className="px-4 pt-3 text-center text-xs shrink-0"
@@ -1189,6 +1239,19 @@ const Conversation = ({
             >
               /b
             </button>
+            {draftable && (
+              <button
+                type="button"
+                onClick={() => setDrafting(true)}
+                disabled={!online}
+                aria-label="Ask b to draft an agreement or summarise terms"
+                title="Ask b to draft"
+                className="h-10 px-3 rounded-full flex items-center justify-center shrink-0 text-[13px]"
+                style={{ background: '#111', color: GOLD, border: `1px solid ${LINE}` }}
+              >
+                Draft
+              </button>
+            )}
             <textarea
               ref={composer}
               value={draft}
@@ -2219,6 +2282,30 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     null,
   );
   const [inviting, setInviting] = useState(false);
+  // Room X invites: shown only once bit-sign answers that this user manages the open room.
+  const [xManage, setXManage] = useState<string | null>(null);
+  const [xInvites, setXInvites] = useState(false);
+  const [xClaim, setXClaim] = useState<XInviteLink | null>(() => (XINVITES_ENABLED ? takeXInvite() : null));
+  useEffect(() => (XINVITES_ENABLED ? onXInvite(() => setXClaim(takeXInvite())) : undefined), []);
+  const xTicker = XINVITES_ENABLED && handle && open?.entry?.key.startsWith('bsv21:') ? open.room.ticker : null;
+  useEffect(() => {
+    setXManage(null);
+    if (!xTicker) return;
+    let live = true;
+    // GET the host list: 200 = this user manages the room; 403 / 404 (not deployed yet) = hide the entry.
+    void new InvitesApi((m, p, b, a) => client.request(m, p, b, a))
+      .list(xTicker)
+      .then((r) => {
+        if (!live || r === null) return;
+        setXManage(xTicker);
+        // Friends › "Invite the rest" queued handles for this room: open Invites on its confirm.
+        if (hasInvitePrefill()) setXInvites(true);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [client, xTicker]);
   const [banning, setBanning] = useState(false);
   // Token room settings / rules: only the token's issuer can change them (RoomSettingsSheet).
   const [roomSettings, setRoomSettings] = useState(false);
@@ -2243,6 +2330,10 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   const [rooms, setRooms] = useState<ChatRoom[] | null>(() => readListCache<ChatRoom>(roomsCacheKey(identityAddress)));
   // Either segment's rooms() fetch updates this list too (chat/sharedRooms.ts).
   useEffect(() => onRooms(setRooms), []);
+  // Chat tab badge: this list's unread counts (a room opened or marked read clears at once).
+  useEffect(() => {
+    if (rooms) mergeChatRooms(rooms);
+  }, [rooms]);
   // My X / Google picture (names/socialAvatar.ts) goes to bit-sign once, so other people's bubbles show it
   // instead of my initial; bit-sign keeps a photo chosen there. Remembered per handle + picture.
   const socialAvatar = chromeStorageService.getCurrentAccountObject().account?.settings?.socialProfile?.avatar ?? '';
@@ -2503,6 +2594,14 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   const tokenOther = shown.filter(({ e }) => e.status !== 'member');
   // Telegram-style list (chat/listPrefs.ts): pinned first, then newest activity; archived in one group.
   const [prefs, updatePrefs] = useListPrefs(handle);
+  const helpDeskPinned = useHelpDeskPinned();
+  // Pinning the unpinned Help Desk row brings back its card (and drops the ordinary pin).
+  useEffect(() => {
+    const k = roomKeyOf(LOUNGE_TICKER);
+    if (helpDeskPinned || !isPinned(prefs, k)) return;
+    updatePrefs((p) => setPrefPinned(p, k, false));
+    setHelpDeskUnpinned(false);
+  }, [helpDeskPinned, prefs, updatePrefs]);
   const arranged = useMemo(() => {
     const roomOf = (x: { kind: 'open'; room: ChatRoom } | { kind: 'token'; item: (typeof shown)[number] }) =>
       x.kind === 'open' ? x.room : x.item.e.room;
@@ -2510,9 +2609,10 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
       ...[...myOpen].sort(byActivity).map((room) => ({ kind: 'open' as const, room })),
       ...(ROOMS ? tokenMine.map((item) => ({ kind: 'token' as const, item })) : []),
     ];
-    // The bWallet Lounge is the yellow card above this list (LoungeCard, pinned as before), so it isn't a row here.
+    // The bWallet Help Desk is the yellow card above this list (LoungeCard) while pinned, so it isn't a row
+    // here. Unpinned on this device, it's an ordinary row (helpDeskPin.ts).
     return arrange(
-      list.filter((x) => !(x.kind === 'open' && isLounge(x.room.ticker))),
+      helpDeskPinned ? list.filter((x) => !(x.kind === 'open' && isLounge(x.room.ticker))) : list,
       prefs,
       (x) => roomKeyOf(roomOf(x)?.ticker ?? (x.kind === 'token' ? x.item.e.key : '')),
       (x) => {
@@ -2520,7 +2620,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
         return r ? roomActivity(r) : 0;
       },
     );
-  }, [myOpen, tokenMine, prefs]);
+  }, [myOpen, tokenMine, prefs, helpDeskPinned]);
   const yours = arranged.main;
   // A new message brings an archived (not muted) or deleted chat back: record that.
   useEffect(() => {
@@ -2586,14 +2686,14 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     setHidden(new Set());
     setOpen({ room, entry: null, joinSpace });
   };
-  /** The pinned Lounge card: open (or first join) the Lounge, optionally straight into its Space. */
+  /** The pinned Help Desk card: open (or first join) the Help Desk, optionally straight into its Space. */
   const openLounge = async (joinSpace: boolean) => {
     const mine = (rooms ?? []).find((r) => isLounge(r.ticker));
     if (mine) return openOpenRoom(mine, joinSpace);
     try {
       await client.joinOpenRoom({ ticker: LOUNGE_TICKER });
       openOpenRoom(
-        stubRoom(LOUNGE_TICKER, 'bWallet Lounge', {
+        stubRoom(LOUNGE_TICKER, HELP_DESK_NAME, {
           metadata: { kind: 'open', open: { visibility: 'public', official: true } },
         }),
         joinSpace,
@@ -2716,7 +2816,9 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
       );
       await prove(key);
       const look = parseLookup(await client.tokenRoom(key).catch(() => null));
-      const list = buildTokenRoomList(held, rooms ?? [], look ? { [key]: look } : {});
+      // MNEE isn't in the 1Sat index: when the wallet sees nothing, trust bit-sign's own check.
+      const fromServer = held.length ? null : holdingFromLookup(look);
+      const list = buildTokenRoomList(fromServer ? [fromServer] : held, rooms ?? [], look ? { [key]: look } : {});
       if (list[0]) return void openEntry(list[0]);
       // Not held (or below the minimum): show the lock with the room's real terms.
       const gate = look?.gate ?? { key, symbol: held[0]?.symbol ?? 'TOKEN', dec: held[0]?.dec ?? 0, minRaw: '1' };
@@ -2934,15 +3036,15 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           <div className="px-4 pb-1 flex gap-2">
             <button
               onClick={() => setNewRoom(true)}
-              className="rounded-2xl px-4 py-2 text-sm font-bold inline-flex items-center gap-1"
+              className="flex-1 rounded-2xl px-4 py-2 text-sm font-bold inline-flex items-center justify-center gap-1"
               style={{ background: GOLD, color: '#1a1300' }}
             >
-              <Plus size={16} strokeWidth={2.6} /> New room
+              <Plus size={16} strokeWidth={2.6} /> New Room
             </button>
             {BSPACES_ENABLED && (
               <button
                 onClick={() => setNewSpace(true)}
-                className="rounded-2xl px-4 py-2 text-sm font-bold inline-flex items-center gap-1"
+                className="flex-1 rounded-2xl px-4 py-2 text-sm font-bold inline-flex items-center justify-center gap-1"
                 style={{ border: `1px solid ${GOLD}`, color: GOLD }}
               >
                 <Plus size={16} strokeWidth={2.6} /> New Space
@@ -2975,8 +3077,9 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
         )}
 
         {BSPACES_ENABLED && ROOMS && handle && rooms && <RoomFilterChips value={roomFilter} onChange={setRoomFilter} />}
-        {BSPACES_ENABLED && ROOMS && handle && rooms && roomFilter === 'spaces' && (
+        {BSPACES_ENABLED && ROOMS && handle && rooms && roomFilter !== 'rooms' && (
           <SpacesRoomList
+            quiet={roomFilter === 'all'}
             client={client}
             me={handle}
             items={tokenMine.flatMap(({ e }) =>
@@ -2991,19 +3094,22 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           />
         )}
 
-        {handle && rooms && (!BSPACES_ENABLED || roomFilter === 'all') && (
+        {handle && rooms && (!BSPACES_ENABLED || roomFilter !== 'spaces') && (
           <>
-            <LoungeCard
-              client={client}
-              room={(rooms ?? []).find((r) => isLounge(r.ticker)) ?? null}
-              me={handle}
-              preview={(() => {
-                const r = (rooms ?? []).find((x) => isLounge(x.ticker));
-                return r ? previewText(r, handle) : '';
-              })()}
-              onOpen={() => void openLounge(false)}
-              onJoin={() => void openLounge(true)}
-            />
+            {helpDeskPinned && (
+              <LoungeCard
+                client={client}
+                room={(rooms ?? []).find((r) => isLounge(r.ticker)) ?? null}
+                me={handle}
+                preview={(() => {
+                  const r = (rooms ?? []).find((x) => isLounge(x.ticker));
+                  return r ? previewText(r, handle) : '';
+                })()}
+                onOpen={() => void openLounge(false)}
+                onJoin={() => void openLounge(true)}
+                onUnpin={() => setHelpDeskUnpinned(true)}
+              />
+            )}
             <ListLabel>Your rooms</ListLabel>
             {yours.length === 0 && arranged.archived.length === 0 && (
               <p className="px-4 pb-2 text-xs" style={{ color: MUTED }}>
@@ -3125,6 +3231,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           online={online}
           onAuthLost={authLost}
           onInvite={open.entry && open.entry.key.startsWith('bsv21:') ? () => setInviting(true) : null}
+          onXInvites={xManage && xManage === open.room.ticker ? () => setXInvites(true) : null}
           onBans={!openTicker && open.entry ? () => setRoomSettings(true) : null}
           onBounties={openTicker ? null : () => setShowBounties(true)}
           openRoom={
@@ -3228,6 +3335,41 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           onClose={() => setShowBounties(false)}
         />
       )}
+      {XInvitesSheet && xInvites && open?.entry && xManage === open.room.ticker && (
+        <Suspense fallback={null}>
+          <XInvitesSheet
+            client={client}
+            ctx={apiContext}
+            ticker={open.room.ticker}
+            roomName={roomTitle(open.room, handle ?? '')}
+            gate={open.entry.gate}
+            onClose={() => setXInvites(false)}
+          />
+        </Suspense>
+      )}
+      {XInviteClaim && xClaim && (
+        <Suspense fallback={null}>
+          <XInviteClaim
+            client={client}
+            ctx={apiContext}
+            link={xClaim}
+            identityAddress={identityAddress ?? ''}
+            onClose={() => setXClaim(null)}
+            onOpenRoom={(ticker) => {
+              setXClaim(null);
+              refresh();
+              void client
+                .roomPage(ticker)
+                .then(parsePage)
+                .then((p) => {
+                  const key = p?.kind === 'room' ? p.gate?.key : null;
+                  if (key) requestChatRoom(key);
+                })
+                .catch(() => undefined);
+            }}
+          />
+        </Suspense>
+      )}
       {inviting && open?.entry && (
         <InviteSheet
           client={client}
@@ -3251,7 +3393,7 @@ const DmConversation = (p: DmConversationProps) => (
     onBans={null}
     onBounties={null}
     bell={false}
-    peer={/↔/.test(p.room.name || '') ? roomTitle(p.room, p.me).replace(/^\$/, '') : null}
+    peer={dmPeer(p.room, p.me)}
   />
 );
 

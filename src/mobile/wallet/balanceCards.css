@@ -1,0 +1,451 @@
+/* Balance cards: one swipe card per real balance, All cards browser. See BalanceCarousel.tsx. */
+.bw-bcar {
+  width: calc(100vw - 32px);
+  max-width: 398px;
+  margin: 0 auto;
+}
+.bw-bcar-track {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.bw-bcar-track::-webkit-scrollbar {
+  display: none;
+}
+.bw-bcar-slide {
+  flex: 0 0 100%;
+  scroll-snap-align: center;
+  min-width: 0;
+}
+.bw-bcar-slide > .bw-wcard-wrap {
+  width: 100%;
+}
+.bw-bcar-wrap {
+  margin-top: 12px;
+}
+.bw-bc {
+  aspect-ratio: 1.7 / 1;
+  border-radius: 16px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  background:
+    radial-gradient(120% 90% at 100% 0%, rgb(var(--bw-accent-hi-rgb, 255 210 77) / 0.28), transparent 60%),
+    linear-gradient(145deg, var(--bc-bg), #0b0b0d 140%);
+  color: var(--bc-ink);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgb(var(--bw-accent-hi-rgb, 255 210 77) / 0.35);
+}
+
+.bw-bcar-dots {
+  display: flex;
+  justify-content: center;
+  gap: 7px;
+  margin-top: 10px;
+}
+.bw-bcar-dots button {
+  width: 7px;
+  height: 7px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(var(--bw-accent-hi-rgb, 255 210 77) / 0.3);
+}
+.bw-bcar-dots button.is-on {
+  background: var(--bw-accent-hi, #ffd24d);
+  width: 18px;
+  border-radius: 4px;
+}
+
+/* The real card pans vertically only; inside the carousel it must also let horizontal swipes through. */
+.bw-bcar .bw-wcard {
+  touch-action: pan-x pan-y;
+}
+.bw-bc {
+  cursor: pointer;
+}
+.bw-bc.is-turning {
+  animation: bw-wcard-turn 0.44s ease-in-out;
+}
+
+.bw-bc,
+.bw-bcar-bsv {
+  position: relative;
+}
+/* Top layer for every balance-card sheet (portalled to <body>): above TopNav, tab bar, bApp frame, Feed and wallet overlays. */
+.bw-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483600;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+}
+.bw-layer.is-sheet {
+  justify-content: flex-end;
+}
+
+/* Flip control = the BSV card's own pen (.bw-wcard-penflip, right-centre), reused on every balance card. */
+.bw-bc .bw-wcard-penflip {
+  /* Right edge, halfway down, like the BSV card (owner, 15 Oct 2026); the skin's 'everything after me is
+     relative' rule must not pull it into the flow. */
+  position: absolute;
+  z-index: 3;
+  color: var(--bc-ink, var(--bw-accent-hi, #ffd24d));
+}
+
+.bw-bc {
+  padding-right: 52px;
+}
+
+.bw-bcar-dots button.is-basket {
+  border-radius: 2px;
+}
+
+.bw-bkv-grid small,
+.bw-eg-tile small {
+  font-size: 10px;
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bw-eg-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.bw-eg-tile.is-drag {
+  animation: none;
+  opacity: 0.85;
+}
+.bw-eg-tile.is-hidden {
+  opacity: 0.35;
+}
+
+.bw-eg-tile {
+  touch-action: pan-y;
+}
+
+/* Time Machine */
+.bw-tm {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+  background: radial-gradient(120% 80% at 50% 110%, #2a2208 0%, #07070a 55%, #000 100%);
+  color: #f4f1e8;
+  touch-action: none;
+  padding-top: env(safe-area-inset-top);
+}
+.bw-tm-stars {
+  position: absolute;
+  inset: 0;
+  opacity: 0.7;
+  background-image:
+    radial-gradient(1px 1px at 12% 18%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 72% 12%, #fff 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 40% 40%, #ffe9a8 50%, transparent 51%),
+    radial-gradient(1px 1px at 85% 55%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 20% 70%, #fff 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 60% 85%, #ffe9a8 50%, transparent 51%),
+    radial-gradient(1px 1px at 33% 92%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 92% 30%, #fff 50%, transparent 51%);
+  background-size: 320px 320px;
+  animation: bw-tm-drift 60s linear infinite;
+}
+@keyframes bw-tm-drift {
+  to {
+    background-position: 0 320px;
+  }
+}
+.bw-tm-head {
+  position: relative;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+}
+.bw-tm-head b {
+  font-size: 20px;
+  color: var(--bw-accent-hi, #ffd24d);
+}
+.bw-tm-head button {
+  margin-left: 8px;
+  border: 1px solid rgb(var(--bw-accent-hi-rgb, 255 210 77) / 0.5);
+  border-radius: 999px;
+  padding: 6px 14px;
+  background: rgba(0, 0, 0, 0.5);
+  color: var(--bw-accent-hi, #ffd24d);
+  font-weight: 700;
+}
+.bw-tm-stage {
+  position: absolute;
+  inset: 0;
+  perspective: 900px;
+  perspective-origin: 50% 20%;
+  transform-style: preserve-3d;
+}
+.bw-tm-card {
+  position: absolute;
+  left: 50%;
+  top: 62%;
+  width: min(calc(100vw - 48px), 380px);
+  border-radius: 16px;
+  cursor: pointer;
+  transition:
+    transform 0.55s cubic-bezier(0.2, 0.9, 0.25, 1.15),
+    opacity 0.4s ease,
+    filter 0.4s ease;
+  will-change: transform, opacity;
+}
+/* The carousel's own card inside (same component, same design and theme); taps go to the deck, not the card. */
+.bw-tm-inner {
+  pointer-events: none;
+  border-radius: 16px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+}
+.bw-tm-inner .bw-bc {
+  margin: 0;
+}
+.bw-tm-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.bw-tm-text b {
+  font-size: 18px;
+}
+.bw-tm-text small {
+  font-size: 13px;
+  opacity: 0.85;
+}
+.bw-tm-logo {
+  font-size: 26px;
+  font-weight: 800;
+}
+.bw-tm-hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  z-index: 2000;
+  text-align: center;
+  font-size: 12px;
+  opacity: 0.7;
+}
+/* Address book (left) and Calendar (right): the swipes as buttons, above the hint. Theme tokens only. */
+.bw-tm-doors {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: calc(44px + env(safe-area-inset-bottom));
+  z-index: 2000;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.bw-tm-doors button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 1px solid var(--bw-line);
+  border-radius: 999px;
+  background: var(--bw-surface);
+  color: var(--bw-text);
+  font-size: 13px;
+  font-weight: 700;
+}
+.bw-tm-doors svg {
+  color: var(--bw-accent-hi);
+}
+/* Reduced motion: a flat scrolling list. */
+.bw-tm.is-flat {
+  overflow-y: auto;
+  touch-action: pan-y;
+}
+.bw-tm.is-flat .bw-tm-stars {
+  animation: none;
+}
+.bw-tm.is-flat .bw-tm-stage {
+  position: static;
+  perspective: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0 80px;
+}
+.bw-tm.is-flat .bw-tm-card {
+  position: static;
+  transform: none;
+  transition: none;
+}
+
+/* Card front/back (restored from the approved mock, real data only): head, back terms, back buttons. */
+.bw-bc-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.bw-bc-logo {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 17px;
+  background: var(--bw-accent-hi, #ffd24d);
+  color: var(--bw-on-accent, #111);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.25);
+}
+.bw-bc-head {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.bw-bc-head b {
+  font-size: 15px;
+}
+.bw-bc-head small {
+  font-size: 10.5px;
+  opacity: 0.75;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bw-bc-amt {
+  font-family: 'Space Grotesk', Inter, system-ui, sans-serif;
+  font-size: clamp(30px, 10vw, 42px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+}
+.bw-bc-terms {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.35;
+  text-shadow: 0 1px 6px rgb(0 0 0 / 0.55);
+}
+.bw-bc-actions {
+  display: flex;
+  gap: 8px;
+}
+.bw-bc-stop {
+  flex: 1;
+  border: 0;
+  border-radius: 10px;
+  padding: 9px;
+  font-weight: 800;
+  font-size: 15px;
+}
+.bw-bc-stop.is-top {
+  background: var(--bw-accent-hi, #ffd24d);
+  color: var(--bw-on-accent, #111);
+}
+.bw-bc-contact {
+  flex: 1;
+  border: 1px solid currentColor;
+  background: rgba(0, 0, 0, 0.25);
+  color: inherit;
+  border-radius: 10px;
+  padding: 9px 6px;
+  font-weight: 700;
+  font-size: 11px;
+}
+.bw-bc-back {
+  aspect-ratio: auto;
+  min-height: calc((min(100vw - 32px, 398px)) / 1.7);
+  gap: 8px;
+}
+.bw-bc-back .bw-bc-terms {
+  font-size: 11px;
+}
+
+/* "View contract" (bCredits): the NDS page in a sandboxed frame, Save and Close below. */
+.bw-ag {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #0b0b0d;
+  color: #f4f1e8;
+  padding: calc(16px + env(safe-area-inset-top)) 16px calc(20px + env(safe-area-inset-bottom));
+  cursor: auto;
+}
+.bw-ag-doc {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  background: #0b0b0d;
+}
+.bw-ag-btns {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+.bw-ag-btns button {
+  border: 1px solid rgb(var(--bw-accent-hi-rgb, 255 210 77) / 0.5);
+  background: transparent;
+  color: var(--bw-accent-hi, #ffd24d);
+  border-radius: 12px;
+  padding: 13px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+/* A tapped token row on the card (cardFocus.ts): over the hidden track, so nothing below moves. */
+.bw-bcar-stage {
+  position: relative;
+}
+.bw-bcar-focus {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+}
+.bw-bcar-unfocus {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  z-index: 3;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 0.6);
+  color: #fff;
+  cursor: pointer;
+}
+
+/* Value cards (owner, 15 Oct 2026): the fiat/BSV switch sits in the BSV card's corner, not inside the pen's gutter. */
+.bw-bc .bw-wcard-bottom {
+  margin-right: -36px;
+}
+.bw-bc .bw-wcard-sats {
+  color: var(--bc-ink);
+  opacity: 0.75;
+}

@@ -9,6 +9,9 @@ import {
   GLYPHS,
   ICON_SIZES,
   badgeColors,
+  iconDataUrl,
+  isSetIcon,
+  themedIconUrl,
   layout,
 } from '.';
 
@@ -36,6 +39,15 @@ const ALL_SLUGS = [
   'bcode',
   'bagents',
   'bshares',
+  'bchat',
+  'bvideo',
+  'bmint',
+  'names',
+  'bid',
+  'bsearch',
+  'bdns',
+  'bedu',
+  'bmaps',
 ];
 
 /** Well-formed SVG: parses as XML with an <svg> root (DOMParser where present, else tag balance). */
@@ -51,7 +63,7 @@ const wellFormed = (svg: string) => {
 };
 
 describe('bApp icon set', () => {
-  test('the registry covers all 23, each with a glyph and a colour', () => {
+  test('the registry covers every slug, each with a glyph and a colour', () => {
     expect(Object.keys(BAPP_ICONS).sort()).toEqual([...ALL_SLUGS].sort());
     for (const s of ALL_SLUGS) {
       expect(GLYPHS[s as keyof typeof GLYPHS]).toBeTruthy();
@@ -63,16 +75,29 @@ describe('bApp icon set', () => {
   });
 
   test('a slug with no glyph gets the fallback initial in its colour', () => {
-    expect(bappIconDef('bmaps')).toBeNull();
+    expect(bappIconDef('bnothing')).toBeNull();
     expect(bappIconDef('bitcoincode')?.slug).toBe('bcode');
-    expect(bappIconContent('bmaps', { label: 'bMaps', color: '#5BB98B' })).toEqual({ letter: 'M', color: '#5BB98B' });
-    const svg = bappIconSvg('bmaps', 28, { label: 'bMaps', color: '#5BB98B' });
-    expect(svg).toContain('>M</text>');
+    expect(bappIconContent('bnothing', { label: 'bNothing', color: '#5BB98B' })).toEqual({
+      letter: 'N',
+      color: '#5BB98B',
+    });
+    const svg = bappIconSvg('bnothing', 28, { label: 'bNothing', color: '#5BB98B' });
+    expect(svg).toContain('>N</text>');
     expect(svg).toContain(`stop-color="#5BB98B"`); // the b in the app colour
   });
 
+  test('minimal glyphs: 2–4 primitives, strokes only, inside the 24 grid', () => {
+    for (const [slug, g] of Object.entries(GLYPHS)) {
+      const prims = g.match(/<(path|rect|circle|ellipse|line|polyline|polygon)\b/g) ?? [];
+      expect({ slug, ok: prims.length >= 1 && prims.length <= 4 }).toEqual({ slug, ok: true });
+      expect({ slug, fill: /fill="currentColor"|fill="#/.test(g) }).toEqual({ slug, fill: false });
+    }
+    expect(layout(24).glyph.stroke).toBeLessThanOrEqual(1.9);
+    expect(layout(64).glyph.stroke).toBe(1.5);
+  });
+
   test('every icon renders valid SVG at each size, with the badge', () => {
-    for (const s of [...ALL_SLUGS, 'bmaps']) {
+    for (const s of [...ALL_SLUGS, 'bnothing']) {
       for (const size of ICON_SIZES) {
         const svg = bappIconSvg(s, size);
         expect(wellFormed(svg)).toBe(true);
@@ -108,12 +133,39 @@ describe('bApp icon set', () => {
     for (const id of ids.filter((i) => i.endsWith('-g'))) expect(doc).toContain(`url(#${id})`);
   });
 
-  test('the b grows at small sizes (~32% at 64px, ~38–46% at 28 and 20px)', () => {
-    expect(layout(64).badge.h / 64).toBeCloseTo(0.32, 2);
+  test('the b stays small and grows a little at small sizes (24% at 64px, 28–34% at 28 and 20px)', () => {
+    expect(layout(64).badge.h / 64).toBeCloseTo(0.24, 2);
     for (const sz of [28, 20]) {
       const f = layout(sz).badge.h / 64;
-      expect(f).toBeGreaterThanOrEqual(0.38);
-      expect(f).toBeLessThanOrEqual(0.46);
+      expect(f).toBeGreaterThanOrEqual(0.28);
+      expect(f).toBeLessThanOrEqual(0.34);
     }
   });
+});
+
+test('theme looks: Mono redraws a set icon on a white tile with line art; Gold and own artwork are unchanged', () => {
+  const gold = iconDataUrl({ glyph: Object.keys(GLYPHS)[0] as never, color: '#3D8EF0' }, 64, 'x');
+  expect(isSetIcon(gold)).toBe(true);
+  expect(themedIconUrl(gold, null)).toBe(gold);
+  const look = { mono: true, tile: '#FFFFFF', edge: '#E0E6F0', ink: '#1D4ED8', hi: '#1E40AF', lo: '#1E3A8A' };
+  const mono = decodeURIComponent(themedIconUrl(gold, look));
+  expect(mono).toContain('fill="#FFFFFF"');
+  expect(mono).not.toContain('#0B0B0D');
+  expect(mono).toContain('stroke="#1D4ED8"');
+  expect(themedIconUrl(gold, look)).toBe(themedIconUrl(gold, look)); // cached
+  expect(themedIconUrl('data:image/png;base64,AAAA', look)).toBe('data:image/png;base64,AAAA');
+});
+
+test('every bApp in the grid has a set icon (one family, themed with the rest)', async () => {
+  const { BAPPS } = await import('../../bapps');
+  const { EXCHANGE_BAPPS } = await import('../../exchangeAppsX');
+  const outside = new Set(EXCHANGE_BAPPS.filter((a) => a.name !== 'bExchange').map((a) => a.name));
+  const own = BAPPS.filter((a) => !outside.has(a.name));
+  expect(own.length).toBeGreaterThan(25);
+  for (const a of own)
+    expect({ name: a.name, set: !!a.icon && isSetIcon(a.icon) }).toEqual({ name: a.name, set: true });
+  const icons = own.map((a) => decodeURIComponent(a.icon!).replace(/bb-[^"]+-\d+/g, ''));
+  // no two bApps share a drawing (labels aside)
+  const glyphs = icons.map((s) => s.replace(/aria-label="[^"]*"/, '').replace(/color="[^"]*"|stop-color="[^"]*"/g, ''));
+  expect(new Set(glyphs).size).toBe(glyphs.length);
 });

@@ -42,7 +42,6 @@ import {
   type ListPrefs,
 } from './listPrefs';
 
-const GOLD = 'var(--bw-accent-hi)';
 const MUTED = '#8a8f98';
 
 export type ChatRowInfo = {
@@ -205,7 +204,7 @@ export const MutedMark = ({ muted }: { muted: boolean }) =>
   muted ? <BellOff size={13} color={MUTED} className="shrink-0" aria-label="Muted" /> : null;
 
 /**
- * The right-hand badge: the unread count (gold; grey when muted), an empty dot badge when marked
+ * The right-hand badge: the unread count (red in every theme; grey when muted), an empty dot badge when marked
  * unread by hand, or a pin icon for a pinned chat with nothing new. Fixed height: no layout shift.
  */
 export const RowBadge = ({
@@ -219,12 +218,12 @@ export const RowBadge = ({
   muted: boolean;
   pinned: boolean;
 }) => {
-  const bg = muted ? '#3a3d44' : GOLD;
-  const fg = muted ? '#e5e7eb' : '#1a1300';
+  const bg = muted ? '#3a3d44' : '#E5242B';
+  const fg = muted ? '#e5e7eb' : '#FFFFFF';
   if (unread > 0 || marked)
     return (
       <span
-        className="min-w-[20px] h-5 px-[6px] rounded-full text-[11px] font-bold flex items-center justify-center shrink-0"
+        className={`${muted ? '' : 'bw-unread-badge '}min-w-[20px] h-5 px-[6px] rounded-full text-[11px] font-bold flex items-center justify-center shrink-0`}
         style={{ background: bg, color: fg }}
         aria-label={unread > 0 ? `${unread} unread` : 'Marked unread'}
       >
@@ -234,7 +233,12 @@ export const RowBadge = ({
   if (pinned)
     return (
       <span className="h-5 flex items-center shrink-0" aria-label="Pinned">
-        <Pin size={14} color={MUTED} style={{ transform: 'rotate(45deg)' }} />
+        <Pin
+          size={14}
+          color="var(--bw-accent-hi, #ffd24d)"
+          fill="var(--bw-accent-hi, #ffd24d)"
+          style={{ transform: 'rotate(45deg)' }}
+        />
       </span>
     );
   return null;

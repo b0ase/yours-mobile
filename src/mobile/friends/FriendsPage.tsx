@@ -680,8 +680,8 @@ const FriendDetail = ({ fr, data }: { fr: Friend; data: Data }) => {
         <div className="fr-panel">
           <div className="fr-small fr-muted">Puts a Space link in your chat with {fr.title}. You press Send.</div>
           <div className="flex gap-2 flex-wrap">
-            <button className="fr-btn is-gold" onClick={() => message(spaceInviteText('LOUNGE', 'the Lounge'))}>
-              The Lounge
+            <button className="fr-btn is-gold" onClick={() => message(spaceInviteText('LOUNGE', 'the Help Desk'))}>
+              The Help Desk
             </button>
             {me?.ticker && (
               <button

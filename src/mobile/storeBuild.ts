@@ -27,7 +27,7 @@ export const STORE_AGENT_NOTE = 'Use your own AI provider key';
 export const bcorpFeeAddress = (address: string, store = STORE_BUILD): string => (store ? '' : address);
 
 /** Wallet tab switch: no Tickets (token-gated rooms) or Credits (prepaid bCorp credits) in a store build. */
-export const STORE_HIDDEN_WALLET_KINDS: readonly string[] = ['tickets', 'credits'];
+export const STORE_HIDDEN_WALLET_KINDS: readonly string[] = ['tickets', 'credits', 'shares'];
 export const walletKindsFor = <T extends readonly [string, ...unknown[]]>(
   kinds: readonly T[],
   store = STORE_BUILD,
@@ -65,6 +65,28 @@ export const CURVE_COINS_ENABLED: boolean = !(
  * it and Rollup drops the data and the lazy imports. Same env as STORE_BUILD (storeBuild.test.ts).
  */
 export const TOKENBLASTER_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+
+/**
+ * Airdrop to holders (issuer tool, 16 Oct 2026, `holderDrop/`): send a token or BSV to every holder of a token
+ * in one go. bWalletX only: a token airdrop to a token's holders rewards holding it (STORE-AUDIT 2), so the
+ * sheet is a lazy chunk behind this literal env check and not in the store bundle. Same env as STORE_BUILD.
+ */
+export const HOLDER_DROP_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+
+/**
+ * bPositive (/m/bpositive, site /bpositive, bit-sign PR #299): journeys with witnesses and pledges between
+ * friends. bWalletX only, as the site page says ("Not in the store edition"): a lazy chunk behind this literal
+ * env check, with its Apps tile behind the same check, so the store bundle has none of it. Same env as STORE_BUILD.
+ */
+export const BPOSITIVE_ENABLED: boolean = !(
   import.meta.env.VITE_STORE_BUILD === '1' ||
   import.meta.env.VITE_CHANNEL === 'ios-store' ||
   import.meta.env.VITE_CHANNEL === 'android-play'
@@ -207,6 +229,15 @@ export const APP_NAME = appNameFor();
  */
 // Literal env checks (like the gates above): `!STORE_BUILD` was not folded, so the Buy BSV sheet and its provider
 // list were still in the store bundle (store parity, 10 Oct 2026).
+/**
+ * Sign in with HandCash + "Bring in my HandCash friends" (15 Oct 2026): the same store gate as Continue with X
+ * (socialLoginEnabled, guideline 4.8: no Sign in with Apple beside it), as a literal so the store bundle drops it.
+ */
+export const HANDCASH_SIGNIN_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
 export const BUY_CRYPTO_ENABLED: boolean = !(
   import.meta.env.VITE_STORE_BUILD === '1' ||
   import.meta.env.VITE_CHANNEL === 'ios-store' ||
@@ -366,7 +397,7 @@ export const BMINT_NOTES_ENABLED: boolean = !(
 );
 
 /**
- * bShares, the bCorp share placement (docs/BCORP-PLACEMENT.md): the /m/bshares bApp, the Lock page Vault and the
+ * bShares, share registers for any company (docs/BCORP-PLACEMENT.md): the /m/bshares bApp, the Lock page Vault and the
  * Exchange "Shares" filter. Securities never ship in a store build, not even as code: the lazy imports are dropped.
  * Store grep: `bShares|BCORP-PLACEMENT|bcorp-placement|Restricted · not offered publicly|locked 2-of-2`.
  */
@@ -406,6 +437,82 @@ export const BCREDITS_ENABLED: boolean = !(
  * every build, but its Tokenise button (Launchpad) is behind MARKET_ENABLED. Same env as STORE_BUILD.
  */
 export const BEX_REEL_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+
+/**
+ * Balance cards (src/mobile/wallet/BalanceCarousel.tsx): the swipe carousel of real balances and the All cards
+ * browser. bWalletX only; a lazy chunk behind this inlined flag, so the store bundle has none of it (not even its CSS).
+ * Store grep: `bwCardLayer|bw-bcar-`.
+ */
+export const BALANCE_CARDS_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+
+/**
+ * In-app "Update" for the Android direct APK (update/directUpdate.ts). Only the site
+ * APK needs it: Play, the App Store, Ad Hoc iOS and the extension update themselves, and a store app may
+ * not install code from outside the store. Literal env check so Vite inlines it and Rollup drops the
+ * updater from every other build (STORE-AUDIT.md lists its strings for the store grep).
+ */
+export const DIRECT_UPDATE_ENABLED: boolean = import.meta.env.VITE_CHANNEL === 'android-direct';
+
+/**
+ * Room X invites (chat/xInvites.ts, XInvitesSheet, XInviteClaim): a room host pre-funds one-time keys with the
+ * gate token and hands each invitee a link that carries the key. Token transfers that admit someone to a token
+ * room, so bWalletX only (token rooms are off in a store build, STORE-AUDIT 2.1). Literal env check so Vite
+ * inlines it and Rollup drops the lazy chunks. Store grep: `x-invites|Whoever opens this link|bwx.xinvites`.
+ */
+export const XINVITES_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+
+/**
+ * "Find people you follow on X" (wallet/XFollowsImport.tsx): on by default in bWalletX builds (bit-sign #295 live,
+ * owner flag + cap set). VITE_X_FOLLOWS_IMPORT=0 turns it off; never in a store build. Still hides on a 404 'disabled'. Literal env
+ * check so Vite inlines it and Rollup drops the lazy chunk. Store grep: `x-follows|Find people you follow on X`.
+ */
+export const X_FOLLOWS_IMPORT_ENABLED: boolean =
+  import.meta.env.VITE_X_FOLLOWS_IMPORT !== '0' &&
+  import.meta.env.VITE_STORE_BUILD !== '1' &&
+  import.meta.env.VITE_CHANNEL !== 'ios-store' &&
+  import.meta.env.VITE_CHANNEL !== 'android-play';
+
+/**
+ * Get your own theme (16 Oct 2026, `themeOrder/`): order a custom theme edition, $99 a year paid in BSV to bCorp.
+ * Paying bCorp for a digital good is Apple 3.1.1 / Play Payments, so it is bWalletX only: the sheet is a lazy
+ * chunk behind this literal env check and the store bundle has none of it. Same env as STORE_BUILD.
+ */
+export const THEME_ORDERS_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+
+/**
+ * Theme Store tabs beyond Free (16 Oct 2026, docs/THEME-STORE-PLAN.md): Premium (prices), Holders (token-gated
+ * unlocks) and Editions (the $99 order link). Owner: store builds show Free themes only. `themeStore/PaidTabs.tsx`
+ * is a lazy chunk behind this literal env check, so the store bundle has none of its text. Same env as STORE_BUILD.
+ */
+export const THEME_STORE_PAID_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+
+/**
+ * Business agent account (agents/business/): a capped account derived from the owner's seed that a room's
+ * business agent pays refunds from, with a daily limit and Stop. It moves money without a per-payment approval,
+ * so it is bWalletX only and off in every store build (STORE-AUDIT.md). Literal env check so Vite inlines it and
+ * Rollup drops the lazy BizAgentAccount chunk.
+ */
+export const BIZ_AGENT_ACCOUNT_ENABLED: boolean = !(
   import.meta.env.VITE_STORE_BUILD === '1' ||
   import.meta.env.VITE_CHANNEL === 'ios-store' ||
   import.meta.env.VITE_CHANNEL === 'android-play'
