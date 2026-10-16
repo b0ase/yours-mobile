@@ -285,3 +285,26 @@ export const canAskFromCredits = (info: Pick<CreditsInfo, 'enabled' | 'agentTurn
 /** What b says when the balance is too low for a reply. */
 export const lowBalanceText = (balance: number) =>
   `${balance > 0 ? `You have ${fmtCredits(balance)}, not enough for this reply.` : "You're out of bCredits."} Top up to keep talking to me. Top-ups pay for b. Keep it small.`;
+
+// ── The Credits card: many credit types, one card ──
+
+/** One line on the Credits card. bCredits is the first type; issuer credits (e.g. $mandala) can join later. */
+export type CreditLine = {
+  /** Stable id, e.g. 'bcredits'. */
+  type: string;
+  /** Plain-English line label, e.g. "bCredits — pay for b". */
+  label: string;
+  /** Whole credits held. */
+  balance: number;
+};
+
+/** The card's title: a general "Credits" card that lists every credit type. */
+export const CREDITS_CARD_TITLE = 'Credits';
+
+/** The bCredits line label: credits we sell so you can prepay for b. */
+export const BCREDITS_LINE_LABEL = 'bCredits — pay for b';
+
+/** The lines the Credits card shows. Only bCredits for now; add issuer credit types here. */
+export function creditLines(bcreditsBalance: number): CreditLine[] {
+  return [{ type: 'bcredits', label: BCREDITS_LINE_LABEL, balance: Math.max(0, Math.floor(bcreditsBalance)) }];
+}
