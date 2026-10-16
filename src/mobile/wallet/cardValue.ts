@@ -51,6 +51,40 @@ export const cardValueText = (v: CardValue, unit: CardUnit, usdPerBsv: number, f
 /** "2 unpriced" under the amount, or '' when every holding has a price. */
 export const unpricedNote = (v: CardValue): string => (v.unpriced > 0 ? `${v.unpriced} unpriced` : '');
 
+/**
+ * A balance in its own units (owner, 16 Oct 2026): every token card shows this line directly under its value,
+ * e.g. "1,000 SCAM". Thousand separators, at most `decimals` places (trailing zeros dropped), and compact notation
+ * from a million up ("1.2M", "3.4B", "5T"). A count of 1 drops a plural "s" ("1 PNEE", "3 PNEEs").
+ */
+export const formatTokenAmount = (amount: number, symbol: string, decimals = 0): string => {
+  const n = Number.isFinite(amount) ? amount : 0;
+  const abs = Math.abs(n);
+  const dec = Math.max(0, Math.min(8, Math.floor(decimals)));
+  let num: string;
+  if (abs >= 1e6) {
+    const steps: [number, string][] = [
+      [1e12, 'T'],
+      [1e9, 'B'],
+      [1e6, 'M'],
+    ];
+    const [div, suffix] = steps.find(([d]) => abs >= d) ?? [1e6, 'M'];
+    let scaled = Math.round((abs / div) * 10) / 10;
+    let sfx = suffix;
+    if (scaled >= 1000 && sfx !== 'T') {
+      scaled = 1;
+      sfx = sfx === 'M' ? 'B' : 'T';
+    }
+    num = `${n < 0 ? '-' : ''}${scaled.toLocaleString('en-US', { maximumFractionDigits: 1 })}${sfx}`;
+  } else {
+    num = n.toLocaleString('en-US', { maximumFractionDigits: dec, minimumFractionDigits: 0 });
+  }
+  const sym = abs === 1 && /[A-Za-z]s$/.test(symbol) && symbol.length > 2 ? symbol.slice(0, -1) : symbol;
+  return sym ? `${num} ${sym}` : num;
+};
+
+/** True when a card has nothing priced: its big line is then the token amount and "No price yet" sits under it. */
+export const hasNoPrice = (v: CardValue): boolean => v.usd <= 0 && v.sats <= 0 && v.unpriced > 0;
+
 /** A bCredit is 1p: its US$ value at `usdPerGbp` (null while no GBP rate is known). */
 export const creditsUsd = (credits: number, usdPerGbp: number | null): number | null =>
   credits > 0 ? (pos(usdPerGbp) ? (credits / 100) * usdPerGbp : null) : 0;
