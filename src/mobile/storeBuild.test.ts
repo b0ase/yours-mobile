@@ -760,3 +760,23 @@ describe('BALANCE_CARDS_ENABLED: balance cards are bWalletX only', () => {
     expect(BALANCE_CARDS_ENABLED).toBe(!STORE_BUILD);
   });
 });
+
+describe('THEME_ORDERS_ENABLED: Get your own theme ($99 a year to bCorp) is bWalletX only', () => {
+  const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  const cond = (text: string, name: string) =>
+    (new RegExp(`export const ${name}: boolean =\\s*!?\\(?([^;]*?)\\)?;`, 's').exec(text)?.[1] ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  test('inverse of STORE_BUILD, from the same env', async () => {
+    const { THEME_ORDERS_ENABLED } = await import('./storeBuild');
+    expect(THEME_ORDERS_ENABLED).toBe(!STORE_BUILD);
+    const s = src('./storeBuild.ts');
+    expect(cond(s, 'THEME_ORDERS_ENABLED')).toBe(cond(s, 'STORE_BUILD'));
+  });
+  test('the sheet is only a lazy import behind the flag', () => {
+    const lazyLine = "THEME_ORDERS_ENABLED ? lazy(() => import('../themeOrder/ThemeOrderSheet')) : null";
+    expect(src('./theme/ThemeSheet.tsx')).toContain(lazyLine);
+    expect(src('../pages/Settings.tsx')).toContain(lazyLine.replace('../themeOrder', '../mobile/themeOrder'));
+    expect(src('../pages/Settings.tsx')).not.toMatch(/^import .*themeOrder/m);
+  });
+});
