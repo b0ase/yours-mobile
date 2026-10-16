@@ -141,8 +141,10 @@ export function applyThemeParam(): AccentId | null {
   } catch {
     /* corrupt: start again */
   }
-  if (seen.includes(raw)) return null;
-  write(URL_SEEN_KEY, JSON.stringify([...seen, raw].slice(-50)));
+  // An edition entry (/white, /pink …) is that edition's install: it always opens in its own pack, before unlock,
+  // even when the same origin's plain install last saved another (owner, 16 Oct 2026: White lock screen was Gold).
+  if (!edition && seen.includes(raw)) return null;
+  if (!seen.includes(raw)) write(URL_SEEN_KEY, JSON.stringify([...seen, raw].slice(-50)));
   write(BOOT_KEY, id === DEFAULT_ACCENT ? null : id);
   write(MIX_BOOT_KEY, null);
   write(URL_PENDING_KEY, id);
