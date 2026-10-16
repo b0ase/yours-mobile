@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useBackClose } from '../backStack';
 import { parseUsdInput } from '../money/money';
 import { POT_NAME_PLACEHOLDER, SUBSCRIPTIONS_ENABLED } from '../storeBuild';
-import { ownServicePayees, addSubscription, subProblem, type NewSub, type Period } from './pots';
+import { ownServicePayees, addSubscription, subProblem, usdToPnee, type NewSub, type Period } from './pots';
 import { reschedulePotReminders } from './notifyPots';
 import { clearSubscribeRequest, requestLabel, type SubscribeRequest } from './subscribeLink';
 import { ErrorActions } from '../errors/ErrorActions';
@@ -79,11 +79,14 @@ export const AddOrderSheet = ({
   bsvUsd,
   onClose,
   request,
+  unit = 'BSV',
 }: {
   potId: string;
   potName: string;
   balanceUsd: number | null;
   bsvUsd: number;
+  /** What the pot pays in: a PNEE pot's orders are kept in PNEEs (cents), so $5 is 500 PNEEs. */
+  unit?: 'BSV' | 'PNEE';
   onClose: () => void;
   /** A subscribe link from one of our services (subscribeLink.ts): prefills service, amount, period, memo. */
   request?: SubscribeRequest | null;
@@ -112,7 +115,8 @@ export const AddOrderSheet = ({
   const n: NewSub = {
     potId,
     payee,
-    amount: { value: amount ?? 0, currency: 'USD' },
+    amount:
+      unit === 'PNEE' ? { value: usdToPnee(amount ?? 0), currency: 'PNEE' } : { value: amount ?? 0, currency: 'USD' },
     period,
     start: startAt,
     maxCount: max.trim() ? Number(max) : null,
