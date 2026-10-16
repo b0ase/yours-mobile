@@ -70,9 +70,12 @@ export const HandleFlow = ({
   onClose,
   title = 'Choose your handle',
   onClaimed,
+  suggest,
 }: {
   onClose: () => void;
   title?: string;
+  /** A verified name to prefill (Sign in with HandCash: first claim on the HandCash handle). */
+  suggest?: string;
   /** bChat sign-in waiting on a handle (needs_handle): the caller finishes the sign-in with this name. */
   onClaimed?: (paymail: string) => Promise<void> | void;
 }) => {
@@ -84,7 +87,7 @@ export const HandleFlow = ({
   const ordAddress = account?.addresses?.ordAddress ?? '';
   const profileName = account?.settings?.socialProfile?.displayName ?? '';
   const [paymail, setPm] = useState(getPaymail(identityAddress));
-  const [alias, setAlias] = useState(() => suggestHandle(profileName, account?.name ?? ''));
+  const [alias, setAlias] = useState(() => suggest || suggestHandle(profileName, account?.name ?? ''));
   // Optional "Your name" (owner, 15 Oct 2026): shown to people who pay the paymail. Blank → the server uses the handle.
   const [yourName, setYourName] = useState(() => cleanDisplayName(profileName));
   const [state, setState] = useState<AliasState>('idle');
@@ -136,7 +139,7 @@ export const HandleFlow = ({
   // name published the address). Old servers send only `alias` (b0asex.x): its X part is the suggestion.
   const [_suggested] = useState<string | null>(() => {
     const p = socialProof(identityAddress)?.profile;
-    if (!p || p.provider !== 'x') return null;
+    if (suggest || !p || p.provider !== 'x') return null;
     const a = toAlias(p.suggested_handle || p.name || '');
     if (a) setTimeout(() => setAlias(a), 0);
     return a || null;
