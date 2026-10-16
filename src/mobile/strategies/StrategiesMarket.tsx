@@ -8,9 +8,12 @@ import { listAgentsOnly } from '../agents/agentAccounts';
 import { loadStrategy, type Strategy } from '../agents/strategy';
 import { marketFeeSats } from '../market/fee';
 import { buyStrategy, listStrategies, ownedStrategyOutpoints, priceSats, unlockStrategy, type Listing } from './market';
+import { EXAMPLE_STRATEGIES } from './examples';
+import { PublishStrategy } from './PublishStrategy';
 import { SPEC_LABELS, STRATEGY_DISCLAIMER } from './strategyNft';
 import { rememberStrategy, myStrategies } from './myStrategies';
 import { ErrorActions } from '../errors/ErrorActions';
+import { MARKET_ENABLED } from '../storeBuild';
 
 const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
@@ -68,6 +71,7 @@ export const StrategiesMarket = () => {
   const [busy, setBusy] = useState('');
   const [bought, setBought] = useState<Strategy | null>(null);
   const [risk, setRisk] = useState<string>('All');
+  const [publishing, setPublishing] = useState(false);
 
   const refresh = () => {
     listStrategies().then(setItems, (e) => setError(e instanceof Error ? e.message : String(e)));
@@ -113,11 +117,33 @@ export const StrategiesMarket = () => {
   };
 
   const shown = (items ?? []).filter((l) => risk === 'All' || l.envelope.spec.risk === risk);
+  if (publishing && EXAMPLE_STRATEGIES[0])
+    return (
+      <section className="rounded-2xl p-3" style={{ background: CARD }}>
+        <PublishStrategy
+          strategy={EXAMPLE_STRATEGIES[0].strategy}
+          onClose={() => {
+            setPublishing(false);
+            refresh();
+          }}
+        />
+      </section>
+    );
   return (
     <section className="flex flex-col gap-3">
       <p className="text-[11px] m-0" style={{ color: MUTED }}>
         {STRATEGY_DISCLAIMER}
       </p>
+      {MARKET_ENABLED && apiContext && (
+        <button
+          type="button"
+          onClick={() => setPublishing(true)}
+          className="rounded-lg px-3 py-2 text-xs font-bold border-0 self-start"
+          style={{ background: LINE, color: '#fff' }}
+        >
+          Publish a strategy
+        </button>
+      )}
       <div className="flex gap-2 flex-wrap">
         {['All', 'Low', 'Medium', 'High', 'Experimental'].map((r) => (
           <button
@@ -180,8 +206,8 @@ export const StrategiesMarket = () => {
       )}
       {items?.length === 0 && (
         <p className="text-xs text-center py-8 m-0" style={{ color: MUTED }}>
-          No strategies for sale yet. Publish yours from an agent account (Settings › Agents › Strategy › Publish &amp;
-          sell).
+          No strategies for sale yet. Tap Publish a strategy, or publish from an agent account (Settings › Agents ›
+          Strategy › Publish &amp; sell).
         </p>
       )}
       {shown.map((l) => {

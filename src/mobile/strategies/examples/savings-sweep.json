@@ -1,0 +1,29 @@
+{
+  "format": "bwalletx.strategy/1",
+  "name": "Savings sweep",
+  "version": "1.0",
+  "description": "Sends BSV from this agent account to one savings address you choose, a few dollars at a time, so spending money does not pile up in an agent account. At most $5 a send, $20 a day, $200 in total. You must replace the placeholder in sendTo with your own savings address or paymail before loading. Sending is final.",
+  "goals": "When this account holds more than it needs for its other work, send $5 of BSV to the savings address. Never send anywhere else. Leave at least $2 for network fees.",
+  "rules": {
+    "tokens": ["BSV"],
+    "actions": ["send"],
+    "sendTo": ["your-savings@paymail.example"],
+    "maxPerTradeUsd": 5,
+    "maxPerDayUsd": 20,
+    "maxTotalUsd": 200
+  },
+  "spec": {
+    "trades": "BSV only, sent to one address you set",
+    "risk": "Low",
+    "spends": "$5 a send, $20/day, $200 total",
+    "often": "Once or twice a day",
+    "stops": "$200 sent",
+    "needs": "Your savings address in sendTo before loading"
+  },
+  "changelog": [
+    {
+      "version": "1.0",
+      "note": "First version"
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "format": "bwalletx.strategy/1",
+  "name": "Holder thank-you drop",
+  "version": "1.0",
+  "description": "Sends a small BSV thank-you to a fixed list of addresses you write into sendTo (for example your top holders or contributors). 50 cents each, at most $5 a day and $20 in total. It sends BSV, not tokens: token airdrops are not something strategies can do yet. Replace the placeholders before loading. Sending is final.",
+  "goals": "Send $0.50 of BSV to each address on the send list, once each. Skip anyone already paid (check Activity). Never send to an address not on the list.",
+  "rules": {
+    "tokens": ["BSV"],
+    "actions": ["send"],
+    "sendTo": ["holder-1@paymail.example", "holder-2@paymail.example", "holder-3@paymail.example"],
+    "maxPerTradeUsd": 0.5,
+    "maxPerDayUsd": 5,
+    "maxTotalUsd": 20
+  },
+  "spec": {
+    "trades": "BSV only, to the addresses in its list",
+    "risk": "Low",
+    "spends": "$0.50 a send, $5/day, $20 total",
+    "often": "Once per address",
+    "stops": "$20 sent",
+    "needs": "Your list of addresses in sendTo before loading"
+  },
+  "changelog": [
+    {
+      "version": "1.0",
+      "note": "First version"
+    }
+  ]
+}

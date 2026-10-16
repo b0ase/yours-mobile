@@ -52,3 +52,56 @@ that refused it.
 
 Loading always starts on paper: live prices, $100 of pretend money, nothing signed; fills show in Activity
 as "Paper buy …". **Run live** (two taps) switches to the account's real balance.
+
+## Top-level fields
+
+| Field         | Required | Meaning                                                                                                                                       |
+| ------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `format`      | yes      | Always `bwalletx.strategy/1`.                                                                                                                 |
+| `name`        | yes      | Up to 60 characters.                                                                                                                          |
+| `version`     | yes      | e.g. `1.0`. Bump it when the rules change.                                                                                                    |
+| `goals`       | yes      | Plain language for the agent (b): what to do and how often. Not enforced; the rules are.                                                      |
+| `rules`       | yes      | The hard limits above. The agent can never act outside them.                                                                                  |
+| `spec`        | to sell  | Public listing fields: `trades`, `risk` (Low/Medium/High/Experimental), `spends`, `often`, `stops`, `needs`. All six are required to publish. |
+| `changelog`   |          | `[{ "version", "note" }]`.                                                                                                                    |
+| `description` |          | Example files only: the public listing text. Dropped on load (unknown fields are dropped).                                                    |
+
+## What actually runs today
+
+Be honest in `goals` and `spec`: only write what the runtime can do.
+
+- **buy**: b buys the cheapest market listing of a BSV-21 token (by id) within the dollar amount, after
+  the rules pass (`buyBelowUsd`, caps, stop). Paper or live.
+- **send**: b sends BSV worth the dollar amount to an address or paymail on `sendTo`. Use `"BSV"` in
+  `tokens`.
+- **sell / list**: valid in a file and checked by the rules, but b can't run them from chat yet, so a
+  strategy that depends on selling does nothing.
+- **When it acts**: there is no scheduler. b acts when it is talking in the agent account; `often` and the
+  cadence in `goals` are guidance, and `maxPerDayUsd` is what really limits frequency.
+
+## Authoring checklist
+
+1. Name exact tokens (never "any"); add `buyBelowUsd` / `sellAboveUsd` where price matters.
+2. Always set `maxPerTradeUsd`, `maxPerDayUsd` and `maxTotalUsd`. Keep them small.
+3. Give it an end: `stop.holdTokens`, or `maxTotalUsd` as the hard stop.
+4. Fill all six spec fields; rate risk honestly. No performance or "returns" claims; say it can lose money.
+5. Placeholders the buyer must edit (addresses, token ids, prices) are named in `spec.needs`.
+
+## Bundled examples
+
+`src/mobile/strategies/examples/*.json` (checked by `examples.test.ts`): Slow DCA $B0ASEX, Dip buyer $NPG,
+Dollar stack MNEE, Two-token basket, Launch nibbler, Savings sweep, Weekly allowance, Holder thank-you drop.
+Publish one from Exchange › Strategies (or Contracts › Strategies) › **Publish a strategy** › Start from an
+example.
+
+## Gaps (proposed, not built)
+
+- **Sell from the agent** (`runAgentAction` refuses sell/list): needed for take-profit ladders, stop-loss,
+  trailing stops, grid trading and rebalancing. Those examples are left out until it runs.
+- **`stop.downPct` isn't enforced live**: `loadStrategy` is called without `startValueUsd` and nothing passes
+  `valueUsd`, so the check never triggers. Fix before selling stop-loss strategies.
+- **Schedule** (e.g. `rules.every: "1d"`) and a background runner, for true DCA and recurring sends.
+- **Lock** action (time-lock a % of BSV) and **percent-based** rules (`sendPct`, target weights) for
+  auto-lock / rebalance.
+- **Token send** (airdrop BSV-21 to holders): `send` moves BSV only.
+- **Price as a rule for BSV itself**: BSV is the cash leg, so "DCA into BSV" can't be expressed.

@@ -3,6 +3,7 @@ import { Loader2 } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import type { Strategy, StrategySpec } from '../agents/strategy';
 import { MARKET_ENABLED } from '../storeBuild';
+import { EXAMPLE_STRATEGIES } from './examples';
 import { publishStrategy } from './market';
 import { rememberStrategy } from './myStrategies';
 import { publishProblems, sealStrategy, SPEC_LABELS, STRATEGY_DISCLAIMER } from './strategyNft';
@@ -20,6 +21,8 @@ const RISKS = ['Low', 'Medium', 'High', 'Experimental'] as const;
 export const PublishStrategy = ({ strategy, onClose }: { strategy: Strategy; onClose: () => void }) => {
   const { apiContext, chromeStorageService } = useServiceContext();
   const account = chromeStorageService.getCurrentAccountObject().account;
+  const [base, setBase] = useState<Strategy>(strategy);
+  const [exampleId, setExampleId] = useState('');
   const [spec, setSpec] = useState<StrategySpec>({ ...strategy.spec });
   const [description, setDescription] = useState('');
   const [price, setPrice] = useState('5');
@@ -30,7 +33,17 @@ export const PublishStrategy = ({ strategy, onClose }: { strategy: Strategy; onC
   if (!MARKET_ENABLED) return null;
   const payTo = account?.addresses.bsvAddress ?? '';
   const sale = { priceUsd: Number(price), copies: Number(copies), payTo };
-  const s: Strategy = { ...strategy, spec };
+  const s: Strategy = { ...base, spec };
+  // Start from an example (examples/*.json): replaces the program, spec and description in the form.
+  const pickExample = (id: string) => {
+    setExampleId(id);
+    const ex = EXAMPLE_STRATEGIES.find((e) => e.id === id);
+    const next = ex?.strategy ?? strategy;
+    setBase(next);
+    setSpec({ ...next.spec });
+    setDescription(ex?.description ?? '');
+    setProblems([]);
+  };
 
   const publish = async () => {
     const p = publishProblems(s, sale, description);
@@ -82,6 +95,17 @@ export const PublishStrategy = ({ strategy, onClose }: { strategy: Strategy; onC
       <div className="text-xs" style={{ color: MUTED }}>
         Buyers see the description and spec. The program itself is encrypted: only owners of a copy can open and run it.
       </div>
+      <label className="text-xs flex flex-col gap-1" style={{ color: MUTED }}>
+        Start from an example
+        <select value={exampleId} onChange={(e) => pickExample(e.target.value)} className={input} style={style}>
+          <option value="">{strategy.name} (this one)</option>
+          {EXAMPLE_STRATEGIES.map((e) => (
+            <option key={e.id} value={e.id}>
+              {e.strategy.name} · {e.strategy.spec?.risk}
+            </option>
+          ))}
+        </select>
+      </label>
       <textarea
         value={description}
         onChange={(e) => setDescription(e.target.value)}

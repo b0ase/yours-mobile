@@ -1,0 +1,31 @@
+{
+  "format": "bwalletx.strategy/1",
+  "name": "Slow DCA: $B0ASEX",
+  "version": "1.0",
+  "description": "Buys $B0ASEX in small, even amounts (dollar-cost averaging) from the cheapest market listings. At most $1 a buy, $3 a day, $60 in total, and it stops once it holds 50,000 tokens. It can lose money: token prices can fall and listings can be thin.",
+  "goals": "Dollar-cost average into $B0ASEX. Buy about $1 of the cheapest listing up to three times a day, spread out. Never buy more than $1 at once and never try to catch up on missed days.",
+  "rules": {
+    "tokens": ["B0ASEX"],
+    "actions": ["buy"],
+    "maxPerTradeUsd": 1,
+    "maxPerDayUsd": 3,
+    "maxTotalUsd": 60,
+    "stop": {
+      "holdTokens": 50000
+    }
+  },
+  "spec": {
+    "trades": "$B0ASEX only (BSV-21), bought from market listings",
+    "risk": "Medium",
+    "spends": "$1 a buy, $3/day, $60 total",
+    "often": "Up to 3 times a day",
+    "stops": "Holds 50k $B0ASEX, or $60 spent",
+    "needs": "Agent account with at least $10 of BSV"
+  },
+  "changelog": [
+    {
+      "version": "1.0",
+      "note": "First version"
+    }
+  ]
+}
