@@ -16,7 +16,7 @@ export const SharesMarket = () => {
   return (
     <div className="rounded-2xl bg-[#17191E] border border-[#2b2f36] p-4 flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-white font-bold">{me?.company.name ?? 'The Bitcoin Corporation Ltd'}</span>
+        <span className="text-white font-bold">{me?.company.name ?? 'bShares · share registers for any company'}</span>
         <span
           className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold"
           style={{ background: '#2a2100', color: GOLD }}

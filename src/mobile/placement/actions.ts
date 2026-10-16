@@ -24,7 +24,7 @@ export async function payTreasury(ctx: OneSatContext, company: Company, offer: P
       {
         lockingScript: company.treasury.lockingScriptHex,
         satoshis: offer.sats,
-        outputDescription: `bCorp treasury ${company.treasury.m}-of-${company.treasury.n}`,
+        outputDescription: `${company.name} treasury ${company.treasury.m}-of-${company.treasury.n}`,
       },
     ],
     labels: ['bshares'],

@@ -117,8 +117,8 @@ export const BAPPS: BApp[] = [
     status: 'live',
     icon: bmintIcon,
   },
-  // bShares (docs/BCORP-PLACEMENT.md): The Bitcoin Corporation share placement for registered members and the
-  // director. Restricted, never in the store edition (no route or tile there: PLACEMENT_ENABLED).
+  // bShares (docs/BCORP-PLACEMENT.md): share registers for any company; first register in testing is The Bitcoin
+  // Corporation Ltd. For registered members and directors. Restricted, never in the store edition (no route or tile there: PLACEMENT_ENABLED).
   // Literal env check (not the imported flag) so Rollup drops the entry from the store bundle.
   ...(!(
     import.meta.env.VITE_STORE_BUILD === '1' ||
@@ -129,7 +129,7 @@ export const BAPPS: BApp[] = [
         {
           name: 'bShares',
           url: '/m/bshares',
-          verb: 'Restricted: for registered bCorp shareholders',
+          verb: 'Share registers for any company. Restricted: registered members only',
           group: 'featured' as const,
           status: 'live' as const,
           icon: bmintIcon,

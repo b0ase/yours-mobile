@@ -375,7 +375,7 @@ export const BMINT_NOTES_ENABLED: boolean = !(
 );
 
 /**
- * bShares, the bCorp share placement (docs/BCORP-PLACEMENT.md): the /m/bshares bApp, the Lock page Vault and the
+ * bShares, share registers for any company (docs/BCORP-PLACEMENT.md): the /m/bshares bApp, the Lock page Vault and the
  * Exchange "Shares" filter. Securities never ship in a store build, not even as code: the lazy imports are dropped.
  * Store grep: `bShares|BCORP-PLACEMENT|bcorp-placement|Restricted · not offered publicly|locked 2-of-2`.
  */
