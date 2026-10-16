@@ -263,6 +263,8 @@ const describeTokens = (record: ReconcileRecord): string => {
   if (t.recovered) parts.push(`${t.recovered} token ${t.recovered === 1 ? 'output' : 'outputs'} found`);
   if (t.staleDropped.length)
     parts.push(`${t.staleDropped.length} already-spent token ${t.staleDropped.length === 1 ? 'record' : 'records'} removed`);
+  if (t.unseenFixed)
+    parts.push(`${t.unseenFixed} token ${t.unseenFixed === 1 ? 'transfer' : 'transfers'} sent to the indexer`);
   return parts.length ? ` · ${parts.join(', ')}` : '';
 };
 
