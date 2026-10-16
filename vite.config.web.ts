@@ -1,6 +1,6 @@
 import { defineConfig, mergeConfig, type Plugin } from 'vite';
 import { resolve } from 'path';
-import { readFileSync, readdirSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'fs';
 import mobileConfig from './vite.config.mobile';
 import { writeAlbumPages } from './src/web/albumPages';
 import { installStaleBuildCheck } from './src/web/staleBuild';
@@ -145,7 +145,7 @@ const webShell = (): Plugin => ({
             id: `/bwallet-${colour}`,
             name,
             short_name: 'bWallet',
-            start_url: `/?theme=${colour}`,
+            start_url: colour === 'white' ? '/white' : `/?theme=${colour}`,
             scope: '/',
             display: 'standalone',
             background_color: bg,
@@ -196,6 +196,37 @@ const webShell = (): Plugin => ({
   },
 });
 
+/**
+ * web.bwalletx.com/white: the same wallet (same origin, same data) with the White edition's head, so Add to Home
+ * Screen installs the white icon (iOS reads apple-touch-icon from the page at that moment) and the White manifest.
+ * vercel.json rewrites /white to white.html; accent.ts treats /white like ?theme=white on first open.
+ */
+export const whiteEntryHtml = (html: string): string =>
+  html
+    .replace(/<link rel="manifest" href="[^"]*" \/>/, '<link rel="manifest" href="/themes/white/manifest.json" />')
+    .replace(
+      /<link rel="apple-touch-icon" href="[^"]*" \/>/,
+      '<link rel="apple-touch-icon" href="/themes/white/icon-180.png" />',
+    )
+    .replace(
+      /<meta name="theme-color" content="[^"]*" \/>/,
+      `<meta name="theme-color" content="${THEME_INSTALLS.white}" />`,
+    )
+    .replace(
+      /<meta name="apple-mobile-web-app-title" content="[^"]*" \/>/,
+      '<meta name="apple-mobile-web-app-title" content="bWallet" />',
+    );
+
+const whiteEntry = (): Plugin => ({
+  name: 'bwallet-white-entry',
+  closeBundle() {
+    if (DESKTOP) return;
+    const index = resolve(__dirname, 'build-web/index.html');
+    if (existsSync(index))
+      writeFileSync(resolve(__dirname, 'build-web/white.html'), whiteEntryHtml(readFileSync(index, 'utf8')));
+  },
+});
+
 /** Desktop: a static page with its own share card per shareable album and artist (src/web/albumPages.ts). */
 const albumPages = (): Plugin => ({
   name: 'bwallet-album-pages',
@@ -220,7 +251,7 @@ const webCss = (): Plugin => ({
 export default mergeConfig(
   mobileConfig,
   defineConfig({
-    plugins: [webShell(), webCss(), albumPages()],
+    plugins: [webShell(), webCss(), albumPages(), whiteEntry()],
     // public/ is the extension's (Yours manifest and sprout icons); the web wallet emits its own.
     publicDir: false,
     // Both web hosts serve index.html for deep paths (/lock/subscriptions, /m/market, /bapp/bchatx): relative ./assets/
