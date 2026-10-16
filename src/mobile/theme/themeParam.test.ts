@@ -108,14 +108,25 @@ describe('themed installs', () => {
 });
 
 describe('/white edition entry', () => {
-  test('counts as ?theme=white once and lands on /', () => {
+  test('applies White on every open (before unlock) and lands on /', () => {
     store.clear();
     replaced.length = 0;
     href = 'https://web.bwalletx.com/white';
     expect(applyThemeParam()).toBe('white');
     expect(replaced).toEqual(['/']);
+    // The plain install on the same origin saved Gold / another pack: the White install still opens White.
     store.set('bwx.accent.boot', 'cyber');
     href = 'https://web.bwalletx.com/white/';
+    expect(applyThemeParam()).toBe('white');
+    expect(store.get('bwx.accent.boot')).toBe('white');
+    expect(store.get('bwx.accent.pending')).toBe('white');
+  });
+  test('?theme=white is still once only', () => {
+    store.clear();
+    href = 'https://web.bwalletx.com/?theme=white';
+    expect(applyThemeParam()).toBe('white');
+    store.set('bwx.accent.boot', 'cyber');
+    href = 'https://web.bwalletx.com/?theme=white';
     expect(applyThemeParam()).toBeNull();
     expect(store.get('bwx.accent.boot')).toBe('cyber');
   });

@@ -1093,6 +1093,43 @@
   color: var(--bw-text) !important;
   border-color: rgb(0 0 0 / 0.18) !important;
 }
+:root[data-bw-tone='mono']
+  :is(
+    .bg-\[\#08090b\],
+    .bg-\[\#0B0B0D\],
+    .bg-\[\#0F1013\],
+    .bg-\[\#0b0c0f\],
+    .bg-\[\#0d0e11\],
+    .bg-\[\#0d0f12\],
+    .bg-\[\#0f1013\],
+    .bg-\[\#101114\],
+    .bg-\[\#111113\],
+    .bg-\[\#111216\],
+    .bg-\[\#121316\],
+    .bg-\[\#17191E\]
+  ):not(
+    :is(.bg-black\/50, .bg-black\/60, .bg-black\/65, .bg-black\/70, .bg-black\/80, .bw-videobg, [data-pool-dark]) *
+  ) {
+  background: var(--bw-surface) !important;
+  color: var(--bw-text) !important;
+}
+:root[data-bw-tone='mono']
+  :is(
+    .active\:bg-\[\#111\]:active,
+    .bg-\[\#1d2026\],
+    .bg-\[\#22252c\],
+    .bg-\[\#2b2f36\],
+    .focus\:bg-\[\#2b2f36\]:focus,
+    .hover\:bg-\[\#1e2127\]:hover,
+    .hover\:bg-\[\#1f2128\]:hover,
+    .hover\:bg-\[\#22252c\]:hover,
+    .hover\:bg-\[\#2b2f36\]:hover
+  ):not(
+    :is(.bg-black\/50, .bg-black\/60, .bg-black\/65, .bg-black\/70, .bg-black\/80, .bw-videobg, [data-pool-dark]) *
+  ) {
+  background: var(--bw-tint) !important;
+  color: var(--bw-text) !important;
+}
 /* dark-fills:end */
 
 /* White: dark gradient cards (bChat token cards, credits cards, bMovies register banner) go white with a hairline.
@@ -1206,4 +1243,79 @@
 }
 :root[data-bw-pack='light'] .bw-stills .text-white\/80 {
   color: var(--bw-muted);
+}
+
+/* Unlock and onboarding on paper (owner, 16 Oct 2026: White lock screen had a yellow field with white text).
+   The pool is the pack's pale silk (ObsidianBackdrop picks the light pack), the Unlock button is black with white
+   ink, and Safari / Chrome autofill keeps the field's own fill and the pack's ink instead of yellow + white. */
+:root[data-bw-paper] .bw-unlock-btn {
+  background-color: #0a0a0a !important;
+  color: #ffffff !important;
+}
+:root[data-bw-pack='light'] input:is(:-webkit-autofill, :autofill) {
+  -webkit-text-fill-color: var(--bw-text) !important;
+  caret-color: var(--bw-text);
+  -webkit-box-shadow: 0 0 0 1000px #ffffff inset !important;
+  box-shadow: 0 0 0 1000px #ffffff inset !important;
+}
+/* Every pack, Gold too: autofill never paints a pale fill under light ink. */
+input:-webkit-autofill {
+  transition: background-color 600000s 0s;
+}
+/* The web beta banner on paper: the page's paper and ink with a hairline, not a black accent bar. */
+:root[data-bw-paper] .bwallet-web-banner {
+  background: var(--bw-pack-bg);
+  color: var(--bw-text);
+  border-bottom: 1px solid rgb(0 0 0 / 0.12);
+}
+/* White and paper packs: stylesheet cards that were hard-coded dark (owner, 16 Oct 2026: the Hidden tokens head card
+   stayed black). The sweep in scripts/dark-fills.ts only reads inline hex, so cardPatternsLight.test.ts now also fails
+   on any dark background in src/*.css without a pack override here (or a CSS_KEEP reason for scrims and stages). */
+:root[data-bw-tone='mono']
+  :is(
+    .bw-hid,
+    .bw-hid-head,
+    .askb-tools button,
+    .bp-page input,
+    .bw-pull-cue[data-ready='1'],
+    .bw-ag,
+    .bw-ag-doc,
+    .bwx-bapp-sections,
+    .bx-dock,
+    .bx-tip,
+    .ww-card,
+    .ww-cmd,
+    .ww-sidebar
+  ) {
+  background: var(--bw-surface) !important;
+  color: var(--bw-text) !important;
+}
+:root[data-bw-tone='mono'] :is(.bw-hid-head, .ww-card, .ww-cmd, .bx-tip, .bw-pull-cue[data-ready='1']) {
+  border: 1px solid rgb(0 0 0 / 0.14);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.05),
+    0 8px 22px rgb(0 0 0 / 0.07) !important;
+}
+:root[data-bw-tone='mono'] .bw-hid {
+  background: var(--bw-bg) !important;
+}
+:root[data-bw-tone='mono'] :is(.ww-sidebar, .bx-dock, .bwx-bapp-sections) {
+  border-color: rgb(0 0 0 / 0.12) !important;
+}
+:root[data-bw-tone='mono'] .bw-hid-sub {
+  color: var(--bw-muted);
+}
+:root[data-bw-tone='mono'] .bw-hid-close {
+  color: var(--bw-text);
+  background: rgb(0 0 0 / 0.06);
+}
+/* White and paper packs: the Feed's sort pill and selected filter chips (All, bChat, Twetch…, timeframes) are a
+   white pill with black ink and a dark outline, never a dark or accent fill (owner, 16 Oct 2026). */
+:root[data-bw-tone='mono'] :is(.bw-feed-sort, .bw-feed-chip.is-on) {
+  background: var(--bw-surface) !important;
+  color: var(--bw-text) !important;
+  border: 1.5px solid var(--bw-text) !important;
+}
+:root[data-bw-tone='mono'] :is(.bw-feed-sort, .bw-feed-chip.is-on) * {
+  color: var(--bw-text) !important;
 }

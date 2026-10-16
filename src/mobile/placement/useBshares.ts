@@ -17,7 +17,7 @@ export function useBshares() {
       setError(null);
     } catch (e) {
       setMe(null);
-      setError(e instanceof Error ? e.message : 'Could not reach the register');
+      setError(e instanceof Error ? e.message : 'Could not load share registers');
     } finally {
       setLoading(false);
     }
