@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { BadgeCheck, Loader2 } from 'lucide-react';
-import { socialLoginEnabled } from '../storeBuild';
+import { HANDCASH_SIGNIN_ENABLED, socialLoginEnabled } from '../storeBuild';
 import { BWALLET_PAYMAIL_DOMAIN } from '../names/config';
 import { CAP, fill, getCapabilities } from '../names/names';
 
@@ -26,6 +26,7 @@ import {
   startSocial,
   type SocialProvider,
 } from './socialLogin';
+import { HandCashSignIn } from './HandCashSignIn';
 
 const XLogo = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
@@ -202,6 +203,7 @@ export const SocialSignIn = ({
         {btn('x', 'Continue with X', <XLogo />)}
         {btn('google', 'Google', <GoogleLogo />)}
       </div>
+      {HANDCASH_SIGNIN_ENABLED && <HandCashSignIn onHandle={(h) => onProfileRef.current({ name: h, avatar: '' })} />}
       <p className="text-[11px] mt-2 text-center" style={{ color: error ? '#FDA29B' : '#98A2B3' }}>
         {error || 'Optional: your X or Gmail name becomes your verified handle.'}
       </p>

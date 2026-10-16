@@ -1,4 +1,5 @@
 import { Play } from 'lucide-react';
+import { invertOnLightClass } from '../media/invertOnLight';
 import { openBapp } from '../bappFrame/bappFrame';
 import { SHARE_ALBUMS, albumPublicPath } from '../media/shareAlbums';
 import vexvoidCover from '../media/featured/vexvoid-cover.jpg';
@@ -25,7 +26,12 @@ export const FeaturedAlbum = ({ color }: { color: string }) => {
       style={{ background: '#0d0d0f', border: `1px solid ${color}` }}
     >
       {COVERS[a.id] && (
-        <img src={COVERS[a.id]} alt="" className="h-14 w-14 shrink-0 rounded-xl object-cover" draggable={false} />
+        <img
+          src={COVERS[a.id]}
+          alt=""
+          className={`h-14 w-14 shrink-0 rounded-xl object-cover${invertOnLightClass(a.artist)}`}
+          draggable={false}
+        />
       )}
       <span className="min-w-0 flex-1">
         <span className="block text-[10px] font-bold uppercase tracking-wider" style={{ color }}>

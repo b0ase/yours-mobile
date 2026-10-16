@@ -1,4 +1,5 @@
 import { hueTurnFor, shownHueFor } from './cardHue';
+import { setBavatarShimmer, useBavatarShimmer } from '../names/bavatarShimmer';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ImagePlus, X } from 'lucide-react';
@@ -364,6 +365,7 @@ export function CardDesigner({
           <CardNftGrid selected={customImage ? nftSel : null} busy={nftBusy} onPick={(m) => void pickNft(m)} />
         )}
         <p className="bw-cdes-note">Your pictures stay on this device. They aren’t uploaded anywhere.</p>
+        <ShimmerToggle />
       </div>
       <div className="bw-cdes-actions">
         <button type="button" className="bw-cdes-reset" onClick={onReset} disabled={isDefault}>
@@ -385,5 +387,16 @@ export function CardDesigner({
       )}
     </div>,
     document.body,
+  );
+}
+
+/** Optional shimmer on the gold bAvatar (names/bavatarShimmer.ts): off by default, still with reduced motion. */
+function ShimmerToggle() {
+  const on = useBavatarShimmer();
+  return (
+    <label className="bw-cdes-note" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+      <input type="checkbox" checked={on} onChange={(e) => setBavatarShimmer(e.target.checked)} />
+      Shimmer my bAvatar (a soft gold sweep)
+    </label>
   );
 }

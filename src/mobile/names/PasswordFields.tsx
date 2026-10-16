@@ -114,6 +114,24 @@ export const PasswordFields = ({
           <PasswordRevealButton shown={show} onToggle={() => setShow((s) => !s)} inputRef={confirmRef} />
         </div>
       )}
+      {newWallet && password && show && (
+        // Plain text, not an input (owner, 15 Oct 2026, Android): long-press on a short field with the keyboard and
+        // autofill up only picked a fragment or nothing, so the system Copy never appeared. user-select: all makes one
+        // long-press (Android) or tap-hold (iOS) select the whole password with the native Copy menu.
+        <p
+          data-testid="password-selectable"
+          className="m-0 rounded-xl px-3 py-2 font-mono text-sm break-all"
+          style={{
+            background: '#16181D',
+            color: 'white',
+            userSelect: 'all',
+            WebkitUserSelect: 'all',
+            WebkitTouchCallout: 'default',
+          }}
+        >
+          {password}
+        </p>
+      )}
       {newWallet && (
         <div className="flex items-center gap-3 text-xs">
           <button

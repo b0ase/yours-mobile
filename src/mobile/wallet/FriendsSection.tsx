@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
+import { X_FOLLOWS_IMPORT_ENABLED } from '../storeBuild';
 import { heldBsv21Balances } from '../airdrops/heldBalances';
 import { type Bsv21Balance } from '@1sat/actions';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -8,6 +9,8 @@ import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { asMenuItem } from '../tabs/tabs';
 import { requestDm } from '../chat/segmentNav';
 import { useContacts } from '../chat/useContacts';
+import { useJoinMatch } from './useJoinMatch';
+import { handleOf } from './joinMatch';
 import { ContactRow } from '../chat/ContactViews';
 import { filterContacts } from '../chat/contacts';
 import { resolveCallee } from '../calls/peer';
@@ -15,8 +18,15 @@ import { addFriend } from '../calls/friends';
 import { getPersonalLink, normId } from '../names/personalToken';
 import { requestChatRoom } from '../chat/nav';
 import { tokenKey } from '../chat/tokenRooms';
+import type { Contact } from '../chat/contacts';
+import { ContactCard } from './ContactCard';
 
 const f = (u: string, i?: RequestInit) => fetch(u, i);
+
+// On by default outside store builds (VITE_X_FOLLOWS_IMPORT=0 turns it off).
+const XFollowsImport = X_FOLLOWS_IMPORT_ENABLED
+  ? lazy(() => import('./XFollowsImport').then((m) => ({ default: m.XFollowsImport })))
+  : null;
 
 /**
  * Wallet › Friends (owner, 4 Oct 2026): the one address book (Calls friends, bChat contacts, Feed
@@ -24,7 +34,8 @@ const f = (u: string, i?: RequestInit) => fetch(u, i);
  * paymail; a token or room is optional.
  */
 export const FriendsSection = () => {
-  const contacts = useContacts();
+  const joined = useJoinMatch(useContacts());
+  const contacts = joined.contacts;
   const { apiContext, chromeStorageService } = useServiceContext();
   const [held, setHeld] = useState<Bsv21Balance[]>([]);
   useEffect(() => {
@@ -34,7 +45,9 @@ export const FriendsSection = () => {
   }, [apiContext]);
   const { handleSelect } = useBottomMenu();
   // Your own $NAME token, pinned at the top of Friends (owner, 5 Oct 2026).
-  const me = getPersonalLink(chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress);
+  const account = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress;
+  const me = getPersonalLink(account);
+  const [open, setOpen] = useState<Contact | null>(null);
   const mine = me ? held.find((b) => b.id && normId(b.id) === normId(me.tokenId)) : undefined;
   const mineAmount = mine ? Number(mine.all.confirmed) / 10 ** (mine.dec ?? 0) : 0;
   const [query, setQuery] = useState('');
@@ -60,6 +73,7 @@ export const FriendsSection = () => {
   };
 
   const shown = filterContacts(contacts, query);
+  if (open) return <ContactCard c={open} account={account} onBack={() => setOpen(null)} />;
   return (
     <div className="w-[92%] mx-auto flex flex-col gap-3 pb-6">
       {me && (
@@ -112,11 +126,50 @@ export const FriendsSection = () => {
           <UserPlus size={16} />
         </button>
       </form>
+      {XFollowsImport && (
+        <Suspense fallback={null}>
+          <XFollowsImport
+            onInviteRest={
+              me
+                ? (handles: string[]) => {
+                    // Open Drops live in your room › Invites (chat/XInvitesSheet), which opens on its confirm.
+                    void import('../chat/xInvites').then((m) => {
+                      m.requestInvitePrefill(handles);
+                      const key = tokenKey('bsv21', me.tokenId);
+                      if (key) requestChatRoom(key);
+                      handleSelect(asMenuItem('chat'));
+                    });
+                  }
+                : null
+            }
+          />
+        </Suspense>
+      )}
       {msg && (
         <p className="text-xs m-0" style={{ color: '#98A2B3' }}>
           {msg}
         </p>
       )}
+      {joined.notices.map((n) => (
+        <div
+          key={n.name}
+          role="status"
+          className="flex items-center justify-between gap-2 rounded-xl border border-[#3a3220] bg-[var(--bw-surface)] px-3 py-2 text-sm text-white"
+        >
+          <span>
+            <span style={{ color: '#E6B84C' }}>Joined bWalletX</span> · {n.who} joined: {handleOf(n.paymail)}
+          </span>
+          <button
+            type="button"
+            className="text-xs"
+            style={{ color: '#98A2B3' }}
+            aria-label={`Dismiss ${n.who} joined`}
+            onClick={() => joined.dismiss(n.name)}
+          >
+            OK
+          </button>
+        </div>
+      ))}
       {contacts.length > 6 && (
         <input
           value={query}
@@ -137,6 +190,8 @@ export const FriendsSection = () => {
               c={c}
               busy={false}
               onRemove={null}
+              onOpen={setOpen}
+              messageLabel="Chat"
               extra={<FriendToken c={c} held={held} />}
               onMessage={(x) => {
                 if (!x.handle) return;

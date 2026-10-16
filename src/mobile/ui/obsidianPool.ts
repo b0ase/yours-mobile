@@ -8,9 +8,16 @@ import { useEffect, useState } from 'react';
  */
 
 const VERT = `attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}`;
+/**
+ * highp where the GPU has it. The hash below (fract(sin(x)*43758.5)) needs 32-bit floats: Android's Mali / Adreno
+ * GPUs honour mediump as 16-bit, and the pool then draws as small striped blocks ("broken images", "static"; owner,
+ * 15 Oct 2026, Android 5.2.23). Desktop and iOS GPUs already run mediump at full precision, so nothing else changes.
+ */
+export const PRECISION =
+  '#ifdef GL_FRAGMENT_PRECISION_HIGH\nprecision highp float;\n#else\nprecision mediump float;\n#endif\n';
 // Domain-warped noise as a height field, lit like polished volcanic glass: near-black body, soft white sheen,
 // and a faint warm glow where the gold b sits. Do not change: bwalletx-site/ask-b.html carries the same shader.
-export const FRAG = `precision mediump float;
+export const FRAG = `${PRECISION}
 uniform vec2 r;uniform float t;
 float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
@@ -35,7 +42,7 @@ gl_FragColor=vec4(col,1.);}`;
  * lighting as FRAG, but a molten-gold body, warm highlights and a dusting of sparkle. A separate shader so the
  * original obsidian stays untouched.
  */
-export const GOLD_FRAG = `precision mediump float;
+export const GOLD_FRAG = `${PRECISION}
 uniform vec2 r;uniform float t;
 float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
@@ -56,6 +63,72 @@ col+=vec3(1.,.9,.6)*dust*.6;
 col+=vec3(.96,.72,.0)*.16*exp(-d*d*4.)*(.6+.4*sheen);
 col*=smoothstep(1.35,.2,d);
 gl_FragColor=vec4(col,1.);}`;
+
+/**
+ * The same pool in a theme pack's colours (owner, 15 Oct 2026: Ask b follows the theme, "keep the ORIGINAL
+ * shader"). Built from FRAG itself by swapping its colour constants for uniforms, so the height field, lighting
+ * and motion are exactly the original's; with POOL_GOLD_COLOURS it paints the original pool bit for bit (the
+ * vignette becomes mix(edge, col, v), which is col * v when edge is black).
+ */
+export const TINT_FRAG = FRAG.replace(
+  'uniform vec2 r;uniform float t;',
+  'uniform vec2 r;uniform float t;uniform vec3 cB,cS,cP,cG,cE;',
+)
+  .replace('vec3(.014,.014,.018)+vec3(.09,.095,.115)*sheen+vec3(.7,.71,.76)*spec*.7', 'cB+cS*sheen+cP*spec*.7')
+  .replace('vec3(.96,.72,.0)*.10*', 'cG*')
+  .replace('col*=smoothstep(1.25,.25,d);', 'col=mix(cE,col,smoothstep(1.25,.25,d));');
+
+/** Body, sheen, specular, centre glow and edge colours (linear 0–1 RGB) for TINT_FRAG. */
+export type PoolColours = { body: number[]; sheen: number[]; spec: number[]; glow: number[]; edge: number[] };
+export const POOL_GOLD_COLOURS: PoolColours = {
+  body: [0.014, 0.014, 0.018],
+  sheen: [0.09, 0.095, 0.115],
+  spec: [0.7, 0.71, 0.76],
+  glow: [0.096, 0.072, 0],
+  edge: [0, 0, 0],
+};
+
+const rgb01 = (hex: string) => {
+  const n = parseInt(hex.replace('#', '').slice(0, 6), 16);
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+};
+
+/**
+ * A pack's pool: light packs get pale silk (a near-white body with soft grey folds and the hue in the glow); dark
+ * packs keep the obsidian body tinted by their page, sheen and accent.
+ */
+export function poolColoursFor(p: {
+  scheme: 'dark' | 'light';
+  bg: string;
+  line: string;
+  accent: string;
+  tint?: string;
+}): PoolColours {
+  const bg = rgb01(p.tint ?? p.bg);
+  const acc = rgb01(p.accent);
+  if (p.scheme === 'light')
+    return {
+      body: bg.map((v) => v * 0.97),
+      sheen: [-0.14, -0.14, -0.13],
+      spec: [0.12, 0.12, 0.12],
+      glow: acc.map((v) => v * 0.1),
+      edge: rgb01(p.bg),
+    };
+  const line = rgb01(p.line);
+  return {
+    body: rgb01(p.bg).map((v) => v * 0.6),
+    sheen: line.map((v) => v * 0.9),
+    spec: [0.7, 0.71, 0.76],
+    glow: acc.map((v) => v * 0.1),
+    edge: [0, 0, 0],
+  };
+}
+
+/** The no-WebGL look for a pack. */
+export const poolFallbackFor = (p: { scheme: 'dark' | 'light'; bg: string; tint?: string }) =>
+  p.scheme === 'light'
+    ? `radial-gradient(circle at 50% 50%, ${p.tint ?? p.bg} 0%, ${p.bg} 70%)`
+    : `radial-gradient(circle at 50% 50%, ${p.bg} 0%, #050506 60%, #010101 85%)`;
 
 /** The no-WebGL look, and what shows under the canvas before its first frame. */
 export const POOL_FALLBACK = 'radial-gradient(circle at 50% 50%, #15130c 0%, #050506 45%, #010101 80%)';
@@ -91,14 +164,16 @@ export type PoolOptions = {
   fps?: number;
   /** Hold the current frame while an input or textarea has focus. */
   pauseWhileTyping?: boolean;
-  /** Fragment shader; the obsidian pool unless a variant (GOLD_FRAG) is given. */
+  /** Fragment shader; the obsidian pool unless a variant (GOLD_FRAG, TINT_FRAG) is given. */
   frag?: string;
+  /** TINT_FRAG's colours. */
+  colours?: PoolColours;
 };
 
 /** Runs the pool on a canvas. Returns true when WebGL is unavailable, so the caller shows the gradient. */
 export const usePool = (
   canvas: React.RefObject<HTMLCanvasElement | null>,
-  { still, fps = 0, pauseWhileTyping = false, frag = FRAG }: PoolOptions,
+  { still, fps = 0, pauseWhileTyping = false, frag = FRAG, colours }: PoolOptions,
 ) => {
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -135,6 +210,15 @@ export const usePool = (
     gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
     const uR = gl.getUniformLocation(prog, 'r');
     const uT = gl.getUniformLocation(prog, 't');
+    if (colours) {
+      const set = (name: string, v: number[]) =>
+        gl.uniform3f(gl.getUniformLocation(prog, name), v[0] ?? 0, v[1] ?? 0, v[2] ?? 0);
+      set('cB', colours.body);
+      set('cS', colours.sheen);
+      set('cP', colours.spec);
+      set('cG', colours.glow);
+      set('cE', colours.edge);
+    }
     // Half resolution, capped: the pool is soft, so this is invisible and keeps the GPU cool.
     const size = () => {
       const s = Math.min(window.devicePixelRatio || 1, 1.5) * POOL_SCALE;
@@ -175,6 +259,7 @@ export const usePool = (
       ro.disconnect();
       gl.getExtension('WEBGL_lose_context')?.loseContext();
     };
-  }, [canvas, still, fps, pauseWhileTyping, frag]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- colours are compared by value
+  }, [canvas, still, fps, pauseWhileTyping, frag, JSON.stringify(colours ?? null)]);
   return failed;
 };

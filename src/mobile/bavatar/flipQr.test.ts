@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   PAY_URI_RE,
@@ -10,6 +10,10 @@ import {
   paymailPayload,
 } from './flipQr';
 import { jsqr, rasterise, zbar, zxing } from './flipQr.testkit';
+
+// These tests rasterise QR codes with sharp and decode them with several scanners; under a full parallel
+// test run that can pass bun's 5s default, so give them room (a timeout once failed a run on 16 Oct 2026).
+setDefaultTimeout(30_000);
 
 const ADDR = '1BoatSLRHtKNngkdXEeobR76b53LETtpyT';
 const ADDR2 = '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa';
@@ -69,28 +73,36 @@ describe('flip back scans', () => {
     [keyOf('mira'), 'b0asex@bwalletx.com'],
     [keyOf('a-longer_name.x'), 'a-longer_name.x@bwalletx.com'],
   ];
-  test('ZXing and zbar read every back at 512, 240 and 160 px; jsQR most', async () => {
-    let z = 0,
-      zb = 0,
-      j = 0,
-      total = 0,
-      zbarRan = false;
+  // One test per back, not one test for all 18 renders + zbar spawns: the single test sat at ~5s and timed out
+  // whenever the full suite ran under load. Rasters are memoised so the whole-set jsQR check reuses them in any
+  // order (also under --concurrent / --randomize) instead of depending on the per-back tests running first.
+  const rasters = new Map<string, ReturnType<typeof rasterise>>();
+  const raster = (svg: string, px: number) => {
+    const k = `${px}:${svg}`;
+    if (!rasters.has(k)) rasters.set(k, rasterise(svg, px));
+    return rasters.get(k)!;
+  };
+  for (const [key, p] of cases) {
+    test(`ZXing and zbar read the back for ${p} at 512, 240 and 160 px`, async () => {
+      const svg = flipBackSvg(key, p);
+      for (const px of [512, 240, 160]) {
+        expect(zxing(await raster(svg, px))).toBe(p);
+        const r = await zbar(svg, px);
+        if (r !== undefined) expect(r).toBe(p); // undefined: zbarimg not installed (CI), decoder skipped
+      }
+    });
+  }
+  test('jsQR reads most backs', async () => {
+    let j = 0,
+      total = 0;
     for (const [key, p] of cases) {
       const svg = flipBackSvg(key, p);
       for (const px of [512, 240, 160]) {
         total++;
-        const img = await rasterise(svg, px);
-        if (zxing(img) === p) z++;
-        if (jsqr(img) === p) j++;
-        const r = await zbar(svg, px);
-        if (r !== undefined) zbarRan = true;
-        if (r === p || r === undefined) zb++;
+        if (jsqr(await raster(svg, px)) === p) j++;
       }
     }
-    expect(z).toBe(total);
-    expect(zb).toBe(total);
     // jsQR, the weakest decoder, cannot read the site's Art QR at all; the tuned back reads in most cases.
     expect(j / total).toBeGreaterThanOrEqual(0.6);
-    if (!zbarRan) console.warn('zbarimg not installed: zbar decode skipped');
   });
 });

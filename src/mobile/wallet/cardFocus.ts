@@ -9,6 +9,11 @@ export type FocusedToken = {
   icon: string;
   /** The real balance, formatted, e.g. "12.5 FOO". */
   amount: string;
+  /** The same balance in whole units, for the card's fiat/BSV value. */
+  qty?: number;
+  /** The token's symbol and decimals, for the units line under the value ("1,000 SCAM"). */
+  symbol?: string;
+  decimals?: number;
   onSend: () => void;
   onReceive?: () => void;
   onLock?: () => void;

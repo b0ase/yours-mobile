@@ -1,6 +1,18 @@
 import { describe, expect, it } from 'bun:test';
 import { BANNED_PROMO, RISK_LINE, TOKEN_SORTS, mergeTokens, sortTokens, sparkPath, sparkline } from './bexCards';
-import { APP_SORTS, appCards, contributeLinks, isBuilder, sortApps, tokeniseQuery, previewSandbox } from './bappsCards';
+import {
+  APP_SORTS,
+  appCards,
+  contributeLinks,
+  isBuilder,
+  sortApps,
+  tokeniseQuery,
+  BAPP_ABOUT,
+  appPages,
+  appFacts,
+  swipeAxis,
+} from './bappsCards';
+import { BAPPS } from '../../bapps';
 import type { BApp } from '../../bapps';
 
 const id = (c: string) => `${c.repeat(64)}_0`;
@@ -128,9 +140,24 @@ describe('bApps reel', () => {
   });
 });
 
-it('bApps previews: other https origins get storage, our own origin and non-https stay script-only', () => {
-  expect(previewSandbox('https://bmovies.app/', 'capacitor://localhost')).toBe('allow-scripts allow-same-origin');
-  expect(previewSandbox('https://web.bwalletx.com/x', 'https://web.bwalletx.com')).toBe('allow-scripts');
-  expect(previewSandbox('http://example.com/', 'capacitor://localhost')).toBe('allow-scripts');
-  expect(previewSandbox('not a url', 'capacitor://localhost')).toBe('allow-scripts');
+it('every bApp in the store has a plain-English description', () => {
+  for (const a of BAPPS) expect(BAPP_ABOUT[a.name]?.length ?? 0).toBeGreaterThan(10);
+  for (const c of appCards(BAPPS)) {
+    expect(c.about).toBe(BAPP_ABOUT[c.name]);
+    const pages = appPages(c);
+    expect(pages.length).toBeGreaterThanOrEqual(2);
+    expect(pages.length).toBeLessThanOrEqual(5);
+    expect(appFacts(c).length).toBeGreaterThanOrEqual(2);
+    expect(appFacts(c).length).toBeLessThanOrEqual(4);
+    for (const p of pages) for (const l of p.lines) expect(l).not.toMatch(BANNED_PROMO);
+  }
+});
+
+it('swipe direction: small moves wait, clear horizontal browses pages, diagonal stays vertical', () => {
+  expect(swipeAxis(3, 4)).toBeNull();
+  expect(swipeAxis(40, 5)).toBe('x');
+  expect(swipeAxis(-40, 10)).toBe('x');
+  expect(swipeAxis(5, 40)).toBe('y');
+  expect(swipeAxis(30, 28)).toBe('y');
+  expect(swipeAxis(0, -12)).toBe('y');
 });

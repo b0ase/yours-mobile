@@ -30,7 +30,7 @@ export const IconTile = ({ icon, color, on, size }: { icon: FeedIcon; color: str
   const Glyph = icon.kind === 'glyph' ? GLYPHS[icon.glyph] : null;
   return (
     <span
-      className="relative flex shrink-0 items-center justify-center overflow-hidden"
+      className="bw-feed-tile relative flex shrink-0 items-center justify-center overflow-hidden"
       style={{
         width: size,
         height: size,
@@ -80,7 +80,7 @@ const Chip = ({
     >
       <IconTile icon={icon} color={color} on={on} size={44} />
       <span
-        className="max-w-full truncate text-[11px]"
+        className="bw-feed-label max-w-full truncate text-[11px]"
         style={{ color: on ? color : alpha(color, 0.75), fontWeight: on ? 700 : 500 }}
       >
         {label}
@@ -131,7 +131,10 @@ export const FeedPicker = ({
       <div
         aria-hidden
         className="pointer-events-none absolute inset-y-0 right-0 w-10"
-        style={{ background: 'linear-gradient(to right, rgba(0,0,0,0), rgba(0,0,0,0.85))' }}
+        style={{
+          background:
+            'linear-gradient(to right, rgb(var(--bw-fade-rgb, 0 0 0) / 0), rgb(var(--bw-fade-rgb, 0 0 0) / 0.85))',
+        }}
       />
     </div>
   );

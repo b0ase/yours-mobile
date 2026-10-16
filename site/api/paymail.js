@@ -27,6 +27,11 @@ const ROUTES = {
   history: ['POST', 'history'],
   delete: ['POST', 'delete'],
   unlink: ['POST', 'unlink'],
+  // Several names per wallet, one main (signed like unlink; tighter rate limit below).
+  'names-list': ['POST', 'names-list'],
+  'names-add': ['POST', 'names-add'],
+  'names-remove': ['POST', 'names-remove'],
+  'names-primary': ['POST', 'names-primary'],
   'apps-get': ['POST', 'appsGet'],
   'apps-put': ['POST', 'appsPut'],
   // bPhone (docs/BPHONE-PLAN.md): public rate card + directory, signed writes and bookings.
@@ -36,15 +41,18 @@ const ROUTES = {
   'bphone-book': ['POST', 'bphone-book'],
   'bphone-bookings': ['POST', 'bphone-bookings'],
   'bphone-book-act': ['POST', 'bphone-book-act'],
+  // Settings › Identity › Your name (signed): one display name for every paymail on the key.
+  'set-name': ['POST', 'set-name'],
 };
 
 const hits = new Map();
-function limited(ip, max = 120) {
+const nameHits = new Map();
+function limited(ip, max = 120, map = hits) {
   const now = Date.now();
-  const list = (hits.get(ip) || []).filter((t) => now - t < 60_000);
+  const list = (map.get(ip) || []).filter((t) => now - t < 60_000);
   list.push(now);
-  hits.set(ip, list);
-  if (hits.size > 5000) hits.clear();
+  map.set(ip, list);
+  if (map.size > 5000) map.clear();
   return list.length > max;
 }
 
@@ -91,6 +99,7 @@ module.exports = async function handler(req, res) {
       .split(',')[0]
       .trim() || 'unknown';
   if (limited(ip)) return send(res, 429, { error: 'rate-limited' });
+  if (route[1].startsWith('names-') && limited(ip, 20, nameHits)) return send(res, 429, { error: 'rate-limited' });
 
   if (!handlers) {
     const store = supabaseStore();

@@ -167,6 +167,50 @@ describe('TOKENBLASTER_ENABLED: tokenblaster.lol data and the 1Sat Ordnance 3D c
   });
 });
 
+describe('HOLDER_DROP_ENABLED: Airdrop to holders is bWalletX only', () => {
+  const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  const cond = (text: string, name: string) =>
+    (new RegExp(`export const ${name}: boolean =\\s*!?\\(?([^;]*?)\\)?;`, 's').exec(text)?.[1] ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  test('inverse of STORE_BUILD, from the same env', async () => {
+    const { HOLDER_DROP_ENABLED } = await import('./storeBuild');
+    expect(HOLDER_DROP_ENABLED).toBe(!STORE_BUILD);
+    const s = src('./storeBuild.ts');
+    expect(cond(s, 'HOLDER_DROP_ENABLED')).toBe(cond(s, 'STORE_BUILD'));
+  });
+  test('the sheet is only a lazy import behind the flag', () => {
+    const v = src('../components/SendBsv21View.tsx');
+    expect(v).not.toMatch(/^import [^;]*holderDrop\//m);
+    expect(v).toMatch(/HOLDER_DROP_ENABLED\s*\?\s*lazy\(\(\) => import\('\.\.\/mobile\/holderDrop\/HolderDropSheet'\)/);
+  });
+});
+
+describe('BPOSITIVE_ENABLED: bPositive is bWalletX only', () => {
+  const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  const cond = (text: string, name: string) =>
+    (new RegExp(`export const ${name}: boolean =\\s*!?\\(?([^;]*?)\\)?;`, 's').exec(text)?.[1] ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  test('inverse of STORE_BUILD, from the same env', async () => {
+    const { BPOSITIVE_ENABLED } = await import('./storeBuild');
+    expect(BPOSITIVE_ENABLED).toBe(!STORE_BUILD);
+    const s = src('./storeBuild.ts');
+    expect(cond(s, 'BPOSITIVE_ENABLED')).toBe(cond(s, 'STORE_BUILD'));
+  });
+  test('the page is only a lazy import behind the flag, and the tile sits behind the literal env check', () => {
+    const r = src('./tabs/MobileRoutes.tsx');
+    expect(r).not.toMatch(/^import [^;]*bpositive\//m);
+    expect(r).toMatch(/BPOSITIVE_ENABLED \? lazy\(\(\) => import\('\.\.\/bpositive\/BPositivePage'\)\)/);
+    const b = src('./bapps.ts');
+    const at = b.indexOf("name: 'bPositive'");
+    expect(at).toBeGreaterThan(0);
+    expect(b.lastIndexOf("import.meta.env.VITE_CHANNEL === 'android-play'", at)).toBeGreaterThan(
+      b.lastIndexOf("name: '", at - 1),
+    );
+  });
+});
+
 describe('pots and subscriptions: pots + person standing orders everywhere, services and billing bWalletX only', () => {
   const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
   const cond = (text: string, name: string) =>
@@ -274,7 +318,8 @@ describe('store build has no Market', () => {
     expect(bar).not.toMatch(/SwapCell/);
     expect(bar).toMatch(/<PriceCell rate=\{rate\} onOpen=\{\(\) => setPortfolioOpen\(true\)\} change=\{change\} \/>/);
     expect(bar).toMatch(/import\('..\/portfolio\/PortfolioScreen'\)/);
-    expect(bar).toMatch(/swapOn && SwapPromo && \(/);
+    // All cards | Swap row (15 Oct 2026): Swap only when swapOn; All cards only with the balance cards (bWalletX).
+    expect(bar).toMatch(/swapRowButtons\(swapOn && !!SwapPromo, false\)/);
     // Permanent card (owner, 10 Oct 2026): no × and no dismissed flag, so nobody is left without a swap entry.
     const promo = src('./swap/SwapPromo.tsx');
     expect(promo).not.toMatch(/Hide the swap card|setDismissed|localStorage/);
@@ -357,7 +402,7 @@ describe('store build has no Market', () => {
     const x = src('./exchangeAppsX.ts');
     expect(x).toMatch(/EXCHANGE_BAPPS[^=]*= MARKET_ENABLED\s*\?/);
     expect(x).toMatch(/MARKET_APPS[^=]*= MARKET_ENABLED\s*\?/);
-    expect(x).toContain("'./brand/apps/bexchange.png'");
+    expect(x).toContain("bappIconUrl('bexchange')");
     const st = src('./exchangeAppsX.store.ts');
     expect(st).not.toMatch(/bExchange|bexchange|Markets|\.png/);
     expect(st).toContain('EXCHANGE_BAPPS: BApp[] = []');
@@ -713,5 +758,51 @@ describe('BALANCE_CARDS_ENABLED: balance cards are bWalletX only', () => {
   test('off exactly when the store flag is on', async () => {
     const { BALANCE_CARDS_ENABLED } = await import('./storeBuild');
     expect(BALANCE_CARDS_ENABLED).toBe(!STORE_BUILD);
+  });
+});
+
+describe('THEME_ORDERS_ENABLED: Get your own theme ($99 a year to bCorp) is bWalletX only', () => {
+  const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  const cond = (text: string, name: string) =>
+    (new RegExp(`export const ${name}: boolean =\\s*!?\\(?([^;]*?)\\)?;`, 's').exec(text)?.[1] ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  test('inverse of STORE_BUILD, from the same env', async () => {
+    const { THEME_ORDERS_ENABLED } = await import('./storeBuild');
+    expect(THEME_ORDERS_ENABLED).toBe(!STORE_BUILD);
+    const s = src('./storeBuild.ts');
+    expect(cond(s, 'THEME_ORDERS_ENABLED')).toBe(cond(s, 'STORE_BUILD'));
+  });
+  test('the sheet is only a lazy import behind the flag', () => {
+    const lazyLine = "THEME_ORDERS_ENABLED ? lazy(() => import('../themeOrder/ThemeOrderSheet')) : null";
+    expect(src('./theme/ThemeSheet.tsx')).toContain(lazyLine);
+    expect(src('../pages/Settings.tsx')).toContain(lazyLine.replace('../themeOrder', '../mobile/themeOrder'));
+    expect(src('../pages/Settings.tsx')).not.toMatch(/^import .*themeOrder/m);
+  });
+});
+
+describe('THEME_STORE_PAID_ENABLED: store builds show Free themes only', () => {
+  const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  const cond = (text: string, name: string) =>
+    (new RegExp(`export const ${name}: boolean =\\s*!?\\(?([^;]*?)\\)?;`, 's').exec(text)?.[1] ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  test('inverse of STORE_BUILD, from the same env', async () => {
+    const { THEME_STORE_PAID_ENABLED } = await import('./storeBuild');
+    expect(THEME_STORE_PAID_ENABLED).toBe(!STORE_BUILD);
+    const s = src('./storeBuild.ts');
+    expect(cond(s, 'THEME_STORE_PAID_ENABLED')).toBe(cond(s, 'STORE_BUILD'));
+  });
+  test('Premium, Holders and Editions are only a lazy chunk behind the flag', () => {
+    const page = src('./themeStore/ThemeStorePage.tsx');
+    expect(page).toContain("THEME_STORE_PAID_ENABLED ? lazy(() => import('./PaidTabs')) : null");
+    expect(page).not.toMatch(/^import .*PaidTabs/m);
+    expect(page).not.toMatch(/Coming soon|\$99|Unlocks for/);
+  });
+  test('bStore paid sections are only a lazy chunk behind the flag', () => {
+    const page = src('./themeStore/ThemeStorePage.tsx');
+    expect(page).toContain("THEME_STORE_PAID_ENABLED ? lazy(() => import('./Sections')) : null");
+    expect(page).not.toMatch(/^import .*Sections/m);
+    expect(page).not.toMatch(/Sell something|Selling opens soon|Seller gets/);
   });
 });

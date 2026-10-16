@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { allAccountsDecrypt, findStaleAccounts, rekeyAccounts } from './usbRekey';
-import { decrypt, deriveKey, encrypt } from '../utils/crypto';
+import { createHash } from 'node:crypto';
+import { decrypt, encrypt } from '../utils/crypto';
 import type { Account } from './types/chromeStorage.types';
+
+// rekeyAccounts takes already-derived passKeys; it never runs the KDF. Stand-in 256-bit keys keep these tests off
+// PBKDF2-100k (about a second per call, several seconds per test under a loaded full run).
+const deriveKey = (password: string, salt: string) => createHash('sha256').update(`${password}\0${salt}`).digest('hex');
 
 const KEYS = JSON.stringify({ walletWif: 'L1', identityWif: 'L2', walletAddress: '1abc' });
 

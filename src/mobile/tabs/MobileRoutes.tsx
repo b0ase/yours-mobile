@@ -2,9 +2,12 @@ import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { TermsGate } from '../ugc/UgcSheets';
 import { SectionBoundary } from '../wallet/SectionBoundary';
+import { useBottomMenu } from '../../hooks/useBottomMenu';
 import {
   ARTIST_PROGRAMME_ENABLED,
+  BPOSITIVE_ENABLED,
   BSPACES_ENABLED,
+  DIRECT_UPDATE_ENABLED,
   MARKET_ENABLED,
   PAY_STREAM_ENABLED,
   PLACEMENT_ENABLED,
@@ -13,8 +16,18 @@ import {
 
 /** Mobile-only tab routes, mounted by vite.config.mobile.ts at /m/* in App.tsx. */
 const SettingsHub = lazy(() => import('./SettingsHub'));
+// Android direct APK only: once-per-version "update available" banner (update/UpdateCard.tsx).
+const DirectUpdateBanner = DIRECT_UPDATE_ENABLED
+  ? lazy(() => import('../update/UpdateCard').then((m) => ({ default: m.DirectUpdateBanner })))
+  : null;
+const UpdateBanner = () => {
+  const { handleSelect } = useBottomMenu();
+  return DirectUpdateBanner ? <DirectUpdateBanner onOpen={() => handleSelect('settings', 'about')} /> : null;
+};
 // bSpaces (Apps › bSpaces): bWalletX only, not even built into a store edition.
 const SpacesPage = BSPACES_ENABLED ? lazy(() => import('../spaces/SpacesPage')) : null;
+// bPositive (bpositive/): bWalletX only, not even built into a store edition.
+const BPositivePage = BPOSITIVE_ENABLED ? lazy(() => import('../bpositive/BPositivePage')) : null;
 // No Market in a store build (storeBuild.ts MARKET_ENABLED): the chunk is not even built.
 const ExchangePage = MARKET_ENABLED ? lazy(() => import('../exchange/ExchangePage')) : null;
 // bPics (Apps › bPics): picture ordinals; mint, shared library, mine.
@@ -44,6 +57,10 @@ const BappLinkPage = lazy(() => import('../bappFrame/BappLinkPage'));
 const LockScreen = lazy(() => import('../locks/LockScreen'));
 // Desktop sidebar › Tickets / Credits (wide/WalletKindPages.tsx).
 const TicketsPage = lazy(() => import('../wide/WalletKindPages').then((m) => ({ default: m.TicketsPage })));
+const MyNamesPage = lazy(() => import('../wide/WalletKindPages').then((m) => ({ default: m.MyNamesPage })));
+// Wallet › Friends is the address book notebook (wallet/AddressBook.tsx, owner 15 Oct 2026); /m/friends/<slug> keeps
+// a friend's own page.
+const AddressBookPage = lazy(() => import('../wallet/AddressBook').then((m) => ({ default: m.AddressBookPage })));
 const CreditsPage = lazy(() => import('../wide/WalletKindPages').then((m) => ({ default: m.CreditsPage })));
 // Wallet › NFTs library (Desktop /wallet/nfts[/<outpoint>], docs/NFT-LIBRARY.md).
 const NftLibraryPage = lazy(() => import('../nfts/NftLibraryPage'));
@@ -56,6 +73,8 @@ const BmintPage = lazy(() => import('../bmint/BmintPage'));
 const BsharesPage = PLACEMENT_ENABLED ? lazy(() => import('../placement/BsharesPage')) : null;
 // The Name Store (/m/names, public /names): search, buy, claim and give names (names/store/).
 const NameStorePage = lazy(() => import('../names/store/NameStorePage'));
+// bStore (/m/store, themeStore/, docs/BSTORE.md): Themes + Names everywhere; bWalletX also paid themes, Subscriptions, Credits, Stickers, Services, Community (THEME_STORE_PAID_ENABLED).
+const ThemeStorePage = lazy(() => import('../themeStore/ThemeStorePage'));
 // /names/store: the shop's stock (listed by tier, other sellers, held unlisted), names/store/StockPage.tsx.
 const StockPage = MARKET_ENABLED ? lazy(() => import('../names/store/StockPage')) : null;
 const ToOpnsMint = () => <Navigate to={`/m/bmint/opns${useLocation().search}`} replace />;
@@ -67,6 +86,7 @@ const LockVerify = () => <LockScreen initialVerify={new URLSearchParams(window.l
 const MobileRoutes = () => (
   <SectionBoundary name="mobile tab" screen>
     <Suspense fallback={null}>
+      {DirectUpdateBanner && <UpdateBanner />}
       <Routes>
         <Route path="settings" element={<SettingsHub />} />
         {/* The top bar's Play button: music & video. */}
@@ -94,6 +114,7 @@ const MobileRoutes = () => (
         {BsharesPage && <Route path="bshares" element={<BsharesPage />} />}
         <Route path="opns-mint" element={<ToOpnsMint />} />
         <Route path="names" element={<NameStorePage />} />
+        <Route path="store" element={<ThemeStorePage />} />
         {StockPage && <Route path="names/store" element={<StockPage />} />}
         <Route path="calls" element={<CallsPage />} />
         <Route path="notifications" element={<NotificationsPage />} />
@@ -105,7 +126,8 @@ const MobileRoutes = () => (
         <Route path="nfts/:outpoint" element={<NftLibraryPage />} />
         <Route path="tickets" element={<TicketsPage />} />
         <Route path="credits" element={<CreditsPage />} />
-        <Route path="friends" element={<FriendsPage />} />
+        <Route path="my-names" element={<MyNamesPage />} />
+        <Route path="friends" element={<AddressBookPage />} />
         <Route path="friends/:slug" element={<FriendsPage />} />
         <Route path="home" element={<HomeScreen />} />
         <Route path="apps" element={<BrowserPage only="apps" />} />
@@ -117,6 +139,7 @@ const MobileRoutes = () => (
         {/* The Exchange (was Market, 12 Oct 2026): /m/exchange, /m/exchange/swap, /m/exchange/<token>… */}
         {ExchangePage && <Route path="exchange/*" element={<ExchangePage />} />}
         {ExchangePage && <Route path="market/*" element={<Navigate to="/m/exchange" replace />} />}
+        {BPositivePage && <Route path="bpositive" element={<BPositivePage />} />}
         {SpacesPage && <Route path="spaces" element={<SpacesPage />} />}
         {/* Shared spaces: the terms (zero tolerance, Apple 1.2) are agreed once before first use. */}
         <Route

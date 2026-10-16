@@ -1,9 +1,19 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { PenLine, X } from 'lucide-react';
+import { BookUser, CalendarDays, PenLine, X } from 'lucide-react';
 import { BCREDITS_ENABLED, BUY_CRYPTO_ENABLED, PLACEMENT_ENABLED, STORE_BUILD } from '../storeBuild';
-import { PNEE_ICON } from '../notes/pnee';
+import { PNEE_ICON, PNEE_TOKEN_ID } from '../notes/pnee';
 import { requestWalletAction } from '../phone/walletAction';
 import { MNEE_ICON_URL } from '../../utils/constants';
 import { getListCoin, getWalletKind, setWalletKind, setWalletView, subscribeWalletKind } from './walletKind';
@@ -16,6 +26,26 @@ import {
   type FocusedToken,
 } from './cardFocus';
 import { CardBalance, CardSkin } from './CardSkin';
+import { useCardBalance } from './balanceStore';
+import {
+  EMPTY_VALUE,
+  cardValueText,
+  creditsUsd,
+  formatTokenAmount,
+  hasNoPrice,
+  sumHoldings,
+  unpricedNote,
+  useCardUnit,
+  useHeldTokens,
+  type CardValue,
+} from './cardValue';
+import { CardUnitSwitch } from './CardUnitSwitch';
+import { useDisplayCurrency } from '../../hooks/useDisplayCurrency';
+import { latestUsdPerGbp, type Fx } from '../../utils/displayCurrency';
+import { cachedExchangeRate, fetchExchangeRate } from '../../utils/wallet';
+import { useServiceContext } from '../../hooks/useServiceContext';
+import { tokenTrades } from '../exchange/exchangeData';
+import { useCardThemed } from './cardLook';
 import { skinFor } from './cardSkins';
 import { publishBalance } from './balanceStore';
 import { useBshares } from '../placement/useBshares';
@@ -23,6 +53,10 @@ import { requestCreditsSheet } from '../credits/creditsNav';
 import { BuyBsvSheet } from './BuyBsv';
 import { holdersRoomsEnabled, openHoldersRoom, type HoldersCoin } from './holdersRoom';
 import { routeFor } from '../tabs/tabs';
+import { AddressBook } from './AddressBook';
+import { allCardsSwipe, opensAddressBook } from './addressBookGesture';
+import { BCal } from './BCal';
+import { subscribeAllCards } from './allCardsOpen';
 import './balanceCards.css';
 
 /**
@@ -65,14 +99,118 @@ type CardDef = {
   agreement?: Agreement;
   /** A tapped token's card: its real balance, already formatted (instead of balanceStore). */
   amount?: string;
+  /** A tapped token's card: its value (whole units at the last sale), for the fiat/BSV line. */
+  value?: CardValue;
+  /** A tapped token's card: its balance in its own units, for the line under the value. */
+  units?: Units;
 };
 
+/** A balance in its own units: whole-unit amount, symbol and decimals ("1,000 SCAM" under the value). */
+type Units = { qty: number; symbol: string; decimals: number };
+
+/** Decimals each built-in card's own units show with (counts are whole; MNEE and PNEEs are cents). */
+const UNIT_DECIMALS: Record<string, number> = { mnee: 2, pnee: 2 };
+/** Unit names when a card has not published its balance yet. */
+const UNIT_NAMES: Record<string, string> = {
+  tokens: 'tokens',
+  btickets: 'tickets',
+  bshares: 'shares',
+  bcredits: 'bCredits',
+  mnee: 'MNEE',
+  pnee: 'PNEEs',
+};
+
+/** Cards whose front is a balance (all but Top up): they show a fiat/BSV value and the shared switch. */
+const VALUED = new Set(['tokens', 'btickets', 'bshares', 'bcredits', 'mnee', 'pnee']);
+
+/** What the card fronts need to price a balance: BSV price, display currency, the Tokens card's sum. */
+type ValueCtx = { rate: number; fx: Fx; tokens: CardValue | null };
+const CardValueContext = createContext<ValueCtx>({ rate: 0, fx: { currency: 'USD', usdPerUnit: 1 }, tokens: null });
+
+/**
+ * A card's value from its real balance (balanceStore): MNEE and PNEEs are dollars, a bCredit is 1p, Tokens is the
+ * sum of each held token at its last sale. Tickets and bShares have no price here, so they count as unpriced.
+ */
+const valueFor = (id: string, amount: number, tokens: CardValue | null): CardValue => {
+  switch (id) {
+    case 'mnee':
+    case 'pnee':
+      return { ...EMPTY_VALUE, usd: Math.max(0, amount) };
+    case 'bcredits': {
+      const usd = creditsUsd(amount, latestUsdPerGbp()?.rate ?? null);
+      return usd === null ? { ...EMPTY_VALUE, unpriced: 1 } : { ...EMPTY_VALUE, usd };
+    }
+    case 'tokens':
+      return tokens ?? EMPTY_VALUE;
+    case 'btickets':
+      return { ...EMPTY_VALUE, unpriced: Math.max(0, Math.round(amount)) };
+    case 'bshares':
+      return { ...EMPTY_VALUE, unpriced: amount > 0 ? 1 : 0 };
+    default:
+      return EMPTY_VALUE;
+  }
+};
+
+/**
+ * The value block, laid out exactly like the BSV card (WalletCard): the amount left-aligned on the middle row
+ * (.bw-wcard-centre / .bw-wcard-usd, "N unpriced" in .bw-wcard-sats under it) and the fiat/BSV switch bottom-right
+ * (.bw-wcard-bottom › .bw-wcard-addrline › .bw-wcard-unit).
+ */
+const CardValueFront = ({
+  id,
+  live,
+  value,
+  units,
+}: {
+  id: string;
+  live: boolean;
+  value?: CardValue;
+  units?: Units;
+}) => {
+  const ctx = useContext(CardValueContext);
+  const unit = useCardUnit();
+  const bal = useCardBalance(id, live);
+  const v = value ?? valueFor(id, bal?.amount ?? 0, ctx.tokens);
+  const own = units ?? {
+    qty: bal?.amount ?? 0,
+    symbol: bal?.unit || UNIT_NAMES[id] || '',
+    decimals: UNIT_DECIMALS[id] ?? 0,
+  };
+  const amountLine = formatTokenAmount(own.qty, own.symbol, own.decimals);
+  // The rule (owner, 16 Oct 2026): big line = value ($ or BSV per the switch), the token amount always under it.
+  // No price at all → the token amount is the big line and "No price yet" sits under it.
+  const noPrice = hasNoPrice(v);
+  const text = noPrice ? amountLine : cardValueText(v, unit, ctx.rate, ctx.fx);
+  const note = noPrice ? '' : unpricedNote(v);
+  return (
+    <>
+      <span className="bw-wcard-centre" style={{ position: 'relative' }}>
+        <span className={`bw-wcard-usd${unit === 'bsv' && !noPrice ? ' is-bsv' : ''}`}>{text}</span>
+        <span className="bw-wcard-sats bw-bc-units">{noPrice ? 'No price yet' : amountLine}</span>
+        {note && <span className="bw-wcard-sats">{note}</span>}
+      </span>
+      <span className="bw-wcard-bottom" style={{ position: 'relative' }}>
+        <span className="bw-wcard-bl">
+          <span className="bw-wcard-addrline">
+            <span className="bw-wcard-addrslot" />
+            <CardUnitSwitch fx={ctx.fx} />
+          </span>
+        </span>
+      </span>
+    </>
+  );
+};
+
+type Prices = Record<string, number | null | undefined>;
+
 /** A tapped token row as a card: real balance and icon; the back's buttons are the row's existing actions. */
-const tokenCard = (t: FocusedToken): CardDef => ({
+const tokenCard = (t: FocusedToken, prices: Prices): CardDef => ({
   id: `tok-${t.id}`,
   title: t.name,
   sub: t.amount,
   amount: t.amount,
+  value: sumHoldings([{ amount: t.qty ?? 0, usdEach: t.id === PNEE_TOKEN_ID ? 1 : null, satsEach: prices[t.id] }]),
+  units: { qty: t.qty ?? 0, symbol: t.symbol ?? t.name, decimals: t.decimals ?? 0 },
   issuer: 'BSV-21 token',
   colour: '#14161f',
   logo: <img src={t.icon} alt="" width={22} height={22} style={{ borderRadius: 11 }} />,
@@ -106,21 +244,9 @@ const FlipBtn = ({ onFlip, back }: { onFlip: () => void; back: boolean }) => (
   </button>
 );
 
-const FlipCard = ({ c }: { c: CardDef }) => {
-  const [flipped, setFlipped] = useState(false);
-  const [turning, setTurning] = useState(false);
-  const [sheetOpen, setSheetOpen] = useState(false);
-  const timers = useRef<number[]>([]);
-  useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), []);
-  const flip = () => {
-    setTurning(true);
-    timers.current.push(
-      window.setTimeout(() => setFlipped((f) => !f), 220),
-      window.setTimeout(() => setTurning(false), 440),
-    );
-  };
+const cardStyle = (c: CardDef) => {
   const ink = skinFor(c.id, c.colour).ink;
-  const style = {
+  return {
     position: 'relative' as const,
     width: '100%',
     overflow: 'hidden',
@@ -130,21 +256,63 @@ const FlipCard = ({ c }: { c: CardDef }) => {
     textAlign: 'left' as const,
     ['--bc-ink' as string]: ink,
   };
-  const head = (
-    <span className="bw-bc-top" style={{ position: 'relative' }}>
-      <span className="bw-bc-logo">{c.logo}</span>
-      <span className="bw-bc-head">
-        <b>{c.title}</b>
-        <small>{c.issuer}</small>
-      </span>
+};
+
+const CardHead = ({ c }: { c: CardDef }) => (
+  <span className="bw-bc-top" style={{ position: 'relative' }}>
+    <span className="bw-bc-logo">{c.logo}</span>
+    <span className="bw-bc-head">
+      <b>{c.title}</b>
+      <small>{c.issuer}</small>
     </span>
-  );
+  </span>
+);
+
+/**
+ * A balance card's front, exactly as the carousel shows it. The All cards browser renders this same component, so
+ * a card never loses its design (or its theme) there. `live` keeps the balance subscribed.
+ */
+const CardFront = ({ c, live = true, onFlip }: { c: CardDef; live?: boolean; onFlip?: () => void }) => (
+  <>
+    <CardSkin id={c.id} colour={c.colour} />
+    {onFlip && <FlipBtn onFlip={onFlip} back={false} />}
+    <CardHead c={c} />
+    {c.value || (c.amount === undefined && VALUED.has(c.id)) ? (
+      <CardValueFront id={c.id} live={live} value={c.value} units={c.units} />
+    ) : (
+      <span style={{ position: 'relative' }}>
+        {c.amount !== undefined ? (
+          <span className="bw-skin-bal bw-bc-amt">{c.amount}</span>
+        ) : (
+          <CardBalance id={c.id} live={live} fallback={c.sub} className="bw-skin-bal bw-bc-amt" />
+        )}
+      </span>
+    )}
+  </>
+);
+
+const FlipCard = ({ c }: { c: CardDef }) => {
+  const [flipped, setFlipped] = useState(false);
+  const [turning, setTurning] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const themed = useCardThemed(c.id);
+  const timers = useRef<number[]>([]);
+  useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), []);
+  const flip = () => {
+    setTurning(true);
+    timers.current.push(
+      window.setTimeout(() => setFlipped((f) => !f), 220),
+      window.setTimeout(() => setTurning(false), 440),
+    );
+  };
+  const style = cardStyle(c);
+  const theme = themed ? ' is-themed' : '';
   if (flipped)
     return (
-      <div className={`bw-bc bw-bc-back${turning ? ' is-turning' : ''}`} style={style} onClick={flip}>
+      <div className={`bw-bc bw-bc-back${theme}${turning ? ' is-turning' : ''}`} style={style} onClick={flip}>
         <CardSkin id={c.id} colour={c.colour} />
         <FlipBtn onFlip={flip} back />
-        {head}
+        <CardHead c={c} />
         <span className="bw-bc-terms" style={{ position: 'relative' }}>
           {c.backLines.map((l) => (
             <span key={l}>{l}</span>
@@ -182,7 +350,7 @@ const FlipCard = ({ c }: { c: CardDef }) => {
     );
   return (
     <div
-      className={`bw-bc${turning ? ' is-turning' : ''}`}
+      className={`bw-bc${theme}${turning ? ' is-turning' : ''}`}
       style={style}
       role="button"
       tabIndex={0}
@@ -190,16 +358,17 @@ const FlipCard = ({ c }: { c: CardDef }) => {
       onClick={flip}
       onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && flip()}
     >
-      <CardSkin id={c.id} colour={c.colour} />
-      <FlipBtn onFlip={flip} back={false} />
-      {head}
-      <span style={{ position: 'relative' }}>
-        {c.amount !== undefined ? (
-          <span className="bw-skin-bal bw-bc-amt">{c.amount}</span>
-        ) : (
-          <CardBalance id={c.id} live fallback={c.sub} className="bw-skin-bal bw-bc-amt" />
-        )}
-      </span>
+      <CardFront c={c} onFlip={flip} />
+    </div>
+  );
+};
+
+/** The All cards browser's copy of a card: the carousel's own front (same skin, theme, ink), not interactive. */
+const StaticCard = ({ c, live }: { c: CardDef; live: boolean }) => {
+  const themed = useCardThemed(c.id);
+  return (
+    <div className={`bw-bc${themed ? ' is-themed' : ''}`} style={cardStyle(c)}>
+      <CardFront c={c} live={live} onFlip={() => undefined} />
     </div>
   );
 };
@@ -351,7 +520,6 @@ const Layer = ({ onClose, children, sheet = false }: { onClose: () => void; chil
   );
 };
 
-type TmCard = { key: string; id: string; title: string; sub: string; colour: string; logo: ReactNode };
 const reducedMotionTm = () => {
   try {
     return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -361,32 +529,48 @@ const reducedMotionTm = () => {
 };
 const TimeMachine = ({
   cards,
+  bsvCard,
   start,
   onPick,
   onClose,
+  onBook,
+  onCalendar,
 }: {
-  cards: TmCard[];
+  cards: CardDef[];
+  /** The carousel's own BSV card (the real WalletCard with the user's design), shown as is. */
+  bsvCard: ReactNode;
   start: number;
   onPick: (i: number) => void;
   onClose: () => void;
+  onBook: () => void;
+  onCalendar: () => void;
 }) => {
   const [focus, setFocus] = useState(start);
   const [reduced] = useState(reducedMotionTm);
-  const t0 = useRef<{ y: number; f: number } | null>(null);
+  const t0 = useRef<{ x: number; y: number; f: number } | null>(null);
   const clamp = (f: number) => Math.max(0, Math.min(cards.length - 1, f));
   return (
     <Layer onClose={onClose}>
       <div
         className={`bw-tm${reduced ? ' is-flat' : ''}`}
         onWheel={(e) => setFocus((f) => clamp(f + e.deltaY / 240))}
-        onTouchStart={(e) => (t0.current = { y: e.touches[0].clientY, f: focus })}
+        onTouchStart={(e) => (t0.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, f: focus })}
         onTouchMove={(e) => {
           if (!t0.current || reduced) return;
-          setFocus(clamp(t0.current.f + (t0.current.y - e.touches[0].clientY) / 120));
+          const dx = e.touches[0].clientX - t0.current.x;
+          const dy = t0.current.y - e.touches[0].clientY;
+          if (Math.abs(dx) > Math.abs(dy)) return;
+          setFocus(clamp(t0.current.f + dy / 120));
         }}
-        onTouchEnd={() => {
+        onTouchEnd={(e) => {
+          const s0 = t0.current;
           t0.current = null;
           if (!reduced) setFocus((f) => Math.round(f));
+          if (!s0) return;
+          const t = e.changedTouches[0];
+          const go = allCardsSwipe({ dx: t.clientX - s0.x, dy: t.clientY - s0.y });
+          if (go === 'book') onBook();
+          else if (go === 'calendar') onCalendar();
         }}
       >
         <div className="bw-tm-stars" />
@@ -410,25 +594,40 @@ const TimeMachine = ({
                   pointerEvents: (o < -0.5 ? 'none' : 'auto') as 'none' | 'auto',
                   filter: o > 0.5 ? `brightness(${Math.max(0.45, 1 - o * 0.1)})` : undefined,
                 };
+            const pick = () => (reduced || Math.abs(o) < 0.5 ? onPick(i) : setFocus(i));
             return (
-              <button
-                type="button"
-                key={c.key}
+              <div
+                key={c.id}
+                role="button"
+                tabIndex={0}
+                aria-label={c.title}
                 className="bw-tm-card"
-                style={{ ...style, background: c.colour, color: skinFor(c.id, c.colour).ink }}
-                onClick={() => (reduced || Math.abs(o) < 0.5 ? onPick(i) : setFocus(i))}
+                style={style}
+                onClick={pick}
+                onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && pick()}
               >
-                <CardSkin id={c.id} colour={c.colour} />
-                <span className="bw-tm-logo">{c.logo}</span>
-                <span className="bw-tm-text">
-                  <b>{c.title}</b>
-                  <CardBalance id={c.id} live={Math.abs(o) < 2.5} fallback={c.sub} />
-                </span>
-              </button>
+                <div className="bw-tm-inner">
+                  {c.id === 'bsv' ? bsvCard : <StaticCard c={c} live={Math.abs(o) < 2.5} />}
+                </div>
+              </div>
             );
           })}
         </div>
-        <p className="bw-tm-hint">Swipe up and down to fly through · tap a card to land on it</p>
+        {/* Visible doors (owner, 15 Oct 2026): Address book on the left (a right pull opens it), bCal on the right
+            (a left swipe), so the buttons teach the swipe directions. Theme tokens only. */}
+        <div className="bw-tm-doors">
+          <button type="button" onClick={onBook}>
+            <BookUser size={16} aria-hidden="true" />
+            <span>Address book</span>
+          </button>
+          <button type="button" onClick={onCalendar}>
+            <CalendarDays size={16} aria-hidden="true" />
+            <span>Calendar</span>
+          </button>
+        </div>
+        <p className="bw-tm-hint">
+          Swipe up and down to fly through · tap a card to land on it · swipe sideways for Friends or bCal
+        </p>
       </div>
     </Layer>
   );
@@ -439,9 +638,63 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
   const [active, setActive] = useState(0);
   const [tm, setTm] = useState(false);
   const [buyOpen, setBuyOpen] = useState(false);
+  // Address book (owner, 15 Oct 2026): pull right past the first card, or the notebook button.
+  const [book, setBook] = useState(false);
+  // bCal (owner, 15 Oct 2026): the All cards browser's other sideways swipe.
+  const [cal, setCal] = useState(false);
+  const pull0 = useRef<{ x: number; y: number; left: number } | null>(null);
   const [mnee, setMnee] = useState<number | null>(readMnee);
   const track = useRef<HTMLDivElement>(null);
   const shares = useBshares();
+
+  // Card values (owner, 15 Oct 2026): the BSV price and Settings › Currency the BSV card uses, and each held
+  // token's last sale on the 1Sat market (exchangeData.ts) for the Tokens card's sum. No price → unpriced.
+  const fx = useDisplayCurrency();
+  const { apiContext } = useServiceContext();
+  const [rate, setRate] = useState(cachedExchangeRate);
+  useEffect(() => {
+    if (!apiContext) return;
+    let on = true;
+    void fetchExchangeRate(apiContext.chain, apiContext.wocApiKey)
+      .then((r) => on && r > 0 && setRate(r))
+      .catch(() => undefined);
+    return () => {
+      on = false;
+    };
+  }, [apiContext]);
+  const held = useHeldTokens();
+  const focusedNow = useSyncExternalStore(subscribeFocusedToken, getFocusedToken, getFocusedToken);
+  const [prices, setPrices] = useState<Prices>({});
+  const priceIds = [...(held ?? []).map((h) => h.id), ...(focusedNow ? [focusedNow.id] : [])]
+    .filter((id) => id !== PNEE_TOKEN_ID)
+    .join(',');
+  useEffect(() => {
+    if (!priceIds) return;
+    let on = true;
+    for (const id of priceIds.split(',')) {
+      void tokenTrades(id, 1).then((t) => {
+        const last = t[t.length - 1]?.satsPerToken;
+        if (on) setPrices((p) => (id in p ? p : { ...p, [id]: last && last > 0 ? last : null }));
+      });
+    }
+    return () => {
+      on = false;
+    };
+  }, [priceIds]);
+  const tokensValue = useMemo(
+    () =>
+      held
+        ? sumHoldings(
+            held.map((h) => ({
+              amount: h.amount,
+              usdEach: h.id === PNEE_TOKEN_ID ? 1 : null,
+              satsEach: prices[h.id],
+            })),
+          )
+        : null,
+    [held, prices],
+  );
+  const valueCtx = useMemo(() => ({ rate, fx, tokens: tokensValue }), [rate, fx, tokensValue]);
 
   // MNEE: the wallet's real balance (BsvWallet shares the last fetch), read only.
   useEffect(() => {
@@ -517,30 +770,30 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
       id: 'bshares',
       title: 'bShares',
       sub: '0.00 shares',
-      issuer: 'The Bitcoin Corporation Ltd',
+      issuer: 'Share registers for any company',
       colour: '#23200f',
       logo: '§',
       backLines: shares.me
         ? [
-            'Your shares in The Bitcoin Corporation Ltd, as recorded on its Register of Members (bit-sign).',
+            `Your shares in ${shares.me.company.name}, as recorded on its Register of Members (bit-sign).`,
             'Restricted: not offered publicly.',
           ]
         : [
-            'Shares in The Bitcoin Corporation Ltd, as recorded on its Register of Members (bit-sign).',
-            'You are not on the register.',
+            'Share registers for any company: register of members, director approvals, locked shares.',
+            'You are not on a register yet.',
           ],
       backButtons: shares.me ? [{ label: 'Open register', run: () => navigate('/m/bshares'), primary: true }] : [],
     });
   if (BCREDITS_ENABLED)
     cards.push({
       id: 'bcredits',
-      title: 'bCredits',
+      title: 'Credits',
       sub: '0.00 bCredits',
-      issuer: 'The Bitcoin Corporation Ltd',
+      issuer: 'bCredits — pay for b · The Bitcoin Corporation Ltd',
       colour: '#1a1608',
       logo: '¢',
       backLines: [
-        'Prepaid credit for b, the bWalletX agent. 1 bCredit = 1p.',
+        'Credits: one card for every credit type. bCredits — pay for b: prepay for b, the bWalletX agent. 1 bCredit = 1p.',
         'Each b reply costs what it costs to run × 1.35. Top-ups up to £20. No expiry.',
       ],
       backButtons: [
@@ -670,104 +923,122 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
     press.current = null;
   };
   useEffect(() => () => endPress(), []);
-
-  const tmCards: TmCard[] = cards.map((c) => ({
-    key: c.id,
-    id: c.id,
-    title: c.title,
-    sub: c.sub,
-    colour: c.colour,
-    logo: c.logo,
-  }));
+  // The Wallet's "All cards" button (BuyBsv.tsx) opens the browser too; the long-press stays.
+  useEffect(() => subscribeAllCards(() => setTm(true)), []);
 
   return (
-    <div className="bw-bcar">
-      <div className="bw-bcar-stage">
-        <div
-          ref={track}
-          className="bw-bcar-track"
-          style={focused ? { visibility: 'hidden' } : undefined}
-          onScroll={onScroll}
-          onTouchStart={startPress}
-          onTouchEnd={endPress}
-          onTouchMove={endPress}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            setTm(true);
-          }}
-        >
-          {cards.map((c) => (
-            <div className="bw-bcar-slide" key={c.id}>
-              {c.id === 'bsv' ? (
-                <div className="bw-bcar-bsv">{bsvCard}</div>
-              ) : (
-                <div className="bw-bcar-wrap">
-                  <FlipCard c={c} />
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-        {focused && (
+    <CardValueContext.Provider value={valueCtx}>
+      <div className="bw-bcar">
+        <div className="bw-bcar-stage">
           <div
-            className="bw-bcar-focus"
-            onTouchStart={(e) => (swipe0.current = { x: e.touches[0].clientX, y: e.touches[0].clientY })}
+            ref={track}
+            className="bw-bcar-track"
+            style={focused ? { visibility: 'hidden' } : undefined}
+            onScroll={onScroll}
+            onTouchStart={(e) => {
+              pull0.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, left: e.currentTarget.scrollLeft };
+              startPress();
+            }}
             onTouchEnd={(e) => {
-              const s0 = swipe0.current;
-              swipe0.current = null;
-              if (!s0) return;
-              const dx = e.changedTouches[0].clientX - s0.x;
-              const dy = e.changedTouches[0].clientY - s0.y;
-              if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) clearFocusedToken();
+              endPress();
+              const p = pull0.current;
+              pull0.current = null;
+              if (!p || focused) return;
+              const t = e.changedTouches[0];
+              if (opensAddressBook(p.left, { dx: t.clientX - p.x, dy: t.clientY - p.y })) setBook(true);
+            }}
+            onTouchMove={endPress}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setTm(true);
             }}
           >
-            <div className="bw-bcar-wrap">
-              <FlipCard key={focused.id} c={tokenCard(focused)} />
-            </div>
-            <button
-              type="button"
-              className="bw-bcar-unfocus"
-              aria-label="Back to your cards"
-              onClick={clearFocusedToken}
-            >
-              <X size={14} aria-hidden="true" />
-            </button>
+            {cards.map((c) => (
+              <div className="bw-bcar-slide" key={c.id}>
+                {c.id === 'bsv' ? (
+                  <div className="bw-bcar-bsv">{bsvCard}</div>
+                ) : (
+                  <div className="bw-bcar-wrap">
+                    <FlipCard c={c} />
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
+          {focused && (
+            <div
+              className="bw-bcar-focus"
+              onTouchStart={(e) => (swipe0.current = { x: e.touches[0].clientX, y: e.touches[0].clientY })}
+              onTouchEnd={(e) => {
+                const s0 = swipe0.current;
+                swipe0.current = null;
+                if (!s0) return;
+                const dx = e.changedTouches[0].clientX - s0.x;
+                const dy = e.changedTouches[0].clientY - s0.y;
+                if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) clearFocusedToken();
+              }}
+            >
+              <div className="bw-bcar-wrap">
+                <FlipCard key={focused.id} c={tokenCard(focused, prices)} />
+              </div>
+              <button
+                type="button"
+                className="bw-bcar-unfocus"
+                aria-label="Back to your cards"
+                onClick={clearFocusedToken}
+              >
+                <X size={14} aria-hidden="true" />
+              </button>
+            </div>
+          )}
+        </div>
+        <div style={{ position: 'relative', minHeight: 26 }}>
+          {cards.length > 1 && (
+            <div className="bw-bcar-dots" aria-label={`Card ${active + 1} of ${cards.length}`}>
+              {cards.map((c, i) => (
+                <button
+                  type="button"
+                  key={c.id}
+                  aria-label={c.title}
+                  className={i === active ? 'is-on' : ''}
+                  onClick={() => goTo(i)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+        {book && <AddressBook onClose={() => setBook(false)} />}
+        {cal && <BCal onClose={() => setCal(false)} />}
+        {BUY_CRYPTO_ENABLED && buyOpen && (
+          <BuyBsvSheet
+            onClose={() => setBuyOpen(false)}
+            onReceive={() => {
+              setBuyOpen(false);
+              requestWalletAction('receive');
+            }}
+          />
+        )}
+        {tm && (
+          <TimeMachine
+            cards={cards}
+            bsvCard={bsvCard}
+            start={active}
+            onBook={() => {
+              setTm(false);
+              setBook(true);
+            }}
+            onCalendar={() => {
+              setTm(false);
+              setCal(true);
+            }}
+            onClose={() => setTm(false)}
+            onPick={(i) => {
+              setTm(false);
+              window.setTimeout(() => goTo(i), 60);
+            }}
+          />
         )}
       </div>
-      {cards.length > 1 && (
-        <div className="bw-bcar-dots" aria-label={`Card ${active + 1} of ${cards.length}`}>
-          {cards.map((c, i) => (
-            <button
-              type="button"
-              key={c.id}
-              aria-label={c.title}
-              className={i === active ? 'is-on' : ''}
-              onClick={() => goTo(i)}
-            />
-          ))}
-        </div>
-      )}
-      {BUY_CRYPTO_ENABLED && buyOpen && (
-        <BuyBsvSheet
-          onClose={() => setBuyOpen(false)}
-          onReceive={() => {
-            setBuyOpen(false);
-            requestWalletAction('receive');
-          }}
-        />
-      )}
-      {tm && (
-        <TimeMachine
-          cards={tmCards}
-          start={active}
-          onClose={() => setTm(false)}
-          onPick={(i) => {
-            setTm(false);
-            window.setTimeout(() => goTo(i), 60);
-          }}
-        />
-      )}
-    </div>
+    </CardValueContext.Provider>
   );
 };

@@ -44,7 +44,7 @@ import bspacesGlyph from './brand/bspaces-glyph.svg';
 import bpicsGlyph from './brand/bpics-glyph.svg';
 import { ArrowRight, Clock, Github, Globe, Lock, Plus, Search, Star, X } from 'lucide-react';
 import { BAPP_GROUPS, bappsIn, type BApp } from './bapps';
-import { ALL_BAPP_ICON_SLUGS, bappIconUrl } from './brand/bappIcons';
+import { ALL_BAPP_ICON_SLUGS, bappIconUrl, useThemedIcon } from './brand/bappIcons';
 import { RADAR_APPS, RADAR_GROUPS } from './radarApps';
 import { GAME_SOURCES, gamesFor } from './games/gamesCatalog';
 import { AddAppSheet } from './apps/AddAppSheet';
@@ -87,6 +87,14 @@ import { usePhoneLayout } from './phone/flag';
 import { PHONE_ADD_TO_DOCK } from './phone/events';
 import type { DockItem } from './phone/dockModel';
 import { ErrorActions } from './errors/ErrorActions';
+import { accentById } from './theme/accents';
+import { useAccentId } from './theme/useAccent';
+
+// The VexVoid live set heads the Music (Media) section (owner, 16 Oct 2026); its own chunk, loaded on demand.
+const VexVoidHero = lazy(() => import('./media/vexvoid/VexVoidHero'));
+/** bRacer goes white with black edges on light themes (owner, 16 Oct 2026); the game reads ?theme=white. */
+const BRACER = '/arcade/bracer';
+const useLightScheme = () => accentById(useAccentId()).scheme === 'light';
 
 /**
  * Apps tab (theme.settings.services.browser), laid out like a phone home
@@ -172,6 +180,9 @@ const ONE_LINE = 'overflow-hidden text-ellipsis whitespace-nowrap';
 /** Home-screen icon: the site's icon, else a monogram ("b" in gold for bApps). */
 const TileIcon = ({ tile }: { tile: Tile }) => {
   const [failed, setFailed] = useState(false);
+  // Theme packs redraw the set icons; Mono puts own artwork on a white paper tile (themes.css .bw-paper-icon).
+  const themed = useThemedIcon(tile.icon);
+  const light = useLightScheme();
   if (tile.screen) {
     const Icon = SCREEN_ICON[tile.screen];
     return (
@@ -183,7 +194,7 @@ const TileIcon = ({ tile }: { tile: Tile }) => {
   if (tile.icon && !failed) {
     return (
       <img
-        src={tile.icon}
+        src={themed.src}
         alt=""
         draggable={false}
         onError={() => setFailed(true)}
@@ -191,7 +202,9 @@ const TileIcon = ({ tile }: { tile: Tile }) => {
         loading="lazy"
         width={60}
         height={60}
-        className={`${ICON} object-cover bg-[var(--bw-surface)]`}
+        className={`${ICON} object-cover bg-[var(--bw-surface)]${themed.paper ? ' bw-paper-icon' : ''}`}
+        // bRacer's neon-on-black cover turns white with black edges (GPU filter, no extra asset).
+        style={light && tile.url.includes(BRACER) ? { filter: 'grayscale(1) invert(1) contrast(1.6)' } : undefined}
       />
     );
   }
@@ -594,6 +607,7 @@ const BrowserPage = ({
 } = {}) => {
   const phone = usePhoneLayout();
   const navigate = useNavigate();
+  const lightScheme = useLightScheme();
   const only: Only | undefined = onlyProp ?? (phone ? 'apps' : undefined);
   const keyboard = useKeyboardInset();
   const reduce = useReducedMotion();
@@ -739,6 +753,8 @@ const BrowserPage = ({
     // typed addresses open full screen.
     const tile = ALL_TILES.find((t) => t.url === url);
     const name = bapp?.name ?? tile?.name;
+    // bRacer in a light theme: ask the game for its white palette (gameplay unchanged; ignored until it ships).
+    if (lightScheme && url.includes(BRACER)) url += `${url.includes('?') ? '&' : '?'}theme=white`;
     // Chrome extension: Chrome is the browser, so apps open in a normal tab and connect to the extension.
     if (IS_EXTENSION) return void chrome.tabs.create({ url });
     (name ? openBapp(name, url) : openDappBrowser(url)).catch((e: unknown) =>
@@ -981,6 +997,11 @@ const BrowserPage = ({
         <div key={i} data-apps-section={i} className="flex flex-col gap-3">
           {/* The Games section opens with the bGames hero (owner, 11 Oct 2026). */}
           {/^games$/i.test(screenTitle(x, i).trim()) && <BGamesHero top={false} />}
+          {/^(music|media)$/i.test(screenTitle(x, i).trim()) && (
+            <Suspense fallback={<div className="-mx-4" style={{ height: 200, background: 'var(--bw-bg)' }} />}>
+              <VexVoidHero />
+            </Suspense>
+          )}
           <button
             type="button"
             onClick={() => {

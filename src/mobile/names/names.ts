@@ -1,6 +1,7 @@
 import { Utils } from '@bsv/sdk';
 import { AMOUNT_HINT, cleanRecipient, isMainnetAddress, looksLikeAmount } from './address';
 import { BWALLET_PAYMAIL_DOMAIN, LEGACY_PAYMAIL_DOMAINS } from './config';
+import { isPlaceholderName } from './handlePrompt';
 
 /**
  * "Send to a name": classify what the user typed in a recipient box and resolve it to
@@ -203,7 +204,8 @@ export const resolvePaymail = async (f: Fetch, paymail: string, input = paymail)
   const prof = str(caps[CAP.publicProfile]);
   if (prof) {
     const p = await tryJson<Fields>(f, fill(prof, alias, domain));
-    r.displayName = str(p?.name);
+    // "Anonymous" / "Account 1" from an old profile is no name: the UI shows the paymail instead.
+    r.displayName = str(p?.name) && !isPlaceholderName(str(p?.name)) ? str(p?.name) : undefined;
     r.avatar = str(p?.avatar);
   }
   const pki = str(caps[CAP.pki]);

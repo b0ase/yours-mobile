@@ -1,5 +1,7 @@
 import type { CardPatternId } from '../theme/accents';
 import { hexToHsl, hslToHex, mix } from '../theme/colour';
+import { LIGHT_PATTERNS, isLightPattern, lightPatternSvg } from './cardPatternsLight';
+import { editionArtUri, isEditionPattern, vexFieldSvg } from './cardPatternsEdition';
 
 /**
  * Card patterns (Design your card › Patterns, owner 14 Oct 2026): for people with no picture they want to use.
@@ -21,6 +23,8 @@ export const PATTERNS: readonly { id: CardPatternId; label: string }[] = [
   { id: 'circuit', label: 'Circuit' },
   { id: 'chevron', label: 'Chevrons' },
   { id: 'starburst', label: 'Starburst' },
+  // White designs (cardPatternsLight.ts): off-white modernist studies for the White theme.
+  ...LIGHT_PATTERNS,
 ];
 
 const W = PATTERN_W;
@@ -300,11 +304,15 @@ function finish(id: CardPatternId, c: string): Finish {
           VIGNETTE,
         over: `<rect width="${W}" height="${H}" fill="url(#glaze)"/>` + vigRect + EDGE,
       };
+    default: // White designs draw their own ground (cardPatternsLight.ts).
+      return { ground: '', defs: '', over: '' };
   }
 }
 
 /** The pattern as an SVG string: the pattern in `colour` on its own art-directed ground and finish. */
-export function patternSvg(id: CardPatternId, colour: string): string {
+export function patternSvg(id: CardPatternId, colour: string, ground?: string): string {
+  if (isLightPattern(id)) return lightPatternSvg(id, colour, ground);
+  if (id === 'vexfield') return vexFieldSvg(0);
   const f = finish(id, colour);
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">` +
@@ -314,11 +322,13 @@ export function patternSvg(id: CardPatternId, colour: string): string {
 }
 
 const cache = new Map<string, string>();
-export function patternUri(id: CardPatternId, colour: string): string {
-  const k = id + colour;
+/** `key` picks a steady variant for the artist editions (VexVoid stills, NPG characters, NPGX slices). */
+export function patternUri(id: CardPatternId, colour: string, key = '', ground?: string): string {
+  if (isEditionPattern(id)) return editionArtUri(id, key);
+  const k = id + colour + (ground ?? '');
   let u = cache.get(k);
   if (!u) {
-    u = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(patternSvg(id, colour));
+    u = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(patternSvg(id, colour, ground));
     cache.set(k, u);
   }
   return u;

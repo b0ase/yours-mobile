@@ -7,6 +7,8 @@ import { asMenuItem, TAB_ORDER, TAB_TAP, tabFor } from './tabs';
 import { usePhoneLayout } from '../phone/flag';
 import { WIDE_ON } from '../wide/flag';
 import { onTabRetap } from './tabRetap';
+import { badgeLabel, badgeText, walletBadgeLabel } from './tabBadges';
+import { useTabBadges } from './useTabBadges';
 
 /**
  * Mobile swap for BottomMenu's export (vite.config.mobile.ts). Five tabs:
@@ -33,6 +35,9 @@ export const BottomMenu = ({ selected, handleSelect, theme }: BottomMenuProps) =
     apiContext,
     chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress,
   ).length;
+  // Unread on Chat and Feed (tabBadges.ts). Wallet keeps only its rooms-to-set-up count: new tokens show in bMail.
+  const unread = useTabBadges();
+  const count = (id: string) => (id === 'chat' ? unread.chat : id === 'feed' ? unread.feed : 0);
   // Phone layout test switch on: the dock (phone/PhoneShell.tsx) replaces this bar.
   if (phone || WIDE_ON) return null;
   return (
@@ -60,7 +65,14 @@ export const BottomMenu = ({ selected, handleSelect, theme }: BottomMenuProps) =
               if (again) onTabRetap();
             }}
             isSelected={active === t.id}
-            badge={t.id === 'bsv' && pending && indexingEnabled() ? String(pending) : undefined}
+            ariaLabel={
+              t.id === 'bsv' && pending && indexingEnabled()
+                ? walletBadgeLabel(t.label, pending)
+                : badgeLabel(t.label, count(t.id))
+            }
+            badge={
+              t.id === 'bsv' && pending && indexingEnabled() ? String(pending) : badgeText(count(t.id)) || undefined
+            }
           />
         ))}
       </div>

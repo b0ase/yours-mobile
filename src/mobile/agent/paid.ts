@@ -13,6 +13,7 @@
  */
 import type { AgentMessage } from './agent';
 import { fmtUsd, money } from '../money/money';
+import { enabledAddOns, loadBWeb } from '../bweb/bweb';
 
 export type PriceInfo = {
   enabled: boolean;
@@ -121,7 +122,18 @@ export const turnBody = (quote: Quote, txid: string, messages: AgentMessage[], s
   ...(beef && /^[0-9a-f]+$/i.test(beef) ? { beef } : {}),
   // So b can log a bug report with the platform without asking (bit-sign lib/b-feedback.ts).
   client: clientInfo(),
+  // Ask b add-ons switched on in Settings › bWeb (bweb.ts). Same price per message; omitted when none.
+  ...addOnsField(),
 });
+
+const addOnsField = (): { addOns?: string[] } => {
+  try {
+    const on = enabledAddOns(loadBWeb());
+    return on.length ? { addOns: on } : {};
+  } catch {
+    return {};
+  }
+};
 
 export const clientInfo = (): { platform: string; version?: string } => {
   const g = globalThis as {

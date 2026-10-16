@@ -133,7 +133,7 @@ export const BsvWallet = () => {
   const { theme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
-  const { updateBalance, isSyncing, restoreMessage } = useSyncTracker();
+  const { updateBalance, balanceTick, isSyncing, restoreMessage } = useSyncTracker();
   const urlParams = new URLSearchParams(location.search);
   const { handleSelect, query } = useBottomMenu();
   const tokenRows = useTokenRows();
@@ -608,6 +608,14 @@ export const BsvWallet = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [updateBalance]);
+
+  // Every finished sync / paymail receipt, not just the first (updateBalance latches at true).
+  useEffect(() => {
+    if (!balanceTick) return;
+    getAndSetBsvBalance();
+    loadLocks();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [balanceTick]);
 
   useEffect(() => {
     if (isReload) window.location.reload();
@@ -1165,7 +1173,7 @@ export const BsvWallet = () => {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -12 }}
       transition={{ duration: 0.28, ease: 'easeOut' }}
-      className="flex flex-col items-center w-full pt-14 pb-20 px-4 overflow-y-auto overflow-x-hidden self-start"
+      className="flex flex-col items-center w-full pt-14 px-4 overflow-y-auto bw-dock-pad overflow-x-hidden self-start"
       style={{ height: '100%', backgroundColor: theme.color.global.walletBackground }}
     >
       {/* Header row */}
@@ -1188,7 +1196,7 @@ export const BsvWallet = () => {
 
       {/* Your bAvatar: tap to turn it over to the same address as a pay code (flip bAvatar, 14 Oct 2026). */}
       <div className="mb-4 flex flex-col items-center gap-1">
-        <MyFlipBavatar address={receiveAddress} size={72} backSize={180} />
+        <MyFlipBavatar address={receiveAddress} size={144} backSize={200} />
         <span className="text-[11px]" style={{ color: theme.color.global.gray }}>
           Tap your bAvatar to flip it
         </span>
@@ -1388,7 +1396,7 @@ export const BsvWallet = () => {
           hidden: {},
           visible: { transition: { staggerChildren: 0.07 } },
         }}
-        className="flex flex-col items-center w-full pt-14 pb-16 overflow-y-auto"
+        className="flex flex-col items-center w-full pt-14 pb-16 overflow-y-auto bw-dock-pad"
         style={{ minHeight: '100%' }}
       >
         {/* ── BSV price + Buy BSV (owner, 6 Oct 2026); the migration banner moved below the token buttons ── */}
@@ -1817,7 +1825,7 @@ export const BsvWallet = () => {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -12 }}
       transition={{ duration: 0.28, ease: 'easeOut' }}
-      className="flex flex-col items-center w-full pt-14 pb-20 px-4 overflow-y-auto overflow-x-hidden self-start"
+      className="flex flex-col items-center w-full pt-14 px-4 overflow-y-auto bw-dock-pad overflow-x-hidden self-start"
       style={{ height: '100%', backgroundColor: theme.color.global.walletBackground }}
     >
       {/* Header */}
@@ -2001,7 +2009,7 @@ export const BsvWallet = () => {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -12 }}
       transition={{ duration: 0.28, ease: 'easeOut' }}
-      className="flex flex-col items-center w-full pt-14 pb-20 px-4 overflow-y-auto overflow-x-hidden self-start"
+      className="flex flex-col items-center w-full pt-14 px-4 overflow-y-auto bw-dock-pad overflow-x-hidden self-start"
       style={{ height: '100%', backgroundColor: theme.color.global.walletBackground }}
     >
       {/* Header */}
@@ -2057,7 +2065,7 @@ export const BsvWallet = () => {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -12 }}
       transition={{ duration: 0.28, ease: 'easeOut' }}
-      className="flex flex-col items-center w-full pt-14 pb-20 px-4 overflow-y-auto overflow-x-hidden self-start"
+      className="flex flex-col items-center w-full pt-14 px-4 overflow-y-auto bw-dock-pad overflow-x-hidden self-start"
       style={{ height: '100%', backgroundColor: theme.color.global.walletBackground }}
     >
       {/* Header */}

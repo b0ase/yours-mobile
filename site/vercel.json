@@ -1,6 +1,10 @@
 {
   "rewrites": [
     {
+      "source": "/api/theme-orders/:op",
+      "destination": "/api/theme-orders?op=:op"
+    },
+    {
       "source": "/pair",
       "destination": "/pair.html"
     },

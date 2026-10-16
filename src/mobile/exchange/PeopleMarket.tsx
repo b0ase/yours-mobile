@@ -1,6 +1,13 @@
 import { useMemo, useState } from 'react';
 import { buyBsv21 } from '@1sat/actions';
-import { MessageCircle } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { MessageCircle, Send, UserRound } from 'lucide-react';
+import type { SwipeAction } from '../swipe/SwipeRow';
+import { requestPay } from '../wallet/payNav';
+import { setWalletKind } from '../wallet/walletKind';
+import { TokenSwipeRow } from './TokenRowActions';
+import { TRAY, useTokenRowActions } from './useTokenRowActions';
+import { payTarget, peopleActionIds, profileRoute } from './rowActions';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
@@ -230,28 +237,74 @@ export const BuyAndChat = ({ token, rate }: { token: PersonToken; rate: number }
   );
 };
 
-const PersonRow = ({ t, rate }: { t: PersonToken; rate: number }) => (
-  <div className="flex items-center gap-3 border-t border-[#2b2f36] px-3 py-2.5">
-    <img src={avatarSrc(t)} alt="" className="w-9 h-9 rounded-full object-cover" />
-    <div className="flex-1 min-w-0">
-      <div className="font-bold text-white truncate">${t.handle}</div>
-      <div className="text-[11px] truncate" style={{ color: MUTED }}>
-        {joinLabel(t)}
-        {t.members > 0 && ` · ${t.members} in the room`}
+type ActionsFor = (t: PersonToken) => SwipeAction[];
+
+/** Swipe left (or long-press / "…"): Chat (their room) · Pay · Profile. Pay/Profile need an unmasked handle. */
+const usePersonActions = () => {
+  const navigate = useNavigate();
+  const { handleSelect } = useBottomMenu();
+  const { chatAction, sheet } = useTokenRowActions();
+  const actionsFor: ActionsFor = (t) =>
+    peopleActionIds(t.handle).map((id): SwipeAction => {
+      if (id === 'chat') return chatAction(t.tokenId, `$${t.handle}`);
+      if (id === 'pay')
+        return {
+          id,
+          label: 'Pay',
+          icon: <Send size={18} />,
+          ...TRAY.second,
+          onPress: () => {
+            requestPay(payTarget(t.handle));
+            setWalletKind('tokens');
+            handleSelect(asMenuItem('bsv'));
+            navigate('/bsv-wallet');
+          },
+        };
+      return {
+        id,
+        label: 'Profile',
+        icon: <UserRound size={18} />,
+        ...TRAY.plain,
+        onPress: () => navigate(profileRoute(t.handle)),
+      };
+    });
+  return { actionsFor, sheet };
+};
+
+const PersonRow = ({ t, rate, actionsFor }: { t: PersonToken; rate: number; actionsFor: ActionsFor }) => (
+  <TokenSwipeRow actions={actionsFor(t)} title={`$${t.handle}`} rowId={t.tokenId}>
+    <div className="flex items-center gap-3 border-t border-[#2b2f36] px-3 py-2.5">
+      <img src={avatarSrc(t)} alt="" className="w-9 h-9 rounded-full object-cover" />
+      <div className="flex-1 min-w-0">
+        <div className="font-bold text-white truncate">${t.handle}</div>
+        <div className="text-[11px] truncate" style={{ color: MUTED }}>
+          {joinLabel(t)}
+          {t.members > 0 && ` · ${t.members} in the room`}
+        </div>
       </div>
+      <BuyAndChat token={t} rate={rate} />
     </div>
-    <BuyAndChat token={t} rate={rate} />
-  </div>
+  </TokenSwipeRow>
 );
 
-const Section = ({ title, list, rate }: { title: string; list: PersonToken[]; rate: number }) =>
+const Section = ({
+  title,
+  list,
+  rate,
+  actionsFor,
+}: {
+  title: string;
+  list: PersonToken[];
+  rate: number;
+  actionsFor: ActionsFor;
+}) =>
   list.length ? (
     <section className="rounded-2xl bg-[var(--bw-surface)] border border-[#2b2f36] overflow-hidden">
       <h2 className="text-xs font-bold m-0 px-3 py-2" style={{ color: MUTED }}>
         {title}
       </h2>
       {list.map((t) => (
-        <PersonRow key={t.tokenId} t={t} rate={rate} />
+        <PersonRow key={t.tokenId} t={t} rate={rate} actionsFor={actionsFor} />
       ))}
     </section>
   ) : null;
@@ -259,6 +312,7 @@ const Section = ({ title, list, rate }: { title: string; list: PersonToken[]; ra
 /** Markets → Friends: your friends' tokens first, then everyone else's ("People"). */
 export const PeopleMarket = ({ rate, q }: { rate: number; q: string }) => {
   const tokens = usePeopleTokens();
+  const { actionsFor, sheet } = usePersonActions();
   const contacts = useContacts();
   const me = loadSession()?.handle ?? null;
   const needle = q.trim().replace(/^\$/, '').toLowerCase();
@@ -287,11 +341,12 @@ export const PeopleMarket = ({ rate, q }: { rate: number; q: string }) => {
   return (
     <div className="flex flex-col gap-3">
       {mine && SELL_ENABLED && <SellMyToken token={mine} rate={rate} />}
-      <Section title="Friends" list={sections.friends} rate={rate} />
-      <Section title="People" list={sections.people} rate={rate} />
+      <Section title="Friends" list={sections.friends} rate={rate} actionsFor={actionsFor} />
+      <Section title="People" list={sections.people} rate={rate} actionsFor={actionsFor} />
       <p className="text-[11px] m-0" style={{ color: MUTED }}>
-        Hold 1 of someone's token to join their room.
+        Hold 1 of someone's token to join their room. Swipe a row (or long-press) for Chat, Pay and Profile.
       </p>
+      {sheet}
     </div>
   );
 };

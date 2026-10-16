@@ -5,6 +5,7 @@ import { resolve } from 'path';
 import { copyFileSync, existsSync, readFileSync, renameSync } from 'fs';
 import baseConfig from './vite.config.base';
 import { BRAND, brand as sharedBrand, bcorpText, bcorpColours, brandDefines } from './vite.brand';
+import { splashScript } from './src/mobile/theme/splash';
 
 // The app's name in build-time text patches: bWallet in a store build, bWalletX otherwise (src/mobile/storeBuild.ts).
 const STORE_APP_NAME =
@@ -454,8 +455,8 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       "        style={{ minHeight: '100%' }}\n      >\n<PullToRefresh onRefresh={() => refreshUtxos({ notifyIfUnchanged: true })} />\n<WalletRefreshListener onRefresh={() => refreshUtxos()} />\n<VideoBackground src={walletBg} poster={walletPoster} scrim='dark' position='fixed' />\n        {/* ── BSV price + Buy BSV (owner, 6 Oct 2026); the migration banner moved below the token buttons ── */}",
     ],
     [
-      'className="flex flex-col items-center w-full pt-14 pb-16 overflow-y-auto"',
-      'className="isolate flex flex-col items-center w-full pt-14 pb-16 overflow-y-auto"',
+      'className="flex flex-col items-center w-full pt-14 pb-16 overflow-y-auto bw-dock-pad"',
+      'className="isolate flex flex-col items-center w-full pt-14 pb-16 overflow-y-auto bw-dock-pad"',
     ],
     [
       // Phone: pull to refresh instead. Extension (no pull gesture): keep the button.
@@ -497,11 +498,11 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       'const favs = account?.settings?.favoriteTokens ?? [];\n    const hidden = (account?.settings as { hiddenTokens?: string[] } | undefined)?.hiddenTokens ?? [];\n    const held = bsv21s.filter((t) => t.id && (favs.includes(t.id) || (BigInt(t.amt || "0") > 0n && !hidden.includes(t.id))));\n    const filtered = [...held].sort((a, b) => (favs.indexOf(a.id!) + 1 || 1e9) - (favs.indexOf(b.id!) + 1 || 1e9));',
     ],
   ],
-  // Wallet tab: Tokens | NFTs | Tickets | Credits (like Market). NFTs is the media library (src/mobile/wallet, src/mobile/media).
+  // Wallet tab: Tokens | NFTs | Names (+ Tickets | Credits | Shares from the cards). NFTs is the media library (src/mobile/wallet, src/mobile/media).
   'src/pages/BsvWallet.tsx#kinds': [
     [
       "import { ManageTokens } from '../components/ManageTokens';",
-      "import { ManageTokens } from '../components/ManageTokens';\nimport { WalletKindGate, WalletKindSwitch } from '../mobile/wallet/KindSwitch';\nimport { MediaSection } from '../mobile/media/MediaSection';\nimport { TicketsSection } from '../mobile/wallet/TicketsSection';\nimport { FriendsSection } from '../mobile/wallet/FriendsSection';\nimport { SharesSection } from '../mobile/wallet/SharesSection';",
+      "import { ManageTokens } from '../components/ManageTokens';\nimport { WalletKindGate, WalletKindSwitch } from '../mobile/wallet/KindSwitch';\nimport { MediaSection } from '../mobile/media/MediaSection';\nimport { TicketsSection } from '../mobile/wallet/TicketsSection';\nimport { NamesSection } from '../mobile/wallet/NamesSection';\nimport { SharesSection } from '../mobile/wallet/SharesSection';",
     ],
     [
       '        {/* ── Assets section ── */}',
@@ -509,7 +510,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       '        {/* Bottom breathing room */}',
-      '</SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="nfts">\n          <SectionBoundary name="NFTs"><MediaSection /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="friends">\n          <SectionBoundary name="Friends"><FriendsSection /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="tickets">\n          <SectionBoundary name="Tickets"><TicketsSection /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="credits">\n          <SectionBoundary name="Credits"><CreditsRow /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="shares">\n          <SectionBoundary name="Shares"><SharesSection /></SectionBoundary>\n        </WalletKindGate>\n        {/* Bottom breathing room */}',
+      '</SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="nfts">\n          <SectionBoundary name="NFTs"><MediaSection /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="names">\n          <SectionBoundary name="Names"><NamesSection /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="tickets">\n          <SectionBoundary name="Tickets"><TicketsSection /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="credits">\n          <SectionBoundary name="Credits"><CreditsRow /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="shares">\n          <SectionBoundary name="Shares"><SharesSection /></SectionBoundary>\n        </WalletKindGate>\n        {/* Bottom breathing room */}',
     ],
     // The switch replaces the section label and its top margin.
     [
@@ -692,7 +693,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       '<Route path="/settings" element={<Settings />} />',
-      '<Route path="/settings" element={<Settings />} />\n<Route path="/m/*" element={<Suspense fallback={null}><MobileRoutes /></Suspense>} />',
+      '<Route path="/settings" element={<Settings />} />\n<Route path="/m/*" element={<Suspense fallback={<PageLoader message="Loading..." theme={theme} />}><MobileRoutes /></Suspense>} />',
     ],
     // Media (Wallet › NFTs) now-playing bar, app-wide so audio controls follow every tab.
     // bWallet calls: incoming / in-call screens above every tab (mobile/calls/CallScreen).
@@ -735,6 +736,8 @@ const mobilePages = (): Plugin => ({
       );
       // Upstream's PWA manifest link points at extension icons; not used in-app.
       out = out.replace(/\s*<link rel="manifest"[^>]*>/, '');
+      // The in-app splash follows the saved theme pack (src/mobile/theme/splash.ts); Gold paints nothing.
+      if (isShell) out = out.replace('</head>', `    ${splashScript()}\n  </head>`);
       if (!isShell) {
         out = out.replace('<head>', `<head>\n    ${FRAME_SHIM}`);
         out = out.replace('</head>', '    <link rel="stylesheet" href="./src/mobile/mobile.css" />\n  </head>');
@@ -782,25 +785,33 @@ export const MOBILE_DEFINES = {
  * public/ is the extension's folder and still carries the Yours favicon and logos, so a browser tab on the
  * mobile build showed the Yours icon (owner, 7 Oct 2026). Overwrite them with the bWalletX icons after the copy.
  */
-const bwalletxIcons = (): Plugin => ({
-  name: 'bwalletx-icons',
-  apply: 'build',
-  closeBundle() {
-    // Only the bcorp brand: bWalletX (non-store) gets the bWalletX set, the store bWallet its own
-    // (black b on yellow); other brands keep public/. Missing icons skip instead of failing the build.
-    if (BRAND !== 'bcorp') return;
-    const store =
-      process.env.VITE_STORE_BUILD === '1' || ['ios-store', 'android-play'].includes(process.env.VITE_CHANNEL ?? '');
-    const dir = store ? 'assets/bwallet-ext' : 'assets/bwalletx-ext';
-    const from = (f: string) => resolve(__dirname, dir, f);
-    const to = (f: string) => resolve(__dirname, 'build-mobile', f);
-    const copy = (a: string, b: string) => existsSync(from(a)) && copyFileSync(from(a), to(b));
-    copy('favicon.ico', 'favicon.ico');
-    copy('icon192.png', 'logo192.png');
-    copy('icon512.png', 'logo512.png');
-    for (const f of ['icon16.png', 'icon48.png', 'icon128.png', 'icon192.png']) copy(f, `icons/${f}`);
-  },
-});
+const bwalletxIcons = (): Plugin => {
+  // The resolved outDir, not a hardcoded build-mobile/: vite.config.web.ts reuses these plugins with
+  // outDir build-web, and in a fresh worktree build-mobile/ does not exist, so the copy failed (ENOENT).
+  let outDir = resolve(__dirname, 'build-mobile');
+  return {
+    name: 'bwalletx-icons',
+    apply: 'build',
+    configResolved(config) {
+      outDir = resolve(config.root, config.build.outDir);
+    },
+    closeBundle() {
+      // Only the bcorp brand: bWalletX (non-store) gets the bWalletX set, the store bWallet its own
+      // (black b on yellow); other brands keep public/. Missing icons skip instead of failing the build.
+      if (BRAND !== 'bcorp') return;
+      const store =
+        process.env.VITE_STORE_BUILD === '1' || ['ios-store', 'android-play'].includes(process.env.VITE_CHANNEL ?? '');
+      const dir = store ? 'assets/bwallet-ext' : 'assets/bwalletx-ext';
+      const from = (f: string) => resolve(__dirname, dir, f);
+      const to = (f: string) => resolve(outDir, f);
+      const copy = (a: string, b: string) => existsSync(from(a)) && copyFileSync(from(a), to(b));
+      copy('favicon.ico', 'favicon.ico');
+      copy('icon192.png', 'logo192.png');
+      copy('icon512.png', 'logo512.png');
+      for (const f of ['icon16.png', 'icon48.png', 'icon128.png', 'icon192.png']) copy(f, `icons/${f}`);
+    },
+  };
+};
 
 export default mergeConfig(
   baseConfig,

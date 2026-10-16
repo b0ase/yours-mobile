@@ -17,8 +17,11 @@ import { PayHero } from '../../components/approval/ApprovalHeroes';
 import { fmtSats } from '../money/money';
 import { SUPPORT_EMAIL } from '../ugc/ugc';
 import {
+  BCREDITS_LINE_LABEL,
+  CREDITS_CARD_TITLE,
   TOP_UP_PRESETS_PENCE,
   addPending,
+  creditLines,
   creditsStopped,
   depositOutcome,
   depositRequests,
@@ -43,6 +46,8 @@ import {
   type TopUpPlan,
 } from './credits';
 import { liveGbpPerBsv } from './rate';
+import { accentById } from '../theme/accents';
+import { useAccentId } from '../theme/useAccent';
 
 /**
  * The bCredits card (Wallet › Credits, desktop /m/credits). Lazy chunk behind BCREDITS_ENABLED (CreditsRow.tsx).
@@ -120,6 +125,13 @@ export default function CreditsPanel() {
   const [stopped, setStopped] = useState(creditsStopped);
   const [tick, setTick] = useState(false);
   const prevBalance = useRef<number | null>(null);
+  // White and paper themes: a light card with black text, never a dark card.
+  const accentId = useAccentId();
+  const light = accentId === 'white' || !!accentById(accentId).paper;
+  const ink = light ? '#111111' : CARD.ink;
+  const muted = light ? '#555555' : CARD.muted;
+  const soft = light ? '#333333' : CARD.soft;
+  const chip = light ? 'var(--bw-tint, #EDEDED)' : CARD.chip;
   // The bCredits card's back opens Top up or History here (creditsNav.ts).
   useEffect(() => {
     const take = () => {
@@ -213,13 +225,13 @@ export default function CreditsPanel() {
         <div
           role="button"
           tabIndex={0}
-          aria-label={flipped ? 'Show the bCredits balance' : 'Show the bCredits terms'}
+          aria-label={flipped ? 'Show your credits' : 'Show the bCredits terms'}
           onClick={() => enabled && setFlipped((f) => !f)}
           onKeyDown={(e) => e.key === 'Enter' && enabled && setFlipped((f) => !f)}
           className="rounded-3xl px-5 py-4"
           style={{
-            background: 'linear-gradient(135deg, #1b1608 0%, #0b0a08 60%)',
-            border: `1px solid ${CARD.goldLo}`,
+            background: light ? 'var(--bw-card, #FFFFFF)' : 'linear-gradient(135deg, #1b1608 0%, #0b0a08 60%)',
+            border: `1px solid ${light ? '#D6D6D6' : CARD.goldLo}`,
             minHeight: 168,
             cursor: enabled ? 'pointer' : 'default',
           }}
@@ -228,11 +240,11 @@ export default function CreditsPanel() {
           <div className="flex items-center gap-3">
             <BTile />
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-semibold" style={{ color: CARD.ink }}>
-                bCredits
+              <div className="text-sm font-semibold" style={{ color: ink }}>
+                {CREDITS_CARD_TITLE}
               </div>
-              <div className="text-[11px]" style={{ color: CARD.muted }}>
-                Issued by b · The Bitcoin Corporation
+              <div className="text-[11px]" style={{ color: muted }}>
+                Prepaid credits, one line per type
               </div>
             </div>
             {enabled && !flipped && (
@@ -251,24 +263,34 @@ export default function CreditsPanel() {
 
           {!flipped ? (
             <>
-              <div
-                className="mt-4 font-extrabold tabular-nums"
-                style={{
-                  fontSize: 30,
-                  color: tick ? CARD.goldHi : CARD.ink,
-                  transition: 'color 0.6s ease',
-                }}
-                aria-live="polite"
-              >
-                {!info ? 'Loading…' : enabled ? fmtCredits(balance) : 'Coming soon'}
-              </div>
-              {enabled && info && (
-                <div className="text-xs mt-1" style={{ color: CARD.muted }}>
-                  ≈ {fmtPence(balance * info.pencePerCredit)}
-                  {pendingCredits ? ` · ${fmtCredits(pendingCredits)} pending` : ''}
-                  {stopped ? ' · Stopped' : ''}
+              {(enabled && info
+                ? creditLines(balance)
+                : [{ type: 'bcredits', label: BCREDITS_LINE_LABEL, balance: 0 }]
+              ).map((line) => (
+                <div key={line.type} className="mt-4" data-testid={`credit-line-${line.type}`}>
+                  <div className="text-xs font-semibold" style={{ color: soft }}>
+                    {line.label}
+                  </div>
+                  <div
+                    className="font-extrabold tabular-nums"
+                    style={{
+                      fontSize: 30,
+                      color: tick && line.type === 'bcredits' ? (light ? '#8A6400' : CARD.goldHi) : ink,
+                      transition: 'color 0.6s ease',
+                    }}
+                    aria-live="polite"
+                  >
+                    {!info ? 'Loading…' : enabled ? fmtCredits(line.balance) : 'Coming soon'}
+                  </div>
+                  {line.type === 'bcredits' && enabled && info && (
+                    <div className="text-xs mt-1" style={{ color: muted }}>
+                      ≈ {fmtPence(line.balance * info.pencePerCredit)}
+                      {pendingCredits ? ` · ${fmtCredits(pendingCredits)} pending` : ''}
+                      {stopped ? ' · Stopped' : ''}
+                    </div>
+                  )}
                 </div>
-              )}
+              ))}
               {enabled && (
                 <div className="flex gap-2 mt-4">
                   <button
@@ -286,7 +308,7 @@ export default function CreditsPanel() {
             </>
           ) : (
             info && (
-              <div className="mt-3 text-xs flex flex-col gap-1.5" style={{ color: CARD.soft }}>
+              <div className="mt-3 text-xs flex flex-col gap-1.5" style={{ color: soft }}>
                 <div>Rate: what each b reply costs to run × {info.markup}, rounded up to whole bCredits.</div>
                 <div>1 bCredit = {fmtPence(info.pencePerCredit)}. No expiry.</div>
                 <div>Spent so far: {fmtCredits(spent)}</div>
@@ -307,7 +329,7 @@ export default function CreditsPanel() {
                     onClick={(e) => e.stopPropagation()}
                     href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('bCredits')}`}
                     className="rounded-xl px-3 py-1.5 text-xs font-bold"
-                    style={{ background: CARD.chip, color: CARD.ink }}
+                    style={{ background: chip, color: ink }}
                   >
                     Contact
                   </a>

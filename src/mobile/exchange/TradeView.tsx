@@ -23,7 +23,10 @@ import { SELL_ENABLED } from '../sell/sell';
 import { marketTradingEnabled } from '../storeBuild';
 import { useBackClose } from '../backStack';
 import { purchaseError } from './purchase';
+import { BUY_ANCHOR } from './rowActions';
+import { useLocation } from 'react-router-dom';
 import { TokenIcon } from './TokenIcon';
+import { TokenIdentity } from '../tokens/TokenIdPanel';
 import { PriceChart } from './PriceChart';
 import { chartSeries } from './chartSeries';
 import { TokenLabelsRow } from './Categories';
@@ -83,12 +86,15 @@ export const TradeView = ({
   fav,
   onFav,
   onBack,
+  onPick,
 }: {
   id: string;
   rate: number;
   fav: boolean;
   onFav: () => void;
   onBack: () => void;
+  /** Open another token by id (ticker-collision picker). */
+  onPick: (id: string) => void;
 }) => {
   const { apiContext, chromeStorageService } = useServiceContext();
   const { addSnackbar } = useSnackbar();
@@ -123,6 +129,13 @@ export const TradeView = ({
     setTrades([]);
     load();
   }, [load]);
+  // Exchange row "Buy" (rowActions.buyRoute) lands on the Buy panel.
+  const { hash } = useLocation();
+  useEffect(() => {
+    if (hash !== `#${BUY_ANCHOR}`) return;
+    const t = setTimeout(() => document.getElementById(BUY_ANCHOR)?.scrollIntoView({ block: 'start' }), 80);
+    return () => clearTimeout(t);
+  }, [id, hash]);
 
   const dec = meta?.dec ?? 0;
   const sym = meta?.sym ?? id.slice(0, 8);
@@ -195,9 +208,6 @@ export const TradeView = ({
         <TokenIcon icon={meta?.icon} sym={sym} size={36} />
         <div className="min-w-0 flex-1">
           <div className="text-lg font-extrabold text-white">{meta === null ? 'Unknown token' : `$${sym}`}</div>
-          <div className="text-xs truncate" style={{ color: MUTED }}>
-            {id}
-          </div>
           <div className="mt-1">
             <TokenLabelsRow id={id} />
           </div>
@@ -211,6 +221,7 @@ export const TradeView = ({
           <Star size={18} color={GOLD} fill={fav ? GOLD : 'none'} />
         </button>
       </div>
+      <TokenIdentity tokenId={id} ticker={meta?.sym ?? null} onPick={onPick} />
       {launched && (
         <p className="text-[11px] m-0" style={{ color: MUTED }}>
           Launched on the bWalletX Launchpad. {LAUNCH_DISCLAIMER}
@@ -327,7 +338,7 @@ export const TradeView = ({
 
         {/* Buy / sell panel */}
         <div className="flex flex-col gap-4">
-          <div className={`${CARD} p-4 flex flex-col gap-3`}>
+          <div id={BUY_ANCHOR} className={`${CARD} p-4 flex flex-col gap-3 scroll-mt-4`}>
             <div className="text-sm font-bold text-white">Buy ${sym}</div>
             {!TRADING ? (
               <p className="text-xs" style={{ color: MUTED }}>

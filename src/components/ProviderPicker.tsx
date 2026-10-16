@@ -157,7 +157,7 @@ export const ProviderPicker = ({
           </div>
 
           {/* Scrollable content */}
-          <div className="flex-1 overflow-y-auto px-4 py-3 pb-20 space-y-3">
+          <div className="flex-1 overflow-y-auto px-4 pt-3 bw-dock-pad space-y-3">
             <p className="text-[10px]" style={{ color: '#98A2B3' }}>
               Choose a provider or enter a custom URL. Providers can be added to the wallet repo via pull request.
             </p>

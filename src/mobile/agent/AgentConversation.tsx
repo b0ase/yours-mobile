@@ -47,6 +47,8 @@ import { ConsentSheet } from './ConsentSheet';
 import { ObsidianHero } from './ObsidianHero';
 import { AskBar } from './AskBar';
 import { loadThread, saveThread, screenContext } from './thread';
+import { useBWeb } from '../bweb/useBWeb';
+import { bwebContext } from '../bweb/bweb';
 import { FINAL_CODES, clearPending, errorCode, finalText, loadPending, savePending, type PendingPaid } from './pending';
 import { ReportSheet } from '../ugc/UgcSheets';
 
@@ -196,7 +198,9 @@ export const AgentConversation = ({
   const baseSystem = MARKET_ENABLED
     ? BWALLET_GUIDE + agentAccountPrompt(accountId, account?.name || 'Agent account')
     : BWALLET_GUIDE;
-  const system = baseSystem + screenContext(screen);
+  // bWeb (Settings › bWeb): the screen line only if allowed, plus the Ask b add-ons you switched on.
+  const [bweb] = useBWeb();
+  const system = baseSystem + (bweb.privacy.shareScreen ? screenContext(screen) : '') + bwebContext(bweb);
   const [prefs, setPrefs] = useAgentPrefs();
   const [keyScreen, setKeyScreen] = useState(false);
   // Shared with the floating bar / full page (thread.ts), so "Open full chat" carries the conversation over.

@@ -1,4 +1,7 @@
 import { useNavigate } from 'react-router-dom';
+import { useBottomMenu } from '../../hooks/useBottomMenu';
+import { shareGate } from '../kyc/kyc';
+import { useKyc } from '../kyc/useKyc';
 import { useBshares } from './useBshares';
 import { mayOpenBshares } from './placement';
 
@@ -11,7 +14,9 @@ const box = 'w-[92%] mx-auto rounded-xl border border-[#2b2f36] bg-[var(--bw-sur
  */
 const SharesList = () => {
   const navigate = useNavigate();
+  const { handleSelect } = useBottomMenu();
   const { me, loading, error, reload } = useBshares();
+  const { identityKey, kyc, investor, loading: kycLoading } = useKyc();
   if (loading)
     return (
       <div className="w-[92%] mx-auto flex flex-col gap-2" aria-busy="true">
@@ -21,7 +26,7 @@ const SharesList = () => {
   if (error)
     return (
       <div className={`${box} p-4 text-center`}>
-        <p className="text-sm text-[#98A2B3] m-0 mb-3">Couldn't reach the register. {error}</p>
+        <p className="text-sm text-[#98A2B3] m-0 mb-3">Couldn't load your share registers. Try again.</p>
         <button
           type="button"
           onClick={() => void reload()}
@@ -33,12 +38,50 @@ const SharesList = () => {
       </div>
     );
   const holdings = me?.holdings ?? [];
-  if (!holdings.length)
+  if (!holdings.length) {
+    // Unknown KYC/investor status (still loading or unreadable) counts as not done.
+    const gate = kycLoading ? 'need-kyc' : shareGate(kyc, investor, identityKey, Date.now()).state;
+    if (gate === 'qualified')
+      return (
+        <div className={`${box} p-6 text-center`}>
+          <p className="text-sm font-bold m-0 mb-1" style={{ color: 'var(--bw-text, #fff)' }}>
+            No shares yet
+          </p>
+          <p className="text-sm text-[#98A2B3] m-0">
+            You're a verified investor. When a company adds you to its share register, your holdings show here.
+          </p>
+        </div>
+      );
+    const btn = 'inline-flex items-center h-9 px-4 rounded-lg text-sm font-bold border cursor-pointer outline-none';
     return (
-      <div className={`${box} p-6 text-center`}>
-        <p className="text-sm text-[#98A2B3] m-0">You are not on the register of The Bitcoin Corporation Ltd.</p>
+      <div className={`${box} p-5 text-center`}>
+        <p className="text-base font-bold m-0 mb-1" style={{ color: 'var(--bw-text, #fff)' }}>
+          Become a registered investor
+        </p>
+        <p className="text-sm text-[#98A2B3] m-0 mb-4">
+          Verify your identity (KYC) and self-certify as an investor to apply to join share registers.
+        </p>
+        <div className="flex flex-wrap justify-center gap-2">
+          <button
+            type="button"
+            onClick={() => handleSelect('settings', 'identity')}
+            className={btn}
+            style={{ background: GOLD, borderColor: GOLD, color: '#000' }}
+          >
+            Verify identity
+          </button>
+          <button
+            type="button"
+            onClick={() => handleSelect('settings', 'investor')}
+            className={btn}
+            style={{ background: 'var(--bw-surface)', borderColor: '#3a2f0c', color: GOLD }}
+          >
+            Self-certify as investor
+          </button>
+        </div>
       </div>
     );
+  }
   return (
     <div className="w-[92%] mx-auto flex flex-col gap-2">
       {holdings.map((h, i) => (

@@ -179,6 +179,30 @@ export interface SocialProfile {
   suggested_handle?: string | null;
 }
 
+export type HandlesInfo = {
+  handles: { handle: string; primary: boolean }[];
+  max: number;
+  nextFee: { pence: number; sats: number; to: string } | null;
+};
+
+/** bit-sign GET /me/handles → HandlesInfo. Pure. */
+export function parseHandlesInfo(v: { handles?: unknown; max?: unknown; next_fee?: unknown } | null): HandlesInfo {
+  const handles = (Array.isArray(v?.handles) ? v.handles : [])
+    .map((h: { handle?: unknown; primary?: unknown }) => ({
+      handle: String(h?.handle ?? '')
+        .replace(/^\$/, '')
+        .toLowerCase(),
+      primary: h?.primary === true,
+    }))
+    .filter((h) => !!h.handle);
+  const f = v?.next_fee as { pence?: unknown; sats?: unknown; to?: unknown } | null | undefined;
+  const nextFee =
+    f && Number(f.sats) > 0 && typeof f.to === 'string' && f.to
+      ? { pence: Number(f.pence) || 0, sats: Math.ceil(Number(f.sats)), to: f.to }
+      : null;
+  return { handles, max: Number(v?.max) > 0 ? Number(v?.max) : 5, nextFee };
+}
+
 export class BchatClient {
   constructor(
     private readonly http: Http,
@@ -227,7 +251,7 @@ export class BchatClient {
   }
 
   protected async call<T>(
-    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     path: string,
     body?: unknown,
     auth = true,
@@ -250,6 +274,16 @@ export class BchatClient {
       throw new ChatApiError(errorOf(res.data, `bChat error ${res.status}`), res.status, res.data);
     }
     return res.data as T;
+  }
+
+  /** One JSON call for small feature clients (chat/invitesApi.ts) that keep their own routes. */
+  request(
+    method: 'GET' | 'POST' | 'DELETE',
+    path: string,
+    body?: Record<string, unknown>,
+    auth = true,
+  ): Promise<unknown> {
+    return this.call(method, path, body, auth);
   }
 
   /** Challenge → wallet BSM signature → verify. Returns (and keeps) the session. */
@@ -352,6 +386,35 @@ export class BchatClient {
     if (!this.session || !r.handle) throw new ChatApiError('bChat handle update failed', 500);
     this.session = { ...this.session, handle: r.handle, token: r.token || this.session.token };
     void this.reportWalletAddress();
+    return this.session;
+  }
+
+  // ── Several names per account (bit-sign /me/handles; owner, 15 Oct 2026) ──
+
+  /** This account's names, the max, and what the next extra name costs (null = free). */
+  async listHandles(): Promise<HandlesInfo> {
+    const r = await this.call<{ handles?: unknown; max?: unknown; next_fee?: unknown }>(
+      'GET',
+      '/api/bitsign/me/handles',
+    );
+    return parseHandlesInfo(r);
+  }
+
+  /** Add a name. Without `beef` bit-sign answers 402 `payment_required` with what to pay (ChatApiError.data). */
+  async addHandle(handle: string, beef?: string): Promise<void> {
+    await this.call('POST', '/api/bitsign/me/handles', { handle, ...(beef ? { beef } : {}) });
+  }
+
+  /** Remove a name (not the primary); bit-sign holds it for 90 days. */
+  async removeHandle(handle: string): Promise<void> {
+    await this.call('DELETE', '/api/bitsign/me/handles', { handle });
+  }
+
+  /** Make a name primary (30-day cooldown on bit-sign). Keeps the new session token it returns. */
+  async setPrimaryHandle(handle: string): Promise<ChatSession> {
+    const r = await this.call<{ token?: string; handle?: string }>('POST', '/api/bitsign/me/handle', { handle });
+    if (!this.session) throw new ChatApiError('Not signed in to bChat', 401);
+    this.session = { ...this.session, handle: r.handle || handle, token: r.token || this.session.token };
     return this.session;
   }
 
@@ -562,6 +625,29 @@ export class BchatClient {
     return r.message ?? null;
   }
 
+  /**
+   * Upload my own picture (bit-sign PUT /api/bitsign/me/avatar, PR #264): the file's original bytes as a data URL,
+   * animated GIF / WebP / APNG kept as they are. The server checks type (magic bytes), ≤ 512 px and ≤ 2 MB, stores
+   * it and sets my avatar_url. 503 until its migration runs: the caller treats that as "not available yet".
+   */
+  async uploadAvatar(dataUrl: string): Promise<AvatarUploaded> {
+    return this.call('PUT', '/api/bitsign/me/avatar', { avatar: dataUrl });
+  }
+
+  /** My public bio (bit-sign GET /api/bitsign/me/bio, PR #270). 404 until that ships: the caller hides the field. */
+  async getBio(): Promise<string | null> {
+    const r = await this.call<{ bio?: string | null }>('GET', '/api/bitsign/me/bio');
+    return typeof r.bio === 'string' && r.bio ? r.bio : null;
+  }
+
+  /** Set my public bio (≤ 160 chars; '' clears). Returns what the server stored. */
+  async setBio(bio: string): Promise<string | null> {
+    const r = await this.call<{ ok?: boolean; bio?: string | null }>('PUT', '/api/bitsign/me/bio', {
+      bio: bio.trim() || null,
+    });
+    return typeof r.bio === 'string' && r.bio ? r.bio : null;
+  }
+
   /** Publish my X / Google picture so other people's chat bubbles show it (bit-sign keeps a chosen photo). */
   async publishAvatar(url: string): Promise<void> {
     await this.call('POST', '/api/bitsign/avatars', { url });
@@ -581,6 +667,16 @@ export class BchatClient {
   /** join | heartbeat | leave | end | hand | role | step_down (bit-sign rooms/[ticker]/space). */
   async spaceAction(ticker: string, body: Record<string, unknown>): Promise<unknown> {
     return this.call('POST', `${BchatClient.path(ticker)}/space`, body);
+  }
+
+  /** Synced Space video (bit-sign rooms/[ticker]/space-video): item + clock, or item null. */
+  async spaceVideo(ticker: string): Promise<unknown> {
+    return this.call('GET', `${BchatClient.path(ticker)}/space-video`);
+  }
+
+  /** Staff only: play | pause | resume | seek | stop | set_loop, with optional if_version (409 when stale). */
+  async spaceVideoAction(ticker: string, body: Record<string, unknown>): Promise<unknown> {
+    return this.call('PATCH', `${BchatClient.path(ticker)}/space-video`, body);
   }
 
   /** Paid listening (bit-sign rooms/[ticker]/space/paid): config, my paid time and the next minute's signed plan. */
@@ -1144,4 +1240,13 @@ export type BavatarMine = {
   edition: number;
   minted: { txid: string; outpoint: string } | null;
   sponsored: boolean;
+};
+
+export type AvatarUploaded = {
+  ok?: boolean;
+  avatar_url: string;
+  mime?: string;
+  width?: number;
+  height?: number;
+  animated?: boolean;
 };

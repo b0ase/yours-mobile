@@ -38,7 +38,7 @@ describe('cardForView', () => {
   });
   test('views with no card, or cards not in this build, stay put', () => {
     expect(cardForView({ kind: 'nfts', coin: null }, ALL, 'bsv')).toBeNull();
-    expect(cardForView({ kind: 'friends', coin: null }, ALL, 'btickets')).toBeNull();
+    expect(cardForView({ kind: 'names', coin: null }, ALL, 'btickets')).toBeNull();
     expect(cardForView({ kind: 'tickets', coin: null }, STORE, 'bsv')).toBeNull();
     expect(cardForView({ kind: 'credits', coin: null }, STORE, 'bsv')).toBeNull();
     expect(cardForView({ kind: 'shares', coin: null }, STORE, 'bsv')).toBeNull();

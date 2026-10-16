@@ -2,14 +2,17 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Minus, Plus, RotateCcw } from 'lucide-react';
 import { useReducedMotion } from 'framer-motion';
 import bGlyph from '../brand/bwallet-glyph.svg';
+import { B_OUTLINE_D, B_OUTLINE_VIEWBOX } from '../brand/bOutline';
 import { useBackClose } from '../backStack';
 import { dockKey, isDefaultDock, moveInDock, removeFromDock, resetDock, splitDock, type DockItem } from './dockModel';
 import { setAgentNote, setAgentVoice } from '../agent/handoff';
-import { voiceNote } from '../agent/voiceText';
+import { firstNoVoiceNote, voiceNote } from '../agent/voiceText';
 import { useHoldToTalk } from '../agent/useHoldToTalk';
 import { HoldRing, TalkSheetView } from '../agent/TalkVisuals';
 import { DOCK_LONG_PRESS_MS, edgeFade, fadeMask, longPressCancelled } from './gesture';
 import { itemIcon, itemLabel } from './icons';
+import { useThemedIcon } from '../brand/bappIcons';
+import { TabBadge } from '../../components/TabBadge';
 
 /**
  * The phone layout's dock (docs/PHONE-LAYOUT-PLAN.md §5, §14): left slots · the b · right slots, which scroll
@@ -27,6 +30,8 @@ type Props = {
   labels: Record<string, string>;
   activeKey: string | null;
   badges: Record<string, string | undefined>;
+  /** Accessible names for badged tiles (default "<label>, N unread"). */
+  badgeLabels?: Record<string, string | undefined>;
   onOpen: (item: DockItem) => void;
   onHome: () => void;
   /** Open the b agent page (after a hold: with the spoken request, or a note and the keyboard). */
@@ -44,6 +49,7 @@ const Tile = ({
   label,
   active,
   badge,
+  badgeLabel,
   arranging,
   picked,
   alt,
@@ -55,6 +61,7 @@ const Tile = ({
   label: string;
   active: boolean;
   badge?: string;
+  badgeLabel?: string;
   arranging: boolean;
   picked: boolean;
   alt: boolean;
@@ -65,6 +72,8 @@ const Tile = ({
   const Icon = itemIcon(item);
   const isApp = item.kind === 'app';
   const [iconFailed, setIconFailed] = useState(false);
+  // The bApp icon set follows the theme pack, like the Apps grid (brand/bappIcons/theme.ts).
+  const themed = useThemedIcon(isApp ? item.icon : undefined);
   const timer = useRef<number | null>(null);
   const start = useRef<{ x: number; y: number } | null>(null);
   const fired = useRef(false);
@@ -77,7 +86,13 @@ const Tile = ({
     <div className="relative shrink-0 flex justify-center" style={{ width: 74 }}>
       <button
         type="button"
-        aria-label={arranging ? `${label}${picked ? ', selected' : ''}. Tap to select for moving` : label}
+        aria-label={
+          arranging
+            ? `${label}${picked ? ', selected' : ''}. Tap to select for moving`
+            : badge
+              ? (badgeLabel ?? `${label}, ${badge} unread`)
+              : label
+        }
         aria-current={active ? 'page' : undefined}
         onPointerDown={(e) => {
           fired.current = false;
@@ -119,20 +134,16 @@ const Tile = ({
         >
           {isApp && item.icon && !iconFailed ? (
             <img
-              src={item.icon}
+              src={themed.src}
               alt=""
               draggable={false}
               onError={() => setIconFailed(true)}
-              className="h-10 w-10 rounded-[11px] object-cover"
+              className={`h-10 w-10 rounded-[11px] object-cover${themed.paper ? ' bw-paper-icon' : ''}`}
             />
           ) : (
             <Icon size={isApp ? 18 : 20} color={isApp || active ? GOLD : '#F2F2F0'} />
           )}
-          {badge && (
-            <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-[#F04438] text-[9px] font-bold text-white flex items-center justify-center">
-              {badge}
-            </span>
-          )}
+          {badge && <TabBadge text={badge} />}
         </span>
         <span
           className="w-full overflow-hidden text-ellipsis whitespace-nowrap text-center text-[10px] leading-tight"
@@ -181,7 +192,7 @@ export const HomeButton = ({
     onListen: (ok) => {
       // Owner, 10 Oct 2026: the hold opens b's chat at once; keep holding to talk, the reply lands there.
       onAgent();
-      if (!ok) setAgentNote(voiceNote('unavailable', 'web'));
+      if (!ok && firstNoVoiceNote()) setAgentNote(voiceNote('unavailable', 'web'));
     },
     // Still inside the user's gesture: iOS lets the composer take focus (and show the keyboard) here.
     onUnsupportedRelease: focusComposer,
@@ -211,7 +222,7 @@ export const HomeButton = ({
         data-testid="dock-b"
         {...handlers}
         // Snug in the bar, centred, ring fully inside (owner, 8 Oct 2026; bChatX copies it).
-        className="relative shrink-0 h-[52px] w-[52px] rounded-full flex items-center justify-center border-0 select-none transition-transform disabled:opacity-40"
+        className="bw-dock-b relative shrink-0 h-[52px] w-[52px] rounded-full flex items-center justify-center border-0 select-none transition-transform disabled:opacity-40"
         style={{
           background: 'var(--bw-bg)',
           boxShadow: `0 0 0 2px ${GOLD}, 0 6px 18px rgba(0,0,0,0.6)`,
@@ -223,7 +234,30 @@ export const HomeButton = ({
         }}
       >
         <HoldRing phase={phase} />
-        <img src={bGlyph} alt="" width={30} height={30} draggable={false} className="pointer-events-none" />
+        <img
+          src={bGlyph}
+          alt=""
+          width={30}
+          height={30}
+          draggable={false}
+          className="bw-dock-b-gold pointer-events-none"
+          style={{ WebkitTouchCallout: 'none', userSelect: 'none' }}
+        />
+        {/* White theme only (themes.css swaps them): the shared outline b, black on white. */}
+        <svg
+          className="bw-dock-b-outline pointer-events-none"
+          width={30}
+          height={30}
+          viewBox={B_OUTLINE_VIEWBOX}
+          fill="none"
+          stroke="#0A0A0A"
+          strokeWidth={2}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          aria-hidden="true"
+        >
+          <path d={B_OUTLINE_D} vectorEffect="non-scaling-stroke" />
+        </svg>
       </button>
     </>
   );
@@ -234,6 +268,7 @@ export const Dock = ({
   labels,
   activeKey,
   badges,
+  badgeLabels,
   onOpen,
   onHome,
   onAgent,
@@ -316,6 +351,7 @@ export const Dock = ({
         label={itemLabel(item, labels)}
         active={k === activeKey}
         badge={badges[k]}
+        badgeLabel={badgeLabels?.[k]}
         arranging={arranging}
         picked={picked === k}
         alt={i % 2 === 1}

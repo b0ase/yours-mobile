@@ -149,7 +149,7 @@ const SpacesPage = () => {
         />
       )}
 
-      <div className="flex-1 overflow-y-auto pb-24">
+      <div className="flex-1 overflow-y-auto bw-dock-pad">
         <RegularSpaces onJoin={joinPublic} />
         {!client.handle ? (
           <Empty>

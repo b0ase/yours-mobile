@@ -338,6 +338,22 @@ export function mediaUrl(ref: string, ordfs = 'https://ordfs.network'): string |
   return null;
 }
 
+/**
+ * An author picture as an <img> src: https as is; b:// / 1sat:// / ord:// / bitfs refs and bare
+ * txids or outpoints via ORDFS; protocol-relative and Treechat-relative paths made absolute;
+ * http upgraded to https. Anything else (data:, javascript:, ipfs without a gateway…) null.
+ */
+export function avatarUrl(ref: string | null | undefined, ordfs = 'https://ordfs.network'): string | null {
+  const r = String(ref ?? '').trim();
+  if (!r) return null;
+  if (/^\/\//.test(r)) return `https:${r}`;
+  if (/^http:\/\//i.test(r)) return `https://${r.slice(7)}`;
+  if (/^ipfs:\/\/[a-z0-9]+/i.test(r)) return `https://ipfs.io/ipfs/${r.slice(7)}`;
+  if (/^[0-9a-f]{64}(?:_\d+)?$/i.test(r)) return `${ordfs}/${r.includes('_') ? r : `${r}_0`}`;
+  if (/^\/[^/]/.test(r)) return `https://app.treechat.com${r}`;
+  return mediaUrl(r, ordfs);
+}
+
 export type Identity = { name: string; avatar: string | null };
 
 /** The schema.org Person JSON a BAP ID record carries (as a string or object). */

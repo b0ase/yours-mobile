@@ -201,22 +201,22 @@
   left: 50%;
   top: 62%;
   width: min(calc(100vw - 48px), 380px);
-  aspect-ratio: 1.7 / 1;
-  border: 0;
   border-radius: 16px;
-  padding: 14px 16px;
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  text-align: left;
-  box-shadow:
-    0 20px 50px rgba(0, 0, 0, 0.6),
-    0 0 0 1px rgb(var(--bw-accent-hi-rgb, 255 210 77) / 0.4);
+  cursor: pointer;
   transition:
     transform 0.55s cubic-bezier(0.2, 0.9, 0.25, 1.15),
     opacity 0.4s ease,
     filter 0.4s ease;
   will-change: transform, opacity;
+}
+/* The carousel's own card inside (same component, same design and theme); taps go to the deck, not the card. */
+.bw-tm-inner {
+  pointer-events: none;
+  border-radius: 16px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+}
+.bw-tm-inner .bw-bc {
+  margin: 0;
 }
 .bw-tm-text {
   display: flex;
@@ -243,6 +243,33 @@
   text-align: center;
   font-size: 12px;
   opacity: 0.7;
+}
+/* Address book (left) and Calendar (right): the swipes as buttons, above the hint. Theme tokens only. */
+.bw-tm-doors {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: calc(44px + env(safe-area-inset-bottom));
+  z-index: 2000;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.bw-tm-doors button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 1px solid var(--bw-line);
+  border-radius: 999px;
+  background: var(--bw-surface);
+  color: var(--bw-text);
+  font-size: 13px;
+  font-weight: 700;
+}
+.bw-tm-doors svg {
+  color: var(--bw-accent-hi);
 }
 /* Reduced motion: a flat scrolling list. */
 .bw-tm.is-flat {
@@ -412,4 +439,13 @@
   background: rgb(0 0 0 / 0.6);
   color: #fff;
   cursor: pointer;
+}
+
+/* Value cards (owner, 15 Oct 2026): the fiat/BSV switch sits in the BSV card's corner, not inside the pen's gutter. */
+.bw-bc .bw-wcard-bottom {
+  margin-right: -36px;
+}
+.bw-bc .bw-wcard-sats {
+  color: var(--bc-ink);
+  opacity: 0.75;
 }

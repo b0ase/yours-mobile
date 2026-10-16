@@ -8,6 +8,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { AssetRow } from '../../components/AssetRow';
 import { getPersonalLink, onPersonalChange } from '../names/personalToken';
 import { publishBalance } from './balanceStore';
+import { publishHeldTokens } from './cardValue';
 import { PNEE_DECIMALS, PNEE_ICON, PNEE_TOKEN_ID, unindexedPnee } from '../notes/pnee';
 import { BACK_PNEE_LABEL, BACK_PNEE_ROUTE } from '../notes/backPnee';
 import { Lock } from 'lucide-react';
@@ -50,15 +51,16 @@ export const DefaultTokenCards = ({ onSendToken, onReceive, onChat }: Props = {}
         if (!live) return;
         // The Tokens card's real count: BSV-21 tokens this wallet holds (published only after a successful fetch).
         publishBalance('tokens', rows.filter((r) => r.id && Number(r.all.confirmed) > 0).length, 'tokens');
-        setBals(
-          rows
-            .filter((r) => r.id)
-            .map((r) => ({
-              id: r.id!,
-              amount: Number(r.all.confirmed) / 10 ** (r.dec ?? 0),
-              icon: r.icon ? `https://ordfs.network/${r.icon}` : null,
-            })),
-        );
+        const held = rows
+          .filter((r) => r.id)
+          .map((r) => ({
+            id: r.id!,
+            amount: Number(r.all.confirmed) / 10 ** (r.dec ?? 0),
+            icon: r.icon ? `https://ordfs.network/${r.icon}` : null,
+          }));
+        setBals(held);
+        // The Tokens card's value: what each held token is worth, summed (cardValue.ts).
+        publishHeldTokens(held.map(({ id, amount }) => ({ id, amount })));
       })
       .catch(() => {});
     return () => {

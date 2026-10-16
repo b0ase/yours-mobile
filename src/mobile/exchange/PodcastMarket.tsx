@@ -13,7 +13,12 @@ import { MODULE_FINISHES, purchaseContext, walletOutpoint } from '../market/wall
 import { purchaseError } from './purchase';
 import { forSale, isOwned, type Podcast } from '../bradio/podcasts';
 import { PodcastCard } from '../bradio/PodcastCard';
-import { RECORDING_NOTE, usePodcasts } from '../bradio/usePodcasts';
+import { RECORDING_NOTE, playPodcast, usePodcasts } from '../bradio/usePodcasts';
+import { Info, Play, ShoppingCart } from 'lucide-react';
+import type { SwipeAction } from '../swipe/SwipeRow';
+import { TokenSwipeRow } from './TokenRowActions';
+import { TRAY, openExternal } from './useTokenRowActions';
+import { podcastActionIds, txInfoUrl } from './rowActions';
 import { EXCHANGE_ROUTE } from './exchangeData';
 
 /**
@@ -79,6 +84,49 @@ export const PodcastMarket = ({ rate }: { rate: number }) => {
     navigate(`${EXCHANGE_ROUTE}/podcasts`, { replace: true });
   }, [search, items, listed, owned, navigate]);
 
+  // Swipe left (or long-press / "…"): Play · Buy · Info, each only when it has a real target.
+  const actionsFor = (p: Podcast): SwipeAction[] => {
+    const mine = isOwned(p, owned);
+    const expand = () => navigate(`${EXCHANGE_ROUTE}/podcasts`);
+    return podcastActionIds({
+      playable: !!p.previewUrl || mine,
+      canBuy: !mine && !!apiContext && !!p.nft?.outpoint,
+      origin: p.nft?.origin ?? null,
+    }).map((id): SwipeAction => {
+      if (id === 'play')
+        return {
+          id,
+          label: 'Play',
+          icon: <Play size={18} />,
+          ...TRAY.primary,
+          onPress: () => {
+            void playPodcast(p, mine, apiContext, expand).then((r) => {
+              if (r === 'listed') setMsg('Listed for sale — cancel the listing to play in full');
+              else if (r === 'none') setMsg('Preview not available yet.');
+            });
+          },
+        };
+      if (id === 'buy')
+        return {
+          id,
+          label: 'Buy',
+          icon: <ShoppingCart size={18} />,
+          ...TRAY.second,
+          onPress: () => !busy && setBuy(p),
+        };
+      return {
+        id,
+        label: 'Info',
+        icon: <Info size={18} />,
+        ...TRAY.plain,
+        onPress: () => {
+          const u = txInfoUrl(p.nft?.origin);
+          if (u) openExternal(u);
+        },
+      };
+    });
+  };
+
   const purchase = async (p: Podcast) => {
     setBuy(null);
     if (!apiContext || !p.nft?.outpoint) return;
@@ -116,14 +164,15 @@ export const PodcastMarket = ({ rate }: { rate: number }) => {
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
           {listed.map((p) => (
-            <PodcastCard
-              key={p.id}
-              p={p}
-              owned={isOwned(p, owned)}
-              price={busy === p.id ? undefined : usdOrSats(p.nft?.price ?? 0, rate)}
-              onBuy={apiContext && !busy ? () => setBuy(p) : undefined}
-              onExpand={() => navigate(`${EXCHANGE_ROUTE}/podcasts`)}
-            />
+            <TokenSwipeRow key={p.id} actions={actionsFor(p)} title={p.title} rowId={p.id}>
+              <PodcastCard
+                p={p}
+                owned={isOwned(p, owned)}
+                price={busy === p.id ? undefined : usdOrSats(p.nft?.price ?? 0, rate)}
+                onBuy={apiContext && !busy ? () => setBuy(p) : undefined}
+                onExpand={() => navigate(`${EXCHANGE_ROUTE}/podcasts`)}
+              />
+            </TokenSwipeRow>
           ))}
         </div>
       )}

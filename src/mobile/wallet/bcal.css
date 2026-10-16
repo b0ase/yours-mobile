@@ -1,0 +1,149 @@
+/* bCal (BCal.tsx): phone-first, on the theme tokens (Gold falls back to the dark defaults). */
+.bw-bcal {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483600;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: calc(14px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom));
+  background: var(--bw-pack-bg, #010101);
+  color: var(--bw-text, #fff);
+  overflow-y: auto;
+  touch-action: pan-y;
+}
+.bw-bcal-head,
+.bw-bcal-month {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.bw-bcal-head b {
+  font-size: 24px;
+  font-family: var(--bw-font-head, inherit);
+  color: var(--bw-accent, #f5b800);
+}
+.bw-bcal-head button,
+.bw-bcal-month button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--bw-line, #2b2f36);
+  background: var(--bw-card, #17191e);
+  color: var(--bw-text, #fff);
+}
+.bw-bcal-month span {
+  font-weight: 700;
+}
+.bw-bcal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+.bw-bcal-dow {
+  text-align: center;
+  font-size: 11px;
+  color: var(--bw-muted, #98a2b3);
+}
+.bw-bcal-day {
+  aspect-ratio: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: var(--bw-card, #17191e);
+  color: var(--bw-text, #fff);
+  font-size: 14px;
+  padding: 0;
+}
+.bw-bcal-day.is-out {
+  opacity: 0.35;
+}
+.bw-bcal-day.has-items {
+  background: var(--bw-card2, #1f2128);
+  font-weight: 700;
+}
+.bw-bcal-day.is-on {
+  border-color: var(--bw-accent, #f5b800);
+}
+.bw-bcal-dots {
+  display: flex;
+  gap: 2px;
+  min-height: 5px;
+}
+.bw-bcal-dots i,
+.bw-bcal-legend i,
+.bw-bcal-item > i {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+.bw-bcal .is-buy {
+  background: var(--bw-success, #3ddc97);
+}
+.bw-bcal .is-sell {
+  background: var(--bw-danger, #f97066);
+}
+.bw-bcal .is-episode {
+  background: var(--bw-muted, #98a2b3);
+}
+.bw-bcal .is-podcast {
+  background: var(--bw-accent-hi, #ffd24d);
+}
+.bw-bcal .is-held {
+  background: var(--bw-accent, #f5b800);
+}
+.bw-bcal-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12px;
+  color: var(--bw-muted, #98a2b3);
+}
+.bw-bcal-legend i {
+  width: 8px;
+  height: 8px;
+}
+.bw-bcal-list h3 {
+  margin: 6px 0 8px;
+  font-size: 16px;
+}
+.bw-bcal-empty {
+  color: var(--bw-muted, #98a2b3);
+  font-size: 14px;
+}
+.bw-bcal-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  border-radius: var(--bw-radius-card, 14px);
+  background: var(--bw-card, #17191e);
+  border: 1px solid var(--bw-line, #2b2f36);
+}
+.bw-bcal-item > i {
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  flex: none;
+}
+.bw-bcal-item span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.bw-bcal-item b {
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.bw-bcal-item small {
+  font-size: 12px;
+  color: var(--bw-muted, #98a2b3);
+}

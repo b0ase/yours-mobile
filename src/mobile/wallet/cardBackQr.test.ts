@@ -1,10 +1,14 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { BinaryBitmap, HybridBinarizer, QRCodeReader, RGBLuminanceSource } from '@zxing/library';
 import * as qr from 'qrcode';
 import sharp from 'sharp';
 import { cardArtQrSvg, cardPaymail, svgDataUri } from './cardBackQr';
+
+// These tests rasterise QR codes with sharp and decode them with several scanners; under a full parallel
+// test run that can pass bun's 5s default, so give them room (a timeout once failed a run on 16 Oct 2026).
+setDefaultTimeout(30_000);
 
 /**
  * The back of the wallet card shows the account's bAvatar art QR (owner, 11 Oct 2026). It has to scan.

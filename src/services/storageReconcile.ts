@@ -340,6 +340,8 @@ export interface ReconcileRecord {
   tokens?: {
     recovered: number;
     staleDropped: Array<{ outpoint: string; tokenId: string; amt: string }>;
+    /** Transfers the overlay had never seen, submitted to it or broadcast again. */
+    unseenFixed?: number;
     errors?: string[];
   };
   error?: string;
