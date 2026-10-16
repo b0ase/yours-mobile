@@ -40,6 +40,14 @@ const DESKTOP_SHARE = [
   `    <meta name="twitter:image" content="${DESKTOP_OG}" />`,
 ];
 
+/** Colour installs served under /themes/<colour>/ (only white is linked from the app for now). */
+const THEME_INSTALLS: Record<string, string> = {
+  white: '#f7f6f2',
+  pink: '#fbeef1',
+  blue: '#edf2f9',
+  yellow: '#fbf5dc',
+};
+
 const webShell = (): Plugin => ({
   name: 'bwallet-web-shell',
   transformIndexHtml: {
@@ -119,6 +127,39 @@ const webShell = (): Plugin => ({
       fileName: 'install-wide.png',
       source: readFileSync(resolve(__dirname, 'src/web/install-wide.png')),
     });
+    // Per-colour installs (bwalletx.com theme-apps): /themes/<colour>/manifest.json starts at /?theme=<colour>;
+    // src/mobile/theme/accent.ts swaps the manifest link to it so Add to Home Screen gets the coloured icon.
+    for (const [colour, bg] of Object.entries(THEME_INSTALLS)) {
+      for (const size of [180, 192, 512])
+        this.emitFile({
+          type: 'asset',
+          fileName: `themes/${colour}/icon-${size}.png`,
+          source: readFileSync(resolve(__dirname, `src/web/themes/icon-${colour}-${size}.png`)),
+        });
+      const name = `bWallet ${colour[0].toUpperCase()}${colour.slice(1)}`;
+      this.emitFile({
+        type: 'asset',
+        fileName: `themes/${colour}/manifest.json`,
+        source: JSON.stringify(
+          {
+            id: `/bwallet-${colour}`,
+            name,
+            short_name: 'bWallet',
+            start_url: `/?theme=${colour}`,
+            scope: '/',
+            display: 'standalone',
+            background_color: bg,
+            theme_color: bg,
+            icons: [
+              { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
+              { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+            ],
+          },
+          null,
+          2,
+        ),
+      });
+    }
     this.emitFile({
       type: 'asset',
       fileName: 'manifest.webmanifest',
