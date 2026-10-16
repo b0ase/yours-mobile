@@ -12,10 +12,11 @@ import { useWalletMedia } from '../media/useWalletMedia';
 import type { SpaceMedia } from './media';
 import {
   ALBUM_MAX,
+  albumCursor,
+  isTimedAlbum,
   isAllowedVideoSrc,
   MESH_POLL_MS,
   moveItem,
-  nextAlbumIndex,
   nowPlaying,
   needsReseek,
   newerVideo,
@@ -86,13 +87,27 @@ export const SpaceVideoPlayer = ({ client, ticker, media, transport, staff }: Pr
     };
   }, [media, transport, fetchNow]);
 
+  // Timed album: the track index follows the clock between packets (albumCursor).
+  const [trackIndex, setTrackIndex] = useState<number | null>(null);
+
   // Keep the element on the room's clock: state changes and a 1 s drift check.
   const sync = useCallback(() => {
     const v = videoRef.current;
     const e = el.current;
-    if (!v?.item || !e) return;
-    const durMs = Number.isFinite(e.duration) ? e.duration * 1000 : undefined;
-    const { ms, ended } = positionOf(v, Date.now(), durMs);
+    let ms: number;
+    let ended: boolean;
+    if (v && isTimedAlbum(v.album)) {
+      const c = albumCursor(v, Date.now())!;
+      setTrackIndex(c.index);
+      ms = c.ms;
+      ended = c.stopped;
+      if (!e || e.dataset.track !== String(c.index)) return; // the element for this track mounts next render
+    } else {
+      setTrackIndex(null);
+      if (!v?.item || !e) return;
+      const durMs = Number.isFinite(e.duration) ? e.duration * 1000 : undefined;
+      ({ ms, ended } = positionOf(v, Date.now(), durMs));
+    }
     if (needsReseek(e.currentTime * 1000, ms)) {
       try {
         e.currentTime = ms / 1000;
@@ -130,16 +145,21 @@ export const SpaceVideoPlayer = ({ client, ticker, media, transport, staff }: Pr
     }
   };
 
-  // Album: when a track ends, a staff phone advances the room (if_version makes the first one win).
+  // Untimed album: ANY viewer reports the end (album_next, bit-sign #297). A 409 (stale_index: someone
+  // beat us; too_early: under 20 s in) is expected and ignored; the packet/poll brings the next track.
   const advancedFor = useRef(-1);
   const onEnded = () => {
     const v = videoRef.current;
-    if (v?.album && mayControl) {
-      if (advancedFor.current === v.version) return;
+    if (v?.album) {
+      if (isTimedAlbum(v.album) || advancedFor.current === v.version) return;
       advancedFor.current = v.version;
-      const next = nextAlbumIndex(v.album);
-      if (next !== null) void act({ action: 'album_goto', index: next });
-      else void act({ action: 'stop' });
+      client
+        .spaceVideoAction(ticker, { action: 'album_next', from_index: v.album.index })
+        .then((r) => {
+          const out = r as { video?: unknown } | null;
+          if (out?.video) take(out.video);
+        })
+        .catch(() => void fetchNow());
       return;
     }
     if (!v?.loop) el.current?.pause();
@@ -151,14 +171,16 @@ export const SpaceVideoPlayer = ({ client, ticker, media, transport, staff }: Pr
     return () => clearTimeout(id);
   }, [note]);
 
-  const item = video?.item ?? null;
+  const timedIndex = video?.album && isTimedAlbum(video.album) ? (trackIndex ?? video.album.index) : null;
+  const item = timedIndex !== null && video?.album ? (video.album.items[timedIndex] ?? null) : (video?.item ?? null);
   return (
     <>
       {item && (
         <div className="relative w-full shrink-0" style={{ background: '#000' }}>
           <video
-            key={item.src}
+            key={`${timedIndex ?? ''}-${item.src}`}
             ref={el}
+            data-track={timedIndex ?? undefined}
             src={item.src}
             poster={item.poster}
             playsInline
@@ -335,16 +357,18 @@ const HostControls = ({
             </button>
           </>
         )}
-        <button
-          role="switch"
-          aria-checked={loop}
-          disabled={busy}
-          onClick={() => void run({ action: 'set_loop', loop: !loop })}
-          className={btn}
-          style={loop ? goldStyle : btnStyle}
-        >
-          Loop {loop ? 'on' : 'off'}
-        </button>
+        {!video?.album && (
+          <button
+            role="switch"
+            aria-checked={loop}
+            disabled={busy}
+            onClick={() => void run({ action: 'set_loop', loop: !loop })}
+            className={btn}
+            style={loop ? goldStyle : btnStyle}
+          >
+            Loop {loop ? 'on' : 'off'}
+          </button>
+        )}
         <button onClick={() => setOpen(false)} className={btn} style={btnStyle}>
           Close
         </button>
@@ -428,11 +452,11 @@ const TrackList = ({ video }: { video: SpaceVideo }) => {
           {video.album.items.map((it, i) => (
             <li
               key={`${i}-${it.src}`}
-              aria-current={i === video.album!.index ? 'true' : undefined}
+              aria-current={i === np.index ? 'true' : undefined}
               className="overflow-hidden whitespace-nowrap text-ellipsis"
               style={{
-                color: i === video.album!.index ? 'var(--bw-accent)' : 'var(--bw-muted)',
-                fontWeight: i === video.album!.index ? 600 : 400,
+                color: i === np.index ? 'var(--bw-accent)' : 'var(--bw-muted)',
+                fontWeight: i === np.index ? 600 : 400,
               }}
             >
               {it.title || `Video ${i + 1}`}

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  albumCursor,
   isAllowedVideoSrc,
   moveItem,
   nextAlbumIndex,
@@ -117,7 +118,12 @@ describe('album spaces', () => {
     expect(v({}).album).toBeNull();
   });
   test('now playing n/N', () => {
-    expect(nowPlaying(v({ album: { items, index: 1 } }))).toEqual({ n: 2, total: 3, title: 'Video 2' });
+    expect(nowPlaying(v({ album: { items, index: 1 } }), 1_000_000)).toEqual({
+      n: 2,
+      total: 3,
+      title: 'Video 2',
+      index: 1,
+    });
     expect(nowPlaying(v({}))).toBeNull();
   });
   test('next index: advance, wrap on repeat, stop at end once', () => {
@@ -130,5 +136,32 @@ describe('album spaces', () => {
     expect(moveItem(['a', 'b', 'c'], 0, 2)).toEqual(['b', 'c', 'a']);
     expect(moveItem(['a', 'b', 'c'], 2, 1)).toEqual(['a', 'c', 'b']);
     expect(moveItem(['a', 'b'], 0, 5)).toEqual(['a', 'b']);
+  });
+});
+
+describe('timed album cursor', () => {
+  const t = [
+    { kind: 'url', src: 'https://cdn.example.com/1.mp4', duration_ms: 10_000 },
+    { kind: 'url', src: 'https://cdn.example.com/2.mp4', duration_ms: 5_000 },
+  ];
+  const at = (index: number, repeat: boolean, now: number) =>
+    albumCursor(v({ album: { items: t, index, repeat } }), now)!;
+  test('walks the durations from started_at', () => {
+    expect(at(0, false, 1_004_000)).toEqual({ index: 0, ms: 4000, stopped: false });
+    expect(at(0, false, 1_012_000)).toEqual({ index: 1, ms: 2000, stopped: false });
+    expect(at(1, false, 1_001_000)).toEqual({ index: 1, ms: 1000, stopped: false });
+  });
+  test('end: stop once, wrap on repeat', () => {
+    expect(at(0, false, 1_016_000).stopped).toBe(true);
+    expect(at(0, true, 1_016_000)).toEqual({ index: 0, ms: 1000, stopped: false });
+    expect(at(1, true, 1_000_000 + 5_000 + 15_000 * 3 + 11_000)).toEqual({ index: 1, ms: 1000, stopped: false });
+  });
+  test('untimed stays on index', () => {
+    const u = [{ kind: 'url', src: 'https://cdn.example.com/1.mp4' }, t[1]];
+    expect(albumCursor(v({ album: { items: u, index: 0 } }), 1_050_000)).toEqual({
+      index: 0,
+      ms: 50_000,
+      stopped: false,
+    });
   });
 });

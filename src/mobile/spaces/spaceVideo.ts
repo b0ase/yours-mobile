@@ -125,12 +125,55 @@ const parseAlbum = (raw: unknown): SpaceAlbum | null => {
   return { items, index, repeat: o.repeat === true };
 };
 
-/** "Now playing n/N" (1-based), or null when the Space is not running an album. */
-export const nowPlaying = (v: SpaceVideo | null): { n: number; total: number; title: string } | null => {
-  const a = v?.album;
+/** Timed album: every item has duration_ms, so the current track follows from the clock alone. */
+export const isTimedAlbum = (a: SpaceAlbum | null | undefined): boolean =>
+  !!a && a.items.every((i) => !!i.durationMs && i.durationMs > 0);
+
+export type AlbumCursor = { index: number; ms: number; stopped: boolean };
+
+/**
+ * Where an album is now (bit-sign #297): started_at is when the current track (album.index) was at 0.
+ * Timed albums walk forward through the durations, wrapping on repeat; untimed ones stay on album.index.
+ */
+export const albumCursor = (v: SpaceVideo, localNow: number): AlbumCursor | null => {
+  const a = v.album;
   if (!a) return null;
-  const it = a.items[a.index];
-  return { n: a.index + 1, total: a.items.length, title: it?.title || `Video ${a.index + 1}` };
+  if (v.state === 'stopped') return { index: a.index, ms: 0, stopped: true };
+  if (v.state === 'paused') return { index: a.index, ms: v.pausedAtMs, stopped: false };
+  let e = Math.max(0, localNow + v.skew - v.startedAt);
+  if (!isTimedAlbum(a)) return { index: a.index, ms: e, stopped: false };
+  const d = a.items.map((i) => i.durationMs as number);
+  const total = d.reduce((x, y) => x + y, 0);
+  let i = a.index;
+  // Skip whole laps on repeat so a long-running room doesn't loop many times.
+  if (a.repeat && total > 0) {
+    const toEnd = d.slice(i).reduce((x, y) => x + y, 0);
+    if (e >= toEnd) {
+      e = (e - toEnd) % total;
+      i = 0;
+    }
+  }
+  while (e >= (d[i] as number)) {
+    e -= d[i] as number;
+    i++;
+    if (i >= d.length) {
+      if (!a.repeat) return { index: d.length - 1, ms: d[d.length - 1] as number, stopped: true };
+      i = 0;
+    }
+  }
+  return { index: i, ms: e, stopped: false };
+};
+
+/** "Now playing n/N" (1-based), or null when the Space is not running an album. */
+export const nowPlaying = (
+  v: SpaceVideo | null,
+  localNow = Date.now(),
+): { n: number; total: number; title: string; index: number } | null => {
+  const a = v?.album;
+  if (!a || !v) return null;
+  const index = albumCursor(v, localNow)?.index ?? a.index;
+  const it = a.items[index];
+  return { n: index + 1, total: a.items.length, title: it?.title || `Video ${index + 1}`, index };
 };
 
 /** Where the album goes when the current video ends: the next index, wrap on repeat, or null at the end. */
@@ -203,10 +246,12 @@ export type VideoAction =
   | { action: 'seek'; position_ms: number }
   | { action: 'stop' }
   | { action: 'set_loop'; loop: boolean }
-  /** Album Space (needs bit-sign album support): replace the run and start at `index` (default 0). */
+  /** Album Space (bit-sign #297): replace the run and start at `index` (default 0). */
   | { action: 'set_album'; items: AlbumDraftItem[]; repeat: boolean; index?: number }
   /** Album Space: jump to a track (also how a staff phone advances when a video ends). */
   | { action: 'album_goto'; index: number }
+  /** Any viewer, on <video> 'ended' of an untimed track. 409 stale_index / too_early are ignored. */
+  | { action: 'album_next'; from_index: number }
   | { action: 'clear_album' };
 
 /** ORDFS content URL for an owned ordinal (origin `<txid>_<n>` or `.n`). */
