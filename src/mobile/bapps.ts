@@ -120,6 +120,23 @@ export const BAPPS: BApp[] = [
         },
       ]
     : []),
+  // bPositive (bpositive/BPositivePage.tsx): bWalletX only, like its route (BPOSITIVE_ENABLED). Literal env check.
+  ...(!(
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+  )
+    ? [
+        {
+          name: 'bPositive',
+          url: '/m/bpositive',
+          verb: 'One day at a time, with three friends who have your back',
+          group: 'featured' as const,
+          status: 'live' as const,
+          icon: bappIconUrl('bpositive'),
+        },
+      ]
+    : []),
   {
     name: 'Names',
     // The Name Store (names/store/NameStorePage.tsx): get your name on Bitcoin.

@@ -186,6 +186,31 @@ describe('HOLDER_DROP_ENABLED: Airdrop to holders is bWalletX only', () => {
   });
 });
 
+describe('BPOSITIVE_ENABLED: bPositive is bWalletX only', () => {
+  const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  const cond = (text: string, name: string) =>
+    (new RegExp(`export const ${name}: boolean =\\s*!?\\(?([^;]*?)\\)?;`, 's').exec(text)?.[1] ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  test('inverse of STORE_BUILD, from the same env', async () => {
+    const { BPOSITIVE_ENABLED } = await import('./storeBuild');
+    expect(BPOSITIVE_ENABLED).toBe(!STORE_BUILD);
+    const s = src('./storeBuild.ts');
+    expect(cond(s, 'BPOSITIVE_ENABLED')).toBe(cond(s, 'STORE_BUILD'));
+  });
+  test('the page is only a lazy import behind the flag, and the tile sits behind the literal env check', () => {
+    const r = src('./tabs/MobileRoutes.tsx');
+    expect(r).not.toMatch(/^import [^;]*bpositive\//m);
+    expect(r).toMatch(/BPOSITIVE_ENABLED \? lazy\(\(\) => import\('\.\.\/bpositive\/BPositivePage'\)\)/);
+    const b = src('./bapps.ts');
+    const at = b.indexOf("name: 'bPositive'");
+    expect(at).toBeGreaterThan(0);
+    expect(b.lastIndexOf("import.meta.env.VITE_CHANNEL === 'android-play'", at)).toBeGreaterThan(
+      b.lastIndexOf("name: '", at - 1),
+    );
+  });
+});
+
 describe('pots and subscriptions: pots + person standing orders everywhere, services and billing bWalletX only', () => {
   const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
   const cond = (text: string, name: string) =>

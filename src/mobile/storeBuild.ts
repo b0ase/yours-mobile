@@ -82,6 +82,17 @@ export const HOLDER_DROP_ENABLED: boolean = !(
 );
 
 /**
+ * bPositive (/m/bpositive, site /bpositive, bit-sign PR #299): journeys with witnesses and pledges between
+ * friends. bWalletX only, as the site page says ("Not in the store edition"): a lazy chunk behind this literal
+ * env check, with its Apps tile behind the same check, so the store bundle has none of it. Same env as STORE_BUILD.
+ */
+export const BPOSITIVE_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+
+/**
  * Owner apps left out of a store build: TokenBlaster sells guns and runs a coin launchpad, so a store
  * app linking to it would point users at outside buying (Apple 3.1.1/3.1.5, Play Payments).
  */
