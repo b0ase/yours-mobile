@@ -388,7 +388,7 @@ export default function ThemeOrderSheet({ onClose, initialTab = 'order' }: { onC
                         type="button"
                         aria-label="Remove colour"
                         onClick={() => set('colours', form.colours.slice(0, 2))}
-                        className="absolute -top-2 -right-2 rounded-full bg-black border border-white/20 p-0.5 text-white"
+                        className="absolute -top-2 -right-2 rounded-full bg-[#0b0c0f] border border-white/20 p-0.5 text-white"
                       >
                         <X size={12} />
                       </button>

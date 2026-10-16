@@ -330,7 +330,7 @@ const SortMenu = ({ sort, onChange }: { sort: FeedSort; onChange: (s: FeedSort) 
         aria-haspopup="menu"
         aria-expanded={!!at}
         aria-label={`Sort: ${current.label}`}
-        className="shrink-0 flex items-center gap-1 rounded-full pl-3 pr-2 py-1 text-[12px] font-semibold"
+        className="bw-feed-sort shrink-0 flex items-center gap-1 rounded-full pl-3 pr-2 py-1 text-[12px] font-semibold"
         style={{ background: '#1a1408', color: GOLD, border: `1px solid ${GOLD}` }}
       >
         {sort === 'locked' && <Lock size={12} />}
@@ -2038,7 +2038,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
                     setSource(s.id);
                     saveSource(s.id);
                   }}
-                  className="shrink-0 rounded-full px-3 py-1 text-[12px] font-semibold"
+                  className={`bw-feed-chip shrink-0 rounded-full px-3 py-1 text-[12px] font-semibold${source === s.id ? ' is-on' : ''}`}
                   style={
                     source === s.id
                       ? { background: chipColor(s.id), color: textOn(chipColor(s.id)) }
@@ -2825,7 +2825,7 @@ const Leaderboard = ({
           <button
             key={t.id}
             onClick={() => setTf(t.id)}
-            className="shrink-0 rounded-full px-3 py-1 text-[12px] font-semibold"
+            className={`bw-feed-chip shrink-0 rounded-full px-3 py-1 text-[12px] font-semibold${tf === t.id ? ' is-on' : ''}`}
             style={
               tf === t.id
                 ? { background: GOLD, color: '#1a1300' }

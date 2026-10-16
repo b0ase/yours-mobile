@@ -112,7 +112,7 @@ export const ModeratorsSheet = ({
             aria-label="Handle to add as a moderator"
             autoCapitalize="none"
             autoCorrect="off"
-            className="min-w-0 flex-1 rounded-full bg-black px-4 py-2 text-sm text-white outline-none"
+            className="min-w-0 flex-1 rounded-full bg-[#0b0c0f] px-4 py-2 text-sm text-white outline-none"
             style={{ border: '1px solid #ffffff1a' }}
           />
           <button

@@ -39,12 +39,30 @@ test('Light packs: typed text in inputs takes the pack ink (no white on white)',
 });
 
 test('No dark cards on White: every dark hex in src/ has a mono sweep selector (run bun scripts/dark-fills.ts)', async () => {
-  const { darkFills, renderBlock } = await import('../../../scripts/dark-fills');
+  const { darkFills, darkClasses, renderBlock } = await import('../../../scripts/dark-fills');
   const css = readFileSync(new URL('../../themes.css', import.meta.url), 'utf8');
   const fills = darkFills(new URL('../../', import.meta.url).pathname);
   // New lock's "start small" card (#2a1d00), Pots/Subscriptions panels (#17191E), Launchpad (#0F1013) and friends.
   for (const c of ['42, 29, 0', '23, 25, 30', '15, 16, 19', '11, 12, 15']) expect(fills).toContain(c);
   const missing = fills.filter((c) => !css.includes(`[style*='background: rgb(${c})']`));
   expect(missing).toEqual([]);
-  expect(css).toContain(renderBlock(fills));
+  const classes = darkClasses(new URL('../../', import.meta.url).pathname);
+  // Hidden tokens row hover, bChat tabs, sell sheets: Tailwind dark fills are swept too.
+  for (const c of ['hover:bg-[#1f2128]', 'bg-[#2b2f36]', 'bg-[#0F1013]']) expect(classes).toContain(c);
+  expect(css).toContain(renderBlock(fills, classes));
+});
+
+test('No dark cards on White: dark backgrounds in stylesheets have a pack override (Hidden tokens head, 16 Oct)', async () => {
+  const { uncoveredDarkCss, strayBgBlack } = await import('../../../scripts/dark-fills');
+  const src = new URL('../../', import.meta.url).pathname;
+  // Fix: add a [data-bw-tone='mono'] rule in themes.css, or a CSS_KEEP reason (scrim, media stage) in dark-fills.ts.
+  expect(uncoveredDarkCss(src)).toEqual([]);
+  // Solid bg-black outside media letterboxes: use a dark hex so the mono sweep catches it.
+  expect(strayBgBlack(src)).toEqual([]);
+  const css = readFileSync(new URL('../../themes.css', import.meta.url), 'utf8');
+  expect(css).toMatch(/:root\[data-bw-tone='mono'\]\s*:is\(\s*\.bw-hid,\s*\.bw-hid-head/);
+  // Feed: sort pill and selected chips are white pills with a dark outline on White and paper packs.
+  expect(css).toMatch(
+    /:is\(\.bw-feed-sort, \.bw-feed-chip\.is-on\) \{[^}]*background: var\(--bw-surface\) !important;[^}]*border: 1\.5px solid var\(--bw-text\)/,
+  );
 });
