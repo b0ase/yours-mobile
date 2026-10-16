@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { invertOnLightClass } from './invertOnLight';
 import { useLocation, useNavigate, useNavigationType, useParams } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Home, LayoutGrid, Pause, Play, Users } from 'lucide-react';
 import { useBackClose } from '../backStack';
@@ -144,7 +145,12 @@ const Cover = ({ e, size }: { e: Entry; size?: number }) => (
   >
     <Blurred forceBlur={!!e.item?.flagged}>
       {e.cover ? (
-        <img src={e.cover} alt="" className="w-full h-full object-cover" loading="lazy" />
+        <img
+          src={e.cover}
+          alt=""
+          className={`w-full h-full object-cover${invertOnLightClass(e.artist)}`}
+          loading="lazy"
+        />
       ) : e.kind === 'video' && e.item ? (
         <video
           src={`${e.item.url}#t=0.1`}

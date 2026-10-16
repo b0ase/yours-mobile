@@ -1192,7 +1192,7 @@ export const BsvWallet = () => {
 
       {/* Your bAvatar: tap to turn it over to the same address as a pay code (flip bAvatar, 14 Oct 2026). */}
       <div className="mb-4 flex flex-col items-center gap-1">
-        <MyFlipBavatar address={receiveAddress} size={72} backSize={180} />
+        <MyFlipBavatar address={receiveAddress} size={144} backSize={200} />
         <span className="text-[11px]" style={{ color: theme.color.global.gray }}>
           Tap your bAvatar to flip it
         </span>
