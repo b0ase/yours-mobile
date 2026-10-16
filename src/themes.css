@@ -486,10 +486,10 @@
 
 /* White (owner, 16 Oct 2026): a real white card set. The White designs (wallet/cardPatternsLight.ts) are already
    off-white and faint, so they show at full strength; every balance card is white with a hairline and soft shadow. */
-:root[data-bw-theme='white'] .is-themed .bw-wcard-art {
+:root[data-bw-paper] .is-themed .bw-wcard-art {
   opacity: 1;
 }
-:root[data-bw-theme='white'] :is(.bw-wcard-face.is-themed, .bw-bc.is-themed) {
+:root[data-bw-paper] :is(.bw-wcard-face.is-themed, .bw-bc.is-themed) {
   border: 1px solid rgb(0 0 0 / 0.14) !important;
   box-shadow:
     0 1px 2px rgb(0 0 0 / 0.05),
@@ -541,42 +541,42 @@
 
 /* White: the swipe actions beside a row (Pin · Lock · Archive, Chat · Receive · Send) are white with black ink and a
    thin outline instead of coloured fills (owner, 16 Oct 2026). */
-:root[data-bw-theme='white'] .bw-swipe-action {
+:root[data-bw-paper] .bw-swipe-action {
   background: #ffffff !important;
   color: #0a0a0a !important;
   border: 1px solid rgb(0 0 0 / 0.18);
 }
 /* White: balance cards (front and back) show their white design at full strength; no glaze, no text shadow. */
-:root[data-bw-theme='white'] .bw-skin-art {
+:root[data-bw-paper] .bw-skin-art {
   opacity: 1 !important;
   filter: none !important;
 }
-:root[data-bw-theme='white'] .bw-skin-fx {
+:root[data-bw-paper] .bw-skin-fx {
   display: none !important;
 }
-:root[data-bw-theme='white'] .bw-bc :is(b, small, span) {
+:root[data-bw-paper] .bw-bc :is(b, small, span) {
   text-shadow: none !important;
 }
-:root[data-bw-theme='white'] .bw-bc {
+:root[data-bw-paper] .bw-bc {
   color: var(--bw-text) !important;
   --bc-ink: var(--bw-text);
 }
-:root[data-bw-theme='white'] .bw-bc :is(.bw-bc-contact, .bw-bc-stop) {
+:root[data-bw-paper] .bw-bc :is(.bw-bc-contact, .bw-bc-stop) {
   background: #ffffff !important;
   color: #0a0a0a !important;
   border: 1px solid rgb(0 0 0 / 0.35) !important;
 }
 /* Cover art an artist opted in to invert on White (media/invertOnLight.ts; VexVoid only). */
-:root[data-bw-theme='white'] .bw-invert-on-light {
+:root[data-bw-paper] .bw-invert-on-light {
   filter: invert(1) hue-rotate(180deg);
 }
-:root[data-bw-theme='white'] .bw-swipe-action[data-danger] {
+:root[data-bw-paper] .bw-swipe-action[data-danger] {
   color: var(--bw-danger, #b91c1c) !important;
 }
 
 /* White: bMail and bPhone cards, hero, segmented control and bars are white with black ink and a hairline
    (owner, 16 Oct 2026: "No black cards in white theme please"). */
-:root[data-bw-theme='white'] :is(.bw-mail-card, .bw-mail-card.is-unread, .bw-mail-hero, .bw-mail-seg) {
+:root[data-bw-paper] :is(.bw-mail-card, .bw-mail-card.is-unread, .bw-mail-hero, .bw-mail-seg) {
   background: #ffffff !important;
   color: var(--bw-text) !important;
   border: 1px solid rgb(0 0 0 / 0.14) !important;
@@ -586,22 +586,22 @@
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }
-:root[data-bw-theme='white'] .bw-mail-card.is-unread {
+:root[data-bw-paper] .bw-mail-card.is-unread {
   border-color: rgb(0 0 0 / 0.4) !important;
 }
-:root[data-bw-theme='white'] .bw-mail-hero::after {
+:root[data-bw-paper] .bw-mail-hero::after {
   display: none;
 }
-:root[data-bw-theme='white'] .bw-mail-bar {
+:root[data-bw-paper] .bw-mail-bar {
   background: rgb(255 255 255 / 0.92) !important;
   color: var(--bw-text);
   border-bottom: 1px solid var(--bw-line);
 }
-:root[data-bw-theme='white'] .bw-mail-stamp {
+:root[data-bw-paper] .bw-mail-stamp {
   background: color-mix(in srgb, currentColor 22%, #ffffff);
 }
 /* White: Ask b's quick-start chips are white with black ink and a thin outline. */
-:root[data-bw-theme='white'] .askb-chips button {
+:root[data-bw-paper] .askb-chips button {
   background: #ffffff !important;
   color: #0a0a0a !important;
   border: 1px solid rgb(0 0 0 / 0.3) !important;
@@ -626,26 +626,26 @@
 
 /* White (owner, 16 Oct 2026): chat bubbles are black text on white. Mine: very light grey fill; theirs: white with a
    thin outline. Never a dark fill. Applies to DMs, rooms and Ask b. */
-:root[data-bw-theme='white'] :is(.bw-chat-bubble, .askb-bubble.b, .askb-bubble.note) {
+:root[data-bw-paper] :is(.bw-chat-bubble, .askb-bubble.b, .askb-bubble.note) {
   background: #ffffff !important;
   color: #0a0a0a !important;
   border: 1px solid rgb(0 0 0 / 0.18) !important;
   box-shadow: none !important;
 }
-:root[data-bw-theme='white'] :is(.bw-chat-bubble.is-mine, .askb-bubble.user) {
+:root[data-bw-paper] :is(.bw-chat-bubble.is-mine, .askb-bubble.user) {
   background: #f4f4f4 !important;
   color: #0a0a0a !important;
   border: 1px solid transparent !important;
 }
-:root[data-bw-theme='white'] :is(.bw-chat-bubble, .askb-bubble) :is(div, span, small, p) {
+:root[data-bw-paper] :is(.bw-chat-bubble, .askb-bubble) :is(div, span, small, p) {
   color: inherit;
 }
-:root[data-bw-theme='white'] :is(.bw-chat-bubble, .askb-bubble) a {
+:root[data-bw-paper] :is(.bw-chat-bubble, .askb-bubble) a {
   color: #0a0a0a !important;
   text-decoration: underline;
 }
 /* Help Desk card and the live Space banner: white cards. */
-:root[data-bw-theme='white'] :is(.bw-helpdesk-card, .bw-live-banner) {
+:root[data-bw-paper] :is(.bw-helpdesk-card, .bw-live-banner) {
   background: #ffffff !important;
   color: #0a0a0a !important;
   border: 1px solid rgb(0 0 0 / 0.18) !important;
@@ -653,21 +653,21 @@
     0 1px 2px rgb(0 0 0 / 0.04),
     0 6px 16px rgb(0 0 0 / 0.05) !important;
 }
-:root[data-bw-theme='white'] :is(.bw-helpdesk-card, .bw-live-banner) :is(span, b) {
+:root[data-bw-paper] :is(.bw-helpdesk-card, .bw-live-banner) :is(span, b) {
   color: #0a0a0a !important;
 }
 /* Account drawer scrim: a light veil, so no grey strip shows under the dock / home indicator. */
-:root[data-bw-theme='white'] .bw-drawer-scrim {
+:root[data-bw-paper] .bw-drawer-scrim {
   background: rgb(255 255 255 / 0.6) !important;
   -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
 }
-:root[data-bw-theme='white'] body {
-  background: #ffffff;
+:root[data-bw-paper] body {
+  background: var(--bw-pack-bg, #ffffff);
 }
 /* Scroll fades (Feed bApps bar) fade to the page, not to black. */
-:root[data-bw-theme='white'] {
-  --bw-fade-rgb: 255 255 255;
+:root[data-bw-paper] {
+  --bw-fade-rgb: var(--bw-bg-rgb, 255 255 255);
 }
 
 /* Dock centre b: the gold filled b everywhere, the shared outline b on a white button with a thin black ring in
@@ -675,23 +675,23 @@
 .bw-dock-b-outline {
   display: none;
 }
-:root[data-bw-theme='white'] .bw-dock-b-gold {
+:root[data-bw-paper] .bw-dock-b-gold {
   display: none;
 }
-:root[data-bw-theme='white'] .bw-dock-b-outline {
+:root[data-bw-paper] .bw-dock-b-outline {
   display: block;
 }
-:root[data-bw-theme='white'] .bw-dock-b {
+:root[data-bw-paper] .bw-dock-b {
   background: #ffffff !important;
   box-shadow:
     0 0 0 1.5px #0a0a0a,
     0 4px 12px rgb(0 0 0 / 0.08) !important;
 }
 /* bPhone / Calls: text-white inside the (now white) cards takes the ink; the Off pill is light. */
-:root[data-bw-theme='white'] :is(.bw-mail-card.text-white, .bw-mail-card .text-white) {
+:root[data-bw-paper] :is(.bw-mail-card.text-white, .bw-mail-card .text-white) {
   color: var(--bw-text) !important;
 }
-:root[data-bw-theme='white'] .bw-mail-card [style*='background: rgba(0, 0, 0, 0.45)'] {
+:root[data-bw-paper] .bw-mail-card [style*='background: rgba(0, 0, 0, 0.45)'] {
   background: #f2f2f2 !important;
 }
 
@@ -776,6 +776,8 @@
     [style*='background-color: rgb(15, 46, 24)'],
     [style*='background: rgb(16, 17, 20)'],
     [style*='background-color: rgb(16, 17, 20)'],
+    [style*='background: rgb(16, 26, 18)'],
+    [style*='background-color: rgb(16, 26, 18)'],
     [style*='background: rgb(17, 0, 34)'],
     [style*='background-color: rgb(17, 0, 34)'],
     [style*='background: rgb(17, 17, 17)'],
@@ -800,6 +802,8 @@
     [style*='background-color: rgb(18, 19, 23)'],
     [style*='background: rgb(18, 19, 24)'],
     [style*='background-color: rgb(18, 19, 24)'],
+    [style*='background: rgb(18, 6, 13)'],
+    [style*='background-color: rgb(18, 6, 13)'],
     [style*='background: rgb(18, 61, 36)'],
     [style*='background-color: rgb(18, 61, 36)'],
     [style*='background: rgb(19, 10, 36)'],
@@ -886,6 +890,8 @@
     [style*='background-color: rgb(27, 22, 8)'],
     [style*='background: rgb(27, 28, 32)'],
     [style*='background-color: rgb(27, 28, 32)'],
+    [style*='background: rgb(28, 10, 21)'],
+    [style*='background-color: rgb(28, 10, 21)'],
     [style*='background: rgb(28, 22, 6)'],
     [style*='background-color: rgb(28, 22, 6)'],
     [style*='background: rgb(28, 28, 30)'],
@@ -990,6 +996,8 @@
     [style*='background-color: rgb(42, 45, 53)'],
     [style*='background: rgb(42, 46, 54)'],
     [style*='background-color: rgb(42, 46, 54)'],
+    [style*='background: rgb(42, 61, 46)'],
+    [style*='background-color: rgb(42, 61, 46)'],
     [style*='background: rgb(43, 38, 71)'],
     [style*='background-color: rgb(43, 38, 71)'],
     [style*='background: rgb(43, 47, 54)'],
@@ -1050,10 +1058,14 @@
     [style*='background-color: rgb(6, 11, 26)'],
     [style*='background: rgb(6, 36, 15)'],
     [style*='background-color: rgb(6, 36, 15)'],
+    [style*='background: rgb(6, 64, 28)'],
+    [style*='background-color: rgb(6, 64, 28)'],
     [style*='background: rgb(61, 42, 0)'],
     [style*='background-color: rgb(61, 42, 0)'],
     [style*='background: rgb(61, 48, 0)'],
     [style*='background-color: rgb(61, 48, 0)'],
+    [style*='background: rgb(61, 61, 61)'],
+    [style*='background-color: rgb(61, 61, 61)'],
     [style*='background: rgb(68, 68, 68)'],
     [style*='background-color: rgb(68, 68, 68)'],
     [style*='background: rgb(7, 17, 12)'],
@@ -1062,12 +1074,16 @@
     [style*='background-color: rgb(7, 4, 15)'],
     [style*='background: rgb(7, 8, 10)'],
     [style*='background-color: rgb(7, 8, 10)'],
+    [style*='background: rgb(74, 24, 52)'],
+    [style*='background-color: rgb(74, 24, 52)'],
     [style*='background: rgb(74, 34, 53)'],
     [style*='background-color: rgb(74, 34, 53)'],
     [style*='background: rgb(74, 56, 6)'],
     [style*='background-color: rgb(74, 56, 6)'],
     [style*='background: rgb(74, 63, 37)'],
-    [style*='background-color: rgb(74, 63, 37)']
+    [style*='background-color: rgb(74, 63, 37)'],
+    [style*='background: rgb(8, 16, 10)'],
+    [style*='background-color: rgb(8, 16, 10)']
   ):not(
     :is(.bg-black\/50, .bg-black\/60, .bg-black\/65, .bg-black\/70, .bg-black\/80, .bw-videobg, [data-pool-dark]) *
   ) {
@@ -1089,4 +1105,84 @@
   background: var(--bw-surface) !important;
   color: var(--bw-text) !important;
   border-color: rgb(0 0 0 / 0.18) !important;
+}
+
+/* ── Artist editions (owner, 16 Oct 2026): VexVoid, Ninja Punk Girls, NPGX ─────────────────────────────────
+   Dark packs with their own card art (cardPatternsEdition.ts). No gold: the dock b is the shared outline b in the
+   pack's ink (white for VexVoid, pink for NPG, acid green for NPGX); NPG and NPGX glow on primary buttons and the
+   selected tab. */
+:root[data-bw-tone='edition'] .bw-dock-b-gold {
+  display: none;
+}
+:root[data-bw-tone='edition'] .bw-dock-b-outline {
+  display: block;
+  stroke: var(--bw-accent);
+}
+:root[data-bw-tone='edition'] .bw-dock-b {
+  background: #000000 !important;
+  box-shadow:
+    0 0 0 1.5px var(--bw-accent),
+    var(--bw-glow) !important;
+}
+:root[data-bw-tone='edition'] [aria-current='page'] {
+  text-shadow: 0 0 8px rgb(var(--bw-accent-rgb) / 0.7);
+}
+:root[data-bw-tone='edition'] input,
+:root[data-bw-tone='edition'] textarea,
+:root[data-bw-tone='edition'] select {
+  color: var(--bw-text) !important;
+  -webkit-text-fill-color: var(--bw-text);
+  caret-color: var(--bw-accent);
+}
+:root[data-bw-tone='edition'] :is(input, textarea)::placeholder {
+  color: var(--bw-muted);
+  -webkit-text-fill-color: var(--bw-muted);
+}
+/* VexVoid: hairline white outlines, mono labels, a faint grain. */
+:root[data-bw-theme='vexvoid'] body {
+  background-image: radial-gradient(rgb(255 255 255 / 0.05) 1px, transparent 1px);
+  background-size: 3px 3px;
+}
+:root[data-bw-theme='vexvoid'] .bw-wcard-face.is-themed {
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.7);
+}
+:root[data-bw-theme='vexvoid'] :is(.bw-pill-gold, .yours-sheet-primary) {
+  background: #ffffff !important;
+  color: #000000 !important;
+}
+:root[data-bw-theme='vexvoid'] :is(h1, h2, .bw-cdes-top b) {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+/* NPG: hot-pink neon. */
+:root[data-bw-theme='npg'] body {
+  background-image: radial-gradient(120% 60% at 100% 0%, rgb(255 46 147 / 0.14), transparent 60%);
+  background-attachment: fixed;
+}
+:root[data-bw-theme='npg'] .bw-wcard-face.is-themed {
+  box-shadow:
+    0 0 22px rgb(255 46 147 / 0.35),
+    inset 0 0 0 1px var(--bw-trim);
+}
+:root[data-bw-theme='npg'] :is(h1, h2) {
+  text-shadow: 0 0 10px rgb(255 46 147 / 0.6);
+}
+/* NPGX: acid green with magenta and cyan edges, scanlines. */
+:root[data-bw-theme='npgx'] body {
+  background-image:
+    repeating-linear-gradient(0deg, rgb(255 255 255 / 0.03) 0 1px, transparent 1px 3px),
+    radial-gradient(100% 50% at 100% 0%, rgb(255 43 214 / 0.12), transparent 60%),
+    radial-gradient(90% 50% at 0% 100%, rgb(0 240 255 / 0.1), transparent 60%);
+  background-attachment: fixed;
+}
+:root[data-bw-theme='npgx'] .bw-wcard-face.is-themed {
+  box-shadow:
+    -2px 0 0 rgb(255 43 214 / 0.8),
+    2px 0 0 rgb(0 240 255 / 0.8),
+    0 0 20px rgb(198 255 26 / 0.25);
+}
+:root[data-bw-theme='npgx'] :is(h1, h2) {
+  text-shadow:
+    -1px 0 rgb(255 43 214 / 0.8),
+    1px 0 rgb(0 240 255 / 0.8);
 }

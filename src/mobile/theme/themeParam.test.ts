@@ -98,7 +98,7 @@ describe('themed installs', () => {
         return rel in links ? { setAttribute: (_: string, v: string) => (links[rel] = v) } : null;
       },
     };
-    expect(swapInstallLinks('pink')).toBe(false);
+    expect(swapInstallLinks('green')).toBe(false);
     expect(links.manifest).toBe('/manifest.webmanifest');
     expect(swapInstallLinks('white')).toBe(true);
     expect(links.manifest).toBe('/themes/white/manifest.json');
@@ -118,5 +118,17 @@ describe('/white edition entry', () => {
     href = 'https://web.bwalletx.com/white/';
     expect(applyThemeParam()).toBeNull();
     expect(store.get('bwx.accent.boot')).toBe('cyber');
+  });
+});
+
+describe('edition entries', () => {
+  test('/vexvoid, /npg, /npgx, /pink, /blue, /yellow apply their pack once and open home', () => {
+    for (const id of ['vexvoid', 'npg', 'npgx', 'pink', 'blue', 'yellow']) {
+      store.clear();
+      href = `https://web.bwalletx.com/${id}`;
+      expect(applyThemeParam()).toBe(id as never);
+      expect(new URL(href).pathname).toBe('/');
+      expect(packFromThemeParam(id)).toBe(id as never);
+    }
   });
 });

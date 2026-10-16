@@ -25,11 +25,20 @@ export const CardSkin = memo(function CardSkin({ id, colour }: { id: string; col
   // An uncustomised card follows the theme: its pattern is drawn in the pack's hue (cardLook.ts, themes.css).
   const pack = accentById(useAccentId());
   const c = cardPatternColour(pack, useCardCustomised(id), s.colour);
+  // White and the paper packs (Pink, Blue, Yellow) use the white designs; artist editions their own art.
+  const whiteArt = pack.id === 'white' || !!pack.paper;
+  const edition = pack.group === 'edition';
   return (
     <span className={`bw-skin bw-skin--${s.finish}`} aria-hidden="true" style={{ ['--skin-c' as string]: c }}>
       <img
         className="bw-skin-art"
-        src={patternUri(pack.id === 'white' ? whiteArtFor(id) : s.pattern, pack.id === 'white' ? pack.accent : c)}
+        src={
+          whiteArt
+            ? patternUri(whiteArtFor(id), pack.accent)
+            : edition
+              ? patternUri(pack.pattern, pack.accent, id)
+              : patternUri(s.pattern, c)
+        }
         alt=""
         draggable={false}
         decoding="async"
