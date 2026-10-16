@@ -3,6 +3,7 @@ import type { OneSatContext } from '@1sat/actions';
 import { Sheet } from '../phone/Sheet';
 import { TEXT_COST_LABEL } from './phoneApi';
 import { usePhoneApi, usePhoneAvailable } from './usePhone';
+import { SentTexts } from './SentTexts';
 import { MIN_DROP_SATS, SEND_BY_TEXT_ENABLED, sendByText } from './sendByText';
 
 /** Send › "Send by text". Renders nothing unless the flag is on AND bit-sign has SMS enabled. */
@@ -13,6 +14,7 @@ export const SendByTextSheet = ({ ctx, onClose }: { ctx: OneSatContext; onClose:
   const [sats, setSats] = useState(String(MIN_DROP_SATS * 10));
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [sentCount, setSentCount] = useState(0);
   if (!SEND_BY_TEXT_ENABLED || !state) return null;
 
   const send = async () => {
@@ -20,6 +22,7 @@ export const SendByTextSheet = ({ ctx, onClose }: { ctx: OneSatContext; onClose:
     setMsg(null);
     try {
       const r = await sendByText(ctx, api, { to, sats: Number(sats) });
+      setSentCount((n) => n + 1);
       setMsg(`Sent to ${r.to}. If it is not claimed in 14 days you can take it back.`);
     } catch (e) {
       setMsg(e instanceof Error ? e.message : String(e));
@@ -58,6 +61,7 @@ export const SendByTextSheet = ({ ctx, onClose }: { ctx: OneSatContext; onClose:
         Send
       </button>
       {msg && <p className="text-[12px] text-[#98A2B3]">{msg}</p>}
+      <SentTexts ctx={ctx} api={api} refresh={sentCount} />
       <button onClick={onClose} className="py-2 text-sm text-[#98A2B3] bg-transparent border-0">
         Cancel
       </button>

@@ -69,6 +69,34 @@ export function parseMatches(v: unknown): { e164: string; paymail: string }[] {
     .map((m) => ({ e164: m.e164 as string, paymail: m.paymail as string }));
 }
 
+/** GET /api/bitsign/sms/drops → the sender's texts (bit-sign PR #304). Bad rows are dropped. */
+export function parseDrops(v: unknown): TextDrop[] {
+  const list = (v as { drops?: unknown })?.drops;
+  if (!Array.isArray(list)) return [];
+  const ok = new Set(['sent', 'claimed', 'reclaimed', 'failed']);
+  return list
+    .map((d) => d as Record<string, unknown>)
+    .filter(
+      (d) =>
+        typeof d.code === 'string' &&
+        typeof d.amount_sats === 'number' &&
+        typeof d.expires_at === 'string' &&
+        ok.has(d.status as string),
+    )
+    .map((d) => ({
+      code: d.code as string,
+      to: typeof d.to === 'string' ? d.to : '',
+      funded_address: typeof d.funded_address === 'string' ? d.funded_address : '',
+      amount_sats: d.amount_sats as number,
+      status: d.status as TextDrop['status'],
+      expires_at: d.expires_at as string,
+    }));
+}
+
+/** Same rule as bit-sign mayReclaim: after expiry, or at once when the text failed to send. */
+export const mayReclaim = (d: Pick<TextDrop, 'status' | 'expires_at'>, now = Date.now()) =>
+  d.status === 'failed' || (d.status === 'sent' && Date.parse(d.expires_at) <= now);
+
 export class PhoneApi {
   constructor(private readonly call: Caller) {}
 
@@ -118,6 +146,10 @@ export class PhoneApi {
       amount_sats: d.amount_sats,
       fragment: `k=${d.wif}&t=${d.funding_txid}`,
     }) as Promise<{ ok?: boolean; code?: string; to?: string; expires_at?: string }>;
+  }
+
+  async myDrops(): Promise<TextDrop[]> {
+    return parseDrops(await this.call('GET', DROPS));
   }
 
   reclaimed(code: string, sweepTxid: string) {

@@ -37,6 +37,12 @@ import { isNative } from './mobile/native';
 import { PAY_STREAM_ENABLED } from './mobile/storeBuild';
 import { guestMusicRoute } from './mobile/media/artists/guestRoute';
 import { guestNamesRoute } from './mobile/names/store/guestRoute';
+import { captureClaim } from './mobile/sms/claimLink';
+import { SmsClaimHost } from './mobile/sms/SmsClaimHost';
+
+// Pay by text (/claim/t/<code>#k=…): read the one-time key from the fragment and scrub it from the
+// address bar before anything else runs (mobile/sms/claimLink.ts). Web app only.
+const SMS_CLAIM = typeof window !== 'undefined' && isWebApp() ? captureClaim(window) : null;
 
 // bMusic artist/album pages are readable without a wallet on web/Desktop (bWalletX only: prices are not in a store
 // build). Decided once at load from the address bar; only those read-only routes (guestRoute.ts).
@@ -58,7 +64,7 @@ const UsbBackupRunner = () => {
 
 export const App = () => {
   const { theme } = useTheme();
-  const { isLocked, isReady, chromeStorageService, setIsLocked, isSwitchingAccount } = useServiceContext();
+  const { isLocked, isReady, chromeStorageService, setIsLocked, isSwitchingAccount, apiContext } = useServiceContext();
   const menuContext = useContext(BottomMenuContext);
 
   const walletBg = theme.color.global.walletBackground;
@@ -124,6 +130,7 @@ export const App = () => {
                 <SyncingBlocks />
                 <StorageRepairOverlay />
                 <SentHost />
+                {SMS_CLAIM && <SmsClaimHost ctx={apiContext} hasWallet={hasWallet} unlocked={!isLocked} />}
                 {IS_EXTENSION && <PanelPrompt />}
                 {showGuest && guestNames && guest && (
                   <Suspense fallback={<PageLoader message="Loading..." theme={theme} />}>
