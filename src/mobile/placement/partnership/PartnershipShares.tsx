@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Transaction } from '@bsv/sdk';
 import { Lock } from 'lucide-react';
 import { useServiceContext } from '../../../hooks/useServiceContext';
-import { defaultHttp, loadSession } from '../../chat/api';
+import { ChatApiError, defaultHttp, loadSession } from '../../chat/api';
 import { isNative } from '../../native';
 import { BsharesApi } from '../api';
 import { identityKey } from '../company';
@@ -91,6 +91,17 @@ function Partnership({ api, ticker, name }: { api: BsharesApi; ticker: string; n
     const dest = s.keys.find((k) => k.handle === to.replace(/^\$/, ''));
     if (!dest) throw new Error('Choose one of your partners');
     if (!/^\d+$/.test(amt) || BigInt(amt) <= 0n || BigInt(amt) > myTotal) throw new Error(`Up to ${myTotal} shares`);
+    // M comes from the signed agreement (server keyset), never from us: every locked input must already sit
+    // under exactly the agreement's keyset, or the mailbox refuses the proposal (409).
+    const want = [...ks!.pubKeys].sort().join();
+    for (const h of mine) {
+      const vout = Number(h.outpoint.split('.')[1]);
+      const lock = parsePartnerLock(Transaction.fromHex(h.rawTx).outputs[vout].lockingScript);
+      if (!lock || lock.m !== ks!.m || [...lock.pubKeys].sort().join() !== want)
+        throw new Error(
+          'Your locked shares are under an older partner key set. They need re-locking under the current agreement first.',
+        );
+    }
     const n = BigInt(amt);
     const outputs: Holding[] = [{ tokenId: s.tokenId!, amt: n, holder: dest.partnerKey }];
     if (myTotal - n > 0n) outputs.push({ tokenId: s.tokenId!, amt: myTotal - n, holder: s.myKey! });
@@ -176,7 +187,13 @@ function Partnership({ api, ticker, name }: { api: BsharesApi; ticker: string; n
                 style={{ background: GOLD, color: '#1a1300' }}
                 onClick={run(async () => {
                   const signed = await signProposal(ctx, p.proposal);
-                  await api.partnerLockAction(ticker, { action: 'sign', id: p.id, sigs: signed.sigs });
+                  try {
+                    await api.partnerLockAction(ticker, { action: 'sign', id: p.id, sigs: signed.sigs });
+                  } catch (e) {
+                    if (e instanceof ChatApiError && e.status === 409)
+                      throw new Error('A partner signed at the same moment. Reloaded: tap Sign again.');
+                    throw e;
+                  }
                   return 'Signed.';
                 })}
               >
@@ -190,8 +207,14 @@ function Partnership({ api, ticker, name }: { api: BsharesApi; ticker: string; n
                 className={btn}
                 style={{ background: GOLD, color: '#1a1300' }}
                 onClick={run(async () => {
+                  // Broadcast FIRST (the wallet, not the server), then report the txid; the server checks it on chain.
                   const { txid, rawTx } = await broadcastProposal(p.proposal);
-                  await api.partnerLockAction(ticker, { action: 'broadcast', id: p.id, txid });
+                  try {
+                    await api.reportBroadcast(ticker, p.id, txid);
+                  } catch (e) {
+                    const why = e instanceof Error ? e.message : 'not recorded';
+                    return `Sent to the network (${txid.slice(0, 12)}…), but the record did not update: ${why}`;
+                  }
                   const tx = Transaction.fromHex(rawTx);
                   for (const [vout, o] of tx.outputs.entries()) {
                     const h = parsePartnerLock(o.lockingScript);
