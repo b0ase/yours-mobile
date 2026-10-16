@@ -15,7 +15,8 @@ import {
   type Resolved,
 } from './names';
 import { liveDomains, withDomain } from './paymailDomains';
-import { APP_NAME } from '../storeBuild';
+import { BWALLET_PAYMAIL_DOMAIN } from './config';
+import { payeeDetail, recipientHint } from './payeeText';
 
 /**
  * Recipient box for the Send screens (build-time swap for upstream's address <Input>, see
@@ -36,6 +37,8 @@ type Props = {
    */
   autoConfirm?: boolean;
   /** What the box is doing, plus the resolved name when there is one. */
+  /** Send card: a taller box with larger text (phone-first, big tap target). */
+  big?: boolean;
   onStatus?: (status: 'empty' | 'typing' | 'loading' | 'error' | 'ready', resolved?: Resolved) => void;
 };
 
@@ -47,7 +50,7 @@ const pickedDomain = (typed: string) => {
 
 const short = (s: string) => (s.length > 22 ? `${s.slice(0, 10)}…${s.slice(-8)}` : s);
 
-export const NameInput = ({ theme, value, onChange, asset, placeholder, style, autoConfirm, onStatus }: Props) => {
+export const NameInput = ({ theme, value, onChange, asset, placeholder, style, autoConfirm, onStatus, big }: Props) => {
   const [text, setText] = useState(value);
   const [state, setState] = useState<
     { s: 'idle' } | { s: 'loading' } | { s: 'error'; msg: string } | { s: 'resolved'; r: Resolved; confirmed: boolean }
@@ -146,20 +149,20 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
     <div style={{ width: style?.width ?? '85%', margin: style?.margin ?? '0 auto' }} className="flex flex-col gap-2">
       <Input
         theme={theme}
-        placeholder={placeholder ?? `$name (${APP_NAME}), paymail or address`}
+        placeholder={placeholder ?? recipientHint(BWALLET_PAYMAIL_DOMAIN)}
+        aria-label="Recipient: $name, paymail or address"
         type="text"
         autoCapitalize="none"
         autoCorrect="off"
         spellCheck={false}
         onChange={(e) => onType(e.target.value)}
         value={text}
-        style={{ width: '100%', margin: 0 }}
+        style={big ? { width: '100%', margin: 0, height: 52, fontSize: 16 } : { width: '100%', margin: 0 }}
       />
       <div className="flex items-center justify-end gap-1 text-[11px]" style={{ color: gray }}>
-        <label htmlFor="bw-paymail-domain">Pay to</label>
         <select
           id="bw-paymail-domain"
-          aria-label="Paymail domain"
+          aria-label="Name from another wallet"
           value={pickedDomain(text)}
           onFocus={loadDomains}
           onMouseDown={loadDomains}
@@ -171,7 +174,8 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
           className="bg-transparent border-0 text-[11px] cursor-pointer"
           style={{ color: fg }}
         >
-          <option value="">bWalletX</option>
+          {/* Never a bare "bWalletX" here: it read like a payment to us (owner, 16 Oct 2026). */}
+          <option value="">From another wallet?</option>
           {[...new Set([...(domains ?? []), pickedDomain(text)].filter(Boolean))].map((d) => (
             <option key={d} value={d}>
               {d} (other wallet)
@@ -216,7 +220,7 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
                     {r.displayName ?? r.input}
                   </div>
                   <div className="text-[11px] truncate" style={{ color: gray }}>
-                    {r.input} → {short(d.ok ? d.to : r.target)}
+                    {payeeDetail(r.input, d.ok ? d.to : r.target, short)}
                   </div>
                   <div className="text-[10px]" style={{ color: gray }}>
                     {asset === 'token' && d.ok && r.via !== 'opns-owner' ? 'Paymail ordinal address' : VIA_LABEL[r.via]}
