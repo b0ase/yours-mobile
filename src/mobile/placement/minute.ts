@@ -20,7 +20,22 @@ export const EXCESS_CHOICES: readonly ExcessChoice[] = ['refund', 'premium'];
 export const isExcessChoice = (v: unknown): v is ExcessChoice => v === 'refund' || v === 'premium';
 
 export type MinuteInput = {
-  company: { name: string; number: string };
+  /**
+   * The company, from its bShares company row (never env). refPrefix is the minute reference prefix
+   * (default 'BCORP'; other companies use their ticker upper-cased). authorisedArticle names the article
+   * that sets the authorised ceiling (default 'Article 19.1', bCorp's); null omits the article citation.
+   */
+  company: {
+    name: string;
+    number: string;
+    refPrefix?: string;
+    authorisedArticle?: string | null;
+    recordsArticle?: string | null;
+  };
+  /** Every serving director (from company_directors). One director → sole-director minute. Defaults to [director]. */
+  directors?: { name: string; handle: string }[];
+  /** The company's treasury multisig (default 2-of-3, keys held by the director). */
+  treasury?: { m: number; n: number };
   /** Allotment date, YYYY-MM-DD. */
   date: string;
   /** Next minute number in the company's sequence (the NNN in BCORP-BM-<date>-NNN). */
@@ -90,11 +105,17 @@ function addMonths(iso: string, months: number): string {
   return t.toISOString().slice(0, 10);
 }
 
-export const minuteRef = (date: string, minuteNumber: number) => {
+export const minutePrefix = (p?: string) => {
+  const v = (p || 'BCORP').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!v || v.length > 12) throw new Error('minute prefix must be 1–12 letters or digits');
+  return v;
+};
+
+export const minuteRef = (date: string, minuteNumber: number, prefix?: string) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('minute date must be YYYY-MM-DD');
   if (!Number.isInteger(minuteNumber) || minuteNumber < 1 || minuteNumber > 999)
     throw new Error('minute number must be 1–999');
-  return `BCORP-BM-${date}-${String(minuteNumber).padStart(3, '0')}`;
+  return `${minutePrefix(prefix)}-BM-${date}-${String(minuteNumber).padStart(3, '0')}`;
 };
 
 /** Excess over the quoted amount, never negative. */
@@ -108,7 +129,12 @@ export const excessRefundDue = (o: {
 }) => o.excessChoice === 'refund' && (o.excessSats ?? 0) > 0 && !o.excessRefundTxid;
 
 export function allotmentMinute(i: MinuteInput): Minute {
-  const ref = minuteRef(i.date, i.minuteNumber);
+  const ref = minuteRef(i.date, i.minuteNumber, i.company.refPrefix);
+  const directors = i.directors && i.directors.length ? i.directors : [i.director];
+  const sole = directors.length === 1;
+  const article = i.company.authorisedArticle === undefined ? 'Article 19.1' : i.company.authorisedArticle;
+  const recordsArticle = i.company.recordsArticle === undefined ? 'Article 19.3' : i.company.recordsArticle;
+  const treasury = i.treasury ?? { m: 2, n: 3 };
   const { offer, payment, register } = i;
   const excess = excessSats(payment.paidSats, offer.sats);
   if (excess > 0 && !payment.excessChoice) throw new Error('an excess needs the investor’s refund/premium choice');
@@ -151,8 +177,10 @@ export function allotmentMinute(i: MinuteInput): Minute {
       `Issued capital after allotment: ${n(issuedAfter)} ordinary shares (${nominal(issuedAfter * register.nominalNanoPounds)})`,
       `Resulting percentage: ${pct}%`,
       (register.authorised != null
-        ? `The allotment is within the authorised limit of ${n(register.authorised)} ordinary shares under Article 19.1, and the director`
-        : 'The director') +
+        ? `The allotment is within the authorised limit of ${n(register.authorised)} ordinary shares` +
+          (article ? ` under ${article}` : '') +
+          `, and the ${sole ? 'director' : 'board'}`
+        : `The ${sole ? 'director' : 'board'}`) +
         ' is authorised to allot under section 550 of the Companies Act 2006, the Company having one class of shares.',
     ],
   ]);
@@ -201,20 +229,20 @@ export function allotmentMinute(i: MinuteInput): Minute {
   sections.push([
     'Direction to file and to record',
     [
-      'The director is authorised and directed to:',
+      `The ${sole ? 'director is' : 'directors are'} authorised and directed to:`,
       `Enter the Subscriber in the register of members in respect of the shares allotted.`,
       `Issue certificate number ${register.certificate} and the $403 share token to the Subscriber.`,
       `Deliver form SH01 to the Registrar of Companies within one month of allotment under section 555, ` +
         `that is on or before ${longDate(addMonths(i.date, 1))}, recording the consideration as non-cash.`,
-      'Reconcile the blockchain records maintained under Article 19.3 to the register.',
+      `Reconcile the blockchain records${recordsArticle ? ` maintained under ${recordsArticle}` : ''} to the register.`,
     ],
   ]);
 
   sections.push([
     'Treasury',
     [
-      'The consideration was received at the Company’s treasury, a 2-of-3 multisignature output whose keys are ' +
-        'held by the director. The whole of it is investor subscription capital of the Company and is not a ' +
+      `The consideration was received at the Company’s treasury, a ${treasury.m}-of-${treasury.n} multisignature output whose keys are ` +
+        `held by the ${sole ? 'director' : 'directors'}. The whole of it is investor subscription capital of the Company and is not a ` +
         'director’s loan.',
     ],
   ]);
@@ -223,11 +251,13 @@ export function allotmentMinute(i: MinuteInput): Minute {
     i.company.name.toUpperCase(),
     `Company Number ${i.company.number}`,
     '',
-    'MINUTE OF A DECISION OF THE SOLE DIRECTOR',
+    sole ? 'MINUTE OF A DECISION OF THE SOLE DIRECTOR' : 'MINUTE OF A MEETING OF THE BOARD OF DIRECTORS',
     'made under section 248 of the Companies Act 2006',
     '',
     `Date: ${longDate(i.date)} · Reference: ${ref}`,
-    `Present: ${i.director.name}, sole director`,
+    sole
+      ? `Present: ${i.director.name}, sole director`
+      : `Present: ${directors.map((d) => d.name).join(', ')} (directors); ${i.director.name} in the chair`,
   ];
   sections.forEach(([heading, paras], k) => {
     lines.push('', `${k + 1}. ${heading}`);
@@ -240,8 +270,8 @@ export function allotmentMinute(i: MinuteInput): Minute {
   });
   lines.push(
     '',
-    `Sole Director of ${i.company.name}`,
-    `${i.director.name} · Sole Director · $${i.director.handle}`,
+    sole ? `Sole Director of ${i.company.name}` : `Chair, for the Board of ${i.company.name}`,
+    `${i.director.name} · ${sole ? 'Sole Director' : 'Director, Chair'} · $${i.director.handle}`,
     `Date: ${longDate(i.date)}`,
     '',
     `${i.company.name} · Company Number ${i.company.number}`,
