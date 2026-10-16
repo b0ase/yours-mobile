@@ -728,7 +728,7 @@ const Conversation = ({
       }}
     >
       <div
-        className="flex items-center gap-3 px-2 pb-2 shrink-0"
+        className="bw-room-head flex items-center gap-3 px-2 pb-2 shrink-0"
         style={{
           paddingTop: 8,
           background: 'linear-gradient(180deg, #16140c 0%, #0b0b0b 100%)',
@@ -876,7 +876,7 @@ const Conversation = ({
       <div
         ref={scroller}
         onScroll={onScroll}
-        className="flex-1 overflow-y-auto px-3 py-2"
+        className="bw-room-list flex-1 overflow-y-auto px-3 py-2"
         style={{ background: 'radial-gradient(120% 60% at 50% 0%, #15130b 0%, #050505 60%)' }}
       >
         {loadingOlder && (
