@@ -91,6 +91,12 @@ describe('routing and ranking', () => {
 });
 
 describe('examples', () => {
+  test('no example mail on the phone build (real or removed)', async () => {
+    const { examplesAllowed } = await import('./examples');
+    expect(examplesAllowed(true)).toBe(false);
+    expect(examplesAllowed(false)).toBe(true);
+  });
+
   test('examples are display-only: ids can never be real message ids, inbox and requests both covered', async () => {
     const { EXAMPLES } = await import('./examples');
     for (const e of EXAMPLES) expect(/^[0-9a-f]{8,64}$/i.test(e.id)).toBe(false);
