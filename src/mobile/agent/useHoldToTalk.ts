@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { BHoldPhase } from '../phone/gesture';
 import { createHoldToTalk, type HoldToTalk, type HoldToTalkOptions, type TalkSheet } from './holdToTalk';
-import { hapticTick, startVoice, voiceSupported } from './voice';
+import { hapticTick, primeVoice, startVoice, unprimeVoice, voiceSupported } from './voice';
 
 type Callbacks = Pick<HoldToTalkOptions, 'onTap' | 'onListen' | 'onResult' | 'onUnsupportedRelease' | 'onCancel'>;
 
@@ -9,6 +9,10 @@ type Callbacks = Pick<HoldToTalkOptions, 'onTap' | 'onListen' | 'onResult' | 'on
  * React side of createHoldToTalk: phase + sheet state and the touch/pointer/key handlers for a b button.
  * Touch events drive touch (WKWebView may cancel pointer events mid-hold); pointer events drive mouse and pen.
  */
+const stopNative = (e: Event) => {
+  if (e.cancelable) e.preventDefault();
+};
+
 export function useHoldToTalk(cb: Callbacks & { disabled?: boolean }) {
   const latest = useRef(cb);
   latest.current = cb;
@@ -32,6 +36,8 @@ export function useHoldToTalk(cb: Callbacks & { disabled?: boolean }) {
       start: startVoice,
       supported: () => known.current,
       haptic: hapticTick,
+      prime: () => void primeVoice(),
+      unprime: unprimeVoice,
     });
   const c = ctl.current;
 
@@ -51,11 +57,26 @@ export function useHoldToTalk(cb: Callbacks & { disabled?: boolean }) {
     };
   }, [c]);
 
+  // iOS Safari / home-screen apps: a long press opens the callout (the card with the three dots) and can
+  // cancel the hold. React's touchstart is passive, so preventDefault has to go on a native listener.
+  const node = useRef<HTMLElement | null>(null);
+  const ref = (el: HTMLElement | null) => {
+    if (node.current === el) return;
+    node.current?.removeEventListener('touchstart', stopNative);
+    node.current?.removeEventListener('contextmenu', stopNative);
+    node.current?.removeEventListener('selectstart', stopNative);
+    node.current = el;
+    el?.addEventListener('touchstart', stopNative, { passive: false });
+    el?.addEventListener('contextmenu', stopNative);
+    el?.addEventListener('selectstart', stopNative);
+  };
+
   const begin = (x: number, y: number) => {
     if (latest.current.disabled) return;
     c.down(x, y);
   };
   const handlers = {
+    ref,
     onTouchStart: (e: React.TouchEvent) => {
       lastTouch.current = Date.now();
       const t = e.touches[0];
