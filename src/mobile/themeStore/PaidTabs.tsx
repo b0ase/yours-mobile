@@ -7,7 +7,7 @@ import { holderUnlocked, type ThemePack } from '../theme/themePack';
 import { applyPack, byTier } from './catalog';
 import type { StoreTab } from './ThemeStorePage';
 import { S } from './styles';
-import { PackCard, StatusList } from './ui';
+import { Empty, PackCard, PreviewSheet, StatusList } from './ui';
 
 // The existing "Get your own edition" order flow ($99 a year), itself bWalletX only.
 const ThemeOrderSheet = THEME_ORDERS_ENABLED ? lazy(() => import('../themeOrder/ThemeOrderSheet')) : null;
@@ -27,21 +27,33 @@ export default function PaidTabs({ tab, packs, account }: { tab: StoreTab; packs
 const usd = (n: number) => `$${n.toFixed(2)}`;
 
 function Premium({ packs }: { packs: ThemePack[] }) {
+  const [open, setOpen] = useState<ThemePack | null>(null);
   return (
     <>
       {packs.length ? (
         <div style={S.grid}>
           {packs.map((p) => (
-            <PackCard key={p.id} p={p}>
-              <p style={S.muted}>{p.price_usd ? usd(p.price_usd) : ''} · paid to the creator</p>
-              <button type="button" style={S.ghost} disabled>
-                Coming soon
+            <PackCard key={p.id} p={p} price={p.price_usd ? usd(p.price_usd) : undefined} onOpen={() => setOpen(p)}>
+              <button type="button" style={{ ...S.ghost, width: '100%' }} disabled>
+                Buy · Coming soon
               </button>
             </PackCard>
           ))}
         </div>
       ) : (
-        <p style={S.empty}>Premium themes from creators are coming soon, about $1 each, paid to the creator.</p>
+        <Empty title="No premium themes yet">Themes from creators, about $1 each, paid to the creator.</Empty>
+      )}
+      {open && (
+        <PreviewSheet
+          p={open}
+          inUse={false}
+          price={open.price_usd ? usd(open.price_usd) : undefined}
+          onClose={() => setOpen(null)}
+        >
+          <button type="button" style={S.ghost} disabled>
+            Buy · Coming soon (paid to the creator)
+          </button>
+        </PreviewSheet>
       )}
       <StatusList
         items={[
@@ -73,9 +85,9 @@ function Holders({ packs, account }: { packs: ThemePack[]; account: string }) {
           {packs.map((p) => {
             const open = held ? holderUnlocked(p, held) : false;
             return (
-              <PackCard key={p.id} p={p}>
+              <PackCard key={p.id} p={p} price={p.token ? `$${p.token.symbol}` : undefined}>
                 {open ? (
-                  <button type="button" style={S.btn} onClick={() => applyPack(account, p)}>
+                  <button type="button" style={{ ...S.btn, width: '100%' }} onClick={() => applyPack(account, p)}>
                     Apply
                   </button>
                 ) : (
@@ -88,7 +100,7 @@ function Holders({ packs, account }: { packs: ThemePack[]; account: string }) {
           })}
         </div>
       ) : (
-        <p style={S.empty}>Token themes unlock free while your wallet holds the token. None listed yet.</p>
+        <Empty title="No token themes yet">Token themes unlock free while your wallet holds the token.</Empty>
       )}
       <StatusList
         items={[
@@ -107,9 +119,7 @@ function Editions({ packs }: { packs: ThemePack[] }) {
       {packs.length > 0 && (
         <div style={{ ...S.grid, marginBottom: 16 }}>
           {packs.map((p) => (
-            <PackCard key={p.id} p={p}>
-              <p style={S.muted}>Edition</p>
-            </PackCard>
+            <PackCard key={p.id} p={p} price="Edition" />
           ))}
         </div>
       )}
