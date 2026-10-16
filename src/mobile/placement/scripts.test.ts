@@ -123,8 +123,8 @@ describe('share lock: parsing and labels', () => {
     expect(() => unlockHeightAfterMonths(900_000, 0)).toThrow();
   });
   test('wallet label', () => {
-    expect(shareLabel(1_000_000, UNTIL, UNTIL - 1)).toBe('bCorp shares · 1,000,000 · locked 2-of-2');
-    expect(shareLabel(5, UNTIL, UNTIL)).toBe('bCorp shares · 5 · unlocked');
+    expect(shareLabel(1_000_000, UNTIL, UNTIL - 1, 'Acme Ltd')).toBe('Acme Ltd shares · 1,000,000 · locked 2-of-2');
+    expect(shareLabel(5, UNTIL, UNTIL)).toBe('Shares · 5 · unlocked');
   });
 });
 

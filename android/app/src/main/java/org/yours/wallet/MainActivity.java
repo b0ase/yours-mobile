@@ -11,6 +11,14 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(YoursNativePlugin.class);
         registerPlugin(SpaceSessionPlugin.class);
+        // Direct APK only: the in-app updater lives in src/direct (not compiled into Play), so load it by name.
+        if ("android-direct".equals(BuildConfig.CHANNEL)) {
+            try {
+                registerPlugin(Class.forName("org.yours.wallet.ApkUpdatePlugin").asSubclass(com.getcapacitor.Plugin.class));
+            } catch (ClassNotFoundException ignored) {
+                // Not in this flavour.
+            }
+        }
         super.onCreate(savedInstanceState);
         // Keep seed phrases and balances out of screenshots, screen recordings
         // and the recent-apps thumbnail. Debug builds skip it so QA can capture.

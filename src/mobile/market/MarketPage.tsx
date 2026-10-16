@@ -2,15 +2,28 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } fro
 import { assertOrdLockV2 } from './ordlockVersion';
 import { purchaseError } from '../exchange/purchase';
 import { useTabHome } from '../tabs/useTabHome';
-import { xAccountRows } from './xAccounts';
+import { cachedExchangeRate } from '../../utils/wallet';
 import { useBackClose } from '../backStack';
-import { IssuerBadge, SharedTickerNote } from '../issuer/IssuerBadge';
-import { duplicateTickers, sharedTickerWarning } from '../issuer/issuerVerify';
+import { IssuerBadge } from '../issuer/IssuerBadge';
+import { duplicateTickers } from '../issuer/issuerVerify';
 import { isPersonalTokenId, knownPersonal, tickerLabel } from '../names/personalToken';
 import type { WalletOutput } from '@bsv/sdk';
 import { buyBsv21, buyOrdinal, cancelOrdinalListing, listOrdinals } from '@1sat/actions';
 import { readAssetIdTag } from '@1sat/types';
-import { ArrowLeft, Coins, Flag, Flame, Image as ImageIcon, Rocket, Search, ShieldCheck, Tag, X } from 'lucide-react';
+import {
+  ArrowLeft,
+  Coins,
+  Flag,
+  Flame,
+  Image as ImageIcon,
+  Palette,
+  Rocket,
+  Search,
+  ShieldCheck,
+  Tag,
+  X,
+} from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { TopNav } from '../../components/TopNav';
 import { PageLoader } from '../../components/PageLoader';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -43,6 +56,8 @@ import { thumbOrFullUrls } from './thumbs';
 import { pauseAudio, playQueue } from '../media/player';
 import { OpenTokenRoomButton } from '../chat/OpenTokenRoomButton';
 import { TokenLinks } from '../tokens/TokenLinks';
+import { TokenIdentity } from '../tokens/TokenIdPanel';
+import { shortTokenId } from '../tokens/tokenIdentity';
 import { onTokenNav, takeMarketNft, takeMarketToken } from '../chat/nav';
 import { showOnWallet } from '../tokens/indexFund';
 import { isBappToken, unlaunchedBapps } from './bappTokens';
@@ -125,11 +140,12 @@ type View = 'collections' | NftCategory;
  * Curve coins = bonding-curve coins (./launchpad/tile.ts), not in a store build.
  * Tickets = rooms you can buy into (src/mobile/tickets/TicketsPanel.tsx).
  */
-type TokenFilter = 'all' | 'social' | 'bapps' | typeof CURVE_FILTER | 'tickets';
+type TokenFilter = 'all' | 'names' | 'bapps' | typeof CURVE_FILTER | 'tickets';
 // Store build: no Tickets or curve coins (storeBuild.ts).
 const TOKEN_FILTERS: [TokenFilter, string, boolean][] = marketFiltersFor<[TokenFilter, string, boolean]>([
   ['all', 'All tokens', true],
-  ['social', 'Friends', true], // shown as Friends (owner, 6 Oct 2026); id stays 'social'
+  // Names (owner, 15 Oct 2026; replaces Friends: people aren't bought and sold, names are): the OpNS names market.
+  ['names', 'Names', true],
   ['bapps', 'bApps', true],
   ...(CURVE_COINS_ENABLED ? [[CURVE_FILTER, CURVE_LABEL, true] as [TokenFilter, string, boolean]] : []),
   ['tickets', 'Tickets', true],
@@ -138,6 +154,8 @@ const TRADING = marketTradingEnabled();
 // Curve coins load on demand and only outside a store build: CURVE_COINS_ENABLED folds to false there
 // and Rollup drops ./launchpad/* entirely (code, strings and sourcemap sources).
 const CurvePanel = CURVE_COINS_ENABLED ? lazy(loadCurvePanel) : null;
+// The Names tile shows the Exchange's OpNS names market (the same screen as Exchange › Names).
+const OpnsMarket = lazy(() => import('../exchange/OpnsMarket').then((m) => ({ default: m.OpnsMarket })));
 // three.js viewer for a 3D (GLB) listing: same gate as the 3D tab, so three.js stays out of a store build.
 const ModelPreview = TOKENBLASTER_ENABLED
   ? lazy(() => import('../three3d/Cabinet').then((m) => ({ default: m.ModelPreview })))
@@ -308,6 +326,24 @@ const MarketPage = () => {
     setMarket(await roomMarket(r.ref));
   };
 
+  // Open a token / collection page by id (never by ticker: tickers aren't unique).
+  const openRoomById = (kind: string, id: string) => {
+    const ref = parseRoom(kind, id);
+    if (!ref) return;
+    void roomMeta(ref.kind, ref.id).then((m) =>
+      openRoom({
+        ref,
+        title: m?.title ?? (ref.kind === 'bsv21' ? 'Token' : 'Collection'),
+        subtitle: m?.subtitle ?? '',
+        icon: m?.icon ?? null,
+        trades: 0,
+        newListings: 0,
+        floorLabel: null,
+        heat: 0,
+      }),
+    );
+  };
+
   // "Buy in Market" from a locked token room in Chat: open that token's page.
   useEffect(() => {
     const take = () => {
@@ -317,23 +353,11 @@ const MarketPage = () => {
         setPreview(nft);
       }
       const want = takeMarketToken();
-      const ref = want && parseRoom(want.kind, want.id);
-      if (!ref) return;
-      void roomMeta(ref.kind, ref.id).then((m) =>
-        openRoom({
-          ref,
-          title: m?.title ?? (ref.kind === 'bsv21' ? 'Token' : 'Collection'),
-          subtitle: m?.subtitle ?? '',
-          icon: m?.icon ?? null,
-          trades: 0,
-          newListings: 0,
-          floorLabel: null,
-          heat: 0,
-        }),
-      );
+      if (want) openRoomById(want.kind, want.id);
     };
     take();
     return onTokenNav(take);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only listener; openRoomById only sets state
   }, []);
 
   const buy = async ({ room: r, listing }: Pending) => {
@@ -396,7 +420,7 @@ const MarketPage = () => {
   type Cat = { id: string; label: string; kind: Kind; token?: TokenFilter; view?: View; soon?: boolean };
   const CATS: Cat[] = [
     { id: 'tokens', label: 'Tokens', kind: 'tokens', token: 'all' },
-    { id: 'social', label: 'Friends', kind: 'tokens', token: 'social' },
+    { id: 'names', label: 'Names', kind: 'tokens', token: 'names' },
     { id: 'music', label: 'Music', kind: 'nfts', view: 'music' },
     { id: 'video', label: 'Video', kind: 'nfts', view: 'video' },
     { id: 'images', label: 'Images', kind: 'nfts', view: 'images' },
@@ -436,18 +460,28 @@ const MarketPage = () => {
   const launchOn = CURVE_COINS_ENABLED && activeCat === CURVE_FILTER;
   const categoryTiles = (
     <div className="flex flex-col gap-1.5">
-      {CURVE_COINS_ENABLED && (
-        <button
-          type="button"
-          aria-pressed={launchOn}
-          onClick={() => pick({ id: CURVE_FILTER, label: CURVE_LABEL, kind: 'tokens', token: CURVE_FILTER })}
-          className="bw-pill bw-pill-gold flex min-h-[44px] w-full items-center justify-center gap-2 py-2.5 text-sm font-bold"
-          style={launchOn ? { boxShadow: '0 0 0 2px #010101, 0 0 0 4px var(--bw-accent)' } : { opacity: 0.85 }}
+      {/* Launchpad (left half, never in a store build) + Theme Store (right half, or the full width alone). */}
+      <div className="flex gap-1.5">
+        {CURVE_COINS_ENABLED && (
+          <button
+            type="button"
+            aria-pressed={launchOn}
+            onClick={() => pick({ id: CURVE_FILTER, label: CURVE_LABEL, kind: 'tokens', token: CURVE_FILTER })}
+            className="bw-pill bw-pill-gold flex min-h-[44px] flex-1 basis-0 items-center justify-center gap-2 py-2.5 text-sm font-bold"
+            style={launchOn ? { boxShadow: '0 0 0 2px #010101, 0 0 0 4px var(--bw-accent)' } : { opacity: 0.85 }}
+          >
+            <Rocket size={16} /> {CURVE_LABEL}
+            {launchOn && <span className="text-[10px] font-semibold uppercase tracking-wide">· open</span>}
+          </button>
+        )}
+        <Link
+          to="/m/store"
+          className="bw-pill bw-pill-gold flex min-h-[44px] flex-1 basis-0 items-center justify-center gap-2 py-2.5 text-sm font-bold no-underline"
+          style={{ opacity: 0.85 }}
         >
-          <Rocket size={16} /> {CURVE_LABEL}
-          {launchOn && <span className="text-[10px] font-semibold uppercase tracking-wide">· open</span>}
-        </button>
-      )}
+          <Palette size={16} /> Store
+        </Link>
+      </div>
       <div className="grid grid-cols-4 gap-1.5" role="tablist" aria-label="What's for sale">
         {CATS.map((c) => {
           const on = !c.soon && activeCat === c.id;
@@ -585,25 +619,12 @@ const MarketPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [rooms, directory, safetyRev],
   );
-  // Friends: people's personal tokens (xAccounts.ts), loaded when the filter opens.
-  const [xRows, setXRows] = useState<HotRoom[] | null>(null);
-  useEffect(() => {
-    if (tokenFilter !== 'social') return;
-    let live = true;
-    xAccountRows(tokenRows)
-      .then((r) => live && setXRows(r))
-      .catch(() => live && setXRows([]));
-    return () => {
-      live = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tokenFilter, tokenRows.length]);
   // Search (owner, 5 Oct 2026): ticker or token id, across every token whatever the filter.
   const query = q.trim().replace(/^\$/, '').toLowerCase();
   const searched = useMemo(() => {
     if (!query) return null;
     const all = new Map<string, HotRoom>();
-    for (const r of [...tokenRows, ...(xRows ?? [])]) all.set(r.ref.key, r);
+    for (const r of tokenRows) all.set(r.ref.key, r);
     const hits = [...all.values()].filter(
       (r) => r.title.replace(/^\$/, '').toLowerCase().includes(query) || r.ref.id.toLowerCase() === query,
     );
@@ -626,14 +647,12 @@ const MarketPage = () => {
         heat: 0,
       });
     return hits;
-  }, [query, q, tokenRows, xRows]);
+  }, [query, q, tokenRows]);
   const filteredTokens = searched
     ? searched
     : tokenFilter === 'bapps'
       ? tokenRows.filter((r) => isBappToken(r.ref.id))
-      : tokenFilter === 'social'
-        ? (xRows ?? [])
-        : tokenRows;
+      : tokenRows;
   const visibleTokens = filteredTokens.slice(0, shown);
   // Tickers are not unique: flag every ticker more than one token id uses (issuer check on those rows).
   const dupTickers = useMemo(
@@ -708,14 +727,6 @@ const MarketPage = () => {
           <ErrorActions message={String(error)} />
         </div>
       )}
-      {tokenFilter === 'social' && xRows === null && (
-        <p className="text-xs text-[#98A2B3] text-center py-8">Loading people's tokens…</p>
-      )}
-      {tokenFilter === 'social' && xRows !== null && xRows.length === 0 && (
-        <p className="text-xs text-[#98A2B3] text-center py-8">
-          No personal tokens yet. Claim your name and mint your $NAME token to be the first.
-        </p>
-      )}
       {searched?.length === 0 && (
         <p className="text-xs text-[#98A2B3] text-center py-8">No token matches “{q.trim()}”.</p>
       )}
@@ -740,7 +751,6 @@ const MarketPage = () => {
       {!searched &&
         !directoryFailed &&
         tokenFilter !== 'bapps' &&
-        tokenFilter !== 'social' &&
         filteredTokens.length === 0 &&
         rooms !== null &&
         directory !== null &&
@@ -770,7 +780,12 @@ const MarketPage = () => {
                 {r.heat > 0 && <Flame size={11} className="inline ml-1" style={{ color: '#A1FF8B' }} />}
               </div>
               <div className={`text-[11px] text-[#98A2B3] ${ELLIPSIS}`}>{['Token', ...stats].join(' · ')}</div>
-              {dupFor(r.title) && <IssuerBadge tokenId={r.ref.id} compact />}
+              {dupFor(r.title) && (
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="text-[10px] font-mono text-[#667085] shrink-0">{shortTokenId(r.ref.id)}</span>
+                  <IssuerBadge tokenId={r.ref.id} compact />
+                </div>
+              )}
             </div>
             <div className="text-right shrink-0">
               <div className="text-[10px] text-[#667085]">Floor</div>
@@ -864,11 +879,6 @@ const MarketPage = () => {
       >
         <ArrowLeft size={14} /> {ticketPage ? 'Tickets' : 'Trending'}
       </button>
-      {room.ref.kind === 'bsv21' && (
-        <SharedTickerNote
-          text={sharedTickerWarning(room.title.replace(/^\$/, ''), dupFor(room.title) ?? [room.ref.id])}
-        />
-      )}
       <div className="flex items-center gap-3">
         <Art outpoint={room.icon} kind={room.ref.kind} collectionId={room.ref.id} />
         <div className="min-w-0">
@@ -895,6 +905,13 @@ const MarketPage = () => {
           />
         )}
       </div>
+      {room.ref.kind === 'bsv21' && !ticketPage && (
+        <TokenIdentity
+          tokenId={room.ref.id}
+          ticker={room.title === 'Token' ? null : room.title}
+          onPick={(id) => openRoomById('bsv21', id)}
+        />
+      )}
       {room.ref.kind === 'bsv21' && !ticketPage && <TokenLinks tokenId={room.ref.id} sym={room.title} />}
       {ticketPage && (
         <div className="text-[11px] leading-relaxed text-[#98A2B3] rounded-xl bg-[var(--bw-surface)] px-3 py-2.5">
@@ -1090,6 +1107,10 @@ const MarketPage = () => {
           tokenFilter === CURVE_FILTER && CurvePanel ? (
             <Suspense fallback={null}>
               <CurvePanel />
+            </Suspense>
+          ) : tokenFilter === 'names' ? (
+            <Suspense fallback={null}>
+              <OpnsMarket rate={cachedExchangeRate()} />
             </Suspense>
           ) : tokenFilter === 'tickets' ? (
             <TicketsPanel

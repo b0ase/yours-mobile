@@ -7,10 +7,16 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { useTheme } from '../../hooks/useTheme';
 import { AssetRow } from '../../components/AssetRow';
 import { getPersonalLink, onPersonalChange } from '../names/personalToken';
+import { publishBalance } from './balanceStore';
+import { publishHeldTokens } from './cardValue';
 import { PNEE_DECIMALS, PNEE_ICON, PNEE_TOKEN_ID, unindexedPnee } from '../notes/pnee';
 import { BACK_PNEE_LABEL, BACK_PNEE_ROUTE } from '../notes/backPnee';
 import { Lock } from 'lucide-react';
 import bGlyph from '../brand/bwallet-glyph.svg';
+import { CoinRow } from './CoinRow';
+import { TokenSwipe } from './TokenSwipe';
+import { useTokenRows } from './tokenRows';
+import { lockRouteFor } from './rowLock';
 
 type Bal = { id: string; amount: number; icon: string | null };
 
@@ -18,7 +24,15 @@ type Bal = { id: string; amount: number; icon: string | null };
  * Wallet › default balances under BSV and MNEE (owner, 5 Oct 2026): Penny Notes ($PNEE, shown in dollars) and, while
  * you hold none of it, the account's own $HANDLE token, so the cards people care about are always there.
  */
-export const DefaultTokenCards = () => {
+type Props = {
+  /** Send a held BSV-21 token by id (the PNEEs row). */
+  onSendToken?: (tokenId: string) => void;
+  onReceive?: () => void;
+  onChat?: () => void;
+};
+
+export const DefaultTokenCards = ({ onSendToken, onReceive, onChat }: Props = {}) => {
+  const rows = useTokenRows();
   const { apiContext, chromeStorageService } = useServiceContext();
   const { theme } = useTheme();
   const navigate = useNavigate();
@@ -35,15 +49,18 @@ export const DefaultTokenCards = () => {
     void heldBsv21Balances(apiContext)
       .then((rows) => {
         if (!live) return;
-        setBals(
-          rows
-            .filter((r) => r.id)
-            .map((r) => ({
-              id: r.id!,
-              amount: Number(r.all.confirmed) / 10 ** (r.dec ?? 0),
-              icon: r.icon ? `https://ordfs.network/${r.icon}` : null,
-            })),
-        );
+        // The Tokens card's real count: BSV-21 tokens this wallet holds (published only after a successful fetch).
+        publishBalance('tokens', rows.filter((r) => r.id && Number(r.all.confirmed) > 0).length, 'tokens');
+        const held = rows
+          .filter((r) => r.id)
+          .map((r) => ({
+            id: r.id!,
+            amount: Number(r.all.confirmed) / 10 ** (r.dec ?? 0),
+            icon: r.icon ? `https://ordfs.network/${r.icon}` : null,
+          }));
+        setBals(held);
+        // The Tokens card's value: what each held token is worth, summed (cardValue.ts).
+        publishHeldTokens(held.map(({ id, amount }) => ({ id, amount })));
       })
       .catch(() => {});
     return () => {
@@ -62,7 +79,9 @@ export const DefaultTokenCards = () => {
     };
   }, [indexed, addrs?.bsvAddress, addrs?.ordAddress, addrs?.identityAddress]); // eslint-disable-line react-hooks/exhaustive-deps
   const pnee = indexed > 0 ? indexed : pending;
+  useEffect(() => publishBalance('pnee', pnee, 'PNEEs'), [pnee]);
   const mine = link ? of(link.tokenId) : undefined;
+  const pneeLock = lockRouteFor('pnee', { backPneeLive: MARKET_ENABLED });
   const sub = (text: string) => (
     <span className="text-xs mt-0.5" style={{ color: theme.color.global.gray }}>
       {text}
@@ -71,40 +90,55 @@ export const DefaultTokenCards = () => {
 
   return (
     <>
-      <AssetRow
-        icon={PNEE_ICON}
-        ticker="PNEEs · USD¢"
-        balance={pnee}
-        decimals={PNEE_DECIMALS}
-        usdBalance={pnee}
-        showPointer={false}
-        subline={indexed === 0 && pending > 0 ? sub('Indexing · can send once indexed') : undefined}
-        // Get PNEEs on the right, like Get MNEE, once the token exists (Exchange › Bonds lists notes and vaults).
-        // Store build: no Market, so nothing to get PNEEs from, and no backing (minting against a vault) either.
-        action={
-          PNEE_TOKEN_ID && MARKET_ENABLED
-            ? { label: 'Get PNEEs', onClick: () => navigate(routeFor('market') ?? '/m/exchange') }
-            : undefined
-        }
-        // Back PNEEs: a round lock icon (owner, 10 Oct 2026; the text button covered "USD¢"). Opens the Lock screen
-        // in Back PNEEs mode: how much BSV to lock, then the Back PNEEs flow.
-        secondaryAction={
-          MARKET_ENABLED
-            ? { label: BACK_PNEE_LABEL, icon: <Lock size={18} />, onClick: () => navigate(BACK_PNEE_ROUTE) }
-            : undefined
-        }
-      />
+      <CoinRow id="pnee">
+        <TokenSwipe
+          id="pnee"
+          noArchive
+          label="PNEEs"
+          pinned={rows.pinned.includes('pnee')}
+          onSend={() => PNEE_TOKEN_ID && onSendToken?.(PNEE_TOKEN_ID)}
+          onReceive={() => onReceive?.()}
+          onChat={() => onChat?.()}
+          onLock={pneeLock ? () => navigate(pneeLock) : undefined}
+        >
+          <AssetRow
+            icon={PNEE_ICON}
+            ticker="PNEEs · USD¢"
+            balance={pnee}
+            decimals={PNEE_DECIMALS}
+            usdBalance={pnee}
+            showPointer={false}
+            subline={indexed === 0 && pending > 0 ? sub('Indexing · can send once indexed') : undefined}
+            // Get PNEEs on the right, like Get MNEE, once the token exists (Exchange › Bonds lists notes and vaults).
+            // Store build: no Market, so nothing to get PNEEs from, and no backing (minting against a vault) either.
+            action={
+              PNEE_TOKEN_ID && MARKET_ENABLED
+                ? { label: 'Get PNEEs', onClick: () => navigate(routeFor('market') ?? '/m/exchange') }
+                : undefined
+            }
+            // Back PNEEs: a round lock icon (owner, 10 Oct 2026; the text button covered "USD¢"). Opens the Lock screen
+            // in Back PNEEs mode: how much BSV to lock, then the Back PNEEs flow.
+            secondaryAction={
+              MARKET_ENABLED
+                ? { label: BACK_PNEE_LABEL, icon: <Lock size={18} />, onClick: () => navigate(BACK_PNEE_ROUTE) }
+                : undefined
+            }
+          />
+        </TokenSwipe>
+      </CoinRow>
       {/* Held tokens already have a row in the token list below (with the issuer badge): only show it here at 0. */}
       {link && !(mine && mine.amount > 0) && (
-        <AssetRow
-          icon={mine?.icon ?? bGlyph}
-          ticker={`$${link.ticker.replace(/^\$/, '')}`}
-          balance={mine?.amount ?? 0}
-          decimals={0}
-          usdBalance={0}
-          showPointer={false}
-          subline={sub('Your token')}
-        />
+        <CoinRow id={link.tokenId}>
+          <AssetRow
+            icon={mine?.icon ?? bGlyph}
+            ticker={`$${link.ticker.replace(/^\$/, '')}`}
+            balance={mine?.amount ?? 0}
+            decimals={0}
+            usdBalance={0}
+            showPointer={false}
+            subline={sub('Your token')}
+          />
+        </CoinRow>
       )}
     </>
   );

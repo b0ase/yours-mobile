@@ -1,11 +1,50 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, Moon, Palette, SlidersHorizontal, Sun, X } from 'lucide-react';
-import { DEFAULT_ACCENT, MORE_COLOURS, THEMES, accentById, type Accent, type AccentId } from './accents';
+import { Link } from 'react-router-dom';
+import { Check, Dices, Moon, Palette, Shuffle, SlidersHorizontal, Sun, X } from 'lucide-react';
+import {
+  DEFAULT_ACCENT,
+  DUO_PACKS,
+  EDITION_PACKS,
+  MORE_COLOURS,
+  MONO_PACKS,
+  TRI_PACKS,
+  THEMES,
+  accentById,
+  type Accent,
+  type AccentId,
+} from './accents';
 import { loadAccent, loadMix, previewMix, saveAccent, saveMix } from './accent';
-import { deriveMix, mixFromPack, type MixSpec } from './mixer';
+import { deriveMix, mixFromPack, nextMixerOpen, type MixSpec } from './mixer';
+import { THEME_ORDERS_ENABLED } from '../storeBuild';
+
+// Get your own theme ($99 a year): bWalletX only, a lazy chunk never in a store build.
+const ThemeOrderSheet = THEME_ORDERS_ENABLED ? lazy(() => import('../themeOrder/ThemeOrderSheet')) : null;
+
+// Mix your own is open by default (owner, 15 Oct 2026: found it by accident when collapsed) and remembers the
+// user's own collapse for this session, so a remount of the sheet never snaps it shut mid-edit.
+let mixerOpen = true;
 
 type ThemeTab = 'colours' | 'card';
+
+// Corners for a mix (owner, 15 Oct 2026: fill the Theme page with real options). Buttons · cards.
+const CORNERS = [
+  { id: 'sharp', label: 'Sharp', radius: '3px', radiusCard: '6px' },
+  { id: 'soft', label: 'Soft', radius: '12px', radiusCard: '16px' },
+  { id: 'round', label: 'Round', radius: '999px', radiusCard: '22px' },
+] as const;
+const rnd = (lo: number, hi: number) => Math.round(lo + Math.random() * (hi - lo));
+/** A random mix: any hues, colour and depth kept in ranges that look designed. Contrast is still enforced by deriveMix. */
+const surpriseMix = (prev: MixSpec): MixSpec => ({
+  ...prev,
+  base: Math.random() < 0.7 ? 'dark' : 'light',
+  sh: rnd(0, 360),
+  ss: rnd(0, 45),
+  sd: rnd(0, 60),
+  ah: rnd(0, 360),
+  as: rnd(55, 100),
+  al: rnd(35, 75),
+});
 
 /**
  * Theme (owner, 14 Oct 2026): the page behind the sliders icon on the card back, which was "Design your card".
@@ -55,8 +94,11 @@ export function ThemeSheet({
 function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNode; onClose: () => void }) {
   const [current, setCurrent] = useState<AccentId>(() => loadAccent(account));
   const [mix, setMix] = useState<MixSpec>(() => loadMix(account) ?? mixFromPack(accentById(loadAccent(account))));
-  const [mixing, setMixing] = useState(() => loadAccent(account) === 'custom');
+  const [mixing, setMixingState] = useState(() => mixerOpen);
+  const setMixing = (act: Parameters<typeof nextMixerOpen>[1]) =>
+    setMixingState((open) => (mixerOpen = nextMixerOpen(open, act)));
   const closeRef = useRef<HTMLButtonElement>(null);
+  const [ordering, setOrdering] = useState(false);
   useEffect(() => {
     closeRef.current?.focus();
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -66,7 +108,6 @@ function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNo
   const pick = (id: AccentId) => {
     saveAccent(account, id);
     setCurrent(id);
-    setMixing(false);
     if (id !== 'custom') setMix(mixFromPack(accentById(id)));
   };
   // Sliders paint live; the mix is saved when the finger lifts (and on Done), not on every frame.
@@ -77,6 +118,16 @@ function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNo
     else previewMix(next);
   };
   const derived = useMemo(() => deriveMix(mix), [mix]);
+  // Shuffle: another pack at random (never the one on). Surprise: a random mix, opened so it can be tuned.
+  const shuffle = () => {
+    const others = THEMES.filter((a) => a.id !== current);
+    pick(others[Math.floor(Math.random() * others.length)].id);
+  };
+  const surprise = () => {
+    setMixing('open');
+    slide(surpriseMix(mix), true);
+  };
+  const corner = CORNERS.find((c) => c.radiusCard === derived.radiusCard)?.id;
 
   return createPortal(
     <div className="bw-cdes bw-theme" role="dialog" aria-modal="true" aria-label="Theme">
@@ -87,22 +138,51 @@ function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNo
         </button>
       </div>
       {tabs}
-      <p className="bw-theme-more">Theme packs</p>
-      <div className="bw-pack-grid" role="radiogroup" aria-label="Theme packs">
-        {THEMES.map((a) => (
+      <div className="bw-theme-head">
+        <p className="bw-theme-more">Theme packs</p>
+        <button type="button" className="bw-theme-chip" onClick={shuffle}>
+          <Shuffle size={14} aria-hidden="true" />
+          Shuffle
+        </button>
+        <button type="button" className="bw-theme-chip" onClick={surprise}>
+          <Dices size={14} aria-hidden="true" />
+          Surprise me
+        </button>
+      </div>
+      <p className="bw-theme-group">Mono</p>
+      <div className="bw-pack-grid" role="radiogroup" aria-label="Mono">
+        {MONO_PACKS.map((a) => (
+          <PackTile key={a.id} a={a} on={current === a.id} onPick={() => pick(a.id)} />
+        ))}
+      </div>
+      <p className="bw-theme-group">Duo</p>
+      <div className="bw-pack-grid" role="radiogroup" aria-label="Duo">
+        {DUO_PACKS.map((a) => (
           <PackTile key={a.id} a={a} on={current === a.id} onPick={() => pick(a.id)} />
         ))}
         <PackTile
           a={derived}
           on={current === 'custom'}
           onPick={() => {
-            setMixing(true);
+            setMixing('open');
             slide(mix, true);
           }}
         />
       </div>
+      <p className="bw-theme-group">Tri</p>
+      <div className="bw-pack-grid" role="radiogroup" aria-label="Tri">
+        {TRI_PACKS.map((a) => (
+          <PackTile key={a.id} a={a} on={current === a.id} onPick={() => pick(a.id)} />
+        ))}
+      </div>
+      <p className="bw-theme-group">Editions</p>
+      <div className="bw-pack-grid" role="radiogroup" aria-label="Editions">
+        {EDITION_PACKS.map((a) => (
+          <PackTile key={a.id} a={a} on={current === a.id} onPick={() => pick(a.id)} />
+        ))}
+      </div>
       <div className="bw-mixer" data-open={mixing ? '' : undefined}>
-        <button type="button" className="bw-mixer-head" aria-expanded={mixing} onClick={() => setMixing((m) => !m)}>
+        <button type="button" className="bw-mixer-head" aria-expanded={mixing} onClick={() => setMixing('toggle')}>
           <SlidersHorizontal size={18} aria-hidden="true" />
           <span>
             <b>Mix your own</b>
@@ -123,6 +203,21 @@ function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNo
                 >
                   {b === 'dark' ? <Moon size={16} aria-hidden="true" /> : <Sun size={16} aria-hidden="true" />}
                   {b === 'dark' ? 'Dark' : 'Light'}
+                </button>
+              ))}
+            </div>
+            <div className="bw-mixer-base bw-mixer-corners" role="radiogroup" aria-label="Corners">
+              {CORNERS.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={corner === c.id}
+                  className={corner === c.id ? 'on' : ''}
+                  onClick={() => slide({ ...mix, radius: c.radius, radiusCard: c.radiusCard }, true)}
+                >
+                  <i aria-hidden="true" style={{ borderRadius: c.id === 'round' ? 9 : c.id === 'soft' ? 5 : 1 }} />
+                  {c.label}
                 </button>
               ))}
             </div>
@@ -165,9 +260,36 @@ function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNo
         ))}
       </div>
       <p className="bw-cdes-note">
-        A pack restyles the whole app: page, cards, text, lines, buttons and the card pattern it suggests. Accent only
-        keeps Gold&apos;s black and changes the highlights. The b stays. Kept for this account on this device.
+        Packs restyle the whole app; Accent only keeps Gold&apos;s black. Kept for this account on this device.
       </p>
+      <p className="bw-theme-more">
+        <Link to="/m/store" onClick={onClose} style={{ color: 'var(--bw-accent)' }}>
+          More in the Theme Store
+        </Link>
+      </p>
+      {THEME_ORDERS_ENABLED && ThemeOrderSheet && (
+        <p className="bw-theme-more">
+          <button
+            type="button"
+            onClick={() => setOrdering(true)}
+            style={{
+              background: 'none',
+              border: 0,
+              padding: 0,
+              color: 'var(--bw-accent)',
+              font: 'inherit',
+              cursor: 'pointer',
+            }}
+          >
+            Get your own edition · $99 a year
+          </button>
+        </p>
+      )}
+      {THEME_ORDERS_ENABLED && ThemeOrderSheet && ordering && (
+        <Suspense fallback={null}>
+          <ThemeOrderSheet onClose={() => setOrdering(false)} />
+        </Suspense>
+      )}
       <div className="bw-cdes-actions">
         <button
           type="button"
@@ -242,6 +364,8 @@ function MixGroup({
 
 /** A tappable pack preview: a mini wallet screen drawn in that pack's own colours. */
 function PackTile({ a, on, onPick }: { a: Accent; on: boolean; onPick: () => void }) {
+  // Mono packs preview as they paint: a white card and a tinted button, no dark fills.
+  const mono = a.group === 'mono';
   return (
     <button
       type="button"
@@ -266,8 +390,11 @@ function PackTile({ a, on, onPick }: { a: Accent; on: boolean; onPick: () => voi
         <span
           className="bw-pack-card"
           style={{
-            background: `linear-gradient(135deg, ${a.hi}, ${a.accent} 50%, ${a.lo})`,
-            color: a.on,
+            background: mono
+              ? `linear-gradient(135deg, #FFFFFF, ${a.tint ?? a.surface2})`
+              : `linear-gradient(135deg, ${a.hi}, ${a.accent} 50%, ${a.lo})`,
+            color: mono ? a.accent : a.on,
+            border: mono ? `1px solid ${a.line}` : undefined,
             borderRadius: Math.min(parseInt(a.radiusCard) || 12, 10),
             boxShadow: a.glow !== 'none' ? a.glow : undefined,
           }}
@@ -283,7 +410,15 @@ function PackTile({ a, on, onPick }: { a: Accent; on: boolean; onPick: () => voi
           <small style={{ color: a.success }}>+2.4%</small>
         </span>
         <span className="bw-pack-btns">
-          <span style={{ background: a.accent, color: a.on, borderRadius: a.radius }}>Send</span>
+          <span
+            style={
+              mono
+                ? { background: a.tint, color: a.accent, borderColor: a.trim, borderRadius: a.radius }
+                : { background: a.accent, color: a.on, borderRadius: a.radius }
+            }
+          >
+            Send
+          </span>
           <span style={{ borderColor: a.line, color: a.text, borderRadius: a.radius, background: a.surface2 }}>
             Receive
           </span>
@@ -302,6 +437,11 @@ function PackTile({ a, on, onPick }: { a: Accent; on: boolean; onPick: () => voi
       <small className="bw-pack-blurb" style={{ color: a.muted }}>
         {a.blurb}
       </small>
+      {a.edition && (
+        <small className="bw-pack-credit" style={{ color: a.muted, fontSize: 10, letterSpacing: '0.04em' }}>
+          {a.edition}
+        </small>
+      )}
     </button>
   );
 }

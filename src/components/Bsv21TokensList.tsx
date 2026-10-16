@@ -16,6 +16,13 @@ import { isUri } from '../utils/uri';
 import { fetchExchangeRate } from '../utils/wallet';
 import { AssetRow } from './AssetRow';
 import { Show } from './Show';
+import { IS_EXTENSION } from '../mobile/extension';
+import { TokenSwipe } from '../mobile/wallet/TokenSwipe';
+import { UndoToastHost } from '../mobile/swipe/undo';
+import { arrange, useTokenRows } from '../mobile/wallet/tokenRows';
+import { useListCoin } from '../mobile/wallet/useListCoin';
+import { rowMatchesCoin } from '../mobile/wallet/cardFilter';
+import { hasFocusHost, setFocusedToken } from '../mobile/wallet/cardFocus';
 
 const resolveIcon = (icon: string) => (isUri(icon) ? icon : `${ONESAT_MAINNET_CONTENT_URL}/${icon}`);
 
@@ -29,6 +36,10 @@ export type Bsv21TokensListProps = {
   theme: Theme;
   hideStatusLabels?: boolean;
   onTokenClick: (token: Bsv21Balance) => void;
+  /** Swipe actions (phone and web wallet; not the extension). */
+  onReceive?: () => void;
+  onChat?: (token: Bsv21Balance) => void;
+  onLock?: (token: Bsv21Balance) => void;
 };
 
 const getTokenName = (b: Bsv21Balance): string => b.sym || 'Null';
@@ -44,11 +55,12 @@ const YoursChip = () => (
 );
 
 /** Token icon: a personal token shows its creator's profile picture (mobile/tokens/tokenIcon). */
-const TokenAssetRow = ({ t, usdBalance }: { t: Bsv21Balance; usdBalance: number }) => {
+const TokenAssetRow = ({ t, usdBalance, still }: { t: Bsv21Balance; usdBalance: number; still?: boolean }) => {
   const icon = useTokenIcon(t.id, getTokenName(t), t.icon ? resolveIcon(t.icon) : GENERIC_TOKEN_ICON);
   return (
     <AssetRow
       animate
+      still={still}
       balance={Number(showAmount(t.all.confirmed, t.dec))}
       decimals={t.dec}
       showPointer={true}
@@ -117,7 +129,11 @@ export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
     const reorderedTokens = Array.from(tokens);
     const [removed] = reorderedTokens.splice(result.source.index, 1);
     reorderedTokens.splice(result.destination.index, 0, removed);
+    await saveOrder(reorderedTokens);
+  };
 
+  /** Persist the list order (this account's favoriteTokens, on this device). */
+  const saveOrder = async (reorderedTokens: Bsv21Balance[]) => {
     setTokens(reorderedTokens);
     const { account } = chromeStorageService.getCurrentAccountObject();
     if (!account) return;
@@ -138,8 +154,106 @@ export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
     await chromeStorageService.updateNested(key, update);
   };
 
-  const confirmedTokens = tokens.filter((t) => t.all.confirmed > 0n);
-  const pendingTokens = tokensProp.filter((d) => d.all.pending > 0n);
+  // The MNEE / PNEEs balance card narrows the list to its coin (mobile/wallet/cardFilter.ts).
+  const coin = useListCoin();
+  const confirmedTokens = tokens.filter((t) => t.all.confirmed > 0n && rowMatchesCoin(t.id, coin));
+  const pendingTokens = tokensProp.filter((d) => d.all.pending > 0n && rowMatchesCoin(d.id, coin));
+  const rowsState = useTokenRows();
+  const usdOf = (t: Bsv21Balance) =>
+    (priceData.find((p) => p.id === t.id)?.satPrice ?? 0) *
+    (exchangeRate / BSV_DECIMAL_CONVERSION) *
+    Number(showAmount(t.all.confirmed, t.dec));
+
+  // Tap a row: with the balance cards on screen it becomes the front card (owner, 15 Oct 2026; × or a swipe puts
+  // the normal card back, the list stays where it is). Otherwise the old tap (the token's send screen).
+  const openRow = (t: Bsv21Balance) => {
+    if (!hasFocusHost()) return onTokenClick(t);
+    const name = getTokenName(t);
+    setFocusedToken({
+      id: t.id,
+      name,
+      icon: t.icon ? resolveIcon(t.icon) : GENERIC_TOKEN_ICON,
+      amount: `${showAmount(t.all.confirmed, t.dec)} ${t.sym || name}`,
+      qty: Number(t.all.confirmed) / 10 ** (t.dec ?? 0),
+      symbol: t.sym || name,
+      decimals: t.dec ?? 0,
+      onSend: () => onTokenClick(t),
+      onReceive: props.onReceive,
+      onLock: props.onLock ? () => props.onLock?.(t) : undefined,
+      onRoom: props.onChat ? () => props.onChat?.(t) : undefined,
+    });
+  };
+
+  // Phone / web wallet: swipe actions, pinned group, archive, iPhone-style reorder (owner, 15 Oct 2026).
+  if (!IS_EXTENSION && tokens.length > 0) {
+    const groups = arrange(confirmedTokens, (t) => t.id, rowsState.pinned, rowsState.archived);
+    const row = (t: Bsv21Balance) => (
+      <TokenSwipe
+        id={t.id}
+        label={getTokenName(t)}
+        pinned={rowsState.pinned.includes(t.id)}
+        onSend={() => onTokenClick(t)}
+        onReceive={() => props.onReceive?.()}
+        onChat={() => props.onChat?.(t)}
+        onLock={() => props.onLock?.(t)}
+      >
+        <div
+          style={{ display: 'flex', justifyContent: 'center', width: '100%' }}
+          onClick={() => openRow(t)}
+        >
+          <TokenAssetRow t={t} usdBalance={usdOf(t)} still />
+        </div>
+      </TokenSwipe>
+    );
+    const label = (text: string) => (
+      <div className="w-full px-5 pt-3 pb-1">
+        <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: theme.color.global.gray }}>
+          {text}
+        </span>
+      </div>
+    );
+    return (
+      <div className="flex flex-col items-center w-full">
+        {groups.pinned.length > 0 && (
+          <>
+            {label('Pinned')}
+            {groups.pinned.map((t) => (
+              <div key={t.id} className="w-full">
+                {row(t)}
+              </div>
+            ))}
+          </>
+        )}
+        {groups.pinned.length > 0 && groups.rest.length > 0 && label('Tokens')}
+        {groups.rest.map((t) => (
+          <div key={t.id} className="w-full">
+            {row(t)}
+          </div>
+        ))}
+        {pendingTokens.length > 0 && label('Pending')}
+        {pendingTokens.map((b) => (
+          <div
+            key={b.id}
+            style={{ display: 'flex', justifyContent: 'center', width: '100%' }}
+            onClick={() => onTokenClick(b)}
+          >
+            <AssetRow
+              animate
+              balance={Number(showAmount(b.all.pending, b.dec))}
+              decimals={b.dec}
+              showPointer={true}
+              icon={b.icon ? resolveIcon(b.icon) : GENERIC_TOKEN_ICON}
+              ticker={getTokenName(b)}
+              subline={<IssuerBadge tokenId={b.id} compact />}
+              usdBalance={usdOf(b)}
+            />
+          </div>
+        ))}
+        {/* Archived rows live in Wallet › Hidden tokens (HiddenTokens.tsx). */}
+        <UndoToastHost />
+      </div>
+    );
+  }
 
   return (
     <>

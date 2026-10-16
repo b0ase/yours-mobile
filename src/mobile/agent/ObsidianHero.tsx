@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
+import { B_OUTLINE_D, B_OUTLINE_VIEWBOX } from '../brand/bOutline';
 import bGlyph from '../brand/bwalletx-glyph.svg';
 import { IDEAS, ideaPrompt, shuffled } from './ideas';
 import { ObsidianBackdrop } from '../ui/ObsidianBackdrop';
 import { prefersReducedMotion } from '../ui/obsidianPool';
+import { accentById, DEFAULT_ACCENT } from '../theme/accents';
+import { useAccentId } from '../theme/useAccent';
 
 /**
  * Ask b's opening (owner, 11 Oct 2026): a pool of liquid obsidian with the gold b in the middle, which then makes
@@ -53,39 +56,70 @@ export const ObsidianHero = ({
   const shown = now - HERO_EPOCH >= 1400 && since % cycle < LINE_MS;
   const line = lines[i % lines.length];
   const mark = compact ? 120 : 176;
+  // Theme packs (owner, 15 Oct 2026): the same pool in the pack's colours; Mono = pale silk with an outline b
+  // like the splash, suggestions in the pack's ink. Gold stays the original.
+  const pack = accentById(useAccentId());
+  const themed = pack.id !== DEFAULT_ACCENT && pack.kind !== 'colour';
+  const light = themed && pack.scheme === 'light';
   return (
     <div
       className="absolute inset-0 flex flex-col items-center justify-center overflow-hidden"
       style={{ isolation: 'isolate' }}
     >
-      <ObsidianBackdrop fixed={false} dim={0} fps={0} pauseWhileTyping={false} />
-      <img
-        src={bGlyph}
-        alt="Ask b"
-        width={mark}
-        height={mark}
-        className="relative"
-        style={{
-          filter: 'drop-shadow(0 0 36px rgb(var(--bw-accent-rgb) / .5)) drop-shadow(0 8px 24px rgba(0,0,0,.85))',
-        }}
-      />
+      <ObsidianBackdrop fixed={false} dim={0} fps={0} pauseWhileTyping={false} pack={themed ? pack : null} />
+      {light ? (
+        <svg
+          role="img"
+          aria-label="Ask b"
+          width={mark}
+          height={mark}
+          viewBox={B_OUTLINE_VIEWBOX}
+          fill="none"
+          stroke={pack.group === 'mono' ? pack.text : pack.accent}
+          strokeWidth={4}
+          strokeLinejoin="round"
+          className="relative"
+          style={{
+            filter: `drop-shadow(0 0 28px rgb(${pack.group === 'mono' ? '0 0 0 / .08' : 'var(--bw-accent-rgb) / .35'}))`,
+          }}
+        >
+          {/* One unioned outline + the counter (brand/bOutline.ts): no stem lines inside the bowl. */}
+          <path d={B_OUTLINE_D} vectorEffect="non-scaling-stroke" strokeLinecap="round" />
+        </svg>
+      ) : (
+        <img
+          src={bGlyph}
+          alt="Ask b"
+          width={mark}
+          height={mark}
+          className="relative"
+          style={{
+            filter: 'drop-shadow(0 0 36px rgb(var(--bw-accent-rgb) / .5)) drop-shadow(0 8px 24px rgba(0,0,0,.85))',
+          }}
+        />
+      )}
       <button
         type="button"
         onClick={() => onPick(line.prompt)}
         aria-live="polite"
         className="relative mt-10 border-0 bg-transparent px-6 cursor-pointer"
         style={{
-          color: '#F3E7C2',
+          color: light ? pack.text : '#F3E7C2',
           fontWeight: 500,
           fontSize: compact ? 22 : 30,
           letterSpacing: '-0.01em',
           lineHeight: 1.25,
           maxWidth: 720,
-          textShadow: '0 2px 18px rgba(0,0,0,.9)',
+          textShadow: light ? '0 1px 12px rgb(255 255 255 / .9)' : '0 2px 18px rgba(0,0,0,.9)',
           opacity: shown || still ? 1 : 0,
           filter: shown || still ? 'blur(0)' : 'blur(6px)',
           transition: `opacity ${FADE_MS}ms ease, filter ${FADE_MS}ms ease`,
-          minHeight: '1.6em',
+          // Fixed 3-line slot, top-aligned: a wrapping or rotating question never moves the b above it.
+          height: '3.75em',
+          overflow: 'hidden',
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'center',
         }}
       >
         {line.label}

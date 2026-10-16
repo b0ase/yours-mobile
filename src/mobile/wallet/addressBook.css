@@ -1,0 +1,317 @@
+/* Address book notebook (wallet/AddressBook.tsx): black leather cover, spiral down the left, ruled pages. CSS only. */
+.bw-abook {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  padding: max(12px, env(safe-area-inset-top)) 10px max(12px, env(safe-area-inset-bottom));
+  animation: bw-abook-in 220ms ease-out;
+}
+@keyframes bw-abook-in {
+  from {
+    transform: translateX(-24px);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bw-abook {
+    animation: none;
+  }
+}
+.bw-abook-cover {
+  position: relative;
+  flex: 1;
+  max-width: 560px;
+  margin: 0 auto;
+  border-radius: 14px 18px 18px 14px;
+  padding: 10px 10px 10px 30px;
+  background:
+    radial-gradient(120% 80% at 30% 0%, rgba(255, 255, 255, 0.07), transparent 60%),
+    repeating-linear-gradient(35deg, rgba(255, 255, 255, 0.015) 0 2px, transparent 2px 5px), #0b0b0c;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 18px 50px rgba(0, 0, 0, 0.6);
+  display: flex;
+}
+/* Spiral: a column of rings drawn with a repeating radial gradient. */
+.bw-abook-spiral {
+  position: absolute;
+  left: 8px;
+  top: 18px;
+  bottom: 18px;
+  width: 26px;
+  background: radial-gradient(
+      ellipse 11px 5px at 13px 50%,
+      transparent 6px,
+      #bfbfc4 6.5px,
+      #6c6c72 8.5px,
+      transparent 9px
+    )
+    0 0 / 26px 22px repeat-y;
+  z-index: 2;
+}
+.bw-abook-page {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 6px 12px 12px 6px;
+  background: #151517;
+  box-shadow: inset 6px 0 10px -6px rgba(0, 0, 0, 0.8);
+  overflow: hidden;
+}
+.bw-abook-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 14px 8px 20px;
+  border-bottom: 1px solid rgb(var(--bw-accent-rgb) / 0.35);
+}
+.bw-abook-head h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--bw-accent);
+  letter-spacing: 0.02em;
+}
+.bw-abook-close {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 0;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--bw-text, #fff);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* Ruled paper: faint lines every 28px and a red margin rule. */
+.bw-abook-lines {
+  flex: 1;
+  overflow-y: auto;
+  padding-top: 12px;
+}
+/* Notebook button under the balance cards (BalanceCarousel). */
+.bw-abook-open {
+  position: absolute;
+  left: 0;
+  top: 4px;
+  width: 26px;
+  height: 22px;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  background: transparent;
+  color: var(--bw-muted, #98a2b3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* Store edition: the button sits on its own row under the single wallet card. */
+.bw-abook-row {
+  position: relative;
+  width: calc(100vw - 32px);
+  max-width: 398px;
+  height: 26px;
+  margin: 0 auto;
+}
+/* Contact card (wallet/ContactCard.tsx): sits on the same ruled page. */
+.bw-abook-card {
+  width: 92%;
+  margin: 0 auto;
+  padding-bottom: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  color: var(--bw-text, #fff);
+  font-size: 13px;
+}
+.bw-abook-card-back {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  color: var(--bw-accent);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+}
+.bw-abook-card-thumbs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+}
+.bw-abook-card-thumbs button {
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+  background: transparent;
+  cursor: pointer;
+}
+.bw-abook-card-thumbs button[aria-pressed='true'] {
+  border-color: var(--bw-accent);
+}
+.bw-abook-card-thumbs img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.bw-abook-card-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 10px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid rgb(var(--bw-accent-rgb) / 0.35);
+  background: rgb(var(--bw-accent-rgb) / 0.13);
+  color: var(--bw-accent);
+  cursor: pointer;
+}
+.bw-abook-card-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.bw-abook-card-line {
+  display: flex;
+  gap: 10px;
+  line-height: 28px;
+}
+.bw-abook-card-label {
+  width: 52px;
+  flex-shrink: 0;
+  color: var(--bw-muted, #98a2b3);
+  font-size: 11px;
+}
+.bw-abook-card-bio {
+  margin: 0;
+  line-height: 28px;
+  white-space: pre-wrap;
+}
+.bw-abook-card-private {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px dashed rgb(var(--bw-accent-rgb) / 0.35);
+  background: rgba(0, 0, 0, 0.25);
+}
+.bw-abook-card-private input,
+.bw-abook-card-private textarea {
+  border-radius: 8px;
+  border: 1px solid #2b2f36;
+  background: var(--bw-surface);
+  color: var(--bw-text, #fff);
+  padding: 8px 10px;
+  font-size: 13px;
+  outline: none;
+  resize: vertical;
+}
+.bw-abook-row-open {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+}
+
+/* Theme packs (owner, 15 Oct 2026): the notebook follows the pack instead of staying black. The cover takes the
+   pack hue, the page and ink take the pack's card and text tokens; Gold (no data-bw-pack) keeps the leather. */
+:root[data-bw-pack] .bw-abook-cover {
+  background:
+    radial-gradient(120% 80% at 30% 0%, rgba(255, 255, 255, 0.25), transparent 60%), rgb(var(--bw-accent-rgb) / 0.22);
+  box-shadow:
+    inset 0 0 0 1px rgb(var(--bw-accent-rgb) / 0.35),
+    0 18px 50px rgba(0, 0, 0, 0.18);
+}
+:root[data-bw-pack] .bw-abook-page {
+  background: var(--bw-card);
+  color: var(--bw-text);
+  box-shadow: inset 6px 0 10px -6px rgb(var(--bw-text-rgb) / 0.2);
+}
+:root[data-bw-pack] .bw-abook-close,
+:root[data-bw-pack] .bw-abook [class*='text-white'] {
+  color: var(--bw-text) !important;
+}
+:root[data-bw-pack] .bw-abook :is([class*='text-[#98A2B3]'], [class*='text-[#98a2b3]']) {
+  color: var(--bw-muted) !important;
+}
+/* Import / Export in the notebook header (wallet/AbookImport.tsx). */
+.bw-abook-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+  margin-right: 8px;
+}
+.bw-abook-action {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid rgb(var(--bw-accent-rgb) / 0.35);
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  background: transparent;
+  color: var(--bw-accent);
+  cursor: pointer;
+}
+.bw-abook-action:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Full-screen page (owner, 16 Oct 2026: "address book should cover the whole screen … I don't like this" spiral):
+   no backdrop, no binding, no ruled margin; a plain page in the theme's colours with a back button. */
+.bw-abook {
+  background: var(--bw-bg, #010101);
+  padding: 0;
+}
+.bw-abook-cover {
+  max-width: none;
+  border-radius: 0;
+  padding: 0;
+  background: var(--bw-bg, #010101);
+  box-shadow: none;
+}
+.bw-abook-page {
+  border-radius: 0;
+  background: var(--bw-bg, #010101);
+  box-shadow: none;
+}
+.bw-abook-head {
+  padding: calc(10px + env(safe-area-inset-top)) 12px 10px;
+  border-bottom: 1px solid var(--bw-line, #2b2f36);
+  gap: 6px;
+}
+.bw-abook-lines {
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+}
+.bw-abook-back {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--bw-text, #fff);
+  cursor: pointer;
+}
+:root[data-bw-paper] .bw-abook-head h2 {
+  color: var(--bw-text);
+}

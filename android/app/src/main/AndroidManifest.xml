@@ -40,6 +40,13 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="bwalletx" android:host="social" />
             </intent-filter>
+            <!-- Sign in with HandCash returns here with a sealed grant (bit-sign PKCE: src/mobile/social/handcashLogin.ts) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="bwalletx" android:host="auth" android:pathPrefix="/handcash" />
+            </intent-filter>
             <!-- Space pages, invites and room pages: bwalletx://space/<slug>, bwalletx://invite/<code>,
                  bwalletx://room/<ticker> from the /s/, /i/ and /r/ pages (src/mobile/spaces/inviteLinks.ts). -->
             <intent-filter>
@@ -49,6 +56,7 @@
                 <data android:scheme="bwalletx" android:host="space" />
                 <data android:scheme="bwalletx" android:host="invite" />
                 <data android:scheme="bwalletx" android:host="room" />
+                <data android:scheme="bwalletx" android:host="xinvite" />
             </intent-filter>
 
         </activity>

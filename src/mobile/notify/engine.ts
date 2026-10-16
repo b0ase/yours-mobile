@@ -19,6 +19,7 @@ import type { OneSatContext } from '@1sat/actions';
 import {
   FEED_API,
   fetchByAddress,
+  fetchForYou,
   fetchByBap,
   fetchReplies,
   fetchTwetchReplies,
@@ -29,6 +30,7 @@ import { parseBmapFeed, parseTwetchFeed, TWETCH_API, type FeedPost } from '../fe
 import { BchatClient, defaultHttp, loadSession } from '../chat/api';
 import { isRoomMuted } from '../chat/listPrefs';
 import { liveHub } from '../chat/live';
+import { feedRowWantsPoll, roomFeed } from '../chat/roomFeed';
 import { subscribe as subscribeCalls } from '../calls/store';
 import { App } from '@capacitor/app';
 import { ONESAT, search, type SearchRow } from '../market/indexer';
@@ -57,6 +59,7 @@ import {
   type MeKeys,
   type NotifyItem,
 } from './notify';
+import { clearChatBadges, setChatRooms, setFeedLatest } from '../tabs/tabBadges';
 import { loadPollState, pushItems, savePollState, setAsked, wasAsked, type PollState } from './store';
 
 export type Me = MeKeys & {
@@ -73,6 +76,10 @@ let timer: ReturnType<typeof setTimeout> | null = null;
 let running = false;
 let unsubCalls: (() => void) | null = null;
 let unsubLive: (() => void) | null = null;
+let unsubFeed: (() => void) | null = null;
+/** room id → ticker, from the last bChat room list (the feed's rows carry only room_id). */
+let roomTickers = new Map<string, string>();
+
 let resumeSub: { remove: () => Promise<void> } | null = null;
 let tapSub: { remove: () => Promise<void> } | null = null;
 
@@ -327,6 +334,15 @@ async function bchat(m: Me, st: PollState, out: NotifyItem[]) {
   if (!session) return;
   const client = new BchatClient(defaultHttp(Capacitor.isNativePlatform()), session);
   const rooms = await client.rooms();
+  roomTickers = new Map(rooms.map((r) => [r.id, r.ticker]));
+  // Chat tab badge (tabs/tabBadges.ts): the server's unread counts, muted rooms dropped at display.
+  setChatRooms(rooms);
+  // Watch the most recently active rooms on the realtime feed (capped there).
+  roomFeed()?.setRooms(
+    [...rooms]
+      .sort((a, b) => (Date.parse(b.updated_at ?? '') || 0) - (Date.parse(a.updated_at ?? '') || 0))
+      .map((r) => r.id),
+  );
   const names = [...m.names, session.handle].filter(Boolean);
   await source(st, 'bchat.rooms', async (_seen, prev) => {
     const counts: Record<string, number> = {};
@@ -356,6 +372,16 @@ async function bchat(m: Me, st: PollState, out: NotifyItem[]) {
     }
     return counts;
   });
+}
+
+/** Feed tab badge: the For you list's newest post times, at most every FEED_BADGE_MS (it is six requests). */
+const FEED_BADGE_MS = 5 * 60_000;
+let feedCheckedAt = 0;
+async function feedBadge() {
+  if (Date.now() - feedCheckedAt < FEED_BADGE_MS) return;
+  feedCheckedAt = Date.now();
+  const posts = await fetchForYou();
+  setFeedLatest(posts.map((p) => p.at));
 }
 
 const outpointKey = (o: string) => o.replace('.', '_');
@@ -570,10 +596,18 @@ async function deliver(found: NotifyItem[]) {
   }
 }
 
+let again = false;
+
 export async function pollNow(): Promise<void> {
   const m = me;
-  if (!m || running) return;
+  if (!m) return;
+  // A live event during a slow poll (Twetch/bmap can take 15 s) used to be dropped until the next 90 s poll.
+  if (running) {
+    again = true;
+    return;
+  }
   running = true;
+  again = false;
   try {
     const st = loadPollState();
     const out: NotifyItem[] = [];
@@ -584,11 +618,14 @@ export async function pollNow(): Promise<void> {
       bchat(m, st, out),
       incoming(m, st, out),
       bmail(m, st, out),
+      feedBadge(),
     ]);
     savePollState(st);
     await deliver(out);
   } finally {
     running = false;
+    // After the caller's own reschedule (schedule() sets POLL_MS in its finally), so this one wins.
+    if (again && me) setTimeout(() => me && schedule(1_500), 0);
   }
 }
 
@@ -628,12 +665,32 @@ export function startNotify(next: Me) {
     const lh = liveHub();
     if (lh) {
       const release = lh.acquire();
-      const off = lh.on('message.new', undefined, (ev) => {
+      // System events ("$mike joined" is a member_joined event message) arrive as message.event / member.join,
+      // not message.new; they used to wait for the 90 s poll (latency audit, 15 Oct 2026).
+      const onRoomEvent = (ev: { room?: string }) => {
         const handle = loadSession()?.handle;
         if (!me || !ev.room || (handle && isRoomMuted(handle, ev.room))) return;
         schedule(1_500);
-      });
+      };
+      const offs = (['message.new', 'message.event', 'member.join'] as const).map((t) =>
+        lh.on(t, undefined, onRoomEvent),
+      );
       unsubLive = () => {
+        offs.forEach((off) => off());
+        release();
+      };
+    }
+    // Realtime room feed (the postgres_changes feed bChatX web uses): bit-sign never sends joins to
+    // the rt relay, so this is what brings "$mike joined" in seconds. Polling stays as the fallback.
+    const feed = roomFeed();
+    if (feed) {
+      const release = feed.acquire();
+      const off = feed.on(undefined, (row) => {
+        const handle = loadSession()?.handle;
+        const muted = (t: string) => !!handle && isRoomMuted(handle, t);
+        if (me && feedRowWantsPoll(row, (id) => roomTickers.get(id), muted)) schedule(1_500);
+      });
+      unsubFeed = () => {
         off();
         release();
       };
@@ -649,6 +706,11 @@ export function stopNotify() {
   unsubCalls = null;
   unsubLive?.();
   unsubLive = null;
+  unsubFeed?.();
+  unsubFeed = null;
+  roomTickers = new Map();
+  clearChatBadges();
+  feedCheckedAt = 0;
   void resumeSub?.remove();
   resumeSub = null;
   void tapSub?.remove();

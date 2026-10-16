@@ -1,4 +1,5 @@
 import * as qr from 'qrcode';
+import { isLightPattern } from './cardPatternsLight';
 import { cardArtQrSvg, cardPaymail, svgDataUri } from './cardBackQr';
 import {
   Component,
@@ -33,9 +34,11 @@ import {
 } from './cardFrontArt';
 import { CardDesigner } from './CardDesigner';
 import { ThemeSheet } from '../theme/ThemeSheet';
+import { onThemeSheetRequest } from '../theme/themeNav';
 import { switchToAccountAccent } from '../theme/accent';
 import { useAccentId } from '../theme/useAccent';
 import { accentById } from '../theme/accents';
+import { cardFollowsTheme, setCardCustomised, useCardCustomised } from './cardLook';
 import { CARD_DESIGN_EVENT, loadCardDesign, saveCardDesign, type CardDesign } from './cardDesign';
 import { loadCardArt, type CardArtModule } from './cardArtLoader';
 import { patternUri } from './cardPatterns';
@@ -50,7 +53,6 @@ import { usePictureReturn } from './pictureReturn';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { formatUSD } from '../../utils/format';
-import { fiatSymbol } from '../../utils/displayCurrency';
 import { useDisplayCurrency } from '../../hooks/useDisplayCurrency';
 import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
@@ -67,6 +69,10 @@ import { requestBackupThen } from '../backup/backupState';
 import { useCardSignature } from '../signature/useCardSignature';
 import { cardGoldLevel } from './cardGold';
 import { keyFingerprint } from './identityLine';
+
+/** The card back's ID KEY: longer than the shared fingerprint (owner, 15 Oct 2026). */
+const stripeKey = (key: string) =>
+  keyFingerprint(key) ? `${key.trim().toLowerCase().slice(0, 10)}…${key.trim().toLowerCase().slice(-8)}` : key;
 import { useBchatFollow } from './useBchatFollow';
 import { useChatIdentity } from './useChatIdentity';
 import { BottomMenuContext } from '../../contexts/BottomMenuContext';
@@ -76,7 +82,15 @@ import { LiveTicker } from './live/LiveTicker';
 import { noteBalance, useLive } from './live/liveBus';
 import { displayedSats, refreshDelay } from './live/liveLogic';
 import { useCountUp } from './live/useCountUp';
-import { cardSats, memberSince, cardBsv, loadCardUnit, saveCardUnit, type CardUnit } from './walletCardText';
+import { BALANCE_CARDS_ENABLED } from '../storeBuild';
+import { AddressBookPull } from './AddressBook';
+import { cardSats, memberSince, cardBsv } from './walletCardText';
+import { useCardUnit } from './cardValue';
+import { CardUnitSwitch } from './CardUnitSwitch';
+/** Balance cards: a lazy chunk, absent from store builds (storeBuild.ts). */
+const BalanceCarousel = BALANCE_CARDS_ENABLED
+  ? lazy(() => import('./BalanceCarousel').then((m) => ({ default: m.BalanceCarousel })))
+  : null;
 
 export type WalletCardProps = {
   /** Total in US dollars (BSV at the current rate, plus MNEE when enabled). */
@@ -204,12 +218,8 @@ const WalletCardInner = ({
   const { chromeStorageService } = useServiceContext();
   const { addSnackbar } = useSnackbar();
   const [flipped, setFlipped] = useState(false);
-  const [unit, setUnit] = useState<CardUnit>(loadCardUnit);
-  const pickUnit = (u: CardUnit) => (e: MouseEvent) => {
-    e.stopPropagation();
-    setUnit(u);
-    saveCardUnit(u);
-  };
+  // Shared with every balance card (cardValue.ts): flipping it here flips them all.
+  const unit = useCardUnit();
   const [handleOpen, setHandleOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
   // Tap the avatar: "Your picture" (X / Google photo, an NFT, or the bAvatar). Back from X / Google lands here.
@@ -274,12 +284,30 @@ const WalletCardInner = ({
     const r = artMod?.resolveArt(design);
     return r ? { src: r.src, attribution: r.line } : null;
   }, [design, artMod, accentId]);
-  const frontArt = (bavatarArt && (cardImage || designArt?.src)) || bavatarArt;
+  // Theme-follow (owner, 15 Oct 2026, cardLook.ts): an uncustomised card wears the active pack (White → white,
+  // Blue → blue …), drawing the pack's card pattern in its hue instead of the default bAvatar art. A card the user
+  // customised (own picture, chosen design, saved look/colour) keeps its look whatever the theme.
+  const pack = accentById(accentId);
+  const flagged = useCardCustomised(`bsv:${artKey}`);
+  const savedLookNow = loadCardArtLook(artKey);
+  const customised = flagged || !!cardImage || !!design || !!savedLookNow;
+  // Light packs (owner, 16 Oct 2026) never show dark card art: only an own picture or a chosen Art design (e.g. the
+  // Great Wave, which washes out well) is kept; a dark pattern or a saved look alone gives way to the white card.
+  const light = pack.scheme === 'light';
+  const ownArt = !!cardImage || (!!design && design.kind !== 'pattern');
+  const lightPick = design?.kind === 'pattern' && isLightPattern(design.id) ? design.id : null;
+  const themed =
+    !!bavatarArt && (light ? !ownArt && cardFollowsTheme(pack, false) : cardFollowsTheme(pack, customised));
+  const themeArt = themed ? patternUri(lightPick ?? pack.pattern, pack.accent, artKey) : null;
+  const frontArt = light
+    ? (bavatarArt && ownArt && (cardImage || designArt?.src)) || themeArt || bavatarArt
+    : (bavatarArt && (cardImage || designArt?.src)) || themeArt || bavatarArt;
   const artAttribution = !cardImage && designArt?.attribution ? designArt.attribution : '';
   const setImage = (uri: string | null) => {
     if (!saveCardImage(artKey, uri)) return false;
     setCardImage(uri);
     saveCardDesign(artKey, null);
+    setCardCustomised(`bsv:${artKey}`, !!uri);
     return true;
   };
   const pickDesign = (d: CardDesign | null) => {
@@ -288,6 +316,7 @@ const WalletCardInner = ({
       setCardImage(null);
     }
     saveCardDesign(artKey, d);
+    setCardCustomised(`bsv:${artKey}`, !!d);
   };
   const [luma, setLuma] = useState<number | null>(null);
   useEffect(() => {
@@ -306,10 +335,13 @@ const WalletCardInner = ({
   );
   const look = savedLook ?? defaultLook;
   const [adjusting, setAdjusting] = useState(false);
+  // Settings › Appearance › Theme opens this same sheet (theme/themeNav.ts).
+  useEffect(() => onThemeSheetRequest(() => setAdjusting(true)), []);
   const setLook = (l: CardArtLook | null) => {
     const v = l && clampLook(l);
     setSavedLook(v);
     saveCardArtLook(artKey, v);
+    setCardCustomised(`bsv:${artKey}`, !!v || !!cardImage || !!design);
   };
 
   // The back's QR: the account's bAvatar art QR (its paymail), else the plain receive QR below.
@@ -417,7 +449,10 @@ const WalletCardInner = ({
         onKeyDown={onKey}
       >
         {/* ── Front ── */}
-        <div className={`bw-wcard-face bw-wcard-front${frontArt ? ' has-art' : ''}`} aria-hidden={flipped}>
+        <div
+          className={`bw-wcard-face bw-wcard-front${frontArt ? ' has-art' : ''}${themed ? ' is-themed' : ''}`}
+          aria-hidden={flipped}
+        >
           {frontArt && (
             <>
               <img
@@ -622,19 +657,7 @@ const WalletCardInner = ({
                   )}
                 </div>
                 {/* $/BSV switch: same row as the address, right (owner, 9 Oct 2026). */}
-                <div className="bw-wcard-unit" role="group" aria-label="Balance unit">
-                  {(['usd', 'bsv'] as const).map((u) => (
-                    <button
-                      key={u}
-                      type="button"
-                      aria-pressed={unit === u}
-                      className={unit === u ? 'is-on' : undefined}
-                      onClick={pickUnit(u)}
-                    >
-                      {u === 'usd' ? fiatSymbol(fx) : 'BSV'}
-                    </button>
-                  ))}
-                </div>
+                <CardUnitSwitch fx={fx} />
               </div>
               {since && (
                 <div className="bw-wcard-since">
@@ -661,7 +684,7 @@ const WalletCardInner = ({
         </div>
 
         {/* ── Back ── */}
-        <div className="bw-wcard-face bw-wcard-back" aria-hidden={!flipped}>
+        <div className={`bw-wcard-face bw-wcard-back${themed ? ' is-themed' : ''}`} aria-hidden={!flipped}>
           {/* Magnetic strip: the identity key lives here (owner, 10 Oct 2026), with a small copy icon on its left. */}
           <div className="bw-wcard-stripe">
             {backKey && (
@@ -680,7 +703,7 @@ const WalletCardInner = ({
                 <span className="bw-wcard-stripe-text">
                   <span className="bw-wcard-stripe-label">ID KEY:</span>
                   <span className="bw-wcard-stripe-hex" title={backKey}>
-                    {keyFingerprint(backKey) || backKey}
+                    {stripeKey(backKey)}
                   </span>
                 </span>
               </div>
@@ -881,8 +904,20 @@ class WalletCardBoundary extends Component<
   }
 }
 
-export const WalletCard = (p: WalletCardProps) => (
+const RealWalletCard = (p: WalletCardProps) => (
   <WalletCardBoundary usd={p.usd} sats={p.sats} onRetry={p.onRetry}>
     <WalletCardInner {...p} />
   </WalletCardBoundary>
 );
+
+// Balance cards (bWalletX only, never in store builds): the real card becomes the first slide of a multi-balance carousel.
+export const WalletCard = (p: WalletCardProps) =>
+  BalanceCarousel ? (
+    <Suspense fallback={<RealWalletCard {...p} />}>
+      <BalanceCarousel bsvCard={<RealWalletCard {...p} />} />
+    </Suspense>
+  ) : (
+    <AddressBookPull>
+      <RealWalletCard {...p} />
+    </AddressBookPull>
+  );

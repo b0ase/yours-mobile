@@ -1,19 +1,27 @@
 import { useLayoutEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
 import { getWalletKind, setWalletKind, subscribeWalletKind, type WalletKind } from './walletKind';
-import { walletKindsFor } from '../storeBuild';
+import { PLACEMENT_ENABLED, walletKindsFor } from '../storeBuild';
 import { WalletTabs } from '../nfts/WalletTabs';
 
 const useWalletKind = () => useSyncExternalStore(subscribeWalletKind, getWalletKind, getWalletKind);
 
-// Tokens | NFTs | Friends (address book, owner 4 Oct 2026). Tickets are ordinary tokens that get burned on entry, so they sit under Tokens
+// Tokens | NFTs | Names (owner, 15 Oct 2026: Names replaces Friends; Friends is the address book, AddressBook.tsx). Tickets are ordinary tokens that get burned on entry, so they sit under Tokens
 // (owner, 3 Oct 2026); the Tickets view (WalletKindGate kind="tickets") is kept but nothing opens it.
 // Credits (bCredits) are shelved the same way (2 Oct 2026).
 const KINDS: [WalletKind, string][] = walletKindsFor<[WalletKind, string]>([
   ['tokens', 'Tokens'],
   ['nfts', 'NFTs'],
-  ['friends', 'Friends'], // back to Friends (owner, 6 Oct 2026)
+  ['names', 'Names'],
 ]);
-const SHOWN = new Set(KINDS.map(([k]) => k));
+// Views with no chip that a balance card opens (tickets, credits, shares; 15 Oct 2026). Store builds drop them.
+const SHOWN = new Set<WalletKind>([
+  ...KINDS.map(([k]) => k),
+  ...walletKindsFor<[WalletKind]>([
+    ['tickets'],
+    ['credits'],
+    ...(PLACEMENT_ENABLED ? [['shares'] as [WalletKind]] : []),
+  ]).map(([k]) => k),
+]);
 
 /** Tokens | NFTs (sized so four fit a 320px phone), styled like Market's type switch (market/MarketPage.tsx). */
 export const WalletKindSwitch = () => {

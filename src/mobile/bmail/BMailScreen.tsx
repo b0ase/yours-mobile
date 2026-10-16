@@ -51,6 +51,7 @@ import {
   EXAMPLE_SWIPE,
   EXAMPLES,
   EXAMPLES_BELOW,
+  examplesAllowed,
   examplesHidden,
   filterExamples,
   fmtCents,
@@ -81,6 +82,7 @@ import { PULL_THRESHOLD, usePullToRefresh } from './usePullToRefresh';
 import { BMAIL_OFFLINE_ACTION, friendlyMailError } from './friendlyError';
 import { ErrorActions } from '../errors/ErrorActions';
 import { APP_NAME } from '../storeBuild';
+import { isNative } from '../native';
 
 const MUTED = '#98A2B3';
 const GOLD = 'var(--bw-accent-hi)';
@@ -901,7 +903,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
     m.state.received.map((r) => r.from),
     m.state.sent,
   );
-  const showEx = !hideEx && m.state.received.length + m.state.sent.length < EXAMPLES_BELOW;
+  const showEx = examplesAllowed(isNative) && !hideEx && m.state.received.length + m.state.sent.length < EXAMPLES_BELOW;
   const hideExamples = () => {
     setExamplesHidden(true);
     setHideEx(true);
@@ -1281,15 +1283,17 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
         ) : null}
         {!inFrameSub && (
           <>
-            <div className="bw-mail-card bw-mail-hero flex items-center gap-3 px-4 py-4">
-              <div className="flex flex-1 flex-col">
-                <span className="text-[11px] uppercase tracking-wide" style={{ color: MUTED }}>
-                  {inView ? 'In view' : 'Postage received this week'}
+            {/* Fixed height, one line per text row (owner, 15 Oct 2026: switching boxes must not resize this card or
+                move the mailbox row; only the list below changes). Long values truncate instead of wrapping. */}
+            <div className="bw-mail-card bw-mail-hero flex h-[92px] shrink-0 items-center gap-3 overflow-hidden px-4 py-3">
+              <div className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate text-[11px] uppercase leading-4 tracking-wide" style={{ color: MUTED }}>
+                  {inView ? 'In view · postage this week' : 'Postage received this week'}
                 </span>
-                <span className="text-2xl font-bold tabular-nums leading-tight" style={{ color: GOLD }}>
-                  {inView ? `${fmtCents(Math.round(inView.usd * 100))} in postage this week` : money(week.sats, m.rate)}
+                <span className="truncate text-2xl font-bold tabular-nums leading-8" style={{ color: GOLD }}>
+                  {inView ? fmtCents(Math.round(inView.usd * 100)) : money(week.sats, m.rate)}
                 </span>
-                <span className="text-[11px]" style={{ color: MUTED }}>
+                <span className="truncate text-[11px] leading-4" style={{ color: MUTED }}>
                   {inView ? inView.n : week.n} stamped
                   {inView?.ex ? ' · includes examples' : ''}
                 </span>
@@ -1299,16 +1303,18 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                 type="button"
                 onClick={() => setSettings(true)}
                 aria-label={`Price to reach you: ${money(m.priceSats, m.rate)}. Change it`}
-                className="flex flex-col items-end text-[11px] rounded-xl px-2 py-1 -mr-2 bg-transparent border-0 cursor-pointer"
+                className="flex max-w-[45%] shrink-0 flex-col items-end whitespace-nowrap text-[11px] leading-4 rounded-xl px-2 py-1 -mr-2 bg-transparent border-0 cursor-pointer"
                 style={{ color: MUTED }}
               >
                 <span>Price to reach you</span>
-                <span className="text-sm font-semibold text-white">{money(m.priceSats, m.rate)}</span>
+                <span className="max-w-full truncate text-sm font-semibold leading-5 text-white">
+                  {money(m.priceSats, m.rate)}
+                </span>
                 <span style={{ color: GOLD }}>Change ›</span>
               </button>
             </div>
             {tab === 'bin' ? (
-              <div className="flex items-center gap-2">
+              <div className="flex min-h-[60px] items-center gap-2">
                 <button
                   type="button"
                   onClick={leaveBin}
@@ -1339,7 +1345,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                     aria-selected={tab === id}
                     aria-label={n ? `${label}, ${n}` : label}
                     onClick={() => setTab(id)}
-                    className="relative min-h-[52px] flex flex-col items-center justify-center gap-0.5 rounded-xl px-1 py-1.5 text-[10px] font-semibold"
+                    className="relative h-[60px] flex flex-col items-center justify-center gap-0.5 rounded-xl px-1 py-1.5 text-[10px] font-semibold"
                     style={
                       tab === id
                         ? { background: GOLD, color: '#1a1300' }

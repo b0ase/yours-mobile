@@ -49,7 +49,13 @@ const Card = ({
   }, [seenKey, onSeen]);
   const url = contentUrls(item.origin)[0];
   const poster = item.collectionIcon ? (
-    <img src={contentUrls(item.collectionIcon)[0]} alt={item.name} className="w-full h-full object-cover" />
+    <img
+      src={contentUrls(item.collectionIcon)[0]}
+      alt={item.name}
+      loading="lazy"
+      decoding="async"
+      className="w-full h-full object-cover"
+    />
   ) : (
     <ModelThumb
       url={url}

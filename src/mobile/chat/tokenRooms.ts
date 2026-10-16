@@ -49,7 +49,49 @@ export interface TokenRoomLookup {
   /** Who administers the room: the token's issuer, once claimed. */
   issuer?: { address: string | null; handle: string | null; claimed: boolean } | null;
   youAreIssuer?: boolean;
+  /** Who may start the room's Space (bit-sign `space_start`); `text` is shown as-is. */
+  spaceStart?: SpaceStartRule | null;
 }
+
+/** bit-sign `space_start`: the room's rule for starting a Space, with the plain line to show. */
+export interface SpaceStartRule {
+  mode: string;
+  value: string | number | null;
+  text: string;
+  needRaw: string | null;
+}
+
+export const parseSpaceStart = (v: unknown): SpaceStartRule | null => {
+  if (!v || typeof v !== 'object') return null;
+  const d = v as { mode?: unknown; value?: unknown; text?: unknown; need_raw?: unknown };
+  const text = typeof d.text === 'string' ? d.text.trim() : '';
+  if (!text) return null;
+  return {
+    mode: typeof d.mode === 'string' ? d.mode : '',
+    value: typeof d.value === 'string' || typeof d.value === 'number' ? d.value : null,
+    text,
+    needRaw: typeof d.need_raw === 'string' ? d.need_raw : null,
+  };
+};
+
+/** The line a room's rules sheet shows for its Space rule, or null when the server sent none. */
+export const spaceStartLine = (r: SpaceStartRule | null | undefined): string | null =>
+  r?.text ? `Starting a Space: ${r.text}` : null;
+
+/**
+ * A holding the wallet's own index can't see (MNEE is cosigned and not in the 1Sat index), taken
+ * from the server's lookup: bit-sign checked the balance itself. Null when the lookup shows neither
+ * membership nor a balance at the gate's minimum.
+ */
+export const holdingFromLookup = (look: TokenRoomLookup | null | undefined): Holding | null => {
+  const g = look?.gate;
+  const k = g ? parseTokenKey(g.key) : null;
+  if (!look || !g || !k) return null;
+  const held = look.heldRaw ?? null;
+  const enough = held !== null && /^\d+$/.test(held) && /^\d+$/.test(g.minRaw) && BigInt(held) >= BigInt(g.minRaw);
+  if (!enough && !look.member) return null;
+  return { kind: k.kind, id: k.id, symbol: g.symbol, dec: g.dec, amountRaw: enough ? held : g.minRaw };
+};
 
 export interface RoomSpendRule {
   amountRaw: string;
@@ -236,6 +278,7 @@ export const parseLookup = (data: unknown): TokenRoomLookup | null => {
     spend_charge?: unknown;
     issuer?: { address?: unknown; handle?: unknown; claimed?: unknown } | null;
     you_are_issuer?: unknown;
+    space_start?: unknown;
   };
   if (typeof d.key !== 'string') return null;
   const r = d.room as { ticker?: unknown; name?: unknown; members?: unknown } | null | undefined;
@@ -259,6 +302,7 @@ export const parseLookup = (data: unknown): TokenRoomLookup | null => {
         }
       : null,
     youAreIssuer: d.you_are_issuer === true,
+    spaceStart: parseSpaceStart(d.space_start),
   };
 };
 

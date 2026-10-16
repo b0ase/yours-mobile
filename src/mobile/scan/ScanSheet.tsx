@@ -14,7 +14,8 @@ import { Scanner } from './Scanner';
 import { parseScan, type Scan } from './parseScan';
 import { myPayUri } from './payUri';
 import { offerAppLink } from '../spaces/inviteLinks';
-import { APP_NAME } from '../storeBuild';
+import { parseXInviteLink } from '../chat/xInvites';
+import { APP_NAME, XINVITES_ENABLED } from '../storeBuild';
 
 const PairSheet = lazy(() => import('../pair/PairSheet'));
 
@@ -73,6 +74,12 @@ export default function ScanSheet({
   };
 
   const onCode = (text: string) => {
+    // A room X invite link (key in its fragment): straight to the Chat claim screen, never shown or kept here.
+    if (XINVITES_ENABLED && parseXInviteLink(text)) {
+      offerAppLink(text.trim());
+      onClose();
+      return;
+    }
     const s = parseScan(text);
     // A plain payment code goes straight to the Send card (still needs the user's confirm there).
     if (s.kind === 'pay') pay(s.to, s.amountSats);

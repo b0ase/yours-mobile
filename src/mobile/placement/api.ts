@@ -96,8 +96,26 @@ export class BsharesApi {
       'GET',
       this.co(this.company ?? 'bcorp', '/treasury'),
     );
-  signTreasury = (t: string, a: { m: number } & Signed) =>
-    this.call<{ ok: true; adopted: boolean; signed: number; need: number }>('POST', this.co(t, '/treasury'), a);
+  /**
+   * 409 = the treasury was already adopted (treasury_m set, e.g. another director's signature completed it):
+   * not an error for the signer, so it comes back as adopted and the caller reloads.
+   */
+  signTreasury = async (
+    t: string,
+    a: { m: number } & Signed,
+  ): Promise<{ ok: true; adopted: boolean; signed: number; need: number; alreadySet?: boolean }> => {
+    try {
+      return await this.call<{ ok: true; adopted: boolean; signed: number; need: number }>(
+        'POST',
+        this.co(t, '/treasury'),
+        a,
+      );
+    } catch (e) {
+      if (e instanceof ChatApiError && e.status === 409)
+        return { ok: true, adopted: true, signed: 0, need: 0, alreadySet: true };
+      throw e;
+    }
+  };
   createOffer = (o: NewOffer) => this.call<PlacementOffer>('POST', '/offers', o);
   accept = (id: string, investorPubKey: string) =>
     this.call<PlacementOffer>('POST', `/offers/${encodeURIComponent(id)}/accept`, { investorPubKey });

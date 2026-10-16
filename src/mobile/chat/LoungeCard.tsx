@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react';
+import { PinOff } from 'lucide-react';
 import type { BchatClient } from './api';
 import type { ChatRoom } from './messages';
 import { audienceCount, parseSpaceState } from '../spaces/model';
-import { loungeCardInfo, LOUNGE_TICKER } from './loungeInfo';
+import { HELP_DESK_NAME, loungeCardInfo, LOUNGE_TICKER } from './loungeInfo';
 import { useLive } from './live';
 
 /**
- * The bWallet Lounge as a yellow card pinned above every other chat (owner, 10 Oct 2026: "I still
- * want the bWallet Lounge to be a yellow card in chat, pinned to the top"). Not a list row: it can't
- * be unpinned or archived. Shows the last message, unread count and, while its always-open Space is
+ * The bWallet Help Desk (ticker LOUNGE; was the bWallet Lounge) as a yellow card pinned above every
+ * other chat (owner, 10 Oct 2026). Not a list row and can't be archived; the pin icon unpins it on this
+ * device only (helpDeskPin.ts), after which it's an ordinary row until pinned again. Shows the last message, unread count and, while its always-open Space is
  * live, "Live · N listening" with Join (tap Join → the Space; tap the card → the room).
  */
 const INK = '#0B0A08';
@@ -21,6 +22,7 @@ export const LoungeCard = ({
   preview,
   onOpen,
   onJoin,
+  onUnpin,
 }: {
   client: BchatClient;
   /** The Lounge row from the rooms list, or null when this account isn't a member yet. */
@@ -30,6 +32,8 @@ export const LoungeCard = ({
   preview: string;
   onOpen: () => void;
   onJoin: () => void;
+  /** Unpin on this device: the card goes and the room becomes an ordinary row. */
+  onUnpin?: () => void;
 }) => {
   const [listening, setListening] = useState<number | null>(null);
   const [bump, setBump] = useState(0);
@@ -67,10 +71,10 @@ export const LoungeCard = ({
       <div
         role="button"
         tabIndex={0}
-        aria-label="Open the bWallet Lounge"
+        aria-label={`Open the ${HELP_DESK_NAME}`}
         onClick={onOpen}
         onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onOpen()}
-        className="w-full flex items-center gap-3 rounded-2xl px-4 py-3 text-left cursor-pointer active:opacity-90"
+        className="bw-helpdesk-card w-full flex items-center gap-3 rounded-2xl px-4 py-3 text-left cursor-pointer active:opacity-90"
         style={{ background: '#F5C542', color: INK, boxShadow: '0 6px 24px rgba(245,197,66,0.18)' }}
       >
         <span
@@ -91,7 +95,7 @@ export const LoungeCard = ({
         </span>
         <span className="flex-1 min-w-0">
           <span className="flex items-center gap-2">
-            <span className="text-[16px] font-extrabold truncate">bWallet Lounge</span>
+            <span className="text-[16px] font-extrabold truncate">{HELP_DESK_NAME}</span>
             {info.badge && (
               <span
                 className="min-w-[20px] h-5 px-[6px] rounded-full text-[11px] font-bold flex items-center justify-center shrink-0"
@@ -122,6 +126,21 @@ export const LoungeCard = ({
             style={{ background: INK, color: '#F5C542' }}
           >
             Join
+          </button>
+        )}
+        {onUnpin && (
+          <button
+            type="button"
+            aria-label={`Unpin the ${HELP_DESK_NAME}`}
+            title="Unpin (this device only)"
+            onClick={(e) => {
+              e.stopPropagation();
+              onUnpin();
+            }}
+            className="shrink-0 rounded-full p-2"
+            style={{ color: INK, opacity: 0.7 }}
+          >
+            <PinOff size={16} />
           </button>
         )}
       </div>

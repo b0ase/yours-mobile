@@ -65,7 +65,7 @@ const Option = ({
     <span className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#111216] text-white">
       {pic ? <img src={pic} alt="" className="h-full w-full object-cover" draggable={false} /> : icon}
       {pic && icon && (
-        <span className="absolute -bottom-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-black text-white ring-2 ring-[#0d0e11]">
+        <span className="absolute -bottom-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-[#0b0c0f] text-white ring-2 ring-[#0d0e11]">
           {icon}
         </span>
       )}

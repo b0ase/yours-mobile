@@ -130,3 +130,32 @@ export const bHold = (s: BHoldState, e: BHoldEvent): { state: BHoldState; effect
       return s.phase === 'listening' || s.phase === 'cancelling' ? idle('cancel') : idle('none');
   }
 };
+
+/**
+ * Swipe up on the b screen to close it (owner, 15 Oct 2026): the mirror of the pull-down that opened it,
+ * with the same distance (PULL_THRESHOLD). It never takes a scroll from b's chat: it only starts when the
+ * chat (if any) is already scrolled to the bottom, so an upward drag has nothing left to scroll, and never
+ * from a text field or the bottom zone where the composer and keyboard live.
+ */
+export const B_CLOSE_BOTTOM_ZONE = 120;
+/** Scroll slack: a list within this many px of its end counts as at the bottom (sub-pixel rounding). */
+export const B_CLOSE_SCROLL_SLACK = 2;
+
+export type BCloseStart = {
+  y: number;
+  viewportH: number;
+  /** The chat scroller under the finger, if any. */
+  scroll: { top: number; height: number; client: number } | null;
+  /** The touch began on a text field, button or other control. */
+  onField: boolean;
+};
+
+export const bCloseStartOk = ({ y, viewportH, scroll, onField }: BCloseStart): boolean => {
+  if (onField || y > viewportH - B_CLOSE_BOTTOM_ZONE) return false;
+  if (!scroll) return true;
+  return scroll.top + scroll.client >= scroll.height - B_CLOSE_SCROLL_SLACK;
+};
+
+/** dy < 0 is up. 0..1 as the finger swipes up; reached = release closes b. */
+export const bCloseProgress = (dy: number) => Math.max(0, Math.min(1, -dy / PULL_THRESHOLD));
+export const bCloseReached = (dy: number) => -dy >= PULL_THRESHOLD;

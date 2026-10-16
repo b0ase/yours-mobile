@@ -305,7 +305,7 @@ export const parseRoomSpaceMeta = (data: unknown, ticker?: string | null): RoomS
 
 /** The always-open room's one bar: Join, whether or not anyone is on stage yet. */
 export const alwaysOpenBarText = (ticker: string, roomName: string) =>
-  `Join ${tickerKey(ticker) === 'LOUNGE' ? 'the Lounge' : roomName} · Open 24/7`;
+  `Join ${tickerKey(ticker) === 'LOUNGE' ? 'the Help Desk' : roomName} · Open 24/7`;
 
 /** The agent tile's caption (b on an always-open stage). */
 export const alwaysHereCaption = (a: AlwaysHere) =>

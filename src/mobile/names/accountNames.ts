@@ -3,7 +3,18 @@ import { bareName } from './names';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { getMyName } from './myName';
 import { isPlaceholderName } from './handlePrompt';
-import { getCachedProfileName, getPaymail, onAccountNamesChange, payableLabel, syncAccountNames } from './accountName';
+import {
+  collectPaymailNow,
+  ctxIdentityAddress,
+  getCachedProfileName,
+  getPaymail,
+  onAccountNamesChange,
+  payableLabel,
+  syncAccountNames,
+} from './accountName';
+
+/** Paymail inbox check while the app is open and visible (one signed POST, ~0.2 s). */
+export const PAYMAIL_INBOX_POLL_MS = 15_000;
 
 export type AccountNames = {
   /** BAP profile name, else the account's name. */
@@ -50,6 +61,25 @@ export const useAccountNames = (identityAddress?: string, accountName = '', prof
     run();
     const t = setInterval(run, 150_000);
     return () => clearInterval(t);
+  }, [apiContext, identityAddress, sync]);
+  // Paymail payments arrive on our server, not on chain addresses: check that inbox every 15 s while
+  // visible and at once on return to the app, instead of only inside the 150 s name sync above.
+  useEffect(() => {
+    if (!sync || !apiContext || !identityAddress) return;
+    const tick = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      if (!getPaymail(identityAddress)) return; // no paymail yet: the name sync finds it
+      if ((await ctxIdentityAddress(apiContext)) !== identityAddress) return; // mid account switch
+      await collectPaymailNow(apiContext);
+    };
+    const run = () => void tick().catch(() => undefined);
+    const t = setInterval(run, PAYMAIL_INBOX_POLL_MS);
+    const onVisible = () => document.visibilityState === 'visible' && run();
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [apiContext, identityAddress, sync]);
   return names;
 };

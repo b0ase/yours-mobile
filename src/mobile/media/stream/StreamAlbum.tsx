@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { invertOnLightClass } from '../invertOnLight';
 import { createPortal } from 'react-dom';
 import { Pause, Play, Square } from 'lucide-react';
 import type { PrivateKey } from '@bsv/sdk';
@@ -36,9 +37,9 @@ export type Headline = { playing: boolean; duration?: number; onPlay: () => void
  * popups. Stop, leaving, or 60 s hidden returns what's left to the wallet.
  */
 const GOLD = 'var(--bw-accent-hi)';
-const PANEL = '#111216';
-const LINE = '#2b2f36';
-const MUTED = '#98A2B3';
+const PANEL = 'var(--bw-card)';
+const LINE = 'var(--bw-line)';
+const MUTED = 'var(--bw-muted)';
 const HIDDEN_STOP_MS = 60_000;
 
 /** A paid session (funded budget, swept on stop) or a sponsored one (the pot pays; nothing to sweep). */
@@ -319,7 +320,7 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
               if (e.currentTarget.src !== HEADLINE_ALBUM.cover) e.currentTarget.src = HEADLINE_ALBUM.cover;
             }}
             alt={`${title} cover`}
-            className="w-full md:w-[260px] shrink-0 aspect-square object-cover"
+            className={`w-full md:w-[260px] shrink-0 aspect-square object-cover${invertOnLightClass(artistName)}`}
             style={{ borderRadius: 6, boxShadow: '0 10px 30px rgba(0,0,0,0.7)', background: '#000' }}
           />
           <div className="flex-1 min-w-0 flex flex-col justify-end gap-2">

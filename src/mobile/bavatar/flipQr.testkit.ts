@@ -29,17 +29,24 @@ export function zxing(img: { data: Uint8ClampedArray; width: number; height: num
 export const jsqr = (img: { data: Uint8ClampedArray; width: number; height: number }) =>
   jsQR(img.data, img.width, img.height)?.data ?? null;
 
+/** Probed once per process: spawning `zbarimg --version` before every decode doubled the subprocess count. */
+let hasZbar: boolean | undefined;
+
 /** zbar (zbarimg) when installed, else undefined (CI without it skips that decoder). */
 export async function zbar(svg: string, px: number): Promise<string | null | undefined> {
   const { execFileSync } = await import('node:child_process');
   const { mkdtempSync, rmSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
-  try {
-    execFileSync('zbarimg', ['--version'], { stdio: 'ignore' });
-  } catch {
-    return undefined;
+  if (hasZbar === undefined) {
+    try {
+      execFileSync('zbarimg', ['--version'], { stdio: 'ignore' });
+      hasZbar = true;
+    } catch {
+      hasZbar = false;
+    }
   }
+  if (!hasZbar) return undefined;
   const dir = mkdtempSync(join(tmpdir(), 'bflip-'));
   try {
     const file = join(dir, 'q.png');

@@ -1,7 +1,9 @@
 /**
  * Feed › bMovies: a full-screen vertical reel of bmovies.app clips (see bmovies.ts). One clip per
- * screen, snap scrolling. Only the clip on screen plays (muted until tapped); the next one preloads;
- * every other slide is just its poster, so there are never more than two players mounted.
+ * screen, snap scrolling. Only the clip on screen plays (muted until tapped); the next one preloads its metadata;
+ * only the slides either side of it hold a poster, and every other slide is just its gold title card, so at most
+ * three media items are mounted (reelMemory.ts). Off-window players are unloaded, and nothing mounts while the
+ * Feed page or the app is hidden, so iOS does not kill the web view for memory.
  *
  * The overlay mirrors bmovies.app's own feed (SwipeFeedView): black top/bottom scrims, sound chip
  * top-left, then bottom-up a white scrubber, a green Buy $TICKER button, the title and $TICKER in
@@ -54,6 +56,8 @@ import {
   type SwipeTrade,
 } from './swipeTrade';
 import { BMUSIC_SOURCES, fetchMerged, type Cursors, type VideoSource } from './videoSources';
+import { inReelWindow, phonePoster, useAppVisible, useReelDevLog, useReelVideo } from '../reelMemory';
+import { useInPeek } from '../../phone/pageEl';
 
 const GOLD = '#FFD24D';
 const MUTED = '#8a8f98';
@@ -197,6 +201,7 @@ const Slide = ({
   c,
   i,
   active,
+  shown,
   muted,
   onToggleSound,
   onTrade,
@@ -209,6 +214,8 @@ const Slide = ({
   c: Clip;
   i: number;
   active: number;
+  /** False while the Feed page or the app is hidden: no media at all. */
+  shown: boolean;
   muted: boolean;
   onToggleSound: () => void;
   onTrade: (c: Clip, side: Side) => void;
@@ -219,10 +226,10 @@ const Slide = ({
 }) => {
   const [poster, setPoster] = useState<string | null>(c.poster);
   const [posterBroken, setPosterBroken] = useState(false);
-  const video = useRef<HTMLVideoElement>(null);
-  const near = i >= active - 1 && i <= active + 2;
-  const playing = i === active;
-  const preloading = i === active + 1;
+  const near = inReelWindow(i, active, shown);
+  const playing = shown && i === active;
+  const preloading = shown && i === active + 1;
+  const video = useReelVideo(playing);
 
   useEffect(() => {
     if (poster || !near) return;
@@ -233,20 +240,13 @@ const Slide = ({
     };
   }, [c, near, poster]);
 
-  useEffect(() => {
-    const v = video.current;
-    if (!v) return;
-    if (playing) void v.play().catch(() => undefined);
-    else v.pause();
-  }, [playing]);
-
   // The white scrubber under the overlay (0..1), from the playing clip.
   const [progress, setProgress] = useState(0);
   useEffect(() => {
     if (!playing) setProgress(0);
   }, [playing]);
 
-  const shownPoster = poster && !posterBroken ? poster : null;
+  const shownPoster = poster && !posterBroken ? phonePoster(poster) : null;
   const openOnBmovies = () => void openDappBrowser(clipPageUrl(c));
   const share = () =>
     void shareLink({
@@ -302,16 +302,16 @@ const Slide = ({
       style={{ height: '100%', scrollSnapAlign: 'start' }}
     >
       <TitleCard c={c} t={t} />
-      {shownPoster && (
+      {shownPoster && near && (
         <img
           src={shownPoster}
           alt=""
           className="absolute inset-0 h-full w-full object-cover"
-          loading={near ? 'eager' : 'lazy'}
+          decoding="async"
           onError={() => setPosterBroken(true)}
         />
       )}
-      {/* No poster yet: the clip's first frame, but only near the screen (metadata only). */}
+      {/* No poster yet: the clip's first frame, only for the slide just above (metadata only). */}
       {!shownPoster && near && !playing && !preloading && (
         <video
           src={firstFrameUrl(c.src)}
@@ -460,6 +460,11 @@ const BmoviesReel = ({ brand = 'bmovies' }: { brand?: keyof typeof THEMES }) => 
   const [error, setError] = useState('');
   const [active, setActive] = useState(0);
   const [muted, setMuted] = useState(true);
+  // The phone layout keeps the Feed mounted while another page is on screen: then, or in the background, no media.
+  const offScreen = useInPeek();
+  const appVisible = useAppVisible();
+  const shown = !offScreen && appVisible;
+  useReelDevLog(brand, shown && clips?.length ? Math.min(clips.length, active + 2) - Math.max(0, active - 1) : 0);
   const [height, setHeight] = useState<number | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const loading = useRef(false);
@@ -681,6 +686,7 @@ const BmoviesReel = ({ brand = 'bmovies' }: { brand?: keyof typeof THEMES }) => 
             c={c}
             i={i}
             active={active}
+            shown={shown}
             muted={muted}
             onToggleSound={() => setMuted((m) => !m)}
             onTrade={onTrade}

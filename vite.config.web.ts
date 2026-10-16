@@ -1,6 +1,6 @@
 import { defineConfig, mergeConfig, type Plugin } from 'vite';
 import { resolve } from 'path';
-import { readFileSync, readdirSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'fs';
 import mobileConfig from './vite.config.mobile';
 import { writeAlbumPages } from './src/web/albumPages';
 import { installStaleBuildCheck } from './src/web/staleBuild';
@@ -39,6 +39,18 @@ const DESKTOP_SHARE = [
   '    <meta name="twitter:card" content="summary_large_image" />',
   `    <meta name="twitter:image" content="${DESKTOP_OG}" />`,
 ];
+
+/** Edition installs served under /themes/<id>/, each with a web.bwalletx.com/<id> entry page (accent.ts LINKED_INSTALLS). */
+export const THEME_INSTALLS: Record<string, string> = {
+  white: '#f7f6f2',
+  pink: '#F4A7C0',
+  blue: '#8EC5F0',
+  yellow: '#F7DA4A',
+  vexvoid: '#000000',
+  npg: '#000000',
+  npgx: '#000000',
+};
+const INSTALL_NAMES: Record<string, string> = { npg: 'NPG', npgx: 'NPGX', vexvoid: 'VexVoid' };
 
 const webShell = (): Plugin => ({
   name: 'bwallet-web-shell',
@@ -119,6 +131,39 @@ const webShell = (): Plugin => ({
       fileName: 'install-wide.png',
       source: readFileSync(resolve(__dirname, 'src/web/install-wide.png')),
     });
+    // Per-colour installs (bwalletx.com theme-apps): /themes/<colour>/manifest.json starts at /?theme=<colour>;
+    // src/mobile/theme/accent.ts swaps the manifest link to it so Add to Home Screen gets the coloured icon.
+    for (const [colour, bg] of Object.entries(THEME_INSTALLS)) {
+      for (const size of [180, 192, 512])
+        this.emitFile({
+          type: 'asset',
+          fileName: `themes/${colour}/icon-${size}.png`,
+          source: readFileSync(resolve(__dirname, `src/web/themes/icon-${colour}-${size}.png`)),
+        });
+      const name = `bWallet ${INSTALL_NAMES[colour] ?? colour[0].toUpperCase() + colour.slice(1)}`;
+      this.emitFile({
+        type: 'asset',
+        fileName: `themes/${colour}/manifest.json`,
+        source: JSON.stringify(
+          {
+            id: `/bwallet-${colour}`,
+            name,
+            short_name: 'bWallet',
+            start_url: `/${colour}`,
+            scope: '/',
+            display: 'standalone',
+            background_color: bg,
+            theme_color: bg,
+            icons: [
+              { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
+              { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+            ],
+          },
+          null,
+          2,
+        ),
+      });
+    }
     this.emitFile({
       type: 'asset',
       fileName: 'manifest.webmanifest',
@@ -155,6 +200,55 @@ const webShell = (): Plugin => ({
   },
 });
 
+/**
+ * web.bwalletx.com/<edition> (/white, /pink, /vexvoid, /npg …): the same wallet (same origin, same data) with that
+ * edition's head, so Add to Home Screen installs its icon (iOS reads apple-touch-icon from the page at that moment)
+ * and manifest. vercel.json rewrites /<id> to <id>.html; accent.ts treats /<id> like ?theme=<id> on first open.
+ */
+export const editionEntryHtml = (html: string, id: string): string =>
+  html
+    .replace(/<link rel="manifest" href="[^"]*" \/>/, `<link rel="manifest" href="/themes/${id}/manifest.json" />`)
+    .replace(
+      /<link rel="apple-touch-icon" href="[^"]*" \/>/,
+      `<link rel="apple-touch-icon" href="/themes/${id}/icon-180.png" />`,
+    )
+    .replace(
+      /<meta name="theme-color" content="[^"]*" \/>/,
+      `<meta name="theme-color" content="${THEME_INSTALLS[id]}" />`,
+    )
+    .replace(
+      /<meta name="apple-mobile-web-app-title" content="[^"]*" \/>/,
+      '<meta name="apple-mobile-web-app-title" content="bWallet" />',
+    )
+    .replace(
+      /<meta name="color-scheme" content="[^"]*" \/>/,
+      `<meta name="color-scheme" content="${editionScheme(id)}" />`,
+    )
+    // Status bar, safe-area strip and page follow the edition from the first paint (owner, 16 Oct 2026: a black bar
+    // across the top of White). Paper editions: the default (light) iOS bar on the paper; dark editions: black.
+    .replace(
+      '</head>',
+      [
+        `    <meta name="apple-mobile-web-app-status-bar-style" content="${editionScheme(id) === 'light' ? 'default' : 'black'}" />`,
+        `    <style>html,body{background:${THEME_INSTALLS[id]}}</style>`,
+        '  </head>',
+      ].join('\n'),
+    );
+const editionScheme = (id: string): 'light' | 'dark' => (THEME_INSTALLS[id] === '#000000' ? 'dark' : 'light');
+export const whiteEntryHtml = (html: string): string => editionEntryHtml(html, 'white');
+
+const editionEntries = (): Plugin => ({
+  name: 'bwallet-edition-entries',
+  closeBundle() {
+    if (DESKTOP) return;
+    const index = resolve(__dirname, 'build-web/index.html');
+    if (!existsSync(index)) return;
+    const html = readFileSync(index, 'utf8');
+    for (const id of Object.keys(THEME_INSTALLS))
+      writeFileSync(resolve(__dirname, `build-web/${id}.html`), editionEntryHtml(html, id));
+  },
+});
+
 /** Desktop: a static page with its own share card per shareable album and artist (src/web/albumPages.ts). */
 const albumPages = (): Plugin => ({
   name: 'bwallet-album-pages',
@@ -179,7 +273,7 @@ const webCss = (): Plugin => ({
 export default mergeConfig(
   mobileConfig,
   defineConfig({
-    plugins: [webShell(), webCss(), albumPages()],
+    plugins: [webShell(), webCss(), albumPages(), editionEntries()],
     // public/ is the extension's (Yours manifest and sprout icons); the web wallet emits its own.
     publicDir: false,
     // Both web hosts serve index.html for deep paths (/lock/subscriptions, /m/market, /bapp/bchatx): relative ./assets/

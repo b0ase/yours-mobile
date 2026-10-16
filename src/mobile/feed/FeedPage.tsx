@@ -1,3 +1,5 @@
+import { useAvatarPlayback } from '../names/useAvatarPlayback';
+import { setFeedLatest } from '../tabs/tabBadges';
 import {
   lazy,
   Suspense,
@@ -73,6 +75,7 @@ import {
   quoteText,
   estimatePostFee,
   avatarSeed,
+  avatarUrl,
   feedTimeLabel,
   filterFeed,
   MAX_INLINE_IMAGE_BYTES,
@@ -173,6 +176,7 @@ import {
   type TipDest,
 } from './tipMessage';
 import { resolvePaymail } from '../names/names';
+import { bavatarSeedDataUri } from '../names/avatar';
 import { sendMail } from '../bmail/client';
 import type { WalletInterface } from '@bsv/sdk';
 import { ErrorActions } from '../errors/ErrorActions';
@@ -180,10 +184,12 @@ import { NewsList, NewsThread } from './NewsThread';
 import { loadNewsMode, saveNewsMode, type NewsItem } from './bnews';
 import { AllFeedsSheet, FeedPicker } from './FeedPicker';
 import { BrandFeed } from './BrandFeed';
+import { rememberFeed, takeCrashFeed } from '../url/crashResume';
 import { BradioFeed } from '../bradio/BradioFeed';
 import { authorProfileUrl, authorRef, fetchAuthorPage, fetchAuthorProfile, type AuthorProfile } from './authorFeed';
 import { FeaturedAlbum } from './FeaturedAlbum';
 import {
+  FEED_COLORS,
   feedColor,
   feedDef,
   hasCustomView,
@@ -324,7 +330,7 @@ const SortMenu = ({ sort, onChange }: { sort: FeedSort; onChange: (s: FeedSort) 
         aria-haspopup="menu"
         aria-expanded={!!at}
         aria-label={`Sort: ${current.label}`}
-        className="shrink-0 flex items-center gap-1 rounded-full pl-3 pr-2 py-1 text-[12px] font-semibold"
+        className="bw-feed-sort shrink-0 flex items-center gap-1 rounded-full pl-3 pr-2 py-1 text-[12px] font-semibold"
         style={{ background: '#1a1408', color: GOLD, border: `1px solid ${GOLD}` }}
       >
         {sort === 'locked' && <Lock size={12} />}
@@ -395,45 +401,38 @@ const useOnline = () => {
   return online;
 };
 
-const hue = (s: string) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
-
 const Avatar = ({
   author,
   size = 40,
   source,
+  place = 'list',
 }: {
   author: Pick<Author, 'name' | 'avatar' | 'address'> & { bapId?: string | null };
   size?: number;
+  place?: 'full' | 'list';
   source?: Source;
 }) => {
   const [broken, setBroken] = useState(false);
-  const h = hue(avatarSeed({ bapId: null, ...author }, source));
-  // Treechat exposes no public avatar API, so its authors get a per-username initial with a Treechat-purple ring.
-  const ring = source === 'treechat' ? `2px solid ${SOURCE_REGISTRY.treechat.color}` : undefined;
-  if (author.avatar && !broken)
-    return (
-      <img
-        src={author.avatar}
-        alt=""
-        onError={() => setBroken(true)}
-        className="rounded-full object-cover shrink-0"
-        style={{ width: size, height: size, border: `1px solid ${LINE}` }}
-      />
-    );
+  // Treechat exposes no avatar (not on chain, not in the overlay): its authors get a gold bAvatar
+  // seeded by username, with a Treechat-purple ring. Never a bare letter.
+  const ring = source === 'treechat' ? `2px solid ${SOURCE_REGISTRY.treechat.color}` : `1px solid ${LINE}`;
+  const photo = avatarUrl(author.avatar);
+  // Feeds: a still first frame of an animated picture, played on press/hover (names/animatedAvatar.ts).
+  const play = useAvatarPlayback(photo, place);
+  const real = photo && !broken;
+  const src = real ? play.src : bavatarSeedDataUri(avatarSeed({ bapId: null, ...author }, source));
   return (
-    <div
-      className="rounded-full flex items-center justify-center shrink-0 font-bold"
-      style={{
-        width: size,
-        height: size,
-        fontSize: size * 0.42,
-        color: `hsl(${h} 70% 82%)`,
-        background: `linear-gradient(145deg, hsl(${h} 35% 26%), hsl(${h} 30% 14%))`,
-        border: ring,
-      }}
-    >
-      {(safeName(author.name) || '?').replace(/^\$/, '').charAt(0).toUpperCase()}
-    </div>
+    <img
+      {...(real ? play.handlers : {})}
+      src={src}
+      alt=""
+      loading="lazy"
+      decoding="async"
+      referrerPolicy="no-referrer"
+      onError={() => setBroken(true)}
+      className="rounded-full object-cover shrink-0"
+      style={{ width: size, height: size, border: ring, background: '#16181c' }}
+    />
   );
 };
 
@@ -483,7 +482,7 @@ const Layer = ({
         </button>
         <span className="text-[16px] font-bold text-white truncate">{title}</span>
       </div>
-      <div className="flex-1 overflow-y-auto pb-24">
+      <div className="flex-1 overflow-y-auto bw-dock-pad">
         {onRefresh && <PullToRefresh onRefresh={onRefresh} />}
         {children}
       </div>
@@ -1651,7 +1650,12 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
     quote?: FeedPost;
     link?: { url: string; title: string };
   } | null>(null);
-  const [feed, setFeed] = useState<FeedId>(() => (loadNewsMode() ? 'bnews' : 'home'));
+  const [feed, setFeed] = useState<FeedId>(() => {
+    // After iOS killed the web view (crashResume.ts): back on the sub-feed that was open.
+    const crashed = takeCrashFeed();
+    if (crashed && crashed in FEED_COLORS) return migrateFeedId(crashed as FeedId);
+    return loadNewsMode() ? 'bnews' : 'home';
+  });
   const [pins, setPins] = useState<FeedId[]>(loadPins);
   const [allFeeds, setAllFeeds] = useState(false);
   const news = feed === 'bnews';
@@ -1660,6 +1664,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
     setFeed(id);
     setAllFeeds(false);
     saveNewsMode(id === 'bnews');
+    rememberFeed(id);
   };
   // Home's two filters (Following | For you), remembered per device as the Feed setting's default
   // (For you keeps "Latest" when that was the setting).
@@ -1729,6 +1734,8 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
         const posts = which === 'foryou' ? await fetchForYou() : await fetchFollowing(follows);
         setRaw((r) => ({ ...r, [which]: posts }));
         writeListCache(`feed:${which}`, posts);
+        // Feed tab badge: the newest posts known (cleared by viewing the Feed route, useTabBadges.ts).
+        if (which === 'foryou') setFeedLatest(posts.map((x) => x.at));
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         setRaw((r) => ({ ...r, [which]: r[which] ?? [] }));
@@ -2031,7 +2038,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
                     setSource(s.id);
                     saveSource(s.id);
                   }}
-                  className="shrink-0 rounded-full px-3 py-1 text-[12px] font-semibold"
+                  className={`bw-feed-chip shrink-0 rounded-full px-3 py-1 text-[12px] font-semibold${source === s.id ? ' is-on' : ''}`}
                   style={
                     source === s.id
                       ? { background: chipColor(s.id), color: textOn(chipColor(s.id)) }
@@ -2425,7 +2432,7 @@ const ProfileView = ({
       >
         {/* Tap to turn it over: their pay code, an Art QR of their payable address (public data only). */}
         <FlipBavatar
-          front={<Avatar author={author} size={80} />}
+          front={<Avatar author={author} size={80} place="full" />}
           artSeed={author.address}
           address={isPayAddress(author.address) ? author.address : ''}
           caption={safeName(author.name)}
@@ -2818,7 +2825,7 @@ const Leaderboard = ({
           <button
             key={t.id}
             onClick={() => setTf(t.id)}
-            className="shrink-0 rounded-full px-3 py-1 text-[12px] font-semibold"
+            className={`bw-feed-chip shrink-0 rounded-full px-3 py-1 text-[12px] font-semibold${tf === t.id ? ' is-on' : ''}`}
             style={
               tf === t.id
                 ? { background: GOLD, color: '#1a1300' }

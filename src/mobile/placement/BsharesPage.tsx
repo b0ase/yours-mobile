@@ -1,6 +1,7 @@
 /**
- * bShares (/m/bshares): any company's register + private placements, RESTRICTED to that company's registered
- * members and directors (bCorp is the first; docs/BCORP-PLACEMENT.md). Company switcher at the top. Never in a store build: the route is lazy and dropped there (PLACEMENT_ENABLED).
+ * bShares (/m/bshares): share registers for any company (register of members, director approvals, locked shares).
+ * The first register in testing is The Bitcoin Corporation Ltd. RESTRICTED to registered members and the director
+ * (docs/BCORP-PLACEMENT.md). Never in a store build: the route is lazy and dropped there (PLACEMENT_ENABLED).
  * Tranche size, price and the BSV rate are typed in by the director; nothing here is a cap-table number.
  */
 import { useEffect, useState } from 'react';
@@ -37,8 +38,8 @@ export const RestrictedNotice = () => (
       <Lock size={16} color={GOLD} aria-hidden="true" /> Restricted: for registered shareholders
     </div>
     <p className="m-0 text-sm" style={{ color: MUTED }}>
-      bShares opens for members on a company&apos;s register of members and its directors. Shares are not offered
-      publicly.
+      bShares keeps share registers for any company: register of members, director approvals and locked shares. It opens
+      for members and directors of a company on bShares. Shares are not offered publicly.
     </p>
   </div>
 );
@@ -332,7 +333,7 @@ export const Holdings = ({ me, height }: { me: BsharesMe; height: number }) => (
     {me.holdings.map((h, i) => (
       <div key={i} className="text-sm text-white">
         {h.token
-          ? shareLabel(h.shares, h.token.unlockHeight, height)
+          ? shareLabel(h.shares, h.token.unlockHeight, height, me.company.name)
           : `${me.company.name} · ${h.shareClass} · ${h.shares.toLocaleString('en-GB')}`}
         {h.token && (
           <span className="block text-xs" style={{ color: MUTED }}>

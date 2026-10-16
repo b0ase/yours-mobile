@@ -1,6 +1,18 @@
 import { describe, expect, it } from 'bun:test';
 import { BANNED_PROMO, RISK_LINE, TOKEN_SORTS, mergeTokens, sortTokens, sparkPath, sparkline } from './bexCards';
-import { APP_SORTS, appCards, contributeLinks, isBuilder, sortApps, tokeniseQuery } from './bappsCards';
+import {
+  APP_SORTS,
+  appCards,
+  contributeLinks,
+  isBuilder,
+  sortApps,
+  tokeniseQuery,
+  BAPP_ABOUT,
+  appPages,
+  appFacts,
+  swipeAxis,
+} from './bappsCards';
+import { BAPPS } from '../../bapps';
 import type { BApp } from '../../bapps';
 
 const id = (c: string) => `${c.repeat(64)}_0`;
@@ -126,4 +138,26 @@ describe('bApps reel', () => {
       category: 'apps',
     });
   });
+});
+
+it('every bApp in the store has a plain-English description', () => {
+  for (const a of BAPPS) expect(BAPP_ABOUT[a.name]?.length ?? 0).toBeGreaterThan(10);
+  for (const c of appCards(BAPPS)) {
+    expect(c.about).toBe(BAPP_ABOUT[c.name]);
+    const pages = appPages(c);
+    expect(pages.length).toBeGreaterThanOrEqual(2);
+    expect(pages.length).toBeLessThanOrEqual(5);
+    expect(appFacts(c).length).toBeGreaterThanOrEqual(2);
+    expect(appFacts(c).length).toBeLessThanOrEqual(4);
+    for (const p of pages) for (const l of p.lines) expect(l).not.toMatch(BANNED_PROMO);
+  }
+});
+
+it('swipe direction: small moves wait, clear horizontal browses pages, diagonal stays vertical', () => {
+  expect(swipeAxis(3, 4)).toBeNull();
+  expect(swipeAxis(40, 5)).toBe('x');
+  expect(swipeAxis(-40, 10)).toBe('x');
+  expect(swipeAxis(5, 40)).toBe('y');
+  expect(swipeAxis(30, 28)).toBe('y');
+  expect(swipeAxis(0, -12)).toBe('y');
 });

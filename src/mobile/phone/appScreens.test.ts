@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import {
   defaultScreens,
+  gatherBapps,
+  ownIconsFirst,
   moveToScreen,
   parseScreens,
   placeFirstFree,
@@ -117,5 +119,38 @@ describe('app screens (Option B)', () => {
     expect(pageForPath('/bsv-wallet', strip)?.id).toBe('wallet');
     expect(pageForPath('/m/feed', strip)?.id).toBe('feed');
     expect(pageForPath('/m/home', strip)).toBeNull();
+  });
+});
+
+describe('all bApps in one section', () => {
+  const own = new Set(['b:mint', 'b:chat']);
+  const hasOwn = (k: string) => own.has(k);
+
+  test('ownIconsFirst keeps order within each group', () => {
+    expect(ownIconsFirst(['b:movies', 'b:mint', 'b:music', 'b:chat'], hasOwn)).toEqual([
+      'b:mint',
+      'b:chat',
+      'b:movies',
+      'b:music',
+    ]);
+  });
+
+  test('gatherBapps pulls bApps off Home into the bApps screen, own icons first, nothing lost', () => {
+    const s = defaultScreens(['screen:wallet', 'b:movies', 'b:mint', 'o:treechat'], ['b:music', 'b:chat'], ['g:1']);
+    const out = gatherBapps(s, ['sys:agent', 'b:movies', 'b:mint', 'b:music', 'b:chat'], hasOwn);
+    expect(out.screens[0].items).toEqual(['screen:wallet', 'o:treechat']);
+    expect(out.screens[1]).toEqual({
+      title: 'bApps',
+      items: ['b:mint', 'b:chat', 'sys:agent', 'b:movies', 'b:music'],
+    });
+    expect(out.screens[2]).toEqual({ title: 'Games', items: ['g:1'] });
+  });
+
+  test('gatherBapps makes a bApps screen when the user has none, and skips dock keys', () => {
+    const s = parseScreens(JSON.stringify({ v: 1, screens: [{ items: ['b:mint', 'b:movies', 'x'] }] }))!;
+    const out = gatherBapps(s, ['b:mint', 'b:movies'], hasOwn, new Set(['b:movies']));
+    expect(out.screens.map((x) => x.title)).toEqual([undefined, 'bApps']);
+    expect(out.screens[0].items).toEqual(['b:movies', 'x']);
+    expect(out.screens[1].items).toEqual(['b:mint']);
   });
 });

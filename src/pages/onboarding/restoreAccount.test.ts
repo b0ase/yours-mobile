@@ -15,10 +15,18 @@ import { normalizePhrase, phraseProblem, restoreErrorMessage } from './restoreHe
 const PASSWORD = 'correct horse battery';
 const SALT = 'a1b2c3d4e5f6';
 
+// The real KDF (PBKDF2, 100k rounds) is about a second per call; derive each password once per file, not twice a test.
+const keyCache = new Map<string, Promise<string>>();
+const passKeyFor = (pw: string, salt: string) => {
+  const k = `${pw}\0${salt}`;
+  if (!keyCache.has(k)) keyCache.set(k, derivePassKey(pw, salt, undefined));
+  return keyCache.get(k)!;
+};
+
 type Acct = { addresses: { identityAddress: string }; encryptedKeys: string; name: string };
 
 const makeStore = async (count: number) => {
-  const passKey = await derivePassKey(PASSWORD, SALT, undefined);
+  const passKey = await passKeyFor(PASSWORD, SALT);
   const accounts: Record<string, Acct> = {};
   for (let i = 0; i < count; i++) {
     const k = getKeys();
@@ -46,7 +54,7 @@ const makeStore = async (count: number) => {
     getUsbSecurity: () => undefined,
     verifyPassword: async (pw: string) => {
       try {
-        const key = await derivePassKey(pw, state.salt, undefined);
+        const key = await passKeyFor(pw, state.salt);
         JSON.parse(await decrypt(state.accounts[state.selectedAccount].encryptedKeys, key));
         session = key;
         return true;

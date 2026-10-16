@@ -24,6 +24,7 @@ import {
   amountLabel,
   formatRaw,
   parseLookup,
+  spaceStartLine,
   spendLabel,
   spendEnforced,
   SPEND_ENFORCED_NOTE,
@@ -35,6 +36,7 @@ import {
 } from './tokenRooms';
 import type { Derivation } from './tokenRooms';
 import { ErrorActions } from '../errors/ErrorActions';
+import { keepAnimated } from '../names/animatedAvatar';
 
 const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#121316';
@@ -71,8 +73,25 @@ const SSheet = ({ title, onClose, children }: { title: string; onClose: () => vo
   );
 };
 
-/** Downscale an image file to a small JPEG data URL (the server caps covers at ~220KB). */
-const toCoverDataUrl = (file: File): Promise<string> =>
+/**
+ * Downscale an image file to a small JPEG data URL (the server caps covers at ~220KB). An animated cover is
+ * never flattened: an animated WebP under the cap is sent as is; GIF / APNG covers (the server takes only
+ * png/jpeg/webp) or bigger ones are refused with a message.
+ */
+const toCoverDataUrl = async (file: File): Promise<string> => {
+  const moving = await keepAnimated(file, { maxBytes: 220 * 1024, maxPx: 1024 }).catch((e: Error) => {
+    throw new Error(`${e.message.replace(/up to \d+ MB/, 'up to 220 KB')}`);
+  });
+  if (moving) {
+    if (moving.mime !== 'image/webp')
+      throw new Error(
+        'Animated covers must be an animated WebP for now (GIF/APNG covers come with the server update).',
+      );
+    return moving.dataUrl;
+  }
+  return toStillCover(file);
+};
+const toStillCover = (file: File): Promise<string> =>
   new Promise((resolve, reject) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
@@ -275,6 +294,9 @@ export const RoomSettingsSheet = ({
             </p>
           )}
           <Row label="Admin" value={issuerLine} />
+          {spaceStartLine(look.spaceStart) && (
+            <p className="text-sm mt-3 text-white">{spaceStartLine(look.spaceStart)}</p>
+          )}
           <p className="text-xs mt-3" style={{ color: MUTED }}>
             Only the token's issuer can change these rules.
           </p>
@@ -294,6 +316,7 @@ export const RoomSettingsSheet = ({
 
       {look && isIssuer && (
         <div className="flex flex-col gap-3">
+          {spaceStartLine(look.spaceStart) && <p className="text-sm text-white">{spaceStartLine(look.spaceStart)}</p>}
           <HistoryToggle client={client} ticker={ticker} />
           <label className="text-xs" style={{ color: MUTED }}>
             Title

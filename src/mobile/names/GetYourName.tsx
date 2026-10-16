@@ -24,6 +24,9 @@ import {
   paymailEnabled,
   PAYMAIL_ALIAS_RE,
   toAlias,
+  DISPLAY_NAME_MAX,
+  cleanDisplayName,
+  defaultDisplayName,
 } from './paymail';
 import { BWALLET_PAYMAIL_DOMAIN, OPNS_PROFILE_DOMAIN } from './config';
 import { alsoGetText, estimateMintFee, fetchMineNode } from './opnsMint';
@@ -85,6 +88,8 @@ export const GetYourName = ({
   // Paymail
   const [paymail, setPm] = useState(getPaymail(identityAddress));
   const [alias, setAlias] = useState(toAlias(profileName));
+  // Optional "Your name" (owner, 15 Oct 2026). Blank → the server uses the handle ("mike" → "Mike").
+  const [yourName, setYourName] = useState(() => cleanDisplayName(profileName));
   const [aliasState, setAliasState] = useState<'idle' | 'checking' | 'free' | 'taken' | 'invalid'>('idle');
   // Personal token: minted with the name (same confirmation) unless already linked.
   const [link, setLink] = useState(getPersonalLink(identityAddress));
@@ -272,7 +277,11 @@ export const GetYourName = ({
     setMsg('');
     try {
       const fee = nameFee && !ownPaymail ? await payNameFee(apiContext, nameFee) : {};
-      const pm = await claimPaymail(f, apiContext.wallet, alias, { ordAddress, name: profileName, ...fee });
+      const pm = await claimPaymail(f, apiContext.wallet, alias, {
+        ordAddress,
+        name: cleanDisplayName(yourName) || cleanDisplayName(profileName) || undefined,
+        ...fee,
+      });
       setPaymail(identityAddress, pm);
       setPm(pm);
       await syncBchatHandle(apiContext, pm, { signIn: true });
@@ -428,6 +437,17 @@ export const GetYourName = ({
               {aliasState === 'invalid' && 'a-z, 0-9, - or _'}
               {aliasState === 'checking' && 'Checking…'}
             </span>
+            {!blocked && !paymail && (
+              <input
+                value={yourName}
+                maxLength={DISPLAY_NAME_MAX}
+                placeholder={`Your name (optional), e.g. ${defaultDisplayName(alias) || 'Mike Smith'}`}
+                aria-label="Your name"
+                onChange={(e) => setYourName(e.target.value)}
+                className="rounded-lg px-3 py-2 text-sm bg-transparent outline-none"
+                style={{ color: fg, border: '1px solid #3a2f0c' }}
+              />
+            )}
             {!blocked && (
               <button
                 type="button"

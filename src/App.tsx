@@ -31,6 +31,8 @@ import { PANEL_PROMPT_EVENT, PanelPrompt } from './mobile/PanelPrompt';
 import { IS_EXTENSION } from './mobile/extension';
 import { isWebApp } from './mobile/webApp';
 import { UrlSync } from './mobile/url/UrlSync';
+import { CrashResume } from './mobile/url/ResumeAfterCrash';
+import { isNative } from './mobile/native';
 
 import { PAY_STREAM_ENABLED } from './mobile/storeBuild';
 import { guestMusicRoute } from './mobile/media/artists/guestRoute';
@@ -124,12 +126,12 @@ export const App = () => {
                 <SentHost />
                 {IS_EXTENSION && <PanelPrompt />}
                 {showGuest && guestNames && guest && (
-                  <Suspense fallback={null}>
+                  <Suspense fallback={<PageLoader message="Loading..." theme={theme} />}>
                     <GuestNames route={guest} onWallet={() => setGuest(null)} />
                   </Suspense>
                 )}
                 {showGuest && !guestNames && GuestMusic && guest && (
-                  <Suspense fallback={null}>
+                  <Suspense fallback={<PageLoader message="Loading..." theme={theme} />}>
                     <GuestMusic route={guest} onWallet={() => setGuest(null)} />
                   </Suspense>
                 )}
@@ -143,6 +145,7 @@ export const App = () => {
                     >
                       <Router>
                         {isWebApp() && <UrlSync />}
+                        {isNative && !IS_EXTENSION && <CrashResume />}
                         <Routes>
                           <Route path="/" element={<Start />} />
                           <Route
@@ -166,7 +169,7 @@ export const App = () => {
                           <Route
                             path="/browser"
                             element={
-                              <Suspense fallback={null}>
+                              <Suspense fallback={<PageLoader message="Loading..." theme={theme} />}>
                                 <BrowserPage />
                               </Suspense>
                             }
