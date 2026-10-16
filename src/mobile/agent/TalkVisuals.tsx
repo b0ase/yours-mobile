@@ -31,7 +31,7 @@ export const TalkSheetView = ({
       style={{ bottom: '100%' }}
     >
       <div
-        className="rounded-2xl px-4 py-3 flex flex-col items-center gap-2 backdrop-blur-md"
+        className="bw-talk-card rounded-2xl px-4 py-3 flex flex-col items-center gap-2 backdrop-blur-md"
         style={{ background: 'rgba(23,25,30,0.95)', border: `1px solid ${cancelling ? '#F04438' : '#2b2f36'}` }}
       >
         <div className="flex items-end gap-1 h-8" aria-hidden>
@@ -43,10 +43,10 @@ export const TalkSheetView = ({
             />
           ))}
         </div>
-        <p className="m-0 text-center text-[15px] leading-snug text-white min-h-[1.4em] max-h-24 overflow-hidden">
+        <p className="bw-talk-text m-0 text-center text-[15px] leading-snug text-white min-h-[1.4em] max-h-24 overflow-hidden">
           {sheet.note ?? (sheet.text || (sheet.sending ? '' : idleText))}
         </p>
-        <p className="m-0 text-[11px]" style={{ color: cancelling ? '#F04438' : MUTED }}>
+        <p className="bw-talk-hint m-0 text-[11px]" style={{ color: cancelling ? '#F04438' : MUTED }}>
           {sheet.sending ? sendingHint : sheet.note ? noteHint : cancelling ? 'Let go to cancel' : hint}
         </p>
       </div>

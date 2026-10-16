@@ -3,6 +3,24 @@
 :root[data-bw-paper] .bw-feed-label {
   color: var(--bw-text) !important;
 }
+/* Hold-to-talk sheet (Dock b, Ask b composer) on light packs: the pack's card with an ink hairline and ink text,
+   not a near-black card with dark ink (owner, 16 Oct 2026, Pink). Meter bars and the ring already use the accent. */
+:root[data-bw-pack='light'] .bw-talk-card {
+  background: var(--bw-card) !important;
+  border-color: var(--bw-line) !important;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.08);
+}
+:root[data-bw-pack='light'] .bw-talk-text {
+  color: var(--bw-text) !important;
+}
+:root[data-bw-pack='light'] .bw-talk-hint:not([style*='rgb(240, 68, 56)']) {
+  color: var(--bw-muted) !important;
+}
+/* The wallet card's $ / BSV switch: the off side sits on a paper shade with an ink hairline, matching the on side. */
+:root[data-bw-paper] .bw-wcard-unit {
+  background: var(--bw-card2) !important;
+  border-color: var(--bw-line) !important;
+}
 /* …and their icon tiles are the pack's card (a paper shade on Pink / Blue / Yellow) with an ink hairline. */
 :root[data-bw-paper] .bw-feed-tile {
   background: var(--bw-card) !important;

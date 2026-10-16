@@ -298,7 +298,9 @@ const WalletCardInner = ({
   const lightPick = design?.kind === 'pattern' && isLightPattern(design.id) ? design.id : null;
   const themed =
     !!bavatarArt && (light ? !ownArt && cardFollowsTheme(pack, false) : cardFollowsTheme(pack, customised));
-  const themeArt = themed ? patternUri(lightPick ?? pack.pattern, pack.accent, artKey) : null;
+  const themeArt = themed
+    ? patternUri(lightPick ?? pack.pattern, pack.accent, artKey, pack.paper ? pack.surface : undefined)
+    : null;
   const frontArt = light
     ? (bavatarArt && ownArt && (cardImage || designArt?.src)) || themeArt || bavatarArt
     : (bavatarArt && (cardImage || designArt?.src)) || themeArt || bavatarArt;

@@ -66,3 +66,12 @@ test('No dark cards on White: dark backgrounds in stylesheets have a pack overri
     /:is\(\.bw-feed-sort, \.bw-feed-chip\.is-on\) \{[^}]*background: var\(--bw-surface\) !important;[^}]*border: 1\.5px solid var\(--bw-text\)/,
   );
 });
+
+test('paper packs draw the White designs on their own paper shade, never the off-white ground', () => {
+  for (const id of ['pink', 'blue', 'yellow'] as const) {
+    const a = accentById(id);
+    const svg = lightPatternSvg('arcs', a.accent, a.surface);
+    expect(svg).toContain(`fill="${a.surface}"`);
+    expect(svg).not.toContain(LIGHT_GROUND);
+  }
+});
