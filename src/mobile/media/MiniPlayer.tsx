@@ -31,11 +31,11 @@ const MiniPlayer = () => {
     };
   }, [shown]);
   if (!track) return null;
-  const btn = 'p-2 rounded-full active:bg-[#2b2f36]';
+  const btn = 'p-2 rounded-full active:bg-[var(--bw-line)]';
   return (
     <div
       ref={box}
-      className="absolute left-2 right-2 z-[101] rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36] px-3 pt-2 pb-1"
+      className="absolute left-2 right-2 z-[101] rounded-xl bg-[var(--bw-surface)] border border-[var(--bw-line)] px-3 pt-2 pb-1"
       style={{ bottom: '4rem' }}
     >
       <div className="flex items-center gap-2">
@@ -52,8 +52,8 @@ const MiniPlayer = () => {
           disabled={!track.onExpand}
           aria-label={track.onExpand ? `Open ${track.title}` : undefined}
         >
-          <div className="text-xs font-semibold text-white truncate">{track.title}</div>
-          <div className="text-[10px] text-[#98A2B3] truncate">
+          <div className="text-xs font-semibold text-[var(--bw-text)] truncate">{track.title}</div>
+          <div className="text-[10px] text-[var(--bw-muted)] truncate">
             {fmt(s.time)} / {fmt(s.duration)}
             {s.queue.length > 1 ? ` · ${s.index + 1} of ${s.queue.length}` : ''}
             {track.subtitle ? ` · ${track.subtitle}` : ''}
@@ -61,16 +61,16 @@ const MiniPlayer = () => {
           </div>
         </button>
         <button aria-label="Previous" className={btn} onClick={previous}>
-          <SkipBack size={16} color="#fff" />
+          <SkipBack size={16} color="var(--bw-text)" />
         </button>
         <button aria-label={s.playing ? 'Pause' : 'Play'} className={btn} onClick={toggle}>
-          {s.playing ? <Pause size={18} color="#fff" /> : <Play size={18} color="#fff" />}
+          {s.playing ? <Pause size={18} color="var(--bw-text)" /> : <Play size={18} color="var(--bw-text)" />}
         </button>
         <button aria-label="Next" className={btn} onClick={next}>
-          <SkipForward size={16} color="#fff" />
+          <SkipForward size={16} color="var(--bw-text)" />
         </button>
         <button aria-label="Close player" className={btn} onClick={stop}>
-          <X size={16} color="#98A2B3" />
+          <X size={16} color="var(--bw-muted)" />
         </button>
       </div>
       <input
