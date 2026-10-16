@@ -266,7 +266,7 @@ const MONO_TONES: readonly Accent[] = [
 
 /**
  * Artist editions (owner, 16 Oct 2026): VexVoid, Ninja Punk Girls and NPGX. Dark packs with their own card art
- * (cardPatterns.ts: a still VexVoid point field, official NPG art, NPGX glitch slices) and a credit in Theme.
+ * (cardPatternsEdition.ts: a still VexVoid point field, official NPG art, the official NPGX red X logo) and a credit in Theme.
  * No gold anywhere. The owner's own art, so they ship in every build (store included).
  */
 const EDITIONS: readonly Accent[] = [
@@ -337,23 +337,23 @@ const EDITIONS: readonly Accent[] = [
     group: 'edition',
     edition: 'NPGX edition',
     label: 'NPGX',
-    blurb: 'Acid green, magenta, cyan',
-    accent: '#C6FF1A',
-    hi: '#E0FF66',
-    lo: '#B4F000',
+    blurb: 'Black and red',
+    accent: '#FF2D3A',
+    hi: '#FF5A63',
+    lo: '#F0202E',
     on: '#000000',
     bg: '#000000',
-    surface: '#08100A',
-    surface2: '#101A12',
+    surface: '#0D0506',
+    surface2: '#170809',
     nav: '#000000',
-    text: '#F4FFF0',
-    muted: '#A9C9B2',
-    line: '#2A3D2E',
-    success: '#3DF5FF',
-    danger: '#FF5C9A',
-    shadow: '0 0 24px rgb(255 43 214 / 0.15)',
-    trim: 'rgb(0 240 255 / 0.6)',
-    glow: '0 0 14px rgb(198 255 26 / 0.55), 0 0 3px rgb(255 43 214 / 0.9)',
+    text: '#FFFFFF',
+    muted: '#C9C9C9',
+    line: '#5A1A1E',
+    success: '#7EE2A8',
+    danger: '#FF8A80',
+    shadow: '0 0 24px rgb(255 45 58 / 0.15)',
+    trim: 'rgb(255 45 58 / 0.7)',
+    glow: '0 0 16px rgb(255 45 58 / 0.65), 0 0 3px rgb(255 45 58 / 0.95)',
     fontNum: MONO,
     fontHead: MONO,
     weightHead: 800,

@@ -10,7 +10,7 @@ import npgx2 from './editionArt/npgx-card-2.webp';
  * Artist edition card art (owner, 16 Oct 2026). VexVoid: a still of the VexVoid point field (the same formulas as the
  * live hero, media/vexvoid/pointField.ts) drawn as SVG, white points on true black. NPG: official Ninja Punk Girls
  * characters and the white tag logo on black with a pink glow (from ninja-punk-girls-com, compressed). NPGX: the
- * official NPGX logo cut into acid green / magenta / cyan glitch slices. Each card picks one variant from its id.
+ * official NPGX logo (red tech font, red X) on black. Each card picks one variant from its id.
  */
 export const EDITION_PATTERN_IDS = ['vexfield', 'npg', 'npgx'] as const satisfies readonly CardPatternId[];
 export type EditionPatternId = (typeof EDITION_PATTERN_IDS)[number];

@@ -157,5 +157,9 @@ describe('artist editions', () => {
     expect(accentById('npg').pattern).toBe('npg');
     expect(accentById('npg').glow).not.toBe('none');
     expect(accentById('npgx').pattern).toBe('npgx');
+    // NPGX is black and red: no green, magenta or cyan.
+    expect(accentById('npgx').accent).toBe('#FF2D3A');
+    for (const v of Object.values(packVars(accentById('npgx'))))
+      expect(/C6FF1A|FF2BD6|00F0FF|0 240 255|255 43 214/i.test(v)).toBe(false);
   });
 });
