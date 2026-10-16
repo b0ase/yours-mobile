@@ -384,7 +384,7 @@ export const UnlockWallet = (props: UnlockWalletProps) => {
               type="button"
               disabled={isProcessing}
               onClick={() => void handleAllowAccess()}
-              className="relative inline-flex items-center justify-center w-full font-bold text-sm rounded-xl h-10 px-4 outline-none select-none cursor-pointer border-none disabled:opacity-50 gap-2"
+              className="bw-unlock-btn relative inline-flex items-center justify-center w-full font-bold text-sm rounded-xl h-10 px-4 outline-none select-none cursor-pointer border-none disabled:opacity-50 gap-2"
               style={{
                 backgroundColor: bg,
                 color: contrast,
@@ -429,7 +429,7 @@ export const UnlockWallet = (props: UnlockWalletProps) => {
             <button
               type="button"
               onClick={() => void openUsbWindow('unlock')}
-              className="relative inline-flex items-center justify-center w-full font-bold text-sm rounded-xl h-10 px-4 outline-none select-none cursor-pointer border-none"
+              className="bw-unlock-btn relative inline-flex items-center justify-center w-full font-bold text-sm rounded-xl h-10 px-4 outline-none select-none cursor-pointer border-none"
               style={{
                 backgroundColor: bg,
                 color: contrast,
@@ -546,7 +546,7 @@ export const UnlockWallet = (props: UnlockWalletProps) => {
               <button
                 type="submit"
                 disabled={isProcessing || !canSubmit}
-                className="relative inline-flex items-center justify-center w-full font-bold text-sm rounded-xl h-10 px-4 outline-none select-none cursor-pointer border-none disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none gap-2"
+                className="bw-unlock-btn relative inline-flex items-center justify-center w-full font-bold text-sm rounded-xl h-10 px-4 outline-none select-none cursor-pointer border-none disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none gap-2"
                 style={{
                   backgroundColor: bg,
                   color: contrast,
