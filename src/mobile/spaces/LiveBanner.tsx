@@ -135,7 +135,7 @@ export const LiveBanner = ({
         // Always-open room (the Lounge): one Join bar for everyone, live or not. Never "Start a Space".
         <button
           onClick={() => setOpen({ always: true })}
-          className="mx-3 mt-2 flex items-center gap-3 rounded-xl px-3 py-2 text-left"
+          className="bw-live-banner mx-3 mt-2 flex items-center gap-3 rounded-xl px-3 py-2 text-left"
           style={{
             background: 'linear-gradient(90deg, #2a1d05, #1a1408)',
             border: `1px solid color-mix(in srgb, ${GOLD} 33%, transparent)`,

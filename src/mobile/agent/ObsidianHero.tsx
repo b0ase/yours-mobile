@@ -84,7 +84,7 @@ export const ObsidianHero = ({
           }}
         >
           {/* One unioned outline + the counter (brand/bOutline.ts): no stem lines inside the bowl. */}
-          <path d={B_OUTLINE_D} />
+          <path d={B_OUTLINE_D} vectorEffect="non-scaling-stroke" strokeLinecap="round" />
         </svg>
       ) : (
         <img
