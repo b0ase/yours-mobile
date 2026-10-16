@@ -28,8 +28,8 @@ export const VaultSection = ({ height }: { height: number }) => {
       {me.holdings.map((h, i) => (
         <div key={i} className="text-sm text-white">
           {h.token
-            ? shareLabel(h.shares, h.token.unlockHeight, height)
-            : `bCorp shares · ${h.shares.toLocaleString('en-GB')}`}
+            ? shareLabel(h.shares, h.token.unlockHeight, height, me.company.name)
+            : `${me.company.name} shares · ${h.shares.toLocaleString('en-GB')}`}
           {h.token && (
             <span className="block text-xs" style={{ color: MUTED }}>
               Yours alone from block {h.token.unlockHeight.toLocaleString('en-GB')}

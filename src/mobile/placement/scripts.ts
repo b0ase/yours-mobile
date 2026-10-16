@@ -114,10 +114,14 @@ export function parseShareLock(
   return { directorPubKey: Utils.toHex(d), investorPubKey, unlockHeight: decoded.until };
 }
 
-/** Wallet label: "bCorp shares · N · locked 2-of-2" (or "· unlocked" once the investor may move them alone). */
-export function shareLabel(shares: number, unlockHeight: number, currentHeight: number): string {
+/**
+ * Wallet label: "<Company> shares · N · locked 2-of-2" (or "· unlocked" once the investor may move them alone).
+ * bShares serves any company's register, so the company name comes from the register, never a constant.
+ */
+export function shareLabel(shares: number, unlockHeight: number, currentHeight: number, company?: string): string {
   const n = shares.toLocaleString('en-GB');
-  return currentHeight >= unlockHeight ? `bCorp shares · ${n} · unlocked` : `bCorp shares · ${n} · locked 2-of-2`;
+  const what = company ? `${company} shares` : 'Shares';
+  return currentHeight >= unlockHeight ? `${what} · ${n} · unlocked` : `${what} · ${n} · locked 2-of-2`;
 }
 
 export function treasuryLock(m: number, pubKeys: (PublicKey | string)[]): LockingScript {

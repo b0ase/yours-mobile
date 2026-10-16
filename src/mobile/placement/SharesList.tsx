@@ -36,7 +36,7 @@ const SharesList = () => {
   if (!holdings.length)
     return (
       <div className={`${box} p-6 text-center`}>
-        <p className="text-sm text-[#98A2B3] m-0">You are not on the register of The Bitcoin Corporation Ltd.</p>
+        <p className="text-sm text-[#98A2B3] m-0">You are not on a share register yet.</p>
       </div>
     );
   return (
