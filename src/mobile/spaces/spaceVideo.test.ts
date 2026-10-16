@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import {
   isAllowedVideoSrc,
+  moveItem,
+  nextAlbumIndex,
+  nowPlaying,
   needsReseek,
   newerVideo,
   parseSpaceVideo,
@@ -94,5 +97,38 @@ describe('drift reseek', () => {
     expect(needsReseek(10_000, 11_400)).toBe(false);
     expect(needsReseek(10_000, 11_600)).toBe(true);
     expect(needsReseek(12_000, 10_000)).toBe(true);
+  });
+});
+
+describe('album spaces', () => {
+  const items = [
+    { kind: 'url', src: 'https://cdn.example.com/1.mp4', title: 'One' },
+    { kind: 'ordinal', src: 'https://ordfs.network/' + 'a'.repeat(64) + '_0' },
+    { kind: 'url', src: 'javascript:alert(1)' },
+    { kind: 'url', src: 'https://cdn.example.com/3.webm', title: 'Three' },
+  ];
+  test('parses the album, drops bad items, clamps index', () => {
+    const a = v({ album: { items, index: 2, repeat: true } }).album!;
+    expect(a.items.length).toBe(3);
+    expect(a.index).toBe(2);
+    expect(a.repeat).toBe(true);
+    expect(v({ album: { items, index: 9 } }).album!.index).toBe(0);
+    expect(v({ album: { items: [] } }).album).toBeNull();
+    expect(v({}).album).toBeNull();
+  });
+  test('now playing n/N', () => {
+    expect(nowPlaying(v({ album: { items, index: 1 } }))).toEqual({ n: 2, total: 3, title: 'Video 2' });
+    expect(nowPlaying(v({}))).toBeNull();
+  });
+  test('next index: advance, wrap on repeat, stop at end once', () => {
+    const it = v({ album: { items, index: 0 } }).album!.items;
+    expect(nextAlbumIndex({ items: it, index: 0, repeat: false })).toBe(1);
+    expect(nextAlbumIndex({ items: it, index: 2, repeat: true })).toBe(0);
+    expect(nextAlbumIndex({ items: it, index: 2, repeat: false })).toBeNull();
+  });
+  test('reorder', () => {
+    expect(moveItem(['a', 'b', 'c'], 0, 2)).toEqual(['b', 'c', 'a']);
+    expect(moveItem(['a', 'b', 'c'], 2, 1)).toEqual(['a', 'c', 'b']);
+    expect(moveItem(['a', 'b'], 0, 5)).toEqual(['a', 'b']);
   });
 });
