@@ -483,3 +483,143 @@
   * {
   color: var(--bw-on-accent) !important;
 }
+
+/* White (owner, 16 Oct 2026): a real white card set. The White designs (wallet/cardPatternsLight.ts) are already
+   off-white and faint, so they show at full strength; every balance card is white with a hairline and soft shadow. */
+:root[data-bw-theme='white'] .is-themed .bw-wcard-art {
+  opacity: 1;
+}
+:root[data-bw-theme='white'] :is(.bw-wcard-face.is-themed, .bw-bc.is-themed) {
+  border: 1px solid rgb(0 0 0 / 0.14) !important;
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.05),
+    0 8px 22px rgb(0 0 0 / 0.07) !important;
+}
+
+/* Mono sweep for hard-coded dark fills (owner, 16 Oct 2026, Exchange › Names: selected chips were near-black pills).
+   Inline dark / dark-gold backgrounds (#2a2100 chips, #0b0c0f panels …) take the white surface, the pack's ink and
+   a dark hairline, so a selected chip reads as a white pill with a dark outline. Gold and dark packs are untouched. */
+:root[data-bw-tone='mono']
+  :is(
+    [style*='background: rgb(11, 11, 13)'],
+    [style*='background-color: rgb(11, 11, 13)'],
+    [style*='background: rgb(11, 12, 15)'],
+    [style*='background-color: rgb(11, 12, 15)'],
+    [style*='background: rgb(15, 16, 19)'],
+    [style*='background-color: rgb(15, 16, 19)'],
+    [style*='background: rgb(42, 33, 0)'],
+    [style*='background-color: rgb(42, 33, 0)'],
+    [style*='background: rgb(13, 14, 17)'],
+    [style*='background-color: rgb(13, 14, 17)'],
+    [style*='background: rgb(5, 5, 6)'],
+    [style*='background-color: rgb(5, 5, 6)'],
+    [style*='background: rgb(58, 47, 12)'],
+    [style*='background-color: rgb(58, 47, 12)'],
+    [style*='background: rgb(42, 36, 16)'],
+    [style*='background-color: rgb(42, 36, 16)'],
+    [style*='background: rgb(42, 20, 8)'],
+    [style*='background-color: rgb(42, 20, 8)'],
+    [style*='background: rgb(34, 37, 43)'],
+    [style*='background-color: rgb(34, 37, 43)'],
+    [style*='background: rgb(23, 25, 30)'],
+    [style*='background-color: rgb(23, 25, 30)'],
+    [style*='background: rgb(22, 24, 29)'],
+    [style*='background-color: rgb(22, 24, 29)'],
+    [style*='background: rgb(17, 17, 20)'],
+    [style*='background-color: rgb(17, 17, 20)'],
+    [style*='background: rgb(11, 11, 11)'],
+    [style*='background-color: rgb(11, 11, 11)'],
+    [style*='background: rgb(7, 8, 10)'],
+    [style*='background-color: rgb(7, 8, 10)'],
+    [style*='background: rgb(26, 20, 5)'],
+    [style*='background-color: rgb(26, 20, 5)']
+  ):not(:is(.bg-black\/50, .bg-black\/60, .bg-black\/65, .bg-black\/70, .bg-black\/80, .bw-videobg) *) {
+  background: var(--bw-surface) !important;
+  color: var(--bw-text) !important;
+  border-color: var(--bw-text) !important;
+}
+
+/* White: the swipe actions beside a row (Pin · Lock · Archive, Chat · Receive · Send) are white with black ink and a
+   thin outline instead of coloured fills (owner, 16 Oct 2026). */
+:root[data-bw-theme='white'] .bw-swipe-action {
+  background: #ffffff !important;
+  color: #0a0a0a !important;
+  border: 1px solid rgb(0 0 0 / 0.18);
+}
+/* White: balance cards (front and back) show their white design at full strength; no glaze, no text shadow. */
+:root[data-bw-theme='white'] .bw-skin-art {
+  opacity: 1 !important;
+  filter: none !important;
+}
+:root[data-bw-theme='white'] .bw-skin-fx {
+  display: none !important;
+}
+:root[data-bw-theme='white'] .bw-bc :is(b, small, span) {
+  text-shadow: none !important;
+}
+:root[data-bw-theme='white'] .bw-bc {
+  color: var(--bw-text) !important;
+  --bc-ink: var(--bw-text);
+}
+:root[data-bw-theme='white'] .bw-bc :is(.bw-bc-contact, .bw-bc-stop) {
+  background: #ffffff !important;
+  color: #0a0a0a !important;
+  border: 1px solid rgb(0 0 0 / 0.35) !important;
+}
+/* Cover art an artist opted in to invert on White (media/invertOnLight.ts; VexVoid only). */
+:root[data-bw-theme='white'] .bw-invert-on-light {
+  filter: invert(1) hue-rotate(180deg);
+}
+:root[data-bw-theme='white'] .bw-swipe-action[data-danger] {
+  color: var(--bw-danger, #b91c1c) !important;
+}
+
+/* White: bMail and bPhone cards, hero, segmented control and bars are white with black ink and a hairline
+   (owner, 16 Oct 2026: "No black cards in white theme please"). */
+:root[data-bw-theme='white'] :is(.bw-mail-card, .bw-mail-card.is-unread, .bw-mail-hero, .bw-mail-seg) {
+  background: #ffffff !important;
+  color: var(--bw-text) !important;
+  border: 1px solid rgb(0 0 0 / 0.14) !important;
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.04),
+    0 6px 16px rgb(0 0 0 / 0.05) !important;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+:root[data-bw-theme='white'] .bw-mail-card.is-unread {
+  border-color: rgb(0 0 0 / 0.4) !important;
+}
+:root[data-bw-theme='white'] .bw-mail-hero::after {
+  display: none;
+}
+:root[data-bw-theme='white'] .bw-mail-bar {
+  background: rgb(255 255 255 / 0.92) !important;
+  color: var(--bw-text);
+  border-bottom: 1px solid var(--bw-line);
+}
+:root[data-bw-theme='white'] .bw-mail-stamp {
+  background: color-mix(in srgb, currentColor 22%, #ffffff);
+}
+/* White: Ask b's quick-start chips are white with black ink and a thin outline. */
+:root[data-bw-theme='white'] .askb-chips button {
+  background: #ffffff !important;
+  color: #0a0a0a !important;
+  border: 1px solid rgb(0 0 0 / 0.3) !important;
+}
+
+/* Light packs: typed text is never white on white (owner, 16 Oct 2026, token lock fields). Inputs, textareas and
+   selects take the pack's ink, caret and muted placeholder, whatever hard-coded text-white / #fff they carry.
+   Screens over the dark obsidian pool keep their light ink. */
+:root[data-bw-pack='light']
+  :is(input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']), textarea, select):not(
+    :is([data-pool-dark], .bg-black\/50, .bg-black\/60, .bg-black\/65, .bg-black\/70, .bg-black\/80) *
+  ) {
+  color: var(--bw-text) !important;
+  -webkit-text-fill-color: var(--bw-text) !important;
+  caret-color: var(--bw-text);
+}
+:root[data-bw-pack='light'] :is(input, textarea)::placeholder {
+  color: var(--bw-muted) !important;
+  -webkit-text-fill-color: var(--bw-muted) !important;
+  opacity: 1;
+}

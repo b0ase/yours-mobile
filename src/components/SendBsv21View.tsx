@@ -28,6 +28,9 @@ import { fundOverlayExact, fundingTotal, formatBsvAmount, transfersCovered } fro
 import {
   chromeJournalStore,
   describeStaleFix,
+  describeUnseenHeal,
+  isUnseenState,
+  type UnseenHealReport,
   journalSendEnd,
   journalSendStart,
   type StaleFixResult,
@@ -121,6 +124,8 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
     fundingError?: string;
   } | null>(null);
   const [overlayProcessing, setOverlayProcessing] = useState<string | undefined>();
+  /** Outpoints (txid.vout) the overlay reported 'unknown' on the last re-check, shown in the unseen prompt. */
+  const [unseenOutpoints, setUnseenOutpoints] = useState<string[]>([]);
   const [confirmUnverified, setConfirmUnverified] = useState(false);
   const sentAtomicRef = useRef<bigint>(0n);
   const [copied, setCopied] = useState(false);
@@ -384,6 +389,7 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
         owned.map((o) => o.outpoint),
       );
       const states = new Map(statuses.map((s) => [s.outpoint, s.state as string]));
+      setUnseenOutpoints(owned.filter((o) => isUnseenState(states.get(o.outpoint))).map((o) => o.outpoint));
       const shortfall = classifyBsv21Shortfall(
         owned.map((o) => ({ amount: o.amount, state: states.get(o.outpoint) })),
         total,
@@ -490,6 +496,37 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
     }
   };
 
+  /** Unseen prompt: submit mined transfers to the overlay, rebroadcast unfinished ones, drop dead ones, send again. */
+  const handleFixUnseenAndSend = async () => {
+    if (!overlayPrompt) return;
+    const { recipients: rs, total } = overlayPrompt;
+    setOverlayProcessing('Sending your tokens to the indexer...');
+    try {
+      const res = await sendMessageAsync<{ success: boolean; error?: string; data?: UnseenHealReport }>({
+        action: 'BSV21_FIX_UNSEEN',
+        tokenId: token.info.id,
+      });
+      if (!res?.success || !res.data) {
+        addSnackbar(res?.error ?? "Couldn't fix this. Try Settings › Troubleshooting › Repair Sync.", 'error');
+        return;
+      }
+      const d = res.data;
+      const changed = d.submitted.length + d.rebroadcast.length + d.dropped.length > 0;
+      addSnackbar(describeUnseenHeal(d), changed ? 'success' : 'info');
+      if (d.submitted.length || d.rebroadcast.length) {
+        // The overlay validates a submitted transfer in a moment.
+        setOverlayProcessing('Waiting for the indexer...');
+        await new Promise((r) => setTimeout(r, 4000));
+      }
+      setOverlayProcessing('Sending...');
+      await runSend(rs, total, true);
+    } catch (error) {
+      addSnackbar(getErrorMessage(error), 'error');
+    } finally {
+      setOverlayProcessing(undefined);
+    }
+  };
+
   const handleRetrySend = async () => {
     if (!overlayPrompt) return;
     const { recipients: rs, total } = overlayPrompt;
@@ -503,8 +540,16 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
 
   const handleSendUnverified = async () => {
     if (!overlayPrompt) return;
-    setOverlayProcessing('Sending...');
+    setOverlayProcessing('Checking your token keys...');
     try {
+      // Never sign with a record whose key doesn't match its output: the unlock would be empty (5.2.25, SCAM).
+      const keys = await sendMessageAsync<{ success: boolean; data?: UnseenHealReport }>({
+        action: 'BSV21_FIX_UNSEEN',
+        tokenId: token.info.id,
+        keysOnly: true,
+      }).catch(() => undefined);
+      if (keys?.data && (keys.data.keysRepaired || keys.data.keysDropped)) addSnackbar(describeUnseenHeal(keys.data), 'info');
+      setOverlayProcessing('Sending...');
       await runSend(overlayPrompt.recipients, overlayPrompt.total, false);
     } finally {
       setOverlayProcessing(undefined);
@@ -876,7 +921,8 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
         processingMessage={overlayProcessing}
         onFund={(sats) => void handleFundOverlay(sats)}
         onRetryFunding={() => void handleRetryFunding()}
-        onFixAndSend={() => void handleFixAndSend()}
+        onFixAndSend={() => void (overlayPrompt?.issue === 'unseen' ? handleFixUnseenAndSend() : handleFixAndSend())}
+        unseenOutpoints={overlayPrompt?.issue === 'unseen' ? unseenOutpoints : undefined}
         onRetry={() => void handleRetrySend()}
         onSendUnverified={() => setConfirmUnverified(true)}
         onCancel={() => setOverlayPrompt(null)}

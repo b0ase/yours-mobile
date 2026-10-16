@@ -56,12 +56,15 @@ export function useCardCustomised(id: string): boolean {
  * Whether a card wears the theme's look. Gold (the default) and accent-only colours set no pack, so every card
  * keeps its own look there; any full pack (Mono / Duo / Tri / your mix) restyles every uncustomised card.
  */
-export const cardFollowsTheme = (pack: Pick<Accent, 'id' | 'kind'>, customised: boolean): boolean =>
-  !customised && pack.id !== DEFAULT_ACCENT && pack.kind !== 'colour';
+export const cardFollowsTheme = (pack: Pick<Accent, 'id' | 'kind' | 'scheme'>, customised: boolean): boolean =>
+  (!customised || pack.scheme === 'light') && pack.id !== DEFAULT_ACCENT && pack.kind !== 'colour';
+// Light packs (owner, 16 Oct 2026: "a white/light set of credit cards that go with the white theme"): every card
+// turns light, customised or not, so a light theme never falls back to the dark card art. Only the wallet card's
+// own picture or chosen design (WalletCard.tsx) is kept, and then on the light face.
 
 /** The colour a card's pattern is drawn in: the pack's hue when it follows the theme, its own colour otherwise. */
 export const cardPatternColour = (
-  pack: Pick<Accent, 'id' | 'kind' | 'accent'>,
+  pack: Pick<Accent, 'id' | 'kind' | 'scheme' | 'accent'>,
   customised: boolean,
   own: string,
 ): string => (cardFollowsTheme(pack, customised) ? pack.accent : own);

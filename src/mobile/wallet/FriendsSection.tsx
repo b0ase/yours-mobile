@@ -8,6 +8,8 @@ import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { asMenuItem } from '../tabs/tabs';
 import { requestDm } from '../chat/segmentNav';
 import { useContacts } from '../chat/useContacts';
+import { useJoinMatch } from './useJoinMatch';
+import { handleOf } from './joinMatch';
 import { ContactRow } from '../chat/ContactViews';
 import { filterContacts } from '../chat/contacts';
 import { resolveCallee } from '../calls/peer';
@@ -26,7 +28,8 @@ const f = (u: string, i?: RequestInit) => fetch(u, i);
  * paymail; a token or room is optional.
  */
 export const FriendsSection = () => {
-  const contacts = useContacts();
+  const joined = useJoinMatch(useContacts());
+  const contacts = joined.contacts;
   const { apiContext, chromeStorageService } = useServiceContext();
   const [held, setHeld] = useState<Bsv21Balance[]>([]);
   useEffect(() => {
@@ -122,6 +125,26 @@ export const FriendsSection = () => {
           {msg}
         </p>
       )}
+      {joined.notices.map((n) => (
+        <div
+          key={n.name}
+          role="status"
+          className="flex items-center justify-between gap-2 rounded-xl border border-[#3a3220] bg-[var(--bw-surface)] px-3 py-2 text-sm text-white"
+        >
+          <span>
+            <span style={{ color: '#E6B84C' }}>Joined bWalletX</span> · {n.who} joined: {handleOf(n.paymail)}
+          </span>
+          <button
+            type="button"
+            className="text-xs"
+            style={{ color: '#98A2B3' }}
+            aria-label={`Dismiss ${n.who} joined`}
+            onClick={() => joined.dismiss(n.name)}
+          >
+            OK
+          </button>
+        </div>
+      ))}
       {contacts.length > 6 && (
         <input
           value={query}
