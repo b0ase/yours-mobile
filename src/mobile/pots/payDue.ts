@@ -13,6 +13,7 @@ import { SUBSCRIPTIONS_ENABLED } from '../storeBuild';
 import {
   MAX_CATCH_UP,
   advanced,
+  amountPnee,
   amountSats,
   amountUsd,
   dueItems,
@@ -42,6 +43,17 @@ export type PayDeps = {
   ) => Promise<{ rawTx: string; txid: string }>;
   /** Broadcast a signed tx. Must be idempotent: the same raw tx again is fine (already known / mined). */
   broadcast: (rawTx: string) => Promise<void>;
+  /**
+   * Sign (don't broadcast) one PNEE transfer from a PNEE pot: `units` PNEEs (1 unit = 1¢) per output. Absent = PNEE
+   * orders wait. rawTx is what broadcastPnee takes.
+   */
+  signPnee?: (
+    potId: string,
+    outputs: { address: string; units: number }[],
+    memo?: string,
+  ) => Promise<{ rawTx: string; txid: string }>;
+  /** Broadcast a signed PNEE transfer (and hand it to the token overlay). Idempotent like broadcast. */
+  broadcastPnee?: (rawTx: string) => Promise<void>;
   /** More than MAX_CATCH_UP periods are owed: pay them all? */
   confirm?: (s: Subscription, missed: number) => Promise<boolean>;
   notify?: (title: string, body: string) => void;
@@ -100,8 +112,14 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
       }
     }
     const count = plan.due.length;
-    const sats = amountSats(s.amount, deps.bsvUsd);
-    if (sats === null) {
+    const pnee = s.amount.currency === 'PNEE';
+    const units = pnee ? amountPnee(s.amount) : null;
+    const sats = pnee ? null : amountSats(s.amount, deps.bsvUsd);
+    if (pnee && (units === null || !deps.signPnee || !deps.broadcastPnee)) {
+      out.push(fail(s, 'PNEE payments can’t be sent from this device', deps));
+      continue;
+    }
+    if (!pnee && sats === null) {
       out.push({ id: s.id, ok: false, reason: 'No price right now' }); // try again next open, no alert
       continue;
     }
@@ -120,11 +138,17 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
     }
     let signed: { rawTx: string; txid: string };
     try {
-      signed = await deps.sign(
-        s.potId,
-        Array.from({ length: count }, () => ({ address, sats })),
-        s.memo,
-      );
+      signed = pnee
+        ? await deps.signPnee!(
+            s.potId,
+            Array.from({ length: count }, () => ({ address, units: units! })),
+            s.memo,
+          )
+        : await deps.sign(
+            s.potId,
+            Array.from({ length: count }, () => ({ address, sats: sats! })),
+            s.memo,
+          );
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
       out.push(fail(s, m, deps, /not enough|insufficient/i.test(m)));
@@ -139,6 +163,7 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
       ...signed,
       usd,
       at: now,
+      ...(pnee ? { unit: 'PNEE' as const } : {}),
     };
     savePending(p); // before the broadcast: from here on these periods are only ever paid by this tx
     out.push(await settlePending(s, p, deps, now));
@@ -149,7 +174,10 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
 /** Broadcast a recorded payment (again, if it may already be out) and, once accepted, mark its periods paid. */
 async function settlePending(s: Subscription, p: PendingPayment, deps: PayDeps, now: number): Promise<PayOutcome> {
   try {
-    await deps.broadcast(p.rawTx);
+    if (p.unit === 'PNEE') {
+      if (!deps.broadcastPnee) throw new Error('PNEE payments can’t be sent from this device');
+      await deps.broadcastPnee(p.rawTx);
+    } else await deps.broadcast(p.rawTx);
   } catch (e) {
     const m = e instanceof Error ? e.message : String(e);
     if (!/already|duplicate/i.test(m)) {
