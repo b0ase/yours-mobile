@@ -799,4 +799,10 @@ describe('THEME_STORE_PAID_ENABLED: store builds show Free themes only', () => {
     expect(page).not.toMatch(/^import .*PaidTabs/m);
     expect(page).not.toMatch(/Coming soon|\$99|Unlocks for/);
   });
+  test('bStore paid sections are only a lazy chunk behind the flag', () => {
+    const page = src('./themeStore/ThemeStorePage.tsx');
+    expect(page).toContain("THEME_STORE_PAID_ENABLED ? lazy(() => import('./Sections')) : null");
+    expect(page).not.toMatch(/^import .*Sections/m);
+    expect(page).not.toMatch(/Sell something|Submitted for review|Seller gets/);
+  });
 });

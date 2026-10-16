@@ -264,7 +264,7 @@ function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNo
       </p>
       <p className="bw-theme-more">
         <Link to="/m/store" onClick={onClose} style={{ color: 'var(--bw-accent)' }}>
-          More in the Theme Store
+          More in the bStore
         </Link>
       </p>
       {THEME_ORDERS_ENABLED && ThemeOrderSheet && (

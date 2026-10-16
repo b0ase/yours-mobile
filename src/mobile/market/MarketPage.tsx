@@ -460,7 +460,7 @@ const MarketPage = () => {
   const launchOn = CURVE_COINS_ENABLED && activeCat === CURVE_FILTER;
   const categoryTiles = (
     <div className="flex flex-col gap-1.5">
-      {/* Launchpad (left half, never in a store build) + Theme Store (right half, or the full width alone). */}
+      {/* Launchpad (left half, never in a store build) + bStore (right half, or the full width alone). */}
       <div className="flex gap-1.5">
         {CURVE_COINS_ENABLED && (
           <button
@@ -479,7 +479,7 @@ const MarketPage = () => {
           className="bw-pill bw-pill-gold flex min-h-[44px] flex-1 basis-0 items-center justify-center gap-2 py-2.5 text-sm font-bold no-underline"
           style={{ opacity: 0.85 }}
         >
-          <Palette size={16} /> Store
+          <Palette size={16} /> bStore
         </Link>
       </div>
       <div className="grid grid-cols-4 gap-1.5" role="tablist" aria-label="What's for sale">
