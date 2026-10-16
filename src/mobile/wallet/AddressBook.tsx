@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { Download, Upload, X } from 'lucide-react';
+import { Download, Upload, X, ArrowLeft } from 'lucide-react';
 import { FriendsSection } from './FriendsSection';
 import { AddressBookImport } from './AddressBookImport';
 import { exportAddressBook } from './addressBookExport';
@@ -11,7 +11,7 @@ import { closesAddressBook, opensAddressBook } from './addressBookGesture';
 import './addressBook.css';
 
 /**
- * The address book (owner, 15 Oct 2026): Friends as a little black spiral-bound notebook. Opened by pulling the
+ * The address book (owner, 15 Oct 2026): Friends as a full-screen page (16 Oct 2026; was a spiral notebook). Opened by pulling the
  * balance carousel right past the first card, or the notebook button under the cards; /m/friends shows it too.
  * The contacts, search, Add a friend, Pay and Message are FriendsSection's. Swipe left, × or Escape closes it.
  */
@@ -42,9 +42,11 @@ export const AddressBook = ({ onClose }: { onClose: () => void }) => {
       }}
     >
       <div className="bw-abook-cover">
-        <div className="bw-abook-spiral" aria-hidden="true" />
         <div className="bw-abook-page">
           <div className="bw-abook-head">
+            <button type="button" className="bw-abook-back" aria-label="Back" onClick={onClose}>
+              <ArrowLeft size={20} aria-hidden="true" />
+            </button>
             <h2>Address book</h2>
             <div className="bw-abook-actions">
               <button type="button" className="bw-abook-action" onClick={() => setImporting(true)}>

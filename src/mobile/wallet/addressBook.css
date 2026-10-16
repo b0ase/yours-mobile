@@ -92,9 +92,6 @@
   flex: 1;
   overflow-y: auto;
   padding-top: 12px;
-  background:
-    linear-gradient(90deg, transparent 14px, rgba(232, 80, 80, 0.35) 14px 15px, transparent 15px),
-    repeating-linear-gradient(transparent 0 27px, rgba(255, 255, 255, 0.06) 27px 28px);
 }
 /* Notebook button under the balance cards (BalanceCarousel). */
 .bw-abook-open {
@@ -276,4 +273,45 @@
 .bw-abook-action:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+/* Full-screen page (owner, 16 Oct 2026: "address book should cover the whole screen … I don't like this" spiral):
+   no backdrop, no binding, no ruled margin; a plain page in the theme's colours with a back button. */
+.bw-abook {
+  background: var(--bw-bg, #010101);
+  padding: 0;
+}
+.bw-abook-cover {
+  max-width: none;
+  border-radius: 0;
+  padding: 0;
+  background: var(--bw-bg, #010101);
+  box-shadow: none;
+}
+.bw-abook-page {
+  border-radius: 0;
+  background: var(--bw-bg, #010101);
+  box-shadow: none;
+}
+.bw-abook-head {
+  padding: calc(10px + env(safe-area-inset-top)) 12px 10px;
+  border-bottom: 1px solid var(--bw-line, #2b2f36);
+  gap: 6px;
+}
+.bw-abook-lines {
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+}
+.bw-abook-back {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--bw-text, #fff);
+  cursor: pointer;
+}
+:root[data-bw-theme='white'] .bw-abook-head h2 {
+  color: var(--bw-text);
 }

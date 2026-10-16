@@ -46,7 +46,19 @@ export type CardPatternId =
   | 'halftone'
   | 'circuit'
   | 'chevron'
-  | 'starburst';
+  | 'starburst'
+  | 'grid'
+  | 'field'
+  | 'bauhaus'
+  | 'lines'
+  | 'fold'
+  | 'brush'
+  | 'paper'
+  | 'squares'
+  | 'arcs'
+  | 'dotgrid'
+  | 'horizon'
+  | 'contour';
 
 export interface Accent {
   id: AccentId;
@@ -179,8 +191,27 @@ function mono(id: PackId, label: string, blurb: string, h: number, s: number, pa
   };
 }
 
+/**
+ * White (owner, 16 Oct 2026: "WHITE … no grey fills"): black ink instead of grey. Accent fills are solid black with
+ * white text; the Mono tint buttons become white with a black outline; selected tabs read black.
+ */
+const WHITE: Accent = {
+  ...mono('white', 'White', 'All white, black ink', 220, 0, 'grid'),
+  accent: '#000000',
+  hi: '#1A1A1A',
+  lo: '#000000',
+  on: '#FFFFFF',
+  // Light grey buttons with black ink (owner preferred them to dark grey, 16 Oct 2026).
+  tint: '#F2F2F2',
+  surface2: '#F5F5F5',
+  text: '#0A0A0A',
+  muted: '#595959',
+  line: '#E3E3E3',
+  trim: 'rgb(0 0 0 / 0.35)',
+};
+
 const MONO_TONES: readonly Accent[] = [
-  mono('white', 'White', 'All white, grey ink', 220, 0, 'clouds'),
+  WHITE,
   mono('blue', 'Blue', 'White and blue', 218, 75, 'waves'),
   mono('pink', 'Pink', 'White and pink', 330, 70, 'halftone'),
   mono('green', 'Green', 'White and green', 150, 55, 'hex'),
