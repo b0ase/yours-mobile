@@ -8,6 +8,7 @@ import { listPaymails, type WalletName } from '../names/paymail';
 import { ownedForSale, type OwnedForSale } from '../names/opnsSell';
 import { OpnsSellSection } from '../names/OpnsSellSection';
 import { OpnsGiftSection } from '../names/OpnsGiftSection';
+import { HandleNftActions } from '../names/HandleNftActions';
 import { MARKET_ENABLED } from '../storeBuild';
 import { useBsvUsd } from '../money/money';
 import { useOpnsVault } from '../names/useOpnsVault';
@@ -77,38 +78,55 @@ export const NamesSection = () => {
           <h2 id="names-paymail" className={HEAD} style={{ color: 'var(--bw-muted)' }}>
             Paymail
           </h2>
-          {handles.map((h) => (
-            <div
-              key={h.paymail}
-              className="flex items-center gap-2 rounded-xl px-3 py-3 text-sm font-bold"
-              style={{
-                background: 'var(--bw-surface)',
-                color: 'var(--bw-text)',
-                border: '1px solid rgb(var(--bw-accent-rgb)/0.27)',
-              }}
-            >
-              <AtSign size={14} color="var(--bw-accent)" aria-hidden="true" className="shrink-0" />
-              <span className="min-w-0 truncate">{h.paymail}</span>
-              {h.main && (
-                <span
-                  className="shrink-0 text-[10px] font-bold rounded px-1.5 py-0.5"
-                  style={{ background: 'rgb(var(--bw-accent-rgb)/0.13)', color: 'var(--bw-accent)' }}
+          {handles.map((h) => {
+            const info = paymails.find((n) => n.paymail.toLowerCase() === h.paymail.toLowerCase());
+            return (
+              <div key={h.paymail} className="flex flex-col gap-1.5">
+                <div
+                  className="flex items-center gap-2 rounded-xl px-3 py-3 text-sm font-bold"
+                  style={{
+                    background: 'var(--bw-surface)',
+                    color: 'var(--bw-text)',
+                    border: '1px solid rgb(var(--bw-accent-rgb)/0.27)',
+                  }}
                 >
-                  Primary
-                </span>
-              )}
-              <button
-                type="button"
-                onClick={() => copy(h.paymail)}
-                aria-label={`Copy ${h.paymail}`}
-                className="ml-auto shrink-0 flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-bold border-0 cursor-pointer bg-transparent"
-                style={{ color: copied === h.paymail ? 'var(--bw-success)' : 'var(--bw-muted)' }}
-              >
-                {copied === h.paymail ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
-                {copied === h.paymail ? 'Copied' : 'Copy'}
-              </button>
-            </div>
-          ))}
+                  <AtSign size={14} color="var(--bw-accent)" aria-hidden="true" className="shrink-0" />
+                  <span className="min-w-0 truncate">{h.paymail}</span>
+                  {h.main && (
+                    <span
+                      className="shrink-0 text-[10px] font-bold rounded px-1.5 py-0.5"
+                      style={{ background: 'rgb(var(--bw-accent-rgb)/0.13)', color: 'var(--bw-accent)' }}
+                    >
+                      Primary
+                    </span>
+                  )}
+                  {info?.nftOrigin && (
+                    <span
+                      className="shrink-0 text-[10px] font-bold rounded px-1.5 py-0.5"
+                      style={{ background: 'var(--bw-card2)', color: 'var(--bw-accent)' }}
+                    >
+                      NFT
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => copy(h.paymail)}
+                    aria-label={`Copy ${h.paymail}`}
+                    className="ml-auto shrink-0 flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-bold border-0 cursor-pointer bg-transparent"
+                    style={{ color: copied === h.paymail ? 'var(--bw-success)' : 'var(--bw-muted)' }}
+                  >
+                    {copied === h.paymail ? (
+                      <Check size={14} aria-hidden="true" />
+                    ) : (
+                      <Copy size={14} aria-hidden="true" />
+                    )}
+                    {copied === h.paymail ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
+                {info && <HandleNftActions ctx={apiContext} name={info} onChanged={() => setTick((t) => t + 1)} />}
+              </div>
+            );
+          })}
         </section>
       )}
       {empty ? (

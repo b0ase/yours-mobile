@@ -32,6 +32,9 @@ const ROUTES = {
   'names-add': ['POST', 'names-add'],
   'names-remove': ['POST', 'names-remove'],
   'names-primary': ['POST', 'names-primary'],
+  // Handle NFTs (docs/HANDLE-NFTS.md): tokenise (signed) and re-check against the chain (public).
+  'handle-nft-bind': ['POST', 'handle-nft-bind'],
+  'handle-nft-sync': ['POST', 'handle-nft-sync'],
   'apps-get': ['POST', 'appsGet'],
   'apps-put': ['POST', 'appsPut'],
   // bPhone (docs/BPHONE-PLAN.md): public rate card + directory, signed writes and bookings.
@@ -99,7 +102,8 @@ module.exports = async function handler(req, res) {
       .split(',')[0]
       .trim() || 'unknown';
   if (limited(ip)) return send(res, 429, { error: 'rate-limited' });
-  if (route[1].startsWith('names-') && limited(ip, 20, nameHits)) return send(res, 429, { error: 'rate-limited' });
+  if ((route[1].startsWith('names-') || route[1].startsWith('handle-nft-')) && limited(ip, 20, nameHits))
+    return send(res, 429, { error: 'rate-limited' });
 
   if (!handlers) {
     const store = supabaseStore();

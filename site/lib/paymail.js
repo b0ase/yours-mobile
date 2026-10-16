@@ -66,6 +66,7 @@ const PUBKEY_RE = /^0[23][0-9a-f]{64}$/;
 const CHANGE_COOLDOWN_MS = 30 * 24 * 60 * 60 * 1000;
 const NAME_IP_DAILY = 5;
 const nameFee = require('./nameFee');
+const handleNft = require('./handleNft');
 const crypto = require('crypto');
 const hashIp = (ip, env = process.env) =>
   ip
@@ -394,7 +395,45 @@ function makeHandlers({
   feeChain = nameFee.chain,
   // Owner of a bit-sign name (lib: bitsignHandleOwner). Tests inject their own.
   handleOwner = (alias, identityKey) => bitsignHandleOwner(alias, identityKey, env),
+  // Chain access for handle NFTs (lib/handleNft.js makeChain); tests inject a mock. Only rows with
+  // nft_origin ever touch it.
+  handleChain = handleNft.makeChain(),
 }) {
+  // Handle NFTs: a tokenised handle follows its NFT (docs/HANDLE-NFTS.md). The row moves with it.
+  const handles = handleNft.makeHandleResolver({
+    chain: handleChain,
+    now,
+    onMove: async (row, r) => {
+      if (!store.moveHandle) return;
+      if (r.via === 'unbound') {
+        await store.moveHandle(row.alias, row.nft_location, { nft_location: r.location, nft_unbound: true });
+      } else {
+        const main = await store.getAliasByKey(r.key).catch(() => null);
+        await store.moveHandle(row.alias, row.nft_location, {
+          identity_key: r.key,
+          nft_location: r.location,
+          nft_unbound: false,
+          is_primary: false,
+          ord_address: main?.ord_address ?? null,
+        });
+      }
+      await store.recordHandleEvent?.({
+        alias: row.alias,
+        kind: r.via,
+        from_key: row.identity_key,
+        to_key: r.via === 'unbound' ? null : r.key,
+        location: r.location,
+      });
+    },
+  });
+  // The row as it stands now: an untokenised row as-is; a tokenised one with its chain holder, or null.
+  const followNft = async (row) => {
+    if (!row || !row.nft_origin) return row;
+    const r = await handles(row);
+    if (!r.key) return null;
+    if (r.key === row.identity_key) return row;
+    return { ...row, identity_key: r.key, ord_address: null, is_primary: false };
+  };
   // Aliases are unique across all our domains (the store is keyed by alias alone).
   const handleOf = (alias, d = domain(env)) => `${alias}@${d}`;
   // A live forward (rename within 90 days, or a permanent extra name). Expired ones are released.
@@ -423,6 +462,7 @@ function makeHandlers({
       const to = await renamed(p.alias).catch(() => null);
       if (to) row = await store.getAlias(to);
     }
+    row = await followNft(row);
     if (!row) return [404, { error: 'not-found' }];
     return [200, { ...row, _domain: p.domain }];
   };
@@ -452,6 +492,8 @@ function makeHandlers({
         {
           nameFee: address ? { address, usd: nameFee.FEE_USD } : null,
           nameChangeDays: CHANGE_COOLDOWN_MS / 86_400_000,
+          // Making a handle an NFT: the same 1 cent, paid inside the mint transaction (null = no fee).
+          handleNft: address ? { address, usd: nameFee.FEE_USD } : null,
         },
       ];
     },
@@ -594,6 +636,9 @@ function makeHandlers({
       // A new plain name for this wallet (first claim or rename; not a profile update of its own name).
       const newName = kind === 'plain' && !ownsIt;
       const isRename = newName && !!mine && (mine.kind ?? 'plain') === 'plain' && mine.alias !== alias;
+      // A handle NFT keeps its name (the inscription names it): send it, don't rename it.
+      if (isRename && mine.nft_origin)
+        return [409, { error: 'Your main name is an NFT. Make another name main first, then claim the new one.' }];
       const ipHash = hashIp(ctx.ip, env);
       let fee = null;
       if (newName) {
@@ -715,6 +760,7 @@ function makeHandlers({
         paymail: handleOf(r.alias),
         kind: r.kind || 'plain',
         main: r.alias === row.alias,
+        ...(r.nft_origin ? { nftOrigin: r.nft_origin, nftUnbound: !!r.nft_unbound || !!r.nft_frozen } : {}),
       }));
       return [200, { paymail: handleOf(row.alias), alias: row.alias, names }];
     },
@@ -799,6 +845,7 @@ function makeHandlers({
       const row = alias ? await store.getAlias(alias) : null;
       if (!row || String(row.identity_key).toLowerCase() !== key)
         return [404, { error: 'That name is not on this wallet' }];
+      if (row.nft_origin) return [409, { error: 'This name is an NFT. Send it instead.' }];
       if (store.countUncollected && (await store.countUncollected(alias)) > 0)
         return [
           409,
@@ -824,6 +871,7 @@ function makeHandlers({
             paymail: handleOf(r.alias),
             kind: r.kind || 'plain',
             main: !!main && r.alias === main.alias,
+            ...(r.nft_origin ? { nftOrigin: r.nft_origin, nftUnbound: !!r.nft_unbound || !!r.nft_frozen } : {}),
           })),
         },
       ];
@@ -897,6 +945,7 @@ function makeHandlers({
       const row = alias && !TOMB_RE.test(alias) ? await store.getAlias(alias) : null;
       if (!row || String(row.identity_key).toLowerCase() !== key || (row.kind ?? 'plain') !== 'plain')
         return [404, { error: 'That name is not on this wallet' }];
+      if (row.nft_origin) return [409, { error: 'This name is an NFT. Send it instead.' }];
       const main = await store.getAliasByKeyKind?.(key, 'plain');
       if (!main || main.alias === alias) return [409, { error: 'Make another name main first' }];
       // Forward first, so there is no moment when the name answers nothing.
@@ -909,6 +958,54 @@ function makeHandlers({
       });
       await store.renameAlias(alias, `rm-${Utils.toHex(Random(14))}`);
       return [200, { removed: handleOf(alias), forwardsTo: handleOf(main.alias) }];
+    },
+
+    // ---- handle NFTs (docs/HANDLE-NFTS.md) ---------------------------------------------------
+    // Tokenise: the wallet minted the handle inscription (with its genesis binding and the fee) and
+    // now asks us to follow it. Signed by the handle's current (DB) owner.
+    'handle-nft-bind': async (_q, body) => {
+      body = body || {};
+      const alias = String(body.fields?.alias || '').toLowerCase();
+      const origin = handleNft.normOutpoint(body.fields?.origin);
+      const om = handleNft.OUTPOINT_RE.exec(origin);
+      if (!ALIAS_RE.test(alias) || !om) return [400, { error: 'Bad handle or outpoint' }];
+      const sigErr = await verifySigned(body, 'handle-nft-bind', now());
+      if (sigErr) return [401, { error: sigErr }];
+      const key = String(body.identityKey).toLowerCase();
+      const row = await store.getAlias(alias);
+      if (!row || String(row.identity_key).toLowerCase() !== key || (row.kind ?? 'plain') !== 'plain')
+        return [404, { error: 'That name is not on this wallet' }];
+      if (row.nft_origin) {
+        if (row.nft_origin === origin) return [200, { alias, origin }];
+        return [409, { error: 'This handle is already an NFT' }];
+      }
+      const tx = await handleChain.tx(om[1]).catch(() => null);
+      if (!tx || tx.id('hex') !== om[1]) return [409, { error: "We can't see your NFT yet. Try again in a moment." }];
+      const bad = await handleNft.checkMint(tx, Number(om[2]), { alias, identityKey: key, domains: domains(env) });
+      if (bad) return [400, { error: bad }];
+      const feeAddr = nameFee.feeAddress(env);
+      if (feeAddr) {
+        const fee = await nameFee.checkFeeTx({ txid: om[1], address: feeAddr, c: { ...feeChain, tx: async () => tx } });
+        if (!fee.ok) return [402, { error: fee.error }];
+      }
+      await store.setHandleNft(alias, key, origin);
+      const after = await store.getAlias(alias);
+      if (!after || after.nft_origin !== origin) return [409, { error: 'This handle is already an NFT' }];
+      handles.forget(alias);
+      await store.recordHandleEvent?.({ alias, kind: 'mint', from_key: key, to_key: key, location: origin });
+      return [200, { alias, origin }];
+    },
+
+    // Re-check a tokenised handle against the chain now (after a send, or a self-claim). Public and
+    // harmless: it only follows what the chain already says.
+    'handle-nft-sync': async (q, body) => {
+      const alias = String(body?.alias || q.alias || '').toLowerCase();
+      if (!ALIAS_RE.test(alias)) return [400, { error: 'Bad handle' }];
+      const row = await store.getAlias(alias);
+      if (!row || !row.nft_origin) return [404, { error: 'not-found' }];
+      handles.forget(alias);
+      const r = await handles(row);
+      return [200, { alias, origin: row.nft_origin, holder: r.key, location: r.location, state: r.via }];
     },
 
     delete: async (_q, body) => {

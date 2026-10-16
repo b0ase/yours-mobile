@@ -31,7 +31,7 @@ function supabaseStore(env = process.env, f = fetch) {
     listByKey: async (k) =>
       // Removed extra names are renamed to an rm-… tombstone (they keep their payment history); hide them.
       (await req(
-        `bwallet_paymail_aliases?identity_key=eq.${q(k)}&alias=not.like.rm-*&select=alias,kind,is_primary&order=created_at.asc&limit=50`,
+        `bwallet_paymail_aliases?identity_key=eq.${q(k)}&alias=not.like.rm-*&select=alias,kind,is_primary,nft_origin,nft_unbound,nft_frozen&order=created_at.asc&limit=50`,
       )) || [],
     getAliasByKeyKind: (k, kind) =>
       one(`bwallet_paymail_aliases?identity_key=eq.${q(k)}&kind=eq.${q(kind)}&is_primary=is.true&limit=1`),
@@ -63,6 +63,37 @@ function supabaseStore(env = process.env, f = fetch) {
         throw e;
       }
     },
+    // Handle NFTs (migrations/20261016_bwallet_handle_nfts.sql). First tokenisation: only while untokenised
+    // and still on this key (the filter makes a race a no-op; the caller re-reads to confirm).
+    setHandleNft: (alias, k, origin) =>
+      req(`bwallet_paymail_aliases?alias=eq.${q(alias)}&identity_key=eq.${q(k)}&nft_origin=is.null`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          nft_origin: origin,
+          nft_location: origin,
+          nft_unbound: false,
+          nft_minted_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }),
+      }),
+    // The NFT moved: follow it. Filtered on the last verified location so two servers can't apply twice.
+    moveHandle: (alias, fromLocation, patch) =>
+      req(`bwallet_paymail_aliases?alias=eq.${q(alias)}&nft_location=eq.${q(fromLocation)}`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          ...patch,
+          nft_moved_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }),
+      }),
+    recordHandleEvent: (row) =>
+      req('bwallet_handle_nft_events', {
+        method: 'POST',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify(row),
+      }),
     // Verified social names (alias ends .x / .gmail), for the bWalletX Market "X Accounts" filter.
     listSocial: async (suffix) =>
       (await req(`bwallet_paymail_aliases?kind=eq.${q(suffix)}&select=alias,display_name&limit=5000`)) || [],
