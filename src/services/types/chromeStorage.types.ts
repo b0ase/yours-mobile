@@ -24,6 +24,11 @@ export type Settings = {
   dismissedBackupPromo?: boolean;
   /** Set to true once the user downloads their keys from the walkthrough */
   keysBackedUp?: boolean;
+  /**
+   * Restored as a RelayX wallet: the RelayX account's xpub (public, spends nothing), so its Run NFTs can be found
+   * across every RelayX address without the words (sweep/relayxRecover.ts relayxXpub).
+   */
+  relayx?: { xpub: string };
   /** Highest deposit address index derived so far. Defaults to 4 (5 addresses). */
   maxKeyIndex?: number;
   /** Highest deposit index this device has scanned with full history (services/addressScan.ts). */
