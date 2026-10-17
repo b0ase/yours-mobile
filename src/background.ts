@@ -15,6 +15,9 @@ import { panelUnlockMessages, shouldPushPrompt, type ShownPrompt } from './servi
 import { RequestParams, ResponseEventDetail, YoursEventName } from './inject';
 import { recordCall, recordPayment, requestedSats, updateConnectionLog } from './mobile/wallet/connectionLog';
 import { CWIEventName } from './cwi';
+import { describeWalletError } from './brand/walletError';
+import { healInvalidSend, healMessage, isInvalidTxReview, type HealReport } from './services/invalidSendHeal';
+import { refusalFor } from './services/broadcastRefusals';
 import type {
   ListOutputsArgs,
   RelinquishOutputArgs,
@@ -117,6 +120,43 @@ const isInServiceWorker = self?.document === undefined;
 
 // Account context - null if locked or not initialized
 let accountContext: AccountContext | null = null;
+
+/** WhatsOnChain's spender for an outpoint (confirmed or mempool); null when unspent (404), throws when it can't tell. */
+async function wocSpend(outpoint: string): Promise<string | null> {
+  const [txid, vout] = outpoint.split('_');
+  const r = await fetch(`https://api.whatsonchain.com/v1/bsv/main/tx/${txid}/${vout}/spent`);
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`woc ${r.status}`);
+  const j = (await r.json()) as { txid?: string };
+  return typeof j.txid === 'string' ? j.txid : null;
+}
+
+/** invalidSendHeal against this account's storage, the 1sat spend index, then WhatsOnChain. Never throws. */
+async function healRejectedInputs(ctx: AccountContext, error: unknown): Promise<HealReport | null> {
+  const { account } = chromeStorageService.getCurrentAccountObject();
+  const identityKey = account?.pubKeys?.identityPubKey || '';
+  const txo = (ctx.syncContext.services as unknown as { txo?: { getSpend: (o: string) => Promise<string | null> } }).txo;
+  if (!identityKey || !txo) return null;
+  try {
+    const rejected = (error as { reviewActionResults?: { txid?: string; status?: string }[] }).reviewActionResults?.find(
+      (r) => r?.status === 'invalidTx',
+    )?.txid;
+    return await healInvalidSend(error, (o) => txo.getSpend(o), {
+      markSpent: (txid, vout) =>
+        ctx.storage.runAsStorageProvider(async (sp) => {
+          const user = (await sp.findUsers({ partial: { identityKey } }))[0];
+          if (!user) return 0;
+          let n = 0;
+          for (const o of await sp.findOutputs({ partial: { userId: user.userId, txid, vout, spendable: true } }))
+            n += await sp.updateOutput(o.outputId, { spendable: false });
+          return n;
+        }),
+    }, { fallback: wocSpend, reason: refusalFor(rejected) });
+  } catch (err) {
+    console.error('[createAction] invalidTx heal failed:', err);
+    return null;
+  }
+}
 // Set while wallet is reinitializing (e.g. account switch) to prevent
 // ensureWallet from launching a popup during the transition.
 let reinitPromise: Promise<WalletInterface | null> | null = null;
@@ -3804,16 +3844,20 @@ if (isInServiceWorker) {
       });
     } catch (error) {
       const errorName = error instanceof Error ? error.name : 'Unknown';
-      const errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
+      // describeWalletError: WERR_REVIEW_ACTIONS' per-tx status (doubleSpend, invalidTx…) only survives as text here.
+      const errorMessage = error instanceof Error ? describeWalletError(error) : JSON.stringify(error);
       const errorStack = error instanceof Error ? error.stack : undefined;
       console.error('[createAction] Error:', errorName, errorMessage);
       if (errorStack) console.error('[createAction] Stack:', errorStack);
       const friendly = fundingSnap && isInsufficientFunds(error) ? insufficientFundsMessage(error, fundingSnap) : null;
       if (friendly) console.error('[createAction] Funding:', friendly);
+      // Rejected as invalid: clear the inputs the chain proves spent, or the retry picks them again (invalidSendHeal.ts).
+      const heal = isInvalidTxReview(error) && accountContext ? await healRejectedInputs(accountContext, error) : null;
+      if (heal) console.warn('[createAction] invalidTx heal:', heal);
       sendResponse({
         type: CWIEventName.CREATE_ACTION,
         success: false,
-        error: friendly ?? errorMessage,
+        error: (friendly ?? errorMessage) + (heal ? healMessage(heal) : ''),
       });
     }
     return true;
@@ -3895,7 +3939,7 @@ if (isInServiceWorker) {
         type: CWIEventName.SIGN_ACTION,
         success: false,
         // Queued to retry is not a failure (services/repeatGuard.ts): the wallet will send it on its own.
-        error: queuedSend(error) ? QUEUED_MESSAGE : error instanceof Error ? error.message : JSON.stringify(error),
+        error: queuedSend(error) ? QUEUED_MESSAGE : error instanceof Error ? describeWalletError(error) : JSON.stringify(error),
       });
     }
     return true;

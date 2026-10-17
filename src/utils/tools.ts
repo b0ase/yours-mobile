@@ -237,7 +237,7 @@ export const getErrorMessage = (error: string | unknown | undefined) => {
       // Say what actually failed (owner 17 Oct: a $1 send showed only "unknown error", so nobody could tell why).
       const raw = typeof error === 'string' ? error : error instanceof Error ? error.message : '';
       return raw && !/^[a-z0-9-]+$/.test(raw)
-        ? `That didn't work: ${raw.slice(0, 200)}`
+        ? `That didn't work: ${raw.slice(0, 400)}`
         : `An unknown error has occurred! Try again.${raw ? ` (${raw})` : ''}`;
     }
   }
