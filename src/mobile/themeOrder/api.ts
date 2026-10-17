@@ -38,6 +38,8 @@ const MESSAGES: Record<string, string> = {
   broadcast_failed: "The network didn't take the payment. Nothing was paid; try again.",
   underpaid: 'The payment was less than the price. Nothing was paid.',
   memo_missing: "The payment didn't carry the order reference. Nothing was paid.",
+  already_owned: 'You already own this theme.',
+  pack_not_for_sale: "This theme isn't for sale.",
 };
 
 const post = async <T>(f: Fetch, op: string, body: unknown): Promise<T> => {
@@ -124,3 +126,36 @@ export const payQuote = async (ctx: OneSatContext, f: Fetch, q: Quote): Promise<
 
 export const myOrders = async (f: Fetch, wallet: Signer) =>
   post<{ orders: MyOrder[]; configured: boolean }>(f, 'mine', await signRequest(wallet, 'theme-orders-mine', {}));
+
+/** Store theme purchases ($1 each, site/lib/themeBuys.js): the same quote → one approval → claim flow. */
+export interface BuyQuote extends Quote {
+  pack: string;
+}
+export const getBuyQuote = async (f: Fetch, wallet: Signer, pack: string) =>
+  post<BuyQuote>(f, 'buy-quote', await signRequest(wallet, 'theme-buy-quote', { pack }));
+
+/** Call only after the user pressed Pay on the approval sheet. */
+export const payBuyQuote = async (ctx: OneSatContext, f: Fetch, q: BuyQuote): Promise<string> => {
+  if (Date.parse(q.expires_at) < Date.now()) throw new ThemeOrderError(MESSAGES.quote_expired, 'quote_expired', 410);
+  const r = await ctx.wallet.createAction({
+    description: 'bWalletX theme',
+    outputs: [
+      ...q.outputs.map((o) => ({ lockingScript: o.script, satoshis: o.satoshis, outputDescription: 'Theme' })),
+      { lockingScript: q.memo_hex, satoshis: 0, outputDescription: 'Theme purchase reference' },
+    ],
+    options: NO_SEND,
+  });
+  if (!r.tx || !r.txid) throw new Error('The wallet did not return the payment');
+  try {
+    const signed = await signRequest(ctx.wallet, 'theme-buy-claim', { quote_id: q.quote_id, txid: r.txid });
+    const { pack } = await post<{ pack: string }>(f, 'buy-claim', { ...signed, rawtx: Utils.toHex(r.tx) });
+    return pack;
+  } catch (e) {
+    if (e instanceof ThemeOrderError && (e.status < 500 || e.code === 'broadcast_failed'))
+      await releasePayment(ctx, r.txid);
+    throw e;
+  }
+};
+
+export const ownedThemes = async (f: Fetch, wallet: Signer) =>
+  post<{ packs: string[]; configured: boolean }>(f, 'owned', await signRequest(wallet, 'theme-buy-owned', {}));
