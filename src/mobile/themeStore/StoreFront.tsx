@@ -18,6 +18,11 @@ import {
 } from 'lucide-react';
 import { TopNav } from '../../components/TopNav';
 import { THEME_ORDERS_ENABLED } from '../storeBuild';
+import { useServiceContext } from '../../hooks/useServiceContext';
+import { useAccentId } from '../theme/useAccent';
+import { BUNDLED_PACKS, bundledId, type ThemePack } from '../theme/themePack';
+import { applyPack } from './catalog';
+import { PackCard, PreviewSheet } from './ui';
 import { priceLabel, visible, type Listing } from './bstore';
 
 // The existing "Get your own edition" order flow ($99 a year), bWalletX only.
@@ -112,6 +117,53 @@ const matches = (l: Listing, q: string) =>
 
 // Same frame, type and colours as the Exchange page (market/MarketPage.tsx), so the Store looks like the rest of the app.
 const MUTED = '#98A2B3';
+
+// Our edition themes, listed in Themes (owner, 17 Oct 2026). They apply today, so they show their real state.
+const EDITION_IDS = ['vexvoid', 'npg', 'npgx'];
+const EDITIONS: readonly ThemePack[] = EDITION_IDS.map((id) => BUNDLED_PACKS.find((p) => p.id === id)).filter(
+  (p): p is ThemePack => !!p,
+);
+
+/** The editions as products: live mini wallet, tap for the big preview, Apply or In use. */
+function Editions() {
+  const { chromeStorageService } = useServiceContext();
+  const account = chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey ?? '';
+  const current = useAccentId();
+  const [open, setOpen] = useState<ThemePack | null>(null);
+  const inUse = (p: ThemePack) => bundledId(p) === current;
+  const apply = (p: ThemePack) => (
+    <button
+      type="button"
+      disabled={inUse(p)}
+      aria-pressed={inUse(p)}
+      onClick={() => applyPack(account, p)}
+      className={
+        inUse(p)
+          ? 'rounded-xl border border-[#2b2f36] py-2 text-xs font-bold'
+          : 'bw-pill bw-pill-gold flex min-h-[36px] items-center justify-center py-2 text-xs font-bold'
+      }
+      style={inUse(p) ? { color: MUTED, background: 'transparent' } : undefined}
+    >
+      {inUse(p) ? 'In use' : 'Apply'}
+    </button>
+  );
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-1.5">
+        {EDITIONS.map((p) => (
+          <PackCard key={p.id} p={p} inUse={inUse(p)} price="Free" onOpen={() => setOpen(p)}>
+            {apply(p)}
+          </PackCard>
+        ))}
+      </div>
+      {open && (
+        <PreviewSheet p={open} inUse={inUse(open)} price="Free" onClose={() => setOpen(null)}>
+          {apply(open)}
+        </PreviewSheet>
+      )}
+    </>
+  );
+}
 const TILE = 'rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36]';
 const BACK =
   'flex items-center gap-1.5 self-start rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36] px-3 py-2 text-xs font-bold text-white cursor-pointer';
@@ -132,6 +184,7 @@ function Department({ d, query, onBack }: { d: Dept; query: string; onBack: () =
       <p className="text-xs m-0" style={{ color: MUTED }}>
         {d.blurb}
       </p>
+      {d.id === 'themes' && <Editions />}
       {items.length ? (
         <div className="grid grid-cols-2 gap-1.5">
           {items.map((l) => (
@@ -144,7 +197,7 @@ function Department({ d, query, onBack }: { d: Dept; query: string; onBack: () =
             </div>
           ))}
         </div>
-      ) : (
+      ) : d.id === 'themes' ? null : (
         <div className={`${TILE} p-5 flex flex-col items-center gap-2 text-center`}>
           <d.Icon size={28} style={{ color: 'var(--bw-accent)' }} aria-hidden="true" />
           <b className="text-sm text-white">Be the first to sell here</b>
@@ -240,7 +293,7 @@ function Store() {
             {shown.length ? (
               <div className="grid grid-cols-2 gap-1.5">
                 {shown.map((d) => {
-                  const n = LISTINGS.filter(d.has).length;
+                  const n = LISTINGS.filter(d.has).length + (d.id === 'themes' ? EDITIONS.length : 0);
                   return (
                     <button
                       key={d.id}
