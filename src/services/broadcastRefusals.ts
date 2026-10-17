@@ -24,7 +24,7 @@ export function noteRefusals(results: unknown): void {
     for (const t of r.txidResults ?? []) {
       if (!t?.txid || t.status !== 'error' || t.serviceError) continue;
       refusals.delete(t.txid);
-      refusals.set(t.txid, `${r.error.message}`.slice(0, 240));
+      refusals.set(t.txid, `${r.error.message}`.slice(0, 600));
       if (refusals.size > MAX) refusals.delete(refusals.keys().next().value as string);
     }
   }

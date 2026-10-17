@@ -17,6 +17,7 @@ import { recordCall, recordPayment, requestedSats, updateConnectionLog } from '.
 import { CWIEventName } from './cwi';
 import { describeWalletError } from './brand/walletError';
 import { healInvalidSend, healMessage, isInvalidTxReview, type HealReport } from './services/invalidSendHeal';
+import { refusalFor } from './services/broadcastRefusals';
 import type {
   ListOutputsArgs,
   RelinquishOutputArgs,
@@ -120,13 +121,26 @@ const isInServiceWorker = self?.document === undefined;
 // Account context - null if locked or not initialized
 let accountContext: AccountContext | null = null;
 
-/** invalidSendHeal against this account's storage and the 1sat spend index. Never throws. */
+/** WhatsOnChain's spender for an outpoint (confirmed or mempool); null when unspent (404), throws when it can't tell. */
+async function wocSpend(outpoint: string): Promise<string | null> {
+  const [txid, vout] = outpoint.split('_');
+  const r = await fetch(`https://api.whatsonchain.com/v1/bsv/main/tx/${txid}/${vout}/spent`);
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`woc ${r.status}`);
+  const j = (await r.json()) as { txid?: string };
+  return typeof j.txid === 'string' ? j.txid : null;
+}
+
+/** invalidSendHeal against this account's storage, the 1sat spend index, then WhatsOnChain. Never throws. */
 async function healRejectedInputs(ctx: AccountContext, error: unknown): Promise<HealReport | null> {
   const { account } = chromeStorageService.getCurrentAccountObject();
   const identityKey = account?.pubKeys?.identityPubKey || '';
   const txo = (ctx.syncContext.services as unknown as { txo?: { getSpend: (o: string) => Promise<string | null> } }).txo;
   if (!identityKey || !txo) return null;
   try {
+    const rejected = (error as { reviewActionResults?: { txid?: string; status?: string }[] }).reviewActionResults?.find(
+      (r) => r?.status === 'invalidTx',
+    )?.txid;
     return await healInvalidSend(error, (o) => txo.getSpend(o), {
       markSpent: (txid, vout) =>
         ctx.storage.runAsStorageProvider(async (sp) => {
@@ -137,7 +151,7 @@ async function healRejectedInputs(ctx: AccountContext, error: unknown): Promise<
             n += await sp.updateOutput(o.outputId, { spendable: false });
           return n;
         }),
-    });
+    }, { fallback: wocSpend, reason: refusalFor(rejected) });
   } catch (err) {
     console.error('[createAction] invalidTx heal failed:', err);
     return null;

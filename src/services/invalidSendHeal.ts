@@ -7,9 +7,11 @@
  * same outputs and is rejected again, forever.
  *
  * Here, after an invalidTx, each input of the rejected transaction (WERR_REVIEW_ACTIONS carries it as AtomicBEEF) is
- * looked up on the chain. Only inputs the chain names a spending txid for are marked spendable: false. A lookup that
- * fails, or any answer without a spending txid, changes nothing (fail closed): an input that is unspent but could
- * not be unlocked is a different bug, and this must never hide live money.
+ * checked: one the broadcaster names as spent (UTXO_SPENT) is taken as is; the rest are looked up on the 1sat spend
+ * index, then WhatsOnChain (confirmed or mempool). Only inputs with a named spending txid are marked spendable: false.
+ * A lookup that fails, or any answer without a spending txid, leaves that input alone (fail closed): this must never
+ * hide live money. Second test of the same day: "UTXO_SPENT (70)" from the broadcaster while the 1sat index named no
+ * spender (spent from another device holding the same keys, likely still unconfirmed).
  *
  * Not the toolbox's reviewSpendableOutputs: OneSatServices.getUtxoStatus reports a failed lookup as "not a UTXO",
  * so a flaky API would release live coins.
@@ -44,24 +46,45 @@ export function rejectedInputs(error: unknown): string[] {
 }
 
 /**
- * The inputs the chain says are spent, or null when any lookup failed (then nothing is released).
- * `getSpend` resolves the spending txid, or null/undefined while unspent, and throws when it can't tell.
+ * The inputs proven spent. Each input stands alone: a lookup that throws, or an answer without a spending txid,
+ * leaves that input as it is (fail closed per input). `getSpend` resolves the spending txid, or null/undefined while
+ * unspent, and throws when it can't tell; `fallback` (e.g. WhatsOnChain, which also sees the mempool) is asked when
+ * the first lookup can't name a spender.
  */
 export async function provenSpent(
   outpoints: string[],
   getSpend: (outpoint: string) => Promise<string | null | undefined>,
-): Promise<string[] | null> {
+  fallback?: (outpoint: string) => Promise<string | null | undefined>,
+  rejectedTxid?: string,
+): Promise<string[]> {
   const spent: string[] = [];
-  for (const op of outpoints) {
-    let by: string | null | undefined;
+  const ask = async (f: typeof getSpend, op: string) => {
     try {
-      by = await getSpend(op);
+      const by = await f(op);
+      // The rejected tx itself is not a spender (it never went out).
+      return typeof by === 'string' && TXID.test(by) && by !== rejectedTxid ? by : null;
     } catch {
       return null;
     }
-    if (typeof by === 'string' && TXID.test(by)) spent.push(op);
+  };
+  for (const op of outpoints) {
+    if ((await ask(getSpend, op)) || (fallback && (await ask(fallback, op)))) spent.push(op);
   }
   return spent;
+}
+
+/**
+ * Pure: inputs the broadcaster itself names as spent. ARC/Teranode reports e.g.
+ * "UTXO_SPENT (70): [ProcessTransaction][<txid of the tx being processed>] …"; an input outpoint written in the
+ * reason ("txid:vout" or "txid_vout") after a UTXO_SPENT verdict is taken as authoritative.
+ */
+export function namedSpentInputs(reason: string | undefined, inputs: string[]): string[] {
+  if (!reason || !/UTXO_SPENT|already spent|missing ?inputs/i.test(reason)) return [];
+  const text = reason.toLowerCase();
+  return inputs.filter((op) => {
+    const [txid, vout] = op.split('_');
+    return text.includes(`${txid}:${vout}`) || text.includes(`${txid}_${vout}`);
+  });
 }
 
 export interface HealStore {
@@ -69,20 +92,27 @@ export interface HealStore {
   markSpent: (txid: string, vout: number) => Promise<number>;
 }
 
-export type HealReport = { checked: number; released: number; inconclusive?: boolean };
+export type HealReport = { checked: number; released: number };
 
-/** After an invalidTx: release the rejected send's inputs the chain proves spent. Never throws. */
+/** After an invalidTx: release the rejected send's inputs proven spent. Never throws. */
 export async function healInvalidSend(
   error: unknown,
   getSpend: (outpoint: string) => Promise<string | null | undefined>,
   store: HealStore,
+  opts: { fallback?: (outpoint: string) => Promise<string | null | undefined>; reason?: string } = {},
 ): Promise<HealReport> {
   if (!isInvalidTxReview(error)) return { checked: 0, released: 0 };
   const inputs = rejectedInputs(error);
-  const spent = await provenSpent(inputs, getSpend);
-  if (!spent) return { checked: inputs.length, released: 0, inconclusive: true };
+  const rejectedTxid = (error as ReviewError).reviewActionResults?.find((r) => r?.status === 'invalidTx')?.txid;
+  const named = namedSpentInputs(opts.reason, inputs);
+  const looked = await provenSpent(
+    inputs.filter((op) => !named.includes(op)),
+    getSpend,
+    opts.fallback,
+    rejectedTxid,
+  );
   let released = 0;
-  for (const op of spent) {
+  for (const op of [...named, ...looked]) {
     const [txid, vout] = op.split('_');
     released += await store.markSpent(txid, Number(vout)).catch(() => 0);
   }
@@ -92,5 +122,5 @@ export async function healInvalidSend(
 /** What to add to the error the person sees. */
 export const healMessage = (r: HealReport): string =>
   r.released > 0
-    ? ` ${r.released === 1 ? 'One coin was already spent elsewhere; it is' : `${r.released} coins were already spent elsewhere; they are`} now cleared. Please try again.`
+    ? ` ${r.released === 1 ? '1 coin was' : `${r.released} coins were`} already spent elsewhere (another device?); cleared — tap Send again.`
     : '';

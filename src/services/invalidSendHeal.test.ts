@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { healInvalidSend, healMessage, isInvalidTxReview, provenSpent } from './invalidSendHeal';
+import { healInvalidSend, healMessage, isInvalidTxReview, namedSpentInputs, provenSpent } from './invalidSendHeal';
 
 const T = (c: string) => c.repeat(64);
 const review = (status: string) =>
@@ -22,15 +22,31 @@ describe('provenSpent', () => {
     const spend: Record<string, string | null> = { [`${T('1')}_0`]: T('9'), [`${T('2')}_1`]: null };
     expect(await provenSpent(Object.keys(spend), async (o) => spend[o])).toEqual([`${T('1')}_0`]);
   });
-  test('any failed lookup releases nothing', async () => {
+  test('a failed lookup leaves only that input alone', async () => {
     const r = await provenSpent([`${T('1')}_0`, `${T('2')}_0`], async (o) => {
       if (o.startsWith('2')) throw new Error('timeout');
       return T('9');
     });
-    expect(r).toBeNull();
+    expect(r).toEqual([`${T('1')}_0`]);
   });
-  test('junk answers are not proof', async () => {
+  test('asks the fallback (mempool) when the index names no spender', async () => {
+    const r = await provenSpent([`${T('1')}_0`], async () => null, async () => T('8'));
+    expect(r).toEqual([`${T('1')}_0`]);
+  });
+  test('junk answers and the rejected tx itself are not proof', async () => {
     expect(await provenSpent([`${T('1')}_0`], async () => 'spent')).toEqual([]);
+    expect(await provenSpent([`${T('1')}_0`], async () => T('a'), undefined, T('a'))).toEqual([]);
+  });
+});
+
+describe('namedSpentInputs', () => {
+  test('takes inputs the broadcaster names after UTXO_SPENT', () => {
+    const inputs = [`${T('1')}_0`, `${T('2')}_3`];
+    expect(namedSpentInputs(`UTXO_SPENT (70): [ProcessTransaction][${T('a')}] utxo ${T('2')}:3 already spent`, inputs)).toEqual([
+      `${T('2')}_3`,
+    ]);
+    expect(namedSpentInputs(`SCRIPT_FAILED ${T('2')}:3`, inputs)).toEqual([]);
+    expect(namedSpentInputs(undefined, inputs)).toEqual([]);
   });
 });
 
@@ -48,6 +64,8 @@ describe('healInvalidSend', () => {
 describe('healMessage', () => {
   test('says nothing when nothing changed', () => {
     expect(healMessage({ checked: 2, released: 0 })).toBe('');
-    expect(healMessage({ checked: 2, released: 2 })).toContain('2 coins were already spent elsewhere; they are now cleared');
+    expect(healMessage({ checked: 2, released: 2 })).toBe(
+      ' 2 coins were already spent elsewhere (another device?); cleared — tap Send again.',
+    );
   });
 });
