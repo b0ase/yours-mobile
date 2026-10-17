@@ -16,6 +16,7 @@ import {
   bsv20TickExists,
   controlledTokens,
   decideExisting,
+  heldTokenNote,
   duplicateNote,
   linkImported,
   signImport,
@@ -95,6 +96,7 @@ export async function deployPersonalToken(
   const choice = input.choice ?? (await existingChoice(ctx, input.name));
   if (choice.kind === 'import')
     throw new Error(`You already have the $${choice.token.sym} token. Import it instead of minting a new one.`);
+  if (choice.kind === 'held') throw new Error(heldTokenNote(choice.token.sym));
   if (choice.kind === 'bsv20-taken') throw new Error(bsv20TakenError(choice.tick));
   if (choice.kind === 'mint-labelled' && !input.acceptDuplicate) throw new Error(duplicateNote(input.name));
   const bad = validateSupply(input.supply);

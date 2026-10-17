@@ -27,11 +27,10 @@ describe('handle ↔ existing token', () => {
     expect(handleCardTitle(true, 'NPG')).toBe('We found the $NPG token — sign to import it');
     expect(handleCardTitle(true, null)).toBe('Open your $name room');
   });
-  test('a holder (not the issuer) is never offered the import; gets the labelled-mint note', () => {
-    const held = { tokenId: ID, sym: 'NPG' };
-    expect(decideExisting({ handle: 'npg', controlled: [held], othersBsv21: 0, bsv20Tick: false }).kind).toBe(
-      'mint-labelled',
-    );
+  test('a holder (not the issuer) is offered neither the import nor a mint', () => {
+    const held = { tokenId: ID, sym: 'NINJAPUNKGIRLS' };
+    expect(decideExisting({ handle: 'npg', controlled: [held], othersBsv21: 0, bsv20Tick: false }).kind).toBe('held');
+    expect(decideExisting({ handle: 'npg', controlled: [held], othersBsv21: 1, bsv20Tick: true }).kind).toBe('held');
   });
   test("labelled mint allowed when someone else's token uses the ticker", () => {
     expect(decideExisting({ handle: 'john', controlled: [], othersBsv21: 1, bsv20Tick: false }).kind).toBe(
@@ -54,6 +53,9 @@ describe('handle ↔ existing token', () => {
     );
     await expect(deployPersonalToken(ctx, { ...base, choice: { kind: 'bsv20-taken', tick: 'NPG' } })).rejects.toThrow(
       /BSV-20/,
+    );
+    await expect(deployPersonalToken(ctx, { ...base, choice: { kind: 'held', token: npg } })).rejects.toThrow(
+      /already hold/,
     );
     await expect(deployPersonalToken(ctx, { ...base, choice: { kind: 'mint-labelled', others: 1 } })).rejects.toThrow(
       /someone else/,
@@ -81,7 +83,7 @@ describe('handle ↔ existing token', () => {
     await expect(signer.sign(PrivateKey.fromRandom().toAddress(), msg)).rejects.toThrow();
   });
 
-  test('a holder whose legacy keys did not deploy the token gets the note, not the import', async () => {
+  test('a holder whose legacy keys did not deploy the token gets the held note, not the import', async () => {
     const pay = PrivateKey.fromRandom();
     const tokens = await withLegacyIssuers(
       'npg',
@@ -89,9 +91,7 @@ describe('handle ↔ existing token', () => {
       { addresses: [pay.toAddress()] },
       async () => PrivateKey.fromRandom().toAddress(),
     );
-    expect(decideExisting({ handle: 'npg', controlled: tokens, othersBsv21: 0, bsv20Tick: false }).kind).toBe(
-      'mint-labelled',
-    );
+    expect(decideExisting({ handle: 'npg', controlled: tokens, othersBsv21: 0, bsv20Tick: false }).kind).toBe('held');
   });
 
   test('outputOwner reads the P2PKH owner of a deploy output', () => {
