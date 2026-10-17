@@ -7,6 +7,7 @@ import { createChainReader, createTxCache, type ChainReader } from '../../sweep/
 import {
   groupFound,
   retryUnread,
+  createJigMemo,
   scanRelayx,
   wordsProblem,
   type Found,
@@ -310,6 +311,7 @@ export function RelayxRecoverScreen({ onBack }: { onBack: () => void }) {
           }
         },
         cancel.current,
+        createJigMemo(store),
       );
       if (cancel.current.cancelled) return setPhase({ k: 'enter' });
       setPhase({ k: 'done', result });

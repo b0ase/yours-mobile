@@ -85,8 +85,25 @@ export function createScheduler(opts: SchedulerOpts = {}) {
 }
 
 /** Tx hex cache: memory first, then localStorage (skips big txs, evicts oldest past the cap). */
+/** Hex kept in memory for a scan, oldest dropped first. */
+export const MEM_HEX_BYTES = 16_000_000;
+/** Parsed transactions kept at once (a parsed image mint is several MB). */
+export const PARSED_TXS = 60;
+
 export function createTxCache(store: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null, capBytes = 3_000_000) {
+  // Bounded (owner, 17 Oct 2026: the app reloaded mid-scan; unbounded tx memory got the WebView killed by iOS).
   const mem = new Map<string, string>();
+  let memBytes = 0;
+  const remember = (txid: string, hex: string) => {
+    if (mem.has(txid)) return;
+    mem.set(txid, hex);
+    memBytes += hex.length;
+    for (const [k, v] of mem) {
+      if (memBytes <= MEM_HEX_BYTES) break;
+      mem.delete(k);
+      memBytes -= v.length;
+    }
+  };
   const KEY = 'bw.relayx.txcache.index';
   const idx = (): string[] => {
     try {
@@ -101,14 +118,14 @@ export function createTxCache(store: Pick<Storage, 'getItem' | 'setItem' | 'remo
       if (hit) return hit;
       try {
         const v = store?.getItem(`bw.relayx.tx.${txid}`) ?? undefined;
-        if (v) mem.set(txid, v);
+        if (v) remember(txid, v);
         return v;
       } catch {
         return undefined;
       }
     },
     set(txid: string, hex: string) {
-      mem.set(txid, hex);
+      remember(txid, hex);
       if (!store || hex.length > 200_000) return; // big mints (images) stay in memory only
       try {
         const list = idx().filter((t) => t !== txid);
@@ -247,17 +264,21 @@ export function createChainReader(opts: ChainReaderOpts = {}) {
 
   const txs = new Map<string, Promise<Transaction>>();
   const getTx = (txid: string) => {
-    if (!txs.has(txid))
-      txs.set(
-        txid,
-        txHex(txid)
-          .then((h) => Transaction.fromHex(h))
-          .catch((e) => {
-            txs.delete(txid); // so "Retry" fetches it again
-            throw e;
-          }),
-      );
-    return txs.get(txid)!;
+    const had = txs.get(txid);
+    if (had) {
+      txs.delete(txid); // most recently used last
+      txs.set(txid, had);
+      return had;
+    }
+    if (txs.size >= PARSED_TXS) txs.delete(txs.keys().next().value!);
+    const p = txHex(txid)
+      .then((h) => Transaction.fromHex(h))
+      .catch((e) => {
+        txs.delete(txid); // so "Retry" fetches it again
+        throw e;
+      });
+    txs.set(txid, p);
+    return p;
   };
 
   return { holding, unspent, txHex, getTx };
