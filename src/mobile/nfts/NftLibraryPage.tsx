@@ -47,6 +47,8 @@ import {
   type SortKey,
 } from './nftLibrary';
 import { WalletTabs } from './WalletTabs';
+import { TopNav } from '../../components/TopNav';
+import { WIDE_ON } from '../wide/flag';
 import { BavatarKeep } from './BavatarKeep';
 import { isBavatarItem } from '../names/pictureSource';
 
@@ -564,7 +566,12 @@ const NftLibraryPage = () => {
   const audioMedia = useMemo(() => media.filter((m) => m.kind === 'music'), [media]);
 
   return (
-    <div className="flex h-full min-h-0 text-white bg-[#08090b]">
+    // Phone: the app's top bar sits above the page (each phone page mounts it); Desktop has its own shell bar.
+    <div
+      className="flex h-full min-h-0 text-white bg-[#08090b]"
+      style={WIDE_ON ? undefined : { paddingTop: 'calc(56px + var(--wallet-inset-top, 0px))' }}
+    >
+      {!WIDE_ON && <TopNav />}
       <div className="flex flex-col flex-1 min-w-0 min-h-0">
         <WalletTabs active="nfts" />
         <div className="px-4 pt-3 pb-2 flex flex-col gap-2 border-b border-white/5">
