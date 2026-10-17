@@ -4,6 +4,7 @@
  */
 import type { OneSatServices } from '@1sat/client';
 import type { IndexedOutput } from '@1sat/types';
+import { isRunJig } from './runGuard';
 
 export interface EnrichedOrdinal extends IndexedOutput {
   origin?: string;
@@ -27,6 +28,8 @@ export interface ScannedAssets {
   bsv21Tokens: TokenBalance[];
   bsv20Tokens: IndexedOutput[];
   locked: IndexedOutput[];
+  /** Run NFTs (jigs, e.g. a RelayX collection): never swept or spent as sats (runGuard.ts). */
+  runJigs: IndexedOutput[];
   totalBsv: number;
 }
 
@@ -114,6 +117,7 @@ function categorizeOutputs(
   const bsv21Raw: IndexedOutput[] = [];
   const bsv20Tokens: IndexedOutput[] = [];
   const locked: IndexedOutput[] = [];
+  const runJigs: IndexedOutput[] = [];
 
   for (const out of outputs) {
     const events = out.events ?? [];
@@ -131,6 +135,12 @@ function categorizeOutputs(
 
     if (events.some((e) => e === 'type:application/bsv-20' || e === 'type:Token')) {
       bsv20Tokens.push(out);
+      continue;
+    }
+
+    // Before any sats rule: a Run jig spent as BSV is destroyed.
+    if (isRunJig(out)) {
+      runJigs.push(out);
       continue;
     }
 
@@ -155,6 +165,7 @@ function categorizeOutputs(
     bsv21Tokens,
     bsv20Tokens,
     locked,
+    runJigs,
     totalBsv: funding.reduce((sum, o) => sum + (o.satoshis ?? 0), 0),
   }));
 
@@ -214,6 +225,7 @@ export async function scanAddresses(
     bsv21Tokens: allResults.flatMap((r) => r.bsv21Tokens),
     bsv20Tokens: allResults.flatMap((r) => r.bsv20Tokens),
     locked: allResults.flatMap((r) => r.locked),
+    runJigs: allResults.flatMap((r) => r.runJigs),
     totalBsv: allResults.reduce((sum, r) => sum + r.totalBsv, 0),
   };
 }
