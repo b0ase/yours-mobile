@@ -48,10 +48,7 @@ function verifyReceipt(r) {
   if (!r || typeof r.sig !== 'string' || typeof r.signer !== 'string') return false;
   try {
     const { sig, ...body } = r;
-    return PublicKey.fromString(r.signer).verify(
-      Utils.toArray(canonical(body), 'utf8'),
-      Signature.fromDER(sig, 'hex'),
-    );
+    return PublicKey.fromString(r.signer).verify(Utils.toArray(canonical(body), 'utf8'), Signature.fromDER(sig, 'hex'));
   } catch {
     return false;
   }

@@ -40,7 +40,9 @@ const quoteFor = async (env) => {
 
 describe('store receipts', () => {
   test('canonical JSON sorts keys at every level and drops undefined', () => {
-    expect(sr.canonical({ b: 1, a: { d: [2, { z: 1, y: 2 }], c: undefined } })).toBe('{"a":{"d":[2,{"y":2,"z":1}]},"b":1}');
+    expect(sr.canonical({ b: 1, a: { d: [2, { z: 1, y: 2 }], c: undefined } })).toBe(
+      '{"a":{"d":[2,{"y":2,"z":1}]},"b":1}',
+    );
   });
 
   test('the quote carries a receipt signed by the Store key, naming the order, pack, price, seller and buyer', async () => {
@@ -81,9 +83,17 @@ describe('store receipts', () => {
   });
 
   test('a payment that also carries the 1-sat receipt inscription is still accepted', async () => {
-    const { q, h, wallet, identityKey } = await quoteFor({ THEME_ORDER_PAY_ADDRESS: PAY, STORE_RECEIPT_WIF: STORE_WIF });
+    const { q, h, wallet, identityKey } = await quoteFor({
+      THEME_ORDER_PAY_ADDRESS: PAY,
+      STORE_RECEIPT_WIF: STORE_WIF,
+    });
     const tx = new Transaction();
-    tx.addInput({ sourceTXID: '00'.repeat(32), sourceOutputIndex: 0, unlockingScript: new Script(), sequence: 0xffffffff });
+    tx.addInput({
+      sourceTXID: '00'.repeat(32),
+      sourceOutputIndex: 0,
+      unlockingScript: new Script(),
+      sequence: 0xffffffff,
+    });
     tx.addOutput({ lockingScript: new P2PKH().lock(PAY), satoshis: q.sats });
     tx.addOutput({ lockingScript: Script.fromHex(q.memo_hex), satoshis: 0 });
     tx.addOutput({ lockingScript: new P2PKH().lock(new PrivateKey(3).toPublicKey().toAddress()), satoshis: 1 });

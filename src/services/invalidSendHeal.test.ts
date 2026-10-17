@@ -30,7 +30,11 @@ describe('provenSpent', () => {
     expect(r).toEqual([`${T('1')}_0`]);
   });
   test('asks the fallback (mempool) when the index names no spender', async () => {
-    const r = await provenSpent([`${T('1')}_0`], async () => null, async () => T('8'));
+    const r = await provenSpent(
+      [`${T('1')}_0`],
+      async () => null,
+      async () => T('8'),
+    );
     expect(r).toEqual([`${T('1')}_0`]);
   });
   test('junk answers and the rejected tx itself are not proof', async () => {
@@ -42,9 +46,9 @@ describe('provenSpent', () => {
 describe('namedSpentInputs', () => {
   test('takes inputs the broadcaster names after UTXO_SPENT', () => {
     const inputs = [`${T('1')}_0`, `${T('2')}_3`];
-    expect(namedSpentInputs(`UTXO_SPENT (70): [ProcessTransaction][${T('a')}] utxo ${T('2')}:3 already spent`, inputs)).toEqual([
-      `${T('2')}_3`,
-    ]);
+    expect(
+      namedSpentInputs(`UTXO_SPENT (70): [ProcessTransaction][${T('a')}] utxo ${T('2')}:3 already spent`, inputs),
+    ).toEqual([`${T('2')}_3`]);
     expect(namedSpentInputs(`SCRIPT_FAILED ${T('2')}:3`, inputs)).toEqual([]);
     expect(namedSpentInputs(undefined, inputs)).toEqual([]);
   });
@@ -64,7 +68,9 @@ describe('healInvalidSend', () => {
 describe('healMessage', () => {
   test('says nothing when nothing changed', () => {
     expect(healMessage({ checked: 2, released: 0 })).toBe('');
-    expect(healMessage({ checked: 1, released: 0, inputs: [`${T('1')}_3`] })).toBe(` Coins tried: ${T('1').slice(0, 10)}…:3.`);
+    expect(healMessage({ checked: 1, released: 0, inputs: [`${T('1')}_3`] })).toBe(
+      ` Coins tried: ${T('1').slice(0, 10)}…:3.`,
+    );
     expect(healMessage({ checked: 2, released: 2 })).toBe(
       ' 2 coins were already spent elsewhere (another device?); cleared — tap Send again.',
     );

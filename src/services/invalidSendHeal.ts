@@ -29,8 +29,7 @@ type ReviewError = Error & {
 
 /** Pure: was this a broadcast the network refused as invalid (not a double spend, not a service hiccup)? */
 export const isInvalidTxReview = (error: unknown): boolean =>
-  error instanceof Error &&
-  ((error as ReviewError).reviewActionResults ?? []).some((r) => r?.status === 'invalidTx');
+  error instanceof Error && ((error as ReviewError).reviewActionResults ?? []).some((r) => r?.status === 'invalidTx');
 
 /** Pure: the outpoints ("txid_vout") the rejected transaction spends, from the error's AtomicBEEF. */
 export function rejectedInputs(error: unknown): string[] {
