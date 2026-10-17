@@ -2,6 +2,7 @@ import { hueTurnFor, shownHueFor } from './cardHue';
 import { setBavatarShimmer, useBavatarShimmer } from '../names/bavatarShimmer';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { useInRouterContext, useLocation } from 'react-router-dom';
 import { ImagePlus, X } from 'lucide-react';
 import { CardNftGrid } from './CardNftGrid';
 import type { CardDesign } from './cardDesign';
@@ -56,6 +57,16 @@ import {
  * Colour and own picture (owner, 12 Oct 2026): hue, saturation and shade sliders, and "Use my picture" to put a
  * picture from this device on the front (resized here, kept on this device only); the same controls apply to it.
  */
+/** The bars stay usable while the designer is open (owner, 17 Oct 2026): leaving the page from them closes it. */
+function CloseOnNavigate({ onClose }: { onClose: () => void }) {
+  const { pathname } = useLocation();
+  const first = useRef(pathname);
+  useEffect(() => {
+    if (pathname !== first.current) onClose();
+  }, [pathname, onClose]);
+  return null;
+}
+
 export function CardDesigner({
   art,
   look,
@@ -152,6 +163,7 @@ export function CardDesigner({
   const [imgErr, setImgErr] = useState('');
   const drag = useRef<{ x: number; y: number; lx: number; ly: number; w: number; h: number } | null>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+  const inRouter = useInRouterContext();
   useEffect(() => {
     closeRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
@@ -191,7 +203,8 @@ export function CardDesigner({
   );
 
   return createPortal(
-    <div className="bw-cdes" role="dialog" aria-modal="true" aria-label="Card designer">
+    <div className="bw-cdes" role="dialog" aria-label="Card designer">
+      {inRouter && <CloseOnNavigate onClose={onClose} />}
       <div className="bw-cdes-top">
         <b>{title}</b>
         <button ref={closeRef} type="button" className="bw-cdes-x" aria-label="Close card designer" onClick={onClose}>
