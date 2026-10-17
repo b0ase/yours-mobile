@@ -100,7 +100,9 @@ export const duplicateNote = (handle: string, domain = BWALLET_PAYMAIL_DOMAIN): 
   `There's already a token called ${personalTicker(handle) ?? handle} by someone else; yours will be labelled ${personalTokenLabel(handle, domain)}.`;
 
 export const bsv20TakenError = (tick: string) =>
-  `${tick} is already a BSV-20 token, and BSV-20 names are unique, so it can't be minted again. Choose a different handle for your token.`;
+  `${tick} is already a BSV-20 token, and BSV-20 names are unique, so it can't be minted again. ` +
+  `If you issued it, add the key it was issued from (Settings \u203a Add account \u203a Restore with private key) ` +
+  `and its room opens from that account with one signature, nothing minted. Otherwise choose a different handle.`;
 
 /** Tokens this wallet issued (own deploys) or holds, read from the wallet. */
 export async function controlledTokens(ctx: OneSatContext): Promise<TokenRef[]> {
