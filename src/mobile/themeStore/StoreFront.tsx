@@ -25,6 +25,7 @@ import { applyPack } from './catalog';
 import { PackCard, PreviewSheet } from './ui';
 import { BuySheet } from './StoreBuy';
 import { useOwnedThemes } from './useOwnedThemes';
+import { SHOPS, shopById, type Shop } from './shops';
 import { priceLabel, visible, type Listing } from './bstore';
 
 // The existing "Get your own edition" order flow ($99 a year), bWalletX only.
@@ -131,7 +132,7 @@ const EDITIONS: readonly ThemePack[] = EDITION_IDS.map((id) => BUNDLED_PACKS.fin
 
 /** The editions as products ($1 each, owner 17 Oct 2026): live mini wallet, tap for the big preview, then Buy,
  *  Apply or In use. Buying is real (StoreBuy.tsx); until the server is set up it says buying opens soon. */
-function Editions() {
+function Editions({ ids = EDITION_IDS }: { ids?: readonly string[] }) {
   const { chromeStorageService } = useServiceContext();
   const account = chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey ?? '';
   const current = useAccentId();
@@ -168,7 +169,7 @@ function Editions() {
   return (
     <>
       <div className="grid grid-cols-2 gap-1.5">
-        {EDITIONS.map((p) => (
+        {EDITIONS.filter((p) => ids.includes(p.id)).map((p) => (
           <PackCard key={p.id} p={p} inUse={inUse(p)} price={price(p)} onOpen={() => setPreview(p)}>
             {action(p)}
           </PackCard>
@@ -197,6 +198,80 @@ function Editions() {
           }}
         />
       )}
+    </>
+  );
+}
+
+/** One shop in the mall: banner, logo, name, who runs it, and everything it sells. */
+function ShopPage({ shop, onBack }: { shop: Shop; onBack: () => void }) {
+  return (
+    <>
+      <button type="button" onClick={onBack} className={BACK}>
+        <ArrowLeft size={14} aria-hidden="true" /> All shops
+      </button>
+      <div className={`${TILE} overflow-hidden`}>
+        <div
+          className="h-28 w-full bg-cover bg-center"
+          style={{ background: shop.banner ? `center / cover no-repeat url(${shop.banner})` : shop.colour }}
+        />
+        <div className="flex items-center gap-3 p-3">
+          <img src={shop.logo} alt="" width={48} height={48} className="rounded-xl -mt-8 border-2 border-[#2b2f36]" />
+          <div className="min-w-0">
+            <b className="block text-base text-white">{shop.name}</b>
+            <span className="text-xs" style={{ color: MUTED }}>
+              {shop.blurb} · by {shop.owner}
+            </span>
+          </div>
+        </div>
+      </div>
+      <h2 className="text-sm font-bold text-white m-0">Themes</h2>
+      <Editions ids={shop.themes} />
+      <p className="text-xs m-0" style={{ color: MUTED }}>
+        More from {shop.name} soon.
+      </p>
+    </>
+  );
+}
+
+/** The shops row: a 2-column grid of shop cards (no sideways scrolling), then Open a shop. */
+function Shops({ onOpen }: { onOpen: (id: string) => void }) {
+  const [soon, setSoon] = useState(false);
+  return (
+    <>
+      <h2 className="text-sm font-bold text-white m-0">Shops</h2>
+      <div className="grid grid-cols-2 gap-1.5">
+        {SHOPS.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            onClick={() => onOpen(s.id)}
+            className={`${TILE} overflow-hidden flex flex-col text-left cursor-pointer p-0`}
+          >
+            <span
+              className="block h-16 w-full"
+              style={{ background: s.banner ? `center / cover no-repeat url(${s.banner})` : s.colour }}
+            />
+            <span className="flex items-center gap-2 p-2">
+              <img src={s.logo} alt="" width={28} height={28} className="rounded-lg" />
+              <span className="min-w-0">
+                <span className="block text-sm font-bold text-white truncate">{s.name}</span>
+                <span className="block text-[11px] truncate" style={{ color: MUTED }}>
+                  {s.themes.length} {s.themes.length === 1 ? 'item' : 'items'}
+                </span>
+              </span>
+            </span>
+          </button>
+        ))}
+      </div>
+      <button type="button" onClick={() => setSoon(true)} className={`${BACK} self-stretch justify-center py-2.5`}>
+        Open your own shop
+      </button>
+      {soon && (
+        <p role="status" className="text-xs text-center m-0" style={{ color: MUTED }}>
+          Shops open soon. b reviews every shop before it goes live.
+        </p>
+      )}
+      <h2 className="text-sm font-bold text-white m-0">Departments</h2>
     </>
   );
 }
@@ -272,6 +347,8 @@ function Department({ d, query, onBack }: { d: Dept; query: string; onBack: () =
 function Store() {
   const navigate = useNavigate();
   const [dept, setDept] = useState<DeptId | null>(null);
+  const [shopId, setShopId] = useState<string | null>(null);
+  const shop = shopId ? shopById(shopId) : undefined;
   const [query, setQuery] = useState('');
   const open = DEPTS.find((d) => d.id === dept);
   const q = query.trim();
@@ -299,7 +376,7 @@ function Store() {
             <ShoppingBag size={18} style={{ color: 'var(--bw-accent)' }} aria-hidden="true" /> Store
           </h1>
           {/* Back out like every other page: to where you came from, else the Exchange (owner, 17 Oct 2026). */}
-          {!open && (
+          {!open && !shop && (
             <button
               type="button"
               onClick={() => (window.history.length > 1 ? navigate(-1) : navigate('/m/exchange'))}
@@ -319,10 +396,13 @@ function Store() {
             className="flex-1 bg-transparent border-0 outline-none text-sm text-white"
           />
         </label>
-        {open ? (
+        {shop ? (
+          <ShopPage shop={shop} onBack={() => setShopId(null)} />
+        ) : open ? (
           <Department d={open} query={q} onBack={() => setDept(null)} />
         ) : (
           <>
+            {!q && <Shops onOpen={setShopId} />}
             {shown.length ? (
               <div className="grid grid-cols-2 gap-1.5">
                 {shown.map((d) => {
