@@ -6,7 +6,7 @@ import { atLeast, type Holding } from '../chat/tokenRooms';
  * Theme packs as JSON (docs/THEME-STORE-PLAN.md step 1). A pack is the `Accent` look (accents.ts) plus who made
  * it and how it is had: `free` (apply now), `premium` (priced, not on sale yet), `holder` (unlocks while the wallet
  * holds the pack's token) or `edition` (a $99/yr custom edition). The bundled packs are expressed in this format
- * (BUNDLED_PACKS) and served read-only by site/api/themes.js from site/api/themes.json (kept equal by
+ * (BUNDLED_PACKS) and served read-only by site/api/themes.js from site/lib/themes.json (kept equal by
  * themePack.test.ts). A pack from the catalog is validated with parseThemePack before it can paint anything.
  */
 export const THEME_PACK_FORMAT = 'bwx-theme/1';
