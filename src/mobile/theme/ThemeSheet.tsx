@@ -155,6 +155,17 @@ function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNo
           Surprise me
         </button>
       </div>
+      {/* Owner 17 Oct 2026: bought themes were buried under Mono/Duo/Tri. They come first. */}
+      {editions.length > 0 && (
+        <>
+          <p className="bw-theme-group">Your themes</p>
+          <div className="bw-pack-grid" role="radiogroup" aria-label="Your themes">
+            {editions.map((a) => (
+              <PackTile key={a.id} a={a} on={current === a.id} onPick={() => pick(a.id)} />
+            ))}
+          </div>
+        </>
+      )}
       <p className="bw-theme-group">Mono</p>
       <div className="bw-pack-grid" role="radiogroup" aria-label="Mono">
         {MONO_PACKS.map((a) => (
@@ -181,16 +192,6 @@ function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNo
           <PackTile key={a.id} a={a} on={current === a.id} onPick={() => pick(a.id)} />
         ))}
       </div>
-      {editions.length > 0 && (
-        <>
-          <p className="bw-theme-group">Your editions</p>
-          <div className="bw-pack-grid" role="radiogroup" aria-label="Your editions">
-            {editions.map((a) => (
-              <PackTile key={a.id} a={a} on={current === a.id} onPick={() => pick(a.id)} />
-            ))}
-          </div>
-        </>
-      )}
       {THEME_STORE_PAID_ENABLED && (
         <p className="bw-theme-more">
           <Link to="/m/store" onClick={onClose} style={{ color: 'var(--bw-accent)' }}>
