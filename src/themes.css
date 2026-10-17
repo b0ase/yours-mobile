@@ -1380,3 +1380,45 @@ input:-webkit-autofill {
   color: #ffffff !important;
   font-weight: 700 !important;
 }
+
+/* ── VexVoid (owner, 17 Oct 2026: "buttons should be black too") ─────────────────────────────────────────
+   Accent fills (buttons, pills, send) turn black with white ink and a white hairline, so they match the
+   pack's black. The accent itself stays white, so icons, rings and highlights keep their white ink. */
+:root[data-bw-theme='vexvoid']
+  :is(
+    .bw-pill-gold,
+    .yours-sheet-primary,
+    .bw-bc-stop,
+    [style*='var(--bw-accent-hi), var(--bw-accent-lo)'],
+    [style*='var(--bw-accent-lo), var(--bw-accent-hi)'],
+    [style*='var(--bw-accent-hi) 0%, var(--bw-accent-lo)'],
+    [style*='var(--bw-accent-lo) 0%, var(--bw-accent-hi)'],
+    [style*='background: var(--bw-accent)'],
+    [style*='background: var(--bw-accent-hi)'],
+    [style*='background: var(--bw-accent-lo)'],
+    [style*='background-color: var(--bw-accent)'],
+    [style*='background-color: var(--bw-accent-hi)'],
+    [style*='background-color: var(--bw-accent-lo)'],
+    .bg-\[var\(--bw-accent\)\],
+    .bg-\[var\(--bw-accent-hi\)\],
+    .bg-\[var\(--bw-accent-lo\)\],
+    .bw-wcard-getname,
+    .askb-send,
+    .askb-bubble.user,
+    .bw-cdes-done,
+    .bw-idwarn-go,
+    .bw-mixer-base button.on,
+    .bw-sigpad-btns .is-primary,
+    .bw-wcard-unit button.is-on,
+    .bw-theme-pv-toggle
+  ) {
+  background: #000 !important;
+  color: #fff !important;
+  border: 1px solid #fff !important;
+  box-shadow: none !important;
+}
+:root[data-bw-theme='vexvoid']
+  :is(.bw-pill-gold, .yours-sheet-primary, .askb-send, [style*='background: var(--bw-accent'])
+  * {
+  color: #fff !important;
+}
