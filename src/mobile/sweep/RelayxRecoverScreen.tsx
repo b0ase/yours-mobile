@@ -33,6 +33,7 @@ const SURFACE = 'rgb(255 255 255 / 0.03)';
 
 type Phase =
   | { k: 'enter' }
+  | { k: 'saved'; result: ScanResult; at: number }
   | { k: 'scanning'; step: ScanStep | null }
   | { k: 'done'; result: ScanResult }
   | { k: 'error'; message: string };
@@ -42,23 +43,62 @@ const bsv = (sats: number) => (sats / 1e8).toLocaleString('en-US', { maximumFrac
 const pad = (n: number) => String(n).padStart(4, '0');
 
 /**
+ * The last search, kept on this phone so the gallery survives the app being closed (owner, 17 Oct 2026). Public
+ * chain facts only: the keys (wif) are stripped, so melting asks for the words again.
+ */
+const SAVED_KEY = 'bw.relayx.lastsearch.v1';
+function saveResult(r: ScanResult) {
+  try {
+    const nfts = r.nfts.filter((n) => !n.unread).map((n) => ({ ...n, wif: '' }));
+    localStorage.setItem(SAVED_KEY, JSON.stringify({ at: Date.now(), result: { ...r, nfts } }));
+  } catch {
+    // Storage full or blocked: the search still shows; it just won't survive a restart.
+  }
+}
+function loadSaved(): { result: ScanResult; at: number } | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(SAVED_KEY) ?? 'null');
+    return v?.result?.nfts?.length ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Her full NPG card. Loaded lazily and decoded off the main thread, so a gallery of 1,800 doesn't fetch them all
  * at once (owner, 17 Oct 2026: most tiles sat empty). Same 2:3 frame for every card.
  */
 function CardArt({ url, className, eager }: { url: string; className?: string; eager?: boolean }) {
   const [loaded, setLoaded] = useState(false);
+  // Only cards on or near the screen hold their picture: iOS closed the app in the background when hundreds of
+  // decoded cards sat in memory (owner, 17 Oct 2026). Far off screen the <img> goes away and memory is freed.
+  const [near, setNear] = useState(!!eager);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (eager || !ref.current || typeof IntersectionObserver === 'undefined') return setNear(true);
+    const io = new IntersectionObserver(
+      ([e]) => {
+        setNear(e.isIntersecting);
+        if (!e.isIntersecting) setLoaded(false);
+      },
+      { rootMargin: '1200px 0px' },
+    );
+    io.observe(ref.current);
+    return () => io.disconnect();
+  }, [eager]);
   return (
-    <div className={`relative overflow-hidden ${className ?? ''}`}>
+    <div ref={ref} className={`relative overflow-hidden ${className ?? ''}`}>
       {!loaded && <div aria-hidden="true" className="absolute inset-0 animate-pulse" style={{ background: SURFACE }} />}
-      <img
-        src={url}
-        alt=""
-        loading={eager ? 'eager' : 'lazy'}
-        decoding="async"
-        onLoad={() => setLoaded(true)}
-        className="absolute inset-0 h-full w-full object-contain transition-opacity duration-200 ease-out"
-        style={{ opacity: loaded ? 1 : 0 }}
-      />
+      {near && (
+        <img
+          src={url}
+          alt=""
+          decoding="async"
+          onLoad={() => setLoaded(true)}
+          className="absolute inset-0 h-full w-full object-contain transition-opacity duration-200 ease-out"
+          style={{ opacity: loaded ? 1 : 0 }}
+        />
+      )}
     </div>
   );
 }
@@ -169,7 +209,7 @@ function Row({ f, onOpen }: { f: Found; onOpen: () => void }) {
   );
 }
 
-function Detail({ f, onClose }: { f: Found; onClose: () => void }) {
+function Detail({ f, onClose, onSearch }: { f: Found; onClose: () => void; onSearch: () => void }) {
   const tx = f.origin ? splitOutpoint(f.origin).txid : '';
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -243,7 +283,17 @@ function Detail({ f, onClose }: { f: Found; onClose: () => void }) {
             )}
           </span>
         </div>
-        {f.n !== undefined ? (
+        {f.n !== undefined && !f.wif ? (
+          // From the saved search: no keys are kept, so melting needs the words again.
+          <button
+            type="button"
+            onClick={onSearch}
+            className="h-12 w-full rounded-xl border-0 text-[15px] font-semibold cursor-pointer"
+            style={{ background: BLUE, color: '#fff' }}
+          >
+            Enter your words to melt her
+          </button>
+        ) : f.n !== undefined ? (
           <NpgMelt jig={f} wif={f.wif} art={f.art} size="lg" />
         ) : (
           <p
@@ -261,7 +311,10 @@ function Detail({ f, onClose }: { f: Found; onClose: () => void }) {
 
 export function RelayxRecoverScreen({ onBack }: { onBack: () => void }) {
   const [words, setWords] = useState('');
-  const [phase, setPhase] = useState<Phase>({ k: 'enter' });
+  const [phase, setPhase] = useState<Phase>(() => {
+    const s = loadSaved();
+    return s ? { k: 'saved', ...s } : { k: 'enter' };
+  });
   const [open, setOpen] = useState<Found | null>(null);
   const [sweep, setSweep] = useState(false);
   const [retrying, setRetrying] = useState(false);
@@ -288,7 +341,10 @@ export function RelayxRecoverScreen({ onBack }: { onBack: () => void }) {
       } catch {
         store = null;
       }
-      const reader = createChainReader({ cache: createTxCache(store) });
+      // Raw transactions stay in memory only. Stored, they filled the ~5 MB the phone allows and the per-NFT memo
+      // (createJigMemo, what makes a second search instant) failed to save (owner, 17 Oct 2026). Clear old ones.
+      if (store) for (const k of Object.keys(store)) if (k.startsWith('bw.relayx.tx')) store.removeItem(k);
+      const reader = createChainReader({ cache: createTxCache(null) });
       const maps = await loadNpgMaps();
       ctx.current = { reader, maps };
       setLive([]);
@@ -307,6 +363,7 @@ export function RelayxRecoverScreen({ onBack }: { onBack: () => void }) {
         createJigMemo(store),
       );
       if (cancel.current.cancelled) return setPhase({ k: 'enter' });
+      saveResult(result);
       setPhase({ k: 'done', result });
     } catch (e) {
       if (!cancel.current.cancelled) setPhase({ k: 'error', message: (e as Error).message });
@@ -321,7 +378,7 @@ export function RelayxRecoverScreen({ onBack }: { onBack: () => void }) {
     setRetrying(false);
   };
 
-  const shown = phase.k === 'done' ? phase.result.nfts : phase.k === 'scanning' ? live : null;
+  const shown = phase.k === 'done' || phase.k === 'saved' ? phase.result.nfts : phase.k === 'scanning' ? live : null;
   const groups = useMemo(() => (shown ? groupFound(shown) : []), [shown]);
   const total = phase.k === 'done' ? phase.result.nfts.filter((n) => !n.unread).length : 0;
   const unread = phase.k === 'done' ? phase.result.nfts.filter((n) => n.unread).length : 0;
@@ -380,7 +437,7 @@ export function RelayxRecoverScreen({ onBack }: { onBack: () => void }) {
 
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-[560px] flex-col gap-7 px-4 pb-28 pt-6">
-          <Header compact={phase.k === 'done' || phase.k === 'scanning'} />
+          <Header compact={phase.k !== 'enter' && phase.k !== 'error'} />
 
           {(phase.k === 'enter' || phase.k === 'error') && (
             <div className="flex flex-col gap-3">
@@ -492,6 +549,32 @@ export function RelayxRecoverScreen({ onBack }: { onBack: () => void }) {
             </div>
           )}
 
+          {phase.k === 'saved' && (
+            <div className="flex flex-col gap-7">
+              <div className="flex flex-col gap-1">
+                <span
+                  className="text-[44px] font-semibold leading-none tabular-nums tracking-[-0.03em]"
+                  style={{ color: INK }}
+                >
+                  {phase.result.nfts.length}
+                </span>
+                <span className="text-[14px]" style={{ color: MUTED }}>
+                  RelayX NFTs from your last search,{' '}
+                  {new Date(phase.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPhase({ k: 'enter' })}
+                  className="mt-2 self-start rounded-lg border-0 bg-transparent px-0 text-[14px] font-medium cursor-pointer hover:underline"
+                  style={{ color: BLUE }}
+                >
+                  Search again
+                </button>
+              </div>
+              {gallery}
+            </div>
+          )}
+
           {phase.k === 'done' && (
             <div className="flex flex-col gap-7">
               {total > 0 && (
@@ -572,7 +655,16 @@ export function RelayxRecoverScreen({ onBack }: { onBack: () => void }) {
           )}
         </div>
       </div>
-      {open && <Detail f={open} onClose={() => setOpen(null)} />}
+      {open && (
+        <Detail
+          f={open}
+          onClose={() => setOpen(null)}
+          onSearch={() => {
+            setOpen(null);
+            setPhase({ k: 'enter' });
+          }}
+        />
+      )}
     </div>,
     document.body,
   );
