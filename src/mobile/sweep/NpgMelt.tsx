@@ -231,8 +231,12 @@ export function NpgMelt({
 
         {q && (
           <ul className="m-0 p-0 list-none flex flex-col gap-1.5 text-xs text-white">
+            <li className="text-[13px] leading-snug">
+              <b>What happens:</b> her old RelayX NFT (a Run token) is destroyed, and each of her parts is minted fresh
+              as a <b>1Sat Ordinal</b>, the NFT standard bWalletX and today&apos;s BSV wallets use.
+            </li>
             <li style={{ color: '#FF8A80' }}>
-              <b>This NFT will be destroyed</b> (burned on chain). It can't be undone.
+              <b>The RelayX NFT will be destroyed</b> (burned on chain). It can&apos;t be undone.
             </li>
             {q.note && <li style={{ color: '#F7A8CF' }}>{q.note}</li>}
             <li>Melt fee: free</li>
@@ -240,7 +244,7 @@ export function NpgMelt({
               Minting and network fees: {q.fee_sats.toLocaleString()} sats
               {usd(q.fee_sats) ? ` (${usd(q.fee_sats)})` : ''}, plus a few sats for the network, at cost
             </li>
-            <li>The cards arrive in Collectibles.</li>
+            <li>The new 1Sat Ordinals arrive in Collectibles.</li>
           </ul>
         )}
 
@@ -262,11 +266,17 @@ export function NpgMelt({
                 ? 'Your element cards are in Collectibles.'
                 : 'Burned. NPG is still minting: check Collectibles in a few minutes.'}
             </p>
-            {p.s.elements?.map((e) => (
-              <span key={e.outpoint} className="text-[11px]" style={{ color: '#F7A8CF' }}>
-                {e.file.split('/').pop()}
-              </span>
-            ))}
+            {!!p.s.elements?.length && (
+              <p className="m-0 text-[12px]" style={{ color: '#F7A8CF' }}>
+                {/* Labels, not raw file names (owner, 17 Oct 2026). */}
+                Minted as 1Sat Ordinals:{' '}
+                {p.s.elements
+                  .map((e) =>
+                    e.outpoint && /\.webp$/.test(e.file) ? 'her avatar badge' : elementLabel({ file: e.file }),
+                  )
+                  .join(' · ')}
+              </p>
+            )}
             {p.s.status === 'done' && parts.avatar && (
               <button
                 type="button"
