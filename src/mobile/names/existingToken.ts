@@ -57,6 +57,8 @@ export function matchExistingToken(handle: string, tokens: readonly TokenRef[]):
 export type ExistingChoice =
   | { kind: 'import'; token: TokenRef }
   | { kind: 'bsv20-taken'; tick: string }
+  /** This account holds a token with the ticker but didn't issue it from any key it has: no mint offered. */
+  | { kind: 'held'; token: TokenRef }
   | { kind: 'mint-labelled'; others: number }
   | { kind: 'mint' };
 
@@ -75,16 +77,16 @@ export function decideExisting(input: {
     input.controlled.filter((t) => t.issued),
   );
   if (mine) return { kind: 'import', token: mine };
-  // Held but not issued here: someone else's token with this ticker.
-  const heldOthers = matchExistingToken(
+  // Held but not issued from a key here: never offer a second token with the same ticker (owner 17 Oct:
+  // onboarding offered a 1B $NINJAPUNKGIRLS to the wallet holding the original). Add the issuing key instead.
+  const held = matchExistingToken(
     input.handle,
     input.controlled.filter((t) => !t.issued),
-  )
-    ? 1
-    : 0;
+  );
+  if (held) return { kind: 'held', token: held };
   const tick = personalTicker(input.handle) ?? input.handle;
   if (input.bsv20Tick) return { kind: 'bsv20-taken', tick };
-  const others = Math.max(input.othersBsv21, heldOthers);
+  const others = input.othersBsv21;
   if (others > 0) return { kind: 'mint-labelled', others };
   return { kind: 'mint' };
 }
@@ -103,6 +105,14 @@ export const bsv20TakenError = (tick: string) =>
   `${tick} is already a BSV-20 token, and BSV-20 names are unique, so it can't be minted again. ` +
   `If you issued it, add the key it was issued from (Settings \u203a Add account \u203a Restore with private key) ` +
   `and its room opens from that account with one signature, nothing minted. Otherwise choose a different handle.`;
+
+export const heldTokenNote = (sym: string) => {
+  const t = clean(sym);
+  return (
+    `You already hold $${t}, so a second $${t} token isn't offered. If you issued it, add the key it was issued ` +
+    `from (Settings \u203a Add account \u203a Restore with private key) and its room opens with one signature, nothing minted.`
+  );
+};
 
 /** Tokens this wallet issued (own deploys) or holds, read from the wallet. */
 export async function controlledTokens(ctx: OneSatContext): Promise<TokenRef[]> {

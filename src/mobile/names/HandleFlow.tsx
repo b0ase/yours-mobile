@@ -47,7 +47,13 @@ import { useTheme } from '../../hooks/useTheme';
 import { handleTitle, suggestHandle } from './handlePrompt';
 import { useBackClose } from '../backStack';
 import { moneyNow } from '../money/money';
-import { bsv20TakenError, duplicateNote, personalTokenLabel, type ExistingChoice } from './existingToken';
+import {
+  bsv20TakenError,
+  duplicateNote,
+  heldTokenNote,
+  personalTokenLabel,
+  type ExistingChoice,
+} from './existingToken';
 
 /**
  * "Choose your handle": a full-screen sheet shown after create / restore (HandleOnboarding) and
@@ -517,6 +523,11 @@ export const HandleFlow = ({
                 {withToken && claimed && choice?.kind === 'bsv20-taken' && (
                   <p className="text-[11px]" style={{ color: '#ff4444' }}>
                     {bsv20TakenError(choice.tick)}
+                  </p>
+                )}
+                {withToken && claimed && choice?.kind === 'held' && (
+                  <p className="text-[11px]" style={{ color: GOLD }}>
+                    {heldTokenNote(choice.token.sym)}
                   </p>
                 )}
                 {withToken && claimed && choice?.kind === 'mint-labelled' && (
