@@ -523,7 +523,7 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
       const wif = found?.keyFor.get(o.outpoint);
       if (!wif) return [];
       if (!addr.has(wif)) addr.set(wif, PrivateKey.fromWif(wif).toAddress());
-      return [{ outpoint: o.outpoint, address: addr.get(wif)! }];
+      return [{ outpoint: o.outpoint, address: addr.get(wif)!, wif }];
     });
   }, [found]);
   const fx = latestUsdPerGbp()?.rate;

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Transaction } from '@bsv/sdk';
 import { identifyJig, loadNpgMaps, NPG_CUTOUT_INDEX, type IdentifiedJig } from '../../sweep/runIdentify';
 import { mapLimit } from './speed';
+import { NpgMelt } from './NpgMelt';
 
 /**
  * RelayX NFT Collection Importer, phase a (owner, 17 Oct 2026): the Run NFTs found at the swept wallet's
@@ -9,7 +10,8 @@ import { mapLimit } from './speed';
  * ("NPG #0417" with her cut-out) or its class. Nothing is moved: bringing them into bWalletX waits on the
  * owner's choice of scheme.
  */
-type Held = { outpoint: string; address: string };
+/** wif: the RelayX key holding it, kept in memory for this sweep session only (melt signs with it, NpgMelt). */
+type Held = { outpoint: string; address: string; wif?: string };
 type BBox = Record<string, [number, number, number, number]>;
 
 const THUMB = 56;
@@ -39,7 +41,7 @@ function Cutout({ url, box }: { url: string; box?: [number, number, number, numb
 }
 
 export function RelayxJigs({ held, getHex }: { held: Held[]; getHex: (txid: string) => Promise<string> }) {
-  const [found, setFound] = useState<(IdentifiedJig & { address: string })[] | null>(null);
+  const [found, setFound] = useState<(IdentifiedJig & { address: string; wif?: string })[] | null>(null);
   const [bbox, setBbox] = useState<BBox>({});
   const [done, setDone] = useState(0);
   const key = held.map((h) => h.outpoint).join();
@@ -66,7 +68,7 @@ export function RelayxJigs({ held, getHex }: { held: Held[]; getHex: (txid: stri
       const out = await mapLimit(held, 3, async (h) => {
         const j = await identifyJig(h.outpoint, getTx, maps);
         if (live) setDone((d) => d + 1);
-        return { ...j, address: h.address };
+        return { ...j, address: h.address, wif: h.wif };
       });
       if (live) setFound(out.sort((a, b) => (a.n ?? 1e9) - (b.n ?? 1e9) || a.title.localeCompare(b.title)));
     })();
@@ -84,7 +86,7 @@ export function RelayxJigs({ held, getHex }: { held: Held[]; getHex: (txid: stri
         <span className="text-sm font-bold text-white">RelayX NFT Collection Importer</span>
         <span className="text-[11px]" style={{ color: '#B6C8F5' }}>
           {found
-            ? `${found.length} NFT${found.length === 1 ? '' : 's'} found. Read-only: nothing is moved.`
+            ? `${found.length} NFT${found.length === 1 ? '' : 's'} found. Nothing moves unless you melt one.`
             : `Reading your RelayX NFTs: ${done} of ${held.length}`}
         </span>
       </div>
@@ -115,11 +117,18 @@ export function RelayxJigs({ held, getHex }: { held: Held[]; getHex: (txid: stri
               Held at {short(j.address)}
             </span>
           </div>
+          {/* Melt only what the NPG maps identify (owner 17 Oct 2026); everything else stays read-only. */}
+          {j.n !== undefined && j.wif && (
+            <span className="ml-auto">
+              <NpgMelt jig={j} wif={j.wif} art={j.art} />
+            </span>
+          )}
         </div>
       ))}
       {found && (
         <p className="m-0 text-[11px]" style={{ color: '#B6C8F5' }}>
-          Bring into bWalletX: coming soon. They stay safe where they are until then.
+          NPGs can be melted into element cards for the NPG games. Bringing other NFTs into bWalletX: coming soon. They
+          stay safe where they are until then.
         </p>
       )}
     </div>
