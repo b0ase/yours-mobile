@@ -18,7 +18,7 @@ const short = (k: string) => `${k.slice(0, 6)}…${k.slice(-4)}`;
  * this wallet's release and the recipient's accept. We can't move it for you, and a lost key can't be recovered.
  */
 export function NameHandover({ names, onChanged }: { names: WalletName[]; onChanged: () => void }) {
-  const { apiContext } = useServiceContext();
+  const { apiContext, chromeStorageService } = useServiceContext();
   const [incoming, setIncoming] = useState<Handover[]>([]);
   const [alias, setAlias] = useState('');
   const [to, setTo] = useState('');
@@ -26,6 +26,12 @@ export function NameHandover({ names, onChanged }: { names: WalletName[]; onChan
   const [busy, setBusy] = useState(false);
   const [released, setReleased] = useState('');
   const plain = names.filter((n) => n.kind === 'plain').map((n) => n.paymail.split('@')[0]);
+  // This wallet's other accounts, so moving a name between your own accounts needs no pasted key.
+  const current = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress;
+  const mine = chromeStorageService
+    .getAllAccounts()
+    .filter((a) => a.addresses?.identityAddress !== current && a.pubKeys?.identityPubKey)
+    .map((a) => ({ name: a.name || short(a.pubKeys.identityPubKey), key: a.pubKeys.identityPubKey }));
 
   useEffect(() => {
     let live = true;
@@ -88,6 +94,25 @@ export function NameHandover({ names, onChanged }: { names: WalletName[]; onChan
             Hand a name to another wallet. It moves only when that wallet accepts. We can&apos;t move names for you, and
             a lost key can&apos;t be recovered.
           </p>
+          {mine.length > 0 && (
+            <div className="flex flex-wrap gap-1.5" aria-label="Your other accounts">
+              {mine.map((a) => (
+                <button
+                  key={a.key}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setTo(a.key)}
+                  className="rounded-full px-2.5 py-1 text-xs bg-[var(--bw-surface)] border-0"
+                  style={{
+                    color: to === a.key ? 'var(--bw-on-accent, #010101)' : '#fff',
+                    background: to === a.key ? 'var(--bw-accent)' : undefined,
+                  }}
+                >
+                  {a.name}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="flex flex-wrap gap-2">
             {plain.length > 1 && (
               <select
@@ -103,7 +128,7 @@ export function NameHandover({ names, onChanged }: { names: WalletName[]; onChan
               </select>
             )}
             <input
-              value={to}
+              value={mine.find((a) => a.key === to)?.name ?? to}
               onChange={(e) => setTo(e.target.value)}
               placeholder="$name, name@domain or identity key"
               aria-label="Hand over to"
