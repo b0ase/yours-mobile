@@ -104,6 +104,7 @@ import { IS_EXTENSION } from '../mobile/extension';
 import { useTokenRows } from '../mobile/wallet/tokenRows';
 import { openTicketRoomInChat } from '../mobile/tickets/ticketRoom';
 import { asMenuItem } from '../mobile/tabs/tabs';
+import { describeWalletError } from '../brand/walletError';
 import { publishBalance } from '../mobile/wallet/balanceStore';
 import {
   BALANCE_TIMEOUT_MS,
@@ -1043,11 +1044,11 @@ export const BsvWallet = () => {
           } catch (err) {
             console.warn('[BsvWallet] OrdLock auto-cancel before sendAll failed', err);
           }
-          sendRes = await sendAllBsv.execute(apiContext, {
+          sendRes = await sendAllBsv.execute(sendContext(), {
             destination,
           });
         } else {
-          sendRes = await sendBsv.execute(apiContext, { requests: sendRecipients });
+          sendRes = await sendBsv.execute(sendContext(), { requests: sendRecipients });
         }
 
         if (!sendRes.txid || sendRes.error) {
@@ -1073,6 +1074,29 @@ export const BsvWallet = () => {
         }
       },
     });
+  };
+
+  // @1sat/actions keeps only error.message, which drops WERR_REVIEW_ACTIONS' per-tx status (owner's $1 send, 17 Oct:
+  // "Undelayed createAction or signAction results require review" and nothing else). Put the status into the message.
+  const sendContext = () => {
+    const wallet = apiContext.wallet;
+    const explain =
+      <A extends unknown[], R>(fn: (...a: A) => Promise<R>) =>
+      async (...a: A) => {
+        try {
+          return await fn(...a);
+        } catch (e) {
+          if (e instanceof Error) e.message = describeWalletError(e);
+          throw e;
+        }
+      };
+    return {
+      ...apiContext,
+      wallet: Object.assign(Object.create(wallet), {
+        createAction: explain(wallet.createAction.bind(wallet)),
+        signAction: explain(wallet.signAction.bind(wallet)),
+      }),
+    };
   };
 
   const fillInputWithAllBsv = () => {
