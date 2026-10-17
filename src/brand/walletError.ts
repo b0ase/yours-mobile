@@ -35,5 +35,8 @@ export function describeWalletError(error: unknown): string {
   if (!parts.length)
     for (const s of e.sendWithResults ?? [])
       if (s?.status && s.status !== 'unproven' && s.status !== 'sending') parts.push(s.status);
+  // The rejected txid, short, so a report can be traced on the chain (owner's $1 send, 17 Oct 2026).
+  const txid = (e as { txid?: string }).txid ?? e.reviewActionResults?.find((r) => r?.txid)?.txid;
+  if (parts.length && txid && !e.message.includes(txid.slice(0, 12))) parts.push(`tx ${txid.slice(0, 12)}…`);
   return parts.length ? `${e.message} ${parts.join('; ')}` : e.message;
 }

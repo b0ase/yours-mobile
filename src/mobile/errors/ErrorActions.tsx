@@ -25,7 +25,8 @@ export const ErrorActions = ({
   // b once told the owner a broadcast refusal was a one-click-pay limit (17 Oct 2026). The ref comes back here.
   // Plain useContext: error UI also renders outside the provider (boot errors), where it falls back to Ask b.
   const apiContext = useContext(ServiceContext)?.apiContext;
-  const [sent, setSent] = useState<'sending' | string | null>(null);
+  // null → idle, 'sending' → in flight, { ref } → filed (ref like "F-8", may be empty).
+  const [sent, setSent] = useState<null | 'sending' | { ref: string }>(null);
   const report = async () => {
     if (sent) return;
     if (!apiContext) {
@@ -44,9 +45,9 @@ export const ErrorActions = ({
         });
     try {
       const r = await reportToB(call, text);
-      // Owner 17 Oct: the button must not just vanish; say it was reported, then close.
-      setSent(`Reported to b${r.ref ? ` (${r.ref})` : ''}. Sorry for the inconvenience, we're looking into it.`);
-      setTimeout(() => onAsk?.(), 6000);
+      // Owner 17 Oct: never just vanish. Confirm in its own full-width row, then close.
+      setSent({ ref: (r.ref ?? '').replace(/^#/, '') });
+      setTimeout(() => onAsk?.(), 8000);
     } catch {
       setSent(null);
       onAsk?.();
@@ -55,6 +56,16 @@ export const ErrorActions = ({
   };
   const btn =
     'shrink-0 inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold border-0 cursor-pointer select-none';
+  if (sent && sent !== 'sending')
+    return (
+      <span role="status" className="basis-full flex items-start gap-2 rounded-lg px-3 py-2" style={{ background: color + '1a' }}>
+        <Check size={16} style={{ color, flexShrink: 0, marginTop: 1 }} />
+        <span className="flex flex-col gap-0.5 text-xs leading-snug" style={{ color }}>
+          <span className="font-semibold">Reported to b{sent.ref ? ` · Ref ${sent.ref}` : ''}</span>
+          <span>Sorry about this. We're looking into it.</span>
+        </span>
+      </span>
+    );
   return (
     <span className="inline-flex items-center gap-1.5 shrink-0">
       <button
@@ -77,10 +88,11 @@ export const ErrorActions = ({
         aria-label="Report this error to b"
         className={btn}
         style={{ background: '#F5C542', color: '#0B0A08' }}
+        disabled={sent === 'sending'}
         onClick={() => report()}
       >
         <img src={bGlyph} alt="" width={12} height={12} />
-        {sent === 'sending' ? 'Sending…' : (sent ?? 'Report to b')}
+        {sent === 'sending' ? 'Reporting…' : 'Report to b'}
       </button>
     </span>
   );

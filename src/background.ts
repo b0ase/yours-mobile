@@ -16,6 +16,7 @@ import { RequestParams, ResponseEventDetail, YoursEventName } from './inject';
 import { recordCall, recordPayment, requestedSats, updateConnectionLog } from './mobile/wallet/connectionLog';
 import { CWIEventName } from './cwi';
 import { describeWalletError } from './brand/walletError';
+import { healInvalidSend, healMessage, isInvalidTxReview, type HealReport } from './services/invalidSendHeal';
 import type {
   ListOutputsArgs,
   RelinquishOutputArgs,
@@ -118,6 +119,30 @@ const isInServiceWorker = self?.document === undefined;
 
 // Account context - null if locked or not initialized
 let accountContext: AccountContext | null = null;
+
+/** invalidSendHeal against this account's storage and the 1sat spend index. Never throws. */
+async function healRejectedInputs(ctx: AccountContext, error: unknown): Promise<HealReport | null> {
+  const { account } = chromeStorageService.getCurrentAccountObject();
+  const identityKey = account?.pubKeys?.identityPubKey || '';
+  const txo = (ctx.syncContext.services as unknown as { txo?: { getSpend: (o: string) => Promise<string | null> } }).txo;
+  if (!identityKey || !txo) return null;
+  try {
+    return await healInvalidSend(error, (o) => txo.getSpend(o), {
+      markSpent: (txid, vout) =>
+        ctx.storage.runAsStorageProvider(async (sp) => {
+          const user = (await sp.findUsers({ partial: { identityKey } }))[0];
+          if (!user) return 0;
+          let n = 0;
+          for (const o of await sp.findOutputs({ partial: { userId: user.userId, txid, vout, spendable: true } }))
+            n += await sp.updateOutput(o.outputId, { spendable: false });
+          return n;
+        }),
+    });
+  } catch (err) {
+    console.error('[createAction] invalidTx heal failed:', err);
+    return null;
+  }
+}
 // Set while wallet is reinitializing (e.g. account switch) to prevent
 // ensureWallet from launching a popup during the transition.
 let reinitPromise: Promise<WalletInterface | null> | null = null;
@@ -3812,10 +3837,13 @@ if (isInServiceWorker) {
       if (errorStack) console.error('[createAction] Stack:', errorStack);
       const friendly = fundingSnap && isInsufficientFunds(error) ? insufficientFundsMessage(error, fundingSnap) : null;
       if (friendly) console.error('[createAction] Funding:', friendly);
+      // Rejected as invalid: clear the inputs the chain proves spent, or the retry picks them again (invalidSendHeal.ts).
+      const heal = isInvalidTxReview(error) && accountContext ? await healRejectedInputs(accountContext, error) : null;
+      if (heal) console.warn('[createAction] invalidTx heal:', heal);
       sendResponse({
         type: CWIEventName.CREATE_ACTION,
         success: false,
-        error: friendly ?? errorMessage,
+        error: (friendly ?? errorMessage) + (heal ? healMessage(heal) : ''),
       });
     }
     return true;
