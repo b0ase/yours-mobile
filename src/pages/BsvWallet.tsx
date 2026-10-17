@@ -198,6 +198,7 @@ export const BsvWallet = () => {
   const [showBackupPromo, setShowBackupPromo] = useState(false);
   const [keysAlreadyBackedUp, setKeysAlreadyBackedUp] = useState(false);
   const [showMigrationBanner, setShowMigrationBanner] = useState(false);
+  const [legacyLeft, setLegacyLeft] = useState(0);
   // Cache first (owner round 6): last token balances at once, refreshed in the background.
   const [bsv21s, setBsv21s] = useState<Bsv21Balance[]>(() => {
     const id = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress;
@@ -484,7 +485,11 @@ export const BsvWallet = () => {
       const hasRemotes = (acct?.storageConfig?.remotes?.length ?? 0) > 0;
       setKeysAlreadyBackedUp(!!acct?.settings?.keysBackedUp);
       setShowBackupPromo(!dismissed && !hasRemotes);
-      setShowMigrationBanner(!acct?.settings?.sweepStarted && !acct?.settings?.sweepCompleted);
+      // Stays until a finished sweep leaves nothing behind (owner 17 Oct: it vanished with 62 ordinals left).
+      // Sweeps finished before 5.2.30 never counted what was left, so an unknown count shows the card too.
+      const left = acct?.settings?.legacyLeft;
+      setLegacyLeft(left ?? 0);
+      setShowMigrationBanner(!acct?.settings?.sweepCompleted || left === undefined || left > 0);
       if (obj?.selectedAccount) {
         await getAndSetAccountAndBsv21s();
       }
@@ -1731,7 +1736,18 @@ export const BsvWallet = () => {
                 className="text-xs leading-snug min-w-0 overflow-hidden text-ellipsis whitespace-nowrap"
                 style={{ color: '#FDB022' }}
               >
-                <span style={{ fontWeight: 600 }}>Missing assets?</span> Open migration tool
+                {legacyLeft > 0 ? (
+                  <>
+                    <span style={{ fontWeight: 600 }}>
+                      {legacyLeft} item{legacyLeft === 1 ? '' : 's'} still at your old address.
+                    </span>{' '}
+                    Bring them in
+                  </>
+                ) : (
+                  <>
+                    <span style={{ fontWeight: 600 }}>Missing assets?</span> Open migration tool
+                  </>
+                )}
               </span>
               <ArrowRight size={14} style={{ color: '#FDB022' }} className="shrink-0" />
             </motion.button>

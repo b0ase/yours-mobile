@@ -326,7 +326,25 @@ export const SweepMigration = () => {
   };
 
   const handleDone = async () => {
-    await persistSweepFlag('sweepCompleted');
+    // What's still at the legacy addresses, so the home "Missing assets?" card stays until it's all in.
+    const ok = (type: SweepTxResult['type']) => sweepResults.filter((r) => r.type === type && r.txid && !r.error);
+    const found =
+      (assets.funding.length > 0 ? 1 : 0) +
+      assets.ordinals.length +
+      assets.bsv21Tokens.length +
+      assets.bsv20Tokens.length +
+      assets.locked.length;
+    const swept =
+      (ok('bsv').length ? 1 : 0) + (ok('ordinals').length ? selection.selectedOrdinals.size : 0) + ok('bsv21').length;
+    const { account } = chromeStorageService.getCurrentAccountObject();
+    if (account) {
+      await chromeStorageService.updateNested('accounts', {
+        [account.addresses.identityAddress]: {
+          ...account,
+          settings: { ...account.settings, sweepCompleted: true, legacyLeft: Math.max(0, found - swept) },
+        },
+      });
+    }
     navigate('/bsv-wallet');
   };
 

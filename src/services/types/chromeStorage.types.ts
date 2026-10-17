@@ -40,6 +40,8 @@ export type Settings = {
    * least once for this account (Done or Skip).
    */
   sweepCompleted?: boolean;
+  /** Items still at the legacy addresses after the last sweep; the home migration card stays while > 0. */
+  legacyLeft?: number;
   /**
    * Lock BSV plans (names, modes, dollar targets: src/mobile/locks/schedule.ts LockPlan). Mirrored here so
    * the encrypted backup file carries them and a restore brings them back. The coins never depend on them.
