@@ -1,0 +1,245 @@
+import { BSM, OP, P2PKH, PrivateKey, Script, Transaction, Utils } from '@bsv/sdk';
+import { deriveDepositAddresses, type OneSatContext } from '@1sat/actions';
+import { splitOutpoint } from './runIdentify';
+
+/**
+ * Melt an NPG RelayX jig into its element cards (owner, 17 Oct 2026: burn on chain, melt fee 0, the holder
+ * pays network and mint fees at cost). Server side: ninjapunkgirls.com, spec ninja-punk-girls-com
+ * docs/MELT-API.md. The wallet:
+ *  1. asks for a quote, naming where the element cards go (the wallet's first deposit address, which address
+ *     sync reads, so they land in Collectibles);
+ *  2. builds ONE transaction, never broadcast here (noSend): input 0 = the jig, signed on this device with the
+ *     RelayX key that holds it; output 0 = the burn script, rebuilt byte for byte and compared with the quote;
+ *     output 1 = fee_sats to fee_to when there is a fee; the wallet funds the rest;
+ *  3. proves control with a BSM signature over the quote's challenge, and commits the EF transaction;
+ *  4. polls status while NPG mints the cards. If the server refuses, the unsent action is aborted so its
+ *     inputs are free again.
+ */
+export const NPG_MELT_API = 'https://www.ninjapunkgirls.com/api/melt';
+
+export type MeltElement = { file: string; hue?: number; slot: string };
+export type MeltQuote = {
+  quote_id: string;
+  expires: string;
+  series: number;
+  n: number;
+  name?: string;
+  elements: MeltElement[];
+  note: string | null;
+  challenge: string;
+  burn_script_hex: string;
+  fee_sats: number;
+  fee_to: string | null;
+  mint: { count: number; sats_each: number };
+};
+export type MeltStatus = {
+  status: 'quoted' | 'burned' | 'minting' | 'done' | 'failed';
+  burn_txid?: string;
+  elements?: { file: string; outpoint: string }[];
+  error?: string;
+};
+
+/** The quote endpoint isn't there yet: the sheet says "Melting opens soon", never a pretend melt. */
+export class MeltNotOpenError extends Error {
+  constructor() {
+    super('Melting opens soon.');
+  }
+}
+
+/** Element art: paths are relative to the NPG assets base unless already absolute. */
+export const NPG_ASSETS = 'https://www.ninjapunkgirls.com/assets/';
+export const elementUrl = (file: string) => (/^https?:\/\//.test(file) ? file : NPG_ASSETS + file.replace(/^\//, ''));
+
+/** The avatar badge rides along with the cards (slot "avatar"); shown apart on the sheet. Absent for S1 so far. */
+export const splitAvatar = (q: Pick<MeltQuote, 'elements'>) => ({
+  cards: q.elements.filter((e) => e.slot !== 'avatar'),
+  avatar: q.elements.find((e) => e.slot === 'avatar'),
+});
+
+export const meltChallenge = (quoteId: string, jigLocation: string) => `npg-melt|v1|${quoteId}|${jigLocation}`;
+
+/** OP_FALSE OP_RETURN "npg-melt" <origin ascii> <quote_id ascii>, 0 sats. */
+export function burnScript(origin: string, quoteId: string): Script {
+  const push = (s: string) => Utils.toArray(s, 'utf8');
+  return new Script()
+    .writeOpCode(OP.OP_FALSE)
+    .writeOpCode(OP.OP_RETURN)
+    .writeBin(push('npg-melt'))
+    .writeBin(push(origin))
+    .writeBin(push(quoteId));
+}
+
+/** Refuse a quote whose challenge or burn output isn't exactly what this jig and quote id should give. */
+export function checkQuote(q: MeltQuote, jigLocation: string, jigOrigin: string): string | null {
+  if (!q?.quote_id || !/^[\w-]{4,80}$/.test(q.quote_id)) return 'The quote has no valid id.';
+  if (q.challenge !== meltChallenge(q.quote_id, jigLocation)) return "The quote's challenge doesn't match this NFT.";
+  if (q.burn_script_hex.toLowerCase() !== burnScript(jigOrigin, q.quote_id).toHex())
+    return "The quote's burn output isn't the agreed one.";
+  if (!Number.isInteger(q.fee_sats) || q.fee_sats < 0) return 'The quote has an invalid fee.';
+  if (q.fee_sats > 0) {
+    try {
+      new P2PKH().lock(q.fee_to ?? '');
+    } catch {
+      return 'The quote has no valid fee address.';
+    }
+  }
+  if (!Array.isArray(q.elements) || !q.elements.length) return 'The quote lists no element cards.';
+  return null;
+}
+
+/** BSM signature (base64) over the challenge with the key of the jig's output. The key stays on this device. */
+export const signChallenge = (challenge: string, wif: string): string =>
+  BSM.sign(Utils.toArray(challenge, 'utf8'), PrivateKey.fromWif(wif), 'base64') as string;
+
+/** Where the element cards go: deposit address 0, which the wallet's address sync reads (ordinals included). */
+export async function recipientPubkey(ctx: OneSatContext): Promise<string> {
+  const { derivations } = await deriveDepositAddresses.execute(ctx, { count: 1 });
+  const pk = derivations?.[0]?.publicKey;
+  if (!pk) throw new Error("Couldn't derive where your element cards go.");
+  return pk;
+}
+
+/** A refusal the server answered with (4xx): nothing was broadcast, so the wallet's inputs can be freed. */
+export class MeltRefusedError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+type Fetch = typeof fetch;
+const post = async (f: Fetch, path: string, body: unknown) => {
+  const r = await f(`${NPG_MELT_API}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (r.status === 404 || r.status === 405 || r.status === 501) throw new MeltNotOpenError();
+  const j = await r.json().catch(() => ({}));
+  const msg = typeof j?.error === 'string' ? j.error : `The NPG melt service said ${r.status}.`;
+  // Only a 4xx is a clean refusal. A 5xx or a dropped connection may have broadcast already: never free inputs then.
+  if (r.status >= 400 && r.status < 500) throw new MeltRefusedError(msg, r.status);
+  if (!r.ok) throw new Error(msg);
+  return j;
+};
+
+export const getQuote = (
+  f: Fetch,
+  body: { jig_location: string; jig_origin: string; recipient_pubkey: string },
+): Promise<MeltQuote> => post(f, '/quote', body);
+
+export const commitMelt = (
+  f: Fetch,
+  body: { quote_id: string; rawtx_ef: string; signature: string },
+): Promise<MeltStatus> => post(f, '/commit', body);
+
+export async function meltStatus(f: Fetch, quoteId: string): Promise<MeltStatus> {
+  const r = await f(`${NPG_MELT_API}/status/${encodeURIComponent(quoteId)}`);
+  if (!r.ok) throw new Error(`Status ${r.status}`);
+  return r.json();
+}
+
+/** Poll every 3 s for up to 2 min (spec). Resolves with the last status; 'minting' at the end means check back. */
+export async function pollMelt(
+  f: Fetch,
+  quoteId: string,
+  onStatus: (s: MeltStatus) => void,
+  { every = 3000, max = 120_000, sleep = (ms: number) => new Promise((r) => setTimeout(r, ms)) } = {},
+): Promise<MeltStatus> {
+  let last: MeltStatus = { status: 'minting' };
+  for (let t = 0; t <= max; t += every) {
+    try {
+      last = await meltStatus(f, quoteId);
+      onStatus(last);
+      if (last.status === 'done' || last.status === 'failed') return last;
+    } catch {
+      /* a missed poll is retried */
+    }
+    await sleep(every);
+  }
+  return last;
+}
+
+/** "<txid>_o<n>" (Run) or "<txid>_<n>" → the toolbox outpoint "<txid>.<n>". */
+export const toolboxOutpoint = (location: string) => {
+  const { txid, vout } = splitOutpoint(location);
+  return `${txid}.${vout}`;
+};
+
+type MeltWallet = Pick<OneSatContext['wallet'], 'createAction' | 'signAction' | 'abortAction'>;
+type BeefServices = { getBeefForTxid(txid: string): Promise<{ toBinary(): number[] }> };
+
+/** Unlocking a P2PKH input with a compressed key: up to 107 bytes; reserve 108 as the sweep does. */
+const P2PKH_UNLOCK_LEN = 108;
+
+/**
+ * Build and sign the melt transaction without broadcasting it. Returns the EF hex the server broadcasts, and
+ * the action reference to abort if the server refuses.
+ */
+export async function buildMeltTx(
+  wallet: MeltWallet,
+  services: BeefServices,
+  q: MeltQuote,
+  jig: { location: string; wif: string },
+): Promise<{ ef: string; txid: string; reference: string }> {
+  const { txid, vout } = splitOutpoint(jig.location);
+  const beef = await services.getBeefForTxid(txid);
+  const outputs = [
+    { lockingScript: q.burn_script_hex, satoshis: 0, outputDescription: `Burn NPG #${q.n} (melt)` },
+    ...(q.fee_sats > 0 && q.fee_to
+      ? [
+          {
+            lockingScript: new P2PKH().lock(q.fee_to).toHex(),
+            satoshis: q.fee_sats,
+            outputDescription: 'NPG mint fees',
+          },
+        ]
+      : []),
+  ];
+  const created = await wallet.createAction({
+    description: `Melt NPG #${String(q.n).padStart(4, '0')} into element cards`,
+    inputBEEF: beef.toBinary(),
+    inputs: [
+      {
+        outpoint: `${txid}.${vout}`,
+        inputDescription: `RelayX NPG #${q.n}`,
+        unlockingScriptLength: P2PKH_UNLOCK_LEN,
+      },
+    ],
+    outputs,
+    options: { randomizeOutputs: false, noSend: true, signAndProcess: false },
+  });
+  const st = created.signableTransaction;
+  if (!st) throw new Error("The wallet didn't return a transaction to sign.");
+  const reference = st.reference;
+  try {
+    const tx = Transaction.fromAtomicBEEF(st.tx);
+    const i = tx.inputs.findIndex(
+      (x) => (x.sourceTXID ?? x.sourceTransaction?.id('hex')) === txid && x.sourceOutputIndex === vout,
+    );
+    if (i !== 0) throw new Error('The NFT must be the first input.');
+    const unlocking = await new P2PKH().unlock(PrivateKey.fromWif(jig.wif)).sign(tx, 0);
+    const signed = await wallet.signAction({
+      reference,
+      spends: { 0: { unlockingScript: unlocking.toHex() } },
+      options: { noSend: true },
+    });
+    if (!signed.tx) throw new Error("The wallet didn't return the signed transaction.");
+    const final = Transaction.fromAtomicBEEF(signed.tx);
+    return { ef: final.toHexEF(), txid: final.id('hex'), reference };
+  } catch (e) {
+    await wallet.abortAction({ reference }).catch(() => undefined);
+    throw e;
+  }
+}
+
+/**
+ * The server refused the commit with a 4xx (MeltRefusedError): free the wallet's inputs. Never call this after a
+ * 5xx or a network error: the server may have broadcast, and freeing spent inputs makes the next send fail
+ * (UTXO_SPENT, owner's $1 send, 17 Oct 2026).
+ */
+export async function releaseMelt(wallet: MeltWallet, reference: string): Promise<void> {
+  await wallet.abortAction({ reference }).catch(() => undefined);
+}
