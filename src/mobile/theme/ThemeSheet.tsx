@@ -13,10 +13,12 @@ import {
   accentById,
   type Accent,
   type AccentId,
+  PAID_EDITIONS,
 } from './accents';
 import { loadAccent, loadMix, previewMix, saveAccent, saveMix } from './accent';
 import { deriveMix, mixFromPack, nextMixerOpen, type MixSpec } from './mixer';
 import { THEME_ORDERS_ENABLED, THEME_STORE_PAID_ENABLED } from '../storeBuild';
+import { useOwnedThemes } from '../themeStore/useOwnedThemes';
 
 // Get your own theme ($99 a year): bWalletX only, a lazy chunk never in a store build.
 const ThemeOrderSheet = THEME_ORDERS_ENABLED ? lazy(() => import('../themeOrder/ThemeOrderSheet')) : null;
@@ -119,8 +121,12 @@ function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNo
   };
   const derived = useMemo(() => deriveMix(mix), [mix]);
   // Shuffle: another pack at random (never the one on). Surprise: a random mix, opened so it can be tuned.
+  // Paid editions (Store, $1): only the ones this account bought, plus the one already on, so nobody loses theirs.
+  const { owned } = useOwnedThemes();
+  const mayUse = (id: string) => !PAID_EDITIONS.includes(id) || owned.has(id) || id === current;
+  const editions = THEME_STORE_PAID_ENABLED ? EDITION_PACKS.filter((a) => mayUse(a.id)) : [];
   const shuffle = () => {
-    const others = THEMES.filter((a) => a.id !== current);
+    const others = THEMES.filter((a) => a.id !== current && !PAID_EDITIONS.includes(a.id));
     pick(others[Math.floor(Math.random() * others.length)].id);
   };
   const surprise = () => {
@@ -175,12 +181,23 @@ function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNo
           <PackTile key={a.id} a={a} on={current === a.id} onPick={() => pick(a.id)} />
         ))}
       </div>
-      <p className="bw-theme-group">Editions</p>
-      <div className="bw-pack-grid" role="radiogroup" aria-label="Editions">
-        {EDITION_PACKS.map((a) => (
-          <PackTile key={a.id} a={a} on={current === a.id} onPick={() => pick(a.id)} />
-        ))}
-      </div>
+      {editions.length > 0 && (
+        <>
+          <p className="bw-theme-group">Your editions</p>
+          <div className="bw-pack-grid" role="radiogroup" aria-label="Your editions">
+            {editions.map((a) => (
+              <PackTile key={a.id} a={a} on={current === a.id} onPick={() => pick(a.id)} />
+            ))}
+          </div>
+        </>
+      )}
+      {THEME_STORE_PAID_ENABLED && (
+        <p className="bw-theme-more">
+          <Link to="/m/store" onClick={onClose} style={{ color: 'var(--bw-accent)' }}>
+            VexVoid, NPG, NPGX and more: get them in the Store
+          </Link>
+        </p>
+      )}
       <div className="bw-mixer" data-open={mixing ? '' : undefined}>
         <button type="button" className="bw-mixer-head" aria-expanded={mixing} onClick={() => setMixing('toggle')}>
           <SlidersHorizontal size={18} aria-hidden="true" />
