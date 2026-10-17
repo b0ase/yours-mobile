@@ -7,9 +7,12 @@ import { ServiceProvider } from './contexts/providers/ServiceProvider';
 import { ThemeProvider } from './contexts/providers/ThemeProvider';
 import './index.css';
 import { applyBootAccent } from './mobile/theme/accent';
+import { nameFailedFetch } from './utils/nameFailedFetch';
 global.Buffer = Buffer;
 global.process = process;
 window.Buffer = Buffer;
+// "Couldn't reach <host>" instead of a bare "Load failed" (utils/nameFailedFetch.ts).
+nameFailedFetch();
 // App accent (Theme → App colours) before the first paint: the extension popup/side panel and the web edition.
 applyBootAccent();
 
