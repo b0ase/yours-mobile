@@ -8,14 +8,20 @@ describe('broadcast refusals', () => {
   test('records a definite refusal, not a service hiccup', () => {
     noteRefusals([
       { status: 'error', error: new Error('ARC 461: script failed'), txidResults: [{ txid: T('a'), status: 'error' }] },
-      { status: 'error', error: new Error('timeout'), txidResults: [{ txid: T('b'), status: 'error', serviceError: true }] },
+      {
+        status: 'error',
+        error: new Error('timeout'),
+        txidResults: [{ txid: T('b'), status: 'error', serviceError: true }],
+      },
     ]);
     expect(refusalFor(T('a'))).toBe('ARC 461: script failed');
     expect(refusalFor(T('b'))).toBeUndefined();
   });
 
   test('wraps postBeef and passes results through', async () => {
-    const results = [{ status: 'error', error: new Error('fee too low'), txidResults: [{ txid: T('c'), status: 'error' }] }];
+    const results = [
+      { status: 'error', error: new Error('fee too low'), txidResults: [{ txid: T('c'), status: 'error' }] },
+    ];
     const s = { postBeef: async () => results };
     expect(rememberRefusals(s)).toBe(true);
     expect(await s.postBeef({}, [T('c')])).toBe(results);
@@ -23,7 +29,13 @@ describe('broadcast refusals', () => {
   });
 
   test('the reason and txid reach the message', () => {
-    noteRefusals([{ status: 'error', error: new Error('mandatory-script-verify-flag-failed'), txidResults: [{ txid: T('d'), status: 'error' }] }]);
+    noteRefusals([
+      {
+        status: 'error',
+        error: new Error('mandatory-script-verify-flag-failed'),
+        txidResults: [{ txid: T('d'), status: 'error' }],
+      },
+    ]);
     const e = Object.assign(new Error('Undelayed createAction or signAction results require review.'), {
       reviewActionResults: [{ txid: T('d'), status: 'invalidTx' }],
     });

@@ -159,7 +159,12 @@ async function receiptOutput(ctx: OneSatContext, r: StoreReceipt, art: string | 
   return {
     svg,
     output: {
-      lockingScript: buildInscriptionScript(dest, new TextEncoder().encode(svg), 'image/svg+xml', storeReceiptMap(r)).toHex(),
+      lockingScript: buildInscriptionScript(
+        dest,
+        new TextEncoder().encode(svg),
+        'image/svg+xml',
+        storeReceiptMap(r),
+      ).toHex(),
       satoshis: 1,
       outputDescription: 'Store receipt',
       basket: ORDINALS_BASKET,
@@ -177,7 +182,8 @@ export const payBuyQuote = async (
   opts: { label?: string; art?: string | null } = {},
 ): Promise<BuyResult> => {
   if (Date.parse(q.expires_at) < Date.now()) throw new ThemeOrderError(MESSAGES.quote_expired, 'quote_expired', 410);
-  const receipt = q.receipt && q.receipt.order === q.quote_id ? await receiptOutput(ctx, q.receipt, opts.art ?? null) : null;
+  const receipt =
+    q.receipt && q.receipt.order === q.quote_id ? await receiptOutput(ctx, q.receipt, opts.art ?? null) : null;
   const r = await ctx.wallet.createAction({
     // "Theme purchase · NPG": the history labels it (wallet/txHistory.ts).
     description: `Theme purchase · ${opts.label ?? q.receipt?.item.label ?? q.pack}`,

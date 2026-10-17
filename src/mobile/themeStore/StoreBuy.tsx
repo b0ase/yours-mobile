@@ -141,7 +141,11 @@ export function BuySheet({
             style={{ background: 'rgba(0,0,0,.92)' }}
             onClick={() => setBigReceipt(false)}
           >
-            <img src={svgUri} alt={`Receipt for ${label}`} className="block max-h-full w-full max-w-[640px] rounded-2xl" />
+            <img
+              src={svgUri}
+              alt={`Receipt for ${label}`}
+              className="block max-h-full w-full max-w-[640px] rounded-2xl"
+            />
           </div>
         )}
       </div>,
