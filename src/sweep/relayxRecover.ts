@@ -96,12 +96,49 @@ async function isJigOutput(u: Utxo, reader: ChainReader, maps: readonly NpgMap[]
   }
 }
 
+/**
+ * What each output turned out to be, by location: the jig it holds, or null for "not a Run jig". A location is a
+ * spent-once outpoint, so the answer never changes; a few dozen bytes each, so all of a big collection fits on the
+ * phone and a second search is instant (owner, 17 Oct 2026: the raw-tx cache held only ~350 of 1,842). Unread
+ * outputs are never remembered, so they are tried again.
+ */
+export type JigMemo = {
+  get(location: string): IdentifiedJig | null | undefined;
+  set(location: string, jig: IdentifiedJig | null): void;
+};
+
+export function createJigMemo(store: Pick<Storage, 'getItem' | 'setItem'> | null, key = 'bw.relayx.jigs.v1'): JigMemo {
+  let map: Record<string, IdentifiedJig | 0> = {};
+  try {
+    map = JSON.parse(store?.getItem(key) ?? '{}') ?? {};
+  } catch {
+    map = {};
+  }
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const save = () => {
+    timer = null;
+    try {
+      store?.setItem(key, JSON.stringify(map));
+    } catch {
+      // Storage full or blocked: the memo still works for this search.
+    }
+  };
+  return {
+    get: (location) => (location in map ? map[location] || null : undefined),
+    set(location, jig) {
+      map[location] = jig ?? 0;
+      if (store && !timer) timer = setTimeout(save, 1000);
+    },
+  };
+}
+
 export async function scanRelayx(
   words: string,
   reader: ChainReader,
   maps: readonly NpgMap[],
   onStep: (s: ScanStep) => void,
   signal?: { cancelled: boolean },
+  memo?: JigMemo,
 ): Promise<ScanResult> {
   const account = relayxAccount(words);
   let checked = 0;
@@ -123,9 +160,12 @@ export async function scanRelayx(
   const results = await mapLimit(dust, 20, async (u) => {
     if (signal?.cancelled) return null;
     const location = outpoint(u.txid, u.vout);
-    const jig = await isJigOutput(u, reader, maps);
+    const known = memo?.get(location);
+    const jig = known !== undefined ? !!known : await isJigOutput(u, reader, maps);
+    if (jig === false) memo?.set(location, null);
     let item: Found | null = null;
-    if (jig === 'unread')
+    if (known) item = { ...known, address: u.address, wif: u.wif };
+    else if (jig === 'unread')
       item = {
         location,
         origin: '',
@@ -137,6 +177,7 @@ export async function scanRelayx(
       };
     else if (jig) {
       const id = await identifyJig(location, reader.getTx, maps);
+      if (id.origin) memo?.set(location, id);
       item = id.origin
         ? { ...id, address: u.address, wif: u.wif }
         : { ...id, title: "Couldn't read this one", collection: '', address: u.address, wif: u.wif, unread: true };

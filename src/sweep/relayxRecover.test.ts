@@ -1,7 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 import { Mnemonic } from '@bsv/sdk';
 import type { ChainReader } from './chainReads';
-import { cleanWords, groupFound, keyAt, relayxAccount, scanRelayx, wordsProblem, type Found } from './relayxRecover';
+import {
+  cleanWords,
+  createJigMemo,
+  groupFound,
+  keyAt,
+  relayxAccount,
+  scanRelayx,
+  wordsProblem,
+  type Found,
+} from './relayxRecover';
 import type { NpgMap } from './runIdentify';
 
 const WORDS = Mnemonic.fromRandom().toString();
@@ -82,5 +91,22 @@ describe('scan', () => {
     ]);
     expect(r.otherSats).toBe(50_000);
     expect(r.addresses).toBe(2);
+  });
+
+  test('remembers what each output is, so a second search downloads nothing', async () => {
+    const store = new Map<string, string>();
+    const ls = {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+    };
+    const jig = { location: `${'e'.repeat(64)}_o1`, origin: 'o', title: 'NPG #0001', collection: 'S1', n: 1 };
+    const m1 = createJigMemo(ls);
+    m1.set(jig.location, jig);
+    m1.set('x_o0', null);
+    await new Promise((r) => setTimeout(r, 1100));
+    const m2 = createJigMemo(ls);
+    expect(m2.get(jig.location)).toEqual(jig);
+    expect(m2.get('x_o0')).toBeNull();
+    expect(m2.get('y_o0')).toBeUndefined();
   });
 });
