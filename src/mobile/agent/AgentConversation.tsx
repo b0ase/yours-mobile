@@ -172,7 +172,7 @@ const QUICK_STARTS: { label: string; prompt: string }[] = [
   {
     label: 'Buy or sell a strategy',
     prompt:
-      'Help me buy or sell a strategy on Exchange › Strategies: compare listings, or fill in the listing spec for mine and suggest a price.',
+      'Help me buy or sell a strategy on Exchange › Contracts › Strategies: compare listings, or fill in the listing spec for mine and suggest a price.',
   },
 ];
 
