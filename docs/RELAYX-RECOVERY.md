@@ -4,6 +4,22 @@ Owner, 17 Oct 2026: a priority product. Many people hold RelayX (Run) collection
 show them, and never destroy them. Phase a (read-only view) is next; phase b (Run-aware send, or re-mint as 1Sat
 ordinals with provenance) waits on an owner decision.
 
+## Phase a: read-only importer (17 Oct 2026)
+
+The sweep screen lists the Run NFTs it found ("RelayX NFT Collection Importer", `src/mobile/sweep/RelayxJigs.tsx`),
+each named from where it was minted (`src/sweep/runIdentify.ts`). Nothing is moved; keys stay on the device.
+
+Origin walk: read the tx at the jig's location and its Run payload; jig outputs start after the last OP_RETURN
+(S2 mint: image o0, Run o1, class o2, new NFT o3), updated input jigs first, then creates. Output k < `in` is
+input jig k moved on (follow that input); otherwise it was created here and that outpoint is the origin.
+
+Naming: origin → card from the maps the NPG site publishes (immutable, `{class, collection, jigs: {origin: {i, n,
+name?}}}`): S2 `…/s2/v2/jig-to-card.json` (3,333 mints, cut-outs `s2/v2/NNNN-cutout.webp` + `cutouts-index.json`
+bbox), S1 `…/s1/v1/jig-to-card.json` (named, no art yet). Known origins stop the walk before the mint tx (which
+carries the ~0.5 MB image) is downloaded. Other classes (KAZUYO, AIKA, NPG 00001…, one girl each) are named from
+the class DEPLOY metadata, found by walking the mint's input 0. Verified on chain from 1B6Pjhoi…: held jigs →
+NPG #2709/#2710/#2711/#2970; a KAZUYO jig → "KAZUYO".
+
 ## Guard (shipped)
 
 `src/sweep/runGuard.ts`: every 1, 273 or 546-sat output is checked against its source tx for the Run marker
@@ -31,7 +47,7 @@ Classes
 - `props.metadata = {name, description, image: "_o1", symbol, numbered, isCollection}`.
 - mint: `[{"$jig":0},"mint",["", {name, description, image:"_o1"}]]` with the class as input 0; outputs: class
   re-output first, then the new NFT (the last jig output). Each mint carries its card image at vout1.
-- NPG Series 2 class: "Ninja Punk Girls Vs The Evil Erobotz Series 2", block 733,985; 3,138 mints, ~733,000–736,000.
+- NPG Series 2 class: "Ninja Punk Girls Vs The Evil Erobotz Series 2", block 733,985; 3,333 mints (blocks 733,999–734,841; the earlier "3,138" missed bare-6a Run payloads).
 
 Listings (OrderLock)
 
