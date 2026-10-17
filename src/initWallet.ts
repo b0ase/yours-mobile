@@ -1,3 +1,4 @@
+import { rememberRefusals } from './services/broadcastRefusals';
 import { knownOnChain, recoverMinedFailedActions, type RecoverReport } from './services/recoverFailed';
 import { singleFlight } from './services/addressResync';
 import { sizeAwareBroadcast } from './services/bigBroadcast';
@@ -329,6 +330,7 @@ export const initWallet = async (
 
   // Big mints need longer than the broadcaster's fixed 30 s to upload (services/bigBroadcast.ts, vexvoid 12 Oct 2026).
   if (!sizeAwareBroadcast(toolboxServices)) console.warn('[initWallet] broadcaster timeout not tunable');
+  if (!rememberRefusals(toolboxServices)) console.warn('[initWallet] broadcast refusals not recorded');
   // UnFail's output verdicts read getUtxoStatus: parse api.1sat.app's "txid.vout" (dkg, 14 Oct 2026; services/utxoStatus.ts).
   if (!fixUtxoStatus(toolboxServices)) console.warn('[initWallet] getUtxoStatus not patched (no txo client)');
 
