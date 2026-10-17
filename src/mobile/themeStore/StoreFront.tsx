@@ -190,9 +190,9 @@ function Editions({ ids = EDITION_IDS }: { ids?: readonly string[] }) {
           pack={buying.id}
           label={buying.label}
           onClose={() => setBuying(null)}
-          onDone={() => {
+          onDone={(apply) => {
             add(buying.id);
-            applyPack(account, buying);
+            if (apply) applyPack(account, buying);
             setPreview(null);
             setBuying(null);
           }}
@@ -255,6 +255,7 @@ const MANIFEST: readonly (readonly [string, readonly string[]])[] = [
       'A name and a one-line blurb',
       'A logo, square, 512 × 512',
       'A banner, wide, 1500 × 500',
+      'Receipt art: a square picture printed on every receipt you issue (PNG, JPEG or WebP; your logo if none)',
       'At least 3 products, each with a title, one or two lines, a price in $ and a preview picture',
       'For a theme: its colours and card art',
       'Your token and room, if you have one, so buyers can talk to you',

@@ -8,9 +8,11 @@ const { makeThemeOrderHandlers, themeOrderStore } = require('../lib/themeOrders'
 const { makeThemeBuyHandlers, themeBuyStore } = require('../lib/themeBuys');
 const { arcBroadcast } = require('../lib/paymailStore');
 const { chain } = require('../lib/nameFee');
+const { storeKey } = require('../lib/storeReceipt');
 
 // buy-quote / buy-claim / owned: Store theme purchases, $1 each (site/lib/themeBuys.js).
-const OPS = new Set(['upload', 'quote', 'claim', 'mine', 'buy-quote', 'buy-claim', 'owned']);
+// store-key (GET): the public key Store receipts are signed with (site/lib/storeReceipt.js), null if unsigned.
+const OPS = new Set(['upload', 'quote', 'claim', 'mine', 'buy-quote', 'buy-claim', 'owned', 'store-key']);
 const BUY = { 'buy-quote': 'quote', 'buy-claim': 'claim', owned: 'owned' };
 const hits = new Map();
 function limited(ip, max) {
@@ -44,11 +46,12 @@ function send(res, status, body) {
 let handlers;
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return send(res, 204, {});
   const op = new URL(req.url, 'http://x').searchParams.get('op') || '';
   if (!OPS.has(op)) return send(res, 404, { error: 'not-found' });
+  if (op === 'store-key') return send(res, 200, { signer: storeKey() });
   if (req.method !== 'POST') return send(res, 405, { error: 'method-not-allowed' });
   const ip =
     String(req.headers['x-real-ip'] || req.headers['x-vercel-forwarded-for'] || req.headers['x-forwarded-for'] || '')

@@ -329,6 +329,11 @@ export const classifyEvent = (
   });
   const plainType: EventType = row.direction === 'in' ? 'receive' : row.direction === 'out' ? 'send' : 'self';
 
+  // A Store purchase pays the shop and inscribes its receipt to us (1 sat): a purchase, not an NFT mint.
+  if (row.label === 'theme purchase') {
+    const what = /theme purchase\s*·\s*(.+)$/i.exec(local?.description ?? '')?.[1]?.trim();
+    return { ...base('payment', 'payment'), label: what ? `theme purchase · ${what}` : 'theme purchase' };
+  }
   if (tx) {
     // Our own listing being spent: a sale (the asset left, we were paid) or a cancel (it came back).
     const listingIn = tx.vin.map((i) => ctx.listings.get(`${i.txid}:${i.vout}`)).find(Boolean);
