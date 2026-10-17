@@ -14,7 +14,7 @@ import {
   type ScanResult,
   type ScanStep,
 } from '../../sweep/relayxRecover';
-import { loadNpgMaps, NPG_CUTOUT_INDEX, splitOutpoint, type NpgMap } from '../../sweep/runIdentify';
+import { loadNpgMaps, splitOutpoint, type NpgMap } from '../../sweep/runIdentify';
 import { HdSweepScreen } from './HdSweepScreen';
 import { NpgMelt } from './NpgMelt';
 
@@ -31,7 +31,6 @@ const MUTED = '#98A2B3';
 const LINE = 'rgb(255 255 255 / 0.08)';
 const SURFACE = 'rgb(255 255 255 / 0.03)';
 
-type BBox = Record<string, [number, number, number, number]>;
 type Phase =
   | { k: 'enter' }
   | { k: 'scanning'; step: ScanStep | null }
@@ -42,29 +41,24 @@ const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const bsv = (sats: number) => (sats / 1e8).toLocaleString('en-US', { maximumFractionDigits: 8 });
 const pad = (n: number) => String(n).padStart(4, '0');
 
-/** Her cut-out cropped to her bounding box. SVG viewBox does the crop at any tile size. */
-function Cutout({ url, box, className }: { url: string; box?: [number, number, number, number]; className?: string }) {
+/**
+ * Her full NPG card. Loaded lazily and decoded off the main thread, so a gallery of 1,800 doesn't fetch them all
+ * at once (owner, 17 Oct 2026: most tiles sat empty). Same 2:3 frame for every card.
+ */
+function CardArt({ url, className, eager }: { url: string; className?: string; eager?: boolean }) {
   const [loaded, setLoaded] = useState(false);
-  const [x0, y0, x1, y1] = box ?? [0, 0, 961, 1441];
-  const m = 24;
   return (
-    <div className={`relative ${className ?? ''}`}>
-      {!loaded && (
-        <div
-          aria-hidden="true"
-          className="absolute inset-0 rounded-[inherit] animate-pulse"
-          style={{ background: SURFACE }}
-        />
-      )}
-      <svg
-        viewBox={`${x0 - m} ${y0 - m} ${x1 - x0 + 2 * m} ${y1 - y0 + 2 * m}`}
-        preserveAspectRatio="xMidYMax meet"
-        className="absolute inset-0 h-full w-full transition-opacity duration-200 ease-out"
+    <div className={`relative overflow-hidden ${className ?? ''}`}>
+      {!loaded && <div aria-hidden="true" className="absolute inset-0 animate-pulse" style={{ background: SURFACE }} />}
+      <img
+        src={url}
+        alt=""
+        loading={eager ? 'eager' : 'lazy'}
+        decoding="async"
+        onLoad={() => setLoaded(true)}
+        className="absolute inset-0 h-full w-full object-contain transition-opacity duration-200 ease-out"
         style={{ opacity: loaded ? 1 : 0 }}
-        aria-hidden="true"
-      >
-        <image href={url} width={961} height={1441} onLoad={() => setLoaded(true)} />
-      </svg>
+      />
     </div>
   );
 }
@@ -133,7 +127,7 @@ function Progress({ step }: { step: ScanStep | null }) {
   );
 }
 
-function Tile({ f, box, onOpen }: { f: Found; box?: [number, number, number, number]; onOpen: () => void }) {
+function Tile({ f, onOpen }: { f: Found; onOpen: () => void }) {
   return (
     <button
       type="button"
@@ -143,9 +137,9 @@ function Tile({ f, box, onOpen }: { f: Found; box?: [number, number, number, num
       aria-label={f.title}
     >
       {f.art ? (
-        <Cutout url={f.art} box={box} className="aspect-[3/4] w-full rounded-t-xl" />
+        <CardArt url={f.art} className="aspect-[2/3] w-full rounded-t-xl" />
       ) : (
-        <div className="aspect-[3/4] w-full" style={{ background: SURFACE }} />
+        <div className="aspect-[2/3] w-full" style={{ background: SURFACE }} />
       )}
       <span className="px-2 py-1.5 text-[12px] font-medium tabular-nums" style={{ color: INK }}>
         {f.n !== undefined ? `#${pad(f.n)}` : f.title}
@@ -175,7 +169,7 @@ function Row({ f, onOpen }: { f: Found; onOpen: () => void }) {
   );
 }
 
-function Detail({ f, box, onClose }: { f: Found; box?: [number, number, number, number]; onClose: () => void }) {
+function Detail({ f, onClose }: { f: Found; onClose: () => void }) {
   const tx = f.origin ? splitOutpoint(f.origin).txid : '';
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -218,8 +212,14 @@ function Detail({ f, box, onClose }: { f: Found; box?: [number, number, number, 
             className="mx-auto w-full overflow-hidden rounded-2xl"
             style={{ background: `radial-gradient(120% 80% at 50% 100%, rgb(38 105 255 / 0.18), transparent 60%)` }}
           >
-            <Cutout url={f.art} box={box} className="mx-auto h-[300px] w-full" />
+            <CardArt url={f.art} eager className="mx-auto aspect-[2/3] h-[360px]" />
           </div>
+        )}
+        {f.art && (
+          <p className="m-0 text-[12px] leading-relaxed" style={{ color: MUTED }}>
+            Card art from NPG for card #{pad(f.n ?? 0)}. The number is matched from the chain by mint order; the image
+            stored on chain is encrypted, so it can't be shown.
+          </p>
         )}
         <div className="flex flex-col gap-1">
           <h2 className="m-0 text-[22px] font-semibold tracking-[-0.02em]" style={{ color: INK }}>
@@ -262,7 +262,6 @@ function Detail({ f, box, onClose }: { f: Found; box?: [number, number, number, 
 export function RelayxRecoverScreen({ onBack }: { onBack: () => void }) {
   const [words, setWords] = useState('');
   const [phase, setPhase] = useState<Phase>({ k: 'enter' });
-  const [bbox, setBbox] = useState<BBox>({});
   const [open, setOpen] = useState<Found | null>(null);
   const [sweep, setSweep] = useState(false);
   const [retrying, setRetrying] = useState(false);
@@ -290,13 +289,7 @@ export function RelayxRecoverScreen({ onBack }: { onBack: () => void }) {
         store = null;
       }
       const reader = createChainReader({ cache: createTxCache(store) });
-      const [maps, index] = await Promise.all([
-        loadNpgMaps(),
-        fetch(NPG_CUTOUT_INDEX)
-          .then((r) => (r.ok ? r.json() : null))
-          .catch(() => null),
-      ]);
-      if (index?.bbox) setBbox(index.bbox as BBox);
+      const maps = await loadNpgMaps();
       ctx.current = { reader, maps };
       setLive([]);
       const result = await scanRelayx(
@@ -332,7 +325,6 @@ export function RelayxRecoverScreen({ onBack }: { onBack: () => void }) {
   const groups = useMemo(() => (shown ? groupFound(shown) : []), [shown]);
   const total = phase.k === 'done' ? phase.result.nfts.filter((n) => !n.unread).length : 0;
   const unread = phase.k === 'done' ? phase.result.nfts.filter((n) => n.unread).length : 0;
-  const boxOf = (f: Found) => (f.n !== undefined ? bbox[pad(f.n)] : undefined);
 
   const gallery = groups
     .filter((g) => g.key !== 'unread')
@@ -347,7 +339,7 @@ export function RelayxRecoverScreen({ onBack }: { onBack: () => void }) {
         {g.key === 's2' || g.key === 's1' ? (
           <div className="grid grid-cols-3 gap-2.5">
             {g.items.map((f) => (
-              <Tile key={f.location} f={f} box={boxOf(f)} onOpen={() => setOpen(f)} />
+              <Tile key={f.location} f={f} onOpen={() => setOpen(f)} />
             ))}
           </div>
         ) : (
@@ -580,7 +572,7 @@ export function RelayxRecoverScreen({ onBack }: { onBack: () => void }) {
           )}
         </div>
       </div>
-      {open && <Detail f={open} box={boxOf(open)} onClose={() => setOpen(null)} />}
+      {open && <Detail f={open} onClose={() => setOpen(null)} />}
     </div>,
     document.body,
   );

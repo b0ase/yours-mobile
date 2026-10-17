@@ -48,9 +48,27 @@ export class MeltNotOpenError extends Error {
   }
 }
 
-/** Element art: paths are relative to the NPG assets base unless already absolute. */
+/**
+ * Element art. S1 parts are "21-Body/…png" under the NPG site assets; S2 parts are bare names like
+ * "B_011_[Weapon]<Graffiti_Can>(R)((RGB)).png" in NPG's Blob under s2/elements/. Names carry [ ] < > ( ) and
+ * must be encoded (owner, 17 Oct 2026: every element tile on the melt sheet was a broken image).
+ */
 export const NPG_ASSETS = 'https://www.ninjapunkgirls.com/assets/';
-export const elementUrl = (file: string) => (/^https?:\/\//.test(file) ? file : NPG_ASSETS + file.replace(/^\//, ''));
+export const NPG_S2_ELEMENTS = 'https://qw1nh74cmgrgawoh.public.blob.vercel-storage.com/s2/elements/';
+export const elementUrl = (file: string) => {
+  if (/^https?:\/\//.test(file)) return file;
+  const path = file.replace(/^\//, '');
+  const enc = path.split('/').map(encodeURIComponent).join('/');
+  return path.includes('/') ? NPG_ASSETS + enc : NPG_S2_ELEMENTS + enc;
+};
+
+/** A readable label for an element: the quote's slot, else from the file name ("[Weapon]" or "[[Peggy]]<choker>"). */
+export const elementLabel = (e: { slot?: string; file: string }) => {
+  if (e.slot?.trim()) return e.slot.replace(/_/g, ' ');
+  const name = e.file.split('/').pop() ?? '';
+  const m = /\[\[[^\]]+\]\]<([^>]+)>/.exec(name) ?? /\[([^\]]+)\]/.exec(name) ?? /^\d+-([A-Za-z-]+)\//.exec(e.file);
+  return m ? m[1].replace(/[_-]/g, ' ') : 'Element';
+};
 
 /** The avatar badge rides along with the cards (slot "avatar"); shown apart on the sheet. Absent for S1 so far. */
 export const splitAvatar = (q: Pick<MeltQuote, 'elements'>) => ({

@@ -83,14 +83,14 @@ describe('RelayX importer: origin walk', () => {
 });
 
 describe('RelayX importer: naming', () => {
-  test('an origin in the NPG S2 map is "NPG #NNNN" with its cut-out', async () => {
+  test('an origin in the NPG S2 map is "NPG #NNNN" with its full card', async () => {
     const maps: NpgMap[] = [
       { class: '393b1c2a_o2', collection: 'NPG Series 2', jigs: { [MINT_ORIGIN]: { i: 7, n: 417 } } },
     ];
     const j = await identifyJig(`${send2.id('hex')}_o1`, getTx, maps);
     expect(j.title).toBe('NPG #0417');
     expect(j.n).toBe(417);
-    expect(j.art).toMatch(/s2\/v3\/0417-cutout\.webp$/);
+    expect(j.art).toMatch(/s2\/v2\/0417-card\.webp$/);
   });
   test('S1 entries carry a name and no art', async () => {
     const maps: NpgMap[] = [

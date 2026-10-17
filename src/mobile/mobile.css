@@ -71,6 +71,20 @@ html[data-phone-layout]:root {
 .bw-dock-scroll::-webkit-scrollbar {
   display: none;
 }
+/* The status-bar strip above TopNav (0 → safe-area top). TopNav starts at --wallet-inset-top, so without this, any
+   page that scrolls the document (Exchange › Shop) slid its content up under the clock (owner, 17 Oct 2026, a
+   repeat bug). One cover for every page: new screens don't need to remember it. Below sheets/overlays (z ≥ 20). */
+body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: env(safe-area-inset-top);
+  background: var(--bw-bg);
+  z-index: 10;
+  pointer-events: none;
+}
 html.has-account-strip:root {
   --account-strip-height: 28px;
 }

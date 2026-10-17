@@ -241,19 +241,23 @@ const AudioView = ({ src, name }: { src: string; name: string }) => {
   );
 };
 
+/**
+ * The whole image, fitted to the screen, never cropped. No tap-to-zoom: a 200% zoom from the corner cut off badges
+ * and bAvatars (owner, 17 Oct 2026); pinch zooms instead. Hard pixels only for small pixel art.
+ */
 const ImageView = ({ src, name }: { src: string; name: string }) => {
-  const [zoom, setZoom] = useState(false);
   const [bad, setBad] = useState(false);
+  const [tiny, setTiny] = useState(false);
   if (bad) return <GoldArt icon={<Sparkles size={40} color={GOLD} />} label="Image" sub={name} />;
   return (
-    <div className={`w-full bg-black ${zoom ? 'overflow-auto' : ''}`} style={{ maxHeight: zoom ? '80vh' : undefined }}>
+    <div className="flex w-full items-center justify-center bg-black" style={{ touchAction: 'pinch-zoom' }}>
       <img
         src={src}
         alt={name}
-        onClick={() => setZoom((z) => !z)}
         onError={() => setBad(true)}
-        className={zoom ? 'max-w-none w-[200%] cursor-zoom-out' : 'block w-full h-auto object-contain cursor-zoom-in'}
-        style={{ imageRendering: 'pixelated', maxHeight: zoom ? undefined : '80vh' }}
+        onLoad={(e) => setTiny(e.currentTarget.naturalWidth > 0 && e.currentTarget.naturalWidth <= 256)}
+        className="block h-auto max-w-full object-contain"
+        style={{ imageRendering: tiny ? 'pixelated' : 'auto', maxHeight: '70vh', width: '100%' }}
       />
     </div>
   );
