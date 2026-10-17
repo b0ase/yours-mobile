@@ -93,6 +93,38 @@ export interface HealStore {
 
 export type HealReport = { checked: number; released: number; inputs?: string[] };
 
+/**
+ * Settings › Troubleshooting › Resync coins (owner, 17 Oct 2026: sends kept failing with UTXO_SPENT after coins were
+ * spent from another device). Checks every coin storage lists as spendable, same lookups and the same fail-closed
+ * rule as healInvalidSend: a coin is cleared only when a spending txid is named. Never throws.
+ */
+export async function resyncSpent(
+  outpoints: string[],
+  getSpend: (outpoint: string) => Promise<string | null | undefined>,
+  store: HealStore,
+  opts: {
+    fallback?: (outpoint: string) => Promise<string | null | undefined>;
+    onProgress?: (done: number) => void;
+  } = {},
+): Promise<HealReport> {
+  const spent: string[] = [];
+  for (let i = 0; i < outpoints.length; i++) {
+    spent.push(...(await provenSpent([outpoints[i]], getSpend, opts.fallback)));
+    opts.onProgress?.(i + 1);
+  }
+  let released = 0;
+  for (const op of spent) {
+    const [txid, vout] = op.split('_');
+    released += await store.markSpent(txid, Number(vout)).catch(() => 0);
+  }
+  return { checked: outpoints.length, released, inputs: spent };
+}
+
+export const resyncMessage = (r: HealReport): string =>
+  r.released > 0
+    ? `Checked ${r.checked} coins: ${r.released} had already been spent elsewhere and are cleared. Try your send again.`
+    : `Checked ${r.checked} coins: all still spendable. Nothing to clear.`;
+
 /** After an invalidTx: release the rejected send's inputs proven spent. Never throws. */
 export async function healInvalidSend(
   error: unknown,

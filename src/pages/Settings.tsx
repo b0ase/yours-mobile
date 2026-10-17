@@ -1297,6 +1297,30 @@ export const Settings = () => {
     }
   };
 
+  // Resync coins (owner, 17 Oct 2026): clear coins spent from another device, so sends stop failing UTXO_SPENT.
+  const [resyncing, setResyncing] = useState(false);
+  const [resyncResult, setResyncResult] = useState('');
+  const handleResyncCoins = async () => {
+    if (resyncing) return;
+    setResyncing(true);
+    setResyncResult('');
+    setRecoverStep((p) => ({ ...p, txid: 'Starting…' }));
+    try {
+      const r = await sendMessageAsync<{ success: boolean; error?: string; data?: { summary?: string } }>({
+        action: 'STORAGE_RESYNC_COINS',
+      });
+      const text = r?.data?.summary ?? r?.error ?? 'No answer from the wallet. Try again.';
+      setResyncResult(text);
+      addSnackbar(text, r?.success ? 'success' : 'error');
+    } catch (error) {
+      const text = error instanceof Error ? error.message : 'Resync failed';
+      setResyncResult(text);
+      addSnackbar(text, 'error');
+    } finally {
+      setResyncing(false);
+    }
+  };
+
   const [restoring, setRestoring] = useState(false);
   const [restoreResult, setRestoreResult] = useState('');
   const handleRestoreBackup = async () => {
@@ -1391,6 +1415,23 @@ export const Settings = () => {
                 onClick={() => void handleRepairSync([missingTokenId.trim()])}
               />
             </div>
+          </div>
+          <Divider />
+          <div className="flex flex-col gap-2 px-4 py-3">
+            <span className="text-sm font-semibold">Resync coins</span>
+            <span className="text-xs opacity-70">
+              {resyncing
+                ? recoverStep.txid ?? 'Checking…'
+                : resyncResult ||
+                'Sends failing with “UTXO_SPENT” or “already spent”? Coins were spent somewhere else (another device with the same words). This checks each coin on chain and clears only the ones proven spent.'}
+            </span>
+            <Button
+              theme={theme}
+              type="secondary"
+              label={resyncing ? 'Checking…' : 'Resync coins'}
+              disabled={resyncing}
+              onClick={() => void handleResyncCoins()}
+            />
           </div>
           <Divider />
           <div className="flex flex-col gap-2 px-4 py-3">
