@@ -268,9 +268,28 @@ function arcBroadcast(env = process.env, f = fetch) {
   return async (tx, beefHex) => {
     const headers = { 'Content-Type': 'application/octet-stream' };
     if (env.ARC_API_KEY) headers.Authorization = `Bearer ${env.ARC_API_KEY}`;
-    const body = Buffer.from(beefHex || tx.toHex(), 'hex');
-    const r = await f(`${arc}/v1/tx`, { method: 'POST', headers, body });
-    if (!r.ok && r.status !== 409) throw new Error(`arc ${r.status}`);
+    // ARC's own extended format (EF: each input carries its source output) when the wallet sent BEEF, so the
+    // parents travel with it; a wallet's AtomicBEEF bytes were refused as-is (owner's $1 theme buy, 17 Oct 2026).
+    let hex = tx.toHex();
+    if (beefHex) {
+      try {
+        hex = tx.toHexEF();
+      } catch {
+        hex = beefHex;
+      }
+    }
+    const r = await f(`${arc}/v1/tx`, { method: 'POST', headers, body: Buffer.from(hex, 'hex') });
+    const text = await r.text().catch(() => '');
+    let status = '';
+    try {
+      status = String(JSON.parse(text).txStatus || '');
+    } catch {
+      /* not JSON */
+    }
+    if ((!r.ok && r.status !== 409) || /REJECTED|DOUBLE_SPEND/i.test(status)) {
+      console.error('arc broadcast refused', r.status, text.slice(0, 400));
+      throw new Error(`arc ${r.status}`);
+    }
   };
 }
 
