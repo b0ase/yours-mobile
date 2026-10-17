@@ -1,6 +1,8 @@
-import type { OneSatContext } from '@1sat/actions';
+import { buildOrdinalCustomInstructions, ORDINALS_BASKET, P1SAT_PROTOCOL, type OneSatContext } from '@1sat/actions';
+import { buildInscriptionScript } from '@1sat/templates';
 import type { WalletInterface } from '@bsv/sdk';
-import { Utils } from '@bsv/sdk';
+import { P2PKH, PublicKey, Random, Utils } from '@bsv/sdk';
+import { storeReceiptMap, storeReceiptSvg, STORE_RECEIPT_TYPE, type StoreReceipt } from '../storeReceipt/receipt';
 import { BWALLET_PAYMAIL_API } from '../names/config';
 import type { Fetch } from '../names/names';
 import { signRequest } from '../names/paymail';
@@ -130,18 +132,59 @@ export const myOrders = async (f: Fetch, wallet: Signer) =>
 /** Store theme purchases ($1 each, site/lib/themeBuys.js): the same quote → one approval → claim flow. */
 export interface BuyQuote extends Quote {
   pack: string;
+  /** The Store's receipt for this order (site/lib/storeReceipt.js), signed when the Store key is set. */
+  receipt?: StoreReceipt;
 }
 export const getBuyQuote = async (f: Fetch, wallet: Signer, pack: string) =>
   post<BuyQuote>(f, 'buy-quote', await signRequest(wallet, 'theme-buy-quote', { pack }));
 
-/** Call only after the user pressed Pay on the approval sheet. */
-export const payBuyQuote = async (ctx: OneSatContext, f: Fetch, q: BuyQuote): Promise<string> => {
+export type BuyResult = { pack: string; txid: string; receipt?: StoreReceipt; receiptSvg?: string };
+
+/**
+ * The receipt inscription (storeReceipt/receipt.ts): a 1-sat SVG card to a fresh key of the wallet's own ordinals,
+ * as lock receipts and @1sat/actions inscribe do, so it shows in Collectibles. `art` is the shop's picture.
+ */
+async function receiptOutput(ctx: OneSatContext, r: StoreReceipt, art: string | null) {
+  const keyID = `inscribe-${Utils.toHex(Random(8))}`;
+  const { publicKey } = await ctx.wallet.getPublicKey({
+    protocolID: P1SAT_PROTOCOL,
+    keyID,
+    counterparty: 'self',
+    forSelf: true,
+  });
+  const dest = new P2PKH().lock(PublicKey.fromString(publicKey).toAddress());
+  const svg = storeReceiptSvg(r, art);
+  const tags = ['type:image/svg+xml', 'origin', STORE_RECEIPT_TYPE];
+  const name = `bWalletX receipt · ${r.item.label}`;
+  return {
+    svg,
+    output: {
+      lockingScript: buildInscriptionScript(dest, new TextEncoder().encode(svg), 'image/svg+xml', storeReceiptMap(r)).toHex(),
+      satoshis: 1,
+      outputDescription: 'Store receipt',
+      basket: ORDINALS_BASKET,
+      tags,
+      customInstructions: buildOrdinalCustomInstructions({ protocolID: P1SAT_PROTOCOL, keyID, tags, name }),
+    },
+  };
+}
+
+/** Call only after the user pressed Pay on the approval sheet. The receipt rides in the same transaction. */
+export const payBuyQuote = async (
+  ctx: OneSatContext,
+  f: Fetch,
+  q: BuyQuote,
+  opts: { label?: string; art?: string | null } = {},
+): Promise<BuyResult> => {
   if (Date.parse(q.expires_at) < Date.now()) throw new ThemeOrderError(MESSAGES.quote_expired, 'quote_expired', 410);
+  const receipt = q.receipt && q.receipt.order === q.quote_id ? await receiptOutput(ctx, q.receipt, opts.art ?? null) : null;
   const r = await ctx.wallet.createAction({
-    description: 'bWalletX theme',
+    // "Theme purchase · NPG": the history labels it (wallet/txHistory.ts).
+    description: `Theme purchase · ${opts.label ?? q.receipt?.item.label ?? q.pack}`,
     outputs: [
       ...q.outputs.map((o) => ({ lockingScript: o.script, satoshis: o.satoshis, outputDescription: 'Theme' })),
       { lockingScript: q.memo_hex, satoshis: 0, outputDescription: 'Theme purchase reference' },
+      ...(receipt ? [receipt.output] : []),
     ],
     options: NO_SEND,
   });
@@ -149,7 +192,7 @@ export const payBuyQuote = async (ctx: OneSatContext, f: Fetch, q: BuyQuote): Pr
   try {
     const signed = await signRequest(ctx.wallet, 'theme-buy-claim', { quote_id: q.quote_id, txid: r.txid });
     const { pack } = await post<{ pack: string }>(f, 'buy-claim', { ...signed, rawtx: Utils.toHex(r.tx) });
-    return pack;
+    return { pack, txid: r.txid, ...(receipt && q.receipt ? { receipt: q.receipt, receiptSvg: receipt.svg } : {}) };
   } catch (e) {
     if (e instanceof ThemeOrderError && (e.status < 500 || e.code === 'broadcast_failed'))
       await releasePayment(ctx, r.txid);

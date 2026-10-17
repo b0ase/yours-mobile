@@ -19,6 +19,8 @@ export interface Shop {
   /** A CSS background for the banner (wins over `banner`), e.g. the logo on a pattern. */
   bannerCss?: string;
   colour: string;
+  /** Picture printed on this shop's receipts (storeReceipt/art.ts); the logo when absent. */
+  receiptArt?: string;
   /** Theme pack ids this shop sells (Store › Themes lists the same items). */
   themes: readonly string[];
 }

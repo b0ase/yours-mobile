@@ -7,11 +7,14 @@ const crypto = require('crypto');
 const { OP, P2PKH, Script, Utils } = require('@bsv/sdk');
 const { parseIncoming, verifySigned } = require('./paymail');
 const { checkPayment, payAddress, priceSats, QUOTE_MS, CLAIM_GRACE_MS } = require('./themeOrders');
+const { signReceipt } = require('./storeReceipt');
 
 const FEE_ROOM_SATS = 500;
 
 /** Packs for sale and their price in USD. Only these can be bought. */
 const PACKS = { vexvoid: 1, npg: 1, npgx: 1 };
+/** Names printed on receipts. */
+const PACK_LABELS = { vexvoid: 'VexVoid', npg: 'NPG', npgx: 'NPGX' };
 const MEMO_TAG = 'bwx-theme-buy';
 const QUOTE_ID_RE = /^[0-9a-f]{32}$/;
 
@@ -102,11 +105,28 @@ function makeThemeBuyHandlers({ store, rate, broadcast, env = process.env, now =
       quote_memo_hex: memoHex,
       quote_expires_at: expiresAt,
     });
+    // The receipt the buyer's wallet inscribes in the paying transaction (storeReceipt.js).
+    const receipt = signReceipt(
+      {
+        app: 'bwalletx',
+        type: 'store-receipt',
+        v: 1,
+        order: quoteId,
+        item: { kind: 'theme', id: packId, label: PACK_LABELS[packId] || packId },
+        usd,
+        sats,
+        seller: pay,
+        buyer: identityKey,
+        issuedAt: new Date(now()).toISOString(),
+      },
+      env,
+    );
     return [
       200,
       {
         quote_id: quoteId,
         pack: packId,
+        receipt,
         outputs: [{ script: new P2PKH().lock(pay).toHex(), satoshis: sats }],
         memo_hex: memoHex,
         usd,
@@ -163,4 +183,4 @@ function makeThemeBuyHandlers({ store, rate, broadcast, env = process.env, now =
   return { quote, claim, owned };
 }
 
-module.exports = { PACKS, MEMO_TAG, memoScript, themeBuyStore, makeThemeBuyHandlers };
+module.exports = { PACKS, PACK_LABELS, MEMO_TAG, memoScript, themeBuyStore, makeThemeBuyHandlers };

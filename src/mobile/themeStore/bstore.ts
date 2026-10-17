@@ -3,6 +3,7 @@
  * prohibited list. Pure data and validation: no network, no payments. The server side (bit-sign listings CRUD,
  * review queue, receipts, renewals) is a spec in docs/BSTORE.md and not built yet.
  */
+import { artOk } from '../storeReceipt/receipt';
 
 /** Seller share of every bStore sale (owner decision, 16 Oct 2026). Configurable: change it here only. */
 export const SELLER_SHARE = 0.8;
@@ -63,6 +64,8 @@ export interface Listing {
   status: ListingStatus;
   /** Seeded placeholder, not a real offer. */
   example?: boolean;
+  /** The seller's picture for this sale's receipts (inline data URI, storeReceipt/receipt.ts artOk). */
+  receiptArt?: string;
 }
 
 export const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
@@ -79,6 +82,8 @@ export interface Draft {
   type: ListingType;
   period?: Period;
   perks?: string;
+  /** Optional receipt picture (storeReceipt/art.ts readReceiptArt makes it). */
+  receiptArt?: string;
 }
 
 /** Validate a sell-flow draft. Returns errors (empty when OK) and the listing to submit (status pending). */
@@ -95,6 +100,7 @@ export function draftToListing(d: Draft, id: string): { errors: string[]; listin
   if (!Number.isFinite(n) || priceCents < 1 || priceCents > 1_000_000) errors.push('Price: $0.01 to $10,000.');
   if (d.type === 'subscription' && !d.period) errors.push('Pick a period for the subscription.');
   if (d.images.length > 6) errors.push('Up to 6 images.');
+  if (d.receiptArt && !artOk(d.receiptArt)) errors.push('Receipt art: a PNG, JPEG or WebP picture up to 60 KB.');
   if (errors.length) return { errors };
   const perks = (d.perks ?? '')
     .split('\n')
@@ -113,6 +119,7 @@ export function draftToListing(d: Draft, id: string): { errors: string[]; listin
       priceCents,
       type: d.type,
       ...(d.type === 'subscription' ? { period: d.period, perks } : {}),
+      ...(d.receiptArt ? { receiptArt: d.receiptArt } : {}),
       status: 'pending',
     },
   };

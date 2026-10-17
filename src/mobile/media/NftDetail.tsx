@@ -20,6 +20,8 @@ import { nftCreator } from '../tip/tip';
 import { celebrateSend } from '../../components/sent/sent';
 import { nftSendButton, shortAddr } from './nftSend';
 import { txidOf, walletTxStates } from './unbroadcast';
+import { ReceiptBadge } from '../storeReceipt/ReceiptBadge';
+import { isStoreReceipt } from '../storeReceipt/receipt';
 import {
   BURN_HOLD_MS,
   BURN_WORD,
@@ -219,6 +221,7 @@ export const NftDetail = ({
           origin={origin}
           chainLink={link || undefined}
         />
+        {isStoreReceipt(item.output.tags) && <ReceiptBadge txid={txidOf(item.output.outpoint)} />}
         {nftCreator(item.output.tags) && (
           <TipButton
             to={nftCreator(item.output.tags)!}
