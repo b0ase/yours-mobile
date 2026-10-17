@@ -1,5 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import { healInvalidSend, healMessage, isInvalidTxReview, namedSpentInputs, provenSpent } from './invalidSendHeal';
+import {
+  healInvalidSend,
+  healMessage,
+  isInvalidTxReview,
+  namedSpentInputs,
+  provenSpent,
+  resyncMessage,
+  resyncSpent,
+} from './invalidSendHeal';
 
 const T = (c: string) => c.repeat(64);
 const review = (status: string) =>
@@ -74,5 +82,35 @@ describe('healMessage', () => {
     expect(healMessage({ checked: 2, released: 2 })).toBe(
       ' 2 coins were already spent elsewhere (another device?); cleared — tap Send again.',
     );
+  });
+});
+
+describe('resyncSpent (Settings › Resync coins)', () => {
+  const A = 'a'.repeat(64);
+  const B = 'b'.repeat(64);
+  const C = 'c'.repeat(64);
+  const SPENDER = 'f'.repeat(64);
+  test('clears only coins with a named spender; a failed lookup keeps the coin', async () => {
+    const marked: string[] = [];
+    const store = { markSpent: async (t: string, v: number) => (marked.push(`${t}_${v}`), 1) };
+    const getSpend = async (op: string) => {
+      if (op.startsWith(A)) return SPENDER;
+      if (op.startsWith(B)) throw new Error('indexer down');
+      return null;
+    };
+    const progress: number[] = [];
+    const r = await resyncSpent([`${A}_0`, `${B}_1`, `${C}_2`], getSpend, store, {
+      onProgress: (n) => progress.push(n),
+    });
+    expect(marked).toEqual([`${A}_0`]);
+    expect(r).toMatchObject({ checked: 3, released: 1 });
+    expect(progress).toEqual([1, 2, 3]);
+    expect(resyncMessage(r)).toContain('1 had already been spent');
+  });
+  test('the fallback (WhatsOnChain) can name the spender when the first index does not', async () => {
+    const store = { markSpent: async () => 1 };
+    const r = await resyncSpent([`${C}_0`], async () => null, store, { fallback: async () => SPENDER });
+    expect(r.released).toBe(1);
+    expect(resyncMessage({ checked: 4, released: 0 })).toContain('all still spendable');
   });
 });

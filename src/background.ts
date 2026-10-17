@@ -16,7 +16,14 @@ import { RequestParams, ResponseEventDetail, YoursEventName } from './inject';
 import { recordCall, recordPayment, requestedSats, updateConnectionLog } from './mobile/wallet/connectionLog';
 import { CWIEventName } from './cwi';
 import { describeWalletError } from './brand/walletError';
-import { healInvalidSend, healMessage, isInvalidTxReview, type HealReport } from './services/invalidSendHeal';
+import {
+  healInvalidSend,
+  healMessage,
+  isInvalidTxReview,
+  resyncMessage,
+  resyncSpent,
+  type HealReport,
+} from './services/invalidSendHeal';
 import { refusalFor } from './services/broadcastRefusals';
 import type {
   ListOutputsArgs,
@@ -1394,6 +1401,7 @@ if (isInServiceWorker) {
       'STORAGE_REPAIR_SYNC',
       'STORAGE_RECOVER_MINED',
       'STORAGE_RECOVER_TXID',
+      'STORAGE_RESYNC_COINS',
       'STORAGE_RESTORE_BACKUP',
       'BSV21_FIX_STALE',
       'BSV21_FIX_UNSEEN',
@@ -1715,6 +1723,9 @@ if (isInServiceWorker) {
           return true;
         case 'STORAGE_RECOVER_TXID':
           processRecoverTxid(typeof message.txid === 'string' ? message.txid : '', sendResponse);
+          return true;
+        case 'STORAGE_RESYNC_COINS':
+          processResyncCoins(sendResponse);
           return true;
         case 'STORAGE_RESTORE_BACKUP':
           processRestoreBackup(sendResponse);
@@ -2117,6 +2128,51 @@ if (isInServiceWorker) {
   /** Live step text for Settings › Troubleshooting (owner, 15 Oct 2026: no more silent "Checking…"). */
   const sendRecoverProgress = (kind: 'txid' | 'mined', step: string) => {
     chrome.runtime.sendMessage({ action: 'RECOVER_PROGRESS', data: { kind, step } }).catch(() => undefined);
+  };
+
+  /** Settings › Troubleshooting › Resync coins: clear coins the chain proves were spent elsewhere (resyncSpent). */
+  const processResyncCoins = async (sendResponse: CallbackResponse) => {
+    try {
+      await ensureWallet(true);
+      if (!accountContext) throw new Error('Wallet not initialized');
+      const ctx = accountContext;
+      const { account } = chromeStorageService.getCurrentAccountObject();
+      const identityKey = account?.pubKeys?.identityPubKey || '';
+      const txo = (ctx.syncContext.services as unknown as { txo?: { getSpend: (o: string) => Promise<string | null> } })
+        .txo;
+      if (!identityKey || !txo) throw new Error('Wallet services are not ready yet. Try again in a moment.');
+      const outpoints = await ctx.storage.runAsStorageProvider(async (sp) => {
+        const user = (await sp.findUsers({ partial: { identityKey } }))[0];
+        if (!user) return [] as string[];
+        return (await sp.findOutputs({ partial: { userId: user.userId, spendable: true } }))
+          .filter((o) => !!o.txid)
+          .map((o) => `${o.txid}_${o.vout}`);
+      });
+      sendRecoverProgress('txid', `Checking ${outpoints.length} coins…`);
+      const report = await resyncSpent(
+        outpoints,
+        (o) => txo.getSpend(o),
+        {
+          markSpent: (txid, vout) =>
+            ctx.storage.runAsStorageProvider(async (sp) => {
+              const user = (await sp.findUsers({ partial: { identityKey } }))[0];
+              if (!user) return 0;
+              let n = 0;
+              for (const o of await sp.findOutputs({ partial: { userId: user.userId, txid, vout, spendable: true } }))
+                n += await sp.updateOutput(o.outputId, { spendable: false });
+              return n;
+            }),
+        },
+        {
+          fallback: wocSpend,
+          onProgress: (done) => sendRecoverProgress('txid', `Checked ${done} of ${outpoints.length} coins…`),
+        },
+      );
+      console.log('[STORAGE_RESYNC_COINS]', report);
+      sendResponse({ type: 'STORAGE_RESYNC_COINS', success: true, data: { report, summary: resyncMessage(report) } });
+    } catch (err) {
+      sendResponse({ type: 'STORAGE_RESYNC_COINS', success: false, error: err instanceof Error ? err.message : String(err) });
+    }
   };
 
   /** Settings › Troubleshooting › Recover a payment by transaction ID (services/recoverByTxid.ts). */
