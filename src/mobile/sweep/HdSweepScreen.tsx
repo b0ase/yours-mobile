@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, ArrowLeft, Check, ChevronDown, ChevronRight, Loader2, X } from 'lucide-react';
 import { HD, Mnemonic, PrivateKey } from '@bsv/sdk';
@@ -45,6 +45,7 @@ import {
   type Result,
 } from './plan';
 import { mapLimit, rateLimiter, withBeefCache } from './speed';
+import { RelayxJigs } from './RelayxJigs';
 import { requestWalletRefresh, useGoToWallet } from '../wallet/walletRefresh';
 
 const GOLD = 'var(--bw-accent-hi)';
@@ -365,7 +366,7 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
       const tokens: TokenBalance[] = [];
       for (const { r, wif } of scanned) {
         const own = (o: IndexedOutput) => keyFor.set(o.outpoint, wif);
-        [...r.funding, ...r.ordinals, ...r.opnsNames, ...r.bsv20Tokens, ...r.locked].forEach(own);
+        [...r.funding, ...r.ordinals, ...r.opnsNames, ...r.bsv20Tokens, ...r.locked, ...r.runJigs].forEach(own);
         r.bsv21Tokens.forEach((t) => t.outputs.forEach(own));
         assets.funding.push(...r.funding);
         assets.ordinals.push(...r.ordinals);
@@ -515,6 +516,16 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
   const shown = visibleResults(results);
   const skipped = a ? a.opnsNames.length + a.bsv20Tokens.length + a.locked.length : 0;
   const jigs = a ? a.runJigs.length : 0;
+  // Run NFTs found here, with the address that holds each (read-only importer, RelayxJigs).
+  const heldJigs = useMemo(() => {
+    const addr = new Map<string, string>();
+    return (found?.assets.runJigs ?? []).flatMap((o) => {
+      const wif = found?.keyFor.get(o.outpoint);
+      if (!wif) return [];
+      if (!addr.has(wif)) addr.set(wif, PrivateKey.fromWif(wif).toAddress());
+      return [{ outpoint: o.outpoint, address: addr.get(wif)! }];
+    });
+  }, [found]);
   const fx = latestUsdPerGbp()?.rate;
   const bigBsv = !!a && selected.has('bsv') && overBetaLimit(a.totalBsv, cachedExchangeRate(), fx);
   const canTest =
@@ -666,6 +677,16 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
                 </p>
               )}
             </div>
+            {!!heldJigs.length && (
+              <RelayxJigs
+                held={heldJigs}
+                getHex={async (txid) => {
+                  const r = await wocGet(`/tx/${txid}/hex`);
+                  if (!r?.ok) throw new Error('could not read ' + txid.slice(0, 8));
+                  return (await r.text()).trim();
+                }}
+              />
+            )}
             {!!plan?.possibleTokens.length && (
               <div className="rounded-2xl p-4 flex flex-col gap-1" style={{ background: PANEL }}>
                 <p className="flex items-center gap-1.5 text-xs font-semibold text-white">
