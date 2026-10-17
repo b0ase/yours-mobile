@@ -9,6 +9,7 @@ import {
   retryUnread,
   createJigMemo,
   scanRelayx,
+  wifAt,
   wordsProblem,
   type Found,
   type ScanResult,
@@ -16,6 +17,7 @@ import {
 } from '../../sweep/relayxRecover';
 import { loadNpgMaps, splitOutpoint, type NpgMap } from '../../sweep/runIdentify';
 import { HdSweepScreen } from './HdSweepScreen';
+import { useServiceContext } from '../../hooks/useServiceContext';
 import { NpgMelt } from './NpgMelt';
 
 /**
@@ -211,7 +213,18 @@ function Row({ f, onOpen }: { f: Found; onOpen: () => void }) {
   );
 }
 
-function Detail({ f, onClose, onSearch }: { f: Found; onClose: () => void; onSearch: () => void }) {
+function Detail({
+  f,
+  onClose,
+  onSearch,
+  account,
+}: {
+  f: Found;
+  onClose: () => void;
+  onSearch: () => void;
+  /** A restored RelayX account: its own keys can melt, no words needed. */
+  account?: boolean;
+}) {
   const tx = f.origin ? splitOutpoint(f.origin).txid : '';
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -293,7 +306,7 @@ function Detail({ f, onClose, onSearch }: { f: Found; onClose: () => void; onSea
             className="h-12 w-full rounded-xl border-0 text-[15px] font-semibold cursor-pointer"
             style={{ background: BLUE, color: '#fff' }}
           >
-            Enter your words to melt her
+            {account ? 'Melt her' : 'Enter your words to melt her'}
           </button>
         ) : f.n !== undefined ? (
           <NpgMelt jig={f} wif={f.wif} art={f.art} size="lg" />
@@ -323,6 +336,14 @@ export function RelayxRecoverScreen({ onBack, xpub }: { onBack: () => void; xpub
   });
   const [open, setOpen] = useState<Found | null>(null);
   const [sweep, setSweep] = useState(false);
+  // A restored RelayX account uses its own words (the wallet is unlocked): Bring it in and Melt need nothing typed.
+  const { keysService } = useServiceContext();
+  const [sweepWords, setSweepWords] = useState<string | undefined>();
+  const accountWords = async () => {
+    const k = (await keysService.retrieveKeys()) as { mnemonic?: string };
+    if (!k.mnemonic) throw new Error("This account's words aren't available.");
+    return k.mnemonic;
+  };
   const [retrying, setRetrying] = useState(false);
   // NFTs found so far, shown while the scan runs; refreshed at most every 600 ms so 1,800 tiles don't re-render
   // on every read (owner, 17 Oct 2026: "nothing displays" during a long scan).
@@ -424,7 +445,7 @@ export function RelayxRecoverScreen({ onBack, xpub }: { onBack: () => void; xpub
       </section>
     ));
 
-  if (sweep) return <HdSweepScreen onBack={() => setSweep(false)} />;
+  if (sweep) return <HdSweepScreen initialPhrase={sweepWords} onBack={() => setSweep(false)} />;
 
   return createPortal(
     <div className="fixed inset-0 z-[150] flex flex-col" style={{ background: 'var(--bw-bg, #0B0C0E)' }}>
@@ -659,15 +680,24 @@ export function RelayxRecoverScreen({ onBack, xpub }: { onBack: () => void; xpub
               {phase.result.otherSats > 0 && (
                 <button
                   type="button"
-                  onClick={() => setSweep(true)}
+                  onClick={() => {
+                    if (!xpub) return setSweep(true);
+                    void accountWords()
+                      .then((w) => {
+                        setSweepWords(w);
+                        setSweep(true);
+                      })
+                      .catch(() => setSweep(true));
+                  }}
                   className="flex items-center justify-between gap-3 rounded-xl border-0 bg-transparent px-3.5 py-3 text-left cursor-pointer hover:brightness-125"
                   style={{ boxShadow: `inset 0 0 0 1px ${LINE}` }}
                 >
                   <span className="text-[13px]" style={{ color: MUTED }}>
-                    These words also hold {bsv(phase.result.otherSats)} BSV
+                    {xpub ? 'Its old RelayX addresses also hold' : 'These words also hold'}{' '}
+                    {bsv(phase.result.otherSats)} BSV
                   </span>
                   <span className="inline-flex items-center gap-1 text-[13px] font-medium" style={{ color: INK }}>
-                    Bring it in <ArrowRight size={14} />
+                    {xpub ? 'Move it into this account' : 'Bring it in'} <ArrowRight size={14} />
                   </span>
                 </button>
               )}
@@ -679,7 +709,14 @@ export function RelayxRecoverScreen({ onBack, xpub }: { onBack: () => void; xpub
         <Detail
           f={open}
           onClose={() => setOpen(null)}
+          account={!!xpub && !!open.path}
           onSearch={() => {
+            if (xpub && open.path) {
+              void accountWords()
+                .then((w) => setOpen({ ...open, wif: wifAt(w, open.path!) }))
+                .catch(() => undefined);
+              return;
+            }
             setOpen(null);
             setPhase({ k: 'enter' });
           }}

@@ -185,9 +185,10 @@ const BRC100_NOTE =
  *
  * The phrase, key and passphrase live only in this screen's state; they are cleared on leaving.
  */
-export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
+/** `initialPhrase`: words to start from (a restored RelayX account's own), searched straight away. */
+export const HdSweepScreen = ({ onBack, initialPhrase }: { onBack: () => void; initialPhrase?: string }) => {
   const { apiContext } = useServiceContext();
-  const [phrase, setPhrase] = useState('');
+  const [phrase, setPhrase] = useState(initialPhrase ?? '');
   const [passphrase, setPassphrase] = useState('');
   const [advanced, setAdvanced] = useState(false);
   const [customPath, setCustomPath] = useState('');
@@ -410,6 +411,14 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
     }
   };
 
+  const autoScanned = useRef(false);
+  useEffect(() => {
+    if (!initialPhrase || autoScanned.current) return;
+    autoScanned.current = true;
+    void scan();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on open
+  }, []);
+
   /** testOnly: BSV only, and only the smallest coins adding up to the test amount (beta, 15 Oct 2026). */
   const sweep = async (testOnly = false) => {
     if (!found) return;
@@ -547,7 +556,13 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
         <span className="text-[16px] font-bold text-white">Sweep from another wallet</span>
       </div>
       <div className="flex-1 overflow-y-auto p-4 pb-24 flex flex-col gap-4">
-        {step === 'enter' && (
+        {step === 'enter' && initialPhrase && (
+          // A restored RelayX account's own words: never shown, searched straight away.
+          <p className="text-xs" style={{ color: error ? '#F97066' : MUTED }}>
+            {error || "Looking at this account's old RelayX addresses…"}
+          </p>
+        )}
+        {step === 'enter' && !initialPhrase && (
           <>
             <p className="text-xs" style={{ color: MUTED }}>
               Move everything from another wallet (bWalletX, Yours, Money Button, RelayX, Twetch, SimplyCash and other

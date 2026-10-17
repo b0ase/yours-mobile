@@ -8,6 +8,7 @@ import {
   keyAt,
   relayxAccount,
   relayxXpub,
+  wifAt,
   scanRelayx,
   wordsProblem,
   type Found,
@@ -98,6 +99,10 @@ describe('scan', () => {
     expect(x.nfts.map((n) => [n.title, n.address, n.wif])).toEqual([['NPG #2730', nft.address, '']]);
     expect(x.addresses).toBe(2);
     expect(relayxXpub(WORDS).startsWith('xpub')).toBe(true);
+    // The account's words give back each NFT's key from its path, for melting from a restored account.
+    expect(x.nfts[0].path).toBe("m/44'/236'/0'/2/0");
+    expect(wifAt(WORDS, x.nfts[0].path!)).toBe(nft.wif);
+    expect(() => wifAt(WORDS, "m/44'/0'/0'/0/0")).toThrow();
   });
 
   test('remembers what each output is, so a second search downloads nothing', async () => {

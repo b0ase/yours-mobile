@@ -46,6 +46,13 @@ export const relayxXpub = (words: string): string => relayxAccount(words).toPubl
 
 /** Words, or a saved xpub: what a search starts from. */
 export type RelayxSource = string | { xpub: string };
+
+/** The private key for one found NFT, from the account's words and its `path` (a restored RelayX account). */
+export function wifAt(words: string, path: string): string {
+  const m = /^m\/44'\/236'\/0'\/(\d+)\/(\d+)$/.exec(path);
+  if (!m) throw new Error(`Not a RelayX path: ${path}`);
+  return keyAt(relayxAccount(words), Number(m[1]), Number(m[2])).wif;
+}
 const accountOf = (src: RelayxSource): HD => (typeof src === 'string' ? relayxAccount(src) : HD.fromString(src.xpub));
 
 /** The key at chain/i. From an xpub there is no private key: `wif` is '' and melting needs the words or password. */
@@ -56,7 +63,8 @@ export function keyAt(account: HD, chain: number, i: number): RelayxKey {
   return { path, address: node.privKey.toAddress(), wif: node.privKey.toWif() };
 }
 
-export type Found = IdentifiedJig & { address: string; wif: string; unread?: boolean };
+/** `path`: where it sits (m/44'/236'/0'/2/i), so a restored account can work out its key later (wifAt). */
+export type Found = IdentifiedJig & { address: string; wif: string; path?: string; unread?: boolean };
 export type ScanStep =
   | { k: 'addresses'; checked: number }
   | { k: 'outputs'; addresses: number }
@@ -161,10 +169,10 @@ export async function scanRelayx(
     if (signal?.cancelled) break;
   }
   onStep({ k: 'outputs', addresses: keys.length });
-  const utxos: (Utxo & { wif: string })[] = [];
+  const utxos: (Utxo & { wif: string; path: string })[] = [];
   for (const k of keys) {
     if (signal?.cancelled) break;
-    for (const u of await reader.unspent(k.address)) utxos.push({ ...u, wif: k.wif });
+    for (const u of await reader.unspent(k.address)) utxos.push({ ...u, wif: k.wif, path: k.path });
   }
   const dust = utxos.filter((u) => JIG_DUST.has(u.sats));
   const rest = utxos.filter((u) => !JIG_DUST.has(u.sats));
@@ -177,7 +185,7 @@ export async function scanRelayx(
     const jig = known !== undefined ? !!known : await isJigOutput(u, reader, maps);
     if (jig === false) memo?.set(location, null);
     let item: Found | null = null;
-    if (known) item = { ...known, address: u.address, wif: u.wif };
+    if (known) item = { ...known, address: u.address, wif: u.wif, path: u.path };
     else if (jig === 'unread')
       item = {
         location,
@@ -186,14 +194,23 @@ export async function scanRelayx(
         collection: '',
         address: u.address,
         wif: u.wif,
+        path: u.path,
         unread: true,
       };
     else if (jig) {
       const id = await identifyJig(location, reader.getTx, maps);
       if (id.origin) memo?.set(location, id);
       item = id.origin
-        ? { ...id, address: u.address, wif: u.wif }
-        : { ...id, title: "Couldn't read this one", collection: '', address: u.address, wif: u.wif, unread: true };
+        ? { ...id, address: u.address, wif: u.wif, path: u.path }
+        : {
+            ...id,
+            title: "Couldn't read this one",
+            collection: '',
+            address: u.address,
+            wif: u.wif,
+            path: u.path,
+            unread: true,
+          };
     }
     if (item) nfts.push(item);
     onStep({
