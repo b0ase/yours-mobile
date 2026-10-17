@@ -426,3 +426,37 @@ export const fetchDisplayName = async (f: Fetch, paymail: string): Promise<strin
     return '';
   }
 };
+
+let bindFlight: Promise<number> | null = null;
+/**
+ * Sign the binding for every name of this wallet that isn't signed by it yet (docs/NAME-BINDINGS.md). Silent:
+ * it signs only "my name -> my key", which any wallet then checks before paying. Returns how many it signed.
+ */
+export const bindMyNames = (
+  f: Fetch,
+  wallet: Pick<WalletInterface, 'getPublicKey' | 'createSignature'>,
+  identityKey: string,
+): Promise<number> => {
+  if (!paymailEnabled()) return Promise.resolve(0);
+  if (bindFlight) return bindFlight;
+  bindFlight = (async () => {
+    const { checkBinding } = await import('./binding');
+    let signed = 0;
+    for (const n of await listPaymails(f, identityKey)) {
+      const alias = aliasOf(n.paymail);
+      const r = await f(api(`id/${alias}@${BWALLET_PAYMAIL_DOMAIN}`)).catch(() => null);
+      const id = r?.ok
+        ? ((await r.json().catch(() => null)) as { pubkey?: string; binding?: { seq?: number } } | null)
+        : null;
+      if (!id || String(id.pubkey ?? '').toLowerCase() !== identityKey.toLowerCase()) continue;
+      if ((await checkBinding(alias, id.pubkey, id.binding)) === 'signed') continue;
+      const seq = String((Number(id.binding?.seq) || 0) + 1);
+      await postJson(f, api('bind'), await signRequest(wallet, 'bind', { alias, seq })).catch(() => undefined);
+      signed++;
+    }
+    return signed;
+  })().finally(() => {
+    bindFlight = null;
+  });
+  return bindFlight;
+};

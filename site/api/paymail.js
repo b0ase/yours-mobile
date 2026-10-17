@@ -43,6 +43,9 @@ const ROUTES = {
   'bphone-book-act': ['POST', 'bphone-book-act'],
   // Settings › Identity › Your name (signed): one display name for every paymail on the key.
   'set-name': ['POST', 'set-name'],
+  // Signed name bindings + public log (docs/NAME-BINDINGS.md).
+  bind: ['POST', 'bind'],
+  'name-log': ['GET', 'name-log'],
 };
 
 const hits = new Map();
@@ -89,7 +92,7 @@ module.exports = async function handler(req, res) {
     'Cache-Control',
     route[1] === 'caps'
       ? 'public, max-age=300'
-      : route[1] === 'bphone-get' || route[1] === 'bphone-directory'
+      : route[1] === 'bphone-get' || route[1] === 'bphone-directory' || route[1] === 'name-log'
         ? 'public, max-age=30'
         : 'no-store',
   );

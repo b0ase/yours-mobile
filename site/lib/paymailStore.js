@@ -134,6 +134,20 @@ function supabaseStore(env = process.env, f = fetch) {
           `bwallet_paymail_name_events?ip_hash=eq.${q(ipHash)}&created_at=gte.${q(since)}&select=id&limit=1000`,
         )) ?? []
       ).length,
+    // Signed name bindings + the public append-only log (migrations/20261017_name_bindings.sql).
+    getBinding: (alias) => one(`bwallet_name_bindings?alias=eq.${q(alias)}&limit=1`),
+    putBinding: (row) =>
+      req('bwallet_name_bindings', {
+        method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify(row),
+      }),
+    logName: (row) =>
+      req('bwallet_name_log', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(row) }),
+    nameLog: async (alias, limit = 200) =>
+      (await req(
+        `bwallet_name_log?${alias ? `alias=eq.${q(alias)}&` : ''}select=id,alias,identity_key,prev_identity_key,action,actor,seq,signature,note,prev_hash,entry_hash,created_at&order=id.desc&limit=${limit}`,
+      )) ?? [],
     recordNameEvent: (row) =>
       req('bwallet_paymail_name_events', {
         method: 'POST',

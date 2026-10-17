@@ -244,6 +244,16 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
                       Did you mean {r.didYouMean}? (a bWalletX name)
                     </button>
                   )}
+                  {r.nameBinding === 'signed' && (
+                    <div className="text-[11px] flex items-center gap-1" style={{ color: '#2ecc71' }}>
+                      <Check size={11} /> Signed by its owner · bound to {short(r.pubkey ?? '')}
+                    </div>
+                  )}
+                  {r.nameBinding === 'unsigned' && (
+                    <div className="text-[11px]" style={{ color: gray }}>
+                      Not signed by its owner yet
+                    </div>
+                  )}
                   {opnsBinding(r) === 'bound' && (
                     <div className="text-[11px] flex items-center gap-1" style={{ color: '#2ecc71' }}>
                       <Check size={11} /> Verified on chain · bound to {short(r.pubkey ?? '')}
