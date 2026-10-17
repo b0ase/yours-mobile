@@ -16,7 +16,7 @@ import {
   type ThemePack,
 } from './themePack';
 
-const JSON_PATH = resolve(__dirname, '../../../site/api/themes.json');
+const JSON_PATH = resolve(__dirname, '../../../site/lib/themes.json');
 const catalogJson = () => ({ format: THEME_PACK_FORMAT, tiers: THEME_TIERS, packs: BUNDLED_PACKS });
 
 const TOKEN = `${'ab'.repeat(32)}_0`;
@@ -40,7 +40,7 @@ describe('theme pack format (bwx-theme/1)', () => {
     }
   });
 
-  it('site/api/themes.json matches the bundled packs (WRITE_THEMES=1 regenerates it)', () => {
+  it('site/lib/themes.json matches the bundled packs (WRITE_THEMES=1 regenerates it)', () => {
     const want = JSON.stringify(catalogJson(), null, 2) + '\n';
     if (process.env.WRITE_THEMES === '1') writeFileSync(JSON_PATH, want);
     expect(readFileSync(JSON_PATH, 'utf8')).toBe(want);
