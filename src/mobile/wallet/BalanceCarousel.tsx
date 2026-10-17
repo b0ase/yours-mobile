@@ -576,11 +576,6 @@ const TimeMachine = ({
         <div className="bw-tm-stars" />
         <div className="bw-tm-head">
           <b>All cards</b>
-          <span>
-            <button type="button" onClick={onClose}>
-              Close
-            </button>
-          </span>
         </div>
         <div className="bw-tm-stage">
           {cards.map((c, i) => {
@@ -619,6 +614,11 @@ const TimeMachine = ({
           <button type="button" onClick={onBook}>
             <BookUser size={16} aria-hidden="true" />
             <span>Address book</span>
+          </button>
+          {/* Close sits between the doors in the theme's own colours (owner, 17 Oct 2026). */}
+          <button type="button" onClick={onClose}>
+            <X size={16} aria-hidden="true" />
+            <span>Close</span>
           </button>
           <button type="button" onClick={onCalendar}>
             <CalendarDays size={16} aria-hidden="true" />
