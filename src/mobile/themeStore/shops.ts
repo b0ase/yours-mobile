@@ -1,5 +1,6 @@
 import npgBanner from '../wallet/art/npg/npg-1.webp';
 import npgLogo from '../../web/themes/icon-npg-192.png';
+import npgxLogo from '../../web/themes/icon-npgx-192.png';
 import vexLogo from '../../web/themes/icon-vexvoid-192.png';
 
 /**
@@ -29,7 +30,16 @@ export const SHOPS: readonly Shop[] = [
     logo: npgLogo,
     banner: npgBanner,
     colour: '#FF2E93',
-    themes: ['npg', 'npgx'],
+    themes: ['npg'],
+  },
+  {
+    id: 'npgx',
+    name: 'NPGX',
+    owner: 'bWalletX',
+    blurb: 'Black and red',
+    logo: npgxLogo,
+    colour: '#FF2D3A',
+    themes: ['npgx'],
   },
   {
     id: 'vexvoid',
