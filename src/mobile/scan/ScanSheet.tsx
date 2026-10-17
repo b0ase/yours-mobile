@@ -98,8 +98,9 @@ export default function ScanSheet({
   const big = 'flex w-full min-h-[48px] items-center justify-center gap-2 rounded-xl py-3 font-bold border-0';
 
   return createPortal(
-    <div className="fixed inset-0 z-[420] flex flex-col" style={{ background: 'var(--bw-bg)' }}>
-      <div className="flex items-center gap-2 px-2 pb-2" style={{ paddingTop: 'max(env(safe-area-inset-top), 12px)' }}>
+    // Between the app's bars (owner, 17 Oct 2026: it ran under the tab bar).
+    <div className="bw-between-bars z-[420] flex flex-col" style={{ background: 'var(--bw-bg)' }}>
+      <div className="flex items-center gap-2 px-2 py-2">
         <button
           onClick={stage.k === 'scan' ? onClose : () => setStage({ k: 'scan' })}
           aria-label="Back"
@@ -150,7 +151,7 @@ export default function ScanSheet({
         {stage.k === 'mine' && (
           <div className="mt-6 flex flex-col items-center text-center">
             {/* Owner, 17 Oct 2026: show the bAvatar; tap it to turn over to the pay code (FlipBavatar). */}
-            <MyFlipBavatar address={myAddress} size={200} backSize={260} />
+            <MyFlipBavatar address={myAddress} size={240} />
             {names.paymail && <p className="mt-4 text-base font-bold text-white">{names.paymail}</p>}
             <p className="mt-2 break-all font-mono text-xs" style={{ color: MUTED }}>
               {myAddress}

@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { flipBackSvg, flipPayload } from './flipQr';
 import { svgDataUri } from '../wallet/cardBackQr';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -8,9 +8,11 @@ import { AccountAvatar } from '../names/AccountAvatar';
 
 /**
  * A bAvatar that turns over (owner, 14 Oct 2026). Front: the avatar as it is. Back: the bAvatar Art QR (as on
- * bwalletx.com/bavatars) on a rounded card, paying this person (`bitcoin:<address>` or their paymail; public data only, built on the device). Tap to flip, tap again
- * to flip back; reduced motion crossfades (mobile.css .bw-bflip). The back grows to `backSize` so the code is
- * big enough for a phone camera even when the avatar is small. No pay target → just the front, not a button.
+ * bwalletx.com/bavatars) on a rounded card, paying this person (`bitcoin:<address>` or their paymail; public data
+ * only, built on the device). Tap to turn it over, tap again to turn back: a 2D turn in a fixed frame, the face
+ * swapping when it is edge-on (mobile.css .bw-bflip; owner 17 Oct 2026: the old 3D flip grew and swung out of
+ * frame). The back is `backSize` when given, so the code is big enough for a phone camera.
+ * No pay target → just the front, not a button.
  */
 export const FlipBavatar = ({
   front,
@@ -33,29 +35,42 @@ export const FlipBavatar = ({
   label?: string;
 }) => {
   const [flipped, setFlipped] = useState(false);
+  const [turning, setTurning] = useState(false);
+  const timers = useRef<number[]>([]);
+  useEffect(() => () => timers.current.forEach(clearTimeout), []);
   const payload = flipPayload(address, paymail);
   const back = useMemo(
     () => (payload ? svgDataUri(flipBackSvg(artSeed, payload, { size: 512 })) : ''),
     [artSeed, payload],
   );
   if (!back) return <>{front}</>;
-  const px = flipped ? Math.max(size, backSize ?? 200) : size;
+  // The size changes only at the midpoint, edge-on, so the turn itself never grows or swings.
+  const px = flipped ? Math.max(size, backSize ?? size) : size;
+  const turn = () => {
+    if (turning) return;
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return setFlipped((f) => !f);
+    setTurning(true);
+    timers.current.push(
+      window.setTimeout(() => setFlipped((f) => !f), 220),
+      window.setTimeout(() => setTurning(false), 440),
+    );
+  };
   return (
     <button
       type="button"
-      className={`bw-bflip${flipped ? ' is-flipped' : ''}`}
+      className={`bw-bflip${turning ? ' is-turning' : ''}`}
       style={{ width: px, height: px }}
-      onClick={() => setFlipped((f) => !f)}
+      onClick={turn}
       aria-pressed={flipped}
       aria-label={flipped ? `${label}: showing pay code, tap to turn back` : `${label}: tap to show pay code`}
       data-testid="bavatar-flip"
     >
-      <span className="bw-bflip-inner">
-        <span className="bw-bflip-face bw-bflip-front">{front}</span>
-        <span className="bw-bflip-face bw-bflip-back">
-          <img src={back} alt={`Pay code for ${caption || payload}`} draggable={false} />
-          {caption && <span className="bw-bflip-caption">{caption}</span>}
-        </span>
+      <span className="bw-bflip-face bw-bflip-front" aria-hidden={flipped}>
+        {front}
+      </span>
+      <span className="bw-bflip-face bw-bflip-back" aria-hidden={!flipped}>
+        <img src={back} alt={`Pay code for ${caption || payload}`} draggable={false} />
+        {caption && <span className="bw-bflip-caption">{caption}</span>}
       </span>
     </button>
   );

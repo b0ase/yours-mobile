@@ -265,6 +265,10 @@ export function RelayxRecoverScreen({ onBack }: { onBack: () => void }) {
   const [open, setOpen] = useState<Found | null>(null);
   const [sweep, setSweep] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  // NFTs found so far, shown while the scan runs; refreshed at most every 600 ms so 1,800 tiles don't re-render
+  // on every read (owner, 17 Oct 2026: "nothing displays" during a long scan).
+  const [live, setLive] = useState<readonly Found[]>([]);
+  const liveAt = useRef(0);
   const cancel = useRef({ cancelled: false });
   const ctx = useRef<{ reader: ChainReader; maps: NpgMap[] } | null>(null);
 
@@ -291,7 +295,20 @@ export function RelayxRecoverScreen({ onBack }: { onBack: () => void }) {
       ]);
       if (index?.bbox) setBbox(index.bbox as BBox);
       ctx.current = { reader, maps };
-      const result = await scanRelayx(words, reader, maps, (step) => setPhase({ k: 'scanning', step }), cancel.current);
+      setLive([]);
+      const result = await scanRelayx(
+        words,
+        reader,
+        maps,
+        (step) => {
+          setPhase({ k: 'scanning', step });
+          if (step.k === 'reading' && (Date.now() - liveAt.current > 600 || step.done === step.total)) {
+            liveAt.current = Date.now();
+            setLive(step.items.filter((n) => !n.unread));
+          }
+        },
+        cancel.current,
+      );
       if (cancel.current.cancelled) return setPhase({ k: 'enter' });
       setPhase({ k: 'done', result });
     } catch (e) {
@@ -307,10 +324,37 @@ export function RelayxRecoverScreen({ onBack }: { onBack: () => void }) {
     setRetrying(false);
   };
 
-  const groups = useMemo(() => (phase.k === 'done' ? groupFound(phase.result.nfts) : []), [phase]);
+  const shown = phase.k === 'done' ? phase.result.nfts : phase.k === 'scanning' ? live : null;
+  const groups = useMemo(() => (shown ? groupFound(shown) : []), [shown]);
   const total = phase.k === 'done' ? phase.result.nfts.filter((n) => !n.unread).length : 0;
   const unread = phase.k === 'done' ? phase.result.nfts.filter((n) => n.unread).length : 0;
   const boxOf = (f: Found) => (f.n !== undefined ? bbox[pad(f.n)] : undefined);
+
+  const gallery = groups
+    .filter((g) => g.key !== 'unread')
+    .map((g) => (
+      <section key={g.key} className="flex flex-col gap-3">
+        <h3 className="m-0 flex items-baseline justify-between text-[13px] font-medium" style={{ color: INK }}>
+          {g.title}
+          <span className="tabular-nums" style={{ color: MUTED }}>
+            {g.items.length}
+          </span>
+        </h3>
+        {g.key === 's2' || g.key === 's1' ? (
+          <div className="grid grid-cols-3 gap-2.5">
+            {g.items.map((f) => (
+              <Tile key={f.location} f={f} box={boxOf(f)} onOpen={() => setOpen(f)} />
+            ))}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {g.items.map((f) => (
+              <Row key={f.location} f={f} onOpen={() => setOpen(f)} />
+            ))}
+          </div>
+        )}
+      </section>
+    ));
 
   if (sweep) return <HdSweepScreen onBack={() => setSweep(false)} />;
 
@@ -400,6 +444,7 @@ export function RelayxRecoverScreen({ onBack }: { onBack: () => void }) {
           {phase.k === 'scanning' && (
             <div className="flex flex-col gap-5">
               <Progress step={phase.step} />
+              {gallery}
               <button
                 type="button"
                 onClick={() => {
@@ -473,34 +518,7 @@ export function RelayxRecoverScreen({ onBack }: { onBack: () => void }) {
                 </div>
               )}
 
-              {groups
-                .filter((g) => g.key !== 'unread')
-                .map((g) => (
-                  <section key={g.key} className="flex flex-col gap-3">
-                    <h3
-                      className="m-0 flex items-baseline justify-between text-[13px] font-medium"
-                      style={{ color: INK }}
-                    >
-                      {g.title}
-                      <span className="tabular-nums" style={{ color: MUTED }}>
-                        {g.items.length}
-                      </span>
-                    </h3>
-                    {g.key === 's2' || g.key === 's1' ? (
-                      <div className="grid grid-cols-3 gap-2.5">
-                        {g.items.map((f) => (
-                          <Tile key={f.location} f={f} box={boxOf(f)} onOpen={() => setOpen(f)} />
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="flex flex-col gap-2">
-                        {g.items.map((f) => (
-                          <Row key={f.location} f={f} onOpen={() => setOpen(f)} />
-                        ))}
-                      </div>
-                    )}
-                  </section>
-                ))}
+              {gallery}
 
               {phase.result.otherSats > 0 && (
                 <button

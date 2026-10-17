@@ -47,7 +47,8 @@ export type Found = IdentifiedJig & { address: string; wif: string; unread?: boo
 export type ScanStep =
   | { k: 'addresses'; checked: number }
   | { k: 'outputs'; addresses: number }
-  | { k: 'reading'; done: number; total: number; found: number };
+  /** `items`: everything identified so far, so the gallery fills in while a big collection is read. */
+  | { k: 'reading'; done: number; total: number; found: number; items: readonly Found[] };
 export type ScanResult = { nfts: Found[]; otherSats: number; otherOutputs: number; addresses: number };
 
 /** Addresses on one chain that hold anything, walked in bulk windows until GAP empty in a row. */
@@ -141,7 +142,13 @@ export async function scanRelayx(
         : { ...id, title: "Couldn't read this one", collection: '', address: u.address, wif: u.wif, unread: true };
     }
     if (item) nfts.push(item);
-    onStep({ k: 'reading', done: ++done, total: dust.length, found: nfts.filter((n) => !n.unread).length });
+    onStep({
+      k: 'reading',
+      done: ++done,
+      total: dust.length,
+      found: nfts.filter((n) => !n.unread).length,
+      items: nfts,
+    });
     return item;
   });
   // A non-Run dust output (e.g. a 1-sat ordinal) counts toward "also holds".
