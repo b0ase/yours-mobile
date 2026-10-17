@@ -1891,6 +1891,19 @@ button.bw-mail-card:active {
   background: var(--bw-bg);
   color: var(--bw-text, #f2f2f0);
 }
+/* Full screens that keep the app's top bar and bottom tab bar in place (same frame as .bw-cdes). */
+.bw-between-bars {
+  position: fixed;
+  top: calc(var(--wallet-inset-top, 0px) + 3.5rem);
+  right: 0;
+  bottom: calc(var(--dock-h, 0px) + env(safe-area-inset-bottom, 0px));
+  left: 0;
+}
+html.ww-on .bw-between-bars {
+  top: var(--ww-top-h, 0px);
+  left: var(--ww-side-w, 0px);
+  bottom: 0;
+}
 html.ww-on .bw-cdes {
   top: var(--ww-top-h, 0px);
   left: var(--ww-side-w, 0px);
@@ -2447,33 +2460,27 @@ html.ww-on .bw-cdes {
   font-variant-numeric: tabular-nums;
 }
 
-/* Flip bAvatar (owner, 14 Oct 2026): tap your (or someone's profile) bAvatar to turn it over to its pay QR. */
+/* Flip bAvatar (owner, 14 Oct 2026): tap your (or someone's profile) bAvatar to turn it over to its pay QR.
+   Owner, 17 Oct 2026: it must turn over in place, like the wallet card. A 2D turn (no preserve-3d, which iOS
+   WebKit renders badly and which swallowed scroll on the card) in a frame that never changes size; the face
+   swaps at the midpoint, when the frame is edge-on. */
 .bw-bflip {
   position: relative;
   display: inline-block;
+  flex-shrink: 0;
   padding: 0;
   border: 0;
   background: transparent;
-  border-radius: 9999px;
   cursor: pointer;
-  perspective: 900px;
-  transition:
-    width 0.45s cubic-bezier(0.2, 0.7, 0.2, 1),
-    height 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
   -webkit-tap-highlight-color: transparent;
+}
+.bw-bflip.is-turning {
+  animation: bw-wcard-turn 0.44s ease-in-out;
 }
 .bw-bflip:focus-visible {
   outline: 2px solid var(--bw-accent);
-  outline-offset: 3px;
-}
-.bw-bflip-inner {
-  position: absolute;
-  inset: 0;
-  transform-style: preserve-3d;
-  transition: transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1);
-}
-.bw-bflip.is-flipped .bw-bflip-inner {
-  transform: rotateY(180deg);
+  outline-offset: 4px;
+  border-radius: 16%;
 }
 .bw-bflip-face {
   position: absolute;
@@ -2483,8 +2490,9 @@ html.ww-on .bw-cdes {
   justify-content: center;
   border-radius: 9999px;
   overflow: hidden;
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
+}
+.bw-bflip-face[aria-hidden='true'] {
+  visibility: hidden;
 }
 .bw-bflip-face > img,
 .bw-bflip-face > div,
@@ -2493,14 +2501,12 @@ html.ww-on .bw-cdes {
   height: 100% !important;
 }
 .bw-bflip-back {
-  transform: rotateY(180deg);
-  border-radius: 14%;
+  border-radius: 16%;
   background: #fff3cf;
-  box-shadow: 0 0 0 2px var(--bw-accent);
+  box-shadow:
+    0 0 0 1px rgb(var(--bw-accent-hi-rgb, 240 200 100) / 0.55),
+    0 12px 32px -12px rgb(0 0 0 / 0.6);
   flex-direction: column;
-}
-.bw-bflip.is-flipped {
-  border-radius: 14%;
 }
 .bw-bflip-caption {
   position: absolute;
@@ -2523,25 +2529,8 @@ html.ww-on .bw-cdes {
   height: 100%;
 }
 @media (prefers-reduced-motion: reduce) {
-  .bw-bflip,
-  .bw-bflip-inner {
-    transition: none;
-  }
-  .bw-bflip.is-flipped .bw-bflip-inner {
-    transform: none;
-  }
-  .bw-bflip-face {
-    transition: opacity 0.25s ease;
-  }
-  .bw-bflip-back {
-    transform: none;
-    opacity: 0;
-  }
-  .bw-bflip.is-flipped .bw-bflip-back {
-    opacity: 1;
-  }
-  .bw-bflip.is-flipped .bw-bflip-front {
-    opacity: 0;
+  .bw-bflip.is-turning {
+    animation: none;
   }
 }
 
