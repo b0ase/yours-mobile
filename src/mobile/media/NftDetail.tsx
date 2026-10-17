@@ -20,6 +20,7 @@ import { nftCreator } from '../tip/tip';
 import { celebrateSend } from '../../components/sent/sent';
 import { nftSendButton, shortAddr } from './nftSend';
 import { txidOf, walletTxStates } from './unbroadcast';
+import { STORE_BUILD } from '../storeBuild';
 import { ReceiptBadge } from '../storeReceipt/ReceiptBadge';
 import { isStoreReceipt } from '../storeReceipt/receipt';
 import {
@@ -221,7 +222,8 @@ export const NftDetail = ({
           origin={origin}
           chainLink={link || undefined}
         />
-        {isStoreReceipt(item.output.tags) && <ReceiptBadge txid={txidOf(item.output.outpoint)} />}
+        {/* Theme-store receipts: not in the App Store / Play edition (store audit, docs/STORE-AUDIT.md). */}
+        {!STORE_BUILD && isStoreReceipt(item.output.tags) && <ReceiptBadge txid={txidOf(item.output.outpoint)} />}
         {nftCreator(item.output.tags) && (
           <TipButton
             to={nftCreator(item.output.tags)!}
