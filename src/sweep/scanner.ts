@@ -4,7 +4,7 @@
  */
 import type { OneSatServices } from '@1sat/client';
 import type { IndexedOutput } from '@1sat/types';
-import { isRunJig } from './runGuard';
+import { isRunJig, JIG_DUST, runOrUnknownTxids } from './runGuard';
 
 export interface EnrichedOrdinal extends IndexedOutput {
   origin?: string;
@@ -158,7 +158,20 @@ function categorizeOutputs(
     }
   }
 
-  const result = groupBsv21Tokens(bsv21Raw, services).then((bsv21Tokens) => ({
+  // Run jigs of other sizes (1 or 546 sats): check each source tx for the Run marker; hold back unreadable ones.
+  const txidOf = (o: IndexedOutput) => o.outpoint.split(/[._]/)[0];
+  const dust = [...funding, ...rawOrdinals].filter((o) => JIG_DUST.has(o.satoshis ?? 0));
+  const checked = runOrUnknownTxids(dust.map(txidOf), (t) => services.beef.getRawTx(t)).then((bad) => {
+    const keep = (list: IndexedOutput[]) => {
+      const kept = list.filter((o) => !(JIG_DUST.has(o.satoshis ?? 0) && bad.has(txidOf(o))));
+      runJigs.push(...list.filter((o) => !kept.includes(o)));
+      return kept;
+    };
+    funding.splice(0, funding.length, ...keep(funding));
+    rawOrdinals.splice(0, rawOrdinals.length, ...keep(rawOrdinals));
+  });
+
+  const result = Promise.all([groupBsv21Tokens(bsv21Raw, services), checked]).then(([bsv21Tokens]) => ({
     funding,
     ordinals: rawOrdinals.map(enrichOrdinal),
     opnsNames: opnsRaw.map(enrichOrdinal),

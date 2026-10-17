@@ -17,7 +17,7 @@ import { SupportedWalletImports, WifKeys } from './types/keys.types';
 import { P2PKH, PrivateKey, SatoshisPerKilobyte, Transaction, Utils } from '@bsv/sdk';
 import { OneSatServices } from '@1sat/wallet-browser';
 import { AccountExistsError } from './accountErrors';
-import { isRunJig } from '../sweep/runGuard';
+import { isRunJig, JIG_DUST } from '../sweep/runGuard';
 
 export class KeysService {
   bsvAddress: string;
@@ -159,8 +159,9 @@ export class KeysService {
       if (utxos.length === 0) return;
 
       const tx = new Transaction();
-      // Run NFTs (273-sat jigs) are never swept as sats: that destroys them (sweep/runGuard.ts).
-      const spendable = utxos.filter((u) => !isRunJig(u));
+      // Run NFTs are never swept as sats: that destroys them (sweep/runGuard.ts). Jig-sized outputs (1, 273, 546
+      // sats) are skipped outright here; the purse holds BSV, not collectibles.
+      const spendable = utxos.filter((u) => !isRunJig(u) && !JIG_DUST.has(u.satoshis ?? 0));
       tx.addOutput({ lockingScript: new P2PKH().lock(keys.walletAddress), change: true });
 
       for (const u of spendable) {
