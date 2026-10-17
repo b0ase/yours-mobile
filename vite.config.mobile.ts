@@ -543,8 +543,8 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       "import { BackupGate } from '../mobile/backup/BackupGate';\nimport { createdHere, requestBackupThen } from '../mobile/backup/backupState';",
     ],
     [
-      '      setShowMigrationBanner(!acct?.settings?.sweepStarted && !acct?.settings?.sweepCompleted);',
-      '      setShowMigrationBanner(!acct?.settings?.sweepStarted && !acct?.settings?.sweepCompleted && !createdHere(acct?.addresses?.identityAddress));',
+      '      setShowMigrationBanner(!acct?.settings?.sweepCompleted || left === undefined || left > 0);',
+      '      setShowMigrationBanner(\n        (!acct?.settings?.sweepCompleted || left === undefined || left > 0) &&\n          !createdHere(acct?.addresses?.identityAddress),\n      );',
     ],
   ],
   // Tokens list: tickets stay listed (sending one is an invite) but carry a "· Ticket" mark.
