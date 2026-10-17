@@ -4,8 +4,12 @@ import {
   buildMeltTx,
   burnScript,
   checkQuote,
+  commitMelt,
+  getQuote,
   meltChallenge,
+  MeltRefusedError,
   pollMelt,
+  quoteReady,
   signChallenge,
   splitAvatar,
   type MeltQuote,
@@ -164,5 +168,61 @@ describe('npg melt', () => {
     const g = (async () => ({ ok: true, json: async () => ({ status: 'minting' }) })) as any;
     const t = await pollMelt(g, 'mq', () => {}, { every: 10, max: 30, sleep: async () => {} });
     expect(t.status).toBe('minting');
+  });
+
+  test('only an explicit commit_ready with a payable fee is ready', () => {
+    expect(quoteReady({ commit_ready: true, fee_sats: 51_381, fee_to: JIG_KEY.toAddress() })).toBe(true);
+    expect(quoteReady({ commit_ready: true, fee_sats: 0, fee_to: null })).toBe(true);
+    expect(quoteReady({ commit_ready: false, fee_sats: 0, fee_to: null })).toBe(false);
+    expect(quoteReady({ fee_sats: 0, fee_to: null })).toBe(false); // missing = not open
+    expect(quoteReady({ commit_ready: true, fee_sats: 51_381, fee_to: null })).toBe(false); // fee with nowhere to go
+    // A fee with no address is a readiness question, not a malformed quote.
+    expect(checkQuote(quote({ fee_sats: 51_381, fee_to: null }), LOCATION, ORIGIN)).toBeNull();
+  });
+
+  test('realistic quote: 16 elements, avatar last, split for the sheet', () => {
+    const slots = [
+      'Hair Back',
+      'Body',
+      'Cincher',
+      'Boots',
+      'Gloves',
+      'Mask',
+      'Top',
+      'Bottom',
+      'Weapon L',
+      'Weapon R',
+      'Hair',
+      'Eyes',
+      'Mouth',
+      'Horns',
+      'Wings',
+      'avatar',
+    ];
+    const q = quote({ elements: slots.map((slot, i) => ({ file: `e${i}.png`, slot })) });
+    expect(splitAvatar(q).cards).toHaveLength(15);
+    expect(splitAvatar(q).avatar?.file).toBe('e15.png');
+  });
+
+  const answer = (status: number, body: unknown) =>
+    (async () => ({ status, ok: status < 300, json: async () => body })) as any;
+
+  test('commit 409 not_ready and 503 are clean refusals (coins freed); 500 is not', async () => {
+    const body = { quote_id: 'mq', rawtx_ef: '00', signature: 's' };
+    const e409 = await commitMelt(answer(409, { error: 'not_ready' }), body).catch((e) => e);
+    expect(e409).toBeInstanceOf(MeltRefusedError);
+    expect(e409.message).toBe('Melting opens soon.');
+    expect(await commitMelt(answer(503, {}), body).catch((e) => e)).toBeInstanceOf(MeltRefusedError);
+    const e500 = await commitMelt(answer(500, { error: 'boom' }), body).catch((e) => e);
+    expect(e500).not.toBeInstanceOf(MeltRefusedError);
+  });
+
+  test('a 400 quote names the traced origin', async () => {
+    const e = await getQuote(answer(400, { error: 'Not this origin', traced_origin: `${'cd'.repeat(32)}_o3` }), {
+      jig_location: LOCATION,
+      jig_origin: ORIGIN,
+      recipient_pubkey: JIG_KEY.toPublicKey().toString(),
+    }).catch((x) => x);
+    expect(e.message).toContain('traces back to cdcdcdcdcdcd');
   });
 });

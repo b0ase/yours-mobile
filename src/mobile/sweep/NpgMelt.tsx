@@ -15,6 +15,7 @@ import {
   MeltNotOpenError,
   MeltRefusedError,
   pollMelt,
+  quoteReady,
   recipientPubkey,
   releaseMelt,
   signChallenge,
@@ -60,6 +61,8 @@ export function NpgMelt({ jig, wif, art }: { jig: IdentifiedJig; wif: string; ar
       });
       const bad = checkQuote(q, jig.location, jig.origin);
       if (bad) throw new Error(bad);
+      // Not open for commits yet: say so, build and sign nothing (owner rule: no pretend flows).
+      if (!quoteReady(q)) return setP({ k: 'soon' });
       setP({ k: 'sheet', q });
     } catch (e) {
       if (e instanceof MeltNotOpenError) setP({ k: 'soon' });

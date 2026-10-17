@@ -31,6 +31,8 @@ export type MeltQuote = {
   fee_sats: number;
   fee_to: string | null;
   mint: { count: number; sats_each: number };
+  /** The server can take a commit for this quote. Missing or false: melting isn't open yet (no build, no signing). */
+  commit_ready?: boolean;
 };
 export type MeltStatus = {
   status: 'quoted' | 'burned' | 'minting' | 'done' | 'failed';
@@ -76,9 +78,9 @@ export function checkQuote(q: MeltQuote, jigLocation: string, jigOrigin: string)
   if (q.burn_script_hex.toLowerCase() !== burnScript(jigOrigin, q.quote_id).toHex())
     return "The quote's burn output isn't the agreed one.";
   if (!Number.isInteger(q.fee_sats) || q.fee_sats < 0) return 'The quote has an invalid fee.';
-  if (q.fee_sats > 0) {
+  if (q.fee_sats > 0 && q.fee_to) {
     try {
-      new P2PKH().lock(q.fee_to ?? '');
+      new P2PKH().lock(q.fee_to);
     } catch {
       return 'The quote has no valid fee address.';
     }
@@ -86,6 +88,13 @@ export function checkQuote(q: MeltQuote, jigLocation: string, jigOrigin: string)
   if (!Array.isArray(q.elements) || !q.elements.length) return 'The quote lists no element cards.';
   return null;
 }
+
+/**
+ * Whether to offer Allow. Only an explicit commit_ready: true; and a fee needs somewhere to go (fee_sats > 0 with
+ * fee_to null can't be paid, so it isn't ready either). Anything else shows "Melting opens soon" and signs nothing.
+ */
+export const quoteReady = (q: Pick<MeltQuote, 'commit_ready' | 'fee_sats' | 'fee_to'>): boolean =>
+  q.commit_ready === true && !(q.fee_sats > 0 && !q.fee_to);
 
 /** BSM signature (base64) over the challenge with the key of the jig's output. The key stays on this device. */
 export const signChallenge = (challenge: string, wif: string): string =>
@@ -110,7 +119,7 @@ export class MeltRefusedError extends Error {
 }
 
 type Fetch = typeof fetch;
-const post = async (f: Fetch, path: string, body: unknown) => {
+const post = async (f: Fetch, path: string, body: unknown, refusals: readonly number[] = []) => {
   const r = await f(`${NPG_MELT_API}${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -118,7 +127,12 @@ const post = async (f: Fetch, path: string, body: unknown) => {
   });
   if (r.status === 404 || r.status === 405 || r.status === 501) throw new MeltNotOpenError();
   const j = await r.json().catch(() => ({}));
-  const msg = typeof j?.error === 'string' ? j.error : `The NPG melt service said ${r.status}.`;
+  let msg = typeof j?.error === 'string' ? j.error : `The NPG melt service said ${r.status}.`;
+  if (msg === 'not_ready') msg = 'Melting opens soon.';
+  if (r.status === 400 && typeof j?.traced_origin === 'string')
+    msg = `${msg} (this NFT traces back to ${j.traced_origin.slice(0, 12)}…)`;
+  // Commit answers these before broadcasting anything (409 not_ready, 503): a clean refusal, coins are freed.
+  if (refusals.includes(r.status)) throw new MeltRefusedError(msg, r.status);
   // Only a 4xx is a clean refusal. A 5xx or a dropped connection may have broadcast already: never free inputs then.
   if (r.status >= 400 && r.status < 500) throw new MeltRefusedError(msg, r.status);
   if (!r.ok) throw new Error(msg);
@@ -133,7 +147,10 @@ export const getQuote = (
 export const commitMelt = (
   f: Fetch,
   body: { quote_id: string; rawtx_ef: string; signature: string },
-): Promise<MeltStatus> => post(f, '/commit', body);
+): Promise<MeltStatus> => post(f, '/commit', body, COMMIT_REFUSALS);
+
+/** Commit statuses that mean "not broadcast": 409 not_ready and 503 (owner's server, 17 Oct 2026), plus any 4xx. */
+export const COMMIT_REFUSALS = [409, 503] as const;
 
 export async function meltStatus(f: Fetch, quoteId: string): Promise<MeltStatus> {
   const r = await f(`${NPG_MELT_API}/status/${encodeURIComponent(quoteId)}`);
