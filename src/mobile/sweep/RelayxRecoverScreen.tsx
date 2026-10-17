@@ -274,6 +274,18 @@ function Detail({
               </>
             )}
           </span>
+          {f.unread && (
+            // Which one and where, so it can be looked up by hand (owner, 18 Oct 2026).
+            <button
+              type="button"
+              onClick={() => void navigator.clipboard?.writeText(f.location).catch(() => undefined)}
+              className="mt-1 break-all rounded-lg border-0 bg-transparent p-0 text-left font-mono text-[11px] cursor-pointer"
+              style={{ color: MUTED }}
+              aria-label="Copy its location"
+            >
+              {f.location} · tap to copy
+            </button>
+          )}
         </div>
         {f.n !== undefined && !f.wif ? (
           // From the saved search: no keys are kept, so melting needs the words again.
