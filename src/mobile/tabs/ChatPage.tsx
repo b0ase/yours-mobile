@@ -728,7 +728,9 @@ const Conversation = ({
       }}
     >
       <div
-        className="bw-room-head flex items-center gap-3 px-2 pb-2 shrink-0"
+        // Two rows (owner, 17 Oct 2026): back, picture, name and details on the first; the room's buttons on the
+        // second. On one row the buttons squeezed the name and details into a one-word column.
+        className="bw-room-head flex flex-wrap items-center gap-x-3 gap-y-1 px-2 pb-2 shrink-0"
         style={{
           paddingTop: 8,
           background: 'linear-gradient(180deg, #16140c 0%, #0b0b0b 100%)',
@@ -752,62 +754,67 @@ const Conversation = ({
           </div>
           {entry && entry.key.startsWith('bsv21:') && <IssuerBadge tokenId={entry.holding.id} compact />}
         </div>
-        {peer && <UserSafetyButton client={client} handle={peer} onBlocked={onBack} />}
-        {bell && <RoomBell ticker={room.ticker} />}
-        {openRoom && (
-          <button onClick={openRoom.onInfo} className="p-2 rounded-full active:opacity-60" aria-label="Room info">
-            <Info size={20} color={GOLD} />
-          </button>
-        )}
-        {onBans && (
-          <button onClick={onBans} className="p-2 rounded-full active:opacity-60" aria-label="Room settings">
-            {/* Gold for the room's issuer (known once set-up was offered), so they can find their controls. */}
-            <Settings size={18} color={['done', 'later'].includes(roomSetupState(room.ticker) ?? '') ? GOLD : MUTED} />
-          </button>
-        )}
-        {hasBusiness && (
-          <button
-            onClick={() => setBizOpen(true)}
-            className="p-2 rounded-full active:opacity-60"
-            aria-label="Business agent and orders"
-          >
-            <Store size={19} color={GOLD} />
-          </button>
-        )}
-        {onBounties && (
-          <button onClick={onBounties} className="relative p-2 rounded-full active:opacity-60" aria-label="Bounties">
-            <Trophy size={20} color={GOLD} />
-            {bountyBadge > 0 && (
-              <span
-                className="absolute top-1 right-1 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold flex items-center justify-center"
-                style={{ background: '#F97066', color: '#fff' }}
-              >
-                {bountyBadge}
-              </span>
-            )}
-          </button>
-        )}
-        {room.created_by_handle && room.created_by_handle !== me && (
-          <TipButton
-            compact
-            to={{ name: `$${room.created_by_handle}`, paymail: `$${room.created_by_handle}` }}
-            context={{ kind: 'room', room: room.ticker }}
-          />
-        )}
-        {onXInvites && (
-          <button
-            onClick={onXInvites}
-            className="px-2.5 py-1 rounded-full text-xs font-semibold active:opacity-60"
-            style={{ border: `1px solid ${GOLD}`, color: GOLD }}
-          >
-            Invites
-          </button>
-        )}
-        {onInvite && (
-          <button onClick={onInvite} className="p-2 rounded-full active:opacity-60" aria-label="Invite">
-            <UserPlus size={20} color={GOLD} />
-          </button>
-        )}
+        <div className="flex basis-full items-center justify-end gap-1">
+          {peer && <UserSafetyButton client={client} handle={peer} onBlocked={onBack} />}
+          {bell && <RoomBell ticker={room.ticker} />}
+          {openRoom && (
+            <button onClick={openRoom.onInfo} className="p-2 rounded-full active:opacity-60" aria-label="Room info">
+              <Info size={20} color={GOLD} />
+            </button>
+          )}
+          {onBans && (
+            <button onClick={onBans} className="p-2 rounded-full active:opacity-60" aria-label="Room settings">
+              {/* Gold for the room's issuer (known once set-up was offered), so they can find their controls. */}
+              <Settings
+                size={18}
+                color={['done', 'later'].includes(roomSetupState(room.ticker) ?? '') ? GOLD : MUTED}
+              />
+            </button>
+          )}
+          {hasBusiness && (
+            <button
+              onClick={() => setBizOpen(true)}
+              className="p-2 rounded-full active:opacity-60"
+              aria-label="Business agent and orders"
+            >
+              <Store size={19} color={GOLD} />
+            </button>
+          )}
+          {onBounties && (
+            <button onClick={onBounties} className="relative p-2 rounded-full active:opacity-60" aria-label="Bounties">
+              <Trophy size={20} color={GOLD} />
+              {bountyBadge > 0 && (
+                <span
+                  className="absolute top-1 right-1 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold flex items-center justify-center"
+                  style={{ background: '#F97066', color: '#fff' }}
+                >
+                  {bountyBadge}
+                </span>
+              )}
+            </button>
+          )}
+          {room.created_by_handle && room.created_by_handle !== me && (
+            <TipButton
+              compact
+              to={{ name: `$${room.created_by_handle}`, paymail: `$${room.created_by_handle}` }}
+              context={{ kind: 'room', room: room.ticker }}
+            />
+          )}
+          {onXInvites && (
+            <button
+              onClick={onXInvites}
+              className="px-2.5 py-1 rounded-full text-xs font-semibold active:opacity-60"
+              style={{ border: `1px solid ${GOLD}`, color: GOLD }}
+            >
+              Invites
+            </button>
+          )}
+          {onInvite && (
+            <button onClick={onInvite} className="p-2 rounded-full active:opacity-60" aria-label="Invite">
+              <UserPlus size={20} color={GOLD} />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Spaces: Live now / Join, or Start for the issuer or admin. bWalletX: any room; store: open rooms (free Spaces). */}
