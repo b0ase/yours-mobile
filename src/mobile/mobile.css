@@ -1871,20 +1871,30 @@ button.bw-mail-card:active {
 .bw-cdes * {
   box-sizing: border-box;
 }
+/* Opens between the app's bars, so the top bar (tabs/TopNav.tsx: fixed at --wallet-inset-top, h-14) and the
+   bottom tab bar / dock (--dock-h, above the home indicator) stay in place and usable (owner, 17 Oct 2026). */
 .bw-cdes {
   position: fixed;
-  inset: 0;
+  top: calc(var(--wallet-inset-top, 0px) + 3.5rem);
+  right: 0;
+  bottom: calc(var(--dock-h, 0px) + env(safe-area-inset-bottom, 0px));
+  left: 0;
   z-index: 1000;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 14px;
-  padding: calc(14px + env(safe-area-inset-top)) 16px 0;
+  padding: 14px 16px 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   background: var(--bw-bg);
   color: var(--bw-text, #f2f2f0);
+}
+html.ww-on .bw-cdes {
+  top: var(--ww-top-h, 0px);
+  left: var(--ww-side-w, 0px);
+  bottom: 0;
 }
 .bw-cdes > * {
   width: 100%;
@@ -2157,7 +2167,7 @@ button.bw-mail-card:active {
   position: sticky;
   bottom: 0;
   z-index: 2;
-  padding: 12px 0 calc(12px + env(safe-area-inset-bottom));
+  padding: 12px 0;
   background: linear-gradient(180deg, transparent, var(--bw-bg) 30%);
 }
 .bw-cdes-actions button {
