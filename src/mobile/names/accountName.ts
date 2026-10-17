@@ -1,7 +1,7 @@
 import { getProfile, listOpns, resolveBapId, type OneSatContext } from '@1sat/actions';
 import { PublicKey, type WalletOutput } from '@bsv/sdk';
 import { getMyName, setMyName } from './myName';
-import { collectPaymailInbox, lookupPaymail, paymailEnabled } from './paymail';
+import { bindMyNames, collectPaymailInbox, lookupPaymail, paymailEnabled } from './paymail';
 import { syncBchatHandle } from './bchatHandle';
 import { requestBalanceRefresh } from '../../hooks/balanceRefresh';
 
@@ -183,6 +183,8 @@ export const syncAccountNames = async (
       if (p) {
         // One identity: a bChat session still on its `yours-*` default takes the paymail name.
         void syncBchatHandle(ctx, p);
+        // Sign "my names -> my key" so payers can check it without trusting our server (NAME-BINDINGS.md).
+        void bindMyNames(f, ctx.wallet, publicKey).catch(() => undefined);
         await collectPaymailNow(ctx);
       }
     })(),

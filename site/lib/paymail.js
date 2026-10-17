@@ -276,6 +276,16 @@ async function verifySigned(body, action, now = Date.now()) {
   }
 }
 
+/** A binding as served publicly: everything a verifier needs to rebuild the signed message. */
+const bindingOut = (b) => ({
+  alias: b.alias,
+  identityKey: b.identity_key,
+  seq: Number(b.seq),
+  timestamp: String(Date.parse(b.signed_at)),
+  signature: b.signature,
+  scheme: 'bwallet-paymail/v1 bind; BRC-43 protocol [2,"bwallet paymail"] keyID "1", counterparty anyone',
+});
+
 const deriver = new KeyDeriver(new PrivateKey(1));
 /** BRC-29 P2PKH destination for `identityKey`; returns script + derivation the wallet needs. */
 function deriveDestination(identityKey, satoshis) {
@@ -459,7 +469,56 @@ function makeHandlers({
     pki: async ({ handle }) => {
       const [s, row] = await publicIdentity(handle);
       if (s !== 200) return [s, row];
-      return [200, { bsvalias: '1.0', handle: handleOf(row.alias, row._domain), pubkey: row.identity_key }];
+      const out = { bsvalias: '1.0', handle: handleOf(row.alias, row._domain), pubkey: row.identity_key };
+      // The owner's signed binding (docs/NAME-BINDINGS.md): lets any wallet check, without trusting us, that the
+      // key's holder put this name on this key. Only a binding signed by the key now served is returned.
+      const b = row.alias && store.getBinding ? await store.getBinding(row.alias).catch(() => null) : null;
+      if (b && String(b.identity_key).toLowerCase() === String(row.identity_key).toLowerCase())
+        out.binding = bindingOut(b);
+      return [200, out];
+    },
+
+    // Signed name binding: the name's current owner signs "alias -> my key, version seq" (seq must go up).
+    bind: async (_q, body) => {
+      body = body || {};
+      const sigErr = await verifySigned(body, 'bind', now());
+      if (sigErr) return [401, { error: sigErr }];
+      const identityKey = String(body.identityKey).toLowerCase();
+      const f = body.fields || {};
+      const alias = String(f.alias || '').toLowerCase();
+      const seq = Number(f.seq);
+      if (!alias || !Number.isInteger(seq) || seq < 1) return [400, { error: 'alias and seq' }];
+      const row = await store.getAlias(alias);
+      if (!row || String(row.identity_key).toLowerCase() !== identityKey)
+        return [403, { error: 'Only the wallet the name points to can sign its binding' }];
+      const prev = await store.getBinding(alias);
+      if (prev && String(prev.identity_key).toLowerCase() === identityKey && Number(prev.seq) >= seq)
+        return [409, { error: 'seq must go up', seq: Number(prev.seq) }];
+      const b = {
+        alias,
+        identity_key: identityKey,
+        seq,
+        signature: String(body.signature).toLowerCase(),
+        signed_at: new Date(Number(body.timestamp)).toISOString(),
+      };
+      await store.putBinding(b);
+      await store.logName({
+        alias,
+        identity_key: identityKey,
+        action: 'bind',
+        actor: 'owner',
+        seq,
+        signature: b.signature,
+        note: String(body.timestamp),
+      });
+      return [200, { binding: bindingOut(b) }];
+    },
+
+    // The public name log, newest first: every change of who a name points to, hash-chained.
+    'name-log': async (q) => {
+      const alias = String(q.alias || '').toLowerCase();
+      const rows = await store.nameLog(alias || null, Math.min(Number(q.limit) || 200, 1000));
+      return [200, { log: rows }];
     },
 
     profile: async ({ handle }) => {

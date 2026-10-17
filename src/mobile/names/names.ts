@@ -1,3 +1,4 @@
+import { checkBinding, type BindingStatus } from './binding';
 import { Utils } from '@bsv/sdk';
 import { AMOUNT_HINT, cleanRecipient, isMainnetAddress, looksLikeAmount } from './address';
 import { BWALLET_PAYMAIL_DOMAIN, LEGACY_PAYMAIL_DOMAINS } from './config';
@@ -83,6 +84,8 @@ export type Resolved = {
   avatar?: string;
   /** Paymail identity pubkey (pki) or OpNS-bound identity key, when known. */
   pubkey?: string;
+  /** A bWalletX name's owner-signed binding to `pubkey` (names/binding.ts): signed, not yet signed, or bad. */
+  nameBinding?: BindingStatus;
   /** Where tokens (BSV-21 / ordinals) would go, if this name can receive them. */
   ordAddress?: string;
   /** A $name that wasn't ours but a lookalike is (0/o, 1/l/i): "did you mean $b0asey?" (12 Oct 2026). */
@@ -209,7 +212,12 @@ export const resolvePaymail = async (f: Fetch, paymail: string, input = paymail)
     r.avatar = str(p?.avatar);
   }
   const pki = str(caps[CAP.pki]);
-  if (pki) r.pubkey = str((await tryJson<Fields>(f, fill(pki, alias, domain)))?.pubkey);
+  if (pki) {
+    const id = await tryJson<Fields & { binding?: unknown }>(f, fill(pki, alias, domain));
+    r.pubkey = str(id?.pubkey);
+    // Our names carry the owner's signed binding: check it here rather than trust our server.
+    if (!r.external && r.pubkey) r.nameBinding = await checkBinding(alias, r.pubkey, id?.binding);
+  }
 
   const ord = ordCapability(caps);
   if (ord) r.ordAddress = str((await tryJson<Fields>(f, fill(ord, alias, domain)))?.address);
@@ -377,11 +385,16 @@ export const TOKENS_UNSUPPORTED = "This name can't receive tokens";
 export const UNBOUND_NAME =
   "This name can't receive payments yet. Ask its owner to publish it, or pay their address instead.";
 
+/** A bWalletX name whose served key doesn't match its owner's signed binding: never pay it. */
+export const BAD_BINDING =
+  "This name's signed binding doesn't match its key, so it may have been changed without its owner. Not paying it.";
+
 export const destinationFor = (
   r: Resolved,
   asset: 'bsv' | 'token',
 ): { ok: true; to: string } | { ok: false; error: string } => {
   if (opnsBinding(r) === 'unbound') return { ok: false, error: UNBOUND_NAME };
+  if (r.nameBinding === 'bad') return { ok: false, error: BAD_BINDING };
   if (asset === 'bsv') return { ok: true, to: r.target };
   if (r.ordAddress) return { ok: true, to: r.ordAddress };
   return { ok: false, error: TOKENS_UNSUPPORTED };
