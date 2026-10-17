@@ -85,7 +85,7 @@ describe('theme buys', () => {
     const [s, q] = await h.quote(await u.sign('theme-buy-quote', { pack: 'npgx' }));
     expect(s).toBe(200);
     expect(q.usd).toBe(1);
-    expect(q.sats).toBe(2_000_000); // $1 at $50/BSV
+    expect(q.sats).toBe(2_000_000 - 500); // $1 at $50/BSV, less room for the network fee
   });
 
   test('a matching payment is broadcast and the pack is owned; a retry is idempotent', async () => {

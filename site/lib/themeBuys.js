@@ -8,6 +8,8 @@ const { OP, P2PKH, Script, Utils } = require('@bsv/sdk');
 const { parseIncoming, verifySigned } = require('./paymail');
 const { checkPayment, payAddress, priceSats, QUOTE_MS, CLAIM_GRACE_MS } = require('./themeOrders');
 
+const FEE_ROOM_SATS = 500;
+
 /** Packs for sale and their price in USD. Only these can be bought. */
 const PACKS = { vexvoid: 1, npg: 1, npgx: 1 };
 const MEMO_TAG = 'bwx-theme-buy';
@@ -82,7 +84,9 @@ function makeThemeBuyHandlers({ store, rate, broadcast, env = process.env, now =
     const r = await Promise.resolve(rate()).catch(() => 0);
     if (!(r > 0)) return [503, { error: 'price_unavailable' }];
     const usd = PACKS[packId];
-    const sats = priceSats(r, usd);
+    // "$1" is the most it costs: leave room for the network fee inside the price, so a wallet holding exactly
+    // $1 can buy (owner, 17 Oct 2026: $1 in the wallet, refused 25 sats short). ~500 sats is a hundredth of a cent.
+    const sats = Math.max(1, priceSats(r, usd) - FEE_ROOM_SATS);
     const quoteId = crypto.randomBytes(16).toString('hex');
     const memoHex = memoScript(quoteId).toHex();
     const expiresAt = new Date(now() + QUOTE_MS).toISOString();
