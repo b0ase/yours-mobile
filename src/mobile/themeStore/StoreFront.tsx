@@ -212,7 +212,9 @@ function ShopPage({ shop, onBack }: { shop: Shop; onBack: () => void }) {
       <div className={`${TILE} overflow-hidden`}>
         <div
           className="h-28 w-full bg-cover bg-center"
-          style={{ background: shop.banner ? `center / cover no-repeat url(${shop.banner})` : shop.colour }}
+          style={{
+            background: shop.bannerCss ?? (shop.banner ? `center / cover no-repeat url(${shop.banner})` : shop.colour),
+          }}
         />
         <div className="flex items-center gap-3 p-3">
           <img src={shop.logo} alt="" width={48} height={48} className="rounded-xl -mt-8 border-2 border-[#2b2f36]" />
@@ -233,6 +235,68 @@ function ShopPage({ shop, onBack }: { shop: Shop; onBack: () => void }) {
   );
 }
 
+/** What a shop owner needs (owner, 17 Oct 2026): a clear list of what to sell and what a good shop has. */
+const MANIFEST: readonly (readonly [string, readonly string[]])[] = [
+  [
+    'What you can sell',
+    [
+      'Themes: colours and card art for the whole app',
+      'Stickers & emoji packs',
+      'Art & numbered editions',
+      'Music & video: albums, films, fan access',
+      'Courses & books',
+      'Room memberships and subscriptions (by day, week or month)',
+      'Services: design, dev, help',
+    ],
+  ],
+  [
+    'What a good shop has',
+    [
+      'A name and a one-line blurb',
+      'A logo, square, 512 × 512',
+      'A banner, wide, 1500 × 500',
+      'At least 3 products, each with a title, one or two lines, a price in $ and a preview picture',
+      'For a theme: its colours and card art',
+      'Your token and room, if you have one, so buyers can talk to you',
+    ],
+  ],
+  [
+    'Rules',
+    [
+      'Digital goods only',
+      'Your own work, or work you have the rights to',
+      "No one else's brand or name",
+      'b reviews every shop and listing before it goes live',
+    ],
+  ],
+  [
+    'Money',
+    ["Paid in BSV, straight from the buyer's wallet", 'You get 80%, the Store keeps 20%', 'Paid to your bWalletX'],
+  ],
+];
+
+function ShopManifest() {
+  return (
+    <div className={`${TILE} flex flex-col gap-3 p-3`}>
+      {MANIFEST.map(([head, items]) => (
+        <div key={head}>
+          <b className="block text-sm text-white">{head}</b>
+          <ul className="m-0 mt-1 flex list-none flex-col gap-1 p-0">
+            {items.map((t) => (
+              <li key={t} className="flex items-start gap-1.5 text-xs" style={{ color: MUTED }}>
+                <Check size={12} className="mt-0.5 shrink-0" aria-hidden="true" /> {t}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+      <p role="status" className="m-0 text-xs font-semibold" style={{ color: 'var(--bw-accent)' }}>
+        Shops open soon. Get these ready now.
+      </p>
+    </div>
+  );
+}
+
 /** The shops row: a 2-column grid of shop cards (no sideways scrolling), then Open a shop. */
 function Shops({ onOpen }: { onOpen: (id: string) => void }) {
   const [soon, setSoon] = useState(false);
@@ -249,7 +313,7 @@ function Shops({ onOpen }: { onOpen: (id: string) => void }) {
           >
             <span
               className="block h-16 w-full"
-              style={{ background: s.banner ? `center / cover no-repeat url(${s.banner})` : s.colour }}
+              style={{ background: s.bannerCss ?? (s.banner ? `center / cover no-repeat url(${s.banner})` : s.colour) }}
             />
             <span className="flex items-center gap-2 p-2">
               <img src={s.logo} alt="" width={28} height={28} className="rounded-lg" />
@@ -263,14 +327,15 @@ function Shops({ onOpen }: { onOpen: (id: string) => void }) {
           </button>
         ))}
       </div>
-      <button type="button" onClick={() => setSoon(true)} className={`${BACK} self-stretch justify-center py-2.5`}>
+      <button
+        type="button"
+        onClick={() => setSoon((v) => !v)}
+        aria-expanded={soon}
+        className={`${BACK} self-stretch justify-center py-2.5`}
+      >
         Open your own shop
       </button>
-      {soon && (
-        <p role="status" className="text-xs text-center m-0" style={{ color: MUTED }}>
-          Shops open soon. b reviews every shop before it goes live.
-        </p>
-      )}
+      {soon && <ShopManifest />}
       <h2 className="text-sm font-bold text-white m-0">Departments</h2>
     </>
   );
@@ -368,8 +433,18 @@ function Store() {
     <div
       // Pinned to the screen so it has a height to scroll in (the /m/store route's parent gives none, so a
       // height: 100% box grew with its content and never scrolled; owner, 17 Oct 2026). The dock sits above it.
-      className="flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36"
-      style={{ position: 'fixed', inset: 0, overscrollBehavior: 'contain', background: 'var(--bw-bg)' }}
+      // Stops at the dock (like a chat room), so the strip under the dock stays the app's own and the Store's
+      // content never shows through beneath it (owner, 17 Oct 2026).
+      className="flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-6"
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 'calc(env(safe-area-inset-bottom) + var(--dock-h, 3.75rem))',
+        overscrollBehavior: 'contain',
+        background: 'var(--bw-bg)',
+      }}
     >
       <TopNav />
       <div className="w-full px-4 pt-16 flex flex-col gap-3">
