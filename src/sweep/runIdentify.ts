@@ -22,8 +22,8 @@ const BLOB = 'https://qw1nh74cmgrgawoh.public.blob.vercel-storage.com';
 /** Published by the NPG site (tokenblaster session), immutable: {class, collection, jigs: {origin: {i, n, name?}}}. */
 export const NPG_JIG_MAPS = [`${BLOB}/s2/v2/jig-to-card.json`, `${BLOB}/s1/v1/jig-to-card.json`] as const;
 /** S2 cut-out art (961x1441 WebP with alpha) and the bounding box of each girl in it. */
-export const npgCutoutUrl = (n: number) => `${BLOB}/s2/v2/${String(n).padStart(4, '0')}-cutout.webp`;
-export const NPG_CUTOUT_INDEX = `${BLOB}/s2/v2/cutouts-index.json`;
+export const npgCutoutUrl = (n: number) => `${BLOB}/s2/v3/${String(n).padStart(4, '0')}-cutout.webp`;
+export const NPG_CUTOUT_INDEX = `${BLOB}/s2/v3/cutouts-index.json`;
 
 /** OP_FALSE OP_RETURN PUSH3 "run". */
 const RUN_PREFIX = [0x00, 0x6a, 0x03, 0x72, 0x75, 0x6e];
