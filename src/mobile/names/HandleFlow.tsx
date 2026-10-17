@@ -47,7 +47,13 @@ import { useTheme } from '../../hooks/useTheme';
 import { handleTitle, suggestHandle } from './handlePrompt';
 import { useBackClose } from '../backStack';
 import { moneyNow } from '../money/money';
-import { bsv20TakenError, duplicateNote, heldTokenNote, personalTokenLabel, type ExistingChoice } from './existingToken';
+import {
+  bsv20TakenError,
+  duplicateNote,
+  heldTokenNote,
+  personalTokenLabel,
+  type ExistingChoice,
+} from './existingToken';
 
 /**
  * "Choose your handle": a full-screen sheet shown after create / restore (HandleOnboarding) and
