@@ -244,16 +244,30 @@ const AudioView = ({ src, name }: { src: string; name: string }) => {
 const ImageView = ({ src, name }: { src: string; name: string }) => {
   const [zoom, setZoom] = useState(false);
   const [bad, setBad] = useState(false);
+  // Hard pixels only for small pixel art; painted art (an NPG badge) stays smooth (owner, 17 Oct 2026).
+  const [tiny, setTiny] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // Zoom in on the middle, not the top-left corner.
+    const el = box.current;
+    if (zoom && el)
+      el.scrollTo({ left: (el.scrollWidth - el.clientWidth) / 2, top: (el.scrollHeight - el.clientHeight) / 2 });
+  }, [zoom]);
   if (bad) return <GoldArt icon={<Sparkles size={40} color={GOLD} />} label="Image" sub={name} />;
   return (
-    <div className={`w-full bg-black ${zoom ? 'overflow-auto' : ''}`} style={{ maxHeight: zoom ? '80vh' : undefined }}>
+    <div
+      ref={box}
+      className={`w-full bg-black ${zoom ? 'overflow-auto' : ''}`}
+      style={{ maxHeight: zoom ? '80vh' : undefined }}
+    >
       <img
         src={src}
         alt={name}
         onClick={() => setZoom((z) => !z)}
         onError={() => setBad(true)}
+        onLoad={(e) => setTiny(e.currentTarget.naturalWidth <= 256)}
         className={zoom ? 'max-w-none w-[200%] cursor-zoom-out' : 'block w-full h-auto object-contain cursor-zoom-in'}
-        style={{ imageRendering: 'pixelated', maxHeight: zoom ? undefined : '80vh' }}
+        style={{ imageRendering: tiny ? 'pixelated' : 'auto', maxHeight: zoom ? undefined : '80vh' }}
       />
     </div>
   );
