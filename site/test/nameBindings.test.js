@@ -111,3 +111,66 @@ describe('signed name bindings', () => {
     expect(out.log.length).toBe(1);
   });
 });
+
+const handoverStore = (rows) => {
+  const s = store(rows);
+  const handovers = new Map();
+  return Object.assign(s, {
+    getHandover: async (a) => handovers.get(a) ?? null,
+    putHandover: async (r) => void handovers.set(r.alias, { ...r }),
+    deleteHandover: async (a) => void handovers.delete(a),
+    handoversFor: async (k) => [...handovers.values()].filter((h) => h.to_key === k),
+    moveAlias: async (a, k) => {
+      const r = await s.getAlias(a);
+      r.identity_key = k;
+    },
+  });
+};
+
+describe('two-party handover (no operator recovery)', () => {
+  test('a name moves only when the owner releases and the recipient accepts; both signatures are served', async () => {
+    const a = user();
+    const b = user();
+    const s = handoverStore([{ alias: 'npg', identity_key: a.identityKey, kind: 'plain' }]);
+    const h = pm.makeHandlers({ store: s, env: ENV });
+    await h.bind({}, await a.sign('bind', { alias: 'npg', seq: '1' }));
+    expect(
+      (await h['handover-release']({}, await a.sign('release', { alias: 'npg', to: b.identityKey, seq: '2' })))[0],
+    ).toBe(200);
+    expect((await h.pki({ handle: 'npg@pay.test' }))[1].pubkey).toBe(a.identityKey); // nothing moved yet
+    expect((await h['handovers-for']({ key: b.identityKey }))[1].handovers.length).toBe(1);
+    expect((await h['handover-accept']({}, await b.sign('bind', { alias: 'npg', seq: '2' })))[0]).toBe(200);
+    const [, out] = await h.pki({ handle: 'npg@pay.test' });
+    expect(out.pubkey).toBe(b.identityKey);
+    expect(out.binding.handover.from).toBe(a.identityKey);
+    expect(await verify(out)).toBe('signed');
+  });
+
+  test('nobody else can release, accept, or rebind a signed name', async () => {
+    const a = user();
+    const b = user();
+    const c = user();
+    const s = handoverStore([{ alias: 'npg', identity_key: a.identityKey, kind: 'plain' }]);
+    const h = pm.makeHandlers({ store: s, env: ENV });
+    await h.bind({}, await a.sign('bind', { alias: 'npg', seq: '1' }));
+    expect(
+      (await h['handover-release']({}, await c.sign('release', { alias: 'npg', to: b.identityKey, seq: '2' })))[0],
+    ).toBe(403);
+    await h['handover-release']({}, await a.sign('release', { alias: 'npg', to: b.identityKey, seq: '2' }));
+    expect((await h['handover-accept']({}, await c.sign('bind', { alias: 'npg', seq: '2' })))[0]).toBe(404);
+    // A quiet database move to c: c can't sign it as its own; payers see it unsigned.
+    (await s.getAlias('npg')).identity_key = c.identityKey;
+    expect((await h.bind({}, await c.sign('bind', { alias: 'npg', seq: '3' })))[0]).toBe(409);
+    expect(await verify((await h.pki({ handle: 'npg@pay.test' }))[1])).toBe('unsigned');
+  });
+
+  test('the owner can cancel a release before it is accepted', async () => {
+    const a = user();
+    const b = user();
+    const s = handoverStore([{ alias: 'npg', identity_key: a.identityKey, kind: 'plain' }]);
+    const h = pm.makeHandlers({ store: s, env: ENV });
+    await h['handover-release']({}, await a.sign('release', { alias: 'npg', to: b.identityKey, seq: '1' }));
+    expect((await h['handover-cancel']({}, await a.sign('release-cancel', { alias: 'npg' })))[0]).toBe(200);
+    expect((await h['handover-accept']({}, await b.sign('bind', { alias: 'npg', seq: '1' })))[0]).toBe(404);
+  });
+});

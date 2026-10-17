@@ -71,3 +71,28 @@ the paymail server made for an owner-signed request; `admin` = anything else, i.
 
 The first entries are three admin changes made on 17 Oct 2026 at the owner's request (two names moved between
 the owner's own wallets, one name assigned).
+
+## Handovers, and no operator recovery (owner decision, 17 Oct 2026)
+
+A name moves to another key only with two signatures:
+
+1. **Release**, signed by the current owner: `bwallet-paymail|v1|release|alias=…|identityKey=<from>|seq=<n>|timestamp=…|to=<to key>`
+   (`POST /api/paymail/handover-release`). Nothing moves yet; the owner can cancel (`handover-cancel`).
+2. **Accept**, signed by the new owner: an ordinary `bind` for the same `seq` (`POST /api/paymail/handover-accept`).
+   Only then does the name move. The binding is served with the release (`binding.handover = { from, releaseSignature,
+releaseTimestamp }`), so any wallet checks both signatures.
+
+Once a key has signed a name, the server refuses a plain `bind` by any other key: a name moved any other way stays
+unsigned for its new key.
+
+**No operator recovery.** If an owner loses their key, the name stays bound to it. There is no host-side or
+time-delayed recovery path: any such path is a back door that makes every binding negotiable. Recovery is the user's,
+set up in advance (bTrust recovery slices), so it recovers the key and the name with it. Payments to a lost-key name
+go to a key nobody can spend, like a lost address.
+
+**Key-change warning (BRC-169 §4.4).** The wallet remembers each name's key. If it changes without a valid handover
+from the key it knew, Send stops ("This name now points to a different wallet than before…"); the payer can override
+only after checking with the person ("I've checked with them: trust the new wallet").
+
+Limit stated plainly: a dishonest host can still ignore its own rules. The public log and the payers' remembered keys
+make that visible; on-chain anchoring and OpNS remove it.

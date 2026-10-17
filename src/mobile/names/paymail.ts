@@ -460,3 +460,31 @@ export const bindMyNames = (
   });
   return bindFlight;
 };
+
+/** Two-party handovers (docs/NAME-BINDINGS.md): the owner releases a name to a key; that key accepts. */
+export type Handover = { alias: string; from_key: string; to_key: string; seq: number };
+
+/** The name's current binding version (0 if never signed). */
+export const bindingSeq = async (f: Fetch, alias: string): Promise<number> => {
+  const r = await f(api(`id/${alias}@${BWALLET_PAYMAIL_DOMAIN}`)).catch(() => null);
+  const j = r?.ok ? ((await r.json().catch(() => null)) as { binding?: { seq?: number } } | null) : null;
+  return Number(j?.binding?.seq) || 0;
+};
+
+export const releaseName = async (f: Fetch, wallet: NameSigner, alias: string, to: string): Promise<number> => {
+  const seq = (await bindingSeq(f, alias)) + 1;
+  await postJson(f, api('handover-release'), await signRequest(wallet, 'release', { alias, to, seq: String(seq) }));
+  return seq;
+};
+
+export const cancelRelease = async (f: Fetch, wallet: NameSigner, alias: string) =>
+  postJson(f, api('handover-cancel'), await signRequest(wallet, 'release-cancel', { alias }));
+
+export const incomingHandovers = async (f: Fetch, key: string): Promise<Handover[]> => {
+  const r = await f(`${api('handovers-for')}?key=${key}`).catch(() => null);
+  const j = r?.ok ? ((await r.json().catch(() => null)) as { handovers?: Handover[] } | null) : null;
+  return j?.handovers ?? [];
+};
+
+export const acceptHandover = async (f: Fetch, wallet: NameSigner, h: Handover) =>
+  postJson(f, api('handover-accept'), await signRequest(wallet, 'bind', { alias: h.alias, seq: String(h.seq) }));

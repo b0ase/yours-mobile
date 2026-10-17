@@ -46,6 +46,11 @@ const ROUTES = {
   // Signed name bindings + public log (docs/NAME-BINDINGS.md).
   bind: ['POST', 'bind'],
   'name-log': ['GET', 'name-log'],
+  // Two-party handovers: the owner releases, the recipient accepts; no operator recovery.
+  'handover-release': ['POST', 'handover-release'],
+  'handover-cancel': ['POST', 'handover-cancel'],
+  'handover-accept': ['POST', 'handover-accept'],
+  'handovers-for': ['GET', 'handovers-for'],
 };
 
 const hits = new Map();
