@@ -1,13 +1,16 @@
-import { lazy, Suspense, useMemo, useState, type CSSProperties } from 'react';
+import { lazy, Suspense, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
+  Check,
+  Circle,
   BookOpen,
   Brush,
   Clapperboard,
   DoorOpen,
   Palette,
   Repeat,
+  ShoppingBag,
   Search,
   Smile,
   Wrench,
@@ -16,8 +19,6 @@ import {
 import { TopNav } from '../../components/TopNav';
 import { THEME_ORDERS_ENABLED } from '../storeBuild';
 import { priceLabel, visible, type Listing } from './bstore';
-import { S } from './styles';
-import { StatusList } from './ui';
 
 // The existing "Get your own edition" order flow ($99 a year), bWalletX only.
 const ThemeOrderSheet = THEME_ORDERS_ENABLED ? lazy(() => import('../themeOrder/ThemeOrderSheet')) : null;
@@ -109,25 +110,11 @@ const LISTINGS: readonly Listing[] = visible([]);
 const matches = (l: Listing, q: string) =>
   !q || `${l.title} ${l.description} ${l.seller}`.toLowerCase().includes(q.toLowerCase());
 
-const deptCard: CSSProperties = {
-  ...S.card,
-  padding: 14,
-  minHeight: 132,
-  textAlign: 'left',
-  font: 'inherit',
-  color: 'var(--bw-text, #f2f2f0)',
-  cursor: 'pointer',
-};
-const searchBox: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 8,
-  margin: '0 0 16px',
-  padding: '10px 12px',
-  borderRadius: 'var(--bw-radius-btn, 12px)',
-  background: 'var(--bw-card, #17191e)',
-  border: '1px solid var(--bw-line, #2b2f36)',
-};
+// Same frame, type and colours as the Exchange page (market/MarketPage.tsx), so the Store looks like the rest of the app.
+const MUTED = '#98A2B3';
+const TILE = 'rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36]';
+const BACK =
+  'flex items-center gap-1.5 self-start rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36] px-3 py-2 text-xs font-bold text-white cursor-pointer';
 
 /** One department: its products, or "Be the first to sell here". Buying and selling are not open yet. */
 function Department({ d, query, onBack }: { d: Dept; query: string; onBack: () => void }) {
@@ -136,45 +123,54 @@ function Department({ d, query, onBack }: { d: Dept; query: string; onBack: () =
   const items = LISTINGS.filter((l) => d.has(l) && matches(l, query));
   return (
     <>
-      <button
-        type="button"
-        onClick={onBack}
-        style={{ ...S.ghost, display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 12 }}
-      >
-        <ArrowLeft size={16} aria-hidden="true" /> All departments
+      <button type="button" onClick={onBack} className={BACK}>
+        <ArrowLeft size={14} aria-hidden="true" /> All departments
       </button>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-        <d.Icon size={22} color="var(--bw-accent)" aria-hidden="true" />
-        <h2 style={{ margin: 0, fontSize: 22 }}>{d.name}</h2>
-      </div>
-      <p style={S.sub}>{d.blurb}</p>
+      <h2 className="text-base font-bold text-white flex items-center gap-1.5 m-0">
+        <d.Icon size={18} style={{ color: 'var(--bw-accent)' }} aria-hidden="true" /> {d.name}
+      </h2>
+      <p className="text-xs m-0" style={{ color: MUTED }}>
+        {d.blurb}
+      </p>
       {items.length ? (
-        <div style={S.grid}>
+        <div className="grid grid-cols-2 gap-1.5">
           {items.map((l) => (
-            <div key={l.id} style={S.card}>
-              <b>{l.title}</b>
-              <p style={S.muted}>{l.seller}</p>
-              <p style={{ ...S.muted, color: 'var(--bw-text, #f2f2f0)' }}>{priceLabel(l)}</p>
+            <div key={l.id} className={`${TILE} p-3 flex flex-col gap-1`}>
+              <b className="text-sm text-white">{l.title}</b>
+              <span className="text-xs" style={{ color: MUTED }}>
+                {l.seller}
+              </span>
+              <span className="text-xs text-white">{priceLabel(l)}</span>
             </div>
           ))}
         </div>
       ) : (
-        <div style={{ ...S.card, padding: 20, alignItems: 'center', textAlign: 'center' }}>
-          <d.Icon size={32} color="var(--bw-accent)" aria-hidden="true" />
-          <b>Be the first to sell here</b>
-          <p style={S.muted}>Nothing is for sale in {d.name} yet.</p>
+        <div className={`${TILE} p-5 flex flex-col items-center gap-2 text-center`}>
+          <d.Icon size={28} style={{ color: 'var(--bw-accent)' }} aria-hidden="true" />
+          <b className="text-sm text-white">Be the first to sell here</b>
+          <span className="text-xs" style={{ color: MUTED }}>
+            Nothing is for sale in {d.name} yet.
+          </span>
         </div>
       )}
-      <button type="button" style={{ ...S.btn, width: '100%', marginTop: 16 }} onClick={() => setSoon(true)}>
+      <button
+        type="button"
+        onClick={() => setSoon(true)}
+        className="bw-pill bw-pill-gold flex min-h-[44px] items-center justify-center gap-2 py-2.5 text-sm font-bold"
+      >
         {d.sell}
       </button>
       {soon && (
-        <p role="status" style={{ ...S.muted, marginTop: 8, textAlign: 'center' }}>
+        <p role="status" className="text-xs text-center m-0" style={{ color: MUTED }}>
           Selling opens soon. b reviews every listing before it goes live.
         </p>
       )}
       {d.id === 'themes' && ThemeOrderSheet && (
-        <button type="button" style={{ ...S.ghost, width: '100%', marginTop: 8 }} onClick={() => setOrdering(true)}>
+        <button
+          type="button"
+          onClick={() => setOrdering(true)}
+          className={`${BACK} self-stretch justify-center py-2.5`}
+        >
           Order your own theme edition
         </button>
       )}
@@ -206,46 +202,35 @@ function Store() {
   );
 
   return (
-    // Its own scroller (like every phone page): scrolling the document dragged the dock with it (owner, 17 Oct).
     <div
-      style={{
-        ...S.page,
-        height: '100%',
-        overflowY: 'auto',
-        overscrollBehavior: 'contain',
-        WebkitOverflowScrolling: 'touch',
-        paddingBottom: 'calc(var(--dock-h, 80px) + 24px)',
-      }}
+      className="flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36"
+      style={{ height: '100%', background: 'var(--bw-bg)' }}
     >
       <TopNav />
-      <div style={{ paddingTop: 'calc(64px + var(--wallet-inset-top, 0px))' }}>
-        {/* Back out like every other page: to where you came from, else the Exchange (owner, 17 Oct 2026). */}
-        {!open && (
-          <button
-            type="button"
-            onClick={() => (window.history.length > 1 ? navigate(-1) : navigate('/m/exchange'))}
-            style={{ ...S.ghost, display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 12 }}
-          >
-            <ArrowLeft size={16} aria-hidden="true" /> Back
-          </button>
-        )}
-        <h1 style={S.h1}>Store</h1>
-        <p style={S.sub}>Things for your wallet, paid in BSV.</p>
-        <label style={searchBox}>
-          <Search size={16} color="var(--bw-muted, #98a2b3)" aria-hidden="true" />
+      <div className="w-full px-4 pt-16 flex flex-col gap-3">
+        <div className="flex items-center justify-between gap-2">
+          <h1 className="text-lg font-bold text-white flex items-center gap-1.5 m-0">
+            <ShoppingBag size={18} style={{ color: 'var(--bw-accent)' }} aria-hidden="true" /> Store
+          </h1>
+          {/* Back out like every other page: to where you came from, else the Exchange (owner, 17 Oct 2026). */}
+          {!open && (
+            <button
+              type="button"
+              onClick={() => (window.history.length > 1 ? navigate(-1) : navigate('/m/exchange'))}
+              className={BACK}
+            >
+              <ArrowLeft size={14} aria-hidden="true" /> Back
+            </button>
+          )}
+        </div>
+        <label className="flex items-center gap-2 rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36] px-3 py-2">
+          <Search size={16} color={MUTED} aria-hidden="true" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search the Store"
             aria-label="Search the Store"
-            style={{
-              flex: 1,
-              background: 'transparent',
-              border: 0,
-              outline: 'none',
-              color: 'inherit',
-              font: 'inherit',
-            }}
+            className="flex-1 bg-transparent border-0 outline-none text-sm text-white"
           />
         </label>
         {open ? (
@@ -253,15 +238,22 @@ function Store() {
         ) : (
           <>
             {shown.length ? (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="grid grid-cols-2 gap-1.5">
                 {shown.map((d) => {
                   const n = LISTINGS.filter(d.has).length;
                   return (
-                    <button key={d.id} type="button" style={deptCard} onClick={() => setDept(d.id)}>
-                      <d.Icon size={28} color="var(--bw-accent)" aria-hidden="true" />
-                      <b style={{ fontSize: 16 }}>{d.name}</b>
-                      <span style={S.muted}>{d.blurb}</span>
-                      <span style={{ ...S.muted, marginTop: 'auto' }}>
+                    <button
+                      key={d.id}
+                      type="button"
+                      onClick={() => setDept(d.id)}
+                      className={`${TILE} flex min-h-[112px] flex-col items-start gap-1 p-3 text-left cursor-pointer`}
+                    >
+                      <d.Icon size={22} style={{ color: 'var(--bw-accent)' }} aria-hidden="true" />
+                      <span className="text-sm font-bold text-white">{d.name}</span>
+                      <span className="text-[11px] leading-tight" style={{ color: MUTED }}>
+                        {d.blurb}
+                      </span>
+                      <span className="mt-auto text-[11px] font-semibold" style={{ color: MUTED }}>
                         {n ? `${n} for sale` : 'Be the first to sell'}
                       </span>
                     </button>
@@ -269,15 +261,24 @@ function Store() {
                 })}
               </div>
             ) : (
-              <p style={S.muted}>Nothing matches &ldquo;{q}&rdquo;.</p>
+              <p className="text-sm m-0" style={{ color: MUTED }}>
+                Nothing matches &ldquo;{q}&rdquo;.
+              </p>
             )}
-            <StatusList
-              items={[
-                ['Departments and search', true],
-                ['Buying, paid in BSV', false],
-                ['Selling, with every listing reviewed by b', false],
-              ]}
-            />
+            <ul className="m-0 p-0 list-none flex flex-col gap-1 text-xs" style={{ color: MUTED }}>
+              {(
+                [
+                  ['Departments and search', true],
+                  ['Buying, paid in BSV', false],
+                  ['Selling, with every listing reviewed by b', false],
+                ] as const
+              ).map(([t, done]) => (
+                <li key={t} className="flex items-center gap-1.5">
+                  {done ? <Check size={12} aria-hidden="true" /> : <Circle size={12} aria-hidden="true" />} {t}
+                  {!done && ' (coming)'}
+                </li>
+              ))}
+            </ul>
           </>
         )}
       </div>
@@ -285,6 +286,7 @@ function Store() {
   );
 }
 
-/** bStore (/m/store, docs/BSTORE.md): departments as big cards, search, each department's products, inside the
- *  app shell (top bar + dock). bWalletX only: ThemeStorePage loads this chunk behind THEME_STORE_PAID_ENABLED. */
+/** Store (/m/store, docs/BSTORE.md): departments, search, each department's products, inside the app shell
+ *  (top bar + dock), laid out like the Exchange. bWalletX only: ThemeStorePage loads this chunk behind
+ *  THEME_STORE_PAID_ENABLED. */
 export default Store;
