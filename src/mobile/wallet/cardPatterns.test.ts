@@ -46,7 +46,7 @@ describe('edition card art', () => {
     const { readdirSync, statSync } = await import('node:fs');
     const dir = new URL('./editionArt/', import.meta.url).pathname;
     const files = readdirSync(dir);
-    expect(files.length).toBe(5);
+    expect(files.length).toBe(3); // NPG logo card + 2 NPGX
     for (const f of files) expect(statSync(dir + f).size).toBeLessThan(120_000);
   });
 });
