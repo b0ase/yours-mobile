@@ -13,7 +13,7 @@ const draft = {
 
 describe('bStore model', () => {
   test('fee split 80/20, seller keeps rounding', () => {
-    expect(feeSplitLabel()).toBe('Seller gets 80%, bStore 20%');
+    expect(feeSplitLabel()).toBe('Seller gets 80%, Store 20%');
     expect(splitCents(100)).toEqual({ seller: 80, bstore: 20 });
     expect(splitCents(99)).toEqual({ seller: 80, bstore: 19 });
   });

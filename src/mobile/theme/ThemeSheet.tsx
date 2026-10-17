@@ -16,7 +16,7 @@ import {
 } from './accents';
 import { loadAccent, loadMix, previewMix, saveAccent, saveMix } from './accent';
 import { deriveMix, mixFromPack, nextMixerOpen, type MixSpec } from './mixer';
-import { THEME_ORDERS_ENABLED } from '../storeBuild';
+import { THEME_ORDERS_ENABLED, THEME_STORE_PAID_ENABLED } from '../storeBuild';
 
 // Get your own theme ($99 a year): bWalletX only, a lazy chunk never in a store build.
 const ThemeOrderSheet = THEME_ORDERS_ENABLED ? lazy(() => import('../themeOrder/ThemeOrderSheet')) : null;
@@ -262,11 +262,13 @@ function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNo
       <p className="bw-cdes-note">
         Packs restyle the whole app; Accent only keeps Gold&apos;s black. Kept for this account on this device.
       </p>
-      <p className="bw-theme-more">
-        <Link to="/m/store" onClick={onClose} style={{ color: 'var(--bw-accent)' }}>
-          More in the bStore
-        </Link>
-      </p>
+      {THEME_STORE_PAID_ENABLED && (
+        <p className="bw-theme-more">
+          <Link to="/m/store" onClick={onClose} style={{ color: 'var(--bw-accent)' }}>
+            More in the Store
+          </Link>
+        </p>
+      )}
       {THEME_ORDERS_ENABLED && ThemeOrderSheet && (
         <p className="bw-theme-more">
           <button

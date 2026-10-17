@@ -793,16 +793,10 @@ describe('THEME_STORE_PAID_ENABLED: store builds show Free themes only', () => {
     const s = src('./storeBuild.ts');
     expect(cond(s, 'THEME_STORE_PAID_ENABLED')).toBe(cond(s, 'STORE_BUILD'));
   });
-  test('Premium, Holders and Editions are only a lazy chunk behind the flag', () => {
+  test('bStore is only a lazy chunk behind the flag; store builds go home', () => {
     const page = src('./themeStore/ThemeStorePage.tsx');
-    expect(page).toContain("THEME_STORE_PAID_ENABLED ? lazy(() => import('./PaidTabs')) : null");
-    expect(page).not.toMatch(/^import .*PaidTabs/m);
-    expect(page).not.toMatch(/Coming soon|\$99|Unlocks for/);
-  });
-  test('bStore paid sections are only a lazy chunk behind the flag', () => {
-    const page = src('./themeStore/ThemeStorePage.tsx');
-    expect(page).toContain("THEME_STORE_PAID_ENABLED ? lazy(() => import('./Sections')) : null");
-    expect(page).not.toMatch(/^import .*Sections/m);
-    expect(page).not.toMatch(/Sell something|Selling opens soon|Seller gets/);
+    expect(page).toContain("THEME_STORE_PAID_ENABLED ? lazy(() => import('./StoreFront')) : null");
+    expect(page).not.toMatch(/^import .*StoreFront/m);
+    expect(page).not.toMatch(/Sell|Be the first|Selling opens soon|\$99/);
   });
 });

@@ -486,7 +486,7 @@ const MarketPage = () => {
           className="bw-pill bw-pill-gold flex min-h-[44px] flex-1 basis-0 items-center justify-center gap-2 py-2.5 text-sm font-bold no-underline"
           style={{ opacity: 0.85 }}
         >
-          <Palette size={16} /> bStore
+          <Palette size={16} /> Store
         </Link>
       </div>
       <div className="grid grid-cols-4 gap-1.5" role="tablist" aria-label="What's for sale">
