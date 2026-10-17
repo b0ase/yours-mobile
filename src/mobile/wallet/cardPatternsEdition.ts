@@ -1,8 +1,6 @@
 import type { CardPatternId } from '../theme/accents';
 import { fieldFormulas } from '../media/vexvoid/pointField';
-import npgHikaru from './editionArt/npg-card-hikaru.webp';
-import npgMiyuki from './editionArt/npg-card-miyuki.webp';
-import npgYamarashii from './editionArt/npg-card-yamarashii.webp';
+import npgLogo from './editionArt/npg-card-logo.webp';
 import npgx1 from './editionArt/npgx-card-1.webp';
 import npgx2 from './editionArt/npgx-card-2.webp';
 
@@ -53,7 +51,8 @@ export function vexFieldSvg(variant = 0): string {
 }
 
 const RASTER: Record<'npg' | 'npgx', readonly string[]> = {
-  npg: [npgHikaru, npgMiyuki, npgYamarashii],
+  // Owner 17 Oct 2026: the NPG card is the pink NPG logo. Characters come later as 3,334 one-per-character NFT packs.
+  npg: [npgLogo],
   npgx: [npgx1, npgx2],
 };
 
