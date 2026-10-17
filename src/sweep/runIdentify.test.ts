@@ -90,7 +90,7 @@ describe('RelayX importer: naming', () => {
     const j = await identifyJig(`${send2.id('hex')}_o1`, getTx, maps);
     expect(j.title).toBe('NPG #0417');
     expect(j.n).toBe(417);
-    expect(j.art).toMatch(/s2\/v2\/0417-cutout\.webp$/);
+    expect(j.art).toMatch(/s2\/v3\/0417-cutout\.webp$/);
   });
   test('S1 entries carry a name and no art', async () => {
     const maps: NpgMap[] = [
