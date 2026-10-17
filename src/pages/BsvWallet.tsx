@@ -1780,9 +1780,11 @@ export const BsvWallet = () => {
           )}
         </AnimatePresence>
 
+        {/* Bottom breathing room */}
+        <div className="h-4" />
         {/* Owner 17 Oct 2026: old assets must always be findable at the bottom of the wallet, not only when a
             banner decides to show. Two rows: the Yours/old-address migration tool, and the RelayX NFT importer. */}
-        <div className="flex flex-col gap-2 w-[92%] mt-2 mb-2">
+        <div className="flex flex-col gap-2 w-[92%] mt-2 mb-6">
           <p className="m-0 text-xs font-semibold" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
             Bring in old assets
           </p>
@@ -1811,8 +1813,6 @@ export const BsvWallet = () => {
         </div>
         {relayxOpen && <HdSweepScreen onBack={() => setRelayxOpen(false)} />}
 
-        {/* Bottom breathing room */}
-        <div className="h-4" />
       </motion.div>
     </MainContent>
   );
