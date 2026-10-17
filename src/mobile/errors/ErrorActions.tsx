@@ -28,7 +28,10 @@ export const ErrorActions = ({
   const [sent, setSent] = useState<'sending' | string | null>(null);
   const report = async () => {
     if (sent) return;
-    if (!apiContext) return askB(message);
+    if (!apiContext) {
+      onAsk?.();
+      return askB(message);
+    }
     setSent('sending');
     const text = redactSecrets(errorReportText(message));
     const call = (m: 'GET' | 'POST', p: string, b?: unknown) =>
@@ -41,9 +44,12 @@ export const ErrorActions = ({
         });
     try {
       const r = await reportToB(call, text);
-      setSent(r.ref ? `Sent · ${r.ref}` : 'Sent');
+      // Owner 17 Oct: the button must not just vanish; say it was reported, then close.
+      setSent(`Reported to b${r.ref ? ` (${r.ref})` : ''}. Sorry for the inconvenience, we're looking into it.`);
+      setTimeout(() => onAsk?.(), 6000);
     } catch {
       setSent(null);
+      onAsk?.();
       askB(message);
     }
   };
@@ -71,10 +77,7 @@ export const ErrorActions = ({
         aria-label="Report this error to b"
         className={btn}
         style={{ background: '#F5C542', color: '#0B0A08' }}
-        onClick={() => {
-          onAsk?.();
-          report();
-        }}
+        onClick={() => report()}
       >
         <img src={bGlyph} alt="" width={12} height={12} />
         {sent === 'sending' ? 'Sending…' : (sent ?? 'Report to b')}
