@@ -105,6 +105,8 @@ import { useTokenRows } from '../mobile/wallet/tokenRows';
 import { openTicketRoomInChat } from '../mobile/tickets/ticketRoom';
 import { asMenuItem } from '../mobile/tabs/tabs';
 import { RelayxRecoverScreen } from '../mobile/sweep/RelayxRecoverScreen';
+import { useRelayxAccount } from '../mobile/sweep/useRelayxAccount';
+import relayxIcon from '../mobile/brand/restore/relayx.svg';
 import { describeWalletError } from '../brand/walletError';
 import { publishBalance } from '../mobile/wallet/balanceStore';
 import {
@@ -203,7 +205,7 @@ export const BsvWallet = () => {
   const [legacyLeft, setLegacyLeft] = useState(0);
   const [relayxOpen, setRelayxOpen] = useState(false);
   // Restored as RelayX: open this account's own RelayX collection (settings.relayx, RestoreAccount.tsx).
-  const relayxXpub = chromeStorageService.getCurrentAccountObject().account?.settings?.relayx?.xpub;
+  const relayxXpub = useRelayxAccount();
   // Cache first (owner round 6): last token balances at once, refreshed in the background.
   const [bsv21s, setBsv21s] = useState<Bsv21Balance[]>(() => {
     const id = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress;
@@ -1562,6 +1564,26 @@ export const BsvWallet = () => {
             Send
           </motion.button>
         </motion.div>
+
+        {/* ── RelayX account: its collection up top (owner, 17 Oct 2026: a restored RelayX account showed nothing; Run
+            NFTs and most RelayX coins aren't in the normal lists). ── */}
+        {relayxXpub && (
+          <button
+            type="button"
+            onClick={() => setRelayxOpen(true)}
+            className="flex w-[92%] items-center gap-3 rounded-2xl border-0 px-4 py-3.5 mb-3 text-left cursor-pointer active:scale-[0.99] transition-transform"
+            style={{ background: 'linear-gradient(135deg, #2669FF, #1B4FD1)', color: '#fff' }}
+          >
+            <img src={relayxIcon} alt="" width={36} height={36} className="shrink-0 rounded-[9px]" />
+            <span className="min-w-0 flex-1">
+              <span className="block text-[15px] font-semibold">Your RelayX collection</span>
+              <span className="block text-[12px] opacity-85">
+                Your RelayX NFTs, and BSV on your old RelayX addresses
+              </span>
+            </span>
+            <ArrowRight size={16} className="shrink-0" />
+          </button>
+        )}
 
         {/* ── Assets section ── */}
         <motion.div
