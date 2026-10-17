@@ -740,3 +740,6 @@ export const packVars = (a: Accent): Record<string, string> => ({
 
 /** Every variable any pack may set (so switching packs can clear the previous one's). */
 export const ALL_VARS = Object.keys(packVars(ACCENTS[0] as Accent));
+
+/** Editions sold in the Store ($1 each, owner 17 Oct 2026): only buyers get them, never in the free picker. */
+export const PAID_EDITIONS: readonly string[] = ['vexvoid', 'npg', 'npgx'];
