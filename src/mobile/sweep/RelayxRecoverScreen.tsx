@@ -269,6 +269,8 @@ export function RelayxRecoverScreen({ onBack }: { onBack: () => void }) {
   // on every read (owner, 17 Oct 2026: "nothing displays" during a long scan).
   const [live, setLive] = useState<readonly Found[]>([]);
   const liveAt = useRef(0);
+  // Leaving mid-scan takes a deliberate second tap (owner, 17 Oct 2026); 'back' or 'cancel' = what was asked.
+  const [stopAsk, setStopAsk] = useState<null | 'back' | 'cancel'>(null);
   const cancel = useRef({ cancelled: false });
   const ctx = useRef<{ reader: ChainReader; maps: NpgMap[] } | null>(null);
 
@@ -367,6 +369,7 @@ export function RelayxRecoverScreen({ onBack }: { onBack: () => void }) {
         <button
           type="button"
           onClick={() => {
+            if (phase.k === 'scanning') return setStopAsk('back');
             cancel.current.cancelled = true;
             onBack();
           }}
@@ -443,14 +446,50 @@ export function RelayxRecoverScreen({ onBack }: { onBack: () => void }) {
 
           {phase.k === 'scanning' && (
             <div className="flex flex-col gap-5">
+              {stopAsk && (
+                <div
+                  className="flex flex-col gap-3 rounded-xl px-3.5 py-3"
+                  style={{ background: SURFACE, boxShadow: `inset 0 0 0 1px ${LINE}` }}
+                  role="alertdialog"
+                  aria-label="Stop the search?"
+                >
+                  <p className="m-0 text-[14px]" style={{ color: INK }}>
+                    Stop the search?
+                  </p>
+                  <p className="m-0 text-[13px] leading-relaxed" style={{ color: MUTED }}>
+                    What's been read so far is kept on this phone, so the next search picks up from there.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setStopAsk(null)}
+                      className="h-10 flex-1 rounded-lg border-0 text-[14px] font-semibold cursor-pointer"
+                      style={{ background: BLUE, color: '#fff' }}
+                    >
+                      Keep searching
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        cancel.current.cancelled = true;
+                        const was = stopAsk;
+                        setStopAsk(null);
+                        if (was === 'back') onBack();
+                        else setPhase({ k: 'enter' });
+                      }}
+                      className="h-10 flex-1 rounded-lg border-0 bg-transparent text-[14px] font-medium cursor-pointer"
+                      style={{ color: MUTED, boxShadow: `inset 0 0 0 1px ${LINE}` }}
+                    >
+                      Stop
+                    </button>
+                  </div>
+                </div>
+              )}
               <Progress step={phase.step} />
               {gallery}
               <button
                 type="button"
-                onClick={() => {
-                  cancel.current.cancelled = true;
-                  setPhase({ k: 'enter' });
-                }}
+                onClick={() => setStopAsk('cancel')}
                 className="self-start rounded-lg border-0 bg-transparent px-0 py-1 text-[14px] font-medium cursor-pointer hover:underline"
                 style={{ color: MUTED }}
               >
