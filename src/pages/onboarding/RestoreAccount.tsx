@@ -5,6 +5,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, CheckCircle, ChevronRight, FileUp, Plus, Upload, Usb } from 'lucide-react';
 import { isUsbSupported, openUsbWindow } from '../../services/UsbKey.service';
 import relayXLogo from '../../assets/relayx.svg';
+import { relayxXpub } from '../../sweep/relayxRecover';
+import type { ChromeStorageService } from '../../services/ChromeStorage.service';
 import twetchLogo from '../../assets/twetch.svg';
 import yoursWhiteLogo from '../../assets/logos/white-logo.png';
 import otherWallet from '../../assets/other-wallet.svg';
@@ -155,6 +157,9 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
       await chromeStorageService.switchAccount(keys.identityAddress);
       console.log('[restore] wallet started at', at());
       await saveAccountDataToChromeStorage(chromeStorageService, accountName, iconURL);
+      // RelayX: the inherited restore holds only /1/0 and /2/0. Keep the RelayX account's xpub (public, spends
+      // nothing) so the wallet can find its Run NFTs on every RelayX address (sweep/relayxRecover.ts).
+      if (importWallet === 'relayx') await rememberRelayx(chromeStorageService, keys.mnemonic);
       console.log('[restore] done at', at());
 
       setStep(4);
@@ -699,3 +704,19 @@ export const RestoreAccount = (p: RestoreAccountProps) => (
     <RestoreAccountInner {...p} />
   </BetaGate>
 );
+
+async function rememberRelayx(storage: ChromeStorageService, words: string) {
+  try {
+    const { account } = storage.getCurrentAccountObject();
+    if (!account) return;
+    await storage.updateNested('accounts', {
+      [account.addresses.identityAddress]: {
+        ...account,
+        settings: { ...account.settings, relayx: { xpub: relayxXpub(words) } },
+      },
+    });
+  } catch (e) {
+    // The account is restored either way; only the NFT finder misses its starting point.
+    console.warn('[restore] RelayX xpub not saved', e);
+  }
+}

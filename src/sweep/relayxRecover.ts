@@ -38,9 +38,22 @@ export function relayxAccount(words: string): HD {
   return HD.fromSeed(Mnemonic.fromString(cleanWords(words)).toSeed()).derive(RELAYX_ACCOUNT);
 }
 
+/**
+ * The RelayX account's public key (xpub of m/44'/236'/0'). Kept on an account restored as RelayX, so its NFTs can be
+ * found again without the words or the password: it derives every address and can spend nothing.
+ */
+export const relayxXpub = (words: string): string => relayxAccount(words).toPublic().toString();
+
+/** Words, or a saved xpub: what a search starts from. */
+export type RelayxSource = string | { xpub: string };
+const accountOf = (src: RelayxSource): HD => (typeof src === 'string' ? relayxAccount(src) : HD.fromString(src.xpub));
+
+/** The key at chain/i. From an xpub there is no private key: `wif` is '' and melting needs the words or password. */
 export function keyAt(account: HD, chain: number, i: number): RelayxKey {
-  const k = account.deriveChild(chain).deriveChild(i).privKey;
-  return { path: `${RELAYX_ACCOUNT}/${chain}/${i}`, address: k.toAddress(), wif: k.toWif() };
+  const node = account.deriveChild(chain).deriveChild(i);
+  const path = `${RELAYX_ACCOUNT}/${chain}/${i}`;
+  if (!node.privKey) return { path, address: node.pubKey.toAddress(), wif: '' };
+  return { path, address: node.privKey.toAddress(), wif: node.privKey.toWif() };
 }
 
 export type Found = IdentifiedJig & { address: string; wif: string; unread?: boolean };
@@ -133,14 +146,14 @@ export function createJigMemo(store: Pick<Storage, 'getItem' | 'setItem'> | null
 }
 
 export async function scanRelayx(
-  words: string,
+  words: RelayxSource,
   reader: ChainReader,
   maps: readonly NpgMap[],
   onStep: (s: ScanStep) => void,
   signal?: { cancelled: boolean },
   memo?: JigMemo,
 ): Promise<ScanResult> {
-  const account = relayxAccount(words);
+  const account = accountOf(words);
   let checked = 0;
   const keys: RelayxKey[] = [];
   for (const chain of RELAYX_CHAINS) {

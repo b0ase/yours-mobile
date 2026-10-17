@@ -202,6 +202,8 @@ export const BsvWallet = () => {
   const [showMigrationBanner, setShowMigrationBanner] = useState(false);
   const [legacyLeft, setLegacyLeft] = useState(0);
   const [relayxOpen, setRelayxOpen] = useState(false);
+  // Restored as RelayX: open this account's own RelayX collection (settings.relayx, RestoreAccount.tsx).
+  const relayxXpub = chromeStorageService.getCurrentAccountObject().account?.settings?.relayx?.xpub;
   // Cache first (owner round 6): last token balances at once, refreshed in the background.
   const [bsv21s, setBsv21s] = useState<Bsv21Balance[]>(() => {
     const id = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress;
@@ -1806,12 +1808,20 @@ export const BsvWallet = () => {
             style={{ background: 'rgba(46,144,250,0.10)', border: '1px solid rgba(46,144,250,0.35)', color: '#53B1FD' }}
           >
             <span className="text-sm">
-              <b>RelayX NFT Collection Importer</b>: find your Run NFTs (NPG and more) from your RelayX words
+              {relayxXpub ? (
+                <>
+                  <b>Your RelayX NFTs</b>: this account was restored from RelayX. See its Run NFTs (NPG and more)
+                </>
+              ) : (
+                <>
+                  <b>RelayX NFT Collection Importer</b>: find your Run NFTs (NPG and more) from your RelayX words
+                </>
+              )}
             </span>
             <ArrowRight size={14} className="shrink-0" />
           </button>
         </div>
-        {relayxOpen && <RelayxRecoverScreen onBack={() => setRelayxOpen(false)} />}
+        {relayxOpen && <RelayxRecoverScreen xpub={relayxXpub} onBack={() => setRelayxOpen(false)} />}
 
       </motion.div>
     </MainContent>

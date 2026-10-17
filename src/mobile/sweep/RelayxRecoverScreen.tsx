@@ -47,17 +47,19 @@ const pad = (n: number) => String(n).padStart(4, '0');
  * chain facts only: the keys (wif) are stripped, so melting asks for the words again.
  */
 const SAVED_KEY = 'bw.relayx.lastsearch.v1';
-function saveResult(r: ScanResult) {
+/** A restored RelayX account keeps its own saved search, keyed by its xpub's tail. */
+const savedKey = (xpub?: string) => (xpub ? `${SAVED_KEY}.${xpub.slice(-16)}` : SAVED_KEY);
+function saveResult(r: ScanResult, xpub?: string) {
   try {
     const nfts = r.nfts.filter((n) => !n.unread).map((n) => ({ ...n, wif: '' }));
-    localStorage.setItem(SAVED_KEY, JSON.stringify({ at: Date.now(), result: { ...r, nfts } }));
+    localStorage.setItem(savedKey(xpub), JSON.stringify({ at: Date.now(), result: { ...r, nfts } }));
   } catch {
     // Storage full or blocked: the search still shows; it just won't survive a restart.
   }
 }
-function loadSaved(): { result: ScanResult; at: number } | null {
+function loadSaved(xpub?: string): { result: ScanResult; at: number } | null {
   try {
-    const v = JSON.parse(localStorage.getItem(SAVED_KEY) ?? 'null');
+    const v = JSON.parse(localStorage.getItem(savedKey(xpub)) ?? 'null');
     return v?.result?.nfts?.length ? v : null;
   } catch {
     return null;
@@ -309,10 +311,14 @@ function Detail({ f, onClose, onSearch }: { f: Found; onClose: () => void; onSea
   );
 }
 
-export function RelayxRecoverScreen({ onBack }: { onBack: () => void }) {
+/**
+ * `xpub`: a restored RelayX account (settings.relayx). Account mode: no words, the search runs from the public key
+ * (it can spend nothing), and its results are kept apart from a words search.
+ */
+export function RelayxRecoverScreen({ onBack, xpub }: { onBack: () => void; xpub?: string }) {
   const [words, setWords] = useState('');
   const [phase, setPhase] = useState<Phase>(() => {
-    const s = loadSaved();
+    const s = loadSaved(xpub);
     return s ? { k: 'saved', ...s } : { k: 'enter' };
   });
   const [open, setOpen] = useState<Found | null>(null);
@@ -327,8 +333,8 @@ export function RelayxRecoverScreen({ onBack }: { onBack: () => void }) {
   const cancel = useRef({ cancelled: false });
   const ctx = useRef<{ reader: ChainReader; maps: NpgMap[] } | null>(null);
 
-  const problem = wordsProblem(words);
-  const ready = !!words.trim() && !problem;
+  const problem = xpub ? null : wordsProblem(words);
+  const ready = !!xpub || (!!words.trim() && !problem);
 
   const start = async () => {
     if (!ready) return;
@@ -349,7 +355,7 @@ export function RelayxRecoverScreen({ onBack }: { onBack: () => void }) {
       ctx.current = { reader, maps };
       setLive([]);
       const result = await scanRelayx(
-        words,
+        xpub ? { xpub } : words,
         reader,
         maps,
         (step) => {
@@ -363,12 +369,21 @@ export function RelayxRecoverScreen({ onBack }: { onBack: () => void }) {
         createJigMemo(store),
       );
       if (cancel.current.cancelled) return setPhase({ k: 'enter' });
-      saveResult(result);
+      saveResult(result, xpub);
       setPhase({ k: 'done', result });
     } catch (e) {
       if (!cancel.current.cancelled) setPhase({ k: 'error', message: (e as Error).message });
     }
   };
+
+  // Account mode with nothing saved yet: search straight away; there is nothing to type.
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (!xpub || autoStarted.current || phase.k !== 'enter') return;
+    autoStarted.current = true;
+    void start();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on open
+  }, []);
 
   const retry = async () => {
     if (phase.k !== 'done' || !ctx.current) return;
@@ -441,34 +456,38 @@ export function RelayxRecoverScreen({ onBack }: { onBack: () => void }) {
 
           {(phase.k === 'enter' || phase.k === 'error') && (
             <div className="flex flex-col gap-3">
-              <label htmlFor="relayx-words" className="text-[13px] font-medium" style={{ color: INK }}>
-                Your RelayX 12 words
-              </label>
-              <textarea
-                id="relayx-words"
-                value={words}
-                onChange={(e) => setWords(e.target.value)}
-                rows={4}
-                autoCapitalize="none"
-                autoCorrect="off"
-                autoComplete="off"
-                spellCheck={false}
-                placeholder="word word word …"
-                className="w-full resize-none rounded-xl border-0 px-3.5 py-3 text-[15px] leading-relaxed outline-none transition-shadow duration-150 ease-out"
-                style={{
-                  background: SURFACE,
-                  color: INK,
-                  boxShadow: `inset 0 0 0 1px ${problem ? 'rgb(249 112 102 / 0.6)' : LINE}`,
-                }}
-                onFocus={(e) => (e.currentTarget.style.boxShadow = `inset 0 0 0 1.5px ${BLUE}`)}
-                onBlur={(e) =>
-                  (e.currentTarget.style.boxShadow = `inset 0 0 0 1px ${problem ? 'rgb(249 112 102 / 0.6)' : LINE}`)
-                }
-              />
-              {problem && (
-                <p className="m-0 text-[13px]" style={{ color: '#F97066' }}>
-                  {problem}
-                </p>
+              {!xpub && (
+                <>
+                  <label htmlFor="relayx-words" className="text-[13px] font-medium" style={{ color: INK }}>
+                    Your RelayX 12 words
+                  </label>
+                  <textarea
+                    id="relayx-words"
+                    value={words}
+                    onChange={(e) => setWords(e.target.value)}
+                    rows={4}
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder="word word word …"
+                    className="w-full resize-none rounded-xl border-0 px-3.5 py-3 text-[15px] leading-relaxed outline-none transition-shadow duration-150 ease-out"
+                    style={{
+                      background: SURFACE,
+                      color: INK,
+                      boxShadow: `inset 0 0 0 1px ${problem ? 'rgb(249 112 102 / 0.6)' : LINE}`,
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.boxShadow = `inset 0 0 0 1.5px ${BLUE}`)}
+                    onBlur={(e) =>
+                      (e.currentTarget.style.boxShadow = `inset 0 0 0 1px ${problem ? 'rgb(249 112 102 / 0.6)' : LINE}`)
+                    }
+                  />
+                  {problem && (
+                    <p className="m-0 text-[13px]" style={{ color: '#F97066' }}>
+                      {problem}
+                    </p>
+                  )}
+                </>
               )}
               {phase.k === 'error' && (
                 <p
@@ -485,12 +504,13 @@ export function RelayxRecoverScreen({ onBack }: { onBack: () => void }) {
                 className="mt-1 h-12 w-full rounded-xl border-0 text-[15px] font-semibold cursor-pointer transition-[transform,filter,opacity] duration-150 ease-out active:scale-[0.98] hover:brightness-110 disabled:cursor-default disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
                 style={{ background: BLUE, color: '#fff' }}
               >
-                {phase.k === 'error' ? 'Try again' : 'Find my NFTs'}
+                {phase.k === 'error' ? 'Try again' : xpub ? 'Find this account’s RelayX NFTs' : 'Find my NFTs'}
               </button>
               <p className="m-0 flex items-start gap-2 text-[12px] leading-relaxed" style={{ color: MUTED }}>
                 <ShieldCheck size={14} className="mt-[2px] shrink-0" />
-                Your words stay on this phone, in this screen only. They are never saved or sent anywhere. We read
-                public chain data to find what they hold.
+                {xpub
+                  ? 'This account was restored from RelayX. Its NFTs are found from its public key, which can spend nothing.'
+                  : 'Your words stay on this phone, in this screen only. They are never saved or sent anywhere. We read public chain data to find what they hold.'}
               </p>
             </div>
           )}
