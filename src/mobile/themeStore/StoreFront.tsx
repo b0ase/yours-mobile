@@ -366,8 +366,10 @@ function Store() {
 
   return (
     <div
+      // Pinned to the screen so it has a height to scroll in (the /m/store route's parent gives none, so a
+      // height: 100% box grew with its content and never scrolled; owner, 17 Oct 2026). The dock sits above it.
       className="flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36"
-      style={{ height: '100%', background: 'var(--bw-bg)' }}
+      style={{ position: 'fixed', inset: 0, overscrollBehavior: 'contain', background: 'var(--bw-bg)' }}
     >
       <TopNav />
       <div className="w-full px-4 pt-16 flex flex-col gap-3">
