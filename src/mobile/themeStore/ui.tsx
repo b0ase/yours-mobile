@@ -111,7 +111,8 @@ export function MiniWallet({ p, big = false }: { p: ThemePack; big?: boolean }) 
               textShadow: l.scheme === 'dark' ? '0 1px 4px rgb(0 0 0 / 0.8)' : '0 1px 3px rgb(255 255 255 / 0.9)',
             }}
           >
-            ₿ 1.2345
+            {/* No sample balance: on a Store tile it read as the price (owner 17 Oct 2026). */}
+            •••• 2026
           </span>
         </div>
         {row('62%', '+0.01')}
@@ -207,7 +208,22 @@ export function PackCard({
         </b>
         <p style={{ ...S.muted, fontSize: 12, display: 'flex', justifyContent: 'space-between', gap: 6 }}>
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.creator}</span>
-          {price && <span style={{ color: 'var(--bw-text, #f2f2f0)', fontWeight: 600, flex: 'none' }}>{price}</span>}
+          {price && (
+            <span
+              style={{
+                flex: 'none',
+                fontWeight: 800,
+                fontSize: 13,
+                padding: '2px 8px',
+                borderRadius: 999,
+                background: price === 'Owned' ? 'transparent' : 'var(--bw-accent, #F5C542)',
+                color: price === 'Owned' ? 'var(--bw-muted, #98A2B3)' : 'var(--bw-on, #0B0A08)',
+                border: price === 'Owned' ? '1px solid var(--bw-line, #333)' : 'none',
+              }}
+            >
+              {price}
+            </span>
+          )}
         </p>
       </div>
       {children && (
