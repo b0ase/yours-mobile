@@ -7,7 +7,7 @@
 /** Seller share of every bStore sale (owner decision, 16 Oct 2026). Configurable: change it here only. */
 export const SELLER_SHARE = 0.8;
 export const feeSplitLabel = (seller = SELLER_SHARE) =>
-  `Seller gets ${Math.round(seller * 100)}%, bStore ${Math.round((1 - seller) * 100)}%`;
+  `Seller gets ${Math.round(seller * 100)}%, Store ${Math.round((1 - seller) * 100)}%`;
 
 /** Split a price (USD cents, integer) into seller and bStore parts; the seller gets the rounding. */
 export function splitCents(cents: number, seller = SELLER_SHARE): { seller: number; bstore: number } {

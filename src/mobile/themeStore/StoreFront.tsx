@@ -204,18 +204,28 @@ function Store() {
   );
 
   return (
-    <div style={{ ...S.page, paddingBottom: 'calc(var(--dock-h, 80px) + 24px)' }}>
+    // Its own scroller (like every phone page): scrolling the document dragged the dock with it (owner, 17 Oct).
+    <div
+      style={{
+        ...S.page,
+        height: '100%',
+        overflowY: 'auto',
+        overscrollBehavior: 'contain',
+        WebkitOverflowScrolling: 'touch',
+        paddingBottom: 'calc(var(--dock-h, 80px) + 24px)',
+      }}
+    >
       <TopNav />
       <div style={{ paddingTop: 'calc(64px + var(--wallet-inset-top, 0px))' }}>
-        <h1 style={S.h1}>bStore</h1>
+        <h1 style={S.h1}>Store</h1>
         <p style={S.sub}>Things for your wallet, paid in BSV.</p>
         <label style={searchBox}>
           <Search size={16} color="var(--bw-muted, #98a2b3)" aria-hidden="true" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search the bStore"
-            aria-label="Search the bStore"
+            placeholder="Search the Store"
+            aria-label="Search the Store"
             style={{
               flex: 1,
               background: 'transparent',
