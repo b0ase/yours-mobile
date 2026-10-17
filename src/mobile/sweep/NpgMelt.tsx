@@ -10,6 +10,7 @@ import {
   buildMeltTx,
   checkQuote,
   commitMelt,
+  elementLabel,
   elementUrl,
   getQuote,
   MeltNotOpenError,
@@ -200,19 +201,25 @@ export function NpgMelt({
         {!!parts.cards.length && (
           <div className="grid grid-cols-5 gap-1.5">
             {parts.cards.map((e) => (
-              <div
-                key={e.file}
-                title={e.slot}
-                className="aspect-square rounded-lg overflow-hidden"
-                style={{ background: '#1C0A15' }}
-              >
-                <img
-                  src={elementUrl(e.file)}
-                  alt={e.slot}
-                  className="w-full h-full"
-                  style={{ objectFit: 'cover', filter: e.hue ? `hue-rotate(${e.hue}deg)` : undefined }}
-                />
-              </div>
+              <figure key={e.file} className="m-0 flex flex-col gap-1">
+                <div className="aspect-[2/3] rounded-lg overflow-hidden" style={{ background: '#1C0A15' }}>
+                  {/* Each part is a full 961×1441 layer: contain keeps it whole, as it sits on her card. */}
+                  <img
+                    src={elementUrl(e.file)}
+                    alt={elementLabel(e)}
+                    loading="lazy"
+                    decoding="async"
+                    className="w-full h-full"
+                    style={{ objectFit: 'contain', filter: e.hue ? `hue-rotate(${e.hue}deg)` : undefined }}
+                  />
+                </div>
+                <figcaption
+                  className="overflow-hidden text-ellipsis whitespace-nowrap text-center text-[10px] capitalize"
+                  style={{ color: '#C9A3B8' }}
+                >
+                  {elementLabel(e)}
+                </figcaption>
+              </figure>
             ))}
           </div>
         )}

@@ -23,6 +23,11 @@ const BLOB = 'https://qw1nh74cmgrgawoh.public.blob.vercel-storage.com';
 export const NPG_JIG_MAPS = [`${BLOB}/s2/v2/jig-to-card.json`, `${BLOB}/s1/v1/jig-to-card.json`] as const;
 /** S2 cut-out art (961x1441 WebP with alpha) and the bounding box of each girl in it. */
 export const npgCutoutUrl = (n: number) => `${BLOB}/s2/v3/${String(n).padStart(4, '0')}-cutout.webp`;
+/**
+ * Her full card (background, frame, stats), as NPG publishes it. Not read from chain: S2's on-chain image is
+ * encrypted with a key nobody holds, so this is NPG's art for the card number the jig was matched to.
+ */
+export const npgCardUrl = (n: number) => `${BLOB}/s2/v2/${String(n).padStart(4, '0')}-card.webp`;
 export const NPG_CUTOUT_INDEX = `${BLOB}/s2/v3/cutouts-index.json`;
 
 /** OP_FALSE OP_RETURN PUSH3 "run". */
@@ -119,7 +124,7 @@ export type IdentifiedJig = {
   /** e.g. "NPG #0417", "Nao (NPG #0001)", "KAZUYO", or "RelayX NFT". */
   title: string;
   collection: string;
-  /** S2 card number, when known: art at npgCutoutUrl(n). */
+  /** S2 card number, when known: art at npgCardUrl(n). */
   n?: number;
   art?: string;
 };
@@ -141,7 +146,7 @@ export async function identifyJig(location: string, getTx: GetTx, maps: readonly
         title: npgTitle(hit.n, hit.name),
         collection: m.collection,
         n: hit.n,
-        art: s2 ? npgCutoutUrl(hit.n) : undefined,
+        art: s2 ? npgCardUrl(hit.n) : undefined,
       };
     }
     // Not in the NPG maps: name it from the mint, else from its class (input 0 of the mint is the class).
