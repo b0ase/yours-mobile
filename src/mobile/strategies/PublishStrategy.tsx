@@ -72,7 +72,7 @@ export const PublishStrategy = ({ strategy, onClose }: { strategy: Strategy; onC
     return (
       <div className="flex flex-col gap-2">
         <div className="text-sm font-bold" style={{ color: '#6CE9A6' }}>
-          Published: it’s on Exchange › Strategies.
+          Published: it’s on Exchange › Contracts › Strategies.
         </div>
         <div className="text-xs" style={{ color: MUTED }}>
           Sales pay {account?.name || 'this account'} directly. Your copy (the original) stays in this wallet.
