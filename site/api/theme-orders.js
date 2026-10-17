@@ -5,10 +5,13 @@
 // SUPABASE_SERVICE_ROLE_KEY, ARC_URL / ARC_API_KEY (optional).
 'use strict';
 const { makeThemeOrderHandlers, themeOrderStore } = require('../lib/themeOrders');
+const { makeThemeBuyHandlers, themeBuyStore } = require('../lib/themeBuys');
 const { arcBroadcast } = require('../lib/paymailStore');
 const { chain } = require('../lib/nameFee');
 
-const OPS = new Set(['upload', 'quote', 'claim', 'mine']);
+// buy-quote / buy-claim / owned: Store theme purchases, $1 each (site/lib/themeBuys.js).
+const OPS = new Set(['upload', 'quote', 'claim', 'mine', 'buy-quote', 'buy-claim', 'owned']);
+const BUY = { 'buy-quote': 'quote', 'buy-claim': 'claim', owned: 'owned' };
 const hits = new Map();
 function limited(ip, max) {
   const now = Date.now();
@@ -54,13 +57,18 @@ module.exports = async function handler(req, res) {
   if (limited(ip, 30)) return send(res, 429, { error: 'rate-limited' });
   if (!handlers) {
     const store = themeOrderStore();
-    if (!store) return send(res, 503, { error: 'not_configured' });
-    handlers = makeThemeOrderHandlers({ store, rate: () => chain.bsvUsd(), broadcast: arcBroadcast() });
+    const buyStore = themeBuyStore();
+    if (!store || !buyStore) return send(res, 503, { error: 'not_configured' });
+    const deps = { rate: () => chain.bsvUsd(), broadcast: arcBroadcast() };
+    handlers = {
+      ...makeThemeOrderHandlers({ store, ...deps }),
+      buy: makeThemeBuyHandlers({ store: buyStore, ...deps }),
+    };
   }
   const body = await readJson(req);
   if (body === null) return send(res, 400, { error: 'invalid-json' });
   try {
-    const [status, out] = await handlers[op](body);
+    const [status, out] = BUY[op] ? await handlers.buy[BUY[op]](body) : await handlers[op](body);
     return send(res, status, out);
   } catch (e) {
     console.error('theme-orders error', op, String(e && e.message ? e.message : e).slice(0, 200));

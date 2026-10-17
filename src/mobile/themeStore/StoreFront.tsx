@@ -23,6 +23,8 @@ import { useAccentId } from '../theme/useAccent';
 import { BUNDLED_PACKS, bundledId, type ThemePack } from '../theme/themePack';
 import { applyPack } from './catalog';
 import { PackCard, PreviewSheet } from './ui';
+import { BuySheet } from './StoreBuy';
+import { useOwnedThemes } from './useOwnedThemes';
 import { priceLabel, visible, type Listing } from './bstore';
 
 // The existing "Get your own edition" order flow ($99 a year), bWalletX only.
@@ -117,6 +119,9 @@ const matches = (l: Listing, q: string) =>
 
 // Same frame, type and colours as the Exchange page (market/MarketPage.tsx), so the Store looks like the rest of the app.
 const MUTED = '#98A2B3';
+const TILE = 'rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36]';
+const BACK =
+  'flex items-center gap-1.5 self-start rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36] px-3 py-2 text-xs font-bold text-white cursor-pointer';
 
 // Our edition themes, listed in Themes (owner, 17 Oct 2026). They apply today, so they show their real state.
 const EDITION_IDS = ['vexvoid', 'npg', 'npgx'];
@@ -124,49 +129,77 @@ const EDITIONS: readonly ThemePack[] = EDITION_IDS.map((id) => BUNDLED_PACKS.fin
   (p): p is ThemePack => !!p,
 );
 
-/** The editions as products: live mini wallet, tap for the big preview, Apply or In use. */
+/** The editions as products ($1 each, owner 17 Oct 2026): live mini wallet, tap for the big preview, then Buy,
+ *  Apply or In use. Buying is real (StoreBuy.tsx); until the server is set up it says buying opens soon. */
 function Editions() {
   const { chromeStorageService } = useServiceContext();
   const account = chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey ?? '';
   const current = useAccentId();
-  const [open, setOpen] = useState<ThemePack | null>(null);
+  const { owned, open: buyingOpen, add } = useOwnedThemes();
+  const [preview, setPreview] = useState<ThemePack | null>(null);
+  const [buying, setBuying] = useState<ThemePack | null>(null);
+  const [soon, setSoon] = useState(false);
   const inUse = (p: ThemePack) => bundledId(p) === current;
-  const apply = (p: ThemePack) => (
-    <button
-      type="button"
-      disabled={inUse(p)}
-      aria-pressed={inUse(p)}
-      onClick={() => applyPack(account, p)}
-      className={
-        inUse(p)
-          ? 'rounded-xl border border-[#2b2f36] py-2 text-xs font-bold'
-          : 'bw-pill bw-pill-gold flex min-h-[36px] items-center justify-center py-2 text-xs font-bold'
-      }
-      style={inUse(p) ? { color: MUTED, background: 'transparent' } : undefined}
-    >
-      {inUse(p) ? 'In use' : 'Apply'}
-    </button>
-  );
+  const action = (p: ThemePack) => {
+    if (inUse(p))
+      return (
+        <button
+          type="button"
+          disabled
+          aria-pressed
+          className="rounded-xl border border-[#2b2f36] py-2 text-xs font-bold"
+          style={{ color: MUTED, background: 'transparent' }}
+        >
+          In use
+        </button>
+      );
+    const mine = owned.has(p.id);
+    return (
+      <button
+        type="button"
+        onClick={() => (mine ? applyPack(account, p) : buyingOpen ? setBuying(p) : setSoon(true))}
+        className="bw-pill bw-pill-gold flex min-h-[36px] items-center justify-center py-2 text-xs font-bold"
+      >
+        {mine ? 'Apply' : 'Buy · $1'}
+      </button>
+    );
+  };
+  const price = (p: ThemePack) => (owned.has(p.id) ? 'Owned' : '$1');
   return (
     <>
       <div className="grid grid-cols-2 gap-1.5">
         {EDITIONS.map((p) => (
-          <PackCard key={p.id} p={p} inUse={inUse(p)} price="Free" onOpen={() => setOpen(p)}>
-            {apply(p)}
+          <PackCard key={p.id} p={p} inUse={inUse(p)} price={price(p)} onOpen={() => setPreview(p)}>
+            {action(p)}
           </PackCard>
         ))}
       </div>
-      {open && (
-        <PreviewSheet p={open} inUse={inUse(open)} price="Free" onClose={() => setOpen(null)}>
-          {apply(open)}
+      {soon && (
+        <p role="status" className="text-xs text-center m-0" style={{ color: MUTED }}>
+          Buying opens soon.
+        </p>
+      )}
+      {preview && (
+        <PreviewSheet p={preview} inUse={inUse(preview)} price={price(preview)} onClose={() => setPreview(null)}>
+          {action(preview)}
         </PreviewSheet>
+      )}
+      {buying && (
+        <BuySheet
+          pack={buying.id}
+          label={buying.label}
+          onClose={() => setBuying(null)}
+          onDone={() => {
+            add(buying.id);
+            applyPack(account, buying);
+            setPreview(null);
+            setBuying(null);
+          }}
+        />
       )}
     </>
   );
 }
-const TILE = 'rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36]';
-const BACK =
-  'flex items-center gap-1.5 self-start rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36] px-3 py-2 text-xs font-bold text-white cursor-pointer';
 
 /** One department: its products, or "Be the first to sell here". Buying and selling are not open yet. */
 function Department({ d, query, onBack }: { d: Dept; query: string; onBack: () => void }) {
