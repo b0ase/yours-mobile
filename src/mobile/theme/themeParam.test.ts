@@ -133,13 +133,21 @@ describe('/white edition entry', () => {
 });
 
 describe('edition entries', () => {
-  test('/vexvoid, /npg, /npgx, /pink, /blue, /yellow apply their pack once and open home', () => {
-    for (const id of ['vexvoid', 'npg', 'npgx', 'pink', 'blue', 'yellow']) {
+  test('/pink, /blue, /yellow apply their pack once and open home', () => {
+    for (const id of ['pink', 'blue', 'yellow']) {
       store.clear();
       href = `https://web.bwalletx.com/${id}`;
       expect(applyThemeParam()).toBe(id as never);
       expect(new URL(href).pathname).toBe('/');
       expect(packFromThemeParam(id)).toBe(id as never);
+    }
+  });
+  test('/vexvoid, /npg, /npgx open home but never switch a paid edition on (bought in the Store)', () => {
+    for (const id of ['vexvoid', 'npg', 'npgx']) {
+      store.clear();
+      href = `https://web.bwalletx.com/${id}`;
+      expect(applyThemeParam()).toBeNull();
+      expect(new URL(href).pathname).toBe('/');
     }
   });
 });

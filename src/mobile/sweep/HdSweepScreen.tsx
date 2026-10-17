@@ -142,6 +142,7 @@ const emptyAssets = (): ScannedAssets => ({
   bsv21Tokens: [],
   bsv20Tokens: [],
   locked: [],
+  runJigs: [],
   totalBsv: 0,
 });
 
@@ -371,6 +372,7 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
         assets.opnsNames.push(...r.opnsNames);
         assets.bsv20Tokens.push(...r.bsv20Tokens);
         assets.locked.push(...r.locked);
+        assets.runJigs.push(...r.runJigs);
         assets.totalBsv += r.totalBsv;
         tokens.push(...r.bsv21Tokens);
       }
@@ -512,6 +514,7 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
   const nothing = !!plan && !plan.classes.length;
   const shown = visibleResults(results);
   const skipped = a ? a.opnsNames.length + a.bsv20Tokens.length + a.locked.length : 0;
+  const jigs = a ? a.runJigs.length : 0;
   const fx = latestUsdPerGbp()?.rate;
   const bigBsv = !!a && selected.has('bsv') && overBetaLimit(a.totalBsv, cachedExchangeRate(), fx);
   const canTest =
@@ -651,6 +654,12 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
                   {c.label}
                 </label>
               ))}
+              {!!jigs && (
+                <p className="text-[11px] font-semibold" style={{ color: GOLD }}>
+                  Kept safe, not swept: {jigs} Run NFT{jigs === 1 ? '' : 's'} (e.g. a RelayX collection). Sweeping them
+                  as BSV would destroy them.
+                </p>
+              )}
               {!!skipped && (
                 <p className="text-[11px]" style={{ color: MUTED }}>
                   Not swept here: {skipped} other item{skipped === 1 ? '' : 's'} (names, BSV-20 tokens or locked coins).

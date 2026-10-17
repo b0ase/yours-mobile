@@ -65,6 +65,7 @@ export const SweepMigration = () => {
     bsv21Tokens: [],
     bsv20Tokens: [],
     locked: [],
+    runJigs: [],
     totalBsv: 0,
   });
 
@@ -175,6 +176,7 @@ export const SweepMigration = () => {
       bsv21Tokens: [],
       bsv20Tokens: [],
       locked: [],
+      runJigs: [],
       totalBsv: 0,
     };
     for (const r of results) {
@@ -185,6 +187,7 @@ export const SweepMigration = () => {
       merged.bsv21Tokens.push(...r.bsv21Tokens);
       merged.bsv20Tokens.push(...r.bsv20Tokens);
       merged.locked.push(...r.locked);
+      merged.runJigs.push(...r.runJigs);
       merged.totalBsv += r.totalBsv;
     }
 
@@ -924,6 +927,25 @@ export const SweepMigration = () => {
                     <p className="text-xs leading-relaxed px-1" style={{ color: gray }}>
                       Cannot be swept automatically. Export your legacy keys from Settings to access these with a
                       compatible wallet.
+                    </p>
+                  </div>
+                </Show>
+
+                {/* Never swept: Run NFTs (RelayX collections). Spending them as sats destroys them (sweep/runGuard.ts). */}
+                <Show when={assets.runJigs.length > 0}>
+                  <div className="rounded-2xl p-4" style={{ background: rowBg, border: `1px solid ${errorColor}20` }}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <Lock size={14} style={{ color: errorColor }} />
+                      <span className="text-sm font-semibold" style={{ color: contrast }}>
+                        Run NFTs: kept safe
+                      </span>
+                      <span className="ml-auto text-xs font-semibold" style={{ color: errorColor }}>
+                        {assets.runJigs.length}
+                      </span>
+                    </div>
+                    <p className="text-xs leading-relaxed px-1" style={{ color: gray }}>
+                      Run NFTs (for example a RelayX collection) are never swept: moving them as BSV would destroy them.
+                      They stay at your legacy address until Recover your RelayX collection is ready.
                     </p>
                   </div>
                 </Show>

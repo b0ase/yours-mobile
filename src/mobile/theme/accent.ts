@@ -9,6 +9,7 @@ import {
   packVars,
   setCustomAccent,
   type AccentId,
+  PAID_EDITIONS,
 } from './accents';
 import { deriveMix, normaliseMix, type MixSpec } from './mixer';
 import { accentOfPack, parseThemePack, type ThemePack } from './themePack';
@@ -138,6 +139,8 @@ export function applyThemeParam(): AccentId | null {
   swapInstallLinks(raw);
   const id = packFromThemeParam(raw);
   if (!id) return null;
+  // Paid editions are bought in the Store, so a link can't switch one on for free (owner, 17 Oct 2026).
+  if (PAID_EDITIONS.includes(id)) return null;
   let seen: string[] = [];
   try {
     const v = JSON.parse(read(URL_SEEN_KEY) ?? '[]') as unknown;
