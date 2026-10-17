@@ -104,7 +104,7 @@ import { IS_EXTENSION } from '../mobile/extension';
 import { useTokenRows } from '../mobile/wallet/tokenRows';
 import { openTicketRoomInChat } from '../mobile/tickets/ticketRoom';
 import { asMenuItem } from '../mobile/tabs/tabs';
-import { HdSweepScreen } from '../mobile/sweep/HdSweepScreen';
+import { RelayxRecoverScreen } from '../mobile/sweep/RelayxRecoverScreen';
 import { describeWalletError } from '../brand/walletError';
 import { publishBalance } from '../mobile/wallet/balanceStore';
 import {
@@ -1811,7 +1811,7 @@ export const BsvWallet = () => {
             <ArrowRight size={14} className="shrink-0" />
           </button>
         </div>
-        {relayxOpen && <HdSweepScreen onBack={() => setRelayxOpen(false)} />}
+        {relayxOpen && <RelayxRecoverScreen onBack={() => setRelayxOpen(false)} />}
 
       </motion.div>
     </MainContent>

@@ -45,7 +45,18 @@ const usd = (sats: number) => {
   return rate ? `$${((sats / 1e8) * rate).toFixed(2)}` : '';
 };
 
-export function NpgMelt({ jig, wif, art }: { jig: IdentifiedJig; wif: string; art?: string }) {
+export function NpgMelt({
+  jig,
+  wif,
+  art,
+  size = 'sm',
+}: {
+  jig: IdentifiedJig;
+  wif: string;
+  art?: string;
+  /** lg: the full-width primary action on the RelayX recovery detail sheet. */
+  size?: 'sm' | 'lg';
+}) {
   const { apiContext, chromeStorageService } = useServiceContext();
   const identity = useIdentity(apiContext, chromeStorageService);
   const [p, setP] = useState<Phase>({ k: 'idle' });
@@ -116,17 +127,25 @@ export function NpgMelt({ jig, wif, art }: { jig: IdentifiedJig; wif: string; ar
       type="button"
       onClick={() => void start()}
       disabled={p.k === 'quoting'}
-      className="shrink-0 rounded-lg border-0 px-2.5 py-1.5 text-[11px] font-bold cursor-pointer inline-flex items-center gap-1"
+      className={
+        size === 'lg'
+          ? 'w-full h-12 rounded-xl border-0 text-[15px] font-semibold cursor-pointer inline-flex items-center justify-center gap-2 transition-[transform,filter] duration-150 ease-out active:scale-[0.98] hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:opacity-60'
+          : 'shrink-0 rounded-lg border-0 px-2.5 py-1.5 text-[11px] font-bold cursor-pointer inline-flex items-center gap-1'
+      }
       style={{ background: PINK, color: '#000' }}
     >
-      <Flame size={12} /> {p.k === 'quoting' ? 'Quoting…' : 'Melt'}
+      <Flame size={size === 'lg' ? 17 : 12} />{' '}
+      {p.k === 'quoting' ? 'Checking the price…' : size === 'lg' ? 'Melt into element cards' : 'Melt'}
     </button>
   );
 
   if (p.k === 'idle' || p.k === 'quoting') return button;
   if (p.k === 'soon')
     return (
-      <span className="shrink-0 text-[11px]" style={{ color: '#B6C8F5' }}>
+      <span
+        className={size === 'lg' ? 'block w-full text-center text-sm py-3 rounded-xl' : 'shrink-0 text-[11px]'}
+        style={{ color: '#B6C8F5', border: size === 'lg' ? '1px solid rgb(255 255 255 / 0.08)' : undefined }}
+      >
         Melting opens soon
       </span>
     );

@@ -76,7 +76,7 @@ describe('npg melt', () => {
     const calls: Record<string, unknown> = {};
     let pending: Transaction | null = null;
     const wallet = {
-      createAction: async (args: any) => {
+      createAction: async (args: Record<string, unknown>) => {
         calls.create = args;
         const tx = new Transaction();
         tx.addInput({ sourceTransaction: parent, sourceOutputIndex: 0, unlockingScript: new Script() });
@@ -88,7 +88,7 @@ describe('npg melt', () => {
         beef.mergeTransaction(tx);
         return { signableTransaction: { reference: 'ref1', tx: beef.toBinaryAtomic(tx.id('hex')) } };
       },
-      signAction: async (args: any) => {
+      signAction: async (args: Record<string, unknown>) => {
         calls.sign = args;
         pending!.inputs[0].unlockingScript = Script.fromHex(args.spends[0].unlockingScript);
         const beef = new Beef();
@@ -107,9 +107,12 @@ describe('npg melt', () => {
         return b;
       },
     };
-    const out = await buildMeltTx(wallet as any, services, quote(), { location: LOCATION, wif: JIG_KEY.toWif() });
-    expect((calls.create as any).options).toMatchObject({ noSend: true, randomizeOutputs: false });
-    expect((calls.create as any).outputs[0]).toMatchObject({
+    const out = await buildMeltTx(wallet as never, services, quote(), { location: LOCATION, wif: JIG_KEY.toWif() });
+    expect((calls.create as Record<string, unknown> & { outputs: unknown[] }).options).toMatchObject({
+      noSend: true,
+      randomizeOutputs: false,
+    });
+    expect((calls.create as Record<string, unknown> & { outputs: unknown[] }).outputs[0]).toMatchObject({
       satoshis: 0,
       lockingScript: burnScript(ORIGIN, 'mq_test123').toHex(),
     });
@@ -154,7 +157,7 @@ describe('npg melt', () => {
       },
     };
     await expect(
-      buildMeltTx(wallet as any, services, quote(), { location: LOCATION, wif: JIG_KEY.toWif() }),
+      buildMeltTx(wallet as never, services, quote(), { location: LOCATION, wif: JIG_KEY.toWif() }),
     ).rejects.toThrow();
     expect(aborted).toBe(true);
   });
@@ -162,11 +165,14 @@ describe('npg melt', () => {
   test('polls until done, and stops at the time limit', async () => {
     const seen: string[] = [];
     let n = 0;
-    const f = (async () => ({ ok: true, json: async () => ({ status: ++n < 3 ? 'minting' : 'done' }) })) as any;
+    const f = (async () => ({
+      ok: true,
+      json: async () => ({ status: ++n < 3 ? 'minting' : 'done' }),
+    })) as unknown as typeof fetch;
     const s = await pollMelt(f, 'mq', (x) => seen.push(x.status), { every: 1, max: 100, sleep: async () => {} });
     expect(s.status).toBe('done');
     expect(seen).toEqual(['minting', 'minting', 'done']);
-    const g = (async () => ({ ok: true, json: async () => ({ status: 'minting' }) })) as any;
+    const g = (async () => ({ ok: true, json: async () => ({ status: 'minting' }) })) as unknown as typeof fetch;
     const t = await pollMelt(g, 'mq', () => {}, { every: 10, max: 30, sleep: async () => {} });
     expect(t.status).toBe('minting');
   });
@@ -206,7 +212,7 @@ describe('npg melt', () => {
   });
 
   const answer = (status: number, body: unknown) =>
-    (async () => ({ status, ok: status < 300, json: async () => body })) as any;
+    (async () => ({ status, ok: status < 300, json: async () => body })) as unknown as typeof fetch;
 
   test('commit 409 not_ready and 503 are clean refusals (coins freed); 500 is not', async () => {
     const body = { quote_id: 'mq', rawtx_ef: '00', signature: 's' };
