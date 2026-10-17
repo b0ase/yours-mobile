@@ -15,6 +15,7 @@ import { panelUnlockMessages, shouldPushPrompt, type ShownPrompt } from './servi
 import { RequestParams, ResponseEventDetail, YoursEventName } from './inject';
 import { recordCall, recordPayment, requestedSats, updateConnectionLog } from './mobile/wallet/connectionLog';
 import { CWIEventName } from './cwi';
+import { describeWalletError } from './brand/walletError';
 import type {
   ListOutputsArgs,
   RelinquishOutputArgs,
@@ -3804,7 +3805,8 @@ if (isInServiceWorker) {
       });
     } catch (error) {
       const errorName = error instanceof Error ? error.name : 'Unknown';
-      const errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
+      // describeWalletError: WERR_REVIEW_ACTIONS' per-tx status (doubleSpend, invalidTx…) only survives as text here.
+      const errorMessage = error instanceof Error ? describeWalletError(error) : JSON.stringify(error);
       const errorStack = error instanceof Error ? error.stack : undefined;
       console.error('[createAction] Error:', errorName, errorMessage);
       if (errorStack) console.error('[createAction] Stack:', errorStack);
@@ -3895,7 +3897,7 @@ if (isInServiceWorker) {
         type: CWIEventName.SIGN_ACTION,
         success: false,
         // Queued to retry is not a failure (services/repeatGuard.ts): the wallet will send it on its own.
-        error: queuedSend(error) ? QUEUED_MESSAGE : error instanceof Error ? error.message : JSON.stringify(error),
+        error: queuedSend(error) ? QUEUED_MESSAGE : error instanceof Error ? describeWalletError(error) : JSON.stringify(error),
       });
     }
     return true;
