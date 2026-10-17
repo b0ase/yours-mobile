@@ -679,7 +679,8 @@ const NftLibraryPage = () => {
       </div>
 
       {openParam && (
-        <div className="w-[400px] max-w-[45%] shrink-0 min-h-0">
+        // Phone: full screen over the list (a side column pushed the page sideways). Wide: side column.
+        <div className="fixed inset-0 z-40 pt-[env(safe-area-inset-top)] bg-[#0b0c0f] md:static md:z-auto md:pt-0 md:bg-transparent md:w-[400px] md:max-w-[45%] md:shrink-0 min-h-0">
           {openItem && openMedia ? (
             <DetailPanel
               key={openItem.outpoint}
