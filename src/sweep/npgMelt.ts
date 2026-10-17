@@ -119,8 +119,20 @@ export class MeltRefusedError extends Error {
 }
 
 type Fetch = typeof fetch;
+export const MELT_UNREACHABLE =
+  "Couldn't reach NPG's melt service (ninjapunkgirls.com). Check your connection and try again in a bit.";
+/** Browsers report a blocked or dropped request as a bare TypeError ("Load failed" on iPhone, owner 17 Oct 2026).
+ *  Name the service instead. Still a plain Error, never a refusal: a dropped commit may have broadcast. */
+const reach = async (f: Fetch, url: string, init?: RequestInit) => {
+  try {
+    return await f(url, init);
+  } catch (e) {
+    if (e instanceof TypeError) throw new Error(MELT_UNREACHABLE);
+    throw e;
+  }
+};
 const post = async (f: Fetch, path: string, body: unknown, refusals: readonly number[] = []) => {
-  const r = await f(`${NPG_MELT_API}${path}`, {
+  const r = await reach(f, `${NPG_MELT_API}${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
@@ -153,7 +165,7 @@ export const commitMelt = (
 export const COMMIT_REFUSALS = [409, 503] as const;
 
 export async function meltStatus(f: Fetch, quoteId: string): Promise<MeltStatus> {
-  const r = await f(`${NPG_MELT_API}/status/${encodeURIComponent(quoteId)}`);
+  const r = await reach(f, `${NPG_MELT_API}/status/${encodeURIComponent(quoteId)}`);
   if (!r.ok) throw new Error(`Status ${r.status}`);
   return r.json();
 }

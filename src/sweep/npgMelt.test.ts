@@ -13,6 +13,7 @@ import {
   signChallenge,
   splitAvatar,
   type MeltQuote,
+  MELT_UNREACHABLE,
 } from './npgMelt';
 
 const JIG_KEY = new PrivateKey(42);
@@ -224,5 +225,16 @@ describe('npg melt', () => {
       recipient_pubkey: JIG_KEY.toPublicKey().toString(),
     }).catch((x) => x);
     expect(e.message).toContain('traces back to cdcdcdcdcdcd');
+  });
+});
+
+describe('unreachable melt service', () => {
+  test('a blocked request names the service, and is never a clean refusal', async () => {
+    const f = (async () => {
+      throw new TypeError('Load failed');
+    }) as unknown as typeof fetch;
+    const err = await commitMelt(f, { quote_id: 'q', rawtx_ef: '00', signature: 's' }).catch((e) => e);
+    expect(err.message).toBe(MELT_UNREACHABLE);
+    expect(err).not.toBeInstanceOf(MeltRefusedError);
   });
 });
