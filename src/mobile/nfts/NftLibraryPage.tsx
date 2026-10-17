@@ -51,6 +51,10 @@ import { TopNav } from '../../components/TopNav';
 import { WIDE_ON } from '../wide/flag';
 import { BavatarKeep } from './BavatarKeep';
 import { isBavatarItem } from '../names/pictureSource';
+import { useRelayxAccount } from '../sweep/useRelayxAccount';
+import { loadSavedRelayx } from '../sweep/relayxSaved';
+import { CardArt, RelayxRecoverScreen } from '../sweep/RelayxRecoverScreen';
+import type { Found } from '../../sweep/relayxRecover';
 
 const ModelViewer = lazy(() => import('../three3d/ModelViewer'));
 
@@ -211,6 +215,85 @@ const Tile = ({
       </div>
     </div>
   </div>
+);
+
+/* ---------- Run (RelayX) ---------- */
+
+/** All · 1Sat · Run: which NFTs the grid shows. Run = the account's saved RelayX search (RelayxRecoverScreen). */
+type Source = 'all' | '1sat' | 'run';
+const SOURCE_KEY = 'bw.nfts.source';
+const readSource = (): Source => {
+  try {
+    const v = localStorage.getItem(SOURCE_KEY);
+    return v === '1sat' || v === 'run' ? v : 'all';
+  } catch {
+    return 'all';
+  }
+};
+
+const RunTile = ({ f, onOpen }: { f: Found; onOpen: () => void }) => (
+  <button
+    onClick={onOpen}
+    aria-label={`Open ${f.title}`}
+    className="relative flex flex-col min-w-0 overflow-hidden rounded-xl bg-[var(--bw-surface)] border border-white/5 hover:border-[color:var(--bw-accent)]/60 transition-colors text-left"
+  >
+    {f.art ? (
+      <CardArt url={f.art} className="aspect-[2/3] w-full" />
+    ) : (
+      <div className="aspect-[2/3] w-full">
+        <GoldCard icon={<Sparkles size={26} color={GOLD} />} label="Run" title={f.title} />
+      </div>
+    )}
+    <span className="absolute top-2 left-2 rounded-md bg-black/80 px-2 py-0.5 text-[10px] font-semibold text-[#8FB3FF]">
+      Run
+    </span>
+    <span className="px-2 pt-1.5 text-xs font-semibold text-white truncate">{f.title}</span>
+    <span className="px-2 pb-1.5 text-[10px] text-[#98A2B3] truncate">{f.collection}</span>
+  </button>
+);
+
+/** The saved RelayX search as tiles; nothing saved yet = a short note and a button to search. */
+const RunSection = ({
+  nfts,
+  heading,
+  onOpen,
+  onSearch,
+}: {
+  nfts: readonly Found[] | null;
+  heading: boolean;
+  onOpen: (f: Found) => void;
+  onSearch: () => void;
+}) => (
+  <section className="pb-6">
+    <div className="flex items-center gap-2 pb-3">
+      {heading && <span className="text-sm font-semibold text-white">Run NFTs</span>}
+      {nfts && (
+        <button className="ml-auto text-xs underline text-[#98A2B3]" onClick={onSearch}>
+          Refresh
+        </button>
+      )}
+    </div>
+    {nfts ? (
+      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(140px, 45%), 1fr))' }}>
+        {nfts.map((f) => (
+          <RunTile key={f.origin} f={f} onOpen={() => onOpen(f)} />
+        ))}
+      </div>
+    ) : (
+      <div className="flex flex-col items-center gap-3 py-10 text-center">
+        <p className="max-w-xs text-sm text-[#98A2B3]">
+          This account came from RelayX. Search its old addresses to see the Run NFTs it holds.
+        </p>
+        <button
+          onClick={onSearch}
+          className="rounded-xl px-5 py-2.5 text-sm font-semibold text-[#010101]"
+          style={{ background: GOLD }}
+        >
+          Find Run NFTs
+        </button>
+      </div>
+    )}
+  </section>
 );
 
 /* ---------- Detail panel ---------- */
@@ -498,6 +581,26 @@ const NftLibraryPage = () => {
   const [filter, setFilter] = useState<LibraryFilter>(EMPTY_FILTER);
   const [sort, setSort] = useState<SortKey>('newest');
   const [note, setNote] = useState('');
+  const xpub = useRelayxAccount();
+  const [pickedSource, setPickedSource] = useState<Source>(readSource);
+  // Without a RelayX xpub there is no Run list, so Run falls back to All (which is then just 1Sat).
+  const source: Source = !xpub && pickedSource === 'run' ? 'all' : pickedSource;
+  const pickSource = (s: Source) => {
+    setPickedSource(s);
+    try {
+      localStorage.setItem(SOURCE_KEY, s);
+    } catch {
+      // Blocked storage: the choice just isn't remembered.
+    }
+  };
+  // RelayxRecoverScreen open (focus = a saved NFT's origin); closing it re-reads the saved search.
+  const [relayx, setRelayx] = useState<{ focus?: string } | null>(null);
+  const [runVersion, setRunVersion] = useState(0);
+  const runAll = useMemo(
+    () => (xpub ? (loadSavedRelayx(xpub)?.result.nfts ?? null) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-read when the search screen closes
+    [xpub, runVersion],
+  );
 
   // Load the whole collection (50 per page) so filters, search and counts cover everything.
   useEffect(() => {
@@ -513,6 +616,14 @@ const NftLibraryPage = () => {
   );
   const byOutpoint = useMemo(() => new Map(media.map((m) => [m.output.outpoint.replace('.', '_'), m])), [media]);
   const shown = useMemo(() => filterAndSort(lib, filter, sort), [lib, filter, sort]);
+  const runShown = useMemo(() => {
+    const q = filter.query.trim().toLowerCase();
+    return runAll && q
+      ? runAll.filter((f) => `${f.title} ${f.collection} ${f.origin}`.toLowerCase().includes(q))
+      : runAll;
+  }, [runAll, filter.query]);
+  const showOneSat = source !== 'run';
+  const showRun = !!xpub && source !== '1sat';
   const groups = useMemo(() => groupByCollection(lib), [lib]);
   const counts = useMemo(() => typeCounts(lib), [lib]);
   const listedCount = lib.filter((i) => i.listed).length;
@@ -618,11 +729,28 @@ const NftLibraryPage = () => {
             </button>
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
-            {NFT_TYPES.filter((t) => counts[t.id]).map((t) => (
-              <button key={t.id} className={chip(filter.types.includes(t.id))} onClick={() => toggleType(t.id)}>
-                {t.label} {counts[t.id]}
-              </button>
-            ))}
+            <div role="group" aria-label="Source" className="flex rounded-full bg-[var(--bw-surface)] p-0.5 mr-1">
+              {(['all', '1sat', 'run'] as const)
+                .filter((s) => s !== 'run' || xpub)
+                .map((s) => (
+                  <button
+                    key={s}
+                    aria-pressed={source === s}
+                    onClick={() => pickSource(s)}
+                    className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                      source === s ? 'bg-[color:var(--bw-accent)] text-[#010101]' : 'text-[#D0D5DD]'
+                    }`}
+                  >
+                    {s === 'all' ? 'All' : s === '1sat' ? '1Sat' : 'Run'}
+                  </button>
+                ))}
+            </div>
+            {showOneSat &&
+              NFT_TYPES.filter((t) => counts[t.id]).map((t) => (
+                <button key={t.id} className={chip(filter.types.includes(t.id))} onClick={() => toggleType(t.id)}>
+                  {t.label} {counts[t.id]}
+                </button>
+              ))}
             {listedCount > 0 && (
               <button className={chip(filter.listedOnly)} onClick={() => set({ listedOnly: !filter.listedOnly })}>
                 Listed for sale {listedCount}
@@ -654,8 +782,10 @@ const NftLibraryPage = () => {
           className="flex-1 min-h-0 overflow-y-auto px-4 pt-4"
           onScroll={(e) => setBox((b) => ({ ...b, top: (e.target as HTMLDivElement).scrollTop }))}
         >
-          {!lib.length && !hasMore && !loading && !error ? (
-            <Empty onMint={() => navigate('/m/bpics')} />
+          {!showOneSat ? null : !lib.length && !hasMore && !loading && !error ? (
+            showRun ? null : (
+              <Empty onMint={() => navigate('/m/bpics')} />
+            )
           ) : !shown.length && lib.length ? (
             <div className="py-16 text-center text-sm text-[#98A2B3]">Nothing matches these filters.</div>
           ) : (
@@ -682,8 +812,26 @@ const NftLibraryPage = () => {
               })}
             </div>
           )}
+          {showRun && (
+            <RunSection
+              nfts={runShown}
+              heading={showOneSat}
+              onOpen={(f) => setRelayx({ focus: f.origin })}
+              onSearch={() => setRelayx({})}
+            />
+          )}
         </div>
       </div>
+      {relayx && xpub && (
+        <RelayxRecoverScreen
+          xpub={xpub}
+          focus={relayx.focus}
+          onBack={() => {
+            setRelayx(null);
+            setRunVersion((v) => v + 1);
+          }}
+        />
+      )}
 
       {openParam && (
         // Phone: full screen over the list (a side column pushed the page sideways). Wide: side column.

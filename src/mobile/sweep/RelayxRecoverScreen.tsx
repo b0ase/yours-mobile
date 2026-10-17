@@ -19,6 +19,7 @@ import { loadNpgMaps, splitOutpoint, type NpgMap } from '../../sweep/runIdentify
 import { HdSweepScreen } from './HdSweepScreen';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { NpgMelt } from './NpgMelt';
+import { loadSavedRelayx, saveRelayxResult } from './relayxSaved';
 
 /**
  * Recover RelayX collections (owner, 17 Oct 2026: "it's SPECIFICALLY FOR FINDING RELAYX NFTS"). Its own screen:
@@ -45,34 +46,10 @@ const bsv = (sats: number) => (sats / 1e8).toLocaleString('en-US', { maximumFrac
 const pad = (n: number) => String(n).padStart(4, '0');
 
 /**
- * The last search, kept on this phone so the gallery survives the app being closed (owner, 17 Oct 2026). Public
- * chain facts only: the keys (wif) are stripped, so melting asks for the words again.
- */
-const SAVED_KEY = 'bw.relayx.lastsearch.v1';
-/** A restored RelayX account keeps its own saved search, keyed by its xpub's tail. */
-const savedKey = (xpub?: string) => (xpub ? `${SAVED_KEY}.${xpub.slice(-16)}` : SAVED_KEY);
-function saveResult(r: ScanResult, xpub?: string) {
-  try {
-    const nfts = r.nfts.filter((n) => !n.unread).map((n) => ({ ...n, wif: '' }));
-    localStorage.setItem(savedKey(xpub), JSON.stringify({ at: Date.now(), result: { ...r, nfts } }));
-  } catch {
-    // Storage full or blocked: the search still shows; it just won't survive a restart.
-  }
-}
-function loadSaved(xpub?: string): { result: ScanResult; at: number } | null {
-  try {
-    const v = JSON.parse(localStorage.getItem(savedKey(xpub)) ?? 'null');
-    return v?.result?.nfts?.length ? v : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
  * Her full NPG card. Loaded lazily and decoded off the main thread, so a gallery of 1,800 doesn't fetch them all
  * at once (owner, 17 Oct 2026: most tiles sat empty). Same 2:3 frame for every card.
  */
-function CardArt({ url, className, eager }: { url: string; className?: string; eager?: boolean }) {
+export function CardArt({ url, className, eager }: { url: string; className?: string; eager?: boolean }) {
   const [loaded, setLoaded] = useState(false);
   // Only cards on or near the screen hold their picture: iOS closed the app in the background when hundreds of
   // decoded cards sat in memory (owner, 17 Oct 2026). Far off screen the <img> goes away and memory is freed.
@@ -328,13 +305,24 @@ function Detail({
  * `xpub`: a restored RelayX account (settings.relayx). Account mode: no words, the search runs from the public key
  * (it can spend nothing), and its results are kept apart from a words search.
  */
-export function RelayxRecoverScreen({ onBack, xpub }: { onBack: () => void; xpub?: string }) {
+export function RelayxRecoverScreen({
+  onBack,
+  xpub,
+  focus,
+}: {
+  onBack: () => void;
+  xpub?: string;
+  /** Origin of a saved NFT to open straight away (the NFTs tab's Run list). */
+  focus?: string;
+}) {
   const [words, setWords] = useState('');
   const [phase, setPhase] = useState<Phase>(() => {
-    const s = loadSaved(xpub);
+    const s = loadSavedRelayx(xpub);
     return s ? { k: 'saved', ...s } : { k: 'enter' };
   });
-  const [open, setOpen] = useState<Found | null>(null);
+  const [open, setOpen] = useState<Found | null>(() =>
+    focus ? (loadSavedRelayx(xpub)?.result.nfts.find((n) => n.origin === focus) ?? null) : null,
+  );
   const [sweep, setSweep] = useState(false);
   // A restored RelayX account uses its own words (the wallet is unlocked): Bring it in and Melt need nothing typed.
   const { keysService } = useServiceContext();
@@ -390,7 +378,7 @@ export function RelayxRecoverScreen({ onBack, xpub }: { onBack: () => void; xpub
         createJigMemo(store),
       );
       if (cancel.current.cancelled) return setPhase({ k: 'enter' });
-      saveResult(result, xpub);
+      saveRelayxResult(result, xpub);
       setPhase({ k: 'done', result });
     } catch (e) {
       if (!cancel.current.cancelled) setPhase({ k: 'error', message: (e as Error).message });
