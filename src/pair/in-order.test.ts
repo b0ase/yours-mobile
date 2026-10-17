@@ -3,6 +3,12 @@ import { PrivateKey } from '@bsv/sdk';
 import { Sealer, deriveSession, newChannel } from './protocol';
 import { inOrder } from './in-order';
 
+// Poll instead of a fixed sleep: under full-suite load timers fire late.
+const until = async (ok: () => boolean, ms = 2000) => {
+  const end = Date.now() + ms;
+  while (!ok() && Date.now() < end) await new Promise((r) => setTimeout(r, 5));
+};
+
 describe('inOrder', () => {
   test('runs frames one at a time, in arrival order', async () => {
     const seen: number[] = [];
@@ -13,7 +19,7 @@ describe('inOrder', () => {
     h(1);
     h(2);
     h(3);
-    await new Promise((r) => setTimeout(r, 60));
+    await until(() => seen.length === 3);
     expect(seen).toEqual([1, 2, 3]);
   });
 
@@ -32,7 +38,7 @@ describe('inOrder', () => {
     });
     h(f1);
     h(f2);
-    await new Promise((r) => setTimeout(r, 50));
+    await until(() => got.length === 2);
     expect(got).toEqual(['1', '2']);
     expect(wallet.counters.lastSeen).toBe(2);
     expect(await wallet.open(f2)).toBeNull(); // replay still refused
@@ -46,7 +52,7 @@ describe('inOrder', () => {
     });
     h(1);
     h(2);
-    await new Promise((r) => setTimeout(r, 10));
+    await until(() => seen.length === 1);
     expect(seen).toEqual([2]);
   });
 });
