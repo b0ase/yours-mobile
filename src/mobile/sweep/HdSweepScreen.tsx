@@ -682,7 +682,7 @@ export const HdSweepScreen = ({ onBack }: { onBack: () => void }) => {
                 held={heldJigs}
                 getHex={async (txid) => {
                   const r = await wocGet(`/tx/${txid}/hex`);
-                  if (!r?.ok) throw new Error('could not read ' + txid.slice(0, 8));
+                  if (!r?.ok) throw new Error(`could not read ${txid.slice(0, 8)} (${r?.status ?? 'no answer'})`);
                   return (await r.text()).trim();
                 }}
               />

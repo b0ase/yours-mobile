@@ -40,10 +40,25 @@ function Cutout({ url, box }: { url: string; box?: [number, number, number, numb
   );
 }
 
+/** WhatsOnChain rate-limits long scans; its 429 replies carry no CORS header, so iPhone reports "Load failed"
+ *  (a TypeError). Retry those and 429/5xx-shaped failures with backoff: 1.5 s, 3 s, 6 s … up to 6 tries. */
+async function withRetry<T>(fn: () => Promise<T>, tries = 6): Promise<T> {
+  for (let a = 0; ; a++) {
+    try {
+      return await fn();
+    } catch (e) {
+      const transient = e instanceof TypeError || /429|Too Many|5\d\d|rate/i.test(String((e as Error)?.message ?? e));
+      if (!transient || a >= tries - 1) throw e;
+      await new Promise((r) => setTimeout(r, 1500 * 2 ** a));
+    }
+  }
+}
+
 export function RelayxJigs({ held, getHex }: { held: Held[]; getHex: (txid: string) => Promise<string> }) {
   const [found, setFound] = useState<(IdentifiedJig & { address: string; wif?: string })[] | null>(null);
   const [bbox, setBbox] = useState<BBox>({});
   const [done, setDone] = useState(0);
+  const [attempt, setAttempt] = useState(0);
   const key = held.map((h) => h.outpoint).join();
 
   useEffect(() => {
@@ -53,7 +68,7 @@ export function RelayxJigs({ held, getHex }: { held: Held[]; getHex: (txid: stri
       if (!txs.has(txid))
         txs.set(
           txid,
-          getHex(txid).then((h) => Transaction.fromHex(h)),
+          withRetry(() => getHex(txid)).then((h) => Transaction.fromHex(h)),
         );
       return txs.get(txid)!;
     };
@@ -65,10 +80,23 @@ export function RelayxJigs({ held, getHex }: { held: Held[]; getHex: (txid: stri
           .catch(() => null),
       ]);
       if (live && index?.bbox) setBbox(index.bbox as BBox);
+      // One unreadable NFT must not stop the rest (owner 17 Oct 2026: a single failed lookup showed a bare
+      // "Load failed" and the importer gave up). It shows as unread with a Retry instead.
       const out = await mapLimit(held, 3, async (h) => {
-        const j = await identifyJig(h.outpoint, getTx, maps);
-        if (live) setDone((d) => d + 1);
-        return { ...j, address: h.address, wif: h.wif };
+        try {
+          const j = await identifyJig(h.outpoint, getTx, maps);
+          return { ...j, address: h.address, wif: h.wif };
+        } catch {
+          return {
+            location: h.outpoint,
+            title: "Couldn't read this one",
+            unread: true,
+            address: h.address,
+            wif: h.wif,
+          } as unknown as IdentifiedJig & { address: string; wif?: string };
+        } finally {
+          if (live) setDone((d) => d + 1);
+        }
       });
       if (live) setFound(out.sort((a, b) => (a.n ?? 1e9) - (b.n ?? 1e9) || a.title.localeCompare(b.title)));
     })();
@@ -77,7 +105,7 @@ export function RelayxJigs({ held, getHex }: { held: Held[]; getHex: (txid: stri
     };
     // held is identified once per scan result
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }, [key, attempt]);
 
   if (!held.length) return null;
   return (
@@ -89,6 +117,20 @@ export function RelayxJigs({ held, getHex }: { held: Held[]; getHex: (txid: stri
             ? `${found.length} NFT${found.length === 1 ? '' : 's'} found. Nothing moves unless you melt one.`
             : `Reading your RelayX NFTs: ${done} of ${held.length}`}
         </span>
+        {found?.some((j) => (j as { unread?: boolean }).unread) && (
+          <button
+            type="button"
+            onClick={() => {
+              setFound(null);
+              setDone(0);
+              setAttempt((a) => a + 1);
+            }}
+            className="self-start mt-1 rounded-lg border-0 px-3 py-1.5 text-xs font-semibold cursor-pointer"
+            style={{ background: '#2E6BFF', color: '#fff' }}
+          >
+            Retry the {found.filter((j) => (j as { unread?: boolean }).unread).length} unread
+          </button>
+        )}
       </div>
       {found?.map((j) => (
         <div
