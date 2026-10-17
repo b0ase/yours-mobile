@@ -104,6 +104,7 @@ import { IS_EXTENSION } from '../mobile/extension';
 import { useTokenRows } from '../mobile/wallet/tokenRows';
 import { openTicketRoomInChat } from '../mobile/tickets/ticketRoom';
 import { asMenuItem } from '../mobile/tabs/tabs';
+import { HdSweepScreen } from '../mobile/sweep/HdSweepScreen';
 import { describeWalletError } from '../brand/walletError';
 import { publishBalance } from '../mobile/wallet/balanceStore';
 import {
@@ -200,6 +201,7 @@ export const BsvWallet = () => {
   const [keysAlreadyBackedUp, setKeysAlreadyBackedUp] = useState(false);
   const [showMigrationBanner, setShowMigrationBanner] = useState(false);
   const [legacyLeft, setLegacyLeft] = useState(0);
+  const [relayxOpen, setRelayxOpen] = useState(false);
   // Cache first (owner round 6): last token balances at once, refreshed in the background.
   const [bsv21s, setBsv21s] = useState<Bsv21Balance[]>(() => {
     const id = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress;
@@ -1780,6 +1782,37 @@ export const BsvWallet = () => {
 
         {/* Bottom breathing room */}
         <div className="h-4" />
+        {/* Owner 17 Oct 2026: old assets must always be findable at the bottom of the wallet, not only when a
+            banner decides to show. Two rows: the Yours/old-address migration tool, and the RelayX NFT importer. */}
+        <div className="flex flex-col gap-2 w-[92%] mt-2 mb-6">
+          <p className="m-0 text-xs font-semibold" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
+            Bring in old assets
+          </p>
+          <button
+            type="button"
+            onClick={() => navigate('/sweep')}
+            className="flex items-center justify-between gap-2 px-4 py-3 rounded-xl border-0 cursor-pointer text-left"
+            style={{ background: 'rgba(253,176,34,0.08)', border: '1px solid rgba(253,176,34,0.2)', color: '#FDB022' }}
+          >
+            <span className="text-sm">
+              <b>Migration tool</b>: coins, tokens and ordinals from Yours or old addresses
+            </span>
+            <ArrowRight size={14} className="shrink-0" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setRelayxOpen(true)}
+            className="flex items-center justify-between gap-2 px-4 py-3 rounded-xl border-0 cursor-pointer text-left"
+            style={{ background: 'rgba(46,144,250,0.10)', border: '1px solid rgba(46,144,250,0.35)', color: '#53B1FD' }}
+          >
+            <span className="text-sm">
+              <b>RelayX NFT Collection Importer</b>: find your Run NFTs (NPG and more) from your RelayX words
+            </span>
+            <ArrowRight size={14} className="shrink-0" />
+          </button>
+        </div>
+        {relayxOpen && <HdSweepScreen onBack={() => setRelayxOpen(false)} />}
+
       </motion.div>
     </MainContent>
   );
