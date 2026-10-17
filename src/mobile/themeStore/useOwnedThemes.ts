@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useServiceContext } from '../../hooks/useServiceContext';
-import { isNotConfigured, ownedThemes } from '../themeOrder/api';
+import { THEME_STORE_PAID_ENABLED } from '../storeBuild';
 
 const f: typeof fetch = (u, i) => fetch(u, i);
 
@@ -10,6 +10,9 @@ export function useOwnedThemes() {
   const [owned, setOwned] = useState<Set<string>>(new Set());
   const [open, setOpen] = useState<boolean | null>(null);
   const load = useCallback(async () => {
+    // Store builds sell nothing: no purchase code in their bundle (the inlined flag drops this import).
+    if (!THEME_STORE_PAID_ENABLED) return;
+    const { isNotConfigured, ownedThemes } = await import('../themeOrder/api');
     try {
       const r = await ownedThemes(f, apiContext.wallet);
       setOwned(new Set(r.packs));
