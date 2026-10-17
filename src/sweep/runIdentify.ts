@@ -77,6 +77,12 @@ export function readRun(tx: Transaction): { run: RunPayload; firstJig: number } 
 
 export type GetTx = (txid: string) => Promise<Transaction>;
 
+/**
+ * How far back a jig is followed. A Run jig moves on every send and on every update of itself, so an often-traded
+ * one can be hundreds of moves from its mint (owner, 18 Oct 2026: the same 3 of 1,839 unread on every search).
+ */
+export const MAX_MOVES = 1000;
+
 /** Walk a jig's current location back to the output that created it. */
 export async function jigOrigin(
   location: string,
@@ -135,7 +141,7 @@ export const npgTitle = (n: number, name?: string) =>
 /** Name one held jig: map lookup first, then the class's own metadata. Never throws; unknowns say so. */
 export async function identifyJig(location: string, getTx: GetTx, maps: readonly NpgMap[]): Promise<IdentifiedJig> {
   try {
-    const { origin, mint: minted } = await jigOrigin(location, getTx, 80, (o) => maps.some((m) => !!m.jigs[o]));
+    const { origin, mint: minted } = await jigOrigin(location, getTx, MAX_MOVES, (o) => maps.some((m) => !!m.jigs[o]));
     for (const m of maps) {
       const hit = m.jigs[origin];
       if (!hit) continue;

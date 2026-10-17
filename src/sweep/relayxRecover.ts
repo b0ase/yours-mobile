@@ -107,13 +107,13 @@ async function mapLimit<T, R>(items: readonly T[], n: number, fn: (t: T) => Prom
  * an S2 mint tx carries its image (~470 KB), and a held-since-mint jig sits at its mint. Others (1 or 546 sats)
  * are read (batched + cached by the reader).
  */
-async function isJigOutput(u: Utxo, reader: ChainReader, maps: readonly NpgMap[]): Promise<boolean | 'unread'> {
+async function isJigOutput(u: Utxo, reader: ChainReader, maps: readonly NpgMap[]): Promise<boolean | Error> {
   if (u.sats === RUN_JIG_SATS || maps.some((m) => !!m.jigs[outpoint(u.txid, u.vout)])) return true;
   try {
     const r = readRun(await reader.getTx(u.txid));
     return !!r && u.vout >= r.firstJig;
-  } catch {
-    return 'unread';
+  } catch (e) {
+    return e instanceof Error ? e : new Error(String(e));
   }
 }
 
@@ -184,14 +184,15 @@ export async function scanRelayx(
     const known = memo?.get(location);
     const jig = known !== undefined ? !!known : await isJigOutput(u, reader, maps);
     if (jig === false) memo?.set(location, null);
+    // Unread ones keep the reason, so the gallery can say why (owner, 18 Oct 2026).
     let item: Found | null = null;
     if (known) item = { ...known, address: u.address, wif: u.wif, path: u.path };
-    else if (jig === 'unread')
+    else if (jig instanceof Error)
       item = {
         location,
         origin: '',
         title: "Couldn't read this one",
-        collection: '',
+        collection: `Couldn't read it (${jig.message})`,
         address: u.address,
         wif: u.wif,
         path: u.path,
@@ -205,7 +206,6 @@ export async function scanRelayx(
         : {
             ...id,
             title: "Couldn't read this one",
-            collection: '',
             address: u.address,
             wif: u.wif,
             path: u.path,
@@ -237,7 +237,7 @@ export async function retryUnread(found: Found[], reader: ChainReader, maps: rea
   return mapLimit(found, 20, async (f) => {
     if (!f.unread) return f;
     const id = await identifyJig(f.location, reader.getTx, maps);
-    return id.origin ? { ...id, address: f.address, wif: f.wif } : f;
+    return id.origin ? { ...id, address: f.address, wif: f.wif, path: f.path } : { ...f, collection: id.collection };
   });
 }
 
