@@ -92,7 +92,7 @@ export interface HealStore {
   markSpent: (txid: string, vout: number) => Promise<number>;
 }
 
-export type HealReport = { checked: number; released: number };
+export type HealReport = { checked: number; released: number; inputs?: string[] };
 
 /** After an invalidTx: release the rejected send's inputs proven spent. Never throws. */
 export async function healInvalidSend(
@@ -116,11 +116,16 @@ export async function healInvalidSend(
     const [txid, vout] = op.split('_');
     released += await store.markSpent(txid, Number(vout)).catch(() => 0);
   }
-  return { checked: inputs.length, released };
+  return { checked: inputs.length, released, inputs };
 }
 
-/** What to add to the error the person sees. */
+/** What to add to the error the person sees. With nothing cleared, name the coins tried so a report can be traced. */
 export const healMessage = (r: HealReport): string =>
   r.released > 0
     ? ` ${r.released === 1 ? '1 coin was' : `${r.released} coins were`} already spent elsewhere (another device?); cleared — tap Send again.`
-    : '';
+    : r.inputs?.length
+      ? ` Coins tried: ${r.inputs
+          .slice(0, 4)
+          .map((o) => `${o.slice(0, 10)}…:${o.split('_')[1]}`)
+          .join(', ')}${r.inputs.length > 4 ? ` +${r.inputs.length - 4}` : ''}.`
+      : '';

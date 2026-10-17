@@ -57,13 +57,14 @@ describe('healInvalidSend', () => {
   });
   test('no tx bytes: nothing to check', async () => {
     const r = await healInvalidSend(review('invalidTx'), async () => T('9'), { markSpent: async () => 1 });
-    expect(r).toEqual({ checked: 0, released: 0 });
+    expect(r).toEqual({ checked: 0, released: 0, inputs: [] });
   });
 });
 
 describe('healMessage', () => {
   test('says nothing when nothing changed', () => {
     expect(healMessage({ checked: 2, released: 0 })).toBe('');
+    expect(healMessage({ checked: 1, released: 0, inputs: [`${T('1')}_3`] })).toBe(` Coins tried: ${T('1').slice(0, 10)}…:3.`);
     expect(healMessage({ checked: 2, released: 2 })).toBe(
       ' 2 coins were already spent elsewhere (another device?); cleared — tap Send again.',
     );
