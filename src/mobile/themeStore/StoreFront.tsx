@@ -1,4 +1,5 @@
 import { lazy, Suspense, useMemo, useState, type CSSProperties } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
   BookOpen,
@@ -187,6 +188,7 @@ function Department({ d, query, onBack }: { d: Dept; query: string; onBack: () =
 }
 
 function Store() {
+  const navigate = useNavigate();
   const [dept, setDept] = useState<DeptId | null>(null);
   const [query, setQuery] = useState('');
   const open = DEPTS.find((d) => d.id === dept);
@@ -217,6 +219,16 @@ function Store() {
     >
       <TopNav />
       <div style={{ paddingTop: 'calc(64px + var(--wallet-inset-top, 0px))' }}>
+        {/* Back out like every other page: to where you came from, else the Exchange (owner, 17 Oct 2026). */}
+        {!open && (
+          <button
+            type="button"
+            onClick={() => (window.history.length > 1 ? navigate(-1) : navigate('/m/exchange'))}
+            style={{ ...S.ghost, display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 12 }}
+          >
+            <ArrowLeft size={16} aria-hidden="true" /> Back
+          </button>
+        )}
         <h1 style={S.h1}>Store</h1>
         <p style={S.sub}>Things for your wallet, paid in BSV.</p>
         <label style={searchBox}>
