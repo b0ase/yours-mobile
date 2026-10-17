@@ -283,6 +283,9 @@ const bindingOut = (b) => ({
   seq: Number(b.seq),
   timestamp: String(Date.parse(b.signed_at)),
   signature: b.signature,
+  ...(b.from_key
+    ? { handover: { from: b.from_key, releaseSignature: b.release_sig, releaseTimestamp: String(b.release_ts) } }
+    : {}),
   scheme: 'bwallet-paymail/v1 bind; BRC-43 protocol [2,"bwallet paymail"] keyID "1", counterparty anyone',
 });
 
@@ -492,8 +495,11 @@ function makeHandlers({
       if (!row || String(row.identity_key).toLowerCase() !== identityKey)
         return [403, { error: 'Only the wallet the name points to can sign its binding' }];
       const prev = await store.getBinding(alias);
-      if (prev && String(prev.identity_key).toLowerCase() === identityKey && Number(prev.seq) >= seq)
-        return [409, { error: 'seq must go up', seq: Number(prev.seq) }];
+      // Once another key has signed this name, only a two-party handover (its release + this key's accept) can
+      // rebind it: a name moved any other way stays unsigned for its new key, and payers see that.
+      if (prev && String(prev.identity_key).toLowerCase() !== identityKey)
+        return [409, { error: 'This name was signed by another wallet; it can only move by a signed handover' }];
+      if (prev && Number(prev.seq) >= seq) return [409, { error: 'seq must go up', seq: Number(prev.seq) }];
       const b = {
         alias,
         identity_key: identityKey,
@@ -511,6 +517,94 @@ function makeHandlers({
         signature: b.signature,
         note: String(body.timestamp),
       });
+      return [200, { binding: bindingOut(b) }];
+    },
+
+    // Two-party handover, step 1: the name's current owner signs "alias -> key B, version seq". Nothing moves yet.
+    'handover-release': async (_q, body) => {
+      body = body || {};
+      const sigErr = await verifySigned(body, 'release', now());
+      if (sigErr) return [401, { error: sigErr }];
+      const from = String(body.identityKey).toLowerCase();
+      const f = body.fields || {};
+      const alias = String(f.alias || '').toLowerCase();
+      const to = String(f.to || '').toLowerCase();
+      const seq = Number(f.seq);
+      if (!alias || !PUBKEY_RE.test(to) || to === from || !Number.isInteger(seq) || seq < 1)
+        return [400, { error: 'alias, to and seq' }];
+      const row = await store.getAlias(alias);
+      if (!row || String(row.identity_key).toLowerCase() !== from)
+        return [403, { error: 'Only the wallet the name points to can hand it over' }];
+      const b = await store.getBinding(alias);
+      const floor = b && String(b.identity_key).toLowerCase() === from ? Number(b.seq) : 0;
+      if (seq <= floor) return [409, { error: 'seq must go up', seq: floor }];
+      await store.putHandover({
+        alias,
+        from_key: from,
+        to_key: to,
+        seq,
+        release_sig: String(body.signature).toLowerCase(),
+        release_ts: Number(body.timestamp),
+      });
+      return [200, { pending: { alias, to, seq } }];
+    },
+
+    // The owner takes back a release that hasn't been accepted.
+    'handover-cancel': async (_q, body) => {
+      body = body || {};
+      const sigErr = await verifySigned(body, 'release-cancel', now());
+      if (sigErr) return [401, { error: sigErr }];
+      const alias = String(body.fields?.alias || '').toLowerCase();
+      const h = await store.getHandover(alias);
+      if (!h || h.from_key !== String(body.identityKey).toLowerCase()) return [404, { error: 'No handover to cancel' }];
+      await store.deleteHandover(alias);
+      return [200, { cancelled: alias }];
+    },
+
+    // Names offered to this key, waiting for it to accept (public: keys and names are public).
+    'handovers-for': async (q) => {
+      const key = String(q.key || '').toLowerCase();
+      if (!PUBKEY_RE.test(key)) return [400, { error: 'key' }];
+      return [200, { handovers: await store.handoversFor(key) }];
+    },
+
+    // Step 2: the new owner signs the binding for the same seq. Only then does the name move. The release travels
+    // with the binding, so any wallet can check both signatures.
+    'handover-accept': async (_q, body) => {
+      body = body || {};
+      const sigErr = await verifySigned(body, 'bind', now());
+      if (sigErr) return [401, { error: sigErr }];
+      const to = String(body.identityKey).toLowerCase();
+      const alias = String(body.fields?.alias || '').toLowerCase();
+      const seq = Number(body.fields?.seq);
+      const h = await store.getHandover(alias);
+      if (!h || h.to_key !== to || Number(h.seq) !== seq) return [404, { error: 'No handover of that name to you' }];
+      const row = await store.getAlias(alias);
+      if (!row || String(row.identity_key).toLowerCase() !== h.from_key)
+        return [409, { error: 'The name changed hands since the release' }];
+      await store.moveAlias(alias, to);
+      const b = {
+        alias,
+        identity_key: to,
+        seq,
+        signature: String(body.signature).toLowerCase(),
+        signed_at: new Date(Number(body.timestamp)).toISOString(),
+        from_key: h.from_key,
+        release_sig: h.release_sig,
+        release_ts: Number(h.release_ts),
+      };
+      await store.putBinding(b);
+      await store.logName({
+        alias,
+        identity_key: to,
+        prev_identity_key: h.from_key,
+        action: 'bind',
+        actor: 'owner',
+        seq,
+        signature: b.signature,
+        note: `handover: release ${h.release_sig} at ${h.release_ts}; accept at ${body.timestamp}`,
+      });
+      await store.deleteHandover(alias);
       return [200, { binding: bindingOut(b) }];
     },
 

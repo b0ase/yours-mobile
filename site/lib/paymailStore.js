@@ -148,6 +148,29 @@ function supabaseStore(env = process.env, f = fetch) {
       (await req(
         `bwallet_name_log?${alias ? `alias=eq.${q(alias)}&` : ''}select=id,alias,identity_key,prev_identity_key,action,actor,seq,signature,note,prev_hash,entry_hash,created_at&order=id.desc&limit=${limit}`,
       )) ?? [],
+    // Two-party handovers (migrations/20261017_name_handovers.sql).
+    getHandover: (alias) => one(`bwallet_name_handovers?alias=eq.${q(alias)}&limit=1`),
+    putHandover: (row) =>
+      req('bwallet_name_handovers', {
+        method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify(row),
+      }),
+    deleteHandover: (alias) =>
+      req(`bwallet_name_handovers?alias=eq.${q(alias)}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } }),
+    handoversFor: async (key) =>
+      (await req(`bwallet_name_handovers?to_key=eq.${q(key)}&select=alias,from_key,to_key,seq,created_at`)) ?? [],
+    /** Point a name at a new key (the trigger logs it). Main name only if the new key has no main plain name. */
+    moveAlias: async (alias, key) => {
+      const hasMain = await one(
+        `bwallet_paymail_aliases?identity_key=eq.${q(key)}&kind=eq.plain&is_primary=eq.true&select=alias&limit=1`,
+      );
+      await req(`bwallet_paymail_aliases?alias=eq.${q(alias)}`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({ identity_key: key, is_primary: !hasMain, updated_at: new Date().toISOString() }),
+      });
+    },
     recordNameEvent: (row) =>
       req('bwallet_paymail_name_events', {
         method: 'POST',

@@ -1,4 +1,4 @@
-import { checkBinding, type BindingStatus } from './binding';
+import { checkBinding, keyChange, type BindingStatus } from './binding';
 import { Utils } from '@bsv/sdk';
 import { AMOUNT_HINT, cleanRecipient, isMainnetAddress, looksLikeAmount } from './address';
 import { BWALLET_PAYMAIL_DOMAIN, LEGACY_PAYMAIL_DOMAINS } from './config';
@@ -216,7 +216,11 @@ export const resolvePaymail = async (f: Fetch, paymail: string, input = paymail)
     const id = await tryJson<Fields & { binding?: unknown }>(f, fill(pki, alias, domain));
     r.pubkey = str(id?.pubkey);
     // Our names carry the owner's signed binding: check it here rather than trust our server.
-    if (!r.external && r.pubkey) r.nameBinding = await checkBinding(alias, r.pubkey, id?.binding);
+    if (!r.external && r.pubkey) {
+      const status = await checkBinding(alias, r.pubkey, id?.binding);
+      const from = (id?.binding as { handover?: { from?: string } } | undefined)?.handover?.from;
+      r.nameBinding = keyChange(alias, r.pubkey, status, from);
+    }
   }
 
   const ord = ordCapability(caps);
@@ -389,12 +393,17 @@ export const UNBOUND_NAME =
 export const BAD_BINDING =
   "This name's signed binding doesn't match its key, so it may have been changed without its owner. Not paying it.";
 
+/** BRC-169 4.4: the name points to a different key than before, with no signed handover. */
+export const KEY_CHANGED =
+  "This name now points to a different wallet than before, and its owner didn't sign a handover. Not paying it.";
+
 export const destinationFor = (
   r: Resolved,
   asset: 'bsv' | 'token',
 ): { ok: true; to: string } | { ok: false; error: string } => {
   if (opnsBinding(r) === 'unbound') return { ok: false, error: UNBOUND_NAME };
   if (r.nameBinding === 'bad') return { ok: false, error: BAD_BINDING };
+  if (r.nameBinding === 'changed') return { ok: false, error: KEY_CHANGED };
   if (asset === 'bsv') return { ok: true, to: r.target };
   if (r.ordAddress) return { ok: true, to: r.ordAddress };
   return { ok: false, error: TOKENS_UNSUPPORTED };

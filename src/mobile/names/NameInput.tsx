@@ -1,3 +1,4 @@
+import { trustCurrentKey } from './binding';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Check, Loader2, X } from 'lucide-react';
 import { Input } from '../../components/Input';
@@ -85,6 +86,9 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
     setState({ s: 'resolved', r, confirmed: true });
     emit(d.to);
     status.current?.('ready', r);
+    // Remember who this name was when you chose to pay it (BRC-169 4.4 key-change check next time).
+    if (r.pubkey && r.nameBinding && r.nameBinding !== 'bad')
+      trustCurrentKey(r.input.replace(/^\$/, '').split('@')[0], r.pubkey);
   };
 
   const onType = (raw: string) => {
@@ -262,8 +266,24 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
                 </div>
               </div>
               {!d.ok ? (
-                <div className="flex items-center gap-1 text-xs" style={{ color: '#ff4444' }}>
-                  <X size={12} /> {d.error}
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-1 text-xs" style={{ color: '#ff4444' }}>
+                    <X size={12} /> {d.error}
+                  </div>
+                  {r.nameBinding === 'changed' && r.pubkey && (
+                    // A deliberate override (BRC-169 4.4): only after the payer has checked with the person.
+                    <button
+                      type="button"
+                      className="self-start bg-transparent border-0 p-0 text-xs font-semibold underline cursor-pointer"
+                      style={{ color: fg }}
+                      onClick={() => {
+                        trustCurrentKey(r.input.replace(/^\$/, '').split('@')[0], r.pubkey!);
+                        onType(text);
+                      }}
+                    >
+                      I've checked with them: trust the new wallet
+                    </button>
+                  )}
                 </div>
               ) : confirmed ? (
                 <div className="flex items-center gap-1 text-xs" style={{ color: '#2ecc71' }}>

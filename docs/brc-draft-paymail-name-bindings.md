@@ -170,8 +170,8 @@ This is safe to do without user interaction because it can only ever assert "my 
 the served `pubkey` with the one stored for that handle; if they differ, do not silently update the stored entry,
 mark the contact as changed, and warn the user before any value-moving action, distinguishing a key change on an
 existing contact from a first-time resolution. A binding does not replace this check. A new key can carry a valid
-binding of its own if the handle really moved, so the binding says *who* bound the key, and the key-change rule says
-*that it changed*.
+binding of its own if the handle really moved, so the binding says _who_ bound the key, and the key-change rule says
+_that it changed_.
 
 ## Public name log
 
@@ -179,20 +179,20 @@ binding of its own if the handle really moved, so the binding says *who* bound t
 
 The service keeps an append-only log. Each entry has:
 
-| field | meaning |
-|---|---|
-| `id` | increasing integer |
-| `alias` | the handle's alias |
-| `identity_key` | the key the handle now points to (empty on release) |
-| `prev_identity_key` | the key it pointed to before (empty on claim) |
-| `action` | `claim`, `move`, `bind` or `release` |
-| `actor` | `owner`, `server` or `admin` |
-| `seq` | the binding's `seq` (for `bind`) |
-| `signature` | the binding's signature (for `bind`) |
-| `note` | free text (for `admin` entries, why) |
-| `prev_hash` | `entry_hash` of the previous entry; 64 zeros for the first |
-| `entry_hash` | see below |
-| `created_at` | UTC time |
+| field               | meaning                                                    |
+| ------------------- | ---------------------------------------------------------- |
+| `id`                | increasing integer                                         |
+| `alias`             | the handle's alias                                         |
+| `identity_key`      | the key the handle now points to (empty on release)        |
+| `prev_identity_key` | the key it pointed to before (empty on claim)              |
+| `action`            | `claim`, `move`, `bind` or `release`                       |
+| `actor`             | `owner`, `server` or `admin`                               |
+| `seq`               | the binding's `seq` (for `bind`)                           |
+| `signature`         | the binding's signature (for `bind`)                       |
+| `note`              | free text (for `admin` entries, why)                       |
+| `prev_hash`         | `entry_hash` of the previous entry; 64 zeros for the first |
+| `entry_hash`        | see below                                                  |
+| `created_at`        | UTC time                                                   |
 
 `actor` meanings: `owner` = a binding the handle's key signed; `server` = a change the service made in response to
 a request signed by the affected key; `admin` = anything else, including direct database edits by the operator.
@@ -349,3 +349,19 @@ bWalletX (open source, MIT), repository `github.com/b0ase/yours-mobile`:
 
 Live service: `https://pay.bwallet.space/api/paymail/id/<alias>@bwalletx.com` and
 `https://pay.bwallet.space/api/paymail/name-log`.
+
+## Addendum (17 Oct 2026): two-party handover, no operator recovery
+
+Implemented in the reference implementation:
+
+- A name moves only with a **release** signed by the current owner (`release` message: alias, identityKey = from,
+  seq, timestamp, to) and an **accept** signed by the new owner (a `bind` for the same seq). The host stores and
+  serves both; the binding carries `handover: { from, releaseSignature, releaseTimestamp }`.
+- Once a key has signed a name, the host refuses a plain bind by any other key.
+- **No operator or time-delayed recovery, by design.** A lost key keeps its name. Recovery belongs to the user, set
+  up in advance, so it recovers the key rather than reassigning the name.
+- Wallets apply BRC-169 §4.4: a key change without a valid handover from the previously seen key stops payment, with
+  a deliberate user override after out-of-band checking.
+
+(Earlier text in this draft that describes the key-change rule as "not yet in the reference implementation" is
+superseded by this addendum.)
