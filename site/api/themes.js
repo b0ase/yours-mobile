@@ -1,8 +1,8 @@
 // Theme Store catalog (read-only, docs/THEME-STORE-PLAN.md step 2). GET /api/themes[?tier=free|premium|holder|edition]
-// Serves site/api/themes.json: the bundled packs in the bwx-theme/1 format (src/mobile/theme/themePack.ts), kept
+// Serves site/lib/themes.json: the bundled packs in the bwx-theme/1 format (src/mobile/theme/themePack.ts), kept
 // equal to the wallet's own packs by src/mobile/theme/themePack.test.ts. No payments, no writes, no secrets.
 'use strict';
-const catalog = require('./themes.json');
+const catalog = require('../lib/themes.json');
 
 const TIERS = new Set(['free', 'premium', 'holder', 'edition']);
 
