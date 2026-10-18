@@ -1049,16 +1049,22 @@ html.ww-on body > .fixed.inset-0.items-end > * {
   flex-direction: column;
   font-family: Inter, system-ui, sans-serif;
 }
-.ww-page-head {
+/* Page title: in the top bar, left of the Ask b bar (no title row above the page). */
+.ww-top-title {
   display: flex;
   align-items: center;
-  gap: 12px;
-  min-height: 76px;
-  padding: 20px var(--ww-pad) 16px;
+  gap: 10px;
+  min-width: 0;
+  flex: 0 1 auto;
+  max-width: 280px;
 }
 .ww-page-title {
   margin: 0;
-  font-size: 22px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 18px;
   font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--ww-text);
@@ -1073,7 +1079,8 @@ html.ww-on body > .fixed.inset-0.items-end > * {
   align-items: center;
   gap: 8px;
 }
-.ww-page-back {
+.ww-top .ww-page-back {
+  flex-shrink: 0;
   width: 36px;
   height: 36px;
   border-radius: 10px;
@@ -1085,11 +1092,11 @@ html.ww-on body > .fixed.inset-0.items-end > * {
   color: var(--ww-text);
   cursor: pointer;
 }
-.ww-page-back:hover {
+.ww-top .ww-page-back:hover {
   border-color: var(--ww-line-2);
 }
 .ww-page .ww-content {
-  padding: 0 var(--ww-pad) var(--ww-pad);
+  padding: 20px var(--ww-pad) var(--ww-pad);
   gap: var(--ww-gap);
 }
 .ww-page.is-bleed .ww-content {
@@ -1169,7 +1176,8 @@ html.ww-on:not(.ww-onb) body > .fixed.right-0.z-\[110\] {
 .ww-room-details {
   position: fixed;
   z-index: 110;
-  top: calc(69px + 76px);
+  /* Top bar (69px) + the page content's top padding (20px); there is no title row any more. */
+  top: calc(69px + 20px);
   right: 32px;
   bottom: 32px;
   width: 300px;
@@ -1285,4 +1293,21 @@ html.ww-on:not(.ww-onb) body > .fixed.right-0.z-\[110\] {
 /* Settings and Tools are 75% tall for the extension popup; on Desktop they fill the pane (owner, 11 Oct 2026). */
 .ww-col .bw-75h {
   height: 100% !important;
+}
+
+/* The Live card in the room-details column: always fits the column, Join always visible (owner, 18 Oct 2026). */
+.ww-room-details .bw-live-banner {
+  margin: 0 !important;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  gap: 10px !important;
+  padding: 10px 12px !important;
+}
+.ww-room-details .bw-live-banner > span:last-child {
+  flex-shrink: 0;
+}
+.ww-rd-people .ww-rd-role {
+  color: var(--bw-muted, #8e8e89);
+  font-size: 12px;
 }
