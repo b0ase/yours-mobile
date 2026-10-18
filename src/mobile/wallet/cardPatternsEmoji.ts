@@ -15,8 +15,10 @@ const symbol = (e: EmojiTheme) => `<symbol id="e" viewBox="0 0 36 36">${TWEMOJI[
 export function emojiCardSvg(e: EmojiTheme, variant = 0): string {
   const a = e.accent;
   const tilt = variant % 2 ? 8 : -8;
-  const big = 400;
-  const bx = W - big - 70;
+  // The wallet card zooms art 1.4x about the centre (cardFrontArt.ts ART_ZOOM), so keep the emoji inside the middle
+  // ~70%: right of centre, clear of the balance at bottom left.
+  const big = 240;
+  const bx = 480;
   const by = (H - big) / 2;
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">` +
