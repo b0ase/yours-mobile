@@ -158,7 +158,7 @@
     // bChat instead of Telegram/Discord (owner, 6 Oct 2026): a white b, next to X and GitHub.
     var bc = document.createElement('a');
     bc.className = 'x-link bchat-link';
-    bc.href = 'https://www.bitcoinchat.online/room/LOUNGE';
+    bc.href = 'https://www.bchatx.com/chat?room=LOUNGE';
     bc.target = '_blank';
     bc.rel = 'noopener';
     bc.setAttribute('aria-label', 'Join the bWallet Lounge on bChat');

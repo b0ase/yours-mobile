@@ -65,7 +65,7 @@ export const BAPPS: BApp[] = [
   },
   {
     name: 'bChat',
-    url: 'https://www.bitcoinchat.online',
+    url: 'https://www.bchatx.com',
     noFrame: true,
     verb: 'Chat, voice and video messages, tokenised group chats',
     group: 'featured',

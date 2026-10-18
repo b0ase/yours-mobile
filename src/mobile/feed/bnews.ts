@@ -303,7 +303,7 @@ export function discussionFor<P extends { txid: string; text: string; at: number
 // ── fetching ──────────────────────────────────────────────────────────────────
 
 /** bit-sign's GET /api/bitsign/news: the same sources fetched and parsed server-side, CDN-cached. */
-export const NEWS_API = 'https://www.bitcoinchat.online/api/bitsign/news';
+export const NEWS_API = 'https://www.bchatx.com/api/bitsign/news';
 
 export type FetchText = (url: string) => Promise<string | null>;
 export type FetchJson = (url: string) => Promise<unknown>;

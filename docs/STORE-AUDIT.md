@@ -298,8 +298,8 @@ Contact everywhere: support@bwalletx.com.
   DELETE, then: collects and deletes the paymail (signed `delete` op in `site/lib/paymail.js`), deletes the bChat account
   (bit-sign `POST /api/bitsign/account/delete`, identity-key signature, fresh sign-in), clears local data, and removes the
   account from the phone (the existing account-removal steps, or a full wipe when it is the only account). Web page for
-  Google: https://www.bitcoinchat.online/delete-account.
-- **UGC (section 6).** Terms with a zero-tolerance clause (bitcoinchat.online/terms#conduct) must be agreed once before
+  Google: https://www.bitcoinchat.online/delete-account (still served there, never redirected; the app links https://www.bchatx.com/delete-account).
+- **UGC (section 6).** Terms with a zero-tolerance clause (bchatx.com/terms#conduct) must be agreed once before
   Feed, Chat/DMs or Calls (`src/mobile/ugc/`), and are linked in Settings. DMs have Report / Block in the conversation
   header; Feed profiles have Report or block. Blocks hide DMs and messages locally and go to bit-sign
   `/api/bitsign/me/blocks`, which refuses 1:1 messages both ways. Feed/Market reports now default to bit-sign

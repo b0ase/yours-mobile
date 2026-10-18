@@ -6,8 +6,8 @@ import { PROVIDERS, type ProviderId } from './providers';
  * user is told who receives what and must allow it. Stored per provider on this device;
  * Settings › b agent can revoke it. Nothing is sent without it (AgentPage checks before every send).
  *
- * 'paid' = bWallet's pay-per-message mode: the message goes to bit-sign (BCHAT_ORIGIN, www.bitcoinchat.online —
- * bChatX's server, also served as bchatx.com), which
+ * 'paid' = bWallet's pay-per-message mode: the message goes to bit-sign (BCHAT_ORIGIN, www.bchatx.com —
+ * bChatX's server), which
  * forwards it to Anthropic on bCorp's key (bit-sign src/lib/paid-agent-server.ts).
  */
 export type ConsentTarget = 'paid' | ProviderId;
@@ -33,8 +33,7 @@ export const consentInfo = (t: ConsentTarget): ConsentInfo =>
   t === 'paid'
     ? {
         provider: 'Anthropic',
-        route:
-          'bChatX’s server (bitcoinchat.online / bchatx.com, run by The Bitcoin Corporation Ltd), which passes it to Anthropic',
+        route: 'bChatX’s server (bchatx.com, run by The Bitcoin Corporation Ltd), which passes it to Anthropic',
         terms: 'Anthropic’s commercial terms and privacy policy (anthropic.com/legal)',
         summary: `b is run by Anthropic. Your message and the last few messages go via bChatX’s server to Anthropic. ${KEEP}`,
       }
