@@ -13,7 +13,7 @@ import {
   markAgentAccount,
   setAgentDailyCap,
 } from '../agents/agentAccounts';
-import { SUBSCRIPTIONS_ENABLED } from '../storeBuild';
+import { PNEE_POTS_ENABLED, SUBSCRIPTIONS_ENABLED } from '../storeBuild';
 import type { RemoteConfig } from '../config/remoteConfig';
 
 export type Pot = {
@@ -177,13 +177,28 @@ export const dueItems = (s: Subscription, now: number, cap = MAX_CATCH_UP): DueP
 
 // ── Amounts and funds ──────────────────────────────────────────────────────────────────────────────────────
 
-/** One payment in sats at `bsvUsd` dollars per BSV. null when it can't be priced (no rate, PNEE in v1). */
+/** One payment in sats at `bsvUsd` dollars per BSV. null when it can't be priced (no rate, or a PNEE order). */
 export const amountSats = (amount: Subscription['amount'], bsvUsd: number): number | null => {
   if (!(amount.value > 0)) return null;
   if (amount.currency === 'SAT') return Math.round(amount.value);
   if (amount.currency === 'USD') return bsvUsd > 0 ? Math.max(1, Math.round((amount.value / bsvUsd) * 1e8)) : null;
   return null;
 };
+
+/** One payment in PNEE units (1 unit = 1¢). null unless it is a whole, positive PNEE amount. */
+export const amountPnee = (amount: Subscription['amount']): number | null =>
+  amount.currency === 'PNEE' && Number.isInteger(amount.value) && amount.value > 0 ? amount.value : null;
+
+/** Dollars typed for a PNEE pot, as whole PNEE units (cents). */
+export const usdToPnee = (usd: number) => Math.round(usd * 100);
+
+/** The amount a pot's orders are kept in: PNEE pots pay PNEEs, BSV pots pay dollars (or sats) in BSV. */
+export const potCurrencyOk = (unit: Pot['unit'], currency: Currency) =>
+  !PNEE_POTS_ENABLED && (unit === 'PNEE' || currency === 'PNEE')
+    ? false
+    : unit === 'PNEE'
+      ? currency === 'PNEE'
+      : currency !== 'PNEE';
 
 /** One payment in dollars (for the spend gate and log). */
 export const amountUsd = (amount: Subscription['amount'], bsvUsd: number): number => {
@@ -196,10 +211,22 @@ export const amountUsd = (amount: Subscription['amount'], bsvUsd: number): numbe
  * How many upcoming payments `balanceSats` covers across a pot's live subscriptions, paying them in due order.
  * Stops counting at `limit`.
  */
-export const potCovers = (subs: Subscription[], balanceSats: number, bsvUsd: number, limit = 99): number => {
+export const potCovers = (subs: Subscription[], balanceSats: number, bsvUsd: number, limit = 99): number =>
+  coversIn(subs, balanceSats, (s) => amountSats(s.amount, bsvUsd), limit);
+
+/** potCovers for a PNEE pot: `balanceUnits` PNEEs against its PNEE orders. */
+export const potCoversPnee = (subs: Subscription[], balanceUnits: number, limit = 99): number =>
+  coversIn(subs, balanceUnits, (s) => amountPnee(s.amount), limit);
+
+const coversIn = (
+  subs: Subscription[],
+  balanceSats: number,
+  cost: (s: Subscription) => number | null,
+  limit: number,
+): number => {
   const live = subs
     .filter((s) => s.status === 'active' || s.status === 'lowFunds')
-    .map((s) => ({ s, k: s.periodIndex, sats: amountSats(s.amount, bsvUsd) }))
+    .map((s) => ({ s, k: s.periodIndex, sats: cost(s) }))
     .filter((x): x is { s: Subscription; k: number; sats: number } => x.sats !== null && !finished(x.s));
   if (!live.length) return limit;
   let left = balanceSats;
@@ -298,6 +325,8 @@ export type PendingPayment = {
   /** Total sats paid (absent on records written before receipts). */
   sats?: number;
   at: number;
+  /** 'PNEE': rawTx is a BEEF hex of a PNEE transfer, broadcast with broadcastPnee. Absent = a BSV payment. */
+  unit?: 'PNEE';
 };
 export const getPending = (subId: string): PendingPayment | null =>
   read<Record<string, PendingPayment>>(PENDING, {})[subId] ?? null;
@@ -315,6 +344,19 @@ export const makePot = (identityAddress: string, name: string, emoji?: string, n
   const p: Pot = { identityAddress, name: name.trim().slice(0, 32) || 'Pot', emoji, unit: 'BSV', createdAt: now };
   savePot(p);
   return p;
+};
+
+/**
+ * Hold BSV or PNEEs. Only while nothing live pays from the pot, so an order is never paid in a unit it wasn't set
+ * up in. Returns whether it changed.
+ */
+export const setPotUnit = (id: string, unit: Pot['unit']): boolean => {
+  if (!PNEE_POTS_ENABLED) return false;
+  const p = getPot(id);
+  if (!p || p.unit === unit) return false;
+  if (listSubs(id).some((s) => s.status !== 'cancelled' && s.status !== 'ended')) return false;
+  savePot({ ...p, unit });
+  return true;
 };
 
 export const renamePot = (id: string, name: string) => {
@@ -345,7 +387,14 @@ export const subProblem = (n: NewSub, subsOn = SUBSCRIPTIONS_ENABLED): string | 
     if (!subsOn || !servicePayee(n.payee.service)) return 'That service isn’t available';
   } else if (!n.payee.address && !n.payee.paymail) return 'Enter who to pay';
   if (!(n.amount.value > 0) || !Number.isFinite(n.amount.value)) return 'Enter an amount';
-  if (n.amount.currency === 'PNEE') return 'PNEE pots aren’t available yet';
+  const pot = getPot(n.potId)!;
+  if (!potCurrencyOk(pot.unit, n.amount.currency))
+    return PNEE_POTS_ENABLED
+      ? pot.unit === 'PNEE'
+        ? 'This pot pays in PNEEs'
+        : 'PNEE orders need a PNEE pot'
+      : 'That amount isn’t available';
+  if (n.amount.currency === 'PNEE' && amountPnee(n.amount) === null) return 'Enter a whole number of cents';
   if (n.maxCount !== null && !(Number.isInteger(n.maxCount) && n.maxCount > 0 && n.maxCount <= 1000))
     return 'Number of payments must be 1–1000';
   if (typeof n.period === 'object' && !(n.period.seconds >= 3600)) return 'The period must be at least an hour';
@@ -419,7 +468,9 @@ export const formatAmount = (a: Subscription['amount']) =>
     ? `$${a.value.toFixed(2)}`
     : a.currency === 'SAT'
       ? `${a.value.toLocaleString()} sats`
-      : `${a.value} ${a.value === 1 ? 'PNEE' : 'PNEEs'}`;
+      : PNEE_POTS_ENABLED
+        ? `$${(a.value / 100).toFixed(2)} in PNEEs`
+        : `$${(a.value / 100).toFixed(2)}`;
 
 // ── Pots & Locks › Subscriptions (owner, 10 Oct 2026) ──────────────────────────────────────────────────────
 
@@ -428,7 +479,8 @@ const liveSub = (s: Subscription) => s.status === 'active' || s.status === 'lowF
 /** Pays from: move a subscription to another pot. Its schedule and approval stay the same. */
 export const moveSub = (id: string, potId: string, now = Date.now()) => {
   const s = getSub(id);
-  if (!s || s.potId === potId || !getPot(potId)) return;
+  const to = getPot(potId);
+  if (!s || s.potId === potId || !to || !potCurrencyOk(to.unit, s.amount.currency)) return;
   saveSub({ ...s, potId, lastError: undefined });
   appendAgentLog(potId, { at: now, action: 'sub-move', detail: `${s.payee.name} now pays from here`, usd: 0 });
 };
