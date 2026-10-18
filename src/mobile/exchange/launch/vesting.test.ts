@@ -6,8 +6,10 @@ import {
   PrivateKey,
   ProtoWallet,
   PublicKey,
+  Script,
   Spend,
   Transaction,
+  Utils,
   type LockingScript,
 } from '@bsv/sdk';
 import {
@@ -27,6 +29,12 @@ import {
 
 const TOKEN = `${'ab'.repeat(32)}_0`;
 const START = 920_000;
+const hx = (t: string) => Utils.toHex(Utils.toArray(t, 'utf8'));
+/** The creator's unlocked rest: a plain BSV-21 transfer (ord envelope + P2PKH). */
+const restScript = (amt: bigint, address: string): LockingScript =>
+  Script.fromASM(
+    `OP_0 OP_IF ${hx('ord')} OP_1 ${hx('application/bsv-20')} OP_0 ${hx(JSON.stringify({ p: 'bsv-20', op: 'transfer', id: TOKEN, amt: amt.toString() }))} OP_ENDIF ${new P2PKH().lock(address).toASM()}`,
+  ) as LockingScript;
 const creator = PrivateKey.fromRandom();
 const stranger = PrivateKey.fromRandom();
 const ADDR = creator.toAddress();
@@ -172,7 +180,7 @@ describe('public receipt', () => {
     });
     for (const t of tranches)
       tx.addOutput({ lockingScript: vestTrancheScript(TOKEN, t.amt, ADDR, t.height), satoshis: 1 });
-    tx.addOutput({ lockingScript: new P2PKH().lock(ADDR), satoshis: 1 }); // the rest to the creator
+    tx.addOutput({ lockingScript: restScript(supply - keptAmount(supply, plan.keepBps), ADDR), satoshis: 1 }); // the rest
     tx.addOutput({ lockingScript: vestReceiptScript(receipt), satoshis: 0 });
     mutate?.(tx);
     return tx;
@@ -183,6 +191,21 @@ describe('public receipt', () => {
     expect(receipt.kept).toBe('100000000');
     expect(receipt.tranches[0]).toEqual({ vout: 0, height: tranches[0].height, amt: tranches[0].amt.toString() });
   });
+  test('rejects a receipt whose supply is not what the transaction moves', () => {
+    const fake = {
+      ...receipt,
+      supply: (supply * 10n).toString(),
+      kept: keptAmount(supply * 10n, plan.keepBps).toString(),
+    };
+    const v = verifyVestingTx(
+      vestTx((tx) => {
+        tx.outputs[tx.outputs.length - 1].lockingScript = vestReceiptScript(fake);
+      }),
+      TOKEN,
+    );
+    expect(typeof v).toBe('string');
+  });
+
   test('verifies against the outputs', () => {
     const v = verifyVestingTx(vestTx(), TOKEN);
     expect(typeof v).toBe('object');
@@ -264,7 +287,7 @@ describe('receipt as the wallet returns it (regression: mainnet $VESTTEST, 18 Oc
     });
     for (const t of tranches)
       tx.addOutput({ lockingScript: vestTrancheScript(TOKEN, t.amt, ADDR, t.height), satoshis: 1 });
-    tx.addOutput({ lockingScript: new P2PKH().lock(ADDR), satoshis: 1 });
+    tx.addOutput({ lockingScript: restScript(supply - keptAmount(supply, plan.keepBps), ADDR), satoshis: 1 });
     tx.addOutput({ lockingScript: vestReceiptScript(receipt), satoshis: 0 });
     tx.addOutput({ lockingScript: new P2PKH().lock(stranger.toAddress()), satoshis: 5000 }); // change
     const wire = Transaction.fromHex(tx.toHex());

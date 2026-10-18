@@ -193,6 +193,21 @@ export function parseVestReceiptScript(script: Script): VestReceipt | null {
   }
 }
 
+/** The BSV-21 transfer amount an output carries for `id` (an ord envelope with a bsv-20 transfer JSON), or 0n. */
+export function transferAmount(script: LockingScript, id: string): bigint {
+  for (const c of script.chunks) {
+    if (!c.data || c.data.length < 20 || c.data[0] !== 0x7b) continue;
+    try {
+      const j = JSON.parse(Utils.toUTF8(c.data)) as { p?: string; op?: string; id?: string; amt?: string };
+      if (j.p === 'bsv-20' && j.op === 'transfer' && j.id === id && typeof j.amt === 'string' && /^\d+$/.test(j.amt))
+        return BigInt(j.amt);
+    } catch {
+      /* not JSON */
+    }
+  }
+  return 0n;
+}
+
 export type VerifiedVesting = { txid: string; receipt: VestReceipt; kept: bigint; tranches: Tranche[] };
 
 /**
@@ -249,6 +264,10 @@ export function verifyVestingTx(tx: Transaction, tokenId: string): VerifiedVesti
   }
   if (new Set(r.tranches.map((t) => t.vout)).size !== r.tranches.length) return 'Tranches repeat an output.';
   if (sum !== kept) return 'The tranches do not add up to the kept amount.';
+  // The stated supply must be what the transaction actually moves (tranches + the creator's rest), so a receipt
+  // cannot inflate the supply to make its share look smaller.
+  const moved = tx.outputs.reduce((n, o) => n + transferAmount(o.lockingScript, id), 0n);
+  if (moved !== supply) return 'The receipt’s supply does not match the coins this transaction moves.';
   if (
     !Number.isInteger(r.startHeight) ||
     tranches[tranches.length - 1].height - r.startHeight < monthsToBlocks(VEST_MIN_MONTHS)
