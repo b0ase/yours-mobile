@@ -199,7 +199,7 @@ export function stillFrame(src: string): Promise<string> {
 }
 
 /** Hosts that serve bit-sign's public pictures (bit-sign PR #269: `?still=1` returns the first frame as PNG). */
-const BITSIGN_HOST = /(^|\.)(bitcoinchat\.online|bit-sign\.online)$/i;
+const BITSIGN_HOST = /(^|\.)(bchatx\.com|bitcoinchat\.online|bit-sign\.online)$/i;
 
 /**
  * The server-made still of a bit-sign avatar or cover (`/api/public/avatar|cover/<file>?still=1`), or null for

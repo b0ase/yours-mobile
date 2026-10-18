@@ -143,7 +143,7 @@ export const fetchPaymailPublic = async (f: Fetch, paymail: string): Promise<Pay
   }
 };
 
-export const BITSIGN_PUBLIC = 'https://www.bitcoinchat.online/api/public/profile';
+export const BITSIGN_PUBLIC = 'https://www.bchatx.com/api/public/profile';
 
 export const parseBitsignPublic = (d: unknown): BitsignPublic | null => {
   const o = d && typeof d === 'object' ? (d as Record<string, unknown>) : null;

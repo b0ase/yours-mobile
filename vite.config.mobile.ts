@@ -762,7 +762,7 @@ export const MOBILE_DEFINES = {
   __MARKET_BLOCKLIST_URL__: JSON.stringify(process.env.BWALLET_MARKET_BLOCKLIST_URL ?? ''),
   // Reports go to bit-sign's moderation queue (content_reports); owner acts within 24h (Apple 1.2).
   __MARKET_REPORT_URL__: JSON.stringify(
-    process.env.BWALLET_MARKET_REPORT_URL ?? 'https://www.bitcoinchat.online/api/bitsign/report',
+    process.env.BWALLET_MARKET_REPORT_URL ?? 'https://www.bchatx.com/api/bitsign/report',
   ),
   // bWallet paymail (src/mobile/names/config.ts): name@bwalletx.com (owner, 4 Oct 2026; bwallet.space stays an
   // alias for every name), both served by pay.bwallet.space (PAYMAIL_DOMAINS).

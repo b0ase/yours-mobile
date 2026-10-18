@@ -36,7 +36,7 @@ describe('X follows import client', () => {
     const e = parseEstimate(est);
     expect(e.accounts).toBe(850);
     expect(e.hasScope).toBe(false);
-    expect(e.reauthUrl).toBe('https://www.bitcoinchat.online/api/auth/twitter?scope=follows&next=%2F');
+    expect(e.reauthUrl).toBe('https://www.bchatx.com/api/auth/twitter?scope=follows&next=%2F');
     expect(absoluteUrl('javascript:alert(1)')).toBeNull();
     expect(absoluteUrl('http://evil.example/x')).toBeNull();
   });
@@ -84,11 +84,11 @@ describe('X follows import client', () => {
     expect(err(404, { code: 'disabled' }).kind).toBe('disabled');
     expect(err(401).kind).toBe('signed_out');
     expect(err(409, { code: 'no_x' }).kind).toBe('no_x');
-    const scope = err(409, { code: 'scope_missing', reauth_url: 'https://www.bitcoinchat.online/api/auth/twitter' });
+    const scope = err(409, { code: 'scope_missing', reauth_url: 'https://www.bchatx.com/api/auth/twitter' });
     expect(scope).toEqual({
       kind: 'scope',
       message: 'Allow X to share who you follow, then come back and try again.',
-      reauthUrl: 'https://www.bitcoinchat.online/api/auth/twitter',
+      reauthUrl: 'https://www.bchatx.com/api/auth/twitter',
     });
     expect(err(429, { code: 'cooldown', cooldown_until: '2026-11-15T00:00:00Z' }).kind).toBe('cooldown');
     expect(err(429, { code: 'monthly_cap_reached' }).kind).toBe('cap');

@@ -2,7 +2,7 @@
  * User-generated content safety (Apple 1.2, Google Play UGC policy):
  *
  *  - Terms of use with a zero-tolerance clause, agreed once before first use of Feed, Chat, DMs
- *    or Calls (stored on this device; the text is hosted at bitcoinchat.online/terms#conduct).
+ *    or Calls (stored on this device; the text is hosted at bchatx.com/terms#conduct).
  *  - Reports go to bit-sign POST /api/bitsign/report (content_reports), which the owner must act
  *    on within 24 hours.
  *  - Blocked bChat handles: hidden locally (DMs, messages, calls) and sent to bit-sign

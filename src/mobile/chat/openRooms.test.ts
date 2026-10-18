@@ -73,7 +73,7 @@ describe('open rooms', () => {
 
   test('invite codes from codes and links', () => {
     expect(parseInviteCode('k7px-m2qa')).toBe('K7PXM2QA');
-    expect(parseInviteCode('https://www.bitcoinchat.online/join/K7PXM2QA')).toBe('K7PXM2QA');
+    expect(parseInviteCode('https://www.bchatx.com/join/K7PXM2QA')).toBe('K7PXM2QA');
     expect(parseInviteCode('https://x/room/A?invite=K7PXM2QA')).toBe('K7PXM2QA');
     expect(parseInviteCode('O0I1O0I1')).toBeNull();
     expect(parseInviteCode('nope')).toBeNull();

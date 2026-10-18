@@ -342,12 +342,12 @@ function matchOutputs(tx, expected) {
 /**
  * A renamed handle (bit-sign self-serve rename, PR #102): bit-sign's public profile API answers an old
  * name with the current handle for 90 days, so `$old@ourdomain` keeps receiving for the new name.
- * Public, read-only, no credentials. Env: BITSIGN_PUBLIC_URL (optional, default https://www.bitcoinchat.online).
+ * Public, read-only, no credentials. Env: BITSIGN_PUBLIC_URL (optional, default https://www.bchatx.com).
  * Returns the new alias, or null (unknown, not renamed, or bit-sign unreachable).
  */
 async function bitsignRenamed(alias, env = process.env, f = fetch) {
   if (!ALIAS_RE.test(alias)) return null;
-  const base = String(env.BITSIGN_PUBLIC_URL || 'https://www.bitcoinchat.online').replace(/\/$/, '');
+  const base = String(env.BITSIGN_PUBLIC_URL || 'https://www.bchatx.com').replace(/\/$/, '');
   try {
     const r = await f(`${base}/api/public/profile/${encodeURIComponent(alias)}`, {
       headers: { Accept: 'application/json' },
@@ -367,12 +367,12 @@ const MAX_PLAIN_NAMES = 5;
 /**
  * Does `identityKey` own the bit-sign name `alias`? Public GET
  * /api/public/handles/owner?handle=<name>&key=<pubkey> → {handle, matches, active, primary}; it never
- * returns the key. Env: BITSIGN_PUBLIC_URL (optional, default https://www.bitcoinchat.online).
+ * returns the key. Env: BITSIGN_PUBLIC_URL (optional, default https://www.bchatx.com).
  * Returns { matches, active } (both false for a JSON 404 = no such name). Throws on anything else
  * (unreachable, 400, 5xx, an HTML 404 while the route isn't shipped, a wrong answer): callers fail closed.
  */
 async function bitsignHandleOwner(alias, identityKey, env = process.env, f = fetch) {
-  const base = String(env.BITSIGN_PUBLIC_URL || 'https://www.bitcoinchat.online').replace(/\/$/, '');
+  const base = String(env.BITSIGN_PUBLIC_URL || 'https://www.bchatx.com').replace(/\/$/, '');
   const r = await f(
     `${base}/api/public/handles/owner?handle=${encodeURIComponent(alias)}&key=${encodeURIComponent(identityKey)}`,
     { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(5000) },
