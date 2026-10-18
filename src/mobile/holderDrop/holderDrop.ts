@@ -12,6 +12,7 @@
  *   5. Progress: a plan records each batch's txid, so an interrupted drop resumes where it stopped.
  *   6. Receipt: CSV of recipients, amounts and txids.
  */
+import { Hash, Utils } from '@bsv/sdk';
 import validate from 'bitcoin-address-validation';
 
 export const HOLDERS_API = 'https://ordinals.gorillapool.io/api/bsv20/id';
@@ -42,16 +43,18 @@ export const normTokenId = (raw: string): string | null => {
 
 type Fetch = (url: string) => Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }>;
 
-/** Parse one page of the holders API. Rows that are not `{address, amt}` with a whole-number amount are skipped. */
+/**
+ * Parse one page of the holders API. Fails closed: a body that is not a list, or any row that is not
+ * `{address, amt}` with a whole-number amount, stops the drop (an unreadable list must never be half-paid).
+ */
 export const parseHolders = (body: unknown): Holder[] => {
   if (!Array.isArray(body)) throw new Error('The holders list could not be read.');
   const out: Holder[] = [];
   for (const row of body) {
-    if (!row || typeof row !== 'object') continue;
-    const { address, amt } = row as { address?: unknown; amt?: unknown };
-    if (typeof address !== 'string' || !address) continue;
+    const { address, amt } = (row && typeof row === 'object' ? row : {}) as { address?: unknown; amt?: unknown };
     const s = typeof amt === 'number' ? (Number.isSafeInteger(amt) ? String(amt) : '') : String(amt ?? '');
-    if (!/^\d+$/.test(s)) continue;
+    if (typeof address !== 'string' || !address || !/^\d+$/.test(s))
+      throw new Error('The holders list has a row this wallet cannot read, so nothing will be sent.');
     out.push({ address, amt: BigInt(s) });
   }
   return out;
@@ -72,10 +75,22 @@ export const fetchHolders = async (f: Fetch, tokenId: string, max = MAX_HOLDERS)
   throw new Error(`This token has more than ${max} holders. Raise the minimum holding to narrow the list.`);
 };
 
-export type SnapshotFilter = { exclude: readonly string[]; minHolding?: bigint };
+/**
+ * `exclude`: the sender's own addresses. `block`: other addresses to leave out, such as the token's indexer fee
+ * address and any exchange or market addresses the issuer pastes in (there is no public list of those to trust).
+ */
+export type SnapshotFilter = { exclude: readonly string[]; block?: readonly string[]; minHolding?: bigint };
 export type SnapshotResult = {
   holders: Holder[];
-  skipped: { burn: number; sender: number; invalid: number; belowMin: number; empty: number };
+  skipped: { burn: number; sender: number; blocked: number; invalid: number; belowMin: number; empty: number };
+};
+
+/** Addresses from pasted text (commas, spaces or new lines). Anything that is not a valid address is returned in `bad`. */
+export const parseAddressList = (text: string): { addresses: string[]; bad: string[] } => {
+  const addresses: string[] = [];
+  const bad: string[] = [];
+  for (const t of text.split(/[\s,;]+/).filter(Boolean)) (validate(t) ? addresses : bad).push(t);
+  return { addresses: [...new Set(addresses)], bad };
 };
 
 /**
@@ -87,12 +102,14 @@ export const filterHolders = (raw: readonly Holder[], filter: SnapshotFilter): S
   const merged = new Map<string, bigint>();
   for (const h of raw) merged.set(h.address, (merged.get(h.address) ?? 0n) + h.amt);
   const exclude = new Set(filter.exclude.filter(Boolean));
+  const block = new Set((filter.block ?? []).filter(Boolean));
   const burn = new Set(BURN_ADDRESSES);
-  const skipped = { burn: 0, sender: 0, invalid: 0, belowMin: 0, empty: 0 };
+  const skipped = { burn: 0, sender: 0, blocked: 0, invalid: 0, belowMin: 0, empty: 0 };
   const holders: Holder[] = [];
   for (const [address, amt] of merged) {
     if (burn.has(address)) skipped.burn++;
     else if (exclude.has(address)) skipped.sender++;
+    else if (block.has(address)) skipped.blocked++;
     else if (!validate(address)) skipped.invalid++;
     else if (amt <= 0n) skipped.empty++;
     else if (filter.minHolding && amt < filter.minHolding) skipped.belowMin++;
@@ -206,9 +223,73 @@ export type DropPlan = {
   batches: PlanBatch[];
 };
 
-export const makePlan = (p: Omit<DropPlan, 'batches'> & { recipients: Recipient[]; batchSize: number }): DropPlan => {
-  const { recipients, batchSize, ...rest } = p;
-  return { ...rest, batches: toBatches(recipients, batchSize).map((r) => ({ recipients: r })) };
+/**
+ * A stable ID for one airdrop: the same snapshot token, asset, mode, amount and minimum give the same ID, so a
+ * drop that is discarded and built again is recognised and holders already paid under it are skipped.
+ */
+export const dropId = (p: {
+  snapshotTokenId: string;
+  asset: DropAsset;
+  mode: 'fixed' | 'prorata';
+  amount: bigint;
+  minHolding?: bigint;
+}) =>
+  Utils.toHex(
+    Hash.sha256(
+      Utils.toArray(
+        [
+          'bwx-holderdrop-v1',
+          p.snapshotTokenId.toLowerCase(),
+          p.asset.kind === 'bsv' ? 'bsv' : p.asset.tokenId.toLowerCase().replace('.', '_'),
+          p.mode,
+          p.amount.toString(),
+          (p.minHolding ?? 0n).toString(),
+        ].join('|'),
+        'utf8',
+      ),
+    ),
+  ).slice(0, 24);
+
+/**
+ * Build a plan. `alreadyPaid`: addresses paid under this drop ID before (paidLedger), left out so nobody is paid
+ * twice. Throws on a duplicate recipient, so one plan can never pay the same address twice either.
+ */
+export const makePlan = (
+  p: Omit<DropPlan, 'batches'> & { recipients: Recipient[]; batchSize: number; alreadyPaid?: Iterable<string> },
+): DropPlan => {
+  const { recipients, batchSize, alreadyPaid, ...rest } = p;
+  const seen = new Set<string>();
+  for (const r of recipients) {
+    if (seen.has(r.address)) throw new Error(`${r.address} appears twice in this airdrop.`);
+    seen.add(r.address);
+  }
+  const paid = new Set(alreadyPaid ?? []);
+  const todo = recipients.filter((r) => !paid.has(r.address));
+  return { ...rest, batches: toBatches(todo, batchSize).map((r) => ({ recipients: r })) };
+};
+
+/** Addresses this plan has paid (batches with a txid), for the per-drop ledger. */
+export const paidAddresses = (plan: DropPlan) =>
+  plan.batches.flatMap((b) => (b.txid ? b.recipients.map((r) => r.address) : []));
+
+/** The ledger after a plan's progress: drop ID → every address paid under it, merged, never shrinking. */
+export const mergeLedger = (ledger: Record<string, string[]>, plan: DropPlan): Record<string, string[]> => {
+  const paid = paidAddresses(plan);
+  if (!paid.length) return ledger;
+  return { ...ledger, [plan.id]: [...new Set([...(ledger[plan.id] ?? []), ...paid])] };
+};
+
+/** Indexes of the batches still to send, in order (no txid and not interrupted mid-send). */
+export const pendingBatches = (plan: DropPlan) => plan.batches.flatMap((b, i) => (b.txid || b.started ? [] : [i]));
+
+/** What the one approval sheet shows: everything still to send in this plan. */
+export const planSummary = (plan: DropPlan) => {
+  const idx = pendingBatches(plan);
+  const rs = idx.flatMap((i) => plan.batches[i].recipients);
+  const amounts = rs.map((r) => r.amount);
+  const min = amounts.length ? amounts.reduce((a, b) => (b < a ? b : a)) : 0n;
+  const max = amounts.length ? amounts.reduce((a, b) => (b > a ? b : a)) : 0n;
+  return { batches: idx.length, holders: rs.length, total: sumAmounts(rs), min, max, recipients: rs };
 };
 
 /** Index of the next batch to send, or -1 when every batch has a txid. */
