@@ -554,3 +554,11 @@ export const BUREAU_ENABLED: boolean = !(
   import.meta.env.VITE_CHANNEL === 'ios-store' ||
   import.meta.env.VITE_CHANNEL === 'android-play'
 );
+
+/**
+ * Desktop menu / page titles (owner, 18 Oct 2026): "bSpaces" and "bPeople" in bWalletX; the store edition keeps
+ * "Spaces" and "People" ("bSpaces" is on the STORE-AUDIT blocklist). Literal env check so the store bundle never
+ * carries the string.
+ */
+export const SPACES_LABEL: string = BSPACES_ENABLED ? 'bSpaces' : 'Spaces';
+export const PEOPLE_LABEL: string = BSPACES_ENABLED ? 'bPeople' : 'People';

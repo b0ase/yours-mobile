@@ -26,6 +26,8 @@ import {
   marketLabel,
   STORE_HIDDEN_WALLET_KINDS,
   STORE_BUILD,
+  PEOPLE_LABEL,
+  SPACES_LABEL,
 } from '../storeBuild';
 import { badgeLabel, badgeText } from '../tabs/tabBadges';
 import { useTabBadges } from '../tabs/useTabBadges';
@@ -51,6 +53,15 @@ import { WidePage, WideEmpty, WideTitle } from './WidePage';
 import { WideAuth } from './WideAuth';
 import { useCanInstall, installApp } from './install';
 import { BAPPS, BAPP_ROUTE, bappFromPath, useBappBadge } from './bapps';
+import { BAPPS as BAPP_ROOMS } from '../chat/bappRooms';
+
+/** bApps with their own in-wallet page; the rest open their room (Chat › bApps). */
+const BAPP_PAGES: Record<string, string> = {
+  bcal: '/m/calendar',
+  bstore: '/m/store',
+  bmail: '/m/bmail',
+  bmusic: '/m/media',
+};
 import { ONESAT_MAINNET_CONTENT_URL } from '@1sat/actions';
 import { isUri } from '../../utils/uri';
 import { GENERIC_TOKEN_ICON } from '../../utils/constants';
@@ -118,6 +129,8 @@ type Item = {
   id: string;
   label: string;
   icon: string;
+  /** Bundled image icon (bApp rooms); drawn in place of the path icon. */
+  img?: string | null;
   /** Route, a wallet view, or an action. */
   to?: string;
   kind?: WalletKind;
@@ -342,8 +355,8 @@ const WideShell = ({ children }: { children: ReactNode }) => {
         { id: 'bmail', label: 'bMail', icon: I.mail, to: '/m/bmail', badge: mail },
         { id: 'chat', label: 'bChat', icon: I.chat, to: '/m/chat', badge: unread.chat },
         { id: 'calls', label: 'bPhone', icon: I.calls, to: CALLS_ROUTE },
-        { id: 'people', label: 'People', icon: I.people, to: '/m/people' },
-        { id: 'spaces', label: 'Spaces', icon: I.spaces, to: '/m/spaces', hidden: !BSPACES_ENABLED },
+        { id: 'people', label: PEOPLE_LABEL, icon: I.people, to: '/m/people' },
+        { id: 'spaces', label: SPACES_LABEL, icon: I.spaces, to: '/m/spaces', hidden: !BSPACES_ENABLED },
         // bCal: the one calendar of scheduled Spaces, shared with bChatX and bcalx.com (owner, 18 Oct 2026).
         { id: 'calendar', label: 'Calendar', icon: I.calendar, to: '/m/calendar', hidden: !BSPACES_ENABLED },
       ],
@@ -356,6 +369,18 @@ const WideShell = ({ children }: { children: ReactNode }) => {
         { id: 'apps', label: 'bApps', icon: I.apps, to: '/m/apps' },
         { id: 'games', label: 'bGames', icon: I.games, to: '/m/games' },
       ],
+    },
+    // The bApps (owner, 18 Oct 2026): each opens its in-wallet page, else its room under /chat/bapps. Not in a store build.
+    {
+      title: BSPACES_ENABLED ? 'bApps' : '',
+      items: BAPP_ROOMS.map((b) => ({
+        id: `room-${b.id}`,
+        label: b.name,
+        icon: I.apps,
+        img: b.icon,
+        to: BAPP_PAGES[b.id] ?? '/m/chat/bapps',
+        hidden: !BSPACES_ENABLED,
+      })),
     },
     // bApps pinned in the wide layout (BappHost.tsx, shell protocol v2).
     {
@@ -486,7 +511,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
         onClick={() => go(it)}
         aria-label={badgeLabel(it.label, it.badge ?? 0)}
       >
-        <Icon d={it.icon} />
+        {it.img ? <img className="ww-navimg" src={it.img} alt="" aria-hidden /> : <Icon d={it.icon} />}
         <span className="ww-grow">{it.label}</span>
         {!!it.badge && (
           <span className="ww-badge" aria-hidden>
@@ -528,8 +553,8 @@ const WideShell = ({ children }: { children: ReactNode }) => {
         <div className="ww-navscroll">
           {groups
             .filter((g) => g.items.some((i) => !i.hidden))
-            .map((g) => (
-              <nav key={g.title} className="ww-nav">
+            .map((g, gi) => (
+              <nav key={`${gi}-${g.title}`} className="ww-nav">
                 {g.title && <div className="ww-navtitle">{g.title}</div>}
                 {g.items.map(navBtn)}
               </nav>
