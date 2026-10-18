@@ -3,6 +3,7 @@ import type { ThemeLook, ThemePack } from '../theme/themePack';
 import { patternUri } from '../wallet/cardPatterns';
 import { isLightPattern } from '../wallet/cardPatternsLight';
 import { S } from './styles';
+import { isEmojiPack, TWEMOJI_CREDIT, TWEMOJI_LICENSE_URL } from '../theme/emojiThemes';
 
 /** The pack's card art, as its balance card would wear it (edition art for VexVoid / NPG / NPGX). */
 const artOf = (p: ThemePack): string => {
@@ -266,6 +267,15 @@ export function PreviewSheet({
         <p style={{ ...S.muted, margin: '4px 0 0' }}>{p.creator}</p>
         {p.blurb && <p style={{ margin: '8px 0 0', fontSize: 14 }}>{p.blurb}</p>}
         {inUse && <p style={{ ...S.muted, margin: '8px 0 0' }}>This is your current theme.</p>}
+        {isEmojiPack(p.id) && (
+          <p style={{ ...S.muted, margin: '8px 0 0', fontSize: 12 }}>
+            {TWEMOJI_CREDIT} (
+            <a href={TWEMOJI_LICENSE_URL} target="_blank" rel="noreferrer" style={{ color: 'inherit' }}>
+              licence
+            </a>
+            ). You buy the look; nobody owns the emoji.
+          </p>
+        )}
         <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>{children}</div>
           <button type="button" style={S.ghost} onClick={onClose}>

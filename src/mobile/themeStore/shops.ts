@@ -1,6 +1,8 @@
 import npgBanner from '../wallet/art/npg/npg-1.webp';
 import npgLogo from '../../web/themes/icon-npg-192.png';
 import npgxLogo from '../../web/themes/icon-npgx-192.png';
+import { EMOJI_PACK_IDS } from '../theme/emojiThemes';
+import { emojiArtUri, emojiTileUri } from '../wallet/cardPatternsEmoji';
 import vexArt from '../media/featured/vexvoid-cover.jpg';
 
 /**
@@ -56,6 +58,17 @@ export const SHOPS: readonly Shop[] = [
     banner: vexArt,
     colour: '#000000',
     themes: ['vexvoid'],
+  },
+  {
+    // Emoji themes (owner, 18 Oct 2026): Twemoji art (CC-BY 4.0, credited on each item), $1 each.
+    id: 'emoji',
+    name: 'Emoji',
+    owner: 'bWalletX',
+    blurb: 'Twelve emoji looks, $1 each',
+    logo: emojiTileUri('emoji-cool', 96),
+    bannerCss: `center / cover no-repeat url("${emojiArtUri('emoji-rainbow')}"), #08060F`,
+    colour: '#B18CFF',
+    themes: EMOJI_PACK_IDS,
   },
 ];
 

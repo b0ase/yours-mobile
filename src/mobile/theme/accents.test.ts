@@ -13,6 +13,7 @@ import {
   packVars,
   rgbTriplet,
 } from './accents';
+import { EMOJI_PACK_IDS, EMOJI_THEMES, isEmojiPack } from './emojiThemes';
 
 describe('app accents and packs', () => {
   test('gold is first and the default', () => {
@@ -140,9 +141,9 @@ describe('paper packs (Pink, Blue, Yellow)', () => {
 
 describe('artist editions', () => {
   test('VexVoid, NPG and NPGX: dark, credited, no gold, AA ink on paper', () => {
-    expect(EDITION_PACKS.map((a) => a.id)).toEqual(['vexvoid', 'npg', 'npgx']);
+    expect(EDITION_PACKS.map((a) => a.id)).toEqual(['vexvoid', 'npg', 'npgx', ...EMOJI_PACK_IDS]);
     const credits = { vexvoid: 'VexVoid edition', npg: 'Ninja Punk Girls edition', npgx: 'NPGX edition' };
-    for (const a of EDITION_PACKS) {
+    for (const a of EDITION_PACKS.filter((x) => !isEmojiPack(x.id))) {
       expect(a.edition).toBe(credits[a.id as keyof typeof credits]);
       expect(a.scheme).toBe('dark');
       expect(a.bg).toBe('#000000');
@@ -162,6 +163,34 @@ describe('artist editions', () => {
     expect(accentById('npgx').accent).toBe('#FF2D3A');
     for (const v of Object.values(packVars(accentById('npgx'))))
       expect(/C6FF1A|FF2BD6|00F0FF|0 240 255|255 43 214/i.test(v)).toBe(false);
+  });
+});
+
+describe('emoji themes', () => {
+  test('twelve dark packs in the Emoji collection, AA everywhere, each its own accent and art', () => {
+    expect(EMOJI_THEMES.length).toBe(12);
+    const accents = new Set<string>();
+    for (const e of EMOJI_THEMES) {
+      const a = accentById(e.id);
+      expect(a.id).toBe(e.id);
+      expect(a.group).toBe('edition');
+      expect(a.edition).toBe('Emoji collection');
+      expect(a.scheme).toBe('dark');
+      expect(a.pattern).toBe(e.id);
+      accents.add(a.accent);
+      for (const g of [a.bg, a.surface, a.surface2]) {
+        expect(contrast(a.text, g)).toBeGreaterThanOrEqual(7);
+        expect(contrast(a.muted, g)).toBeGreaterThanOrEqual(4.5);
+        for (const c of [a.accent, a.hi, a.lo, a.success, a.danger]) expect(contrast(c, g)).toBeGreaterThanOrEqual(4.5);
+      }
+      for (const c of [a.accent, a.hi, a.lo]) expect(contrast(a.on, c)).toBeGreaterThanOrEqual(4.5);
+      // Not the default gold: the emoji's own colour.
+      for (const v of Object.values(packVars(a))) expect(/F5B800|FFD24D|EAB300/i.test(v)).toBe(false);
+    }
+    expect(accents.size).toBe(12);
+    // Crypto clichés stay out (owner brief, 18 Oct 2026).
+    for (const bad of ['rocket', 'gem', 'diamond', 'money', 'chart'])
+      expect(EMOJI_THEMES.some((e) => e.id.includes(bad))).toBe(false);
   });
 });
 

@@ -2,6 +2,8 @@ import type { CardPatternId } from '../theme/accents';
 import { hexToHsl, hslToHex, mix } from '../theme/colour';
 import { LIGHT_PATTERNS, isLightPattern, lightPatternSvg } from './cardPatternsLight';
 import { editionArtUri, isEditionPattern, vexFieldSvg } from './cardPatternsEdition';
+import { emojiCardSvg } from './cardPatternsEmoji';
+import { emojiTheme } from '../theme/emojiThemes';
 
 /**
  * Card patterns (Design your card › Patterns, owner 14 Oct 2026): for people with no picture they want to use.
@@ -313,6 +315,8 @@ function finish(id: CardPatternId, c: string): Finish {
 export function patternSvg(id: CardPatternId, colour: string, ground?: string): string {
   if (isLightPattern(id)) return lightPatternSvg(id, colour, ground);
   if (id === 'vexfield') return vexFieldSvg(0);
+  const emoji = emojiTheme(id);
+  if (emoji) return emojiCardSvg(emoji);
   const f = finish(id, colour);
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">` +

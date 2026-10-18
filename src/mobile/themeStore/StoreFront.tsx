@@ -27,6 +27,7 @@ import { BuySheet } from './StoreBuy';
 import { useOwnedThemes } from './useOwnedThemes';
 import { SHOPS, shopById, type Shop } from './shops';
 import { priceLabel, visible, type Listing } from './bstore';
+import { EMOJI_PACK_IDS } from '../theme/emojiThemes';
 
 // The existing "Get your own edition" order flow ($99 a year), bWalletX only.
 const ThemeOrderSheet = THEME_ORDERS_ENABLED ? lazy(() => import('../themeOrder/ThemeOrderSheet')) : null;
@@ -125,10 +126,12 @@ const BACK =
   'flex items-center gap-1.5 self-start rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36] px-3 py-2 text-xs font-bold text-white cursor-pointer';
 
 // Our edition themes, listed in Themes (owner, 17 Oct 2026). They apply today, so they show their real state.
-const EDITION_IDS = ['vexvoid', 'npg', 'npgx'];
-const EDITIONS: readonly ThemePack[] = EDITION_IDS.map((id) => BUNDLED_PACKS.find((p) => p.id === id)).filter(
-  (p): p is ThemePack => !!p,
-);
+const EDITION_IDS: readonly string[] = ['vexvoid', 'npg', 'npgx'];
+// The Emoji collection (owner, 18 Oct 2026): twelve $1 themes with Twemoji art, sold the same way.
+const EMOJI_IDS: readonly string[] = EMOJI_PACK_IDS;
+const EDITIONS: readonly ThemePack[] = [...EDITION_IDS, ...EMOJI_IDS]
+  .map((id) => BUNDLED_PACKS.find((p) => p.id === id))
+  .filter((p): p is ThemePack => !!p);
 
 /** The editions as products ($1 each, owner 17 Oct 2026): live mini wallet, tap for the big preview, then Buy,
  *  Apply or In use. Buying is real (StoreBuy.tsx); until the server is set up it says buying opens soon. */
@@ -358,7 +361,16 @@ function Department({ d, query, onBack }: { d: Dept; query: string; onBack: () =
       <p className="text-xs m-0" style={{ color: MUTED }}>
         {d.blurb}
       </p>
-      {d.id === 'themes' && <Editions />}
+      {d.id === 'themes' && (
+        <>
+          <Editions />
+          <h3 className="text-sm font-bold text-white m-0 mt-1">Emoji collection</h3>
+          <p className="text-xs m-0 -mt-2" style={{ color: MUTED }}>
+            Twelve emoji looks, $1 each. Art: Twemoji, CC-BY 4.0.
+          </p>
+          <Editions ids={EMOJI_IDS} />
+        </>
+      )}
       {items.length ? (
         <div className="grid grid-cols-2 gap-1.5">
           {items.map((l) => (
