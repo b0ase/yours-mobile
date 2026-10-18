@@ -3201,6 +3201,30 @@ html.ww-on .bw-cdes {
   font-weight: 700;
   cursor: pointer;
 }
+/* An install link's pack (theme/themeLink.ts): offered first, applied on Use it. */
+.bw-theme-offer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  max-width: 520px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgb(var(--bw-accent-rgb) / 0.4);
+}
+.bw-theme-offer > span {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.bw-theme-offer small {
+  color: var(--bw-muted, #a6a6a1);
+}
+.bw-theme-chip.on {
+  background: var(--bw-accent);
+  color: var(--bw-on-accent, #000);
+}
 .bw-theme .bw-pack-grid {
   grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
   gap: 6px;

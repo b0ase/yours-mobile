@@ -58,6 +58,7 @@ export function ThemeSheet({
   onClose,
   card,
   initialTab = 'card',
+  offer = null,
 }: {
   /** The account's identity key: the accent is kept per account on this device. */
   account: string;
@@ -65,6 +66,8 @@ export function ThemeSheet({
   /** Renders the card designer with the shared tab bar; absent where the card can't be designed. */
   card?: (tabs: ReactNode) => ReactNode;
   initialTab?: ThemeTab;
+  /** A pack an install link offers (theme/themeLink.ts): shown first, applied only on Use it. */
+  offer?: AccentId | null;
 }) {
   const [tab, setTab] = useState<ThemeTab>(card ? initialTab : 'colours');
   const tabs = card ? (
@@ -90,11 +93,22 @@ export function ThemeSheet({
     </div>
   ) : null;
   if (card && tab === 'card') return <>{card(tabs)}</>;
-  return <AppColours account={account} tabs={tabs} onClose={onClose} />;
+  return <AppColours account={account} tabs={tabs} onClose={onClose} offer={offer} />;
 }
 
-function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNode; onClose: () => void }) {
+function AppColours({
+  account,
+  tabs,
+  onClose,
+  offer,
+}: {
+  account: string;
+  tabs: ReactNode;
+  onClose: () => void;
+  offer: AccentId | null;
+}) {
   const [current, setCurrent] = useState<AccentId>(() => loadAccent(account));
+  const [offered, setOffered] = useState<AccentId | null>(offer);
   const [mix, setMix] = useState<MixSpec>(() => loadMix(account) ?? mixFromPack(accentById(loadAccent(account))));
   const [mixing, setMixingState] = useState(() => mixerOpen);
   const setMixing = (act: Parameters<typeof nextMixerOpen>[1]) =>
@@ -144,6 +158,28 @@ function AppColours({ account, tabs, onClose }: { account: string; tabs: ReactNo
         </button>
       </div>
       {tabs}
+      {offered && offered !== current && (
+        <div className="bw-theme-offer" role="group" aria-label="Theme from a link">
+          <span>
+            <b>{accentById(offered).label}</b>
+            <small>{accentById(offered).blurb}</small>
+          </span>
+          <button
+            type="button"
+            className="bw-theme-chip on"
+            onClick={() => {
+              pick(offered);
+              setOffered(null);
+            }}
+          >
+            <Check size={14} aria-hidden="true" />
+            Use it
+          </button>
+          <button type="button" className="bw-theme-chip" onClick={() => setOffered(null)}>
+            Not now
+          </button>
+        </div>
+      )}
       <div className="bw-theme-head">
         <p className="bw-theme-more">Theme packs</p>
         <button type="button" className="bw-theme-chip" onClick={shuffle}>
