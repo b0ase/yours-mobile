@@ -331,7 +331,7 @@ const TopNavBar = () => {
           // Phone layout (test switch, owner round 3): one row, evenly spaced, icons only:
           // Accounts · Calls · Airdrops · Media · Lock. No account strip above it.
           <div
-            className="grid items-center justify-items-center fixed top-0 w-full z-10 px-2 h-14 overflow-hidden"
+            className="bw-topnav grid items-center justify-items-center fixed top-0 w-full z-10 px-2 h-14 overflow-hidden"
             style={{
               backgroundColor: BAR_BG ?? theme.color.global.walletBackground,
               top: 'var(--wallet-inset-top)',
@@ -403,7 +403,7 @@ const TopNavBar = () => {
       ) : (
         // Five equal slots: Accounts · Calls · Airdrops · Media · Settings.
         <div
-          className="grid grid-cols-5 items-center fixed top-0 w-full z-10 px-2 h-14 justify-items-center"
+          className="bw-topnav grid grid-cols-5 items-center fixed top-0 w-full z-10 px-2 h-14 justify-items-center"
           style={{ backgroundColor: BAR_BG ?? theme.color.global.walletBackground, top: 'var(--wallet-inset-top)' }}
         >
           <MenuAvatarButton
