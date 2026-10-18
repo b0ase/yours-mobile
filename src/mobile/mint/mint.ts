@@ -168,3 +168,12 @@ export const iconFile = async (file: File, edge = 256): Promise<File> => {
   if (!blob) throw new Error('Could not read this image');
   return new File([blob], 'icon.png', { type: 'image/png' });
 };
+
+/** Default title suggested from a picked file: its name without the extension, at most 100 characters. */
+export const titleFromFileName = (fileName: string): string => fileName.replace(/\.\w+$/, '').slice(0, 100);
+
+/**
+ * Select the Title box's text on its first focus so typing replaces the file-name suggestion rather than
+ * appending to it ("test-videobWalletX mint test"). Once the user has focused it, leave their caret alone.
+ */
+export const shouldSelectTitleOnFocus = (touched: boolean, title: string): boolean => !touched && title.length > 0;
