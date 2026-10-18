@@ -30,7 +30,7 @@ export const SIGN_KEY_ID = '1';
 export const EXTRA_TRUSTED_CERTIFIERS: string[] = [];
 
 /**
- * ISO-3166 alpha-2 countries where "Register interest" in a share offer is switched off.
+ * ISO-3166 alpha-2 countries where registering interest in a share offer is switched off (no longer offered in the app).
  * Viewing is never blocked by country. Empty by default — the owner sets it.
  */
 export const PURCHASE_BLOCKED_COUNTRIES: string[] = [];
@@ -38,5 +38,5 @@ export const PURCHASE_BLOCKED_COUNTRIES: string[] = [];
 /** Investor self-certification lasts twelve months. */
 export const INVESTOR_CERT_VALID_MONTHS = 12;
 
-/** Feature flag: show the "Other companies" (third-party issuer) share section. Off by default. */
+/** Feature flag: third-party issuer share offers. Stays OFF: no third-party offers are shown anywhere. */
 export const SHOW_OTHER_COMPANIES = false;
