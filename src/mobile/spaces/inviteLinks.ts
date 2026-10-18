@@ -19,6 +19,8 @@ import { offerXInvite, openXInviteInBrowser, parseXInviteLink } from '../chat/xI
 import { BchatClient, defaultHttp, loadSession } from '../chat/api';
 import { requestChatRoom } from '../chat/nav';
 import { isNative } from '../native';
+import { parseThemeLink } from '../theme/themeLink';
+import { requestThemeSheet } from '../theme/themeNav';
 import { parseAppLink, parsePage, parseSpaceInvite, type AppLink, type RoomPage } from './invite';
 
 const ROOM_LINKS = tokenRoomsEnabled();
@@ -30,6 +32,9 @@ const listeners = new Set<() => void>();
 
 /** Accepts a link if this build handles its kind. */
 export const offerAppLink = (url?: string | null) => {
+  // bwalletx://theme/<pack> (bwalletx.com/themes Install): Theme › App colours offers that pack, every build.
+  const theme = parseThemeLink(url);
+  if (theme) return requestThemeSheet(theme);
   // Room X invite (…/i/x/<code>#k=…): the key stays in memory until the Chat claim screen takes it.
   // A build without X invites (Play / App Store) never swallows one: bchatx.com's web page opens instead.
   if (!XINVITES_ENABLED) {

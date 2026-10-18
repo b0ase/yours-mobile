@@ -34,7 +34,8 @@ import {
 } from './cardFrontArt';
 import { CardDesigner } from './CardDesigner';
 import { ThemeSheet } from '../theme/ThemeSheet';
-import { onThemeSheetRequest } from '../theme/themeNav';
+import { onThemeSheetRequest, takeThemeOffer } from '../theme/themeNav';
+import type { AccentId } from '../theme/accents';
 import { switchToAccountAccent } from '../theme/accent';
 import { useAccentId } from '../theme/useAccent';
 import { accentById } from '../theme/accents';
@@ -337,8 +338,17 @@ const WalletCardInner = ({
   );
   const look = savedLook ?? defaultLook;
   const [adjusting, setAdjusting] = useState(false);
+  // An install link's pack (bwalletx://theme/<pack>): the sheet opens on App colours and offers it.
+  const [themeOffer, setThemeOffer] = useState<AccentId | null>(null);
   // Settings › Appearance › Theme opens this same sheet (theme/themeNav.ts).
-  useEffect(() => onThemeSheetRequest(() => setAdjusting(true)), []);
+  useEffect(
+    () =>
+      onThemeSheetRequest(() => {
+        setThemeOffer(takeThemeOffer());
+        setAdjusting(true);
+      }),
+    [],
+  );
   const setLook = (l: CardArtLook | null) => {
     const v = l && clampLook(l);
     setSavedLook(v);
@@ -818,6 +828,8 @@ const WalletCardInner = ({
         <ThemeSheet
           account={artKey}
           onClose={() => setAdjusting(false)}
+          offer={themeOffer}
+          initialTab={themeOffer ? 'colours' : undefined}
           card={
             frontArt
               ? (tabs) => (

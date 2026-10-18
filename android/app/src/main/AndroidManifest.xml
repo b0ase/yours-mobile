@@ -57,6 +57,8 @@
                 <data android:scheme="bwalletx" android:host="invite" />
                 <data android:scheme="bwalletx" android:host="room" />
                 <data android:scheme="bwalletx" android:host="xinvite" />
+                <!-- bwalletx://theme/<pack>: Install on bwalletx.com/themes (src/mobile/theme/themeLink.ts) -->
+                <data android:scheme="bwalletx" android:host="theme" />
             </intent-filter>
 
         </activity>
