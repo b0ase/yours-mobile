@@ -15,10 +15,13 @@ export const MODULE_IDS = [
   'pots',
   'notifications',
   'music',
+  'holdings',
 ] as const;
 export type ModuleId = (typeof MODULE_IDS)[number];
 
 export const DEFAULT_LAYOUT: readonly ModuleId[] = ['card', 'askB', 'showcase'];
+/** Desktop (wide) also opens with Holdings: the old side pane's table, now a module like everything else. */
+export const WIDE_DEFAULT_LAYOUT: readonly ModuleId[] = ['card', 'askB', 'holdings', 'showcase'];
 
 export const isModuleId = (v: unknown): v is ModuleId =>
   typeof v === 'string' && (MODULE_IDS as readonly string[]).includes(v);
@@ -40,8 +43,11 @@ export const normalise = (ids: readonly unknown[]): ModuleId[] => {
  * wallet before modules: their home becomes the default desktop, with History one tap away as a module).
  * v0 was a bare array of ids; v1 is { v: 1, ids }.
  */
-export const parseLayout = (raw: string | null | undefined): ModuleId[] => {
-  if (!raw) return [...DEFAULT_LAYOUT];
+export const parseLayout = (
+  raw: string | null | undefined,
+  defaults: readonly ModuleId[] = DEFAULT_LAYOUT,
+): ModuleId[] => {
+  if (!raw) return [...defaults];
   try {
     const v = JSON.parse(raw) as unknown;
     if (Array.isArray(v)) return normalise(v);
@@ -50,7 +56,7 @@ export const parseLayout = (raw: string | null | undefined): ModuleId[] => {
   } catch {
     /* fall through */
   }
-  return [...DEFAULT_LAYOUT];
+  return [...defaults];
 };
 
 export const serialise = (ids: readonly ModuleId[]) => JSON.stringify({ v: 1, ids: normalise(ids) });
@@ -78,11 +84,11 @@ export const visibleLayout = (ids: readonly ModuleId[], allowed: (id: ModuleId) 
 const EVENT = 'bwallet:home-layout';
 export const layoutKey = (account: string) => `bwallet.home.layout.${account || 'default'}`;
 
-export const loadLayout = (account: string): ModuleId[] => {
+export const loadLayout = (account: string, defaults: readonly ModuleId[] = DEFAULT_LAYOUT): ModuleId[] => {
   try {
-    return parseLayout(localStorage.getItem(layoutKey(account)));
+    return parseLayout(localStorage.getItem(layoutKey(account)), defaults);
   } catch {
-    return [...DEFAULT_LAYOUT];
+    return [...defaults];
   }
 };
 

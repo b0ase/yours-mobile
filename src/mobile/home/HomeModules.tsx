@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type ComponentType, type ReactNode } from 'react';
+import { lazy, Suspense, useState, type ComponentType, type ReactNode } from 'react';
 import {
   ArrowDown,
   ArrowUp,
@@ -12,27 +12,21 @@ import {
   PiggyBank,
   Plus,
   ShoppingBag,
+  Wallet,
   type LucideIcon,
 } from 'lucide-react';
 import bGlyph from '../brand/bwallet-glyph.svg';
-import { useServiceContext } from '../../hooks/useServiceContext';
 import { STORE_BUILD, THEME_STORE_PAID_ENABLED } from '../storeBuild';
 import { SectionBoundary } from '../wallet/SectionBoundary';
-import {
-  MODULE_IDS,
-  addModule,
-  loadLayout,
-  onLayoutChange,
-  removeModule,
-  saveLayout,
-  shiftModule,
-  visibleLayout,
-  type ModuleId,
-} from './layout';
+import { MODULE_IDS, addModule, removeModule, shiftModule, visibleLayout, type ModuleId } from './layout';
+import { useHomeLayout } from './useHomeLayout';
+import { WIDE_ON } from '../wide/flag';
 import { AskBModule, HistoryModule, MusicModule, NotificationsModule, PotsModule, PriceChartModule } from './modules';
 import './home.css';
 
 // Paid store content: its own chunk behind the inlined flag, so a store build never contains it.
+// Holdings reads the wide layout's wallet feed, so it is a Desktop module.
+const Holdings = WIDE_ON ? lazy(() => import('./Holdings')) : null;
 const StoreShowcase = THEME_STORE_PAID_ENABLED ? lazy(() => import('./StoreShowcase')) : null;
 
 const BIcon = ((p: { size?: number }) => (
@@ -117,6 +111,15 @@ const HOME_MODULES: Record<ModuleId, HomeModuleDef> = {
     store: true,
     Component: NotificationsModule,
   },
+  holdings: {
+    id: 'holdings',
+    title: 'Holdings',
+    blurb: 'Every balance, sortable',
+    icon: Wallet,
+    size: 'full',
+    store: true,
+    Component: Holdings ?? undefined,
+  },
   music: {
     id: 'music',
     title: 'Music',
@@ -134,25 +137,6 @@ const moduleAllowed = (id: ModuleId, store = STORE_BUILD): boolean => {
   if (!d) return false;
   if (store && !d.store) return false;
   return d.slot || !!d.Component;
-};
-
-const useAccount = () => {
-  const { chromeStorageService } = useServiceContext();
-  return chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ?? '';
-};
-
-const useHomeLayout = () => {
-  const account = useAccount();
-  const [ids, setIds] = useState(() => loadLayout(account));
-  useEffect(() => {
-    setIds(loadLayout(account));
-    return onLayoutChange(() => setIds(loadLayout(account)));
-  }, [account]);
-  const set = (next: ModuleId[]) => {
-    setIds(next);
-    saveLayout(account, next);
-  };
-  return { ids, set };
 };
 
 /** The card slot: renders its children only while the card module is on the home. */

@@ -1,15 +1,5 @@
 import { hasOwnComposer } from './composer';
-import {
-  lazy,
-  Suspense,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useMemo,
-  useState,
-  useSyncExternalStore,
-  type ReactNode,
-} from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import bgVideo from '../brand/bg/wallet-card.mp4';
@@ -38,14 +28,12 @@ import {
   getDisplayCurrency,
   onDisplayCurrencyChange,
   setDisplayCurrency,
-  formatFiat,
-  currentFx,
 } from '../../utils/displayCurrency';
 import { wwOpen } from './flag';
+import { useHomeLayout } from '../home/useHomeLayout';
 import { LockCoin } from '../tabs/TopNav';
 import { AgentConversation } from '../agent/AgentConversation';
 import { useWalletFeed } from './walletFeed';
-import { PNEE_TOKEN_ID } from '../notes/pnee';
 import { BappHost } from './BappHost';
 import { PersonPic } from './PersonPic';
 import { useAvatar } from '../names/useAvatar';
@@ -62,15 +50,7 @@ const BAPP_PAGES: Record<string, string> = {
   bmail: '/m/bmail',
   bmusic: '/m/media',
 };
-import { ONESAT_MAINNET_CONTENT_URL } from '@1sat/actions';
-import { isUri } from '../../utils/uri';
-import { GENERIC_TOKEN_ICON } from '../../utils/constants';
-import { useTokenIcon } from '../tokens/tokenIcon';
-import bsvCoin from '../../assets/bsv-coin.svg';
 import './wide.css';
-
-const HistoryScreen = lazy(() => import('../wallet/HistoryScreen'));
-const BsvPriceChart = lazy(() => import('../wallet/PriceChart').then((m) => ({ default: m.BsvPriceChart })));
 
 /**
  * PROTOTYPE (demo/desktop-shell): the wide web layout. Runs inside the real app (same providers, router and
@@ -143,138 +123,6 @@ type Item = {
 const ONBOARDING = ['/', '/create-wallet', '/restore-wallet', '/import-wallet', '/master-restore'];
 
 const useCurrency = () => useSyncExternalStore(onDisplayCurrencyChange, getDisplayCurrency, getDisplayCurrency);
-
-/* ---------- Wallet side pane: tokens table (the Wallet page's own balances) + History ---------- */
-
-/** Prices the app actually has: BSV (the wallet's rate), MNEE ($1 stablecoin), PNEEs (1 = $0.01). Others: none. */
-type Row = { id: string; sym: string; icon?: string; amt: number; price: number | null; usd: number | null };
-type SortKey = 'sym' | 'amt' | 'price' | 'usd';
-
-/** A holding's picture, as on the phone (Bsv21TokensList): BSV's coin, an on-chain icon resolved to a URL, a
- *  personal token's creator photo, else the generic token art. Never a raw outpoint (it broke as an image). */
-const TokIcon = ({ row }: { row: Row }) => {
-  const onchain = row.icon
-    ? isUri(row.icon)
-      ? row.icon
-      : `${ONESAT_MAINNET_CONTENT_URL}/${row.icon}`
-    : GENERIC_TOKEN_ICON;
-  const icon = useTokenIcon(row.id === 'bsv' || row.id === 'mnee' ? undefined : row.id, row.sym, onchain);
-  const [broken, setBroken] = useState(false);
-  if (row.id === 'bsv') return <img className="ww-tok" src={bsvCoin} alt="" />;
-  if (row.id === 'mnee' && !row.icon) return <span className="ww-tok">{row.sym.slice(0, 2)}</span>;
-  return (
-    <img
-      className="ww-tok"
-      src={broken ? GENERIC_TOKEN_ICON : icon.url}
-      alt=""
-      referrerPolicy="no-referrer"
-      onError={() => setBroken(true)}
-    />
-  );
-};
-
-const WalletSide = () => {
-  const feed = useWalletFeed();
-  useCurrency();
-  const [sort, setSort] = useState<{ k: SortKey; desc: boolean }>({ k: 'usd', desc: true });
-  const rows = useMemo<Row[]>(() => {
-    if (!feed) return [];
-    const r: Row[] = [
-      {
-        id: 'bsv',
-        sym: 'BSV',
-        amt: feed.bsvBalance,
-        price: feed.exchangeRate || null,
-        usd: feed.exchangeRate ? feed.bsvBalance * feed.exchangeRate : null,
-      },
-    ];
-    if (feed.mneeBalance) r.push({ id: 'mnee', sym: 'MNEE', amt: feed.mneeBalance, price: 1, usd: feed.mneeBalance });
-    for (const t of feed.bsv21s) {
-      const amt = Number(t.amt) / 10 ** (t.dec || 0);
-      const price = t.id === PNEE_TOKEN_ID ? 0.01 : null;
-      r.push({
-        id: t.id,
-        sym: t.sym || t.id.slice(0, 8),
-        icon: t.icon,
-        amt,
-        price,
-        usd: price === null ? null : amt * price,
-      });
-    }
-    return r;
-  }, [feed]);
-  const sorted = [...rows].sort((a, b) => {
-    const v =
-      sort.k === 'sym'
-        ? a.sym.localeCompare(b.sym)
-        : sort.k === 'amt'
-          ? a.amt - b.amt
-          : (a[sort.k] ?? -1) - (b[sort.k] ?? -1);
-    return sort.desc ? -v : v;
-  });
-  const total = rows.reduce((s, r) => s + (r.usd ?? 0), 0);
-  const th = (k: SortKey, label: string, right = false) => (
-    <th className={right ? 'r' : ''} onClick={() => setSort((s) => ({ k, desc: s.k === k ? !s.desc : true }))}>
-      {label}
-      {sort.k === k && <span className="ww-sort">{sort.desc ? '↓' : '↑'}</span>}
-    </th>
-  );
-  return (
-    <div className="ww-side-stack">
-      <div className="ww-panel ww-flush">
-        <div className="ww-panel-head">
-          <span>Holdings</span>
-          <span className="ww-muted ww-small">
-            {feed
-              ? `${formatFiat(total, currentFx())} priced · ${rows.length} assets · click a column to sort`
-              : 'Loading…'}
-          </span>
-        </div>
-        <table className="ww-table">
-          <thead>
-            <tr>
-              {th('sym', 'Asset')}
-              {th('amt', 'Amount', true)}
-              {th('price', 'Price', true)}
-              {th('usd', 'Value', true)}
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map((t) => (
-              <tr key={t.id}>
-                <td>
-                  <TokIcon row={t} />
-                  <b>{t.sym}</b>
-                </td>
-                <td className="r mono">{t.amt.toLocaleString('en-GB', { maximumFractionDigits: 8 })}</td>
-                <td className="r mono">
-                  {t.price === null ? <span className="ww-muted">—</span> : formatFiat(t.price, currentFx())}
-                </td>
-                <td className="r mono">
-                  {t.usd === null ? <span className="ww-muted">—</span> : formatFiat(t.usd, currentFx())}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="ww-panel">
-        <div className="ww-panel-head">
-          <span>BSV price</span>
-          <span className="ww-muted ww-small">WhatsOnChain daily rate</span>
-        </div>
-        <Suspense fallback={null}>
-          <BsvPriceChart />
-        </Suspense>
-      </div>
-      <div className="ww-panel ww-flush ww-history">
-        <Suspense fallback={null}>
-          <HistoryScreen inline onClose={() => undefined} />
-        </Suspense>
-      </div>
-    </div>
-  );
-};
 
 /* ---------- Shell ---------- */
 
@@ -467,6 +315,9 @@ const WideShell = ({ children }: { children: ReactNode }) => {
 
   // Unlocked wallet pages: leave the auth composition flag.ts set before first paint.
   const onAuth = ONBOARDING.includes(pathname);
+  // The home's Ask b module is the prompt there: no second, floating bar over the modules (owner, 18 Oct 2026).
+  const homeIds = useHomeLayout().ids;
+  const askOnHome = onWallet && homeIds.includes('askB');
   useLayoutEffect(() => {
     if (!onAuth) document.documentElement.classList.remove('ww-onb');
   }, [onAuth]);
@@ -476,7 +327,8 @@ const WideShell = ({ children }: { children: ReactNode }) => {
 
   const bapp = bappFromPath(pathname);
   // NFTs and Friends take the whole area right of the menu (owner, 11 Oct 2026); the holdings pane is for Wallet.
-  const fullWallet = onWallet && (kind === 'nfts' || kind === 'names');
+  // The wallet is one full-width page: the home modules (Holdings, BSV price, History…) replaced the side pane.
+  const fullWallet = onWallet;
   const view = bapp
     ? 'bapp'
     : pathname.startsWith('/m/bmail')
@@ -625,7 +477,6 @@ const WideShell = ({ children }: { children: ReactNode }) => {
                 {bapp ? <BappHost key={bapp.id} app={bapp} onClose={() => navigate('/m/feed')} /> : children}
               </div>
             </div>
-            {view === 'wallet' && !fullWallet && <WalletSide />}
             {view === 'chat' && (
               <div className="ww-panel ww-chat-empty">
                 <WideEmpty
@@ -640,7 +491,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
       {/* Ask b's chat bar, floating bottom-centre; replies float above it as dismissable bubbles (owner, 12 Oct 2026).
           Not on pages with their own bottom composer (bChat rooms + DMs, bMail, Ask b): it sat behind their
           composer and its mic peeked out (owner, 18 Oct 2026). */}
-      {!bapp && !hasOwnComposer(pathname) && <AgentConversation variant="float" screen={pathname} />}
+      {!bapp && !hasOwnComposer(pathname) && !askOnHome && <AgentConversation variant="float" screen={pathname} />}
     </div>,
     document.body,
   );
