@@ -23,6 +23,8 @@ import {
   type InheritancePlan,
 } from './inheritance';
 import { BTRUST_CHECKLIST } from './checklist';
+import { CheckInPanel } from './CheckInPanel';
+import { HeirClaimPanel } from './HeirClaimPanel';
 
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
@@ -347,6 +349,20 @@ export const BTrustPage = () => {
               {paperMsg}
             </p>
           )}
+        </Step>
+
+        <Step n={4} title="Check in">
+          {plan ? (
+            <CheckInPanel plan={plan} height={height} months={months} onPreview={setPlan} />
+          ) : (
+            <p className="m-0 text-sm" style={{ color: MUTED }}>
+              Build a plan in step 2 first. Then check in now and then to keep the coins yours.
+            </p>
+          )}
+        </Step>
+
+        <Step n={5} title="For heirs: claim">
+          <HeirClaimPanel height={height} />
         </Step>
 
         <section className={CARD} aria-label="Status">
