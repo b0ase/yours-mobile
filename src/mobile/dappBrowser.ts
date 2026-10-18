@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { IS_TAURI, openExternal } from './desktop/ipc';
 import { isCWIEventName } from '@1sat/wallet-browser';
 import { YoursNative, isNative } from './native';
 import { MOBILE_EXTENSION_ID } from './protocol';
@@ -110,6 +111,7 @@ export const initDappBrowser = (createContext: ContextFactory) => {
 
 /** Route a context's window.open(http[s]) into the dApp browser. */
 export const routeWindowOpen = (win: Window) => {
+  if (IS_TAURI) return routeWindowOpenDesktop(win);
   if (!isNative) return;
   const original = win.open.bind(win);
   win.open = ((url?: string | URL, target?: string, features?: string) => {
@@ -117,6 +119,20 @@ export const routeWindowOpen = (win: Window) => {
     const href = raw === '' ? '' : new URL(raw, win.location.href).href;
     if (/^https?:/i.test(href)) {
       openDappBrowser(href).catch((error) => console.error('[dapp browser]', error));
+      return null;
+    }
+    return original(url, target, features);
+  }) as typeof win.open;
+};
+
+/** Desktop (Tauri): the webview opens no windows of its own; web links go to the default browser. */
+const routeWindowOpenDesktop = (win: Window) => {
+  const original = win.open.bind(win);
+  win.open = ((url?: string | URL, target?: string, features?: string) => {
+    const raw = url === undefined ? '' : String(url);
+    const href = raw === '' ? '' : new URL(raw, win.location.href).href;
+    if (/^(https?|mailto):/i.test(href)) {
+      openExternal(href).catch((error) => console.error('[desktop] open link', error));
       return null;
     }
     return original(url, target, features);

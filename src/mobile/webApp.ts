@@ -6,10 +6,18 @@ import { IS_EXTENSION } from './extension';
  * (vite.config.ts, IS_EXTENSION) and the web app (`pnpm build:web` → web.bwalletx.com, which is
  * the mobile build with Capacitor's web fallbacks, so isNativePlatform() is false). Anything that
  * is neither native nor the extension keeps its keys in this browser's storage: the web app
- * (and `pnpm preview:mobile`, which is the same build).
+ * (and `pnpm preview:mobile`, which is the same build). Desktop (Tauri) keeps them in its own app data dir.
  */
-export type WebAppEnv = { native: boolean; extension: boolean };
-export const detectWebApp = ({ native, extension }: WebAppEnv) => !native && !extension;
+export type WebAppEnv = { native: boolean; extension: boolean; tauri?: boolean };
+export const detectWebApp = ({ native, extension, tauri = false }: WebAppEnv) => !native && !extension && !tauri;
+
+/**
+ * bWalletX Desktop (src-tauri/): the Tauri webview injects __TAURI_INTERNALS__ before any page script runs, and only
+ * into the app's own pages. Capacitor's isNativePlatform() is false there, so Desktop is told apart by this.
+ */
+export const detectTauri = (w: unknown = typeof window === 'undefined' ? undefined : window): boolean =>
+  !!w && typeof w === 'object' && '__TAURI_INTERNALS__' in w && !!(w as Record<string, unknown>).__TAURI_INTERNALS__;
+export const isTauri = () => detectTauri();
 
 export type IosEnv = {
   userAgent: string;
@@ -42,6 +50,7 @@ const currentIosEnv = (): IosEnv => {
 };
 
 /** Web app (not the native apps, not the extension): the wallet lives only in this browser. */
-export const isWebApp = () => detectWebApp({ native: Capacitor.isNativePlatform(), extension: IS_EXTENSION });
+export const isWebApp = () =>
+  detectWebApp({ native: Capacitor.isNativePlatform(), extension: IS_EXTENSION, tauri: detectTauri() });
 /** The web app on an iPhone / iPad (Safari or added to the Home Screen), where iOS may clear site data. */
 export const isIosWebApp = () => isWebApp() && detectIos(currentIosEnv());

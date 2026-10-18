@@ -30,7 +30,6 @@ import { isSpaceInviteCode, isSpaceSlug } from './invite';
 import { inBatches, MAX_ROOMS } from './roomSpaces';
 import { ErrorActions } from '../errors/ErrorActions';
 import { RegularSpaces } from './RegularSpaces';
-import { CalendarView } from './CalendarView';
 import { roomPageUrl } from './schedule';
 
 const GOLD = 'var(--bw-accent-hi)';
@@ -164,8 +163,7 @@ const SpacesPage = () => {
       )}
 
       <div className="flex-1 overflow-y-auto bw-dock-pad">
-        <CalendarView onJoin={joinPublic} />
-        <RegularSpaces onJoin={joinPublic} />
+        <RegularSpaces onJoin={joinPublic} onStart={() => navigate('/m/chat')} />
         {!client.handle ? (
           <Empty>
             Listening works without signing in. Open Chat once to sign in and see Spaces in your own rooms.

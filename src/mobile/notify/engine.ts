@@ -61,6 +61,7 @@ import {
 } from './notify';
 import { clearChatBadges, setChatRooms, setFeedLatest } from '../tabs/tabBadges';
 import { loadPollState, pushItems, savePollState, setAsked, wasAsked, type PollState } from './store';
+import { IS_TAURI } from '../desktop/ipc';
 
 export type Me = MeKeys & {
   /** Names to match mentions on (paymail, $handle, OpNS name, profile name). */
@@ -576,6 +577,13 @@ function watchCalls() {
 async function deliver(found: NotifyItem[]) {
   const on = allowed(found, loadPrefs().notify);
   const added = pushItems(on);
+  if (added.length && IS_TAURI) {
+    // Desktop (Tauri): OS notifications through the Rust side (desktop/notify.ts).
+    void import('../desktop/notify')
+      .then((m) => m.desktopNotify(added))
+      .catch((e) => console.warn('[notify] desktop notification failed', e));
+    return;
+  }
   if (!added.length || !Capacitor.isNativePlatform()) return;
   try {
     const { display } = await LocalNotifications.checkPermissions();
@@ -723,8 +731,12 @@ export function stopNotify() {
  * about (after their first post, after claiming a name, or when they open the bell) — never at launch.
  */
 export async function askNotifyPermissionOnce(): Promise<void> {
-  if (wasAsked() || !Capacitor.isNativePlatform()) return;
+  if (wasAsked() || (!Capacitor.isNativePlatform() && !IS_TAURI)) return;
   setAsked();
+  if (IS_TAURI) {
+    await import('../desktop/notify').then((m) => m.askDesktopNotifyPermission()).catch(() => undefined);
+    return;
+  }
   try {
     const { display } = await LocalNotifications.checkPermissions();
     if (display === 'prompt' || display === 'prompt-with-rationale') await LocalNotifications.requestPermissions();

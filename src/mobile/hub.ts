@@ -23,12 +23,53 @@ type PendingSend = {
   done: boolean;
 };
 
-export type HostHandler = (op: HostOp, args: unknown[]) => Promise<unknown>;
-
 const LOCAL_PREFIX = 'chrome.storage.local:';
 const SESSION_KEY = 'chrome.storage.session';
 const NO_RECEIVER = 'Could not establish connection. Receiving end does not exist.';
 const PORT_CLOSED = 'The message port closed before a response was received.';
+
+export type HostHandler = (op: HostOp, args: unknown[]) => Promise<unknown>;
+
+/**
+ * Where storage.local is persisted. Keys arrive already prefixed (LOCAL_PREFIX) and values JSON-encoded.
+ * - Phones (default): YoursNative secure storage, one item per key.
+ * - Desktop (Tauri): one owner-only file in the app data dir, written atomically per batch (desktop/storage.ts).
+ */
+export interface LocalBackend {
+  load(): Promise<Record<string, string>>;
+  apply(sets: Record<string, string>, removes: string[]): Promise<void>;
+}
+
+/** Builds before 5.1.0-mobile.2 kept storage.local in Preferences; move it into secure storage. */
+const migrateFromPreferences = async () => {
+  const { keys } = await Preferences.keys();
+  for (const key of keys) {
+    if (!key.startsWith(LOCAL_PREFIX)) continue;
+    const { value } = await Preferences.get({ key });
+    if (value !== null) await YoursNative.secureSet({ key, value });
+    await Preferences.remove({ key });
+  }
+};
+
+export const nativeLocalBackend: LocalBackend = {
+  async load() {
+    await migrateFromPreferences();
+    const out: Record<string, string> = {};
+    const { keys } = await YoursNative.secureKeys();
+    for (const key of keys) {
+      if (!key.startsWith(LOCAL_PREFIX)) continue;
+      const { value } = await YoursNative.secureGet({ key });
+      if (value !== null) out[key] = value;
+    }
+    return out;
+  },
+  async apply(sets, removes) {
+    await Promise.all([
+      ...Object.entries(sets).map(([key, value]) => YoursNative.secureSet({ key, value })),
+      ...removes.map((key) => YoursNative.secureRemove({ key })),
+    ]);
+  },
+};
 
 const clone = <T>(value: T): T => (value === undefined ? value : JSON.parse(JSON.stringify(value)));
 
@@ -46,7 +87,10 @@ export class Hub {
   private backgroundReady: Promise<void>;
   private resolveBackgroundReady!: () => void;
 
-  constructor(private host: HostHandler) {
+  constructor(
+    private host: HostHandler,
+    private backend: LocalBackend = nativeLocalBackend,
+  ) {
     this.storageReady = this.loadLocal();
     this.backgroundReady = new Promise((resolve) => (this.resolveBackgroundReady = resolve));
   }
@@ -158,36 +202,19 @@ export class Hub {
   // STORAGE ****************************************************************
 
   private async loadLocal() {
-    await this.migrateFromPreferences();
-    const { keys } = await YoursNative.secureKeys();
-    for (const key of keys) {
-      if (!key.startsWith(LOCAL_PREFIX)) continue;
-      const { value } = await YoursNative.secureGet({ key });
-      if (value !== null) this.local.set(key.slice(LOCAL_PREFIX.length), JSON.parse(value));
-    }
-  }
-
-  /** Builds before 5.1.0-mobile.2 kept storage.local in Preferences; move it. */
-  private async migrateFromPreferences() {
-    const { keys } = await Preferences.keys();
-    for (const key of keys) {
-      if (!key.startsWith(LOCAL_PREFIX)) continue;
-      const { value } = await Preferences.get({ key });
-      if (value !== null) await YoursNative.secureSet({ key, value });
-      await Preferences.remove({ key });
+    for (const [key, value] of Object.entries(await this.backend.load())) {
+      if (key.startsWith(LOCAL_PREFIX)) this.local.set(key.slice(LOCAL_PREFIX.length), JSON.parse(value));
     }
   }
 
   private persist(ops: Array<[string, unknown]>) {
-    this.persistQueue = this.persistQueue.then(() =>
-      Promise.all(
-        ops.map(([key, value]) =>
-          value === undefined
-            ? YoursNative.secureRemove({ key: LOCAL_PREFIX + key })
-            : YoursNative.secureSet({ key: LOCAL_PREFIX + key, value: JSON.stringify(value) }),
-        ),
-      ),
-    );
+    const sets: Record<string, string> = {};
+    const removes: string[] = [];
+    for (const [key, value] of ops) {
+      if (value === undefined) removes.push(LOCAL_PREFIX + key);
+      else sets[LOCAL_PREFIX + key] = JSON.stringify(value);
+    }
+    this.persistQueue = this.persistQueue.then(() => this.backend.apply(sets, removes));
     return this.persistQueue;
   }
 

@@ -2,7 +2,7 @@
  * bCal — the one calendar (owner, 18 Oct 2026: "everyone is on the same calendar system"). The same
  * list bChatX and bcalx.com show: every scheduled Space from bit-sign's bookings, All / Following /
  * Mine, each with Remind me, Add to calendar (.ics), Open the Space and, when the host put it on chain,
- * "On chain ↗". Phone: top of bSpaces. Desktop: Talk › Calendar (/m/calendar).
+ * "On chain ↗". Phone: the home bCal tile (/m/calendar); bSpaces keeps its own Coming up. Desktop: Talk › Calendar.
  * bWalletX only: lives behind BSPACES_ENABLED (storeBuild.ts), like the rest of bSpaces.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';

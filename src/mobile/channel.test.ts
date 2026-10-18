@@ -9,5 +9,6 @@ describe('channel', () => {
   test('version label names the channel except in dev builds', () => {
     expect(versionLabel('0.1.0', 'android-direct')).toBe('0.1.0 (android-direct)');
     expect(versionLabel('0.1.0', 'dev')).toBe('0.1.0');
+    expect(versionLabel('0.1.0', 'desktop')).toBe('0.1.0 (desktop)');
   });
 });
