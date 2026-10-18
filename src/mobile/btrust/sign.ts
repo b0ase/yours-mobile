@@ -186,6 +186,35 @@ export async function signCheckIn(opts: {
   return tx;
 }
 
+// ── owner withdraw ──────────────────────────────────────────────────────────
+
+/**
+ * Cancel the lock: spend the owner branch and pay everything (less the fee) to `payTo`, normally the wallet's
+ * own receive address. Verified by the interpreter before it is returned.
+ */
+export async function signWithdraw(opts: {
+  lockTx: Transaction;
+  vout: number;
+  plan: InheritancePlan;
+  owner: HashSigner;
+  payTo: string | LockingScript;
+  feeRate?: number;
+}): Promise<Transaction> {
+  const plan = validatePlan(opts.plan);
+  if (opts.owner.pubKey !== plan.ownerPubKey) throw new Error('this wallet does not hold the owner key for that lock');
+  const sats = lockInput(opts.lockTx, opts.vout, plan);
+  const script = typeof opts.payTo === 'string' ? new P2PKH().lock(opts.payTo) : opts.payTo;
+  const fee = feeFor(10 + 41 + 75 + 9 + script.toBinary().length + 4, opts.feeRate);
+  if (sats - fee < 1) throw new Error('the lock is too small to pay the fee');
+  const tx = new Transaction();
+  tx.addInput({ sourceTransaction: opts.lockTx, sourceOutputIndex: opts.vout, sequence: 0xffffffff });
+  tx.addOutput({ lockingScript: script, satoshis: sats - fee });
+  const sig = await signInput(tx, 0, opts.owner);
+  tx.inputs[0].unlockingScript = new UnlockingScript(new Script().writeBin(sig).writeOpCode(OP.OP_1).chunks);
+  if (!verifySpend(tx)) throw new Error('the withdrawal did not verify');
+  return tx;
+}
+
 // ── heir claims ──────────────────────────────────────────────────────────────
 
 /** Unsigned claim of `lockTx:vout` to `payTo` (a P2PKH address or locking script) at nLockTime `height`. */

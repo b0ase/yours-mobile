@@ -8,7 +8,7 @@
 // 4. only then the wallet broadcasts it (sendWith). On any failure before that, the action is aborted.
 
 import { OP, Script, Transaction, UnlockingScript, type WalletInterface } from '@bsv/sdk';
-import { BTRUST_PROTOCOL, inheritanceLock, validatePlan, type InheritancePlan } from './inheritance';
+import { BTRUST_PROTOCOL, inheritanceLock, TEST_HEIRS_BLOCKS, validatePlan, type InheritancePlan } from './inheritance';
 import { beaconScript, ownerKeyID, planFromScript, scanForLocks, type ChainReader } from './derive';
 import { BEACON_SATS, ownerSigner, signInput, verifySpend, type HashSigner } from './sign';
 
@@ -91,6 +91,19 @@ export async function fundLock(opts: {
   } finally {
     if (!sent) await wallet.abortAction({ reference: txid }).catch(() => undefined);
   }
+}
+
+/**
+ * Refuse to fund a plan whose timings do not match the mode the page is in: a test plan (or test mode) must
+ * have test-length heights, and a real plan must not. Returns the reason, or '' when it is fine.
+ */
+export function fundingMismatch(plan: InheritancePlan, height: number, testMode: boolean): string {
+  const short = plan.heirsHeight - height <= TEST_HEIRS_BLOCKS + 2;
+  if (testMode || plan.test) {
+    if (!plan.test || !testMode) return 'This plan was built in a different mode. Build the plan again.';
+    if (!short) return 'Test mode, but this plan has real dates. Build the plan again.';
+  } else if (short) return 'These dates are too close. Build the plan again.';
+  return '';
 }
 
 // ── plans kept on this device ────────────────────────────────────────────────

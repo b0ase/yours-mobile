@@ -152,15 +152,32 @@ export { keySigner };
 export const blocksForMonths = (months: number) => Math.ceil(months * 30.44 * 144);
 
 /** Owner check-in: the same plan with both heights pushed forward from `currentHeight`. */
+/** Test plans (developer builds only): heirs 3 blocks out, the lead heir 3 blocks after that. */
+export const TEST_HEIRS_BLOCKS = 3;
+export const TEST_LEAD_BLOCKS = 3;
+
+/**
+ * Heights for a new plan or a check-in. The single place that decides test vs real timings: the page passes
+ * the same flag that shows the TEST banner, and a test plan keeps test timings on every check-in.
+ */
+export function planHeights(currentHeight: number, months: number, test: boolean, leadExtraMonths = 6) {
+  if (!isHeight(currentHeight)) throw new Error('current height required');
+  const heirsHeight = currentHeight + (test ? TEST_HEIRS_BLOCKS : blocksForMonths(months));
+  return { heirsHeight, leadHeight: heirsHeight + (test ? TEST_LEAD_BLOCKS : blocksForMonths(leadExtraMonths)) };
+}
+
+/** True when a plan's heights are test-length from `builtAt` (used to refuse funding a mismatched plan). */
+export const isTestLength = (p: InheritancePlan, builtAt: number) =>
+  p.heirsHeight - builtAt <= TEST_HEIRS_BLOCKS && p.leadHeight - p.heirsHeight <= TEST_LEAD_BLOCKS;
+
+/** Owner check-in: the same plan with both heights pushed forward from `currentHeight`. */
 export function checkIn(
   plan: InheritancePlan,
   currentHeight: number,
   months = 12,
   leadExtraMonths = 6,
 ): InheritancePlan {
-  if (!isHeight(currentHeight)) throw new Error('current height required');
-  const heirsHeight = currentHeight + blocksForMonths(months);
-  return validatePlan({ ...plan, heirsHeight, leadHeight: heirsHeight + blocksForMonths(leadExtraMonths) });
+  return validatePlan({ ...plan, ...planHeights(currentHeight, months, !!plan.test, leadExtraMonths) });
 }
 
 /** "about 30 min", "about 1 hour", "about 3 days": real block delta x 10 minutes. */
