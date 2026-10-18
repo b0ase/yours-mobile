@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Loader2 } from 'lucide-react';
+import { SEEDLESS_ENABLED } from '../mobile/passkey/prf';
+import { PasskeyUnlockButton } from '../mobile/passkey/PasskeyCreate';
 import { useTheme } from '../hooks/useTheme';
 import { sleep } from '../utils/sleep';
 import { Input } from './Input';
@@ -212,6 +214,15 @@ export const UnlockWallet = (props: UnlockWalletProps) => {
       failUnlock(usbEnabled ? 'Incorrect password' : '');
     }
   };
+
+  // "Unlock with passkey" (VITE_SEEDLESS=1): the passkey derives the same password the wallet was made with.
+  const [passkeyPassword, setPasskeyPassword] = useState('');
+  useEffect(() => {
+    if (!passkeyPassword || password !== passkeyPassword) return;
+    setPasskeyPassword('');
+    void handleUnlock({ preventDefault: () => undefined } as React.FormEvent<HTMLFormElement>);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, after the passkey filled the password
+  }, [passkeyPassword, password]);
 
   const outlineLeft = theme.color.component.secondaryOutlineButtonGradientLeft;
   const outlineRight = theme.color.component.secondaryOutlineButtonGradientRight;
@@ -513,6 +524,10 @@ export const UnlockWallet = (props: UnlockWalletProps) => {
             </>
           )}
 
+          {SEEDLESS_ENABLED && !usbEnabled && <PasskeyUnlockButton onPassword={(pw) => {
+            setPassword(pw);
+            setPasskeyPassword(pw);
+          }} />}
           <Input
             theme={theme}
             placeholder="Password"

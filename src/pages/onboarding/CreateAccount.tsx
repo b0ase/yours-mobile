@@ -14,6 +14,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { sleep } from '../../utils/sleep';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useNavigate } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { YoursIcon } from '../../components/YoursIcon';
 import { saveAccountDataToChromeStorage } from '../../utils/chromeStorageHelpers';
 import { copySecret } from '../../mobile/secretClipboard';
@@ -22,6 +23,7 @@ import { clearHelpDeskUnpin } from '../../mobile/chat/helpDeskPin';
 import { isWebApp } from '../../mobile/webApp';
 import { PasskeyBackupButton } from '../../mobile/passkey/PasskeyBackup';
 import { SEEDLESS_ENABLED } from '../../mobile/passkey/prf';
+import { PasskeyCreatePanel } from '../../mobile/passkey/PasskeyCreate';
 
 export type CreateAccountProps = {
   onNavigateBack: () => void;
@@ -57,6 +59,10 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
   const [copied, setCopied] = useState(false);
   const [backupOpen, setBackupOpen] = useState(false);
   const [backupSaved, setBackupSaved] = useState(false);
+  // "Continue with a passkey" (VITE_SEEDLESS=1, web): the passkey supplies the password (mobile/passkey/PasskeyCreate.tsx).
+  const { search } = useLocation();
+  const viaPasskey = SEEDLESS_ENABLED && newWallet && new URLSearchParams(search).get('via') === 'passkey';
+  const [passkeyPassword, setPasskeyPassword] = useState('');
 
   useEffect(() => {
     if (newWallet) hideMenu();
@@ -113,6 +119,14 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
     }
   };
 
+  useEffect(() => {
+    if (passkeyPassword && password === passkeyPassword && passwordConfirm === passkeyPassword) {
+      setPasskeyPassword('');
+      void handleKeyGeneration();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once, when the passkey has filled both fields
+  }, [passkeyPassword, password, passwordConfirm]);
+
   // Sensitive / local-only copy, wiped after 60 s if still on the clipboard (src/mobile/secretClipboard.ts).
   const handleCopyToClipboard = () => {
     copySecret(seedWords.join(' ').trim()).then(
@@ -168,13 +182,26 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
     <div className="flex flex-col items-center w-full pb-20">
       {stepIndicator}
       <h2 className="text-xl font-bold mb-1 text-center" style={{ color: contrast }}>
-        {newWallet ? 'Create password' : 'New Account'}
+        {viaPasskey ? 'Protect your wallet with a passkey' : <>{newWallet ? 'Create password' : 'New Account'}</>}
       </h2>
       <p className="text-xs mb-5 text-center" style={{ color: gray }}>
-        {newWallet ? 'This will be used to unlock your wallet.' : 'Enter your existing password.'}
+        {viaPasskey ? 'Face ID, fingerprint or your device PIN.' : <>{newWallet ? 'This will be used to unlock your wallet.' : 'Enter your existing password.'}</>}
       </p>
 
-      <form onSubmit={handleKeyGeneration} className="flex flex-col items-center w-full gap-0">
+      {viaPasskey && (
+        <PasskeyCreatePanel
+          onPassword={(pw) => {
+            setPassword(pw);
+            setPasswordConfirm(pw);
+            setPasskeyPassword(pw);
+          }}
+        />
+      )}
+      <form
+        onSubmit={handleKeyGeneration}
+        className="flex flex-col items-center w-full gap-0"
+        style={viaPasskey ? { display: 'none' } : undefined}
+      >
         <AccountNameField
           theme={theme}
           value={accountName}

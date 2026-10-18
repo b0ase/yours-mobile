@@ -156,3 +156,34 @@ export const saveLocalBackup = (blob: SeedBackupBlob, store: Pick<Storage, 'getI
 
 export const backupFileName = (blob: SeedBackupBlob) =>
   `bwalletx-passkey-backup-${blob.createdAt.slice(0, 10)}-${blob.credentialId.slice(0, 6)}.json`;
+
+/**
+ * "Continue with a passkey" (no password to invent): the wallet's normal keystore password is derived from the same
+ * PRF output with a different HKDF label, so it is unrelated to the backup key and never shown or typed. The
+ * keystore format, unlock and change-password code are unchanged; the passkey just types the password for you.
+ */
+export const KEYSTORE_INFO = 'bwalletx keystore password v1';
+export async function keystorePasswordFromPrf(prfOutput: Uint8Array): Promise<string> {
+  if (prfOutput.length !== 32) throw new Error('PRF output must be 32 bytes');
+  const ikm = await crypto.subtle.importKey('raw', prfOutput as BufferSource, 'HKDF', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(32) as BufferSource, info: enc.encode(KEYSTORE_INFO) },
+    ikm,
+    256,
+  );
+  return `pk1.${b64url(new Uint8Array(bits))}`;
+}
+
+/** Which passkey unlocks this browser's wallet (not secret: an id and an rpId). */
+export const UNLOCK_KEY = 'bwx:passkey-unlock';
+export type PasskeyUnlock = { rpId: string; credentialId: string };
+export const loadPasskeyUnlock = (store: Pick<Storage, 'getItem'> = localStorage): PasskeyUnlock | null => {
+  try {
+    const o = JSON.parse(store.getItem(UNLOCK_KEY) ?? 'null') as PasskeyUnlock | null;
+    return o && typeof o.rpId === 'string' && typeof o.credentialId === 'string' ? o : null;
+  } catch {
+    return null;
+  }
+};
+export const savePasskeyUnlock = (u: PasskeyUnlock, store: Pick<Storage, 'setItem'> = localStorage) =>
+  store.setItem(UNLOCK_KEY, JSON.stringify(u));

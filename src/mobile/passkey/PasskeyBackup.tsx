@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Check, Fingerprint, FileUp } from 'lucide-react';
 import { useTheme } from '../../hooks/useTheme';
 import { createPasskeyWithPrf, getPrf } from './prf';
@@ -11,6 +11,7 @@ import {
   sealSeed,
   type SeedBackupBlob,
 } from './seedBackup';
+import { takePasskeySession } from './session';
 
 const linkStyle = { background: 'none', border: 'none', cursor: 'pointer' } as const;
 
@@ -22,6 +23,25 @@ export const PasskeyBackupButton = ({ words, label }: { words: string[]; label: 
   const [error, setError] = useState('');
   const [blob, setBlob] = useState<SeedBackupBlob | null>(null);
   const accent = theme.color.component.primaryButtonLeftGradient;
+
+  // Made with "Continue with a passkey": seal the new words with that passkey now (no second prompt).
+  const phrase = words.join(' ');
+  useEffect(() => {
+    if (!phrase) return;
+    const s = takePasskeySession();
+    if (!s) return;
+    void sealSeed(phrase, s.prf, { rpId: s.rpId, credentialId: s.credentialId, label }).then(
+      (b) => {
+        s.prf.fill(0);
+        saveLocalBackup(b);
+        setBlob(b);
+        downloadBackupFile(b);
+        setState('done');
+      },
+      (e: unknown) => setError(e instanceof Error ? e.message : String(e)),
+    );
+  }, [phrase, label]);
+
   if (!available || words.length === 0) return null;
 
   const run = async () => {

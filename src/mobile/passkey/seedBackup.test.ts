@@ -4,6 +4,7 @@ import {
   BLOB_VERSION,
   b64url,
   fromB64url,
+  keystorePasswordFromPrf,
   loadLocalBackups,
   openSeed,
   parseSeedBackup,
@@ -80,6 +81,18 @@ describe('passkey seed backup', () => {
     saveLocalBackup(b, store);
     saveLocalBackup(a, store);
     expect(loadLocalBackups(store).map((x) => x.ct)).toEqual([a.ct, b.ct]);
+  });
+});
+
+describe('keystore password from passkey', () => {
+  test('deterministic per passkey, different per passkey, unrelated to the backup ciphertext', async () => {
+    const a1 = await keystorePasswordFromPrf(prfA);
+    expect(a1).toBe(await keystorePasswordFromPrf(prfA));
+    expect(a1).not.toBe(await keystorePasswordFromPrf(prfB));
+    expect(a1.startsWith('pk1.')).toBe(true);
+    expect(a1.length).toBeGreaterThan(40);
+    const blob = await sealSeed(PHRASE, prfA, meta);
+    expect(blob.ct).not.toContain(a1.slice(4, 20));
   });
 });
 

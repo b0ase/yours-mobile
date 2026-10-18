@@ -22,6 +22,58 @@ password. v2 option: on web only, derive the keystore password from the same PRF
 label, e.g. `bwalletx keystore v1`) so "Continue with a passkey" needs no password at all; the password form then
 becomes "Set a password too (for the extension)".
 
+## Welcome screen and identity (owner, 19 Oct 2026)
+
+Flag-on welcome (`src/mobile/passkey/SeedlessWelcome.tsx`, replaces Create / Restore on `Start.tsx`), in this order:
+
+1. **Continue with X**, 2. **Continue with Google**: the existing wallet sign-in (`social/SocialSignIn.tsx`,
+   `social/socialLogin.ts` → paymail server `/api/social/start` + `/preview`, web returns to the same tab). This is
+   **who you are**: the verified profile waits as `NEW_ACCOUNT`, the new account picks it up (`bindSocial`, mobile
+   patch on CreateAccount) and "Claim your name" links the $name and badge as today. It never touches keys.
+   (Reverses the 18 Oct removal of these buttons from Create, but only in VITE_SEEDLESS builds.)
+2. **Continue with a passkey**: **what protects the keys** (`/create-wallet?via=passkey`, `PasskeyCreate.tsx`).
+3. "Use a password instead" (the current flow) · "Restore a wallet".
+
+### Passkey instead of a password (v1.5, built)
+
+With `?via=passkey` the user never invents a password:
+
+- One passkey sheet makes the passkey and returns its PRF output.
+- The wallet password is derived from it: `"pk1." + b64url(HKDF-SHA256(prf, salt=0^32, info="bwalletx keystore password v1"))`.
+  The normal create path runs with that password (same keystore format, nothing else changed). The derived
+  password is not offered to the browser's password manager (patch in `vite.config.mobile.ts`).
+- The 12 words are still generated and shown; the same PRF output (kept in memory only, `session.ts`) seals them
+  straight away, so the recovery file downloads with no second prompt.
+- Unlock screen shows **"Unlock with passkey"** when `bwx:passkey-unlock` (credential id + rpId, not secret) is
+  set; it derives the same password and runs the normal unlock. Typing the password is still possible in theory
+  but the user doesn't know it; "Forgot password? Restore with recovery phrase" and Restore with a passkey are the
+  ways back.
+- Not covered yet: Settings › Change password for a passkey wallet (would replace the derived password with a
+  typed one; fine, but the passkey unlock then fails until re-enrolled), adding a second account (asks for the
+  master password: needs the same "Use passkey" button there), the extension and native apps (no passkey).
+
+Verified 19 Oct in headless Chrome + virtual PRF authenticator: welcome shows the five options in order; Continue
+with a passkey → Create my passkey → wallet created, words shown, "Saved with your passkey", file downloaded →
+session cleared + reload → "Welcome back" with **Unlock with passkey** → unlocked to the Wallet tab. X / Google were
+not exercised (real OAuth); they are the unchanged existing flow.
+
+### Finding the backup by X / Google on a new device (design, not built)
+
+Goal: new phone → Continue with X → passkey sheet → wallet back, no file. The server keeps ciphertext only.
+
+- Store: the paymail sign-in service already proves an X / Google account with a one-time `ticket` + `secret`
+  (`/api/social/preview`). Add `POST /api/social/backup/put { ticket, secret, blob }` (store the blob under the
+  verified `provider:subject`, at most 5 per subject) and `POST /api/social/backup/get { ticket, secret }` (return
+  that subject's blobs). Both take a fresh sign-in proof, so only the X / Google account holder can fetch.
+- Why server + X/Google together can't decrypt: the blob is AES-GCM under a key from the passkey's PRF output,
+  which only the user's authenticator can compute after Face ID / fingerprint. The server never sees PRF output,
+  the phrase or a key; X/Google never see the blob. A server breach plus an X takeover yields ciphertext only.
+- Client: after the social return on Restore, call `backup/get`, list the blobs (label, date), then `getPrf(rpId,
+credentialId)` → `openSeed` → normal restore (the code path in `PasskeyRestoreRow.openWith`).
+- Missing today: the two endpoints and a table on the paymail server (`social_backups(subject text, credential_id
+text, blob jsonb, created_at)`, RLS on) and a migration on Hetzner, not run. Alternatively key it by identity key
+  on the bit-sign API (below); the X / Google lookup is what makes "no file" work on a new device.
+
 ## Crypto
 
 ```
