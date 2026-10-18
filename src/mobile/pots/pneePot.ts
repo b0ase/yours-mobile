@@ -4,7 +4,7 @@
  *
  * An output is spent only when (1) the token overlay reports it 'valid' (one invalid input in a transfer would burn
  * the valid ones alongside it, as sweepBsv21 guards), and (2) its P2PKH suffix pays the pot key itself: the same key
- * check repairUnsignableTokenOutputs (tokenSendHeal.ts, PR #121) does, so a send never fails on an input this key
+ * check repairUnsignableTokenOutputs (tokenSendHeal.ts, PR 121) does, so a send never fails on an input this key
  * can't sign.
  */
 
