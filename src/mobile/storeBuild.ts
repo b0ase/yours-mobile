@@ -157,6 +157,20 @@ export const BSPACES_ENABLED: boolean = !(
  */
 export const FREE_SPACES_ENABLED = true;
 
+/**
+ * Space transcription with consent (18 Oct 2026, bit-sign space-transcription-rules). bWalletX only
+ * for the parts that turn speech into text: the host's mode switch, the speak-consent tick and the
+ * transcript view. A store build still SHOWS the "Transcribing" badge, the listen notice and the
+ * "(not transcribed)" labels, because that is disclosure; it never offers the tick, so a store user
+ * is never transcribed. Store listings (Apple privacy labels, Play Data safety) must declare audio
+ * collection before this flag opens up there.
+ */
+export const TRANSCRIPTION_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+
 /** An open room (metadata.kind 'open', or an always-open one like the Lounge): no token gate. */
 export const isOpenRoom = (room: { ticker?: string | null; metadata?: unknown } | null | undefined): boolean => {
   if (!room) return false;
