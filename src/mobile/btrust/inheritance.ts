@@ -48,6 +48,8 @@ export const GATE_KEY = new PrivateKey(new BigNumber(1));
 export type InheritancePlan = {
   v: 1;
   ownerPubKey: string;
+  /** Built in a developer build's test mode (3-block timings). Never set in production. */
+  test?: true;
   /** Exactly three heir public keys, in the order signatures must follow. */
   heirs: { name: string; paymail?: string; pubKey: string }[];
   /** Height after which any two heirs may spend (if the owner has not checked in). */

@@ -25,8 +25,13 @@ import {
 import { BTRUST_CHECKLIST } from './checklist';
 import { CheckInPanel } from './CheckInPanel';
 import { HeirClaimPanel } from './HeirClaimPanel';
+import { FundPanel } from './FundPanel';
+import { btrustTestMode, TEST_BANNER } from './testMode';
+import { nextOwnerSlot } from './fund';
+import { wocChain } from './derive';
 
 const GOLD = '#F5B800';
+const TEST_TIMINGS = btrustTestMode();
 const MUTED = '#98A2B3';
 const CARD = 'rounded-2xl bg-[#17191E] border border-[#2b2f36] p-4 flex flex-col gap-2';
 const INPUT = 'w-full rounded-xl bg-[#0f1115] border border-[#2b2f36] p-2 text-white text-sm';
@@ -79,6 +84,16 @@ const Step = ({ n, title, children }: { n: number; title: string; children: Reac
   </section>
 );
 
+export const TestBanner = () => (
+  <div
+    role="alert"
+    className="rounded-2xl p-4 text-center text-lg font-extrabold text-white"
+    style={{ background: '#D92D20' }}
+  >
+    {TEST_BANNER}
+  </div>
+);
+
 export const BTrustPage = () => {
   const { apiContext } = useServiceContext();
   const [secret, setSecret] = useState('');
@@ -95,6 +110,7 @@ export const BTrustPage = () => {
   const [heirs, setHeirs] = useState([0, 1, 2].map(() => ({ name: '', paymail: '', pubKey: '' })));
   const [months, setMonths] = useState(12);
   const [plan, setPlan] = useState<InheritancePlan | null>(null);
+  const [slot, setSlot] = useState(0);
   const [paperMsg, setPaperMsg] = useState('');
 
   useEffect(() => {
@@ -138,24 +154,29 @@ export const BTrustPage = () => {
     }
   };
 
-  const buildPlan = () => {
+  const buildPlan = async () => {
     setError('');
     try {
       if (!ownerPub) throw new Error('Your wallet key is not ready yet');
       if (!height) throw new Error('Waiting for the current block height');
-      const heirsHeight = height + blocksForMonths(months);
+      // Each lock gets its own owner key: the next slot the seed-only scan has not seen (derive.ts).
+      const next = await nextOwnerSlot(apiContext.wallet, wocChain());
+      // ?btrust-test: tiny real-money test timings (heirs after 3 blocks, lead heir 3 blocks later).
+      const heirsHeight = TEST_TIMINGS ? height + 3 : height + blocksForMonths(months);
       const p = validatePlan({
         v: 1,
-        ownerPubKey: ownerPub,
+        ownerPubKey: next.ownerPubKey,
         heirs: heirs.map((h) => ({
           name: h.name.trim(),
           pubKey: h.pubKey.trim(),
           ...(h.paymail.trim() ? { paymail: h.paymail.trim() } : {}),
         })),
         heirsHeight,
-        leadHeight: heirsHeight + blocksForMonths(6),
+        leadHeight: heirsHeight + (TEST_TIMINGS ? 3 : blocksForMonths(6)),
+        ...(TEST_TIMINGS ? { test: true as const } : {}),
       });
       inheritanceLock(p);
+      setSlot(next.slot);
       setPlan(p);
     } catch (e) {
       fail(e);
@@ -196,6 +217,7 @@ export const BTrustPage = () => {
     <div className="px-4 pb-24">
       <TopNav />
       <div className="mt-14 flex flex-col gap-3">
+        {TEST_TIMINGS && <TestBanner />}
         <header className="flex flex-col gap-1">
           <h1 className="m-0 text-white text-xl">bTrust</h1>
           <p className="m-0 text-sm" style={{ color: MUTED }}>
@@ -310,7 +332,7 @@ export const BTrustPage = () => {
             />
             months without a check-in
           </label>
-          <button type="button" className={BTN} style={{ background: GOLD }} onClick={buildPlan}>
+          <button type="button" className={BTN} style={{ background: GOLD }} onClick={() => void buildPlan()}>
             Build plan
           </button>
           {plan && (
@@ -328,6 +350,7 @@ export const BTrustPage = () => {
               >
                 Save plan (give a copy to each heir)
               </button>
+              <FundPanel plan={plan} slot={slot} height={height} download={download} />
             </div>
           )}
         </Step>
