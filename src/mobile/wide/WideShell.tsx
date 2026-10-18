@@ -358,8 +358,6 @@ const WideShell = ({ children }: { children: ReactNode }) => {
         { id: 'calls', label: 'bPhone', icon: I.calls, to: CALLS_ROUTE },
         { id: 'people', label: PEOPLE_LABEL, icon: I.people, to: '/m/people' },
         { id: 'spaces', label: SPACES_LABEL, icon: I.spaces, to: '/m/spaces', hidden: !BSPACES_ENABLED },
-        // bCal: the one calendar of scheduled Spaces, shared with bChatX and bcalx.com (owner, 18 Oct 2026).
-        { id: 'calendar', label: 'Calendar', icon: I.calendar, to: '/m/calendar', hidden: !BSPACES_ENABLED },
       ],
     },
     {
