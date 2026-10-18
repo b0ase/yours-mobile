@@ -208,7 +208,7 @@ export const DeleteAccountScreen = ({ onBack }: { onBack: () => void }) => {
                 className="underline"
                 style={{ color: GOLD }}
               >
-                bitcoinchat.online/delete-account
+                bchatx.com/delete-account
               </button>
               . Questions: {SUPPORT_EMAIL}
             </p>

@@ -82,7 +82,7 @@ describe('reports reach the server', () => {
     await sendReport(http, { kind: 'ai_response', target: 'b-agent:paid', reason: 'hate', content: 'reply' });
     expect(seen[0].method).toBe('POST');
     expect(seen[0].url).toBe(REPORT_URL);
-    expect(REPORT_URL).toBe('https://www.bitcoinchat.online/api/bitsign/report');
+    expect(REPORT_URL).toBe('https://www.bchatx.com/api/bitsign/report');
     expect(seen[0].body).toMatchObject({ kind: 'ai_response', reason: 'hate', content: 'reply', source: 'bwallet' });
   });
   test('a refused report is an error the user sees, not silence', async () => {
@@ -110,7 +110,7 @@ describe('AI consent (Apple 5.1.2(i))', () => {
     expect(consentTarget('paid', 'openai')).toBe('paid');
     expect(consentTarget('own', 'openrouter')).toBe('openrouter');
     expect(consentInfo('paid').provider).toBe('Anthropic');
-    expect(consentInfo('paid').route).toContain('bitcoinchat.online');
+    expect(consentInfo('paid').route).toContain('bchatx.com');
     expect(consentInfo('openai').provider).toBe('OpenAI');
   });
   test('the sheet states the real turn limit and what is not sent', () => {

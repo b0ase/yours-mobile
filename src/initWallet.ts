@@ -60,7 +60,8 @@ import { fixUtxoStatus, utxoStatusFromTxo } from './services/utxoStatus';
 import { restorePaymailHistory, type PaymailRestoreReport } from './mobile/names/paymail';
 import { makeRecoverDeps, runRecoverOnce } from './services/recoverFailedWiring';
 import { recoverPaymentByTxid, type TxidRecoverReport } from './services/recoverByTxid';
-import { makeTxidRecoverDeps, sweepCandidateTxids } from './services/recoverByTxidWiring';
+import { makePostageReconcileWiring, makeTxidRecoverDeps, sweepCandidateTxids } from './services/recoverByTxidWiring';
+import { reconcilePostage, wocIsMined, type PostageReconcileReport } from './services/postageReconcile';
 import { chainActive } from './services/dappChain';
 import { SYNC_HEALTH_KEY } from './services/storageHealth';
 import type { TokenRecoveryOptions, TokenRecoveryResult } from './services/tokenRecovery';
@@ -152,6 +153,8 @@ export interface AccountContext {
   recoverFailed: () => Promise<RecoverReport>;
   /** Recover one mined payment by txid from the derivation any reachable store holds (services/recoverByTxid.ts). */
   recoverTxid: (txid: string, progress?: (step: string) => void) => Promise<TxidRecoverReport>;
+  /** Settle bMail postage held as nosend/unsent whose tx the chain says is mined (services/postageReconcile.ts). */
+  reconcilePostage: (force?: boolean) => Promise<PostageReconcileReport>;
   /** Sweep txids from this wallet's own records, for Find mined payments (recoverByTxidWiring.ts). */
   sweepCandidates: () => Promise<string[]>;
   /** Re-internalize paymail receipts the server recorded that this device lacks (restore from seed, 14 Oct 2026). */
@@ -895,6 +898,14 @@ export const initWallet = async (
         if (r.result === 'restored') internalizeBackoff.clear(r.txid);
         return r;
       }),
+    reconcilePostage: (force?: boolean) =>
+      reconcilePostage(
+        {
+          ...makePostageReconcileWiring({ storage, wallet: baseWallet as never, services: toolboxServices as never }),
+          isMined: (txid) => wocIsMined(txid),
+        },
+        { force },
+      ),
     sweepCandidates: () => {
       const txo = (toolboxServices as unknown as { txo?: { getSpends?: (o: string[]) => Promise<(string | null)[]> } })
         .txo;

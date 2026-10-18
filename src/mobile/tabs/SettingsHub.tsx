@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { Github } from 'lucide-react';
+import { FileText, Github } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../../hooks/useTheme';
 import { UNOFFICIAL_NOTICE } from '../brandText';
 import { openDappBrowser } from '../dappBrowser';
@@ -9,7 +10,7 @@ import { AppsAndTools } from '../../pages/AppsAndTools';
 import { Settings } from '../../pages/Settings';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { versionLabel } from '../channel';
-import { DIRECT_UPDATE_ENABLED } from '../storeBuild';
+import { BUREAU_ENABLED, DIRECT_UPDATE_ENABLED } from '../storeBuild';
 
 // Android direct APK only: the in-app updater (update/), not even built into other channels.
 const DirectUpdateCard = DIRECT_UPDATE_ENABLED
@@ -29,6 +30,7 @@ const NEW_QUERIES = ['create-account', 'restore-account'];
 const SettingsHub = () => {
   const { selected, query, handleSelect } = useBottomMenu();
   const { theme } = useTheme();
+  const navigate = useNavigate();
   const [section, setSection] = useState<Section>(
     query === 'about' ? 'about' : NEW_QUERIES.includes(query) ? 'new' : selected === 'tools' ? 'tools' : 'settings',
   );
@@ -77,6 +79,21 @@ const SettingsHub = () => {
         {section === 'tools' && (
           // A little clearance below the Settings | Tools | About switch.
           <div className="w-full pt-6">
+            {BUREAU_ENABLED && (
+              // One-time import of documents signed on bit-sign (retired quietly, 18 Oct 2026); not on bMail's screen.
+              <div className="px-4 pb-3">
+                <button
+                  onClick={() => navigate('/m/bmail/agreements/bit-sign')}
+                  className="flex w-full items-center gap-3 rounded-xl bg-[var(--bw-surface)] px-4 py-3 text-left"
+                >
+                  <FileText size={18} color="#98A2B3" />
+                  <div>
+                    <div className="text-sm font-semibold text-white">Import from bit-sign</div>
+                    <div className="text-[11px] text-[#98A2B3]">Documents you signed there, read-only</div>
+                  </div>
+                </button>
+              </div>
+            )}
             <AppsAndTools />
           </div>
         )}

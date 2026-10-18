@@ -540,3 +540,17 @@ export const BIZ_AGENT_ACCOUNT_ENABLED: boolean = !(
   import.meta.env.VITE_CHANNEL === 'ios-store' ||
   import.meta.env.VITE_CHANNEL === 'android-play'
 );
+
+/**
+ * bMail › Agreements (/m/bmail/agreements, was the Bureau at /m/bureau; code in src/mobile/bureau): agreements over
+ * bMail (sign with the card signature + identity key, seal a hashes-only receipt on chain), the bMail Agreements box,
+ * and the one-time "Import from bit-sign" view (Settings › Tools). bWalletX only (owner, 18 Oct 2026: the
+ * desktop app's bureau); absent from a store build even as code. Literal env check so Vite inlines it and Rollup
+ * drops the lazy AgreementsPage / AgreementsBox / BitSignImportPage chunks.
+ * Store grep: `Review & sign|bwallet.bureau|Seal on chain|Import from bit-sign|bwallet agreement|Needs my signature`.
+ */
+export const BUREAU_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);

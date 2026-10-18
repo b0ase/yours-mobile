@@ -51,7 +51,7 @@ const mined = (t: Transaction) => {
 };
 
 type Call = string;
-const fakeWallet = (beefHex: string, txid: string, calls: Call[]) =>
+const fakeWallet = (beefHex: string, txid: string, calls: Call[], walletSends = true) =>
   ({
     getPublicKey: async (a: { identityKey?: boolean }) => ({
       publicKey: a.identityKey ? ME : PrivateKey.fromRandom().toPublicKey().toString(),
@@ -60,7 +60,7 @@ const fakeWallet = (beefHex: string, txid: string, calls: Call[]) =>
     createAction: async (a: { options?: { noSend?: boolean; sendWith?: string[] } }) => {
       if (a.options?.sendWith) {
         calls.push(`broadcast:${a.options.sendWith[0]}`);
-        return { txid: a.options.sendWith[0] };
+        return { sendWithResults: [{ txid: a.options.sendWith[0], status: walletSends ? 'unproven' : 'failed' }] };
       }
       calls.push(a.options?.noSend ? 'sign:noSend' : 'sign:send');
       return { txid, tx: Utils.toArray(beefHex, 'hex') };
@@ -198,5 +198,25 @@ describe('sendMail: pay only after the relay accepts', () => {
     expect(calls).toContain(`abort:${child.id('hex')}`);
     expect(calls.some((c) => c.startsWith('broadcast'))).toBe(false);
     expect(loadPending(ME)).toEqual([]);
+  });
+
+  test('wallet does not send it: the BEEF goes to ARC', async () => {
+    const { gp, child, sign } = chain(10);
+    mined(gp);
+    await sign();
+    const calls: Call[] = [];
+    const w = fakeWallet(Utils.toHex(child.toAtomicBEEF()), child.id('hex'), calls, false);
+    const arc: string[] = [];
+    await sendMail(w, letter, {
+      limit: DEFAULT_MAX_BODY_BYTES,
+      fetchProof: null,
+      deliver: async () => void calls.push('deliver'),
+      broadcastFetch: (async (url: string) => {
+        arc.push(url);
+        return new Response(JSON.stringify({ txStatus: 'SEEN_ON_NETWORK' }));
+      }) as unknown as typeof fetch,
+    });
+    expect(calls).toEqual(['sign:noSend', 'deliver', `broadcast:${child.id('hex')}`]);
+    expect(arc).toEqual(['https://arc.gorillapool.io/v1/tx']);
   });
 });

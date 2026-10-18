@@ -5,7 +5,7 @@
  *  - open: BRC-2 decrypt.
  */
 import { MessageBoxClient } from '@bsv/message-box-client';
-import { P2PKH, PublicKey, Transaction, Utils, type WalletInterface } from '@bsv/sdk';
+import { Beef, P2PKH, PublicKey, Transaction, Utils, type WalletInterface } from '@bsv/sdk';
 import {
   BMAIL_BOX,
   BMAIL_PROTOCOL,
@@ -97,8 +97,38 @@ export const payPostage = async (
 };
 
 /** Broadcast a postage tx signed with noSend (after the relay accepted the letter). */
-export const broadcastPostage = async (wallet: WalletInterface, txid: string) => {
-  await wallet.createAction({ description: 'bMail postage', options: { sendWith: [txid] } });
+export const ARC_URL = 'https://arc.gorillapool.io/v1/tx';
+
+/**
+ * Broadcast a postage tx signed with noSend (after the relay accepted the letter). The wallet is asked to send it
+ * now (acceptDelayedBroadcast: false; a delayed share waits on a monitor the web wallet may not run, which left
+ * the 18 Oct Bureau stamps unbroadcast). If the wallet does not report it sent, the BEEF goes straight to ARC.
+ */
+export const broadcastPostage = async (
+  wallet: WalletInterface,
+  postage: Pick<Postage, 'txid' | 'beef'>,
+  fetchImpl: typeof fetch = fetch,
+): Promise<'wallet' | 'arc'> => {
+  try {
+    const r = await wallet.createAction({
+      description: 'bMail postage',
+      options: { sendWith: [postage.txid], acceptDelayedBroadcast: false },
+    });
+    const mine = r.sendWithResults?.find((x) => x.txid === postage.txid);
+    if (mine && mine.status !== 'failed') return 'wallet';
+  } catch (e) {
+    console.warn('[bMail] wallet postage broadcast failed', e);
+  }
+  const beef = Beef.fromBinary(Utils.toArray(postage.beef, 'hex')).toBinary();
+  const res = await fetchImpl(ARC_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: new Uint8Array(beef),
+  });
+  const j = (await res.json().catch(() => ({}))) as { txStatus?: string; status?: number; detail?: string };
+  const ok = res.ok && !/REJECTED|DOUBLE_SPEND/i.test(String(j.txStatus ?? ''));
+  if (!ok) throw new Error(`Postage broadcast failed: ${j.detail ?? j.txStatus ?? res.status}`);
+  return 'arc';
 };
 
 /** Release a signed-but-never-broadcast stamp so its coins are spendable again. */
@@ -132,6 +162,8 @@ export type SendDeps = {
   limit?: number;
   /** Merkle proof lookup for trimming the postage BEEF (default WhatsOnChain; null = no lookup). */
   fetchProof?: ProofFetcher | null;
+  /** fetch for the ARC fallback broadcast (tests). */
+  broadcastFetch?: typeof fetch;
   /** Delivery (default: the message box client). */
   deliver?: (body: string) => Promise<unknown>;
 };
@@ -206,7 +238,7 @@ export const sendMail = async (wallet: WalletInterface, a: SendArgs, deps: SendD
   }
   if (unbroadcast && postage) {
     try {
-      await broadcastPostage(wallet, postage.txid);
+      await broadcastPostage(wallet, postage, deps.broadcastFetch);
     } catch (e) {
       // Delivered: the recipient's wallet broadcasts the stamp when it accepts it, so the letter still counts.
       console.warn('[bMail] postage broadcast after delivery failed', e);
@@ -224,6 +256,7 @@ export const sendMail = async (wallet: WalletInterface, a: SendArgs, deps: SendD
     replyPaidSats: env.replyPaidSats ?? 0,
     txid: postage?.txid,
     inReplyTo: a.inReplyTo,
+    ...(a.sealed.agreement !== undefined ? { agreement: a.sealed.agreement } : {}),
   };
 };
 

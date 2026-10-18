@@ -177,7 +177,7 @@ describe('roles and bio', () => {
         office: 'secretary',
         office_label: 'Company Secretary',
         appointed_at: '2026-10-01',
-        register_url: 'https://www.bitcoinchat.online/r/bcorp',
+        register_url: 'https://www.bchatx.com/r/bcorp',
       },
       { ticker: 'X', name: '', office: '' },
       { ticker: 'EVIL', name: 'Evil', office_label: 'Director', register_url: 'javascript:alert(1)' },
@@ -191,7 +191,7 @@ describe('roles and bio', () => {
     expect(v.businesses[0]).toEqual({
       label: 'Company Secretary · The Bitcoin Corporation Ltd',
       verified: true,
-      url: 'https://www.bitcoinchat.online/r/bcorp',
+      url: 'https://www.bchatx.com/r/bcorp',
     });
     expect(v.businesses[1].url).toBeNull();
     expect(parseRoles({ roles: [] })).toEqual([]);

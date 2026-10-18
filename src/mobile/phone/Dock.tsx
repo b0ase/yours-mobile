@@ -83,7 +83,7 @@ const Tile = ({
   };
   useEffect(() => clear, []);
   return (
-    <div className="relative shrink-0 flex justify-center" style={{ width: 74 }}>
+    <div className="relative shrink flex justify-center" style={{ width: 74, minWidth: 0 }}>
       <button
         type="button"
         aria-label={
@@ -318,7 +318,7 @@ export const Dock = ({
   const empty = items.length === 0;
   const atDefault = isDefaultDock(items);
   const addTile = (
-    <div className="relative shrink-0 flex justify-center" style={{ width: 74 }}>
+    <div className="relative shrink flex justify-center" style={{ width: 74, minWidth: 0 }}>
       <button
         type="button"
         aria-label="Add to the dock"
@@ -509,7 +509,12 @@ export const Dock = ({
             }}
           >
             {right.map((it, i) => (
-              <div key={dockKey(it)} style={{ scrollSnapAlign: 'start' }}>
+              <div
+                key={dockKey(it)}
+                // Two or fewer on the right: share the width like the left side (no clipped Chat at 320px).
+                className={right.length <= 2 ? 'flex min-w-0 flex-1 justify-center' : undefined}
+                style={{ scrollSnapAlign: 'start' }}
+              >
                 {tile(it, left.length + i)}
               </div>
             ))}

@@ -40,7 +40,7 @@ describe('own-site link previews in the Feed', () => {
     expect(desk?.title).toContain('bWalletX Desktop');
     const prof = await ownLinkPreview(links[1].url, http);
     expect(prof?.title).toBe('Message $b0asex');
-    expect(calls[0]).toBe('https://www.bitcoinchat.online/api/bitsign/unfurl?url=https%3A%2F%2Fbwalletx.com%2Fdesktop');
+    expect(calls[0]).toBe('https://www.bchatx.com/api/bitsign/unfurl?url=https%3A%2F%2Fbwalletx.com%2Fdesktop');
   });
 
   test('other hosts never fetch; own hosts include bmovies.app and our subdomains', async () => {

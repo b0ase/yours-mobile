@@ -171,7 +171,7 @@ Or [create an issue](https://github.com/bitcoin-corp/bwallet/issues) and the tea
 
 - Email: [support@bwalletx.com](mailto:support@bwalletx.com)
 - X: [@bWalletX](https://x.com/bWalletX)
-- bChat: [bitcoinchat.online](https://www.bitcoinchat.online)
+- bChatX: [bchatx.com](https://www.bchatx.com)
 - YouTube: [@bWalletX](https://www.youtube.com/@bWalletX)
 - Website: [bwalletx.com](https://bwalletx.com)
 

@@ -331,8 +331,14 @@ const TopNavBar = () => {
           // Phone layout (test switch, owner round 3): one row, evenly spaced, icons only:
           // Accounts · Calls · Airdrops · Media · Lock. No account strip above it.
           <div
-            className="grid grid-cols-5 items-center justify-items-center fixed top-0 w-full z-10 px-2 h-14"
-            style={{ backgroundColor: BAR_BG ?? theme.color.global.walletBackground, top: 'var(--wallet-inset-top)' }}
+            className="grid items-center justify-items-center fixed top-0 w-full z-10 px-2 h-14 overflow-hidden"
+            style={{
+              backgroundColor: BAR_BG ?? theme.color.global.walletBackground,
+              top: 'var(--wallet-inset-top)',
+              // One row always: five slots, six when a bApp's own button is in (bMail…). A fixed 5-column grid
+              // wrapped the sixth (Lock BSV) onto a second row over the page's back button (18 Oct 2026).
+              gridTemplateColumns: `repeat(${bapp ? 6 : 5}, minmax(0, 1fr))`,
+            }}
           >
             <MenuAvatarButton
               identityAddress={current}

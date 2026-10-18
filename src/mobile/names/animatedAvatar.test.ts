@@ -140,18 +140,18 @@ describe('avatar upload helpers', () => {
 
 describe('bitsignStillUrl', () => {
   it('bit-sign avatars and covers get ?still=1', () => {
-    expect(bitsignStillUrl('https://www.bitcoinchat.online/api/public/avatar/abc.gif')).toBe(
-      'https://www.bitcoinchat.online/api/public/avatar/abc.gif?still=1',
+    expect(bitsignStillUrl('https://www.bchatx.com/api/public/avatar/abc.gif')).toBe(
+      'https://www.bchatx.com/api/public/avatar/abc.gif?still=1',
     );
     expect(bitsignStillUrl('https://bit-sign.online/api/public/cover/x?v=2')).toBe(
       'https://bit-sign.online/api/public/cover/x?v=2&still=1',
     );
-    expect(mayBeAnimated('https://www.bitcoinchat.online/api/public/avatar/abc')).toBe(true);
+    expect(mayBeAnimated('https://www.bchatx.com/api/public/avatar/abc')).toBe(true);
   });
   it('other hosts and paths keep the canvas path', () => {
     expect(bitsignStillUrl('https://example.com/api/public/avatar/abc.gif')).toBeNull();
     expect(bitsignStillUrl('http://www.bitcoinchat.online/api/public/avatar/a.gif')).toBeNull();
-    expect(bitsignStillUrl('https://www.bitcoinchat.online/api/public/profile/alice')).toBeNull();
+    expect(bitsignStillUrl('https://www.bchatx.com/api/public/profile/alice')).toBeNull();
     expect(bitsignStillUrl('data:image/gif;base64,AAAA')).toBeNull();
     expect(bitsignStillUrl(null)).toBeNull();
   });

@@ -50,7 +50,7 @@ export function callNotification(c: RingCandidate) {
  * in @capacitor/core, which a service worker must not load. Same requests as calls/api.ts CallsClient
  * (session proof format is pinned to it by callRinger.test.ts).
  */
-export const RING_ORIGIN = 'https://www.bitcoinchat.online';
+export const RING_ORIGIN = 'https://www.bchatx.com';
 export const ringProofMessage = (identityKey: string, timestamp: number, nonce: string) =>
   ['bwallet-calls', 'v1', 'session', `identityKey=${identityKey}`, `nonce=${nonce}`, `timestamp=${timestamp}`].join(
     '|',

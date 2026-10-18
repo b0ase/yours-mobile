@@ -37,6 +37,8 @@ export type Sent = {
   replyPaidSats: number;
   txid?: string;
   inReplyTo?: string;
+  /** Bureau agreement part sent with this mail (kept so the Bureau shows what I sent and signed). */
+  agreement?: unknown;
 };
 export type MailState = {
   received: Received[];

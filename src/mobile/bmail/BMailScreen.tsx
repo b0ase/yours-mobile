@@ -10,7 +10,8 @@ import {
   Send as TabSent,
   ShieldAlert as TabQuarantine,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type ReactNode, type TouchEvent } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode, type TouchEvent } from 'react';
+import { BUREAU_ENABLED } from '../storeBuild';
 import { createPortal } from 'react-dom';
 import {
   Archive,
@@ -83,12 +84,16 @@ import { BMAIL_OFFLINE_ACTION, friendlyMailError } from './friendlyError';
 import { ErrorActions } from '../errors/ErrorActions';
 import { APP_NAME } from '../storeBuild';
 import { isNative } from '../native';
+import { sendMessageAsync } from '../../utils/chromeHelpers';
 
 const MUTED = '#98A2B3';
 const GOLD = 'var(--bw-accent-hi)';
 /** Pinned letters: orange-gold border + pin icon. */
 const PIN = '#F79009';
 const f = (u: string, i?: RequestInit) => fetch(u, i);
+// bMail › Agreements box (bWalletX only; the chunk is not built for the stores).
+const AgreementsBox = BUREAU_ENABLED ? lazy(() => import('../bureau/AgreementsBox')) : null;
+
 type Tab = 'inbox' | 'requests' | 'sent' | 'archive' | 'quarantine' | 'bin';
 type Draft = { to?: string; toLabel?: string; subject?: string; inReplyTo?: string; credit?: boolean };
 
@@ -846,6 +851,10 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
   const [settings, setSettings] = useState(false);
   const [hideEx, setHideEx] = useState(examplesHidden);
   useBackClose(true, onClose);
+  // Settle any postage the wallet still holds as unsent though the chain has it (rate-limited in the wallet).
+  useEffect(() => {
+    sendMessageAsync({ action: 'STORAGE_RECONCILE_POSTAGE' }).catch(() => undefined);
+  }, []);
   // Scan › person page › "Send a bMail": open on a new mail to them (store.openBMailTo).
   useEffect(() => {
     const take = () => {
@@ -1326,9 +1335,14 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                 <span className="text-base font-bold text-white">Bin</span>
               </div>
             ) : (
-              <div className="grid grid-cols-5 gap-1.5" role="tablist" aria-label="Mailboxes">
-                {/* Five fixed boxes with icons; nothing scrolls sideways (owner, 14 Oct 2026: a left-right filter
-                    row "smacks of trying to squeeze everything in"). The count sits on the icon. */}
+              <div
+                className={`grid ${AgreementsBox ? 'grid-cols-3 min-[480px]:grid-cols-6' : 'grid-cols-5'} gap-1.5`}
+                role="tablist"
+                aria-label="Mailboxes"
+              >
+                {/* Fixed boxes with icons; nothing scrolls sideways (owner, 14 Oct 2026: a left-right filter
+                    row "smacks of trying to squeeze everything in"). The count sits on the icon. Agreements
+                    (bWalletX) is the sixth: two rows of three on a phone. */}
                 {(
                   [
                     ['inbox', 'Inbox', TabInbox, m.unread],
@@ -1366,6 +1380,11 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                     )}
                   </button>
                 ))}
+                {AgreementsBox && (
+                  <Suspense fallback={null}>
+                    <AgreementsBox gold={GOLD} />
+                  </Suspense>
+                )}
               </div>
             )}
             {(tab === 'inbox' || tab === 'requests') && (

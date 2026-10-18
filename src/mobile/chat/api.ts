@@ -19,7 +19,7 @@ import type { ChatMessage, ChatRoom } from './messages';
 
 import type { BchatContact } from './contacts';
 
-export const BCHAT_ORIGIN = 'https://www.bitcoinchat.online';
+export const BCHAT_ORIGIN = 'https://www.bchatx.com';
 /** Room attachments: bit-sign MAX_UPLOAD_BYTES (25 MB a file); one request up to 4 MB, else 3 MB parts. */
 export const ROOM_UPLOAD_MAX_BYTES = 25 * 1024 * 1024;
 const ROOM_SINGLE_REQUEST_BYTES = 4 * 1024 * 1024;

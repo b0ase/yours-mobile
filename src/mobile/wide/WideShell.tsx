@@ -19,7 +19,14 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { useAccountNames } from '../names/accountNames';
 import { setWalletKind, getWalletKind, subscribeWalletKind, type WalletKind } from '../wallet/walletKind';
-import { BSPACES_ENABLED, MARKET_ENABLED, marketLabel, STORE_HIDDEN_WALLET_KINDS, STORE_BUILD } from '../storeBuild';
+import {
+  BSPACES_ENABLED,
+  BUREAU_ENABLED,
+  MARKET_ENABLED,
+  marketLabel,
+  STORE_HIDDEN_WALLET_KINDS,
+  STORE_BUILD,
+} from '../storeBuild';
 import { badgeLabel, badgeText } from '../tabs/tabBadges';
 import { useTabBadges } from '../tabs/useTabBadges';
 import { NotificationsBell } from '../notify/NotificationsPanel';
@@ -386,6 +393,8 @@ const WideShell = ({ children }: { children: ReactNode }) => {
       calls: CALLS_ROUTE,
       settings: '/m/settings',
       exchange: '/m/exchange',
+      // Agreements live in bMail (18 Oct 2026); ?view=bureau stays as a quiet alias.
+      ...(BUREAU_ENABLED ? { agreements: '/m/bmail/agreements', bureau: '/m/bmail/agreements' } : {}),
     };
     if (v && to[v]) navigate(to[v]);
   }, [pathname, navigate]);

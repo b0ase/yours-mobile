@@ -3,7 +3,7 @@ import { bannerUrl, faceArtLocal, faceArtUrl } from './faceArt';
 
 describe('Space participant default picture (gold bAvatar)', () => {
   test('network art resolves the handle on bChatX, cleaned', () => {
-    expect(faceArtUrl('$B0asex')).toBe('https://www.bitcoinchat.online/api/bavatar/b0asex.svg');
+    expect(faceArtUrl('$B0asex')).toBe('https://www.bchatx.com/api/bavatar/b0asex.svg');
   });
   test('local fallback is an SVG bAvatar, stable per handle, never a letter', () => {
     const a = faceArtLocal('b0asex');
@@ -12,6 +12,6 @@ describe('Space participant default picture (gold bAvatar)', () => {
     expect(faceArtLocal('testy')).not.toBe(a);
   });
   test('uploaded banner is the public bChatX banner for the cleaned handle', () => {
-    expect(bannerUrl('$VexVoid')).toBe('https://www.bitcoinchat.online/api/public/banner/vexvoid');
+    expect(bannerUrl('$VexVoid')).toBe('https://www.bchatx.com/api/public/banner/vexvoid');
   });
 });
