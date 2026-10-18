@@ -280,7 +280,7 @@ const WalletSide = () => {
 
 const WideShell = ({ children }: { children: ReactNode }) => {
   const navigate = useNavigate();
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const canInstall = useCanInstall();
   const bmoviesBadge = useBappBadge('bmovies');
   const { chromeStorageService, lockWallet } = useServiceContext();
@@ -352,7 +352,8 @@ const WideShell = ({ children }: { children: ReactNode }) => {
     {
       title: 'Talk',
       items: [
-        { id: 'bmail', label: 'bMail', icon: I.mail, to: '/m/bmail', badge: mail },
+        // bMail and bMusic live in the bApps group in bWalletX (one entry each); the store edition keeps them here.
+        { id: 'bmail', label: 'bMail', icon: I.mail, to: '/m/bmail', badge: mail, hidden: BSPACES_ENABLED },
         { id: 'chat', label: 'bChat', icon: I.chat, to: '/m/chat', badge: unread.chat },
         { id: 'calls', label: 'bPhone', icon: I.calls, to: CALLS_ROUTE },
         { id: 'people', label: PEOPLE_LABEL, icon: I.people, to: '/m/people' },
@@ -365,7 +366,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
       title: 'Discover',
       items: [
         { id: 'feed', label: 'bChatX Feed', icon: I.feed, to: '/m/feed', badge: unread.feed },
-        { id: 'media', label: 'bMusic', icon: I.media, to: '/m/media' },
+        { id: 'media', label: 'bMusic', icon: I.media, to: '/m/media', hidden: BSPACES_ENABLED },
         { id: 'apps', label: 'bApps', icon: I.apps, to: '/m/apps' },
         { id: 'games', label: 'bGames', icon: I.games, to: '/m/games' },
       ],
@@ -378,7 +379,9 @@ const WideShell = ({ children }: { children: ReactNode }) => {
         label: b.name,
         icon: I.apps,
         img: b.icon,
-        to: BAPP_PAGES[b.id] ?? '/m/chat/bapps',
+        // Rooms without a page open their own room: /m/chat/bapps?room=<TICKER> (ChatPage.tsx).
+        to: BAPP_PAGES[b.id] ?? `/m/chat/bapps?room=${b.ticker}`,
+        badge: b.id === 'bmail' ? mail : 0,
         hidden: !BSPACES_ENABLED,
       })),
     },
@@ -404,7 +407,11 @@ const WideShell = ({ children }: { children: ReactNode }) => {
     { id: 'lockapp', label: 'Lock wallet (⌘L)', icon: I.lock, act: () => void lockWallet() },
   ];
   const isOn = (it: Item) =>
-    it.kind ? onWallet && kind === it.kind : !!it.to && pathname.startsWith(it.to.split('?')[0]);
+    it.kind
+      ? onWallet && kind === it.kind
+      : !!it.to &&
+        // A link with a query (a bApp room) is on only for that exact query, so the rooms don't all light up together.
+        (it.to.includes('?') ? pathname + search === it.to : pathname.startsWith(it.to));
 
   // Deep link on a cold load (the app router is in memory): ?view=bapps|bmail|chat|… opens that view once.
   const deepLinked = useRef(false);

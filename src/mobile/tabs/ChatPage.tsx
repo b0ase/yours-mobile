@@ -132,7 +132,7 @@ import { setHelpDeskUnpinned, useHelpDeskPinned } from '../chat/helpDeskPin';
 import { roomSpaceOpen } from '../spaces/model';
 import { RoomFilterChips, SpacesRoomList } from '../spaces/SpacesFilter';
 import { loadRoomFilter, saveRoomFilter, type RoomFilter } from '../spaces/roomFilterPref';
-import { isBappRoom, type Bapp } from '../chat/bappRooms';
+import { bappForTicker, isBappRoom, type Bapp } from '../chat/bappRooms';
 import { BappRoomCards } from '../chat/BappRoomCards';
 import { useLocation } from 'react-router-dom';
 import { guardedSendBsv21 } from '../../services/tokenSpendGuard';
@@ -2313,7 +2313,10 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     saveRoomFilter(f);
   };
   // /chat/bapps (Desktop, web, phone deep link) opens straight on the bApps filter.
-  const bappsRoute = /\/chat\/bapps\/?$/.test(useLocation().pathname);
+  const chatLocation = useLocation();
+  const bappsRoute = /\/chat\/bapps\/?$/.test(chatLocation.pathname);
+  // /chat/bapps?room=BRADIO (the Desktop sidebar's bApp entries): open that bApp's room once it's known to be mine.
+  const bappRoomParam = bappsRoute ? (new URLSearchParams(chatLocation.search).get('room') ?? '') : '';
   useEffect(() => {
     if (bappsRoute && BSPACES_ENABLED) setRoomFilterState('bapps');
   }, [bappsRoute]);
@@ -2789,6 +2792,17 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     openBapp(b);
   };
   const bappMembers = useMemo(() => new Set((rooms ?? []).map((r) => r.ticker.toUpperCase())), [rooms]);
+  const bappRoomOpened = useRef('');
+  useEffect(() => {
+    if (!bappRoomParam) bappRoomOpened.current = '';
+    if (!BSPACES_ENABLED || !bappRoomParam || bappRoomOpened.current === bappRoomParam || rooms === null) return;
+    const b = bappForTicker(bappRoomParam);
+    // Not a member: stay on the list, where the room's card offers its ticket.
+    if (!b || !bappMembers.has(b.ticker)) return;
+    bappRoomOpened.current = bappRoomParam;
+    openBapp(b);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- openBapp is recreated each render; run on param/rooms only
+  }, [bappRoomParam, rooms, bappMembers]);
   const bappsWide = typeof window !== 'undefined' && window.matchMedia?.('(min-width: 900px)').matches;
   const blockUser = (target: string) => void setBlocked(client, target, true);
 
