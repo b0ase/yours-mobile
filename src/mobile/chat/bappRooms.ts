@@ -18,6 +18,7 @@ import bmusicIcon from '../brand/bmusic-icon.png';
 import bmailIcon from '../brand/apps/bmail.png';
 import bcalIcon from '../brand/apps/bcal.png';
 import bjobsIcon from '../brand/apps/bjobs.png';
+import bstoreIcon from '../brand/apps/bstore.png';
 import bnewsIcon from '../brand/apps/bnews.svg';
 
 /** A bApp token's default sale terms: the personal-token curve (exchange/curveSales.ts), so a launch picks it up. */
@@ -98,7 +99,7 @@ export const BAPPS: readonly Bapp[] = [
   bapp({
     id: 'bstore',
     name: 'bStore',
-    icon: null,
+    icon: bstoreIcon,
     purpose: 'Themes, icons and packs for bWalletX, and their makers.',
     site: null,
     ticker: 'BSTORE',

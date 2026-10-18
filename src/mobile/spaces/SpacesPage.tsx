@@ -133,7 +133,8 @@ const SpacesPage = () => {
   );
 
   return (
-    <div className="min-h-full flex flex-col" style={{ background: 'var(--bw-bg)', color: '#fff' }}>
+    // bs-spaces: on Desktop this page sits under .ww-col's -3.5rem clip (wide.css); without it the first rows are cut off.
+    <div className="bs-spaces min-h-full flex flex-col" style={{ background: 'var(--bw-bg)', color: '#fff' }}>
       <header className="flex items-center gap-2 px-2 py-2" style={{ borderBottom: `1px solid ${LINE}` }}>
         <button onClick={() => navigate(-1)} className="p-2" aria-label="Back">
           <ArrowLeft size={22} color={GOLD} />

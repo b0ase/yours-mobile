@@ -26,6 +26,8 @@ import {
   marketLabel,
   STORE_HIDDEN_WALLET_KINDS,
   STORE_BUILD,
+  PEOPLE_LABEL,
+  SPACES_LABEL,
 } from '../storeBuild';
 import { badgeLabel, badgeText } from '../tabs/tabBadges';
 import { useTabBadges } from '../tabs/useTabBadges';
@@ -51,6 +53,15 @@ import { WidePage, WideEmpty, WideTitle } from './WidePage';
 import { WideAuth } from './WideAuth';
 import { useCanInstall, installApp } from './install';
 import { BAPPS, BAPP_ROUTE, bappFromPath, useBappBadge } from './bapps';
+import { BAPPS as BAPP_ROOMS } from '../chat/bappRooms';
+
+/** bApps with their own in-wallet page; the rest open their room (Chat › bApps). */
+const BAPP_PAGES: Record<string, string> = {
+  bcal: '/m/calendar',
+  bstore: '/m/store',
+  bmail: '/m/bmail',
+  bmusic: '/m/media',
+};
 import { ONESAT_MAINNET_CONTENT_URL } from '@1sat/actions';
 import { isUri } from '../../utils/uri';
 import { GENERIC_TOKEN_ICON } from '../../utils/constants';
@@ -118,6 +129,8 @@ type Item = {
   id: string;
   label: string;
   icon: string;
+  /** Bundled image icon (bApp rooms); drawn in place of the path icon. */
+  img?: string | null;
   /** Route, a wallet view, or an action. */
   to?: string;
   kind?: WalletKind;
@@ -267,7 +280,7 @@ const WalletSide = () => {
 
 const WideShell = ({ children }: { children: ReactNode }) => {
   const navigate = useNavigate();
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const canInstall = useCanInstall();
   const bmoviesBadge = useBappBadge('bmovies');
   const { chromeStorageService, lockWallet } = useServiceContext();
@@ -339,23 +352,36 @@ const WideShell = ({ children }: { children: ReactNode }) => {
     {
       title: 'Talk',
       items: [
-        { id: 'bmail', label: 'bMail', icon: I.mail, to: '/m/bmail', badge: mail },
+        // bMail and bMusic live in the bApps group in bWalletX (one entry each); the store edition keeps them here.
+        { id: 'bmail', label: 'bMail', icon: I.mail, to: '/m/bmail', badge: mail, hidden: BSPACES_ENABLED },
         { id: 'chat', label: 'bChat', icon: I.chat, to: '/m/chat', badge: unread.chat },
         { id: 'calls', label: 'bPhone', icon: I.calls, to: CALLS_ROUTE },
-        { id: 'people', label: 'People', icon: I.people, to: '/m/people' },
-        { id: 'spaces', label: 'Spaces', icon: I.spaces, to: '/m/spaces', hidden: !BSPACES_ENABLED },
-        // bCal: the one calendar of scheduled Spaces, shared with bChatX and bcalx.com (owner, 18 Oct 2026).
-        { id: 'calendar', label: 'Calendar', icon: I.calendar, to: '/m/calendar', hidden: !BSPACES_ENABLED },
+        { id: 'people', label: PEOPLE_LABEL, icon: I.people, to: '/m/people' },
+        { id: 'spaces', label: SPACES_LABEL, icon: I.spaces, to: '/m/spaces', hidden: !BSPACES_ENABLED },
       ],
     },
     {
       title: 'Discover',
       items: [
         { id: 'feed', label: 'bChatX Feed', icon: I.feed, to: '/m/feed', badge: unread.feed },
-        { id: 'media', label: 'bMusic', icon: I.media, to: '/m/media' },
+        { id: 'media', label: 'bMusic', icon: I.media, to: '/m/media', hidden: BSPACES_ENABLED },
         { id: 'apps', label: 'bApps', icon: I.apps, to: '/m/apps' },
         { id: 'games', label: 'bGames', icon: I.games, to: '/m/games' },
       ],
+    },
+    // The bApps (owner, 18 Oct 2026): each opens its in-wallet page, else its room under /chat/bapps. Not in a store build.
+    {
+      title: BSPACES_ENABLED ? 'bApps' : '',
+      items: BAPP_ROOMS.map((b) => ({
+        id: `room-${b.id}`,
+        label: b.name,
+        icon: I.apps,
+        img: b.icon,
+        // Rooms without a page open their own room: /m/chat/bapps?room=<TICKER> (ChatPage.tsx).
+        to: BAPP_PAGES[b.id] ?? `/m/chat/bapps?room=${b.ticker}`,
+        badge: b.id === 'bmail' ? mail : 0,
+        hidden: !BSPACES_ENABLED,
+      })),
     },
     // bApps pinned in the wide layout (BappHost.tsx, shell protocol v2).
     {
@@ -379,7 +405,13 @@ const WideShell = ({ children }: { children: ReactNode }) => {
     { id: 'lockapp', label: 'Lock wallet (⌘L)', icon: I.lock, act: () => void lockWallet() },
   ];
   const isOn = (it: Item) =>
-    it.kind ? onWallet && kind === it.kind : !!it.to && pathname.startsWith(it.to.split('?')[0]);
+    it.kind
+      ? onWallet && kind === it.kind
+      : !!it.to &&
+        // A link with a query (a bApp room) is on only for that exact query, so the rooms don't all light up together.
+        (it.to.includes('?')
+          ? pathname + search === it.to
+          : pathname.startsWith(it.to) && !(it.to === '/m/chat' && pathname.startsWith('/m/chat/bapps')));
 
   // Deep link on a cold load (the app router is in memory): ?view=bapps|bmail|chat|… opens that view once.
   const deepLinked = useRef(false);
@@ -486,7 +518,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
         onClick={() => go(it)}
         aria-label={badgeLabel(it.label, it.badge ?? 0)}
       >
-        <Icon d={it.icon} />
+        {it.img ? <img className="ww-navimg" src={it.img} alt="" aria-hidden /> : <Icon d={it.icon} />}
         <span className="ww-grow">{it.label}</span>
         {!!it.badge && (
           <span className="ww-badge" aria-hidden>
@@ -528,8 +560,8 @@ const WideShell = ({ children }: { children: ReactNode }) => {
         <div className="ww-navscroll">
           {groups
             .filter((g) => g.items.some((i) => !i.hidden))
-            .map((g) => (
-              <nav key={g.title} className="ww-nav">
+            .map((g, gi) => (
+              <nav key={`${gi}-${g.title}`} className="ww-nav">
                 {g.title && <div className="ww-navtitle">{g.title}</div>}
                 {g.items.map(navBtn)}
               </nav>

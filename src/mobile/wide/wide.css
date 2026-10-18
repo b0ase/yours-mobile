@@ -168,6 +168,13 @@ kbd {
   color: var(--ww-text);
   box-shadow: inset 2px 0 0 var(--ww-gold);
 }
+.ww-navimg {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  object-fit: cover;
+  flex: none;
+}
 .ww-nav button.on svg {
   color: var(--ww-gold);
 }

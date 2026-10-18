@@ -1,4 +1,4 @@
-import { MARKET_ENABLED, STORE_BUILD, screensFor } from '../storeBuild';
+import { MARKET_ENABLED, PEOPLE_LABEL, STORE_BUILD, screensFor } from '../storeBuild';
 
 /**
  * Phone layout swipe screens (docs/PHONE-LAYOUT-PLAN.md §3, §14). Pure: no React, so it is unit-tested.
@@ -34,7 +34,7 @@ export const SCREENS: readonly Screen[] = [
   { id: 'home', label: 'Home', route: '/m/home', legacyIds: [] },
   { id: 'apps', label: 'bApps', route: '/browser', aliases: ['/m/apps'], legacyIds: ['browser'] },
   { id: 'games', label: 'Games', route: '/m/games', legacyIds: [] },
-  { id: 'people', label: 'People', route: '/m/people', legacyIds: [] },
+  { id: 'people', label: PEOPLE_LABEL, route: '/m/people', legacyIds: [] },
   { id: 'feed', label: 'Feed', route: '/m/feed', legacyIds: ['feed'] },
   { id: 'chat', label: 'Chat', route: '/m/chat', legacyIds: ['chat'] },
 ];
