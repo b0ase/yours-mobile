@@ -105,7 +105,7 @@ export type AgentDeps = {
 
 const uploads = new UploadStore();
 let mintQueue: Promise<unknown> = Promise.resolve();
-/** One mint at a time per phone, so two requests can't both pass the budget check. */
+/** One spend (mint, buy, send) at a time per phone, so two requests can't both pass the budget check. */
 const serial = <T>(fn: () => Promise<T>): Promise<T> => {
   const run = mintQueue.then(fn, fn);
   mintQueue = run.catch(() => undefined);
@@ -180,7 +180,10 @@ export async function handleAgentCall(
         action === 'buy'
           ? { kind: 'buy' as const, token: String(p.tokenId ?? ''), usd }
           : { kind: 'send' as const, token: 'BSV', usd, to: String(p.to ?? '') };
-      const r = await runAgentAction(deps.ctx, id, block, await deps.bsvUsd());
+      // Serialised like mint: checkAgentAction reads the log and the spend is logged only after it is
+      // signed, so two parallel requests could both pass the daily cap (18 Oct 2026 review).
+      const rate = await deps.bsvUsd();
+      const r = await serial(() => runAgentAction(deps.ctx, id, block, rate));
       if (!r.ok) throw new AgentCallError('REFUSED', r.text);
       return { text: r.text, txid: r.txid ?? null };
     }
