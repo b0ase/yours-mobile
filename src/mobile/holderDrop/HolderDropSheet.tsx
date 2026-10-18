@@ -329,7 +329,12 @@ export default function HolderDropSheet({
   const summary = plan ? planSummary(plan) : null;
   const summaryFees =
     plan && summary
-      ? previewDrop(summary.recipients, plan.asset, { batchSize: size, satsPerKb, feePerOutput: feeOk?.sats ?? 0 })
+      ? previewDrop(summary.recipients, plan.asset, {
+          // The plan's own batch size (the field may have changed since it was built).
+          batchSize: Math.max(1, ...plan.batches.map((b) => b.recipients.length)),
+          satsPerKb,
+          feePerOutput: feeOk?.sats ?? 0,
+        })
       : null;
 
   return createPortal(
@@ -651,6 +656,10 @@ export default function HolderDropSheet({
                   <span className="text-white">{summaryFees.indexerFee} sats</span>
                 </div>
               )}
+              <div className="flex justify-between font-bold">
+                <span>Total from your balance (up to)</span>
+                <span className="text-white">{formatUnits(summaryFees.satsOut, 8)} BSV</span>
+              </div>
               {plan.note && (
                 <div className="flex justify-between gap-3">
                   <span>Note</span>
