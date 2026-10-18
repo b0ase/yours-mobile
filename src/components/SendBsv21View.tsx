@@ -23,7 +23,7 @@ import {
   type Bsv21Balance,
 } from '@1sat/actions';
 import { classifyBsv21Shortfall } from '../utils/bsv21OverlayShortfall';
-import { OVERLAY_ISSUES, bsv21ErrorMessage } from '../utils/bsv21SendErrors';
+import { EMPTY_UNLOCK_MESSAGE, OVERLAY_ISSUES, bsv21ErrorMessage, isEmptyUnlockError } from '../utils/bsv21SendErrors';
 import { fundOverlayExact, fundingTotal, formatBsvAmount, transfersCovered } from '../services/bsv21FundGuard';
 import {
   chromeJournalStore,
@@ -295,7 +295,8 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
     sendRecipients: { address: string; amount: bigint }[],
     total: bigint,
     validateOverlay: boolean,
-  ) => {
+    healedKeys = false,
+  ): Promise<void> => {
     let sendRes: Awaited<ReturnType<typeof sendBsv21.execute>>;
     let journalId: string | undefined;
     // Quarantine: never spend a token from a sender you have not accepted together with your own coins.
@@ -332,6 +333,12 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
         validateOverlay,
       });
     } catch (error) {
+      if (isEmptyUnlockError(error)) {
+        // Rejected by the wallet's own verifier before any broadcast, so the journal can close.
+        if (journalId) void journalSendEnd(chromeJournalStore, journalId, undefined).catch(() => undefined);
+        await retryAfterKeyCheck(sendRecipients, total, validateOverlay, healedKeys);
+        return;
+      }
       // Left open on purpose: a throw can come after the broadcast.
       console.error('[SendBsv21View] sendBsv21.execute threw:', error);
       setIsProcessing(false);
@@ -340,6 +347,10 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
     }
     if (journalId) void journalSendEnd(chromeJournalStore, journalId, sendRes.txid).catch(() => undefined);
 
+    if (!sendRes.txid && isEmptyUnlockError(sendRes.error)) {
+      await retryAfterKeyCheck(sendRecipients, total, validateOverlay, healedKeys);
+      return;
+    }
     if (!sendRes.txid || sendRes.error) {
       console.error('[SendBsv21View] sendBsv21 error:', sendRes.error);
       setIsProcessing(false);
@@ -362,6 +373,33 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
       recipients: sendRecipients.map((r) => r.address),
     });
     if (!shown) addSnackbar('Tokens Sent!', 'success');
+  };
+
+  /**
+   * F-3: the signer left a token input's unlock empty (its record names a key that doesn't derive its address).
+   * Run the keys-only check for this token (refile with the key that signs, or set the output aside), then try the
+   * send once more. Runs on every send path, not only "Send unverified".
+   */
+  const retryAfterKeyCheck = async (
+    sendRecipients: { address: string; amount: bigint }[],
+    total: bigint,
+    validateOverlay: boolean,
+    healedKeys: boolean,
+  ) => {
+    console.error('[SendBsv21View] empty unlock on a token input (F-3); healedKeys =', healedKeys);
+    if (healedKeys) {
+      setIsProcessing(false);
+      addSnackbar(EMPTY_UNLOCK_MESSAGE, 'error');
+      return;
+    }
+    setIsProcessing(true);
+    const keys = await sendMessageAsync<{ success: boolean; data?: UnseenHealReport }>({
+      action: 'BSV21_FIX_UNSEEN',
+      tokenId: token.info.id,
+      keysOnly: true,
+    }).catch(() => undefined);
+    if (keys?.data && (keys.data.keysRepaired || keys.data.keysDropped)) addSnackbar(describeUnseenHeal(keys.data), 'info');
+    await runSend(sendRecipients, total, validateOverlay, true);
   };
 
   /**

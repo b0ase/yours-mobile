@@ -33,3 +33,19 @@ export const bsv21ErrorMessage = (error: string | undefined, ticker: string): st
       return undefined;
   }
 };
+
+/**
+ * The signer left an input's unlock empty (F-3, 16 Oct 2026, 5.2.25: "inputs[0].unlockScript parameter must be
+ * valid. Script evaluation error: OP_DUP requires at least one item to be on the stack", PC 8 = the OP_DUP after a
+ * BSV-21 inscription envelope). That means the output's record names a key that does not derive its address. The
+ * wallet's verifier rejects the tx before anything is broadcast, so the send can be healed (keys-only check) and
+ * tried once more.
+ */
+export const isEmptyUnlockError = (error: unknown): boolean => {
+  const text =
+    typeof error === 'string' ? error : error instanceof Error ? error.message : error == null ? '' : String(error);
+  return /unlockScript/i.test(text) && /requires at least one item to be on the stack|Stack: \[\] \(len: 0/i.test(text);
+};
+
+export const EMPTY_UNLOCK_MESSAGE =
+  "One of these token outputs isn't signable by this wallet. It has been set aside; nothing was sent. Try again, or run Settings › Repair Sync.";
