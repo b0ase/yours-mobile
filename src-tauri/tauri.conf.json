@@ -46,6 +46,10 @@
       "desktop": {
         "schemes": ["bwalletx"]
       }
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDYwQzUxOEIyRDA0OTM3NTIKUldSU04wblFzaGpGWUJVV2FPS0pTUUxDaGJkaDJJU2xubmI0bDh0K1dOcCsrY3hVc1NGL1VWTGoK",
+      "endpoints": ["https://bwalletx.com/download/desktop/latest.json"]
     }
   },
   "bundle": {
