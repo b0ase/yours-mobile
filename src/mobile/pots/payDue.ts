@@ -80,6 +80,18 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
     }
     let plan = dueItems(s, now, cap);
     if (!plan.missed) continue;
+    if (s.catchUp === 'latest' && plan.missed > 1) {
+      // App subscriptions never stack up: skip every missed period but the latest, then pay that one once.
+      const skip = plan.missed - 1;
+      s = saveSub({ ...s, periodIndex: s.periodIndex + skip });
+      appendAgentLog(s.potId, {
+        at: now,
+        action: 'sub-skip',
+        detail: `Skipped ${skip} missed payment${skip === 1 ? '' : 's'} to ${s.payee.name}`,
+        usd: 0,
+      });
+      plan = dueItems(s, now, 1);
+    }
     if (s.payee.service && (!subsOn || !servicePayee(s.payee.service))) {
       out.push(fail(s, 'This service subscription isn’t available in this version', deps));
       continue;
@@ -138,6 +150,7 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
       dueTimes: plan.due,
       ...signed,
       usd,
+      sats: sats * count,
       at: now,
     };
     savePending(p); // before the broadcast: from here on these periods are only ever paid by this tx
@@ -164,7 +177,11 @@ async function settlePending(s: Subscription, p: PendingPayment, deps: PayDeps, 
   if (cur.periodIndex === p.periodIndex) {
     const next = advanced(cur, p.count);
     // The user may have paused or cancelled while this was paying: keep that.
-    saveSub({ ...next, status: cur.status === 'paused' || cur.status === 'cancelled' ? cur.status : next.status });
+    saveSub({
+      ...next,
+      status: cur.status === 'paused' || cur.status === 'cancelled' ? cur.status : next.status,
+      lastReceipt: { at: now, txid: p.txid, usd: p.usd, sats: p.sats ?? 0 },
+    });
     appendAgentLog(s.potId, {
       at: now,
       action: 'sub-pay',

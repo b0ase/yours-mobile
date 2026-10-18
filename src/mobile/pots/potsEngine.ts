@@ -69,6 +69,11 @@ export function startPots(next: Env) {
   schedule(6_000);
 }
 
+/** Run the charger shortly (a new app subscription's first month is due at once). No-op while locked. */
+export function chargeSoon() {
+  if (env) schedule(1_500);
+}
+
 export function stopPots() {
   env = null;
   if (timer) clearTimeout(timer);

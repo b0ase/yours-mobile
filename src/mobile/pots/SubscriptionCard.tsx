@@ -93,6 +93,18 @@ export const SubscriptionCard = ({
           Paid from {potLabel}
         </div>
       )}
+      {sub.payee.origin && (
+        <div className="text-xs truncate" style={{ color: MUTED }}>
+          Asked by {sub.payee.origin.replace(/^https:\/\//, '')}
+          {sub.description ? ` · ${sub.description}` : ''}
+        </div>
+      )}
+      {sub.lastReceipt && (
+        <div className="text-xs truncate" style={{ color: MUTED }}>
+          Last paid {day(sub.lastReceipt.at)} · ${sub.lastReceipt.usd.toFixed(2)} ·{' '}
+          {(sub.lastReceipt.sats / 1e8).toFixed(8)} BSV · {sub.lastReceipt.txid.slice(0, 10)}…
+        </div>
+      )}
       {sub.lastError && !over && (
         <div className="text-xs" style={{ color: '#FDA29B' }}>
           Last try: {sub.lastError}
