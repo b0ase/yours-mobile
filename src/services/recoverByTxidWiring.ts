@@ -317,3 +317,44 @@ export async function sweepCandidateTxids(
   }
   return [...out];
 }
+
+/**
+ * Wiring for services/postageReconcile.ts: bMail postage rows still nosend/unsent on the repair store, and the
+ * repair for one that the chain says is mined (reuses repairRows above; nothing is built or broadcast).
+ */
+export function makePostageReconcileWiring(w: TxidWiring) {
+  const deps = makeTxidRecoverDeps(w);
+  return {
+    listStuck: async () => {
+      const rows = (await withRepairStore(w.storage, (sp, userId) =>
+        sp.findTransactions({ partial: { userId, isOutgoing: true }, noRawTx: true }),
+      )) as unknown as TxRow[];
+      // Descriptions are stored encrypted, so 'bMail postage' can't be matched here: every outgoing row still held
+      // back is checked, and only one the chain says is mined is touched (the chain is the authority either way).
+      return rows
+        .filter((t) => !!t.txid && ['nosend', 'unsent', 'unprocessed'].includes(t.status))
+        .map((t) => ({ transactionId: t.transactionId, txid: t.txid!, status: t.status }));
+    },
+    settle: async (row: { transactionId: number; txid: string }) => {
+      const rawTx = await deps.getRawTx(row.txid);
+      if (!rawTx?.length) throw new Error('raw tx not found');
+      const merklePath = await deps.getMerklePath(row.txid);
+      if (!merklePath?.path?.[0]?.some((l) => l.hash === row.txid)) throw new Error('no merkle proof yet');
+      const rows = await deps.activeRows(row.txid);
+      const outputIds: number[] = [];
+      for (const o of rows?.outputs ?? []) {
+        // Only outputs the chain says are still unspent become spendable; a spent or unclear one is left as is.
+        if ((await deps.isUnspent(`${row.txid}.${o.vout}`).catch(() => undefined)) === true) outputIds.push(o.outputId);
+      }
+      await deps.repairRows({
+        txid: row.txid,
+        rawTx,
+        merklePath,
+        transactionId: rows?.tx?.transactionId ?? row.transactionId,
+        outputIds,
+      });
+      await deps.pushBackups?.().catch(() => undefined);
+      return { outputs: outputIds.length };
+    },
+  };
+}
