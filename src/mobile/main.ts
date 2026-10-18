@@ -4,6 +4,8 @@ import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { createChromeShim } from './chromeShim';
 import { Hub } from './hub';
+import { IS_TAURI, invoke as tauriInvoke } from './desktop/ipc';
+import { tauriLocalBackend } from './desktop/storage';
 import type { PlatformHooks } from '../platform';
 import { initBiometricUnlock } from './biometricUnlock';
 import { handleBack } from './backStack';
@@ -49,7 +51,8 @@ const senderFor = (url: string): Sender => ({ id: MOBILE_EXTENSION_ID, url, orig
 const defineChrome = (target: any, chrome: unknown) =>
   Object.defineProperty(target, 'chrome', { value: chrome, writable: true, configurable: true });
 
-const hub = new Hub(handleHostOp);
+// Desktop (Tauri): storage.local lives in an owner-only file on the Rust side, not in the webview (desktop/storage.ts).
+const hub = new Hub(handleHostOp, IS_TAURI ? tauriLocalBackend(tauriInvoke) : undefined);
 
 // Frames (overlay iframes) register here; swept when their overlay closes.
 const frames = new Map<string, Window>();
@@ -128,7 +131,7 @@ initDappBrowser((id, origin, url) => attachContext(id, window, { id: MOBILE_EXTE
 // Web app (web.bwalletx.com, the iPhone route): the wallet's encrypted keys live in this site's storage. Ask the
 // browser to keep it persistent so it isn't cleared under storage pressure (Safari grants this to Home Screen apps;
 // Chrome to installed or engaged sites). The recovery phrase is still the only real backup.
-if (!Capacitor.isNativePlatform()) {
+if (!Capacitor.isNativePlatform() && !IS_TAURI) {
   void navigator.storage?.persist?.().catch(() => false);
 }
 
@@ -152,3 +155,5 @@ if ((await import('./wide/flag')).WIDE_ON) {
   void import('./wide/mountIntro').then((m) => m.mountJustBIntro());
 }
 await import('../index');
+// Desktop (Tauri): deep links, tray (lock), native notifications, external links (desktop/boot.ts).
+if (IS_TAURI) void import('./desktop/boot').then((m) => m.initDesktop(mainChrome));

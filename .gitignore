@@ -61,3 +61,11 @@ _HOT.md
 google-services.json
 GoogleService-Info.plist
 *.tsbuildinfo
+
+# bWalletX Desktop (Tauri)
+/build-desktop
+/src-tauri/target
+/src-tauri/gen/schemas
+
+# Desktop updater config with the real pubkey/endpoint (src-tauri/tauri.updater.example.json)
+/src-tauri/tauri.updater.json

@@ -5,6 +5,13 @@
 #   bash scripts/channel-build.sh android-direct   → dist/bwallet-<ver>-direct.apk (site download)
 #   bash scripts/channel-build.sh ios-store        → dist/bwallet-<ver>-ios-store.xcarchive (App Store)
 #   bash scripts/channel-build.sh ios-private      → dist/bwallet-<ver>-ios-private.xcarchive (Ad Hoc / EU)
+#   bash scripts/channel-build.sh desktop-mac      → dist/bwalletx-desktop-<ver>-mac.dmg + .app.zip (Tauri, src-tauri/)
+#
+# desktop-mac signing (all optional; without them the .app/.dmg are unsigned, fine for local testing):
+#   APPLE_SIGNING_IDENTITY="Developer ID Application: …"   codesign the app (hardened runtime, Entitlements.plist)
+#   APPLE_ID + APPLE_PASSWORD (app-specific) + APPLE_TEAM_ID  notarise and staple (Tauri does both when set)
+#   src-tauri/tauri.updater.json (copy tauri.updater.example.json; real minisign pubkey + endpoint) plus
+#   TAURI_SIGNING_PRIVATE_KEY[_PASSWORD]                    signed updater artifacts; the app checks that endpoint
 #
 # INSTALL=1 installs and launches it on every connected target for that platform instead: Android phones and
 # emulators (release-signed, so existing data is kept), booted iPhone simulators and USB iPhones (Debug builds).
@@ -19,10 +26,39 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 CH=${1:-}
+
+# bWalletX Desktop (macOS): no Capacitor; the web build is build-desktop/ (vite.config.desktop.ts).
+if [[ $CH == desktop-mac ]]; then
+  VERSION=$(node -p "require('./package.json').version")
+  ARGS=(--bundles app,dmg)
+  if [[ -f src-tauri/tauri.updater.json ]]; then
+    ARGS+=(--config src-tauri/tauri.updater.json)
+  fi
+  if [[ -z ${APPLE_SIGNING_IDENTITY:-} ]]; then
+    echo "▸ no APPLE_SIGNING_IDENTITY: building UNSIGNED (signing and notarisation skipped)"
+    # Ad-hoc signature only, so Gatekeeper treats it as a local build.
+    export APPLE_SIGNING_IDENTITY=-
+  elif [[ -z ${APPLE_ID:-} || -z ${APPLE_PASSWORD:-} || -z ${APPLE_TEAM_ID:-} ]]; then
+    echo "▸ signing as $APPLE_SIGNING_IDENTITY; notarisation skipped (APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID unset)"
+  else
+    echo "▸ signing as $APPLE_SIGNING_IDENTITY and notarising"
+  fi
+  echo "▸ web build (desktop)"
+  pnpm build:desktop >/dev/null
+  echo "▸ tauri build"
+  pnpm tauri build "${ARGS[@]}"
+  mkdir -p dist
+  B=src-tauri/target/release/bundle
+  cp "$B"/dmg/*.dmg "dist/bwalletx-desktop-$VERSION-mac.dmg"
+  (cd "$B/macos" && ditto -c -k --keepParent bWalletX.app "$OLDPWD/dist/bwalletx-desktop-$VERSION-mac.app.zip")
+  ls -la dist/bwalletx-desktop-"$VERSION"-mac.*
+  exit 0
+fi
+
 case "$CH" in
   ios-store | android-play) STORE=1 ;;
   ios-private | android-direct) STORE= ;;
-  *) echo "usage: $0 <ios-store|ios-private|android-play|android-direct>" >&2; exit 2 ;;
+  *) echo "usage: $0 <ios-store|ios-private|android-play|android-direct|desktop-mac>" >&2; exit 2 ;;
 esac
 
 restore() { pnpm build:mobile >/dev/null && pnpm exec cap sync >/dev/null; }
