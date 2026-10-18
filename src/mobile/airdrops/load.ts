@@ -2,7 +2,7 @@
 import { buildRows, ownOutputs, type RawTx } from '../wallet/txHistory';
 import { fetchAccountTxs, fetchLocalInfo, fetchTokenSymbols } from '../wallet/txHistoryFetch';
 import { classifyEvent, findListings } from '../wallet/historyEvents';
-import { isUnsolicited, loadItems, saveItems, saveSolicited, toItems } from './inbox';
+import { bsvDropItems, isUnsolicited, loadItems, saveItems, saveSolicited, toItems } from './inbox';
 import { noteForTx } from './note';
 import { poisonDataFrom, savePoisonData } from './poison';
 import { withSender } from './sender';
@@ -20,6 +20,8 @@ export const refreshAirdrops = (
   wallet: Wallet,
   apiKey: string | undefined,
   force = false,
+  /** The fixed (legacy) addresses among `addresses`: BSV there needs a Sweep. Default: all of them. */
+  legacy: string[] = addresses,
 ): Promise<void> => {
   if (!account || !addresses.length) return Promise.resolve();
   if (!force && Date.now() - loadItems(account).at < REFRESH_MS) return Promise.resolve();
@@ -35,7 +37,21 @@ export const refreshAirdrops = (
     const rows = buildRows(txs, own, local, Date.now()).map((r) =>
       classifyEvent(r, byId.get(r.txid), local.get(r.txid), ctx),
     );
-    let items = toItems(rows, (t) => local.has(t));
+    // Token / NFT airdrops: only those on the fixed addresses, as before (the receive address is scanned for BSV
+    // airdrops only, so a token paid there is never quarantined by this change).
+    const legacySet = new Set(legacy);
+    let items = toItems(rows, (t) => local.has(t)).filter((i) =>
+      (byId.get(i.txid)?.vout ?? []).some((o) => o.sats === 1 && o.addresses.some((a) => legacySet.has(a))),
+    );
+    items = [
+      ...items,
+      ...bsvDropItems(rows, byId, {
+        own,
+        legacy: legacySet,
+        funded: (tx) => tx.vin.some((i) => prev.has(`${i.txid}:${i.vout}`)),
+        hasLocal: (t) => local.has(t),
+      }),
+    ].sort((a, b) => b.time - a.time);
     // Tokens held by the wallet's own doing never go to Quarantine (quarantine.ts).
     saveSolicited(account, [
       ...new Set(

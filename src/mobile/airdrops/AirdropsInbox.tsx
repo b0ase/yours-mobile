@@ -5,6 +5,7 @@
  * Keep on an NFT syncs the address so the wallet takes the NFT into its list, then says where it went.
  */
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Check, Coins, EyeOff, Flag, ShieldAlert } from 'lucide-react';
 import { listOrdinals, syncAddresses } from '@1sat/actions';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -21,7 +22,8 @@ import { STORE_BUILD, tokenRoomsEnabled } from '../storeBuild';
 import { ReportSheet } from '../ugc/UgcSheets';
 import { SwipeRow } from '../swipe/SwipeRow';
 import { showUndo } from '../swipe/undo';
-import { hide, inWalletList, keep, markSeen, type AirdropItem } from './inbox';
+import { hideItem, inWalletList, keep, markSeen, type AirdropItem } from './inbox';
+import { fetchExchangeRate } from '../../utils/wallet';
 import { NftThumb, NftViewer, useSenderName } from './AirdropNft';
 import { trustIssuer } from './quarantine';
 import { keptIssuers, noteSegments, noteView, replyDraft } from './note';
@@ -35,7 +37,7 @@ const short = (s: string) => (s.length > 16 ? `${s.slice(0, 6)}…${s.slice(-6)}
 
 /** The issuer: avatar + $handle (verified badge for tokens) or a short address. */
 const useIssuerName = (item: AirdropItem) => {
-  const info = useIssuer(item.asset.kind === 'token' ? item.asset.id : null);
+  const info = useIssuer(item.asset.kind === 'token' ? item.asset.id : (item.holdersOf ?? null));
   // NFTs (and tokens without a verified issuer): the sender's $name from their key or address (sender.ts).
   const sender = useSenderName(item, item.asset.kind === 'nft');
   const verified = info?.status === 'verified' && info.handle ? info.handle.replace(/^\$/, '') : null;
@@ -119,8 +121,10 @@ const Row = ({
   onHide,
   onTrust,
   onLeave,
+  usdPerBsv = 0,
 }: {
   item: AirdropItem;
+  usdPerBsv?: number;
   issuerKept: boolean;
   onKeep: () => void;
   onHide: () => void;
@@ -155,8 +159,8 @@ const Row = ({
           <span className="text-sm font-semibold text-white overflow-hidden text-ellipsis whitespace-nowrap">
             {who.label}
           </span>
-          {item.asset.kind === 'token' ? (
-            <IssuerBadge tokenId={item.asset.id} compact />
+          {item.asset.kind === 'token' || item.holdersOf ? (
+            <IssuerBadge tokenId={item.asset.kind === 'token' ? item.asset.id : item.holdersOf!} compact />
           ) : (
             <span className="text-[11px]" style={{ color: MUTED }}>
               {who.handle ? 'bWallet name, not verified by an issuer' : 'Unknown sender'}
@@ -184,6 +188,19 @@ const Row = ({
           >
             NFT from {who.label} <span style={{ color: GOLD }}>· View</span>
           </button>
+        ) : item.asset.kind === 'bsv' ? (
+          <div className="min-w-0 flex-1 flex flex-col">
+            <span className="text-sm font-semibold text-white">
+              {usdPerBsv ? `$${((Number(item.asset.qty) / 1e8) * usdPerBsv).toFixed(2)} · ` : ''}
+              {Number(item.asset.qty).toLocaleString()} sats
+            </span>
+            <span className="text-[11px]" style={{ color: MUTED }}>
+              BSV airdrop{item.holdersOf ? ' to token holders' : ''}.{' '}
+              {item.needsMove
+                ? 'It reached your ordinals address: move it into your balance to spend it.'
+                : 'Already in your balance.'}
+            </span>
+          </div>
         ) : (
           <div className="min-w-0 flex-1 text-sm font-semibold text-white overflow-hidden text-ellipsis whitespace-nowrap">
             {`${item.asset.qty ? `${Number(item.asset.qty).toLocaleString()} ` : ''}$${item.asset.symbol ?? short(item.asset.id)}`}
@@ -197,7 +214,7 @@ const Row = ({
           className="min-h-[44px] rounded-lg px-4 py-2 text-sm font-bold"
           style={{ background: GOLD, color: '#010101' }}
         >
-          Keep
+          {item.asset.kind === 'bsv' && item.needsMove ? 'Move to balance' : 'Keep'}
         </button>
         <button type="button" onClick={onHide} className={small}>
           Hide
@@ -320,6 +337,16 @@ export const AirdropsList = ({ onLeave }: { onLeave: () => void }) => {
   const { items, visible, state, loading, error, update } = useAirdrops();
   const { handleSelect } = useBottomMenu();
   const keepNft = useKeepNft();
+  const navigate = useNavigate();
+  const { apiContext } = useServiceContext();
+  const [usdPerBsv, setUsdPerBsv] = useState(0);
+  const hasBsv = visible.some((i) => i.asset.kind === 'bsv');
+  useEffect(() => {
+    if (!hasBsv) return;
+    fetchExchangeRate(apiContext.chain, apiContext.wocApiKey)
+      .then((r) => r && setUsdPerBsv(r))
+      .catch(() => undefined);
+  }, [hasBsv, apiContext]);
   const [kept, setKept] = useState<{ item: AirdropItem; status: KeptStatus }[]>([]);
   const openNfts = () => {
     handleSelect('ords' as Parameters<typeof handleSelect>[0]);
@@ -327,6 +354,12 @@ export const AirdropsList = ({ onLeave }: { onLeave: () => void }) => {
   };
   /** Keep (also Trust): an NFT gets a notice and is taken into the wallet's list. */
   const afterKeep = (i: AirdropItem) => {
+    // A BSV airdrop on a fixed address: the Sweep moves it into the balance (it signs with that address's key).
+    if (i.asset.kind === 'bsv' && i.needsMove) {
+      onLeave();
+      navigate('/sweep');
+      return;
+    }
     if (i.asset.kind !== 'nft') return;
     setKept((k) => [{ item: i, status: 'checking' }, ...k.filter((x) => x.item.key !== i.key)]);
     void keepNft(i).then((status) => setKept((k) => k.map((x) => (x.item.key === i.key ? { ...x, status } : x))));
@@ -387,7 +420,7 @@ export const AirdropsList = ({ onLeave }: { onLeave: () => void }) => {
         };
         const doHide = () => {
           const issuerWasHidden = state.hiddenIssuers.includes(i.issuer);
-          update((s) => hide(s, i));
+          update((s) => hideItem(s, i));
           showUndo('Hidden', () =>
             update((s) => ({
               ...s,
@@ -396,7 +429,12 @@ export const AirdropsList = ({ onLeave }: { onLeave: () => void }) => {
             })),
           );
         };
-        const label = i.asset.kind === 'token' ? `$${i.asset.symbol ?? short(i.asset.id)} airdrop` : 'NFT airdrop';
+        const label =
+          i.asset.kind === 'token'
+            ? `$${i.asset.symbol ?? short(i.asset.id)} airdrop`
+            : i.asset.kind === 'bsv'
+              ? 'BSV airdrop'
+              : 'NFT airdrop';
         return (
           <SwipeRow
             key={i.key}
@@ -427,6 +465,7 @@ export const AirdropsList = ({ onLeave }: { onLeave: () => void }) => {
           >
             <Row
               item={i}
+              usdPerBsv={usdPerBsv}
               issuerKept={known.has(i.issuer)}
               onLeave={onLeave}
               onKeep={() => {
@@ -444,7 +483,7 @@ export const AirdropsList = ({ onLeave }: { onLeave: () => void }) => {
                   })),
                 );
               }}
-              onHide={() => update((s) => hide(s, i))}
+              onHide={() => update((s) => hideItem(s, i))}
             />
           </SwipeRow>
         );
