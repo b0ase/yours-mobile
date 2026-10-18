@@ -48,6 +48,8 @@ import {
   validateForm,
   wocTxUrl,
   type Collection,
+  shouldSelectTitleOnFocus,
+  titleFromFileName,
 } from './mint';
 import { money, moneyWithSats } from '../money/money';
 import { captureVideoFrame } from '../wallet/cardVideoFrame';
@@ -174,6 +176,7 @@ export const MintSheet = ({
   const coverRef = useRef<HTMLInputElement>(null);
   const [fileError, setFileError] = useState('');
   const [title, setTitle] = useState('');
+  const titleTouched = useRef(false);
   const [description, setDescription] = useState('');
   const [collKind, setCollKind] = useState<Collection['kind']>('none');
   const [newColl, setNewColl] = useState('');
@@ -255,7 +258,10 @@ export const MintSheet = ({
     const url = URL.createObjectURL(file);
     setPicked({ file, url, type });
     setPosterFile(null);
-    if (!title) setTitle(file.name.replace(/\.\w+$/, '').slice(0, 100));
+    if (!title) {
+      setTitle(titleFromFileName(file.name));
+      titleTouched.current = false;
+    }
     // 3D: render a still on this device for the cover (gold card if it can't be drawn; USDZ has no renderer here).
     if (kindSel === '3d' && type !== 'model/vnd.usdz+zip') {
       setPosterNote('Drawing a cover picture…');
@@ -598,6 +604,11 @@ export const MintSheet = ({
               value={title}
               maxLength={100}
               onChange={(e) => setTitle(e.target.value)}
+              onFocus={(e) => {
+                // The file name is only a suggestion: select it on first focus so typing replaces it.
+                if (shouldSelectTitleOnFocus(titleTouched.current, title)) e.currentTarget.select();
+                titleTouched.current = true;
+              }}
             />
             {kindSel === 'music' && (
               <>

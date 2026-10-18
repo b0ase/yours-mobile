@@ -12,7 +12,13 @@ import {
   makePlan,
   nextBatch,
   normTokenId,
+  parseAddressList,
   parseHolders,
+  dropId,
+  mergeLedger,
+  paidAddresses,
+  pendingBatches,
+  planSummary,
   parsePlan,
   previewDrop,
   receiptCsv,
@@ -41,10 +47,24 @@ describe('token id', () => {
 });
 
 describe('snapshot', () => {
-  it('parses rows and skips malformed ones', () => {
-    expect(parseHolders([{ address: A, amt: '5' }, { address: B, amt: '1.5' }, { amt: '3' }, null])).toEqual([
+  it('parses rows and fails closed on any row it cannot read', () => {
+    expect(
+      parseHolders([
+        { address: A, amt: '5' },
+        { address: B, amt: 7 },
+      ]),
+    ).toEqual([
       { address: A, amt: 5n },
+      { address: B, amt: 7n },
     ]);
+    expect(() =>
+      parseHolders([
+        { address: A, amt: '5' },
+        { address: B, amt: '1.5' },
+      ]),
+    ).toThrow(/cannot read/);
+    expect(() => parseHolders([{ amt: '3' }])).toThrow(/cannot read/);
+    expect(() => parseHolders([null])).toThrow(/cannot read/);
     expect(() => parseHolders({ message: 'x' })).toThrow();
   });
 
@@ -83,9 +103,17 @@ describe('snapshot', () => {
     ];
     const r = filterHolders(raw, { exclude: [B], minHolding: 5n });
     expect(r.holders).toEqual([{ address: A, amt: 150n }]);
-    expect(r.skipped).toEqual({ burn: 1, sender: 1, invalid: 1, belowMin: 1, empty: 1 });
+    expect(r.skipped).toEqual({ burn: 1, sender: 1, blocked: 0, invalid: 1, belowMin: 1, empty: 1 });
     // No minimum: C stays; sorted largest first.
     expect(filterHolders(raw, { exclude: [B] }).holders.map((h) => h.address)).toEqual([A, C]);
+    // Blocked (indexer fee address, pasted exchange/market addresses) are left out and counted.
+    const blocked = filterHolders(raw, { exclude: [], block: [C] });
+    expect(blocked.holders.map((h) => h.address)).toEqual([A, B]);
+    expect(blocked.skipped.blocked).toBe(1);
+  });
+
+  it('reads a pasted address list and reports what is not an address', () => {
+    expect(parseAddressList(`${A}, ${B}\n${A} nope`)).toEqual({ addresses: [A, B], bad: ['nope'] });
   });
 });
 
@@ -213,5 +241,147 @@ describe('resume and receipt', () => {
     expect(csv[3]).toBe(`2,${C},1,1,,pending`);
     expect(formatUnits(1234n, 2)).toBe('12.34');
     expect(formatUnits(5n, 3)).toBe('0.005');
+  });
+});
+
+describe('one approval, idempotent per holder per drop', () => {
+  const hs: Holder[] = [
+    { address: A, amt: 300n },
+    { address: B, amt: 200n },
+    { address: C, amt: 100n },
+  ];
+  const key = { snapshotTokenId: TOKEN, asset, mode: 'fixed' as const, amount: 5n };
+
+  it('gives the same drop the same ID, and a different drop a different one', () => {
+    expect(dropId(key)).toBe(dropId({ ...key }));
+    expect(dropId(key)).toMatch(/^[0-9a-f]{24}$/);
+    expect(dropId({ ...key, amount: 6n })).not.toBe(dropId(key));
+    expect(dropId({ ...key, minHolding: 10n })).not.toBe(dropId(key));
+    expect(dropId({ ...key, asset: { kind: 'bsv' } })).not.toBe(dropId(key));
+  });
+
+  it('summarises everything still to send for the one approval sheet', () => {
+    const plan = makePlan({
+      id: 'd',
+      createdAt: 1,
+      snapshotTokenId: TOKEN,
+      asset,
+      mode: 'prorata',
+      recipients: allocateProRata(hs, 600n),
+      batchSize: 2,
+    });
+    const s = planSummary(plan);
+    expect(s).toMatchObject({ batches: 2, holders: 3, total: 600n, min: 100n, max: 300n });
+    const after = recordBatch(plan, 0, { txid: 't0' });
+    expect(pendingBatches(after)).toEqual([1]);
+    expect(planSummary(after)).toMatchObject({ batches: 1, holders: 1, total: 100n });
+    // An interrupted batch is never part of an approval until the issuer has checked it.
+    expect(pendingBatches(startBatch(plan, 1, 9))).toEqual([0]);
+  });
+
+  it('never pays a holder twice under the same drop, even if the plan is rebuilt', () => {
+    const id = dropId(key);
+    const first = makePlan({
+      id,
+      createdAt: 1,
+      snapshotTokenId: TOKEN,
+      asset,
+      mode: 'fixed',
+      recipients: allocateFixed(hs, 5n),
+      batchSize: 2,
+    });
+    const half = recordBatch(first, 0, { txid: 't0' });
+    expect(paidAddresses(half)).toEqual([A, B]);
+    let ledger = mergeLedger({}, half);
+    ledger = mergeLedger(ledger, half); // merging twice changes nothing
+    expect(ledger).toEqual({ [id]: [A, B] });
+    // Discarded and built again from a fresh snapshot: only C is left to pay.
+    const again = makePlan({
+      id,
+      createdAt: 2,
+      snapshotTokenId: TOKEN,
+      asset,
+      mode: 'fixed',
+      recipients: allocateFixed(hs, 5n),
+      batchSize: 2,
+      alreadyPaid: ledger[id],
+    });
+    expect(again.batches.flatMap((b) => b.recipients.map((r) => r.address))).toEqual([C]);
+    // A different drop ID has its own ledger.
+    expect(mergeLedger(ledger, { ...half, id: 'other' })).toEqual({ [id]: [A, B], other: [A, B] });
+  });
+
+  it('refuses a plan that names the same address twice', () => {
+    const rs = allocateFixed(hs, 5n);
+    expect(() =>
+      makePlan({
+        id: 'x',
+        createdAt: 1,
+        snapshotTokenId: TOKEN,
+        asset,
+        mode: 'fixed',
+        recipients: [...rs, rs[0]],
+        batchSize: 2,
+      }),
+    ).toThrow(/twice/);
+  });
+
+  it('batches stay under the cap and cover every holder exactly once', () => {
+    const many: Holder[] = Array.from({ length: 250 }, (_, i) => ({ address: `addr${i}`, amt: BigInt(i + 1) }));
+    const plan = makePlan({
+      id: 'm',
+      createdAt: 1,
+      snapshotTokenId: TOKEN,
+      asset,
+      mode: 'prorata',
+      recipients: allocateProRata(many, 1_000_000n),
+      batchSize: 500,
+    });
+    expect(plan.batches.every((b) => b.recipients.length <= 100)).toBe(true);
+    const all = plan.batches.flatMap((b) => b.recipients);
+    expect(new Set(all.map((r) => r.address)).size).toBe(all.length);
+    expect(sumAmounts(all)).toBe(1_000_000n);
+  });
+});
+
+describe('BSV holder drops', () => {
+  const bsv = { kind: 'bsv' as const };
+  const hs: Holder[] = [
+    { address: A, amt: 300n },
+    { address: B, amt: 100n },
+  ];
+
+  it('plans pro-rata sats, batches them and keeps its own drop ID and ledger', () => {
+    const id = dropId({ snapshotTokenId: TOKEN, asset: bsv, mode: 'prorata', amount: 10_000n });
+    expect(id).not.toBe(dropId({ snapshotTokenId: TOKEN, asset, mode: 'prorata', amount: 10_000n }));
+    const plan = makePlan({
+      id,
+      createdAt: 1,
+      snapshotTokenId: TOKEN,
+      asset: bsv,
+      mode: 'prorata',
+      recipients: allocateProRata(hs, 10_000n),
+      batchSize: 1,
+    });
+    expect(plan.batches.map((b) => b.recipients[0].amount)).toEqual([7500n, 2500n]);
+    const pv = previewDrop(
+      plan.batches.flatMap((b) => b.recipients),
+      bsv,
+      { batchSize: 1, satsPerKb: 100 },
+    );
+    expect(pv.indexerFee).toBe(0);
+    expect(pv.satsOut).toBe(10_000n + BigInt(pv.minerFee));
+    const half = recordBatch(plan, 0, { txid: 't' });
+    const again = makePlan({
+      id,
+      createdAt: 2,
+      snapshotTokenId: TOKEN,
+      asset: bsv,
+      mode: 'prorata',
+      recipients: allocateProRata(hs, 10_000n),
+      batchSize: 1,
+      alreadyPaid: mergeLedger({}, half)[id],
+    });
+    expect(again.batches.flatMap((b) => b.recipients.map((r) => r.address))).toEqual([B]);
   });
 });

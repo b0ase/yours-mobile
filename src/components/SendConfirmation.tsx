@@ -5,6 +5,7 @@ import { Theme } from '../theme.types';
 import { Button } from './Button';
 import { Show } from './Show';
 import { PageLoader } from './PageLoader';
+import { lineItemLabel } from './sendLineItemLabel';
 
 export type SendLineItem = {
   address: string;
@@ -36,11 +37,6 @@ export type SendConfirmationProps = {
   isProcessing?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
-};
-
-const truncateAddress = (addr: string) => {
-  if (addr.length <= 16) return addr;
-  return `${addr.slice(0, 8)}...${addr.slice(-8)}`;
 };
 
 export const SendConfirmation = (props: SendConfirmationProps) => {
@@ -76,7 +72,7 @@ export const SendConfirmation = (props: SendConfirmationProps) => {
                 initial={{ scale: 0.95, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 transition={{ duration: 0.2, ease: 'easeOut' }}
-                className="flex flex-col items-center text-center px-6 w-full"
+                className="flex flex-col items-center text-center px-6 w-full max-w-[420px] mx-auto"
               >
                 {/* Icon cluster: asset icon ··· → send icon */}
                 <div className="flex items-center gap-3 mb-4">
@@ -134,7 +130,7 @@ export const SendConfirmation = (props: SendConfirmationProps) => {
                       className="flex flex-col gap-2 px-3 py-2 rounded-lg text-sm text-left"
                       style={{ backgroundColor: `${contrast}08` }}
                     >
-                      <div className="flex justify-between items-center gap-2">
+                      <div className="flex justify-between items-start gap-2">
                         <span className="flex items-center gap-2 min-w-0">
                           {item.payee && (
                             <Avatar src={item.payee.avatar} name={item.payee.name || item.address} size={28} />
@@ -145,8 +141,11 @@ export const SendConfirmation = (props: SendConfirmationProps) => {
                                 {item.payee.name}
                               </span>
                             )}
-                            <span className="font-mono truncate" style={{ color: gray }}>
-                              {truncateAddress(item.address)}
+                            <span
+                              className={/\s/.test(item.address) ? 'break-words' : 'font-mono truncate'}
+                              style={{ color: gray }}
+                            >
+                              {lineItemLabel(item.address)}
                             </span>
                             {item.payee?.fingerprint && (
                               <span className="font-mono text-[10px]" style={{ color: gray }}>
@@ -155,7 +154,7 @@ export const SendConfirmation = (props: SendConfirmationProps) => {
                             )}
                           </span>
                         </span>
-                        <span className="font-semibold shrink-0" style={{ color: contrast }}>
+                        <span className="font-semibold shrink-0 text-right" style={{ color: contrast }}>
                           {item.amount}
                         </span>
                       </div>

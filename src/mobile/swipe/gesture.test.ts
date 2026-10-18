@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { ACTION_W, dragOffset, isArmed, lockAxis, resolveRelease } from './gesture';
+import { ACTION_W, dragOffset, isArmed, lockAxis, menuList, resolveRelease } from './gesture';
 
 const L = { count: 3, hasFull: true };
 const R = { count: 2, hasFull: true };
@@ -60,4 +60,16 @@ describe('keyToAction', () => {
     expect(keyToAction('k')).toBe('prev');
     expect(keyToAction('x')).toBeNull();
   });
+});
+
+describe('menuList', () => {
+  const a = (id: string) => ({ id });
+  test('default: right tray, left tray, then extras, no duplicates', () =>
+    expect(menuList([a('pin')], [a('chat'), a('pin')], [a('spam')]).map((x) => x.id)).toEqual(['pin', 'chat', 'spam']));
+  test('a list can give its own order', () =>
+    expect(menuList([a('pin')], [a('buy')], [], [a('buy'), a('pin'), a('info'), a('buy')]).map((x) => x.id)).toEqual([
+      'buy',
+      'pin',
+      'info',
+    ]));
 });

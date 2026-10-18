@@ -180,7 +180,8 @@ export const CreatorVesting = ({ tokenId }: { tokenId: string }) => {
         <>
           <p className="text-xs m-0" style={{ color: MUTED }}>
             The creator locked {fmtAmt(pub.kept)} ({r.keepBps / 100}% of the supply): {scheduleSummary(r)}. Checked on
-            chain: every lock below is in the transaction.
+            chain: every lock below is in the transaction. Wallets and the Exchange only count these locks as valid
+            tokens once the coin's indexing deposit is active (see below).
           </p>
           <ul className="m-0 p-0 list-none flex flex-col gap-0.5 max-h-40 overflow-y-auto">
             {pub.tranches.map((t, i) => (

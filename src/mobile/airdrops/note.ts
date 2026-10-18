@@ -175,3 +175,60 @@ export const withExtraOutput = <W extends object>(
     },
   });
 };
+
+// ─── BSV airdrop marker ──────────────────────────────────────────────────────
+
+/**
+ * A plain BSV payment only counts as an airdrop when its tx carries our marker, so ordinary payments never show in
+ * the inbox. With a note, the note output (type airdrop_note) is the marker. Without one, a MAP-only output:
+ *
+ *   OP_FALSE OP_RETURN 1PuQa7K62MiKCtssSLKy1kh56WWU7MtUR5 SET app bWalletX type airdrop v 1 asset bsv
+ *     [context bsv21 bsv21 <tokenId>]          (the token whose holders were paid)
+ */
+export const DROP_TYPE = 'airdrop';
+
+export const dropMarkerScript = (tokenId?: string): Script => {
+  const s = new Script().writeOpCode(OP.OP_FALSE).writeOpCode(OP.OP_RETURN);
+  const push = (v: string) => s.writeBin(Utils.toArray(v, 'utf8'));
+  push(MAP_PREFIX);
+  push('SET');
+  const kv: [string, string][] = [
+    ['app', NOTE_APP],
+    ['type', DROP_TYPE],
+    ['v', NOTE_VERSION],
+    ['asset', 'bsv'],
+  ];
+  if (tokenId) kv.push(['context', 'bsv21'], ['bsv21', tokenId]);
+  for (const [k, v] of kv) {
+    push(k);
+    push(v);
+  }
+  return s;
+};
+
+/** The extra output a BSV holder drop always carries: its note (when given) or the bare marker. */
+export const bsvDropOutput = (note: string | undefined, tokenId?: string) =>
+  note
+    ? noteOutput(note, tokenId)
+    : { lockingScript: dropMarkerScript(tokenId).toHex(), satoshis: 0, outputDescription: 'Airdrop marker' };
+
+/**
+ * The airdrop marker in a tx's outputs: `{ tokenId }` (the token whose holders were paid, when named), or null when
+ * the tx has no bWalletX airdrop note or marker. Never throws.
+ */
+export const dropMarker = (vout: { script?: string }[] | undefined): { tokenId?: string } | null => {
+  for (const o of vout ?? []) {
+    const hex = o.script;
+    if (!hex || hex.length > 8000 || !/^(006a|6a)/i.test(hex)) continue;
+    try {
+      const d = decodeScript(Script.fromHex(hex));
+      if (!d || d.MAP.app !== NOTE_APP || (d.MAP.type !== DROP_TYPE && d.MAP.type !== NOTE_TYPE)) continue;
+      if (d.MAP.type === NOTE_TYPE && !decodeNote(hex)) continue;
+      const tokenId = d.MAP.context === 'bsv21' && d.MAP.bsv21 ? d.MAP.bsv21 : undefined;
+      return tokenId ? { tokenId } : {};
+    } catch {
+      continue;
+    }
+  }
+  return null;
+};

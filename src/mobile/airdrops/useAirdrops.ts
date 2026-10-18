@@ -23,10 +23,13 @@ export const useAirdrops = () => {
   const a = chromeStorageService.getCurrentAccountObject().account?.addresses;
   const account = a?.identityAddress ?? '';
   setQuarantineAccount(account);
-  const addresses = useMemo(
+  const legacy = useMemo(
     () => [...new Set([a?.ordAddress, a?.bsvAddress, a?.identityAddress].filter((x): x is string => !!x))],
     [a?.ordAddress, a?.bsvAddress, a?.identityAddress],
   );
+  // Plus the receive (deposit) address, so a BSV airdrop paid there shows too (it is already in the balance).
+  const primary = chromeStorageService.getCurrentAccountObject().account?.primaryAddress;
+  const addresses = useMemo(() => [...new Set([...legacy, ...(primary ? [primary] : [])])], [legacy, primary]);
   const v = useSyncExternalStore(subscribeInbox, () => version);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -39,11 +42,11 @@ export const useAirdrops = () => {
     (force = false) => {
       setLoading(true);
       setError('');
-      refreshAirdrops(account, addresses, apiContext.wallet as never, apiContext.wocApiKey || undefined, force)
+      refreshAirdrops(account, addresses, apiContext.wallet as never, apiContext.wocApiKey || undefined, force, legacy)
         .catch((e) => setError(e instanceof Error ? e.message : String(e)))
         .finally(() => setLoading(false));
     },
-    [account, addresses, apiContext],
+    [account, addresses, legacy, apiContext],
   );
   useEffect(() => refresh(false), [refresh]);
 

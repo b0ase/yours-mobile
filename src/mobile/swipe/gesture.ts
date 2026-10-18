@@ -69,3 +69,14 @@ export const dragOffset = (raw: number, width: number, left: SideSpec, right: Si
 /** True once the drag is far enough that releasing would commit (drives the haptic tick + armed colour). */
 export const isArmed = (offset: number, width: number, side: SideSpec) =>
   side.hasFull && Math.abs(offset) >= commitDistance(width, side);
+
+/**
+ * The "…" / long-press menu: `menu` when a list gives its own order (Exchange: Buy, Sell, Chat, Pin, Hide,
+ * Info), else right tray, left tray, then the menu-only extras. Duplicate ids keep their first place.
+ */
+export const menuList = <A extends { id: string }>(
+  right: readonly A[],
+  left: readonly A[],
+  more: readonly A[],
+  menu?: readonly A[],
+): A[] => (menu ?? [...right, ...left, ...more]).filter((a, i, xs) => xs.findIndex((b) => b.id === a.id) === i);

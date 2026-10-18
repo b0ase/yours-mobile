@@ -5,6 +5,10 @@
       "destination": "/api/theme-orders?op=:op"
     },
     {
+      "source": "/api/shops/:op",
+      "destination": "/api/shops?op=:op"
+    },
+    {
       "source": "/pair",
       "destination": "/pair.html"
     },

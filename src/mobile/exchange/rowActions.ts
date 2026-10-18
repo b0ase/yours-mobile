@@ -1,10 +1,13 @@
 /**
- * Exchange token rows: swipe left (or long-press / "…") for Chat · Buy · Info (owner, 15 Oct 2026).
+ * Exchange token rows (owner, 15 Oct 2026; Sell, Pin and Hide 18 Oct 2026):
+ *  - Swipe left: Buy · Sell · Chat (Sell only when this wallet holds that token ID).
+ *  - Swipe right: Pin · Hide (rowPrefs.ts). Long-press / "…" lists every action plus Info.
  *
  * - Chat opens the token's room straight away when this wallet holds some of that token. Holdings are
  *   matched on the token ID (`<txid>_<vout>`), never the ticker: two tokens can share a ticker.
  * - Otherwise Chat shows "Hold some to enter" with a Buy shortcut.
- * - Buy opens the trade screen at its Buy panel; Info opens the token page (TokenIdPanel at the top).
+ * - Buy opens the trade screen at its Buy panel, Sell at its Sell panel (Sell (list for sale) → SellSheet);
+ *   Info opens the token page (TokenIdPanel at the top).
  */
 import { normOutpoint, tokenKey } from '../chat/tokenRooms';
 import { tradeRoute } from './exchangeData';
@@ -35,10 +38,18 @@ export const chatDecision = (tokenId: string, held: ReadonlySet<string> | null):
 /** Anchor on the trade screen's Buy panel. */
 export const BUY_ANCHOR = 'buy';
 export const buyRoute = (tokenId: string) => `${tradeRoute(tokenId)}#${BUY_ANCHOR}`;
+/** Anchor on the trade screen's Sell panel (the existing list-for-sale flow). */
+export const SELL_ANCHOR = 'sell';
+export const sellRoute = (tokenId: string) => `${tradeRoute(tokenId)}#${SELL_ANCHOR}`;
 export const infoRoute = (tokenId: string) => tradeRoute(tokenId);
 
-/** Left-swipe tray order (outermost last): Chat, Buy, Info. */
-export const ROW_ACTION_IDS = ['chat', 'buy', 'info'] as const;
+/** Left-swipe tray (outermost last): Buy, Sell (only when held), Chat. `held` null = still loading: no Sell yet. */
+export const tokenActionIds = (tokenId: string, held: ReadonlySet<string> | null): ('buy' | 'sell' | 'chat')[] => {
+  const id = normOutpoint(tokenId);
+  return ['buy', ...(id && held?.has(id) ? (['sell'] as const) : []), 'chat'];
+};
+/** Right-swipe tray: Pin, Hide. */
+export const SIDE_ACTION_IDS = ['pin', 'hide'] as const;
 
 /* ── Other Exchange lists (owner, 15 Oct 2026): People, OpNS names, Podcasts, Movies ─────────────── */
 
