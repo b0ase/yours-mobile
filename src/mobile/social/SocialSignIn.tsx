@@ -28,6 +28,10 @@ import {
 } from './socialLogin';
 import { HandCashSignIn } from './HandCashSignIn';
 
+/** bWalletX Desktop (Tauri): the X / Google redirect can't come back into the app, so the buttons can't work there. */
+const inDesktopApp = () =>
+  typeof window !== 'undefined' && !!(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+
 const XLogo = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
     <path d="M18.9 2H22l-6.8 7.8L23 22h-6.2l-4.8-6.3L6.4 22H3.3l7.3-8.3L1 2h6.3l4.4 5.8L18.9 2Zm-1.1 18h1.7L6.3 3.9H4.5L17.8 20Z" />
@@ -64,7 +68,10 @@ export const SocialSignIn = ({
   onRestore,
   onClear,
   owner = NEW_ACCOUNT,
+  check = false,
 }: {
+  /** Restore: an optional check that the 12 words own the verified name (restoreGuard.ts), never a sign-in. */
+  check?: boolean;
   onProfile: (p: { name: string; avatar: string }) => void;
   /** The sign-in was removed (or expired): `avatar` is the photo this form filled from it, to take back out. */
   onClear?: (avatar: string) => void;
@@ -151,7 +158,9 @@ export const SocialSignIn = ({
               <BadgeCheck size={14} color="var(--bw-accent)" />
             </div>
             <div className="text-[11px]" style={{ color: '#98A2B3' }}>
-              Verified · you choose your handle next
+              {check
+                ? `Verified · the 12 words must be the wallet that owns ${alias || 'this name'}`
+                : 'Verified · you choose your handle next'}
             </div>
           </div>
           <button
@@ -184,13 +193,14 @@ export const SocialSignIn = ({
       </div>
     );
 
+  const desktop = inDesktopApp();
   const btn = (p: SocialProvider, label: string, icon: JSX.Element) => (
     <button
       type="button"
       onClick={() => void go(p)}
-      disabled={!!busy}
+      disabled={!!busy || desktop}
       className="flex flex-1 items-center justify-center gap-2 h-11 rounded-xl text-sm font-semibold border-0"
-      style={{ background: 'var(--bw-surface)', color: '#fff', opacity: busy && busy !== p ? 0.5 : 1 }}
+      style={{ background: 'var(--bw-surface)', color: '#fff', opacity: desktop || (busy && busy !== p) ? 0.5 : 1 }}
     >
       {busy === p ? <Loader2 size={16} className="animate-spin" /> : icon}
       {label}
@@ -200,12 +210,21 @@ export const SocialSignIn = ({
   return (
     <div className="w-[92%] mb-4">
       <div className="flex gap-2">
-        {btn('x', 'Continue with X', <XLogo />)}
+        {btn('x', check ? 'Check with X' : 'Continue with X', <XLogo />)}
         {btn('google', 'Google', <GoogleLogo />)}
       </div>
-      {HANDCASH_SIGNIN_ENABLED && <HandCashSignIn onHandle={(h) => onProfileRef.current({ name: h, avatar: '' })} />}
+      {HANDCASH_SIGNIN_ENABLED && !check && !desktop && (
+        <HandCashSignIn onHandle={(h) => onProfileRef.current({ name: h, avatar: '' })} />
+      )}
       <p className="text-[11px] mt-2 text-center" style={{ color: error ? '#FDA29B' : '#98A2B3' }}>
-        {error || 'Optional: your X or Gmail name becomes your verified handle.'}
+        {error ||
+          (desktop
+            ? check
+              ? 'Check on web or in the phone app.'
+              : 'Use X / Google on web or in the phone app for now.'
+            : check
+              ? 'Optional check, not a sign-in: confirms these 12 words are the wallet that owns your verified name.'
+              : 'Optional: your X or Gmail name becomes your verified handle.')}
       </p>
     </div>
   );
