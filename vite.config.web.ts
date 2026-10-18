@@ -4,6 +4,7 @@ import { existsSync, readFileSync, readdirSync, writeFileSync } from 'fs';
 import mobileConfig from './vite.config.mobile';
 import { writeAlbumPages } from './src/web/albumPages';
 import { installStaleBuildCheck } from './src/web/staleBuild';
+import { BANNER_VIDEO, bannerHtml, installWebBanner } from './src/web/betaBanner';
 
 /**
  * bWalletX web wallet (web.bwalletx.com): the mobile UI as a static site (build-web/), for any
@@ -14,7 +15,10 @@ import { installStaleBuildCheck } from './src/web/staleBuild';
  * docs/WEB-WALLET.md.
  */
 
-const BANNER = 'Web wallet beta — test with small amounts. Your keys stay in this browser.';
+/** Optional hazard-tape video for the beta banner (src/web/betaBanner.ts): copied when the file exists. */
+const BANNER_VIDEO_SRC = resolve(__dirname, 'public', BANNER_VIDEO);
+const HAS_BANNER_VIDEO = existsSync(BANNER_VIDEO_SRC);
+const BANNER_SCRIPT = `(${installWebBanner.toString()})();`;
 /** Newer build pick-up without reloading under the user: src/web/staleBuild.ts (inlined, self-contained). */
 const STALE_BUILD = `(${installStaleBuildCheck.toString()})();`;
 
@@ -74,11 +78,13 @@ const webShell = (): Plugin => ({
             '  </head>',
           ].join('\n'),
         )
-        .replace('<body>', `<body>\n    <div class="bwallet-web-banner" role="status">${BANNER}</div>`)
+        .replace('<body>', `<body>\n    ${bannerHtml(HAS_BANNER_VIDEO)}\n    <script>${BANNER_SCRIPT}</script>`)
         .replace('</body>', `    <script>${STALE_BUILD}</script>\n  </body>`);
     },
   },
   generateBundle() {
+    if (HAS_BANNER_VIDEO)
+      this.emitFile({ type: 'asset', fileName: BANNER_VIDEO, source: readFileSync(BANNER_VIDEO_SRC) });
     for (const f of readdirSync(ICONS).filter((n) => n.endsWith('.png'))) {
       this.emitFile({ type: 'asset', fileName: `icons/${f}`, source: readFileSync(resolve(ICONS, f)) });
     }

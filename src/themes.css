@@ -1339,10 +1339,8 @@
 input:-webkit-autofill {
   transition: background-color 600000s 0s;
 }
-/* The web beta banner on paper: the page's paper and ink with a hairline, not a black accent bar. */
+/* The web beta banner is hazard tape on every pack (owner, 18 Oct 2026); on paper, a hairline under it. */
 :root[data-bw-paper] .bwallet-web-banner {
-  background: var(--bw-pack-bg);
-  color: var(--bw-text);
   border-bottom: 1px solid rgb(0 0 0 / 0.12);
 }
 /* White and paper packs: stylesheet cards that were hard-coded dark (owner, 16 Oct 2026: the Hidden tokens head card
