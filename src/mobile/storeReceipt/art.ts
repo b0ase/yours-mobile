@@ -6,10 +6,14 @@
  * to the plain gold card.
  */
 import { SHOPS } from '../themeStore/shops';
+import { isEmojiPack } from '../theme/emojiThemes';
+import { emojiTileUri } from '../wallet/cardPatternsEmoji';
 import { ART_MAX_BYTES, artOk } from './receipt';
 
 /** The picture URL for a theme pack's receipt: its shop's receipt art or logo. */
 export const receiptArtUrl = (packId: string): string | null => {
+  // An Emoji theme's receipt shows its own emoji (Twemoji, CC-BY 4.0).
+  if (isEmojiPack(packId)) return emojiTileUri(packId, 256);
   const shop = SHOPS.find((s) => s.themes.includes(packId));
   return shop ? (shop.receiptArt ?? shop.logo) : null;
 };

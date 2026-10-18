@@ -1,5 +1,7 @@
 import type { CardPatternId } from '../theme/accents';
 import { fieldFormulas } from '../media/vexvoid/pointField';
+import { EMOJI_PACK_IDS, isEmojiPack } from '../theme/emojiThemes';
+import { emojiArtUri } from './cardPatternsEmoji';
 import npgLogo from './editionArt/npg-card-logo.webp';
 import npgx1 from './editionArt/npgx-card-1.webp';
 import npgx2 from './editionArt/npgx-card-2.webp';
@@ -10,7 +12,12 @@ import npgx2 from './editionArt/npgx-card-2.webp';
  * characters and the white tag logo on black with a pink glow (from ninja-punk-girls-com, compressed). NPGX: the
  * official NPGX logo (red tech font, red X) on black. Each card picks one variant from its id.
  */
-export const EDITION_PATTERN_IDS = ['vexfield', 'npg', 'npgx'] as const satisfies readonly CardPatternId[];
+export const EDITION_PATTERN_IDS = [
+  'vexfield',
+  'npg',
+  'npgx',
+  ...EMOJI_PACK_IDS,
+] as const satisfies readonly CardPatternId[];
 export type EditionPatternId = (typeof EDITION_PATTERN_IDS)[number];
 export const isEditionPattern = (id: string): id is EditionPatternId =>
   (EDITION_PATTERN_IDS as readonly string[]).includes(id);
@@ -67,6 +74,8 @@ const cache = new Map<string, string>();
 /** The edition art for a card: an SVG data URI (VexVoid) or a bundled image URL (NPG, NPGX). */
 export function editionArtUri(id: EditionPatternId, key = ''): string {
   const v = variantFor(key);
+  // Emoji themes: Twemoji on original card art (cardPatternsEmoji.ts).
+  if (isEmojiPack(id)) return emojiArtUri(id, v);
   if (id === 'vexfield') {
     const k = `vex${v % VEX_STILLS.length}`;
     let u = cache.get(k);

@@ -150,4 +150,11 @@ describe('edition entries', () => {
       expect(new URL(href).pathname).toBe('/');
     }
   });
+  test('?theme= never switches a paid Emoji theme on either', () => {
+    for (const id of ['emoji-frog', 'emoji-cool']) {
+      store.clear();
+      href = `https://web.bwalletx.com/?theme=${id}`;
+      expect(applyThemeParam()).toBeNull();
+    }
+  });
 });

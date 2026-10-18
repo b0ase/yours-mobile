@@ -11,10 +11,35 @@ const { signReceipt } = require('./storeReceipt');
 
 const FEE_ROOM_SATS = 500;
 
+/** Emoji themes (owner 18 Oct 2026, src/mobile/theme/emojiThemes.ts): $1 each, Twemoji art. */
+const EMOJI_LABELS = {
+  'emoji-frog': 'Frog',
+  'emoji-fire': 'Fire',
+  'emoji-wave': 'Wave',
+  'emoji-blossom': 'Blossom',
+  'emoji-spark': 'Spark',
+  'emoji-moon': 'Moon',
+  'emoji-pizza': 'Pizza',
+  'emoji-headphones': 'Headphones',
+  'emoji-pup': 'Pup',
+  'emoji-rainbow': 'Rainbow',
+  'emoji-clover': 'Clover',
+  'emoji-cool': 'Cool',
+};
 /** Packs for sale and their price in USD. Only these can be bought. */
-const PACKS = { vexvoid: 1, npg: 1, npgx: 1 };
+const PACKS = {
+  vexvoid: 1,
+  npg: 1,
+  npgx: 1,
+  ...Object.fromEntries(Object.keys(EMOJI_LABELS).map((id) => [id, 1])),
+};
 /** Names printed on receipts. */
-const PACK_LABELS = { vexvoid: 'VexVoid', npg: 'NPG', npgx: 'NPGX' };
+const PACK_LABELS = {
+  vexvoid: 'VexVoid',
+  npg: 'NPG',
+  npgx: 'NPGX',
+  ...Object.fromEntries(Object.entries(EMOJI_LABELS).map(([id, l]) => [id, `${l} (Emoji)`])),
+};
 const MEMO_TAG = 'bwx-theme-buy';
 const QUOTE_ID_RE = /^[0-9a-f]{32}$/;
 

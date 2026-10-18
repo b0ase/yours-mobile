@@ -1,4 +1,5 @@
-import { contrast, ensureContrast, hexToHsl, hslToHex, pickReadable, rgbTriplet } from './colour';
+import { contrast, ensureContrast, hexToHsl, hslToHex, mix, pickReadable, rgbTriplet } from './colour';
+import { EMOJI_PACK_IDS, EMOJI_THEMES, type EmojiPackId, type EmojiTheme } from './emojiThemes';
 
 export { contrast, rgbTriplet };
 
@@ -36,7 +37,8 @@ export type PackId =
   | 'yellow'
   | 'vexvoid'
   | 'npg'
-  | 'npgx';
+  | 'npgx'
+  | EmojiPackId;
 export type AccentId = PackId | 'silver' | 'rose' | 'emerald' | 'sapphire' | 'violet' | 'custom';
 
 export type CardPatternId =
@@ -65,7 +67,8 @@ export type CardPatternId =
   | 'contour'
   | 'vexfield'
   | 'npg'
-  | 'npgx';
+  | 'npgx'
+  | EmojiPackId;
 
 export interface Accent {
   id: AccentId;
@@ -424,6 +427,50 @@ const CROSS_OVERS: readonly Accent[] = [
   },
 ];
 
+/**
+ * Emoji themes (owner, 18 Oct 2026; emojiThemes.ts): twelve $1 Store packs, each the emoji's colour on a dark ground
+ * tinted by it, with Twemoji card art (cardPatternsEmoji.ts). Sold like the editions (group 'edition', credit
+ * "Emoji collection"), so owning, applying and the card art follow the same paths. Every stop is pushed to AA by
+ * ensureContrast, so each pack passes by construction (accents.test.ts checks again).
+ */
+function emojiPack(e: EmojiTheme): Accent {
+  const bg = e.bg;
+  const surface = mix(bg, e.accent, 0.08);
+  const surface2 = mix(bg, e.accent, 0.14);
+  const grounds = [bg, surface, surface2];
+  const accent = ensureContrast(e.accent, grounds, 4.5);
+  const hi = ensureContrast(mix(accent, '#FFFFFF', 0.3), grounds, 4.5);
+  const lo = ensureContrast(mix(accent, '#000000', 0.1), grounds, 4.5);
+  const rgb = rgbTriplet(accent);
+  return {
+    ...BASE,
+    id: e.id,
+    kind: 'theme',
+    group: 'edition',
+    edition: 'Emoji collection',
+    label: e.label,
+    blurb: e.blurb,
+    accent,
+    hi,
+    lo,
+    on: pickReadable([bg, '#000000', '#FFFFFF'], [accent, hi, lo]),
+    bg,
+    surface,
+    surface2,
+    nav: bg,
+    text: '#FFFFFF',
+    muted: ensureContrast(mix('#C8CCD4', accent, 0.3), grounds, 4.5),
+    line: mix(bg, accent, 0.3),
+    shadow: `0 0 24px rgb(${rgb} / 0.14)`,
+    trim: `rgb(${rgb} / 0.45)`,
+    weightHead: 800,
+    radius: '14px',
+    radiusCard: '18px',
+    pattern: e.id,
+  };
+}
+const EMOJI_PACKS: readonly Accent[] = EMOJI_THEMES.map(emojiPack);
+
 // Never use upstream's greens (#A1FF8B, #9EFF8A, #34D399) here: vite.brand.ts bcorpColours rewrites them to
 // the accent variables at build time, which would make an accent point at itself.
 export const ACCENTS: readonly Accent[] = [
@@ -441,6 +488,7 @@ export const ACCENTS: readonly Accent[] = [
   ...MONO_TONES,
   ...CROSS_OVERS,
   ...EDITIONS,
+  ...EMOJI_PACKS,
   {
     ...BASE,
     id: 'executive',
@@ -741,5 +789,5 @@ export const packVars = (a: Accent): Record<string, string> => ({
 /** Every variable any pack may set (so switching packs can clear the previous one's). */
 export const ALL_VARS = Object.keys(packVars(ACCENTS[0] as Accent));
 
-/** Editions sold in the Store ($1 each, owner 17 Oct 2026): only buyers get them, never in the free picker. */
-export const PAID_EDITIONS: readonly string[] = ['vexvoid', 'npg', 'npgx'];
+/** Editions and Emoji themes sold in the Store ($1 each, owner 17-18 Oct 2026): only buyers get them, never in the free picker. */
+export const PAID_EDITIONS: readonly string[] = ['vexvoid', 'npg', 'npgx', ...EMOJI_PACK_IDS];
