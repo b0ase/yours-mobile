@@ -2,12 +2,14 @@
  * The top of /m/spaces for everyone, signed in or not (guest-first: listening works signed out):
  *  - Featured: real persistent rooms from bit-sign's public directory (GET /api/bitsign/spaces),
  *    the Lounge pinned first and always open, then any live public Space. Real counts only.
- *  - Regular Spaces: the weekly schedule (GET /api/bitsign/spaces/schedule), each slot in a real
- *    room at /s/<room>, shown in the viewer's local time, with Add to calendar (.ics).
+ *  - Coming up: real scheduled Spaces (bookings, confirmed or live) across public rooms
+ *    (GET /api/public/spaces/upcoming). None → an honest empty state: Start a Space / Book a slot.
+ *  - Regular Spaces: the weekly schedule (GET /api/bitsign/spaces/schedule), shown only when a real
+ *    host has committed a slot (the server ships none). No made-up content (owner, 18 Oct 2026).
  * bWalletX only: lives in the lazy SpacesPage chunk (storeBuild.ts BSPACES_ENABLED).
  */
 import { useEffect, useMemo, useState } from 'react';
-import { CalendarPlus, Radio } from 'lucide-react';
+import { CalendarClock, CalendarPlus, Radio } from 'lucide-react';
 import { BCHAT_ORIGIN, defaultHttp } from '../chat/api';
 import { isNative } from '../native';
 import { defaultPictures } from '../chat/roomArt';
@@ -15,10 +17,13 @@ import {
   nextSession,
   roomPageUrl,
   parseSchedule,
+  parseUpcoming,
+  PUBLIC_SPACES_ORIGIN,
   slotIcs,
   whenLabel,
   type Schedule,
   type ScheduleSlot,
+  type UpcomingSpace,
 } from './schedule';
 
 const GOLD = 'var(--bw-accent-hi)';
@@ -97,10 +102,25 @@ const downloadIcs = (slot: ScheduleSlot, tz: string) => {
 const dayFmt = new Intl.DateTimeFormat(undefined, { weekday: 'short' });
 const timeFmt = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
 
-export const RegularSpaces = ({ onJoin }: { onJoin: (ticker: string, name: string) => void }) => {
+const openOut = (url: string) => {
+  try {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  } catch {
+    /* no window */
+  }
+};
+
+export const RegularSpaces = ({
+  onJoin,
+  onStart,
+}: {
+  onJoin: (ticker: string, name: string) => void;
+  /** Start a Space: to the rooms you run (Chat). */
+  onStart: () => void;
+}) => {
   const [featured, setFeatured] = useState<FeaturedCard[] | null>(null);
+  const [upcoming, setUpcoming] = useState<UpcomingSpace[] | null>(null);
   const [schedule, setSchedule] = useState<Schedule | null>(null);
-  const [scheduleError, setScheduleError] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -109,11 +129,14 @@ export const RegularSpaces = ({ onJoin }: { onJoin: (ticker: string, name: strin
       getJson('/api/bitsign/spaces')
         .then((d) => alive && setFeatured(parseFeatured(d)))
         .catch(() => alive && setFeatured((f) => f ?? []));
+      getJson('/api/public/spaces/upcoming')
+        .then((d) => alive && setUpcoming(parseUpcoming(d)))
+        .catch(() => alive && setUpcoming((u) => u ?? []));
     };
     load();
     getJson('/api/bitsign/spaces/schedule')
       .then((d) => alive && setSchedule(parseSchedule(d)))
-      .catch(() => alive && setScheduleError(true));
+      .catch(() => undefined);
     const poll = setInterval(load, 30_000);
     const tick = setInterval(() => setNow(Date.now()), 30_000);
     return () => {
@@ -209,15 +232,55 @@ export const RegularSpaces = ({ onJoin }: { onJoin: (ticker: string, name: strin
         </div>
       )}
 
-      <Label>Regular Spaces</Label>
-      {scheduleError && !schedule ? (
-        <p className="px-4 text-sm" style={{ color: MUTED }}>
-          The schedule didn’t load. Tap refresh to try again.
-        </p>
-      ) : !schedule ? null : (
-        <div>
+      <Label>Coming up</Label>
+      {upcoming === null ? (
+        <div className="px-4 py-3">
+          <Radio size={18} color={GOLD} className="animate-pulse" />
+        </div>
+      ) : upcoming.filter((u) => u.end > now || u.live).length === 0 && slots.length === 0 ? (
+        <EmptySchedule onStart={onStart} />
+      ) : (
+        upcoming
+          .filter((u) => u.end > now || u.live)
+          .map((u) => {
+            const isLive = u.live || (u.start <= now && now < u.end);
+            const label = isLive ? 'Live now' : whenLabel({ start: u.start, end: u.end }, now);
+            return (
+              <div key={u.id} className="flex items-center gap-3 px-4 py-3" style={{ borderTop: `1px solid ${LINE}` }}>
+                <div className="w-[64px] shrink-0 text-center">
+                  <div className="text-[12px] font-semibold" style={{ color: GOLD }}>
+                    {dayFmt.format(u.start)}
+                  </div>
+                  <div className="text-[13px] font-bold">{timeFmt.format(u.start)}</div>
+                </div>
+                <span className="min-w-0 flex-1">
+                  <span className="block font-semibold">{u.title}</span>
+                  {u.description && (
+                    <span className="block text-xs" style={{ color: MUTED }}>
+                      {u.description}
+                    </span>
+                  )}
+                  <span className="block text-xs" style={{ color: MUTED }}>
+                    {u.room.name} · Host ${u.host} · <span style={{ color: isLive ? '#F97066' : GOLD }}>{label}</span>
+                  </span>
+                </span>
+                <button
+                  onClick={() => onJoin(u.room.ticker, u.room.name)}
+                  className="shrink-0 rounded-full px-3 py-1 text-xs font-bold"
+                  style={isLive ? { background: GOLD, color: INK } : { border: `1px solid ${GOLD}`, color: GOLD }}
+                >
+                  {isLive ? 'Join' : 'Open room'}
+                </button>
+              </div>
+            );
+          })
+      )}
+
+      {schedule && slots.length > 0 && (
+        <>
+          <Label>Regular Spaces</Label>
           <p className="px-4 pb-2 text-xs" style={{ color: MUTED }}>
-            Every week, in your local time. A slot with no host is an open room: anyone can join.
+            Every week, in your local time.
           </p>
           {slots.map(({ slot, when }) => {
             const label = whenLabel(when, now);
@@ -241,7 +304,8 @@ export const RegularSpaces = ({ onJoin }: { onJoin: (ticker: string, name: strin
                     {slot.blurb}
                   </span>
                   <span className="block text-xs" style={{ color: MUTED }}>
-                    {roomName} · {slot.host ? `Host $${slot.host}` : 'Open room'} ·{' '}
+                    {roomName}
+                    {slot.host ? ` · Host $${slot.host}` : ''} ·{' '}
                     <span style={{ color: isLive ? '#F97066' : GOLD }}>{label}</span>
                   </span>
                 </span>
@@ -264,11 +328,52 @@ export const RegularSpaces = ({ onJoin }: { onJoin: (ticker: string, name: strin
               </div>
             );
           })}
-        </div>
+        </>
       )}
     </div>
   );
 };
+
+/** No Spaces scheduled: say so plainly, in gold, with the two real ways to fill it. */
+const EmptySchedule = ({ onStart }: { onStart: () => void }) => (
+  <div
+    className="mx-4 flex items-center gap-4 rounded-2xl p-4"
+    style={{
+      background: 'linear-gradient(135deg, rgba(245,197,66,0.16), rgba(245,197,66,0.04))',
+      border: `1px solid rgba(245,197,66,0.35)`,
+    }}
+  >
+    <div
+      className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full"
+      style={{ background: GOLD }}
+      aria-hidden="true"
+    >
+      <CalendarClock size={22} color={INK} />
+    </div>
+    <div className="min-w-0 flex-1">
+      <div className="font-bold">No Spaces scheduled yet</div>
+      <div className="text-xs" style={{ color: MUTED }}>
+        Go live in a room you run, or book a time in a public room so people can plan to join.
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          onClick={onStart}
+          className="rounded-full px-4 py-1.5 text-[13px] font-bold"
+          style={{ background: GOLD, color: INK }}
+        >
+          Start a Space
+        </button>
+        <button
+          onClick={() => openOut(`${PUBLIC_SPACES_ORIGIN}/spaces`)}
+          className="rounded-full px-4 py-1.5 text-[13px] font-bold"
+          style={{ border: `1px solid ${GOLD}`, color: GOLD }}
+        >
+          Book a slot
+        </button>
+      </div>
+    </div>
+  </div>
+);
 
 const Label = ({ children }: { children: React.ReactNode }) => (
   <h2 className="px-4 pt-5 pb-2 text-xs font-semibold uppercase tracking-wide" style={{ color: MUTED }}>

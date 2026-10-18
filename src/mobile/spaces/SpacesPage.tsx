@@ -150,7 +150,7 @@ const SpacesPage = () => {
       )}
 
       <div className="flex-1 overflow-y-auto bw-dock-pad">
-        <RegularSpaces onJoin={joinPublic} />
+        <RegularSpaces onJoin={joinPublic} onStart={() => navigate('/m/chat')} />
         {!client.handle ? (
           <Empty>
             Listening works without signing in. Open Chat once to sign in and see Spaces in your own rooms.
