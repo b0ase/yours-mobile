@@ -14,6 +14,8 @@ import {
   type Found,
 } from './relayxRecover';
 import type { NpgMap } from './runIdentify';
+import { P2PKH, Transaction } from '@bsv/sdk';
+import { LISTING_HEX, MINT_TXID } from './relayxListing.fixtures';
 
 const WORDS = Mnemonic.fromRandom().toString();
 
@@ -80,6 +82,7 @@ describe('scan', () => {
         a === nft.address
           ? [{ txid: mint, vout: 3, sats: 273, address: a }]
           : [{ txid: 'd'.repeat(64), vout: 0, sats: 50_000, address: a }],
+      scriptUnspent: async () => [],
       txHex: async () => {
         throw new Error('no download expected');
       },
@@ -120,5 +123,44 @@ describe('scan', () => {
     expect(m2.get(jig.location)).toEqual(jig);
     expect(m2.get('x_o0')).toBeNull();
     expect(m2.get('y_o0')).toBeUndefined();
+  });
+
+  test('finds an NFT still listed on RelayX from its cancel output, apart from the held ones', async () => {
+    const acct = relayxAccount(WORDS);
+    const pay = keyAt(acct, 0, 0);
+    // The real listing of NPG S2 #2506, with its cancel output paid to this test account.
+    const listing = Transaction.fromHex(LISTING_HEX);
+    listing.outputs[0].lockingScript = new P2PKH().lock(pay.address);
+    const txid = listing.id('hex');
+    const maps: NpgMap[] = [
+      {
+        class: '393b1c2a',
+        collection: 'Ninja Punk Girls Vs The Evil Erobotz Series 2',
+        jigs: { [`${MINT_TXID}_o3`]: { i: 0, n: 2506 } },
+      },
+    ];
+    let open = true;
+    const reader: ChainReader = {
+      holding: async (as) => new Map(as.map((a) => [a, a === pay.address ? 1 : 0])),
+      unspent: async (a) => (a === pay.address ? [{ txid, vout: 0, sats: 546, address: a }] : []),
+      scriptUnspent: async (hex) =>
+        open && hex === listing.outputs[2].lockingScript.toHex() ? [{ txid, vout: 2, sats: 1415, address: '' }] : [],
+      txHex: async () => listing.toHex(),
+      getTx: async (t) => {
+        if (t === txid) return listing;
+        throw new Error(`unexpected fetch ${t}`);
+      },
+    };
+    const r = await scanRelayx(WORDS, reader, maps, () => {});
+    expect(r.nfts.map((n) => [n.title, n.location, n.address, n.wif === pay.wif, n.listed?.price])).toEqual([
+      ['NPG #2506', `${txid}_o2`, pay.address, true, 10_000_000],
+    ]);
+    expect(r.otherSats).toBe(0); // the baton is never counted as spare BSV
+    expect(groupFound(r.nfts).map((g) => g.title)).toEqual(['Listed for sale on RelayX']);
+
+    // Bought or cancelled since: the order is spent, so it isn't shown as listed.
+    open = false;
+    const gone = await scanRelayx(WORDS, reader, maps, () => {});
+    expect(gone.nfts).toEqual([]);
   });
 });

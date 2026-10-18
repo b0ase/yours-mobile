@@ -139,17 +139,23 @@ export const roomSetupExtraOutputs = (ticker: string, feeSats: number, feeAddres
     ? [{ address: feeAddress, satoshis: feeSats, outputDescription: `bWallet room setup ($${ticker})`.slice(0, 50) }]
     : [];
 
-/** Pay a room setup (after the user's tap / confirmation): indexer + bCorp fee in one tx. */
+/**
+ * Pay a room setup (after the user's tap / confirmation): indexer + bCorp fee in one tx.
+ * Same rule as the launch deposit: the fee address is derived locally from the token id
+ * (deriveFeeAddress); an indexer answer naming a different address is refused ("Nothing was
+ * sent"), and when the indexer hasn't seen the token yet the derived address is paid.
+ */
 export const payRoomSetup = (
   ctx: OneSatContext,
   tokenId: string,
   ticker: string,
-  status: OverlayStatus,
+  status: OverlayStatus | null,
   feeSats: number,
   feeAddress = roomSetupFeeAddress(),
 ) =>
   fundIndexing(ctx, tokenId, ticker, {
     status,
+    allowDerived: true,
     timeoutMs: 8000,
     extraOutputs: roomSetupExtraOutputs(ticker, feeSats, feeAddress),
   });

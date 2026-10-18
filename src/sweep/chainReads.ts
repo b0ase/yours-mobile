@@ -9,7 +9,7 @@
  *     is ~50 requests, not 1,000; a txid WoC can't give is fetched from api.1sat.app/1sat/beef/<txid>;
  *   - tx hex cached in memory and in localStorage (size-capped), so a second scan is instant.
  */
-import { Transaction } from '@bsv/sdk';
+import { Hash, Transaction, Utils } from '@bsv/sdk';
 
 const WOC = 'https://api.whatsonchain.com/v1/bsv/main';
 const ONESAT = 'https://api.1sat.app/1sat';
@@ -262,6 +262,15 @@ export function createChainReader(opts: ChainReaderOpts = {}) {
     });
   }
 
+  /** Unspent outputs locked by exactly this script (WoC script hash), e.g. a RelayX order. */
+  async function scriptUnspent(scriptHex: string): Promise<Utxo[]> {
+    const h = Utils.toHex(Hash.sha256(Utils.toArray(scriptHex, 'hex')).reverse());
+    const r = await json<{ result?: { tx_hash: string; tx_pos: number; value: number }[] }>(
+      `${WOC}/script/${h}/unspent/all`,
+    );
+    return (r.result ?? []).map((u) => ({ txid: u.tx_hash, vout: u.tx_pos, sats: u.value, address: '' }));
+  }
+
   const txs = new Map<string, Promise<Transaction>>();
   const getTx = (txid: string) => {
     const had = txs.get(txid);
@@ -281,7 +290,7 @@ export function createChainReader(opts: ChainReaderOpts = {}) {
     return p;
   };
 
-  return { holding, unspent, txHex, getTx };
+  return { holding, unspent, scriptUnspent, txHex, getTx };
 }
 
 export type ChainReader = ReturnType<typeof createChainReader>;

@@ -1,4 +1,4 @@
-import { P2PKH } from '@bsv/sdk';
+import { HD, Hash, P2PKH, Utils } from '@bsv/sdk';
 import type { OneSatContext } from '@1sat/actions';
 import { withTimeout } from '../withTimeout';
 import type { ChromeStorageService } from '../../services/ChromeStorage.service';
@@ -41,6 +41,8 @@ export type OverlayStatus = {
    * when this was added on 2 Oct 2026; earlier a few thousand sats activated a token). 0 = not sent.
    */
   minFunding: number;
+  /** Total ever paid to the fee address (`credits`); activation needs credits ≥ min_funding. 0 when not given. */
+  credits?: number;
 };
 
 /** Pull the funding fields out of a 1sat-stack token details response (null = not known yet). */
@@ -54,8 +56,87 @@ export function parseOverlayStatus(details: unknown): OverlayStatus | null {
     isActive: s.is_active === true,
     balance: typeof s.balance === 'number' ? s.balance : 0,
     minFunding: typeof s.min_funding === 'number' && s.min_funding > 0 ? s.min_funding : 0,
+    ...(typeof s.credits === 'number' && s.credits > 0 ? { credits: s.credits } : {}),
   };
 }
+
+// ── Fee address derived locally (b-open-io/1sat-stack pkg/bsv21/fee.go GenerateFeeAddress) ──
+
+/**
+ * The indexer's public HD key for token fee addresses (1sat-stack fee.go: "matches 1sat-indexer and
+ * bsv21-overlay-1sat-sync"; GorillaPool's ordinals API reports the same address as `fundAddress`).
+ */
+export const FEE_ADDRESS_XPUB =
+  'xpub661MyMwAqRbcF221R74MPqdipLsgUevAAX4hZP2rywyEeShpbe3v2r9ciAvSGT6FB22TEmFLdUyeEDJL4ekG8s9H5WXbzDQPr6eW1zEYYy9';
+
+const TOKEN_ID_RE = /^([0-9a-f]{64})[_.](\d{1,10})$/i;
+
+/**
+ * A token's indexer fee address, computed here from its id: sha256(txid bytes in hex order ‖ vout as
+ * 4 bytes big-endian) → path m/21/(u32be(h[0..4])>>1)/(u32be(h[24..28])>>1) under FEE_ADDRESS_XPUB.
+ * It depends on the deploy txid, so it only exists after the deploy is signed: the deposit can never
+ * ride in the deploy transaction itself. null for a malformed id.
+ */
+export function deriveFeeAddress(tokenId: string): string | null {
+  const m = TOKEN_ID_RE.exec(tokenId.trim());
+  if (!m) return null;
+  const vout = Number(m[2]);
+  if (!Number.isSafeInteger(vout) || vout > 0xffffffff) return null;
+  const h = Hash.sha256([
+    ...Utils.toArray(m[1].toLowerCase(), 'hex'),
+    (vout >>> 24) & 255,
+    (vout >>> 16) & 255,
+    (vout >>> 8) & 255,
+    vout & 255,
+  ]);
+  const u32 = (o: number) => ((h[o] << 24) | (h[o + 1] << 16) | (h[o + 2] << 8) | h[o + 3]) >>> 0;
+  return HD.fromString(FEE_ADDRESS_XPUB)
+    .derive(`m/21/${u32(0) >>> 1}/${u32(24) >>> 1}`)
+    .pubKey.toAddress();
+}
+
+// ── Launch indexing deposit ──
+
+/** The indexer's own funding headroom: GET /bsv21/{id}/fund adds this many outputs past what activates. */
+export const FUNDING_HEADROOM_OUTPUTS = 10;
+/**
+ * Outputs a launch deposit must cover at the least: the deploy, a vesting lock (lock + change), and the
+ * creator's first 100 transfers (recipient + token change each) plus room for a few airdrops ≈ 250.
+ * Today the indexer's min_funding (10,000,000 sats ≈ 10,000 outputs) is far above this, so it decides
+ * the deposit; this floor only matters if 1Sat lowers min_funding.
+ */
+export const LAUNCH_INDEX_OUTPUTS = 250;
+
+/**
+ * Sats a new coin's indexing deposit pays: what activates it (min_funding minus anything already paid)
+ * plus the indexer's 10-output headroom, and never less than LAUNCH_INDEX_OUTPUTS outputs. Before the
+ * indexer has seen the token (always the case on the review sheet): the published defaults, so a fresh
+ * token = 10,000,000 + 10 × 1,000 = 10,010,000 sats, the same figure the indexer's /fund route quotes.
+ */
+export function launchDepositSats(
+  s?: Partial<Pick<OverlayStatus, 'feePerOutput' | 'minFunding' | 'credits'>> | null,
+): number {
+  const fpo = s?.feePerOutput && s.feePerOutput > 0 ? s.feePerOutput : DEFAULT_FEE_PER_OUTPUT;
+  const min = s?.minFunding && s.minFunding > 0 ? s.minFunding : INDEX_FUND_SATS;
+  const activate = Math.max(0, min - Math.max(0, s?.credits ?? 0));
+  return Math.max(activate + FUNDING_HEADROOM_OUTPUTS * fpo, LAUNCH_INDEX_OUTPUTS * fpo);
+}
+
+/** Issuer "Top up indexing" on an active token: 1,000 more indexed outputs (1,000,000 sats at 1,000 per output). */
+export const TOP_UP_OUTPUTS = 1000;
+/** What a top-up pays: the activating deposit when the token is inactive, else TOP_UP_OUTPUTS outputs. */
+export const topUpSats = (s: OverlayStatus): number =>
+  needsIndexFunding(s) ? launchDepositSats(s) : TOP_UP_OUTPUTS * s.feePerOutput;
+
+/** "$1.80 · 10,010,000 sats" (just the sats when the BSV price is unknown). */
+export const depositValue = (sats: number, fmt: (sats: number) => string): string => {
+  const m = fmt(sats);
+  return /sats/.test(m) ? m : `${m} · ${sats.toLocaleString('en-US')} sats`;
+};
+
+/** Indexed outputs the fund still pays for (a transfer is about 2: recipient + token change). */
+export const outputsLeft = (s: Pick<OverlayStatus, 'balance' | 'feePerOutput'>): number =>
+  s.feePerOutput > 0 ? Math.max(0, Math.floor(s.balance / s.feePerOutput)) : 0;
 
 /** Does this token still need its indexing funded? Unknown status (not seen yet) = yes. */
 export const needsIndexFunding = (s: OverlayStatus | null) => !s || !s.isActive || s.balance < s.feePerOutput;
@@ -148,15 +229,28 @@ export async function fundIndexing(
   ticker: string,
   opts: {
     fund?: number;
+    /** Pay exactly this (what the user approved), instead of the computed amount. */
+    sats?: number;
     status?: OverlayStatus | null;
+    /**
+     * When the indexer hasn't reported the token in time, pay the locally derived fee address
+     * (deriveFeeAddress) instead of failing. The overlay credits it when it next checks the address.
+     */
+    allowDerived?: boolean;
     timeoutMs?: number;
     /** Extra outputs in the SAME tx (the bCorp room setup fee): all paid together or not at all. */
     extraOutputs?: { address: string; satoshis: number; outputDescription: string }[];
   } = {},
 ): Promise<{ txid: string; sats: number; feeAddress: string }> {
-  const status = opts.status ?? (await waitForOverlayStatus(ctx, tokenId, { timeoutMs: opts.timeoutMs }));
+  const derived = deriveFeeAddress(tokenId);
+  let status = opts.status ?? (await waitForOverlayStatus(ctx, tokenId, { timeoutMs: opts.timeoutMs }));
+  if (!status && opts.allowDerived && derived)
+    status = { feeAddress: derived, feePerOutput: DEFAULT_FEE_PER_OUTPUT, isActive: false, balance: 0, minFunding: 0 };
   if (!status) throw new Error(`The indexer hasn't seen $${ticker} yet. Try setting up its room again in a minute.`);
-  const sats = fundAmount(status, opts.fund);
+  // Never pay an address the token's id doesn't lead to (a wrong or tampered indexer answer).
+  if (opts.allowDerived && derived && status.feeAddress !== derived)
+    throw new Error(`The indexer gave $${ticker} a fee address that doesn't match its id. Nothing was sent.`);
+  const sats = opts.sats && opts.sats > 0 ? Math.floor(opts.sats) : fundAmount(status, opts.fund);
   const description = indexFundDescription(ticker);
   let res: { txid?: string };
   try {

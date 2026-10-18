@@ -8,7 +8,7 @@ import { money, moneyWithSats, useBsvUsd } from '../../money/money';
 import { checkSize, formatBytes, iconFile, notifyMinted } from '../../mint/mint';
 import { inscribeIcon } from '../../tickets/mintTicket';
 import { MAX_ICON_BYTES, suggestTicker } from '../../tickets/tickets';
-import { indexCostSats, showOnWallet } from '../../tokens/indexFund';
+import { showOnWallet } from '../../tokens/indexFund';
 import { RETURNS_WARNING, hasReturnsWording } from '../../tokens/returnsWording';
 import type { TokenForm } from '../../tokens/token';
 import { ErrorActions } from '../../errors/ErrorActions';
@@ -18,24 +18,38 @@ import { useBottomMenu } from '../../../hooks/useBottomMenu';
 import { asMenuItem } from '../../tabs/tabs';
 import { CATEGORIES } from '../registry/catalog';
 import {
+  DEPOSIT_NOTE,
   LAUNCH_DISCLAIMER,
   LAUNCH_NOTICE,
   launchPrefill,
   approvalLines,
   defaultLaunchOptions,
   emptyLaunchForm,
+  costSummary,
+  depositValue,
   launchCost,
   mapBytes,
   validateLaunch,
   validateOptions,
+  validateVest,
   withOptions,
   type Launch,
   type LaunchOptions,
 } from './launch';
-import { deployLaunch } from './launchNet';
+import { deployLaunch, payLaunchDeposit, retryVesting } from './launchNet';
+import { defaultVestPlan, scheduleSummary, type VerifiedVesting, type VestPlan } from './vesting';
+import { KeepForYourself } from './VestingSection';
 
 const CATEGORY_SLUGS = CATEGORIES.map((c) => c.slug);
-type Done = { launch: Launch; supply: string; roomError: boolean; indexError: string | null };
+type Done = {
+  launch: Launch;
+  supply: string;
+  roomError: boolean;
+  indexError: string | null;
+  vesting: VerifiedVesting | null;
+  vestError: string | null;
+  depositSats: number;
+};
 
 /**
  * Exchange › Launchpad › Launch your own coin: name, ticker, supply (1B default), icon, then ONE
@@ -66,6 +80,9 @@ export const LaunchCoin = () => {
   const [done, setDone] = useState<Done | null>(null);
   const [opts, setOpts] = useState<LaunchOptions>(() => ({ ...defaultLaunchOptions(), ...prefill.options }));
   const [advanced, setAdvanced] = useState(false);
+  const [vest, setVest] = useState<VestPlan>(defaultVestPlan);
+  const [doneVest, setDoneVest] = useState<{ plan: VestPlan; form: TokenForm; opts: LaunchOptions } | null>(null);
+  const [vestBusy, setVestBusy] = useState(false);
   const { handleSelect } = useBottomMenu();
   const setOpt = <K extends keyof LaunchOptions>(k: K, v: LaunchOptions[K]) => setOpts((o) => ({ ...o, [k]: v }));
   const fileRef = useRef<HTMLInputElement>(null);
@@ -73,12 +90,21 @@ export const LaunchCoin = () => {
   useEffect(() => () => void (icon && URL.revokeObjectURL(icon.url)), [icon]);
 
   const cost = launchCost(icon?.file.size ?? 0, chromeStorageService.getCustomFeeRate(), undefined, {
-    indexNow: opts.indexNow,
     mapBytes: mapBytes(form, opts),
+    vest,
   });
-  const check = () => validateLaunch(withOptions(form, opts)) ?? validateOptions(opts, CATEGORY_SLUGS);
+  const check = () =>
+    validateLaunch(withOptions(form, opts)) ??
+    validateOptions(opts, CATEGORY_SLUGS) ??
+    validateVest(withOptions(form, opts), vest);
+  const wholeSupply = (() => {
+    try {
+      return BigInt((form.supply || '0').replace(/[,_\s]/g, '') || '0');
+    } catch {
+      return 0n;
+    }
+  })();
   const fmt = (sats: number) => money(sats, rate);
-  const fmtIndex = fmt(indexCostSats());
 
   const set = (k: keyof TokenForm) => (v: string) =>
     setForm((f) => ({ ...f, [k]: v, ...(k === 'name' && !tickerTouched ? { ticker: suggestTicker(v) } : {}) }));
@@ -114,11 +140,17 @@ export const LaunchCoin = () => {
     try {
       const iconOutpoint = icon ? await inscribeIcon(apiContext, icon.file, form.ticker.trim(), 'coin') : null;
       // The flat launch fee rides on the deploy tx as its own labelled output (no fee address = none).
-      const res = await deployLaunch(apiContext, form, opts, { icon: iconOutpoint, launchFeeSats: cost.launchFeeSats });
+      const res = await deployLaunch(apiContext, form, opts, {
+        icon: iconOutpoint,
+        launchFeeSats: cost.launchFeeSats,
+        depositSats: cost.depositSats,
+        vest,
+      });
+      setDoneVest({ plan: vest, form, opts });
       void showOnWallet(chromeStorageService, res.launch.tokenId);
       notifyMinted();
       setSheet(false);
-      setDone(res);
+      setDone({ ...res, depositSats: cost.depositSats });
     } catch (e) {
       setSheet(false);
       setError(e instanceof Error ? e.message : 'Launch failed');
@@ -127,8 +159,42 @@ export const LaunchCoin = () => {
     }
   };
 
+  // The deposit failed after the deploy: retry it alone (same approved amount, never twice).
+  const retryDeposit = async () => {
+    if (!done) return;
+    setBusy('Paying indexing deposit…');
+    try {
+      await payLaunchDeposit(apiContext, done.launch.tokenId, done.launch.ticker, done.depositSats);
+      setDone({ ...done, indexError: null });
+    } catch (e) {
+      setDone({ ...done, indexError: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy('');
+    }
+  };
+
   const input = 'w-full rounded-xl px-3 py-2.5 text-sm outline-none border bg-transparent text-white';
   const inputStyle = { borderColor: LINE };
+
+  const lockNow = async () => {
+    if (!done || !doneVest) return;
+    setVestBusy(true);
+    try {
+      const v = await retryVesting(
+        apiContext,
+        doneVest.form,
+        doneVest.opts,
+        done.launch.tokenId,
+        done.launch.icon,
+        doneVest.plan,
+      );
+      setDone({ ...done, vesting: v, vestError: null });
+    } catch (e) {
+      setDone({ ...done, vestError: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setVestBusy(false);
+    }
+  };
 
   if (done) {
     const l = done.launch;
@@ -138,12 +204,34 @@ export const LaunchCoin = () => {
           <Check size={18} color="#A1FF8B" /> ${l.ticker} is launched
         </div>
         <p className="text-sm m-0" style={{ color: MUTED }}>
-          {BigInt(done.supply).toLocaleString('en-US')} ${l.ticker} are in your wallet. Its Exchange page is live; it
-          shows trades once the token is indexed (usually a few minutes).
+          {BigInt(done.supply).toLocaleString('en-US')} ${l.ticker} are yours
+          {done.vesting ? ', with your kept share locked' : ''}. Its Exchange page is live; it shows trades once the
+          token is indexed (usually a few minutes).
         </p>
         <p className="text-[11px] break-all m-0" style={{ color: MUTED }}>
           {l.tokenId}
         </p>
+        {done.vesting && (
+          <p className="text-xs m-0" style={{ color: MUTED }}>
+            Your {done.vesting.receipt.keepBps / 100}% share is locked: {scheduleSummary(done.vesting.receipt)}. The
+            public receipt is on chain and on the coin&apos;s Exchange page; claim each lock there once it opens.
+          </p>
+        )}
+        {done.vestError && (
+          <div className="flex flex-col gap-1.5">
+            <p className="text-xs m-0" style={{ color: '#FF6B6B' }}>
+              Your share is NOT locked yet ({done.vestError}). The coin has no vesting receipt until you lock it.
+            </p>
+            <button
+              type="button"
+              disabled={vestBusy}
+              onClick={() => void lockNow()}
+              className="bw-pill bw-pill-gold min-h-[44px] w-full text-sm font-bold disabled:opacity-60"
+            >
+              {vestBusy ? 'Locking…' : 'Lock my share now'}
+            </button>
+          </div>
+        )}
         <p className="text-xs m-0" style={{ color: MUTED }}>
           {LAUNCH_DISCLAIMER}
         </p>
@@ -151,8 +239,28 @@ export const LaunchCoin = () => {
           {done.roomError
             ? "Its holders' room opens once the token is indexed: open it from Chat or Settings › My tokens."
             : `The holders' room "${l.name}" is open.`}
-          {done.indexError ? ` Indexing wasn't paid (${done.indexError}); pay it any time from the room setup.` : ''}
         </p>
+        {done.indexError ? (
+          <div className="flex flex-col gap-2 rounded-xl border p-3" style={{ borderColor: '#5a2a2a' }}>
+            <p className="text-xs m-0" style={{ color: '#FF6B6B' }}>
+              The indexing deposit wasn't paid: {done.indexError}. Until it is, wallets and the Exchange can't verify $
+              {l.ticker} transfers.
+            </p>
+            <button
+              type="button"
+              disabled={!!busy}
+              onClick={() => void retryDeposit()}
+              className="bw-pill bw-pill-gold min-h-[44px] w-full text-sm font-bold disabled:opacity-60"
+            >
+              {busy || `Pay indexing deposit · ${depositValue(done.depositSats, fmt)}`}
+            </button>
+          </div>
+        ) : (
+          <p className="text-xs m-0" style={{ color: MUTED }}>
+            Indexing deposit paid to GorillaPool ({depositValue(done.depositSats, fmt)}). Top it up any time from the
+            coin's Exchange page.
+          </p>
+        )}
         <button
           type="button"
           onClick={() => navigate(tradeRoute(l.tokenId))}
@@ -175,6 +283,8 @@ export const LaunchCoin = () => {
           type="button"
           onClick={() => {
             setOpts(defaultLaunchOptions());
+            setVest(defaultVestPlan());
+            setDoneVest(null);
             setDone(null);
             setForm(emptyLaunchForm());
             setTickerTouched(false);
@@ -270,6 +380,7 @@ export const LaunchCoin = () => {
         maxLength={1000}
         onChange={(e) => set('description')(e.target.value)}
       />
+      <KeepForYourself plan={vest} onChange={setVest} supply={wholeSupply} />
       {/* The Launchpad's default disclaimer: written into the coin's on-chain card and shown on its page. */}
       <p className="text-[11px] m-0" style={{ color: MUTED }}>
         {LAUNCH_DISCLAIMER}
@@ -352,18 +463,6 @@ export const LaunchCoin = () => {
               onChange={(e) => setOpt('telegram', e.target.value)}
             />
           </div>
-          <label className="flex items-start gap-2 text-xs cursor-pointer" style={{ color: MUTED }}>
-            <input
-              type="checkbox"
-              className="mt-0.5"
-              checked={opts.indexNow}
-              onChange={(e) => setOpt('indexNow', e.target.checked)}
-            />
-            <span>
-              Pay indexing now ({fmtIndex}) so every wallet shows the coin from the start. You can also do this from the
-              room setup.
-            </span>
-          </label>
           <p className="text-[11px] m-0" style={{ color: MUTED }}>
             Links and category are written on-chain with the coin.
           </p>
@@ -375,10 +474,11 @@ export const LaunchCoin = () => {
         </p>
       )}
       <p className="text-xs m-0" style={{ color: MUTED }}>
-        Launch fee: {cost.launchFeeSats > 0 ? `${fmt(cost.launchFeeSats)} flat` : 'none'} · network ≈{' '}
-        {fmt(cost.networkSats)}
-        {cost.indexSats > 0 ? ` · indexing ${fmt(cost.indexSats)}` : ''} · total ≈ {moneyWithSats(cost.totalSats, rate)}
-        . No share of your coin is taken.
+        Launching costs ≈ {moneyWithSats(cost.totalSats, rate)}: {costSummary(cost, fmt)}. No share of your coin is
+        taken.
+      </p>
+      <p className="text-[11px] m-0" style={{ color: MUTED }}>
+        {DEPOSIT_NOTE}
       </p>
       {error && (
         <div className="flex flex-col gap-1.5">
@@ -393,7 +493,7 @@ export const LaunchCoin = () => {
       </button>
       {sheet && (
         <ApproveSheet
-          lines={approvalLines(withOptions(form, opts), cost, fmt, !!icon, opts)}
+          lines={approvalLines(withOptions(form, opts), cost, fmt, !!icon, opts, vest)}
           total={moneyWithSats(cost.totalSats, rate)}
           busy={busy}
           onAllow={() => void launch()}
@@ -446,7 +546,7 @@ const ApproveSheet = ({
           ))}
         </ul>
         <p className="text-[11px] m-0" style={{ color: MUTED }}>
-          {LAUNCH_NOTICE} {LAUNCH_DISCLAIMER}
+          {DEPOSIT_NOTE} {LAUNCH_NOTICE} {LAUNCH_DISCLAIMER}
         </p>
         <div className="flex items-center justify-between border-t pt-3 text-sm" style={{ borderColor: LINE }}>
           <span style={{ color: MUTED }}>Total</span>

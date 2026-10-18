@@ -4,6 +4,18 @@ import type { ExcessChoice } from './minute';
 import type { BsharesMe, PlacementOffer } from './placement';
 import type { CompanyListing } from './company';
 import type { PartnerLockState, PartnerLockAction } from './partnership/lockState';
+import type { AgreementVersion, Partner } from './partnership/partnership';
+import type { TransferRule } from './partnership/partnerLock';
+
+export type PartnershipRecord = {
+  roomId: string;
+  ticker: string;
+  constitution: string;
+  notice: string;
+  active: AgreementVersion | null;
+  draft: AgreementVersion | null;
+  converted: boolean;
+};
 
 export type NewOffer = {
   investorHandle: string;
@@ -172,6 +184,30 @@ export class BsharesApi {
       }
     }
   };
+  /** The room's partnership: active agreement, open draft, who has signed (room members only). */
+  partnership = (ticker: string) =>
+    this.call<PartnershipRecord>(
+      'GET',
+      `/${encodeURIComponent(ticker)}`,
+      undefined,
+      '/api/bitsign/bshares/partnership',
+    );
+  /** Propose a version: the first (anyone it names) or an admission/removal (a current partner). b drafts the text. */
+  proposePartnership = (ticker: string, body: { partners: Partner[]; rule: TransferRule }) =>
+    this.call<{ id: string; version: number; agreement_sha256: string; agreementText: string }>(
+      'POST',
+      `/${encodeURIComponent(ticker)}`,
+      body,
+      '/api/bitsign/bshares/partnership',
+    );
+  /** Sign the open draft with the identity key (the server verifies the signature over signMessage()). */
+  signPartnership = (ticker: string, body: { identityKey: string; at: string; signature: string }) =>
+    this.call<{ ok: true; active: boolean; signed: string[]; waitingFor?: string[]; amendment?: string | null }>(
+      'POST',
+      `/${encodeURIComponent(ticker)}/sign`,
+      body,
+      '/api/bitsign/bshares/partnership',
+    );
   partnerLockAction = (ticker: string, body: PartnerLockAction) =>
     this.call<{ ok: true; id?: string }>(
       'POST',
