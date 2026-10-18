@@ -110,7 +110,7 @@ describe('AI consent (Apple 5.1.2(i))', () => {
     expect(consentTarget('paid', 'openai')).toBe('paid');
     expect(consentTarget('own', 'openrouter')).toBe('openrouter');
     expect(consentInfo('paid').provider).toBe('Anthropic');
-    expect(consentInfo('paid').route).toContain('bitcoinchat.online');
+    expect(consentInfo('paid').route).toContain('bchatx.com');
     expect(consentInfo('openai').provider).toBe('OpenAI');
   });
   test('the sheet states the real turn limit and what is not sent', () => {
