@@ -140,6 +140,7 @@ export const CSS_KEEP: Record<string, string> = {
   '.bw-bcar-unfocus': 'scrim behind a focused card',
   '.bw-abook': 'modal scrim',
   '.yours-sheet-backdrop': 'sheet scrim',
+  '.ag-sheet-back': 'sign sheet scrim (bMail › Agreements)',
   '.bw-wcard-face': 'wallet card; White repaints it (.bw-wcard-face.is-themed)',
   '.bw-wcard-art-shade': 'shade over card art; White hides it',
   '.bw-wcard-getname': 'chip on the yellow card (Gold only)',

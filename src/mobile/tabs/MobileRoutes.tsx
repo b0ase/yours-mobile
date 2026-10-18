@@ -46,8 +46,9 @@ const JoinArtistPage = ARTIST_PROGRAMME_ENABLED
 const AddReleasePage = RELEASES_ENABLED ? lazy(() => import('../media/releases/AddReleasePage')) : null;
 const AgentPage = lazy(() => import('../agent/AgentPage'));
 const MyReportsPage = lazy(() => import('../agent/MyReportsPage'));
-// Bureau: bWalletX only (storeBuild.ts BUREAU_ENABLED); the chunk is not built for the stores.
-const BureauPage = BUREAU_ENABLED ? lazy(() => import('../bureau/BureauPage')) : null;
+// bMail › Agreements (was the Bureau): bWalletX only (storeBuild.ts BUREAU_ENABLED); not built for the stores.
+const AgreementsPage = BUREAU_ENABLED ? lazy(() => import('../bureau/AgreementsPage')) : null;
+const BitSignImportPage = BUREAU_ENABLED ? lazy(() => import('../bureau/BitSignImportPage')) : null;
 // The top bar's mailbox: bMail in the content area, between the top bar and the tab bar.
 const BMailPage = lazy(() => import('../bmail/BMailPage'));
 // The top bar's phone button: bPhone Calls in the content area (active calls stay full-screen via CallScreen).
@@ -113,7 +114,10 @@ const MobileRoutes = () => (
         <Route path="ask-b" element={<AgentPage />} />
         {/* Everything you told b, and where each report stands (18 Oct 2026). */}
         <Route path="reports" element={<MyReportsPage />} />
-        {BureauPage && <Route path="bureau" element={<BureauPage />} />}
+        {AgreementsPage && <Route path="bmail/agreements" element={<AgreementsPage />} />}
+        {BitSignImportPage && <Route path="bmail/agreements/bit-sign" element={<BitSignImportPage />} />}
+        {/* The Bureau moved into bMail (18 Oct 2026): old links land there. */}
+        {AgreementsPage && <Route path="bureau" element={<Navigate to="/m/bmail/agreements" replace />} />}
         {/* Old links (/agent, /m/agent) keep working (renamed Ask b, 12 Oct 2026). */}
         <Route path="agent" element={<Navigate to="/m/ask-b" replace />} />
         <Route path="bmail" element={<BMailPage />} />

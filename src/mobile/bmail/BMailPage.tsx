@@ -1,4 +1,5 @@
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
+import { BUREAU_ENABLED } from '../storeBuild';
 import { TopNav } from '../../components/TopNav';
 import { BMailScreen } from './BMailScreen';
 import { VideoBackground } from '../ui/VideoBackground';
@@ -13,6 +14,8 @@ const BMailPage = () => {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const want = params.get('tab');
+  // ?tab=agreements: the Agreements box has its own wide page.
+  if (BUREAU_ENABLED && want === 'agreements') return <Navigate to="/m/bmail/agreements" replace />;
   const tab = want === 'requests' || want === 'quarantine' || want === 'bin' ? want : 'inbox';
   return (
     // Top padding = the fixed TopNav (h-14); bottom = the tab bar / dock (--dock-h), as AgentPage.
