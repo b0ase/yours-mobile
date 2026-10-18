@@ -130,7 +130,9 @@ import { LoungeCard } from '../chat/LoungeCard';
 import { HELP_DESK_NAME, isLounge, LOUNGE_TICKER } from '../chat/loungeInfo';
 import { setHelpDeskUnpinned, useHelpDeskPinned } from '../chat/helpDeskPin';
 import { roomSpaceOpen } from '../spaces/model';
-import { RoomFilterChips, SpacesRoomList, type RoomFilter } from '../spaces/SpacesFilter';
+import { RoomFilterChips, SpacesRoomList } from '../spaces/SpacesFilter';
+import { loadRoomFilter, saveRoomFilter, type RoomFilter } from '../spaces/roomFilterPref';
+import { isBappRoom } from '../chat/bappRooms';
 import { guardedSendBsv21 } from '../../services/tokenSpendGuard';
 
 /** Store build: token rooms are listed but never opened, joined or bought into (storeBuild.ts). */
@@ -2302,8 +2304,12 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   const [lookups, setLookups] = useState<Record<string, TokenRoomLookup>>({});
   const [listError, setListError] = useState('');
   const [query, setQuery] = useState('');
-  // Chat filters (bWalletX only): All, or Spaces = token rooms with a space on (spaces/SpacesFilter.tsx).
-  const [roomFilter, setRoomFilter] = useState<RoomFilter>('all');
+  // Chat filters (bWalletX only): Rooms | Spaces | bApps, remembered per device (spaces/SpacesFilter.tsx).
+  const [roomFilter, setRoomFilterState] = useState<RoomFilter>(loadRoomFilter);
+  const setRoomFilter = (f: RoomFilter) => {
+    setRoomFilterState(f);
+    saveRoomFilter(f);
+  };
   const [open, setOpen] = useState<{ room: ChatRoom; entry: TokenRoomEntry | null; joinSpace?: boolean } | null>(null);
   const [locked, setLocked] = useState<{ gate: TokenGate; heldRaw: string | null; members: number | null } | null>(
     null,
@@ -2648,7 +2654,15 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
       },
     );
   }, [myOpen, tokenMine, prefs, helpDeskPinned]);
-  const yours = arranged.main;
+  // Rooms hides bApp rooms; bApps shows only them. The store build has no chips, so nothing is filtered there.
+  const bappsView = BSPACES_ENABLED && roomFilter === 'bapps';
+  const keepTicker = (t: string | null | undefined) => !BSPACES_ENABLED || isBappRoom(t) === bappsView;
+  const keepYour = (y: (typeof arranged.main)[number]) =>
+    keepTicker(y.kind === 'open' ? y.room.ticker : (y.item.e.room?.ticker ?? y.item.e.gate.symbol));
+  const yours = arranged.main.filter(keepYour);
+  const archivedShown = arranged.archived.filter(keepYour);
+  const browseShown = browse.filter((r) => keepTicker(r.ticker));
+  const tokenOtherShown = tokenOther.filter(({ e }) => keepTicker(e.room?.ticker ?? e.gate.symbol));
   // A new message brings an archived (not muted) or deleted chat back: record that.
   useEffect(() => {
     if (arranged.unarchive.length || arranged.unhide.length) updatePrefs((p) => settle(p, arranged));
@@ -3103,10 +3117,28 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           </div>
         )}
 
+        {/* The Help Desk card stays pinned above the filters, whichever is picked. */}
+        {handle && rooms && (
+          <>
+            {helpDeskPinned && (
+              <LoungeCard
+                client={client}
+                room={(rooms ?? []).find((r) => isLounge(r.ticker)) ?? null}
+                me={handle}
+                preview={(() => {
+                  const r = (rooms ?? []).find((x) => isLounge(x.ticker));
+                  return r ? previewText(r, handle) : '';
+                })()}
+                onOpen={() => void openLounge(false)}
+                onJoin={() => void openLounge(true)}
+                onUnpin={() => setHelpDeskUnpinned(true)}
+              />
+            )}
+          </>
+        )}
         {BSPACES_ENABLED && ROOMS && handle && rooms && <RoomFilterChips value={roomFilter} onChange={setRoomFilter} />}
-        {BSPACES_ENABLED && ROOMS && handle && rooms && roomFilter !== 'rooms' && (
+        {BSPACES_ENABLED && ROOMS && handle && rooms && roomFilter === 'spaces' && (
           <SpacesRoomList
-            quiet={roomFilter === 'all'}
             client={client}
             me={handle}
             items={tokenMine.flatMap(({ e }) =>
@@ -3123,28 +3155,17 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
 
         {handle && rooms && (!BSPACES_ENABLED || roomFilter !== 'spaces') && (
           <>
-            {helpDeskPinned && (
-              <LoungeCard
-                client={client}
-                room={(rooms ?? []).find((r) => isLounge(r.ticker)) ?? null}
-                me={handle}
-                preview={(() => {
-                  const r = (rooms ?? []).find((x) => isLounge(x.ticker));
-                  return r ? previewText(r, handle) : '';
-                })()}
-                onOpen={() => void openLounge(false)}
-                onJoin={() => void openLounge(true)}
-                onUnpin={() => setHelpDeskUnpinned(true)}
-              />
-            )}
-            <ListLabel>Your rooms</ListLabel>
-            {yours.length === 0 && arranged.archived.length === 0 && (
+            <ListLabel>{bappsView ? 'Your bApp rooms' : 'Your rooms'}</ListLabel>
+            {yours.length === 0 && archivedShown.length === 0 && (
               <p className="px-4 pb-2 text-xs" style={{ color: MUTED }}>
-                You haven’t joined any rooms yet. Pick a public room below or start your own.
+                {bappsView
+                  ? 'No bApp rooms yet. Join bRadio Lounge below to hear live shows, or open a bApp’s room from its page.'
+                  : 'You haven’t joined any rooms yet. Pick a public room below or start your own.'}
               </p>
             )}
             <ul className="w-full">
               {ROOMS &&
+                !bappsView &&
                 ownTokens(identityAddress).map((t) => (
                   <SetupRoomRow
                     key={t.tokenId}
@@ -3162,25 +3183,29 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
                 ))}
               <ArchivedGroup
                 identity={handle}
-                count={arranged.archived.length}
-                unread={arranged.archived.reduce(
+                count={archivedShown.length}
+                unread={archivedShown.reduce(
                   (n, y) => n + ((y.kind === 'open' ? y.room.unread : y.item.e.room?.unread) ?? 0),
                   0,
                 )}
               >
-                {arranged.archived.map(renderYour)}
+                {archivedShown.map(renderYour)}
               </ArchivedGroup>
               {yoursShown.map(renderYour)}
             </ul>
 
-            <ListLabel>Public rooms</ListLabel>
-            {browse.length === 0 && (
+            <ListLabel>{bappsView ? 'More bApp rooms' : 'Public rooms'}</ListLabel>
+            {browseShown.length === 0 && (
               <p className="px-4 pb-2 text-xs" style={{ color: MUTED }}>
-                {query ? 'No public rooms match.' : 'No other public rooms right now. Start one.'}
+                {query
+                  ? 'No public rooms match.'
+                  : bappsView
+                    ? 'You’re in every bApp room open to the public.'
+                    : 'No other public rooms right now. Start one.'}
               </p>
             )}
             <ul className="w-full">
-              {browse.map((r) => (
+              {browseShown.map((r) => (
                 <li key={r.ticker} className="flex items-center gap-3 px-4 py-[10px]">
                   <Avatar title={r.name} />
                   <div className="flex-1 min-w-0">
@@ -3206,7 +3231,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
             </ul>
 
             {/* Token rooms: full build only. The store build hides the section entirely (storeBuild.ts). */}
-            {ROOMS && (
+            {ROOMS && !bappsView && (
               <>
                 <ListLabel>Token rooms</ListLabel>
                 {entries === null && <SkeletonRows count={3} label="Loading token rooms" />}
@@ -3227,12 +3252,12 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
                     )}
                   </div>
                 )}
-                {entries && entries.length > 0 && tokenOther.length === 0 && (
+                {entries && entries.length > 0 && tokenOtherShown.length === 0 && (
                   <p className="px-4 pb-2 text-xs" style={{ color: MUTED }}>
                     You’re in every token room you hold. They’re under Your rooms.
                   </p>
                 )}
-                <ul className="w-full">{tokenOther.map(renderTokenRow)}</ul>
+                <ul className="w-full">{tokenOtherShown.map(renderTokenRow)}</ul>
               </>
             )}
           </>
