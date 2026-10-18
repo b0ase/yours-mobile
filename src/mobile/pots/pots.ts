@@ -13,7 +13,7 @@ import {
   markAgentAccount,
   setAgentDailyCap,
 } from '../agents/agentAccounts';
-import { SUBSCRIPTIONS_ENABLED } from '../storeBuild';
+import { PNEE_POTS_ENABLED, SUBSCRIPTIONS_ENABLED } from '../storeBuild';
 import type { RemoteConfig } from '../config/remoteConfig';
 
 export type Pot = {
@@ -194,7 +194,11 @@ export const usdToPnee = (usd: number) => Math.round(usd * 100);
 
 /** The amount a pot's orders are kept in: PNEE pots pay PNEEs, BSV pots pay dollars (or sats) in BSV. */
 export const potCurrencyOk = (unit: Pot['unit'], currency: Currency) =>
-  unit === 'PNEE' ? currency === 'PNEE' : currency !== 'PNEE';
+  !PNEE_POTS_ENABLED && (unit === 'PNEE' || currency === 'PNEE')
+    ? false
+    : unit === 'PNEE'
+      ? currency === 'PNEE'
+      : currency !== 'PNEE';
 
 /** One payment in dollars (for the spend gate and log). */
 export const amountUsd = (amount: Subscription['amount'], bsvUsd: number): number => {
@@ -347,6 +351,7 @@ export const makePot = (identityAddress: string, name: string, emoji?: string, n
  * up in. Returns whether it changed.
  */
 export const setPotUnit = (id: string, unit: Pot['unit']): boolean => {
+  if (!PNEE_POTS_ENABLED) return false;
   const p = getPot(id);
   if (!p || p.unit === unit) return false;
   if (listSubs(id).some((s) => s.status !== 'cancelled' && s.status !== 'ended')) return false;
@@ -384,7 +389,11 @@ export const subProblem = (n: NewSub, subsOn = SUBSCRIPTIONS_ENABLED): string | 
   if (!(n.amount.value > 0) || !Number.isFinite(n.amount.value)) return 'Enter an amount';
   const pot = getPot(n.potId)!;
   if (!potCurrencyOk(pot.unit, n.amount.currency))
-    return pot.unit === 'PNEE' ? 'This pot pays in PNEEs' : 'PNEE orders need a PNEE pot';
+    return PNEE_POTS_ENABLED
+      ? pot.unit === 'PNEE'
+        ? 'This pot pays in PNEEs'
+        : 'PNEE orders need a PNEE pot'
+      : 'That amount isn’t available';
   if (n.amount.currency === 'PNEE' && amountPnee(n.amount) === null) return 'Enter a whole number of cents';
   if (n.maxCount !== null && !(Number.isInteger(n.maxCount) && n.maxCount > 0 && n.maxCount <= 1000))
     return 'Number of payments must be 1–1000';
@@ -459,7 +468,9 @@ export const formatAmount = (a: Subscription['amount']) =>
     ? `$${a.value.toFixed(2)}`
     : a.currency === 'SAT'
       ? `${a.value.toLocaleString()} sats`
-      : `$${(a.value / 100).toFixed(2)} in PNEEs`;
+      : PNEE_POTS_ENABLED
+        ? `$${(a.value / 100).toFixed(2)} in PNEEs`
+        : `$${(a.value / 100).toFixed(2)}`;
 
 // ── Pots & Locks › Subscriptions (owner, 10 Oct 2026) ──────────────────────────────────────────────────────
 

@@ -13,6 +13,7 @@ import {
   signFromPot,
   signPneeFromPot,
 } from './potSend';
+import { PNEE_POTS_ENABLED } from '../storeBuild';
 import { notifyLowFunds, notifyPot, reschedulePotReminders } from './notifyPots';
 
 /**
@@ -43,8 +44,13 @@ const tick = async () => {
     resolve: payeeAddress,
     sign: (potId, outputs, memo) => signFromPot(e.store, potId, outputs, memo),
     broadcast: broadcastRaw,
-    signPnee: (potId, outputs, memo) => signPneeFromPot(e.store, potId, outputs, memo),
-    broadcastPnee,
+    ...(PNEE_POTS_ENABLED
+      ? {
+          signPnee: (potId: string, outputs: Parameters<typeof signPneeFromPot>[2], memo?: string) =>
+            signPneeFromPot(e.store, potId, outputs, memo),
+          broadcastPnee,
+        }
+      : {}),
     confirm: confirmCatchUp,
     notify: (t, b) => void notifyPot(t, b),
   }).catch(() => []);
@@ -52,6 +58,7 @@ const tick = async () => {
     const subs = listSubs(p.identityAddress);
     if (!subs.some((s) => s.status === 'active' || s.status === 'lowFunds')) continue;
     if (p.unit === 'PNEE') {
+      if (!PNEE_POTS_ENABLED) continue;
       const units = await potPneeUnits(e.store, p.identityAddress).catch(() => null);
       if (units !== null && isLowFunds(potCoversPnee(subs, units)))
         notifyLowFunds(p.identityAddress, p.name, potCoversPnee(subs, units));

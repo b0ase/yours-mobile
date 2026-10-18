@@ -27,7 +27,7 @@ import {
 } from './pots';
 import { potBalanceSats, potPneeUnits } from './potSend';
 import { SubscriptionCard } from './SubscriptionCard';
-import { POTS_INTRO } from '../storeBuild';
+import { PNEE_POTS_ENABLED, POTS_INTRO } from '../storeBuild';
 import { AddOrderSheet, CreatePotSheet } from './CreatePotSheet';
 import { BackFundSheet } from './BackFundSheet';
 import { fundAvailable } from './fund';
@@ -64,6 +64,7 @@ const useTick = () => {
 
 /** A pot's balance in its own unit: sats for a BSV pot, PNEE units (cents) for a PNEE pot. null while loading. */
 const usePotBalance = (id: string, unit: 'BSV' | 'PNEE' = 'BSV') => {
+  if (!PNEE_POTS_ENABLED) unit = 'BSV';
   const { chromeStorageService } = useServiceContext();
   const [bal, setBal] = useState<number | null>(null);
   useEffect(() => {
@@ -82,7 +83,8 @@ const usePotBalance = (id: string, unit: 'BSV' | 'PNEE' = 'BSV') => {
 /** Balance in dollars, how many payments it covers, and a fallback label, for either kind of pot. */
 const potFunds = (unit: 'BSV' | 'PNEE', bal: number | null, subs: Subscription[], rate: number) => {
   if (bal === null) return { usd: null, covers: null, label: '…' };
-  if (unit === 'PNEE') return { usd: bal / 100, covers: potCoversPnee(subs, bal), label: `$${(bal / 100).toFixed(2)}` };
+  if (PNEE_POTS_ENABLED && unit === 'PNEE')
+    return { usd: bal / 100, covers: potCoversPnee(subs, bal), label: `$${(bal / 100).toFixed(2)}` };
   const usd = rate > 0 ? (bal / 1e8) * rate : null;
   return {
     usd,
@@ -90,6 +92,9 @@ const potFunds = (unit: 'BSV' | 'PNEE', bal: number | null, subs: Subscription[]
     label: usd !== null ? `$${usd.toFixed(2)}` : `${bal.toLocaleString()} sats`,
   };
 };
+
+/** A pot's unit as this build sees it: a store build has BSV pots only. */
+const potUnit = (u: 'BSV' | 'PNEE' | undefined): 'BSV' | 'PNEE' => (PNEE_POTS_ENABLED && u === 'PNEE' ? 'PNEE' : 'BSV');
 
 const Header = ({ title, onBack }: { title: string; onBack: () => void }) => (
   <div className="flex items-center gap-2 px-2 pb-2" style={{ paddingTop: 'max(env(safe-area-inset-top), 12px)' }}>
@@ -108,10 +113,10 @@ const LowBadge = () => (
 
 const PotRow = ({ id, onOpen, rate }: { id: string; onOpen: () => void; rate: number }) => {
   const pot = getPot(id);
-  const bal = usePotBalance(id, pot?.unit);
+  const bal = usePotBalance(id, potUnit(pot?.unit));
   const subs = listSubs(id);
   const live = subs.filter((s) => s.status === 'active' || s.status === 'lowFunds');
-  const { covers, label } = potFunds(pot?.unit ?? 'BSV', bal, subs, rate);
+  const { covers, label } = potFunds(potUnit(pot?.unit), bal, subs, rate);
   if (!pot) return null;
   return (
     <button
@@ -128,7 +133,7 @@ const PotRow = ({ id, onOpen, rate }: { id: string; onOpen: () => void; rate: nu
         </div>
         <div className="text-[11px]" style={{ color: MUTED }}>
           {label}
-          {pot.unit === 'PNEE' ? ' in PNEEs' : ''}
+          {PNEE_POTS_ENABLED && pot.unit === 'PNEE' ? ' in PNEEs' : ''}
           {live.length ? ` · ${live.length} subscription${live.length === 1 ? '' : 's'}` : ''}
           {live.length && covers !== null ? ` · covers ${covers >= 99 ? '99+' : covers} payments` : ''}
         </div>
@@ -220,9 +225,9 @@ export const PotsScreen = ({ onClose, openFund = false }: { onClose: () => void;
               </button>
             </div>
             <p className="text-xs m-0" style={{ color: MUTED }}>
-              Priced in dollars. Each time one is due, your wallet pays it when you open it: from a BSV pot in BSV at
-              the day&apos;s rate, from a PNEE pot in PNEEs, so $1 is exactly $1. Nothing is paid up front. Cancel any
-              time.
+              {PNEE_POTS_ENABLED
+                ? 'Priced in dollars. Each time one is due, your wallet pays it when you open it: from a BSV pot in BSV at the day’s rate, from a PNEE pot in PNEEs, so $1 is exactly $1. Nothing is paid up front. Cancel any time.'
+                : 'Priced in dollars. Each time one is due, your wallet pays that amount in BSV at the day’s rate when you open it. Nothing is paid up front. Cancel any time.'}
             </p>
             {allSubs.map((sub) => (
               <SubscriptionCard key={sub.id} sub={sub} rate={rate} pots={pots} />
@@ -302,7 +307,7 @@ const PotScreen = ({
   const { chromeStorageService } = useServiceContext();
   const pot = getPot(id);
   const agent = getAgentAccount(id);
-  const unit = pot?.unit ?? 'BSV';
+  const unit = potUnit(pot?.unit);
   const bal = usePotBalance(id, unit);
   const accounts = chromeStorageService.getAllAccounts?.() ?? [];
   const acct = accounts.find((x) => x.addresses.identityAddress === id);
@@ -337,9 +342,11 @@ const PotScreen = ({
             <PixelGhost color={ghostColorOf(id) ?? GOLD} size={28} />
             <div className="flex-1">
               <div className="text-xl font-bold text-white">{label}</div>
-              <div className="text-xs" style={{ color: MUTED }}>
-                {unit === 'PNEE' ? 'Held in PNEEs: $1 is always $1' : 'Held in BSV'}
-              </div>
+              {PNEE_POTS_ENABLED && (
+                <div className="text-xs" style={{ color: MUTED }}>
+                  {unit === 'PNEE' ? 'Held in PNEEs: $1 is always $1' : 'Held in BSV'}
+                </div>
+              )}
               {covers !== null && subs.some((s) => s.status === 'active' || s.status === 'lowFunds') && (
                 <div className="text-xs" style={{ color: isLowFunds(covers) ? '#FDB022' : MUTED }}>
                   Covers {covers >= 99 ? '99+' : covers} upcoming payment{covers === 1 ? '' : 's'}
@@ -377,32 +384,34 @@ const PotScreen = ({
           </div>
         </div>
 
-        <div className={section} style={{ background: CARD }}>
-          <div className="text-sm font-bold text-white">Pays in</div>
-          <div className="flex gap-2">
-            {(['BSV', 'PNEE'] as const).map((u) => (
-              <button
-                key={u}
-                type="button"
-                disabled={unitLocked && u !== unit}
-                onClick={() => setPotUnit(id, u)}
-                className="flex-1 rounded-lg px-3 py-2 text-xs font-bold border-0"
-                style={{
-                  background: u === unit ? GOLD : LINE,
-                  color: u === unit ? '#000' : '#fff',
-                  opacity: unitLocked && u !== unit ? 0.4 : 1,
-                }}
-              >
-                {u === 'BSV' ? 'BSV' : 'PNEEs ($)'}
-              </button>
-            ))}
+        {PNEE_POTS_ENABLED && (
+          <div className={section} style={{ background: CARD }}>
+            <div className="text-sm font-bold text-white">Pays in</div>
+            <div className="flex gap-2">
+              {(['BSV', 'PNEE'] as const).map((u) => (
+                <button
+                  key={u}
+                  type="button"
+                  disabled={unitLocked && u !== unit}
+                  onClick={() => setPotUnit(id, u)}
+                  className="flex-1 rounded-lg px-3 py-2 text-xs font-bold border-0"
+                  style={{
+                    background: u === unit ? GOLD : LINE,
+                    color: u === unit ? '#000' : '#fff',
+                    opacity: unitLocked && u !== unit ? 0.4 : 1,
+                  }}
+                >
+                  {u === 'BSV' ? 'BSV' : 'PNEEs ($)'}
+                </button>
+              ))}
+            </div>
+            <div className="text-xs" style={{ color: MUTED }}>
+              {unitLocked
+                ? 'Cancel this pot’s subscriptions to change what it pays in.'
+                : 'PNEEs are dollar tokens: payments are exact dollar amounts. The pot keeps a little BSV for network fees.'}
+            </div>
           </div>
-          <div className="text-xs" style={{ color: MUTED }}>
-            {unitLocked
-              ? 'Cancel this pot’s subscriptions to change what it pays in.'
-              : 'PNEEs are dollar tokens: payments are exact dollar amounts. The pot keeps a little BSV for network fees.'}
-          </div>
-        </div>
+        )}
 
         <div className="flex items-center justify-between pt-1">
           <span className="text-sm font-bold text-white">Subscriptions</span>
@@ -426,7 +435,7 @@ const PotScreen = ({
 
         <div className={section} style={{ background: CARD }}>
           <div className="text-sm font-bold text-white">Top up</div>
-          {unit === 'PNEE' && (
+          {PNEE_POTS_ENABLED && unit === 'PNEE' && (
             <div className="text-xs" style={{ color: MUTED }}>
               Send PNEEs to this address, plus a few cents of BSV for network fees.
             </div>

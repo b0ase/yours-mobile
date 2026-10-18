@@ -308,6 +308,18 @@ export const SUBSCRIPTIONS_ENABLED: boolean = !(
 export const subscriptionsEnabled = (store = STORE_BUILD) => !store;
 
 /**
+ * Pots in PNEEs (PR 128): a pot that holds PNEEs (dollar tokens) and pays standing orders in them. bWalletX only
+ * (owner, 18 Oct 2026): a dollar-pegged token is kept out of the App Store and Play builds, so the "Pays in"
+ * switch, the PNEE copy and the PNEE signing / overlay calls sit behind this literal env check and Rollup drops
+ * them. Store builds treat every pot as a BSV pot. Same env as STORE_BUILD (storeBuild.test.ts).
+ */
+export const PNEE_POTS_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+
+/**
  * The bWalletX 1¢/day billing subscription: never in a store build. Outside one it still needs the signed
  * remote switch and the user's acceptance (config/remoteConfig.ts), and it is OFF today.
  */

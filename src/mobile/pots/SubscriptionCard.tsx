@@ -1,3 +1,4 @@
+import { PNEE_POTS_ENABLED } from '../storeBuild';
 import {
   amountSats,
   cancelSub,
@@ -105,8 +106,10 @@ export const SubscriptionCard = ({
       {sub.lastReceipt && (
         <div className="text-xs truncate" style={{ color: MUTED }}>
           Last paid {day(sub.lastReceipt.at)} · ${sub.lastReceipt.usd.toFixed(2)} ·{' '}
-          {sub.amount.currency === 'PNEE' ? 'in PNEEs' : `${(sub.lastReceipt.sats / 1e8).toFixed(8)} BSV`} ·{' '}
-          {sub.lastReceipt.txid.slice(0, 10)}…
+          {PNEE_POTS_ENABLED && sub.amount.currency === 'PNEE'
+            ? 'in PNEEs'
+            : `${(sub.lastReceipt.sats / 1e8).toFixed(8)} BSV`}{' '}
+          · {sub.lastReceipt.txid.slice(0, 10)}…
         </div>
       )}
       {sub.lastError && !over && (
