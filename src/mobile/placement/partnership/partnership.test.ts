@@ -157,6 +157,8 @@ describe('agreement', () => {
   });
   test('the wallet signs only the exact standard text', () => {
     expect(agreementProblem(draft)).toBeNull();
+    expect(agreementProblem(draft, input.ticker)).toBeNull();
+    expect(agreementProblem(draft, 'OTHER')).toContain('different token');
     expect(agreementProblem({ ...draft, agreementText: text.replace('40%', '45%') })).toContain('differs');
     expect(agreementProblem({ ...draft, partners: admitPartner(ICE, { handle: 'max', name: 'M' }, 1000) })).toContain(
       'differs',

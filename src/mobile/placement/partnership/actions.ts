@@ -141,9 +141,9 @@ export async function broadcastProposal(p: PartnerProposal): Promise<{ txid: str
  */
 export async function signAgreement(
   ctx: OneSatContext,
-  a: { roomId: string; handle: string; draft: AgreementVersion },
+  a: { roomId: string; handle: string; draft: AgreementVersion; ticker?: string },
 ): Promise<{ identityKey: string; at: string; signature: string }> {
-  const problem = agreementProblem(a.draft);
+  const problem = agreementProblem(a.draft, a.ticker);
   if (problem) throw new Error(`Not signed: ${problem}`);
   const at = new Date().toISOString();
   const message = signMessage({

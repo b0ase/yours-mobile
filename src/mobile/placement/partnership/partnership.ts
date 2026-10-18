@@ -211,11 +211,14 @@ export type AgreementVersion = {
  */
 export function agreementProblem(
   v: Pick<AgreementVersion, 'version' | 'partners' | 'rule' | 'agreementText' | 'agreementSha256'>,
+  expectTicker?: string,
 ): string | null {
   const [l1 = '', l2 = ''] = v.agreementText.split('\n');
   const h1 = /^PARTNERSHIP AGREEMENT — (.+) \(\$([^)]+)\)$/.exec(l1);
   const h2 = /^Version (\d+)(?:, replacing version (\d+))? · (\d{4}-\d{2}-\d{2})$/.exec(l2);
   if (!h1 || !h2) return 'This agreement is not in the standard form.';
+  if (expectTicker && h1[2].toUpperCase() !== expectTicker.replace(/^\$/, '').toUpperCase())
+    return 'The agreement names a different token.';
   if (Number(h2[1]) !== v.version) return 'The version in the text does not match the draft.';
   const again = agreementText({
     roomName: h1[1],

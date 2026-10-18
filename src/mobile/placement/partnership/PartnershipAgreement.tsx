@@ -171,7 +171,7 @@ export function PartnershipAgreement({ api, ticker }: { api: BsharesApi; ticker:
   if (!rec) return null;
 
   const { active, draft } = rec;
-  const draftProblem = draft ? agreementProblem(draft) : null;
+  const draftProblem = draft ? agreementProblem(draft, ticker) : null;
   const iSigned = !!draft?.signed.includes(me);
   const mayAmend = !!active?.partners.some((p) => p.handle === me);
   const newBps = pctToBps(joiner.pct);
@@ -188,7 +188,7 @@ export function PartnershipAgreement({ api, ticker }: { api: BsharesApi; ticker:
 
   const sign = run(async () => {
     if (!draft) return;
-    const s = await signAgreement(ctx, { roomId: rec.roomId, handle: me, draft });
+    const s = await signAgreement(ctx, { roomId: rec.roomId, handle: me, draft, ticker });
     const r = await api.signPartnership(ticker, s);
     if (r.active) return 'Signed by everyone: the agreement is in force.';
     return `Signed. Waiting for ${(r.waitingFor ?? []).map((h) => `$${h}`).join(', ') || 'the other partners'}.${
