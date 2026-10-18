@@ -7,6 +7,7 @@ import { useAvatar } from '../names/useAvatar';
 import { AccountList, AgentMark } from '../account/AccountSwitcher';
 import { useAccountSwitch } from '../account/accountSwitch';
 import { StorageBadge } from './StorageBadge';
+import { NameAccountPrompt } from './NameAccountPrompt';
 
 const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
@@ -51,6 +52,7 @@ export const SettingsAccountHeader = () => {
           <AccountList current={id} switchingTo={switchingTo} onSwitch={(to) => void switchAccount(to)} compact />
         </div>
       )}
+      <NameAccountPrompt />
       <StorageBadge />
     </div>
   );

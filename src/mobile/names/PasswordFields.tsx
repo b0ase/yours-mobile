@@ -107,7 +107,8 @@ export const PasswordFields = ({
             type={type}
             name="confirm-password"
             autoComplete="new-password"
-            placeholder={newWallet ? 'Master password again' : 'Your master password again'}
+            aria-label="Type the master password again to confirm"
+            placeholder={newWallet ? 'Master password again (to confirm)' : 'Your master password again'}
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
           />
@@ -118,19 +119,26 @@ export const PasswordFields = ({
         // Plain text, not an input (owner, 15 Oct 2026, Android): long-press on a short field with the keyboard and
         // autofill up only picked a fragment or nothing, so the system Copy never appeared. user-select: all makes one
         // long-press (Android) or tap-hold (iOS) select the whole password with the native Copy menu.
-        <p
-          data-testid="password-selectable"
-          className="m-0 rounded-xl px-3 py-2 font-mono text-sm break-all"
-          style={{
-            background: '#16181D',
-            color: 'white',
-            userSelect: 'all',
-            WebkitUserSelect: 'all',
-            WebkitTouchCallout: 'default',
-          }}
-        >
-          {password}
-        </p>
+        // Labelled (owner, 18 Oct 2026: it read as a mystery third box holding a copy of the password).
+        <div className="flex flex-col gap-1">
+          <span id="password-copy-label" className="text-[11px] font-semibold" style={{ color: '#98A2B3' }}>
+            Your password, shown so you can copy it (tap and hold to select). Not a field to fill in.
+          </span>
+          <p
+            aria-labelledby="password-copy-label"
+            data-testid="password-selectable"
+            className="m-0 rounded-xl px-3 py-2 font-mono text-sm break-all"
+            style={{
+              background: '#16181D',
+              color: 'white',
+              userSelect: 'all',
+              WebkitUserSelect: 'all',
+              WebkitTouchCallout: 'default',
+            }}
+          >
+            {password}
+          </p>
+        </div>
       )}
       {newWallet && (
         <div className="flex items-center gap-3 text-xs">

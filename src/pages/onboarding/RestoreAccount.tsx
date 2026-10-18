@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { AccountNameField } from '../../components/AccountNameField';
+import { accountNameError, cleanAccountName, suggestAccountName } from '../../utils/accountNameRules';
 import { BetaGate } from '../../mobile/sweep/BetaGate';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -59,7 +61,10 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
   const [ordDerivation, setOrdDerivation] = useState<string | null>(null);
   const [identityDerivation, setIdentityDerivation] = useState<string | null>(null);
   const { keysService, chromeStorageService } = useServiceContext();
-  const [accountName, setAccountName] = useState('');
+  // Required, prefilled with an editable "Account N" (owner, 18 Oct 2026: utils/accountNameRules.ts).
+  const otherAccountNames = () => chromeStorageService.getAllAccounts().map((a) => a.name ?? '');
+  const [accountName, setAccountName] = useState(() => suggestAccountName(otherAccountNames()));
+  const [nameError, setNameError] = useState('');
   const [iconURL, setIconURL] = useState('');
   const hiddenYoursFileInput = useRef<HTMLInputElement>(null);
   const currentAccountName = (() => {
@@ -116,6 +121,13 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
       const t0 = Date.now();
       const at = () => `${((Date.now() - t0) / 1000).toFixed(1)}s`;
 
+      const badName = accountNameError(accountName, otherAccountNames());
+      setNameError(badName);
+      if (badName) {
+        setLoading(false);
+        addSnackbar(badName, 'error');
+        return;
+      }
       if (password.length < 8) {
         addSnackbar(newWallet ? 'The password must be at least 8 characters!' : restoreErrorMessage(new Error('Unauthorized!')), 'error');
         return;
@@ -156,7 +168,7 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
       if (!objKeys) throw new Error('Object identity address not found');
       await chromeStorageService.switchAccount(keys.identityAddress);
       console.log('[restore] wallet started at', at());
-      await saveAccountDataToChromeStorage(chromeStorageService, accountName, iconURL);
+      await saveAccountDataToChromeStorage(chromeStorageService, cleanAccountName(accountName), iconURL);
       // RelayX: the inherited restore holds only /1/0 and /2/0. Keep the RelayX account's xpub (public, spends
       // nothing) so the wallet can find its Run NFTs on every RelayX address (sweep/relayxRecover.ts).
       if (importWallet === 'relayx') await rememberRelayx(chromeStorageService, keys.mnemonic);
@@ -549,12 +561,14 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
       </p>
 
       <form onSubmit={handleRestore} className="flex flex-col items-center w-full">
-        <Input
+        <AccountNameField
           theme={theme}
-          placeholder="Account Name"
-          type="text"
           value={accountName}
-          onChange={(e) => setAccountName(e.target.value)}
+          error={nameError}
+          onChange={(v) => {
+            setAccountName(v);
+            if (nameError) setNameError('');
+          }}
         />
         <Input
           theme={theme}

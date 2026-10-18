@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { AccountNameField } from '../../components/AccountNameField';
+import { accountNameError, cleanAccountName, suggestAccountName } from '../../utils/accountNameRules';
 import { BetaGate } from '../../mobile/sweep/BetaGate';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, CheckCircle, Upload } from 'lucide-react';
@@ -43,7 +45,10 @@ const ImportAccountInner = ({ onNavigateBack, newWallet = false }: ImportAccount
   const [loading, setLoading] = useState(false);
   const [explicitlyDisableButton, setExplicitlyDisableButton] = useState(false);
   const hiddenFileInput = useRef<HTMLInputElement>(null);
-  const [accountName, setAccountName] = useState('');
+  // Required, prefilled with an editable "Account N" (owner, 18 Oct 2026: utils/accountNameRules.ts).
+  const otherAccountNames = () => chromeStorageService.getAllAccounts().map((a) => a.name ?? '');
+  const [accountName, setAccountName] = useState(() => suggestAccountName(otherAccountNames()));
+  const [nameError, setNameError] = useState('');
   const [iconURL, setIconURL] = useState('');
 
   useEffect(() => {
@@ -57,6 +62,13 @@ const ImportAccountInner = ({ onNavigateBack, newWallet = false }: ImportAccount
     event.preventDefault();
     try {
       setLoading(true);
+      const badName = accountNameError(accountName, otherAccountNames());
+      setNameError(badName);
+      if (badName) {
+        setLoading(false);
+        addSnackbar(badName, 'error');
+        return;
+      }
       if (password.length < 8) {
         setLoading(false);
         addSnackbar(newWallet ? 'The password must be at least 8 characters!' : 'Invalid Password!', 'error');
@@ -96,7 +108,7 @@ const ImportAccountInner = ({ onNavigateBack, newWallet = false }: ImportAccount
       }
 
       await chromeStorageService.switchAccount(keys.identityAddress || identityPk);
-      await saveAccountDataToChromeStorage(chromeStorageService, accountName, iconURL);
+      await saveAccountDataToChromeStorage(chromeStorageService, cleanAccountName(accountName), iconURL);
       setStep(3);
     } catch (error) {
       console.log(error);
@@ -231,12 +243,14 @@ const ImportAccountInner = ({ onNavigateBack, newWallet = false }: ImportAccount
       </p>
 
       <form onSubmit={handleImport} className="flex flex-col items-center w-full">
-        <Input
+        <AccountNameField
           theme={theme}
-          placeholder="Account Name"
-          type="text"
           value={accountName}
-          onChange={(e) => setAccountName(e.target.value)}
+          error={nameError}
+          onChange={(v) => {
+            setAccountName(v);
+            if (nameError) setNameError('');
+          }}
         />
         <Input
           theme={theme}

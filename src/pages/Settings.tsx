@@ -67,6 +67,7 @@ import { RestoreAccount } from './onboarding/RestoreAccount';
 import { ImportAccount } from './onboarding/ImportAccount';
 import { MasterBackupProgressEvent, streamDataToZip } from '../utils/masterExporter';
 import { accountNamesFor } from '../mobile/names/accountNames';
+import { currentAccountBackupName } from '../utils/accountBackupName';
 import { useSnackbar } from '../hooks/useSnackbar';
 import { PermissionsManager } from './PermissionsManager';
 import { StorageStatus } from './StorageStatus';
@@ -708,7 +709,7 @@ export const Settings = () => {
     const url = URL.createObjectURL(blob);
     const tempLink = document.createElement('a');
     tempLink.href = url;
-    tempLink.setAttribute('download', 'yours_wallet_keys.json');
+    tempLink.setAttribute('download', currentAccountBackupName(chromeStorageService, 'json'));
     document.body.appendChild(tempLink);
     tempLink.click();
     document.body.removeChild(tempLink);
