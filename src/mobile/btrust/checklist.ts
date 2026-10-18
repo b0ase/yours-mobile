@@ -4,7 +4,7 @@ export const BTRUST_CHECKLIST: { label: string; live: boolean }[] = [
   { label: 'Restore from any two slices, on this device', live: true },
   { label: 'Passing on: inheritance plan and lock script (owner, 2 of 3 heirs, lead heir)', live: true },
   { label: 'Important papers: seal and open with your slices', live: true },
-  { label: 'Fund the inheritance lock from your wallet', live: false },
+  { label: 'Fund the inheritance lock from your wallet (one approval sheet)', live: true },
   { label: 'Check in (re-lock with a later date): signed by your wallet, verified on the device', live: true },
   { label: 'Heirs claim from their own bWalletX (lead heir alone, or any two heirs)', live: true },
   { label: 'Find your locks from your recovery phrase alone (no plan file, no server)', live: true },
