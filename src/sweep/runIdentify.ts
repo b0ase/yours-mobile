@@ -132,7 +132,10 @@ export type IdentifiedJig = {
   collection: string;
   /** S2 card number, when known: art at npgCardUrl(n). */
   n?: number;
+  /** A picture URL: NPG's card art, or the image stored on chain with a non-NPG mint/class (ORDFS). */
   art?: string;
+  /** An emoji the class/mint gives as its picture, when there's no image. */
+  emoji?: string;
 };
 
 export const npgTitle = (n: number, name?: string) =>
@@ -160,21 +163,103 @@ export async function identifyJig(location: string, getTx: GetTx, maps: readonly
     const own = readRun(mint);
     let title = own ? runName(own.run) : '';
     let collection = 'RelayX NFT';
+    // The mint's own picture; one-of classes (NPG 00001…) mint with no image and carry it on the class instead.
+    let pic = own ? runPicture(runMetadata(own.run), mint) : null;
     if (own?.run.in && mint.inputs[0]?.sourceTXID) {
       try {
         const cls = await jigOrigin(outpoint(mint.inputs[0].sourceTXID, mint.inputs[0].sourceOutputIndex), getTx);
         const deploy = cls.mint ? readRun(cls.mint) : null;
         const name = deploy ? runName(deploy.run) : '';
         if (name) collection = name;
+        if (!pic && deploy && cls.mint) pic = runPicture(runMetadata(deploy.run), cls.mint);
       } catch {
         /* class unreadable: keep the generic label */
       }
     }
     if (!title) title = collection;
-    return { location, origin, title, collection };
+    return { location, origin, title, collection, ...(pic && pic !== 'none' ? pic : {}) };
   } catch (e) {
     return { location, origin: '', title: 'RelayX NFT', collection: `Couldn't read it (${(e as Error).message})` };
   }
+}
+
+/** B:// protocol prefix (a file in an OP_RETURN: data, mime, encoding, filename). */
+const B_PREFIX = '19HxigV4QyBv3tHpQVcUEQyq1pzZVdoAut';
+/** On-chain files by outpoint, as the wallet already reads ordinals (ORDFS serves B:// outputs too). */
+export const ORDFS = 'https://ordfs.network';
+const TXID = /^(?:b:\/\/)?([0-9a-f]{64})$/i;
+
+/** The metadata a Run payload carries: DEPLOY props.metadata, mint(owner, {…}) or updateMetadata({…}). */
+export function runMetadata(run: RunPayload): Record<string, unknown> | null {
+  const isObj = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
+  const find = (x: unknown, depth: number): Record<string, unknown> | null => {
+    if (depth > 4) return null;
+    if (isObj(x)) {
+      if (isObj(x.metadata)) return x.metadata;
+      if ('image' in x || 'emoji' in x) return x;
+      for (const v of Object.values(x)) {
+        const m = find(v, depth + 1);
+        if (m) return m;
+      }
+    } else if (Array.isArray(x))
+      for (const v of x) {
+        const m = find(v, depth + 1);
+        if (m) return m;
+      }
+    return null;
+  };
+  for (const e of run.exec ?? []) {
+    const m = find(e.data, 0);
+    if (m) return m;
+  }
+  return null;
+}
+
+/**
+ * The first unencrypted B:// image output in a tx (RelayX mints and deploys put it before the Run payload; their
+ * `"image": "_o1"` means that file). RelayX's encrypted NFTs use a `UNIV` output instead: no picture for those.
+ */
+export function bImageOutput(tx: Transaction): number | null {
+  const prefix = new TextEncoder().encode(B_PREFIX);
+  for (let i = 0; i < tx.outputs.length; i++) {
+    const cs = tx.outputs[i].lockingScript.chunks;
+    const at = cs.findIndex((c) => c.op === OP_RETURN);
+    if (at < 0) continue;
+    // As in readRun: the SDK may keep everything after OP_RETURN as one chunk.
+    const pushes = cs[at].data?.length
+      ? Script.fromBinary([...cs[at].data!]).chunks.map((c) => c.data ?? [])
+      : cs.slice(at + 1).map((c) => c.data ?? []);
+    const [tag, , mime] = pushes;
+    if (!tag || tag.length !== prefix.length || !prefix.every((b, k) => tag[k] === b)) continue;
+    if (/^image\//i.test(new TextDecoder().decode(new Uint8Array(mime ?? [])))) return i;
+  }
+  return null;
+}
+
+const EMOJI = /^\p{Extended_Pictographic}/u;
+
+/**
+ * A jig's picture from Run metadata: https URLs as they are, B:// / bare txids and `_oN` (this tx's B file) via
+ * ORDFS, or an emoji. `none` = an image is named but can't be shown (encrypted, missing): keep the named tile.
+ */
+export function runPicture(
+  meta: Record<string, unknown> | null,
+  tx: Transaction,
+): { art?: string; emoji?: string } | 'none' | null {
+  if (!meta) return null;
+  const img = typeof meta.image === 'string' ? meta.image.trim() : '';
+  const emoji = typeof meta.emoji === 'string' && EMOJI.test(meta.emoji.trim()) ? meta.emoji.trim() : undefined;
+  if (!img) return emoji ? { emoji } : null;
+  if (meta.isEncrypted === true) return emoji ? { emoji } : 'none';
+  if (/^https:\/\/\S+$/i.test(img)) return { art: img };
+  const t = TXID.exec(img);
+  if (t) return { art: `${ORDFS}/${t[1].toLowerCase()}` };
+  if (/^_o\d+$/.test(img)) {
+    const i = bImageOutput(tx);
+    return i === null ? (emoji ? { emoji } : 'none') : { art: `${ORDFS}/content/${tx.id('hex')}_${i}` };
+  }
+  if (EMOJI.test(img) && img.length <= 16) return { emoji: img };
+  return emoji ? { emoji } : 'none';
 }
 
 /** Load the published NPG maps; a map that can't be fetched is skipped (its jigs show as "number pending"). */
