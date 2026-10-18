@@ -6,6 +6,7 @@
  * Anonymous = a hidden, listen-only LiveKit token and no participant row (bit-sign
  * /space/anon-token). It is still member-gated, so a ticketed room's ticket still applies.
  */
+import { TRANSCRIBING_BADGE } from './transcription';
 import { faceArtUrl, fallBackToLocal } from './faceArt';
 import { ANON_EXPLAINER, RECORDING_NOTICE, audienceLine, greenRoomPrimary, type GreenRoom } from './model';
 
@@ -53,6 +54,17 @@ export const GreenRoomSheet = ({
         style={{ background: 'rgba(217,45,32,0.15)', border: '1px solid rgba(217,45,32,0.5)', color: '#fecaca' }}
       >
         <span style={{ color: '#ef4444' }}>●</span> {RECORDING_NOTICE}
+      </p>
+    )}
+
+    {data.transcribing && (
+      <p
+        role="status"
+        className="mt-3 flex items-start gap-2 rounded-xl px-3 py-2 text-sm"
+        style={{ background: 'rgba(212,175,55,0.12)', border: '1px solid rgba(212,175,55,0.5)', color: '#f5e7b8' }}
+      >
+        <TranscribingBadge />
+        <span>{data.transcriptionNotice}</span>
       </p>
     )}
 
@@ -140,5 +152,16 @@ export const RecordingBadge = () => (
     style={{ border: '1px solid rgba(217,45,32,0.6)', color: '#fca5a5', background: 'rgba(217,45,32,0.15)' }}
   >
     ● Recording
+  </span>
+);
+
+/** In-Space indicator, shown to everyone while transcription is on (host's mode is not Off). */
+export const TranscribingBadge = () => (
+  <span
+    role="status"
+    className="shrink-0 rounded-full px-2 py-[1px] text-[10px] font-bold"
+    style={{ border: '1px solid rgba(212,175,55,0.7)', color: '#f5d77a', background: 'rgba(212,175,55,0.15)' }}
+  >
+    ✎ {TRANSCRIBING_BADGE}
   </span>
 );

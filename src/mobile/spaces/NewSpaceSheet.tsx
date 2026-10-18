@@ -12,6 +12,8 @@ import { alwaysOpenBarText, canHostRoom, isAlwaysOpenTicker, roomSpaceOpen } fro
 import { NameSpaceSheet } from './LiveBanner';
 import { SpaceScreen } from './SpaceScreen';
 import { DoorKeeper } from './DoorKeeper';
+import { TRANSCRIPTION_MODES, type TranscriptionMode } from './transcription';
+import { TRANSCRIPTION_ENABLED } from '../storeBuild';
 
 const GOLD = 'var(--bw-accent-hi)';
 const MUTED = '#8a8f98';
@@ -36,6 +38,8 @@ export const NewSpaceSheet = ({
 }) => {
   const [picked, setPicked] = useState<ChatRoom | null>(null);
   const [start, setStart] = useState<string | null>(null);
+  /** Off by default; the host's per-Space choice (bit-sign space-transcription-rules). */
+  const [transcription, setTranscription] = useState<TranscriptionMode>('off');
   const list = hostableRooms(rooms, me);
 
   if (picked && start !== null) {
@@ -48,6 +52,7 @@ export const NewSpaceSheet = ({
           roomName={roomTitle(picked, me)}
           me={me}
           startTitle={isAlwaysOpenTicker(picked.ticker) ? undefined : start}
+          startTranscription={isAlwaysOpenTicker(picked.ticker) ? undefined : transcription}
           alwaysOpen={isAlwaysOpenTicker(picked.ticker)}
           spaceOpen={roomSpaceOpen(picked)}
           onClose={onClose}
@@ -83,6 +88,33 @@ export const NewSpaceSheet = ({
             <p className="mt-1 text-xs" style={{ color: MUTED }}>
               Pick the room to go live in. Its members can listen and raise a hand.
             </p>
+            {TRANSCRIPTION_ENABLED && (
+              <fieldset className="mt-3">
+                <legend className="text-xs font-semibold text-white">Transcription</legend>
+                <div className="mt-1 flex gap-2" role="radiogroup" aria-label="Transcription">
+                  {TRANSCRIPTION_MODES.map((m) => (
+                    <button
+                      key={m.mode}
+                      role="radio"
+                      aria-checked={transcription === m.mode}
+                      onClick={() => setTranscription(m.mode)}
+                      className="flex-1 rounded-full px-2 py-1.5 text-[11px] font-semibold"
+                      style={
+                        transcription === m.mode
+                          ? { background: GOLD, color: '#010101' }
+                          : { border: '1px solid #2a2b30', color: '#fff' }
+                      }
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1 text-[11px]" style={{ color: MUTED }}>
+                  {TRANSCRIPTION_MODES.find((m) => m.mode === transcription)?.hint} Speakers are asked first, and anyone
+                  can say no.
+                </p>
+              </fieldset>
+            )}
             <div className="mt-3 flex flex-col gap-2">
               {list.map((r) => (
                 <button

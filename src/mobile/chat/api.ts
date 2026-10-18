@@ -669,6 +669,16 @@ export class BchatClient {
     return this.call('POST', `${BchatClient.path(ticker)}/space`, body);
   }
 
+  /** A Space's transcript (speakers + host only; bit-sign answers 404 to anyone else). */
+  async spaceTranscript(ticker: string, spaceId: string): Promise<unknown> {
+    return this.call('GET', `${BchatClient.path(ticker)}/space/transcript?space_id=${encodeURIComponent(spaceId)}`);
+  }
+
+  /** Delete (redact) one of MY transcript lines. */
+  async spaceRedactLine(ticker: string, id: string): Promise<unknown> {
+    return this.call('PATCH', `${BchatClient.path(ticker)}/space/transcript`, { id });
+  }
+
   /** Synced Space video (bit-sign rooms/[ticker]/space-video): item + clock, or item null. */
   async spaceVideo(ticker: string): Promise<unknown> {
     return this.call('GET', `${BchatClient.path(ticker)}/space-video`);
