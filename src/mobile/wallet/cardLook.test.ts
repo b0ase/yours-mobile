@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { accentById } from '../theme/accents';
-import { cardFollowsTheme, cardPatternColour } from './cardLook';
+import { cardFollowsTheme, cardPatternColour, editionArtOn } from './cardLook';
 
 describe('card theme-follow vs customised', () => {
   const white = accentById('white');
@@ -26,5 +26,19 @@ describe('card theme-follow vs customised', () => {
   it('Gold and accent-only colours restyle no card', () => {
     expect(cardFollowsTheme(gold, false)).toBe(false);
     expect(cardFollowsTheme(accentById('silver'), false)).toBe(false);
+  });
+});
+
+describe('edition card art (owner bug 18 Oct 2026)', () => {
+  it('a bought edition puts its art on the card even when the card was customised', () => {
+    const npgx = accentById('npgx');
+    expect(editionArtOn(npgx, false)).toBe(true);
+    expect(npgx.pattern).toBe('npgx');
+  });
+  it('an own picture or chosen art still wins', () => {
+    expect(editionArtOn(accentById('npgx'), true)).toBe(false);
+  });
+  it('plain packs keep the customised rule', () => {
+    expect(editionArtOn(accentById('white'), false)).toBe(false);
   });
 });

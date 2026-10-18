@@ -19,6 +19,8 @@ import { loadAccent, loadMix, previewMix, saveAccent, saveMix } from './accent';
 import { deriveMix, mixFromPack, nextMixerOpen, type MixSpec } from './mixer';
 import { THEME_ORDERS_ENABLED, THEME_STORE_PAID_ENABLED } from '../storeBuild';
 import { useOwnedThemes } from '../themeStore/useOwnedThemes';
+import { patternUri } from '../wallet/cardPatterns';
+import { yourThemes } from './yourThemes';
 
 // Get your own theme ($99 a year): bWalletX only, a lazy chunk never in a store build.
 const ThemeOrderSheet = THEME_ORDERS_ENABLED ? lazy(() => import('../themeOrder/ThemeOrderSheet')) : null;
@@ -27,7 +29,7 @@ const ThemeOrderSheet = THEME_ORDERS_ENABLED ? lazy(() => import('../themeOrder/
 // user's own collapse for this session, so a remount of the sheet never snaps it shut mid-edit.
 let mixerOpen = true;
 
-type ThemeTab = 'colours' | 'card';
+type ThemeTab = 'colours' | 'card' | 'themes';
 
 // Corners for a mix (owner, 15 Oct 2026: fill the Theme page with real options). Buttons · cards.
 const CORNERS = [
@@ -90,9 +92,23 @@ export function ThemeSheet({
       >
         Design your card
       </button>
+      {/* Owner 18 Oct 2026: a third tab for the themes this wallet bought. Paid themes never show in store builds. */}
+      {THEME_STORE_PAID_ENABLED && (
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'themes'}
+          className={tab === 'themes' ? 'on' : ''}
+          onClick={() => setTab('themes')}
+        >
+          Themes
+        </button>
+      )}
     </div>
   ) : null;
   if (card && tab === 'card') return <>{card(tabs)}</>;
+  if (card && tab === 'themes' && THEME_STORE_PAID_ENABLED)
+    return <YourThemes account={account} tabs={tabs} onClose={onClose} />;
   return <AppColours account={account} tabs={tabs} onClose={onClose} offer={offer} />;
 }
 
@@ -518,5 +534,72 @@ function Swatch({ a, on, pick }: { a: Accent; on: boolean; pick: (id: AccentId) 
       </span>
       <span className="bw-theme-name">{a.label}</span>
     </button>
+  );
+}
+
+/** Themes tab: every theme this wallet owns (any of its accounts), each previewed with its own card art. */
+function YourThemes({ account, tabs, onClose }: { account: string; tabs: ReactNode; onClose: () => void }) {
+  const [current, setCurrent] = useState<AccentId>(() => loadAccent(account));
+  const { boughtOn } = useOwnedThemes();
+  const list = yourThemes(boughtOn);
+  const pick = (id: AccentId) => {
+    saveAccent(account, id);
+    setCurrent(id);
+  };
+  return createPortal(
+    <div className="bw-cdes bw-theme" role="dialog" aria-modal="true" aria-label="Theme">
+      <div className="bw-cdes-top">
+        <b>Theme</b>
+        <button type="button" className="bw-cdes-x" aria-label="Close theme" onClick={onClose}>
+          <X size={20} aria-hidden="true" />
+        </button>
+      </div>
+      {tabs}
+      <p className="bw-theme-group">Your themes</p>
+      {list.length === 0 ? (
+        <p className="bw-cdes-note">No themes bought yet. Artist editions are $1 each in the Store.</p>
+      ) : (
+        <div className="bw-yt-grid" role="radiogroup" aria-label="Your themes">
+          {list.map(({ a, from }) => {
+            const on = current === a.id;
+            return (
+              <button
+                key={a.id}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                className={`bw-yt${on ? ' is-on' : ''}`}
+                style={{ borderColor: on ? a.accent : a.line, background: a.bg, color: a.text }}
+                onClick={() => pick(a.id)}
+              >
+                <img
+                  className="bw-yt-art"
+                  src={patternUri(a.pattern, a.accent, account)}
+                  alt=""
+                  style={{ borderRadius: a.radiusCard, boxShadow: a.glow !== 'none' ? a.glow : undefined }}
+                />
+                <span className="bw-yt-name" style={{ fontFamily: a.fontHead, fontWeight: a.weightHead }}>
+                  {a.label}
+                  {on && <Check size={14} aria-hidden="true" />}
+                </span>
+                <small style={{ color: a.muted }}>{from ? `Bought on ${from}` : (a.edition ?? a.blurb)}</small>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <p className="bw-cdes-note">Tap one to wear it: app colours and its card art. Kept for this account.</p>
+      <p className="bw-theme-more">
+        <Link to="/m/store" onClick={onClose} style={{ color: 'var(--bw-accent)' }}>
+          More themes in the Store
+        </Link>
+      </p>
+      <div className="bw-cdes-actions">
+        <button type="button" className="bw-cdes-done bw-theme-done" onClick={onClose}>
+          Done
+        </button>
+      </div>
+    </div>,
+    document.body,
   );
 }
