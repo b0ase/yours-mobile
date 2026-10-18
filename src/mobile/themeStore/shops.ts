@@ -29,7 +29,7 @@ export interface Shop {
   themes: readonly string[];
 }
 
-export const SHOPS: readonly Shop[] = [
+const ALL_SHOPS: readonly Shop[] = [
   {
     id: 'npg',
     name: 'Ninja Punk Girls',
@@ -85,4 +85,8 @@ export const SHOPS: readonly Shop[] = [
   },
 ];
 
-export const shopById = (id: string) => SHOPS.find((s) => s.id === id);
+/** Shops not ready for release (owner, 19 Oct 2026): Scammers Cartel waits for the community's real banner. */
+export const HIDDEN_SHOPS: readonly string[] = ['scammerscartel'];
+export const SHOPS: readonly Shop[] = ALL_SHOPS.filter((s) => !HIDDEN_SHOPS.includes(s.id));
+// Owners of a hidden shop's theme keep it working, so look-ups use the full list.
+export const shopById = (id: string) => ALL_SHOPS.find((s) => s.id === id);
