@@ -78,6 +78,11 @@ const ROUTES = {
 module.exports = async function handler(req, res) {
   const q = Object.fromEntries(new URL(req.url, 'http://x').searchParams);
   const op = q.op;
+  // Only answer on the issuer's own host (auth.bwalletx.com), never on bwalletx.com or a preview URL.
+  const host = String(req.headers.host || '').toLowerCase();
+  const allowed = new URL(process.env.BWALLETX_AUTH_ISSUER || 'https://auth.bwalletx.com').host;
+  if (host !== allowed && !/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host))
+    return out(res, { status: 404, json: { error: 'not-found' } });
   // Public, cookie-free endpoints answer any origin (SPAs call /token and /userinfo directly).
   if (op !== 'status' && op !== 'authorize') {
     res.setHeader('Access-Control-Allow-Origin', '*');

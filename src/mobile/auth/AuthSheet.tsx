@@ -137,6 +137,10 @@ export function AuthSheet({ link, onClose }: { link: AuthLink; onClose: () => vo
               <Chip>No password</Chip>
               <Chip>Nothing paid</Chip>
             </div>
+            <p className="m-0" style={{ color: CARD.muted, fontSize: 14 }}>
+              Only allow if you just tapped Sign in on {req.client.site} yourself. If someone sent you this link, tap
+              Not now.
+            </p>
           </>
         )}
       </ApprovalCard>

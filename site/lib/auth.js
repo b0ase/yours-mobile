@@ -285,7 +285,7 @@ function makeAuth({
 
     /** GET /authorize. Errors before the redirect URI is trusted are shown, never redirected (RFC 6749 §4.1.2.1). */
     authorize: async (q) => {
-      const client = clients[q.client_id];
+      const client = Object.hasOwn(clients, String(q.client_id)) ? clients[q.client_id] : null;
       if (!client) return { status: 400, html: errorPage('Unknown app (client_id).') };
       if (!client.redirectUris.includes(q.redirect_uri))
         return { status: 400, html: errorPage('That redirect_uri is not registered for this app.') };
@@ -333,7 +333,7 @@ function makeAuth({
       if (!ID_RE.test(String(q.id || ''))) return { status: 400, json: { error: 'bad-id' } };
       const row = await store.get(q.id);
       if (!live(row)) return { status: 404, json: { error: 'This sign-in has expired. Start again on the site.' } };
-      const client = clients[row.client_id];
+      const client = Object.hasOwn(clients, row.client_id) ? clients[row.client_id] : null;
       return {
         status: 200,
         json: {

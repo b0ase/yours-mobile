@@ -260,3 +260,53 @@ describe('tokens and claims', () => {
     expect(JSON.stringify(q.json)).not.toContain(challenge);
   });
 });
+
+describe('client lookup hardening', () => {
+  for (const id of ['__proto__', 'constructor', 'toString', 'hasOwnProperty'])
+    test(`client_id=${id} is an unknown app, not a crash`, async () => {
+      const { a } = setup();
+      const r = await a.authorize(authorizeQ({ client_id: id }));
+      expect(r.status).toBe(400);
+      expect(r.redirect).toBeUndefined();
+    });
+
+  test('a redirect_uri that only differs by a trailing slash or query is refused, never redirected', async () => {
+    const { a } = setup();
+    for (const u of [
+      'https://app.test/cb/',
+      'https://app.test/cb?x=1',
+      'https://evil.test/cb',
+      'HTTPS://APP.TEST/cb',
+    ]) {
+      const r = await a.authorize(authorizeQ({ redirect_uri: u }));
+      expect(r.status).toBe(400);
+      expect(r.redirect).toBeUndefined();
+    }
+  });
+});
+
+describe('handler host binding', () => {
+  const handler = require('../api/auth.js');
+  const call = (host) =>
+    new Promise((resolve) => {
+      const res = {
+        statusCode: 0,
+        headers: {},
+        setHeader(k, v) {
+          this.headers[k] = v;
+        },
+        end(b) {
+          resolve({ status: this.statusCode, body: b });
+        },
+      };
+      handler({ url: '/api/auth?op=discovery', method: 'GET', headers: { host } }, res);
+    });
+  test('answers nothing on bwalletx.com or preview hosts', async () => {
+    expect((await call('bwalletx.com')).status).toBe(404);
+    expect((await call('www.bwalletx.com')).status).toBe(404);
+    expect((await call('yours-mobile-git-x.vercel.app')).status).toBe(404);
+  });
+  test('answers on auth.bwalletx.com', async () => {
+    expect((await call('auth.bwalletx.com')).status).toBe(200);
+  });
+});
