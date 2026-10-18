@@ -1,4 +1,5 @@
 import { useContext, useState } from 'react';
+import { useInRouterContext, useNavigate } from 'react-router-dom';
 import { Check, Copy } from 'lucide-react';
 import bGlyph from '../brand/bwallet-glyph.svg';
 import { ServiceContext } from '../../contexts/ServiceContext';
@@ -21,6 +22,8 @@ export const ErrorActions = ({
   onAsk?: () => void;
 }) => {
   const [copied, setCopied] = useState(false);
+  // Error UI can render outside the router (boot errors): the Your reports link only shows inside it.
+  const inRouter = useInRouterContext();
   // "Report to b" files the error with the team (bit-sign feedback log) instead of asking b's AI to guess a cause:
   // b once told the owner a broadcast refusal was a one-click-pay limit (17 Oct 2026). The ref comes back here.
   // Plain useContext: error UI also renders outside the provider (boot errors), where it falls back to Ask b.
@@ -66,7 +69,16 @@ export const ErrorActions = ({
         <Check size={16} style={{ color, flexShrink: 0, marginTop: 1 }} />
         <span className="flex flex-col gap-0.5 text-xs leading-snug" style={{ color }}>
           <span className="font-semibold">Reported to b{sent.ref ? ` · Ref ${sent.ref}` : ''}</span>
-          <span>Sorry about this. We're looking into it.</span>
+          <span>
+            Sorry about this.{' '}
+            {inRouter ? (
+              <>
+                Follow it in <ReportsLink color={color} />.
+              </>
+            ) : (
+              "We're looking into it."
+            )}
+          </span>
         </span>
       </span>
     );
@@ -99,6 +111,21 @@ export const ErrorActions = ({
         {sent === 'sending' ? 'Reporting…' : 'Report to b'}
       </button>
     </span>
+  );
+};
+
+/** "Your reports" (/m/reports): every report and where it stands. Only rendered inside the router. */
+const ReportsLink = ({ color }: { color: string }) => {
+  const navigate = useNavigate();
+  return (
+    <button
+      type="button"
+      className="underline p-0 border-0 bg-transparent cursor-pointer text-xs"
+      style={{ color }}
+      onClick={() => navigate('/m/reports')}
+    >
+      Your reports
+    </button>
   );
 };
 
