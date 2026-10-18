@@ -141,4 +141,12 @@ describe('the cancel', () => {
     const l = readListingTx(t)!;
     await expect(buildCancel(l, t, await state(), key.toWif(), { feePerKb: 5000 })).rejects.toThrow('not enough');
   });
+
+  test('refuses a fee above the cap even when the order could pay it', async () => {
+    const t = mine();
+    const l = { ...readListingTx(t)!, orderSats: 1_000_000 };
+    await expect(buildCancel(l, t, await state(), key.toWif(), { feePerKb: 5000 })).rejects.toThrow(
+      'higher than expected',
+    );
+  });
 });
