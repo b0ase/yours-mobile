@@ -20,6 +20,8 @@ interface ImportMetaEnv {
   readonly VITE_FEE_POT?: string;
   /** '1' = show "Find people you follow on X" (off by default; needs bit-sign #295 turned on). */
   readonly VITE_X_FOLLOWS_IMPORT?: string;
+  /** '1' = passkey seed backup prototype + /passkey-check (off by default; never in store builds). */
+  readonly VITE_SEEDLESS?: string;
 }
 
 interface ImportMeta {

@@ -20,6 +20,8 @@ import { copySecret } from '../../mobile/secretClipboard';
 import { BackupStep } from '../../mobile/backup/BackupStep';
 import { clearHelpDeskUnpin } from '../../mobile/chat/helpDeskPin';
 import { isWebApp } from '../../mobile/webApp';
+import { PasskeyBackupButton } from '../../mobile/passkey/PasskeyBackup';
+import { SEEDLESS_ENABLED } from '../../mobile/passkey/prf';
 
 export type CreateAccountProps = {
   onNavigateBack: () => void;
@@ -306,6 +308,8 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
             onExit={() => setBackupOpen(false)}
           />
         )}
+        {/* Prototype, VITE_SEEDLESS=1 only: renders nothing unless the browser can do passkey PRF. */}
+        {SEEDLESS_ENABLED && <PasskeyBackupButton words={seedWords} label={cleanAccountName(accountName)} />}
       </div>
 
       <p className="text-[10px] mt-2 mb-4 text-center px-6" style={{ color: gray + 'bb' }}>

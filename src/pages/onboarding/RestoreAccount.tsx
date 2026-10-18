@@ -31,6 +31,8 @@ import { SettingsPage } from '../Settings';
 import { saveAccountDataToChromeStorage } from '../../utils/chromeStorageHelpers';
 import { normalizePhrase, phraseProblem, restoreErrorMessage } from './restoreHelpers';
 import { clearHelpDeskUnpin } from '../../mobile/chat/helpDeskPin';
+import { PasskeyRestoreRow } from '../../mobile/passkey/PasskeyBackup';
+import { SEEDLESS_ENABLED } from '../../mobile/passkey/prf';
 
 export type RestoreAccountProps = {
   onNavigateBack: (page: SettingsPage) => void;
@@ -387,6 +389,17 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
         {newWallet ? "Select the wallet you'd like to restore from" : 'Or restore one from 12 words'}
       </p>
 
+      {/* Prototype, VITE_SEEDLESS=1 only: the passkey opens the sealed 12 words, then the normal restore
+      form runs from its name + password step (as the JSON backup upload does). */}
+      {SEEDLESS_ENABLED && (
+        <PasskeyRestoreRow
+          onPhrase={(words) => {
+            setImportWallet('yours');
+            setSeedWords(words);
+            setStep(3);
+          }}
+        />
+      )}
       <div className="w-full flex flex-col gap-2.5 mb-3">
         {walletOptions.map((opt) =>
           opt.id ? (
