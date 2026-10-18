@@ -7,6 +7,7 @@ import {
   ARTIST_PROGRAMME_ENABLED,
   BPOSITIVE_ENABLED,
   BSPACES_ENABLED,
+  BUREAU_ENABLED,
   DIRECT_UPDATE_ENABLED,
   MARKET_ENABLED,
   PAY_STREAM_ENABLED,
@@ -45,6 +46,8 @@ const JoinArtistPage = ARTIST_PROGRAMME_ENABLED
 const AddReleasePage = RELEASES_ENABLED ? lazy(() => import('../media/releases/AddReleasePage')) : null;
 const AgentPage = lazy(() => import('../agent/AgentPage'));
 const MyReportsPage = lazy(() => import('../agent/MyReportsPage'));
+// Bureau: bWalletX only (storeBuild.ts BUREAU_ENABLED); the chunk is not built for the stores.
+const BureauPage = BUREAU_ENABLED ? lazy(() => import('../bureau/BureauPage')) : null;
 // The top bar's mailbox: bMail in the content area, between the top bar and the tab bar.
 const BMailPage = lazy(() => import('../bmail/BMailPage'));
 // The top bar's phone button: bPhone Calls in the content area (active calls stay full-screen via CallScreen).
@@ -110,6 +113,7 @@ const MobileRoutes = () => (
         <Route path="ask-b" element={<AgentPage />} />
         {/* Everything you told b, and where each report stands (18 Oct 2026). */}
         <Route path="reports" element={<MyReportsPage />} />
+        {BureauPage && <Route path="bureau" element={<BureauPage />} />}
         {/* Old links (/agent, /m/agent) keep working (renamed Ask b, 12 Oct 2026). */}
         <Route path="agent" element={<Navigate to="/m/ask-b" replace />} />
         <Route path="bmail" element={<BMailPage />} />

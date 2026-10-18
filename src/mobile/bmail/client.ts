@@ -256,6 +256,7 @@ export const sendMail = async (wallet: WalletInterface, a: SendArgs, deps: SendD
     replyPaidSats: env.replyPaidSats ?? 0,
     txid: postage?.txid,
     inReplyTo: a.inReplyTo,
+    ...(a.sealed.agreement !== undefined ? { agreement: a.sealed.agreement } : {}),
   };
 };
 
