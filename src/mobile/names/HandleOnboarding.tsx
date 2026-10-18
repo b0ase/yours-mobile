@@ -5,7 +5,8 @@ import { useLegacyKeys } from './useLegacyKeys';
 import { accountNamesFor } from './accountNames';
 import { onAccountNamesChange, syncAccountNames } from './accountName';
 import { HandleFlow } from './HandleFlow';
-import { PAID_FEATURES_ENABLED, handleCardText } from '../storeBuild';
+import { LINK_ACCOUNTS_ENABLED, PAID_FEATURES_ENABLED, handleCardText } from '../storeBuild';
+import { LinkAccountsStep } from '../social/LinkAccountsStep';
 import { getPersonalLink, onPersonalChange } from './personalToken';
 import { existingChoice, recoverPersonalLink } from './claimPersonal';
 import {
@@ -105,12 +106,20 @@ export const HandleOnboarding = () => {
     else if (hasName && (synced || pending.reason === 'create')) clearPendingPrompt();
   }, [id, hasName, synced]);
 
+  // A new wallet's "Claim your name" step continues with "Link your accounts" (owner, 18 Oct 2026), skippable.
+  const [linking, setLinking] = useState(false);
   const close = () => {
+    const fromCreate = getPendingPrompt()?.reason === 'create';
     clearPendingPrompt();
     setOpen(false);
+    if (fromCreate && LINK_ACCOUNTS_ENABLED) setLinking(true);
   };
 
-  if (open) return <HandleFlow onClose={close} />;
+  if (LINK_ACCOUNTS_ENABLED && linking && id) return <LinkAccountsStep owner={id} onClose={() => setLinking(false)} />;
+  if (open)
+    return (
+      <HandleFlow onClose={close} title={getPendingPrompt()?.reason === 'create' ? 'Claim your name' : undefined} />
+    );
   // An unindexed personal token is offered by the Wallet's indexing list (tokens/WalletIndexing), once.
   // Not before the name check has answered: a restored wallet that owns a name must never be asked for one.
   if (!id || !synced || !shouldShowCard(handleComplete(hasName, hasRoom || !PAID_FEATURES_ENABLED), dismissed, open))

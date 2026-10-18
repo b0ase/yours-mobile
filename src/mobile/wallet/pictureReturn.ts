@@ -30,8 +30,10 @@ export function usePictureReturn(onDone: (msg: string) => void) {
     if (!id) return;
     const take = () => {
       const p = takePictureReturn(id);
-      if (!p) return;
-      void adoptLinkedProfile(chromeStorageService, id, p).then((url) => {
+      // The picture sheet only offers X / Google.
+      if (!p || (p.provider !== 'x' && p.provider !== 'google')) return;
+      const provider: 'x' | 'google' = p.provider;
+      void adoptLinkedProfile(chromeStorageService, id, { ...p, provider }).then((url) => {
         onDone(
           p.avatar ? `Your ${p.provider === 'x' ? 'X' : 'Google'} picture is on` : 'Linked, but it has no picture',
         );

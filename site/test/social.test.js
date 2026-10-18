@@ -101,3 +101,40 @@ describe('Continue with X (bWalletX own OAuth)', () => {
     expect(desktop.startsWith('https://desktop.bwalletx.com/#')).toBe(true);
   });
 });
+
+describe('Link your accounts: GitHub / LinkedIn (env-gated)', () => {
+  test('providers reports only configured pairs; unconfigured start is 503', () => {
+    expect(social.providers(ENV)).toEqual({ x: true, google: false, github: false, linkedin: false });
+    expect(social.start({ provider: 'github', verifier_hash: vh }, ENV)[0]).toBe(503);
+    expect(social.start({ provider: 'linkedin', verifier_hash: vh }, ENV)[0]).toBe(503);
+    expect(social.start({ provider: 'facebook', verifier_hash: vh }, ENV)[0]).toBe(400);
+  });
+
+  test('github: our callback, ticket carries the login', async () => {
+    const env = { ...ENV, GITHUB_CLIENT_ID: 'gh-test', GITHUB_CLIENT_SECRET: 'gh-secret' };
+    const [s, r] = social.start({ provider: 'github', verifier_hash: vh }, env);
+    expect(s).toBe(200);
+    const u = new URL(r.authorizeUrl);
+    expect(u.host).toBe('github.com');
+    expect(u.searchParams.get('redirect_uri')).toBe('https://pay.bwallet.space/api/social/github/callback');
+    const fake = async (url) => ({
+      json: async () =>
+        url.includes('access_token') ? { access_token: 'tok' } : { id: 7, login: 'Octo', name: 'Oc', avatar_url: 'a' },
+    });
+    const to = await social.callback('github', { state: u.searchParams.get('state'), code: 'c' }, env, fake);
+    const p = social.openTicket(new URLSearchParams(to.split('#')[1]).get('t'), secret, env);
+    expect(p).toMatchObject({ provider: 'github', id: '7', name: 'octo', alias: null, suggested_handle: null });
+  });
+
+  test('linkedin: opaque id, display name only', async () => {
+    const env = { ...ENV, LINKEDIN_CLIENT_ID: 'li-test', LINKEDIN_CLIENT_SECRET: 'li-secret' };
+    const [, r] = social.start({ provider: 'linkedin', verifier_hash: vh }, env);
+    const state = new URL(r.authorizeUrl).searchParams.get('state');
+    const fake = async (url) => ({
+      json: async () => (url.includes('accessToken') ? { access_token: 'tok' } : { sub: 'abc', name: 'Rich B' }),
+    });
+    const to = await social.callback('linkedin', { state, code: 'c' }, env, fake);
+    const p = social.openTicket(new URLSearchParams(to.split('#')[1]).get('t'), secret, env);
+    expect(p).toMatchObject({ provider: 'linkedin', id: 'abc', display: 'Rich B', suggested_handle: null });
+  });
+});

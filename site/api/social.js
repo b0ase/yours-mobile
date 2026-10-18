@@ -1,5 +1,6 @@
 // bWalletX Continue with X / Google (lib/social.js). Routed by vercel.json:
-//   POST /api/social/start, GET /api/social/{x,google}/callback, POST /api/social/preview
+//   POST /api/social/start, GET /api/social/{x,google,github,linkedin}/callback, POST /api/social/preview,
+//   GET /api/social/providers (which can link now)
 'use strict';
 const social = require('../lib/social');
 
@@ -33,7 +34,8 @@ module.exports = async function handler(req, res) {
       const p = social.openTicket(b.ticket, b.secret);
       return p ? send(res, 200, p) : send(res, 401, { error: 'That sign-in has expired. Please try again.' });
     }
-    if ((q.op === 'x' || q.op === 'google') && req.method === 'GET') {
+    if (q.op === 'providers' && req.method === 'GET') return send(res, 200, social.providers());
+    if (social.PROVIDERS.includes(q.op) && req.method === 'GET') {
       const to = await social.callback(q.op, q);
       res.statusCode = 302;
       res.setHeader('Location', to);
