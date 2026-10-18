@@ -87,6 +87,10 @@ const Option = ({
   </button>
 );
 
+/** bWalletX Desktop (Tauri): linking needs a redirect back into the app, which can't happen there (link on web/phone). */
+const inDesktopApp = () =>
+  typeof window !== 'undefined' && !!(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+
 /**
  * "Your picture" (owner, 13 Oct 2026): opened by tapping the avatar on the card front. Use the linked X / Google
  * photo (linking reuses Continue with X / Google), an image NFT you own, or your gold bAvatar, which is never lost:
@@ -193,7 +197,7 @@ export default function PictureSheet({ onClose }: { onClose: () => void }) {
           <span className="text-[12px] text-[#98A2B3]">{sourceLine(state, linked?.handle)}</span>
         </div>
         <div className="flex flex-col gap-2 overflow-y-auto px-4">
-          {socialOk && (
+          {socialOk && (x || !inDesktopApp()) && (
             <Option
               pic={x?.avatar}
               icon={<XLogo />}
@@ -204,7 +208,7 @@ export default function PictureSheet({ onClose }: { onClose: () => void }) {
               onClick={() => social('x')}
             />
           )}
-          {socialOk && (
+          {socialOk && (g || !inDesktopApp()) && (
             <Option
               pic={g?.avatar}
               icon={<GLogo />}

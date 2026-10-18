@@ -112,13 +112,20 @@ export const LinkAccounts = ({ owner, onClaim }: { owner: string; onClaim?: (ali
     }
   };
   const xLink = linked('x');
+  // bWalletX Desktop (Tauri): the provider's redirect can't return into the app, so no Link button can work there.
+  const desktop = typeof window !== 'undefined' && !!(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
 
   return (
     <div className="w-full flex flex-col gap-3">
+      {desktop ? (
+        <p className="text-[12px] m-0 text-center" style={{ color: GRAY }}>
+          Link accounts in the bWalletX phone app or on web for now. Links made there show here too.
+        </p>
+      ) : null}
       <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--bw-surface)' }}>
         {ROWS.map((p, i) => {
           const l = linked(p);
-          const on = providers[p];
+          const on = providers[p] && !desktop;
           return (
             <div
               key={p}
@@ -140,7 +147,9 @@ export const LinkAccounts = ({ owner, onClaim }: { owner: string; onClaim?: (ali
                       ? p === 'google'
                         ? 'Email-verified tick only'
                         : 'Adds a badge to your profile'
-                      : 'Coming soon'}
+                      : desktop
+                        ? 'Phone app or web'
+                        : 'Coming soon'}
                 </div>
               </div>
               {l ? (
@@ -164,7 +173,7 @@ export const LinkAccounts = ({ owner, onClaim }: { owner: string; onClaim?: (ali
                       : { background: '#2B2F36', color: GRAY }
                   }
                 >
-                  {busy === p ? <Loader2 size={14} className="animate-spin" /> : on ? 'Link' : 'Soon'}
+                  {busy === p ? <Loader2 size={14} className="animate-spin" /> : on ? 'Link' : desktop ? '—' : 'Soon'}
                 </button>
               )}
             </div>
@@ -186,7 +195,7 @@ export const LinkAccounts = ({ owner, onClaim }: { owner: string; onClaim?: (ali
           First claim on {toAlias(xLink.handle.replace(/_/g, '-'))}@{BWALLET_PAYMAIL_DOMAIN}
         </button>
       ) : null}
-      {HANDCASH_SIGNIN_ENABLED && <LinkHandCash owner={owner} onClaim={onClaim} />}
+      {HANDCASH_SIGNIN_ENABLED && !desktop && <LinkHandCash owner={owner} onClaim={onClaim} />}
     </div>
   );
 };
