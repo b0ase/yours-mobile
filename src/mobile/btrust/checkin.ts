@@ -1,6 +1,5 @@
 // bTrust check-in and heir claim: pure view helpers for the screens. No keys, no network, no signing.
-// The real check-in (spend the owner branch and re-lock with checkIn()'s plan) and the heir claim
-// (heirsUnlock / leadHeirUnlock in inheritance.ts) are not wired yet: see BTRUST_CHECKLIST.
+// Signing lives in sign.ts (check-in, heir claims); seed-only lock discovery in derive.ts.
 
 import { validatePlan, type InheritancePlan } from './inheritance';
 

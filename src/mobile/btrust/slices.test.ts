@@ -38,7 +38,9 @@ describe('recovery slices 2-of-3', () => {
   });
   test('a damaged card is refused', () => {
     const t = cards[0].text;
-    const bad = t.slice(0, -6) + (t.endsWith('A') ? 'B' : 'A') + t.slice(-5);
+    // Change the 6th-from-last character to a different one (the old check looked at the last character, so it
+    // sometimes swapped a character for itself and the test flaked).
+    const bad = t.slice(0, -6) + (t.at(-6) === 'A' ? 'B' : 'A') + t.slice(-5);
     expect(() => parseCard(bad)).toThrow();
     expect(() => parseCard('hello')).toThrow('not a bTrust slice');
   });
