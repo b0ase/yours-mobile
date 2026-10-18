@@ -140,9 +140,14 @@ describe('paper packs (Pink, Blue, Yellow)', () => {
 });
 
 describe('artist editions', () => {
-  test('VexVoid, NPG and NPGX: dark, credited, no gold, AA ink on paper', () => {
-    expect(EDITION_PACKS.map((a) => a.id)).toEqual(['vexvoid', 'npg', 'npgx', ...EMOJI_PACK_IDS]);
-    const credits = { vexvoid: 'VexVoid edition', npg: 'Ninja Punk Girls edition', npgx: 'NPGX edition' };
+  test('VexVoid, NPG, NPGX and Scammers Cartel: dark, credited, no gold, AA ink on paper', () => {
+    expect(EDITION_PACKS.map((a) => a.id)).toEqual(['vexvoid', 'npg', 'npgx', 'scammerscartel', ...EMOJI_PACK_IDS]);
+    const credits = {
+      vexvoid: 'VexVoid edition',
+      npg: 'Ninja Punk Girls edition',
+      npgx: 'NPGX edition',
+      scammerscartel: 'Scammers Cartel edition',
+    };
     for (const a of EDITION_PACKS.filter((x) => !isEmojiPack(x.id))) {
       expect(a.edition).toBe(credits[a.id as keyof typeof credits]);
       expect(a.scheme).toBe('dark');

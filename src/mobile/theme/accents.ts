@@ -38,6 +38,7 @@ export type PackId =
   | 'vexvoid'
   | 'npg'
   | 'npgx'
+  | 'scammerscartel'
   | EmojiPackId;
 export type AccentId = PackId | 'silver' | 'rose' | 'emerald' | 'sapphire' | 'violet' | 'custom';
 
@@ -68,6 +69,7 @@ export type CardPatternId =
   | 'vexfield'
   | 'npg'
   | 'npgx'
+  | 'scammerscartel'
   | EmojiPackId;
 
 export interface Accent {
@@ -367,6 +369,37 @@ const EDITIONS: readonly Accent[] = [
     radius: '2px',
     radiusCard: '4px',
     pattern: 'npgx',
+  },
+  {
+    // ScammersCartel (owner, 18 Oct 2026): the first community on bChatX. The name is an in-joke, so the pack is too:
+    // hazard-tape yellow and magenta on black, with a raccoon crew (no real faces) on the card.
+    ...BASE,
+    id: 'scammerscartel',
+    kind: 'theme',
+    group: 'edition',
+    edition: 'Scammers Cartel edition',
+    label: 'Scammers Cartel',
+    blurb: 'Hazard yellow and magenta, raccoon crew',
+    accent: '#FFD400',
+    hi: '#FFE35C',
+    lo: '#F2C200',
+    on: '#000000',
+    bg: '#000000',
+    surface: '#0F0E06',
+    surface2: '#1A180A',
+    nav: '#000000',
+    text: '#FFFFFF',
+    muted: '#D9D2A6',
+    line: '#4A4310',
+    success: '#7CFFB2',
+    danger: '#FF7AC6',
+    shadow: '0 0 24px rgb(255 212 0 / 0.14)',
+    trim: 'rgb(255 212 0 / 0.6)',
+    glow: '0 0 14px rgb(255 46 147 / 0.45)',
+    weightHead: 800,
+    radius: '10px',
+    radiusCard: '14px',
+    pattern: 'scammerscartel',
   },
 ];
 
@@ -790,4 +823,4 @@ export const packVars = (a: Accent): Record<string, string> => ({
 export const ALL_VARS = Object.keys(packVars(ACCENTS[0] as Accent));
 
 /** Editions and Emoji themes sold in the Store ($1 each, owner 17-18 Oct 2026): only buyers get them, never in the free picker. */
-export const PAID_EDITIONS: readonly string[] = ['vexvoid', 'npg', 'npgx', ...EMOJI_PACK_IDS];
+export const PAID_EDITIONS: readonly string[] = ['vexvoid', 'npg', 'npgx', 'scammerscartel', ...EMOJI_PACK_IDS];
