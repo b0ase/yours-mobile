@@ -126,7 +126,7 @@ const BACK =
   'flex items-center gap-1.5 self-start rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36] px-3 py-2 text-xs font-bold text-white cursor-pointer';
 
 // Our edition themes, listed in Themes (owner, 17 Oct 2026). They apply today, so they show their real state.
-const EDITION_IDS: readonly string[] = ['vexvoid', 'npg', 'npgx'];
+const EDITION_IDS: readonly string[] = ['vexvoid', 'npg', 'npgx', 'scammerscartel'];
 // The Emoji collection (owner, 18 Oct 2026): twelve $1 themes with Twemoji art, sold the same way.
 const EMOJI_IDS: readonly string[] = EMOJI_PACK_IDS;
 const EDITIONS: readonly ThemePack[] = [...EDITION_IDS, ...EMOJI_IDS]

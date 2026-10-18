@@ -3,6 +3,8 @@ import npgLogo from '../../web/themes/icon-npg-192.png';
 import npgxLogo from '../../web/themes/icon-npgx-192.png';
 import { EMOJI_PACK_IDS } from '../theme/emojiThemes';
 import { emojiArtUri, emojiTileUri } from '../wallet/cardPatternsEmoji';
+import scammersCard from '../wallet/editionArt/scammerscartel-card.webp';
+import scammersBg from '../wallet/editionArt/scammerscartel-bg.webp';
 import vexArt from '../media/featured/vexvoid-cover.jpg';
 
 /**
@@ -58,6 +60,17 @@ export const SHOPS: readonly Shop[] = [
     banner: vexArt,
     colour: '#000000',
     themes: ['vexvoid'],
+  },
+  {
+    // ScammersCartel (owner, 18 Oct 2026): the first community on bChatX (scammerscartel.com). An ironic name, a playful look.
+    id: 'scammerscartel',
+    name: 'Scammers Cartel',
+    owner: 'bWalletX',
+    blurb: 'The crew theme: hazard yellow, magenta, raccoons',
+    logo: scammersCard,
+    bannerCss: `center / cover no-repeat url(${scammersBg}), #000`,
+    colour: '#FFD400',
+    themes: ['scammerscartel'],
   },
   {
     // Emoji themes (owner, 18 Oct 2026): Twemoji art (CC-BY 4.0, credited on each item), $1 each.

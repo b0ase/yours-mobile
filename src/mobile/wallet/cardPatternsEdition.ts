@@ -5,6 +5,7 @@ import { emojiArtUri } from './cardPatternsEmoji';
 import npgLogo from './editionArt/npg-card-logo.webp';
 import npgx1 from './editionArt/npgx-card-1.webp';
 import npgx2 from './editionArt/npgx-card-2.webp';
+import scammersCard from './editionArt/scammerscartel-card.webp';
 
 /**
  * Artist edition card art (owner, 16 Oct 2026). VexVoid: a still of the VexVoid point field (the same formulas as the
@@ -16,6 +17,7 @@ export const EDITION_PATTERN_IDS = [
   'vexfield',
   'npg',
   'npgx',
+  'scammerscartel',
   ...EMOJI_PACK_IDS,
 ] as const satisfies readonly CardPatternId[];
 export type EditionPatternId = (typeof EDITION_PATTERN_IDS)[number];
@@ -57,7 +59,9 @@ export function vexFieldSvg(variant = 0): string {
   );
 }
 
-const RASTER: Record<'npg' | 'npgx', readonly string[]> = {
+const RASTER: Record<'npg' | 'npgx' | 'scammerscartel', readonly string[]> = {
+  // Scammers Cartel: a cartoon raccoon crew (generated art, no real people).
+  scammerscartel: [scammersCard],
   // Owner 17 Oct 2026: the NPG card is the pink NPG logo. Characters come later as 3,334 one-per-character NFT packs.
   npg: [npgLogo],
   npgx: [npgx1, npgx2],
