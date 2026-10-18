@@ -87,6 +87,19 @@ const SpacesPage = () => {
     if (client.handle) setOpen({ ticker, name, spaceOpen: true });
     else window.open(roomPageUrl(ticker), '_blank', 'noopener');
   };
+  // Calendar (/m/calendar) "Open the Space" lands here as ?open=<TICKER>&name=<room name>.
+  const openParam = params.get('open') ?? '';
+  useEffect(() => {
+    if (!/^[A-Za-z0-9_-]{1,40}$/.test(openParam)) return;
+    const name = params.get('name') || openParam;
+    const next = new URLSearchParams(params);
+    next.delete('open');
+    next.delete('name');
+    setParams(next, { replace: true });
+    if (client.handle) setOpen({ ticker: openParam.toUpperCase(), name, spaceOpen: true });
+    else window.open(roomPageUrl(openParam), '_blank', 'noopener');
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per ?open= link
+  }, [openParam]);
 
   const load = useCallback(async () => {
     if (!client.handle) return;
