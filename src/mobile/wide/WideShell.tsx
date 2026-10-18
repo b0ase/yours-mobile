@@ -1,3 +1,4 @@
+import { hasOwnComposer } from './composer';
 import {
   lazy,
   Suspense,
@@ -586,8 +587,10 @@ const WideShell = ({ children }: { children: ReactNode }) => {
           </div>
         </WidePage>
       </main>
-      {/* Ask b's chat bar, floating bottom-centre; replies float above it as dismissable bubbles (owner, 12 Oct 2026). */}
-      {!bapp && !pathname.startsWith('/m/ask-b') && <AgentConversation variant="float" screen={pathname} />}
+      {/* Ask b's chat bar, floating bottom-centre; replies float above it as dismissable bubbles (owner, 12 Oct 2026).
+          Not on pages with their own bottom composer (bChat rooms + DMs, bMail, Ask b): it sat behind their
+          composer and its mic peeked out (owner, 18 Oct 2026). */}
+      {!bapp && !hasOwnComposer(pathname) && <AgentConversation variant="float" screen={pathname} />}
     </div>,
     document.body,
   );
