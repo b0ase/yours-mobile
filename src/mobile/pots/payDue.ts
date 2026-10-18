@@ -180,9 +180,8 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
       dueTimes: plan.due,
       ...signed,
       usd,
-      sats: sats * count,
       at: now,
-      ...(pnee ? { unit: 'PNEE' as const } : {}),
+      ...(pnee ? { unit: 'PNEE' as const } : { sats: sats! * count }),
     };
     savePending(p); // before the broadcast: from here on these periods are only ever paid by this tx
     out.push(await settlePending(s, p, deps, now));
