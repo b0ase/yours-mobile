@@ -23,7 +23,8 @@ import { useTabHome } from '../tabs/useTabHome';
 import { TradeView } from './TradeView';
 import { groupByTicker, normTicker, shortTokenId } from '../tokens/tokenIdentity';
 import { TokenIcon } from './TokenIcon';
-import { TokenSwipeRow } from './TokenRowActions';
+import { HiddenChip, TokenSwipeRow } from './TokenRowActions';
+import { arrangeRows, hiddenCount } from './rowPrefs';
 import { useTokenRowActions } from './useTokenRowActions';
 import { Sparkline } from './PriceChart';
 import { chartSeries } from './chartSeries';
@@ -170,6 +171,8 @@ const Markets = ({
   };
   const [shown, setShown] = useState(40);
   const rowActions = useTokenRowActions();
+  const { prefs } = rowActions;
+  const [showHidden, setShowHidden] = useState(false);
 
   const all = useMemo(() => board ?? [], [board]);
   const labels = useMemo(() => (registry ? all.map((r) => registry.labels(r.ref.id)) : []), [all, registry]);
@@ -189,9 +192,11 @@ const Markets = ({
           !!l?.tags.some((t) => t.startsWith(needle)))
       );
     });
-    // Favourites first, then the board's own order (trending, then most used).
-    return [...hits.filter((r) => favs.includes(r.ref.id)), ...hits.filter((r) => !favs.includes(r.ref.id))];
-  }, [all, labels, filter, q, onlyFavs, favs]);
+    // Pinned first (right swipe), then favourites, then the board's own order (trending, then most used).
+    const byFav = [...hits.filter((r) => favs.includes(r.ref.id)), ...hits.filter((r) => !favs.includes(r.ref.id))];
+    return arrangeRows(byFav, (r) => r.ref.id, prefs, showHidden);
+  }, [all, labels, filter, q, onlyFavs, favs, prefs, showHidden]);
+  const nHidden = useMemo(() => hiddenCount(all, (r) => r.ref.id, prefs), [all, prefs]);
   const visible = list.slice(0, shown);
   // Tickers more than one token uses: those rows show their short token id so copies can be told apart.
   const shared = useMemo(() => {
@@ -275,6 +280,7 @@ const Markets = ({
           onShares={SharesMarket ? setShares : undefined}
         />
       )}
+      {!shares && <HiddenChip count={nHidden} on={showHidden} onToggle={() => setShowHidden((v) => !v)} />}
       {shares && SharesMarket ? (
         <Suspense fallback={null}>
           <SharesMarket />
@@ -285,7 +291,7 @@ const Markets = ({
             <Loading text="Loading markets…" />
           ) : !list.length ? (
             <p className="text-sm text-center py-8" style={{ color: MUTED }}>
-              {onlyFavs ? 'Star a token to keep it here.' : 'No tokens match.'}
+              {showHidden ? 'Nothing hidden.' : onlyFavs ? 'Star a token to keep it here.' : 'No tokens match.'}
             </p>
           ) : (
             <div className="rounded-2xl bg-[var(--bw-surface)] border border-[#2b2f36] overflow-hidden">
@@ -305,11 +311,7 @@ const Markets = ({
                   const fav = favs.includes(r.ref.id);
                   return (
                     <div key={r.ref.id} role="listitem" className="border-t border-[#2b2f36]">
-                      <TokenSwipeRow
-                        actions={rowActions.actionsFor(r.ref.id, r.title)}
-                        title={r.title}
-                        rowId={r.ref.id}
-                      >
+                      <TokenSwipeRow {...rowActions.rowFor(r.ref.id, r.title)} title={r.title} rowId={r.ref.id}>
                         <div
                           role="button"
                           tabIndex={0}
@@ -317,7 +319,7 @@ const Markets = ({
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') navigate(tradeRoute(r.ref.id));
                           }}
-                          className={`${ROW_GRID} cursor-pointer bg-[var(--bw-surface)] hover:bg-[#1e2127]`}
+                          className={`${ROW_GRID} min-h-[48px] cursor-pointer bg-[var(--bw-surface)] hover:bg-[#1e2127]`}
                         >
                           <span className="pl-2">
                             <button
@@ -395,8 +397,8 @@ const Markets = ({
             </div>
           )}
           <p className="text-[11px]" style={{ color: MUTED }}>
-            Prices are live 1Sat listings and recent trades. 24h = the last 144 blocks. Swipe a row left (or long-press
-            it) for Chat, Buy and Info.
+            Prices are live 1Sat listings and recent trades. 24h = the last 144 blocks. Swipe a row left for Buy, Sell
+            and Chat, right to Pin or Hide (or long-press it for everything, with Info).
           </p>
           {rowActions.sheet}
         </>
@@ -428,6 +430,7 @@ const Orders = () => {
             <TokenSwipeRow
               key={b.txid}
               actions={rowActions.actionsFor(b.tokenId, b.amountLabel)}
+              menuActions={[...rowActions.actionsFor(b.tokenId, b.amountLabel), rowActions.infoAction(b.tokenId)]}
               title={b.amountLabel}
               rowId={b.txid}
             >

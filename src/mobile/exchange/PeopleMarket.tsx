@@ -5,7 +5,8 @@ import { MessageCircle, Send, UserRound } from 'lucide-react';
 import type { SwipeAction } from '../swipe/SwipeRow';
 import { requestPay } from '../wallet/payNav';
 import { setWalletKind } from '../wallet/walletKind';
-import { TokenSwipeRow } from './TokenRowActions';
+import { HiddenChip, TokenSwipeRow } from './TokenRowActions';
+import { arrangeRows, hiddenCount, type RowPrefs } from './rowPrefs';
 import { TRAY, useTokenRowActions } from './useTokenRowActions';
 import { payTarget, peopleActionIds, profileRoute } from './rowActions';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -238,12 +239,16 @@ export const BuyAndChat = ({ token, rate }: { token: PersonToken; rate: number }
 };
 
 type ActionsFor = (t: PersonToken) => SwipeAction[];
+type Row = { actionsFor: ActionsFor; sideFor: (t: PersonToken) => SwipeAction[]; prefs: RowPrefs };
 
-/** Swipe left (or long-press / "…"): Chat (their room) · Pay · Profile. Pay/Profile need an unmasked handle. */
+/**
+ * Swipe left (or long-press / "…"): Chat (their room) · Pay · Profile. Pay/Profile need an unmasked handle.
+ * Swipe right: Pin · Hide (shared with the other Exchange lists, keyed on the token ID).
+ */
 const usePersonActions = () => {
   const navigate = useNavigate();
   const { handleSelect } = useBottomMenu();
-  const { chatAction, sheet } = useTokenRowActions();
+  const { chatAction, sheet, sideActionsFor, prefs } = useTokenRowActions();
   const actionsFor: ActionsFor = (t) =>
     peopleActionIds(t.handle).map((id): SwipeAction => {
       if (id === 'chat') return chatAction(t.tokenId, `$${t.handle}`);
@@ -268,11 +273,18 @@ const usePersonActions = () => {
         onPress: () => navigate(profileRoute(t.handle)),
       };
     });
-  return { actionsFor, sheet };
+  const sideFor = (t: PersonToken) => sideActionsFor(t.tokenId);
+  return { row: { actionsFor, sideFor, prefs } as Row, sheet };
 };
 
-const PersonRow = ({ t, rate, actionsFor }: { t: PersonToken; rate: number; actionsFor: ActionsFor }) => (
-  <TokenSwipeRow actions={actionsFor(t)} title={`$${t.handle}`} rowId={t.tokenId}>
+const PersonRow = ({ t, rate, row }: { t: PersonToken; rate: number; row: Row }) => (
+  <TokenSwipeRow
+    actions={row.actionsFor(t)}
+    rightActions={row.sideFor(t)}
+    pinned={row.prefs.pinned.includes(t.tokenId)}
+    title={`$${t.handle}`}
+    rowId={t.tokenId}
+  >
     <div className="flex items-center gap-3 border-t border-[#2b2f36] px-3 py-2.5">
       <img src={avatarSrc(t)} alt="" className="w-9 h-9 rounded-full object-cover" />
       <div className="flex-1 min-w-0">
@@ -287,24 +299,14 @@ const PersonRow = ({ t, rate, actionsFor }: { t: PersonToken; rate: number; acti
   </TokenSwipeRow>
 );
 
-const Section = ({
-  title,
-  list,
-  rate,
-  actionsFor,
-}: {
-  title: string;
-  list: PersonToken[];
-  rate: number;
-  actionsFor: ActionsFor;
-}) =>
+const Section = ({ title, list, rate, row }: { title: string; list: PersonToken[]; rate: number; row: Row }) =>
   list.length ? (
     <section className="rounded-2xl bg-[var(--bw-surface)] border border-[#2b2f36] overflow-hidden">
       <h2 className="text-xs font-bold m-0 px-3 py-2" style={{ color: MUTED }}>
         {title}
       </h2>
       {list.map((t) => (
-        <PersonRow key={t.tokenId} t={t} rate={rate} actionsFor={actionsFor} />
+        <PersonRow key={t.tokenId} t={t} rate={rate} row={row} />
       ))}
     </section>
   ) : null;
@@ -312,7 +314,8 @@ const Section = ({
 /** Markets → Friends: your friends' tokens first, then everyone else's ("People"). */
 export const PeopleMarket = ({ rate, q }: { rate: number; q: string }) => {
   const tokens = usePeopleTokens();
-  const { actionsFor, sheet } = usePersonActions();
+  const { row, sheet } = usePersonActions();
+  const [showHidden, setShowHidden] = useState(false);
   const contacts = useContacts();
   const me = loadSession()?.handle ?? null;
   const needle = q.trim().replace(/^\$/, '').toLowerCase();
@@ -331,6 +334,8 @@ export const PeopleMarket = ({ rate, q }: { rate: number; q: string }) => {
         Loading people…
       </p>
     );
+  const arrange = (list: PersonToken[]) => arrangeRows(list, (t) => t.tokenId, row.prefs, showHidden);
+  const nHidden = hiddenCount([...sections.friends, ...sections.people], (t) => t.tokenId, row.prefs);
   const mine = tokenFor(tokens, me);
   if (!mine && !sections.friends.length && !sections.people.length)
     return (
@@ -341,10 +346,12 @@ export const PeopleMarket = ({ rate, q }: { rate: number; q: string }) => {
   return (
     <div className="flex flex-col gap-3">
       {mine && SELL_ENABLED && <SellMyToken token={mine} rate={rate} />}
-      <Section title="Friends" list={sections.friends} rate={rate} actionsFor={actionsFor} />
-      <Section title="People" list={sections.people} rate={rate} actionsFor={actionsFor} />
+      <HiddenChip count={nHidden} on={showHidden} onToggle={() => setShowHidden((v) => !v)} />
+      <Section title="Friends" list={arrange(sections.friends)} rate={rate} row={row} />
+      <Section title="People" list={arrange(sections.people)} rate={rate} row={row} />
       <p className="text-[11px] m-0" style={{ color: MUTED }}>
-        Hold 1 of someone's token to join their room. Swipe a row (or long-press) for Chat, Pay and Profile.
+        Hold 1 of someone's token to join their room. Swipe a row left (or long-press) for Chat, Pay and Profile, right
+        to Pin or Hide.
       </p>
       {sheet}
     </div>

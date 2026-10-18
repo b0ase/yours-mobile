@@ -23,7 +23,7 @@ import { SELL_ENABLED } from '../sell/sell';
 import { marketTradingEnabled } from '../storeBuild';
 import { useBackClose } from '../backStack';
 import { purchaseError } from './purchase';
-import { BUY_ANCHOR } from './rowActions';
+import { BUY_ANCHOR, SELL_ANCHOR } from './rowActions';
 import { useLocation } from 'react-router-dom';
 import { TokenIcon } from './TokenIcon';
 import { TokenIdentity } from '../tokens/TokenIdPanel';
@@ -129,11 +129,12 @@ export const TradeView = ({
     setTrades([]);
     load();
   }, [load]);
-  // Exchange row "Buy" (rowActions.buyRoute) lands on the Buy panel.
+  // Exchange row "Buy" / "Sell" (rowActions.buyRoute / sellRoute) lands on the Buy or Sell panel.
   const { hash } = useLocation();
   useEffect(() => {
-    if (hash !== `#${BUY_ANCHOR}`) return;
-    const t = setTimeout(() => document.getElementById(BUY_ANCHOR)?.scrollIntoView({ block: 'start' }), 80);
+    const anchor = [BUY_ANCHOR, SELL_ANCHOR].find((a) => hash === `#${a}`);
+    if (!anchor) return;
+    const t = setTimeout(() => document.getElementById(anchor)?.scrollIntoView({ block: 'start' }), 80);
     return () => clearTimeout(t);
   }, [id, hash]);
 
@@ -371,7 +372,7 @@ export const TradeView = ({
             )}
           </div>
 
-          <div className={`${CARD} p-4 flex flex-col gap-3`}>
+          <div id={SELL_ANCHOR} className={`${CARD} p-4 flex flex-col gap-3 scroll-mt-4`}>
             <div className="text-sm font-bold text-white">Sell ${sym}</div>
             <div className="text-xs" style={{ color: MUTED }}>
               You hold <span className="text-white">{held === null ? '…' : `${formatAmount(held, dec)} $${sym}`}</span>

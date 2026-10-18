@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Clapperboard, Film } from 'lucide-react';
 import type { SwipeAction } from '../swipe/SwipeRow';
-import { TokenSwipeRow } from './TokenRowActions';
+import { HiddenChip, TokenSwipeRow } from './TokenRowActions';
+import { arrangeRows, hiddenCount } from './rowPrefs';
 import { TRAY, useTokenRowActions } from './useTokenRowActions';
 import { buyRoute, movieActionIds } from './rowActions';
 import { createPortal } from 'react-dom';
@@ -71,12 +72,13 @@ const MovieCard = (p: {
   canBuy: boolean;
   onBack: () => void;
   onClip: (c: MovieClip) => void;
-  rows: Pick<ReturnType<typeof useTokenRowActions>, 'chatAction' | 'held'>;
+  rows: Pick<ReturnType<typeof useTokenRowActions>, 'chatAction' | 'held' | 'sideActionsFor' | 'prefs'>;
 }) => {
   const [show, setShow] = useState(false);
   const clips = clipsForSale(p.movie);
   const { chatAction, held } = p.rows;
   // Swipe left (or long-press / "…"): Back this movie · Own a clip · Chat (only when you hold its token ID).
+  // Swipe right: Pin · Hide.
   const actions = movieActionIds(p.movie.tokenId, clips.length, held).map((id): SwipeAction => {
     if (id === 'chat') return chatAction(p.movie.tokenId, p.movie.title);
     if (id === 'clip')
@@ -84,7 +86,13 @@ const MovieCard = (p: {
     return { id, label: 'Back', icon: <Clapperboard size={18} />, ...TRAY.primary, onPress: p.onBack };
   });
   return (
-    <TokenSwipeRow actions={actions} title={p.movie.title} rowId={p.movie.tokenId}>
+    <TokenSwipeRow
+      actions={actions}
+      rightActions={p.rows.sideActionsFor(p.movie.tokenId)}
+      pinned={p.rows.prefs.pinned.includes(p.movie.tokenId)}
+      title={p.movie.title}
+      rowId={p.movie.tokenId}
+    >
       <div className="rounded-2xl border border-[#2b2f36] overflow-hidden flex flex-col">
         {p.movie.trailerUrl ? (
           <video
@@ -158,6 +166,7 @@ export const MoviesMarket = ({ rate }: { rate: number }) => {
   const [buy, setBuy] = useState<{ movie: Original; clip: MovieClip } | null>(null);
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState('');
+  const [showHidden, setShowHidden] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -192,6 +201,11 @@ export const MoviesMarket = ({ rate }: { rate: number }) => {
 
   return (
     <div className="flex flex-col gap-3 w-full">
+      <HiddenChip
+        count={hiddenCount(movies ?? [], (m) => m.tokenId, rows.prefs)}
+        on={showHidden}
+        onToggle={() => setShowHidden((v) => !v)}
+      />
       {movies === null ? (
         <p className="text-sm text-center py-8" style={{ color: MUTED }}>
           Loading movies…
@@ -205,7 +219,7 @@ export const MoviesMarket = ({ rate }: { rate: number }) => {
         </div>
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
-          {movies.map((m) => (
+          {arrangeRows(movies, (m) => m.tokenId, rows.prefs, showHidden).map((m) => (
             <MovieCard
               key={m.tokenId}
               movie={m}
