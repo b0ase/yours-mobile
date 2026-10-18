@@ -186,7 +186,7 @@ export const BsvPriceBar = ({
       </div>
       {row.length > 0 ? (
         // Equal 8px above and below the row: the price row's mb-2 above; below, the next card's 12px top margin less 4px.
-        <div className="w-[92%] -mb-1 flex items-stretch gap-2">
+        <div className="bw-swaprow w-[92%] -mb-1 flex items-stretch gap-2">
           {row.map((b) =>
             b === 'allCards'
               ? null

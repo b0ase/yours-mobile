@@ -18,7 +18,15 @@ import {
 import bGlyph from '../brand/bwallet-glyph.svg';
 import { STORE_BUILD, THEME_STORE_PAID_ENABLED } from '../storeBuild';
 import { SectionBoundary } from '../wallet/SectionBoundary';
-import { MODULE_IDS, addModule, removeModule, shiftModule, visibleLayout, type ModuleId } from './layout';
+import {
+  MODULE_IDS,
+  WIDE_PANE_MODULES,
+  addModule,
+  removeModule,
+  shiftModule,
+  visibleLayout,
+  type ModuleId,
+} from './layout';
 import { useHomeLayout } from './useHomeLayout';
 import { WIDE_ON } from '../wide/flag';
 import { AskBModule, HistoryModule, MusicModule, NotificationsModule, PotsModule, PriceChartModule } from './modules';
@@ -136,6 +144,7 @@ const moduleAllowed = (id: ModuleId, store = STORE_BUILD): boolean => {
   const d = HOME_MODULES[id];
   if (!d) return false;
   if (store && !d.store) return false;
+  if (WIDE_ON && WIDE_PANE_MODULES.includes(id)) return false;
   return d.slot || !!d.Component;
 };
 

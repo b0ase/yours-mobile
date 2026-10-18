@@ -1,5 +1,14 @@
 import { hasOwnComposer } from './composer';
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import bgVideo from '../brand/bg/wallet-card.mp4';
@@ -51,6 +60,34 @@ const BAPP_PAGES: Record<string, string> = {
   bmusic: '/m/media',
 };
 import './wide.css';
+
+const HistoryScreen = lazy(() => import('../wallet/HistoryScreen'));
+const BsvPriceChart = lazy(() => import('../wallet/PriceChart').then((m) => ({ default: m.BsvPriceChart })));
+const Holdings = lazy(() => import('../home/Holdings'));
+
+/* ---------- Wallet side pane (the classic Desktop wallet, restored 19 Oct 2026): the card column on the left, and
+   here, right of it, the BSV price chart, History right under it, then Holdings. ---------- */
+const WalletSide = () => (
+  <div className="ww-side-stack">
+    <div className="ww-panel">
+      <div className="ww-panel-head">
+        <span>BSV price</span>
+        <span className="ww-muted ww-small">WhatsOnChain daily rate</span>
+      </div>
+      <Suspense fallback={null}>
+        <BsvPriceChart />
+      </Suspense>
+    </div>
+    <div className="ww-panel ww-flush ww-history">
+      <Suspense fallback={null}>
+        <HistoryScreen inline onClose={() => undefined} />
+      </Suspense>
+    </div>
+    <Suspense fallback={null}>
+      <Holdings />
+    </Suspense>
+  </div>
+);
 
 /**
  * PROTOTYPE (demo/desktop-shell): the wide web layout. Runs inside the real app (same providers, router and
@@ -330,8 +367,8 @@ const WideShell = ({ children }: { children: ReactNode }) => {
 
   const bapp = bappFromPath(pathname);
   // NFTs and Friends take the whole area right of the menu (owner, 11 Oct 2026); the holdings pane is for Wallet.
-  // The wallet is one full-width page: the home modules (Holdings, BSV price, History…) replaced the side pane.
-  const fullWallet = onWallet;
+  // Tokens (the home) keeps the classic two columns: card left, price / History / Holdings right (owner, 19 Oct 2026).
+  const fullWallet = onWallet && kind !== 'tokens';
   const view = bapp
     ? 'bapp'
     : pathname.startsWith('/m/bmail')
@@ -480,6 +517,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
                 {bapp ? <BappHost key={bapp.id} app={bapp} onClose={() => navigate('/m/feed')} /> : children}
               </div>
             </div>
+            {view === 'wallet' && !fullWallet && <WalletSide />}
             {view === 'chat' && (
               <div className="ww-panel ww-chat-empty">
                 <WideEmpty

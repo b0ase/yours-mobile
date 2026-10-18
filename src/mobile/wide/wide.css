@@ -1318,3 +1318,44 @@ html.ww-on:not(.ww-onb) body > .fixed.right-0.z-\[110\] {
   color: var(--bw-muted, #8e8e89);
   font-size: 12px;
 }
+/* Desktop wallet home (owner, 19 Oct 2026): the classic card column. The BSV price lives in the side pane's chart and
+   Swap / Buy in the beta banner, so the phone's price line and Swap card are not repeated here. */
+.ww-content.view-wallet:not(.is-full) .bw-priceline,
+.ww-content.view-wallet:not(.is-full) .bw-swaprow {
+  display: none !important;
+}
+/* Store shop / Themes grid on Desktop (owner, 19 Oct 2026): a tidy grid of small previews, 3 across (4 from 1600px),
+   one modest Buy button per item instead of window-wide yellow bars. */
+html.ww-on .bw-pack-grid {
+  width: 100%;
+  max-width: 960px !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 12px !important;
+}
+@media (min-width: 1600px) {
+  html.ww-on .bw-pack-grid {
+    max-width: 1240px !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+}
+html.ww-on .bw-pack-grid .bw-pill {
+  min-height: 30px !important;
+  height: auto !important;
+  padding: 6px 14px !important;
+  font-size: 12px !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+  align-self: flex-start;
+}
+/* Address book on Desktop: a page in the main area like every other full-screen page (the menu and top bar stay),
+   with its content in a reading column, not a black sheet over the whole window. */
+html.ww-on:not(.ww-onb) .bw-abook {
+  left: var(--ww-side-w) !important;
+  top: var(--ww-top-h) !important;
+}
+html.ww-on:not(.ww-onb) .bw-abook-page > :not(.bw-abook-head) {
+  width: 100%;
+  max-width: 880px;
+  margin-left: auto;
+  margin-right: auto;
+}
