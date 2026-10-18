@@ -146,7 +146,8 @@ export const sendMail = async (wallet: WalletInterface, a: SendArgs, deps: SendD
   const host = bmailHost();
   const key = letterKey(a.to, a.sealed.subject, a.sealed.body);
   const prior = a.postage ? undefined : loadPending<Postage>(from).find((p) => p.key === key && p.to === a.to);
-  const reuse = prior && prior.postage.sats === a.sats ? prior : undefined;
+  // Reuse the earlier stamp even if the price moved since (e.g. the BSV rate): it is already signed for this letter.
+  const reuse = prior;
   const id = a.id ?? reuse?.id ?? newMessageId();
   const { ciphertext } = await wallet.encrypt({
     plaintext: sealedToBytes(a.sealed),

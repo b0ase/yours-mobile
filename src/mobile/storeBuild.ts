@@ -252,6 +252,15 @@ export const HANDCASH_SIGNIN_ENABLED: boolean = !(
   import.meta.env.VITE_CHANNEL === 'ios-store' ||
   import.meta.env.VITE_CHANNEL === 'android-play'
 );
+/**
+ * "Link your accounts" (X / Google / GitHub / LinkedIn / HandCash badges, owner 18 Oct 2026): the same store gate
+ * as Continue with X (guideline 4.8 is still unsettled), as a literal so the store bundle drops the screen.
+ */
+export const LINK_ACCOUNTS_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
 export const BUY_CRYPTO_ENABLED: boolean = !(
   import.meta.env.VITE_STORE_BUILD === '1' ||
   import.meta.env.VITE_CHANNEL === 'ios-store' ||

@@ -165,11 +165,15 @@ describe('sendMail: pay only after the relay accepts', () => {
     expect(kept).toHaveLength(1);
     expect(kept[0].key).toBe(letterKey(TO, 'Agreement', 'Please sign'));
     expect(kept[0].state).toBe('signed');
-    const sent = await sendMail(w, letter, {
-      limit: DEFAULT_MAX_BODY_BYTES,
-      fetchProof: null,
-      deliver: async (b) => void bodies.push(b),
-    });
+    const sent = await sendMail(
+      w,
+      { ...letter, sats: 510 },
+      {
+        limit: DEFAULT_MAX_BODY_BYTES,
+        fetchProof: null,
+        deliver: async (b) => void bodies.push(b),
+      },
+    );
     expect(calls.filter((c) => c.startsWith('sign'))).toEqual(['sign:noSend']); // paid once
     expect(calls).not.toContain(`abort:${child.id('hex')}`);
     expect(JSON.parse(bodies[0]).id).toBe(kept[0].id);

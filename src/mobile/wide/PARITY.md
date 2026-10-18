@@ -50,7 +50,7 @@ Anything not listed as its own entry is inside a real screen that is listed (e.g
 | Bottom sheets                                          | Centred modal over a dimmed, blurred window                                            | Real                                                |
 | Full-screen phone pages (backup, $name, agent tools…)  | A page in the main area under the top bar, reading column                              | Real                                                |
 
-Every destination renders through one page template (WidePage.tsx: header, padding, card, one background layer);
+Every destination renders through one page template (WidePage.tsx: padding, card, one background layer; the title sits in the top bar, left of Ask b);
 screens' own clips and phone title rows are off in the wide layout.
 
 Still open: sheets that render inside a screen column (not portalled to <body>) stay inside that column (e.g. Receive

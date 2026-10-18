@@ -34,6 +34,7 @@ import { ChangePassword } from './ChangePassword';
 import { ConnectSocial } from './ConnectSocial';
 import { HandleFlow } from '../names/HandleFlow';
 import { onSocialChange, takeSocialReturn } from '../social/socialLogin';
+import { LinkedBadges } from '../social/LinkAccounts';
 import { BottomMenuContext } from '../../contexts/BottomMenuContext';
 import { asMenuItem } from '../tabs/tabs';
 import { socialCloseTarget } from '../names/handlePrompt';
@@ -52,6 +53,7 @@ import {
   languageSettingsEnabled,
   potsEnabled,
   socialLoginEnabled,
+  LINK_ACCOUNTS_ENABLED,
   SUBSCRIPTIONS_DESC,
   SUBSCRIPTIONS_ENABLED,
 } from '../storeBuild';
@@ -572,6 +574,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
       {acct && socialLoginEnabled() && (
         <Section title="Identity">
           <DisplayNameField />
+          {LINK_ACCOUNTS_ENABLED && <LinkedBadges owner={socialOwner} />}
           <WalletNames />
           <Row
             icon={<Network size={16} />}
@@ -588,13 +591,17 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
             onClick={() => setHandleOpen(true)}
           />
           <Divider />
-          <Row
-            icon={<BadgeCheck size={16} />}
-            label="Connect X or Google"
-            description="Verify it's you and bring your photo; you still choose your handle"
-            onClick={() => setScreen('social')}
-          />
-          <Divider />
+          {LINK_ACCOUNTS_ENABLED && (
+            <>
+              <Row
+                icon={<BadgeCheck size={16} />}
+                label="Link your accounts"
+                description="X, Google, GitHub, LinkedIn and HandCash: verified badges on your profile, signed by your wallet"
+                onClick={() => setScreen('social')}
+              />
+              <Divider />
+            </>
+          )}
           <Row
             icon={<ShieldCheck size={16} />}
             label="Verify your identity"
@@ -1071,7 +1078,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
       {screen === 'signins' && <SignInsScreen onBack={() => setScreen(null)} />}
       {screen === 'tokens' && <MyTokensScreen onBack={() => setScreen(null)} />}
       {screen === 'password' && <ChangePassword onClose={() => setScreen(null)} />}
-      {screen === 'social' && <ConnectSocial onClose={closeSocial} />}
+      {LINK_ACCOUNTS_ENABLED && screen === 'social' && <ConnectSocial onClose={closeSocial} />}
       {handleOpen && <HandleFlow title="Change handle" onClose={() => setHandleOpen(false)} />}
       {screen === 'idmap' && <IdentityMap onClose={() => setScreen(null)} />}
       {screen === 'agents' && <AgentsScreen onClose={() => setScreen(null)} />}

@@ -24,8 +24,9 @@ export const RoomDetails = ({
   /** The live Space card (spaces/LiveBanner), when the room can have one. */
   space: ReactNode;
   actions: ReactNode;
-}) =>
-  createPortal(
+}) => {
+  const others = voices.filter((h) => h.toLowerCase() !== 'b');
+  return createPortal(
     <aside className="ww-room-details" aria-label="Room details">
       <section>
         <div className="ww-rd-title">{title}</div>
@@ -55,11 +56,20 @@ export const RoomDetails = ({
         <h3>
           Members <span className="ww-rd-count">{members}</span>
         </h3>
-        {voices.length ? (
+        {/* $b, the assistant, heads every room's list, posted or not (owner, 18 Oct 2026). */}
+        <ul className="ww-rd-people">
+          <li>
+            <PersonPic className="ww-rd-av" handle="b" />
+            <span>
+              $b <span className="ww-rd-role">· assistant</span>
+            </span>
+          </li>
+        </ul>
+        {others.length ? (
           <>
             <div className="ww-rd-note">Recently active here</div>
             <ul className="ww-rd-people">
-              {voices.map((h) => (
+              {others.map((h) => (
                 <li key={h}>
                   <PersonPic className="ww-rd-av" handle={h} />${h}
                 </li>
@@ -73,3 +83,4 @@ export const RoomDetails = ({
     </aside>,
     document.body,
   );
+};

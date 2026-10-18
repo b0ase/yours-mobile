@@ -142,10 +142,16 @@ export const LiveBanner = ({
           }}
         >
           <span
-            className="flex h-8 w-8 items-center justify-center rounded-full"
+            className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
             style={{ background: space ? '#D92D20' : '#2a2b30' }}
           >
             <Radio size={16} color="#fff" />
+            {/* Live dot: red while someone is on stage, gold when the room is simply open. */}
+            <span
+              aria-hidden
+              className={`absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full${space ? ' animate-pulse' : ''}`}
+              style={{ background: space ? '#ff4d3d' : GOLD, boxShadow: '0 0 0 2px #1a1408' }}
+            />
           </span>
           <span className="flex-1 min-w-0">
             <span className="block text-[13px] font-semibold text-white truncate">
@@ -156,14 +162,17 @@ export const LiveBanner = ({
               {space ? ` · ${audienceLine(audienceCount(state!))}` : ''}
             </span>
           </span>
-          <span className="rounded-full px-3 py-1 text-xs font-bold" style={{ background: GOLD, color: '#010101' }}>
+          <span
+            className="shrink-0 rounded-full px-3 py-1 text-xs font-bold"
+            style={{ background: GOLD, color: '#010101' }}
+          >
             Join
           </span>
         </button>
       ) : space || publicLive ? (
         <button
           onClick={() => setOpen({})}
-          className="mx-3 mt-2 flex items-center gap-3 rounded-xl px-3 py-2 text-left"
+          className="bw-live-banner mx-3 mt-2 flex items-center gap-3 rounded-xl px-3 py-2 text-left"
           style={{
             background: 'linear-gradient(90deg, #2a1d05, #1a1408)',
             border: `1px solid color-mix(in srgb, ${GOLD} 33%, transparent)`,
@@ -188,7 +197,10 @@ export const LiveBanner = ({
                 : 'Tap to watch and listen'}
             </span>
           </span>
-          <span className="rounded-full px-3 py-1 text-xs font-bold" style={{ background: GOLD, color: '#010101' }}>
+          <span
+            className="shrink-0 rounded-full px-3 py-1 text-xs font-bold"
+            style={{ background: GOLD, color: '#010101' }}
+          >
             Join
           </span>
         </button>
