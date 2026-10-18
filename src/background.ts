@@ -122,6 +122,7 @@ import {
   type UsbBackupChunkRequest,
 } from './services/usbBackupBackground';
 
+
 let chromeStorageService = new ChromeStorageService();
 const isInServiceWorker = self?.document === undefined;
 
@@ -1329,6 +1330,13 @@ if (isInServiceWorker) {
     // Live-balance messages are for the wallet page (src/mobile/wallet/live/liveBus.ts), not the wallet: never
     // answer them here, so a page's session report can never reach a wallet method or a connect prompt.
     if (message?.action === 'bwxSessionSpend' || message?.action === 'bwxLiveSpend') return false;
+    // Subscribe requests are answered by the wallet page (src/mobile/pots/siteSubscribe.ts), never by a wallet method.
+    // SUBSCRIPTIONS_ENABLED written out (literal env) so the minifier drops it from a store bundle.
+if (!(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+) && message?.action === 'bwxSubscribe') return false;
 
     // Check if message is from our own extension pages. Admin status follows from THIS, never from an
     // originator string a page supplies (security review H1).

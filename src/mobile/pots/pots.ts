@@ -6,7 +6,13 @@
  *
  * Pure helpers + localStorage in the agentAccounts style; nothing here signs.
  */
-import { appendAgentLog, getAgentAccount, markAgentAccount, setAgentDailyCap } from '../agents/agentAccounts';
+import {
+  appendAgentLog,
+  getAgentAccount,
+  isPotAccount,
+  markAgentAccount,
+  setAgentDailyCap,
+} from '../agents/agentAccounts';
 import { SUBSCRIPTIONS_ENABLED } from '../storeBuild';
 import type { RemoteConfig } from '../config/remoteConfig';
 
@@ -29,6 +35,8 @@ export type Payee = {
   name: string;
   /** Requesting app (v2 Subscribe requests). */
   origin?: string;
+  /** The merchant identity key that signed the request (docs/SUBSCRIBE-API.md › Signing). */
+  merchantKey?: string;
   /** One of ownServicePayees() (bChat, $b agent). Absent = a person / paymail standing order. */
   service?: string;
 };
@@ -256,6 +264,11 @@ export const subscriptionsUnlocked = (
 export const listPots = (): Pot[] => Object.values(read<Record<string, Pot>>(POTS, {}));
 export const getPot = (id?: string | null): Pot | null =>
   id ? (read<Record<string, Pot>>(POTS, {})[id] ?? null) : null;
+/**
+ * Owner rule (18 Oct 2026): subscriptions pay from a pot ONLY, never the main balance. A pot is in the pots registry
+ * AND is an agent account of kind 'pot'; the main account is neither, so no path can sign from it.
+ */
+export const isPayingPot = (id?: string | null): boolean => !!getPot(id) && isPotAccount(getAgentAccount(id));
 export const listSubs = (potId?: string): Subscription[] =>
   Object.values(read<Record<string, Subscription>>(SUBS, {})).filter((s) => !potId || s.potId === potId);
 export const getSub = (id: string): Subscription | null => read<Record<string, Subscription>>(SUBS, {})[id] ?? null;
@@ -327,7 +340,7 @@ export const subMemoProblem = (payee: Payee, memo: string | undefined): string |
 
 /** Problems with a new standing order, or null. Service payees only when subscriptions are enabled. */
 export const subProblem = (n: NewSub, subsOn = SUBSCRIPTIONS_ENABLED): string | null => {
-  if (!getPot(n.potId)) return 'Pick a pot';
+  if (!isPayingPot(n.potId)) return 'Pick a pot';
   if (n.payee.service) {
     if (!subsOn || !servicePayee(n.payee.service)) return 'That service isn’t available';
   } else if (!n.payee.address && !n.payee.paymail) return 'Enter who to pay';

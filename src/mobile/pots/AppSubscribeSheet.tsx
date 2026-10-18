@@ -5,16 +5,28 @@ import { CARD } from '../../components/approval/cardTheme';
 import { PayHero } from '../../components/approval/ApprovalHeroes';
 import { siteName } from '../../services/approvalKind';
 import type { AppSubscribeRequest } from './appSubscribe';
-import { listPots } from './pots';
+import { keyFingerprint } from './merchantSig';
+import { isPayingPot, listPots } from './pots';
+import { POT_NAME_PLACEHOLDER } from '../storeBuild';
 
 /**
  * The ONE approval sheet for "Subscribe with bWalletX" (docs/SUBSCRIBE-API.md), in the approval-card style: dollars
  * a month as the hero, who it pays, which pot pays it, and one Subscribe button. Nothing is paid by this sheet; the
  * charger (payDue.ts) pays the first month from the chosen pot right after, through the pot's spend limits.
+ *
+ * Pot only, never the main balance (owner, 18 Oct 2026): with no pot the sheet offers to make one instead. Nothing is
+ * pre-chosen for the user when there is more than one pot. The merchant shown is the key whose signature the wallet
+ * verified over this exact request (merchantSig.ts).
  */
-export const AppSubscribeSheet = (p: { req: AppSubscribeRequest; onAnswer: (potId: string | null) => void }) => {
-  const pots = listPots();
-  const [potId, setPotId] = useState(pots[0]?.identityAddress ?? '');
+export const AppSubscribeSheet = (p: {
+  req: AppSubscribeRequest;
+  onAnswer: (potId: string | null) => void;
+  /** No pot yet: make one called `name` (the request is declined; the app asks again afterwards). */
+  onCreatePot: (name: string) => void;
+}) => {
+  const pots = listPots().filter((pot) => isPayingPot(pot.identityAddress));
+  const [potId, setPotId] = useState(pots.length === 1 ? pots[0].identityAddress : '');
+  const [potName, setPotName] = useState('');
   const [details, setDetails] = useState(false);
   const site = siteName(p.req.appOrigin);
   return createPortal(
@@ -38,9 +50,12 @@ export const AppSubscribeSheet = (p: { req: AppSubscribeRequest; onAnswer: (potI
             Subscribe to <span style={{ color: CARD.gold }}>{p.req.merchantName}</span>
           </>
         }
-        primary={{ label: 'Subscribe', onClick: () => p.onAnswer(potId), disabled: !potId }}
+        primary={
+          pots.length
+            ? { label: 'Subscribe', onClick: () => p.onAnswer(potId), disabled: !potId }
+            : { label: 'Make a pot', onClick: () => p.onCreatePot(potName.trim() || 'Subscriptions') }
+        }
         secondary={{ label: 'Not now', onClick: () => p.onAnswer(null) }}
-        error={pots.length ? undefined : 'Make a pot first (Pots & Locks), then try again. Only a pot can pay.'}
         detailsOpen={details}
         onToggleDetails={() => setDetails((d) => !d)}
         details={
@@ -48,6 +63,7 @@ export const AppSubscribeSheet = (p: { req: AppSubscribeRequest; onAnswer: (potI
             {p.req.description && <div>{p.req.description}</div>}
             <div>Pays: {p.req.payTo}</div>
             <div>Asked by: {p.req.appOrigin}</div>
+            <div>Signed by merchant key: {p.req.merchantKey}</div>
             <div>
               Charged once a month in BSV at that day&apos;s rate, when you open the wallet. A missed month is paid
               once, never stacked. Nothing is locked or paid ahead.
@@ -57,10 +73,28 @@ export const AppSubscribeSheet = (p: { req: AppSubscribeRequest; onAnswer: (potI
         testId="app-subscribe-sheet"
       >
         <div className="flex flex-wrap gap-2">
+          <Chip>✓ Verified merchant · {keyFingerprint(p.req.merchantKey)}</Chip>
           <Chip>First month today</Chip>
           <Chip>Cancel any time</Chip>
           <Chip>Paid in BSV</Chip>
         </div>
+        {pots.length === 0 && (
+          <div className="flex flex-col gap-2" style={{ fontSize: 14 }}>
+            <span style={{ color: CARD.muted }}>
+              Subscriptions pay only from a pot, never your main balance. Make one, add a little BSV, then subscribe
+              again.
+            </span>
+            <input
+              value={potName}
+              onChange={(e) => setPotName(e.target.value)}
+              placeholder={POT_NAME_PLACEHOLDER}
+              maxLength={32}
+              aria-label="New pot name"
+              className="rounded-xl px-3 py-2"
+              style={{ background: CARD.chip, color: CARD.ink, border: 0, fontSize: 14 }}
+            />
+          </div>
+        )}
         {pots.length > 0 && (
           <label className="flex items-center gap-2" style={{ fontSize: 14 }}>
             <span style={{ color: CARD.muted }}>Pays from</span>
@@ -71,6 +105,11 @@ export const AppSubscribeSheet = (p: { req: AppSubscribeRequest; onAnswer: (potI
               style={{ background: CARD.chip, color: CARD.ink, border: 0, fontSize: 14 }}
               aria-label="Pot that pays"
             >
+              {pots.length > 1 && (
+                <option value="" disabled>
+                  Choose a pot
+                </option>
+              )}
               {pots.map((pot) => (
                 <option key={pot.identityAddress} value={pot.identityAddress}>
                   {pot.emoji ? `${pot.emoji} ` : ''}

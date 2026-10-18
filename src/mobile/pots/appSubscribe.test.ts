@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { PrivateKey } from '@bsv/sdk';
+import { BSM, PrivateKey, Utils } from '@bsv/sdk';
 
 const mem = new Map<string, string>();
 (globalThis as Record<string, unknown>).localStorage = {
@@ -8,7 +8,8 @@ const mem = new Map<string, string>();
   removeItem: (k: string) => void mem.delete(k),
 };
 
-const { amountSats, dueAt, getSub, makePot } = await import('./pots');
+const { amountSats, dueAt, getSub, makePot, saveSub } = await import('./pots');
+const { canonicalSubscribe, MAX_LIFETIME_MS, signSubscribeRequest } = await import('./merchantSig');
 const { payDue } = await import('./payDue');
 const { getAgentLog, setAgentDailyCap } = await import('../agents/agentAccounts');
 const { answerSubscribe, createAppSub, handleSubscribeCall, parseSubscribeArgs, parseSubscribeMessage } =
@@ -17,14 +18,39 @@ const { answerSubscribe, createAppSub, handleSubscribeCall, parseSubscribeArgs, 
 const T = (iso: string) => Date.parse(iso);
 const ORIGIN = 'https://app.example.com';
 const ADDR = PrivateKey.fromRandom().toAddress();
-const req = (p: Record<string, unknown> = {}) => ({
-  merchantName: 'Example Pro',
-  payTo: 'pay@example.com',
-  usdPerMonth: 5,
-  description: 'Pro plan',
-  appOrigin: ORIGIN,
-  ...p,
-});
+const MERCHANT = PrivateKey.fromRandom();
+const MKEY = MERCHANT.toPublicKey().toString();
+let nonceSeq = 0;
+/**
+ * A request signed by MERCHANT for `signFor` (the origin the merchant meant), valid from `at`. Fields in `p` are
+ * signed too unless `tamper` changes them after signing.
+ */
+const req = (
+  p: Record<string, unknown> = {},
+  o: { at?: number; signFor?: string; ttl?: number; nonce?: string; tamper?: Record<string, unknown> } = {},
+) => {
+  const base = {
+    merchantName: 'Example Pro',
+    payTo: 'pay@example.com',
+    usdPerMonth: 5,
+    description: 'Pro plan',
+    appOrigin: ORIGIN,
+    ...p,
+  };
+  const nonce = o.nonce ?? `nonce-${String(++nonceSeq).padStart(12, '0')}`;
+  const expiresAt = (o.at ?? Date.now()) + (o.ttl ?? 5 * 60_000);
+  const msg = canonicalSubscribe({
+    origin: o.signFor ?? ORIGIN,
+    payTo: base.payTo as string,
+    usdPerMonth: Math.round((base.usdPerMonth as number) * 100) / 100,
+    merchantName: base.merchantName as string,
+    description: base.description as string,
+    nonce,
+    expiresAt,
+  });
+  const signature = BSM.sign(Utils.toArray(msg, 'utf8'), MERCHANT, 'base64') as string;
+  return { ...base, merchantKey: MKEY, nonce, expiresAt, signature, ...o.tamper };
+};
 type Outs = { address: string; sats: number }[];
 const deps = (paid: Outs[], bsvUsd = 50) => ({
   bsvUsd,
@@ -46,6 +72,7 @@ describe('request parsing', () => {
       usdPerMonth: 5,
       description: 'Pro plan',
       appOrigin: ORIGIN,
+      merchantKey: MKEY,
     });
     expect(parseSubscribeArgs(req({ payTo: ADDR }), ORIGIN).payTo).toBe(ADDR);
   });
@@ -73,6 +100,57 @@ describe('request parsing', () => {
   });
 });
 
+describe('merchant signatures', () => {
+  const NOW = T('2026-10-18T12:00:00Z');
+  test('good: a signed request verifies and names the merchant key', () => {
+    expect(parseSubscribeArgs(req({}, { at: NOW }), ORIGIN, NOW).merchantKey).toBe(MKEY);
+  });
+  test('good: the merchant helper signs what the wallet checks', () => {
+    const f = { merchantName: 'Example Pro', payTo: 'pay@example.com', usdPerMonth: 5, description: 'Pro plan' };
+    const proof = signSubscribeRequest({ ...f, origin: ORIGIN }, MERCHANT.toWif(), NOW);
+    expect(parseSubscribeArgs({ ...f, appOrigin: ORIGIN, ...proof }, ORIGIN, NOW).merchantKey).toBe(MKEY);
+  });
+  test('unsigned requests are refused', () => {
+    const bare: Record<string, unknown> = req({}, { at: NOW });
+    for (const k of ['merchantKey', 'signature', 'nonce', 'expiresAt']) delete bare[k];
+    expect(() => parseSubscribeArgs(bare, ORIGIN, NOW)).toThrow('Unsigned');
+  });
+  test('bad: any field changed after signing, another key, or garbage fails', () => {
+    expect(() => parseSubscribeArgs(req({}, { at: NOW, tamper: { usdPerMonth: 50 } }), ORIGIN, NOW)).toThrow(
+      'signature',
+    );
+    expect(() => parseSubscribeArgs(req({}, { at: NOW, tamper: { payTo: 'thief@example.com' } }), ORIGIN, NOW)).toThrow(
+      'signature',
+    );
+    expect(() =>
+      parseSubscribeArgs(req({}, { at: NOW, tamper: { merchantName: 'Someone Else' } }), ORIGIN, NOW),
+    ).toThrow('signature');
+    const other = PrivateKey.fromRandom().toPublicKey().toString();
+    expect(() => parseSubscribeArgs(req({}, { at: NOW, tamper: { merchantKey: other } }), ORIGIN, NOW)).toThrow(
+      'signature',
+    );
+    expect(() => parseSubscribeArgs(req({}, { at: NOW, tamper: { signature: 'A'.repeat(88) } }), ORIGIN, NOW)).toThrow(
+      'signature',
+    );
+  });
+  test('expired, or valid for too long, is refused', () => {
+    expect(() => parseSubscribeArgs(req({}, { at: NOW - 10 * 60_000 }), ORIGIN, NOW)).toThrow('expired');
+    expect(() => parseSubscribeArgs(req({}, { at: NOW, ttl: MAX_LIFETIME_MS + 5 * 60_000 }), ORIGIN, NOW)).toThrow(
+      'too far ahead',
+    );
+  });
+  test('replayed: the same signed request works once', () => {
+    const r = req({}, { at: NOW });
+    parseSubscribeArgs(r, ORIGIN, NOW);
+    expect(() => parseSubscribeArgs(r, ORIGIN, NOW + 1000)).toThrow('already used');
+  });
+  test('wrong origin: a request signed for one site fails from another, even if appOrigin is set to match', () => {
+    const evil = 'https://evil.example';
+    expect(() => parseSubscribeArgs(req({ appOrigin: evil }, { at: NOW }), evil, NOW)).toThrow('signature');
+    expect(() => parseSubscribeArgs(req({}, { at: NOW }), evil, NOW)).toThrow('appOrigin');
+  });
+});
+
 describe('due dates and rate maths', () => {
   test('monthly from the 31st clamps to short months and goes back', () => {
     const start = T('2026-01-31T10:00:00Z');
@@ -92,11 +170,14 @@ describe('subscribe, status, cancel', () => {
     makePot('1Pot', 'Apps', undefined, NOW);
     let kicked = 0;
     const d = { approve: async () => '1Pot', bsvUsd: () => 50, chargeSoon: () => void kicked++, now: () => NOW };
-    const st = (await handleSubscribeCall('subscribe', req(), ORIGIN, d)) as { id: string; status: string };
+    const st = (await handleSubscribeCall('subscribe', req({}, { at: NOW }), ORIGIN, d)) as {
+      id: string;
+      status: string;
+    };
     expect(st.status).toBe('active');
     expect(kicked).toBe(1);
     expect(getSub(st.id)).toMatchObject({ catchUp: 'latest', period: 'month', amount: { value: 5, currency: 'USD' } });
-    const no = await answerSubscribe({ id: 2, call: 'subscribe', args: req() }, ORIGIN, {
+    const no = await answerSubscribe({ id: 2, call: 'subscribe', args: req({}, { at: NOW }) }, ORIGIN, {
       ...d,
       approve: async () => null,
     });
@@ -104,7 +185,7 @@ describe('subscribe, status, cancel', () => {
   });
   test('an app only sees and cancels its own', async () => {
     makePot('1Pot', 'Apps', undefined, NOW);
-    const s = createAppSub(parseSubscribeArgs(req(), ORIGIN), '1Pot', 50, NOW);
+    const s = createAppSub(parseSubscribeArgs(req({}, { at: NOW }), ORIGIN, NOW), '1Pot', 50, NOW);
     const d = { approve: async () => null, bsvUsd: () => 50 };
     await expect(handleSubscribeCall('status', { id: s.id }, 'https://other.example', d)).rejects.toThrow('Unknown');
     await expect(handleSubscribeCall('cancel', { id: s.id }, 'https://other.example', d)).rejects.toThrow('Unknown');
@@ -119,7 +200,7 @@ describe('charger', () => {
   const START = T('2026-06-16T12:00:00Z');
   const setup = () => {
     makePot('1Pot', 'Apps', undefined, START);
-    return createAppSub(parseSubscribeArgs(req({ payTo: ADDR }), ORIGIN), '1Pot', 50, START);
+    return createAppSub(parseSubscribeArgs(req({ payTo: ADDR }, { at: START }), ORIGIN, START), '1Pot', 50, START);
   };
 
   test('first month pays at once, with a receipt; a second run pays nothing', async () => {
@@ -160,6 +241,24 @@ describe('charger', () => {
     const paid: Outs[] = [];
     const r = await payDue(deps(paid), START + 1000);
     expect(r[0]).toMatchObject({ id: s.id, ok: false });
+    expect(paid.length).toBe(0);
+  });
+});
+
+describe('pot only, never the main balance', () => {
+  const NOW = T('2026-10-18T12:00:00Z');
+  test('approving with an id that is not a pot (e.g. the main account) stores nothing', async () => {
+    const d = { approve: async () => '1MainAccount', bsvUsd: () => 50, now: () => NOW };
+    await expect(handleSubscribeCall('subscribe', req({}, { at: NOW }), ORIGIN, d)).rejects.toThrow('Only a pot');
+    expect(await handleSubscribeCall('list', {}, ORIGIN, d)).toEqual([]);
+  });
+  test('the charger refuses a subscription whose payer is not a pot, and signs nothing', async () => {
+    makePot('1Pot', 'Apps', undefined, NOW);
+    const s = createAppSub(parseSubscribeArgs(req({ payTo: ADDR }, { at: NOW }), ORIGIN, NOW), '1Pot', 50, NOW);
+    saveSub({ ...s, potId: '1MainAccount' }); // e.g. a tampered or migrated record pointing at the main account
+    const paid: Outs[] = [];
+    const r = await payDue(deps(paid), NOW + 1000);
+    expect(r[0]).toMatchObject({ id: s.id, ok: false, reason: expect.stringContaining('Only a pot') });
     expect(paid.length).toBe(0);
   });
 });

@@ -3,7 +3,7 @@ import { OneSatServices } from '@1sat/wallet-browser';
 import type { ChromeStorageService } from '../../services/ChromeStorage.service';
 import { decrypt } from '../../utils/crypto';
 import { UNBOUND_NAME, opnsBinding, parseRecipient, resolveRecipient } from '../names/names';
-import type { Payee } from './pots';
+import { isPayingPot, type Payee } from './pots';
 
 /**
  * Paying from a pot without switching to it (POTS-SUBSCRIPTIONS-PLAN.md v1). The session passKey that is
@@ -65,6 +65,8 @@ export const signFromPot = async (
   outputs: PotPayment[],
   memo?: string,
 ): Promise<{ rawTx: string; txid: string }> => {
+  // Pot only, never the main balance (owner, 18 Oct 2026): refuse any id that isn't a registered pot.
+  if (!isPayingPot(potId)) throw new Error('Only a pot can pay');
   const acct = potAccount(store, potId);
   if (!acct?.encryptedKeys) throw new Error('This pot isn’t on this device');
   const passKey = await store.getPassKey();

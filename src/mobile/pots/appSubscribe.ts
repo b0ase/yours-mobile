@@ -5,7 +5,8 @@
  *   wallet → page: { type: 'BWX_SUBSCRIBE', isInvocation: false, id, status: 'success', result }
  *                | { type: 'BWX_SUBSCRIBE', isInvocation: false, id, status: 'error', description }
  *
- *   call 'subscribe'  args { merchantName, payTo, usdPerMonth, description?, appOrigin }
+ *   call 'subscribe'  args { merchantName, payTo, usdPerMonth, description?, appOrigin,
+ *                            merchantKey, nonce, expiresAt, signature }   (signed: merchantSig.ts)
  *   call 'status'     args { id }            → only subscriptions this origin made
  *   call 'cancel'     args { id }            → only subscriptions this origin made
  *   call 'list'       args {}                → this origin's subscriptions
@@ -19,7 +20,8 @@
  * ⚠ bWalletX only: the host wires this behind SUBSCRIPTIONS_ENABLED, so a store build never answers it.
  */
 import { isMainnetAddress } from '../names/address';
-import { addSubscription, cancelSub, getSub, listSubs, nextDue, type Subscription } from './pots';
+import { parseProof, verifyMerchant } from './merchantSig';
+import { addSubscription, cancelSub, getSub, isPayingPot, listSubs, nextDue, type Subscription } from './pots';
 
 export const SUBSCRIBE_MSG = 'BWX_SUBSCRIBE';
 export type SubscribeCall = 'subscribe' | 'status' | 'cancel' | 'list';
@@ -32,6 +34,8 @@ export type AppSubscribeRequest = {
   usdPerMonth: number;
   description: string;
   appOrigin: string;
+  /** The merchant identity key whose signature over this request the wallet verified. */
+  merchantKey: string;
 };
 
 /** Most a single app subscription may charge a month. Bigger needs a standing order the user types in. */
@@ -85,7 +89,11 @@ const text = (v: unknown, max: number, what: string, required: boolean): string 
  * Checks a subscribe request against the origin that really sent it. `appOrigin` must be that exact origin: an app
  * can't ask on another site's behalf.
  */
-export const parseSubscribeArgs = (args: Record<string, unknown>, senderOrigin: string): AppSubscribeRequest => {
+export const parseSubscribeArgs = (
+  args: Record<string, unknown>,
+  senderOrigin: string,
+  now = Date.now(),
+): AppSubscribeRequest => {
   if (args.appOrigin !== senderOrigin) fail('appOrigin must be the origin of the page asking');
   const merchantName = text(args.merchantName, MAX_NAME, 'merchantName', true);
   const description = text(args.description, MAX_DESC, 'description', false);
@@ -96,7 +104,14 @@ export const parseSubscribeArgs = (args: Record<string, unknown>, senderOrigin: 
   const usdPerMonth = cents(usd as number);
   if (usdPerMonth < MIN_USD_PER_MONTH || usdPerMonth > MAX_USD_PER_MONTH)
     fail(`usdPerMonth must be between $${MIN_USD_PER_MONTH} and $${MAX_USD_PER_MONTH}`);
-  return { merchantName, payTo, usdPerMonth, description, appOrigin: senderOrigin };
+  // Signed by the merchant over exactly what the sheet shows, bound to the REAL sender origin; nonce burnt here.
+  const proof = parseProof(args);
+  const merchantKey = verifyMerchant(
+    { origin: senderOrigin, payTo, usdPerMonth, merchantName, description },
+    proof,
+    now,
+  );
+  return { merchantName, payTo, usdPerMonth, description, appOrigin: senderOrigin, merchantKey };
 };
 
 /** The pots Subscription an approved request becomes: $X a month, first payment now, no end, no stacking. */
@@ -105,6 +120,7 @@ export const newAppSub = (r: AppSubscribeRequest, potId: string, now: number) =>
   payee: {
     name: r.merchantName,
     origin: r.appOrigin,
+    merchantKey: r.merchantKey,
     ...(PAYMAIL_RE.test(r.payTo) ? { paymail: r.payTo.toLowerCase() } : { address: r.payTo }),
   },
   amount: { value: r.usdPerMonth, currency: 'USD' as const },
@@ -116,8 +132,11 @@ export const newAppSub = (r: AppSubscribeRequest, potId: string, now: number) =>
 });
 
 /** Stores an approved request. bsvUsd is only used for the pot's default daily cap. */
-export const createAppSub = (r: AppSubscribeRequest, potId: string, bsvUsd: number, now = Date.now()) =>
-  addSubscription(newAppSub(r, potId, now), bsvUsd, now);
+export const createAppSub = (r: AppSubscribeRequest, potId: string, bsvUsd: number, now = Date.now()) => {
+  // Pot only, never the main balance (owner, 18 Oct 2026).
+  if (!isPayingPot(potId)) fail('Only a pot can pay');
+  return addSubscription(newAppSub(r, potId, now), bsvUsd, now);
+};
 
 export type AppSubStatus = {
   id: string;
@@ -172,7 +191,7 @@ export const handleSubscribeCall = async (
   const now = deps.now?.() ?? Date.now();
   switch (call) {
     case 'subscribe': {
-      const r = parseSubscribeArgs(args, origin);
+      const r = parseSubscribeArgs(args, origin, now);
       const potId = await deps.approve(r);
       if (!potId) return fail('Declined');
       const s = createAppSub(r, potId, deps.bsvUsd(), now);

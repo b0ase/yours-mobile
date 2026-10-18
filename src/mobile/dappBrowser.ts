@@ -46,9 +46,17 @@ export const openDappBrowser = async (url: string) => {
   onOverlayCountChanged(overlayCount);
 };
 
+/** Wallet-drawn sheets (the subscribe sheet) up right now; counted like overlays. */
+let sheets = 0;
+export const sheetOverBrowser = (on: boolean) => {
+  sheets = Math.max(0, sheets + (on ? 1 : -1));
+  onOverlayCountChanged(overlayCount);
+};
+
 /** Approval prompts render in the wallet WebView, under the browser: step it aside. */
-export const onOverlayCountChanged = (count: number) => {
-  overlayCount = count;
+export const onOverlayCountChanged = (raw: number) => {
+  overlayCount = raw;
+  const count = raw + sheets;
   if (!open) return;
   if (count > 0 && !hiddenForOverlay) {
     hiddenForOverlay = true;
@@ -98,7 +106,18 @@ export const initDappBrowser = (createContext: ContextFactory) => {
     let response: unknown;
     try {
       const { type, params } = JSON.parse(req.payload) as { type: string; params?: unknown };
-      response = await handleSiteCall(req.origin, req.url ?? '', type, params);
+      // Subscribe with bWalletX (docs/SUBSCRIBE-API.md): origin from the native WebView, never the page.
+      // SUBSCRIPTIONS_ENABLED written out (literal env) so the minifier drops it from a store bundle.
+      if (
+        !(
+          import.meta.env.VITE_STORE_BUILD === '1' ||
+          import.meta.env.VITE_CHANNEL === 'ios-store' ||
+          import.meta.env.VITE_CHANNEL === 'android-play'
+        ) &&
+        type === 'BWX_SUBSCRIBE'
+      )
+        response = await (await import('./pots/siteSubscribe')).answerSiteSubscribe(req.origin, params);
+      else response = await handleSiteCall(req.origin, req.url ?? '', type, params);
     } catch (error) {
       response = { success: false, error: error instanceof Error ? error.message : String(error) };
     }
