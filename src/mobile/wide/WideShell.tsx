@@ -411,7 +411,9 @@ const WideShell = ({ children }: { children: ReactNode }) => {
       ? onWallet && kind === it.kind
       : !!it.to &&
         // A link with a query (a bApp room) is on only for that exact query, so the rooms don't all light up together.
-        (it.to.includes('?') ? pathname + search === it.to : pathname.startsWith(it.to));
+        (it.to.includes('?')
+          ? pathname + search === it.to
+          : pathname.startsWith(it.to) && !(it.to === '/m/chat' && pathname.startsWith('/m/chat/bapps')));
 
   // Deep link on a cold load (the app router is in memory): ?view=bapps|bmail|chat|… opens that view once.
   const deepLinked = useRef(false);
