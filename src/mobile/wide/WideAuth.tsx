@@ -7,7 +7,7 @@ const FEATURES = [
   ['bMail', 'Mail that pays: postage in, spam out.'],
   ['Spaces & chat', 'Rooms, live audio and token-gated groups.'],
   ['bApps', 'Apps that open inside your wallet.'],
-  ['Your keys', 'They stay in this browser. Nobody else holds them.'],
+  ['Your keys', 'They stay on this device. Nobody else holds them.'],
 ];
 
 /**
