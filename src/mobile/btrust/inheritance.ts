@@ -19,6 +19,8 @@
 //
 // Recovery needs no server: the owner key derives from the seed, the heirs hold their own keys, and the
 // script rebuilds from the InheritancePlan (heir pubkeys + heights), which travels with the recovery slices.
+// Without the plan file, derive.ts finds the locks from the seed alone (owner key slots + beacon outputs) and
+// rebuilds the plan from the lock script on chain.
 
 import { Lock } from '@1sat/templates';
 import {
