@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import type { OneSatContext } from '@1sat/actions';
 import { P2PKH } from '@bsv/sdk';
-import { INDEX_FUND_NETWORK_SATS, INDEX_FUND_SATS } from './indexFund';
+import { INDEX_FUND_NETWORK_SATS, INDEX_FUND_SATS, deriveFeeAddress } from './indexFund';
 import {
   DISMISS_PREFIX,
   FREE_FEE,
@@ -24,9 +24,10 @@ import {
 import { ticketCost } from '../tickets/tickets';
 import { PERSONAL_FEE_ESTIMATE_SATS, PERSONAL_NETWORK_FEE_SATS } from '../names/claimPersonal';
 
-const FEE = '1HAeteL7Dk8vXQ3ctVyktyRqrAzgk4LwfU';
 const BCORP = '1BoatSLRHtKNngkdXEeobR76b53LETtpyT';
 const ID = `${'a'.repeat(64)}_0`;
+/** The real indexer fee address for ID, derived from the id as the wallet does. */
+const FEE = deriveFeeAddress(ID) as string;
 
 // Minimal localStorage / window for the dismissal helpers.
 const store = new Map<string, string>();
@@ -136,6 +137,15 @@ describe('payRoomSetup', () => {
       },
     } as unknown as OneSatContext;
     await expect(payRoomSetup(ctx, ID, 'TESTY', status, 2_000_000, BCORP)).rejects.toThrow(/Insufficient/);
+  });
+  test('an indexer fee address that does not match the token id is refused: nothing sent', async () => {
+    const calls: unknown[] = [];
+    const wrong = { ...status, feeAddress: '1HAeteL7Dk8vXQ3ctVyktyRqrAzgk4LwfU' };
+    expect(wrong.feeAddress).not.toBe(FEE);
+    await expect(payRoomSetup(ctxWith(calls), ID, 'TESTY', wrong, 2_000_000, BCORP)).rejects.toThrow(
+      /Nothing was sent/,
+    );
+    expect(calls).toHaveLength(0);
   });
 });
 
