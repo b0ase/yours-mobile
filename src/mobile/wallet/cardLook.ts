@@ -74,3 +74,12 @@ export function useCardThemed(id: string): boolean {
   const pack = accentById(useAccentId());
   return cardFollowsTheme(pack, useCardCustomised(id));
 }
+
+/**
+ * Artist editions (VexVoid, NPG, NPGX) bring their own card art (cardPatternsEdition.ts). Owner bug, 18 Oct 2026:
+ * an account whose card had a saved brightness/position (so "customised") kept its bAvatar, tinted red, under NPGX.
+ * A bought edition is chosen on purpose, so its art goes on the card whatever the saved look; only the account's own
+ * picture or a chosen Art/Collections design (ownArt) stays in front of it.
+ */
+export const editionArtOn = (pack: Pick<Accent, 'group' | 'scheme'>, ownArt: boolean): boolean =>
+  pack.group === 'edition' && pack.scheme !== 'light' && !ownArt;

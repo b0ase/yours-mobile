@@ -39,7 +39,7 @@ import type { AccentId } from '../theme/accents';
 import { switchToAccountAccent } from '../theme/accent';
 import { useAccentId } from '../theme/useAccent';
 import { accentById } from '../theme/accents';
-import { cardFollowsTheme, setCardCustomised, useCardCustomised } from './cardLook';
+import { cardFollowsTheme, editionArtOn, setCardCustomised, useCardCustomised } from './cardLook';
 import { CARD_DESIGN_EVENT, loadCardDesign, saveCardDesign, type CardDesign } from './cardDesign';
 import { loadCardArt, type CardArtModule } from './cardArtLoader';
 import { patternUri } from './cardPatterns';
@@ -297,14 +297,19 @@ const WalletCardInner = ({
   const light = pack.scheme === 'light';
   const ownArt = !!cardImage || (!!design && design.kind !== 'pattern');
   const lightPick = design?.kind === 'pattern' && isLightPattern(design.id) ? design.id : null;
+  // A bought edition (NPGX …) puts its own art on the card even over a saved look or chosen pattern (cardLook.ts).
+  const edition = !!bavatarArt && editionArtOn(pack, ownArt);
   const themed =
-    !!bavatarArt && (light ? !ownArt && cardFollowsTheme(pack, false) : cardFollowsTheme(pack, customised));
+    edition ||
+    (!!bavatarArt && (light ? !ownArt && cardFollowsTheme(pack, false) : cardFollowsTheme(pack, customised)));
   const themeArt = themed
     ? patternUri(lightPick ?? pack.pattern, pack.accent, artKey, pack.paper ? pack.surface : undefined)
     : null;
   const frontArt = light
     ? (bavatarArt && ownArt && (cardImage || designArt?.src)) || themeArt || bavatarArt
-    : (bavatarArt && (cardImage || designArt?.src)) || themeArt || bavatarArt;
+    : edition
+      ? themeArt
+      : (bavatarArt && (cardImage || designArt?.src)) || themeArt || bavatarArt;
   const artAttribution = !cardImage && designArt?.attribution ? designArt.attribution : '';
   const setImage = (uri: string | null) => {
     if (!saveCardImage(artKey, uri)) return false;
@@ -336,7 +341,12 @@ const WalletCardInner = ({
     () => ({ brightness: autoBrightness(luma), ...defaultPlacement(artKey) }),
     [luma, artKey],
   );
-  const look = savedLook ?? defaultLook;
+  // Edition art is drawn as the artist made it: a saved hue/saturation (meant for the bAvatar) is not applied to it.
+  const look = savedLook
+    ? edition
+      ? { brightness: savedLook.brightness, x: savedLook.x, y: savedLook.y }
+      : savedLook
+    : defaultLook;
   const [adjusting, setAdjusting] = useState(false);
   // An install link's pack (bwalletx://theme/<pack>): the sheet opens on App colours and offers it.
   const [themeOffer, setThemeOffer] = useState<AccentId | null>(null);
