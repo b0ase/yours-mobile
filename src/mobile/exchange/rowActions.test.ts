@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import {
   BUY_ANCHOR,
-  ROW_ACTION_IDS,
+  SELL_ANCHOR,
+  SIDE_ACTION_IDS,
+  sellRoute,
+  tokenActionIds,
   buyRoute,
   chatDecision,
   heldTokenIds,
@@ -50,7 +53,14 @@ describe('routes and actions', () => {
     expect(buyRoute(A)).toBe(`${tradeRoute(A)}#${BUY_ANCHOR}`);
     expect(infoRoute(A)).toBe(tradeRoute(A));
   });
-  test('tray order is Chat, Buy, Info', () => expect([...ROW_ACTION_IDS]).toEqual(['chat', 'buy', 'info']));
+  test('Sell opens the trade screen at its Sell panel', () =>
+    expect(sellRoute(A)).toBe(`${tradeRoute(A)}#${SELL_ANCHOR}`));
+  test('left tray is Buy, Sell, Chat; Sell only when the token ID is held', () => {
+    expect(tokenActionIds(A, new Set([A]))).toEqual(['buy', 'sell', 'chat']);
+    expect(tokenActionIds(A, new Set())).toEqual(['buy', 'chat']);
+    expect(tokenActionIds(A, null)).toEqual(['buy', 'chat']);
+  });
+  test('right tray is Pin, Hide', () => expect([...SIDE_ACTION_IDS]).toEqual(['pin', 'hide']));
 });
 
 describe('swipe on token rows', () => {

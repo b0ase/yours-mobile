@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { MoreHorizontal } from 'lucide-react';
-import { ACTION_W, dragOffset, isArmed, lockAxis, resolveRelease, type SideSpec } from './gesture';
+import { ACTION_W, dragOffset, isArmed, lockAxis, menuList, resolveRelease, type SideSpec } from './gesture';
 import { haptic } from './haptics';
 
 export type SwipeAction = {
@@ -38,6 +38,8 @@ export type SwipeRowProps = {
   fullSwipeRight?: string;
   /** Extra actions for the "…" / long-press menu only (Spam, Block…). */
   moreActions?: SwipeAction[];
+  /** The whole "…" / long-press menu in this order, instead of right tray + left tray + moreActions. */
+  menuActions?: SwipeAction[];
   /** Accessible name of the row for the menu ("Actions for …"). */
   label: string;
   /** Show a selection checkbox (desktop bulk mode). */
@@ -76,6 +78,7 @@ export const SwipeRow = ({
   fullSwipeLeft,
   fullSwipeRight,
   moreActions = [],
+  menuActions,
   label,
   selected,
   onSelect,
@@ -253,9 +256,7 @@ export const SwipeRow = ({
     }
   };
 
-  const all = [...rightActions, ...leftActions, ...moreActions].filter(
-    (a, i, xs) => xs.findIndex((b) => b.id === a.id) === i,
-  );
+  const all = menuList(rightActions, leftActions, moreActions, menuActions);
   const hover = [...rightActions, ...leftActions].filter((a, i, xs) => xs.findIndex((b) => b.id === a.id) === i);
   const anim = dragging || reducedMotion() ? 'none' : 'transform 180ms ease-out';
   const w = wrap.current?.offsetWidth || 360;

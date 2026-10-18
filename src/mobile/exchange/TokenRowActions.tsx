@@ -1,27 +1,64 @@
 /**
- * Swipe-row actions for Exchange token lists (Markets, My orders): reuses the app's SwipeRow
+ * Swipe-row actions for Exchange token lists (Markets, People, Movies, My orders): left = Buy · Sell · Chat,
+ * right = Pin · Hide (owner, 18 Oct 2026; HiddenChip shows "Hidden (n)"). Reuses the app's SwipeRow
  * (swipe/SwipeRow.tsx: one row open at a time, axis lock so vertical scroll is never taken,
  * long-press / right-click / "…" / Shift+F10 menu for the same actions without swiping).
  * State lives in useTokenRowActions.tsx; logic (holding check by token ID, routes) in rowActions.ts.
  */
 import type { ReactNode } from 'react';
+import { EyeOff, Pin } from 'lucide-react';
 import { SwipeRow, type SwipeAction } from '../swipe/SwipeRow';
 
 export const TokenSwipeRow = ({
   actions,
+  rightActions,
+  menuActions,
+  pinned,
   title,
   rowId,
   children,
 }: {
   actions: SwipeAction[];
+  rightActions?: SwipeAction[];
+  menuActions?: SwipeAction[];
+  pinned?: boolean;
   title: string;
   rowId: string;
   children: ReactNode;
 }) => (
-  <SwipeRow label={title} rowId={rowId} leftActions={actions}>
-    {children}
-  </SwipeRow>
+  <div className="relative">
+    <SwipeRow label={title} rowId={rowId} leftActions={actions} rightActions={rightActions} menuActions={menuActions}>
+      {children}
+    </SwipeRow>
+    {pinned && (
+      <span
+        aria-label="Pinned"
+        className="absolute left-1 top-1 z-[2] pointer-events-none rotate-[35deg]"
+        style={{ color: 'var(--bw-accent)' }}
+      >
+        <Pin size={11} fill="currentColor" />
+      </span>
+    )}
+  </div>
 );
+
+/** "Hidden (n)" chip: toggles a list between its rows and the rows hidden with a right swipe. */
+export const HiddenChip = ({ count, on, onToggle }: { count: number; on: boolean; onToggle: () => void }) =>
+  count > 0 || on ? (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={on}
+      className="self-start flex items-center gap-1.5 rounded-full px-3 min-h-[32px] text-xs font-bold cursor-pointer"
+      style={{
+        background: on ? 'var(--bw-accent-lo)' : 'var(--bw-surface)',
+        border: '1px solid var(--bw-line)',
+        color: 'var(--bw-text)',
+      }}
+    >
+      <EyeOff size={13} /> {on ? 'Done' : `Hidden (${count})`}
+    </button>
+  ) : null;
 
 export const HoldHint = ({
   title,
