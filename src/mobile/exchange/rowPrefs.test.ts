@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import {
   arrangeRows,
   emptyRowPrefs,
@@ -11,13 +11,21 @@ import {
   type RowPrefs,
 } from './rowPrefs';
 
-// A small in-memory localStorage for bun.
+// A small in-memory localStorage for these tests only (put back afterwards: other files share the global).
 const mem = new Map<string, string>();
-(globalThis as unknown as { localStorage: Pick<Storage, 'getItem' | 'setItem' | 'clear'> }).localStorage = {
-  getItem: (k) => mem.get(k) ?? null,
-  setItem: (k, v) => void mem.set(k, String(v)),
-  clear: () => mem.clear(),
-};
+const g = globalThis as unknown as { localStorage?: unknown };
+const had = g.localStorage;
+beforeAll(() => {
+  g.localStorage = {
+    getItem: (k: string) => mem.get(k) ?? null,
+    setItem: (k: string, v: string) => void mem.set(k, String(v)),
+    clear: () => mem.clear(),
+  };
+});
+afterAll(() => {
+  if (had === undefined) delete g.localStorage;
+  else g.localStorage = had;
+});
 
 const rows = ['a', 'b', 'c', 'd', 'e'];
 const id = (s: string) => s;
