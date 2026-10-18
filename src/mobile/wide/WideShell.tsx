@@ -99,6 +99,7 @@ const I = {
   chat: 'M21 12a8 8 0 0 1-12 7l-5 1 1-4a8 8 0 1 1 16-4z',
   people: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
   spaces: 'M12 3a4 4 0 0 1 4 4v4a4 4 0 0 1-8 0V7a4 4 0 0 1 4-4zM5 11a7 7 0 0 0 14 0M12 18v3',
+  calendar: 'M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM4 10h16M8 2v4M16 2v4',
   feed: 'M4 5h16M4 12h16M4 19h10',
   media: 'M8 5v14l11-7z',
   apps: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',
@@ -343,6 +344,8 @@ const WideShell = ({ children }: { children: ReactNode }) => {
         { id: 'calls', label: 'bPhone', icon: I.calls, to: CALLS_ROUTE },
         { id: 'people', label: 'People', icon: I.people, to: '/m/people' },
         { id: 'spaces', label: 'Spaces', icon: I.spaces, to: '/m/spaces', hidden: !BSPACES_ENABLED },
+        // bCal: the one calendar of scheduled Spaces, shared with bChatX and bcalx.com (owner, 18 Oct 2026).
+        { id: 'calendar', label: 'Calendar', icon: I.calendar, to: '/m/calendar', hidden: !BSPACES_ENABLED },
       ],
     },
     {

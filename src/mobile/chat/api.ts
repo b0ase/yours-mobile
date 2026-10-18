@@ -662,6 +662,21 @@ export class BchatClient {
 
   // ── bSpaces (docs/BSPACES-PLAN.md): the room's live space. Same member gate as the thread. ──
 
+  /** bCal: your calendar — Spaces you follow (rooms you're in, reminders) and host/booked/guest in (bit-sign me/spaces/calendar). */
+  async myCalendar(): Promise<unknown> {
+    return this.call('GET', '/api/bitsign/me/spaces/calendar');
+  }
+
+  /** Reminder slots you have set (`booking:<id>` for scheduled Spaces). */
+  async spaceReminders(): Promise<unknown> {
+    return this.call('GET', '/api/bitsign/spaces/schedule/remind');
+  }
+
+  /** Remind me / stop reminding me about one scheduled Space. */
+  async setSpaceReminder(slot: string, on: boolean): Promise<unknown> {
+    return this.call('POST', '/api/bitsign/spaces/schedule/remind', { slot, on });
+  }
+
   /** The room's live space: `{ space, participants, me }`, or `{ space: null }`. */
   async space(ticker: string): Promise<unknown> {
     return this.call('GET', `${BchatClient.path(ticker)}/space`);

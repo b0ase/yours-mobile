@@ -27,6 +27,7 @@ const UpdateBanner = () => {
 };
 // bSpaces (Apps › bSpaces): bWalletX only, not even built into a store edition.
 const SpacesPage = BSPACES_ENABLED ? lazy(() => import('../spaces/SpacesPage')) : null;
+const CalendarPage = BSPACES_ENABLED ? lazy(() => import('../spaces/CalendarPage')) : null;
 // bPositive (bpositive/): bWalletX only, not even built into a store edition.
 const BPositivePage = BPOSITIVE_ENABLED ? lazy(() => import('../bpositive/BPositivePage')) : null;
 // No Market in a store build (storeBuild.ts MARKET_ENABLED): the chunk is not even built.
@@ -152,6 +153,7 @@ const MobileRoutes = () => (
         {ExchangePage && <Route path="market/*" element={<Navigate to="/m/exchange" replace />} />}
         {BPositivePage && <Route path="bpositive" element={<BPositivePage />} />}
         {SpacesPage && <Route path="spaces" element={<SpacesPage />} />}
+        {CalendarPage && <Route path="calendar" element={<CalendarPage />} />}
         {/* Shared spaces: the terms (zero tolerance, Apple 1.2) are agreed once before first use. */}
         <Route
           path="feed"
