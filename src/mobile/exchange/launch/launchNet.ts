@@ -17,6 +17,8 @@ import {
   type Launch,
   type LaunchOptions,
 } from './launch';
+import type { VerifiedVesting, VestPlan } from './vesting';
+import { lockVesting } from './vestingNet';
 
 /**
  * Launch network steps, run only after Allow on the one approval sheet. The icon is inscribed by the
@@ -28,8 +30,15 @@ export async function deployLaunch(
   ctx: OneSatContext,
   form: TokenForm,
   opts: LaunchOptions,
-  extra: { icon: string | null; launchFeeSats: number },
-): Promise<{ launch: Launch; supply: string; roomError: boolean; indexError: string | null }> {
+  extra: { icon: string | null; launchFeeSats: number; vest?: VestPlan },
+): Promise<{
+  launch: Launch;
+  supply: string;
+  roomError: boolean;
+  indexError: string | null;
+  vesting: VerifiedVesting | null;
+  vestError: string | null;
+}> {
   const f = withOptions(form, opts);
   const c = cleanToken(f);
   const o = cleanOptions(opts);
@@ -52,6 +61,18 @@ export async function deployLaunch(
   };
   saveLocalLaunch(launch);
 
+  // Creator vesting: straight after the deploy, before anything else touches the new coin. If it fails the
+  // creator is told plainly and can lock from the done screen (retryVesting); nothing else is signed for it.
+  let vesting: VerifiedVesting | null = null;
+  let vestError: string | null = null;
+  if (extra.vest && extra.vest.keepBps > 0) {
+    try {
+      vesting = await lockVesting(ctx, vestStartFor(tokenId, c, extra.icon), extra.vest);
+    } catch (e) {
+      vestError = e instanceof Error ? e.message : String(e);
+    }
+  }
+
   // A just-deployed token may not be indexed yet; the room can also be opened later from Chat.
   const client = await chatClient(ctx).catch(() => null);
   const roomTicker = client
@@ -71,8 +92,26 @@ export async function deployLaunch(
     indexError = await fundIndexing(ctx, tokenId, c.ticker, { timeoutMs: 60_000 })
       .then(() => null)
       .catch((e) => (e instanceof Error ? e.message : String(e)));
-  return { launch: done, supply: c.supply, roomError: !roomTicker, indexError };
+  return { launch: done, supply: c.supply, roomError: !roomTicker, indexError, vesting, vestError };
 }
+
+const vestStartFor = (tokenId: string, c: ReturnType<typeof cleanToken>, icon: string | null) => ({
+  tokenId,
+  sym: c.ticker,
+  supply: BigInt(c.amount),
+  decimals: c.decimals,
+  icon,
+});
+
+/** Done screen › "Lock it now": the same vesting transaction, for a launch whose lock did not go through. */
+export const retryVesting = (
+  ctx: OneSatContext,
+  form: TokenForm,
+  opts: LaunchOptions,
+  tokenId: string,
+  icon: string | null,
+  plan: VestPlan,
+) => lockVesting(ctx, vestStartFor(tokenId, cleanToken(withOptions(form, opts)), icon), plan);
 
 /**
  * Launch registry calls (bit-sign /api/bitsign/launches), kept out of chat/api.ts so the paths live only
