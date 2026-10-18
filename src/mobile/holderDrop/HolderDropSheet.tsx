@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { P2PKH } from '@bsv/sdk';
-import { sendBsv, sendBsv21, type Bsv21Balance } from '@1sat/actions';
+import { sendBsv, type Bsv21Balance } from '@1sat/actions';
 import { ArrowLeft, Download, Gift, RotateCcw } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { normalize } from '../../utils/format';
@@ -42,6 +42,7 @@ import {
   type Holder,
   type SnapshotResult,
 } from './holderDrop';
+import { guardedSendBsv21 } from '../../services/tokenSpendGuard';
 
 const STORE_KEY = 'bwx.holderdrop.';
 const loadPlan = (account: string) => {
@@ -287,7 +288,7 @@ export default function HolderDropSheet({
             f ? { feeScript: new P2PKH().lock(f.address).toHex(), maxSats: f.sats } : null,
           );
           const wallet = p.note ? withExtraOutput(guarded, noteOutput(p.note, a.tokenId)) : guarded;
-          res = await sendBsv21.execute(
+          res = await guardedSendBsv21.execute(
             { ...apiContext, wallet },
             {
               tokenId: a.tokenId,

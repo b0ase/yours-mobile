@@ -33,6 +33,7 @@ import {
   removeRecord,
   type ListingRecord,
 } from './sell';
+import { guardedSendBsv21 } from '../../services/tokenSpendGuard';
 
 const normId = (id: string) => id.replace('.', '_');
 const dotted = (outpoint: string) => outpoint.replace('_', '.');
@@ -91,7 +92,7 @@ export async function createListing(ctx: OneSatContext, input: CreateListingInpu
   const keyID = cancelKeyID(tokenId);
   const [cancel, pay] = await Promise.all([cancelAddress(ctx, keyID), defaultPayAddress(ctx)]);
   const script = buildListingScript(tokenId, input.amount, cancel, pay, input.priceSats);
-  const res = await sendBsv21.execute(ctx, {
+  const res = await guardedSendBsv21.execute(ctx, {
     tokenId,
     recipients: [{ amount: input.amount.toString(), destination: { lockingScript: script.toHex() } }],
   } as Parameters<typeof sendBsv21.execute>[1]);
@@ -255,7 +256,7 @@ export async function createTranche(ctx: OneSatContext, input: CreateTrancheInpu
   const keyID = cancelKeyID(tokenId);
   const [cancel, pay] = await Promise.all([cancelAddress(ctx, keyID), defaultPayAddress(ctx)]);
   const script = buildListingScript(tokenId, input.pack, cancel, pay, input.priceSats).toHex();
-  const res = await sendBsv21.execute(ctx, {
+  const res = await guardedSendBsv21.execute(ctx, {
     tokenId,
     recipients: Array.from({ length: count }, () => ({
       amount: input.pack.toString(),

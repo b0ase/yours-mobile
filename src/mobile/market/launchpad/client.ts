@@ -6,7 +6,8 @@
  * absolute BlastPad base URL.
  */
 import { Beef, PublicKey, Transaction, UnlockingScript, Utils, type WalletInterface } from '@bsv/sdk';
-import { ONESAT, bsv21, noteFor, tokenCoins, tokenSpends } from './tokens';
+import { keyCheckFor } from '../../../services/tokenSpendGuard';
+import { ONESAT, bsv21, noteFor, tokenCoins, tokenOutputTags, tokenSpends } from './tokens';
 import { exactBsv, exactTokens } from './curve';
 import { matchesPlan, type TradePlan } from './shape';
 import { BLASTPAD } from './api';
@@ -75,6 +76,8 @@ export async function prepareTrade(
   let walletBeef: number[] | undefined;
   if (side === 'buy') buyKey = await freshTokenKey(w.client, coin.id);
   else {
+    // F-3: refile or set aside token records this wallet can't sign before picking the coins to sell.
+    await keyCheckFor({ wallet: w.client })(coin.id, false).catch(() => undefined);
     const { coins, beef } = await tokenCoins(w.client, true);
     const mine = coins.filter((c) => c.id === coin.id && c.keyID && c.noted).sort((a, b) => (b.amt > a.amt ? 1 : -1));
     let sum = BigInt(0);
@@ -152,7 +155,7 @@ export async function executeTrade(p: PreparedTrade, onStatus?: (s: string) => v
       ...(side === 'buy' && i === 0
         ? {
             basket: 'bsv21',
-            tags: [`bsv21:${coin.id}`],
+            tags: tokenOutputTags(coin.id),
             customInstructions: noteFor(coin.id, q.tokens, coin.sym, 0, buyKey!.keyID, coin.icon),
           }
         : {}),
@@ -175,7 +178,7 @@ export async function executeTrade(p: PreparedTrade, onStatus?: (s: string) => v
         satoshis: 1,
         outputDescription: `The rest of your $${coin.sym}: ${exactTokens(left)}`,
         basket: 'bsv21',
-        tags: [`bsv21:${coin.id}`],
+        tags: tokenOutputTags(coin.id),
         customInstructions: noteFor(coin.id, left, coin.sym, 0, ch.keyID, coin.icon),
       });
     }

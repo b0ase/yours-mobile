@@ -169,31 +169,77 @@ describe('repairUnsignableTokenOutputs', () => {
   const LISTING = `${'f'.repeat(64)}`;
   const ci = (keyID: string, counterparty = 'self') =>
     JSON.stringify({ protocolID: [1, '1sat'], keyID, counterparty, amt: '1' });
-  const keyed = (vout: number, customInstructions: string | undefined, hash160: string | null = H_GOOD) => ({
+  const keyed = (
+    vout: number,
+    customInstructions: string | undefined,
+    hash160: string | null = H_GOOD,
+    tags: string[] = [`bsv21:${TOKEN}`, `id:abc_${vout}`],
+  ) => ({
     outpoint: `${MINED}.${vout}`,
     tokenId: TOKEN,
     amt: '1',
     hash160,
     customInstructions,
+    tags,
   });
   const run = async (
     outs: ReturnType<typeof keyed>[],
     signs: (k: { keyID: string; counterparty: string }) => boolean,
+    opts: { verified?: Set<string> } = {},
   ) => {
-    const refiled: { outpoint: string; ci: string }[] = [];
+    const refiled: { outpoint: string; ci: string; tags: string[] }[] = [];
     const relinquished: string[] = [];
-    const r = await repairUnsignableTokenOutputs({
-      localOutputs: async () => outs,
-      derive: async (k) => (signs(k) ? H_GOOD : '22'.repeat(20)),
-      refile: async (o, c) => {
-        refiled.push({ outpoint: o.outpoint, ci: c });
+    let derives = 0;
+    const r = await repairUnsignableTokenOutputs(
+      {
+        localOutputs: async () => outs,
+        derive: async (k) => {
+          derives++;
+          return signs(k) ? H_GOOD : '22'.repeat(20);
+        },
+        refile: async (o, c, tags) => {
+          refiled.push({ outpoint: o.outpoint, ci: c, tags });
+        },
+        relinquish: async (o) => {
+          relinquished.push(o);
+        },
+        newIdTag: () => 'id:new_0',
       },
-      relinquish: async (o) => {
-        relinquished.push(o);
-      },
-    });
-    return { r, refiled, relinquished };
+      opts,
+    );
+    return { r, refiled, relinquished, derives };
   };
+
+  // Root cause (18 Oct 2026): creator-vesting / launchpad / purchase-recovery records had no id: tag, so
+  // @1sat/actions built no spend for them and the input went to the signer with an empty unlock.
+  test('a record whose key signs but has no id: tag is refiled with one, record unchanged', async () => {
+    const rec = ci('k1');
+    const { r, refiled, relinquished } = await run(
+      [keyed(0, rec, H_GOOD, [`bsv21:${TOKEN}`])],
+      (k) => k.keyID === 'k1',
+    );
+    expect(r.repaired.length).toBe(1);
+    expect(relinquished).toEqual([]);
+    expect(refiled[0].ci).toBe(rec);
+    expect(refiled[0].tags).toEqual([`bsv21:${TOKEN}`, 'id:new_0']);
+  });
+
+  test('a wrong key and no id: tag: refiled once with both fixed', async () => {
+    const { refiled } = await run([keyed(0, ci('k1', 'anyone'), H_GOOD, [])], (k) => k.counterparty === 'self');
+    expect(refiled.length).toBe(1);
+    expect(JSON.parse(refiled[0].ci).counterparty).toBe('self');
+    expect(refiled[0].tags).toEqual(['id:new_0']);
+  });
+
+  test('verified records are skipped on the next pass (the pre-send check stays cheap)', async () => {
+    const verified = new Set<string>();
+    const outs = [keyed(0, ci('k1'))];
+    const first = await run(outs, (k) => k.keyID === 'k1', { verified });
+    expect(first.derives).toBe(1);
+    const second = await run(outs, (k) => k.keyID === 'k1', { verified });
+    expect(second.derives).toBe(0);
+    expect(second.r.checked).toBe(0);
+  });
 
   test('a record whose key signs is left alone', async () => {
     const { r, refiled, relinquished } = await run(

@@ -7,7 +7,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { WalletInterface } from '@bsv/sdk';
-import { sendBsv21 } from '@1sat/actions';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { getErrorMessage } from '../../utils/tools';
 import type { BchatClient } from '../chat/api';
@@ -16,6 +15,7 @@ import { fmtUsd, usdToSats, useBsvUsd } from '../money/money';
 import { parsePage } from './invite';
 import { parseSpaceState } from './model';
 import { doorPriceUsd, loadLedger, needsHandCheck, runDoor } from './door';
+import { guardedSendBsv21 } from '../../services/tokenSpendGuard';
 
 const GOLD = 'var(--bw-accent-hi)';
 const PASS_MS = 5000;
@@ -83,7 +83,7 @@ export const DoorKeeper = ({ client, ticker, me }: { client: BchatClient; ticker
           ticker: t,
           priceSats: usdToSats(door.usd, rateRef.current),
           sendTicket: async ({ ordAddress }) => {
-            const res = await sendBsv21.execute(apiContext, {
+            const res = await guardedSendBsv21.execute(apiContext, {
               tokenId: door.tokenId,
               recipients: [{ amount: BigInt(door.amountRaw), destination: { address: ordAddress } }],
             });

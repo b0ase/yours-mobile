@@ -32,7 +32,7 @@ import {
   Loader2,
   Store,
 } from 'lucide-react';
-import { sendBsv, sendBsv21, type Bsv21Balance } from '@1sat/actions';
+import { sendBsv, type Bsv21Balance } from '@1sat/actions';
 import { SendBsv21View } from '../../components/SendBsv21View';
 import { NameInput } from '../names/NameInput';
 import { useTheme } from '../../hooks/useTheme';
@@ -129,6 +129,7 @@ import { HELP_DESK_NAME, isLounge, LOUNGE_TICKER } from '../chat/loungeInfo';
 import { setHelpDeskUnpinned, useHelpDeskPinned } from '../chat/helpDeskPin';
 import { roomSpaceOpen } from '../spaces/model';
 import { RoomFilterChips, SpacesRoomList, type RoomFilter } from '../spaces/SpacesFilter';
+import { guardedSendBsv21 } from '../../services/tokenSpendGuard';
 
 /** Store build: token rooms are listed but never opened, joined or bought into (storeBuild.ts). */
 const ROOMS = tokenRoomsEnabled();
@@ -1949,7 +1950,7 @@ const BountiesSheet = ({
       for (const t of paying.transfers) {
         const res =
           t.type === 'bsv21'
-            ? await sendBsv21.execute(apiContext, {
+            ? await guardedSendBsv21.execute(apiContext, {
                 tokenId: t.tokenId,
                 recipients: [{ amount: BigInt(t.amountRaw), destination: { address: t.address } }],
               })

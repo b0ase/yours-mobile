@@ -26,6 +26,7 @@ import {
 } from '@1sat/actions';
 import { buildInputAssetLabel, buildTokenLabel, readAssetIdTag } from '@1sat/types';
 import { formatRaw } from './tokenRooms';
+import { withTokenKeyCheck } from '../../services/tokenSpendGuard';
 
 /** Token id equality (dot or underscore outpoint form). */
 const normalizeBsv21TokenId = (id: string) => id.trim().toLowerCase().replace('.', '_');
@@ -238,6 +239,16 @@ type ListedOutput = { outpoint: string; tags?: string[]; customInstructions?: st
  * are valid (as sendBsv21 does), so the server's provenance check passes.
  */
 export async function payForMessage(
+  ctx: OneSatContext,
+  m: { ticker: string; handle: string; text: string; charge: SpendCharge },
+): Promise<{ beef: string; txid: string }> {
+  const tokenIds = m.charge.charges.flatMap((c) => (c.unit === 'token' ? [c.tokenId] : []));
+  if (!tokenIds.length) return payForMessageOnce(ctx, m);
+  // F-3: token inputs whose records can't be signed are fixed before, and once after, an empty unlock.
+  return withTokenKeyCheck(ctx, tokenIds, () => payForMessageOnce(ctx, m));
+}
+
+async function payForMessageOnce(
   ctx: OneSatContext,
   m: { ticker: string; handle: string; text: string; charge: SpendCharge },
 ): Promise<{ beef: string; txid: string }> {

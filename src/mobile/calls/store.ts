@@ -1,4 +1,4 @@
-import { sendBsv, sendBsv21, sendMnee, type OneSatContext } from '@1sat/actions';
+import { sendBsv, sendMnee, type OneSatContext } from '@1sat/actions';
 import { isNative } from '../native';
 import { isPermissionDenied, type MediaKind } from '../permissions/mediaPermission';
 import { defaultHttp } from '../chat/api';
@@ -23,6 +23,7 @@ import {
   type RateCard,
 } from './rateCard';
 import { busy, IDLE, reduce, type CallEvent, type CallState, type Peer, type ServerCall } from './machine';
+import { guardedSendBsv21 } from '../../services/tokenSpendGuard';
 
 /**
  * App-wide call controller (module singleton, like media/player.ts). The CallScreen overlay
@@ -392,7 +393,7 @@ async function pay(ctx: OneSatContext, card: RateCard, payTo: PayTo, units: numb
     return res.txid ?? null;
   }
   const raw = BigInt(Math.round(units * 10 ** asset.dec));
-  const res = await sendBsv21.execute(ctx, {
+  const res = await guardedSendBsv21.execute(ctx, {
     tokenId: asset.id,
     recipients: [{ amount: raw, destination: { address: payTo.address } }],
   });
