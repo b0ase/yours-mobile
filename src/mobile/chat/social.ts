@@ -57,10 +57,16 @@ export const optimisticReaction = (target: string, emoji: string, me: string, mi
 });
 
 export const replyOf = (m: ChatMessage): ReplyRef | null => {
-  const r = (m.event_payload as { reply_to?: Partial<ReplyRef> } | null | undefined)?.reply_to;
-  return r && typeof r.id === 'string'
-    ? { id: r.id, author: r.author ?? null, snippet: String(r.snippet ?? '') }
-    : null;
+  const p = m.event_payload as
+    | { reply_to?: Partial<ReplyRef>; shared_by?: string; question?: string }
+    | null
+    | undefined;
+  const r = p?.reply_to;
+  if (r && typeof r.id === 'string') return { id: r.id, author: r.author ?? null, snippet: String(r.snippet ?? '') };
+  // A shared $b answer from before 18 Oct kept only `question`: still quote it, or the room
+  // sees an answer with no question.
+  if (p?.shared_by && p.question) return { id: '', author: p.shared_by, snippet: String(p.question) };
+  return null;
 };
 
 export const replyRefFor = (m: ChatMessage): ReplyRef => ({
