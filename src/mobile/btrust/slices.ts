@@ -81,6 +81,8 @@ export function restoreKey(texts: string[]): { trustKey: PrivateKey; cipher: num
   const parsed = texts.filter((t) => t.trim()).map(parseCard);
   if (parsed.length < 2) throw new Error('add at least two slices');
   if (new Set(parsed.map((p) => p.setId)).size !== 1) throw new Error('these slices are from different sets');
+  const c0 = Utils.toHex(parsed[0].cipher);
+  if (parsed.some((p) => Utils.toHex(p.cipher) !== c0)) throw new Error('these slices are from different sets');
   const unique = [...new Map(parsed.map((p) => [p.index, p])).values()];
   if (unique.length < 2) throw new Error('these are copies of the same slice; add a different one');
   let trustKey: PrivateKey;

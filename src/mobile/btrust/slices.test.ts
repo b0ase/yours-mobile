@@ -50,6 +50,20 @@ describe('n-of-m', () => {
     expect(restoreSecret([cards[4].text, cards[0].text, cards[2].text])).toEqual(secret);
     expect(() => restoreSecret([cards[0].text, cards[1].text])).toThrow();
   });
+  test('every pair of a 2-of-5 set restores; threshold-1 of 4-of-6 does not', () => {
+    const five = makeSlices(secret, 2, 5).cards;
+    for (let a = 0; a < 5; a++)
+      for (let b = a + 1; b < 5; b++) expect(restoreSecret([five[a].text, five[b].text])).toEqual(secret);
+    const six = makeSlices(secret, 4, 6).cards;
+    expect(() => restoreSecret(six.slice(0, 3).map((c) => c.text))).toThrow();
+    expect(restoreSecret(six.slice(2).map((c) => c.text))).toEqual(secret);
+  });
+  test('a card with a swapped ciphertext but the same set id is refused', () => {
+    const { cards } = makeSlices(secret);
+    const p = cards[1].text.split(':');
+    const forged = [...p.slice(0, 4), makeSlices(secret).cards[0].text.split(':')[4]].join(':');
+    expect(() => restoreSecret([cards[0].text, forged])).toThrow();
+  });
   test('refuses silly counts', () => {
     expect(() => makeSlices(secret, 1, 3)).toThrow();
     expect(() => makeSlices(secret, 4, 3)).toThrow();
