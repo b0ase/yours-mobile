@@ -159,7 +159,7 @@ export const HiddenTokens = ({ tokens, style }: { tokens: Bsv21Balance[]; style?
                   <Row
                     key={i.key}
                     name={qName(i)}
-                    sub={`${tokenAmount(i.asset.qty, i.asset.dec)} · from ${short(i.from || i.issuer)}`}
+                    sub={`${tokenAmount(i.asset.qty, i.asset.kind === 'bsv' ? 8 : i.asset.dec)} · from ${short(i.from || i.issuer)}`}
                     actions={
                       <>
                         <Act label="Keep" strong onClick={() => update((s) => keep(s, i.key))} />

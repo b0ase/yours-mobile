@@ -4,6 +4,7 @@ import { PrivateKey } from '@bsv/sdk';
 import { prepareSweepInputs, sweepBsv, sweepOrdinals, sweepBsv21 } from '@1sat/actions';
 import { cancelOwnedOrdLockListings } from '../utils/cancelOrdLockListings';
 import { scanAddress, type ScannedAssets } from '../sweep/scanner';
+import { fundingOwners, sweepKeyWifs } from '../sweep/sweepKeys';
 import type { IndexedOutput } from '@1sat/types';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
@@ -58,6 +59,8 @@ export const SweepMigration = () => {
   const [legacyKeys, setLegacyKeys] = useState<Keys | null>(null);
 
   const [scanStatuses, setScanStatuses] = useState<AddressScanStatus[]>([]);
+  // Which address (and key) each scanned BSV output was found at: the sweep signs each input with its own key.
+  const [owners, setOwners] = useState<Map<string, string>>(new Map());
   const [assets, setAssets] = useState<ScannedAssets>({
     funding: [],
     ordinals: [],
@@ -191,6 +194,7 @@ export const SweepMigration = () => {
       merged.totalBsv += r.totalBsv;
     }
 
+    setOwners(fundingOwners(addresses.map((a, i) => ({ address: a, funding: results[i]?.funding ?? [] }))));
     setAssets(merged);
     setStep('review');
   }, [legacyKeys, apiContext.services]);
@@ -258,10 +262,9 @@ export const SweepMigration = () => {
       setCurrentSweepOp('Sweeping BSV...');
       try {
         const inputs = await prepareSweepInputs(apiContext, toSweepInputs(assets.funding));
-        const payKey = PrivateKey.fromWif(legacyKeys.walletWif);
         const resp = await sweepBsv.execute(apiContext, {
           inputs,
-          keys: inputs.map(() => payKey),
+          keys: sweepKeyWifs(inputs, owners).map((w) => PrivateKey.fromWif(w)),
           amount: selection.bsvAmount,
         });
         results.push({

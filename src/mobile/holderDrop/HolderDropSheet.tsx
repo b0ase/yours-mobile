@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { P2PKH } from '@bsv/sdk';
-import { sendBsv21, type Bsv21Balance } from '@1sat/actions';
+import { sendBsv, sendBsv21, type Bsv21Balance } from '@1sat/actions';
 import { ArrowLeft, Download, Gift, RotateCcw } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { normalize } from '../../utils/format';
 import { getErrorMessage } from '../../utils/tools';
 import { useBackClose } from '../backStack';
 import { NoteField } from '../airdrops/NoteField';
-import { cleanNote, noteOutput, withExtraOutput } from '../airdrops/note';
+import { bsvDropOutput, cleanNote, noteOutput, withExtraOutput } from '../airdrops/note';
 import { heldBsv21Balances } from '../airdrops/heldBalances';
 import { saveTextFile } from '../agents/saveText';
 import { maxOverlayFee, withTokenSendGuard } from '../wallet/send/tokenFee';
@@ -101,8 +101,10 @@ const input =
  * sheet covers the whole drop; batches go out one transaction each after that tap. Progress and a per-drop ledger
  * of paid addresses are kept on the device, so an interrupted drop resumes without paying anyone twice.
  *
- * BSV is not offered: a plain BSV payment is not an asset the recipient's Airdrops inbox shows (inbox.ts only
- * lists 1-sat tokens and NFTs), and holder addresses are token (ord) addresses.
+ * BSV drops (owner, 18 Oct 2026) always carry the airdrop marker (note.ts bsvDropOutput, naming the holders' token),
+ * which is what makes a plain payment show in the recipient's Airdrops inbox (inbox.ts bsvDropItems); ordinary
+ * payments carry none. They go to the holder's address as listed (often an ordinals address: there is no public
+ * map from it to a pay address); bWalletX moves BSV found there into the balance with the Sweep (sweep/sweepKeys.ts).
  */
 export default function HolderDropSheet({
   token,
@@ -146,21 +148,28 @@ export default function HolderDropSheet({
 
   const pageId = normTokenId(token.id) ?? token.id;
   const other = held.find((b) => normTokenId(b.id) === assetId);
-  const asset: Extract<DropAsset, { kind: 'token' }> =
-    assetId === pageId || !other
-      ? { kind: 'token', tokenId: token.id, dec: token.dec, symbol: token.symbol }
-      : { kind: 'token', tokenId: other.id, dec: other.dec, symbol: other.sym || other.id.slice(0, 8) };
-  const assetHeld = assetId === pageId || !other ? heldRaw : other.all.confirmed;
-  const unit = asset.symbol;
+  const asset: DropAsset =
+    assetId === 'bsv'
+      ? { kind: 'bsv' }
+      : assetId === pageId || !other
+        ? { kind: 'token', tokenId: token.id, dec: token.dec, symbol: token.symbol }
+        : { kind: 'token', tokenId: other.id, dec: other.dec, symbol: other.sym || other.id.slice(0, 8) };
+  // BSV: the wallet refuses a send it can't fund, so no balance check here.
+  const assetHeld: bigint | null =
+    asset.kind === 'bsv' ? null : assetId === pageId || !other ? heldRaw : other.all.confirmed;
+  const assetDec = asset.kind === 'bsv' ? 8 : asset.dec;
+  const assetKey = asset.kind === 'bsv' ? 'bsv' : asset.tokenId;
+  const unit = asset.kind === 'bsv' ? 'BSV' : asset.symbol;
   const satsPerKb = chromeStorageService.getCustomFeeRate();
 
   // The indexer's per-output fee for the token being sent (sendBsv21 pays it in every batch). Fail closed: a drop
   // can't be planned until the token's details are read.
   // A saved plan pays in its own token, whatever is picked in the form.
-  const feeTokenId = plan?.asset.kind === 'token' ? plan.asset.tokenId : asset.tokenId;
+  const feeTokenId = plan ? (plan.asset.kind === 'token' ? plan.asset.tokenId : 'bsv') : assetKey;
   useEffect(() => {
     const bsv21 = apiContext.services?.bsv21;
     const id = feeTokenId;
+    if (id === 'bsv') return setFee({ id, sats: 0 });
     if (!bsv21) return setFee({ id, error: 'Token details are unavailable.' });
     setFee(null);
     bsv21
@@ -206,7 +215,7 @@ export default function HolderDropSheet({
     });
   }, [snap, minHolding, pasted, feeOk?.address, addrs?.ordAddress, addrs?.bsvAddress, addrs?.identityAddress]);
 
-  const amount = toAtomic(amountIn, asset.dec);
+  const amount = toAtomic(amountIn, assetDec);
   const size = Math.max(1, Math.min(MAX_BATCH, parseInt(batchSize, 10) || DEFAULT_BATCH));
   const draft = useMemo(() => {
     if (!filtered || !amount || !feeOk) return null;
@@ -219,9 +228,9 @@ export default function HolderDropSheet({
       return null;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtered, amount, mode, asset.tokenId, size, satsPerKb, feeOk]);
+  }, [filtered, amount, mode, assetKey, size, satsPerKb, feeOk]);
 
-  const overBalance = !!draft && draft.preview.total > assetHeld;
+  const overBalance = !!draft && assetHeld !== null && draft.preview.total > assetHeld;
   const noteBad = !!note.trim() && !cleanNote(note);
 
   const startDrop = () => {
@@ -252,7 +261,7 @@ export default function HolderDropSheet({
 
   /** After the one approval: send every pending batch in order, stopping at the first failure. */
   const sendAll = async () => {
-    if (!plan || plan.asset.kind !== 'token') return;
+    if (!plan) return;
     setConfirming(false);
     setBusy(true);
     setMsg('');
@@ -263,19 +272,29 @@ export default function HolderDropSheet({
       p = startBatch(p, i);
       update(p);
       try {
-        const f = feeOk ? maxOverlayFee(feeOk.address, feeOk.sats, b.recipients.length) : null;
-        const guarded = withTokenSendGuard(
-          apiContext.wallet,
-          f ? { feeScript: new P2PKH().lock(f.address).toHex(), maxSats: f.sats } : null,
-        );
-        const wallet = p.note ? withExtraOutput(guarded, noteOutput(p.note, a.tokenId)) : guarded;
-        const res = await sendBsv21.execute(
-          { ...apiContext, wallet },
-          {
-            tokenId: a.tokenId,
-            recipients: b.recipients.map((r) => ({ amount: r.amount, destination: { address: r.address } })),
-          },
-        );
+        let res: { txid?: string; error?: string };
+        if (a.kind === 'bsv') {
+          // Always marked, so it shows in the holders' Airdrops inbox and nowhere else looks like an airdrop.
+          const wallet = withExtraOutput(apiContext.wallet, bsvDropOutput(p.note, p.snapshotTokenId));
+          res = await sendBsv.execute(
+            { ...apiContext, wallet },
+            { requests: b.recipients.map((r) => ({ address: r.address, satoshis: Number(r.amount) })) },
+          );
+        } else {
+          const f = feeOk ? maxOverlayFee(feeOk.address, feeOk.sats, b.recipients.length) : null;
+          const guarded = withTokenSendGuard(
+            apiContext.wallet,
+            f ? { feeScript: new P2PKH().lock(f.address).toHex(), maxSats: f.sats } : null,
+          );
+          const wallet = p.note ? withExtraOutput(guarded, noteOutput(p.note, a.tokenId)) : guarded;
+          res = await sendBsv21.execute(
+            { ...apiContext, wallet },
+            {
+              tokenId: a.tokenId,
+              recipients: b.recipients.map((r) => ({ amount: r.amount, destination: { address: r.address } })),
+            },
+          );
+        }
         p =
           res.txid && !res.error
             ? recordBatch(p, i, { txid: res.txid })
@@ -476,6 +495,7 @@ export default function HolderDropSheet({
               </label>
               <select className={input} value={assetId} onChange={(e) => setAssetId(e.target.value)}>
                 <option value={pageId}>{token.symbol} (this token)</option>
+                <option value="bsv">BSV</option>
                 {held
                   .filter((b) => normTokenId(b.id) !== pageId)
                   .map((b) => (
@@ -525,7 +545,7 @@ export default function HolderDropSheet({
                 onChange={(e) => setBatchSize(e.target.value)}
               />
               <NoteField value={note} onChange={setNote} />
-              {fee && 'error' in fee && fee.id === asset.tokenId && (
+              {fee && 'error' in fee && fee.id === assetKey && (
                 <p className="text-xs m-0" style={{ color: '#FDA29B' }}>
                   This token&apos;s details could not be read ({fee.error}), so it can&apos;t be airdropped right now.
                 </p>
@@ -535,7 +555,7 @@ export default function HolderDropSheet({
             {draft && (
               <div className="flex flex-col gap-1 rounded-2xl p-4" style={card}>
                 <p className="text-sm text-white m-0">
-                  {formatUnits(draft.preview.total, asset.dec)} {unit} to {draft.preview.holders} holders
+                  {formatUnits(draft.preview.total, assetDec)} {unit} to {draft.preview.holders} holders
                 </p>
                 <p className="text-xs m-0" style={{ color: muted }}>
                   {draft.preview.batches} transaction{draft.preview.batches === 1 ? '' : 's'} · network fee about{' '}
@@ -543,7 +563,8 @@ export default function HolderDropSheet({
                   {draft.preview.indexerFee ? ` · indexer fee up to ${draft.preview.indexerFee} sats` : ''}
                 </p>
                 <p className="text-xs m-0" style={{ color: muted }}>
-                  Total leaving your wallet: {formatUnits(draft.preview.total, asset.dec)} {unit} +{' '}
+                  Total leaving your wallet:{' '}
+                  {asset.kind === 'bsv' ? '' : `${formatUnits(draft.preview.total, assetDec)} ${unit} + `}
                   {formatUnits(draft.preview.satsOut, 8)} BSV
                 </p>
                 <div className="flex flex-col gap-0.5 mt-1 max-h-40 overflow-y-auto">
@@ -551,7 +572,7 @@ export default function HolderDropSheet({
                     <div key={r.address} className="flex justify-between text-[11px]" style={{ color: muted }}>
                       <span>{short(r.address)}</span>
                       <span>
-                        {formatUnits(r.amount, asset.dec)} {unit}
+                        {formatUnits(r.amount, assetDec)} {unit}
                       </span>
                     </div>
                   ))}
@@ -563,7 +584,7 @@ export default function HolderDropSheet({
                 </div>
                 {overBalance && (
                   <p className="text-xs m-0" style={{ color: '#FDA29B' }}>
-                    You hold {formatUnits(assetHeld, asset.dec)} {unit}, less than this airdrop.
+                    You hold {formatUnits(assetHeld ?? 0n, assetDec)} {unit}, less than this airdrop.
                   </p>
                 )}
                 {mode === 'prorata' && filtered && draft.preview.holders < filtered.holders.length && (

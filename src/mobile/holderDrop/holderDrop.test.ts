@@ -343,3 +343,45 @@ describe('one approval, idempotent per holder per drop', () => {
     expect(sumAmounts(all)).toBe(1_000_000n);
   });
 });
+
+describe('BSV holder drops', () => {
+  const bsv = { kind: 'bsv' as const };
+  const hs: Holder[] = [
+    { address: A, amt: 300n },
+    { address: B, amt: 100n },
+  ];
+
+  it('plans pro-rata sats, batches them and keeps its own drop ID and ledger', () => {
+    const id = dropId({ snapshotTokenId: TOKEN, asset: bsv, mode: 'prorata', amount: 10_000n });
+    expect(id).not.toBe(dropId({ snapshotTokenId: TOKEN, asset, mode: 'prorata', amount: 10_000n }));
+    const plan = makePlan({
+      id,
+      createdAt: 1,
+      snapshotTokenId: TOKEN,
+      asset: bsv,
+      mode: 'prorata',
+      recipients: allocateProRata(hs, 10_000n),
+      batchSize: 1,
+    });
+    expect(plan.batches.map((b) => b.recipients[0].amount)).toEqual([7500n, 2500n]);
+    const pv = previewDrop(
+      plan.batches.flatMap((b) => b.recipients),
+      bsv,
+      { batchSize: 1, satsPerKb: 100 },
+    );
+    expect(pv.indexerFee).toBe(0);
+    expect(pv.satsOut).toBe(10_000n + BigInt(pv.minerFee));
+    const half = recordBatch(plan, 0, { txid: 't' });
+    const again = makePlan({
+      id,
+      createdAt: 2,
+      snapshotTokenId: TOKEN,
+      asset: bsv,
+      mode: 'prorata',
+      recipients: allocateProRata(hs, 10_000n),
+      batchSize: 1,
+      alreadyPaid: mergeLedger({}, half)[id],
+    });
+    expect(again.batches.flatMap((b) => b.recipients.map((r) => r.address))).toEqual([B]);
+  });
+});

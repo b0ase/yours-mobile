@@ -6,15 +6,27 @@
  * launch, recovery or swap always has one). Pure and persisted per account in localStorage.
  */
 import type { Asset } from '../wallet/historyEvents';
-import type { HistoryRow } from '../wallet/txHistory';
+import type { HistoryRow, RawTx } from '../wallet/txHistory';
+import { dropMarker } from './note';
 import { quarantinedNfts, quarantinedTokenIds } from './quarantine';
+
+/** A plain BSV airdrop (holder drop): `qty` is the sats paid to us. */
+export type BsvDropAsset = { kind: 'bsv'; id: 'bsv'; qty: string };
+export type InboxAsset = Asset | BsvDropAsset;
 
 export type AirdropItem = {
   /** `txid:assetId`, stable across reloads. */
   key: string;
   txid: string;
   time: number;
-  asset: Asset;
+  asset: InboxAsset;
+  /** BSV airdrop: the token whose holders were paid (from the tx's marker), when named. */
+  holdersOf?: string;
+  /**
+   * BSV airdrop: it landed on one of the account's fixed (legacy) addresses, which the balance does not scan, so it
+   * must be moved into the balance (Sweep) before it can be spent. False: it is already in the balance.
+   */
+  needsMove?: boolean;
   /** Who it's from: the token id for a token (one issuer per deploy), else the sending address. */
   issuer: string;
   from: string;
@@ -55,6 +67,43 @@ export const toItems = (rows: HistoryRow[], hasLocal: (txid: string) => boolean)
     out.push({ key, txid: r.txid, time: r.time, asset: r.asset, issuer, from: r.counterparty });
   }
   return out.sort((a, b) => b.time - a.time);
+};
+
+/**
+ * BSV airdrops (owner, 18 Oct 2026): a payment in that we did not fund, with no action record of our own, whose tx
+ * carries the bWalletX airdrop note or marker (note.ts dropMarker). Ordinary payments carry no marker and never
+ * show. `legacy`: the account's fixed addresses (ord / pay / identity), which need a Sweep to reach the balance.
+ */
+export const bsvDropItems = (
+  rows: Pick<HistoryRow, 'txid' | 'time' | 'direction' | 'asset' | 'counterparty'>[],
+  txs: Map<string, RawTx>,
+  opts: { own: Set<string>; legacy: Set<string>; funded: (tx: RawTx) => boolean; hasLocal: (txid: string) => boolean },
+): AirdropItem[] => {
+  const out: AirdropItem[] = [];
+  const seen = new Set<string>();
+  for (const r of rows) {
+    if (r.asset || r.direction !== 'in' || opts.hasLocal(r.txid) || seen.has(r.txid)) continue;
+    const tx = txs.get(r.txid);
+    if (!tx || opts.funded(tx)) continue;
+    const marker = dropMarker(tx.vout);
+    if (!marker) continue;
+    // Only plain outputs to us (a 1-sat output is a token or NFT, handled by toItems).
+    const mine = tx.vout.filter((o) => o.sats > 1 && o.addresses.some((a) => opts.own.has(a)));
+    const sats = mine.reduce((n, o) => n + o.sats, 0);
+    if (!sats) continue;
+    seen.add(r.txid);
+    out.push({
+      key: `${r.txid}:bsv`,
+      txid: r.txid,
+      time: r.time,
+      asset: { kind: 'bsv', id: 'bsv', qty: String(sats) },
+      issuer: marker.tokenId ?? r.counterparty,
+      from: r.counterparty,
+      ...(marker.tokenId ? { holdersOf: marker.tokenId } : {}),
+      needsMove: mine.some((o) => o.addresses.some((a) => opts.legacy.has(a))),
+    });
+  }
+  return out;
 };
 
 /** Items still in the inbox: not kept, not hidden, issuer not hidden, and (onlyKnown) from a known issuer. */
@@ -120,6 +169,9 @@ export const hide = (s: InboxState, item: Pick<AirdropItem, 'key' | 'issuer'>): 
   hidden: [...new Set([...s.hidden, item.key])],
   hiddenIssuers: [...new Set([...s.hiddenIssuers, item.issuer])],
 });
+/** Hide from the inbox. A BSV airdrop hides only its card (the money is the user's either way); others hide(). */
+export const hideItem = (s: InboxState, item: Pick<AirdropItem, 'key' | 'issuer' | 'asset'>): InboxState =>
+  item.asset.kind === 'bsv' ? { ...s, hidden: [...new Set([...s.hidden, item.key])] } : hide(s, item);
 export const markSeen = (s: InboxState, now = Date.now()): InboxState => ({ ...s, seenAt: now });
 
 // ─── Persistence ─────────────────────────────────────────────────────────────
