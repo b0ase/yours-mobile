@@ -44,6 +44,7 @@ const JoinArtistPage = ARTIST_PROGRAMME_ENABLED
 // bWalletX only: absent from a store build (RELEASES_ENABLED).
 const AddReleasePage = RELEASES_ENABLED ? lazy(() => import('../media/releases/AddReleasePage')) : null;
 const AgentPage = lazy(() => import('../agent/AgentPage'));
+const MyReportsPage = lazy(() => import('../agent/MyReportsPage'));
 // The top bar's mailbox: bMail in the content area, between the top bar and the tab bar.
 const BMailPage = lazy(() => import('../bmail/BMailPage'));
 // The top bar's phone button: bPhone Calls in the content area (active calls stay full-screen via CallScreen).
@@ -107,6 +108,8 @@ const MobileRoutes = () => (
         />
         {/* The top bar's centre b: the b agent. */}
         <Route path="ask-b" element={<AgentPage />} />
+        {/* Everything you told b, and where each report stands (18 Oct 2026). */}
+        <Route path="reports" element={<MyReportsPage />} />
         {/* Old links (/agent, /m/agent) keep working (renamed Ask b, 12 Oct 2026). */}
         <Route path="agent" element={<Navigate to="/m/ask-b" replace />} />
         <Route path="bmail" element={<BMailPage />} />
