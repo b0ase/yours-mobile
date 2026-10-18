@@ -84,6 +84,7 @@ import { BMAIL_OFFLINE_ACTION, friendlyMailError } from './friendlyError';
 import { ErrorActions } from '../errors/ErrorActions';
 import { APP_NAME } from '../storeBuild';
 import { isNative } from '../native';
+import { sendMessageAsync } from '../../utils/chromeHelpers';
 
 const MUTED = '#98A2B3';
 const GOLD = 'var(--bw-accent-hi)';
@@ -850,6 +851,10 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
   const [settings, setSettings] = useState(false);
   const [hideEx, setHideEx] = useState(examplesHidden);
   useBackClose(true, onClose);
+  // Settle any postage the wallet still holds as unsent though the chain has it (rate-limited in the wallet).
+  useEffect(() => {
+    sendMessageAsync({ action: 'STORAGE_RECONCILE_POSTAGE' }).catch(() => undefined);
+  }, []);
   // Scan › person page › "Send a bMail": open on a new mail to them (store.openBMailTo).
   useEffect(() => {
     const take = () => {

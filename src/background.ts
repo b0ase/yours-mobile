@@ -474,6 +474,11 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
         .catch((err: unknown) => console.warn('[background] paymail restore failed:', err));
       const r = await ctx.recoverFailed();
       if (r.failed || r.error || r.skipped) console.log('[background] failed-action review:', r);
+      // bMail postage broadcast by the recipient while our row still says nosend (Bureau retest, 18 Oct 2026).
+      await ctx
+        .reconcilePostage()
+        .then((p) => (p.settled.length || p.errors.length ? console.log('[background] postage reconcile:', p) : undefined))
+        .catch((err: unknown) => console.warn('[background] postage reconcile failed:', err));
       // Give up on queued sends that never reached the network, and give the money back (services/stuckSends.ts).
       // Anything still queued keeps the send-retry alarm on (services/sendRetry.ts).
       const q = await reviewQueuedSends(ctx);
@@ -1401,6 +1406,7 @@ if (isInServiceWorker) {
       'STORAGE_REPAIR_SYNC',
       'STORAGE_RECOVER_MINED',
       'STORAGE_RECOVER_TXID',
+      'STORAGE_RECONCILE_POSTAGE',
       'STORAGE_RESYNC_COINS',
       'STORAGE_RESTORE_BACKUP',
       'BSV21_FIX_STALE',
@@ -1720,6 +1726,23 @@ if (isInServiceWorker) {
           return true;
         case 'STORAGE_RECOVER_MINED':
           processRecoverMined(sendResponse);
+          return true;
+        case 'STORAGE_RECONCILE_POSTAGE':
+          void (async () => {
+            try {
+              await ensureWallet(true);
+              if (!accountContext) throw new Error('Wallet not initialized');
+              const data = await accountContext.reconcilePostage(message.force === true);
+              if (data.settled.length || data.errors.length) console.log('[STORAGE_RECONCILE_POSTAGE]', data);
+              sendResponse({ type: 'STORAGE_RECONCILE_POSTAGE', success: true, data });
+            } catch (err) {
+              sendResponse({
+                type: 'STORAGE_RECONCILE_POSTAGE',
+                success: false,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
+          })();
           return true;
         case 'STORAGE_RECOVER_TXID':
           processRecoverTxid(typeof message.txid === 'string' ? message.txid : '', sendResponse);
