@@ -177,7 +177,7 @@ export const purchaseBlocked = (country: string, blocked: string[] = PURCHASE_BL
 
 /**
  * Viewing the share offers needs BOTH a valid KYC certificate and a current investor
- * self-certification. The country rule only ever disables "Register interest".
+ * self-certification. The country rule only ever disables registering interest (no longer offered in the app).
  */
 export const shareGate = (
   kyc: KycSummary | null,
@@ -211,106 +211,5 @@ export const shareEventMessage = (a: {
   `bit-sign share offer event\nhandle:${a.handle}\nidentity_key:${a.identityKey}` +
   `\nkind:${a.kind}\noffers:${a.offerIds.join(',')}\ntimestamp:${a.timestamp}`;
 
-// ── Share offers ──
-
-export type ShareSection = 'bcorp' | 'bapps' | 'other';
-
-/** A share offer. Pre-launch: no price is held or shown anywhere. */
-export interface ShareOffer {
-  /** Slug, sent to bit-sign when registering interest. */
-  id: string;
-  section: ShareSection;
-  name: string;
-  /** e.g. "Class W — bWallet" (placeholder). */
-  className: string;
-  icon?: string;
-  /** What the share class tracks. */
-  tracks: string;
-  /** Total shares in the class, as display text. */
-  classSize: string;
-  issuerName: string;
-  /** '' = placeholder, shown as "company no. to be confirmed". */
-  issuerCompanyNumber: string;
-  /** KYB-verified issuer. Third-party offers without it are not shown. */
-  issuerVerified: boolean;
-  /** Issuer's offer document; absent = placeholder. */
-  offerUrl?: string;
-  status: 'pre-launch' | 'open' | 'closed';
-  /** Held via a nominee: the nominee is on the register, the token is the beneficial claim. */
-  nominee: boolean;
-  /** Transfers locked (e.g. transfer restrictions) until `lockedUntil`. */
-  transferLocked: boolean;
-  /** ISO date; '' = to be confirmed. */
-  lockedUntil: string;
-}
-
-const SECTIONS: ShareSection[] = ['bcorp', 'bapps', 'other'];
-const STATUSES = ['pre-launch', 'open', 'closed'];
-export const isOfferId = (s: unknown): s is string => typeof s === 'string' && /^[a-z0-9][a-z0-9-]{0,63}$/.test(s);
-
-/** Validate offers from config; drops malformed rows and unverified third-party issuers. */
-export const parseShareOffers = (raw: unknown): ShareOffer[] => {
-  const rows = Array.isArray(raw) ? raw : (raw as { offers?: unknown[] } | null)?.offers;
-  if (!Array.isArray(rows)) return [];
-  return rows.flatMap((r) => {
-    const o = r as Partial<ShareOffer>;
-    if (!o || !SECTIONS.includes(o.section as ShareSection) || !isOfferId(o.id)) return [];
-    if (typeof o.name !== 'string' || !o.name) return [];
-    const str = (v: unknown) => (typeof v === 'string' ? v : '');
-    const offer: ShareOffer = {
-      id: o.id,
-      section: o.section as ShareSection,
-      name: o.name,
-      className: str(o.className),
-      icon: str(o.icon) || undefined,
-      tracks: str(o.tracks),
-      classSize: str(o.classSize),
-      issuerName: str(o.issuerName),
-      issuerCompanyNumber: str(o.issuerCompanyNumber),
-      issuerVerified: o.issuerVerified === true,
-      offerUrl: typeof o.offerUrl === 'string' && /^https:\/\//.test(o.offerUrl) ? o.offerUrl : undefined,
-      status: STATUSES.includes(o.status as string) ? (o.status as ShareOffer['status']) : 'pre-launch',
-      nominee: o.nominee === true,
-      // Fail closed: locked unless the config says otherwise.
-      transferLocked: o.transferLocked !== false,
-      lockedUntil: Number.isFinite(Date.parse(str(o.lockedUntil))) ? str(o.lockedUntil) : '',
-    };
-    if (offer.section === 'other' && !offer.issuerVerified) return [];
-    return [offer];
-  });
-};
-
-export const BCORP_ISSUER = 'The Bitcoin Corporation Ltd';
-
-/** Placeholder class size for an alphabet share class (org convention: 1B units). [LEGAL REVIEW] */
-export const ALPHABET_CLASS_SIZE = '1,000,000,000 (placeholder)';
-
-/**
- * One bCorp alphabet-share offer per bApp. Class letters are placeholders: the letter after the
- * "b", numbered on collision (bMovies → M, bMusic → M2 …).
- */
-export const bappOffers = (apps: { name: string; verb: string; icon?: string }[]): ShareOffer[] => {
-  const used = new Map<string, number>();
-  return apps.map((a) => {
-    const letter = (a.name.slice(1, 2) || a.name.slice(0, 1)).toUpperCase();
-    const n = (used.get(letter) ?? 0) + 1;
-    used.set(letter, n);
-    return {
-      id: `bapp-${a.name.toLowerCase().replace(/[^a-z0-9]/g, '')}`,
-      section: 'bapps',
-      name: a.name,
-      className: `Class ${letter}${n > 1 ? n : ''} — ${a.name}`,
-      icon: a.icon,
-      tracks: `Tracks ${a.name}: ${a.verb.charAt(0).toLowerCase()}${a.verb.slice(1)}.`,
-      classSize: ALPHABET_CLASS_SIZE,
-      issuerName: BCORP_ISSUER,
-      issuerCompanyNumber: '',
-      issuerVerified: true,
-      status: 'pre-launch',
-      // Nominee model (docs/TOKENS-AND-SHARES-HANDOFF.md §5); lock date to be confirmed.
-      nominee: true,
-      transferLocked: true,
-      lockedUntil: '',
-    };
-  });
-};
+// Share offers are not bundled (18 Oct 2026): bit-sign serves each member only the tranches made out to them
+// (GET /api/bitsign/bshares/me). See src/mobile/market/sharesView.ts.

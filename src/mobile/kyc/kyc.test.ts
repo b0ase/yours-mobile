@@ -6,9 +6,7 @@ import {
   investorExpiry,
   investorValid,
   kycRequestMessage,
-  bappOffers,
   parseKycFields,
-  parseShareOffers,
   purchaseBlocked,
   selfCertSignMessage,
   shareEventMessage,
@@ -18,7 +16,6 @@ import {
   type KycSummary,
 } from './kyc';
 import { checkIssuedCertificate, rootKeysFrom } from './kycWallet';
-import listingsConfig from '../market/shareListings.json';
 
 const NOW = Date.parse('2026-10-01T12:00:00Z');
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -194,35 +191,6 @@ describe('issued certificate checks', () => {
 });
 
 describe('share offers', () => {
-  test('bundled config: bCorp offer, no price field anywhere', () => {
-    const l = parseShareOffers(listingsConfig);
-    expect(l.map((x) => x.id)).toEqual(['bcorp-ordinary']);
-    expect(listingsConfig.offers.some((o) => Object.keys(o).some((k) => /price/i.test(k)))).toBe(false);
-  });
-  test('one pre-launch alphabet offer per bApp, letters numbered on collision', () => {
-    const o = bappOffers([
-      { name: 'bWallet', verb: 'Hold coins' },
-      { name: 'bMovies', verb: 'Watch' },
-      { name: 'bMusic', verb: 'Listen' },
-    ]);
-    expect(o.map((x) => x.className)).toEqual(['Class W — bWallet', 'Class M — bMovies', 'Class M2 — bMusic']);
-    expect(o.every((x) => x.status === 'pre-launch' && x.issuerName === 'The Bitcoin Corporation Ltd')).toBe(true);
-    expect(o[0].id).toBe('bapp-bwallet');
-    expect(o.every((x) => x.nominee && x.transferLocked && x.lockedUntil === '')).toBe(true);
-  });
-  test('unverified third-party issuers and bad rows are dropped; offer urls must be https', () => {
-    const l = parseShareOffers({
-      offers: [
-        { id: 'dojo-co', section: 'other', name: 'Dojo Co', issuerVerified: false },
-        { id: 'kyb-co', section: 'other', name: 'Kyb Co', issuerVerified: true, offerUrl: 'http://x' },
-        { id: 'Bad Id', section: 'bcorp', name: 'x' },
-        { id: 'x', section: 'nope', name: 'x' },
-      ],
-    });
-    expect(l.map((x) => x.name)).toEqual(['Kyb Co']);
-    expect(l[0].offerUrl).toBeUndefined();
-    expect(l[0].transferLocked).toBe(true); // locked unless config says otherwise
-  });
   test('share event message is in lockstep with bit-sign', () => {
     expect(
       shareEventMessage({ handle: 'a', identityKey: 'k', kind: 'interest', offerIds: ['x', 'y'], timestamp: 't' }),

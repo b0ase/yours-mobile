@@ -1,7 +1,7 @@
 /**
  * Market › Tokens › bApps: the BSV-21 tokens of bCorp's bApps ($bMail, $bDrive…), shown as ordinary
  * tokens with the same list, floor and trading as every other token. No share offers, no investor
- * checks (the old share-offer panel, SharesPanel.tsx, is no longer shown).
+ * checks (the old share-offer panel, SharesPanel.tsx, now shows only server-sent tranches to members).
  *
  * bApps without a token yet are listed too, labelled "Not launched": name, icon and what the app
  * does, with no price, listing or buy (unlaunchedBapps).

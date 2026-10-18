@@ -69,8 +69,8 @@ chain, and bCorp optionally takes a 1% fee.
   jurisdictions) requires registration or licensing for exchange-like functionality in listed countries.
   Purely non-custodial software wallets are generally excluded, but an in-app marketplace with a fee is
   ambiguous. **High (verify country list).**
-- Market › bApps (`SharesPanel.tsx`, `kyc/kyc.ts`) shows bCorp/bApp share offers to investors with
-  KYC (Veriff via bit-sign). That is a **securities offering inside the app**, regulated in its own right
+- Market › bApps (`SharesPanel.tsx`, `kyc/kyc.ts`) showed bCorp/bApp share offers to investors with
+  KYC (Veriff via bit-sign). **Removed 18 Oct 2026:** no offers are bundled; members see only their own bCorp tranches from bit-sign `/bshares/me`, everyone else sees "Members only". The store grep also checks `bcorp-ordinary|Register interest|Interest registered|alphabet-share|Share offers are for verified investors|To be confirmed from the Register of Members`. That is a **securities offering inside the app**, regulated in its own right
   (UK FSMA s21 financial promotion, US securities law). Apple 3.1.5 and 5.1.1(ix) (highly regulated fields)
   and Play's Financial Services policy apply. **High.**
 
