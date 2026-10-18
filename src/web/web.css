@@ -6,7 +6,7 @@
  */
 
 html:root {
-  --web-banner-height: 34px;
+  --web-banner-height: 40px;
   --wallet-height: calc(
     100dvh - var(--web-banner-height) - env(safe-area-inset-top) - var(--account-strip-height) -
       env(safe-area-inset-bottom)
@@ -19,23 +19,79 @@ html:root {
   box-sizing: border-box;
   height: var(--web-banner-height);
   margin-top: env(safe-area-inset-top);
-  padding: 0 12px;
+  padding: 0 8px;
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   overflow: hidden;
-  background: var(--bw-accent);
   color: #010101;
   font:
-    600 11px/1.2 Inter,
+    700 12px/1.2 Inter,
     system-ui,
     sans-serif;
-  text-align: center;
+  /* Hazard tape: diagonal yellow and black stripes, scrolling slowly (betaBanner.ts). */
+  background: repeating-linear-gradient(-45deg, #f5b800 0 14px, #0a0a0a 14px 28px);
+  background-size: 39.6px 39.6px;
+  animation: bw-hazard-scroll 6s linear infinite;
+}
+@keyframes bw-hazard-scroll {
+  to {
+    background-position: 39.6px 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bwallet-web-banner {
+    animation: none;
+  }
+}
+.bwallet-web-banner__video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: -1;
+}
+.bwallet-web-banner__text,
+.bwallet-web-banner__link,
+.bwallet-web-banner__close {
+  position: relative;
+  border: 0;
+  border-radius: 999px;
+  background: #f5b800;
+  color: #010101;
+  font: inherit;
+  white-space: nowrap;
+  padding: 4px 10px;
+  box-shadow: 0 0 0 2px #0a0a0a;
+}
+.bwallet-web-banner__link,
+.bwallet-web-banner__close {
+  cursor: pointer;
+  background: #0a0a0a;
+  color: #f5b800;
+  box-shadow: 0 0 0 2px #f5b800;
+}
+.bwallet-web-banner__close {
+  padding: 2px 9px;
+  font-size: 15px;
+  line-height: 1;
+}
+@media (max-width: 400px) {
+  .bwallet-web-banner {
+    gap: 5px;
+    font-size: 11px;
+  }
+  .bwallet-web-banner__text,
+  .bwallet-web-banner__link {
+    padding: 3px 7px;
+  }
 }
 
-/* TopNav's tool bar is portalled to <body> (fixed, top 0), outside #root: put it under the banner,
+/* TopNav's tool bar (.bw-topnav, tabs/TopNav.tsx) is portalled to <body> (fixed, top 0), outside #root: put it under the banner,
    not behind it (owner, 8 Oct 2026). */
-html body > .grid.grid-cols-5.fixed.top-0 {
+html body > .bw-topnav {
   /* Beats the inline top: var(--wallet-inset-top) (safe area + account strip). */
   top: calc(var(--web-banner-height) + var(--wallet-inset-top)) !important;
 }
@@ -85,7 +141,7 @@ html body #root {
   }
 
   /* The portalled tool bar spans the same 720px column as the page and tab bar, not the window. */
-  html body > .grid.grid-cols-5.fixed.top-0 {
+  html body > .bw-topnav {
     left: 0;
     right: 0;
     max-width: var(--web-max);

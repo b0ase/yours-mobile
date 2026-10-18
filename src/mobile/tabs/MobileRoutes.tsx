@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { TermsGate } from '../ugc/UgcSheets';
 import { SectionBoundary } from '../wallet/SectionBoundary';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
+import { BannerActions } from '../../web/BannerActions';
 import {
   ARTIST_PROGRAMME_ENABLED,
   BPOSITIVE_ENABLED,
@@ -95,6 +96,8 @@ const MobileRoutes = () => (
   <SectionBoundary name="mobile tab" screen>
     <Suspense fallback={null}>
       {DirectUpdateBanner && <UpdateBanner />}
+      {/* The web build's hazard-tape banner buttons (src/web/betaBanner.ts). */}
+      <BannerActions />
       <Routes>
         <Route path="settings" element={<SettingsHub />} />
         {/* The top bar's Play button: music & video. */}
