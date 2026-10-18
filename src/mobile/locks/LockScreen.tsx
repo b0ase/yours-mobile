@@ -50,6 +50,13 @@ import {
   type PercentBase,
   type PercentResult,
   type ScheduleResult,
+  localDay,
+  fromLocalDay,
+  fmtDay,
+  tomorrowLocal,
+  heightFresh,
+  opensText,
+  confirmOpensText,
 } from './schedule';
 import {
   claimMatured,
@@ -104,9 +111,9 @@ type View = { kind: 'list' } | { kind: 'new' } | { kind: 'confirm' } | { kind: '
 type Kind = 'once' | 'gradual';
 type GradualMode = 'usd' | 'bsv' | 'percent';
 
-const dayInput = (d: Date) => d.toISOString().slice(0, 10);
-const fromDayInput = (s: string) => new Date(`${s}T12:00:00`);
-const fmtDate = (d: Date) => d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+const dayInput = localDay;
+const fromDayInput = fromLocalDay;
+const fmtDate = fmtDay;
 const bsvToSats = (s: string) => Math.round(Number(s) * 1e8);
 
 const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
@@ -157,6 +164,9 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
   );
 
   const [height, setHeight] = useState(0);
+  /** When `height` was read (ms). Locks are never built from a height older than 10 minutes. */
+  const [heightAt, setHeightAt] = useState(0);
+  const [clock, setClock] = useState(() => Date.now());
   const [rate, setRate] = useState(cachedExchangeRate());
   const [plans, setPlans] = useState<LockPlan[]>(() => loadPlans(account, chromeStorageService));
   const [busy, setBusy] = useState(false);
@@ -186,6 +196,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
     try {
       const h = (await apiContext.services?.chaintracks.currentHeight()) ?? 0;
       setHeight(h);
+      if (h) setHeightAt(Date.now());
       const unspent = new Set((await walletLockOutpoints(apiContext)).map((o) => o.outpoint));
       const synced = syncClaimed(loadPlans(account, chromeStorageService), unspent, h);
       savePlans(account, synced, chromeStorageService);
@@ -196,6 +207,47 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
     setRate(await fetchExchangeRate('main'));
   }, [apiContext, account, chromeStorageService]);
   useEffect(() => void refresh(), [refresh]);
+  /** Just the chain tip (cheap): on focus, on becoming visible and every 2 minutes while visible. */
+  const refreshHeight = useCallback(async (): Promise<number> => {
+    try {
+      const h = (await apiContext.services?.chaintracks.currentHeight()) ?? 0;
+      if (h) {
+        setHeight(h);
+        setHeightAt(Date.now());
+      }
+      return h;
+    } catch {
+      return 0;
+    } finally {
+      setClock(Date.now());
+    }
+  }, [apiContext]);
+  useEffect(() => {
+    const onShow = () => {
+      if (document.visibilityState === 'visible') void refreshHeight();
+    };
+    window.addEventListener('focus', onShow);
+    document.addEventListener('visibilitychange', onShow);
+    const t = setInterval(onShow, 120_000);
+    return () => {
+      window.removeEventListener('focus', onShow);
+      document.removeEventListener('visibilitychange', onShow);
+      clearInterval(t);
+    };
+  }, [refreshHeight]);
+  const heightOk = heightFresh(heightAt, clock);
+  // The heights on the confirm card are the ones the user reviewed: if the tip moves while it is open,
+  // go back to Review with the rebuilt schedule rather than changing the numbers under their finger.
+  const [reviewedHeight, setReviewedHeight] = useState(0);
+  useEffect(() => {
+    if (view.kind !== 'confirm') return setReviewedHeight(0);
+    if (!reviewedHeight) return setReviewedHeight(height);
+    if (height !== reviewedHeight) {
+      setTyped('');
+      setView({ kind: 'new' });
+      addSnackbar('A new block arrived, so the lock heights were updated. Review them again.', 'info');
+    }
+  }, [view.kind, height, reviewedHeight, addSnackbar]);
 
   // ── builder state ──
   const [label, setLabel] = useState('');
@@ -274,7 +326,8 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
   const entered = valuesEntered({ kind, gmode, until, amountBsv, usdPer, bsvPer, pct, count });
   const schedule: ScheduleResult | PercentResult | null = useMemo(() => {
     if (!height || !entered) return null;
-    const now = new Date();
+    // `now` must match when `height` was read: a fresh clock on an old height would open the lock early.
+    const now = new Date(heightAt || Date.now());
     if (kind === 'once') return buildOnce(bsvToSats(amountBsv), fromDayInput(unlockOn), now, height);
     const common = {
       start: fromDayInput(start),
@@ -304,6 +357,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
     return buildGradual({ ...common, perPayoutSats: bsvToSats(bsvPer), curve }, now, height);
   }, [
     height,
+    heightAt,
     entered,
     kind,
     amountBsv,
@@ -335,6 +389,16 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
     if (!ok || !schedule || schedule.error || typed !== 'LOCK') return;
     setBusy(true);
     try {
+      // The tip may have moved since Review: re-read it, and if it changed send the user back to Review
+      // with the schedule rebuilt on the new height.
+      const tip = await refreshHeight();
+      if (!tip) throw new Error('Could not read the current block height. Check your connection and try again.');
+      if (tip !== height || (reviewedHeight && tip !== reviewedHeight)) {
+        setTyped('');
+        setView({ kind: 'new' });
+        addSnackbar('A new block arrived, so the lock heights were updated. Review them again.', 'info');
+        return;
+      }
       const pr = schedule as PercentResult;
       const made = await createLock(
         apiContext,
@@ -960,10 +1024,11 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
                   onChange={(e) => setAmountBsv(e.target.value)}
                 />
               </Field>
-              <Field label="Unlock on (approximate)">
+              <Field label="Opens on or after (≈ midday)">
                 <input
                   className={inputCls}
                   type="date"
+                  min={tomorrowLocal(new Date(clock))}
                   value={unlockOn}
                   onChange={(e) => setUnlockOn(e.target.value)}
                 />
@@ -1073,8 +1138,14 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
                 </>
               )}
               <div className="flex gap-2">
-                <Field label="Locked until (first payout)">
-                  <input className={inputCls} type="date" value={start} onChange={(e) => setStart(e.target.value)} />
+                <Field label="First payout on or after (≈ midday)">
+                  <input
+                    className={inputCls}
+                    type="date"
+                    min={tomorrowLocal(new Date(clock))}
+                    value={start}
+                    onChange={(e) => setStart(e.target.value)}
+                  />
                 </Field>
                 <Field label="Every">
                   <select
@@ -1160,8 +1231,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
               </div>
               {kind === 'gradual' && (
                 <div className="text-xs text-white">
-                  Nothing unlocks before ≈ {fmtDate(schedule!.pieces[0].date)} (block {schedule!.pieces[0].height}).
-                  Then{' '}
+                  First payout: {opensText(schedule!.pieces[0].date)} (block {schedule!.pieces[0].height}). Then{' '}
                   {schedule!.pieces.length > 1
                     ? `${frequency === 'custom' ? `every ${customDays} days` : frequency} until ≈ ${fmtDate(schedule!.pieces[schedule!.pieces.length - 1].date)}`
                     : 'that is the only payout'}
@@ -1211,8 +1281,9 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
                 </table>
               </div>
               <p className="text-[11px]" style={{ color: MUTED }}>
-                Dates are estimates: the lock is set to a block height, about 144 blocks a day. USD is at today&apos;s
-                price and will change.
+                Each lock opens at its block, not at a clock time. Blocks average about 10 minutes but vary, so the
+                block is set with a safety margin: each lock opens on or after its date, usually a little later. USD is
+                at today&apos;s price and will change.
               </p>
             </div>
           )}
@@ -1246,14 +1317,21 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
               </div>
             </div>
           ) : (
-            <button
-              disabled={!ok || !reviewAllowed(entered, templateUsed != null, templateChecked)}
-              onClick={() => (needsSizeCheck(schedule!.totalSats) ? setSizeAsk(true) : setView({ kind: 'confirm' }))}
-              className={btn}
-              style={{ background: GOLD, color: '#1a1300' }}
-            >
-              Review
-            </button>
+            <>
+              {height > 0 && !heightOk && (
+                <p className="text-xs" style={{ color: GOLD }}>
+                  Checking the latest block before you can review…
+                </p>
+              )}
+              <button
+                disabled={!ok || !heightOk || !reviewAllowed(entered, templateUsed != null, templateChecked)}
+                onClick={() => (needsSizeCheck(schedule!.totalSats) ? setSizeAsk(true) : setView({ kind: 'confirm' }))}
+                className={btn}
+                style={{ background: GOLD, color: '#1a1300' }}
+              >
+                Review
+              </button>
+            </>
           )}
         </div>
       </>
@@ -1270,11 +1348,12 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
             <ul className="text-xs text-white flex flex-col gap-2 list-disc pl-4">
               <li>
                 {fmtBsv(schedule?.totalSats ?? 0)} will be locked on the Bitcoin SV blockchain.{' '}
-                <b>Nobody can unlock it early: not you, not bWalletX, not support.</b>
+                <b>Nobody can unlock it before its block: not you, not bWalletX, not support.</b>
               </li>
+              <li className="font-semibold">{confirmOpensText(schedule?.pieces ?? [])}</li>
               <li>
-                Unlock dates are approximate. The lock opens at a block height; blocks come about every 10 minutes on
-                average.
+                Dates are approximate. Blocks average about 10 minutes but vary; the block is set with a safety margin,
+                so it opens on or after the date shown, usually a little later.
               </li>
               <li>The locked asset is BSV. Its dollar value will go up and down while it is locked.</li>
               <li>Only your 12 words can claim it. Lose them and the locks are lost for good.</li>
@@ -1290,7 +1369,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
             />
           </Field>
           <button
-            disabled={busy || typed !== 'LOCK' || !ok}
+            disabled={busy || typed !== 'LOCK' || !ok || !heightOk}
             onClick={() => void doLock()}
             className={btn}
             style={{ background: GOLD, color: '#1a1300' }}

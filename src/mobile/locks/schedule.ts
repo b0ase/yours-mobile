@@ -19,23 +19,40 @@ export const MAX_PIECES = 520;
  * (~120 sats at 100 sat/kB), so a piece below this would mostly go to the miner when claimed.
  */
 export const MIN_PIECE_SATS = 1000;
-/** About ten years: a typo must not lock coins for a century. */
-export const MAX_LOCK_BLOCKS = BLOCKS_PER_DAY * 3650;
+/** About ten years (plus the safety margin): a typo must not lock coins for a century. */
+export const MAX_LOCK_BLOCKS = BLOCKS_PER_DAY * 3650 + Math.ceil(3 * Math.sqrt(BLOCKS_PER_DAY * 3650)) + 6;
 /** Default buffer for dollar-target payouts. */
 export const DEFAULT_BUFFER_PCT = 20;
 
 export type Frequency = 'daily' | 'weekly' | 'monthly' | 'custom';
 export type Piece = { height: number; sats: number; date: Date; usdTarget?: number };
 
-/** Block height expected at `date`, never earlier than the next block. */
+/**
+ * Safety margin for a lock `blocks` away at 10-minute blocks. Blocks arrive at random, so over n blocks
+ * the real time spreads by about √n × 10 minutes. Three of those plus an hour means the lock opens
+ * before the chosen time only in a very rare run of fast blocks; usually it opens a little later.
+ */
+export const marginBlocks = (blocks: number) => (blocks > 0 ? Math.ceil(3 * Math.sqrt(blocks)) + 6 : 0);
+
+/** Lock height for `date`: the blocks to it at ~10 minutes each plus the margin, never below the next block. */
 export function heightForDate(date: Date, now: Date, currentHeight: number): number {
   const blocks = Math.ceil((date.getTime() - now.getTime()) / BLOCK_MS);
-  return currentHeight + Math.max(1, blocks);
+  if (blocks < 1) return currentHeight + 1;
+  return currentHeight + blocks + marginBlocks(blocks);
 }
 
 /** Estimated wall-clock date of `height` (approximate: blocks are ~10 minutes on average). */
 export const dateForHeight = (height: number, now: Date, currentHeight: number) =>
   new Date(now.getTime() + (height - currentHeight) * BLOCK_MS);
+
+/**
+ * The date shown for a piece: "opens on or after" it. The chosen date, unless the height was pushed
+ * further (two dates in one block) and its plain 10-minute estimate without margin is later.
+ */
+function openDate(chosen: Date, height: number, now: Date, currentHeight: number): Date {
+  const est = dateForHeight(height - marginBlocks(height - currentHeight), now, currentHeight);
+  return est.getTime() > chosen.getTime() ? est : chosen;
+}
 
 /** BSV satoshis worth `usd` at `rate` USD/BSV (rounded up, so the piece covers the dollars). */
 export function usdToSats(usd: number, rate: number): number {
@@ -163,7 +180,7 @@ export function buildGradual(g: GradualInput, now: Date, currentHeight: number):
     // Strictly increasing heights, even when two dates fall in the same block.
     const h = Math.max(prev + 1, heightForDate(dates[i], now, currentHeight));
     prev = h;
-    pieces.push({ height: h, sats: amounts[i], date: dateForHeight(h, now, currentHeight), usdTarget });
+    pieces.push({ height: h, sats: amounts[i], date: openDate(dates[i], h, now, currentHeight), usdTarget });
   }
   return checkSpan(pieces, currentHeight);
 }
@@ -218,7 +235,7 @@ function buildCurved(g: GradualInput, curve: Curve, dates: Date[], now: Date, cu
     pieces.push({
       height: h,
       sats: m.amounts[k],
-      date: dateForHeight(h, now, currentHeight),
+      date: openDate(dates[di], h, now, currentHeight),
       ...(mergedTargets ? { usdTarget: mergedTargets[k] } : {}),
     });
   });
@@ -238,7 +255,7 @@ export function buildOnce(sats: number, unlockAt: Date, now: Date, currentHeight
     return fail(`Lock at least ${MIN_PIECE_SATS.toLocaleString()} sats.`);
   if (unlockAt.getTime() <= now.getTime()) return fail('Choose a date in the future.');
   const h = heightForDate(unlockAt, now, currentHeight);
-  return checkSpan([{ height: h, sats, date: dateForHeight(h, now, currentHeight) }], currentHeight);
+  return checkSpan([{ height: h, sats, date: openDate(unlockAt, h, now, currentHeight) }], currentHeight);
 }
 
 /** No single lock output more than about ten years away. */
@@ -401,7 +418,7 @@ export function buildPercent(p: PercentInput, now: Date, currentHeight: number):
     const d = stepDate(p.start, p.frequency, i, p.customDays);
     const h = Math.max(prev + 1, heightForDate(d, now, currentHeight));
     prev = h;
-    pieces.push({ height: h, sats: amounts[i], date: dateForHeight(h, now, currentHeight) });
+    pieces.push({ height: h, sats: amounts[i], date: openDate(d, h, now, currentHeight) });
   }
   let tail = false;
   if (periods > MAX_PIECES) {
@@ -564,3 +581,45 @@ export function mergePlans(local: LockPlan[], backed: LockPlan[]): LockPlan[] {
 
 /** "Locked until X, then pays every period": nothing unlocks before the first payout's height. */
 export const lockedUntil = (pieces: { height: number; date: Date }[]) => pieces[0] ?? null;
+
+// ── dates in the builder (local time) ───────────────────────────────────────
+
+/** yyyy-mm-dd of `d` in the device's local time (for <input type="date">; never toISOString, which is UTC). */
+export function localDay(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+/** A yyyy-mm-dd from the date input, read as local midday. */
+export const fromLocalDay = (s: string) => new Date(`${s}T12:00:00`);
+/** The earliest day the builder offers: tomorrow, local. */
+export function tomorrowLocal(now: Date): string {
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 12);
+  return localDay(d);
+}
+/** `days` calendar days from today, local. */
+export function localDayIn(now: Date, days: number): string {
+  return localDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() + days, 12));
+}
+
+// ── chain height freshness ──────────────────────────────────────────────────
+
+/** A height older than this is not used to build a lock (heights from a stale tip open early). */
+export const HEIGHT_MAX_AGE_MS = 10 * 60 * 1000;
+export const heightFresh = (fetchedAt: number, nowMs: number) =>
+  fetchedAt > 0 && nowMs - fetchedAt <= HEIGHT_MAX_AGE_MS;
+
+// ── wording ─────────────────────────────────────────────────────────────────
+
+export const fmtDay = (d: Date) => d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+export const OPENS_NOTE = 'usually a little later (blocks vary)';
+/** "Opens on or after ≈ 1 Nov 2027, usually a little later (blocks vary)". */
+export const opensText = (d: Date, fmt: (d: Date) => string = fmtDay) => `Opens on or after ≈ ${fmt(d)}, ${OPENS_NOTE}`;
+
+/** The confirm card's line: the block the chain enforces, with its approximate date. */
+export function confirmOpensText(pieces: { height: number; date: Date }[], fmt: (d: Date) => string = fmtDay): string {
+  if (!pieces.length) return '';
+  const first = pieces[0];
+  if (pieces.length === 1) return `Opens at block ${first.height} (≈ ${fmt(first.date)}).`;
+  const last = pieces[pieces.length - 1];
+  return `First payout opens at block ${first.height} (≈ ${fmt(first.date)}); last at block ${last.height} (≈ ${fmt(last.date)}).`;
+}

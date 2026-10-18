@@ -11,6 +11,7 @@ import {
   buildPercent,
   dateForHeight,
   heightForDate,
+  marginBlocks,
   matured,
   payoutFor,
   percentAmounts,
@@ -27,9 +28,9 @@ const H = 970_000;
 const day = (n: number) => new Date(NOW.getTime() + n * 86_400_000);
 
 describe('date ↔ height', () => {
-  test('144 blocks a day from the current height', () => {
-    expect(heightForDate(day(1), NOW, H)).toBe(H + 144);
-    expect(heightForDate(day(7), NOW, H)).toBe(H + 1008);
+  test('144 blocks a day from the current height, plus the safety margin', () => {
+    expect(heightForDate(day(1), NOW, H)).toBe(H + 144 + marginBlocks(144));
+    expect(heightForDate(day(7), NOW, H)).toBe(H + 1008 + marginBlocks(1008));
   });
   test('never earlier than the next block', () => {
     expect(heightForDate(NOW, NOW, H)).toBe(H + 1);
@@ -49,7 +50,7 @@ describe('schedules', () => {
   test('one date', () => {
     const r = buildOnce(10_000_000, day(30), NOW, H);
     expect(r.pieces).toHaveLength(1);
-    expect(r.pieces[0].height).toBe(H + 30 * 144);
+    expect(r.pieces[0].height).toBe(H + 30 * 144 + marginBlocks(30 * 144));
     expect(buildOnce(10_000_000, day(-1), NOW, H).error).toBeTruthy();
     expect(buildOnce(10, day(5), NOW, H).error).toBeTruthy();
     expect(buildOnce(10_000_000, day(3651), NOW, H).error).toContain('ten years');
@@ -59,7 +60,7 @@ describe('schedules', () => {
     const r = buildGradual({ start: day(7), frequency: 'weekly', count: 10, perPayoutSats: 10_000_000 }, NOW, H);
     expect(r.pieces).toHaveLength(10);
     expect(r.totalSats).toBe(100_000_000);
-    expect(r.pieces[1].height - r.pieces[0].height).toBe(1008);
+    expect(r.pieces[1].height - r.pieces[0].height).toBe(1008 + marginBlocks(2016) - marginBlocks(1008));
   });
   test('total split evenly; remainder on the last piece; nothing lost', () => {
     const r = buildGradual({ start: day(1), frequency: 'daily', count: 3, totalSats: 100_000 }, NOW, H);
