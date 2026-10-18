@@ -65,11 +65,7 @@ export const DocView = ({ content, title }: { content: DocContent; title: string
     case 'text':
       return <pre className="bu-text">{content.text}</pre>;
     case 'encrypted':
-      return (
-        <p className="bu-note">
-          {content.reason} Opening those in bWalletX is coming; until then they open on bit-sign.
-        </p>
-      );
+      return <p className="bu-note">{content.reason} Opening those here is coming.</p>;
     case 'empty':
       return <p className="bu-note">{content.reason}</p>;
     case 'other':

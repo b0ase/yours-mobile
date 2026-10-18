@@ -42,7 +42,7 @@ const writeScan = (me: string, v: Record<string, unknown>) => {
 };
 
 /**
- * The Bureau's data: agreements found in bMail (sent + received, quarantined mail never opened), merged per
+ * bMail › Agreements data: agreements found in bMail (sent + received, quarantined mail never opened), merged per
  * agreement, signatures verified. Sending an agreement or an update is a normal bMail send with postage.
  */
 export const useBureau = () => {
@@ -167,9 +167,24 @@ export const useBureau = () => {
     [me, mail, postageFor],
   );
 
+  /** Postage I paid per agreement (every letter that carried it), and the names I sent them to. */
+  const { postagePaid, labels } = useMemo(() => {
+    const paid: Record<string, number> = {};
+    const names: Record<string, string> = {};
+    for (const s of state.sent) {
+      const p = parsePart(s.agreement);
+      if (!p) continue;
+      paid[p.doc.id] = (paid[p.doc.id] ?? 0) + (s.sats || 0);
+      if (s.to !== me && s.toLabel && !/^0[23][0-9a-f]{8}$/i.test(s.toLabel)) names[s.to] = s.toLabel;
+    }
+    return { postagePaid: paid, labels: names };
+  }, [state.sent, me]);
+
   return {
     me,
     wallet,
+    postagePaid,
+    labels,
     items: withArchive,
     setArchived,
     deliver,
