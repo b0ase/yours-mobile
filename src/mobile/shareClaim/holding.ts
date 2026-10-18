@@ -13,14 +13,16 @@ import { companyConfigured, COMPANIES, type CompanyPin } from './companies';
  *   200 → { v:1, company:{name,number,ticker}, holder:{identityKey,registerEntry,nameOnRegister,shares},
  *           tokens:[{id,tranche,amount,outpoint?}], activity:[{at,text}], sig }
  *     sig: company createSignature(canonicalJson(body without sig), [1,'npg share holding'], keyID '1', 'anyone')
- *   404 → not a member (the card stays hidden).
+ *   404 → not a member OR a bad request signature: either way the card shows nothing, never an error.
+ * The timestamp is sent in milliseconds.
  */
 export const HOLDING_PROTOCOL: WalletProtocol = [1, 'npg share holding'];
 
 export type Holding = {
   company: { name: string; number: string; ticker: string };
   holder: { identityKey: string; registerEntry: string; nameOnRegister: string; shares: number };
-  tokens: { id: string; tranche: string; amount: number; outpoint?: string }[];
+  /** id null = a planned tranche whose token is not on chain yet. */
+  tokens: { id: string | null; tranche: string; amount: number; outpoint?: string }[];
   activity: { at: string; text: string }[];
 };
 
@@ -53,8 +55,16 @@ export async function checkHolding(raw: unknown, pin: CompanyPin, identityKey: s
   let sum = 0;
   const tokens: Holding['tokens'] = [];
   for (const t of raw.tokens) {
-    if (!isObj(t) || typeof t.id !== 'string' || !pin.tokens[t.id] || !isCount(t.amount)) return null;
-    if (t.tranche !== pin.tokens[t.id].tranche) return null;
+    if (!isObj(t) || !isCount(t.amount) || typeof t.tranche !== 'string') return null;
+    if (t.id === null) {
+      // Only a tranche pinned as planned may be off chain, and never larger than its allotment.
+      const plan = Object.prototype.hasOwnProperty.call(pin.planned, t.tranche) ? pin.planned[t.tranche] : null;
+      if (!plan || t.amount > plan.shares) return null;
+      sum += t.amount;
+      tokens.push({ id: null, tranche: t.tranche, amount: t.amount });
+      continue;
+    }
+    if (typeof t.id !== 'string' || !pin.tokens[t.id] || t.tranche !== pin.tokens[t.id].tranche) return null;
     sum += t.amount;
     tokens.push({
       id: t.id,
@@ -110,7 +120,7 @@ export async function fetchHoldings(
           'x-bwx-signature': Utils.toHex(signature),
         },
       });
-      if (!r.ok) continue;
+      if (!r.ok) continue; // 404 = not a member / bad signature: show nothing
       const h = await checkHolding(await r.json(), pin, identityKey);
       if (h) out.push(h);
     } catch {

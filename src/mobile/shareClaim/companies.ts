@@ -24,6 +24,8 @@ export type CompanyPin = {
   totalShares: number;
   /** Allowed BSV-21 token ids → tranche. Unknown ids are rejected. All are 0 decimals. */
   tokens: Record<string, TranchePin>;
+  /** Tranches allotted but not yet deployed as tokens, by tranche name. Only these may come back with id null. */
+  planned: Record<string, TranchePin>;
 };
 
 export const NPG_TOKEN_2022A = 'b8747a4b356875cc90842c733ad2770b12bf50c17cf204afd0605f9dcba67d31_1';
@@ -41,8 +43,9 @@ export const COMPANIES: Record<string, CompanyPin> = {
     totalShares: 2_115_915,
     tokens: {
       [NPG_TOKEN_2022A]: { tranche: '2022A', shares: 2_045_457, note: 'Allotments up to Apr 2022' },
-      // TODO(owner): add $NPG-2022B (70,458 shares) here once its token is deployed.
+      // TODO(owner): move 2022B here (with its token id) once deployed, and drop it from `planned`.
     },
+    planned: { '2022B': { tranche: '2022B', shares: 70_458, note: 'Planned $NPG-2022B, not deployed yet' } },
   },
 };
 

@@ -15,7 +15,7 @@ every claim is refused with "Company key not configured". Keys inside a payload 
 | 2022A   | `b8747a4b…dcba67d31_1`           | 2,045,457 (allotments up to Apr 2022) |
 | 2022B   | not deployed (add once deployed) | 70,458                                |
 
-Total 2,115,915. Supply comes from here, never from the GorillaPool index (it reports null).
+2022B is pinned as **planned**: a holding may list it with `id: null` (shown as "not on chain yet"); any other null or unknown id is rejected. Total 2,115,915. Supply comes from here, never from the GorillaPool index (it reports null).
 
 ## Links
 
@@ -35,8 +35,8 @@ nameOnRegister}, lock{type:'2of2', companyPubKey, releaseAfterBlock:null}, claim
    not deployed.
 2. **Claim** `POST claimUrl {inviteId, identityKey, lockPubKey, signature}`; signed bytes
    `canonicalJson({inviteId, identityKey(lowercase), lockPubKey(lowercase)})`, `[1,'npg share claim']`, keyID =
-   inviteId, `'anyone'`. lockPubKey ≠ identityKey. Optional response: `txid` (lock tx), `claims[]` (for recovery).
-3. **Holding** (PROPOSED, not yet on the NPG side) `GET <host>/api/shareholders/holding/<identityKey>` with
+   inviteId, `'anyone'`. lockPubKey ≠ identityKey. Response: `claims:[{inviteId, company}]` (for recovery); `txid` is absent until the lock move is signed, shown as "Waiting for NPG to lock your shares".
+3. **Holding** (NPG PR #32; timestamp sent in ms; a 404 = not a member or bad signature, so the card shows nothing) `GET <host>/api/shareholders/holding/<identityKey>` with
    `x-bwx-timestamp` / `x-bwx-signature` (`canonicalJson({identityKey, timestamp})`, `[1,'npg share holding']`,
    keyID = timestamp). Response signed like the invite under `[1,'npg share holding']`, keyID '1'.
 

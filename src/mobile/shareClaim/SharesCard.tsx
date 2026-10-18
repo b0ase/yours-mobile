@@ -77,8 +77,11 @@ const HoldingCard = ({ h }: { h: Holding }) => (
     </div>
     <ul className="m-0 p-0 list-none text-sm flex flex-col gap-1">
       {h.tokens.map((t) => (
-        <li key={t.id} className="flex justify-between">
-          <span style={{ color: '#98A2B3' }}>Tranche {t.tranche}</span>
+        <li key={t.id ?? `planned-${t.tranche}`} className="flex justify-between gap-3">
+          <span style={{ color: '#98A2B3' }}>
+            Tranche {t.tranche}
+            {t.id === null ? ' · not on chain yet' : ''}
+          </span>
           <span className="font-semibold">{n(t.amount)}</span>
         </li>
       ))}

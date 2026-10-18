@@ -107,8 +107,8 @@ const ClaimPage = () => {
             </p>
           ) : (
             <p className="m-0">
-              Claim sent. The company will move your tokens into the 2-of-2 lock; this wallet checks the lock on chain
-              when it appears.{stage.note ? ` (${stage.note})` : ''}
+              Waiting for NPG to lock your shares. This wallet checks the lock on chain when it appears.
+              {stage.note ? ` (${stage.note})` : ''}
             </p>
           )}
           <button type="button" className="bw-pill bw-pill-gold min-h-[44px]" onClick={() => navigate('/m')}>

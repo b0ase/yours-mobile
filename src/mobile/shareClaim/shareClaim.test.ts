@@ -292,6 +292,27 @@ describe('holding card data', () => {
   test('own signed entry renders', async () => {
     expect((await checkHolding(await signH(holding()), pin, me))?.holder.shares).toBe(1200);
   });
+  test('a planned tranche (2022B) may come back with id null; any other null or unknown id is rejected', async () => {
+    const two = holding({
+      holder: { identityKey: me, registerEntry: '17', nameOnRegister: 'A. Holder', shares: 1300 },
+      tokens: [
+        { id: NPG_TOKEN_2022A, tranche: '2022A', amount: 1200 },
+        { id: null, tranche: '2022B', amount: 100 },
+      ],
+    });
+    const h = await checkHolding(await signH(two), pin, me);
+    expect(h?.tokens[1]).toEqual({ id: null, tranche: '2022B', amount: 100 });
+    const bad = (tokens: unknown[], shares: number) =>
+      holding({ holder: { identityKey: me, registerEntry: '17', nameOnRegister: 'A', shares }, tokens });
+    expect(await checkHolding(await signH(bad([{ id: null, tranche: '2022A', amount: 5 }], 5)), pin, me)).toBeNull();
+    expect(await checkHolding(await signH(bad([{ id: null, tranche: '2099Z', amount: 5 }], 5)), pin, me)).toBeNull();
+    expect(
+      await checkHolding(await signH(bad([{ id: null, tranche: '2022B', amount: 70_459 }], 70_459)), pin, me),
+    ).toBeNull();
+    expect(
+      await checkHolding(await signH(bad([{ id: 'ab'.repeat(32) + '_0', tranche: '2022B', amount: 5 }], 5)), pin, me),
+    ).toBeNull();
+  });
   test('someone else’s entry, a forged signature or a wrong sum renders nothing', async () => {
     expect(await checkHolding(await signH(holding()), pin, attacker.toPublicKey().toString())).toBeNull();
     expect(await checkHolding(await signH(holding(), attacker), pin, me)).toBeNull();
