@@ -5,14 +5,15 @@
  *   ios-private     Ad Hoc / EU direct   com.bitcoincorp.bwallet.private  everything on (bWalletX)
  *   android-play    Google Play          com.bitcoincorp.bwallet          store rules
  *   android-direct  APK from the site    com.bitcoincorp.bwallet.direct   everything on (bWalletX)
+ *   desktop         Tauri app (macOS)    com.bitcoincorp.bwalletx.desktop everything on (bWalletX Desktop, src-tauri/)
  *
  * Unset = 'dev' (local builds), which behaves like the private channels. Store rules key off
  * isStoreChannel; the app IDs and home-screen names are set natively (android/app/build.gradle
  * flavors, ios/App build settings).
  */
-export type Channel = 'ios-store' | 'ios-private' | 'android-play' | 'android-direct' | 'dev';
+export type Channel = 'ios-store' | 'ios-private' | 'android-play' | 'android-direct' | 'desktop' | 'dev';
 
-export const CHANNELS: readonly Channel[] = ['ios-store', 'ios-private', 'android-play', 'android-direct'];
+export const CHANNELS: readonly Channel[] = ['ios-store', 'ios-private', 'android-play', 'android-direct', 'desktop'];
 
 export const CHANNEL: Channel = (import.meta.env.VITE_CHANNEL as Channel | undefined) || 'dev';
 

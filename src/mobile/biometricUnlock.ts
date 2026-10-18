@@ -2,6 +2,7 @@
 import { decrypt } from '../utils/crypto';
 import type { PlatformHooks } from '../platform';
 import { YoursNative, isNative, type BiometryType } from './native';
+import { IS_TAURI } from './desktop/ipc';
 import { afterUnlockRead, enrolmentOffer, lockScreenMode, type UnlockRead } from './biometricDecision';
 
 /**
@@ -190,7 +191,8 @@ const notice = async () => (lockScreenMode(await enrolmentState()) === 'reenrol'
  * available on this device.
  */
 export const initBiometricUnlock = async (chrome: any): Promise<PlatformHooks> => {
-  if (!isNative) return {};
+  // Phones, and Desktop on a Mac with Touch ID (src-tauri/src/bio.rs).
+  if (!isNative && !IS_TAURI) return {};
   chromeApi = chrome;
   const status = await YoursNative.biometricStatus().catch(() => ({ available: false, biometryType: 'none' as const }));
   if (!status.available) return {};

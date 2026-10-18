@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSCameraUsageDescription</key>
+	<string>bWalletX uses the camera to scan QR codes and for video in calls and Spaces.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>bWalletX uses the microphone for calls, Spaces and voice messages.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>bWalletX can unlock your wallet with Touch ID.</string>
+</dict>
+</plist>

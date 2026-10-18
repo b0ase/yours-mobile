@@ -1,4 +1,5 @@
 import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
+import { IS_TAURI, tauriNative } from './desktop/ipc';
 
 /**
  * YoursNative: the app's own native plugin (ios/App/App/YoursNativePlugin.swift,
@@ -126,7 +127,8 @@ const web: Partial<YoursNativePlugin> = {
 };
 
 export const YoursNative = registerPlugin<YoursNativePlugin>('YoursNative', {
-  web: () => web as YoursNativePlugin,
+  // Desktop (Tauri): keystore, flags and biometrics go to the Rust side (desktop/ipc.ts); the rest stays web.
+  web: () => (IS_TAURI ? { ...web, ...tauriNative() } : web) as YoursNativePlugin,
 });
 
 export const isNative = Capacitor.isNativePlatform();

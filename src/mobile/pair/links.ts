@@ -20,7 +20,7 @@ export const isPairLink = (url: string) => {
     return false;
   }
 };
-const offer = (url?: string | null) => {
+export const offerPairLink = (url?: string | null) => {
   if (!url || !isPairLink(url)) return;
   pending = url;
   listeners.forEach((l) => l());
@@ -34,8 +34,8 @@ export const takePairLink = () => {
 export const onPairLink = (l: () => void) => (listeners.add(l), () => void listeners.delete(l));
 
 if (Capacitor.isNativePlatform()) {
-  void CapApp.addListener('appUrlOpen', ({ url }) => offer(url));
-  void CapApp.getLaunchUrl().then((r) => offer(r?.url));
+  void CapApp.addListener('appUrlOpen', ({ url }) => offerPairLink(url));
+  void CapApp.getLaunchUrl().then((r) => offerPairLink(r?.url));
 }
 
 /**
@@ -48,7 +48,7 @@ if (IS_EXTENSION && typeof chrome !== 'undefined' && chrome.storage?.local) {
   const pick = (url?: unknown) => {
     if (typeof url !== 'string' || !url) return;
     void chrome.storage.local.remove(PAIR_LINK_KEY);
-    offer(url);
+    offerPairLink(url);
   };
   chrome.storage.local.get(PAIR_LINK_KEY, (r) => pick(r?.[PAIR_LINK_KEY]));
   chrome.storage.onChanged.addListener((ch, area) => {
