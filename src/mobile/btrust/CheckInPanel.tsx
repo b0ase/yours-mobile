@@ -6,8 +6,9 @@
 import { useState } from 'react';
 import type { Transaction } from '@bsv/sdk';
 import { useServiceContext } from '../../hooks/useServiceContext';
-import { BTRUST_PROTOCOL, checkIn, type InheritancePlan } from './inheritance';
+import { aboutBlocks, BTRUST_PROTOCOL, checkIn, type InheritancePlan } from './inheritance';
 import { countdown } from './checkin';
+import { planLabel } from './planFile';
 import { broadcast, scanForLocks, wocChain, type FoundLock } from './derive';
 import { ownerSigner, signCheckIn, verifySpend } from './sign';
 
@@ -34,7 +35,7 @@ export const CheckInPanel = ({ plan, height, months, onPreview }: Props) => {
   const headline =
     c.tone === 'open'
       ? 'Your heirs can claim now. Check in to push the date back.'
-      : `${c.heirsDays} ${c.heirsDays === 1 ? 'day' : 'days'} until your heirs can claim`;
+      : `${aboutBlocks(c.heirsBlocks).replace(/^a/, 'A')} until your heirs can claim`;
   const fail = (e: unknown) => setNote(e instanceof Error ? e.message : 'Check-in failed');
 
   const tap = () => {
@@ -99,7 +100,7 @@ export const CheckInPanel = ({ plan, height, months, onPreview }: Props) => {
         </div>
         <div className="text-xs" style={{ color: MUTED }}>
           Block {height.toLocaleString('en-GB')} now. Heirs from block {plan.heirsHeight.toLocaleString('en-GB')}, lead
-          heir alone in about {c.leadDays} days.
+          heir alone in {aboutBlocks(c.leadBlocks)}.
         </div>
       </div>
       <button
@@ -123,7 +124,8 @@ export const CheckInPanel = ({ plan, height, months, onPreview }: Props) => {
       {locks?.map((l) => (
         <div key={`${l.txid}:${l.vout}`} className="flex items-center justify-between gap-2">
           <span className="text-xs" style={{ color: MUTED }}>
-            {l.sats.toLocaleString('en-GB')} sats · heirs from block {l.plan.heirsHeight.toLocaleString('en-GB')}
+            {planLabel(l.plan)} · {l.sats.toLocaleString('en-GB')} sats · heirs from block{' '}
+            {l.plan.heirsHeight.toLocaleString('en-GB')}
           </span>
           <button
             type="button"

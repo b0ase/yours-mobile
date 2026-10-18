@@ -9,7 +9,9 @@
 import { useEffect, useState } from 'react';
 import { Transaction, Utils } from '@bsv/sdk';
 import { useServiceContext } from '../../hooks/useServiceContext';
-import { BTRUST_PROTOCOL, type InheritancePlan } from './inheritance';
+import { aboutBlocks, BTRUST_PROTOCOL, type InheritancePlan } from './inheritance';
+import { CopyButton } from './CopyButton';
+import { planLabel } from './planFile';
 import { claimPath, countdown, heirIndex, parsePlan } from './checkin';
 import { broadcast, findPlanLock, wocChain } from './derive';
 import { buildHeirsClaim, finishHeirsClaim, heirSignature, heirSigner, signLeadClaim, verifySpend } from './sign';
@@ -127,7 +129,7 @@ export const HeirClaimPanel = ({ height }: { height: number }) => {
   const status = !plan
     ? ''
     : path === 'none'
-      ? `Not yet. Any two heirs can claim in about ${c?.heirsDays} days if the owner does not check in.`
+      ? `Not yet. Any two heirs can claim in ${aboutBlocks(c?.heirsBlocks ?? 0)} if the owner does not check in.`
       : path === 'heirs'
         ? 'Any two heirs can claim together now. You will need one other heir to sign with you.'
         : `${plan.heirs[0].name} can now claim alone, or any two heirs together.`;
@@ -139,7 +141,10 @@ export const HeirClaimPanel = ({ height }: { height: number }) => {
       </p>
       <label className="flex flex-col gap-1">
         Your heir key
-        <input readOnly className={INPUT} value={myKey || 'Loading…'} spellCheck={false} aria-label="Your heir key" />
+        <div className="flex gap-2 items-center">
+          <input readOnly className={INPUT} value={myKey || 'Loading…'} spellCheck={false} aria-label="Your heir key" />
+          <CopyButton text={myKey} />
+        </div>
       </label>
       <label>
         Open a plan file <input type="file" accept=".json" onChange={(e) => void onFile(e.target.files?.[0])} />
@@ -151,6 +156,9 @@ export const HeirClaimPanel = ({ height }: { height: number }) => {
       )}
       {plan && (
         <div className="flex flex-col gap-1">
+          <span className="font-bold" style={{ color: GOLD }}>
+            {planLabel(plan)}
+          </span>
           <span>{status}</span>
           <span style={{ color: MUTED }}>
             {seat >= 0
@@ -198,7 +206,12 @@ export const HeirClaimPanel = ({ height }: { height: number }) => {
               </button>
             </>
           )}
-          {out && <textarea readOnly className={INPUT} rows={3} value={out} aria-label="Claim output" />}
+          {out && (
+            <div className="flex flex-col gap-1">
+              <textarea readOnly className={INPUT} rows={3} value={out} aria-label="Claim output" />
+              <CopyButton text={out} />
+            </div>
+          )}
           {ready && (
             <button
               type="button"

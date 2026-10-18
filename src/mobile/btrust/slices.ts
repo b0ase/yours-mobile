@@ -63,7 +63,7 @@ export function slicesForKey(
   }));
 }
 
-type Parsed = { setId: string; index: number; total: number; share: string; cipher: number[] };
+export type Parsed = { setId: string; index: number; total: number; share: string; cipher: number[] };
 
 export function parseCard(text: string): Parsed {
   const parts = text.trim().split(':');

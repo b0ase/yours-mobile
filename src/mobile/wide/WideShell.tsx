@@ -85,6 +85,7 @@ const I = {
   history: 'M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 3',
   exchange: 'M7 7h13l-4-4M17 17H4l4 4',
   lockbsv: 'M5 11h14v10H5zM8 11V7a4 4 0 0 1 8 0v4M12 15v2',
+  shield: 'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6zM9 12l2 2 4-4',
   mail: 'M3 6h18v12H3zM3 7l9 6 9-6',
   calls: 'M5 4h4l2 5-3 2a11 11 0 0 0 5 5l2-3 5 2v4a2 2 0 0 1-2 2A17 17 0 0 1 3 6a2 2 0 0 1 2-2',
   chat: 'M21 12a8 8 0 0 1-12 7l-5 1 1-4a8 8 0 1 1 16-4z',
@@ -195,6 +196,8 @@ const WideShell = ({ children }: { children: ReactNode }) => {
         },
         { id: 'market', label: marketLabel(), icon: I.exchange, to: '/m/exchange', hidden: !MARKET_ENABLED },
         { id: 'lock', label: 'Lock BSV', icon: I.lockbsv, to: '/m/lock' },
+        // bTrust: recovery slices and passing on (same route as the phone, no extra gate: /m/btrust has none).
+        { id: 'btrust', label: 'bTrust', icon: I.shield, to: '/m/btrust' },
       ],
     },
     {
