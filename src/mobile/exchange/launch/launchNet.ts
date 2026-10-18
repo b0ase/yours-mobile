@@ -17,6 +17,8 @@ import {
   type Launch,
   type LaunchOptions,
 } from './launch';
+import type { VerifiedVesting, VestPlan } from './vesting';
+import { lockVesting, saveVestPlan } from './vestingNet';
 
 /**
  * Launch network steps, run only after Allow on the one approval sheet. The icon is inscribed by the
@@ -29,8 +31,15 @@ export async function deployLaunch(
   ctx: OneSatContext,
   form: TokenForm,
   opts: LaunchOptions,
-  extra: { icon: string | null; launchFeeSats: number; depositSats: number },
-): Promise<{ launch: Launch; supply: string; roomError: boolean; indexError: string | null }> {
+  extra: { icon: string | null; launchFeeSats: number; depositSats: number; vest?: VestPlan },
+): Promise<{
+  launch: Launch;
+  supply: string;
+  roomError: boolean;
+  indexError: string | null;
+  vesting: VerifiedVesting | null;
+  vestError: string | null;
+}> {
   const f = withOptions(form, opts);
   const c = cleanToken(f);
   const o = cleanOptions(opts);
@@ -53,7 +62,20 @@ export async function deployLaunch(
   };
   saveLocalLaunch(launch);
 
-  // The deposit the user approved, before the room: the room needs the indexer to know the token.
+  // Creator vesting: straight after the deploy, before anything else touches the new coin. If it fails the
+  // creator is told plainly and can lock from the done screen (retryVesting); nothing else is signed for it.
+  let vesting: VerifiedVesting | null = null;
+  let vestError: string | null = null;
+  if (extra.vest && extra.vest.keepBps > 0) {
+    saveVestPlan(tokenId, extra.vest);
+    try {
+      vesting = await lockVesting(ctx, vestStartFor(tokenId, c, extra.icon), extra.vest);
+    } catch (e) {
+      vestError = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  // The deposit the user approved, after the vesting lock and before the room: the room needs the indexer to know the token.
   const indexError = await payLaunchDeposit(ctx, tokenId, c.ticker, extra.depositSats)
     .then(() => null)
     .catch((e) => (e instanceof Error ? e.message : String(e)));
@@ -71,8 +93,26 @@ export async function deployLaunch(
   const done = { ...launch, roomTicker };
   saveLocalLaunch(done);
   await registerLaunch(done, client);
-  return { launch: done, supply: c.supply, roomError: !roomTicker, indexError };
+  return { launch: done, supply: c.supply, roomError: !roomTicker, indexError, vesting, vestError };
 }
+
+const vestStartFor = (tokenId: string, c: ReturnType<typeof cleanToken>, icon: string | null) => ({
+  tokenId,
+  sym: c.ticker,
+  supply: BigInt(c.amount),
+  decimals: c.decimals,
+  icon,
+});
+
+/** Done screen › "Lock it now": the same vesting transaction, for a launch whose lock did not go through. */
+export const retryVesting = (
+  ctx: OneSatContext,
+  form: TokenForm,
+  opts: LaunchOptions,
+  tokenId: string,
+  icon: string | null,
+  plan: VestPlan,
+) => lockVesting(ctx, vestStartFor(tokenId, cleanToken(withOptions(form, opts)), icon), plan);
 
 /**
  * Pay a launched coin's indexing deposit: exactly the approved sats, to the fee address its id derives

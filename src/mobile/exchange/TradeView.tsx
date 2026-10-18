@@ -33,6 +33,7 @@ import { chartSeries } from './chartSeries';
 import { TokenLabelsRow } from './Categories';
 import { LAUNCH_DISCLAIMER, localLaunches } from './launch/launch';
 import { registryLaunches } from './launch/launchNet';
+import { CreatorVesting } from './launch/VestingSection';
 import {
   addHistory,
   bsvLabel,
@@ -230,6 +231,7 @@ export const TradeView = ({
         </p>
       )}
       <IndexerFundPanel tokenId={id} ticker={sym} />
+      {launched && <CreatorVesting tokenId={id} />}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
         {[

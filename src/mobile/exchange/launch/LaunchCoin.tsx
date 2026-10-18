@@ -31,11 +31,14 @@ import {
   mapBytes,
   validateLaunch,
   validateOptions,
+  validateVest,
   withOptions,
   type Launch,
   type LaunchOptions,
 } from './launch';
-import { deployLaunch, payLaunchDeposit } from './launchNet';
+import { deployLaunch, payLaunchDeposit, retryVesting } from './launchNet';
+import { defaultVestPlan, scheduleSummary, type VerifiedVesting, type VestPlan } from './vesting';
+import { KeepForYourself } from './VestingSection';
 
 const CATEGORY_SLUGS = CATEGORIES.map((c) => c.slug);
 type Done = {
@@ -43,6 +46,8 @@ type Done = {
   supply: string;
   roomError: boolean;
   indexError: string | null;
+  vesting: VerifiedVesting | null;
+  vestError: string | null;
   depositSats: number;
 };
 
@@ -75,6 +80,9 @@ export const LaunchCoin = () => {
   const [done, setDone] = useState<Done | null>(null);
   const [opts, setOpts] = useState<LaunchOptions>(() => ({ ...defaultLaunchOptions(), ...prefill.options }));
   const [advanced, setAdvanced] = useState(false);
+  const [vest, setVest] = useState<VestPlan>(defaultVestPlan);
+  const [doneVest, setDoneVest] = useState<{ plan: VestPlan; form: TokenForm; opts: LaunchOptions } | null>(null);
+  const [vestBusy, setVestBusy] = useState(false);
   const { handleSelect } = useBottomMenu();
   const setOpt = <K extends keyof LaunchOptions>(k: K, v: LaunchOptions[K]) => setOpts((o) => ({ ...o, [k]: v }));
   const fileRef = useRef<HTMLInputElement>(null);
@@ -83,8 +91,19 @@ export const LaunchCoin = () => {
 
   const cost = launchCost(icon?.file.size ?? 0, chromeStorageService.getCustomFeeRate(), undefined, {
     mapBytes: mapBytes(form, opts),
+    vest,
   });
-  const check = () => validateLaunch(withOptions(form, opts)) ?? validateOptions(opts, CATEGORY_SLUGS);
+  const check = () =>
+    validateLaunch(withOptions(form, opts)) ??
+    validateOptions(opts, CATEGORY_SLUGS) ??
+    validateVest(withOptions(form, opts), vest);
+  const wholeSupply = (() => {
+    try {
+      return BigInt((form.supply || '0').replace(/[,_\s]/g, '') || '0');
+    } catch {
+      return 0n;
+    }
+  })();
   const fmt = (sats: number) => money(sats, rate);
 
   const set = (k: keyof TokenForm) => (v: string) =>
@@ -125,7 +144,9 @@ export const LaunchCoin = () => {
         icon: iconOutpoint,
         launchFeeSats: cost.launchFeeSats,
         depositSats: cost.depositSats,
+        vest,
       });
+      setDoneVest({ plan: vest, form, opts });
       void showOnWallet(chromeStorageService, res.launch.tokenId);
       notifyMinted();
       setSheet(false);
@@ -155,6 +176,26 @@ export const LaunchCoin = () => {
   const input = 'w-full rounded-xl px-3 py-2.5 text-sm outline-none border bg-transparent text-white';
   const inputStyle = { borderColor: LINE };
 
+  const lockNow = async () => {
+    if (!done || !doneVest) return;
+    setVestBusy(true);
+    try {
+      const v = await retryVesting(
+        apiContext,
+        doneVest.form,
+        doneVest.opts,
+        done.launch.tokenId,
+        done.launch.icon,
+        doneVest.plan,
+      );
+      setDone({ ...done, vesting: v, vestError: null });
+    } catch (e) {
+      setDone({ ...done, vestError: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setVestBusy(false);
+    }
+  };
+
   if (done) {
     const l = done.launch;
     return (
@@ -163,12 +204,34 @@ export const LaunchCoin = () => {
           <Check size={18} color="#A1FF8B" /> ${l.ticker} is launched
         </div>
         <p className="text-sm m-0" style={{ color: MUTED }}>
-          {BigInt(done.supply).toLocaleString('en-US')} ${l.ticker} are in your wallet. Its Exchange page is live; it
-          shows trades once the token is indexed (usually a few minutes).
+          {BigInt(done.supply).toLocaleString('en-US')} ${l.ticker} are yours
+          {done.vesting ? ', with your kept share locked' : ''}. Its Exchange page is live; it shows trades once the
+          token is indexed (usually a few minutes).
         </p>
         <p className="text-[11px] break-all m-0" style={{ color: MUTED }}>
           {l.tokenId}
         </p>
+        {done.vesting && (
+          <p className="text-xs m-0" style={{ color: MUTED }}>
+            Your {done.vesting.receipt.keepBps / 100}% share is locked: {scheduleSummary(done.vesting.receipt)}. The
+            public receipt is on chain and on the coin&apos;s Exchange page; claim each lock there once it opens.
+          </p>
+        )}
+        {done.vestError && (
+          <div className="flex flex-col gap-1.5">
+            <p className="text-xs m-0" style={{ color: '#FF6B6B' }}>
+              Your share is NOT locked yet ({done.vestError}). The coin has no vesting receipt until you lock it.
+            </p>
+            <button
+              type="button"
+              disabled={vestBusy}
+              onClick={() => void lockNow()}
+              className="bw-pill bw-pill-gold min-h-[44px] w-full text-sm font-bold disabled:opacity-60"
+            >
+              {vestBusy ? 'Locking…' : 'Lock my share now'}
+            </button>
+          </div>
+        )}
         <p className="text-xs m-0" style={{ color: MUTED }}>
           {LAUNCH_DISCLAIMER}
         </p>
@@ -220,6 +283,8 @@ export const LaunchCoin = () => {
           type="button"
           onClick={() => {
             setOpts(defaultLaunchOptions());
+            setVest(defaultVestPlan());
+            setDoneVest(null);
             setDone(null);
             setForm(emptyLaunchForm());
             setTickerTouched(false);
@@ -315,6 +380,7 @@ export const LaunchCoin = () => {
         maxLength={1000}
         onChange={(e) => set('description')(e.target.value)}
       />
+      <KeepForYourself plan={vest} onChange={setVest} supply={wholeSupply} />
       {/* The Launchpad's default disclaimer: written into the coin's on-chain card and shown on its page. */}
       <p className="text-[11px] m-0" style={{ color: MUTED }}>
         {LAUNCH_DISCLAIMER}
@@ -427,7 +493,7 @@ export const LaunchCoin = () => {
       </button>
       {sheet && (
         <ApproveSheet
-          lines={approvalLines(withOptions(form, opts), cost, fmt, !!icon, opts)}
+          lines={approvalLines(withOptions(form, opts), cost, fmt, !!icon, opts, vest)}
           total={moneyWithSats(cost.totalSats, rate)}
           busy={busy}
           onAllow={() => void launch()}

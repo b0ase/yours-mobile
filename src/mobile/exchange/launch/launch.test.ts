@@ -9,6 +9,7 @@ import {
   validateLaunch,
 } from './launch';
 import { exchangeView, LAUNCH_ROUTE } from '../exchangeData';
+import { defaultVestPlan } from './vesting';
 
 const ADDR = '1BoatSLRHtKNngkdXEeobR76b53LETtpyT';
 const ok = { check: () => ({ blocked: false }) } as never;
@@ -36,6 +37,20 @@ describe('launch', () => {
     expect(b.totalSats).toBe(b.networkSats + b.launchFeeSats + b.depositSats);
   });
 
+  it('counts vesting and the deposit together: one sheet, a true total', () => {
+    const vest = { ...defaultVestPlan(), keepBps: 1_000 };
+    const plain = launchCost(0, 100, ADDR);
+    const both = launchCost(0, 100, ADDR, { vest });
+    expect(both.txCount).toBe(plain.txCount + 1);
+    expect(both.depositSats).toBe(plain.depositSats);
+    expect(both.networkSats).toBeGreaterThan(plain.networkSats);
+    expect(both.totalSats).toBe(both.networkSats + both.launchFeeSats + both.depositSats);
+    const f = { ...emptyLaunchForm(), name: 'Frog', ticker: 'FROG' };
+    const labels = approvalLines(f, both, (n) => `${n}`, false, undefined, vest).map((l) => l.label);
+    expect(labels).toContain('Keep for yourself, locked');
+    expect(labels).toContain('Indexing deposit (paid to the token indexer, GorillaPool)');
+  });
+
   it('validates the form', () => {
     expect(validateLaunch(emptyLaunchForm(), ok)).toBe('Name the token.');
     expect(validateLaunch({ ...emptyLaunchForm(), name: 'Frog', ticker: 'FROG' }, ok)).toBeNull();
@@ -51,11 +66,12 @@ describe('launch', () => {
       'Inscribe icon',
       'Coin card on-chain',
       "Open holders' room",
+      'List on the Launchpad',
       'Indexing deposit (paid to the token indexer, GorillaPool)',
       'Network fee',
       'Our launch fee',
     ]);
-    expect(lines[5].value).toBe('10010000 sats');
+    expect(lines[6].value).toBe('10010000 sats');
     expect(lines[0].value).toBe('$FROG');
     expect(lines[1].value).toBe('1,000,000,000');
     expect(approvalLines(f, launchCost(0, 100, ''), String, false).at(-1)?.value).toBe('None');

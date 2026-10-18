@@ -2,9 +2,10 @@ import { mintFeeAddress, txFeeSats } from '../../mint/mint';
 import { LockingScript, OP, Utils } from '@bsv/sdk';
 import { MAP_PREFIX } from '../../names/personalToken';
 import { INDEX_FUND_NETWORK_SATS, depositValue, launchDepositSats } from '../../tokens/indexFund';
-import { TOKEN_DEPLOY_BYTES, validateToken, type TokenForm } from '../../tokens/token';
+import { TOKEN_DEPLOY_BYTES, cleanToken, validateToken, type TokenForm } from '../../tokens/token';
 import { safety, type SafetyFilter } from '../../market/safety';
 import { hasReturnsWording, RETURNS_BLOCK } from '../../tokens/returnsWording';
+import { scheduleSummary, trancheCount, validateVestPlan, vestSchedule, type VestPlan } from './vesting';
 
 /**
  * Exchange › Launchpad › Launch your own coin (phase 1 of the launchpad of launchpads): a BSV-21 token
@@ -52,10 +53,12 @@ export function launchCost(
   iconBytes: number,
   satsPerKb: number,
   feeAddress?: string,
-  opts: { mapBytes?: number; depositSats?: number } = {},
+  opts: { mapBytes?: number; depositSats?: number; vest?: VestPlan } = {},
 ): LaunchCost {
   const icon = iconBytes > 0 ? txFeeSats(iconBytes, satsPerKb) : 0;
-  const networkSats = icon + txFeeSats(TOKEN_DEPLOY_BYTES + (opts.mapBytes ?? 0), satsPerKb) + INDEX_FUND_NETWORK_SATS;
+  const vesting = opts.vest && opts.vest.keepBps > 0 ? txFeeSats(vestBytes(opts.vest), satsPerKb) : 0;
+  const networkSats =
+    icon + txFeeSats(TOKEN_DEPLOY_BYTES + (opts.mapBytes ?? 0), satsPerKb) + INDEX_FUND_NETWORK_SATS + vesting;
   const launchFeeSats = launchFeeFor(feeAddress);
   const depositSats = opts.depositSats ?? launchDepositSats();
   return {
@@ -63,9 +66,12 @@ export function launchCost(
     launchFeeSats,
     depositSats,
     totalSats: networkSats + launchFeeSats + depositSats,
-    txCount: (iconBytes > 0 ? 2 : 1) + 1,
+    txCount: (iconBytes > 0 ? 2 : 1) + 1 + (vesting > 0 ? 1 : 0),
   };
 }
+
+/** Rough size of the vesting transaction: token input, ~1.1 KB per tranche lock, the rest coin and the receipt. */
+export const vestBytes = (p: VestPlan): number => 400 + trancheCount(p) * 1_150 + 300 + 900;
 
 export const DEPOSIT_LABEL = 'Indexing deposit (paid to the token indexer, GorillaPool)';
 
@@ -86,6 +92,18 @@ export const costSummary = (cost: LaunchCost, fmt: (sats: number) => string): st
 /** Form check before the approval sheet: token rules plus the returns-wording block. */
 export function validateLaunch(f: TokenForm, s: SafetyFilter = safety()): string | null {
   return validateToken(f, s) ?? (hasReturnsWording(`${f.name} ${f.description}`) ? RETURNS_BLOCK : null);
+}
+
+/** Creator vesting check before the approval sheet: the plan's rules and that the supply splits into the ladder. */
+export function validateVest(f: TokenForm, p: VestPlan): string | null {
+  const err = validateVestPlan(p);
+  if (err || p.keepBps === 0) return err;
+  try {
+    vestSchedule(BigInt(cleanToken(f).amount), p, 1);
+    return null;
+  } catch (e) {
+    return e instanceof Error ? e.message : 'Check the vesting schedule.';
+  }
 }
 
 /**
@@ -124,6 +142,7 @@ export function approvalLines(
   fmt: (sats: number) => string,
   hasIcon: boolean,
   o: LaunchOptions = defaultLaunchOptions(),
+  vest?: VestPlan,
 ): { label: string; value: string }[] {
   const c = cleanOptions(o);
   const ticker = f.ticker.trim().replace(/^\$/, '');
@@ -131,11 +150,15 @@ export function approvalLines(
   return [
     { label: 'Create token', value: `$${ticker}` },
     { label: 'Supply to your wallet', value: supply },
+    ...(vest && vest.keepBps > 0
+      ? [{ label: 'Keep for yourself, locked', value: `${vest.keepBps / 100}% · ${scheduleSummary(vest)}` }]
+      : []),
     ...(hasIcon ? [{ label: 'Inscribe icon', value: 'On-chain image' }] : []),
     ...(hasMapExtras(o)
       ? [{ label: 'Coin card on-chain', value: 'Links, category and the no-promises disclaimer' }]
       : []),
     { label: "Open holders' room", value: `Hold ${BigInt(c.roomMin).toLocaleString('en-US')} to enter` },
+    { label: 'List on the Launchpad', value: 'Public launch registry' },
     { label: DEPOSIT_LABEL, value: depositValue(cost.depositSats, fmt) },
     { label: 'Network fee', value: fmt(cost.networkSats) },
     { label: 'Our launch fee', value: cost.launchFeeSats > 0 ? fmt(cost.launchFeeSats) : 'None' },
