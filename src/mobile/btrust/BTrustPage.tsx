@@ -16,7 +16,7 @@ import { makeSlices, restoreKey, restoreSecret, slicesForKey, type SliceCard } f
 import { openPaper, parsePaper, sealPaper } from './papers';
 import {
   BTRUST_PROTOCOL,
-  blocksForMonths,
+  planHeights,
   inheritanceLock,
   planStatus,
   validatePlan,
@@ -185,7 +185,6 @@ export const BTrustPage = () => {
       // Each lock gets its own owner key: the next slot the seed-only scan has not seen (derive.ts).
       const next = await nextOwnerSlot(apiContext.wallet, wocChain());
       // ?btrust-test: tiny real-money test timings (heirs after 3 blocks, lead heir 3 blocks later).
-      const heirsHeight = TEST_TIMINGS ? height + 3 : height + blocksForMonths(months);
       const p = validatePlan({
         v: 1,
         ownerPubKey: next.ownerPubKey,
@@ -194,8 +193,8 @@ export const BTrustPage = () => {
           pubKey: h.pubKey.trim(),
           ...(h.paymail.trim() ? { paymail: h.paymail.trim() } : {}),
         })),
-        heirsHeight,
-        leadHeight: heirsHeight + (TEST_TIMINGS ? 3 : blocksForMonths(6)),
+        // Same flag as the TEST banner (one place decides): test heights if and only if the banner shows.
+        ...planHeights(height, months, TEST_TIMINGS),
         ...(TEST_TIMINGS ? { test: true as const } : {}),
       });
       inheritanceLock(p);
@@ -241,7 +240,7 @@ export const BTrustPage = () => {
     // put. Top padding = the fixed TopNav (h-14); bottom = the tab bar / dock (--dock-h), as BMailPage.
     <div
       className="w-full h-full overflow-y-auto"
-      style={{ paddingTop: '3.5rem', paddingBottom: 'calc(var(--dock-h, 3.75rem) + 1.5rem)' }}
+      style={{ paddingTop: '3.5rem', paddingBottom: 'calc(var(--dock-h, 3.75rem) + 7rem)' }}
     >
       <TopNav />
       <div className="w-full max-w-2xl mx-auto px-4 pt-3 flex flex-col gap-3">
@@ -405,7 +404,14 @@ export const BTrustPage = () => {
               >
                 Save plan (give a copy to each heir)
               </button>
-              <FundPanel plan={plan} slot={slot} height={height} download={download} onFunded={setPlan} />
+              <FundPanel
+                plan={plan}
+                slot={slot}
+                height={height}
+                testMode={TEST_TIMINGS}
+                download={download}
+                onFunded={setPlan}
+              />
             </div>
           )}
         </Step>
@@ -430,13 +436,11 @@ export const BTrustPage = () => {
         </Step>
 
         <Step n={4} title="Check in">
-          {plan ? (
-            <CheckInPanel plan={plan} height={height} months={months} onPreview={setPlan} />
-          ) : (
-            <p className="m-0 text-sm" style={{ color: MUTED }}>
-              Build a plan in step 2 first. Then check in now and then to keep the coins yours.
-            </p>
-          )}
+          <p className="m-0 text-sm" style={{ color: MUTED }}>
+            Find your locks from this wallet&apos;s recovery phrase. Check in to push the date back, or move the coins
+            back to your wallet at any time.
+          </p>
+          <CheckInPanel plan={plan} height={height} months={months} onPreview={setPlan} />
         </Step>
 
         <Step n={5} title="For heirs: claim" id="btrust-claim">

@@ -12,6 +12,7 @@ import { fmtSats } from '../money/money';
 import { fundLock, MIN_LOCK_SATS, savePlanLocally } from './fund';
 import { planFileName, planJson, planLabel, withFunding } from './planFile';
 import { aboutBlocks, type InheritancePlan } from './inheritance';
+import { fundingMismatch } from './fund';
 import { TEST_BANNER } from './testMode';
 
 const GOLD = '#F5B800';
@@ -26,9 +27,11 @@ type Props = {
   download: (name: string, text: string) => void;
   /** The plan with slot, funding txid, vout and createdAt, after funding. */
   onFunded?: (plan: InheritancePlan) => void;
+  /** The page's test-mode flag (the same one that shows the TEST banner). */
+  testMode?: boolean;
 };
 
-export const FundPanel = ({ plan, slot, height, download, onFunded }: Props) => {
+export const FundPanel = ({ plan, slot, height, download, onFunded, testMode = false }: Props) => {
   const { apiContext } = useServiceContext();
   const [sats, setSats] = useState(10_000);
   const [sheet, setSheet] = useState(false);
@@ -42,6 +45,8 @@ export const FundPanel = ({ plan, slot, height, download, onFunded }: Props) => 
     setBusy(true);
     setError('');
     try {
+      const why = fundingMismatch(plan, height, testMode);
+      if (why) throw new Error(why);
       const f = await fundLock({ wallet: apiContext.wallet, plan, slot, sats });
       const full = withFunding(plan, { slot, fundingTxid: f.txid, vout: f.vout });
       savePlanLocally({ txid: f.txid, slot, plan: full, savedAt: Date.now() });
