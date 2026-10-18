@@ -18,9 +18,9 @@ import { SESSION_SPEND_TYPE } from '../wallet/live/liveLogic';
 import { isAllowedFrameOrigin, parseXdmRequest, toXdmResponse } from './frameBridge';
 import { BWX_CHANGED, answerBwx, isBwxOrigin, parseBwx, type BwxDeps } from './bwxBridge';
 import { SUBSCRIPTIONS_ENABLED } from '../storeBuild';
-import { answerSubscribe, parseSubscribeMessage, type AppSubscribeRequest } from '../pots/appSubscribe';
-import { AppSubscribeSheet } from '../pots/AppSubscribeSheet';
-import { chargeSoon } from '../pots/potsEngine';
+import { answerSubscribe, parseSubscribeMessage } from '../pots/appSubscribe';
+import { AppSubscribeHost } from '../pots/AppSubscribeHost';
+import { answerSubscribeAsk, currentSubscribeAsk, setSubscribeBusy, subscribeDeps } from '../pots/subscribeAsk';
 import {
   allAgentsStopped,
   getAgentAccount,
@@ -55,12 +55,9 @@ export const BappFrameHost = () => {
   const [ask, setAsk] = useState<{ text: string; resolve: (ok: boolean) => void } | null>(null);
   const askRef = useRef(ask);
   askRef.current = ask;
-  // "Subscribe with bWalletX" (docs/SUBSCRIBE-API.md): one wallet-drawn sheet at a time.
-  const [subAsk, setSubAsk] = useState<{ req: AppSubscribeRequest; resolve: (potId: string | null) => void } | null>(
-    null,
-  );
-  const subAskRef = useRef(subAsk);
-  subAskRef.current = subAsk;
+  // "Subscribe with bWalletX" (docs/SUBSCRIBE-API.md): the shared sheet (subscribeAsk.ts) is refused while our own
+  // confirm sheet is up, so there is one wallet-drawn sheet at a time.
+  useEffect(() => (SUBSCRIPTIONS_ENABLED ? setSubscribeBusy(() => !!askRef.current) : undefined), []);
 
   // Wallet bridge (BRC-100 XDM): only our iframe, only its allowlisted origin.
   useEffect(() => {
@@ -91,19 +88,7 @@ export const BappFrameHost = () => {
       if (SUBSCRIPTIONS_ENABLED) {
         const sub = parseSubscribeMessage(e.data);
         if (sub) {
-          const approve = (req: AppSubscribeRequest) =>
-            subAskRef.current || askRef.current
-              ? Promise.resolve(null)
-              : new Promise<string | null>((resolve) => {
-                  const a = { req, resolve };
-                  subAskRef.current = a;
-                  setSubAsk(a);
-                });
-          void answerSubscribe(sub, e.origin, {
-            approve,
-            bsvUsd: () => cachedExchangeRate(),
-            chargeSoon,
-          }).then((reply) => win.postMessage(reply, e.origin));
+          void answerSubscribe(sub, e.origin, subscribeDeps()).then((reply) => win.postMessage(reply, e.origin));
           return;
         }
       }
@@ -131,9 +116,7 @@ export const BappFrameHost = () => {
       askRef.current?.resolve(false);
       askRef.current = null;
       setAsk(null);
-      subAskRef.current?.resolve(null);
-      subAskRef.current = null;
-      setSubAsk(null);
+      if (SUBSCRIPTIONS_ENABLED && currentSubscribeAsk()?.appOrigin === session.origin) answerSubscribeAsk(null);
     };
   }, [session]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -273,16 +256,7 @@ export const BappFrameHost = () => {
           </div>
         </div>
       )}
-      {SUBSCRIPTIONS_ENABLED && subAsk && (
-        <AppSubscribeSheet
-          req={subAsk.req}
-          onAnswer={(potId) => {
-            subAsk.resolve(potId);
-            subAskRef.current = null;
-            setSubAsk(null);
-          }}
-        />
-      )}
+      {SUBSCRIPTIONS_ENABLED && <AppSubscribeHost />}
       {ask && (
         <BwxConfirmSheet
           text={ask.text}

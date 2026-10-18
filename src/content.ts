@@ -3,6 +3,7 @@
 import { isCWIEventName } from '@1sat/wallet-browser';
 import { CustomListenerName, RequestEventDetail, RequestParams, ResponseEventDetail } from './inject';
 import { originatorForOrigin } from './services/originKey';
+import { SUBSCRIPTIONS_ENABLED } from './mobile/storeBuild';
 
 console.log('🌱 Yours Wallet Loaded');
 
@@ -74,6 +75,32 @@ window.addEventListener('message', (e: MessageEvent) => {
     /* extension reloaded: nothing to tell */
   }
 });
+
+// Subscribe with bWalletX (docs/SUBSCRIBE-API.md): the page posts { type: 'BWX_SUBSCRIBE', … } to itself. Forwarded
+// to the open wallet page (side panel / popup), which takes the origin from Chrome's sender, never from here or the
+// page. background.ts ignores the action. Only the page's own window (not a child frame); at most one in flight.
+if (SUBSCRIPTIONS_ENABLED) {
+  let subBusy = false;
+  window.addEventListener('message', (e: MessageEvent) => {
+    const d = e.data as { type?: unknown; isInvocation?: unknown; id?: unknown } | null;
+    if (e.source !== window || d?.type !== 'BWX_SUBSCRIBE' || d.isInvocation !== true) return;
+    const reply = (r: unknown) => window.postMessage(r, location.origin);
+    const error = (description: string) =>
+      reply({ type: 'BWX_SUBSCRIBE', isInvocation: false, id: d.id, status: 'error', description });
+    if (subBusy) return error('Another subscription request is open');
+    subBusy = true;
+    try {
+      chrome.runtime.sendMessage({ action: 'bwxSubscribe', data: d }, (r: unknown) => {
+        subBusy = false;
+        if (chrome.runtime.lastError || !r) return error('Open bWalletX (click its icon), then try again');
+        reply(r);
+      });
+    } catch {
+      subBusy = false;
+      error('bWalletX was updated: reload this page');
+    }
+  });
+}
 
 // In-page wallet sheet (docs/ONE-SHEET-PERMISSIONS.md §3d). When the side panel can't open, the background asks
 // for the wallet's own approval page (prompt.html, extension origin) as a sheet over this site. It sits in a

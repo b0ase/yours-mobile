@@ -20,6 +20,7 @@ import {
   clearPending,
   getPending,
   getSub,
+  isPayingPot,
   listSubs,
   savePending,
   saveSub,
@@ -118,6 +119,11 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
       continue;
     }
     const usd = amountUsd(s.amount, deps.bsvUsd) * count;
+    // Pot only, never the main balance: no fallback if the pot is gone or isn't a pot.
+    if (!isPayingPot(s.potId)) {
+      out.push(fail(s, 'Only a pot can pay. Pick a pot for this subscription.', deps));
+      continue;
+    }
     const gate = checkAgentSpend(s.potId, usd, now);
     if (!gate.ok) {
       out.push(fail(s, gate.reason, deps));

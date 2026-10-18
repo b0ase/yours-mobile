@@ -69,6 +69,9 @@ export function startPots(next: Env) {
   schedule(6_000);
 }
 
+/** True while the wallet is unlocked (the engine is started by NotifyEngine, which mounts only then). */
+export const potsRunning = () => env !== null;
+
 /** Run the charger shortly (a new app subscription's first month is due at once). No-op while locked. */
 export function chargeSoon() {
   if (env) schedule(1_500);

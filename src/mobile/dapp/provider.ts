@@ -8,7 +8,7 @@ import { isCWIEventName } from '@1sat/wallet-browser';
 import { CustomListenerName, type RequestEventDetail, type RequestParams } from '../../inject';
 import { CWI } from '../../cwi';
 import { announceWallet } from '../../brand/discovery';
-import { appNameFor, isBWalletX } from '../storeBuild';
+import { SUBSCRIPTIONS_ENABLED, appNameFor, isBWalletX } from '../storeBuild';
 import bIcon from '../../../assets/bwallet-ext/icon128.png?inline';
 import bxIcon from '../../../assets/bwalletx-ext/icon128.png?inline';
 
@@ -58,6 +58,27 @@ self.addEventListener(CustomListenerName.YOURS_REQUEST, (e: Event) => {
       reply({ success: false, error: error instanceof Error ? error.message : String(error) }),
     );
 });
+
+// Subscribe with bWalletX (docs/SUBSCRIBE-API.md): the page posts { type: 'BWX_SUBSCRIBE', … } to itself (at the top
+// level window.parent is window). Only the page's own window, never a child frame. The wallet attaches the origin
+// natively; the reply comes back to this window. bWalletX only.
+if (SUBSCRIPTIONS_ENABLED) {
+  window.addEventListener('message', (e: MessageEvent) => {
+    const d = e.data as { type?: unknown; isInvocation?: unknown; id?: unknown } | null;
+    if (e.source !== window || d?.type !== 'BWX_SUBSCRIBE' || d.isInvocation !== true) return;
+    const fallback = (description: string) => ({
+      type: 'BWX_SUBSCRIBE',
+      isInvocation: false,
+      id: d.id,
+      status: 'error',
+      description,
+    });
+    send(JSON.stringify({ type: 'BWX_SUBSCRIBE', params: d }))
+      .then((r) => JSON.parse(r) as unknown)
+      .catch((err: unknown) => fallback(err instanceof Error ? err.message : String(err)))
+      .then((reply) => window.postMessage(reply ?? fallback('No answer'), location.origin));
+  });
+}
 
 // Discovery (wallet-connect spec §3): the in-app browser has exactly one wallet; say which.
 announceWallet(
