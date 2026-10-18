@@ -9,6 +9,76 @@
       "destination": "/api/shops?op=:op"
     },
     {
+      "source": "/authorize",
+      "destination": "/api/auth?op=authorize",
+      "has": [
+        {
+          "type": "host",
+          "value": "auth.bwalletx.com"
+        }
+      ]
+    },
+    {
+      "source": "/token",
+      "destination": "/api/auth?op=token",
+      "has": [
+        {
+          "type": "host",
+          "value": "auth.bwalletx.com"
+        }
+      ]
+    },
+    {
+      "source": "/userinfo",
+      "destination": "/api/auth?op=userinfo",
+      "has": [
+        {
+          "type": "host",
+          "value": "auth.bwalletx.com"
+        }
+      ]
+    },
+    {
+      "source": "/wallet",
+      "destination": "/api/auth?op=wallet",
+      "has": [
+        {
+          "type": "host",
+          "value": "auth.bwalletx.com"
+        }
+      ]
+    },
+    {
+      "source": "/.well-known/openid-configuration",
+      "destination": "/api/auth?op=discovery",
+      "has": [
+        {
+          "type": "host",
+          "value": "auth.bwalletx.com"
+        }
+      ]
+    },
+    {
+      "source": "/.well-known/jwks.json",
+      "destination": "/api/auth?op=jwks",
+      "has": [
+        {
+          "type": "host",
+          "value": "auth.bwalletx.com"
+        }
+      ]
+    },
+    {
+      "source": "/api/auth/:op",
+      "destination": "/api/auth?op=:op",
+      "has": [
+        {
+          "type": "host",
+          "value": "auth.bwalletx.com"
+        }
+      ]
+    },
+    {
       "source": "/pair",
       "destination": "/pair.html"
     },
