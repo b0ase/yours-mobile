@@ -16,6 +16,7 @@ import {
 import { marketFeeOptions, marketFeeSats, MARKET_FEE_RATE } from '../market/fee';
 import { MODULE_FINISHES, purchaseContext, walletOutpoint } from '../market/walletOutpoint';
 import { showOnWallet } from '../tokens/indexFund';
+import { IndexerFundPanel } from '../tokens/IndexerFundPanel';
 import { heldBsv21Balances } from '../airdrops/heldBalances';
 import { MyTokenListings } from '../sell/MyTokenListings';
 import { SellSheet, type SellTarget } from '../sell/SellSheet';
@@ -228,6 +229,7 @@ export const TradeView = ({
           Launched on the bWalletX Launchpad. {LAUNCH_DISCLAIMER}
         </p>
       )}
+      <IndexerFundPanel tokenId={id} ticker={sym} />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
         {[

@@ -3,7 +3,7 @@ import { isNative } from '../../native';
 import { BchatClient, defaultHttp, loadSession } from '../../chat/api';
 import { chatClient, deployBsv21, openRoom } from '../../tickets/mintTicket';
 import { mintFeeAddress, withFeeOutput } from '../../mint/mint';
-import { fundIndexing } from '../../tokens/indexFund';
+import { fundIndexing, getFundRecord } from '../../tokens/indexFund';
 import { cleanToken, tokenFoundingMessage, type TokenForm } from '../../tokens/token';
 import {
   cleanOptions,
@@ -20,15 +20,16 @@ import {
 
 /**
  * Launch network steps, run only after Allow on the one approval sheet. The icon is inscribed by the
- * caller. Deploy (fixed supply to self, flat launch fee output, optional MAP coin card) → holders'
- * room (same as Wallet › Mint a token) → registry → optional indexing fund. Only the deploy must
- * succeed; the rest is best effort and reported back.
+ * caller. Deploy (fixed supply to self, flat launch fee output, MAP coin card) → indexing deposit to
+ * the token's fee address (its own tx: the address is derived from the deploy txid, so it can't ride in
+ * the deploy) → holders' room (same as Wallet › Mint a token) → registry. Only the deploy must succeed;
+ * a failed deposit is reported back with a retry ("Pay indexing deposit"), the rest is best effort.
  */
 export async function deployLaunch(
   ctx: OneSatContext,
   form: TokenForm,
   opts: LaunchOptions,
-  extra: { icon: string | null; launchFeeSats: number },
+  extra: { icon: string | null; launchFeeSats: number; depositSats: number },
 ): Promise<{ launch: Launch; supply: string; roomError: boolean; indexError: string | null }> {
   const f = withOptions(form, opts);
   const c = cleanToken(f);
@@ -52,6 +53,11 @@ export async function deployLaunch(
   };
   saveLocalLaunch(launch);
 
+  // The deposit the user approved, before the room: the room needs the indexer to know the token.
+  const indexError = await payLaunchDeposit(ctx, tokenId, c.ticker, extra.depositSats)
+    .then(() => null)
+    .catch((e) => (e instanceof Error ? e.message : String(e)));
+
   // A just-deployed token may not be indexed yet; the room can also be opened later from Chat.
   const client = await chatClient(ctx).catch(() => null);
   const roomTicker = client
@@ -65,13 +71,25 @@ export async function deployLaunch(
   const done = { ...launch, roomTicker };
   saveLocalLaunch(done);
   await registerLaunch(done, client);
-
-  let indexError: string | null = null;
-  if (o.indexNow)
-    indexError = await fundIndexing(ctx, tokenId, c.ticker, { timeoutMs: 60_000 })
-      .then(() => null)
-      .catch((e) => (e instanceof Error ? e.message : String(e)));
   return { launch: done, supply: c.supply, roomError: !roomTicker, indexError };
+}
+
+/**
+ * Pay a launched coin's indexing deposit: exactly the approved sats, to the fee address its id derives
+ * (cross-checked against the indexer's answer when it has one). Waits up to 20 s for the indexer to
+ * learn the token, then pays the derived address anyway: the overlay credits it on its next check.
+ * Already paid from this device (a retry after an unclear broadcast): nothing is sent again.
+ */
+export async function payLaunchDeposit(
+  ctx: OneSatContext,
+  tokenId: string,
+  ticker: string,
+  sats: number,
+): Promise<{ txid: string; sats: number }> {
+  const prior = getFundRecord(tokenId);
+  if (prior) return { txid: prior.txid, sats: prior.sats };
+  const r = await fundIndexing(ctx, tokenId, ticker, { sats, allowDerived: true, timeoutMs: 20_000 });
+  return { txid: r.txid, sats: r.sats };
 }
 
 /**

@@ -8,7 +8,7 @@ import { money, moneyWithSats, useBsvUsd } from '../../money/money';
 import { checkSize, formatBytes, iconFile, notifyMinted } from '../../mint/mint';
 import { inscribeIcon } from '../../tickets/mintTicket';
 import { MAX_ICON_BYTES, suggestTicker } from '../../tickets/tickets';
-import { indexCostSats, showOnWallet } from '../../tokens/indexFund';
+import { showOnWallet } from '../../tokens/indexFund';
 import { RETURNS_WARNING, hasReturnsWording } from '../../tokens/returnsWording';
 import type { TokenForm } from '../../tokens/token';
 import { ErrorActions } from '../../errors/ErrorActions';
@@ -18,12 +18,15 @@ import { useBottomMenu } from '../../../hooks/useBottomMenu';
 import { asMenuItem } from '../../tabs/tabs';
 import { CATEGORIES } from '../registry/catalog';
 import {
+  DEPOSIT_NOTE,
   LAUNCH_DISCLAIMER,
   LAUNCH_NOTICE,
   launchPrefill,
   approvalLines,
   defaultLaunchOptions,
   emptyLaunchForm,
+  costSummary,
+  depositValue,
   launchCost,
   mapBytes,
   validateLaunch,
@@ -32,10 +35,16 @@ import {
   type Launch,
   type LaunchOptions,
 } from './launch';
-import { deployLaunch } from './launchNet';
+import { deployLaunch, payLaunchDeposit } from './launchNet';
 
 const CATEGORY_SLUGS = CATEGORIES.map((c) => c.slug);
-type Done = { launch: Launch; supply: string; roomError: boolean; indexError: string | null };
+type Done = {
+  launch: Launch;
+  supply: string;
+  roomError: boolean;
+  indexError: string | null;
+  depositSats: number;
+};
 
 /**
  * Exchange › Launchpad › Launch your own coin: name, ticker, supply (1B default), icon, then ONE
@@ -73,12 +82,10 @@ export const LaunchCoin = () => {
   useEffect(() => () => void (icon && URL.revokeObjectURL(icon.url)), [icon]);
 
   const cost = launchCost(icon?.file.size ?? 0, chromeStorageService.getCustomFeeRate(), undefined, {
-    indexNow: opts.indexNow,
     mapBytes: mapBytes(form, opts),
   });
   const check = () => validateLaunch(withOptions(form, opts)) ?? validateOptions(opts, CATEGORY_SLUGS);
   const fmt = (sats: number) => money(sats, rate);
-  const fmtIndex = fmt(indexCostSats());
 
   const set = (k: keyof TokenForm) => (v: string) =>
     setForm((f) => ({ ...f, [k]: v, ...(k === 'name' && !tickerTouched ? { ticker: suggestTicker(v) } : {}) }));
@@ -114,14 +121,32 @@ export const LaunchCoin = () => {
     try {
       const iconOutpoint = icon ? await inscribeIcon(apiContext, icon.file, form.ticker.trim(), 'coin') : null;
       // The flat launch fee rides on the deploy tx as its own labelled output (no fee address = none).
-      const res = await deployLaunch(apiContext, form, opts, { icon: iconOutpoint, launchFeeSats: cost.launchFeeSats });
+      const res = await deployLaunch(apiContext, form, opts, {
+        icon: iconOutpoint,
+        launchFeeSats: cost.launchFeeSats,
+        depositSats: cost.depositSats,
+      });
       void showOnWallet(chromeStorageService, res.launch.tokenId);
       notifyMinted();
       setSheet(false);
-      setDone(res);
+      setDone({ ...res, depositSats: cost.depositSats });
     } catch (e) {
       setSheet(false);
       setError(e instanceof Error ? e.message : 'Launch failed');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  // The deposit failed after the deploy: retry it alone (same approved amount, never twice).
+  const retryDeposit = async () => {
+    if (!done) return;
+    setBusy('Paying indexing deposit…');
+    try {
+      await payLaunchDeposit(apiContext, done.launch.tokenId, done.launch.ticker, done.depositSats);
+      setDone({ ...done, indexError: null });
+    } catch (e) {
+      setDone({ ...done, indexError: e instanceof Error ? e.message : String(e) });
     } finally {
       setBusy('');
     }
@@ -151,8 +176,28 @@ export const LaunchCoin = () => {
           {done.roomError
             ? "Its holders' room opens once the token is indexed: open it from Chat or Settings › My tokens."
             : `The holders' room "${l.name}" is open.`}
-          {done.indexError ? ` Indexing wasn't paid (${done.indexError}); pay it any time from the room setup.` : ''}
         </p>
+        {done.indexError ? (
+          <div className="flex flex-col gap-2 rounded-xl border p-3" style={{ borderColor: '#5a2a2a' }}>
+            <p className="text-xs m-0" style={{ color: '#FF6B6B' }}>
+              The indexing deposit wasn't paid: {done.indexError}. Until it is, wallets and the Exchange can't verify $
+              {l.ticker} transfers.
+            </p>
+            <button
+              type="button"
+              disabled={!!busy}
+              onClick={() => void retryDeposit()}
+              className="bw-pill bw-pill-gold min-h-[44px] w-full text-sm font-bold disabled:opacity-60"
+            >
+              {busy || `Pay indexing deposit · ${depositValue(done.depositSats, fmt)}`}
+            </button>
+          </div>
+        ) : (
+          <p className="text-xs m-0" style={{ color: MUTED }}>
+            Indexing deposit paid to GorillaPool ({depositValue(done.depositSats, fmt)}). Top it up any time from the
+            coin's Exchange page.
+          </p>
+        )}
         <button
           type="button"
           onClick={() => navigate(tradeRoute(l.tokenId))}
@@ -352,18 +397,6 @@ export const LaunchCoin = () => {
               onChange={(e) => setOpt('telegram', e.target.value)}
             />
           </div>
-          <label className="flex items-start gap-2 text-xs cursor-pointer" style={{ color: MUTED }}>
-            <input
-              type="checkbox"
-              className="mt-0.5"
-              checked={opts.indexNow}
-              onChange={(e) => setOpt('indexNow', e.target.checked)}
-            />
-            <span>
-              Pay indexing now ({fmtIndex}) so every wallet shows the coin from the start. You can also do this from the
-              room setup.
-            </span>
-          </label>
           <p className="text-[11px] m-0" style={{ color: MUTED }}>
             Links and category are written on-chain with the coin.
           </p>
@@ -375,10 +408,11 @@ export const LaunchCoin = () => {
         </p>
       )}
       <p className="text-xs m-0" style={{ color: MUTED }}>
-        Launch fee: {cost.launchFeeSats > 0 ? `${fmt(cost.launchFeeSats)} flat` : 'none'} · network ≈{' '}
-        {fmt(cost.networkSats)}
-        {cost.indexSats > 0 ? ` · indexing ${fmt(cost.indexSats)}` : ''} · total ≈ {moneyWithSats(cost.totalSats, rate)}
-        . No share of your coin is taken.
+        Launching costs ≈ {moneyWithSats(cost.totalSats, rate)}: {costSummary(cost, fmt)}. No share of your coin is
+        taken.
+      </p>
+      <p className="text-[11px] m-0" style={{ color: MUTED }}>
+        {DEPOSIT_NOTE}
       </p>
       {error && (
         <div className="flex flex-col gap-1.5">
@@ -446,7 +480,7 @@ const ApproveSheet = ({
           ))}
         </ul>
         <p className="text-[11px] m-0" style={{ color: MUTED }}>
-          {LAUNCH_NOTICE} {LAUNCH_DISCLAIMER}
+          {DEPOSIT_NOTE} {LAUNCH_NOTICE} {LAUNCH_DISCLAIMER}
         </p>
         <div className="flex items-center justify-between border-t pt-3 text-sm" style={{ borderColor: LINE }}>
           <span style={{ color: MUTED }}>Total</span>

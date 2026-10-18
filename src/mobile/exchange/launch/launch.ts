@@ -1,7 +1,7 @@
 import { mintFeeAddress, txFeeSats } from '../../mint/mint';
 import { LockingScript, OP, Utils } from '@bsv/sdk';
 import { MAP_PREFIX } from '../../names/personalToken';
-import { indexCostSats } from '../../tokens/indexFund';
+import { INDEX_FUND_NETWORK_SATS, depositValue, launchDepositSats } from '../../tokens/indexFund';
 import { TOKEN_DEPLOY_BYTES, validateToken, type TokenForm } from '../../tokens/token';
 import { safety, type SafetyFilter } from '../../market/safety';
 import { hasReturnsWording, RETURNS_BLOCK } from '../../tokens/returnsWording';
@@ -13,6 +13,11 @@ import { hasReturnsWording, RETURNS_BLOCK } from '../../tokens/returnsWording';
  * Fee (owner, 11 Oct 2026: "small flat BSV fee, never a share of the token"): one flat output of
  * LAUNCH_FEE_SATS to the build's bCorp fee address (BWALLET_MINT_FEE_ADDRESS, address only). A build
  * without that address, and every store build (bcorpFeeAddress), charges no launch fee.
+ *
+ * Indexing deposit (owner, 18 Oct 2026: "launching a coin can't be presented as free"): a BSV-21 coin is
+ * not validated by the 1Sat/GorillaPool indexer until its fee address holds min_funding (0.1 BSV), and
+ * every indexed output then costs 1,000 sats from it. Every launch pays that deposit right after the
+ * deploy, under the same Allow (launchDepositSats, tokens/indexFund.ts). It goes to the indexer, not us.
  */
 
 /** Flat launch fee: 0.001 BSV. Owner decision pending on the exact figure. */
@@ -32,33 +37,51 @@ export const emptyLaunchForm = (): TokenForm => ({
 export const launchFeeFor = (feeAddress?: string): number => (mintFeeAddress(feeAddress) ? LAUNCH_FEE_SATS : 0);
 
 export interface LaunchCost {
+  /** Miner fees: icon inscription, deploy and the deposit payment. */
   networkSats: number;
+  /** Our own flat launch fee (0 = none). */
   launchFeeSats: number;
-  /** The optional indexing fund (Advanced › index now), 0 when off. */
-  indexSats: number;
+  /** Indexing deposit paid to the token's indexer fee address (GorillaPool / 1Sat), not to us. */
+  depositSats: number;
   totalSats: number;
   txCount: number;
 }
 
-/** Network fee for the optional icon inscription plus the deploy, and the flat launch fee. */
+/** Everything a launch costs: network fees (icon, deploy, deposit tx), the indexing deposit and our launch fee. */
 export function launchCost(
   iconBytes: number,
   satsPerKb: number,
   feeAddress?: string,
-  opts: { indexNow?: boolean; mapBytes?: number } = {},
+  opts: { mapBytes?: number; depositSats?: number } = {},
 ): LaunchCost {
   const icon = iconBytes > 0 ? txFeeSats(iconBytes, satsPerKb) : 0;
-  const networkSats = icon + txFeeSats(TOKEN_DEPLOY_BYTES + (opts.mapBytes ?? 0), satsPerKb);
+  const networkSats = icon + txFeeSats(TOKEN_DEPLOY_BYTES + (opts.mapBytes ?? 0), satsPerKb) + INDEX_FUND_NETWORK_SATS;
   const launchFeeSats = launchFeeFor(feeAddress);
-  const indexSats = opts.indexNow ? indexCostSats() : 0;
+  const depositSats = opts.depositSats ?? launchDepositSats();
   return {
     networkSats,
     launchFeeSats,
-    indexSats,
-    totalSats: networkSats + launchFeeSats + indexSats,
-    txCount: (iconBytes > 0 ? 2 : 1) + (opts.indexNow ? 1 : 0),
+    depositSats,
+    totalSats: networkSats + launchFeeSats + depositSats,
+    txCount: (iconBytes > 0 ? 2 : 1) + 1,
   };
 }
+
+export const DEPOSIT_LABEL = 'Indexing deposit (paid to the token indexer, GorillaPool)';
+
+export { depositValue };
+
+/** Why the deposit exists, under the form and on the sheet. */
+export const DEPOSIT_NOTE =
+  "The indexer (GorillaPool / 1Sat) only validates a new coin once its fee address holds a 0.1 BSV deposit; each transfer it indexes then uses 1,000 sats of it. Without it, wallets and the Exchange can't verify the coin.";
+
+/** One-line cost summary under the form: no "free" anywhere, the total says what launching costs. */
+export const costSummary = (cost: LaunchCost, fmt: (sats: number) => string): string =>
+  [
+    `Indexing deposit ${fmt(cost.depositSats)} (to GorillaPool)`,
+    `network ≈ ${fmt(cost.networkSats)}`,
+    cost.launchFeeSats > 0 ? `our launch fee ${fmt(cost.launchFeeSats)}` : 'our launch fee: none',
+  ].join(' · ');
 
 /** Form check before the approval sheet: token rules plus the returns-wording block. */
 export function validateLaunch(f: TokenForm, s: SafetyFilter = safety()): string | null {
@@ -113,9 +136,9 @@ export function approvalLines(
       ? [{ label: 'Coin card on-chain', value: 'Links, category and the no-promises disclaimer' }]
       : []),
     { label: "Open holders' room", value: `Hold ${BigInt(c.roomMin).toLocaleString('en-US')} to enter` },
-    ...(cost.indexSats > 0 ? [{ label: 'Indexing fund', value: fmt(cost.indexSats) }] : []),
+    { label: DEPOSIT_LABEL, value: depositValue(cost.depositSats, fmt) },
     { label: 'Network fee', value: fmt(cost.networkSats) },
-    { label: 'Launch fee (flat)', value: cost.launchFeeSats > 0 ? fmt(cost.launchFeeSats) : 'None' },
+    { label: 'Our launch fee', value: cost.launchFeeSats > 0 ? fmt(cost.launchFeeSats) : 'None' },
   ];
 }
 
@@ -133,8 +156,6 @@ export interface LaunchOptions {
   category: string;
   /** Whole tokens a holder needs to enter the holders' room. */
   roomMin: string;
-  /** Pay the 0.1 BSV indexing fund now so every wallet sees the coin from the start (tokenblaster always does). */
-  indexNow: boolean;
 }
 
 export const defaultLaunchOptions = (): LaunchOptions => ({
@@ -144,7 +165,6 @@ export const defaultLaunchOptions = (): LaunchOptions => ({
   telegram: '',
   category: '',
   roomMin: '1',
-  indexNow: false,
 });
 
 const HANDLE = /^[A-Za-z0-9_]{1,32}$/;
