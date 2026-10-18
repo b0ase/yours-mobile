@@ -109,3 +109,19 @@ describe('fee output wrapper', () => {
     expect(m.withFeeOutput(ctx, 5, '')).toBe(ctx);
   });
 });
+
+describe('title prefill', () => {
+  test('titleFromFileName drops the extension and caps at 100', () => {
+    expect(m.titleFromFileName('test-video.mp4')).toBe('test-video');
+    expect(m.titleFromFileName('a'.repeat(150) + '.png')).toHaveLength(100);
+  });
+  test('selects the suggestion only on first focus', () => {
+    expect(m.shouldSelectTitleOnFocus(false, 'test-video')).toBe(true);
+    expect(m.shouldSelectTitleOnFocus(true, 'test-video')).toBe(false);
+    expect(m.shouldSelectTitleOnFocus(false, '')).toBe(false);
+  });
+  test('inscription name is the title alone', () => {
+    const map = m.buildMap({ title: 'bWalletX mint test: video', description: '', collection: { kind: 'none' } });
+    expect(map.name).toBe('bWalletX mint test: video');
+  });
+});

@@ -39,6 +39,7 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [step, setStep] = useState(1);
+  const [leaving, setLeaving] = useState(false);
   const [seedWords, setSeedWords] = useState<string[]>([]);
   const [identityAddress, setIdentityAddress] = useState('');
   const { hideMenu, showMenu } = useBottomMenu();
@@ -302,9 +303,14 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
         type="primary"
         label="Next"
         onClick={async () => {
-          setSeedWords([]);
+          // Clear the words only after leaving this step: clearing first re-rendered this screen with an
+          // empty grid while switchAccount ran, which looked like a second "Your recovery phrase" screen.
+          if (leaving) return;
+          setLeaving(true);
           await chromeStorageService.switchAccount(identityAddress);
           setStep(3);
+          setSeedWords([]);
+          setLeaving(false);
         }}
       />
     </div>
