@@ -3,6 +3,8 @@
 //   GET /api/social/providers (which can link now)
 'use strict';
 const social = require('../lib/social');
+const socialLinks = require('../lib/socialLinks');
+const { supabaseStore } = require('../lib/paymailStore');
 
 async function readJson(req) {
   if (req.body && typeof req.body === 'object') return req.body;
@@ -34,6 +36,10 @@ module.exports = async function handler(req, res) {
       const p = social.openTicket(b.ticket, b.secret);
       return p ? send(res, 200, p) : send(res, 401, { error: 'That sign-in has expired. Please try again.' });
     }
+    if (q.op === 'link' && req.method === 'POST')
+      return send(res, ...(await socialLinks.link(await readJson(req), supabaseStore())));
+    if (q.op === 'links' && req.method === 'GET')
+      return send(res, ...(await socialLinks.links(q.key, supabaseStore())));
     if (q.op === 'providers' && req.method === 'GET') return send(res, 200, social.providers());
     if (social.PROVIDERS.includes(q.op) && req.method === 'GET') {
       const to = await social.callback(q.op, q);
