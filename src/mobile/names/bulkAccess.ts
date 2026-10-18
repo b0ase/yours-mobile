@@ -1,6 +1,6 @@
 import { isAgentAccount } from '../agents/agentAccounts';
 import { getPaymail } from './accountName';
-import { BWALLET_PAYMAIL_DOMAIN } from './config';
+import { BWALLET_PAYMAIL_DOMAIN, SIBLING_PAYMAIL_DOMAINS } from './config';
 
 /**
  * Who sees the bulk OpNS minter (bMint › Mint names, /m/bmint/opns). Owner, 14 Oct 2026: it is the maker's tool,
@@ -14,7 +14,7 @@ export const BULK_MINT_HANDLES: readonly string[] = ['b0asex'];
 export const paymailAllowsBulkMint = (paymail: string, handles: readonly string[] = BULK_MINT_HANDLES): boolean => {
   const [alias, domain] = paymail.trim().toLowerCase().replace(/^\$/, '').split('@');
   if (!alias || !handles.includes(alias)) return false;
-  return !domain || domain === BWALLET_PAYMAIL_DOMAIN.toLowerCase();
+  return !domain || domain === BWALLET_PAYMAIL_DOMAIN.toLowerCase() || (SIBLING_PAYMAIL_DOMAINS ?? []).includes(domain);
 };
 
 export const canBulkMint = (identityAddress?: string | null, studioOwner = false): boolean =>

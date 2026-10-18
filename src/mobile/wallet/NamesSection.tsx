@@ -13,6 +13,7 @@ import { useBsvUsd } from '../money/money';
 import { useOpnsVault } from '../names/useOpnsVault';
 import { mergeNames, opnsRows, paymailRows } from './namesList';
 import { copyLink } from '../chat/shareLink';
+import { BWALLET_PAYMAIL_DOMAIN, SIBLING_PAYMAIL_DOMAINS } from '../names/config';
 
 const f = (u: string, i?: RequestInit) => fetch(u, i);
 const HEAD = 'm-0 text-xs font-semibold uppercase tracking-widest';
@@ -59,7 +60,10 @@ export const NamesSection = () => {
     };
   }, [apiContext, tick]);
 
-  const handles = paymailRows(paymails, getPaymail(identityAddress));
+  const handles = paymailRows(paymails, getPaymail(identityAddress), {
+    primary: BWALLET_PAYMAIL_DOMAIN,
+    siblings: SIBLING_PAYMAIL_DOMAINS,
+  });
   const names = opnsRows(mergeNames(bound, forSale));
   const empty = loaded && !handles.length && !names.length;
   const copy = (pm: string) =>

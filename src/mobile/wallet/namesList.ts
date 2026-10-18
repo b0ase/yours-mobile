@@ -24,6 +24,8 @@ export type PaymailRow = { paymail: string; main: boolean };
 export const paymailRows = (
   names: readonly { paymail: string; main: boolean }[],
   cached: string | null | undefined,
+  /** Sibling addresses (owner, 18 Oct 2026): each name@primary also shows name@<sibling>, same key, after it. */
+  also?: { primary: string; siblings: readonly string[] },
 ): PaymailRow[] => {
   const src = names.length ? names : cached ? [{ paymail: cached, main: true }] : [];
   const seen = new Set<string>();
@@ -33,6 +35,19 @@ export const paymailRows = (
     if (!key || seen.has(key)) continue;
     seen.add(key);
     rows.push({ paymail: n.paymail.trim(), main: !!n.main });
+  }
+  if (also?.primary) {
+    const suffix = `@${also.primary.toLowerCase()}`;
+    for (const r of [...rows]) {
+      if (!r.paymail.toLowerCase().endsWith(suffix)) continue;
+      const alias = r.paymail.slice(0, -suffix.length);
+      for (const d of also.siblings) {
+        const sib = `${alias}@${d.toLowerCase()}`;
+        if (seen.has(sib)) continue;
+        seen.add(sib);
+        rows.splice(rows.indexOf(r) + 1, 0, { paymail: sib, main: false });
+      }
+    }
   }
   return rows.sort((a, b) => Number(b.main) - Number(a.main));
 };

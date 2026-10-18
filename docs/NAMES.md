@@ -124,8 +124,15 @@ the destination script.
 `https://pay.bwallet.space`. `PAYMAIL_DOMAIN` is the primary domain (what `register` and `lookup` return).
 `PAYMAIL_DOMAINS` is an optional comma-separated list of extra domains served with the same aliases: an alias is
 one record whatever the domain (aliases are unique across all of them), so moving the primary keeps old
-addresses working. No extra domains are set today (`b0ase.com` was a placeholder that never had DNS and was dropped on
-1 Oct 2026). `pki` / `verify` echo the domain that
+addresses working. Production `PAYMAIL_DOMAINS` = `bwalletx.com,bwallet.space,bchatx.com,bmailx.com` (`b0ase.com` was a
+placeholder that never had DNS and was dropped on 1 Oct 2026).
+
+**One name, two addresses (owner, 18 Oct 2026).** Claiming `$john` gives `john@bwalletx.com` AND `john@bmailx.com`: the
+same alias row, so both answer with the same identity key, and handovers, key changes and signed bindings (keyed by
+alias, never domain) move both at once, with one badge. `bmailx.com/.well-known/bsvalias` (repo `b0ase/bmailx-site`,
+Vercel project `bmailx`) rewrites to this server like bwalletx.com. In the wallet, `SIBLING_PAYMAIL_DOMAINS`
+(`src/mobile/names/config.ts`) makes `isOurDomain`/`bareName` treat bmailx.com as ours, and Wallet › Names lists the
+sibling address under each primary one. `pki` / `verify` echo the domain that
 was asked for. The capability document and every endpoint URL use `PAYMAIL_BASE_URL` (default
 `https://<PAYMAIL_DOMAIN>`).
 

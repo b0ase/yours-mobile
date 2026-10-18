@@ -1,7 +1,10 @@
 import { checkBinding, keyChange, type BindingStatus } from './binding';
 import { Utils } from '@bsv/sdk';
 import { AMOUNT_HINT, cleanRecipient, isMainnetAddress, looksLikeAmount } from './address';
-import { BWALLET_PAYMAIL_DOMAIN, LEGACY_PAYMAIL_DOMAINS } from './config';
+import { BWALLET_PAYMAIL_DOMAIN, LEGACY_PAYMAIL_DOMAINS, SIBLING_PAYMAIL_DOMAINS } from './config';
+
+/** Other domains every name answers on (legacy bwallet.space, sibling bmailx.com). Tolerates mocked config. */
+const alsoOurs = (): string[] => [...(LEGACY_PAYMAIL_DOMAINS ?? []), ...(SIBLING_PAYMAIL_DOMAINS ?? [])];
 import { isPlaceholderName } from './handlePrompt';
 
 /**
@@ -294,10 +297,10 @@ export const resolveBareName = async (
   return resolveOpns(f, name);
 };
 
-/** A bWalletX paymail domain: the configured one (bwalletx.com) or a legacy one (bwallet.space). */
+/** A bWalletX paymail domain: the configured one (bwalletx.com), a sibling (bmailx.com) or a legacy one (bwallet.space). */
 export const isOurDomain = (d: string, domain: string = BWALLET_PAYMAIL_DOMAIN) => {
   const x = d.toLowerCase();
-  return (!!domain && x === domain.toLowerCase()) || LEGACY_PAYMAIL_DOMAINS.includes(x);
+  return (!!domain && x === domain.toLowerCase()) || alsoOurs().includes(x);
 };
 
 export const noSuchUser = (input: string) => `No bWalletX user called ${input}`;
@@ -449,8 +452,8 @@ export const checkOpnsAvailability = async (f: Fetch, raw: string): Promise<Avai
  */
 export const bareName = (name: string, domain: string = BWALLET_PAYMAIL_DOMAIN) => {
   if (!name || !domain) return name;
-  // bwallet.space is the earlier domain; every name answers there too.
-  for (const d of new Set([domain.toLowerCase(), ...LEGACY_PAYMAIL_DOMAINS])) {
+  // bwallet.space is the earlier domain and bmailx.com the sibling; every name answers there too.
+  for (const d of new Set([domain.toLowerCase(), ...alsoOurs()])) {
     const suffix = `@${d}`;
     if (name.toLowerCase().endsWith(suffix) && name.length > suffix.length) return name.slice(0, -suffix.length);
   }
@@ -460,3 +463,7 @@ export const bareName = (name: string, domain: string = BWALLET_PAYMAIL_DOMAIN) 
 /** bWallet-hosted paymail (name@BWALLET_PAYMAIL_DOMAIN), or undefined when paymail is off (docs/NAMES.md). */
 export const bwalletPaymail = (name: string) =>
   BWALLET_PAYMAIL_DOMAIN ? `${name}@${BWALLET_PAYMAIL_DOMAIN}` : undefined;
+
+/** Both addresses of one name, primary first: name@bwalletx.com, name@bmailx.com. [] when paymail is off. */
+export const bwalletPaymails = (name: string, domain: string = BWALLET_PAYMAIL_DOMAIN): string[] =>
+  domain ? [...new Set([domain.toLowerCase(), ...(SIBLING_PAYMAIL_DOMAINS ?? [])])].map((d) => `${name}@${d}`) : [];

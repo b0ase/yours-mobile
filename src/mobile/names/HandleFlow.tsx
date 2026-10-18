@@ -24,7 +24,7 @@ import {
   defaultDisplayName,
 } from './paymail';
 import { clearSocial, socialProof } from '../social/socialLogin';
-import { BWALLET_PAYMAIL_API, BWALLET_PAYMAIL_DOMAIN } from './config';
+import { BWALLET_PAYMAIL_API, BWALLET_PAYMAIL_DOMAIN, SIBLING_PAYMAIL_DOMAINS } from './config';
 import {
   PERSONAL_FEE_ESTIMATE_SATS,
   PERSONAL_NETWORK_FEE_SATS,
@@ -404,6 +404,11 @@ export const HandleFlow = ({
             >
               {stateText[state]}
             </span>
+            {!!alias && SIBLING_PAYMAIL_DOMAINS.length > 0 && (
+              <span className="text-[11px]" style={{ color: GRAY }}>
+                Also yours, same key: {SIBLING_PAYMAIL_DOMAINS.map((d) => `${alias}@${d}`).join(', ')}
+              </span>
+            )}
             {isGmailName(paymail) && (
               <p className="text-xs" style={{ color: GOLD }}>
                 Choose a name — your current address shows your Gmail. Your old address keeps receiving for 90 days.
