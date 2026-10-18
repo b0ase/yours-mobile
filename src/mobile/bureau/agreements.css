@@ -633,6 +633,16 @@
   }
   .ag-top .ag-title {
     font-size: 16px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ag-top .ag-btn {
+    flex: none;
+  }
+  .ag {
+    overflow-x: hidden;
   }
   .ag-body,
   .ag-two .ag-body {
@@ -642,7 +652,8 @@
   }
   .ag-rail {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    /* minmax(0, …): a long label ellipsizes instead of pushing the count off a 320px screen. */
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
     padding: 12px;
     border-right: 0;
@@ -700,5 +711,32 @@
   }
   .ag-parties {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Narrow phones (320–380px): tighter header and folder tiles so everything fits on one screen width. */
+@media (max-width: 380px) {
+  .ag-top {
+    gap: 8px;
+    padding: 8px 10px;
+  }
+  .ag-top .ag-title {
+    font-size: 15px;
+  }
+  .ag-top .ag-btn {
+    padding-left: 10px;
+    padding-right: 10px;
+    font-size: 13px;
+  }
+  .ag-rail {
+    padding: 10px;
+  }
+  .ag-folder {
+    gap: 6px;
+    padding: 6px 8px;
+  }
+  .ag-folder svg {
+    width: 16px;
+    height: 16px;
   }
 }
