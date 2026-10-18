@@ -14,8 +14,18 @@ import {
   validateVestPlan,
   type VerifiedVesting,
   type VestPlan,
+  defaultVestPlan,
 } from './vesting';
-import { claimVesting, fetchVesting, listVesting, vestTxUrl, type VestRow } from './vestingNet';
+import {
+  claimVesting,
+  fetchVesting,
+  heldDeploy,
+  listVesting,
+  lockVestingLater,
+  savedVestPlan,
+  vestTxUrl,
+  type VestRow,
+} from './vestingNet';
 
 const GOLD = 'var(--bw-accent)';
 const LINE = '#2b2f36';
@@ -108,8 +118,12 @@ export const CreatorVesting = ({ tokenId }: { tokenId: string }) => {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
+  const [canLock, setCanLock] = useState(false);
 
   const load = useCallback(() => {
+    void heldDeploy(apiContext, tokenId)
+      .then((d) => setCanLock(!!d))
+      .catch(() => setCanLock(false));
     void fetchVesting(tokenId)
       .then(setPub)
       .catch(() => setPub(null));
@@ -139,7 +153,23 @@ export const CreatorVesting = ({ tokenId }: { tokenId: string }) => {
     }
   };
 
-  if (pub === undefined && mine.length === 0) return null;
+  const lockPlan = savedVestPlan(tokenId) ?? defaultVestPlan();
+  const lockNow = async () => {
+    setBusy(true);
+    setError('');
+    setMsg('');
+    try {
+      const v = await lockVestingLater(apiContext, tokenId, lockPlan);
+      setMsg(`Locked. Txid ${v.txid}`);
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (pub === undefined && mine.length === 0 && !canLock) return null;
   const r = pub?.receipt;
   return (
     <div className="flex flex-col gap-2 rounded-2xl border p-3" style={{ borderColor: LINE }}>
@@ -179,6 +209,28 @@ export const CreatorVesting = ({ tokenId }: { tokenId: string }) => {
             No checked creator vesting found on chain for this coin.
           </p>
         )
+      )}
+      {canLock && !pub && mine.length === 0 && (
+        <div className="flex flex-col gap-1.5 border-t pt-2" style={{ borderColor: LINE }}>
+          <span className="text-xs" style={{ color: MUTED }}>
+            You launched this coin and its supply is untouched. Lock your {lockPlan.keepBps / 100}% share:{' '}
+            {scheduleSummary(lockPlan)}.
+          </span>
+          {error && (
+            <p className="text-xs m-0 break-words" style={{ color: '#FF6B6B' }}>
+              {error}
+            </p>
+          )}
+          {msg && <p className="text-xs m-0 break-all text-[#A1FF8B]">{msg}</p>}
+          <button
+            type="button"
+            disabled={busy || lockPlan.keepBps === 0}
+            onClick={() => void lockNow()}
+            className="bw-pill bw-pill-gold min-h-[40px] w-full text-sm font-bold disabled:opacity-50"
+          >
+            {busy ? 'Locking…' : 'Lock my share now'}
+          </button>
+        </div>
       )}
       {mine.length > 0 && (
         <div className="flex flex-col gap-1.5 border-t pt-2" style={{ borderColor: LINE }}>

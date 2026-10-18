@@ -46,7 +46,39 @@ const currentHeight = async (ctx: OneSatContext): Promise<number> => {
   return h;
 };
 
-export type VestStart = { tokenId: string; sym: string; supply: bigint; decimals: number; icon?: string | null };
+export type VestStart = { tokenId: string; sym: string; supply: bigint; decimals?: number; icon?: string | null };
+
+const planKey = (tokenId: string) => `bwx.vestPlan.${norm(tokenId)}`;
+/** The plan chosen at launch, kept on this device so a failed lock can be retried later with the same terms. */
+export const saveVestPlan = (tokenId: string, p: VestPlan) => {
+  try {
+    localStorage.setItem(planKey(tokenId), JSON.stringify(p));
+  } catch {
+    /* storage unavailable */
+  }
+};
+export const savedVestPlan = (tokenId: string): VestPlan | null => {
+  try {
+    const p = JSON.parse(localStorage.getItem(planKey(tokenId)) || 'null') as VestPlan | null;
+    return p && typeof p.keepBps === 'number' ? p : null;
+  } catch {
+    return null;
+  }
+};
+
+/** This wallet's unspent deploy output for the token (the whole supply), or null. */
+export async function heldDeploy(ctx: OneSatContext, tokenId: string) {
+  const id = norm(tokenId);
+  const { coins } = await tokenCoins(ctx.wallet, true);
+  return coins.find((c) => norm(c.outpoint) === id && c.id === id && !!c.keyID) ?? null;
+}
+
+/** Token page › "Lock my share now": the launch's vesting transaction, for a coin whose deploy output is still unspent. */
+export async function lockVestingLater(ctx: OneSatContext, tokenId: string, plan: VestPlan): Promise<VerifiedVesting> {
+  const d = await heldDeploy(ctx, tokenId);
+  if (!d) throw new Error("Your wallet does not hold this coin's untouched supply, so it cannot be locked here.");
+  return lockVesting(ctx, { tokenId, sym: d.sym ?? '', supply: d.amt, decimals: d.dec, icon: d.icon }, plan);
+}
 
 /**
  * Moves the creator's kept share from the deploy output into the tranche locks, with the receipt, in one

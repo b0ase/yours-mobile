@@ -1,6 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import { Lock } from '@1sat/templates';
-import { P2PKH, PrivateKey, ProtoWallet, PublicKey, Spend, Transaction, type LockingScript } from '@bsv/sdk';
+import {
+  LockingScript as LS,
+  P2PKH,
+  PrivateKey,
+  ProtoWallet,
+  PublicKey,
+  Spend,
+  Transaction,
+  type LockingScript,
+} from '@bsv/sdk';
 import {
   VEST_KEY_ID,
   VEST_PROTOCOL,
@@ -215,5 +224,68 @@ describe('public receipt', () => {
       tx.outputs[tx.outputs.length - 1].lockingScript = vestReceiptScript(short);
     });
     expect(typeof verifyVestingTx(tooShort, TOKEN)).toBe('string');
+  });
+});
+
+describe('receipt as the wallet returns it (regression: mainnet $VESTTEST, 18 Oct 2026)', () => {
+  // The wallet hands back a signable tx parsed from bytes: @bsv/sdk keeps everything after OP_RETURN as one chunk,
+  // so the receipt must be read from that shape too.
+  const supply = 1_000_000n;
+  const plan = defaultVestPlan();
+  const tranches = vestSchedule(supply, plan, START);
+  const receipt = buildVestReceipt({
+    tokenId: TOKEN,
+    sym: 'VESTTEST',
+    supply,
+    plan,
+    startHeight: START,
+    lockAddress: ADDR,
+    tranches,
+  });
+
+  test('a receipt read from hex parses', () => {
+    const fromHex = LS.fromHex(vestReceiptScript(receipt).toHex());
+    expect(fromHex.chunks.length).toBe(2);
+    expect(parseVestReceiptScript(fromHex)).toEqual(receipt);
+  });
+  test('a whole wallet-shaped tx (round-tripped through bytes, wallet change appended) verifies', () => {
+    const tx = new Transaction();
+    tx.addInput({
+      sourceTXID: TOKEN.split('_')[0],
+      sourceOutputIndex: 0,
+      sequence: 0xffffffff,
+      unlockingScript: new P2PKH().lock(ADDR),
+    });
+    tx.addInput({
+      sourceTXID: 'ef'.repeat(32),
+      sourceOutputIndex: 2,
+      sequence: 0xffffffff,
+      unlockingScript: new P2PKH().lock(ADDR),
+    });
+    for (const t of tranches)
+      tx.addOutput({ lockingScript: vestTrancheScript(TOKEN, t.amt, ADDR, t.height), satoshis: 1 });
+    tx.addOutput({ lockingScript: new P2PKH().lock(ADDR), satoshis: 1 });
+    tx.addOutput({ lockingScript: vestReceiptScript(receipt), satoshis: 0 });
+    tx.addOutput({ lockingScript: new P2PKH().lock(stranger.toAddress()), satoshis: 5000 }); // change
+    const wire = Transaction.fromHex(tx.toHex());
+    const v = verifyVestingTx(wire, TOKEN);
+    expect(typeof v).toBe('object');
+  });
+  test('still exactly one canonical receipt: a tampered or duplicated one fails', () => {
+    const hex = vestReceiptScript(receipt).toHex();
+    const extra = LS.fromHex(hex + '0178'); // a trailing push after the JSON
+    expect(parseVestReceiptScript(extra)).toBeNull();
+    const tx = new Transaction();
+    tx.addInput({
+      sourceTXID: TOKEN.split('_')[0],
+      sourceOutputIndex: 0,
+      sequence: 0xffffffff,
+      unlockingScript: new P2PKH().lock(ADDR),
+    });
+    for (const t of tranches)
+      tx.addOutput({ lockingScript: vestTrancheScript(TOKEN, t.amt, ADDR, t.height), satoshis: 1 });
+    tx.addOutput({ lockingScript: LS.fromHex(hex), satoshis: 0 });
+    tx.addOutput({ lockingScript: LS.fromHex(hex), satoshis: 0 });
+    expect(typeof verifyVestingTx(Transaction.fromHex(tx.toHex()), TOKEN)).toBe('string');
   });
 });

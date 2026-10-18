@@ -18,7 +18,7 @@ import {
   type LaunchOptions,
 } from './launch';
 import type { VerifiedVesting, VestPlan } from './vesting';
-import { lockVesting } from './vestingNet';
+import { lockVesting, saveVestPlan } from './vestingNet';
 
 /**
  * Launch network steps, run only after Allow on the one approval sheet. The icon is inscribed by the
@@ -66,6 +66,7 @@ export async function deployLaunch(
   let vesting: VerifiedVesting | null = null;
   let vestError: string | null = null;
   if (extra.vest && extra.vest.keepBps > 0) {
+    saveVestPlan(tokenId, extra.vest);
     try {
       vesting = await lockVesting(ctx, vestStartFor(tokenId, c, extra.icon), extra.vest);
     } catch (e) {

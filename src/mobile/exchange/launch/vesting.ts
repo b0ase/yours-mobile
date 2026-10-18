@@ -162,14 +162,32 @@ export function vestReceiptScript(r: VestReceipt): LockingScript {
 /** The receipt JSON inside a MAP OP_RETURN script, or null. */
 export function parseVestReceiptScript(script: Script): VestReceipt | null {
   const c = script.chunks;
-  if (c.length < 4 || c[0].op !== OP.OP_FALSE || c[1].op !== OP.OP_RETURN) return null;
-  const text = c.slice(2).map((x) => (x.data ? Utils.toUTF8(x.data) : ''));
+  if (c.length < 2 || c[0].op !== OP.OP_FALSE || c[1].op !== OP.OP_RETURN) return null;
+  // A script read from hex (the wallet's transaction, the chain) keeps everything after OP_RETURN as ONE data
+  // chunk; a script we built keeps the pushes. Read the pushes either way.
+  let pushes = c.slice(2);
+  if (pushes.length === 0 && c[1].data?.length) {
+    try {
+      pushes = Script.fromBinary(c[1].data).chunks;
+    } catch {
+      return null;
+    }
+  }
+  if (pushes.some((x) => !x.data)) return null;
+  const text = pushes.map((x) => Utils.toUTF8(x.data!));
   if (text[0] !== MAP_PREFIX || text[1] !== 'SET') return null;
   const i = text.indexOf('receipt');
   if (i < 0 || i % 2 !== 0 || !text.includes(VEST_RECEIPT_TYPE)) return null;
+  let r: VestReceipt;
   try {
-    const r = JSON.parse(text[i + 1] ?? '') as VestReceipt;
-    return r && r.type === VEST_RECEIPT_TYPE && r.v === 1 ? r : null;
+    r = JSON.parse(text[i + 1] ?? '') as VestReceipt;
+  } catch {
+    return null;
+  }
+  if (!r || r.type !== VEST_RECEIPT_TYPE || r.v !== 1) return null;
+  // Exactly the canonical receipt script for this JSON, byte for byte (no extra or reordered fields).
+  try {
+    return vestReceiptScript(r).toHex() === script.toHex() ? r : null;
   } catch {
     return null;
   }
