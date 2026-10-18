@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { AccountNameField } from '../../components/AccountNameField';
+import { accountNameError, cleanAccountName, suggestAccountName } from '../../utils/accountNameRules';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, Copy, Check, CheckCircle, FileLock2 } from 'lucide-react';
 import { Button } from '../../components/Button';
@@ -45,7 +47,10 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
   const { hideMenu, showMenu } = useBottomMenu();
   const [loading, setLoading] = useState(false);
   const { keysService, chromeStorageService } = useServiceContext();
-  const [accountName, setAccountName] = useState('');
+  // Required, prefilled with an editable "Account N" (owner, 18 Oct 2026: utils/accountNameRules.ts).
+  const otherAccountNames = () => chromeStorageService.getAllAccounts().map((a) => a.name ?? '');
+  const [accountName, setAccountName] = useState(() => suggestAccountName(otherAccountNames()));
+  const [nameError, setNameError] = useState('');
   const [iconURL, setIconURL] = useState('');
   const [copied, setCopied] = useState(false);
   const [backupOpen, setBackupOpen] = useState(false);
@@ -62,6 +67,13 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
     try {
       event?.preventDefault();
       setLoading(true);
+      const badName = accountNameError(accountName, otherAccountNames());
+      setNameError(badName);
+      if (badName) {
+        setLoading(false);
+        addSnackbar(badName, 'error');
+        return;
+      }
       if (password.length < 8) {
         addSnackbar(newWallet ? 'The password must be at least 8 characters!' : 'Invalid Password!', 'error');
         return;
@@ -89,7 +101,7 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
         return;
       }
       setIdentityAddress(keys.identityAddress);
-      await saveAccountDataToChromeStorage(chromeStorageService, accountName, iconURL);
+      await saveAccountDataToChromeStorage(chromeStorageService, cleanAccountName(accountName), iconURL);
       setStep(2);
     } catch (error) {
       console.log(error);
@@ -161,12 +173,14 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
       </p>
 
       <form onSubmit={handleKeyGeneration} className="flex flex-col items-center w-full gap-0">
-        <Input
+        <AccountNameField
           theme={theme}
-          placeholder="Account Name"
-          type="text"
           value={accountName}
-          onChange={(e) => setAccountName(e.target.value)}
+          error={nameError}
+          onChange={(v) => {
+            setAccountName(v);
+            if (nameError) setNameError('');
+          }}
         />
         <Input
           theme={theme}

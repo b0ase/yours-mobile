@@ -33,9 +33,9 @@ export const createBackupFile = async (cs: ChromeStorageService, password: strin
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   const sealed = await sealBackup(bytes, password);
   bytes.fill(0);
-  // Named for the account like Settings › Backup ($handle + identity key start): owner, 15 Oct 2026.
+  // Named for the account like Settings › Backup ($handle, else its name): owner, 15 Oct 2026.
   const names = accountNamesFor(account?.addresses?.identityAddress, account?.name ?? '');
-  const name = masterBackupFileName(names.payable || names.displayName, account?.pubKeys?.identityPubKey);
+  const name = masterBackupFileName(names.payable || names.displayName);
   return new File([sealed as Uint8Array<ArrayBuffer>], name, { type: 'application/zip' });
 };
 

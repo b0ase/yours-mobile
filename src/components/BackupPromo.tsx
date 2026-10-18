@@ -5,6 +5,8 @@ import { Button } from './Button';
 import { Input } from './Input';
 import { Theme } from '../theme.types';
 import { KeysService } from '../services/Keys.service';
+import { useServiceContext } from '../hooks/useServiceContext';
+import { currentAccountBackupName } from '../utils/accountBackupName';
 
 type Props = {
   theme: Theme;
@@ -21,6 +23,7 @@ export const BackupPromo = ({ theme, keysService, keysAlreadyBackedUp, onKeysBac
   const [password, setPassword] = useState('');
   const [passwordError, setPasswordError] = useState('');
   const [downloading, setDownloading] = useState(false);
+  const { chromeStorageService } = useServiceContext();
   const [keysDownloaded, setKeysDownloaded] = useState(!!keysAlreadyBackedUp);
 
   const handleDownloadKeys = async () => {
@@ -45,7 +48,7 @@ export const BackupPromo = ({ theme, keysService, keysAlreadyBackedUp, onKeysBac
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', 'yours_wallet_keys.json');
+      link.setAttribute('download', currentAccountBackupName(chromeStorageService, 'json'));
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);

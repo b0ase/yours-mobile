@@ -194,8 +194,8 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     // A Continue with X / Google sign-in made on this screen now belongs to the new account (socialLogin.ts bindSocial).
     [
-      '      await saveAccountDataToChromeStorage(chromeStorageService, accountName, iconURL);',
-      '      await saveAccountDataToChromeStorage(chromeStorageService, accountName, iconURL);\n      bindSocial(keys.identityAddress);',
+      '      await saveAccountDataToChromeStorage(chromeStorageService, cleanAccountName(accountName), iconURL);',
+      '      await saveAccountDataToChromeStorage(chromeStorageService, cleanAccountName(accountName), iconURL);\n      bindSocial(keys.identityAddress);',
     ],
     [
       "import { useNavigate } from 'react-router-dom';",
@@ -325,8 +325,8 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   'src/pages/onboarding/RestoreAccount.tsx': [
     // A Continue with X / Google sign-in made on this screen now belongs to the new account (socialLogin.ts bindSocial).
     [
-      '      await saveAccountDataToChromeStorage(chromeStorageService, accountName, iconURL);',
-      '      await saveAccountDataToChromeStorage(chromeStorageService, accountName, iconURL);\n      bindSocial(keys.identityAddress);',
+      '      await saveAccountDataToChromeStorage(chromeStorageService, cleanAccountName(accountName), iconURL);',
+      '      await saveAccountDataToChromeStorage(chromeStorageService, cleanAccountName(accountName), iconURL);\n      bindSocial(keys.identityAddress);',
     ],
     [
       "import { useNavigate } from 'react-router-dom';",

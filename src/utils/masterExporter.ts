@@ -1,22 +1,13 @@
 import { ChromeStorageService } from '../services/ChromeStorage.service';
-import { accountNamesFor } from '../mobile/names/accountNames';
+import { currentAccountBackupName } from './accountBackupName';
 import { sealBackup } from './backupEnvelope';
+import { backupFileName } from './backupFileName';
 
 /**
- * `vexvoid_02cbe7_bwalletx_backup_2026-10-11.zip`: the account's $handle (else its name) plus the start of
- * its identity key, which is the account itself (handles change). The owner never renames the file to
- * know whose backup it is (owner, 11 Oct 2026).
+ * `bwalletx-backup-vexvoid-2026-10-18.zip`: the account's $handle (else its name), so the owner never renames the
+ * file to know whose backup it is (owner, 11 + 18 Oct 2026). Format lives in backupFileName.ts.
  */
-export const masterBackupFileName = (name: string, identityKey = '', now = new Date()): string => {
-  const slug = name
-    .replace(/^\$/, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '');
-  const key = /^[0-9a-f]{6}/i.test(identityKey) ? identityKey.slice(0, 6).toLowerCase() : '';
-  const prefix = [slug, key].filter(Boolean).join('_');
-  return `${prefix ? `${prefix}_` : ''}bwalletx_backup_${now.toISOString().split('T')[0]}.zip`;
-};
+export const masterBackupFileName = (name: string, now = new Date()): string => backupFileName(name, 'zip', now);
 
 export type MasterBackupProgressEvent = {
   message: string;
@@ -90,9 +81,7 @@ export const streamDataToZip = async (
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    const { account } = chromeStorageService.getCurrentAccountObject();
-    const names = accountNamesFor(account?.addresses?.identityAddress, account?.name ?? '');
-    a.download = masterBackupFileName(names.payable || names.displayName, account?.pubKeys?.identityPubKey);
+    a.download = currentAccountBackupName(chromeStorageService, 'zip');
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
