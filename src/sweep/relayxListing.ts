@@ -241,6 +241,8 @@ export async function listingState(
 }
 
 export const CANCEL_FEE_PER_KB = 100;
+/** Hard ceiling on the cancel's fee: anything above this fails closed rather than being shown. */
+export const MAX_CANCEL_FEE = 2_000;
 /** The Run app name written in the cancel's OP_RETURN (any string is valid Run). */
 export const CANCEL_APP = 'bwalletx';
 
@@ -378,6 +380,7 @@ export async function buildCancel(
   unlockOrder(probe);
   await probe.sign();
   const fee = Math.max(1, Math.ceil((probe.toBinary().length * feePerKb) / 1000));
+  if (fee > MAX_CANCEL_FEE) throw new Error(`The cancel's fee (${fee} sats) is higher than expected, so it wasn't made.`);
   const change = total - RUN_JIG_SATS - fee;
   if (change < 0) throw new Error(`The listing holds ${total} sats, not enough for the NFT and the ${fee}-sat fee.`);
   // OP_PUSH_TX in the contract can refuse a few preimages: a different lock time gives a different one.
@@ -385,6 +388,9 @@ export async function buildCancel(
     const tx = make(change, lockTime);
     unlockOrder(tx);
     await tx.sign();
+    const toUser = tx.outputs.slice(1).every((o) => p2pkhAddress(o.lockingScript) === to);
+    const spent = total - tx.outputs.reduce((n, o) => n + (o.satoshis ?? 0), 0);
+    if (!toUser || spent !== fee || tx.outputs[0].satoshis !== 0) throw new Error("The cancel's outputs didn't check out.");
     if (inputValid(tx, 0) && inputValid(tx, 1)) return { tx, to, fee, change };
   }
   throw new Error("The cancel didn't check out against the order's script, so it wasn't made.");
