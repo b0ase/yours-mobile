@@ -19,7 +19,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const BUNDLE_ID = 'com.bitcoincorp.bwallet';
+const BUNDLE_ID = process.env.ASC_BUNDLE_ID || 'com.bitcoincorp.bwallet';
 const TEAM_ID = 'ZQ4NX9NJ89';
 const API = 'https://api.appstoreconnect.apple.com';
 const DIR = join(homedir(), '.appstoreconnect');
@@ -64,9 +64,11 @@ async function api(method, path, data) {
 }
 
 async function appId() {
+  // filter[bundleId] also returns com.bitcoincorp.bwallet.private, in no fixed order: match exactly.
   const r = await api('GET', `/v1/apps?filter[bundleId]=${BUNDLE_ID}`);
-  if (!r.data?.[0]) throw new Error(`No app with bundle id ${BUNDLE_ID}`);
-  return r.data[0].id;
+  const app = r.data?.find((a) => a.attributes?.bundleId === BUNDLE_ID);
+  if (!app) throw new Error(`No app with bundle id ${BUNDLE_ID}`);
+  return app.id;
 }
 
 async function builds(version) {
@@ -192,11 +194,42 @@ async function submit(version, buildNumber, notes) {
   console.log(`✓ ${version} (${buildNumber}) submitted for review`);
 }
 
+// Add a processed build to one TestFlight beta group by name (no Beta App Review is requested here).
+async function addToGroup(version, buildNumber, groupName) {
+  const app = await appId();
+  const build = (await builds(version)).find((b) => b.build === String(buildNumber));
+  if (!build || build.state !== 'VALID')
+    throw new Error(`Build ${version} (${buildNumber}) is ${build?.state ?? 'not found'}`);
+  const gs = await api('GET', `/v1/apps/${app}/betaGroups?limit=50`);
+  // ASC shows "<name> internal/external"; the API name is just <name>, so match the suffix on isInternalGroup.
+  const m = /^(.*) (internal|external)$/.exec(groupName);
+  const g =
+    gs.data.find((x) => x.attributes.name === groupName) ??
+    (m && gs.data.find((x) => x.attributes.name === m[1] && x.attributes.isInternalGroup === (m[2] === 'internal')));
+  if (!g)
+    throw new Error(
+      `No beta group "${groupName}" (have: ${gs.data.map((x) => JSON.stringify(x.attributes.name)).join(', ') || 'none'})`,
+    );
+  // An internal group set to "all builds" gets every processed build already; Apple refuses an explicit add.
+  if (g.attributes.isInternalGroup && g.attributes.hasAccessToAllBuilds) {
+    const d = await api('GET', `/v1/builds/${build.id}/buildBetaDetail`);
+    console.log(
+      `✓ "${groupName}" has access to all builds · ${version} (${buildNumber}) internal state ${d.data.attributes.internalBuildState}`,
+    );
+    return;
+  }
+  await api('POST', `/v1/betaGroups/${g.id}/relationships/builds`, [{ type: 'builds', id: build.id }]);
+  console.log(
+    `✓ ${version} (${buildNumber}) added to "${groupName}" (${g.attributes.isInternalGroup ? 'internal' : 'external'})`,
+  );
+}
+
 const [cmd, ...args] = process.argv.slice(2);
 try {
   if (cmd === 'auth') console.log(`✓ key works · app ${await appId()}`);
   else if (cmd === 'upload') upload(args[0]);
   else if (cmd === 'builds') console.table(await builds(args[0]));
+  else if (cmd === 'group') await addToGroup(args[0], args[1], args[2]);
   else if (cmd === 'submit') {
     const i = args.indexOf('--notes');
     await submit(args[0], args[1], i >= 0 ? args[i + 1] : undefined);
