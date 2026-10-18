@@ -39,6 +39,7 @@ export const BAPP_ICONS: Record<GlyphSlug, BappIconDef> = {
   bchat: def('bchat', 'bChat', FEED_COLORS.bbrowser),
   bvideo: def('bvideo', 'bVideo', '#F76B15'),
   bmint: def('bmint', 'bMint', '#46A758'),
+  btrust: def('btrust', 'bTrust', '#F5B800'),
   names: def('names', 'Names', '#46A758'),
   bid: def('bid', 'bID', FEED_COLORS.bidentity),
   bsearch: def('bsearch', 'bSearch', '#3E63DD'),

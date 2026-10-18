@@ -26,6 +26,9 @@ import { BTRUST_CHECKLIST } from './checklist';
 import { CheckInPanel } from './CheckInPanel';
 import { HeirClaimPanel } from './HeirClaimPanel';
 import { FundPanel } from './FundPanel';
+import { CopyButton } from './CopyButton';
+import { RestoreBoxes } from './RestoreBoxes';
+import { planFileName, planJson, planLabel } from './planFile';
 import { btrustTestMode, TEST_BANNER } from './testMode';
 import { nextOwnerSlot } from './fund';
 import { wocChain } from './derive';
@@ -59,24 +62,45 @@ const SliceView = ({ card }: { card: SliceCard }) => {
       <p className="m-0 text-xs" style={{ color: MUTED }}>
         Any {card.threshold} slices restore it. Give this one to one person. On its own it reveals nothing.
       </p>
-      {src && (
+      {src ? (
         <img src={src} alt={`QR for slice ${card.index}`} className="self-center bg-white rounded-lg" width={200} />
+      ) : (
+        <p className="m-0 text-xs" style={{ color: MUTED }}>
+          This slice is too long for one QR code. Use Copy or Save instead.
+        </p>
       )}
       <textarea readOnly className={INPUT} rows={3} value={card.text} aria-label={`Slice ${card.index} text`} />
-      <button
-        type="button"
-        className={BTN}
-        style={{ background: GOLD }}
-        onClick={() => download(`btrust-slice-${card.setId}-${card.index}.txt`, card.text, 'text/plain')}
-      >
-        Save slice {card.index}
-      </button>
+      <div className="flex gap-2 flex-wrap">
+        <CopyButton text={card.text} secret />
+        {typeof navigator !== 'undefined' && 'share' in navigator && (
+          <button
+            type="button"
+            className="rounded-xl px-3 py-2 text-sm font-bold border cursor-pointer"
+            style={{ background: 'transparent', color: GOLD, borderColor: GOLD }}
+            onClick={() =>
+              void navigator
+                .share({ title: `bTrust slice ${card.index} of ${card.total}`, text: card.text })
+                .catch(() => undefined)
+            }
+          >
+            Share
+          </button>
+        )}
+        <button
+          type="button"
+          className={BTN + ' flex-1'}
+          style={{ background: GOLD }}
+          onClick={() => download(`btrust-slice-${card.setId}-${card.index}.txt`, card.text, 'text/plain')}
+        >
+          Save slice {card.index}
+        </button>
+      </div>
     </div>
   );
 };
 
-const Step = ({ n, title, children }: { n: number; title: string; children: React.ReactNode }) => (
-  <section className={CARD}>
+const Step = ({ n, title, children, id }: { n: number; title: string; children: React.ReactNode; id?: string }) => (
+  <section className={CARD} id={id}>
     <h2 className="m-0 text-white text-base">
       <span style={{ color: GOLD }}>{n}.</span> {title}
     </h2>
@@ -101,7 +125,7 @@ export const BTrustPage = () => {
   const [total, setTotal] = useState(3);
   const [cards, setCards] = useState<SliceCard[]>([]);
   const [trustKey, setTrustKey] = useState<PrivateKey | null>(null);
-  const [restoreText, setRestoreText] = useState('');
+  const [restoring, setRestoring] = useState(false);
   const [restored, setRestored] = useState('');
   const [error, setError] = useState('');
 
@@ -143,10 +167,9 @@ export const BTrustPage = () => {
     }
   };
 
-  const doRestore = () => {
+  const doRestore = (texts: string[]) => {
     setError('');
     try {
-      const texts = restoreText.split(/\s+/).filter(Boolean);
       setRestored(Utils.toUTF8(restoreSecret(texts)));
       setTrustKey(restoreKey(texts).trustKey);
     } catch (e) {
@@ -229,6 +252,16 @@ export const BTrustPage = () => {
             Shared keys, passing on, important papers. Everything stays on this device. We never hold a copy.
           </p>
         </header>
+        <button
+          type="button"
+          className="w-full rounded-2xl px-4 py-4 text-base font-extrabold border-0 cursor-pointer"
+          style={{ background: GOLD }}
+          onClick={() =>
+            document.getElementById('btrust-claim')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          }
+        >
+          Claim an inheritance
+        </button>
         {error && (
           <p role="alert" className="m-0 text-sm" style={{ color: '#F97066' }}>
             {error}
@@ -279,21 +312,34 @@ export const BTrustPage = () => {
           {cards.map((c) => (
             <SliceView key={`${c.setId}-${c.index}`} card={c} />
           ))}
-          <details>
-            <summary className="text-sm text-white cursor-pointer">Restore from slices</summary>
-            <textarea
-              className={INPUT}
-              rows={4}
-              value={restoreText}
-              onChange={(e) => setRestoreText(e.target.value)}
-              placeholder="Paste two or more slices, one per line"
-              spellCheck={false}
-            />
-            <button type="button" className={BTN} style={{ background: GOLD }} onClick={doRestore}>
-              Restore
-            </button>
-            {restored && <textarea readOnly className={INPUT} rows={3} value={restored} aria-label="Restored secret" />}
-          </details>
+          <button
+            type="button"
+            className="w-full rounded-xl px-3 py-3 text-base font-bold border cursor-pointer flex items-center justify-center gap-2"
+            style={{ background: 'transparent', color: GOLD, borderColor: GOLD }}
+            aria-expanded={restoring}
+            onClick={() => setRestoring(!restoring)}
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden="true"
+            >
+              <path d="M3 12a9 9 0 1 0 3-6.7" />
+              <path d="M3 4v5h5" />
+            </svg>
+            {restoring ? 'Close restore' : 'Restore from slices'}
+          </button>
+          {restoring && <RestoreBoxes onRestore={doRestore} />}
+          {restored && (
+            <div className="flex flex-col gap-1">
+              <textarea readOnly className={INPUT} rows={3} value={restored} aria-label="Restored secret" />
+              <CopyButton text={restored} secret />
+            </div>
+          )}
         </Step>
 
         <Step n={2} title="Passing on">
@@ -329,19 +375,23 @@ export const BTrustPage = () => {
             <input
               type="number"
               className={INPUT}
-              style={{ width: 72 }}
               min={1}
               max={120}
               value={months}
+              disabled={TEST_TIMINGS}
+              style={{ width: 72, opacity: TEST_TIMINGS ? 0.4 : 1 }}
               onChange={(e) => setMonths(Number(e.target.value))}
             />
-            months without a check-in
+            {TEST_TIMINGS ? 'months (test mode: 3 blocks, about 30 min)' : 'months without a check-in'}
           </label>
           <button type="button" className={BTN} style={{ background: GOLD }} onClick={() => void buildPlan()}>
             Build plan
           </button>
           {plan && (
             <div className="flex flex-col gap-1 text-sm text-white">
+              <span className="font-bold" style={{ color: GOLD }}>
+                {planLabel(plan)}
+              </span>
               <span>{planStatus(plan, height)}</span>
               <span style={{ color: MUTED }}>
                 Heirs from block {plan.heirsHeight.toLocaleString('en-GB')}, lead heir alone from block{' '}
@@ -351,11 +401,11 @@ export const BTrustPage = () => {
                 type="button"
                 className={BTN}
                 style={{ background: GOLD }}
-                onClick={() => download('btrust-plan.json', JSON.stringify(plan, null, 2))}
+                onClick={() => download(planFileName(plan), planJson(plan))}
               >
                 Save plan (give a copy to each heir)
               </button>
-              <FundPanel plan={plan} slot={slot} height={height} download={download} />
+              <FundPanel plan={plan} slot={slot} height={height} download={download} onFunded={setPlan} />
             </div>
           )}
         </Step>
@@ -389,7 +439,7 @@ export const BTrustPage = () => {
           )}
         </Step>
 
-        <Step n={5} title="For heirs: claim">
+        <Step n={5} title="For heirs: claim" id="btrust-claim">
           <HeirClaimPanel height={height} />
         </Step>
 

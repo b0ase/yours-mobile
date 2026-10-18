@@ -9,9 +9,9 @@ import { PayHero } from '../../components/approval/ApprovalHeroes';
 import { CARD } from '../../components/approval/cardTheme';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { fmtSats } from '../money/money';
-import { BLOCKS_PER_DAY } from './checkin';
 import { fundLock, MIN_LOCK_SATS, savePlanLocally } from './fund';
-import type { InheritancePlan } from './inheritance';
+import { planFileName, planJson, planLabel, withFunding } from './planFile';
+import { aboutBlocks, type InheritancePlan } from './inheritance';
 import { TEST_BANNER } from './testMode';
 
 const GOLD = '#F5B800';
@@ -19,33 +19,37 @@ const MUTED = '#98A2B3';
 const INPUT = 'w-full rounded-xl bg-[#0f1115] border border-[#2b2f36] p-2 text-white text-sm';
 const BTN = 'rounded-xl px-3 py-2 text-sm font-bold border-0 cursor-pointer';
 
-const days = (blocks: number) => Math.max(0, Math.ceil(blocks / BLOCKS_PER_DAY));
-
 type Props = {
   plan: InheritancePlan;
   slot: number;
   height: number;
   download: (name: string, text: string) => void;
+  /** The plan with slot, funding txid, vout and createdAt, after funding. */
+  onFunded?: (plan: InheritancePlan) => void;
 };
 
-export const FundPanel = ({ plan, slot, height, download }: Props) => {
+export const FundPanel = ({ plan, slot, height, download, onFunded }: Props) => {
   const { apiContext } = useServiceContext();
   const [sats, setSats] = useState(10_000);
   const [sheet, setSheet] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [done, setDone] = useState('');
-  const file = () => download(`btrust-plan-${plan.ownerPubKey.slice(0, 8)}.json`, JSON.stringify(plan, null, 2));
+  const [funded, setFunded] = useState<InheritancePlan | null>(null);
+  const file = (p: InheritancePlan = funded ?? plan) => download(planFileName(p), planJson(p));
 
   const approve = async () => {
     setBusy(true);
     setError('');
     try {
       const f = await fundLock({ wallet: apiContext.wallet, plan, slot, sats });
-      savePlanLocally({ txid: f.txid, slot, plan, savedAt: Date.now() });
+      const full = withFunding(plan, { slot, fundingTxid: f.txid, vout: f.vout });
+      savePlanLocally({ txid: f.txid, slot, plan: full, savedAt: Date.now() });
       setSheet(false);
       setDone(f.txid);
-      file();
+      setFunded(full);
+      onFunded?.(full);
+      file(full);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not lock the coins');
     } finally {
@@ -81,7 +85,7 @@ export const FundPanel = ({ plan, slot, height, download }: Props) => {
           <span style={{ color: MUTED }} className="break-all">
             Locked. Transaction {done}. The plan is saved on this device; give each heir a copy.
           </span>
-          <button type="button" className={BTN} style={{ background: GOLD }} onClick={file}>
+          <button type="button" className={BTN} style={{ background: GOLD }} onClick={() => file()}>
             Download the plan again
           </button>
         </>
@@ -106,6 +110,7 @@ export const FundPanel = ({ plan, slot, height, download }: Props) => {
               title={
                 <>
                   Lock <span style={{ color: CARD.gold }}>{fmtSats(sats)}</span> for your heirs
+                  <div style={{ fontSize: 14, opacity: 0.7 }}>{planLabel(plan)}</div>
                 </>
               }
               primary={{ label: 'Allow', onClick: () => void approve(), busy, disabled: busy }}
@@ -131,8 +136,8 @@ export const FundPanel = ({ plan, slot, height, download }: Props) => {
               </div>
               <div className="flex flex-wrap gap-2">
                 <Chip>You: any time</Chip>
-                <Chip>Any 2 heirs: in ~{days(plan.heirsHeight - height)} days</Chip>
-                <Chip>Lead alone: in ~{days(plan.leadHeight - height)} days</Chip>
+                <Chip>Any 2 heirs: in {aboutBlocks(plan.heirsHeight - height)}</Chip>
+                <Chip>Lead alone: in {aboutBlocks(plan.leadHeight - height)}</Chip>
                 <Chip>Check in to push back</Chip>
               </div>
             </ApprovalCard>

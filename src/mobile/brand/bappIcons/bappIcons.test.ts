@@ -42,6 +42,7 @@ const ALL_SLUGS = [
   'bchat',
   'bvideo',
   'bmint',
+  'btrust',
   'names',
   'bid',
   'bsearch',

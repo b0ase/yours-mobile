@@ -50,6 +50,11 @@ export type InheritancePlan = {
   ownerPubKey: string;
   /** Built in a developer build's test mode (3-block timings). Never set in production. */
   test?: true;
+  /** Written after funding (planFile.ts withFunding). Optional: older files do not have them. */
+  slot?: number;
+  fundingTxid?: string;
+  vout?: number;
+  createdAt?: number;
   /** Exactly three heir public keys, in the order signatures must follow. */
   heirs: { name: string; paymail?: string; pubKey: string }[];
   /** Height after which any two heirs may spend (if the owner has not checked in). */
@@ -158,10 +163,21 @@ export function checkIn(
   return validatePlan({ ...plan, heirsHeight, leadHeight: heirsHeight + blocksForMonths(leadExtraMonths) });
 }
 
+/** "about 30 min", "about 1 hour", "about 3 days": real block delta x 10 minutes. */
+export function aboutBlocks(blocks: number): string {
+  const min = Math.max(0, blocks) * 10;
+  if (min < 60) return `about ${min} min`;
+  if (min < 24 * 60) {
+    const h = Math.round(min / 60);
+    return `about ${h} ${h === 1 ? 'hour' : 'hours'}`;
+  }
+  const d = Math.ceil(blocks / 144);
+  return `about ${d} ${d === 1 ? 'day' : 'days'}`;
+}
+
 /** Plain-English status for the screen. */
 export function planStatus(plan: InheritancePlan, currentHeight: number): string {
   if (currentHeight >= plan.leadHeight) return `${plan.heirs[0].name} can now claim alone, or any two heirs together`;
   if (currentHeight >= plan.heirsHeight) return 'Any two heirs can now claim. Check in to push the date back.';
-  const days = Math.ceil((plan.heirsHeight - currentHeight) / 144);
-  return `Yours. Heirs can claim in about ${days} ${days === 1 ? 'day' : 'days'} unless you check in.`;
+  return `Yours. Heirs can claim in ${aboutBlocks(plan.heirsHeight - currentHeight)} unless you check in.`;
 }
