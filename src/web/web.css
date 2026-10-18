@@ -164,3 +164,26 @@ html body #root {
     margin-right: auto;
   }
 }
+
+/* One rule for everything portalled to <body> (owner, 19 Oct 2026: Addresses, the backup gate, Claim your name…
+   opened edge to edge at 1920px with their titles under the banner). Full-screen pages and bottom sheets stay in
+   the wallet column and start under the banner, the same as #root. Plain web only: the wide layout (ww-on) has
+   its own rules in mobile/wide/wide.css. */
+html:not(.ww-on) body > :is(.fixed.inset-0, .fixed.inset-x-0, .bw-abook) {
+  left: 0 !important;
+  right: 0 !important;
+  width: auto !important;
+  max-width: var(--web-max, 100%);
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+html:not(.ww-on) body > :is(.fixed.inset-0, .bw-abook) {
+  top: calc(var(--web-banner-height) + env(safe-area-inset-top)) !important;
+}
+
+/* The beta banner spans the wallet column, not the window (owner, 19 Oct 2026: "hazard tape is too wide"). */
+html:not(.ww-on) .bwallet-web-banner {
+  max-width: var(--web-max, 100%);
+  margin-left: auto;
+  margin-right: auto;
+}

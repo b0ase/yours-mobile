@@ -102,8 +102,11 @@ export const HandleOnboarding = () => {
   useEffect(() => {
     const pending = getPendingPrompt();
     if (!pending || pending.id !== id) return;
+    // Owner, 19 Oct 2026: create + backup lands straight on the wallet. No "Claim your name" / "Link your accounts"
+    // screens after a new wallet; the Get your $name chip and card on the wallet home stay.
+    if (pending.reason === 'create') return clearPendingPrompt();
     if (shouldShowOnboarding(pending, id, hasName, synced)) setOpen(true);
-    else if (hasName && (synced || pending.reason === 'create')) clearPendingPrompt();
+    else if (hasName && synced) clearPendingPrompt();
   }, [id, hasName, synced]);
 
   // A new wallet's "Claim your name" step continues with "Link your accounts" (owner, 18 Oct 2026), skippable.
