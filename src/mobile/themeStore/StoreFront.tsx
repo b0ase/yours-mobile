@@ -425,7 +425,15 @@ function Department({ d, query, onBack }: { d: Dept; query: string; onBack: () =
 function Store() {
   const navigate = useNavigate();
   const [dept, setDept] = useState<DeptId | null>(null);
-  const [shopId, setShopId] = useState<string | null>(null);
+  // /m/store?shop=<id> opens that shop (the home's Store showcase links each item to its shop).
+  const [shopId, setShopId] = useState<string | null>(() => {
+    try {
+      const id = new URLSearchParams(window.location.search).get('shop');
+      return id && shopById(id) ? id : null;
+    } catch {
+      return null;
+    }
+  });
   const shop = shopId ? shopById(shopId) : undefined;
   const [query, setQuery] = useState('');
   const open = DEPTS.find((d) => d.id === dept);

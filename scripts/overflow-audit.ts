@@ -278,7 +278,7 @@ try {
   await measure(page, 'landing');
 
   await step('wallet', async () => {});
-  await step('wallet › History', () => clickByText(page, 'History'));
+  await step('wallet › Edit home', () => clickByText(page, 'Edit home'));
   await step('wallet › Buy BSV', () => clickByText(page, 'Buy BSV'));
   await step('wallet › Receive', () => clickByText(page, 'Receive'));
   await step('wallet › Send', () => clickByText(page, 'Send'));

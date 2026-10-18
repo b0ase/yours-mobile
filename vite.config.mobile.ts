@@ -537,6 +537,23 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '      setShowMigrationBanner(\n        (!acct?.settings?.sweepCompleted || left === undefined || left > 0) &&\n          !createdHere(acct?.addresses?.identityAddress),\n      );',
     ],
   ],
+  // Home modules (src/mobile/home, owner 18 Oct 2026): the card shows while its module is on the home; the other
+  // modules (Ask b, Store showcase, History…) and "Edit home" sit under Send / Receive.
+  'src/pages/BsvWallet.tsx#home': [
+    [
+      "import { getPlatform } from '../platform';",
+      "import { getPlatform } from '../platform';\nimport { HomeRest, HomeTop } from '../mobile/home/HomeModules';",
+    ],
+    ['<SectionBoundary name="Card"><WalletCard ', '<SectionBoundary name="Card"><HomeTop><WalletCard '],
+    [
+      'refreshing={isRefreshing} rate={exchangeRate} /></SectionBoundary>',
+      'refreshing={isRefreshing} rate={exchangeRate} /></HomeTop></SectionBoundary>',
+    ],
+    [
+      '<SectionBoundary name="Indexing"><WalletIndexing exchangeRate={exchangeRate} /></SectionBoundary>',
+      '<SectionBoundary name="Indexing"><WalletIndexing exchangeRate={exchangeRate} /></SectionBoundary>\n<SectionBoundary name="Home"><HomeRest /></SectionBoundary>',
+    ],
+  ],
   // Tokens list: tickets stay listed (sending one is an invite) but carry a "· Ticket" mark.
   'src/components/Bsv21TokensList.tsx': [
     [
