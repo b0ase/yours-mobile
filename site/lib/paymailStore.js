@@ -134,6 +134,17 @@ function supabaseStore(env = process.env, f = fetch) {
           `bwallet_paymail_name_events?ip_hash=eq.${q(ipHash)}&created_at=gte.${q(since)}&select=id&limit=1000`,
         )) ?? []
       ).length,
+    // Link your accounts (migrations/20261018_social_links.sql): wallet-signed, provider-proved links.
+    putSocialLink: (row) =>
+      req('bwallet_social_links?on_conflict=provider,account', {
+        method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify(row),
+      }),
+    listSocialLinks: async (key) =>
+      (await req(
+        `bwallet_social_links?identity_key=eq.${q(key)}&select=provider,account,handle,identity_key,signature,signed_at&order=created_at.asc&limit=20`,
+      )) ?? [],
     // Signed name bindings + the public append-only log (migrations/20261017_name_bindings.sql).
     getBinding: (alias) => one(`bwallet_name_bindings?alias=eq.${q(alias)}&limit=1`),
     putBinding: (row) =>
