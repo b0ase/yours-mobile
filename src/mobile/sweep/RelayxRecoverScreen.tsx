@@ -19,6 +19,7 @@ import { loadNpgMaps, splitOutpoint, type NpgMap } from '../../sweep/runIdentify
 import { HdSweepScreen } from './HdSweepScreen';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { NpgMelt } from './NpgMelt';
+import { RelayxListedCancel } from './RelayxListedCancel';
 import { loadSavedRelayx, saveRelayxResult } from './relayxSaved';
 
 /**
@@ -199,7 +200,11 @@ function Row({ f, onOpen }: { f: Found; onOpen: () => void }) {
           {f.title}
         </span>
         <span className="truncate text-[12px]" style={{ color: MUTED }}>
-          {f.unread ? `At ${short(f.address)}` : f.collection}
+          {f.listed
+            ? `Listed at ${bsv(f.listed.price)} BSV · ${f.collection}`
+            : f.unread
+              ? `At ${short(f.address)}`
+              : f.collection}
         </span>
       </span>
       <ArrowRight size={16} color={MUTED} className="shrink-0" />
@@ -284,8 +289,13 @@ function Detail({
           <h2 className="m-0 text-[22px] font-semibold tracking-[-0.02em]" style={{ color: INK }}>
             {f.title}
           </h2>
+          {f.listed && (
+            <span className="text-[13px] font-medium" style={{ color: INK }}>
+              Listed for sale on RelayX at {bsv(f.listed.price)} BSV
+            </span>
+          )}
           <span className="text-[13px]" style={{ color: MUTED }}>
-            Held at {short(f.address)}
+            {f.listed ? `Cancel output at ${short(f.address)}` : `Held at ${short(f.address)}`}
             {tx && (
               <>
                 {' · '}
@@ -314,7 +324,20 @@ function Detail({
             </button>
           )}
         </div>
-        {f.n !== undefined && !f.wif ? (
+        {f.listed ? (
+          f.wif ? (
+            <RelayxListedCancel f={f} wif={f.wif} />
+          ) : (
+            <button
+              type="button"
+              onClick={onSearch}
+              className="h-12 w-full rounded-xl border-0 text-[15px] font-semibold cursor-pointer"
+              style={{ background: BLUE, color: '#fff' }}
+            >
+              {account ? 'Check the cancel' : 'Enter your words to cancel it'}
+            </button>
+          )
+        ) : f.n !== undefined && !f.wif ? (
           // From the saved search: no keys are kept, so melting needs the words again.
           <button
             type="button"
@@ -668,8 +691,8 @@ export function RelayxRecoverScreen({
                     No RelayX NFTs at these words
                   </p>
                   <p className="m-0 text-[13px] leading-relaxed" style={{ color: MUTED }}>
-                    Check these are your RelayX words, not another wallet's. NFTs that were listed for sale on RelayX
-                    when it closed sit at a market address and won't show here.
+                    Check these are your RelayX words, not another wallet's. NFTs listed for sale on RelayX show here
+                    while their listing's cancel output is still at these words.
                   </p>
                   <button
                     type="button"
