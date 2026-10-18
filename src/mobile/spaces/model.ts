@@ -7,6 +7,8 @@
  * LiveKit token is minted from your row. Nothing here grants anything.
  */
 
+import { DEFAULT_LISTEN_NOTICE, parseMode, parseTranscription, type Transcription } from './transcription';
+
 export type SpaceRole = 'host' | 'speaker' | 'listener';
 export type SpaceMode = 'stage' | 'meeting';
 
@@ -37,6 +39,10 @@ export interface SpaceState {
   recordingSince?: string | null;
   /** I may start/stop a recording (room boss: host, room admin, named host). bit-sign decides. */
   mayRecord?: boolean;
+  /** Consented transcription (transcription.ts). Off when bit-sign does not send it. */
+  transcription?: Transcription;
+  /** I may change the transcription mode (room boss). bit-sign decides. */
+  maySetTranscription?: boolean;
   /** Open stage (the always-open Lounge, or an open room): one tap takes a seat, full → queue. */
   openStage?: boolean;
   /** Stage seats in this Space (16 on the Lounge's open stage). */
@@ -101,6 +107,8 @@ export const parseSpaceState = (data: unknown, me: string): SpaceState => {
     recording: rec?.active === true,
     recordingSince: rec?.active === true ? str(rec.started_at) : null,
     mayRecord: o.may_record === true,
+    transcription: parseTranscription(o.transcription),
+    maySetTranscription: o.may_set_transcription === true,
     ...parseStageFacts(o),
   };
 };
@@ -147,7 +155,19 @@ export interface GreenRoom {
   stage: { handle: string; role: SpaceRole; avatar: string | null }[];
   recording: boolean;
   ticketed: boolean;
+  /** Transcription on in this Space: "Transcribing" + the listen notice, shown before joining. */
+  transcribing: boolean;
+  transcriptionNotice: string | null;
 }
+
+const greenTranscription = (v: unknown) => {
+  const t = v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
+  const on = parseMode(t.mode) !== 'off';
+  return {
+    transcribing: on,
+    transcriptionNotice: on ? (typeof t.notice === 'string' && t.notice ? t.notice : DEFAULT_LISTEN_NOTICE) : null,
+  };
+};
 
 export const parseGreenRoom = (data: unknown): GreenRoom | null => {
   const o = (data && typeof data === 'object' ? data : null) as Record<string, unknown> | null;
@@ -168,6 +188,7 @@ export const parseGreenRoom = (data: unknown): GreenRoom | null => {
     stage,
     recording: rec?.active === true,
     ticketed: o.ticketed === true,
+    ...greenTranscription(o.transcription),
   };
 };
 
@@ -385,7 +406,13 @@ export const applyParticipantsReply = (cur: SpaceState, reply: unknown, me: stri
   if (!o || !Array.isArray(o.participants) || !cur.space) return null;
   const participants = o.participants.map(parseParticipant).filter((p): p is Participant => !!p);
   const mine = norm(me);
-  return { ...cur, participants, me: participants.find((p) => p.handle === mine) ?? null };
+  return {
+    ...cur,
+    participants,
+    me: participants.find((p) => p.handle === mine) ?? null,
+    // consent / transcription_set replies carry the new transcription facts.
+    ...(o.transcription ? { transcription: parseTranscription(o.transcription) } : {}),
+  };
 };
 
 /** "Ana ($ana)" when the host chose a display name, else "$ana". */

@@ -70,7 +70,17 @@ import {
   type SpaceState,
 } from './model';
 import { inviteShareText, parsePage } from './invite';
-import { GreenRoomSheet, RecordingBadge } from './GreenRoom';
+import { GreenRoomSheet, RecordingBadge, TranscribingBadge } from './GreenRoom';
+import { ConsentSheet } from './ConsentSheet';
+import {
+  NOT_TRANSCRIBED,
+  OFF as TRANSCRIPTION_OFF,
+  TRANSCRIPTION_MODES,
+  needsListenNotice,
+  needsSpeakChoice,
+  type TranscriptionMode,
+} from './transcription';
+import { TRANSCRIPTION_ENABLED } from '../storeBuild';
 import {
   applyParticipantsReply,
   defaultJoinAs,
@@ -106,6 +116,10 @@ import { PAID_LISTENING_ENABLED } from './paidListen';
 
 /** Paid listening: bWalletX only. A literal-false constant in store builds, so Vite drops the chunk. */
 const PaidListening = PAID_LISTENING_ENABLED ? lazy(() => import('./PaidListening')) : null;
+/** bWalletX only (TRANSCRIPTION_ENABLED): a store bundle has no transcript view. */
+const TranscriptSheet = TRANSCRIPTION_ENABLED
+  ? lazy(() => import('./TranscriptSheet').then((m) => ({ default: m.TranscriptSheet })))
+  : null;
 import { isBlocked, TERMS_URL } from '../ugc/ugc';
 
 const GOLD = 'var(--bw-accent-hi)';
@@ -493,6 +507,8 @@ export interface SpaceScreenProps {
   me: string;
   /** Host starting a new space: its title. Omit to join the live one. */
   startTitle?: string;
+  /** Host starting a new space: the transcription mode picked in New Space (default off). */
+  startTranscription?: TranscriptionMode;
   /** Shown as an inline "Claim admin" when an admin-only start is refused; true = claimed. */
   onClaimAdmin?: () => Promise<boolean>;
   /** Room admin (issuer / creator): may share an invite even when someone else hosts. */
@@ -573,6 +589,7 @@ const SpaceScreenInner = ({
   roomName,
   me,
   startTitle,
+  startTranscription,
   canInvite,
   spaceOpen = false,
   hostName: hostNameProp,
@@ -732,6 +749,9 @@ const SpaceScreenInner = ({
         action: 'join',
         ...(title ? { title } : {}),
         ...(asSpeaker ? { as: 'speaker' } : {}),
+        ...(TRANSCRIPTION_ENABLED && startTitle !== undefined && startTranscription && startTranscription !== 'off'
+          ? { transcription: startTranscription }
+          : {}),
       });
       noteMeta(raw);
       const joined = parseSpaceState(raw, me);
@@ -911,6 +931,22 @@ const SpaceScreenInner = ({
   const raised = !!state.me?.handRaisedAt;
   const canHand = mayRaiseHand({ anonymous: anon, role: myRole });
   const recording = !!state.recording;
+  const transcription = state.transcription ?? TRANSCRIPTION_OFF;
+  const transcribing = transcription.mode !== 'off';
+  /** I chose "Don't transcribe me" in this Space: don't ask again on every unmute. */
+  // A ref, not state: the mic callback that resumes after the sheet was created in an older render.
+  const speakAnswered = useRef(false);
+  const [speakAsk, setSpeakAsk] = useState<null | (() => void)>(null);
+  const [listenDismissed, setListenDismissed] = useState(false);
+  const [transcriptOpen, setTranscriptOpen] = useState(false);
+  /** Run `go` (turn the mic on) after the speak choice, when one is needed. */
+  const withSpeakChoice = (go: () => void) => {
+    if (needsSpeakChoice(transcription, { enabled: TRANSCRIPTION_ENABLED, answered: speakAnswered.current })) {
+      setSpeakAsk(() => go);
+      return;
+    }
+    go();
+  };
   const moderator = mayModerate({ isHost, roomBoss: canInvite || !!state.mayModerate });
   /** Open stage (the Lounge): "Join the stage" takes a seat; full → the queue. */
   const openStage = !!state.openStage || open24;
@@ -944,6 +980,12 @@ const SpaceScreenInner = ({
   }, [phase, hostName, isHost, canInvite, client, ticker]);
 
   const toggleMic = async () => {
+    if (
+      !micOn &&
+      needsSpeakChoice(transcription, { enabled: TRANSCRIPTION_ENABLED, answered: speakAnswered.current })
+    ) {
+      return withSpeakChoice(() => void toggleMic());
+    }
     try {
       await media.setMic(!micOn);
       setMicOn(!micOn);
@@ -984,6 +1026,9 @@ const SpaceScreenInner = ({
   };
   const accept = async (withCamera: boolean) => {
     setInvited(false);
+    if (needsSpeakChoice(transcription, { enabled: TRANSCRIPTION_ENABLED, answered: speakAnswered.current })) {
+      return withSpeakChoice(() => void accept(withCamera));
+    }
     try {
       await media.setMic(true);
       setMicOn(true);
@@ -1073,6 +1118,7 @@ const SpaceScreenInner = ({
           : null
       }
       avatars={Object.fromEntries((green?.stage ?? []).map((g) => [g.handle, g.avatar]))}
+      notTranscribed={transcription.notTranscribed}
     />
   );
 
@@ -1242,6 +1288,43 @@ const SpaceScreenInner = ({
               onChange={(moderators) => apply({ ...(prev.current ?? state), moderators })}
             />
           ) : null}
+          {TRANSCRIPTION_ENABLED && state.maySetTranscription && !anon && (
+            <select
+              aria-label="Transcription"
+              value={transcription.mode}
+              onChange={(e) => void act({ action: 'transcription_set', mode: e.target.value })}
+              className="shrink-0 rounded-full px-2 py-1 text-xs font-semibold"
+              style={{ background: '#1a1b1f', color: '#f5d77a', border: '1px solid rgba(212,175,55,0.6)' }}
+            >
+              {TRANSCRIPTION_MODES.map((m) => (
+                <option key={m.mode} value={m.mode}>
+                  Transcription: {m.label}
+                </option>
+              ))}
+            </select>
+          )}
+          {TRANSCRIPTION_ENABLED && !anon && state.space && (onStage || transcription.me.speak) && (
+            <button
+              onClick={() => setTranscriptOpen(true)}
+              className="shrink-0 rounded-full px-3 py-1 text-xs font-semibold"
+              style={{ border: '1px solid rgba(212,175,55,0.6)', color: '#f5d77a' }}
+            >
+              Transcript
+            </button>
+          )}
+          {TRANSCRIPTION_ENABLED && transcribing && transcription.me.speak && (
+            <button
+              onClick={() => {
+                speakAnswered.current = true;
+                setNote('Stopped. You are no longer transcribed.');
+                void act({ action: 'consent_withdraw', scope: 'speak' });
+              }}
+              className="shrink-0 rounded-full px-3 py-1 text-xs font-semibold"
+              style={{ border: `1px solid ${MUTED}`, color: '#fff' }}
+            >
+              Stop transcribing me
+            </button>
+          )}
           {state.mayRecord && !anon ? (
             <button
               onClick={() => {
@@ -1460,6 +1543,7 @@ const SpaceScreenInner = ({
             )}
             <span className="text-[15px] font-semibold text-white truncate">{title}</span>
             {phase === 'live' && recording && <RecordingBadge />}
+            {phase === 'live' && transcribing && <TranscribingBadge />}
           </div>
           <div className="text-[11px]" style={{ color: MUTED }}>
             ${ticker.replace(/^\$/, '')}{' '}
@@ -1669,6 +1753,54 @@ const SpaceScreenInner = ({
         </Sheet>
       )}
 
+      {phase === 'live' && !isHost && !listenDismissed && needsListenNotice(transcription, anon) && (
+        <ConsentSheet
+          kind="listen"
+          notice={transcription.listenNotice}
+          onAgree={() => {
+            setListenDismissed(true);
+            void act({ action: 'consent', scope: 'listen' });
+          }}
+          onDecline={() => void leave(false)}
+        />
+      )}
+      {TRANSCRIPTION_ENABLED && speakAsk && (
+        <ConsentSheet
+          kind="speak"
+          notice={transcription.speakNotice}
+          onAgree={() => {
+            const go = speakAsk;
+            setSpeakAsk(null);
+            speakAnswered.current = true;
+            void client
+              .spaceAction(ticker, { action: 'consent', scope: 'speak' })
+              .then((d) => {
+                const next = applyParticipantsReply(prev.current ?? state, d, me);
+                if (next) apply(next);
+              })
+              .catch((e) => setNote(errText(e)))
+              .finally(go);
+          }}
+          onDecline={() => {
+            const go = speakAsk;
+            setSpeakAsk(null);
+            speakAnswered.current = true;
+            setNote(`You are speaking ${NOT_TRANSCRIBED}.`);
+            go();
+          }}
+        />
+      )}
+      {TranscriptSheet && transcriptOpen && state.space && (
+        <Suspense fallback={null}>
+          <TranscriptSheet
+            client={client}
+            ticker={ticker}
+            spaceId={state.space.id}
+            me={me}
+            onClose={() => setTranscriptOpen(false)}
+          />
+        </Suspense>
+      )}
       {menuFor && (
         <Sheet onClose={() => setMenuFor(null)}>
           <p className="text-white text-base font-semibold">${menuFor.handle}</p>
