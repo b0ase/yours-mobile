@@ -305,7 +305,7 @@ describe('store build has no Market', () => {
     const s = src('./storeBuild.ts');
     expect(cond(s, 'MARKET_ENABLED')).toBe(cond(s, 'STORE_BUILD'));
   });
-  test('Swap: SWAP_ENABLED mirrors MARKET_ENABLED; the top row is always the price card; Swap is only the promo card (dropped in the store edition)', async () => {
+  test('Swap: SWAP_ENABLED mirrors MARKET_ENABLED; the balance header always has the price line; Swap is only the promo card (dropped in the store edition)', async () => {
     const { SWAP_ENABLED } = await import('./storeBuild');
     expect(SWAP_ENABLED).toBe(!STORE_BUILD);
     const s = src('./storeBuild.ts');
@@ -316,7 +316,10 @@ describe('store build has no Market', () => {
     const bar = src('./wallet/BuyBsv.tsx');
     expect(bar).toMatch(/const SwapFlow = SWAP_ENABLED \? lazy\(/);
     expect(bar).not.toMatch(/SwapCell/);
-    expect(bar).toMatch(/<PriceCell rate=\{rate\} onOpen=\{\(\) => setPortfolioOpen\(true\)\} change=\{change\} \/>/);
+    // The price is one small line in the balance header (home modules, 18 Oct 2026); it opens Portfolio.
+    expect(bar).toMatch(
+      /<div className="bw-priceline">\s*<button type="button" onClick=\{\(\) => setPortfolioOpen\(true\)\} aria-label="BSV price">/,
+    );
     expect(bar).toMatch(/import\('..\/portfolio\/PortfolioScreen'\)/);
     // All cards | Swap row (15 Oct 2026): Swap only when swapOn; All cards only with the balance cards (bWalletX).
     expect(bar).toMatch(/swapRowButtons\(swapOn && !!SwapPromo, false\)/);

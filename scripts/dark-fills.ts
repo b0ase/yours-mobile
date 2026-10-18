@@ -135,6 +135,8 @@ export const CSS_KEEP: Record<string, string> = {
   '.bm-show-big': 'image letterbox (media)',
   '.bm-type-media': 'media placeholder art',
   '.bw-layer': 'modal scrim',
+  '.bw-home-stage': 'Store showcase media stage (artwork)',
+  '.bw-home-cap': 'caption fade over Store showcase artwork',
   '.bw-tm-head': 'button over the Time Machine stage',
   '.bw-tm': 'Time Machine full-screen stage (media)',
   '.bw-bcar-unfocus': 'scrim behind a focused card',
