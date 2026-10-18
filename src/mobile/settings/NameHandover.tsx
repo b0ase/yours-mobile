@@ -9,6 +9,7 @@ import {
   type Handover,
   type WalletName,
 } from '../names/paymail';
+import { handoverIsEmpty } from './handoverEmpty';
 
 const f: typeof fetch = (u, i) => fetch(u, i);
 const short = (k: string) => `${k.slice(0, 6)}…${k.slice(-4)}`;
@@ -70,6 +71,7 @@ export function NameHandover({ names, onChanged }: { names: WalletName[]; onChan
       setReleased(name);
     }, 'Released. The name moves when the other wallet accepts it.');
 
+  if (handoverIsEmpty(plain.length, incoming.length, msg)) return null;
   return (
     <div className="px-4 py-3 flex flex-col gap-2" style={{ borderBottom: '1px solid #ffffff10' }}>
       {incoming.map((h) => (
