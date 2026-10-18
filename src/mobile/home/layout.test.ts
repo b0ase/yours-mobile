@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   DEFAULT_LAYOUT,
+  WIDE_DEFAULT_LAYOUT,
   addModule,
   normalise,
   parseLayout,
@@ -55,6 +56,12 @@ describe('home layout', () => {
 
   test('visible layout hides what a build does not allow, keeping order', () => {
     expect(visibleLayout(['card', 'showcase', 'history'], (id) => id !== 'showcase')).toEqual(['card', 'history']);
+  });
+
+  test('Desktop defaults add Holdings; a saved layout wins over either default', () => {
+    expect(WIDE_DEFAULT_LAYOUT).toEqual(['card', 'askB', 'holdings', 'showcase']);
+    expect(parseLayout(null, WIDE_DEFAULT_LAYOUT)).toEqual([...WIDE_DEFAULT_LAYOUT]);
+    expect(parseLayout(serialise(['card', 'history']), WIDE_DEFAULT_LAYOUT)).toEqual(['card', 'history']);
   });
 
   test('normalise dedupes', () => {

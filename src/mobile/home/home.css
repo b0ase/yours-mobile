@@ -22,6 +22,11 @@
 .ww-on .bw-home-cell.full {
   grid-column: 1 / -1;
 }
+@media (min-width: 1700px) {
+  .ww-on .bw-home-grid {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+}
 .bw-home-panel {
   display: flex;
   flex-direction: column;
