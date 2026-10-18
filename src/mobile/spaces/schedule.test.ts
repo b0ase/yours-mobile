@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { nextSession, parseSchedule, slotIcs, whenLabel, zonedToUtc } from './schedule';
+import { nextSession, parseSchedule, parseUpcoming, slotIcs, whenLabel, zonedToUtc } from './schedule';
 
 const TZ = 'Europe/London';
 const slot = parseSchedule({
@@ -35,5 +35,48 @@ describe('schedule', () => {
     expect(ics).toContain('DTSTART;TZID=Europe/London:20261012T190000');
     expect(ics).toContain('RRULE:FREQ=WEEKLY;BYDAY=MO');
     expect(ics).toContain('DURATION:PT1H');
+  });
+  test('upcoming: real bookings only, bad rows dropped', () => {
+    const list = parseUpcoming({
+      items: [
+        {
+          id: 'b1',
+          title: ' Launch night ',
+          description: null,
+          room: 'lounge',
+          roomName: 'bWallet Lounge',
+          guests: [],
+          host: 'alice',
+          startsAt: '2026-10-20T19:00:00Z',
+          durationMin: 90,
+          status: 'confirmed',
+          link: 'https://www.bchatx.com/s/lounge',
+        },
+        {
+          id: 'b2',
+          title: 'Asked',
+          room: { ticker: 'X' },
+          host: 'b',
+          startsAt: '2026-10-20T19:00:00Z',
+          status: 'requested',
+        },
+        {
+          id: 'b3',
+          title: 'Bad room',
+          room: { ticker: '../x' },
+          host: 'b',
+          startsAt: '2026-10-20T19:00:00Z',
+          status: 'live',
+        },
+        { id: 'b4', title: 'No time', room: { ticker: 'X' }, host: 'b', startsAt: 'soon', status: 'live' },
+      ],
+    });
+    expect(list).toHaveLength(1);
+    expect(list[0].title).toBe('Launch night');
+    expect(list[0].room).toEqual({ ticker: 'LOUNGE', name: 'bWallet Lounge' });
+    expect(list[0].end - list[0].start).toBe(90 * 60_000);
+    expect(list[0].live).toBe(false);
+    expect(parseUpcoming(null)).toEqual([]);
+    expect(parseUpcoming({ items: 'x' })).toEqual([]);
   });
 });

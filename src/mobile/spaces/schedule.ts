@@ -157,3 +157,53 @@ export const slotIcs = (slot: ScheduleSlot, tz: string, now: number, url: string
     '',
   ].join('\r\n');
 };
+
+/**
+ * Scheduled Spaces coming up across public rooms: real bookings only (confirmed or live), from
+ * bChatX GET /api/public/spaces/upcoming. Never made-up content (owner, 18 Oct 2026).
+ */
+export interface UpcomingSpace {
+  id: string;
+  title: string;
+  description: string | null;
+  room: { ticker: string; name: string };
+  host: string;
+  /** Epoch ms. */
+  start: number;
+  end: number;
+  live: boolean;
+}
+
+export const parseUpcoming = (data: unknown): UpcomingSpace[] => {
+  const items = rec(data).items;
+  return (Array.isArray(items) ? items : []).flatMap((raw): UpcomingSpace[] => {
+    const s = rec(raw);
+    // room is the ticker; roomName its label (older shape: room { ticker, name }).
+    const room = typeof s.room === 'string' ? { ticker: s.room, name: s.roomName } : rec(s.room);
+    const start = typeof s.startsAt === 'string' ? Date.parse(s.startsAt) : NaN;
+    const ok =
+      typeof s.id === 'string' &&
+      typeof s.title === 'string' &&
+      !!s.title.trim() &&
+      typeof room.ticker === 'string' &&
+      /^[A-Za-z0-9_-]{1,32}$/.test(room.ticker) &&
+      typeof s.host === 'string' &&
+      (s.status === 'confirmed' || s.status === 'live') &&
+      Number.isFinite(start);
+    if (!ok) return [];
+    const mins = typeof s.durationMin === 'number' && s.durationMin > 0 ? s.durationMin : 60;
+    const ticker = (room.ticker as string).toUpperCase();
+    return [
+      {
+        id: s.id as string,
+        title: (s.title as string).trim(),
+        description: typeof s.description === 'string' && s.description.trim() ? s.description.trim() : null,
+        room: { ticker, name: typeof room.name === 'string' && room.name ? room.name : `$${ticker}` },
+        host: (s.host as string).replace(/^\$/, ''),
+        start,
+        end: start + mins * 60_000,
+        live: s.status === 'live',
+      },
+    ];
+  });
+};
