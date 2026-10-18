@@ -527,7 +527,7 @@ export const runStartupTokenHeal = async (args: TokenHealArgs & { addresses?: ()
  */
 export const runUnseenHeal = async (
   args: { wallet: WalletInterface; services: OneSatServices },
-  opts: { tokenId?: string; keysOnly?: boolean } = {},
+  opts: { tokenId?: string; keysOnly?: boolean; verified?: Set<string> } = {},
 ): Promise<UnseenHealReport> => {
   const { wallet, services } = args;
   let stored: Beef | undefined;
@@ -607,7 +607,7 @@ export const runUnseenHeal = async (
 /** Outputs whose record names a key that doesn't sign them: refile with the right key, or relinquish. */
 const runKeyCheck = (
   { wallet }: { wallet: WalletInterface },
-  opts: { tokenId?: string },
+  opts: { tokenId?: string; verified?: Set<string> },
   beefOf: (txid: string) => Promise<number[] | null>,
 ): Promise<KeyCheckReport> =>
   repairUnsignableTokenOutputs(
@@ -655,7 +655,7 @@ const runKeyCheck = (
         });
         return PublicKey.fromString(publicKey).toHash('hex') as string;
       },
-      async refile(o, customInstructions) {
+      async refile(o, customInstructions, tags) {
         const [txid, vout] = o.outpoint.split('.');
         const beef = await beefOf(txid);
         if (!beef) throw new Error('no copy of the transaction to refile from');
@@ -667,7 +667,7 @@ const runKeyCheck = (
             {
               outputIndex: Number(vout),
               protocol: 'basket insertion',
-              insertionRemittance: { basket: BSV21_BASKET, tags: o.tags ?? [], customInstructions },
+              insertionRemittance: { basket: BSV21_BASKET, tags, customInstructions },
             },
           ],
         });

@@ -1,6 +1,7 @@
 import { PublicKey, type WalletInterface } from '@bsv/sdk';
 import { BSV21_BASKET, P1SAT_PROTOCOL, bsv21FilterTags, buildBsv21CustomInstructions } from '@1sat/actions';
 import { buildTokenLabel } from '@1sat/types';
+import { withTrackingId } from '../../services/tokenSendHeal';
 
 /**
  * Find BSV-21 tokens this wallet bought on the market that its storage has no record of (owner,
@@ -103,7 +104,8 @@ export async function recoverPurchases(wallet: WalletInterface, pages = 10): Pro
             protocol: 'basket insertion',
             insertionRemittance: {
               basket: BSV21_BASKET,
-              tags: bsv21FilterTags({ tokenId: s.id }),
+              // The id: tag is what @1sat/actions spends by; without it the token can never be sent (F-3).
+              tags: withTrackingId(bsv21FilterTags({ tokenId: s.id })),
               customInstructions: buildBsv21CustomInstructions({
                 token: { id: s.id, amt: s.amt, op: 'transfer', sym: s.sym, dec: s.dec ?? 0, icon: s.icon },
                 protocolID: P1SAT_PROTOCOL,

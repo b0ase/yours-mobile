@@ -516,6 +516,13 @@ export const describeUnseenHeal = (
  * hash. On a mismatch try the usual slips (keyID outpoint written txid.vout vs txid_vout, counterparty self vs
  * anyone); if one matches, file the output again with the corrected record, else relinquish it so no send ever
  * picks it.
+ *
+ * Root cause found 18 Oct 2026 (F-3 follow-up): most failing records had a key that signs but NO `id:` tracking tag.
+ * @1sat/actions builds its spends from that tag (sendBsv21: `spends = selected.map(readAssetIdTag)`, untagged inputs
+ * dropped), so an untagged token output is added as an input and never unlocked: the same empty-unlock error. Our
+ * own writers that bypass stampManagedOutputIds (creator vesting lock/claim, launchpad buy/sell change, purchase
+ * recovery) wrote such records. They now stamp the tag (trackedTokenOutputs); this pass refiles old untagged records
+ * with one.
  */
 export type KeyedTokenOutput = LocalTokenOutput & {
   /** P2PKH hash160 the locking script pays, or null when it is not P2PKH (skipped). */
@@ -531,8 +538,10 @@ export interface KeyCheckDeps {
   localOutputs(tokenId?: string): Promise<KeyedTokenOutput[]>;
   /** hash160 (hex) of the wallet's public key for this derivation (forSelf). */
   derive(key: KeyRef): Promise<string>;
-  /** Replace the output's record with corrected custom instructions. */
-  refile(output: KeyedTokenOutput, customInstructions: string): Promise<void>;
+  /** Replace the output's record with corrected custom instructions and tags (always carrying an `id:` tag). */
+  refile(output: KeyedTokenOutput, customInstructions: string, tags: string[]): Promise<void>;
+  /** A fresh `id:` tracking tag (default: random). */
+  newIdTag?(): string;
   relinquish(outpoint: string): Promise<void>;
   log?(msg: string): void;
 }
@@ -557,6 +566,19 @@ const parseKeyRef = (ci: string | undefined): (KeyRef & { raw: Record<string, un
   }
 };
 
+/** The tracking tag @1sat/actions spends by (`id:<actionId>_<vout>`). */
+export const hasTrackingId = (tags: string[] | undefined): boolean => !!tags?.some((t) => t.startsWith('id:'));
+
+export const randomIdTag = (vout = 0): string => {
+  const b = new Uint8Array(8);
+  globalThis.crypto.getRandomValues(b);
+  return `id:${Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')}_${vout}`;
+};
+
+/** tags with an `id:` tag added when they have none. */
+export const withTrackingId = (tags: string[] | undefined, gen: () => string = randomIdTag): string[] =>
+  hasTrackingId(tags) ? [...(tags ?? [])] : [...(tags ?? []), gen()];
+
 /** The record's own key first, then the slips seen in practice. */
 export const keyCandidates = (k: KeyRef): KeyRef[] => {
   const ids = [k.keyID];
@@ -571,7 +593,7 @@ export const keyCandidates = (k: KeyRef): KeyRef[] => {
 
 export async function repairUnsignableTokenOutputs(
   deps: KeyCheckDeps,
-  opts: { tokenId?: string } = {},
+  opts: { tokenId?: string; verified?: Set<string> } = {},
 ): Promise<KeyCheckReport> {
   const report: KeyCheckReport = { checked: 0, repaired: [], dropped: [], errors: [] };
   const log = deps.log ?? (() => {});
@@ -587,6 +609,8 @@ export async function repairUnsignableTokenOutputs(
   for (const o of local) {
     const ref = parseKeyRef(o.customInstructions);
     if (!ref || !o.hash160) continue; // unreadable record or not P2PKH: not ours to judge
+    const seenKey = `${normOutpoint(o.outpoint)}|${o.customInstructions}|${hasTrackingId(o.tags)}`;
+    if (opts.verified?.has(seenKey)) continue;
     report.checked++;
     try {
       const want = o.hash160.toLowerCase();
@@ -597,12 +621,22 @@ export async function repairUnsignableTokenOutputs(
           break;
         }
       }
-      if (match && match.keyID === ref.keyID && match.counterparty === ref.counterparty) continue;
+      const keyOk = !!match && match.keyID === ref.keyID && match.counterparty === ref.counterparty;
+      if (keyOk && hasTrackingId(o.tags)) {
+        opts.verified?.add(seenKey);
+        continue;
+      }
       if (match) {
-        const fixed = JSON.stringify({ ...ref.raw, keyID: match.keyID, counterparty: match.counterparty });
-        await deps.refile(o, fixed);
+        const fixed = keyOk
+          ? o.customInstructions!
+          : JSON.stringify({ ...ref.raw, keyID: match.keyID, counterparty: match.counterparty });
+        await deps.refile(o, fixed, withTrackingId(o.tags, deps.newIdTag));
         report.repaired.push(o);
-        log(`refiled ${o.outpoint} with keyID ${match.keyID} (${match.counterparty})`);
+        log(
+          keyOk
+            ? `refiled ${o.outpoint} with an id: tracking tag (it had none, so no send could sign it)`
+            : `refiled ${o.outpoint} with keyID ${match.keyID} (${match.counterparty})`,
+        );
       } else {
         await deps.relinquish(normOutpoint(o.outpoint));
         report.dropped.push(o);

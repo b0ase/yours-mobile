@@ -1,8 +1,9 @@
-import { listOrdinals, sendAllBsv, sendBsv21, sendOrdinals, type OneSatContext } from '@1sat/actions';
+import { listOrdinals, sendAllBsv, sendOrdinals, type OneSatContext } from '@1sat/actions';
 import { heldBsv21Balances } from '../airdrops/heldBalances';
 import { activeNftQuarantine } from '../airdrops/inbox';
 import { normId } from '../airdrops/quarantine';
 import { appendAgentLog } from './agentAccounts';
+import { guardedSendBsv21 } from '../../services/tokenSpendGuard';
 
 /**
  * Sweep back (docs/SMART-WALLET-SPEC.md §1): move everything in the CURRENT account (an agent account) to
@@ -24,7 +25,7 @@ export async function sweepBack(
   for (const b of balances) {
     const amount = BigInt(b.all.confirmed);
     if (amount <= 0n || !b.id) continue;
-    const r = await sendBsv21
+    const r = await guardedSendBsv21
       .execute(ctx, { tokenId: b.id, recipients: [{ amount, destination: { address: to.ordAddress } }] })
       .catch((e: unknown) => ({ error: e instanceof Error ? e.message : String(e), txid: undefined }));
     if (r.txid) {

@@ -7,7 +7,7 @@
 import type { OneSatContext } from '@1sat/actions';
 import { Lock } from '@1sat/templates';
 import { PublicKey, Script, Transaction, type WalletInterface, type WalletProtocol } from '@bsv/sdk';
-import { ONESAT, bsv21, noteFor, tokenCoins, tokenSpends } from '../../market/launchpad/tokens';
+import { ONESAT, bsv21, noteFor, tokenCoins, tokenOutputTags, tokenSpends } from '../../market/launchpad/tokens';
 import {
   VEST_BASKET,
   VEST_KEY_ID,
@@ -20,6 +20,7 @@ import {
   type VerifiedVesting,
   type VestPlan,
 } from './vesting';
+import { withTokenKeyCheck } from '../../../services/tokenSpendGuard';
 
 const WOC = 'https://api.whatsonchain.com/v1/bsv/main';
 const norm = (op: string) => op.replace('.', '_');
@@ -86,6 +87,11 @@ export async function lockVestingLater(ctx: OneSatContext, tokenId: string, plan
  * Returns the txid. Throws (nothing signed) if the wallet's transaction is not exactly the plan.
  */
 export async function lockVesting(ctx: OneSatContext, t: VestStart, plan: VestPlan): Promise<VerifiedVesting> {
+  // F-3: the deploy output's record is checked (key, tracking tag) before it is spent.
+  return withTokenKeyCheck(ctx, norm(t.tokenId), () => lockVestingOnce(ctx, t, plan));
+}
+
+async function lockVestingOnce(ctx: OneSatContext, t: VestStart, plan: VestPlan): Promise<VerifiedVesting> {
   const w = ctx.wallet;
   const tokenId = norm(t.tokenId);
   const startHeight = await currentHeight(ctx);
@@ -137,7 +143,7 @@ export async function lockVesting(ctx: OneSatContext, t: VestStart, plan: VestPl
             satoshis: 1,
             outputDescription: `Your unlocked $${t.sym}`,
             basket: 'bsv21',
-            tags: [`bsv21:${tokenId}`],
+            tags: tokenOutputTags(tokenId),
             customInstructions: noteFor(tokenId, rest, t.sym, t.decimals, restKey.keyID, t.icon),
           },
         ]
@@ -272,7 +278,7 @@ export async function claimVesting(ctx: OneSatContext, tokenId: string): Promise
         satoshis: 1,
         outputDescription: `Unlocked $${sym}`,
         basket: 'bsv21',
-        tags: [`bsv21:${id}`],
+        tags: tokenOutputTags(id),
         customInstructions: noteFor(id, sum, sym, undefined, key.keyID, due[0].icon),
       },
     ],

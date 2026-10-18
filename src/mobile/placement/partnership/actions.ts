@@ -31,6 +31,7 @@ import {
   type MovePlan,
   type PartnerProposal,
 } from './partnerLock';
+import { guardedSendBsv21 } from '../../../services/tokenSpendGuard';
 
 const hex = (b: number[]) => b.map((x) => x.toString(16).padStart(2, '0')).join('');
 const parseTx = (raw: number[] | Uint8Array | undefined): Transaction => {
@@ -62,7 +63,7 @@ export async function lockUp(
   a: { tokenId: string; amt: bigint; keyset: Keyset; myKey: string },
 ): Promise<{ outpoint: string; rawTx: string }> {
   const script = partnerLockScript({ tokenId: a.tokenId, amt: a.amt, holder: a.myKey }, a.keyset);
-  const res = await sendBsv21.execute(ctx, {
+  const res = await guardedSendBsv21.execute(ctx, {
     tokenId: a.tokenId,
     recipients: [{ amount: a.amt.toString(), destination: { lockingScript: script.toHex() } }],
   } as Parameters<typeof sendBsv21.execute>[1]);

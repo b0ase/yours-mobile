@@ -30,6 +30,7 @@ import {
 } from '@1sat/actions';
 import { buildInputAssetLabel, buildTokenLabel, readAssetIdTag } from '@1sat/types';
 import { YoursNative } from '../native';
+import { withTokenKeyCheck } from '../../services/tokenSpendGuard';
 
 /** The first room (owner, 15 Oct 2026). */
 export const SCAMMERSCARTEL_GATE = 'bsv21:8353949b27e8e16025702ce2b5d9b1ac2dad56d725eb2a38761974a857d98804_0';
@@ -203,6 +204,14 @@ export interface FundedInvites {
  * the overlay says they are valid, as sendBsv21 does.
  */
 export async function fundInvites(
+  ctx: OneSatContext,
+  m: { tokenId: string; amountRaw: bigint; addresses: string[]; satsEach: number; ticker: string },
+): Promise<FundedInvites> {
+  // F-3: token inputs whose records can't be signed are fixed before, and once after, an empty unlock.
+  return withTokenKeyCheck(ctx, m.tokenId, () => fundInvitesOnce(ctx, m));
+}
+
+async function fundInvitesOnce(
   ctx: OneSatContext,
   m: { tokenId: string; amountRaw: bigint; addresses: string[]; satsEach: number; ticker: string },
 ): Promise<FundedInvites> {

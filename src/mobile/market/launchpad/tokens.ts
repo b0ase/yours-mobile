@@ -15,6 +15,7 @@ import {
   type WalletInterface,
   type WalletProtocol,
 } from '@bsv/sdk';
+import { randomIdTag } from '../../../services/tokenSendHeal';
 
 export const ONESAT: WalletProtocol = [0, 'onesat'];
 
@@ -25,6 +26,13 @@ export const bsv21 = (id: string, amt: bigint, address: string) =>
   Script.fromASM(
     `OP_0 OP_IF ${hex('ord')} OP_1 ${hex('application/bsv-20')} OP_0 ${hex(JSON.stringify({ p: 'bsv-20', op: 'transfer', id, amt: amt.toString() }))} OP_ENDIF ${new P2PKH().lock(address).toASM()}`,
   );
+
+/**
+ * Tags for a bsv21-basket output written by a direct createAction: the token filter tag plus an `id:` tracking tag.
+ * @1sat/actions spends token outputs by that tag and leaves an untagged input unsigned (F-3: "OP_DUP requires at
+ * least one item to be on the stack"), so every token record we write must carry one. One id per output.
+ */
+export const tokenOutputTags = (id: string, gen: () => string = randomIdTag): string[] => [`bsv21:${id}`, gen()];
 
 /** The note the 1Sat wallets write on a token coin (bsv21 basket): the wallet counts it from this. */
 export const noteFor = (
