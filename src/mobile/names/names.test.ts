@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import {
   bareName,
+  bwalletPaymails,
+  isOurDomain,
   checkOpnsAvailability,
   destinationFor,
   parseRecipient,
@@ -294,5 +296,20 @@ describe('$name: bWalletX handles only (bwalletx.com, legacy bwallet.space), nev
   test('$name@domain is accepted as the paymail', () => {
     expect(parseRecipient('$b0asex.x@bwalletX.com')).toEqual({ kind: 'paymail', paymail: 'b0asex.x@bwalletx.com' });
     expect(parseRecipient('$bad@x').kind).toBe('invalid');
+  });
+});
+
+describe('bmailx.com sibling domain (one name, two addresses)', () => {
+  test('bmailx.com is one of ours, so a send there is not flagged external', () => {
+    expect(isOurDomain('bmailx.com', 'bwalletx.com')).toBe(true);
+    expect(isOurDomain('BMAILX.COM', 'bwalletx.com')).toBe(true);
+    expect(isOurDomain('handcash.io', 'bwalletx.com')).toBe(false);
+  });
+  test('bareName strips bmailx.com like our primary domain', () => {
+    expect(bareName('john@bmailx.com', 'bwalletx.com')).toBe('john');
+  });
+  test('bwalletPaymails lists both addresses, primary first', () => {
+    expect(bwalletPaymails('john', 'bwalletx.com')).toEqual(['john@bwalletx.com', 'john@bmailx.com']);
+    expect(bwalletPaymails('john', '')).toEqual([]);
   });
 });
