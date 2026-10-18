@@ -7,18 +7,14 @@ import { HandleFlow } from '../names/HandleFlow';
 import { getPaymail } from '../names/accountName';
 import { handleState } from '../names/handlePrompt';
 import { listPaymails, type WalletName } from '../names/paymail';
-import { SocialSignIn } from '../social/SocialSignIn';
+import { LinkAccounts } from '../social/LinkAccounts';
 import { onSocialChange, socialProof } from '../social/socialLogin';
-import { useHandCashHandle } from '../social/useHandCashHandle';
-import { BWALLET_PAYMAIL_DOMAIN } from '../names/config';
-import { toAlias } from '../names/paymail';
-import { HANDCASH_SIGNIN_ENABLED } from '../storeBuild';
 
 /**
- * Settings › Identity › Connect X / Google. Signing in proves the account (photo, display name); it
- * no longer registers a name for you (owner, 9 Oct 2026: users choose their handle, and a Gmail-derived
- * name published the address). After sign-in, "Choose your handle" opens HandleFlow prefilled with the
- * X @name (X only). Existing b0asex.x / theirname.gmail names keep receiving.
+ * Settings › Identity › Link your accounts (owner, 18 Oct 2026): X, Google, GitHub, LinkedIn rows and the Link
+ * HandCash card (social/LinkAccounts.tsx), the same as the onboarding "Claim your name" step. A link proves the
+ * account and is signed by the wallet; it never registers a name (users choose their handle, 9 Oct 2026). X and
+ * HandCash give first claim on the same bWalletX name. Existing b0asex.x / theirname.gmail names keep receiving.
  */
 export const ConnectSocial = ({ onClose }: { onClose: () => void }) => {
   useBackClose(true, onClose);
@@ -27,9 +23,6 @@ export const ConnectSocial = ({ onClose }: { onClose: () => void }) => {
   const identityAddress = account?.addresses?.identityAddress ?? '';
   const [proof, setProof] = useState(() => socialProof(identityAddress));
   const [choosing, setChoosing] = useState(false);
-  // Signed in with HandCash: offer the matching name@bwalletx.com through the normal claim (HandleFlow).
-  const hcHandle = useHandCashHandle();
-  const hcAlias = hcHandle ? toAlias(hcHandle) : '';
   const [suggest, setSuggest] = useState('');
   useEffect(() => onSocialChange(() => setProof(socialProof(identityAddress))), [identityAddress]);
   // The paymail server decides whether this account already has a handle; the cache only paints until it
@@ -64,34 +57,26 @@ export const ConnectSocial = ({ onClose }: { onClose: () => void }) => {
         <button onClick={onClose} aria-label="Back" className="p-2 bg-transparent border-0">
           <ArrowLeft size={20} color="white" />
         </button>
-        <span className="text-[16px] font-bold text-white">
-          {HANDCASH_SIGNIN_ENABLED ? 'Connect X, Google or HandCash' : 'Connect X or Google'}
-        </span>
+        <span className="text-[16px] font-bold text-white">Link your accounts</span>
       </div>
       <div className="flex flex-col items-center px-5 pb-10 overflow-y-auto">
-        <p className="text-sm text-center mt-4 mb-5" style={{ color: '#98A2B3' }}>
-          Connect your X account or Google to verify it's you and bring your photo. You choose your handle
+        <p className="text-sm text-center mt-4 mb-4" style={{ color: '#98A2B3' }}>
+          Linking adds a verified badge to your profile. It never signs you in: your wallet is your account, and it
+          signs each link with its identity key. Your handle
           {current ? (
             <>
               {' '}
-              (now <span className="text-white">{current}</span>)
+              is <span className="text-white">{current}</span>
             </>
-          ) : null}
+          ) : (
+            ' is yours to choose'
+          )}
           .
         </p>
-        <SocialSignIn owner={identityAddress} onProfile={() => setProof(socialProof(identityAddress))} />
-        {HANDCASH_SIGNIN_ENABLED && state === 'none' && hcAlias && BWALLET_PAYMAIL_DOMAIN && (
-          <button
-            onClick={() => (setSuggest(hcAlias), setChoosing(true))}
-            className="mt-2 w-[92%] flex flex-col items-center justify-center rounded-xl py-3 font-bold border-0"
-            style={{ background: 'var(--bw-accent)', color: '#000' }}
-          >
-            <span>
-              Claim {hcAlias}@{BWALLET_PAYMAIL_DOMAIN}
-            </span>
-            <span className="text-[11px] font-normal">First claim on your HandCash name</span>
-          </button>
-        )}
+        <LinkAccounts
+          owner={identityAddress}
+          onClaim={state === 'none' ? (a) => (setSuggest(a), setChoosing(true)) : undefined}
+        />
         {state !== 'loading' && (proof || current) && (
           <button
             onClick={() => setChoosing(true)}

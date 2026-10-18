@@ -201,11 +201,6 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       "import { useNavigate } from 'react-router-dom';",
       "import { useNavigate } from 'react-router-dom';\nimport { bindSocial } from '../../mobile/social/socialLogin';",
     ],
-    // Restore offer from SocialSignIn needs the bottom menu's page switch.
-    [
-      '  const { hideMenu, showMenu } = useBottomMenu();',
-      '  const { hideMenu, showMenu, handleSelect } = useBottomMenu();',
-    ],
     [
       "import { useNavigate } from 'react-router-dom';",
       "import { useNavigate } from 'react-router-dom';\nimport { onboardingError } from '../../mobile/onboardingError';",
@@ -245,20 +240,14 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       "      markHandlePrompt(keys.identityAddress, 'create');",
       "      markHandlePrompt(keys.identityAddress, 'create');\n      if (newWallet) void saveWalletPassword(accountName, password);",
     ],
+    // No "Continue with X / Google" here any more (owner, 18 Oct 2026: bWalletX isn't an OAuth sign-in, so those
+    // buttons misled). Create = master password + optional photo + 12 words; accounts are linked after the wallet
+    // exists, in the "Claim your name" step (social/LinkAccountsStep.tsx) and Settings › Identity.
     // Recovery phrase "Next": don't wait on the background wallet switch (a new wallet's first
     // storage connection can hang), so the button never silently does nothing.
     [
       '          await chromeStorageService.switchAccount(identityAddress);\n          setStep(3);',
       "          await Promise.race([\n            chromeStorageService.switchAccount(identityAddress).catch((e) => console.error('[create] switchAccount', e)),\n            new Promise((r) => setTimeout(r, 4000)),\n          ]);\n          setStep(3);",
-    ],
-    // Continue with X / Google above the form (src/mobile/social): fills name + photo.
-    [
-      "import { useNavigate } from 'react-router-dom';",
-      "import { useNavigate } from 'react-router-dom';\nimport { SocialSignIn } from '../../mobile/social/SocialSignIn';",
-    ],
-    [
-      '      <form onSubmit={handleKeyGeneration} className="flex flex-col items-center w-full gap-0">',
-      "      <SocialSignIn onProfile={(p) => { setAccountName(p.name); if (p.avatar) setIconURL(p.avatar); }} onClear={(a) => setIconURL((v) => (a && v === a ? '' : v))} onRestore={() => (newWallet ? navigate('/restore-wallet') : handleSelect('settings', 'restore-account'))} />\n      <form onSubmit={handleKeyGeneration} className=\"flex flex-col items-center w-full gap-0\">",
     ],
     // Add account: say plainly it's the wallet password (one password unlocks every account) and that this
     // account gets its own new 12 words next (owner, 6 Oct 2026: it looked like it wanted a new password).

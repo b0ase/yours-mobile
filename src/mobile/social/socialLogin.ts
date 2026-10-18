@@ -19,7 +19,7 @@ import { YoursNative } from '../native';
  *    picks, with a live availability check. Existing <name>.x / <name>.gmail names keep receiving.
  */
 
-export type SocialProvider = 'x' | 'google';
+export type SocialProvider = 'x' | 'google' | 'github' | 'linkedin';
 type Pending = {
   provider: SocialProvider;
   secret: string;
@@ -241,9 +241,9 @@ export async function receiveSocialUrl(url: string): Promise<void> {
  */
 export function socialProof(
   owner: string = NEW_ACCOUNT,
-): { profile: SocialProfile; ticket: string; secret: string } | null {
+): { profile: SocialProfile; ticket: string; secret: string; purpose?: 'picture' } | null {
   const p = read(owner);
-  return p?.ticket && p.profile ? { profile: p.profile, ticket: p.ticket, secret: p.secret } : null;
+  return p?.ticket && p.profile ? { profile: p.profile, ticket: p.ticket, secret: p.secret, purpose: p.purpose } : null;
 }
 
 // Web wallet: back from the provider in this tab with #p=…&t=… (or #error=…). Take it, then clear the address

@@ -12,7 +12,12 @@
 //
 // The ticket alone is worthless: it only opens with the secret, which never left the app.
 // Env: SOCIAL_SEAL_KEY (32-byte hex), X_CLIENT_ID / X_CLIENT_SECRET, GOOGLE_CLIENT_ID /
-//      GOOGLE_CLIENT_SECRET, SOCIAL_BASE_URL (optional, default https://pay.bwallet.space).
+//      GOOGLE_CLIENT_SECRET, GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET, LINKEDIN_CLIENT_ID /
+//      LINKEDIN_CLIENT_SECRET, SOCIAL_BASE_URL (optional, default https://pay.bwallet.space).
+//
+// "Link your accounts" (owner, 18 Oct 2026): the same tickets prove an X / Google / GitHub / LinkedIn account
+// for a link the wallet signs with its identity key. A provider without its env pair answers 503 and
+// `providers` reports it off, so the app shows that row as coming soon instead of a broken button.
 'use strict';
 const crypto = require('crypto');
 
@@ -101,9 +106,20 @@ const RETURNS = {
 };
 const returnUrl = (q, to = 'app') => `${RETURNS[to] || RETURN}#${new URLSearchParams(q).toString()}`;
 
+const PROVIDERS = ['x', 'google', 'github', 'linkedin'];
+const ENV_PAIR = {
+  x: ['X_CLIENT_ID', 'X_CLIENT_SECRET'],
+  google: ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'],
+  github: ['GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET'],
+  linkedin: ['LINKEDIN_CLIENT_ID', 'LINKEDIN_CLIENT_SECRET'],
+};
+const configured = (provider, env) => !!ENV_PAIR[provider] && ENV_PAIR[provider].every((k) => !!env[k]);
+/** Which providers can link right now (no secrets, just on/off). */
+const providers = (env = process.env) => Object.fromEntries(PROVIDERS.map((p) => [p, configured(p, env)]));
+
 function start({ provider, verifier_hash: vh, return_to }, env = process.env, now = Date.now()) {
   const r = Object.hasOwn(RETURNS, return_to) && return_to !== 'app' ? return_to : undefined;
-  if (provider !== 'x' && provider !== 'google') return [400, { error: 'provider must be x or google' }];
+  if (!PROVIDERS.includes(provider)) return [400, { error: 'provider must be x, google, github or linkedin' }];
   if (!/^[0-9a-f]{64}$/.test(String(vh || ''))) return [400, { error: 'verifier_hash must be sha256 hex' }];
   const e = now + TTL_MS;
   if (provider === 'x') {
@@ -119,6 +135,30 @@ function start({ provider, verifier_hash: vh, return_to }, env = process.env, no
       state: seal({ p: 'x', vh, v, e, r }, env),
       code_challenge: challenge,
       code_challenge_method: 'S256',
+    }).toString();
+    return [200, { authorizeUrl: u.toString() }];
+  }
+  if (provider === 'github') {
+    if (!configured('github', env)) return [503, { error: 'GitHub linking is not configured yet' }];
+    const u = new URL('https://github.com/login/oauth/authorize');
+    u.search = new URLSearchParams({
+      client_id: env.GITHUB_CLIENT_ID,
+      redirect_uri: redirectUri('github', env),
+      scope: 'read:user',
+      state: seal({ p: 'github', vh, e, r }, env),
+      allow_signup: 'false',
+    }).toString();
+    return [200, { authorizeUrl: u.toString() }];
+  }
+  if (provider === 'linkedin') {
+    if (!configured('linkedin', env)) return [503, { error: 'LinkedIn linking is not configured yet' }];
+    const u = new URL('https://www.linkedin.com/oauth/v2/authorization');
+    u.search = new URLSearchParams({
+      response_type: 'code',
+      client_id: env.LINKEDIN_CLIENT_ID,
+      redirect_uri: redirectUri('linkedin', env),
+      scope: 'openid profile',
+      state: seal({ p: 'linkedin', vh, e, r }, env),
     }).toString();
     return [200, { authorizeUrl: u.toString() }];
   }
@@ -172,6 +212,42 @@ async function callback(provider, q, env = process.env, f = fetch, now = Date.no
         d: me.data.name,
         a: me.data.profile_image_url?.replace('_normal.', '_400x400.'),
       };
+    } else if (provider === 'github') {
+      const tok = await f('https://github.com/login/oauth/access_token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+        body: new URLSearchParams({
+          client_id: env.GITHUB_CLIENT_ID,
+          client_secret: env.GITHUB_CLIENT_SECRET,
+          code: q.code,
+          redirect_uri: redirectUri('github', env),
+        }),
+      }).then((r) => r.json());
+      if (!tok.access_token) throw new Error(tok.error_description || 'GitHub token exchange failed');
+      const me = await f('https://api.github.com/user', {
+        headers: { Authorization: `Bearer ${tok.access_token}`, Accept: 'application/json', 'User-Agent': 'bWalletX' },
+      }).then((r) => r.json());
+      if (!me.id || !me.login) throw new Error('Could not read the GitHub account');
+      user = { id: String(me.id), name: me.login, d: me.name || me.login, a: me.avatar_url };
+    } else if (provider === 'linkedin') {
+      const tok = await f('https://www.linkedin.com/oauth/v2/accessToken', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'authorization_code',
+          code: q.code,
+          redirect_uri: redirectUri('linkedin', env),
+          client_id: env.LINKEDIN_CLIENT_ID,
+          client_secret: env.LINKEDIN_CLIENT_SECRET,
+        }),
+      }).then((r) => r.json());
+      if (!tok.access_token) throw new Error(tok.error_description || 'LinkedIn token exchange failed');
+      const me = await f('https://api.linkedin.com/v2/userinfo', {
+        headers: { Authorization: `Bearer ${tok.access_token}` },
+      }).then((r) => r.json());
+      if (!me.sub) throw new Error('Could not read the LinkedIn account');
+      // LinkedIn has no public @name: the opaque member id stands in, and only the display name is shown.
+      user = { id: String(me.sub), name: String(me.sub), d: me.name, a: me.picture };
     } else {
       const tok = await f('https://oauth2.googleapis.com/token', {
         method: 'POST',
@@ -210,4 +286,16 @@ async function callback(provider, q, env = process.env, f = fetch, now = Date.no
   }
 }
 
-module.exports = { start, callback, openTicket, socialAliasFor, suggestedHandleFor, seal, open, sha256Hex, TTL_MS };
+module.exports = {
+  start,
+  providers,
+  PROVIDERS,
+  callback,
+  openTicket,
+  socialAliasFor,
+  suggestedHandleFor,
+  seal,
+  open,
+  sha256Hex,
+  TTL_MS,
+};
