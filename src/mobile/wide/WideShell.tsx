@@ -18,7 +18,14 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { useAccountNames } from '../names/accountNames';
 import { setWalletKind, getWalletKind, subscribeWalletKind, type WalletKind } from '../wallet/walletKind';
-import { BSPACES_ENABLED, MARKET_ENABLED, marketLabel, STORE_HIDDEN_WALLET_KINDS, STORE_BUILD } from '../storeBuild';
+import {
+  BSPACES_ENABLED,
+  BUREAU_ENABLED,
+  MARKET_ENABLED,
+  marketLabel,
+  STORE_HIDDEN_WALLET_KINDS,
+  STORE_BUILD,
+} from '../storeBuild';
 import { badgeLabel, badgeText } from '../tabs/tabBadges';
 import { useTabBadges } from '../tabs/useTabBadges';
 import { NotificationsBell } from '../notify/NotificationsPanel';
@@ -87,6 +94,7 @@ const I = {
   exchange: 'M7 7h13l-4-4M17 17H4l4 4',
   lockbsv: 'M5 11h14v10H5zM8 11V7a4 4 0 0 1 8 0v4M12 15v2',
   mail: 'M3 6h18v12H3zM3 7l9 6 9-6',
+  bureau: 'M6 3h9l4 4v14H6zM15 3v4h4M9 13h7M9 17h4',
   calls: 'M5 4h4l2 5-3 2a11 11 0 0 0 5 5l2-3 5 2v4a2 2 0 0 1-2 2A17 17 0 0 1 3 6a2 2 0 0 1 2-2',
   chat: 'M21 12a8 8 0 0 1-12 7l-5 1 1-4a8 8 0 1 1 16-4z',
   people: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
@@ -331,6 +339,8 @@ const WideShell = ({ children }: { children: ReactNode }) => {
       title: 'Talk',
       items: [
         { id: 'bmail', label: 'bMail', icon: I.mail, to: '/m/bmail', badge: mail },
+        // Bureau: bMail's agreements (sign, seal, the old bit-sign vault). bWalletX only.
+        { id: 'bureau', label: 'Bureau', icon: I.bureau, to: '/m/bureau', hidden: !BUREAU_ENABLED },
         { id: 'chat', label: 'bChat', icon: I.chat, to: '/m/chat', badge: unread.chat },
         { id: 'calls', label: 'bPhone', icon: I.calls, to: CALLS_ROUTE },
         { id: 'people', label: 'People', icon: I.people, to: '/m/people' },
@@ -385,6 +395,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
       calls: CALLS_ROUTE,
       settings: '/m/settings',
       exchange: '/m/exchange',
+      ...(BUREAU_ENABLED ? { bureau: '/m/bureau' } : {}),
     };
     if (v && to[v]) navigate(to[v]);
   }, [pathname, navigate]);

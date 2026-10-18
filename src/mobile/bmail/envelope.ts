@@ -53,23 +53,44 @@ export type Envelope = {
   // TODO(bmail pay-to-open): escrow?: { lockScript, refundAfter }
 };
 
-export type Sealed = { subject: string; body: string };
+export type Sealed = {
+  subject: string;
+  body: string;
+  /**
+   * Bureau agreement part (src/mobile/bureau/agreement.ts parses and checks it). Opaque here so bMail stays
+   * independent of the Bureau; older clients drop it and still read subject + body, which always say what it is.
+   */
+  agreement?: unknown;
+};
+/** The agreement part's JSON may use at most this many characters (the whole envelope must stay under 64 000). */
+export const AGREEMENT_JSON_MAX = 40_000;
 
 export const newMessageId = (rand: (n: number) => Uint8Array = defaultRand): string =>
   [...rand(16)].map((b) => b.toString(16).padStart(2, '0')).join('');
 const defaultRand = (n: number) => crypto.getRandomValues(new Uint8Array(n));
 
-export const sealedToBytes = (s: Sealed): number[] => [
-  ...new TextEncoder().encode(
-    JSON.stringify({ subject: s.subject.slice(0, SUBJECT_MAX), body: s.body.slice(0, BODY_MAX) }),
-  ),
-];
+const agreementOk = (a: unknown) => !!a && typeof a === 'object' && JSON.stringify(a).length <= AGREEMENT_JSON_MAX;
+
+export const sealedToBytes = (s: Sealed): number[] => {
+  if (s.agreement !== undefined && !agreementOk(s.agreement)) throw new Error('This document is too large to send.');
+  return [
+    ...new TextEncoder().encode(
+      JSON.stringify({
+        subject: s.subject.slice(0, SUBJECT_MAX),
+        body: s.body.slice(0, BODY_MAX),
+        ...(s.agreement !== undefined ? { agreement: s.agreement } : {}),
+      }),
+    ),
+  ];
+};
 export const bytesToSealed = (b: number[] | Uint8Array): Sealed => {
   const j = JSON.parse(new TextDecoder().decode(new Uint8Array(b))) as Partial<Sealed>;
-  return {
+  const out: Sealed = {
     subject: typeof j.subject === 'string' ? j.subject.slice(0, SUBJECT_MAX) : '',
     body: typeof j.body === 'string' ? j.body.slice(0, BODY_MAX) : '',
   };
+  if (agreementOk(j.agreement)) out.agreement = j.agreement;
+  return out;
 };
 
 export const encodeEnvelope = (e: Envelope): string => JSON.stringify(e);

@@ -22,6 +22,7 @@ Anything not listed as its own entry is inside a real screen that is listed (e.g
 | Top bar Lock BSV (time-locks)                          | Top bar padlock-with-coin icon, Sidebar › Money › Lock BSV                             | Real                                                |
 | Top bar Settings                                       | Sidebar › Settings                                                                     | Real                                                |
 | Phone layout top bar mailbox / bMail                   | Sidebar › Talk › bMail (unread badge)                                                  | Real, two-pane                                      |
+| bChat desktop Home "bureau" (bit-sign vault)           | Sidebar › Talk › Bureau (`/m/bureau`, bWalletX only)                                   | Real, three-pane; agreements over bMail             |
 | Tab: Wallet                                            | Sidebar › Money › Wallet (real page + holdings table + History pane)                   | Real                                                |
 | Tab: Exchange / Market                                 | Sidebar › Money › Exchange (Market in store builds)                                    | Real                                                |
 | Tab: Apps (bApps)                                      | Sidebar › Discover › bApps (`/browser`)                                                | Real                                                |
