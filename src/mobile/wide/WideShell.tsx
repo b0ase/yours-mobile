@@ -40,7 +40,7 @@ import { PNEE_TOKEN_ID } from '../notes/pnee';
 import { BappHost } from './BappHost';
 import { PersonPic } from './PersonPic';
 import { useAvatar } from '../names/useAvatar';
-import { WidePage, WideEmpty } from './WidePage';
+import { WidePage, WideEmpty, WideTitle } from './WidePage';
 import { WideAuth } from './WideAuth';
 import { useCanInstall, installApp } from './install';
 import { BAPPS, BAPP_ROUTE, bappFromPath, useBappBadge } from './bapps';
@@ -522,6 +522,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
       </aside>
       <main className="ww-main">
         <header className="ww-top">
+          {view !== 'bapp' && <WideTitle title={page.title} onBack={page.root ? undefined : () => navigate(-1)} />}
           <button
             className="ww-search"
             onClick={() => {
@@ -568,7 +569,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
             </button>
           </div>
         </header>
-        <WidePage title={page.title} onBack={page.root ? undefined : () => navigate(-1)} bleed={view === 'bapp'}>
+        <WidePage bleed={view === 'bapp'}>
           <div className={`ww-content view-${view}${fullWallet ? ' is-full' : ''}`}>
             <div className="ww-colwrap">
               <div className="ww-col">

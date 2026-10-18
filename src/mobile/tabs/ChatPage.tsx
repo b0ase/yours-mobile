@@ -1,4 +1,6 @@
 import { TipButton } from '../tip/TipButton';
+import bGlyph from '../brand/bwallet-glyph.svg';
+import { B_OUTLINE_D, B_OUTLINE_VIEWBOX } from '../brand/bOutline';
 import { mergeChatRooms } from './tabBadges';
 import { claimIssuerAdmin } from '../chat/autoClaim';
 import { WIDE_ON } from '../wide/flag';
@@ -1196,7 +1198,7 @@ const Conversation = ({
             >
               {/* Two lines (owner, 6 Oct 2026). */}
               <div>
-                Questions? Tap <b style={{ color: GOLD }}>/b</b> and ask $b, the {APP_NAME} assistant.
+                Questions? Tap the gold <b style={{ color: GOLD }}>b</b> and ask $b, the {APP_NAME} assistant.
               </div>
               <div>Just /b shows what it can do.</div>
             </div>
@@ -1238,14 +1240,30 @@ const Conversation = ({
               type="button"
               onClick={askB}
               aria-label={`Ask $b, the ${APP_NAME} assistant`}
-              className="h-10 px-3 rounded-full flex items-center justify-center shrink-0 font-bold text-[14px]"
+              title="Ask b"
+              className="h-10 w-10 rounded-full flex items-center justify-center shrink-0"
               style={{
                 background: '#1a1608',
                 color: GOLD,
                 border: `1px solid color-mix(in srgb, ${GOLD} 33%, transparent)`,
               }}
             >
-              /b
+              {/* The gold b mark (owner, 18 Oct 2026: was the text "/b"); the white/edition themes swap in the outline b. */}
+              <img src={bGlyph} alt="" width={22} height={22} draggable={false} className="bw-dock-b-gold" />
+              <svg
+                className="bw-dock-b-outline"
+                width={22}
+                height={22}
+                viewBox={B_OUTLINE_VIEWBOX}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinejoin="round"
+                strokeLinecap="round"
+                aria-hidden="true"
+              >
+                <path d={B_OUTLINE_D} vectorEffect="non-scaling-stroke" />
+              </svg>
             </button>
             {draftable && (
               <button
@@ -2147,6 +2165,7 @@ const BountiesSheet = ({
 
 /** "$BOASE ✓" for a verified personal token, else the room name / "$SYM". */
 const entryTitle = (entry: TokenRoomEntry | null, room: ChatRoom | null): string | null => {
+  if (room && isLounge(room.ticker)) return HELP_DESK_NAME;
   if (!entry) return room?.name || null;
   if (entry.key.startsWith('coll:')) return room?.name || entry.gate.symbol;
   const label = tickerLabel(entry.gate.symbol, entry.holding.id, knownPersonal());
@@ -2177,7 +2196,7 @@ const OpenRoomRow = ({
 }) => {
   const info = openInfo(room);
   const unread = room.unread ?? 0;
-  const title = room.name || `$${room.ticker}`;
+  const title = isLounge(room.ticker) ? HELP_DESK_NAME : room.name || `$${room.ticker}`;
   const key = roomKeyOf(room.ticker);
   const muted = isMuted(commands.prefs, key);
   return (
