@@ -4,15 +4,31 @@
 // Env (Vercel only): THEME_ORDER_PAY_ADDRESS (empty = 503 not_configured), SUPABASE_URL,
 // SUPABASE_SERVICE_ROLE_KEY, ARC_URL / ARC_API_KEY (optional).
 'use strict';
-const { makeThemeOrderHandlers, themeOrderStore } = require('../lib/themeOrders');
+const { makeThemeOrderHandlers, payAddress, themeOrderStore } = require('../lib/themeOrders');
 const { makeThemeBuyHandlers, themeBuyStore } = require('../lib/themeBuys');
+const { depositUsd, makeThemeDepositHandlers, themeDepositStore } = require('../lib/themeDeposits');
 const { arcBroadcast } = require('../lib/paymailStore');
 const { chain } = require('../lib/nameFee');
 const { storeKey } = require('../lib/storeReceipt');
 
 // buy-quote / buy-claim / owned: Store theme purchases, $1 each (site/lib/themeBuys.js).
 // store-key (GET): the public key Store receipts are signed with (site/lib/storeReceipt.js), null if unsigned.
-const OPS = new Set(['upload', 'quote', 'claim', 'mine', 'buy-quote', 'buy-claim', 'owned', 'store-key']);
+// deposit-config (GET) / deposit-quote / deposit-claim: branded wallet deposits from the site order form
+// (site/lib/themeDeposits.js; closed until THEME_DEPOSIT_USD is set).
+const OPS = new Set([
+  'upload',
+  'quote',
+  'claim',
+  'mine',
+  'buy-quote',
+  'buy-claim',
+  'owned',
+  'store-key',
+  'deposit-config',
+  'deposit-quote',
+  'deposit-claim',
+]);
+const DEPOSIT = { 'deposit-quote': 'quote', 'deposit-claim': 'claim' };
 const BUY = { 'buy-quote': 'quote', 'buy-claim': 'claim', owned: 'owned' };
 const hits = new Map();
 function limited(ip, max) {
@@ -52,6 +68,10 @@ module.exports = async function handler(req, res) {
   const op = new URL(req.url, 'http://x').searchParams.get('op') || '';
   if (!OPS.has(op)) return send(res, 404, { error: 'not-found' });
   if (op === 'store-key') return send(res, 200, { signer: storeKey() });
+  if (op === 'deposit-config') {
+    const usd = depositUsd();
+    return send(res, 200, { configured: !!(usd && payAddress()), usd: usd || null });
+  }
   if (req.method !== 'POST') return send(res, 405, { error: 'method-not-allowed' });
   const ip =
     String(req.headers['x-real-ip'] || req.headers['x-vercel-forwarded-for'] || req.headers['x-forwarded-for'] || '')
@@ -61,17 +81,23 @@ module.exports = async function handler(req, res) {
   if (!handlers) {
     const store = themeOrderStore();
     const buyStore = themeBuyStore();
-    if (!store || !buyStore) return send(res, 503, { error: 'not_configured' });
+    const depositStore = themeDepositStore();
+    if (!store || !buyStore || !depositStore) return send(res, 503, { error: 'not_configured' });
     const deps = { rate: () => chain.bsvUsd(), broadcast: arcBroadcast() };
     handlers = {
       ...makeThemeOrderHandlers({ store, ...deps }),
       buy: makeThemeBuyHandlers({ store: buyStore, ...deps }),
+      deposit: makeThemeDepositHandlers({ store: depositStore, ...deps }),
     };
   }
   const body = await readJson(req);
   if (body === null) return send(res, 400, { error: 'invalid-json' });
   try {
-    const [status, out] = BUY[op] ? await handlers.buy[BUY[op]](body) : await handlers[op](body);
+    const [status, out] = DEPOSIT[op]
+      ? await handlers.deposit[DEPOSIT[op]](body)
+      : BUY[op]
+        ? await handlers.buy[BUY[op]](body)
+        : await handlers[op](body);
     return send(res, status, out);
   } catch (e) {
     console.error('theme-orders error', op, String(e && e.message ? e.message : e).slice(0, 200));
