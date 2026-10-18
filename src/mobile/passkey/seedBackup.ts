@@ -33,6 +33,8 @@ export type SeedBackupBlob = {
   createdAt: string;
   /** Optional, shown on the restore screen so the user can tell backups apart. Not secret. */
   label?: string;
+  /** Optional identity address of the account the words belong to (Settings lists accounts with a backup). */
+  account?: string;
 };
 
 const enc = new TextEncoder();
@@ -74,7 +76,7 @@ const aesKey = async (prfOutput: Uint8Array, salt: Uint8Array): Promise<CryptoKe
 export async function sealSeed(
   mnemonic: string,
   prfOutput: Uint8Array,
-  meta: { rpId: string; credentialId: string; label?: string },
+  meta: { rpId: string; credentialId: string; label?: string; account?: string },
 ): Promise<SeedBackupBlob> {
   const phrase = mnemonic.trim().split(/\s+/).join(' ');
   if (!phrase) throw new Error('Nothing to back up');
@@ -96,6 +98,7 @@ export async function sealSeed(
     ct: b64url(ct),
     createdAt: new Date().toISOString(),
     ...(meta.label ? { label: meta.label } : {}),
+    ...(meta.account ? { account: meta.account } : {}),
   };
 }
 
@@ -174,9 +177,70 @@ export async function keystorePasswordFromPrf(prfOutput: Uint8Array): Promise<st
   return `pk1.${b64url(new Uint8Array(bits))}`;
 }
 
-/** Which passkey unlocks this browser's wallet (not secret: an id and an rpId). */
+/**
+ * Which passkey unlocks this browser's wallet. Two kinds:
+ * - made with "Continue with a passkey": no `sealed`, the password IS keystorePasswordFromPrf(prf);
+ * - an existing password wallet that added a passkey (Settings): `sealed` holds the user's own password, AES-GCM
+ *   under a PRF-derived key (its own HKDF label), so the typed password keeps working and the keystore is unchanged.
+ */
 export const UNLOCK_KEY = 'bwx:passkey-unlock';
-export type PasskeyUnlock = { rpId: string; credentialId: string };
+export const UNLOCK_INFO = 'bwalletx unlock password v1';
+export type SealedPassword = { salt: string; iv: string; ct: string };
+export type PasskeyUnlock = { rpId: string; credentialId: string; sealed?: SealedPassword; addedAt?: string };
+
+const unlockAad = (u: Pick<PasskeyUnlock, 'rpId' | 'credentialId'>) =>
+  enc.encode(JSON.stringify([UNLOCK_KEY, 1, u.rpId, u.credentialId]));
+
+const unlockKey = async (prfOutput: Uint8Array, salt: Uint8Array): Promise<CryptoKey> => {
+  if (prfOutput.length !== 32) throw new Error('PRF output must be 32 bytes');
+  const ikm = await crypto.subtle.importKey('raw', prfOutput as BufferSource, 'HKDF', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name: 'HKDF', hash: 'SHA-256', salt: salt as BufferSource, info: enc.encode(UNLOCK_INFO) },
+    ikm,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  );
+};
+
+export async function sealPassword(
+  password: string,
+  prfOutput: Uint8Array,
+  ids: Pick<PasskeyUnlock, 'rpId' | 'credentialId'>,
+): Promise<PasskeyUnlock> {
+  if (!password) throw new Error('No password to seal');
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(
+    await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv: iv as BufferSource, additionalData: unlockAad(ids) as BufferSource },
+      await unlockKey(prfOutput, salt),
+      enc.encode(password),
+    ),
+  );
+  return {
+    rpId: ids.rpId,
+    credentialId: ids.credentialId,
+    sealed: { salt: b64url(salt), iv: b64url(iv), ct: b64url(ct) },
+    addedAt: new Date().toISOString(),
+  };
+}
+
+/** The wallet password this passkey stands for (sealed one, or the derived one for passkey-made wallets). */
+export async function unlockPasswordFromPrf(u: PasskeyUnlock, prfOutput: Uint8Array): Promise<string> {
+  if (!u.sealed) return keystorePasswordFromPrf(prfOutput);
+  try {
+    const pt = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: fromB64url(u.sealed.iv) as BufferSource, additionalData: unlockAad(u) as BufferSource },
+      await unlockKey(prfOutput, fromB64url(u.sealed.salt)),
+      fromB64url(u.sealed.ct) as BufferSource,
+    );
+    return dec.decode(pt);
+  } catch {
+    throw new Error("This passkey doesn't unlock this wallet. Use your password.");
+  }
+}
+
 export const loadPasskeyUnlock = (store: Pick<Storage, 'getItem'> = localStorage): PasskeyUnlock | null => {
   try {
     const o = JSON.parse(store.getItem(UNLOCK_KEY) ?? 'null') as PasskeyUnlock | null;
@@ -187,3 +251,12 @@ export const loadPasskeyUnlock = (store: Pick<Storage, 'getItem'> = localStorage
 };
 export const savePasskeyUnlock = (u: PasskeyUnlock, store: Pick<Storage, 'setItem'> = localStorage) =>
   store.setItem(UNLOCK_KEY, JSON.stringify(u));
+
+/** Settings › Remove passkey: forget the unlock record and every local backup sealed with that passkey. */
+export const removePasskey = (store: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> = localStorage) => {
+  const u = loadPasskeyUnlock(store);
+  store.removeItem(UNLOCK_KEY);
+  if (!u) return;
+  const rest = loadLocalBackups(store).filter((b) => b.credentialId !== u.credentialId);
+  store.setItem(LOCAL_KEY, JSON.stringify(rest));
+};

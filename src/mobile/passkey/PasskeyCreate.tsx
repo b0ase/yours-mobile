@@ -3,7 +3,7 @@ import { Fingerprint } from 'lucide-react';
 import { useTheme } from '../../hooks/useTheme';
 import { createPasskeyWithPrf, getPrf } from './prf';
 import { currentRpId } from './passkeyUi';
-import { keystorePasswordFromPrf, loadPasskeyUnlock, savePasskeyUnlock } from './seedBackup';
+import { keystorePasswordFromPrf, loadPasskeyUnlock, savePasskeyUnlock, unlockPasswordFromPrf } from './seedBackup';
 import { setPasskeySession } from './session';
 
 /**
@@ -66,7 +66,7 @@ export const PasskeyUnlockButton = ({ onPassword }: { onPassword: (password: str
         type="button"
         onClick={() =>
           void getPrf(u.rpId, u.credentialId).then(
-            async ({ prf }) => onPassword(await keystorePasswordFromPrf(prf)),
+            async ({ prf }) => onPassword(await unlockPasswordFromPrf(u, prf)),
             (e: unknown) => setError(e instanceof Error ? e.message : String(e)),
           )
         }

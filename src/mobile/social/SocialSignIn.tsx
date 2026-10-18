@@ -32,12 +32,12 @@ import { HandCashSignIn } from './HandCashSignIn';
 const inDesktopApp = () =>
   typeof window !== 'undefined' && !!(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
 
-const XLogo = () => (
+export const XLogo = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
     <path d="M18.9 2H22l-6.8 7.8L23 22h-6.2l-4.8-6.3L6.4 22H3.3l7.3-8.3L1 2h6.3l4.4 5.8L18.9 2Zm-1.1 18h1.7L6.3 3.9H4.5L17.8 20Z" />
   </svg>
 );
-const GoogleLogo = () => (
+export const GoogleLogo = () => (
   <svg width="16" height="16" viewBox="0 0 48 48" aria-hidden>
     <path
       fill="#FFC107"

@@ -48,14 +48,55 @@ With `?via=passkey` the user never invents a password:
   set; it derives the same password and runs the normal unlock. Typing the password is still possible in theory
   but the user doesn't know it; "Forgot password? Restore with recovery phrase" and Restore with a passkey are the
   ways back.
-- Not covered yet: Settings › Change password for a passkey wallet (would replace the derived password with a
-  typed one; fine, but the passkey unlock then fails until re-enrolled), adding a second account (asks for the
+- Not covered yet: adding a second account (asks for the
   master password: needs the same "Use passkey" button there), the extension and native apps (no passkey).
 
 Verified 19 Oct in headless Chrome + virtual PRF authenticator: welcome shows the five options in order; Continue
 with a passkey → Create my passkey → wallet created, words shown, "Saved with your passkey", file downloaded →
 session cleared + reload → "Welcome back" with **Unlock with passkey** → unlocked to the Wallet tab. X / Google were
 not exercised (real OAuth); they are the unchanged existing flow.
+
+### Welcome layout v2 + HandCash (owner, 19 Oct 2026)
+
+Order: Continue with X, Google, **HandCash**, then Continue with a passkey, then two full-size secondary buttons
+**Create with password and 12 words** and **Restore with 12 words or a backup file** (today's flows, unchanged). On
+narrow screens (< 640px) X / Google / HandCash are one row of three icon buttons after "Continue with"; wider
+screens get full buttons. Screenshots: 1440 and 390 wide (scratchpad, see PR report).
+
+**Continue with HandCash = identity only** (`passkey/handcashWeb.ts`). Same PKCE contract as the phone app's "Sign
+in with HandCash" (`social/handcashLogin.ts`: bit-sign `/api/auth/handcash?mode=native` + `/api/auth/native/exchange`
+on www.bchatx.com, HandCash app id/secret server-side only). The web version returns to
+`https://<web origin>/auth/handcash`, keeps only the verified `$handle` (shown with a badge) and drops HandCash's
+auth_token at once. Keys still come from the passkey or password. **Missing server side** (not in this repo):
+
+1. bit-sign must allow `https://web.bwalletx.com/auth/handcash` and `https://desktop.bwalletx.com/auth/handcash`
+   (and beta.) as `redirect` for `mode=native` (today only `bwalletx://auth/handcash`, bit-sign #283);
+2. CORS on `/api/auth/native/exchange` for those origins;
+3. Vercel: `/auth/handcash` must serve index.html (SPA fallback; check the web project's rewrites);
+4. linking the handle to the new account's badge on web: the phone links it via the stored token; on web the
+   handle is only shown for now. Needs a bit-sign "attach verified handle to identity key" call, or the user links
+   HandCash later in the app.
+   Until 1-2 exist the button comes back with an error and the other options still work.
+
+### Existing password wallets: Settings › Passkey (built)
+
+Settings › Security › **Passkey** (`PasskeySettings.tsx`, flag only):
+
+- **Add a passkey to this wallet**: type the current password → one passkey prompt → the typed password is sealed
+  with a PRF-derived key (`sealPassword`, HKDF label `bwalletx unlock password v1`, AAD = rpId + credential id) and
+  stored as `bwx:passkey-unlock.sealed`; the open account's 12 words are sealed in the usual blob (now with
+  `account`). The keystore is not touched; the typed password keeps working.
+- Wallet already has a passkey: the button backs up the open account too (reuses the same passkey, one prompt).
+- Lists every account with "Passkey backup" / "None". **Remove passkey** forgets the unlock record and that
+  passkey's local backups (the passkey itself stays in iCloud / Google until the user deletes it).
+- **Change password** re-seals the new password with one passkey prompt ("Unlock with passkey still works."). If
+  the prompt is cancelled, passkey unlock is turned off and the screen says to add it again. A wallet made with
+  "Continue with a passkey" becomes a sealed-password wallet after a change.
+
+Verified 19 Oct, headless Chrome + virtual PRF authenticator: password wallet → Settings › Passkey → add →
+account shows "Passkey backup" → lock → Unlock with passkey ✓ → typed old password still unlocks ✓ → Change
+password → "Unlock with passkey still works." → lock → Unlock with passkey ✓ → Remove passkey → lock → no passkey
+button ✓.
 
 ### Finding the backup by X / Google on a new device (design, not built)
 

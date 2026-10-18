@@ -7,6 +7,8 @@ import { useBackClose } from '../backStack';
 import { PasswordFields } from '../names/PasswordFields';
 import { saveWalletPassword } from '../names/walletPassword';
 import { ErrorActions } from '../errors/ErrorActions';
+import { SEEDLESS_ENABLED } from '../passkey/prf';
+import { resealAfterPasswordChange } from '../passkey/passkeyWallet';
 
 /**
  * Settings › Security › Change password (owner, 4 Oct 2026). The wallet is unlocked, so no old
@@ -23,6 +25,7 @@ export const ChangePassword = ({ onClose }: { onClose: () => void }) => {
   const [error, setError] = useState('');
   const [done, setDone] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [passkeyNote, setPasskeyNote] = useState('');
 
   const ok = password.length >= 8 && password === confirm;
   const save = async () => {
@@ -31,6 +34,13 @@ export const ChangePassword = ({ onClose }: { onClose: () => void }) => {
     try {
       await chromeStorageService.changePassword(password);
       void saveWalletPassword(name, password);
+      // Passkey wallets: re-seal the new password so Unlock with passkey keeps working (one passkey prompt).
+      if (SEEDLESS_ENABLED) {
+        const r = await resealAfterPasswordChange(password);
+        if (r === 'resealed') setPasskeyNote('Unlock with passkey still works.');
+        if (r === 'turned-off')
+          setPasskeyNote('Unlock with passkey is off until you add your passkey again in Settings › Passkey.');
+      }
       setDone(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not change the password');
@@ -55,6 +65,11 @@ export const ChangePassword = ({ onClose }: { onClose: () => void }) => {
             <p className="mt-2 text-sm" style={{ color: '#98A2B3' }}>
               Use the new password next time you unlock. Your recovery phrase still restores this wallet.
             </p>
+            {passkeyNote && (
+              <p className="mt-2 text-sm" style={{ color: '#98A2B3' }} data-testid="passkey-reseal-note">
+                {passkeyNote}
+              </p>
+            )}
             <button
               onClick={onClose}
               className="mt-8 w-full rounded-xl py-3 font-bold border-0"
