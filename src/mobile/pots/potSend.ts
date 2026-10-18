@@ -6,7 +6,7 @@ import { decrypt } from '../../utils/crypto';
 import { UNBOUND_NAME, opnsBinding, parseRecipient, resolveRecipient } from '../names/names';
 import { isPayingPot, type Payee } from './pots';
 import { PNEE_TOKEN_ID } from '../notes/pnee';
-import { pickPneeInputs, type PneeCandidate } from './pneePot';
+import { pickPneeInputs, pneeOverlayFee, type PneeCandidate } from './pneePot';
 
 /**
  * Paying from a pot without switching to it (POTS-SUBSCRIPTIONS-PLAN.md v1). The session passKey that is
@@ -221,8 +221,7 @@ export const signPneeFromPot = async (
   }
   const feeAddr = details.status?.fee_address;
   const feePer = details.status?.fee_per_output;
-  const overlayFee =
-    typeof feeAddr === 'string' && feeAddr && typeof feePer === 'number' && feePer > 0 ? feePer * tokenOuts : 0;
+  const overlayFee = pneeOverlayFee(feeAddr, feePer, tokenOuts);
   if (overlayFee) tx.addOutput({ lockingScript: new P2PKH().lock(feeAddr!), satoshis: overlayFee });
   if (memo) tx.addOutput({ lockingScript: memoScript(memo), satoshis: 0 });
   tx.addOutput({ lockingScript: new P2PKH().lock(from), change: true });

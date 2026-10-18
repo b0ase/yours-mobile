@@ -57,3 +57,17 @@ export const pickPneeInputs = (cands: PneeCandidate[], potHash160: string, need:
 
 /** Spendable PNEE units (valid on the overlay, own key) as dollars. */
 export const pneeUnitsToUsd = (units: bigint | number) => Number(units) / 100;
+
+/**
+ * Most a pot pays the PNEE overlay per token output. Standing orders pay without a per-payment prompt, so the
+ * overlay's own fee_per_output (read from the network) can't be trusted unbounded: above this the payment fails.
+ */
+export const MAX_PNEE_OVERLAY_FEE_PER_OUTPUT = 10_000;
+
+/** The overlay fee for `tokenOuts` token outputs, 0 when the token has none; throws when the fee is out of bounds. */
+export const pneeOverlayFee = (feeAddr: unknown, feePer: unknown, tokenOuts: number): number => {
+  if (typeof feeAddr !== 'string' || !feeAddr || typeof feePer !== 'number' || !(feePer > 0)) return 0;
+  if (!Number.isInteger(feePer) || feePer > MAX_PNEE_OVERLAY_FEE_PER_OUTPUT)
+    throw new Error('The PNEE network fee looks wrong, so nothing was paid');
+  return feePer * tokenOuts;
+};

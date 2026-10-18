@@ -290,3 +290,21 @@ describe('PNEE pots: store and pay-on-open', () => {
     expect(sent).toEqual(['beef:A']);
   });
 });
+
+describe('PNEE overlay fee bound (auto-pay has no per-payment prompt)', () => {
+  test('no fee address or fee: 0', async () => {
+    const { pneeOverlayFee } = await import('./pneePot');
+    expect(pneeOverlayFee(undefined, 100, 2)).toBe(0);
+    expect(pneeOverlayFee('1abc', 0, 2)).toBe(0);
+  });
+  test('normal fee: per token output', async () => {
+    const { pneeOverlayFee } = await import('./pneePot');
+    expect(pneeOverlayFee('1abc', 1000, 3)).toBe(3000);
+  });
+  test('an inflated or fractional fee fails the payment instead of draining the pot', async () => {
+    const { pneeOverlayFee, MAX_PNEE_OVERLAY_FEE_PER_OUTPUT } = await import('./pneePot');
+    expect(() => pneeOverlayFee('1abc', MAX_PNEE_OVERLAY_FEE_PER_OUTPUT + 1, 1)).toThrow();
+    expect(() => pneeOverlayFee('1abc', 1e9, 1)).toThrow();
+    expect(() => pneeOverlayFee('1abc', 1.5, 1)).toThrow();
+  });
+});
