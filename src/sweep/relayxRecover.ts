@@ -11,6 +11,7 @@ import { HD, Mnemonic } from '@bsv/sdk';
 import { JIG_DUST, RUN_JIG_SATS } from './runGuard';
 import { identifyJig, outpoint, readRun, type IdentifiedJig, type NpgMap } from './runIdentify';
 import type { ChainReader, Utxo } from './chainReads';
+import { readListingTx } from './relayxListing';
 
 export const RELAYX_ACCOUNT = "m/44'/236'/0'";
 export const RELAYX_CHAINS = [2, 0, 1] as const;
@@ -63,8 +64,14 @@ export function keyAt(account: HD, chain: number, i: number): RelayxKey {
   return { path, address: node.privKey.toAddress(), wif: node.privKey.toWif() };
 }
 
+/**
+ * Listed for sale on RelayX when it closed: the NFT sits in an OrderLock order (`location`), not at the user's
+ * address. `address`/`wif`/`path` are then the cancel baton's (output 0 of the listing tx), whose key can cancel.
+ */
+export type Listed = { listing: string; price: number; payTo: string; problem?: string };
+
 /** `path`: where it sits (m/44'/236'/0'/2/i), so a restored account can work out its key later (wifAt). */
-export type Found = IdentifiedJig & { address: string; wif: string; path?: string; unread?: boolean };
+export type Found = IdentifiedJig & { address: string; wif: string; path?: string; unread?: boolean; listed?: Listed };
 export type ScanStep =
   | { k: 'addresses'; checked: number }
   | { k: 'outputs'; addresses: number }
@@ -223,19 +230,55 @@ export async function scanRelayx(
     return item;
   });
   // A non-Run dust output (e.g. a 1-sat ordinal) counts toward "also holds".
-  const notJigs = dust.filter((_, i) => results[i] === null);
+  let notJigs = dust.filter((_, i) => results[i] === null);
+  // RelayX cancel batons (546 sats at output 0 of a listing): their NFT is still listed if the order is unspent.
+  const listed: Found[] = [];
+  const batons = new Set<Utxo>();
+  for (const u of notJigs.filter((x) => x.vout === 0)) {
+    if (signal?.cancelled) break;
+    const f = await findListed(u, reader, maps).catch(() => null);
+    if (!f) continue;
+    batons.add(u);
+    listed.push(f);
+  }
+  notJigs = notJigs.filter((u) => !batons.has(u));
   return {
-    nfts: results.filter((r): r is Found => !!r),
+    nfts: [...results.filter((r): r is Found => !!r), ...listed],
     otherSats: [...rest, ...notJigs].reduce((n, u) => n + u.sats, 0),
     otherOutputs: rest.length + notJigs.length,
     addresses: keys.length,
   };
 }
 
+/**
+ * Is this output the cancel baton of a RelayX listing whose order is still open? Read-only: it reads the listing
+ * tx (already fetched by the scan), checks the order output is unspent, and names the NFT inside it.
+ */
+async function findListed(
+  u: Utxo & { wif: string; path: string },
+  reader: ChainReader,
+  maps: readonly NpgMap[],
+): Promise<Found | null> {
+  const l = readListingTx(await reader.getTx(u.txid));
+  if (!l || l.batonAddress !== u.address) return null;
+  const open = await reader.scriptUnspent(l.orderScript);
+  if (!open.some((o) => o.txid === l.txid && o.vout === l.orderVout)) return null;
+  const location = outpoint(l.txid, l.orderVout);
+  const id = await identifyJig(location, reader.getTx, maps);
+  return {
+    ...id,
+    title: id.origin ? id.title : 'Listed NFT',
+    address: u.address,
+    wif: u.wif,
+    path: u.path,
+    listed: { listing: l.txid, price: l.price, payTo: l.payTo, problem: l.problem },
+  };
+}
+
 /** Re-read just the unread ones (the "Retry" button). */
 export async function retryUnread(found: Found[], reader: ChainReader, maps: readonly NpgMap[]): Promise<Found[]> {
   return mapLimit(found, 20, async (f) => {
-    if (!f.unread) return f;
+    if (!f.unread || f.listed) return f;
     const id = await identifyJig(f.location, reader.getTx, maps);
     return id.origin ? { ...id, address: f.address, wif: f.wif, path: f.path } : { ...f, collection: id.collection };
   });
@@ -244,9 +287,10 @@ export async function retryUnread(found: Found[], reader: ChainReader, maps: rea
 export type Group = { key: string; title: string; items: Found[] };
 
 const S2 = /series 2/i;
-/** Gallery sections: NPG Series 2, NPG Series 1, other NPG girls (one per class), other Run NFTs, unread. */
+/** Gallery sections: listed on RelayX, NPG Series 2, NPG Series 1, other NPG girls (one per class), other Run NFTs, unread. */
 export function groupFound(found: readonly Found[]): Group[] {
   const groups: Group[] = [
+    { key: 'listed', title: 'Listed for sale on RelayX', items: [] },
     { key: 's2', title: 'NPG Series 2', items: [] },
     { key: 's1', title: 'NPG Series 1', items: [] },
     { key: 'npg', title: 'Ninja Punk Girls', items: [] },
@@ -255,7 +299,8 @@ export function groupFound(found: readonly Found[]): Group[] {
   ];
   const by = (k: string) => groups.find((g) => g.key === k)!;
   for (const f of found) {
-    if (f.unread) by('unread').items.push(f);
+    if (f.listed) by('listed').items.push(f);
+    else if (f.unread) by('unread').items.push(f);
     else if (f.n !== undefined && S2.test(f.collection)) by('s2').items.push(f);
     else if (f.n !== undefined) by('s1').items.push(f);
     else if (/npg|ninja punk/i.test(f.collection) || /^[A-Z][A-Z ]{2,}$/.test(f.title)) by('npg').items.push(f);
