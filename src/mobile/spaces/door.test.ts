@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import * as realClient from '../bmail/client';
 
 // The message box and the wallet's BEEF check are mocked: these tests cover the door's own rules.
 type Msg = { messageId: string; sender: string; body: string };
@@ -21,10 +22,9 @@ mock.module('@bsv/message-box-client', () => ({
   },
 }));
 mock.module('../bmail/client', () => ({
+  // Keep the real exports (bun module mocks leak across test files; bMail's own tests need sendMail).
+  ...realClient,
   bmailHost: () => 'https://box.test',
-  payPostage: async () => {
-    throw new Error('not used');
-  },
   verifyPostage: async (_w: unknown, _e: unknown, internalize = true) => {
     if (internalize) internalized++;
     return { sats: paidSats };
