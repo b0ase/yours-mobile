@@ -167,7 +167,10 @@ const errorOf = (data: unknown, fallback: string) =>
     : '') || fallback;
 
 export interface SocialProfile {
-  provider: 'x' | 'google';
+  provider: 'x' | 'google' | 'github' | 'linkedin';
+  /** The provider's account id (stable; a renamed @name keeps it). */
+  id?: string;
+  /** X @name / GitHub login; Google: the email address (never stored or shown); LinkedIn: an opaque id. */
   name: string;
   display?: string | null;
   avatar?: string | null;
@@ -667,6 +670,16 @@ export class BchatClient {
   /** join | heartbeat | leave | end | hand | role | step_down (bit-sign rooms/[ticker]/space). */
   async spaceAction(ticker: string, body: Record<string, unknown>): Promise<unknown> {
     return this.call('POST', `${BchatClient.path(ticker)}/space`, body);
+  }
+
+  /** A Space's transcript (speakers + host only; bit-sign answers 404 to anyone else). */
+  async spaceTranscript(ticker: string, spaceId: string): Promise<unknown> {
+    return this.call('GET', `${BchatClient.path(ticker)}/space/transcript?space_id=${encodeURIComponent(spaceId)}`);
+  }
+
+  /** Delete (redact) one of MY transcript lines. */
+  async spaceRedactLine(ticker: string, id: string): Promise<unknown> {
+    return this.call('PATCH', `${BchatClient.path(ticker)}/space/transcript`, { id });
   }
 
   /** Synced Space video (bit-sign rooms/[ticker]/space-video): item + clock, or item null. */

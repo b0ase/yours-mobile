@@ -2,7 +2,7 @@
  * Pure chat logic for the native Chat tab: message merge/ordering, day
  * separators, room titles and previews. No I/O, so it is unit-tested directly.
  */
-import { isLounge } from './loungeInfo';
+import { HELP_DESK_NAME, isLounge } from './loungeInfo';
 
 /** A bChat room message as returned by /api/bitsign/rooms/[ticker]/messages. */
 export interface ChatMessage {
@@ -223,6 +223,8 @@ export const listTimeLabel = (iso: string | null | undefined, now = new Date()) 
  * viewer it reads as the other person's handle.
  */
 export const roomTitle = (room: Pick<ChatRoom, 'name' | 'ticker'>, me: string) => {
+  // The LOUNGE room is the bWallet Help Desk everywhere in the wallet, whatever name the server still sends.
+  if (isLounge(room.ticker)) return HELP_DESK_NAME;
   const name = (room.name || '').trim();
   const dm = name.match(/^\$?([\w.-]+)\s*↔\s*\$?([\w.-]+)$/);
   if (dm) {

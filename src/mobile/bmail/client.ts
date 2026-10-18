@@ -20,6 +20,21 @@ import {
   type Sealed,
 } from './envelope';
 import type { Received, Sent } from './store';
+import {
+  LetterTooLargeError,
+  TOO_LARGE_CONFIRMING,
+  TOO_LARGE_TEXT,
+  dropPending,
+  isRefusal,
+  letterKey,
+  loadPending,
+  putPending,
+  relayLimit,
+  trimPostageBeef,
+  utf8Bytes,
+  wocProof,
+  type ProofFetcher,
+} from './delivery';
 
 /**
  * bMail's own relay (owner, 9 Oct 2026): messagebox.1sat.app refused recipients without a 1Sat account, so bMail
@@ -45,8 +60,18 @@ export const myKey = async (wallet: WalletInterface) =>
 
 const rand = () => Utils.toBase64([...crypto.getRandomValues(new Uint8Array(12))]);
 
-/** Pay `sats` to `to` as a BRC-29 wallet payment; returns the envelope's postage record. */
-export const payPostage = async (wallet: WalletInterface, to: string, sats: number, id: string): Promise<Postage> => {
+/**
+ * Sign a BRC-29 postage payment of `sats` to `to`. With `noSend` (the default for bMail sends) the wallet signs it
+ * but does not broadcast: sendMail broadcasts only after the relay has accepted the letter, so a refused letter
+ * never costs a stamp.
+ */
+export const payPostage = async (
+  wallet: WalletInterface,
+  to: string,
+  sats: number,
+  id: string,
+  opts: { noSend?: boolean } = {},
+): Promise<Postage> => {
   const derivationPrefix = rand();
   const derivationSuffix = rand();
   const { publicKey } = await wallet.getPublicKey({
@@ -58,7 +83,7 @@ export const payPostage = async (wallet: WalletInterface, to: string, sats: numb
   const r = await wallet.createAction({
     description: 'bMail postage',
     outputs: [{ lockingScript, satoshis: sats, outputDescription: `bMail stamp ${id.slice(0, 8)}` }],
-    options: { randomizeOutputs: false },
+    options: { randomizeOutputs: false, ...(opts.noSend ? { noSend: true } : {}) },
   });
   if (!r.tx || !r.txid) throw new Error('The wallet did not return the postage payment');
   return {
@@ -69,6 +94,20 @@ export const payPostage = async (wallet: WalletInterface, to: string, sats: numb
     derivationPrefix,
     derivationSuffix,
   };
+};
+
+/** Broadcast a postage tx signed with noSend (after the relay accepted the letter). */
+export const broadcastPostage = async (wallet: WalletInterface, txid: string) => {
+  await wallet.createAction({ description: 'bMail postage', options: { sendWith: [txid] } });
+};
+
+/** Release a signed-but-never-broadcast stamp so its coins are spendable again. */
+export const releasePostage = async (wallet: WalletInterface, txid: string) => {
+  try {
+    await wallet.abortAction({ reference: txid });
+  } catch {
+    /* already gone */
+  }
 };
 
 export type SendArgs = {
@@ -84,34 +123,96 @@ export type SendArgs = {
   postage?: Postage;
   /** Message id from that earlier attempt (keeps the postage stamp and the envelope id together). */
   id?: string;
-  /** Called as soon as postage is paid, before delivery, so a caller can keep it if delivery then fails. */
+  /** Called as soon as the stamp is signed, before delivery, so a caller can keep it if delivery then fails. */
   onPostagePaid?: (postage: Postage, id: string) => void | Promise<void>;
 };
 
-export const sendMail = async (wallet: WalletInterface, a: SendArgs): Promise<Sent> => {
+export type SendDeps = {
+  /** Relay body limit in bytes (default: ask the relay, GET /limits). */
+  limit?: number;
+  /** Merkle proof lookup for trimming the postage BEEF (default WhatsOnChain; null = no lookup). */
+  fetchProof?: ProofFetcher | null;
+  /** Delivery (default: the message box client). */
+  deliver?: (body: string) => Promise<unknown>;
+};
+
+/**
+ * Send one letter. Order (never lose a stamp): sign postage with noSend → trim + size-check the envelope against the
+ * relay limit → deliver to the relay → only then broadcast the stamp. A pending record (local) keeps the stamp
+ * while this runs; a retry of the same letter (same recipient/subject/body) reuses it instead of paying again.
+ */
+export const sendMail = async (wallet: WalletInterface, a: SendArgs, deps: SendDeps = {}): Promise<Sent> => {
   const from = await myKey(wallet);
-  const id = a.id ?? newMessageId();
+  const host = bmailHost();
+  const key = letterKey(a.to, a.sealed.subject, a.sealed.body);
+  const prior = a.postage ? undefined : loadPending<Postage>(from).find((p) => p.key === key && p.to === a.to);
+  // Reuse the earlier stamp even if the price moved since (e.g. the BSV rate): it is already signed for this letter.
+  const reuse = prior;
+  const id = a.id ?? reuse?.id ?? newMessageId();
   const { ciphertext } = await wallet.encrypt({
     plaintext: sealedToBytes(a.sealed),
     protocolID: BMAIL_PROTOCOL,
     keyID: id,
     counterparty: a.to,
   });
-  let postage = a.postage;
+  let postage = a.postage ?? reuse?.postage;
+  let state: 'signed' | 'broadcast' | 'given' = a.postage ? 'given' : (reuse?.state ?? 'signed');
   if (!postage && a.sats > 0) {
-    postage = await payPostage(wallet, a.to, a.sats, id);
+    postage = await payPostage(wallet, a.to, a.sats, id, { noSend: true });
+    state = 'signed';
+    putPending(from, { key, id, to: a.to, postage, state, at: Date.now() });
     await a.onPostagePaid?.(postage, id);
+  }
+  const unbroadcast = state === 'signed' && !!postage;
+  const giveUp = async () => {
+    if (unbroadcast && postage) await releasePostage(wallet, postage.txid);
+    if (state !== 'given') dropPending(from, key);
+  };
+  if (postage) {
+    try {
+      const fetchProof = deps.fetchProof === null ? undefined : (deps.fetchProof ?? wocProof());
+      const beef = await trimPostageBeef(postage.beef, fetchProof);
+      if (beef !== postage.beef) {
+        postage = { ...postage, beef };
+        if (state !== 'given') putPending(from, { key, id, to: a.to, postage, state, at: Date.now() });
+      }
+    } catch (e) {
+      console.warn('[bMail] could not trim postage', e);
+    }
   }
   const env: Envelope = { t: 'bmail', v: 1, id, from, to: a.to, at: Date.now(), sealed: Utils.toBase64(ciphertext) };
   if (postage) env.postage = postage;
   if (postage && a.replyPaidSats > 0) env.replyPaidSats = a.replyPaidSats;
   if (a.inReplyTo) env.inReplyTo = a.inReplyTo;
   if (a.usesReplyCredit) env.usesReplyCredit = true;
+  const body = encodeEnvelope(env);
+  const limit = deps.limit ?? (await relayLimit(host));
+  const bytes = utf8Bytes(body);
+  if (bytes > limit) {
+    // The stamp alone is too big (its coins' unconfirmed ancestry): release it if unpaid; keep it if already paid.
+    const stampBig = !!postage && utf8Bytes(body) - postage.beef.length < limit;
+    if (state !== 'broadcast') await giveUp();
+    throw new LetterTooLargeError(stampBig ? TOO_LARGE_CONFIRMING : TOO_LARGE_TEXT, bytes, limit);
+  }
   // TODO(bmail pay-to-open): escrow the stamp instead of paying it outright (BMAIL.md §5.3).
-  await mbox(wallet).sendMessage(
-    { recipient: a.to, messageBox: BMAIL_BOX, body: encodeEnvelope(env), skipEncryption: true },
-    bmailHost(),
-  );
+  try {
+    if (deps.deliver) await deps.deliver(body);
+    else await mbox(wallet).sendMessage({ recipient: a.to, messageBox: BMAIL_BOX, body, skipEncryption: true }, host);
+  } catch (e) {
+    // A refusal (4xx) will not change on retry: release an unpaid stamp. Network/5xx: keep it for the retry.
+    if (isRefusal(e) && state !== 'broadcast') await giveUp();
+    if (/HTTP 413/.test(String((e as Error)?.message))) throw new LetterTooLargeError(TOO_LARGE_TEXT, bytes, limit);
+    throw e;
+  }
+  if (unbroadcast && postage) {
+    try {
+      await broadcastPostage(wallet, postage.txid);
+    } catch (e) {
+      // Delivered: the recipient's wallet broadcasts the stamp when it accepts it, so the letter still counts.
+      console.warn('[bMail] postage broadcast after delivery failed', e);
+    }
+  }
+  if (state !== 'given') dropPending(from, key);
   return {
     id,
     to: a.to,

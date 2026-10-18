@@ -42,3 +42,26 @@ describe('opnsRows', () => {
     ]);
   });
 });
+
+describe('paymailRows siblings (one name, two addresses)', () => {
+  it('each primary address is followed by its bmailx.com sibling', () => {
+    const rows = paymailRows(
+      [
+        { paymail: 'john@bwalletx.com', main: true },
+        { paymail: 'john.x@bwalletx.com', main: false },
+        { paymail: 'old@bwallet.space', main: false },
+      ],
+      null,
+      { primary: 'bwalletx.com', siblings: ['bmailx.com'] },
+    );
+    expect(rows.map((r) => r.paymail)).toEqual([
+      'john@bwalletx.com',
+      'john@bmailx.com',
+      'john.x@bwalletx.com',
+      'john.x@bmailx.com',
+      'old@bwallet.space',
+    ]);
+    expect(rows[0].main).toBe(true);
+    expect(rows[1].main).toBe(false);
+  });
+});

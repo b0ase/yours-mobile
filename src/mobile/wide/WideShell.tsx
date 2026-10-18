@@ -1,3 +1,4 @@
+import { hasOwnComposer } from './composer';
 import {
   lazy,
   Suspense,
@@ -39,7 +40,7 @@ import { PNEE_TOKEN_ID } from '../notes/pnee';
 import { BappHost } from './BappHost';
 import { PersonPic } from './PersonPic';
 import { useAvatar } from '../names/useAvatar';
-import { WidePage, WideEmpty } from './WidePage';
+import { WidePage, WideEmpty, WideTitle } from './WidePage';
 import { WideAuth } from './WideAuth';
 import { useCanInstall, installApp } from './install';
 import { BAPPS, BAPP_ROUTE, bappFromPath, useBappBadge } from './bapps';
@@ -521,6 +522,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
       </aside>
       <main className="ww-main">
         <header className="ww-top">
+          {view !== 'bapp' && <WideTitle title={page.title} onBack={page.root ? undefined : () => navigate(-1)} />}
           <button
             className="ww-search"
             onClick={() => {
@@ -567,7 +569,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
             </button>
           </div>
         </header>
-        <WidePage title={page.title} onBack={page.root ? undefined : () => navigate(-1)} bleed={view === 'bapp'}>
+        <WidePage bleed={view === 'bapp'}>
           <div className={`ww-content view-${view}${fullWallet ? ' is-full' : ''}`}>
             <div className="ww-colwrap">
               <div className="ww-col">
@@ -586,8 +588,10 @@ const WideShell = ({ children }: { children: ReactNode }) => {
           </div>
         </WidePage>
       </main>
-      {/* Ask b's chat bar, floating bottom-centre; replies float above it as dismissable bubbles (owner, 12 Oct 2026). */}
-      {!bapp && !pathname.startsWith('/m/ask-b') && <AgentConversation variant="float" screen={pathname} />}
+      {/* Ask b's chat bar, floating bottom-centre; replies float above it as dismissable bubbles (owner, 12 Oct 2026).
+          Not on pages with their own bottom composer (bChat rooms + DMs, bMail, Ask b): it sat behind their
+          composer and its mic peeked out (owner, 18 Oct 2026). */}
+      {!bapp && !hasOwnComposer(pathname) && <AgentConversation variant="float" screen={pathname} />}
     </div>,
     document.body,
   );

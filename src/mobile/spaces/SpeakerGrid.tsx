@@ -8,6 +8,7 @@
  * layer its size needs (small tiles get the low layer). At 4×4 only speakers heard in the last ~10 s
  * stay live; the rest are paused (last frame stays on the tile) via SpaceMedia.setVideoLive.
  */
+import { NOT_TRANSCRIBED } from './transcription';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MoreHorizontal, PictureInPicture2, Users } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
@@ -47,6 +48,7 @@ const Tile = ({
   onMenu,
   noHost = false,
   space = '',
+  notTranscribed = false,
 }: {
   p: Participant;
   video: boolean;
@@ -63,6 +65,8 @@ const Tile = ({
   noHost?: boolean;
   /** The Space's room ticker, for the tip record. */
   space?: string;
+  /** Transcription is on and this speaker is not being transcribed. */
+  notTranscribed?: boolean;
 }) => {
   const ref = useRef<HTMLVideoElement>(null);
   useEffect(() => {
@@ -191,6 +195,9 @@ const Tile = ({
         ) : (
           <span className="truncate">${p.handle}</span>
         )}
+        {notTranscribed && size !== 'small' && (
+          <span className="shrink-0 opacity-80 text-[10px]">{NOT_TRANSCRIBED}</span>
+        )}
         {p.role === 'host' && !noHost && size !== 'small' && (
           <span className="shrink-0 rounded px-1 text-[10px] font-bold" style={{ background: GOLD, color: '#010101' }}>
             HOST
@@ -276,6 +283,8 @@ export interface SpeakerGridProps {
   banner?: string | null;
   /** The Space's room ticker (tip records). */
   space?: string;
+  /** Speakers on stage who are not transcribed while transcription is on: "(not transcribed)". */
+  notTranscribed?: string[];
 }
 
 export const SpeakerGrid = ({
@@ -296,6 +305,7 @@ export const SpeakerGrid = ({
   avatars,
   banner,
   space,
+  notTranscribed: notTranscribedList = [],
 }: SpeakerGridProps) => {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [page, setPage] = useState(0);
@@ -363,6 +373,7 @@ export const SpeakerGrid = ({
       onMenu={menuFor(p)}
       noHost={noHost}
       space={space}
+      notTranscribed={notTranscribedList.includes(p.handle)}
     />
   );
 

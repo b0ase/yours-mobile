@@ -45,6 +45,11 @@ describe('replies', () => {
     expect(ref).toEqual({ id: 'p', author: 'alice', snippet: 'line one line two' });
     expect(replyOf(msg({ event_payload: { reply_to: ref } }))).toEqual(ref);
     expect(replyOf(msg({}))).toBeNull();
+    expect(replyOf(msg({ event_payload: { shared_by: 'ann', question: 'How do I back up?' } }))).toEqual({
+      id: '',
+      author: 'ann',
+      snippet: 'How do I back up?',
+    });
   });
 });
 

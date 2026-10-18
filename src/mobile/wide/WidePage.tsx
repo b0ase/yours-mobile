@@ -1,55 +1,42 @@
 import type { ReactNode } from 'react';
 
+const BackIcon = () => (
+  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+    <path d="M15 18l-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+/**
+ * The page title, shown in the wide top bar to the left of the Ask b bar (owner, 18 Oct 2026: the old title row above
+ * every page wasted vertical space). Optional Back for sub-routes, the page's one h1, truncated when long.
+ */
+export const WideTitle = ({ title, onBack }: { title: string; onBack?: () => void }) => (
+  <div className="ww-top-title">
+    {onBack && (
+      <button className="ww-page-back" onClick={onBack} aria-label="Back" title="Back">
+        <BackIcon />
+      </button>
+    )}
+    <h1 className="ww-page-title" title={title}>
+      {title}
+    </h1>
+  </div>
+);
+
 /**
  * The one page template of the wide layout (wide.css "Page template"). Every sidebar destination renders inside it:
- * the same header (optional back, title, subtitle, actions on the right), the same padding, the same card, the same
- * background layer (the shell's, behind everything; screens' own clips are hidden). Phone screens keep their own
- * layout inside the card; their phone title rows are hidden so the page header is the only title.
+ * the same padding, the same card, the same background layer (the shell's, behind everything; screens' own clips are
+ * hidden). The title lives in the top bar (WideTitle). Phone screens keep their own layout inside the card; their phone
+ * title rows are hidden so the top-bar title is the only title.
  */
 export const WidePage = ({
-  title,
-  subtitle,
-  onBack,
-  actions,
   bleed,
   children,
 }: {
-  title: string;
-  subtitle?: ReactNode;
-  onBack?: () => void;
-  actions?: ReactNode;
-  /** Full-bleed content (a bApp): no header, no padding. */
+  /** Full-bleed content (a bApp): no padding. */
   bleed?: boolean;
   children: ReactNode;
-}) => (
-  <section className={`ww-page${bleed ? ' is-bleed' : ''}`}>
-    {!bleed && (
-      <header className="ww-page-head">
-        {onBack && (
-          <button className="ww-page-back" onClick={onBack} aria-label="Back" title="Back">
-            <svg
-              viewBox="0 0 24 24"
-              width="18"
-              height="18"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              aria-hidden
-            >
-              <path d="M15 18l-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-        )}
-        <div className="ww-grow">
-          <h1 className="ww-page-title">{title}</h1>
-          {subtitle && <div className="ww-page-sub">{subtitle}</div>}
-        </div>
-        {actions && <div className="ww-page-actions">{actions}</div>}
-      </header>
-    )}
-    {children}
-  </section>
-);
+}) => <section className={`ww-page${bleed ? ' is-bleed' : ''}`}>{children}</section>;
 
 /** Empty state: one icon, one line, an optional action. Same everywhere. */
 export const WideEmpty = ({ title, body, action }: { title: string; body?: ReactNode; action?: ReactNode }) => (

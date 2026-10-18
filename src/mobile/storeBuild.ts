@@ -157,6 +157,20 @@ export const BSPACES_ENABLED: boolean = !(
  */
 export const FREE_SPACES_ENABLED = true;
 
+/**
+ * Space transcription with consent (18 Oct 2026, bit-sign space-transcription-rules). bWalletX only
+ * for the parts that turn speech into text: the host's mode switch, the speak-consent tick and the
+ * transcript view. A store build still SHOWS the "Transcribing" badge, the listen notice and the
+ * "(not transcribed)" labels, because that is disclosure; it never offers the tick, so a store user
+ * is never transcribed. Store listings (Apple privacy labels, Play Data safety) must declare audio
+ * collection before this flag opens up there.
+ */
+export const TRANSCRIPTION_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+
 /** An open room (metadata.kind 'open', or an always-open one like the Lounge): no token gate. */
 export const isOpenRoom = (room: { ticker?: string | null; metadata?: unknown } | null | undefined): boolean => {
   if (!room) return false;
@@ -234,6 +248,15 @@ export const APP_NAME = appNameFor();
  * (socialLoginEnabled, guideline 4.8: no Sign in with Apple beside it), as a literal so the store bundle drops it.
  */
 export const HANDCASH_SIGNIN_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+/**
+ * "Link your accounts" (X / Google / GitHub / LinkedIn / HandCash badges, owner 18 Oct 2026): the same store gate
+ * as Continue with X (guideline 4.8 is still unsettled), as a literal so the store bundle drops the screen.
+ */
+export const LINK_ACCOUNTS_ENABLED: boolean = !(
   import.meta.env.VITE_STORE_BUILD === '1' ||
   import.meta.env.VITE_CHANNEL === 'ios-store' ||
   import.meta.env.VITE_CHANNEL === 'android-play'

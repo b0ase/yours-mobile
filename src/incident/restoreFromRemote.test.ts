@@ -23,6 +23,9 @@ mock.module('../mobile/names/config', () => ({
   BWALLET_PAYMAIL_DOMAIN: 'bwalletx.com',
   BWALLET_PAYMAIL_API: 'https://pay.test',
   LEGACY_PAYMAIL_DOMAINS: ['bwallet.space'],
+  SIBLING_PAYMAIL_DOMAINS: ['bmailx.com'],
+  BWALLET_PAYMAIL_DOMAINS: ['bwalletx.com', 'bmailx.com'],
+  OPNS_PROFILE_DOMAIN: 'bwalletx.com',
 }));
 
 const HEIGHT = 971004;
