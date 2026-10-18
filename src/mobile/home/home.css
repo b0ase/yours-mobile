@@ -191,18 +191,32 @@
   position: absolute;
   inset: 0;
 }
+.ww-on .bw-home-stage {
+  height: auto;
+  aspect-ratio: 16 / 6;
+  max-height: 340px;
+}
+.bw-home-artimg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
 .bw-home-cap {
   position: absolute;
   left: 0;
-  right: 0;
   bottom: 0;
+  max-width: 100%;
   display: flex;
   align-items: flex-end;
   gap: 10px;
-  padding: 28px 14px 12px;
+  padding: 22px 40px 12px 14px;
   text-align: left;
   color: #fff;
-  background: linear-gradient(180deg, transparent, rgb(0 0 0 / 0.78));
+  /* Dark only behind the words: a soft corner fade, the art stays clear elsewhere. */
+  background: radial-gradient(120% 140% at 0% 100%, rgb(0 0 0 / 0.78), rgb(0 0 0 / 0.45) 55%, transparent 80%);
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.6);
 }
 .bw-home-cap img {
   border-radius: 9px;
@@ -214,7 +228,8 @@
   font-weight: 800;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--bw-accent-hi);
+  /* Always on the dark caption fade, so a fixed light gold (theme accents can be black on White). */
+  color: #f6d47a;
 }
 .bw-home-captitle {
   font-size: 16px;
