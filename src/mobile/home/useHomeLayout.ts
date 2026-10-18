@@ -9,10 +9,10 @@ const defaults = () => (WIDE_ON ? WIDE_DEFAULT_LAYOUT : DEFAULT_LAYOUT);
 export const useHomeLayout = () => {
   const { chromeStorageService } = useServiceContext();
   const account = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ?? '';
-  const [ids, setIds] = useState(() => loadLayout(account, defaults()));
+  const [ids, setIds] = useState(() => loadLayout(account, defaults(), WIDE_ON));
   useEffect(() => {
-    setIds(loadLayout(account, defaults()));
-    return onLayoutChange(() => setIds(loadLayout(account, defaults())));
+    setIds(loadLayout(account, defaults(), WIDE_ON));
+    return onLayoutChange(() => setIds(loadLayout(account, defaults(), WIDE_ON)));
   }, [account]);
   const set = (next: ModuleId[]) => {
     setIds(next);

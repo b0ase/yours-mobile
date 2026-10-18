@@ -125,6 +125,8 @@ ${END}`;
 export const CSS_KEEP: Record<string, string> = {
   '@theme': 'sweep tab Tailwind theme token, not a fill',
   '.bwallet-web-banner': 'hazard tape (yellow and black) in every pack, by design',
+  '.bw-betagate': 'Start small beta notice: hazard-tape panel, dark in every pack like the web banner',
+  '.bw-betagate-tape': 'hazard tape (yellow and black) in every pack, by design',
   '.bwallet-web-banner__link': 'hazard-tape button: black pill on the tape in every pack',
   '.bwallet-web-banner__close': 'hazard-tape close button: black pill on the tape in every pack',
   'html body': 'web edition page ground; packs repaint it through --bw-bg',

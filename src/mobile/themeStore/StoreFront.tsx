@@ -168,10 +168,11 @@ function Editions({ ids = EDITION_IDS }: { ids?: readonly string[] }) {
       </button>
     );
   };
-  const price = (p: ThemePack) => (owned.has(p.id) ? 'Owned' : '$1');
+  // The Buy button carries the price; the pill only marks what you own (no second "$1", owner 19 Oct 2026).
+  const price = (p: ThemePack) => (owned.has(p.id) ? 'Owned' : undefined);
   return (
     <>
-      <div className="grid grid-cols-2 gap-1.5">
+      <div className="bw-pack-grid grid grid-cols-2 gap-1.5">
         {EDITIONS.filter((p) => ids.includes(p.id)).map((p) => (
           <PackCard key={p.id} p={p} inUse={inUse(p)} price={price(p)} onOpen={() => setPreview(p)}>
             {action(p)}
