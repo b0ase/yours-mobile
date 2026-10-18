@@ -132,7 +132,9 @@ import { setHelpDeskUnpinned, useHelpDeskPinned } from '../chat/helpDeskPin';
 import { roomSpaceOpen } from '../spaces/model';
 import { RoomFilterChips, SpacesRoomList } from '../spaces/SpacesFilter';
 import { loadRoomFilter, saveRoomFilter, type RoomFilter } from '../spaces/roomFilterPref';
-import { isBappRoom } from '../chat/bappRooms';
+import { isBappRoom, type Bapp } from '../chat/bappRooms';
+import { BappRoomCards } from '../chat/BappRoomCards';
+import { useLocation } from 'react-router-dom';
 import { guardedSendBsv21 } from '../../services/tokenSpendGuard';
 
 /** Store build: token rooms are listed but never opened, joined or bought into (storeBuild.ts). */
@@ -2310,6 +2312,11 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     setRoomFilterState(f);
     saveRoomFilter(f);
   };
+  // /chat/bapps (Desktop, web, phone deep link) opens straight on the bApps filter.
+  const bappsRoute = /\/chat\/bapps\/?$/.test(useLocation().pathname);
+  useEffect(() => {
+    if (bappsRoute && BSPACES_ENABLED) setRoomFilterState('bapps');
+  }, [bappsRoute]);
   const [open, setOpen] = useState<{ room: ChatRoom; entry: TokenRoomEntry | null; joinSpace?: boolean } | null>(null);
   const [locked, setLocked] = useState<{ gate: TokenGate; heldRaw: string | null; members: number | null } | null>(
     null,
@@ -2771,6 +2778,18 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
       setOpening('');
     }
   };
+  // bApp room cards (chat/BappRoomCards.tsx): open a room I'm in, or walk into a free one.
+  const openBapp = (b: Bapp) => {
+    const mine = (rooms ?? []).find((r) => r.ticker.toUpperCase() === b.ticker);
+    openOpenRoom(mine ?? stubRoom(b.ticker, b.name, { metadata: { kind: 'open', open: { official: true } } }));
+    if (!mine) refresh();
+  };
+  const joinFreeBapp = async (b: Bapp) => {
+    await client.joinOpenRoom({ ticker: b.ticker });
+    openBapp(b);
+  };
+  const bappMembers = useMemo(() => new Set((rooms ?? []).map((r) => r.ticker.toUpperCase())), [rooms]);
+  const bappsWide = typeof window !== 'undefined' && window.matchMedia?.('(min-width: 900px)').matches;
   const blockUser = (target: string) => void setBlocked(client, target, true);
 
   // "Set up your room": offered once when the issuer opens their own token room (chat/roomSetupPrompt.ts).
@@ -3159,7 +3178,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
             {yours.length === 0 && archivedShown.length === 0 && (
               <p className="px-4 pb-2 text-xs" style={{ color: MUTED }}>
                 {bappsView
-                  ? 'No bApp rooms yet. Join bRadio Lounge below to hear live shows, or open a bApp’s room from its page.'
+                  ? 'No bApp rooms yet. Every bApp’s room is below.'
                   : 'You haven’t joined any rooms yet. Pick a public room below or start your own.'}
               </p>
             )}
@@ -3194,8 +3213,20 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
               {yoursShown.map(renderYour)}
             </ul>
 
-            <ListLabel>{bappsView ? 'More bApp rooms' : 'Public rooms'}</ListLabel>
-            {browseShown.length === 0 && (
+            {bappsView && (
+              <>
+                <ListLabel>Every bApp room</ListLabel>
+                <BappRoomCards
+                  me={handle ?? null}
+                  memberTickers={bappMembers}
+                  onOpen={openBapp}
+                  onJoinFree={joinFreeBapp}
+                  wide={bappsWide}
+                />
+              </>
+            )}
+            {!bappsView && <ListLabel>Public rooms</ListLabel>}
+            {!bappsView && browseShown.length === 0 && (
               <p className="px-4 pb-2 text-xs" style={{ color: MUTED }}>
                 {query
                   ? 'No public rooms match.'
@@ -3205,7 +3236,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
               </p>
             )}
             <ul className="w-full">
-              {browseShown.map((r) => (
+              {(bappsView ? [] : browseShown).map((r) => (
                 <li key={r.ticker} className="flex items-center gap-3 px-4 py-[10px]">
                   <Avatar title={r.name} />
                   <div className="flex-1 min-w-0">

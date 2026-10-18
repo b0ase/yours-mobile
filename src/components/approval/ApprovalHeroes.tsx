@@ -168,7 +168,17 @@ export const PayHero = ({ amount, sub, badge = 'PAY' }: { amount: string; sub?: 
   </Panel>
 );
 
-export const MintHero = ({ image, alt, number }: { image?: string; alt: string; number?: string }) => (
+export const MintHero = ({
+  image,
+  alt,
+  number,
+  badge = 'MINT',
+}: {
+  image?: string;
+  alt: string;
+  number?: string;
+  badge?: string;
+}) => (
   <Panel glow={0.34}>
     <GoldRing px={190} glow={0.5}>
       {image ? (
@@ -202,7 +212,7 @@ export const MintHero = ({ image, alt, number }: { image?: string; alt: string; 
         {number}
       </div>
     )}
-    <Badge label="MINT" />
+    <Badge label={badge} />
   </Panel>
 );
 
