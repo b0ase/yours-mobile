@@ -2,7 +2,17 @@
 // Each function is one approval sheet and runs only when the partner taps a button. Tests never broadcast.
 import { sendBsv21, type OneSatContext } from '@1sat/actions';
 import { P2PKH, PublicKey, Transaction } from '@bsv/sdk';
-import { broadcastRaw } from '../../pots/potSend';
+import type { MessageCharge } from '../../chat/roomSpend';
+import { broadcastRaw, payeeAddress } from '../../pots/potSend';
+import { PARTNER_SIGN_PROTOCOL } from './lockState';
+import {
+  agreementProblem,
+  signKeyId,
+  signMessage,
+  splitCharges,
+  type AgreementVersion,
+  type Partner,
+} from './partnership';
 import {
   PARTNER_LOCK_PROTOCOL,
   addSignatures,
@@ -121,4 +131,66 @@ export async function broadcastProposal(p: PartnerProposal): Promise<{ txid: str
   const { rawTx, txid } = finalize(p);
   await broadcastRaw(rawTx);
   return { txid, rawTx };
+}
+
+// ── agreement + payments (partnership.ts) ────────────────────────────────────
+
+/**
+ * Sign the open agreement draft with this wallet's identity key. Refuses (no sheet) unless the text regenerates
+ * exactly from the draft's partners and rule and matches its sha256 (agreementProblem).
+ */
+export async function signAgreement(
+  ctx: OneSatContext,
+  a: { roomId: string; handle: string; draft: AgreementVersion },
+): Promise<{ identityKey: string; at: string; signature: string }> {
+  const problem = agreementProblem(a.draft);
+  if (problem) throw new Error(`Not signed: ${problem}`);
+  const at = new Date().toISOString();
+  const message = signMessage({
+    roomId: a.roomId,
+    version: a.draft.version,
+    sha256: a.draft.agreementSha256.toLowerCase(),
+    handle: a.handle,
+    at,
+  });
+  const [{ publicKey }, { signature }] = await Promise.all([
+    ctx.wallet.getPublicKey({ identityKey: true }),
+    ctx.wallet.createSignature({
+      protocolID: PARTNER_SIGN_PROTOCOL,
+      keyID: signKeyId(a.roomId, a.draft.version),
+      counterparty: 'anyone',
+      data: Array.from(new TextEncoder().encode(message)),
+    }),
+  ]);
+  return { identityKey: publicKey, at, signature: hex(signature) };
+}
+
+/** A partner's own wallet address ($name = name@bwalletx.com). */
+export const partnerAddress = (handle: string) =>
+  payeeAddress({ paymail: `${handle}@bwalletx.com`, name: `$${handle}` });
+
+/**
+ * Pay the partnership: ONE transaction, one output per partner by share, straight to each partner's wallet.
+ * One approval sheet. Nothing is pooled or held by us.
+ */
+export async function payPartnership(
+  ctx: OneSatContext,
+  a: { ticker: string; totalSats: number; partners: Partner[]; resolve?: (handle: string) => Promise<string> },
+): Promise<{ txid: string; charges: MessageCharge[] }> {
+  const resolve = a.resolve ?? partnerAddress;
+  const addressOf: Record<string, string> = {};
+  for (const p of a.partners) addressOf[p.handle] = await resolve(p.handle);
+  const charges = splitCharges(a.totalSats, a.partners, addressOf);
+  const r = await ctx.wallet.createAction({
+    description: `Pay the $${a.ticker} partnership`.slice(0, 50),
+    outputs: charges.map((c) => ({
+      lockingScript: new P2PKH().lock(c.to).toHex(),
+      satoshis: Number(c.amount),
+      outputDescription: 'Partner share of a payment',
+    })),
+    labels: ['bwx-partnership'],
+    options: { randomizeOutputs: false },
+  });
+  if (!r.txid) throw new Error('The payment was not sent');
+  return { txid: r.txid, charges };
 }

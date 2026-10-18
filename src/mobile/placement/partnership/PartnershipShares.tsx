@@ -11,6 +11,7 @@ import { ChatApiError, defaultHttp, loadSession } from '../../chat/api';
 import { isNative } from '../../native';
 import { BsharesApi } from '../api';
 import { identityKey } from '../company';
+import { PartnershipAgreement, PartnershipSetup } from './PartnershipAgreement';
 import { broadcastProposal, lockUp, partnerKey, proposeMove, signProposal } from './actions';
 import { PARTNER_SIGN_PROTOCOL, lockKeyKeyID, lockKeyMessage, type PartnerLockState } from './lockState';
 import { RULE_WARNING, isReady, parsePartnerLock, partnershipLabel, type Holding } from './partnerLock';
@@ -131,6 +132,7 @@ function Partnership({ api, ticker, name }: { api: BsharesApi; ticker: string; n
           <Lock size={10} aria-hidden="true" /> Restricted · not for sale
         </span>
       </div>
+      <PartnershipAgreement api={api} ticker={ticker} />
       {myTotal > 0n && <div className="text-sm text-white">{partnershipLabel(myTotal)}</div>}
       {ks && (
         <p className="m-0 text-xs" style={{ color: MUTED }}>
@@ -284,13 +286,20 @@ function Partnership({ api, ticker, name }: { api: BsharesApi; ticker: string; n
 export const PartnershipShares = () => {
   const api = useMemo(() => new BsharesApi(defaultHttp(isNative), loadSession()), []);
   const [list, setList] = useState<{ ticker: string; name: string }[]>([]);
+  const load = useCallback(
+    () =>
+      api
+        .myPartnerships()
+        .then((r) => setList(r.partnerships))
+        .catch(() => setList([])),
+    [api],
+  );
   useEffect(() => {
-    api
-      .myPartnerships()
-      .then((r) => setList(r.partnerships))
-      .catch(() => setList([]));
-  }, [api]);
-  if (!list.length) return null;
+    void load();
+  }, [load]);
+  // A just-proposed draft may not be listed until it is signed: show it straight away.
+  const onProposed = (ticker: string) =>
+    setList((l) => (l.some((p) => p.ticker === ticker) ? l : [...l, { ticker, name: `$${ticker}` }]));
   return (
     <section
       className="mx-4 rounded-2xl bg-[#17191E] border border-[#2b2f36] p-4 flex flex-col gap-2"
@@ -302,6 +311,7 @@ export const PartnershipShares = () => {
       {list.map((p) => (
         <Partnership key={p.ticker} api={api} ticker={p.ticker} name={p.name} />
       ))}
+      <PartnershipSetup api={api} onProposed={onProposed} />
     </section>
   );
 };
