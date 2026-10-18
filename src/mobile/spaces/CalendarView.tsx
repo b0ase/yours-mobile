@@ -157,7 +157,7 @@ export const CalendarView = ({
                   href={eventPageUrl(e.id)}
                   target="_blank"
                   rel="noreferrer"
-                  className="block overflow-hidden text-ellipsis whitespace-nowrap font-semibold"
+                  className="block font-semibold line-clamp-2"
                 >
                   {e.title}
                 </a>

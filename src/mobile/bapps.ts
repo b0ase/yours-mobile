@@ -186,7 +186,15 @@ export const BAPPS: BApp[] = [
   },
   {
     name: 'bCal',
-    url: 'https://bitcoin-calendar.vercel.app',
+    // bWalletX: the one calendar of scheduled Spaces, in the wallet (spaces/CalendarPage.tsx, owner 18 Oct 2026).
+    // The store edition has no bSpaces (BSPACES_ENABLED), so it keeps the bitcoin-calendar site. Literal env check.
+    url: !(
+      import.meta.env.VITE_STORE_BUILD === '1' ||
+      import.meta.env.VITE_CHANNEL === 'ios-store' ||
+      import.meta.env.VITE_CHANNEL === 'android-play'
+    )
+      ? '/m/calendar'
+      : 'https://bitcoin-calendar.vercel.app',
     verb: 'Keep a calendar on Bitcoin',
     group: 'work',
     status: 'live',

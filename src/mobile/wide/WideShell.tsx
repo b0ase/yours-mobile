@@ -396,6 +396,8 @@ const WideShell = ({ children }: { children: ReactNode }) => {
       calls: CALLS_ROUTE,
       settings: '/m/settings',
       exchange: '/m/exchange',
+      // bcalx.com "Open in bWalletX" lands on ?view=calendar.
+      ...(BSPACES_ENABLED ? { calendar: '/m/calendar', spaces: '/m/spaces' } : {}),
       // Agreements live in bMail (18 Oct 2026); ?view=bureau stays as a quiet alias.
       ...(BUREAU_ENABLED ? { agreements: '/m/bmail/agreements', bureau: '/m/bmail/agreements' } : {}),
     };
