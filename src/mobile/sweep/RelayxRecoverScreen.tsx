@@ -51,6 +51,8 @@ const pad = (n: number) => String(n).padStart(4, '0');
  */
 export function CardArt({ url, className, eager }: { url: string; className?: string; eager?: boolean }) {
   const [loaded, setLoaded] = useState(false);
+  // A picture that won't load (gone from the file host, not an image) leaves the plain tile, never a broken image.
+  const [failed, setFailed] = useState(false);
   // Only cards on or near the screen hold their picture: iOS closed the app in the background when hundreds of
   // decoded cards sat in memory (owner, 17 Oct 2026). Far off screen the <img> goes away and memory is freed.
   const [near, setNear] = useState(!!eager);
@@ -69,13 +71,20 @@ export function CardArt({ url, className, eager }: { url: string; className?: st
   }, [eager]);
   return (
     <div ref={ref} className={`relative overflow-hidden ${className ?? ''}`}>
-      {!loaded && <div aria-hidden="true" className="absolute inset-0 animate-pulse" style={{ background: SURFACE }} />}
-      {near && (
+      {!loaded && (
+        <div
+          aria-hidden="true"
+          className={`absolute inset-0 ${failed ? '' : 'animate-pulse'}`}
+          style={{ background: SURFACE }}
+        />
+      )}
+      {near && !failed && (
         <img
           src={url}
           alt=""
           decoding="async"
           onLoad={() => setLoaded(true)}
+          onError={() => setFailed(true)}
           className="absolute inset-0 h-full w-full object-contain transition-opacity duration-200 ease-out"
           style={{ opacity: loaded ? 1 : 0 }}
         />
@@ -159,6 +168,14 @@ function Tile({ f, onOpen }: { f: Found; onOpen: () => void }) {
     >
       {f.art ? (
         <CardArt url={f.art} className="aspect-[2/3] w-full rounded-t-xl" />
+      ) : f.emoji ? (
+        <div
+          aria-hidden="true"
+          className="flex aspect-[2/3] w-full items-center justify-center text-[56px]"
+          style={{ background: SURFACE }}
+        >
+          {f.emoji}
+        </div>
       ) : (
         <div className="aspect-[2/3] w-full" style={{ background: SURFACE }} />
       )}
@@ -247,7 +264,17 @@ function Detail({
             <CardArt url={f.art} eager className="mx-auto aspect-[2/3] h-[360px]" />
           </div>
         )}
-        {f.art && (
+        {!f.art && f.emoji && (
+          <div aria-hidden="true" className="mx-auto text-[96px] leading-none">
+            {f.emoji}
+          </div>
+        )}
+        {f.art && f.n === undefined && (
+          <p className="m-0 text-[12px] leading-relaxed" style={{ color: MUTED }}>
+            The picture stored on chain with this NFT.
+          </p>
+        )}
+        {f.art && f.n !== undefined && (
           <p className="m-0 text-[12px] leading-relaxed" style={{ color: MUTED }}>
             Card art from NPG for card #{pad(f.n ?? 0)}. The number is matched from the chain by mint order; the image
             stored on chain is encrypted, so it can't be shown.

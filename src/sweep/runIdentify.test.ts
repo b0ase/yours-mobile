@@ -1,6 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 import { LockingScript, P2PKH, PrivateKey, Script, Transaction, UnlockingScript } from '@bsv/sdk';
-import { identifyJig, jigOrigin, npgTitle, readRun, type NpgMap } from './runIdentify';
+import {
+  bImageOutput,
+  identifyJig,
+  jigOrigin,
+  npgTitle,
+  ORDFS,
+  readRun,
+  runMetadata,
+  runPicture,
+  type NpgMap,
+} from './runIdentify';
 
 const owner = new PrivateKey(5).toPublicKey().toAddress();
 const enc = (s: string) => [...new TextEncoder().encode(s)];
@@ -112,5 +122,86 @@ describe('RelayX importer: naming', () => {
   });
   test('titles pad to four digits', () => {
     expect(npgTitle(9)).toBe('NPG #0009');
+  });
+});
+
+// Shaped like real RelayX txs (decoded from chain, 18 Oct 2026):
+// - Pixel Foxes #173 mint 1594d1e5…: o0 B:// image/png "Pixel Foxes #173.png", o1 Run CALL mint(["", {image: "_o1"}]).
+// - NPG 00001 deploy d956030a…: o0 B:// image/jpeg, o1 Run DEPLOY metadata {name, image: "_o1", isCollection: false}.
+// - NPG S1 mint cb1c9e84…: o0 UNIV (CBOR, proto relay.encrypted-nft, AES-128-GCM), image "_o1" → no picture.
+const bOut = (mime = 'image/png', name = 'Pixel Foxes #173.png') => {
+  const s = new Script();
+  s.writeOpCode(0x00).writeOpCode(0x6a).writeBin(enc('19HxigV4QyBv3tHpQVcUEQyq1pzZVdoAut'));
+  s.writeBin([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).writeBin(enc(mime)).writeBin(enc('binary'));
+  s.writeBin(enc(name));
+  return { lockingScript: new LockingScript(s.chunks), satoshis: 0 };
+};
+const mintArgs = (meta: object) => ({ in: 1, exec: [{ op: 'CALL', data: [{ $jig: 0 }, 'mint', ['', meta]] }] });
+
+describe('RelayX importer: pictures', () => {
+  const foxMint = tx([['cc'.repeat(32), 2]], [bOut(), runOut(mintArgs({ name: '', image: '_o1' })), jig(), jig()]);
+  test('finds the B:// image output and skips UNIV (encrypted) ones', () => {
+    expect(bImageOutput(foxMint)).toBe(0);
+    expect(bImageOutput(mint)).toBeNull();
+    expect(bImageOutput(tx([], [bOut('text/plain', 'a.txt'), jig()]))).toBeNull();
+  });
+  test('reads metadata from mint args and DEPLOY props', () => {
+    expect(runMetadata(readRun(foxMint)!.run)).toEqual({ name: '', image: '_o1' });
+    expect(runMetadata(readRun(deploy)!.run)).toEqual({ name: 'KAZUYO' });
+  });
+  test('"_o1" points at the B:// file in the same tx, served by ORDFS', () => {
+    expect(runPicture({ image: '_o1' }, foxMint)).toEqual({ art: `${ORDFS}/content/${foxMint.id('hex')}_0` });
+  });
+  test('encrypted or missing images give "none" (named tile), never a broken URL', () => {
+    expect(runPicture({ image: '_o1' }, mint)).toBe('none');
+    expect(runPicture({ image: '_o1', isEncrypted: true }, foxMint)).toBe('none');
+    expect(runPicture({ image: 'ipfs://x' }, foxMint)).toBe('none');
+    expect(runPicture({ name: 'x' }, foxMint)).toBeNull();
+  });
+  test('https as is, b:// and bare txids via ORDFS, emoji as a tile', () => {
+    const id = 'ab'.repeat(32);
+    expect(runPicture({ image: 'https://x.io/a.png' }, foxMint)).toEqual({ art: 'https://x.io/a.png' });
+    expect(runPicture({ image: 'http://x.io/a.png' }, foxMint)).toBe('none');
+    expect(runPicture({ image: `b://${id}` }, foxMint)).toEqual({ art: `${ORDFS}/${id}` });
+    expect(runPicture({ image: id.toUpperCase() }, foxMint)).toEqual({ art: `${ORDFS}/${id}` });
+    expect(runPicture({ emoji: '🦊' }, foxMint)).toEqual({ emoji: '🦊' });
+    expect(runPicture({ image: '🦊' }, foxMint)).toEqual({ emoji: '🦊' });
+  });
+  test('a held non-NPG jig gets its mint picture', async () => {
+    const cls = tx(
+      [['dd'.repeat(32), 0]],
+      [runOut({ in: 0, exec: [{ op: 'DEPLOY', data: ['class NFT', { metadata: { name: 'Pixel Foxes' } }] }] }), jig()],
+    );
+    const m = tx([[cls.id('hex'), 1]], [bOut(), runOut(mintArgs({ name: '', image: '_o1' })), jig(), jig()]);
+    const local = new Map([cls, m].map((t) => [t.id('hex'), t]));
+    const j = await identifyJig(`${m.id('hex')}_o3`, async (id) => local.get(id)!, []);
+    expect(j.collection).toBe('Pixel Foxes');
+    expect(j.art).toBe(`${ORDFS}/content/${m.id('hex')}_0`);
+  });
+  test('a one-of class (mint carries no image) uses the DEPLOY picture', async () => {
+    const cls = tx(
+      [['ee'.repeat(32), 0]],
+      [
+        bOut('image/jpeg', 'npg.jpeg'),
+        runOut({
+          in: 0,
+          exec: [{ op: 'DEPLOY', data: ['class NFT', { metadata: { name: 'NPG 00001', image: '_o1' } }] }],
+        }),
+        jig(),
+      ],
+    );
+    const m = tx(
+      [[cls.id('hex'), 2]],
+      [runOut({ in: 1, exec: [{ op: 'CALL', data: [{ $jig: 0 }, 'mint', ['']] }] }), jig(), jig()],
+    );
+    const local = new Map([cls, m].map((t) => [t.id('hex'), t]));
+    const j = await identifyJig(`${m.id('hex')}_o2`, async (id) => local.get(id)!, []);
+    expect(j.title).toBe('NPG 00001');
+    expect(j.art).toBe(`${ORDFS}/content/${cls.id('hex')}_0`);
+  });
+  test('no picture anywhere: the named tile stays', async () => {
+    const j = await identifyJig(`${send2.id('hex')}_o1`, getTx, []);
+    expect(j.art).toBeUndefined();
+    expect(j.emoji).toBeUndefined();
   });
 });

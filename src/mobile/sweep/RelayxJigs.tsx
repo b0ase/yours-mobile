@@ -20,7 +20,16 @@ const PANEL = 'rgb(255 255 255 / 0.04)';
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
 /** The girl only: crop the 961x1441 cut-out to her bounding box, centred in a square thumbnail. */
-function Cutout({ url, box }: { url: string; box?: [number, number, number, number] }) {
+function Cutout({ url, box, plain }: { url: string; box?: [number, number, number, number]; plain?: boolean }) {
+  // Not an NPG cut-out (a picture from another collection's mint): fit it whole.
+  if (plain)
+    return (
+      <div
+        aria-hidden="true"
+        className="shrink-0 rounded-xl"
+        style={{ width: THUMB, height: THUMB, background: `#12060D url("${url}") center / contain no-repeat` }}
+      />
+    );
   const [x0, y0, x1, y1] = box ?? [0, 0, 961, 1441];
   const scale = THUMB / Math.max(x1 - x0, y1 - y0);
   const dx = (THUMB - (x1 - x0) * scale) / 2;
@@ -140,14 +149,18 @@ export function RelayxJigs({ held, getHex }: { held: Held[]; getHex: (txid: stri
           title={j.origin ? `Minted at ${j.origin}` : undefined}
         >
           {j.art ? (
-            <Cutout url={j.art} box={j.n !== undefined ? bbox[String(j.n).padStart(4, '0')] : undefined} />
+            <Cutout
+              url={j.art}
+              plain={j.n === undefined}
+              box={j.n !== undefined ? bbox[String(j.n).padStart(4, '0')] : undefined}
+            />
           ) : (
             <div
               aria-hidden="true"
               className="shrink-0 rounded-xl flex items-center justify-center text-[10px] font-bold"
               style={{ width: THUMB, height: THUMB, background: '#12060D', color: '#FF2E93' }}
             >
-              NPG
+              {j.emoji ? <span className="text-[28px]">{j.emoji}</span> : 'NPG'}
             </div>
           )}
           <div className="flex flex-col min-w-0">
