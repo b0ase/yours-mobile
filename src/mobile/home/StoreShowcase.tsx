@@ -4,13 +4,35 @@ import { ChevronLeft, ChevronRight, ShoppingBag } from 'lucide-react';
 import { SHOPS } from '../themeStore/shops';
 import { HEADLINE_ALBUM } from '../media/featured/featured';
 import { BSPACES_ENABLED } from '../storeBuild';
+import scammersCard from '../wallet/editionArt/scammerscartel-dj-card.webp';
+import npgBanner from '../wallet/art/npg/npg-1.webp';
+import vexArt from '../media/featured/vexvoid-cover.jpg';
 
 /**
  * Store showcase (home module, bWalletX only: loaded behind THEME_STORE_PAID_ENABLED like the Store itself).
  * A calm, slowly turning shelf of real things in the Store: the edition themes (Scammers Cartel first), the emoji
  * packs, the VexVoid album, OpNS names and Spaces. Every slide opens its own page.
  */
-type Item = { key: string; kind: string; title: string; blurb: string; to: string; art: string; logo?: string };
+type Item = {
+  key: string;
+  kind: string;
+  title: string;
+  blurb: string;
+  to: string;
+  /** Background behind the picture (or the whole art when there is no picture). */
+  art: string;
+  /** The item's picture, shown sharp with object-fit: cover; `pos` keeps its focal point in view. */
+  img?: string;
+  pos?: string;
+  logo?: string;
+};
+
+/** Sharp art per shop (the shops' own banner CSS uses a soft, blurred backdrop for Scammers Cartel). */
+const SHOP_ART: Record<string, { img: string; pos: string } | undefined> = {
+  scammerscartel: { img: scammersCard, pos: '50% 35%' },
+  npg: { img: npgBanner, pos: '50% 30%' },
+  vexvoid: { img: vexArt, pos: '50% 40%' },
+};
 
 const ROTATE_MS = 5200;
 
@@ -26,6 +48,7 @@ const showcaseItems = (spaces = BSPACES_ENABLED): Item[] => {
   const order = ['scammerscartel', 'emoji', 'npg', 'vexvoid', 'npgx'];
   const shops = [...SHOPS].sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
   const items: Item[] = shops.map((s) => ({
+    ...SHOP_ART[s.id],
     key: `shop:${s.id}`,
     kind: s.id === 'emoji' ? 'Emoji packs' : 'Theme',
     title: s.name,
@@ -40,7 +63,9 @@ const showcaseItems = (spaces = BSPACES_ENABLED): Item[] => {
     title: HEADLINE_ALBUM.title,
     blurb: `${HEADLINE_ALBUM.artist} · first track free`,
     to: '/m/media',
-    art: `center / cover no-repeat url(${HEADLINE_ALBUM.cover}), #000`,
+    art: '#000',
+    img: HEADLINE_ALBUM.cover,
+    pos: '50% 40%',
   });
   items.splice(4, 0, {
     key: 'names',
@@ -101,8 +126,11 @@ const StoreShowcase = () => {
             onClick={() => navigate(it.to)}
           >
             <span className="bw-home-art" style={{ background: it.art }} />
+            {it.img && (
+              <img className="bw-home-artimg" src={it.img} alt="" style={{ objectPosition: it.pos ?? 'center' }} />
+            )}
             <span className="bw-home-cap">
-              {it.logo && <img src={it.logo} alt="" width={34} height={34} />}
+              {it.logo && it.logo !== it.img && <img src={it.logo} alt="" width={34} height={34} />}
               <span className="bw-home-tiletext">
                 <span className="bw-home-kind">{it.kind}</span>
                 <span className="bw-home-captitle">{it.title}</span>
