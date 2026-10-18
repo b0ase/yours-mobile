@@ -214,9 +214,14 @@ export const BTrustPage = () => {
   };
 
   return (
-    <div className="px-4 pb-24">
+    // Own scroll container inside the app shell (as StockPage): the document never scrolls, so the tab bar stays
+    // put. Top padding = the fixed TopNav (h-14); bottom = the tab bar / dock (--dock-h), as BMailPage.
+    <div
+      className="w-full h-full overflow-y-auto"
+      style={{ paddingTop: '3.5rem', paddingBottom: 'calc(var(--dock-h, 3.75rem) + 1.5rem)' }}
+    >
       <TopNav />
-      <div className="mt-14 flex flex-col gap-3">
+      <div className="w-full max-w-2xl mx-auto px-4 pt-3 flex flex-col gap-3">
         {TEST_TIMINGS && <TestBanner />}
         <header className="flex flex-col gap-1">
           <h1 className="m-0 text-white text-xl">bTrust</h1>
