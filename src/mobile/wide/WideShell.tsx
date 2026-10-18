@@ -392,6 +392,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
       bmail: '/m/bmail',
       mail: '/m/bmail',
       chat: '/m/chat',
+      ...(BSPACES_ENABLED ? { 'chat-bapps': '/m/chat/bapps' } : {}),
       feed: '/m/feed',
       calls: CALLS_ROUTE,
       settings: '/m/settings',
@@ -469,10 +470,12 @@ const WideShell = ({ children }: { children: ReactNode }) => {
       ? 'NFT'
       : pathname.startsWith('/m/bmint')
         ? 'bMint'
-        : friendPage
-          ? 'Friends'
-          : (current?.label.replace(/\s*\(⌘L\)$/, '') ??
-            (seg ? seg.charAt(0).toUpperCase() + seg.slice(1).replace(/-/g, ' ') : '')),
+        : pathname.startsWith('/m/chat/bapps')
+          ? 'bApp rooms'
+          : friendPage
+            ? 'Friends'
+            : (current?.label.replace(/\s*\(⌘L\)$/, '') ??
+              (seg ? seg.charAt(0).toUpperCase() + seg.slice(1).replace(/-/g, ' ') : '')),
     root: !!current,
   };
   const navBtn = (it: Item) =>

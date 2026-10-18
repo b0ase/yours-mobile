@@ -171,6 +171,15 @@ const MobileRoutes = () => (
             </TermsGate>
           }
         />
+        {/* Chat › bApps on its own URL (/chat/bapps on Desktop and web): every bApp room, entry by ticket. */}
+        <Route
+          path="chat/bapps"
+          element={
+            <TermsGate>
+              <ChatPage />
+            </TermsGate>
+          }
+        />
       </Routes>
     </Suspense>
   </SectionBoundary>
