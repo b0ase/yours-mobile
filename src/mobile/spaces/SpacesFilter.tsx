@@ -1,5 +1,5 @@
 /**
- * The Chat tab's room filters: All | Spaces. Spaces lists the token rooms you're in that have a space
+ * The Chat tab's room filters: Rooms | Spaces | bApps. Spaces lists the token rooms you're in that have a space
  * on, live first with a LIVE badge; tapping one opens the room, where the Live now banner joins it.
  * bWalletX only: ChatPage mounts this behind BSPACES_ENABLED, so the store bundle drops it.
  */
@@ -7,6 +7,9 @@ import { Radio } from 'lucide-react';
 import type { BchatClient } from '../chat/api';
 import { audienceCount, audienceLine, roomsWithSpaces, stageOf } from './model';
 import { MAX_ROOMS, useRoomSpaces } from './roomSpaces';
+import { type RoomFilter } from './roomFilterPref';
+
+export type { RoomFilter };
 
 const GOLD = 'var(--bw-accent-hi)';
 const MUTED = '#8a8f98';
@@ -14,17 +17,15 @@ const LINE = '#1f2127';
 const PANEL = '#121316';
 const CLIP = 'overflow-hidden text-ellipsis whitespace-nowrap';
 
-// All = live Spaces on top, then every room; Rooms = rooms only; Spaces = Spaces only (owner, 15 Oct 2026).
-export type RoomFilter = 'all' | 'rooms' | 'spaces';
 const CHIPS: [RoomFilter, string][] = [
-  ['all', 'All'],
   ['rooms', 'Rooms'],
   ['spaces', 'Spaces'],
+  ['bapps', 'bApps'],
 ];
 
 /** Chips scroll sideways on their own if more are added; the page never overflows. */
 export const RoomFilterChips = ({ value, onChange }: { value: RoomFilter; onChange: (f: RoomFilter) => void }) => (
-  <div className="w-full max-w-full overflow-x-auto px-4 pb-2" style={{ scrollbarWidth: 'none' }}>
+  <div className="w-full max-w-full overflow-x-auto px-4 pt-3 pb-2" style={{ scrollbarWidth: 'none' }}>
     <div className="flex w-max gap-2" role="tablist">
       {CHIPS.map(([k, label]) => (
         <button
