@@ -26,17 +26,12 @@ import { BTRUST_CHECKLIST } from './checklist';
 import { CheckInPanel } from './CheckInPanel';
 import { HeirClaimPanel } from './HeirClaimPanel';
 import { FundPanel } from './FundPanel';
+import { btrustTestMode, TEST_BANNER } from './testMode';
 import { nextOwnerSlot } from './fund';
 import { wocChain } from './derive';
 
 const GOLD = '#F5B800';
-const TEST_TIMINGS = (() => {
-  try {
-    return /btrust-test/.test(window.location.href) || localStorage.getItem('btrust-test') === '1';
-  } catch {
-    return false;
-  }
-})();
+const TEST_TIMINGS = btrustTestMode();
 const MUTED = '#98A2B3';
 const CARD = 'rounded-2xl bg-[#17191E] border border-[#2b2f36] p-4 flex flex-col gap-2';
 const INPUT = 'w-full rounded-xl bg-[#0f1115] border border-[#2b2f36] p-2 text-white text-sm';
@@ -87,6 +82,16 @@ const Step = ({ n, title, children }: { n: number; title: string; children: Reac
     </h2>
     {children}
   </section>
+);
+
+export const TestBanner = () => (
+  <div
+    role="alert"
+    className="rounded-2xl p-4 text-center text-lg font-extrabold text-white"
+    style={{ background: '#D92D20' }}
+  >
+    {TEST_BANNER}
+  </div>
 );
 
 export const BTrustPage = () => {
@@ -168,6 +173,7 @@ export const BTrustPage = () => {
         })),
         heirsHeight,
         leadHeight: heirsHeight + (TEST_TIMINGS ? 3 : blocksForMonths(6)),
+        ...(TEST_TIMINGS ? { test: true as const } : {}),
       });
       inheritanceLock(p);
       setSlot(next.slot);
@@ -211,6 +217,7 @@ export const BTrustPage = () => {
     <div className="px-4 pb-24">
       <TopNav />
       <div className="mt-14 flex flex-col gap-3">
+        {TEST_TIMINGS && <TestBanner />}
         <header className="flex flex-col gap-1">
           <h1 className="m-0 text-white text-xl">bTrust</h1>
           <p className="m-0 text-sm" style={{ color: MUTED }}>

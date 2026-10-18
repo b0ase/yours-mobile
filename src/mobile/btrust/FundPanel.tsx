@@ -12,6 +12,7 @@ import { fmtSats } from '../money/money';
 import { BLOCKS_PER_DAY } from './checkin';
 import { fundLock, MIN_LOCK_SATS, savePlanLocally } from './fund';
 import type { InheritancePlan } from './inheritance';
+import { TEST_BANNER } from './testMode';
 
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
@@ -111,6 +112,15 @@ export const FundPanel = ({ plan, slot, height, download }: Props) => {
               secondary={{ label: 'Not now', onClick: () => setSheet(false), disabled: busy }}
               error={error}
             >
+              {plan.test && (
+                <div
+                  role="alert"
+                  className="rounded-2xl p-4 text-center text-lg font-extrabold text-white"
+                  style={{ background: '#D92D20' }}
+                >
+                  {TEST_BANNER}
+                </div>
+              )}
               <div className="flex flex-wrap gap-2">
                 {plan.heirs.map((h, i) => (
                   <Chip key={h.pubKey} solid={i === 0}>
