@@ -16,7 +16,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import bGlyph from '../brand/bwallet-glyph.svg';
-import { STORE_BUILD, THEME_STORE_PAID_ENABLED } from '../storeBuild';
+import { SHARES_CARD_ENABLED, STORE_BUILD, THEME_STORE_PAID_ENABLED } from '../storeBuild';
 import { SectionBoundary } from '../wallet/SectionBoundary';
 import { MODULE_IDS, addModule, removeModule, shiftModule, visibleLayout, type ModuleId } from './layout';
 import { useHomeLayout } from './useHomeLayout';
@@ -27,6 +27,7 @@ import './home.css';
 // Paid store content: its own chunk behind the inlined flag, so a store build never contains it.
 // Holdings reads the wide layout's wallet feed, so it is a Desktop module.
 const Holdings = WIDE_ON ? lazy(() => import('./Holdings')) : null;
+const SharesCard = SHARES_CARD_ENABLED ? lazy(() => import('../shareClaim/SharesCard')) : null;
 const StoreShowcase = THEME_STORE_PAID_ENABLED ? lazy(() => import('./StoreShowcase')) : null;
 
 const BIcon = ((p: { size?: number }) => (
@@ -157,6 +158,14 @@ export const HomeRest = () => {
         <HomeEditor ids={shown} set={set} all={ids} onDone={() => setEditing(false)} />
       ) : (
         <div className="bw-home-grid">
+          {/* Your shareholding: renders nothing unless a company returns this wallet's own signed register entry. */}
+          {SharesCard && (
+            <SectionBoundary name="Your shareholding">
+              <Suspense fallback={null}>
+                <SharesCard />
+              </Suspense>
+            </SectionBoundary>
+          )}
           {rest.map((id) => {
             const d = HOME_MODULES[id];
             const C = d.Component!;

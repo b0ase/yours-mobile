@@ -574,3 +574,20 @@ export const BUREAU_ENABLED: boolean = !(
  */
 export const SPACES_LABEL: string = BSPACES_ENABLED ? 'bSpaces' : 'Spaces';
 export const PEOPLE_LABEL: string = BSPACES_ENABLED ? 'bPeople' : 'People';
+
+/**
+ * Register-of-members claims ($NPG first, docs/SHARE-CLAIM.md): the claim + 2-of-2 lock flow is bWalletX only.
+ * Literal env check so Vite inlines it and Rollup drops the lazy ClaimPage chunk from a store build.
+ * Store grep: `Claim your shares|npg share claim|will be locked 2-of-2 with the company|bwallet.shareClaims`.
+ */
+export const SHARE_CLAIM_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+
+/**
+ * The read-only "Your shareholding" card: every build (owner, 18 Oct 2026). It renders only when a company server
+ * returns this user's own register entry signed by a pinned key; no offers, prices, values or transfer controls.
+ */
+export const SHARES_CARD_ENABLED = true;
