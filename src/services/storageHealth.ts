@@ -4,11 +4,12 @@
  * server holds the wallet's records; otherwise this device does, and any `remotes` are backups.
  */
 import type { StorageConfig } from './types/chromeStorage.types';
+import { isNetworkError, OFFLINE_TEXT } from '../utils/offline';
 
 export const SYNC_HEALTH_KEY = (identityAddress: string) => `syncHealth:${identityAddress}`;
 
 export type SyncHealth = {
-  status: 'complete' | 'error' | 'sweep-failed' | 'receive-failed' | 'arriving';
+  status: 'complete' | 'offline' | 'error' | 'sweep-failed' | 'receive-failed' | 'arriving';
   at: number;
   error?: string;
   satoshis?: number;
@@ -61,12 +62,19 @@ export type HealthLabel = { text: string; failing: boolean; error?: string };
 export function syncHealthLabel(h: SyncHealth | undefined, now = Date.now()): HealthLabel {
   if (!h) return { text: 'Not synced yet on this device', failing: false };
   const when = ago(now - h.at);
-  switch (h.status) {
+  switch (healthStatus(h.status, h.error)) {
     case 'complete':
       return { text: `Synced ${when}`, failing: false };
+    case 'offline':
+      return { text: `${OFFLINE_TEXT}. Sync will resume when you reconnect · last tried ${when}`, failing: false };
     case 'arriving':
       return { text: `Payment arriving (${h.satoshis ?? 0} sats), still being added · ${when}`, failing: false };
     default:
       return { text: `Sync failing: ${h.error || h.status} · ${when}`, failing: true, error: h.error || h.status };
   }
+}
+
+/** An 'error' caused by having no connection is recorded as 'offline', so the badge doesn't call it a fault. */
+export function healthStatus(status: string, error: string | undefined): string {
+  return status === 'error' && error && isNetworkError(error) ? 'offline' : status;
 }
