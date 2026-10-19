@@ -18,6 +18,14 @@ const PAIR_HOSTS = new Set([PAIR_HOST, 'bwallet.space']);
 export const DEFAULT_RELAY = 'relay.bwallet.space';
 export const QR_LIFETIME_S = 120;
 
+/**
+ * The only relay a wallet will use (security audit 19 Oct 2026, H1). A pairing link names its relay, and the relay
+ * reports the site's origin, so a link pointing at someone else's relay could claim to be any site. Loopback is
+ * accepted only when the caller allows it (development builds).
+ */
+export const isAllowedRelay = (relay: string, allowLocal = false) =>
+  relay === DEFAULT_RELAY || (allowLocal && /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(relay));
+
 export type Role = 'site' | 'wallet';
 export type WalletInfo = { name: string; icon?: string; rdns: string };
 
@@ -63,7 +71,11 @@ export function pairUrl(link: PairLink): string {
 }
 
 /** Parse a scanned QR (https link or bwallet:// fallback). Throws on anything else. */
-export function parsePairUrl(text: string, nowS = Math.floor(Date.now() / 1000)): PairLink {
+export function parsePairUrl(
+  text: string,
+  nowS = Math.floor(Date.now() / 1000),
+  opts: { allowLocalRelay?: boolean } = {},
+): PairLink {
   const u = new URL(text.trim());
   const ok =
     (u.protocol === 'https:' && PAIR_HOSTS.has(u.host) && u.pathname === '/pair') ||
@@ -75,6 +87,8 @@ export function parsePairUrl(text: string, nowS = Math.floor(Date.now() / 1000))
   if (!/^[A-Za-z0-9_-]{22}$/.test(link.c)) throw new Error('Bad pairing code');
   if (!/^0[23][0-9a-f]{64}$/i.test(link.k)) throw new Error('Bad pairing code');
   if (!/^[a-z0-9.-]+(:\d+)?$/i.test(link.r)) throw new Error('Bad pairing code');
+  if (!isAllowedRelay(link.r, opts.allowLocalRelay))
+    throw new Error("This pairing code uses a pairing service bWalletX doesn't trust. Don't connect.");
   const o = new URL(link.o);
   if (o.origin !== link.o) throw new Error('Bad pairing code');
   if (!Number.isFinite(link.e) || link.e < nowS) throw new Error('This code has expired. Ask the site for a new one.');

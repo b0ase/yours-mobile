@@ -52,7 +52,8 @@ test('QR → scan → same code → connect → request reaches the wallet and t
   };
 
   mock.module(new URL('../../src/mobile/dappBrowser.ts', import.meta.url).pathname, () => ({
-    handleSiteCall: async (origin: string, _url: string, type: string, params: unknown) => {
+    handleSiteCall: async (origin: string, _url: string, type: string, params: unknown, paired?: boolean) => {
+      expect(paired).toBe(true);
       calls.push({ origin, type, params });
       return { success: true, data: { publicKey: '02' + 'ab'.repeat(32) } };
     },
@@ -89,7 +90,10 @@ test('QR → scan → same code → connect → request reaches the wallet and t
     .wallet;
   const r = await wallet.getPublicKey({ identityKey: true });
   expect(r).toEqual({ publicKey: '02' + 'ab'.repeat(32) });
-  expect(calls).toEqual([{ origin: SITE_ORIGIN, type: 'getPublicKey', params: { identityKey: true } }]);
+  // Audit H1: the call runs under the paired key, not the site's own originator (no inherited grants).
+  expect(calls).toEqual([
+    { origin: 'https://localhost.paired.invalid:3000', type: 'getPublicKey', params: { identityKey: true } },
+  ]);
   expect(phone.pairedSites().map((s: { origin: string }) => s.origin)).toEqual([SITE_ORIGIN]);
 
   // A QR claiming another origin is refused by the phone (relay reports the real one).

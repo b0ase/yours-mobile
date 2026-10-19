@@ -145,7 +145,7 @@ test('sessions: never re-runs an answered call; holds a reply while the socket i
   const c = 'AAAAAAAAAAAAAAAAAAAAAA';
   const url = pairUrl({
     v: PAIR_VERSION,
-    r: 'relay.test',
+    r: 'relay.bwallet.space',
     c,
     k: site.toPublicKey().toString(),
     o: 'https://a.lol',
