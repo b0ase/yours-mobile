@@ -25,10 +25,11 @@ import { CWIEventName } from './cwi';
 import { describeWalletError } from './brand/walletError';
 import {
   healInvalidSend,
-  healMessage,
+  withHealMessage,
   isInvalidTxReview,
   resyncMessage,
   resyncSpent,
+  shouldAutoResync,
   type HealReport,
 } from './services/invalidSendHeal';
 import { refusalFor } from './services/broadcastRefusals';
@@ -173,6 +174,54 @@ async function healRejectedInputs(ctx: AccountContext, error: unknown): Promise<
     return null;
   }
 }
+/**
+ * Clear every coin storage lists as spendable that the chain proves was spent (resyncSpent, fail closed: only coins
+ * with a named spending txid). Owner's iPhone, 19 Oct 2026: ~$51 of coins spent from another device holding the same
+ * seed still showed as balance; the toolbox's sync only adds outputs and never re-checks ones it holds, so they were
+ * found one failed send at a time. Returns null when storage/services aren't ready. Never throws.
+ */
+async function resyncAccountCoins(
+  ctx: AccountContext,
+  onStep?: (step: string) => void,
+): Promise<HealReport | null> {
+  const { account } = chromeStorageService.getCurrentAccountObject();
+  const identityKey = account?.pubKeys?.identityPubKey || '';
+  const txo = (ctx.syncContext.services as unknown as { txo?: { getSpend: (o: string) => Promise<string | null> } }).txo;
+  if (!identityKey || !txo) return null;
+  try {
+    const outpoints = await ctx.storage.runAsStorageProvider(async (sp) => {
+      const user = (await sp.findUsers({ partial: { identityKey } }))[0];
+      if (!user) return [] as string[];
+      return (await sp.findOutputs({ partial: { userId: user.userId, spendable: true } }))
+        .filter((o) => !!o.txid)
+        .map((o) => `${o.txid}_${o.vout}`);
+    });
+    onStep?.(`Checking ${outpoints.length} coins…`);
+    return await resyncSpent(outpoints, (o) => txo.getSpend(o), markSpentStore(ctx, identityKey), {
+      fallback: wocSpend,
+      onProgress: (done) => onStep?.(`Checked ${done} of ${outpoints.length} coins…`),
+    });
+  } catch (err) {
+    console.error('[resyncCoins] failed:', err);
+    return null;
+  }
+}
+
+/** HealStore over this account's storage: spendable → false for one outpoint. */
+const markSpentStore = (ctx: AccountContext, identityKey: string) => ({
+  markSpent: (txid: string, vout: number) =>
+    ctx.storage.runAsStorageProvider(async (sp) => {
+      const user = (await sp.findUsers({ partial: { identityKey } }))[0];
+      if (!user) return 0;
+      let n = 0;
+      for (const o of await sp.findOutputs({ partial: { userId: user.userId, txid, vout, spendable: true } }))
+        n += await sp.updateOutput(o.outputId, { spendable: false });
+      return n;
+    }),
+});
+
+/** Last automatic coin resync per identity key (ms). */
+const autoResyncAt = new Map<string, number>();
 // Set while wallet is reinitializing (e.g. account switch) to prevent
 // ensureWallet from launching a popup during the transition.
 let reinitPromise: Promise<WalletInterface | null> | null = null;
@@ -463,6 +512,21 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
   if (accountContext) {
     bindPermissionCallbacks(accountContext.wallet);
     console.log('[background] initializeWallet: bound permission callbacks');
+    // Coins spent elsewhere (another device, same seed) stay "spendable" here until checked: check at unlock, at most
+    // every 30 minutes, so the balance is right before the first send fails (resyncAccountCoins).
+    {
+      const ctxNow = accountContext;
+      const key = chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey || '';
+      if (key && shouldAutoResync(autoResyncAt.get(key), Date.now())) {
+        autoResyncAt.set(key, Date.now());
+        void resyncAccountCoins(ctxNow).then((r) => {
+          if (r?.released) {
+            console.warn('[background] auto coin resync cleared spent coins:', r);
+            notifyBalanceUpdate();
+          }
+        });
+      }
+    }
     // Abort token-indexing payments that were built but never sent (bounded, never throws).
     void healIndexFundActions(accountContext.baseWallet).then((r) => {
       if (r.aborted.length || r.pending.length || r.errors.length) console.log('[background] indexFund heal:', r);
@@ -2208,38 +2272,8 @@ if (!(
       await ensureWallet(true);
       if (!accountContext) throw new Error('Wallet not initialized');
       const ctx = accountContext;
-      const { account } = chromeStorageService.getCurrentAccountObject();
-      const identityKey = account?.pubKeys?.identityPubKey || '';
-      const txo = (ctx.syncContext.services as unknown as { txo?: { getSpend: (o: string) => Promise<string | null> } })
-        .txo;
-      if (!identityKey || !txo) throw new Error('Wallet services are not ready yet. Try again in a moment.');
-      const outpoints = await ctx.storage.runAsStorageProvider(async (sp) => {
-        const user = (await sp.findUsers({ partial: { identityKey } }))[0];
-        if (!user) return [] as string[];
-        return (await sp.findOutputs({ partial: { userId: user.userId, spendable: true } }))
-          .filter((o) => !!o.txid)
-          .map((o) => `${o.txid}_${o.vout}`);
-      });
-      sendRecoverProgress('txid', `Checking ${outpoints.length} coins…`);
-      const report = await resyncSpent(
-        outpoints,
-        (o) => txo.getSpend(o),
-        {
-          markSpent: (txid, vout) =>
-            ctx.storage.runAsStorageProvider(async (sp) => {
-              const user = (await sp.findUsers({ partial: { identityKey } }))[0];
-              if (!user) return 0;
-              let n = 0;
-              for (const o of await sp.findOutputs({ partial: { userId: user.userId, txid, vout, spendable: true } }))
-                n += await sp.updateOutput(o.outputId, { spendable: false });
-              return n;
-            }),
-        },
-        {
-          fallback: wocSpend,
-          onProgress: (done) => sendRecoverProgress('txid', `Checked ${done} of ${outpoints.length} coins…`),
-        },
-      );
+      const report = await resyncAccountCoins(ctx, (step) => sendRecoverProgress('txid', step));
+      if (!report) throw new Error('Wallet services are not ready yet. Try again in a moment.');
       console.log('[STORAGE_RESYNC_COINS]', report);
       sendResponse({ type: 'STORAGE_RESYNC_COINS', success: true, data: { report, summary: resyncMessage(report) } });
     } catch (err) {
@@ -3994,7 +4028,8 @@ if (!(
       sendResponse({
         type: CWIEventName.CREATE_ACTION,
         success: false,
-        error: (friendly ?? errorMessage) + (heal ? healMessage(heal) : ''),
+        // Heal outcome first: the page cuts long errors, and a long broadcaster reason hid "tap Send again" (19 Oct).
+        error: withHealMessage(friendly ?? errorMessage, heal),
       });
     }
     return true;

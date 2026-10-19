@@ -160,3 +160,22 @@ export const healMessage = (r: HealReport): string =>
           .map((o) => `${o.slice(0, 10)}…:${o.split('_')[1]}`)
           .join(', ')}${r.inputs.length > 4 ? ` +${r.inputs.length - 4}` : ''}.`
       : '';
+
+/**
+ * The error text with the heal outcome FIRST when coins were cleared. Owner's iPhone, 19 Oct 2026: the heal cleared
+ * coins, but its "tap Send again" was appended after a long broadcaster reason and the page cuts errors at 400
+ * characters, so only the raw UTXO_SPENT text showed.
+ */
+export const withHealMessage = (error: string, r: HealReport | null): string => {
+  if (!r) return error;
+  const m = healMessage(r).trim();
+  if (!m) return error;
+  return r.released > 0 ? `${m} (${error})` : `${error} ${m}`;
+};
+
+/** Minimum gap between automatic coin resyncs for one account. */
+export const AUTO_RESYNC_GAP_MS = 30 * 60 * 1000;
+
+/** Pure: is an automatic coin resync due (never run, or the last one is older than the gap)? */
+export const shouldAutoResync = (lastAt: number | undefined, now: number, gap = AUTO_RESYNC_GAP_MS): boolean =>
+  lastAt === undefined || now - lastAt >= gap;

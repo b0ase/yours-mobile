@@ -114,3 +114,29 @@ describe('resyncSpent (Settings › Resync coins)', () => {
     expect(resyncMessage({ checked: 4, released: 0 })).toContain('all still spendable');
   });
 });
+
+describe('owner iPhone 19 Oct: WERR_REVIEW_ACTIONS + UTXO_SPENT, heal outcome must survive the page cut', () => {
+  const { withHealMessage, shouldAutoResync, namedSpentInputs: named } = require('./invalidSendHeal');
+  const IN = 'a'.repeat(64);
+  const PROC = 'b'.repeat(64);
+  const SPENDER = 'c'.repeat(64);
+  const reason = `UTXO_SPENT (70): [ProcessTransaction][${PROC}] UTXO_SPENT (70): ${IN}:1 utxo already spent by tx ${SPENDER}[0]`;
+  const raw = `Undelayed createAction or signAction results require review. rejected by the network as invalid; broadcaster said: ${reason}; tx ${PROC.slice(0, 12)}…`;
+
+  test('the broadcaster names the input', () => {
+    expect(named(reason, [`${IN}_1`, `${IN}_0`])).toEqual([`${IN}_1`]);
+  });
+  test('cleared: "tap Send again" leads, so a 400-char cut keeps it', () => {
+    const text = withHealMessage(raw + ' x'.repeat(300), { checked: 1, released: 1, inputs: [`${IN}_1`] });
+    expect(text.slice(0, 400)).toContain('tap Send again');
+  });
+  test('nothing cleared: error unchanged first', () => {
+    expect(withHealMessage(raw, { checked: 0, released: 0 })).toBe(raw);
+    expect(withHealMessage(raw, null)).toBe(raw);
+  });
+  test('auto resync throttle', () => {
+    expect(shouldAutoResync(undefined, 1)).toBe(true);
+    expect(shouldAutoResync(0, 1000, 5000)).toBe(false);
+    expect(shouldAutoResync(0, 5000, 5000)).toBe(true);
+  });
+});
