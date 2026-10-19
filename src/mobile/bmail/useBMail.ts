@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { WalletInterface } from '@bsv/sdk';
 import { useServiceContext } from '../../hooks/useServiceContext';
+import { walletReady } from '../../utils/walletReady';
 import { isFriend as isCallFriend } from '../calls/friends';
 import { loadMyProfile, saveMyProfile } from '../calls/bphone';
 import { usdToSats, useBsvUsd } from '../money/money';
@@ -221,19 +222,21 @@ export const useBMail = () => {
  * Reads local state only: never fetches or acknowledges, so it cannot steal mail from the notifier or the screen.
  */
 export const useBMailUnread = (): number => {
-  const { apiContext } = useServiceContext();
+  const { apiContext, isLocked, chromeStorageService } = useServiceContext();
   const wallet = apiContext?.wallet as unknown as WalletInterface | undefined;
+  // App-wide (top bar): before a wallet exists or while locked there is no key to ask for (src/utils/walletReady.ts).
+  const ready = walletReady(chromeStorageService, isLocked);
   const [me, setMe] = useState('');
   useEffect(() => {
     let live = true;
-    if (wallet)
+    if (wallet && ready)
       myKey(wallet)
         .then((k) => live && setMe(k))
         .catch(() => undefined);
     return () => {
       live = false;
     };
-  }, [wallet]);
+  }, [wallet, ready]);
   const v = useSyncExternalStore(subscribeMail, () => version);
   return useMemo(() => {
     if (!me) return 0;

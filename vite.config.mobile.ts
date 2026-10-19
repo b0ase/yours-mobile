@@ -246,8 +246,8 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     // Recovery phrase "Next": don't wait on the background wallet switch (a new wallet's first
     // storage connection can hang), so the button never silently does nothing.
     [
-      '          await chromeStorageService.switchAccount(identityAddress);\n          setStep(3);',
-      "          await Promise.race([\n            chromeStorageService.switchAccount(identityAddress).catch((e) => console.error('[create] switchAccount', e)),\n            new Promise((r) => setTimeout(r, 4000)),\n          ]);\n          setStep(3);",
+      '          await chromeStorageService.switchAccountForReload(identityAddress);\n          setStep(3);',
+      "          await Promise.race([\n            chromeStorageService.switchAccountForReload(identityAddress).catch((e) => console.error('[create] switchAccount', e)),\n            new Promise((r) => setTimeout(r, 4000)),\n          ]);\n          setStep(3);",
     ],
     // Add account: say plainly it's the wallet password (one password unlocks every account) and that this
     // account gets its own new 12 words next (owner, 6 Oct 2026: it looked like it wanted a new password).

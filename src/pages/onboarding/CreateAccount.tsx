@@ -321,7 +321,9 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
           // empty grid while switchAccount ran, which looked like a second "Your recovery phrase" screen.
           if (leaving) return;
           setLeaving(true);
-          await chromeStorageService.switchAccount(identityAddress);
+          // "Enter" reloads into the wallet next. Outside the extension that reload restarts the background, which
+          // opens the account once; switching here as well opened it twice (ChromeStorage.service.ts).
+          await chromeStorageService.switchAccountForReload(identityAddress);
           setStep(3);
           setSeedWords([]);
           setLeaving(false);

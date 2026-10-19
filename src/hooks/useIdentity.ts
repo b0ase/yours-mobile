@@ -13,6 +13,8 @@ import type { OneSatContext } from '@1sat/actions';
 import type { ChromeStorageService } from '../services/ChromeStorage.service';
 import type { ChromeStorageObject } from '../services/types/chromeStorage.types';
 import { HOSTED_YOURS_IMAGE } from '../utils/constants';
+import { walletReady } from '../utils/walletReady';
+import { useServiceContext } from './useServiceContext';
 import { PublicKey } from '@bsv/sdk';
 
 /** The identity address this wallet context signs as, or null (same check as mobile/names/accountName.ts). */
@@ -125,7 +127,16 @@ export const useIdentity = (apiContext: OneSatContext, chromeStorageService?: Ch
     [chromeStorageService],
   );
 
+  // Mounted app-wide (notifications, wallet home): before a wallet exists or while locked, asking the wallet for its
+  // identity key fails with "Wallet not available". Wait until there is an open wallet (src/utils/walletReady.ts).
+  const { isLocked } = useServiceContext();
+  const ready = walletReady(chromeStorageService, isLocked);
+
   const loadIdentity = useCallback(async () => {
+    if (!ready) {
+      setState((s) => ({ ...s, loading: false }));
+      return;
+    }
     setState((s) => ({ ...s, loading: true, error: null }));
     try {
       const [bapId, resolvedId] = await Promise.all([computeBapId(apiContext), resolveBapId(apiContext)]);
@@ -158,7 +169,7 @@ export const useIdentity = (apiContext: OneSatContext, chromeStorageService?: Ch
         error: err instanceof Error ? err.message : String(err),
       }));
     }
-  }, [apiContext, cacheToStorage, chromeStorageService]);
+  }, [apiContext, cacheToStorage, chromeStorageService, ready]);
 
   useEffect(() => {
     loadIdentity();

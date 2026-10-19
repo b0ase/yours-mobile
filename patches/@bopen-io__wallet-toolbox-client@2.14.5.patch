@@ -1,5 +1,5 @@
 diff --git a/out/index.client.cjs b/out/index.client.cjs
-index af2c513176b1265c5a02d8242ac87fc1c6805ad1..24614f4a462e96101a5b9c7512db0c94a391eea7 100644
+index af2c513176b1265c5a02d8242ac87fc1c6805ad1..b988fed9f4bc87af6c04e4c1299962117bf444fa 100644
 --- a/out/index.client.cjs
 +++ b/out/index.client.cjs
 @@ -3593,6 +3593,10 @@ var EntityOutputTagMap = class EntityOutputTagMap extends EntityBase {
@@ -35,7 +35,45 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..24614f4a462e96101a5b9c7512db0c94
  			spendable: true,
  			...specOp?.managedChangeOnly ? managedChangeOutputFields : {}
  		},
-@@ -38567,6 +38577,13 @@ var Monitor = class Monitor {
+@@ -38451,10 +38461,19 @@ var Monitor = class Monitor {
+ 	async runOnce() {
+ 		await this.ensureEventSubscriptions();
+ 		await this.setupTasksOnce();
+-		if (!this.storage.getActive().isStorageProvider()) return;
+ 		for (const task of await this.tasksReadyToRun()) await this.runScheduledTask(task);
+ 	}
+ 	/**
++	* bWalletX: tasks that do not touch StorageProvider APIs and so may run while the active store is remote
++	* (a StorageClient). The 1Sat factory adds only "BackupSync" for a remote-active wallet (it pushes the remote
++	* active's state into the local IndexedDB backup), but runOnce returned before any task when the active store
++	* was remote, so that backup was never refreshed. Every other task still waits for a local active store.
++	*/
++	static remoteActiveTaskNames = new Set(["BackupSync"]);
++	canRunTask(task) {
++		return this.storage.getActive().isStorageProvider() || Monitor.remoteActiveTaskNames.has(task.name);
++	}
++	/**
+ 	* Best-effort attempt to (re)register the optional Chaintracks header/reorg
+ 	* push subscriptions ahead of this scheduler tick.
+ 	*
+@@ -38514,6 +38533,7 @@ var Monitor = class Monitor {
+ 		const tasks = [];
+ 		const now = Date.now();
+ 		for (const task of this._tasks) try {
++			if (!this.canRunTask(task)) continue;
+ 			if (task.trigger(now).run) tasks.push(task);
+ 		} catch (error_) {
+ 			await this.logTaskError(task, "trigger", "error0", error_);
+@@ -38522,7 +38542,7 @@ var Monitor = class Monitor {
+ 	}
+ 	async runScheduledTask(task) {
+ 		try {
+-			if (!this.storage.getActive().isStorageProvider()) return;
++			if (!this.canRunTask(task)) return;
+ 			const log = await task.runTask();
+ 			if (log.length === 0) return;
+ 			const details = task.name === "MonitorCallHistory" ? "..." : safeDiagnostic(log, 1024);
+@@ -38567,6 +38587,13 @@ var Monitor = class Monitor {
  	async logEvent(event, details) {
  		if (typeof event !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(event)) throw new WERR_INVALID_PARAMETER("event", "a bounded control-free monitor event name");
  		const boundedDetails = details == null ? void 0 : safeDiagnostic(details, 8192);
@@ -50,7 +88,7 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..24614f4a462e96101a5b9c7512db0c94
  			await sp.insertMonitorEvent({
  				created_at: /* @__PURE__ */ new Date(),
 diff --git a/out/index.client.mjs b/out/index.client.mjs
-index 5d9233efe5b3e60fcb88b8f260eb65e871945552..7eaea344ec68ae234366957b1528e5d6316ec99d 100644
+index 5d9233efe5b3e60fcb88b8f260eb65e871945552..3a302546992cca3de7f3e98a5a6a4dc0166e168b 100644
 --- a/out/index.client.mjs
 +++ b/out/index.client.mjs
 @@ -3558,6 +3558,10 @@ var EntityOutputTagMap = class EntityOutputTagMap extends EntityBase {
@@ -86,7 +124,45 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..7eaea344ec68ae234366957b1528e5d6
  			spendable: true,
  			...specOp?.managedChangeOnly ? managedChangeOutputFields : {}
  		},
-@@ -38532,6 +38542,13 @@ var Monitor = class Monitor {
+@@ -38416,10 +38426,19 @@ var Monitor = class Monitor {
+ 	async runOnce() {
+ 		await this.ensureEventSubscriptions();
+ 		await this.setupTasksOnce();
+-		if (!this.storage.getActive().isStorageProvider()) return;
+ 		for (const task of await this.tasksReadyToRun()) await this.runScheduledTask(task);
+ 	}
+ 	/**
++	* bWalletX: tasks that do not touch StorageProvider APIs and so may run while the active store is remote
++	* (a StorageClient). The 1Sat factory adds only "BackupSync" for a remote-active wallet (it pushes the remote
++	* active's state into the local IndexedDB backup), but runOnce returned before any task when the active store
++	* was remote, so that backup was never refreshed. Every other task still waits for a local active store.
++	*/
++	static remoteActiveTaskNames = new Set(["BackupSync"]);
++	canRunTask(task) {
++		return this.storage.getActive().isStorageProvider() || Monitor.remoteActiveTaskNames.has(task.name);
++	}
++	/**
+ 	* Best-effort attempt to (re)register the optional Chaintracks header/reorg
+ 	* push subscriptions ahead of this scheduler tick.
+ 	*
+@@ -38479,6 +38498,7 @@ var Monitor = class Monitor {
+ 		const tasks = [];
+ 		const now = Date.now();
+ 		for (const task of this._tasks) try {
++			if (!this.canRunTask(task)) continue;
+ 			if (task.trigger(now).run) tasks.push(task);
+ 		} catch (error_) {
+ 			await this.logTaskError(task, "trigger", "error0", error_);
+@@ -38487,7 +38507,7 @@ var Monitor = class Monitor {
+ 	}
+ 	async runScheduledTask(task) {
+ 		try {
+-			if (!this.storage.getActive().isStorageProvider()) return;
++			if (!this.canRunTask(task)) return;
+ 			const log = await task.runTask();
+ 			if (log.length === 0) return;
+ 			const details = task.name === "MonitorCallHistory" ? "..." : safeDiagnostic(log, 1024);
+@@ -38532,6 +38552,13 @@ var Monitor = class Monitor {
  	async logEvent(event, details) {
  		if (typeof event !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(event)) throw new WERR_INVALID_PARAMETER("event", "a bounded control-free monitor event name");
  		const boundedDetails = details == null ? void 0 : safeDiagnostic(details, 8192);

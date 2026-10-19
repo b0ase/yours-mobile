@@ -4,6 +4,8 @@
  *    support "StorageProvider" interface', so every runOnce that logged an event rejected;
  *  - the IndexedDB invalid-change review with ['release', 'all'] passed basketId: undefined to findOutputs, which
  *    refuses undefined filters, so the post-restore UTXO review always failed on a local store.
+ *  - Monitor.runOnce returned before any task when the active store was remote, so BackupSync (the only task the
+ *    1Sat factory adds for a remote-active wallet: remote → the device's IndexedDB backup) never ran.
  * Local only: fake-indexeddb, random keys, no network.
  */
 import 'fake-indexeddb/auto';
@@ -60,4 +62,55 @@ describe('wallet-toolbox patches', () => {
     };
     await expect(monitor.logEvent('chaintracksEventsError', 'unavailable')).resolves.toBeUndefined();
   });
+
+  test('Monitor.runOnce runs BackupSync, and only BackupSync, while the active store is remote', async () => {
+    const { storage } = await localManager();
+    const monitor = new Monitor({
+      chain: 'main',
+      services: new Services('main'),
+      storage,
+      chaintracks: new Services('main').options.chaintracks!,
+      msecsWaitPerMerkleProofServiceReq: 500,
+      taskRunWaitMsecs: 5000,
+      abandonedMsecs: 300000,
+      unprovenAttemptsLimitTest: 10,
+      unprovenAttemptsLimitMain: 144,
+      maxRebroadcastAttempts: 0,
+    });
+    monitor.ensureEventSubscriptions = async () => undefined; // no chaintracks connection in a unit test
+    const ran: string[] = [];
+    const task = (name: string) =>
+      ({
+        monitor,
+        storage,
+        name,
+        lastRunMsecsSinceEpoch: 0,
+        asyncSetup: async () => undefined,
+        trigger: () => ({ run: true }),
+        runTask: async () => {
+          ran.push(name);
+          return '';
+        },
+      }) as never;
+    monitor.addTask(task('BackupSync'));
+    monitor.addTask(task('CheckForProofs'));
+
+    const active = storage.getActive();
+    const isProvider = active.isStorageProvider.bind(active);
+    active.isStorageProvider = () => false; // a StorageClient
+    await monitor.runOnce();
+    expect(ran).toEqual(['BackupSync']);
+
+    active.isStorageProvider = isProvider; // local active: every task, as before
+    ran.length = 0;
+    await monitor.runOnce();
+    expect(ran).toEqual(['BackupSync', 'CheckForProofs']);
+  });
+});
+
+test('the master-backup storage open skips the boot monitor run (its BackupSync would contend with getSyncChunk)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../initWallet.ts', import.meta.url), 'utf8');
+  const fn = src.slice(src.indexOf('export const openAccountStorageForBackup'), src.indexOf('export const initWallet'));
+  expect(fn).toContain('skipInitialMonitor: true');
 });
