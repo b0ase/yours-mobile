@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, ShoppingBag } from 'lucide-react';
-import { SHOPS } from '../themeStore/shops';
+import { LISTED_SHOPS } from '../themeStore/shops';
 import { HEADLINE_ALBUM } from '../media/featured/featured';
 import { BSPACES_ENABLED } from '../storeBuild';
 import scammersCard from '../wallet/editionArt/scammerscartel-dj-card.webp';
@@ -10,7 +10,7 @@ import vexArt from '../media/featured/vexvoid-cover.jpg';
 
 /**
  * Store showcase (home module, bWalletX only: loaded behind THEME_STORE_PAID_ENABLED like the Store itself).
- * A calm, slowly turning shelf of real things in the Store: the edition themes (Scammers Cartel first), the emoji
+ * A calm, slowly turning shelf of real things in the Store: the edition themes (NPG first; Scammers Cartel hidden until it is ready), the emoji
  * packs, the VexVoid album, OpNS names and Spaces. Every slide opens its own page.
  */
 type Item = {
@@ -45,8 +45,8 @@ const reduced = () => {
 };
 
 const showcaseItems = (spaces = BSPACES_ENABLED): Item[] => {
-  const order = ['scammerscartel', 'emoji', 'npg', 'vexvoid', 'npgx'];
-  const shops = [...SHOPS].sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+  const order = ['npg', 'emoji', 'vexvoid', 'npgx', 'scammerscartel'];
+  const shops = [...LISTED_SHOPS].sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
   const items: Item[] = shops.map((s) => ({
     ...SHOP_ART[s.id],
     key: `shop:${s.id}`,

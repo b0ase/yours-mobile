@@ -85,4 +85,13 @@ export const SHOPS: readonly Shop[] = [
   },
 ];
 
+/** Scammers Cartel is not ready for release (owner, 19 Oct 2026: wrong banner). Off in every build; the shop, theme and
+ *  art stay in the repo, and anyone who already owns or applied the theme keeps it (ThemeSheet lists owned editions). */
+export const SCAMMERS_CARTEL_ENABLED = false;
+const LISTED = (id: string) => SCAMMERS_CARTEL_ENABLED || id !== 'scammerscartel';
+/** The shops the Store and the wallet home showcase list. */
+export const LISTED_SHOPS: readonly Shop[] = SHOPS.filter((s) => LISTED(s.id));
+/** Edition theme ids the Store sells. */
+export const listedEditionIds = (ids: readonly string[]) => ids.filter(LISTED);
+
 export const shopById = (id: string) => SHOPS.find((s) => s.id === id);

@@ -25,7 +25,7 @@ import { applyPack } from './catalog';
 import { PackCard, PreviewSheet } from './ui';
 import { BuySheet } from './StoreBuy';
 import { useOwnedThemes } from './useOwnedThemes';
-import { SHOPS, shopById, type Shop } from './shops';
+import { LISTED_SHOPS, listedEditionIds, shopById, type Shop } from './shops';
 import { priceLabel, visible, type Listing } from './bstore';
 import { EMOJI_PACK_IDS } from '../theme/emojiThemes';
 
@@ -126,7 +126,7 @@ const BACK =
   'flex items-center gap-1.5 self-start rounded-xl bg-[var(--bw-surface)] border border-[#2b2f36] px-3 py-2 text-xs font-bold text-white cursor-pointer';
 
 // Our edition themes, listed in Themes (owner, 17 Oct 2026). They apply today, so they show their real state.
-const EDITION_IDS: readonly string[] = ['vexvoid', 'npg', 'npgx', 'scammerscartel'];
+const EDITION_IDS: readonly string[] = listedEditionIds(['vexvoid', 'npg', 'npgx', 'scammerscartel']);
 // The Emoji collection (owner, 18 Oct 2026): twelve $1 themes with Twemoji art, sold the same way.
 const EMOJI_IDS: readonly string[] = EMOJI_PACK_IDS;
 const EDITIONS: readonly ThemePack[] = [...EDITION_IDS, ...EMOJI_IDS]
@@ -308,7 +308,7 @@ function Shops({ onOpen }: { onOpen: (id: string) => void }) {
     <>
       <h2 className="text-sm font-bold text-white m-0">Shops</h2>
       <div className="grid grid-cols-2 gap-1.5">
-        {SHOPS.map((s) => (
+        {LISTED_SHOPS.map((s) => (
           <button
             key={s.id}
             type="button"
@@ -429,7 +429,7 @@ function Store() {
   const [shopId, setShopId] = useState<string | null>(() => {
     try {
       const id = new URLSearchParams(window.location.search).get('shop');
-      return id && shopById(id) ? id : null;
+      return id && LISTED_SHOPS.some((s) => s.id === id) ? id : null;
     } catch {
       return null;
     }
