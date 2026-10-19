@@ -14,3 +14,19 @@ export const nextPullHint = (stored: string | null | undefined): { show: boolean
   if (n >= PULL_HINT_SHOWS) return { show: false, next: String(n) };
   return { show: true, next: String(n + 1) };
 };
+
+/**
+ * Whether the hint may run at all. Only on an app screen, where the pull works: the shell also wraps onboarding,
+ * where the hint covered the "Create New Wallet" button (19 Oct 2026). Only with a touch screen: the pull is a
+ * touch gesture, so a mouse can't do it.
+ */
+export const pullHintApplies = (onAppScreen: boolean, touch: boolean) => onAppScreen && touch;
+
+/** A touch-first screen (phones, tablets); false for a mouse or trackpad. */
+export const touchScreen = () => {
+  try {
+    return typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+  } catch {
+    return false;
+  }
+};
