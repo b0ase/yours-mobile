@@ -15,6 +15,8 @@ export default tseslint.config(
       'build-web',
       'build-desktop',
       'src-tauri',
+      // Vendored upstream source, kept byte-identical (src/vendor/webrtpay/README.md).
+      'src/vendor',
       'release',
       'android',
       'ios',

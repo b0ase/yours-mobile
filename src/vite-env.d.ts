@@ -18,6 +18,10 @@ interface ImportMetaEnv {
   readonly VITE_ARTIST_PROGRAMME?: string;
   /** '1' = ask the fee pot to pay network fees (off by default; needs the server). */
   readonly VITE_FEE_POT?: string;
+  /** Phone to phone direct pay prototype (storeBuild.ts DIRECT_PAY_ENABLED); "1" to turn it on. */
+  readonly VITE_DIRECT_PAY?: string;
+  /** Comma-separated STUN urls for phone to phone; default stun:stun.l.google.com:19302. */
+  readonly VITE_DIRECT_PAY_STUN?: string;
   /** '1' = show "Find people you follow on X" (off by default; needs bit-sign #295 turned on). */
   readonly VITE_X_FOLLOWS_IMPORT?: string;
 }

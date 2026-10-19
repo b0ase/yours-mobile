@@ -410,6 +410,19 @@ export const ARTIST_PROGRAMME_ENABLED: boolean =
     import.meta.env.VITE_CHANNEL === 'android-play'
   );
 
+/**
+ * Phone to phone (prototype, docs/DIRECT-PAY.md): pay by QR over a WebRTC data channel with the vendored
+ * @bsv/webrtpay (src/vendor/webrtpay). OFF by default and never in a store build (VITE_DIRECT_PAY=1 to try it).
+ * Literal env checks so Vite inlines them and Rollup drops the lazy DirectPaySheet chunk and the vendored code.
+ */
+export const DIRECT_PAY_ENABLED: boolean =
+  import.meta.env.VITE_DIRECT_PAY === '1' &&
+  !(
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+  );
+
 /** Network fees on us (docs/FEE-POT.md): OFF by default, never in a store build (VITE_FEE_POT=1 to try it). */
 export const FEE_POT_ENABLED: boolean =
   import.meta.env.VITE_FEE_POT === '1' &&
