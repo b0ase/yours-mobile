@@ -30,6 +30,7 @@ import {
   paymentFailedText,
   reportToB,
 } from './paid';
+import { enqueueReport, failureReason, logQueued, outboxText } from './reportOutbox';
 import { BCREDITS_ENABLED, MARKET_ENABLED, STORE_BUILD } from '../storeBuild';
 import { useAgentCredits, type AgentCredits } from '../credits/useAgentCredits';
 
@@ -462,8 +463,18 @@ export const AgentConversation = ({
     try {
       // No key in own-key mode: b can't answer, but it still takes the message for the team (paid.ts reportToB).
       if (prefs.mode === 'own' && keyReady === false) {
-        const r = await reportToB((m, p, b) => withClient((c) => c.agentCall(m, p, b)), text);
-        setMessages([...next, { role: 'assistant', text: noKeyReply(r, provider.label) }]);
+        // Can't reach bit-sign (offline, signed out): the message waits in the outbox, never dropped.
+        const r = await reportToB((m, p, b) => withClient((c) => c.agentCall(m, p, b)), text).catch((e) => {
+          const reason = failureReason(e);
+          logQueued(reason, e);
+          enqueueReport(accountId, text, reason);
+          return reason;
+        });
+        const reply =
+          typeof r === 'string'
+            ? `${outboxText(r)} You'll see it in Your reports as Waiting to send.`
+            : noKeyReply(r, provider.label);
+        setMessages([...next, { role: 'assistant', text: reply }]);
         return;
       }
       const sent = transcript(next);
