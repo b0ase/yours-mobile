@@ -62,6 +62,20 @@ export const shouldResync = (g: ResyncGate): boolean => {
   return g.now - g.lastFinishedAt >= (g.minGapMs ?? ADDRESS_RESYNC_MIN_GAP_MS);
 };
 
+/**
+ * A refresh asked for by the Wallet home (RESYNC_ADDRESSES). A manual one (the refresh button, pull to refresh)
+ * always syncs, or joins the run in flight. An automatic one (the card's quiet timer, every 5–20 s) joins a run in
+ * flight but does not start a fresh full address scan within `minGapMs` of the last: the startup run and the
+ * alarm already cover that window, and a scan every few seconds only competed with them.
+ */
+export const refreshShouldSync = (r: {
+  manual: boolean;
+  busy: boolean;
+  lastFinishedAt: number;
+  now: number;
+  minGapMs?: number;
+}): boolean => r.manual || r.busy || r.now - r.lastFinishedAt >= (r.minGapMs ?? ADDRESS_RESYNC_MIN_GAP_MS);
+
 /** The page's hidden state where there is a page; undefined in a service worker. */
 export const pageHidden = (
   doc: { visibilityState?: string } | undefined = (globalThis as { document?: Document }).document,

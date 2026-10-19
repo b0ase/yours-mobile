@@ -751,7 +751,7 @@ export const BsvWallet = () => {
       // services/addressResync.ts); a wallet that can't take the message falls back to syncing from here.
       const viaWallet = await withTimeout(
         chrome.runtime
-          .sendMessage({ action: 'RESYNC_ADDRESSES' })
+          .sendMessage({ action: 'RESYNC_ADDRESSES', manual: notifyIfUnchanged })
           .then((r: { success?: boolean } | undefined) => r?.success === true)
           .catch(() => false),
         BALANCE_TIMEOUT_MS,
