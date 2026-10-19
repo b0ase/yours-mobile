@@ -101,7 +101,10 @@ const MyReportsPage = () => {
                 <span className="text-xs" style={{ color: '#9aa3ad' }}>
                   On this device
                 </span>
-                <span className="text-xs font-semibold" style={{ color: '#F5C542' }}>
+                <span
+                  className="text-xs font-semibold rounded-full px-2 py-0.5"
+                  style={{ background: '#F5C542', color: '#0B0A08' }}
+                >
                   Waiting to send
                 </span>
               </div>

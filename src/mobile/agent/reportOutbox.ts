@@ -3,9 +3,10 @@
  * (offline, not signed in to bChatX, bit-sign down) is kept on this device and sent later: on app resume,
  * when the network comes back, after sign-in, and on a backoff timer. "Your reports" lists it as Waiting to send.
  *
- * Per-device UI state in localStorage, one list per wallet account, small cap. Holds no keys: the report text
- * is redacted before it gets here (errorReport.ts redactSecrets).
+ * Per-device UI state in localStorage, one list per wallet account, small cap. Holds no keys: every report is
+ * run through redactSecrets (errorReport.ts) here, so typed Ask b messages are covered too.
  */
+import { redactSecrets } from '../errors/errorReport';
 import { reportToB, type ReportResult } from './paid';
 
 export type OutboxReason = 'offline' | 'signin' | 'error';
@@ -100,7 +101,7 @@ export const enqueueReport = (
   const item: QueuedReport = {
     id: `${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     account: account || DEVICE,
-    text: text.slice(0, MAX_TEXT),
+    text: redactSecrets(text).slice(0, MAX_TEXT),
     at: now,
     tries: 1,
     nextAt: now + backoffMs(1),
