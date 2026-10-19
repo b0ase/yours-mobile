@@ -1,7 +1,13 @@
-MIT License
+MIT License (Yours Wallet upstream code)
+
+This licence covers the code bWalletX inherits from Yours Wallet
+(https://github.com/yours-org/yours-wallet), including upstream changes merged
+later, and any version of bWalletX released before the switch to the Open BSV
+License (see LICENSE and NOTICE).
 
 Copyright (c) 2024 Daniel Wagner, David Case (Yours Wallet)
-Copyright (c) 2026 The Bitcoin Corporation Ltd (bWalletX)
+Copyright (c) 2026 The Bitcoin Corporation Ltd (bWalletX, releases before the
+Open BSV License change only)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
