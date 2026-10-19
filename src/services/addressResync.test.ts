@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { ADDRESS_RESYNC_MIN_GAP_MS, pageHidden, shouldResync, singleFlight } from './addressResync';
+import { ADDRESS_RESYNC_MIN_GAP_MS, pageHidden, refreshShouldSync, shouldResync, singleFlight } from './addressResync';
 
 describe('singleFlight', () => {
   test('one run at a time: callers during a run share it', async () => {
@@ -70,6 +70,20 @@ describe('pageHidden', () => {
   test('no page (service worker)', () => expect(pageHidden(undefined)).toBeUndefined());
 });
 
+describe('refreshShouldSync', () => {
+  const now = 1_000_000;
+  test('a manual refresh always syncs', () =>
+    expect(refreshShouldSync({ manual: true, busy: false, lastFinishedAt: now - 1, now })).toBe(true));
+  test('an automatic refresh joins a run in flight', () =>
+    expect(refreshShouldSync({ manual: false, busy: true, lastFinishedAt: now - 1, now })).toBe(true));
+  test('an automatic refresh does not start a scan right after one finished', () =>
+    expect(refreshShouldSync({ manual: false, busy: false, lastFinishedAt: now - 5_000, now })).toBe(false));
+  test('an automatic refresh syncs once the gap has passed', () =>
+    expect(
+      refreshShouldSync({ manual: false, busy: false, lastFinishedAt: now - ADDRESS_RESYNC_MIN_GAP_MS, now }),
+    ).toBe(true));
+});
+
 describe('wiring', () => {
   const bg = readFileSync(new URL('../background.ts', import.meta.url), 'utf8');
   const init = readFileSync(new URL('../initWallet.ts', import.meta.url), 'utf8');
@@ -84,6 +98,10 @@ describe('wiring', () => {
     expect(init).toContain('void resyncAddresses();');
   });
   test('refresh button asks the wallet to run the shared sync first', () => {
-    expect(page).toContain("action: 'RESYNC_ADDRESSES'");
+    expect(page).toContain("action: 'RESYNC_ADDRESSES', manual: notifyIfUnchanged");
+  });
+  test('the RESYNC_ADDRESSES handler is reachable (listed with the internal no-auth messages)', () => {
+    const list = bg.slice(bg.indexOf('const noAuthRequired = ['), bg.indexOf('if (noAuthRequired.includes'));
+    expect(list).toContain("'RESYNC_ADDRESSES'");
   });
 });

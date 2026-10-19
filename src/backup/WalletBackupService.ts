@@ -634,33 +634,40 @@ export class WalletBackupService {
    * written, and any spent since would be picked for a send that fails at
    * broadcast. Ask the chain (one lookup per change output) and release
    * them: the toolbox's invalid-change review with `release`. Takes the
-   * manager's exclusive locks, so the caller runs it once the address sync
-   * is done, not in front of it.
+   * manager's locks, so the caller runs it once the address sync is done,
+   * not in front of it.
+   *
+   * Goes through the manager's own listOutputs, so the review runs on
+   * whichever store is active: the device's IndexedDB or a remote storage
+   * server (the default for new accounts), whose listOutputs runs the same
+   * special-op basket. It used to call runAsStorageProvider, which only a
+   * local store supports, so with a remote active store every review failed
+   * with 'Active "WalletStorageProvider" does not support "StorageProvider"
+   * interface' and nothing was released.
    */
-  static async reviewRestoredUtxos(storage: WalletStorageManager, identityKey: string): Promise<number> {
+  static async reviewRestoredUtxos(
+    storage: Pick<WalletStorageManager, 'getAuth' | 'listOutputs'>,
+    identityKey: string,
+  ): Promise<number> {
     try {
-      const released = await storage.runAsStorageProvider(async (sp) => {
-        const user = (await sp.findUsers({ partial: { identityKey } }))[0];
-        if (!user) return 0;
-        const result = await sp.listOutputs(
-          { userId: user.userId, identityKey: user.identityKey },
-          {
-            basket: sdk.specOpInvalidChange,
-            tags: ['release', 'all'],
-            tagQueryMode: 'all',
-            includeLockingScripts: false,
-            includeTransactions: false,
-            includeCustomInstructions: false,
-            includeTags: false,
-            includeLabels: false,
-            limit: 0,
-            offset: 0,
-            seekPermission: false,
-            knownTxids: [],
-          },
-        );
-        return result.totalOutputs;
+      const auth = await storage.getAuth();
+      // The manager belongs to one identity; never review another account's outputs.
+      if (auth.identityKey !== identityKey) return 0;
+      const result = await storage.listOutputs({
+        basket: sdk.specOpInvalidChange,
+        tags: ['release', 'all'],
+        tagQueryMode: 'all',
+        includeLockingScripts: false,
+        includeTransactions: false,
+        includeCustomInstructions: false,
+        includeTags: false,
+        includeLabels: false,
+        limit: 0,
+        offset: 0,
+        seekPermission: false,
+        knownTxids: [],
       });
+      const released = result.totalOutputs;
       console.log(`[WalletBackupService] post-restore UTXO review: ${released} released`);
       return released;
     } catch (err) {

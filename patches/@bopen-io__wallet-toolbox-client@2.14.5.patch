@@ -1,5 +1,5 @@
 diff --git a/out/index.client.cjs b/out/index.client.cjs
-index af2c513176b1265c5a02d8242ac87fc1c6805ad1..dd29b5c8d3f24f88cf3b50d00099e4a2bf0fefeb 100644
+index af2c513176b1265c5a02d8242ac87fc1c6805ad1..24614f4a462e96101a5b9c7512db0c94a391eea7 100644
 --- a/out/index.client.cjs
 +++ b/out/index.client.cjs
 @@ -3593,6 +3593,10 @@ var EntityOutputTagMap = class EntityOutputTagMap extends EntityBase {
@@ -24,8 +24,33 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..dd29b5c8d3f24f88cf3b50d00099e4a2
  		const ef = verifyOneOrNone(await storage.findTxLabelMaps({
  			partial: {
  				transactionId,
+@@ -19797,7 +19805,9 @@ async function loadIdbOutputs(query) {
+ 	const args = {
+ 		partial: {
+ 			userId,
+-			basketId,
++			// bWalletX: the "all" tag clears basketId to mean every basket; an undefined key is refused by
++			// assertNoUndefinedInPartial, which broke the invalid-change review with ['release', 'all'].
++			...basketId !== void 0 ? { basketId } : {},
+ 			spendable: true,
+ 			...specOp?.managedChangeOnly ? managedChangeOutputFields : {}
+ 		},
+@@ -38567,6 +38577,13 @@ var Monitor = class Monitor {
+ 	async logEvent(event, details) {
+ 		if (typeof event !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(event)) throw new WERR_INVALID_PARAMETER("event", "a bounded control-free monitor event name");
+ 		const boundedDetails = details == null ? void 0 : safeDiagnostic(details, 8192);
++		if (!this.storage.isStorageProvider()) {
++			// bWalletX: a remote (StorageClient) active store has no monitor_events table on this side, and
++			// runAsStorageProvider throws for it, so every logged monitor event became a rejected runOnce
++			// ("does not support StorageProvider interface"). Every caller has already sent the same text to
++			// emitLog, and the server keeps its own monitor log, so there is nothing more to record here.
++			return;
++		}
+ 		await this.storage.runAsStorageProvider(async (sp) => {
+ 			await sp.insertMonitorEvent({
+ 				created_at: /* @__PURE__ */ new Date(),
 diff --git a/out/index.client.mjs b/out/index.client.mjs
-index 5d9233efe5b3e60fcb88b8f260eb65e871945552..d79238bec8e4734ff97f7779a0037c1751dbf9a2 100644
+index 5d9233efe5b3e60fcb88b8f260eb65e871945552..7eaea344ec68ae234366957b1528e5d6316ec99d 100644
 --- a/out/index.client.mjs
 +++ b/out/index.client.mjs
 @@ -3558,6 +3558,10 @@ var EntityOutputTagMap = class EntityOutputTagMap extends EntityBase {
@@ -50,3 +75,28 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..d79238bec8e4734ff97f7779a0037c17
  		const ef = verifyOneOrNone(await storage.findTxLabelMaps({
  			partial: {
  				transactionId,
+@@ -19762,7 +19770,9 @@ async function loadIdbOutputs(query) {
+ 	const args = {
+ 		partial: {
+ 			userId,
+-			basketId,
++			// bWalletX: the "all" tag clears basketId to mean every basket; an undefined key is refused by
++			// assertNoUndefinedInPartial, which broke the invalid-change review with ['release', 'all'].
++			...basketId !== void 0 ? { basketId } : {},
+ 			spendable: true,
+ 			...specOp?.managedChangeOnly ? managedChangeOutputFields : {}
+ 		},
+@@ -38532,6 +38542,13 @@ var Monitor = class Monitor {
+ 	async logEvent(event, details) {
+ 		if (typeof event !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(event)) throw new WERR_INVALID_PARAMETER("event", "a bounded control-free monitor event name");
+ 		const boundedDetails = details == null ? void 0 : safeDiagnostic(details, 8192);
++		if (!this.storage.isStorageProvider()) {
++			// bWalletX: a remote (StorageClient) active store has no monitor_events table on this side, and
++			// runAsStorageProvider throws for it, so every logged monitor event became a rejected runOnce
++			// ("does not support StorageProvider interface"). Every caller has already sent the same text to
++			// emitLog, and the server keeps its own monitor log, so there is nothing more to record here.
++			return;
++		}
+ 		await this.storage.runAsStorageProvider(async (sp) => {
+ 			await sp.insertMonitorEvent({
+ 				created_at: /* @__PURE__ */ new Date(),

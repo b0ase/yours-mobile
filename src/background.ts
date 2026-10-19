@@ -2,7 +2,13 @@
 import { promptsShowInPanel } from './services/panelPrompt';
 import { isSessionExpired } from './utils/lockTimeout';
 import { originatorForOrigin } from './services/originKey';
-import { ADDRESS_RESYNC_ALARM, ADDRESS_RESYNC_PERIOD_MINUTES, pageHidden, shouldResync } from './services/addressResync';
+import {
+  ADDRESS_RESYNC_ALARM,
+  ADDRESS_RESYNC_PERIOD_MINUTES,
+  pageHidden,
+  refreshShouldSync,
+  shouldResync,
+} from './services/addressResync';
 import { balanceWithDeposits } from './services/depositBalance';
 import { arrivingSats } from './services/receiveGuard';
 import { recoverySummary } from './services/recoverFailed';
@@ -1432,6 +1438,9 @@ if (!(
       // Address management (popup internal)
       'GET_DEPOSIT_ADDRESSES',
       'GENERATE_NEW_ADDRESS',
+      // The Wallet home's refresh: its handler below was unreachable without this entry (the message fell through
+      // to the CWI switch, which never answered, so every refresh waited out its 15 s timeout).
+      'RESYNC_ADDRESSES',
     ];
 
     if (noAuthRequired.includes(message.action)) {
@@ -1546,6 +1555,19 @@ if (!(
           const ctx = accountContext;
           if (!ctx) {
             sendResponse({ type: 'RESYNC_ADDRESSES', success: false, error: 'locked' });
+            return true;
+          }
+          const manual = message.manual === true;
+          if (
+            !refreshShouldSync({
+              manual,
+              busy: ctx.addressSyncBusy(),
+              lastFinishedAt: ctx.lastAddressSyncAt(),
+              now: Date.now(),
+            })
+          ) {
+            // An automatic refresh right after a finished run: storage is already current.
+            sendResponse({ type: 'RESYNC_ADDRESSES', success: true });
             return true;
           }
           ctx
