@@ -115,6 +115,9 @@ import {
   RATE_TIMEOUT_MS,
   balanceView,
   loadLastBalance,
+  loadLastBalanceAt,
+  showSyncRetry,
+  staleBalanceHint,
   saveLastBalance,
 } from '../mobile/wallet/balanceLoad';
 
@@ -192,11 +195,27 @@ export const BsvWallet = () => {
   >([]);
   const [selectedAddressIndex, setSelectedAddressIndex] = useState(0);
   const [generatingAddress, setGeneratingAddress] = useState(false);
-  const [bsvBalance, setBsvBalance] = useState<number>(0);
+  // The last balance this device saw, shown at once while the wallet opens and syncs (owner, 19 Oct 2026: a big
+  // wallet sat on "Still syncing. Tap to retry." for a long time before its balance appeared).
+  const [bsvBalance, setBsvBalance] = useState<number>(() => (loadLastBalance(identityAddress) ?? 0) / 100_000_000);
   const [exchangeRate, setExchangeRate] = useState<number>(0);
   const [balanceLoading, setBalanceLoading] = useState(true);
   const [balanceFailed, setBalanceFailed] = useState(false);
-  const [balanceKnown, setBalanceKnown] = useState(false);
+  const [balanceKnown, setBalanceKnown] = useState(() => loadLastBalance(identityAddress) != null);
+  // True only once THIS session loaded a fresh balance: MAX / send-all never act on the cached amount.
+  const [balanceFresh, setBalanceFresh] = useState(false);
+  // Switching account without a remount: show that account's cached balance, never the previous one's.
+  const balanceAccount = useRef(identityAddress);
+  useEffect(() => {
+    if (balanceAccount.current === identityAddress) return;
+    balanceAccount.current = identityAddress;
+    const cached = loadLastBalance(identityAddress);
+    setBsvBalance((cached ?? 0) / 100_000_000);
+    setBalanceKnown(cached != null);
+    setBalanceFresh(false);
+    setBalanceFailed(false);
+    setBalanceLoading(true);
+  }, [identityAddress]);
   const [lockData, setLockData] = useState<LockData>();
   const [isSendAllBsv, setIsSendAllBsv] = useState(false);
   const [showWelcome, setShowWelcome] = useState(false);
@@ -538,14 +557,22 @@ export const BsvWallet = () => {
 
   useEffect(() => {
     const bsvBalanceInSats = Math.round(bsvBalance * BSV_DECIMAL_CONVERSION);
-    setIsSendAllBsv(satSendAmount === bsvBalanceInSats);
-  }, [satSendAmount, bsvBalance]);
+    setIsSendAllBsv(balanceFresh && satSendAmount === bsvBalanceInSats);
+  }, [satSendAmount, bsvBalance, balanceFresh]);
+
+  const staleHint = staleBalanceHint({
+    failed: balanceFailed,
+    known: balanceKnown,
+    fresh: balanceFresh,
+    at: loadLastBalanceAt(identityAddress),
+  });
 
   const applyBalance = (satoshis: number) => {
     setBsvBalance(satoshis / 100_000_000);
     saveLastBalance(identityAddress, satoshis);
     publishBalance('bsv', satoshis / 100_000_000, 'BSV');
     setBalanceKnown(true);
+    setBalanceFresh(true);
     setBalanceFailed(false);
     setBalanceLoading(false);
   };
@@ -1010,6 +1037,11 @@ export const BsvWallet = () => {
       return isValidEmail(r.address) ? { paymail: r.address, satoshis } : { address: r.address, satoshis };
     });
 
+    // Send-all from a cached (possibly stale) balance: wait for the fresh one.
+    if (isSendAllBsv && !balanceFresh) {
+      addSnackbar('Updating balance…', 'info');
+      return;
+    }
     const totalSats = isSendAllBsv
       ? Math.round(bsvBalance * BSV_DECIMAL_CONVERSION)
       : sendRecipients.reduce((acc, r) => acc + (r.satoshis ?? 0), 0);
@@ -1106,6 +1138,10 @@ export const BsvWallet = () => {
   };
 
   const fillInputWithAllBsv = () => {
+    if (!balanceFresh) {
+      addSnackbar('Updating balance…', 'info');
+      return;
+    }
     const maxSats = Math.round(bsvBalance * BSV_DECIMAL_CONVERSION);
     setSatSendAmount(maxSats);
     // MAX is single-recipient only. Preserve the existing recipient's id and
@@ -1516,7 +1552,7 @@ export const BsvWallet = () => {
               <UpToDateAnnouncer done={upToDate} />
             )}
           </div>
-          {balanceFailed && (
+          {showSyncRetry({ failed: balanceFailed, known: balanceKnown }) && (
             <button
               type="button"
               onClick={() => void getAndSetBsvBalance()}
@@ -1525,6 +1561,11 @@ export const BsvWallet = () => {
             >
               Still syncing. Tap to retry.
             </button>
+          )}
+          {staleHint && (
+            <p className="mt-1 text-[11px] m-0" style={{ color: theme.color.global.gray, opacity: 0.8 }}>
+              {staleHint}
+            </p>
           )}
           {restoreMessage && (
             <p role="status" className="mt-1 text-[11px] m-0" style={{ color: theme.color.global.gray }}>

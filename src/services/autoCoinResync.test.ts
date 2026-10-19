@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { AUTO_RESYNC_KEY, autoResyncCoins, runAutoResyncIfDue, type AutoResyncDeps } from './autoCoinResync';
+import {
+  AUTO_RESYNC_KEY,
+  autoResyncCoins,
+  readAutoResyncCoins,
+  runAutoResyncIfDue,
+  type AutoResyncDeps,
+  type AutoResyncReader,
+} from './autoCoinResync';
 import { withCoinResyncLock } from './coinResyncLock';
 
 const A = 'a'.repeat(64);
@@ -179,5 +186,65 @@ describe('withCoinResyncLock', () => {
     const fast = withCoinResyncLock(async () => order.push('b'));
     await Promise.all([slow, fast]);
     expect(order).toEqual(['a1', 'a2', 'b']);
+  });
+});
+
+describe('readAutoResyncCoins (web/native storage, big wallets)', () => {
+  const T = (c: string) => c.repeat(64);
+  const rows = Array.from({ length: 1203 }, (_, i) => ({
+    txid: T((i % 16).toString(16)),
+    vout: i,
+    spendable: i % 3 !== 0,
+    spentBy: i === 3 ? 77 : i === 6 ? 5 : null,
+  }));
+  const fake = (opts: { activeLocal?: () => boolean } = {}) => {
+    const calls = { reads: 0, pages: [] as number[], held: 0, maxHeld: 0 };
+    const reader: AutoResyncReader = {
+      findUsers: async () => [{ userId: 1 }],
+      findOutputBaskets: async () => [{ basketId: 9 }],
+      findTransactions: async () => [{ transactionId: 77, txid: T('e') }],
+      findOutputs: async (a) => {
+        calls.pages.push(a.paged.offset);
+        expect(a.noScript).toBe(true);
+        return rows.slice(a.paged.offset, a.paged.offset + a.paged.limit);
+      },
+    };
+    const storage = {
+      isActiveStorageProvider: opts.activeLocal ?? (() => true),
+      runAsReader: async <X>(f: (r: AutoResyncReader) => Promise<X>) => {
+        calls.reads++;
+        calls.held++;
+        calls.maxHeld = Math.max(calls.maxHeld, calls.held);
+        try {
+          return await f(reader);
+        } finally {
+          calls.held--;
+        }
+      },
+    };
+    return { storage, calls };
+  };
+
+  test('remote-active store (web before the switch): skipped, nothing read, no error', async () => {
+    const { storage, calls } = fake({ activeLocal: () => false });
+    expect(await readAutoResyncCoins(storage, 'idk', ['failed'])).toBeNull();
+    expect(calls.reads).toBe(0);
+  });
+
+  test('reads the basket in pages, one lock hold per page, without scripts', async () => {
+    const { storage, calls } = fake();
+    const r = await readAutoResyncCoins(storage, 'idk', ['failed'], 500);
+    expect(calls.pages).toEqual([0, 500, 1000]);
+    expect(calls.reads).toBe(4); // head + 3 pages, each released before the next
+    expect(calls.maxHeld).toBe(1);
+    expect(r!.coins.length).toBe(rows.filter((o) => o.spendable).length);
+    expect([...r!.ownPendingInputs]).toEqual([`${T('3')}_3`]);
+    expect([...r!.ownPendingTxids]).toEqual([T('e')]);
+  });
+
+  test('store switched mid-read: stops, no verdicts from a half read', async () => {
+    let n = 0;
+    const { storage } = fake({ activeLocal: () => n++ < 2 });
+    expect(await readAutoResyncCoins(storage, 'idk', ['failed'], 500)).toBeNull();
   });
 });
