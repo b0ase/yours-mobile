@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { Flag, Loader2, X } from 'lucide-react';
 import { sendBsv } from '@1sat/actions';
 import { useBackClose } from '../backStack';
+import { useFloatingBarReserve } from '../ui/floatingBars';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { getErrorMessage } from '../../utils/tools';
 import { fetchExchangeRate } from '../../utils/wallet';
@@ -570,6 +571,9 @@ export const AgentConversation = ({
     if (float && busy) setFloatHidden(false);
   }, [float, busy]);
   const floatList = useRef<HTMLDivElement>(null);
+  // The bar itself (not the dismissable reply bubbles above it) keeps the page's content clear of it.
+  const floatBar = useRef<HTMLDivElement>(null);
+  useFloatingBarReserve(floatBar);
   useEffect(() => {
     const el = floatList.current;
     if (el) el.scrollTop = el.scrollHeight;
@@ -659,7 +663,7 @@ export const AgentConversation = ({
             </div>
           </>
         )}
-        {bar('float')}
+        <div ref={floatBar}>{bar('float')}</div>
         {sheets}
       </div>
     );
