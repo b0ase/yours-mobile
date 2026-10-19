@@ -32,6 +32,11 @@ export interface YoursNativePlugin {
   /** Rejects with code 'cancelled' if the user dismisses the prompt. */
   biometricGet(opts: { key: string; reason: string }): Promise<{ value: string | null }>;
   biometricRemove(opts: { key: string }): Promise<void>;
+  /**
+   * Face ID / Touch ID / fingerprint OR the phone's passcode (iOS deviceOwnerAuthentication, Android
+   * BiometricPrompt + DEVICE_CREDENTIAL). Phones only; optional so the web and desktop shims can leave it out.
+   */
+  deviceOwnerAuth?(opts: { reason: string }): Promise<{ ok: boolean }>;
 
   browserOpen(opts: { url: string; provider: string }): Promise<void>;
   browserClose(): Promise<void>;
