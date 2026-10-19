@@ -17,7 +17,7 @@ import { ArrowDownToLine, CreditCard, ExternalLink, Users, X } from 'lucide-reac
 import { useBackClose } from '../backStack';
 import { openDappBrowser } from '../dappBrowser';
 import { cachedExchangeRate, fetchExchangeRate } from '../../utils/wallet';
-import '../home/home.css';
+import { HistoryButton } from './HistoryButton';
 import { formatUSD } from '../../utils/format';
 
 const GOLD = 'var(--bw-accent)';
@@ -116,6 +116,35 @@ const useDayChange = (rate: number): number | null => {
   return dayAgo && rate > 0 ? ((rate - dayAgo) / dayAgo) * 100 : null;
 };
 
+/** The wallet top row's shared cell style: equal columns, same height, radius and border (owner round 7). */
+const CELL = 'flex-1 basis-0 min-w-0 h-14 rounded-xl flex items-center justify-center border cursor-pointer';
+
+/**
+ * Today's BSV price; opens Portfolio vs market. With `change` the small line shows today's % change in green / red
+ * instead of "per BSV".
+ */
+const PriceCell = ({ rate, onOpen, change }: { rate: number; onOpen: () => void; change?: number | null }) => (
+  <button
+    type="button"
+    onClick={onOpen}
+    aria-label="BSV price"
+    className={`${CELL} flex-col leading-tight`}
+    style={{ background: 'var(--bw-surface)', borderColor: '#2b2f36', color: '#fff' }}
+  >
+    <span className="text-[15px] font-extrabold">{rate > 0 ? formatUSD(rate) : '…'}</span>
+    {change == null ? (
+      <span className="text-[10px] font-semibold" style={{ color: MUTED }}>
+        per BSV
+      </span>
+    ) : (
+      <span className="text-[10px] font-bold" style={{ color: change >= 0 ? '#2ecc71' : '#F04438' }}>
+        {change >= 0 ? '+' : ''}
+        {change.toFixed(2)}% today
+      </span>
+    )}
+  </button>
+);
+
 /** Same box and margins as the promo card, so nothing jumps when the chunk loads. */
 const SwapPromoSkeleton = () => <div className="flex-1 min-w-0 min-h-[52px]" aria-hidden="true" />;
 
@@ -162,27 +191,24 @@ export const BsvPriceBar = ({
   };
   return (
     <>
-      {/* The price is one small line in the balance header (home modules, owner 18 Oct 2026); History is a home
-          module now (home/modules.tsx) and still opens from the live ticker and Desktop's side panel. */}
-      <div className="bw-priceline">
-        <button type="button" onClick={() => setPortfolioOpen(true)} aria-label="BSV price">
-          <span style={{ color: MUTED }}>BSV</span>
-          <span className="font-extrabold">{rate > 0 ? formatUSD(rate) : '…'}</span>
-          {change != null && (
-            <span className="text-[11px] font-bold" style={{ color: change >= 0 ? '#2ecc71' : '#F04438' }}>
-              {change >= 0 ? '+' : ''}
-              {change.toFixed(2)}%
-            </span>
-          )}
-        </button>
-        {/* Store edition (no buying, Apple 3.1.5 / Play): the same pill receives instead of buying. */}
+      {/* Wallet top row restored (owner, 19 Oct 2026, as in 5.2.33): price · Buy BSV · History, three equal tiles.
+          Desktop hides it (wide.css .bw-toprow): its side pane has the chart and History. */}
+      <div className="bw-toprow w-[92%] mb-2 flex items-stretch gap-2">
+        <PriceCell rate={rate} onOpen={() => setPortfolioOpen(true)} change={change} />
+        {/* Store edition (no buying, Apple 3.1.5 / Play): the same gold cell receives instead of buying. */}
         <button
           type="button"
-          className="bw-priceline-buy"
           onClick={BUY_CRYPTO_ENABLED ? () => setOpen(true) : onReceive}
+          className={`${CELL} text-sm font-extrabold`}
+          style={{
+            background: 'linear-gradient(135deg, var(--bw-accent-lo), var(--bw-accent-hi))',
+            borderColor: 'rgb(var(--bw-accent-rgb)/0.4)',
+            color: 'var(--bw-on-accent)',
+          }}
         >
           {BUY_CRYPTO_ENABLED ? 'Buy BSV' : 'Receive'}
         </button>
+        <HistoryButton className={CELL} />
       </div>
       {row.length > 0 ? (
         // Equal 8px above and below the row: the price row's mb-2 above; below, the next card's 12px top margin less 4px.

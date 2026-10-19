@@ -316,10 +316,11 @@ describe('store build has no Market', () => {
     const bar = src('./wallet/BuyBsv.tsx');
     expect(bar).toMatch(/const SwapFlow = SWAP_ENABLED \? lazy\(/);
     expect(bar).not.toMatch(/SwapCell/);
-    // The price is one small line in the balance header (home modules, 18 Oct 2026); it opens Portfolio.
+    // Top row restored (19 Oct 2026): price tile (opens Portfolio) · Buy BSV · History.
     expect(bar).toMatch(
-      /<div className="bw-priceline">\s*<button type="button" onClick=\{\(\) => setPortfolioOpen\(true\)\} aria-label="BSV price">/,
+      /<div className="bw-toprow[^"]*">\s*<PriceCell rate=\{rate\} onOpen=\{\(\) => setPortfolioOpen\(true\)\}/,
     );
+    expect(bar).toMatch(/<HistoryButton className=\{CELL\} \/>/);
     expect(bar).toMatch(/import\('..\/portfolio\/PortfolioScreen'\)/);
     // All cards | Swap row (15 Oct 2026): Swap only when swapOn; All cards only with the balance cards (bWalletX).
     expect(bar).toMatch(/swapRowButtons\(swapOn && !!SwapPromo, false\)/);
