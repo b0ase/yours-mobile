@@ -7,6 +7,7 @@ import {
   addModule,
   normalise,
   parseLayout,
+  resolveLayout,
   removeModule,
   serialise,
   shiftModule,
@@ -14,9 +15,9 @@ import {
 } from './layout';
 
 describe('home layout', () => {
-  test('defaults: card, Ask b, store showcase', () => {
-    expect(DEFAULT_LAYOUT).toEqual(['card', 'showcase', 'askB']);
-    expect(parseLayout(null)).toEqual(['card', 'showcase', 'askB']);
+  test('defaults: card, Ask b last, no Store showcase', () => {
+    expect(DEFAULT_LAYOUT).toEqual(['card', 'askB']);
+    expect(parseLayout(null)).toEqual(['card', 'askB']);
   });
 
   test('migration: an existing user with nothing saved gets the defaults; garbage too', () => {
@@ -31,7 +32,7 @@ describe('home layout', () => {
 
   test('round trip through v1', () => {
     const ids = ['card', 'history', 'askB'] as const;
-    expect(JSON.parse(serialise(ids))).toEqual({ v: 1, ids: [...ids] });
+    expect(JSON.parse(serialise(ids))).toEqual({ v: 2, ids: [...ids] });
     expect(parseLayout(serialise(ids))).toEqual([...ids]);
   });
 
@@ -82,7 +83,31 @@ describe('Desktop classic home (19 Oct 2026)', () => {
   });
 
   test('phone/web: the untouched old default moves Ask b last; custom layouts are kept', () => {
-    expect(migrateDefault(['card', 'askB', 'showcase'])).toEqual(['card', 'showcase', 'askB']);
+    expect(migrateDefault(['card', 'askB', 'showcase'])).toEqual(['card', 'askB']);
+    expect(migrateDefault(['card', 'showcase', 'askB'])).toEqual(['card', 'askB']);
     expect(migrateDefault(['card', 'askB', 'history'])).toEqual(['card', 'askB', 'history']);
+  });
+});
+
+describe('No Store showcase by default (19 Oct 2026)', () => {
+  const v1 = (ids: string[]) => JSON.stringify({ v: 1, ids });
+  test('nothing saved: no showcase anywhere', () => {
+    expect(resolveLayout(null)).toEqual(['card', 'askB']);
+    expect(resolveLayout(null, WIDE_DEFAULT_LAYOUT, true)).toEqual(['card']);
+  });
+  test('untouched old defaults (#283/#284/#296/#298) lose the showcase', () => {
+    expect(resolveLayout(v1(['card', 'showcase', 'askB']))).toEqual(['card', 'askB']);
+    expect(resolveLayout(v1(['card', 'askB', 'showcase']))).toEqual(['card', 'askB']);
+    expect(resolveLayout(v1(['card', 'askB', 'holdings', 'showcase']), WIDE_DEFAULT_LAYOUT, true)).toEqual(['card']);
+    expect(resolveLayout(JSON.stringify(['card', 'askB', 'showcase']))).toEqual(['card', 'askB']);
+  });
+  test('custom pre-v2 layouts keep everything but the showcase', () => {
+    expect(resolveLayout(v1(['card', 'history', 'showcase', 'pots']))).toEqual(['card', 'history', 'pots']);
+    expect(resolveLayout(v1(['card', 'showcase', 'askB']), WIDE_DEFAULT_LAYOUT, true)).toEqual(['card', 'askB']);
+    expect(resolveLayout(v1(['card', 'history']))).toEqual(['card', 'history']);
+  });
+  test('a showcase added via Edit home (saved as v2) is kept', () => {
+    expect(resolveLayout(serialise(['card', 'askB', 'showcase']))).toEqual(['card', 'askB', 'showcase']);
+    expect(resolveLayout(serialise(['card', 'showcase']), WIDE_DEFAULT_LAYOUT, true)).toEqual(['card', 'showcase']);
   });
 });

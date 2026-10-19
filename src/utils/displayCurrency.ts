@@ -100,10 +100,12 @@ export const usdToFiat = (usd: number, fx: Fx = currentFx()) => usd / fx.usdPerU
 export const fiatToUsd = (amount: number, fx: Fx = currentFx()) => amount * fx.usdPerUnit;
 
 export type FormatOpts = {
-  /** Sub-cent amounts keep one significant digit ("$0.0006") instead of rounding to 0.00. */
+  /** Kept for callers; sub-cent amounts always show 2 significant digits now. */
   small?: boolean;
   /** Prefix "≈ " when the amount was converted (protocol prices defined in USD). */
   approx?: boolean;
+  /** Keep 2 decimals on large amounts too (Send / confirm screens, where exact amounts matter). */
+  cents?: boolean;
   /** Whole units for large amounts (≥ 100): "$1,234". */
   wholeAbove100?: boolean;
 };
@@ -116,13 +118,19 @@ export const formatFiat = (usd: number, fx: Fx = currentFx(), opts: FormatOpts =
   const a = Math.abs(v);
   const sym = SYMBOL[fx.currency];
   const pre = opts.approx && fx.currency !== 'USD' ? '≈ ' : '';
+  // One rule app-wide (owner, 19 Oct 2026): zero → 0.00; under a cent → 2 significant digits (max 6 decimals, so
+  // 22,000 sats reads "$0.0039", never "$0.00"); a cent to 9,999.99 → 2 decimals; 10,000 and up → whole units.
+  // Thousands separators everywhere. `cents` (Send / confirm) keeps 2 decimals on large amounts.
+  const loc = LOCALE[fx.currency];
   let body: string;
-  if (opts.small && a > 0 && a < 0.01) {
-    body = Number(a.toPrecision(1)).toFixed(Math.max(2, -Math.floor(Math.log10(a))));
-  } else if (opts.wholeAbove100 && a >= 100) {
-    body = Math.round(a).toLocaleString(LOCALE[fx.currency]);
+  if (a > 0 && a < 0.01) {
+    const dp = Math.min(6, Math.max(2, 1 - Math.floor(Math.log10(a))));
+    body = a < 0.000001 ? '0.000001' : Number(a.toFixed(dp)).toFixed(dp).replace(/0+$/, '');
+    if (a < 0.000001) return `${pre}${sign}<${sym}${body}`;
+  } else if ((opts.wholeAbove100 && a >= 100) || (!opts.cents && a >= 10_000)) {
+    body = Math.round(a).toLocaleString(loc);
   } else {
-    body = a.toLocaleString(LOCALE[fx.currency], { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    body = a.toLocaleString(loc, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
   return `${pre}${sign}${sym}${body}`;
 };

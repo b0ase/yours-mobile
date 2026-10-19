@@ -45,7 +45,7 @@ export const cardTotals = (v: CardValue, usdPerBsv: number): { usd: number | nul
 export const cardValueText = (v: CardValue, unit: CardUnit, usdPerBsv: number, fx: Fx): string => {
   const t = cardTotals(v, usdPerBsv);
   if (unit === 'bsv') return t.sats === null ? '—' : cardBsv(t.sats);
-  return t.usd === null ? '—' : formatFiat(t.usd, fx, { small: true });
+  return t.usd === null ? '—' : formatFiat(t.usd, fx);
 };
 
 /** "2 unpriced" under the amount, or '' when every holding has a price. */

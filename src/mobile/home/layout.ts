@@ -19,10 +19,16 @@ export const MODULE_IDS = [
 ] as const;
 export type ModuleId = (typeof MODULE_IDS)[number];
 
-/** Ask b last (owner, 19 Oct 2026: "a great helper, but not the primary feature on the wallet screen"). */
-export const DEFAULT_LAYOUT: readonly ModuleId[] = ['card', 'showcase', 'askB'];
-/** Phone/web's earlier untouched default: an account still on it moves to today's default. */
-const OLD_DEFAULTS: readonly (readonly ModuleId[])[] = [['card', 'askB', 'showcase']];
+/**
+ * Card first, Ask b last (owner, 19 Oct 2026: "a great helper, but not the primary feature on the wallet screen").
+ * No Store showcase by default in any edition (owner, 19 Oct 2026): it is an optional module added via Edit home.
+ */
+export const DEFAULT_LAYOUT: readonly ModuleId[] = ['card', 'askB'];
+/** Phone/web's earlier untouched defaults: an account still on one moves to today's default. */
+const OLD_DEFAULTS: readonly (readonly ModuleId[])[] = [
+  ['card', 'askB', 'showcase'],
+  ['card', 'showcase', 'askB'],
+];
 /**
  * Desktop (wide) is the classic wallet again (owner, 19 Oct 2026): the card column with Send / Receive / Mint, and
  * the side pane right of it with the BSV price, History and Holdings. The top bar is the Ask b prompt and the beta
@@ -83,7 +89,37 @@ export const parseLayout = (
   return [...defaults];
 };
 
-export const serialise = (ids: readonly ModuleId[]) => JSON.stringify({ v: 1, ids: normalise(ids) });
+/**
+ * v2 (19 Oct 2026): layouts saved before v2 may carry the Store showcase only because it was a default, and a saved
+ * layout cannot tell a default from a choice, so the showcase is dropped once from every pre-v2 layout (owner: "no
+ * shop over a forced shop"). Anyone who adds it again via Edit home saves v2 and keeps it.
+ */
+export const LAYOUT_VERSION = 2;
+export const serialise = (ids: readonly ModuleId[]) => JSON.stringify({ v: LAYOUT_VERSION, ids: normalise(ids) });
+
+/** True when the stored value predates v2 (so the showcase in it came from an old default). */
+export const isPreV2 = (raw: string | null | undefined): boolean => {
+  if (!raw) return false;
+  try {
+    const v = JSON.parse(raw) as unknown;
+    if (Array.isArray(v)) return true;
+    return !!v && typeof v === 'object' && (v as { v?: unknown }).v !== LAYOUT_VERSION;
+  } catch {
+    return false;
+  }
+};
+
+/** Stored value → the layout to show: old untouched defaults migrate, pre-v2 layouts lose the showcase. */
+export const resolveLayout = (
+  raw: string | null | undefined,
+  defaults: readonly ModuleId[] = DEFAULT_LAYOUT,
+  wide = false,
+): ModuleId[] => {
+  const ids = parseLayout(raw, defaults);
+  // v2 layouts are saved after these migrations, so whatever they hold is the user's choice.
+  if (!isPreV2(raw)) return ids;
+  return removeModule(wide ? migrateWide(ids) : migrateDefault(ids), 'showcase');
+};
 
 export const addModule = (ids: readonly ModuleId[], id: ModuleId): ModuleId[] =>
   ids.includes(id) ? [...ids] : normalise([...ids, id]);
@@ -114,8 +150,7 @@ export const loadLayout = (
   wide = false,
 ): ModuleId[] => {
   try {
-    const ids = parseLayout(localStorage.getItem(layoutKey(account)), defaults);
-    return wide ? migrateWide(ids) : migrateDefault(ids);
+    return resolveLayout(localStorage.getItem(layoutKey(account)), defaults, wide);
   } catch {
     return [...defaults];
   }
