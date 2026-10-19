@@ -6,6 +6,8 @@ import npgLogo from './editionArt/npg-card-logo.webp';
 import npgx1 from './editionArt/npgx-card-1.webp';
 import npgx2 from './editionArt/npgx-card-2.webp';
 import scammersCard from './editionArt/scammerscartel-dj-card.webp';
+import dojo1 from './editionArt/bdojox-card-1.webp';
+import dojo2 from './editionArt/bdojox-card-2.webp';
 
 /**
  * Artist edition card art (owner, 16 Oct 2026). VexVoid: a still of the VexVoid point field (the same formulas as the
@@ -18,6 +20,7 @@ export const EDITION_PATTERN_IDS = [
   'npg',
   'npgx',
   'scammerscartel',
+  'bdojox',
   ...EMOJI_PACK_IDS,
 ] as const satisfies readonly CardPatternId[];
 export type EditionPatternId = (typeof EDITION_PATTERN_IDS)[number];
@@ -59,7 +62,9 @@ export function vexFieldSvg(variant = 0): string {
   );
 }
 
-const RASTER: Record<'npg' | 'npgx' | 'scammerscartel', readonly string[]> = {
+const RASTER: Record<'npg' | 'npgx' | 'scammerscartel' | 'bdojox', readonly string[]> = {
+  // bDojoX: our own red/blue torii and white katakana-style wordmark on navy (scripts/bdojox-art.mjs).
+  bdojox: [dojo1, dojo2],
   // Scammers Cartel: a crop of the community's own DJ raccoon banner (scammerscartel.com hero-poster).
   scammerscartel: [scammersCard],
   // Owner 17 Oct 2026: the NPG card is the pink NPG logo. Characters come later as 3,334 one-per-character NFT packs.

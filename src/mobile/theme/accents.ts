@@ -39,6 +39,7 @@ export type PackId =
   | 'npg'
   | 'npgx'
   | 'scammerscartel'
+  | 'bdojox'
   | EmojiPackId;
 export type AccentId = PackId | 'silver' | 'rose' | 'emerald' | 'sapphire' | 'violet' | 'custom';
 
@@ -70,6 +71,7 @@ export type CardPatternId =
   | 'npg'
   | 'npgx'
   | 'scammerscartel'
+  | 'bdojox'
   | EmojiPackId;
 
 export interface Accent {
@@ -400,6 +402,39 @@ const EDITIONS: readonly Accent[] = [
     radius: '10px',
     radiusCard: '14px',
     pattern: 'scammerscartel',
+  },
+  {
+    // bDojoX (19 Oct 2026): our own dojo for companies' share registers (bdojox.com). Free (it promotes our own
+    // product and costs nothing). Deep navy on black, the Dojo red and blue, our own torii and a white
+    // katakana-style wordmark on the card (cardPatternsEdition.ts, scripts/bdojox-art.mjs).
+    ...BASE,
+    id: 'bdojox',
+    kind: 'theme',
+    group: 'edition',
+    edition: 'bDojoX edition',
+    label: 'bDojoX',
+    blurb: 'Red and blue torii on navy',
+    accent: '#FF5A62',
+    hi: '#FF7A80',
+    lo: '#FF4C55',
+    on: '#000000',
+    bg: '#000000',
+    surface: '#0A1430',
+    surface2: '#101D42',
+    nav: '#000000',
+    text: '#FFFFFF',
+    muted: '#B4C3E6',
+    line: '#24366B',
+    success: '#7CFFB2',
+    danger: '#FF8A80',
+    shadow: '0 0 24px rgb(47 123 255 / 0.16)',
+    trim: 'rgb(94 162 255 / 0.55)',
+    glow: '0 0 14px rgb(255 90 98 / 0.5), 0 0 3px rgb(255 90 98 / 0.9)',
+    fontHead: SERIF,
+    weightHead: 600,
+    radius: '6px',
+    radiusCard: '12px',
+    pattern: 'bdojox',
   },
 ];
 

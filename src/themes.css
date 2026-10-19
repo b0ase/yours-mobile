@@ -753,6 +753,8 @@
     [style*='background-color: rgb(10, 10, 46)'],
     [style*='background: rgb(10, 11, 13)'],
     [style*='background-color: rgb(10, 11, 13)'],
+    [style*='background: rgb(10, 20, 48)'],
+    [style*='background-color: rgb(10, 20, 48)'],
     [style*='background: rgb(10, 26, 10)'],
     [style*='background-color: rgb(10, 26, 10)'],
     [style*='background: rgb(10, 5, 9)'],
@@ -821,6 +823,8 @@
     [style*='background-color: rgb(15, 46, 24)'],
     [style*='background: rgb(16, 17, 20)'],
     [style*='background-color: rgb(16, 17, 20)'],
+    [style*='background: rgb(16, 29, 66)'],
+    [style*='background-color: rgb(16, 29, 66)'],
     [style*='background: rgb(17, 0, 34)'],
     [style*='background-color: rgb(17, 0, 34)'],
     [style*='background: rgb(17, 10, 3)'],
@@ -1295,6 +1299,21 @@
 :root[data-bw-theme='npgx'] :is(h1, h2) {
   letter-spacing: 0.04em;
   text-shadow: 0 0 10px rgb(255 45 58 / 0.55);
+}
+/* bDojoX: deep navy wash, red torii glow, blue hairlines (free edition, our own share-register dojo). */
+:root[data-bw-theme='bdojox'] body {
+  background-image:
+    radial-gradient(120% 60% at 100% 0%, rgb(47 123 255 / 0.16), transparent 60%),
+    radial-gradient(90% 50% at 0% 100%, rgb(255 77 85 / 0.08), transparent 60%);
+  background-attachment: fixed;
+}
+:root[data-bw-theme='bdojox'] .bw-wcard-face.is-themed {
+  box-shadow:
+    0 0 20px rgb(47 123 255 / 0.25),
+    inset 0 0 0 1px var(--bw-trim);
+}
+:root[data-bw-theme='bdojox'] :is(h1, h2) {
+  letter-spacing: 0.02em;
 }
 
 /* Media player on light packs (owner, 16 Oct 2026): track titles over the VexVoid stills banner were dark ink on
