@@ -1328,8 +1328,8 @@ html.ww-on:not(.ww-onb) body > .fixed.right-0.z-\[110\] {
   font-size: 12px;
 }
 /* Desktop wallet home (owner, 19 Oct 2026): the classic card column. The BSV price lives in the side pane's chart and
-   Swap / Buy in the beta banner, so the phone's price line and Swap card are not repeated here. */
-.ww-content.view-wallet:not(.is-full) .bw-priceline,
+   Swap / Buy in the beta banner, so the phone's top row (price · Buy · History) and Swap card are not repeated here. */
+.ww-content.view-wallet:not(.is-full) .bw-toprow,
 .ww-content.view-wallet:not(.is-full) .bw-swaprow {
   display: none !important;
 }

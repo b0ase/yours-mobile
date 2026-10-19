@@ -362,38 +362,6 @@
   cursor: pointer;
 }
 
-/* The BSV price, one small line in the balance header (wallet/BuyBsv.tsx BsvPriceBar). */
-.bw-priceline {
-  width: 92%;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-  font-size: 13px;
-  color: var(--bw-text, #fff);
-}
-.bw-priceline > button:first-child {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  border: 0;
-  background: none;
-  padding: 2px 0;
-  color: inherit;
-  cursor: pointer;
-  font: inherit;
-}
-.bw-priceline-buy {
-  margin-left: auto;
-  border: 0;
-  border-radius: 999px;
-  padding: 5px 12px;
-  font-size: 12px;
-  font-weight: 800;
-  cursor: pointer;
-  background: linear-gradient(135deg, var(--bw-accent-lo), var(--bw-accent-hi));
-  color: var(--bw-on-accent, #000);
-}
 /* Phone / web wallet page: Ask b sits at the very bottom of the wallet home, under the tokens (owner, 19 Oct 2026:
    "a great helper, but not the primary feature on the wallet screen"). The home's wrappers are flattened into the
    page column so the Ask b cell can take the last place; the other modules keep their order and spacing. */
