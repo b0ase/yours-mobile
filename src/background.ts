@@ -1,4 +1,5 @@
 /* global chrome */
+import { createMasterBackupGate } from './services/masterBackupGate';
 import { promptsShowInPanel } from './services/panelPrompt';
 import { isSessionExpired } from './utils/lockTimeout';
 import { originatorForOrigin } from './services/originKey';
@@ -658,7 +659,8 @@ export const getWallet = (): WalletInterface | null => {
  */
 const ensureWallet = async (suppressPopup = false): Promise<WalletInterface> => {
   await startupInitPromise;
-  if (masterBackupInFlight) throw new Error('Wallet is busy with a master backup; try again in a moment');
+  // During a master backup, wait for it (and the original account to reopen) instead of failing (masterBackupGate.ts).
+  if (masterBackupGate.active) await masterBackupGate.wait();
   if (accountContext?.wallet) {
     return accountContext.wallet;
   }
@@ -752,6 +754,8 @@ const USB_CHECK_TIMEOUT_MS = 3 * 60_000;
  * then would initialise whichever account the export had selected last.
  */
 let masterBackupInFlight = false;
+/** Wallet requests that land during the backup wait here; released once the original account is open again. */
+const masterBackupGate = createMasterBackupGate();
 
 const pendingGroupedPermissionRequests = new Map<
   string,
@@ -3166,6 +3170,8 @@ if (!(
         await initializeWallet();
       } catch (err) {
         console.error('[MasterBackup] failed to restore original account:', err);
+      } finally {
+        masterBackupGate.end();
       }
     };
 
@@ -3214,6 +3220,7 @@ if (!(
 
       // From here until restoreOriginalAccount: no wallet may come up.
       masterBackupInFlight = true;
+      masterBackupGate.begin();
       // Release the live wallet so per-account opens own the IDB connection.
       await closeLiveWallet('before-master-backup');
 

@@ -5,6 +5,7 @@ import { Utils } from '@bsv/sdk';
 import { NetWork } from './types/provider.types';
 import { YoursEventName } from '../inject';
 import { sendMessageAsync } from '../utils/chromeHelpers';
+import { IS_EXTENSION } from '../mobile/extension';
 import {
   CHROME_STORAGE_OBJECT_VERSION,
   DEFAULT_ACCOUNT,
@@ -539,6 +540,22 @@ export class ChromeStorageService {
   switchAccount = async (identityAddress: string): Promise<void> => {
     await this.update({ selectedAccount: identityAddress });
     await sendMessageAsync({ action: YoursEventName.SWITCH_ACCOUNT });
+  };
+
+  /**
+   * Select an account for a page reload that follows at once (account switch, the end of Create wallet).
+   *
+   * Outside the Chrome extension the background runs inside the page, so the reload restarts it and its startup opens
+   * the selected account. Sending SWITCH_ACCOUNT first opened the wallet twice: the first init's address sync was
+   * then cut off by the reload (release check, 19 Oct 2026). There, only the selection is saved. In the extension the
+   * service worker outlives the page, so it is switched as before.
+   */
+  switchAccountForReload = async (
+    identityAddress: string,
+    backgroundSurvivesReload: boolean = IS_EXTENSION,
+  ): Promise<void> => {
+    if (backgroundSurvivesReload) return this.switchAccount(identityAddress);
+    await this.update({ selectedAccount: identityAddress });
   };
 
   /**
