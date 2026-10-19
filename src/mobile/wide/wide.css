@@ -1038,6 +1038,14 @@ html.ww-on body > .fixed.inset-0.items-end > * {
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
   animation: ww-page-in 0.16s ease-out;
 }
+/* A cover laid over the sheet with position: absolute; inset: 0 (SendConfirmation inside Mint, Send, Swap…) is a
+   sibling of the sheet, so the rule above caps it at 560px but leaves it pinned to the window's left edge (bMint
+   Confirm Send at 1440, 19 Oct 2026). Centre it in the window over the sheet it covers. */
+html.ww-on body > .fixed.inset-0.items-end > :is(.absolute, [style*='position: absolute']) {
+  inset: 32px 0 !important;
+  margin: 0 auto !important;
+  height: auto !important;
+}
 
 /* ---- Page template (WidePage.tsx): one header, one padding, one card, one background for every destination ---- */
 .ww-root {
