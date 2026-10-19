@@ -36,7 +36,13 @@ export const streamDataToZip = async (
   passwordKey?: string,
   /** Wallet password: seals the file in the v2 envelope (backupEnvelope.ts, PBKDF2-SHA256 600k + AES-GCM). */
   password?: string,
-) => {
+  /**
+   * Saves the finished file; resolves false if the user cancelled. Settings passes the phone's share-sheet route
+   * (mobile/backup/backupFile.ts), because an <a download> does nothing inside the iOS / Android apps (owner,
+   * 19 Oct 2026). Without it the file downloads as before.
+   */
+  save?: (file: File) => Promise<boolean>,
+): Promise<{ saved: boolean; fileName: string }> => {
   progress({ message: 'Starting backup...', stage: 'preparing' });
 
   // Listen for progress broadcasts from the background script
@@ -75,19 +81,25 @@ export const streamDataToZip = async (
     // One format going forward: the v2 envelope (still a .zip). Restore reads it and older plain files.
     const out = password ? await sealBackup(bytes, password) : bytes;
     if (password) bytes.fill(0);
+    const fileName = currentAccountBackupName(chromeStorageService, 'zip');
     const blob = new Blob([out as Uint8Array<ArrayBuffer>], { type: 'application/zip' });
 
-    // Trigger download
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = currentAccountBackupName(chromeStorageService, 'zip');
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    let saved = true;
+    if (save) {
+      saved = await save(new File([blob], fileName, { type: 'application/zip' }));
+    } else {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
 
-    progress({ message: 'Backup complete!', stage: 'complete' });
+    if (saved) progress({ message: 'Backup complete!', stage: 'complete' });
+    return { saved, fileName };
   } catch (error) {
     chrome.runtime.onMessage.removeListener(progressListener);
     const message = error instanceof Error ? error.message : 'Unknown error';

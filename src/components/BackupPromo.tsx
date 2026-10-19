@@ -7,6 +7,8 @@ import { Theme } from '../theme.types';
 import { KeysService } from '../services/Keys.service';
 import { useServiceContext } from '../hooks/useServiceContext';
 import { currentAccountBackupName } from '../utils/accountBackupName';
+import { Capacitor } from '@capacitor/core';
+import { saveBackupFile, saveRoute } from '../mobile/backup/backupFile';
 
 type Props = {
   theme: Theme;
@@ -44,15 +46,19 @@ export const BackupPromo = ({ theme, keysService, keysAlreadyBackedUp, onKeysBac
         identityPk: keys.identityWif,
         identityDerivationPath: keys.identityDerivationPath,
       };
-      const blob = new Blob([JSON.stringify(keysToExport, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', currentAccountBackupName(chromeStorageService, 'json'));
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      // In the iOS / Android app an <a download> does nothing: the share sheet saves it (owner, 19 Oct 2026).
+      const name = currentAccountBackupName(chromeStorageService, 'json');
+      const file = new File([JSON.stringify(keysToExport, null, 2)], name, { type: 'application/json' });
+      let saved = false;
+      try {
+        saved = await saveBackupFile(file, saveRoute(file, Capacitor.isNativePlatform()));
+      } catch {
+        saved = false;
+      }
+      if (!saved) {
+        setPasswordError('Not saved — try again');
+        return;
+      }
       setKeysDownloaded(true);
       onKeysBackedUp();
     } catch {

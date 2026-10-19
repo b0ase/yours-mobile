@@ -22,6 +22,11 @@ export type QuickUnlock = {
    */
   unlock: () => Promise<boolean>;
   disable?: () => Promise<void>;
+  /**
+   * Confirms the user with the same biometric prompt, without changing the lock state (Show my 12 words).
+   * Resolves true only if the sealed key still opens this account; false if cancelled, broken or not set up.
+   */
+  verify?: (reason: string) => Promise<boolean>;
   /** Prompt as soon as the lock screen appears. */
   autoPrompt?: boolean;
   /**
