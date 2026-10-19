@@ -1,26 +1,41 @@
 /**
- * bDojoX theme card art (19 Oct 2026, owner direction): deep navy/black base, our own red + blue torii, and a white
- * katakana-style wordmark (Latin letters drawn as katakana-like strokes, SVG paths, no font). Original geometry only:
- * no third-party dojo marks. Writes SVG then webp via sharp:
+ * bDojoX theme card art (19 Oct 2026). Matches bdojox.com: navy #070b1a, Dojo red #e0262f, blue #3a6bf0 / #7ea0ff,
+ * and the site's own logo family (the 3D slanted torii and the forward-leaning katakana-style wordmark), copied
+ * unchanged from bdojox-site (media-src/logo-gen.mjs output) into scripts/bdojox/. Writes webp via sharp:
  *   node scripts/bdojox-art.mjs
+ *
+ * Layout: WalletCard zooms edition art 1.4x toward the top-right (cardFrontArt.ts), so the card shows roughly
+ * x 0-71% and y 29-100% of the art. The marks sit inside that window, right of the balance.
  */
+import { readFileSync } from 'node:fs';
 import sharp from 'sharp';
 
 const W = 1011;
 const H = 637;
 const OUT = new URL('../src/mobile/wallet/editionArt/', import.meta.url);
+const SRC = new URL('./bdojox/', import.meta.url);
+
+/** One of the site's SVGs as a nested <svg> placed at x, y with width w (height follows its viewBox). */
+function place(file, x, y, w) {
+  const svg = readFileSync(new URL(file, SRC), 'utf8');
+  const vb = /viewBox="([^"]+)"/.exec(svg)[1];
+  const [, , vw, vh] = vb.split(/\s+/).map(Number);
+  const h = (w * vh) / vw;
+  const inner = svg.replace(/^<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '');
+  return `<svg x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" viewBox="${vb}">${inner}</svg>`;
+}
 
 // Seeded random so the art is reproducible.
 let s = 7;
 const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647;
 
-/** Ensō: many thin arcs with drifting radius and fading tail, read as a dry gold brush stroke. */
+/** Ensō: many thin arcs with drifting radius and a fading tail, read as a dry red brush stroke. */
 function enso(cx, cy, r, start = -100, sweep = 330) {
   const out = [];
   for (let k = 0; k < 70; k++) {
-    const off = (rnd() - 0.5) * 34; // bristle spread
+    const off = (rnd() - 0.5) * 30;
     const a0 = start + rnd() * 6;
-    const a1 = a0 + sweep - rnd() * (40 + Math.abs(off) * 2.2); // outer bristles run dry sooner
+    const a1 = a0 + sweep - rnd() * (40 + Math.abs(off) * 2.2);
     const pts = [];
     for (let a = a0; a <= a1; a += 3) {
       const t = (a - a0) / (a1 - a0);
@@ -28,50 +43,17 @@ function enso(cx, cy, r, start = -100, sweep = 330) {
       const rad = (a * Math.PI) / 180;
       pts.push(`${(cx + rr * Math.cos(rad)).toFixed(1)} ${(cy + rr * Math.sin(rad)).toFixed(1)}`);
     }
-    const w = (1.4 + rnd() * 3.2).toFixed(1);
-    const o = (0.35 + rnd() * 0.5).toFixed(2);
+    const w = (1.2 + rnd() * 3).toFixed(1);
+    const o = (0.3 + rnd() * 0.45).toFixed(2);
     out.push(
-      `<path d="M${pts.join('L')}" stroke="url(#gold)" stroke-width="${w}" stroke-opacity="${o}" fill="none" stroke-linecap="round"/>`,
+      `<path d="M${pts.join('L')}" stroke="#e0262f" stroke-width="${w}" stroke-opacity="${o}" fill="none" stroke-linecap="round"/>`,
     );
   }
   return out.join('');
 }
 
-/** Torii: two pillars, kasagi (curved top beam) and nuki (tie beam), in gold leaf. */
-function torii(x, y, w) {
-  const h = w * 0.9;
-  const p = w * 0.07;
-  return `<g>
-<path d="M${x - w * 0.62} ${y} Q${x} ${y + w * 0.08} ${x + w * 0.62} ${y} L${x + w * 0.56} ${y + w * 0.1} Q${x} ${y + w * 0.16} ${x - w * 0.56} ${y + w * 0.1} Z" fill="url(#gold)"/>
-<rect fill="url(#gold)" x="${x - w * 0.5}" y="${y + w * 0.26}" width="${w}" height="${w * 0.06}"/>
-<rect fill="url(#gold)" x="${x - p / 2}" y="${y + w * 0.12}" width="${p * 0.8}" height="${w * 0.15}"/>
-<rect fill="url(#blue)" x="${x - w * 0.38}" y="${y + w * 0.1}" width="${p}" height="${h}"/>
-<rect fill="url(#blue)" x="${x + w * 0.38 - p}" y="${y + w * 0.1}" width="${p}" height="${h}"/>
-</g>`;
-}
-
-/** White katakana-style wordmark "bDOJOX": each letter is a few straight brush strokes (b≈ト+コ, D≈ワ, O≈ロ, J≈フ, X≈メ). */
-const GLYPHS = {
-  b: ['M8 0L4 80', 'M6 38L50 34L46 78L4 80'],
-  D: ['M4 2L4 80', 'M4 2L54 4L50 44Q42 72 4 80'],
-  O: ['M6 6L52 4L50 76L4 78Z'],
-  J: ['M2 6L54 4L50 60Q44 78 14 80L6 64'],
-  X: ['M8 4Q40 40 56 80', 'M54 10Q30 60 2 76'],
-};
-function wordmark(x, y, size) {
-  const k = size / 80;
-  const g = [];
-  [...'bDOJOX'].forEach((ch, i) => {
-    g.push(
-      `<g transform="translate(${(x + i * 72 * k).toFixed(1)} ${y}) scale(${k.toFixed(3)}) skewX(-6)">${GLYPHS[ch]
-        .map((d) => `<path d="${d}"/>`)
-        .join('')}</g>`,
-    );
-  });
-  return `<g fill="none" stroke="#FFFFFF" stroke-width="${(9).toFixed(0)}" stroke-linecap="square" stroke-linejoin="miter">${g.join('')}</g>`;
-}
-
-const BELTS = ['#FFFFFF', '#E5262E', '#2F7BFF', '#E5262E', '#2F7BFF'];
+/** Belt rule in the site's colours. */
+const BELTS = ['#ffffff', '#e0262f', '#3a6bf0', '#e0262f', '#7ea0ff'];
 function beltRule(x, y, w, h) {
   const seg = w / BELTS.length;
   return BELTS.map(
@@ -80,43 +62,23 @@ function beltRule(x, y, w, h) {
   ).join('');
 }
 
-const defs = `<defs>
-<linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FF5A5F"/><stop offset=".45" stop-color="#E5262E"/><stop offset="1" stop-color="#B0151C"/></linearGradient>
-<radialGradient id="lac" cx=".7" cy=".3" r="1"><stop offset="0" stop-color="#14254A"/><stop offset=".55" stop-color="#0A1430"/><stop offset="1" stop-color="#03060F"/></radialGradient>
-<linearGradient id="blue" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5EA2FF"/><stop offset="1" stop-color="#1F5FD6"/></linearGradient>
-<linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFF" stop-opacity=".06"/><stop offset=".35" stop-color="#FFF" stop-opacity="0"/></linearGradient>
-</defs>`;
+const ground = `<defs>
+<radialGradient id="navy" cx=".7" cy=".3" r="1"><stop offset="0" stop-color="#101a3a"/><stop offset=".55" stop-color="#070b1a"/><stop offset="1" stop-color="#03050d"/></radialGradient>
+<radialGradient id="bluewash" cx=".55" cy=".45" r=".5"><stop offset="0" stop-color="#3a6bf0" stop-opacity=".22"/><stop offset="1" stop-color="#3a6bf0" stop-opacity="0"/></radialGradient>
+</defs><rect width="${W}" height="${H}" fill="url(#navy)"/><rect width="${W}" height="${H}" fill="url(#bluewash)"/>`;
 
-/** Faint lacquer grain: thin horizontal hairlines. */
-function grain(w, h) {
-  const out = [];
-  for (let i = 0; i < 90; i++) {
-    const y = (rnd() * h).toFixed(1);
-    out.push(
-      `<rect x="0" y="${y}" width="${w}" height="${(0.6 + rnd()).toFixed(1)}" fill="#7FA8FF" fill-opacity="${(0.015 + rnd() * 0.03).toFixed(3)}"/>`,
-    );
-  }
-  return out.join('');
-}
+const open = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`;
 
-/* Layout note: WalletCard zooms edition art 1.4x toward the top-right (cardFrontArt.ts), so the card shows roughly
-   x 0-71% and y 29-100% of the art. The torii and wordmark sit inside that window, right of the balance. */
+// Card 1: the site's lockup (torii + wordmark) with a belt rule.
+const card1 = `${open}${ground}
+${place('logo-lockup.svg', W * 0.355, H * 0.47, W * 0.31)}
+${beltRule(W * 0.4, H * 0.66, 190, 5)}</svg>`;
 
-// Card 1: the torii over the wordmark and a red/blue rule.
-const card1 = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${defs}
-<rect width="${W}" height="${H}" fill="url(#lac)"/>${grain(W, H)}<rect width="${W}" height="${H}" fill="url(#sheen)"/>
-${torii(W * 0.5, H * 0.335, 150)}
-${wordmark(W * 0.405, H * 0.64, 36)}
-${beltRule(W * 0.405, H * 0.735, 190, 5)}</svg>`;
-
-// Card 2: a torii framed by a large faint ensō.
-s = 21;
-const card2 = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${defs}
-<rect width="${W}" height="${H}" fill="url(#lac)"/>${grain(W, H)}<rect width="${W}" height="${H}" fill="url(#sheen)"/>
-<g opacity=".45">${enso(W * 0.5, H * 0.5, 130, -60, 320)}</g>
-${torii(W * 0.5, H * 0.35, 120)}
-${wordmark(W * 0.405, H * 0.64, 36)}
-${beltRule(W * 0.405, H * 0.735, 190, 5)}</svg>`;
+// Card 2: the torii mark inside a red ensō, the wordmark beneath.
+const card2 = `${open}${ground}
+<g opacity=".55">${enso(W * 0.51, H * 0.44, 78, -60, 320)}</g>
+${place('logo.svg', W * 0.51 - 52, H * 0.44 - 46, 104)}
+${place('wordmark.svg', W * 0.44, H * 0.6, W * 0.15)}</svg>`;
 
 for (const [name, svg] of [
   ['bdojox-card-1', card1],
