@@ -360,6 +360,49 @@ public class YoursNativePlugin extends Plugin {
         }
     }
 
+    /**
+     * Fingerprint / face OR the phone's PIN, pattern or password (BiometricPrompt with DEVICE_CREDENTIAL). Used to
+     * confirm the owner when the wallet password is forgotten (Change password). Resolves { ok }.
+     */
+    @PluginMethod
+    public void deviceOwnerAuth(PluginCall call) {
+        String reason = call.getString("reason", "Confirm it's you");
+        int allowed = BiometricManager.Authenticators.BIOMETRIC_WEAK | BiometricManager.Authenticators.DEVICE_CREDENTIAL;
+        if (BiometricManager.from(getContext()).canAuthenticate(allowed) != BiometricManager.BIOMETRIC_SUCCESS) {
+            JSObject no = new JSObject();
+            no.put("ok", false);
+            call.resolve(no);
+            return;
+        }
+        getActivity().runOnUiThread(() -> {
+            BiometricPrompt prompt = new BiometricPrompt(
+                (AppCompatActivity) getActivity(),
+                ContextCompat.getMainExecutor(getContext()),
+                new BiometricPrompt.AuthenticationCallback() {
+                    @Override
+                    public void onAuthenticationSucceeded(@NonNull BiometricPrompt.AuthenticationResult result) {
+                        JSObject ret = new JSObject();
+                        ret.put("ok", true);
+                        call.resolve(ret);
+                    }
+
+                    @Override
+                    public void onAuthenticationError(int code, @NonNull CharSequence message) {
+                        JSObject ret = new JSObject();
+                        ret.put("ok", false);
+                        call.resolve(ret);
+                    }
+                }
+            );
+            BiometricPrompt.PromptInfo info = new BiometricPrompt.PromptInfo.Builder()
+                .setTitle("Confirm it's you")
+                .setSubtitle(reason)
+                .setAllowedAuthenticators(allowed)
+                .build();
+            prompt.authenticate(info);
+        });
+    }
+
     @PluginMethod
     public void biometricRemove(PluginCall call) {
         deleteBiometricKey();

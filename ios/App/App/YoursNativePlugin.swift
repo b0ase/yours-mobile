@@ -42,6 +42,7 @@ public class YoursNativePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "biometricSet", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "biometricGet", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "biometricRemove", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "deviceOwnerAuth", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "browserOpen", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "browserClose", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "browserSetHidden", returnType: CAPPluginReturnPromise),
@@ -371,6 +372,20 @@ public class YoursNativePlugin: CAPPlugin, CAPBridgedPlugin {
             call.reject("Cancelled", "cancelled")
         default:
             call.reject("Biometric unlock failed (\(status))", "failed")
+        }
+    }
+
+    /// Face ID / Touch ID OR the phone's passcode (LAPolicy.deviceOwnerAuthentication). Used to confirm the owner
+    /// when the wallet password is forgotten (Change password). Resolves { ok }; a cancel resolves ok: false.
+    @objc func deviceOwnerAuth(_ call: CAPPluginCall) {
+        let context = LAContext()
+        var error: NSError?
+        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
+            return call.resolve(["ok": false])
+        }
+        let reason = call.getString("reason") ?? "Confirm it's you"
+        context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) { ok, _ in
+            call.resolve(["ok": ok])
         }
     }
 

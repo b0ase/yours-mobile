@@ -1,7 +1,9 @@
 import { APP_NAME } from '../storeBuild';
 import { useState } from 'react';
+import { canDeviceOwnerAuth } from '../deviceOwnerAuth';
+import { FORGOT_PASSWORD_COPY, type ChangePasswordProof } from '../../utils/changePasswordGate';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, Check } from 'lucide-react';
+import { ArrowLeft, Check, Fingerprint } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useBackClose } from '../backStack';
 import { PasswordFields } from '../names/PasswordFields';
@@ -9,8 +11,9 @@ import { saveWalletPassword } from '../names/walletPassword';
 import { ErrorActions } from '../errors/ErrorActions';
 
 /**
- * Settings › Security › Change password (owner, 4 Oct 2026). The wallet is unlocked, so no old
- * password is needed: ChromeStorageService.changePassword re-encrypts the keys under the new one.
+ * Settings › Security › Change password (owner, 4 Oct 2026). One proof of the owner is required:
+ * the current password, the phone's Face ID / fingerprint / passcode, or the 12 words (security audit 19 Oct 2026): an unlocked phone alone must not be enough.
+ * ChromeStorageService.changePassword enforces it and re-encrypts the keys under the new one.
  * The recovery phrase is unaffected; it still restores the same wallet.
  */
 export const ChangePassword = ({ onClose }: { onClose: () => void }) => {
@@ -23,13 +26,17 @@ export const ChangePassword = ({ onClose }: { onClose: () => void }) => {
   const [error, setError] = useState('');
   const [done, setDone] = useState(false);
   const [saved, setSaved] = useState(false);
-
+  const [current, setCurrent] = useState('');
+  // Forgot the password: the phone's Face ID / fingerprint / passcode, or the 12 words (utils/changePasswordGate.ts).
+  const [forgot, setForgot] = useState(false);
+  const [phrase, setPhrase] = useState('');
+  const deviceAuth = canDeviceOwnerAuth();
   const ok = password.length >= 8 && password === confirm;
-  const save = async () => {
+  const save = async (proof: ChangePasswordProof) => {
     setBusy(true);
     setError('');
     try {
-      await chromeStorageService.changePassword(password);
+      await chromeStorageService.changePassword(password, proof);
       void saveWalletPassword(name, password);
       setDone(true);
     } catch (e) {
@@ -68,13 +75,55 @@ export const ChangePassword = ({ onClose }: { onClose: () => void }) => {
             className="w-full flex flex-col items-center"
             onSubmit={(e) => {
               e.preventDefault();
-              if (ok && saved && !busy) void save();
+              if (!ok || !saved || busy) return;
+              if (!forgot && current) void save({ currentPassword: current });
+              else if (forgot && phrase.trim()) void save({ mnemonic: phrase });
             }}
           >
             <p className="text-sm text-center mt-4 mb-4" style={{ color: '#98A2B3' }}>
-              Your wallet is unlocked, so you don't need the old password. This changes the password on this device
-              only.
+              {forgot
+                ? deviceAuth
+                  ? FORGOT_PASSWORD_COPY + ' Or type your 12 words.'
+                  : 'Forgot your password? Type your 12 words to set a new one.'
+                : 'Enter your current password to set a new one.'}{' '}
+              This changes the password on this device only.
             </p>
+            {forgot ? (
+              <textarea
+                autoComplete="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                placeholder="Your 12 words"
+                aria-label="Your 12 words"
+                value={phrase}
+                onChange={(e) => setPhrase(e.target.value)}
+                rows={3}
+                className="w-[85%] mb-3 rounded-xl px-3 py-3 text-white"
+                style={{ background: 'var(--bw-card, #1D2939)', border: '1px solid #344054' }}
+              />
+            ) : (
+              <input
+                type="password"
+                autoComplete="current-password"
+                placeholder="Current password"
+                aria-label="Current password"
+                value={current}
+                onChange={(e) => setCurrent(e.target.value)}
+                className="w-[85%] mb-3 rounded-xl px-3 py-3 text-white"
+                style={{ background: 'var(--bw-card, #1D2939)', border: '1px solid #344054' }}
+              />
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setForgot(!forgot);
+                setError('');
+              }}
+              className="mb-3 text-xs bg-transparent border-0 underline"
+              style={{ color: '#D0D5DD' }}
+            >
+              {forgot ? 'I know my password' : 'Forgot your password?'}
+            </button>
             <PasswordFields
               newWallet
               username={name}
@@ -102,12 +151,32 @@ export const ChangePassword = ({ onClose }: { onClose: () => void }) => {
             )}
             <button
               type="submit"
-              disabled={!ok || !saved || busy}
+              disabled={!ok || !saved || !(forgot ? phrase.trim() : current) || busy}
               className="mt-6 w-[85%] rounded-xl py-3 font-bold border-0"
-              style={{ background: 'var(--bw-accent)', color: '#000', opacity: ok && saved && !busy ? 1 : 0.4 }}
+              style={{
+                background: 'var(--bw-accent)',
+                color: '#000',
+                opacity: ok && saved && (forgot ? phrase.trim() : current) && !busy ? 1 : 0.4,
+              }}
             >
               {busy ? 'Changing…' : 'Change password'}
             </button>
+            {forgot && deviceAuth && (
+              <button
+                type="button"
+                disabled={!ok || !saved || busy}
+                onClick={() => void save({ deviceOwner: true })}
+                className="mt-3 w-[85%] rounded-xl py-3 font-bold flex items-center justify-center gap-2"
+                style={{
+                  background: 'transparent',
+                  color: 'white',
+                  border: '1px solid #344054',
+                  opacity: ok && saved && !busy ? 1 : 0.4,
+                }}
+              >
+                <Fingerprint size={18} /> Confirm with Face ID or passcode
+              </button>
+            )}
           </form>
         )}
       </div>
