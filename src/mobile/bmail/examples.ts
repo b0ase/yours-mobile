@@ -282,22 +282,58 @@ const HIDE_KEY = 'bw-bmail-examples-hidden';
  */
 export const examplesAllowed = (native: boolean): boolean => !native;
 
-export const examplesHidden = (): boolean => {
+/** Per-account keys (owner, 19 Oct: "Delete all examples" is remembered per account). '' = the old device-wide key. */
+const hideKey = (acct = '') => (acct ? `${HIDE_KEY}:${acct}` : HIDE_KEY);
+const goneKey = (acct = '') => `${HIDE_KEY}:one:${acct}`;
+const HINT_KEY = 'bw-bmail-example-swipe-hint';
+
+const get = (k: string): string | null => {
   try {
-    return globalThis.localStorage?.getItem(HIDE_KEY) === '1';
+    return globalThis.localStorage?.getItem(k) ?? null;
   } catch {
-    return false;
+    return null;
   }
 };
-
-export const setExamplesHidden = (v: boolean) => {
+const put = (k: string, v: string | null) => {
   try {
-    if (v) globalThis.localStorage?.setItem(HIDE_KEY, '1');
-    else globalThis.localStorage?.removeItem(HIDE_KEY);
+    if (v === null) globalThis.localStorage?.removeItem(k);
+    else globalThis.localStorage?.setItem(k, v);
   } catch {
     /* private mode: shown again next launch */
   }
 };
+
+/** All examples hidden for this account (the old device-wide "Hide examples" still counts). */
+export const examplesHidden = (acct = ''): boolean => get(hideKey(acct)) === '1' || get(HIDE_KEY) === '1';
+
+/** Hide (true) or bring back (false) every example for this account; bringing back also restores single ones. */
+export const setExamplesHidden = (v: boolean, acct = '') => {
+  put(hideKey(acct), v ? '1' : null);
+  if (!v) {
+    put(HIDE_KEY, null);
+    put(goneKey(acct), null);
+  }
+};
+
+/** Ids of single examples this account deleted (swipe or Delete). */
+export const hiddenExampleIds = (acct = ''): string[] => {
+  try {
+    const v: unknown = JSON.parse(get(goneKey(acct)) ?? '[]');
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+};
+
+export const hideExample = (id: string, acct = '') =>
+  put(goneKey(acct), JSON.stringify([...new Set([...hiddenExampleIds(acct), id])]));
+
+export const unhideExample = (id: string, acct = '') =>
+  put(goneKey(acct), JSON.stringify(hiddenExampleIds(acct).filter((x) => x !== id)));
+
+/** The swipe-to-delete hint plays once per device. */
+export const swipeHintSeen = (): boolean => get(HINT_KEY) === '1';
+export const markSwipeHintSeen = () => put(HINT_KEY, '1');
 
 /** Show examples while the user has little real mail of their own. */
 export const EXAMPLES_BELOW = 5;
