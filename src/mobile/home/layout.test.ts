@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  migrateDefault,
   DEFAULT_LAYOUT,
   WIDE_DEFAULT_LAYOUT,
   migrateWide,
@@ -14,8 +15,8 @@ import {
 
 describe('home layout', () => {
   test('defaults: card, Ask b, store showcase', () => {
-    expect(DEFAULT_LAYOUT).toEqual(['card', 'askB', 'showcase']);
-    expect(parseLayout(null)).toEqual(['card', 'askB', 'showcase']);
+    expect(DEFAULT_LAYOUT).toEqual(['card', 'showcase', 'askB']);
+    expect(parseLayout(null)).toEqual(['card', 'showcase', 'askB']);
   });
 
   test('migration: an existing user with nothing saved gets the defaults; garbage too', () => {
@@ -78,5 +79,10 @@ describe('Desktop classic home (19 Oct 2026)', () => {
   test('a layout the user arranged is kept', () => {
     expect(migrateWide(['card', 'showcase', 'askB'])).toEqual(['card', 'showcase', 'askB']);
     expect(migrateWide(['card', 'pots'])).toEqual(['card', 'pots']);
+  });
+
+  test('phone/web: the untouched old default moves Ask b last; custom layouts are kept', () => {
+    expect(migrateDefault(['card', 'askB', 'showcase'])).toEqual(['card', 'showcase', 'askB']);
+    expect(migrateDefault(['card', 'askB', 'history'])).toEqual(['card', 'askB', 'history']);
   });
 });

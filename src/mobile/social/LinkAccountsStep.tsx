@@ -6,7 +6,7 @@ import { LinkAccounts } from './LinkAccounts';
 import { getLinks, onLinksChange } from './links';
 
 /**
- * Onboarding "Claim your name", part 2 (owner, 18 Oct 2026): after the $name, optional "Link your accounts".
+ * "Link your accounts" (owner, 18 Oct 2026), opened from the wallet home card (LinkAccountsCard; no longer an onboarding step, 19 Oct 2026).
  * Skippable ("Later"); the same rows live in Settings › Identity › Link your accounts.
  */
 export const LinkAccountsStep = ({ owner, onClose }: { owner: string; onClose: () => void }) => {
@@ -19,7 +19,7 @@ export const LinkAccountsStep = ({ owner, onClose }: { owner: string; onClose: (
       <div className="flex flex-col items-center px-5 pb-6 overflow-y-auto flex-1">
         <div style={{ paddingTop: 'max(env(safe-area-inset-top), 20px)' }} />
         <div className="text-[11px] font-bold uppercase tracking-wider mt-2" style={{ color: 'var(--bw-accent-hi)' }}>
-          Claim your name
+          Verified badges
         </div>
         <h1 className="text-[22px] font-bold text-white m-0 mt-1 text-center">Link your accounts</h1>
         <p className="text-sm text-center mt-2 mb-5" style={{ color: '#98A2B3' }}>

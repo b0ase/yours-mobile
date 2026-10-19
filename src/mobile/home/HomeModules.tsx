@@ -170,7 +170,7 @@ export const HomeRest = () => {
             const d = HOME_MODULES[id];
             const C = d.Component!;
             return (
-              <div key={id} className={`bw-home-cell ${d.size}`}>
+              <div key={id} className={`bw-home-cell bw-home-cell-${id} ${d.size}`}>
                 <SectionBoundary name={d.title}>
                   <Suspense fallback={<div className="bw-home-panel bw-home-skel" />}>
                     <C />
