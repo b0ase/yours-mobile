@@ -260,6 +260,9 @@ html:not(.ww-on) .bwallet-web-banner {
     flex: 1;
     min-width: 0;
   }
+  html:not(.ww-on) .pt-14.pb-16.overflow-y-auto:has(> .bw-bcar):has(.bw-home-show) .bw-home-cell.bw-home-cell-askB {
+    order: 10;
+  }
   /* Some inserts are display: contents wrappers (the token list), so their children are flex items here too. */
   html:not(.ww-on) .pt-14.pb-16.overflow-y-auto:has(> .bw-bcar):has(.bw-home-show) > *,
   html:not(.ww-on)

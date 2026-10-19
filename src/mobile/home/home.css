@@ -394,3 +394,21 @@
   background: linear-gradient(135deg, var(--bw-accent-lo), var(--bw-accent-hi));
   color: var(--bw-on-accent, #000);
 }
+/* Phone / web wallet page: Ask b sits at the very bottom of the wallet home, under the tokens (owner, 19 Oct 2026:
+   "a great helper, but not the primary feature on the wallet screen"). The home's wrappers are flattened into the
+   page column so the Ask b cell can take the last place; the other modules keep their order and spacing. */
+html:not(.ww-on) .pt-14.pb-16.overflow-y-auto > .bw-home:not(:has(.bw-home-editor)),
+html:not(.ww-on) .pt-14.pb-16.overflow-y-auto > .bw-home:not(:has(.bw-home-editor)) > .bw-home-grid {
+  display: contents;
+}
+html:not(.ww-on) .pt-14.pb-16.overflow-y-auto > .bw-home:not(:has(.bw-home-editor)) .bw-home-cell {
+  width: 92%;
+  margin-top: 10px;
+}
+html:not(.ww-on) .pt-14.pb-16.overflow-y-auto > .bw-home:not(:has(.bw-home-editor)) > .bw-home-edit {
+  margin-top: 10px;
+}
+html:not(.ww-on) .pt-14.pb-16.overflow-y-auto > .bw-home .bw-home-cell-askB {
+  order: 10;
+  margin-bottom: 16px;
+}
