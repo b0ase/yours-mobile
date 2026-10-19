@@ -560,6 +560,13 @@ export const BsvWallet = () => {
     setIsSendAllBsv(balanceFresh && satSendAmount === bsvBalanceInSats);
   }, [satSendAmount, bsvBalance, balanceFresh]);
 
+  const staleHint = staleBalanceHint({
+    failed: balanceFailed,
+    known: balanceKnown,
+    fresh: balanceFresh,
+    at: loadLastBalanceAt(identityAddress),
+  });
+
   const applyBalance = (satoshis: number) => {
     setBsvBalance(satoshis / 100_000_000);
     saveLastBalance(identityAddress, satoshis);
@@ -1555,19 +1562,9 @@ export const BsvWallet = () => {
               Still syncing. Tap to retry.
             </button>
           )}
-          {staleBalanceHint({
-            failed: balanceFailed,
-            known: balanceKnown,
-            fresh: balanceFresh,
-            at: loadLastBalanceAt(identityAddress),
-          }) && (
+          {staleHint && (
             <p className="mt-1 text-[11px] m-0" style={{ color: theme.color.global.gray, opacity: 0.8 }}>
-              {staleBalanceHint({
-                failed: balanceFailed,
-                known: balanceKnown,
-                fresh: balanceFresh,
-                at: loadLastBalanceAt(identityAddress),
-              })}
+              {staleHint}
             </p>
           )}
           {restoreMessage && (

@@ -103,6 +103,8 @@ export type WalletCardProps = {
   view: BalanceView;
   syncing: boolean;
   failed: boolean;
+  /** Quiet line under a cached amount while fresh loads fail (staleBalanceHint): "Last updated 14:05 · may be out of date". */
+  stale?: string | null;
   onRetry: () => void;
   receiveAddress: string;
   /** Manual refresh (icon on the card); also run quietly every minute and when the wallet comes back into view. */
@@ -144,6 +146,7 @@ const WalletCardInner = ({
   view,
   syncing,
   failed,
+  stale,
   onRetry,
   receiveAddress,
   onRefresh,
@@ -643,6 +646,11 @@ const WalletCardInner = ({
               <span className="bw-wcard-sighint">
                 <PenLine size={11} aria-hidden="true" />
                 Flip the card to add your signature
+              </span>
+            )}
+            {stale && !failed && (
+              <span className="bw-wcard-stale" role="status">
+                {stale}
               </span>
             )}
             {failed && (
