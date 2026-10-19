@@ -11,6 +11,11 @@
  * already changes the whole view, and never while audio or video is playing. The keys stay encrypted in localStorage
  * and the unlock session in sessionStorage, both survive that load.
  *
+ * A home-screen web app (iOS standalone) can sit on one view for days and resumes without a navigation, so it never
+ * reached that load (owner, 19 Oct 2026: chat "wouldn't connect" on an old build). So a found build is also offered
+ * as a small "New version · tap to update" pill, and a resume (`pageshow`) checks too. Tapping reloads; nothing
+ * reloads by itself.
+ *
  * `installStaleBuildCheck` is inlined into the page as a classic script (vite.config.web.ts), so it must stay
  * self-contained: no imports, no closures over module scope.
  */
@@ -19,6 +24,8 @@ export type StaleEnv = {
   win: Pick<Window, 'addEventListener'> & { history: Pick<History, 'pushState'>; location: Pick<Location, 'assign'> };
   fetchText: (url: string) => Promise<string>;
   now: () => number;
+  /** Offer the newer build: a quiet "tap to update" pill. Called once, when the check first finds one. */
+  offer?: () => void;
 };
 
 export function installStaleBuildCheck(env?: StaleEnv): { check: () => Promise<void>; stale: () => boolean } | null {
@@ -27,6 +34,22 @@ export function installStaleBuildCheck(env?: StaleEnv): { check: () => Promise<v
     win: window,
     fetchText: (u) => fetch(u, { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')),
     now: () => Date.now(),
+    offer: () => {
+      if (document.getElementById('bwx-update')) return;
+      const b = document.createElement('button');
+      b.id = 'bwx-update';
+      b.type = 'button';
+      b.textContent = 'New version \u00b7 Tap to update';
+      b.setAttribute(
+        'style',
+        'position:fixed;left:50%;transform:translateX(-50%);bottom:calc(76px + env(safe-area-inset-bottom));' +
+          'z-index:2147483000;padding:8px 14px;border-radius:999px;border:1px solid rgba(212,175,55,.6);' +
+          'background:#0b0b0b;color:#d4af37;font:600 13px/1.2 system-ui,-apple-system,sans-serif;' +
+          'box-shadow:0 4px 16px rgba(0,0,0,.35);cursor:pointer',
+      );
+      b.addEventListener('click', () => location.reload());
+      document.body.appendChild(b);
+    },
   };
   const GAP_MS = 60_000;
   const m = e.doc.querySelector('script[type=module][src*="main-"]');
@@ -41,7 +64,10 @@ export function installStaleBuildCheck(env?: StaleEnv): { check: () => Promise<v
     last = e.now();
     try {
       const x = /assets\/(main-[^"']+\.js)/.exec(await e.fetchText('/'));
-      if (x && x[1] !== mine) stale = true;
+      if (x && x[1] !== mine) {
+        stale = true;
+        if (e.offer) e.offer();
+      }
     } catch {
       /* offline: try again on the next focus */
     } finally {
@@ -61,5 +87,7 @@ export function installStaleBuildCheck(env?: StaleEnv): { check: () => Promise<v
   } as History['pushState'];
   e.doc.addEventListener('visibilitychange', () => void check());
   e.win.addEventListener('focus', () => void check());
+  // iOS home-screen apps come back from the background via pageshow, often without focus.
+  e.win.addEventListener('pageshow', () => void check());
   return { check, stale: () => stale };
 }
