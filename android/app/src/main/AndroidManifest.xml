@@ -80,6 +80,12 @@
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
 
+        <!-- Passkeys for rpId bwalletx.com (PasskeysPlugin.java). The site side is
+             https://bwalletx.com/.well-known/assetlinks.json (get_login_creds for both app ids). -->
+        <meta-data
+            android:name="asset_statements"
+            android:resource="@string/asset_statements" />
+
         <!-- Push (FCM): status-bar icon, tint and the "chat" channel the server targets (src/mobile/push). -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_icon"

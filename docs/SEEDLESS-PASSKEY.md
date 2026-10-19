@@ -362,3 +362,25 @@ blob jsonb not null, created_at timestamptz default now())`, RLS on, service-rol
 3. Native apps: worth a Capacitor passkey plugin (ASAuthorization / Credential Manager) + AASA/assetlinks for
    `bwalletx.com`? That is what makes it work in the store apps, where most users arrive.
 4. Balance threshold and wording for the "write your 12 words too" nudge.
+
+## Native apps (feat/seedless-native)
+
+The Capacitor shells can't use `navigator.credentials` for `bwalletx.com` (origin is `capacitor://localhost` /
+`https://localhost`), so `prf.ts` sends passkey calls to a local plugin when `Capacitor.isNativePlatform()`:
+
+- JS bridge: `src/mobile/passkey/nativePasskeys.ts` (`Passkeys` plugin: `isAvailable`, `create`, `get`; base64url
+  over the bridge), tests in `nativePasskeys.test.ts` with a mock plugin. Same rpId (`bwalletx.com`), same PRF input
+  (`prfSalt()`), same blob format and server store, so one synced passkey gives the same key on web and in the app.
+- iOS: `ios/App/App/PasskeysPlugin.swift`, `ASAuthorizationPlatformPublicKeyCredentialProvider` + `prf`
+  (iOS 18+; older iOS reports unavailable and the passkey options stay hidden). Entitlement
+  `webcredentials:bwalletx.com`; AASA on `https://bwalletx.com/.well-known/apple-app-site-association` lists
+  `ZQ4NX9NJ89.com.bitcoincorp.bwallet` and `ZQ4NX9NJ89.com.bitcoincorp.bwallet.private`.
+- Android: `PasskeysPlugin.java`, Credential Manager (`androidx.credentials` 1.5.0 + play-services-auth) with
+  `extensions.prf` in the WebAuthn JSON (Android 9+). PRF output depends on the provider: Google Password Manager
+  returns it; a third-party provider may not, which shows the "no PRF" message. `assetlinks.json` on bwalletx.com
+  lists `com.bitcoincorp.bwallet` and `com.bitcoincorp.bwallet.direct` with the upload-key and Play app-signing
+  SHA-256 fingerprints (`get_login_creds`).
+- Flag: unchanged. `SEEDLESS_ENABLED` needs `VITE_SEEDLESS=1` and is always off in store builds, so only
+  `VITE_SEEDLESS=1 bash scripts/channel-build.sh ios-private` / `android-direct` turn it on.
+- To verify on device: make a passkey on web.bwalletx.com, then Restore with a passkey in the app (and the reverse);
+  both must open the same backup. That proves the OS PRF APIs apply the same WebAuthn salt hashing as the browser.

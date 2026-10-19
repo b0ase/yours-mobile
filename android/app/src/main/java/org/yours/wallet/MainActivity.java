@@ -11,6 +11,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(YoursNativePlugin.class);
         registerPlugin(SpaceSessionPlugin.class);
+        registerPlugin(PasskeysPlugin.class);
         // Direct APK only: the in-app updater lives in src/direct (not compiled into Play), so load it by name.
         if ("android-direct".equals(BuildConfig.CHANNEL)) {
             try {
