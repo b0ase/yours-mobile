@@ -1,7 +1,7 @@
 {
   "name": "yours-wallet",
   "version": "5.2.34",
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "private": true,
   "type": "module",
   "dependencies": {

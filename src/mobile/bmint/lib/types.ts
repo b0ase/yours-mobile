@@ -1,4 +1,4 @@
-/** bMint note designer types. Ported from bcorp-mint (lib/types.ts) (The Bitcoin Corporation Mint, MIT). */
+/** bMint note designer types. Ported from bcorp-mint (lib/types.ts) (The Bitcoin Corporation Mint, Open BSV License). */
 
 export type MintBlendMode = 'source-over' | 'multiply' | 'screen' | 'overlay' | 'soft-light';
 
