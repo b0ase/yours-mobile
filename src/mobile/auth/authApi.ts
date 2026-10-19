@@ -39,6 +39,7 @@ export const answerAuthRequest = async (
   action: 'approve' | 'deny',
   f: typeof fetch = fetch,
   now = Date.now(),
+  match?: string,
 ) => {
   const { publicKey: identityKey } = await wallet.getPublicKey({ identityKey: true });
   const fields = {
@@ -57,7 +58,13 @@ export const answerAuthRequest = async (
   const r = await f(`${link.server}/api/auth/${action}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: req.id, identityKey, timestamp: now, signature: Utils.toHex(signature) }),
+    body: JSON.stringify({
+      id: req.id,
+      identityKey,
+      timestamp: now,
+      signature: Utils.toHex(signature),
+      ...(action === 'approve' ? { match } : {}),
+    }),
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j?.error || 'Sign-in failed. Try again on the site.');
@@ -73,3 +80,6 @@ export const scopeLabel = (s: string) =>
       : s === 'bitsign'
         ? 'Your bit-sign verified level'
         : s;
+
+/** The 4-digit code the site shows; the sheet only enables Allow once four digits are typed. */
+export const cleanMatchCode = (s: string) => s.replace(/[^0-9]/g, '').slice(0, 4);

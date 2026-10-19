@@ -6,7 +6,7 @@ import { SignInHero } from '../../components/approval/ApprovalHeroes';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useBackClose } from '../backStack';
 import { offerAuthLink, onAuthLink, takeAuthLink, type AuthLink } from './authLink';
-import { answerAuthRequest, fetchAuthRequest, scopeLabel, type AuthRequest } from './authApi';
+import { answerAuthRequest, cleanMatchCode, fetchAuthRequest, scopeLabel, type AuthRequest } from './authApi';
 
 type State =
   | { k: 'loading' }
@@ -23,6 +23,7 @@ export function AuthSheet({ link, onClose }: { link: AuthLink; onClose: () => vo
   const { apiContext } = useServiceContext();
   const [state, setState] = useState<State>({ k: 'loading' });
   const [details, setDetails] = useState(false);
+  const [match, setMatch] = useState('');
   useBackClose(true, onClose);
 
   useEffect(() => {
@@ -50,7 +51,7 @@ export function AuthSheet({ link, onClose }: { link: AuthLink; onClose: () => vo
     if (!wallet) return setState({ k: 'error', msg: 'Unlock your wallet first.', req });
     setState({ k: 'busy', req });
     try {
-      await answerAuthRequest(wallet, link, req, action);
+      await answerAuthRequest(wallet, link, req, action, fetch, Date.now(), match);
       if (action === 'deny') return onClose();
       setState({ k: 'done', req });
     } catch (e) {
@@ -89,7 +90,12 @@ export function AuthSheet({ link, onClose }: { link: AuthLink; onClose: () => vo
         }
         primary={
           state.k === 'ready' || busy
-            ? { label: busy ? 'Signing…' : 'Allow', onClick: () => void answer('approve'), disabled: busy, busy }
+            ? {
+                label: busy ? 'Signing…' : 'Allow',
+                onClick: () => void answer('approve'),
+                disabled: busy || match.length !== 4,
+                busy,
+              }
             : state.k === 'done'
               ? { label: 'Done', onClick: onClose }
               : undefined
@@ -133,13 +139,36 @@ export function AuthSheet({ link, onClose }: { link: AuthLink; onClose: () => vo
                 </div>
               ))}
             </div>
+            <label className="flex flex-col" style={{ gap: 6, fontSize: 14, color: CARD.muted }}>
+              Type the 4-digit code shown on {req.client.site}
+              <input
+                data-testid="auth-match-code"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={4}
+                value={match}
+                disabled={busy}
+                onChange={(e) => setMatch(cleanMatchCode(e.target.value))}
+                placeholder="0000"
+                style={{
+                  fontSize: 28,
+                  letterSpacing: 10,
+                  textAlign: 'center',
+                  padding: '8px 12px',
+                  borderRadius: 12,
+                  border: `1px solid ${CARD.gold}`,
+                  background: 'transparent',
+                  color: 'inherit',
+                }}
+              />
+            </label>
             <div className="flex flex-wrap" style={{ gap: 8 }}>
               <Chip>No password</Chip>
               <Chip>Nothing paid</Chip>
             </div>
             <p className="m-0" style={{ color: CARD.muted, fontSize: 14 }}>
-              Only allow if you just tapped Sign in on {req.client.site} yourself. If someone sent you this link, tap
-              Not now.
+              Only allow if you just tapped Sign in on {req.client.site} yourself and can see the code there. If someone
+              sent you this link or told you a code, tap Not now.
             </p>
           </>
         )}

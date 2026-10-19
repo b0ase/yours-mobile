@@ -34,6 +34,14 @@ const sha256 = (s) => crypto.createHash('sha256').update(s).digest();
 const sha256hex = (s) => sha256(s).toString('hex');
 const randHex = (n) => crypto.randomBytes(n).toString('hex');
 
+/**
+ * The 4-digit match code for a request. Shown only on the /authorize page (the browser that started the sign-in)
+ * and typed into the wallet sheet, so a forwarded sign-in link can't be approved by someone who never saw that page.
+ * Derived from poll_hash, which never leaves the server, so no extra column is needed.
+ */
+const matchCode = (row) =>
+  String(parseInt(sha256hex(`bwx-match|${row.poll_hash}`).slice(0, 8), 16) % 10000).padStart(4, '0');
+
 /** RFC 7636 S256: BASE64URL(SHA256(ascii(verifier))) === challenge. Verifier: 43-128 unreserved chars. */
 function pkceOk(verifier, challenge) {
   if (typeof verifier !== 'string' || !/^[A-Za-z0-9._~-]{43,128}$/.test(verifier)) return false;
@@ -317,7 +325,7 @@ function makeAuth({
       });
       return {
         status: 200,
-        html: authorizePage({ id, issuer, client }),
+        html: authorizePage({ id, issuer, client, match: matchCode({ poll_hash: sha256hex(poll) }) }),
         headers: {
           'Set-Cookie': `bwx_auth=${id}.${poll}; Path=/; Max-Age=${REQUEST_TTL_MS / 1000}; HttpOnly; Secure; SameSite=Lax`,
           'Referrer-Policy': 'no-referrer',
@@ -348,7 +356,7 @@ function makeAuth({
       };
     },
 
-    /** POST /api/auth/approve { id, identityKey, timestamp, signature } */
+    /** POST /api/auth/approve { id, identityKey, timestamp, signature, match } — match = the 4-digit code from /authorize */
     approve: async (body) => {
       if (!ID_RE.test(String(body?.id || ''))) return { status: 400, json: { error: 'bad-id' } };
       const row = await store.get(body.id);
@@ -356,6 +364,20 @@ function makeAuth({
       if (row.status !== 'pending') return { status: 409, json: { error: 'This sign-in was already answered.' } };
       const err = await verifyAuthSignature(body, row, 'approve', now());
       if (err) return { status: 401, json: { error: err } };
+      if (typeof body.match !== 'string' || !/^[0-9]{4}$/.test(body.match))
+        return {
+          status: 400,
+          json: { error: 'Type the 4-digit code shown on the site. (Update bWalletX if you see no box.)' },
+        };
+      const want = Buffer.from(matchCode(row));
+      if (!crypto.timingSafeEqual(Buffer.from(body.match), want)) {
+        // One try: a wrong code cancels the sign-in, so the 4 digits can't be guessed.
+        await store.transition(row.id, 'pending', { status: 'denied' });
+        return {
+          status: 403,
+          json: { error: "That code doesn't match the site. This sign-in was cancelled; start again on the site." },
+        };
+      }
       const identityKey = String(body.identityKey).toLowerCase();
       const scopes = row.scope.split(' ');
       const name = await lookupAlias(identityKey).catch(() => null);
@@ -502,7 +524,7 @@ function errorPage(msg) {
 <h1>Can't sign in</h1><p>${esc(msg)}</p></main></body></html>`;
 }
 
-function authorizePage({ id, issuer, client }) {
+function authorizePage({ id, issuer, client, match }) {
   const server = encodeURIComponent(issuer);
   const deep = `bwalletx://auth?id=${id}&server=${server}`;
   const web = `https://web.bwalletx.com/m/settings?bwxauth=${id}&server=${server}`;
@@ -511,6 +533,8 @@ function authorizePage({ id, issuer, client }) {
 <title>Sign in with bWalletX</title><style>${PAGE_CSS}</style></head><body><main><div class="b">b</div>
 <h1>Sign in to ${esc(client.name)}</h1>
 <p>Approve in bWalletX. ${esc(client.site)} gets your identity key and $name. No password, nothing paid.</p>
+<p>Your wallet will ask for this code:</p>
+<p id="m" style="font-size:40px;letter-spacing:12px;font-weight:700;margin:8px 0 20px">${esc(match)}</p>
 <a class="btn primary" href="${esc(deep)}">Open bWalletX</a>
 <a class="btn alt" href="${esc(web)}" target="_blank" rel="noopener">Use the web wallet</a>
 <a class="btn alt" href="${esc(ext)}" target="_blank" rel="noopener">Use the Chrome extension</a>
@@ -545,6 +569,7 @@ module.exports = {
   authMessage,
   signedFields,
   verifyAuthSignature,
+  matchCode,
   bitsignLevel,
   walletHandoffPage,
   SIGN_PROTOCOL,
