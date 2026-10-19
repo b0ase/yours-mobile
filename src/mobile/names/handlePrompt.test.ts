@@ -65,3 +65,34 @@ describe('handle prompt', () => {
     expect(handleTitle('')).toBe('$name');
   });
 });
+
+describe('restore from a master backup file', () => {
+  test('re-reads storage, then counts every restored account as backed up', async () => {
+    const mem = new Map<string, string>();
+    const g = globalThis as { localStorage?: unknown };
+    const had = g.localStorage;
+    g.localStorage = {
+      getItem: (k: string) => mem.get(k) ?? null,
+      setItem: (k: string, v: string) => void mem.set(k, v),
+      removeItem: (k: string) => void mem.delete(k),
+    };
+    try {
+      const { markMasterRestored } = await import('./handlePrompt');
+      const { importedAt } = await import('../backup/backupState');
+      let fresh = false;
+      const accounts = [{ addresses: { identityAddress: 'id-a' } }, { addresses: { identityAddress: 'id-b' } }];
+      const cs = {
+        getAndSetStorage: async () => void (fresh = true),
+        // Before the re-read this page's copy has no accounts (the background wrote them).
+        getAllAccounts: () => (fresh ? accounts : []),
+        getCurrentAccountObject: () => ({ account: fresh ? accounts[0] : undefined }),
+      } as unknown as Parameters<typeof markMasterRestored>[0];
+      await markMasterRestored(cs);
+      expect(importedAt('id-a')).toBeGreaterThan(0);
+      expect(importedAt('id-b')).toBeGreaterThan(0);
+      expect(JSON.parse(mem.get('bwallet.handlePrompt.pending') ?? '{}')).toEqual({ id: 'id-a', reason: 'restore' });
+    } finally {
+      g.localStorage = had;
+    }
+  });
+});

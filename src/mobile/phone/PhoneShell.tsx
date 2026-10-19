@@ -19,7 +19,14 @@ import { useDock } from './dockStore';
 import { APPS_PAGED, usePhoneLayout } from './flag';
 import { PHONE_ADD_TO_DOCK, PHONE_APPS_TOP, PHONE_GO, PHONE_TOAST } from './events';
 import { placeFirstFree, renameScreen, screenTitle } from './appScreens';
-import { nextPullHint, PULL_HINT_DELAY_MS, PULL_HINT_KEY, PULL_HINT_TEXT } from './pullHint';
+import {
+  nextPullHint,
+  PULL_HINT_DELAY_MS,
+  PULL_HINT_KEY,
+  PULL_HINT_TEXT,
+  pullHintApplies,
+  touchScreen,
+} from './pullHint';
 import { getAppScreens, setAppScreens, useAppScreens } from './appScreensStore';
 import {
   bCloseReached,
@@ -464,8 +471,13 @@ const Shell = () => {
     return () => window.clearTimeout(t);
   }, [toast]);
 
-  // First few opens: say that pulling down asks b, and let the cue peek out once (pullHint.ts).
+  // First few opens: say that pulling down asks b, and let the cue peek out once (pullHint.ts). Waits for an app
+  // screen (not onboarding) and only once per open.
+  const onAppScreen = curIdx !== null;
+  const hintRan = useRef(false);
   useEffect(() => {
+    if (hintRan.current || !pullHintApplies(onAppScreen, touchScreen())) return;
+    hintRan.current = true;
     let stored: string | null = null;
     try {
       stored = localStorage.getItem(PULL_HINT_KEY);
@@ -489,7 +501,7 @@ const Shell = () => {
       window.clearTimeout(t2);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [onAppScreen]);
 
   const walletAction = (a: WalletAction) => {
     setSendReceive(false);

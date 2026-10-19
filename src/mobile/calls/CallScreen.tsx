@@ -165,12 +165,15 @@ export const CallScreen = () => {
   // bPhone MNEE payments scan the account's deposit keys (the same count BsvWallet uses).
   const maxKeyIndex = chromeStorageService?.getCurrentAccountObject?.()?.account?.settings?.maxKeyIndex;
   useEffect(() => setMneeKeyCount((maxKeyIndex ?? 4) + 1), [maxKeyIndex]);
+  // Before a wallet exists (the welcome / create screens) "unlocked" is true but there are no keys: polling then asked
+  // the wallet for its identity key every 4 s and logged "Wallet not available" each time (release check, 19 Oct 2026).
+  const hasWallet = !!chromeStorageService?.getCurrentAccountObject?.()?.account?.encryptedKeys;
   useEffect(() => {
-    if (isLocked || !apiContext?.wallet) return stopCalls();
+    if (isLocked || !hasWallet || !apiContext?.wallet) return stopCalls();
     startCalls(apiContext);
     // Locking the wallet unmounts this (App renders it only when unlocked): stop polling.
     return stopCalls;
-  }, [apiContext, isLocked]);
+  }, [apiContext, isLocked, hasWallet]);
 
   useEffect(() => setNote(''), [call.phase]);
 

@@ -1,4 +1,4 @@
-import { hasOwnComposer } from './composer';
+import { hasOwnComposer, isAddAccountFlow } from './composer';
 import {
   lazy,
   Suspense,
@@ -170,7 +170,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
   const canInstall = useCanInstall();
   const bmoviesBadge = useBappBadge('bmovies');
   const { chromeStorageService, lockWallet } = useServiceContext();
-  const { handleSelect } = useBottomMenu();
+  const { handleSelect, selected, query } = useBottomMenu();
   const ccy = useCurrency();
   // bMail = airdrops + mail (same as the top-bar mailbox); Chat and Feed unread (tabs/tabBadges.ts).
   const unread = useTabBadges();
@@ -532,7 +532,9 @@ const WideShell = ({ children }: { children: ReactNode }) => {
       {/* Ask b's chat bar, floating bottom-centre; replies float above it as dismissable bubbles (owner, 12 Oct 2026).
           Not on pages with their own bottom composer (bChat rooms + DMs, bMail, Ask b): it sat behind their
           composer and its mic peeked out (owner, 18 Oct 2026). */}
-      {!bapp && !hasOwnComposer(pathname) && !askOnHome && <AgentConversation variant="float" screen={pathname} />}
+      {!bapp && !hasOwnComposer(pathname) && !askOnHome && !isAddAccountFlow(selected, query) && (
+        <AgentConversation variant="float" screen={pathname} />
+      )}
     </div>,
     document.body,
   );

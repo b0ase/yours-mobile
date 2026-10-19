@@ -314,11 +314,11 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   'src/pages/onboarding/MasterRestore.tsx': [
     [
       "import { useNavigate } from 'react-router-dom';",
-      "import { useNavigate } from 'react-router-dom';\nimport { markHandlePrompt } from '../../mobile/names/handlePrompt';",
+      "import { useNavigate } from 'react-router-dom';\nimport { markMasterRestored } from '../../mobile/names/handlePrompt';",
     ],
     [
       "      addSnackbar('Wallet restored successfully!', 'success');\n",
-      "      addSnackbar('Wallet restored successfully!', 'success');\n      markHandlePrompt(chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress, 'restore');\n",
+      "      addSnackbar('Wallet restored successfully!', 'success');\n      await markMasterRestored(chromeStorageService);\n",
     ],
   ],
   // Restore: same step, shown only if the restored account has no name after the name sync.
