@@ -4,6 +4,7 @@
  *   bwalletx://invite/<code> · https://<host>/i/<code>  → counts a use, then the Space or the room
  *   bwalletx://room/<ticker> · https://<host>/r/<ticker> → the room; without the token, its existing
  *                                                          get-entry (locked) screen with Buy   (token rooms)
+ *   bwalletx://claim/<inviteId>?c=npg · https://web.bwalletx.com/m/claim/<id>?c=npg → share claim (SHARE_CLAIM_ENABLED)
  * The https forms need universal / app links (docs/BSPACES-PLAN.md, "To make it live").
  *
  * Gating: Space links only with BSPACES_ENABLED (inlined, so a store build drops them); room links
@@ -14,7 +15,8 @@ import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { App as CapApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
-import { BSPACES_ENABLED, tokenRoomsEnabled, XINVITES_ENABLED } from '../storeBuild';
+import { BSPACES_ENABLED, SHARE_CLAIM_ENABLED, tokenRoomsEnabled, XINVITES_ENABLED } from '../storeBuild';
+import { parseClaimLink, type ClaimLink } from '../shareClaim/invite';
 import { offerXInvite, openXInviteInBrowser, parseXInviteLink } from '../chat/xInvites';
 import { BchatClient, defaultHttp, loadSession } from '../chat/api';
 import { requestChatRoom } from '../chat/nav';
@@ -28,6 +30,8 @@ const LINKS_ON = BSPACES_ENABLED || ROOM_LINKS;
 
 let pending: AppLink | null = null;
 let xPending = false;
+/** A register claim link (bwalletx://claim/<inviteId>?c=npg): bWalletX only; a store build ignores it. */
+let claimPending: ClaimLink | null = null;
 const listeners = new Set<() => void>();
 
 /** Accepts a link if this build handles its kind. */
@@ -35,6 +39,12 @@ export const offerAppLink = (url?: string | null) => {
   // bwalletx://theme/<pack> (bwalletx.com/themes Install): Theme › App colours offers that pack, every build.
   const theme = parseThemeLink(url);
   if (theme) return requestThemeSheet(theme);
+  const claim = SHARE_CLAIM_ENABLED ? parseClaimLink(url) : null;
+  if (claim) {
+    claimPending = claim;
+    listeners.forEach((l) => l());
+    return;
+  }
   // Room X invite (…/i/x/<code>#k=…): the key stays in memory until the Chat claim screen takes it.
   // A build without X invites (Play / App Store) never swallows one: bchatx.com's web page opens instead.
   if (!XINVITES_ENABLED) {
@@ -95,8 +105,14 @@ const openRoom = async (ticker: string, go: (path: string) => void) => {
 export const useSpaceInviteLinks = (enabled = true) => {
   const navigate = useNavigate();
   useEffect(() => {
-    if (!LINKS_ON || !enabled) return;
+    if (!(LINKS_ON || SHARE_CLAIM_ENABLED) || !enabled) return;
     const go = () => {
+      if (claimPending) {
+        const c = claimPending;
+        claimPending = null;
+        navigate(`/m/claim/${c.inviteId}?c=${encodeURIComponent(c.company)}`);
+        return;
+      }
       if (xPending) {
         xPending = false;
         navigate('/m/chat');

@@ -59,6 +59,8 @@
                 <data android:scheme="bwalletx" android:host="xinvite" />
                 <!-- bwalletx://theme/<pack>: Install on bwalletx.com/themes (src/mobile/theme/themeLink.ts) -->
                 <data android:scheme="bwalletx" android:host="theme" />
+                <!-- bwalletx://claim/<inviteId>?c=npg: register-of-members claim (src/mobile/shareClaim, bWalletX only) -->
+                <data android:scheme="bwalletx" android:host="claim" />
             </intent-filter>
 
         </activity>

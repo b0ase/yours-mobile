@@ -1,0 +1,47 @@
+{
+  "note": "THROWAWAY TEST KEYS ONLY: company priv = 0x11*32, holder priv = 0x22*32, lock priv = 0x33*32. Never use these keys for anything real.",
+  "companyPrivHex": "1111111111111111111111111111111111111111111111111111111111111111",
+  "holderPrivHex": "2222222222222222222222222222222222222222222222222222222222222222",
+  "lockPrivHex": "3333333333333333333333333333333333333333333333333333333333333333",
+  "companyIdentityKey": "034f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa",
+  "inviteId": "TEST-vector-invite-id-not-real-000000000000",
+  "payload": {
+    "v": 1,
+    "company": {
+      "name": "Ninja Punk Girls Ltd",
+      "number": "13706347",
+      "ticker": "NPG"
+    },
+    "tokens": [
+      {
+        "standard": "bsv21",
+        "id": "b8747a4b356875cc90842c733ad2770b12bf50c17cf204afd0605f9dcba67d31_1",
+        "decimals": 0,
+        "tranche": "2022A",
+        "amount": 1234
+      }
+    ],
+    "holder": {
+      "registerEntry": "FAKE-001",
+      "shares": 1234,
+      "nameOnRegister": "Test Holder (fake)"
+    },
+    "lock": {
+      "type": "2of2",
+      "companyPubKey": "034f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa",
+      "releaseAfterBlock": null
+    },
+    "claimUrl": "https://www.ninjapunkgirls.com/api/shareholders/claim/TEST-vector-invite-id-not-real-000000000000",
+    "expiresAt": "2026-11-17T00:00:00.000Z",
+    "sig": "304402204e5f9b942d7b54f01d91a748a1996dbc5cf54522f9e04009e3e1de4f71ee04100220232c3c15926f2203fcb80c4aeaf1bdf4200247b323f433e5e18c0fbbacb53b03"
+  },
+  "canonical": "{\"claimUrl\":\"https://www.ninjapunkgirls.com/api/shareholders/claim/TEST-vector-invite-id-not-real-000000000000\",\"company\":{\"name\":\"Ninja Punk Girls Ltd\",\"number\":\"13706347\",\"ticker\":\"NPG\"},\"expiresAt\":\"2026-11-17T00:00:00.000Z\",\"holder\":{\"nameOnRegister\":\"Test Holder (fake)\",\"registerEntry\":\"FAKE-001\",\"shares\":1234},\"lock\":{\"companyPubKey\":\"034f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa\",\"releaseAfterBlock\":null,\"type\":\"2of2\"},\"tokens\":[{\"amount\":1234,\"decimals\":0,\"id\":\"b8747a4b356875cc90842c733ad2770b12bf50c17cf204afd0605f9dcba67d31_1\",\"standard\":\"bsv21\",\"tranche\":\"2022A\"}],\"v\":1}",
+  "sig": "304402204e5f9b942d7b54f01d91a748a1996dbc5cf54522f9e04009e3e1de4f71ee04100220232c3c15926f2203fcb80c4aeaf1bdf4200247b323f433e5e18c0fbbacb53b03",
+  "claim": {
+    "inviteId": "TEST-vector-invite-id-not-real-000000000000",
+    "identityKey": "02466d7fcae563e5cb09a0d1870bb580344804617879a14949cf22285f1bae3f27",
+    "lockPubKey": "023c72addb4fdf09af94f0c94d7fe92a386a7e70cf8a1d85916386bb2535c7b1b1",
+    "signedBytes": "{\"identityKey\":\"02466d7fcae563e5cb09a0d1870bb580344804617879a14949cf22285f1bae3f27\",\"inviteId\":\"TEST-vector-invite-id-not-real-000000000000\",\"lockPubKey\":\"023c72addb4fdf09af94f0c94d7fe92a386a7e70cf8a1d85916386bb2535c7b1b1\"}",
+    "signature": "3045022100e88656de3d32796aeac883851e64664d9cd36b483326122aff900ab0c214aa7e0220217b00f05fdd25dde78305ef70e2191fce9708b0059797519d857c2edfcae4ce"
+  }
+}

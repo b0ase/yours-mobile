@@ -14,6 +14,7 @@ import {
   MARKET_ENABLED,
   PAY_STREAM_ENABLED,
   PLACEMENT_ENABLED,
+  SHARE_CLAIM_ENABLED,
   RELEASES_ENABLED,
 } from '../storeBuild';
 
@@ -80,6 +81,7 @@ const BmintPage = lazy(() => import('../bmint/BmintPage'));
 // bTrust (/m/btrust): recovery slices, passing on, important papers. btrust/BTrustPage.tsx.
 const BTrustPage = lazy(() => import('../btrust/BTrustPage'));
 // bShares (/m/bshares, docs/BCORP-PLACEMENT.md): restricted share placement; bWalletX only, dropped from the store bundle.
+const ClaimPage = SHARE_CLAIM_ENABLED ? lazy(() => import('../shareClaim/ClaimPage')) : null;
 const BsharesPage = PLACEMENT_ENABLED ? lazy(() => import('../placement/BsharesPage')) : null;
 // The Name Store (/m/names, public /names): search, buy, claim and give names (names/store/).
 const NameStorePage = lazy(() => import('../names/store/NameStorePage'));
@@ -132,6 +134,7 @@ const MobileRoutes = () => (
         <Route path="bmail" element={<BMailPage />} />
         <Route path="bmint/*" element={<BmintPage />} />
         <Route path="btrust" element={<BTrustPage />} />
+        {ClaimPage && <Route path="claim/:inviteId" element={<ClaimPage />} />}
         {BsharesPage && <Route path="bshares" element={<BsharesPage />} />}
         <Route path="opns-mint" element={<ToOpnsMint />} />
         <Route path="names" element={<NameStorePage />} />
