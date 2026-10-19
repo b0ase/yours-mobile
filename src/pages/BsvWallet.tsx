@@ -33,6 +33,7 @@ import { BetaLine } from '../mobile/sweep/BetaLine';
 import { MainContent } from '../components/Reusable';
 import { Show } from '../components/Show';
 import { TopNav } from '../components/TopNav';
+import { RefreshGlyph, UpToDateAnnouncer, useUpToDate } from '../components/RefreshGlyph';
 import { useBottomMenu } from '../hooks/useBottomMenu';
 import { useSnackbar } from '../hooks/useSnackbar';
 import { useIdentity, resolveImageUrl } from '../hooks/useIdentity';
@@ -723,6 +724,8 @@ export const BsvWallet = () => {
   };
 
   const [isRefreshing, setIsRefreshing] = useState(false);
+  // Manual refresh that found nothing new: the refresh icon turns into a tick for a moment (no toast).
+  const [upToDate, showUpToDate] = useUpToDate();
   const [getBsvOpen, setGetBsvOpen] = useState(false);
 
   /**
@@ -785,7 +788,7 @@ export const BsvWallet = () => {
         tokens !== undefined &&
         bsv21Signature(tokens) === before.tokens;
       if (notifyIfUnchanged && synced && unchanged) {
-        addSnackbar('Balances are up to date. Incoming transactions can take one confirmation to appear.', 'info');
+        showUpToDate();
       }
       // NFTs: reload the list on a manual refresh or when anything moved, so purchases appear without reopening.
       if (notifyIfUnchanged || !unchanged) notifyMinted();
@@ -1501,12 +1504,17 @@ export const BsvWallet = () => {
                 whileTap={{ scale: 0.9 }}
                 onClick={() => refreshUtxos({ notifyIfUnchanged: true })}
                 disabled={isRefreshing}
-                title="Refresh balances"
-                className="flex items-center justify-center border-0 outline-none bg-transparent p-1 cursor-pointer"
-                style={{ color: theme.color.global.gray, opacity: 0.55 }}
+                title={upToDate ? 'Up to date' : 'Refresh balances'}
+                aria-label={upToDate ? 'Balances are up to date' : 'Refresh balances'}
+                className={`flex items-center gap-1.5 border-0 outline-none bg-transparent p-1 cursor-pointer${upToDate ? ' bw-uptodate' : ''}`}
+                style={{ color: theme.color.global.gray, opacity: 0.55, transition: 'color 150ms, opacity 150ms' }}
               >
-                <RefreshCw size={16} className={isRefreshing ? 'animate-spin' : ''} />
+                <RefreshGlyph refreshing={isRefreshing} done={upToDate} />
+                {upToDate && <span className="text-sm font-semibold">Up to date</span>}
               </motion.button>
+            )}
+            {!balanceLoading && (
+              <UpToDateAnnouncer done={upToDate} />
             )}
           </div>
           {balanceFailed && (
