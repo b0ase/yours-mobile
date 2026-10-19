@@ -4,6 +4,7 @@
  * signs, claims or broadcasts (claims go through paymail.ts / GetYourName).
  */
 import { PAYMAIL_ALIAS_RE, toAlias } from './paymail';
+import type { ChromeStorageService } from '../../services/ChromeStorage.service';
 import { markBackupPrompt, markCreatedHere, markImported } from '../backup/backupState';
 
 export type PromptReason = 'create' | 'restore';
@@ -52,6 +53,19 @@ export const markHandlePrompt = (id: string | undefined, reason: PromptReason) =
     markCreatedHere(id);
   }
   fire();
+};
+/**
+ * After a restore from a master backup file. The background wrote the accounts, so this page's copy of storage is
+ * stale: read it again first. Reading the account from the stale copy found none, so the restored wallet showed
+ * "Not backed up" and hid its receive address (19 Oct 2026). Every account in the file counts as backed up: the
+ * user restored it from their own file.
+ */
+export const markMasterRestored = async (
+  cs: Pick<ChromeStorageService, 'getAndSetStorage' | 'getAllAccounts' | 'getCurrentAccountObject'>,
+) => {
+  await cs.getAndSetStorage();
+  for (const a of cs.getAllAccounts()) markImported(a.addresses?.identityAddress);
+  markHandlePrompt(cs.getCurrentAccountObject().account?.addresses?.identityAddress, 'restore');
 };
 export const getPendingPrompt = (): PendingPrompt | null => parsePending(store()?.getItem(PENDING));
 export const clearPendingPrompt = () => {

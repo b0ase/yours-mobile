@@ -45,7 +45,7 @@ const reduced = () => {
 };
 
 const showcaseItems = (spaces = BSPACES_ENABLED): Item[] => {
-  const order = ['scammerscartel', 'emoji', 'npg', 'vexvoid', 'npgx'];
+  const order = ['emoji', 'npg', 'vexvoid', 'npgx']; // Scammers Cartel hidden until ready (19 Oct)
   const shops = [...SHOPS].sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
   const items: Item[] = shops.map((s) => ({
     ...SHOP_ART[s.id],

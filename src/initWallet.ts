@@ -247,6 +247,9 @@ export const openAccountStorageForBackup = async (
     backups,
     storageIdentityKey,
     taskStateStore: createIndexedDbTaskStateStore(),
+    // No boot runOnce: its BackupSync (which now also runs for a remote active store; toolbox patch) would contend
+    // with the backup's getSyncChunk. stopTasks below only ends a task loop; it cannot recall a runOnce in flight.
+    skipInitialMonitor: true,
   });
 
   // Stop monitor work so BackupSync/runOnce does not contend with getSyncChunk.

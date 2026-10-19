@@ -1,8 +1,15 @@
 /* global chrome */
+import { createMasterBackupGate } from './services/masterBackupGate';
 import { promptsShowInPanel } from './services/panelPrompt';
 import { isSessionExpired } from './utils/lockTimeout';
 import { originatorForOrigin } from './services/originKey';
-import { ADDRESS_RESYNC_ALARM, ADDRESS_RESYNC_PERIOD_MINUTES, pageHidden, shouldResync } from './services/addressResync';
+import {
+  ADDRESS_RESYNC_ALARM,
+  ADDRESS_RESYNC_PERIOD_MINUTES,
+  pageHidden,
+  refreshShouldSync,
+  shouldResync,
+} from './services/addressResync';
 import { balanceWithDeposits } from './services/depositBalance';
 import { arrivingSats } from './services/receiveGuard';
 import { recoverySummary } from './services/recoverFailed';
@@ -652,7 +659,8 @@ export const getWallet = (): WalletInterface | null => {
  */
 const ensureWallet = async (suppressPopup = false): Promise<WalletInterface> => {
   await startupInitPromise;
-  if (masterBackupInFlight) throw new Error('Wallet is busy with a master backup; try again in a moment');
+  // During a master backup, wait for it (and the original account to reopen) instead of failing (masterBackupGate.ts).
+  if (masterBackupGate.active) await masterBackupGate.wait();
   if (accountContext?.wallet) {
     return accountContext.wallet;
   }
@@ -746,6 +754,8 @@ const USB_CHECK_TIMEOUT_MS = 3 * 60_000;
  * then would initialise whichever account the export had selected last.
  */
 let masterBackupInFlight = false;
+/** Wallet requests that land during the backup wait here; released once the original account is open again. */
+const masterBackupGate = createMasterBackupGate();
 
 const pendingGroupedPermissionRequests = new Map<
   string,
@@ -1432,6 +1442,9 @@ if (!(
       // Address management (popup internal)
       'GET_DEPOSIT_ADDRESSES',
       'GENERATE_NEW_ADDRESS',
+      // The Wallet home's refresh: its handler below was unreachable without this entry (the message fell through
+      // to the CWI switch, which never answered, so every refresh waited out its 15 s timeout).
+      'RESYNC_ADDRESSES',
     ];
 
     if (noAuthRequired.includes(message.action)) {
@@ -1546,6 +1559,19 @@ if (!(
           const ctx = accountContext;
           if (!ctx) {
             sendResponse({ type: 'RESYNC_ADDRESSES', success: false, error: 'locked' });
+            return true;
+          }
+          const manual = message.manual === true;
+          if (
+            !refreshShouldSync({
+              manual,
+              busy: ctx.addressSyncBusy(),
+              lastFinishedAt: ctx.lastAddressSyncAt(),
+              now: Date.now(),
+            })
+          ) {
+            // An automatic refresh right after a finished run: storage is already current.
+            sendResponse({ type: 'RESYNC_ADDRESSES', success: true });
             return true;
           }
           ctx
@@ -3144,6 +3170,8 @@ if (!(
         await initializeWallet();
       } catch (err) {
         console.error('[MasterBackup] failed to restore original account:', err);
+      } finally {
+        masterBackupGate.end();
       }
     };
 
@@ -3192,6 +3220,7 @@ if (!(
 
       // From here until restoreOriginalAccount: no wallet may come up.
       masterBackupInFlight = true;
+      masterBackupGate.begin();
       // Release the live wallet so per-account opens own the IDB connection.
       await closeLiveWallet('before-master-backup');
 
