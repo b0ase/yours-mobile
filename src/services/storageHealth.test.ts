@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { storageLabel, syncHealthLabel } from './storageHealth';
+import { healthStatus, storageLabel, syncHealthLabel } from './storageHealth';
 
 describe('storage label', () => {
   test('remotes but no activeRemote: this device holds the data, 1Sat is the backup', () => {
@@ -39,5 +39,20 @@ describe('sync health', () => {
     const l = syncHealthLabel({ status: 'arriving', at: now, satoshis: 25 }, now);
     expect(l.failing).toBe(false);
     expect(l.text).toContain('Payment arriving');
+  });
+});
+
+describe('offline is not a sync fault', () => {
+  const now = 1_000_000_000;
+  test('a network error is recorded as offline', () => {
+    expect(healthStatus('error', 'signal is aborted without reason')).toBe('offline');
+    expect(healthStatus('error', 'Failed to fetch')).toBe('offline');
+    expect(healthStatus('error', 'Bad script')).toBe('error');
+    expect(healthStatus('complete', undefined)).toBe('complete');
+  });
+  test('old records with a network error read as offline, not failing', () => {
+    const l = syncHealthLabel({ status: 'error', at: now - 120_000, error: 'signal is aborted without reason' }, now);
+    expect(l.failing).toBe(false);
+    expect(l.text).toBe("You're offline. Sync will resume when you reconnect · last tried 2 min ago");
   });
 });

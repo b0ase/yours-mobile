@@ -6,6 +6,7 @@ import {
   enqueueReport,
   failureReason,
   flushOutbox,
+  outboxText,
   queuedFor,
   readOutbox,
 } from './reportOutbox';
@@ -105,4 +106,17 @@ describe('report outbox', () => {
     expect(left.length).toBe(2);
     expect(left[0].reason).toBe('signin');
   });
+});
+
+describe('failureReason: offline even when navigator says online', () => {
+  test('aborts, timeouts and DNS failures read as offline', () => {
+    expect(failureReason(new Error('signal is aborted without reason'), true)).toBe('offline');
+    expect(failureReason(new DOMException('x', 'TimeoutError'), true)).toBe('offline');
+    expect(failureReason('net::ERR_NAME_NOT_RESOLVED', true)).toBe('offline');
+  });
+  test('a server error is still an error, sign-in still sign-in', () => {
+    expect(failureReason(new Error('HTTP 500'), true)).toBe('error');
+    expect(failureReason(Object.assign(new Error('x'), { status: 401 }), true)).toBe('signin');
+  });
+  test("offline text says You're offline", () => expect(outboxText('offline').startsWith("You're offline")).toBe(true));
 });

@@ -64,7 +64,7 @@ import { recoverPaymentByTxid, type TxidRecoverReport } from './services/recover
 import { makePostageReconcileWiring, makeTxidRecoverDeps, sweepCandidateTxids } from './services/recoverByTxidWiring';
 import { reconcilePostage, wocIsMined, type PostageReconcileReport } from './services/postageReconcile';
 import { chainActive } from './services/dappChain';
-import { SYNC_HEALTH_KEY } from './services/storageHealth';
+import { healthStatus, SYNC_HEALTH_KEY } from './services/storageHealth';
 import type { TokenRecoveryOptions, TokenRecoveryResult } from './services/tokenRecovery';
 
 // Admin originator for the extension (bypasses all permission checks). The bare
@@ -414,11 +414,12 @@ export const initWallet = async (
   const sendSyncStatus = (data: { status: string; [key: string]: unknown }) => {
     // Remember the outcome for the storage badge on Settings (services/storageHealth.ts).
     if (['complete', 'error', 'sweep-failed', 'receive-failed', 'arriving'].includes(data.status)) {
+      const error =
+        typeof data.message === 'string' ? data.message : typeof data.error === 'string' ? data.error : undefined;
       const health = {
-        status: data.status,
+        status: healthStatus(data.status, error),
         at: Date.now(),
-        error:
-          typeof data.message === 'string' ? data.message : typeof data.error === 'string' ? data.error : undefined,
+        error,
         satoshis: typeof data.satoshis === 'number' ? data.satoshis : undefined,
       };
       chrome.storage.local.set({ [SYNC_HEALTH_KEY(keys.identityAddress)]: health }).catch(() => undefined);
