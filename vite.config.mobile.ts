@@ -527,15 +527,6 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '      setShowBackupPromo(!dismissed && !hasRemotes);',
       '      setShowBackupPromo(false && !dismissed && !hasRemotes);',
     ],
-    // "Missing assets? Open migration tool": only for wallets that could hold legacy Yours assets, not ones made here.
-    [
-      "import { BackupGate } from '../mobile/backup/BackupGate';\nimport { requestBackupThen } from '../mobile/backup/backupState';",
-      "import { BackupGate } from '../mobile/backup/BackupGate';\nimport { createdHere, requestBackupThen } from '../mobile/backup/backupState';",
-    ],
-    [
-      '      setShowMigrationBanner(!acct?.settings?.sweepCompleted || left === undefined || left > 0);',
-      '      setShowMigrationBanner(\n        (!acct?.settings?.sweepCompleted || left === undefined || left > 0) &&\n          !createdHere(acct?.addresses?.identityAddress),\n      );',
-    ],
   ],
   // Home modules (src/mobile/home, owner 18 Oct 2026): the card shows while its module is on the home; the other
   // modules (Ask b, Store showcase, History…) and "Edit home" sit under Send / Receive.

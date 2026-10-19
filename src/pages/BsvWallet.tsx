@@ -1,4 +1,5 @@
 import { heldBsv21Balances } from '../mobile/airdrops/heldBalances';
+import { migrationRowText } from '../utils/migrationRow';
 import { quarantineFor, setQuarantineAccount } from '../mobile/airdrops/inbox';
 import { withoutQuarantined } from '../mobile/airdrops/quarantine';
 import { BsvPriceBar, BuyBsvButton, BuyBsvSheet } from '../mobile/wallet/BuyBsv';
@@ -201,7 +202,6 @@ export const BsvWallet = () => {
   const [showWelcome, setShowWelcome] = useState(false);
   const [showBackupPromo, setShowBackupPromo] = useState(false);
   const [keysAlreadyBackedUp, setKeysAlreadyBackedUp] = useState(false);
-  const [showMigrationBanner, setShowMigrationBanner] = useState(false);
   const [legacyLeft, setLegacyLeft] = useState(0);
   const [relayxOpen, setRelayxOpen] = useState(false);
   // Restored as RelayX: open this account's own RelayX collection (settings.relayx, RestoreAccount.tsx).
@@ -492,11 +492,9 @@ export const BsvWallet = () => {
       const hasRemotes = (acct?.storageConfig?.remotes?.length ?? 0) > 0;
       setKeysAlreadyBackedUp(!!acct?.settings?.keysBackedUp);
       setShowBackupPromo(!dismissed && !hasRemotes);
-      // Stays until a finished sweep leaves nothing behind (owner 17 Oct: it vanished with 62 ordinals left).
-      // Sweeps finished before 5.2.30 never counted what was left, so an unknown count shows the card too.
+      // Owner 19 Oct: one always-present "Bring in old assets" row; the count only changes its wording.
       const left = acct?.settings?.legacyLeft;
       setLegacyLeft(left ?? 0);
-      setShowMigrationBanner(!acct?.settings?.sweepCompleted || left === undefined || left > 0);
       if (obj?.selectedAccount) {
         await getAndSetAccountAndBsv21s();
       }
@@ -1131,7 +1129,6 @@ export const BsvWallet = () => {
   };
 
   const handleMigrationBannerClick = async () => {
-    setShowMigrationBanner(false);
     const { account } = chromeStorageService.getCurrentAccountObject();
     if (account) {
       await chromeStorageService.updateNested('accounts', {
@@ -1765,45 +1762,6 @@ export const BsvWallet = () => {
           </motion.div>
         </Show>
 
-        {/* ── Legacy migration banner ── */}
-        <AnimatePresence>
-          {showMigrationBanner && (
-            <motion.button
-              key="migration-banner"
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.25, ease: 'easeOut' }}
-              type="button"
-              onClick={handleMigrationBannerClick}
-              className="flex items-center justify-between gap-2 w-[92%] mt-3 mb-4 px-4 py-2.5 rounded-xl border-0 outline-none cursor-pointer text-left"
-              style={{
-                background: 'rgba(253,176,34,0.08)',
-                border: '1px solid rgba(253,176,34,0.2)',
-              }}
-            >
-              <span
-                className="text-xs leading-snug min-w-0 overflow-hidden text-ellipsis whitespace-nowrap"
-                style={{ color: '#FDB022' }}
-              >
-                {legacyLeft > 0 ? (
-                  <>
-                    <span style={{ fontWeight: 600 }}>
-                      {legacyLeft} item{legacyLeft === 1 ? '' : 's'} still at your old address.
-                    </span>{' '}
-                    Bring them in
-                  </>
-                ) : (
-                  <>
-                    <span style={{ fontWeight: 600 }}>Missing assets?</span> Open migration tool
-                  </>
-                )}
-              </span>
-              <ArrowRight size={14} style={{ color: '#FDB022' }} className="shrink-0" />
-            </motion.button>
-          )}
-        </AnimatePresence>
-
         {/* Bottom breathing room */}
         <div className="h-4" />
         {/* Owner 17 Oct 2026: old assets must always be findable at the bottom of the wallet, not only when a
@@ -1814,12 +1772,13 @@ export const BsvWallet = () => {
           </p>
           <button
             type="button"
-            onClick={() => navigate('/sweep')}
+            data-testid="migration-tool-row"
+            onClick={() => void handleMigrationBannerClick()}
             className="flex items-center justify-between gap-2 px-4 py-3 rounded-xl border-0 cursor-pointer text-left"
             style={{ background: 'rgba(253,176,34,0.08)', border: '1px solid rgba(253,176,34,0.2)', color: '#FDB022' }}
           >
             <span className="text-sm">
-              <b>Migration tool</b>: coins, tokens and ordinals from Yours or old addresses
+              <b>Migration tool</b>: {migrationRowText(legacyLeft)}
             </span>
             <ArrowRight size={14} className="shrink-0" />
           </button>
