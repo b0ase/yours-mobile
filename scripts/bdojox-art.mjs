@@ -1,7 +1,7 @@
 /**
  * bDojoX theme card art (19 Oct 2026). Matches bdojox.com: navy #070b1a, Dojo red #e0262f, blue #3a6bf0 / #7ea0ff,
- * and the site's own logo family (the 3D slanted torii and the forward-leaning katakana-style wordmark), copied
- * unchanged from bdojox-site (media-src/logo-gen.mjs output) into scripts/bdojox/. Writes webp via sharp:
+ * and the site's own logo set (3D torii in a brush ensō with the red 道 seal; Chakra Petch BDOJOX wordmark),
+ * copied unchanged from bdojox-site (main 503c880) into scripts/bdojox/. Sizes follow each file's viewBox. Writes webp via sharp:
  *   node scripts/bdojox-art.mjs
  *
  * Layout: WalletCard zooms edition art 1.4x toward the top-right (cardFrontArt.ts), so the card shows roughly
@@ -25,33 +25,6 @@ function place(file, x, y, w) {
   return `<svg x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" viewBox="${vb}">${inner}</svg>`;
 }
 
-// Seeded random so the art is reproducible.
-let s = 7;
-const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647;
-
-/** Ensō: many thin arcs with drifting radius and a fading tail, read as a dry red brush stroke. */
-function enso(cx, cy, r, start = -100, sweep = 330) {
-  const out = [];
-  for (let k = 0; k < 70; k++) {
-    const off = (rnd() - 0.5) * 30;
-    const a0 = start + rnd() * 6;
-    const a1 = a0 + sweep - rnd() * (40 + Math.abs(off) * 2.2);
-    const pts = [];
-    for (let a = a0; a <= a1; a += 3) {
-      const t = (a - a0) / (a1 - a0);
-      const rr = r + off * (1 - 0.35 * t) + Math.sin(t * 9) * 3;
-      const rad = (a * Math.PI) / 180;
-      pts.push(`${(cx + rr * Math.cos(rad)).toFixed(1)} ${(cy + rr * Math.sin(rad)).toFixed(1)}`);
-    }
-    const w = (1.2 + rnd() * 3).toFixed(1);
-    const o = (0.3 + rnd() * 0.45).toFixed(2);
-    out.push(
-      `<path d="M${pts.join('L')}" stroke="#e0262f" stroke-width="${w}" stroke-opacity="${o}" fill="none" stroke-linecap="round"/>`,
-    );
-  }
-  return out.join('');
-}
-
 /** Belt rule in the site's colours. */
 const BELTS = ['#ffffff', '#e0262f', '#3a6bf0', '#e0262f', '#7ea0ff'];
 function beltRule(x, y, w, h) {
@@ -69,16 +42,15 @@ const ground = `<defs>
 
 const open = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`;
 
-// Card 1: the site's lockup (torii + wordmark) with a belt rule.
+// Card 1: the site's lockup (mark + wordmark) with a belt rule.
 const card1 = `${open}${ground}
-${place('logo-lockup.svg', W * 0.355, H * 0.47, W * 0.31)}
-${beltRule(W * 0.4, H * 0.66, 190, 5)}</svg>`;
+${place('logo-lockup.svg', W * 0.355, H * 0.44, W * 0.32)}
+${beltRule(W * 0.41, H * 0.63, 190, 5)}</svg>`;
 
-// Card 2: the torii mark inside a red ensō, the wordmark beneath.
+// Card 2: the site's mark (ensō, torii, seal), the wordmark beneath.
 const card2 = `${open}${ground}
-<g opacity=".55">${enso(W * 0.51, H * 0.44, 78, -60, 320)}</g>
-${place('logo.svg', W * 0.51 - 52, H * 0.44 - 46, 104)}
-${place('wordmark.svg', W * 0.44, H * 0.6, W * 0.15)}</svg>`;
+${place('logo.svg', W * 0.51 - 70, H * 0.43 - 70, 140)}
+${place('wordmark.svg', W * 0.44, H * 0.62, W * 0.15)}</svg>`;
 
 for (const [name, svg] of [
   ['bdojox-card-1', card1],

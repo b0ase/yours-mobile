@@ -655,7 +655,7 @@
         "trim": "rgb(126 160 255 / 0.55)",
         "glow": "0 0 14px rgb(255 90 98 / 0.5), 0 0 3px rgb(255 90 98 / 0.9)",
         "fontNum": "inherit",
-        "fontHead": "'Big Shoulders Display', 'IBM Plex Sans Condensed', 'Arial Narrow', sans-serif",
+        "fontHead": "'Chakra Petch', 'IBM Plex Sans Condensed', 'Arial Narrow', sans-serif",
         "weightHead": 700,
         "radius": "6px",
         "radiusCard": "12px",

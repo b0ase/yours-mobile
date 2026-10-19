@@ -26,8 +26,8 @@ import { installOverlayFetch } from './overlayFetch';
 import { initPushTaps } from './push/register';
 import { initTesterCheckins } from './testers/checkin';
 import '@fontsource/space-grotesk/700.css';
-// bDojoX theme headings (bdojox.com's display face); the woff2 only loads when that theme is on.
-import '@fontsource/big-shoulders-display/latin-700';
+// bDojoX theme headings (bdojox.com's nav/wordmark face); the woff2 only loads when that theme is on.
+import '@fontsource/chakra-petch/latin-700';
 import './mobile.css';
 import { applyBootAccent } from './theme/accent';
 

@@ -139,7 +139,7 @@ export const DEFAULT_ACCENT: AccentId = 'gold';
 
 const SANS = 'inherit';
 const MONO = "'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
-const BIG_SHOULDERS = "'Big Shoulders Display', 'IBM Plex Sans Condensed', 'Arial Narrow', sans-serif";
+const CHAKRA = "'Chakra Petch', 'IBM Plex Sans Condensed', 'Arial Narrow', sans-serif";
 const SERIF = "'Cormorant Garamond', 'Iowan Old Style', Georgia, 'Times New Roman', serif";
 /** The Gold look (today's app), the base every pack starts from. */
 const BASE: Omit<Accent, 'id' | 'label' | 'accent' | 'hi' | 'lo'> = {
@@ -407,7 +407,7 @@ const EDITIONS: readonly Accent[] = [
   {
     // bDojoX (19 Oct 2026): our own dojo for companies' share registers (bdojox.com). Free (it promotes our own
     // product and costs nothing). Matches bdojox.com: navy #070b1a, Dojo red #e0262f (brightened to #FF5A62 here
-    // for AA on navy), blue #3a6bf0 / #7ea0ff, Big Shoulders Display headings, and the site's torii lockup on the
+    // for AA on navy), blue #3a6bf0 / #7ea0ff, Chakra Petch headings (the site's nav/wordmark face), and the site's ensō/torii/seal logo on the
     // card (cardPatternsEdition.ts, scripts/bdojox-art.mjs).
     ...BASE,
     id: 'bdojox',
@@ -432,7 +432,7 @@ const EDITIONS: readonly Accent[] = [
     shadow: '0 0 24px rgb(58 107 240 / 0.16)',
     trim: 'rgb(126 160 255 / 0.55)',
     glow: '0 0 14px rgb(255 90 98 / 0.5), 0 0 3px rgb(255 90 98 / 0.9)',
-    fontHead: BIG_SHOULDERS,
+    fontHead: CHAKRA,
     weightHead: 700,
     radius: '6px',
     radiusCard: '12px',
