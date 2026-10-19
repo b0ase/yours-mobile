@@ -191,10 +191,16 @@ export function accountKeyNonCompliant(phrase: string, passphrase: string, path:
 }
 
 export function addressAt(account: HD, accountPath: string, chain: 0 | 1, index: number): HdAddress {
-  const child = account.deriveChild(chain).deriveChild(index);
+  return addressOnChain(account.deriveChild(chain), accountPath, chain, index);
+}
+
+/** addressAt from an already-derived chain node (account/chain), for loops over many indexes on one chain. */
+export function addressOnChain(chainNode: HD, accountPath: string, chain: 0 | 1, index: number): HdAddress {
+  const child = chainNode.deriveChild(index);
   return {
     path: `${accountPath}/${chain}/${index}`,
-    address: child.privKey.toAddress(),
+    // From the node's already-computed public key: privKey.toAddress() redoes the EC multiplication (~60 ms).
+    address: child.pubKey.toAddress(),
     wif: child.privKey.toWif(),
   };
 }
