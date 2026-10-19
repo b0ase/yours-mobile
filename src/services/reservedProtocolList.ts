@@ -43,6 +43,11 @@ export const RESERVED_PROTOCOLS: readonly Protocol[] = [
   [2, 'bmusic artist'],
   [2, 'bmusic listen claim'],
   [2, 'bpositive'],
+  // Phone-to-phone direct pay (src/mobile/directPay, vendored src/vendor/webrtpay). The channel signature binds the
+  // user's identity key to a WebRTC session: an outside app holding it could pose as the user to a payer or payee.
+  [2, 'webrtpay channel'],
+  [2, 'webrtpay signaling'],
+  [2, 'webrtpay relay'],
 ];
 
 /**
@@ -53,4 +58,6 @@ export const EXTERNAL_OK: readonly (readonly [number, string, string])[] = [
   [2, 'bwallet sign in', 'Sign in with bWalletX (bwalletx-connect, bit-sign, bChatX)'],
   [0, 'fwetch identity', 'bit-sign fwetch feed signatures'],
   [2, '3241645161d8', 'BRC-29 payments: every BRC-100 payer derives these keys'],
+  // Only referenced by the vendored webrtpay request code (unused by the wallet); message-box-client apps use it.
+  [2, 'payment request auth', 'PeerPay payment requests (message-box-client compatible HMAC)'],
 ];

@@ -48,3 +48,6 @@ site/lib/themes.json
 build-desktop/
 src-tauri/target/
 src-tauri/gen/
+
+# Vendored upstream source, kept byte-identical (src/vendor/webrtpay/README.md).
+src/vendor/

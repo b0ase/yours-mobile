@@ -90,6 +90,8 @@ export const labelFor = (direction: Direction, local: LocalInfo | undefined, tx?
   if (kind) return kind;
   const text = `${local?.description ?? ''} ${(local?.labels ?? []).join(' ')}`.toLowerCase();
   const rules: [RegExp, string][] = [
+    // Phone to phone direct pay (directPay/directPay.ts: "Phone to phone from …" / "… payment to …").
+    [/^\s*phone to phone\b/, 'phone to phone'],
     // Store purchases (themeOrder/api.ts: "Theme purchase · NPG"), with the receipt in the same tx.
     [/^\s*theme purchase\b|store receipt/, 'theme purchase'],
     [/\bpots?\b|subscription|standing order/, 'pot payment'],

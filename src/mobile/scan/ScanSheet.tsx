@@ -1,7 +1,7 @@
 import { lazy, Suspense, useContext, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { MyFlipBavatar } from '../bavatar/FlipBavatar';
-import { ArrowLeft, Copy, Mail, QrCode, ScanLine, Send } from 'lucide-react';
+import { ArrowLeft, Copy, Mail, QrCode, ScanLine, Send, Smartphone } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { BottomMenuContext } from '../../contexts/BottomMenuContext';
@@ -14,16 +14,24 @@ import { Scanner } from './Scanner';
 import { parseScan, type Scan } from './parseScan';
 import { offerAppLink } from '../spaces/inviteLinks';
 import { parseXInviteLink } from '../chat/xInvites';
-import { APP_NAME, XINVITES_ENABLED } from '../storeBuild';
+import { APP_NAME, DIRECT_PAY_ENABLED, XINVITES_ENABLED } from '../storeBuild';
+import { isDirectPayCode } from '../directPay/code';
 
 const PairSheet = lazy(() => import('../pair/PairSheet'));
+// Phone to phone (prototype): a lazy chunk behind the inlined flag, so store/default builds carry none of it.
+const DirectPaySheet = DIRECT_PAY_ENABLED ? lazy(() => import('../directPay/DirectPaySheet')) : null;
 
 const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 const PANEL = '#17191E';
 const SATS = 100_000_000;
 
-type Stage = { k: 'scan' } | { k: 'mine' } | { k: 'result'; s: Scan };
+type Stage =
+  | { k: 'scan' }
+  | { k: 'mine' }
+  | { k: 'result'; s: Scan }
+  | { k: 'direct-receive' }
+  | { k: 'direct-pay'; code: string };
 
 /**
  * "Scan": one camera sheet for everything bWallet understands (scan/parseScan.ts). Payment codes and
@@ -61,6 +69,11 @@ export default function ScanSheet({
   };
 
   const onCode = (text: string) => {
+    // Phone to phone: someone's offer code → the one-sheet approval (DirectPaySheet). Flag off: never reached.
+    if (DIRECT_PAY_ENABLED && isDirectPayCode(text)) {
+      setStage({ k: 'direct-pay', code: text.trim() });
+      return;
+    }
     // A room X invite link (key in its fragment): straight to the Chat claim screen, never shown or kept here.
     if (XINVITES_ENABLED && parseXInviteLink(text)) {
       offerAppLink(text.trim());
@@ -81,6 +94,18 @@ export default function ScanSheet({
     return (
       <Suspense fallback={null}>
         <PairSheet initial={stage.s.text} onClose={onClose} />
+      </Suspense>
+    );
+  }
+
+  if (DirectPaySheet && (stage.k === 'direct-receive' || stage.k === 'direct-pay')) {
+    return (
+      <Suspense fallback={null}>
+        {stage.k === 'direct-pay' ? (
+          <DirectPaySheet mode="pay" code={stage.code} onClose={onClose} onSendNormally={(sats) => pay('', sats)} />
+        ) : (
+          <DirectPaySheet mode="receive" onClose={onClose} onSendNormally={(sats) => pay('', sats)} />
+        )}
       </Suspense>
     );
   }
@@ -143,6 +168,15 @@ export default function ScanSheet({
                 style={{ background: PANEL }}
               >
                 <QrCode size={18} color={GOLD} /> Show my code
+              </button>
+            )}
+            {DIRECT_PAY_ENABLED && (
+              <button
+                onClick={() => setStage({ k: 'direct-receive' })}
+                className={`${big} mt-3 text-white`}
+                style={{ background: PANEL }}
+              >
+                <Smartphone size={18} color={GOLD} /> Phone to phone
               </button>
             )}
           </>
