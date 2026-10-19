@@ -30,6 +30,15 @@ export type NewOffer = {
 
 type Signed = { at: string; signature: string };
 
+/** bit-sign's signed one-tap quote (offers/[id]/quote). */
+export type PlacementQuote = {
+  quote_id: string;
+  expires_at: string;
+  outputs: { lockingScript: string; satoshis: number }[];
+  memo: string;
+  memo_script: string;
+};
+
 export class BsharesApi {
   constructor(
     private readonly http: Http,
@@ -131,9 +140,15 @@ export class BsharesApi {
   createOffer = (o: NewOffer) => this.call<PlacementOffer>('POST', '/offers', o);
   accept = (id: string, investorPubKey: string) =>
     this.call<PlacementOffer>('POST', `/offers/${encodeURIComponent(id)}/accept`, { investorPubKey });
+  /**
+   * Payment is memo-bound (security audit 19 Oct 2026, M5): get a signed quote, pay its outputs plus its
+   * OP_RETURN memo, then claim with the quote. The old `/paid` step accepted any treasury txid and is retired.
+   */
+  quote = (id: string, investorPubKey: string) =>
+    this.call<PlacementQuote>('POST', `/offers/${encodeURIComponent(id)}/quote`, { investorPubKey });
   /** `excessChoice` is the investor's answer to the offer's overpayment term, made at payment time. */
-  paid = (id: string, txid: string, excessChoice: ExcessChoice) =>
-    this.call<PlacementOffer>('POST', `/offers/${encodeURIComponent(id)}/paid`, { txid, excessChoice });
+  claim = (id: string, c: { quote_id: string; txid: string; excessChoice: ExcessChoice }) =>
+    this.call<PlacementOffer>('POST', `/offers/${encodeURIComponent(id)}/claim`, c);
   /** Single-director resolution: bit-sign writes the minute (BCORP-BM-<date>-<NNN>) from the allotment data. */
   approve = (id: string, directorPubKey: string, minuteNumber: number) =>
     this.call<PlacementOffer>('POST', `/offers/${encodeURIComponent(id)}/approve`, { directorPubKey, minuteNumber });

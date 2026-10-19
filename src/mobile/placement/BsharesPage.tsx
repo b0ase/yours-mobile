@@ -159,8 +159,32 @@ const OfferCard = ({
     setBusy(true);
     try {
       if (step === 'Accept') await api.accept(offer.id, await shareLockKey(apiContext, offer.id));
-      else if (step === 'Pay') await api.paid(offer.id, await payTreasury(apiContext, me.company, offer), excessChoice);
-      else if (step === 'Approve allotment') {
+      else if (step === 'Pay') {
+        // A paid-but-unconfirmed claim is kept so a retry re-claims instead of paying twice.
+        const key = `bshares-claim:${offer.id}`;
+        let pending: { quote_id: string; txid: string } | null = null;
+        try {
+          pending = JSON.parse(localStorage.getItem(key) || 'null');
+        } catch {
+          pending = null;
+        }
+        if (!pending) {
+          const q = await api.quote(offer.id, await shareLockKey(apiContext, offer.id));
+          const txid = await payTreasury(apiContext, me.company, offer, q);
+          pending = { quote_id: q.quote_id, txid };
+          try {
+            localStorage.setItem(key, JSON.stringify(pending));
+          } catch {
+            /* storage off: the claim below still runs once */
+          }
+        }
+        await api.claim(offer.id, { ...pending, excessChoice });
+        try {
+          localStorage.removeItem(key);
+        } catch {
+          /* ignore */
+        }
+      } else if (step === 'Approve allotment') {
         const no = Number(minuteNo);
         if (!Number.isInteger(no) || no < 1) throw new Error('Enter the next board minute number');
         await api.approve(offer.id, await shareLockKey(apiContext, offer.id), no);
