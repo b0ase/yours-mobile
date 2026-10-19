@@ -153,3 +153,86 @@ export async function runAutoResyncIfDue(
     return report;
   });
 }
+
+/** How long after unlock the automatic check waits, so the first balance read and address sync go first. */
+export const AUTO_RESYNC_DELAY_MS = 45_000;
+/** Outputs read per storage-lock hold; the lock is released between pages so the balance can read in between. */
+export const AUTO_RESYNC_PAGE = 500;
+
+type Row = { txid?: string; vout: number; spendable: boolean; spentBy?: number | null };
+/** The few reads the check needs from the active store (a WalletStorageProvider reader). */
+export interface AutoResyncReader {
+  findUsers: (a: { partial: { identityKey: string } }) => Promise<{ userId: number }[]>;
+  findOutputBaskets: (a: { partial: { userId: number; name: string } }) => Promise<{ basketId: number }[]>;
+  findOutputs: (a: {
+    partial: { userId: number; basketId: number };
+    noScript: true;
+    paged: { limit: number; offset: number };
+  }) => Promise<Row[]>;
+  findTransactions: (a: {
+    partial: { userId: number };
+    status: string[];
+    noRawTx: true;
+  }) => Promise<{ transactionId: number; txid?: string }[]>;
+}
+
+export type AutoResyncRead = {
+  userId: number;
+  coins: string[];
+  ownPendingTxids: Set<string>;
+  ownPendingInputs: Set<string>;
+};
+
+/**
+ * Read the default basket's coins for the check, cheaply: reader locks only (never the storage-provider lock that
+ * also blocks writers and sync), no locking scripts, one pass over the basket in pages with the lock released between
+ * pages. Null when the device's own store is not active (remote-active web/native before the switch) or the
+ * account/basket is not there yet.
+ */
+export async function readAutoResyncCoins(
+  storage: {
+    runAsReader: <T>(f: (r: AutoResyncReader) => Promise<T>) => Promise<T>;
+    isActiveStorageProvider: () => boolean;
+  },
+  identityKey: string,
+  pendingStatuses: string[],
+  page = AUTO_RESYNC_PAGE,
+): Promise<AutoResyncRead | null> {
+  if (!storage.isActiveStorageProvider()) return null;
+  const head = await storage.runAsReader(async (r) => {
+    const user = (await r.findUsers({ partial: { identityKey } }))[0];
+    if (!user) return null;
+    const [basket] = await r.findOutputBaskets({ partial: { userId: user.userId, name: 'default' } });
+    if (!basket) return null;
+    const pending = await r.findTransactions({
+      partial: { userId: user.userId },
+      status: pendingStatuses,
+      noRawTx: true,
+    });
+    return { userId: user.userId, basketId: basket.basketId, pending };
+  });
+  if (!head) return null;
+  const pendingIds = new Set(head.pending.map((t) => t.transactionId));
+  const ownPendingTxids = new Set(head.pending.map((t) => t.txid).filter((t): t is string => !!t));
+  const coins: string[] = [];
+  const ownPendingInputs = new Set<string>();
+  for (let offset = 0; ; offset += page) {
+    // The store may switch (or lock) between pages: stop rather than read another store.
+    if (!storage.isActiveStorageProvider()) return null;
+    const rows = await storage.runAsReader((r) =>
+      r.findOutputs({
+        partial: { userId: head.userId, basketId: head.basketId },
+        noScript: true,
+        paged: { limit: page, offset },
+      }),
+    );
+    for (const o of rows) {
+      if (!o.txid) continue;
+      const op = `${o.txid}_${o.vout}`;
+      if (o.spendable) coins.push(op);
+      if (o.spentBy != null && pendingIds.has(o.spentBy)) ownPendingInputs.add(op);
+    }
+    if (rows.length < page) break;
+  }
+  return { userId: head.userId, coins, ownPendingTxids, ownPendingInputs };
+}

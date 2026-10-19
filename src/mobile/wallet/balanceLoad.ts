@@ -41,3 +41,9 @@ export type BalanceView = 'spinner' | 'amount' | 'unknown';
  */
 export const balanceView = (s: { loading: boolean; failed: boolean; known: boolean }): BalanceView =>
   s.known ? 'amount' : s.failed ? 'unknown' : s.loading ? 'spinner' : 'amount';
+
+/**
+ * Whether to show "Still syncing. Tap to retry.": only when the balance failed AND nothing is known. With a cached
+ * or earlier balance on screen the wallet keeps retrying quietly (every 10 s) and the fresh value replaces it.
+ */
+export const showSyncRetry = (s: { failed: boolean; known: boolean }): boolean => s.failed && !s.known;

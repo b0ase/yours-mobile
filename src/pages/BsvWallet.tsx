@@ -115,6 +115,7 @@ import {
   RATE_TIMEOUT_MS,
   balanceView,
   loadLastBalance,
+  showSyncRetry,
   saveLastBalance,
 } from '../mobile/wallet/balanceLoad';
 
@@ -192,11 +193,13 @@ export const BsvWallet = () => {
   >([]);
   const [selectedAddressIndex, setSelectedAddressIndex] = useState(0);
   const [generatingAddress, setGeneratingAddress] = useState(false);
-  const [bsvBalance, setBsvBalance] = useState<number>(0);
+  // The last balance this device saw, shown at once while the wallet opens and syncs (owner, 19 Oct 2026: a big
+  // wallet sat on "Still syncing. Tap to retry." for a long time before its balance appeared).
+  const [bsvBalance, setBsvBalance] = useState<number>(() => (loadLastBalance(identityAddress) ?? 0) / 100_000_000);
   const [exchangeRate, setExchangeRate] = useState<number>(0);
   const [balanceLoading, setBalanceLoading] = useState(true);
   const [balanceFailed, setBalanceFailed] = useState(false);
-  const [balanceKnown, setBalanceKnown] = useState(false);
+  const [balanceKnown, setBalanceKnown] = useState(() => loadLastBalance(identityAddress) != null);
   const [lockData, setLockData] = useState<LockData>();
   const [isSendAllBsv, setIsSendAllBsv] = useState(false);
   const [showWelcome, setShowWelcome] = useState(false);
@@ -1516,7 +1519,7 @@ export const BsvWallet = () => {
               <UpToDateAnnouncer done={upToDate} />
             )}
           </div>
-          {balanceFailed && (
+          {showSyncRetry({ failed: balanceFailed, known: balanceKnown }) && (
             <button
               type="button"
               onClick={() => void getAndSetBsvBalance()}

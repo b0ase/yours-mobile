@@ -32,7 +32,14 @@ import {
   type HealReport,
 } from './services/invalidSendHeal';
 import { refusalFor } from './services/broadcastRefusals';
-import { runAutoResyncIfDue, type AutoResyncDeps, type WocAnswer } from './services/autoCoinResync';
+import {
+  AUTO_RESYNC_DELAY_MS,
+  readAutoResyncCoins,
+  runAutoResyncIfDue,
+  type AutoResyncDeps,
+  type AutoResyncReader,
+  type WocAnswer,
+} from './services/autoCoinResync';
 import { withCoinResyncLock } from './services/coinResyncLock';
 import type {
   ListOutputsArgs,
@@ -252,26 +259,18 @@ async function autoResyncDeps(
     }
   ).txo;
   if (!identityKey || !txo?.getSpends) return null;
-  const read = await ctx.storage.runAsStorageProvider(async (sp) => {
-    const user = (await sp.findUsers({ partial: { identityKey } }))[0];
-    if (!user) return null;
-    const [basket] = await sp.findOutputBaskets({ partial: { userId: user.userId, name: 'default' } });
-    if (!basket) return null;
-    const coins = (await sp.findOutputs({ partial: { userId: user.userId, basketId: basket.basketId, spendable: true } }))
-      .filter((o) => !!o.txid)
-      .map((o) => `${o.txid}_${o.vout}`);
-    const pending = await sp.findTransactions({
-      partial: { userId: user.userId },
-      status: [...PENDING_STATUSES] as never,
-      noRawTx: true,
-    });
-    const pendingIds = new Set(pending.map((t) => t.transactionId));
-    const ownPendingTxids = new Set(pending.map((t) => t.txid).filter((t): t is string => !!t));
-    const ownPendingInputs = new Set<string>();
-    for (const o of await sp.findOutputs({ partial: { userId: user.userId, basketId: basket.basketId }, noScript: true }))
-      if (o.spentBy != null && pendingIds.has(o.spentBy) && o.txid) ownPendingInputs.add(`${o.txid}_${o.vout}`);
-    return { userId: user.userId, coins, ownPendingTxids, ownPendingInputs };
-  });
+  // The device's own store must be active: with a remote (1Sat) store active, as on web before the switch to this
+  // device, there is no StorageProvider to repair ("WalletStorageProvider does not support StorageProvider", web,
+  // 19 Oct 2026). Skip (not due-stamped), the next unlock tries again.
+  if (!ctx.storage.isActiveStorageProvider()) return null;
+  const read = await readAutoResyncCoins(
+    {
+      runAsReader: (f) => ctx.storage.runAsReader((r) => f(r as unknown as AutoResyncReader)),
+      isActiveStorageProvider: () => ctx.storage.isActiveStorageProvider(),
+    },
+    identityKey,
+    [...PENDING_STATUSES],
+  );
   if (!read) return null;
   const { userId } = read;
   const setSpendable = (outpoint: string, spendable: boolean, spender?: string) =>
@@ -279,7 +278,7 @@ async function autoResyncDeps(
       const [txid, vout] = outpoint.split('_');
       const spentBy = spender ? (await sp.findTransactions({ partial: { userId, txid: spender }, noRawTx: true }))[0] : undefined;
       let n = 0;
-      for (const o of await sp.findOutputs({ partial: { userId, txid, vout: Number(vout), spendable: !spendable } }))
+      for (const o of await sp.findOutputs({ partial: { userId, txid, vout: Number(vout), spendable: !spendable }, noScript: true }))
         n += await sp.updateOutput(o.outputId, { spendable, spentBy: spendable ? undefined : spentBy?.transactionId });
       return n;
     });
@@ -584,28 +583,6 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
   if (accountContext) {
     bindPermissionCallbacks(accountContext.wallet);
     console.log('[background] initializeWallet: bound permission callbacks');
-    // Coins spent elsewhere (another device, same seed) stay "spendable" here until checked: check the default basket
-    // at unlock, at most every 30 minutes per account (persisted), fail closed (services/autoCoinResync.ts).
-    {
-      const ctxNow = accountContext;
-      const key = chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey || '';
-      if (key)
-        void runAutoResyncIfDue(
-          key,
-          {
-            get: (k) => chrome.storage.local.get(k),
-            set: (items) => chrome.storage.local.set(items),
-          },
-          (cleared) => autoResyncDeps(ctxNow, key, cleared),
-        )
-          .then((r) => {
-            if (r && (r.released || r.restored)) {
-              console.warn('[background] auto coin resync:', r);
-              notifyBalanceUpdate();
-            }
-          })
-          .catch((err) => console.error('[background] auto coin resync failed:', err));
-    }
     // Abort token-indexing payments that were built but never sent (bounded, never throws).
     void healIndexFundActions(accountContext.baseWallet).then((r) => {
       if (r.aborted.length || r.pending.length || r.errors.length) console.log('[background] indexFund heal:', r);
@@ -617,8 +594,40 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
     // Restore any mined transaction storage holds as failed, so its change counts again ($vexvoid, 11 Oct 2026).
     // Order matters (owner, 14 Oct 2026): both repairs need this device's storage active, so switch first.
     const ctx = accountContext;
+    const localReady = preferLocalStorage(ctx);
+    // Coins spent elsewhere (another device, same seed) stay "spendable" here until checked: check the default basket
+    // at most every 30 minutes per account (persisted), fail closed (services/autoCoinResync.ts). Off the unlock path:
+    // after this device's store is active, and a while after unlock so the first balance read and the address sync
+    // are not queued behind its scan of every coin (owner's big wallet, 19 Oct 2026).
+    {
+      const key = chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey || '';
+      const gen = lockGeneration;
+      if (key)
+        void localReady
+          .then(() => new Promise((r) => setTimeout(r, AUTO_RESYNC_DELAY_MS)))
+          .then(() =>
+            // Locked or switched account since: skip (the next unlock tries again).
+            lockGeneration !== gen || accountContext !== ctx
+              ? null
+              : runAutoResyncIfDue(
+                  key,
+                  {
+                    get: (k) => chrome.storage.local.get(k),
+                    set: (items) => chrome.storage.local.set(items),
+                  },
+                  (cleared) => autoResyncDeps(ctx, key, cleared),
+                ),
+          )
+          .then((r) => {
+            if (r && (r.released || r.restored)) {
+              console.warn('[background] auto coin resync:', r);
+              notifyBalanceUpdate();
+            }
+          })
+          .catch((err) => console.error('[background] auto coin resync failed:', err));
+    }
     void (async () => {
-      await preferLocalStorage(ctx);
+      await localReady;
       // Paymail receipts whose derivation only the server recorded (restore from seed, 14 Oct 2026). Idempotent.
       await ctx
         .restorePaymails()

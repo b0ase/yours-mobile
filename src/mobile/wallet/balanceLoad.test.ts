@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { withTimeout } from '../withTimeout';
-import { balanceView, loadLastBalance, saveLastBalance } from './balanceLoad';
+import { balanceView, loadLastBalance, saveLastBalance, showSyncRetry } from './balanceLoad';
 
 test('spinner only while the first load is in flight; never after a failure', () => {
   expect(balanceView({ loading: true, failed: false, known: false })).toBe('spinner');
@@ -32,4 +32,10 @@ test('last balance cache round-trips per identity and ignores junk', () => {
   } finally {
     g.localStorage = prev;
   }
+});
+
+test('"Still syncing" only when nothing is known: a cached balance syncs quietly', () => {
+  expect(showSyncRetry({ failed: true, known: true })).toBe(false);
+  expect(showSyncRetry({ failed: true, known: false })).toBe(true);
+  expect(showSyncRetry({ failed: false, known: false })).toBe(false);
 });
