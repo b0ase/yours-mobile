@@ -311,3 +311,62 @@ export async function finishHeirsClaim(
   if (!verifySpend(tx)) throw new Error('the claim did not verify');
   return tx;
 }
+
+/** What a co-signing heir is agreeing to: every output, the fee and the lock total. */
+export type ClaimSummary = {
+  lockSats: number;
+  fee: number;
+  outputs: { to: string; sats: number; mine: boolean }[];
+};
+
+const scriptLabel = (s: LockingScript) => {
+  const c = s.chunks;
+  const isP2PKH =
+    c.length === 5 &&
+    c[0].op === OP.OP_DUP &&
+    c[1].op === OP.OP_HASH160 &&
+    c[2].data?.length === 20 &&
+    c[3].op === OP.OP_EQUALVERIFY &&
+    c[4].op === OP.OP_CHECKSIG;
+  return isP2PKH ? Utils.toBase58Check(c[2].data as number[], [0]) : `script ${s.toHex().slice(0, 16)}…`;
+};
+
+/**
+ * Before a co-signing heir signs a claim another heir sent: check it spends exactly the plan's live lock
+ * (`lockTx:vout`, found by this device from the chain, never the sender's copy), pays everything to this heir's
+ * own `payTo` in one output, and that the fee is a sane claim fee. Attaches the real source and returns what
+ * the heir is agreeing to. Throws on anything else.
+ */
+export function checkHeirsClaim(opts: {
+  tx: Transaction;
+  lockTx: Transaction;
+  vout: number;
+  plan: InheritancePlan;
+  payTo: string | LockingScript;
+  feeRate?: number;
+}): ClaimSummary {
+  const { tx, lockTx, vout } = opts;
+  const plan = validatePlan(opts.plan);
+  const lockSats = lockInput(lockTx, vout, plan);
+  if (tx.inputs.length !== 1) throw new Error('the claim must spend only the plan lock');
+  const inp = tx.inputs[0];
+  const txid = inp.sourceTXID ?? inp.sourceTransaction?.id('hex');
+  if (txid !== lockTx.id('hex') || inp.sourceOutputIndex !== vout)
+    throw new Error("the claim does not spend this plan's live lock");
+  inp.sourceTransaction = lockTx;
+  const want = (typeof opts.payTo === 'string' ? new P2PKH().lock(opts.payTo) : opts.payTo).toHex();
+  const outputs = tx.outputs.map((o) => ({
+    to: scriptLabel(o.lockingScript),
+    sats: o.satoshis ?? 0,
+    mine: o.lockingScript.toHex() === want,
+  }));
+  const paid = outputs.reduce((n, o) => n + o.sats, 0);
+  const fee = lockSats - paid;
+  if (fee < 0) throw new Error('the claim pays out more than the lock holds');
+  if (outputs.length !== 1 || !outputs[0].mine)
+    throw new Error('the claim does not pay everything to the address you entered');
+  // A real claim is ~1.4 kB; allow 4x the expected fee (and at least 1,000 sats) before calling it inflated.
+  const cap = Math.max(1000, 4 * feeFor(10 + 41 + 1250 + 9 + 25 + 4, opts.feeRate));
+  if (fee > cap) throw new Error(`the claim fee (${fee} sats) is far too high`);
+  return { lockSats, fee, outputs };
+}
