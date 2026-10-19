@@ -240,9 +240,14 @@ const Row = ({
   >
     {avatar}
     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-      <div className="flex items-center gap-1.5">
+      <div className={`flex items-center gap-1.5${tag ? ' flex-wrap' : ''}`}>
         {bold && <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: GOLD }} />}
-        <span className={`${ONE} text-sm text-white ${bold ? 'font-bold' : 'font-medium'}`}>{title}</span>
+        {/* Example senders wrap to a second line rather than cut off "· example" on a phone. */}
+        <span
+          className={`${tag ? 'min-w-0 break-words' : ONE} text-sm text-white ${bold ? 'font-bold' : 'font-medium'}`}
+        >
+          {title}
+        </span>
         {pinned && <Pin size={12} color={PIN} aria-label="Pinned" className="shrink-0" />}
         {tag && <ExampleBadge text={tag} />}
         {!amount && (
@@ -361,7 +366,7 @@ const exAmount = (e: ExampleMail): Amount => ({
 const ExampleRow = ({ e, onOpen }: { e: ExampleMail; onOpen: () => void }) => (
   <Row
     avatar={<Avatar label={e.name} color={e.color} />}
-    title={`${e.name} (example sender)`}
+    title={`${e.name} · example`}
     bold={!!e.unread}
     subject={e.subject}
     preview={oneLine(e.body)}
@@ -999,20 +1004,40 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
     setExamplesHidden(true, acct);
     setExVer((v) => v + 1);
     setExample(null);
-    showUndo('Examples deleted', () => {
-      setExamplesHidden(false, acct);
-      goneExamples.forEach((id) => hideExample(id, acct));
-      setExVer((v) => v + 1);
-    });
+    exUndo(
+      'Examples deleted',
+      () => {
+        setExamplesHidden(false, acct);
+        goneExamples.forEach((id) => hideExample(id, acct));
+        setExVer((v) => v + 1);
+      },
+      true,
+    );
+  };
+  // When the clean empty inbox takes over, Undo sits inside it (a toast would cover its buttons on a phone).
+  const [inlineUndo, setInlineUndo] = useState<{ text: string; undo: () => void } | null>(null);
+  useEffect(() => {
+    if (!inlineUndo) return;
+    const t = setTimeout(() => setInlineUndo(null), 6000);
+    return () => clearTimeout(t);
+  }, [inlineUndo]);
+  const exUndo = (text: string, undo: () => void, emptiesList: boolean) => {
+    const realMail = tab === 'requests' ? view('requests').length : view('inbox').length;
+    if (emptiesList && !realMail && tab === 'inbox') setInlineUndo({ text, undo });
+    else showUndo(text, undo);
   };
   const deleteExample = (id: string, verb = 'deleted') => {
     hideExample(id, acct);
     setExVer((v) => v + 1);
     setExample(null);
-    showUndo(`Example ${verb}`, () => {
-      unhideExample(id, acct);
-      setExVer((v) => v + 1);
-    });
+    exUndo(
+      `Example ${verb}`,
+      () => {
+        unhideExample(id, acct);
+        setExVer((v) => v + 1);
+      },
+      exInbox.filter((x) => !goneExamples.includes(x.id)).length <= 1,
+    );
   };
   const showExamplesAgain = () => {
     setExamplesHidden(false, acct);
@@ -1606,15 +1631,32 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                         Share your address
                       </button>
                     </div>
-                    {examplesOff && (
-                      <button
-                        type="button"
-                        className="min-h-[44px] px-2 text-xs underline"
-                        style={{ color: MUTED }}
-                        onClick={showExamplesAgain}
-                      >
-                        Show examples again
-                      </button>
+                    {inlineUndo ? (
+                      <div role="status" aria-live="polite" className="flex items-center gap-2 text-xs text-white">
+                        <span>{inlineUndo.text}</span>
+                        <button
+                          type="button"
+                          className="min-h-[44px] px-2 font-bold"
+                          style={{ color: GOLD }}
+                          onClick={() => {
+                            inlineUndo.undo();
+                            setInlineUndo(null);
+                          }}
+                        >
+                          Undo
+                        </button>
+                      </div>
+                    ) : (
+                      examplesOff && (
+                        <button
+                          type="button"
+                          className="min-h-[44px] px-2 text-xs underline"
+                          style={{ color: MUTED }}
+                          onClick={showExamplesAgain}
+                        >
+                          Show examples again
+                        </button>
+                      )
                     )}
                   </div>
                 )}
