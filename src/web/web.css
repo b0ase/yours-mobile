@@ -223,63 +223,6 @@ html:not(.ww-on) .bwallet-web-banner {
   margin-right: auto;
 }
 
-/* Wallet home, plain web column at 700px and up (card 398px + a usable Store panel) (owner, 19 Oct 2026: "store should be to the right of the credit
-   card"): the card (with its dots) on the left and From the Store on the right, the same height; everything else
-   keeps its order below. Narrower windows and phones keep the stacked order. The Desktop (ww-on) home is not touched.
-   The home modules (.bw-home > .bw-home-grid > .bw-home-cell) are flattened into the page's wrapping row. */
-@media (min-width: 700px) {
-  html:not(.ww-on) .pt-14.pb-16.overflow-y-auto:has(> .bw-bcar):has(.bw-home-show) {
-    flex-direction: row;
-    flex-wrap: wrap;
-    justify-content: center;
-    align-content: flex-start;
-  }
-  html:not(.ww-on) .pt-14.pb-16.overflow-y-auto:has(> .bw-bcar):has(.bw-home-show) > .bw-home,
-  html:not(.ww-on) .pt-14.pb-16.overflow-y-auto:has(> .bw-bcar):has(.bw-home-show) > .bw-home > .bw-home-grid {
-    display: contents;
-  }
-  html:not(.ww-on) .pt-14.pb-16.overflow-y-auto:has(> .bw-bcar):has(.bw-home-show) > :has(~ .bw-bcar) {
-    order: 0;
-  }
-  html:not(.ww-on) .pt-14.pb-16.overflow-y-auto:has(> .bw-bcar):has(.bw-home-show) > .bw-bcar {
-    order: 1;
-    flex: 0 0 398px;
-    width: auto;
-    min-width: 0;
-    max-width: none;
-    margin: 12px 12px 0 0;
-  }
-  html:not(.ww-on) .pt-14.pb-16.overflow-y-auto:has(> .bw-bcar):has(.bw-home-show) .bw-home-cell:has(> .bw-home-show) {
-    order: 2;
-    flex: 0 0 calc(92% - 410px);
-    min-width: 0;
-    margin-top: 12px;
-    display: flex;
-  }
-  html:not(.ww-on) .pt-14.pb-16.overflow-y-auto:has(> .bw-bcar):has(.bw-home-show) .bw-home-cell > .bw-home-show {
-    flex: 1;
-    min-width: 0;
-  }
-  html:not(.ww-on) .pt-14.pb-16.overflow-y-auto:has(> .bw-bcar):has(.bw-home-show) .bw-home-cell.bw-home-cell-askB {
-    order: 10;
-  }
-  /* Some inserts are display: contents wrappers (the token list), so their children are flex items here too. */
-  html:not(.ww-on) .pt-14.pb-16.overflow-y-auto:has(> .bw-bcar):has(.bw-home-show) > *,
-  html:not(.ww-on)
-    .pt-14.pb-16.overflow-y-auto:has(> .bw-bcar):has(.bw-home-show)
-    > .bw-bcar
-    ~ :is([class=''], :not([class]))
-    > *,
-  html:not(.ww-on) .pt-14.pb-16.overflow-y-auto:has(> .bw-bcar):has(.bw-home-show) > .bw-home > :not(.bw-home-grid),
-  html:not(.ww-on) .pt-14.pb-16.overflow-y-auto:has(> .bw-bcar):has(.bw-home-show) .bw-home-cell {
-    order: 3;
-  }
-  html:not(.ww-on) .pt-14.pb-16.overflow-y-auto:has(> .bw-bcar):has(.bw-home-show) .bw-home-cell {
-    width: 92%;
-    margin-top: 10px;
-  }
-}
-
 /* Desktop (wide) onboarding: the phone flow is a 440px panel on the right (mobile.css, html.ww-on.ww-onb #root).
    Pages it opens on <body> (the backup gate after create) take the same panel instead of the whole window
    (owner, 19 Oct 2026). Centred full-viewport overlays (lock, unlock, splash) are left alone. */

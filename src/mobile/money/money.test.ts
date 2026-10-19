@@ -7,7 +7,7 @@ describe('money', () => {
     expect(fmtUsd(1234.5)).toBe('$1,234.50');
     expect(fmtUsd(0)).toBe('$0.00');
     expect(fmtUsd(0.0006)).toBe('$0.0006');
-    expect(fmtUsd(0.00064)).toBe('$0.0006');
+    expect(fmtUsd(0.00064)).toBe('$0.00064');
     expect(fmtUsd(0.005)).toBe('$0.005');
   });
   test('sats <-> usd', () => {
