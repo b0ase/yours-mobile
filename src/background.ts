@@ -88,6 +88,7 @@ import {
 import { normalizeOriginator } from '@1sat/wallet';
 import { ADMIN_ORIGINATOR, initWallet, openAccountStorageForBackup, type AccountContext } from './initWallet';
 import { isExtensionSender, reservedOriginatorRefusal } from './services/adminOriginator';
+import { isReservedProtocol, reservedProtocolRefusal, RESERVED_REFUSAL, withoutReservedProtocols } from './services/reservedProtocols';
 import { healIndexFundActions } from './mobile/tokens/indexFundHeal';
 import { continuesChain, endChain, isAlreadyProcessedAbort, markChainStep, startsChain } from './services/dappChain';
 import { HOSTED_YOURS_IMAGE } from './utils/constants';
@@ -1050,6 +1051,10 @@ const bindPermissionCallbacks = (manager: LocalWalletPermissionsManager) => {
  */
 const showPermissionPrompt = (request: PermissionRequest & { requestID: string }): Promise<void> => {
   console.log('[background] showPermissionPrompt called, requestID:', request.requestID, 'type:', request.type);
+  if (request.type === 'protocol' && isReservedProtocol(request.protocolID) && request.originator !== ADMIN_ORIGINATOR) {
+    accountContext?.wallet.denyPermission(request.requestID).catch(() => undefined);
+    return Promise.reject(new Error(RESERVED_REFUSAL));
+  }
   return siteTrustedFor(request).then(
     (trusted) =>
       new Promise<void>((resolve, reject) => {
@@ -1371,6 +1376,16 @@ if (!(
       }
       if (message.originator !== expected.originator) {
         sendResponse({ type: message.action, success: false, error: 'Origin mismatch' });
+        return true;
+      }
+    }
+
+    // Wallet-internal protocols (bTrust, Locks, funds, presign…) are never available to an outside site or app,
+    // and the refusal comes before any unlock or permission sheet (services/reservedProtocols.ts, audit C1).
+    if (!isFromExtension && message?.originator !== ADMIN_ORIGINATOR) {
+      const refusal = reservedProtocolRefusal(String(message?.action ?? ''), message?.params);
+      if (refusal) {
+        sendResponse({ type: message.action, success: false, error: refusal });
         return true;
       }
     }
@@ -2913,7 +2928,13 @@ if (!(
       accountContext?.wallet
         .grantGroupedPermission({
           requestID: response.requestID,
-          granted: response.granted,
+          // Reserved wallet-internal protocols are never granted to a site, whatever the sheet sent (audit C1).
+          granted: response.granted.protocolPermissions
+            ? {
+                ...response.granted,
+                protocolPermissions: withoutReservedProtocols(response.granted.protocolPermissions),
+              }
+            : response.granted,
           expiry: response.expiry,
         })
         .then(() => {
