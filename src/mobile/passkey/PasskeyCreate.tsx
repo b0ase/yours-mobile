@@ -56,7 +56,13 @@ export const PasskeyCreatePanel = ({ onPassword }: { onPassword: (password: stri
 };
 
 /** Unlock screen: "Unlock with passkey" when this browser's wallet was made with one. */
-export const PasskeyUnlockButton = ({ onPassword }: { onPassword: (password: string) => void }) => {
+export const PasskeyUnlockButton = ({
+  onPassword,
+  label = 'Unlock with passkey',
+}: {
+  onPassword: (password: string) => void;
+  label?: string;
+}) => {
   const [error, setError] = useState('');
   const u = loadPasskeyUnlock();
   if (!u) return null;
@@ -73,7 +79,7 @@ export const PasskeyUnlockButton = ({ onPassword }: { onPassword: (password: str
         className="flex items-center gap-2 bg-transparent border-0 cursor-pointer text-sm font-semibold"
         style={{ color: '#F5C542' }}
       >
-        <Fingerprint size={16} /> Unlock with passkey
+        <Fingerprint size={16} /> {label}
       </button>
       {error && (
         <p className="text-xs m-0 mt-1 text-center" style={{ color: '#f87171' }}>

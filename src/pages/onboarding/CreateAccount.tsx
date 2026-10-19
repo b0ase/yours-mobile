@@ -23,8 +23,9 @@ import { clearHelpDeskUnpin } from '../../mobile/chat/helpDeskPin';
 import { isWebApp } from '../../mobile/webApp';
 import { PasskeyBackupButton } from '../../mobile/passkey/PasskeyBackup';
 import { SEEDLESS_ENABLED } from '../../mobile/passkey/prf';
-import { PasskeyCreatePanel, PasskeySavedBanner } from '../../mobile/passkey/PasskeyCreate';
+import { PasskeyCreatePanel, PasskeySavedBanner, PasskeyUnlockButton } from '../../mobile/passkey/PasskeyCreate';
 import { PairDevicePanel } from '../../mobile/passkey/PairDevice';
+import { walletFingerprint } from '../../mobile/passkey/openHere';
 
 export type CreateAccountProps = {
   onNavigateBack: () => void;
@@ -67,6 +68,11 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
   const [passkeySaved, setPasskeySaved] = useState<'saving' | 'saved' | 'failed'>('saving');
   const [showWords, setShowWords] = useState(false);
   const [pairLater, setPairLater] = useState(false);
+  // "Your phone has it": a fingerprint of the new words (never the words) for the pair step's one-time channel.
+  const [walletFp, setWalletFp] = useState('');
+  useEffect(() => {
+    if (viaPasskey && seedWords.length) void walletFingerprint(seedWords.join(' ')).then(setWalletFp);
+  }, [viaPasskey, seedWords]);
 
   useEffect(() => {
     if (newWallet) hideMenu();
@@ -192,6 +198,17 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
         {viaPasskey ? 'Face ID, fingerprint or your device PIN.' : <>{newWallet ? 'This will be used to unlock your wallet.' : 'Enter your existing password.'}</>}
       </p>
 
+      {/* Add account on a passkey wallet: one Face ID / Touch ID prompt stands in for the master password. */}
+      {SEEDLESS_ENABLED && !newWallet && (
+        <PasskeyUnlockButton
+          label="Use passkey"
+          onPassword={(pw) => {
+            setPassword(pw);
+            setPasswordConfirm(pw);
+            setPasskeyPassword(pw);
+          }}
+        />
+      )}
       {viaPasskey && (
         <PasskeyCreatePanel
           onPassword={(pw) => {
@@ -358,6 +375,7 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
           <PasskeyBackupButton
             words={seedWords}
             label={cleanAccountName(accountName)}
+            accountId={identityAddress}
             identityWif={() => keysService.retrieveKeys(password).then((k) => (k as { identityWif?: string }).identityWif)}
             onSaved={(ok) => {
               setPasskeySaved(ok ? 'saved' : 'failed');
@@ -395,7 +413,7 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
     viaPasskey && !pairLater ? (
       <div className="flex flex-col items-center w-full">
         {stepIndicator}
-        <PairDevicePanel onLater={() => setPairLater(true)} />
+        <PairDevicePanel fp={walletFp} onLater={() => setPairLater(true)} />
       </div>
     ) : (
     <div className="flex flex-col items-center w-full">

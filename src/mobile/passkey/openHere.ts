@@ -69,13 +69,13 @@ export function parseOpenUrl(text: string, nowS = Math.floor(Date.now() / 1000),
 }
 
 /** Shared key + the 4-digit check code ("4-7-2-9"), the same on both screens. */
-export async function deriveOpen(mine: PrivateKey, theirs: string, channel: string) {
+export async function deriveOpen(mine: PrivateKey, theirs: string, channel: string, info = OPEN_INFO) {
   const point = mine.deriveSharedSecret(PublicKey.fromString(theirs));
   const ikm = new Uint8Array(point.encode(true) as number[]);
   const base = await crypto.subtle.importKey('raw', ikm, 'HKDF', false, ['deriveBits']);
   const bits = new Uint8Array(
     await crypto.subtle.deriveBits(
-      { name: 'HKDF', hash: 'SHA-256', salt: fromB64url(channel) as BufferSource, info: enc.encode(OPEN_INFO) },
+      { name: 'HKDF', hash: 'SHA-256', salt: fromB64url(channel) as BufferSource, info: enc.encode(info) },
       base,
       256,
     ),
@@ -232,4 +232,166 @@ export function beginOpenHere(
       });
     };
   });
+}
+
+// ── "Your phone has it" (round 5) ─────────────────────────────────────────────────────────────────────────────
+/**
+ * The computer's "Put this wallet on your phone" QR also carries a one-time relay channel + ephemeral key. When the
+ * phone opens that link and restores with its passkey, it sends one sealed ping { t:'restored', fp } where fp =
+ * SHA-256("bwalletx-restored|" + words). The computer shows "✓ Your phone has it" only if fp matches its own wallet.
+ * Best effort; no server, no PII; the relay sees ciphertext only. Separate HKDF label from "open on computer".
+ */
+export const RESTORED_INFO = 'bwalletx-restored-v1';
+export const RESTORED_LIFETIME_S = 280; // under the relay's 300 s QR limit; the QR is renewed before it lapses
+const PING_KEY = 'bwx:restored-ping';
+
+export async function walletFingerprint(words: string): Promise<string> {
+  const norm = words.trim().toLowerCase().split(/\s+/).join(' ');
+  const h = new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(`bwalletx-restored|${norm}`)));
+  return Array.from(h, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+export type PingParams = { r: string; c: string; k: string; e: number };
+export const pingQuery = (p: PingParams) => `&r=${encodeURIComponent(p.r)}&c=${p.c}&k=${p.k}&e=${p.e}`;
+export function parsePing(search: string, nowS = Math.floor(Date.now() / 1000)): PingParams | null {
+  const q = new URLSearchParams(search);
+  const p = { r: q.get('r') ?? '', c: q.get('c') ?? '', k: q.get('k') ?? '', e: Number(q.get('e')) };
+  if (!/^[A-Za-z0-9_-]{22}$/.test(p.c) || !/^0[23][0-9a-f]{64}$/i.test(p.k) || !/^[a-z0-9.-]+(:\d+)?$/i.test(p.r))
+    return null;
+  if (!Number.isFinite(p.e) || p.e < nowS || p.e > nowS + RESTORED_LIFETIME_S + 30) return null;
+  return p;
+}
+
+/** Phone: remember the ping channel from /restore?passkey=1&r&c&k&e and join it at once (it must join before the
+ * QR lapses; once joined the relay keeps the channel). */
+let pingSocket: { ws: WebSocket; p: PingParams; origin: Promise<string | null> } | null = null;
+export function armRestorePing(search = typeof location === 'undefined' ? '' : location.search): boolean {
+  const p = parsePing(search);
+  if (!p || typeof WebSocket === 'undefined') return false;
+  try {
+    sessionStorage.setItem(PING_KEY, JSON.stringify(p));
+  } catch {
+    /* fine */
+  }
+  const ws = new WebSocket(relaySocketUrl(p.r, p.c, 'wallet'));
+  const origin = new Promise<string | null>((res) => {
+    ws.onmessage = (ev: MessageEvent) => {
+      try {
+        const f = JSON.parse(String(ev.data)) as { t?: string; verifiedOrigin?: string };
+        if (f.t === 'relay' && f.verifiedOrigin) res(f.verifiedOrigin);
+      } catch {
+        /* ignore */
+      }
+    };
+    ws.onerror = () => res(null);
+    setTimeout(() => res(null), 15_000);
+  });
+  pingSocket = { ws, p, origin };
+  return true;
+}
+
+/** Phone, after the passkey opened the backup: tell the computer (best effort, never throws). */
+export async function sendRestoredPing(words: string, allowLocal = false): Promise<boolean> {
+  const s = pingSocket;
+  pingSocket = null;
+  if (!s) return false;
+  try {
+    const origin = await s.origin;
+    if (!origin || !isWalletOrigin(origin, allowLocal)) return false;
+    const me = PrivateKey.fromRandom();
+    s.ws.send(JSON.stringify({ t: 'hello', k: me.toPublicKey().toString() }));
+    const { key } = await deriveOpen(me, s.p.k, s.p.c, RESTORED_INFO);
+    const n = crypto.getRandomValues(new Uint8Array(12));
+    const fp = await walletFingerprint(words);
+    const d = new Uint8Array(
+      await crypto.subtle.encrypt(
+        {
+          name: 'AES-GCM',
+          iv: n as BufferSource,
+          additionalData: enc.encode(`bwalletx-restored|${s.p.c}`) as BufferSource,
+        },
+        key,
+        enc.encode(JSON.stringify({ t: 'restored', fp })),
+      ),
+    );
+    s.ws.send(JSON.stringify({ t: 'restored', n: b64url(n), d: b64url(d) }));
+    setTimeout(() => s.ws.close(), 1500);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Computer: the extra QR params + a listener; renews itself before the relay's QR limit. */
+export function listenForRestore(
+  fp: string,
+  onRestored: () => void,
+): { params: () => PingParams; onChange: (l: () => void) => void; close: () => void } {
+  let cur: { ws: WebSocket; me: PrivateKey; p: PingParams } | null = null;
+  let done = false;
+  let listener: () => void = () => undefined;
+  let renew: ReturnType<typeof setTimeout> | undefined;
+  const open = () => {
+    cur?.ws.close();
+    const me = PrivateKey.fromRandom();
+    const p: PingParams = {
+      r: relayHost(),
+      c: newChannel(),
+      k: me.toPublicKey().toString(),
+      e: Math.floor(Date.now() / 1000) + RESTORED_LIFETIME_S,
+    };
+    const ws = new WebSocket(relaySocketUrl(p.r, p.c, 'site', p.e));
+    let key: CryptoKey | null = null;
+    let joined = false;
+    ws.onmessage = inOrder(async (ev: MessageEvent) => {
+      if (done) return;
+      const f = JSON.parse(String(ev.data)) as { t?: string; k?: string; n?: string; d?: string; peer?: string };
+      if (f.t === 'relay' && f.peer === 'joined') joined = true;
+      if (f.t === 'hello' && typeof f.k === 'string') key = (await deriveOpen(me, f.k, p.c, RESTORED_INFO)).key;
+      if (f.t === 'restored' && key && f.n && f.d) {
+        try {
+          const pt = await crypto.subtle.decrypt(
+            {
+              name: 'AES-GCM',
+              iv: fromB64url(f.n) as BufferSource,
+              additionalData: enc.encode(`bwalletx-restored|${p.c}`) as BufferSource,
+            },
+            key,
+            fromB64url(f.d) as BufferSource,
+          );
+          const m = JSON.parse(dec.decode(pt)) as { t?: string; fp?: string };
+          if (m.t === 'restored' && m.fp === fp) {
+            done = true;
+            ws.close();
+            onRestored();
+          }
+        } catch {
+          /* not ours */
+        }
+      }
+    });
+    cur = { ws, me, p };
+    // A phone that joined keeps this channel alive; otherwise renew before the QR lapses.
+    renew = setTimeout(
+      () => {
+        if (!done && !joined) {
+          open();
+          listener();
+        }
+      },
+      (RESTORED_LIFETIME_S - 20) * 1000,
+    );
+  };
+  open();
+  return {
+    params: () => cur!.p,
+    onChange: (l) => {
+      listener = l;
+    },
+    close: () => {
+      done = true;
+      clearTimeout(renew);
+      cur?.ws.close();
+    },
+  };
 }

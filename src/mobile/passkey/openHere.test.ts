@@ -110,3 +110,36 @@ describe('server backup store client', () => {
     expect(await fetchBackup(blob.credentialId, nf)).toBeNull();
   });
 });
+
+describe('"your phone has it" ping', () => {
+  test('fingerprint is stable, normalised and does not reveal the words', async () => {
+    const { walletFingerprint } = await import('./openHere');
+    const a = await walletFingerprint('Abandon  ability able');
+    expect(a).toBe(await walletFingerprint('abandon ability able'));
+    expect(a).not.toBe(await walletFingerprint('abandon ability about'));
+    expect(a).toMatch(/^[0-9a-f]{64}$/);
+  });
+  test('ping params are validated and expire', async () => {
+    const { parsePing, pingQuery, RESTORED_LIFETIME_S } = await import('./openHere');
+    const p = { r: 'relay.bwallet.space', c: channel, k: computer.toPublicKey().toString(), e: NOW + 100 };
+    expect(parsePing('?passkey=1' + pingQuery(p), NOW)).toEqual(p);
+    expect(parsePing('?passkey=1' + pingQuery(p), NOW + 101)).toBeNull();
+    expect(parsePing('?passkey=1' + pingQuery({ ...p, e: NOW + RESTORED_LIFETIME_S + 3600 }), NOW)).toBeNull();
+    expect(parsePing('?passkey=1' + pingQuery({ ...p, k: 'nope' }), NOW)).toBeNull();
+    expect(parsePing('?passkey=1', NOW)).toBeNull();
+  });
+  test('restored-ping keys are separate from open-on-computer keys', async () => {
+    const { RESTORED_INFO } = await import('./openHere');
+    const a = await deriveOpen(phone, computer.toPublicKey().toString(), channel);
+    const b = await deriveOpen(phone, computer.toPublicKey().toString(), channel, RESTORED_INFO);
+    const f = await sealOpen(a.key, channel, { t: 'wallet', words: 'x', exp: NOW + 60 });
+    await expect(openOpen(b.key, channel, f, NOW)).rejects.toThrow();
+  });
+});
+
+describe('biometric confirm', () => {
+  test('is unavailable (password fallback) where biometric unlock was never set up', async () => {
+    const { confirmWithBiometrics } = await import('../biometricUnlock');
+    expect(await confirmWithBiometrics('test')).toBe('unavailable');
+  });
+});

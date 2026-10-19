@@ -10,7 +10,8 @@
  */
 import type { ChromeStorageService } from '../../services/ChromeStorage.service';
 
-export type BackupMethod = 'file' | 'phrase' | 'imported';
+/** 'passkey' = the 12 words sealed with the user's passkey + recovery file (VITE_SEEDLESS, mobile/passkey). */
+export type BackupMethod = 'file' | 'phrase' | 'imported' | 'passkey';
 export type BackupSettings = { backedUpAt?: number; backupMethod?: BackupMethod; backupCheckedAt?: number };
 
 /** Why the Backup step is open. */

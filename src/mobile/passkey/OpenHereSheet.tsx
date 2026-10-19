@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Monitor } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { beginOpenHere } from './openHere';
+import { biometricLabel, confirmWithBiometrics } from '../biometricUnlock';
 
 /**
  * Phone: "Open your wallet on <origin>?" after scanning the computer's QR (openHere.ts). The user compares the code
@@ -34,13 +35,23 @@ export const OpenHereSheet = ({ scanned, onClose }: { scanned: string; onClose: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scanned]);
 
-  const confirm = async () => {
+  const bio = biometricLabel();
+  const [usePassword, setUsePassword] = useState(!bio);
+  const confirm = async (how: 'bio' | 'password') => {
     if (!s) return;
     setBusy(true);
     setError('');
     try {
-      if (!(await chromeStorageService.verifyPassword(password))) throw new Error('Wrong password.');
-      const keys = await keysService.retrieveKeys(password);
+      if (how === 'bio') {
+        // Face ID / Touch ID (biometricUnlock.ts); the wallet is open, so its keys are already readable.
+        const r = await confirmWithBiometrics(`Open your wallet on ${s.origin.replace(/^https?:\/\//, '')}`);
+        if (r === 'cancelled') return;
+        if (r !== 'ok') {
+          setUsePassword(true);
+          throw new Error(`${bio || 'Biometrics'} isn't set up for this wallet. Use your password.`);
+        }
+      } else if (!(await chromeStorageService.verifyPassword(password))) throw new Error('Wrong password.');
+      const keys = await keysService.retrieveKeys(how === 'password' ? password : undefined);
       setPassword('');
       if (!keys.mnemonic)
         throw new Error('This account has no 12 words (imported key), so it can’t be opened this way.');
@@ -85,23 +96,48 @@ export const OpenHereSheet = ({ scanned, onClose }: { scanned: string; onClose: 
           <p className="text-xs" style={{ color: '#98A2B3' }}>
             Only continue if you opened bWalletX on that computer yourself. It gets full control of this wallet.
           </p>
-          <input
-            type="password"
-            placeholder="Wallet password to confirm"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full rounded-xl px-4 py-3 border-0 text-white mt-2"
-            style={{ background: '#16181D' }}
-          />
-          <button
-            type="button"
-            disabled={!password || busy}
-            onClick={() => void confirm()}
-            className="w-full rounded-xl py-3 font-bold border-0 mt-3"
-            style={{ background: 'var(--bw-accent, #F5C542)', color: '#000' }}
-          >
-            {busy ? 'Sending…' : 'Codes match: open it there'}
-          </button>
+          {!usePassword && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void confirm('bio')}
+              className="w-full rounded-xl py-3 font-bold border-0 mt-3"
+              style={{ background: 'var(--bw-accent, #F5C542)', color: '#000' }}
+              data-testid="open-here-bio"
+            >
+              {busy ? 'Sending…' : `Codes match: confirm with ${bio}`}
+            </button>
+          )}
+          {usePassword ? (
+            <>
+              <input
+                type="password"
+                placeholder="Wallet password to confirm"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full rounded-xl px-4 py-3 border-0 text-white mt-2"
+                style={{ background: '#16181D' }}
+              />
+              <button
+                type="button"
+                disabled={!password || busy}
+                onClick={() => void confirm('password')}
+                className="w-full rounded-xl py-3 font-bold border-0 mt-3"
+                style={{ background: 'var(--bw-accent, #F5C542)', color: '#000' }}
+              >
+                {busy ? 'Sending…' : 'Codes match: open it there'}
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setUsePassword(true)}
+              className="mt-2 bg-transparent border-0 underline text-sm"
+              style={{ color: '#98A2B3' }}
+            >
+              Use my password instead
+            </button>
+          )}
         </>
       ) : !error ? (
         <p className="text-white mt-3">Connecting…</p>

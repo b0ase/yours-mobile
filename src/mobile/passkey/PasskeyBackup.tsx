@@ -13,6 +13,9 @@ import {
 } from './seedBackup';
 import { takePasskeySession } from './session';
 import { fetchBackup, uploadBackup } from './passkeyServer';
+import { sendRestoredPing } from './openHere';
+import { useServiceContext } from '../../hooks/useServiceContext';
+import { markBackedUp } from '../backup/backupState';
 
 const linkStyle = { background: 'none', border: 'none', cursor: 'pointer' } as const;
 
@@ -22,13 +25,17 @@ export const PasskeyBackupButton = ({
   label,
   identityWif,
   onSaved,
+  accountId,
 }: {
   words: string[];
   label: string;
   /** The new account's identity key, to sign the server upload (passkeyServer.ts). */
   identityWif?: () => Promise<string | undefined>;
   onSaved?: (ok: boolean) => void;
+  /** The account these words belong to: marked backed up ('passkey') so the backup prompt doesn't nag. */
+  accountId?: string;
 }) => {
+  const { chromeStorageService } = useServiceContext();
   const { theme } = useTheme();
   const available = usePasskeyBackupAvailable();
   const [state, setState] = useState<'idle' | 'busy' | 'done'>('idle');
@@ -37,6 +44,10 @@ export const PasskeyBackupButton = ({
   const [onServer, setOnServer] = useState<boolean | null>(null);
   const accent = theme.color.component.primaryButtonLeftGradient;
 
+  const saved = (b: SeedBackupBlob) => {
+    if (accountId) void markBackedUp(chromeStorageService, 'passkey', Date.now(), [accountId]).catch(() => undefined);
+    toServer(b);
+  };
   const toServer = (b: SeedBackupBlob) =>
     void identityWif?.()
       .then((wif) => (wif ? uploadBackup(b, wif) : false))
@@ -59,7 +70,7 @@ export const PasskeyBackupButton = ({
         downloadBackupFile(b);
         setState('done');
         onSaved?.(true);
-        toServer(b);
+        saved(b);
       },
       (e: unknown) => {
         setError(e instanceof Error ? e.message : String(e));
@@ -83,7 +94,7 @@ export const PasskeyBackupButton = ({
       downloadBackupFile(b);
       setState('done');
       onSaved?.(true);
-      toServer(b);
+      saved(b);
     } catch (e) {
       setState('idle');
       setError(e instanceof Error ? e.message : String(e));
@@ -160,11 +171,16 @@ export const PasskeyRestoreRow = ({ onPhrase }: { onPhrase: (mnemonic: string, p
   const contrast = theme.color.global.contrast;
   const gray = theme.color.global.gray;
 
+  const local = () => /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+  const opened = (words: string) => {
+    void sendRestoredPing(words, local()); // "Your phone has it" on the computer, best effort
+    return words;
+  };
   const openWith = async (blob: SeedBackupBlob) => {
     if (blob.rpId !== currentRpId())
       throw new Error(`This backup was made on ${blob.rpId}. Open bWalletX there to restore it.`);
     const { prf } = await getPrf(blob.rpId, blob.credentialId);
-    onPhrase(await openSeed(blob, prf), { rpId: blob.rpId, credentialId: blob.credentialId, prf });
+    onPhrase(opened(await openSeed(blob, prf)), { rpId: blob.rpId, credentialId: blob.credentialId, prf });
   };
 
   const fromDevice = async () => {
@@ -181,7 +197,7 @@ export const PasskeyRestoreRow = ({ onPhrase }: { onPhrase: (mnemonic: string, p
         setNeedFile(true);
         throw new Error('No backup found for that passkey. Choose your recovery file.');
       }
-      onPhrase(await openSeed(blob, prf), { rpId: blob.rpId, credentialId, prf });
+      onPhrase(opened(await openSeed(blob, prf)), { rpId: blob.rpId, credentialId, prf });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

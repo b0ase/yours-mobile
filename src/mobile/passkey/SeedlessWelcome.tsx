@@ -22,6 +22,7 @@ import {
 } from './handcashWeb';
 import { usePasskeyBackupAvailable } from './passkeyUi';
 import { OpenOnComputerPanel } from './OpenOnComputer';
+import { armRestorePing } from './openHere';
 
 const HandCashMark = () => (
   <span
@@ -56,6 +57,7 @@ export const SeedlessWelcome = () => {
   // Opened from the "Put this wallet on your phone" QR: /restore?passkey=1 → straight to Restore.
   useEffect(() => {
     if (typeof location !== 'undefined' && location.pathname.replace(/\/$/, '') === '/restore') {
+      armRestorePing(location.search); // join the computer's one-time channel now, ping after the passkey restore
       navigate('/restore-wallet');
     }
   }, [navigate]);

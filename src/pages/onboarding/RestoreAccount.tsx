@@ -33,7 +33,7 @@ import { normalizePhrase, phraseProblem, restoreErrorMessage } from './restoreHe
 import { clearHelpDeskUnpin } from '../../mobile/chat/helpDeskPin';
 import { PasskeyRestoreRow } from '../../mobile/passkey/PasskeyBackup';
 import { SEEDLESS_ENABLED } from '../../mobile/passkey/prf';
-import { PasskeyCreatePanel } from '../../mobile/passkey/PasskeyCreate';
+import { PasskeyCreatePanel, PasskeyUnlockButton } from '../../mobile/passkey/PasskeyCreate';
 import { keystorePasswordFromPrf, savePasskeyUnlock } from '../../mobile/passkey/seedBackup';
 import { takeTransferredWallet } from '../../mobile/passkey/session';
 
@@ -610,6 +610,7 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
           : `The password you use to unlock bWalletX${currentAccountName ? ` (checked against ${currentAccountName})` : ''}.`}
       </p>
 
+      {SEEDLESS_ENABLED && !newWallet && <PasskeyUnlockButton label="Use passkey" onPassword={applyPasskeyPassword} />}
       {needPasskey && (
         <PasskeyCreatePanel
           onPassword={(pw) => {

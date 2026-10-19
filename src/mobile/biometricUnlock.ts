@@ -172,6 +172,30 @@ const unlock = async (): Promise<boolean> => {
   return true;
 };
 
+/**
+ * Confirm a sensitive action with Face ID / Touch ID / fingerprint (passkey "Scan to open on computer", VITE_SEEDLESS).
+ * Reuses the unlock item: reading the sealed passKey needs the biometric prompt, and it must still decrypt this
+ * account's keys, so a pass proves the owner is present on an enrolled device. Nothing is read or changed besides
+ * that. 'unavailable' = biometrics not set up here (caller falls back to the password).
+ */
+export const confirmWithBiometrics = async (reason: string): Promise<'ok' | 'cancelled' | 'unavailable'> => {
+  if (!chromeApi || biometry === 'none') return 'unavailable';
+  const { id, encryptedKeys } = await selectedAccount();
+  if (!id || !encryptedKeys || !(await flag.get(ENROLLED(id)))) return 'unavailable';
+  try {
+    const passKey = (await YoursNative.biometricGet({ key: SEALED(id), reason })).value;
+    const ok =
+      !!passKey &&
+      (await decrypt(encryptedKeys, passKey)
+        .then((plain) => (JSON.parse(plain), true))
+        .catch(() => false));
+    return ok ? 'ok' : 'unavailable';
+  } catch (error: any) {
+    return error?.code === 'cancelled' ? 'cancelled' : 'unavailable';
+  }
+};
+export const biometricLabel = () => (biometry === 'none' ? '' : label());
+
 // Platform hooks -------------------------------------------------------------
 
 const reenrolNotice = () => `${capitalised()} needs setting up again: unlock with your password once`;

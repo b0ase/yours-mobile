@@ -185,6 +185,42 @@ so it is a passkey wallet from then on. Code: `passkey/openHere.ts`, `OpenOnComp
   against a local relay: codes matched (2-1-2-9 on both), words arrived, Restore → Create my passkey → wallet
   restored → lock → Unlock with passkey. The phone UI sheet itself was not driven (needs the app + camera).
 
+## Round 5 (owner, 19 Oct 2026)
+
+Server table `public.passkey_seed_backups` now exists (migration run by the coordinator after owner approval).
+
+### Scan to open on computer: confirm with Face ID / Touch ID
+
+The phone sheet's main button is **"Codes match: confirm with Face ID"** (or Touch ID / fingerprint).
+`confirmWithBiometrics()` in `biometricUnlock.ts` reuses the existing biometric unlock: it reads the account's
+sealed unlock key from the Keychain / Keystore (`YoursNative.biometricGet`, which shows the system biometric prompt)
+and checks it still decrypts this account's keys. That proves the owner is present on an enrolled device. The
+password itself is never needed here: the wallet is already unlocked, so its keys are readable
+(`keysService.retrieveKeys()` without a password uses the session key, as the rest of the app does). If biometric
+unlock isn't set up for this account (or on the web), the sheet falls back to the wallet password; "Use my password
+instead" is always there.
+
+### "✓ Your phone has it"
+
+The computer's "Put this wallet on your phone" QR now also carries a one-time relay channel and ephemeral public key
+(`/restore?passkey=1&r=…&c=…&k=…&e=…`). The phone joins that channel as soon as the page opens (the relay keeps a
+joined channel open) and, once its passkey has opened the backup, sends one sealed ping `{ t:'restored', fp }` where
+`fp = SHA-256("bwalletx-restored|" + words)`. The computer shows **✓ Your phone has it** only if `fp` matches its own
+new wallet, and the button becomes Continue. No server, no PII, the relay sees ciphertext only, and the HKDF label
+differs from "open on computer". Best effort: if the phone opens the page after the QR lapsed (≈4½ min; the computer
+renews it) or restores some other way, nothing is shown and nothing breaks.
+(Scan-to-open is the other direction, phone to computer, so its success is already visible on the computer.)
+
+### Add account with a passkey
+
+On a passkey wallet, Add account (both "New account" and restoring another wallet into it) shows **Use passkey**:
+one passkey prompt unseals or derives the master password (`unlockPasswordFromPrf`) and the normal add-account path
+runs. Typing the master password still works.
+
+Verified 19 Oct (headless Chrome + virtual PRF authenticator, local relay; phone simulated with the same
+`armRestorePing` / `sendRestoredPing` code): see the PR report. The biometric confirm needs a real device;
+unit-tested only for its fallback.
+
 ## Crypto
 
 ```
