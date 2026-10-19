@@ -82,7 +82,11 @@ async function writeAccountPicture(storage: ChromeStorageService, id: string, ur
 export async function setPicture(
   storage: ChromeStorageService,
   id: string,
-  choice: { source: 'bavatar' } | { source: 'x' | 'google' } | { source: 'nft'; origin: string },
+  choice:
+    | { source: 'bavatar' }
+    | { source: 'x' | 'google' }
+    /** `url`: a public https picture for this NFT (e.g. an NPG Avatar's circle); else its ORDFS content. */
+    | { source: 'nft'; origin: string; url?: string },
 ): Promise<string> {
   if (!id) return '';
   if (choice.source === 'bavatar') {
@@ -91,7 +95,7 @@ export async function setPicture(
     return '';
   }
   if (choice.source === 'nft') {
-    const url = nftPictureUrl(choice.origin);
+    const url = paymailAvatar(choice.url) || nftPictureUrl(choice.origin);
     savePictureState(id, { source: 'nft', url, outpoint: choice.origin.replace('.', '_') });
     await writeAccountPicture(storage, id, url);
     return paymailAvatar(url);
