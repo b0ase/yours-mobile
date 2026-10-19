@@ -1,11 +1,14 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, Fingerprint } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useBackClose } from '../backStack';
 import { addPasskeyToWallet } from './passkeyWallet';
+import { PairDevicePanel } from './PairDevice';
 import { usePasskeyBackupAvailable } from './passkeyUi';
 import { loadLocalBackups, loadPasskeyUnlock, removePasskey } from './seedBackup';
+
+const ScanSheet = lazy(() => import('../scan/ScanSheet'));
 
 const MUTED = '#98A2B3';
 
@@ -21,6 +24,8 @@ export const PasskeySettings = ({ onClose }: { onClose: () => void }) => {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
+  const [pairing, setPairing] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const accounts = chromeStorageService.getAllAccounts();
   const current = chromeStorageService.getCurrentAccountObject().account;
   const currentId = current?.addresses.identityAddress ?? '';
@@ -42,12 +47,13 @@ export const PasskeySettings = ({ onClose }: { onClose: () => void }) => {
         mnemonic: keys.mnemonic,
         account: currentId,
         label: current?.name ?? 'Account',
+        identityWif: (keys as { identityWif?: string }).identityWif,
       });
       setPassword('');
       refresh();
       setMsg(
         r.backedUp
-          ? 'Done. Unlock with passkey is on, and this account’s 12 words are sealed with your passkey. Your password still works.'
+          ? `Done. Unlock with passkey is on, and this account’s 12 words are sealed with your passkey${r.onServer ? ' (also in your bWalletX backup)' : ''}. Your password still works.`
           : 'Unlock with passkey is on. This account has no 12 words to back up (imported key).',
       );
     } catch (e) {
@@ -138,6 +144,32 @@ export const PasskeySettings = ({ onClose }: { onClose: () => void }) => {
             {error}
           </p>
         )}
+        {unlock && !pairing && (
+          <button
+            type="button"
+            onClick={() => setPairing(true)}
+            className="rounded-xl py-3 font-bold border-0 mt-2"
+            style={{ background: '#16181D', color: '#fff' }}
+            data-testid="pair-a-device"
+          >
+            Pair a device
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => setScanning(true)}
+          className="rounded-xl py-3 font-bold border-0"
+          style={{ background: '#16181D', color: '#fff' }}
+          data-testid="scan-open-on-computer"
+        >
+          Scan to open on computer
+        </button>
+        {scanning && (
+          <Suspense fallback={null}>
+            <ScanSheet onClose={() => setScanning(false)} />
+          </Suspense>
+        )}
+        {pairing && <PairDevicePanel title="Pair a device" onLater={() => setPairing(false)} />}
         {unlock && (
           <button
             type="button"

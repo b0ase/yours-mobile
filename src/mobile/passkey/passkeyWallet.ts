@@ -1,5 +1,6 @@
 import { createPasskeyWithPrf, getPrf } from './prf';
 import { currentRpId } from './passkeyUi';
+import { uploadBackup } from './passkeyServer';
 import { loadPasskeyUnlock, saveLocalBackup, savePasskeyUnlock, sealPassword, sealSeed } from './seedBackup';
 
 /**
@@ -13,7 +14,8 @@ export async function addPasskeyToWallet(opts: {
   mnemonic?: string;
   account: string;
   label: string;
-}): Promise<{ credentialId: string; backedUp: boolean }> {
+  identityWif?: string;
+}): Promise<{ credentialId: string; backedUp: boolean; onServer: boolean }> {
   const existing = loadPasskeyUnlock();
   const rpId = existing?.rpId ?? currentRpId();
   const { credentialId, prf } = existing
@@ -23,13 +25,14 @@ export async function addPasskeyToWallet(opts: {
     // A passkey-made wallet (no `sealed`) keeps its derived password; otherwise seal the typed one.
     if (!existing || existing.sealed) savePasskeyUnlock(await sealPassword(opts.password, prf, { rpId, credentialId }));
     let backedUp = false;
+    let onServer = false;
     if (opts.mnemonic?.trim()) {
-      saveLocalBackup(
-        await sealSeed(opts.mnemonic, prf, { rpId, credentialId, label: opts.label, account: opts.account }),
-      );
+      const blob = await sealSeed(opts.mnemonic, prf, { rpId, credentialId, label: opts.label, account: opts.account });
+      saveLocalBackup(blob);
       backedUp = true;
+      if (opts.identityWif) onServer = await uploadBackup(blob, opts.identityWif);
     }
-    return { credentialId, backedUp };
+    return { credentialId, backedUp, onServer };
   } finally {
     prf.fill(0);
   }

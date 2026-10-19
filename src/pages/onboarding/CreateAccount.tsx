@@ -23,7 +23,8 @@ import { clearHelpDeskUnpin } from '../../mobile/chat/helpDeskPin';
 import { isWebApp } from '../../mobile/webApp';
 import { PasskeyBackupButton } from '../../mobile/passkey/PasskeyBackup';
 import { SEEDLESS_ENABLED } from '../../mobile/passkey/prf';
-import { PasskeyCreatePanel } from '../../mobile/passkey/PasskeyCreate';
+import { PasskeyCreatePanel, PasskeySavedBanner } from '../../mobile/passkey/PasskeyCreate';
+import { PairDevicePanel } from '../../mobile/passkey/PairDevice';
 
 export type CreateAccountProps = {
   onNavigateBack: () => void;
@@ -63,6 +64,9 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
   const { search } = useLocation();
   const viaPasskey = SEEDLESS_ENABLED && newWallet && new URLSearchParams(search).get('via') === 'passkey';
   const [passkeyPassword, setPasskeyPassword] = useState('');
+  const [passkeySaved, setPasskeySaved] = useState<'saving' | 'saved' | 'failed'>('saving');
+  const [showWords, setShowWords] = useState(false);
+  const [pairLater, setPairLater] = useState(false);
 
   useEffect(() => {
     if (newWallet) hideMenu();
@@ -249,15 +253,29 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
   const copySeedStep = (
     <div className="flex flex-col items-center w-full">
       {stepIndicator}
-      <h2 className="text-xl font-bold mb-1 text-center" style={{ color: contrast }}>
-        Your recovery phrase
-      </h2>
-      <p className="text-xs mb-4 text-center px-4" style={{ color: gray }}>
-        Safely write down and store your seed phrase in a safe place.
-      </p>
+      {viaPasskey && (
+        <PasskeySavedBanner state={passkeySaved} shown={showWords} onShow={() => setShowWords((v) => !v)} />
+      )}
+      {!viaPasskey && (
+        <>
+          <h2 className="text-xl font-bold mb-1 text-center" style={{ color: contrast }}>
+            Your recovery phrase
+          </h2>
+          <p className="text-xs mb-4 text-center px-4" style={{ color: gray }}>
+            Safely write down and store your seed phrase in a safe place.
+          </p>
+        </>
+      )}
 
-      {/* Word grid */}
-      <div className="w-[87%] rounded-xl border p-4 mb-1" style={{ backgroundColor: row, borderColor: gray + '30' }}>
+      {/* Word grid (passkey flow: hidden until "Show my 12 words"; still mounted so the passkey backup runs) */}
+      <div
+        className="w-[87%] rounded-xl border p-4 mb-1"
+        style={{
+          backgroundColor: row,
+          borderColor: gray + '30',
+          ...(viaPasskey && !showWords ? { display: 'none' } : {}),
+        }}
+      >
         <div className="grid grid-cols-3 gap-x-3 gap-y-2">
           {seedWords.map((word, i) => (
             <div key={i} className="flex items-center gap-1.5 rounded-lg px-2 py-1.5" style={{ backgroundColor: bg }}>
@@ -336,17 +354,29 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
           />
         )}
         {/* Prototype, VITE_SEEDLESS=1 only: renders nothing unless the browser can do passkey PRF. */}
-        {SEEDLESS_ENABLED && <PasskeyBackupButton words={seedWords} label={cleanAccountName(accountName)} />}
+        {SEEDLESS_ENABLED && (
+          <PasskeyBackupButton
+            words={seedWords}
+            label={cleanAccountName(accountName)}
+            identityWif={() => keysService.retrieveKeys(password).then((k) => (k as { identityWif?: string }).identityWif)}
+            onSaved={(ok) => {
+              setPasskeySaved(ok ? 'saved' : 'failed');
+              if (!ok) setShowWords(true);
+            }}
+          />
+        )}
       </div>
 
-      <p className="text-[10px] mt-2 mb-4 text-center px-6" style={{ color: gray + 'bb' }}>
-        Make sure you are in a safe place and no one is watching.
-      </p>
+      {(!viaPasskey || showWords) && (
+        <p className="text-[10px] mt-2 mb-4 text-center px-6" style={{ color: gray + 'bb' }}>
+          Make sure you are in a safe place and no one is watching.
+        </p>
+      )}
 
       <Button
         theme={theme}
         type="primary"
-        label="Next"
+        label={viaPasskey ? 'Continue' : 'Next'}
         onClick={async () => {
           // Clear the words only after leaving this step: clearing first re-rendered this screen with an
           // empty grid while switchAccount ran, which looked like a second "Your recovery phrase" screen.
@@ -361,7 +391,13 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
     </div>
   );
 
-  const successStep = (
+  const successStep =
+    viaPasskey && !pairLater ? (
+      <div className="flex flex-col items-center w-full">
+        {stepIndicator}
+        <PairDevicePanel onLater={() => setPairLater(true)} />
+      </div>
+    ) : (
     <div className="flex flex-col items-center w-full">
       {stepIndicator}
       <motion.div
@@ -418,7 +454,7 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
         />
       </motion.div>
     </div>
-  );
+    );
 
   return (
     <Show when={!loading} whenFalseContent={<PageLoader theme={theme} message="Generating keys..." />}>

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Fingerprint } from 'lucide-react';
+import { CheckCircle2, Fingerprint, Loader2 } from 'lucide-react';
 import { useTheme } from '../../hooks/useTheme';
 import { createPasskeyWithPrf, getPrf } from './prf';
 import { currentRpId } from './passkeyUi';
@@ -83,3 +83,59 @@ export const PasskeyUnlockButton = ({ onPassword }: { onPassword: (password: str
     </div>
   );
 };
+
+/**
+ * Passkey sign-up, 12-words step (owner, 19 Oct 2026): the words are already saved, so say so loudly and hide
+ * them behind an optional reveal. Never says "passphrase" or "seed" here.
+ */
+export const PasskeySavedBanner = ({
+  state,
+  shown,
+  onShow,
+}: {
+  state: 'saving' | 'saved' | 'failed';
+  shown: boolean;
+  onShow: () => void;
+}) => (
+  <div className="w-[87%] flex flex-col items-center gap-3 mb-4" data-testid="passkey-saved-banner">
+    {state === 'failed' ? (
+      <div className="w-full rounded-2xl p-4 text-center" style={{ background: 'rgba(253,162,155,0.12)' }}>
+        <p className="m-0 text-base font-bold" style={{ color: '#FDA29B' }}>
+          We couldn't save your backup with your passkey.
+        </p>
+        <p className="m-0 mt-1 text-sm" style={{ color: '#E4E7EC' }}>
+          Write these 12 words down on paper before you continue.
+        </p>
+      </div>
+    ) : (
+      <div
+        className="w-full rounded-2xl p-4 flex flex-col items-center text-center"
+        style={{ background: 'rgba(46,204,113,0.12)' }}
+      >
+        {state === 'saving' ? (
+          <Loader2 size={40} className="animate-spin" color="#2ecc71" />
+        ) : (
+          <CheckCircle2 size={44} color="#2ecc71" strokeWidth={2} />
+        )}
+        <p className="m-0 mt-2 text-lg font-bold" style={{ color: '#2ecc71' }}>
+          {state === 'saving' ? 'Saving…' : "Already saved. You don't need to write these down."}
+        </p>
+        <p className="m-0 mt-2 text-sm leading-snug" style={{ color: '#E4E7EC' }}>
+          Your wallet is locked with your passkey (Face ID / Touch ID) and an encrypted backup was saved to this device.
+          These 12 words are only for people who want a paper copy.
+        </p>
+      </div>
+    )}
+    {state !== 'failed' && (
+      <button
+        type="button"
+        onClick={onShow}
+        className="bg-transparent border-0 text-sm underline cursor-pointer"
+        style={{ color: '#98A2B3' }}
+        data-testid="show-12-words"
+      >
+        {shown ? 'Hide my 12 words' : 'Show my 12 words (optional)'}
+      </button>
+    )}
+  </div>
+);

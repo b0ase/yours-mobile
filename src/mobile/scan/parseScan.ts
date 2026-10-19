@@ -8,11 +8,23 @@ import { parseAppLink, type AppLink } from '../spaces/invite';
  */
 export type Scan =
   | { kind: 'pair'; text: string }
+  /** "Open on computer" (passkey/openHere.ts, VITE_SEEDLESS builds act on it). */
+  | { kind: 'open'; text: string }
   | { kind: 'pay'; to: string; amountSats?: number; label?: string; message?: string }
   | { kind: 'person'; handle: string; to: string }
   /** A Space page, invite or room link (https /s/ /i/ /r/ on our hosts, or bwalletx://space|invite|room/…). */
   | { kind: 'join'; url: string; link: AppLink }
   | { kind: 'text'; text: string };
+
+/** https://www.bwallet.space/open?… (passkey/openHere.ts isOpenLink; inlined to keep this module dependency-free). */
+const isOpenLink = (s: string) => {
+  try {
+    const u = new URL(s);
+    return (u.host === PAIR_HOST || u.host === 'bwallet.space') && u.pathname === '/open';
+  } catch {
+    return false;
+  }
+};
 
 const SATS = 100_000_000;
 const PERSON_HOSTS = new Set(['bwalletx.com', 'www.bwalletx.com']);
@@ -55,6 +67,7 @@ export const parseScan = (raw: string | null | undefined): Scan => {
   if (!text) return { kind: 'text', text: '' };
 
   if (isPairLink(text) || /^bwallet:.*pair/i.test(text)) return { kind: 'pair', text };
+  if (isOpenLink(text)) return { kind: 'open', text };
 
   const link = parseAppLink(text);
   if (link) return { kind: 'join', url: text, link };

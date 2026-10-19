@@ -29,3 +29,19 @@ export const downloadBackupFile = (blob: SeedBackupBlob) => {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 };
+
+export const copyText = (t: string) => navigator.clipboard?.writeText(t) ?? Promise.resolve();
+
+/** Where a second device opens "Restore with a passkey". No secrets: the synced passkey + backup store do the work. */
+export const pairRestoreUrl = (origin = typeof location === 'undefined' ? '' : location.origin): string => {
+  const base =
+    /^https:\/\/([a-z0-9-]+\.)?bwalletx\.com$/.test(origin) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
+      ? origin
+      : 'https://web.bwalletx.com';
+  return `${base}/restore?passkey=1`;
+};
+
+/** Phone-sized screen (or touch device) = we're on the phone, so point at the computer instead. */
+export const onPhone = () =>
+  typeof window !== 'undefined' &&
+  (window.matchMedia?.('(max-width: 639px)').matches || /iPhone|Android/.test(navigator.userAgent));

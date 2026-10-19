@@ -13,3 +13,15 @@ export const takePasskeySession = (): PasskeySession | null => {
   pending = null;
   return s;
 };
+
+/** "Open on computer": the words the phone sent, handed from the welcome panel to Restore (memory only). */
+export type Transferred = { words: string; name?: string };
+let transferred: Transferred | null = null;
+export const setTransferredWallet = (t: Transferred | null) => {
+  transferred = t;
+};
+export const takeTransferredWallet = (): Transferred | null => {
+  const t = transferred;
+  transferred = null;
+  return t;
+};

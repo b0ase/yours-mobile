@@ -115,6 +115,76 @@ credentialId)` → `openSeed` → normal restore (the code path in `PasskeyResto
 text, blob jsonb, created_at)`, RLS on) and a migration on Hetzner, not run. Alternatively key it by identity key
   on the bit-sign API (below); the X / Google lookup is what makes "no file" work on a new device.
 
+## Round 4 (owner, 19 Oct 2026): saved banner, server store, phone pairing, open on computer
+
+### 12-words step in the passkey flow
+
+Big green check: **"Already saved. You don't need to write these down."** + "Your wallet is locked with your passkey
+(Face ID / Touch ID) and an encrypted backup was saved to this device. These 12 words are only for people who want a
+paper copy." The words sit behind **"Show my 12 words (optional)"**; the button is a big **Continue**. While the seal
+runs it says "Saving…"; if sealing fails it turns red ("Write these 12 words down on paper before you continue")
+and shows the words. "Passphrase" never appears in this flow.
+
+### Server store (bit-sign PR, table NOT created)
+
+`PUT /api/bitsign/passkey-backups` `{ blob, identity_key, ts, signature }`: BSM signature by the wallet identity key
+over `bwalletx passkey backup v1|<credentialId>|sha256(blob json)|<ts>` (5-minute window). The first PUT claims the
+credential id for that key; later PUTs need the same key (no overwrite by others). `GET
+/api/bitsign/passkey-backups/<credentialId>` → `{ blob }`, public by random id, ciphertext only, rate-limited (30 /
+10 min / IP), one 404 for missing and deleted. Migration `migrations/20261220_passkey_seed_backups.sql` (RLS on,
+service role only) **must be approved and run by the owner**; until then the routes answer 503 and the wallet keeps
+the local copy + recovery file (it says "Online copy not available right now").
+Why identity-key signature and not a WebAuthn assertion: verifying an assertion needs the passkey's public key on
+the server (a registration ceremony we don't have); the identity key is already the wallet's public identity and
+the wallet can sign with it at the moment it seals.
+
+Client (`passkeyServer.ts`): uploads after every seal (sign-up, Settings › Passkey), three tries; restore does a
+**discoverable** passkey sign-in (no allowCredentials) → credential id → local copy, else server → decrypt →
+normal restore, and the restored wallet unlocks with the same passkey (no password).
+
+### Pair your phone at sign-up
+
+After a passkey sign-up on a computer: **"Put this wallet on your phone"** with a QR to
+`https://web.bwalletx.com/restore?passkey=1` (no secrets: the synced passkey + server copy do the work) and "Same
+Apple or Google account → your passkey is already on your phone." **Later** skips. On a phone the same step reads
+**"Add on your computer"** with the address. Settings › Passkey › **Pair a device** shows it again. (Success on the
+other device is not reported back yet: optional, would need a "restored" ping to the store.)
+
+### Open on computer (WhatsApp-Web style) — threat model
+
+For wallets that live in the phone app (no passkey yet). Web welcome at desktop widths: "Already have bWalletX on
+your phone? Scan to open it here" + QR. Phone: Scan (top bar) or Settings › Passkey › **Scan to open on computer** →
+"Open your wallet on web.bwalletx.com? Check the code: 4-7-2-9" → wallet password (app lock) → the open account's
+12 words are sealed to the computer and sent → the computer restores and asks for a passkey ("Create my passkey"),
+so it is a passkey wallet from then on. Code: `passkey/openHere.ts`, `OpenOnComputer.tsx`, `OpenHereSheet.tsx`.
+
+- **QR**: `https://www.bwallet.space/open?v=1&r=<relay>&c=<channel>&k=<ephemeral pubkey>&o=<origin>&e=<expiry>`.
+  Public data only; a fresh key pair per QR, private key in page memory only.
+- **Transport**: the existing phone-pairing relay (`relay/relay.mjs`, relay.bwallet.space). It forwards frames
+  verbatim and never sees plaintext. It ties the channel to the computer page's real websocket Origin (browsers set
+  it; scripts can't) and tells the phone; the phone refuses unless that origin equals the QR's `o` **and** is a
+  `https://*.bwalletx.com` host. A QR shown on evil.example therefore can't receive a wallet even if the user scans it.
+- **Crypto**: ECDH secp256k1 (phone ephemeral × computer ephemeral) → HKDF-SHA256(salt = channel, info =
+  `bwalletx-open-v1`) → AES-256-GCM; AAD binds the channel; the payload carries the QR expiry and is refused after it.
+- **MITM / substituted key**: anyone who swaps a public key gets a different 4-digit code on each screen; the user
+  is told to continue only if they match. 4 digits = 1 in 10,000 for a live attacker per attempt, and every attempt
+  needs a fresh scan + the user's password.
+- **Expiry and single use**: QR and relay channel live 2 minutes (the relay enforces the expiry when the phone
+  joins; the phone checks it again before sending); the computer accepts exactly one wallet frame, then closes and
+  forgets the key. A new QR appears on expiry.
+- **Consent**: the phone sends nothing until the user has compared the code and typed the wallet password; the
+  sheet says "It gets full control of this wallet."
+- **What it does NOT protect against**: malware on the computer or a malicious browser extension on
+  web.bwalletx.com (it would see the words after decryption, as with typing the 12 words), a compromised
+  web.bwalletx.com deployment, or a user who confirms without comparing the code. The relay operator can deny
+  service but not read or change the wallet.
+- Tests (`openHere.test.ts`): QR has no secrets and round-trips; lookalike / http / foreign origins refused; 2-minute
+  expiry and over-long expiry refused; both sides derive the same code and key; a MITM key gives a different code
+  and can't decrypt; channel binding; expired payload refused.
+- Verified 19 Oct: headless Chrome (computer, 1440) + a simulated phone running the same `beginOpenHere` code
+  against a local relay: codes matched (2-1-2-9 on both), words arrived, Restore → Create my passkey → wallet
+  restored → lock → Unlock with passkey. The phone UI sheet itself was not driven (needs the app + camera).
+
 ## Crypto
 
 ```

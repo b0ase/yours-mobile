@@ -12,17 +12,38 @@ import {
   type SeedBackupBlob,
 } from './seedBackup';
 import { takePasskeySession } from './session';
+import { fetchBackup, uploadBackup } from './passkeyServer';
 
 const linkStyle = { background: 'none', border: 'none', cursor: 'pointer' } as const;
 
 /** Create Account › "Your recovery phrase": "Save with a passkey" under the existing Copy / Download rows. */
-export const PasskeyBackupButton = ({ words, label }: { words: string[]; label: string }) => {
+export const PasskeyBackupButton = ({
+  words,
+  label,
+  identityWif,
+  onSaved,
+}: {
+  words: string[];
+  label: string;
+  /** The new account's identity key, to sign the server upload (passkeyServer.ts). */
+  identityWif?: () => Promise<string | undefined>;
+  onSaved?: (ok: boolean) => void;
+}) => {
   const { theme } = useTheme();
   const available = usePasskeyBackupAvailable();
   const [state, setState] = useState<'idle' | 'busy' | 'done'>('idle');
   const [error, setError] = useState('');
   const [blob, setBlob] = useState<SeedBackupBlob | null>(null);
+  const [onServer, setOnServer] = useState<boolean | null>(null);
   const accent = theme.color.component.primaryButtonLeftGradient;
+
+  const toServer = (b: SeedBackupBlob) =>
+    void identityWif?.()
+      .then((wif) => (wif ? uploadBackup(b, wif) : false))
+      .then(
+        (ok) => setOnServer(ok),
+        () => setOnServer(false),
+      );
 
   // Made with "Continue with a passkey": seal the new words with that passkey now (no second prompt).
   const phrase = words.join(' ');
@@ -37,9 +58,15 @@ export const PasskeyBackupButton = ({ words, label }: { words: string[]; label: 
         setBlob(b);
         downloadBackupFile(b);
         setState('done');
+        onSaved?.(true);
+        toServer(b);
       },
-      (e: unknown) => setError(e instanceof Error ? e.message : String(e)),
+      (e: unknown) => {
+        setError(e instanceof Error ? e.message : String(e));
+        onSaved?.(false);
+      },
     );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per new phrase; callbacks are fresh each render
   }, [phrase, label]);
 
   if (!available || words.length === 0) return null;
@@ -55,6 +82,8 @@ export const PasskeyBackupButton = ({ words, label }: { words: string[]; label: 
       setBlob(b);
       downloadBackupFile(b);
       setState('done');
+      onSaved?.(true);
+      toServer(b);
     } catch (e) {
       setState('idle');
       setError(e instanceof Error ? e.message : String(e));
@@ -96,6 +125,17 @@ export const PasskeyBackupButton = ({ words, label }: { words: string[]; label: 
           opens it. Your 12 words still work too.
         </p>
       )}
+      {state === 'done' && onServer !== null && (
+        <p
+          className="text-[10px] mt-1 text-center px-6"
+          style={{ color: theme.color.global.gray }}
+          data-testid="passkey-server-status"
+        >
+          {onServer
+            ? 'Also stored (locked) in your bWalletX backup, so your passkey can restore it on a new device.'
+            : 'Online copy not available right now; your file and this device still have it.'}
+        </p>
+      )}
       {error && (
         <p className="text-[10px] mt-1 text-center px-6" style={{ color: '#f87171' }}>
           {error}
@@ -106,7 +146,10 @@ export const PasskeyBackupButton = ({ words, label }: { words: string[]; label: 
 };
 
 /** Restore a Wallet: "Restore with a passkey". Hands the 12 words to the normal restore form. */
-export const PasskeyRestoreRow = ({ onPhrase }: { onPhrase: (mnemonic: string) => void }) => {
+/** The passkey that opened the backup: lets the restored wallet unlock with it straight away (no password). */
+export type RestorePasskey = { rpId: string; credentialId: string; prf: Uint8Array };
+
+export const PasskeyRestoreRow = ({ onPhrase }: { onPhrase: (mnemonic: string, passkey: RestorePasskey) => void }) => {
   const { theme } = useTheme();
   const available = usePasskeyBackupAvailable();
   const fileInput = useRef<HTMLInputElement>(null);
@@ -121,26 +164,24 @@ export const PasskeyRestoreRow = ({ onPhrase }: { onPhrase: (mnemonic: string) =
     if (blob.rpId !== currentRpId())
       throw new Error(`This backup was made on ${blob.rpId}. Open bWalletX there to restore it.`);
     const { prf } = await getPrf(blob.rpId, blob.credentialId);
-    onPhrase(await openSeed(blob, prf));
+    onPhrase(await openSeed(blob, prf), { rpId: blob.rpId, credentialId: blob.credentialId, prf });
   };
 
   const fromDevice = async () => {
     setError('');
     setBusy(true);
     try {
-      const local = loadLocalBackups().filter((b) => b.rpId === currentRpId());
-      if (local.length === 0) {
-        setNeedFile(true);
-        return;
-      }
-      // Let the browser list this site's passkeys; the one chosen picks the matching backup.
+      // Discoverable passkey sign-in (no allow list): the chosen passkey's id finds the backup, on this device or
+      // in the bWalletX backup store (ciphertext only; passkeyServer.ts).
       const { credentialId, prf } = await getPrf(currentRpId());
-      const blob = local.find((b) => b.credentialId === credentialId);
+      const blob =
+        loadLocalBackups().find((b) => b.credentialId === credentialId && b.rpId === currentRpId()) ??
+        (await fetchBackup(credentialId));
       if (!blob) {
         setNeedFile(true);
-        throw new Error('No backup on this device for that passkey. Choose your recovery file.');
+        throw new Error('No backup found for that passkey. Choose your recovery file.');
       }
-      onPhrase(await openSeed(blob, prf));
+      onPhrase(await openSeed(blob, prf), { rpId: blob.rpId, credentialId, prf });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

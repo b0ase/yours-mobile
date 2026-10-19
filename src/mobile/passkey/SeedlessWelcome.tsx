@@ -21,6 +21,7 @@ import {
   startHandCashWeb,
 } from './handcashWeb';
 import { usePasskeyBackupAvailable } from './passkeyUi';
+import { OpenOnComputerPanel } from './OpenOnComputer';
 
 const HandCashMark = () => (
   <span
@@ -52,6 +53,12 @@ export const SeedlessWelcome = () => {
   const [hc, setHc] = useState(handcashWebHandle);
   const [error, setError] = useState(() => socialError() || handcashWebError());
   const [busy, setBusy] = useState<Who | null>(null);
+  // Opened from the "Put this wallet on your phone" QR: /restore?passkey=1 → straight to Restore.
+  useEffect(() => {
+    if (typeof location !== 'undefined' && location.pathname.replace(/\/$/, '') === '/restore') {
+      navigate('/restore-wallet');
+    }
+  }, [navigate]);
   useEffect(() => {
     const a = onSocialChange(() => {
       setProfile(socialProfile(NEW_ACCOUNT));
@@ -101,6 +108,7 @@ export const SeedlessWelcome = () => {
 
   return (
     <div className="flex flex-col items-center gap-3 w-full" data-testid="seedless-welcome">
+      <OpenOnComputerPanel />
       {social && !signedIn && (
         <>
           {/* Narrow phones: one row of three icon buttons. */}

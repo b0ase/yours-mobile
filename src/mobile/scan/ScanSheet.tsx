@@ -1,4 +1,5 @@
 import { lazy, Suspense, useContext, useState } from 'react';
+import { SEEDLESS_ENABLED } from '../passkey/prf';
 import { createPortal } from 'react-dom';
 import { MyFlipBavatar } from '../bavatar/FlipBavatar';
 import { ArrowLeft, Copy, Mail, QrCode, ScanLine, Send } from 'lucide-react';
@@ -17,6 +18,9 @@ import { parseXInviteLink } from '../chat/xInvites';
 import { APP_NAME, XINVITES_ENABLED } from '../storeBuild';
 
 const PairSheet = lazy(() => import('../pair/PairSheet'));
+const OpenHereSheet = SEEDLESS_ENABLED
+  ? lazy(() => import('../passkey/OpenHereSheet').then((m) => ({ default: m.OpenHereSheet })))
+  : null;
 
 const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
@@ -76,6 +80,14 @@ export default function ScanSheet({
       onClose();
     } else setStage({ k: 'result', s });
   };
+
+  if (OpenHereSheet && stage.k === 'result' && stage.s.kind === 'open') {
+    return (
+      <Suspense fallback={null}>
+        <OpenHereSheet scanned={stage.s.text} onClose={onClose} />
+      </Suspense>
+    );
+  }
 
   if (stage.k === 'result' && stage.s.kind === 'pair') {
     return (

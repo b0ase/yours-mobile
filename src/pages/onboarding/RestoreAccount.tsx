@@ -33,6 +33,9 @@ import { normalizePhrase, phraseProblem, restoreErrorMessage } from './restoreHe
 import { clearHelpDeskUnpin } from '../../mobile/chat/helpDeskPin';
 import { PasskeyRestoreRow } from '../../mobile/passkey/PasskeyBackup';
 import { SEEDLESS_ENABLED } from '../../mobile/passkey/prf';
+import { PasskeyCreatePanel } from '../../mobile/passkey/PasskeyCreate';
+import { keystorePasswordFromPrf, savePasskeyUnlock } from '../../mobile/passkey/seedBackup';
+import { takeTransferredWallet } from '../../mobile/passkey/session';
 
 export type RestoreAccountProps = {
   onNavigateBack: (page: SettingsPage) => void;
@@ -53,6 +56,9 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [step, setStep] = useState(1);
+  // Passkey restore / "open on computer" (VITE_SEEDLESS=1): the passkey supplies the wallet password.
+  const [passkeyPassword, setPasskeyPassword] = useState('');
+  const [needPasskey, setNeedPasskey] = useState(false);
   const [seedWords, setSeedWords] = useState<string>('');
   const { addSnackbar } = useSnackbar();
   const { hideMenu, showMenu } = useBottomMenu();
@@ -114,6 +120,29 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
     reader.readAsText(file);
     event.target.value = '';
   };
+
+  const applyPasskeyPassword = (pw: string) => {
+    setPassword(pw);
+    setPasswordConfirm(pw);
+    setPasskeyPassword(pw);
+  };
+  useEffect(() => {
+    if (!SEEDLESS_ENABLED || !newWallet) return;
+    const t = takeTransferredWallet();
+    if (!t) return;
+    setImportWallet('yours');
+    setSeedWords(t.words);
+    setStep(3);
+    setNeedPasskey(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on arrival from "open on computer"
+  }, []);
+  useEffect(() => {
+    if (passkeyPassword && password === passkeyPassword && passwordConfirm === passkeyPassword) {
+      setPasskeyPassword('');
+      void handleRestore({ preventDefault: () => undefined } as React.FormEvent<HTMLFormElement>);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once both fields hold the passkey password
+  }, [passkeyPassword, password, passwordConfirm]);
 
   const handleRestore = async (event: React.FormEvent<HTMLFormElement>) => {
     try {
@@ -393,10 +422,18 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
       form runs from its name + password step (as the JSON backup upload does). */}
       {SEEDLESS_ENABLED && (
         <PasskeyRestoreRow
-          onPhrase={(words) => {
+          onPhrase={(words, pk) => {
             setImportWallet('yours');
             setSeedWords(words);
             setStep(3);
+            // The same passkey unlocks the restored wallet: its derived password, no password to invent.
+            // (Add account keeps the master password, so only a new wallet does this.)
+            if (newWallet)
+              void keystorePasswordFromPrf(pk.prf).then((pw) => {
+              pk.prf.fill(0);
+              savePasskeyUnlock({ rpId: pk.rpId, credentialId: pk.credentialId });
+              applyPasskeyPassword(pw);
+            });
           }}
         />
       )}
@@ -573,6 +610,14 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
           : `The password you use to unlock bWalletX${currentAccountName ? ` (checked against ${currentAccountName})` : ''}.`}
       </p>
 
+      {needPasskey && (
+        <PasskeyCreatePanel
+          onPassword={(pw) => {
+            setNeedPasskey(false);
+            applyPasskeyPassword(pw);
+          }}
+        />
+      )}
       <form onSubmit={handleRestore} className="flex flex-col items-center w-full">
         <AccountNameField
           theme={theme}
