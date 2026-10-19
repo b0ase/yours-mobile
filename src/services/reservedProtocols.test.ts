@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { EXTERNAL_OK, RESERVED_PROTOCOLS } from './reservedProtocolList';
 import {
-  EXTERNAL_OK,
   guardReservedProtocols,
   isReservedProtocol,
+  protocolHash,
   RAW_HASH_REFUSAL,
-  RESERVED_PROTOCOLS,
   reservedProtocolRefusal,
   revokeReservedProtocolGrants,
   withoutReservedProtocols,
@@ -142,6 +142,14 @@ describe('reserved protocols (audit C1)', () => {
     expect(reservedProtocolRefusal('getPublicKey', { protocolID: [2, '3241645161d8'], keyID: 'a b' })).toBeNull();
   });
 
+  test('the runtime hash set is exactly the readable list', () => {
+    for (const p of RESERVED_PROTOCOLS) expect(isReservedProtocol([p[0], p[1]])).toBe(true);
+    for (const p of EXTERNAL_OK) expect(isReservedProtocol([p[0], p[1]])).toBe(false);
+    const src = readFileSync(join(import.meta.dir, 'reservedProtocols.ts'), 'utf8');
+    const listed = [...src.matchAll(/0x([0-9a-f]{8}),/g)].map((m) => parseInt(m[1], 16));
+    expect(listed.sort()).toEqual(RESERVED_PROTOCOLS.map((p) => protocolHash(p)).sort());
+  });
+
   test('a malformed protocolID is refused', () => {
     expect(reservedProtocolRefusal('createSignature', { protocolID: 'btrust' })).toBe('Invalid protocolID');
   });
@@ -188,7 +196,7 @@ describe('registry covers every wallet protocol', () => {
     const found = new Set<string>();
     const re = /\[\s*([0-2])\s*,\s*['"]([a-zA-Z0-9][a-zA-Z0-9 ]*)['"]\s*\]/g;
     for (const file of walk(join(import.meta.dir, '..'))) {
-      if (file.endsWith('reservedProtocols.ts')) continue;
+      if (file.endsWith('reservedProtocolList.ts')) continue;
       for (const m of readFileSync(file, 'utf8').matchAll(re)) found.add(`${m[1]}:${m[2]}`);
     }
     const missing = [...found].filter((p) => !known.has(p));

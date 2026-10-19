@@ -6,67 +6,36 @@
  * lock's withdrawal. Level 0 is worse: the permissions manager asks nothing at all, so [0, 'onesat'] (the
  * wallet's funds, ordinals and Locks keys) was open to any connected site.
  *
- * Every protocol the wallet itself derives keys under is listed here, and a call from any originator other
+ * Every protocol the wallet itself derives keys under is listed in reservedProtocolList.ts, and a call from any originator other
  * than the wallet's own is refused BEFORE any permission prompt, on every method that takes a protocolID.
  * src/services/reservedProtocols.test.ts scans src for protocol constants, so a new internal protocol fails
- * the tests until it is added here (or to EXTERNAL_OK with a reason).
+ * the tests until it is classified there.
  */
 
 type Protocol = readonly [number, string];
 
-/** Protocols only the wallet itself may use. Default for anything the wallet derives keys under. */
-export const RESERVED_PROTOCOLS: readonly Protocol[] = [
-  // Funds, ordinals, Locks, vesting, NFT ownership, deposit keys (@1sat ONESAT_PROTOCOL / P1SAT_PROTOCOL).
-  [0, 'onesat'],
-  // xInvites vault keys (src/mobile/chat/xInvites.ts).
-  [0, 'bwx xinvites'],
-  // bTrust owner / heir keys (src/mobile/btrust/inheritance.ts).
-  [1, 'btrust'],
-  // Token registry manifest signer (src/mobile/exchange/registry/manifest.ts).
-  [1, 'bsv tokens manifest'],
-  // The wallet's identity signatures (chat signer, name proofs, identity map).
-  [1, 'message signing'],
-  // Pre-signed payments / pots / subscriptions (src/mobile/presign/keys.ts).
-  [2, 'bwalletx presign'],
-  // bChatX / bit-sign sign-in for the wallet itself (src/mobile/auth/authApi.ts).
-  [2, 'bwalletx auth'],
-  [2, 'bwalletx business agent'],
-  [2, 'bwallet calls'],
-  [2, 'bwallet issuer'],
-  [2, 'bwallet paymail'],
-  [2, 'bwallet agreement'],
-  [2, 'bwx partnership'],
-  [2, 'bshares director'],
-  [2, 'bshares treasury'],
-  [2, 'bshares partner'],
-  [2, 'bshares lock'],
-  [2, 'bitsign kyc certificate'],
-  [2, 'bitsign investor self cert'],
-  [2, 'bitsign share offer event'],
-  [2, 'bitsign account delete'],
-  [2, 'bitsign handle claim'],
-  [2, 'bmail'],
-  [2, 'bmusic session'],
-  [2, 'bmusic artist'],
-  [2, 'bmusic listen claim'],
-  [2, 'bpositive'],
-];
-
+const key = (p: Protocol) => `${p[0]}:${p[1].trim().toLowerCase()}`;
 /**
- * Protocols the wallet uses that outside apps legitimately need too. Still prompted (never auto-granted),
- * and hashToDirectlySign is refused for the ones in NO_RAW_HASH.
+ * FNV-1a (32-bit) of "level:name" for every reserved protocol in reservedProtocolList.ts. Hashes, not names, so
+ * store builds don't carry store-hidden feature names. A collision could only over-refuse an outside app.
  */
-export const EXTERNAL_OK: readonly (readonly [number, string, string])[] = [
-  [2, 'bwallet sign in', 'Sign in with bWalletX (bwalletx-connect, bit-sign, bChatX)'],
-  [0, 'fwetch identity', 'bit-sign fwetch feed signatures'],
-  [2, '3241645161d8', 'BRC-29 payments: every BRC-100 payer derives these keys'],
-];
+const RESERVED_HASHES = new Set<number>(
+  [
+    0x96f7845f, 0x5c1efc8e, 0xec8cb43a, 0x989014a2, 0x3a98170a, 0xa392b7f4, 0x06a1d43a, 0xcd609e3f, 0x8b22ea1d,
+    0xf7be44e7, 0xd59296c1, 0x8ef2a248, 0x3f7de0fa, 0x9220f557, 0x5e9de672, 0xd057f30f, 0x82eb9c44, 0xbd16812f,
+    0xed10a363, 0x7dcea8b8, 0x94347fb5, 0xeb45ebe9, 0xb9a0b206, 0xcb1fe820, 0x7ce83ef7, 0x37432cf7, 0x4bb19af2,
+  ].map((h) => h >>> 0),
+);
 
-/** Shared protocols whose keys hold the user's money: never sign a raw hash for an outside app. */
+/** Shared protocols whose keys hold the user's money (BRC-29 payments): never sign a raw hash for an outside app. */
 const NO_RAW_HASH: readonly Protocol[] = [[2, '3241645161d8']];
 
-const key = (p: Protocol) => `${p[0]}:${p[1].trim().toLowerCase()}`;
-const RESERVED = new Set(RESERVED_PROTOCOLS.map(key));
+export const protocolHash = (p: Protocol): number => {
+  let h = 0x811c9dc5;
+  for (const b of new TextEncoder().encode(key(p))) h = Math.imul(h ^ b, 0x01000193) >>> 0;
+  return h >>> 0;
+};
+
 const RAW_HASH_REFUSED = new Set(NO_RAW_HASH.map(key));
 
 const asProtocol = (p: unknown): Protocol | null =>
@@ -74,7 +43,7 @@ const asProtocol = (p: unknown): Protocol | null =>
 
 export const isReservedProtocol = (protocolID: unknown): boolean => {
   const p = asProtocol(protocolID);
-  return !!p && RESERVED.has(key(p));
+  return !!p && RESERVED_HASHES.has(protocolHash(p));
 };
 
 export const RESERVED_REFUSAL = 'This protocol is reserved for bWalletX itself';
@@ -103,7 +72,7 @@ export const reservedProtocolRefusal = (method: string, args: unknown): string |
   if (a.protocolID === undefined || a.protocolID === null) return null;
   const p = asProtocol(a.protocolID);
   if (!p) return 'Invalid protocolID';
-  if (RESERVED.has(key(p))) return `${RESERVED_REFUSAL}: "${p[1]}"`;
+  if (RESERVED_HASHES.has(protocolHash(p))) return `${RESERVED_REFUSAL}: "${p[1]}"`;
   if (method === 'createSignature' && a.hashToDirectlySign !== undefined && a.hashToDirectlySign !== null) {
     // Level-0 keys are shared by every app and the wallet; BRC-29 keys receive the user's payments.
     if (p[0] === 0 || RAW_HASH_REFUSED.has(key(p))) return RAW_HASH_REFUSAL;
