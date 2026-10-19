@@ -394,9 +394,9 @@ const MediaPage = () => {
             {list.length} {list.length === 1 ? 'item' : 'items'}
           </span>
         </h2>
-        <div className="flex gap-4 overflow-x-auto pb-2 -mx-1 px-1" style={{ scrollbarWidth: 'thin' }}>
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
           {list.map((e) => (
-            <button key={e.id} onClick={() => openEntry(e)} className="w-[140px] md:w-[168px] shrink-0 text-left group">
+            <button key={e.id} onClick={() => openEntry(e)} className="min-w-0 text-left group">
               <div className="relative">
                 <Cover e={e} />
                 <span className="absolute right-2 bottom-2 opacity-90 md:opacity-0 md:group-hover:opacity-100 transition">
@@ -527,10 +527,10 @@ const MediaPage = () => {
       {/* Room for the top bar as its own block: Desktop hides the header below, and its margin went with it. */}
       <div className="h-14 shrink-0" aria-hidden />
       <div
-        className="sticky top-14 z-10 flex items-center gap-2 px-2 py-1"
+        className="sticky top-14 z-10 flex flex-wrap items-center gap-x-2 gap-y-1.5 px-2 py-1.5"
         style={{ background: 'var(--bw-bg)', borderBottom: `1px solid ${LINE}` }}
       >
-        <nav className="flex items-center shrink-0" aria-label="Store navigation">
+        <nav className="flex flex-wrap items-center shrink-0" aria-label="Store navigation">
           <button aria-label="Back" title="Back" onClick={close} className="p-1.5">
             <ChevronLeft size={20} color="#fff" />
           </button>
@@ -577,8 +577,8 @@ const MediaPage = () => {
           )}
         </h1>
         {!release && !browsing && (
-          <div className="ml-auto flex items-center gap-1.5 pr-2">
-            <div className="hidden sm:flex items-center mr-2" role="group" aria-label="View">
+          <div className="ml-auto flex flex-wrap items-center gap-1.5 pr-2">
+            <div className="flex items-center mr-2" role="group" aria-label="View">
               {VIEWS.map((v) => (
                 <button
                   key={v.id}

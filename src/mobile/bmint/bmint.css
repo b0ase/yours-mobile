@@ -58,8 +58,7 @@
   display: flex;
   gap: 4px;
   margin-left: auto;
-  overflow-x: auto;
-  scrollbar-width: none;
+  flex-wrap: wrap;
 }
 .bm-tab {
   padding: 8px 14px;

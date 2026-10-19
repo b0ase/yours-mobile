@@ -337,7 +337,7 @@ const BexReel = () => {
           <TokenSlide key={c.id} c={c} i={i} active={active} shown={shown} live={live[c.id]} rate={rate} />
         ))}
       </div>
-      <div className="absolute inset-x-0 top-0 flex gap-2 overflow-x-auto px-3 pt-3" role="tablist" aria-label="Sort">
+      <div className="absolute inset-x-0 top-0 flex flex-wrap gap-2 px-3 pt-3" role="tablist" aria-label="Sort">
         {TOKEN_SORTS.map((s) => (
           <button
             key={s.id}

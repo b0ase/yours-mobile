@@ -279,7 +279,7 @@ export const SendCard = (p: Props) => {
               </p>
             )}
             {showPicks && status[r.id] !== 'loading' && picks.length > 0 && (
-              <div className="flex gap-2 overflow-x-auto -mx-1 px-1 pb-1" style={{ scrollbarWidth: 'none' }}>
+              <div className="flex flex-wrap gap-2 pb-1">
                 {picks.map((k) => (
                   <button
                     key={k.input}

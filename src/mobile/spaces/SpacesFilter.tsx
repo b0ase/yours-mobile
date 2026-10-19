@@ -23,10 +23,10 @@ const CHIPS: [RoomFilter, string][] = [
   ['bapps', 'bApps'],
 ];
 
-/** Chips scroll sideways on their own if more are added; the page never overflows. */
+/** Chips wrap onto more lines if more are added: no sideways scrolling, nothing hidden. */
 export const RoomFilterChips = ({ value, onChange }: { value: RoomFilter; onChange: (f: RoomFilter) => void }) => (
-  <div className="w-full max-w-full overflow-x-auto px-4 pt-3 pb-2" style={{ scrollbarWidth: 'none' }}>
-    <div className="flex w-max gap-2" role="tablist">
+  <div className="w-full max-w-full px-4 pt-3 pb-2">
+    <div className="flex flex-wrap gap-2" role="tablist">
       {CHIPS.map(([k, label]) => (
         <button
           key={k}

@@ -89,7 +89,7 @@ const Bar = ({ title, slug }: { title?: string; slug?: boolean }) => {
   const HOME = useContext(GuestCtx) ? ROOT : HOME_ROUTE;
   return (
     <div
-      className="sticky top-14 z-10 flex items-center gap-2 px-2 py-1"
+      className="sticky top-14 z-10 flex flex-wrap items-center gap-x-2 gap-y-1.5 px-2 py-1.5"
       style={{ background: 'var(--bw-bg)', borderBottom: `1px solid ${LINE}` }}
     >
       <button aria-label="Back" title="Back" onClick={() => navigate(slug ? ROOT : HOME)} className="p-1.5">

@@ -166,14 +166,14 @@ export const RegularSpaces = ({
           No public rooms are open right now.
         </p>
       ) : (
-        <div className="flex gap-3 overflow-x-auto px-4 pb-2 snap-x">
+        <div className="grid gap-3 px-4 pb-2 grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
           {featured.map((c) => {
             const here = c.speakers + c.listeners;
             return (
               <div
                 key={c.ticker}
-                className="relative shrink-0 snap-start overflow-hidden rounded-2xl"
-                style={{ width: 260, height: 170, background: GOLD, boxShadow: '0 6px 24px rgba(245,197,66,0.18)' }}
+                className="relative overflow-hidden rounded-2xl"
+                style={{ height: 170, background: GOLD, boxShadow: '0 6px 24px rgba(245,197,66,0.18)' }}
               >
                 <GoldArt cover={coverUrl(c)} seed={c.ticker} />
                 <div

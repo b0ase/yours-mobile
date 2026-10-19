@@ -539,7 +539,7 @@ const ExchangePage = () => {
             BSV {rate > 0 ? fiatLabel(1e8, rate) : '…'}
           </span>
         </div>
-        <nav className="flex gap-1 border-b border-[#2b2f36] overflow-x-auto" aria-label="Exchange">
+        <nav className="flex flex-wrap gap-1 border-b border-[#2b2f36]" aria-label="Exchange">
           {tabs.map((t) => (
             <button
               key={t.id}
