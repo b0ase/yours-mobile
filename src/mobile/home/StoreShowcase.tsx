@@ -7,6 +7,9 @@ import { BSPACES_ENABLED } from '../storeBuild';
 import scammersCard from '../wallet/editionArt/scammerscartel-dj-card.webp';
 import npgBanner from '../wallet/art/npg/npg-1.webp';
 import vexArt from '../media/featured/vexvoid-cover.jpg';
+import namesArt from './art/store-names.webp';
+import spacesArt from './art/store-spaces.webp';
+import { bavatarSvg } from '../bavatar/bavatar';
 
 /**
  * Store showcase (home module, bWalletX only: loaded behind THEME_STORE_PAID_ENABLED like the Store itself).
@@ -35,6 +38,10 @@ const SHOP_ART: Record<string, { img: string; pos: string } | undefined> = {
 };
 
 const ROTATE_MS = 5200;
+
+/** Gold bAvatar art for a slide (seeded by its key), used when it has no picture or its picture fails to load. */
+const goldArt = (seed: string) =>
+  'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(bavatarSvg(seed, { size: 512 }));
 
 const reduced = () => {
   try {
@@ -73,7 +80,9 @@ const showcaseItems = (spaces = BSPACES_ENABLED): Item[] => {
     title: 'Your name on chain',
     blurb: 'OpNS names: short, yours, payable',
     to: '/m/names',
-    art: 'radial-gradient(120% 90% at 20% 10%, var(--bw-accent-hi), var(--bw-accent-lo) 55%, #1a1405)',
+    art: '#000',
+    img: namesArt,
+    pos: '70% 50%',
   });
   if (spaces)
     items.push({
@@ -82,9 +91,12 @@ const showcaseItems = (spaces = BSPACES_ENABLED): Item[] => {
       title: 'Live Spaces',
       blurb: 'Talks and shows in your rooms, tickets at the door',
       to: '/m/spaces',
-      art: 'radial-gradient(120% 90% at 80% 0%, #3a2a08, #0b0905 70%)',
+      art: '#000',
+      img: spacesArt,
+      pos: '70% 50%',
     });
-  return items;
+  // Gold by default: a slide with no picture of its own gets gold bAvatar art, never a blank banner.
+  return items.map((it) => (it.img || /url\(/.test(it.art) ? it : { ...it, img: goldArt(it.key) }));
 };
 
 const StoreShowcase = () => {
@@ -127,7 +139,16 @@ const StoreShowcase = () => {
           >
             <span className="bw-home-art" style={{ background: it.art }} />
             {it.img && (
-              <img className="bw-home-artimg" src={it.img} alt="" style={{ objectPosition: it.pos ?? 'center' }} />
+              <img
+                className="bw-home-artimg"
+                src={it.img}
+                alt=""
+                style={{ objectPosition: it.pos ?? 'center' }}
+                onError={(e) => {
+                  const fallback = goldArt(it.key);
+                  if (e.currentTarget.src !== fallback) e.currentTarget.src = fallback;
+                }}
+              />
             )}
             <span className="bw-home-cap">
               {it.logo && it.logo !== it.img && <img src={it.logo} alt="" width={34} height={34} />}
