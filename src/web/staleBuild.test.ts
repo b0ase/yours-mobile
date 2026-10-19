@@ -8,6 +8,7 @@ const setup = (live: string, opts: { playing?: boolean } = {}) => {
   const fetched: string[] = [];
   const assigned: string[] = [];
   const pushed: string[] = [];
+  const offers: number[] = [];
   const media = { paused: !opts.playing, ended: false };
   const env: StaleEnv = {
     doc: {
@@ -26,13 +27,14 @@ const setup = (live: string, opts: { playing?: boolean } = {}) => {
       return `<script type="module" src="/assets/${live}"></script>`;
     },
     now: () => t,
+    offer: () => void offers.push(t),
   };
   const api = installStaleBuildCheck(env)!;
   const fire = async (k: string) => {
     for (const f of listeners[k] || []) f();
     await new Promise((r) => setTimeout(r, 0));
   };
-  return { env, api, fire, fetched, assigned, pushed, tick: (ms: number) => (t += ms), media };
+  return { env, api, fire, fetched, assigned, pushed, tick: (ms: number) => (t += ms), media, offers };
 };
 
 describe('stale build check', () => {
@@ -72,5 +74,22 @@ describe('stale build check', () => {
     s.env.win.history.pushState(null, '', '/x');
     expect(s.pushed).toEqual(['/x']);
     expect(s.assigned).toEqual([]);
+  });
+
+  test('a newer build is offered once (tap to update), never applied by itself', async () => {
+    const s = setup('main-NEW.js');
+    await s.fire('pageshow');
+    expect(s.offers.length).toBe(1);
+    s.tick(60_000);
+    await s.fire('focus');
+    expect(s.offers.length).toBe(1);
+    expect(s.assigned).toEqual([]);
+  });
+
+  test('the same build offers nothing', async () => {
+    const s = setup('main-OLD.js');
+    await s.fire('pageshow');
+    expect(s.fetched.length).toBe(1);
+    expect(s.offers).toEqual([]);
   });
 });
