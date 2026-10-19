@@ -5,6 +5,7 @@ import type { FeedMedia, LinkEmbed } from './media';
 import { isOwnHost, ownLinkPreview, type OgPreview } from './unfurl';
 import { usePrefs } from '../settings/usePrefs';
 import { VideoEmbed } from './VideoEmbed';
+import { ImageViewer } from './ImageViewer';
 import { useAppVisible, useNearView } from './reelMemory';
 import { parseVideoLink } from './video-embed';
 
@@ -72,16 +73,29 @@ export const Gallery = ({
   const [shown, setShown] = useState(!blur);
   const [at, setAt] = useState(0);
   const [failed, setFailed] = useState<Set<string>>(new Set());
+  const [open, setOpen] = useState<number | null>(null);
   const ok = images.filter((m) => !failed.has(m.src));
   if (!ok.length) return null;
   const many = ok.length > 1;
   return (
     <div
       className="relative mt-2 overflow-hidden rounded-2xl"
-      style={{ border: `1px solid ${LINE}` }}
+      style={{ border: `1px solid ${LINE}`, cursor: shown ? 'zoom-in' : undefined }}
+      role={shown ? 'button' : undefined}
+      tabIndex={shown ? 0 : undefined}
+      aria-label={shown ? (many ? `Open ${ok.length} images full screen` : 'Open image full screen') : undefined}
       onClick={(e) => {
         stop(e);
-        setShown(true);
+        // First tap reveals a blurred image; once shown, a tap opens the full-screen viewer (with Save).
+        if (shown) setOpen(Math.min(at, ok.length - 1));
+        else setShown(true);
+      }}
+      onKeyDown={(e) => {
+        if (shown && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault();
+          e.stopPropagation();
+          setOpen(Math.min(at, ok.length - 1));
+        }
       }}
     >
       <div
@@ -114,6 +128,7 @@ export const Gallery = ({
           {Math.min(at + 1, ok.length)}/{ok.length}
         </span>
       )}
+      {open !== null && <ImageViewer images={ok} start={open} onClose={() => setOpen(null)} />}
     </div>
   );
 };
