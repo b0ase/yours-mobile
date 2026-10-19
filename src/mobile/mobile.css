@@ -647,6 +647,17 @@ body,
   font-size: 12px;
   color: var(--bw-wcard-muted, #8e8e89);
 }
+/* A manual refresh found nothing new: the sats line briefly reads "Up to date" in the card's own ink. */
+.bw-wcard-face .bw-wcard-sync.is-uptodate {
+  color: inherit !important;
+}
+.bw-wcard-face .bw-wcard-sync.is-uptodate svg {
+  stroke: currentColor;
+}
+.bw-wcard-face .bw-wcard-sats.is-uptodate {
+  color: inherit;
+  font-weight: 600;
+}
 /* Live balance (src/mobile/wallet/live): number flash, activity ticker, session meter. One line, never grows the card. */
 .bw-wcard-usd.bw-live-flash-up {
   animation: bw-live-up 900ms ease-out;

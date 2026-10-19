@@ -17,3 +17,13 @@
   --bw-font-head: inherit;
   --bw-radius-btn: 12px;
 }
+/* Manual refresh found nothing new: the refresh icon turns into a tick + "Up to date" (RefreshGlyph.tsx).
+   Gold on the black base; ink on light packs, where gold text on paper is too faint. */
+.bw-uptodate {
+  color: var(--bw-accent) !important;
+  opacity: 1 !important;
+}
+:root[data-bw-pack='light'] .bw-uptodate,
+:root[data-bw-paper] .bw-uptodate {
+  color: var(--bw-text) !important;
+}

@@ -1,3 +1,4 @@
+import { RefreshGlyph, UpToDateAnnouncer } from '../../components/RefreshGlyph';
 import * as qr from 'qrcode';
 import { isLightPattern } from './cardPatternsLight';
 import { cardArtQrSvg, cardPaymail, svgDataUri } from './cardBackQr';
@@ -107,6 +108,8 @@ export type WalletCardProps = {
   /** Manual refresh (icon on the card); also run quietly every minute and when the wallet comes back into view. */
   onRefresh?: (manual: boolean) => void;
   refreshing?: boolean;
+  /** A manual refresh just found nothing new: the refresh icon shows a tick and the sats line says "Up to date". */
+  upToDate?: boolean;
   /** Balance hidden (privacy): the card shows a neutral gold so its colour does not reveal the balance. */
   balanceHidden?: boolean;
   /** USD per BSV, so an optimistic spend moves the dollar figure too (live/). 0 or absent: dollars follow the fetch. */
@@ -145,6 +148,7 @@ const WalletCardInner = ({
   receiveAddress,
   onRefresh,
   refreshing = false,
+  upToDate = false,
   balanceHidden = false,
   rate = 0,
 }: WalletCardProps) => {
@@ -614,21 +618,24 @@ const WalletCardInner = ({
                   {onRefresh && !syncing && (
                     <button
                       type="button"
-                      aria-label="Refresh balance"
-                      title="Refresh balance"
+                      aria-label={upToDate ? 'Balance is up to date' : 'Refresh balance'}
+                      title={upToDate ? 'Up to date' : 'Refresh balance'}
                       disabled={refreshing}
                       onClick={(e) => {
                         e.stopPropagation();
                         onRefresh(true);
                       }}
-                      className="bw-wcard-sync bg-transparent border-0 p-1 cursor-pointer"
+                      className={`bw-wcard-sync bg-transparent border-0 p-1 cursor-pointer${upToDate ? ' is-uptodate' : ''}`}
                       style={{ color: 'var(--bw-wcard-muted, #8e8e89)', lineHeight: 0 }}
                     >
-                      <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
+                      <RefreshGlyph refreshing={refreshing} done={upToDate} />
                     </button>
                   )}
                 </span>
-                <span className="bw-wcard-sats">{unit === 'usd' ? cardSats(animSats) : formatUSD(animUsd)}</span>
+                <span className={`bw-wcard-sats${upToDate ? ' is-uptodate' : ''}`}>
+                  {upToDate ? 'Up to date' : unit === 'usd' ? cardSats(animSats) : formatUSD(animUsd)}
+                </span>
+                <UpToDateAnnouncer done={upToDate} label="Balance is up to date" />
                 <LiveTicker hidden={balanceHidden} />
               </>
             )}
