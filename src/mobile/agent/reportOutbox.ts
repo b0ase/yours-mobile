@@ -8,6 +8,7 @@
  */
 import { redactSecrets } from '../errors/errorReport';
 import { reportToB, type ReportResult } from './paid';
+import { isNetworkError, OFFLINE_TEXT } from '../../utils/offline';
 
 export type OutboxReason = 'offline' | 'signin' | 'error';
 
@@ -128,8 +129,9 @@ export const failureReason = (
   if (status === 401 || status === 403) return 'signin';
   const msg = e instanceof Error ? e.message : String(e ?? '');
   if (/sign.?in|session|locked/i.test(msg)) return 'signin';
-  // fetch's network failures: "Failed to fetch" (Chrome), "Load failed" (Safari), "NetworkError" (Firefox).
-  if (e instanceof TypeError || /failed to fetch|load failed|network/i.test(msg)) return 'offline';
+  // No connection: fetch failures on each engine, aborts/timeouts, net::ERR_* (utils/offline). Android can report
+  // an unvalidated link as online, so the error itself decides (owner's phone, 19 Oct 2026).
+  if (e instanceof TypeError || isNetworkError(e)) return 'offline';
   return 'error';
 };
 
@@ -150,7 +152,7 @@ export const outboxText = (reason: OutboxReason) =>
   reason === 'signin'
     ? 'Saved. Sign in to send it to b.'
     : reason === 'offline'
-      ? "Saved. We'll send it to b when you're back online."
+      ? `${OFFLINE_TEXT}. Saved on this device; we'll send it to b when you reconnect.`
       : "Saved. We'll send it to b shortly.";
 
 let flushing: Promise<{ sent: number; left: number }> | null = null;
