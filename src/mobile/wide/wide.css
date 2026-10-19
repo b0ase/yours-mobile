@@ -322,7 +322,7 @@ kbd {
 .ww-content {
   flex: 1;
   min-height: 0;
-  padding: 20px 24px 24px;
+  padding: 20px 24px max(24px, var(--float-bar-reserve, 0px));
   overflow: auto;
 }
 
@@ -915,7 +915,8 @@ kbd {
   display: flex;
   gap: 16px;
   overflow: hidden;
-  padding: 16px 24px 16px;
+  /* A floating bar (Ask b) publishes the space it covers (ui/floatingBars.ts): content ends above it, never under. */
+  padding: 16px 24px max(16px, var(--float-bar-reserve, 0px));
 }
 /* The real screen. Its top 3.5rem is where the phone top bar was: clipped. transform contains fixed children. */
 .ww-colwrap {
@@ -1111,11 +1112,11 @@ html.ww-on body > .fixed.inset-0.items-end > :is(.absolute, [style*='position: a
   border-color: var(--ww-line-2);
 }
 .ww-page .ww-content {
-  padding: 20px var(--ww-pad) var(--ww-pad);
+  padding: 20px var(--ww-pad) max(var(--ww-pad), var(--float-bar-reserve, 0px));
   gap: var(--ww-gap);
 }
 .ww-page.is-bleed .ww-content {
-  padding: 0;
+  padding: 0 0 var(--float-bar-reserve, 0px);
 }
 /* One card for every screen column (wallet, chat list, bMail, pages) and every side panel. */
 .ww-page .ww-colwrap,
