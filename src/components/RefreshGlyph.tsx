@@ -10,6 +10,7 @@ export const UP_TO_DATE_MS = 1800;
  * "Balances are up to date…" toast looked bad). Returns [shown, show]: call show() and the refresh
  * icon turns into a tick for UP_TO_DATE_MS. No toast.
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export const useUpToDate = () => {
   const [at, setAt] = useState(0);
   useEffect(() => {

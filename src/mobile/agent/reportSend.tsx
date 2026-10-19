@@ -9,6 +9,7 @@ import { enqueueReport, failureReason, flushOutbox, logQueued, queuedFor, type Q
 type ApiContext = NonNullable<ServiceContextProps['apiContext']>;
 
 /** bit-sign agent calls, signed in to bChatX; one fresh sign-in on a 401. */
+// eslint-disable-next-line react-refresh/only-export-components
 export const agentCaller =
   (apiContext: ApiContext) =>
   (m: 'GET' | 'POST', p: string, b?: unknown): Promise<unknown> =>
@@ -20,6 +21,7 @@ export const agentCaller =
         return (await signedInClient(apiContext, kycClient())).agentCall(m, p, b);
       });
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const currentAccountId = (s: ServiceContextProps['chromeStorageService'] | undefined): string | null => {
   try {
     return s?.getCurrentAccountObject().account?.addresses.identityAddress ?? null;
@@ -32,6 +34,7 @@ export const currentAccountId = (s: ServiceContextProps['chromeStorageService'] 
  * Report to b, or keep it in the outbox when it can't go now. Never throws and never drops the report:
  * { sent } when bit-sign has it, { queued } when it's waiting on this device.
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export const sendOrQueueReport = async (
   apiContext: ApiContext | null | undefined,
   account: string | null,
@@ -48,6 +51,7 @@ export const sendOrQueueReport = async (
 };
 
 /** Retry now (Retry button / Sign in to send). */
+// eslint-disable-next-line react-refresh/only-export-components
 export const retryOutbox = (apiContext: ApiContext | null | undefined, account: string | null) =>
   apiContext ? flushOutbox(account, agentCaller(apiContext), { force: true }) : Promise.resolve(null);
 

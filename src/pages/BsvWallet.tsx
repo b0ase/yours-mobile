@@ -22,7 +22,6 @@ import {
   Trash2,
   Plus,
   Loader2,
-  RefreshCw,
 } from 'lucide-react';
 import bsvCoin from '../assets/bsv-coin.svg';
 import { Button } from '../components/Button';
