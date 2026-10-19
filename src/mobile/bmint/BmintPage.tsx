@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, Navigate, NavLink, Route, Routes, useNavigate, useParams } from 'react-router-dom';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -10,6 +10,9 @@ import { BMINT_NOTES_ENABLED, MARKET_ENABLED, RELEASES_ENABLED, STORE_BUILD } fr
 import { isStudioOwner } from './lib/studioAccess';
 import mintMark from './assets/logos/mint-stamp.svg';
 import { HubArt } from './HubArt';
+import { takeHandOff } from './lib/drop';
+import { useChatHandle } from '../tabs/useTabBadges';
+import { DropHero, Vault } from './Studio';
 import './bmint.css';
 
 /**
@@ -114,12 +117,14 @@ const useHub = (owner: boolean) => {
         ]
       : []),
   ];
-  return [
-    { title: 'Names & identity', tiles: identity },
-    { title: 'Make', tiles: make },
-    { title: 'Studio', tiles: studio },
-    { title: 'With b', tiles: withB },
-  ].filter((g) => g.tiles.length);
+  return {
+    make,
+    more: [
+      { title: 'Names & identity', tiles: identity },
+      { title: 'Studio', tiles: studio },
+      { title: 'With b', tiles: withB },
+    ].filter((g) => g.tiles.length),
+  };
 };
 
 const TypeTile = ({ t }: { t: HubTile }) => {
@@ -151,27 +156,42 @@ const TypeTile = ({ t }: { t: HubTile }) => {
   );
 };
 
-const Landing = ({ owner }: { owner: boolean }) => {
-  const groups = useHub(owner);
-  return (
-    <div className="bm-body">
-      <div className="bm-hero">
-        <span className="bm-chip">bMint</span>
-        <h1>
-          The <span>Mint</span>
-        </h1>
-        <p>Everything you can mint, in one place. Whatever you make is yours on chain: keep it, send it or sell it.</p>
-      </div>
-      {groups.map((g) => (
-        <section key={g.title} className="bm-group" aria-label={g.title}>
-          <h2 className="bm-group-title">{g.title}</h2>
-          <div className="bm-types">
-            {g.tiles.map((t) => (
-              <TypeTile key={t.id} t={t} />
-            ))}
-          </div>
-        </section>
+const Group = ({ title, tiles, compact }: { title: string; tiles: HubTile[]; compact?: boolean }) => (
+  <section className="bm-group" aria-label={title}>
+    <h2 className="bm-group-title">{title}</h2>
+    <div className={`bm-types${compact ? ' compact' : ''}`}>
+      {tiles.map((t) => (
+        <TypeTile key={t.id} t={t} />
       ))}
+    </div>
+  </section>
+);
+
+/** The account's display name for the preview card and vault ("$you" until it has one). */
+const useMinterName = () => {
+  const { chromeStorageService } = useServiceContext();
+  const handle = useChatHandle();
+  const account = chromeStorageService.getCurrentAccountObject()?.account?.name?.trim();
+  return handle ? `$${handle.replace(/^\$/, '')}` : account || '$you';
+};
+
+/** The studio landing (Studio.tsx): drop zone hero, the types, your vault, then names, studio tools and b. */
+const Landing = ({ owner }: { owner: boolean }) => {
+  const { make, more } = useHub(owner);
+  const name = useMinterName();
+  return (
+    <div className="bm-body bm-studio">
+      <DropHero name={name} />
+      {make.length > 0 && <Group title="Or start from a type" tiles={make} compact />}
+      <Vault name={name} />
+      {more.map((g) => (
+        <Group key={g.title} title={g.title} tiles={g.tiles} />
+      ))}
+      <p className="bm-fine">
+        Minting writes your file, a timestamp and your signature to Bitcoin. It proves the file existed at that time and
+        was published by your key; it is not a copyright registration. Only mint work you have the right to publish. The
+        cost depends on the file size.
+      </p>
     </div>
   );
 };
@@ -180,6 +200,8 @@ const Landing = ({ owner }: { owner: boolean }) => {
 const MintOpen = ({ owner }: { owner: boolean }) => {
   const { type = '' } = useParams();
   const navigate = useNavigate();
+  // A file dropped on the hero (lib/drop.ts), taken once so a later open starts empty.
+  const [file] = useState(takeHandOff);
   const close = () => navigate(BASE, { replace: true });
   const flow =
     type === 'bavatar' ? (
@@ -187,7 +209,7 @@ const MintOpen = ({ owner }: { owner: boolean }) => {
     ) : type === 'handle' && !STORE_BUILD ? (
       <HandleFlow onClose={close} />
     ) : (
-      <MintSheet exchangeRate={0} start={type} onClose={close} />
+      <MintSheet exchangeRate={0} start={type} file={file} onClose={close} />
     );
   return (
     <>
