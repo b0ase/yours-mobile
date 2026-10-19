@@ -137,6 +137,12 @@ const NewTranche = ({ api, onDone }: { api: BsharesApi; onDone: () => void }) =>
   );
 };
 
+/** bit-sign claim codes worth retrying with the same payment (bshares-invest-rules InvestErrorCode). */
+const RETRYABLE_CLAIM = new Set(['not_seen', 'not_confirmed', 'rate_limited', 'internal', 'excess_choice', 'unauthenticated']);
+
+const paidButUnclaimed = (txid: string, reason: string) =>
+  `Your payment was sent but could not be matched to this offer (${reason}). Don't pay again: ask the company's directors to refund transaction ${txid}.`;
+
 const OfferCard = ({
   offer,
   me,
@@ -162,6 +168,15 @@ const OfferCard = ({
       else if (step === 'Pay') {
         // A paid-but-unconfirmed claim is kept so a retry re-claims instead of paying twice.
         const key = `bshares-claim:${offer.id}`;
+        const failedKey = `bshares-claim-failed:${offer.id}`;
+        let failed: { txid: string; reason: string } | null = null;
+        try {
+          failed = JSON.parse(localStorage.getItem(failedKey) || 'null');
+        } catch {
+          failed = null;
+        }
+        // A payment the server refused for good: never pay a second time from here.
+        if (failed) throw new Error(paidButUnclaimed(failed.txid, failed.reason));
         let pending: { quote_id: string; txid: string } | null = null;
         try {
           pending = JSON.parse(localStorage.getItem(key) || 'null');
@@ -178,7 +193,22 @@ const OfferCard = ({
             /* storage off: the claim below still runs once */
           }
         }
-        await api.claim(offer.id, { ...pending, excessChoice });
+        try {
+          await api.claim(offer.id, { ...pending, excessChoice });
+        } catch (e) {
+          const code = (e as { data?: { code?: string } }).data?.code;
+          // Retryable (or no answer at all): keep the claim so the next tap re-claims the same payment.
+          if (!code || RETRYABLE_CLAIM.has(code)) throw e;
+          // Refused for good: stop replaying a dead claim, and keep the txid so the user can ask for a refund.
+          const reason = e instanceof Error ? e.message : code;
+          try {
+            localStorage.setItem(failedKey, JSON.stringify({ txid: pending.txid, reason }));
+            localStorage.removeItem(key);
+          } catch {
+            /* ignore */
+          }
+          throw new Error(paidButUnclaimed(pending.txid, reason));
+        }
         try {
           localStorage.removeItem(key);
         } catch {
