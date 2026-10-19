@@ -11,6 +11,7 @@ import { Settings } from '../../pages/Settings';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { versionLabel } from '../channel';
 import { BUREAU_ENABLED, DIRECT_UPDATE_ENABLED } from '../storeBuild';
+import { ADD_ACCOUNT_QUERIES } from '../wide/composer';
 
 // Android direct APK only: the in-app updater (update/), not even built into other channels.
 const DirectUpdateCard = DIRECT_UPDATE_ENABLED
@@ -25,7 +26,7 @@ const DirectUpdateCard = DIRECT_UPDATE_ENABLED
 type Section = 'settings' | 'new' | 'tools' | 'about';
 
 // Drawer links that open the add-account pages get their own pill, so Settings always means the Settings list.
-const NEW_QUERIES = ['create-account', 'restore-account'];
+const NEW_QUERIES = ADD_ACCOUNT_QUERIES;
 
 const SettingsHub = () => {
   const { selected, query, handleSelect } = useBottomMenu();

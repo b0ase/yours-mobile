@@ -145,10 +145,13 @@ export const MintSheet = ({
   exchangeRate,
   onClose,
   start,
+  file,
 }: {
   exchangeRate: number;
   onClose: () => void;
   start?: string;
+  /** A file already chosen (bMint's drop zone): the media step opens with it picked, through the same checks. */
+  file?: File | null;
 }) => {
   useBackClose(true, onClose);
   const { apiContext, chromeStorageService } = useServiceContext();
@@ -275,6 +278,12 @@ export const MintSheet = ({
         .catch(() => setPosterNote('No cover picture: it shows as a gold card.'));
     }
   };
+
+  // bMint's drop zone hands the file over: pick it once, exactly as if it was chosen here.
+  useEffect(() => {
+    if (file && step === 'media') void pick(file);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on open
+  }, []);
 
   const takeFrame = async () => {
     const el = videoRef.current;

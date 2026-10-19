@@ -19,9 +19,33 @@ export const MODULE_IDS = [
 ] as const;
 export type ModuleId = (typeof MODULE_IDS)[number];
 
-export const DEFAULT_LAYOUT: readonly ModuleId[] = ['card', 'askB', 'showcase'];
-/** Desktop (wide) also opens with Holdings: the old side pane's table, now a module like everything else. */
-export const WIDE_DEFAULT_LAYOUT: readonly ModuleId[] = ['card', 'askB', 'holdings', 'showcase'];
+/** Ask b last (owner, 19 Oct 2026: "a great helper, but not the primary feature on the wallet screen"). */
+export const DEFAULT_LAYOUT: readonly ModuleId[] = ['card', 'showcase', 'askB'];
+/** Phone/web's earlier untouched default: an account still on it moves to today's default. */
+const OLD_DEFAULTS: readonly (readonly ModuleId[])[] = [['card', 'askB', 'showcase']];
+/**
+ * Desktop (wide) is the classic wallet again (owner, 19 Oct 2026): the card column with Send / Receive / Mint, and
+ * the side pane right of it with the BSV price, History and Holdings. The top bar is the Ask b prompt and the beta
+ * banner carries Swap / Buy, so the home opens with the card alone; Edit home still adds modules under it.
+ */
+export const WIDE_DEFAULT_LAYOUT: readonly ModuleId[] = ['card'];
+/** Desktop's earlier untouched defaults (#283, #284): an account still on one of these moves to the new default. */
+const OLD_WIDE_DEFAULTS: readonly (readonly ModuleId[])[] = [
+  ['card', 'askB', 'showcase'],
+  ['card', 'askB', 'holdings', 'showcase'],
+];
+/** The side pane already shows these on Desktop, so they are not home modules there. */
+export const WIDE_PANE_MODULES: readonly ModuleId[] = ['holdings', 'history', 'priceChart'];
+
+const same = (a: readonly ModuleId[], b: readonly ModuleId[]) => a.length === b.length && a.every((x, i) => x === b[i]);
+
+/** Desktop: an untouched old default becomes today's default; anything the user arranged is kept. */
+export const migrateWide = (ids: readonly ModuleId[]): ModuleId[] =>
+  OLD_WIDE_DEFAULTS.some((d) => same(d, ids)) ? [...WIDE_DEFAULT_LAYOUT] : [...ids];
+
+/** Phone/web: an untouched old default becomes today's default (Ask b last); anything arranged is kept. */
+export const migrateDefault = (ids: readonly ModuleId[]): ModuleId[] =>
+  OLD_DEFAULTS.some((d) => same(d, ids)) ? [...DEFAULT_LAYOUT] : [...ids];
 
 export const isModuleId = (v: unknown): v is ModuleId =>
   typeof v === 'string' && (MODULE_IDS as readonly string[]).includes(v);
@@ -84,9 +108,14 @@ export const visibleLayout = (ids: readonly ModuleId[], allowed: (id: ModuleId) 
 const EVENT = 'bwallet:home-layout';
 export const layoutKey = (account: string) => `bwallet.home.layout.${account || 'default'}`;
 
-export const loadLayout = (account: string, defaults: readonly ModuleId[] = DEFAULT_LAYOUT): ModuleId[] => {
+export const loadLayout = (
+  account: string,
+  defaults: readonly ModuleId[] = DEFAULT_LAYOUT,
+  wide = false,
+): ModuleId[] => {
   try {
-    return parseLayout(localStorage.getItem(layoutKey(account)), defaults);
+    const ids = parseLayout(localStorage.getItem(layoutKey(account)), defaults);
+    return wide ? migrateWide(ids) : migrateDefault(ids);
   } catch {
     return [...defaults];
   }

@@ -322,7 +322,7 @@ kbd {
 .ww-content {
   flex: 1;
   min-height: 0;
-  padding: 20px 24px 24px;
+  padding: 20px 24px max(24px, var(--float-bar-reserve, 0px));
   overflow: auto;
 }
 
@@ -915,7 +915,8 @@ kbd {
   display: flex;
   gap: 16px;
   overflow: hidden;
-  padding: 16px 24px 16px;
+  /* A floating bar (Ask b) publishes the space it covers (ui/floatingBars.ts): content ends above it, never under. */
+  padding: 16px 24px max(16px, var(--float-bar-reserve, 0px));
 }
 /* The real screen. Its top 3.5rem is where the phone top bar was: clipped. transform contains fixed children. */
 .ww-colwrap {
@@ -1038,6 +1039,14 @@ html.ww-on body > .fixed.inset-0.items-end > * {
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
   animation: ww-page-in 0.16s ease-out;
 }
+/* A cover laid over the sheet with position: absolute; inset: 0 (SendConfirmation inside Mint, Send, Swap…) is a
+   sibling of the sheet, so the rule above caps it at 560px but leaves it pinned to the window's left edge (bMint
+   Confirm Send at 1440, 19 Oct 2026). Centre it in the window over the sheet it covers. */
+html.ww-on body > .fixed.inset-0.items-end > :is(.absolute, [style*='position: absolute']) {
+  inset: 32px 0 !important;
+  margin: 0 auto !important;
+  height: auto !important;
+}
 
 /* ---- Page template (WidePage.tsx): one header, one padding, one card, one background for every destination ---- */
 .ww-root {
@@ -1103,11 +1112,11 @@ html.ww-on body > .fixed.inset-0.items-end > * {
   border-color: var(--ww-line-2);
 }
 .ww-page .ww-content {
-  padding: 20px var(--ww-pad) var(--ww-pad);
+  padding: 20px var(--ww-pad) max(var(--ww-pad), var(--float-bar-reserve, 0px));
   gap: var(--ww-gap);
 }
 .ww-page.is-bleed .ww-content {
-  padding: 0;
+  padding: 0 0 var(--float-bar-reserve, 0px);
 }
 /* One card for every screen column (wallet, chat list, bMail, pages) and every side panel. */
 .ww-page .ww-colwrap,
@@ -1317,4 +1326,45 @@ html.ww-on:not(.ww-onb) body > .fixed.right-0.z-\[110\] {
 .ww-rd-people .ww-rd-role {
   color: var(--bw-muted, #8e8e89);
   font-size: 12px;
+}
+/* Desktop wallet home (owner, 19 Oct 2026): the classic card column. The BSV price lives in the side pane's chart and
+   Swap / Buy in the beta banner, so the phone's price line and Swap card are not repeated here. */
+.ww-content.view-wallet:not(.is-full) .bw-priceline,
+.ww-content.view-wallet:not(.is-full) .bw-swaprow {
+  display: none !important;
+}
+/* Store shop / Themes grid on Desktop (owner, 19 Oct 2026): a tidy grid of small previews, 3 across (4 from 1600px),
+   one modest Buy button per item instead of window-wide yellow bars. */
+html.ww-on .bw-pack-grid {
+  width: 100%;
+  max-width: 960px !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 12px !important;
+}
+@media (min-width: 1600px) {
+  html.ww-on .bw-pack-grid {
+    max-width: 1240px !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+}
+html.ww-on .bw-pack-grid .bw-pill {
+  min-height: 30px !important;
+  height: auto !important;
+  padding: 6px 14px !important;
+  font-size: 12px !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+  align-self: flex-start;
+}
+/* Address book on Desktop: a page in the main area like every other full-screen page (the menu and top bar stay),
+   with its content in a reading column, not a black sheet over the whole window. */
+html.ww-on:not(.ww-onb) .bw-abook {
+  left: var(--ww-side-w) !important;
+  top: var(--ww-top-h) !important;
+}
+html.ww-on:not(.ww-onb) .bw-abook-page > :not(.bw-abook-head) {
+  width: 100%;
+  max-width: 880px;
+  margin-left: auto;
+  margin-right: auto;
 }

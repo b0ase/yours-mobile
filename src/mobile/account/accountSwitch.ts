@@ -23,7 +23,7 @@ export const useAccountSwitch = (onSame?: () => void) => {
     setIsSwitchingAccount(true);
     wallet?.close?.();
     try {
-      await chromeStorageService.switchAccount(identityAddress);
+      await chromeStorageService.switchAccountForReload(identityAddress);
       // Act as the new account at once (before the reload): no request may reuse the old session.
       setChatAccount(identityAddress);
       setChatReceiveAddress(null); // the new account's address arrives with its storage refresh

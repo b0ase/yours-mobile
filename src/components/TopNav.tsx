@@ -40,7 +40,7 @@ export const TopNav = () => {
     setIsSwitchingAccount(true);
     wallet?.close?.();
     try {
-      await chromeStorageService.switchAccount(identityAddress);
+      await chromeStorageService.switchAccountForReload(identityAddress);
     } catch (err) {
       console.error('[TopNav] account switch failed:', err);
       setIsSwitchingAccount(false);

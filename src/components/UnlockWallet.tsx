@@ -211,7 +211,7 @@ export const UnlockWallet = (props: UnlockWalletProps) => {
       // The key is gone: walk the user into rotation right away.
       if (unlockedViaRecovery && recoveryIntent === 'lost') void openUsbWindow('rotate', { viaRecovery: true });
     } else {
-      failUnlock(usbEnabled ? 'Incorrect password' : '');
+      failUnlock('Incorrect password');
     }
   };
 
@@ -539,7 +539,7 @@ export const UnlockWallet = (props: UnlockWalletProps) => {
             onKeyDown={(e) => e.stopPropagation()}
           />
 
-          {usbEnabled && errorText && (
+          {errorText && (
             <motion.p
               initial={{ opacity: 0, y: -4 }}
               animate={{ opacity: 1, y: 0 }}

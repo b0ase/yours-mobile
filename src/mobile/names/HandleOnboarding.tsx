@@ -7,6 +7,7 @@ import { onAccountNamesChange, syncAccountNames } from './accountName';
 import { HandleFlow } from './HandleFlow';
 import { LINK_ACCOUNTS_ENABLED, PAID_FEATURES_ENABLED, handleCardText } from '../storeBuild';
 import { LinkAccountsStep } from '../social/LinkAccountsStep';
+import { LinkAccountsCard } from '../social/LinkAccountsCard';
 import { getPersonalLink, onPersonalChange } from './personalToken';
 import { existingChoice, recoverPersonalLink } from './claimPersonal';
 import {
@@ -102,8 +103,11 @@ export const HandleOnboarding = () => {
   useEffect(() => {
     const pending = getPendingPrompt();
     if (!pending || pending.id !== id) return;
+    // Owner, 19 Oct 2026: create + backup lands straight on the wallet. No "Claim your name" / "Link your accounts"
+    // screens after a new wallet; the Get your $name chip and card on the wallet home stay.
+    if (pending.reason === 'create') return clearPendingPrompt();
     if (shouldShowOnboarding(pending, id, hasName, synced)) setOpen(true);
-    else if (hasName && (synced || pending.reason === 'create')) clearPendingPrompt();
+    else if (hasName && synced) clearPendingPrompt();
   }, [id, hasName, synced]);
 
   // A new wallet's "Claim your name" step continues with "Link your accounts" (owner, 18 Oct 2026), skippable.
@@ -122,41 +126,45 @@ export const HandleOnboarding = () => {
     );
   // An unindexed personal token is offered by the Wallet's indexing list (tokens/WalletIndexing), once.
   // Not before the name check has answered: a restored wallet that owns a name must never be asked for one.
+  const linkCard = LINK_ACCOUNTS_ENABLED && id ? <LinkAccountsCard owner={id} /> : null;
   if (!id || !synced || !shouldShowCard(handleComplete(hasName, hasRoom || !PAID_FEATURES_ENABLED), dismissed, open))
-    return null;
+    return linkCard;
   return (
-    <div
-      className="relative flex items-center gap-3 w-[92%] mt-4 rounded-2xl px-4 py-3 cursor-pointer"
-      style={{ background: 'var(--bw-surface)', border: '1px solid var(--bw-line, #3a2f0c)' }}
-      onClick={() => setOpen(true)}
-      role="button"
-      aria-label="Get your $name"
-    >
-      <span
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
-        style={{ background: 'var(--bw-tint, #2a2410)' }}
+    <>
+      <div
+        className="relative flex items-center gap-3 w-[92%] mt-4 rounded-2xl px-4 py-3 cursor-pointer"
+        style={{ background: 'var(--bw-surface)', border: '1px solid var(--bw-line, #3a2f0c)' }}
+        onClick={() => setOpen(true)}
+        role="button"
+        aria-label="Get your $name"
       >
-        <Sparkles size={16} color="var(--bw-accent-hi)" />
-      </span>
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-bold" style={{ color: 'var(--bw-accent-hi)' }}>
-          {handleCardTitle(hasName, importSym)}
+        <span
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
+          style={{ background: 'var(--bw-tint, #2a2410)' }}
+        >
+          <Sparkles size={16} color="var(--bw-accent-hi)" />
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-bold" style={{ color: 'var(--bw-accent-hi)' }}>
+            {handleCardTitle(hasName, importSym)}
+          </div>
+          <div className="text-[11px]" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
+            {handleCardText(hasName)}
+          </div>
         </div>
-        <div className="text-[11px]" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
-          {handleCardText(hasName)}
-        </div>
+        <button
+          type="button"
+          aria-label="Dismiss"
+          onClick={(e) => {
+            e.stopPropagation();
+            dismissCard(id);
+          }}
+          className="p-1.5 bg-transparent border-0 cursor-pointer"
+        >
+          <X size={14} color="#98A2B3" />
+        </button>
       </div>
-      <button
-        type="button"
-        aria-label="Dismiss"
-        onClick={(e) => {
-          e.stopPropagation();
-          dismissCard(id);
-        }}
-        className="p-1.5 bg-transparent border-0 cursor-pointer"
-      >
-        <X size={14} color="#98A2B3" />
-      </button>
-    </div>
+      {linkCard}
+    </>
   );
 };

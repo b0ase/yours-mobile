@@ -56,6 +56,9 @@ const BavatarMintSheet = lazy(() => import('../bavatar/BavatarMintSheet'));
 import { useLocation, useNavigate } from 'react-router-dom';
 import { MenuAvatarButton } from './MenuAvatarButton';
 import { WIDE_ON, WW_OPEN, type WwOpen } from '../wide/flag';
+import { isWebApp } from '../webApp';
+import { lockShortcutLabel, useLockShortcut } from '../lockShortcut';
+import { touchScreen } from '../phone/pullHint';
 
 /**
  * Mobile swap for src/components/TopNav.tsx (vite.config.mobile.ts).
@@ -119,6 +122,10 @@ const TopNavBar = () => {
   const [sheet, setSheet] = useState<'accounts' | 'agents' | null>(null);
   const [confirmOut, setConfirmOut] = useState(false);
   const signOut = useSignOut();
+  // ⌘L / Ctrl+L locks the web app, as in the wide layout (whose shell has its own listener).
+  const webKeys = !WIDE_ON && isWebApp();
+  useLockShortcut(webKeys, lockWallet);
+  const lockHint = webKeys && !touchScreen() ? lockShortcutLabel() : '';
   const [pairLink, setPairLink] = useState<string | null>(null);
   // A pairing QR scanned with the phone's camera opened the app (pair/links.ts): go straight to confirm.
   // Phone layout: PhoneShell owns pair links, pairing and the CLI wallet context, once (phone/useAppServices.ts).
@@ -611,18 +618,26 @@ const TopNavBar = () => {
                         Sign out
                       </span>
                     </button>
+                    {/* A small labelled button, not a bare padlock (the release check of 19 Oct 2026 missed the icon)
+                        and not the old full-width row (removed 8 Oct 2026). */}
                     <button
                       type="button"
                       aria-label="Lock wallet"
-                      title="Lock wallet"
+                      title={`Lock wallet${lockHint ? ` (${lockHint})` : ''}`}
                       onClick={() => {
                         setDrawer(false);
                         void lockWallet();
                       }}
-                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-0"
+                      className="flex h-10 shrink-0 items-center gap-2 rounded-full border-0 px-3.5"
                       style={{ background: '#2b2f36' }}
                     >
                       <Lock size={16} color="#fff" />
+                      <span className="text-sm font-semibold text-white">Lock</span>
+                      {lockHint && (
+                        <kbd className="text-[11px] font-sans" style={{ color: '#98A2B3' }}>
+                          {lockHint}
+                        </kbd>
+                      )}
                     </button>
                   </div>
                 )}

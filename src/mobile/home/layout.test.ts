@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  migrateDefault,
   DEFAULT_LAYOUT,
   WIDE_DEFAULT_LAYOUT,
+  migrateWide,
   addModule,
   normalise,
   parseLayout,
@@ -13,8 +15,8 @@ import {
 
 describe('home layout', () => {
   test('defaults: card, Ask b, store showcase', () => {
-    expect(DEFAULT_LAYOUT).toEqual(['card', 'askB', 'showcase']);
-    expect(parseLayout(null)).toEqual(['card', 'askB', 'showcase']);
+    expect(DEFAULT_LAYOUT).toEqual(['card', 'showcase', 'askB']);
+    expect(parseLayout(null)).toEqual(['card', 'showcase', 'askB']);
   });
 
   test('migration: an existing user with nothing saved gets the defaults; garbage too', () => {
@@ -58,13 +60,29 @@ describe('home layout', () => {
     expect(visibleLayout(['card', 'showcase', 'history'], (id) => id !== 'showcase')).toEqual(['card', 'history']);
   });
 
-  test('Desktop defaults add Holdings; a saved layout wins over either default', () => {
-    expect(WIDE_DEFAULT_LAYOUT).toEqual(['card', 'askB', 'holdings', 'showcase']);
+  test('Desktop opens with the card alone (side pane has price, History, Holdings); a saved layout wins', () => {
+    expect(WIDE_DEFAULT_LAYOUT).toEqual(['card']);
     expect(parseLayout(null, WIDE_DEFAULT_LAYOUT)).toEqual([...WIDE_DEFAULT_LAYOUT]);
     expect(parseLayout(serialise(['card', 'history']), WIDE_DEFAULT_LAYOUT)).toEqual(['card', 'history']);
   });
 
   test('normalise dedupes', () => {
     expect(normalise(['askB', 'askB', 'card'])).toEqual(['card', 'askB']);
+  });
+});
+
+describe('Desktop classic home (19 Oct 2026)', () => {
+  test('untouched old Desktop defaults move to the card alone', () => {
+    expect(migrateWide(['card', 'askB', 'holdings', 'showcase'])).toEqual(['card']);
+    expect(migrateWide(['card', 'askB', 'showcase'])).toEqual(['card']);
+  });
+  test('a layout the user arranged is kept', () => {
+    expect(migrateWide(['card', 'showcase', 'askB'])).toEqual(['card', 'showcase', 'askB']);
+    expect(migrateWide(['card', 'pots'])).toEqual(['card', 'pots']);
+  });
+
+  test('phone/web: the untouched old default moves Ask b last; custom layouts are kept', () => {
+    expect(migrateDefault(['card', 'askB', 'showcase'])).toEqual(['card', 'showcase', 'askB']);
+    expect(migrateDefault(['card', 'askB', 'history'])).toEqual(['card', 'askB', 'history']);
   });
 });

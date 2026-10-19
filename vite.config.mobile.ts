@@ -246,8 +246,8 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     // Recovery phrase "Next": don't wait on the background wallet switch (a new wallet's first
     // storage connection can hang), so the button never silently does nothing.
     [
-      '          await chromeStorageService.switchAccount(identityAddress);\n          setStep(3);',
-      "          await Promise.race([\n            chromeStorageService.switchAccount(identityAddress).catch((e) => console.error('[create] switchAccount', e)),\n            new Promise((r) => setTimeout(r, 4000)),\n          ]);\n          setStep(3);",
+      '          await chromeStorageService.switchAccountForReload(identityAddress);\n          setStep(3);',
+      "          await Promise.race([\n            chromeStorageService.switchAccountForReload(identityAddress).catch((e) => console.error('[create] switchAccount', e)),\n            new Promise((r) => setTimeout(r, 4000)),\n          ]);\n          setStep(3);",
     ],
     // Add account: say plainly it's the wallet password (one password unlocks every account) and that this
     // account gets its own new 12 words next (owner, 6 Oct 2026: it looked like it wanted a new password).
@@ -314,11 +314,11 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   'src/pages/onboarding/MasterRestore.tsx': [
     [
       "import { useNavigate } from 'react-router-dom';",
-      "import { useNavigate } from 'react-router-dom';\nimport { markHandlePrompt } from '../../mobile/names/handlePrompt';",
+      "import { useNavigate } from 'react-router-dom';\nimport { markMasterRestored } from '../../mobile/names/handlePrompt';",
     ],
     [
       "      addSnackbar('Wallet restored successfully!', 'success');\n",
-      "      addSnackbar('Wallet restored successfully!', 'success');\n      markHandlePrompt(chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress, 'restore');\n",
+      "      addSnackbar('Wallet restored successfully!', 'success');\n      await markMasterRestored(chromeStorageService);\n",
     ],
   ],
   // Restore: same step, shown only if the restored account has no name after the name sync.
