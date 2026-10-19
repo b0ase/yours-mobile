@@ -127,19 +127,27 @@ const writeAt = (k: string, at: number) => {
   }
 };
 
+// The cursor in memory as well as in localStorage. When the write fails (storage full or blocked), reading storage back
+// gave the old value, so markFeedViewed saw the cursor "move" on every call and emitted every time; useTabBadges runs it
+// on each badge change, so the Feed looped until React gave up (error #185, desktop.bwalletx.com/bchatx-feed, 19 Oct 2026).
+let seenMem: number | null = null;
 const readSeen = (): number | null => {
+  let stored: number | null = null;
   try {
     const v = Number(localStorage.getItem(FEED_SEEN));
-    return Number.isFinite(v) && v > 0 ? v : null;
+    stored = Number.isFinite(v) && v > 0 ? v : null;
   } catch {
-    return null;
+    // storage unavailable
   }
+  if (seenMem === null) return stored;
+  return stored === null ? seenMem : Math.max(stored, seenMem);
 };
 const writeSeen = (at: number) => {
+  seenMem = at;
   try {
     localStorage.setItem(FEED_SEEN, String(at));
   } catch {
-    // storage unavailable
+    // storage unavailable: the in-memory cursor still holds for this session
   }
 };
 
@@ -185,5 +193,6 @@ export const resetBadgesForTest = () => {
   chat = new Map();
   dms = new Set();
   feedLatest = [];
+  seenMem = null;
   version = 0;
 };

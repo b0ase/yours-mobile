@@ -104,6 +104,38 @@ describe('feed new posts', () => {
     markFeedViewed();
     expect(badgesVersion()).toBe(v);
   });
+  test('a failed storage write does not make every view a new cursor (no update loop, error #185)', () => {
+    setFeedLatest([100]);
+    setFeedLatest([100, 300]);
+    const realSet = localStorage.setItem;
+    localStorage.setItem = () => {
+      throw new Error('QuotaExceededError');
+    };
+    try {
+      markFeedViewed();
+      expect(feedNew()).toBe(0);
+      const v = badgesVersion();
+      // useTabBadges calls this on every badge change: it must settle, not emit again.
+      for (let i = 0; i < 5; i++) markFeedViewed();
+      expect(badgesVersion()).toBe(v);
+    } finally {
+      localStorage.setItem = realSet;
+    }
+  });
+  test('no posts and no storage: the first view sets a cursor once', () => {
+    const realSet = localStorage.setItem;
+    localStorage.setItem = () => {
+      throw new Error('blocked');
+    };
+    try {
+      markFeedViewed();
+      const v = badgesVersion();
+      markFeedViewed();
+      expect(badgesVersion()).toBe(v);
+    } finally {
+      localStorage.setItem = realSet;
+    }
+  });
 });
 
 describe('Chat filter badges', () => {
