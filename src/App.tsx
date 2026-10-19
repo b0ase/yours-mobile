@@ -37,15 +37,19 @@ import { isNative } from './mobile/native';
 import { PAY_STREAM_ENABLED } from './mobile/storeBuild';
 import { guestMusicRoute } from './mobile/media/artists/guestRoute';
 import { guestNamesRoute } from './mobile/names/store/guestRoute';
+import { guestCheckRoute } from './mobile/bmint/check/guestRoute';
 
 // bMusic artist/album pages are readable without a wallet on web/Desktop (bWalletX only: prices are not in a store
 // build). Decided once at load from the address bar; only those read-only routes (guestRoute.ts).
 const GUEST_START =
   (PAY_STREAM_ENABLED && typeof window !== 'undefined' && isWebApp() ? guestMusicRoute(window.location.pathname) : null) ??
-  (typeof window !== 'undefined' && isWebApp() ? guestNamesRoute(window.location.pathname, window.location.search) : null);
+  (typeof window !== 'undefined' && isWebApp() ? guestNamesRoute(window.location.pathname, window.location.search) : null) ??
+  (typeof window !== 'undefined' && isWebApp() ? guestCheckRoute(window.location.pathname, window.location.search) : null);
 const GuestMusic = PAY_STREAM_ENABLED ? lazy(() => import('./mobile/media/artists/GuestMusic')) : null;
 // The Name Store (/names) is guest-first too: search and browse signed out (names/store/GuestNames.tsx).
 const GuestNames = lazy(() => import('./mobile/names/store/GuestNames'));
+// Check this mint (/bmint/check?o=…) works signed out too: a shared check link must open for anyone.
+const GuestCheck = lazy(() => import('./mobile/bmint/check/GuestCheck'));
 
 // Mobile-only (theme.settings.services.browser); lazy so the extension never loads it.
 const BrowserPage = lazy(() => import('./mobile/BrowserPage'));
@@ -66,7 +70,8 @@ export const App = () => {
   const [guest, setGuest] = useState(GUEST_START);
   const hasWallet = !!chromeStorageService?.getCurrentAccountObject?.()?.account?.encryptedKeys;
   const guestNames = !!guest && guest.startsWith('/m/names');
-  const showGuest = !!(guest && (guestNames || GuestMusic) && (isLocked || !hasWallet));
+  const guestCheck = !!guest && guest.startsWith('/m/bmint/check');
+  const showGuest = !!(guest && (guestNames || guestCheck || GuestMusic) && (isLocked || !hasWallet));
 
   useActivityDetector(isLocked, isReady, chromeStorageService);
 
@@ -130,7 +135,12 @@ export const App = () => {
                     <GuestNames route={guest} onWallet={() => setGuest(null)} />
                   </Suspense>
                 )}
-                {showGuest && !guestNames && GuestMusic && guest && (
+                {showGuest && guestCheck && guest && (
+                  <Suspense fallback={<PageLoader message="Loading..." theme={theme} />}>
+                    <GuestCheck route={guest} onWallet={() => setGuest(null)} />
+                  </Suspense>
+                )}
+                {showGuest && !guestNames && !guestCheck && GuestMusic && guest && (
                   <Suspense fallback={<PageLoader message="Loading..." theme={theme} />}>
                     <GuestMusic route={guest} onWallet={() => setGuest(null)} />
                   </Suspense>

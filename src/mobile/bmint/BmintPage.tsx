@@ -32,6 +32,8 @@ const OpnsMintPage = lazy(() => import('../names/OpnsMintPage'));
 // Name store (/m/bmint/store, public /bmint/store): every OpNS name for sale. bWalletX only (market rules).
 const OpnsStorePage = MARKET_ENABLED ? lazy(() => import('../names/OpnsStorePage')) : null;
 const BavatarMintSheet = lazy(() => import('../bavatar/BavatarMintSheet'));
+// Check this mint (/m/bmint/check?o=<outpoint>): verify any bMint mint on this device (check/verify.ts).
+const CheckPage = lazy(() => import('./check/CheckPage'));
 
 const BASE = '/m/bmint';
 
@@ -260,6 +262,7 @@ export const BmintPage = () => {
             <Tab to="/m/names">Get a name</Tab>
             {Notes && <Tab to={`${BASE}/notes`}>Notes</Tab>}
             {bulk && <Tab to={`${BASE}/opns`}>Mint names</Tab>}
+            <Tab to={`${BASE}/check`}>Check</Tab>
           </nav>
         </header>
         <Suspense fallback={<div className="bm-body bm-msg">Loading…</div>}>
@@ -268,6 +271,7 @@ export const BmintPage = () => {
             <Route path="opns" element={bulk ? <OpnsMintPage /> : <Navigate to="/m/names" replace />} />
             {OpnsStorePage && <Route path="store" element={<OpnsStorePage />} />}
             <Route path="mint/:type" element={<MintOpen owner={owner} />} />
+            <Route path="check" element={<CheckPage />} />
             <Route path="*" element={<Landing owner={owner} />} />
           </Routes>
         </Suspense>

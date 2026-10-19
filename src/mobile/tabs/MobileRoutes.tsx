@@ -87,6 +87,8 @@ const NameStorePage = lazy(() => import('../names/store/NameStorePage'));
 const ThemeStorePage = lazy(() => import('../themeStore/ThemeStorePage'));
 // /names/store: the shop's stock (listed by tier, other sellers, held unlisted), names/store/StockPage.tsx.
 const StockPage = MARKET_ENABLED ? lazy(() => import('../names/store/StockPage')) : null;
+// Short share link for Check this mint: /check?o=<outpoint> → /m/bmint/check?o=….
+const ToCheck = () => <Navigate to={`/m/bmint/check${useLocation().search}`} replace />;
 const ToOpnsMint = () => <Navigate to={`/m/bmint/opns${useLocation().search}`} replace />;
 // Desktop top bar bell: notifications as a page in the main column (notify/NotificationsPage.tsx).
 const NotificationsPage = lazy(() => import('../notify/NotificationsPage'));
@@ -131,6 +133,7 @@ const MobileRoutes = () => (
         <Route path="agent" element={<Navigate to="/m/ask-b" replace />} />
         <Route path="bmail" element={<BMailPage />} />
         <Route path="bmint/*" element={<BmintPage />} />
+        <Route path="check" element={<ToCheck />} />
         <Route path="btrust" element={<BTrustPage />} />
         {BsharesPage && <Route path="bshares" element={<BsharesPage />} />}
         <Route path="opns-mint" element={<ToOpnsMint />} />
