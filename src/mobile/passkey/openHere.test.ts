@@ -1,13 +1,19 @@
 import { describe, expect, test } from 'bun:test';
 import { BSM, Hash, PrivateKey, PublicKey, Signature, Utils } from '@bsv/sdk';
 import {
+  beginOpenHere,
+  checkOpenProof,
   deriveOpen,
+  newOpenCode,
+  normaliseOpenCode,
+  openProof,
   isWalletOrigin,
   OPEN_LIFETIME_S,
   openOpen,
   openUrl,
   parseOpenUrl,
   sealOpen,
+  type OpenFrame,
   type OpenLink,
 } from './openHere';
 import { fetchBackup, putMessage, signedPut } from './passkeyServer';
@@ -18,7 +24,7 @@ const channel = 'AAAAAAAAAAAAAAAAAAAAAA';
 const computer = PrivateKey.fromRandom();
 const phone = PrivateKey.fromRandom();
 const link = (o: Partial<OpenLink> = {}): OpenLink => ({
-  v: '1',
+  v: '2',
   r: 'relay.bwallet.space',
   c: channel,
   k: computer.toPublicKey().toString(),
@@ -53,22 +59,43 @@ describe('open on computer: QR', () => {
 });
 
 describe('open on computer: crypto', () => {
-  test('both sides get the same key and the same 4-digit code', async () => {
+  test('both sides get the same keys; the sealed frame opens only with them', async () => {
     const a = await deriveOpen(phone, computer.toPublicKey().toString(), channel);
     const b = await deriveOpen(computer, phone.toPublicKey().toString(), channel);
-    expect(a.code).toBe(b.code);
-    expect(a.code).toMatch(/^\d-\d-\d-\d$/);
     const f = await sealOpen(a.key, channel, { t: 'wallet', words: 'one two three', exp: NOW + 60 });
     expect(JSON.stringify(f)).not.toContain('one two');
     expect((await openOpen(b.key, channel, f, NOW)).words).toBe('one two three');
+    expect(await checkOpenProof(a.macKey, channel, '123456', await openProof(b.macKey, channel, '123 456'))).toBe(true);
   });
-  test('a man in the middle gets a different code and cannot open the payload', async () => {
+  test('a man in the middle cannot open the payload or make a proof', async () => {
     const mitm = PrivateKey.fromRandom();
     const phoneSide = await deriveOpen(phone, mitm.toPublicKey().toString(), channel);
     const computerSide = await deriveOpen(computer, phone.toPublicKey().toString(), channel);
-    expect(phoneSide.code).not.toBe(computerSide.code);
     const f = await sealOpen(phoneSide.key, channel, { t: 'wallet', words: 'x y z', exp: NOW + 60 });
     await expect(openOpen(computerSide.key, channel, f, NOW)).rejects.toThrow();
+    const pr = await openProof(computerSide.macKey, channel, '123456');
+    expect(await checkOpenProof(phoneSide.macKey, channel, '123456', pr)).toBe(false);
+  });
+  test('the proof is bound to the code and the channel', async () => {
+    const a = await deriveOpen(phone, computer.toPublicKey().toString(), channel);
+    const b = await deriveOpen(computer, phone.toPublicKey().toString(), channel);
+    expect(await checkOpenProof(a.macKey, channel, '123456', await openProof(b.macKey, channel, '123457'))).toBe(false);
+    expect(
+      await checkOpenProof(a.macKey, channel, '123456', await openProof(b.macKey, 'BBBBBBBBBBBBBBBBBBBBBB', '123456')),
+    ).toBe(false);
+    expect(await checkOpenProof(a.macKey, channel, '123456', { m: 'garbage' })).toBe(false);
+    expect(await checkOpenProof(a.macKey, channel, '123456', {})).toBe(false);
+  });
+  test('codes are 6 random digits', () => {
+    const seen = new Set<string>();
+    for (let i = 0; i < 200; i++) {
+      const c = newOpenCode();
+      expect(c).toMatch(/^\d{6}$/);
+      seen.add(c);
+    }
+    expect(seen.size).toBeGreaterThan(190);
+    expect(normaliseOpenCode('123 456')).toBe('123456');
+    expect(normaliseOpenCode('12345')).toBe('');
   });
   test('bound to its channel and refused after expiry', async () => {
     const a = await deriveOpen(phone, computer.toPublicKey().toString(), channel);
@@ -76,6 +103,107 @@ describe('open on computer: crypto', () => {
     const f = await sealOpen(a.key, channel, { t: 'wallet', words: 'a b c', exp: NOW + 60 });
     await expect(openOpen(b.key, 'BBBBBBBBBBBBBBBBBBBBBB', f, NOW)).rejects.toThrow();
     await expect(openOpen(b.key, channel, f, NOW + 61)).rejects.toThrow('Expired');
+  });
+});
+
+/** A stand-in relay socket: the test plays the relay + the computer (or an attacker posing as one). */
+class FakeSocket {
+  static last: FakeSocket;
+  sent: string[] = [];
+  closed = false;
+  onmessage: ((ev: MessageEvent) => unknown) | null = null;
+  onerror: (() => void) | null = null;
+  constructor(public url: string) {
+    FakeSocket.last = this;
+  }
+  send(d: string) {
+    if (!this.closed) this.sent.push(d);
+  }
+  close() {
+    this.closed = true;
+  }
+  async deliver(o: unknown) {
+    await this.onmessage?.({ data: JSON.stringify(o) } as MessageEvent);
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
+describe('open on computer: phone session (audit C2)', () => {
+  const realWs = globalThis.WebSocket;
+  const WORDS = 'abandon ability able about above absent absorb abstract absurd abuse access accident';
+  const run = async () => {
+    globalThis.WebSocket = FakeSocket as unknown as typeof WebSocket;
+    const now = Math.floor(Date.now() / 1000);
+    // The attacker made this QR, so it knows k's private key, and it forges the relay Origin.
+    const s = beginOpenHere(openUrl(link({ e: now + OPEN_LIFETIME_S })));
+    const ws = FakeSocket.last;
+    await ws.deliver({ t: 'relay', verifiedOrigin: 'https://web.bwalletx.com' });
+    const session = await s;
+    const hello = JSON.parse(ws.sent[0]) as { t: string; k: string };
+    expect(hello.t).toBe('hello');
+    const keys = await deriveOpen(computer, hello.k, channel);
+    return { session, ws, keys };
+  };
+  const frames = (ws: FakeSocket) => ws.sent.map((d) => JSON.parse(d) as { t: string });
+
+  test('an attacker who knows only the QR + relay traffic cannot get the words sealed', async () => {
+    try {
+      const { session, ws, keys } = await run();
+      // Nothing it has seen depends on the phone's code: the hello is the phone's public key only.
+      expect(ws.sent.join()).not.toContain(session.code.replace(' ', ''));
+      // Its one guess is wrong (1 in 10^6) and the session dies.
+      const guess = session.code.replace(' ', '') === '000000' ? '000001' : '000000';
+      await ws.deliver(await openProof(keys.macKey, channel, guess));
+      await expect(session.confirmed).rejects.toThrow('wrong code');
+      expect(ws.closed).toBe(true);
+      // Even with the right code afterwards, and even if the UI called send, nothing is sealed.
+      await ws.deliver(await openProof(keys.macKey, channel, session.code));
+      await expect(session.send(WORDS)).rejects.toThrow();
+      expect(frames(ws).filter((f) => f.t === 'open')).toHaveLength(0);
+    } finally {
+      globalThis.WebSocket = realWs;
+    }
+  });
+
+  test('send refuses before any proof (Face ID first is not enough)', async () => {
+    try {
+      const { session, ws } = await run();
+      await expect(session.send(WORDS)).rejects.toThrow('code');
+      expect(frames(ws).filter((f) => f.t === 'open')).toHaveLength(0);
+      session.cancel();
+    } finally {
+      globalThis.WebSocket = realWs;
+    }
+  });
+
+  test('the computer that was told the code gets the words, once', async () => {
+    try {
+      const { session, ws, keys } = await run();
+      await ws.deliver(await openProof(keys.macKey, channel, session.code));
+      await session.confirmed;
+      await session.send(WORDS, 'Main');
+      const open = frames(ws).filter((f) => f.t === 'open') as OpenFrame[];
+      expect(open).toHaveLength(1);
+      expect((await openOpen(keys.key, channel, open[0])).words).toBe(WORDS);
+      await expect(session.send(WORDS)).rejects.toThrow();
+    } finally {
+      globalThis.WebSocket = realWs;
+    }
+  });
+
+  test('a mismatched relay origin is still refused (hint only, never shown as verified)', async () => {
+    try {
+      globalThis.WebSocket = FakeSocket as unknown as typeof WebSocket;
+      const s = beginOpenHere(openUrl(link({ e: Math.floor(Date.now() / 1000) + OPEN_LIFETIME_S })));
+      const refused = s.then(
+        () => null,
+        (e: Error) => e.message,
+      );
+      await FakeSocket.last.deliver({ t: 'relay', verifiedOrigin: 'https://evil.example' });
+      expect(await refused).toContain("wasn't shown by bWalletX");
+    } finally {
+      globalThis.WebSocket = realWs;
+    }
   });
 });
 

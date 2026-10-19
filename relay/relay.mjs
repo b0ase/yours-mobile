@@ -5,9 +5,11 @@
  * forwards their frames verbatim. Frames after the hello are end-to-end encrypted, so it can't read or
  * change them. It stores nothing on disk and logs counts only.
  *
- * The one thing it vouches for is the site's origin: browsers set the websocket Origin header and page
- * scripts can't change it, so the relay ties the channel to that origin and tells the phone
- * ({ t: 'relay', verifiedOrigin }). The phone refuses to pair unless it matches the QR.
+ * It ties the channel to the site socket's Origin header and tells the phone ({ t: 'relay', verifiedOrigin }).
+ * Browsers set that header and page scripts can't change it, but any non-browser client can send whatever it
+ * likes, so it is only a hint: it stops a QR shown on a phishing page in a real browser, nothing more. Never treat
+ * it as proof of who is on the other end (audit C2); protocols that send secrets must authenticate the peer
+ * themselves (e.g. "open on computer" makes the computer prove a code shown only on the phone).
  */
 import { WebSocketServer } from 'ws';
 
