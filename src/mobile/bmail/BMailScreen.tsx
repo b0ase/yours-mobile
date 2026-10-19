@@ -55,6 +55,11 @@ import {
   examplesAllowed,
   examplesHidden,
   filterExamples,
+  hiddenExampleIds,
+  hideExample,
+  markSwipeHintSeen,
+  swipeHintSeen,
+  unhideExample,
   fmtCents,
   setExamplesHidden,
   sortExamples,
@@ -85,6 +90,9 @@ import { ErrorActions } from '../errors/ErrorActions';
 import { APP_NAME } from '../storeBuild';
 import { isNative } from '../native';
 import { sendMessageAsync } from '../../utils/chromeHelpers';
+import { useServiceContext } from '../../hooks/useServiceContext';
+import { accountNamesFor } from '../names/accountNames';
+import { shareText } from '../chat/shareLink';
 
 const MUTED = '#98A2B3';
 const GOLD = 'var(--bw-accent-hi)';
@@ -169,7 +177,20 @@ const Stamp = ({ r, rate }: { r: Received; rate: number }) => (
   </div>
 );
 
-type Amount = { main: string; eq?: string; note: string; zero?: boolean };
+type Amount = { main: string; eq?: string; note: string; zero?: boolean; example?: boolean };
+
+/**
+ * Loud "EXAMPLE" badge (owner, 19 Oct: unmistakable, not a small grey tag) on example rows, senders and amounts,
+ * so nobody reads an example as real mail or real money.
+ */
+const ExampleBadge = ({ text = 'Example' }: { text?: string }) => (
+  <span
+    className="shrink-0 rounded px-1.5 py-[1px] text-[10px] font-extrabold uppercase tracking-wider"
+    style={{ background: '#FDB022', color: '#1a1300' }}
+  >
+    {text}
+  </span>
+);
 
 /** Big right-aligned amount for real mail: verified postage. TODO(bmail tokens): token outputs are not parsed yet. */
 const realAmount = (r: Received, rate: number, friend: boolean): Amount => {
@@ -223,21 +244,17 @@ const Row = ({
         {bold && <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: GOLD }} />}
         <span className={`${ONE} text-sm text-white ${bold ? 'font-bold' : 'font-medium'}`}>{title}</span>
         {pinned && <Pin size={12} color={PIN} aria-label="Pinned" className="shrink-0" />}
-        {tag && (
-          <span
-            className="shrink-0 rounded px-1 text-[9px] font-bold uppercase tracking-wide bg-[#2b2f36]"
-            style={{ color: MUTED }}
-          >
-            {tag}
-          </span>
-        )}
+        {tag && <ExampleBadge text={tag} />}
         {!amount && (
           <span className="ml-auto shrink-0 text-[11px]" style={{ color: MUTED }}>
             {time}
           </span>
         )}
       </div>
-      <div className={`${ONE} text-[13px] text-white ${bold ? 'font-semibold' : ''}`}>{subject || '(no subject)'}</div>
+      <div className={`${ONE} text-[13px] text-white ${bold ? 'font-semibold' : ''}`}>
+        {tag && <span className="font-extrabold uppercase tracking-wide text-[#FDB022]">{tag}: </span>}
+        {subject || '(no subject)'}
+      </div>
       <div className={`${ONE} text-xs`} style={{ color: MUTED }}>
         {preview}
       </div>
@@ -246,7 +263,11 @@ const Row = ({
     </div>
     {amount && (
       <div className="flex max-w-[38%] shrink-0 flex-col items-end gap-0.5 text-right">
-        <span className="text-lg font-bold leading-tight tabular-nums" style={{ color: amount.zero ? MUTED : GOLD }}>
+        {amount.example && <ExampleBadge />}
+        <span
+          className={`text-lg font-bold leading-tight tabular-nums${amount.example ? ' line-through decoration-1' : ''}`}
+          style={{ color: amount.zero ? MUTED : GOLD }}
+        >
           {amount.main}
         </span>
         {amount.eq && (
@@ -265,7 +286,7 @@ const Row = ({
   </button>
 );
 
-const TokenChips = ({ tokens }: { tokens: TokenAttach[] }) => (
+const TokenChips = ({ tokens, example }: { tokens: TokenAttach[]; example?: boolean }) => (
   <>
     {tokens.map((t) => (
       <span
@@ -274,6 +295,7 @@ const TokenChips = ({ tokens }: { tokens: TokenAttach[] }) => (
         style={{ color: '#C3B5FD', background: '#C3B5FD1f', border: '1px solid #C3B5FD44' }}
       >
         {tokenLabel(t)}
+        {example ? ' (example)' : ''}
       </span>
     ))}
   </>
@@ -329,18 +351,23 @@ const TokenFacts = ({ t }: { t: NonNullable<ExampleMail['token']> }) => (
   </div>
 );
 
-const exAmount = (e: ExampleMail): Amount => ({ ...amountOf(e), zero: totalCents(e) === 0 });
+const exAmount = (e: ExampleMail): Amount => ({
+  ...amountOf(e),
+  note: `${amountOf(e).note} · not real`,
+  zero: totalCents(e) === 0,
+  example: true,
+});
 
 const ExampleRow = ({ e, onOpen }: { e: ExampleMail; onOpen: () => void }) => (
   <Row
     avatar={<Avatar label={e.name} color={e.color} />}
-    title={e.name}
+    title={`${e.name} (example sender)`}
     bold={!!e.unread}
     subject={e.subject}
     preview={oneLine(e.body)}
     chips={
       <>
-        {e.tokens && <TokenChips tokens={e.tokens} />}
+        {e.tokens && <TokenChips tokens={e.tokens} example />}
         {e.stamps.map((k) => (
           <Chip key={k} kind={k} text={centsChip(k, e.cents, e.pnee)} />
         ))}
@@ -359,22 +386,25 @@ const ExampleRow = ({ e, onOpen }: { e: ExampleMail; onOpen: () => void }) => (
   />
 );
 
-const ExampleReader = ({ e, onHide }: { e: ExampleMail; onHide: () => void }) => (
+const ExampleReader = ({ e, onHide, onDelete }: { e: ExampleMail; onHide: () => void; onDelete: () => void }) => (
   <div className="flex flex-col gap-3">
-    <div className="bw-mail-seg rounded-xl p-3 text-xs" style={{ color: MUTED }}>
-      Example: this shows what a bMail looks like. It is not real mail, so nothing here can be paid, signed or answered.
+    <div className="bw-mail-seg flex items-start gap-2 rounded-xl p-3 text-xs" style={{ color: MUTED }}>
+      <ExampleBadge />
+      This shows what a bMail looks like. It is not real mail, so nothing here can be paid, signed or answered.
     </div>
     <div className="bw-mail-card flex items-center gap-3 p-4">
       <Avatar label={e.name} color={e.color} />
       <div className="flex min-w-0 flex-1 flex-col">
-        <span className="text-sm font-semibold text-white">{e.name}</span>
+        <span className="flex items-center gap-1.5 text-sm font-semibold text-white">
+          <ExampleBadge /> {e.name}
+        </span>
         <span className="text-[11px]" style={{ color: MUTED }}>
           {e.handle} · {agoLabel(e.ago)} ago
         </span>
       </div>
       <div className="flex flex-col items-end gap-0.5 text-right">
         <span className="text-xl font-bold tabular-nums" style={{ color: totalCents(e) ? GOLD : MUTED }}>
-          {amountOf(e).main}
+          {amountOf(e).main} <span className="text-xs font-extrabold uppercase text-[#FDB022]">example</span>
         </span>
         {amountOf(e).eq && (
           <span className="text-[10px]" style={{ color: MUTED }}>
@@ -394,7 +424,7 @@ const ExampleReader = ({ e, onHide }: { e: ExampleMail; onHide: () => void }) =>
     {(totalCents(e) > 0 || e.invoiceCents) && (
       <div className="bw-mail-card p-3 flex flex-col gap-1 text-xs">
         <div className="text-[11px] font-bold uppercase tracking-wide" style={{ color: MUTED }}>
-          Money in this mail
+          Money in this mail (example: nothing was paid)
         </div>
         <div className="flex justify-between text-white">
           <span>Postage{e.pnee ? ' (PNEE)' : ''}</span>
@@ -419,11 +449,11 @@ const ExampleReader = ({ e, onHide }: { e: ExampleMail; onHide: () => void }) =>
     {!!e.tokens?.length && (
       <div className="bw-mail-card p-3 flex flex-col gap-2">
         <div className="text-[11px] font-bold uppercase tracking-wide" style={{ color: MUTED }}>
-          Tokens attached
+          Tokens attached (example: none arrived)
         </div>
         {e.tokens.map((t) => (
           <div key={t.symbol} className="flex items-center gap-2">
-            <span className="flex-1 text-sm font-semibold text-white">{tokenLabel(t)}</span>
+            <span className="flex-1 text-sm font-semibold text-white">{tokenLabel(t)} (example)</span>
             <button type="button" disabled className={btn} style={{ opacity: 0.45 }}>
               Keep
             </button>
@@ -435,7 +465,10 @@ const ExampleReader = ({ e, onHide }: { e: ExampleMail; onHide: () => void }) =>
       </div>
     )}
     <div className="bw-mail-card bw-mail-letter flex flex-col gap-3">
-      <div className="text-lg font-bold text-white">{e.subject}</div>
+      <div className="text-lg font-bold text-white">
+        <span className="font-extrabold text-[#FDB022]">EXAMPLE: </span>
+        {e.subject}
+      </div>
       <div className="bw-mail-body whitespace-pre-wrap break-words">{e.body}</div>
       {e.token && <TokenFacts t={e.token} />}
     </div>
@@ -444,9 +477,14 @@ const ExampleReader = ({ e, onHide }: { e: ExampleMail; onHide: () => void }) =>
         {e.action} (example)
       </button>
     )}
-    <button type="button" className={btn} onClick={onHide}>
-      Hide examples
-    </button>
+    <div className="flex gap-2">
+      <button type="button" className={`${btn} flex-1`} onClick={onDelete}>
+        Delete this example
+      </button>
+      <button type="button" className={`${btn} flex-1`} onClick={onHide}>
+        Delete all examples
+      </button>
+    </div>
   </div>
 );
 
@@ -829,6 +867,42 @@ const useNames = (keys: string[], sent: Sent[]) => {
 
 const WEEK_MS = 7 * 24 * 3600 * 1000;
 
+/**
+ * One-time swipe hint (owner, 19 Oct): the first example slides left to show a red Delete, then back.
+ * prefers-reduced-motion: no movement, the hint just counts as seen.
+ */
+const SwipeHint = ({ children, onDone }: { children: ReactNode; onDone: () => void }) => {
+  const reduced = (() => {
+    try {
+      return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    } catch {
+      return true;
+    }
+  })();
+  useEffect(() => {
+    const t = setTimeout(onDone, reduced ? 0 : 2600);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  if (reduced) return <>{children}</>;
+  return (
+    <div className="relative overflow-hidden rounded-2xl" data-swipe-hint="">
+      <style>{`@keyframes bwMailHint{0%,15%{transform:translateX(0)}40%,70%{transform:translateX(-96px)}95%,100%{transform:translateX(0)}}`}</style>
+      <div
+        aria-hidden
+        className="absolute inset-y-0 right-0 flex w-24 flex-col items-center justify-center gap-1 text-xs font-bold text-white"
+        style={{ background: '#D92D20' }}
+      >
+        <Trash2 size={18} />
+        Delete
+      </div>
+      <div className="relative" style={{ animation: 'bwMailHint 2.4s ease-in-out 0.4s 1 both' }}>
+        {children}
+      </div>
+    </div>
+  );
+};
+
 const Empty = ({ title, text }: { title: string; text: string }) => (
   <div className="bw-mail-card flex flex-col items-center gap-2 px-6 py-8 text-center">
     <Mailbox size={28} color={GOLD} />
@@ -849,7 +923,15 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
   const [example, setExample] = useState<ExampleMail | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [settings, setSettings] = useState(false);
-  const [hideEx, setHideEx] = useState(examplesHidden);
+  // Examples are remembered per account (owner, 19 Oct): Delete all / Delete one persist; Settings brings them back.
+  const { chromeStorageService } = useServiceContext();
+  const acct = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ?? '';
+  const [exVer, setExVer] = useState(0);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const hideEx = useMemo(() => examplesHidden(acct), [acct, exVer]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const goneExamples = useMemo(() => hiddenExampleIds(acct), [acct, exVer]);
+  const myAddress = accountNamesFor(acct).paymail;
   useBackClose(true, onClose);
   // Settle any postage the wallet still holds as unsent though the chain has it (rate-limited in the wallet).
   useEffect(() => {
@@ -914,9 +996,33 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
   );
   const showEx = examplesAllowed(isNative) && !hideEx && m.state.received.length + m.state.sent.length < EXAMPLES_BELOW;
   const hideExamples = () => {
-    setExamplesHidden(true);
-    setHideEx(true);
+    setExamplesHidden(true, acct);
+    setExVer((v) => v + 1);
     setExample(null);
+    showUndo('Examples deleted', () => {
+      setExamplesHidden(false, acct);
+      goneExamples.forEach((id) => hideExample(id, acct));
+      setExVer((v) => v + 1);
+    });
+  };
+  const deleteExample = (id: string, verb = 'deleted') => {
+    hideExample(id, acct);
+    setExVer((v) => v + 1);
+    setExample(null);
+    showUndo(`Example ${verb}`, () => {
+      unhideExample(id, acct);
+      setExVer((v) => v + 1);
+    });
+  };
+  const showExamplesAgain = () => {
+    setExamplesHidden(false, acct);
+    setExVer((v) => v + 1);
+  };
+  const examplesOff = examplesAllowed(isNative) && (hideEx || goneExamples.length > 0);
+  // One-time swipe hint on the first example row (respects prefers-reduced-motion: no animation, seen anyway).
+  const [hint, setHint] = useState(() => !swipeHintSeen());
+  const shareAddress = () => {
+    if (myAddress) void shareText(`Write to me on bMail: ${myAddress}`);
   };
   const [now] = useState(() => Date.now());
   const week = useMemo(() => {
@@ -945,8 +1051,6 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
     else setReading(r);
   };
   const undoable = (text: string, undo: () => void) => showUndo(text, undo);
-  // Examples dismissed by a swipe this visit (display only; examples are never stored as mail).
-  const [goneExamples, setGoneExamples] = useState<string[]>([]);
   // Paid letters: the postage was internalized into the wallet when the letter arrived (client.ts verifyPostage), so
   // deleting or archiving it does not touch the money. The toast says so (owner, 9 Oct: "where did the money go?").
   const keepsPostage = (ids: string[]) => {
@@ -1272,9 +1376,22 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
         {settings ? (
           <>
             <PriceSettings usd={m.state.priceUsd} rate={m.rate} save={m.setPrice} onDone={back} />
+            {examplesOff && (
+              <button
+                type="button"
+                className="min-h-[44px] self-start px-1 text-xs underline"
+                style={{ color: MUTED }}
+                onClick={() => {
+                  showExamplesAgain();
+                  back();
+                }}
+              >
+                Show examples again
+              </button>
+            )}
           </>
         ) : example ? (
-          <ExampleReader e={example} onHide={hideExamples} />
+          <ExampleReader e={example} onHide={hideExamples} onDelete={() => deleteExample(example.id)} />
         ) : reading ? (
           <Reader
             r={m.state.received.find((x) => x.id === reading.id) ?? reading}
@@ -1467,11 +1584,39 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                     )}
                   </div>
                 ))}
-                {!view('inbox').length && !exInbox.length && (
-                  <Empty
-                    title={m.loading ? 'Checking for mail…' : 'No mail yet'}
-                    text="bMail is sealed mail with a stamp. Friends write free and sit on top. Strangers pay your price to reach you (Penny post, 1¢), and the postage comes to you. Unstamped mail waits in Requests."
-                  />
+                {!view('inbox').length && !exInbox.filter((e) => !goneExamples.includes(e.id)).length && (
+                  <div className="bw-mail-card flex flex-col items-center gap-3 px-6 py-8 text-center">
+                    <Mailbox size={28} color={GOLD} />
+                    <div className="text-sm font-bold text-white">
+                      {m.loading ? 'Checking for mail…' : 'Your bMail inbox.'}
+                    </div>
+                    <div className="text-xs leading-relaxed" style={{ color: MUTED }}>
+                      Mail to your $name arrives here. Senders pay a tiny stamp, so spam doesn't pay.
+                    </div>
+                    <div className="flex w-full max-w-xs flex-col gap-2 sm:flex-row">
+                      <button
+                        type="button"
+                        className={`${gold} flex-1`}
+                        style={{ background: GOLD, color: '#1a1300' }}
+                        onClick={() => setDraft({})}
+                      >
+                        Write a letter
+                      </button>
+                      <button type="button" className={`${btn} flex-1`} disabled={!myAddress} onClick={shareAddress}>
+                        Share your address
+                      </button>
+                    </div>
+                    {examplesOff && (
+                      <button
+                        type="button"
+                        className="min-h-[44px] px-2 text-xs underline"
+                        style={{ color: MUTED }}
+                        onClick={showExamplesAgain}
+                      >
+                        Show examples again
+                      </button>
+                    )}
+                  </div>
                 )}
               </>
             )}
@@ -1508,7 +1653,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                     )}
                   </div>
                 ))}
-                {!view('requests').length && !exRequests.length && (
+                {!view('requests').length && !exRequests.filter((e) => !goneExamples.includes(e.id)).length && (
                   <Empty
                     title="Requests"
                     text="Unstamped mail and promotions wait here. Tokens and NFTs from senders you haven't accepted wait in Quarantine."
@@ -1548,67 +1693,76 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
                   text="Swipe a letter left to archive it (or press e on a keyboard). Archived mail stays here, out of your Inbox, until you move it back."
                 />
               ))}
-            {(tab === 'inbox' || tab === 'requests') && (tab === 'inbox' ? exInbox : exRequests).length > 0 && (
-              <>
-                <div className="mt-2 flex items-center gap-2">
-                  <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: MUTED }}>
-                    Examples
-                  </span>
-                  <span className="flex-1 text-[11px]" style={{ color: '#667085' }}>
-                    what bMail looks like in use
-                  </span>
+            {(tab === 'inbox' || tab === 'requests') &&
+              (tab === 'inbox' ? exInbox : exRequests).some((e) => !goneExamples.includes(e.id)) && (
+                <>
                   <button
                     type="button"
                     onClick={hideExamples}
-                    className="min-h-[44px] px-2 text-xs underline"
-                    style={{ color: MUTED }}
+                    className="mt-2 flex min-h-[52px] w-full items-center justify-center gap-2 rounded-xl text-sm font-bold text-white"
+                    style={{ background: '#D92D20' }}
                   >
-                    Hide examples
+                    <Trash2 size={18} /> Delete all examples
                   </button>
-                </div>
-                {(tab === 'inbox' ? exInbox : exRequests)
-                  .filter((e) => !goneExamples.includes(e.id))
-                  .map((e) => {
-                    // Examples swipe like real mail (same trays as mailActions) so the gesture can be tried before
-                    // any real mail arrives. Archive / Delete / Quarantine hide the example; the rest open it.
-                    const hide = (verb: string) => {
-                      setGoneExamples((g) => [...g, e.id]);
-                      undoable(`Example ${verb}`, () => setGoneExamples((g) => g.filter((x) => x !== e.id)));
-                    };
-                    const look: Record<string, { icon: ReactNode; color: string }> = {
-                      reply: { icon: <Reply size={18} />, color: '#475467' },
-                      archive: { icon: <Archive size={18} />, color: '#12B76A' },
-                      delete: { icon: <Trash2 size={18} />, color: '#D92D20' },
-                      read: { icon: <MailOpen size={18} />, color: '#2E90FA' },
-                      pin: { icon: <Pin size={18} />, color: '#B54708' },
-                      quarantine: { icon: <ShieldAlert size={18} />, color: '#7A2E0E' },
-                    };
-                    const toAction = (a: (typeof EXAMPLE_SWIPE.left)[number]): SwipeAction => ({
-                      id: a.id,
-                      label: a.label,
-                      ...look[a.id],
-                      removes: a.removes,
-                      onPress: () =>
-                        a.removes
-                          ? hide(a.id === 'delete' ? 'deleted' : a.id === 'quarantine' ? 'quarantined' : 'archived')
-                          : setExample(e),
-                    });
-                    return (
-                      <SwipeRow
-                        key={e.id}
-                        rowId={e.id}
-                        label={`example mail from ${e.name}`}
-                        leftActions={EXAMPLE_SWIPE.left.map(toAction)}
-                        rightActions={EXAMPLE_SWIPE.right.map(toAction)}
-                        fullSwipeLeft={EXAMPLE_SWIPE.fullLeft}
-                        fullSwipeRight={EXAMPLE_SWIPE.fullRight}
-                      >
-                        <ExampleRow e={e} onOpen={() => setExample(e)} />
-                      </SwipeRow>
-                    );
-                  })}
-              </>
-            )}
+                  <p className="m-0 px-1 text-[11px]" style={{ color: MUTED }}>
+                    <span className="font-extrabold text-[#FDB022]">EXAMPLES</span> show what bMail looks like in use.
+                    They are not real mail and no money or tokens arrived. Swipe one left to delete it.
+                  </p>
+                  {(tab === 'inbox' ? exInbox : exRequests)
+                    .filter((e) => !goneExamples.includes(e.id))
+                    .map((e, i) => {
+                      // Examples swipe like real mail (same trays as mailActions) so the gesture can be tried before
+                      // any real mail arrives. Archive / Delete / Quarantine hide that example (remembered per account).
+                      const look: Record<string, { icon: ReactNode; color: string }> = {
+                        reply: { icon: <Reply size={18} />, color: '#475467' },
+                        archive: { icon: <Archive size={18} />, color: '#12B76A' },
+                        delete: { icon: <Trash2 size={18} />, color: '#D92D20' },
+                        read: { icon: <MailOpen size={18} />, color: '#2E90FA' },
+                        pin: { icon: <Pin size={18} />, color: '#B54708' },
+                        quarantine: { icon: <ShieldAlert size={18} />, color: '#7A2E0E' },
+                      };
+                      const toAction = (a: (typeof EXAMPLE_SWIPE.left)[number]): SwipeAction => ({
+                        id: a.id,
+                        label: a.label,
+                        ...look[a.id],
+                        removes: a.removes,
+                        onPress: () =>
+                          a.removes
+                            ? deleteExample(
+                                e.id,
+                                a.id === 'delete' ? 'deleted' : a.id === 'quarantine' ? 'quarantined' : 'archived',
+                              )
+                            : setExample(e),
+                      });
+                      const row = (
+                        <SwipeRow
+                          key={e.id}
+                          rowId={e.id}
+                          label={`example mail from ${e.name}`}
+                          leftActions={EXAMPLE_SWIPE.left.map(toAction)}
+                          rightActions={EXAMPLE_SWIPE.right.map(toAction)}
+                          fullSwipeLeft={EXAMPLE_SWIPE.fullLeft}
+                          fullSwipeRight={EXAMPLE_SWIPE.fullRight}
+                        >
+                          <ExampleRow e={e} onOpen={() => setExample(e)} />
+                        </SwipeRow>
+                      );
+                      return i === 0 && hint ? (
+                        <SwipeHint
+                          key={e.id}
+                          onDone={() => {
+                            markSwipeHintSeen();
+                            setHint(false);
+                          }}
+                        >
+                          {row}
+                        </SwipeHint>
+                      ) : (
+                        row
+                      );
+                    })}
+                </>
+              )}
             {tab === 'quarantine' && (
               <>
                 <p className="m-0 px-1 text-[11px] leading-relaxed" style={{ color: MUTED }}>
