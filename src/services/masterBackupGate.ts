@@ -6,6 +6,9 @@
  * master backup" (~40 console errors per backup; release check, 19 Oct 2026). They now wait until the backup has
  * finished and the original account is open again, then carry on.
  */
+/** Longest a wallet request waits for a running master backup before failing. */
+export const MASTER_BACKUP_WAIT_MS = 5 * 60_000;
+
 export const createMasterBackupGate = () => {
   let done: Promise<void> | null = null;
   let release: (() => void) | null = null;
@@ -25,9 +28,20 @@ export const createMasterBackupGate = () => {
       release = null;
       r?.();
     },
-    /** Resolves at once when no backup runs, otherwise when it ends. */
-    wait(): Promise<void> {
-      return done ?? Promise.resolve();
+    /**
+     * Resolves at once when no backup runs, otherwise when it ends. A backup that never ends must not hold wallet
+     * requests forever: after `timeoutMs` the wait rejects with the old "busy" error so callers fail visibly.
+     */
+    wait(timeoutMs = MASTER_BACKUP_WAIT_MS): Promise<void> {
+      if (!done) return Promise.resolve();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('Wallet is busy with a master backup; try again in a moment')),
+          timeoutMs,
+        );
+      });
+      return Promise.race([done, timeout]).finally(() => clearTimeout(timer));
     },
   };
 };

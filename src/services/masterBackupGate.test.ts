@@ -29,3 +29,13 @@ describe('master backup gate', () => {
     expect(bg).toMatch(/failed to restore original account:', err\);\n\s+\} finally \{\n\s+masterBackupGate\.end\(\);/);
   });
 });
+
+describe('masterBackupGate timeout', () => {
+  test('a backup that never ends rejects waiting callers after the timeout', async () => {
+    const g = createMasterBackupGate();
+    g.begin();
+    await expect(g.wait(20)).rejects.toThrow('busy with a master backup');
+    g.end();
+    await expect(g.wait(20)).resolves.toBeUndefined();
+  });
+});
