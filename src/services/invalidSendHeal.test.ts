@@ -116,7 +116,7 @@ describe('resyncSpent (Settings › Resync coins)', () => {
 });
 
 describe('owner iPhone 19 Oct: WERR_REVIEW_ACTIONS + UTXO_SPENT, heal outcome must survive the page cut', () => {
-  const { withHealMessage, shouldAutoResync, namedSpentInputs: named } = require('./invalidSendHeal');
+  const { withHealMessage, namedSpentInputs: named } = require('./invalidSendHeal');
   const IN = 'a'.repeat(64);
   const PROC = 'b'.repeat(64);
   const SPENDER = 'c'.repeat(64);
@@ -133,10 +133,5 @@ describe('owner iPhone 19 Oct: WERR_REVIEW_ACTIONS + UTXO_SPENT, heal outcome mu
   test('nothing cleared: error unchanged first', () => {
     expect(withHealMessage(raw, { checked: 0, released: 0 })).toBe(raw);
     expect(withHealMessage(raw, null)).toBe(raw);
-  });
-  test('auto resync throttle', () => {
-    expect(shouldAutoResync(undefined, 1)).toBe(true);
-    expect(shouldAutoResync(0, 1000, 5000)).toBe(false);
-    expect(shouldAutoResync(0, 5000, 5000)).toBe(true);
   });
 });

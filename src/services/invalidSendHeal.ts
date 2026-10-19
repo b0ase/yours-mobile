@@ -172,10 +172,3 @@ export const withHealMessage = (error: string, r: HealReport | null): string => 
   if (!m) return error;
   return r.released > 0 ? `${m} (${error})` : `${error} ${m}`;
 };
-
-/** Minimum gap between automatic coin resyncs for one account. */
-export const AUTO_RESYNC_GAP_MS = 30 * 60 * 1000;
-
-/** Pure: is an automatic coin resync due (never run, or the last one is older than the gap)? */
-export const shouldAutoResync = (lastAt: number | undefined, now: number, gap = AUTO_RESYNC_GAP_MS): boolean =>
-  lastAt === undefined || now - lastAt >= gap;
