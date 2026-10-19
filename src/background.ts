@@ -268,7 +268,7 @@ async function autoResyncDeps(
     const pendingIds = new Set(pending.map((t) => t.transactionId));
     const ownPendingTxids = new Set(pending.map((t) => t.txid).filter((t): t is string => !!t));
     const ownPendingInputs = new Set<string>();
-    for (const o of await sp.findOutputs({ partial: { userId: user.userId }, noScript: true }))
+    for (const o of await sp.findOutputs({ partial: { userId: user.userId, basketId: basket.basketId }, noScript: true }))
       if (o.spentBy != null && pendingIds.has(o.spentBy) && o.txid) ownPendingInputs.add(`${o.txid}_${o.vout}`);
     return { userId: user.userId, coins, ownPendingTxids, ownPendingInputs };
   });

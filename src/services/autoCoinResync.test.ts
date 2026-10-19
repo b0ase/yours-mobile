@@ -92,7 +92,41 @@ describe('autoResyncCoins', () => {
   });
 });
 
+describe('index replies: only an explicit null is unspent', () => {
+  test('short reply: nothing restored, nothing cleared', async () => {
+    const { d, unspent, spent } = deps({
+      coins: [`${A}_0`],
+      cleared: { [`${C}_2`]: S },
+      getSpends: async () => [],
+    });
+    const r = await autoResyncCoins(d);
+    expect(unspent).toEqual([]);
+    expect(spent).toEqual({});
+    expect(r.cleared).toEqual({ [`${C}_2`]: S });
+  });
+  test('undefined entry is unknown, not unspent', async () => {
+    const { d, unspent } = deps({ cleared: { [`${C}_2`]: S }, getSpends: async (b) => b.map(() => undefined) });
+    await autoResyncCoins(d);
+    expect(unspent).toEqual([]);
+  });
+  test('explicit null (and WoC 404) restores', async () => {
+    const { d, unspent } = deps({ cleared: { [`${C}_2`]: S }, woc: async () => null });
+    await autoResyncCoins(d);
+    expect(unspent).toEqual([`${C}_2`]);
+  });
+});
+
 describe('runAutoResyncIfDue', () => {
+  test('not ready (load null) does not start the wait', async () => {
+    const m: Record<string, unknown> = {};
+    const kv = {
+      get: async (k: string) => ({ [k]: m[k] }),
+      set: async (i: Record<string, unknown>) => void Object.assign(m, i),
+    };
+    expect(await runAutoResyncIfDue('k', kv, async () => null, 1)).toBeNull();
+    expect(await runAutoResyncIfDue('k', kv, async () => deps().d, 2)).not.toBeNull();
+  });
+
   const memKV = () => {
     const m: Record<string, unknown> = {};
     return {

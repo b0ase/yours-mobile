@@ -4,8 +4,9 @@
  *
  * Stricter than the manual Resync coins, because nobody asked for it:
  * - Only the default basket. Tokens, locks and OrdLocks are left to Repair Sync's token-aware passes.
- * - A spender counts only from the 1sat spend index (batched, 429 backoff) or a CONFIRMED WhatsOnChain spend, on
- *   mainnet. A mempool-only spend can be dropped, so it never clears a coin here.
+ * - A spender counts from the 1sat spend index (batched, 429 backoff; it can name a mempool spend, which the restore
+ *   pass below undoes if that spend is dropped), or else a CONFIRMED WhatsOnChain spend ("status": "confirmed" on
+ *   /tx/<txid>/<vout>/spent, checked 19 Oct 2026), mainnet only. A WhatsOnChain mempool spend never clears a coin.
  * - Never the wallet's own unfinished actions: their txids are not spenders, and coins they spend are skipped.
  * - Every coin cleared is remembered (outpoint → spender); later runs re-check them, and one both lookups now call
  *   unspent is restored to spendable (a mistake can always be undone).
@@ -60,7 +61,11 @@ export async function autoResyncCoins(d: AutoResyncDeps): Promise<AutoResyncRepo
   await mapPool(batches, POOL, async (b) => {
     try {
       const r = await withRetry(() => d.getSpends(b));
-      b.forEach((o, j) => index.set(o, r[j] ?? null));
+      // A short or malformed reply is unknown, never "unspent": only an explicit null counts as unspent.
+      if (!Array.isArray(r) || r.length !== b.length) throw new Error('getSpends: reply does not match the batch');
+      b.forEach((o, j) => {
+        if (r[j] === null || typeof r[j] === 'string') index.set(o, r[j] as string | null);
+      });
     } catch {
       /* unknown */
     }
@@ -123,8 +128,7 @@ export interface KV {
 
 /**
  * Run autoResyncCoins for one account if due, under the shared lock, with the throttle and the cleared list
- * persisted in `kv` (chrome.storage.local). The timestamp is written before the run, so a crash mid-run still waits
- * the gap. Returns null when not due.
+ * persisted in `kv` (chrome.storage.local). Returns null when not due or not ready.
  */
 export async function runAutoResyncIfDue(
   identityKey: string,
@@ -135,10 +139,12 @@ export async function runAutoResyncIfDue(
   const read = async () => ((await kv.get(AUTO_RESYNC_KEY))[AUTO_RESYNC_KEY] as AutoResyncState | undefined) ?? {};
   const state = await read();
   if (!shouldAutoResync(state[identityKey]?.at, now)) return null;
-  await kv.set({ [AUTO_RESYNC_KEY]: { ...state, [identityKey]: { ...state[identityKey], at: now } } });
   return withCoinResyncLock(async () => {
     const deps = await load(state[identityKey]?.cleared ?? {});
+    // Not ready (no services/storage yet): don't start the wait, the next unlock tries again.
     if (!deps) return null;
+    // Written before the run, so a crash mid-run still waits the gap.
+    await kv.set({ [AUTO_RESYNC_KEY]: { ...(await read()), [identityKey]: { ...state[identityKey], at: now } } });
     const report = await autoResyncCoins(deps);
     const latest = await read();
     await kv.set({
