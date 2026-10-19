@@ -138,7 +138,14 @@ const NewTranche = ({ api, onDone }: { api: BsharesApi; onDone: () => void }) =>
 };
 
 /** bit-sign claim codes worth retrying with the same payment (bshares-invest-rules InvestErrorCode). */
-const RETRYABLE_CLAIM = new Set(['not_seen', 'not_confirmed', 'rate_limited', 'internal', 'excess_choice', 'unauthenticated']);
+const RETRYABLE_CLAIM = new Set([
+  'not_seen',
+  'not_confirmed',
+  'rate_limited',
+  'internal',
+  'excess_choice',
+  'unauthenticated',
+]);
 
 const paidButUnclaimed = (txid: string, reason: string) =>
   `Your payment was sent but could not be matched to this offer (${reason}). Don't pay again: ask the company's directors to refund transaction ${txid}.`;
