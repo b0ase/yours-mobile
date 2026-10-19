@@ -1,0 +1,182 @@
+/* bMint › Check this mint (check/CheckPage.tsx). Uses the .bmint tokens from bmint.css. */
+.ck {
+  max-width: 760px;
+}
+.ck-head h1 {
+  font-size: clamp(28px, 6vw, 44px);
+  line-height: 1.05;
+  margin: 8px 0 8px;
+  color: var(--bm-text);
+}
+.ck-head h1 span {
+  color: var(--bm-gold);
+}
+.ck-head p {
+  color: var(--bm-muted);
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0 0 16px;
+}
+.ck-form {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ck-input {
+  flex: 1 1 260px;
+  min-width: 0;
+  background: var(--bm-panel-2);
+  border: 1px solid var(--bm-line-2);
+  border-radius: var(--bm-radius);
+  color: var(--bm-text);
+  padding: 12px 14px;
+  font:
+    14px/1.2 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  outline: none;
+}
+.ck-input:focus {
+  border-color: var(--bm-gold);
+}
+.ck-drop {
+  margin-top: 10px;
+  border: 1px dashed var(--bm-line-2);
+  border-radius: var(--bm-radius);
+  padding: 14px;
+  font-size: 13px;
+  color: var(--bm-muted);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.ck-drop:hover,
+.ck-drop.over {
+  border-color: var(--bm-gold);
+  background: var(--bm-gold-dim);
+}
+.ck-drop b {
+  color: var(--bm-text);
+}
+.ck-err {
+  color: var(--bm-danger);
+}
+.ck-card {
+  margin-top: 16px;
+  border-radius: 16px;
+  padding: 18px;
+  background: var(--bm-panel);
+  border: 1px solid var(--bm-line-2);
+}
+.ck-card.ok {
+  border-color: var(--bm-gold);
+  box-shadow: 0 0 0 1px var(--bm-gold-dim) inset;
+}
+.ck-card.bad {
+  border-color: var(--bm-danger);
+}
+.ck-card.wait {
+  border-color: #d9a441;
+}
+.ck-verdict {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.ck-verdict h2 {
+  margin: 0;
+  font-size: 20px;
+  color: var(--bm-text);
+}
+.ck-badge {
+  font:
+    700 12px/1 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  letter-spacing: 0.06em;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--bm-panel-3);
+  color: var(--bm-muted);
+}
+.ck-card.ok .ck-badge {
+  background: var(--bm-gold);
+  color: #000;
+}
+.ck-card.bad .ck-badge {
+  background: var(--bm-danger);
+  color: #000;
+}
+.ck-card.wait .ck-badge {
+  background: #d9a441;
+  color: #000;
+}
+.ck-reason {
+  margin: 10px 0 0;
+  color: var(--bm-text);
+  font-size: 14px;
+}
+.ck-fine {
+  margin: 6px 0 0;
+  color: var(--bm-muted);
+  font-size: 12px;
+}
+.ck-facts {
+  margin: 14px 0 0;
+  display: grid;
+  gap: 8px;
+}
+.ck-row {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 10px;
+  font-size: 13px;
+}
+.ck-row dt {
+  color: var(--bm-muted);
+}
+.ck-row dd {
+  margin: 0;
+  color: var(--bm-text);
+  overflow-wrap: anywhere;
+}
+.ck code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+.ck-label {
+  color: var(--bm-muted);
+}
+.ck-proves {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--bm-line);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--bm-muted);
+}
+.ck-proves p {
+  margin: 0 0 8px;
+}
+.ck-proves b {
+  color: var(--bm-text);
+}
+.ck-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.ck-actions a.bm-btn {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+@media (max-width: 480px) {
+  .ck-row {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}
