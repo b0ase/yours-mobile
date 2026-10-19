@@ -1,5 +1,7 @@
 import {
+  Suspense,
   createContext,
+  lazy,
   useCallback,
   useContext,
   useEffect,
@@ -12,7 +14,13 @@ import {
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { BookUser, CalendarDays, PenLine, X } from 'lucide-react';
-import { BCREDITS_ENABLED, BUY_CRYPTO_ENABLED, PLACEMENT_ENABLED, STORE_BUILD } from '../storeBuild';
+import {
+  BCREDITS_ENABLED,
+  BUY_CRYPTO_ENABLED,
+  ISSUER_CREDITS_ENABLED,
+  PLACEMENT_ENABLED,
+  STORE_BUILD,
+} from '../storeBuild';
 import { PNEE_ICON, PNEE_TOKEN_ID } from '../notes/pnee';
 import { requestWalletAction } from '../phone/walletAction';
 import { MNEE_ICON_URL } from '../../utils/constants';
@@ -57,7 +65,11 @@ import { AddressBook } from './AddressBook';
 import { allCardsSwipe, opensAddressBook } from './addressBookGesture';
 import { BCal } from './BCal';
 import { subscribeAllCards } from './allCardsOpen';
+import type { IssuerCardDef } from '../credits/IssuerCreditCards';
 import './balanceCards.css';
+
+// Credits from other issuers: a card per issuer, lazy chunk dropped while the flag is off (bit-sign #294 not live).
+const IssuerCreditCards = ISSUER_CREDITS_ENABLED ? lazy(() => import('../credits/IssuerCreditCards')) : null;
 
 /**
  * Balance cards: the wallet card as a swipe carousel, one card per kind of balance, always shown with its REAL
@@ -637,6 +649,7 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
   const navigate = useNavigate();
   const [active, setActive] = useState(0);
   const [tm, setTm] = useState(false);
+  const [issuerCards, setIssuerCards] = useState<IssuerCardDef[]>([]);
   const [buyOpen, setBuyOpen] = useState(false);
   // Address book (owner, 15 Oct 2026): pull right past the first card, or the notebook button.
   const [book, setBook] = useState(false);
@@ -815,6 +828,8 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
       ],
       agreement: BCREDITS_AGREEMENT,
     });
+  // One card per credit issuer (bCredits above is the built-in one), in the row and in All cards.
+  if (ISSUER_CREDITS_ENABLED) cards.push(...issuerCards);
   cards.push(
     {
       id: 'mnee',
@@ -1007,6 +1022,11 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
             </div>
           )}
         </div>
+        {ISSUER_CREDITS_ENABLED && IssuerCreditCards && (
+          <Suspense fallback={null}>
+            <IssuerCreditCards onCards={setIssuerCards} />
+          </Suspense>
+        )}
         {book && <AddressBook onClose={() => setBook(false)} />}
         {cal && <BCal onClose={() => setCal(false)} />}
         {BUY_CRYPTO_ENABLED && buyOpen && (
