@@ -515,7 +515,7 @@ export const NameStorePage = () => {
                   key={n}
                   type="button"
                   onClick={() => pick(n)}
-                  className="group shrink-0 snap-start w-[150px] text-left rounded-2xl p-4 border-0 cursor-pointer transition-[background,transform] duration-150 ease-out hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2"
+                  className="group w-[150px] text-left rounded-2xl p-4 border-0 cursor-pointer transition-[background,transform] duration-150 ease-out hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2"
                   style={{ background: SURFACE, boxShadow: `inset 0 0 0 1px ${HAIR}`, color: TEXT, outlineColor: GOLD }}
                 >
                   <span className="block text-base font-semibold break-all">{n}</span>
@@ -540,7 +540,7 @@ export const NameStorePage = () => {
                     key={l.outpoint}
                     type="button"
                     onClick={() => pick(l.name)}
-                    className="group shrink-0 snap-start w-[150px] text-left rounded-2xl p-4 border-0 cursor-pointer transition-[background,transform] duration-150 ease-out hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2"
+                    className="group w-[150px] text-left rounded-2xl p-4 border-0 cursor-pointer transition-[background,transform] duration-150 ease-out hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2"
                     style={{
                       background: SURFACE,
                       boxShadow: `inset 0 0 0 1px ${HAIR}`,
@@ -1001,7 +1001,7 @@ const Rail = (p: { title: string; sub: string; loading: boolean; children: React
           {p.sub}
         </span>
       </div>
-      <div className="-mx-4 px-4 sm:mx-0 sm:px-0 flex gap-3 overflow-x-auto snap-x pb-2">
+      <div className="flex flex-wrap gap-3 pb-2">
         {p.loading
           ? Array.from({ length: 6 }, (_, i) => (
               <div

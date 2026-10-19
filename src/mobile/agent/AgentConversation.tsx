@@ -797,7 +797,7 @@ export const AgentConversation = ({
       </div>
 
       {MARKET_ENABLED && !input && !busy && messages.length > 0 && (
-        <div className="askb-chips relative z-10 shrink-0 flex gap-1.5 overflow-x-auto px-3 pb-2">
+        <div className="askb-chips relative z-10 shrink-0 flex flex-wrap gap-1.5 px-3 pb-2">
           {QUICK_STARTS.map((q) => (
             <button
               key={q.label}

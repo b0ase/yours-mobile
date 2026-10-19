@@ -144,8 +144,7 @@
 .bw-abook-card-thumbs {
   display: flex;
   gap: 8px;
-  overflow-x: auto;
-  scroll-snap-type: x mandatory;
+  flex-wrap: wrap;
 }
 .bw-abook-card-thumbs button {
   flex: 0 0 auto;

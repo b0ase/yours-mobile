@@ -315,7 +315,7 @@ export const HistoryScreen = ({
               </button>
             ))}
           </div>
-          <div className="flex gap-2 mt-2 overflow-x-auto pb-1" role="group" aria-label="Category">
+          <div className="flex flex-wrap gap-2 mt-2 pb-1" role="group" aria-label="Category">
             {CATEGORIES.map((c) => (
               <button
                 key={c.id}

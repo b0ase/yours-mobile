@@ -143,7 +143,7 @@ export const FilterBar = ({
           document.body,
         )}
       {platforms.length > 1 && (
-        <div className="flex gap-1.5 items-center overflow-x-auto pb-1" role="group" aria-label="Platforms">
+        <div className="flex flex-wrap gap-1.5 items-center pb-1" role="group" aria-label="Platforms">
           <span className="text-[11px] shrink-0" style={{ color: MUTED }}>
             Platform
           </span>

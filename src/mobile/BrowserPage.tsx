@@ -958,7 +958,7 @@ const BrowserPage = ({
       <div className="flex flex-col gap-2">
         <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[color:var(--bw-accent-hi)]">Recents</h2>
         {recent.length === 0 && <p className="text-[12px] text-[#98A2B3] m-0">Apps you open show here.</p>}
-        <div className="-mx-4 px-4 flex gap-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+        <div className="flex flex-wrap gap-2">
           {recent.map((url) => (
             <button
               key={url}
@@ -1076,7 +1076,7 @@ const BrowserPage = ({
                 Recents
               </h2>
               {recent.length === 0 && <p className="text-[12px] text-[#98A2B3] m-0">Apps you open show here.</p>}
-              <div className="-mx-4 px-4 flex gap-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+              <div className="flex flex-wrap gap-2">
                 {recent.map((url) => (
                   <button
                     key={url}

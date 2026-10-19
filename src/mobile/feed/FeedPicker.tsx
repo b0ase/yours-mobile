@@ -105,11 +105,7 @@ export const FeedPicker = ({
   const row = rowFeeds(pins);
   return (
     <div className="relative pb-2">
-      <div
-        className="flex items-start gap-2 overflow-x-auto px-3 pr-10 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-        role="tablist"
-        aria-label="Feeds"
-      >
+      <div className="flex flex-wrap items-start gap-2 px-3" role="tablist" aria-label="Feeds">
         {row.map((id) => (
           <Chip
             key={id}
@@ -128,14 +124,6 @@ export const FeedPicker = ({
           onClick={onOpenAll}
         />
       </div>
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-y-0 right-0 w-10"
-        style={{
-          background:
-            'linear-gradient(to right, rgb(var(--bw-fade-rgb, 0 0 0) / 0), rgb(var(--bw-fade-rgb, 0 0 0) / 0.85))',
-        }}
-      />
     </div>
   );
 };
