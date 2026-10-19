@@ -4,6 +4,7 @@ import { TermsGate } from '../ugc/UgcSheets';
 import { SectionBoundary } from '../wallet/SectionBoundary';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { BannerActions } from '../../web/BannerActions';
+import { ReportOutboxRunner } from '../agent/reportSend';
 import {
   ARTIST_PROGRAMME_ENABLED,
   BPOSITIVE_ENABLED,
@@ -98,6 +99,8 @@ const MobileRoutes = () => (
       {DirectUpdateBanner && <UpdateBanner />}
       {/* The web build's hazard-tape banner buttons (src/web/betaBanner.ts). */}
       <BannerActions />
+      {/* Sends reports to b that couldn't go at the time (agent/reportOutbox.ts). */}
+      <ReportOutboxRunner />
       <Routes>
         <Route path="settings" element={<SettingsHub />} />
         {/* The top bar's Play button: music & video. */}
