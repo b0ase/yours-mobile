@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { PrivateKey } from '@bsv/sdk';
-import { Sealer, deriveSession, newChannel, pairUrl, parsePairUrl, relaySocketUrl } from './protocol';
+import { Sealer, deriveSession, isAllowedRelay, newChannel, pairUrl, parsePairUrl, relaySocketUrl } from './protocol';
 
 describe('pairing protocol', () => {
   test('both sides derive the same key and code; frames round-trip', async () => {
@@ -42,6 +42,15 @@ describe('pairing protocol', () => {
     expect(() => parsePairUrl('https://evil.example/pair?v=1')).toThrow();
     expect(() => parsePairUrl(pairUrl({ ...link, e: 10 }))).toThrow(/expired/);
     expect(() => parsePairUrl(pairUrl({ ...link, o: 'https://a.lol/path' }))).toThrow();
+    // Audit H1: the relay is pinned; a link naming any other relay is refused.
+    expect(() => parsePairUrl(pairUrl({ ...link, r: 'relay.attacker.com' }))).toThrow(/doesn't trust/);
+    expect(() => parsePairUrl(pairUrl({ ...link, r: 'relay.bwallet.space.evil.com' }))).toThrow(/doesn't trust/);
+    expect(() => parsePairUrl(pairUrl({ ...link, r: 'localhost:8787' }))).toThrow(/doesn't trust/);
+    expect(parsePairUrl(pairUrl({ ...link, r: 'localhost:8787' }), undefined, { allowLocalRelay: true }).r).toBe(
+      'localhost:8787',
+    );
+    expect(isAllowedRelay('relay.bwallet.space')).toBe(true);
+    expect(isAllowedRelay('127.0.0.1:1', false)).toBe(false);
     expect(relaySocketUrl('relay.bwallet.space', link.c, 'site', e)).toBe(
       `wss://relay.bwallet.space/v1/c/${link.c}?role=site&e=${e}`,
     );

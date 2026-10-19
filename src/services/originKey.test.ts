@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { INSECURE_ORIGIN_ERROR, isLoopbackHostname, originatorForOrigin } from './originKey';
+import {
+  INSECURE_ORIGIN_ERROR,
+  isLoopbackHostname,
+  originatorForOrigin,
+  isPairedHost,
+  pairedOrigin,
+} from './originKey';
 
 describe('originatorForOrigin (M3)', () => {
   test('https keeps the host key existing grants were stored under', () => {
@@ -28,5 +34,17 @@ describe('originatorForOrigin (M3)', () => {
     for (const o of ['file:///etc/passwd', 'ftp://example.com', 'data:text/html,x', 'null', '', undefined, null]) {
       expect(originatorForOrigin(o).originator).toBeUndefined();
     }
+  });
+});
+
+describe('paired sessions (audit H1)', () => {
+  test('run under their own key, never the site originator', () => {
+    const o = pairedOrigin('https://bchatx.com');
+    expect(o).toBe('https://bchatx.com.paired.invalid');
+    expect(originatorForOrigin(o).originator).toBe('bchatx.com.paired.invalid');
+    expect(originatorForOrigin(o).originator).not.toBe(originatorForOrigin('https://bchatx.com').originator);
+    expect(isPairedHost('bchatx.com.paired.invalid')).toBe(true);
+    expect(isPairedHost('bchatx.com')).toBe(false);
+    expect(pairedOrigin('http://localhost:3000')).toBe('https://localhost.paired.invalid:3000');
   });
 });
