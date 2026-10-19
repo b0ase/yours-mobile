@@ -161,22 +161,26 @@ so it is a passkey wallet from then on. Code: `passkey/openHere.ts`, `OpenOnComp
 - **QR**: `https://www.bwallet.space/open?v=1&r=<relay>&c=<channel>&k=<ephemeral pubkey>&o=<origin>&e=<expiry>`.
   Public data only; a fresh key pair per QR, private key in page memory only.
 - **Transport**: the existing phone-pairing relay (`relay/relay.mjs`, relay.bwallet.space). It forwards frames
-  verbatim and never sees plaintext. It ties the channel to the computer page's real websocket Origin (browsers set
-  it; scripts can't) and tells the phone; the phone refuses unless that origin equals the QR's `o` **and** is a
-  `https://*.bwalletx.com` host. A QR shown on evil.example therefore can't receive a wallet even if the user scans it.
-- **Crypto**: ECDH secp256k1 (phone ephemeral × computer ephemeral) → HKDF-SHA256(salt = channel, info =
-  `bwalletx-open-v1`) → AES-256-GCM; AAD binds the channel; the payload carries the QR expiry and is refused after it.
-- **MITM / substituted key**: anyone who swaps a public key gets a different 4-digit code on each screen; the user
-  is told to continue only if they match. 4 digits = 1 in 10,000 for a live attacker per attempt, and every attempt
-  needs a fresh scan + the user's password.
+  verbatim and never sees plaintext. It reports the computer socket's Origin to the phone; the phone refuses unless
+  it equals the QR's `o` and is a `https://*.bwalletx.com` host. That stops a QR shown on a phishing page in a real
+  browser, but it is a **hint, not proof**: any non-browser client can send any Origin header (audit C2, 19 Oct). The
+  phone UI never calls it "verified" and does not show it.
+- **Crypto (v2)**: ECDH secp256k1 (phone ephemeral × computer ephemeral) → HKDF-SHA256(salt = channel, info =
+  `bwalletx-open-v2`) → AES-256-GCM key + HMAC-SHA256 key; AAD binds the channel; the payload carries the QR expiry.
+- **The code goes phone → computer (audit C2 fix)**: the phone makes 6 random digits and shows them only on its
+  screen. The user types them on the computer, which sends `HMAC(macKey, "bwalletx-open-proof|<channel>|<code>")`.
+  The phone checks it once: a wrong proof ends the session. Only after a good proof and Face ID / the wallet
+  password does it seal the words. Whoever made the QR knows its key (v1's 4-digit code came from that key, so an
+  attacker with a forged Origin could display it); only someone looking at the phone knows v2's code. A remote
+  attacker gets one guess per scan: 1 in 1,000,000. A key-swapping MITM can't produce a valid proof either.
 - **Expiry and single use**: QR and relay channel live 2 minutes (the relay enforces the expiry when the phone
   joins; the phone checks it again before sending); the computer accepts exactly one wallet frame, then closes and
   forgets the key. A new QR appears on expiry.
-- **Consent**: the phone sends nothing until the user has compared the code and typed the wallet password; the
-  sheet says "It gets full control of this wallet."
+- **Consent**: the phone sends nothing until the computer has proved the code and the user has confirmed with Face
+  ID / the wallet password; the sheet says "It gets full control of this wallet."
 - **What it does NOT protect against**: malware on the computer or a malicious browser extension on
   web.bwalletx.com (it would see the words after decryption, as with typing the 12 words), a compromised
-  web.bwalletx.com deployment, or a user who confirms without comparing the code. The relay operator can deny
+  web.bwalletx.com deployment, or a user who reads the code out to someone else (the sheet says never to). The relay operator can deny
   service but not read or change the wallet.
 - Tests (`openHere.test.ts`): QR has no secrets and round-trips; lookalike / http / foreign origins refused; 2-minute
   expiry and over-long expiry refused; both sides derive the same code and key; a MITM key gives a different code
@@ -362,3 +366,25 @@ blob jsonb not null, created_at timestamptz default now())`, RLS on, service-rol
 3. Native apps: worth a Capacitor passkey plugin (ASAuthorization / Credential Manager) + AASA/assetlinks for
    `bwalletx.com`? That is what makes it work in the store apps, where most users arrive.
 4. Balance threshold and wording for the "write your 12 words too" nudge.
+
+## Native apps (feat/seedless-native)
+
+The Capacitor shells can't use `navigator.credentials` for `bwalletx.com` (origin is `capacitor://localhost` /
+`https://localhost`), so `prf.ts` sends passkey calls to a local plugin when `Capacitor.isNativePlatform()`:
+
+- JS bridge: `src/mobile/passkey/nativePasskeys.ts` (`Passkeys` plugin: `isAvailable`, `create`, `get`; base64url
+  over the bridge), tests in `nativePasskeys.test.ts` with a mock plugin. Same rpId (`bwalletx.com`), same PRF input
+  (`prfSalt()`), same blob format and server store, so one synced passkey gives the same key on web and in the app.
+- iOS: `ios/App/App/PasskeysPlugin.swift`, `ASAuthorizationPlatformPublicKeyCredentialProvider` + `prf`
+  (iOS 18+; older iOS reports unavailable and the passkey options stay hidden). Entitlement
+  `webcredentials:bwalletx.com`; AASA on `https://bwalletx.com/.well-known/apple-app-site-association` lists
+  `ZQ4NX9NJ89.com.bitcoincorp.bwallet` and `ZQ4NX9NJ89.com.bitcoincorp.bwallet.private`.
+- Android: `PasskeysPlugin.java`, Credential Manager (`androidx.credentials` 1.5.0 + play-services-auth) with
+  `extensions.prf` in the WebAuthn JSON (Android 9+). PRF output depends on the provider: Google Password Manager
+  returns it; a third-party provider may not, which shows the "no PRF" message. `assetlinks.json` on bwalletx.com
+  lists `com.bitcoincorp.bwallet` and `com.bitcoincorp.bwallet.direct` with the upload-key and Play app-signing
+  SHA-256 fingerprints (`get_login_creds`).
+- Flag: unchanged. `SEEDLESS_ENABLED` needs `VITE_SEEDLESS=1` and is always off in store builds, so only
+  `VITE_SEEDLESS=1 bash scripts/channel-build.sh ios-private` / `android-direct` turn it on.
+- To verify on device: make a passkey on web.bwalletx.com, then Restore with a passkey in the app (and the reverse);
+  both must open the same backup. That proves the OS PRF APIs apply the same WebAuthn salt hashing as the browser.

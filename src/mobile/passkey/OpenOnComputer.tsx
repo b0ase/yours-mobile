@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as qr from 'qrcode';
-import { startOpenSession } from './openHere';
+import { normaliseOpenCode, startOpenSession } from './openHere';
 import { setTransferredWallet } from './session';
 
 /**
@@ -13,15 +13,20 @@ export const OpenOnComputerPanel = () => {
   const navigate = useNavigate();
   const [img, setImg] = useState('');
   const [url, setUrl] = useState('');
+  const [joined, setJoined] = useState(false);
   const [code, setCode] = useState('');
+  const [sent, setSent] = useState(false);
+  const [submit, setSubmit] = useState<((c: string) => Promise<boolean>) | null>(null);
   const [error, setError] = useState('');
   const [round, setRound] = useState(0);
   useEffect(() => {
     if (typeof window !== 'undefined' && !window.matchMedia?.('(min-width: 640px)').matches) return;
+    setJoined(false);
     setCode('');
+    setSent(false);
     setError('');
     const s = startOpenSession({
-      onCode: setCode,
+      onJoined: () => setJoined(true),
       onWallet: (p) => {
         setTransferredWallet({ words: p.words, name: p.name });
         navigate('/restore-wallet');
@@ -30,6 +35,7 @@ export const OpenOnComputerPanel = () => {
       onError: setError,
     });
     setUrl(s.url);
+    setSubmit(() => s.submitCode);
     void qr.toDataURL(s.url, { margin: 1, width: 200 }).then(setImg, () => setImg(''));
     return () => s.close();
   }, [round, navigate]);
@@ -49,13 +55,40 @@ export const OpenOnComputerPanel = () => {
         <ol className="m-0 mt-2 pl-4 list-decimal text-xs leading-relaxed" style={{ color: '#E4E7EC' }}>
           <li>Open bWalletX on your phone</li>
           <li>Tap Scan (top bar)</li>
-          <li>Point it at this code and check the numbers match</li>
+          <li>Point it at this code, then type the 6 digits your phone shows</li>
         </ol>
-        {code && (
-          <p className="m-0 mt-2 text-sm text-white" data-testid="open-on-computer-code">
-            Code: <b style={{ color: '#F5C542', letterSpacing: 2 }}>{code}</b>
-          </p>
+        {joined && !sent && (
+          <form
+            className="m-0 mt-2 flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!submit || !normaliseOpenCode(code)) return;
+              setSent(true);
+              void submit(code);
+            }}
+          >
+            <input
+              autoFocus
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              placeholder="Code on your phone"
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/[^\d ]/g, '').slice(0, 7))}
+              className="flex-1 rounded-lg px-3 py-2 border-0 text-white"
+              style={{ background: '#0b0c0f', letterSpacing: 2 }}
+              data-testid="open-on-computer-code"
+            />
+            <button
+              type="submit"
+              disabled={!normaliseOpenCode(code)}
+              className="rounded-lg px-3 py-2 font-bold border-0"
+              style={{ background: '#F5C542', color: '#000' }}
+            >
+              OK
+            </button>
+          </form>
         )}
+        {sent && !error && <p className="m-0 mt-2 text-sm text-white">Now confirm on your phone.</p>}
         {error && (
           <p className="m-0 mt-2 text-xs" style={{ color: '#FDA29B' }}>
             {error}

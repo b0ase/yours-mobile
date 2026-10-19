@@ -1,6 +1,12 @@
 /* WebAuthn PRF for the passkey seed backup (prototype). See docs/SEEDLESS-PASSKEY.md for the rpId choice. */
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { STORE_BUILD } from '../storeBuild';
+import { NATIVE_RP_ID, nativeCreateWithPrf, nativeGetPrf, type PasskeysPlugin } from './nativePasskeys';
 import { b64url, fromB64url, prfSalt } from './seedBackup';
+
+/** iOS / Android apps: passkeys go through the native "Passkeys" plugin (nativePasskeys.ts), not the web view. */
+const IS_NATIVE = Capacitor.isNativePlatform();
+const Passkeys = registerPlugin<PasskeysPlugin>('Passkeys');
 
 /**
  * Off everywhere unless built with VITE_SEEDLESS=1, and never in a store build (the App Store / Play shells can't
@@ -13,8 +19,8 @@ export const SEEDLESS_ENABLED: boolean = import.meta.env.VITE_SEEDLESS === '1' &
  * the same passkeys. Anywhere else (localhost, preview hosts) falls back to the page's own host, so a passkey
  * made there only works there.
  */
-export const rpIdFor = (hostname: string): string =>
-  hostname === 'bwalletx.com' || hostname.endsWith('.bwalletx.com') ? 'bwalletx.com' : hostname;
+export const rpIdFor = (hostname: string, native = IS_NATIVE): string =>
+  native || hostname === 'bwalletx.com' || hostname.endsWith('.bwalletx.com') ? NATIVE_RP_ID : hostname;
 
 export type PrfSupport = {
   webauthn: boolean;
@@ -34,6 +40,34 @@ type PKC = typeof PublicKeyCredential & {
 };
 
 export async function detectPrfSupport(): Promise<PrfSupport> {
+  if (IS_NATIVE) {
+    const origin = typeof location === 'undefined' ? '' : location.origin;
+    try {
+      const a = await Passkeys.isAvailable();
+      return {
+        webauthn: a.available,
+        secureContext: true,
+        platformAuthenticator: a.available,
+        prfCapability: a.prf,
+        origin,
+        rpId: NATIVE_RP_ID,
+        likely: a.available && a.prf !== false,
+        notes: [`Native passkeys (${Capacitor.getPlatform()})`, ...(a.reason ? [a.reason] : [])],
+      };
+    } catch (e) {
+      const why = `Passkeys plugin missing: ${String(e)}`;
+      return {
+        webauthn: false,
+        secureContext: true,
+        platformAuthenticator: false,
+        prfCapability: false,
+        origin,
+        rpId: NATIVE_RP_ID,
+        likely: false,
+        notes: [why],
+      };
+    }
+  }
   const notes: string[] = [];
   const loc = typeof location === 'undefined' ? undefined : location;
   const origin = loc?.origin ?? '';
@@ -76,6 +110,7 @@ const bytes = (b: ArrayBuffer | ArrayBufferView): Uint8Array =>
 /** Ask the passkey for its PRF output. With no credentialId the browser offers any bwalletx.com passkey. */
 export async function getPrf(rpId: string, credentialId?: string): Promise<{ credentialId: string; prf: Uint8Array }> {
   const first = await prfSalt();
+  if (IS_NATIVE) return nativeGetPrf(Passkeys, first, rpId, credentialId);
   const cred = (await navigator.credentials.get({
     publicKey: {
       challenge: crypto.getRandomValues(new Uint8Array(32)),
@@ -101,6 +136,7 @@ export async function createPasskeyWithPrf(
   label: string,
 ): Promise<{ credentialId: string; prf: Uint8Array }> {
   const first = await prfSalt();
+  if (IS_NATIVE) return nativeCreateWithPrf(Passkeys, first, rpId, label);
   const cred = (await navigator.credentials.create({
     publicKey: {
       challenge: crypto.getRandomValues(new Uint8Array(32)),

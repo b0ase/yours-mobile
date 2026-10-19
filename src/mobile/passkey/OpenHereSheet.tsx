@@ -6,9 +6,10 @@ import { beginOpenHere } from './openHere';
 import { biometricLabel, confirmWithBiometrics } from '../biometricUnlock';
 
 /**
- * Phone: "Open your wallet on <origin>?" after scanning the computer's QR (openHere.ts). The user compares the code
- * and confirms with the wallet password (the app lock); only then are the open account's 12 words sealed to the
- * computer's one-time key and sent through the relay.
+ * Phone: after scanning the computer's QR (openHere.ts) it shows a 6-digit code made here. The user types it on the
+ * computer; once the computer has proved it knows the code, the user confirms with Face ID / the wallet password
+ * (the app lock) and only then are the open account's 12 words sealed to the computer's one-time key and sent.
+ * The computer's site name comes from the relay and is not shown as verified: only the code proves anything.
  */
 export const OpenHereSheet = ({ scanned, onClose }: { scanned: string; onClose: () => void }) => {
   const { chromeStorageService, keysService } = useServiceContext();
@@ -17,14 +18,19 @@ export const OpenHereSheet = ({ scanned, onClose }: { scanned: string; onClose: 
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
   useEffect(() => {
     let live = true;
     let session: Awaited<ReturnType<typeof beginOpenHere>> | null = null;
     beginOpenHere(scanned, import.meta.env.DEV).then(
       (x) => {
         session = x;
-        if (live) setS(x);
-        else x.cancel();
+        if (!live) return x.cancel();
+        setS(x);
+        x.confirmed.then(
+          () => live && setConfirmed(true),
+          (e: unknown) => live && setError(e instanceof Error ? e.message : String(e)),
+        );
       },
       (e: unknown) => live && setError(e instanceof Error ? e.message : String(e)),
     );
@@ -38,13 +44,13 @@ export const OpenHereSheet = ({ scanned, onClose }: { scanned: string; onClose: 
   const bio = biometricLabel();
   const [usePassword, setUsePassword] = useState(!bio);
   const confirm = async (how: 'bio' | 'password') => {
-    if (!s) return;
+    if (!s || !confirmed) return;
     setBusy(true);
     setError('');
     try {
       if (how === 'bio') {
         // Face ID / Touch ID (biometricUnlock.ts); the wallet is open, so its keys are already readable.
-        const r = await confirmWithBiometrics(`Open your wallet on ${s.origin.replace(/^https?:\/\//, '')}`);
+        const r = await confirmWithBiometrics('Open your wallet on your computer');
         if (r === 'cancelled') return;
         if (r !== 'ok') {
           setUsePassword(true);
@@ -78,14 +84,9 @@ export const OpenHereSheet = ({ scanned, onClose }: { scanned: string; onClose: 
             It will ask for a passkey so it unlocks with Face ID / Touch ID next time.
           </p>
         </>
-      ) : s ? (
+      ) : s && !confirmed ? (
         <>
-          <p className="text-lg font-bold text-white mt-3">
-            Open your wallet on {s.origin.replace(/^https?:\/\//, '')}?
-          </p>
-          <p className="text-sm m-0" style={{ color: '#98A2B3' }}>
-            Check the code on your computer matches:
-          </p>
+          <p className="text-lg font-bold text-white mt-3">Type this code on your computer</p>
           <p
             className="text-4xl font-black tracking-widest my-3"
             style={{ color: '#F5C542' }}
@@ -94,6 +95,14 @@ export const OpenHereSheet = ({ scanned, onClose }: { scanned: string; onClose: 
             {s.code}
           </p>
           <p className="text-xs" style={{ color: '#98A2B3' }}>
+            Only type it into bWalletX on a computer in front of you. Never read it out or send it to anyone.
+          </p>
+          {!error && <p className="text-sm text-white mt-2">Waiting for your computer…</p>}
+        </>
+      ) : s ? (
+        <>
+          <p className="text-lg font-bold text-white mt-3">Your computer has the code. Open your wallet there?</p>
+          <p className="text-xs mt-2" style={{ color: '#98A2B3' }}>
             Only continue if you opened bWalletX on that computer yourself. It gets full control of this wallet.
           </p>
           {!usePassword && (
@@ -105,7 +114,7 @@ export const OpenHereSheet = ({ scanned, onClose }: { scanned: string; onClose: 
               style={{ background: 'var(--bw-accent, #F5C542)', color: '#000' }}
               data-testid="open-here-bio"
             >
-              {busy ? 'Sending…' : `Codes match: confirm with ${bio}`}
+              {busy ? 'Sending…' : `Confirm with ${bio}`}
             </button>
           )}
           {usePassword ? (
@@ -125,7 +134,7 @@ export const OpenHereSheet = ({ scanned, onClose }: { scanned: string; onClose: 
                 className="w-full rounded-xl py-3 font-bold border-0 mt-3"
                 style={{ background: 'var(--bw-accent, #F5C542)', color: '#000' }}
               >
-                {busy ? 'Sending…' : 'Codes match: open it there'}
+                {busy ? 'Sending…' : 'Open it there'}
               </button>
             </>
           ) : (
