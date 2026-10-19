@@ -115,3 +115,23 @@ export const barButtons = (def: BappBarDef, pathname: string, search = ''): BarB
     return { slot, label: SLOT_LABELS[slot], route, active: !!route && (here === route || pathname === base) };
   });
 };
+
+/** The phone top bar's fixed buttons, left to right (TopNav.tsx). bMail is the mailbox button. */
+export const TOP_BAR_FIXED = ['accounts', 'calls', 'bmail', 'media', 'lock'] as const;
+
+/**
+ * The bApp button the phone top bar adds after Calls on this path, or null. A bApp that already has a fixed
+ * button (bMail = the mailbox) gets none: that button is highlighted instead, so opening bMail never shows
+ * a second bMail icon (owner, 19 Oct 2026).
+ */
+export const topBarBappForPath = (pathname: string, bars: readonly BappBarDef[] = BAPP_BARS): BappBarDef | null => {
+  const def = bappBarForPath(pathname, bars);
+  return def && !(TOP_BAR_FIXED as readonly string[]).includes(def.id) ? def : null;
+};
+
+/** Slot ids the phone top bar renders on this path, in order. */
+export const topBarSlots = (pathname: string, bars: readonly BappBarDef[] = BAPP_BARS): string[] => {
+  const extra = topBarBappForPath(pathname, bars);
+  const [accounts, calls, ...rest] = TOP_BAR_FIXED;
+  return [accounts, calls, ...(extra ? [extra.id] : []), ...rest];
+};

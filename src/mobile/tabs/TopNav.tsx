@@ -31,7 +31,7 @@ import {
 import { agentMenuTarget, showAgentInMenu } from './agentEntry';
 import { phoneLayoutOn, usePhoneLayout } from '../phone/flag';
 import { BappAppButton } from '../phone/BappBar';
-import { bappBarForPath } from '../phone/bappBarModel';
+import { topBarBappForPath } from '../phone/bappBarModel';
 import { startAgentCreate } from '../agents/agentCreate';
 import { AGENT_TOOLS_TITLE, AgentToolsSheet } from '../agents/AgentToolsSheet';
 import { AirdropsNavButton } from '../airdrops/AirdropsNavButton';
@@ -111,7 +111,7 @@ const TopNavBar = () => {
   // bPhone Calls opens in the content area (/m/calls, owner 9 Oct 2026, as bMail); tapping the button again leaves.
   const onCalls = pathname.startsWith(CALLS_ROUTE);
   /** In a bApp (phone layout): its icon sits after the bPhone button and opens the app's sections. bPhone stays put. */
-  const bapp = phone ? bappBarForPath(pathname) : null;
+  const bapp = phone ? topBarBappForPath(pathname) : null;
   const [toolsOpen, setToolsOpen] = useState(false);
   const [mintOpen, setMintOpen] = useState(false);
   const [pairOpen, setPairOpen] = useState(false);
