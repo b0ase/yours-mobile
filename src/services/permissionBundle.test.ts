@@ -180,14 +180,14 @@ describe('PermissionBundler answers', () => {
 });
 
 describe('sheet model', () => {
-  test('connect only: plain words, everything ticked', () => {
+  test('connect only: plain words; key use is said plainly and not pre-ticked (audit C1)', () => {
     const m = buildSheetModel({ originator: 'bmovies.app', items: [proto('r1'), basket('r2')] });
     expect(m.mode).toBe('connect');
     expect(m.lines.map((l) => l.text)).toEqual([
-      'Sign in and sign its messages',
+      'Sign and encrypt anything with your "bmovies ticket" keys',
       'Keep its tickets and tokens in your wallet',
     ]);
-    expect(m.lines.every((l) => l.checked)).toBe(true);
+    expect(m.lines.map((l) => l.checked)).toEqual([false, true]);
     expect(m.lines[1].detail).toContain('bmovies tickets');
   });
 
@@ -223,7 +223,7 @@ describe('sheet model', () => {
     expect(byId.priv.checked).toBe(false);
     expect(byId.cert.checked).toBe(false);
     expect(byId.cert.risky).toBe(true);
-    expect(byId.ok.checked).toBe(true);
+    expect(byId.ok.checked).toBe(false);
     expect(isRiskyRequest(proto('p'))).toBe(false);
   });
 
@@ -247,12 +247,15 @@ describe('allowanceSats', () => {
 
 describe("Don't ask again on this site", () => {
   const base = { requestID: 'r', originator: 'bchatx.com' };
-  test('routine signing and baskets can be granted without a sheet', () => {
+  test('baskets can be granted without a sheet; protocol (key) access never is (audit C1)', () => {
     expect(isAutoGrantable({ ...base, type: 'protocol', protocolID: [1, 'bitsign auth'], counterparty: 'self' })).toBe(
-      true,
+      false,
     );
-    expect(isAutoGrantable({ ...base, type: 'protocol', protocolID: [0, 'feed post'] })).toBe(true);
-    expect(isAutoGrantable({ ...base, type: 'protocol', protocolID: [2, 'own key'], counterparty: 'self' })).toBe(true);
+    expect(isAutoGrantable({ ...base, type: 'protocol', protocolID: [0, 'feed post'] })).toBe(false);
+    expect(isAutoGrantable({ ...base, type: 'protocol', protocolID: [2, 'own key'], counterparty: 'self' })).toBe(
+      false,
+    );
+    expect(isAutoGrantable({ ...base, type: 'protocol', protocolID: [1, 'btrust'], counterparty: 'self' })).toBe(false);
     expect(isAutoGrantable({ ...base, type: 'basket', basket: 'bchat posts' })).toBe(true);
   });
   test('payments, personal details and risky key use still ask', () => {
@@ -275,7 +278,7 @@ describe("Don't ask again on this site", () => {
       sheetCanTrust({
         items: [
           { ...base, type: 'spending', spending: { satoshis: 5 } },
-          { ...base, requestID: 'r2', type: 'protocol', protocolID: [1, 'post'] },
+          { ...base, requestID: 'r2', type: 'basket', basket: 'posts' },
         ],
       }),
     ).toBe(true);

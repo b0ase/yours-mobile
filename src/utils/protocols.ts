@@ -20,10 +20,11 @@ export const securityLevelLabel = (level?: number): string => {
   switch (level) {
     case 0:
       return 'Level 0 · any app';
+    // BRC-43 keys do not depend on the app: any app asking for the same protocol gets the same keys (audit C1).
     case 1:
-      return 'Level 1 · this app only';
+      return 'Level 1 · same keys for any app using this protocol';
     case 2:
-      return 'Level 2 · this app and this recipient only';
+      return 'Level 2 · same keys for any app using this protocol with this recipient';
     default:
       return `Level ${level ?? 0}`;
   }

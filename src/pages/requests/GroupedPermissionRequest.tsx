@@ -7,6 +7,7 @@ import { useSnackbar } from '../../hooks/useSnackbar';
 import { useTheme } from '../../hooks/useTheme';
 import { sendMessage } from '../../utils/chromeHelpers';
 import { protocolLabel } from '../../utils/protocols';
+import { isReservedProtocol } from '../../services/reservedProtocols';
 import type {
   GroupedPermissionRequest as GroupedPermissionRequestType,
   GroupedPermissions,
@@ -29,8 +30,9 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
   const { chromeStorageService } = useServiceContext();
   const { permissions } = request;
 
+  // Protocol access lets the app sign with keys derived from your wallet: never pre-ticked (audit C1).
   const [protocolChecked, setProtocolChecked] = useState<boolean[]>(() =>
-    (permissions.protocolPermissions ?? []).map(() => true),
+    (permissions.protocolPermissions ?? []).map(() => false),
   );
   const [basketChecked, setBasketChecked] = useState<boolean[]>(() => (permissions.basketAccess ?? []).map(() => true));
   const [certChecked, setCertChecked] = useState<boolean[]>(() =>
@@ -46,7 +48,9 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
 
   const buildGranted = (): Partial<GroupedPermissions> => {
     const granted: Partial<GroupedPermissions> = {};
-    const checkedProtocols = (permissions.protocolPermissions ?? []).filter((_, i) => protocolChecked[i]);
+    const checkedProtocols = (permissions.protocolPermissions ?? []).filter(
+      (p, i) => protocolChecked[i] && !isReservedProtocol(p.protocolID),
+    );
     if (checkedProtocols.length > 0) granted.protocolPermissions = checkedProtocols;
     const checkedBaskets = (permissions.basketAccess ?? []).filter((_, i) => basketChecked[i]);
     if (checkedBaskets.length > 0) granted.basketAccess = checkedBaskets;
@@ -188,31 +192,40 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
           >
             Protocols
           </p>
-          {permissions.protocolPermissions?.map((p, i) => (
-            <label
-              key={`proto-${i}`}
-              className="flex items-start gap-3 py-2 cursor-pointer"
-              style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}
-            >
-              <input
-                type="checkbox"
-                checked={protocolChecked[i]}
-                onChange={() => toggleProtocol(i)}
-                className="mt-0.5 accent-green-400"
-              />
-              <div className="flex flex-col min-w-0">
-                <span className="text-xs font-medium" style={{ color: theme.color.global.contrast }}>
-                  {protocolLabel(p.protocolID)} (level {p.protocolID[0]})
-                  {p.counterparty ? ` — ${p.counterparty.slice(0, 10)}...` : ''}
-                </span>
-                {p.description && (
-                  <span className="text-xs mt-0.5 opacity-60" style={{ color: theme.color.global.contrast }}>
-                    {p.description}
+          {permissions.protocolPermissions?.map((p, i) =>
+            isReservedProtocol(p.protocolID) ? (
+              <p key={`proto-${i}`} className="text-xs py-2" style={{ color: theme.color.global.gray }}>
+                Refused: “{p.protocolID[1]}” is used only by bWalletX itself.
+              </p>
+            ) : (
+              <label
+                key={`proto-${i}`}
+                className="flex items-start gap-3 py-2 cursor-pointer"
+                style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}
+              >
+                <input
+                  type="checkbox"
+                  checked={protocolChecked[i]}
+                  onChange={() => toggleProtocol(i)}
+                  className="mt-0.5 accent-green-400"
+                />
+                <div className="flex flex-col min-w-0">
+                  <span className="text-xs font-medium" style={{ color: theme.color.global.contrast }}>
+                    Let this app sign and encrypt with your keys for “{protocolLabel(p.protocolID)}”
+                    {p.counterparty ? ` (shared with ${p.counterparty.slice(0, 10)}…)` : ''}
                   </span>
-                )}
-              </div>
-            </label>
-          ))}
+                  <span className="text-xs mt-0.5 opacity-60" style={{ color: theme.color.global.contrast }}>
+                    Any app that asks for this protocol gets the same keys (level {p.protocolID[0]}).
+                  </span>
+                  {p.description && (
+                    <span className="text-xs mt-0.5 opacity-60" style={{ color: theme.color.global.contrast }}>
+                      {p.description}
+                    </span>
+                  )}
+                </div>
+              </label>
+            ),
+          )}
         </Show>
 
         {/* Baskets */}
