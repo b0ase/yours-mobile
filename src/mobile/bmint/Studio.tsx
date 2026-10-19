@@ -7,6 +7,11 @@ import { fmtSats, fmtUsd, hasRate, satsToUsd, useBsvUsd } from '../money/money';
 import { useWalletMedia, type MediaItem } from '../media/useWalletMedia';
 import { thumbUrl } from '../market/thumbs';
 import { HubArt } from './HubArt';
+import { getTagValue } from '../../utils/format';
+import { useRelayxAccount } from '../sweep/useRelayxAccount';
+import { loadSavedRelayx } from '../sweep/relayxSaved';
+import type { Found } from '../../sweep/relayxRecover';
+import { coverOf, groupVault, runCollection, type SubVault, type VaultPiece } from './lib/vaultGroups';
 import { DROP_ACCEPT, DROP_UNSUPPORTED, handOff, TILE_LABEL, tileForFile, type DropTile } from './lib/drop';
 
 /**
@@ -15,7 +20,8 @@ import { DROP_ACCEPT, DROP_UNSUPPORTED, handOff, TILE_LABEL, tileForFile, type D
  *              live cost estimate (mint.ts estimateCost, the same maths the confirm sheet uses), then "Mint it" opens
  *              the existing Mint sheet for that type with the file already picked (BmintPage MintOpen → MintSheet file).
  *   Steps      the calm three-step explanation.
- *   Vault      the wallet's real NFTs (media/useWalletMedia, the same list as Wallet › NFTs); gold empty state.
+ *   Vault      the wallet's real NFTs (media/useWalletMedia, the same list as Wallet › NFTs) plus saved Run NFTs, as
+ *              sub-vaults per collection (lib/vaultGroups.ts); gold empty state.
  * Nothing here signs or spends: every mint still goes through MintSheet and the wallet's confirm sheet.
  */
 
@@ -217,64 +223,124 @@ export const DropHero = ({ name }: { name: string }) => {
   );
 };
 
-const VaultTile = ({ item }: { item: MediaItem }) => {
+/** A wallet NFT or a saved Run NFT as a vault piece. */
+const fromMedia = (m: MediaItem): VaultPiece => ({
+  key: m.origin,
+  name: m.name,
+  collection: getTagValue(m.output.tags, 'collection') || getTagValue(m.output.tags, 'collectionId') || '',
+  thumb: m.kind === 'images' ? (thumbUrl(m.origin) ?? m.url) : undefined,
+  video: m.kind === 'video' ? m.url : undefined,
+  kind: m.kind,
+  origin: m.origin.replace('.', '_'),
+  pending: m.pending,
+  flagged: m.flagged,
+});
+const fromRun = (f: Found): VaultPiece => ({
+  key: `run:${f.origin || f.location}`,
+  name: f.title,
+  collection: runCollection(f),
+  thumb: f.art,
+  kind: 'run',
+});
+
+const KIND_LABEL: Record<string, string> = { images: 'Picture', music: 'Music', video: 'Video', run: 'Run NFT' };
+
+const PieceArt = ({ piece }: { piece?: VaultPiece }) => {
   const [broken, setBroken] = useState(false);
-  const thumb = item.kind === 'images' ? (thumbUrl(item.origin) ?? item.url) : '';
+  if (piece?.thumb && !broken) return <img src={piece.thumb} alt="" loading="lazy" onError={() => setBroken(true)} />;
+  if (piece?.video) return <video src={piece.video} muted preload="metadata" playsInline />;
+  return <HubArt id={piece?.kind === 'music' ? 'music' : 'books'} />;
+};
+
+const VaultTile = ({ item }: { item: VaultPiece }) => (
+  <Link to="/m/nfts" className={`bm-vtile${item.flagged ? ' flagged' : ''}`}>
+    <span className="bm-vart">
+      <PieceArt piece={item} />
+      {item.pending && <span className="bm-chip bm-vpending">Pending</span>}
+      <Seal className="bm-vseal" />
+    </span>
+    <span className="bm-vcap">
+      <b>{item.name}</b>
+      <span>{KIND_LABEL[item.kind] ?? 'Piece'}</span>
+    </span>
+  </Link>
+);
+
+/** A sub-vault: one cover for the whole collection, its name and count. */
+const SubVaultTile = ({ vault, onOpen }: { vault: SubVault; onOpen: () => void }) => {
+  const cover = coverOf(vault);
   return (
-    <Link to="/m/nfts" className={`bm-vtile${item.flagged ? ' flagged' : ''}`}>
+    <button type="button" className={`bm-vtile bm-vcoll${cover?.flagged ? ' flagged' : ''}`} onClick={onOpen}>
       <span className="bm-vart">
-        {thumb && !broken ? (
-          <img src={thumb} alt="" loading="lazy" onError={() => setBroken(true)} />
-        ) : item.kind === 'video' ? (
-          <video src={item.url} muted preload="metadata" playsInline />
-        ) : (
-          <HubArt id={item.kind === 'music' ? 'music' : 'books'} />
-        )}
-        {item.pending && <span className="bm-chip bm-vpending">Pending</span>}
+        <PieceArt piece={cover} />
+        <span className="bm-chip bm-vcount">{vault.items.length}</span>
         <Seal className="bm-vseal" />
       </span>
       <span className="bm-vcap">
-        <b>{item.name}</b>
-        <span>
-          {item.kind === 'images'
-            ? 'Picture'
-            : item.kind === 'music'
-              ? 'Music'
-              : item.kind === 'video'
-                ? 'Video'
-                : 'Piece'}
-        </span>
+        <b>{vault.title}</b>
+        <span>{vault.items.length === 1 ? '1 piece' : `${vault.items.length} pieces`}</span>
       </span>
-    </Link>
+    </button>
   );
 };
 
-const VAULT_SHOWN = 10;
-
+/** Your vault (owner, 20 Oct 2026): sub-vaults per collection; tap one to open its grid. */
 export const Vault = ({ name }: { name: string }) => {
-  const { items, loading, error } = useWalletMedia();
-  const shown = items.slice(0, VAULT_SHOWN);
+  const { items, loading, error, hasMore, loadMore } = useWalletMedia();
+  const xpub = useRelayxAccount();
+  const [open, setOpen] = useState<string | null>(null);
+  // Every page, so each sub-vault's count is the real one (Wallet › NFTs does the same).
+  useEffect(() => {
+    if (hasMore && !loading && !error) void loadMore();
+  }, [hasMore, loading, error, loadMore]);
+  const pieces = useMemo(() => {
+    const run = xpub ? (loadSavedRelayx(xpub)?.result.nfts ?? []) : [];
+    return [...items.map(fromMedia), ...run.filter((f) => !f.unread).map(fromRun)];
+  }, [items, xpub]);
+  const { vaults, loose } = useMemo(() => groupVault(pieces), [pieces]);
+  const inside = open ? vaults.find((v) => v.id === open) : undefined;
   return (
     <section className="bm-vault" aria-label="Your vault">
       <div className="bm-vault-h">
         <div>
-          <p className="bm-eyebrow">Your vault</p>
-          <h2>Everything you&rsquo;ve sealed, in one place.</h2>
+          {inside ? (
+            <button type="button" className="bm-vback" onClick={() => setOpen(null)}>
+              ‹ Your vault
+            </button>
+          ) : (
+            <p className="bm-eyebrow">Your vault</p>
+          )}
+          <h2>{inside ? inside.title : <>Everything you&rsquo;ve sealed, in one place.</>}</h2>
         </div>
         <span className="bm-vault-who">
           {name}
-          {items.length > 0 && <small> · {items.length >= 50 ? '50+' : items.length} pieces</small>}
-          {items.length > 0 && (
+          {pieces.length > 0 && (
+            <small>
+              {' '}
+              · {inside ? inside.items.length : pieces.length}
+              {!inside && hasMore ? '+' : ''} pieces
+            </small>
+          )}
+          {pieces.length > 0 && (
             <Link to="/m/nfts" className="bm-vault-all">
               See all
             </Link>
           )}
         </span>
       </div>
-      {shown.length > 0 ? (
+      {inside ? (
         <div className="bm-vgrid">
-          {shown.map((i) => (
-            <VaultTile key={i.origin} item={i} />
+          {inside.items.map((i) => (
+            <VaultTile key={i.key} item={i} />
+          ))}
+        </div>
+      ) : pieces.length > 0 ? (
+        <div className="bm-vgrid">
+          {vaults.map((v) => (
+            <SubVaultTile key={v.id} vault={v} onOpen={() => setOpen(v.id)} />
+          ))}
+          {loose.map((i) => (
+            <VaultTile key={i.key} item={i} />
           ))}
         </div>
       ) : loading ? (
