@@ -83,7 +83,7 @@ const KYC_URL = 'https://bit-sign.online/kyc';
 const PairSheet = lazy(() => import('../pair/PairSheet'));
 const PotsScreen = lazy(() => import('../pots/PotsScreen'));
 import { TermsScreen } from '../ugc/UgcSheets';
-import { SUPPORT_EMAIL } from '../ugc/ugc';
+import { SECURITY_URL, SUPPORT_EMAIL } from '../ugc/ugc';
 import { DeleteAccountScreen } from '../account/DeleteAccountScreen';
 import { HdSweepScreen } from '../sweep/HdSweepScreen';
 import { hasRate, money, useBsvUsd } from '../money/money';
@@ -959,6 +959,13 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
               label="Contact and reports"
               description={SUPPORT_EMAIL}
               onClick={() => (window.location.href = `mailto:${SUPPORT_EMAIL}`)}
+            />
+            <Divider />
+            <Row
+              icon={<ShieldCheck size={16} />}
+              label="Report a security issue"
+              description="b-Aware: responsible disclosure, rewards paid in BSV"
+              onClick={() => window.open(SECURITY_URL, '_blank', 'noopener')}
               isLast
             />
           </Section>

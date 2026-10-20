@@ -1,0 +1,33 @@
+name: Bug report
+description: Something in bWallet or bWalletX does not work as it should (not a security issue)
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks. If this is a **security** finding (funds, keys, approvals, signing), stop here and follow https://bwallet.space/b-Aware instead; it pays, and a public issue would put users at risk.
+  - type: input
+    id: edition
+    attributes:
+      label: Edition and version
+      description: Settings › About. e.g. bWalletX extension 5.2.26, bWallet Mobile Android 118, web.bwalletx.com
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: 1. … 2. … 3. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and what happened instead
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Screenshots, console output, a txid. Never paste a recovery phrase, private key, password or key file.

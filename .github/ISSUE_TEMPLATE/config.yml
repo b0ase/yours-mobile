@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability (b-Aware)
+    url: https://bwallet.space/b-Aware
+    about: Found a way to take funds, read keys or bypass an approval? Do not file it here. Email support@bwalletx.com with the subject "b-Aware". Rewards are paid in BSV.

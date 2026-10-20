@@ -11,6 +11,8 @@
 import { BCHAT_ORIGIN, type Http } from '../chat/api';
 
 export const SUPPORT_EMAIL = 'support@bwalletx.com';
+/** Responsible disclosure and bug bounty (b-Aware): where to send a security finding, and what it pays. */
+export const SECURITY_URL = 'https://bwallet.space/b-Aware';
 export const TERMS_URL = `${BCHAT_ORIGIN}/terms#conduct`;
 export const DELETE_ACCOUNT_URL = `${BCHAT_ORIGIN}/delete-account`;
 export const REPORT_URL = `${BCHAT_ORIGIN}/api/bitsign/report`;

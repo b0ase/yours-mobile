@@ -1,0 +1,7 @@
+# bWallet / bWalletX security contact (RFC 9116). Policy and rewards: https://bwallet.space/b-Aware
+Contact: mailto:support@bwalletx.com?subject=b-Aware
+Expires: 2027-10-20T00:00:00.000Z
+Policy: https://bwallet.space/b-Aware
+Canonical: https://bwallet.space/.well-known/security.txt
+Acknowledgments: https://bwallet.space/b-Aware#credits
+Preferred-Languages: en

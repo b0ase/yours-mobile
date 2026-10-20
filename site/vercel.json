@@ -1,6 +1,30 @@
 {
   "rewrites": [
     {
+      "source": "/b-Aware",
+      "destination": "/b-aware.html"
+    },
+    {
+      "source": "/b-aware",
+      "destination": "/b-aware.html"
+    },
+    {
+      "source": "/bugs",
+      "destination": "/b-aware.html"
+    },
+    {
+      "source": "/disclosure",
+      "destination": "/b-aware.html"
+    },
+    {
+      "source": "/security",
+      "destination": "/b-aware.html"
+    },
+    {
+      "source": "/bounty",
+      "destination": "/b-aware.html"
+    },
+    {
       "source": "/api/theme-orders/:op",
       "destination": "/api/theme-orders?op=:op"
     },
@@ -127,6 +151,15 @@
         {
           "key": "Content-Type",
           "value": "application/json"
+        }
+      ]
+    },
+    {
+      "source": "/.well-known/security.txt",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "text/plain; charset=utf-8"
         }
       ]
     }
