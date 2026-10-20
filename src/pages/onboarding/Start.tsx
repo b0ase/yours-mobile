@@ -78,22 +78,6 @@ export const Start = () => {
             {theme.settings.displayName ?? `${theme.settings.walletName} Wallet`}
           </motion.h1>
           <ThemeBadge theme={theme} />
-          {getPlatform().welcomeNotice && (
-            <p className="text-[10px] leading-relaxed text-center max-w-[18rem]" style={{ color: gray }}>
-              {getPlatform().welcomeNotice}
-            </p>
-          )}
-
-          <motion.p
-            variants={fadeUp}
-            initial="hidden"
-            animate="visible"
-            custom={0.18}
-            className="text-xs tracking-wide uppercase"
-            style={{ color: gray }}
-          >
-            An open source project
-          </motion.p>
         </div>
 
         {/* Bottom section — actions */}
@@ -161,6 +145,16 @@ export const Start = () => {
           >
             <img src={gihubIcon} alt="GitHub" style={{ width: '1.4rem', height: '1.4rem' }} />
           </motion.button>
+
+          {/* Legal notice and the open-source line sit at the bottom, under the GitHub logo (owner, 20 Oct 2026). */}
+          {getPlatform().welcomeNotice && (
+            <p className="text-[10px] leading-relaxed text-center max-w-[18rem]" style={{ color: gray }}>
+              {getPlatform().welcomeNotice}
+            </p>
+          )}
+          <p className="text-xs tracking-wide uppercase text-center" style={{ color: gray }}>
+            An open source project
+          </p>
         </div>
       </div>
     </Show>

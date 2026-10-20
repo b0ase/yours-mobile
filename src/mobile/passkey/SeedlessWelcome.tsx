@@ -125,11 +125,8 @@ export const SeedlessWelcome = () => {
       <OpenOnComputerPanel />
       {social && !signedIn && (
         <>
-          {/* Narrow phones: one row of three icon buttons. */}
-          <div className="w-full flex items-center gap-2 sm:hidden" data-testid="welcome-who-compact">
-            <span className="text-xs font-semibold shrink-0" style={{ color: gray }}>
-              Continue with
-            </span>
+          {/* X and Google side by side at every width (owner, 20 Oct 2026). */}
+          <div className="w-full flex items-center gap-2" data-testid="welcome-who">
             {WHO.map((w) => (
               <button
                 key={w}
@@ -137,26 +134,11 @@ export const SeedlessWelcome = () => {
                 aria-label={`Continue with ${NAMES[w]}`}
                 disabled={!!busy}
                 onClick={() => go(w)}
-                className="flex-1 h-11 rounded-xl flex items-center justify-center border-0 cursor-pointer"
+                className="flex-1 h-11 rounded-xl flex items-center justify-center gap-2 text-sm font-semibold border-0 cursor-pointer"
                 style={surface}
               >
                 {logo(w)}
-              </button>
-            ))}
-          </div>
-          {/* Wider screens: full buttons. */}
-          <div className="w-full hidden sm:flex flex-col gap-2" data-testid="welcome-who-full">
-            {WHO.map((w) => (
-              <button
-                key={w}
-                type="button"
-                disabled={!!busy}
-                onClick={() => go(w)}
-                className="w-full h-11 rounded-xl flex items-center justify-center gap-2 text-sm font-semibold border-0 cursor-pointer"
-                style={surface}
-              >
-                {logo(w)}
-                Continue with {NAMES[w]}
+                {NAMES[w]}
               </button>
             ))}
           </div>
