@@ -22,6 +22,8 @@ interface ImportMetaEnv {
   readonly VITE_X_FOLLOWS_IMPORT?: string;
   /** '1' = passkey seed backup prototype + /passkey-check (off by default; never in store builds). */
   readonly VITE_SEEDLESS?: string;
+  /** Test builds only: shows the on-screen restore trace. */
+  readonly VITE_SEEDLESS_TRACE?: string;
   /** Passkey seed backup store (default bit-sign /api/bitsign/passkey-backups on www.bchatx.com). */
   readonly VITE_PASSKEY_BACKUP_URL?: string;
   /** Pairing relay host for "open on computer" (default relay.bwallet.space). */
