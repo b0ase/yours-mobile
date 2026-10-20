@@ -29,3 +29,34 @@ export const securityLevelLabel = (level?: number): string => {
       return `Level ${level ?? 0}`;
   }
 };
+
+/**
+ * Plain wording the WALLET writes for protocols it knows are read-only. A site cannot change this text.
+ * Only protocols that reveal nothing secret and cannot spend belong here: they may be approved with one tap.
+ */
+const READ_ONLY_PROTOCOLS: Record<string, string> = {
+  'identity key retrieval': 'see your public ID',
+};
+
+export const readOnlyProtocolPhrase = (protocolID?: [number, string]): string | undefined =>
+  protocolID ? READ_ONLY_PROTOCOLS[protocolID[1].trim().toLowerCase()] : undefined;
+
+/** "see your public ID" / "see your public ID and X": the sentence tail for a list of read-only phrases. */
+export const joinPhrases = (phrases: string[]): string =>
+  phrases.length <= 1 ? (phrases[0] ?? '') : `${phrases.slice(0, -1).join(', ')} and ${phrases[phrases.length - 1]}`;
+
+/** Amount line for a spend: "1¢" on top, sats under it. Cents need a price; without one only sats are shown. */
+export const spendAmount = (sats: number, usdPerBsv: number): { primary: string; secondary: string | null } => {
+  const satsText = `${sats.toLocaleString()} sats`;
+  if (!(usdPerBsv > 0)) return { primary: satsText, secondary: null };
+  const cents = (sats / 100_000_000) * usdPerBsv * 100;
+  const text =
+    cents >= 100
+      ? `$${(cents / 100).toFixed(2)}`
+      : cents >= 1
+        ? `${Math.round(cents)}¢`
+        : cents > 0
+          ? 'under 1¢'
+          : '0¢';
+  return { primary: text, secondary: satsText };
+};

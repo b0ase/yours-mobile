@@ -6,7 +6,8 @@ import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { useTheme } from '../../hooks/useTheme';
 import { sendMessage } from '../../utils/chromeHelpers';
-import { protocolLabel } from '../../utils/protocols';
+import { joinPhrases, protocolLabel, readOnlyProtocolPhrase, spendAmount } from '../../utils/protocols';
+import { cachedExchangeRate } from '../../utils/exchangeRate';
 import { isReservedProtocol } from '../../services/reservedProtocols';
 import type {
   GroupedPermissionRequest as GroupedPermissionRequestType,
@@ -41,6 +42,20 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
   // Ticked by default (owner, 9 Oct 2026): connecting sets the app's allowance in the same tap.
   const [spendingChecked, setSpendingChecked] = useState(true);
 
+  const [showDetails, setShowDetails] = useState(false);
+
+  // Ordinary, read-only request (today: just the public ID): one sentence and one button, no checkboxes.
+  // The wording comes from the wallet's own table, never from the site (utils/protocols.ts).
+  const protocolList = permissions.protocolPermissions ?? [];
+  const readPhrases = protocolList.map((p) => readOnlyProtocolPhrase(p.protocolID));
+  const simple =
+    protocolList.length > 0 &&
+    readPhrases.every(Boolean) &&
+    protocolList.every((p) => !isReservedProtocol(p.protocolID)) &&
+    !permissions.spendingAuthorization &&
+    !permissions.basketAccess?.length &&
+    !permissions.certificateAccess?.length;
+
   useEffect(() => {
     handleSelect('bsv');
     hideMenu();
@@ -49,7 +64,7 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
   const buildGranted = (): Partial<GroupedPermissions> => {
     const granted: Partial<GroupedPermissions> = {};
     const checkedProtocols = (permissions.protocolPermissions ?? []).filter(
-      (p, i) => protocolChecked[i] && !isReservedProtocol(p.protocolID),
+      (p, i) => (simple || protocolChecked[i]) && !isReservedProtocol(p.protocolID),
     );
     if (checkedProtocols.length > 0) granted.protocolPermissions = checkedProtocols;
     const checkedBaskets = (permissions.basketAccess ?? []).filter((_, i) => basketChecked[i]);
@@ -97,6 +112,92 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
   const toggleProtocol = (i: number) => setProtocolChecked((prev) => prev.map((v, j) => (j === i ? !v : v)));
   const toggleBasket = (i: number) => setBasketChecked((prev) => prev.map((v, j) => (j === i ? !v : v)));
   const toggleCert = (i: number) => setCertChecked((prev) => prev.map((v, j) => (j === i ? !v : v)));
+
+  if (simple) {
+    return (
+      <motion.div
+        className="flex flex-col items-center w-full px-5 pt-8 pb-5 overflow-y-auto text-center"
+        style={{ maxHeight: '100vh' }}
+        initial={{ opacity: 0, y: 20, scale: 0.97 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ type: 'spring', damping: 24, stiffness: 260 }}
+      >
+        <div
+          className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 text-2xl font-extrabold"
+          style={{ background: 'rgba(245,184,0,0.14)', color: '#F5B800', border: '1px solid rgba(245,184,0,0.35)' }}
+          aria-hidden="true"
+        >
+          {request.originator
+            .replace(/^www\./, '')
+            .charAt(0)
+            .toUpperCase()}
+        </div>
+        <h1 className="text-lg font-bold leading-snug mb-2" style={{ color: theme.color.global.contrast }}>
+          {request.originator} wants to {joinPhrases(readPhrases as string[])}
+        </h1>
+        <p className="text-sm mb-1" style={{ color: theme.color.global.gray }}>
+          It can&rsquo;t spend anything.
+        </p>
+        <p
+          className="text-xs font-semibold px-3 py-1 rounded-full mb-6"
+          style={{ background: 'rgba(161,255,139,0.12)', color: '#A1FF8B' }}
+        >
+          Read only
+        </p>
+        {usbError && (
+          <p className="text-xs m-0 mb-2" style={{ color: '#ef4444' }}>
+            {usbError}
+          </p>
+        )}
+        <motion.button
+          className="w-full py-4 rounded-2xl font-bold text-base flex items-center justify-center gap-2 mb-3"
+          style={{
+            background: 'linear-gradient(135deg, #F5B800 0%, #FFD24D 100%)',
+            color: '#050505',
+            opacity: isProcessing ? 0.6 : 1,
+          }}
+          disabled={isProcessing}
+          onClick={handleGrant}
+          whileTap={{ scale: isProcessing ? 1 : 0.97 }}
+          transition={{ type: 'spring', damping: 20, stiffness: 400 }}
+        >
+          {isProcessing && <Loader2 size={14} className="animate-spin" />}
+          Allow
+        </motion.button>
+        <button
+          className="w-full py-3 rounded-xl text-sm"
+          style={{ background: 'transparent', color: theme.color.global.gray, opacity: isProcessing ? 0.5 : 1 }}
+          disabled={isProcessing}
+          onClick={handleDeny}
+        >
+          Deny
+        </button>
+        <button
+          className="text-xs mt-4 underline"
+          style={{ color: theme.color.global.gray, background: 'transparent' }}
+          onClick={() => setShowDetails(!showDetails)}
+          aria-expanded={showDetails}
+        >
+          {showDetails ? 'Hide details' : 'Details'}
+        </button>
+        <Show when={showDetails}>
+          <div
+            className="w-full rounded-xl px-4 py-3 mt-3 text-left text-xs leading-relaxed"
+            style={{ background: theme.color.global.row, color: theme.color.global.gray }}
+          >
+            {protocolList.map((p, i) => (
+              <p key={`detail-${i}`} className="m-0 mb-2">
+                Protocol &ldquo;{protocolLabel(p.protocolID)}&rdquo; (level {p.protocolID[0]}). Any app that asks for
+                this protocol gets the same keys.
+                {p.description ? ` App says: \u201C${p.description}\u201D` : ''}
+              </p>
+            ))}
+            {permissions.description && <p className="m-0">App says: &ldquo;{permissions.description}&rdquo;</p>}
+          </div>
+        </Show>
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div
@@ -157,9 +258,18 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
               className="mt-0.5 accent-orange-400"
             />
             <div className="flex flex-col min-w-0">
-              <span className="text-xs font-semibold" style={{ color: '#F79009' }}>
-                This app wants to spend up to {((permissions.spendingAuthorization?.amount ?? 0) / 1e8).toFixed(8)} BSV{' '}
-                ({(permissions.spendingAuthorization?.amount ?? 0).toLocaleString()} satoshis)
+              <span className="flex flex-col">
+                <span className="text-xs font-semibold" style={{ color: '#F79009' }}>
+                  This app wants to spend up to
+                </span>
+                <span className="text-2xl font-extrabold leading-tight" style={{ color: '#F79009' }}>
+                  {spendAmount(permissions.spendingAuthorization?.amount ?? 0, cachedExchangeRate()).primary}
+                </span>
+                {spendAmount(permissions.spendingAuthorization?.amount ?? 0, cachedExchangeRate()).secondary && (
+                  <span className="text-xs opacity-80" style={{ color: '#F79009' }}>
+                    {spendAmount(permissions.spendingAuthorization?.amount ?? 0, cachedExchangeRate()).secondary}
+                  </span>
+                )}
               </span>
               {permissions.spendingAuthorization?.description && (
                 <span className="text-xs mt-1 opacity-70" style={{ color: theme.color.global.contrast }}>
