@@ -8,6 +8,9 @@ import { ThemeProvider } from './contexts/providers/ThemeProvider';
 import './index.css';
 import { applyBootAccent } from './mobile/theme/accent';
 import { nameFailedFetch } from './utils/nameFailedFetch';
+import { lazy, Suspense } from 'react';
+import { SEEDLESS_ENABLED } from './mobile/passkey/prf';
+import { takeHandCashWebReturn } from './mobile/passkey/handcashWeb';
 global.Buffer = Buffer;
 global.process = process;
 window.Buffer = Buffer;
@@ -32,12 +35,25 @@ window.addEventListener('vite:preloadError', (e) => {
 const root = document.getElementById('root');
 if (!root) throw new Error('Root element');
 const rootDiv = ReactDOM.createRoot(root);
-rootDiv.render(
-  <RootErrorBoundary>
-    <ServiceProvider>
-      <ThemeProvider>
-        <App />
-      </ThemeProvider>
-    </ServiceProvider>
-  </RootErrorBoundary>,
-);
+// Back from "Continue with HandCash" on the web welcome (identity only).
+if (SEEDLESS_ENABLED) takeHandCashWebReturn();
+// Passkey PRF diagnostic (VITE_SEEDLESS=1 builds only), outside the wallet lock so it works on a fresh browser.
+const PasskeyCheck = SEEDLESS_ENABLED
+  ? lazy(() => import('./mobile/passkey/PasskeyCheck').then((m) => ({ default: m.PasskeyCheck })))
+  : null;
+if (PasskeyCheck && location.pathname.replace(/\/$/, '').endsWith('/passkey-check')) {
+  rootDiv.render(
+    <Suspense fallback={null}>
+      <PasskeyCheck />
+    </Suspense>,
+  );
+} else
+  rootDiv.render(
+    <RootErrorBoundary>
+      <ServiceProvider>
+        <ThemeProvider>
+          <App />
+        </ThemeProvider>
+      </ServiceProvider>
+    </RootErrorBoundary>,
+  );

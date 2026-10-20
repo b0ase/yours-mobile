@@ -238,7 +238,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       "      markHandlePrompt(keys.identityAddress, 'create');",
-      "      markHandlePrompt(keys.identityAddress, 'create');\n      if (newWallet) void saveWalletPassword(accountName, password);",
+      "      markHandlePrompt(keys.identityAddress, 'create');\n      if (newWallet) if (!password.startsWith('pk1.')) void saveWalletPassword(accountName, password);",
     ],
     // No "Continue with X / Google" here any more (owner, 18 Oct 2026: bWalletX isn't an OAuth sign-in, so those
     // buttons misled). Create = master password + optional photo + 12 words; accounts are linked after the wallet

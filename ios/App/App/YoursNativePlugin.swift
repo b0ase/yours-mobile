@@ -11,6 +11,7 @@ import WebKit
 class YoursBridgeViewController: CAPBridgeViewController {
     override open func capacitorDidLoad() {
         bridge?.registerPluginInstance(YoursNativePlugin())
+        bridge?.registerPluginInstance(PasskeysPlugin())
     }
 
     /// Live Spaces (src/mobile/spaces/background.ts) float the active speaker's <video> as

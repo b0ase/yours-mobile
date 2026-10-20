@@ -31,6 +31,8 @@ import {
 } from 'lucide-react';
 import { openDappBrowser } from '../dappBrowser';
 import { ChangePassword } from './ChangePassword';
+import { SEEDLESS_ENABLED } from '../passkey/prf';
+import { PasskeySettings } from '../passkey/PasskeySettings';
 import { ConnectSocial } from './ConnectSocial';
 import { HandleFlow } from '../names/HandleFlow';
 import { onSocialChange, takeSocialReturn } from '../social/socialLogin';
@@ -602,6 +604,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
   const [prefs, setPrefs] = usePrefs();
   const [screen, setScreen] = useState<
     | 'bookmarks'
+    | 'passkey'
     | 'hidden'
     | 'terms'
     | 'delete'
@@ -878,8 +881,20 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
               label="Change password"
               description="One password unlocks every account"
               onClick={() => setScreen('password')}
-              isLast
+              isLast={!SEEDLESS_ENABLED}
             />
+            {SEEDLESS_ENABLED && (
+              <>
+                <Divider />
+                <Row
+                  icon={<LockKeyhole size={16} />}
+                  label="Passkey"
+                  description="Unlock with Face ID / fingerprint; seal your 12 words"
+                  onClick={() => setScreen('passkey')}
+                  isLast
+                />
+              </>
+            )}
           </Section>
           <Section title="Appearance">
             <PhoneLayoutToggle />
@@ -1205,6 +1220,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
       {screen === 'signins' && <SignInsScreen onBack={() => setScreen(null)} />}
       {screen === 'tokens' && <MyTokensScreen onBack={() => setScreen(null)} />}
       {screen === 'password' && <ChangePassword onClose={() => setScreen(null)} />}
+      {SEEDLESS_ENABLED && screen === 'passkey' && <PasskeySettings onClose={() => setScreen(null)} />}
       {LINK_ACCOUNTS_ENABLED && screen === 'social' && <ConnectSocial onClose={closeSocial} />}
       {handleOpen && <HandleFlow title="Change handle" onClose={() => setHandleOpen(false)} />}
       {screen === 'idmap' && <IdentityMap onClose={() => setScreen(null)} />}

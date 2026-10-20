@@ -31,6 +31,13 @@ import { SettingsPage } from '../Settings';
 import { saveAccountDataToChromeStorage } from '../../utils/chromeStorageHelpers';
 import { normalizePhrase, phraseProblem, restoreErrorMessage } from './restoreHelpers';
 import { clearHelpDeskUnpin } from '../../mobile/chat/helpDeskPin';
+import { PasskeyRestoreRow } from '../../mobile/passkey/PasskeyBackup';
+import { ExtPasskeyRow } from '../../mobile/passkey/ExtPasskeyRow';
+import { IS_EXTENSION } from '../../mobile/extension';
+import { SEEDLESS_ENABLED } from '../../mobile/passkey/prf';
+import { PasskeyCreatePanel, PasskeyUnlockButton } from '../../mobile/passkey/PasskeyCreate';
+import { keystorePasswordFromPrf, savePasskeyUnlock } from '../../mobile/passkey/seedBackup';
+import { takeTransferredWallet } from '../../mobile/passkey/session';
 import { switchBeforeReload } from './finishSwitch';
 
 export type RestoreAccountProps = {
@@ -52,6 +59,9 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [step, setStep] = useState(1);
+  // Passkey restore / "open on computer" (VITE_SEEDLESS=1): the passkey supplies the wallet password.
+  const [passkeyPassword, setPasskeyPassword] = useState('');
+  const [needPasskey, setNeedPasskey] = useState(false);
   const [seedWords, setSeedWords] = useState<string>('');
   const { addSnackbar } = useSnackbar();
   const { hideMenu, showMenu } = useBottomMenu();
@@ -66,6 +76,35 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
   const otherAccountNames = () => chromeStorageService.getAllAccounts().map((a) => a.name ?? '');
   const [accountName, setAccountName] = useState(() => suggestAccountName(otherAccountNames()));
   const [nameError, setNameError] = useState('');
+  // Preview-only trace of the passkey restore (VITE_SEEDLESS=1): shows each step and the exact error on screen, because
+  // on a phone there is no console (owner, 20 Oct 2026: the first passkey restore sends him back to the restore form).
+  const [trace, setTrace] = useState<string[]>([]);
+  const note = (m: string) => {
+    if (SEEDLESS_ENABLED) setTrace((t) => [...t.slice(-9), `${new Date().toLocaleTimeString()} ${m}`]);
+  };
+  // Cancel on the Restoring screen (owner, 20 Oct 2026: "there's no way off the restoring screen"). A cancelled run
+  // is ignored when it finishes: it never jumps to the finish screen later.
+  const cancelled = useRef(false);
+  // A passkey restore has nothing left to ask (the passkey is the password), so it goes straight to unlock.
+  const viaPasskey = useRef(false);
+  const cancelRestore = () => {
+    cancelled.current = true;
+    note('cancelled by the user');
+    setLoading(false);
+  };
+  useEffect(() => {
+    note(`screen: step ${step}, ${loading ? 'spinner' : 'form'}`);
+  }, [step, loading]);
+  const traceBox =
+    SEEDLESS_ENABLED && trace.length > 0 ? (
+      <pre
+        data-testid="restore-trace"
+        className="w-full text-xs whitespace-pre-wrap break-words rounded-lg p-2 mb-3"
+        style={{ background: '#111', color: '#9ae6b4' }}
+      >
+        {trace.join('\n')}
+      </pre>
+    ) : null;
   const [iconURL, setIconURL] = useState('');
   const hiddenYoursFileInput = useRef<HTMLInputElement>(null);
   const currentAccountName = (() => {
@@ -114,10 +153,37 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
     event.target.value = '';
   };
 
+  const applyPasskeyPassword = (pw: string) => {
+    setPassword(pw);
+    setPasswordConfirm(pw);
+    setPasskeyPassword(pw);
+  };
+  useEffect(() => {
+    if (!SEEDLESS_ENABLED || !newWallet) return;
+    const t = takeTransferredWallet();
+    if (!t) return;
+    setImportWallet('yours');
+    setSeedWords(t.words);
+    setStep(3);
+    setNeedPasskey(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on arrival from "open on computer"
+  }, []);
+  useEffect(() => {
+    if (passkeyPassword && password === passkeyPassword && passwordConfirm === passkeyPassword) {
+      setPasskeyPassword('');
+      note('passkey password ready, starting the restore');
+      viaPasskey.current = true;
+      void handleRestore({ preventDefault: () => undefined } as React.FormEvent<HTMLFormElement>);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once both fields hold the passkey password
+  }, [passkeyPassword, password, passwordConfirm]);
+
   const handleRestore = async (event: React.FormEvent<HTMLFormElement>) => {
     try {
       event.preventDefault();
+      cancelled.current = false;
       setLoading(true);
+      note(`restore: start (name "${accountName}", ${seedWords.trim().split(/\s+/).filter(Boolean).length} words, password ${password.length} chars, newWallet ${String(newWallet)})`);
       // Stage timings (owner, 6 Oct 2026: a restore took ~50 s).
       const t0 = Date.now();
       const at = () => `${((Date.now() - t0) / 1000).toFixed(1)}s`;
@@ -125,22 +191,26 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
       const badName = accountNameError(accountName, otherAccountNames());
       setNameError(badName);
       if (badName) {
+        note(`stopped: ${badName}`);
         setLoading(false);
         addSnackbar(badName, 'error');
         return;
       }
       if (password.length < 8) {
+        note('stopped: password shorter than 8');
         addSnackbar(newWallet ? 'The password must be at least 8 characters!' : restoreErrorMessage(new Error('Unauthorized!')), 'error');
         return;
       }
       const problem = phraseProblem(seedWords);
       if (problem) {
+        note(`stopped: ${problem}`);
         addSnackbar(problem, 'error');
         setStep(2);
         return;
       }
 
       if (newWallet && password !== passwordConfirm) {
+        note('stopped: passwords do not match');
         addSnackbar('The passwords do not match!', 'error');
         return;
       }
@@ -161,6 +231,7 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
       }
 
       console.log('[restore] keys stored at', at());
+      note(`keys stored (${at()})`);
       // A fresh restore pins the bWallet Help Desk again (its unpin is per device only).
       clearHelpDeskUnpin();
       const chromeObject = await chromeStorageService.getAndSetStorage();
@@ -169,15 +240,27 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
       if (!objKeys) throw new Error('Object identity address not found');
       await switchBeforeReload(chromeStorageService, keys.identityAddress);
       console.log('[restore] wallet started at', at());
+      note(`account selected (${at()})`);
       await saveAccountDataToChromeStorage(chromeStorageService, cleanAccountName(accountName), iconURL);
       // RelayX: the inherited restore holds only /1/0 and /2/0. Keep the RelayX account's xpub (public, spends
       // nothing) so the wallet can find its Run NFTs on every RelayX address (sweep/relayxRecover.ts).
       if (importWallet === 'relayx') await rememberRelayx(chromeStorageService, keys.mnemonic);
       console.log('[restore] done at', at());
 
+      if (cancelled.current) {
+        note(`finished after being cancelled (${at()}): staying on the form`);
+        return;
+      }
+      note(`done (${at()}), showing the finish screen`);
       setStep(4);
+      if (viaPasskey.current) {
+        note('going straight to unlock');
+        window.location.reload();
+      }
     } catch (error) {
       console.log(error);
+      // Class name only: a library error message could one day carry the words (review 20 Oct 2026).
+      note(`ERROR: ${error instanceof Error ? error.name : typeof error}`);
       addSnackbar(restoreErrorMessage(error), 'error');
     } finally {
       setLoading(false);
@@ -388,6 +471,39 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
         {newWallet ? "Select the wallet you'd like to restore from" : 'Or restore one from 12 words'}
       </p>
 
+      {/* Prototype, VITE_SEEDLESS=1 only: the passkey opens the sealed 12 words, then the normal restore
+      form runs from its name + password step (as the JSON backup upload does). */}
+      {SEEDLESS_ENABLED && IS_EXTENSION && (
+        <ExtPasskeyRow
+          onWallet={(words, name) => {
+            // The words came from web.bwalletx.com after the person typed the one-time code and said yes. From here
+            // it is the ordinary restore: the person picks this extension's password; an existing account is never
+            // overwritten (the restore refuses "already added").
+            setImportWallet('yours');
+            setSeedWords(words);
+            if (name) setAccountName(cleanAccountName(name));
+            setStep(3);
+          }}
+        />
+      )}
+      {SEEDLESS_ENABLED && !IS_EXTENSION && (
+        <PasskeyRestoreRow
+          onPhrase={(words, pk) => {
+            note(`passkey opened the backup: ${words.trim().split(/\s+/).length} words`);
+            setImportWallet('yours');
+            setSeedWords(words);
+            setStep(3);
+            // The same passkey unlocks the restored wallet: its derived password, no password to invent.
+            // (Add account keeps the master password, so only a new wallet does this.)
+            if (newWallet)
+              void keystorePasswordFromPrf(pk.prf).then((pw) => {
+              pk.prf.fill(0);
+              savePasskeyUnlock({ rpId: pk.rpId, credentialId: pk.credentialId });
+              applyPasskeyPassword(pw);
+            });
+          }}
+        />
+      )}
       <div className="w-full flex flex-col gap-2.5 mb-3">
         {walletOptions.map((opt) =>
           opt.id ? (
@@ -561,6 +677,15 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
           : `The password you use to unlock bWalletX${currentAccountName ? ` (checked against ${currentAccountName})` : ''}.`}
       </p>
 
+      {SEEDLESS_ENABLED && !newWallet && <PasskeyUnlockButton label="Use passkey" onPassword={applyPasskeyPassword} />}
+      {needPasskey && (
+        <PasskeyCreatePanel
+          onPassword={(pw) => {
+            setNeedPasskey(false);
+            applyPasskeyPassword(pw);
+          }}
+        />
+      )}
       <form onSubmit={handleRestore} className="flex flex-col items-center w-full">
         <AccountNameField
           theme={theme}
@@ -650,10 +775,25 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
   );
 
   return (
-    <Show when={!loading} whenFalseContent={<PageLoader theme={theme} message="Restoring..." />}>
+    <Show when={!loading} whenFalseContent={
+        <div className="w-full flex flex-col items-center gap-3">
+          <PageLoader theme={theme} message="Restoring..." />
+          {traceBox}
+          <button
+            type="button"
+            onClick={cancelRestore}
+            data-testid="restore-cancel"
+            className="text-sm underline border-0 bg-transparent cursor-pointer pb-4"
+            style={{ color: theme.color.global.gray }}
+          >
+            Cancel
+          </button>
+        </div>
+      }>
       {/* my-auto: centred when short, top-aligned (not clipped) when taller than the wallet box. */}
       <div className="flex flex-col items-center w-full px-2 pt-4 pb-4 my-auto" style={{ isolation: 'isolate' }}>
         <ObsidianBackdrop />
+        {traceBox}
         <AnimatePresence mode="wait">
           {step === 1 && (
             <motion.div
