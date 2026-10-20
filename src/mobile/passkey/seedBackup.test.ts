@@ -98,12 +98,18 @@ describe('keystore password from passkey', () => {
 });
 
 describe('rpId', () => {
+  // `native` is passed on purpose: the default comes from Capacitor at import time, and another test file in the same
+  // `bun test src` run can change that, so a test relying on the default passed alone but failed in CI.
   test('bwalletx.com family shares one rpId; others use their own host', () => {
-    expect(rpIdFor('web.bwalletx.com')).toBe('bwalletx.com');
-    expect(rpIdFor('desktop.bwalletx.com')).toBe('bwalletx.com');
-    expect(rpIdFor('bwalletx.com')).toBe('bwalletx.com');
-    expect(rpIdFor('localhost')).toBe('localhost');
-    expect(rpIdFor('notbwalletx.com')).toBe('notbwalletx.com');
+    expect(rpIdFor('web.bwalletx.com', false)).toBe('bwalletx.com');
+    expect(rpIdFor('desktop.bwalletx.com', false)).toBe('bwalletx.com');
+    expect(rpIdFor('bwalletx.com', false)).toBe('bwalletx.com');
+    expect(rpIdFor('localhost', false)).toBe('localhost');
+    expect(rpIdFor('notbwalletx.com', false)).toBe('notbwalletx.com');
+  });
+
+  test('the native app always uses the bwalletx.com rpId', () => {
+    expect(rpIdFor('localhost', true)).toBe('bwalletx.com');
   });
 });
 
