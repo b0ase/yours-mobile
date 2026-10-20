@@ -23,7 +23,8 @@ import {
 import { usePasskeyBackupAvailable } from './passkeyUi';
 import { OpenOnComputerPanel } from './OpenOnComputer';
 import { armRestorePing } from './openHere';
-import { parseHandoffSearch } from './extHandoff';
+import { HANDOFF_ENABLED, parseHandoffSearch } from './extHandoff';
+import { IS_EXTENSION } from '../extension';
 import { ExtHandoffSend } from './ExtHandoffSend';
 
 const HandCashMark = () => (
@@ -212,6 +213,23 @@ export const SeedlessWelcome = () => {
         >
           <Fingerprint size={16} />
           Continue with a passkey
+        </button>
+      )}
+      {IS_EXTENSION && HANDOFF_ENABLED && !passkeyOk && (
+        // The extension cannot use a bwalletx.com passkey itself: this goes to the restore screen's "Sign in with a
+        // passkey", which opens web.bwalletx.com and hands the wallet back (notes/extension-passkey-handoff.md).
+        <button
+          type="button"
+          onClick={() => navigate('/restore-wallet')}
+          data-testid="welcome-ext-passkey"
+          className="w-full rounded-xl h-11 text-sm font-bold tracking-wide flex items-center justify-center gap-2 border-0 cursor-pointer"
+          style={{
+            background: `linear-gradient(135deg, ${accent}, ${accentRight})`,
+            color: theme.color.component.primaryButtonText,
+          }}
+        >
+          <Fingerprint size={16} />
+          Sign in with a passkey
         </button>
       )}
       {passkeyOk && (
