@@ -89,6 +89,8 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
   // Cancel on the Restoring screen (owner, 20 Oct 2026: "there's no way off the restoring screen"). A cancelled run
   // is ignored when it finishes: it never jumps to the finish screen later.
   const cancelled = useRef(false);
+  // The wallet arrived from the passkey hand-off (extension): say what this password is for.
+  const [viaExt, setViaExt] = useState(false);
   // A passkey restore has nothing left to ask (the passkey is the password), so it goes straight to unlock.
   const viaPasskey = useRef(false);
   const cancelRestore = () => {
@@ -499,6 +501,7 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
             // overwritten (the restore refuses "already added").
             setImportWallet('yours');
             setSeedWords(words);
+            setViaExt(true);
             if (name) setAccountName(cleanAccountName(name));
             setStep(3);
           }}
@@ -688,9 +691,14 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
 
   const passwordStep = (
     <div className={`flex flex-col items-center w-full ${newWallet ? 'pb-6' : 'pb-20'}`}>
-      <SubStepHeader title={newWallet ? 'Create Password' : 'Your bWalletX password'} onBack={() => setStep(2)} />
+      <SubStepHeader
+        title={viaExt ? 'Master password for this extension' : newWallet ? 'Create Password' : 'Your bWalletX password'}
+        onBack={() => setStep(2)}
+      />
       <p className="text-xs mb-4 text-center px-4" style={{ color: gray }}>
-        {newWallet
+        {viaExt
+          ? 'Your passkey brought your wallet here. This password unlocks all your accounts in this Chrome. Pick one your password manager will keep. Everything else on this page is optional.'
+          : newWallet
           ? 'This will be used to unlock your wallet.'
           : `The password you use to unlock bWalletX${currentAccountName ? ` (checked against ${currentAccountName})` : ''}.`}
       </p>
