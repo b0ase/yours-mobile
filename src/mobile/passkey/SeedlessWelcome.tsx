@@ -113,7 +113,8 @@ export const SeedlessWelcome = () => {
       <HandCashMark />
     );
   const NAMES: Record<Who, string> = { x: 'X', google: 'Google', handcash: 'HandCash' };
-  const WHO: Who[] = ['x', 'google', 'handcash'];
+  // X and Google sit in the row; HandCash is its own full-width green button under it (owner, 20 Oct 2026).
+  const WHO: Who[] = ['x', 'google'];
   const surface = { background: 'var(--bw-surface, #17191E)', color: '#fff' };
   const signedIn = profile || hc;
 
@@ -159,6 +160,18 @@ export const SeedlessWelcome = () => {
               </button>
             ))}
           </div>
+          {/* HandCash: full width, its own green. */}
+          <button
+            type="button"
+            disabled={!!busy}
+            onClick={() => go('handcash')}
+            data-testid="welcome-handcash"
+            className="w-full h-11 rounded-xl flex items-center justify-center gap-2 text-sm font-bold border-0 cursor-pointer"
+            style={{ background: '#38CB7C', color: '#000' }}
+          >
+            {busy === 'handcash' ? <Loader2 size={16} className="animate-spin" /> : null}
+            Continue with HandCash
+          </button>
         </>
       )}
       {signedIn && (
@@ -217,6 +230,18 @@ export const SeedlessWelcome = () => {
         >
           <Fingerprint size={16} />
           Continue with a passkey
+        </button>
+      )}
+      {passkeyOk && (
+        <button
+          type="button"
+          onClick={() => navigate('/restore-wallet')}
+          data-testid="welcome-restore-passkey"
+          className="w-full rounded-xl h-11 text-sm font-bold tracking-wide flex items-center justify-center gap-2 border cursor-pointer"
+          style={{ background: 'transparent', color: contrast, borderColor: accent }}
+        >
+          <Fingerprint size={16} />
+          Restore with a passkey
         </button>
       )}
       <p className="text-[11px] text-center m-0 px-4" style={{ color: gray }}>
