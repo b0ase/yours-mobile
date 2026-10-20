@@ -18,6 +18,7 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { WifKeys } from '../../services/types/keys.types';
 import { useNavigate } from 'react-router-dom';
 import { saveAccountDataToChromeStorage } from '../../utils/chromeStorageHelpers';
+import { switchBeforeReload } from './finishSwitch';
 
 export type ImportAccountProps = {
   onNavigateBack: () => void;
@@ -107,7 +108,7 @@ const ImportAccountInner = ({ onNavigateBack, newWallet = false }: ImportAccount
         return;
       }
 
-      await chromeStorageService.switchAccount(keys.identityAddress || identityPk);
+      await switchBeforeReload(chromeStorageService, keys.identityAddress || identityPk);
       await saveAccountDataToChromeStorage(chromeStorageService, cleanAccountName(accountName), iconURL);
       setStep(3);
     } catch (error) {

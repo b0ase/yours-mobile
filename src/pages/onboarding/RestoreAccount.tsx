@@ -36,6 +36,7 @@ import { SEEDLESS_ENABLED } from '../../mobile/passkey/prf';
 import { PasskeyCreatePanel, PasskeyUnlockButton } from '../../mobile/passkey/PasskeyCreate';
 import { keystorePasswordFromPrf, savePasskeyUnlock } from '../../mobile/passkey/seedBackup';
 import { takeTransferredWallet } from '../../mobile/passkey/session';
+import { switchBeforeReload } from './finishSwitch';
 
 export type RestoreAccountProps = {
   onNavigateBack: (page: SettingsPage) => void;
@@ -197,7 +198,7 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
       if (!chromeObject?.accounts) throw new Error('No accounts found!');
       const objKeys = Object.keys(chromeObject.accounts);
       if (!objKeys) throw new Error('Object identity address not found');
-      await chromeStorageService.switchAccount(keys.identityAddress);
+      await switchBeforeReload(chromeStorageService, keys.identityAddress);
       console.log('[restore] wallet started at', at());
       await saveAccountDataToChromeStorage(chromeStorageService, cleanAccountName(accountName), iconURL);
       // RelayX: the inherited restore holds only /1/0 and /2/0. Keep the RelayX account's xpub (public, spends
