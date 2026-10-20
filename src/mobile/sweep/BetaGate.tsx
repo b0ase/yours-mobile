@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { BANNER_VIDEO } from '../../web/betaBanner';
-import { BETA_RESTORE_TEXT } from './betaTest';
+import { BETA_GATE_TEXT } from './betaTest';
 import './betaGate.css';
 
 /**
@@ -13,17 +13,23 @@ export const BetaGate = ({ children }: { children: ReactNode }) => {
   const [video, setVideo] = useState(true);
   if (ok) return <>{children}</>;
   return (
-    <div className="bw-betagate" data-testid="beta-gate">
+    // The whole screen is the button: tap anywhere (owner, 20 Oct 2026).
+    <div
+      className="bw-betagate"
+      data-testid="beta-gate"
+      role="button"
+      tabIndex={0}
+      onClick={() => setOk(true)}
+      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setOk(true)}
+    >
       <div className="bw-betagate-tape" aria-hidden="true">
         {video && <video src={`/${BANNER_VIDEO}`} autoPlay loop muted playsInline onError={() => setVideo(false)} />}
       </div>
       <div className="bw-betagate-body">
         <span className="bw-betagate-tag">Beta</span>
-        <h1 className="bw-betagate-title">Start small</h1>
-        <p className="bw-betagate-text">{BETA_RESTORE_TEXT}</p>
-        <button type="button" className="bw-betagate-go" onClick={() => setOk(true)}>
-          Continue
-        </button>
+        <h1 className="bw-betagate-title">Dream big. Start small.</h1>
+        <p className="bw-betagate-text">{BETA_GATE_TEXT}</p>
+        <span className="bw-betagate-go">Tap anywhere to continue</span>
       </div>
       <div className="bw-betagate-tape bw-betagate-tape-low" aria-hidden="true" />
     </div>

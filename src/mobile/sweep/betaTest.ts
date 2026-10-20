@@ -56,4 +56,6 @@ export function pickTestInputs<T extends { satoshis: number }>(inputs: readonly 
 
 export const BETA_LINE = 'Beta: test with a small amount first.';
 export const BETA_SWEEP_TEXT = `${APP_NAME} is in beta. Sweep a small test amount first. Once it shows and you’ve sent some back out, sweep the rest.`;
+/** The full-screen "Dream big. Start small." notice before a restore or import (owner, 20 Oct 2026). */
+export const BETA_GATE_TEXT = `${APP_NAME} is still in beta and some features may be experimental. Try it with a small amount before moving your main funds here.`;
 export const BETA_RESTORE_TEXT = `${APP_NAME} is in beta. Try it with a small amount before moving your main funds here.`;

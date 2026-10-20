@@ -11,6 +11,7 @@ import {
   isWalletOrigin,
   OPEN_LIFETIME_S,
   openOpen,
+  restoringFromComputer,
   openUrl,
   parseOpenUrl,
   sealOpen,
@@ -351,5 +352,25 @@ describe('biometric confirm', () => {
   test('is unavailable (password fallback) where biometric unlock was never set up', async () => {
     const { confirmWithBiometrics } = await import('../biometricUnlock');
     expect(await confirmWithBiometrics('test')).toBe('unavailable');
+  });
+});
+
+describe('restoringFromComputer', () => {
+  const realSs = (globalThis as { sessionStorage?: unknown }).sessionStorage;
+  const withStore = (v: string | null) => {
+    (globalThis as { sessionStorage?: unknown }).sessionStorage = { getItem: () => v };
+  };
+  test('true only while a ping channel from the computer is still alive', () => {
+    try {
+      withStore(JSON.stringify({ r: 'x', c: 'c', k: 'k', e: 2000 }));
+      expect(restoringFromComputer(1000)).toBe(true);
+      expect(restoringFromComputer(3000)).toBe(false);
+      withStore(null);
+      expect(restoringFromComputer(1000)).toBe(false);
+      withStore('not json');
+      expect(restoringFromComputer(1000)).toBe(false);
+    } finally {
+      (globalThis as { sessionStorage?: unknown }).sessionStorage = realSs;
+    }
   });
 });

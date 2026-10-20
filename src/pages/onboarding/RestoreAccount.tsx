@@ -36,6 +36,7 @@ import { ExtPasskeyRow } from '../../mobile/passkey/ExtPasskeyRow';
 import { IS_EXTENSION } from '../../mobile/extension';
 import { SEEDLESS_ENABLED } from '../../mobile/passkey/prf';
 import { PasskeyCreatePanel, PasskeyUnlockButton } from '../../mobile/passkey/PasskeyCreate';
+import { restoringFromComputer } from '../../mobile/passkey/openHere';
 import { keystorePasswordFromPrf, savePasskeyUnlock } from '../../mobile/passkey/seedBackup';
 import { takeTransferredWallet } from '../../mobile/passkey/session';
 import { switchBeforeReload } from './finishSwitch';
@@ -474,6 +475,20 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
         {newWallet ? "Select the wallet you'd like to restore from" : 'Or restore one from 12 words'}
       </p>
 
+      {SEEDLESS_ENABLED && newWallet && restoringFromComputer() && (
+        <div
+          className="w-full rounded-xl px-4 py-3 mb-3 text-left"
+          style={{ background: theme.color.global.row }}
+          data-testid="restore-from-computer"
+        >
+          <p className="text-sm font-semibold m-0" style={{ color: contrast }}>
+            Put your wallet on this phone
+          </p>
+          <p className="text-xs mt-1 mb-0" style={{ color: gray }}>
+            Tap Restore with a passkey below and choose your passkey. Your computer will tell you when it is done.
+          </p>
+        </div>
+      )}
       {/* Prototype, VITE_SEEDLESS=1 only: the passkey opens the sealed 12 words, then the normal restore
       form runs from its name + password step (as the JSON backup upload does). */}
       {SEEDLESS_ENABLED && IS_EXTENSION && (

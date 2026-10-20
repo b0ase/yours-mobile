@@ -8,6 +8,8 @@
   flex: 1 1 auto;
   overflow: hidden;
   border-radius: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
   background: radial-gradient(120% 80% at 50% 0%, rgba(245, 184, 0, 0.22), transparent 60%), #0a0a0a;
   color: #f2f2f0;
   text-align: center;
@@ -86,10 +88,20 @@
   font-size: 15px;
   font-weight: 800;
   cursor: pointer;
+  display: inline-block;
 }
-.bw-betagate-go:focus-visible {
+.bw-betagate:focus-visible {
   outline: 2px solid #fff;
   outline-offset: 3px;
+}
+/* Phones and web at phone width: the notice covers the whole screen. */
+@media (max-width: 640px) {
+  html:not(.ww-on) .bw-betagate {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    min-height: 0;
+  }
 }
 /* Desktop: the auth panel is a fixed card; the notice fills it edge to edge (no black box around it). */
 html.ww-on .bw-betagate {

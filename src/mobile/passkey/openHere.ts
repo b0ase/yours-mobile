@@ -365,6 +365,16 @@ export function parsePing(search: string, nowS = Math.floor(Date.now() / 1000)):
 /** Phone: remember the ping channel from /restore?passkey=1&r&c&k&e and join it at once (it must join before the
  * QR lapses; once joined the relay keeps the channel). */
 let pingSocket: { ws: WebSocket; p: PingParams; origin: Promise<string | null> } | null = null;
+/** True while this tab was opened from a computer's "Put this wallet on your phone" code that has not lapsed. */
+export function restoringFromComputer(nowS = Math.floor(Date.now() / 1000)): boolean {
+  try {
+    const p = JSON.parse(sessionStorage.getItem(PING_KEY) ?? 'null') as { e?: number } | null;
+    return !!p && typeof p.e === 'number' && p.e >= nowS;
+  } catch {
+    return false;
+  }
+}
+
 export function armRestorePing(search = typeof location === 'undefined' ? '' : location.search): boolean {
   const p = parsePing(search);
   if (!p || typeof WebSocket === 'undefined') return false;
