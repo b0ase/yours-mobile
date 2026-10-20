@@ -852,6 +852,12 @@ section {
   display: grid;
   gap: 18px;
 }
+.sec-note {
+  margin: 22px auto 0;
+  max-width: 62ch;
+  text-align: center;
+  opacity: 0.8;
+}
 @media (min-width: 860px) {
   .sec-grid {
     grid-template-columns: repeat(3, 1fr);

@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>b-Aware · Responsible disclosure and bug bounty · bWallet</title>
+    <meta
+      name="description"
+      content="How to report a security weakness in bWallet or bWalletX, what we pay for it (in BSV), the safe harbour for good-faith research, and our public responses to advisories."
+    />
+    <meta name="theme-color" content="#000000" />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" href="/favicon.png" type="image/png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <link rel="canonical" href="https://bwallet.space/b-Aware" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="b-Aware: responsible disclosure and bug bounty for bWallet" />
+    <meta
+      property="og:description"
+      content="Find a way to take funds, read keys or bypass an approval in bWallet, tell us first, and get paid in BSV. 10 BSV for a critical, a safe harbour for good-faith research, and our public answers to BRC-100 advisories."
+    />
+    <meta property="og:url" content="https://bwallet.space/b-Aware" />
+    <meta property="og:image" content="https://bwallet.space/og-b-aware.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="b-Aware: responsible disclosure and bug bounty, rewards in BSV" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@bWalletX" />
+    <meta name="twitter:title" content="b-Aware: responsible disclosure and bug bounty for bWallet" />
+    <meta name="twitter:image" content="https://bwallet.space/og-b-aware.png" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=Space+Grotesk:wght@600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      body {
+        margin: 0;
+        background: #000000;
+        color: #e4e7ec;
+        font:
+          15px/1.7 'IBM Plex Sans',
+          system-ui,
+          sans-serif;
+      }
+      main {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: max(24px, env(safe-area-inset-top)) 16px 64px;
+      }
+      h1,
+      h2,
+      h3 {
+        font-family: 'Space Grotesk', system-ui, sans-serif;
+        color: #fff;
+      }
+      h1 {
+        font-size: 30px;
+        line-height: 1.15;
+        margin: 8px 0 4px;
+      }
+      h1 b {
+        color: #f5b800;
+      }
+      h2 {
+        font-size: 18px;
+        margin: 36px 0 8px;
+      }
+      h3 {
+        font-size: 15px;
+        margin: 22px 0 6px;
+      }
+      p,
+      li,
+      td,
+      th {
+        color: #c0c6d0;
+      }
+      a {
+        color: #f5b800;
+      }
+      .meta {
+        color: #667085;
+        font-size: 13px;
+      }
+      .notice {
+        padding: 12px 14px;
+        border: 1px solid #f5b80040;
+        background: #f5b8000d;
+        border-radius: 12px;
+        color: #fcd9a0;
+        font-size: 14px;
+      }
+      .card {
+        padding: 14px 16px;
+        border: 1px solid #ffffff14;
+        background: #0b0b0d;
+        border-radius: 14px;
+        margin: 10px 0;
+      }
+      .card h3 {
+        margin: 0 0 4px;
+      }
+      code {
+        background: #17191e;
+        padding: 1px 6px;
+        border-radius: 6px;
+        font-size: 13px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 10px 0 4px;
+        font-size: 14px;
+      }
+      th,
+      td {
+        text-align: left;
+        vertical-align: top;
+        padding: 9px 10px;
+        border-top: 1px solid #ffffff14;
+      }
+      th {
+        color: #fff;
+        font-weight: 600;
+        border-top: 0;
+      }
+      td.r,
+      th.r {
+        white-space: nowrap;
+        color: #f5b800;
+        font-weight: 600;
+      }
+      .status {
+        display: inline-block;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        padding: 2px 8px;
+        border-radius: 999px;
+        border: 1px solid #3ddc8466;
+        color: #3ddc84;
+      }
+      .status.watch {
+        border-color: #f5b80066;
+        color: #f5b800;
+      }
+      .toc a {
+        margin-right: 12px;
+        font-size: 14px;
+      }
+      @media (max-width: 560px) {
+        table,
+        thead,
+        tbody,
+        tr,
+        th,
+        td {
+          display: block;
+        }
+        thead {
+          display: none;
+        }
+        tr {
+          border-top: 1px solid #ffffff14;
+          padding: 8px 0;
+        }
+        td {
+          border: 0;
+          padding: 2px 0;
+        }
+        td.r {
+          white-space: normal;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p><a href="/">← bWallet</a></p>
+      <h1>b-<b>Aware</b></h1>
+      <p class="meta">
+        Responsible disclosure and bug bounty for bWallet and bWalletX · Policy version 1 · 20 October 2026
+      </p>
+
+      <p class="notice">
+        bWallet and bWalletX are non-custodial. If you find a way to take or spend someone's money, read their keys or
+        recovery phrase, or make the wallet sign something its owner did not approve, tell us first. We fix it, we
+        credit you, and we pay for it in BSV.
+      </p>
+
+      <p class="toc">
+        <a href="#report">Report</a> <a href="#rewards">Rewards</a> <a href="#scope">Scope</a>
+        <a href="#safe-harbour">Safe harbour</a> <a href="#known">Known and accepted</a>
+        <a href="#advisories">Advisories</a> <a href="#credits">Credits</a>
+      </p>
+
+      <h2 id="report">How to report</h2>
+      <ol>
+        <li>
+          Email <a href="mailto:support@bwalletx.com?subject=b-Aware">support@bwalletx.com</a> with the subject line
+          <code>b-Aware</code>. Put the report in the mail itself: the edition and version (Settings › About), the
+          steps, what happens, and why it matters. Steps we can run beat a video.
+        </li>
+        <li>If it lets an attacker move funds or read keys, say so in the subject so it is read first.</li>
+        <li>
+          Do not open a public GitHub issue for a security finding. Ordinary bugs belong at
+          <a href="https://github.com/bitcoin-corp/bwallet/issues">github.com/bitcoin-corp/bwallet/issues</a>.
+        </li>
+        <li>
+          Never send us a recovery phrase, private key, password or key file. Use a throwaway wallet to demonstrate.
+        </li>
+      </ol>
+      <p>
+        What you can expect from us: an acknowledgement within <b>2 working days</b>, a severity and a fix plan within
+        <b>7 days</b>, and a note when the fix ships. Our machine-readable contact is at
+        <a href="/.well-known/security.txt">/.well-known/security.txt</a>; the policy also lives in the repository as
+        <a href="https://github.com/bitcoin-corp/bwallet/blob/main/SECURITY.md">SECURITY.md</a>.
+      </p>
+
+      <h2 id="rewards">What we pay</h2>
+      <p>
+        Rewards are paid in BSV to an address you give us, within 14 days of the fix shipping or 30 days of triage,
+        whichever is first.
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Severity</th>
+            <th>What it looks like in bWallet</th>
+            <th class="r">Reward</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Critical</td>
+            <td>Steal or spend funds, extract keys or the recovery phrase, sign without the owner's approval</td>
+            <td class="r">10 BSV</td>
+          </tr>
+          <tr>
+            <td>High</td>
+            <td>Bypass an approval or permission, forge a pairing or connection, drain through a dApp endpoint</td>
+            <td class="r">3 BSV</td>
+          </tr>
+          <tr>
+            <td>Medium</td>
+            <td>Leak private data, defeat the safety filter, deny a user their own wallet</td>
+            <td class="r">0.5 BSV</td>
+          </tr>
+          <tr>
+            <td>Low</td>
+            <td>Real but contained</td>
+            <td class="r">Credit</td>
+          </tr>
+        </tbody>
+      </table>
+      <h3>The rules that bound it</h3>
+      <ul>
+        <li>
+          <b>A pool, not an open tap.</b> The reward pool is <b>20 BSV per calendar quarter</b>. When it is spent, valid
+          reports still earn credit and are paid from the next quarter's pool, in the order they were triaged. We are a
+          small company and would rather say this than quietly stop paying.
+        </li>
+        <li>
+          <b>First valid report wins.</b> Duplicates, issues we already know about and anything listed under
+          <a href="#known">Known and accepted</a> earn credit, not money.
+        </li>
+        <li>
+          <b>Proof required.</b> A working reproduction against a wallet you control. Scanner output or an AI-written
+          report with no reproduction is closed politely.
+        </li>
+        <li>
+          <b>Severity is by impact on users' money and keys</b>, not by CVSS alone. We set it and explain the reasoning
+          in writing; if you disagree, say so and we will look again.
+        </li>
+        <li>One reward per root cause, even where it shows up in several places.</li>
+      </ul>
+
+      <h2 id="scope">Scope</h2>
+      <p>
+        <b>In scope</b> (the code is open at
+        <a href="https://github.com/bitcoin-corp/bwallet">github.com/bitcoin-corp/bwallet</a>):
+      </p>
+      <ul>
+        <li>Key handling, signing and approvals: the background wallet, the approval sheets and the USB key flow.</li>
+        <li>Storage, backup and the remote storage provider.</li>
+        <li>
+          The BRC-100 dApp bridge: the injected provider, the content script, the extension side panel and in-page
+          sheet, the mobile dApp browser and its per-origin endpoints, pairing of computers and the CLI.
+        </li>
+        <li>Paymail, OpNS names, the Name Store, pots and subscriptions, agent accounts.</li>
+        <li>The iOS and Android apps, the Chrome extension, and the web wallet.</li>
+      </ul>
+      <p><b>Out of scope:</b></p>
+      <ul>
+        <li>The marketing sites and this page.</li>
+        <li>Rate limiting, missing security headers, best-practice notes with no exploit.</li>
+        <li>
+          Self-XSS, clickjacking on pages with nothing to click, anything that needs a rooted or jailbroken device or
+          physical access to an unlocked phone.
+        </li>
+        <li>Social engineering of our staff or users.</li>
+        <li>Services we do not run: indexers, exchanges, HandCash, the Yours Wallet upstream.</li>
+      </ul>
+
+      <h2 id="safe-harbour">Safe harbour</h2>
+      <p>
+        Research done in good faith under this policy is authorised. We will not pursue, or support, legal action
+        against you for it, and if a third party does, we will say publicly that you acted under this policy. Good faith
+        means: you test against your own wallets and your own funds; you do not access, change or destroy anyone else's
+        data or money; you do not degrade the service for other people; and you give us a reasonable time to fix before
+        you publish. We will not ask you to sign anything to be paid.
+      </p>
+
+      <h2 id="known">Known and accepted</h2>
+      <p>Things we already know about. Reports of these earn credit only.</p>
+      <ul>
+        <li>
+          <b>DNS rebinding of an app's own origin.</b> In browser runtimes the wallet cannot pre-resolve DNS, so a site
+          could point its own hostname at a private address after we verify it. The fetch is still limited to that
+          site's HTTPS origin with no redirects; the same limitation is documented by the upstream reference wallet (see
+          the 20 October advisory below).
+        </li>
+        <li>
+          <b>Connected wallets hold operating balances.</b> A BRC-100 wallet signs what its owner approves; it cannot
+          judge intent. Keep savings in a wallet that is not connected to apps.
+        </li>
+      </ul>
+
+      <h2 id="advisories">Advisories and our responses</h2>
+      <p>
+        Published advisories that touch BRC-100 wallets, the BSV TypeScript stack or our dependencies, with what bWallet
+        does about each. Newest first.
+      </p>
+
+      <div class="card" id="adv-2026-10-20">
+        <h3>20 October 2026 · SSRF hardening of BRC-100 manifest fetching (bsv-desktop)</h3>
+        <p class="meta">
+          Source: <a href="https://github.com/bsv-blockchain/bsv-desktop/pull/135">bsv-blockchain/bsv-desktop#135</a>,
+          opened 20 October 2026, no CVE or GHSA id at the time of writing. <span class="status">Not affected</span>
+        </p>
+        <p>
+          <b>What it is.</b> A BRC-100 wallet fetches <code>https://&lt;app&gt;/manifest.json</code> to show an app's
+          declared permissions in one grouped prompt. In the Electron reference wallet that fetch ran in the privileged
+          main process on a URL the renderer supplied, which is a server-side request forgery surface: a page could make
+          the wallet process reach localhost or a private network. The pull request requires HTTPS on the default port
+          with a <code>manifest.json</code> path, rejects localhost, private, reserved and non-public IP addresses
+          including DNS results, refuses redirects, caps the body at 1 MiB, restricts the IPC handler to the main frame
+          and removes the renderer's fallback to an unrestricted fetch.
+        </p>
+        <p>
+          <b>bWallet's position.</b> bWallet does not have the mechanism the fix addresses. There is no privileged
+          "fetch this URL" channel between a page and the wallet: the background never fetches a URL a page supplies.
+          The manifest fetch happens inside the wallet toolbox's permissions manager (we ship wallet-toolbox-client
+          2.14.5 and @bsv/sdk 2.8.11), which builds the URL from the originator rather than accepting one, goes through
+          the SDK's public-HTTPS fetch (HTTPS only, no credentials, pinned to that origin, IP literals must be public),
+          refuses redirects, caps the body at 256 KiB and times out after 10 seconds. The originator itself is not
+          chosen by the page: the extension rejects any message whose originator does not match the browser's
+          <code>sender.origin</code>, and the mobile app derives it from the verified origin of the per-site endpoint.
+          The only host a site can make the wallet contact is therefore its own.
+        </p>
+        <p>
+          <b>Residual and shared.</b> In browser runtimes the SDK cannot resolve DNS before the request, so a site could
+          rebind its own hostname to a private address; the reference wallet notes the same gap. Plain HTTP is used only
+          for an originator of <code>localhost</code>, for local development, as upstream does. We will adopt DNS and IP
+          checks in our toolbox fork if upstream lands them, and we track the fix.
+        </p>
+        <p><b>Action for users:</b> none.</p>
+      </div>
+
+      <div class="card" id="adv-2026-09-23">
+        <h3>23 September 2026 · Coordinated ts-stack trust-boundary advisory (GHSA-qp3j-h5xf-p2p7)</h3>
+        <p class="meta">
+          Source:
+          <a href="https://github.com/bsv-blockchain/ts-stack/security/advisories/GHSA-qp3j-h5xf-p2p7"
+            >ts-stack advisory</a
+          >, High. Patched: @bsv/sdk 2.8.0, wallet-toolbox and wallet-toolbox-client 2.13.2, @bsv/message-box-client
+          2.5.2, @bsv/templates 1.10.2 and others. <span class="status">Patched</span>
+        </p>
+        <p>
+          A broad set of findings across the stack: storage-supplied output scripts not verified against the requested
+          outputs in <code>createAction</code>, action references not bound to the originator that was authorised, abort
+          refusals reported as success, negative signature verdicts treated as success, originator spoofing over the
+          wallet wire transport, and tenant isolation gaps in remote storage.
+        </p>
+        <p>
+          <b>bWallet's position.</b> bWallet ships @bsv/sdk 2.8.11, wallet-toolbox-client 2.14.5 and
+          @bsv/message-box-client 2.5.4, all past the patched versions. Separately from the stack fixes, the wallet
+          checks every message's originator against the browser-reported sender origin before any wallet call, verifies
+          the OpNS covenant locally before broadcast, and refuses to abort an action the network may already have.
+        </p>
+        <p>
+          <b>Action for users:</b> be on the current release (bWalletX 5.2.38 or later, or the current store build).
+        </p>
+      </div>
+
+      <div class="card" id="adv-2026-07-06">
+        <h3>
+          6 July 2026 · createAction output redirection with remote storage (GHSA-36f9-7rg5-cpf8 / CVE-2026-56744)
+        </h3>
+        <p class="meta">
+          Source:
+          <a href="https://github.com/bsv-blockchain/ts-stack/security/advisories/GHSA-36f9-7rg5-cpf8"
+            >ts-stack advisory</a
+          >, High. Affected wallet-toolbox, -client and -mobile; fixed in 2.13.2. <span class="status">Patched</span>
+        </p>
+        <p>
+          A malicious or compromised remote storage server could return output scripts different from the ones the
+          caller asked for, redirecting a payment. bWallet ships wallet-toolbox-client 2.14.5, which verifies returned
+          outputs against the authorised request. The remote storage provider is a setting you can change in Settings ›
+          Wallet Backup.
+        </p>
+      </div>
+
+      <h2 id="credits">Credits</h2>
+      <p>No reports yet. Yours could be the first name here.</p>
+
+      <h2>Changes to this policy</h2>
+      <ul>
+        <li>
+          20 October 2026: version 1. Policy, reward table, 20 BSV quarterly pool, safe harbour, first three advisory
+          responses.
+        </li>
+      </ul>
+      <p class="meta">
+        The Bitcoin Corporation Ltd. Questions about the policy itself:
+        <a href="mailto:support@bwalletx.com">support@bwalletx.com</a>.
+      </p>
+    </main>
+  </body>
+</html>
