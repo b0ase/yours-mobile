@@ -40,6 +40,8 @@ import { keystorePasswordFromPrf, savePasskeyUnlock } from '../../mobile/passkey
 import { takeTransferredWallet } from '../../mobile/passkey/session';
 import { switchBeforeReload } from './finishSwitch';
 
+const TRACE_ENABLED = SEEDLESS_ENABLED && import.meta.env.VITE_SEEDLESS_TRACE === '1';
+
 export type RestoreAccountProps = {
   onNavigateBack: (page: SettingsPage) => void;
   newWallet?: boolean;
@@ -80,7 +82,8 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
   // on a phone there is no console (owner, 20 Oct 2026: the first passkey restore sends him back to the restore form).
   const [trace, setTrace] = useState<string[]>([]);
   const note = (m: string) => {
-    if (SEEDLESS_ENABLED) setTrace((t) => [...t.slice(-9), `${new Date().toLocaleTimeString()} ${m}`]);
+    // Test builds only (VITE_SEEDLESS_TRACE=1, the Vercel previews): a release shows no debug panel.
+    if (TRACE_ENABLED) setTrace((t) => [...t.slice(-9), `${new Date().toLocaleTimeString()} ${m}`]);
   };
   // Cancel on the Restoring screen (owner, 20 Oct 2026: "there's no way off the restoring screen"). A cancelled run
   // is ignored when it finishes: it never jumps to the finish screen later.
@@ -96,7 +99,7 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
     note(`screen: step ${step}, ${loading ? 'spinner' : 'form'}`);
   }, [step, loading]);
   const traceBox =
-    SEEDLESS_ENABLED && trace.length > 0 ? (
+    TRACE_ENABLED && trace.length > 0 ? (
       <pre
         data-testid="restore-trace"
         className="w-full text-xs whitespace-pre-wrap break-words rounded-lg p-2 mb-3"
