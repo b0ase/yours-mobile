@@ -95,7 +95,8 @@ export const OpenHereSheet = ({ scanned, onClose }: { scanned: string; onClose: 
             {s.code}
           </p>
           <p className="text-xs" style={{ color: '#98A2B3' }}>
-            Only type it into bWalletX on a computer in front of you. Never read it out or send it to anyone.
+            Only type this code on bwalletx.com, on a computer in front of you. Never read it out or send it to anyone,
+            whoever asks.
           </p>
           {!error && <p className="text-sm text-white mt-2">Waiting for your computer…</p>}
         </>

@@ -49,6 +49,20 @@ describe('open on computer: QR', () => {
     ])
       expect(() => parseOpenUrl(openUrl(link({ o })), NOW)).toThrow();
     expect(isWalletOrigin('https://desktop.bwalletx.com')).toBe(true);
+    expect(isWalletOrigin('https://web.bwalletx.com')).toBe(true);
+    // Only the two wallet hosts: no wildcard over the rest of the family (review 20 Oct 2026).
+    for (const o of [
+      'https://auth.bwalletx.com',
+      'https://push.bwalletx.com',
+      'https://agents.bwalletx.com',
+      'https://games.bwalletx.com',
+      'https://anything.bwalletx.com',
+      'https://bwalletx.com',
+      'https://www.bwalletx.com',
+      'https://web.bwalletx.com.evil.example',
+      'https://web.bwalletx.com:8443',
+    ])
+      expect(isWalletOrigin(o)).toBe(false);
     expect(isWalletOrigin('http://localhost:4797')).toBe(false);
     expect(isWalletOrigin('http://localhost:4797', true)).toBe(true);
   });

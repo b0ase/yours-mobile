@@ -15,7 +15,19 @@ export const passkeyBackupApi = (): string =>
 export const putMessage = (credentialId: string, hashHex: string, ts: number) =>
   `bwalletx passkey backup v1|${credentialId}|${hashHex}|${ts}`;
 
+/**
+ * What the server gets: the blob WITHOUT its optional `label` and `account` fields (review 20 Oct 2026). GET is
+ * public by credential id, so an account address in the blob would link a credential to a wallet address for anyone,
+ * and a label like a device name is personal. Neither is part of the encrypted header (aad covers version, rpId,
+ * credential id and salt only), so the server copy still decrypts. The local copy and the recovery file keep both.
+ */
+export const serverCopy = (blob: SeedBackupBlob): SeedBackupBlob => {
+  const { account: _account, label: _label, ...rest } = blob;
+  return rest;
+};
+
 export function signedPut(blob: SeedBackupBlob, identityWif: string, ts = Date.now()) {
+  blob = serverCopy(blob);
   const json = JSON.stringify(blob);
   const hash = Utils.toHex(Hash.sha256(Utils.toArray(json, 'utf8')));
   const key = PrivateKey.fromWif(identityWif);

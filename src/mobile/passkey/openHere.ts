@@ -39,10 +39,16 @@ export type OpenProof = { t: 'proof'; m: string };
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
-/** Only bWalletX's own web origins may receive a wallet (plus localhost for development when allowed). */
+/**
+ * The ONLY origins that may receive a wallet: the two places the wallet web app runs. An explicit list, not a
+ * wildcard over *.bwalletx.com (review 20 Oct 2026): a forgotten or taken-over subdomain (or auth., push., agents.,
+ * games. and the other non-wallet hosts) must never be able to ask for someone's 12 words. Add a host here only
+ * when the wallet app really is served from it. Localhost is allowed for development when asked for.
+ */
+export const WALLET_ORIGINS: readonly string[] = ['https://web.bwalletx.com', 'https://desktop.bwalletx.com'];
+
 export const isWalletOrigin = (origin: string, allowLocal = false): boolean =>
-  /^https:\/\/([a-z0-9-]+\.)*bwalletx\.com$/.test(origin) ||
-  (allowLocal && /^http:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/.test(origin));
+  WALLET_ORIGINS.includes(origin) || (allowLocal && /^http:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/.test(origin));
 
 export const openUrl = (l: OpenLink) => {
   const q = new URLSearchParams({ v: l.v, r: l.r, c: l.c, k: l.k, o: l.o, e: String(l.e) });
