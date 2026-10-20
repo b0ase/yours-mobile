@@ -4,7 +4,7 @@ bWallet and bWalletX are non-custodial BSV wallets published by The Bitcoin Corp
 take or spend someone's money, read their keys, or make the wallet sign something its owner did not approve, we want
 to hear from you first, and we pay for it.
 
-The full policy, the reward table and our responses to advisories live at **https://bwallet.space/b-Aware**
+The full policy, the reward table and our responses to advisories live at **https://bwalletx.com/b-Aware**
 (machine-readable: `/.well-known/security.txt`). This file is the short form.
 
 ## Report a vulnerability
@@ -52,4 +52,4 @@ reasonable time to fix before you publish. We will not ask you to sign anything 
 ## Advisories
 
 Our responses to published advisories that touch BRC-100 wallets, the BSV TypeScript stack or our dependencies are
-listed, dated, on https://bwallet.space/b-Aware#advisories.
+listed, dated, on https://bwalletx.com/b-Aware#advisories.

@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks. If this is a **security** finding (funds, keys, approvals, signing), stop here and follow https://bwallet.space/b-Aware instead; it pays, and a public issue would put users at risk.
+        Thanks. If this is a **security** finding (funds, keys, approvals, signing), stop here and follow https://bwalletx.com/b-Aware instead; it pays, and a public issue would put users at risk.
   - type: input
     id: edition
     attributes:
