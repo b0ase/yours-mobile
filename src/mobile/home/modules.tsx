@@ -8,6 +8,8 @@ import { getItems, subscribeItems } from '../notify/store';
 import { getState, next, playQueue, subscribe, toggle } from '../media/player';
 import { FEATURED_TRACKS, featuredQueue } from '../media/featured/featured';
 import { listPots, listSubs, onPotsChange } from '../pots/pots';
+import { useCollapsed } from './collapse';
+import { CollapseToggle } from './CollapseToggle';
 
 const HistoryScreen = lazy(() => import('../wallet/HistoryScreen'));
 const PotsScreen = lazy(() => import('../pots/PotsScreen'));
@@ -18,22 +20,30 @@ export const Panel = ({
   title,
   icon,
   action,
+  collapseKey,
   children,
 }: {
   title: string;
   icon?: ReactNode;
   action?: ReactNode;
+  /** Set to let the user fold the panel away with a small toggle (remembered per device). */
+  collapseKey?: string;
   children: ReactNode;
-}) => (
-  <section className="bw-home-panel">
-    <header className="bw-home-head">
-      {icon}
-      <span className="bw-home-title">{title}</span>
-      {action}
-    </header>
-    {children}
-  </section>
-);
+}) => {
+  const [collapsed, toggle] = useCollapsed(collapseKey ?? '');
+  const foldable = !!collapseKey;
+  return (
+    <section className="bw-home-panel">
+      <header className="bw-home-head">
+        {icon}
+        <span className="bw-home-title">{title}</span>
+        {action}
+        {foldable && <CollapseToggle collapsed={collapsed} onToggle={toggle} label={title} />}
+      </header>
+      {!(foldable && collapsed) && children}
+    </section>
+  );
+};
 
 // ── Ask b ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -106,7 +116,7 @@ export const HistoryModule = () => {
 // ── BSV price chart ───────────────────────────────────────────────────────────────────────────────────────────
 
 export const PriceChartModule = () => (
-  <Panel title="BSV price">
+  <Panel title="BSV price" collapseKey="price">
     <Suspense fallback={<div style={{ height: 140 }} />}>
       <BsvPriceChart />
     </Suspense>

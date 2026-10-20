@@ -10,6 +10,10 @@ import vexArt from '../media/featured/vexvoid-cover.jpg';
 import namesArt from './art/store-names.webp';
 import spacesArt from './art/store-spaces.webp';
 import { bavatarSvg } from '../bavatar/bavatar';
+import { useCollapsed } from './collapse';
+import { CollapseToggle } from './CollapseToggle';
+import { AD_PAGE_URL, adSlideText } from './adSlot';
+import { openExternal } from '../exchange/useTokenRowActions';
 
 /**
  * Store showcase (home module, bWalletX only: loaded behind THEME_STORE_PAID_ENABLED like the Store itself).
@@ -28,6 +32,8 @@ type Item = {
   img?: string;
   pos?: string;
   logo?: string;
+  /** An outside page (opened in the browser) instead of an in-app route. */
+  href?: string;
 };
 
 /** Sharp art per shop (the shops' own banner CSS uses a soft, blurred backdrop for Scammers Cartel). */
@@ -95,6 +101,8 @@ const showcaseItems = (spaces = BSPACES_ENABLED): Item[] => {
       img: spacesArt,
       pos: '70% 50%',
     });
+  // Far right: the advert slot (owner, 20 Oct 2026). Gold bAvatar art like any slide without a picture of its own.
+  items.push({ key: 'advertise', ...adSlideText(), to: '/m/store', href: AD_PAGE_URL, art: '#000' });
   // Gold by default: a slide with no picture of its own gets gold bAvatar art, never a blank banner.
   return items.map((it) => (it.img || /url\(/.test(it.art) ? it : { ...it, img: goldArt(it.key) }));
 };
@@ -104,11 +112,12 @@ const StoreShowcase = () => {
   const items = useMemo(() => showcaseItems(), []);
   const [i, setI] = useState(0);
   const [paused, setPaused] = useState(false);
+  const [collapsed, toggleCollapsed] = useCollapsed('showcase');
   useEffect(() => {
-    if (paused || reduced() || items.length < 2) return;
+    if (collapsed || paused || reduced() || items.length < 2) return;
     const t = setInterval(() => setI((n) => (n + 1) % items.length), ROTATE_MS);
     return () => clearInterval(t);
-  }, [paused, items.length]);
+  }, [collapsed, paused, items.length]);
   const go = (d: number) => setI((n) => (n + d + items.length) % items.length);
   return (
     <section
@@ -126,52 +135,57 @@ const StoreShowcase = () => {
         <button type="button" className="bw-home-link" onClick={() => navigate('/m/store')}>
           Open Store
         </button>
+        <CollapseToggle collapsed={collapsed} onToggle={toggleCollapsed} label="the Store showcase" />
       </header>
-      <div className="bw-home-stage">
-        {items.map((it, n) => (
-          <button
-            key={it.key}
-            type="button"
-            className={`bw-home-slide${n === i ? ' on' : ''}`}
-            aria-hidden={n !== i}
-            tabIndex={n === i ? 0 : -1}
-            onClick={() => navigate(it.to)}
-          >
-            <span className="bw-home-art" style={{ background: it.art }} />
-            {it.img && (
-              <img
-                className="bw-home-artimg"
-                src={it.img}
-                alt=""
-                style={{ objectPosition: it.pos ?? 'center' }}
-                onError={(e) => {
-                  const fallback = goldArt(it.key);
-                  if (e.currentTarget.src !== fallback) e.currentTarget.src = fallback;
-                }}
-              />
-            )}
-            <span className="bw-home-cap">
-              {it.logo && it.logo !== it.img && <img src={it.logo} alt="" width={34} height={34} />}
-              <span className="bw-home-tiletext">
-                <span className="bw-home-kind">{it.kind}</span>
-                <span className="bw-home-captitle">{it.title}</span>
-                <span className="bw-home-capsub">{it.blurb}</span>
+      {!collapsed && (
+        <div className="bw-home-stage">
+          {items.map((it, n) => (
+            <button
+              key={it.key}
+              type="button"
+              className={`bw-home-slide${n === i ? ' on' : ''}`}
+              aria-hidden={n !== i}
+              tabIndex={n === i ? 0 : -1}
+              onClick={() => (it.href ? openExternal(it.href) : navigate(it.to))}
+            >
+              <span className="bw-home-art" style={{ background: it.art }} />
+              {it.img && (
+                <img
+                  className="bw-home-artimg"
+                  src={it.img}
+                  alt=""
+                  style={{ objectPosition: it.pos ?? 'center' }}
+                  onError={(e) => {
+                    const fallback = goldArt(it.key);
+                    if (e.currentTarget.src !== fallback) e.currentTarget.src = fallback;
+                  }}
+                />
+              )}
+              <span className="bw-home-cap">
+                {it.logo && it.logo !== it.img && <img src={it.logo} alt="" width={34} height={34} />}
+                <span className="bw-home-tiletext">
+                  <span className="bw-home-kind">{it.kind}</span>
+                  <span className="bw-home-captitle">{it.title}</span>
+                  <span className="bw-home-capsub">{it.blurb}</span>
+                </span>
               </span>
-            </span>
+            </button>
+          ))}
+          <button type="button" className="bw-home-nav l" aria-label="Previous" onClick={() => go(-1)}>
+            <ChevronLeft size={16} />
           </button>
-        ))}
-        <button type="button" className="bw-home-nav l" aria-label="Previous" onClick={() => go(-1)}>
-          <ChevronLeft size={16} />
-        </button>
-        <button type="button" className="bw-home-nav r" aria-label="Next" onClick={() => go(1)}>
-          <ChevronRight size={16} />
-        </button>
-      </div>
-      <div className="bw-home-dots" aria-hidden="true">
-        {items.map((it, n) => (
-          <span key={it.key} className={n === i ? 'on' : ''} />
-        ))}
-      </div>
+          <button type="button" className="bw-home-nav r" aria-label="Next" onClick={() => go(1)}>
+            <ChevronRight size={16} />
+          </button>
+        </div>
+      )}
+      {!collapsed && (
+        <div className="bw-home-dots" aria-hidden="true">
+          {items.map((it, n) => (
+            <span key={it.key} className={n === i ? 'on' : ''} />
+          ))}
+        </div>
+      )}
     </section>
   );
 };
