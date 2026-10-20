@@ -59,6 +59,25 @@
   color: var(--bw-accent);
   flex-shrink: 0;
 }
+.bw-home-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin: -4px -6px -4px 0;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--bw-muted, #98a2b3);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.bw-home-toggle:hover,
+.bw-home-toggle:focus-visible {
+  color: var(--bw-text, #fff);
+  background: rgb(var(--bw-text-rgb, 255 255 255) / 0.08);
+}
 .bw-home-muted,
 .bw-home-sub {
   color: var(--bw-muted, #98a2b3);
