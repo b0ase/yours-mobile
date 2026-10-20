@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { BSM, Hash, PrivateKey, PublicKey, Signature, Utils } from '@bsv/sdk';
 import {
   beginOpenHere,
+  startOpenSession,
   checkOpenProof,
   deriveOpen,
   newOpenCode,
@@ -76,7 +77,7 @@ describe('open on computer: crypto', () => {
   test('both sides get the same keys; the sealed frame opens only with them', async () => {
     const a = await deriveOpen(phone, computer.toPublicKey().toString(), channel);
     const b = await deriveOpen(computer, phone.toPublicKey().toString(), channel);
-    const f = await sealOpen(a.key, channel, { t: 'wallet', words: 'one two three', exp: NOW + 60 });
+    const f = await sealOpen(a.key, channel, { t: 'wallet', words: 'one two three', exp: NOW + 60, code: '123456' });
     expect(JSON.stringify(f)).not.toContain('one two');
     expect((await openOpen(b.key, channel, f, NOW)).words).toBe('one two three');
     expect(await checkOpenProof(a.macKey, channel, '123456', await openProof(b.macKey, channel, '123 456'))).toBe(true);
@@ -85,7 +86,7 @@ describe('open on computer: crypto', () => {
     const mitm = PrivateKey.fromRandom();
     const phoneSide = await deriveOpen(phone, mitm.toPublicKey().toString(), channel);
     const computerSide = await deriveOpen(computer, phone.toPublicKey().toString(), channel);
-    const f = await sealOpen(phoneSide.key, channel, { t: 'wallet', words: 'x y z', exp: NOW + 60 });
+    const f = await sealOpen(phoneSide.key, channel, { t: 'wallet', words: 'x y z', exp: NOW + 60, code: '123456' });
     await expect(openOpen(computerSide.key, channel, f, NOW)).rejects.toThrow();
     const pr = await openProof(computerSide.macKey, channel, '123456');
     expect(await checkOpenProof(phoneSide.macKey, channel, '123456', pr)).toBe(false);
@@ -114,7 +115,7 @@ describe('open on computer: crypto', () => {
   test('bound to its channel and refused after expiry', async () => {
     const a = await deriveOpen(phone, computer.toPublicKey().toString(), channel);
     const b = await deriveOpen(computer, phone.toPublicKey().toString(), channel);
-    const f = await sealOpen(a.key, channel, { t: 'wallet', words: 'a b c', exp: NOW + 60 });
+    const f = await sealOpen(a.key, channel, { t: 'wallet', words: 'a b c', exp: NOW + 60, code: '123456' });
     await expect(openOpen(b.key, 'BBBBBBBBBBBBBBBBBBBBBB', f, NOW)).rejects.toThrow();
     await expect(openOpen(b.key, channel, f, NOW + 61)).rejects.toThrow('Expired');
   });
@@ -221,6 +222,73 @@ describe('open on computer: phone session (audit C2)', () => {
   });
 });
 
+describe('open on computer: the computer binds the wallet to the code it was typed (review 20 Oct 2026)', () => {
+  const realWs = globalThis.WebSocket;
+  const realLoc = (globalThis as { location?: unknown }).location;
+  const WORDS = 'abandon ability able about above absent absorb abstract absurd abuse access accident';
+  const setup = async () => {
+    globalThis.WebSocket = FakeSocket as unknown as typeof WebSocket;
+    (globalThis as { location?: unknown }).location = { origin: 'https://web.bwalletx.com' };
+    const got: { wallet?: string; error?: string } = {};
+    const s = startOpenSession({
+      onJoined: () => undefined,
+      onWallet: (p) => (got.wallet = p.words),
+      onExpired: () => undefined,
+      onError: (m) => (got.error = m),
+    });
+    const ws = FakeSocket.last;
+    const url = new URL(s.url);
+    const k = url.searchParams.get('k') as string;
+    const c = url.searchParams.get('c') as string;
+    // Whoever joins first as the "phone" (here: an attacker who saw the QR) says hello with its own key.
+    const intruder = PrivateKey.fromRandom();
+    await ws.deliver({ t: 'hello', k: intruder.toPublicKey().toString() });
+    const keys = await deriveOpen(intruder, k, c);
+    return { s, ws, got, keys, c };
+  };
+  const restore = () => {
+    globalThis.WebSocket = realWs;
+    (globalThis as { location?: unknown }).location = realLoc;
+  };
+
+  test('a wallet sealed with a code other than the typed one is refused', async () => {
+    try {
+      const { s, ws, got, keys, c } = await setup();
+      expect(await s.submitCode('111111')).toBe(true);
+      const exp = Math.floor(Date.now() / 1000) + 60;
+      await ws.deliver(await sealOpen(keys.key, c, { t: 'wallet', words: WORDS, exp, code: '999999' }));
+      expect(got.wallet).toBeUndefined();
+      expect(got.error).toContain("didn't come from your phone");
+    } finally {
+      restore();
+    }
+  });
+
+  test('a wallet frame with no code at all is refused', async () => {
+    try {
+      const { s, ws, got, keys, c } = await setup();
+      await s.submitCode('111111');
+      const exp = Math.floor(Date.now() / 1000) + 60;
+      await ws.deliver(await sealOpen(keys.key, c, { t: 'wallet', words: WORDS, exp } as never));
+      expect(got.wallet).toBeUndefined();
+    } finally {
+      restore();
+    }
+  });
+
+  test('the phone that made the typed code is accepted', async () => {
+    try {
+      const { s, ws, got, keys, c } = await setup();
+      await s.submitCode('111 111');
+      const exp = Math.floor(Date.now() / 1000) + 60;
+      await ws.deliver(await sealOpen(keys.key, c, { t: 'wallet', words: WORDS, exp, code: '111111' }));
+      expect(got.wallet).toBe(WORDS);
+    } finally {
+      restore();
+    }
+  });
+});
+
 describe('server backup store client', () => {
   test('signed upload verifies against the identity key and binds the blob', async () => {
     const id = PrivateKey.fromRandom();
@@ -274,7 +342,7 @@ describe('"your phone has it" ping', () => {
     const { RESTORED_INFO } = await import('./openHere');
     const a = await deriveOpen(phone, computer.toPublicKey().toString(), channel);
     const b = await deriveOpen(phone, computer.toPublicKey().toString(), channel, RESTORED_INFO);
-    const f = await sealOpen(a.key, channel, { t: 'wallet', words: 'x', exp: NOW + 60 });
+    const f = await sealOpen(a.key, channel, { t: 'wallet', words: 'x', exp: NOW + 60, code: '123456' });
     await expect(openOpen(b.key, channel, f, NOW)).rejects.toThrow();
   });
 });

@@ -85,3 +85,19 @@ describe('flag on', () => {
     expect(await m.handleExternalHandoff(old, HANDOFF_WEB_ORIGIN, a, Date.now(), true)).toBe(false);
   });
 });
+
+describe('expired requests are erased (review 20 Oct 2026)', () => {
+  test('sweep removes a request past its time, even one holding parked words', async () => {
+    const a = fakeArea();
+    await m.startHandoff(a);
+    await m.sweepExpiredHandoff(a, Date.now() + 10 * 60_000);
+    expect(await m.readHandoff(a)).toBeNull();
+  });
+
+  test('sweep leaves a live request alone', async () => {
+    const a = fakeArea();
+    await m.startHandoff(a);
+    await m.sweepExpiredHandoff(a);
+    expect((await m.readHandoff(a))?.state).toBe('waiting');
+  });
+});

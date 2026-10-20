@@ -34,6 +34,14 @@ export const clearHandoff = async (a: SessionArea | undefined = area()) => {
   await a?.remove(HANDOFF_KEY);
 };
 
+/** Erase a request (and any parked words) that is past its time. Called on a timer, at start-up and when the popup opens. */
+export const sweepExpiredHandoff = async (a: SessionArea | undefined = area(), now = Date.now()) => {
+  const s = await readHandoff(a);
+  if (s && !(s.exp > now)) await clearHandoff(a);
+};
+
+export const HANDOFF_ALARM = 'bwx-handoff-expire';
+
 /** Popup: start a new request (replacing any old one) and return the URL to open. */
 export const startHandoff = async (a: SessionArea | undefined = area()): Promise<string> => {
   if (!a) throw new Error('This browser cannot keep a one-time request.');
@@ -58,6 +66,12 @@ export const handleExternalHandoff = async (
     const r = receiveHandoff(await readHandoff(a), senderOrigin, message, now);
     if (!r.ok) return false;
     await a.set({ [HANDOFF_KEY]: r.session });
+    try {
+      // The parked words must not wait for someone to come back and type a code.
+      chrome.alarms?.create(HANDOFF_ALARM, { when: Math.max(r.session.exp, now + 1000) });
+    } catch {
+      /* the popup and start-up sweeps still clear it */
+    }
     return true;
   } catch {
     return false;

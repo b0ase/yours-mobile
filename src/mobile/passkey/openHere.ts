@@ -32,7 +32,9 @@ export const OPEN_CODE_DIGITS = 6;
 export const OPEN_LIFETIME_S = 120;
 
 export type OpenLink = { v: string; r: string; c: string; k: string; o: string; e: number };
-export type OpenPayload = { t: 'wallet'; words: string; name?: string; exp: number };
+// `code` is the phone's own 6 digits, sealed inside the frame: the computer accepts a wallet only if it matches what
+// the user typed (review 20 Oct 2026: otherwise whoever joined the channel first could hand the computer THEIR wallet).
+export type OpenPayload = { t: 'wallet'; words: string; name?: string; exp: number; code: string };
 export type OpenFrame = { t: 'open'; n: string; d: string };
 export type OpenProof = { t: 'proof'; m: string };
 
@@ -194,6 +196,7 @@ export function startOpenSession(cb: {
       cb.onExpired();
     }
   }, OPEN_LIFETIME_S * 1000);
+  let typed = '';
   ws.onerror = () => !done && cb.onError("Couldn't reach the pairing service.");
   // One frame at a time: the wallet frame must not race the hello's key derivation.
   ws.onmessage = inOrder(async (ev: MessageEvent) => {
@@ -216,6 +219,7 @@ export function startOpenSession(cb: {
     } else if (f.t === 'open' && keys && proved) {
       try {
         const p = await openOpen(keys.key, channel, f as OpenFrame);
+        if (!typed || normaliseOpenCode(String(p.code ?? '')) !== typed) throw new Error('code mismatch');
         done = true;
         clearTimeout(timer);
         ws.close();
@@ -230,6 +234,7 @@ export function startOpenSession(cb: {
     submitCode: async (code) => {
       if (done || !keys || proved || !normaliseOpenCode(code)) return false;
       proved = true; // one try: the phone ends the session on a wrong code
+      typed = normaliseOpenCode(code);
       ws.send(JSON.stringify(await openProof(keys.macKey, channel, code)));
       return true;
     },
@@ -312,7 +317,7 @@ export function beginOpenHere(
             if (state !== 'ok' || !keys) throw new Error('Type the code on your computer first.');
             if (Math.floor(Date.now() / 1000) > link.e) throw new Error('This code has expired.');
             state = 'dead'; // single use
-            const frame = await sealOpen(keys.key, link.c, { t: 'wallet', words, name, exp: link.e });
+            const frame = await sealOpen(keys.key, link.c, { t: 'wallet', words, name, exp: link.e, code });
             ws.send(JSON.stringify(frame));
             setTimeout(() => ws.close(), 1500);
           },

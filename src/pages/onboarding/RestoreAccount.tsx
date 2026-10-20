@@ -259,7 +259,8 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
       }
     } catch (error) {
       console.log(error);
-      note(`ERROR: ${error instanceof Error ? error.message : String(error)}`);
+      // Class name only: a library error message could one day carry the words (review 20 Oct 2026).
+      note(`ERROR: ${error instanceof Error ? error.name : typeof error}`);
       addSnackbar(restoreErrorMessage(error), 'error');
     } finally {
       setLoading(false);

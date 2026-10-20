@@ -16,10 +16,11 @@
  *
  * This file is pure (no chrome.* calls) so every rule can be tested. The browser glue is extHandoffStore.ts.
  */
+import { STORE_BUILD } from '../storeBuild';
 import { b64url } from './seedBackup';
 
 /** Compile-time switch, written literally so Vite drops every hand-off path from a build without VITE_SEEDLESS=1. */
-export const HANDOFF_ENABLED: boolean = import.meta.env.VITE_SEEDLESS === '1';
+export const HANDOFF_ENABLED: boolean = import.meta.env.VITE_SEEDLESS === '1' && !STORE_BUILD;
 
 /** The only page allowed to hand a wallet to the extension. Exact match, never a wildcard over *.bwalletx.com. */
 export const HANDOFF_WEB_ORIGIN = 'https://web.bwalletx.com';

@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Fingerprint } from 'lucide-react';
 import { useTheme } from '../../hooks/useTheme';
-import { clearHandoff, confirmTypedCode, startHandoff } from './extHandoffStore';
+import { clearHandoff, confirmTypedCode, startHandoff, sweepExpiredHandoff } from './extHandoffStore';
 import { normaliseHandoffCode } from './extHandoff';
 
 /**
@@ -30,6 +30,10 @@ export const ExtPasskeyRow = ({ onWallet }: { onWallet: (words: string, name?: s
   const contrast = theme.color.global.contrast;
   const gray = theme.color.global.gray;
   const row = { backgroundColor: theme.color.global.row };
+  // Words parked by a request that ran out of time are erased as soon as the popup opens.
+  useEffect(() => {
+    void sweepExpiredHandoff();
+  }, []);
 
   const reset = () => {
     setStage('idle');

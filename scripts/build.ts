@@ -1,4 +1,4 @@
-import { build } from 'vite';
+import { build, loadEnv } from 'vite';
 import { resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
@@ -68,7 +68,9 @@ function brandManifest() {
   manifest.key = readFileSync(resolve(__dirname, 'extension-key.pub.txt'), 'utf-8').trim();
   // Passkey hand-off (notes/extension-passkey-handoff.md): ONLY in a VITE_SEEDLESS=1 build, and only the exact web
   // wallet page may message the extension. Not a wildcard, not desktop.; without this line no website can reach it.
-  if (process.env.VITE_SEEDLESS === '1') manifest.externally_connectable = { matches: ['https://web.bwalletx.com/*'] };
+  // Read the flag the way the code does (Vite also loads .env files), so the manifest line and the listener never disagree.
+  const seedless = (loadEnv('production', root, 'VITE_').VITE_SEEDLESS ?? process.env.VITE_SEEDLESS) === '1';
+  if (seedless) manifest.externally_connectable = { matches: ['https://web.bwalletx.com/*'] };
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
 
   const pwaPath = resolve(dist, 'pwa-manifest.json');

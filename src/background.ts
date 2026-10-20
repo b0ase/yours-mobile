@@ -24,7 +24,7 @@ import { recordCall, recordPayment, requestedSats, updateConnectionLog } from '.
 import { CWIEventName } from './cwi';
 import { describeWalletError } from './brand/walletError';
 import { HANDOFF_ENABLED } from './mobile/passkey/extHandoff';
-import { handleExternalHandoff } from './mobile/passkey/extHandoffStore';
+import { HANDOFF_ALARM, handleExternalHandoff, sweepExpiredHandoff } from './mobile/passkey/extHandoffStore';
 import {
   healInvalidSend,
   withHealMessage,
@@ -1490,6 +1490,8 @@ if (isInServiceWorker) {
   // parked in chrome.storage.session and are NEVER restored here or logged: the popup releases them after the
   // person types the code the web page shows. Anything refused gets the same generic answer.
   if (HANDOFF_ENABLED) {
+    void sweepExpiredHandoff();
+    chrome.alarms?.onAlarm.addListener((a) => a.name === HANDOFF_ALARM && void sweepExpiredHandoff());
     chrome.runtime.onMessageExternal.addListener((message: unknown, sender, sendResponse) => {
       void handleExternalHandoff(message, sender.origin).then((ok) => sendResponse({ ok }));
       return true;
