@@ -3,6 +3,7 @@ import {
   allowanceSats,
   buildSheetModel,
   isAutoGrantable,
+  isIdentityKeyRequest,
   isRiskyRequest,
   sheetCanTrust,
   TRUST_SITE_BASKET,
@@ -225,6 +226,25 @@ describe('sheet model', () => {
     expect(byId.cert.risky).toBe(true);
     expect(byId.ok.checked).toBe(false);
     expect(isRiskyRequest(proto('p'))).toBe(false);
+  });
+
+  test('the public identity key line is pre-ticked and plain, so Allow does not deny it (Sign in with bWalletX)', () => {
+    const idKey = (id: string, extra: Partial<BundleRequest> = {}) =>
+      proto(id, 'x', { protocolID: [1, 'identity key retrieval'], counterparty: 'self', ...extra });
+    const m = buildSheetModel({ originator: 'x', items: [idKey('id'), proto('other', 'x', { counterparty: 'self' })] });
+    const byId = Object.fromEntries(m.lines.map((l) => [l.requestID, l]));
+    expect(byId.id.checked).toBe(true);
+    expect(byId.id.risky).toBe(false);
+    expect(byId.id.text).toBe('See your public identity (the key that names you)');
+    // Other key use stays unticked (audit C1).
+    expect(byId.other.checked).toBe(false);
+    // A privileged identity request is not the plain one.
+    expect(isIdentityKeyRequest(idKey('p', { privileged: true }))).toBe(false);
+    expect(buildSheetModel({ originator: 'x', items: [idKey('p', { privileged: true })] }).lines[0].checked).toBe(
+      false,
+    );
+    // Another counterparty is not the plain one either.
+    expect(isIdentityKeyRequest(idKey('q', { counterparty: '02abcdef' }))).toBe(false);
   });
 
   test('a second spend in one bundle is a separate unticked line', () => {

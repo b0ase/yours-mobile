@@ -243,9 +243,22 @@ export const isRiskyRequest = (r: BundleRequest): boolean => {
   return false;
 };
 
+/**
+ * The wallet's request for the public identity key (BRC-100 getPublicKey with identityKey:true) arrives as the
+ * level-1 protocol named "identity key retrieval" with counterparty "self". It reveals only the PUBLIC key, which is
+ * what a site needs to recognise you, and gives no signing power. Not privileged (a privileged request is
+ * never this).
+ */
+export const isIdentityKeyRequest = (r: BundleRequest): boolean =>
+  r.type === 'protocol' &&
+  !r.privileged &&
+  r.protocolID?.[1] === 'identity key retrieval' &&
+  (r.counterparty === undefined || r.counterparty === 'self');
+
 const lineText = (r: BundleRequest): string => {
   switch (r.type) {
     case 'protocol': {
+      if (isIdentityKeyRequest(r)) return 'See your public identity (the key that names you)';
       if (r.counterparty === 'anyone') return "Prove it's you (a signature anyone can check)";
       if (protoLevel(r) === 2 && r.counterparty && r.counterparty !== 'self')
         return `Sign and encrypt with your "${protoName(r)}" keys, shared with one named person or service`;
@@ -315,7 +328,9 @@ export const buildSheetModel = (bundle: Pick<PermissionBundle, 'originator' | 'i
     // Protocol (key use) lines are not pre-ticked: the user ticks them knowingly (audit C1). The one exception is
     // "Prove it's you" (counterparty 'anyone'), which Sign in with bWalletX needs; reserved wallet protocols never
     // reach a sheet at all (services/reservedProtocols.ts).
-    const checked = !risky && (r.type !== 'protocol' || r.counterparty === 'anyone');
+    // The public identity key is the other exception: Sign in with bWalletX asks for it first, and an unticked line
+    // made Allow answer "denied" for it ("Permission denied." on every site since 5.2.35, 20 Oct 2026).
+    const checked = !risky && (r.type !== 'protocol' || r.counterparty === 'anyone' || isIdentityKeyRequest(r));
     lines.push({ requestID: r.requestID, text: lineText(r), detail: lineDetail(r), risky, checked });
   }
   const mode: SheetModel['mode'] = payment ? (lines.length ? 'connectAndPay' : 'pay') : 'connect';
