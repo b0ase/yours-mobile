@@ -160,12 +160,7 @@ export const Directory = ({
 
   return (
     <div className="flex flex-col gap-3 min-w-0">
-      <div
-        role="radiogroup"
-        aria-label="Category"
-        className="flex gap-1.5 overflow-x-auto -mx-4 px-4"
-        style={{ scrollbarWidth: 'none' }}
-      >
+      <div role="radiogroup" aria-label="Category" className="flex flex-wrap gap-1.5">
         {SERVICE_CHIPS.map((c) => (
           <button
             key={c.id}

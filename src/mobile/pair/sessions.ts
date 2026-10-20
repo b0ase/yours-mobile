@@ -13,6 +13,7 @@ import {
   isSealed,
   parsePairUrl,
   relaySocketUrl,
+  isAllowedRelay,
   type HelloFrame,
   type PairLink,
   type PairMessage,
@@ -20,6 +21,7 @@ import {
 } from '../../pair/protocol';
 import { inOrder } from '../../pair/in-order';
 import { handleSiteCall } from '../dappBrowser';
+import { pairedOrigin } from '../../services/originKey';
 import { appNameFor } from '../storeBuild';
 import type { OneSatContext } from '@1sat/actions';
 import { fetchExchangeRate } from '../../utils/wallet';
@@ -72,9 +74,22 @@ const listeners = new Set<Listener>();
 const emit = () => listeners.forEach((l) => l());
 export const subscribePairs = (l: Listener) => (listeners.add(l), () => void listeners.delete(l));
 
+// Loopback relay: dev builds and bun tests only (Vite never defines NODE_ENV on import.meta.env in a build).
+const ALLOW_LOCAL_RELAY =
+  import.meta.env.DEV === true || (import.meta.env as Record<string, unknown>).NODE_ENV === 'test';
+
+/**
+ * Pairings stored before the relay was pinned (audit H1) may point at any relay. Drop them for good; the user pairs
+ * again through relay.bwallet.space.
+ */
+export const dropUntrustedRelays = (all: StoredSession[], allowLocal = ALLOW_LOCAL_RELAY) =>
+  all.filter((s) => isAllowedRelay(s.r, allowLocal));
+
 const load = (): StoredSession[] => {
   try {
-    const all = JSON.parse(localStorage.getItem(KEY) ?? '[]') as StoredSession[];
+    const raw = JSON.parse(localStorage.getItem(KEY) ?? '[]') as StoredSession[];
+    const all = dropUntrustedRelays(raw);
+    if (all.length !== raw.length) localStorage.setItem(KEY, JSON.stringify(all));
     return all.filter((s) => (s.agent ? Date.now() < s.agent.expiresAt : Date.now() - s.lastUsed < IDLE_MS));
   } catch {
     return [];
@@ -159,7 +174,9 @@ async function onRequest(l: Live, id: string, action: string, params: unknown) {
   if (seen !== 'run') return send(l.stored.c, seen.replay); // answered before: re-send, never re-run
   if (l.stored.agent) return onAgentRequest(l, l.stored.agent, id, action, params);
   try {
-    const r = (await handleSiteCall(l.stored.origin, l.stored.origin + '/', action, params)) as {
+    // The relay's origin is a claim, not proof (audit H1): run under the paired key, never the site's own grants.
+    const as = pairedOrigin(l.stored.origin);
+    const r = (await handleSiteCall(as, as + '/', action, params, true)) as {
       success?: boolean;
       data?: unknown;
       error?: string;
@@ -222,6 +239,7 @@ function connect(c: string) {
       if (!load().some((s) => s.c === c)) return; // forgotten meanwhile
       const sealer = new Sealer(key, 'wallet');
       sealer.restore({ sent: stored.sent, lastSeen: stored.lastSeen });
+      if (!isAllowedRelay(stored.r, ALLOW_LOCAL_RELAY)) return; // never reconnect to an unpinned relay (audit H1)
       attach({ ws: new WebSocket(relaySocketUrl(stored.r, stored.c, 'wallet')), sealer, stored });
     } finally {
       connecting.delete(c);
@@ -250,7 +268,7 @@ export function forget(c: string, notify = true) {
 export function beginPairing(scanned: string): Promise<PendingPair> {
   let link: PairLink;
   try {
-    link = parsePairUrl(scanned);
+    link = parsePairUrl(scanned, undefined, { allowLocalRelay: ALLOW_LOCAL_RELAY });
   } catch (e) {
     return Promise.reject(e);
   }
@@ -272,7 +290,8 @@ export function beginPairing(scanned: string): Promise<PendingPair> {
       const f = JSON.parse(String(ev.data)) as RelayFrame;
       if (f.t !== 'relay' || !f.verifiedOrigin || settled) return;
       clearTimeout(timer);
-      // §4.4: trust the relay's view of the site's origin, never the QR alone.
+      // §4.4: the relay's view of the origin must match the QR. This only catches honest mistakes: a non-browser
+      // client can set any Origin header, so the session never gets the site's saved grants (see onRequest).
       if (f.verifiedOrigin !== link.o)
         return fail(`This code was shown by ${f.verifiedOrigin}, not ${link.o}. Don't connect.`);
       const hello: HelloFrame = {

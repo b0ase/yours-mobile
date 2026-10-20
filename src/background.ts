@@ -25,13 +25,22 @@ import { CWIEventName } from './cwi';
 import { describeWalletError } from './brand/walletError';
 import {
   healInvalidSend,
-  healMessage,
+  withHealMessage,
   isInvalidTxReview,
   resyncMessage,
   resyncSpent,
   type HealReport,
 } from './services/invalidSendHeal';
 import { refusalFor } from './services/broadcastRefusals';
+import {
+  AUTO_RESYNC_DELAY_MS,
+  readAutoResyncCoins,
+  runAutoResyncIfDue,
+  type AutoResyncDeps,
+  type AutoResyncReader,
+  type WocAnswer,
+} from './services/autoCoinResync';
+import { withCoinResyncLock } from './services/coinResyncLock';
 import type {
   ListOutputsArgs,
   RelinquishOutputArgs,
@@ -88,6 +97,7 @@ import {
 import { normalizeOriginator } from '@1sat/wallet';
 import { ADMIN_ORIGINATOR, initWallet, openAccountStorageForBackup, type AccountContext } from './initWallet';
 import { isExtensionSender, reservedOriginatorRefusal } from './services/adminOriginator';
+import { isReservedProtocol, reservedProtocolRefusal, RESERVED_REFUSAL, withoutReservedProtocols } from './services/reservedProtocols';
 import { healIndexFundActions } from './mobile/tokens/indexFundHeal';
 import { continuesChain, endChain, isAlreadyProcessedAbort, markChainStep, startsChain } from './services/dappChain';
 import { HOSTED_YOURS_IMAGE } from './utils/constants';
@@ -146,6 +156,23 @@ async function wocSpend(outpoint: string): Promise<string | null> {
   return typeof j.txid === 'string' ? j.txid : null;
 }
 
+/** WhatsOnChain's spender and whether that spend is mined; null when unspent (404); throws when it can't tell. */
+async function wocSpendStatus(outpoint: string): Promise<WocAnswer> {
+  const [txid, vout] = outpoint.split('_');
+  const r = await fetch(`https://api.whatsonchain.com/v1/bsv/main/tx/${txid}/${vout}/spent`);
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`woc ${r.status}`);
+  const j = (await r.json()) as { txid?: string; status?: string };
+  if (typeof j.txid !== 'string') throw new Error('woc: no spender');
+  return { txid: j.txid, confirmed: j.status === 'confirmed' };
+}
+
+/** The account's chain; WhatsOnChain lookups here are mainnet only. */
+const ctxChain = (ctx: AccountContext): string =>
+  (ctx.syncContext as unknown as { chain?: string }).chain ??
+  (ctx.syncContext.services as unknown as { chain?: string }).chain ??
+  'main';
+
 /** invalidSendHeal against this account's storage, the 1sat spend index, then WhatsOnChain. Never throws. */
 async function healRejectedInputs(ctx: AccountContext, error: unknown): Promise<HealReport | null> {
   const { account } = chromeStorageService.getCurrentAccountObject();
@@ -171,6 +198,100 @@ async function healRejectedInputs(ctx: AccountContext, error: unknown): Promise<
     console.error('[createAction] invalidTx heal failed:', err);
     return null;
   }
+}
+/**
+ * Clear every coin storage lists as spendable that the chain proves was spent (resyncSpent, fail closed: only coins
+ * with a named spending txid). Owner's iPhone, 19 Oct 2026: ~$51 of coins spent from another device holding the same
+ * seed still showed as balance; the toolbox's sync only adds outputs and never re-checks ones it holds, so they were
+ * found one failed send at a time. Returns null when storage/services aren't ready. Never throws.
+ */
+async function resyncAccountCoins(
+  ctx: AccountContext,
+  identityKey: string,
+  onStep?: (step: string) => void,
+): Promise<HealReport | null> {
+  const txo = (ctx.syncContext.services as unknown as { txo?: { getSpend: (o: string) => Promise<string | null> } }).txo;
+  if (!identityKey || !txo) return null;
+  try {
+    const outpoints = await ctx.storage.runAsStorageProvider(async (sp) => {
+      const user = (await sp.findUsers({ partial: { identityKey } }))[0];
+      if (!user) return [] as string[];
+      return (await sp.findOutputs({ partial: { userId: user.userId, spendable: true } }))
+        .filter((o) => !!o.txid)
+        .map((o) => `${o.txid}_${o.vout}`);
+    });
+    onStep?.(`Checking ${outpoints.length} coins…`);
+    return await resyncSpent(outpoints, (o) => txo.getSpend(o), markSpentStore(ctx, identityKey), {
+      fallback: ctxChain(ctx) === 'main' ? wocSpend : undefined,
+      onProgress: (done) => onStep?.(`Checked ${done} of ${outpoints.length} coins…`),
+    });
+  } catch (err) {
+    console.error('[resyncCoins] failed:', err);
+    return null;
+  }
+}
+
+/** HealStore over this account's storage: spendable → false for one outpoint. */
+const markSpentStore = (ctx: AccountContext, identityKey: string) => ({
+  markSpent: (txid: string, vout: number) =>
+    ctx.storage.runAsStorageProvider(async (sp) => {
+      const user = (await sp.findUsers({ partial: { identityKey } }))[0];
+      if (!user) return 0;
+      let n = 0;
+      for (const o of await sp.findOutputs({ partial: { userId: user.userId, txid, vout, spendable: true } }))
+        n += await sp.updateOutput(o.outputId, { spendable: false });
+      return n;
+    }),
+});
+
+/** Unfinished actions: their txids are not "spenders", and the coins they hold are not checked. */
+const PENDING_STATUSES = ['unsigned', 'nosend', 'sending', 'unprocessed', 'failed'] as const;
+
+/** Inputs for autoCoinResync from this account's storage: default-basket coins, pending actions. */
+async function autoResyncDeps(
+  ctx: AccountContext,
+  identityKey: string,
+  cleared: Record<string, string>,
+): Promise<AutoResyncDeps | null> {
+  const txo = (
+    ctx.syncContext.services as unknown as {
+      txo?: { getSpends: (o: string[]) => Promise<(string | null | undefined)[]> };
+    }
+  ).txo;
+  if (!identityKey || !txo?.getSpends) return null;
+  // The device's own store must be active: with a remote (1Sat) store active, as on web before the switch to this
+  // device, there is no StorageProvider to repair ("WalletStorageProvider does not support StorageProvider", web,
+  // 19 Oct 2026). Skip (not due-stamped), the next unlock tries again.
+  if (!ctx.storage.isActiveStorageProvider()) return null;
+  const read = await readAutoResyncCoins(
+    {
+      runAsReader: (f) => ctx.storage.runAsReader((r) => f(r as unknown as AutoResyncReader)),
+      isActiveStorageProvider: () => ctx.storage.isActiveStorageProvider(),
+    },
+    identityKey,
+    [...PENDING_STATUSES],
+  );
+  if (!read) return null;
+  const { userId } = read;
+  const setSpendable = (outpoint: string, spendable: boolean, spender?: string) =>
+    ctx.storage.runAsStorageProvider(async (sp) => {
+      const [txid, vout] = outpoint.split('_');
+      const spentBy = spender ? (await sp.findTransactions({ partial: { userId, txid: spender }, noRawTx: true }))[0] : undefined;
+      let n = 0;
+      for (const o of await sp.findOutputs({ partial: { userId, txid, vout: Number(vout), spendable: !spendable }, noScript: true }))
+        n += await sp.updateOutput(o.outputId, { spendable, spentBy: spendable ? undefined : spentBy?.transactionId });
+      return n;
+    });
+  return {
+    coins: read.coins,
+    cleared,
+    ownPendingTxids: read.ownPendingTxids,
+    ownPendingInputs: read.ownPendingInputs,
+    getSpends: (b) => txo.getSpends(b),
+    woc: ctxChain(ctx) === 'main' ? wocSpendStatus : undefined,
+    markSpent: (o, by) => setSpendable(o, false, by),
+    markUnspent: (o) => setSpendable(o, true),
+  };
 }
 // Set while wallet is reinitializing (e.g. account switch) to prevent
 // ensureWallet from launching a popup during the transition.
@@ -473,8 +594,40 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
     // Restore any mined transaction storage holds as failed, so its change counts again ($vexvoid, 11 Oct 2026).
     // Order matters (owner, 14 Oct 2026): both repairs need this device's storage active, so switch first.
     const ctx = accountContext;
+    const localReady = preferLocalStorage(ctx);
+    // Coins spent elsewhere (another device, same seed) stay "spendable" here until checked: check the default basket
+    // at most every 30 minutes per account (persisted), fail closed (services/autoCoinResync.ts). Off the unlock path:
+    // after this device's store is active, and a while after unlock so the first balance read and the address sync
+    // are not queued behind its scan of every coin (owner's big wallet, 19 Oct 2026).
+    {
+      const key = chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey || '';
+      const gen = lockGeneration;
+      if (key)
+        void localReady
+          .then(() => new Promise((r) => setTimeout(r, AUTO_RESYNC_DELAY_MS)))
+          .then(() =>
+            // Locked or switched account since: skip (the next unlock tries again).
+            lockGeneration !== gen || accountContext !== ctx
+              ? null
+              : runAutoResyncIfDue(
+                  key,
+                  {
+                    get: (k) => chrome.storage.local.get(k),
+                    set: (items) => chrome.storage.local.set(items),
+                  },
+                  (cleared) => autoResyncDeps(ctx, key, cleared),
+                ),
+          )
+          .then((r) => {
+            if (r && (r.released || r.restored)) {
+              console.warn('[background] auto coin resync:', r);
+              notifyBalanceUpdate();
+            }
+          })
+          .catch((err) => console.error('[background] auto coin resync failed:', err));
+    }
     void (async () => {
-      await preferLocalStorage(ctx);
+      await localReady;
       // Paymail receipts whose derivation only the server recorded (restore from seed, 14 Oct 2026). Idempotent.
       await ctx
         .restorePaymails()
@@ -1050,6 +1203,10 @@ const bindPermissionCallbacks = (manager: LocalWalletPermissionsManager) => {
  */
 const showPermissionPrompt = (request: PermissionRequest & { requestID: string }): Promise<void> => {
   console.log('[background] showPermissionPrompt called, requestID:', request.requestID, 'type:', request.type);
+  if (request.type === 'protocol' && isReservedProtocol(request.protocolID) && request.originator !== ADMIN_ORIGINATOR) {
+    accountContext?.wallet.denyPermission(request.requestID).catch(() => undefined);
+    return Promise.reject(new Error(RESERVED_REFUSAL));
+  }
   return siteTrustedFor(request).then(
     (trusted) =>
       new Promise<void>((resolve, reject) => {
@@ -1371,6 +1528,16 @@ if (!(
       }
       if (message.originator !== expected.originator) {
         sendResponse({ type: message.action, success: false, error: 'Origin mismatch' });
+        return true;
+      }
+    }
+
+    // Wallet-internal protocols (bTrust, Locks, funds, presign…) are never available to an outside site or app,
+    // and the refusal comes before any unlock or permission sheet (services/reservedProtocols.ts, audit C1).
+    if (!isFromExtension && message?.originator !== ADMIN_ORIGINATOR) {
+      const refusal = reservedProtocolRefusal(String(message?.action ?? ''), message?.params);
+      if (refusal) {
+        sendResponse({ type: message.action, success: false, error: refusal });
         return true;
       }
     }
@@ -2193,38 +2360,11 @@ if (!(
       await ensureWallet(true);
       if (!accountContext) throw new Error('Wallet not initialized');
       const ctx = accountContext;
-      const { account } = chromeStorageService.getCurrentAccountObject();
-      const identityKey = account?.pubKeys?.identityPubKey || '';
-      const txo = (ctx.syncContext.services as unknown as { txo?: { getSpend: (o: string) => Promise<string | null> } })
-        .txo;
-      if (!identityKey || !txo) throw new Error('Wallet services are not ready yet. Try again in a moment.');
-      const outpoints = await ctx.storage.runAsStorageProvider(async (sp) => {
-        const user = (await sp.findUsers({ partial: { identityKey } }))[0];
-        if (!user) return [] as string[];
-        return (await sp.findOutputs({ partial: { userId: user.userId, spendable: true } }))
-          .filter((o) => !!o.txid)
-          .map((o) => `${o.txid}_${o.vout}`);
-      });
-      sendRecoverProgress('txid', `Checking ${outpoints.length} coins…`);
-      const report = await resyncSpent(
-        outpoints,
-        (o) => txo.getSpend(o),
-        {
-          markSpent: (txid, vout) =>
-            ctx.storage.runAsStorageProvider(async (sp) => {
-              const user = (await sp.findUsers({ partial: { identityKey } }))[0];
-              if (!user) return 0;
-              let n = 0;
-              for (const o of await sp.findOutputs({ partial: { userId: user.userId, txid, vout, spendable: true } }))
-                n += await sp.updateOutput(o.outputId, { spendable: false });
-              return n;
-            }),
-        },
-        {
-          fallback: wocSpend,
-          onProgress: (done) => sendRecoverProgress('txid', `Checked ${done} of ${outpoints.length} coins…`),
-        },
+      const identityKey = chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey || '';
+      const report = await withCoinResyncLock(() =>
+        resyncAccountCoins(ctx, identityKey, (step) => sendRecoverProgress('txid', step)),
       );
+      if (!report) throw new Error('Wallet services are not ready yet. Try again in a moment.');
       console.log('[STORAGE_RESYNC_COINS]', report);
       sendResponse({ type: 'STORAGE_RESYNC_COINS', success: true, data: { report, summary: resyncMessage(report) } });
     } catch (err) {
@@ -2913,7 +3053,13 @@ if (!(
       accountContext?.wallet
         .grantGroupedPermission({
           requestID: response.requestID,
-          granted: response.granted,
+          // Reserved wallet-internal protocols are never granted to a site, whatever the sheet sent (audit C1).
+          granted: response.granted.protocolPermissions
+            ? {
+                ...response.granted,
+                protocolPermissions: withoutReservedProtocols(response.granted.protocolPermissions),
+              }
+            : response.granted,
           expiry: response.expiry,
         })
         .then(() => {
@@ -3973,7 +4119,8 @@ if (!(
       sendResponse({
         type: CWIEventName.CREATE_ACTION,
         success: false,
-        error: (friendly ?? errorMessage) + (heal ? healMessage(heal) : ''),
+        // Heal outcome first: the page cuts long errors, and a long broadcaster reason hid "tap Send again" (19 Oct).
+        error: withHealMessage(friendly ?? errorMessage, heal),
       });
     }
     return true;

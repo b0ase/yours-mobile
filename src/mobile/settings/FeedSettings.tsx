@@ -104,6 +104,122 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { ownTokens, recheckPendingIndexing } from '../tokens/pendingIndexing';
 import { setupLabel, useRoomSetup } from '../tokens/useRoomSetup';
 import type { OwnToken } from '../tokens/indexFund';
+import {
+  registerSettingsEntries,
+  SETTINGS_SCREEN_EVENT,
+  takeSettingsScreen,
+  type SettingsEntry,
+} from '../../utils/settingsSearch';
+
+const FEED_SETTINGS_SEARCH: SettingsEntry[] = [
+  {
+    id: 'feed-password',
+    label: 'Change password',
+    description: 'The one password for every account here',
+    keywords: ['password', 'passphrase', 'pin', 'change password', 'new password'],
+    target: { kind: 'screen', screen: 'password' },
+  },
+  {
+    id: 'feed-notifications',
+    label: 'Notifications',
+    description: 'What the app tells you about',
+    keywords: ['notifications', 'alerts', 'push', 'sounds', 'bmail'],
+    target: { kind: 'screen', screen: 'notifications' },
+  },
+  {
+    id: 'feed-feed',
+    label: 'Feed',
+    description: 'Default feed, autoplay, filters',
+    keywords: ['feed', 'autoplay', 'video', 'language', 'filter', 'posts'],
+    target: { kind: 'screen', screen: 'feed' },
+  },
+  {
+    id: 'feed-payments',
+    label: 'Payments',
+    description: 'One-click pay and paid likes',
+    keywords: ['pay', 'payment', 'one click', 'limit', 'like', 'tip'],
+    target: { kind: 'screen', screen: 'payments' },
+  },
+  {
+    id: 'feed-bagent',
+    label: 'Ask b',
+    description: 'b, the assistant in your wallet',
+    keywords: ['b', 'agent', 'assistant', 'ai', 'ask b'],
+    target: { kind: 'screen', screen: 'bagent' },
+  },
+  {
+    id: 'feed-bweb',
+    label: 'bWeb',
+    description: 'The in-app browser',
+    keywords: ['browser', 'web', 'bweb', 'sites'],
+    target: { kind: 'screen', screen: 'bweb' },
+  },
+  {
+    id: 'feed-indexing',
+    label: 'Token indexing',
+    description: 'One-tap indexing fee',
+    keywords: ['index', 'indexing', 'token', 'fee'],
+    target: { kind: 'screen', screen: 'indexing' },
+  },
+  {
+    id: 'feed-bookmarks',
+    label: 'Bookmarks',
+    description: 'Saved posts',
+    keywords: ['bookmarks', 'saved', 'favourites'],
+    target: { kind: 'screen', screen: 'bookmarks' },
+  },
+  {
+    id: 'feed-hidden',
+    label: 'Blocked & muted',
+    description: 'People and posts you hid',
+    keywords: ['block', 'blocked', 'mute', 'muted', 'hide', 'hidden'],
+    target: { kind: 'screen', screen: 'hidden' },
+  },
+  {
+    id: 'feed-idmap',
+    label: 'Identity map',
+    description: 'Your keys, names and links',
+    keywords: ['identity', 'keys', 'map', 'addresses'],
+    target: { kind: 'screen', screen: 'idmap' },
+  },
+  {
+    id: 'feed-signins',
+    label: 'Recent sign-ins',
+    description: 'Where this account signed in',
+    keywords: ['sign in', 'login', 'sessions', 'devices'],
+    target: { kind: 'screen', screen: 'signins' },
+  },
+  {
+    id: 'feed-tokens',
+    label: 'My tokens',
+    description: 'Tokens you launched',
+    keywords: ['tokens', 'my tokens', 'coins'],
+    target: { kind: 'screen', screen: 'tokens' },
+  },
+  {
+    id: 'feed-sweep',
+    label: 'Sweep into this account',
+    description: 'Move funds in from another phrase or key',
+    keywords: ['sweep', 'import', 'move funds', 'transfer'],
+    target: { kind: 'screen', screen: 'sweep' },
+  },
+  {
+    id: 'feed-delete',
+    label: 'Delete account data',
+    description: 'Remove what this account stored',
+    keywords: ['delete', 'erase', 'remove', 'data', 'gdpr'],
+    target: { kind: 'screen', screen: 'delete' },
+  },
+  {
+    id: 'feed-terms',
+    label: 'Terms of use',
+    description: 'The rules for using the app',
+    keywords: ['terms', 'legal', 'policy'],
+    target: { kind: 'screen', screen: 'terms' },
+  },
+];
+// Settings' search bar finds these rows too (utils/settingsSearch.ts); this module loads only where they exist.
+registerSettingsEntries(FEED_SETTINGS_SEARCH);
 
 /**
  * Settings → Feed / Payments / Privacy (mobile). Rendered inside upstream Settings' main page via the
@@ -511,6 +627,17 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
     | 'signins'
     | null
   >(null);
+  // A Settings search result opens one of these screens. Only the "wallet" instance takes it, so it opens once.
+  useEffect(() => {
+    if (!wal) return;
+    const open = () => {
+      const want = takeSettingsScreen();
+      if (want) setScreen(want as typeof screen);
+    };
+    open();
+    window.addEventListener(SETTINGS_SCREEN_EVENT, open);
+    return () => window.removeEventListener(SETTINGS_SCREEN_EVENT, open);
+  }, [wal]);
   // The "New sign-in to bChat" push opens Recent sign-ins (settings/signIns.ts).
   useEffect(() => {
     if (!acct) return;

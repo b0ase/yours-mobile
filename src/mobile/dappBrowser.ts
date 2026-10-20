@@ -4,7 +4,7 @@ import { isCWIEventName } from '@1sat/wallet-browser';
 import { YoursNative, isNative } from './native';
 import { MOBILE_EXTENSION_ID } from './protocol';
 import { isReservedHost } from '../services/adminOriginator';
-import { originatorForOrigin } from '../services/originKey';
+import { isPairedHost, originatorForOrigin } from '../services/originKey';
 
 /**
  * In-app dApp browser. Each site is a hub endpoint whose sender origin is the
@@ -74,9 +74,11 @@ let contextFactory: ContextFactory | undefined;
  * WebView's frame info, or a postMessage from our own bApp iframe). Returns the wallet's
  * { success, data, error } reply. Shared by the full-screen browser and in-frame bApps.
  */
-export const handleSiteCall = async (origin: string, url: string, type: string, params: unknown) => {
+export const handleSiteCall = async (origin: string, url: string, type: string, params: unknown, paired = false) => {
   if (!contextFactory) throw new Error('Wallet not ready');
   const o = new URL(origin);
+  // Phone-paired sessions have their own permission key (originKey.ts pairedOrigin); only they may use it.
+  if (isPairedHost(o.hostname) !== paired) throw new Error('Reserved originator');
   // https only (plus loopback http for development): plain http must not share an https site's grants (M3).
   const key = originatorForOrigin(o.origin);
   if (!key.originator) throw new Error(key.error);

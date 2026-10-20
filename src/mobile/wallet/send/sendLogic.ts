@@ -1,5 +1,5 @@
 import { parseRecipient } from '../../names/names';
-import { formatFiat } from '../../../utils/displayCurrency';
+import { currentFx, formatFiat } from '../../../utils/displayCurrency';
 import { recordPaid } from './payee';
 
 /**
@@ -39,7 +39,7 @@ export const rowUsd = (r: SendRow, rate: number): number => {
 };
 
 /** Dollars shown in the display currency (Settings › Currency). */
-export const fmtUsd = (n: number): string => formatFiat(n);
+export const fmtUsd = (n: number): string => formatFiat(n, currentFx(), { cents: true });
 
 export const fmtBsv = (sats: number): string => {
   const bsv = sats / SATS_PER_BSV;

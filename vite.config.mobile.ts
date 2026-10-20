@@ -416,7 +416,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     // Balance as a membership card (src/mobile/wallet/WalletCard); the old balance block below it is hidden.
     [
       '        {/* ── USD balance ── */}',
-      '<SectionBoundary name="Card"><WalletCard usd={bsvBalance * exchangeRate + (services.mnee ? mneeBalance : 0)} sats={Math.round(bsvBalance * 100_000_000)} view={balanceView({ loading: balanceLoading, failed: balanceFailed, known: balanceKnown })} syncing={isSyncing} failed={balanceFailed} onRetry={() => void getAndSetBsvBalance()} receiveAddress={receiveAddress} onRefresh={(manual) => void refreshUtxos({ notifyIfUnchanged: manual })} refreshing={isRefreshing} rate={exchangeRate} /></SectionBoundary>\n        {/* ── USD balance ── */}',
+      '<SectionBoundary name="Card"><WalletCard usd={bsvBalance * exchangeRate + (services.mnee ? mneeBalance : 0)} sats={Math.round(bsvBalance * 100_000_000)} view={balanceView({ loading: balanceLoading, failed: balanceFailed, known: balanceKnown })} syncing={isSyncing} failed={showSyncRetry({ failed: balanceFailed, known: balanceKnown })} stale={staleHint} onRetry={() => void getAndSetBsvBalance()} receiveAddress={receiveAddress} onRefresh={(manual) => void refreshUtxos({ notifyIfUnchanged: manual })} upToDate={upToDate} refreshing={isRefreshing} rate={exchangeRate} /></SectionBoundary>\n        {/* ── USD balance ── */}',
     ],
     [
       'className="text-4xl font-bold tracking-tight select-none"',
@@ -526,15 +526,6 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     [
       '      setShowBackupPromo(!dismissed && !hasRemotes);',
       '      setShowBackupPromo(false && !dismissed && !hasRemotes);',
-    ],
-    // "Missing assets? Open migration tool": only for wallets that could hold legacy Yours assets, not ones made here.
-    [
-      "import { BackupGate } from '../mobile/backup/BackupGate';\nimport { requestBackupThen } from '../mobile/backup/backupState';",
-      "import { BackupGate } from '../mobile/backup/BackupGate';\nimport { createdHere, requestBackupThen } from '../mobile/backup/backupState';",
-    ],
-    [
-      '      setShowMigrationBanner(!acct?.settings?.sweepCompleted || left === undefined || left > 0);',
-      '      setShowMigrationBanner(\n        (!acct?.settings?.sweepCompleted || left === undefined || left > 0) &&\n          !createdHere(acct?.addresses?.identityAddress),\n      );',
     ],
   ],
   // Home modules (src/mobile/home, owner 18 Oct 2026): the card shows while its module is on the home; the other

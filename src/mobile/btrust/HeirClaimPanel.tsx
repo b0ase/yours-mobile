@@ -14,7 +14,15 @@ import { CopyButton } from './CopyButton';
 import { planLabel } from './planFile';
 import { claimPath, countdown, heirIndex, parsePlan } from './checkin';
 import { broadcast, findPlanLock, wocChain } from './derive';
-import { buildHeirsClaim, finishHeirsClaim, heirSignature, heirSigner, signLeadClaim, verifySpend } from './sign';
+import {
+  buildHeirsClaim,
+  checkHeirsClaim,
+  finishHeirsClaim,
+  heirSignature,
+  heirSigner,
+  signLeadClaim,
+  verifySpend,
+} from './sign';
 
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
@@ -106,14 +114,24 @@ export const HeirClaimPanel = ({ height }: { height: number }) => {
       const req = JSON.parse(request) as ClaimRequest;
       if (req.v !== 1) throw new Error('That is not a bTrust claim request');
       const tx = Transaction.fromHex(req.tx);
-      tx.inputs[0].sourceTransaction = Transaction.fromHex(req.source);
+      // Never trust the sender's copy of the lock: find the plan's real live lock on chain, check the claim
+      // spends exactly it and pays everything to the address this heir typed, with a sane fee.
+      const lock = await liveLock(p);
+      const summary = checkHeirsClaim({ tx, lockTx: lock.tx, vout: lock.vout, plan: p, payTo: payTo.trim() });
+      const sats = (n: number) => `${n.toLocaleString('en-GB')} sats`;
+      const lines = [
+        `Lock total: ${sats(summary.lockSats)}`,
+        ...summary.outputs.map(
+          (o, i) => `Output ${i + 1}: ${sats(o.sats)} to ${o.to}${o.mine ? ' (your address)' : ''}`,
+        ),
+        `Fee: ${sats(summary.fee)}`,
+      ];
+      if (!window.confirm(`Add your signature to this claim?\n\n${lines.join('\n')}`)) return;
       const mine = await heirSignature(tx, p, await heirSigner(apiContext.wallet));
       // finishHeirsClaim checks both signatures against this exact transaction and runs the script.
       const done = await finishHeirsClaim(tx, p, [{ seat: req.seat, sig: Utils.toArray(req.sig, 'hex') }, mine]);
       setReady(done);
-      const pkh = done.outputs[0].lockingScript.chunks[2]?.data;
-      const to = pkh ? Utils.toBase58Check(pkh, [0]) : 'a script';
-      setOut(`Both signatures verified. Pays ${done.outputs[0].satoshis?.toLocaleString('en-GB')} sats to ${to}.`);
+      setOut(`Both signatures verified.\n${lines.join('\n')}`);
     });
 
   const send = () =>
@@ -192,14 +210,14 @@ export const HeirClaimPanel = ({ height }: { height: number }) => {
                 Start a claim with another heir
               </button>
               <label className="flex flex-col gap-1">
-                Or paste the claim another heir sent you
+                Or paste the claim another heir sent you (enter your address above first; it must pay everything there)
                 <textarea className={INPUT} rows={3} value={request} onChange={(e) => setRequest(e.target.value)} />
               </label>
               <button
                 type="button"
                 className={BTN}
                 style={{ background: GOLD }}
-                disabled={busy || !request}
+                disabled={busy || !request || !payTo}
                 onClick={() => void finishTogether(plan)}
               >
                 Add my signature

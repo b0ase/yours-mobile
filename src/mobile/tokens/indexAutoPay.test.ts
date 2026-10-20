@@ -35,7 +35,7 @@ describe('index auto-pay', () => {
     expect(g.peek(3030, RATE, 1000 + WINDOW_MS + 10).ok).toBe(true);
   });
   test('formats tiny USD', () => {
-    expect(formatSmallUsd(0.000606)).toBe('$0.0006');
+    expect(formatSmallUsd(0.000606)).toBe('$0.00061');
     expect(formatSmallUsd(0.12)).toBe('$0.12');
   });
   test('own token registry dedupes', () => {

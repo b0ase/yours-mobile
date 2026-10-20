@@ -1,4 +1,6 @@
 import { lazy, Suspense, useState } from 'react';
+import { BgVideo } from './BgVideo';
+import { useBgVideo } from './lib/bgVideo';
 import { createPortal } from 'react-dom';
 import { Link, Navigate, NavLink, Route, Routes, useNavigate, useParams } from 'react-router-dom';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -30,6 +32,8 @@ const OpnsMintPage = lazy(() => import('../names/OpnsMintPage'));
 // Name store (/m/bmint/store, public /bmint/store): every OpNS name for sale. bWalletX only (market rules).
 const OpnsStorePage = MARKET_ENABLED ? lazy(() => import('../names/OpnsStorePage')) : null;
 const BavatarMintSheet = lazy(() => import('../bavatar/BavatarMintSheet'));
+// Check this mint (/m/bmint/check?o=<outpoint>): verify any bMint mint on this device (check/verify.ts).
+const CheckPage = lazy(() => import('./check/CheckPage'));
 
 const BASE = '/m/bmint';
 
@@ -238,34 +242,40 @@ export const BmintPage = () => {
   const owner = useOwner();
   const bulk = useBulkMint(owner);
   const Notes = owner ? NotesPage : NotesShowcase;
+  const film = useBgVideo();
   return (
-    <div className="bmint">
-      <header className="bm-head">
-        <Link to={BASE} className="bm-brand">
-          <img src={mintMark} alt="" />
-          <span>
-            b<b>Mint</b>
-          </span>
-        </Link>
-        <nav className="bm-tabs" aria-label="bMint">
-          <Tab to={BASE} end>
-            Mint
-          </Tab>
-          {/* The consumer Name Store lives at /names (names/store/); the old order-book list stays at /store. */}
-          <Tab to="/m/names">Get a name</Tab>
-          {Notes && <Tab to={`${BASE}/notes`}>Notes</Tab>}
-          {bulk && <Tab to={`${BASE}/opns`}>Mint names</Tab>}
-        </nav>
-      </header>
-      <Suspense fallback={<div className="bm-body bm-msg">Loading…</div>}>
-        <Routes>
-          {Notes && <Route path="notes" element={<Notes />} />}
-          <Route path="opns" element={bulk ? <OpnsMintPage /> : <Navigate to="/m/names" replace />} />
-          {OpnsStorePage && <Route path="store" element={<OpnsStorePage />} />}
-          <Route path="mint/:type" element={<MintOpen owner={owner} />} />
-          <Route path="*" element={<Landing owner={owner} />} />
-        </Routes>
-      </Suspense>
+    <div className={`bm-frame${film ? ' bm-film' : ''}`}>
+      {film && <BgVideo />}
+      <div className="bmint">
+        <header className="bm-head">
+          <Link to={BASE} className="bm-brand">
+            <img src={mintMark} alt="" />
+            <span>
+              b<b>Mint</b>
+            </span>
+          </Link>
+          <nav className="bm-tabs" aria-label="bMint">
+            <Tab to={BASE} end>
+              Mint
+            </Tab>
+            {/* The consumer Name Store lives at /names (names/store/); the old order-book list stays at /store. */}
+            <Tab to="/m/names">Get a name</Tab>
+            {Notes && <Tab to={`${BASE}/notes`}>Notes</Tab>}
+            {bulk && <Tab to={`${BASE}/opns`}>Mint names</Tab>}
+            <Tab to={`${BASE}/check`}>Check</Tab>
+          </nav>
+        </header>
+        <Suspense fallback={<div className="bm-body bm-msg">Loading…</div>}>
+          <Routes>
+            {Notes && <Route path="notes" element={<Notes />} />}
+            <Route path="opns" element={bulk ? <OpnsMintPage /> : <Navigate to="/m/names" replace />} />
+            {OpnsStorePage && <Route path="store" element={<OpnsStorePage />} />}
+            <Route path="mint/:type" element={<MintOpen owner={owner} />} />
+            <Route path="check" element={<CheckPage />} />
+            <Route path="*" element={<Landing owner={owner} />} />
+          </Routes>
+        </Suspense>
+      </div>
     </div>
   );
 };

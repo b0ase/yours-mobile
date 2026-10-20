@@ -188,7 +188,7 @@ export const MediaSection = () => {
           mintedOutpoint={items.find((i) => isBavatarItem(i.name))?.output.outpoint.replace('.', '_')}
           onOpen={(op) => navigate(`/m/nfts/${op}`)}
         />
-        <div className="flex gap-1.5 overflow-x-auto">
+        <div className="flex flex-wrap gap-1.5">
           {FILTERS.filter((f) => f.id !== '3d' || guns.size > 0).map((f) => (
             <button
               key={f.id}

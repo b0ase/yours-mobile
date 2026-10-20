@@ -1,4 +1,5 @@
 import { heldBsv21Balances } from '../mobile/airdrops/heldBalances';
+import { migrationRowText } from '../utils/migrationRow';
 import { quarantineFor, setQuarantineAccount } from '../mobile/airdrops/inbox';
 import { withoutQuarantined } from '../mobile/airdrops/quarantine';
 import { BsvPriceBar, BuyBsvButton, BuyBsvSheet } from '../mobile/wallet/BuyBsv';
@@ -21,7 +22,6 @@ import {
   Trash2,
   Plus,
   Loader2,
-  RefreshCw,
 } from 'lucide-react';
 import bsvCoin from '../assets/bsv-coin.svg';
 import { Button } from '../components/Button';
@@ -32,6 +32,7 @@ import { BetaLine } from '../mobile/sweep/BetaLine';
 import { MainContent } from '../components/Reusable';
 import { Show } from '../components/Show';
 import { TopNav } from '../components/TopNav';
+import { RefreshGlyph, UpToDateAnnouncer, useUpToDate } from '../components/RefreshGlyph';
 import { useBottomMenu } from '../hooks/useBottomMenu';
 import { useSnackbar } from '../hooks/useSnackbar';
 import { useIdentity, resolveImageUrl } from '../hooks/useIdentity';
@@ -114,6 +115,9 @@ import {
   RATE_TIMEOUT_MS,
   balanceView,
   loadLastBalance,
+  loadLastBalanceAt,
+  showSyncRetry,
+  staleBalanceHint,
   saveLastBalance,
 } from '../mobile/wallet/balanceLoad';
 
@@ -191,17 +195,32 @@ export const BsvWallet = () => {
   >([]);
   const [selectedAddressIndex, setSelectedAddressIndex] = useState(0);
   const [generatingAddress, setGeneratingAddress] = useState(false);
-  const [bsvBalance, setBsvBalance] = useState<number>(0);
+  // The last balance this device saw, shown at once while the wallet opens and syncs (owner, 19 Oct 2026: a big
+  // wallet sat on "Still syncing. Tap to retry." for a long time before its balance appeared).
+  const [bsvBalance, setBsvBalance] = useState<number>(() => (loadLastBalance(identityAddress) ?? 0) / 100_000_000);
   const [exchangeRate, setExchangeRate] = useState<number>(0);
   const [balanceLoading, setBalanceLoading] = useState(true);
   const [balanceFailed, setBalanceFailed] = useState(false);
-  const [balanceKnown, setBalanceKnown] = useState(false);
+  const [balanceKnown, setBalanceKnown] = useState(() => loadLastBalance(identityAddress) != null);
+  // True only once THIS session loaded a fresh balance: MAX / send-all never act on the cached amount.
+  const [balanceFresh, setBalanceFresh] = useState(false);
+  // Switching account without a remount: show that account's cached balance, never the previous one's.
+  const balanceAccount = useRef(identityAddress);
+  useEffect(() => {
+    if (balanceAccount.current === identityAddress) return;
+    balanceAccount.current = identityAddress;
+    const cached = loadLastBalance(identityAddress);
+    setBsvBalance((cached ?? 0) / 100_000_000);
+    setBalanceKnown(cached != null);
+    setBalanceFresh(false);
+    setBalanceFailed(false);
+    setBalanceLoading(true);
+  }, [identityAddress]);
   const [lockData, setLockData] = useState<LockData>();
   const [isSendAllBsv, setIsSendAllBsv] = useState(false);
   const [showWelcome, setShowWelcome] = useState(false);
   const [showBackupPromo, setShowBackupPromo] = useState(false);
   const [keysAlreadyBackedUp, setKeysAlreadyBackedUp] = useState(false);
-  const [showMigrationBanner, setShowMigrationBanner] = useState(false);
   const [legacyLeft, setLegacyLeft] = useState(0);
   const [relayxOpen, setRelayxOpen] = useState(false);
   // Restored as RelayX: open this account's own RelayX collection (settings.relayx, RestoreAccount.tsx).
@@ -492,11 +511,9 @@ export const BsvWallet = () => {
       const hasRemotes = (acct?.storageConfig?.remotes?.length ?? 0) > 0;
       setKeysAlreadyBackedUp(!!acct?.settings?.keysBackedUp);
       setShowBackupPromo(!dismissed && !hasRemotes);
-      // Stays until a finished sweep leaves nothing behind (owner 17 Oct: it vanished with 62 ordinals left).
-      // Sweeps finished before 5.2.30 never counted what was left, so an unknown count shows the card too.
+      // Owner 19 Oct: one always-present "Bring in old assets" row; the count only changes its wording.
       const left = acct?.settings?.legacyLeft;
       setLegacyLeft(left ?? 0);
-      setShowMigrationBanner(!acct?.settings?.sweepCompleted || left === undefined || left > 0);
       if (obj?.selectedAccount) {
         await getAndSetAccountAndBsv21s();
       }
@@ -540,14 +557,22 @@ export const BsvWallet = () => {
 
   useEffect(() => {
     const bsvBalanceInSats = Math.round(bsvBalance * BSV_DECIMAL_CONVERSION);
-    setIsSendAllBsv(satSendAmount === bsvBalanceInSats);
-  }, [satSendAmount, bsvBalance]);
+    setIsSendAllBsv(balanceFresh && satSendAmount === bsvBalanceInSats);
+  }, [satSendAmount, bsvBalance, balanceFresh]);
+
+  const staleHint = staleBalanceHint({
+    failed: balanceFailed,
+    known: balanceKnown,
+    fresh: balanceFresh,
+    at: loadLastBalanceAt(identityAddress),
+  });
 
   const applyBalance = (satoshis: number) => {
     setBsvBalance(satoshis / 100_000_000);
     saveLastBalance(identityAddress, satoshis);
     publishBalance('bsv', satoshis / 100_000_000, 'BSV');
     setBalanceKnown(true);
+    setBalanceFresh(true);
     setBalanceFailed(false);
     setBalanceLoading(false);
   };
@@ -725,6 +750,8 @@ export const BsvWallet = () => {
   };
 
   const [isRefreshing, setIsRefreshing] = useState(false);
+  // Manual refresh that found nothing new: the refresh icon turns into a tick for a moment (no toast).
+  const [upToDate, showUpToDate] = useUpToDate();
   const [getBsvOpen, setGetBsvOpen] = useState(false);
 
   /**
@@ -787,7 +814,7 @@ export const BsvWallet = () => {
         tokens !== undefined &&
         bsv21Signature(tokens) === before.tokens;
       if (notifyIfUnchanged && synced && unchanged) {
-        addSnackbar('Balances are up to date. Incoming transactions can take one confirmation to appear.', 'info');
+        showUpToDate();
       }
       // NFTs: reload the list on a manual refresh or when anything moved, so purchases appear without reopening.
       if (notifyIfUnchanged || !unchanged) notifyMinted();
@@ -1010,6 +1037,11 @@ export const BsvWallet = () => {
       return isValidEmail(r.address) ? { paymail: r.address, satoshis } : { address: r.address, satoshis };
     });
 
+    // Send-all from a cached (possibly stale) balance: wait for the fresh one.
+    if (isSendAllBsv && !balanceFresh) {
+      addSnackbar('Updating balance…', 'info');
+      return;
+    }
     const totalSats = isSendAllBsv
       ? Math.round(bsvBalance * BSV_DECIMAL_CONVERSION)
       : sendRecipients.reduce((acc, r) => acc + (r.satoshis ?? 0), 0);
@@ -1106,6 +1138,10 @@ export const BsvWallet = () => {
   };
 
   const fillInputWithAllBsv = () => {
+    if (!balanceFresh) {
+      addSnackbar('Updating balance…', 'info');
+      return;
+    }
     const maxSats = Math.round(bsvBalance * BSV_DECIMAL_CONVERSION);
     setSatSendAmount(maxSats);
     // MAX is single-recipient only. Preserve the existing recipient's id and
@@ -1131,7 +1167,6 @@ export const BsvWallet = () => {
   };
 
   const handleMigrationBannerClick = async () => {
-    setShowMigrationBanner(false);
     const { account } = chromeStorageService.getCurrentAccountObject();
     if (account) {
       await chromeStorageService.updateNested('accounts', {
@@ -1504,15 +1539,20 @@ export const BsvWallet = () => {
                 whileTap={{ scale: 0.9 }}
                 onClick={() => refreshUtxos({ notifyIfUnchanged: true })}
                 disabled={isRefreshing}
-                title="Refresh balances"
-                className="flex items-center justify-center border-0 outline-none bg-transparent p-1 cursor-pointer"
-                style={{ color: theme.color.global.gray, opacity: 0.55 }}
+                title={upToDate ? 'Up to date' : 'Refresh balances'}
+                aria-label={upToDate ? 'Balances are up to date' : 'Refresh balances'}
+                className={`flex items-center gap-1.5 border-0 outline-none bg-transparent p-1 cursor-pointer${upToDate ? ' bw-uptodate' : ''}`}
+                style={{ color: theme.color.global.gray, opacity: 0.55, transition: 'color 150ms, opacity 150ms' }}
               >
-                <RefreshCw size={16} className={isRefreshing ? 'animate-spin' : ''} />
+                <RefreshGlyph refreshing={isRefreshing} done={upToDate} />
+                {upToDate && <span className="text-sm font-semibold">Up to date</span>}
               </motion.button>
             )}
+            {!balanceLoading && (
+              <UpToDateAnnouncer done={upToDate} />
+            )}
           </div>
-          {balanceFailed && (
+          {showSyncRetry({ failed: balanceFailed, known: balanceKnown }) && (
             <button
               type="button"
               onClick={() => void getAndSetBsvBalance()}
@@ -1521,6 +1561,11 @@ export const BsvWallet = () => {
             >
               Still syncing. Tap to retry.
             </button>
+          )}
+          {staleHint && (
+            <p className="mt-1 text-[11px] m-0" style={{ color: theme.color.global.gray, opacity: 0.8 }}>
+              {staleHint}
+            </p>
           )}
           {restoreMessage && (
             <p role="status" className="mt-1 text-[11px] m-0" style={{ color: theme.color.global.gray }}>
@@ -1765,45 +1810,6 @@ export const BsvWallet = () => {
           </motion.div>
         </Show>
 
-        {/* ── Legacy migration banner ── */}
-        <AnimatePresence>
-          {showMigrationBanner && (
-            <motion.button
-              key="migration-banner"
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.25, ease: 'easeOut' }}
-              type="button"
-              onClick={handleMigrationBannerClick}
-              className="flex items-center justify-between gap-2 w-[92%] mt-3 mb-4 px-4 py-2.5 rounded-xl border-0 outline-none cursor-pointer text-left"
-              style={{
-                background: 'rgba(253,176,34,0.08)',
-                border: '1px solid rgba(253,176,34,0.2)',
-              }}
-            >
-              <span
-                className="text-xs leading-snug min-w-0 overflow-hidden text-ellipsis whitespace-nowrap"
-                style={{ color: '#FDB022' }}
-              >
-                {legacyLeft > 0 ? (
-                  <>
-                    <span style={{ fontWeight: 600 }}>
-                      {legacyLeft} item{legacyLeft === 1 ? '' : 's'} still at your old address.
-                    </span>{' '}
-                    Bring them in
-                  </>
-                ) : (
-                  <>
-                    <span style={{ fontWeight: 600 }}>Missing assets?</span> Open migration tool
-                  </>
-                )}
-              </span>
-              <ArrowRight size={14} style={{ color: '#FDB022' }} className="shrink-0" />
-            </motion.button>
-          )}
-        </AnimatePresence>
-
         {/* Bottom breathing room */}
         <div className="h-4" />
         {/* Owner 17 Oct 2026: old assets must always be findable at the bottom of the wallet, not only when a
@@ -1814,12 +1820,13 @@ export const BsvWallet = () => {
           </p>
           <button
             type="button"
-            onClick={() => navigate('/sweep')}
+            data-testid="migration-tool-row"
+            onClick={() => void handleMigrationBannerClick()}
             className="flex items-center justify-between gap-2 px-4 py-3 rounded-xl border-0 cursor-pointer text-left"
             style={{ background: 'rgba(253,176,34,0.08)', border: '1px solid rgba(253,176,34,0.2)', color: '#FDB022' }}
           >
             <span className="text-sm">
-              <b>Migration tool</b>: coins, tokens and ordinals from Yours or old addresses
+              <b>Migration tool</b>: {migrationRowText(legacyLeft)}
             </span>
             <ArrowRight size={14} className="shrink-0" />
           </button>

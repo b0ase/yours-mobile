@@ -3,6 +3,7 @@ import { KeyDeriver, P2PKH, PrivateKey, ProtoWallet, Transaction, Utils } from '
 import { BTRUST_PROTOCOL, checkIn, inheritanceLock, type InheritancePlan } from './inheritance';
 import {
   buildHeirsClaim,
+  checkHeirsClaim,
   finishHeirsClaim,
   heirSignature,
   heirSigner,
@@ -172,4 +173,36 @@ test('signatures are deterministic over the same data (RFC 6979)', async () => {
   expect(Utils.toHex((await heirSignature(draft, plan, s)).sig)).toBe(
     Utils.toHex((await heirSignature(draft, plan, s)).sig),
   );
+});
+
+describe('co-signer checks a pasted claim', () => {
+  test('accepts an honest claim and shows every output, the fee and the lock total', () => {
+    const src = fundingTx();
+    const draft = Transaction.fromHex(buildHeirsClaim({ lockTx: src, vout: 1, plan, payTo, height: H }).toHex());
+    const s = checkHeirsClaim({ tx: draft, lockTx: src, vout: 1, plan, payTo });
+    expect(s.lockSats).toBe(100_000);
+    expect(s.outputs).toEqual([{ to: payTo, sats: 100_000 - s.fee, mine: true }]);
+    expect(s.fee).toBeGreaterThan(0);
+  });
+
+  test('rejects a split, a different payee, an inflated fee, or a different source', () => {
+    const src = fundingTx();
+    const other = PrivateKey.fromRandom().toAddress();
+    const draft = () => Transaction.fromHex(buildHeirsClaim({ lockTx: src, vout: 1, plan, payTo, height: H }).toHex());
+
+    const split = draft();
+    split.outputs[0].satoshis = 100;
+    split.addOutput({ lockingScript: new P2PKH().lock(other), satoshis: 90_000 });
+    expect(() => checkHeirsClaim({ tx: split, lockTx: src, vout: 1, plan, payTo })).toThrow('everything');
+
+    expect(() => checkHeirsClaim({ tx: draft(), lockTx: src, vout: 1, plan, payTo: other })).toThrow('everything');
+
+    const greedy = draft();
+    greedy.outputs[0].satoshis = 50_000;
+    expect(() => checkHeirsClaim({ tx: greedy, lockTx: src, vout: 1, plan, payTo })).toThrow('too high');
+
+    const elsewhere = fundingTx(plan, 100_001);
+    expect(() => checkHeirsClaim({ tx: draft(), lockTx: elsewhere, vout: 1, plan, payTo })).toThrow('live lock');
+    expect(() => checkHeirsClaim({ tx: draft(), lockTx: src, vout: 0, plan, payTo })).toThrow();
+  });
 });

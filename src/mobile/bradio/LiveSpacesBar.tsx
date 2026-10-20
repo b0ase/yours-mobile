@@ -42,7 +42,7 @@ export const LiveSpacesBar = () => {
       <h2 className="text-[11px] font-semibold uppercase tracking-wider m-0" style={{ color: '#F76B15' }}>
         Live now
       </h2>
-      <div className="-mx-4 px-4 flex gap-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+      <div className="flex flex-wrap gap-2">
         {spaces.map((s) => (
           <button
             key={s.slug}

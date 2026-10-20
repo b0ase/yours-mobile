@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { PrivateKey, ProtoWallet, Utils } from '@bsv/sdk';
 import auth from '../lib/auth.js';
 
-const { makeAuth, memoryAuthStore, pkceOk, authMessage, signedFields, SIGN_PROTOCOL, SIGN_KEY_ID } = auth;
+const { makeAuth, memoryAuthStore, pkceOk, authMessage, signedFields, matchCode, SIGN_PROTOCOL, SIGN_KEY_ID } = auth;
 
 // A throwaway ES256 key made per test run. Never a real key.
 const { privateKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
@@ -54,7 +54,7 @@ const sign = async (row, action, now, w = wallet) => {
     keyID: SIGN_KEY_ID,
     counterparty: 'anyone',
   });
-  return { id: row.id, identityKey, timestamp: now, signature: Utils.toHex(signature) };
+  return { id: row.id, identityKey, timestamp: now, signature: Utils.toHex(signature), match: matchCode(row) };
 };
 
 /** Run /authorize → approve → status; returns the code, the cookie and the row. */
@@ -120,6 +120,41 @@ describe('client allowlist', () => {
     const { a } = setup({ env: { BWALLETX_AUTH_ISSUER: 'https://auth.test' }, key: null });
     const r = await a.authorize(authorizeQ());
     expect(new URL(r.redirect).searchParams.get('error')).toBe('temporarily_unavailable');
+  });
+});
+
+describe('match code (forwarded link)', () => {
+  test('the code is on the /authorize page only, not in the wallet request', async () => {
+    const ctx = setup();
+    const r = await ctx.a.authorize(authorizeQ());
+    const id = r.headers['Set-Cookie'].split('=')[1].split('.')[0];
+    const row = await ctx.store.get(id);
+    expect(r.html).toContain(`>${matchCode(row)}</p>`);
+    const req = await ctx.a.request({ id });
+    expect(JSON.stringify(req.json)).not.toContain(row.poll_hash);
+    expect(req.json.match).toBeUndefined();
+  });
+  test('approve without the code is refused and leaves the request pending', async () => {
+    const ctx = setup();
+    const r = await ctx.a.authorize(authorizeQ());
+    const id = r.headers['Set-Cookie'].split('=')[1].split('.')[0];
+    const row = await ctx.store.get(id);
+    const { match: _m, ...noCode } = await sign(row, 'approve', ctx.now());
+    expect((await ctx.a.approve(noCode)).status).toBe(400);
+    expect((await ctx.store.get(id)).status).toBe('pending');
+  });
+  test('a wrong code cancels the sign-in (one try)', async () => {
+    const ctx = setup();
+    const r = await ctx.a.authorize(authorizeQ());
+    const cookie = r.headers['Set-Cookie'].split(';')[0];
+    const id = cookie.split('=')[1].split('.')[0];
+    const row = await ctx.store.get(id);
+    const good = await sign(row, 'approve', ctx.now());
+    const wrong = String((Number(good.match) + 1) % 10000).padStart(4, '0');
+    expect((await ctx.a.approve({ ...good, match: wrong })).status).toBe(403);
+    expect((await ctx.store.get(id)).status).toBe('denied');
+    expect((await ctx.a.approve(good)).status).toBe(409);
+    expect((await ctx.a.status({ id }, cookie)).json.status).toBe('denied');
   });
 });
 

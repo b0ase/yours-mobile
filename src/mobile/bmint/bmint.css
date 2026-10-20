@@ -58,8 +58,7 @@
   display: flex;
   gap: 4px;
   margin-left: auto;
-  overflow-x: auto;
-  scrollbar-width: none;
+  flex-wrap: wrap;
 }
 .bm-tab {
   padding: 8px 14px;
@@ -1322,4 +1321,71 @@
   .bm-drop {
     transition: none;
   }
+}
+
+/* Sub-vaults (owner, 20 Oct 2026): one cover per collection, count chip, back to the vault */
+.bm-vcoll {
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.bm-vcoll .bm-vart::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0;
+  height: 40%;
+  background: linear-gradient(transparent, rgb(0 0 0 / 0.55));
+  pointer-events: none;
+}
+.bm-vcount {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+}
+.bm-vback {
+  margin: 0 0 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--bm-gold);
+  cursor: pointer;
+}
+
+/* Background film on Desktop (BgVideo.tsx): fixed behind the scrolling page, under a dark gradient */
+.bm-frame {
+  position: relative;
+  height: 100%;
+}
+.bm-film {
+  background: #0b0b0d;
+}
+.bm-bgvid {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.bm-bgvid video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.55;
+}
+.bm-bgvid::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgb(11 11 13 / 0.35) 0%, rgb(11 11 13 / 0.75) 45%, rgb(11 11 13 / 0.94) 100%),
+    radial-gradient(ellipse at 50% 0%, transparent 30%, rgb(11 11 13 / 0.6) 100%);
+}
+.bm-film .bmint {
+  position: relative;
+  background: transparent;
 }

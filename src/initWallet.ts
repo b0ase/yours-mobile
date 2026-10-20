@@ -14,6 +14,7 @@ import {
   IndexedDbPermissionStore,
 } from '@1sat/wallet-browser';
 import { preserveOriginalErrors } from './services/permissionAbortGuard';
+import { guardReservedProtocols, revokeReservedProtocolGrants } from './services/reservedProtocols';
 import {
   syncAddresses,
   syncMessages,
@@ -63,7 +64,7 @@ import { recoverPaymentByTxid, type TxidRecoverReport } from './services/recover
 import { makePostageReconcileWiring, makeTxidRecoverDeps, sweepCandidateTxids } from './services/recoverByTxidWiring';
 import { reconcilePostage, wocIsMined, type PostageReconcileReport } from './services/postageReconcile';
 import { chainActive } from './services/dappChain';
-import { SYNC_HEALTH_KEY } from './services/storageHealth';
+import { healthStatus, SYNC_HEALTH_KEY } from './services/storageHealth';
 import type { TokenRecoveryOptions, TokenRecoveryResult } from './services/tokenRecovery';
 
 // Admin originator for the extension (bypasses all permission checks). The bare
@@ -359,14 +360,23 @@ export const initWallet = async (
 
   // 5. Wrap with permissions manager for external app access control.
   // Grants persist in IndexedDB (off-chain) via LocalWalletPermissionsManager.
-  const wallet = preserveOriginalErrors(
-    new LocalWalletPermissionsManager(
-      baseWallet,
-      ADMIN_ORIGINATOR,
-      { permissionModules: assetModules },
-      { store: permissionStore },
+  // Wallet-internal protocols (bTrust, Locks, funds, presign…) are refused to every outside originator before any
+  // prompt (services/reservedProtocols.ts, security audit 19 Oct 2026 C1).
+  const wallet = guardReservedProtocols(
+    preserveOriginalErrors(
+      new LocalWalletPermissionsManager(
+        baseWallet,
+        ADMIN_ORIGINATOR,
+        { permissionModules: assetModules },
+        { store: permissionStore },
+      ),
     ),
+    ADMIN_ORIGINATOR,
   );
+  // Upgrade migration (C1): grants a site already holds for a reserved protocol are removed. Idempotent.
+  await revokeReservedProtocolGrants(permissionStore, ADMIN_ORIGINATOR)
+    .then((n) => n && console.warn(`[initWallet] revoked ${n} app grant(s) for wallet-internal protocols`))
+    .catch((e: unknown) => console.warn('[initWallet] reserved-protocol grant cleanup failed:', e));
 
   // 5. Initialize sync context (derives addresses, creates services, queue, addressManager).
   // Background sync calls go through the manager-wrapped wallet (admin
@@ -404,11 +414,12 @@ export const initWallet = async (
   const sendSyncStatus = (data: { status: string; [key: string]: unknown }) => {
     // Remember the outcome for the storage badge on Settings (services/storageHealth.ts).
     if (['complete', 'error', 'sweep-failed', 'receive-failed', 'arriving'].includes(data.status)) {
+      const error =
+        typeof data.message === 'string' ? data.message : typeof data.error === 'string' ? data.error : undefined;
       const health = {
-        status: data.status,
+        status: healthStatus(data.status, error),
         at: Date.now(),
-        error:
-          typeof data.message === 'string' ? data.message : typeof data.error === 'string' ? data.error : undefined,
+        error,
         satoshis: typeof data.satoshis === 'number' ? data.satoshis : undefined,
       };
       chrome.storage.local.set({ [SYNC_HEALTH_KEY(keys.identityAddress)]: health }).catch(() => undefined);

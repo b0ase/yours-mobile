@@ -35,6 +35,9 @@ import {
   Radio,
   Receipt,
   Coins,
+  Search,
+  ScrollText,
+  X as XIcon,
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { requestIgnoreBattery } from '../mobile/spaces/battery';
@@ -69,6 +72,9 @@ import { MasterBackupProgressEvent, streamDataToZip } from '../utils/masterExpor
 import { accountNamesFor } from '../mobile/names/accountNames';
 import { currentAccountBackupName } from '../utils/accountBackupName';
 import { useSnackbar } from '../hooks/useSnackbar';
+import { ShowSeedWords } from '../components/ShowSeedWords';
+import { saveBackupFile, saveRoute } from '../mobile/backup/backupFile';
+import { requestSettingsScreen, searchSettings, type SettingsEntry } from '../utils/settingsSearch';
 import { PermissionsManager } from './PermissionsManager';
 import { StorageStatus } from './StorageStatus';
 import { REPAIR_PHASE_LABELS, useStorageRepair } from '../hooks/useStorageRepair';
@@ -108,6 +114,7 @@ export type SettingsPage =
   | 'identity'
   | 'export-keys-options'
   | 'export-keys-qr'
+  | 'show-words'
   | 'storage'
   | 'permissions'
   | 'usb-security'
@@ -319,6 +326,7 @@ export const Settings = () => {
     return 'main';
   });
   const [speedBumpMessage, setSpeedBumpMessage] = useState('');
+  const [settingsQuery, setSettingsQuery] = useState('');
   const [decisionType, setDecisionType] = useState<DecisionType | undefined>();
   const identity = useIdentity(apiContext, chromeStorageService);
   const [exportKeysQrData, setExportKeysAsQrData] = useState('');
@@ -338,6 +346,7 @@ export const Settings = () => {
   );
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [masterBackupProgress, setMasterBackupProgress] = useState(0);
+  const [backupSavedText, setBackupSavedText] = useState('');
   const [masterBackupEventText, setMasterBackupEventText] = useState('');
   const [backupInProgress, setBackupInProgress] = useState(false);
   const [backupAccounts, setBackupAccounts] = useState<
@@ -704,16 +713,20 @@ export const Settings = () => {
       identityDerivationPath: keys.identityDerivationPath,
     };
 
-    const jsonData = JSON.stringify(keysToExport, null, 2);
-    const blob = new Blob([jsonData], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const tempLink = document.createElement('a');
-    tempLink.href = url;
-    tempLink.setAttribute('download', currentAccountBackupName(chromeStorageService, 'json'));
-    document.body.appendChild(tempLink);
-    tempLink.click();
-    document.body.removeChild(tempLink);
-    URL.revokeObjectURL(url);
+    // Inside the iOS / Android app an <a download> does nothing (owner, 19 Oct 2026), so the file goes through the
+    // same route as the phone's backup file: the OS share sheet in the app, a download in a browser. Either way say
+    // what happened.
+    const name = currentAccountBackupName(chromeStorageService, 'json');
+    const file = new File([JSON.stringify(keysToExport, null, 2)], name, { type: 'application/json' });
+    const route = saveRoute(file, Capacitor.isNativePlatform());
+    try {
+      const saved = await saveBackupFile(file, route);
+      if (!saved) addSnackbar('Not saved — try again', 'info');
+      else if (route === 'download') addSnackbar(`Saved to Downloads: ${name}`, 'success');
+      else addSnackbar(`Saved: ${name}`, 'success');
+    } catch {
+      addSnackbar("Couldn't save the keys file. Try Show my 12 words instead.", 'error');
+    }
   };
 
   const exportKeysAsQrCode = async (password: string) => {
@@ -780,7 +793,7 @@ export const Settings = () => {
       setShowSpeedBump(false);
     }
     if (decisionType === 'export-keys' && password) {
-      exportKeys(password);
+      void exportKeys(password).catch(() => addSnackbar('Wrong password', 'error'));
       setDecisionType(undefined);
       setShowSpeedBump(false);
     }
@@ -869,8 +882,14 @@ export const Settings = () => {
     setMasterBackupProgress(0);
     setMasterBackupEventText('Preparing backup...');
 
+    let route: ReturnType<typeof saveRoute> = 'download';
+    // In the iOS / Android app the file goes to the share sheet; "complete" only once it was really saved.
+    const save = (file: File) => {
+      route = saveRoute(file, Capacitor.isNativePlatform());
+      return saveBackupFile(file, route);
+    };
     try {
-      await streamDataToZip(
+      const result = await streamDataToZip(
         chromeStorageService,
         (e: MasterBackupProgressEvent) => {
           setMasterBackupEventText(e.message);
@@ -893,11 +912,20 @@ export const Settings = () => {
         },
         passwordKey,
         password,
+        save,
+      );
+      if (!result.saved) {
+        setBackupError('Not saved — try again');
+        setMasterBackupEventText('Not saved — try again');
+        return;
+      }
+      setBackupSavedText(
+        route === 'download' ? `Saved to Downloads: ${result.fileName}` : `Saved: ${result.fileName}`,
       );
       // USB key security enrolment requires a fresh backup this session.
       await chrome.storage.session.set({ usbBackupConfirmedAt: Date.now() });
       setBackupDone(true);
-      setMasterBackupEventText('Backup complete! File downloaded.');
+      setMasterBackupEventText('Backup complete!');
       setMasterBackupProgress(100);
       setBackupAccounts((prev) => prev.map((a) => ({ ...a, status: 'done' })));
     } catch (error) {
@@ -980,6 +1008,18 @@ export const Settings = () => {
           label="Permissions"
           description="Review and revoke connected apps and permissions"
           onClick={() => setPage('permissions')}
+          isLast
+        />
+      </Section>
+
+      {/* Recovery phrase (owner, 19 Oct 2026): there was no way to SEE the 12 words. */}
+      <Section title="Recovery phrase">
+        <SettingRow
+          icon={<ScrollText size={16} />}
+          label="Show my 12 words"
+          description="See this account's recovery phrase. Password needed"
+          onClick={() => setPage('show-words')}
+          isFirst
           isLast
         />
       </Section>
@@ -1632,11 +1672,20 @@ export const Settings = () => {
         <Section title="Manual Backup">
           <motion.div variants={rowVariant}>
             <SettingRow
+              icon={<ScrollText size={16} />}
+              label="Show my 12 words"
+              description="See this account's recovery phrase to write down"
+              onClick={() => setPage('show-words')}
+              isFirst
+            />
+          </motion.div>
+          <Divider />
+          <motion.div variants={rowVariant}>
+            <SettingRow
               icon={<HardDrive size={16} />}
               label="Master Backup"
               description={`Back up all ${chromeStorageService.getAllAccounts().length} account${chromeStorageService.getAllAccounts().length === 1 ? '' : 's'} — keys, transactions, and settings`}
               onClick={handleMasterBackupIntent}
-              isFirst
             />
           </motion.div>
           {usbSupported && (
@@ -2122,6 +2171,120 @@ export const Settings = () => {
     </motion.div>
   );
 
+  const wordsAccount = (() => {
+    const acc = chromeStorageService.getCurrentAccountObject().account;
+    const n = accountNamesFor(acc?.addresses?.identityAddress, acc?.name ?? '');
+    return n.payable ? `$${n.payable}` : n.displayName || acc?.name || 'This account';
+  })();
+
+  const showWordsPage = (
+    <motion.div
+      key="show-words"
+      variants={pageVariants}
+      initial="initial"
+      animate="animate"
+      exit="exit"
+      className="w-full px-4 pb-20"
+    >
+      <SubPageHeader title="Show my 12 words" onBack={() => setPage('main')} />
+      <ShowSeedWords
+        accountLabel={wordsAccount}
+        verifyPassword={(pw) => chromeStorageService.verifyPassword(pw)}
+        readMnemonic={async () => (await keysService.retrieveKeys()).mnemonic}
+        onDone={() => setPage('main')}
+        onCopied={(text) => addSnackbar(text, 'info')}
+      />
+    </motion.div>
+  );
+
+  const searchResults: SettingsEntry[] = settingsQuery.trim() ? searchSettings(settingsQuery) : [];
+
+  const openSettingsEntry = (entry: SettingsEntry) => {
+    setSettingsQuery('');
+    const t = entry.target;
+    if (t.kind === 'theme') {
+      requestThemeSheet();
+      handleSelect('bsv');
+    } else if (t.kind === 'screen') {
+      requestSettingsScreen(t.screen);
+    } else if (t.page === 'main') {
+      // A row on this page: bring it into view once the full list is back.
+      window.setTimeout(() => {
+        const row = Array.from(document.querySelectorAll('p')).find((el) => el.textContent === entry.label);
+        row?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }, 60);
+    } else {
+      setPage(t.page as SettingsPage);
+    }
+  };
+
+  const settingsSearchBar = (
+    <div className="w-full px-4 pt-1 pb-3">
+      <div
+        className="flex items-center gap-2 rounded-xl px-3"
+        style={{ backgroundColor: 'var(--bw-surface, #17191E)', border: '1px solid rgba(152,162,179,0.15)' }}
+      >
+        <Search size={15} color="#98A2B3" className="flex-shrink-0" />
+        <input
+          type="text"
+          role="searchbox"
+          enterKeyHint="search"
+          aria-label="Search settings"
+          placeholder="Search settings"
+          value={settingsQuery}
+          onChange={(e) => setSettingsQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && searchResults[0]) openSettingsEntry(searchResults[0]);
+            if (e.key === 'Escape') setSettingsQuery('');
+          }}
+          className="flex-1 bg-transparent border-0 outline-none py-2.5 text-sm min-w-0"
+          style={{ color: 'var(--bw-text, #FFFFFF)' }}
+        />
+        {settingsQuery && (
+          <button
+            aria-label="Clear search"
+            onClick={() => setSettingsQuery('')}
+            className="bg-transparent border-0 p-1 cursor-pointer flex"
+          >
+            <XIcon size={14} color="#98A2B3" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
+  const searchResultsPage = (
+    <motion.div
+      key="settings-search"
+      variants={stagger}
+      initial="initial"
+      animate="animate"
+      exit="exit"
+      className="w-full px-4 pb-20">
+      {searchResults.length ? (
+        <div className="rounded-xl overflow-hidden" style={{ border: '1px solid rgba(152,162,179,0.12)' }}>
+          {searchResults.map((r, i) => (
+            <div key={r.id}>
+              {i > 0 && <Divider />}
+              <SettingRow
+                icon={<Search size={16} />}
+                label={r.label}
+                description={r.description}
+                onClick={() => openSettingsEntry(r)}
+                isFirst={i === 0}
+                isLast={i === searchResults.length - 1}
+              />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm text-center py-8" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
+          No settings match “{settingsQuery.trim()}”
+        </p>
+      )}
+    </motion.div>
+  );
+
   return (
     <>
       <Show
@@ -2157,8 +2320,9 @@ export const Settings = () => {
           <div className="h-14 w-full flex-shrink-0" />
 
           {/* Page transitions */}
+          {page === 'main' && settingsSearchBar}
           <AnimatePresence mode="wait">
-            {page === 'main' && mainPage}
+            {page === 'main' && (settingsQuery.trim() ? searchResultsPage : mainPage)}
 
             {page === 'manage-accounts' && manageAccountsPage}
 
@@ -2238,6 +2402,8 @@ export const Settings = () => {
 
             {page === 'export-keys-qr' && exportKeysAsQrCodePage}
 
+            {page === 'show-words' && showWordsPage}
+
             {page === 'usb-security' && usbSecurityPage}
 
             {page === 'troubleshooting' && troubleshootingPage}
@@ -2268,11 +2434,11 @@ export const Settings = () => {
             <YoursIcon width="3rem" />
 
             <h2 className="text-lg font-bold mt-4 mb-1 text-center" style={{ color: 'var(--bw-text, #FFFFFF)' }}>
-              {backupDone ? 'Backup Complete' : backupError ? 'Backup Failed' : 'Backing Up All Accounts'}
+              {backupDone ? 'Backup Complete' : backupError === 'Not saved — try again' ? 'Not Saved' : backupError ? 'Backup Failed' : 'Backing Up All Accounts'}
             </h2>
             <p className="text-xs mb-5 text-center" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
               {backupDone
-                ? 'Your backup file has been downloaded.'
+                ? backupSavedText
                 : backupError
                   ? backupError
                   : `Exporting wallet data for ${backupAccounts.length} account${backupAccounts.length === 1 ? '' : 's'}`}

@@ -1041,7 +1041,7 @@ const Composer = ({
         style={{ background: PANEL, border: `1px solid ${LINE}` }}
       />
       {items.length > 0 && (
-        <div className="mt-2 flex gap-2 overflow-x-auto">
+        <div className="mt-2 flex flex-wrap gap-2">
           {items.map((i) => (
             <div
               key={i.id}
@@ -2028,9 +2028,9 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
           </div>
         )}
         {feed === 'home' && (
-          <div className="flex items-center gap-2 px-4 py-2 overflow-x-auto">
+          <div className="flex flex-wrap items-center gap-2 px-4 py-2">
             {tab === 'foryou' && <SortMenu sort={sort} onChange={setSort} />}
-            <div className="flex gap-2" role="tablist" aria-label="Source">
+            <div className="flex flex-wrap gap-2" role="tablist" aria-label="Source">
               {SOURCES.map((s) => (
                 <button
                   key={s.id}

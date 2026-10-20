@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { PrivateKey, ProtoWallet } from '@bsv/sdk';
-import { answerAuthRequest } from './authApi';
+import { answerAuthRequest, cleanMatchCode } from './authApi';
 // The server's verifier: the wallet's signature must pass it.
 const server = require('../../../site/lib/auth.js');
 
@@ -18,9 +18,22 @@ describe('wallet signature matches the server', () => {
       return new Response('{"ok":true}', { status: 200 });
     }) as unknown as typeof fetch;
     const now = Date.now();
-    await answerAuthRequest(wallet, { id: req.id, server: 'https://auth.bwalletx.com' }, req, 'approve', f, now);
+    await answerAuthRequest(
+      wallet,
+      { id: req.id, server: 'https://auth.bwalletx.com' },
+      req,
+      'approve',
+      f,
+      now,
+      '0427',
+    );
+    expect(sent.match).toBe('0427');
     const row = { id: req.id, client_id: 'app', redirect_uri: req.redirect_uri };
     expect(await server.verifyAuthSignature(sent, row, 'approve', now)).toBeNull();
     expect(await server.verifyAuthSignature(sent, row, 'deny', now)).toBe('Bad signature');
   });
+});
+
+test('cleanMatchCode keeps four digits', () => {
+  expect(cleanMatchCode(' 12a34 5')).toBe('1234');
 });

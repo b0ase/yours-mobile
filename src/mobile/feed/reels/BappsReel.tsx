@@ -298,7 +298,7 @@ const BappsReel = () => {
         ))}
       </div>
       {/* Sorts: user-chosen, top of the reel. */}
-      <div className="absolute inset-x-0 top-0 flex gap-2 overflow-x-auto px-3 pt-3" role="tablist">
+      <div className="absolute inset-x-0 top-0 flex flex-wrap gap-2 px-3 pt-3" role="tablist">
         {APP_SORTS.map((s) => (
           <button
             key={s.id}

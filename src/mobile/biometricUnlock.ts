@@ -195,6 +195,20 @@ export const confirmWithBiometrics = async (reason: string): Promise<'ok' | 'can
   }
 };
 export const biometricLabel = () => (biometry === 'none' ? '' : label());
+/** Show my 12 words: the biometric prompt as a second factor, leaving the lock state alone. */
+const verify = async (reason: string): Promise<boolean> => {
+  const { id, encryptedKeys } = await selectedAccount();
+  if (!id || !encryptedKeys || !(await isEnrolled())) return false;
+  try {
+    const passKey = (await YoursNative.biometricGet({ key: SEALED(id), reason })).value;
+    if (!passKey) return false;
+    return await decrypt(encryptedKeys, passKey)
+      .then((plain) => (JSON.parse(plain), true))
+      .catch(() => false);
+  } catch {
+    return false;
+  }
+};
 
 // Platform hooks -------------------------------------------------------------
 
@@ -236,6 +250,7 @@ export const initBiometricUnlock = async (chrome: any): Promise<PlatformHooks> =
       isAvailable: isEnrolled,
       unlock,
       disable,
+      verify,
       autoPrompt: true,
       notice,
     },

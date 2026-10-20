@@ -243,13 +243,27 @@ export const isRiskyRequest = (r: BundleRequest): boolean => {
   return false;
 };
 
+/**
+ * The wallet's request for the public identity key (BRC-100 getPublicKey with identityKey:true) arrives as the
+ * level-1 protocol named "identity key retrieval" with counterparty "self". It reveals only the PUBLIC key, which is
+ * what a site needs to recognise you, and gives no signing power. Not privileged (a privileged request is
+ * never this).
+ */
+export const isIdentityKeyRequest = (r: BundleRequest): boolean =>
+  r.type === 'protocol' &&
+  !r.privileged &&
+  r.protocolID?.[1] === 'identity key retrieval' &&
+  (r.counterparty === undefined || r.counterparty === 'self');
+
 const lineText = (r: BundleRequest): string => {
   switch (r.type) {
     case 'protocol': {
+      if (isIdentityKeyRequest(r)) return 'See your public identity (the key that names you)';
       if (r.counterparty === 'anyone') return "Prove it's you (a signature anyone can check)";
       if (protoLevel(r) === 2 && r.counterparty && r.counterparty !== 'self')
-        return 'Sign and share keys with one named person or service';
-      return 'Sign in and sign its messages';
+        return `Sign and encrypt with your "${protoName(r)}" keys, shared with one named person or service`;
+      // Not "sign in": this lets the app sign anything with keys derived from your wallet (audit C1).
+      return `Sign and encrypt anything with your "${protoName(r)}" keys`;
     }
     case 'basket':
       return 'Keep its tickets and tokens in your wallet';
@@ -311,7 +325,13 @@ export const buildSheetModel = (bundle: Pick<PermissionBundle, 'originator' | 'i
       continue;
     }
     const risky = isRiskyRequest(r);
-    lines.push({ requestID: r.requestID, text: lineText(r), detail: lineDetail(r), risky, checked: !risky });
+    // Protocol (key use) lines are not pre-ticked: the user ticks them knowingly (audit C1). The one exception is
+    // "Prove it's you" (counterparty 'anyone'), which Sign in with bWalletX needs; reserved wallet protocols never
+    // reach a sheet at all (services/reservedProtocols.ts).
+    // The public identity key is the other exception: Sign in with bWalletX asks for it first, and an unticked line
+    // made Allow answer "denied" for it ("Permission denied." on every site since 5.2.35, 20 Oct 2026).
+    const checked = !risky && (r.type !== 'protocol' || r.counterparty === 'anyone' || isIdentityKeyRequest(r));
+    lines.push({ requestID: r.requestID, text: lineText(r), detail: lineDetail(r), risky, checked });
   }
   const mode: SheetModel['mode'] = payment ? (lines.length ? 'connectAndPay' : 'pay') : 'connect';
   return { originator: bundle.originator, lines, payment, mode };
@@ -343,10 +363,9 @@ export const isAutoGrantable = (r: BundleRequest): boolean => {
   // Signatures anyone can check are pre-ticked but still always shown, even on a trusted site.
   if (r.type === 'protocol' && r.counterparty === 'anyone') return false;
   if (r.type === 'basket') return !!r.basket && r.basket !== TRUST_SITE_BASKET;
-  if (r.type !== 'protocol') return false;
-  const level = protoLevel(r);
-  if (level <= 1) return true;
-  return level === 2 && (r.counterparty === 'self' || r.counterparty === undefined);
+  // Protocol permissions are never auto-granted (audit C1): "Don't ask again" must not silently hand a site
+  // signing keys, at any level. Key derivation ignores the app, so a new protocol may be one the wallet uses.
+  return false;
 };
 
 /** The sheet offers "Don't ask again" when at least one ticked line is the routine kind. */

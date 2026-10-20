@@ -39,3 +39,17 @@ export const originatorForOrigin = (origin: string | undefined | null): Originat
   if (url.protocol === 'http:' && isLoopbackHostname(url.hostname)) return { originator: url.host };
   return { error: INSECURE_ORIGIN_ERROR };
 };
+
+/**
+ * Phone pairing (security audit 19 Oct 2026, H1): the site's origin on a paired session comes from the relay, which
+ * reads the WebSocket Origin header. Any non-browser client can set that header, so it is a hint, not proof. Paired
+ * sessions therefore run under their own permission key, "<host>.paired.invalid" (.invalid can never resolve, so no
+ * real site can hold it), and never inherit the site's saved grants, monthly allowance or "Don't ask again".
+ * See docs/PAIRING-ORIGIN-PROOF.md for how a site could later prove its origin.
+ */
+export const PAIRED_SUFFIX = '.paired.invalid';
+export const pairedOrigin = (origin: string): string => {
+  const u = new URL(origin);
+  return `https://${u.hostname}${PAIRED_SUFFIX}${u.port ? `:${u.port}` : ''}`;
+};
+export const isPairedHost = (host: string) => host.toLowerCase().replace(/\.$/, '').endsWith(PAIRED_SUFFIX);

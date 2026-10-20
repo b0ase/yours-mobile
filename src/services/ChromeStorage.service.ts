@@ -18,6 +18,8 @@ import { decrypt, encrypt, generateRandomSalt } from '../utils/crypto';
 import { NEVER_LOCK, lockTimeoutMs } from '../utils/lockTimeout';
 import { derivePassKey, type UsbUnlockMaterial } from './passKey';
 import { probeSticks } from './UsbKey.service';
+import { canDeviceOwnerAuth, deviceOwnerAuth } from '../mobile/deviceOwnerAuth';
+import { proveCurrentOwner, type ChangePasswordProof } from '../utils/changePasswordGate';
 import { Keys } from '../utils/keys';
 import { deepMerge } from './serviceHelpers';
 import {
@@ -559,14 +561,30 @@ export class ChromeStorageService {
   };
 
   /**
-   * Change the wallet password while unlocked (bWallet, owner 4 Oct 2026). Needs no old password: the
+   * Change the wallet password while unlocked (bWallet, owner 4 Oct 2026). Requires proof of the owner
+   * (security audit 19 Oct 2026, utils/changePasswordGate.ts): the current password, the phone's Face ID / fingerprint
+   * / passcode, or the account's 12 words. The
    * session passKey (present only while unlocked) decrypts every account's keys, which are re-encrypted
    * under a key derived from the new password and a fresh salt, written in one set, then the session
    * key is swapped. Refused with the USB security key on (that re-key has its own flow).
    */
-  changePassword = async (newPassword: string): Promise<void> => {
+  changePassword = async (newPassword: string, proof: ChangePasswordProof): Promise<void> => {
     if (!newPassword || newPassword.length < 8) throw new Error('Use at least 8 characters');
     if (this.getUsbSecurity()?.enabled) throw new Error('Turn off the USB security key before changing the password');
+    if (!(await this.getPassKey())) throw new Error('Unlock the wallet first');
+    await proveCurrentOwner(
+      {
+        verifyPassword: (pw) => this.verifyPassword(pw),
+        deviceOwnerAuth: canDeviceOwnerAuth() ? deviceOwnerAuth : undefined,
+        readMnemonic: async () => {
+          const key = await this.getPassKey();
+          const enc = this.getCurrentAccountObject().account?.encryptedKeys;
+          if (!key || !enc) return undefined;
+          return (JSON.parse(await decrypt(enc, key)) as Partial<Keys>).mnemonic;
+        },
+      },
+      proof,
+    );
     const passKey = await this.getPassKey();
     if (!passKey) throw new Error('Unlock the wallet first');
     const { accounts, keyRekey } = await this.get(['accounts', 'keyRekey']);
