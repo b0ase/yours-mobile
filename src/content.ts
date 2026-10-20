@@ -4,6 +4,7 @@ import { isCWIEventName } from '@1sat/wallet-browser';
 import { CustomListenerName, RequestEventDetail, RequestParams, ResponseEventDetail } from './inject';
 import { originatorForOrigin } from './services/originKey';
 import { SUBSCRIPTIONS_ENABLED } from './mobile/storeBuild';
+import { HANDOFF_ENABLED, HANDOFF_WEB_ORIGIN } from './mobile/passkey/extHandoff';
 
 console.log('🌱 Yours Wallet Loaded');
 
@@ -98,6 +99,27 @@ if (SUBSCRIPTIONS_ENABLED) {
     } catch {
       subBusy = false;
       error('bWalletX was updated: reload this page');
+    }
+  });
+}
+
+// Passkey hand-off (notes/extension-passkey-handoff.md, VITE_SEEDLESS=1 builds only). web.bwalletx.com posts
+// { type: 'BWX_EXT_HANDOFF', isInvocation: true, msg } to its own window; ONLY that exact origin, from its own window
+// (not a child frame), is forwarded, over Chrome's internal route, to the background, which re-checks sender.origin
+// and the one-time request. The reply carries only ok true/false. The words are never logged here.
+if (HANDOFF_ENABLED) {
+  window.addEventListener('message', (e: MessageEvent) => {
+    const d = e.data as { type?: unknown; isInvocation?: unknown; msg?: unknown } | null;
+    if (e.source !== window || e.origin !== HANDOFF_WEB_ORIGIN || d?.type !== 'BWX_EXT_HANDOFF') return;
+    if (d.isInvocation !== true) return;
+    const reply = (ok: boolean) =>
+      window.postMessage({ type: 'BWX_EXT_HANDOFF', isInvocation: false, ok }, HANDOFF_WEB_ORIGIN);
+    try {
+      chrome.runtime.sendMessage({ action: 'bwxExtHandoff', data: d.msg }, (r: { ok?: boolean } | undefined) =>
+        reply(!chrome.runtime.lastError && r?.ok === true),
+      );
+    } catch {
+      reply(false);
     }
   });
 }

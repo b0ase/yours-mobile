@@ -1492,10 +1492,6 @@ if (isInServiceWorker) {
   if (HANDOFF_ENABLED) {
     void sweepExpiredHandoff();
     chrome.alarms?.onAlarm.addListener((a) => a.name === HANDOFF_ALARM && void sweepExpiredHandoff());
-    chrome.runtime.onMessageExternal.addListener((message: unknown, sender, sendResponse) => {
-      void handleExternalHandoff(message, sender.origin).then((ok) => sendResponse({ ok }));
-      return true;
-    });
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1508,6 +1504,13 @@ if (isInServiceWorker) {
       'from:',
       sender.origin,
     );
+
+    // Passkey hand-off from web.bwalletx.com, forwarded by content.ts (VITE_SEEDLESS=1 only). sender.origin is Chrome's
+    // own value for the tab; handleExternalHandoff accepts exactly https://web.bwalletx.com plus the one-time nonce.
+    if (HANDOFF_ENABLED && message?.action === 'bwxExtHandoff') {
+      void handleExternalHandoff(message.data, sender.origin).then((ok) => (sendResponse as (r: unknown) => void)({ ok }));
+      return true;
+    }
 
     // Live-balance messages are for the wallet page (src/mobile/wallet/live/liveBus.ts), not the wallet: never
     // answer them here, so a page's session report can never reach a wallet method or a connect prompt.
