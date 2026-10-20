@@ -157,6 +157,18 @@ export const saveLocalBackup = (blob: SeedBackupBlob, store: Pick<Storage, 'getI
   store.setItem(LOCAL_KEY, JSON.stringify([blob, ...rest].slice(0, 10)));
 };
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/**
+ * What a new passkey is called in the phone's passkey picker: "bWalletX · 20 Oct 14:32". Every passkey used to be
+ * just "bWalletX", so with two of them on one address the picker showed identical entries and a restore that chose
+ * the wrong one failed with "No backup found" (owner, 20 Oct 2026: the first restore failed, the second worked).
+ */
+export const passkeyName = (when: Date = new Date()): string => {
+  const hh = String(when.getHours()).padStart(2, '0');
+  const mm = String(when.getMinutes()).padStart(2, '0');
+  return `bWalletX · ${when.getDate()} ${MONTHS[when.getMonth()]} ${hh}:${mm}`;
+};
+
 export const backupFileName = (blob: SeedBackupBlob) =>
   `bwalletx-passkey-backup-${blob.createdAt.slice(0, 10)}-${blob.credentialId.slice(0, 6)}.json`;
 

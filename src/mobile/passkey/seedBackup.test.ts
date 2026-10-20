@@ -11,6 +11,7 @@ import {
   prfSalt,
   saveLocalBackup,
   sealSeed,
+  passkeyName,
 } from './seedBackup';
 import { rpIdFor } from './prf';
 
@@ -103,5 +104,13 @@ describe('rpId', () => {
     expect(rpIdFor('bwalletx.com')).toBe('bwalletx.com');
     expect(rpIdFor('localhost')).toBe('localhost');
     expect(rpIdFor('notbwalletx.com')).toBe('notbwalletx.com');
+  });
+});
+
+describe('passkey names in the picker', () => {
+  test('are told apart by date and time, so two passkeys never look the same', () => {
+    expect(passkeyName(new Date(2026, 9, 20, 14, 32))).toBe('bWalletX · 20 Oct 14:32');
+    expect(passkeyName(new Date(2026, 0, 5, 9, 5))).toBe('bWalletX · 5 Jan 09:05');
+    expect(passkeyName(new Date(2026, 9, 20, 14, 32))).not.toBe(passkeyName(new Date(2026, 9, 20, 14, 33)));
   });
 });

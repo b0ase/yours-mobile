@@ -3,7 +3,13 @@ import { CheckCircle2, Fingerprint, Loader2 } from 'lucide-react';
 import { useTheme } from '../../hooks/useTheme';
 import { createPasskeyWithPrf, getPrf } from './prf';
 import { currentRpId } from './passkeyUi';
-import { keystorePasswordFromPrf, loadPasskeyUnlock, savePasskeyUnlock, unlockPasswordFromPrf } from './seedBackup';
+import {
+  keystorePasswordFromPrf,
+  loadPasskeyUnlock,
+  savePasskeyUnlock,
+  unlockPasswordFromPrf,
+  passkeyName,
+} from './seedBackup';
 import { setPasskeySession } from './session';
 
 /**
@@ -19,7 +25,7 @@ export const PasskeyCreatePanel = ({ onPassword }: { onPassword: (password: stri
     setError('');
     try {
       const rpId = currentRpId();
-      const { credentialId, prf } = await createPasskeyWithPrf(rpId, 'bWalletX');
+      const { credentialId, prf } = await createPasskeyWithPrf(rpId, passkeyName());
       setPasskeySession({ rpId, credentialId, prf: prf.slice() });
       savePasskeyUnlock({ rpId, credentialId });
       onPassword(await keystorePasswordFromPrf(prf));

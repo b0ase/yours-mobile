@@ -195,7 +195,9 @@ export const PasskeyRestoreRow = ({ onPhrase }: { onPhrase: (mnemonic: string, p
         (await fetchBackup(credentialId));
       if (!blob) {
         setNeedFile(true);
-        throw new Error('No backup found for that passkey. Choose your recovery file.');
+        throw new Error(
+          'That passkey has no backup on this device. If you made more than one wallet, press Restore with a passkey again and choose a different passkey (they are named by date and time), or choose your recovery file.',
+        );
       }
       onPhrase(opened(await openSeed(blob, prf)), { rpId: blob.rpId, credentialId, prf });
     } catch (e) {
@@ -264,7 +266,7 @@ export const PasskeyRestoreRow = ({ onPhrase }: { onPhrase: (mnemonic: string, p
         }}
       />
       {error && (
-        <p className="text-[11px] text-center px-4" style={{ color: '#f87171' }}>
+        <p className="text-sm text-center px-4 py-2" style={{ color: '#f87171' }} role="alert">
           {error}
         </p>
       )}

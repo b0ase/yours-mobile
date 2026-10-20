@@ -80,6 +80,24 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
   const note = (m: string) => {
     if (SEEDLESS_ENABLED) setTrace((t) => [...t.slice(-9), `${new Date().toLocaleTimeString()} ${m}`]);
   };
+  // Cancel on the Restoring screen (owner, 20 Oct 2026: "there's no way off the restoring screen"). A cancelled run
+  // is ignored when it finishes: it never jumps to the finish screen later.
+  const cancelled = useRef(false);
+  const cancelRestore = () => {
+    cancelled.current = true;
+    note('cancelled by the user');
+    setLoading(false);
+  };
+  const traceBox =
+    SEEDLESS_ENABLED && trace.length > 0 ? (
+      <pre
+        data-testid="restore-trace"
+        className="w-full text-xs whitespace-pre-wrap break-words rounded-lg p-2 mb-3"
+        style={{ background: '#111', color: '#9ae6b4' }}
+      >
+        {trace.join('\n')}
+      </pre>
+    ) : null;
   const [iconURL, setIconURL] = useState('');
   const hiddenYoursFileInput = useRef<HTMLInputElement>(null);
   const currentAccountName = (() => {
@@ -155,6 +173,7 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
   const handleRestore = async (event: React.FormEvent<HTMLFormElement>) => {
     try {
       event.preventDefault();
+      cancelled.current = false;
       setLoading(true);
       note(`restore: start (name "${accountName}", ${seedWords.trim().split(/\s+/).filter(Boolean).length} words, password ${password.length} chars, newWallet ${String(newWallet)})`);
       // Stage timings (owner, 6 Oct 2026: a restore took ~50 s).
@@ -220,6 +239,10 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
       if (importWallet === 'relayx') await rememberRelayx(chromeStorageService, keys.mnemonic);
       console.log('[restore] done at', at());
 
+      if (cancelled.current) {
+        note(`finished after being cancelled (${at()}): staying on the form`);
+        return;
+      }
       note(`done (${at()}), showing the finish screen`);
       setStep(4);
     } catch (error) {
@@ -726,19 +749,25 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
   );
 
   return (
-    <Show when={!loading} whenFalseContent={<PageLoader theme={theme} message="Restoring..." />}>
+    <Show when={!loading} whenFalseContent={
+        <div className="w-full flex flex-col items-center gap-3">
+          <PageLoader theme={theme} message="Restoring..." />
+          {traceBox}
+          <button
+            type="button"
+            onClick={cancelRestore}
+            data-testid="restore-cancel"
+            className="text-sm underline border-0 bg-transparent cursor-pointer pb-4"
+            style={{ color: theme.color.global.gray }}
+          >
+            Cancel
+          </button>
+        </div>
+      }>
       {/* my-auto: centred when short, top-aligned (not clipped) when taller than the wallet box. */}
       <div className="flex flex-col items-center w-full px-2 pt-4 pb-4 my-auto" style={{ isolation: 'isolate' }}>
         <ObsidianBackdrop />
-        {SEEDLESS_ENABLED && trace.length > 0 && (
-          <pre
-            data-testid="restore-trace"
-            className="w-full text-xs whitespace-pre-wrap break-words rounded-lg p-2 mb-3"
-            style={{ background: '#111', color: '#9ae6b4' }}
-          >
-            {trace.join('\n')}
-          </pre>
-        )}
+        {traceBox}
         <AnimatePresence mode="wait">
           {step === 1 && (
             <motion.div
