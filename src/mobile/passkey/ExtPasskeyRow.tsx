@@ -21,6 +21,19 @@ const REASON: Record<string, string> = {
   'bad-code': 'Type the 6 digits shown in the browser tab.',
 };
 
+/** The code was accepted: close the web.bwalletx.com sign-in tab(s) this extension opened, so no stale code is left up. */
+const closeHandoffTabs = async () => {
+  try {
+    const tabs = await chrome.tabs.query({ url: 'https://web.bwalletx.com/restore*' });
+    const ids = tabs
+      .filter((t) => t.id !== undefined && /[?&]passkey=1&ext=/.test(t.url ?? ''))
+      .map((t) => t.id as number);
+    if (ids.length) await chrome.tabs.remove(ids);
+  } catch {
+    /* the person can close it */
+  }
+};
+
 export const ExtPasskeyRow = ({ onWallet }: { onWallet: (words: string, name?: string) => void }) => {
   const { theme } = useTheme();
   const [stage, setStage] = useState<Stage>('idle');
@@ -57,6 +70,7 @@ export const ExtPasskeyRow = ({ onWallet }: { onWallet: (words: string, name?: s
     setError('');
     const r = await confirmTypedCode(code);
     if (r.ok) {
+      void closeHandoffTabs();
       setFound({ words: r.words, name: r.name });
       setCode('');
       setStage('confirm');

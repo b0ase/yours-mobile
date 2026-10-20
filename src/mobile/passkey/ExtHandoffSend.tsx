@@ -10,7 +10,7 @@ import { buildHandoffMessage, newHandoffCode } from './extHandoff';
  * local browser message: no server, no relay). The words are never put in React state, a URL or a log. Rules:
  * extHandoff.ts, notes/extension-passkey-handoff.md.
  */
-type Stage = 'ask' | 'sent' | 'refused' | 'unsupported';
+type Stage = 'ask' | 'sent' | 'refused' | 'unsupported' | 'done';
 
 /**
  * The page posts the message to its own window; the extension's content script (only on this exact origin) passes it
@@ -49,6 +49,8 @@ export const ExtHandoffSend = ({ nonce }: { nonce: string }) => {
     const msg = await buildHandoffMessage(nonce, c, words);
     const r = await toExtension(msg);
     setStage(r === 'ok' ? 'sent' : r === 'refused' ? 'refused' : 'unsupported');
+    // The request lives 2 minutes. After that the code means nothing: take it off the screen.
+    if (r === 'ok') setTimeout(() => setStage('done'), 120_000);
   };
 
   const copy = () => {
@@ -99,6 +101,11 @@ export const ExtHandoffSend = ({ nonce }: { nonce: string }) => {
         <p className="text-sm m-0" style={{ color: gray }}>
           Sent. Go back to the extension and type the code (or copy it from above). You can close this tab afterwards.
           Only type this code in the extension, and never give it to anyone who asks.
+        </p>
+      )}
+      {stage === 'done' && (
+        <p className="text-sm m-0" style={{ color: gray }}>
+          This sign-in has finished or timed out. You can close this tab.
         </p>
       )}
       {stage === 'refused' && (
