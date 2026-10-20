@@ -358,16 +358,8 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       "import twetchLogo from '../../assets/twetch.svg';",
       "import twetchLogo from '../../mobile/brand/apps/twetch.png';",
     ],
-    // Check with X / Google on Restore (owner, 4 + 18 Oct 2026): an optional check that the phrase owns the verified
-    // name, worded as a check, not a sign-in; disabled in the Desktop app where the redirect can't return.
-    [
-      "import { useNavigate } from 'react-router-dom';",
-      "import { useNavigate } from 'react-router-dom';\nimport { SocialSignIn } from '../../mobile/social/SocialSignIn';",
-    ],
-    [
-      '      <form onSubmit={handleRestore} className="flex flex-col items-center w-full">',
-      '      {!viaExt && <SocialSignIn check onProfile={(p) => { setAccountName(p.name); if (p.avatar) setIconURL(p.avatar); }} onClear={(a) => setIconURL((v) => (a && v === a ? \'\' : v))} />}\n      <form onSubmit={handleRestore} className="flex flex-col items-center w-full">',
-    ],
+    // Check with X / Google on Restore was REMOVED (owner, 20 Oct 2026): it looked like a sign-in and confused people.
+    // The same check lives in Settings › Link your accounts (src/mobile/social/SocialSignIn.tsx).
     // Restore › SimplyCash: create a bWallet, then sweep the SimplyCash wallet into it (src/mobile/sweep).
     [
       "import { useNavigate } from 'react-router-dom';",
