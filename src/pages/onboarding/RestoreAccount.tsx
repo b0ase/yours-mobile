@@ -83,11 +83,17 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
   // Cancel on the Restoring screen (owner, 20 Oct 2026: "there's no way off the restoring screen"). A cancelled run
   // is ignored when it finishes: it never jumps to the finish screen later.
   const cancelled = useRef(false);
+  // A passkey restore has nothing left to ask (the passkey is the password), so it goes straight to unlock.
+  const viaPasskey = useRef(false);
   const cancelRestore = () => {
     cancelled.current = true;
     note('cancelled by the user');
     setLoading(false);
   };
+  useEffect(() => {
+    note(`screen: step ${step}, ${loading ? 'spinner' : 'form'}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- trace only
+  }, [step, loading]);
   const traceBox =
     SEEDLESS_ENABLED && trace.length > 0 ? (
       <pre
@@ -165,6 +171,7 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
     if (passkeyPassword && password === passkeyPassword && passwordConfirm === passkeyPassword) {
       setPasskeyPassword('');
       note('passkey password ready, starting the restore');
+      viaPasskey.current = true;
       void handleRestore({ preventDefault: () => undefined } as React.FormEvent<HTMLFormElement>);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once both fields hold the passkey password
@@ -245,6 +252,10 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
       }
       note(`done (${at()}), showing the finish screen`);
       setStep(4);
+      if (viaPasskey.current) {
+        note('going straight to unlock');
+        window.location.reload();
+      }
     } catch (error) {
       console.log(error);
       note(`ERROR: ${error instanceof Error ? error.message : String(error)}`);
