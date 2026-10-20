@@ -122,7 +122,8 @@ export const PasskeySettings = ({ onClose }: { onClose: () => void }) => {
               type="submit"
               disabled={!password || busy}
               className="rounded-xl py-3 font-bold border-0 flex items-center justify-center gap-2"
-              style={{ background: 'var(--bw-accent)', color: '#000' }}
+              // Looks disabled while it is (owner, 20 Oct 2026: a bright button that did nothing).
+              style={{ background: 'var(--bw-accent)', color: '#000', opacity: !password || busy ? 0.45 : 1 }}
             >
               <Fingerprint size={16} />
               {busy
@@ -131,6 +132,11 @@ export const PasskeySettings = ({ onClose }: { onClose: () => void }) => {
                   ? 'Back up this account with my passkey'
                   : 'Add a passkey to this wallet'}
             </button>
+            {!password && !busy && (
+              <p className="m-0 text-xs text-center" style={{ color: MUTED }}>
+                Type your password above to turn this on.
+              </p>
+            )}
           </form>
         )}
         {!available && <p style={{ color: MUTED }}>This browser can't use passkeys for this.</p>}
