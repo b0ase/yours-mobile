@@ -23,6 +23,8 @@ import { RequestParams, ResponseEventDetail, YoursEventName } from './inject';
 import { recordCall, recordPayment, requestedSats, updateConnectionLog } from './mobile/wallet/connectionLog';
 import { CWIEventName } from './cwi';
 import { describeWalletError } from './brand/walletError';
+import { HANDOFF_ENABLED } from './mobile/passkey/extHandoff';
+import { handleExternalHandoff } from './mobile/passkey/extHandoffStore';
 import {
   healInvalidSend,
   withHealMessage,
@@ -1482,6 +1484,17 @@ if (isInServiceWorker) {
   initOneSatPromptBridge({
     showPrompt: (requestID) => showPromptUi('oneSatPermission', requestID),
   });
+
+  // Passkey hand-off from web.bwalletx.com (VITE_SEEDLESS=1 builds only; notes/extension-passkey-handoff.md). The
+  // manifest lets only that exact page message the extension; this re-checks sender.origin anyway. The words are
+  // parked in chrome.storage.session and are NEVER restored here or logged: the popup releases them after the
+  // person types the code the web page shows. Anything refused gets the same generic answer.
+  if (HANDOFF_ENABLED) {
+    chrome.runtime.onMessageExternal.addListener((message: unknown, sender, sendResponse) => {
+      void handleExternalHandoff(message, sender.origin).then((ok) => sendResponse({ ok }));
+      return true;
+    });
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   chrome.runtime.onMessage.addListener((message: any, sender, sendResponse: CallbackResponse) => {

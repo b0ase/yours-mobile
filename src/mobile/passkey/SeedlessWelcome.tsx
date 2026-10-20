@@ -23,6 +23,8 @@ import {
 import { usePasskeyBackupAvailable } from './passkeyUi';
 import { OpenOnComputerPanel } from './OpenOnComputer';
 import { armRestorePing } from './openHere';
+import { parseHandoffSearch } from './extHandoff';
+import { ExtHandoffSend } from './ExtHandoffSend';
 
 const HandCashMark = () => (
   <span
@@ -55,12 +57,19 @@ export const SeedlessWelcome = () => {
   const [error, setError] = useState(() => socialError() || handcashWebError());
   const [busy, setBusy] = useState<Who | null>(null);
   // Opened from the "Put this wallet on your phone" QR: /restore?passkey=1 → straight to Restore.
+  // Opened by the Chrome extension's "Sign in with a passkey" (/restore?passkey=1&ext=<id>&n=<nonce>): this page only
+  // opens the backup and hands the words back to the extension (ExtHandoffSend); it never restores them here.
+  const handoff =
+    typeof location !== 'undefined' && location.pathname.replace(/\/$/, '') === '/restore'
+      ? parseHandoffSearch(location.search)
+      : null;
   useEffect(() => {
+    if (handoff) return;
     if (typeof location !== 'undefined' && location.pathname.replace(/\/$/, '') === '/restore') {
       armRestorePing(location.search); // join the computer's one-time channel now, ping after the passkey restore
       navigate('/restore-wallet');
     }
-  }, [navigate]);
+  }, [navigate, handoff]);
   useEffect(() => {
     const a = onSocialChange(() => {
       setProfile(socialProfile(NEW_ACCOUNT));
@@ -107,6 +116,8 @@ export const SeedlessWelcome = () => {
   const WHO: Who[] = ['x', 'google', 'handcash'];
   const surface = { background: 'var(--bw-surface, #17191E)', color: '#fff' };
   const signedIn = profile || hc;
+
+  if (handoff) return <ExtHandoffSend nonce={handoff.nonce} />;
 
   return (
     <div className="flex flex-col items-center gap-3 w-full" data-testid="seedless-welcome">

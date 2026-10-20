@@ -66,6 +66,9 @@ function brandManifest() {
   // (dist/bwalletx-extension-<version>); without a key Chrome derives the ID from the folder path,
   // so every new folder was a new extension with an empty wallet. This is a PUBLIC key only.
   manifest.key = readFileSync(resolve(__dirname, 'extension-key.pub.txt'), 'utf-8').trim();
+  // Passkey hand-off (notes/extension-passkey-handoff.md): ONLY in a VITE_SEEDLESS=1 build, and only the exact web
+  // wallet page may message the extension. Not a wildcard, not desktop.; without this line no website can reach it.
+  if (process.env.VITE_SEEDLESS === '1') manifest.externally_connectable = { matches: ['https://web.bwalletx.com/*'] };
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
 
   const pwaPath = resolve(dist, 'pwa-manifest.json');
@@ -312,6 +315,8 @@ main().catch((err) => {
   try {
     const meta = loadMeta();
     saveMeta({ ...meta, streak: 0 });
-  } catch {}
+  } catch {
+    // the build-streak file is optional; the build already failed
+  }
   process.exit(1);
 });

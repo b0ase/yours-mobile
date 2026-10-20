@@ -32,6 +32,8 @@ import { saveAccountDataToChromeStorage } from '../../utils/chromeStorageHelpers
 import { normalizePhrase, phraseProblem, restoreErrorMessage } from './restoreHelpers';
 import { clearHelpDeskUnpin } from '../../mobile/chat/helpDeskPin';
 import { PasskeyRestoreRow } from '../../mobile/passkey/PasskeyBackup';
+import { ExtPasskeyRow } from '../../mobile/passkey/ExtPasskeyRow';
+import { IS_EXTENSION } from '../../mobile/extension';
 import { SEEDLESS_ENABLED } from '../../mobile/passkey/prf';
 import { PasskeyCreatePanel, PasskeyUnlockButton } from '../../mobile/passkey/PasskeyCreate';
 import { keystorePasswordFromPrf, savePasskeyUnlock } from '../../mobile/passkey/seedBackup';
@@ -92,7 +94,6 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
   };
   useEffect(() => {
     note(`screen: step ${step}, ${loading ? 'spinner' : 'form'}`);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- trace only
   }, [step, loading]);
   const traceBox =
     SEEDLESS_ENABLED && trace.length > 0 ? (
@@ -471,7 +472,20 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
 
       {/* Prototype, VITE_SEEDLESS=1 only: the passkey opens the sealed 12 words, then the normal restore
       form runs from its name + password step (as the JSON backup upload does). */}
-      {SEEDLESS_ENABLED && (
+      {SEEDLESS_ENABLED && IS_EXTENSION && (
+        <ExtPasskeyRow
+          onWallet={(words, name) => {
+            // The words came from web.bwalletx.com after the person typed the one-time code and said yes. From here
+            // it is the ordinary restore: the person picks this extension's password; an existing account is never
+            // overwritten (the restore refuses "already added").
+            setImportWallet('yours');
+            setSeedWords(words);
+            if (name) setAccountName(cleanAccountName(name));
+            setStep(3);
+          }}
+        />
+      )}
+      {SEEDLESS_ENABLED && !IS_EXTENSION && (
         <PasskeyRestoreRow
           onPhrase={(words, pk) => {
             note(`passkey opened the backup: ${words.trim().split(/\s+/).length} words`);
