@@ -27,7 +27,7 @@ With your permission we credit you on the b-Aware page.
 | Medium   | Leak private data, defeat the safety filter, deny a user their own wallet                    | 0.5 BSV |
 | Low      | Real but contained                                                                           | Credit  |
 
-The reward pool is **30 BSV per calendar quarter**. First valid report of an issue wins; duplicates, issues we already
+The reward pool is **20 BSV per calendar quarter**. First valid report of an issue wins; duplicates, issues we already
 know about and issues listed under "Known and accepted" on the b-Aware page earn credit, not money. When the quarter's
 pool is spent, valid reports still get credit and are paid from the next quarter's pool, in order. Severity is ours to
 set, by impact on users' money and keys; we explain the reasoning in writing.
