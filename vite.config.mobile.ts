@@ -366,7 +366,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       '      <form onSubmit={handleRestore} className="flex flex-col items-center w-full">',
-      '      <SocialSignIn check onProfile={(p) => { setAccountName(p.name); if (p.avatar) setIconURL(p.avatar); }} onClear={(a) => setIconURL((v) => (a && v === a ? \'\' : v))} />\n      <form onSubmit={handleRestore} className="flex flex-col items-center w-full">',
+      '      {!viaExt && <SocialSignIn check onProfile={(p) => { setAccountName(p.name); if (p.avatar) setIconURL(p.avatar); }} onClear={(a) => setIconURL((v) => (a && v === a ? \'\' : v))} />}\n      <form onSubmit={handleRestore} className="flex flex-col items-center w-full">',
     ],
     // Restore › SimplyCash: create a bWallet, then sweep the SimplyCash wallet into it (src/mobile/sweep).
     [
@@ -388,7 +388,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       '        <Input\n          theme={theme}\n          placeholder="Icon URL"\n          type="text"\n          value={iconURL}\n          onChange={(e) => setIconURL(e.target.value)}\n        />',
-      '        <AccountIconField value={iconURL} onChange={setIconURL} />',
+      '        {!viaExt && <AccountIconField value={iconURL} onChange={setIconURL} />}',
     ],
     [
       "import { useNavigate } from 'react-router-dom';",
