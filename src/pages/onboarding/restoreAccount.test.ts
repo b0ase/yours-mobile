@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test, setDefaultTimeout } from 'bun:test';
 import * as bip39 from 'bip39';
 import { KeysService } from '../../services/Keys.service';
 import { derivePassKey } from '../../services/passKey';
@@ -6,6 +6,10 @@ import { decrypt, encrypt } from '../../utils/crypto';
 import { getKeys } from '../../utils/keys';
 import { AccountExistsError } from '../../services/accountErrors';
 import { normalizePhrase, phraseProblem, restoreErrorMessage } from './restoreHelpers';
+
+// Password key derivation takes 3 to 5 s here, right at bun's 5 s default: it failed on a busy machine (20 Oct 2026,
+// same cause as #335). A slow test is not a failing test.
+setDefaultTimeout(30_000);
 
 /**
  * Add account › Restore › Twetch (owner, 10 Oct 2026: "neither a new password nor my wallet password works").
