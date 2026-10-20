@@ -74,6 +74,12 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
   const otherAccountNames = () => chromeStorageService.getAllAccounts().map((a) => a.name ?? '');
   const [accountName, setAccountName] = useState(() => suggestAccountName(otherAccountNames()));
   const [nameError, setNameError] = useState('');
+  // Preview-only trace of the passkey restore (VITE_SEEDLESS=1): shows each step and the exact error on screen, because
+  // on a phone there is no console (owner, 20 Oct 2026: the first passkey restore sends him back to the restore form).
+  const [trace, setTrace] = useState<string[]>([]);
+  const note = (m: string) => {
+    if (SEEDLESS_ENABLED) setTrace((t) => [...t.slice(-9), `${new Date().toLocaleTimeString()} ${m}`]);
+  };
   const [iconURL, setIconURL] = useState('');
   const hiddenYoursFileInput = useRef<HTMLInputElement>(null);
   const currentAccountName = (() => {
@@ -140,6 +146,7 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
   useEffect(() => {
     if (passkeyPassword && password === passkeyPassword && passwordConfirm === passkeyPassword) {
       setPasskeyPassword('');
+      note('passkey password ready, starting the restore');
       void handleRestore({ preventDefault: () => undefined } as React.FormEvent<HTMLFormElement>);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once both fields hold the passkey password
@@ -149,6 +156,7 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
     try {
       event.preventDefault();
       setLoading(true);
+      note(`restore: start (name "${accountName}", ${seedWords.trim().split(/\s+/).filter(Boolean).length} words, password ${password.length} chars, newWallet ${String(newWallet)})`);
       // Stage timings (owner, 6 Oct 2026: a restore took ~50 s).
       const t0 = Date.now();
       const at = () => `${((Date.now() - t0) / 1000).toFixed(1)}s`;
@@ -156,22 +164,26 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
       const badName = accountNameError(accountName, otherAccountNames());
       setNameError(badName);
       if (badName) {
+        note(`stopped: ${badName}`);
         setLoading(false);
         addSnackbar(badName, 'error');
         return;
       }
       if (password.length < 8) {
+        note('stopped: password shorter than 8');
         addSnackbar(newWallet ? 'The password must be at least 8 characters!' : restoreErrorMessage(new Error('Unauthorized!')), 'error');
         return;
       }
       const problem = phraseProblem(seedWords);
       if (problem) {
+        note(`stopped: ${problem}`);
         addSnackbar(problem, 'error');
         setStep(2);
         return;
       }
 
       if (newWallet && password !== passwordConfirm) {
+        note('stopped: passwords do not match');
         addSnackbar('The passwords do not match!', 'error');
         return;
       }
@@ -192,6 +204,7 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
       }
 
       console.log('[restore] keys stored at', at());
+      note(`keys stored (${at()})`);
       // A fresh restore pins the bWallet Help Desk again (its unpin is per device only).
       clearHelpDeskUnpin();
       const chromeObject = await chromeStorageService.getAndSetStorage();
@@ -200,15 +213,18 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
       if (!objKeys) throw new Error('Object identity address not found');
       await switchBeforeReload(chromeStorageService, keys.identityAddress);
       console.log('[restore] wallet started at', at());
+      note(`account selected (${at()})`);
       await saveAccountDataToChromeStorage(chromeStorageService, cleanAccountName(accountName), iconURL);
       // RelayX: the inherited restore holds only /1/0 and /2/0. Keep the RelayX account's xpub (public, spends
       // nothing) so the wallet can find its Run NFTs on every RelayX address (sweep/relayxRecover.ts).
       if (importWallet === 'relayx') await rememberRelayx(chromeStorageService, keys.mnemonic);
       console.log('[restore] done at', at());
 
+      note(`done (${at()}), showing the finish screen`);
       setStep(4);
     } catch (error) {
       console.log(error);
+      note(`ERROR: ${error instanceof Error ? error.message : String(error)}`);
       addSnackbar(restoreErrorMessage(error), 'error');
     } finally {
       setLoading(false);
@@ -424,6 +440,7 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
       {SEEDLESS_ENABLED && (
         <PasskeyRestoreRow
           onPhrase={(words, pk) => {
+            note(`passkey opened the backup: ${words.trim().split(/\s+/).length} words`);
             setImportWallet('yours');
             setSeedWords(words);
             setStep(3);
@@ -713,6 +730,15 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
       {/* my-auto: centred when short, top-aligned (not clipped) when taller than the wallet box. */}
       <div className="flex flex-col items-center w-full px-2 pt-4 pb-4 my-auto" style={{ isolation: 'isolate' }}>
         <ObsidianBackdrop />
+        {SEEDLESS_ENABLED && trace.length > 0 && (
+          <pre
+            data-testid="restore-trace"
+            className="w-full text-xs whitespace-pre-wrap break-words rounded-lg p-2 mb-3"
+            style={{ background: '#111', color: '#9ae6b4' }}
+          >
+            {trace.join('\n')}
+          </pre>
+        )}
         <AnimatePresence mode="wait">
           {step === 1 && (
             <motion.div
