@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Check, Fingerprint, FileUp } from 'lucide-react';
 import { useTheme } from '../../hooks/useTheme';
 import { createPasskeyWithPrf, getPrf } from './prf';
-import { currentRpId, downloadBackupFile, usePasskeyBackupAvailable } from './passkeyUi';
+import { currentRpId, downloadBackupFile, saveBackupFile, usePasskeyBackupAvailable } from './passkeyUi';
 import {
   loadLocalBackups,
   openSeed,
@@ -40,6 +40,7 @@ export const PasskeyBackupButton = ({
   const available = usePasskeyBackupAvailable();
   const [state, setState] = useState<'idle' | 'busy' | 'done'>('idle');
   const [error, setError] = useState('');
+  const [fileNote, setFileNote] = useState('');
   const [blob, setBlob] = useState<SeedBackupBlob | null>(null);
   const [onServer, setOnServer] = useState<boolean | null>(null);
   const accent = theme.color.component.primaryButtonLeftGradient;
@@ -124,11 +125,25 @@ export const PasskeyBackupButton = ({
         </span>
       </button>
       {state === 'done' && blob && (
-        <button type="button" onClick={() => downloadBackupFile(blob)} className="mt-1" style={linkStyle}>
-          <span className="text-[10px] underline" style={{ color: theme.color.global.gray }}>
-            Download the recovery file again
-          </span>
-        </button>
+        <>
+          <button
+            type="button"
+            onClick={() => void saveBackupFile(blob).then(setFileNote)}
+            className="flex items-center justify-center gap-2 w-full rounded-xl px-4 py-3 mt-2 border-0 cursor-pointer"
+            style={{ backgroundColor: theme.color.global.row }}
+            data-testid="passkey-save-file"
+          >
+            <FileUp size={16} style={{ color: accent }} />
+            <span className="text-sm font-semibold" style={{ color: theme.color.global.contrast }}>
+              Save the recovery file
+            </span>
+          </button>
+          {fileNote && (
+            <p className="text-xs mt-1 text-center px-6" style={{ color: theme.color.global.gray }}>
+              {fileNote}
+            </p>
+          )}
+        </>
       )}
       {state === 'done' && (
         <p className="text-[10px] mt-1 text-center px-6" style={{ color: theme.color.global.gray }}>
@@ -247,12 +262,23 @@ export const PasskeyRestoreRow = ({ onPhrase }: { onPhrase: (mnemonic: string, p
       <button
         type="button"
         onClick={() => fileInput.current?.click()}
-        className="flex items-center gap-2 self-center mt-1"
-        style={linkStyle}
+        className="flex items-center gap-3 w-full rounded-xl px-4 py-3 border-0 cursor-pointer"
+        style={{ backgroundColor: theme.color.global.row }}
+        data-testid="passkey-file-restore"
       >
-        <FileUp size={12} style={{ color: gray }} />
-        <span className="text-[11px] underline" style={{ color: needFile ? contrast : gray }}>
-          {needFile ? 'Choose your passkey recovery file' : 'Use a passkey recovery file'}
+        <span
+          className="flex items-center justify-center rounded-lg"
+          style={{ backgroundColor: '#17191E', width: '2.25rem', height: '2.25rem' }}
+        >
+          <FileUp size={18} color="#FFFFFF" />
+        </span>
+        <span className="flex-1 flex flex-col text-left">
+          <span className="text-sm font-semibold" style={{ color: contrast }}>
+            {needFile ? 'Choose your recovery file' : 'Restore with a recovery file'}
+          </span>
+          <span className="text-xs" style={{ color: gray }}>
+            The file you saved when you made the passkey (on iPhone: Files, then Downloads)
+          </span>
         </span>
       </button>
       <input

@@ -30,6 +30,26 @@ export const downloadBackupFile = (blob: SeedBackupBlob) => {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 };
 
+/**
+ * Save the recovery file from a tap. Phones get the share sheet (Save to Files, AirDrop, Mail), because Safari hides
+ * plain downloads in the Files app; everything else downloads. Returns a plain sentence saying where it went.
+ */
+export const saveBackupFile = async (blob: SeedBackupBlob): Promise<string> => {
+  const name = backupFileName(blob);
+  const file = new File([JSON.stringify(blob, null, 2)], name, { type: 'application/json' });
+  const nav = typeof navigator === 'undefined' ? undefined : navigator;
+  if (nav?.canShare?.({ files: [file] }) && nav.share) {
+    try {
+      await nav.share({ files: [file], title: 'bWalletX recovery file' });
+      return 'Pick "Save to Files" (or Mail, Drive) in the sheet to keep it.';
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') return 'Not saved. Tap the button to try again.';
+    }
+  }
+  downloadBackupFile(blob);
+  return `Saved as ${name} in your Downloads folder (on iPhone: Files app, then Downloads).`;
+};
+
 export const copyText = (t: string) => navigator.clipboard?.writeText(t) ?? Promise.resolve();
 
 /** Where a second device opens "Restore with a passkey". No secrets: the synced passkey + backup store do the work. */
