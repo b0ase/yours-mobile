@@ -216,6 +216,30 @@ export default function ScanSheet({
           </button>
         )}
 
+        {stage.k === 'result' && stage.s.kind === 'restore' && (
+          <div className="mt-10 flex flex-col">
+            <p className="text-base font-semibold text-white">This puts a wallet on a device</p>
+            <p className="mt-1 text-sm" style={{ color: MUTED }}>
+              The computer is offering to move its wallet to a phone. It opens in your browser, where you restore with
+              your passkey. It does not change the wallet you are signed into here.
+            </p>
+            <button
+              onClick={() => stage.s.kind === 'restore' && window.open(stage.s.url, '_blank')}
+              className={`${big} mt-5`}
+              style={{ background: GOLD, color: '#000' }}
+            >
+              Open in browser
+            </button>
+            <button
+              onClick={() => setStage({ k: 'scan' })}
+              className={`${big} mt-3 text-white`}
+              style={{ background: PANEL }}
+            >
+              Scan again
+            </button>
+          </div>
+        )}
+
         {stage.k === 'result' && stage.s.kind === 'text' && (
           <div className="mt-10 flex flex-col">
             <p className="text-base font-semibold text-white">Not a bWallet code</p>

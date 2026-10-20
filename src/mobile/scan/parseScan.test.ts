@@ -81,3 +81,20 @@ describe('parseScan', () => {
     expect(parseScan('https://bchatx.com/s/bad!name').kind).toBe('text');
   });
 });
+
+describe('restore codes ("Put this wallet on your phone")', () => {
+  test('a web wallet /restore?passkey=1 link is recognised', () => {
+    const u = 'https://web.bwalletx.com/restore?passkey=1&r=relay.bwallet.space&c=abc&k=02aa&e=1';
+    expect(parseScan(u)).toEqual({ kind: 'restore', url: u });
+  });
+  test('other hosts, other paths and a missing flag stay plain text', () => {
+    for (const u of [
+      'https://evil.example/restore?passkey=1',
+      'http://web.bwalletx.com/restore?passkey=1',
+      'https://web.bwalletx.com/other?passkey=1',
+      'https://web.bwalletx.com/restore',
+      'https://web.bwalletx.com.evil.example/restore?passkey=1',
+    ])
+      expect(parseScan(u).kind).toBe('text');
+  });
+});

@@ -10,6 +10,8 @@ export type Scan =
   | { kind: 'pair'; text: string }
   /** "Open on computer" (passkey/openHere.ts, VITE_SEEDLESS builds act on it). */
   | { kind: 'open'; text: string }
+  /** The computer's "Put this wallet on your phone" code (https://web.bwalletx.com/restore?passkey=1&…). */
+  | { kind: 'restore'; url: string }
   | { kind: 'pay'; to: string; amountSats?: number; label?: string; message?: string }
   | { kind: 'person'; handle: string; to: string }
   /** A Space page, invite or room link (https /s/ /i/ /r/ on our hosts, or bwalletx://space|invite|room/…). */
@@ -23,6 +25,19 @@ const isOpenLink = (s: string) => {
     return (u.host === PAIR_HOST || u.host === 'bwallet.space') && u.pathname === '/open';
   } catch {
     return false;
+  }
+};
+
+/** Only the two wallet web hosts, the /restore page and the passkey flag. Opened in the browser, never acted on here. */
+const restoreUrl = (s: string): string | null => {
+  try {
+    const u = new URL(s);
+    const hostOk = u.protocol === 'https:' && ['web.bwalletx.com', 'desktop.bwalletx.com'].includes(u.host);
+    return hostOk && u.pathname.replace(/\/$/, '') === '/restore' && u.searchParams.get('passkey') === '1'
+      ? u.href
+      : null;
+  } catch {
+    return null;
   }
 };
 
@@ -68,6 +83,8 @@ export const parseScan = (raw: string | null | undefined): Scan => {
 
   if (isPairLink(text) || /^bwallet:.*pair/i.test(text)) return { kind: 'pair', text };
   if (isOpenLink(text)) return { kind: 'open', text };
+  const restore = restoreUrl(text);
+  if (restore) return { kind: 'restore', url: restore };
 
   const link = parseAppLink(text);
   if (link) return { kind: 'join', url: text, link };
