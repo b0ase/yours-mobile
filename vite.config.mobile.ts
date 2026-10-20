@@ -307,8 +307,8 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       "import { useNavigate } from 'react-router-dom';\nimport { markHandlePrompt } from '../../mobile/names/handlePrompt';",
     ],
     [
-      '      await chromeStorageService.switchAccount(keys.identityAddress || identityPk);\n',
-      "      await chromeStorageService.switchAccount(keys.identityAddress || identityPk);\n      markHandlePrompt(keys.identityAddress, 'restore');\n",
+      '      await switchBeforeReload(chromeStorageService, keys.identityAddress || identityPk);\n',
+      "      await switchBeforeReload(chromeStorageService, keys.identityAddress || identityPk);\n      markHandlePrompt(keys.identityAddress, 'restore');\n",
     ],
   ],
   'src/pages/onboarding/MasterRestore.tsx': [
