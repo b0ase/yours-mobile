@@ -880,11 +880,14 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
 };
 
 /** Beta: a one-tap "start small" notice before restoring an existing wallet (15 Oct 2026). */
-export const RestoreAccount = (p: RestoreAccountProps) => (
-  <BetaGate>
-    <RestoreAccountInner {...p} />
-  </BetaGate>
-);
+export const RestoreAccount = (p: RestoreAccountProps) => {
+  const navigate = useNavigate();
+  return (
+    <BetaGate onBack={() => navigate('/')}>
+      <RestoreAccountInner {...p} />
+    </BetaGate>
+  );
+};
 
 async function rememberRelayx(storage: ChromeStorageService, words: string) {
   try {
