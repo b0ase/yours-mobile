@@ -30,6 +30,8 @@ import { SweepMigration } from './pages/SweepMigration';
 import { PANEL_PROMPT_EVENT, PanelPrompt } from './mobile/PanelPrompt';
 import { IS_EXTENSION } from './mobile/extension';
 import { isWebApp } from './mobile/webApp';
+import { HANDOFF_ENABLED, parseHandoffSearch } from './mobile/passkey/extHandoff';
+import { ExtHandoffSend } from './mobile/passkey/ExtHandoffSend';
 import { UrlSync } from './mobile/url/UrlSync';
 import { CrashResume } from './mobile/url/ResumeAfterCrash';
 import { isNative } from './mobile/native';
@@ -105,6 +107,23 @@ export const App = () => {
         }}
       >
         <PageLoader message="Loading..." theme={theme} />
+      </div>
+    );
+  }
+
+  // The extension's "Sign in with a passkey" opens /restore?passkey=1&ext=<id>&n=<nonce> here. It must show BEFORE the
+  // unlock screen: a browser that already holds a wallet here would otherwise unlock it instead (owner, 20 Oct 2026).
+  const handoff =
+    HANDOFF_ENABLED && isWebApp() && location.pathname.replace(/\/$/, '') === '/restore'
+      ? parseHandoffSearch(location.search)
+      : null;
+  if (handoff) {
+    return (
+      <div
+        className="flex items-start justify-center relative p-0 overflow-y-auto"
+        style={{ width: 'var(--wallet-width)', height: 'var(--wallet-height)', backgroundColor: walletBg }}
+      >
+        <ExtHandoffSend nonce={handoff.nonce} />
       </div>
     );
   }
