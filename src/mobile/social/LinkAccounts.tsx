@@ -244,7 +244,7 @@ const LinkHandCash = ({ owner, onClaim }: { owner: string; onClaim?: (alias: str
             Link HandCash {link ? <BadgeCheck size={14} color="var(--bw-accent)" /> : null}
           </div>
           <div className="text-[11px]" style={{ color: GRAY }}>
-            {link ? badgeText(link) : available ? 'Verify your $handle' : 'In the bWalletX phone app'}
+            {link ? badgeText(link) : available ? 'Verify your $handle · beta' : 'In the bWalletX phone app'}
           </div>
         </div>
         {link ? (
