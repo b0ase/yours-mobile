@@ -51,6 +51,7 @@ import {
 import { categoryOf, listingsIn, nftFeed, type Feed as BaseFeed, type NftCategory, type NftListing } from './classify';
 import { onSafetyChange, refreshSafety, reportItem, safety } from './safety';
 import { Blurred, ContentImg, NftCard } from './NftCard';
+import { npgAvatarsEnabled } from '../npgav/npgAvatar';
 import { groupCollections } from './groupCollections';
 import { thumbOrFullUrls } from './thumbs';
 import { pauseAudio, playQueue } from '../media/player';
@@ -155,6 +156,7 @@ const TRADING = marketTradingEnabled();
 // and Rollup drops ./launchpad/* entirely (code, strings and sourcemap sources).
 const CurvePanel = CURVE_COINS_ENABLED ? lazy(loadCurvePanel) : null;
 // The Names tile shows the Exchange's OpNS names market (the same screen as Exchange › Names).
+const NpgAvatarsMarket = lazy(() => import('../npgav/NpgAvatarsMarket').then((m) => ({ default: m.NpgAvatarsMarket })));
 const OpnsMarket = lazy(() => import('../exchange/OpnsMarket').then((m) => ({ default: m.OpnsMarket })));
 // three.js viewer for a 3D (GLB) listing: same gate as the 3D tab, so three.js stays out of a store build.
 const ModelPreview = TOKENBLASTER_ENABLED
@@ -196,6 +198,7 @@ const MarketPage = () => {
   const [room, setRoom] = useState<HotRoom | null>(null);
   const [market, setMarket] = useState<RoomMarket | null>(null);
   const [gamesOpen, setGamesOpen] = useState(false);
+  const [npgOpen, setNpgOpen] = useState(false);
   // Strategies / Contracts / Bonds: panels that replace the token list (bWalletX only).
   const [panel, setPanel] = useState<'contracts' | 'bonds' | 'strategies' | 'shares' | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
@@ -441,16 +444,20 @@ const MarketPage = () => {
         ]
       : []),
     ...(TRADING && TOKENBLASTER_ENABLED ? [{ id: '3d', label: '3D', kind: 'nfts' as Kind, view: '3d' as View }] : []),
+    // NPG Avatars (owner, 19 Oct 2026): off until the collection's parent origin is set (npgav/npgAvatar.ts).
+    ...(npgAvatarsEnabled() ? [{ id: 'npg-avatars', label: 'NPG Avatars', kind: 'tokens' as Kind }] : []),
   ];
   // Bonds and Strategies are tabs inside Contracts (owner, 7 / 17 Oct 2026): panel 'bonds' means Contracts › Bonds.
   const activeCat =
     (panel ? 'contracts' : null) ??
     (gamesOpen ? 'games' : null) ??
+    (npgOpen ? 'npg-avatars' : null) ??
     (kind === 'tokens' ? (tokenFilter === 'all' ? 'tokens' : tokenFilter) : view);
   // A grid of square filter buttons, all visible at once: no sideways scrolling, so nothing (e.g. Bonds) is
   // hidden (owner, 5 Oct 2026). Four across, wrapping onto more rows as categories are added.
   const pick = (c: Cat) => {
     setGamesOpen(c.id === 'games');
+    setNpgOpen(c.id === 'npg-avatars');
     setPanel(c.id === 'contracts' ? 'contracts' : null);
     setKind(c.kind);
     if (c.token) setTokenFilter(c.token);
@@ -1096,6 +1103,10 @@ const MarketPage = () => {
         {segment}
         {section === 'mine' ? (
           mineView
+        ) : npgOpen && !room ? (
+          <Suspense fallback={null}>
+            <NpgAvatarsMarket rate={cachedExchangeRate()} />
+          </Suspense>
         ) : gamesOpen && !room ? (
           <GamesMarket tokens={tokenRows} onOpenToken={(r) => void openRoom(r)} />
         ) : panel && !room ? (

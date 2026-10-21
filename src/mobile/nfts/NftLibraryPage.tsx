@@ -30,6 +30,8 @@ import { NftDetail } from '../media/NftDetail';
 import { NftHeader, NftHero, PendingCard } from '../media/NftHero';
 import { ordinalsUrl } from '../media/nftActions';
 import { itemInfo } from '../market/indexer';
+import { npgAvatarsEnabled, parseNpgAvatar } from '../npgav/npgAvatar';
+import { NpgAvatarFlip, NpgPictureActions } from '../npgav/NpgAvatarFlip';
 import {
   EMPTY_FILTER,
   NFT_TYPES,
@@ -298,7 +300,7 @@ const RunSection = ({
 
 /* ---------- Detail panel ---------- */
 
-type Facts = { mintDate?: string; size?: string; description?: string; model?: string };
+type Facts = { mintDate?: string; size?: string; description?: string; model?: string; map?: Record<string, unknown> };
 
 const useFacts = (m: MediaItem | undefined): Facts => {
   const [facts, setFacts] = useState<Facts>({});
@@ -320,6 +322,7 @@ const useFacts = (m: MediaItem | undefined): Facts => {
       })
       .catch(() => undefined);
     void itemInfo(m.origin.replace('.', '_')).then((info) => {
+      if (live && info?.map) setFacts((f) => ({ ...f, map: info.map }));
       const d = info?.map?.description;
       if (live && typeof d === 'string' && d) setFacts((f) => ({ ...f, description: d }));
       const model = mapModelUrl(info?.map?.model);
@@ -354,6 +357,11 @@ const DetailPanel = ({
 }) => {
   const { apiContext } = useServiceContext();
   const facts = useFacts(m);
+  // NPG Avatars (owner, 19 Oct 2026): the flip view, once the collection is live (npgAvatar.ts).
+  const npg = useMemo(
+    () => (npgAvatarsEnabled() && facts.map ? parseNpgAvatar(it.origin, facts.map) : null),
+    [facts.map, it.origin],
+  );
   const [sending, setSending] = useState(false);
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
@@ -440,6 +448,27 @@ const DetailPanel = ({
         </button>
       </div>
       <div className="px-4 py-4 flex flex-col gap-4">
+        {npg && (
+          <NpgAvatarFlip
+            a={npg}
+            size={240}
+            actions={
+              <>
+                <NpgPictureActions a={npg} />
+                {/* Listing NFTs is off wallet-wide (ORDLOCK_LISTING_DISABLED) until the v2 list flow ships. */}
+                <button
+                  type="button"
+                  disabled
+                  title="Listing NFTs for sale isn’t available in the wallet yet"
+                  className="w-full rounded-xl py-2.5 text-sm font-bold bg-transparent text-white opacity-50 cursor-not-allowed"
+                  style={{ border: '1px solid #2b2f36' }}
+                >
+                  {it.listed ? 'Listed' : 'List (coming)'}
+                </button>
+              </>
+            }
+          />
+        )}
         <NftHeader
           name={it.name}
           collection={it.collection ? collectionLabel(it.collection) : undefined}

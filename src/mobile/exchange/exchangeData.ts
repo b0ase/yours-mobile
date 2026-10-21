@@ -133,6 +133,7 @@ export type ExchangeView =
   | { tab: 'names' }
   | { tab: 'podcasts' }
   | { tab: 'movies' }
+  | { tab: 'npg-avatars' }
   | { tab: 'launchpad' }
   | { tab: 'launch' }
   | { tab: 'more' }
@@ -156,6 +157,7 @@ export const exchangeView = (rest: string): ExchangeView => {
   if (seg === 'names') return { tab: 'names' };
   if (seg === 'podcasts') return { tab: 'podcasts' };
   if (seg === 'movies') return { tab: 'movies' };
+  if (seg === 'npg-avatars') return { tab: 'npg-avatars' };
   if (seg === 'launchpad') return segs[1] === 'new' ? { tab: 'launch' } : { tab: 'launchpad' };
   if (seg === 'collectibles') return { tab: 'more' };
   const id = decodeURIComponent(seg).replace('.', '_');

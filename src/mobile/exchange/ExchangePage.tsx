@@ -31,6 +31,8 @@ import { chartSeries } from './chartSeries';
 import { OpnsMarket } from './OpnsMarket';
 import { PodcastMarket } from './PodcastMarket';
 import { MoviesMarket } from './MoviesMarket';
+import { NpgAvatarsMarket } from '../npgav/NpgAvatarsMarket';
+import { npgAvatarsEnabled } from '../npgav/npgAvatar';
 import { LaunchpadPanel } from '../market/launchpad/LaunchpadPanel';
 import { LaunchCoin } from './launch/LaunchCoin';
 import { FilterBar, PlatformPage, PlatformsView } from './Categories';
@@ -513,6 +515,8 @@ const ExchangePage = () => {
     { id: 'platforms', label: 'Platforms', to: platformRoute() },
     { id: 'names', label: 'Names', to: `${EXCHANGE_ROUTE}/names` },
     { id: 'movies', label: 'Movies', to: `${EXCHANGE_ROUTE}/movies` },
+    // NPG Avatars: off until the collection parent origin is set (npgAvatar.ts).
+    ...(npgAvatarsEnabled() ? [{ id: 'npg-avatars', label: 'NPG Avatars', to: `${EXCHANGE_ROUTE}/npg-avatars` }] : []),
     { id: 'podcasts', label: 'Podcasts', to: `${EXCHANGE_ROUTE}/podcasts` },
     { id: 'launchpad', label: 'Launchpad', to: `${EXCHANGE_ROUTE}/launchpad` },
     { id: 'orders', label: 'My orders', to: `${EXCHANGE_ROUTE}/orders` },
@@ -592,6 +596,7 @@ const ExchangePage = () => {
         {view.tab === 'orders' && <Orders />}
         {view.tab === 'names' && <OpnsMarket rate={rate} />}
         {view.tab === 'movies' && <MoviesMarket rate={rate} />}
+        {view.tab === 'npg-avatars' && npgAvatarsEnabled() && <NpgAvatarsMarket rate={rate} />}
         {view.tab === 'podcasts' && <PodcastMarket rate={rate} />}
         {/* In-app launchpad (owner, 14 Oct 2026: the Exchange must not send people to tokenblaster.lol). */}
         {view.tab === 'launchpad' && <LaunchpadPanel />}
