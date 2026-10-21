@@ -20,7 +20,7 @@ import {
 } from '@1sat/actions';
 import { buildInscriptionScript, Lock } from '@1sat/templates';
 import { P2PKH, PublicKey, Random, Utils } from '@bsv/sdk';
-import { buildReceipt, receiptMap, receiptSvg, type ReceiptIdentity, type ReceiptMode } from './receipt';
+import { buildReceipt, receiptMap, receiptSvg, type Receipt, type ReceiptIdentity, type ReceiptMode } from './receipt';
 import { MAX_PIECES, mergePlans, type LockMode, type LockPlan, type PlanPiece } from './schedule';
 import type { ChromeStorageService } from '../../services/ChromeStorage.service';
 
@@ -138,6 +138,28 @@ async function lockTx(
   return res.txid;
 }
 
+/** The receipt inscription output, to a fresh key of the wallet's own ordinals (as @1sat/actions inscribe). */
+export async function receiptOutput(
+  ctx: OneSatContext,
+  r: Receipt,
+): Promise<{ hex: string; ci: string; tags: string[] }> {
+  const keyID = `inscribe-${Utils.toHex(Random(8))}`;
+  const { publicKey } = await ctx.wallet.getPublicKey({
+    protocolID: P1SAT_PROTOCOL,
+    keyID,
+    counterparty: 'self',
+    forSelf: true,
+  });
+  const dest = new P2PKH().lock(PublicKey.fromString(publicKey).toAddress());
+  const content = new TextEncoder().encode(receiptSvg(r));
+  const tags = ['type:image/svg+xml', 'origin', 'lock-receipt'];
+  return {
+    hex: buildInscriptionScript(dest, content, 'image/svg+xml', receiptMap(r)).toHex(),
+    ci: buildOrdinalCustomInstructions({ protocolID: P1SAT_PROTOCOL, keyID, tags, name: 'bWalletX lock receipt' }),
+    tags,
+  };
+}
+
 /** Lock a schedule. Irreversible once broadcast: the caller must have shown the confirmation step. */
 export async function createLock(
   ctx: OneSatContext,
@@ -160,22 +182,7 @@ export async function createLock(
       pctBase: input.base,
       curve: input.curve,
     });
-    // The receipt goes to a fresh key of the wallet's own ordinals (as @1sat/actions inscribe does).
-    const keyID = `inscribe-${Utils.toHex(Random(8))}`;
-    const { publicKey } = await ctx.wallet.getPublicKey({
-      protocolID: P1SAT_PROTOCOL,
-      keyID,
-      counterparty: 'self',
-      forSelf: true,
-    });
-    const dest = new P2PKH().lock(PublicKey.fromString(publicKey).toAddress());
-    const content = new TextEncoder().encode(receiptSvg(r));
-    const tags = ['type:image/svg+xml', 'origin', 'lock-receipt'];
-    receiptOut = {
-      hex: buildInscriptionScript(dest, content, 'image/svg+xml', receiptMap(r)).toHex(),
-      ci: buildOrdinalCustomInstructions({ protocolID: P1SAT_PROTOCOL, keyID, tags, name: 'bWalletX lock receipt' }),
-      tags,
-    };
+    receiptOut = await receiptOutput(ctx, r);
   }
   const txid = await lockTx(ctx, address, input.pieces, receiptOut);
   const plan: LockPlan = {

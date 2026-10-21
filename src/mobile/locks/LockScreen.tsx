@@ -84,6 +84,7 @@ const VaultSection = PLACEMENT_ENABLED ? lazy(() => import('../placement/VaultSe
 // Pots & Locks › Subscriptions (bWalletX only: absent from a store build even as code).
 const SubscriptionsTab = SUBSCRIPTIONS_ENABLED ? lazy(() => import('../pots/SubscriptionsTab')) : null;
 import { verifyLockTx, type VerifyResult } from './verify';
+import { fmtToken } from './receipt';
 import { ARTIST_PROGRAMME_ENABLED } from '../storeBuild';
 import { registerBacking } from '../media/artists/programme/api';
 import { TEMPLATE_CONFIRM, TEMPLATE_NOTE, TEMPLATES, reviewAllowed, type LockTemplate } from './templates';
@@ -1563,7 +1564,7 @@ export const VerifyCard = ({ r }: { r: VerifyResult }) => (
     <div className="flex justify-between">
       <span className="text-sm font-bold text-white">{r.status}</span>
       <span className="text-xs" style={{ color: MUTED }}>
-        {fmtBsv(r.totalSats)}
+        {r.receipt?.token ? fmtToken(r.receipt.token) : fmtBsv(r.totalSats)}
       </span>
     </div>
     <div
@@ -1578,6 +1579,12 @@ export const VerifyCard = ({ r }: { r: VerifyResult }) => (
         : 'No receipt in this transaction'}
     </div>
     {r.description && <div className="text-xs text-white">{r.description}</div>}
+    {r.locks.some((l) => l.token) && (
+      <div className="text-xs" style={{ color: MUTED }}>
+        The chain proves the lock and its unlock block. Whether the tokens themselves are valid BSV-21 is up to the
+        token indexer.
+      </div>
+    )}
     {r.receipt && (
       <div className="text-xs" style={{ color: MUTED }}>
         Locked by {r.receipt.identity.handle || r.receipt.identity.paymail || r.receipt.identity.address}
@@ -1594,7 +1601,11 @@ export const VerifyCard = ({ r }: { r: VerifyResult }) => (
           <tr key={l.vout} style={{ borderTop: `1px solid ${LINE}` }}>
             <td className="py-1">#{l.vout}</td>
             <td>block {l.height}</td>
-            <td className="text-right">{fmtBsv(l.sats)}</td>
+            <td className="text-right">
+              {l.token
+                ? fmtToken({ amt: l.token.amt, dec: r.receipt?.token?.dec ?? 0, sym: r.receipt?.token?.sym })
+                : fmtBsv(l.sats)}
+            </td>
             <td className="text-right" style={{ color: l.spent ? MUTED : '#32D583' }}>
               {l.spent ? 'claimed' : l.matured ? 'unlocked' : 'locked'}
             </td>

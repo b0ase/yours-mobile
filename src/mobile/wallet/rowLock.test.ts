@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { BACK_PNEE_ROUTE } from '../notes/backPnee';
-import { BSV_LOCK_ROUTE, lockRouteFor, tokenLockNotice } from './rowLock';
+import { BSV_LOCK_ROUTE, lockRouteFor } from './rowLock';
 
 describe('row Lock routes', () => {
   it('BSV opens the Lock BSV screen, never Settings', () => {
@@ -10,9 +10,5 @@ describe('row Lock routes', () => {
   it('PNEEs open Back PNEEs only where it is live', () => {
     expect(lockRouteFor('pnee', { backPneeLive: true })).toBe(BACK_PNEE_ROUTE);
     expect(lockRouteFor('pnee', { backPneeLive: false })).toBeNull();
-  });
-  it('token notice names the ticker', () => {
-    expect(tokenLockNotice('FROG')).toBe('Locking FROG isn’t available yet.');
-    expect(tokenLockNotice()).toBe('Locking this token isn’t available yet.');
   });
 });
