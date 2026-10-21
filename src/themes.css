@@ -799,6 +799,8 @@
     [style*='background-color: rgb(13, 6, 6)'],
     [style*='background: rgb(14, 14, 14)'],
     [style*='background-color: rgb(14, 14, 14)'],
+    [style*='background: rgb(14, 21, 48)'],
+    [style*='background-color: rgb(14, 21, 48)'],
     [style*='background: rgb(14, 23, 48)'],
     [style*='background-color: rgb(14, 23, 48)'],
     [style*='background: rgb(15, 10, 7)'],
@@ -1143,6 +1145,8 @@
     [style*='background-color: rgb(61, 61, 61)'],
     [style*='background: rgb(68, 68, 68)'],
     [style*='background-color: rgb(68, 68, 68)'],
+    [style*='background: rgb(7, 11, 26)'],
+    [style*='background-color: rgb(7, 11, 26)'],
     [style*='background: rgb(7, 17, 12)'],
     [style*='background-color: rgb(7, 17, 12)'],
     [style*='background: rgb(7, 4, 15)'],
@@ -1295,6 +1299,22 @@
 :root[data-bw-theme='npgx'] :is(h1, h2) {
   letter-spacing: 0.04em;
   text-shadow: 0 0 10px rgb(255 45 58 / 0.55);
+}
+/* bDojoX: bdojox.com's navy (#070b1a) with its blue and red washes, blue hairlines (free edition). */
+:root[data-bw-theme='bdojox'] body {
+  background-color: #070b1a;
+  background-image:
+    radial-gradient(120% 60% at 100% 0%, rgb(58 107 240 / 0.16), transparent 60%),
+    radial-gradient(90% 50% at 0% 100%, rgb(224 38 47 / 0.08), transparent 60%);
+  background-attachment: fixed;
+}
+:root[data-bw-theme='bdojox'] .bw-wcard-face.is-themed {
+  box-shadow:
+    0 0 20px rgb(58 107 240 / 0.25),
+    inset 0 0 0 1px var(--bw-trim);
+}
+:root[data-bw-theme='bdojox'] :is(h1, h2) {
+  letter-spacing: 0.02em;
 }
 
 /* Media player on light packs (owner, 16 Oct 2026): track titles over the VexVoid stills banner were dark ink on
