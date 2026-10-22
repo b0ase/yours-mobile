@@ -2,7 +2,7 @@ import { lazy, Suspense, useState } from 'react';
 import { BgVideo } from './BgVideo';
 import { useBgVideo } from './lib/bgVideo';
 import { createPortal } from 'react-dom';
-import { Link, Navigate, NavLink, Route, Routes, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, NavLink, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { setAgentDraft } from '../agent/handoff';
 import { mintTilesShown, MintSheet } from '../mint/MintButton';
@@ -203,6 +203,7 @@ const Landing = ({ owner }: { owner: boolean }) => {
 /** /m/bmint/mint/<type>: the existing flow for that type, over the hub. Closing returns to the hub. */
 const MintOpen = ({ owner }: { owner: boolean }) => {
   const { type = '' } = useParams();
+  const [params] = useSearchParams();
   const navigate = useNavigate();
   // A file dropped on the hero (lib/drop.ts), taken once so a later open starts empty.
   const [file] = useState(takeHandOff);
@@ -213,7 +214,13 @@ const MintOpen = ({ owner }: { owner: boolean }) => {
     ) : type === 'handle' && !STORE_BUILD ? (
       <HandleFlow onClose={close} />
     ) : (
-      <MintSheet exchangeRate={0} start={type} file={file} onClose={close} />
+      <MintSheet
+        exchangeRate={0}
+        start={type}
+        file={file}
+        domain={type === 'domain' ? (params.get('d') ?? undefined) : undefined}
+        onClose={close}
+      />
     );
   return (
     <>

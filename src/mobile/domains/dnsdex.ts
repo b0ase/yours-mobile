@@ -49,6 +49,14 @@ export function normaliseDomain(input: string): NormalisedDomain {
   return { ok: true, domain: host };
 }
 
+/** The deep link's ?d= (dns-dex.com "Tokenize with bWalletX"): the cleaned domain, or the raw text with its error. */
+export function prefillDomain(raw: string | null | undefined): { value: string; error: string } {
+  const text = (raw ?? '').trim();
+  if (!text) return { value: '', error: '' };
+  const n = normaliseDomain(text);
+  return n.ok ? { value: n.domain, error: '' } : { value: text, error: n.error };
+}
+
 /** A ticker that passes the token form's rule (capitals, digits, - _ ; max 32): example.com → EXAMPLE-COM. */
 export const suggestDomainTicker = (domain: string) => {
   const t = domain

@@ -160,10 +160,13 @@ export const MintSheet = ({
   onClose,
   start,
   file,
+  domain,
 }: {
   exchangeRate: number;
   onClose: () => void;
   start?: string;
+  /** start='domain' only: the domain the deep link carried (/m/mint/domain?d=…). */
+  domain?: string;
   /** A file already chosen (bMint's drop zone): the media step opens with it picked, through the same checks. */
   file?: File | null;
 }) => {
@@ -526,7 +529,12 @@ export const MintSheet = ({
         )}
 
         {step === 'domain' && CHOICES.has('token') && (
-          <DomainMint exchangeRate={exchangeRate} onBack={() => setStep('choose')} onClose={onClose} />
+          <DomainMint
+            exchangeRate={exchangeRate}
+            onBack={() => setStep('choose')}
+            onClose={onClose}
+            initialDomain={domain}
+          />
         )}
 
         {step === 'media' && (

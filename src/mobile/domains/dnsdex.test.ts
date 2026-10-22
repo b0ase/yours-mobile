@@ -21,6 +21,7 @@ import {
   txtMatches,
   txtText,
   type DomainSigner,
+  prefillDomain,
 } from './dnsdex';
 
 const ok = (s: string) => {
@@ -231,5 +232,18 @@ describe('pending listings', () => {
   test('garbage or missing storage is empty', () => {
     expect(loadPending({ getItem: () => '{nope', setItem: () => undefined })).toEqual([]);
     expect(loadPending(null)).toEqual([]);
+  });
+});
+
+describe('prefillDomain (the /m/mint/domain?d= deep link)', () => {
+  test('a valid domain is cleaned', () => {
+    expect(prefillDomain('https://Example.COM/x')).toEqual({ value: 'example.com', error: '' });
+  });
+  test('an invalid one keeps the raw text with the normal error', () => {
+    expect(prefillDomain('localhost')).toEqual({ value: 'localhost', error: 'Use a public domain name.' });
+  });
+  test('missing or blank is empty, no error', () => {
+    expect(prefillDomain(null)).toEqual({ value: '', error: '' });
+    expect(prefillDomain('  ')).toEqual({ value: '', error: '' });
   });
 });

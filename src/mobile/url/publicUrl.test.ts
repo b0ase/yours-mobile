@@ -89,6 +89,10 @@ describe('wallet pages under /wallet', () => {
     expect(toPublic(`/m/nfts/${op}`, '')).toBe(`/wallet/nfts/${op}`);
     expect(toRouter(`/wallet/nfts/${op}`, '')).toBe(`/m/nfts/${op}`);
   });
+  test('dns-dex deep link /m/mint/domain?d= opens in the router with its query', () => {
+    expect(toRouter('/m/mint/domain', '?d=example.com')).toBe('/m/mint/domain?d=example.com');
+    expect(toRouter('/mint/domain', '?d=example.com')).toBe('/m/mint/domain?d=example.com');
+  });
   test('bMint OpNS names: /bmint/opns round trip, keeps ?mint=', () => {
     expect(toPublic('/m/bmint/opns', '?mint=a,b')).toBe('/bmint/opns?mint=a%2Cb');
     expect(toRouter('/bmint/opns', '?mint=a,b')).toBe('/m/bmint/opns?mint=a,b');

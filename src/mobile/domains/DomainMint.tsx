@@ -13,6 +13,7 @@ import {
   loadPending,
   lookupTxt,
   normaliseDomain,
+  prefillDomain,
   registerDomain,
   removePending,
   savePending,
@@ -42,19 +43,23 @@ export const DomainMint = ({
   exchangeRate,
   onBack,
   onClose,
+  initialDomain,
 }: {
   exchangeRate: number;
   onBack: () => void;
   onClose: () => void;
+  /** From the /m/mint/domain?d= deep link: fills the field; the user still presses Get my DNS record. */
+  initialDomain?: string;
 }) => {
   const { apiContext } = useServiceContext();
   const { handleSelect } = useBottomMenu();
   const signer = useMemo(() => walletDomainSigner(apiContext), [apiContext]);
+  const [prefill] = useState(() => prefillDomain(initialDomain));
   const [view, setView] = useState<View>({ at: 'enter' });
-  const [domainInput, setDomainInput] = useState('');
+  const [domainInput, setDomainInput] = useState(prefill.value);
   const [pending, setPending] = useState<PendingListing[]>(() => loadPending());
   const [busy, setBusy] = useState('');
-  const [error, setError] = useState('');
+  const [error, setError] = useState(prefill.error);
   const [notYet, setNotYet] = useState(false);
 
   const input = 'w-full rounded-xl px-3 py-2 text-sm outline-none border bg-transparent';
