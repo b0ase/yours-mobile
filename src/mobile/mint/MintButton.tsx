@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useBackClose } from '../backStack';
 import { createPortal } from 'react-dom';
 import { listOrdinals } from '@1sat/actions';
@@ -6,6 +6,7 @@ import { mintMedia } from './mintMedia';
 import {
   AppWindow,
   BookOpen,
+  Bot,
   Box,
   Clapperboard,
   Coins,
@@ -15,6 +16,7 @@ import {
   Globe,
   Image as ImageIcon,
   LineChart,
+  Link as LinkIcon,
   Music,
   Sparkles,
   Ticket,
@@ -22,6 +24,9 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { setAgentDraft } from '../agent/handoff';
+import { openAgentCreate } from '../agents/agentCreate';
+import { BottomMenuContext } from '../../contexts/BottomMenuContext';
+import { routeFor } from '../tabs/tabs';
 import { isBWalletX } from '../storeBuild';
 import { SendConfirmation } from '../../components/SendConfirmation';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -29,6 +34,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { getOutputName } from '../../utils/format';
 import { TicketMint } from '../tickets/TicketMint';
 import { TokenMint } from '../tokens/TokenMint';
+import { DomainMint } from '../domains/DomainMint';
 import { mintChoicesFor } from '../storeBuild';
 
 /** Store build: media (NFT) only (storeBuild.ts). */
@@ -66,6 +72,18 @@ import {
   validateKindFields,
   type MintKind,
 } from './mintKinds';
+import { MINT_SOURCES, mintSource, type MintSourceId } from './mintSources';
+import { FaFacebook, FaInstagram, FaLinkedin, FaSoundcloud, FaTiktok, FaXTwitter, FaYoutube } from 'react-icons/fa6';
+
+const SOURCE_ICONS: Record<MintSourceId, typeof FaYoutube> = {
+  youtube: FaYoutube,
+  x: FaXTwitter,
+  instagram: FaInstagram,
+  tiktok: FaTiktok,
+  facebook: FaFacebook,
+  linkedin: FaLinkedin,
+  soundcloud: FaSoundcloud,
+};
 
 /** Cover / poster picture: a small JPEG so the companion inscription stays cheap. */
 const POSTER_EDGE = 512;
@@ -103,7 +121,7 @@ const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#17191E';
 const BORDER = '#3a2f0c';
 
-type Step = 'choose' | 'ticket' | 'token' | 'media' | 'done';
+type Step = 'choose' | 'ticket' | 'token' | 'domain' | 'media' | 'done';
 /** `type` is the content type to inscribe (3D: from magic bytes, not the browser's guess). */
 type Picked = { file: File; url: string; type: string };
 
@@ -146,10 +164,13 @@ export const MintSheet = ({
   onClose,
   start,
   file,
+  domain,
 }: {
   exchangeRate: number;
   onClose: () => void;
   start?: string;
+  /** start='domain' only: the domain the deep link carried (/m/mint/domain?d=…). */
+  domain?: string;
   /** A file already chosen (bMint's drop zone): the media step opens with it picked, through the same checks. */
   file?: File | null;
 }) => {
@@ -159,6 +180,18 @@ export const MintSheet = ({
   const startTile = start ? MINT_TILES.find((t) => t.id === start && t.when() && (t.media || t.step)) : undefined;
   const [step, setStep] = useState<Step>(startTile ? (startTile.media ? 'media' : startTile.step!) : 'choose');
   const navigate = useNavigate();
+  const selectTab = useContext(BottomMenuContext)?.handleSelect;
+  // An agent account: close this sheet, then Settings › Add account with the Agent switch on.
+  const openElsewhere = () => {
+    onClose();
+    openAgentCreate(selectTab, navigate, routeFor('settings'));
+  };
+  // The bMint hub links /m/bmint/mint/agent-account: hand straight over.
+  useEffect(() => {
+    if (start && MINT_TILES.some((t) => t.id === start && t.when() && t.opens)) openElsewhere();
+    // Once, on open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // What the media step accepts and calls itself, set by the tile that opened it.
   const [media, setMedia] = useState<{ accept: string; label: string }>(
     startTile?.media ?? {
@@ -168,6 +201,7 @@ export const MintSheet = ({
   );
   const [picked, setPicked] = useState<Picked | null>(null);
   const [kindSel, setKindSel] = useState<MintKind | null>(startTile?.kind ?? null);
+  const [source, setSource] = useState<MintSourceId | null>(null);
   const [artist, setArtist] = useState('');
   const [album, setAlbum] = useState('');
   const [track, setTrack] = useState('');
@@ -237,6 +271,24 @@ export const MintSheet = ({
       return f ? { file: f, url: URL.createObjectURL(f) } : null;
     });
   };
+
+  const openTile = (t: MintTile) => {
+    if (t.media) {
+      setMedia(t.media);
+      setKindSel(t.kind ?? null);
+      setStep('media');
+    } else if (t.step) setStep(t.step);
+    else if (t.opens) openElsewhere();
+    else if (t.agent) {
+      setAgentDraft(t.agent);
+      onClose();
+      navigate('/m/ask-b');
+    }
+  };
+  // A platform's "Pick the file" opens the same media tile as tapping it (its type); platforms whose type has no
+  // visible tile are not shown.
+  const tileForKind = (kind: MintKind) => MINT_TILES.find((t) => t.when() && t.media && t.kind === kind);
+  const sources = MINT_SOURCES.filter((s) => tileForKind(s.kind));
 
   const pick = async (file: File | undefined) => {
     setFileError('');
@@ -400,11 +452,13 @@ export const MintSheet = ({
               ? 'Mint tickets'
               : step === 'token'
                 ? 'Mint a token'
-                : step === 'choose'
-                  ? 'Mint'
-                  : step === 'done'
-                    ? 'Minted'
-                    : 'Mint'}
+                : step === 'domain'
+                  ? 'Tokenise a domain'
+                  : step === 'choose'
+                    ? 'Mint'
+                    : step === 'done'
+                      ? 'Minted'
+                      : 'Mint'}
           </span>
           <button type="button" onClick={onClose} className="bg-transparent border-0 cursor-pointer" aria-label="Close">
             <X size={20} color="#aaa" />
@@ -417,26 +471,67 @@ export const MintSheet = ({
               What do you want to make? Everything you mint is yours on chain: sell it, send it, or let people collect
               it.
             </p>
+            {sources.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <span className="text-xs font-bold" style={{ color: '#ccc' }}>
+                  Mint what you already post
+                </span>
+                <div className="flex gap-2 overflow-x-auto pb-1" role="group" aria-label="Mint what you already post">
+                  {sources.map((s) => {
+                    const Icon = SOURCE_ICONS[s.id];
+                    const on = source === s.id;
+                    return (
+                      <button
+                        key={s.id}
+                        type="button"
+                        aria-pressed={on}
+                        aria-label={`How to mint from ${s.label}`}
+                        onClick={() => setSource(on ? null : s.id)}
+                        className="flex shrink-0 flex-col items-center gap-1 rounded-xl border px-3 py-2 cursor-pointer bg-transparent"
+                        style={{ borderColor: on ? GOLD : BORDER, color: on ? GOLD : '#ccc' }}
+                      >
+                        <Icon size={20} aria-hidden="true" />
+                        <span className="text-[11px]">{s.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {source &&
+                  (() => {
+                    const s = mintSource(source)!;
+                    return (
+                      <div
+                        className="flex flex-col gap-2 rounded-xl border p-3"
+                        style={{ borderColor: BORDER }}
+                        aria-live="polite"
+                      >
+                        {s.steps.map((line) => (
+                          <p key={line} className="text-xs m-0" style={{ color: '#ccc' }}>
+                            {line}
+                          </p>
+                        ))}
+                        <p className="text-xs m-0" style={{ color: '#999' }}>
+                          Only mint what you made or own. Menus change now and then.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const t = tileForKind(s.kind);
+                            if (t) openTile(t);
+                          }}
+                          className="self-start rounded-lg px-3 py-2 text-xs font-bold border-0 cursor-pointer"
+                          style={{ background: GOLD, color: '#1a1400' }}
+                        >
+                          Pick the file
+                        </button>
+                      </div>
+                    );
+                  })()}
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-2">
               {MINT_TILES.filter((t) => t.when()).map((t) => (
-                <Tile
-                  key={t.id}
-                  icon={t.icon}
-                  title={t.title}
-                  sub={t.sub}
-                  onClick={() => {
-                    if (t.media) {
-                      setMedia(t.media);
-                      setKindSel(t.kind ?? null);
-                      setStep('media');
-                    } else if (t.step) setStep(t.step);
-                    else if (t.agent) {
-                      setAgentDraft(t.agent);
-                      onClose();
-                      navigate('/m/ask-b');
-                    }
-                  }}
-                />
+                <Tile key={t.id} icon={t.icon} title={t.title} sub={t.sub} onClick={() => openTile(t)} />
               ))}
             </div>
           </div>
@@ -448,6 +543,15 @@ export const MintSheet = ({
 
         {step === 'token' && CHOICES.has('token') && (
           <TokenMint exchangeRate={exchangeRate} onBack={() => setStep('choose')} onClose={onClose} />
+        )}
+
+        {step === 'domain' && CHOICES.has('token') && (
+          <DomainMint
+            exchangeRate={exchangeRate}
+            onBack={() => setStep('choose')}
+            onClose={onClose}
+            initialDomain={domain}
+          />
         )}
 
         {step === 'media' && (
@@ -811,6 +915,8 @@ type MintTile = {
   kind?: MintKind;
   step?: Step;
   agent?: string;
+  /** Opens a flow outside this sheet: 'agent-account' = Account menu › Add agent account (agents/agentCreate.ts). */
+  opens?: 'agent-account';
 };
 
 /**
@@ -884,10 +990,18 @@ const MINT_TILES: MintTile[] = [
   {
     id: 'coin',
     icon: <Coins size={18} />,
-    title: 'A coin or memecoin',
+    title: 'A token or memecoin',
     sub: 'Your own token, fixed supply',
     when: () => CHOICES.has('token'),
     step: 'token',
+  },
+  {
+    id: 'domain',
+    icon: <LinkIcon size={18} />,
+    title: 'A domain',
+    sub: 'Prove you own it, then tokenise it',
+    when: () => CHOICES.has('token'),
+    step: 'domain',
   },
   {
     id: 'contract',
@@ -906,6 +1020,14 @@ const MINT_TILES: MintTile[] = [
     when: () => isBWalletX(),
     agent:
       'Help me create a strategy to mint and sell. Ask me what it should do, which tokens, the budget, when it stops and the price.',
+  },
+  {
+    id: 'agent-account',
+    icon: <Bot size={18} />,
+    title: 'An agent account',
+    sub: 'A wallet account your agent trades from, at machine speed',
+    when: () => isBWalletX(),
+    opens: 'agent-account',
   },
   {
     id: 'app',

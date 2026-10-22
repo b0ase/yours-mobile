@@ -14,6 +14,8 @@ import type {
 } from '@bsv/wallet-toolbox-client';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { confirmUsbForApproval } from '../../services/usbPresence';
+import { SiteThemeOffer } from '../../mobile/theme/SiteThemeOffer';
+import { familySite } from '../../mobile/theme/themeSites';
 
 export type GroupedPermissionRequestProps = {
   request: GroupedPermissionRequestType;
@@ -28,6 +30,7 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
   const [isProcessing, setIsProcessing] = useState(false);
   const [usbError, setUsbError] = useState('');
   const { chromeStorageService } = useServiceContext();
+  const themeAccount = chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey ?? '';
   const { permissions } = request;
 
   // Protocol access lets the app sign with keys derived from your wallet: never pre-ticked (audit C1).
@@ -126,6 +129,9 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
           </p>
         </div>
       </div>
+
+      {/* A family site may offer its colours (mobile/theme/siteTheme.ts): a separate tap, never part of the grant. */}
+      <SiteThemeOffer site={familySite(request.originator)} account={themeAccount} style={{ marginBottom: 12 }} />
 
       {/* Description */}
       <Show when={!!permissions.description}>

@@ -10,6 +10,7 @@ import { onSocialChange, socialReturnWaiting } from '../social/socialLogin';
 import { routeFromQuery, type PushRoute } from './logic';
 import { onPushRoute, syncPush, takeRouteFrom } from './register';
 import { offerAppLink } from '../spaces/inviteLinks';
+import { requestPartnerRequest } from '../placement/partnership/openRequest';
 
 /**
  * App-wide, renders nothing (mounted next to NotifyEngine, vite.config.mobile.ts): keeps this device's
@@ -55,6 +56,8 @@ const PushEngine = () => {
       }
       // space_live: the same path as a bwalletx://space/<slug> link (dropped where Spaces are off).
       if (r.segment === 'space') return offerAppLink(`bwalletx://space/${r.ticker}`);
+      // Shared account request: the Lock page › Partnership shares, scrolled to the request.
+      if (r.segment === 'partner') return requestPartnerRequest(r.ticker, r.id ?? null);
       handleSelect(asMenuItem('chat'));
       requestRoomByTicker(r.ticker, r.segment === 'dms');
     };

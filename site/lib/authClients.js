@@ -19,6 +19,22 @@ const CLIENTS = {
       'https://www.bit-sign.online/auth/bwalletx/callback',
     ],
   },
+  dnsdex: {
+    name: 'DNS DEX',
+    site: 'dns-dex.com',
+    redirectUris: [
+      'https://www.dns-dex.com/api/auth/callback/bwalletx',
+      'https://dns-dex.com/api/auth/callback/bwalletx',
+    ],
+  },
+  clawdex: {
+    name: 'CLAW DEX',
+    site: 'claw-dex.com',
+    redirectUris: [
+      'https://claw-dex.com/api/auth/callback/bwalletx',
+      'https://www.claw-dex.com/api/auth/callback/bwalletx',
+    ],
+  },
   // For developers trying the flow on their own machine. Redirects only ever land on the user's own localhost.
   'local-dev': {
     name: 'Local test app',

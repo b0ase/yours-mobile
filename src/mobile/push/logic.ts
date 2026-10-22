@@ -64,7 +64,9 @@ export const deviceBody = (o: {
 
 /** 'signins' = Settings › Chat › Recent sign-ins (the "New sign-in to bChat" alert); ticker is ''. */
 /** `space`: ticker is the Space slug (push kind space_live → bwalletx://space/<slug>). */
-export type PushRoute = { segment: 'rooms' | 'dms' | 'signins' | 'space'; ticker: string };
+/** `partner`: a partnership's shared account request (kind partner_account_*, url /m/lock); id = the request. */
+export type PushRoute = { segment: 'rooms' | 'dms' | 'signins' | 'space' | 'partner'; ticker: string; id?: string };
+const REQUEST_ID_RE = /^[A-Za-z0-9-]{1,64}$/;
 const SPACE_SLUG_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 const TICKER_RE = /^[A-Z0-9_.-]{1,64}$/;
@@ -90,6 +92,13 @@ export const routeFromData = (data: Record<string, unknown> | null | undefined):
     const slug = fromUrl ?? data.slug;
     return typeof slug === 'string' && SPACE_SLUG_RE.test(slug) ? { segment: 'space', ticker: slug } : null;
   }
+  if ((typeof data.kind === 'string' && data.kind.startsWith('partner_account')) || data.url === '/m/lock') {
+    const t = normTicker(data.ticker);
+    if (!t) return null;
+    return typeof data.id === 'string' && REQUEST_ID_RE.test(data.id)
+      ? { segment: 'partner', ticker: t, id: data.id }
+      : { segment: 'partner', ticker: t };
+  }
   let ticker = normTicker(data.ticker) ?? normTicker(data.room);
   if (!ticker && typeof data.url === 'string') {
     const m = /\/room\/([^/?#]+)/.exec(data.url);
@@ -100,12 +109,16 @@ export const routeFromData = (data: Record<string, unknown> | null | undefined):
 };
 
 /** Web Push click → `?push=dms:ABC` on the page it opens, read back with routeFromQuery. */
-export const routeToQuery = (r: PushRoute) => `push=${r.segment}:${encodeURIComponent(r.ticker)}`;
+export const routeToQuery = (r: PushRoute) =>
+  `push=${r.segment}:${encodeURIComponent(r.ticker)}${r.segment === 'partner' && r.id ? `/${r.id}` : ''}`;
 export const routeFromQuery = (search: string): PushRoute | null => {
   const v = new URLSearchParams(search).get('push');
   if (v === 'signins:' || v === 'signins') return { segment: 'signins', ticker: '' };
   const sp = v ? /^space:([A-Za-z0-9_-]{1,64})$/.exec(v) : null;
   if (sp) return { segment: 'space', ticker: sp[1] };
+  const pa = v ? /^partner:([^/]+)(?:\/([A-Za-z0-9-]{1,64}))?$/.exec(v) : null;
+  const pt = pa ? normTicker(pa[1]) : null;
+  if (pa && pt) return pa[2] ? { segment: 'partner', ticker: pt, id: pa[2] } : { segment: 'partner', ticker: pt };
   const m = v ? /^(rooms|dms):(.+)$/.exec(v) : null;
   const ticker = m ? normTicker(m[2]) : null;
   return m && ticker ? { segment: m[1] as PushRoute['segment'], ticker } : null;

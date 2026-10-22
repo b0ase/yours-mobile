@@ -24,25 +24,29 @@
 //
 // Pure: no network, no keys held (signers are passed in). Tests: partnerLock.test.ts.
 import { BSV21 } from '@1sat/templates';
-import {
-  Hash,
-  LockingScript,
-  OP,
-  P2PKH,
-  PublicKey,
-  Script,
-  Signature,
-  Spend,
-  Transaction,
-  TransactionSignature,
-  UnlockingScript,
-  Utils,
-} from '@bsv/sdk';
+import { LockingScript, OP, P2PKH, PublicKey, Script, Transaction, UnlockingScript, Utils } from '@bsv/sdk';
+import { proposalTx, sighash } from './multisig';
+
+// The signing engine lives in multisig.ts (shared with the partnership's shared account); re-exported here so
+// Partnership shares callers keep one import.
+export {
+  SCOPE,
+  addSignatures,
+  finalize,
+  inputsFor,
+  isReady,
+  mergeSignatures,
+  progress,
+  proposalTx,
+  sighash,
+  signedBy,
+  toChecksig,
+  waitingOn,
+} from './multisig';
 
 /** BRC-100 protocol for partner lock keys: getPublicKey/createSignature, keyID = partnership id, counterparty 'self'. */
 export const PARTNER_LOCK_PROTOCOL: [2, string] = [2, 'bwx partnership'];
 export const MAX_PARTNER_KEYS = 16;
-export const SCOPE = TransactionSignature.SIGHASH_ALL | TransactionSignature.SIGHASH_FORKID;
 /** Fee rate for proposals (sats per kB). The fee input is exact; no change output. */
 export const FEE_RATE_SATS_PER_KB = 100;
 export const MIN_FEE_SATS = 50;
@@ -255,142 +259,6 @@ export async function propose(
     fee: { index: feeIndex, pubKey: fee.pubKey.toLowerCase(), sig: Utils.toHex(feeSig) },
     sigs: {},
   };
-}
-
-export const proposalTx = (p: PartnerProposal) => Transaction.fromHexEF(p.txEF);
-
-function preimage(tx: Transaction, i: number): number[] {
-  const input = tx.inputs[i];
-  const out = input.sourceTransaction?.outputs[input.sourceOutputIndex];
-  const sourceTXID = input.sourceTXID ?? input.sourceTransaction?.id('hex');
-  if (!out || !sourceTXID) throw new Error('Input needs its source');
-  return TransactionSignature.format({
-    sourceTXID,
-    sourceOutputIndex: input.sourceOutputIndex,
-    sourceSatoshis: out.satoshis!,
-    transactionVersion: tx.version,
-    otherInputs: tx.inputs.filter((_, j) => j !== i),
-    outputs: tx.outputs,
-    inputIndex: i,
-    subscript: out.lockingScript,
-    inputSequence: input.sequence ?? 0xffffffff,
-    lockTime: tx.lockTime,
-    scope: SCOPE,
-  });
-}
-
-/** The digest a partner signs for input i (sha256d of the BIP143 preimage) — pass as hashToDirectlySign. */
-export const sighash = (tx: Transaction, i: number) => Hash.sha256(Hash.sha256(preimage(tx, i)));
-
-/** DER signature over a digest → checksig format (DER + sighash byte). */
-export const toChecksig = (der: number[]) => {
-  const s = Signature.fromDER(der);
-  return new TransactionSignature(s.r, s.s, SCOPE).toChecksigFormat();
-};
-
-function sigValid(tx: Transaction, i: number, pubKey: string, checksigHex: string): boolean {
-  try {
-    const bytes = Utils.toArray(checksigHex, 'hex');
-    if (bytes[bytes.length - 1] !== SCOPE) return false;
-    const ts = TransactionSignature.fromChecksigFormat(bytes);
-    return PublicKey.fromString(pubKey).verify(Hash.sha256(preimage(tx, i)), ts);
-  } catch {
-    return false;
-  }
-}
-
-/** Which locked inputs a partner key can sign on this proposal. */
-export const inputsFor = (p: PartnerProposal, pubKey: string) =>
-  p.locked.filter((l) => l.pubKeys.includes(pubKey.toLowerCase())).map((l) => l.index);
-
-/**
- * Adds one partner's signatures (input index → checksig hex). Every signature is checked against the transaction
- * and the key; a bad one throws and nothing is added. Returns a new proposal.
- */
-export function addSignatures(p: PartnerProposal, pubKey: string, sigs: Record<number, string>): PartnerProposal {
-  const key = pubKey.toLowerCase();
-  const tx = proposalTx(p);
-  const next: PartnerProposal = {
-    ...p,
-    sigs: Object.fromEntries(Object.entries(p.sigs).map(([k, v]) => [k, { ...v }])),
-  };
-  for (const [idx, sig] of Object.entries(sigs)) {
-    const i = Number(idx);
-    const l = p.locked.find((x) => x.index === i);
-    if (!l) throw new Error(`Input ${i} is not a locked holding`);
-    if (!l.pubKeys.includes(key)) throw new Error('That key is not one of these partners');
-    if (!sigValid(tx, i, key, sig)) throw new Error('That signature does not match this transaction');
-    next.sigs[String(i)] = { ...(next.sigs[String(i)] ?? {}), [key]: sig.toLowerCase() };
-  }
-  return next;
-}
-
-/** Valid signatures per locked input vs what each needs. */
-export function progress(p: PartnerProposal): { index: number; have: number; need: number }[] {
-  const tx = proposalTx(p);
-  return p.locked.map((l) => ({
-    index: l.index,
-    need: l.m,
-    have: l.pubKeys.filter((k) => {
-      const s = p.sigs[String(l.index)]?.[k];
-      return !!s && sigValid(tx, l.index, k, s);
-    }).length,
-  }));
-}
-export const isReady = (p: PartnerProposal) => progress(p).every((x) => x.have >= x.need);
-/** Partner keys that haven't signed every input they can sign yet ("Signature needed"). */
-export const waitingOn = (p: PartnerProposal) => {
-  const all = [...new Set(p.locked.flatMap((l) => l.pubKeys))];
-  return all.filter((k) => inputsFor(p, k).some((i) => !p.sigs[String(i)]?.[k]));
-};
-
-/**
- * The broadcastable transaction. Refuses with too few signatures. Signatures go in key order (CHECKMULTISIG needs
- * the script's order); each input is run through the interpreter before the hex is returned.
- */
-export function finalize(p: PartnerProposal): { rawTx: string; txid: string } {
-  const prog = progress(p);
-  const short = prog.filter((x) => x.have < x.need);
-  if (short.length)
-    throw new Error(
-      `Not enough partner signatures yet: ${short.map((x) => `${x.have} of ${x.need}`).join(', ')}. Nothing was broadcast.`,
-    );
-  const tx = proposalTx(p);
-  for (const l of p.locked) {
-    const s = new Script().writeOpCode(OP.OP_0);
-    let n = 0;
-    for (const k of l.pubKeys) {
-      const sig = p.sigs[String(l.index)]?.[k];
-      if (n < l.m && sig && sigValid(tx, l.index, k, sig)) {
-        s.writeBin(Utils.toArray(sig, 'hex'));
-        n++;
-      }
-    }
-    tx.inputs[l.index].unlockingScript = new UnlockingScript(s.chunks);
-  }
-  if (!sigValid(tx, p.fee.index, p.fee.pubKey, p.fee.sig)) throw new Error('The fee signature does not match');
-  tx.inputs[p.fee.index].unlockingScript = new UnlockingScript(
-    new Script().writeBin(Utils.toArray(p.fee.sig, 'hex')).writeBin(Utils.toArray(p.fee.pubKey, 'hex')).chunks,
-  );
-  for (let i = 0; i < tx.inputs.length; i++) {
-    const input = tx.inputs[i];
-    const out = input.sourceTransaction!.outputs[input.sourceOutputIndex];
-    const ok = new Spend({
-      sourceTXID: input.sourceTXID ?? input.sourceTransaction!.id('hex'),
-      sourceOutputIndex: input.sourceOutputIndex,
-      sourceSatoshis: out.satoshis!,
-      lockingScript: out.lockingScript,
-      transactionVersion: tx.version,
-      otherInputs: tx.inputs.filter((_, j) => j !== i),
-      outputs: tx.outputs,
-      inputIndex: i,
-      unlockingScript: input.unlockingScript!,
-      inputSequence: input.sequence ?? 0xffffffff,
-      lockTime: tx.lockTime,
-    }).validate();
-    if (!ok) throw new Error(`Input ${i} failed the local script check. Nothing was broadcast.`);
-  }
-  return { rawTx: tx.toHex(), txid: tx.id('hex') };
 }
 
 /** Proposals travel as JSON (bit-sign pending approvals, or any channel if our server is down). */

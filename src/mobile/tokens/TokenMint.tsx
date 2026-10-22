@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ExternalLink } from 'lucide-react';
+import type { LockingScript } from '@bsv/sdk';
 import { SendConfirmation } from '../../components/SendConfirmation';
 import { showOnWallet } from './indexFund';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -29,16 +30,25 @@ export const TokenMint = ({
   exchangeRate,
   onBack,
   onClose,
+  initial,
+  map,
+  onMinted,
 }: {
   exchangeRate: number;
   onBack: () => void;
   onClose: () => void;
+  /** Pre-filled fields (Mint › A domain). A given ticker counts as chosen: renaming won't overwrite it. */
+  initial?: Partial<TokenForm>;
+  /** Extra MAP tag on the deploy tx. */
+  map?: { script: LockingScript; description: string };
+  /** When set, called with the minted token instead of showing this form's own "minted" screen. */
+  onMinted?: (token: MintedToken) => void;
 }) => {
   const { apiContext, chromeStorageService } = useServiceContext();
   const { theme } = useTheme();
   const { handleSelect } = useBottomMenu();
-  const [form, setForm] = useState<TokenForm>(emptyTokenForm);
-  const [tickerTouched, setTickerTouched] = useState(false);
+  const [form, setForm] = useState<TokenForm>(() => ({ ...emptyTokenForm(), ...initial }));
+  const [tickerTouched, setTickerTouched] = useState(!!initial?.ticker);
   const [icon, setIcon] = useState<{ file: File; url: string } | null>(null);
   const [error, setError] = useState('');
   const [confirming, setConfirming] = useState(false);
@@ -87,10 +97,18 @@ export const TokenMint = ({
     setBusy('Minting…');
     try {
       const iconOutpoint = icon ? await inscribeIcon(apiContext, icon.file, form.ticker.trim(), 'token') : null;
-      const token = await deployToken(apiContext, form, { icon: iconOutpoint, feeSats: cost.feeSats });
+      const token = await deployToken(apiContext, form, {
+        icon: iconOutpoint,
+        feeSats: cost.feeSats,
+        ...(map ? { map } : {}),
+      });
       void showOnWallet(chromeStorageService, token.tokenId);
       setConfirming(false);
       notifyMinted();
+      if (onMinted) {
+        void openTokenRoom(apiContext, token).catch(() => null);
+        return onMinted(token);
+      }
       setBusy('Opening the room…');
       // A just-deployed token may not be indexed yet; opening the room from Chat also creates it.
       const room = await openTokenRoom(apiContext, token).catch(() => null);

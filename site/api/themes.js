@@ -1,8 +1,10 @@
 // Theme Store catalog (read-only, docs/THEME-STORE-PLAN.md step 2). GET /api/themes[?tier=free|premium|holder|edition]
 // Serves site/lib/themes.json: the bundled packs in the bwx-theme/1 format (src/mobile/theme/themePack.ts), kept
 // equal to the wallet's own packs by src/mobile/theme/themePack.test.ts. No payments, no writes, no secrets.
+// GET /api/theme-sites (rewritten to ?list=sites) serves the family sites that may offer a theme (site/lib/themeSites.js).
 'use strict';
 const catalog = require('../lib/themes.json');
+const { THEME_SITES } = require('../lib/themeSites');
 
 const TIERS = new Set(['free', 'premium', 'holder', 'edition']);
 
@@ -18,7 +20,13 @@ module.exports = function handler(req, res) {
     res.statusCode = 405;
     return res.end(JSON.stringify({ error: 'method-not-allowed' }));
   }
-  const tier = new URL(req.url || '/', 'http://x').searchParams.get('tier');
+  const q = new URL(req.url || '/', 'http://x').searchParams;
+  if (q.get('list') === 'sites') {
+    res.statusCode = 200;
+    res.setHeader('Cache-Control', 'public, max-age=300, s-maxage=3600');
+    return res.end(JSON.stringify({ sites: THEME_SITES }));
+  }
+  const tier = q.get('tier');
   if (tier && !TIERS.has(tier)) {
     res.statusCode = 400;
     return res.end(JSON.stringify({ error: 'bad-tier' }));
