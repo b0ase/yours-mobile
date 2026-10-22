@@ -33,6 +33,7 @@ import { normalizePhrase, phraseProblem, restoreErrorMessage } from './restoreHe
 import { clearHelpDeskUnpin } from '../../mobile/chat/helpDeskPin';
 import { PasskeyRestoreRow } from '../../mobile/passkey/PasskeyBackup';
 import { ExtPasskeyRow } from '../../mobile/passkey/ExtPasskeyRow';
+import { EXT_PASSKEY_LIVE } from '../../mobile/passkey/extHandoff';
 import { IS_EXTENSION } from '../../mobile/extension';
 import { SEEDLESS_ENABLED } from '../../mobile/passkey/prf';
 import { PasskeyCreatePanel, PasskeyUnlockButton } from '../../mobile/passkey/PasskeyCreate';
@@ -493,7 +494,7 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
       )}
       {/* Prototype, VITE_SEEDLESS=1 only: the passkey opens the sealed 12 words, then the normal restore
       form runs from its name + password step (as the JSON backup upload does). */}
-      {SEEDLESS_ENABLED && IS_EXTENSION && (
+      {SEEDLESS_ENABLED && IS_EXTENSION && EXT_PASSKEY_LIVE && (
         <ExtPasskeyRow
           onWallet={(words, name) => {
             // The words came from web.bwalletx.com after the person typed the one-time code and said yes. From here

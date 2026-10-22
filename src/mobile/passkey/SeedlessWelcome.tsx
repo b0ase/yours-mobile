@@ -23,7 +23,7 @@ import {
 import { usePasskeyBackupAvailable } from './passkeyUi';
 import { OpenOnComputerPanel } from './OpenOnComputer';
 import { armRestorePing } from './openHere';
-import { HANDOFF_ENABLED, parseHandoffSearch } from './extHandoff';
+import { EXT_PASSKEY_LIVE, HANDOFF_ENABLED, parseHandoffSearch } from './extHandoff';
 import { IS_EXTENSION } from '../extension';
 import { ExtHandoffSend } from './ExtHandoffSend';
 
@@ -215,7 +215,7 @@ export const SeedlessWelcome = () => {
           Continue with a passkey
         </button>
       )}
-      {IS_EXTENSION && HANDOFF_ENABLED && !passkeyOk && (
+      {IS_EXTENSION && HANDOFF_ENABLED && EXT_PASSKEY_LIVE && !passkeyOk && (
         // The extension cannot use a bwalletx.com passkey itself: this goes to the restore screen's "Sign in with a
         // passkey", which opens web.bwalletx.com and hands the wallet back (notes/extension-passkey-handoff.md).
         <button
