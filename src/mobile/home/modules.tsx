@@ -266,42 +266,44 @@ export const MusicModule = () => {
 // ── Apps Suite ────────────────────────────────────────────────────────────────────────────────────────────────────
 
 const BAPPS = [
-  { name: 'bChatX', url: 'https://bchatx.com', emoji: '💬' },
-  { name: 'bMoneyX', url: 'https://web.bwalletx.com', emoji: '💰' },
-  { name: 'bMintX', url: 'https://bwalletx.com/mint', emoji: '🪙' },
-  { name: 'bMoviesX', url: 'https://bmovies.app', emoji: '🎬' },
-  { name: 'bMusicX', url: 'https://bmusic.app', emoji: '🎵' },
-  { name: 'bWriterX', url: 'https://bitcoin-writer.com', emoji: '✍️' },
-  { name: 'bMailX', url: 'https://bmail.app', emoji: '📧' },
-  { name: 'bNewsX', url: 'https://bnewsx.com', emoji: '📰' },
-  { name: 'bJobsX', url: 'https://bjobsx.com', emoji: '💼' },
-  { name: 'bSharesX', url: 'https://bsharesx.com', emoji: '📊' },
+  { name: 'bChatX', url: 'https://bchatx.com', desc: 'Social', accent: '#FF6B9D' },
+  { name: 'bMoneyX', url: 'https://web.bwalletx.com', desc: 'Finance', accent: '#4F46E5' },
+  { name: 'bMintX', url: 'https://bwalletx.com/mint', desc: 'Create', accent: '#F59E0B' },
+  { name: 'bMoviesX', url: 'https://bmovies.app', desc: 'Movies', accent: '#8B5CF6' },
+  { name: 'bMusicX', url: 'https://bmusic.app', desc: 'Music', accent: '#EC4899' },
+  { name: 'bWriterX', url: 'https://bitcoin-writer.com', desc: 'Writing', accent: '#06B6D4' },
+  { name: 'bMailX', url: 'https://bmail.app', desc: 'Email', accent: '#10B981' },
+  { name: 'bNewsX', url: 'https://bnewsx.com', desc: 'News', accent: '#EF4444' },
+  { name: 'bJobsX', url: 'https://bjobsx.com', desc: 'Jobs', accent: '#3B82F6' },
+  { name: 'bSharesX', url: 'https://bsharesx.com', desc: 'Shares', accent: '#14B8A6' },
 ];
 
 export const AppsSuiteModule = () => {
-  const navigate = useNavigate();
   return (
-    <Panel title="b Apps" icon={<span className="bw-home-ico">🚀</span>}>
-      <div className="grid grid-cols-3 gap-2">
+    <Panel title="b Apps">
+      <div className="grid grid-cols-2 gap-3">
         {BAPPS.map((app) => (
           <a
             key={app.name}
             href={app.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex flex-col items-center justify-center p-3 rounded-xl hover:opacity-80 transition-opacity"
+            className="flex flex-col p-4 rounded-2xl hover:scale-105 transition-transform duration-200"
             style={{
-              background: 'rgba(245, 184, 0, 0.08)',
-              border: '1px solid rgba(245, 184, 0, 0.2)',
+              background: `linear-gradient(135deg, ${app.accent}12 0%, ${app.accent}08 100%)`,
+              border: `1.5px solid ${app.accent}20`,
             }}
           >
-            <div className="text-2xl mb-1">{app.emoji}</div>
-            <div className="text-[10px] font-semibold text-center text-white leading-tight">{app.name}</div>
+            <div className="w-10 h-10 rounded-xl mb-3" style={{ background: `${app.accent}20` }} />
+            <h3 className="font-semibold text-sm text-white">{app.name}</h3>
+            <p className="text-xs mt-1" style={{ color: `${app.accent}CC` }}>
+              {app.desc}
+            </p>
           </a>
         ))}
       </div>
-      <p className="text-xs mt-3" style={{ color: '#8a8f98' }}>
-        Tap any app to open it. More coming soon.
+      <p className="text-xs mt-4" style={{ color: '#8a8f98' }}>
+        Jump to any b App. Open in a new window to keep using your wallet.
       </p>
     </Panel>
   );
