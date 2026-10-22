@@ -220,7 +220,7 @@ export const SeedlessWelcome = () => {
         // passkey", which opens web.bwalletx.com and hands the wallet back (notes/extension-passkey-handoff.md).
         <button
           type="button"
-          onClick={() => navigate('/restore-wallet')}
+          onClick={() => navigate('/restore-wallet?passkey=start')}
           data-testid="welcome-ext-passkey"
           className="w-full rounded-xl h-11 text-sm font-bold tracking-wide flex items-center justify-center gap-2 border-0 cursor-pointer"
           style={{
@@ -229,7 +229,7 @@ export const SeedlessWelcome = () => {
           }}
         >
           <Fingerprint size={16} />
-          Sign in with a passkey
+          Continue with a passkey
         </button>
       )}
       {passkeyOk && (

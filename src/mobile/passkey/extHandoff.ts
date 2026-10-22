@@ -27,7 +27,7 @@ export const HANDOFF_ENABLED: boolean = import.meta.env.VITE_SEEDLESS === '1' &&
  * launch on web.bwalletx.com (owner, 22 Oct 2026): the hand-off needs the web side, and with it off the button led to
  * a dead end. Turn on together with VITE_SEEDLESS on the web build.
  */
-export const EXT_PASSKEY_LIVE = false;
+export const EXT_PASSKEY_LIVE = true;
 
 /** The only page allowed to hand a wallet to the extension. Exact match, never a wildcard over *.bwalletx.com. */
 export const HANDOFF_WEB_ORIGIN = 'https://web.bwalletx.com';

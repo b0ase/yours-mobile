@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Fingerprint } from 'lucide-react';
 import { useTheme } from '../../hooks/useTheme';
 import { clearHandoff, confirmTypedCode, startHandoff, sweepExpiredHandoff } from './extHandoffStore';
@@ -14,9 +14,9 @@ import { normaliseHandoffCode } from './extHandoff';
 type Stage = 'idle' | 'waiting' | 'confirm';
 
 const REASON: Record<string, string> = {
-  none: 'That request has ended. Press Sign in with a passkey to start again.',
-  expired: 'That request timed out. Press Sign in with a passkey to start again.',
-  'wrong-code': "That code didn't match, so the request was cancelled. Press Sign in with a passkey to start again.",
+  none: 'That request has ended. Press Continue with a passkey to start again.',
+  expired: 'That request timed out. Press Continue with a passkey to start again.',
+  'wrong-code': "That code didn't match, so the request was cancelled. Press Continue with a passkey to start again.",
   'not-received': "The browser tab hasn't finished yet. Finish the passkey step there, then type the code.",
   'bad-code': 'Type the 6 digits shown in the browser tab.',
 };
@@ -34,7 +34,14 @@ const closeHandoffTabs = async () => {
   }
 };
 
-export const ExtPasskeyRow = ({ onWallet }: { onWallet: (words: string, name?: string) => void }) => {
+export const ExtPasskeyRow = ({
+  onWallet,
+  autoStart = false,
+}: {
+  onWallet: (words: string, name?: string) => void;
+  /** Opened from the welcome's "Continue with a passkey": open the web tab at once (one press, not two). */
+  autoStart?: boolean;
+}) => {
   const { theme } = useTheme();
   const [stage, setStage] = useState<Stage>('idle');
   const [code, setCode] = useState('');
@@ -65,6 +72,13 @@ export const ExtPasskeyRow = ({ onWallet }: { onWallet: (words: string, name?: s
       setError("Couldn't open the browser tab. Try again, or restore with your 12 words.");
     }
   };
+
+  const started = useRef(false);
+  useEffect(() => {
+    if (!autoStart || started.current) return;
+    started.current = true;
+    void start();
+  }, [autoStart]);
 
   const check = async () => {
     setError('');
@@ -140,17 +154,17 @@ export const ExtPasskeyRow = ({ onWallet }: { onWallet: (words: string, name?: s
         </span>
         <span className="flex-1 flex flex-col text-left">
           <span className="text-sm font-semibold" style={{ color: contrast }}>
-            Sign in with a passkey
+            Continue with a passkey
           </span>
           <span className="text-xs" style={{ color: gray }}>
-            Opens web.bwalletx.com in a new tab
+            New or existing wallet: opens web.bwalletx.com in a new tab
           </span>
         </span>
       </button>
       {stage === 'waiting' && (
         <div className="flex flex-col gap-2 px-1 pt-1">
           <span className="text-xs" style={{ color: gray }}>
-            In the new tab, use your passkey. It will show 6 digits: type them here.
+            In the new tab, create your wallet or use your passkey. It will show 6 digits: type them here.
           </span>
           <div className="flex gap-2">
             <input
