@@ -14,13 +14,32 @@ import { identityKey } from '../company';
 import { PartnershipAgreement, PartnershipSetup } from './PartnershipAgreement';
 import { broadcastProposal, lockUp, partnerKey, proposeMove, signProposal } from './actions';
 import { PARTNER_SIGN_PROTOCOL, lockKeyKeyID, lockKeyMessage, type PartnerLockState } from './lockState';
-import { RULE_WARNING, isReady, parsePartnerLock, partnershipLabel, type Holding } from './partnerLock';
+import { RULE_WARNING, isReady, parsePartnerLock, partnershipLabel, signedBy, type Holding } from './partnerLock';
+import { ApprovalCard } from './ApprovalCard';
+import { SharedAccount } from './SharedAccount';
 
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
 const btn = 'self-start rounded-xl px-4 py-2 text-sm font-bold border-0 cursor-pointer disabled:opacity-50';
 const hex = (b: number[]) => b.map((x) => x.toString(16).padStart(2, '0')).join('');
 const newId = () => hex(Array.from(crypto.getRandomValues(new Uint8Array(12))));
+
+// Share moves this partner declined: hidden on this device (with a majority rule the others can still go ahead).
+const DECLINED = 'bwx.partnership.declined';
+const declined = (): string[] => {
+  try {
+    return JSON.parse(localStorage.getItem(DECLINED) ?? '[]') as string[];
+  } catch {
+    return [];
+  }
+};
+const decline = (id: string) => {
+  try {
+    localStorage.setItem(DECLINED, JSON.stringify([...declined(), id].slice(-200)));
+  } catch {
+    /* private mode */
+  }
+};
 
 function Partnership({ api, ticker, name }: { api: BsharesApi; ticker: string; name: string }) {
   const { apiContext: ctx } = useServiceContext();
@@ -29,6 +48,7 @@ function Partnership({ api, ticker, name }: { api: BsharesApi; ticker: string; n
   const [msg, setMsg] = useState<string | null>(null);
   const [to, setTo] = useState('');
   const [amt, setAmt] = useState('');
+  const [hidden, setHidden] = useState<string[]>(declined);
   const reload = useCallback(async () => setS(await api.partnerLock(ticker).catch(() => null)), [api, ticker]);
   useEffect(() => {
     void reload();
@@ -46,8 +66,17 @@ function Partnership({ api, ticker, name }: { api: BsharesApi; ticker: string; n
       setBusy(false);
     }
   };
+  const ks = s?.keyset ?? null;
+  // Canonical (sorted) keys: every partner must build the identical shared account script.
+  const accountKeyset = useMemo(
+    () => (ks?.complete ? { m: ks.m, pubKeys: [...ks.pubKeys].map((k) => k.toLowerCase()).sort() } : null),
+    [ks?.complete, ks?.m, ks?.pubKeys],
+  );
   if (!s) return null;
-  const ks = s.keyset;
+  const handleOf = (k: string) => {
+    const h = s.keys.find((x) => x.partnerKey.toLowerCase() === k.toLowerCase())?.handle;
+    return h ? `$${h}` : `${k.slice(0, 8)}…`;
+  };
   const mine = s.holdings.filter((h) => h.holder === s.myKey);
   const myTotal = mine.reduce((t, h) => t + BigInt(h.amt), 0n);
   const keysetOf = () => ({ m: ks!.m, pubKeys: ks!.pubKeys });
@@ -172,72 +201,88 @@ function Partnership({ api, ticker, name }: { api: BsharesApi; ticker: string; n
           Lock my shares
         </button>
       )}
-      {s.proposals.map((p) => {
-        const ready = isReady(p.proposal);
-        return (
-          <div key={p.id} className="rounded-xl bg-[#101216] p-3 flex flex-col gap-1">
-            <span className="text-sm text-white">{p.summary}</span>
-            <span className="text-xs" style={{ color: MUTED }}>
-              Proposed by ${p.proposedBy}
-              {p.signatureNeeded ? ' · Signature needed' : ready ? ' · Ready to send' : ' · Waiting for partners'}
-            </span>
-            {p.signatureNeeded && (
-              <button
-                type="button"
-                disabled={busy}
-                className={btn}
-                style={{ background: GOLD, color: '#1a1300' }}
-                onClick={run(async () => {
-                  const signed = await signProposal(ctx, p.proposal);
-                  try {
-                    await api.partnerLockAction(ticker, { action: 'sign', id: p.id, sigs: signed.sigs });
-                  } catch (e) {
-                    if (e instanceof ChatApiError && e.status === 409)
-                      throw new Error('A partner signed at the same moment. Reloaded: tap Sign again.');
-                    throw e;
-                  }
-                  return 'Signed.';
-                })}
-              >
-                Sign
-              </button>
-            )}
-            {ready && (
-              <button
-                type="button"
-                disabled={busy}
-                className={btn}
-                style={{ background: GOLD, color: '#1a1300' }}
-                onClick={run(async () => {
-                  // Broadcast FIRST (the wallet, not the server), then report the txid; the server checks it on chain.
-                  const { txid, rawTx } = await broadcastProposal(p.proposal);
-                  try {
-                    await api.reportBroadcast(ticker, p.id, txid);
-                  } catch (e) {
-                    const why = e instanceof Error ? e.message : 'not recorded';
-                    return `Sent to the network (${txid.slice(0, 12)}…), but the record did not update: ${why}`;
-                  }
-                  const tx = Transaction.fromHex(rawTx);
-                  for (const [vout, o] of tx.outputs.entries()) {
-                    const h = parsePartnerLock(o.lockingScript);
-                    if (h)
-                      await api.partnerLockAction(ticker, {
-                        action: 'holding',
-                        outpoint: `${txid}.${vout}`,
-                        rawTx,
-                        holder: h.holder,
-                        amt: h.amt.toString(),
-                      });
-                  }
-                  return 'Sent.';
-                })}
-              >
-                Send to the network
-              </button>
-            )}
-          </div>
-        );
-      })}
+      {s.proposals
+        .filter((p) => !hidden.includes(p.id))
+        .map((p) => {
+          const ready = isReady(p.proposal);
+          const signed = signedBy(p.proposal);
+          const allKeys = [...new Set(p.proposal.locked.flatMap((l) => l.pubKeys))];
+          const need = p.proposal.locked[0]?.m ?? 0;
+          const mine = p.proposedBy === (loadSession()?.handle ?? '');
+          return (
+            <ApprovalCard
+              key={p.id}
+              what={`${p.summary} · proposed by $${p.proposedBy}`}
+              rule={`Needs ${need} of ${allKeys.length} partners`}
+              signed={signed.map(handleOf)}
+              waiting={allKeys.filter((k) => !signed.includes(k)).map(handleOf)}
+              status={p.signatureNeeded ? 'needs-you' : ready ? 'ready' : 'waiting'}
+              busy={busy}
+              onApprove={
+                p.signatureNeeded
+                  ? run(async () => {
+                      const signedP = await signProposal(ctx, p.proposal);
+                      try {
+                        await api.partnerLockAction(ticker, { action: 'sign', id: p.id, sigs: signedP.sigs });
+                      } catch (e) {
+                        if (e instanceof ChatApiError && e.status === 409)
+                          throw new Error('A partner signed at the same moment. Reloaded: tap Approve again.');
+                        throw e;
+                      }
+                      return 'Approved.';
+                    })
+                  : undefined
+              }
+              onSend={
+                ready
+                  ? run(async () => {
+                      // Broadcast FIRST (the wallet, not the server), then report the txid; the server checks it on chain.
+                      const { txid, rawTx } = await broadcastProposal(p.proposal);
+                      try {
+                        await api.reportBroadcast(ticker, p.id, txid);
+                      } catch (e) {
+                        const why = e instanceof Error ? e.message : 'not recorded';
+                        return `Sent to the network (${txid.slice(0, 12)}…), but the record did not update: ${why}`;
+                      }
+                      const tx = Transaction.fromHex(rawTx);
+                      for (const [vout, o] of tx.outputs.entries()) {
+                        const h = parsePartnerLock(o.lockingScript);
+                        if (h)
+                          await api.partnerLockAction(ticker, {
+                            action: 'holding',
+                            outpoint: `${txid}.${vout}`,
+                            rawTx,
+                            holder: h.holder,
+                            amt: h.amt.toString(),
+                          });
+                      }
+                      return 'Sent.';
+                    })
+                  : undefined
+              }
+              onDecline={
+                mine
+                  ? run(async () => {
+                      await api.partnerLockAction(ticker, { action: 'withdraw', id: p.id });
+                      return 'Withdrawn.';
+                    })
+                  : () => {
+                      decline(p.id);
+                      setHidden(declined());
+                      setMsg('Declined on this device. With a majority rule, the others can still go ahead.');
+                    }
+              }
+            />
+          );
+        })}
+      {s.myKey && accountKeyset && (
+        <SharedAccount
+          partnershipId={s.partnershipId}
+          keyset={accountKeyset}
+          keys={s.keys.map((k) => ({ handle: k.handle, partnerKey: k.partnerKey.toLowerCase() }))}
+          myKey={s.myKey.toLowerCase()}
+        />
+      )}
       {myTotal > 0n && ks?.complete && (
         <div className="flex flex-wrap gap-2 items-center">
           <select
