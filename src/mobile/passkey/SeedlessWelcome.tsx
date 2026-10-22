@@ -96,8 +96,7 @@ export const SeedlessWelcome = () => {
         </button>
       )}
       <p className="text-[11px] text-center m-0 px-4" style={{ color: gray }}>
-        {passkeyOk ? 'Your passkey (Face ID or fingerprint) locks your wallet. ' : ''}We never hold your keys. You can
-        link X, Google or HandCash later.
+        {passkeyOk ? 'Your passkey (Face ID or fingerprint) locks your wallet. ' : ''}We never hold your keys.
       </p>
       {/* The classic paths stay full-size (owner, 19 Oct 2026): unchanged create and restore flows. */}
       <div className="flex flex-col gap-2 w-full">
