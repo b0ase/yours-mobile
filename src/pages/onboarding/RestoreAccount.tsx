@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AccountNameField } from '../../components/AccountNameField';
 import { accountNameError, cleanAccountName, suggestAccountName } from '../../utils/accountNameRules';
 import { BetaGate } from '../../mobile/sweep/BetaGate';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, CheckCircle, ChevronRight, FileUp, Plus, Upload, Usb } from 'lucide-react';
 import { isUsbSupported, openUsbWindow } from '../../services/UsbKey.service';
@@ -60,6 +60,7 @@ const stepVariants = {
 const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }: RestoreAccountProps) => {
   const { theme } = useTheme();
   const navigate = useNavigate();
+  const passkeyStart = new URLSearchParams(useLocation().search).get('passkey') === 'start';
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [step, setStep] = useState(1);
@@ -496,6 +497,7 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
       form runs from its name + password step (as the JSON backup upload does). */}
       {SEEDLESS_ENABLED && IS_EXTENSION && EXT_PASSKEY_LIVE && (
         <ExtPasskeyRow
+          autoStart={passkeyStart}
           onWallet={(words, name) => {
             // The words came from web.bwalletx.com after the person typed the one-time code and said yes. From here
             // it is the ordinary restore: the person picks this extension's password; an existing account is never
