@@ -18,9 +18,9 @@ describe('tier pricing', () => {
   test('$1 for 5+, $5 for 4, $15 for 3 characters', () => {
     expect(nameTierUsd('coffee')).toBe(1);
     expect(nameTierUsd('bread')).toBe(1);
-    expect(nameTierUsd('cafe')).toBe(5);
-    expect(nameTierUsd('zqx')).toBe(15);
-    expect(NAME_TIERS.map((t) => t.usd)).toEqual([1, 5, 15]);
+    expect(nameTierUsd('cafe')).toBeNull(); // short names: held for renting, offer only
+    expect(nameTierUsd('zqx')).toBeNull();
+    expect(NAME_TIERS.map((t) => t.usd)).toEqual([1]);
   });
   test('1–2 characters and the premium shortlist are offers only', () => {
     expect(nameTierUsd('ab')).toBeNull();
@@ -39,8 +39,7 @@ describe('tier pricing', () => {
       50,
     )!;
     expect(b.items.map((i) => [i.name, i.usd])).toEqual([
-      ['coffee', 1],
-      ['cafe', 5],
+      ['coffee', 1], // 'cafe' (4 letters) is held for renting: offer only, never auto-listed
     ]);
     const priced = newSellBatch([{ name: 'b0ase', id: 'c' }], 50, { b0ase: 500 })!;
     expect(priced.items[0].usd).toBe(500);
@@ -86,7 +85,7 @@ describe('inventory', () => {
   });
   test('rails: house only, premium out, short = 3–4 letters', () => {
     const book = [L('aaron'), L('aaron2', '1Other'), L('cafe'), L('zqx'), L('b0ase'), L('abcde')];
-    expect(railNames('short', book).map((l) => l.name)).toEqual(['zqx', 'cafe']);
+    expect(railNames('short', book).map((l) => l.name)).toEqual([]); // short names are offer-only (held for renting)
     expect(railNames('firstnames', book).map((l) => l.name)).toEqual(['aaron']);
     expect(railNames('words', book).some((l) => l.name === 'b0ase')).toBe(false);
   });

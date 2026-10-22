@@ -36,7 +36,7 @@ import {
   STORE_PAY_ADDRESS,
   type StoreResult,
 } from './inventory';
-import { NAME_TIERS, nameTierUsd, offerHref } from './tiers';
+import { NAME_TIERS, isShortName, nameTierUsd, offerHref } from './tiers';
 
 /**
  * The Name Store (/names, owner-approved 13 Oct 2026): "Get your name on Bitcoin. Yours forever."
@@ -443,7 +443,7 @@ export const NameStorePage = () => {
                   {t.label} <span style={{ color: MUTED }}>{fmtUsd(t.usd)}</span>
                 </li>
               ))}
-              <li>Shorter or special names: make an offer</li>
+              <li>Short names (3–4): for rent soon · special names: make an offer</li>
             </ul>
           )}
         </form>
@@ -798,7 +798,9 @@ const ResultCard = (p: {
         <>
           {title}
           <p className="m-0 text-base" style={{ color: MUTED }}>
-            A special name. It isn&apos;t sold at a set price, but we&apos;re happy to hear an offer.
+            {isShortName(r.name)
+              ? 'A short name. Short names will be for rent by the year, coming soon. Until then, we’re happy to hear an offer.'
+              : 'A special name. It isn’t sold at a set price, but we’re happy to hear an offer.'}
           </p>
           <a href={offerHref(r.name)} className={btn} style={{ ...goldBtn, alignSelf: 'flex-start' }}>
             Make an offer

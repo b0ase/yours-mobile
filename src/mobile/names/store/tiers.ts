@@ -6,15 +6,13 @@ import premiumList from './premiumNames.json';
  * the Name Store (/names), bMint › OpNS names "List selected" and the auto-list after a mint.
  *
  *   5+ characters  $1
- *   4 characters   $5
- *   3 characters   $15
- *   1–2 characters and the owner's premium shortlist: not sold at a tier price ("Make an offer").
+ *   1–4 characters and the owner's premium shortlist: not sold at a tier price ("Make an offer").
+ *   Short names (3–4) are held for yearly renting (owner, 22 Oct 2026); until renting ships they are offer-only.
  */
 export const NAME_TIERS: readonly { minLength: number; usd: number; label: string }[] = [
   { minLength: 5, usd: 1, label: '5+ characters' },
-  { minLength: 4, usd: 5, label: '4 characters' },
-  { minLength: 3, usd: 15, label: '3 characters' },
 ];
+
 
 /** Where "Make an offer" goes when there is no chat to open. */
 export const OFFER_EMAIL = 'support@bwalletx.com';
@@ -26,6 +24,12 @@ const clean = (name: string) =>
     .trim()
     .toLowerCase()
     .replace(/^[@$]+/, '');
+
+/** 3–4 character names: held for yearly renting, offers only for now. */
+export const isShortName = (name: string): boolean => {
+  const len = clean(name).length;
+  return len >= 3 && len <= 4;
+};
 
 /** On the owner's premium shortlist (or shorter than every tier): offers only, never auto-listed. */
 export const isPremiumName = (name: string): boolean => {
