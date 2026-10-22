@@ -172,13 +172,21 @@ async function submit(version, buildNumber, notes) {
     }
   }
 
-  const sub = (
-    await api('POST', '/v1/reviewSubmissions', {
-      type: 'reviewSubmissions',
-      attributes: { platform: 'IOS' },
-      relationships: { app: { data: { type: 'apps', id: app } } },
-    })
+  // Reuse an open draft: a failed attempt used to leave an empty one behind each time, and Apple caps open
+  // submissions at 5 (22 Oct 2026). Only create a new one when none is open.
+  const open = (
+    await api('GET', `/v1/apps/${app}/reviewSubmissions?filter[state]=READY_FOR_REVIEW&filter[platform]=IOS`)
   ).data;
+  const sub =
+    open[0] ??
+    (
+      await api('POST', '/v1/reviewSubmissions', {
+        type: 'reviewSubmissions',
+        attributes: { platform: 'IOS' },
+        relationships: { app: { data: { type: 'apps', id: app } } },
+      })
+    ).data;
+  if (open[0]) console.log(`· reusing open draft ${sub.id}`);
   await api('POST', '/v1/reviewSubmissionItems', {
     type: 'reviewSubmissionItems',
     relationships: {
