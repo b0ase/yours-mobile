@@ -92,31 +92,10 @@ export const ExtHandoffSend = ({ nonce }: { nonce: string }) => {
       </h1>
       {stage === 'ask' && !code && (
         <>
+          {/* Your existing passkey first (owner, 22 Oct 2026: the flow that worked); creating a new wallet is the
+          small link underneath, never the big button. */}
           <p className="text-sm m-0" style={{ color: gray }}>
-            New to bWalletX? Make your wallet with a passkey (Face ID, fingerprint or your device PIN). Then this page
-            shows 6 digits to type into the extension.
-          </p>
-          <button
-            type="button"
-            disabled={creating}
-            onClick={() => void create()}
-            data-testid="ext-handoff-create"
-            className="w-full rounded-xl h-11 text-sm font-bold flex items-center justify-center gap-2 border-0 cursor-pointer disabled:opacity-60"
-            style={{
-              background: `linear-gradient(135deg, ${theme.color.component.primaryButtonLeftGradient}, ${theme.color.component.primaryButtonRightGradient})`,
-              color: theme.color.component.primaryButtonText,
-            }}
-          >
-            <Fingerprint size={16} />
-            {creating ? 'Waiting for your passkey…' : 'Create a wallet with a passkey'}
-          </button>
-          {createError && (
-            <p className="text-xs m-0" style={{ color: '#f87171' }} role="alert">
-              {createError}
-            </p>
-          )}
-          <p className="text-sm m-0 mt-3" style={{ color: gray }}>
-            Already made a wallet with a passkey? Use it here:
+            Use your passkey. Then this page shows 6 digits to type into the extension.
           </p>
           <PasskeyRestoreRow
             onPhrase={(words, pk) => {
@@ -124,6 +103,22 @@ export const ExtHandoffSend = ({ nonce }: { nonce: string }) => {
               void send(words);
             }}
           />
+          <button
+            type="button"
+            disabled={creating}
+            onClick={() => void create()}
+            data-testid="ext-handoff-create"
+            className="self-start mt-3 text-sm underline bg-transparent border-0 cursor-pointer p-0 flex items-center gap-1.5 disabled:opacity-60"
+            style={{ color: gray }}
+          >
+            <Fingerprint size={14} />
+            {creating ? 'Waiting for your passkey…' : 'No passkey wallet yet? Create a new one'}
+          </button>
+          {createError && (
+            <p className="text-xs m-0" style={{ color: '#f87171' }} role="alert">
+              {createError}
+            </p>
+          )}
         </>
       )}
       {code && (stage === 'ask' || stage === 'sent') && (
