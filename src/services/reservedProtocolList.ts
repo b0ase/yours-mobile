@@ -27,6 +27,8 @@ export const RESERVED_PROTOCOLS: readonly Protocol[] = [
   [2, 'bwallet calls'],
   // dns-dex.com domain token requests (src/mobile/domains/dnsdex.ts): an app must not sign these as the user.
   [2, 'dnsdex domain'],
+  // bDNSx domain link record (src/mobile/domains/bdnsx.ts): the signature in _bdnsx.<domain> that links it to the user.
+  [2, 'bdnsx link'],
   [2, 'bwallet issuer'],
   [2, 'bwallet paymail'],
   [2, 'bwallet agreement'],

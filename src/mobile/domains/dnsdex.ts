@@ -3,7 +3,8 @@
  * in this wallet and list it on dns-dex.com. Pure helpers + the dns-dex client; the sheet is DomainMint.tsx.
  *
  * Contract with dns-dex (v1):
- *   proof     TXT at `_dnsdex.<domain>` = `dnsdex-verify=<code>` (code issued by dns-dex /start)
+ *   proof     the bDNSx link record (bdnsx.ts): TXT at `_bdnsx.<domain>` = `bdnsx1 key=<identityKey> sig=<base64>`,
+ *             signed by this wallet; /start gets the signature as `linkSignature` and echoes the record back
  *   signing   createSignature(protocol [2,'dnsdex domain'], keyID '1', counterparty 'anyone') over the UTF-8 of
  *             canonicalMessage(); dns-dex verifies against the identity key. Hex DER in the request body.
  *   endpoints POST /api/bwallet/domain/start, POST /api/bwallet/domain/register, GET /api/bwallet/domain/status
@@ -13,6 +14,7 @@ import type { OneSatContext } from '@1sat/actions';
 import { MAP_PREFIX } from '../names/personalToken';
 import { MINT_APP } from '../mint/mint';
 import { isTicker } from '../tickets/tickets';
+import { LINK_KEY_ID, LINK_PROTOCOL, formatLinkValue, linkMessage, linkTxtHost, recordsLinkTo } from './bdnsx';
 
 export const DNSDEX_ORIGIN = 'https://www.dns-dex.com';
 export const DOMAIN_SIGN_PROTOCOL: [2, string] = [2, 'dnsdex domain'];
@@ -101,8 +103,10 @@ export function canonicalMessage(f: SignedFields): string {
 
 export interface DomainSigner {
   identityKey: () => Promise<string>;
-  /** Hex DER signature over the UTF-8 of `message`. */
+  /** Hex DER signature over the UTF-8 of `message` (request signing, [2,'dnsdex domain']). */
   sign: (message: string) => Promise<string>;
+  /** Base64 DER signature over the UTF-8 of `message` under the bDNSx link protocol ([2,'bdnsx link']). */
+  signLink: (message: string) => Promise<string>;
 }
 
 export const walletDomainSigner = (ctx: OneSatContext): DomainSigner => ({
@@ -115,6 +119,15 @@ export const walletDomainSigner = (ctx: OneSatContext): DomainSigner => ({
       counterparty: 'anyone',
     });
     return Utils.toHex(signature);
+  },
+  signLink: async (message) => {
+    const { signature } = await ctx.wallet.createSignature({
+      data: Utils.toArray(message, 'utf8'),
+      protocolID: LINK_PROTOCOL,
+      keyID: LINK_KEY_ID,
+      counterparty: 'anyone',
+    });
+    return Utils.toBase64(signature);
   },
 });
 
@@ -130,7 +143,8 @@ type Fetch = typeof fetch;
 
 export interface StartResult {
   domain: string;
-  code: string;
+  /** This wallet's identity key: the key the TXT record must name. */
+  identityKey: string;
   txtHost: string;
   txtValue: string;
   resumed: boolean;
@@ -161,9 +175,39 @@ async function post<T>(path: string, body: unknown, f: Fetch): Promise<T> {
   return json;
 }
 
-export async function startDomain(signer: DomainSigner, domain: string, f: Fetch = fetch, now = Date.now()) {
-  const body = await signedBody(signer, { action: 'start', domain }, now);
-  return post<StartResult>('/api/bwallet/domain/start', body, f);
+/** Our own link record for `domain`: what the user must publish, signed by this wallet. */
+export async function linkRecord(signer: DomainSigner, domain: string) {
+  const identityKey = await signer.identityKey();
+  const linkSignature = await signer.signLink(linkMessage(domain, identityKey));
+  return {
+    identityKey,
+    linkSignature,
+    txtHost: linkTxtHost(domain),
+    txtValue: formatLinkValue(identityKey, linkSignature),
+  };
+}
+
+export async function startDomain(
+  signer: DomainSigner,
+  domain: string,
+  f: Fetch = fetch,
+  now = Date.now(),
+): Promise<StartResult> {
+  const link = await linkRecord(signer, domain);
+  const body = { ...(await signedBody(signer, { action: 'start', domain }, now)), linkSignature: link.linkSignature };
+  const res = await post<Omit<StartResult, 'identityKey'>>('/api/bwallet/domain/start', body, f);
+  // Never show a record we didn't sign: the server only echoes ours back.
+  if (res.txtHost !== link.txtHost || res.txtValue !== link.txtValue)
+    throw new Error(
+      "dns-dex.com sent back a different DNS record than this wallet made. Don't add it; try again later.",
+    );
+  return {
+    domain: res.domain,
+    identityKey: link.identityKey,
+    txtHost: link.txtHost,
+    txtValue: link.txtValue,
+    resumed: !!res.resumed,
+  };
 }
 
 export async function registerDomain(
@@ -191,9 +235,9 @@ export function txtText(data: string): string {
   return chunks.map((c) => c.slice(1, -1).replace(/\\(.)/g, '$1')).join('');
 }
 
-/** Does any record carry exactly `expected` as one of its space-separated values? */
-export const txtMatches = (records: string[], expected: string) =>
-  records.some((r) => txtText(r).split(/\s+/).includes(expected));
+/** Does any TXT answer at `_bdnsx.<domain>` validly link `domain` to `identityKey`? */
+export const txtLinksTo = (records: string[], domain: string, identityKey: string) =>
+  recordsLinkTo(records.map(txtText), domain, identityKey);
 
 /** TXT records at `name` over DNS-over-HTTPS (Cloudflare, then Google). Throws only when both fail. */
 export async function lookupTxt(name: string, f: Fetch = fetch): Promise<string[]> {

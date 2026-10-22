@@ -19,14 +19,14 @@ import {
   savePending,
   startDomain,
   suggestDomainTicker,
-  txtMatches,
+  txtLinksTo,
   walletDomainSigner,
   type PendingListing,
   type StartResult,
 } from './dnsdex';
 
 /**
- * MINT → "A domain" (dnsdex.ts): get the dns-dex TXT record, add it at the registrar, check it, mint the token with
+ * MINT → "A domain" (dnsdex.ts): sign the bDNSx link record (_bdnsx.<domain>), add it at the registrar, check it, mint the token with
  * the normal token form (pre-filled), then list it on dns-dex.com. A failed listing never undoes the mint: it is kept
  * as pending (survives a reload) with Try again.
  */
@@ -92,7 +92,7 @@ export const DomainMint = ({
   const check = (rec: StartResult) =>
     run('Checking DNS…', async () => {
       const records = await lookupTxt(rec.txtHost);
-      if (txtMatches(records, rec.txtValue)) {
+      if (await txtLinksTo(records, rec.domain, rec.identityKey)) {
         setNotYet(false);
         setView({ at: 'mint', rec });
       } else setNotYet(true);
@@ -211,6 +211,10 @@ export const DomainMint = ({
         <p className="m-0">
           Add this TXT record at your domain registrar or Cloudflare. It can take a few minutes to show up.
         </p>
+        <p className="text-xs m-0" style={{ color: '#bbb' }}>
+          It's signed by your wallet, so anyone can check that {rec.domain} is linked to you. Deleting the record later
+          removes the link.
+        </p>
         {rec.resumed && (
           <p className="text-xs m-0" style={{ color: '#bbb' }}>
             You started {rec.domain} before; this is the same record.
@@ -267,8 +271,8 @@ export const DomainMint = ({
   return (
     <div className="flex flex-col gap-3 text-sm">
       <p className="text-xs m-0" style={{ color: '#bbb' }}>
-        Prove you own a domain, then mint its token in your wallet. dns-dex.com checks a DNS record you add and lists
-        the token.
+        Prove you own a domain, then mint its token in your wallet. Your wallet signs a DNS record for you to add;
+        dns-dex.com checks it and lists the token.
       </p>
       {pending.map((p) => (
         <div

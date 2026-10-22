@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { PrivateKey, ProtoWallet, Utils } from '@bsv/sdk';
 import { hasReturnsWording } from '../tokens/returnsWording';
+import { LINK_KEY_ID, LINK_PROTOCOL, linkMessage, parseLinkValue, verifyLink } from './bdnsx';
 import { validateToken } from '../tokens/token';
 import { emptyTokenForm } from '../tokens/token';
 import {
@@ -18,7 +19,8 @@ import {
   savePending,
   startDomain,
   suggestDomainTicker,
-  txtMatches,
+  txtLinksTo,
+  linkRecord,
   txtText,
   type DomainSigner,
   prefillDomain,
@@ -100,8 +102,8 @@ describe('canonical message', () => {
 });
 
 /** A signer built on a real ProtoWallet, so the round trip proves dns-dex can verify what we send. */
-const realSigner = () => {
-  const w = new ProtoWallet(PrivateKey.fromRandom());
+const realSigner = (priv: PrivateKey = PrivateKey.fromRandom()) => {
+  const w = new ProtoWallet(priv);
   const signer: DomainSigner = {
     identityKey: async () => (await w.getPublicKey({ identityKey: true })).publicKey,
     sign: async (message) =>
@@ -111,6 +113,17 @@ const realSigner = () => {
             data: Utils.toArray(message, 'utf8'),
             protocolID: DOMAIN_SIGN_PROTOCOL,
             keyID: DOMAIN_SIGN_KEY_ID,
+            counterparty: 'anyone',
+          })
+        ).signature,
+      ),
+    signLink: async (message) =>
+      Utils.toBase64(
+        (
+          await w.createSignature({
+            data: Utils.toArray(message, 'utf8'),
+            protocolID: LINK_PROTOCOL,
+            keyID: LINK_KEY_ID,
             counterparty: 'anyone',
           })
         ).signature,
@@ -130,26 +143,23 @@ describe('dns-dex client', () => {
   test('start sends a signed body dns-dex can verify', async () => {
     const seen: { url?: string; body?: Record<string, unknown> } = {};
     const signer = realSigner();
+    const link = await linkRecord(signer, 'example.com');
     const r = await startDomain(
       signer,
       'example.com',
       jsonFetch(
         200,
-        {
-          ok: true,
-          domain: 'example.com',
-          code: 'c',
-          txtHost: '_dnsdex.example.com',
-          txtValue: 'dnsdex-verify=c',
-          resumed: false,
-        },
+        { ok: true, domain: 'example.com', txtHost: link.txtHost, txtValue: link.txtValue, resumed: false },
         seen,
       ),
       1000,
     );
-    expect(r.txtValue).toBe('dnsdex-verify=c');
+    expect(r.txtHost).toBe('_bdnsx.example.com');
+    expect(r.txtValue).toBe(link.txtValue);
+    expect(r.identityKey).toBe(link.identityKey);
     expect(seen.url).toBe(`${DNSDEX_ORIGIN}/api/bwallet/domain/start`);
-    const { signature, ...signed } = seen.body!;
+    const { signature, linkSignature, ...signed } = seen.body!;
+    expect(await verifyLink('example.com', link.identityKey, String(linkSignature))).toBe(true);
     expect(Object.keys(signed)).toEqual(['action', 'domain', 'identityKey', 'ts']);
     const { valid } = await new ProtoWallet('anyone').verifySignature({
       data: Utils.toArray(JSON.stringify(signed), 'utf8'),
@@ -159,6 +169,23 @@ describe('dns-dex client', () => {
       counterparty: String(signed.identityKey),
     });
     expect(valid).toBe(true);
+  });
+
+  test('start refuses a record the server changed', async () => {
+    const signer = realSigner();
+    const link = await linkRecord(signer, 'example.com');
+    const other = await linkRecord(realSigner(), 'example.com');
+    for (const bad of [
+      { txtHost: '_dnsdex.example.com', txtValue: link.txtValue },
+      { txtHost: link.txtHost, txtValue: other.txtValue },
+    ])
+      await expect(
+        startDomain(
+          signer,
+          'example.com',
+          jsonFetch(200, { ok: true, domain: 'example.com', resumed: false, ...bad }, {}),
+        ),
+      ).rejects.toThrow('different DNS record');
   });
 
   test('register carries tokenId; errors come through as plain sentences', async () => {
@@ -185,12 +212,9 @@ describe('dns-dex client', () => {
 
 describe('DNS TXT', () => {
   test('quoted, split and multi-value records', () => {
-    expect(txtText('"dnsdex-verify=abc"')).toBe('dnsdex-verify=abc');
-    expect(txtText('"dnsdex-verify=ab" "c"')).toBe('dnsdex-verify=abc');
-    expect(txtMatches(['"v=spf1 -all"', '"dnsdex-verify=abc"'], 'dnsdex-verify=abc')).toBe(true);
-    expect(txtMatches(['"other dnsdex-verify=abc"'], 'dnsdex-verify=abc')).toBe(true);
-    expect(txtMatches(['"dnsdex-verify=abcd"'], 'dnsdex-verify=abc')).toBe(false);
-    expect(txtMatches(['dnsdex-verify=abc'], 'dnsdex-verify=abc')).toBe(true);
+    expect(txtText('"bdnsx1 key=02ab"')).toBe('bdnsx1 key=02ab');
+    expect(txtText('"bdnsx1 key=02" "ab"')).toBe('bdnsx1 key=02ab');
+    expect(txtText('bdnsx1 key=02ab')).toBe('bdnsx1 key=02ab');
   });
 
   test('falls back to Google when Cloudflare fails', async () => {
@@ -250,5 +274,60 @@ describe('prefillDomain (the /m/mint/domain?d= deep link)', () => {
   test('missing or blank is empty, no error', () => {
     expect(prefillDomain(null)).toEqual({ value: '', error: '' });
     expect(prefillDomain('  ')).toEqual({ value: '', error: '' });
+  });
+});
+
+/** Contract test vector: private scalar 1 (a well-known test key, never a real one). */
+const VECTOR_KEY = new PrivateKey(1);
+const VECTOR_ID = VECTOR_KEY.toPublicKey().toString();
+
+describe('bDNSx link record', () => {
+  test('test vector: message, value, round trip', async () => {
+    const link = await linkRecord(realSigner(VECTOR_KEY), 'example.com');
+    expect(VECTOR_ID).toBe('0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798');
+    expect(linkMessage('example.com', VECTOR_ID)).toBe(
+      'bdnsx-link|v1|domain=example.com|identityKey=0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798',
+    );
+    expect(link.txtHost).toBe('_bdnsx.example.com');
+    expect(link.txtValue).toBe(`bdnsx1 key=${VECTOR_ID} sig=${link.linkSignature}`);
+    expect(link.txtValue.length).toBeLessThan(255);
+    expect(parseLinkValue(link.txtValue)).toEqual({ identityKey: VECTOR_ID, signature: link.linkSignature });
+    expect(await verifyLink('example.com', VECTOR_ID, link.linkSignature)).toBe(true);
+    // Deterministic (RFC 6979), so the dns-dex side can check the same bytes.
+    expect((await linkRecord(realSigner(VECTOR_KEY), 'example.com')).txtValue).toBe(link.txtValue);
+  });
+
+  test('DNS answers: accepts our signed record among others, split or not', async () => {
+    const link = await linkRecord(realSigner(VECTOR_KEY), 'example.com');
+    const quoted = `"${link.txtValue}"`;
+    const split = `"${link.txtValue.slice(0, 50)}" "${link.txtValue.slice(50)}"`;
+    expect(await txtLinksTo(['"v=spf1 -all"', quoted], 'example.com', VECTOR_ID)).toBe(true);
+    expect(await txtLinksTo([split], 'example.com', VECTOR_ID)).toBe(true);
+    expect(await txtLinksTo([link.txtValue], 'example.com', VECTOR_ID)).toBe(true);
+  });
+
+  test('negatives: wrong domain, wrong key, tampered sig, malformed', async () => {
+    const link = await linkRecord(realSigner(VECTOR_KEY), 'example.com');
+    const other = await linkRecord(realSigner(), 'example.com');
+    expect(await txtLinksTo([link.txtValue], 'example.org', VECTOR_ID)).toBe(false);
+    expect(await txtLinksTo([link.txtValue], 'example.com', other.identityKey)).toBe(false);
+    expect(await txtLinksTo([other.txtValue], 'example.com', VECTOR_ID)).toBe(false);
+    const sig = Utils.toArray(link.linkSignature, 'base64');
+    sig[sig.length - 1] ^= 1;
+    const tampered = `bdnsx1 key=${VECTOR_ID} sig=${Utils.toBase64(sig)}`;
+    expect(await txtLinksTo([tampered], 'example.com', VECTOR_ID)).toBe(false);
+    expect(await txtLinksTo(['"v=spf1 -all"', '"dnsdex-verify=abc"'], 'example.com', VECTOR_ID)).toBe(false);
+    for (const bad of [
+      `bdnsx1 key=${VECTOR_ID}`,
+      `bdnsx1 sig=${link.linkSignature} key=${VECTOR_ID}`,
+      `bdnsx1 key=${VECTOR_ID} sig=${link.linkSignature} extra=1`,
+      `bdnsx1  key=${VECTOR_ID} sig=${link.linkSignature}`,
+      `bdnsx2 key=${VECTOR_ID} sig=${link.linkSignature}`,
+      `bdnsx1 key=${VECTOR_ID.toUpperCase()} sig=${link.linkSignature}`,
+      `bdnsx1 key=${VECTOR_ID} sig=${link.linkSignature.replace(/=+$/, '')}!`,
+    ]) {
+      expect(parseLinkValue(bad)).toBeNull();
+      expect(await txtLinksTo([bad], 'example.com', VECTOR_ID)).toBe(false);
+    }
   });
 });
