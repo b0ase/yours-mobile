@@ -5,7 +5,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, Check, Copy, Lock as LockIcon, Unlock, X } from 'lucide-react';
+import { AlertTriangle, Check, Copy, Lock as LockIcon, Search, Unlock, X } from 'lucide-react';
 import type { Bsv21Balance } from '@1sat/actions';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
@@ -16,6 +16,7 @@ import { fmtToken, fmtUnits, VERIFY_URL } from './receipt';
 import { verifyLockTx, type VerifyResult } from './verify';
 import { canUnlock, countdown, loadTokenLocks, parseTokenAmount, type TokenLockRecord } from './tokenLocks';
 import { TokenLockError, createTokenLock, unlockTokenLock } from './tokenLockApi';
+import { scanLine, useTokenLockScan } from './useTokenLockScan';
 
 const GOLD = 'var(--bw-accent)';
 const PANEL = '#17191E';
@@ -69,6 +70,10 @@ export const TokenLockSheet = ({
     () => setLocks(loadTokenLocks(account, chromeStorageService).filter((r) => r.tokenId === token.id)),
     [account, chromeStorageService, token.id],
   );
+  // A restored wallet / new device: look on chain once when this token shows no locks here yet.
+  const [autoScan] = useState(() => locks.length === 0);
+  const scan = useTokenLockScan(apiContext, account, chromeStorageService, reload, autoScan);
+  const scanText = scanLine(scan.state);
 
   useEffect(() => {
     let live = true;
@@ -261,6 +266,23 @@ export const TokenLockSheet = ({
           </div>
         )}
 
+        <div className="flex flex-col gap-1">
+          <button
+            type="button"
+            disabled={scan.state.kind === 'scanning'}
+            onClick={() => void scan.run()}
+            className="self-start flex items-center gap-1 text-xs font-bold"
+            style={{ color: scan.state.kind === 'scanning' ? MUTED : GOLD }}
+          >
+            <Search size={13} /> {scan.state.kind === 'scanning' ? 'Searching the chain…' : 'Find my token locks'}
+          </button>
+          {scanText && (
+            <div className="text-xs" style={{ color: scan.state.kind === 'error' ? RED : MUTED }}>
+              {scanText}
+            </div>
+          )}
+        </div>
+
         {step === 'form' && (
           <div className="flex flex-col gap-3">
             <label className="flex flex-col gap-1 text-xs" style={{ color: MUTED }}>
@@ -336,7 +358,8 @@ export const TokenLockSheet = ({
               </div>
               <div style={{ color: MUTED }} className="text-xs">
                 Nobody, including you, can move these tokens before then. After that only your wallet can unlock them,
-                with keys from your recovery phrase. bWalletX's servers are not needed to get them back.
+                with a key from your recovery phrase. On a restored wallet or a new device, Find my token locks (here or
+                in Pots &amp; Locks) lists them again from the chain.
               </div>
               <div style={{ color: GOLD }} className="text-xs flex items-center gap-1">
                 <AlertTriangle size={13} /> New feature: test with a small amount first.

@@ -186,6 +186,35 @@ export const BsvWallet = () => {
   } | null>(null);
   // Get identityAddress from chrome storage (selected account)
   const identityAddress = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress || '';
+
+  // A restored wallet / new device: find its token locks on chain once, in the background (quiet unless found).
+  const snackRef = useRef(addSnackbar);
+  snackRef.current = addSnackbar;
+  const lockScanTried = useRef(new Set<string>());
+  useEffect(() => {
+    if (!identityAddress || !apiContext.services || lockScanTried.current.has(identityAddress)) return;
+    lockScanTried.current.add(identityAddress);
+    let live = true;
+    void (async () => {
+      try {
+        const { tokenLocksScanned } = await import('../mobile/locks/tokenLocks');
+        if (tokenLocksScanned(identityAddress)) return;
+        const { scanTokenLocks } = await import('../mobile/locks/tokenLockApi');
+        const res = await scanTokenLocks(apiContext, identityAddress, chromeStorageService);
+        if (live && res.added > 0)
+          snackRef.current(
+            `Found ${res.added} token lock${res.added === 1 ? '' : 's'} on chain. See Pots & Locks › Locks.`,
+            'info',
+            5000,
+          );
+      } catch {
+        // indexer down: the next open tries again, and Find my token locks is always there
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [identityAddress, apiContext, chromeStorageService]);
   const [receiveAddress, setReceiveAddress] = useState<string>('');
   const receiveAddressRef = useRef('');
   receiveAddressRef.current = receiveAddress;

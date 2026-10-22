@@ -18,8 +18,9 @@
  * lock auto-claim can never pick up a token lock and spend its 1 sat as plain BSV.
  */
 import { BSV21, Lock } from '@1sat/templates';
-import { LockingScript, type Script } from '@bsv/sdk';
+import { LockingScript, type Script, type Transaction } from '@bsv/sdk';
 import type { ChromeStorageService } from '../../services/ChromeStorage.service';
+import { parseReceipt } from './receipt';
 
 export const TOKEN_LOCK_KEY_ID = 'token-lock';
 /** Lock's unlocking script for a bare lock (sig + pubkey + preimage), from @1sat/actions unlockBsv. */
@@ -125,6 +126,95 @@ export function mergeRecords(a: TokenLockRecord[], b: TokenLockRecord[]): TokenL
     by.set(r.outpoint, prev ? { ...prev, ...r, unlockedTxid: r.unlockedTxid ?? prev.unlockedTxid } : r);
   }
   return [...by.values()].sort((x, y) => y.createdAt.localeCompare(x.createdAt));
+}
+
+/** "txid.vout" or "txid_vout" (the indexer's form) → parts; null when malformed. */
+export function splitOutpoint(o: string): { txid: string; vout: number } | null {
+  const m = /^([0-9a-f]{64})[._](\d+)$/i.exec(o);
+  return m ? { txid: m[1].toLowerCase(), vout: Number(m[2]) } : null;
+}
+
+/**
+ * A record rebuilt from a lock transaction found on chain (wallet restore / new device). Null unless
+ * output `vout` decodes as a token lock to `lockAddress`: amount, token and height come from the script
+ * itself, never from the indexer. The receipt in the same transaction, when there is one for this
+ * output, gives back the label and the token's decimals and symbol.
+ */
+export function recordFromLockTx(
+  tx: Transaction,
+  vout: number,
+  lockAddress: string,
+  meta: { sym?: string; dec?: number; createdAt?: string } = {},
+): TokenLockRecord | null {
+  const out = tx.outputs[vout];
+  const lock = out ? decodeTokenLock(out.lockingScript) : null;
+  if (!lock || lock.address !== lockAddress) return null;
+  const receipt = tx.outputs
+    .map((o) => parseReceipt(o.lockingScript))
+    .find(
+      (r) =>
+        !!r &&
+        r.lockAddress === lockAddress &&
+        r.token?.id === lock.tokenId &&
+        r.schedule.some((s) => s.vout === vout || s.height === lock.until),
+    );
+  const dec = meta.dec ?? receipt?.token?.dec;
+  return {
+    outpoint: `${tx.id('hex')}.${vout}`,
+    tokenId: lock.tokenId,
+    sym: meta.sym ?? receipt?.token?.sym,
+    dec: Number.isInteger(dec) && (dec as number) >= 0 ? (dec as number) : 0,
+    amt: lock.amt.toString(),
+    until: lock.until,
+    label: receipt?.label?.trim() || 'Token lock',
+    lockAddress,
+    createdAt: receipt?.lockedAt ?? meta.createdAt ?? new Date().toISOString(),
+    receipt: !!receipt,
+  };
+}
+
+/**
+ * The wallet's list after a scan: what this device already knew (its labels win) plus every lock found on
+ * chain, with a record marked unlocked when the chain shows its output spent (`spends`: outpoint → spending
+ * txid, null/absent = unspent or unknown).
+ */
+export function reconcileTokenLocks(
+  local: TokenLockRecord[],
+  found: TokenLockRecord[],
+  spends: Record<string, string | null | undefined> = {},
+): TokenLockRecord[] {
+  const unspent = new Set(found.map((r) => r.outpoint));
+  return mergeRecords(local, found).map((r) => {
+    // Unspent on chain beats a note that it was unlocked (e.g. an unlock that never confirmed): the lock
+    // must stay visible and unlockable. unlockTokenLock re-checks the chain before spending anyway.
+    if (unspent.has(r.outpoint) && r.unlockedTxid) {
+      const { unlockedTxid: _gone, ...rest } = r;
+      return rest;
+    }
+    const spent = spends[r.outpoint];
+    return !r.unlockedTxid && typeof spent === 'string' && /^[0-9a-f]{64}$/i.test(spent)
+      ? { ...r, unlockedTxid: spent }
+      : r;
+  });
+}
+
+// ── Recovery scan: once per account per device, so a restored wallet finds its locks by itself. ──
+const scanKey = (account: string) => `bwx.tokenLocks.scanned.${account}`;
+
+export function tokenLocksScanned(account: string): boolean {
+  try {
+    return !!localStorage.getItem(scanKey(account));
+  } catch {
+    return false;
+  }
+}
+
+export function markTokenLocksScanned(account: string) {
+  try {
+    localStorage.setItem(scanKey(account), new Date().toISOString());
+  } catch {
+    // storage blocked: the next open scans again, which is harmless
+  }
 }
 
 const backed = (cs: ChromeStorageService | undefined, account: string): TokenLockRecord[] => {

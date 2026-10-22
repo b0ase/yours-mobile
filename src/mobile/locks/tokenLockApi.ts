@@ -31,7 +31,11 @@ import {
   canUnlock,
   decodeTokenLock,
   loadTokenLocks,
+  markTokenLocksScanned,
+  reconcileTokenLocks,
+  recordFromLockTx,
   saveTokenLocks,
+  splitOutpoint,
   tokenLockScript,
   tokenUnlockLength,
   type TokenLockRecord,
@@ -136,6 +140,113 @@ export async function createTokenLock(
   };
   saveTokenLocks(account, [rec, ...loadTokenLocks(account, cs)], cs);
   return rec;
+}
+
+export type TokenLockScan = { found: number; added: number; list: TokenLockRecord[] };
+
+/**
+ * Find this wallet's token locks on chain (after a restore, on a new device, or when the list was lost)
+ * and merge them into the record list. The indexer only says where to look (unspent outputs owned by the
+ * seed-derived token-lock address); every lock is read from its own transaction and kept only when its
+ * script decodes as a token lock to that address. Throws when the indexer cannot be reached; the stored
+ * list is left untouched then.
+ */
+export async function findTokenLocks(
+  ctx: OneSatContext,
+  account: string,
+  cs?: ChromeStorageService,
+  onProgress?: (detail: string) => void,
+): Promise<TokenLockScan> {
+  const services = ctx.services;
+  if (!services) throw new Error('The wallet services are not ready.');
+  const lockAddress = await tokenLockAddress(ctx);
+
+  onProgress?.('Syncing your lock address…');
+  let synced = false;
+  for await (const ev of services.owner.getTxos(lockAddress, { refresh: true, limit: 1 })) {
+    if (ev.type === 'error') throw ev.error;
+    if (ev.type === 'done') {
+      synced = true;
+      break;
+    }
+  }
+  if (!synced) throw new Error('The lock indexer stopped before it finished. Try again.');
+
+  onProgress?.('Looking for locks…');
+  const outs = (await services.txo.search(`own:${lockAddress}`, { unspent: true, events: true, limit: 0 })) ?? [];
+  const byTx = new Map<string, Set<number>>();
+  for (const o of outs) {
+    const p = splitOutpoint(o.outpoint);
+    if (p) byTx.set(p.txid, (byTx.get(p.txid) ?? new Set()).add(p.vout));
+  }
+
+  onProgress?.(byTx.size ? `Reading ${byTx.size} transaction${byTx.size === 1 ? '' : 's'}…` : 'Checking your list…');
+  const hits: { tx: Transaction; vout: number; tokenId: string }[] = [];
+  let unreadable = 0;
+  for (const [txid, vouts] of byTx) {
+    try {
+      const tx = (await services.getBeefForTxid(txid)).findTxid(txid)?.tx;
+      if (!tx) throw new Error('missing');
+      for (const vout of vouts) {
+        const out = tx.outputs[vout];
+        const lock = out ? decodeTokenLock(out.lockingScript) : null;
+        if (lock && lock.address === lockAddress) hits.push({ tx, vout, tokenId: lock.tokenId });
+      }
+    } catch {
+      unreadable++;
+    }
+  }
+  if (unreadable && unreadable === byTx.size) throw new Error('Could not load the lock transactions. Try again.');
+
+  const meta = new Map<string, { sym?: string; dec?: number }>();
+  const ids = [...new Set(hits.map((h) => h.tokenId))];
+  if (ids.length)
+    try {
+      for (const d of await services.bsv21.lookupTokens(ids.slice(0, 100))) {
+        // The indexer sends decimals as a string ("8"); anything else falls back to the receipt.
+        const dec = d.token?.dec != null && /^\d{1,2}$/.test(String(d.token.dec)) ? Number(d.token.dec) : undefined;
+        meta.set(d.tokenId, { sym: d.token?.sym, dec: dec != null && dec <= 18 ? dec : undefined });
+      }
+    } catch {
+      // the receipt (when there is one) still carries the symbol and decimals
+    }
+  const found = hits
+    .map((h) => recordFromLockTx(h.tx, h.vout, lockAddress, meta.get(h.tokenId)))
+    .filter((r): r is TokenLockRecord => !!r);
+
+  const local = loadTokenLocks(account, cs);
+  const foundSet = new Set(found.map((r) => r.outpoint));
+  const open = local.filter((r) => !r.unlockedTxid && !foundSet.has(r.outpoint)).map((r) => r.outpoint);
+  const spends: Record<string, string | null> = {};
+  if (open.length)
+    try {
+      const res = await services.txo.getSpends(open);
+      open.forEach((o, i) => (spends[o] = res[i] ?? null));
+    } catch {
+      // unknown: leave those records as they are
+    }
+
+  const list = reconcileTokenLocks(local, found, spends);
+  const known = new Set(local.map((r) => r.outpoint));
+  saveTokenLocks(account, list, cs);
+  markTokenLocksScanned(account);
+  return { found: found.length, added: found.filter((r) => !known.has(r.outpoint)).length, list };
+}
+
+const inflight = new Map<string, Promise<TokenLockScan>>();
+
+/** findTokenLocks, with one scan per account at a time (the sheet, the Locks tab and the wallet share it). */
+export function scanTokenLocks(
+  ctx: OneSatContext,
+  account: string,
+  cs?: ChromeStorageService,
+  onProgress?: (detail: string) => void,
+): Promise<TokenLockScan> {
+  const running = inflight.get(account);
+  if (running) return running;
+  const p = findTokenLocks(ctx, account, cs, onProgress).finally(() => inflight.delete(account));
+  inflight.set(account, p);
+  return p;
 }
 
 /**
