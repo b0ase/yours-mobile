@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useBackClose } from '../backStack';
 import { createPortal } from 'react-dom';
 import { listOrdinals } from '@1sat/actions';
@@ -6,6 +6,7 @@ import { mintMedia } from './mintMedia';
 import {
   AppWindow,
   BookOpen,
+  Bot,
   Box,
   Clapperboard,
   Coins,
@@ -23,6 +24,9 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { setAgentDraft } from '../agent/handoff';
+import { openAgentCreate } from '../agents/agentCreate';
+import { BottomMenuContext } from '../../contexts/BottomMenuContext';
+import { routeFor } from '../tabs/tabs';
 import { isBWalletX } from '../storeBuild';
 import { SendConfirmation } from '../../components/SendConfirmation';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -176,6 +180,18 @@ export const MintSheet = ({
   const startTile = start ? MINT_TILES.find((t) => t.id === start && t.when() && (t.media || t.step)) : undefined;
   const [step, setStep] = useState<Step>(startTile ? (startTile.media ? 'media' : startTile.step!) : 'choose');
   const navigate = useNavigate();
+  const selectTab = useContext(BottomMenuContext)?.handleSelect;
+  // An agent account: close this sheet, then Settings › Add account with the Agent switch on.
+  const openElsewhere = () => {
+    onClose();
+    openAgentCreate(selectTab, navigate, routeFor('settings'));
+  };
+  // The bMint hub links /m/bmint/mint/agent-account: hand straight over.
+  useEffect(() => {
+    if (start && MINT_TILES.some((t) => t.id === start && t.when() && t.opens)) openElsewhere();
+    // Once, on open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // What the media step accepts and calls itself, set by the tile that opened it.
   const [media, setMedia] = useState<{ accept: string; label: string }>(
     startTile?.media ?? {
@@ -262,6 +278,7 @@ export const MintSheet = ({
       setKindSel(t.kind ?? null);
       setStep('media');
     } else if (t.step) setStep(t.step);
+    else if (t.opens) openElsewhere();
     else if (t.agent) {
       setAgentDraft(t.agent);
       onClose();
@@ -898,6 +915,8 @@ type MintTile = {
   kind?: MintKind;
   step?: Step;
   agent?: string;
+  /** Opens a flow outside this sheet: 'agent-account' = Account menu › Add agent account (agents/agentCreate.ts). */
+  opens?: 'agent-account';
 };
 
 /**
@@ -971,7 +990,7 @@ const MINT_TILES: MintTile[] = [
   {
     id: 'coin',
     icon: <Coins size={18} />,
-    title: 'A coin or memecoin',
+    title: 'A token or memecoin',
     sub: 'Your own token, fixed supply',
     when: () => CHOICES.has('token'),
     step: 'token',
@@ -1001,6 +1020,14 @@ const MINT_TILES: MintTile[] = [
     when: () => isBWalletX(),
     agent:
       'Help me create a strategy to mint and sell. Ask me what it should do, which tokens, the budget, when it stops and the price.',
+  },
+  {
+    id: 'agent-account',
+    icon: <Bot size={18} />,
+    title: 'An agent account',
+    sub: 'A wallet account your agent trades from, at machine speed',
+    when: () => isBWalletX(),
+    opens: 'agent-account',
   },
   {
     id: 'app',

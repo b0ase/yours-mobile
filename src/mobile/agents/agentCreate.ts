@@ -39,6 +39,20 @@ export const consumeAgentCreate = (identityAddress: string) => {
 /** Account menu › Add agent account: Add account opens with the Agent switch already on (owner, 6 Oct 2026). */
 export const startAgentCreate = () => writeFlag(true);
 
+/**
+ * Mint › An agent account (owner, 22 Oct 2026): the same as Account menu › Add agent account. Sets the flag, selects
+ * Settings › create-account, then routes there (selecting an already-selected Settings changes nothing on its own).
+ */
+export const openAgentCreate = (
+  selectTab: ((item: 'settings', query?: string) => void) | undefined,
+  navigate: (to: string) => void,
+  settingsRoute: string | null | undefined,
+) => {
+  startAgentCreate();
+  selectTab?.('settings', 'create-account');
+  if (settingsRoute) navigate(settingsRoute);
+};
+
 /** The Agent account switch on Add account. */
 export const setAgentCreate = (on: boolean) => writeFlag(on);
 
