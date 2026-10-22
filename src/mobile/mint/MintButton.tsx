@@ -66,6 +66,18 @@ import {
   validateKindFields,
   type MintKind,
 } from './mintKinds';
+import { MINT_SOURCES, mintSource, type MintSourceId } from './mintSources';
+import { FaFacebook, FaInstagram, FaLinkedin, FaSoundcloud, FaTiktok, FaXTwitter, FaYoutube } from 'react-icons/fa6';
+
+const SOURCE_ICONS: Record<MintSourceId, typeof FaYoutube> = {
+  youtube: FaYoutube,
+  x: FaXTwitter,
+  instagram: FaInstagram,
+  tiktok: FaTiktok,
+  facebook: FaFacebook,
+  linkedin: FaLinkedin,
+  soundcloud: FaSoundcloud,
+};
 
 /** Cover / poster picture: a small JPEG so the companion inscription stays cheap. */
 const POSTER_EDGE = 512;
@@ -168,6 +180,7 @@ export const MintSheet = ({
   );
   const [picked, setPicked] = useState<Picked | null>(null);
   const [kindSel, setKindSel] = useState<MintKind | null>(startTile?.kind ?? null);
+  const [source, setSource] = useState<MintSourceId | null>(null);
   const [artist, setArtist] = useState('');
   const [album, setAlbum] = useState('');
   const [track, setTrack] = useState('');
@@ -237,6 +250,23 @@ export const MintSheet = ({
       return f ? { file: f, url: URL.createObjectURL(f) } : null;
     });
   };
+
+  const openTile = (t: MintTile) => {
+    if (t.media) {
+      setMedia(t.media);
+      setKindSel(t.kind ?? null);
+      setStep('media');
+    } else if (t.step) setStep(t.step);
+    else if (t.agent) {
+      setAgentDraft(t.agent);
+      onClose();
+      navigate('/m/ask-b');
+    }
+  };
+  // A platform's "Pick the file" opens the same media tile as tapping it (its type); platforms whose type has no
+  // visible tile are not shown.
+  const tileForKind = (kind: MintKind) => MINT_TILES.find((t) => t.when() && t.media && t.kind === kind);
+  const sources = MINT_SOURCES.filter((s) => tileForKind(s.kind));
 
   const pick = async (file: File | undefined) => {
     setFileError('');
@@ -417,26 +447,67 @@ export const MintSheet = ({
               What do you want to make? Everything you mint is yours on chain: sell it, send it, or let people collect
               it.
             </p>
+            {sources.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <span className="text-xs font-bold" style={{ color: '#ccc' }}>
+                  Mint what you already post
+                </span>
+                <div className="flex gap-2 overflow-x-auto pb-1" role="group" aria-label="Mint what you already post">
+                  {sources.map((s) => {
+                    const Icon = SOURCE_ICONS[s.id];
+                    const on = source === s.id;
+                    return (
+                      <button
+                        key={s.id}
+                        type="button"
+                        aria-pressed={on}
+                        aria-label={`How to mint from ${s.label}`}
+                        onClick={() => setSource(on ? null : s.id)}
+                        className="flex shrink-0 flex-col items-center gap-1 rounded-xl border px-3 py-2 cursor-pointer bg-transparent"
+                        style={{ borderColor: on ? GOLD : BORDER, color: on ? GOLD : '#ccc' }}
+                      >
+                        <Icon size={20} aria-hidden="true" />
+                        <span className="text-[11px]">{s.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {source &&
+                  (() => {
+                    const s = mintSource(source)!;
+                    return (
+                      <div
+                        className="flex flex-col gap-2 rounded-xl border p-3"
+                        style={{ borderColor: BORDER }}
+                        aria-live="polite"
+                      >
+                        {s.steps.map((line) => (
+                          <p key={line} className="text-xs m-0" style={{ color: '#ccc' }}>
+                            {line}
+                          </p>
+                        ))}
+                        <p className="text-xs m-0" style={{ color: '#999' }}>
+                          Only mint what you made or own. Menus change now and then.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const t = tileForKind(s.kind);
+                            if (t) openTile(t);
+                          }}
+                          className="self-start rounded-lg px-3 py-2 text-xs font-bold border-0 cursor-pointer"
+                          style={{ background: GOLD, color: '#1a1400' }}
+                        >
+                          Pick the file
+                        </button>
+                      </div>
+                    );
+                  })()}
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-2">
               {MINT_TILES.filter((t) => t.when()).map((t) => (
-                <Tile
-                  key={t.id}
-                  icon={t.icon}
-                  title={t.title}
-                  sub={t.sub}
-                  onClick={() => {
-                    if (t.media) {
-                      setMedia(t.media);
-                      setKindSel(t.kind ?? null);
-                      setStep('media');
-                    } else if (t.step) setStep(t.step);
-                    else if (t.agent) {
-                      setAgentDraft(t.agent);
-                      onClose();
-                      navigate('/m/ask-b');
-                    }
-                  }}
-                />
+                <Tile key={t.id} icon={t.icon} title={t.title} sub={t.sub} onClick={() => openTile(t)} />
               ))}
             </div>
           </div>
