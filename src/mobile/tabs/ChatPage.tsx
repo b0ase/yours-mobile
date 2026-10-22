@@ -891,7 +891,14 @@ const Conversation = ({
         ref={scroller}
         onScroll={onScroll}
         className="bw-room-list flex-1 overflow-y-auto px-3 py-2"
-        style={{ background: 'radial-gradient(120% 60% at 50% 0%, #15130b 0%, #050505 60%)' }}
+        style={{
+          background:
+            ((room.metadata as { background?: unknown } | null | undefined)?.background as string | undefined) ||
+            'radial-gradient(120% 60% at 50% 0%, #15130b 0%, #050505 60%)',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundAttachment: 'fixed',
+        }}
       >
         {loadingOlder && (
           <div className="text-center text-[11px] py-2" style={{ color: MUTED }}>

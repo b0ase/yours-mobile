@@ -152,6 +152,7 @@ export const RoomSettingsSheet = ({
   const [spendAmt, setSpendAmt] = useState('');
   const [per, setPer] = useState<RoomSpendRule['per']>('message');
   const [to, setTo] = useState<RoomSpendRule['to'] | 'sats'>('burn');
+  const [backgroundUrl, setBackgroundUrl] = useState('');
 
   const load = useCallback(async () => {
     setError('');
@@ -245,6 +246,23 @@ export const RoomSettingsSheet = ({
   const pickCover = async (file: File | undefined) => {
     if (!file) return;
     await run('cover', async () => client.setRoomCover(ticker, await toCoverDataUrl(file)), 'Cover updated.');
+  };
+
+  const pickBackground = async (file: File | undefined) => {
+    if (!file) return;
+    await run('background', async () => client.setRoomBackground(ticker, await toCoverDataUrl(file)), 'Background updated.');
+  };
+
+  const setBackgroundByUrl = () => {
+    if (!backgroundUrl.trim()) {
+      setError('Background URL cannot be empty');
+      return;
+    }
+    void run(
+      'background',
+      async () => client.setRoomBackground(ticker, backgroundUrl.trim()),
+      'Background updated.',
+    ).then(() => setBackgroundUrl(''));
   };
 
   const isIssuer = !!challenge?.youAreIssuer;
@@ -405,6 +423,18 @@ export const RoomSettingsSheet = ({
                 onChange={(e) => void pickCover(e.target.files?.[0])}
               />
             </label>
+            <label
+              className="flex-1 text-center rounded-2xl py-2 text-sm text-white"
+              style={{ background: PANEL, border: `1px solid ${LINE}` }}
+            >
+              {busy === 'background' ? 'Uploading…' : 'Background'}
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="hidden"
+                onChange={(e) => void pickBackground(e.target.files?.[0])}
+              />
+            </label>
             <button
               onClick={onBans}
               className="flex-1 rounded-2xl py-2 text-sm text-white"
@@ -413,6 +443,26 @@ export const RoomSettingsSheet = ({
               Bans
             </button>
           </div>
+          <label className="text-xs mt-3" style={{ color: MUTED }}>
+            Background URL (e.g. share card image)
+            <div className="flex gap-2 mt-1">
+              <input
+                value={backgroundUrl}
+                onChange={(e) => setBackgroundUrl(e.target.value)}
+                placeholder="https://..."
+                className={`${inputCls} flex-1`}
+                style={{ background: PANEL, border: `1px solid ${LINE}` }}
+              />
+              <button
+                onClick={setBackgroundByUrl}
+                disabled={!!busy || !backgroundUrl.trim()}
+                className="rounded-2xl px-4 py-2 font-semibold text-sm disabled:opacity-50"
+                style={{ background: GOLD, color: '#1a1300' }}
+              >
+                {busy === 'background' ? '…' : 'Set'}
+              </button>
+            </div>
+          </label>
         </div>
       )}
 

@@ -922,6 +922,11 @@ export class BchatClient {
     await this.call('POST', `${BchatClient.path(ticker)}/cover`, { dataUrl });
   }
 
+  /** Issuer only (token rooms): set or clear (null) the background image (data URL or HTTPS URL). */
+  async setRoomBackground(ticker: string, backgroundUrl: string | null): Promise<void> {
+    await this.call('POST', `${BchatClient.path(ticker)}/background`, { backgroundUrl });
+  }
+
   /** Link wallet keys to the account: each proof is a DER signature over `message` by that key. */
   async proveAddresses(
     message: string,
