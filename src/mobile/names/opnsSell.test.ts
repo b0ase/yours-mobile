@@ -46,10 +46,10 @@ describe('price conversion', () => {
       123,
     );
     expect(b?.items.map((i) => [i.name, i.usd, i.sats, i.status])).toEqual([
-      ['alpha', 1, 2_000_000, 'pending'],
+      ['alpha', 10, 20_000_000, 'pending'],
       ['beta', 2.5, 5_000_000, 'pending'],
     ]);
-    expect(sellTotals(b as SellState)).toEqual({ count: 2, sats: 7_000_000, usd: 3.5 });
+    expect(sellTotals(b as SellState)).toEqual({ count: 2, sats: 25_000_000, usd: 12.5 });
     expect(newSellBatch([{ name: 'a', id: 'x' }], 0)).toBeNull();
     expect(newSellBatch([], 50)).toBeNull();
   });

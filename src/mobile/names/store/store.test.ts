@@ -15,18 +15,18 @@ const L = (name: string, seller = HOUSE, priceSats = 5_000_000): OpnsListing => 
 });
 
 describe('tier pricing', () => {
-  test('$1 for 5+, $5 for 4, $15 for 3 characters', () => {
-    expect(nameTierUsd('coffee')).toBe(1);
-    expect(nameTierUsd('bread')).toBe(1);
-    expect(nameTierUsd('cafe')).toBe(5);
-    expect(nameTierUsd('zqx')).toBe(15);
-    expect(NAME_TIERS.map((t) => t.usd)).toEqual([1, 5, 15]);
+  test('$10 for 5+, $50 for 4, $100 for 3, $500 for 1–2 characters', () => {
+    expect(nameTierUsd('coffee')).toBe(10);
+    expect(nameTierUsd('bread')).toBe(10);
+    expect(nameTierUsd('cafe')).toBe(50);
+    expect(nameTierUsd('zqx')).toBe(100);
+    expect(nameTierUsd('ab')).toBe(500);
+    expect(NAME_TIERS.map((t) => t.usd)).toEqual([10, 50, 100, 500]);
   });
-  test('1–2 characters and the premium shortlist are offers only', () => {
-    expect(nameTierUsd('ab')).toBeNull();
+  test('the premium shortlist is offers only', () => {
     expect(isPremiumName('b0ase')).toBe(true);
     expect(nameTierUsd('b0ase')).toBeNull();
-    expect(lengthTierUsd('b0ase')).toBe(1);
+    expect(lengthTierUsd('b0ase')).toBe(10);
     expect(offerHref('b0ase')).toContain('mailto:support@bwalletx.com');
   });
   test('List selected and auto-list use the tier; premium names are skipped unless priced', () => {
@@ -39,8 +39,8 @@ describe('tier pricing', () => {
       50,
     )!;
     expect(b.items.map((i) => [i.name, i.usd])).toEqual([
-      ['coffee', 1],
-      ['cafe', 5],
+      ['coffee', 10],
+      ['cafe', 50],
     ]);
     const priced = newSellBatch([{ name: 'b0ase', id: 'c' }], 50, { b0ase: 500 })!;
     expect(priced.items[0].usd).toBe(500);
