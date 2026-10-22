@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Copy, Eye, Fingerprint, Lock } from 'lucide-react';
+import { PasskeyUnlockButton } from '../mobile/passkey/PasskeyCreate';
+import { SEEDLESS_ENABLED } from '../mobile/passkey/prf';
 import { getPlatform } from '../platform';
 import { copyWithAutoClear, revealSeed, SeedRevealError } from '../utils/seedReveal';
 
@@ -184,6 +186,12 @@ export const ShowSeedWords = ({ accountLabel, verifyPassword, readMnemonic, onDo
             {busy ? 'Checking…' : 'Show my 12 words'}
           </button>
         </form>
+        {/* A wallet made with "Continue with a passkey" has a derived password nobody ever saw (23 Oct 2026). */}
+        {SEEDLESS_ENABLED && (
+          <div className="mt-3">
+            <PasskeyUnlockButton label="Use my passkey" onPassword={(pw) => void reveal({ password: pw })} />
+          </div>
+        )}
         {bioReady && quick?.verify && (
           <button
             className={`${secondary} mt-2 flex items-center justify-center gap-2`}
