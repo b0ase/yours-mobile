@@ -3,6 +3,7 @@ import { AccountNameField } from '../../components/AccountNameField';
 import { accountNameError, cleanAccountName, suggestAccountName } from '../../utils/accountNameRules';
 import { BetaGate } from '../../mobile/sweep/BetaGate';
 import { useNavigate } from 'react-router-dom';
+import { PasswordFields } from '../../mobile/names/PasswordFields';
 import { useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, CheckCircle, ChevronRight, FileUp, Plus, Upload, Usb } from 'lucide-react';
@@ -733,6 +734,21 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
           value={iconURL}
           onChange={(e) => setIconURL(e.target.value)}
         />
+        {/* Passkey restore in the extension (owner, 22 Oct 2026): a generated strong password, Copy, and a required
+        "I've saved it" tick, as on Create Account. The plain fields below stay byte-identical (vite.config.mobile.ts
+        patches them). */}
+        {viaExt && (
+          <PasswordFields
+            askSaved
+            newWallet
+            username={accountName}
+            password={password}
+            confirm={passwordConfirm}
+            setPassword={setPassword}
+            setConfirm={setPasswordConfirm}
+          />
+        )}
+        {!viaExt && (<>
         <Input
           theme={theme}
           placeholder={newWallet ? 'Password' : 'bWalletX password'}
@@ -749,6 +765,7 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
             onChange={(e) => setPasswordConfirm(e.target.value)}
           />
         </Show>
+        </>)}
         <div className="mt-3 w-full">
           <Button theme={theme} type="primary" label="Finish" disabled={loading} isSubmit />
         </div>
