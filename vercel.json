@@ -1,0 +1,149 @@
+{
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "Content-Security-Policy",
+          "value": "frame-ancestors 'none'"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "no-referrer"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        }
+      ]
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/agents",
+      "destination": "/agents.html"
+    },
+    {
+      "source": "/pink",
+      "destination": "/pink.html"
+    },
+    {
+      "source": "/blue",
+      "destination": "/blue.html"
+    },
+    {
+      "source": "/yellow",
+      "destination": "/yellow.html"
+    },
+    {
+      "source": "/vexvoid",
+      "destination": "/vexvoid.html"
+    },
+    {
+      "source": "/npg",
+      "destination": "/npg.html"
+    },
+    {
+      "source": "/npgx",
+      "destination": "/npgx.html"
+    },
+    {
+      "source": "/white",
+      "destination": "/white.html"
+    },
+    {
+      "source": "/desktop",
+      "destination": "/desktop.html"
+    },
+    {
+      "source": "/((?!assets/|icons/|api/)[^.]*)",
+      "destination": "/index.html"
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/opns-mint",
+      "destination": "/bmint/opns",
+      "permanent": true
+    },
+    {
+      "source": "/calls",
+      "destination": "/bphone",
+      "permanent": true
+    },
+    {
+      "source": "/calls/:path*",
+      "destination": "/bphone/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/bPhone",
+      "destination": "/bphone",
+      "permanent": true
+    },
+    {
+      "source": "/bPhone/:path*",
+      "destination": "/bphone/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/market",
+      "destination": "/exchange",
+      "permanent": true
+    },
+    {
+      "source": "/market/:path*",
+      "destination": "/exchange/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/media",
+      "destination": "/bmusic",
+      "permanent": true
+    },
+    {
+      "source": "/media/:path*",
+      "destination": "/bmusic/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/tickets",
+      "destination": "/wallet/tickets",
+      "permanent": true
+    },
+    {
+      "source": "/tickets/:path*",
+      "destination": "/wallet/tickets/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/credits",
+      "destination": "/wallet/credits",
+      "permanent": true
+    },
+    {
+      "source": "/credits/:path*",
+      "destination": "/wallet/credits/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/feed",
+      "destination": "/bchatx-feed",
+      "permanent": true
+    },
+    {
+      "source": "/feed/:path*",
+      "destination": "/bchatx-feed/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/bmusic/artist/:slug",
+      "destination": "/bmusic/artists/:slug",
+      "permanent": true
+    }
+  ]
+}
