@@ -24,22 +24,24 @@ export type ModuleId = (typeof MODULE_IDS)[number];
  * Card first, Ask b last (owner, 19 Oct 2026: "a great helper, but not the primary feature on the wallet screen").
  * No Store showcase by default in any edition (owner, 19 Oct 2026): it is an optional module added via Edit home.
  */
-export const DEFAULT_LAYOUT: readonly ModuleId[] = ['card', 'askB'];
+export const DEFAULT_LAYOUT: readonly ModuleId[] = ['card', 'appsSuite', 'askB'];
 /** Phone/web's earlier untouched defaults: an account still on one moves to today's default. */
 const OLD_DEFAULTS: readonly (readonly ModuleId[])[] = [
   ['card', 'askB', 'showcase'],
   ['card', 'showcase', 'askB'],
+  ['card', 'askB'],
 ];
 /**
  * Desktop (wide) is the classic wallet again (owner, 19 Oct 2026): the card column with Send / Receive / Mint, and
  * the side pane right of it with the BSV price, History and Holdings. The top bar is the Ask b prompt and the beta
  * banner carries Swap / Buy, so the home opens with the card alone; Edit home still adds modules under it.
  */
-export const WIDE_DEFAULT_LAYOUT: readonly ModuleId[] = ['card'];
+export const WIDE_DEFAULT_LAYOUT: readonly ModuleId[] = ['card', 'appsSuite'];
 /** Desktop's earlier untouched defaults (#283, #284): an account still on one of these moves to the new default. */
 const OLD_WIDE_DEFAULTS: readonly (readonly ModuleId[])[] = [
   ['card', 'askB', 'showcase'],
   ['card', 'askB', 'holdings', 'showcase'],
+  ['card'],
 ];
 /** The side pane already shows these on Desktop, so they are not home modules there. */
 export const WIDE_PANE_MODULES: readonly ModuleId[] = ['holdings', 'history', 'priceChart'];
