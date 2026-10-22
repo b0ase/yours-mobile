@@ -64,7 +64,7 @@ export type SwapRecord = {
   notified?: boolean;
 };
 
-export const FINAL: ReadonlySet<SwapStage> = new Set(['done', 'failed', 'refunded', 'expired']);
+export const FINAL: ReadonlySet<SwapStage> = /* @__PURE__ */ new Set(['done', 'failed', 'refunded', 'expired']);
 export const POLL_MS = 20_000;
 
 /** The four Track steps; index of the step reached for a stage (-1 = not started). */

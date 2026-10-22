@@ -4,7 +4,7 @@ import { APP_NAME, BUY_CRYPTO_ENABLED, SWAP_ENABLED } from '../storeBuild';
 import { swapRowButtons } from './allCardsOpen';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { useSnackbar } from '../../hooks/useSnackbar';
-import { useSwapWatcher } from '../swap/useSwapWatcher';
+import { useSwapWatcher as useSwapWatcherImpl } from '../swap/useSwapWatcher';
 import type { SwapRecord } from '../swap/swapApi';
 
 // Portfolio vs market (owner, 10 Oct 2026): the price tile opens it; its own chunk.
@@ -12,6 +12,10 @@ const PortfolioScreen = lazy(() => import('../portfolio/PortfolioScreen'));
 // Swap into BSV (bWalletX only): the chunk is dropped from a store build (SWAP_ENABLED).
 const SwapFlow = SWAP_ENABLED ? lazy(() => import('../swap/SwapFlow')) : null;
 const SwapPromo = SWAP_ENABLED ? lazy(() => import('../swap/SwapPromo')) : null;
+// The ChangeNOW swap watcher (finishes swaps, writes history) is bWalletX only: a no-op in a store build so the
+// swap API and its provider are not in the store bundle (App Review 3.1.5(iii)).
+const noSwaps: ReturnType<typeof useSwapWatcherImpl> = { swaps: [], active: [] };
+const useSwapWatcher: typeof useSwapWatcherImpl = SWAP_ENABLED ? useSwapWatcherImpl : () => noSwaps;
 import { createPortal } from 'react-dom';
 import { ArrowDownToLine, CreditCard, ExternalLink, Users, X } from 'lucide-react';
 import { useBackClose } from '../backStack';

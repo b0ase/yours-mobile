@@ -804,3 +804,22 @@ describe('THEME_STORE_PAID_ENABLED: store builds show Free themes only', () => {
     expect(page).not.toMatch(/Sell|Be the first|Selling opens soon|\$99/);
   });
 });
+
+describe('App Review 3.1.5(iii): no exchange surfaces in a store build', () => {
+  const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  test('the ChangeNOW swap watcher is a no-op unless SWAP_ENABLED, and its module has no side effects', () => {
+    expect(src('./wallet/BuyBsv.tsx')).toContain('SWAP_ENABLED ? useSwapWatcherImpl : () => noSwaps');
+    expect(src('./swap/useSwapWatcher.ts')).toContain('/* @__PURE__ */ new SwapApi()');
+    expect(src('./swap/swapApi.ts')).toContain('/* @__PURE__ */ new Set(');
+  });
+  test('the bApps reel has no "Trade tokens" text outside MARKET_ENABLED', () => {
+    expect(src('./feed/reels/bappsCards.ts')).toMatch(/MARKET_ENABLED \? \{ bExchange: 'Trade tokens/);
+  });
+  test('selling names, agent buying and trading strategies are gated by MARKET_ENABLED', () => {
+    expect(src('./names/store/NameStorePage.tsx')).toContain('MARKET_ENABLED && o.listedSats ?');
+    expect(src('./agents/agentTrade.ts')).toContain("if (!MARKET_ENABLED && a.kind !== 'send')");
+    expect(src('./agents/AgentsScreen.tsx')).toContain('{MARKET_ENABLED && <StrategySection id={id} />}');
+    expect(src('./agent/AgentConversation.tsx')).toContain('!MARKET_ENABLED || baseSystem === BWALLET_GUIDE');
+    expect(src('./agent/guide.ts')).toContain('MARKET_ENABLED ? MARKET_LINE : STORE_MARKET_LINE');
+  });
+});

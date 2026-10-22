@@ -8,6 +8,7 @@
  * builder, linear, no self-pay; 0 until the server reports it), A–Z.
  */
 import type { BApp } from '../../bapps';
+import { MARKET_ENABLED } from '../../storeBuild';
 
 /** Who built an app. Our own suite is built by Bitcoin Corp, paid at the owner's handle. */
 export type Builder = { name: string; handle?: string; paymail?: string };
@@ -159,7 +160,7 @@ export const BAPP_ABOUT: Readonly<Record<string, string>> = {
   bAgents: 'Set up AI agents and give each one a budget to spend.',
   bSocial: 'Post and follow people on Bitcoin.',
   bGames: 'Play games where you can stake BSV.',
-  bExchange: 'Trade tokens, with prices from several exchanges in one place.',
+  ...(MARKET_ENABLED ? { bExchange: 'Trade tokens, with prices from several exchanges in one place.' } : {}),
   bMaps: 'A map of places that accept Bitcoin.',
 };
 
