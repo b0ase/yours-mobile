@@ -8,7 +8,7 @@ import { ErrorActions } from '../errors/ErrorActions';
 import { TokenMint } from '../tokens/TokenMint';
 import { wocTxUrl } from '../mint/mint';
 import {
-  domainCoinDescription,
+  domainTokenDescription,
   domainMapScript,
   loadPending,
   lookupTxt,
@@ -26,7 +26,7 @@ import {
 } from './dnsdex';
 
 /**
- * MINT → "A domain" (dnsdex.ts): get the dns-dex TXT record, add it at the registrar, check it, mint the coin with
+ * MINT → "A domain" (dnsdex.ts): get the dns-dex TXT record, add it at the registrar, check it, mint the token with
  * the normal token form (pre-filled), then list it on dns-dex.com. A failed listing never undoes the mint: it is kept
  * as pending (survives a reload) with Try again.
  */
@@ -133,14 +133,14 @@ export const DomainMint = ({
     return (
       <div className="flex flex-col gap-3 text-sm">
         <p className="text-xs m-0" style={{ color: '#9ccc65' }}>
-          ✓ {domain} is verified. Now set up its coin.
+          ✓ {domain} is verified. Now set up its token.
         </p>
         <TokenMint
           exchangeRate={exchangeRate}
           onBack={() => setView({ at: 'record', rec: view.rec })}
           onClose={onClose}
-          initial={{ name: domain, ticker: suggestDomainTicker(domain), description: domainCoinDescription(domain) }}
-          map={{ script: domainMapScript(domain), description: 'bWallet domain coin (MAP)' }}
+          initial={{ name: domain, ticker: suggestDomainTicker(domain), description: domainTokenDescription(domain) }}
+          map={{ script: domainMapScript(domain), description: 'bWallet domain token (MAP)' }}
           onMinted={(t) => minted(domain, t.tokenId)}
         />
       </div>
@@ -151,7 +151,7 @@ export const DomainMint = ({
     const { listing, url } = view;
     return (
       <div className="flex flex-col gap-3 text-sm">
-        <p className="m-0">The coin for {listing.domain} is minted and in your wallet.</p>
+        <p className="m-0">The token for {listing.domain} is minted and in your wallet.</p>
         <a
           href={wocTxUrl(listing.tokenId.split('_')[0])}
           target="_blank"
@@ -174,7 +174,7 @@ export const DomainMint = ({
         ) : busy ? null : (
           <>
             <p className="text-xs m-0" style={{ color: '#bbb' }}>
-              It isn't listed on dns-dex.com yet. Your coin is safe either way; listing just tells dns-dex about it.
+              It isn't listed on dns-dex.com yet. Your token is safe either way; listing just tells dns-dex about it.
             </p>
             <button
               type="button"
@@ -267,8 +267,8 @@ export const DomainMint = ({
   return (
     <div className="flex flex-col gap-3 text-sm">
       <p className="text-xs m-0" style={{ color: '#bbb' }}>
-        Prove you own a domain, then mint its coin in your wallet. dns-dex.com checks a DNS record you add and lists the
-        coin.
+        Prove you own a domain, then mint its token in your wallet. dns-dex.com checks a DNS record you add and lists
+        the token.
       </p>
       {pending.map((p) => (
         <div

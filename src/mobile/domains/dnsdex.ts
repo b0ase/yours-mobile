@@ -1,5 +1,5 @@
 /**
- * Mint › "A domain": prove you own a domain through dns-dex.com's DNS check, then mint a real BSV-21 coin for it
+ * Mint › "A domain": prove you own a domain through dns-dex.com's DNS check, then mint a real BSV-21 token for it
  * in this wallet and list it on dns-dex.com. Pure helpers + the dns-dex client; the sheet is DomainMint.tsx.
  *
  * Contract with dns-dex (v1):
@@ -68,9 +68,9 @@ export const suggestDomainTicker = (domain: string) => {
   return isTicker(t) ? t : '';
 };
 
-export const domainCoinDescription = (domain: string) => `Coin for ${domain}, verified on dns-dex.com`;
+export const domainTokenDescription = (domain: string) => `Token for ${domain}, verified on dns-dex.com`;
 
-/** MAP tag on the deploy tx: `app=bWallet type=domain domain=<d>`, so the coin itself names its domain. */
+/** MAP tag on the deploy tx: `app=bWallet type=domain domain=<d>`, so the token itself names its domain. */
 export function domainMapScript(domain: string): LockingScript {
   const s = new LockingScript();
   s.writeOpCode(OP.OP_FALSE).writeOpCode(OP.OP_RETURN);
@@ -211,7 +211,7 @@ export async function lookupTxt(name: string, f: Fetch = fetch): Promise<string[
   throw lastError instanceof Error ? lastError : new Error("Couldn't look up DNS right now. Try again.");
 }
 
-// ── coins minted but not yet listed (retry survives a reload) ──
+// ── tokens minted but not yet listed (retry survives a reload) ──
 
 export interface PendingListing {
   domain: string;

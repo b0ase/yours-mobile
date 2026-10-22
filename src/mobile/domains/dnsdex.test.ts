@@ -8,7 +8,7 @@ import {
   DOMAIN_SIGN_KEY_ID,
   DOMAIN_SIGN_PROTOCOL,
   canonicalMessage,
-  domainCoinDescription,
+  domainTokenDescription,
   domainMapScript,
   loadPending,
   lookupTxt,
@@ -66,13 +66,18 @@ describe('ticker and description', () => {
       'xn--bcher-kva.de',
       'a-very-long-domain-name-indeed.example.com',
     ]) {
-      const f = { ...emptyTokenForm(), name: d, ticker: suggestDomainTicker(d), description: domainCoinDescription(d) };
+      const f = {
+        ...emptyTokenForm(),
+        name: d,
+        ticker: suggestDomainTicker(d),
+        description: domainTokenDescription(d),
+      };
       expect(validateToken(f, { check: () => ({ blocked: false }) } as never)).toBeNull();
     }
     expect(suggestDomainTicker('example.com')).toBe('EXAMPLE-COM');
   });
   test('description never trips the returns guard', () => {
-    expect(hasReturnsWording(domainCoinDescription('example.com'))).toBe(false);
+    expect(hasReturnsWording(domainTokenDescription('example.com'))).toBe(false);
   });
   test('MAP tag names the domain', () => {
     const asm = Utils.toUTF8(domainMapScript('example.com').toBinary());

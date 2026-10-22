@@ -436,7 +436,7 @@ export const MintSheet = ({
               : step === 'token'
                 ? 'Mint a token'
                 : step === 'domain'
-                  ? 'Mint a domain coin'
+                  ? 'Tokenise a domain'
                   : step === 'choose'
                     ? 'Mint'
                     : step === 'done'
@@ -980,7 +980,7 @@ const MINT_TILES: MintTile[] = [
     id: 'domain',
     icon: <LinkIcon size={18} />,
     title: 'A domain',
-    sub: 'Prove you own it, then mint its coin',
+    sub: 'Prove you own it, then tokenise it',
     when: () => CHOICES.has('token'),
     step: 'domain',
   },
