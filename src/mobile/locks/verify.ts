@@ -6,7 +6,7 @@
  * the chain enforces), compares them with the receipt's claims, and reports the live status.
  * verifyLockTx does the fetching (WhatsOnChain) and is shared by the app and bwalletx.com/lock/verify.
  */
-import { Lock } from '@1sat/templates';
+import { BSV21, Lock } from '@1sat/templates';
 import { Transaction } from '@bsv/sdk';
 import { describeReceipt, parseReceipt, type Receipt } from './receipt';
 
@@ -17,6 +17,8 @@ export type VerifiedLock = {
   address: string;
   spent: boolean;
   matured: boolean;
+  /** A BSV-21 token lock: the token id and amount (base units) the script carries. */
+  token?: { id: string; amt: string };
 };
 export type VerifyStatus = 'Locked' | 'Partly claimed' | 'Fully claimed' | 'No locks';
 export type VerifyResult = {
@@ -40,7 +42,13 @@ export function checkLockTx(rawHex: string, spent: Set<number>, height: number):
   tx.outputs.forEach((o, vout) => {
     const d = Lock.decode(o.lockingScript);
     if (d && (o.satoshis ?? 0) > 0) {
+      const t = BSV21.decode(o.lockingScript);
+      const token =
+        t && t.tokenData.op === 'transfer' && t.tokenData.id
+          ? { id: t.tokenData.id, amt: String(t.getAmount()) }
+          : undefined;
       locks.push({
+        ...(token ? { token } : {}),
         vout,
         height: d.until,
         sats: o.satoshis ?? 0,
@@ -63,6 +71,14 @@ export function checkLockTx(rawHex: string, spent: Set<number>, height: number):
         if (l.height !== s.height) problems.push(`Output ${s.vout} unlocks at block ${l.height}, not ${s.height}.`);
         if (l.sats !== s.sats) problems.push(`Output ${s.vout} holds ${l.sats} sats, not ${s.sats}.`);
         if (l.address !== r.lockAddress) problems.push(`Output ${s.vout} is locked to a different key.`);
+        if (r.token) {
+          if (!l.token) problems.push(`Output ${s.vout} holds no tokens.`);
+          else {
+            if (l.token.id !== r.token.id) problems.push(`Output ${s.vout} holds a different token.`);
+            if (l.token.amt !== r.token.amt)
+              problems.push(`Output ${s.vout} holds ${l.token.amt} token units, not ${r.token.amt}.`);
+          }
+        } else if (l.token) problems.push(`Output ${s.vout} is a token lock, but the receipt is for BSV.`);
       }
     }
     if (r.schedule.length !== locks.length)
