@@ -15,6 +15,7 @@ import {
   Globe,
   Image as ImageIcon,
   LineChart,
+  Link as LinkIcon,
   Music,
   Sparkles,
   Ticket,
@@ -29,6 +30,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { getOutputName } from '../../utils/format';
 import { TicketMint } from '../tickets/TicketMint';
 import { TokenMint } from '../tokens/TokenMint';
+import { DomainMint } from '../domains/DomainMint';
 import { mintChoicesFor } from '../storeBuild';
 
 /** Store build: media (NFT) only (storeBuild.ts). */
@@ -115,7 +117,7 @@ const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#17191E';
 const BORDER = '#3a2f0c';
 
-type Step = 'choose' | 'ticket' | 'token' | 'media' | 'done';
+type Step = 'choose' | 'ticket' | 'token' | 'domain' | 'media' | 'done';
 /** `type` is the content type to inscribe (3D: from magic bytes, not the browser's guess). */
 type Picked = { file: File; url: string; type: string };
 
@@ -430,11 +432,13 @@ export const MintSheet = ({
               ? 'Mint tickets'
               : step === 'token'
                 ? 'Mint a token'
-                : step === 'choose'
-                  ? 'Mint'
-                  : step === 'done'
-                    ? 'Minted'
-                    : 'Mint'}
+                : step === 'domain'
+                  ? 'Mint a domain coin'
+                  : step === 'choose'
+                    ? 'Mint'
+                    : step === 'done'
+                      ? 'Minted'
+                      : 'Mint'}
           </span>
           <button type="button" onClick={onClose} className="bg-transparent border-0 cursor-pointer" aria-label="Close">
             <X size={20} color="#aaa" />
@@ -519,6 +523,10 @@ export const MintSheet = ({
 
         {step === 'token' && CHOICES.has('token') && (
           <TokenMint exchangeRate={exchangeRate} onBack={() => setStep('choose')} onClose={onClose} />
+        )}
+
+        {step === 'domain' && CHOICES.has('token') && (
+          <DomainMint exchangeRate={exchangeRate} onBack={() => setStep('choose')} onClose={onClose} />
         )}
 
         {step === 'media' && (
@@ -959,6 +967,14 @@ const MINT_TILES: MintTile[] = [
     sub: 'Your own token, fixed supply',
     when: () => CHOICES.has('token'),
     step: 'token',
+  },
+  {
+    id: 'domain',
+    icon: <LinkIcon size={18} />,
+    title: 'A domain',
+    sub: 'Prove you own it, then mint its coin',
+    when: () => CHOICES.has('token'),
+    step: 'domain',
   },
   {
     id: 'contract',
