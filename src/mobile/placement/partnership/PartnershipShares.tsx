@@ -277,6 +277,8 @@ function Partnership({ api, ticker, name }: { api: BsharesApi; ticker: string; n
         })}
       {s.myKey && accountKeyset && (
         <SharedAccount
+          api={api}
+          ticker={ticker}
           partnershipId={s.partnershipId}
           keyset={accountKeyset}
           keys={s.keys.map((k) => ({ handle: k.handle, partnerKey: k.partnerKey.toLowerCase() }))}

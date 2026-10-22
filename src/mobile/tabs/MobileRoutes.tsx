@@ -5,6 +5,7 @@ import { SectionBoundary } from '../wallet/SectionBoundary';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { BannerActions } from '../../web/BannerActions';
 import { ReportOutboxRunner } from '../agent/reportSend';
+import { OpenPartnerRequest } from '../placement/partnership/OpenPartnerRequest';
 import {
   ARTIST_PROGRAMME_ENABLED,
   BPOSITIVE_ENABLED,
@@ -109,6 +110,8 @@ const MobileRoutes = () => (
       <BannerActions />
       {/* Sends reports to b that couldn't go at the time (agent/reportOutbox.ts). */}
       <ReportOutboxRunner />
+      {/* A tapped shared-account request push opens the Lock page (placement/partnership/openRequest.ts). */}
+      <OpenPartnerRequest />
       <Routes>
         <Route path="settings" element={<SettingsHub />} />
         {/* The top bar's Play button: music & video. */}

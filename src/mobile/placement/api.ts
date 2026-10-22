@@ -4,6 +4,7 @@ import type { ExcessChoice } from './minute';
 import type { BsharesMe, PlacementOffer } from './placement';
 import type { CompanyListing } from './company';
 import type { PartnerLockState, PartnerLockAction } from './partnership/lockState';
+import type { AccountMailboxAction, AccountMailboxState } from './partnership/accountMailbox';
 import type { AgreementVersion, Partner } from './partnership/partnership';
 import type { TransferRule } from './partnership/partnerLock';
 
@@ -173,17 +174,26 @@ export class BsharesApi {
    * Report a move the wallet has ALREADY broadcast. The server reads the tx from WhatsOnChain and checks it is the
    * agreed move; "isn't visible on chain yet" (409) is retried with backoff.
    */
-  reportBroadcast = async (ticker: string, id: string, txid: string, waits = [2000, 4000, 8000, 15000]) => {
-    for (let i = 0; ; i++) {
-      try {
-        return await this.partnerLockAction(ticker, { action: 'broadcast', id, txid });
-      } catch (e) {
-        const notYet = e instanceof ChatApiError && e.status === 409 && /visible on chain/i.test(e.message);
-        if (!notYet || i >= waits.length) throw e;
-        await new Promise((r) => setTimeout(r, waits[i]));
-      }
-    }
-  };
+  reportBroadcast = (ticker: string, id: string, txid: string, waits = [2000, 4000, 8000, 15000]) =>
+    untilOnChain(() => this.partnerLockAction(ticker, { action: 'broadcast', id, txid }), waits);
+  /** Same as reportBroadcast, for a shared-account payment (idempotent: a repeat answers { ok, already }). */
+  reportAccountBroadcast = (ticker: string, id: string, txid: string, waits = [2000, 4000, 8000, 15000]) =>
+    untilOnChain(() => this.partnerAccountAction(ticker, { action: 'broadcast', id, txid }), waits);
+  /** The shared account's open payment requests (partners only). */
+  partnerAccount = (ticker: string) =>
+    this.call<AccountMailboxState>(
+      'GET',
+      `/${encodeURIComponent(ticker)}/account`,
+      undefined,
+      '/api/bitsign/bshares/partnership',
+    );
+  partnerAccountAction = (ticker: string, body: AccountMailboxAction) =>
+    this.call<{ ok: true; id?: string; added?: number; ready?: boolean; already?: boolean }>(
+      'POST',
+      `/${encodeURIComponent(ticker)}/account`,
+      body,
+      '/api/bitsign/bshares/partnership',
+    );
   /** The room's partnership: active agreement, open draft, who has signed (room members only). */
   partnership = (ticker: string) =>
     this.call<PartnershipRecord>(
@@ -215,4 +225,17 @@ export class BsharesApi {
       body,
       '/api/bitsign/bshares/partnership',
     );
+}
+
+/** Runs a broadcast report, retrying with backoff while the server says the tx "isn't visible on chain yet" (409). */
+async function untilOnChain<T>(report: () => Promise<T>, waits: number[]): Promise<T> {
+  for (let i = 0; ; i++) {
+    try {
+      return await report();
+    } catch (e) {
+      const notYet = e instanceof ChatApiError && e.status === 409 && /visible on chain/i.test(e.message);
+      if (!notYet || i >= waits.length) throw e;
+      await new Promise((r) => setTimeout(r, waits[i]));
+    }
+  }
 }

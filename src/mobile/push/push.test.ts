@@ -168,3 +168,21 @@ describe('sign-in alert taps', () => {
     expect(routeFromQuery(`?${routeToQuery(r!)}`)).toEqual({ segment: 'signins', ticker: '' });
   });
 });
+
+describe('shared account request taps', () => {
+  test('partner_account_request opens that partnership request (not the chat room), and survives Web Push', () => {
+    const id = 'b1d0c2e4-0000-4000-8000-000000000001';
+    const r = routeFromData({ kind: 'partner_account_request', ticker: 'acme', id, url: '/m/lock' });
+    expect(r).toEqual({ segment: 'partner', ticker: 'ACME', id });
+    expect(routeFromQuery(`?${routeToQuery(r!)}`)).toEqual(r);
+    expect(routeFromData({ kind: 'partner_account_sent', ticker: 'ACME' })).toEqual({
+      segment: 'partner',
+      ticker: 'ACME',
+    });
+    expect(routeFromData({ kind: 'partner_account_request', ticker: 'ACME', id: '../x' })).toEqual({
+      segment: 'partner',
+      ticker: 'ACME',
+    });
+    expect(routeFromQuery('?push=partner:ACME/..%2Fx')).toBeNull();
+  });
+});
