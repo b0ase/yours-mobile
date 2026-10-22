@@ -443,7 +443,7 @@ export const NameStorePage = () => {
                   {t.label} <span style={{ color: MUTED }}>{fmtUsd(t.usd)}</span>
                 </li>
               ))}
-              <li>Shorter or special names: make an offer</li>
+              <li>Special names: make an offer</li>
             </ul>
           )}
         </form>

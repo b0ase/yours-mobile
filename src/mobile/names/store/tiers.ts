@@ -5,15 +5,18 @@ import premiumList from './premiumNames.json';
  * at the live rate when the name is listed or bought. Every place that prices a name reads this module:
  * the Name Store (/names), bMint › OpNS names "List selected" and the auto-list after a mint.
  *
- *   5+ characters  $1
- *   4 characters   $5
- *   3 characters   $15
- *   1–2 characters and the owner's premium shortlist: not sold at a tier price ("Make an offer").
+ *   5+ characters  $10
+ *   4 characters   $50
+ *   3 characters   $100
+ *   1–2 characters $500
+ *   The owner's premium shortlist: not sold at a tier price ("Make an offer").
+ * Raised 22 Oct 2026 (owner) so nobody can corner the market cheaply while short names are held for renting.
  */
 export const NAME_TIERS: readonly { minLength: number; usd: number; label: string }[] = [
-  { minLength: 5, usd: 1, label: '5+ characters' },
-  { minLength: 4, usd: 5, label: '4 characters' },
-  { minLength: 3, usd: 15, label: '3 characters' },
+  { minLength: 5, usd: 10, label: '5+ characters' },
+  { minLength: 4, usd: 50, label: '4 characters' },
+  { minLength: 3, usd: 100, label: '3 characters' },
+  { minLength: 1, usd: 500, label: '1–2 characters' },
 ];
 
 /** Where "Make an offer" goes when there is no chat to open. */
