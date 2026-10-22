@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { BadgeCheck, Loader2 } from 'lucide-react';
-import { HANDCASH_SIGNIN_ENABLED, socialLoginEnabled } from '../storeBuild';
+import { socialLoginEnabled } from '../storeBuild';
 import { BWALLET_PAYMAIL_DOMAIN } from '../names/config';
 import { CAP, fill, getCapabilities } from '../names/names';
 
@@ -26,7 +26,6 @@ import {
   startSocial,
   type SocialProvider,
 } from './socialLogin';
-import { HandCashSignIn } from './HandCashSignIn';
 
 /** bWalletX Desktop (Tauri): the X / Google redirect can't come back into the app, so the buttons can't work there. */
 const inDesktopApp = () =>
@@ -213,9 +212,6 @@ export const SocialSignIn = ({
         {btn('x', check ? 'Check with X' : 'Continue with X', <XLogo />)}
         {btn('google', 'Google', <GoogleLogo />)}
       </div>
-      {HANDCASH_SIGNIN_ENABLED && !check && !desktop && (
-        <HandCashSignIn onHandle={(h) => onProfileRef.current({ name: h, avatar: '' })} />
-      )}
       <p className="text-[11px] mt-2 text-center" style={{ color: error ? '#FDA29B' : '#98A2B3' }}>
         {error ||
           (desktop
