@@ -29,7 +29,7 @@ import {
 } from './layout';
 import { useHomeLayout } from './useHomeLayout';
 import { WIDE_ON } from '../wide/flag';
-import { AskBModule, HistoryModule, MusicModule, NotificationsModule, PotsModule, PriceChartModule } from './modules';
+import { AskBModule, HistoryModule, MusicModule, NotificationsModule, PotsModule, PriceChartModule, AppsSuiteModule } from './modules';
 import './home.css';
 
 // Paid store content: its own chunk behind the inlined flag, so a store build never contains it.
@@ -136,6 +136,15 @@ const HOME_MODULES: Record<ModuleId, HomeModuleDef> = {
     size: 'half',
     store: true,
     Component: MusicModule,
+  },
+  appsSuite: {
+    id: 'appsSuite',
+    title: 'b Apps',
+    blurb: 'Chat, money, mint, movies, and more',
+    icon: LayoutGrid,
+    size: 'full',
+    store: true,
+    Component: AppsSuiteModule,
   },
 };
 

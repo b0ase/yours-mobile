@@ -262,3 +262,47 @@ export const MusicModule = () => {
     </Panel>
   );
 };
+
+// ── Apps Suite ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const BAPPS = [
+  { name: 'bChatX', url: 'https://bchatx.com', emoji: '💬' },
+  { name: 'bMoneyX', url: 'https://web.bwalletx.com', emoji: '💰' },
+  { name: 'bMintX', url: 'https://bwalletx.com/mint', emoji: '🪙' },
+  { name: 'bMoviesX', url: 'https://bmovies.app', emoji: '🎬' },
+  { name: 'bMusicX', url: 'https://bmusic.app', emoji: '🎵' },
+  { name: 'bWriterX', url: 'https://bitcoin-writer.com', emoji: '✍️' },
+  { name: 'bMailX', url: 'https://bmail.app', emoji: '📧' },
+  { name: 'bNewsX', url: 'https://bnewsx.com', emoji: '📰' },
+  { name: 'bJobsX', url: 'https://bjobsx.com', emoji: '💼' },
+  { name: 'bSharesX', url: 'https://bsharesx.com', emoji: '📊' },
+];
+
+export const AppsSuiteModule = () => {
+  const navigate = useNavigate();
+  return (
+    <Panel title="b Apps" icon={<span className="bw-home-ico">🚀</span>}>
+      <div className="grid grid-cols-3 gap-2">
+        {BAPPS.map((app) => (
+          <a
+            key={app.name}
+            href={app.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex flex-col items-center justify-center p-3 rounded-xl hover:opacity-80 transition-opacity"
+            style={{
+              background: 'rgba(245, 184, 0, 0.08)',
+              border: '1px solid rgba(245, 184, 0, 0.2)',
+            }}
+          >
+            <div className="text-2xl mb-1">{app.emoji}</div>
+            <div className="text-[10px] font-semibold text-center text-white leading-tight">{app.name}</div>
+          </a>
+        ))}
+      </div>
+      <p className="text-xs mt-3" style={{ color: '#8a8f98' }}>
+        Tap any app to open it. More coming soon.
+      </p>
+    </Panel>
+  );
+};

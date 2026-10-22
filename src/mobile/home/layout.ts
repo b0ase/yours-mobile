@@ -15,6 +15,7 @@ export const MODULE_IDS = [
   'pots',
   'notifications',
   'music',
+  'appsSuite',
   'holdings',
 ] as const;
 export type ModuleId = (typeof MODULE_IDS)[number];
