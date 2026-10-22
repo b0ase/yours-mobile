@@ -88,6 +88,9 @@ import { PHONE_ADD_TO_DOCK } from './phone/events';
 import type { DockItem } from './phone/dockModel';
 import { ErrorActions } from './errors/ErrorActions';
 import { accentById } from './theme/accents';
+import { SiteThemeOffer } from './theme/SiteThemeOffer';
+import { familySite, type ThemeSite } from './theme/themeSites';
+import { useServiceContext } from '../hooks/useServiceContext';
 import { useAccentId } from './theme/useAccent';
 
 // The VexVoid live set heads the Music (Media) section (owner, 16 Oct 2026); its own chunk, loaded on demand.
@@ -613,6 +616,10 @@ const BrowserPage = ({
   const reduce = useReducedMotion();
   const [address, setAddress] = useState('');
   const [error, setError] = useState('');
+  // A family site just opened: offer its colours (theme/siteTheme.ts). Never applied without the tap.
+  const [themeSite, setThemeSite] = useState<ThemeSite | null>(null);
+  const { chromeStorageService } = useServiceContext();
+  const accountKey = chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey ?? '';
   const [recent, setRecent] = useState(readRecent);
   const [favourites, setFavourites] = useState(readFavourites);
   // The dock puts an app back on Home when it leaves the dock (phone/homeFavourites.ts).
@@ -747,6 +754,7 @@ const BrowserPage = ({
 
   const go = (url: string, bapp?: BApp) => {
     setError('');
+    setThemeSite(familySite(url));
     rememberRecent(url);
     setRecent(readRecent());
     // Every app tile runs inside the wallet frame when its site allows it (else full screen);
@@ -1282,6 +1290,16 @@ const BrowserPage = ({
         </div>
       </div>
 
+      {themeSite &&
+        createPortal(
+          <div
+            className="fixed left-3 right-3 z-[120] flex justify-center"
+            style={{ bottom: 'calc(var(--dock-h, 3.75rem) + env(safe-area-inset-bottom) + 0.75rem)' }}
+          >
+            <SiteThemeOffer site={themeSite} account={accountKey} style={{ width: '100%', maxWidth: 520 }} />
+          </div>,
+          document.body,
+        )}
       {/* Portalled above the tab bar (z-100) so the sheet's buttons are never hidden behind it. */}
       {createPortal(
         <AnimatePresence>

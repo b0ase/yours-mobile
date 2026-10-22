@@ -29,6 +29,10 @@
       "destination": "/api/theme-orders?op=:op"
     },
     {
+      "source": "/api/theme-sites",
+      "destination": "/api/themes?list=sites"
+    },
+    {
       "source": "/api/shops/:op",
       "destination": "/api/shops?op=:op"
     },

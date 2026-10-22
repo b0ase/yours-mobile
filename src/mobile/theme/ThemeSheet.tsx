@@ -15,7 +15,9 @@ import {
   type AccentId,
   PAID_EDITIONS,
 } from './accents';
-import { loadAccent, loadMix, previewMix, saveAccent, saveMix } from './accent';
+import { loadAccent, loadMix, loadStorePack, previewMix, saveAccent, saveMix, wearSiteTheme } from './accent';
+import { forgetSiteTheme, wornSiteThemes } from './siteTheme';
+import { accentOfPack } from './themePack';
 import { deriveMix, mixFromPack, nextMixerOpen, type MixSpec } from './mixer';
 import { THEME_ORDERS_ENABLED, THEME_STORE_PAID_ENABLED } from '../storeBuild';
 import { useOwnedThemes } from '../themeStore/useOwnedThemes';
@@ -146,10 +148,16 @@ function AppColours({
   const slide = (next: MixSpec, commit: boolean) => {
     setMix(next);
     setCurrent('custom');
+    setSitePackId(null);
     if (commit) saveMix(account, next);
     else previewMix(next);
   };
   const derived = useMemo(() => deriveMix(mix), [mix]);
+  // From sites: family sites' themes this device has worn (theme/siteTheme.ts). They paint as the 'custom' pack.
+  const [sites, setSites] = useState(() => wornSiteThemes());
+  const [sitePackId, setSitePackId] = useState(() => loadStorePack(account)?.id ?? null);
+  const siteOn = (id: string) => current === 'custom' && sitePackId === id;
+  const mixOn = current === 'custom' && !sites.some((p) => p.id === sitePackId);
   // Shuffle: another pack at random (never the one on). Surprise: a random mix, opened so it can be tuned.
   // Paid editions (Store, $1): only the ones this account bought, plus the one already on, so nobody loses theirs.
   const { owned } = useOwnedThemes();
@@ -218,6 +226,44 @@ function AppColours({
           </div>
         </>
       )}
+      {sites.length > 0 && (
+        <>
+          <p className="bw-theme-group">From sites</p>
+          <div className="bw-pack-grid" role="radiogroup" aria-label="From sites">
+            {sites.map((p) => (
+              <PackTile
+                key={p.id}
+                a={accentOfPack(p)}
+                on={siteOn(p.id)}
+                onPick={() => {
+                  wearSiteTheme(account, p);
+                  setCurrent('custom');
+                  setSitePackId(p.id);
+                  setSites(wornSiteThemes());
+                }}
+              />
+            ))}
+          </div>
+          <div className="bw-theme-head">
+            {sites.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                className="bw-theme-chip"
+                aria-label={`Remove ${p.label} from From sites`}
+                onClick={() => {
+                  forgetSiteTheme(p.id);
+                  setSites(wornSiteThemes());
+                  if (siteOn(p.id)) pick(DEFAULT_ACCENT);
+                }}
+              >
+                <X size={12} aria-hidden="true" />
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
       <p className="bw-theme-group">Mono</p>
       <div className="bw-pack-grid" role="radiogroup" aria-label="Mono">
         {MONO_PACKS.map((a) => (
@@ -231,7 +277,7 @@ function AppColours({
         ))}
         <PackTile
           a={derived}
-          on={current === 'custom'}
+          on={mixOn}
           onPick={() => {
             setMixing('open');
             slide(mix, true);

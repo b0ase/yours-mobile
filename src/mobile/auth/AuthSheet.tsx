@@ -6,6 +6,8 @@ import { SignInHero } from '../../components/approval/ApprovalHeroes';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useBackClose } from '../backStack';
 import { offerAuthLink, onAuthLink, takeAuthLink, type AuthLink } from './authLink';
+import { SiteThemeOffer } from '../theme/SiteThemeOffer';
+import { familySite } from '../theme/themeSites';
 import { answerAuthRequest, cleanMatchCode, fetchAuthRequest, scopeLabel, type AuthRequest } from './authApi';
 
 type State =
@@ -20,7 +22,8 @@ type State =
  * Allow signs the request with the identity key; nothing is paid and no key leaves the wallet.
  */
 export function AuthSheet({ link, onClose }: { link: AuthLink; onClose: () => void }) {
-  const { apiContext } = useServiceContext();
+  const { apiContext, chromeStorageService } = useServiceContext();
+  const accountKey = chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey ?? '';
   const [state, setState] = useState<State>({ k: 'loading' });
   const [details, setDetails] = useState(false);
   const [match, setMatch] = useState('');
@@ -125,9 +128,13 @@ export function AuthSheet({ link, onClose }: { link: AuthLink; onClose: () => vo
           </p>
         )}
         {state.k === 'done' && (
-          <p className="m-0" style={{ color: CARD.muted }}>
-            Go back to your browser. {req?.client.site} will finish signing you in.
-          </p>
+          <>
+            <p className="m-0" style={{ color: CARD.muted }}>
+              Go back to your browser. {req?.client.site} will finish signing you in.
+            </p>
+            {/* A family site may offer its colours (theme/siteTheme.ts); only after the sign-in, never applied unasked. */}
+            <SiteThemeOffer site={familySite(req?.client.site)} account={accountKey} style={{ marginTop: 12 }} />
+          </>
         )}
         {req && state.k !== 'done' && (
           <>

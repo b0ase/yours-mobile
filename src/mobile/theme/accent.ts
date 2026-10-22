@@ -13,6 +13,7 @@ import {
 } from './accents';
 import { deriveMix, normaliseMix, type MixSpec } from './mixer';
 import { accentOfPack, parseThemePack, type ThemePack } from './themePack';
+import { rememberSiteTheme } from './siteTheme';
 
 /**
  * Applies and stores the app accent (Theme → App colours). Per account on this device only, nothing leaves it.
@@ -237,6 +238,16 @@ export function saveStorePack(account: string, pack: ThemePack): void {
   write(MIX_BOOT_KEY, null);
   setCustomAccent(accentOfPack(pack));
   saveAccent(account, 'custom');
+}
+
+/** The account's saved store pack (a site theme, holder pack …), if its 'custom' pack is one. */
+export const loadStorePack = (account: string): ThemePack | null =>
+  readPack(account ? packKeyFor(account) : PACK_BOOT_KEY);
+
+/** Wears a site's theme (Theme › From sites, the site's offer): saved like a store pack and listed under From sites. */
+export function wearSiteTheme(account: string, pack: ThemePack): void {
+  rememberSiteTheme(pack);
+  saveStorePack(account, pack);
 }
 
 /** Paints a mix without saving it (live preview while sliding). */
