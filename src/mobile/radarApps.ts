@@ -483,13 +483,18 @@ const BSVRADAR_APPS: Omit<RadarApp, 'source'>[] = [
     group: 'money',
     icon: r_paiybit,
   },
-  {
-    name: '1Satchel',
-    url: 'https://1satchel.com',
-    desc: 'Sell anything. On-chain. Like Linktree — but every link can charge for itself',
-    group: 'money',
-    icon: r_1satchel,
-  },
+  // A marketplace ("Sell anything"): bWalletX only, like the Markets group (App Review 3.1.5(iii)).
+  ...(MARKET_ENABLED
+    ? [
+        {
+          name: '1Satchel',
+          url: 'https://1satchel.com',
+          desc: 'Sell anything. On-chain. Like Linktree — but every link can charge for itself',
+          group: 'money' as const,
+          icon: r_1satchel,
+        },
+      ]
+    : []),
   {
     name: 'BitChart',
     url: 'https://bitchart.org',

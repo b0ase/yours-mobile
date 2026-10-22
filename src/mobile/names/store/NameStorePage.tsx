@@ -722,7 +722,7 @@ const ResultCard = (p: {
             <Link to="/m/settings" className={btn} style={{ ...ghostBtn, alignSelf: 'flex-start' }}>
               Your names are in Settings
             </Link>
-          ) : o.listedSats ? (
+          ) : MARKET_ENABLED && o.listedSats ? (
             <>
               <p className="m-0 text-sm" style={{ color: MUTED }}>
                 On sale for {listedUsd !== null ? fmtUsd(listedUsd) : fmtSats(o.listedSats)}. Buyers pay you directly.
@@ -739,33 +739,38 @@ const ResultCard = (p: {
             </>
           ) : (
             <>
-              <div className="flex flex-wrap items-center gap-2">
-                <label className="inline-flex items-center gap-2 text-sm" style={{ color: MUTED }}>
-                  Sell for $
-                  <input
-                    value={p.sellUsd}
-                    onChange={(e) => p.setSellUsd(e.target.value.replace(/[^\d.]/g, ''))}
-                    placeholder={String(tier ?? 15)}
-                    inputMode="decimal"
-                    aria-label="Asking price in US dollars"
-                    className="h-11 w-24 rounded-xl px-3 text-sm outline-none focus-visible:shadow-[0_0_0_1px_var(--bw-accent)]"
-                    style={{ background: '#0b0c0f', color: TEXT, boxShadow: `inset 0 0 0 1px ${HAIR}` }}
-                  />
-                </label>
-                <button
-                  type="button"
-                  disabled={!!p.busy}
-                  onClick={() => p.onSell(r.name)}
-                  className={btn}
-                  style={goldBtn}
-                >
-                  {busy ? 'Working…' : 'Put it on sale'}
-                </button>
-              </div>
-              <p className="m-0 text-xs" style={{ color: FAINT }}>
-                Listed on the Exchange until it sells or you take it off. The buyer pays you directly; the network fee
-                is a fraction of a cent.
-              </p>
+              {/* Selling names is exchange functionality: bWalletX only (MARKET_ENABLED, App Review 3.1.5(iii)). */}
+              {MARKET_ENABLED && (
+                <>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="inline-flex items-center gap-2 text-sm" style={{ color: MUTED }}>
+                      Sell for $
+                      <input
+                        value={p.sellUsd}
+                        onChange={(e) => p.setSellUsd(e.target.value.replace(/[^\d.]/g, ''))}
+                        placeholder={String(tier ?? 15)}
+                        inputMode="decimal"
+                        aria-label="Asking price in US dollars"
+                        className="h-11 w-24 rounded-xl px-3 text-sm outline-none focus-visible:shadow-[0_0_0_1px_var(--bw-accent)]"
+                        style={{ background: '#0b0c0f', color: TEXT, boxShadow: `inset 0 0 0 1px ${HAIR}` }}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      disabled={!!p.busy}
+                      onClick={() => p.onSell(r.name)}
+                      className={btn}
+                      style={goldBtn}
+                    >
+                      {busy ? 'Working…' : 'Put it on sale'}
+                    </button>
+                  </div>
+                  <p className="m-0 text-xs" style={{ color: FAINT }}>
+                    Listed on the Exchange until it sells or you take it off. The buyer pays you directly; the network
+                    fee is a fraction of a cent.
+                  </p>
+                </>
+              )}
               {giftBox}
               {p.giving && (
                 <button

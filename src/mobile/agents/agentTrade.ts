@@ -11,6 +11,7 @@
  * an agent account, can be acted on: its keys are the only ones unlocked. Paper mode fills on the paper
  * book; live mode buys the cheapest listing or sends BSV.
  */
+import { MARKET_ENABLED } from '../storeBuild';
 import { buyBsv21, sendBsv, type OneSatContext } from '@1sat/actions';
 import { assertOrdLockV2 } from '../market/ordlockVersion';
 import { appendAgentLog, getAgentAccount } from './agentAccounts';
@@ -98,6 +99,8 @@ export const runAgentAction = async (
   if (!getAgentAccount(id)) return { ok: false, text: 'This isn’t an agent account, so b can’t act on it.' };
   if (!(bsvUsd > 0)) return { ok: false, text: 'No BSV price right now; try again shortly.' };
   if (a.kind === 'sell' || a.kind === 'list') return { ok: false, text: 'Selling from chat isn’t available yet.' };
+  // Buying tokens is exchange functionality: bWalletX only (MARKET_ENABLED, App Review 3.1.5(iii)).
+  if (!MARKET_ENABLED && a.kind !== 'send') return { ok: false, text: 'This edition can only send BSV.' };
 
   if (a.kind === 'send') {
     if (!a.to) return { ok: false, text: 'Send needs a recipient.' };

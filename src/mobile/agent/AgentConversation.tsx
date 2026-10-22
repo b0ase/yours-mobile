@@ -410,7 +410,7 @@ export const AgentConversation = ({
   /** Show a reply; in an agent account, run any actions it asked for and show each result. */
   const answer = async (before: AgentMessage[], reply: string) => {
     const { text, actions, bad } =
-      baseSystem === BWALLET_GUIDE ? { text: reply, actions: [], bad: 0 } : parseActions(reply);
+      !MARKET_ENABLED || baseSystem === BWALLET_GUIDE ? { text: reply, actions: [], bad: 0 } : parseActions(reply);
     let shown: AgentMessage[] = [...before, { role: 'assistant', text: text || 'Working on it.' }];
     setMessages(shown);
     if (bad)

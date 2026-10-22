@@ -15,7 +15,7 @@ import {
   type SwapRecord,
 } from './swapApi';
 
-const api = new SwapApi();
+const api = /* @__PURE__ */ new SwapApi();
 /** Local notification ids for swaps (clear of pots' 43000–48000). */
 const NOTIFY_BASE = 49_000;
 

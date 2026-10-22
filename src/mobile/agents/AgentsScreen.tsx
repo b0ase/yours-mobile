@@ -25,7 +25,7 @@ import { sweepBack } from './sweepBack';
 import { StrategySection } from './StrategySection';
 import { ExportForCli } from './ExportForCli';
 import { IS_EXTENSION } from '../extension';
-import { STORE_BUILD } from '../storeBuild';
+import { MARKET_ENABLED, STORE_BUILD } from '../storeBuild';
 import { REMOTE_AGENTS, isRemoteAgentReady, remoteAgentBalanceSats, type RemoteAgent } from './remoteAgents';
 
 const PairSheet = lazy(() => import('../pair/PairSheet'));
@@ -316,7 +316,8 @@ const AgentAccountScreen = ({ id, onClose }: { id: string; onClose: () => void }
           </div>
         </div>
 
-        <StrategySection id={id} />
+        {/* Trading strategies (buy/sell rules) are bWalletX only (MARKET_ENABLED, App Review 3.1.5(iii)). */}
+        {MARKET_ENABLED && <StrategySection id={id} />}
 
         <div className={section} style={{ background: CARD }}>
           <div className="text-sm font-bold text-white">Fund</div>
