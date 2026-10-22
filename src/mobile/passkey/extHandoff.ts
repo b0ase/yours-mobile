@@ -22,6 +22,13 @@ import { b64url } from './seedBackup';
 /** Compile-time switch, written literally so Vite drops every hand-off path from a build without VITE_SEEDLESS=1. */
 export const HANDOFF_ENABLED: boolean = import.meta.env.VITE_SEEDLESS === '1' && !STORE_BUILD;
 
+/**
+ * The extension's own passkey buttons (welcome "Sign in with a passkey", Restore's passkey row). Off until passkeys
+ * launch on web.bwalletx.com (owner, 22 Oct 2026): the hand-off needs the web side, and with it off the button led to
+ * a dead end. Turn on together with VITE_SEEDLESS on the web build.
+ */
+export const EXT_PASSKEY_LIVE = false;
+
 /** The only page allowed to hand a wallet to the extension. Exact match, never a wildcard over *.bwalletx.com. */
 export const HANDOFF_WEB_ORIGIN = 'https://web.bwalletx.com';
 /** The extension's id, fixed by the manifest key (scripts/extension-key.pub.txt). The web page only talks to this id. */

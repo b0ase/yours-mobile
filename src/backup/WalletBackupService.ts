@@ -7,7 +7,7 @@ import {
 } from '@1sat/wallet-browser';
 import { encode } from '@msgpack/msgpack';
 import { sdk, type WalletStorageManager } from '@bsv/wallet-toolbox-client';
-import type { ChromeStorageService } from '../services/ChromeStorage.service';
+import { isRealAccount, type ChromeStorageService } from '../services/ChromeStorage.service';
 import type { Account } from '../services/types/chromeStorage.types';
 import type { Theme } from '../theme.types';
 import { decrypt, encrypt } from '../utils/crypto';
@@ -503,7 +503,10 @@ export class WalletBackupService {
     passwordKey: string | undefined,
   ): Promise<Record<string, Account>> {
     const storage = await chromeStorageService.getAndSetStorage();
-    const accounts = storage?.accounts || {};
+    // Ghost entries (no addresses, no keys) are skipped: opening one for export never finishes.
+    const accounts = Object.fromEntries(
+      Object.entries(storage?.accounts || {}).filter(([, a]) => isRealAccount(a)),
+    ) as Record<string, Account>;
     const usbSecurity = storage?.usbSecurity;
     if (!usbSecurity?.enabled) return accounts;
     if (!passwordKey) throw new Error('Password required to back up while USB key security is on');

@@ -597,6 +597,10 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
     // Order matters (owner, 14 Oct 2026): both repairs need this device's storage active, so switch first.
     const ctx = accountContext;
     const localReady = preferLocalStorage(ctx);
+    storageSwitch = localReady;
+    void localReady.finally(() => {
+      if (storageSwitch === localReady) storageSwitch = null;
+    });
     // Coins spent elsewhere (another device, same seed) stay "spendable" here until checked: check the default basket
     // at most every 30 minutes per account (persisted), fail closed (services/autoCoinResync.ts). Off the unlock path:
     // after this device's store is active, and a while after unlock so the first balance read and the address sync
@@ -660,9 +664,38 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
  * restore incident 14 Oct 2026). Short → stay remote-active and retry next open. Someone who later
  * picks remote again in Wallet Backup keeps that choice (the flag is set).
  */
+/**
+ * Wallets whose switch to this device failed in this session (22 Oct 2026: a brand-new wallet's switch broke the
+ * toolbox's storage, "not initialized" on every read, and the balance never loaded). They stay on the backup store
+ * until the next service-worker start, so a rebuild after the failure can't loop back into the same switch.
+ */
+const switchFailedThisSession = new Set<string>();
+
+/**
+ * The switch to this device's store while it runs. A master backup closes the live wallet to export each account;
+ * doing that mid-switch left the switch working on a closed wallet ("makeAvailable" / "not initialized", reproduced
+ * 22 Oct 2026 by making backups during sign-up), so the backup waits for it and a switch never starts during one.
+ */
+let storageSwitch: Promise<void> | null = null;
+
+/** After a failed switch: if the active store no longer answers, rebuild the wallet once (it stays on the backup). */
+const recoverAfterFailedSwitch = async (ctx: NonNullable<typeof accountContext>, id: string) => {
+  switchFailedThisSession.add(id);
+  const works = await summarizeActive(ctx.baseWallet as never).then(
+    () => true,
+    () => false,
+  );
+  if (works || accountContext !== ctx) return;
+  console.warn('[background] storage: the store is unusable after a failed switch; reopening the wallet on the backup');
+  await initializeWallet().catch((e) => console.error('[background] storage: reopening the wallet failed:', e));
+  notifyBalanceUpdate();
+};
+
 const preferLocalStorage = async (ctx: NonNullable<typeof accountContext>) => {
   try {
     const { account } = chromeStorageService.getCurrentAccountObject();
+    if (account && switchFailedThisSession.has(account.addresses.identityAddress)) return;
+    if (masterBackupInFlight) return;
     const config = account?.storageConfig as (StorageConfig & { localFirst?: boolean }) | undefined;
     if (!account || !config) return;
     const remoteUrl = config.activeRemote || config.remotes?.[0];
@@ -681,6 +714,7 @@ const preferLocalStorage = async (ctx: NonNullable<typeof accountContext>) => {
       sendRestoreStatus(r.ok ? undefined : null);
       console.log('[background] storage: verified switch', r);
       if (r.ok) await save({ ...config, activeRemote: undefined, remotes, localFirst: true });
+      else await recoverAfterFailedSwitch(ctx, account.addresses.identityAddress);
       return;
     }
 
@@ -694,6 +728,7 @@ const preferLocalStorage = async (ctx: NonNullable<typeof accountContext>) => {
       sendRestoreStatus(r.ok ? undefined : null);
       console.log('[background] storage: recovery from backup', r);
       if (!r.ok && r.activeIsRemote) await save({ ...config, activeRemote: remoteUrl, remotes, localFirst: false });
+      if (!r.ok) await recoverAfterFailedSwitch(ctx, account.addresses.identityAddress);
     }
   } catch (err) {
     sendRestoreStatus(null);
@@ -3382,6 +3417,11 @@ if (!(
         return;
       }
 
+      // Never close the wallet under a running switch to this device's store (see storageSwitch).
+      if (storageSwitch) {
+        console.log('[MasterBackup] waiting for the storage switch to finish');
+        await storageSwitch;
+      }
       // From here until restoreOriginalAccount: no wallet may come up.
       masterBackupInFlight = true;
       masterBackupGate.begin();

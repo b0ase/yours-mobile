@@ -32,6 +32,7 @@ import { IS_EXTENSION } from './mobile/extension';
 import { isWebApp } from './mobile/webApp';
 import { HANDOFF_ENABLED, parseHandoffSearch } from './mobile/passkey/extHandoff';
 import { ExtHandoffSend } from './mobile/passkey/ExtHandoffSend';
+import { isHandoffNotLive } from './mobile/passkey/handoffNotLive';
 import { UrlSync } from './mobile/url/UrlSync';
 import { CrashResume } from './mobile/url/ResumeAfterCrash';
 import { isNative } from './mobile/native';
@@ -124,6 +125,34 @@ export const App = () => {
         style={{ width: 'var(--wallet-width)', height: 'var(--wallet-height)', backgroundColor: walletBg }}
       >
         <ExtHandoffSend nonce={handoff.nonce} />
+      </div>
+    );
+  }
+  if (isWebApp() && isHandoffNotLive(HANDOFF_ENABLED, location.pathname, location.search)) {
+    return (
+      <div
+        className="flex items-center justify-center relative p-6"
+        style={{ width: 'var(--wallet-width)', height: 'var(--wallet-height)', backgroundColor: walletBg }}
+        data-testid="handoff-not-live"
+      >
+        <div className="flex flex-col gap-4 max-w-sm text-center" style={{ color: theme.color.global.contrast }}>
+          <h1 className="text-xl font-bold m-0">Passkey sign-in isn&rsquo;t available yet</h1>
+          <p className="text-sm m-0" style={{ color: theme.color.global.gray }}>
+            Close this tab and go back to bWalletX in Chrome. Choose <strong>Restore Wallet</strong> to use your 12
+            words or backup file, or <strong>Create New Wallet</strong> to start a new one with a password.
+          </p>
+          <button
+            type="button"
+            onClick={() => window.close()}
+            className="rounded-xl h-11 text-sm font-bold border-0 cursor-pointer"
+            style={{
+              background: `linear-gradient(135deg, ${theme.color.component.primaryButtonLeftGradient}, ${theme.color.component.primaryButtonRightGradient})`,
+              color: theme.color.component.primaryButtonText,
+            }}
+          >
+            Close this tab
+          </button>
+        </div>
       </div>
     );
   }
