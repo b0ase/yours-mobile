@@ -83,6 +83,21 @@ export const dropOrphanPatches = (
   return out;
 };
 
+/**
+ * A full wallet written where a ghost sits (restoring the same seed after a sign-out) replaces the ghost instead of
+ * merging into it, so it never inherits the old session's storage switches (localFirst on an emptied device store).
+ */
+export const withoutGhostsUnder = (
+  existing: Record<string, unknown>,
+  update: Record<string, unknown>,
+): Record<string, unknown> => {
+  const out = { ...existing };
+  for (const [id, acct] of Object.entries(update ?? {})) {
+    if (id in out && !isRealAccount(out[id]) && isRealAccount(acct)) delete out[id];
+  }
+  return out;
+};
+
 /** A stored wallet entry is usable only with its addresses (ghosts from dropOrphanPatches' bug are skipped). */
 export const isRealAccount = (a: unknown): boolean =>
   !!(a as { addresses?: { identityAddress?: string } } | null | undefined)?.addresses?.identityAddress;
@@ -441,7 +456,9 @@ export class ChromeStorageService {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const existingObject = (result[key] ?? {}) as Record<string, any>;
       const patch = key === 'accounts' ? dropOrphanPatches(existingObject, update as Record<string, unknown>) : update;
-      const mergedObject = deepMerge(existingObject, patch);
+      const base =
+        key === 'accounts' ? withoutGhostsUnder(existingObject, patch as Record<string, unknown>) : existingObject;
+      const mergedObject = deepMerge(base, patch);
       const data: Partial<ChromeStorageObject> = { [key]: mergedObject as ChromeStorageObject[K] };
       await this.set(data);
     } catch (error) {

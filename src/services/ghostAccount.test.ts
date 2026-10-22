@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { dropOrphanPatches, isRealAccount } from './ChromeStorage.service';
+import { dropOrphanPatches, isRealAccount, withoutGhostsUnder } from './ChromeStorage.service';
 
 const full = (id: string) => ({ addresses: { identityAddress: id }, name: 'w' });
 
@@ -19,5 +19,12 @@ describe('ghost wallet entries', () => {
     expect(isRealAccount(full('A'))).toBe(true);
     expect(isRealAccount({ storageConfig: {} })).toBe(false);
     expect(isRealAccount(undefined)).toBe(false);
+  });
+  test('restoring the same wallet over a ghost replaces it, never inherits its storage switches', () => {
+    const ghost = { storageConfig: { localFirst: true } };
+    expect(withoutGhostsUnder({ A: ghost }, { A: full('A') })).toEqual({});
+  });
+  test('a real wallet is still merged, not replaced', () => {
+    expect(withoutGhostsUnder({ A: full('A') }, { A: full('A') })).toEqual({ A: full('A') });
   });
 });
