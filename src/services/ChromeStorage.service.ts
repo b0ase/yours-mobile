@@ -65,6 +65,28 @@ export const assertAccountKeys = (update: Record<string, unknown>) => {
   }
 };
 
+/**
+ * Drop account patches for wallets that no longer exist. A slow job (backup copy, restore) can finish after the
+ * wallet was signed out or removed; merging its `{ storageConfig }` patch would recreate a ghost entry with no
+ * addresses, which crashes every screen that lists wallets. A full new account (with its addresses) still passes.
+ */
+export const dropOrphanPatches = (
+  existing: Record<string, unknown>,
+  update: Record<string, unknown>,
+): Record<string, unknown> => {
+  const out: Record<string, unknown> = {};
+  for (const [id, acct] of Object.entries(update ?? {})) {
+    const full = !!(acct as { addresses?: { identityAddress?: string } } | undefined)?.addresses?.identityAddress;
+    if (id in existing || full) out[id] = acct;
+    else console.warn('[ChromeStorage] dropped a patch for a wallet that is gone:', id);
+  }
+  return out;
+};
+
+/** A stored wallet entry is usable only with its addresses (ghosts from dropOrphanPatches' bug are skipped). */
+export const isRealAccount = (a: unknown): boolean =>
+  !!(a as { addresses?: { identityAddress?: string } } | null | undefined)?.addresses?.identityAddress;
+
 export class ChromeStorageService {
   storage: Partial<ChromeStorageObject> | undefined;
 
@@ -418,7 +440,8 @@ export class ChromeStorageService {
       }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const existingObject = (result[key] ?? {}) as Record<string, any>;
-      const mergedObject = deepMerge(existingObject, update);
+      const patch = key === 'accounts' ? dropOrphanPatches(existingObject, update as Record<string, unknown>) : update;
+      const mergedObject = deepMerge(existingObject, patch);
       const data: Partial<ChromeStorageObject> = { [key]: mergedObject as ChromeStorageObject[K] };
       await this.set(data);
     } catch (error) {
@@ -531,10 +554,12 @@ export class ChromeStorageService {
     }
     const { accounts } = this.storage as ChromeStorageObject;
     if (!accounts) return [];
-    const accountsArray = Object.entries(accounts).map(([address, account]) => ({
-      ...account,
-      address,
-    }));
+    const accountsArray = Object.entries(accounts)
+      .filter(([, account]) => isRealAccount(account))
+      .map(([address, account]) => ({
+        ...account,
+        address,
+      }));
 
     return accountsArray;
   };
