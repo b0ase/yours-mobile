@@ -17,6 +17,7 @@ import { money, moneyWithSats } from '../money/money';
 import { RETURNS_BLOCK, RETURNS_WARNING, hasReturnsWording } from './returnsWording';
 import { ErrorActions } from '../errors/ErrorActions';
 import { CurvePicker } from '../curves/CurvePicker';
+import { ListAfterMint } from '../sell/ListAfterMint';
 import { STANDARD_SUPPLY, curveProblem } from '../curves/curveChoice';
 import { DEFAULT_PRESET, maxPrice, standardCurve, usd, type Curve, type PresetId } from '../../lib/curves';
 
@@ -166,6 +167,7 @@ export const TokenMint = ({
         >
           {token.tokenId} <ExternalLink size={12} />
         </a>
+        <ListAfterMint tokenId={token.tokenId} symbol={token.ticker} dec={token.decimals} curve={curve} />
         <button
           type="button"
           onClick={() => go('chat', token)}

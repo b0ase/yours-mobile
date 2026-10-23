@@ -333,6 +333,7 @@ const Conversation = ({
   onXInvites = null,
   onBans,
   onBounties,
+  onMarket,
   peer = null,
   openRoom = null,
   hidden,
@@ -354,6 +355,8 @@ const Conversation = ({
   onXInvites?: (() => void) | null;
   /** Room admin: the ban list. */
   onBans: (() => void) | null;
+  /** Token rooms: Buy / sell this token (its Market page). */
+  onMarket?: (() => void) | null;
   /** Null hides the Bounties button (1:1 DMs). */
   onBounties: (() => void) | null;
   /** A 1:1's other person: shows Report / Block (Apple 1.2). */
@@ -767,6 +770,15 @@ const Conversation = ({
           {openRoom && (
             <button onClick={openRoom.onInfo} className="p-2 rounded-full active:opacity-60" aria-label="Room info">
               <Info size={20} color={GOLD} />
+            </button>
+          )}
+          {onMarket && (
+            <button
+              onClick={onMarket}
+              className="p-2 rounded-full active:opacity-60"
+              aria-label="Buy or sell this token"
+            >
+              <ShoppingCart size={19} color={GOLD} />
             </button>
           )}
           {onBans && (
@@ -3330,6 +3342,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           onInvite={open.entry && open.entry.key.startsWith('bsv21:') ? () => setInviting(true) : null}
           onXInvites={xManage && xManage === open.room.ticker ? () => setXInvites(true) : null}
           onBans={!openTicker && open.entry ? () => setRoomSettings(true) : null}
+          onMarket={MARKET_ENABLED && open.entry?.key.startsWith('bsv21:') ? () => buy(open.entry!.key) : null}
           onBounties={openTicker ? null : () => setShowBounties(true)}
           openRoom={
             openTicker
