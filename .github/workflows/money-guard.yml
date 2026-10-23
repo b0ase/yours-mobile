@@ -25,7 +25,7 @@ jobs:
           LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
         run: |
           grep -vE '^(#|$)' .github/money-paths.txt > "$RUNNER_TEMP/paths"
-          hits=$(git diff --name-only "$BASE" "$HEAD" | grep -E -f "$RUNNER_TEMP/paths" || true)
+          hits=$(git diff --name-only "$BASE...$HEAD" | grep -E -f "$RUNNER_TEMP/paths" || true)
           if [ -z "$hits" ]; then echo "No money code touched."; exit 0; fi
           echo "Money code touched:"; echo "$hits"
           case ",$LABELS," in
