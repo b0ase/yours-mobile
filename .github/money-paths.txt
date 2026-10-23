@@ -1,0 +1,22 @@
+# Files that decide where users' money lives: keys, passwords, keystore, backups, restore.
+# A pull request touching any of these must carry the `money-ok` label (added by the owner after review)
+# before the "Money guard" check passes. See docs/MONEY-GUARD.md. One extended regex per line.
+^src/moneyGuard/
+^src/utils/keys\.ts$
+^src/utils/crypto\.ts$
+^src/utils/usbCrypto\.ts$
+^src/utils/backupEnvelope\.ts$
+^src/utils/masterExporter\.ts$
+^src/utils/seedReveal\.ts$
+^src/services/passKey\.ts$
+^src/services/Keys\.service\.ts$
+^src/services/ChromeStorage\.service\.ts$
+^src/services/UsbKey\.service\.ts$
+^src/services/usbBackup\.ts$
+^src/services/restoreFromRemote\.ts$
+^src/mobile/passkey/seedBackup\.ts$
+^src/mobile/passkey/prf\.ts$
+^src/mobile/passkey/passkeyWallet\.ts$
+^src/mobile/sweep/hd\.ts$
+^\.github/money-paths\.txt$
+^\.github/workflows/money-guard\.yml$
