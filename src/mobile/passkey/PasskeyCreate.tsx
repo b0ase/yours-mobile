@@ -11,6 +11,7 @@ import {
   passkeyName,
 } from './seedBackup';
 import { setPasskeySession } from './session';
+import { assertNotPaused } from '../config/killSwitch';
 
 /**
  * Create Account with ?via=passkey: make the passkey, derive the wallet password from it, and hand that to the
@@ -24,6 +25,7 @@ export const PasskeyCreatePanel = ({ onPassword }: { onPassword: (password: stri
     setBusy(true);
     setError('');
     try {
+      await assertNotPaused('passkeyCreate');
       const rpId = currentRpId();
       const name = passkeyName();
       const { credentialId, prf } = await createPasskeyWithPrf(rpId, name);

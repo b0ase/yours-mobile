@@ -15,6 +15,7 @@ import {
 } from '@1sat/wallet-browser';
 import { preserveOriginalErrors } from './services/permissionAbortGuard';
 import { guardReservedProtocols, revokeReservedProtocolGrants } from './services/reservedProtocols';
+import { guardSpending } from './mobile/config/killSwitch';
 import {
   syncAddresses,
   syncMessages,
@@ -337,6 +338,9 @@ export const initWallet = async (
 
   // Big mints need longer than the broadcaster's fixed 30 s to upload (services/bigBroadcast.ts, vexvoid 12 Oct 2026).
   if (!sizeAwareBroadcast(toolboxServices)) console.warn('[initWallet] broadcaster timeout not tunable');
+  // Every payment ends here: our screens and dApps through the permissions manager, send-all and background jobs
+  // directly. The `spending` kill switch pauses createAction/signAction on it (mobile/config/killSwitch.ts).
+  guardSpending(baseWallet);
   if (!rememberRefusals(toolboxServices)) console.warn('[initWallet] broadcast refusals not recorded');
   // UnFail's output verdicts read getUtxoStatus: parse api.1sat.app's "txid.vout" (dkg, 14 Oct 2026; services/utxoStatus.ts).
   if (!fixUtxoStatus(toolboxServices)) console.warn('[initWallet] getUtxoStatus not patched (no txo client)');
