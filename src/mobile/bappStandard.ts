@@ -190,18 +190,26 @@ export const BX_APPS: StoreApp[] = [
     '#FFD24D',
     'BMINTX',
   ),
-  bx(
-    'bsharesx',
-    'bSharesX',
-    'https://bsharesx.com',
-    'Share registers for any company',
-    'Own & trade',
-    '#4D9BFF',
-    'BSHARESX',
-    {
-      privateOnly: true,
-    },
-  ),
+  // Share registers are securities: not even listed in the App Store / Google Play edition (store grep).
+  // Literal env check (same env as STORE_BUILD) so Rollup drops the entry's strings from store bundles.
+  ...(import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+    ? []
+    : [
+        bx(
+          'bsharesx',
+          'bSharesX',
+          'https://bsharesx.com',
+          'Share registers for any company',
+          'Own & trade',
+          '#4D9BFF',
+          'BSHARESX',
+          {
+            privateOnly: true,
+          },
+        ),
+      ]),
   bx(
     'bmoneyx',
     'bMoneyX',

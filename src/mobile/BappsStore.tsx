@@ -7,6 +7,13 @@
 import { useMemo, useState } from 'react';
 import { Coins, Lock, MessagesSquare, Palette, Search, Smartphone, ChevronDown } from 'lucide-react';
 import { STORE_BUILD } from './storeBuild';
+
+/** Adult (18+) tiles never reach a store build; a literal env check so Rollup drops the age-gate text too (store grep). */
+const ADULT_UI: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
 import {
   ADULT_OK_KEY,
   BX_APPS,
@@ -223,7 +230,7 @@ export const BappsStore = ({
             <Card
               key={a.id}
               name={a.adult && !adultOk ? 'Adults only' : a.name}
-              verb={a.adult && !adultOk ? 'Confirm you are 18 or over to see this app' : a.verb}
+              verb={ADULT_UI && a.adult && !adultOk ? 'Confirm you are 18 or over to see this app' : a.verb}
               art={art(a)}
               standard={a.adult && !adultOk ? undefined : a.standard}
               badge={a.adult ? '18+' : undefined}
@@ -335,7 +342,7 @@ export const BappsStore = ({
       )}
       {empty && <p className="text-center text-[13px] text-[#98A2B3] py-8">No bApps match “{q}”.</p>}
 
-      {confirming && (
+      {ADULT_UI && confirming && (
         <div
           role="dialog"
           aria-modal="true"
