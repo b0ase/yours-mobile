@@ -5,6 +5,7 @@ import { SectionBoundary } from '../wallet/SectionBoundary';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { BannerActions } from '../../web/BannerActions';
 import { ReportOutboxRunner } from '../agent/reportSend';
+import { setAgentDraft } from '../agent/handoff';
 import { OpenPartnerRequest } from '../placement/partnership/OpenPartnerRequest';
 import {
   ARTIST_PROGRAMME_ENABLED,
@@ -97,6 +98,18 @@ const ToMint = () => {
   const { search } = useLocation();
   return <Navigate to={`/m/bmint/mint/${encodeURIComponent(type)}${search}`} replace />;
 };
+// Link into b with a request typed in: /m/ask-b?ask=<text> (badvertisingx.com "Ask b to make your ad").
+// It only fills the composer: the user still presses send, and paid work still goes through the consent sheet.
+const ASK_MAX = 500;
+const AskB = () => {
+  const { search } = useLocation();
+  const ask = new URLSearchParams(search).get('ask');
+  if (ask) {
+    setAgentDraft(ask.slice(0, ASK_MAX));
+    return <Navigate to="/m/ask-b" replace />;
+  }
+  return <AgentPage />;
+};
 // Desktop top bar bell: notifications as a page in the main column (notify/NotificationsPage.tsx).
 const NotificationsPage = lazy(() => import('../notify/NotificationsPage'));
 const LockVerify = () => <LockScreen initialVerify={new URLSearchParams(window.location.search).get('tx') ?? ''} />;
@@ -131,7 +144,7 @@ const MobileRoutes = () => (
           }
         />
         {/* The top bar's centre b: the b agent. */}
-        <Route path="ask-b" element={<AgentPage />} />
+        <Route path="ask-b" element={<AskB />} />
         {/* Everything you told b, and where each report stands (18 Oct 2026). */}
         <Route path="reports" element={<MyReportsPage />} />
         {AgreementsPage && <Route path="bmail/agreements" element={<AgreementsPage />} />}
