@@ -65,3 +65,29 @@ export const pairRestoreUrl = (origin = typeof location === 'undefined' ? '' : l
 export const onPhone = () =>
   typeof window !== 'undefined' &&
   (window.matchMedia?.('(max-width: 639px)').matches || /iPhone|Android/.test(navigator.userAgent));
+
+/**
+ * Passkey wallets (owner, 23 Oct 2026): offer the browser's own "Save password?" for the derived pk1.… password,
+ * under the same name as the passkey. It only unlocks the wallet on this browser, and it sits next to the passkey
+ * in the same password manager, so it adds a way back in without adding exposure. Chrome/Edge/Android web only
+ * (PasswordCredential); Safari and the native apps have no such call, so this quietly does nothing there.
+ */
+export const offerSavePassword = async (
+  name: string,
+  password: string,
+  w: { PasswordCredential?: unknown; Capacitor?: { isNativePlatform?: () => boolean } } = window as never,
+  creds: Pick<CredentialsContainer, 'store'> | undefined = typeof navigator === 'undefined'
+    ? undefined
+    : navigator.credentials,
+): Promise<boolean> => {
+  const PC = w.PasswordCredential as
+    | (new (d: { id: string; password: string; name: string }) => Credential)
+    | undefined;
+  if (!PC || !creds || w.Capacitor?.isNativePlatform?.()) return false;
+  try {
+    await creds.store(new PC({ id: name, password, name }));
+    return true;
+  } catch {
+    return false;
+  }
+};

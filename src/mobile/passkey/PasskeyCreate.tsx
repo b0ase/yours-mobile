@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { CheckCircle2, Fingerprint, Loader2 } from 'lucide-react';
 import { useTheme } from '../../hooks/useTheme';
 import { createPasskeyWithPrf, getPrf } from './prf';
-import { currentRpId } from './passkeyUi';
+import { currentRpId, offerSavePassword } from './passkeyUi';
 import {
   keystorePasswordFromPrf,
   loadPasskeyUnlock,
@@ -25,10 +25,13 @@ export const PasskeyCreatePanel = ({ onPassword }: { onPassword: (password: stri
     setError('');
     try {
       const rpId = currentRpId();
-      const { credentialId, prf } = await createPasskeyWithPrf(rpId, passkeyName());
+      const name = passkeyName();
+      const { credentialId, prf } = await createPasskeyWithPrf(rpId, name);
       setPasskeySession({ rpId, credentialId, prf: prf.slice() });
       savePasskeyUnlock({ rpId, credentialId });
-      onPassword(await keystorePasswordFromPrf(prf));
+      const pw = await keystorePasswordFromPrf(prf);
+      void offerSavePassword(name, pw);
+      onPassword(pw);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setBusy(false);

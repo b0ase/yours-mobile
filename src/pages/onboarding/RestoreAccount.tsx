@@ -40,7 +40,8 @@ import { IS_EXTENSION } from '../../mobile/extension';
 import { SEEDLESS_ENABLED } from '../../mobile/passkey/prf';
 import { PasskeyCreatePanel, PasskeyUnlockButton } from '../../mobile/passkey/PasskeyCreate';
 import { restoringFromComputer } from '../../mobile/passkey/openHere';
-import { keystorePasswordFromPrf, savePasskeyUnlock } from '../../mobile/passkey/seedBackup';
+import { keystorePasswordFromPrf, passkeyName, savePasskeyUnlock } from '../../mobile/passkey/seedBackup';
+import { offerSavePassword } from '../../mobile/passkey/passkeyUi';
 import { takeTransferredWallet } from '../../mobile/passkey/session';
 import { switchBeforeReload } from './finishSwitch';
 
@@ -525,6 +526,7 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
               void keystorePasswordFromPrf(pk.prf).then((pw) => {
               pk.prf.fill(0);
               savePasskeyUnlock({ rpId: pk.rpId, credentialId: pk.credentialId });
+              void offerSavePassword(passkeyName(), pw);
               applyPasskeyPassword(pw);
             });
           }}
