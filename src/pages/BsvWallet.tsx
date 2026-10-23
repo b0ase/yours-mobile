@@ -53,15 +53,8 @@ import { BackupPromo } from '../components/BackupPromo';
 import lockIcon from '../assets/lock.svg';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useServiceContext } from '../hooks/useServiceContext';
-import {
-  getLockData,
-  sendAllBsv,
-  sendBsv,
-  syncAddresses,
-  unlockBsv,
-  type Bsv21Balance,
-  type LockData,
-} from '@1sat/actions';
+import { getLockData, sendAllBsv, syncAddresses, unlockBsv, type Bsv21Balance, type LockData } from '@1sat/actions';
+import { sendBsv } from '../utils/guardedSendBsv';
 import { getWalletBalance, fetchExchangeRate, cachedExchangeRate } from '../utils/wallet';
 import { sendMessageAsync } from '../utils/chromeHelpers';
 import { YoursEventName } from '../inject';
@@ -1124,6 +1117,8 @@ export const BsvWallet = () => {
         if (!sendRes.txid || sendRes.error) {
           addSnackbar(getErrorMessage(sendRes.error), 'error');
           setIsProcessing(false);
+          // A refused send may have cleared coins spent on another device: show the corrected balance.
+          refreshUtxos().catch((err) => console.error('[handleSendBsv] refresh after failed send:', err));
           return;
         }
 

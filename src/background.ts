@@ -1,6 +1,8 @@
 /* global chrome */
 import { siteThemeFor } from './mobile/theme/connectTheme';
 import type { AccentId } from './mobile/theme/accents';
+import { revokeOriginatorInAccounts } from './services/accountPermissionStore';
+import { routeBchatUrl } from './services/bchatOrigin';
 import { createMasterBackupGate } from './services/masterBackupGate';
 import { promptsShowInPanel } from './services/panelPrompt';
 import { isSessionExpired } from './utils/lockTimeout';
@@ -61,6 +63,7 @@ import {
   type HealReport,
 } from './services/invalidSendHeal';
 import { refusalFor } from './services/broadcastRefusals';
+import { createWithSpentRetry, retryEligible } from './services/spentRetry';
 import {
   AUTO_RESYNC_DELAY_MS,
   readAutoResyncCoins,
@@ -119,13 +122,15 @@ import {
   allowanceSats,
   DEFAULT_ALLOWANCE_USD,
   PermissionBundler,
-  isAutoGrantable,
   TRUST_SITE_BASKET,
+  trustCovers,
+  trustedBasketsFrom,
   type BundleRequest,
 } from './services/permissionBundle';
 import { normalizeOriginator } from '@1sat/wallet';
 import { ADMIN_ORIGINATOR, initWallet, openAccountStorageForBackup, type AccountContext } from './initWallet';
 import { isExtensionSender, reservedOriginatorRefusal } from './services/adminOriginator';
+import { isReservedBasket, RESERVED_BASKET_REFUSAL, revokeBasketGrantsForOriginator } from './services/reservedBaskets';
 import { isReservedProtocol, reservedProtocolRefusal, RESERVED_REFUSAL, withoutReservedProtocols } from './services/reservedProtocols';
 import { healIndexFundActions } from './mobile/tokens/indexFundHeal';
 import { continuesChain, endChain, isAlreadyProcessedAbort, markChainStep, startsChain } from './services/dappChain';
@@ -194,6 +199,17 @@ async function wocSpendStatus(outpoint: string): Promise<WocAnswer> {
   const j = (await r.json()) as { txid?: string; status?: string };
   if (typeof j.txid !== 'string') throw new Error('woc: no spender');
   return { txid: j.txid, confirmed: j.status === 'confirmed' };
+}
+
+/** Is this txid known to WhatsOnChain (mempool or mined)? false only on 404; null when it can't tell. */
+async function wocTxKnown(txid: string): Promise<boolean | null> {
+  try {
+    const r = await fetch(`https://api.whatsonchain.com/v1/bsv/main/tx/hash/${txid}`);
+    if (r.status === 404) return false;
+    return r.ok ? true : null;
+  } catch {
+    return null;
+  }
 }
 
 /** The account's chain; WhatsOnChain lookups here are mainnet only. */
@@ -1241,7 +1257,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name !== CALL_RING_ALARM || !accountContext) return;
   const base = accountContext.baseWallet;
   try {
-    const incoming = await fetchIncoming((u, i) => fetch(u, i), {
+    const incoming = await fetchIncoming(async (u, i) => fetch(await routeBchatUrl(u), i), {
       identityKey: async () => (await base.getPublicKey({ identityKey: true })).publicKey,
       sign: async (message) => {
         const { signature } = await base.createSignature({
@@ -1336,6 +1352,11 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
     accountContext?.wallet.denyPermission(request.requestID).catch(() => undefined);
     return Promise.reject(new Error(RESERVED_REFUSAL));
   }
+  // The wallet's own baskets (coins, ordinals, tokens, locks, names) are never offered to a site.
+  if (request.type === 'basket' && isReservedBasket(request.basket) && request.originator !== ADMIN_ORIGINATOR) {
+    accountContext?.wallet.denyPermission(request.requestID).catch(() => undefined);
+    return Promise.reject(new Error(RESERVED_BASKET_REFUSAL));
+  }
   // A stream-approved createAction is running for this site: its spend (within the budget) and its label are
   // answered here, without a sheet. Nothing else is (services/streamGrants.ts passCovers).
   const pass = request.originator ? streamPasses.get(normalizeOriginator(request.originator)) : undefined;
@@ -1360,9 +1381,11 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
   );
 };
 
-/** True when the user ticked "Don't ask again" for this site and this request is a routine kind. */
+/**
+ * True when the user ticked "Don't ask again" for this site and this request is a routine kind that the approved
+ * sheet covered (a basket only if it was one shown on that sheet).
+ */
 const siteTrustedFor = async (request: PermissionRequest & { requestID: string }): Promise<boolean> => {
-  if (!isAutoGrantable(request as BundledRequest & BundleRequest)) return false;
   const store = accountContext?.permissionStore;
   if (!store || !request.originator) return false;
   try {
@@ -1371,10 +1394,19 @@ const siteTrustedFor = async (request: PermissionRequest & { requestID: string }
       originator: normalizeOriginator(request.originator),
       basket: TRUST_SITE_BASKET,
     });
-    return !!grant && (grant.expiry === 0 || grant.expiry * 1000 > Date.now());
+    return trustCovers(grant as { expiry: number; baskets?: unknown } | null, request as BundledRequest & BundleRequest);
   } catch {
     return false;
   }
+};
+
+/** Forget site, basket part: see revokeBasketGrantsForOriginator. Also clears the manager's recent-grant cover. */
+const revokeBasketGrantsFor = async (originator: string): Promise<void> => {
+  const store = accountContext?.permissionStore;
+  if (!store || !originator) return;
+  await revokeBasketGrantsForOriginator(store, originator, normalizeOriginator);
+  const recent = (accountContext?.wallet as unknown as { recentGrants?: unknown } | undefined)?.recentGrants;
+  if (recent instanceof Map) recent.clear();
 };
 
 const showGroupedPermissionPrompt = (request: GroupedPermissionRequest): Promise<void> => {
@@ -3055,10 +3087,24 @@ if (!(
     }
   };
 
-  const processPermissionsRevokeAll = async (message: { originator: string }, sendResponse: CallbackResponse) => {
+  const processPermissionsRevokeAll = async (
+    message: { originator: string; allAccounts?: boolean },
+    sendResponse: CallbackResponse,
+  ) => {
     try {
       const wpm = (await ensureWallet(true)) as LocalWalletPermissionsManager;
       const revoked = await wpm.revokeAllForOriginator(message.originator);
+      // Forget site removes its basket grants and site-trust record too, whatever form the originator was
+      // stored under, and drops the manager's short-lived memory of recent grants.
+      await revokeBasketGrantsFor(message.originator);
+      // Grants are per account; a device-wide pairing is withdrawn from the other accounts' stores too.
+      if (message.allAccounts) {
+        const ids = chromeStorageService
+          .getAllAccounts()
+          .map((a) => a.addresses?.identityAddress)
+          .filter((x): x is string => !!x);
+        await revokeOriginatorInAccounts(ids, normalizeOriginator(message.originator));
+      }
       sendResponse({ type: 'PERMISSIONS_REVOKE_ALL', success: true, data: { revokedCount: revoked.length } });
     } catch (error) {
       console.error('[PERMISSIONS_REVOKE_ALL] Error:', error);
@@ -3348,7 +3394,9 @@ if (!(
           expiry: 0,
           grantedAt: Date.now(),
           reason: 'Sign-in and signing without asking',
-        });
+          // Only the baskets on this sheet; any other basket asks again.
+          baskets: trustedBasketsFrom(result.granted as (BundledRequest & BundleRequest)[]),
+        } as Parameters<typeof accountContext.permissionStore.putGrant>[0]);
       }
       await Promise.all([
         ...result.granted.map(async (r) => {
@@ -4335,6 +4383,7 @@ if (!(
   ) => {
     let fundingSnap: FundingSnapshot | undefined;
     let streamPass: (StreamPass & { done: Promise<void>; finish: () => void }) | undefined;
+    let spentHeal: HealReport | null | undefined;
     try {
       const w = await ensureWallet();
       await ensureUsbSeen('build and sign a transaction', message.originator);
@@ -4423,7 +4472,21 @@ if (!(
 
       let result: Awaited<ReturnType<typeof signer.createAction>>;
       try {
-        result = await signer.createAction(args, message.originator);
+        // UTXO_SPENT (coins spent from another device): heal, then retry ONCE when safe (services/spentRetry.ts).
+        const ctxForHeal = accountContext;
+        const outcome = await createWithSpentRetry({
+          create: () => signer.createAction(args, message.originator),
+          heal: (e) => (ctxForHeal ? healRejectedInputs(ctxForHeal, e) : Promise.resolve(null)),
+          txKnown: (txid) => (ctxForHeal && ctxChain(ctxForHeal) === 'main' ? wocTxKnown(txid) : Promise.resolve(null)),
+          reason: (txid) => refusalFor(txid),
+          eligible: retryEligible({ isAdmin, continuing, delayed, sendAll: usesSendAllSentinel, args }),
+          log: (m, d) => console.warn(m, d ?? ''),
+        });
+        spentHeal = outcome.heal;
+        if (spentHeal?.released) notifyBalanceUpdate();
+        if (!outcome.ok) throw outcome.error;
+        if (outcome.retried) console.warn('[createAction] sent on retry after clearing spent coins', spentHeal);
+        result = outcome.result;
       } catch (err) {
         // Queued to retry is not a failure: the wallet will send it. Say so, and guard against paying again.
         if (queuedSend(err)) {
@@ -4507,7 +4570,13 @@ if (!(
       const friendly = fundingSnap && isInsufficientFunds(error) ? insufficientFundsMessage(error, fundingSnap) : null;
       if (friendly) console.error('[createAction] Funding:', friendly);
       // Rejected as invalid: clear the inputs the chain proves spent, or the retry picks them again (invalidSendHeal.ts).
-      const heal = isInvalidTxReview(error) && accountContext ? await healRejectedInputs(accountContext, error) : null;
+      // Already done by createWithSpentRetry when the createAction itself failed (never heal twice).
+      const heal =
+        spentHeal !== undefined
+          ? spentHeal
+          : isInvalidTxReview(error) && accountContext
+            ? await healRejectedInputs(accountContext, error)
+            : null;
       if (heal) console.warn('[createAction] invalidTx heal:', heal);
       sendResponse({
         type: CWIEventName.CREATE_ACTION,
