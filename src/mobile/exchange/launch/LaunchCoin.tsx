@@ -40,6 +40,7 @@ import { deployLaunch, payLaunchDeposit, retryVesting } from './launchNet';
 import { defaultVestPlan, scheduleSummary, type VerifiedVesting, type VestPlan } from './vesting';
 import { KeepForYourself } from './VestingSection';
 import { CurvePicker } from '../../curves/CurvePicker';
+import { ListAfterMint } from '../../sell/ListAfterMint';
 import { STANDARD_SUPPLY, curveProblem } from '../../curves/curveChoice';
 import { curveMapBytes } from '../../curves/curveMap';
 import { standardCurve, type Curve } from '../../../lib/curves';
@@ -219,6 +220,7 @@ export const LaunchCoin = () => {
         <p className="text-[11px] break-all m-0" style={{ color: MUTED }}>
           {l.tokenId}
         </p>
+        <ListAfterMint tokenId={l.tokenId} symbol={l.ticker} dec={Number(opts.decimals) || 0} curve={curve} />
         {done.vesting && (
           <p className="text-xs m-0" style={{ color: MUTED }}>
             Your {done.vesting.receipt.keepBps / 100}% share is locked: {scheduleSummary(done.vesting.receipt)}. The
