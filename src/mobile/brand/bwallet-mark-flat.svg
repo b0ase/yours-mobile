@@ -9,7 +9,7 @@
   <rect x="-4" y="4" width="120" height="120" fill="#000"/>
   <g transform="translate(56 64) scale(0.74) translate(-56 -64)">
   <g fill="#FFD24D" mask="url(#bh)">
-    <polygon points="45,12 45,76 27,76 27,30"/>
+    <polygon points="45,12 45,72 27,72 27,30"/>
     <circle cx="60" cy="72" r="33"/>
   </g>
   </g>

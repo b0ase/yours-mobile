@@ -75,14 +75,14 @@ const badge = (size: number, color: string, id: string, look: IconLook = null) =
     const sw = r(Math.max(b.outline * 0.6, 3)); // a hairline outline b (about 1px on screen)
     return (
       `<svg x="${r(b.x)}" y="${r(b.y)}" width="${r(b.w)}" height="${r(b.h)}" viewBox="23 8 74 100" overflow="visible">` +
-      `<g fill="none" stroke="${esc(look.ink)}" stroke-opacity=".7" stroke-width="${sw}" stroke-linejoin="round"><polygon points="45,12 45,76 27,76 27,30"/><circle cx="60" cy="72" r="31"/><circle cx="60" cy="72" r="15"/></g></svg>`
+      `<g fill="none" stroke="${esc(look.ink)}" stroke-opacity=".7" stroke-width="${sw}" stroke-linejoin="round"><polygon points="45,12 45,72 27,72 27,30"/><circle cx="60" cy="72" r="31"/><circle cx="60" cy="72" r="15"/></g></svg>`
     );
   }
   const k = look ? { top: look.hi, mid: look.ink, bottom: look.lo } : badgeColors(color);
   const edge = look ? look.tile : '#0B0B0D';
   const { badge: b } = layout(size);
   const o = r(b.outline);
-  const shapes = '<polygon points="45,12 45,76 27,76 27,30"/><circle cx="60" cy="72" r="33"/>';
+  const shapes = '<polygon points="45,12 45,72 27,72 27,30"/><circle cx="60" cy="72" r="33"/>';
   return (
     `<svg x="${r(b.x)}" y="${r(b.y)}" width="${r(b.w)}" height="${r(b.h)}" viewBox="23 8 74 100" overflow="visible">` +
     `<defs><linearGradient id="${id}-g" gradientUnits="userSpaceOnUse" x1="0" y1="12" x2="0" y2="105"><stop offset="0" stop-color="${k.top}"/><stop offset=".55" stop-color="${k.mid}"/><stop offset="1" stop-color="${k.bottom}"/></linearGradient>` +
