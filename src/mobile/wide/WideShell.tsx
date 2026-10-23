@@ -25,6 +25,7 @@ import {
   marketLabel,
   STORE_HIDDEN_WALLET_KINDS,
   STORE_BUILD,
+  BTRUST_ENABLED,
   PEOPLE_LABEL,
   SPACES_LABEL,
 } from '../storeBuild';
@@ -233,8 +234,8 @@ const WideShell = ({ children }: { children: ReactNode }) => {
         },
         { id: 'market', label: marketLabel(), icon: I.exchange, to: '/m/exchange', hidden: !MARKET_ENABLED },
         { id: 'lock', label: 'Lock BSV', icon: I.lockbsv, to: '/m/lock' },
-        // bTrust: recovery slices and passing on (same route as the phone, no extra gate: /m/btrust has none).
-        { id: 'btrust', label: 'bTrust', icon: I.shield, to: '/m/btrust' },
+        // bTrust: recovery slices and passing on. bWalletX only (BTRUST_ENABLED).
+        ...(BTRUST_ENABLED ? [{ id: 'btrust', label: 'bTrust', icon: I.shield, to: '/m/btrust' }] : []),
       ],
     },
     {
