@@ -142,7 +142,6 @@ export const DomainMint = ({
           initial={{ name: domain, ticker: suggestDomainTicker(domain), description: domainTokenDescription(domain) }}
           map={{ script: domainMapScript(domain), description: 'bWallet domain token (MAP)' }}
           onMinted={(t) => minted(domain, t.tokenId)}
-          curvePreset="project"
         />
       </div>
     );

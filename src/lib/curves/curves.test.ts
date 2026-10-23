@@ -13,6 +13,7 @@ import {
   maxPrice,
   parseCurve,
   preset,
+  standardCurve,
   priceAt,
   raiseAt,
   sha256Hex,
@@ -25,8 +26,8 @@ import {
 
 const close = (a: number, b: number, rel = 1e-6) => expect(Math.abs(a - b)).toBeLessThanOrEqual(Math.abs(b) * rel + 1e-9);
 
-describe('film preset', () => {
-  const c = preset('film');
+describe('standard launch', () => {
+  const c = preset('standard');
   test('1¢ → 19¢, $100M at 100%', () => {
     close(priceAt(c, 0), 0.01);
     close(priceAt(c, 1), 0.19);
@@ -76,43 +77,55 @@ describe('every shape', () => {
 });
 
 test('buy caps at remaining supply', () => {
-  const c = preset('name');
-  expect(tokensForUsd(c, 99_990, 1e9)).toBe(10);
-  expect(tokensForUsd(c, 100_000, 10)).toBe(0);
+  const c = preset('standard');
+  expect(tokensForUsd(c, 1e9 - 10, 1e12)).toBe(10);
+  expect(tokensForUsd(c, 1e9, 10)).toBe(0);
   expect(tokensForUsd(c, 0, 0)).toBe(0);
 });
 
-test('presets match the grades', () => {
-  close(raiseAt(PRESETS.name.curve, 1), 10_000);
-  close(raiseAt(PRESETS.project.curve, 1), 10_000_000);
-  close(raiseAt(PRESETS.company.curve, 1), 100_000_000);
-  close(raiseAt(PRESETS.studio.curve, 1), 1_000_000_000);
-  close(maxPrice(PRESETS.name.curve), 0.19);
-  close(maxPrice(PRESETS.studio.curve), 1.99);
-  expect(maxPrice(PRESETS.pumpfun.curve) / PRESETS.pumpfun.curve.floorUsd).toBeGreaterThan(1e5);
+test('every climb: 1B supply, 1¢ first token, early tier on, 12-month burn', () => {
+  const want = { standard: [1e8, 0.19], big: [1e9, 1.99], huge: [1e10, 19.99] } as const;
+  for (const id of ['standard', 'big', 'huge'] as const) {
+    const c = PRESETS[id].curve;
+    expect(c.supply).toBe(1e9);
+    expect(c.floorUsd).toBe(0.01);
+    expect(c.earlyTier).toEqual({ fraction: 0.01, maxUsdPerIdentity: 10 });
+    expect(c.burnAfterMonths).toBe(12);
+    close(raiseAt(c, 1), want[id][0]);
+    close(maxPrice(c), want[id][1]);
+  }
+});
+
+test('standardCurve: shape and burn choices keep the raise', () => {
+  const s = standardCurve('big', 'exponential', null);
+  expect(s.shape).toBe('exponential');
+  expect(s.burnAfterMonths).toBeNull();
+  close(raiseAt(s, 1), 1e9);
+  expect(standardCurve('standard', 'sigmoid', 6).burnAfterMonths).toBe(6);
 });
 
 test('maxPrice input and too-small ceiling', () => {
   close(makeCurve({ maxPrice: 0.19 }).ceilingRaiseUsd, 100_000_000);
   const e = makeCurve({ shape: 'exponential', maxPrice: 1 });
+  expect(makeCurve({ earlyTier: null }).earlyTier).toBeNull();
   close(maxPrice(e), 1, 1e-6);
   expect(makeCurve({ ceilingRaiseUsd: 1 }).ceilingRaiseUsd).toBe(10_000_000);
   expect(expRateFor(1)).toBe(0);
 });
 
 test('fitToSupply keeps prices', () => {
-  const c = fitToSupply(preset('film'), 1_000_000);
+  const c = fitToSupply(preset('standard'), 1_000_000);
   expect(c.supply).toBe(1_000_000);
   close(maxPrice(c), 0.19);
-  expect(fitToSupply(preset('film'), 2e9).supply).toBe(1e9);
+  expect(fitToSupply(preset('standard'), 2e9).supply).toBe(1e9);
 });
 
 test('early tier allowance', () => {
-  const c = preset('film');
+  const c = preset('standard');
   expect(earlyTierAllowanceUsd(c, 0, 3)).toBe(7);
   expect(earlyTierAllowanceUsd(c, 0, 30)).toBe(0);
   expect(earlyTierAllowanceUsd(c, 20_000_000, 30)).toBe(Infinity);
-  expect(earlyTierAllowanceUsd(preset('studio'), 0, 1e9)).toBe(Infinity);
+  expect(earlyTierAllowanceUsd(makeCurve({ earlyTier: null }), 0, 1e9)).toBe(Infinity);
 });
 
 test('sha256 matches node', () => {
@@ -122,22 +135,24 @@ test('sha256 matches node', () => {
 
 describe('commitment', () => {
   test('round trips and verifies', () => {
-    const m = curveCommitment(preset('film'));
+    const m = curveCommitment(preset('standard'));
     const v = verifyCurve(m);
     expect(v.ok).toBe(true);
     if (v.ok) expect(v.curve.ceilingRaiseUsd).toBe(100_000_000);
+    if (v.ok) expect(v.curve.burnAfterMonths).toBe(12);
+    expect(m.curve).toContain('"burnAfterMonths":12');
     expect(parseCurve(m.curve)?.earlyTier).toEqual({ fraction: 0.01, maxUsdPerIdentity: 10 });
   });
   test('tampering fails', () => {
-    const m = curveCommitment(preset('film'));
+    const m = curveCommitment(preset('standard'));
     expect(verifyCurve({ ...m, curve: m.curve.replace('100000000', '200000000') }).ok).toBe(false);
     expect(verifyCurve({ curve: m.curve }).ok).toBe(false);
     expect(verifyCurve({ ...m, curve: ' ' + m.curve }).ok).toBe(false);
     expect(verifyCurve(null).ok).toBe(false);
   });
   test('preset name does not change the hash', () => {
-    const a = curveCommitment(preset('company'));
-    const { preset: _p, ...rest } = preset('company');
+    const a = curveCommitment(preset('big'));
+    const { preset: _p, ...rest } = preset('big');
     expect(curveCommitment(makeCurve(rest)).curveHash).toBe(a.curveHash);
   });
 });
@@ -147,10 +162,12 @@ test('plain words', () => {
   expect(usd(100_000_000)).toBe('$100M');
   expect(usd(10_000)).toBe('$10K');
   expect(usd(1.99)).toBe('$1.99');
-  const lines = curveLines(preset('film'));
+  const lines = curveLines(preset('standard'));
   expect(lines[0]).toBe('First $10 buys 999 tokens');
   expect(lines[1]).toBe('If all sell: $100M raised');
-  expect(lines[3]).toContain('Early tier: first 1% · max $10 each');
+  expect(lines[3]).toBe('Unsold after 12 months: burnt');
+  expect(lines[4]).toContain('Early tier: first 1% · max $10 each');
+  expect(curveLines(standardCurve('standard', 'linear', null))[3]).toBe('Unsold: stays on sale forever');
   expect(usdToSats(1, 50)).toBe(2_000_000);
   expect(usdToSats(1, 0)).toBe(0);
 });

@@ -44,8 +44,8 @@ import { DEFAULT_SUPPLY, getPersonalLink, onPersonalChange, personalTicker, vali
 import { getMyName } from './myName';
 import { SendConfirmation } from '../../components/SendConfirmation';
 import { CurvePicker } from '../curves/CurvePicker';
-import { curveProblem, presetFor } from '../curves/curveChoice';
-import { maxPrice, usd, type Curve } from '../../lib/curves';
+import { STANDARD_SUPPLY, curveProblem } from '../curves/curveChoice';
+import { maxPrice, standardCurve, usd, type Curve } from '../../lib/curves';
 import { useTheme } from '../../hooks/useTheme';
 import { handleTitle, suggestHandle } from './handlePrompt';
 import { useBackClose } from '../backStack';
@@ -109,7 +109,7 @@ export const HandleFlow = ({
   const withToken = PAID_FEATURES_ENABLED;
   const [supply, setSupply] = useState(DEFAULT_SUPPLY);
   const supplyNum = Number(String(supply).replace(/[,_\s]/g, '')) || 0;
-  const [curve, setCurve] = useState<Curve | null>(() => presetFor('name', supplyNum));
+  const [curve, setCurve] = useState<Curve>(() => standardCurve());
   const [curveOk, setCurveOk] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [tokenMsg, setTokenMsg] = useState('');
@@ -500,8 +500,8 @@ export const HandleFlow = ({
               <>
                 <p className="text-[11px]" style={{ color: GRAY }}>
                   A personal token, <b className="text-white">${ticker ?? 'NAME'}</b>, all to your wallet, and a chat
-                  room only holders can enter. Invite someone by sending 1 ${ticker ?? 'NAME'}. It's for access, not
-                  trading. About {moneyNow(PERSONAL_NETWORK_FEE_SATS)} network fee. You confirm it before anything is
+                  room only holders can enter. Invite someone by sending 1 ${ticker ?? 'NAME'}. Your room's token:
+                  holders get in; it trades on your curve. About {moneyNow(PERSONAL_NETWORK_FEE_SATS)} network fee. You confirm it before anything is
                   sent.
                 </p>
                 {withToken && (
@@ -523,6 +523,7 @@ export const HandleFlow = ({
                     accepted={curveOk}
                     onAccept={setCurveOk}
                     tokenSupply={supplyNum}
+                    onUseStandardSupply={() => setSupply(STANDARD_SUPPLY)}
                   />
                 )}
                 {withToken && supplyError && (
@@ -559,7 +560,7 @@ export const HandleFlow = ({
                 {withToken && claimed && (choice?.kind === 'mint' || choice?.kind === 'mint-labelled') && (
                   <button
                     type="button"
-                    disabled={busy || !ticker || !!supplyError || !!curveProblem(curve, curveOk)}
+                    disabled={busy || !ticker || !!supplyError || !!curveProblem(curve, curveOk, supplyNum)}
                     onClick={() => setConfirming(true)}
                     className="h-11 rounded-xl text-sm font-bold border-0 cursor-pointer disabled:opacity-40"
                     style={{ background: GOLD, color: '#000' }}
@@ -607,7 +608,7 @@ export const HandleFlow = ({
               address: `$${ticker ?? 'NAME'} + room`.slice(0, 16),
               amount: `${Number(supply || 0).toLocaleString()} tokens`,
             },
-            ...(curve ? [{ address: 'Curve (fixed)', amount: `${usd(curve.floorUsd)} → ${usd(maxPrice(curve))}` }] : []),
+            { address: 'Curve (fixed)', amount: `${usd(curve.floorUsd)} → ${usd(maxPrice(curve))}` },
             { address: 'Network fee', amount: `~${moneyNow(PERSONAL_NETWORK_FEE_SATS)}` },
           ]}
           total={`~${moneyNow(PERSONAL_FEE_ESTIMATE_SATS)}`}

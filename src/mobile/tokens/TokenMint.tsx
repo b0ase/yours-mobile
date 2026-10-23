@@ -17,8 +17,8 @@ import { money, moneyWithSats } from '../money/money';
 import { RETURNS_BLOCK, RETURNS_WARNING, hasReturnsWording } from './returnsWording';
 import { ErrorActions } from '../errors/ErrorActions';
 import { CurvePicker } from '../curves/CurvePicker';
-import { curveProblem, presetFor } from '../curves/curveChoice';
-import { maxPrice, usd, type Curve, type PresetId } from '../../lib/curves';
+import { STANDARD_SUPPLY, curveProblem } from '../curves/curveChoice';
+import { DEFAULT_PRESET, maxPrice, standardCurve, usd, type Curve, type PresetId } from '../../lib/curves';
 
 /**
  * MINT → "Mint a token": a plain BSV-21 token (name, ticker, supply, decimals, optional icon and
@@ -36,7 +36,7 @@ export const TokenMint = ({
   initial,
   map,
   onMinted,
-  curvePreset = 'name',
+  curvePreset = DEFAULT_PRESET,
 }: {
   exchangeRate: number;
   onBack: () => void;
@@ -47,13 +47,14 @@ export const TokenMint = ({
   map?: { script: LockingScript; description: string };
   /** When set, called with the minted token instead of showing this form's own "minted" screen. */
   onMinted?: (token: MintedToken) => void;
-  /** Default launch curve grade (a token with its holders' room = the small $name/room grade). */
+  /** Preselected climb (Standard unless a caller says otherwise). */
   curvePreset?: PresetId;
 }) => {
   const { apiContext, chromeStorageService } = useServiceContext();
   const { theme } = useTheme();
   const { handleSelect } = useBottomMenu();
-  const [form, setForm] = useState<TokenForm>(() => ({ ...emptyTokenForm(), ...initial }));
+  // Every launch is the standard 1,000,000,000 supply, all on the curve (owner, 23 Oct 2026).
+  const [form, setForm] = useState<TokenForm>(() => ({ ...emptyTokenForm(), supply: STANDARD_SUPPLY, ...initial }));
   const [tickerTouched, setTickerTouched] = useState(!!initial?.ticker);
   const [icon, setIcon] = useState<{ file: File; url: string } | null>(null);
   const [error, setError] = useState('');
@@ -62,7 +63,7 @@ export const TokenMint = ({
   const [done, setDone] = useState<{ token: MintedToken; room: string | null } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const supplyNum = Number((form.supply || '0').replace(/[,_\s]/g, '')) || 0;
-  const [curve, setCurve] = useState<Curve | null>(() => presetFor(curvePreset, supplyNum));
+  const [curve, setCurve] = useState<Curve>(() => standardCurve(curvePreset));
   const [curveOk, setCurveOk] = useState(false);
 
   useEffect(() => () => void (icon && URL.revokeObjectURL(icon.url)), [icon]);
@@ -95,7 +96,7 @@ export const TokenMint = ({
     const err =
       validateToken(form) ??
       (hasReturnsWording(`${form.name ?? ''} ${form.description ?? ''}`) ? RETURNS_BLOCK : null) ??
-      curveProblem(curve, curveOk);
+      curveProblem(curve, curveOk, supplyNum);
     setError(err ?? '');
     if (!err) setConfirming(true);
   };
@@ -281,7 +282,7 @@ export const TokenMint = ({
         accepted={curveOk}
         onAccept={setCurveOk}
         tokenSupply={supplyNum}
-        bsvUsd={exchangeRate}
+        onUseStandardSupply={() => set('supply')(STANDARD_SUPPLY)}
       />
 
       <p className="text-xs" style={{ color: '#bbb' }}>
@@ -320,7 +321,7 @@ export const TokenMint = ({
         lineItems={[
           // SendConfirmation truncates labels over 16 characters: keep them short.
           { address: `$${form.ticker.trim()}`.slice(0, 16), amount: `${form.supply.trim() || '0'} tokens` },
-          ...(curve ? [{ address: 'Curve (fixed)', amount: `${usd(curve.floorUsd)} → ${usd(maxPrice(curve))}` }] : []),
+          { address: 'Curve (fixed)', amount: `${usd(curve.floorUsd)} → ${usd(maxPrice(curve))}` },
           ...(icon ? [{ address: 'Icon', amount: formatBytes(icon.file.size) }] : []),
           { address: 'Network fee', amount: `${money(cost.networkSats, exchangeRate)}` },
           ...(cost.feeSats > 0 ? [{ address: 'Mint fee (1%)', amount: `${money(cost.feeSats, exchangeRate)}` }] : []),

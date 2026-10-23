@@ -40,9 +40,9 @@ import { deployLaunch, payLaunchDeposit, retryVesting } from './launchNet';
 import { defaultVestPlan, scheduleSummary, type VerifiedVesting, type VestPlan } from './vesting';
 import { KeepForYourself } from './VestingSection';
 import { CurvePicker } from '../../curves/CurvePicker';
-import { curveProblem, presetFor } from '../../curves/curveChoice';
+import { STANDARD_SUPPLY, curveProblem } from '../../curves/curveChoice';
 import { curveMapBytes } from '../../curves/curveMap';
-import type { Curve } from '../../../lib/curves';
+import { standardCurve, type Curve } from '../../../lib/curves';
 
 const CATEGORY_SLUGS = CATEGORIES.map((c) => c.slug);
 type Done = {
@@ -87,7 +87,7 @@ export const LaunchCoin = () => {
   const [vest, setVest] = useState<VestPlan>(defaultVestPlan);
   const [doneVest, setDoneVest] = useState<{ plan: VestPlan; form: TokenForm; opts: LaunchOptions } | null>(null);
   const [vestBusy, setVestBusy] = useState(false);
-  const [curve, setCurve] = useState<Curve | null>(() => presetFor(prefill.curve, Number(form.supply) || 0));
+  const [curve, setCurve] = useState<Curve>(() => standardCurve(prefill.curve));
   const [curveOk, setCurveOk] = useState(false);
   const { handleSelect } = useBottomMenu();
   const setOpt = <K extends keyof LaunchOptions>(k: K, v: LaunchOptions[K]) => setOpts((o) => ({ ...o, [k]: v }));
@@ -96,14 +96,14 @@ export const LaunchCoin = () => {
   useEffect(() => () => void (icon && URL.revokeObjectURL(icon.url)), [icon]);
 
   const cost = launchCost(icon?.file.size ?? 0, chromeStorageService.getCustomFeeRate(), undefined, {
-    mapBytes: mapBytes(form, opts) + (curve ? curveMapBytes(curve) : 0),
+    mapBytes: mapBytes(form, opts) + curveMapBytes(curve),
     vest,
   });
   const check = () =>
     validateLaunch(withOptions(form, opts)) ??
     validateOptions(opts, CATEGORY_SLUGS) ??
     validateVest(withOptions(form, opts), vest) ??
-    curveProblem(curve, curveOk);
+    curveProblem(curve, curveOk, Number(wholeSupply));
   const wholeSupply = (() => {
     try {
       return BigInt((form.supply || '0').replace(/[,_\s]/g, '') || '0');
@@ -482,7 +482,7 @@ export const LaunchCoin = () => {
         accepted={curveOk}
         onAccept={setCurveOk}
         tokenSupply={Number(wholeSupply)}
-        bsvUsd={rate}
+        onUseStandardSupply={() => set('supply')(STANDARD_SUPPLY)}
       />
       {hasReturnsWording(`${form.name} ${form.description}`) && (
         <p className="text-xs m-0" style={{ color: GOLD }}>

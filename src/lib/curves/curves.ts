@@ -4,7 +4,7 @@
  *
  * Unifies b0ase.com's two libraries:
  *  - lib/path402/pricing.ts "Alice Bond" grades (ceiling raise 10K / 10M / 100M / 1G);
- *  - lib/tokenomics/bonding-curve.ts presets (linear, sigmoid, exponential "pump.fun").
+ *  - lib/tokenomics/bonding-curve.ts shapes (linear, sigmoid, exponential).
  *
  * Everything is USD-first. Positions are in whole tokens; `fraction` is sold / supply in [0, 1].
  * A curve is pure data (JSON-safe) so it can be written into a token's launch metadata and read back by
@@ -37,6 +37,8 @@ export interface Curve {
   earlyTier: EarlyTier | null;
   /** Smallest buy a sale should accept, USD (tiny-friendly: 10¢ by default). */
   minBuyUsd: number;
+  /** Months after launch when unsold curve supply is burnt; null = never (sells forever). */
+  burnAfterMonths: number | null;
   /** Preset id it started from, for display only. */
   preset?: PresetId;
 }
@@ -51,6 +53,8 @@ export interface CurveInput {
   maxPrice?: number;
   earlyTier?: EarlyTier | null;
   minBuyUsd?: number;
+  /** undefined = the standard 12 months; null = forever. */
+  burnAfterMonths?: number | null;
   preset?: PresetId;
 }
 
@@ -66,6 +70,7 @@ export const GRADES = {
   '10M': 10_000_000,
   '100M': 100_000_000,
   '1G': 1_000_000_000,
+  '10G': 10_000_000_000,
 } as const;
 export type Grade = keyof typeof GRADES;
 
@@ -111,7 +116,9 @@ export function makeCurve(input: CurveInput = {}): Curve {
   let raise = input.ceilingRaiseUsd ?? GRADES['100M'];
   if (input.maxPrice !== undefined) raise = raiseForMaxPrice(shape, supply, floorUsd, input.maxPrice);
   if (!(raise >= flat)) raise = flat;
-  const tier = input.earlyTier ?? null;
+  // undefined = the standard early tier (on for everyone); null = off.
+  const tier = input.earlyTier === undefined ? STANDARD_EARLY_TIER : input.earlyTier;
+  const burn = input.burnAfterMonths === undefined ? DEFAULT_BURN_AFTER_MONTHS : input.burnAfterMonths;
   return {
     supply,
     shape,
@@ -122,6 +129,7 @@ export function makeCurve(input: CurveInput = {}): Curve {
         ? { fraction: clamp01(tier.fraction), maxUsdPerIdentity: tier.maxUsdPerIdentity }
         : null,
     minBuyUsd: Math.max(0, input.minBuyUsd ?? DEFAULT_MIN_BUY_USD),
+    burnAfterMonths: burn !== null && burn > 0 ? Math.floor(burn) : null,
     ...(input.preset ? { preset: input.preset } : {}),
   };
 }
@@ -240,9 +248,13 @@ export function earlyTierAllowanceUsd(c: Curve, soldSoFar: number, spentInTierUs
   return Math.max(0, t.maxUsdPerIdentity - spentInTierUsd);
 }
 
-// ── Presets ──
+// ── Climbs: the one standard launch (owner, 23 Oct 2026) ──
+//
+// Every token launches on identical terms: 1,000,000,000 supply, all of it on the curve, first token 1¢,
+// fair-launch early tier on, unsold supply burnt after 12 months. The issuer picks only how far it climbs
+// (and the shape). A nobody's $name room and a celebrity's start the same way.
 
-export type PresetId = 'name' | 'film' | 'project' | 'company' | 'studio' | 'pumpfun' | 'sigmoid';
+export type PresetId = 'standard' | 'big' | 'huge';
 
 export interface Preset {
   id: PresetId;
@@ -252,59 +264,41 @@ export interface Preset {
   curve: Curve;
 }
 
-const FAIR: EarlyTier = { fraction: 0.01, maxUsdPerIdentity: 10 };
+export const STANDARD_EARLY_TIER: EarlyTier = { fraction: 0.01, maxUsdPerIdentity: 10 };
+export const DEFAULT_BURN_AFTER_MONTHS = 12;
+export const BURN_CHOICES: readonly (number | null)[] = [null, 6, 12];
 
-/**
- * name/room: 100,000 tokens on the curve, 1¢ → 19¢, $10K if all sell (Alice 10K). A smaller curve supply
- * than 1B because a 1¢ floor on 1B tokens is already $10M; the rest of the supply stays with the owner.
- * project / company / studio follow the Alice grades at a 1¢ floor.
- */
 export const PRESETS: Record<PresetId, Preset> = {
-  name: {
-    id: 'name',
-    label: '$name / room',
-    blurb: 'Small: friends and fans. $10K if all sell.',
-    curve: makeCurve({ preset: 'name', supply: 100_000, ceilingRaiseUsd: GRADES['10K'], earlyTier: FAIR }),
-  },
-  film: {
-    id: 'film',
-    label: 'Film',
+  standard: {
+    id: 'standard',
+    label: 'Standard',
     blurb: '1¢ to 19¢. $100M if all sell.',
-    curve: makeCurve({ preset: 'film', ceilingRaiseUsd: GRADES['100M'], earlyTier: FAIR }),
+    curve: makeCurve({ preset: 'standard', ceilingRaiseUsd: 100_000_000 }),
   },
-  project: {
-    id: 'project',
-    label: 'Project',
-    blurb: '$10M if all sell.',
-    curve: makeCurve({ preset: 'project', supply: 100_000_000, ceilingRaiseUsd: GRADES['10M'] }),
+  big: {
+    id: 'big',
+    label: 'Big',
+    blurb: '1¢ to $1.99. $1B if all sell.',
+    curve: makeCurve({ preset: 'big', ceilingRaiseUsd: 1_000_000_000 }),
   },
-  company: {
-    id: 'company',
-    label: 'Company',
-    blurb: '$100M if all sell.',
-    curve: makeCurve({ preset: 'company', ceilingRaiseUsd: GRADES['100M'] }),
-  },
-  studio: {
-    id: 'studio',
-    label: 'Studio',
-    blurb: '$1B if all sell.',
-    curve: makeCurve({ preset: 'studio', ceilingRaiseUsd: GRADES['1G'] }),
-  },
-  pumpfun: {
-    id: 'pumpfun',
-    label: 'Pump',
-    blurb: 'Exponential: tiny start, steep finish.',
-    curve: makeCurve({ preset: 'pumpfun', shape: 'exponential', floorUsd: 0.000001, ceilingRaiseUsd: GRADES['100M'] }),
-  },
-  sigmoid: {
-    id: 'sigmoid',
-    label: 'Sigmoid',
-    blurb: 'Slow start, fast middle, slow finish.',
-    curve: makeCurve({ preset: 'sigmoid', shape: 'sigmoid', ceilingRaiseUsd: GRADES['100M'] }),
+  huge: {
+    id: 'huge',
+    label: 'Huge',
+    blurb: '1¢ to $19.99. $10B if all sell.',
+    curve: makeCurve({ preset: 'huge', ceilingRaiseUsd: 10_000_000_000 }),
   },
 };
 
-export const preset = (id: PresetId): Curve => ({ ...PRESETS[id].curve });
+export const DEFAULT_PRESET: PresetId = 'standard';
+
+export const preset = (id: PresetId = DEFAULT_PRESET): Curve => ({ ...PRESETS[id].curve });
+
+/** The standard launch with the issuer's three choices. */
+export const standardCurve = (
+  climb: PresetId = DEFAULT_PRESET,
+  shape: CurveShape = 'linear',
+  burnAfterMonths: number | null = DEFAULT_BURN_AFTER_MONTHS,
+): Curve => makeCurve({ ...PRESETS[climb].curve, shape, burnAfterMonths });
 
 /** Fit a curve to a token whose supply is smaller than the curve's: the curve can't sell more than exists. */
 export const fitToSupply = (c: Curve, tokenSupply: number): Curve =>
@@ -335,6 +329,7 @@ export function canonicalCurve(c: Curve): string {
     ceilingRaiseUsd: c.ceilingRaiseUsd,
     earlyTier: t ? { fraction: t.fraction, maxUsdPerIdentity: t.maxUsdPerIdentity } : null,
     minBuyUsd: c.minBuyUsd,
+    burnAfterMonths: c.burnAfterMonths,
   });
 }
 
@@ -397,6 +392,7 @@ export function parseCurve(v: unknown): Curve | null {
     ceilingRaiseUsd: raise,
     earlyTier: fraction && cap ? { fraction, maxUsdPerIdentity: cap } : null,
     minBuyUsd: num(r.minBuyUsd),
+    burnAfterMonths: num(r.burnAfterMonths) ?? null,
     ...(typeof r.preset === 'string' && r.preset in PRESETS ? { preset: r.preset as PresetId } : {}),
   });
 }
@@ -424,6 +420,7 @@ export function curveLines(c: Curve, firstUsd = 10): string[] {
     `If all sell: ${usd(c.ceilingRaiseUsd)} raised`,
     `Price now ${usd(priceAt(c, 0))} · last token ${usd(maxPrice(c))}`,
   ];
+  lines.push(c.burnAfterMonths ? `Unsold after ${c.burnAfterMonths} months: burnt` : 'Unsold: stays on sale forever');
   const e = earlyTierSummary(c);
   if (e && c.earlyTier)
     lines.push(

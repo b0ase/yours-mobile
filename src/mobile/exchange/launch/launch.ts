@@ -1,5 +1,5 @@
 import { mintFeeAddress, txFeeSats } from '../../mint/mint';
-import { PRESETS, maxPrice, usd, type Curve, type PresetId } from '../../../lib/curves';
+import { DEFAULT_PRESET, PRESETS, maxPrice, usd, type Curve, type PresetId } from '../../../lib/curves';
 import { LockingScript, OP, Utils } from '@bsv/sdk';
 import { MAP_PREFIX } from '../../names/personalToken';
 import { INDEX_FUND_NETWORK_SATS, depositValue, launchDepositSats } from '../../tokens/indexFund';
@@ -131,9 +131,9 @@ export const launchPrefill = (
   if (/^https:\/\/[^\s]+$/i.test(website)) options.website = website;
   const category = get('category', 32);
   if (/^[a-z0-9-]+$/.test(category)) options.category = category;
-  // ?curve=film (bMovies) etc.; the Launchpad's own default is the 'company' grade (1B supply, 1¢ → 19¢).
+  // ?curve=standard|big|huge preselects the climb; anything else (e.g. bMovies' ?curve=film) = Standard.
   const c = get('curve', 16);
-  const curve: PresetId = c in PRESETS ? (c as PresetId) : 'company';
+  const curve: PresetId = c in PRESETS ? (c as PresetId) : DEFAULT_PRESET;
   return { form, options, curve };
 };
 
