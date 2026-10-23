@@ -33,7 +33,37 @@ self.addEventListener(CustomListenerName.YOURS_REQUEST, (e: Event) => {
   }
 
   chrome.runtime.sendMessage({ action: type, params, originator }, buildResponseCallback(messageId));
+  siteThemeConnected();
 });
+
+// Connected-site theme (src/mobile/theme/connectTheme.ts): once this page has talked to the wallet, tell the
+// background which theme it declares (<meta name="bwalletx-theme" content="npgx">), and again when that changes
+// (@bwalletx/connect removes it on disconnect). Only the id is sent; the background takes the origin from Chrome
+// and paints only a pack the wallet bundles. Top frame only.
+let themeWatch: MutationObserver | undefined;
+let sentTheme: string | null | undefined;
+const sendSiteTheme = () => {
+  const v = document.querySelector('meta[name="bwalletx-theme"]')?.getAttribute('content')?.trim() || null;
+  const theme = v && v.length <= 32 ? v : null;
+  if (theme === sentTheme) return;
+  sentTheme = theme;
+  try {
+    chrome.runtime.sendMessage({ action: 'bwxSiteTheme', theme })?.catch(() => undefined);
+  } catch {
+    /* extension reloaded */
+  }
+};
+function siteThemeConnected() {
+  if (themeWatch || window.top !== window) return;
+  themeWatch = new MutationObserver(sendSiteTheme);
+  themeWatch.observe(document.head ?? document.documentElement, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeFilter: ['content', 'name'],
+  });
+  sendSiteTheme();
+}
 
 const buildResponseCallback = (messageId: string) => {
   return (response: ResponseEventDetail) => {

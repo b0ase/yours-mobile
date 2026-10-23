@@ -1,4 +1,6 @@
 /* global chrome */
+import { siteThemeFor } from './mobile/theme/connectTheme';
+import type { AccentId } from './mobile/theme/accents';
 import { createMasterBackupGate } from './services/masterBackupGate';
 import { promptsShowInPanel } from './services/panelPrompt';
 import { isSessionExpired } from './utils/lockTimeout';
@@ -312,6 +314,8 @@ chrome.runtime.onConnect.addListener((port) => {
       // Give the panel's listener a moment to attach before posting.
       setTimeout(() => postToPanels({ action: 'SHOW_PROMPT_PANEL', kind, requestID }), 300);
     }
+    // A panel opening while a themed site is active wears its theme straight away.
+    setTimeout(() => void pushSiteTheme(true), 300);
     port.onDisconnect.addListener(() => {
       activePopupPorts.delete(port);
       if (promptInPanel && activePopupPorts.size === 0) {
@@ -987,6 +991,34 @@ const hideInPageSheet = () => {
   inPageSheet = undefined;
   chrome.tabs?.sendMessage(tabId, { action: 'BWX_INPAGE_SHEET_HIDE' }).catch(() => undefined);
 };
+// Connected-site themes (mobile/theme/connectTheme.ts): tab → the bundled pack its site declared after connecting.
+// The open panel wears the active tab's pack and goes back to the user's own theme on any other tab.
+const siteThemeTabs = new Map<number, AccentId>();
+let siteThemeShown: AccentId | null = null;
+const activeTabId = async (): Promise<number | undefined> => {
+  try {
+    const [t] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    return t?.id;
+  } catch {
+    return undefined;
+  }
+};
+const pushSiteTheme = async (force = false) => {
+  const tab = await activeTabId();
+  const theme = (tab !== undefined && siteThemeTabs.get(tab)) || null;
+  if (!force && theme === siteThemeShown) return;
+  siteThemeShown = theme;
+  postToPanels({ action: 'SITE_THEME', theme });
+};
+chrome.tabs?.onActivated?.addListener(() => void pushSiteTheme());
+chrome.windows?.onFocusChanged?.addListener(() => void pushSiteTheme());
+chrome.tabs?.onRemoved?.addListener((tabId) => {
+  if (siteThemeTabs.delete(tabId)) void pushSiteTheme();
+});
+chrome.tabs?.onUpdated?.addListener((tabId, info) => {
+  // A reload or navigation: the page declares again once it reconnects.
+  if (info.status === 'loading' && siteThemeTabs.delete(tabId)) void pushSiteTheme();
+});
 const postToPanels = (msg: unknown) =>
   activePopupPorts.forEach((p) => {
     try {
@@ -1550,6 +1582,16 @@ if (isInServiceWorker) {
     // Live-balance messages are for the wallet page (src/mobile/wallet/live/liveBus.ts), not the wallet: never
     // answer them here, so a page's session report can never reach a wallet method or a connect prompt.
     if (message?.action === 'bwxSessionSpend' || message?.action === 'bwxLiveSpend') return false;
+    // Connected-site theme (mobile/theme/connectTheme.ts): the id comes from the page, the origin from Chrome.
+    if (message?.action === 'bwxSiteTheme') {
+      if (sender.id === chrome.runtime.id && sender.tab?.id !== undefined && sender.frameId === 0) {
+        const id = siteThemeFor(sender.origin, message.theme);
+        if (id) siteThemeTabs.set(sender.tab.id, id);
+        else siteThemeTabs.delete(sender.tab.id);
+        void pushSiteTheme();
+      }
+      return false;
+    }
     // Subscribe requests are answered by the wallet page (src/mobile/pots/siteSubscribe.ts), never by a wallet method.
     // SUBSCRIPTIONS_ENABLED written out (literal env) so the minifier drops it from a store bundle.
 if (!(
