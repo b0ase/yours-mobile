@@ -7,7 +7,7 @@
        share ONE ramp; per-shape bounding-box gradients would split the b at the join. -->
   <defs><mask id="bh"><rect x="-10" y="-10" width="140" height="140" fill="#fff"/><circle cx="60" cy="72" r="15" fill="#000"/></mask></defs>
   <g fill="#FFD24D" mask="url(#bh)">
-    <polygon points="45,12 45,76 27,76 27,30"/>
+    <polygon points="45,12 45,72 27,72 27,30"/>
     <circle cx="60" cy="72" r="33"/>
   </g>
 </svg>

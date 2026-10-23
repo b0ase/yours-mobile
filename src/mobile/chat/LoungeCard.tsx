@@ -88,7 +88,7 @@ export const LoungeCard = ({
               <circle cx="60" cy="72" r="15" fill="#000" />
             </mask>
             <g fill="#F5C542" mask="url(#lounge-card-b)">
-              <polygon points="45,12 45,76 27,76 27,30" />
+              <polygon points="45,12 45,72 27,72 27,30" />
               <circle cx="60" cy="72" r="33" />
             </g>
           </svg>
