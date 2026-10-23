@@ -44,6 +44,78 @@ const bsvUsd = async () => {
 };
 
 const KEY = 'bwallet.pair.sessions';
+const REVOKE_QUEUE = 'bwallet.pair.revokeQueue';
+const SWEEP_FLAG = 'bwallet.pair.sweptBareHostGrants.v1';
+
+/**
+ * Disconnect must withdraw what the pairing was given (b-Aware report, 23 Oct 2026): the paired key
+ * "<host>.paired.invalid" depends on the host alone, so grants and the monthly allowance left under it were
+ * inherited by the next pairing that reported the same host. Revocation goes through the same background action
+ * as History › Connections › Revoke all (revokeAllForOriginator: every grant type, spending included, and the
+ * permission cache). Originators that could not be revoked yet are queued and retried, never dropped.
+ */
+type Revoke = (originator: string) => Promise<boolean>;
+const defaultRevoke: Revoke = async (originator) => {
+  const c = (globalThis as { chrome?: { runtime?: { sendMessage?: (m: unknown) => Promise<unknown> } } }).chrome;
+  if (!c?.runtime?.sendMessage) return false;
+  const r = (await c.runtime.sendMessage({ action: 'PERMISSIONS_REVOKE_ALL', originator }).catch(() => null)) as {
+    success?: boolean;
+  } | null;
+  return !!r?.success;
+};
+let revoke: Revoke = defaultRevoke;
+/** Tests only. */
+export const setPairRevoker = (fn: Revoke) => {
+  revoke = fn;
+};
+const readQueue = (): string[] => {
+  try {
+    const q = JSON.parse(localStorage.getItem(REVOKE_QUEUE) || '[]');
+    return Array.isArray(q) ? q.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+};
+const writeQueue = (q: string[]) => {
+  try {
+    if (q.length) localStorage.setItem(REVOKE_QUEUE, JSON.stringify([...new Set(q)]));
+    else localStorage.removeItem(REVOKE_QUEUE);
+  } catch {
+    /* storage unavailable */
+  }
+};
+/** Revoke every queued originator plus `more`; keep whatever failed for the next try. */
+export async function flushRevocations(more: string[] = []): Promise<void> {
+  const pending = [...new Set([...readQueue(), ...more])];
+  if (!pending.length) return;
+  writeQueue(pending);
+  const left: string[] = [];
+  for (const o of pending) if (!(await revoke(o).catch(() => false))) left.push(o);
+  writeQueue(left);
+}
+const hostOf = (origin: string): string | null => {
+  try {
+    return new URL(origin).host || null;
+  } catch {
+    return null;
+  }
+};
+/**
+ * Before 5.2.38 (commit 9f57eb29) a paired session's grants were written under the site's bare host. Sweep those
+ * once for every stored session, so the paired session and the in-app browser stop sharing a key.
+ */
+const sweepBareHostGrants = () => {
+  try {
+    if (localStorage.getItem(SWEEP_FLAG)) return;
+    const hosts = load()
+      .map((s) => hostOf(s.origin))
+      .filter((h): h is string => !!h);
+    localStorage.setItem(SWEEP_FLAG, '1');
+    if (hosts.length) void flushRevocations(hosts);
+  } catch {
+    /* storage unavailable: try again next start */
+  }
+};
 const IDLE_MS = 24 * 60 * 60 * 1000;
 
 export type StoredSession = {
@@ -247,8 +319,9 @@ function connect(c: string) {
   })();
 }
 
-/** Disconnect a site: tell it, then forget the key. */
+/** Disconnect a site: tell it, forget the key, and withdraw every grant and allowance the pairing was given. */
 export function forget(c: string, notify = true) {
+  const stored = load().find((s) => s.c === c);
   const l = live.get(c);
   if (l) {
     if (l.retry) clearTimeout(l.retry);
@@ -259,6 +332,7 @@ export function forget(c: string, notify = true) {
   }
   replies.forget(c);
   save(load().filter((s) => s.c !== c));
+  if (stored) void flushRevocations([pairedOrigin(stored.origin)]);
 }
 
 /**
@@ -338,6 +412,8 @@ let started = false;
 export function initPairing() {
   if (started) return;
   started = true;
+  sweepBareHostGrants();
+  void flushRevocations();
   for (const s of load()) connect(s.c);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') for (const s of load()) connect(s.c);
