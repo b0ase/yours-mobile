@@ -16,6 +16,9 @@ import { TOKEN_COPY, emptyTokenForm, tokenCost, validateToken, type TokenForm } 
 import { money, moneyWithSats } from '../money/money';
 import { RETURNS_BLOCK, RETURNS_WARNING, hasReturnsWording } from './returnsWording';
 import { ErrorActions } from '../errors/ErrorActions';
+import { CurvePicker } from '../curves/CurvePicker';
+import { curveProblem, presetFor } from '../curves/curveChoice';
+import { maxPrice, usd, type Curve, type PresetId } from '../../lib/curves';
 
 /**
  * MINT → "Mint a token": a plain BSV-21 token (name, ticker, supply, decimals, optional icon and
@@ -33,6 +36,7 @@ export const TokenMint = ({
   initial,
   map,
   onMinted,
+  curvePreset = 'name',
 }: {
   exchangeRate: number;
   onBack: () => void;
@@ -43,6 +47,8 @@ export const TokenMint = ({
   map?: { script: LockingScript; description: string };
   /** When set, called with the minted token instead of showing this form's own "minted" screen. */
   onMinted?: (token: MintedToken) => void;
+  /** Default launch curve grade (a token with its holders' room = the small $name/room grade). */
+  curvePreset?: PresetId;
 }) => {
   const { apiContext, chromeStorageService } = useServiceContext();
   const { theme } = useTheme();
@@ -55,6 +61,9 @@ export const TokenMint = ({
   const [busy, setBusy] = useState('');
   const [done, setDone] = useState<{ token: MintedToken; room: string | null } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const supplyNum = Number((form.supply || '0').replace(/[,_\s]/g, '')) || 0;
+  const [curve, setCurve] = useState<Curve | null>(() => presetFor(curvePreset, supplyNum));
+  const [curveOk, setCurveOk] = useState(false);
 
   useEffect(() => () => void (icon && URL.revokeObjectURL(icon.url)), [icon]);
 
@@ -84,7 +93,9 @@ export const TokenMint = ({
   const review = () => {
     // Hard block at sign time while returns wording is present (returnsWording.ts).
     const err =
-      validateToken(form) ?? (hasReturnsWording(`${form.name ?? ''} ${form.description ?? ''}`) ? RETURNS_BLOCK : null);
+      validateToken(form) ??
+      (hasReturnsWording(`${form.name ?? ''} ${form.description ?? ''}`) ? RETURNS_BLOCK : null) ??
+      curveProblem(curve, curveOk);
     setError(err ?? '');
     if (!err) setConfirming(true);
   };
@@ -101,6 +112,7 @@ export const TokenMint = ({
         icon: iconOutpoint,
         feeSats: cost.feeSats,
         ...(map ? { map } : {}),
+        curve,
       });
       void showOnWallet(chromeStorageService, token.tokenId);
       setConfirming(false);
@@ -263,6 +275,15 @@ export const TokenMint = ({
         </p>
       )}
 
+      <CurvePicker
+        curve={curve}
+        onChange={setCurve}
+        accepted={curveOk}
+        onAccept={setCurveOk}
+        tokenSupply={supplyNum}
+        bsvUsd={exchangeRate}
+      />
+
       <p className="text-xs" style={{ color: '#bbb' }}>
         Estimated network fee: {money(cost.networkSats, exchangeRate)}
         {cost.txCount > 1 ? ' (2 transactions: icon + token)' : ''}
@@ -299,6 +320,7 @@ export const TokenMint = ({
         lineItems={[
           // SendConfirmation truncates labels over 16 characters: keep them short.
           { address: `$${form.ticker.trim()}`.slice(0, 16), amount: `${form.supply.trim() || '0'} tokens` },
+          ...(curve ? [{ address: 'Curve (fixed)', amount: `${usd(curve.floorUsd)} → ${usd(maxPrice(curve))}` }] : []),
           ...(icon ? [{ address: 'Icon', amount: formatBytes(icon.file.size) }] : []),
           { address: 'Network fee', amount: `${money(cost.networkSats, exchangeRate)}` },
           ...(cost.feeSats > 0 ? [{ address: 'Mint fee (1%)', amount: `${money(cost.feeSats, exchangeRate)}` }] : []),

@@ -43,6 +43,9 @@ import { adoptSocialAvatar } from './socialAvatar';
 import { DEFAULT_SUPPLY, getPersonalLink, onPersonalChange, personalTicker, validateSupply } from './personalToken';
 import { getMyName } from './myName';
 import { SendConfirmation } from '../../components/SendConfirmation';
+import { CurvePicker } from '../curves/CurvePicker';
+import { curveProblem, presetFor } from '../curves/curveChoice';
+import { maxPrice, usd, type Curve } from '../../lib/curves';
 import { useTheme } from '../../hooks/useTheme';
 import { handleTitle, suggestHandle } from './handlePrompt';
 import { useBackClose } from '../backStack';
@@ -105,6 +108,9 @@ export const HandleFlow = ({
   // Store build: free paymail only, no personal token + holder room (storeBuild.ts).
   const withToken = PAID_FEATURES_ENABLED;
   const [supply, setSupply] = useState(DEFAULT_SUPPLY);
+  const supplyNum = Number(String(supply).replace(/[,_\s]/g, '')) || 0;
+  const [curve, setCurve] = useState<Curve | null>(() => presetFor('name', supplyNum));
+  const [curveOk, setCurveOk] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [tokenMsg, setTokenMsg] = useState('');
   // 1¢ to claim a new name (anti-squatting, owner 10 Oct 2026); null = free (server fee off).
@@ -213,6 +219,7 @@ export const HandleFlow = ({
         name,
         supply,
         payAddress: account?.addresses?.bsvAddress,
+        curve,
         avatar: account?.settings?.socialProfile?.avatar ?? account?.icon,
         ...(choice ? { choice, acceptDuplicate: choice.kind === 'mint-labelled' } : {}),
       });
@@ -509,6 +516,15 @@ export const HandleFlow = ({
                     />
                   </label>
                 )}
+                {withToken && claimed && (choice?.kind === 'mint' || choice?.kind === 'mint-labelled') && (
+                  <CurvePicker
+                    curve={curve}
+                    onChange={setCurve}
+                    accepted={curveOk}
+                    onAccept={setCurveOk}
+                    tokenSupply={supplyNum}
+                  />
+                )}
                 {withToken && supplyError && (
                   <span className="text-[11px]" style={{ color: '#ff4444' }}>
                     {supplyError}
@@ -543,7 +559,7 @@ export const HandleFlow = ({
                 {withToken && claimed && (choice?.kind === 'mint' || choice?.kind === 'mint-labelled') && (
                   <button
                     type="button"
-                    disabled={busy || !ticker || !!supplyError}
+                    disabled={busy || !ticker || !!supplyError || !!curveProblem(curve, curveOk)}
                     onClick={() => setConfirming(true)}
                     className="h-11 rounded-xl text-sm font-bold border-0 cursor-pointer disabled:opacity-40"
                     style={{ background: GOLD, color: '#000' }}
@@ -591,6 +607,7 @@ export const HandleFlow = ({
               address: `$${ticker ?? 'NAME'} + room`.slice(0, 16),
               amount: `${Number(supply || 0).toLocaleString()} tokens`,
             },
+            ...(curve ? [{ address: 'Curve (fixed)', amount: `${usd(curve.floorUsd)} → ${usd(maxPrice(curve))}` }] : []),
             { address: 'Network fee', amount: `~${moneyNow(PERSONAL_NETWORK_FEE_SATS)}` },
           ]}
           total={`~${moneyNow(PERSONAL_FEE_ESTIMATE_SATS)}`}
