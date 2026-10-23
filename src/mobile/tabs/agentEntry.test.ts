@@ -31,7 +31,8 @@ describe('classic layout b agent menu entry', () => {
     expect(toRouter('/ask-b', '')).toBe('/m/ask-b');
     expect(toRouter('/agent', '')).toBe('/m/agent');
     const routes = readFileSync(join(import.meta.dir, 'MobileRoutes.tsx'), 'utf8');
-    expect(routes).toContain('<Route path="ask-b" element={<AgentPage />} />');
+    expect(routes).toContain('<Route path="ask-b" element={<AskB />} />');
+    expect(routes).toContain('return <AgentPage />;');
     expect(routes).toContain('<Route path="agent" element={<Navigate to="/m/ask-b" replace />} />');
   });
 });
