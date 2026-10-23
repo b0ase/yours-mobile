@@ -72,7 +72,7 @@ const useInPageArmed = (enabled: boolean, target: React.RefObject<HTMLDivElement
       .catch(() => setTokenOk(false));
   }, [enabled]);
   useEffect(() => {
-    if (!enabled || !target.current) return;
+    if (!enabled || tokenOk !== true || !target.current) return;
     let timer: number | undefined;
     // `target` is a small marker at the top of the sheet, not the whole sheet: a full-height box
     // sized with calc(100vh - 41px) can round to 99.9% visible and never reach a 1.0 threshold,
@@ -92,7 +92,7 @@ const useInPageArmed = (enabled: boolean, target: React.RefObject<HTMLDivElement
       window.clearTimeout(timer);
       io.disconnect();
     };
-  }, [enabled, target]);
+  }, [enabled, target, tokenOk]);
   // Still not armed after 1.5s: offer the wallet's own popup window (see MOVE_PROMPT_TO_WINDOW).
   useEffect(() => {
     if (!enabled || visible) {
@@ -108,6 +108,15 @@ const useInPageArmed = (enabled: boolean, target: React.RefObject<HTMLDivElement
 const PromptApp = () => {
   const { theme } = useTheme();
   const { isLocked, isReady } = useServiceContext();
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const armMarkerRef = useRef<HTMLDivElement>(null);
+  const inPage = useInPageArmed(!!INPAGE_TOKEN, armMarkerRef);
+  // b-Aware report (23 Oct 2026): a foreign page could frame prompt.html?inpage=<anything> and mount the prompt
+  // flow (GET_NEXT_PROMPT / GET_PROMPT_PAYLOAD / CLOSE_PROMPT_WINDOW) while the token check was still pending.
+  // Nothing talks to the background about prompts until the background has vouched for the in-page token.
+  const allowed = !FOREIGN_FRAME && inPage.tokenOk === true;
+  const allowedRef = useRef(allowed);
+  allowedRef.current = allowed;
   const [screen, setScreen] = useState<PromptScreen>({ kind: 'loading' });
   const waitingTimer = useRef<number | undefined>(undefined);
   const advanceRef = useRef<(() => Promise<void>) | undefined>(undefined);
@@ -218,7 +227,7 @@ const PromptApp = () => {
   advanceRef.current = advance;
 
   useEffect(() => {
-    if (!isReady) return;
+    if (!isReady || !allowed) return;
     const params = new URLSearchParams(window.location.search);
     const kind = params.get('kind') as PromptKind | null;
     const requestID = params.get('requestID');
@@ -233,11 +242,11 @@ const PromptApp = () => {
     }
     void advance();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isReady]);
+  }, [isReady, allowed]);
 
   useEffect(() => {
     const listener = (message: { action?: string; kind?: PromptKind; requestID?: string }) => {
-      if (message?.action !== 'SHOW_PROMPT' || !message.kind) return;
+      if (message?.action !== 'SHOW_PROMPT' || !message.kind || !allowedRef.current) return;
       if (message.kind === 'unlock') {
         clearWaitingTimer();
         setScreen({ kind: 'unlock' });
@@ -250,11 +259,10 @@ const PromptApp = () => {
   }, [loadPrompt]);
 
   const walletBg = theme.color.global.walletBackground;
-  const sheetRef = useRef<HTMLDivElement>(null);
-  const armMarkerRef = useRef<HTMLDivElement>(null);
-  const inPage = useInPageArmed(!!INPAGE_TOKEN, armMarkerRef);
 
-  if (FOREIGN_FRAME || inPage.tokenOk === false) {
+  // Still waiting for the background to vouch for the in-page token: render nothing yet.
+  if (!FOREIGN_FRAME && INPAGE_TOKEN && inPage.tokenOk === undefined) return null;
+  if (!allowed) {
     return (
       <p className="text-xs p-4" style={{ color: '#98A2B3' }}>
         Open bWalletX to answer this request.
