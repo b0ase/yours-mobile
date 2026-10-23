@@ -1,6 +1,7 @@
 /* global chrome */
 
 import { isCWIEventName } from '@1sat/wallet-browser';
+import { isSpendingAuthAction } from './services/streamGrants';
 import { CustomListenerName, RequestEventDetail, RequestParams, ResponseEventDetail } from './inject';
 import { originatorForOrigin } from './services/originKey';
 import { SUBSCRIPTIONS_ENABLED } from './mobile/storeBuild';
@@ -14,7 +15,7 @@ console.log('🌱 Yours Wallet Loaded');
 // Forward CWI requests from page to background service worker
 self.addEventListener(CustomListenerName.YOURS_REQUEST, (e: Event) => {
   const { type, messageId, params: originalParams = {} } = (e as CustomEvent<RequestEventDetail>).detail;
-  if (!type || !isCWIEventName(type)) return;
+  if (!type || !(isCWIEventName(type) || isSpendingAuthAction(type))) return;
 
   let params: RequestParams = {};
 
