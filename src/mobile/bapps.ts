@@ -99,15 +99,24 @@ export const BAPPS: BApp[] = [
     status: 'live',
     icon: bappIconUrl('bmint'),
   },
-  // bTrust (btrust/BTrustPage.tsx): recovery slices, passing on, papers. Same route in every edition (/m/btrust).
-  {
-    name: 'bTrust',
-    url: '/m/btrust',
-    verb: 'Recovery slices and passing your coins on to your heirs',
-    group: 'featured',
-    status: 'live',
-    icon: bappIconUrl('btrust'),
-  },
+  // bTrust (btrust/BTrustPage.tsx): recovery slices, passing on, papers. bWalletX only (BTRUST_ENABLED, owner 23 Oct 2026).
+  // Literal env check (not the imported flag) so Rollup drops the entry from the store bundle.
+  ...(!(
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+  )
+    ? [
+        {
+          name: 'bTrust',
+          url: '/m/btrust',
+          verb: 'Recovery slices and passing your coins on to your heirs',
+          group: 'featured' as const,
+          status: 'live' as const,
+          icon: bappIconUrl('btrust'),
+        },
+      ]
+    : []),
   // bShares (docs/BCORP-PLACEMENT.md): share registers for any company; first register in testing is The Bitcoin
   // Corporation Ltd. For registered members and directors. Restricted, never in the store edition (no route or tile there: PLACEMENT_ENABLED).
   // Literal env check (not the imported flag) so Rollup drops the entry from the store bundle.

@@ -574,3 +574,13 @@ export const BUREAU_ENABLED: boolean = !(
  */
 export const SPACES_LABEL: string = BSPACES_ENABLED ? 'bSpaces' : 'Spaces';
 export const PEOPLE_LABEL: string = BSPACES_ENABLED ? 'bPeople' : 'People';
+
+/**
+ * bTrust (recovery slices, heirs, check-in, co-sign on BSV; owner, 23 Oct 2026): bWalletX only. Kept out of the
+ * App Store / Google Play edition like the other money-management features. Literal so the store bundle drops it.
+ */
+export const BTRUST_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
