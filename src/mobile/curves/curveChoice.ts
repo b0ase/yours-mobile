@@ -24,5 +24,8 @@ export function satsView(usd: number, rate: number, stale: boolean, at: number |
   const sats = Math.round((usd / rate) * 1e8).toLocaleString('en-US');
   if (!stale) return { text: `≈ ${sats} sats (BSV $${rate.toFixed(2)})`, stale: false };
   const mins = at ? Math.max(1, Math.round((now - at) / 60_000)) : null;
-  return { text: `≈ ${sats} sats (BSV $${rate.toFixed(2)}, price ${mins ? `${mins} min old` : 'may be old'})`, stale: true };
+  return {
+    text: `≈ ${sats} sats (BSV $${rate.toFixed(2)}, price ${mins ? `${mins} min old` : 'may be old'})`,
+    stale: true,
+  };
 }

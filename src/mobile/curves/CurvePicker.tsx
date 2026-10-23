@@ -162,10 +162,18 @@ export const CurvePicker = ({
         Fair launch: max $10 each in the cheapest 1%
       </label>
       {tokenSupply !== curve.supply && (
-        <div className="flex items-center justify-between gap-2 rounded-lg border p-2 text-xs" style={{ borderColor: '#5a2a2a', color: '#FF6B6B' }}>
+        <div
+          className="flex items-center justify-between gap-2 rounded-lg border p-2 text-xs"
+          style={{ borderColor: '#5a2a2a', color: '#FF6B6B' }}
+        >
           <span>Every launch is 1,000,000,000 tokens, all on the curve.</span>
           {onUseStandardSupply && (
-            <button type="button" className="rounded-full border px-3 min-h-[32px] cursor-pointer bg-transparent" style={{ borderColor: GOLD, color: GOLD }} onClick={onUseStandardSupply}>
+            <button
+              type="button"
+              className="rounded-full border px-3 min-h-[32px] cursor-pointer bg-transparent"
+              style={{ borderColor: GOLD, color: GOLD }}
+              onClick={onUseStandardSupply}
+            >
               Use 1B
             </button>
           )}
@@ -173,7 +181,12 @@ export const CurvePicker = ({
       )}
       <div className="flex flex-col gap-1 rounded-lg border p-2" style={{ borderColor: '#5a4a1a' }}>
         <label className="flex items-start gap-2 text-xs text-white cursor-pointer">
-          <input type="checkbox" checked={accepted} onChange={(e) => onAccept(e.target.checked)} aria-label="Curve is permanent" />
+          <input
+            type="checkbox"
+            checked={accepted}
+            onChange={(e) => onAccept(e.target.checked)}
+            aria-label="Curve is permanent"
+          />
           <span>{PERMANENT_NOTE}</span>
         </label>
         <span className="text-[10px] break-all" style={{ color: MUTED }}>
@@ -219,12 +232,19 @@ export const CurveChart = ({ curve, height = 120 }: { curve: Curve; height?: num
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img" aria-label="Price as the supply sells">
         <rect x={0} y={0} width={W} height={H} rx={8} fill="#0d0e11" />
         {tierW > 0 && <rect x={pad} y={pad} width={tierW} height={H - 2 * pad} fill="rgba(161,255,139,0.18)" />}
-        <polyline points={`${pad},${H - pad} ${pts.join(' ')} ${W - pad},${H - pad}`} fill="rgba(255,200,0,0.10)" stroke="none" />
+        <polyline
+          points={`${pad},${H - pad} ${pts.join(' ')} ${W - pad},${H - pad}`}
+          fill="rgba(255,200,0,0.10)"
+          stroke="none"
+        />
         <polyline points={pts.join(' ')} fill="none" stroke="var(--bw-accent)" strokeWidth={2} />
       </svg>
       <figcaption className="flex justify-between text-[10px]" style={{ color: MUTED }}>
         <span>{usd(curve.floorUsd)} at the start</span>
-        <span>{log ? 'log scale · ' : ''}{usd(top)} at 100% sold</span>
+        <span>
+          {log ? 'log scale · ' : ''}
+          {usd(top)} at 100% sold
+        </span>
       </figcaption>
     </figure>
   );

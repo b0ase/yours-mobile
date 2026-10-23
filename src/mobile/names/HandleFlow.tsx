@@ -501,8 +501,8 @@ export const HandleFlow = ({
                 <p className="text-[11px]" style={{ color: GRAY }}>
                   A personal token, <b className="text-white">${ticker ?? 'NAME'}</b>, all to your wallet, and a chat
                   room only holders can enter. Invite someone by sending 1 ${ticker ?? 'NAME'}. Your room's token:
-                  holders get in; it trades on your curve. About {moneyNow(PERSONAL_NETWORK_FEE_SATS)} network fee. You confirm it before anything is
-                  sent.
+                  holders get in; it trades on your curve. About {moneyNow(PERSONAL_NETWORK_FEE_SATS)} network fee. You
+                  confirm it before anything is sent.
                 </p>
                 {withToken && (
                   <label className="text-[11px] flex items-center gap-2" style={{ color: GRAY }}>

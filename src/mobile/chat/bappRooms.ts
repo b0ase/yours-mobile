@@ -138,8 +138,7 @@ export const BAPPS: readonly Bapp[] = [
 ];
 
 /** The one film page for a film room's ticker (ONE MODEL): rooms link here, and the film page links back. */
-export const bmoviesFilmUrl = (ticker: string): string =>
-  `${BMOVIES_ORIGIN}/film/${encodeURIComponent(norm(ticker))}`;
+export const bmoviesFilmUrl = (ticker: string): string => `${BMOVIES_ORIGIN}/film/${encodeURIComponent(norm(ticker))}`;
 
 /** Tickers kept out of "Rooms" and shown under "bApps": the registry, plus bMovies and $BMUSICX holders. */
 export const BAPP_ROOM_TICKERS: readonly string[] = [...new Set([...BAPPS.map((b) => b.ticker), 'BMOVIES', 'BMUSICX'])];

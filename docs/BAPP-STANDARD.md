@@ -3,7 +3,7 @@
 A **bApp** is a web app that lives inside bWalletX: it has its own token, its own room, its own look in the
 wallet, and it runs in the wallet with no separate sign-in. The bApps screen lists apps in three tiers:
 
-1. **Featured: b*X bApps.** Made by The Bitcoin Corporation (bChatX, bSocialX, bMoviesX, bMintX…).
+1. **Featured: b\*X bApps.** Made by The Bitcoin Corporation (bChatX, bSocialX, bMoviesX, bMintX…).
 2. **Commercial apps.** Our ventures and clients with tokens (Ninja Punk Girls, VexVoid, Zero Dice; NPGX is
    adults only, see below).
 3. **Community bApps.** Apps from other developers, listed **only when they meet all four parts of the standard**.
@@ -13,12 +13,12 @@ Each tile shows four badges, one for each part of the standard.
 
 ## The four requirements
 
-| Badge | Requirement | How we check |
-|-------|-------------|--------------|
-| Token | The app has a BSV-21 token (ticker) and it is launched and indexed. | Token id in the wallet's registry |
-| Room | The token has a **bChatX room** (bit-sign room ticker). Holders meet there and a 1¢ ticket gets you in. | `src/mobile/chat/bappRooms.ts` |
-| Theme | The site serves a **wallet theme pack** at `https://<host>/.well-known/bwalletx-theme.json`, so the wallet takes on the app's colours while it's open. | Host listed in `src/mobile/theme/themeSites.ts` (docs/SITE-THEMES.md) |
-| In-wallet | The app runs in the **bWalletX bApp format**: see below. | Frame headers, plus a manual BRC-100 check |
+| Badge     | Requirement                                                                                                                                            | How we check                                                          |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| Token     | The app has a BSV-21 token (ticker) and it is launched and indexed.                                                                                    | Token id in the wallet's registry                                     |
+| Room      | The token has a **bChatX room** (bit-sign room ticker). Holders meet there and a 1¢ ticket gets you in.                                                | `src/mobile/chat/bappRooms.ts`                                        |
+| Theme     | The site serves a **wallet theme pack** at `https://<host>/.well-known/bwalletx-theme.json`, so the wallet takes on the app's colours while it's open. | Host listed in `src/mobile/theme/themeSites.ts` (docs/SITE-THEMES.md) |
+| In-wallet | The app runs in the **bWalletX bApp format**: see below.                                                                                               | Frame headers, plus a manual BRC-100 check                            |
 
 The data lives on each entry as `standard: { token, room, theme, inWallet }` in `src/mobile/bappStandard.ts`.
 `missingStandard()` says what an app still lacks.
@@ -29,7 +29,7 @@ A bApp must work in **both** of these places:
 
 - **Phones (iOS/Android):** it opens full screen inside the wallet's webview/frame. Your site must allow framing by
   the wallet: send `Content-Security-Policy: frame-ancestors 'self' capacitor://localhost https://localhost
-  https://web.bwalletx.com https://desktop.bwalletx.com` and **no** `X-Frame-Options: DENY/SAMEORIGIN`
+https://web.bwalletx.com https://desktop.bwalletx.com` and **no** `X-Frame-Options: DENY/SAMEORIGIN`
   (docs/BAPP-FRAME.md).
 - **Chrome extension:** the side panel is only the launcher (tiles, badges, search, room previews). Tapping a bApp
   opens it in a **normal browser tab**, or focuses the tab already open on that origin. The extension's injected

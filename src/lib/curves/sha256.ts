@@ -13,14 +13,16 @@ const K = new Uint32Array([
 export function sha256Hex(text: string): string {
   const msg = new TextEncoder().encode(text);
   const len = msg.length;
-  const padded = new Uint8Array((((len + 9 + 63) >> 6) << 6));
+  const padded = new Uint8Array(((len + 9 + 63) >> 6) << 6);
   padded.set(msg);
   padded[len] = 0x80;
   const bits = len * 8;
   const dv = new DataView(padded.buffer);
   dv.setUint32(padded.length - 8, Math.floor(bits / 2 ** 32));
   dv.setUint32(padded.length - 4, bits >>> 0);
-  const h = new Uint32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]);
+  const h = new Uint32Array([
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+  ]);
   const w = new Uint32Array(64);
   const rotr = (x: number, n: number) => (x >>> n) | (x << (32 - n));
   for (let off = 0; off < padded.length; off += 64) {
@@ -34,9 +36,23 @@ export function sha256Hex(text: string): string {
     for (let i = 0; i < 64; i++) {
       const t1 = (hh + (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) + ((e & f) ^ (~e & g)) + K[i] + w[i]) | 0;
       const t2 = ((rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) | 0;
-      hh = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+      hh = g;
+      g = f;
+      f = e;
+      e = (d + t1) | 0;
+      d = c;
+      c = b;
+      b = a;
+      a = (t1 + t2) | 0;
     }
-    h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e; h[5] += f; h[6] += g; h[7] += hh;
+    h[0] += a;
+    h[1] += b;
+    h[2] += c;
+    h[3] += d;
+    h[4] += e;
+    h[5] += f;
+    h[6] += g;
+    h[7] += hh;
   }
   return [...h].map((x) => x.toString(16).padStart(8, '0')).join('');
 }

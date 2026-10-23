@@ -109,8 +109,7 @@ export async function deployPersonalToken(
   // Never mint with our logo when the person has a picture: inscribe it as the token's icon.
   const icon = input.icon || (await personalIcon(ctx, ticker, input).catch(() => undefined));
   // Fresh wrapper per attempt: the MAP proxies add their output to one createAction only.
-  const withCurve = () =>
-    input.curve ? withMapOutput(ctx, curveMapScript(input.curve), CURVE_MAP_DESCRIPTION) : ctx;
+  const withCurve = () => (input.curve ? withMapOutput(ctx, curveMapScript(input.curve), CURVE_MAP_DESCRIPTION) : ctx);
   const deploy = () =>
     deployBsv21Mint.execute(withIssuerSignature(withPersonalMap(withCurve(), input.name, ticker), 'bsv21'), {
       symbol: ticker,

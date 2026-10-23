@@ -24,7 +24,8 @@ import {
   type CurveShape,
 } from './index';
 
-const close = (a: number, b: number, rel = 1e-6) => expect(Math.abs(a - b)).toBeLessThanOrEqual(Math.abs(b) * rel + 1e-9);
+const close = (a: number, b: number, rel = 1e-6) =>
+  expect(Math.abs(a - b)).toBeLessThanOrEqual(Math.abs(b) * rel + 1e-9);
 
 describe('standard launch', () => {
   const c = preset('standard');
