@@ -16,6 +16,7 @@ import {
   offersAllowance,
   sheetCanTrust,
   sheetAnswer,
+  sheetView,
   type SheetChoice,
   type BundleRequest,
 } from '../../services/permissionBundle';
@@ -125,7 +126,7 @@ export const BundleSheet = (props: {
         }
       }
       if (approve) markSiteConnected(request.originator); // its sheets may now wear its theme (docs/SITE-THEME.md)
-      const answer = sheetAnswer(model, choice, checked, detailsSeen);
+      const answer = sheetAnswer(model, choice, checked, detailsSeen, view);
       await sendMessageAsync({
         action: 'BUNDLE_PERMISSION_RESPONSE',
         bundleID: request.bundleID,
@@ -177,6 +178,9 @@ export const BundleSheet = (props: {
   const disabled = busy || !armed;
   const careful = kind === 'careful';
   const riskyLines = model.lines.filter((l) => l.risky);
+  // Every line a tap can grant is on the face (owner: never approve something the user can't read).
+  const view = sheetView(model, careful);
+  const ordinaryLines = careful ? model.lines.filter((l) => !l.risky) : [];
 
   const toggle = (id: string, dflt: boolean) => setChecked((c) => ({ ...c, [id]: !isChecked(id, dflt) }));
   const lineRow = (l: (typeof model.lines)[number], big = false) => (
@@ -368,6 +372,14 @@ export const BundleSheet = (props: {
           </div>
         )}
         {riskyLines.map((l) => lineRow(l, true))}
+        {ordinaryLines.length > 0 && (
+          <div className="flex flex-col" data-testid="careful-ordinary-lines" style={{ padding: '0 4px' }}>
+            <p className="m-0" style={{ fontSize: 12, fontWeight: 700, color: CARD.muted }}>
+              Also asks to
+            </p>
+            {ordinaryLines.map((l) => lineRow(l))}
+          </div>
+        )}
         <div
           className="flex items-center gap-2.5"
           style={{ padding: '12px 14px', borderRadius: 14, background: CARD.redChip, fontSize: 14 }}
@@ -380,7 +392,11 @@ export const BundleSheet = (props: {
   } else if (kind === 'pay') {
     hero = <PayHero amount={payAmount?.main ?? ''} sub={payAmount?.sub} />;
     siteSub = model.payment?.description || 'Asks you to pay';
-    title = <>Pay {gold(name)}</>;
+    title = (
+      <>
+        Pay {gold(payLabel)} now to {gold(name)}
+      </>
+    );
     body = (
       <>
         <div className="flex items-center gap-3" style={{ padding: 14, borderRadius: 16, background: CARD.chip }}>

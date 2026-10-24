@@ -10,6 +10,8 @@ import {
   isRiskyRequest,
   sheetCanTrust,
   sheetDecisions,
+  sheetView,
+  shownItems,
   sheetAnswer,
   blockActive,
   BLOCK_SITE_BASKET,
@@ -560,5 +562,51 @@ describe('the three answers of a careful sheet (owner, 24 Oct 2026)', () => {
     expect(blockActive(null)).toBe(false);
     expect(blockActive({ expiry: 1 }, 5000)).toBe(false);
     expect(BLOCK_SITE_BASKET.startsWith('bwalletx.')).toBe(true);
+  });
+});
+
+describe('never approve a line the user cannot read (mixed careful batch, 24 Oct 2026)', () => {
+  const site = 'mixed.example';
+  const mixed = () =>
+    buildSheetModel({
+      originator: site,
+      items: [proto('key', site, { privileged: true }), basket('bk', site)],
+    });
+
+  test('a line under Details is never granted unless it was shown on the card', () => {
+    const m = mixed();
+    const hidden = { hidden: new Set(['bk']) };
+    // Allow without opening Details: the hidden line is left out of the answer, never granted.
+    const a = sheetAnswer(m, 'allow', { key: true }, false, hidden);
+    expect(a.decisions).toEqual({ key: true });
+    expect('bk' in a.decisions).toBe(false);
+    // Even a stray tick for it cannot grant it while it was never on screen.
+    expect(sheetDecisions(m, true, { key: true, bk: true }, false, hidden)).toEqual({ key: true });
+    // Details opened: now it was shown, and its tick decides.
+    expect(sheetDecisions(m, true, { key: true }, true, hidden)).toEqual({ key: true, bk: true });
+  });
+
+  test('the careful card draws every line on its face, so nothing is hidden', () => {
+    const m = mixed();
+    const v = sheetView(m, true);
+    expect([...v.faceTicks].sort()).toEqual(['bk', 'key']);
+    expect(v.hidden.size).toBe(0);
+    // The ordinary line is drawn ticked, so Allow grants it as drawn; unticked on the face, it is denied.
+    expect(sheetDecisions(m, true, { key: true }, false, v)).toEqual({ key: true, bk: true });
+    expect(sheetDecisions(m, true, { key: true, bk: false }, false, v)).toEqual({ key: true, bk: false });
+  });
+
+  test('a protocol line drawn unticked on the careful face is not granted by Allow', () => {
+    const m = buildSheetModel({
+      originator: site,
+      items: [proto('key', site, { privileged: true }), proto('h1', site, { counterparty: 'self' })],
+    });
+    expect(sheetDecisions(m, true, { key: true }, false, sheetView(m, true))).toEqual({ key: true, h1: false });
+  });
+
+  test('the shown items are exactly what the answer may cover', () => {
+    const items = [proto('key', site, { privileged: true }), basket('bk', site)];
+    expect(shownItems(items, { hidden: new Set(['bk']) }).map((i) => i.requestID)).toEqual(['key']);
+    expect(shownItems(items, sheetView(mixed(), true))).toEqual(items);
   });
 });

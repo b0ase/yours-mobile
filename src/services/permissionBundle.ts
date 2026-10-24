@@ -513,15 +513,46 @@ export const buildSheetModel = (bundle: Pick<PermissionBundle, 'originator' | 'i
  * every call (chat.bwalletx.com, 23 Oct 2026). Risky lines are shown with their ticks on the
  * careful card, so they always keep their tick state. Details opened: the ticks decide.
  */
+/**
+ * What the face of a sheet shows (owner rule: never approve something the user can't read).
+ * - faceTicks: lines drawn on the face with their own tick box. The box decides, as drawn.
+ * - hidden: lines not on the face at all (only behind Details). Until Details is opened they are never granted:
+ *   they are left out of the answer, so the background never grants them (#85 carries them to a sheet of their own;
+ *   the live sheet's hash, built from the shown lines only, no longer matches, so nothing is granted).
+ */
+export interface SheetView {
+  faceTicks?: ReadonlySet<string>;
+  hidden?: ReadonlySet<string>;
+}
+
+/**
+ * The face of a sheet. The careful card draws every line with its tick: the risky ones large, the ordinary ones
+ * compact below (a mixed batch once hid an ordinary line under Details and "I trust it, allow" granted it unseen).
+ * Other cards summarise their routine lines on the face (tiles, chips), so nothing is hidden there either.
+ */
+export const sheetView = (model: Pick<SheetModel, 'lines'>, careful: boolean): Required<SheetView> => ({
+  faceTicks: new Set(careful ? model.lines.map((l) => l.requestID) : []),
+  hidden: new Set<string>(),
+});
+
+/** The requests the user can read on the sheet: what the answer and its hash may cover. */
+export const shownItems = <T extends Pick<BundleRequest, 'requestID'>>(items: T[], view?: SheetView): T[] =>
+  view?.hidden?.size ? items.filter((i) => !view.hidden!.has(i.requestID)) : items;
+
 export const sheetDecisions = (
   model: Pick<SheetModel, 'lines' | 'payment'>,
   approve: boolean,
   ticks: Record<string, boolean>,
   detailsSeen: boolean,
+  view: SheetView = {},
 ): Record<string, boolean> => {
   const decisions: Record<string, boolean> = {};
   for (const l of model.lines) {
-    const ticked = ticks[l.requestID] ?? (l.checked || (!l.risky && !detailsSeen));
+    // Never on screen: not answered, so never granted.
+    if (!detailsSeen && view.hidden?.has(l.requestID)) continue;
+    // A tick box on the face (or in opened Details) decides as drawn.
+    const drawn = detailsSeen || !!view.faceTicks?.has(l.requestID);
+    const ticked = ticks[l.requestID] ?? (l.checked || (!l.risky && !drawn));
     decisions[l.requestID] = approve && ticked;
   }
   if (model.payment) decisions[model.payment.requestID] = approve;
@@ -552,8 +583,9 @@ export const sheetAnswer = (
   choice: SheetChoice,
   ticks: Record<string, boolean>,
   detailsSeen: boolean,
+  view: SheetView = {},
 ): SheetAnswer => ({
-  decisions: sheetDecisions(model, choice === 'allow', ticks, detailsSeen),
+  decisions: sheetDecisions(model, choice === 'allow', ticks, detailsSeen, view),
   block: choice === 'block',
   mayStore: choice === 'allow',
 });
