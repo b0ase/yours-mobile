@@ -13,6 +13,7 @@ import {
   ALLOWANCE_CHOICES_USD,
   buildSheetModel,
   DEFAULT_ALLOWANCE_USD,
+  offersAllowance,
   sheetCanTrust,
   sheetDecisions,
   type BundleRequest,
@@ -104,7 +105,8 @@ export const BundleSheet = (props: {
   // The allowance line shows when the price is known and the site has none yet.
   // A mint sheet is for this one mint: never an allowance or "don't ask again" (the background enforces it too).
   const mint = request.mint && model.payment && model.lines.every((l) => !l.risky) ? request.mint : undefined;
-  const showAllowance = !mint && !!allowance?.usdPerBsv && allowance.existingSats === undefined;
+  const showAllowance =
+    !mint && !!allowance?.usdPerBsv && allowance.existingSats === undefined && offersAllowance(model);
   const payUsd =
     model.payment && allowance?.usdPerBsv ? (model.payment.satoshis / 1e8) * allowance.usdPerBsv : undefined;
 
