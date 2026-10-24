@@ -18,6 +18,7 @@ import { assertOrdLockV2 } from '../market/ordlockVersion';
 import { appendAgentLog, getAgentAccount } from './agentAccounts';
 import { checkAgentAction, getLoadedStrategy, getPaperBook, type ActionRequest, type StrategyAction } from './strategy';
 import { describeRules } from './describeRules';
+import { heldBsv21Balances } from '../airdrops/heldBalances';
 import { parseRoom, roomMarket, roomMeta, type Listing } from '../market/indexer';
 import { MODULE_FINISHES, purchaseContext, walletOutpoint } from '../market/walletOutpoint';
 import { marketFeeOptions } from '../market/fee';
@@ -65,6 +66,12 @@ export const pickListing = (listings: Listing[], maxUsd: number, bsvUsd: number)
     .filter((l) => l.buyable && (l.priceSats / 1e8) * bsvUsd <= maxUsd + 1e-9)
     .sort((a, b) => a.priceSats - b.priceSats)[0] ?? null;
 
+/** A listing's own per-token price in USD, or undefined when unknown (a buyBelowUsd rule then refuses). */
+export const listingPriceUsd = (l: Pick<Listing, 'perTokenSats'>, bsvUsd: number): number | undefined =>
+  l.perTokenSats !== undefined && Number.isFinite(l.perTokenSats) && l.perTokenSats > 0
+    ? (l.perTokenSats / 1e8) * bsvUsd
+    : undefined;
+
 /** Extra system-prompt text for an agent account: its strategy and how to ask for actions. Empty otherwise. */
 export const agentAccountPrompt = (id: string | undefined, name: string) => {
   if (!id || !getAgentAccount(id)) return '';
@@ -88,6 +95,29 @@ Kinds: "buy" (cheapest listing within usd), "send" (BSV worth usd to "to": an ad
 The wallet checks every action before signing and may refuse it; the result is shown to the user and logged. Never claim an action happened: say what you asked for. At most 3 actions per reply.`;
 };
 
+/**
+ * Tokens of the loaded live strategy's coins this account holds (whole tokens, after decimals), for
+ * stop.holdTokens. Undefined when there is no such stop or the balances can't be read: the gate then refuses.
+ */
+export const strategyHolding = async (ctx: OneSatContext, id: string): Promise<number | undefined> => {
+  const loaded = getLoadedStrategy(id);
+  if (!loaded || loaded.mode === 'paper' || !loaded.strategy.rules.stop?.holdTokens) return undefined;
+  const norm = (t: string) => t.replace(/^\$/, '').toLowerCase();
+  const want = new Set(loaded.strategy.rules.tokens.map(norm));
+  try {
+    const balances = await heldBsv21Balances(ctx);
+    return balances
+      .filter((b) => want.has(norm(b.id)) || (b.sym !== undefined && want.has(norm(b.sym))))
+      .reduce((s, b) => {
+        const dec = Number.isInteger(b.dec) && b.dec >= 0 && b.dec <= 18 ? b.dec : 0;
+        const n = Number(BigInt(b.amt)) / 10 ** dec;
+        return Number.isFinite(n) ? s + n : s;
+      }, 0);
+  } catch {
+    return undefined;
+  }
+};
+
 export type ActionResult = { ok: boolean; text: string; txid?: string };
 
 /** Quote, gate and run one action on the current (agent) account. */
@@ -103,10 +133,13 @@ export const runAgentAction = async (
   // Buying tokens is exchange functionality: bWalletX only (MARKET_ENABLED, App Review 3.1.5(iii)).
   if (!MARKET_ENABLED && a.kind !== 'send') return { ok: false, text: 'This edition can only send BSV.' };
 
+  // stop.holdTokens in live mode: how many of the strategy's tokens this account holds now.
+  const holding = await strategyHolding(ctx, id);
+
   if (a.kind === 'send') {
     if (!a.to) return { ok: false, text: 'Send needs a recipient.' };
     const req: ActionRequest = { kind: 'send', token: a.token, usd: a.usd, to: a.to };
-    const g = checkAgentAction(id, req);
+    const g = checkAgentAction(id, req, { holding });
     if (!g.ok) return { ok: false, text: `Refused: ${g.reason}` };
     if (g.paper) return { ok: true, text: `Paper send of $${a.usd.toFixed(2)} to ${a.to}` };
     const sats = Math.round((a.usd / bsvUsd) * 1e8);
@@ -132,9 +165,10 @@ export const runAgentAction = async (
   const pick = pickListing(market.listings, a.usd, bsvUsd);
   if (!pick) return { ok: false, text: `No listing of that token fits $${a.usd.toFixed(2)}.` };
   const usd = (pick.priceSats / 1e8) * bsvUsd;
-  const priceUsd = market.floorSats !== null ? (market.floorSats / 1e8) * bsvUsd : undefined;
+  // The picked listing's own per-token price, never the market floor (b-Aware report, 24 Oct 2026).
+  const priceUsd = listingPriceUsd(pick, bsvUsd);
   const amount = priceUsd ? usd / priceUsd : undefined;
-  const g = checkAgentAction(id, { kind: 'buy', token: a.token, ticker, usd, priceUsd, amount });
+  const g = checkAgentAction(id, { kind: 'buy', token: a.token, ticker, usd, priceUsd, amount }, { holding });
   if (!g.ok) return { ok: false, text: `Refused: ${g.reason}` };
   if (g.paper) return { ok: true, text: `Paper buy: ${pick.label} for $${usd.toFixed(2)}` };
   const outpoint = walletOutpoint(pick.outpoint);

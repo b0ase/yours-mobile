@@ -10,16 +10,27 @@ const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 const PANEL = '#17191E';
 
+const originHost = (origin: string): string => {
+  try {
+    return new URL(origin).host;
+  } catch {
+    return origin;
+  }
+};
+
 /**
  * Confirm a bWalletX CLI / MCP pairing: it's bound to the agent account open right now, with the scopes
  * and lifetime chosen here. Keys stay on the phone; the computer sends requests, the phone checks and signs.
  */
 export const CliPairConfirm = ({
   code,
+  origin,
   onCancel,
   onConnect,
 }: {
   code: string;
+  /** The origin that asked to pair; shown so a website can't pass itself off as the CLI. */
+  origin: string;
   onCancel: () => void;
   onConnect: (g: AgentGrant) => void;
 }) => {
@@ -98,6 +109,7 @@ export const CliPairConfirm = ({
         <Terminal size={28} color={GOLD} />
       </span>
       <p className="mt-4 text-xl font-bold text-white">Pair the bWalletX CLI</p>
+      <p className="mt-1 break-all font-mono text-sm text-white">{originHost(origin)}</p>
       <p className="mt-1 text-sm" style={{ color: MUTED }}>
         A program on a computer (CLI or an AI agent through MCP)
       </p>
@@ -123,7 +135,7 @@ export const CliPairConfirm = ({
             'Buy tokens and load strategies',
             'Within the account’s limits and its strategy’s rules',
           )}
-        {agent && toggle(send, setSend, 'Send BSV', 'To anyone, unless a strategy limits who')}
+        {agent && toggle(send, setSend, 'Send BSV', "To anyone, up to the account's daily cap")}
         {toggle(mint, setMint, 'Mint NFTs', 'Photos, music, video, PDFs: signed here, within the limits below')}
         {mint && (
           <div className="rounded-xl px-3 py-3" style={{ background: PANEL }}>

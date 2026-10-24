@@ -9,6 +9,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { sendMessage } from '../../utils/chromeHelpers';
 import { protocolLabel } from '../../utils/protocols';
 import { isReservedProtocol } from '../../services/reservedProtocols';
+import { ALLOWANCES_ENABLED } from '../../services/allowanceFlag';
 import type {
   GroupedPermissionRequest as GroupedPermissionRequestType,
   GroupedPermissions,
@@ -17,6 +18,7 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { confirmUsbForApproval } from '../../services/usbPresence';
 import { SiteThemeOffer } from '../../mobile/theme/SiteThemeOffer';
 import { familySite } from '../../mobile/theme/themeSites';
+import { DollarAmount, useSheetPrice } from '../../components/DollarAmount';
 
 export type GroupedPermissionRequestProps = {
   request: GroupedPermissionRequestType;
@@ -26,6 +28,8 @@ export type GroupedPermissionRequestProps = {
 export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProps) => {
   const { request, onResponse } = props;
   const { theme } = useTheme();
+  // Dollars first, sats small underneath (owner, 24 Oct 2026). Display only.
+  const price = useSheetPrice();
   const { handleSelect, hideMenu } = useBottomMenu();
   const { addSnackbar } = useSnackbar();
   const [isProcessing, setIsProcessing] = useState(false);
@@ -60,7 +64,8 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
     if (checkedBaskets.length > 0) granted.basketAccess = checkedBaskets;
     const checkedCerts = (permissions.certificateAccess ?? []).filter((_, i) => certChecked[i]);
     if (checkedCerts.length > 0) granted.certificateAccess = checkedCerts;
-    if (spendingChecked && permissions.spendingAuthorization) {
+    // Envelopes by default: connecting never sets a monthly allowance (services/allowanceFlag.ts).
+    if (ALLOWANCES_ENABLED && spendingChecked && permissions.spendingAuthorization) {
       granted.spendingAuthorization = permissions.spendingAuthorization;
     }
     return granted;
@@ -143,7 +148,7 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
       </Show>
 
       {/* Spending authorization — shown separately above the list, ticked by default */}
-      <Show when={!!permissions.spendingAuthorization}>
+      <Show when={ALLOWANCES_ENABLED && !!permissions.spendingAuthorization}>
         <motion.div
           className="w-full rounded-2xl px-4 py-3 mb-3"
           style={{
@@ -166,9 +171,16 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
             />
             <div className="flex flex-col min-w-0">
               <span className="text-xs font-semibold" style={{ color: '#F79009' }}>
-                This app wants to spend up to {((permissions.spendingAuthorization?.amount ?? 0) / 1e8).toFixed(8)} BSV{' '}
-                ({(permissions.spendingAuthorization?.amount ?? 0).toLocaleString()} satoshis)
+                This app wants to spend up to
               </span>
+              <DollarAmount
+                sats={permissions.spendingAuthorization?.amount ?? 0}
+                price={price}
+                size={24}
+                align="left"
+                color="#F79009"
+                mutedColor={theme.color.global.gray}
+              />
               {permissions.spendingAuthorization?.description && (
                 <span className="text-xs mt-1 opacity-70" style={{ color: theme.color.global.contrast }}>
                   App says: &ldquo;{permissions.spendingAuthorization.description}&rdquo;

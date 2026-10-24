@@ -561,6 +561,20 @@ export const BIZ_AGENT_ACCOUNT_ENABLED: boolean = !(
  * drops the lazy AgreementsPage / AgreementsBox / BitSignImportPage chunks.
  * Store grep: `Review & sign|bwallet.bureau|Seal on chain|Import from bit-sign|bwallet agreement|Needs my signature`.
  */
+/**
+ * Company offers paid by signature (offer/, 24 Oct 2026): a director composes, the company account seals, the named
+ * offeree signs to pay. bWalletX only, never in a store build, not even as code (payment for securities; no "buy
+ * shares" anywhere). Literal env check so Rollup drops the lazy OffersPage. Inside bWalletX the screens show only to
+ * the company's directors, the company account, and the named offeree of a received offer (offer/useOffers.ts).
+ * VITE_OFFERS=0 turns it off in a bWalletX build too.
+ */
+export const OFFERS_ENABLED: boolean =
+  !(
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+  ) && import.meta.env.VITE_OFFERS !== '0';
+
 export const BUREAU_ENABLED: boolean = !(
   import.meta.env.VITE_STORE_BUILD === '1' ||
   import.meta.env.VITE_CHANNEL === 'ios-store' ||
@@ -607,3 +621,18 @@ export const SPICY_ENABLED: boolean = !(
   import.meta.env.VITE_CHANNEL === 'ios-store' ||
   import.meta.env.VITE_CHANNEL === 'android-play'
 );
+
+/**
+ * Names, Rooms and Tickets (owner, 24 Oct 2026): the parts the bit-sign server doesn't support yet (a room
+ * inside another room, tickets attached to a room, several tickets per room, burn on entry, collection
+ * tickets, "already have one" lookups by identity key). OFF by default: build with VITE_NRT=1 to try it
+ * (NAMES-ROOMS-TICKETS-SERVER-SPEC.md). Never in a store build: tickets are token sales / token-gated access.
+ * Literal env check so Vite inlines it and Rollup drops the TicketsSheet chunk.
+ */
+export const NRT_ENABLED: boolean =
+  import.meta.env.VITE_NRT === '1' &&
+  !(
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+  );

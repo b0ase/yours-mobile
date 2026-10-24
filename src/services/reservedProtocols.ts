@@ -12,6 +12,9 @@
  * the tests until it is classified there.
  */
 
+import { normalizeOriginator } from '@1sat/wallet';
+import { pinnedAllowed, pinnedProtocolRefusal, PINNED_REFUSAL } from './pinnedProtocols';
+
 type Protocol = readonly [number, string];
 
 const key = (p: Protocol) => `${p[0]}:${p[1].trim().toLowerCase()}`;
@@ -24,7 +27,7 @@ const RESERVED_HASHES = new Set<number>(
     0x96f7845f, 0x5c1efc8e, 0xec8cb43a, 0x989014a2, 0x3a98170a, 0xa392b7f4, 0x06a1d43a, 0xcd609e3f, 0x8b22ea1d,
     0xf7be44e7, 0xd59296c1, 0x8ef2a248, 0x3f7de0fa, 0x9220f557, 0x5e9de672, 0xd057f30f, 0x82eb9c44, 0xbd16812f,
     0xed10a363, 0x7dcea8b8, 0x94347fb5, 0xeb45ebe9, 0xb9a0b206, 0xcb1fe820, 0x7ce83ef7, 0x37432cf7, 0x4bb19af2,
-    0xae00f773, 0x86730eac, 0x13a25b95, 0xaf904c6c,
+    0xae00f773, 0x86730eac, 0x13a25b95, 0xaf904c6c, 0x82c6d7ec, 0xa3b7765b,
   ].map((h) => h >>> 0),
 );
 
@@ -48,6 +51,20 @@ export const isReservedProtocol = (protocolID: unknown): boolean => {
 };
 
 export const RESERVED_REFUSAL = 'This protocol is reserved for bWalletX itself';
+export const LEVEL0_SIGN_REFUSAL =
+  'Level-0 keys are shared by every app and are never asked about; bWalletX does not sign with them for apps';
+export const HISTORY_REFUSAL = 'Name at least one label: bWalletX does not share your whole history with apps';
+
+/** BRC-114 time-range labels (toolbox parseBrc114ActionTimeLabels): they filter by time, not by label. */
+const isTimeLabel = (l: unknown) =>
+  typeof l === 'string' && (l.startsWith('action time from ') || l.startsWith('action time to '));
+
+/** True when an outside app's listActions names no real label (the toolbox then checks nothing). */
+export const listActionsNamesNoLabel = (args: unknown): boolean => {
+  const labels = (args as { labels?: unknown } | null)?.labels;
+  return !Array.isArray(labels) || labels.filter((l) => !isTimeLabel(l)).length === 0;
+};
+
 export const RAW_HASH_REFUSAL =
   'Signing a raw hash with these keys could move your money; bWalletX refuses it for apps';
 
@@ -74,9 +91,13 @@ export const reservedProtocolRefusal = (method: string, args: unknown): string |
   const p = asProtocol(a.protocolID);
   if (!p) return 'Invalid protocolID';
   if (RESERVED_HASHES.has(protocolHash(p))) return `${RESERVED_REFUSAL}: "${p[1]}"`;
-  if (method === 'createSignature' && a.hashToDirectlySign !== undefined && a.hashToDirectlySign !== null) {
-    // Level-0 keys are shared by every app and the wallet; BRC-29 keys receive the user's payments.
-    if (p[0] === 0 || RAW_HASH_REFUSED.has(key(p))) return RAW_HASH_REFUSAL;
+  if (method === 'createSignature') {
+    // Level-0 keys are shared by every app and the wallet, and the permissions manager never asks for level 0, so
+    // any site could get signatures with no sheet. BRC-29 keys receive the user's payments. Both paths are refused:
+    // the data path signs sha256(data), so data = sha256(preimage) yields a transaction sighash just like
+    // hashToDirectlySign (b-Aware report, 24 Oct 2026). verifySignature stays open.
+    if (p[0] === 0) return LEVEL0_SIGN_REFUSAL;
+    if (RAW_HASH_REFUSED.has(key(p))) return RAW_HASH_REFUSAL;
   }
   return null;
 };
@@ -121,10 +142,20 @@ export function guardReservedProtocols<T extends object>(manager: T, adminOrigin
     if (typeof original !== 'function') continue;
     m[method] = async (args: unknown, originator?: string) => {
       if (isOutside(originator)) {
-        const refusal = reservedProtocolRefusal(method, args);
+        const refusal =
+          reservedProtocolRefusal(method, args) ??
+          pinnedProtocolRefusal(method, args, normalizeOriginator(originator ?? ''));
         if (refusal) throw new Error(refusal);
       }
       return (original as (a: unknown, o?: string) => Promise<unknown>).call(manager, args, originator);
+    };
+  }
+  // listActions with no labels returns the whole history without a prompt (b-Aware report, 24 Oct 2026).
+  const listActions = m.listActions;
+  if (typeof listActions === 'function') {
+    m.listActions = async (args: unknown, originator?: string) => {
+      if (isOutside(originator) && listActionsNamesNoLabel(args)) throw new Error(HISTORY_REFUSAL);
+      return (listActions as (a: unknown, o?: string) => Promise<unknown>).call(manager, args, originator);
     };
   }
   const ensure = m.ensureProtocolPermission;
@@ -132,6 +163,9 @@ export function guardReservedProtocols<T extends object>(manager: T, adminOrigin
     m.ensureProtocolPermission = async (args: { originator?: string; protocolID?: unknown }) => {
       if (isOutside(args?.originator) && isReservedProtocol(args?.protocolID))
         throw new Error(`${RESERVED_REFUSAL}: "${String((args.protocolID as Protocol)[1])}"`);
+      // Pinned protocols (pinnedProtocols.ts): only their home site may even be asked.
+      if (isOutside(args?.originator) && !pinnedAllowed(args?.protocolID, normalizeOriginator(args?.originator ?? '')))
+        throw new Error(`${PINNED_REFUSAL}: "${String((args.protocolID as Protocol)[1])}"`);
       return (ensure as (a: unknown) => Promise<boolean>).call(manager, args);
     };
   }

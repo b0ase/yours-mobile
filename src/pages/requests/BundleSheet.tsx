@@ -14,24 +14,50 @@ import {
   buildSheetModel,
   DEFAULT_ALLOWANCE_USD,
   sheetCanTrust,
+  sheetAnswer,
+  sheetHash,
+  sheetView,
+  shownItems,
+  type SheetChoice,
   type BundleRequest,
 } from '../../services/permissionBundle';
-import { approvalKindForSheet, siteName } from '../../services/approvalKind';
+import type { MintSheet } from '../../services/pinnedMint';
+import { approvalKindForSheet, privateTitleLabel, siteName } from '../../services/approvalKind';
 import { ApprovalCard, Check, Chip, Cross, SiteTile } from '../../components/approval/ApprovalCard';
 import { CARD } from '../../components/approval/cardTheme';
 import { CarefulHero, ConnectHero, PayHero, SignInHero } from '../../components/approval/ApprovalHeroes';
+import { useSheetPrice } from '../../components/DollarAmount';
+import { EnvelopePresets } from '../../components/approval/EnvelopePresets';
+import { envelopeUsdText } from '../../services/envelopes';
+import { dollarsFirst, dollarsInline } from '../../utils/dollarsFirst';
 
 /**
  * One sheet per action (docs/ONE-SHEET-PERMISSIONS.md §3c): everything a site asks for in one action,
  * in plain words, ticked by default (risky lines never are), with one button. Used in the side panel,
  * the prompt window, the in-page sheet and the phone overlay alike: all of them load prompt.html.
  */
-export type BundlePayload = { bundleID: string; originator: string; items: BundleRequest[] };
+export type BundlePayload = {
+  bundleID: string;
+  originator: string;
+  items: BundleRequest[];
+  /** A pinned site's paid action (services/pinnedMint.ts): one sheet with these words, no allowance, no trust. */
+  mint?: MintSheet;
+};
 
-type Allowance = { usdPerBsv?: number; existingSats?: number; defaultUsd: number };
+type Allowance = {
+  usdPerBsv?: number;
+  existingSats?: number;
+  defaultUsd: number;
+  /** Monthly allowances are on (services/allowanceFlag.ts); off by default, envelopes instead. */
+  allowances?: boolean;
+  /** The site's envelope (services/envelopes.ts): offered on its pay sheet, with what it holds now. */
+  envelope?: { offer: boolean; balanceSats?: number; presetsUsd: readonly number[] };
+};
 
 const fmtUsd = (usd: number) => (usd < 1 ? `${Math.round(usd * 100)}¢` : `$${usd.toFixed(2)}`);
-const fmtSats = (sats: number) => (sats >= 1e8 ? `${(sats / 1e8).toFixed(8)} BSV` : `${sats.toLocaleString()} sats`);
+
+/** How long a refused answer's message stays up before the sheet moves on (the background leaves the window open). */
+export const ANSWER_ERROR_HOLD_MS = 3000;
 
 export const BundleSheet = (props: {
   request: BundlePayload;
@@ -56,20 +82,39 @@ export const BundleSheet = (props: {
   const signerFingerprint = keyFingerprint(signer?.pubKeys?.identityPubKey);
   const model = useMemo(() => buildSheetModel(request), [request]);
 
-  // Ticks keyed by requestID so lines that join mid-sheet get their default without resetting the rest.
+  // Ticks keyed by requestID, so a line that joins live gets its own (unticked) tick without resetting the rest.
   const [checked, setChecked] = useState<Record<string, boolean>>({});
-  const firstCount = useRef(request.items.length);
-  const added = Math.max(0, request.items.length - firstCount.current);
+  // A line joined: hold the buttons for a moment so a tap already on its way cannot land on the new set.
+  const [hold, setHold] = useState(false);
+  const shownCount = useRef(request.items.length);
+  useEffect(() => {
+    if (request.items.length === shownCount.current) return;
+    shownCount.current = request.items.length;
+    setHold(true);
+    const t = setTimeout(() => setHold(false), 1000);
+    return () => clearTimeout(t);
+  }, [request.items.length]);
+  // First touch freezes the sheet: anything arriving after it gets its own sheet.
+  const frozen = useRef(false);
+  const freeze = () => {
+    if (frozen.current) return;
+    frozen.current = true;
+    sendMessageAsync({ action: 'BUNDLE_SHEET_FREEZE', bundleID: request.bundleID }).catch(() => undefined);
+  };
   const isChecked = (id: string, dflt: boolean) => checked[id] ?? dflt;
 
   const [allowance, setAllowance] = useState<Allowance | undefined>();
   const [allowanceUsd, setAllowanceUsd] = useState<number>(DEFAULT_ALLOWANCE_USD);
   const [allowanceOn, setAllowanceOn] = useState(true);
+  // Opt-in: a pay sheet pays this payment; putting money in the envelope is the user's own choice.
+  const [envelopeUsd, setEnvelopeUsd] = useState(0);
   const [remember, setRemember] = useState(true);
   // "Don't ask again": later sign-in, signing and basket requests from this site need no sheet.
   const canTrust = useMemo(() => sheetCanTrust(request), [request]);
   const [trustSite, setTrustSite] = useState(true);
   const [details_, setDetails] = useState(false);
+  // Once the ticks have been on screen they decide; until then Allow covers the routine lines (sheetDecisions).
+  const [detailsSeen, setDetailsSeen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [usbError, setUsbError] = useState('');
 
@@ -92,11 +137,19 @@ export const BundleSheet = (props: {
   }, [request.originator]);
 
   // The allowance line shows when the price is known and the site has none yet.
-  const showAllowance = !!allowance?.usdPerBsv && allowance.existingSats === undefined;
-  const payUsd =
-    model.payment && allowance?.usdPerBsv ? (model.payment.satoshis / 1e8) * allowance.usdPerBsv : undefined;
+  // A mint sheet is for this one mint: never an allowance or "don't ask again" (the background enforces it too).
+  const mint = request.mint && model.payment && model.lines.every((l) => !l.risky) ? request.mint : undefined;
+  // Pay in the moment (owner, 24 Oct 2026): these sheets never offer a monthly allowance.
+  const showAllowance = false as boolean;
+  // "Put $X in <site>'s envelope" / "Top up the envelope": a payment from a micropayments site, or one with an envelope.
+  const envelope = !mint && model.payment && allowance?.usdPerBsv ? allowance.envelope : undefined;
+  const showEnvelope = !!envelope?.offer;
+  // Dollars first (owner, 24 Oct 2026): the site's allowance rate when the background sent one, else the live price.
+  const price = useSheetPrice(allowance?.usdPerBsv);
+  const payAmount = model.payment ? dollarsFirst(model.payment.satoshis, price) : undefined;
 
-  const send = async (approve: boolean) => {
+  const send = async (choice: SheetChoice) => {
+    const approve = choice === 'allow';
     setBusy(true);
     setUsbError('');
     try {
@@ -109,17 +162,23 @@ export const BundleSheet = (props: {
         }
       }
       if (approve) markSiteConnected(request.originator); // its sheets may now wear its theme (docs/SITE-THEME.md)
-      const decisions: Record<string, boolean> = {};
-      for (const l of model.lines) decisions[l.requestID] = approve && isChecked(l.requestID, l.checked);
-      if (model.payment) decisions[model.payment.requestID] = approve;
-      await sendMessageAsync({
+      const answer = sheetAnswer(model, choice, checked, detailsSeen, view);
+      const res = await sendMessageAsync<{ success?: boolean; error?: string }>({
         action: 'BUNDLE_PERMISSION_RESPONSE',
+        seenHash: seenHash(choice),
         bundleID: request.bundleID,
-        decisions,
-        allowanceUsd: approve && showAllowance && allowanceOn ? allowanceUsd : 0,
-        remember,
-        trustSite: approve && remember && canTrust && trustSite,
+        decisions: answer.decisions,
+        allowanceUsd: answer.mayStore && showAllowance && allowanceOn ? allowanceUsd : 0,
+        envelopeUsd: answer.mayStore && showEnvelope ? envelopeUsd : 0,
+        remember: answer.mayStore && remember,
+        trustSite: !mint && answer.mayStore && remember && canTrust && trustSite,
+        block: answer.block,
       });
+      if (res && res.success === false && res.error) {
+        // e.g. "This request changed while you were answering…": leave it on screen long enough to read.
+        addSnackbar(res.error, 'error');
+        await new Promise((r) => setTimeout(r, ANSWER_ERROR_HOLD_MS));
+      }
       onResponse();
     } catch (error) {
       addSnackbar(error instanceof Error ? error.message : String(error), 'error');
@@ -130,36 +189,87 @@ export const BundleSheet = (props: {
   const kind = approvalKindForSheet(model, { existingAllowanceSats: allowance?.existingSats });
   const name = siteName(request.originator);
   const many = model.lines.length + (model.payment ? 1 : 0) > 1;
-  const payLabel = payUsd !== undefined ? fmtUsd(payUsd) : model.payment ? fmtSats(model.payment.satoshis) : '';
+  const payLabel = model.payment ? dollarsInline(model.payment.satoshis, price) : '';
   const allowanceSetsUsd = showAllowance && allowanceOn && allowanceUsd > 0 ? allowanceUsd : 0;
   const existingUsd =
     allowance?.existingSats !== undefined && allowance.usdPerBsv
       ? (allowance.existingSats / 1e8) * allowance.usdPerBsv
       : undefined;
-  const primary =
-    kind === 'signin'
-      ? 'Sign in'
-      : kind === 'pay'
-        ? model.mode === 'connectAndPay'
-          ? `Connect & pay ${payLabel}`
-          : `Pay ${payLabel}`
-        : many
-          ? 'Allow all'
-          : 'Connect';
+  const reconnect = request.items.some((r) => r.reconnect);
+  const primary = reconnect
+    ? 'Reconnect'
+    : mint
+      ? `${mint.title.split(' ')[0]} · ${payLabel}`
+      : kind === 'post'
+        ? model.payment
+          ? `Allow & pay ${payLabel}`
+          : 'Allow posting'
+        : kind === 'private'
+          ? 'Allow'
+          : kind === 'signin'
+            ? 'Sign in'
+            : kind === 'pay'
+              ? model.mode === 'connectAndPay'
+                ? `Connect & pay ${payLabel}`
+                : `Pay ${payLabel}`
+              : many
+                ? 'Allow all'
+                : 'Connect';
   const nextAllowance = () => {
     const i = ALLOWANCE_CHOICES_USD.indexOf(allowanceUsd as (typeof ALLOWANCE_CHOICES_USD)[number]);
     const next = ALLOWANCE_CHOICES_USD[(i + 1) % ALLOWANCE_CHOICES_USD.length];
     setAllowanceUsd(next);
     setAllowanceOn(next > 0);
   };
-  const disabled = busy || !armed;
+  const disabled = busy || !armed || hold;
   const careful = kind === 'careful';
   const riskyLines = model.lines.filter((l) => l.risky);
+  // Lines that joined while the sheet was open: shown up front with their own tick ("New: …").
+  const newLines = model.lines.filter((l) => l.isNew && !(careful && l.risky));
+  // Every line a tap can grant is on the face (owner: never approve something the user can't read).
+  // Lines whose row has been fully on screen (above the choices). On the careful card Allow waits until every line
+  // was read; a line never on screen is never granted (sheetView.hidden).
+  const [seenLines, setSeenLines] = useState<ReadonlySet<string>>(() => new Set());
+  const faceRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const face = faceRef.current;
+    const scroller = face?.closest<HTMLElement>('[data-approval-scroll]');
+    if (!careful || !face || !scroller) return;
+    const check = () => {
+      const choices = scroller.querySelector('[data-testid="approval-choices"]');
+      const top = Math.max(scroller.getBoundingClientRect().top, 0);
+      const bottom = Math.min(choices ? choices.getBoundingClientRect().top : window.innerHeight, window.innerHeight);
+      const seen: string[] = [];
+      scroller.querySelectorAll<HTMLElement>('[data-line-id]').forEach((el) => {
+        const r = el.getBoundingClientRect();
+        if (r.height > 0 && r.top >= top - 1 && r.bottom <= bottom + 1) seen.push(el.dataset.lineId ?? '');
+      });
+      setSeenLines((prev) => (seen.every((id) => prev.has(id)) ? prev : new Set([...prev, ...seen])));
+    };
+    check();
+    const t = setTimeout(check, 700); // after the entry animation
+    scroller.addEventListener('scroll', check, { passive: true });
+    window.addEventListener('resize', check);
+    return () => {
+      clearTimeout(t);
+      scroller.removeEventListener('scroll', check);
+      window.removeEventListener('resize', check);
+    };
+  }, [careful, model]);
+  const view = sheetView(model, careful, careful && !detailsSeen ? seenLines : undefined);
+  // Careful card: "I trust it, allow" waits until every line has been on screen (or Details was opened).
+  const mustRead = careful && view.hidden.size > 0;
+  const ordinaryLines = careful ? model.lines.filter((l) => !l.risky && !l.isNew) : [];
+  // Live sheet: an Allow is bound to exactly the lines on screen (background checks the hash). A line not on
+  // screen is never in it, so it can never be granted. Not now and Block decline everything, so they cover all.
+  const seenHash = (choice: SheetChoice) =>
+    sheetHash(choice === 'allow' ? shownItems(request.items, view) : request.items);
 
   const toggle = (id: string, dflt: boolean) => setChecked((c) => ({ ...c, [id]: !isChecked(id, dflt) }));
   const lineRow = (l: (typeof model.lines)[number], big = false) => (
     <label
       key={l.requestID}
+      data-line-id={l.requestID}
       className="flex items-center gap-3 cursor-pointer"
       style={{
         minHeight: 44,
@@ -199,15 +309,15 @@ export const BundleSheet = (props: {
           Signing in as {signingAs}
         </p>
       )}
-      {added > 0 && (
-        <p className="m-0" style={{ fontSize: 12, color: CARD.green }}>
-          +{added} more added while this was open
+      {model.lines.length > 0 && (
+        <p className="m-0" style={{ fontSize: 12, fontWeight: 700, color: CARD.muted }}>
+          Allow this app
         </p>
       )}
       {model.lines.map((l) => lineRow(l))}
       {model.payment && (
         <p className="m-0" style={{ padding: '6px 0' }}>
-          Pay now: <span style={{ color: CARD.gold, fontWeight: 600 }}>{payLabel}</span> to {request.originator}
+          Pay <span style={{ color: CARD.gold, fontWeight: 600 }}>{payLabel}</span> now to {request.originator}
           {model.payment.description && <> &ldquo;{model.payment.description}&rdquo;</>}
         </p>
       )}
@@ -247,7 +357,7 @@ export const BundleSheet = (props: {
         />
         <span>Remember this site</span>
       </label>
-      {canTrust && remember && (
+      {!mint && canTrust && remember && (
         <label className="flex items-start gap-3 cursor-pointer" style={{ padding: '6px 0' }}>
           <input
             type="checkbox"
@@ -256,7 +366,8 @@ export const BundleSheet = (props: {
             style={{ width: 18, height: 18, accentColor: CARD.gold, flexShrink: 0, marginTop: 1 }}
           />
           <span>
-            Don&apos;t ask again on {request.originator} for sign-in and signing. Payments stay within the allowance;
+            Don&apos;t ask again on {request.originator} for sign-in and signing.{' '}
+            {allowance?.allowances ? 'Payments stay within the allowance;' : 'Payments still ask, or use its envelope;'}{' '}
             your personal details always ask.
           </span>
         </label>
@@ -271,8 +382,16 @@ export const BundleSheet = (props: {
     </div>
   );
 
-  const deny = { label: careful ? 'No, block it' : 'Not now', onClick: () => void send(false), disabled };
-  const allow = { label: careful ? 'I trust it, allow' : primary, onClick: () => void send(true), disabled, busy };
+  // Careful card: three choices (owner, 24 Oct 2026). The large, safe default is Not now (this request only);
+  // Block this site really blocks (background stores a block record and revokes its grants).
+  const deny = { label: 'Not now', onClick: () => void send('notNow'), disabled };
+  const block = { label: 'Block this site', onClick: () => void send('block'), disabled };
+  const allow = {
+    label: careful ? 'I trust it, allow' : primary,
+    onClick: () => void send('allow'),
+    disabled: disabled || mustRead,
+    busy,
+  };
 
   let hero: ReactNode;
   let title: ReactNode;
@@ -280,8 +399,38 @@ export const BundleSheet = (props: {
   let siteSub: string | undefined;
   const gold = (t: string) => <span style={{ color: CARD.gold }}>{t}</span>;
 
-  if (kind === 'careful') {
-    hero = <CarefulHero />;
+  const satsText = (sats: number) => dollarsInline(sats, price);
+  if (mint && kind !== 'careful') {
+    // One button, one approval (owner, 24 Oct 2026): what will happen, then the price, then the button.
+    hero = <PayHero amount={payAmount?.main ?? ''} sub={payAmount?.sub} />;
+    siteSub = 'One approval for all of it';
+    title = <>{gold(mint.title)}</>;
+    body = (
+      <div className="flex flex-col" style={{ gap: 8 }} data-testid="mint-sheet">
+        <div className="flex items-center gap-2" style={{ fontSize: 15, fontWeight: 600 }} data-testid="mint-cost">
+          <Check size={18} />
+          Costs {satsText(mint.premiumSats)} + {satsText(mint.feeSats)} network fee
+        </div>
+        <div className="flex flex-wrap" style={{ gap: 8 }}>
+          <Chip>
+            <Check />
+            Locked with your keys
+          </Chip>
+          <Chip>
+            <Check />
+            Only on {mint.site}
+          </Chip>
+          <Chip>
+            <Check />
+            Next payment asks again
+          </Chip>
+        </div>
+      </div>
+    );
+  } else if (kind === 'careful') {
+    // With lines to read, the words come first: the red card and "Check this carefully" carry the warning, and
+    // the lines and the choices fit a 392×540 window without the big hero.
+    hero = model.lines.length > 0 ? null : <CarefulHero />;
     siteSub = 'Check this carefully';
     const privileged = request.items.some((r) => r.privileged);
     const privateCert = riskyLines.some(
@@ -298,7 +447,7 @@ export const BundleSheet = (props: {
       <>Wants {red('more than usual')}</>
     );
     body = (
-      <div className="flex flex-col" style={{ gap: 8 }}>
+      <div ref={faceRef} className="flex flex-col" style={{ gap: 8 }}>
         {privileged && (
           <div
             className="flex items-center gap-2.5"
@@ -320,6 +469,14 @@ export const BundleSheet = (props: {
           </div>
         )}
         {riskyLines.map((l) => lineRow(l, true))}
+        {ordinaryLines.length > 0 && (
+          <div className="flex flex-col" data-testid="careful-ordinary-lines" style={{ padding: '0 4px' }}>
+            <p className="m-0" style={{ fontSize: 12, fontWeight: 700, color: CARD.muted }}>
+              Also asks to
+            </p>
+            {ordinaryLines.map((l) => lineRow(l))}
+          </div>
+        )}
         <div
           className="flex items-center gap-2.5"
           style={{ padding: '12px 14px', borderRadius: 14, background: CARD.redChip, fontSize: 14 }}
@@ -330,14 +487,13 @@ export const BundleSheet = (props: {
       </div>
     );
   } else if (kind === 'pay') {
-    hero = (
-      <PayHero
-        amount={payLabel}
-        sub={payUsd !== undefined && model.payment ? `${model.payment.satoshis.toLocaleString()} sats` : undefined}
-      />
-    );
+    hero = <PayHero amount={payAmount?.main ?? ''} sub={payAmount?.sub} />;
     siteSub = model.payment?.description || 'Asks you to pay';
-    title = <>Pay {gold(name)}</>;
+    title = (
+      <>
+        Pay {gold(payLabel)} now to {gold(name)}
+      </>
+    );
     body = (
       <>
         <div className="flex items-center gap-3" style={{ padding: 14, borderRadius: 16, background: CARD.chip }}>
@@ -355,9 +511,109 @@ export const BundleSheet = (props: {
           <Check size={18} />
           {allowanceSetsUsd > 0
             ? `Then up to ${fmtUsd(allowanceSetsUsd)} a month without asking`
-            : 'Every payment asks you first'}
+            : envelopeUsd > 0
+              ? `Then small payments come out of the envelope`
+              : 'Every payment asks you first'}
+        </div>
+        {showEnvelope && envelope && (
+          <div className="flex flex-col" style={{ gap: 8 }} data-testid="envelope-offer">
+            <span style={{ fontSize: 15, fontWeight: 600 }}>
+              {envelope.balanceSats !== undefined ? (
+                <>
+                  Top up the envelope
+                  <span style={{ fontSize: 13, fontWeight: 400, color: CARD.muted }}>
+                    {' '}
+                    · {dollarsInline(envelope.balanceSats, price)} left, not enough for this
+                  </span>
+                </>
+              ) : (
+                <>
+                  {envelopeUsd > 0 ? `Also put ${envelopeUsdText(envelopeUsd)}` : 'Also put money'} in {gold(name)}
+                  &apos;s envelope?
+                </>
+              )}
+            </span>
+            <EnvelopePresets
+              presetsUsd={envelope.presetsUsd}
+              value={envelopeUsd}
+              onChange={setEnvelopeUsd}
+              allowNone
+              disabled={disabled}
+            />
+            <span style={{ fontSize: 12, color: CARD.muted }}>
+              Stays in your wallet. Small payments from {name} come out of it without asking; Coin return any time.
+            </span>
+          </div>
+        )}
+      </>
+    );
+  } else if (kind === 'post') {
+    // One sheet for a site's first post (identity basket, post signature, the post's cost). The amount is plain
+    // text, never themed or hidden (one-sheet rule).
+    hero = <ConnectHero site={request.originator} />;
+    siteSub = 'Wants to post for you';
+    title = <>Allow {gold(name)} to post for you</>;
+    body = (
+      <>
+        <div className="flex flex-wrap" style={{ gap: 8 }}>
+          <Chip>
+            <Check />
+            Post and like as you
+          </Chip>
+          <Chip>
+            <Check />
+            Nothing else moves
+          </Chip>
+        </div>
+        <div className="flex items-center gap-2" style={{ fontSize: 14 }} data-testid="post-cost">
+          <Check size={18} />
+          {payAmount ? (
+            <span className="flex flex-col">
+              <span>
+                This post costs{' '}
+                <span style={{ fontSize: 20, fontWeight: 800, color: CARD.gold }}>{payAmount.main}</span>
+              </span>
+              <span style={{ fontSize: 12, color: CARD.muted }}>{payAmount.sub}</span>
+            </span>
+          ) : allowanceSetsUsd > 0 ? (
+            `Posts cost a little each, up to ${fmtUsd(allowanceSetsUsd)} a month without asking`
+          ) : (
+            'Each paid post asks you first'
+          )}
         </div>
       </>
+    );
+  } else if (kind === 'private') {
+    hero = <SignInHero />;
+    siteSub = 'Private data';
+    title = <>Keep your {gold(privateTitleLabel(model))} private</>;
+    body = (
+      <div className="flex flex-wrap" style={{ gap: 8, marginTop: 4 }}>
+        <Chip>
+          <Check />
+          Only you can read them
+        </Chip>
+        <Chip>
+          <Check />
+          No money moves
+        </Chip>
+      </div>
+    );
+  } else if (reconnect && kind === 'signin') {
+    hero = <ConnectHero site={request.originator} />;
+    siteSub = 'You disconnected this site';
+    title = <>Reconnect to {gold(name)}?</>;
+    body = (
+      <div className="flex flex-wrap" style={{ gap: 8, marginTop: 4 }}>
+        <Chip>
+          <Check />
+          Shares your public key
+        </Chip>
+        <Chip>
+          <Check />
+          No money moves
+        </Chip>
+      </div>
     );
   } else if (kind === 'signin') {
     hero = <SignInHero />;
@@ -438,24 +694,34 @@ export const BundleSheet = (props: {
       animate={{ opacity: 1, y: 0 }}
       transition={{ type: 'spring', damping: 24, stiffness: 260 }}
       data-approval-kind={kind}
+      onPointerDownCapture={freeze}
     >
       <ApprovalCard
         tone={careful ? 'red' : 'gold'}
         site={request.originator}
         siteSub={siteSub}
-        onClose={() => void send(false)}
+        onClose={() => void send('notNow')}
         closeLabel="Deny and close"
         closeDisabled={disabled}
         hero={hero}
         title={title}
         primary={careful ? deny : allow}
         secondary={careful ? allow : deny}
+        tertiary={careful ? block : undefined}
         details={details}
         detailsOpen={details_}
-        onToggleDetails={() => setDetails(!details_)}
-        error={usbError}
+        onToggleDetails={() => {
+          setDetailsSeen(true);
+          setDetails(!details_);
+        }}
+        error={usbError || (mustRead ? 'Scroll to read every line before allowing' : '')}
       >
         {body}
+        {newLines.length > 0 && (
+          <div className="flex flex-col" data-testid="new-lines" style={{ gap: 4, marginTop: 8 }}>
+            {newLines.map((l) => lineRow(l, true))}
+          </div>
+        )}
       </ApprovalCard>
     </motion.div>
   );

@@ -66,6 +66,7 @@ const PUBKEY_RE = /^0[23][0-9a-f]{64}$/;
 const CHANGE_COOLDOWN_MS = 30 * 24 * 60 * 60 * 1000;
 const NAME_IP_DAILY = 5;
 const nameFee = require('./nameFee');
+const offers = require('./offerReceipts');
 const crypto = require('crypto');
 const hashIp = (ip, env = process.env) =>
   ip
@@ -248,6 +249,29 @@ function validAlias(alias) {
   return null;
 }
 
+/**
+ * The owner's standing signature "this identity key receives ordinals at ordAddress" (action 'ord'; fields
+ * ordAddress, identityKey, timestamp). No time window: it is served later so payers can check it.
+ * Returns the proof to store, or false if it doesn't verify.
+ */
+async function checkOrdProof(identityKey, ordAddress, proof) {
+  const ts = String((proof && proof.timestamp) || '');
+  const sig = String((proof && proof.signature) || '');
+  if (!/^\d{1,16}$/.test(ts) || !/^[0-9a-f]{16,200}$/i.test(sig)) return false;
+  try {
+    const { valid } = await new ProtoWallet('anyone').verifySignature({
+      data: Utils.toArray(signedMessage('ord', { ordAddress: String(ordAddress), identityKey, timestamp: ts }), 'utf8'),
+      signature: Utils.toArray(sig, 'hex'),
+      protocolID: SIGN_PROTOCOL,
+      keyID: SIGN_KEY_ID,
+      counterparty: identityKey,
+    });
+    return valid ? { ordAddress: String(ordAddress), timestamp: ts, signature: sig } : false;
+  } catch {
+    return false;
+  }
+}
+
 /** Canonical message the wallet signs. Field order is fixed; values are stringified. */
 function signedMessage(action, fields) {
   const keys = Object.keys(fields).sort();
@@ -407,7 +431,18 @@ function makeHandlers({
   feeChain = nameFee.chain,
   // Owner of a bit-sign name (lib: bitsignHandleOwner). Tests inject their own.
   handleOwner = (alias, identityKey) => bitsignHandleOwner(alias, identityKey, env),
+  // Company offers (lib/offerReceipts.js): USD/BSV at receipt and the director's push. Off under tests unless injected.
+  offerRate = env.NODE_ENV === 'test' || process.env.NODE_ENV === 'test'
+    ? async () => null
+    : () => offers.coingeckoRate(),
+  notifyOffer = env.NODE_ENV === 'test' || process.env.NODE_ENV === 'test'
+    ? async () => false
+    : (handle, receipt) => offers.notifyDirector(handle, receipt, env),
 }) {
+  // Company paymails (PAYMAIL_COMPANIES): the alias row (identity key) is provisioned in the DB by the owner;
+  // the env only says which aliases are companies, their registered name + number, and their directors.
+  const companyOf = (alias) => offers.companies(env).get(String(alias || '').toLowerCase()) || null;
+  const companyOut = (c) => ({ name: c.name, number: c.number, directors: c.directors });
   // Aliases are unique across all our domains (the store is keyed by alias alone).
   const handleOf = (alias, d = domain(env)) => `${alias}@${d}`;
   // A live forward (rename within 90 days, or a permanent extra name). Expired ones are released.
@@ -454,6 +489,59 @@ function makeHandlers({
     ];
   };
 
+  // Receipt for a payment to a company paymail carrying the offer OP_RETURN (template §B). allotment: null, always.
+  const recordOfferReceipt = async (co, row, tx, txid, vouts, body) => {
+    if (!store.getOffer || !store.insertReceipt) return null;
+    const op = offers.parseOfferOpReturn(tx);
+    if (!op) return null;
+    const offer = await store.getOffer(op.ref);
+    if (!offer || offer.alias !== row.alias) return null;
+    if (store.getReceipt && (await store.getReceipt(txid))) return null;
+    const meta = (body && body.metadata && body.metadata.offer) || {};
+    const subscriberKey = String(meta.identityKey || '').toLowerCase();
+    const subscriberSig = /^[0-9a-f]{16,200}$/i.test(String(meta.signature || '')) ? String(meta.signature) : null;
+    const sigOk = subscriberSig
+      ? await offers.verifyOfferSig({
+          key: subscriberKey,
+          ref: op.ref,
+          role: 'subscriber',
+          hash: op.completedHash,
+          sig: subscriberSig,
+        })
+      : false;
+    const sats = vouts.reduce((a, v) => a + Number(tx.outputs[v].satoshis), 0);
+    const picked = offers.pickRate(meta.rateUsdPerBsv, await offerRate().catch(() => null));
+    const firstSeen = new Date(now()).toISOString();
+    const receipt = offers.buildReceipt({
+      company: co,
+      offer,
+      payment: {
+        txid,
+        vout: vouts,
+        satoshis: sats,
+        rate: picked ? picked.rate : 0,
+        rateSource: picked ? picked.source : 'none',
+        rateAt:
+          picked && picked.source.startsWith('payer') && meta.rateAt ? String(meta.rateAt).slice(0, 40) : firstSeen,
+        usdValue: picked ? offers.usdValueOf(sats, picked.rate) : '0.00',
+        firstSeen,
+      },
+      completedHash: op.completedHash,
+      subscriberSig,
+      checks: {
+        offereeKeyMatches: subscriberKey === offer.offeree_key,
+        subscriberSigValid: sigOk && subscriberKey === offer.offeree_key,
+        completedHashFromChain: true,
+      },
+      alias: row.alias,
+      domain: row._domain || domain(env),
+      now: now(),
+    });
+    await store.insertReceipt({ txid, ref: op.ref, alias: row.alias, status: receipt.status, record: receipt });
+    await notifyOffer(offer.director_handle, receipt).catch(() => false);
+    return receipt;
+  };
+
   return {
     caps: async () => [200, capabilities(env)],
 
@@ -473,6 +561,9 @@ function makeHandlers({
       const [s, row] = await publicIdentity(handle);
       if (s !== 200) return [s, row];
       const out = { bsvalias: '1.0', handle: handleOf(row.alias, row._domain), pubkey: row.identity_key };
+      // A company paymail says whose it is (name, number, directors); the payer's wallet checks the seal against it.
+      const co = !row._opns && companyOf(row.alias);
+      if (co) out.company = companyOut(co);
       // The owner's signed binding (docs/NAME-BINDINGS.md): lets any wallet check, without trusting us, that the
       // key's holder put this name on this key. Only a binding signed by the key now served is returned.
       const b = row.alias && store.getBinding ? await store.getBinding(row.alias).catch(() => null) : null;
@@ -619,12 +710,15 @@ function makeHandlers({
       const [s, row] = await publicIdentity(handle);
       if (s !== 200) return [s, row];
       // No picture of their own: their generated bAvatar, drawn from the identity key (bChatX
-      // /api/bavatar, the same picture the wallet draws), so other BSV apps show one too.
+      // /api/bavatar, the same picture the wallet draws), so other BSV apps show one too. BAVATAR_HOST swaps the host
+      // (e.g. www.bitcoinchat.online, the same app) while bchatx.com is unreachable.
       const avatar =
         row.avatar ||
         (/^0[23][0-9a-f]{64}$/.test(row.identity_key || '')
-          ? `https://www.bchatx.com/api/bavatar/${row.identity_key}.png`
+          ? `${String(env.BAVATAR_HOST || process.env.BAVATAR_HOST || 'https://www.bchatx.com').replace(/\/$/, '')}/api/bavatar/${row.identity_key}.png`
           : '');
+      const co = !row._opns && companyOf(row.alias);
+      if (co) return [200, { name: co.name, avatar, company: companyOut(co) }];
       return [200, { name: shownDisplayName(row.display_name, row.alias), avatar }];
     },
 
@@ -642,7 +736,11 @@ function makeHandlers({
       const [s, row] = await publicAlias(handle);
       if (s !== 200) return [s, row];
       if (!row.ord_address) return [404, { error: 'no-ord-address' }];
-      return [200, { address: row.ord_address }];
+      // The owner's signature tying this ordinal address to their identity key, when they sent one. Only a proof
+      // for the address served now is returned; the paying wallet checks it against the key it already trusts.
+      const p = row.ord_proof;
+      const proof = p && p.ordAddress === row.ord_address ? { timestamp: p.timestamp, signature: p.signature } : null;
+      return [200, { address: row.ord_address, ...(proof ? { ordProof: proof } : {}) }];
     },
 
     p2pDestination: async ({ handle }, body) => {
@@ -663,7 +761,17 @@ function makeHandlers({
         outputs: [out],
         status: 'pending',
       });
-      return [200, { outputs: [{ script: out.script, satoshis }], reference }];
+      // The derivation inputs go back with the script (b_feedback 67) so the paying wallet can re-derive the
+      // script from the payee's identity key and refuse a script we didn't derive. Old clients ignore them.
+      const { derivationPrefix, derivationSuffix } = out;
+      const output = {
+        script: out.script,
+        satoshis,
+        derivationPrefix,
+        derivationSuffix,
+        senderIdentityKey: ANYONE_PUB,
+      };
+      return [200, { outputs: [output], reference }];
     },
 
     receive: async ({ handle }, body) => {
@@ -704,7 +812,51 @@ function makeHandlers({
         note: String((body.metadata && body.metadata.note) || '').slice(0, 256) || null,
         received_at: new Date(now()).toISOString(),
       });
+      // A company offer payment: write the subscription receipt. Never fails the receive (the payment is in).
+      const co = companyOf(row.alias);
+      if (co)
+        await recordOfferReceipt(co, row, parsed.tx, txid, vouts, body).catch((e) => {
+          console.error('offer receipt failed', String(e && e.message ? e.message : e).slice(0, 200));
+        });
       return [200, { txid, note: `Received by ${handleOf(row.alias, row._domain)}` }];
+    },
+
+    // ---- company offers (lib/offerReceipts.js) --------------------------------
+    // The company account registers a sealed offer so its payment can be matched. Signed by the company key.
+    'offer-register': async (_q, body) => {
+      body = body || {};
+      const sigErr = await verifySigned(body, 'offer-register', now());
+      if (sigErr) return [401, { error: sigErr }];
+      const key = String(body.identityKey).toLowerCase();
+      const alias = String(body.fields?.alias || '').toLowerCase();
+      const co = companyOf(alias);
+      const row = co && (await store.getAlias(alias));
+      if (!co || !row || String(row.identity_key).toLowerCase() !== key)
+        return [403, { error: "Only the company paymail's own key can register its offers" }];
+      if (!store.putOffer) return [501, { error: 'offers not available' }];
+      const o = offers.offerRow(body.fields, key, co);
+      if (typeof o === 'string') return [400, { error: `Bad offer: ${o}` }];
+      const prev = await store.getOffer(o.ref);
+      if (prev && prev.seal_hash !== o.seal_hash)
+        return [409, { error: 'That reference is already a different offer' }];
+      await store.putOffer({ ...o, alias });
+      return [200, { ref: o.ref }];
+    },
+
+    // Receipts for the director (or the company key): newest first. Signed.
+    'offer-receipts': async (_q, body) => {
+      body = body || {};
+      const sigErr = await verifySigned(body, 'offer-receipts', now());
+      if (sigErr) return [401, { error: sigErr }];
+      if (!store.listReceipts) return [501, { error: 'offers not available' }];
+      const key = String(body.identityKey).toLowerCase();
+      const alias = String(body.fields?.alias || '').toLowerCase();
+      const co = companyOf(alias);
+      const row = co && (await store.getAlias(alias));
+      const isCompany = !!row && String(row.identity_key).toLowerCase() === key;
+      if (!co || !(isCompany || co.directors.includes(key))) return [403, { error: 'Directors only' }];
+      const rows = await store.listReceipts(alias);
+      return [200, { receipts: rows.map((r) => r.record) }];
     },
 
     // ---- wallet-authenticated ------------------------------------------------
@@ -720,6 +872,9 @@ function makeHandlers({
       const sigErr = await verifySigned(body, 'register', now());
       if (sigErr) return [401, { error: sigErr }];
       const identityKey = String(body.identityKey).toLowerCase();
+      const ordProof =
+        f.ordAddress && body.ordProof ? await checkOrdProof(identityKey, f.ordAddress, body.ordProof) : null;
+      if (ordProof === false) return [400, { error: 'Bad ordAddress proof' }];
       const taken = await store.getAlias(alias);
       if (bad === RESERVED_MSG && !(taken && String(taken.identity_key).toLowerCase() === identityKey))
         return [400, { error: bad }];
@@ -815,6 +970,8 @@ function makeHandlers({
           defaultDisplayName(alias),
         avatar: String(f.avatar || '').slice(0, 512) || (ownsIt ? taken.avatar : null) || null,
       });
+      // Before migrations/20261024_paymail_ord_proof.sql runs there is no column: the name still registers, unproven.
+      if (ordProof && store.setOrdProof) await store.setOrdProof(alias, ordProof).catch(() => {});
       // A name they typed is the wallet's name on every one of its paymails.
       if (cleanDisplayName(f.name) && store.setDisplayNameByKey)
         await store.setDisplayNameByKey(identityKey, row.display_name);

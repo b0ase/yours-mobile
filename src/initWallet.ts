@@ -1,9 +1,16 @@
 import { openAccountPermissionStore } from './services/accountPermissionStore';
+import { openSpendLedger, withLocalSpendLedger } from './services/spendLedger';
 import { rememberRefusals } from './services/broadcastRefusals';
 import { knownOnChain, recoverMinedFailedActions, type RecoverReport } from './services/recoverFailed';
 import { singleFlight } from './services/addressResync';
 import { sizeAwareBroadcast } from './services/bigBroadcast';
-import { releaseStuckSends, type QueuedSend, type ReleaseReport } from './services/stuckSends';
+import {
+  releaseStuckSends,
+  resolveUnsent,
+  type QueuedSend,
+  type ReleaseReport,
+  type UnsentOutcome,
+} from './services/stuckSends';
 import {
   createWebWallet,
   createIndexedDbTaskStateStore,
@@ -17,6 +24,11 @@ import {
 import { preserveOriginalErrors } from './services/permissionAbortGuard';
 import { guardReservedBaskets, revokeReservedBasketGrants } from './services/reservedBaskets';
 import { guardReservedProtocols, revokeReservedProtocolGrants } from './services/reservedProtocols';
+import { guardAllowance } from './services/allowanceGuard';
+import { ALLOWANCES_ENABLED } from './services/allowanceFlag';
+import { chromeEnvelopeBackend, EnvelopeStore, guardEnvelopes } from './services/envelopes';
+import { guardCrossSiteSigning } from './services/crossSiteSignGuard';
+import { normalizeOriginator } from '@1sat/wallet';
 import { guardSpending } from './mobile/config/killSwitch';
 import {
   syncAddresses,
@@ -38,6 +50,7 @@ import { decrypt } from './utils/crypto';
 import type { Keys } from './utils/keys';
 import { initSyncContext, type SyncContext } from './initSyncContext';
 import { refileLegacyBaskets } from './services/legacyBaskets';
+import { installLegacyOrdSigner, legacyOrdKey, syncLegacyOrd } from './services/legacyOrd';
 import { readReconcileRecord, reconcileStorage } from './services/storageReconcileBackground';
 import { shouldResumeReconcile } from './services/storageReconcile';
 import { showOneSatPrompt } from './services/oneSatPrompt';
@@ -133,6 +146,8 @@ export interface AccountContext {
   remoteStorage?: StorageClient;
   /** The grant store the permissions manager reads (one-sheet connect writes the monthly allowance here). */
   permissionStore: IndexedDbPermissionStore;
+  /** Per-site envelopes (services/envelopes.ts): the only payments that go through without a sheet. */
+  envelopes: EnvelopeStore;
   setActiveStorage: (target: 'local' | string) => Promise<void>;
   addRemote: (url: string) => Promise<void>;
   /** Find and import token outputs the wallet owns on chain but has no record of (tokenRecovery.ts). */
@@ -165,6 +180,10 @@ export interface AccountContext {
   restorePaymails: () => Promise<PaymailRestoreReport>;
   /** Cancel queued sends that never reached the network after GIVE_UP_MS, releasing inputs (stuckSends.ts). */
   releaseStuckSends: () => Promise<ReleaseReport>;
+  /** Send one queued payment now, or cancel it when the network never got it (services/stuckSends.ts). */
+  resolveUnsent: (txid: string, how: 'send' | 'cancel') => Promise<UnsentOutcome>;
+  /** The queued (not yet accepted) sends, read only. */
+  listUnsent: () => Promise<QueuedSend[]>;
   /** Run the Monitor's SendWaiting task now (a big send was queued: services/bigDelayed.ts). */
   sendWaitingNow: () => Promise<string>;
   /** Bytes storage holds for an action reference (unsigned tx + input BEEF), 0 when unknown. */
@@ -343,6 +362,11 @@ export const initWallet = async (
   // Every payment ends here: our screens and dApps through the permissions manager, send-all and background jobs
   // directly. The `spending` kill switch pauses createAction/signAction on it (mobile/config/killSwitch.ts).
   guardSpending(baseWallet);
+  // The legacy ord address (paymail ordinals go there): its key signs under one wallet-only protocol, so the NFTs
+  // the sync takes in from it send like any other (services/legacyOrd.ts). No key for it (passkey/seedless): skipped.
+  const legacyOrdAddress = account?.addresses?.ordAddress;
+  const ordKey = legacyOrdKey(keys.ordWif, legacyOrdAddress);
+  if (ordKey) installLegacyOrdSigner(baseWallet, ordKey);
   if (!rememberRefusals(toolboxServices)) console.warn('[initWallet] broadcast refusals not recorded');
   // UnFail's output verdicts read getUtxoStatus: parse api.1sat.app's "txid.vout" (dkg, 14 Oct 2026; services/utxoStatus.ts).
   if (!fixUtxoStatus(toolboxServices)) console.warn('[initWallet] getUtxoStatus not patched (no txo client)');
@@ -357,6 +381,12 @@ export const initWallet = async (
     accountId || 'no-account',
     chromeStorageService.getAllAccounts().length,
   );
+
+  // Month-to-date app spend kept on this device, per account, so a remote storage server cannot under-report it
+  // and let payments past a monthly allowance through (services/spendLedger.ts, b-Aware report 23 Oct 2026).
+  const spendLedger = await openSpendLedger(accountId || 'no-account');
+  // Envelopes (owner, 24 Oct 2026): earmarks in this account's own storage, never coins moved (services/envelopes.ts).
+  const envelopes = new EnvelopeStore(chromeEnvelopeBackend(accountId || 'no-account'));
 
   // 4. Build per-asset permission modules (1sat / opns / bsv21 / lock).
   //    Shared toolkit; separate BRC-99 scheme ids. Base wallet is used for
@@ -378,13 +408,38 @@ export const initWallet = async (
   // The wallet's own baskets (coins, ordinals, tokens, locks, names) likewise (services/reservedBaskets.ts).
   const wallet = guardReservedBaskets(
     guardReservedProtocols(
-      preserveOriginalErrors(
-        new LocalWalletPermissionsManager(
-          baseWallet,
-          ADMIN_ORIGINATOR,
-          { permissionModules: assetModules },
-          { store: permissionStore },
+      // A message naming another site (a login challenge fetched from good.com) is never signed for evil.com
+      // (services/crossSiteSignGuard.ts, payment-safety audit 24 Oct 2026 B1).
+      guardCrossSiteSigning(
+        preserveOriginalErrors(
+          withLocalSpendLedger(
+            // Envelopes by default: a site's payment goes through without a sheet only when it fits that site's
+            // envelope; stored allowances grant nothing (services/envelopes.ts, owner 24 Oct 2026). With
+            // ALLOWANCES_ENABLED, the old monthly allowance with its per-payment cap and payee allowlist
+            // (services/allowanceGuard.ts, payment-safety audit 24 Oct 2026 B2).
+            ALLOWANCES_ENABLED
+              ? guardAllowance(
+                  new LocalWalletPermissionsManager(
+                    baseWallet,
+                    ADMIN_ORIGINATOR,
+                    { permissionModules: assetModules },
+                    { store: permissionStore },
+                  ),
+                  { store: permissionStore, adminOriginator: ADMIN_ORIGINATOR, normalize: normalizeOriginator },
+                )
+              : guardEnvelopes(
+                  new LocalWalletPermissionsManager(
+                    baseWallet,
+                    ADMIN_ORIGINATOR,
+                    { permissionModules: assetModules },
+                    { store: permissionStore },
+                  ),
+                  { envelopes, adminOriginator: ADMIN_ORIGINATOR, normalize: normalizeOriginator },
+                ),
+            spendLedger,
+          ),
         ),
+        ADMIN_ORIGINATOR,
       ),
       ADMIN_ORIGINATOR,
     ),
@@ -825,6 +880,13 @@ export const initWallet = async (
         },
       })
       .then(async (result) => {
+        // NFTs at the legacy ord address join Wallet › NFTs (nothing is moved). Before 'complete' so the list
+        // refresh it triggers sees them.
+        if (ordKey && legacyOrdAddress) {
+          await syncLegacyOrd({ wallet: adminWallet, services: syncContext.services, chain, address: legacyOrdAddress })
+            .then((r) => r.added && console.log('[initWallet] legacy ord address:', r))
+            .catch((err) => console.warn('[initWallet] legacy ord sync failed:', err));
+        }
         sendSyncStatus({ status: 'complete', ...result });
         // Only a clean run counts as having read the new addresses' history; a failed one keeps the rescan pending.
         if (result.failed === 0) persistScanThrough();
@@ -872,6 +934,38 @@ export const initWallet = async (
     });
 
   // Create close function
+  /** The queued-send review and the by-hand send/cancel share these (services/stuckSends.ts). */
+  const stuckDeps: Parameters<typeof releaseStuckSends>[0] & { listQueued: () => Promise<QueuedSend[]> } = {
+    listQueued: () =>
+      storage.runAsStorageProvider(async (sp) => {
+        const out: QueuedSend[] = [];
+        for (const t of await sp.findTransactions({
+          partial: { status: 'sending', isOutgoing: true },
+          noRawTx: true,
+        })) {
+          if (!t.txid) continue;
+          const [req] = await sp.findProvenTxReqs({ partial: { txid: t.txid } });
+          out.push({
+            transactionId: t.transactionId,
+            txid: t.txid,
+            createdAt: new Date(t.created_at).getTime(),
+            attempts: req?.attempts ?? 0,
+            description: t.description,
+            satoshis: t.satoshis,
+          });
+        }
+        return out;
+      }),
+    knownOnChain: (txid) => knownOnChain(txid, (t) => toolboxServices.getRawTx(t)),
+    cancel: (q) =>
+      storage.runAsStorageProvider(async (sp) => {
+        for (const req of await sp.findProvenTxReqs({ partial: { txid: q.txid } }))
+          await sp.updateProvenTxReq(req.provenTxReqId, { status: 'invalid' });
+        await sp.updateTransactionStatus('failed', q.transactionId);
+      }),
+    available: () => storage.isActiveStorageProvider(),
+  };
+
   const close = async () => {
     await destroyWallet();
   };
@@ -883,6 +977,7 @@ export const initWallet = async (
     storage,
     remoteStorage,
     permissionStore,
+    envelopes,
     setActiveStorage,
     addRemote,
     recoverTokens,
@@ -971,37 +1066,14 @@ export const initWallet = async (
         const [t] = await sp.findTransactions({ partial: { reference } });
         return (t?.rawTx?.length ?? 0) + (t?.inputBEEF?.length ?? 0);
       }),
-    releaseStuckSends: () =>
-      releaseStuckSends({
-        listQueued: () =>
-          storage.runAsStorageProvider(async (sp) => {
-            const out: QueuedSend[] = [];
-            for (const t of await sp.findTransactions({
-              partial: { status: 'sending', isOutgoing: true },
-              noRawTx: true,
-            })) {
-              if (!t.txid) continue;
-              const [req] = await sp.findProvenTxReqs({ partial: { txid: t.txid } });
-              out.push({
-                transactionId: t.transactionId,
-                txid: t.txid,
-                createdAt: new Date(t.created_at).getTime(),
-                attempts: req?.attempts ?? 0,
-                description: t.description,
-                satoshis: t.satoshis,
-              });
-            }
-            return out;
-          }),
-        knownOnChain: (txid) => knownOnChain(txid, (t) => toolboxServices.getRawTx(t)),
-        cancel: (q) =>
-          storage.runAsStorageProvider(async (sp) => {
-            for (const req of await sp.findProvenTxReqs({ partial: { txid: q.txid } }))
-              await sp.updateProvenTxReq(req.provenTxReqId, { status: 'invalid' });
-            await sp.updateTransactionStatus('failed', q.transactionId);
-          }),
-        available: () => storage.isActiveStorageProvider(),
-      }),
+    releaseStuckSends: () => releaseStuckSends(stuckDeps),
+    listUnsent: () => stuckDeps.listQueued(),
+    resolveUnsent: (txid: string, how: 'send' | 'cancel') =>
+      resolveUnsent(
+        { ...stuckDeps, sendWaiting: async () => (walletMonitor ? await walletMonitor.runTask('SendWaiting') : '') },
+        txid,
+        how,
+      ),
     close,
   };
 };

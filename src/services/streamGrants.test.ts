@@ -12,7 +12,10 @@ import {
   passCovers,
   publicGrant,
   recordSpend,
+  reserveStream,
+  settleHold,
   revokeGrant,
+  revokeGrantsForOriginator,
   spentLastHour,
   tidy,
   type StreamGrant,
@@ -194,4 +197,122 @@ test('options.spendingAuthorization names the protocol, and is stripped before s
   expect(decide(withGrant(), q({ labels: streamProtocolOption(args) })).approve).toBe(true);
   expect(withoutStreamOption(args).options).toEqual({ noSend: true });
   expect(streamProtocolOption({})).toEqual([]);
+});
+
+describe('payee allowlist (audit 24 Oct B2)', () => {
+  const A = '76a914' + 'aa'.repeat(20) + '88ac';
+  const B = '76a914' + 'bb'.repeat(20) + '88ac';
+  test('a request may carry payees; junk is refused, case is folded', () => {
+    const ok = parseSpendingAuthRequest(
+      { protocolID: [2, LABEL], capSatsPerHour: 1000, payees: [A.toUpperCase(), A] },
+      T0,
+    );
+    expect(ok.ok && ok.request.payees).toEqual([A]);
+    expect(parseSpendingAuthRequest({ protocolID: [2, LABEL], capSatsPerHour: 1000, payees: 'x' }, T0).ok).toBe(false);
+    expect(parseSpendingAuthRequest({ protocolID: [2, LABEL], capSatsPerHour: 1000, payees: ['zz'] }, T0).ok).toBe(
+      false,
+    );
+    const none = parseSpendingAuthRequest({ protocolID: [2, LABEL], capSatsPerHour: 1000 }, T0);
+    expect(none.ok && none.request.payees).toBeUndefined();
+  });
+  test('a grant with payees covers only calls paying them', () => {
+    const s = withGrant(grant({ payees: [A] }));
+    expect(decide(s, q({ outputs: [{ satoshis: 100, lockingScript: A }] })).approve).toBe(true);
+    expect(decide(s, q({ outputs: [{ satoshis: 100, lockingScript: B }] }))).toEqual({
+      approve: false,
+      reason: 'payee',
+    });
+    // A zero-sat data output (OP_RETURN) needs no listing.
+    expect(
+      decide(
+        s,
+        q({
+          outputs: [
+            { satoshis: 100, lockingScript: A },
+            { satoshis: 0, lockingScript: '006a' },
+          ],
+        }),
+      ).approve,
+    ).toBe(true);
+  });
+  test('a grant without payees behaves as before', () => {
+    expect(decide(withGrant(), q({ outputs: [{ satoshis: 100, lockingScript: B }] })).approve).toBe(true);
+  });
+});
+
+describe('Forget site / Revoke all / unpair end streaming grants (b-Aware rows 53, 62)', () => {
+  test("revokeGrantsForOriginator stops every grant of that site, and only that site's", () => {
+    const s = addGrant(withGrant(), grant({ id: 'sg_9', originator: 'other.site' }));
+    const r = revokeGrantsForOriginator(s, 'bmovies.online', T0)!;
+    expect(decide(r, q()).approve).toBe(false);
+    expect(decide(r, q({ originator: 'other.site' })).approve).toBe(true);
+    expect(revokeGrantsForOriginator(r, 'bmovies.online', T0)).toBeUndefined();
+    expect(revokeGrantsForOriginator(emptyStreamState(), 'x', T0)).toBeUndefined();
+  });
+});
+
+describe('concurrent calls share one budget (b-Aware report, streaming cap)', () => {
+  // The background's serialised stream-state queue, over an async store, as in background.ts updateStreamState.
+  const store = (initial: StreamState) => {
+    let saved = JSON.stringify(initial);
+    let chain: Promise<unknown> = Promise.resolve();
+    const read = async () => JSON.parse(saved) as StreamState;
+    const update = <T>(fn: (s: StreamState) => { state?: StreamState; result: T }): Promise<T> => {
+      const run = chain.then(async () => {
+        const out = fn(await read());
+        if (out.state) {
+          await Promise.resolve();
+          saved = JSON.stringify(out.state);
+        }
+        return out.result;
+      });
+      chain = run.catch(() => undefined);
+      return run;
+    };
+    return { read, update };
+  };
+  const CAP = 100_000;
+  const call = (s: ReturnType<typeof store>, holdId: string, sats: number, ok: boolean) =>
+    s
+      .update((st) => {
+        const r = reserveStream(st, { ...q({ sats }), holdId });
+        return { state: r.state, result: r.decision };
+      })
+      .then(async (d) => {
+        if (!d.approve) return false;
+        await Promise.resolve(); // the signer runs
+        await s.update((st) => ({
+          state: settleHold(st, d.grant.id, holdId, ok ? { at: T0, sats, txid: holdId } : null),
+          result: undefined,
+        }));
+        return true;
+      });
+
+  test('five concurrent 90k calls against a 100k cap: at most one approved, spend within the cap', async () => {
+    const s = store(withGrant(grant({ capSatsPerHour: CAP })));
+    const approved = await Promise.all([1, 2, 3, 4, 5].map((n) => call(s, `h${n}`, 90_000, true)));
+    expect(approved.filter(Boolean).length).toBe(1);
+    const g = (await s.read()).grants[0];
+    expect(spentLastHour(g, T0 + 1000)).toBeLessThanOrEqual(CAP);
+    expect(spentLastHour(g, T0 + 1000)).toBe(90_000);
+    expect(g.spends.some((x) => x.hold)).toBe(false);
+  });
+
+  test('sequential control: calls one after another approve until the cap', async () => {
+    const s = store(withGrant(grant({ capSatsPerHour: CAP })));
+    const results: boolean[] = [];
+    for (let n = 0; n < 5; n++) results.push(await call(s, `h${n}`, 30_000, true));
+    expect(results).toEqual([true, true, true, false, false]);
+    expect(spentLastHour((await s.read()).grants[0], T0 + 1000)).toBe(90_000);
+  });
+
+  test('a failed call gives its hold back; a hold counts until settled', async () => {
+    const s = store(withGrant(grant({ capSatsPerHour: CAP })));
+    expect(await call(s, 'fail', 90_000, false)).toBe(true);
+    expect(spentLastHour((await s.read()).grants[0], T0 + 1000)).toBe(0);
+    const held = reserveStream(withGrant(grant({ capSatsPerHour: CAP })), { ...q({ sats: 50_000 }), holdId: 'x' });
+    expect(held.decision.approve && held.decision.budget).toBe(52_000);
+    expect(budgetLeft(held.state!, held.state!.grants[0], T0 + 1000)).toBe(48_000);
+    expect(held.state!.grants[0].totalSats).toBe(0);
+  });
 });

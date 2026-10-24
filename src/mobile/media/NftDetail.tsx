@@ -12,13 +12,32 @@ import type { ChromeStorageObject } from '../../services/types/chromeStorage.typ
 import { getTagValue } from '../../utils/format';
 import { getErrorMessage } from '../../utils/tools';
 import { NameInput } from '../names/NameInput';
+import type { WalletInterface } from '@bsv/sdk';
+import { sendMail } from '../bmail/client';
+import { receiptTags } from '../bmail/ordinalReceipt';
+import {
+  defaultKeyMode,
+  encryptNoteForKey,
+  NOTE_MAX,
+  noteMap,
+  saveSentKeyNote,
+  shortKey,
+  type KeyMode,
+} from '../names/pubkeyRecipient';
 import { setLocalAvatar } from '../names/avatar';
 import { nftAvatarUri, normalizeOutpoint, ordinalsUrl } from './nftActions';
 import type { MediaItem } from './useWalletMedia';
 import { TipButton } from '../tip/TipButton';
 import { nftCreator } from '../tip/tip';
 import { celebrateSend } from '../../components/sent/sent';
-import { nftSendButton, shortAddr } from './nftSend';
+import {
+  canUseAsAvatar,
+  isSelfRecipient,
+  nftSendButton,
+  PENDING_CARD_TEXT,
+  PENDING_SEND_TEXT,
+  shortAddr,
+} from './nftSend';
 import { txidOf, walletTxStates } from './unbroadcast';
 import { STORE_BUILD } from '../storeBuild';
 import { ReceiptBadge } from '../storeReceipt/ReceiptBadge';
@@ -36,6 +55,7 @@ import {
   toUnderscore,
 } from './nftBurn';
 
+const PENDING_RECHECK_MS = 4000;
 const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
 const short = (s: string) => (s.length > 22 ? `${s.slice(0, 10)}…${s.slice(-8)}` : s);
 
@@ -52,7 +72,10 @@ export const NftDetail = ({
   onClose,
   onSent,
   initialTo = '',
+  isCard = false,
 }: {
+  /** A just-made greeting card (CardSend): the pending note says "Your card…". */
+  isCard?: boolean;
   item: MediaItem;
   /** Recipient to fill in (Friends › Send NFT): the name box still resolves it and Send to … still confirms. */
   initialTo?: string;
@@ -78,24 +101,36 @@ export const NftDetail = ({
   // Step 1 (who): what the name box resolved. Step 2: one "Send to <name>" button (nftSend.ts).
   const [status, setStatus] = useState<'empty' | 'typing' | 'loading' | 'error' | 'ready'>('empty');
   const [toName, setToName] = useState<string | undefined>();
+  const [toKeys, setToKeys] = useState<{ pubkey?: string; ordAddress?: string }>({});
+  // Send to a public key (24 Oct 2026): the key as typed, how to deliver, and an optional encrypted note.
+  const [toKey, setToKey] = useState<{ raw: string; pubkey: string; address: string } | null>(null);
+  const [keyMode, setKeyMode] = useState<KeyMode>('plain');
+  const [note, setNote] = useState('');
   const [sent, setSent] = useState<{ txid: string; name: string } | null>(null);
   const [failed, setFailed] = useState('');
   // An NFT from a mint the network never saw can't be sent (vexvoid, 11 Oct 2026: every try failed and hid it).
   const [onChain, setOnChain] = useState<boolean | null>(item.pending ? false : null);
   // Queued but not on chain yet ('sending'): pending, not owned; can't be sent or burned until it lands.
   const [pending, setPending] = useState(!!item.pending);
+  // While it is still going out, look again every few seconds: Send unlocks by itself once it lands.
   useEffect(() => {
     let live = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const txid = txidOf(item.output.outpoint);
-    void walletTxStates(apiContext.wallet)
-      .then((st) => {
-        if (!live) return;
-        setPending(st.pending.has(txid));
-        setOnChain(!st.offChain.has(txid) && !st.pending.has(txid));
-      })
-      .catch(() => live && setOnChain(null));
+    const check = () =>
+      void walletTxStates(apiContext.wallet)
+        .then((st) => {
+          if (!live) return;
+          const still = st.pending.has(txid);
+          setPending(still);
+          setOnChain(!st.offChain.has(txid) && !still);
+          if (still) timer = setTimeout(check, PENDING_RECHECK_MS);
+        })
+        .catch(() => live && setOnChain(null));
+    check();
     return () => {
       live = false;
+      if (timer) clearTimeout(timer);
     };
   }, [apiContext.wallet, item.output.outpoint]);
 
@@ -170,7 +205,18 @@ export const NftDetail = ({
     setBusy(true);
     setFailed('');
     try {
-      const res = await sendOrdinals.execute(apiContext, { transfers: [{ id: assetId, address: to }] });
+      const viaWallet = !!toKey && keyMode === 'wallet';
+      const memo = note.trim().slice(0, NOTE_MAX);
+      const transfer = !toKey
+        ? { id: assetId, address: to }
+        : viaWallet
+          ? { id: assetId, counterparty: toKey.pubkey }
+          : {
+              id: assetId,
+              address: toKey.address,
+              ...(memo ? { map: noteMap(encryptNoteForKey(memo, toKey.raw)) } : {}),
+            };
+      const res = await sendOrdinals.execute(apiContext, { transfers: [transfer] });
       if (!res.txid || res.error) {
         // Known codes keep their wording; anything else shows the real message, never a bare "unknown error, try
         // again" (vexvoid, 12 Oct 2026: that hid why sends failed and invited repeats).
@@ -180,6 +226,40 @@ export const NftDetail = ({
             ? `Not sent: ${String(res.error || 'the wallet returned no transaction')}. Check History before sending again.`
             : known,
         );
+      }
+      if (toKey) {
+        if (viaWallet) {
+          // The derivation details (and note, BRC-2 to the identity key) go as a bMail so their wallet can read it.
+          try {
+            await sendMail(apiContext.wallet as unknown as WalletInterface, {
+              to: toKey.pubkey,
+              toLabel: toName ?? shortKey(toKey.raw),
+              sealed: {
+                subject: `An NFT for you: ${item.name}`.slice(0, 120),
+                body: memo || `${item.name} is on its way to your wallet.`,
+                ordinal: {
+                  txid: res.txid,
+                  deliveries: res.deliveries ?? [],
+                  name: item.name,
+                  tags: receiptTags(item.output.tags),
+                },
+              },
+              sats: 0,
+              replyPaidSats: 0,
+            });
+          } catch (e) {
+            console.warn('[send to key] NFT sent; the delivery letter did not go', e);
+          }
+        }
+        if (memo)
+          saveSentKeyNote({
+            at: Date.now(),
+            key: toKey.raw,
+            address: toKey.address,
+            mode: keyMode,
+            txid: res.txid,
+            note: memo,
+          });
       }
       const name = toName && toName !== to ? toName : shortAddr(to);
       setSent({ txid: res.txid, name });
@@ -194,7 +274,21 @@ export const NftDetail = ({
   };
 
   const validTo = !!to && validate(to);
-  const button = nftSendButton({ to: validTo ? to : '', name: toName, status, busy, onChain });
+  const account = chromeStorageService.getCurrentAccountObject().account;
+  const isSelf =
+    status === 'ready' &&
+    isSelfRecipient(
+      { to, ...toKeys },
+      {
+        identityPubKey: account?.pubKeys?.identityPubKey,
+        addresses: [
+          account?.addresses?.bsvAddress,
+          account?.addresses?.ordAddress,
+          account?.addresses?.identityAddress,
+        ].filter((a): a is string => !!a),
+      },
+    );
+  const button = nftSendButton({ to: validTo ? to : '', name: toName, status, busy, onChain, isSelf, pending });
   const btn = 'flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold';
 
   return createPortal(
@@ -231,7 +325,8 @@ export const NftDetail = ({
             className="self-start"
           />
         )}
-        {item.kind === 'images' && (
+        {/* Only while it is still ours: not after a send or burn, nor while the mint is still going out. */}
+        {canUseAsAvatar(item.kind, { sent: !!sent, burned: !!burned, pending }) && (
           <button onClick={() => void setAvatar()} className={`${btn} bg-[#A1FF8B] text-[#010101]`}>
             <UserCircle size={16} /> Use as my bAvatar
           </button>
@@ -248,8 +343,11 @@ export const NftDetail = ({
               {short(sent.txid)}
             </a>
           </div>
-        ) : onChain === false && pending ? (
-          <PendingCard />
+        ) : pending ? (
+          <>
+            <PendingCard />
+            <p className="text-xs text-[#e6d08a] m-0">{isCard ? PENDING_CARD_TEXT : PENDING_SEND_TEXT}</p>
+          </>
         ) : onChain === false ? (
           <div className="rounded-xl bg-[var(--bw-surface)] p-3 text-xs text-[color:var(--bw-accent)]">
             Not on the blockchain yet. This NFT&apos;s mint never reached the network, so it can&apos;t be sent or
@@ -265,7 +363,9 @@ export const NftDetail = ({
           </button>
         ) : (
           <div className="flex flex-col gap-2 rounded-xl bg-[var(--bw-surface)] p-3">
-            <div className="text-xs font-semibold text-[#98A2B3]">Who gets it?</div>
+            <div className="text-xs font-semibold text-[#98A2B3]">
+              Who gets it? A $name, paymail, address or any public key
+            </div>
             <NameInput
               theme={theme}
               value={to}
@@ -274,6 +374,17 @@ export const NftDetail = ({
               onStatus={(st, r) => {
                 setStatus(st);
                 setToName(r ? (r.displayName ?? r.input) : undefined);
+                setToKeys(r ? { pubkey: r.pubkey, ordAddress: r.ordAddress } : {});
+                const k = r?.via === 'pubkey' && r.rawKey && r.pubkey ? r : null;
+                setToKey((prev) =>
+                  k && prev?.raw === k.rawKey
+                    ? prev
+                    : k
+                      ? { raw: k.rawKey!, pubkey: k.pubkey!, address: k.target }
+                      : null,
+                );
+                if (k && k.rawKey !== toKey?.raw)
+                  setKeyMode(defaultKeyMode({ hex: k.rawKey!, compressed: k.rawKey!.length === 66 }));
               }}
               onChange={(v) => {
                 setTo(v);
@@ -282,6 +393,9 @@ export const NftDetail = ({
               style={{ width: '100%', margin: 0 }}
             />
             {to && !validTo && status === 'ready' && <p className="text-xs text-[#F97066]">Not a valid address.</p>}
+            {toKey && status === 'ready' && (
+              <KeySendPanel k={toKey} mode={keyMode} setMode={setKeyMode} note={note} setNote={setNote} />
+            )}
             <button
               disabled={!button.enabled}
               onClick={() => void send()}
@@ -402,5 +516,59 @@ export const NftDetail = ({
       </div>
     </div>,
     document.body,
+  );
+};
+
+/** Send to a public key: how to deliver it, the encrypted note, and what the confirmation will do. */
+const KeySendPanel = ({
+  k,
+  mode,
+  setMode,
+  note,
+  setNote,
+}: {
+  k: { raw: string; pubkey: string; address: string };
+  mode: KeyMode;
+  setMode: (m: KeyMode) => void;
+  note: string;
+  setNote: (n: string) => void;
+}) => {
+  const opt = (m: KeyMode, title: string, sub: string) => (
+    <label className="flex items-start gap-2 text-xs cursor-pointer">
+      <input type="radio" name="bw-key-mode" checked={mode === m} onChange={() => setMode(m)} className="mt-0.5" />
+      <span>
+        <span className="font-semibold text-[color:var(--bw-fg,#fff)]">{title}</span>
+        <span className="block text-[#98A2B3]">{sub}</span>
+      </span>
+    </label>
+  );
+  return (
+    <div data-testid="key-send-panel" className="flex flex-col gap-2 rounded-lg border border-white/10 p-2">
+      <div className="text-[11px] text-[#98A2B3] break-all">
+        Key {shortKey(k.raw)} · address {k.address}
+      </div>
+      {opt(
+        'wallet',
+        'This key belongs to a wallet (recommended)',
+        'Sent so their wallet finds it, with a bMail it can read.',
+      )}
+      {opt('plain', "Send to the key's plain address", `Goes to ${k.address}. Only that key can spend it.`)}
+      <textarea
+        aria-label="Note, encrypted to this key"
+        maxLength={NOTE_MAX}
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        placeholder="Add a note (optional). Only the key's holder can read it."
+        rows={3}
+        className="w-full rounded-lg bg-black/40 text-sm text-white p-2 border border-white/10"
+      />
+      {note.trim() && (
+        <div className="text-[11px] text-[#A1FF8B]">
+          Note encrypted to this key{' '}
+          {mode === 'plain' ? '(Electrum ECIES, in the same transaction)' : '(BRC-2, delivered by bMail)'}. You keep a
+          copy on this device.
+        </div>
+      )}
+    </div>
   );
 };

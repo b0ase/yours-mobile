@@ -1,4 +1,15 @@
 /* global chrome */
+import {
+  RECONNECT_ID_PREFIX,
+  RECONNECT_STATE_KEY,
+  isReconnectRequestId,
+  needsReconnect,
+  noteCall,
+  noteDisconnect,
+  noteReconnected,
+  parseReconnectState,
+  type ReconnectState,
+} from './services/reconnectGate';
 import { siteThemeFor } from './mobile/theme/connectTheme';
 import type { AccentId } from './mobile/theme/accents';
 import { revokeOriginatorInAccounts } from './services/accountPermissionStore';
@@ -7,9 +18,9 @@ import { createMasterBackupGate } from './services/masterBackupGate';
 import { promptsShowInPanel } from './services/panelPrompt';
 import { isSessionExpired } from './utils/lockTimeout';
 import { originatorForOrigin } from './services/originKey';
+import { pairedGrantAllowed, takePendingFor } from './services/pairedPromptGuard';
 import {
   addGrant,
-  decide as decideStream,
   isSpendingAuthAction,
   newGrantId,
   outputSats,
@@ -19,8 +30,10 @@ import {
   parseStreamState,
   passCovers,
   publicGrant,
-  recordSpend,
+  reserveStream,
+  settleHold,
   revokeGrant,
+  revokeGrantsForOriginator,
   SPENDING_AUTH_REQUEST,
   SPENDING_AUTH_REVOKE,
   SPENDING_AUTH_STATUS,
@@ -32,6 +45,14 @@ import {
   type StreamState,
 } from './services/streamGrants';
 import type { StreamGrantPrompt } from './promptProtocol';
+import { ALLOWANCES_ENABLED } from './services/allowanceFlag';
+import {
+  DEFAULT_ENVELOPE_USD,
+  ENVELOPE_PRESETS_USD,
+  isMicropaymentSite,
+  markMicropayments,
+  closeEnvelopeInAccounts,
+} from './services/envelopes';
 import {
   ADDRESS_RESYNC_ALARM,
   ADDRESS_RESYNC_PERIOD_MINUTES,
@@ -52,6 +73,7 @@ import { RequestParams, ResponseEventDetail, YoursEventName } from './inject';
 import { recordCall, recordPayment, requestedSats, updateConnectionLog } from './mobile/wallet/connectionLog';
 import { CWIEventName } from './cwi';
 import { describeWalletError } from './brand/walletError';
+import { userDeniedError, withDenialCode } from './services/userDenied';
 import { HANDOFF_ENABLED } from './mobile/passkey/extHandoff';
 import { HANDOFF_ALARM, handleExternalHandoff, sweepExpiredHandoff } from './mobile/passkey/extHandoffStore';
 import {
@@ -119,18 +141,38 @@ import {
 } from './services/oneSatPrompt';
 import type { PromptKind, UsbCheckRequest } from './promptProtocol';
 import {
+  allowanceGranted,
   allowanceSats,
   DEFAULT_ALLOWANCE_USD,
   PermissionBundler,
   TRUST_SITE_BASKET,
+  BLOCK_SITE_BASKET,
+  BLOCKED_SITE_REFUSAL,
+  blockActive,
   trustCovers,
   trustedBasketsFrom,
+  POST_BASKET,
+  POST_PROTOCOL,
+  postPackCompanions,
   type BundleRequest,
 } from './services/permissionBundle';
 import { normalizeOriginator } from '@1sat/wallet';
+import { withDefaultExpiry } from './services/grantExpiry';
+import { markPayeeMismatch, parsePayees, payeesAllowed } from './services/allowanceGuard';
 import { ADMIN_ORIGINATOR, initWallet, openAccountStorageForBackup, type AccountContext } from './initWallet';
 import { isExtensionSender, reservedOriginatorRefusal } from './services/adminOriginator';
 import { isReservedBasket, RESERVED_BASKET_REFUSAL, revokeBasketGrantsForOriginator } from './services/reservedBaskets';
+import { pinnedProtocol, pinnedProtocolRefusal, PINNED_PROTOCOLS_VERSION, versionWithPins } from './services/pinnedProtocols';
+import {
+  DeferredEncrypts,
+  labelCoveredByIntent,
+  mintIntentFor,
+  mintSheetFor,
+  ProtocolCalls,
+  shouldDeferEncrypt,
+  type MintIntent,
+  type MintSheet,
+} from './services/pinnedMint';
 import { isReservedProtocol, reservedProtocolRefusal, RESERVED_REFUSAL, withoutReservedProtocols } from './services/reservedProtocols';
 import { healIndexFundActions } from './mobile/tokens/indexFundHeal';
 import { continuesChain, endChain, isAlreadyProcessedAbort, markChainStep, startsChain } from './services/dappChain';
@@ -146,13 +188,15 @@ import {
   queuedResult,
   queuedSend,
   repeatRefusal,
-  requestFingerprint,
+  repeatFingerprints,
 } from './services/repeatGuard';
 import { releasedMessage } from './services/stuckSends';
 import { createSendRetry, SEND_RETRY_ALARM } from './services/sendRetry';
 import {
   createActionBytes,
   kickSendWaiting,
+  resultIsQueued,
+  withBroadcastNow,
   pendingShape,
   shouldDelay,
   signActionBytes,
@@ -955,10 +999,62 @@ const pendingPermissionRequests = new Map<
 type BundledRequest = PermissionRequest & { requestID: string };
 const permissionBundler = new PermissionBundler<BundledRequest & BundleRequest>({
   onReady: (bundle) => showPromptUi('bundle', bundle.id),
-  // A request joined an open sheet: the sheet reloads its payload ("+1 more").
+  // Requests that waited behind the site's last sheet get their own sheet now, with their companions.
+  onPromote: (bundle) => askCompanionsFor(bundle),
+  // Live sheet: a line joined the open sheet; it reloads, marks it "New" and holds its button for a moment.
   onUpdate: (bundle) => notifyPromptUpdated('bundle', bundle.id),
 });
 let notifyPromptUpdated: (kind: PromptKind, requestID: string) => void = () => undefined;
+
+// Re-ask on reconnect (services/reconnectGate.ts): after a site's Disconnect, or a day of silence, its next
+// identity-key request opens the reconnect sheet instead of being answered silently.
+let reconnectWrites: Promise<unknown> = Promise.resolve();
+const updateReconnectState = <T>(fn: (s: ReconnectState) => { state?: ReconnectState; result: T }): Promise<T> => {
+  const run = reconnectWrites.then(async () => {
+    const got = await chrome.storage.local.get(RECONNECT_STATE_KEY).catch(() => ({}) as Record<string, unknown>);
+    const out = fn(parseReconnectState((got as Record<string, unknown>)[RECONNECT_STATE_KEY]));
+    if (out.state) await chrome.storage.local.set({ [RECONNECT_STATE_KEY]: out.state }).catch(() => undefined);
+    return out.result;
+  });
+  reconnectWrites = run.catch(() => undefined);
+  return run;
+};
+/** Records a site's call; true when it is an identity-key request that must ask first. */
+const reconnectGate = (originator: string, action: string, params: unknown): Promise<boolean> => {
+  const identity =
+    action === CWIEventName.GET_PUBLIC_KEY && (params as { identityKey?: unknown } | undefined)?.identityKey === true;
+  const now = Date.now();
+  return updateReconnectState((s) => ({
+    state: noteCall(s, originator, now),
+    result: identity && needsReconnect(s, originator, now),
+  })).catch(() => false);
+};
+const IDENTITY_SHEET_LINE = 'identity key retrieval';
+let reconnectCounter = 0;
+/** Shows "Reconnect to <site>?" (the connect sheet); resolves on Reconnect, rejects on Not now. */
+const askReconnect = (originator: string): Promise<void> =>
+  new Promise<void>((resolve, reject) => {
+    const requestID = `${RECONNECT_ID_PREFIX}${Date.now().toString(36)}-${(reconnectCounter++).toString(36)}`;
+    const request = {
+      requestID,
+      type: 'protocol',
+      originator,
+      // Display only: the sheet reads it as the identity-key line. No key is derived from it.
+      protocolID: [1, IDENTITY_SHEET_LINE],
+      counterparty: 'self',
+      reconnect: true,
+      reason: 'Reconnect after disconnect',
+    } as unknown as BundledRequest & BundleRequest;
+    pendingPermissionRequests.set(requestID, {
+      request,
+      resolve: () => {
+        void updateReconnectState((s) => ({ state: noteReconnected(s, originator, Date.now()), result: null }));
+        resolve();
+      },
+      reject,
+    });
+    permissionBundler.add(request);
+  });
 
 // Pending wallet initialization waiters (for ensureWallet when service worker wakes without passKey)
 const pendingWalletWaiters: {
@@ -1001,8 +1097,29 @@ const updateStreamState = <T>(fn: (s: StreamState) => { state?: StreamState; res
   streamWrites = run.catch(() => undefined);
   return run;
 };
+/**
+ * One sheet for a pinned site's paid action (services/pinnedMint.ts). protocolCalls: protocol calls each site has
+ * running. deferredEncrypts: rate cap for self-encrypts let through. mintIntents: the mint createAction running per
+ * site (spendSeen once its spend reached a sheet; after that nothing more is let through). mintBundles: the sheet
+ * words for a bundle holding a mint's spend.
+ */
+const protocolCalls = new ProtocolCalls();
+const deferredEncrypts = new DeferredEncrypts();
+const mintIntents = new Map<string, MintIntent & { spendSeen?: boolean }>();
+const mintBundles = new Map<string, MintSheet>();
+
 /** One in-flight stream-approved createAction per originator (see StreamPass). */
-const streamPasses = new Map<string, StreamPass & { done: Promise<void>; finish: () => void }>();
+type StreamPassRun = StreamPass & { holdId: string; settled?: boolean; done: Promise<void>; finish: () => void };
+const streamPasses = new Map<string, StreamPassRun>();
+/** Swap a pass's budget hold for what it really spent (or drop it with null). Once per pass. */
+const settleStreamPass = (pass: StreamPassRun, spend: { at: number; sats: number; txid?: string } | null) => {
+  if (pass.settled) return Promise.resolve();
+  pass.settled = true;
+  return updateStreamState((st) => ({
+    state: settleHold(st, pass.grantId, pass.holdId, spend),
+    result: undefined,
+  })).catch((e: unknown) => console.warn('[createAction] stream hold not settled:', e));
+};
 /** Sites waiting on the "Allow <site> to stream up to $X/hour" sheet. */
 const pendingStreamGrantRequests = new Map<
   string,
@@ -1042,6 +1159,8 @@ const pendingCounterpartyPermissionRequests = new Map<
 
 let popupWindowId: number | undefined;
 let denyAllPendingPrompts: () => void = () => undefined;
+/** Deny the open prompts of one originator (its grants were just revoked: Forget, unpair, lapse). */
+let denyPendingPromptsFor: (originator: string) => void = () => undefined;
 
 // bWalletX: when the wallet's side panel is open, approval prompts render inside it (an overlay of
 // prompt.html) instead of a separate popup window (owner, 6 Oct 2026). activePopupPorts are the open
@@ -1074,21 +1193,34 @@ const activeTabId = async (): Promise<number | undefined> => {
     return undefined;
   }
 };
+// Tabs whose page has talked to the wallet → that page's origin (from Chrome). The panel wears the active one's
+// v2 theme file while the user has it connected (docs/SITE-THEME.md "The whole view").
+const siteOriginTabs = new Map<number, string>();
+let siteOriginShown: string | null | undefined;
+const sitePathTabs = new Map<number, string>();
+let sitePathShown: string | null | undefined;
 const pushSiteTheme = async (force = false) => {
   const tab = await activeTabId();
   const theme = (tab !== undefined && siteThemeTabs.get(tab)) || null;
-  if (!force && theme === siteThemeShown) return;
+  const origin = (tab !== undefined && siteOriginTabs.get(tab)) || null;
+  const path = (origin && tab !== undefined && sitePathTabs.get(tab)) || null;
+  if (!force && theme === siteThemeShown && origin === siteOriginShown && path === sitePathShown) return;
   siteThemeShown = theme;
-  postToPanels({ action: 'SITE_THEME', theme });
+  siteOriginShown = origin;
+  sitePathShown = path;
+  postToPanels({ action: 'SITE_THEME', theme, origin, path });
 };
 chrome.tabs?.onActivated?.addListener(() => void pushSiteTheme());
 chrome.windows?.onFocusChanged?.addListener(() => void pushSiteTheme());
 chrome.tabs?.onRemoved?.addListener((tabId) => {
-  if (siteThemeTabs.delete(tabId)) void pushSiteTheme();
+  const a = siteThemeTabs.delete(tabId);
+  if (siteOriginTabs.delete(tabId) || a) void pushSiteTheme();
 });
 chrome.tabs?.onUpdated?.addListener((tabId, info) => {
   // A reload or navigation: the page declares again once it reconnects.
-  if (info.status === 'loading' && siteThemeTabs.delete(tabId)) void pushSiteTheme();
+  if (info.status !== 'loading') return;
+  const a = siteThemeTabs.delete(tabId);
+  if (siteOriginTabs.delete(tabId) || a) void pushSiteTheme();
 });
 const postToPanels = (msg: unknown) =>
   activePopupPorts.forEach((p) => {
@@ -1138,7 +1270,15 @@ const closeDappPopup = (): void => {
  * soon as their UI is done; a later prompt reopens via showPromptUi.
  * Never touches the browser-action popup (activePopupPorts).
  */
+/**
+ * Until this time, nothing closes the dApp popup on its own: a sheet is showing why an answer was refused
+ * ("This request changed while you were answering…"). The sheet closes it itself (CLOSE_PROMPT_WINDOW).
+ */
+let holdPopupOpenUntil = 0;
+const STALE_NOTICE_MS = 5000;
+
 const closeDappPopupIfNoUi = (): void => {
+  if (Date.now() < holdPopupOpenUntil) return;
   if (!popupWindowId && !promptInPanel && !inPageSheet) return;
   if (pendingWalletWaiters.length > 0) return;
   if (hasQueuedDappUi()) return;
@@ -1150,6 +1290,7 @@ const closeDappPopupIfNoUi = (): void => {
  * unlock waiters, and no in-flight dApp CWI requests.
  */
 const closeDappPopupIfIdle = (): void => {
+  if (Date.now() < holdPopupOpenUntil) return;
   if (!popupWindowId && !promptInPanel && !inPageSheet) return;
   if (inFlightDappRequests > 0) return;
   if (pendingWalletWaiters.length > 0) return;
@@ -1164,7 +1305,10 @@ const getPendingPromptPayload = (kind: string, requestID?: string): unknown => {
       return requestID ? pendingPermissionRequests.get(requestID)?.request : undefined;
     case 'bundle': {
       const bundle = requestID ? permissionBundler.get(requestID) : undefined;
-      return bundle ? { bundleID: bundle.id, originator: bundle.originator, items: bundle.items } : undefined;
+      const mint = bundle ? mintBundles.get(bundle.id) : undefined;
+      return bundle
+        ? { bundleID: bundle.id, originator: bundle.originator, items: bundle.items, ...(mint ? { mint } : {}) }
+        : undefined;
     }
     case 'groupedPermission':
       return requestID ? pendingGroupedPermissionRequests.get(requestID)?.request : undefined;
@@ -1357,34 +1501,147 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
     accountContext?.wallet.denyPermission(request.requestID).catch(() => undefined);
     return Promise.reject(new Error(RESERVED_BASKET_REFUSAL));
   }
+  // A pinned site's paid action (services/pinnedMint.ts): its self-encrypts, and its own label while its
+  // createAction runs, go through for that one call (ephemeral, nothing stored); its spend is the one sheet.
+  const mintSite = request.originator && request.originator !== ADMIN_ORIGINATOR ? normalizeOriginator(request.originator) : '';
+  if (mintSite && accountContext?.wallet) {
+    const asSite = { ...request, originator: mintSite };
+    const now = Date.now();
+    if (shouldDeferEncrypt(asSite, protocolCalls, deferredEncrypts, now)) {
+      deferredEncrypts.note(mintSite, request.protocolID as [number, string], now);
+      return accountContext.wallet.grantPermission({ requestID: request.requestID, ephemeral: true });
+    }
+    const intent = mintIntents.get(mintSite);
+    if (intent && !intent.spendSeen && labelCoveredByIntent(asSite, intent))
+      return accountContext.wallet.grantPermission({ requestID: request.requestID, ephemeral: true });
+  }
   // A stream-approved createAction is running for this site: its spend (within the budget) and its label are
   // answered here, without a sheet. Nothing else is (services/streamGrants.ts passCovers).
-  const pass = request.originator ? streamPasses.get(normalizeOriginator(request.originator)) : undefined;
+  // Streaming grants are allowances: with envelopes (the default) no pass ever answers a spend (allowanceFlag.ts).
+  const pass =
+    ALLOWANCES_ENABLED && request.originator ? streamPasses.get(normalizeOriginator(request.originator)) : undefined;
   if (pass && accountContext?.wallet && passCovers(pass, { ...request, originator: normalizeOriginator(request.originator) })) {
     if (request.type === 'spending') pass.charged = request.spending?.satoshis;
     return accountContext.wallet.grantPermission({ requestID: request.requestID, ephemeral: true });
   }
-  return siteTrustedFor(request).then(
-    (trusted) =>
+  return Promise.all([siteBlocked(request.originator), siteTrustedFor(request)]).then(
+    ([blocked, trusted]) =>
       new Promise<void>((resolve, reject) => {
+        if (blocked) {
+          accountContext?.wallet.denyPermission(request.requestID).catch(() => undefined);
+          reject(new Error(BLOCKED_SITE_REFUSAL));
+          return;
+        }
         if (trusted && accountContext?.wallet) {
           // A site the user said "don't ask again" for: routine requests go through without a sheet.
           accountContext.wallet
-            .grantPermission({ requestID: request.requestID, expiry: 0 })
+            .grantPermission({ requestID: request.requestID, expiry: withDefaultExpiry(0) })
             .then(() => resolve())
             .catch((error: unknown) => reject(error instanceof Error ? error : new Error(String(error))));
           return;
         }
+        let bundle;
+        try {
+          // A request arriving while this site's sheet is open waits for its own sheet (never joins that one).
+          bundle = permissionBundler.add(request as BundledRequest & BundleRequest);
+        } catch (error) {
+          accountContext?.wallet.denyPermission(request.requestID).catch(() => undefined);
+          reject(error instanceof Error ? error : new Error(String(error)));
+          return;
+        }
         pendingPermissionRequests.set(request.requestID, { request, resolve, reject });
-        permissionBundler.add(request as BundledRequest & BundleRequest);
+        if (!bundle) return; // queued: companions are asked when its sheet opens (askCompanionsFor)
+        askPostCompanions(request.originator, bundle.items);
+        askMintCompanions(mintSite, request, bundle.id);
       }),
   );
+};
+
+/**
+ * A pinned site's mint spend reached a sheet: ask, on the SAME sheet, for the pinned protocol (so its records open
+ * later without a sheet) and the action's own labels (so it can list them). The manager only asks for what the site
+ * has not been granted. The sheet gets the mint's words ("Mint 3 videos, locked to you on bvideox.com").
+ */
+/** A bundle opened from a site's queue: ask for its post and mint companions, as add() does for a new request. */
+const askCompanionsFor = (bundle: { id: string; originator: string; items: (BundledRequest & BundleRequest)[] }) => {
+  askPostCompanions(bundle.originator, bundle.items);
+  const site =
+    bundle.originator && bundle.originator !== ADMIN_ORIGINATOR ? normalizeOriginator(bundle.originator) : '';
+  for (const r of bundle.items) askMintCompanions(site, r, bundle.id);
+};
+
+const askMintCompanions = (site: string, request: PermissionRequest & { requestID: string }, bundleID: string) => {
+  const wallet = accountContext?.wallet;
+  const intent = site ? mintIntents.get(site) : undefined;
+  if (!wallet || !intent || intent.spendSeen || request.type !== 'spending') return;
+  intent.spendSeen = true;
+  mintBundles.set(bundleID, mintSheetFor(intent, request.spending?.satoshis ?? 0));
+  const reason = pinnedProtocol(intent.protocolID)?.label ?? intent.description;
+  const asks = [
+    { protocolID: intent.protocolID as [0 | 1 | 2, string], usageType: 'encrypting' as const },
+    ...intent.labels.map((l) => ({ protocolID: [1, `action label ${l}`] as [0 | 1 | 2, string], usageType: 'generic' as const })),
+  ];
+  for (const a of asks)
+    wallet
+      .ensureProtocolPermission({
+        originator: request.originator,
+        privileged: false,
+        protocolID: a.protocolID,
+        counterparty: 'self',
+        usageType: a.usageType,
+        reason,
+      })
+      .catch(() => undefined);
+};
+
+/**
+ * A site's first post: when one of the first-post set (identity basket "bap", post signature "sigma") reaches a
+ * sheet, ask for the others at the same moment, so they join the SAME sheet ("Allow <site> to post for you")
+ * instead of arriving one after another. The manager only asks for what the site has not been granted, and the
+ * site's later real call finds the grant (or joins the pending request). A refusal here only rejects this
+ * pre-ask; the site still gets the standard denial on its own call.
+ */
+const postAskedAt = new Map<string, number>();
+const askPostCompanions = (originator: string, items: BundleRequest[]) => {
+  const wallet = accountContext?.wallet;
+  if (!wallet || !originator || originator === ADMIN_ORIGINATOR) return;
+  if (postPackCompanions(items).length === 0) return;
+  // Once per site per minute: the companions' own sheets come back through here.
+  const last = postAskedAt.get(originator);
+  if (last !== undefined && Date.now() - last < 60_000) return;
+  postAskedAt.set(originator, Date.now());
+  for (const kind of postPackCompanions(items)) {
+    const ask =
+      kind === 'basket'
+        ? wallet.ensureBasketAccess({ originator, basket: POST_BASKET, usageType: 'listing', reason: 'Post as you' })
+        : wallet.ensureProtocolPermission({
+            originator,
+            privileged: false,
+            protocolID: POST_PROTOCOL,
+            counterparty: 'self',
+            usageType: 'signing',
+            reason: 'Sign your posts',
+          });
+    ask.catch(() => undefined);
+  }
 };
 
 /**
  * True when the user ticked "Don't ask again" for this site and this request is a routine kind that the approved
  * sheet covered (a basket only if it was one shown on that sheet).
  */
+/** The user chose "Block this site" on a sheet (BundleSheet): every request from it is refused without a sheet. */
+const siteBlocked = async (originator: string | undefined): Promise<boolean> => {
+  const store = accountContext?.permissionStore;
+  if (!store || !originator || originator === ADMIN_ORIGINATOR) return false;
+  try {
+    const grant = await store.findGrant({ type: 'basket', originator: normalizeOriginator(originator), basket: BLOCK_SITE_BASKET });
+    return blockActive(grant as { expiry: number } | null);
+  } catch {
+    return false;
+  }
+};
+
 const siteTrustedFor = async (request: PermissionRequest & { requestID: string }): Promise<boolean> => {
   const store = accountContext?.permissionStore;
   if (!store || !request.originator) return false;
@@ -1409,14 +1666,22 @@ const revokeBasketGrantsFor = async (originator: string): Promise<void> => {
   if (recent instanceof Map) recent.clear();
 };
 
-const showGroupedPermissionPrompt = (request: GroupedPermissionRequest): Promise<void> => {
+const showGroupedPermissionPrompt = async (request: GroupedPermissionRequest): Promise<void> => {
+  if (await siteBlocked(request.originator)) {
+    accountContext?.wallet.denyGroupedPermission(request.requestID).catch(() => undefined);
+    throw new Error(BLOCKED_SITE_REFUSAL);
+  }
   return new Promise((resolve, reject) => {
     pendingGroupedPermissionRequests.set(request.requestID, { request, resolve, reject });
     showPromptUi('groupedPermission', request.requestID);
   });
 };
 
-const showCounterpartyPermissionPrompt = (request: CounterpartyPermissionRequest): Promise<void> => {
+const showCounterpartyPermissionPrompt = async (request: CounterpartyPermissionRequest): Promise<void> => {
+  if (await siteBlocked(request.originator)) {
+    accountContext?.wallet.denyCounterpartyPermission(request.requestID).catch(() => undefined);
+    throw new Error(BLOCKED_SITE_REFUSAL);
+  }
   return new Promise((resolve, reject) => {
     pendingCounterpartyPermissionRequests.set(request.requestID, { request, resolve, reject });
     showPromptUi('counterpartyPermission', request.requestID);
@@ -1448,6 +1713,8 @@ if (isInServiceWorker) {
     console.log('[background] switchAccount: starting');
     const doSwitch = async () => {
       try {
+        // An envelope sheet asked under the old account must not be answered on the new one.
+        failPendingStreamGrants();
         dropWalletContext('switchAccount');
         chromeStorageService = new ChromeStorageService();
         await chromeStorageService.getAndSetStorage();
@@ -1661,7 +1928,10 @@ if (isInServiceWorker) {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  chrome.runtime.onMessage.addListener((message: any, sender, sendResponse: CallbackResponse) => {
+  chrome.runtime.onMessage.addListener((message: any, sender, answer: CallbackResponse) => {
+    // Every refusal by the user carries code ERR_PERMISSION_DENIED (services/userDenied.ts), so a site can tell
+    // "declined" from "failed" on every path (extension, phone dApp browser, bApp frames, pairing).
+    const sendResponse: CallbackResponse = (response) => answer(withDenialCode(response));
     console.log(
       '[background] Received message:',
       message.action,
@@ -1687,7 +1957,26 @@ if (isInServiceWorker) {
         const id = siteThemeFor(sender.origin, message.theme);
         if (id) siteThemeTabs.set(sender.tab.id, id);
         else siteThemeTabs.delete(sender.tab.id);
+        if (sender.origin) siteOriginTabs.set(sender.tab.id, sender.origin);
+        // The page's path, from Chrome's sender.url (never from the message), picks a path sub-theme.
+        try {
+          const u = sender.url ? new URL(sender.url) : null;
+          if (u && u.origin === sender.origin) sitePathTabs.set(sender.tab.id, u.pathname);
+          else sitePathTabs.delete(sender.tab.id);
+        } catch {
+          sitePathTabs.delete(sender.tab.id);
+        }
         void pushSiteTheme();
+      }
+      return false;
+    }
+    // A site's own Disconnect (content.ts): the origin comes from Chrome, never from the page.
+    if (message?.action === 'bwxSiteDisconnect') {
+      if (sender.id === chrome.runtime.id && sender.frameId === 0 && sender.origin) {
+        const { originator } = originatorForOrigin(sender.origin);
+        if (originator) void updateReconnectState((s) => ({ state: noteDisconnect(s, originator, Date.now()), result: null }));
+        // Disconnected: the panel drops the site's look.
+        if (sender.tab?.id !== undefined && siteOriginTabs.delete(sender.tab.id)) void pushSiteTheme();
       }
       return false;
     }
@@ -1711,6 +2000,13 @@ if (!(
       return true;
     }
 
+    // A page message with no claimed originator takes the sender's real one, so it is never checked (or granted)
+    // as "no site" (payment-safety audit 24 Oct 2026, B1 Low).
+    if (!isFromExtension && message && typeof message === 'object' && !message.originator && sender.origin) {
+      const filled = originatorForOrigin(sender.origin);
+      if (filled.originator) message.originator = filled.originator;
+    }
+
     // Cross-validate originator against sender.origin for external messages
     if (!isFromExtension && message.originator && sender.origin) {
       // The originator must be the one derived from the sender's origin; plain-http (non-loopback) senders are
@@ -1729,7 +2025,14 @@ if (!(
     // Wallet-internal protocols (bTrust, Locks, funds, presign…) are never available to an outside site or app,
     // and the refusal comes before any unlock or permission sheet (services/reservedProtocols.ts, audit C1).
     if (!isFromExtension && message?.originator !== ADMIN_ORIGINATOR) {
-      const refusal = reservedProtocolRefusal(String(message?.action ?? ''), message?.params);
+      const refusal =
+        reservedProtocolRefusal(String(message?.action ?? ''), message?.params) ??
+        // Protocols pinned to their home site (services/pinnedProtocols.ts): a user's private archive keys.
+        pinnedProtocolRefusal(
+          String(message?.action ?? ''),
+          message?.params,
+          sender.origin ? normalizeOriginator(sender.origin) : undefined,
+        );
       if (refusal) {
         sendResponse({ type: message.action, success: false, error: refusal });
         return true;
@@ -1752,6 +2055,15 @@ if (!(
       void handleSpendingAuth(String(message.action), derived.originator, message.params, sendResponse);
       return true;
     }
+    // Settings › Envelopes and Coin return. Extension pages only.
+    if (typeof message?.action === 'string' && message.action.startsWith('ENVELOPE')) {
+      if (!isFromExtension) {
+        sendResponse({ type: message.action, success: false, error: 'Unauthorized' });
+        return true;
+      }
+      void handleEnvelopesInternal(message as { action: string } & Record<string, unknown>, sendResponse);
+      return true;
+    }
     // The wallet's own Streaming permissions screen and the grant sheet. Extension pages only.
     if (typeof message?.action === 'string' && message.action.startsWith('STREAM_GRANT')) {
       if (!isFromExtension) {
@@ -1759,6 +2071,31 @@ if (!(
         return true;
       }
       void handleStreamGrantInternal(message as { action: string } & Record<string, unknown>, sendResponse);
+      return true;
+    }
+
+    // Queued sends the network has not accepted (services/stuckSends.ts resolveUnsent): list them, send one now, or
+    // cancel one the network never got (releases its inputs). Extension pages only; never a site.
+    if (message?.action === 'UNSENT_SENDS') {
+      if (!isFromExtension) {
+        sendResponse({ type: message.action, success: false, error: 'Unauthorized' });
+        return true;
+      }
+      void (async () => {
+        const ctx = accountContext;
+        if (!ctx) throw new Error('Unlock your wallet first');
+        const m = message as { txid?: string; how?: 'send' | 'cancel' };
+        if (!m.txid) return { queued: await ctx.listUnsent() };
+        if (m.how !== 'send' && m.how !== 'cancel') throw new Error('Say send or cancel');
+        const out = await ctx.resolveUnsent(m.txid, m.how);
+        if (out.ok && out.result === 'cancelled') notifyBalanceUpdate();
+        if (out.ok && out.result === 'still-queued') sendRetry.arm();
+        return out;
+      })()
+        .then((data) => sendResponse({ type: 'UNSENT_SENDS', success: true, data }))
+        .catch((e: unknown) =>
+          sendResponse({ type: 'UNSENT_SENDS', success: false, error: e instanceof Error ? e.message : String(e) }),
+        );
       return true;
     }
 
@@ -1773,6 +2110,7 @@ if (!(
       // Permission responses from popup
       'PERMISSION_RESPONSE',
       'BUNDLE_PERMISSION_RESPONSE',
+      'BUNDLE_SHEET_FREEZE',
       'GET_BUNDLE_ALLOWANCE',
       'GROUPED_PERMISSION_RESPONSE',
       'COUNTERPARTY_PERMISSION_RESPONSE',
@@ -1859,7 +2197,8 @@ if (!(
           sendResponse({
             type: CWIEventName.GET_VERSION,
             success: true,
-            data: { version: `yours-wallet-${chrome.runtime.getManifest().version}` },
+            // pinnedProtocols: sites can tell this wallet keeps pinned protocols (services/pinnedProtocols.ts) to their home site.
+            data: { version: versionWithPins(`yours-wallet-${chrome.runtime.getManifest().version}`), pinnedProtocols: PINNED_PROTOCOLS_VERSION },
           });
           return true;
         // Permission responses from popup UI
@@ -1871,11 +2210,21 @@ if (!(
               bundleID: string;
               decisions: Record<string, boolean>;
               allowanceUsd?: number;
+              allowancePerPaymentUsd?: number;
+              allowancePayees?: string[];
+              envelopeUsd?: number;
               remember?: boolean;
               trustSite?: boolean;
+              block?: boolean;
+              seenHash?: string;
             },
             sendResponse,
           );
+        case 'BUNDLE_SHEET_FREEZE':
+          // The user touched the sheet: anything arriving now gets its own sheet.
+          permissionBundler.freeze((message as { bundleID: string }).bundleID);
+          sendResponse({ type: 'BUNDLE_SHEET_FREEZE', success: true });
+          return true;
         case 'GET_BUNDLE_ALLOWANCE':
           getBundleAllowance((message as { originator: string }).originator)
             .then((data) => sendResponse({ type: 'GET_BUNDLE_ALLOWANCE', success: true, data }))
@@ -2313,6 +2662,17 @@ if (!(
     // Track dApp CWI work so the floating popup closes when the request is
     // done and no approval UI remains. Extension-internal callers skip this —
     // they use suppressPopup and must not own popupWindowId lifecycle.
+    // Which protocol calls a site has running (services/pinnedMint.ts): a pinned site's self-encrypt is only let
+    // through while nothing else on that protocol is in flight. Counted from the call's start to its end.
+    const trackProtocolCall = (run: () => Promise<unknown>): Promise<unknown> => {
+      const end =
+        !isFromExtension && typeof message?.originator === 'string' && message.originator !== ADMIN_ORIGINATOR
+          ? protocolCalls.start(String(message.action), normalizeOriginator(message.originator), message.params)
+          : () => undefined;
+      return Promise.resolve()
+        .then(run)
+        .finally(end);
+    };
     const runDappRequest = (work: Promise<unknown>) => {
       if (isFromExtension) {
         void work;
@@ -2327,6 +2687,7 @@ if (!(
         });
     };
 
+    let gateAsk: Promise<boolean> | undefined;
     ensureWallet(isFromExtension)
       .then(() => {
         console.log('[background] ensureWallet resolved for action:', message.action);
@@ -2334,6 +2695,7 @@ if (!(
         if (!isFromExtension && typeof message.originator === 'string' && message.originator !== ADMIN_ORIGINATOR) {
           const origin = message.originator;
           void updateConnectionLog((l) => recordCall(l, origin, String(message.action)));
+          gateAsk = reconnectGate(origin, String(message.action), message.params);
         }
         switch (message.action) {
           // CWI (BRC-100) handlers - direct passthrough to wallet
@@ -2354,28 +2716,40 @@ if (!(
             runDappRequest(processCWIGetHeaderForHeight(message, sendResponse));
             return true;
           case CWIEventName.GET_PUBLIC_KEY:
-            runDappRequest(processCWIGetPublicKey(message, sendResponse));
+            runDappRequest(
+              (gateAsk ?? Promise.resolve(false)).then(async (ask) => {
+                if (ask) {
+                  try {
+                    await askReconnect(message.originator);
+                  } catch {
+                    sendResponse({ type: CWIEventName.GET_PUBLIC_KEY, success: false, error: 'User denied reconnect' });
+                    return;
+                  }
+                }
+                return trackProtocolCall(() => processCWIGetPublicKey(message, sendResponse));
+              }),
+            );
             return true;
           case CWIEventName.LIST_ACTIONS:
             runDappRequest(processCWIListActions(message, sendResponse));
             return true;
           case CWIEventName.VERIFY_SIGNATURE:
-            runDappRequest(processCWIVerifySignature(message, sendResponse));
+            runDappRequest(trackProtocolCall(() => processCWIVerifySignature(message, sendResponse)));
             return true;
           case CWIEventName.VERIFY_HMAC:
-            runDappRequest(processCWIVerifyHmac(message, sendResponse));
+            runDappRequest(trackProtocolCall(() => processCWIVerifyHmac(message, sendResponse)));
             return true;
           case CWIEventName.CREATE_HMAC:
-            runDappRequest(processCWICreateHmac(message, sendResponse));
+            runDappRequest(trackProtocolCall(() => processCWICreateHmac(message, sendResponse)));
             return true;
           case CWIEventName.CREATE_SIGNATURE:
-            runDappRequest(processCWICreateSignature(message, sendResponse));
+            runDappRequest(trackProtocolCall(() => processCWICreateSignature(message, sendResponse)));
             return true;
           case CWIEventName.ENCRYPT:
-            runDappRequest(processCWIEncrypt(message, sendResponse));
+            runDappRequest(trackProtocolCall(() => processCWIEncrypt(message, sendResponse)));
             return true;
           case CWIEventName.DECRYPT:
-            runDappRequest(processCWIDecrypt(message, sendResponse));
+            runDappRequest(trackProtocolCall(() => processCWIDecrypt(message, sendResponse)));
             return true;
           case CWIEventName.CREATE_ACTION:
             runDappRequest(processCWICreateAction(message, sendResponse));
@@ -2396,7 +2770,7 @@ if (!(
             runDappRequest(processCWIRevealCounterpartyKeyLinkage(message, sendResponse));
             return true;
           case CWIEventName.REVEAL_SPECIFIC_KEY_LINKAGE:
-            runDappRequest(processCWIRevealSpecificKeyLinkage(message, sendResponse));
+            runDappRequest(trackProtocolCall(() => processCWIRevealSpecificKeyLinkage(message, sendResponse)));
             return true;
           case CWIEventName.ACQUIRE_CERTIFICATE:
             runDappRequest(processCWIAcquireCertificate(message, sendResponse));
@@ -3093,17 +3467,25 @@ if (!(
   ) => {
     try {
       const wpm = (await ensureWallet(true)) as LocalWalletPermissionsManager;
+      // Open sheets for this originator are denied first, so approving one afterwards writes nothing.
+      denyPendingPromptsFor(message.originator);
       const revoked = await wpm.revokeAllForOriginator(message.originator);
       // Forget site removes its basket grants and site-trust record too, whatever form the originator was
       // stored under, and drops the manager's short-lived memory of recent grants.
       await revokeBasketGrantsFor(message.originator);
+      // Envelopes and streaming grants are spend rights too: Forget site / Revoke all / unpair ends them (Coin
+      // return) and revokes the site's streaming grants (b-Aware rows 53, 62, 24 Oct 2026).
+      const site = normalizeOriginator(message.originator);
+      await accountContext?.envelopes.close(site);
+      await updateStreamState((st) => ({ state: revokeGrantsForOriginator(st, site, Date.now()), result: undefined }));
       // Grants are per account; a device-wide pairing is withdrawn from the other accounts' stores too.
       if (message.allAccounts) {
         const ids = chromeStorageService
           .getAllAccounts()
           .map((a) => a.addresses?.identityAddress)
           .filter((x): x is string => !!x);
-        await revokeOriginatorInAccounts(ids, normalizeOriginator(message.originator));
+        await revokeOriginatorInAccounts(ids, site);
+        await closeEnvelopeInAccounts(ids, site);
       }
       sendResponse({ type: 'PERMISSIONS_REVOKE_ALL', success: true, data: { revokedCount: revoked.length } });
     } catch (error) {
@@ -3128,13 +3510,28 @@ if (!(
     pendingPermissionRequests.delete(response.requestID);
     permissionBundler.removeRequest(response.requestID);
 
+    if (isReconnectRequestId(response.requestID)) {
+      if (response.granted) pending.resolve();
+      else pending.reject(new Error('Permission denied by user'));
+      closeDappPopupIfNoUi();
+      return true;
+    }
+
+    // A paired originator is granted only while its pairing is current (checked at approve time).
+    if (response.granted && !pairedGrantAllowed(pending.request.originator)) {
+      accountContext?.wallet.denyPermission(response.requestID).catch(console.error);
+      pending.reject(new Error('This pairing has ended'));
+      closeDappPopupIfNoUi();
+      return true;
+    }
+
     if (response.granted) {
       // Grant the permission through the manager
-      // expiry defaults to 0 (never expires), ephemeral defaults to false (persist on-chain)
+      // No expiry given: the grant lasts GRANT_DEFAULT_DAYS (services/grantExpiry.ts, audit 24 Oct B1), never for ever.
       accountContext?.wallet
         .grantPermission({
           requestID: response.requestID,
-          expiry: response.expiry,
+          expiry: withDefaultExpiry(response.expiry),
         })
         .then(() => {
           pending.resolve();
@@ -3147,7 +3544,7 @@ if (!(
       accountContext?.wallet
         .denyPermission(response.requestID)
         .then(() => {
-          pending.reject(new Error('Permission denied by user'));
+          pending.reject(userDeniedError());
         })
         .catch((error) => {
           pending.reject(error);
@@ -3181,6 +3578,7 @@ if (!(
     const reply = (r: { success: boolean; data?: unknown; error?: string }) => sendResponse({ type: action, ...r });
     const now = Date.now();
     const key = normalizeOriginator(originator);
+    if (!ALLOWANCES_ENABLED) return handleEnvelopeAuth(action, key, params, reply);
     try {
       if (action === SPENDING_AUTH_STATUS) {
         const state = await readStreamState();
@@ -3248,6 +3646,7 @@ if (!(
         expiresAt: req.expiresAt,
         createdAt: Date.now(),
         description: req.description,
+        ...(req.payees ? { payees: req.payees } : {}),
         spends: [],
         totalSats: 0,
       };
@@ -3261,6 +3660,104 @@ if (!(
           expiry: Math.floor(grant.expiresAt / 1000),
         },
       });
+    } catch (e) {
+      reply({ success: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
+  /**
+   * requestSpendingAuthorization with envelopes (the default, services/envelopes.ts). The site asks; the user sees
+   * "Put $X in <site>'s envelope" and picks the amount. Status reports the balance. Revoke is Coin return: a site
+   * may always give the user's earmark back, never take or raise it.
+   */
+  const handleEnvelopeAuth = async (
+    action: string,
+    site: string,
+    params: unknown,
+    reply: (r: { success: boolean; data?: unknown; error?: string }) => void,
+  ): Promise<void> => {
+    try {
+      const store = accountContext?.envelopes;
+      if (!store) return reply({ success: false, error: 'Wallet is locked' });
+      const shape = (balanceSats: number) => ({
+        version: SPENDING_AUTH_VERSION,
+        envelope: true,
+        grantId: `envelope:${site}`,
+        balanceSats,
+        remainingSats: balanceSats,
+        active: balanceSats > 0,
+      });
+      if (action === SPENDING_AUTH_STATUS) {
+        const env = await store.get(site);
+        return reply({ success: true, data: { ...shape(env?.balanceSats ?? 0), grants: env ? [shape(env.balanceSats)] : [] } });
+      }
+      if (action === SPENDING_AUTH_REVOKE) {
+        const returned = await store.close(site);
+        return reply({ success: true, data: { revoked: true, grantId: `envelope:${site}`, returnedSats: returned } });
+      }
+      if (action !== SPENDING_AUTH_REQUEST) return reply({ success: false, error: 'Unknown call' });
+      const p = (params && typeof params === 'object' ? params : {}) as Record<string, unknown>;
+      const description = typeof p.description === 'string' ? p.description.trim().slice(0, 140) || undefined : undefined;
+      const pid = p.protocolID;
+      const protocolName = Array.isArray(pid) && typeof pid[1] === 'string' ? pid[1].slice(0, 60) : '';
+      const usdPerBsv = await cachedUsdPerBsv().catch(() => undefined);
+      const env = await store.get(site);
+      const requestID = `envelope-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const prompt: StreamGrantPrompt = {
+        requestID,
+        originator: site,
+        protocolName,
+        // The sheet's default fill; the user picks the amount (presets), the site does not set it.
+        capSatsPerHour: usdPerBsv ? allowanceSats(DEFAULT_ENVELOPE_USD, usdPerBsv) : 0,
+        ceilingSatsPerHour: 0,
+        expiresAt: 0,
+        description,
+        usdPerBsv,
+        envelope: { balanceSats: env?.balanceSats ?? 0 },
+      };
+      const answer = await new Promise<number | null>((resolve) => {
+        const timer = setTimeout(() => {
+          if (pendingStreamGrantRequests.delete(requestID)) resolve(null);
+        }, STREAM_GRANT_TIMEOUT_MS);
+        pendingStreamGrantRequests.set(requestID, {
+          request: prompt,
+          resolve: (v) => {
+            clearTimeout(timer);
+            resolve(v);
+          },
+        });
+        showPromptUi('streamGrant', requestID);
+      });
+      if (answer === null) return reply({ success: false, error: 'Declined' });
+      const balance = await store.fill(site, Math.floor(answer));
+      reply({ success: true, data: shape(balance) });
+    } catch (e) {
+      reply({ success: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
+  /** Settings › Envelopes and a connected app's Coin return (extension pages only, never a site). */
+  const handleEnvelopesInternal = async (
+    message: { action: string } & Record<string, unknown>,
+    sendResponse: CallbackResponse,
+  ): Promise<void> => {
+    const reply = (r: { success: boolean; data?: unknown; error?: string }) => sendResponse({ type: message.action, ...r });
+    try {
+      const store = accountContext?.envelopes;
+      if (!store) return reply({ success: false, error: 'Wallet is locked' });
+      switch (message.action) {
+        case 'ENVELOPES_LIST':
+          return reply({
+            success: true,
+            data: { envelopes: await store.list(), usdPerBsv: await cachedUsdPerBsv().catch(() => undefined) },
+          });
+        case 'ENVELOPE_COIN_RETURN': {
+          const site = normalizeOriginator(String(message.originator ?? ''));
+          return reply({ success: true, data: { returnedSats: await store.close(site) } });
+        }
+        default:
+          return reply({ success: false, error: 'Unknown call' });
+      }
     } catch (e) {
       reply({ success: false, error: e instanceof Error ? e.message : String(e) });
     }
@@ -3280,7 +3777,9 @@ if (!(
           const pending = pendingStreamGrantRequests.get(requestID);
           pendingStreamGrantRequests.delete(requestID);
           const cap = message.capSatsPerHour;
-          pending?.resolve(typeof cap === 'number' && Number.isFinite(cap) && cap >= 1 ? cap : null);
+          // A pairing that ended while the sheet was open gets nothing, as on the other four sheets.
+          const allowed = !!pending && pairedGrantAllowed(pending.request.originator);
+          pending?.resolve(allowed && typeof cap === 'number' && Number.isFinite(cap) && cap >= 1 ? cap : null);
           return reply({ success: !!pending });
         }
         case 'STREAM_GRANTS_LIST': {
@@ -3339,12 +3838,24 @@ if (!(
     const usdPerBsv = await cachedUsdPerBsv();
     let existingSats: number | undefined;
     const store = accountContext?.permissionStore;
-    if (store && originator) {
+    // Envelopes by default: an old stored allowance is not shown and grants nothing (services/allowanceFlag.ts).
+    if (ALLOWANCES_ENABLED && store && originator) {
       const grant = await store.findGrant({ type: 'spending', originator: normalizeOriginator(originator) });
       const live = grant && (grant.expiry === 0 || grant.expiry * 1000 > Date.now());
       if (live && grant.authorizedAmount != null) existingSats = grant.authorizedAmount;
     }
-    return { usdPerBsv, existingSats, defaultUsd: DEFAULT_ALLOWANCE_USD };
+    let envelope: { offer: boolean; balanceSats?: number; presetsUsd: readonly number[] } | undefined;
+    if (!ALLOWANCES_ENABLED && originator) {
+      const site = normalizeOriginator(originator);
+      const env = await accountContext?.envelopes.get(site).catch(() => undefined);
+      envelope = {
+        // A pay sheet offers the envelope for a micropayments site, or to top up one the site already has.
+        offer: !!env || isMicropaymentSite(site),
+        balanceSats: env?.balanceSats,
+        presetsUsd: ENVELOPE_PRESETS_USD,
+      };
+    }
+    return { usdPerBsv, existingSats, defaultUsd: DEFAULT_ALLOWANCE_USD, allowances: ALLOWANCES_ENABLED, envelope };
   };
 
   /**
@@ -3357,41 +3868,124 @@ if (!(
       bundleID: string;
       decisions: Record<string, boolean>;
       allowanceUsd?: number;
+      /** Optional: the most one payment may take without asking (default: a quarter of the month). */
+      allowancePerPaymentUsd?: number;
+      /** Optional: the only output locking scripts (hex) the allowance pays without asking. */
+      allowancePayees?: string[];
+      /** "Put $X in <site>'s envelope" / "Top up the envelope", ticked on a pay sheet (services/envelopes.ts). */
+      envelopeUsd?: number;
       remember?: boolean;
       trustSite?: boolean;
+      /** "Block this site": decline everything, revoke its grants, refuse its later requests. */
+      block?: boolean;
+      /** sheetHash of the lines on screen when the user tapped. A mismatch grants nothing. */
+      seenHash?: string;
     },
     sendResponse: CallbackResponse,
   ) => {
     const bundle = permissionBundler.get(response.bundleID);
-    const result = permissionBundler.resolve(response.bundleID, response.decisions ?? {});
+    // Envelopes by default: no sheet sets a monthly allowance (services/allowanceFlag.ts).
+    if (!ALLOWANCES_ENABLED) response = { ...response, allowanceUsd: 0, allowancePerPaymentUsd: 0, allowancePayees: undefined };
+    if (response.block && bundle) {
+      // Nothing on a blocked sheet is granted or stored, whatever the decisions say.
+      const none = Object.fromEntries(bundle.items.map((i) => [i.requestID, false]));
+      response = { ...response, decisions: none, allowanceUsd: 0, envelopeUsd: 0, trustSite: false, remember: false };
+    }
+    // A mint sheet answers this one mint: never a monthly allowance or "don't ask again" (services/pinnedMint.ts).
+    if (mintBundles.delete(response.bundleID)) {
+      response = {
+        ...response,
+        allowanceUsd: 0,
+        allowancePerPaymentUsd: 0,
+        allowancePayees: undefined,
+        envelopeUsd: 0,
+        trustSite: false,
+      };
+    }
+    // Bound to exactly what was on screen: a missing or different hash grants nothing (permissionBundle.ts).
+    const result = permissionBundler.resolve(response.bundleID, response.decisions ?? {}, response.seenHash ?? '');
     if (!bundle || !result) {
       sendResponse({ type: 'BUNDLE_PERMISSION_RESPONSE', success: false, error: 'Request expired' });
       return true;
     }
+    // Set now, before the denied requests settle: their callers' clean-up would otherwise close the window
+    // before the sheet can say why nothing was allowed.
+    if (result.stale) holdPopupOpenUntil = Date.now() + STALE_NOTICE_MS;
+    if (result.granted.length > 0 && !pairedGrantAllowed(bundle.originator)) {
+      for (const r of [...result.granted, ...result.denied]) {
+        const pending = pendingPermissionRequests.get(r.requestID);
+        pendingPermissionRequests.delete(r.requestID);
+        accountContext?.wallet.denyPermission(r.requestID).catch(console.error);
+        pending?.reject(new Error('This pairing has ended'));
+      }
+      sendResponse({ type: 'BUNDLE_PERMISSION_RESPONSE', success: false, error: 'This pairing has ended' });
+      closeDappPopupIfNoUi();
+      return true;
+    }
     const remember = response.remember !== false;
     // Not remembered: the grants last this visit (an hour), then the site asks again.
-    const expiry = remember ? 0 : Math.floor(Date.now() / 1000) + 3600;
+    // Remembered: GRANT_DEFAULT_DAYS (services/grantExpiry.ts), not for ever (audit 24 Oct B1).
+    const expiry = remember ? withDefaultExpiry(0) : Math.floor(Date.now() / 1000) + 3600;
     const wallet = accountContext?.wallet;
 
+    if (response.block) {
+      // Its queued requests are refused now, before their own sheet opens.
+      denyPendingPromptsFor(bundle.originator);
+    }
+    const blockSite = async () => {
+      const store = accountContext?.permissionStore;
+      if (!response.block || !store) return;
+      const wpm = (await ensureWallet(true)) as LocalWalletPermissionsManager;
+      await wpm.revokeAllForOriginator(bundle.originator);
+      await revokeBasketGrantsFor(bundle.originator);
+      await store.putGrant({
+        key: { type: 'basket', originator: normalizeOriginator(bundle.originator), basket: BLOCK_SITE_BASKET },
+        expiry: 0,
+        grantedAt: Date.now(),
+        reason: 'Blocked: every request is refused',
+      } as Parameters<typeof store.putGrant>[0]);
+    };
+
     const work = (async () => {
+      await blockSite().catch((error) => console.error('[background] block site failed:', error));
       const usd = Number(response.allowanceUsd ?? 0);
-      if (result.granted.length > 0 && usd > 0 && accountContext?.permissionStore) {
-        const sats = allowanceSats(usd, await cachedUsdPerBsv());
+      // Only a sheet about money may set one; a plain sign-in never does (permissionBundle.ts offersAllowance).
+      if (usd > 0 && allowanceGranted(bundle, result.granted) && accountContext?.permissionStore) {
+        const usdPerBsv = await cachedUsdPerBsv();
+        const sats = allowanceSats(usd, usdPerBsv);
         if (sats > 0) {
+          const perUsd = Number(response.allowancePerPaymentUsd ?? 0);
+          const perPaymentSats = perUsd > 0 ? Math.min(sats, allowanceSats(perUsd, usdPerBsv)) : undefined;
+          const payees = parsePayees(response.allowancePayees);
           await accountContext.permissionStore.putGrant({
             key: { type: 'spending', originator: normalizeOriginator(bundle.originator) },
             expiry,
             grantedAt: Date.now(),
             authorizedAmount: sats,
             reason: `Up to $${usd} a month without asking`,
-          });
+            // Per-payment cap and payee list (services/allowanceGuard.ts, audit 24 Oct B2).
+            ...(perPaymentSats !== undefined ? { perPaymentSats } : {}),
+            ...(payees ? { payees } : {}),
+          } as Parameters<typeof accountContext.permissionStore.putGrant>[0]);
         }
+      }
+      // The envelope: only on a sheet carrying a payment the user approved. The money stays in the wallet; this is
+      // an earmark the site may spend from without a sheet, released by Coin return (services/envelopes.ts).
+      const envUsd = Number(response.envelopeUsd ?? 0);
+      const paid = result.granted.some((r) => (r as BundleRequest).type === 'spending');
+      if (!ALLOWANCES_ENABLED && envUsd > 0 && Number.isFinite(envUsd) && paid && accountContext?.envelopes) {
+        const sats = allowanceSats(envUsd, await cachedUsdPerBsv());
+        // Keyed exactly as guardEnvelopes spends it: the site's own originator, port kept (the bundle's is the
+        // host-only permission key, so "shop.com:8443" would otherwise fill "shop.com"'s envelope; b-Aware row 58).
+        const spendReq = result.granted.find((r) => (r as BundleRequest).type === 'spending') as BundleRequest;
+        const site = normalizeOriginator(spendReq.displayOriginator ?? bundle.originator);
+        if (sats > 0) await accountContext.envelopes.fill(site, sats);
       }
       // "Don't ask again": routine requests from this site are granted without a sheet from now on.
       if (response.trustSite && remember && result.granted.length > 0 && accountContext?.permissionStore) {
         await accountContext.permissionStore.putGrant({
           key: { type: 'basket', originator: normalizeOriginator(bundle.originator), basket: TRUST_SITE_BASKET },
-          expiry: 0,
+          expiry,
           grantedAt: Date.now(),
           reason: 'Sign-in and signing without asking',
           // Only the baskets on this sheet; any other basket asks again.
@@ -3403,6 +3997,7 @@ if (!(
           const pending = pendingPermissionRequests.get(r.requestID);
           pendingPermissionRequests.delete(r.requestID);
           if (!pending) return;
+          if (isReconnectRequestId(r.requestID)) return pending.resolve();
           try {
             if (!wallet) throw new Error('Wallet is locked');
             await wallet.grantPermission({ requestID: r.requestID, expiry });
@@ -3415,10 +4010,11 @@ if (!(
           const pending = pendingPermissionRequests.get(r.requestID);
           pendingPermissionRequests.delete(r.requestID);
           if (!pending) return;
+          if (isReconnectRequestId(r.requestID)) return pending.reject(new Error('Permission denied by user'));
           try {
             await wallet?.denyPermission(r.requestID);
           } finally {
-            pending.reject(new Error('Permission denied by user'));
+            pending.reject(userDeniedError());
           }
         }),
       ]);
@@ -3427,10 +4023,27 @@ if (!(
     work
       .catch((error) => console.error('[background] bundle response failed:', error))
       .finally(() => {
-        sendResponse({ type: 'BUNDLE_PERMISSION_RESPONSE', success: true });
-        closeDappPopupIfNoUi();
+        sendResponse(
+          result.stale
+            ? {
+                type: 'BUNDLE_PERMISSION_RESPONSE',
+                success: false,
+                error: 'This request changed while you were answering, so nothing was allowed. Ask the site to try again.',
+              }
+            : { type: 'BUNDLE_PERMISSION_RESPONSE', success: true },
+        );
+        // A stale answer keeps the window open (holdPopupOpenUntil, set above) so the sheet can show why; it closes itself.
+        if (!result.stale) closeDappPopupIfNoUi();
       });
     return true;
+  };
+
+  /** Envelopes by default: a connect sheet never stores a monthly allowance, whatever it sent (allowanceFlag.ts). */
+  const withoutGroupedAllowance = (granted: Partial<GroupedPermissions>): Partial<GroupedPermissions> => {
+    if (ALLOWANCES_ENABLED || !granted.spendingAuthorization) return granted;
+    const { spendingAuthorization: _drop, ...rest } = granted;
+    void _drop;
+    return rest;
   };
 
   const processGroupedPermissionResponse = (response: {
@@ -3446,18 +4059,27 @@ if (!(
 
     pendingGroupedPermissionRequests.delete(response.requestID);
 
+    if (response.granted && !pairedGrantAllowed(pending.request.originator)) {
+      accountContext?.wallet.denyGroupedPermission(response.requestID).catch(console.error);
+      pending.reject(new Error('This pairing has ended'));
+      closeDappPopupIfNoUi();
+      return true;
+    }
+
     if (response.granted) {
       accountContext?.wallet
         .grantGroupedPermission({
           requestID: response.requestID,
           // Reserved wallet-internal protocols are never granted to a site, whatever the sheet sent (audit C1).
-          granted: response.granted.protocolPermissions
-            ? {
-                ...response.granted,
-                protocolPermissions: withoutReservedProtocols(response.granted.protocolPermissions),
-              }
-            : response.granted,
-          expiry: response.expiry,
+          granted: withoutGroupedAllowance(
+            response.granted.protocolPermissions
+              ? {
+                  ...response.granted,
+                  protocolPermissions: withoutReservedProtocols(response.granted.protocolPermissions),
+                }
+              : response.granted,
+          ),
+          expiry: withDefaultExpiry(response.expiry),
         })
         .then(() => {
           pending.resolve();
@@ -3469,7 +4091,7 @@ if (!(
       accountContext?.wallet
         .denyGroupedPermission(response.requestID)
         .then(() => {
-          pending.reject(new Error('Grouped permission denied by user'));
+          pending.reject(userDeniedError());
         })
         .catch((error) => {
           pending.reject(error);
@@ -3493,12 +4115,19 @@ if (!(
 
     pendingCounterpartyPermissionRequests.delete(response.requestID);
 
+    if (response.granted && !pairedGrantAllowed(pending.request.originator)) {
+      accountContext?.wallet.denyCounterpartyPermission(response.requestID).catch(console.error);
+      pending.reject(new Error('This pairing has ended'));
+      closeDappPopupIfNoUi();
+      return true;
+    }
+
     if (response.granted) {
       accountContext?.wallet
         .grantCounterpartyPermission({
           requestID: response.requestID,
           granted: response.granted,
-          expiry: response.expiry,
+          expiry: withDefaultExpiry(response.expiry),
         })
         .then(() => {
           pending.resolve();
@@ -3510,7 +4139,7 @@ if (!(
       accountContext?.wallet
         .denyCounterpartyPermission(response.requestID)
         .then(() => {
-          pending.reject(new Error('Counterparty permission denied by user'));
+          pending.reject(userDeniedError());
         })
         .catch((error) => {
           pending.reject(error);
@@ -3885,14 +4514,6 @@ if (!(
       if (chromeStorageService.getUsbSecurity()?.enabled) {
         throw new Error('Turn off USB key security before restoring a backup');
       }
-      // Any handles and re-key bookkeeping from a previous enrolment on this
-      // profile are meaningless for restored, password-only keys.
-      await chromeStorageService.remove(['usbSecurity', 'keyEpoch', 'keyRecovery', 'keyRekey']);
-      await new Promise<void>((resolve) => {
-        const req = indexedDB.deleteDatabase(USB_HANDLE_DB_NAME);
-        req.onsuccess = req.onerror = req.onblocked = () => resolve();
-      });
-
       const manifest = await WalletBackupService.restoreFromExtractedData(
         chromeStorageService,
         {
@@ -3906,6 +4527,16 @@ if (!(
         (event) => {
           console.log('[MasterRestore]', event.message);
           restoreProgress(event.message);
+        },
+        // Any handles and re-key bookkeeping from a previous enrolment on this
+        // profile are meaningless for restored, password-only keys. Cleared only
+        // once the restore is known to go ahead, so a refused restore leaves them.
+        async () => {
+          await chromeStorageService.remove(['usbSecurity', 'keyEpoch', 'keyRecovery', 'keyRekey']);
+          await new Promise<void>((resolve) => {
+            const req = indexedDB.deleteDatabase(USB_HANDLE_DB_NAME);
+            req.onsuccess = req.onerror = req.onblocked = () => resolve();
+          });
         },
       );
 
@@ -4382,11 +5013,29 @@ if (!(
     sendResponse: CallbackResponse,
   ) => {
     let fundingSnap: FundingSnapshot | undefined;
-    let streamPass: (StreamPass & { done: Promise<void>; finish: () => void }) | undefined;
+    let streamPass: StreamPassRun | undefined;
     let spentHeal: HealReport | null | undefined;
+    let releasePayeeMark: (() => void) | undefined;
+    let releaseMicropay: (() => void) | undefined;
+    let ownMintIntent: MintIntent | undefined;
     try {
       const w = await ensureWallet();
       await ensureUsbSeen('build and sign a transaction', message.originator);
+      // A monthly allowance with a payee allowlist covers only payments to those payees; this call asks otherwise
+      // (services/allowanceGuard.ts, payment-safety audit 24 Oct 2026 B2).
+      if (
+        ALLOWANCES_ENABLED &&
+        message.originator &&
+        message.originator !== ADMIN_ORIGINATOR &&
+        accountContext?.permissionStore
+      ) {
+        const site = normalizeOriginator(message.originator);
+        const allowance = (await accountContext.permissionStore
+          .findGrant({ type: 'spending', originator: site })
+          .catch(() => null)) as { payees?: string[] } | null;
+        if (allowance?.payees?.length && !payeesAllowed(allowance.payees, message.params.outputs))
+          releasePayeeMark = markPayeeMismatch(site);
+      }
 
       console.log('[createAction] Starting with originator:', message.originator);
       console.log(
@@ -4406,29 +5055,65 @@ if (!(
       // Streaming grant (services/streamGrants.ts): a call from a site holding a live grant, carrying its protocol
       // label and inside the rolling hour's budget, has its spend answered without a sheet. Anything else prompts.
       const streamKey = !isAdmin && message.originator ? normalizeOriginator(message.originator) : undefined;
-      if (streamKey) {
+      // A call naming a streaming protocol is a micropayment: its pay sheet offers the site an envelope.
+      if (streamKey && !ALLOWANCES_ENABLED && streamProtocolOption(message.params).length)
+        releaseMicropay = markMicropayments(streamKey);
+      // Streaming grants are allowances: with envelopes (the default) they approve nothing (allowanceFlag.ts).
+      if (streamKey && ALLOWANCES_ENABLED) {
         // One stream-approved call per site at a time, so its pass can never answer a different call's spend.
-        for (let busy = streamPasses.get(streamKey); busy; busy = streamPasses.get(streamKey)) await busy.done;
-        const decision = decideStream(await readStreamState(), {
+        // The busy check, decide() and the budget hold all run in one step of the serialised stream-state queue
+        // (b-Aware report, streaming cap): concurrent calls each see the holds of those decided before them.
+        const holdId = newGrantId();
+        const query = {
           originator: streamKey,
           // The label, or options.spendingAuthorization.protocolID (the form bmovies-app sends); both name the protocol.
           labels: [...(message.params.labels ?? []), ...streamProtocolOption(message.params)],
           sats: outputSats(message.params.outputs),
-          now: Date.now(),
-        });
-        if (decision.approve) {
-          let finish = () => undefined as void;
-          const done = new Promise<void>((r) => (finish = r));
-          streamPass = {
-            grantId: decision.grant.id,
-            originator: streamKey,
-            label: decision.grant.label,
-            maxSats: decision.budget,
-            done,
-            finish,
-          };
-          streamPasses.set(streamKey, streamPass);
-          console.log('[createAction] streaming grant covers this call; budget left', decision.budget);
+          outputs: message.params.outputs,
+          holdId,
+        };
+        for (;;) {
+          let claimed: StreamPassRun | undefined;
+          const claim = await updateStreamState<{ busy?: StreamPassRun; pass?: StreamPassRun }>((st) => {
+            const busy = streamPasses.get(streamKey);
+            if (busy) return { result: { busy } };
+            const r = reserveStream(st, { ...query, now: Date.now() });
+            if (!r.decision.approve) return { result: {} };
+            let finish = () => undefined as void;
+            const done = new Promise<void>((res) => (finish = res));
+            claimed = {
+              grantId: r.decision.grant.id,
+              originator: streamKey,
+              label: r.decision.grant.label,
+              maxSats: r.decision.budget,
+              holdId,
+              done,
+              finish,
+            };
+            streamPasses.set(streamKey, claimed);
+            return { state: r.state, result: { pass: claimed } };
+          }).catch((e: unknown) => {
+            // The hold was not stored: nothing is approved, and the pass set above is withdrawn.
+            if (claimed && streamPasses.get(streamKey) === claimed) streamPasses.delete(streamKey);
+            claimed?.finish();
+            console.warn('[createAction] stream budget not reserved:', e);
+            return {} as { busy?: StreamPassRun; pass?: StreamPassRun };
+          });
+          if (claim.busy) {
+            await claim.busy.done;
+            continue;
+          }
+          streamPass = claim.pass;
+          break;
+        }
+        if (streamPass) console.log('[createAction] streaming grant covers this call; held', streamPass.maxSats);
+      }
+      // A pinned site's mint (services/pinnedMint.ts): read before spendingAuthorization is stripped. One per site.
+      if (streamKey) {
+        const intent = mintIntentFor(streamKey, message.params);
+        if (intent && !mintIntents.has(streamKey)) {
+          mintIntents.set(streamKey, intent);
+          ownMintIntent = intent;
         }
       }
       // options.spendingAuthorization is ours, not BRC-100: never pass it on to the signer.
@@ -4441,7 +5126,12 @@ if (!(
       // Never between the steps of a site's multi-step action: the preparation's own wallet actions break the
       // chain (services/dappChain.ts, vexvoid.com streamed mint 11 Oct 2026).
       const continuing = !isAdmin && continuesChain(message.params);
-      const fingerprint = isAdmin || continuing ? null : await requestFingerprint(message.params).catch(() => null);
+      // Every site payment is checked against the repeat guard, chain or not: the chain options are the site's own
+      // words, so they may skip funding preparation but never the guard (b-Aware row 55, 24 Oct 2026). A noSend step
+      // is checked but not recorded: nothing went out yet, and a retried chain must not be refused for it.
+      const { fingerprint, recordedFingerprint } = isAdmin
+        ? { fingerprint: null, recordedFingerprint: null }
+        : await repeatFingerprints(message.params).catch(() => ({ fingerprint: null, recordedFingerprint: null }));
       const earlier = await withRepeatGuard((g) => g.check(fingerprint));
       if (earlier) {
         console.warn('[createAction] identical request still going out; refusing a second payment', earlier);
@@ -4466,8 +5156,19 @@ if (!(
       // A big transaction goes to the background sender, so the site gets {txid, pending} at once instead of
       // waiting on a long upload (services/bigDelayed.ts, owner 12 Oct 2026). Small ones are never changed.
       const bytes = createActionBytes(message.params);
-      const delayed = shouldDelay(bytes, message.params.options);
-      const args = delayed ? withDelayedBroadcast(message.params) : message.params;
+      // A site's own acceptDelayedBroadcast (or the BRC-100 default, true) is not honoured: a small send goes out
+      // now, so the answer is the network's; only the wallet decides to send a big one in the background, and then
+      // it answers {pending: true} and arms the retry (services/bigDelayed.ts withBroadcastNow, bvideox.com mint
+      // b6963e8c…, 24 Oct 2026: a queued send answered like a broadcast one and never went out).
+      const delayed = shouldDelay(
+        bytes,
+        isAdmin ? message.params.options : { ...(message.params.options ?? {}), acceptDelayedBroadcast: undefined },
+      );
+      const args = delayed
+        ? withDelayedBroadcast(message.params)
+        : isAdmin
+          ? message.params
+          : withBroadcastNow(message.params);
       if (delayed) console.log(`[createAction] ${bytes} bytes: sending in the background`);
 
       let result: Awaited<ReturnType<typeof signer.createAction>>;
@@ -4491,7 +5192,14 @@ if (!(
         // Queued to retry is not a failure: the wallet will send it. Say so, and guard against paying again.
         if (queuedSend(err)) {
           const queued = queuedResult(err);
-          await withRepeatGuard((g) => g.record(fingerprint, { origin: message.originator, txid: queued?.txid }));
+          // It will go out: its spend stays counted against the stream budget.
+          if (streamPass)
+            await settleStreamPass(streamPass, {
+              at: Date.now(),
+              sats: streamPass.charged ?? outputSats(message.params.outputs),
+              txid: queued?.txid,
+            });
+          await withRepeatGuard((g) => g.record(recordedFingerprint, { origin: message.originator, txid: queued?.txid }));
           // With its txid, answer like a send (BRC-100 callers read txid) and say it's pending; else the old message.
           if (!queued) throw new Error(QUEUED_MESSAGE);
           sendResponse({ type: CWIEventName.CREATE_ACTION, success: true, data: queued });
@@ -4501,17 +5209,15 @@ if (!(
       }
       console.log('[createAction] Success');
       if (streamPass) {
-        const pass = streamPass;
-        const sats = pass.charged ?? outputSats(message.params.outputs);
-        await updateStreamState((st) => ({
-          state: recordSpend(st, pass.grantId, { at: Date.now(), sats, txid: result.txid }),
-          result: undefined,
-        })).catch((e: unknown) => console.warn('[createAction] stream spend not recorded:', e));
+        const sats = streamPass.charged ?? outputSats(message.params.outputs);
+        await settleStreamPass(streamPass, { at: Date.now(), sats, txid: result.txid });
       }
       const ref = result.signableTransaction?.reference;
       if (bigRefBytes.size > 200) bigRefBytes.clear();
       if (ref && bytes > 0) bigRefBytes.set(ref, bytes + (result.signableTransaction?.tx?.length ?? 0));
-      if (delayed && result.txid) {
+      // Queued, not accepted (the wallet's own background send, or a broadcaster with no verdict): never answered
+      // like a broadcast. Marked pending, and the retry is armed so it really goes out.
+      if (result.txid && (delayed || (!isAdmin && resultIsQueued(result)))) {
         result = pendingShape(result);
         if (accountContext) {
           sendRetry.arm();
@@ -4519,7 +5225,7 @@ if (!(
         }
       }
       await withRepeatGuard((g) =>
-        g.record(fingerprint, {
+        g.record(recordedFingerprint, {
           origin: message.originator,
           reference: result.signableTransaction?.reference,
           txid: result.txid,
@@ -4585,7 +5291,12 @@ if (!(
         error: withHealMessage(friendly ?? errorMessage, heal),
       });
     } finally {
+      releasePayeeMark?.();
+      releaseMicropay?.();
+      if (ownMintIntent && mintIntents.get(ownMintIntent.origin) === ownMintIntent) mintIntents.delete(ownMintIntent.origin);
       if (streamPass) {
+        // Nothing went out (the call failed or was refused): give the held budget back before the next call runs.
+        await settleStreamPass(streamPass, null);
         if (streamPasses.get(streamPass.originator) === streamPass) streamPasses.delete(streamPass.originator);
         streamPass.finish();
       }
@@ -4622,11 +5333,19 @@ if (!(
       markChainStep();
       // Big: the background sender uploads it (services/bigDelayed.ts).
       const bytes = (await signableBytes(message.params.reference)) + signActionBytes(message.params);
-      const delayed = shouldDelay(bytes, message.params.options);
+      const site = !!message.originator && message.originator !== ADMIN_ORIGINATOR;
+      // As createAction: a site's acceptDelayedBroadcast is not honoured; small sends go out now (withBroadcastNow).
+      const delayed = shouldDelay(
+        bytes,
+        site ? { ...(message.params.options ?? {}), acceptDelayedBroadcast: undefined } : message.params.options,
+      );
       if (delayed) console.log(`[signAction] ${bytes} bytes: sending in the background`);
       bigRefBytes.delete(message.params.reference);
-      let result = await w.signAction(delayed ? withDelayedBroadcast(message.params) : message.params, message.originator);
-      if (delayed && result?.txid) {
+      let result = await w.signAction(
+        delayed ? withDelayedBroadcast(message.params) : site ? withBroadcastNow(message.params) : message.params,
+        message.originator,
+      );
+      if (result?.txid && (delayed || (site && resultIsQueued(result)))) {
         result = pendingShape(result);
         if (accountContext) {
           sendRetry.arm();
@@ -4945,7 +5664,7 @@ if (!(
   // closed the side panel while a prompt was showing in it.
   denyAllPendingPrompts = () => {
       for (const [requestID, pending] of pendingPermissionRequests) {
-        accountContext?.wallet.denyPermission(requestID).catch(console.error);
+        if (!isReconnectRequestId(requestID)) accountContext?.wallet.denyPermission(requestID).catch(console.error);
         pending.reject(new Error('User dismissed the request'));
       }
       pendingPermissionRequests.clear();
@@ -4973,6 +5692,26 @@ if (!(
         waiter.reject(new Error('User dismissed the unlock request'));
       }
 
+  };
+
+  denyPendingPromptsFor = (originator: string) => {
+    for (const [requestID, pending] of takePendingFor(pendingPermissionRequests, originator)) {
+      permissionBundler.removeRequest(requestID);
+      accountContext?.wallet.denyPermission(requestID).catch(console.error);
+      pending.reject(new Error('The site was disconnected'));
+    }
+    for (const [requestID, pending] of takePendingFor(pendingGroupedPermissionRequests, originator)) {
+      accountContext?.wallet.denyGroupedPermission(requestID).catch(console.error);
+      pending.reject(new Error('The site was disconnected'));
+    }
+    for (const [requestID, pending] of takePendingFor(pendingCounterpartyPermissionRequests, originator)) {
+      accountContext?.wallet.denyCounterpartyPermission(requestID).catch(console.error);
+      pending.reject(new Error('The site was disconnected'));
+    }
+    // The envelope / stream sheet too: an open one answers "declined", so Allow after a disconnect writes nothing
+    // (b-Aware rows 53-54, 24 Oct 2026).
+    for (const [, pending] of takePendingFor(pendingStreamGrantRequests, originator)) pending.resolve(null);
+    closeDappPopupIfNoUi();
   };
 
   // In-page sheet: the site's tab closed or navigated away, so the sheet is gone. Deny what it was showing.

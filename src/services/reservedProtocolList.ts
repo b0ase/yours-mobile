@@ -32,6 +32,8 @@ export const RESERVED_PROTOCOLS: readonly Protocol[] = [
   [2, 'bwallet issuer'],
   [2, 'bwallet paymail'],
   [2, 'bwallet agreement'],
+  // Company offers (src/mobile/offer/offer.ts): seal, director and subscriber signatures over the document hash.
+  [2, 'bcorp offer'],
   [2, 'bwx partnership'],
   [2, 'bwx escrow'],
   [2, 'bwx commission terms'],
@@ -49,6 +51,8 @@ export const RESERVED_PROTOCOLS: readonly Protocol[] = [
   [2, 'bmusic artist'],
   [2, 'bmusic listen claim'],
   [2, 'bpositive'],
+  // The legacy ordinals key (addresses.ordAddress), watched by the sync (src/services/legacyOrd.ts).
+  [2, 'bwalletx legacy ord'],
 ];
 
 /**
@@ -57,6 +61,13 @@ export const RESERVED_PROTOCOLS: readonly Protocol[] = [
  */
 export const EXTERNAL_OK: readonly (readonly [number, string, string])[] = [
   [2, 'bwallet sign in', 'Sign in with bWalletX (bwalletx-connect, bit-sign, bChatX)'],
-  [0, 'fwetch identity', 'bit-sign fwetch feed signatures'],
+  // Level 0: apps may read/verify it, but createSignature at level 0 is refused for apps (bit-sign is retired).
+  [0, 'fwetch identity', 'bit-sign fwetch feed signatures (verify only for apps)'],
   [2, '3241645161d8', 'BRC-29 payments: every BRC-100 payer derives these keys'],
+  [2, 'bmintx archive', 'bMintX private archive: pinned to bmintx.com only (pinnedProtocols.ts)'],
+  [2, 'bvideox records', 'bVideoX private video records: pinned to bvideox.com only (pinnedProtocols.ts)'],
+  [2, 'bjobsx records', 'bJobsX private profile records: pinned to bjobsx.com only (pinnedProtocols.ts)'],
+  [2, 'bdrivex records', 'bDriveX private file records: pinned to bdrivex.com only (pinnedProtocols.ts)'],
+  [2, 'bcalx records', 'bCalX private calendar records: pinned to bcalx.com only (pinnedProtocols.ts)'],
+  [1, 'sigma', 'SIGMA post signatures: the wallet asks for it with a first post (permissionBundle.ts POST_PROTOCOL)'],
 ];

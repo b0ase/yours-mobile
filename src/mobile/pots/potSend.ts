@@ -3,9 +3,11 @@ import { OneSatServices } from '@1sat/wallet-browser';
 import { BSV21 } from '@1sat/templates';
 import type { ChromeStorageService } from '../../services/ChromeStorage.service';
 import { decrypt } from '../../utils/crypto';
-import { UNBOUND_NAME, opnsBinding, parseRecipient, resolveRecipient } from '../names/names';
+import { parseRecipient, resolveRecipient } from '../names/names';
+import { payeeDestination, type PayeeDestination } from './payeeBinding';
 import { isPayingPot, type Payee } from './pots';
 import { PNEE_TOKEN_ID } from '../notes/pnee';
+import { assertNotPaused } from '../config/killSwitch';
 import { pickPneeInputs, pneeOverlayFee, type PneeCandidate } from './pneePot';
 
 /**
@@ -49,18 +51,18 @@ export const potBalanceSats = async (store: ChromeStorageService, potId: string)
 };
 
 /**
- * Where a payee is paid: its address, or the address its paymail resolves to. Paymails that only take P2P
- * payments (a fresh destination per payment, submitted to their host) aren't supported for standing orders
- * in v1.
+ * Where a payee is paid: its address, or the address its paymail resolves to, checked like an interactive send
+ * (destinationFor) and against the key pinned at setup (payeeBinding.ts). Paymails that only take P2P payments
+ * (a fresh destination per payment, submitted to their host) aren't supported for standing orders in v1.
  */
-export const payeeAddress = async (p: Payee): Promise<string> => {
-  if (p.address) return p.address;
+export const resolvePayee = async (p: Payee, opts: { ignorePin?: boolean } = {}): Promise<PayeeDestination> => {
+  if (p.address) return { address: p.address };
   if (!p.paymail) throw new Error('No payee address');
   const r = await resolveRecipient((u, i) => fetch(u, i), parseRecipient(p.paymail));
-  if (opnsBinding(r) === 'unbound') throw new Error(UNBOUND_NAME);
-  if (r.targetKind === 'address') return r.target;
-  throw new Error(`${p.paymail} only takes P2P payments, which subscriptions can’t send yet`);
+  return payeeDestination(p, r, opts);
 };
+
+export const payeeAddress = async (p: Payee): Promise<string> => (await resolvePayee(p)).address;
 
 export type PotPayment = { address: string; sats: number };
 
@@ -71,6 +73,8 @@ export const signFromPot = async (
   outputs: PotPayment[],
   memo?: string,
 ): Promise<{ rawTx: string; txid: string }> => {
+  // The spending pause covers pots: they sign with their own key, outside the wallet's guarded createAction.
+  await assertNotPaused('spending');
   // Pot only, never the main balance (owner, 18 Oct 2026): refuse any id that isn't a registered pot.
   if (!isPayingPot(potId)) throw new Error('Only a pot can pay');
   const acct = potAccount(store, potId);
@@ -187,6 +191,7 @@ export const signPneeFromPot = async (
   memo?: string,
 ): Promise<{ rawTx: string; txid: string }> => {
   if (!PNEE_TOKEN_ID) throw new Error('PNEEs aren’t available');
+  await assertNotPaused('spending');
   const acct = potAccount(store, potId);
   if (!acct?.encryptedKeys) throw new Error('This pot isn’t on this device');
   const passKey = await store.getPassKey();

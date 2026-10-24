@@ -1,3 +1,4 @@
+import { manifestVersion, settingsBuildInfo } from '../utils/versionLabel';
 import { requestThemeSheet } from '../mobile/theme/themeNav';
 import { THEME_ORDERS_ENABLED } from '../mobile/storeBuild';
 import { AvatarTooBigError } from '../mobile/names/animatedAvatar';
@@ -39,6 +40,7 @@ import {
   ScrollText,
   X as XIcon,
   Play,
+  Wallet,
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { requestIgnoreBattery } from '../mobile/spaces/battery';
@@ -78,6 +80,8 @@ import { saveBackupFile, saveRoute } from '../mobile/backup/backupFile';
 import { requestSettingsScreen, searchSettings, type SettingsEntry } from '../utils/settingsSearch';
 import { PermissionsManager } from './PermissionsManager';
 import { StreamingPermissions } from './StreamingPermissions';
+import { EnvelopesSettings } from './EnvelopesSettings';
+import { ALLOWANCES_ENABLED } from '../services/allowanceFlag';
 import { StorageStatus } from './StorageStatus';
 import { REPAIR_PHASE_LABELS, useStorageRepair } from '../hooks/useStorageRepair';
 import { RECONCILE_RECORD_KEY, type ReconcileOutcome, type ReconcileRecord } from '../services/storageReconcile';
@@ -120,6 +124,7 @@ export type SettingsPage =
   | 'storage'
   | 'permissions'
   | 'streaming'
+  | 'envelopes'
   | 'usb-security'
   | 'troubleshooting';
 
@@ -305,9 +310,8 @@ const describeRepairBase = (record: ReconcileRecord, outcome: ReconcileOutcome):
 // Manifest version reflects what's actually loaded in the browser; the commit hash is
 // stamped by vite at build time, so a stale `build/` dir is immediately visible here.
 // Nothing time- or environment-dependent is injected, keeping builds reproducible.
-const manifestVersion =
-  typeof chrome !== 'undefined' && chrome.runtime?.getManifest ? chrome.runtime.getManifest().version : 'dev';
-const buildInfo = `v${manifestVersion} · ${__BUILD_COMMIT__}`;
+// "-dirty" is stripped for users; error reports keep it.
+const buildInfo = settingsBuildInfo(manifestVersion(), __BUILD_COMMIT__);
 
 export const Settings = () => {
   const { theme } = useTheme();
@@ -1014,12 +1018,23 @@ export const Settings = () => {
         />
         <Divider />
         <SettingRow
-          icon={<Play size={16} />}
-          label="Streaming permissions"
-          description="Sites that stream payments while you watch: spend, Revoke, Pause all"
-          onClick={() => setPage('streaming')}
-          isLast
+          icon={<Wallet size={16} />}
+          label="Envelopes"
+          description="Money set aside for one site's small payments: what is left, Coin return"
+          onClick={() => setPage('envelopes')}
+          isLast={!ALLOWANCES_ENABLED}
         />
+        {/* Streaming grants are allowances: shown only while allowances are on (services/allowanceFlag.ts). */}
+        {ALLOWANCES_ENABLED && <Divider />}
+        {ALLOWANCES_ENABLED && (
+          <SettingRow
+            icon={<Play size={16} />}
+            label="Streaming permissions"
+            description="Sites that stream payments while you watch: spend, Revoke, Pause all"
+            onClick={() => setPage('streaming')}
+            isLast
+          />
+        )}
       </Section>
 
       {/* Recovery phrase (owner, 19 Oct 2026): there was no way to SEE the 12 words. */}
@@ -2392,6 +2407,20 @@ export const Settings = () => {
               >
                 <SubPageHeader title="Permissions" onBack={() => setPage('main')} />
                 <PermissionsManager onBack={() => setPage('main')} />
+              </motion.div>
+            )}
+
+            {page === 'envelopes' && (
+              <motion.div
+                key="envelopes"
+                variants={pageVariants}
+                initial="initial"
+                animate="animate"
+                exit="exit"
+                className="w-full px-4 pb-4"
+              >
+                <SubPageHeader title="Envelopes" onBack={() => setPage('main')} />
+                <EnvelopesSettings />
               </motion.div>
             )}
 
