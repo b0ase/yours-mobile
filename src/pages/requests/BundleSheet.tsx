@@ -607,7 +607,7 @@ export const BundleSheet = (props: {
           setDetailsSeen(true);
           setDetails(!details_);
         }}
-        error={usbError || (mustRead ? 'Scroll up to read every line before allowing' : '')}
+        error={usbError || (mustRead ? 'Scroll to read every line before allowing' : '')}
       >
         {body}
       </ApprovalCard>
