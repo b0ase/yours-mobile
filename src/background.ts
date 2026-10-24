@@ -1177,7 +1177,15 @@ const closeDappPopup = (): void => {
  * soon as their UI is done; a later prompt reopens via showPromptUi.
  * Never touches the browser-action popup (activePopupPorts).
  */
+/**
+ * Until this time, nothing closes the dApp popup on its own: a sheet is showing why an answer was refused
+ * ("This request changed while you were answering…"). The sheet closes it itself (CLOSE_PROMPT_WINDOW).
+ */
+let holdPopupOpenUntil = 0;
+const STALE_NOTICE_MS = 5000;
+
 const closeDappPopupIfNoUi = (): void => {
+  if (Date.now() < holdPopupOpenUntil) return;
   if (!popupWindowId && !promptInPanel && !inPageSheet) return;
   if (pendingWalletWaiters.length > 0) return;
   if (hasQueuedDappUi()) return;
@@ -1189,6 +1197,7 @@ const closeDappPopupIfNoUi = (): void => {
  * unlock waiters, and no in-flight dApp CWI requests.
  */
 const closeDappPopupIfIdle = (): void => {
+  if (Date.now() < holdPopupOpenUntil) return;
   if (!popupWindowId && !promptInPanel && !inPageSheet) return;
   if (inFlightDappRequests > 0) return;
   if (pendingWalletWaiters.length > 0) return;
@@ -3622,6 +3631,9 @@ if (!(
       sendResponse({ type: 'BUNDLE_PERMISSION_RESPONSE', success: false, error: 'Request expired' });
       return true;
     }
+    // Set now, before the denied requests settle: their callers' clean-up would otherwise close the window
+    // before the sheet can say why nothing was allowed.
+    if (result.stale) holdPopupOpenUntil = Date.now() + STALE_NOTICE_MS;
     if (result.granted.length > 0 && !pairedGrantAllowed(bundle.originator)) {
       for (const r of [...result.granted, ...result.denied]) {
         const pending = pendingPermissionRequests.get(r.requestID);
@@ -3729,7 +3741,8 @@ if (!(
               }
             : { type: 'BUNDLE_PERMISSION_RESPONSE', success: true },
         );
-        closeDappPopupIfNoUi();
+        // A stale answer keeps the window open (holdPopupOpenUntil, set above) so the sheet can show why; it closes itself.
+        if (!result.stale) closeDappPopupIfNoUi();
       });
     return true;
   };

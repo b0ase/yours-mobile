@@ -44,6 +44,9 @@ type Allowance = { usdPerBsv?: number; existingSats?: number; defaultUsd: number
 
 const fmtUsd = (usd: number) => (usd < 1 ? `${Math.round(usd * 100)}¢` : `$${usd.toFixed(2)}`);
 
+/** How long a refused answer's message stays up before the sheet moves on (the background leaves the window open). */
+export const ANSWER_ERROR_HOLD_MS = 3000;
+
 export const BundleSheet = (props: {
   request: BundlePayload;
   onResponse: () => void;
@@ -155,7 +158,11 @@ export const BundleSheet = (props: {
         trustSite: !mint && answer.mayStore && remember && canTrust && trustSite,
         block: answer.block,
       });
-      if (res && res.success === false && res.error) addSnackbar(res.error, 'error');
+      if (res && res.success === false && res.error) {
+        // e.g. "This request changed while you were answering…": leave it on screen long enough to read.
+        addSnackbar(res.error, 'error');
+        await new Promise((r) => setTimeout(r, ANSWER_ERROR_HOLD_MS));
+      }
       onResponse();
     } catch (error) {
       addSnackbar(error instanceof Error ? error.message : String(error), 'error');
