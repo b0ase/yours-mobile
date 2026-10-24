@@ -981,7 +981,10 @@ const permissionBundler = new PermissionBundler<BundledRequest & BundleRequest>(
   onReady: (bundle) => showPromptUi('bundle', bundle.id),
   // Requests that waited behind the site's last sheet get their own sheet now, with their companions.
   onPromote: (bundle) => askCompanionsFor(bundle),
+  // Live sheet: a line joined the open sheet; it reloads, marks it "New" and holds its button for a moment.
+  onUpdate: (bundle) => notifyPromptUpdated('bundle', bundle.id),
 });
+let notifyPromptUpdated: (kind: PromptKind, requestID: string) => void = () => undefined;
 
 // Pending wallet initialization waiters (for ensureWallet when service worker wakes without passKey)
 const pendingWalletWaiters: {
@@ -1174,7 +1177,15 @@ const closeDappPopup = (): void => {
  * soon as their UI is done; a later prompt reopens via showPromptUi.
  * Never touches the browser-action popup (activePopupPorts).
  */
+/**
+ * Until this time, nothing closes the dApp popup on its own: a sheet is showing why an answer was refused
+ * ("This request changed while you were answering…"). The sheet closes it itself (CLOSE_PROMPT_WINDOW).
+ */
+let holdPopupOpenUntil = 0;
+const STALE_NOTICE_MS = 5000;
+
 const closeDappPopupIfNoUi = (): void => {
+  if (Date.now() < holdPopupOpenUntil) return;
   if (!popupWindowId && !promptInPanel && !inPageSheet) return;
   if (pendingWalletWaiters.length > 0) return;
   if (hasQueuedDappUi()) return;
@@ -1186,6 +1197,7 @@ const closeDappPopupIfNoUi = (): void => {
  * unlock waiters, and no in-flight dApp CWI requests.
  */
 const closeDappPopupIfIdle = (): void => {
+  if (Date.now() < holdPopupOpenUntil) return;
   if (!popupWindowId && !promptInPanel && !inPageSheet) return;
   if (inFlightDappRequests > 0) return;
   if (pendingWalletWaiters.length > 0) return;
@@ -1660,6 +1672,10 @@ if (isInServiceWorker) {
     });
   };
 
+  notifyPromptUpdated = (kind, requestID) => {
+    notifyPromptWindow(kind, requestID);
+  };
+
   showPromptUi = (kind, requestID) => {
     console.log('[background] showPromptUi called', kind, requestID);
 
@@ -1969,6 +1985,7 @@ if (!(
       // Permission responses from popup
       'PERMISSION_RESPONSE',
       'BUNDLE_PERMISSION_RESPONSE',
+      'BUNDLE_SHEET_FREEZE',
       'GET_BUNDLE_ALLOWANCE',
       'GROUPED_PERMISSION_RESPONSE',
       'COUNTERPARTY_PERMISSION_RESPONSE',
@@ -2072,9 +2089,16 @@ if (!(
               allowancePayees?: string[];
               remember?: boolean;
               trustSite?: boolean;
+              block?: boolean;
+              seenHash?: string;
             },
             sendResponse,
           );
+        case 'BUNDLE_SHEET_FREEZE':
+          // The user touched the sheet: anything arriving now gets its own sheet.
+          permissionBundler.freeze((message as { bundleID: string }).bundleID);
+          sendResponse({ type: 'BUNDLE_SHEET_FREEZE', success: true });
+          return true;
         case 'GET_BUNDLE_ALLOWANCE':
           getBundleAllowance((message as { originator: string }).originator)
             .then((data) => sendResponse({ type: 'GET_BUNDLE_ALLOWANCE', success: true, data }))
@@ -3586,6 +3610,8 @@ if (!(
       trustSite?: boolean;
       /** "Block this site": decline everything, revoke its grants, refuse its later requests. */
       block?: boolean;
+      /** sheetHash of the lines on screen when the user tapped. A mismatch grants nothing. */
+      seenHash?: string;
     },
     sendResponse: CallbackResponse,
   ) => {
@@ -3599,11 +3625,15 @@ if (!(
     if (mintBundles.delete(response.bundleID)) {
       response = { ...response, allowanceUsd: 0, allowancePerPaymentUsd: 0, allowancePayees: undefined, trustSite: false };
     }
-    const result = permissionBundler.resolve(response.bundleID, response.decisions ?? {});
+    // Bound to exactly what was on screen: a missing or different hash grants nothing (permissionBundle.ts).
+    const result = permissionBundler.resolve(response.bundleID, response.decisions ?? {}, response.seenHash ?? '');
     if (!bundle || !result) {
       sendResponse({ type: 'BUNDLE_PERMISSION_RESPONSE', success: false, error: 'Request expired' });
       return true;
     }
+    // Set now, before the denied requests settle: their callers' clean-up would otherwise close the window
+    // before the sheet can say why nothing was allowed.
+    if (result.stale) holdPopupOpenUntil = Date.now() + STALE_NOTICE_MS;
     if (result.granted.length > 0 && !pairedGrantAllowed(bundle.originator)) {
       for (const r of [...result.granted, ...result.denied]) {
         const pending = pendingPermissionRequests.get(r.requestID);
@@ -3702,8 +3732,17 @@ if (!(
     work
       .catch((error) => console.error('[background] bundle response failed:', error))
       .finally(() => {
-        sendResponse({ type: 'BUNDLE_PERMISSION_RESPONSE', success: true });
-        closeDappPopupIfNoUi();
+        sendResponse(
+          result.stale
+            ? {
+                type: 'BUNDLE_PERMISSION_RESPONSE',
+                success: false,
+                error: 'This request changed while you were answering, so nothing was allowed. Ask the site to try again.',
+              }
+            : { type: 'BUNDLE_PERMISSION_RESPONSE', success: true },
+        );
+        // A stale answer keeps the window open (holdPopupOpenUntil, set above) so the sheet can show why; it closes itself.
+        if (!result.stale) closeDappPopupIfNoUi();
       });
     return true;
   };
