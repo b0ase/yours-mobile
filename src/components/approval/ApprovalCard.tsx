@@ -182,7 +182,21 @@ export const ApprovalCard = (p: ApprovalCardProps) => {
         {p.children}
       </div>
 
-      <div className="flex flex-col" style={{ marginTop: 'auto', padding: '18px 20px 20px', gap: 10 }}>
+      {/* The choices stick to the bottom: on a short window (392×540) the user sees them without scrolling. */}
+      <div
+        className="flex flex-col"
+        data-testid="approval-choices"
+        style={{
+          position: 'sticky',
+          bottom: 0,
+          zIndex: 1,
+          margin: red ? 'auto 2px 0' : 'auto 0 0',
+          padding: '14px 20px 16px',
+          gap: 10,
+          background: red ? CARD.redBg : CARD.bg,
+          boxShadow: `0 -12px 24px ${red ? CARD.redBg : CARD.bg}`,
+        }}
+      >
         {p.error && (
           <p className="m-0 text-center" role="alert" style={{ fontSize: 13, color: CARD.redSoft }}>
             {p.error}
@@ -279,7 +293,9 @@ export const ApprovalCard = (p: ApprovalCardProps) => {
             </button>
           )}
         </div>
-        {p.detailsOpen && p.details && (
+      </div>
+      {p.detailsOpen && p.details && (
+        <div style={{ padding: '0 20px 20px' }}>
           <div
             className="w-full"
             style={{
@@ -292,8 +308,8 @@ export const ApprovalCard = (p: ApprovalCardProps) => {
           >
             {p.details}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 };

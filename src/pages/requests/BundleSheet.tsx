@@ -16,6 +16,8 @@ import {
   sheetCanTrust,
   sheetAnswer,
   sheetHash,
+  sheetView,
+  shownItems,
   type SheetChoice,
   type BundleRequest,
 } from '../../services/permissionBundle';
@@ -72,8 +74,6 @@ export const BundleSheet = (props: {
 
   // Ticks keyed by requestID, so a line that joins live gets its own (unticked) tick without resetting the rest.
   const [checked, setChecked] = useState<Record<string, boolean>>({});
-  // Live sheet: the answer is bound to exactly these lines (background checks the hash).
-  const seenHash = sheetHash(request.items);
   // A line joined: hold the buttons for a moment so a tap already on its way cannot land on the new set.
   const [hold, setHold] = useState(false);
   const shownCount = useRef(request.items.length);
@@ -147,7 +147,7 @@ export const BundleSheet = (props: {
         }
       }
       if (approve) markSiteConnected(request.originator); // its sheets may now wear its theme (docs/SITE-THEME.md)
-      const answer = sheetAnswer(model, choice, checked, detailsSeen);
+      const answer = sheetAnswer(model, choice, checked, detailsSeen, view);
       const res = await sendMessageAsync<{ success?: boolean; error?: string }>({
         action: 'BUNDLE_PERMISSION_RESPONSE',
         seenHash,
@@ -207,6 +207,12 @@ export const BundleSheet = (props: {
   const riskyLines = model.lines.filter((l) => l.risky);
   // Lines that joined while the sheet was open: shown up front with their own tick ("New: …").
   const newLines = model.lines.filter((l) => l.isNew && !(careful && l.risky));
+  // Every line a tap can grant is on the face (owner: never approve something the user can't read).
+  const view = sheetView(model, careful);
+  const ordinaryLines = careful ? model.lines.filter((l) => !l.risky && !l.isNew) : [];
+  // Live sheet: the answer is bound to exactly the lines on screen (background checks the hash). A line not on
+  // screen is never in it, so it can never be granted.
+  const seenHash = sheetHash(shownItems(request.items, view));
 
   const toggle = (id: string, dflt: boolean) => setChecked((c) => ({ ...c, [id]: !isChecked(id, dflt) }));
   const lineRow = (l: (typeof model.lines)[number], big = false) => (
@@ -403,6 +409,14 @@ export const BundleSheet = (props: {
           </div>
         )}
         {riskyLines.map((l) => lineRow(l, true))}
+        {ordinaryLines.length > 0 && (
+          <div className="flex flex-col" data-testid="careful-ordinary-lines" style={{ padding: '0 4px' }}>
+            <p className="m-0" style={{ fontSize: 12, fontWeight: 700, color: CARD.muted }}>
+              Also asks to
+            </p>
+            {ordinaryLines.map((l) => lineRow(l))}
+          </div>
+        )}
         <div
           className="flex items-center gap-2.5"
           style={{ padding: '12px 14px', borderRadius: 14, background: CARD.redChip, fontSize: 14 }}
@@ -415,7 +429,11 @@ export const BundleSheet = (props: {
   } else if (kind === 'pay') {
     hero = <PayHero amount={payAmount?.main ?? ''} sub={payAmount?.sub} />;
     siteSub = model.payment?.description || 'Asks you to pay';
-    title = <>Pay {gold(name)}</>;
+    title = (
+      <>
+        Pay {gold(payLabel)} now to {gold(name)}
+      </>
+    );
     body = (
       <>
         <div className="flex items-center gap-3" style={{ padding: 14, borderRadius: 16, background: CARD.chip }}>

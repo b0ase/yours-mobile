@@ -10,6 +10,8 @@ import {
   isRiskyRequest,
   sheetCanTrust,
   sheetDecisions,
+  sheetView,
+  shownItems,
   sheetAnswer,
   sheetHash,
   MAX_LIVE_CHANGES,
@@ -663,5 +665,65 @@ describe('the live sheet (owner, 24 Oct 2026)', () => {
     const model = buildSheetModel(b);
     expect(model.payment).toBeUndefined();
     expect(sheetDecisions(model, true, {}, false).pay).toBe(false);
+  });
+});
+
+describe('never approve a line the user cannot read (mixed careful batch, 24 Oct 2026)', () => {
+  const site = 'mixed.example';
+  const mixed = () =>
+    buildSheetModel({
+      originator: site,
+      items: [proto('key', site, { privileged: true }), basket('bk', site)],
+    });
+
+  test('a line under Details is never granted unless it was shown on the card', () => {
+    const m = mixed();
+    const hidden = { hidden: new Set(['bk']) };
+    // Allow without opening Details: the hidden line is left out of the answer, never granted.
+    const a = sheetAnswer(m, 'allow', { key: true }, false, hidden);
+    expect(a.decisions).toEqual({ key: true });
+    expect('bk' in a.decisions).toBe(false);
+    // Even a stray tick for it cannot grant it while it was never on screen.
+    expect(sheetDecisions(m, true, { key: true, bk: true }, false, hidden)).toEqual({ key: true });
+    // Details opened: now it was shown, and its tick decides.
+    expect(sheetDecisions(m, true, { key: true }, true, hidden)).toEqual({ key: true, bk: true });
+  });
+
+  test('the careful card draws every line on its face, so nothing is hidden', () => {
+    const m = mixed();
+    const v = sheetView(m, true);
+    expect([...v.faceTicks].sort()).toEqual(['bk', 'key']);
+    expect(v.hidden.size).toBe(0);
+    // The ordinary line is drawn ticked, so Allow grants it as drawn; unticked on the face, it is denied.
+    expect(sheetDecisions(m, true, { key: true }, false, v)).toEqual({ key: true, bk: true });
+    expect(sheetDecisions(m, true, { key: true, bk: false }, false, v)).toEqual({ key: true, bk: false });
+  });
+
+  test('a protocol line drawn unticked on the careful face is not granted by Allow', () => {
+    const m = buildSheetModel({
+      originator: site,
+      items: [proto('key', site, { privileged: true }), proto('h1', site, { counterparty: 'self' })],
+    });
+    expect(sheetDecisions(m, true, { key: true }, false, sheetView(m, true))).toEqual({ key: true, h1: false });
+  });
+
+  test('the shown items are exactly what the answer may cover', () => {
+    const items = [proto('key', site, { privileged: true }), basket('bk', site)];
+    expect(shownItems(items, { hidden: new Set(['bk']) }).map((i) => i.requestID)).toEqual(['key']);
+    expect(shownItems(items, sheetView(mixed(), true))).toEqual(items);
+  });
+
+  test('the hash covers only the shown lines: a hidden line makes the answer stale, so nothing is granted', () => {
+    const { clock, bundler } = setup();
+    const b = bundler.add(proto('key', site, { privileged: true }))!;
+    bundler.add(basket('bk', site));
+    clock.tick(400);
+    const hidden = { hidden: new Set(['bk']) };
+    const seen = sheetHash(shownItems(b.items, hidden));
+    expect(seen).not.toBe(sheetHash(b.items));
+    const answer = sheetAnswer(buildSheetModel(b), 'allow', { key: true }, false, hidden);
+    const r = bundler.resolve(b.id, answer.decisions, seen)!;
+    expect(r.granted).toEqual([]);
+    expect(r.stale).toBe(true);
   });
 });
