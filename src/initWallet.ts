@@ -19,6 +19,7 @@ import { preserveOriginalErrors } from './services/permissionAbortGuard';
 import { guardReservedBaskets, revokeReservedBasketGrants } from './services/reservedBaskets';
 import { guardReservedProtocols, revokeReservedProtocolGrants } from './services/reservedProtocols';
 import { guardAllowance } from './services/allowanceGuard';
+import { guardCrossSiteSigning } from './services/crossSiteSignGuard';
 import { normalizeOriginator } from '@1sat/wallet';
 import { guardSpending } from './mobile/config/killSwitch';
 import {
@@ -385,21 +386,26 @@ export const initWallet = async (
   // The wallet's own baskets (coins, ordinals, tokens, locks, names) likewise (services/reservedBaskets.ts).
   const wallet = guardReservedBaskets(
     guardReservedProtocols(
-      preserveOriginalErrors(
-        withLocalSpendLedger(
-          // A monthly allowance asks for any one payment over its per-payment cap, or to a payee outside its
-          // optional allowlist (services/allowanceGuard.ts, payment-safety audit 24 Oct 2026 B2).
-          guardAllowance(
-            new LocalWalletPermissionsManager(
-              baseWallet,
-              ADMIN_ORIGINATOR,
-              { permissionModules: assetModules },
-              { store: permissionStore },
+      // A message naming another site (a login challenge fetched from good.com) is never signed for evil.com
+      // (services/crossSiteSignGuard.ts, payment-safety audit 24 Oct 2026 B1).
+      guardCrossSiteSigning(
+        preserveOriginalErrors(
+          withLocalSpendLedger(
+            // A monthly allowance asks for any one payment over its per-payment cap, or to a payee outside its
+            // optional allowlist (services/allowanceGuard.ts, payment-safety audit 24 Oct 2026 B2).
+            guardAllowance(
+              new LocalWalletPermissionsManager(
+                baseWallet,
+                ADMIN_ORIGINATOR,
+                { permissionModules: assetModules },
+                { store: permissionStore },
+              ),
+              { store: permissionStore, adminOriginator: ADMIN_ORIGINATOR, normalize: normalizeOriginator },
             ),
-            { store: permissionStore, adminOriginator: ADMIN_ORIGINATOR, normalize: normalizeOriginator },
+            spendLedger,
           ),
-          spendLedger,
         ),
+        ADMIN_ORIGINATOR,
       ),
       ADMIN_ORIGINATOR,
     ),
