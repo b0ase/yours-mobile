@@ -110,6 +110,8 @@ export interface ApprovalCardProps {
   primary?: CardButton;
   /** "Not now" (gold tone) or "I trust it, allow" (red tone). */
   secondary?: CardButton;
+  /** A third, small choice next to secondary (the careful card's "Block this site"). */
+  tertiary?: CardButton;
   /** Expanded under "Details": the per-permission lines, options and technical detail. */
   details?: ReactNode;
   detailsOpen?: boolean;
@@ -234,6 +236,29 @@ export const ApprovalCard = (p: ApprovalCardProps) => {
             </button>
           ) : (
             <span />
+          )}
+          {p.tertiary && (
+            <button
+              type="button"
+              aria-label={p.tertiary.ariaLabel}
+              disabled={p.tertiary.disabled}
+              onClick={p.tertiary.onClick}
+              className="flex items-center gap-2"
+              style={{
+                ...btnBase,
+                height: 44,
+                padding: '0 12px',
+                borderRadius: 12,
+                background: 'transparent',
+                border: `1px solid ${red ? CARD.redLine : CARD.muted}`,
+                color: red ? CARD.redSoft : CARD.muted,
+                fontSize: 14,
+                opacity: p.tertiary.disabled ? 0.6 : 1,
+              }}
+            >
+              {p.tertiary.busy && <Loader2 size={14} className="animate-spin" />}
+              {p.tertiary.label}
+            </button>
           )}
           {p.details && (
             <button

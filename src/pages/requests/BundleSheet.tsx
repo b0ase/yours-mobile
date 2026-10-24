@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { markSiteConnected } from '../../mobile/theme/connectSiteTheme';
 import { motion } from 'framer-motion';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
@@ -15,7 +15,8 @@ import {
   DEFAULT_ALLOWANCE_USD,
   offersAllowance,
   sheetCanTrust,
-  sheetDecisions,
+  sheetAnswer,
+  type SheetChoice,
   type BundleRequest,
 } from '../../services/permissionBundle';
 import type { MintSheet } from '../../services/pinnedMint';
@@ -66,10 +67,8 @@ export const BundleSheet = (props: {
   const signerFingerprint = keyFingerprint(signer?.pubKeys?.identityPubKey);
   const model = useMemo(() => buildSheetModel(request), [request]);
 
-  // Ticks keyed by requestID so lines that join mid-sheet get their default without resetting the rest.
+  // Ticks keyed by requestID. Nothing joins a sheet once it is on screen (permissionBundle.ts queues it instead).
   const [checked, setChecked] = useState<Record<string, boolean>>({});
-  const firstCount = useRef(request.items.length);
-  const added = Math.max(0, request.items.length - firstCount.current);
   const isChecked = (id: string, dflt: boolean) => checked[id] ?? dflt;
 
   const [allowance, setAllowance] = useState<Allowance | undefined>();
@@ -112,7 +111,8 @@ export const BundleSheet = (props: {
   const price = useSheetPrice(allowance?.usdPerBsv);
   const payAmount = model.payment ? dollarsFirst(model.payment.satoshis, price) : undefined;
 
-  const send = async (approve: boolean) => {
+  const send = async (choice: SheetChoice) => {
+    const approve = choice === 'allow';
     setBusy(true);
     setUsbError('');
     try {
@@ -125,14 +125,15 @@ export const BundleSheet = (props: {
         }
       }
       if (approve) markSiteConnected(request.originator); // its sheets may now wear its theme (docs/SITE-THEME.md)
-      const decisions = sheetDecisions(model, approve, checked, detailsSeen);
+      const answer = sheetAnswer(model, choice, checked, detailsSeen);
       await sendMessageAsync({
         action: 'BUNDLE_PERMISSION_RESPONSE',
         bundleID: request.bundleID,
-        decisions,
-        allowanceUsd: approve && showAllowance && allowanceOn ? allowanceUsd : 0,
-        remember,
-        trustSite: !mint && approve && remember && canTrust && trustSite,
+        decisions: answer.decisions,
+        allowanceUsd: answer.mayStore && showAllowance && allowanceOn ? allowanceUsd : 0,
+        remember: answer.mayStore && remember,
+        trustSite: !mint && answer.mayStore && remember && canTrust && trustSite,
+        block: answer.block,
       });
       onResponse();
     } catch (error) {
@@ -220,11 +221,6 @@ export const BundleSheet = (props: {
           Signing in as {signingAs}
         </p>
       )}
-      {added > 0 && (
-        <p className="m-0" style={{ fontSize: 12, color: CARD.green }}>
-          +{added} more added while this was open
-        </p>
-      )}
       {model.lines.map((l) => lineRow(l))}
       {model.payment && (
         <p className="m-0" style={{ padding: '6px 0' }}>
@@ -292,8 +288,11 @@ export const BundleSheet = (props: {
     </div>
   );
 
-  const deny = { label: careful ? 'No, block it' : 'Not now', onClick: () => void send(false), disabled };
-  const allow = { label: careful ? 'I trust it, allow' : primary, onClick: () => void send(true), disabled, busy };
+  // Careful card: three choices (owner, 24 Oct 2026). The large, safe default is Not now (this request only);
+  // Block this site really blocks (background stores a block record and revokes its grants).
+  const deny = { label: 'Not now', onClick: () => void send('notNow'), disabled };
+  const block = { label: 'Block this site', onClick: () => void send('block'), disabled };
+  const allow = { label: careful ? 'I trust it, allow' : primary, onClick: () => void send('allow'), disabled, busy };
 
   let hero: ReactNode;
   let title: ReactNode;
@@ -539,13 +538,14 @@ export const BundleSheet = (props: {
         tone={careful ? 'red' : 'gold'}
         site={request.originator}
         siteSub={siteSub}
-        onClose={() => void send(false)}
+        onClose={() => void send('notNow')}
         closeLabel="Deny and close"
         closeDisabled={disabled}
         hero={hero}
         title={title}
         primary={careful ? deny : allow}
         secondary={careful ? allow : deny}
+        tertiary={careful ? block : undefined}
         details={details}
         detailsOpen={details_}
         onToggleDetails={() => {
