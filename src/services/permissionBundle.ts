@@ -4,15 +4,19 @@
  * The permissions manager raises one callback per permission (protocol, basket,
  * certificate, spending). Instead of one prompt each, the background feeds them
  * into this bundler: requests from the same site inside a short merge window
- * become one bundle, shown as one sheet. Requests that arrive while that sheet
- * is open join it. The user's answer is a yes/no per request; the background
+ * become one bundle, shown as one sheet. A request that arrives while that
+ * sheet is open never joins it (it must not ride on the user's answer to
+ * something else): it waits in a per-site queue and gets its own sheet, judged
+ * on its own merits, once the open one is answered or closed. The user's answer is a yes/no per request; the background
  * still resolves each one through the manager's own grantPermission /
  * denyPermission, so what is stored and checked does not change.
  *
  * Pure (no chrome APIs, timers injected) so it can be unit tested.
  */
 
-import { isReservedBasket } from './reservedBaskets';
+import { BLOCK_SITE_BASKET, isReservedBasket } from './reservedBaskets';
+
+export { BLOCK_SITE_BASKET };
 
 /** The fields of a toolbox PermissionRequest this module reads. */
 export interface BundleRequest {
@@ -27,12 +31,19 @@ export interface BundleRequest {
   certificate?: { verifier: string; certType: string; fields: string[] };
   spending?: { satoshis: number; lineItems?: { type: string; description: string; satoshis: number }[] };
   reason?: string;
-  /**
-   * Set when the request joined a sheet that was already on screen (b-Aware report, 24 Oct 2026). Such a line is
-   * treated as risky: never pre-ticked, shown on the careful card, and answered "denied" unless the user ticks it.
-   * A site can no longer slip a request into a sign-in sheet the user is about to Allow.
-   */
-  lateJoin?: boolean;
+}
+
+/** Most requests one site may have waiting behind its open sheet. More are refused, so nothing can starve. */
+export const MAX_QUEUED_PER_SITE = 10;
+
+/** Thrown by add() when a site already has MAX_QUEUED_PER_SITE requests waiting. */
+export class PermissionQueueFullError extends Error {
+  constructor(originator: string) {
+    super(
+      `Too many permission requests from ${originator} are waiting for an answer. Answer the open request in bWalletX, then try again.`,
+    );
+    this.name = 'PermissionQueueFullError';
+  }
 }
 
 export type BundleState = 'collecting' | 'shown';
@@ -50,8 +61,8 @@ export interface BundlerOptions<R extends BundleRequest> {
   windowMs?: number;
   /** The bundle is ready to show (merge window over, or flushed). */
   onReady: (bundle: PermissionBundle<R>) => void;
-  /** A request joined a bundle whose sheet is already open. */
-  onUpdate?: (bundle: PermissionBundle<R>) => void;
+  /** Queued requests became the site's next bundle (its sheet shows after the merge window). */
+  onPromote?: (bundle: PermissionBundle<R>) => void;
   setTimer?: (fn: () => void, ms: number) => unknown;
   clearTimer?: (handle: unknown) => void;
   now?: () => number;
@@ -66,6 +77,8 @@ const defaultId = () => `bundle-${Date.now().toString(36)}-${(idCounter++).toStr
 export class PermissionBundler<R extends BundleRequest = BundleRequest> {
   private bundles = new Map<string, PermissionBundle<R>>();
   private timers = new Map<string, unknown>();
+  /** Per site: requests that arrived while its sheet was open, in arrival order. */
+  private queues = new Map<string, R[]>();
   private readonly windowMs: number;
   private readonly opts: BundlerOptions<R>;
 
@@ -88,20 +101,36 @@ export class PermissionBundler<R extends BundleRequest = BundleRequest> {
     return undefined;
   }
 
-  /** Add a request. Returns the bundle it joined. */
-  add(request: R): PermissionBundle<R> {
+  /**
+   * Add a request. Returns the bundle it joined, or undefined when it was queued behind the site's open sheet.
+   * An identical repeat (same requestID) joins whatever already holds it. Throws PermissionQueueFullError when the
+   * site's queue is full.
+   */
+  add(request: R): PermissionBundle<R> | undefined {
     const existing = this.openFor(request.originator);
-    if (existing) {
-      if (!existing.items.some((i) => i.requestID === request.requestID))
-        existing.items.push(existing.state === 'shown' ? { ...request, lateJoin: true } : request);
-      if (existing.state === 'shown') this.opts.onUpdate?.(existing);
+    if (existing?.items.some((i) => i.requestID === request.requestID)) return existing;
+    if (existing && existing.state === 'collecting') {
+      existing.items.push(request);
       return existing;
     }
+    if (existing) {
+      const queue = this.queues.get(request.originator) ?? [];
+      if (queue.some((i) => i.requestID === request.requestID)) return undefined;
+      if (queue.length >= MAX_QUEUED_PER_SITE) throw new PermissionQueueFullError(request.originator);
+      queue.push(request);
+      this.queues.set(request.originator, queue);
+      return undefined;
+    }
+    return this.open(request.originator, [request]);
+  }
+
+  /** Start a new bundle (merge window running). */
+  private open(originator: string, items: R[]): PermissionBundle<R> {
     const bundle: PermissionBundle<R> = {
       id: (this.opts.newId ?? defaultId)(),
-      originator: request.originator,
+      originator,
       state: 'collecting',
-      items: [request],
+      items,
       createdAt: (this.opts.now ?? Date.now)(),
     };
     this.bundles.set(bundle.id, bundle);
@@ -110,6 +139,22 @@ export class PermissionBundler<R extends BundleRequest = BundleRequest> {
       this.setTimer(() => this.flush(bundle.id), this.windowMs),
     );
     return bundle;
+  }
+
+  /** The site's sheet is gone: its queued requests become its next bundle (shown after the merge window). */
+  private promote(originator: string): PermissionBundle<R> | undefined {
+    if (this.openFor(originator)) return undefined;
+    const queue = this.queues.get(originator);
+    this.queues.delete(originator);
+    if (!queue || queue.length === 0) return undefined;
+    const bundle = this.open(originator, queue);
+    this.opts.onPromote?.(bundle);
+    return bundle;
+  }
+
+  /** Requests waiting behind a site's open sheet, in arrival order. */
+  queued(originator: string): R[] {
+    return [...(this.queues.get(originator) ?? [])];
   }
 
   /** End the merge window now and show the bundle. No-op if already shown or gone. */
@@ -155,7 +200,7 @@ export class PermissionBundler<R extends BundleRequest = BundleRequest> {
   ): { granted: R[]; denied: R[]; carried?: PermissionBundle<R> } | undefined {
     const bundle = this.bundles.get(id);
     if (!bundle) return undefined;
-    this.drop(id);
+    this.forget(id);
     const granted: R[] = [];
     const denied: R[] = [];
     const unseen: R[] = [];
@@ -175,28 +220,45 @@ export class PermissionBundler<R extends BundleRequest = BundleRequest> {
       };
       this.bundles.set(carried.id, carried);
       this.flush(carried.id);
+    } else {
+      this.promote(bundle.originator);
     }
     return { granted, denied, carried };
   }
 
   /** Remove one request (e.g. it was answered or failed elsewhere). Empty bundles go too. */
   removeRequest(requestID: string): void {
+    for (const [site, queue] of this.queues) {
+      const rest = queue.filter((i) => i.requestID !== requestID);
+      if (rest.length === queue.length) continue;
+      if (rest.length) this.queues.set(site, rest);
+      else this.queues.delete(site);
+      return;
+    }
     const bundle = this.findByRequest(requestID);
     if (!bundle) return;
     bundle.items = bundle.items.filter((i) => i.requestID !== requestID);
     if (bundle.items.length === 0) this.drop(bundle.id);
   }
 
-  /** Forget a bundle without deciding (the caller denies its requests). */
+  /** Forget a bundle without deciding (the caller denies its requests). The site's queue, if any, comes next. */
   drop(id: string): void {
+    const bundle = this.bundles.get(id);
+    this.forget(id);
+    if (bundle) this.promote(bundle.originator);
+  }
+
+  private forget(id: string): void {
     const t = this.timers.get(id);
     if (t !== undefined) this.clearTimer(t);
     this.timers.delete(id);
     this.bundles.delete(id);
   }
 
+  /** Forget everything, queues included (the caller denies every pending request). */
   clear(): void {
-    for (const id of [...this.bundles.keys()]) this.drop(id);
+    this.queues.clear();
+    for (const id of [...this.bundles.keys()]) this.forget(id);
   }
 }
 
@@ -250,7 +312,6 @@ const protoLevel = (r: BundleRequest) => Number(r.protocolID?.[0] ?? 0);
 /** True when a request should never be pre-ticked (plan §3c). */
 export const isRiskyRequest = (r: BundleRequest): boolean => {
   if (r.privileged) return true;
-  if (r.lateJoin) return true;
   // NOT counterparty 'anyone' (owner, 11 Oct 2026): it is how a site gets a signature it can check
   // with only your public identity key, e.g. "Sign in with bWalletX" on bChatX. It proves you hold
   // your key and moves nothing; anything "encrypted for anyone" is readable from your public key
@@ -401,8 +462,7 @@ export const buildSheetModel = (bundle: Pick<PermissionBundle, 'originator' | 'i
   for (const r of bundle.items) {
     if (r.type === 'spending') {
       const sats = r.spending?.satoshis ?? 0;
-      // A spend that joined an open sheet is never the sheet's main payment (Allow would answer it).
-      if (!payment && !r.lateJoin) {
+      if (!payment) {
         payment = {
           requestID: r.requestID,
           satoshis: sats,
@@ -410,10 +470,10 @@ export const buildSheetModel = (bundle: Pick<PermissionBundle, 'originator' | 'i
           detail: lineDetail(r),
         };
       } else {
-        // A second (or late) spend in the same bundle: shown as its own line, never pre-ticked.
+        // A second spend in the same bundle: shown as its own line, never pre-ticked.
         lines.push({
           requestID: r.requestID,
-          text: `${r.lateJoin ? 'Added while this was open: pay' : 'Also pay'} ${sats.toLocaleString()} sats`,
+          text: `Also pay ${sats.toLocaleString()} sats`,
           detail: lineDetail(r),
           risky: true,
           checked: false,
@@ -430,7 +490,7 @@ export const buildSheetModel = (bundle: Pick<PermissionBundle, 'originator' | 'i
     const checked = !risky && (r.type !== 'protocol' || r.counterparty === 'anyone' || isIdentityKeyRequest(r));
     lines.push({
       requestID: r.requestID,
-      text: r.lateJoin ? `Added while this was open: ${lineText(r)}` : lineText(r),
+      text: lineText(r),
       detail: lineDetail(r),
       risky,
       checked,
@@ -453,20 +513,94 @@ export const buildSheetModel = (bundle: Pick<PermissionBundle, 'originator' | 'i
  * every call (chat.bwalletx.com, 23 Oct 2026). Risky lines are shown with their ticks on the
  * careful card, so they always keep their tick state. Details opened: the ticks decide.
  */
+/**
+ * What the face of a sheet shows (owner rule: never approve something the user can't read).
+ * - faceTicks: lines drawn on the face with their own tick box. The box decides, as drawn.
+ * - hidden: lines not on the face at all (only behind Details). Until Details is opened they are never granted:
+ *   they are left out of the answer, so the background never grants them (#85 carries them to a sheet of their own;
+ *   the live sheet's hash, built from the shown lines only, no longer matches, so nothing is granted).
+ */
+export interface SheetView {
+  faceTicks?: ReadonlySet<string>;
+  hidden?: ReadonlySet<string>;
+}
+
+/**
+ * The face of a sheet. The careful card draws every line with its tick: the risky ones large, the ordinary ones
+ * compact below (a mixed batch once hid an ordinary line under Details and "I trust it, allow" granted it unseen).
+ * Other cards summarise their routine lines on the face (tiles, chips), so nothing is hidden there either.
+ */
+export const sheetView = (
+  model: Pick<SheetModel, 'lines'>,
+  careful: boolean,
+  /** Lines whose row has been fully on screen. Given, every other line counts as hidden until it scrolls in. */
+  seen?: ReadonlySet<string>,
+): Required<SheetView> => ({
+  faceTicks: new Set(careful ? model.lines.map((l) => l.requestID) : []),
+  hidden: new Set(seen ? model.lines.filter((l) => !seen.has(l.requestID)).map((l) => l.requestID) : []),
+});
+
+/** The requests the user can read on the sheet: what the answer and its hash may cover. */
+export const shownItems = <T extends Pick<BundleRequest, 'requestID'>>(items: T[], view?: SheetView): T[] =>
+  view?.hidden?.size ? items.filter((i) => !view.hidden!.has(i.requestID)) : items;
+
 export const sheetDecisions = (
   model: Pick<SheetModel, 'lines' | 'payment'>,
   approve: boolean,
   ticks: Record<string, boolean>,
   detailsSeen: boolean,
+  view: SheetView = {},
 ): Record<string, boolean> => {
   const decisions: Record<string, boolean> = {};
   for (const l of model.lines) {
-    const ticked = ticks[l.requestID] ?? (l.checked || (!l.risky && !detailsSeen));
+    // Never on screen: not answered, so never granted.
+    if (!detailsSeen && view.hidden?.has(l.requestID)) continue;
+    // A tick box on the face (or in opened Details) decides as drawn.
+    const drawn = detailsSeen || !!view.faceTicks?.has(l.requestID);
+    const ticked = ticks[l.requestID] ?? (l.checked || (!l.risky && !drawn));
     decisions[l.requestID] = approve && ticked;
   }
   if (model.payment) decisions[model.payment.requestID] = approve;
   return decisions;
 };
+
+/**
+ * The three answers a sheet offers (owner, 24 Oct 2026). The careful card shows all three; the others show the
+ * first two.
+ * - allow: the ticked lines and the main payment (sheetDecisions).
+ * - notNow: this sheet only is declined. Nothing is stored, nothing is blocked; the site stays connected and may
+ *   ask again. The site gets the normal "user declined" error.
+ * - block: everything on the sheet is declined AND the site is blocked: its grants are revoked and a block record
+ *   is stored, so every later request is refused without a sheet until the user revokes all its access in Settings (which removes the record).
+ */
+export type SheetChoice = 'allow' | 'notNow' | 'block';
+
+export interface SheetAnswer {
+  decisions: Record<string, boolean>;
+  /** Store the block record and revoke the site's grants. */
+  block: boolean;
+  /** Allowance and "don't ask again" may be stored only on allow. */
+  mayStore: boolean;
+}
+
+export const sheetAnswer = (
+  model: Pick<SheetModel, 'lines' | 'payment'>,
+  choice: SheetChoice,
+  ticks: Record<string, boolean>,
+  detailsSeen: boolean,
+  view: SheetView = {},
+): SheetAnswer => ({
+  decisions: sheetDecisions(model, choice === 'allow', ticks, detailsSeen, view),
+  block: choice === 'block',
+  mayStore: choice === 'allow',
+});
+
+/** Whether a stored block record still blocks (expiry 0 = until removed). */
+export const blockActive = (grant: { expiry: number } | null | undefined, nowMs: number = Date.now()): boolean =>
+  !!grant && (grant.expiry === 0 || grant.expiry * 1000 > nowMs);
+
+export const BLOCKED_SITE_REFUSAL =
+  'You blocked this site in bWalletX. To unblock it, open Permissions in bWalletX settings and choose Revoke all for this site.';
 
 /** Convert a dollar allowance to satoshis at a USD-per-BSV rate. 0 or no rate → 0. */
 export const allowanceSats = (usd: number, usdPerBsv: number | undefined): number => {

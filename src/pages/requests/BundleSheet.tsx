@@ -15,7 +15,9 @@ import {
   DEFAULT_ALLOWANCE_USD,
   offersAllowance,
   sheetCanTrust,
-  sheetDecisions,
+  sheetAnswer,
+  sheetView,
+  type SheetChoice,
   type BundleRequest,
 } from '../../services/permissionBundle';
 import type { MintSheet } from '../../services/pinnedMint';
@@ -66,10 +68,8 @@ export const BundleSheet = (props: {
   const signerFingerprint = keyFingerprint(signer?.pubKeys?.identityPubKey);
   const model = useMemo(() => buildSheetModel(request), [request]);
 
-  // Ticks keyed by requestID so lines that join mid-sheet get their default without resetting the rest.
+  // Ticks keyed by requestID. Nothing joins a sheet once it is on screen (permissionBundle.ts queues it instead).
   const [checked, setChecked] = useState<Record<string, boolean>>({});
-  const firstCount = useRef(request.items.length);
-  const added = Math.max(0, request.items.length - firstCount.current);
   const isChecked = (id: string, dflt: boolean) => checked[id] ?? dflt;
 
   const [allowance, setAllowance] = useState<Allowance | undefined>();
@@ -112,7 +112,8 @@ export const BundleSheet = (props: {
   const price = useSheetPrice(allowance?.usdPerBsv);
   const payAmount = model.payment ? dollarsFirst(model.payment.satoshis, price) : undefined;
 
-  const send = async (approve: boolean) => {
+  const send = async (choice: SheetChoice) => {
+    const approve = choice === 'allow';
     setBusy(true);
     setUsbError('');
     try {
@@ -125,14 +126,15 @@ export const BundleSheet = (props: {
         }
       }
       if (approve) markSiteConnected(request.originator); // its sheets may now wear its theme (docs/SITE-THEME.md)
-      const decisions = sheetDecisions(model, approve, checked, detailsSeen);
+      const answer = sheetAnswer(model, choice, checked, detailsSeen, view);
       await sendMessageAsync({
         action: 'BUNDLE_PERMISSION_RESPONSE',
         bundleID: request.bundleID,
-        decisions,
-        allowanceUsd: approve && showAllowance && allowanceOn ? allowanceUsd : 0,
-        remember,
-        trustSite: !mint && approve && remember && canTrust && trustSite,
+        decisions: answer.decisions,
+        allowanceUsd: answer.mayStore && showAllowance && allowanceOn ? allowanceUsd : 0,
+        remember: answer.mayStore && remember,
+        trustSite: !mint && answer.mayStore && remember && canTrust && trustSite,
+        block: answer.block,
       });
       onResponse();
     } catch (error) {
@@ -176,11 +178,46 @@ export const BundleSheet = (props: {
   const disabled = busy || !armed;
   const careful = kind === 'careful';
   const riskyLines = model.lines.filter((l) => l.risky);
+  // Every line a tap can grant is on the face (owner: never approve something the user can't read).
+  // Lines whose row has been fully on screen (above the choices). On the careful card Allow waits until every line
+  // was read; a line never on screen is never granted (sheetView.hidden).
+  const [seenLines, setSeenLines] = useState<ReadonlySet<string>>(() => new Set());
+  const faceRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const face = faceRef.current;
+    const scroller = face?.closest<HTMLElement>('[data-approval-scroll]');
+    if (!careful || !face || !scroller) return;
+    const check = () => {
+      const choices = scroller.querySelector('[data-testid="approval-choices"]');
+      const top = Math.max(scroller.getBoundingClientRect().top, 0);
+      const bottom = Math.min(choices ? choices.getBoundingClientRect().top : window.innerHeight, window.innerHeight);
+      const seen: string[] = [];
+      scroller.querySelectorAll<HTMLElement>('[data-line-id]').forEach((el) => {
+        const r = el.getBoundingClientRect();
+        if (r.height > 0 && r.top >= top - 1 && r.bottom <= bottom + 1) seen.push(el.dataset.lineId ?? '');
+      });
+      setSeenLines((prev) => (seen.every((id) => prev.has(id)) ? prev : new Set([...prev, ...seen])));
+    };
+    check();
+    const t = setTimeout(check, 700); // after the entry animation
+    scroller.addEventListener('scroll', check, { passive: true });
+    window.addEventListener('resize', check);
+    return () => {
+      clearTimeout(t);
+      scroller.removeEventListener('scroll', check);
+      window.removeEventListener('resize', check);
+    };
+  }, [careful, model]);
+  const view = sheetView(model, careful, careful && !detailsSeen ? seenLines : undefined);
+  // Careful card: "I trust it, allow" waits until every line has been on screen (or Details was opened).
+  const mustRead = careful && view.hidden.size > 0;
+  const ordinaryLines = careful ? model.lines.filter((l) => !l.risky) : [];
 
   const toggle = (id: string, dflt: boolean) => setChecked((c) => ({ ...c, [id]: !isChecked(id, dflt) }));
   const lineRow = (l: (typeof model.lines)[number], big = false) => (
     <label
       key={l.requestID}
+      data-line-id={l.requestID}
       className="flex items-center gap-3 cursor-pointer"
       style={{
         minHeight: 44,
@@ -218,11 +255,6 @@ export const BundleSheet = (props: {
       {(signerTag || signerFingerprint) && (
         <p className="m-0" data-testid="signing-as" style={{ fontSize: 12 }}>
           Signing in as {signingAs}
-        </p>
-      )}
-      {added > 0 && (
-        <p className="m-0" style={{ fontSize: 12, color: CARD.green }}>
-          +{added} more added while this was open
         </p>
       )}
       {model.lines.map((l) => lineRow(l))}
@@ -292,8 +324,16 @@ export const BundleSheet = (props: {
     </div>
   );
 
-  const deny = { label: careful ? 'No, block it' : 'Not now', onClick: () => void send(false), disabled };
-  const allow = { label: careful ? 'I trust it, allow' : primary, onClick: () => void send(true), disabled, busy };
+  // Careful card: three choices (owner, 24 Oct 2026). The large, safe default is Not now (this request only);
+  // Block this site really blocks (background stores a block record and revokes its grants).
+  const deny = { label: 'Not now', onClick: () => void send('notNow'), disabled };
+  const block = { label: 'Block this site', onClick: () => void send('block'), disabled };
+  const allow = {
+    label: careful ? 'I trust it, allow' : primary,
+    onClick: () => void send('allow'),
+    disabled: disabled || mustRead,
+    busy,
+  };
 
   let hero: ReactNode;
   let title: ReactNode;
@@ -330,7 +370,9 @@ export const BundleSheet = (props: {
       </div>
     );
   } else if (kind === 'careful') {
-    hero = <CarefulHero />;
+    // With lines to read, the words come first: the red card and "Check this carefully" carry the warning, and
+    // the lines and the choices fit a 392×540 window without the big hero.
+    hero = model.lines.length > 0 ? null : <CarefulHero />;
     siteSub = 'Check this carefully';
     const privileged = request.items.some((r) => r.privileged);
     const privateCert = riskyLines.some(
@@ -347,7 +389,7 @@ export const BundleSheet = (props: {
       <>Wants {red('more than usual')}</>
     );
     body = (
-      <div className="flex flex-col" style={{ gap: 8 }}>
+      <div ref={faceRef} className="flex flex-col" style={{ gap: 8 }}>
         {privileged && (
           <div
             className="flex items-center gap-2.5"
@@ -369,6 +411,14 @@ export const BundleSheet = (props: {
           </div>
         )}
         {riskyLines.map((l) => lineRow(l, true))}
+        {ordinaryLines.length > 0 && (
+          <div className="flex flex-col" data-testid="careful-ordinary-lines" style={{ padding: '0 4px' }}>
+            <p className="m-0" style={{ fontSize: 12, fontWeight: 700, color: CARD.muted }}>
+              Also asks to
+            </p>
+            {ordinaryLines.map((l) => lineRow(l))}
+          </div>
+        )}
         <div
           className="flex items-center gap-2.5"
           style={{ padding: '12px 14px', borderRadius: 14, background: CARD.redChip, fontSize: 14 }}
@@ -381,7 +431,11 @@ export const BundleSheet = (props: {
   } else if (kind === 'pay') {
     hero = <PayHero amount={payAmount?.main ?? ''} sub={payAmount?.sub} />;
     siteSub = model.payment?.description || 'Asks you to pay';
-    title = <>Pay {gold(name)}</>;
+    title = (
+      <>
+        Pay {gold(payLabel)} now to {gold(name)}
+      </>
+    );
     body = (
       <>
         <div className="flex items-center gap-3" style={{ padding: 14, borderRadius: 16, background: CARD.chip }}>
@@ -539,20 +593,21 @@ export const BundleSheet = (props: {
         tone={careful ? 'red' : 'gold'}
         site={request.originator}
         siteSub={siteSub}
-        onClose={() => void send(false)}
+        onClose={() => void send('notNow')}
         closeLabel="Deny and close"
         closeDisabled={disabled}
         hero={hero}
         title={title}
         primary={careful ? deny : allow}
         secondary={careful ? allow : deny}
+        tertiary={careful ? block : undefined}
         details={details}
         detailsOpen={details_}
         onToggleDetails={() => {
           setDetailsSeen(true);
           setDetails(!details_);
         }}
-        error={usbError}
+        error={usbError || (mustRead ? 'Scroll to read every line before allowing' : '')}
       >
         {body}
       </ApprovalCard>
