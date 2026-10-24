@@ -604,6 +604,17 @@ describe('never approve a line the user cannot read (mixed careful batch, 24 Oct
     expect(sheetDecisions(m, true, { key: true }, false, sheetView(m, true))).toEqual({ key: true, h1: false });
   });
 
+  test('a careful line that never scrolled onto the screen is hidden, so Allow cannot grant it', () => {
+    const m = mixed();
+    const v = sheetView(m, true, new Set(['key']));
+    expect([...v.hidden]).toEqual(['bk']);
+    expect(sheetDecisions(m, true, { key: true }, false, v)).toEqual({ key: true });
+    // Once it has been on screen it is drawn, ticked, and granted as drawn.
+    const all = sheetView(m, true, new Set(['key', 'bk']));
+    expect(all.hidden.size).toBe(0);
+    expect(sheetDecisions(m, true, { key: true }, false, all)).toEqual({ key: true, bk: true });
+  });
+
   test('the shown items are exactly what the answer may cover', () => {
     const items = [proto('key', site, { privileged: true }), basket('bk', site)];
     expect(shownItems(items, { hidden: new Set(['bk']) }).map((i) => i.requestID)).toEqual(['key']);
