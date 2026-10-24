@@ -585,10 +585,15 @@ export interface SheetView {
  * compact below (a mixed batch once hid an ordinary line under Details and "I trust it, allow" granted it unseen).
  * Other cards summarise their routine lines on the face (tiles, chips), so nothing is hidden there either.
  */
-export const sheetView = (model: Pick<SheetModel, 'lines'>, careful: boolean): Required<SheetView> => ({
+export const sheetView = (
+  model: Pick<SheetModel, 'lines'>,
+  careful: boolean,
+  /** Lines whose row has been fully on screen. Given, every other line counts as hidden until it scrolls in. */
+  seen?: ReadonlySet<string>,
+): Required<SheetView> => ({
   // Lines that joined live are drawn up front with their own tick on every card ("New: …").
   faceTicks: new Set(model.lines.filter((l) => careful || l.isNew).map((l) => l.requestID)),
-  hidden: new Set<string>(),
+  hidden: new Set(seen ? model.lines.filter((l) => !seen.has(l.requestID)).map((l) => l.requestID) : []),
 });
 
 /** The requests the user can read on the sheet: what the answer and its hash may cover. */

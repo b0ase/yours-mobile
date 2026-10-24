@@ -129,6 +129,7 @@ export const ApprovalCard = (p: ApprovalCardProps) => {
   return (
     <div
       data-testid={p.testId}
+      data-approval-scroll
       className="flex flex-col w-full h-full overflow-y-auto"
       style={{
         background: red ? CARD.redBg : CARD.bg,
