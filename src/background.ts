@@ -981,7 +981,10 @@ const permissionBundler = new PermissionBundler<BundledRequest & BundleRequest>(
   onReady: (bundle) => showPromptUi('bundle', bundle.id),
   // Requests that waited behind the site's last sheet get their own sheet now, with their companions.
   onPromote: (bundle) => askCompanionsFor(bundle),
+  // Live sheet: a line joined the open sheet; it reloads, marks it "New" and holds its button for a moment.
+  onUpdate: (bundle) => notifyPromptUpdated('bundle', bundle.id),
 });
+let notifyPromptUpdated: (kind: PromptKind, requestID: string) => void = () => undefined;
 
 // Pending wallet initialization waiters (for ensureWallet when service worker wakes without passKey)
 const pendingWalletWaiters: {
@@ -1660,6 +1663,10 @@ if (isInServiceWorker) {
     });
   };
 
+  notifyPromptUpdated = (kind, requestID) => {
+    notifyPromptWindow(kind, requestID);
+  };
+
   showPromptUi = (kind, requestID) => {
     console.log('[background] showPromptUi called', kind, requestID);
 
@@ -1969,6 +1976,7 @@ if (!(
       // Permission responses from popup
       'PERMISSION_RESPONSE',
       'BUNDLE_PERMISSION_RESPONSE',
+      'BUNDLE_SHEET_FREEZE',
       'GET_BUNDLE_ALLOWANCE',
       'GROUPED_PERMISSION_RESPONSE',
       'COUNTERPARTY_PERMISSION_RESPONSE',
@@ -2072,9 +2080,16 @@ if (!(
               allowancePayees?: string[];
               remember?: boolean;
               trustSite?: boolean;
+              block?: boolean;
+              seenHash?: string;
             },
             sendResponse,
           );
+        case 'BUNDLE_SHEET_FREEZE':
+          // The user touched the sheet: anything arriving now gets its own sheet.
+          permissionBundler.freeze((message as { bundleID: string }).bundleID);
+          sendResponse({ type: 'BUNDLE_SHEET_FREEZE', success: true });
+          return true;
         case 'GET_BUNDLE_ALLOWANCE':
           getBundleAllowance((message as { originator: string }).originator)
             .then((data) => sendResponse({ type: 'GET_BUNDLE_ALLOWANCE', success: true, data }))
@@ -3586,6 +3601,8 @@ if (!(
       trustSite?: boolean;
       /** "Block this site": decline everything, revoke its grants, refuse its later requests. */
       block?: boolean;
+      /** sheetHash of the lines on screen when the user tapped. A mismatch grants nothing. */
+      seenHash?: string;
     },
     sendResponse: CallbackResponse,
   ) => {
@@ -3599,7 +3616,8 @@ if (!(
     if (mintBundles.delete(response.bundleID)) {
       response = { ...response, allowanceUsd: 0, allowancePerPaymentUsd: 0, allowancePayees: undefined, trustSite: false };
     }
-    const result = permissionBundler.resolve(response.bundleID, response.decisions ?? {});
+    // Bound to exactly what was on screen: a missing or different hash grants nothing (permissionBundle.ts).
+    const result = permissionBundler.resolve(response.bundleID, response.decisions ?? {}, response.seenHash ?? '');
     if (!bundle || !result) {
       sendResponse({ type: 'BUNDLE_PERMISSION_RESPONSE', success: false, error: 'Request expired' });
       return true;
@@ -3702,7 +3720,15 @@ if (!(
     work
       .catch((error) => console.error('[background] bundle response failed:', error))
       .finally(() => {
-        sendResponse({ type: 'BUNDLE_PERMISSION_RESPONSE', success: true });
+        sendResponse(
+          result.stale
+            ? {
+                type: 'BUNDLE_PERMISSION_RESPONSE',
+                success: false,
+                error: 'This request changed while you were answering, so nothing was allowed. Ask the site to try again.',
+              }
+            : { type: 'BUNDLE_PERMISSION_RESPONSE', success: true },
+        );
         closeDappPopupIfNoUi();
       });
     return true;

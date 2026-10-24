@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { markSiteConnected } from '../../mobile/theme/connectSiteTheme';
 import { motion } from 'framer-motion';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
@@ -13,9 +13,9 @@ import {
   ALLOWANCE_CHOICES_USD,
   buildSheetModel,
   DEFAULT_ALLOWANCE_USD,
-  offersAllowance,
   sheetCanTrust,
   sheetAnswer,
+  sheetHash,
   type SheetChoice,
   type BundleRequest,
 } from '../../services/permissionBundle';
@@ -67,8 +67,27 @@ export const BundleSheet = (props: {
   const signerFingerprint = keyFingerprint(signer?.pubKeys?.identityPubKey);
   const model = useMemo(() => buildSheetModel(request), [request]);
 
-  // Ticks keyed by requestID. Nothing joins a sheet once it is on screen (permissionBundle.ts queues it instead).
+  // Ticks keyed by requestID, so a line that joins live gets its own (unticked) tick without resetting the rest.
   const [checked, setChecked] = useState<Record<string, boolean>>({});
+  // Live sheet: the answer is bound to exactly these lines (background checks the hash).
+  const seenHash = sheetHash(request.items);
+  // A line joined: hold the buttons for a moment so a tap already on its way cannot land on the new set.
+  const [hold, setHold] = useState(false);
+  const shownCount = useRef(request.items.length);
+  useEffect(() => {
+    if (request.items.length === shownCount.current) return;
+    shownCount.current = request.items.length;
+    setHold(true);
+    const t = setTimeout(() => setHold(false), 1000);
+    return () => clearTimeout(t);
+  }, [request.items.length]);
+  // First touch freezes the sheet: anything arriving after it gets its own sheet.
+  const frozen = useRef(false);
+  const freeze = () => {
+    if (frozen.current) return;
+    frozen.current = true;
+    sendMessageAsync({ action: 'BUNDLE_SHEET_FREEZE', bundleID: request.bundleID }).catch(() => undefined);
+  };
   const isChecked = (id: string, dflt: boolean) => checked[id] ?? dflt;
 
   const [allowance, setAllowance] = useState<Allowance | undefined>();
@@ -105,8 +124,8 @@ export const BundleSheet = (props: {
   // The allowance line shows when the price is known and the site has none yet.
   // A mint sheet is for this one mint: never an allowance or "don't ask again" (the background enforces it too).
   const mint = request.mint && model.payment && model.lines.every((l) => !l.risky) ? request.mint : undefined;
-  const showAllowance =
-    !mint && !!allowance?.usdPerBsv && allowance.existingSats === undefined && offersAllowance(model);
+  // Pay in the moment (owner, 24 Oct 2026): these sheets never offer a monthly allowance.
+  const showAllowance = false as boolean;
   // Dollars first (owner, 24 Oct 2026): the site's allowance rate when the background sent one, else the live price.
   const price = useSheetPrice(allowance?.usdPerBsv);
   const payAmount = model.payment ? dollarsFirst(model.payment.satoshis, price) : undefined;
@@ -126,8 +145,9 @@ export const BundleSheet = (props: {
       }
       if (approve) markSiteConnected(request.originator); // its sheets may now wear its theme (docs/SITE-THEME.md)
       const answer = sheetAnswer(model, choice, checked, detailsSeen);
-      await sendMessageAsync({
+      const res = await sendMessageAsync<{ success?: boolean; error?: string }>({
         action: 'BUNDLE_PERMISSION_RESPONSE',
+        seenHash,
         bundleID: request.bundleID,
         decisions: answer.decisions,
         allowanceUsd: answer.mayStore && showAllowance && allowanceOn ? allowanceUsd : 0,
@@ -135,6 +155,7 @@ export const BundleSheet = (props: {
         trustSite: !mint && answer.mayStore && remember && canTrust && trustSite,
         block: answer.block,
       });
+      if (res && res.success === false && res.error) addSnackbar(res.error, 'error');
       onResponse();
     } catch (error) {
       addSnackbar(error instanceof Error ? error.message : String(error), 'error');
@@ -174,9 +195,11 @@ export const BundleSheet = (props: {
     setAllowanceUsd(next);
     setAllowanceOn(next > 0);
   };
-  const disabled = busy || !armed;
+  const disabled = busy || !armed || hold;
   const careful = kind === 'careful';
   const riskyLines = model.lines.filter((l) => l.risky);
+  // Lines that joined while the sheet was open: shown up front with their own tick ("New: …").
+  const newLines = model.lines.filter((l) => l.isNew && !(careful && l.risky));
 
   const toggle = (id: string, dflt: boolean) => setChecked((c) => ({ ...c, [id]: !isChecked(id, dflt) }));
   const lineRow = (l: (typeof model.lines)[number], big = false) => (
@@ -221,10 +244,15 @@ export const BundleSheet = (props: {
           Signing in as {signingAs}
         </p>
       )}
+      {model.lines.length > 0 && (
+        <p className="m-0" style={{ fontSize: 12, fontWeight: 700, color: CARD.muted }}>
+          Allow this app
+        </p>
+      )}
       {model.lines.map((l) => lineRow(l))}
       {model.payment && (
         <p className="m-0" style={{ padding: '6px 0' }}>
-          Pay now: <span style={{ color: CARD.gold, fontWeight: 600 }}>{payLabel}</span> to {request.originator}
+          Pay <span style={{ color: CARD.gold, fontWeight: 600 }}>{payLabel}</span> now to {request.originator}
           {model.payment.description && <> &ldquo;{model.payment.description}&rdquo;</>}
         </p>
       )}
@@ -533,6 +561,7 @@ export const BundleSheet = (props: {
       animate={{ opacity: 1, y: 0 }}
       transition={{ type: 'spring', damping: 24, stiffness: 260 }}
       data-approval-kind={kind}
+      onPointerDownCapture={freeze}
     >
       <ApprovalCard
         tone={careful ? 'red' : 'gold'}
@@ -555,6 +584,11 @@ export const BundleSheet = (props: {
         error={usbError}
       >
         {body}
+        {newLines.length > 0 && (
+          <div className="flex flex-col" data-testid="new-lines" style={{ gap: 4, marginTop: 8 }}>
+            {newLines.map((l) => lineRow(l, true))}
+          </div>
+        )}
       </ApprovalCard>
     </motion.div>
   );
