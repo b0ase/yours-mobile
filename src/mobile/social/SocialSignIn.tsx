@@ -129,6 +129,8 @@ export const SocialSignIn = ({
         filledAvatar.current = '';
       }
     });
+    // Runs on owner change only; fill and xOnly are read at that moment on purpose.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [owner]);
   // New Account makes new keys, so it can't bring back a wallet that already has this name (owner, 6 Oct 2026:
   // tried to get b0asex.x onto a phone that way and got an error). Say so and offer Restore (12 words).

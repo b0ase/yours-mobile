@@ -88,6 +88,7 @@ const typeColor = (type: PermissionToken['type']): string => {
 };
 
 /** The badge on a permission row. A "Block this site" record is not access: it reads Blocked, in red. */
+// eslint-disable-next-line react-refresh/only-export-components
 export const permissionBadge = (
   perm: Pick<PermissionToken, 'type' | 'basketName'>,
 ): { label: string; color: string } =>
@@ -128,6 +129,7 @@ const formatSatoshis = (sats: number): string => {
   return `${sats.toLocaleString()} sats`;
 };
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const formatPermissionDetail = (perm: PermissionToken, spent?: number): string => {
   switch (perm.type) {
     case 'protocol': {
