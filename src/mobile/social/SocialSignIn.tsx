@@ -129,7 +129,6 @@ export const SocialSignIn = ({
         filledAvatar.current = '';
       }
     });
-    // Runs on owner change only; fill and xOnly are read at that moment on purpose.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [owner]);
   // New Account makes new keys, so it can't bring back a wallet that already has this name (owner, 6 Oct 2026:
