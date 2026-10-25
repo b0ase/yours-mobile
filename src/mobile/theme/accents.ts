@@ -1,6 +1,7 @@
 import { contrast, ensureContrast, hexToHsl, hslToHex, mix, pickReadable, rgbTriplet } from './colour';
 import { EMOJI_PACK_IDS, EMOJI_THEMES, type EmojiPackId, type EmojiTheme } from './emojiThemes';
 import { tokenblasterEditions } from './tokenblasterX';
+import { leanneEditions } from './leanneX';
 
 export { contrast, rgbTriplet };
 
@@ -40,6 +41,7 @@ export type PackId =
   | 'npg'
   | 'npgx'
   | 'scammerscartel'
+  | 'leannethedark'
   | 'tokenblaster'
   | 'terrornode'
   | EmojiPackId;
@@ -73,6 +75,7 @@ export type CardPatternId =
   | 'npg'
   | 'npgx'
   | 'scammerscartel'
+  | 'leannethedark'
   | 'tokenblaster'
   | 'terrornode'
   | EmojiPackId;
@@ -406,6 +409,8 @@ const EDITIONS: readonly Accent[] = [
     radiusCard: '14px',
     pattern: 'scammerscartel',
   },
+  // Leanne The Dark (owner, 25 Oct 2026): bWalletX only, empty in a store build (leanneX.store.ts).
+  ...leanneEditions(BASE, SERIF),
   // TokenBlaster (owner, 25 Oct 2026): bWalletX only, empty in a store build (tokenblasterX.store.ts).
   ...tokenblasterEditions(BASE),
 ];
@@ -837,6 +842,7 @@ export const PAID_EDITIONS: readonly string[] = [
   'npg',
   'npgx',
   'scammerscartel',
+  'leannethedark',
   'tokenblaster',
   'terrornode',
   ...EMOJI_PACK_IDS,
