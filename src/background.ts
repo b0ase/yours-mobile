@@ -184,6 +184,8 @@ import {
   type MintIntent,
   type MintSheet,
 } from './services/pinnedMint';
+import { oneShotGrant } from './services/oneShotGrant';
+import { chromeConsentStore } from './services/siteTokens';
 import { isReservedProtocol, reservedProtocolRefusal, RESERVED_REFUSAL, withoutReservedProtocols } from './services/reservedProtocols';
 import { healIndexFundActions } from './mobile/tokens/indexFundHeal';
 import { continuesChain, endChain, isAlreadyProcessedAbort, markChainStep, startsChain } from './services/dappChain';
@@ -1576,11 +1578,11 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
     const now = Date.now();
     if (shouldDeferEncrypt(asSite, protocolCalls, deferredEncrypts, now)) {
       deferredEncrypts.note(mintSite, request.protocolID as [number, string], now);
-      return accountContext.wallet.grantPermission({ requestID: request.requestID, ephemeral: true });
+      return accountContext.wallet.grantPermission(oneShotGrant(request.requestID));
     }
     const intent = mintIntents.get(mintSite);
     if (intent && !intent.spendSeen && labelCoveredByIntent(asSite, intent))
-      return accountContext.wallet.grantPermission({ requestID: request.requestID, ephemeral: true });
+      return accountContext.wallet.grantPermission(oneShotGrant(request.requestID));
   }
   // A stream-approved createAction is running for this site: its spend (within the budget) and its label are
   // answered here, without a sheet. Nothing else is (services/streamGrants.ts passCovers).
@@ -1589,7 +1591,7 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
     ALLOWANCES_ENABLED && request.originator ? streamPasses.get(normalizeOriginator(request.originator)) : undefined;
   if (pass && accountContext?.wallet && passCovers(pass, { ...request, originator: normalizeOriginator(request.originator) })) {
     if (request.type === 'spending') pass.charged = request.spending?.satoshis;
-    return accountContext.wallet.grantPermission({ requestID: request.requestID, ephemeral: true });
+    return accountContext.wallet.grantPermission(oneShotGrant(request.requestID));
   }
   const deniedThisSession =
     request.originator && request.originator !== ADMIN_ORIGINATOR && isBasketRead(request)
@@ -3606,6 +3608,8 @@ if (!(
       // Session memory too: its basket-read No's and its manifest sheet (services/sessionDenials.ts).
       await basketDenials.forget(site);
       manifestOnce.forget(site);
+      // "See my token balance" answers end with the site too (services/siteTokens.ts).
+      await chromeConsentStore().forget?.(site);
       await accountContext?.envelopes.close(site);
       await updateStreamState((st) => ({ state: revokeGrantsForOriginator(st, site, Date.now()), result: undefined }));
       // Grants are per account; a device-wide pairing is withdrawn from the other accounts' stores too.
