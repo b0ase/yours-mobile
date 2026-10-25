@@ -28,7 +28,7 @@ import { createMasterBackupGate } from './services/masterBackupGate';
 import { promptsShowInPanel } from './services/panelPrompt';
 import { isSessionExpired } from './utils/lockTimeout';
 import { originatorForOrigin } from './services/originKey';
-import { pairedGrantAllowed, takePendingFor } from './services/pairedPromptGuard';
+import { PAIR_MIRROR_KEY, isPairedOriginator, pairedGrantAllowed, setPairMirror, takePendingFor } from './services/pairedPromptGuard';
 import {
   addGrant,
   isSpendingAuthAction,
@@ -1017,6 +1017,16 @@ const permissionBundler = new PermissionBundler<BundledRequest & BundleRequest>(
 });
 let notifyPromptUpdated: (kind: PromptKind, requestID: string) => void = () => undefined;
 
+// Phone pairings (services/pairedPromptGuard.ts): the phone's background is a worker with no localStorage, so it reads
+// the page's session mirror from chrome.storage.local. Without it every Allow for a paired site was denied.
+void chrome.storage.local
+  .get(PAIR_MIRROR_KEY)
+  .then((got) => setPairMirror((got as Record<string, unknown>)[PAIR_MIRROR_KEY]))
+  .catch(() => undefined);
+chrome.storage.onChanged?.addListener((changes, area) => {
+  if (area === 'local' && changes[PAIR_MIRROR_KEY]) setPairMirror(changes[PAIR_MIRROR_KEY].newValue);
+});
+
 // Re-ask on reconnect (services/reconnectGate.ts): after a site's Disconnect, or a day of silence, its next
 // identity-key request opens the reconnect sheet instead of being answered silently.
 let reconnectWrites: Promise<unknown> = Promise.resolve();
@@ -1032,8 +1042,10 @@ const updateReconnectState = <T>(fn: (s: ReconnectState) => { state?: ReconnectS
 };
 /** Records a site's call; true when it is an identity-key request that must ask first. */
 const reconnectGate = (originator: string, action: string, params: unknown): Promise<boolean> => {
-  // Only a real connect may ask; every other call just keeps the site's "last seen" fresh.
-  const identity = gatesConnect(action, params);
+  // Only a real connect may ask; every other call just keeps the site's "last seen" fresh. A phone pairing is never
+  // gated: the pairing is the connection (it lapses after 24 h idle and Disconnect forgets it), so an approved paired
+  // session's identity-key request is answered by its grant, with no sheet.
+  const identity = gatesConnect(action, params) && !isPairedOriginator(originator);
   const now = Date.now();
   return updateReconnectState((s) => ({
     state: noteCall(s, originator, now),
