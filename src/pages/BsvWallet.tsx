@@ -136,7 +136,7 @@ export const BsvWallet = () => {
   const { theme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
-  const { updateBalance, balanceTick, isSyncing, restoreMessage } = useSyncTracker();
+  const { updateBalance, balanceTick, isSyncing, restoreMessage, syncMessage } = useSyncTracker();
   const urlParams = new URLSearchParams(location.search);
   const { handleSelect, query } = useBottomMenu();
   const tokenRows = useTokenRows();
@@ -1588,7 +1588,12 @@ export const BsvWallet = () => {
           {showSyncRetry({ failed: balanceFailed, known: balanceKnown }) && (
             <button
               type="button"
-              onClick={() => void getAndSetBsvBalance()}
+              onClick={() => {
+                // Restart the wallet's sync (it redoes only what failed, or joins a run still going) and re-read the
+                // balance. Re-reading alone was the no-op: nothing that had failed was ever tried again.
+                void refreshUtxos({ notifyIfUnchanged: true });
+                void getAndSetBsvBalance();
+              }}
               className="mt-1 text-[11px] border-0 bg-transparent cursor-pointer p-0"
               style={{ color: theme.color.global.gray }}
             >
@@ -1598,6 +1603,11 @@ export const BsvWallet = () => {
           {staleHint && (
             <p className="mt-1 text-[11px] m-0" style={{ color: theme.color.global.gray, opacity: 0.8 }}>
               {staleHint}
+            </p>
+          )}
+          {isSyncing && syncMessage && !restoreMessage && (
+            <p role="status" className="mt-1 text-[11px] m-0" style={{ color: theme.color.global.gray }}>
+              {syncMessage}
             </p>
           )}
           {restoreMessage && (
