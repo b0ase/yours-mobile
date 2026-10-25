@@ -27,6 +27,8 @@ export type ConsentInfo = {
   summary: string;
 };
 
+/** Owner, 25 Oct 2026: bCorp's mode keeps the chats for feedback; said here too (agent.ts ASK_B_DISCLOSURE). */
+const TEAM_READS = 'Our team reads and keeps conversations with b for up to 180 days.';
 const KEEP = 'Your keys, balances, contacts and files never leave your wallet.';
 
 export const consentInfo = (t: ConsentTarget): ConsentInfo =>
@@ -35,7 +37,7 @@ export const consentInfo = (t: ConsentTarget): ConsentInfo =>
         provider: 'Anthropic',
         route: 'bChatX’s server (bchatx.com, run by The Bitcoin Corporation Ltd), which passes it to Anthropic',
         terms: 'Anthropic’s commercial terms and privacy policy (anthropic.com/legal)',
-        summary: `b is run by Anthropic. Your message and the last few messages go via bChatX’s server to Anthropic. ${KEEP}`,
+        summary: `b is run by Anthropic. Your message and the last few messages go via bChatX’s server to Anthropic. ${TEAM_READS} ${KEEP}`,
       }
     : {
         provider: PROVIDERS[t].label,
