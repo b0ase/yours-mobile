@@ -2432,7 +2432,8 @@ if (!(
             return true;
           }
           ctx
-            .resyncAddresses({ quiet: true })
+            // A manual refresh (the refresh button, "Tap to retry") shows its progress; the card's timer stays quiet.
+            .resyncAddresses({ quiet: !manual })
             .then(() => sendResponse({ type: 'RESYNC_ADDRESSES', success: true }))
             .catch((err: unknown) =>
               sendResponse({
