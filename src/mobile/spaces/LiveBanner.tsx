@@ -20,7 +20,7 @@ import {
   type RoomSpaceMeta,
   type SpaceState,
 } from './model';
-import { SpaceScreen } from './SpaceScreen';
+import { SpaceScreen } from './LazySpaceScreen';
 import { BSPACES_ENABLED } from '../storeBuild';
 
 // Paid entry is bWalletX only: a lazy chunk behind the inlined flag, so a store build never contains it.

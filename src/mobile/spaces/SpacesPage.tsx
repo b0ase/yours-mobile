@@ -22,7 +22,7 @@ import {
   type SpaceState,
   isAlwaysOpenTicker,
 } from './model';
-import { SpaceScreen } from './SpaceScreen';
+import { SpaceScreen } from './LazySpaceScreen';
 import { DoorKeeper } from './DoorKeeper';
 import { SpaceAvatar } from './SpaceAvatar';
 import { InviteCard, type SpaceLink } from './InviteCard';

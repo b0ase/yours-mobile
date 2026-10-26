@@ -10,7 +10,7 @@ import { roomTitle, type ChatRoom } from '../chat/messages';
 import { gateOfRoom } from '../chat/tokenRooms';
 import { alwaysOpenBarText, canHostRoom, isAlwaysOpenTicker, roomSpaceOpen } from './model';
 import { NameSpaceSheet } from './LiveBanner';
-import { SpaceScreen } from './SpaceScreen';
+import { SpaceScreen } from './LazySpaceScreen';
 import { DoorKeeper } from './DoorKeeper';
 import { TRANSCRIPTION_MODES, type TranscriptionMode } from './transcription';
 import { TRANSCRIPTION_ENABLED } from '../storeBuild';

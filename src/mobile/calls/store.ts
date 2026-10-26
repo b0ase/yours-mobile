@@ -9,7 +9,8 @@ import { usdToSats } from '../money/money';
 import { PAID_CALLS_ENABLED } from '../storeBuild';
 import { CallsClient, walletCallSigner, type BlockEntry } from './api';
 import { fetchPeerBPhone, myRateCard } from './bphone';
-import { CallMedia } from './media';
+// Type only: the class (and livekit-client, ~0.55 MB) loads when a call joins (joinMedia), not at app start.
+import type { CallMedia } from './media';
 import { verifyCaller } from './peer';
 import { isShareCancelled } from './screenShare';
 import {
@@ -182,7 +183,7 @@ if (typeof document !== 'undefined') {
 
 async function joinMedia(callId: string) {
   if (!client) throw new Error('Calls are not ready');
-  const t = await client.token(callId);
+  const [{ CallMedia }, t] = await Promise.all([import('./media'), client.token(callId)]);
   const s = snap.call;
   const camera = 'camera' in s ? s.camera : false;
   const facing = 'facing' in s ? s.facing : 'user';
