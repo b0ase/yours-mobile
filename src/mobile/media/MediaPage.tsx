@@ -19,6 +19,7 @@ import { PAY_STREAM_ENABLED, RELEASES_ENABLED } from '../storeBuild';
 import { TopNav } from '../../components/TopNav';
 import { PullToRefresh } from '../ui/PullToRefresh';
 import { ErrorActions } from '../errors/ErrorActions';
+import { useLibraryOwner } from './library/useLibraryOwner';
 
 /**
  * /m/media — a music store front in bWalletX black and gold: a banner of featured square covers,
@@ -31,6 +32,8 @@ import { ErrorActions } from '../errors/ErrorActions';
 // bWalletX only: absent from a store build (PAY_STREAM_ENABLED).
 const StreamAlbum = PAY_STREAM_ENABLED ? lazy(() => import('./stream/StreamAlbum')) : null;
 const FeaturedTracks = PAY_STREAM_ENABLED ? lazy(() => import('./stream/FeaturedTracks')) : null;
+// The owner's private library (library/library.ts): a lazy chunk, mounted only for the owner's handle.
+const OwnerLibrary = lazy(() => import('./library/OwnerLibrary'));
 
 /** Page layout: Cards (banner + shelves), List (tracks only), Hybrid (banner with tracks + track list). */
 type View = 'cards' | 'list' | 'hybrid';
@@ -223,6 +226,7 @@ const MediaPage = () => {
   const [open, setOpen] = useState<MediaItem | null>(null);
   const [slide, setSlide] = useState(0);
   const player = usePlayer();
+  const libraryOwner = useLibraryOwner();
   const nowPlaying = player.queue[player.index];
   const durations = useDurations(FEATURED_TRACKS);
 
@@ -657,6 +661,11 @@ const MediaPage = () => {
           />
         ) : (
           <>
+            {showMusic && libraryOwner && (
+              <Suspense fallback={null}>
+                <OwnerLibrary />
+              </Suspense>
+            )}
             {showMusic && <YourPodcasts />}
             {showMusic && hero && view !== 'list' && (
               <section
