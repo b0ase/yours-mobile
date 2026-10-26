@@ -10,7 +10,7 @@
  *           (info "bwallet-pair-code-v2"). Links without it (older sites and CLIs): the legacy 4 digits, first 2 bytes
  *           of SHA-256(key bits).
  */
-import { PrivateKey, PublicKey, Signature, Utils } from '@bsv/sdk';
+import { Hash, PrivateKey, PublicKey, Signature, Utils } from '@bsv/sdk';
 
 export const PAIR_VERSION = '1';
 export const PAIR_INFO = 'bwallet-pair-v1';
@@ -247,11 +247,41 @@ export async function verifyPairProofs(link: PairLink, f: typeof fetch = fetch):
 /** A fresh relay role claim (16 random bytes): the relay then admits this role only with the same claim. */
 export const newClaim = () => b64url(crypto.getRandomValues(new Uint8Array(16)));
 
-export const relaySocketUrl = (relay: string, channel: string, role: Role, expiry?: number, claim?: string) => {
+const WALLET_CLAIM_INFO = 'bwallet-pair-wallet-claim-v1';
+const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+
+/**
+ * The wallet's relay claim for a fresh QR (b-Aware 26 Oct 2026, N3-2): SHA-256 of the channel and the site's pairing
+ * key, both read from the QR. The site sends its digest (`wc`) when it opens the channel; the relay sees only the
+ * channel ID, so a stranger who learns that can't produce this claim or lock the phone out.
+ */
+export function walletClaimFor(channel: string, sitePub: string): string {
+  // Synchronous (@bsv/sdk Hash) so a scan opens its socket at once; same bytes as bwalletx-connect's async version.
+  return b64url(new Uint8Array(Hash.sha256(Utils.toArray(`${WALLET_CLAIM_INFO}|${channel}|${sitePub}`, 'utf8'))));
+}
+
+/** SHA-256 (hex) of a claim: what the relay stores and what a site sends as `wc`. */
+export async function claimDigest(claim: string): Promise<string> {
+  return hex(new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(claim))));
+}
+
+/**
+ * The relay socket URL. `claim` binds the role to this client; a site opening a new channel also passes `walletClaimHash`
+ * (claimDigest(walletClaimFor(...))) so only the phone that scanned the QR can take the wallet role.
+ */
+export const relaySocketUrl = (
+  relay: string,
+  channel: string,
+  role: Role,
+  expiry?: number,
+  claim?: string,
+  walletClaimHash?: string,
+) => {
   const local = /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(relay);
   const q = new URLSearchParams({ role });
   if (expiry) q.set('e', String(expiry));
   if (claim) q.set('claim', claim);
+  if (walletClaimHash && role === 'site') q.set('wc', walletClaimHash);
   return `${local ? 'ws' : 'wss'}://${relay}/v1/c/${channel}?${q}`;
 };
 

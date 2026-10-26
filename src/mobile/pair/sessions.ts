@@ -14,6 +14,7 @@ import {
   parsePairUrl,
   relaySocketUrl,
   newClaim,
+  walletClaimFor,
   isAllowedRelay,
   verifyPairProofs,
   type HelloFrame,
@@ -549,7 +550,16 @@ export function beginPairing(scanned: string, opts: { allowCli?: boolean } = {})
   // pair the CLI themselves (Agents, Settings), never from the general scanner or a link that opened the app.
   if (link.o === CLI_ORIGIN && !opts.allowCli) return Promise.reject(new Error(CLI_ONLY_FROM_SETTINGS));
   const P = PrivateKey.fromRandom();
-  const claim = newClaim();
+  // Bound to the QR (N3-2): a site that registered this claim's digest lets only us take the wallet role.
+  return connectPairing(link, P, walletClaimFor(link.c, link.k), opts);
+}
+
+function connectPairing(
+  link: PairLink,
+  P: PrivateKey,
+  claim: string,
+  opts: { allowCli?: boolean },
+): Promise<PendingPair> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(relaySocketUrl(link.r, link.c, 'wallet', undefined, claim));
     let settled = false;
