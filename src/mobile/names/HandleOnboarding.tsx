@@ -1,5 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Sparkles, X } from 'lucide-react';
+import { Coins, MessageCircle, Sparkles, X } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { useBottomMenu } from '../../hooks/useBottomMenu';
+import { asMenuItem } from '../tabs/tabs';
+import { requestRoomByTicker } from '../chat/segmentNav';
+import { chatClient } from '../tickets/mintTicket';
+import { PersonalTokenLauncher } from './PersonalTokenLauncher';
+import { ensureNameRoom, getNameRooms, onNameRoomsChange, orderNameRooms, type NameRoom } from './nameRooms';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useLegacyKeys } from './useLegacyKeys';
 import { accountNamesFor } from './accountNames';
@@ -37,6 +44,39 @@ export const HandleOnboarding = () => {
   const [open, setOpen] = useState(false);
   const [dismissed, setDismissed] = useState(() => isCardDismissed(id));
   const [hasRoom, setHasRoom] = useState(() => !!getPersonalLink(id));
+  // Owner, 26 Oct 2026: "Open your $name room" opens the name's free room in Chat (nameRooms.ts), never Choose your
+  // handle; the token launcher has its own "Launch your tokens" card.
+  const [nameRooms, setNameRooms] = useState<NameRoom[]>(() => getNameRooms(id));
+  useEffect(() => onNameRoomsChange(() => setNameRooms(getNameRooms(id))), [id]);
+  const [launching, setLaunching] = useState(false);
+  const [chooser, setChooser] = useState<NameRoom[] | null>(null);
+  const [roomBusy, setRoomBusy] = useState(false);
+  const [roomError, setRoomError] = useState('');
+  const navigate = useNavigate();
+  const { handleSelect } = useBottomMenu();
+  const goRoom = (ticker: string) => {
+    setChooser(null);
+    requestRoomByTicker(ticker, false);
+    handleSelect(asMenuItem('chat'));
+    navigate('/m/chat');
+  };
+  /** The primary name's room (made now, free, if this device has none yet); several rooms → a chooser, primary first. */
+  const openNameRoom = async () => {
+    setRoomError('');
+    const have = orderNameRooms(getNameRooms(id));
+    if (have.length > 1) return setChooser(have);
+    if (have.length === 1) return goRoom(have[0].ticker);
+    const alias = (accountNamesFor(id).payable || '').split('@')[0];
+    if (!apiContext || !id || !alias) return;
+    setRoomBusy(true);
+    try {
+      goRoom((await ensureNameRoom(await chatClient(apiContext), id, alias, true)).ticker);
+    } catch (e) {
+      setRoomError(e instanceof Error ? e.message : 'Could not open your room');
+    } finally {
+      setRoomBusy(false);
+    }
+  };
 
   useEffect(() => {
     const update = () => {
@@ -120,6 +160,7 @@ export const HandleOnboarding = () => {
   };
 
   if (LINK_ACCOUNTS_ENABLED && linking && id) return <LinkAccountsStep owner={id} onClose={() => setLinking(false)} />;
+  if (launching) return <PersonalTokenLauncher onClose={() => setLaunching(false)} />;
   if (open)
     return (
       <HandleFlow onClose={close} title={getPendingPrompt()?.reason === 'create' ? 'Claim your name' : undefined} />
@@ -127,29 +168,84 @@ export const HandleOnboarding = () => {
   // An unindexed personal token is offered by the Wallet's indexing list (tokens/WalletIndexing), once.
   // Not before the name check has answered: a restored wallet that owns a name must never be asked for one.
   const linkCard = LINK_ACCOUNTS_ENABLED && id ? <LinkAccountsCard owner={id} /> : null;
-  if (!id || !synced || !shouldShowCard(handleComplete(hasName, hasRoom || !PAID_FEATURES_ENABLED), dismissed, open))
-    return linkCard;
-  return (
-    <>
+  // "Launch your tokens" (owner, 26 Oct 2026): the personal token launcher, moved out of onboarding. Optional, later.
+  const tokenCard =
+    id && synced && hasName && PAID_FEATURES_ENABLED && !hasRoom ? (
       <div
-        className="relative flex items-center gap-3 w-[92%] mt-4 rounded-2xl px-4 py-3 cursor-pointer"
+        className="flex items-center gap-3 w-[92%] mt-4 rounded-2xl px-4 py-3 cursor-pointer"
         style={{ background: 'var(--bw-surface)', border: '1px solid var(--bw-line, #3a2f0c)' }}
-        onClick={() => setOpen(true)}
+        onClick={() => setLaunching(true)}
         role="button"
-        aria-label="Get your $name"
+        aria-label="Launch your tokens"
+        data-testid="launch-tokens-card"
       >
         <span
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
           style={{ background: 'var(--bw-tint, #2a2410)' }}
         >
-          <Sparkles size={16} color="var(--bw-accent-hi)" />
+          <Coins size={16} color="var(--bw-accent-hi)" />
         </span>
         <div className="flex-1 min-w-0">
           <div className="text-sm font-bold" style={{ color: 'var(--bw-accent-hi)' }}>
-            {handleCardTitle(hasName, importSym)}
+            {importSym ? handleCardTitle(true, importSym) : 'Launch your tokens'}
           </div>
           <div className="text-[11px]" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
-            {handleCardText(hasName)}
+            Optional: a personal token on your own launch curve. Your rooms are free without one.
+          </div>
+        </div>
+      </div>
+    ) : null;
+  const roomChooser = chooser ? (
+    <div className="w-[92%] mt-2 rounded-2xl p-2" style={{ background: 'var(--bw-surface)' }} role="menu">
+      {chooser.map((r) => (
+        <button
+          key={r.ticker}
+          type="button"
+          onClick={() => goRoom(r.ticker)}
+          className="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-sm text-white bg-transparent border-0"
+        >
+          <span>${r.alias}&apos;s room</span>
+          {r.primary ? (
+            <span className="text-[11px]" style={{ color: 'var(--bw-accent-hi)' }}>
+              Primary
+            </span>
+          ) : null}
+        </button>
+      ))}
+    </div>
+  ) : null;
+  if (!id || !synced || !shouldShowCard(handleComplete(hasName, nameRooms.length > 0), dismissed, open))
+    return (
+      <>
+        {tokenCard}
+        {linkCard}
+      </>
+    );
+  return (
+    <>
+      <div
+        className="relative flex items-center gap-3 w-[92%] mt-4 rounded-2xl px-4 py-3 cursor-pointer"
+        style={{ background: 'var(--bw-surface)', border: '1px solid var(--bw-line, #3a2f0c)' }}
+        onClick={() => (hasName ? void openNameRoom() : setOpen(true))}
+        role="button"
+        aria-label={hasName ? 'Open your $name room' : 'Get your $name'}
+      >
+        <span
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
+          style={{ background: 'var(--bw-tint, #2a2410)' }}
+        >
+          {hasName ? (
+            <MessageCircle size={16} color="var(--bw-accent-hi)" />
+          ) : (
+            <Sparkles size={16} color="var(--bw-accent-hi)" />
+          )}
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-bold" style={{ color: 'var(--bw-accent-hi)' }}>
+            {roomBusy ? 'Opening your room…' : handleCardTitle(hasName, null)}
+          </div>
+          <div className="text-[11px]" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
+            {roomError || (hasName ? 'Free. Invite guests or open it to visitors, your choice.' : handleCardText(hasName))}
           </div>
         </div>
         <button
@@ -164,6 +260,8 @@ export const HandleOnboarding = () => {
           <X size={14} color="#98A2B3" />
         </button>
       </div>
+      {roomChooser}
+      {tokenCard}
       {linkCard}
     </>
   );
