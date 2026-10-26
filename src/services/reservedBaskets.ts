@@ -51,12 +51,36 @@ const walletOutpoints = async (list: ListFn, self: unknown, admin: string): Prom
   return out;
 };
 
+/**
+ * 64-hex basket names the wallet itself issues. None today. Every other 64-hex name is treated as a toolbox special
+ * operation (b-Aware 26 Oct 2026, N2).
+ */
+const ISSUED_HEX_BASKETS = new Set<string>();
+
+/**
+ * A toolbox listOutputs special operation (sdk.specOpWalletBalance, specOpInvalidChange, …) or any other 64-hex
+ * name the wallet did not issue. The toolbox rewrites these into queries over every basket (b-Aware 26 Oct 2026,
+ * N2: specOpInvalidChange with the 'all' tag listed spent outputs across reserved baskets, decrypted custom
+ * instructions included), so no outside site may name one.
+ */
+export const isSpecOpBasket = (basket: unknown): boolean => {
+  if (typeof basket !== 'string') return false;
+  const b = basket.trim().toLowerCase();
+  return /^[0-9a-f]{64}$/.test(b) && !ISSUED_HEX_BASKETS.has(b);
+};
+
 export const isReservedBasket = (basket: unknown): boolean => {
   if (typeof basket !== 'string') return false;
   const b = basket.trim().toLowerCase();
   if (!b) return false;
-  return RESERVED.has(b) || b.startsWith('admin') || b.startsWith('bwalletx.');
+  return RESERVED.has(b) || b.startsWith('admin') || b.startsWith('bwalletx.') || isSpecOpBasket(b);
 };
+
+/** How a sheet names a basket: names the wallet can't describe (special operations, hex) read "Unknown basket". */
+export const basketDisplayName = (basket: unknown): string =>
+  typeof basket !== 'string' || !basket.trim() || isSpecOpBasket(basket) || /^[0-9a-f]{32,}$/i.test(basket.trim())
+    ? 'Unknown basket'
+    : basket;
 
 type BasketGrantStore = {
   listGrants(filter?: { type?: 'basket' }): Promise<{ key: { type: string; originator: string; basket?: string } }[]>;
@@ -64,8 +88,8 @@ type BasketGrantStore = {
 };
 
 /**
- * Remove every stored grant an outside originator holds for a reserved basket (upgrade migration; safe to run on
- * every unlock). The site-trust and block records are kept: they are not basket grants. Returns how many were removed.
+ * Remove every stored grant an outside originator holds for a reserved basket, special-operation (64-hex) names
+ * included (upgrade migration; safe to run on every unlock). The site-trust and block records are kept: they are not basket grants. Returns how many were removed.
  */
 export const revokeReservedBasketGrants = async (store: BasketGrantStore, adminOriginator: string) => {
   const grants = await store.listGrants({ type: 'basket' });

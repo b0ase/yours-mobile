@@ -19,6 +19,7 @@ import { confirmUsbForApproval } from '../../services/usbPresence';
 import { SiteThemeOffer } from '../../mobile/theme/SiteThemeOffer';
 import { familySite } from '../../mobile/theme/themeSites';
 import { DollarAmount, useSheetPrice } from '../../components/DollarAmount';
+import { basketDisplayName } from '../../services/reservedBaskets';
 
 export type GroupedPermissionRequestProps = {
   request: GroupedPermissionRequestType;
@@ -270,7 +271,7 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
               />
               <div className="flex flex-col min-w-0">
                 <span className="text-xs font-medium" style={{ color: theme.color.global.contrast }}>
-                  {b.basket}
+                  {basketDisplayName(b.basket)}
                 </span>
                 {b.description && (
                   <span className="text-xs mt-0.5 opacity-60" style={{ color: theme.color.global.contrast }}>

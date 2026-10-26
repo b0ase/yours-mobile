@@ -1,5 +1,5 @@
 diff --git a/out/index.client.cjs b/out/index.client.cjs
-index af2c513176b1265c5a02d8242ac87fc1c6805ad1..b988fed9f4bc87af6c04e4c1299962117bf444fa 100644
+index af2c513176b1265c5a02d8242ac87fc1c6805ad1..3170cd4b096573b8359c0897a2ceb182aaf7a93d 100644
 --- a/out/index.client.cjs
 +++ b/out/index.client.cjs
 @@ -3593,6 +3593,10 @@ var EntityOutputTagMap = class EntityOutputTagMap extends EntityBase {
@@ -24,18 +24,42 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..b988fed9f4bc87af6c04e4c129996211
  		const ef = verifyOneOrNone(await storage.findTxLabelMaps({
  			partial: {
  				transactionId,
-@@ -19797,7 +19805,9 @@ async function loadIdbOutputs(query) {
+@@ -12865,6 +12873,12 @@ function isWalletSigner(args) {
+ 	return "isWalletSigner" in args && args.isWalletSigner;
+ }
+ var Wallet = class {
++	/**
++	* bWalletX (b-Aware 26 Oct 2026, N2): originators other than none (the wallet's own direct calls) that may name a
++	* listOutputs special-operation basket. The app adds its admin originator. Everyone else is refused: a specOp
++	* rewrites the query to every basket, so a site naming one could read the wallet's reserved baskets.
++	*/
++	static bwxSpecOpOriginators = /* @__PURE__ */ new Set();
+ 	chain;
+ 	keyDeriver;
+ 	storage;
+@@ -13092,6 +13106,7 @@ var Wallet = class {
+ 	}
+ 	async listOutputs(args, originator) {
+ 		(0, _bsv_sdk_wallet_validationHelpers.validateOriginator)(originator);
++		if (typeof args?.basket === "string" && /^[0-9a-f]{64}$/i.test(args.basket.trim()) && originator !== void 0 && !Wallet.bwxSpecOpOriginators.has(originator)) throw new WERR_INVALID_PARAMETER("basket", "a basket this app may use (special operations are for the wallet only)");
+ 		const { vargs } = this.validateAuthAndArgs(args, validateListOutputsArgs);
+ 		if (this.autoKnownTxids && !vargs.knownTxids) vargs.knownTxids = this.getKnownTxids();
+ 		const storageArgs = this.actionBatch.hasWorkspace && vargs.basket !== "893b7646de0e1c9f741bd6e9169b76a8847ae34adef7bef1e6a285371206d2e8" && !vargs.tags.includes("893b7646de0e1c9f741bd6e9169b76a8847ae34adef7bef1e6a285371206d2e8") ? {
+@@ -19797,7 +19812,12 @@ async function loadIdbOutputs(query) {
  	const args = {
  		partial: {
  			userId,
 -			basketId,
 +			// bWalletX: the "all" tag clears basketId to mean every basket; an undefined key is refused by
 +			// assertNoUndefinedInPartial, which broke the invalid-change review with ['release', 'all'].
-+			...basketId !== void 0 ? { basketId } : {},
++			// Fail closed (b-Aware 26 Oct 2026, N2): only a special operation may drop the basket filter.
++			...basketId !== void 0 ? { basketId } : specOp ? {} : (() => {
++				throw new WERR_INVALID_OPERATION("listOutputs needs a basket");
++			})(),
  			spendable: true,
  			...specOp?.managedChangeOnly ? managedChangeOutputFields : {}
  		},
-@@ -38451,10 +38461,19 @@ var Monitor = class Monitor {
+@@ -38451,10 +38471,19 @@ var Monitor = class Monitor {
  	async runOnce() {
  		await this.ensureEventSubscriptions();
  		await this.setupTasksOnce();
@@ -56,7 +80,7 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..b988fed9f4bc87af6c04e4c129996211
  	* Best-effort attempt to (re)register the optional Chaintracks header/reorg
  	* push subscriptions ahead of this scheduler tick.
  	*
-@@ -38514,6 +38533,7 @@ var Monitor = class Monitor {
+@@ -38514,6 +38543,7 @@ var Monitor = class Monitor {
  		const tasks = [];
  		const now = Date.now();
  		for (const task of this._tasks) try {
@@ -64,7 +88,7 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..b988fed9f4bc87af6c04e4c129996211
  			if (task.trigger(now).run) tasks.push(task);
  		} catch (error_) {
  			await this.logTaskError(task, "trigger", "error0", error_);
-@@ -38522,7 +38542,7 @@ var Monitor = class Monitor {
+@@ -38522,7 +38552,7 @@ var Monitor = class Monitor {
  	}
  	async runScheduledTask(task) {
  		try {
@@ -73,7 +97,7 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..b988fed9f4bc87af6c04e4c129996211
  			const log = await task.runTask();
  			if (log.length === 0) return;
  			const details = task.name === "MonitorCallHistory" ? "..." : safeDiagnostic(log, 1024);
-@@ -38567,6 +38587,13 @@ var Monitor = class Monitor {
+@@ -38567,6 +38597,13 @@ var Monitor = class Monitor {
  	async logEvent(event, details) {
  		if (typeof event !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(event)) throw new WERR_INVALID_PARAMETER("event", "a bounded control-free monitor event name");
  		const boundedDetails = details == null ? void 0 : safeDiagnostic(details, 8192);
@@ -88,7 +112,7 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..b988fed9f4bc87af6c04e4c129996211
  			await sp.insertMonitorEvent({
  				created_at: /* @__PURE__ */ new Date(),
 diff --git a/out/index.client.mjs b/out/index.client.mjs
-index 5d9233efe5b3e60fcb88b8f260eb65e871945552..3a302546992cca3de7f3e98a5a6a4dc0166e168b 100644
+index 5d9233efe5b3e60fcb88b8f260eb65e871945552..4327504b5a5a0392f03e581870d5143de8d899c1 100644
 --- a/out/index.client.mjs
 +++ b/out/index.client.mjs
 @@ -3558,6 +3558,10 @@ var EntityOutputTagMap = class EntityOutputTagMap extends EntityBase {
@@ -113,18 +137,42 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..3a302546992cca3de7f3e98a5a6a4dc0
  		const ef = verifyOneOrNone(await storage.findTxLabelMaps({
  			partial: {
  				transactionId,
-@@ -19762,7 +19770,9 @@ async function loadIdbOutputs(query) {
+@@ -12830,6 +12838,12 @@ function isWalletSigner(args) {
+ 	return "isWalletSigner" in args && args.isWalletSigner;
+ }
+ var Wallet = class {
++	/**
++	* bWalletX (b-Aware 26 Oct 2026, N2): originators other than none (the wallet's own direct calls) that may name a
++	* listOutputs special-operation basket. The app adds its admin originator. Everyone else is refused: a specOp
++	* rewrites the query to every basket, so a site naming one could read the wallet's reserved baskets.
++	*/
++	static bwxSpecOpOriginators = /* @__PURE__ */ new Set();
+ 	chain;
+ 	keyDeriver;
+ 	storage;
+@@ -13057,6 +13071,7 @@ var Wallet = class {
+ 	}
+ 	async listOutputs(args, originator) {
+ 		validateOriginator(originator);
++		if (typeof args?.basket === "string" && /^[0-9a-f]{64}$/i.test(args.basket.trim()) && originator !== void 0 && !Wallet.bwxSpecOpOriginators.has(originator)) throw new WERR_INVALID_PARAMETER("basket", "a basket this app may use (special operations are for the wallet only)");
+ 		const { vargs } = this.validateAuthAndArgs(args, validateListOutputsArgs$1);
+ 		if (this.autoKnownTxids && !vargs.knownTxids) vargs.knownTxids = this.getKnownTxids();
+ 		const storageArgs = this.actionBatch.hasWorkspace && vargs.basket !== "893b7646de0e1c9f741bd6e9169b76a8847ae34adef7bef1e6a285371206d2e8" && !vargs.tags.includes("893b7646de0e1c9f741bd6e9169b76a8847ae34adef7bef1e6a285371206d2e8") ? {
+@@ -19762,7 +19777,12 @@ async function loadIdbOutputs(query) {
  	const args = {
  		partial: {
  			userId,
 -			basketId,
 +			// bWalletX: the "all" tag clears basketId to mean every basket; an undefined key is refused by
 +			// assertNoUndefinedInPartial, which broke the invalid-change review with ['release', 'all'].
-+			...basketId !== void 0 ? { basketId } : {},
++			// Fail closed (b-Aware 26 Oct 2026, N2): only a special operation may drop the basket filter.
++			...basketId !== void 0 ? { basketId } : specOp ? {} : (() => {
++				throw new WERR_INVALID_OPERATION("listOutputs needs a basket");
++			})(),
  			spendable: true,
  			...specOp?.managedChangeOnly ? managedChangeOutputFields : {}
  		},
-@@ -38416,10 +38426,19 @@ var Monitor = class Monitor {
+@@ -38416,10 +38436,19 @@ var Monitor = class Monitor {
  	async runOnce() {
  		await this.ensureEventSubscriptions();
  		await this.setupTasksOnce();
@@ -145,7 +193,7 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..3a302546992cca3de7f3e98a5a6a4dc0
  	* Best-effort attempt to (re)register the optional Chaintracks header/reorg
  	* push subscriptions ahead of this scheduler tick.
  	*
-@@ -38479,6 +38498,7 @@ var Monitor = class Monitor {
+@@ -38479,6 +38508,7 @@ var Monitor = class Monitor {
  		const tasks = [];
  		const now = Date.now();
  		for (const task of this._tasks) try {
@@ -153,7 +201,7 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..3a302546992cca3de7f3e98a5a6a4dc0
  			if (task.trigger(now).run) tasks.push(task);
  		} catch (error_) {
  			await this.logTaskError(task, "trigger", "error0", error_);
-@@ -38487,7 +38507,7 @@ var Monitor = class Monitor {
+@@ -38487,7 +38517,7 @@ var Monitor = class Monitor {
  	}
  	async runScheduledTask(task) {
  		try {
@@ -162,7 +210,7 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..3a302546992cca3de7f3e98a5a6a4dc0
  			const log = await task.runTask();
  			if (log.length === 0) return;
  			const details = task.name === "MonitorCallHistory" ? "..." : safeDiagnostic(log, 1024);
-@@ -38532,6 +38552,13 @@ var Monitor = class Monitor {
+@@ -38532,6 +38562,13 @@ var Monitor = class Monitor {
  	async logEvent(event, details) {
  		if (typeof event !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(event)) throw new WERR_INVALID_PARAMETER("event", "a bounded control-free monitor event name");
  		const boundedDetails = details == null ? void 0 : safeDiagnostic(details, 8192);
