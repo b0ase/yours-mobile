@@ -348,6 +348,8 @@ export interface SheetLine {
   isNew?: boolean;
   /** For a key used only for your own data (counterparty self): what it keeps private, e.g. "Ask b chats". */
   privateLabel?: string;
+  /** Part of a first post (identity basket or post signature): what the POST card's face describes. */
+  post?: boolean;
 }
 
 export interface SheetPayment {
@@ -565,6 +567,7 @@ export const buildSheetModel = (bundle: Pick<PermissionBundle, 'originator' | 'i
       checked,
       signIn: isSignInRequest(r),
       privateLabel: privateLabelFor(r),
+      ...(isPostSignature(r) || isPostBasket(r) ? { post: true } : {}),
     });
   }
   const mode: SheetModel['mode'] = payment ? (lines.length ? 'connectAndPay' : 'pay') : 'connect';
@@ -592,7 +595,44 @@ export const buildSheetModel = (bundle: Pick<PermissionBundle, 'originator' | 'i
 export interface SheetView {
   faceTicks?: ReadonlySet<string>;
   hidden?: ReadonlySet<string>;
+  /**
+   * Lines the face of this card describes in words without their own tick (the SIGN IN card's sign-in lines, the
+   * PRIVATE card's named keys, the POST card's post lines, the CONNECT card's pre-ticked tiles). With Details never
+   * opened, a line that is neither a face tick nor in here was never shown, so Allow denies it (b-Aware, 26 Oct 2026:
+   * a single Allow granted every routine line, ticked or not, drawn or not). Missing: nothing undrawn is granted.
+   */
+  summarised?: ReadonlySet<string>;
 }
+
+/** Card kind, as approvalKindForSheet names it (kept as a string here to avoid an import cycle). */
+type FaceKind = 'signin' | 'connect' | 'pay' | 'mint' | 'careful' | 'post' | 'private';
+
+/** The lines a card's face describes without drawing them (see SheetView.summarised). Fails closed. */
+export const faceSummary = (model: Pick<SheetModel, 'lines'>, kind?: FaceKind): Set<string> => {
+  const routine = model.lines.filter((l) => !l.risky && !l.isNew);
+  const firstLabel = routine.find((l) => l.privateLabel)?.privateLabel;
+  const described = (l: SheetLine): boolean => {
+    switch (kind) {
+      case 'signin':
+        return l.signIn === true;
+      case 'private':
+        return (l.signIn === true && l.checked) || (!!firstLabel && l.privateLabel === firstLabel);
+      case 'post':
+        return l.post === true;
+      // CONNECT tiles name the kinds of access, so only what the card pre-ticks; an unticked key line is
+      // only ever granted by ticking it in Details (audit C1).
+      case 'connect':
+        return l.checked;
+      // PAY (and a mint) show the amount: only the sign-in it implies ("Connect & pay") rides along.
+      case 'pay':
+      case 'mint':
+        return l.signIn === true && l.checked;
+      default:
+        return false;
+    }
+  };
+  return new Set(routine.filter(described).map((l) => l.requestID));
+};
 
 /**
  * The face of a sheet. The careful card draws every line with its tick: the risky ones large, the ordinary ones
@@ -604,7 +644,9 @@ export const sheetView = (
   careful: boolean,
   /** Lines whose row has been fully on screen. Given, every other line counts as hidden until it scrolls in. */
   seen?: ReadonlySet<string>,
+  kind?: FaceKind,
 ): Required<SheetView> => ({
+  summarised: careful ? new Set<string>() : faceSummary(model, kind),
   // Lines that joined live are drawn up front with their own tick on every card ("New: …").
   faceTicks: new Set(model.lines.filter((l) => careful || l.isNew).map((l) => l.requestID)),
   hidden: new Set(seen ? model.lines.filter((l) => !seen.has(l.requestID)).map((l) => l.requestID) : []),
@@ -631,6 +673,11 @@ export const sheetDecisions = (
     // must never deny a line the user saw (paid playtest, 25 Oct 2026: "I trust it, allow" denied a joined line).
     // It is left out of the answer, so resolve() carries it to a sheet of its own. Not now still declines it.
     if (approve && l.isNew && ticks[l.requestID] === undefined) continue;
+    // Not drawn and not described by the face: the user never saw it, so Allow denies it (fail closed).
+    if (!drawn && !l.isNew && !view.summarised?.has(l.requestID)) {
+      decisions[l.requestID] = false;
+      continue;
+    }
     const ticked = ticks[l.requestID] ?? (l.isNew ? false : l.checked || (!l.risky && !drawn));
     decisions[l.requestID] = approve && ticked;
   }
