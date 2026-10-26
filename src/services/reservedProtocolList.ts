@@ -53,6 +53,8 @@ export const RESERVED_PROTOCOLS: readonly Protocol[] = [
   [2, 'bpositive'],
   // b-Aware payout address proof (src/mobile/kyc/payoutProof.ts). Reserved so no app can forge one.
   [2, 'bwalletx payout proof'],
+  // Signed notes / IOUs (src/mobile/notes/signedNote.ts). Reserved so no app can sign a note in your name.
+  [2, 'bwalletx signed note'],
   // The legacy ordinals key (addresses.ordAddress), watched by the sync (src/services/legacyOrd.ts).
   [2, 'bwalletx legacy ord'],
 ];

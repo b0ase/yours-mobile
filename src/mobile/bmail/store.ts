@@ -250,7 +250,7 @@ export const takeBMailComposeTo = () => {
  * Owner, 26 Oct 2026: a compose link (meeting.ts parseComposeLink) opens Compose pre-filled; the user reviews it and
  * presses Send, which is the normal send path (postage, approval). Nothing is ever sent from here.
  */
-export type BMailDraftRequest = { to?: string; subject?: string; body?: string };
+export type BMailDraftRequest = { to?: string; subject?: string; body?: string; note?: unknown };
 let composeDraft: BMailDraftRequest | null = null;
 export const openBMailDraft = (d: BMailDraftRequest) => {
   composeDraft = { ...d };
