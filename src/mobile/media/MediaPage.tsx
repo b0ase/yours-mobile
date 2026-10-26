@@ -2,7 +2,7 @@ import { useWithoutHidden } from '../albums/useAlbums';
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { invertOnLightClass } from './invertOnLight';
 import { useLocation, useNavigate, useNavigationType, useParams } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Home, LayoutGrid, Pause, Play, Users } from 'lucide-react';
+import { ChevronLeft, ChevronRight, MoreHorizontal, Pause, Play } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { Blurred } from '../market/NftCard';
 import { MediaViewer } from './MediaViewer';
@@ -208,6 +208,7 @@ const MediaPage = () => {
   const idx = historyIdx();
   if (navType === 'PUSH' || idx > maxIdx) maxIdx = idx;
   const canForward = idx < maxIdx;
+  const [menu, setMenu] = useState(false);
   const [view, setViewRaw] = useState<View>(readView);
   const setView = (v: View) => {
     setViewRaw(v);
@@ -532,99 +533,118 @@ const MediaPage = () => {
       <TopNav />
       {/* Room for the top bar as its own block: Desktop hides the header below, and its margin went with it. */}
       <div className="h-14 shrink-0" aria-hidden />
+      {/* One header: back, the title (a breadcrumb inside an album), a ⋯ menu; then one wrapping row of tabs. */}
       <div
-        className="sticky top-14 z-10 flex flex-wrap items-center gap-x-2 gap-y-1.5 px-2 py-1.5"
+        className="sticky top-14 z-10 px-3 pt-1.5 pb-2"
         style={{ background: 'var(--bw-bg)', borderBottom: `1px solid ${LINE}` }}
       >
-        <nav className="flex flex-wrap items-center shrink-0" aria-label="Store navigation">
-          <button aria-label="Back" title="Back" onClick={close} className="p-1.5">
-            <ChevronLeft size={20} color="#fff" />
-          </button>
-          <button
-            aria-label="Forward"
-            title="Forward"
-            onClick={() => navigate(1)}
-            disabled={!canForward}
-            className="p-1.5"
-            style={{ opacity: canForward ? 1 : 0.3 }}
-          >
-            <ChevronRight size={20} color="#fff" />
-          </button>
-          <button aria-label="Media home" title="Media home" onClick={() => navigate(MEDIA_HOME)} className="p-1.5">
-            <Home size={17} color={!release && !browsing ? GOLD : '#fff'} />
-          </button>
-          <button
-            onClick={() => navigate(`${MEDIA_HOME}/browse`)}
-            className="ml-1 px-2 py-1 text-[11px] font-bold flex items-center gap-1"
-            style={{ border: `1px solid ${browsing ? GOLD : LINE}`, color: browsing ? GOLD : MUTED, borderRadius: 4 }}
-          >
-            <LayoutGrid size={12} /> Browse
-          </button>
-          {PAY_STREAM_ENABLED && (
-            <button
-              onClick={() => navigate(`${MEDIA_HOME}/artists`)}
-              className="ml-1 px-2 py-1 text-[11px] font-bold flex items-center gap-1"
-              style={{ border: `1px solid ${LINE}`, color: MUTED, borderRadius: 4 }}
-            >
-              <Users size={12} /> Artists
+        <div className="flex items-center gap-1 min-w-0">
+          {(release || browsing || albumId) && (
+            <button aria-label="Back" title="Back" onClick={close} className="p-1.5 -ml-1.5 shrink-0">
+              <ChevronLeft size={20} color="#fff" />
             </button>
           )}
-        </nav>
-        <h1 className={`text-sm md:text-base font-bold text-white min-w-0 ${ELLIPSIS}`}>
-          <button onClick={() => navigate(MEDIA_HOME)} className={release || browsing ? 'text-[#98A2B3]' : ''}>
-            Media
-          </button>
-          {browsing && <span> › Browse</span>}
-          {release && (
-            <>
-              <span style={{ color: MUTED }}> › {isAlbum(release) || release.release ? 'Albums' : 'Music'} › </span>
-              {release.title}
-            </>
-          )}
-        </h1>
-        {!release && !browsing && (
-          <div className="ml-auto flex flex-wrap items-center gap-1.5 pr-2">
-            <div className="flex items-center mr-2" role="group" aria-label="View">
-              {VIEWS.map((v) => (
-                <button
-                  key={v.id}
-                  onClick={() => setView(v.id)}
-                  aria-pressed={view === v.id}
-                  className="px-2 py-1 text-[11px] font-bold"
-                  style={{
-                    background: view === v.id ? PANEL : 'transparent',
-                    color: view === v.id ? GOLD : MUTED,
-                    border: `1px solid ${view === v.id ? GOLD : LINE}`,
-                  }}
+          <h1 className={`flex-1 text-lg font-bold text-white min-w-0 ${ELLIPSIS}`}>
+            <button onClick={() => navigate(MEDIA_HOME)} className={release ? 'text-[#98A2B3]' : ''}>
+              Media
+            </button>
+            {release && (
+              <>
+                <span style={{ color: MUTED }}> › </span>
+                {release.title}
+              </>
+            )}
+          </h1>
+          <div className="relative shrink-0">
+            <button
+              aria-label="More"
+              title="More"
+              aria-expanded={menu}
+              onClick={() => setMenu((x) => !x)}
+              className="p-1.5"
+            >
+              <MoreHorizontal size={20} color="#fff" />
+            </button>
+            {menu && (
+              <div
+                role="menu"
+                className="absolute right-0 top-full mt-1 z-20 w-48 p-1 flex flex-col text-sm"
+                style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 8 }}
+                onClick={() => setMenu(false)}
+              >
+                <div
+                  className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-widest"
+                  style={{ color: MUTED }}
                 >
-                  {v.label}
-                </button>
-              ))}
-            </div>
-            {FILTERS.map((f) => (
+                  View
+                </div>
+                {VIEWS.map((v) => (
+                  <button
+                    key={v.id}
+                    role="menuitemradio"
+                    aria-checked={view === v.id}
+                    onClick={() => setView(v.id)}
+                    className="px-3 py-2 text-left rounded"
+                    style={{ color: view === v.id ? GOLD : '#fff' }}
+                  >
+                    {v.label}
+                  </button>
+                ))}
+                {canForward && (
+                  <button
+                    role="menuitem"
+                    onClick={() => navigate(1)}
+                    className="px-3 py-2 text-left rounded text-white"
+                  >
+                    Forward
+                  </button>
+                )}
+                {RELEASES_ENABLED && (
+                  <button
+                    role="menuitem"
+                    onClick={() => navigate('/m/media/new')}
+                    className="px-3 py-2 text-left rounded"
+                    style={{ color: GOLD }}
+                  >
+                    Add a release
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+        {!release && (
+          <div className="flex flex-wrap gap-1.5 mt-1" role="tablist" aria-label="Media">
+            {[
+              ...FILTERS.map((f) => ({
+                id: f.id,
+                label: f.label,
+                on: !browsing && filter === f.id,
+                go: () => {
+                  setFilter(f.id);
+                  if (browsing) navigate(MEDIA_HOME);
+                },
+              })),
+              { id: 'browse', label: 'Browse', on: browsing, go: () => navigate(`${MEDIA_HOME}/browse`) },
+              ...(PAY_STREAM_ENABLED
+                ? [{ id: 'artists', label: 'Artists', on: false, go: () => navigate(`${MEDIA_HOME}/artists`) }]
+                : []),
+            ].map((t) => (
               <button
-                key={f.id}
-                onClick={() => setFilter(f.id)}
-                className="px-3 py-1 text-xs font-bold"
+                key={t.id}
+                role="tab"
+                aria-selected={t.on}
+                onClick={t.go}
+                className="h-8 px-3.5 text-xs font-bold rounded-full"
                 style={{
-                  borderRadius: 4,
-                  background: filter === f.id ? GOLD : PANEL,
-                  color: filter === f.id ? '#1a1300' : MUTED,
-                  border: `1px solid ${filter === f.id ? GOLD : LINE}`,
+                  background: t.on ? GOLD : PANEL,
+                  color: t.on ? '#1a1300' : MUTED,
+                  border: `1px solid ${t.on ? GOLD : LINE}`,
                 }}
               >
-                {f.label}
+                {t.label}
               </button>
             ))}
-            {RELEASES_ENABLED && (
-              <button
-                onClick={() => navigate('/m/media/new')}
-                className="ml-2 px-3 py-1 text-xs font-bold"
-                style={{ borderRadius: 4, border: `1px solid ${GOLD}`, color: GOLD }}
-              >
-                Add a release
-              </button>
-            )}
           </div>
         )}
       </div>

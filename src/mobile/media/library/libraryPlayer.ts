@@ -18,14 +18,25 @@ export const libraryQueue = (album: LibraryAlbum, onExpand?: () => void): Track[
     ...(onExpand ? { onExpand } : {}),
   }));
 
-export function playAlbum(album: LibraryAlbum, start = 0, onExpand?: () => void): void {
+/** The album now in the player: its colours and full cover for Now Playing (memory only, this session). */
+let playingAlbum: Pick<LibraryAlbum, 'id' | 'theme' | 'cover'> | null = null;
+export const libraryNowPlaying = () => playingAlbum;
+
+/**
+ * Starts an album in the app's one player. The <audio> element lives in player.ts (module level, outside every
+ * page), so changing tab or page never re-mounts or stops it. The mini player's tap opens Now Playing where you are.
+ */
+export function playAlbum(album: LibraryAlbum, start = 0, onExpand: () => void = () => setNowPlayingOpen(true)): void {
   if (!album.tracks.length) return;
+  playingAlbum = { id: album.id, theme: album.theme, cover: album.cover };
   playQueue(libraryQueue(album, onExpand), Math.max(0, Math.min(start, album.tracks.length - 1)));
 }
 
 /** Closing the player: playback stops. Nothing global was changed, so nothing needs putting back. */
 export function closeLibrary(): void {
   stop();
+  playingAlbum = null;
+  setNowPlayingOpen(false);
 }
 
 // Now Playing open / closed, shared with the mini player's expand.
