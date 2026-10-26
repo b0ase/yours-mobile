@@ -13,7 +13,11 @@
  * closest safe equivalent, run from the wallet's own list of nosend actions:
  *
  *  1. Every nosend action gets a deadline: its BRC-177 label if it has a valid one, else DEFAULT_TTL_S (24 h) from
- *     the first time this wallet saw it. `never` is never reclaimed. Deadlines are persisted and never restart.
+ *     the first time this wallet saw it. Whatever the label says (`never`, a far timestamp or block height, a long
+ *     duration), no hold lasts longer than MAX_HOLD_S (14 days) from first sight (owner 26 Oct 2026: sites may not hold
+ *     the user's coins forever). A blockheight label is checked against WhatsOnChain's height (wocHeight); if the
+ *     height can't be read the action simply isn't due yet. Deadlines are persisted and never restart. Reaching a
+ *     deadline only makes an action a candidate: step 2 decides.
  *  2. At the deadline, nothing is released unless the chain says, conclusively, that the original was not
  *     broadcast. The rules of services/unsentGuard.ts are kept and tightened:
  *       - the transaction is seen anywhere (WhatsOnChain or 1Sat) → hand it to the wallet's send path (sendWith), as
@@ -38,6 +42,11 @@ import { chainSaysUnknown, defaultLookups, type ChainLookup, type Sighting } fro
 export const DEFAULT_TTL_S = 24 * 60 * 60;
 /** How long a released transaction is watched in case its holder broadcasts it after all. */
 export const WATCH_S = 14 * 24 * 60 * 60;
+/**
+ * The longest any nosend action is held, whatever its BRC-177 label (owner 26 Oct 2026). Reaching it releases nothing
+ * by itself: the action still goes through every chain check below.
+ */
+export const MAX_HOLD_S = 14 * 24 * 60 * 60;
 /** Runs at most this often unless forced. */
 export const MIN_INTERVAL_MS = 10 * 60_000;
 
@@ -74,7 +83,10 @@ export function policyFromLabels(labels: readonly string[] | undefined): ExpiryP
   return { mode, value };
 }
 
-/** Has the deadline passed? `firstSeenS` is when this wallet first saw the action (the activation it can prove). */
+/**
+ * Has the deadline passed? `firstSeenS` is when this wallet first saw the action (the activation it can prove). Every
+ * policy, `never` included, is capped at MAX_HOLD_S from first sight.
+ */
 export function isExpired(
   p: ExpiryPolicy,
   firstSeenS: number,
@@ -82,6 +94,7 @@ export function isExpired(
   height: number | undefined,
   defaultTtlS = DEFAULT_TTL_S,
 ): boolean {
+  if (nowS >= firstSeenS + MAX_HOLD_S) return true;
   switch (p.mode) {
     case 'never':
       return false;
@@ -120,6 +133,23 @@ export const wocSpent =
         : { state: 'unclear' };
     } catch {
       return { state: 'unclear' };
+    }
+  };
+
+/**
+ * The chain height from WhatsOnChain /chain/info (`blocks`), as locks/verify.ts reads it. Any failure or odd answer
+ * gives undefined, so a blockheight deadline is simply not due yet (fail closed: the action stays held).
+ */
+export const wocHeight =
+  (f: F = (u, i) => fetch(u, i)) =>
+  async (): Promise<number | undefined> => {
+    try {
+      const r = await f('https://api.whatsonchain.com/v1/bsv/main/chain/info');
+      if (!r.ok) return undefined;
+      const blocks = ((await r.json()) as { blocks?: unknown }).blocks;
+      return typeof blocks === 'number' && Number.isSafeInteger(blocks) && blocks > 0 ? blocks : undefined;
+    } catch {
+      return undefined;
     }
   };
 
@@ -263,14 +293,12 @@ export async function expireOnce(deps: ExpiryDeps): Promise<ExpiryReport> {
   for (const a of actions) {
     report.checked++;
     const p = policyFromLabels(a.labels);
-    if (p.mode === 'never') {
-      keep(a.txid, 'never');
-      continue;
-    }
     if (!isExpired(p, state.first[a.txid], nowS, height, deps.defaultTtlS)) {
-      keep(a.txid, 'not-due');
+      keep(a.txid, p.mode === 'never' ? 'never' : 'not-due');
       continue;
     }
+    if (p.mode !== 'default' && nowS >= state.first[a.txid] + MAX_HOLD_S)
+      log(`[bwx-expiry] ${a.txid}: held ${MAX_HOLD_S / 86400} days (the most we allow), checking it like any deadline`);
     if ((p as { invalid?: string }).invalid)
       log(`[bwx-expiry] ${a.txid}: ${(p as { invalid?: string }).invalid}; using the default deadline`);
     if (await anySeen(a.txid, lookups)) {
