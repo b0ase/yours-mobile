@@ -4,6 +4,7 @@ import type { SocialProfile } from '../chat/api';
 import { BWALLET_PAYMAIL_API } from '../names/config';
 import { IS_EXTENSION } from '../extension';
 import { YoursNative } from '../native';
+import { bindLinkedHandles } from './linkedHandles';
 
 /**
  * "Continue with X / Google" on Create Account (owner, 4 Oct 2026). bWalletX's own sign-in service
@@ -122,6 +123,8 @@ export const pictureLinkPending = (owner: string) => {
 export const bindSocial = (identityAddress: string) => {
   const p = readAny();
   if (p && identityAddress && p.owner === NEW_ACCOUNT) write({ ...p, owner: identityAddress });
+  // The $name suggestions linked on Create move with it (owner, 26 Oct 2026: linkedHandles.ts).
+  bindLinkedHandles(NEW_ACCOUNT, identityAddress);
 };
 
 // bWalletX's own sign-in service (site/lib/social.js on the paymail server).
