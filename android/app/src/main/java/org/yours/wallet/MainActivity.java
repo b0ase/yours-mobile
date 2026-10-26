@@ -21,6 +21,8 @@ public class MainActivity extends BridgeActivity {
             }
         }
         super.onCreate(savedInstanceState);
+        // Old System WebView: Capacitor's bridge is open to every frame, so no frames load in the wallet WebView.
+        if (FrameGuardClient.framesUnsafe(getBridge())) getBridge().setWebViewClient(new FrameGuardClient(getBridge()));
         // Keep seed phrases and balances out of screenshots, screen recordings
         // and the recent-apps thumbnail. Debug builds skip it so QA can capture.
         if (!BuildConfig.DEBUG) {
