@@ -12,8 +12,9 @@ const fmt = (s: number) =>
  * screens), then the track title, a scrub bar and prev / play / next. Phone first; nothing scrolls sideways.
  * The album's colours are scoped to this overlay only (albumStyle); the wallet underneath keeps the user's theme.
  */
-export const NowPlaying = ({ onClose, theme }: { onClose: () => void; theme?: Palette }) => {
+export const NowPlaying = ({ onClose, theme, cover }: { onClose: () => void; theme?: Palette; cover?: string }) => {
   const [s, setS] = useState(getState);
+  const [fullFor, setFullFor] = useState<string | null>(null);
   useEffect(() => subscribe(setS), []);
   const track = s.queue[s.index];
   if (!track) return null;
@@ -35,16 +36,27 @@ export const NowPlaying = ({ onClose, theme }: { onClose: () => void; theme?: Pa
         <span className="w-10" aria-hidden />
       </div>
       <div className="w-full max-w-[560px] mx-auto flex flex-col">
-        {track.artwork ? (
-          <img
-            src={track.artwork}
-            alt=""
-            referrerPolicy="no-referrer"
-            className="w-full aspect-square object-cover block"
-          />
-        ) : (
-          <div className="w-full aspect-square" style={{ background: 'var(--bw-surface)' }} />
-        )}
+        <div className="relative w-full aspect-square" style={{ background: 'var(--bw-surface)' }}>
+          {track.artwork && (
+            <img
+              src={track.artwork}
+              alt=""
+              referrerPolicy="no-referrer"
+              className="absolute inset-0 w-full h-full object-cover block"
+            />
+          )}
+          {cover && cover !== track.artwork && (
+            <img
+              src={cover}
+              alt=""
+              referrerPolicy="no-referrer"
+              decoding="async"
+              onLoad={() => setFullFor(cover)}
+              className="absolute inset-0 w-full h-full object-cover block transition-opacity duration-500"
+              style={{ opacity: fullFor === cover ? 1 : 0 }}
+            />
+          )}
+        </div>
         <div className="px-5 pt-5 pb-8 flex flex-col gap-4">
           <div className="min-w-0">
             <div className="text-xl font-semibold break-words">{track.title}</div>
