@@ -32,6 +32,12 @@ describe('phone top bar: a fixed icon set, never a duplicate', () => {
       expect(topBarSlots(r)).toEqual([...TOP_BAR_FIXED]);
     }
   });
+  test('Media open or playing: the bar never gains a bMusic icon (bug 26 Oct 2026)', () => {
+    for (const r of ['/m/media', '/m/media/', '/m/media/browse', '/m/media/artists', '/m/media/album/x']) {
+      expect(topBarBappForPath(r)).toBeNull();
+      expect(topBarSlots(r)).toEqual([...TOP_BAR_FIXED]);
+    }
+  });
   test('other bApps still get their own button after Calls', () => {
     expect(topBarSlots('/m/bpics')).toEqual(['accounts', 'calls', 'bpics', 'bmail', 'media', 'lock']);
   });

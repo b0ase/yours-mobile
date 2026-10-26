@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Lock, Play } from 'lucide-react';
+import { ChevronLeft, Lock, Play } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useServiceContext } from '../../../hooks/useServiceContext';
-import { fetchLibrary, UNAVAILABLE_TEXT, type LibraryAlbum, type LibraryState } from './library';
+import { coverSources, fetchLibrary, UNAVAILABLE_TEXT, type LibraryAlbum, type LibraryState } from './library';
 import { closeLibrary, nowPlayingOpen, onNowPlayingOpen, playAlbum, setNowPlayingOpen } from './libraryPlayer';
 import { NowPlaying } from './NowPlaying';
 
@@ -42,11 +42,11 @@ const OwnerLibrary = () => {
     const albums = await fresh();
     const album = albums?.find((a) => a.id === albumId);
     if (!albums || !album) return;
+    // The mini player shows the track and moves on at the end of each song; tapping it opens Now Playing.
     playAlbum(albums, album, start, () => {
       navigate('/m/media');
       setNowPlayingOpen(true);
     });
-    setNowPlayingOpen(true);
   };
 
   const close = () => {
@@ -54,14 +54,25 @@ const OwnerLibrary = () => {
     closeLibrary();
   };
 
+  const album = state.status === 'ok' ? state.albums.find((a) => a.id === openAlbum) : undefined;
+
   return (
-    <section aria-label="Private library" className="flex flex-col gap-3">
+    <section aria-label="Private library" className="flex flex-col gap-3 min-w-0">
       <div className="flex items-center gap-2 text-sm font-semibold" style={{ color: 'var(--bw-text)' }}>
         <Lock size={14} /> Private library
       </div>
       {state.status === 'loading' && (
-        <div className="text-sm" style={{ color: 'var(--bw-muted)' }}>
-          Loading…
+        // A skeleton straight away: fixed-size tiles, nothing full-height, so the page scrolls while it loads.
+        <div className={GRID} aria-busy="true" aria-label="Loading library">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="flex flex-col gap-1">
+              <div
+                className="w-full aspect-square rounded-md animate-pulse"
+                style={{ background: 'var(--bw-surface)' }}
+              />
+              <div className="h-3 w-2/3 rounded animate-pulse" style={{ background: 'var(--bw-surface)' }} />
+            </div>
+          ))}
         </div>
       )}
       {state.status === 'unavailable' && (
@@ -76,63 +87,106 @@ const OwnerLibrary = () => {
           </button>
         </div>
       )}
-      {state.status === 'ok' && (
-        <>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-            {state.albums.map((a) => (
+      {state.status === 'ok' && !album && (
+        <div className={GRID}>
+          {state.albums.map((a) => (
+            <button
+              key={a.id}
+              onClick={() => setOpenAlbum(a.id)}
+              className="flex flex-col gap-1 text-left min-w-0"
+              aria-label={`Open ${a.title}`}
+            >
+              <Cover album={a} small />
+              <span className="text-sm truncate" style={{ color: 'var(--bw-text)' }}>
+                {a.title}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+      {album && (
+        <div className="flex flex-col gap-3 min-w-0" aria-label={album.title} role="region">
+          <button
+            onClick={() => setOpenAlbum(null)}
+            className="self-start flex items-center gap-1 text-sm"
+            style={{ color: 'var(--bw-accent)' }}
+          >
+            <ChevronLeft size={16} /> Library
+          </button>
+          <div className="w-full max-w-[420px] mx-auto">
+            <Cover album={album} />
+          </div>
+          <div className="min-w-0">
+            <div className="text-lg font-semibold break-words" style={{ color: 'var(--bw-text)' }}>
+              {album.title}
+            </div>
+            <div className="text-xs" style={{ color: 'var(--bw-muted)' }}>
+              {[album.artist, `${album.tracks.length} ${album.tracks.length === 1 ? 'song' : 'songs'}`]
+                .filter(Boolean)
+                .join(' · ')}
+            </div>
+          </div>
+          <div className="flex flex-col rounded-lg overflow-hidden" style={{ background: 'var(--bw-surface)' }}>
+            {album.tracks.length === 0 && (
+              <div className="p-3 text-sm" style={{ color: 'var(--bw-muted)' }}>
+                No tracks uploaded yet.
+              </div>
+            )}
+            {album.tracks.map((t, i) => (
               <button
-                key={a.id}
-                onClick={() => setOpenAlbum(openAlbum === a.id ? null : a.id)}
-                aria-expanded={openAlbum === a.id}
-                className="flex flex-col gap-1 text-left min-w-0"
+                key={t.id}
+                onClick={() => void play(album.id, i)}
+                className="flex items-center gap-3 px-3 py-2.5 text-left min-w-0"
+                style={{ borderTop: i ? '1px solid var(--bw-line)' : 'none', color: 'var(--bw-text)' }}
               >
-                <img
-                  src={a.cover}
-                  alt=""
-                  referrerPolicy="no-referrer"
-                  loading="lazy"
-                  className="w-full aspect-square object-cover rounded-md block"
-                  style={{ outline: openAlbum === a.id ? '2px solid var(--bw-accent)' : 'none' }}
-                />
-                <span className="text-sm truncate" style={{ color: 'var(--bw-text)' }}>
-                  {a.title}
+                <span className="w-5 text-xs tabular-nums shrink-0" style={{ color: 'var(--bw-muted)' }}>
+                  {i + 1}
                 </span>
+                <span className="flex-1 min-w-0 truncate text-sm">{t.title}</span>
+                {t.duration ? (
+                  <span className="text-xs tabular-nums shrink-0" style={{ color: 'var(--bw-muted)' }}>
+                    {mmss(t.duration)}
+                  </span>
+                ) : null}
+                <Play size={14} className="shrink-0" />
               </button>
             ))}
           </div>
-          {state.albums
-            .filter((a) => a.id === openAlbum)
-            .map((a) => (
-              <div
-                key={a.id}
-                className="flex flex-col rounded-lg overflow-hidden"
-                style={{ background: 'var(--bw-surface)' }}
-              >
-                {a.tracks.length === 0 && (
-                  <div className="p-3 text-sm" style={{ color: 'var(--bw-muted)' }}>
-                    No tracks uploaded yet.
-                  </div>
-                )}
-                {a.tracks.map((t, i) => (
-                  <button
-                    key={t.id}
-                    onClick={() => void play(a.id, i)}
-                    className="flex items-center gap-3 px-3 py-2.5 text-left min-w-0"
-                    style={{ borderTop: i ? '1px solid var(--bw-line)' : 'none', color: 'var(--bw-text)' }}
-                  >
-                    <span className="w-5 text-xs tabular-nums shrink-0" style={{ color: 'var(--bw-muted)' }}>
-                      {i + 1}
-                    </span>
-                    <span className="flex-1 min-w-0 truncate text-sm">{t.title}</span>
-                    <Play size={14} className="shrink-0" />
-                  </button>
-                ))}
-              </div>
-            ))}
-        </>
+        </div>
       )}
       {playing && <NowPlaying onClose={close} />}
     </section>
+  );
+};
+
+const GRID = 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3';
+
+/** m:ss from the manifest's duration; the audio itself is never fetched to find it. */
+const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+
+/**
+ * One album cover. The shelf prefers the small thumbnail and falls back to the full cover, then to a plain tile:
+ * each cover fails on its own, never holding up the others. Lazy, async-decoded, in a fixed square box.
+ */
+const Cover = ({ album, small }: { album: LibraryAlbum; small?: boolean }) => {
+  const sources = coverSources(album, small);
+  const [i, setI] = useState(0);
+  const src = sources[i];
+  return src ? (
+    <img
+      src={src}
+      alt=""
+      referrerPolicy="no-referrer"
+      loading={small ? 'lazy' : 'eager'}
+      decoding="async"
+      width={small ? 400 : 800}
+      height={small ? 400 : 800}
+      onError={() => setI((n) => n + 1)}
+      className="w-full h-auto aspect-square object-cover rounded-md block"
+      style={{ background: 'var(--bw-surface)' }}
+    />
+  ) : (
+    <div className="w-full aspect-square rounded-md" style={{ background: 'var(--bw-surface)' }} aria-hidden />
   );
 };
 

@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'bun:test';
-import { fetchLibrary, isLibraryOwner, LIBRARY_ACTION, LIBRARY_PATH, parseLibrary } from './library';
+import {
+  cleanTitle,
+  coverSources,
+  fetchLibrary,
+  isLibraryOwner,
+  LIBRARY_ACTION,
+  LIBRARY_PATH,
+  parseLibrary,
+} from './library';
 import { albumAccent, albumForPlayer, albumOfTrackId, libTrackId, wearAlbum, wornAlbum } from './albumTheme';
 import { currentAccentId, saveAccent, wearingSiteLook } from '../../theme/accent';
 import { getCustomAccent } from '../../theme/accents';
@@ -50,6 +58,38 @@ describe('parseLibrary', () => {
     expect(parseLibrary({ albums: [{ ...album('a'), title: '<b>x</b>' }], expiresAt: 1 })).toBeNull();
     expect(parseLibrary({ albums: [album('a')] })).toBeNull();
     expect(parseLibrary(null)).toBeNull();
+  });
+  it('one failing album never blocks the others', () => {
+    const r = parseLibrary({
+      albums: [album('a'), { ...album('b'), cover: 'http://x/y.jpg' }, { ...album('c'), theme: null }, album('d')],
+      expiresAt: 1,
+    });
+    expect(r?.albums.map((a) => a.id)).toEqual(['a', 'd']);
+    const t = parseLibrary({
+      albums: [{ ...album('a'), tracks: [...album('a').tracks, { id: 't3', title: 'x', url: 'http://bad' }] }],
+      expiresAt: 1,
+    });
+    expect(t?.albums[0]?.tracks.map((x) => x.id)).toEqual(['t1', 't2']);
+  });
+  it('prefers a thumbnail on the shelf when present, else the full cover', () => {
+    const r = parseLibrary({ albums: [{ ...album('a'), thumb: 'https://store.example/a-400.jpg' }], expiresAt: 1 });
+    const a = r!.albums[0]!;
+    expect(coverSources(a, true)).toEqual(['https://store.example/a-400.jpg', a.cover]);
+    expect(coverSources(a)).toEqual([a.cover]);
+    expect(coverSources(album('b'), true)).toEqual([album('b').cover]);
+    expect(parseLibrary({ albums: [{ ...album('a'), thumb: 'javascript:x' }], expiresAt: 1 })!.albums[0]!.thumb).toBe(
+      undefined,
+    );
+  });
+});
+
+describe('cleanTitle', () => {
+  it('turns file-name titles into song titles and leaves real ones alone', () => {
+    expect(cleanTitle('01 - night_drive.mp3')).toBe('Night Drive');
+    expect(cleanTitle('03. some-song')).toBe('Some Song');
+    expect(cleanTitle('7_LOUD_THING')).toBe('Loud Thing');
+    expect(cleanTitle('Already Fine')).toBe('Already Fine');
+    expect(cleanTitle('Song (feat. Someone)')).toBe('Song (feat. Someone)');
   });
 });
 
@@ -108,6 +148,10 @@ describe('fetchLibrary (server is the lock)', () => {
       'https://pay.example',
     );
     expect(off).toEqual({ status: 'unavailable', reason: 'network' });
+  });
+  it('a request that never answers ends as "network", not loading for ever', async () => {
+    const hung = await fetchLibrary(() => new Promise<Response>(() => {}), wallet, 'https://pay.example', 20);
+    expect(hung).toEqual({ status: 'unavailable', reason: 'network' });
   });
 });
 
