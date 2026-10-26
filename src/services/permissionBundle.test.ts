@@ -212,14 +212,14 @@ describe('PermissionBundler answers', () => {
 });
 
 describe('sheet model', () => {
-  test('connect only: plain words; key use is said plainly and not pre-ticked (audit C1)', () => {
+  test('connect only: plain words; requested key use is pre-ticked and drawn (owner, 26 Oct 2026, replaces audit C1)', () => {
     const m = buildSheetModel({ originator: 'bmovies.app', items: [proto('r1'), basket('r2')] });
     expect(m.mode).toBe('connect');
     expect(m.lines.map((l) => l.text)).toEqual([
       'Sign and encrypt anything with your "bmovies ticket" keys',
       'Keep its tickets and tokens in your wallet',
     ]);
-    expect(m.lines.map((l) => l.checked)).toEqual([false, true]);
+    expect(m.lines.map((l) => l.checked)).toEqual([true, true]);
     expect(m.lines[1].detail).toContain('bmovies tickets');
   });
 
@@ -255,7 +255,7 @@ describe('sheet model', () => {
     expect(byId.priv.checked).toBe(false);
     expect(byId.cert.checked).toBe(false);
     expect(byId.cert.risky).toBe(true);
-    expect(byId.ok.checked).toBe(false);
+    expect(byId.ok.checked).toBe(true); // requested, not risky: ticked and drawn (owner, 26 Oct 2026)
     expect(isRiskyRequest(proto('p'))).toBe(false);
   });
 
@@ -267,8 +267,8 @@ describe('sheet model', () => {
     expect(byId.id.checked).toBe(true);
     expect(byId.id.risky).toBe(false);
     expect(byId.id.text).toBe('See your public identity (the key that names you)');
-    // Other key use stays unticked (audit C1).
-    expect(byId.other.checked).toBe(false);
+    // Other requested key use is ticked too now that every line is drawn (owner, 26 Oct 2026).
+    expect(byId.other.checked).toBe(true);
     // A privileged identity request is not the plain one.
     expect(isIdentityKeyRequest(idKey('p', { privileged: true }))).toBe(false);
     expect(buildSheetModel({ originator: 'x', items: [idKey('p', { privileged: true })] }).lines[0].checked).toBe(
@@ -354,7 +354,7 @@ describe('sheetDecisions (chat.bwalletx.com, 23 Oct 2026)', () => {
 
   test('Allow on the card grants the one protocol line it showed (Details never opened)', () => {
     const m = buildSheetModel({ originator: 'chat.bwalletx.com', items: [history] });
-    expect(m.lines[0].checked).toBe(false); // still not pre-ticked in Details (audit C1)
+    expect(m.lines[0].checked).toBe(true); // drawn ticked (owner, 26 Oct 2026)
     expect(sheetDecisions(m, true, {}, false, cardView(m))).toEqual({ h1: true });
   });
 
@@ -365,8 +365,9 @@ describe('sheetDecisions (chat.bwalletx.com, 23 Oct 2026)', () => {
 
   test('once Details was opened, the ticks decide', () => {
     const m = buildSheetModel({ originator: 'chat.bwalletx.com', items: [history, sigma] });
-    expect(sheetDecisions(m, true, {}, true)).toEqual({ h1: false, s1: false });
-    expect(sheetDecisions(m, true, { s1: true }, true)).toEqual({ h1: false, s1: true });
+    expect(sheetDecisions(m, true, {}, true)).toEqual({ h1: true, s1: true });
+    expect(sheetDecisions(m, true, { h1: false }, true)).toEqual({ h1: false, s1: true });
+    expect(sheetDecisions(m, true, { s1: true, h1: false }, true)).toEqual({ h1: false, s1: true });
   });
 
   test('an untick before Details closed is honoured', () => {
@@ -378,7 +379,7 @@ describe('sheetDecisions (chat.bwalletx.com, 23 Oct 2026)', () => {
     const risky = proto('p1', 'chat.bwalletx.com', { privileged: true });
     const m = buildSheetModel({ originator: 'chat.bwalletx.com', items: [risky, history, spend('pay', 100)] });
     // The careful card draws h1 with its own (unticked, audit C1) box, so Allow leaves it denied until ticked.
-    expect(sheetDecisions(m, true, {}, false, cardView(m))).toEqual({ p1: false, h1: false, pay: true });
+    expect(sheetDecisions(m, true, {}, false, cardView(m))).toEqual({ p1: false, h1: true, pay: true });
     expect(sheetDecisions(m, true, { h1: true }, false, cardView(m))).toEqual({ p1: false, h1: true, pay: true });
     expect(sheetDecisions(m, false, { p1: true }, false)).toEqual({ p1: false, h1: false, pay: false });
   });
@@ -742,7 +743,7 @@ describe('never approve a line the user cannot read (mixed careful batch, 24 Oct
       originator: site,
       items: [proto('key', site, { privileged: true }), proto('h1', site, { counterparty: 'self' })],
     });
-    expect(sheetDecisions(m, true, { key: true }, false, sheetView(m, true))).toEqual({ key: true, h1: false });
+    expect(sheetDecisions(m, true, { key: true, h1: false }, false, sheetView(m, true))).toEqual({ key: true, h1: false });
   });
 
   test('a careful line that never scrolled onto the screen is hidden, so Allow cannot grant it', () => {
@@ -816,7 +817,7 @@ describe('b-Aware: Allow grants only lines the card showed (unseen lines fail cl
   test('connect card: an unticked protocol line is not granted; the pre-ticked basket it tiles is', () => {
     const m = buildSheetModel({ originator: o, items: [keyLine, basket('b1', o)] });
     expect(approvalKindForSheet(m)).toBe('connect');
-    const a = sheetAnswer(m, 'allow', {}, false, viewFor(m));
+    const a = sheetAnswer(m, 'allow', { k1: false }, false, viewFor(m));
     expect(a.decisions.k1).not.toBe(true);
     expect(a.decisions.b1).toBe(true);
   });
