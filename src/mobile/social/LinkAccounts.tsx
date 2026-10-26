@@ -20,6 +20,7 @@ import {
 } from './links';
 import { clearSocial, onSocialChange, socialError, socialProof, startSocial, type SocialProvider } from './socialLogin';
 import { useHandCashHandle } from './useHandCashHandle';
+import { forgetLinkedHandle, rememberLinkedHandle } from './linkedHandles';
 
 const GRAY = '#98A2B3';
 const XMark = () => (
@@ -90,7 +91,12 @@ export const LinkAccounts = ({ owner, onClaim }: { owner: string; onClaim?: (ali
       if (!p || p.purpose === 'picture' || !apiContext?.wallet) return setBusy(null);
       setBusy(p.profile.provider);
       recordLink(apiContext.wallet, owner, p.profile.provider, p.profile, { ticket: p.ticket, secret: p.secret })
-        .then(() => setError(''))
+        .then(() => {
+          setError('');
+          // Choose your handle offers a $name per linked account (owner, 26 Oct 2026: linkedHandles.ts). Google's
+          // local part exists only in this proof, so it's kept on this device now; the link itself stores no email.
+          rememberLinkedHandle(owner, p.profile.provider, p.profile.provider === 'linkedin' ? p.profile.display : p.profile.name);
+        })
         .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Could not link that account'))
         .finally(() => setBusy(null));
     };
@@ -153,14 +159,26 @@ export const LinkAccounts = ({ owner, onClaim }: { owner: string; onClaim?: (ali
                 </div>
               </div>
               {l ? (
+                // Owner, 26 Oct 2026: after linking there was no clear confirmation. A green ✓ Linked on the row's
+                // button once sign-in and the signed link both succeeded (the link exists only after recordLink).
+                <span className="flex items-center gap-2">
+                  <span
+                    className="h-8 px-2.5 rounded-lg text-xs font-bold flex items-center gap-1"
+                    style={{ background: 'rgba(46,204,113,0.15)', color: '#2ecc71' }}
+                    data-testid={`linked-${p}`}
+                    aria-label={`${PROVIDER_LABEL[p]} linked`}
+                  >
+                    <Check size={14} strokeWidth={3} /> Linked
+                  </span>
                 <button
                   type="button"
-                  onClick={() => (unlink(owner, p), clearSocial())}
+                  onClick={() => (unlink(owner, p), forgetLinkedHandle(owner, p), clearSocial())}
                   className="text-xs bg-transparent border-0"
                   style={{ color: GRAY }}
                 >
                   Remove
                 </button>
+                </span>
               ) : (
                 <button
                   type="button"
