@@ -7,7 +7,16 @@ export type SyncStatusMessage = {
   action: YoursEventName.SYNC_STATUS_UPDATE;
   data:
     | { status: 'start'; addressCount: number }
-    | { status: 'progress'; pending: number; done: number; failed: number; message?: string }
+    | {
+        status: 'progress';
+        pending: number;
+        done: number;
+        failed: number;
+        message?: string;
+        part?: 'scan' | 'coins' | 'names';
+        total?: number;
+      }
+    | { status: 'coins-ready'; found: number; failed: number }
     | { status: 'complete' }
     | { status: 'error'; message: string }
     | { status: 'restoring'; message: string }
@@ -31,6 +40,8 @@ export const useSyncTracker = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   /** "Loading your wallet from backup…" while a new device copies the remote store (restore, 14 Oct 2026). */
   const [restoreMessage, setRestoreMessage] = useState('');
+  /** What the sync is doing right now, from the wallet's own counts: "Loading names 1,200 of 3,400". */
+  const [syncMessage, setSyncMessage] = useState('');
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const completeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const stuckTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -56,7 +67,15 @@ export const useSyncTracker = () => {
       setBalanceTick((n) => n + 1);
       setIsSyncing(false);
       setPendingCount(0);
+      setSyncMessage('');
       clearAllTimers();
+    };
+    const armStuck = () => {
+      if (stuckTimeoutRef.current) clearTimeout(stuckTimeoutRef.current);
+      stuckTimeoutRef.current = setTimeout(() => {
+        console.warn('[syncTracker] No sync news within safety window — stopping spinner.');
+        finishSync();
+      }, SYNC_STUCK_TIMEOUT_MS);
     };
 
     const handleMessage = (message: SyncStatusMessage) => {
@@ -83,7 +102,16 @@ export const useSyncTracker = () => {
           break;
 
         case 'progress':
+          // A big restore reports progress for minutes: each report keeps the spinner (and its label) alive.
+          setIsSyncing(true);
           setPendingCount(data.pending);
+          if (data.message) setSyncMessage(data.message);
+          armStuck();
+          break;
+
+        case 'coins-ready':
+          // Coins are in: read the balance now, while names keep loading.
+          setBalanceTick((n) => n + 1);
           break;
 
         case 'complete':
@@ -126,5 +154,6 @@ export const useSyncTracker = () => {
     theme,
     isSyncing,
     restoreMessage,
+    syncMessage,
   };
 };
