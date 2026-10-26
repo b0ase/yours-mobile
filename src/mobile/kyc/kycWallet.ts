@@ -143,14 +143,33 @@ export const checkIssuedCertificate = async (
   return c as IssuedCertificate;
 };
 
-const decrypt = (
+const decrypt = async (
   wallet: WalletInterface,
   keyring: Record<string, string>,
   fields: Record<string, string>,
   certifier: string,
-) =>
+) => {
+  // decryptFields hides the real cause ("Failed to decrypt all master certificate fields"), so try one field's
+  // key ourselves first and report what the wallet actually said.
+  const first = Object.keys(fields)[0];
+  if (first && keyring[first]) {
+    try {
+      const { plaintext } = await wallet.decrypt({
+        ciphertext: Utils.toArray(keyring[first], 'base64'),
+        ...Certificate.getCertificateFieldEncryptionDetails(first),
+        counterparty: certifier,
+      });
+      if (!Array.isArray(plaintext) || plaintext.length === 0 || plaintext.length > 32)
+        throw new Error(`key is ${Array.isArray(plaintext) ? plaintext.length + ' bytes' : typeof plaintext}`);
+    } catch (e) {
+      throw new Error(
+        `Couldn't open the certificate (field "${first}"): ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
   // MasterCertificate only calls wallet.decrypt, which WalletInterface provides.
-  MasterCertificate.decryptFields(wallet as unknown as ProtoWallet, keyring, fields, certifier);
+  return MasterCertificate.decryptFields(wallet as unknown as ProtoWallet, keyring, fields, certifier);
+};
 
 /** "Import my certificate": request, verify, decrypt, store. Returns the summary. */
 export const importKycCertificate = async (ctx: OneSatContext): Promise<KycSummary> => {
