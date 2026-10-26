@@ -51,6 +51,9 @@ export const RESERVED_PROTOCOLS: readonly Protocol[] = [
   [2, 'bmusic artist'],
   [2, 'bmusic listen claim'],
   [2, 'bpositive'],
+  // BRC-77 signed messages from the identity key (src/mobile/kyc/payoutProof.ts, b-Aware payout address proof).
+  // Reserved so an app can never get a BRC-77 signature by this identity key, e.g. a forged payout address proof.
+  [2, 'message signing'],
   // The legacy ordinals key (addresses.ordAddress), watched by the sync (src/services/legacyOrd.ts).
   [2, 'bwalletx legacy ord'],
 ];
