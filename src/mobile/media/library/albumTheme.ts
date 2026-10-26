@@ -1,57 +1,41 @@
-import { BASE_LOOK, type Accent } from '../../theme/accents';
-import { ensureContrast, luminance, mix, pickReadable } from '../../theme/colour';
-import { wearSiteLook } from '../../theme/accent';
+import type { CSSProperties } from 'react';
+import { ensureContrast, mix, pickReadable } from '../../theme/colour';
 import type { Palette } from './library';
 
 /**
- * While a library track plays, the whole wallet wears that album's palette (owner, 26 Oct 2026). It uses the same
- * never-saved overlay as a connected site's look (accent.ts wearSiteLook): the user's own theme is never written,
- * stays the same across tracks of one album, changes when the album changes and comes back on stop or close.
+ * An album's colours, for the player only (owner, 26 Oct 2026). They are CSS variables set on the player's own
+ * container (album page and Now Playing), never on the document: the wallet always keeps the user's own theme, the
+ * mini player stays neutral, and nothing is left behind when the player closes because nothing global was touched.
  */
-export function albumAccent(p: Palette, label: string): Accent {
-  const light = luminance(p.bg) > 0.4;
+export type AlbumVars = Record<`--bw-${string}`, string>;
+
+const rgb = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(' ');
+
+export function albumVars(p: Palette): AlbumVars {
   const surface2 = mix(p.surface, p.text, 0.06);
   const text = ensureContrast(p.text, [p.bg, p.surface], 4.5);
+  const hi = mix(p.accent, '#FFFFFF', 0.25);
   return {
-    ...BASE_LOOK,
-    id: 'custom',
-    kind: 'theme',
-    label,
-    scheme: light ? 'light' : 'dark',
-    ...(light ? { paper: true } : {}),
-    accent: p.accent,
-    hi: mix(p.accent, '#FFFFFF', 0.25),
-    lo: mix(p.accent, p.bg, 0.3),
-    on: pickReadable(['#FFFFFF', '#0A0A0A'], [p.accent], 4.5),
-    bg: p.bg,
-    surface: p.surface,
-    surface2,
-    nav: p.bg,
-    text,
-    muted: ensureContrast(p.muted, [p.bg, p.surface, surface2], 4.5),
-    line: mix(p.surface, p.accent2, 0.35),
+    '--bw-bg': p.bg,
+    '--bw-surface': p.surface,
+    '--bw-card': p.surface,
+    '--bw-card2': surface2,
+    '--bw-text': text,
+    '--bw-muted': ensureContrast(p.muted, [p.bg, p.surface, surface2], 4.5),
+    '--bw-line': mix(p.surface, p.accent2, 0.35),
+    '--bw-accent': p.accent,
+    '--bw-accent-hi': hi,
+    '--bw-accent-hi-rgb': rgb(hi),
+    '--bw-accent-lo': mix(p.accent, p.bg, 0.3),
+    '--bw-on-accent': pickReadable(['#FFFFFF', '#0A0A0A'], [p.accent], 4.5),
   };
 }
 
-let worn: string | null = null;
+/** Style for the player's container: the album's variables plus its background and text colour. */
+export const albumStyle = (p: Palette): CSSProperties =>
+  ({ ...albumVars(p), background: 'var(--bw-bg)', color: 'var(--bw-text)' }) as CSSProperties;
 
-/** The album whose palette is on now, or null. */
-export const wornAlbum = (): string | null => worn;
-
-/** Wears an album's palette (same album: nothing changes); null puts the user's own theme back. */
-export function wearAlbum(album: { id: string; title: string; theme: Palette } | null): void {
-  if (album) {
-    if (worn === album.id) return;
-    wearSiteLook(albumAccent(album.theme, album.title));
-    worn = album.id;
-    return;
-  }
-  if (worn === null) return;
-  worn = null;
-  wearSiteLook(null);
-}
-
-/** Library tracks in the player carry this prefix, so the theme can tell them from every other queue. */
+/** Library tracks in the player carry this prefix, so the player can tell them from every other queue. */
 export const LIB_PREFIX = 'lib:';
 export const libTrackId = (albumId: string, trackId: string) => `${LIB_PREFIX}${albumId}:${trackId}`;
 export const albumOfTrackId = (id: string | undefined): string | null => {
@@ -60,11 +44,11 @@ export const albumOfTrackId = (id: string | undefined): string | null => {
   const i = rest.indexOf(':');
   return i > 0 ? rest.slice(0, i) : null;
 };
+/** The track id inside its album ("t1" from "lib:a:t1"), or null for anything not from the library. */
+export const trackOfTrackId = (id: string | undefined): string | null =>
+  albumOfTrackId(id) ? id!.slice(id!.indexOf(':', LIB_PREFIX.length) + 1) : null;
 
-/**
- * What the theme should be for this player state: the album of the current library track, or null (stopped, empty,
- * or playing something that is not in the library).
- */
+/** The album of the current library track, or null (stopped, empty, or playing something else). */
 export function albumForPlayer<A extends { id: string }>(
   s: { queue: { id: string }[]; index: number },
   albums: readonly A[],

@@ -12,3 +12,6 @@ export const albumBlocks = (s: {
   const inHero = s.view === 'hybrid' && s.heroIsAlbum;
   return { inHero, fullList: s.view !== 'cards' && s.oneAlbum && !inHero };
 };
+
+/** m:ss for album track lengths. */
+export const albumFmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;

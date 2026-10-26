@@ -8,9 +8,10 @@ import {
   LIBRARY_PATH,
   parseLibrary,
 } from './library';
-import { albumAccent, albumForPlayer, albumOfTrackId, libTrackId, wearAlbum, wornAlbum } from './albumTheme';
+import { albumForPlayer, albumOfTrackId, albumStyle, albumVars, libTrackId, trackOfTrackId } from './albumTheme';
+import { closeLibrary, playAlbum } from './libraryPlayer';
+import { getState } from '../player';
 import { currentAccentId, saveAccent, wearingSiteLook } from '../../theme/accent';
-import { getCustomAccent } from '../../theme/accents';
 import { contrast } from '../../theme/colour';
 
 const PALETTE_A = {
@@ -155,48 +156,59 @@ describe('fetchLibrary (server is the lock)', () => {
   });
 });
 
-describe('album theme', () => {
-  it('builds a readable look from the palette', () => {
-    const a = albumAccent(PALETTE_A, 'A');
-    expect(a.bg).toBe('#101014');
-    expect(a.accent).toBe('#E0337A');
-    expect(contrast(a.text, a.bg)).toBeGreaterThanOrEqual(4.5);
-    expect(contrast(a.muted, a.surface)).toBeGreaterThanOrEqual(4.5);
-    expect(contrast(a.on, a.accent)).toBeGreaterThanOrEqual(4.5);
+describe('album theme (scoped to the player only)', () => {
+  it('builds readable player variables from the palette', () => {
+    const v = albumVars(PALETTE_A);
+    expect(v['--bw-bg']).toBe('#101014');
+    expect(v['--bw-accent']).toBe('#E0337A');
+    expect(contrast(v['--bw-text']!, v['--bw-bg']!)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(v['--bw-muted']!, v['--bw-surface']!)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(v['--bw-on-accent']!, v['--bw-accent']!)).toBeGreaterThanOrEqual(4.5);
+    expect(v['--bw-accent-hi-rgb']).toMatch(/^\d+ \d+ \d+$/);
+    expect((albumStyle(PALETTE_A) as Record<string, string>).background).toBe('var(--bw-bg)');
   });
 
   it('maps player state to the playing album only for library tracks', () => {
     const albums = [album('a'), album('b')];
     expect(albumOfTrackId(libTrackId('a', 't1'))).toBe('a');
+    expect(trackOfTrackId(libTrackId('a', 't1'))).toBe('t1');
+    expect(trackOfTrackId('featured-1')).toBeNull();
     expect(albumOfTrackId('featured-1')).toBeNull();
     expect(albumForPlayer({ queue: [{ id: libTrackId('b', 't2') }], index: 0 }, albums)?.id).toBe('b');
     expect(albumForPlayer({ queue: [{ id: 'other' }], index: 0 }, albums)).toBeNull();
     expect(albumForPlayer({ queue: [], index: -1 }, albums)).toBeNull();
   });
 
-  it('applies, keeps within an album, switches between albums and reverts to the user theme', () => {
+  it('playback leaves the global theme untouched, and close leaves nothing behind', () => {
+    // A stand-in <audio> element: the player needs one; no sound is played here.
+    const g = globalThis as { Audio?: unknown };
+    g.Audio ??= class {
+      paused = true;
+      currentTime = 0;
+      preload = '';
+      src = '';
+      addEventListener() {}
+      setAttribute() {}
+      removeAttribute() {}
+      pause() {}
+      play() {
+        return Promise.resolve();
+      }
+    };
     saveAccent('acct', 'pink');
+    const root = typeof document !== 'undefined' ? document.documentElement.getAttribute('style') : null;
+    playAlbum(album('a', PALETTE_A), 0);
+    expect(getState().queue.length).toBe(2);
     expect(currentAccentId()).toBe('pink');
-
-    wearAlbum(album('a', PALETTE_A));
-    expect(wornAlbum()).toBe('a');
-    expect(wearingSiteLook()).toBe(true);
-    expect(currentAccentId()).toBe('custom');
-    expect(getCustomAccent()?.accent).toBe('#E0337A');
-
-    // Next track, same album: nothing changes.
-    wearAlbum(album('a', PALETTE_B));
-    expect(getCustomAccent()?.accent).toBe('#E0337A');
-
-    // Album changes: the palette switches.
-    wearAlbum(album('b', PALETTE_B));
-    expect(wornAlbum()).toBe('b');
-    expect(getCustomAccent()?.accent).toBe('#C8553D');
-
-    // Stop / close: the user's own theme comes back.
-    wearAlbum(null);
-    expect(wornAlbum()).toBeNull();
     expect(wearingSiteLook()).toBe(false);
+    playAlbum(album('b', PALETTE_B), 1);
     expect(currentAccentId()).toBe('pink');
+    expect(wearingSiteLook()).toBe(false);
+    closeLibrary();
+    expect(getState().queue.length).toBe(0);
+    expect(getState().index).toBe(-1);
+    expect(currentAccentId()).toBe('pink');
+    expect(wearingSiteLook()).toBe(false);
+    if (typeof document !== 'undefined') expect(document.documentElement.getAttribute('style')).toBe(root);
   });
 });
