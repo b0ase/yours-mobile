@@ -125,7 +125,7 @@ export const IdentityVerification = () => {
             <button
               type="button"
               className={`${btn} flex items-center gap-1`}
-              style={{ background: 'var(--bw-accent-hi)', color: '#000' }}
+              style={{ background: '#32D583', color: '#000' }}
               onClick={() => void openDappBrowser(KYC_PAGE_URL)}
             >
               Get verified <ExternalLink size={12} />

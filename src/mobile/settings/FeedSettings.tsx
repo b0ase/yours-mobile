@@ -29,7 +29,6 @@ import {
   Network,
   AtSign,
 } from 'lucide-react';
-import { openDappBrowser } from '../dappBrowser';
 import { ChangePassword } from './ChangePassword';
 import { SEEDLESS_ENABLED } from '../passkey/prf';
 import { PasskeySettings } from '../passkey/PasskeySettings';
@@ -47,6 +46,7 @@ import { AgentsScreen } from '../agents/AgentsScreen';
 import { WalletNames } from './WalletNames';
 import { DisplayNameField } from './DisplayNameField';
 import { IdentityMap } from './IdentityMap';
+import { IdentityVerification } from '../kyc/IdentityVerification';
 import {
   B_AGENT_DESC,
   MY_TOKENS_DESC,
@@ -78,7 +78,6 @@ import { PairedSitesList } from '../pair/PairedSitesList';
 import { IS_EXTENSION } from '../extension';
 
 /** bit-sign's branded Verify-your-identity page (Veriff). Shows only verified / not and the date. */
-const KYC_URL = 'https://bit-sign.online/kyc';
 
 const PairSheet = lazy(() => import('../pair/PairSheet'));
 const PotsScreen = lazy(() => import('../pots/PotsScreen'));
@@ -627,6 +626,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
     | 'websites'
     | 'idmap'
     | 'signins'
+    | 'verify'
     | null
   >(null);
   // A Settings search result opens one of these screens. Only the "wallet" instance takes it, so it opens once.
@@ -738,7 +738,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
             icon={<ShieldCheck size={16} />}
             label="Verify your identity"
             description="A two-minute ID check. Shows a Verified identity badge on contracts you sign and unlocks higher limits"
-            onClick={() => void openDappBrowser(KYC_URL)}
+            onClick={() => setScreen('verify')}
             isLast
           />
         </Section>
@@ -1241,6 +1241,11 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
       {LINK_ACCOUNTS_ENABLED && screen === 'social' && <ConnectSocial onClose={closeSocial} />}
       {handleOpen && <HandleFlow title="Change handle" onClose={() => setHandleOpen(false)} />}
       {screen === 'idmap' && <IdentityMap onClose={() => setScreen(null)} />}
+      {screen === 'verify' && (
+        <Screen title="Verify your identity" onBack={() => setScreen(null)}>
+          <IdentityVerification />
+        </Screen>
+      )}
       {screen === 'agents' && <AgentsScreen onClose={() => setScreen(null)} />}
       {screen === 'paired' && (
         <Screen title="Paired websites" onBack={() => setScreen(null)}>
