@@ -9,10 +9,26 @@ import { getState, subscribe, toggle } from '../player';
 import { AlbumHeader, AlbumPlayButton, AlbumTrackRow } from '../AlbumParts';
 import { albumFmt } from '../albumLayout';
 import { albumForPlayer, albumOfTrackId, albumStyle, trackOfTrackId } from './albumTheme';
+import { clearCache, coverPlaceholder, preloadCovers, readCache, usable, writeCache } from './libraryCache';
 
 const f = (u: string, i?: RequestInit) => fetch(u, i);
-// Re-ask the server a minute before the signed links run out.
-const EARLY_MS = 60_000;
+// A cached session with less than this left is refreshed in the background while the cached shelf shows.
+const REFRESH_WITHIN_MS = 20 * 60_000;
+
+/** Asks the server, remembers a good answer (and warms the covers), forgets the cache on a refusal. */
+const ask = async (wallet: Parameters<typeof fetchLibrary>[1]): Promise<LibraryState> => {
+  const next = await fetchLibrary(f, wallet);
+  if (next.status === 'ok') {
+    writeCache(next);
+    preloadCovers(next.albums);
+  } else if (next.status === 'unavailable' && next.reason === 'denied') clearCache();
+  return next;
+};
+const cachedState = (): LibraryState => {
+  const c = readCache();
+  if (c) preloadCovers(c.albums);
+  return c ? { status: 'ok', ...c } : { status: 'loading' };
+};
 
 /**
  * The owner's private library shelf on /m/media (lazy chunk; only mounted when useLibraryOwner says so). Everything
@@ -22,7 +38,7 @@ const EARLY_MS = 60_000;
 const OwnerLibrary = () => {
   const { apiContext } = useServiceContext();
   const navigate = useNavigate();
-  const [state, setState] = useState<LibraryState>({ status: 'loading' });
+  const [state, setState] = useState<LibraryState>(cachedState);
   const [openAlbum, setOpenAlbum] = useState<string | null>(null);
   const [playing, setPlaying] = useState(nowPlayingOpen);
   useEffect(() => onNowPlayingOpen(setPlaying), []);
@@ -30,16 +46,25 @@ const OwnerLibrary = () => {
   useEffect(() => subscribe(setPlayer), []);
 
   const load = useCallback(async () => {
+    const c = readCache();
+    if (c) {
+      // The cached shelf is already on screen; only refresh, quietly, when it is getting old.
+      setState({ status: 'ok', ...c });
+      if (c.expiresAt - Date.now() > REFRESH_WITHIN_MS) return;
+      const next = await ask(apiContext.wallet);
+      if (next.status === 'ok' || (next.status === 'unavailable' && next.reason === 'denied')) setState(next);
+      return;
+    }
     setState({ status: 'loading' });
-    setState(await fetchLibrary(f, apiContext.wallet));
+    setState(await ask(apiContext.wallet));
   }, [apiContext.wallet]);
   useEffect(() => {
     void load();
   }, [load]);
 
   const fresh = async (): Promise<LibraryAlbum[] | null> => {
-    if (state.status === 'ok' && state.expiresAt - EARLY_MS > Date.now()) return state.albums;
-    const next = await fetchLibrary(f, apiContext.wallet);
+    if (state.status === 'ok' && usable(state)) return state.albums;
+    const next = await ask(apiContext.wallet);
     setState(next);
     return next.status === 'ok' ? next.albums : null;
   };
@@ -61,6 +86,7 @@ const OwnerLibrary = () => {
   };
 
   const album = state.status === 'ok' ? state.albums.find((a) => a.id === openAlbum) : undefined;
+  const nowAlbum = state.status === 'ok' ? albumForPlayer(player, state.albums) : null;
 
   return (
     <section aria-label="Private library" className="flex flex-col gap-3 min-w-0">
@@ -198,12 +224,7 @@ const OwnerLibrary = () => {
           })()}
         </div>
       )}
-      {playing && (
-        <NowPlaying
-          onClose={close}
-          theme={state.status === 'ok' ? albumForPlayer(player, state.albums)?.theme : undefined}
-        />
-      )}
+      {playing && <NowPlaying onClose={close} theme={nowAlbum?.theme} cover={nowAlbum?.cover} />}
     </section>
   );
 };
@@ -211,28 +232,50 @@ const OwnerLibrary = () => {
 const GRID = 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3';
 
 /**
- * One album cover. The shelf prefers the small thumbnail and falls back to the full cover, then to a plain tile:
- * each cover fails on its own, never holding up the others. Lazy, async-decoded, in a fixed square box.
+ * One album cover. The shelf shows the small thumbnail (warmed by preloadCovers). The album page shows the thumbnail
+ * at once and cross-fades the full cover in over it when it has loaded. Until anything paints, the tile wears the
+ * album's own colours. Each cover fails on its own; a failed image just leaves the colour tile.
  */
 const Cover = ({ album, small }: { album: LibraryAlbum; small?: boolean }) => {
   const sources = coverSources(album, small);
-  const [i, setI] = useState(0);
-  const src = sources[i];
-  return src ? (
-    <img
-      src={src}
-      alt=""
-      referrerPolicy="no-referrer"
-      loading={small ? 'lazy' : 'eager'}
-      decoding="async"
-      width={small ? 400 : 800}
-      height={small ? 400 : 800}
-      onError={() => setI((n) => n + 1)}
-      className="w-full h-auto aspect-square object-cover rounded-md block"
-      style={{ background: 'var(--bw-surface)' }}
-    />
-  ) : (
-    <div className="w-full aspect-square rounded-md" style={{ background: 'var(--bw-surface)' }} aria-hidden />
+  const first = small ? sources : album.thumb ? [album.thumb] : [];
+  const [failed, setFailed] = useState(0);
+  const [full, setFull] = useState(false);
+  const base = first[failed];
+  const img = 'absolute inset-0 w-full h-full object-cover block transition-opacity duration-500';
+  return (
+    <div
+      className="relative w-full aspect-square rounded-md overflow-hidden"
+      style={{ background: coverPlaceholder(album.theme) }}
+    >
+      {base && (
+        <img
+          src={base}
+          alt=""
+          referrerPolicy="no-referrer"
+          loading="eager"
+          decoding="async"
+          width={400}
+          height={400}
+          onError={() => setFailed((n) => n + 1)}
+          className={img}
+        />
+      )}
+      {!small && (
+        <img
+          src={album.cover}
+          alt=""
+          referrerPolicy="no-referrer"
+          loading="eager"
+          decoding="async"
+          width={800}
+          height={800}
+          onLoad={() => setFull(true)}
+          className={img}
+          style={{ opacity: full ? 1 : 0 }}
+        />
+      )}
+    </div>
   );
 };
 

@@ -11,7 +11,8 @@ export const libraryQueue = (album: LibraryAlbum, onExpand?: () => void): Track[
     id: libTrackId(album.id, t.id),
     title: t.title,
     url: t.url,
-    artwork: album.cover,
+    // The small cover: the mini player and lock screen show it at once (Now Playing cross-fades the full one in).
+    artwork: album.thumb ?? album.cover,
     subtitle: album.artist ?? album.title,
     album: album.title,
     ...(onExpand ? { onExpand } : {}),
