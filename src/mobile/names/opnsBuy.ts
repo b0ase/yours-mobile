@@ -1,18 +1,36 @@
 import { opnsNameOf } from './opnsName';
 import { buyOrdinal, cancelOpnsListing, listOpns, sellOpns, sendOpns, type OneSatContext } from '@1sat/actions';
 import { assertOrdLockV2 } from '../market/ordlockVersion';
+import { assertOpnsPayout } from './opnsBuyPrice';
 import { MODULE_FINISHES, purchaseContext, walletOutpoint } from '../market/walletOutpoint';
 
 /**
  * Wallet calls for OpNS trading, shared by Get your name, bMint › OpNS names and the Exchange's Names tab.
  * buyOpns is buyOrdinal with OpNS defaults but drops usePermissionModule, which the module-wrapped wallet
  * needs (MODULE_FINISHES); so buy through buyOrdinal with the OpNS basket/content type instead.
+ *
+ * `approvedSats` is the price the user saw and allowed on the sheet. The sheet price comes from the listing's
+ * MAP metadata, but the covenant pays its own payout output, so the listing's locking script is read here and the
+ * buy is refused unless that payout equals `approvedSats` (opnsBuyPrice.ts). The checked BEEF is the one handed to
+ * buyOrdinal, so it cannot fetch a different listing. No marketplace fee is added, so the total is the payout.
  */
-export const buyOpnsListing = async (ctx: OneSatContext, rawOutpoint: string, name: string): Promise<string> => {
+export const buyOpnsListing = async (
+  ctx: OneSatContext,
+  rawOutpoint: string,
+  name: string,
+  approvedSats: number,
+): Promise<string> => {
   const outpoint = walletOutpoint(rawOutpoint);
   await assertOrdLockV2(outpoint);
+  const [txid, vout] = outpoint.split('.');
+  if (!ctx.services) throw new Error("Couldn't check this listing's contract. Try again in a moment.");
+  const beef = await ctx.services.getBeefForTxid(txid);
+  const out = beef.findTxid(txid)?.tx?.outputs[Number(vout)];
+  if (!out) throw new Error("Couldn't check this listing's contract. Try again in a moment.");
+  assertOpnsPayout(out.lockingScript, approvedSats, { marketFeeSats: 0, approvedTotalSats: approvedSats });
   const res = await buyOrdinal.execute(purchaseContext(ctx, outpoint), {
     outpoint,
+    inputBEEF: beef.toBinary(),
     name: name.slice(0, 64),
     contentType: 'application/op-ns',
     basket: 'opns',

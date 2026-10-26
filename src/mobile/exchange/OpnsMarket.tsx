@@ -115,7 +115,7 @@ export const OpnsMarket = ({ rate }: { rate: number }) => {
     setBusy(l.name);
     setMsg('');
     try {
-      await buyOpnsListing(apiContext, l.outpoint, l.name);
+      await buyOpnsListing(apiContext, l.outpoint, l.name, l.priceSats);
       setMsg(`You bought ${l.name}. It shows in your names once indexed.`);
       setReload((n) => n + 1);
     } catch (e) {
