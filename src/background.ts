@@ -84,6 +84,16 @@ import { isEmpty, summarizeActive, switchToLocalVerified, type SwitchDeps } from
 import { insufficientFundsMessage, isInsufficientFunds, prepareFunding, type FundingSnapshot } from './services/fundingPrep';
 import { mirrorToMiner } from './mobile/minerMirror';
 import { panelUnlockMessages, shouldPushPrompt, type ShownPrompt } from './services/promptQueue';
+import { CreateActionDedupe, createActionKey } from './services/createActionDedupe';
+import {
+  PROMPT_EXPIRY_MS,
+  PromptWatchdog,
+  promptExpiredError,
+  promptNotShownError,
+  rejectManagerRequest,
+  withPromptNotShownCode,
+  type WatchedPrompt,
+} from './services/promptWatchdog';
 import { RequestParams, ResponseEventDetail, YoursEventName } from './inject';
 import { recordCall, recordPayment, requestedSats, updateConnectionLog } from './mobile/wallet/connectionLog';
 import { CWIEventName } from './cwi';
@@ -1522,6 +1532,10 @@ let showPromptUi: (kind: PromptKind, requestID?: string) => void = () => {
 let showUnlockUi: () => void = () => {
   console.warn('showUnlockUi called before initialization');
 };
+// Prompt watchdog (services/promptWatchdog.ts): set up with the prompt UI in the service worker.
+let watchPrompt: (p: WatchedPrompt) => void = () => undefined;
+// A payment sheet not answered within PROMPT_EXPIRY_MS expires (services/promptWatchdog.ts). Set in the worker.
+let expireSpendRequest: (requestID: string) => void = () => undefined;
 
 /**
  * Bind permission callbacks to the WalletPermissionsManager.
@@ -1647,7 +1661,24 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
           return;
         }
         pendingPermissionRequests.set(request.requestID, { request, resolve, reject });
-        if (!bundle) return; // queued: companions are asked when its sheet opens (askCompanionsFor)
+        // Unanswered payment sheets expire: a retried call (TokenBlaster #105) never meets an old sheet still open.
+        // This rejects the permission request only; nothing has been built or signed yet.
+        if (request.type === 'spending') {
+          const id = request.requestID;
+          setTimeout(() => {
+            if (pendingPermissionRequests.has(id)) expireSpendRequest(id);
+          }, PROMPT_EXPIRY_MS);
+        }
+        if (!bundle) {
+          // Queued behind this site's open sheet: companions are asked when its sheet opens (askCompanionsFor).
+          // That sheet must really be on screen, or this request would wait forever (TokenBlaster, 26 Oct 2026):
+          // the watchdog re-shows it in the wallet's window and, failing that, closes it so the queue moves on.
+          const blocking = permissionBundler
+            .list()
+            .find((b) => b.originator === request.originator && b.state === 'shown');
+          if (blocking) watchPrompt({ kind: 'bundle', requestID: blocking.id });
+          return;
+        }
         askPostCompanions(request.originator, bundle.items);
         askMintCompanions(mintSite, request, bundle.id);
       }),
@@ -1867,11 +1898,14 @@ if (isInServiceWorker) {
   };
 
   notifyPromptUpdated = (kind, requestID) => {
+    // A line joined an open sheet: that sheet must reload it, or the new request (a payment) waits unseen.
+    promptWatchdog.watch({ kind, requestID });
     notifyPromptWindow(kind, requestID);
   };
 
   showPromptUi = (kind, requestID) => {
     console.log('[background] showPromptUi called', kind, requestID);
+    if (requestID && kind !== 'unlock') promptWatchdog.watch({ kind, requestID });
     void surfaceOverFullscreen(kind === 'usbCheck' ? undefined : tabForPrompt(kind, requestID));
 
     // Side panel open: show the prompt inside it (the panel's own unlock screen covers 'unlock').
@@ -2021,6 +2055,75 @@ if (isInServiceWorker) {
     });
   };
 
+  /** Fail one prompt that could not be shown: the site's call rejects with ERR_PROMPT_NOT_SHOWN (no Deny stored). */
+  const failUnshownPrompt = ({ kind, requestID }: WatchedPrompt, err: Error = promptNotShownError()) => {
+    const wallet = accountContext?.wallet;
+    const failPermission = (id: string) => {
+      const pending = pendingPermissionRequests.get(id);
+      pendingPermissionRequests.delete(id);
+      if (!isReconnectRequestId(id)) rejectManagerRequest(wallet, id, err).catch(() => undefined);
+      pending?.reject(err);
+    };
+    switch (kind) {
+      case 'bundle': {
+        const bundle = permissionBundler.get(requestID);
+        for (const item of bundle?.items ?? []) failPermission(item.requestID);
+        permissionBundler.drop(requestID); // the site's queued requests get their own sheet next
+        break;
+      }
+      case 'permission':
+        permissionBundler.removeRequest(requestID);
+        failPermission(requestID);
+        break;
+      case 'groupedPermission': {
+        const pending = pendingGroupedPermissionRequests.get(requestID);
+        pendingGroupedPermissionRequests.delete(requestID);
+        rejectManagerRequest(wallet, requestID, err).catch(() => undefined);
+        pending?.reject(err);
+        break;
+      }
+      case 'counterpartyPermission': {
+        const pending = pendingCounterpartyPermissionRequests.get(requestID);
+        pendingCounterpartyPermissionRequests.delete(requestID);
+        rejectManagerRequest(wallet, requestID, err).catch(() => undefined);
+        pending?.reject(err);
+        break;
+      }
+      default:
+        // Key checks, envelopes, private mints and 1Sat sheets keep waiting for their own answer.
+        return;
+    }
+    if (shownPrompt?.kind === kind && shownPrompt.requestID === requestID) shownPrompt = undefined;
+    closeDappPopupIfNoUi();
+  };
+
+  const promptWatchdog: PromptWatchdog = new PromptWatchdog({
+    isPending: ({ kind, requestID }) => getPendingPromptPayload(kind, requestID) !== undefined,
+    waitingBehindShown: ({ kind, requestID }): boolean =>
+      !!shownPrompt &&
+      !(shownPrompt.kind === kind && shownPrompt.requestID === requestID) &&
+      getPendingPromptPayload(shownPrompt.kind, shownPrompt.requestID) !== undefined &&
+      !promptWatchdog.watching({ kind: shownPrompt.kind, requestID: shownPrompt.requestID ?? '' }),
+    escalate: ({ kind, requestID }) => {
+      // Whatever the panel / in-page sheet flags say, nothing loaded this prompt: drop them and use the window.
+      hideInPageSheet();
+      hidePanelPrompt();
+      showPromptWindow(kind as PromptKind, requestID);
+    },
+    fail: failUnshownPrompt,
+    log: (msg, p) => console.warn(msg, p.kind, p.requestID),
+  });
+  watchPrompt = (p) => promptWatchdog.watch(p);
+  expireSpendRequest = (id) => {
+    const bundle = permissionBundler.findByRequest(id);
+    const p: WatchedPrompt = bundle ? { kind: 'bundle', requestID: bundle.id } : { kind: 'permission', requestID: id };
+    console.warn('[background] payment sheet expired unanswered', p.kind, p.requestID);
+    promptWatchdog.forget(p);
+    failUnshownPrompt(p, promptExpiredError());
+    // An open sheet reloads and finds its request gone, so its Allow can no longer approve it.
+    notifyPromptWindow(p.kind as PromptKind, p.requestID);
+  };
+
   showUnlockUi = () => {
     // The browser-action popup renders its own unlock UI; never force a
     // window over it just to unlock.
@@ -2055,7 +2158,7 @@ if (isInServiceWorker) {
   chrome.runtime.onMessage.addListener((message: any, sender, answer: CallbackResponse) => {
     // Every refusal by the user carries code ERR_PERMISSION_DENIED (services/userDenied.ts), so a site can tell
     // "declined" from "failed" on every path (extension, phone dApp browser, bApp frames, pairing).
-    const sendResponse: CallbackResponse = (response) => answer(withDenialCode(response));
+    const sendResponse: CallbackResponse = (response) => answer(withPromptNotShownCode(withDenialCode(response)));
     console.log(
       '[background] Received message:',
       message.action,
@@ -2432,7 +2535,10 @@ if (!(
         case 'GET_PROMPT_PAYLOAD': {
           const { kind, requestID } = message as { kind: string; requestID?: string };
           const payload = getPendingPromptPayload(kind, requestID);
-          if (payload) shownPrompt = { kind, requestID };
+          if (payload) {
+            shownPrompt = { kind, requestID };
+            if (requestID) promptWatchdog.confirm({ kind, requestID });
+          }
           console.log('[background] GET_PROMPT_PAYLOAD', kind, requestID, 'found:', !!payload);
           sendResponse({ type: 'GET_PROMPT_PAYLOAD', success: !!payload, data: payload });
           return true;
@@ -2954,9 +3060,22 @@ if (!(
           case CWIEventName.DECRYPT:
             runDappRequest(trackProtocolCall(() => processCWIDecrypt(message, sendResponse)));
             return true;
-          case CWIEventName.CREATE_ACTION:
-            runDappRequest(processCWICreateAction(message, sendResponse));
+          case CWIEventName.CREATE_ACTION: {
+            // An identical call already running for this site (a site's Retry) joins it: one sheet, one
+            // transaction, the same answer for both (services/createActionDedupe.ts, TokenBlaster #105).
+            if (isFromExtension) {
+              runDappRequest(processCWICreateAction(message, sendResponse));
+              return true;
+            }
+            const key = createActionKey(message.originator, message.params ?? {});
+            const respond = createActionDedupe.begin(key, sendResponse);
+            if (!respond) {
+              console.log('[createAction] identical call already running: joined it');
+              return true;
+            }
+            runDappRequest(processCWICreateAction(message, respond));
             return true;
+          }
           case CWIEventName.SIGN_ACTION:
             runDappRequest(processCWISignAction(message, sendResponse));
             return true;
@@ -5314,6 +5433,8 @@ if (!(
     chrome.storage.session.set({ bwxRepeatGuard: repeatGuard.toJSON() }).catch(() => undefined);
     return r;
   };
+
+  const createActionDedupe = new CreateActionDedupe<ResponseEventDetail>();
 
   const processCWICreateAction = async (
     message: { params: CreateActionArgs; originator?: string },
