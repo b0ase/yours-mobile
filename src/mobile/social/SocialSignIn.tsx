@@ -5,6 +5,8 @@ import { BWALLET_PAYMAIL_DOMAIN } from '../names/config';
 import { CAP, fill, getCapabilities } from '../names/names';
 import { paymailAvailable } from '../names/paymail';
 import { forgetXHandle, rememberXHandle, xAlias, xPrefill } from './xHandle';
+import { forgetLinkedHandle, handleFromLinked, rememberLinkedHandle } from './linkedHandles';
+import { isPlaceholderName } from '../names/handlePrompt';
 
 /** True when name@<our domain> already has an identity key (public lookup; nothing of this wallet is sent). */
 const nameHasWallet = async (alias: string): Promise<boolean> => {
@@ -70,10 +72,15 @@ export const SocialSignIn = ({
   onClear,
   owner = NEW_ACCOUNT,
   check = false,
-  xOnly = false,
+  create = false,
 }: {
-  /** Create Account (owner, 24 Oct 2026): one optional "Link your X (Twitter)" button; fills name + photo. */
-  xOnly?: boolean;
+  /**
+   * Create Account: optional "Link X" / "Link Google" buttons; fill name + photo. Owner, 24 Oct 2026 made this X only;
+   * owner, 26 Oct 2026 brought Google back beside it: Google fills the Account Name (its display name, else the
+   * Gmail local part) and Add a photo, and its local part is offered on Choose your handle (linkedHandles.ts).
+   * X behaves exactly as on 24 Oct.
+   */
+  create?: boolean;
   /** Restore: an optional check that the 12 words own the verified name (restoreGuard.ts), never a sign-in. */
   check?: boolean;
   onProfile: (p: { name: string; avatar: string }) => void;
@@ -104,14 +111,23 @@ export const SocialSignIn = ({
     if (filled.current === key) return;
     filled.current = key;
     filledAvatar.current = p.avatar || '';
-    if (xOnly) rememberXHandle(xAlias(p));
+    if (create && p.provider === 'x') {
+      rememberXHandle(xAlias(p));
+      rememberLinkedHandle(owner, 'x', xAlias(p));
+    }
+    if (create && p.provider === 'google') rememberLinkedHandle(owner, 'google', p.name);
     onProfileRef.current(
-      xOnly && p.provider === 'x'
+      create && p.provider === 'x'
         ? xPrefill(p)
-        : {
-            name: p.provider === 'x' ? p.name.replace(/^@/, '') : p.display || p.name.split('@')[0],
-            avatar: p.avatar || '',
-          },
+        : create && p.provider === 'google'
+          ? {
+              name: p.display && !isPlaceholderName(p.display) ? p.display : handleFromLinked('google', p.name) || '',
+              avatar: p.avatar || '',
+            }
+          : {
+              name: p.provider === 'x' ? p.name.replace(/^@/, '') : p.display || p.name.split('@')[0],
+              avatar: p.avatar || '',
+            },
     );
   };
   useEffect(() => {
@@ -123,9 +139,13 @@ export const SocialSignIn = ({
       setBusy(null);
       if (p) fill(p);
       else if (filled.current) {
+        const was = filled.current.split(':')[0];
         filled.current = '';
         onClearRef.current?.(filledAvatar.current);
-        if (xOnly) forgetXHandle();
+        if (create) {
+          if (was === 'x') forgetXHandle();
+          if (was === 'x' || was === 'google') forgetLinkedHandle(owner, was);
+        }
         filledAvatar.current = '';
       }
     });
@@ -136,7 +156,8 @@ export const SocialSignIn = ({
   const alias = profile?.alias || '';
   const offerRestore = !!onRestore;
   // Create: is handle@<our domain> free for "Claim your name" to offer next? (Public lookup, nothing claimed.)
-  const xa = xOnly ? xAlias(profile) : '';
+  // The $name this link offers next: the X @name, or the Gmail local part (owner, 26 Oct 2026).
+  const xa = !create ? '' : profile?.provider === 'google' ? handleFromLinked('google', profile.name) : xAlias(profile);
   const [xFree, setXFree] = useState<boolean | null>(null);
   useEffect(() => {
     setXFree(null);
@@ -174,20 +195,24 @@ export const SocialSignIn = ({
 
   if (profile)
     return (
-      <div className={xOnly ? 'w-[85%] mb-3' : 'w-[92%] mb-4'}>
+      <div className={create ? 'w-[85%] mb-3' : 'w-[92%] mb-4'}>
         <div className="flex items-center gap-3 rounded-xl px-3 py-2.5" style={{ background: 'var(--bw-surface)' }}>
           {profile.avatar ? <img src={profile.avatar} alt="" className="w-8 h-8 rounded-full" /> : null}
           <div className="flex-1 min-w-0 text-left">
             <div className="text-sm font-semibold text-white flex items-center gap-1">
-              {profile.provider === 'x' ? `@${profile.name}` : profile.name}
+              {profile.provider === 'x'
+                ? `@${profile.name}`
+                : create && profile.provider === 'google'
+                  ? profile.display || 'Google account'
+                  : profile.name}
               <BadgeCheck size={14} color="var(--bw-accent)" />
             </div>
             <div className="text-[11px]" style={{ color: '#98A2B3' }}>
               {check
                 ? `Verified · the 12 words must be the wallet that owns ${alias || 'this name'}`
-                : xOnly && xa && xFree
+                : create && xa && xFree
                   ? `Linked · $${xa} (${xa}@${BWALLET_PAYMAIL_DOMAIN}) is free; we'll offer it next`
-                  : xOnly && xa && xFree === false
+                  : create && xa && xFree === false
                     ? `Linked · ${xa}@${BWALLET_PAYMAIL_DOMAIN} is taken; you choose your name next`
                     : 'Verified · you choose your handle next'}
             </div>
@@ -223,27 +248,36 @@ export const SocialSignIn = ({
     );
 
   const desktop = inDesktopApp();
-  if (xOnly)
+  // Create: Link X or Google (owner, 26 Oct 2026; X only from 24 Oct). Same button style as the 24 Oct X button.
+  if (create) {
+    const linkBtn = (p: SocialProvider, label: string, icon: JSX.Element) => (
+      <button
+        type="button"
+        onClick={() => void go(p)}
+        disabled={!!busy || desktop}
+        className="flex flex-1 items-center justify-center gap-2 h-11 rounded-xl text-sm font-semibold border-0"
+        style={{ background: 'var(--bw-surface)', color: '#fff', opacity: desktop || (busy && busy !== p) ? 0.5 : 1 }}
+        data-testid={`create-link-${p}`}
+      >
+        {busy === p ? <Loader2 size={16} className="animate-spin" /> : icon}
+        {label}
+      </button>
+    );
     return (
       <div className="w-[85%] mb-3">
-        <button
-          type="button"
-          onClick={() => void go('x')}
-          disabled={!!busy || desktop}
-          className="flex w-full items-center justify-center gap-2 h-11 rounded-xl text-sm font-semibold border-0"
-          style={{ background: 'var(--bw-surface)', color: '#fff', opacity: desktop ? 0.5 : 1 }}
-        >
-          {busy === 'x' ? <Loader2 size={16} className="animate-spin" /> : <XLogo />}
-          Link your X (Twitter)
-        </button>
+        <div className="flex gap-2">
+          {linkBtn('x', 'Link X', <XLogo />)}
+          {linkBtn('google', 'Link Google', <GoogleLogo />)}
+        </div>
         <p className="text-[11px] mt-1.5 text-center" style={{ color: error ? '#FDA29B' : '#98A2B3' }}>
           {error ||
             (desktop
-              ? 'Link X on web or in the phone app for now.'
-              : 'Optional. Fills your name and photo, and offers your X handle as your $name.')}
+              ? 'Link X or Google on web or in the phone app for now.'
+              : 'Optional. Fills your name and photo, and offers your X handle or Gmail name as your $name.')}
         </p>
       </div>
     );
+  }
   const btn = (p: SocialProvider, label: string, icon: JSX.Element) => (
     <button
       type="button"

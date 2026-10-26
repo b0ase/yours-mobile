@@ -1,10 +1,8 @@
 import { createPortal } from 'react-dom';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { payNameFee } from './nameFee';
-import { askNotifyPermissionOnce } from '../notify/engine';
 import { X } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
-import { useLegacyKeys } from './useLegacyKeys';
 import { getPaymail, setPaymail } from './accountName';
 import { syncBchatHandle } from './bchatHandle';
 import {
@@ -26,46 +24,37 @@ import {
 } from './paymail';
 import { clearSocial, socialProof } from '../social/socialLogin';
 import { checkXOffer, forgetXHandle, rememberedXHandle, xAlias, type XOffer } from '../social/xHandle';
-import { BWALLET_PAYMAIL_API, BWALLET_PAYMAIL_DOMAIN, SIBLING_PAYMAIL_DOMAINS } from './config';
 import {
-  PERSONAL_FEE_ESTIMATE_SATS,
-  PERSONAL_NETWORK_FEE_SATS,
-  deployPersonalToken,
-  existingChoice,
-  importExistingToken,
-  openPersonalRoom,
-  recoverPersonalLink,
-} from './claimPersonal';
-import { getFundRecord, showOnWallet } from '../tokens/indexFund';
-import { FinishIndexing } from '../tokens/FinishIndexing';
+  SOURCE_LABEL,
+  canClaimSelection,
+  claimOrder,
+  forgetLinkedHandles,
+  handleFromLinked,
+  linkedSuggestions,
+  rememberedLinkedHandles,
+  resolvePrimary,
+  type HandleSource,
+} from '../social/linkedHandles';
+import { getLinks } from '../social/links';
+import { addExtraName, loadHandles } from './extraNames';
+import { ensureNameRooms } from './nameRooms';
+import { BWALLET_PAYMAIL_API, BWALLET_PAYMAIL_DOMAIN, SIBLING_PAYMAIL_DOMAINS } from './config';
 import { AvatarPicker } from './AvatarPicker';
-import { NRT_ENABLED, PAID_FEATURES_ENABLED } from '../storeBuild';
 import { paymailAvatar } from './avatar';
 import { adoptSocialAvatar } from './socialAvatar';
-import { DEFAULT_SUPPLY, getPersonalLink, onPersonalChange, personalTicker, validateSupply } from './personalToken';
 import { getMyName } from './myName';
 import { SendConfirmation } from '../../components/SendConfirmation';
-import { CurvePicker } from '../curves/CurvePicker';
-import { STANDARD_SUPPLY, curveProblem } from '../curves/curveChoice';
-import { maxPrice, standardCurve, usd, type Curve } from '../../lib/curves';
 import { useTheme } from '../../hooks/useTheme';
 import { handleTitle, suggestHandle } from './handlePrompt';
 import { useBackClose } from '../backStack';
-import { moneyNow } from '../money/money';
-import {
-  bsv20TakenError,
-  duplicateNote,
-  heldTokenNote,
-  personalTokenLabel,
-  type ExistingChoice,
-} from './existingToken';
 
 /**
  * "Choose your handle": a full-screen sheet shown after create / restore (HandleOnboarding) and
- * from the Wallet "Get your $name" card. Step 1 claims the free paymail name@bwallet.space (signed by
- * the identity key, no transaction). Step 2, on by default: the personal $NAME token + its
- * holder-only room (claimPersonal), after the standard confirmation sheet shows the fee (network
- * + creator-paid indexing). Optional: a photo (local; publishing it is a separate confirmed step).
+ * from the Wallet "Get your $name" card. It claims the paymail name@bwallet.space (signed by the identity key).
+ * Owner, 26 Oct 2026: every linked account (X, Google, GitHub, LinkedIn, HandCash) suggests its own $name; the user
+ * may claim several and picks exactly one primary (social/linkedHandles.ts), and each claimed name gets its free
+ * room (nameRooms.ts). The personal $NAME token + room launcher is no longer here: it moved, unchanged, to
+ * PersonalTokenLauncher ("Launch your tokens" card on the wallet home). Optional: a photo (local).
  * The on-chain OpNS name is NOT offered here: it stays a quiet optional link in Settings → Identity.
  * Nothing is broadcast without a confirmation; the user can skip.
  */
@@ -94,7 +83,6 @@ export const HandleFlow = ({
   // The X handle kept from Create is for this sheet only: forget it when the sheet closes.
   useEffect(() => () => forgetXHandle(), []);
   const { apiContext, chromeStorageService } = useServiceContext();
-  const legacy = useLegacyKeys();
   const account = chromeStorageService.getCurrentAccountObject().account;
   const identityAddress = account?.addresses?.identityAddress ?? '';
   const ordAddress = account?.addresses?.ordAddress ?? '';
@@ -108,15 +96,7 @@ export const HandleFlow = ({
   const [msg, setMsg] = useState('');
   const enabled = paymailEnabled();
   const { theme } = useTheme();
-  const [link, setLink] = useState(() => getPersonalLink(identityAddress));
-  // Store build: free paymail only, no personal token + holder room (storeBuild.ts).
-  const withToken = PAID_FEATURES_ENABLED;
-  const [supply, setSupply] = useState(DEFAULT_SUPPLY);
-  const supplyNum = Number(String(supply).replace(/[,_\s]/g, '')) || 0;
-  const [curve, setCurve] = useState<Curve>(() => standardCurve());
-  const [curveOk, setCurveOk] = useState(false);
-  const [confirming, setConfirming] = useState(false);
-  const [tokenMsg, setTokenMsg] = useState('');
+  const claimed = (paymail ? paymail.split('@')[0] : '') || getMyName(identityAddress);
   // 1¢ to claim a new name (anti-squatting, owner 10 Oct 2026); null = free (server fee off).
   const [nameFee, setNameFee] = useState<NameFee | null>(null);
   const [feeConfirm, setFeeConfirm] = useState(false);
@@ -128,7 +108,6 @@ export const HandleFlow = ({
       live = false;
     };
   }, [enabled]);
-  useEffect(() => onPersonalChange(() => setLink(getPersonalLink(identityAddress))), [identityAddress]);
   // A restored wallet already owns its name: show it instead of suggesting a new one. (The background
   // name sync may not have finished when this opens.) The server answers with the wallet's identity,
   // the handle it chose first, so a stale name stored here is replaced.
@@ -161,107 +140,105 @@ export const HandleFlow = ({
     return a || null;
   });
   // Linked X on Create (owner, 24 Oct 2026): propose $handle only when handle@<domain> is free, else free
-  // alternatives. The user confirms with a tap; nothing is claimed automatically.
+  // alternatives. The user confirms with a tap; nothing is claimed automatically. Owner, 26 Oct 2026: X is now one
+  // of the linked-account suggestions below (same check and alternatives, checkXOffer), not the only one.
   const [xHandle] = useState(() =>
     suggest ? '' : xAlias(socialProof(identityAddress)?.profile) || rememberedXHandle(),
   );
-  const [xProposal, setXProposal] = useState<XOffer>({ kind: 'none' });
+
+  // All linked accounts, one primary (owner, 26 Oct 2026: it chose the X @name and ignored the Google account linked
+  // just before). One suggestion per linked account; never anything from an email the user didn't link.
+  const [suggestions] = useState(() => {
+    if (suggest) return [];
+    const found: Partial<Record<HandleSource, string>> = { ...rememberedLinkedHandles(identityAddress) };
+    if (xHandle) found.x = xHandle;
+    const p = socialProof(identityAddress)?.profile;
+    if (p && p.provider !== 'x' && !found[p.provider])
+      found[p.provider] = handleFromLinked(p.provider, p.provider === 'linkedin' ? p.display : p.name);
+    for (const l of getLinks(identityAddress)) {
+      if (found[l.provider]) continue;
+      if (l.provider === 'linkedin') found.linkedin = handleFromLinked('linkedin', l.display);
+      else if (l.provider !== 'google' && l.handle) found[l.provider] = handleFromLinked(l.provider, l.handle);
+    }
+    return linkedSuggestions(found);
+  });
+  const [offers, setOffers] = useState<Record<string, XOffer>>({});
+  const [picks, setPicks] = useState<Record<string, string>>({});
+  const [selected, setSelected] = useState<string[]>([]);
+  const [primary, setPrimary] = useState('');
+  const [extrasDone, setExtrasDone] = useState<string[]>([]);
+  const [extraFee, setExtraFee] = useState<{ alias: string; sats: number; to: string; pence: number } | null>(null);
+  const queue = useRef<string[]>([]);
+  const pending = useRef('');
+  const roomsFor = useRef<{ names: string[]; primary: string }>({ names: [], primary: '' });
   useEffect(() => {
-    if (!enabled || !xHandle || paymail) return;
+    if (!enabled || paymail || !suggestions.length) return;
     let live = true;
-    void checkXOffer(xHandle, (a) => paymailAvailable(f, a)).then((o) => live && setXProposal(o));
+    for (const s of suggestions)
+      void checkXOffer(s.alias, (a) => paymailAvailable(f, a)).then((o) => {
+        if (!live) return;
+        setOffers((m) => ({ ...m, [s.alias]: o }));
+        if (o.kind === 'take') setPicks((m) => ({ ...m, [s.alias]: s.alias }));
+        else if (o.kind === 'taken' && o.alternatives[0]) setPicks((m) => ({ ...m, [s.alias]: o.alternatives[0] }));
+      });
     return () => {
       live = false;
     };
-  }, [enabled, xHandle, paymail]);
-  // The token is named after the claimed handle (paymail alias, else OpNS name), else what's typed.
-  const claimed = (paymail ? paymail.split('@')[0] : '') || getMyName(identityAddress);
-  const tokenName = claimed || alias;
-  const ticker = personalTicker(tokenName);
-  const supplyError = validateSupply(supply);
-  // A token minted earlier whose local link was lost: find this wallet's own deploy (read-only).
-  useEffect(() => {
-    if (link || !claimed || !apiContext) return;
-    recoverPersonalLink(apiContext, identityAddress, claimed)
-      .then((l) => l && setLink(l))
-      .catch(() => undefined);
-  }, [apiContext, identityAddress, claimed, link]);
-
-  // Tokens that already use this ticker: import ours, refuse a taken BSV-20 tick, note someone else's.
-  const [choice, setChoice] = useState<ExistingChoice | null>(null);
-  const [importing, setImporting] = useState(false);
-  useEffect(() => {
-    if (link || !claimed || !apiContext || !withToken) return;
-    let live = true;
-    existingChoice(apiContext, claimed, undefined, legacy)
-      .then((c) => live && setChoice(c))
-      .catch(() => live && setChoice({ kind: 'mint' }));
-    return () => {
-      live = false;
-    };
-  }, [apiContext, claimed, link, withToken, legacy]);
-
-  const importToken = async () => {
-    if (choice?.kind !== 'import') return;
-    setImporting(false);
-    setBusy(true);
-    setTokenMsg('');
-    try {
-      const { link: l, roomTicker } = await importExistingToken(
-        apiContext,
-        identityAddress,
-        claimed,
-        choice.token,
-        legacy,
-      );
-      void showOnWallet(chromeStorageService, l.tokenId);
-      setTokenMsg(
-        roomTicker
-          ? `$${l.ticker} is now your token and its room is open.`
-          : `$${l.ticker} is now your token. Set up its room from Chat when you're ready.`,
-      );
-    } catch (e) {
-      setTokenMsg(e instanceof Error ? e.message : 'Import failed');
-    } finally {
-      setBusy(false);
+  }, [enabled, paymail, suggestions]);
+  const toggle = (name: string, on: boolean) => {
+    const next = on ? [...new Set([...selected, name])] : selected.filter((a) => a !== name);
+    setSelected(next);
+    setPrimary(resolvePrimary(next, primary));
+  };
+  const choose = (src: string, from: string, to: string) => {
+    setPicks((m) => ({ ...m, [src]: to }));
+    if (selected.includes(from)) {
+      const next = selected.map((a) => (a === from ? to : a));
+      setSelected(next);
+      setPrimary(primary === from ? to : resolvePrimary(next, primary));
     }
   };
-
-  const mintToken = async (name = tokenName) => {
-    setConfirming(false);
-    setBusy(true);
-    setTokenMsg('');
-    try {
-      const l = await deployPersonalToken(apiContext, {
-        identityAddress,
-        name,
-        supply,
-        payAddress: account?.addresses?.bsvAddress,
-        curve,
-        avatar: account?.settings?.socialProfile?.avatar ?? account?.icon,
-        ...(choice ? { choice, acceptDuplicate: choice.kind === 'mint-labelled' } : {}),
-      });
-      if (choice?.kind === 'mint-labelled') setTokenMsg(personalTokenLabel(name));
-      // Its balance is local: show it on the Wallet tab now, not when an indexer catches up.
-      void showOnWallet(chromeStorageService, l.tokenId);
-      void askNotifyPermissionOnce();
-      // Names, Rooms and Tickets: a token opens no room by itself; attach it to a room in You › Rooms.
-      if (NRT_ENABLED) {
-        setTokenMsg(`$${l.ticker} minted. Add it as a ticket to any room from You › Rooms.`);
-        return;
+  /** Claim the selection: the primary through the normal claim (it becomes the main paymail), then the others. */
+  const claimSelection = () => {
+    const order = claimOrder(selected, primary);
+    if (!order.length) return;
+    queue.current = order.slice(1);
+    pending.current = order[0];
+    roomsFor.current = { names: order, primary: order[0] };
+    setAlias(order[0]);
+    if (nameFee) setFeeConfirm(true);
+    else void claim({}, order[0]);
+  };
+  /**
+   * The other names, one after another through the existing extra-name call (Settings › Names: bit-sign then the
+   * paymail server). No atomic multi-claim endpoint exists. A name with a fee asks first (its own confirmation).
+   */
+  const addExtras = async (approved: { sats: number; to: string } | null = null) => {
+    while (queue.current.length) {
+      const a = queue.current[0];
+      if (!approved) {
+        const fee = (await loadHandles(apiContext)).nextFee;
+        if (fee) return setExtraFee({ alias: a, ...fee });
       }
-      setTokenMsg(`$${l.ticker} minted. Opening your room…`);
-      // Signatures only; a fresh token may not be indexed yet. Chat retries until it is.
-      openPersonalRoom(apiContext, identityAddress, l)
-        .then(() => setTokenMsg(`$${l.ticker} minted and your room is open. Invite = send 1 $${l.ticker}.`))
-        .catch(() =>
-          setTokenMsg(`$${l.ticker} minted. Set up your room from Chat or Settings › My tokens when you're ready.`),
-        );
-    } catch (e) {
-      setTokenMsg(e instanceof Error ? e.message : 'Token mint failed');
-    } finally {
-      setBusy(false);
+      await addExtraName(apiContext, f, a, approved);
+      approved = null;
+      queue.current = queue.current.slice(1);
+      setExtrasDone((d) => [...d, a]);
     }
+    await finishRooms();
+  };
+  const finishRooms = async () => {
+    const r = roomsFor.current;
+    roomsFor.current = { names: [], primary: '' };
+    if (r.names.length) await ensureNameRooms(apiContext, identityAddress, r.names, r.primary).catch(() => undefined);
+    forgetLinkedHandles(identityAddress);
+  };
+  const runExtras = (approved: { sats: number; to: string } | null) => {
+    setExtraFee(null);
+    setBusy(true);
+    addExtras(approved)
+      .catch((e: unknown) => setMsg(e instanceof Error ? e.message : 'Could not add that name'))
+      .finally(() => setBusy(false));
   };
 
   // Live availability, debounced.
@@ -306,7 +283,7 @@ export const HandleFlow = ({
     setBusy(true);
     setMsg('');
     try {
-      await claim(await payNameFee(apiContext, nameFee));
+      await claim(await payNameFee(apiContext, nameFee), pending.current || alias);
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Claim failed');
       setBusy(false);
@@ -340,7 +317,11 @@ export const HandleFlow = ({
       // waiting on a handle finishes with its own claim token instead (onClaimed).
       if (onClaimed) await onClaimed(pm);
       else await syncBchatHandle(apiContext, pm, { signIn: true });
-      // The token + room is an explicit choice (its own button below), never started automatically.
+      // Owner, 26 Oct 2026: no token here any more (PersonalTokenLauncher). The other selected names follow, then
+      // each claimed name's free room (nameRooms.ts: no payment, no mint).
+      pending.current = '';
+      if (!roomsFor.current.names.length) roomsFor.current = { names: [name], primary: name };
+      await addExtras();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Claim failed');
     } finally {
@@ -407,68 +388,102 @@ export const HandleFlow = ({
                 {nameFee ? '1¢ · instant' : 'Free · instant'}
               </span>
             </div>
-            {!paymail && xProposal.kind === 'take' && (
+            {!paymail && suggestions.length > 0 && (
               <div
                 className="rounded-xl p-3 flex flex-col gap-2"
                 style={{ background: '#0b0c0f', border: `1px solid ${GOLD}` }}
-              >
-                <p className="text-sm text-white m-0">
-                  <b>@{xProposal.alias}</b> is yours on X. Take <b style={{ color: GOLD }}>${xProposal.alias}</b> (
-                  {xProposal.alias}@{BWALLET_PAYMAIL_DOMAIN})?
-                </p>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => {
-                      setAlias(xProposal.alias);
-                      if (nameFee) setFeeConfirm(true);
-                      else void claim({}, xProposal.alias);
-                    }}
-                    className="flex-1 h-10 rounded-lg text-sm font-bold border-0 cursor-pointer disabled:opacity-40"
-                    style={{ background: GOLD, color: '#000' }}
-                  >
-                    {busy ? 'Claiming…' : `Take $${xProposal.alias}${nameFee ? ' · 1¢' : ''}`}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => (setXProposal({ kind: 'none' }), setAlias(''))}
-                    className="h-10 px-3 rounded-lg text-sm border-0 cursor-pointer"
-                    style={{ background: BORDER, color: '#fff' }}
-                  >
-                    Pick another
-                  </button>
-                </div>
-              </div>
-            )}
-            {!paymail && xProposal.kind === 'taken' && (
-              <div
-                className="rounded-xl p-3 flex flex-col gap-2"
-                style={{ background: '#0b0c0f', border: `1px solid ${BORDER}` }}
+                data-testid="linked-handles"
               >
                 <p className="text-xs m-0" style={{ color: GRAY }}>
-                  <b className="text-white">@{xProposal.alias}</b> is yours on X, but {xProposal.alias}@
-                  {BWALLET_PAYMAIL_DOMAIN} is taken.
-                  {xProposal.alternatives.length ? ' These are free:' : ' Type another name below.'}
+                  From your linked accounts. Claim one or more (each is your own paymail, same wallet) and pick one{' '}
+                  <b className="text-white">primary</b>: it becomes your main name.
                 </p>
-                {xProposal.alternatives.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {xProposal.alternatives.map((a) => (
-                      <button
-                        key={a}
-                        type="button"
-                        onClick={() => setAlias(a)}
-                        className="h-8 px-3 rounded-full text-xs font-semibold border-0 cursor-pointer"
-                        style={
-                          alias === a ? { background: GOLD, color: '#000' } : { background: BORDER, color: '#fff' }
-                        }
-                      >
-                        ${a}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                {suggestions.map((sg) => {
+                  const o = offers[sg.alias];
+                  const name = picks[sg.alias] || '';
+                  const on = !!name && selected.includes(name);
+                  return (
+                    <div key={sg.source} className="flex flex-col gap-1.5 rounded-lg p-2" style={{ background: PANEL }}>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={on}
+                          disabled={!name || busy}
+                          onChange={(e) => toggle(name, e.target.checked)}
+                          aria-label={`Claim $${name || sg.alias}`}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm text-white truncate">
+                            <b style={{ color: GOLD }}>${name || sg.alias}</b>
+                          </div>
+                          <div className="text-[11px]" style={{ color: GRAY }}>
+                            {SOURCE_LABEL[sg.source]} · {sg.source === 'x' ? `@${sg.alias}` : sg.alias}
+                            {!o || o.kind === 'none'
+                              ? ' · checking…'
+                              : o.kind === 'take'
+                                ? ' · available'
+                                : ` · ${sg.alias}@${BWALLET_PAYMAIL_DOMAIN} is taken`}
+                          </div>
+                        </div>
+                        <label className="flex items-center gap-1 text-[11px]" style={{ color: on ? '#fff' : GRAY }}>
+                          <input
+                            type="radio"
+                            name="primary-handle"
+                            checked={on && primary === name}
+                            disabled={!on || busy}
+                            onChange={() => setPrimary(name)}
+                          />
+                          Primary
+                        </label>
+                      </div>
+                      {o?.kind === 'taken' && (
+                        <div className="flex flex-wrap gap-2">
+                          {o.alternatives.length ? (
+                            o.alternatives.map((alt) => (
+                              <button
+                                key={alt}
+                                type="button"
+                                onClick={() => choose(sg.alias, name, alt)}
+                                className="h-7 px-3 rounded-full text-xs font-semibold border-0 cursor-pointer"
+                                style={
+                                  name === alt
+                                    ? { background: GOLD, color: '#000' }
+                                    : { background: BORDER, color: '#fff' }
+                                }
+                              >
+                                ${alt}
+                              </button>
+                            ))
+                          ) : (
+                            <span className="text-[11px]" style={{ color: GRAY }}>
+                              No free alternative found; type one below.
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                <button
+                  type="button"
+                  disabled={busy || !canClaimSelection(selected, primary)}
+                  onClick={claimSelection}
+                  className="h-10 rounded-lg text-sm font-bold border-0 cursor-pointer disabled:opacity-40"
+                  style={{ background: GOLD, color: '#000' }}
+                  data-testid="claim-linked"
+                >
+                  {busy
+                    ? 'Claiming…'
+                    : !selected.length
+                      ? 'Tick the names to claim'
+                      : !primary
+                        ? 'Pick your primary name'
+                        : `Claim ${selected.length === 1 ? `$${primary}` : `${selected.length} names`} · primary $${primary}${nameFee ? ' · 1¢' : ''}`}
+                </button>
               </div>
+            )}
+            {extrasDone.length > 0 && (
+              <p className="text-xs text-white m-0">Also yours: {extrasDone.map((a) => `$${a} ✓`).join(', ')}</p>
             )}
             <div
               className="flex items-center gap-1 rounded-xl px-3 h-11"
@@ -558,116 +573,6 @@ export const HandleFlow = ({
           </p>
         )}
 
-        {/* Personal token + room is bWalletX-only: the store build has no panel (or price), and none of its text. */}
-        {PAID_FEATURES_ENABLED ? (
-          <div
-            className="flex flex-col gap-2 rounded-2xl p-4"
-            style={{ background: PANEL, border: `1px solid ${BORDER}` }}
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] uppercase tracking-widest" style={{ color: GRAY }}>
-                Your token + room
-              </span>
-              <span className="text-[10px] font-semibold" style={{ color: GOLD }}>
-                ~{moneyNow(PERSONAL_FEE_ESTIMATE_SATS)}
-              </span>
-            </div>
-            {link ? (
-              <p className="text-xs text-white">
-                <b style={{ color: GOLD }}>${link.ticker} ✓</b> · {Number(link.supply).toLocaleString()} minted ·{' '}
-                {link.roomTicker
-                  ? 'room open'
-                  : getFundRecord(link.tokenId)
-                    ? 'room paid for, waiting for confirmation (usually 10–20 min)'
-                    : 'room not set up yet'}
-                .
-              </p>
-            ) : null}
-            {link && !busy && !getFundRecord(link.tokenId) ? (
-              <FinishIndexing tokenId={link.tokenId} ticker={link.ticker} compact />
-            ) : null}
-            {link || !PAID_FEATURES_ENABLED ? null : (
-              <>
-                <p className="text-[11px]" style={{ color: GRAY }}>
-                  A personal token, <b className="text-white">${ticker ?? 'NAME'}</b>, all to your wallet, and a chat
-                  room only holders can enter. Invite someone by sending 1 ${ticker ?? 'NAME'}. Your room's token:
-                  holders get in; it trades on your curve. About {moneyNow(PERSONAL_NETWORK_FEE_SATS)} network fee. You
-                  confirm it before anything is sent.
-                </p>
-                {withToken && (
-                  <label className="text-[11px] flex items-center gap-2" style={{ color: GRAY }}>
-                    Supply
-                    <input
-                      value={supply}
-                      inputMode="numeric"
-                      onChange={(e) => setSupply(e.target.value)}
-                      className="flex-1 rounded-lg px-2 py-1 text-xs bg-transparent outline-none text-white"
-                      style={{ border: `1px solid ${supplyError ? '#ff4444' : BORDER}` }}
-                    />
-                  </label>
-                )}
-                {withToken && claimed && (choice?.kind === 'mint' || choice?.kind === 'mint-labelled') && (
-                  <CurvePicker
-                    curve={curve}
-                    onChange={setCurve}
-                    accepted={curveOk}
-                    onAccept={setCurveOk}
-                    tokenSupply={supplyNum}
-                    onUseStandardSupply={() => setSupply(STANDARD_SUPPLY)}
-                  />
-                )}
-                {withToken && supplyError && (
-                  <span className="text-[11px]" style={{ color: '#ff4444' }}>
-                    {supplyError}
-                  </span>
-                )}
-                {withToken && claimed && choice?.kind === 'import' && (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => setImporting(true)}
-                    className="h-11 rounded-xl text-sm font-bold border-0 cursor-pointer disabled:opacity-40"
-                    style={{ background: GOLD, color: '#000' }}
-                  >
-                    We found the ${choice.token.sym.replace(/^\$/, '').toUpperCase()} token — sign to import it
-                  </button>
-                )}
-                {withToken && claimed && choice?.kind === 'bsv20-taken' && (
-                  <p className="text-[11px]" style={{ color: '#ff4444' }}>
-                    {bsv20TakenError(choice.tick)}
-                  </p>
-                )}
-                {withToken && claimed && choice?.kind === 'held' && (
-                  <p className="text-[11px]" style={{ color: GOLD }}>
-                    {heldTokenNote(choice.token.sym)}
-                  </p>
-                )}
-                {withToken && claimed && choice?.kind === 'mint-labelled' && (
-                  <p className="text-[11px]" style={{ color: GOLD }}>
-                    {duplicateNote(claimed)}
-                  </p>
-                )}
-                {withToken && claimed && (choice?.kind === 'mint' || choice?.kind === 'mint-labelled') && (
-                  <button
-                    type="button"
-                    disabled={busy || !ticker || !!supplyError || !!curveProblem(curve, curveOk, supplyNum)}
-                    onClick={() => setConfirming(true)}
-                    className="h-11 rounded-xl text-sm font-bold border-0 cursor-pointer disabled:opacity-40"
-                    style={{ background: GOLD, color: '#000' }}
-                  >
-                    Create ${ticker ?? 'NAME'} token + room
-                  </button>
-                )}
-              </>
-            )}
-            {tokenMsg && (
-              <p className="text-xs" style={{ color: GRAY }}>
-                {tokenMsg}
-              </p>
-            )}
-          </div>
-        ) : null}
-
         <button
           type="button"
           onClick={onClose}
@@ -690,35 +595,18 @@ export const HandleFlow = ({
           onCancel={() => setFeeConfirm(false)}
         />
         <SendConfirmation
-          show={confirming}
-          theme={theme}
-          lineItems={[
-            // SendConfirmation truncates labels over 16 characters: keep them short.
-            {
-              address: `$${ticker ?? 'NAME'} + room`.slice(0, 16),
-              amount: `${Number(supply || 0).toLocaleString()} tokens`,
-            },
-            { address: 'Curve (fixed)', amount: `${usd(curve.floorUsd)} → ${usd(maxPrice(curve))}` },
-            { address: 'Network fee', amount: `~${moneyNow(PERSONAL_NETWORK_FEE_SATS)}` },
-          ]}
-          total={`~${moneyNow(PERSONAL_FEE_ESTIMATE_SATS)}`}
-          isProcessing={busy}
-          onConfirm={() => void mintToken()}
-          onCancel={() => setConfirming(false)}
-        />
-        <SendConfirmation
-          show={importing}
+          show={!!extraFee}
           theme={theme}
           lineItems={[
             {
-              address: `Import $${choice?.kind === 'import' ? choice.token.sym.replace(/^\$/, '') : ''}`.slice(0, 16),
-              amount: 'Signature',
+              address: `Add $${extraFee?.alias ?? ''}`.slice(0, 16),
+              amount: extraFee ? (extraFee.pence ? `${extraFee.pence}p` : `${extraFee.sats} sats`) : '',
             },
           ]}
-          total="Free"
+          total={extraFee ? (extraFee.pence ? `${extraFee.pence}p` : `${extraFee.sats} sats`) : ''}
           isProcessing={busy}
-          onConfirm={() => void importToken()}
-          onCancel={() => setImporting(false)}
+          onConfirm={() => extraFee && runExtras({ sats: extraFee.sats, to: extraFee.to })}
+          onCancel={() => (setExtraFee(null), (queue.current = []), void finishRooms())}
         />
       </div>
     </div>,
