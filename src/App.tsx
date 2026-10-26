@@ -13,7 +13,6 @@ import { BottomMenuContext } from './contexts/BottomMenuContext';
 import { useActivityDetector } from './hooks/useActivityDetector';
 import { useTheme } from './hooks/useTheme';
 import { AppsAndTools } from './pages/AppsAndTools';
-import { BsvWallet } from './pages/BsvWallet';
 import { CreateAccount } from './pages/onboarding/CreateAccount';
 import { ImportAccount } from './pages/onboarding/ImportAccount';
 import { RestoreAccount } from './pages/onboarding/RestoreAccount';
@@ -62,6 +61,8 @@ const GuestCheck = lazy(() => import('./mobile/bmint/check/GuestCheck'));
 
 // Mobile-only (theme.settings.services.browser); lazy so the extension never loads it.
 const BrowserPage = lazy(() => import('./mobile/BrowserPage'));
+// Lazy, the same chunk as the phone pager's (mobile/phone/pager.tsx), so onboarding and unlock don't parse it.
+const BsvWallet = lazy(() => import('./pages/BsvWallet').then((m) => ({ default: m.BsvWallet })));
 
 /** Mounted inside the USB gate so the backup loop only runs while a key reads. */
 const UsbBackupRunner = () => {
@@ -83,6 +84,11 @@ export const App = () => {
   const showGuest = !!(guest && (guestNames || guestCheck || GuestMusic) && (isLocked || !hasWallet));
 
   useActivityDetector(isLocked, isReady, chromeStorageService);
+  // Fetch the Wallet page's chunk as soon as a wallet exists (the lock screen is up meanwhile), so landing on
+  // the Wallet after unlock shows no blank frame. Onboarding (no wallet yet) never loads it.
+  useEffect(() => {
+    if (hasWallet) void import('./pages/BsvWallet');
+  }, [hasWallet]);
 
   // Establish a port connection so the background knows the popup is open.
   // Port disconnects automatically when the popup closes — no timers needed.
@@ -245,7 +251,14 @@ export const App = () => {
                           />
                           <Route path="/master-restore" element={<MasterRestore />} />
                           <Route path="/sweep" element={<SweepMigration />} />
-                          <Route path="/bsv-wallet" element={<BsvWallet />} />
+                          <Route
+                            path="/bsv-wallet"
+                            element={
+                              <Suspense fallback={<div className="w-full h-full" style={{ backgroundColor: walletBg }} />}>
+                                <BsvWallet />
+                              </Suspense>
+                            }
+                          />
                           <Route path="/ord-wallet" element={<OrdWallet />} />
                           <Route path="/tools" element={<AppsAndTools />} />
                           <Route path="/settings" element={<Settings />} />

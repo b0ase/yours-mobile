@@ -41,7 +41,6 @@ import { AlertTriangle, ArrowLeft, ShoppingCart, Send, Copy, Check, Plus, Trash2
 import { SellSheet } from '../mobile/sell/SellSheet';
 import { SELL_ENABLED } from '../mobile/sell/sell';
 import { IssuerBadge } from '../mobile/issuer/IssuerBadge';
-import { PriceChart } from '../mobile/wallet/PriceChart';
 import { TokenIconHeader } from '../mobile/tokens/TokenIconHeader';
 import { TokenIndexButton } from '../mobile/tokens/TokenIndexButton';
 import { GroupSendBar } from '../mobile/send/GroupSend';
@@ -84,6 +83,8 @@ type Bsv21Recipient = {
   amountInput: string;
 };
 
+// Lazy: the chart sits below the form and has its own chunk (shared with the Home and wallet charts).
+const PriceChart = lazy(() => import('../mobile/wallet/PriceChart').then((m) => ({ default: m.PriceChart })));
 const WARN = '#F79009';
 
 /** Overlay status of the token, for the pill beside the token ID. */
@@ -724,7 +725,9 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
           {/* Market chart */}
           <Show when={!!token.info.id}>
             <div className="mx-4 mb-5 rounded-2xl p-4" style={{ background: row }}>
-              <PriceChart tokenId={token.info.id} />
+              <Suspense fallback={<div style={{ height: 140 }} />}>
+                <PriceChart tokenId={token.info.id} />
+              </Suspense>
             </div>
           </Show>
 
