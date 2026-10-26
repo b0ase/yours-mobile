@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { siteName } from '../../services/approvalKind';
 import { markSiteConnected } from '../../mobile/theme/connectSiteTheme';
 import { motion } from 'framer-motion';
 import { Shield, Loader2 } from 'lucide-react';
@@ -39,9 +40,11 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
   const themeAccount = chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey ?? '';
   const { permissions } = request;
 
-  // Protocol access lets the app sign with keys derived from your wallet: never pre-ticked (audit C1).
+  // Owner, 26 Oct 2026 (replaces audit C1 here): every line is drawn with its box in plain view, so a protocol the
+  // site's manifest asks for is ticked, and "Connect" grants it unless the user unticks it (bchatx.com's Connect left
+  // "bchat documents" unticked, then encrypt failed "Permission denied"). Reserved protocols are still refused.
   const [protocolChecked, setProtocolChecked] = useState<boolean[]>(() =>
-    (permissions.protocolPermissions ?? []).map(() => false),
+    (permissions.protocolPermissions ?? []).map((p) => !isReservedProtocol(p.protocolID)),
   );
   const [basketChecked, setBasketChecked] = useState<boolean[]>(() => (permissions.basketAccess ?? []).map(() => true));
   const [certChecked, setCertChecked] = useState<boolean[]>(() =>
@@ -105,6 +108,20 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
     onResponse();
   };
 
+  const protos = (permissions.protocolPermissions ?? []).filter((p) => !isReservedProtocol(p.protocolID));
+  const site = siteName(request.originator);
+  const groupedTitle = protos.length
+    ? `Connect to ${site} and use your "${protocolLabel(protos[0].protocolID)}" keys`
+    : `Connect to ${site}`;
+  // Unticked requested lines are named on the button, e.g. "Connect without bchat documents".
+  const off = [
+    ...(permissions.protocolPermissions ?? [])
+      .map((p, i) => (!isReservedProtocol(p.protocolID) && !protocolChecked[i] ? protocolLabel(p.protocolID) : ''))
+      .filter(Boolean),
+    ...(permissions.basketAccess ?? []).map((_, i) => (basketChecked[i] ? '' : 'items')).filter(Boolean),
+    ...(permissions.certificateAccess ?? []).map((_, i) => (certChecked[i] ? '' : 'details')).filter(Boolean),
+  ];
+  const leftOut = !off.length ? '' : off.length > 1 ? ` without ${off.length} permissions` : ` without ${off[0]}`;
   const toggleProtocol = (i: number) => setProtocolChecked((prev) => prev.map((v, j) => (j === i ? !v : v)));
   const toggleBasket = (i: number) => setBasketChecked((prev) => prev.map((v, j) => (j === i ? !v : v)));
   const toggleCert = (i: number) => setCertChecked((prev) => prev.map((v, j) => (j === i ? !v : v)));
@@ -126,8 +143,9 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
           <Shield size={18} style={{ color: '#A1FF8B' }} />
         </div>
         <div>
-          <h1 className="text-base font-bold leading-tight" style={{ color: theme.color.global.contrast }}>
-            Permission Request
+          {/* Titled by what it grants (owner, 26 Oct 2026), not "Permission Request". */}
+          <h1 className="text-lg font-bold leading-tight" style={{ color: theme.color.global.contrast }}>
+            {groupedTitle}
           </h1>
           <p className="text-xs mt-0.5" style={{ color: theme.color.global.gray }}>
             <span className="font-semibold" style={{ color: theme.color.global.contrast }}>
@@ -231,7 +249,10 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
                   className="mt-0.5 accent-green-400"
                 />
                 <div className="flex flex-col min-w-0">
-                  <span className="text-xs font-medium" style={{ color: theme.color.global.contrast }}>
+                  <span
+                    className="text-[15px] font-semibold leading-snug"
+                    style={{ color: theme.color.global.contrast }}
+                  >
                     Let this app sign and encrypt with your keys for “{protocolLabel(p.protocolID)}”
                     {p.counterparty ? ` (shared with ${p.counterparty.slice(0, 10)}…)` : ''}
                   </span>
@@ -270,7 +291,7 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
                 className="mt-0.5 accent-green-400"
               />
               <div className="flex flex-col min-w-0">
-                <span className="text-xs font-medium" style={{ color: theme.color.global.contrast }}>
+                <span className="text-[15px] font-semibold leading-snug" style={{ color: theme.color.global.contrast }}>
                   {basketDisplayName(b.basket)}
                 </span>
                 {b.description && (
@@ -304,7 +325,7 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
                 className="mt-0.5 accent-green-400"
               />
               <div className="flex flex-col min-w-0">
-                <span className="text-xs font-medium" style={{ color: theme.color.global.contrast }}>
+                <span className="text-[15px] font-semibold leading-snug" style={{ color: theme.color.global.contrast }}>
                   {c.type}
                 </span>
                 <span className="text-xs mt-0.5 opacity-60" style={{ color: theme.color.global.contrast }}>
@@ -337,7 +358,7 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
           transition={{ type: 'spring', damping: 20, stiffness: 400 }}
         >
           {isProcessing && <Loader2 size={14} className="animate-spin" />}
-          Allow Selected
+          {`Connect${leftOut}`}
         </motion.button>
 
         <motion.button
