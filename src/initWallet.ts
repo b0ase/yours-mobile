@@ -3,6 +3,7 @@ import { openSpendLedger, withLocalSpendLedger } from './services/spendLedger';
 import { rememberRefusals } from './services/broadcastRefusals';
 import { knownOnChain, recoverMinedFailedActions, type RecoverReport } from './services/recoverFailed';
 import { singleFlight } from './services/addressResync';
+import { runPrioritySync } from './services/prioritySyncRun';
 import { sizeAwareBroadcast } from './services/bigBroadcast';
 import {
   releaseStuckSends,
@@ -36,7 +37,6 @@ import { guardCrossSiteSigning } from './services/crossSiteSignGuard';
 import { normalizeOriginator } from '@1sat/wallet';
 import { guardSpending } from './mobile/config/killSwitch';
 import {
-  syncAddresses,
   syncMessages,
   sweepDeposit,
   internalizeBeef,
@@ -935,14 +935,34 @@ export const initWallet = async (
       console.log('[initWallet] Starting address sync...');
       sendSyncStatus({ status: 'start', addressCount: scanPlan.count });
     }
-    await syncAddresses
-      .execute(actionCtx, {
-        count: scanPlan.count,
-        onProgress: (progress) => {
-          if (!quiet) sendSyncStatus({ status: 'progress', ...progress });
-        },
-      })
+    // Coins first, then names/ordinals in the background, each part with its own progress and failures
+    // (services/prioritySync.ts; owner, 25 Oct 2026: a big restored wallet's balance crept up for minutes).
+    await runPrioritySync(actionCtx, {
+      count: scanPlan.count,
+      onProgress: (p) => {
+        if (!quiet)
+          sendSyncStatus({
+            status: 'progress',
+            pending: Math.max(0, p.total - p.done),
+            done: p.done,
+            failed: p.failed,
+            part: p.part,
+            total: p.total,
+            message: p.message,
+          });
+      },
+      onCoinsReady: (r) => {
+        // The balance is complete now: let the Wallet tab read it while names keep loading.
+        sendSyncStatus({ status: 'coins-ready', ...r });
+        sweepDeposit
+          .execute(actionCtx, {})
+          .catch((err: unknown) => console.error('[initWallet] deposit sweep failed:', err));
+      },
+    })
       .then(async (result) => {
+        await sweepDeposit
+          .execute(actionCtx, {})
+          .catch((err: unknown) => console.error('[initWallet] deposit sweep failed:', err));
         // NFTs at the legacy ord address join Wallet › NFTs (nothing is moved). Before 'complete' so the list
         // refresh it triggers sees them.
         if (ordKey && legacyOrdAddress) {
