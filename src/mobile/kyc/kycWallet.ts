@@ -156,8 +156,7 @@ const decrypt = async (
     try {
       const { plaintext } = await wallet.decrypt({
         ciphertext: Utils.toArray(keyring[first], 'base64'),
-        protocolID: [2, 'certificate field encryption'],
-        keyID: first,
+        ...Certificate.getCertificateFieldEncryptionDetails(first),
         counterparty: certifier,
       });
       if (!Array.isArray(plaintext) || plaintext.length === 0 || plaintext.length > 32)
