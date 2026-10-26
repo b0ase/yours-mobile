@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Music, Pause, Play, SkipBack, SkipForward, X } from 'lucide-react';
 import { getState, next, previous, seek, stop, subscribe, toggle } from './player';
+import { dockBottom, MINI_FALLBACK_BOTTOM } from './miniDock';
 
 const fmt = (s: number) =>
   isFinite(s) ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '0:00';
@@ -14,6 +15,32 @@ const MiniPlayer = () => {
   // above it instead of hiding under it (owner, 15 Oct 2026).
   const box = useRef<HTMLDivElement>(null);
   const shown = !!track;
+  // Docked directly above the bottom nav (Apple Music style), never over it: measured from the nav itself.
+  const [bottom, setBottom] = useState<string>(MINI_FALLBACK_BOTTOM);
+  useEffect(() => {
+    const el = box.current;
+    if (!shown || !el) return;
+    const measure = () => {
+      const parent = el.offsetParent as HTMLElement | null;
+      const navs = [...document.querySelectorAll<HTMLElement>('[data-bw-bottom-nav]')].map((n) =>
+        n.getBoundingClientRect(),
+      );
+      const px = dockBottom(parent?.getBoundingClientRect() ?? null, navs);
+      setBottom(px === null ? MINI_FALLBACK_BOTTOM : `${px}px`);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(document.body);
+    document.querySelectorAll('[data-bw-bottom-nav]').forEach((n) => ro.observe(n));
+    const mo = new MutationObserver(measure);
+    mo.observe(document.body, { childList: true, subtree: true });
+    window.addEventListener('resize', measure);
+    return () => {
+      ro.disconnect();
+      mo.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [shown]);
   useEffect(() => {
     const root = document.documentElement;
     const el = box.current;
@@ -36,7 +63,7 @@ const MiniPlayer = () => {
     <div
       ref={box}
       className="absolute left-2 right-2 z-[101] rounded-xl bg-[var(--bw-surface)] border border-[var(--bw-line)] px-3 pt-2 pb-1"
-      style={{ bottom: '4rem' }}
+      style={{ bottom }}
     >
       <div className="flex items-center gap-2">
         {track.artwork ? (

@@ -62,6 +62,7 @@ export const BappBar = ({ def, pathname, search, onGo, onHome, onAgent }: Props)
     <nav
       aria-label={`${def.name} bar`}
       data-phone-dock
+      data-bw-bottom-nav
       data-bapp-bar={def.id}
       className="absolute bottom-0 left-0 right-0 z-[100] flex flex-col"
       style={{

@@ -483,6 +483,7 @@ export const Dock = ({
       <nav
         aria-label="Dock"
         data-phone-dock
+        data-bw-bottom-nav
         className="absolute bottom-0 left-0 right-0 z-[100] flex flex-col"
         style={{ height: 'var(--dock-h)', background: '#0A0B0D', borderTop: '1px solid #1C1C1E' }}
         onContextMenu={(e) => e.preventDefault()}
