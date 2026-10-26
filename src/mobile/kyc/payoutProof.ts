@@ -15,11 +15,14 @@ import { KYC_CERT_TYPE } from './config';
  *  - Signing goes through the BRC-100 wallet (createSignature), so no private key is touched here.
  */
 
-export const PAYOUT_PROOF_SCHEME = 'brc77' as const;
+export const PAYOUT_PROOF_SCHEME = 'bwx-payout' as const;
 
-/** BRC-77 "message signing" protocol, signed for anyone to verify (same as SignedMessage.sign without a verifier). */
-const BRC77_PROTOCOL: [2, string] = [2, 'message signing'];
-const BRC77_VERSION = [0x42, 0x42, 0x33, 0x01];
+/**
+ * Wallet-only protocol (reserved in reservedProtocolList.ts), so no outside app can get a payout proof signed.
+ * BRC-77 "message signing" stays open to apps. Layout is BRC-77's (version, signer, 0, keyID, sig), signed to anyone.
+ */
+export const PAYOUT_PROOF_PROTOCOL: [2, string] = [2, 'bwalletx payout proof'];
+const PROOF_VERSION = [0x42, 0x42, 0x33, 0x01];
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -82,8 +85,8 @@ export interface PayoutProofFile {
 }
 
 /**
- * Sign the fixed payout-address message with the wallet's identity key as a BRC-77 signed message
- * (hex). Equivalent to SignedMessage.sign(message, identityPrivateKey) with no verifier.
+ * Sign the fixed payout-address message with the wallet's identity key under PAYOUT_PROOF_PROTOCOL, to anyone,
+ * in BRC-77 byte layout (hex). kyc.js verifies it with the same protocol.
  */
 export const signPayoutAddress = async (
   wallet: Pick<WalletInterface, 'getPublicKey' | 'createSignature'>,
@@ -95,11 +98,11 @@ export const signPayoutAddress = async (
   const keyID = Random(32);
   const { signature } = await wallet.createSignature({
     data: Utils.toArray(message, 'utf8'),
-    protocolID: BRC77_PROTOCOL,
+    protocolID: PAYOUT_PROOF_PROTOCOL,
     keyID: Utils.toBase64(keyID),
     counterparty: 'anyone',
   });
-  const bytes = [...BRC77_VERSION, ...Utils.toArray(publicKey, 'hex'), 0, ...keyID, ...signature];
+  const bytes = [...PROOF_VERSION, ...Utils.toArray(publicKey, 'hex'), 0, ...keyID, ...signature];
   return { address, date, signature: Utils.toHex(bytes), scheme: PAYOUT_PROOF_SCHEME };
 };
 

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import {
   BSM,
   Certificate,
+  KeyDeriver,
   MasterCertificate,
   PrivateKey,
   ProtoWallet,
@@ -25,6 +26,7 @@ import {
 
 // ── Replica of bwalletx-admin server/kyc.js (addressProofMessage, verifyCert, verifyAddressProof). Keep in lockstep. ──
 const PUBKEY_RE = /^0[23][0-9a-fA-F]{64}$/;
+const PAYOUT_PROTOCOL: [2, string] = [2, 'bwalletx payout proof'];
 const adminMessage = (address: string, date: string) => `bwalletx b-aware payout address ${address} ${date}`;
 const adminVerifyCert = async (
   c: Record<string, string> & { fields?: Record<string, string> },
@@ -66,11 +68,16 @@ const adminVerifyAddressProof = (p: Record<string, unknown>, address: string, id
       return 'bad sig';
     }
   }
-  if (scheme !== 'brc77') return 'bad scheme';
+  if (scheme !== 'brc77' && scheme !== 'bwx-payout') return 'bad scheme';
   try {
     const bytes = /^[0-9a-f]+$/i.test(sig) ? Utils.toArray(sig, 'hex') : Utils.toArray(sig, 'base64');
     const signer = Utils.toHex(bytes.slice(4, 37));
-    return signer.toLowerCase() === identityKey.toLowerCase() && SignedMessage.verify(msg, bytes) ? 'ok' : 'bad sig';
+    if (signer.toLowerCase() !== identityKey.toLowerCase()) return 'bad sig';
+    if (scheme === 'brc77') return SignedMessage.verify(msg, bytes) ? 'ok' : 'bad sig';
+    if (bytes[37] !== 0) return 'bad sig';
+    const keyID = Utils.toBase64(bytes.slice(38, 70));
+    const pub = new KeyDeriver(new PrivateKey(1)).derivePublicKey(PAYOUT_PROTOCOL, keyID, signer, false);
+    return pub.verify(msg, Signature.fromDER(bytes.slice(70))) ? 'ok' : 'bad sig';
   } catch {
     return 'bad sig';
   }
@@ -124,6 +131,7 @@ describe('b-Aware payout proof', () => {
   test('module exposes no free-form signing path', () => {
     expect(Object.keys(payout).sort()).toEqual(
       [
+        'PAYOUT_PROOF_PROTOCOL',
         'PAYOUT_PROOF_SCHEME',
         'isOwnAddress',
         'isP2pkhAddress',
@@ -148,7 +156,14 @@ describe('b-Aware payout proof', () => {
     const { publicKey } = await wallet.getPublicKey({ identityKey: true });
     expect(publicKey).toBe(identity.toPublicKey().toString());
     const proof = await signPayoutAddress(wallet, ADDRESS, DATE);
-    expect(proof.scheme).toBe('brc77');
+    expect(proof.scheme).toBe('bwx-payout');
+    // Not a BRC-77 message-signing signature: an app's BRC-77 signature can never pass as a payout proof.
+    expect(
+      SignedMessage.verify(
+        Utils.toArray(payoutAddressMessage(ADDRESS, DATE), 'utf8'),
+        Utils.toArray(proof.signature, 'hex'),
+      ),
+    ).toBe(false);
     expect(adminVerifyAddressProof(proof, ADDRESS, publicKey)).toBe('ok');
     // The JSON round trip the admin console does.
     expect(adminVerifyAddressProof(JSON.parse(JSON.stringify(proof)), ADDRESS, publicKey)).toBe('ok');
