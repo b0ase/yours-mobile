@@ -1,4 +1,5 @@
-import { useContext, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useContext, useEffect, useRef, useState } from 'react';
+import { useLibraryOwner } from '../library/useLibraryOwner';
 import { GuestCtx } from './guestCtx';
 import { LOAD_FAILED, playErrorMessage } from './playError';
 import { ARTIST_PROGRAMME_ENABLED } from '../../storeBuild';
@@ -44,6 +45,19 @@ const getJson = <T,>(p: string): Promise<T | null> =>
   fetch(BMUSIC_HOST + p)
     .then((r) => (r.ok ? (r.json() as Promise<T>) : null))
     .catch(() => null);
+
+const LibraryArtists = lazy(() => import('../library/LibraryArtists'));
+/** The owner's private albums, merged into the Artists screens (signed-in owner only; never for a guest). */
+const Library = (p: { mode: 'cards' | 'section' | 'page'; slug?: string; exclude?: string[] }) => {
+  const guest = useContext(GuestCtx);
+  return guest ? null : <OwnerOnly {...p} />;
+};
+const OwnerOnly = (p: { mode: 'cards' | 'section' | 'page'; slug?: string; exclude?: string[] }) =>
+  useLibraryOwner() ? (
+    <Suspense fallback={null}>
+      <LibraryArtists {...p} />
+    </Suspense>
+  ) : null;
 
 const ARTISTS: ShareAlbum[][] = [...new Set(SHARE_ALBUMS.map((a) => a.artistSlug))].map((slug) =>
   SHARE_ALBUMS.filter((a) => a.artistSlug === slug),
@@ -157,6 +171,7 @@ const Index = () => {
             </button>
           );
         })}
+        <Library mode="cards" exclude={ARTISTS.map((x) => x[0].artistSlug)} />
       </div>
     </div>
   );
@@ -499,7 +514,18 @@ const ArtistsPage = ({ album }: { album?: boolean }) => {
       {guest ? <GuestTop /> : <TopNav />}
       <div className="h-14 shrink-0" aria-hidden />
       <Bar title={album ? 'Album' : albums?.[0].artist} slug={!!slug || !!album} />
-      {album ? <GuestAlbum /> : albums ? <Artist albums={albums} /> : <Index />}
+      {album ? (
+        <GuestAlbum />
+      ) : albums ? (
+        <>
+          <Artist albums={albums} />
+          <Library mode="section" slug={slug} />
+        </>
+      ) : slug ? (
+        <Library mode="page" slug={slug} />
+      ) : (
+        <Index />
+      )}
     </div>
   );
 };

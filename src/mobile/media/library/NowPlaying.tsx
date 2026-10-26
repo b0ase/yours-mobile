@@ -27,7 +27,7 @@ export const NowPlaying = ({ onClose, theme, cover }: { onClose: () => void; the
       style={theme ? albumStyle(theme) : { background: 'var(--bw-bg)', color: 'var(--bw-text)' }}
     >
       <div className="flex items-center justify-between px-4 pt-[max(env(safe-area-inset-top),12px)] pb-2">
-        <button aria-label="Close" title="Close" onClick={onClose} className="p-2 -ml-2">
+        <button aria-label="Minimise" title="Minimise" onClick={onClose} className="p-2 -ml-2">
           <ChevronDown size={26} />
         </button>
         <span className="text-xs uppercase tracking-wider truncate min-w-0" style={{ color: 'var(--bw-muted)' }}>

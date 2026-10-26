@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ChevronLeft, Lock, Pause, Play } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { useServiceContext } from '../../../hooks/useServiceContext';
 import { coverSources, fetchLibrary, UNAVAILABLE_TEXT, type LibraryAlbum, type LibraryState } from './library';
-import { closeLibrary, nowPlayingOpen, onNowPlayingOpen, playAlbum, setNowPlayingOpen } from './libraryPlayer';
-import { NowPlaying } from './NowPlaying';
+import { playAlbum, setNowPlayingOpen } from './libraryPlayer';
 import { getState, subscribe, toggle } from '../player';
 import { AlbumHeader, AlbumPlayButton, AlbumTrackRow } from '../AlbumParts';
 import { albumFmt } from '../albumLayout';
-import { albumForPlayer, albumOfTrackId, albumStyle, trackOfTrackId } from './albumTheme';
+import { albumOfTrackId, albumStyle, trackOfTrackId } from './albumTheme';
 import { clearCache, coverPlaceholder, preloadCovers, readCache, usable, writeCache } from './libraryCache';
 
 const f = (u: string, i?: RequestInit) => fetch(u, i);
@@ -37,11 +36,11 @@ const cachedState = (): LibraryState => {
  */
 const OwnerLibrary = () => {
   const { apiContext } = useServiceContext();
-  const navigate = useNavigate();
+  const location = useLocation();
   const [state, setState] = useState<LibraryState>(cachedState);
-  const [openAlbum, setOpenAlbum] = useState<string | null>(null);
-  const [playing, setPlaying] = useState(nowPlayingOpen);
-  useEffect(() => onNowPlayingOpen(setPlaying), []);
+  const [openAlbum, setOpenAlbum] = useState<string | null>(
+    () => (location.state as { libraryAlbum?: string } | null)?.libraryAlbum ?? null,
+  );
   const [player, setPlayer] = useState(getState);
   useEffect(() => subscribe(setPlayer), []);
 
@@ -74,19 +73,10 @@ const OwnerLibrary = () => {
     const album = albums?.find((a) => a.id === albumId);
     if (!albums || !album) return;
     // The mini player shows the track and moves on at the end of each song; tapping it opens Now Playing.
-    playAlbum(album, start, () => {
-      navigate('/m/media');
-      setNowPlayingOpen(true);
-    });
-  };
-
-  const close = () => {
-    setNowPlayingOpen(false);
-    closeLibrary();
+    playAlbum(album, start);
   };
 
   const album = state.status === 'ok' ? state.albums.find((a) => a.id === openAlbum) : undefined;
-  const nowAlbum = state.status === 'ok' ? albumForPlayer(player, state.albums) : null;
 
   return (
     <section aria-label="Private library" className="flex flex-col gap-3 min-w-0">
@@ -224,7 +214,6 @@ const OwnerLibrary = () => {
           })()}
         </div>
       )}
-      {playing && <NowPlaying onClose={close} theme={nowAlbum?.theme} cover={nowAlbum?.cover} />}
     </section>
   );
 };
