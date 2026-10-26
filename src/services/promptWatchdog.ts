@@ -41,6 +41,20 @@ export const PROMPT_EXPIRED_MESSAGE =
   'This payment request expired before it was approved. Nothing was paid; try again.';
 export const PROMPT_EXPIRY_MS = 60_000;
 
+/**
+ * A site request queued behind another sheet the user can see waits its turn, but not forever: after PROMPT_BUSY_MS
+ * behind a visible sheet it is rejected with ERR_PROMPT_BUSY (409), so the site can say "finish the open request
+ * first" and retry. It is never approved; the visible sheet is untouched. Only requests not yet approved or signed.
+ */
+export const PROMPT_BUSY_CODE = 'ERR_PROMPT_BUSY';
+export const PROMPT_BUSY_MESSAGE =
+  'bWalletX is showing another request. Nothing was paid; answer the open request in bWalletX, then try again.';
+export const PROMPT_BUSY_MS = 20_000;
+
+export function promptBusyError(): Error & { code: string; status: number } {
+  return Object.assign(new Error(PROMPT_BUSY_MESSAGE), { code: PROMPT_BUSY_CODE, status: 409 });
+}
+
 export function promptExpiredError(): Error & { code: string; status: number } {
   return Object.assign(new Error(PROMPT_EXPIRED_MESSAGE), { code: PROMPT_EXPIRED_CODE, status: 408 });
 }
@@ -49,6 +63,7 @@ const CODED: [string, string, number][] = [
   ...PRE_APPROVAL_CODED,
   [PROMPT_NOT_SHOWN_MESSAGE, PROMPT_NOT_SHOWN_CODE, 503],
   [PROMPT_EXPIRED_MESSAGE, PROMPT_EXPIRED_CODE, 408],
+  [PROMPT_BUSY_MESSAGE, PROMPT_BUSY_CODE, 409],
 ];
 
 /** Adds the code to a `{ success: false, error }` reply whose error is a coded failure (not shown, expired, pre-approval timeout). */
@@ -72,13 +87,17 @@ export interface PromptWatchdogDeps {
   escalate: (p: WatchedPrompt) => void;
   /** Second miss: reject the request with promptNotShownError(). */
   fail: (p: WatchedPrompt) => void;
+  /** Queued behind a visible sheet for busyMs: reject the request with promptBusyError(). Never approves. */
+  failBusy?: (p: WatchedPrompt) => void;
   confirmMs?: number;
+  busyMs?: number;
+  now?: () => number;
   setTimer?: (fn: () => void, ms: number) => unknown;
   clearTimer?: (handle: unknown) => void;
   log?: (msg: string, p: WatchedPrompt) => void;
 }
 
-type Entry = { stage: 0 | 1; timer: unknown };
+type Entry = { stage: 0 | 1; timer: unknown; since: number };
 
 export class PromptWatchdog {
   private entries = new Map<string, Entry>();
@@ -87,6 +106,7 @@ export class PromptWatchdog {
   private key = (p: WatchedPrompt) => `${p.kind}\u0000${p.requestID}`;
   private set = (fn: () => void) =>
     (this.deps.setTimer ?? ((f, m) => setTimeout(f, m)))(fn, this.deps.confirmMs ?? PROMPT_CONFIRM_MS);
+  private now = () => (this.deps.now ?? Date.now)();
   private clear = (h: unknown) =>
     (this.deps.clearTimer ?? ((x) => clearTimeout(x as ReturnType<typeof setTimeout>)))(h);
 
@@ -97,7 +117,9 @@ export class PromptWatchdog {
     // Already escalated: let that window's clock run out rather than starting over (no endless retries).
     if (old?.stage === 1) return;
     if (old) this.clear(old.timer);
-    this.entries.set(k, { stage: 0, timer: this.set(() => this.tick(p)) });
+    // Re-showing a queued prompt does not restart its busy clock (counted from when it was first watched).
+    const since = old?.since ?? this.now();
+    this.entries.set(k, { stage: 0, timer: this.set(() => this.tick(p)), since });
   }
 
   /** The prompt UI loaded this prompt's payload: it is on screen. */
@@ -127,7 +149,13 @@ export class PromptWatchdog {
       return;
     }
     if (this.deps.waitingBehindShown(p)) {
-      // Queued behind a sheet the user is looking at: check again later, never fail it for waiting its turn.
+      // Queued behind a sheet the user is looking at: not "not shown". Check again later; after busyMs, reject busy.
+      if (this.deps.failBusy && this.now() - e.since >= (this.deps.busyMs ?? PROMPT_BUSY_MS)) {
+        this.deps.log?.('[promptWatchdog] queued behind a visible sheet too long: rejecting busy', p);
+        this.entries.delete(k);
+        this.deps.failBusy(p);
+        return;
+      }
       e.timer = this.set(() => this.tick(p));
       return;
     }

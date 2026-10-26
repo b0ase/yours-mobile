@@ -6,7 +6,9 @@
  * limit, so a stuck step left the site's promise hanging with nothing on screen (follow-up to PR #355).
  *
  * Now:
- * - Waiting for the wallet to settle is capped at STEP_TIMEOUT_MS -> ERR_WALLET_NOT_READY (503).
+ * - Waiting for the wallet to settle is capped at WALLET_SETTLE_MS (8 s) -> ERR_WALLET_NOT_READY (503). The clock starts
+ *   only once the background is warm: it is handling the request, and its startup read (the warm-up) has answered.
+ *   A cold-waking MV3 service worker is not charged for its own wake; the warm-up itself is capped at WARM_UP_CAP_MS.
  * - A locked wallet shows the unlock UI at once (ensureWallet does that); the person then has PROMPT_EXPIRY_MS-like
  *   UNLOCK_WAIT_MS to unlock -> ERR_WALLET_LOCKED_TIMEOUT (408). Typing a password is not held to 5 s.
  * - Funding preparation is capped at STEP_TIMEOUT_MS -> ERR_FUNDING_TIMEOUT (504).
@@ -17,6 +19,10 @@
  */
 
 export const STEP_TIMEOUT_MS = 5000;
+/** Wallet-settle deadline, counted from the moment the background is warm (not from the site's call). */
+export const WALLET_SETTLE_MS = 8000;
+/** Upper bound on the warm-up itself, so a worker that never finishes starting still answers. */
+export const WARM_UP_CAP_MS = 30_000;
 export const UNLOCK_WAIT_MS = 60_000;
 
 export type CodedError = Error & { code: string; status: number };
@@ -94,6 +100,9 @@ export interface WalletWaitDeps<W> extends Timers {
   open: () => Promise<W>;
   /** True while the unlock UI is up and waiting for the person (pendingWalletWaiters is non-empty). */
   awaitingUnlock: () => boolean;
+  /** Cheap warm-up (the background's startup read). The settle clock starts once it settles. */
+  warmUp?: () => Promise<unknown>;
+  warmUpCapMs?: number;
   stepMs?: number;
   unlockMs?: number;
 }
@@ -105,7 +114,7 @@ export interface WalletWaitDeps<W> extends Timers {
 export function walletWithDeadline<W>(deps: WalletWaitDeps<W>): Promise<W> {
   const now = deps.ready();
   if (now) return Promise.resolve(now);
-  const stepMs = deps.stepMs ?? STEP_TIMEOUT_MS;
+  const stepMs = deps.stepMs ?? WALLET_SETTLE_MS;
   const unlockMs = deps.unlockMs ?? UNLOCK_WAIT_MS;
   const opening = deps.open();
   return new Promise<W>((resolve, reject) => {
@@ -121,16 +130,24 @@ export function walletWithDeadline<W>(deps: WalletWaitDeps<W>): Promise<W> {
       (w) => finish(() => resolve(w)),
       (e) => finish(() => reject(e)),
     );
-    h = setT(
-      deps,
-      () => {
-        if (done) return;
-        if (!deps.awaitingUnlock()) return finish(() => reject(walletNotReadyError()));
-        // The unlock UI is up: give the person the rest of the unlock window.
-        h = setT(deps, () => finish(() => reject(walletLockedTimeoutError())), Math.max(0, unlockMs - stepMs));
-      },
-      stepMs,
-    );
+    const startSettleClock = () => {
+      if (done) return;
+      clearT(deps, h);
+      h = setT(
+        deps,
+        () => {
+          if (done) return;
+          if (!deps.awaitingUnlock()) return finish(() => reject(walletNotReadyError()));
+          // The unlock UI is up: give the person the rest of the unlock window.
+          h = setT(deps, () => finish(() => reject(walletLockedTimeoutError())), Math.max(0, unlockMs - stepMs));
+        },
+        stepMs,
+      );
+    };
+    if (!deps.warmUp) return startSettleClock();
+    // Warming up: only the cap runs; the settle clock starts when the warm-up answers (either way).
+    h = setT(deps, () => finish(() => reject(walletNotReadyError())), deps.warmUpCapMs ?? WARM_UP_CAP_MS);
+    deps.warmUp().then(startSettleClock, startSettleClock);
   });
 }
 

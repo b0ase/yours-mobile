@@ -96,6 +96,7 @@ import { CreateActionDedupe, createActionKey } from './services/createActionDedu
 import {
   PROMPT_EXPIRY_MS,
   PromptWatchdog,
+  promptBusyError,
   promptExpiredError,
   promptNotShownError,
   rejectManagerRequest,
@@ -1002,6 +1003,8 @@ const walletForSiteRequest = (): Promise<WalletInterface> =>
     ready: () => (masterBackupGate.active ? undefined : accountContext?.wallet),
     open: () => ensureWallet(),
     awaitingUnlock: () => pendingWalletWaiters.length > 0,
+    // A cold-woken worker is not charged for its wake: the settle clock starts after its startup read answers.
+    warmUp: () => startupInitPromise,
   });
 
 const ensureWallet = async (suppressPopup = false): Promise<WalletInterface> => {
@@ -2138,6 +2141,8 @@ if (isInServiceWorker) {
       showPromptWindow(kind as PromptKind, requestID);
     },
     fail: failUnshownPrompt,
+    // Queued > PROMPT_BUSY_MS behind a visible sheet: reject (never approve); the visible sheet stays as it is.
+    failBusy: (p) => failUnshownPrompt(p, promptBusyError()),
     log: (msg, p) => console.warn(msg, p.kind, p.requestID),
   });
   watchPrompt = (p) => promptWatchdog.watch(p);
