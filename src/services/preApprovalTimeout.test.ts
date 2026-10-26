@@ -97,7 +97,7 @@ describe('walletWithDeadline', () => {
     expect(opened).toBe(0);
   });
 
-  test('a wallet still settling after 5 s: ERR_WALLET_NOT_READY', async () => {
+  test('a wallet still settling after 8 s: ERR_WALLET_NOT_READY (not at 5 s)', async () => {
     const c = clock();
     const s = settle(
       walletWithDeadline({
@@ -108,6 +108,80 @@ describe('walletWithDeadline', () => {
       }),
     );
     c.advance(5000);
+    await flush();
+    expect(s.e).toBeUndefined();
+    c.advance(2999);
+    await flush();
+    expect(s.e).toBeUndefined();
+    c.advance(1);
+    await flush();
+    expect((s.e as { code: string }).code).toBe(WALLET_NOT_READY_CODE);
+  });
+
+  test('a cold-waking worker is not charged for its wake: the 8 s starts after the warm-up answers', async () => {
+    const c = clock();
+    const warm = deferred<void>();
+    const s = settle(
+      walletWithDeadline({
+        ...c,
+        ready: () => undefined,
+        open: () => deferred<string>().p,
+        awaitingUnlock: () => false,
+        warmUp: () => warm.p,
+      }),
+    );
+    c.advance(10_000); // still waking: no error yet
+    await flush();
+    expect(s.e).toBeUndefined();
+    warm.resolve();
+    await flush();
+    c.advance(7999);
+    await flush();
+    expect(s.e).toBeUndefined();
+    c.advance(1);
+    await flush();
+    expect((s.e as { code: string }).code).toBe(WALLET_NOT_READY_CODE);
+  });
+
+  test('wallet opens during or right after warm-up: resolves, no error', async () => {
+    const c = clock();
+    const warm = deferred<void>();
+    const w = deferred<string>();
+    const s = settle(
+      walletWithDeadline({
+        ...c,
+        ready: () => undefined,
+        open: () => w.p,
+        awaitingUnlock: () => false,
+        warmUp: () => warm.p,
+      }),
+    );
+    c.advance(12_000);
+    warm.resolve();
+    await flush();
+    c.advance(3000);
+    w.resolve('w');
+    await flush();
+    expect(s.v).toBe('w');
+    expect(c.pending()).toBe(0);
+  });
+
+  test('a warm-up that never answers is still capped: ERR_WALLET_NOT_READY', async () => {
+    const c = clock();
+    const s = settle(
+      walletWithDeadline({
+        ...c,
+        ready: () => undefined,
+        open: () => deferred<string>().p,
+        awaitingUnlock: () => false,
+        warmUp: () => deferred<void>().p,
+        warmUpCapMs: 30_000,
+      }),
+    );
+    c.advance(29_999);
+    await flush();
+    expect(s.e).toBeUndefined();
+    c.advance(1);
     await flush();
     expect((s.e as { code: string }).code).toBe(WALLET_NOT_READY_CODE);
   });

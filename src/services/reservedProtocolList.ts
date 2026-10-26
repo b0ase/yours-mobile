@@ -51,6 +51,8 @@ export const RESERVED_PROTOCOLS: readonly Protocol[] = [
   [2, 'bmusic artist'],
   [2, 'bmusic listen claim'],
   [2, 'bpositive'],
+  // b-Aware payout address proof (src/mobile/kyc/payoutProof.ts). Reserved so no app can forge one.
+  [2, 'bwalletx payout proof'],
   // The legacy ordinals key (addresses.ordAddress), watched by the sync (src/services/legacyOrd.ts).
   [2, 'bwalletx legacy ord'],
 ];

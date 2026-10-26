@@ -8,6 +8,7 @@ import { KYC_PAGE_URL } from './config';
 import { investorValid, kycValid, PLACEHOLDER_STATEMENTS, statementsFromServer, type InvestorStatement } from './kyc';
 import { importKycCertificate, signedInClient, signInvestorStatement } from './kycWallet';
 import { useKyc } from './useKyc';
+import { PayoutProofButton } from './PayoutProofButton';
 
 const day = (iso: string) =>
   new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
@@ -222,6 +223,8 @@ export const IdentityVerification = () => {
           )}
         </div>
       )}
+
+      <PayoutProofButton />
 
       {msg && (
         <p className="text-xs" style={{ color: gray }}>
