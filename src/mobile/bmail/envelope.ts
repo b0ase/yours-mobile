@@ -66,6 +66,8 @@ export type Sealed = {
    * BRC-29 delivery details, so the recipient's wallet can derive the key and internalize the output.
    */
   ordinal?: SealedOrdinal;
+  /** A signed note / IOU (src/mobile/notes/signedNote.ts). Opaque here; the reader verifies it. */
+  note?: unknown;
   /**
    * Company offer (src/mobile/offer/payload.ts parses and checks it): draft, sealed offer or acceptance. Opaque here,
    * like `agreement`; the subject + body always say what it is for older clients.
@@ -91,6 +93,8 @@ const defaultRand = (n: number) => crypto.getRandomValues(new Uint8Array(n));
 export const OFFER_JSON_MAX = 40_000;
 const offerOk = (o: unknown) => !!o && typeof o === 'object' && JSON.stringify(o).length <= OFFER_JSON_MAX;
 
+const noteOk = (n: unknown) => !!n && typeof n === 'object' && JSON.stringify(n).length <= 6000;
+
 const agreementOk = (a: unknown) => !!a && typeof a === 'object' && JSON.stringify(a).length <= AGREEMENT_JSON_MAX;
 
 export const sealedToBytes = (s: Sealed): number[] => {
@@ -104,6 +108,7 @@ export const sealedToBytes = (s: Sealed): number[] => {
         ...(s.agreement !== undefined ? { agreement: s.agreement } : {}),
         ...(ordinalOk(s.ordinal) ? { ordinal: s.ordinal } : {}),
         ...(s.offer !== undefined ? { offer: s.offer } : {}),
+        ...(noteOk(s.note) ? { note: s.note } : {}),
       }),
     ),
   ];
@@ -117,6 +122,7 @@ export const bytesToSealed = (b: number[] | Uint8Array): Sealed => {
   if (agreementOk(j.agreement)) out.agreement = j.agreement;
   if (ordinalOk(j.ordinal)) out.ordinal = j.ordinal;
   if (offerOk(j.offer)) out.offer = j.offer;
+  if (noteOk(j.note)) out.note = j.note;
   return out;
 };
 

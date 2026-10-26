@@ -92,6 +92,8 @@ import { BMAIL_OFFLINE_ACTION, friendlyMailError } from './friendlyError';
 import { ErrorActions } from '../errors/ErrorActions';
 import { APP_NAME } from '../storeBuild';
 import { isNative } from '../native';
+import { saveBackupFile, saveRoute } from '../backup/backupFile';
+import { noteFileName, verifyNote, type SignedNote } from '../notes/signedNote';
 import { sendMessageAsync } from '../../utils/chromeHelpers';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import type { WalletInterface } from '@bsv/sdk';
@@ -119,7 +121,15 @@ const AgreementsBox = BUREAU_ENABLED ? lazy(() => import('../bureau/AgreementsBo
 
 type Tab = 'inbox' | 'requests' | 'sent' | 'archive' | 'quarantine' | 'bin';
 /** `body`: a compose link's pre-filled text (meeting.ts); the user still reviews and presses Send (owner, 26 Oct 2026). */
-type Draft = { to?: string; toLabel?: string; subject?: string; body?: string; inReplyTo?: string; credit?: boolean };
+type Draft = {
+  to?: string;
+  toLabel?: string;
+  subject?: string;
+  body?: string;
+  inReplyTo?: string;
+  credit?: boolean;
+  note?: unknown;
+};
 
 const btn = 'min-h-[44px] rounded-lg px-4 py-2 text-sm font-semibold bg-[#2b2f36] text-white';
 const gold = 'min-h-[44px] rounded-lg px-4 py-2 text-sm font-bold';
@@ -623,6 +633,7 @@ const Reader = ({
             )}
           </div>
           {mail.ordinal && <ReceivedNft r={r} ordinal={mail.ordinal} />}
+          {mail.note !== undefined && <ReceivedNote note={mail.note} from={r.from} />}
           <JoinMeeting body={mail.body} />
           {!trusted && mailSegments(mail.body, false).some((x) => x.link) && (
             <div className="flex items-center gap-2 text-[11px]" style={{ color: MUTED }}>
@@ -720,7 +731,7 @@ const Compose = ({
       await send({
         to: p.key,
         toLabel: p.label,
-        sealed: { subject: subject.trim(), body },
+        sealed: { subject: subject.trim(), body, ...(draft.note ? { note: draft.note } : {}) },
         sats: q.total,
         replyPaidSats: q.replyPaid,
         inReplyTo: draft.inReplyTo,
@@ -761,6 +772,11 @@ const Compose = ({
         value={body}
         onChange={(e) => setBody(e.target.value)}
       />
+      {draft.note !== undefined && (
+        <div className="text-xs font-semibold" style={{ color: '#32D583' }}>
+          ✓ Signed note attached
+        </div>
+      )}
       <div className="text-xs" style={{ color: MUTED }}>
         Postage
       </div>
@@ -1009,7 +1025,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
       if (to) setDraft({ toLabel: to });
       // A compose link (bChatX meeting invite): the fields filled in, the recipient still looked up on Send.
       const d = takeBMailDraft();
-      if (d) setDraft({ toLabel: d.to, subject: d.subject, body: d.body });
+      if (d) setDraft({ toLabel: d.to, subject: d.subject, body: d.body, note: d.note });
       // A meeting_invite tap before the meeting: the Inbox, on that invite when it has been opened here before.
       const ticker = takeBMailMeeting();
       if (ticker) {
@@ -1962,6 +1978,42 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
  * An NFT that came with this letter (send to a public key). From a trusted sender it goes straight into
  * Wallet › NFTs; otherwise it waits in Quarantine (airdrops rules) until Keep. Nothing is spent either way.
  */
+/** A signed note in a letter: checked here, against the sender's identity key. */
+const ReceivedNote = ({ note, from }: { note: unknown; from: string }) => {
+  const n = note as SignedNote;
+  const ok = verifyNote(n);
+  const bySender = ok && n.signer.toLowerCase() === from.toLowerCase();
+  const save = () => {
+    const f = new File([JSON.stringify(n, null, 2)], noteFileName(n), { type: 'application/json' });
+    void saveBackupFile(f, saveRoute(f, isNative)).catch(() => undefined);
+  };
+  return (
+    <div
+      className="rounded-lg p-3 flex flex-col gap-2"
+      style={{ border: `1px solid ${bySender ? '#32D583' : '#F97066'}` }}
+    >
+      <div className="text-xs font-semibold" style={{ color: bySender ? '#32D583' : '#F97066' }}>
+        {bySender
+          ? '✓ Signed note: signed by the sender, unchanged'
+          : ok
+            ? '⚠ Signed note: signed by someone other than the sender'
+            : '✗ Signed note: the signature does not match'}
+      </div>
+      {ok && <div className="text-sm whitespace-pre-wrap break-words text-white">{n.text}</div>}
+      {ok && (
+        <div className="text-[11px]" style={{ color: MUTED }}>
+          Signed {new Date(n.date).toLocaleString()}
+        </div>
+      )}
+      {ok && (
+        <button type="button" className={`${btn} self-start`} onClick={save}>
+          Save the note
+        </button>
+      )}
+    </div>
+  );
+};
+
 const ReceivedNft = ({ r, ordinal }: { r: Received; ordinal: SealedOrdinal }) => {
   const { chromeStorageService, apiContext } = useServiceContext();
   const account = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ?? '';

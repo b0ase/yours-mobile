@@ -28,6 +28,7 @@ import {
   LogOut,
   Network,
   AtSign,
+  PenLine,
 } from 'lucide-react';
 import { ChangePassword } from './ChangePassword';
 import { SEEDLESS_ENABLED } from '../passkey/prf';
@@ -47,6 +48,7 @@ import { WalletNames } from './WalletNames';
 import { DisplayNameField } from './DisplayNameField';
 import { IdentityMap } from './IdentityMap';
 import { IdentityVerification } from '../kyc/IdentityVerification';
+import { SignNoteScreen } from '../notes/SignNoteScreen';
 import {
   B_AGENT_DESC,
   MY_TOKENS_DESC,
@@ -627,6 +629,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
     | 'idmap'
     | 'signins'
     | 'verify'
+    | 'note'
     | null
   >(null);
   // A Settings search result opens one of these screens. Only the "wallet" instance takes it, so it opens once.
@@ -739,6 +742,12 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
             label="Verify your identity"
             description="A two-minute ID check. Shows a Verified identity badge on contracts you sign and unlocks higher limits"
             onClick={() => setScreen('verify')}
+          />
+          <Row
+            icon={<PenLine size={16} />}
+            label="Sign a note"
+            description="An IOU or promise signed with your identity key. Send it by bMail; anyone can check it"
+            onClick={() => setScreen('note')}
             isLast
           />
         </Section>
@@ -1241,6 +1250,11 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
       {LINK_ACCOUNTS_ENABLED && screen === 'social' && <ConnectSocial onClose={closeSocial} />}
       {handleOpen && <HandleFlow title="Change handle" onClose={() => setHandleOpen(false)} />}
       {screen === 'idmap' && <IdentityMap onClose={() => setScreen(null)} />}
+      {screen === 'note' && (
+        <Screen title="Sign a note" onBack={() => setScreen(null)}>
+          <SignNoteScreen onSent={() => setScreen(null)} />
+        </Screen>
+      )}
       {screen === 'verify' && (
         <Screen title="Verify your identity" onBack={() => setScreen(null)}>
           <IdentityVerification />
