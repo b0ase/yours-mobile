@@ -313,12 +313,12 @@ export const OpnsMintPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, running]);
 
-  const buyNow = async (b: { name: string; outpoint: string }) => {
+  const buyNow = async (b: { name: string; outpoint: string; priceSats: number }) => {
     setBuy(null);
     setBuying(b.name);
     setMsg('');
     try {
-      await buyOpnsListing(apiContext, b.outpoint, b.name);
+      await buyOpnsListing(apiContext, b.outpoint, b.name, b.priceSats);
       setMsg(`You bought ${b.name}. It shows under Owned names once indexed.`);
       setChecks((prev) => ({ ...prev, [b.name]: { name: b.name, state: 'mine' } }));
       void refreshOwned();

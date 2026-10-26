@@ -237,7 +237,7 @@ export const GetYourName = ({
       if (p.kind === 'bind') await bind(p);
       else if (p.kind === 'mint') await registerNew(p.name);
       else {
-        await buyOpnsListing(apiContext, p.outpoint, p.name);
+        await buyOpnsListing(apiContext, p.outpoint, p.name, p.price);
         setMsg(`You bought ${p.name}. Binding it to your identity…`);
         const mine = (await refreshOwned()).find((o) => o.name === p.name);
         if (mine) await bind({ name: p.name, id: mine.id });

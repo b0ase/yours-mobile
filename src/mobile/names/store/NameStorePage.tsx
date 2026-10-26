@@ -287,13 +287,13 @@ export const NameStorePage = () => {
     setBusy(listing.name);
     try {
       if (!to) {
-        await buyOpnsListing(apiContext, listing.outpoint, listing.name);
+        await buyOpnsListing(apiContext, listing.outpoint, listing.name, listing.priceSats);
         setMsg(`${listing.name} is yours. It shows in your names within a minute.`);
         setMine((m) => new Set(m).add(listing.name));
       } else {
         const r = await buyThenGive(
           {
-            buy: () => buyOpnsListing(apiContext, listing.outpoint, listing.name),
+            buy: () => buyOpnsListing(apiContext, listing.outpoint, listing.name, listing.priceSats),
             idOf: (n) => opnsIdFor(apiContext, n),
             send: (id, address) => giftOpnsName(apiContext, id, address),
             onStep: (s) => setMsg(s === 'buying' ? 'Buying…' : s === 'finding' ? 'Wrapping it up…' : 'Sending…'),
