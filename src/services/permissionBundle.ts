@@ -32,6 +32,8 @@ export interface BundleRequest {
   spending?: { satoshis: number; lineItems?: { type: string; description: string; satoshis: number }[] };
   /** New labels this payment's action applies, shown on its sheet instead of a sheet of their own (labelsOnSpend.ts). */
   labels?: string[];
+  /** Where this payment's outputs go (services/spendRecipients.ts), shown on its sheet. */
+  recipients?: { to: string; satoshis: number }[];
   reason?: string;
   /**
    * Joined the sheet while it was on screen (live sheet). Shown as "New: …", never pre-ticked, and never covered
@@ -360,6 +362,8 @@ export interface SheetPayment {
   detail: string;
   /** New labels the action applies; approving the payment applies them to this action only. */
   labels?: string[];
+  /** Where the outputs go: an address, "data (OP_RETURN)" or "a custom script", with sats (N3-3). */
+  recipients?: { to: string; satoshis: number }[];
 }
 
 export interface SheetModel {
@@ -536,6 +540,7 @@ export const buildSheetModel = (bundle: Pick<PermissionBundle, 'originator' | 'i
           description: r.spending?.lineItems?.find((l) => l.description)?.description ?? r.reason,
           detail: lineDetail(r),
           ...(r.labels?.length ? { labels: [...r.labels] } : {}),
+          ...(r.recipients?.length ? { recipients: r.recipients.map((x) => ({ ...x })) } : {}),
         };
       } else {
         // A second (or live-added) spend: shown as its own line, never pre-ticked.
