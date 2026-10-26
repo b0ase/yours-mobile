@@ -1,5 +1,6 @@
 import type { OneSatContext } from '@1sat/actions';
-import type { MessageCharge } from '../chat/roomSpend';
+import { checkApprovedPayees, type MessageCharge } from '../chat/roomSpend';
+import { GuardedPayError } from '../../services/guardedPay';
 
 /**
  * Paid listening in a Space (bit-sign lib/paid-listening.ts; owner, 11 Oct 2026).
@@ -100,24 +101,87 @@ export function parsePaidState(data: unknown): PaidState {
   };
 }
 
-/** Total of a plan in its own unit (sats or raw token units). */
-export const planTotal = (p: ListenPlan): bigint => p.charges.reduce((n, c) => n + BigInt(c.amount), BigInt(0));
+/**
+ * What the listener approved on the sheet (b-Aware, 26 Oct 2026): the unit their limit is in, where the money goes,
+ * the payees the sheet named and the session cap. Every later plan is checked against this, never trusted as sent.
+ */
+export interface ListenApproval {
+  currency: PaidCurrency;
+  dest: PaidDest;
+  payees: readonly string[];
+  limit: bigint;
+}
 
-/** Pay this minute now? Pays shortly before the paid time ends, never past the session limit. */
+const RAW = /^[1-9][0-9]*$/;
+
+/**
+ * Check a plan against the approval before anything is signed, and return its total in the limit's unit.
+ * Refused (GuardedPayError): no cap; no lines or a line without a positive whole amount (no floor); any line in a
+ * unit other than the limit's (sats for BSV, that one token for BSV-21); a burn unless the sheet said burned; any
+ * payee the sheet did not name.
+ */
+export function checkListenPlan(p: ListenPlan, a: ListenApproval): bigint {
+  if (!(a.limit > BigInt(0))) throw new GuardedPayError('no spending limit was set for this session');
+  if (!Array.isArray(p.charges) || !p.charges.length) throw new GuardedPayError('the plan has nothing to pay');
+  let total = BigInt(0);
+  for (const c of p.charges) {
+    if (typeof c.amount !== 'string' || !RAW.test(c.amount)) throw new GuardedPayError('a plan line has no amount');
+    const unitOk =
+      a.currency.kind === 'bsv' ? c.unit === 'sats' : c.unit === 'token' && c.tokenId === a.currency.tokenId;
+    if (!unitOk) throw new GuardedPayError("a plan line is not in your limit's unit");
+    if (c.to === 'burn' && a.dest !== 'burn') throw new GuardedPayError('the plan burns what you agreed to pay');
+    if (a.dest === 'burn' && c.to !== 'burn') throw new GuardedPayError('the plan pays out what you agreed to burn');
+    total += BigInt(c.amount);
+  }
+  checkApprovedPayees(p.charges, a.payees);
+  return total;
+}
+
+/**
+ * The approval for the plan shown on the sheet: the issuer the config names (dest issuer), the plan's own payees
+ * (dest stage: the people on stage, listed on the sheet), or none (burn). Throws if that plan itself fails the check.
+ */
+export function approveListen(cfg: PaidConfig, plan: ListenPlan | undefined, limit: bigint): ListenApproval {
+  if (!plan) throw new GuardedPayError('there is no price to approve yet');
+  const payees =
+    cfg.dest === 'burn'
+      ? []
+      : cfg.dest === 'issuer'
+        ? cfg.issuerAddress
+          ? [cfg.issuerAddress]
+          : []
+        : [...new Set(plan.charges.map((c) => c.to).filter((t) => t !== 'burn'))];
+  const a: ListenApproval = { currency: cfg.currency, dest: cfg.dest, payees, limit };
+  checkListenPlan(plan, a);
+  return a;
+}
+
+/** Total of a plan, checked against the approval (throws on any unit, floor or payee problem). */
+export const planTotal = (p: ListenPlan, a: ListenApproval): bigint => checkListenPlan(p, a);
+
+/**
+ * Pay this minute now? Pays shortly before the paid time ends, never past the session limit, and never a plan that
+ * fails checkListenPlan ('refuse').
+ */
 export function shouldPay(o: {
-  approved: boolean;
+  approval: ListenApproval | null;
   plan: ListenPlan | undefined;
   paidThrough: number | null;
   now: number;
   spent: bigint;
-  limit: bigint;
   busy: boolean;
   leadMs?: number;
-}): 'pay' | 'wait' | 'limit' {
-  if (!o.approved || !o.plan || o.busy) return 'wait';
+}): 'pay' | 'wait' | 'limit' | 'refuse' {
+  if (!o.approval || !o.plan || o.busy) return 'wait';
+  let total: bigint;
+  try {
+    total = checkListenPlan(o.plan, o.approval);
+  } catch {
+    return 'refuse';
+  }
   const lead = o.leadMs ?? 20_000;
   if (o.paidThrough !== null && o.paidThrough - o.now > lead) return 'wait';
-  if (o.spent + planTotal(o.plan) > o.limit) return 'limit';
+  if (o.spent + total > o.approval.limit) return 'limit';
   return 'pay';
 }
 
@@ -144,7 +208,8 @@ export interface PaidClient {
 }
 
 /**
- * Pay one minute: the wallet signs a transaction paying exactly the plan (and committing to this
+ * Pay one minute: the plan is checked against the listener's approval (payees, unit, floor, cap), then the wallet
+ * signs a transaction paying exactly the plan (and committing to this
  * Space and minute); bit-sign checks it, broadcasts it and records it. A refused payment is
  * released so its coins are spendable again.
  */
@@ -153,6 +218,7 @@ export async function payPlan(
   client: PaidClient,
   plan: ListenPlan,
   sig: string,
+  approval: ListenApproval,
   deps: {
     payForMessage: (
       ctx: OneSatContext,
@@ -161,16 +227,19 @@ export async function payPlan(
         handle: string;
         text: string;
         charge: { rule: string; charges: MessageCharge[]; unenforced: null; exempt: false };
+        approvedPayees: readonly string[];
       },
     ) => Promise<{ beef: string; txid: string }>;
     releasePayment: (ctx: OneSatContext, txid: string, cause: unknown) => Promise<void>;
   },
 ): Promise<{ txid: string; paidThrough: number | null }> {
+  checkListenPlan(plan, approval);
   const signed = await deps.payForMessage(ctx, {
     ticker: plan.ticker,
     handle: plan.payer,
     text: plan.body,
     charge: { rule: plan.rule, charges: plan.charges, unenforced: null, exempt: false },
+    approvedPayees: approval.payees,
   });
   try {
     const r = obj(await client.spacePaidAction(plan.ticker, { action: 'pay', plan, sig, beef: signed.beef }));

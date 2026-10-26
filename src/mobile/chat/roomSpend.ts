@@ -271,17 +271,30 @@ export async function payForMessage(
   m: { ticker: string; handle: string; text: string; charge: SpendCharge; issuerAddress: string | null | undefined },
 ): Promise<{ beef: string; txid: string }> {
   checkChargePayees(m.charge.charges, m.issuerAddress);
-  return payForCharges(ctx, m);
+  return payForCharges(ctx, { ...m, approvedPayees: m.charge.charges.map((c) => c.to) });
 }
 
 /**
- * Paid listening (spaces/paidListen.ts) pays the Space's speakers from a plan the user approved; its payees are
- * checked there, not against the issuer.
+ * b-Aware 26 Oct 2026: every payee must be one the user approved on the sheet (paid listening: the speakers or issuer
+ * the approval sheet named), or a token burn. Same per-charge checkPayTo as checkChargePayees. Pure; throws.
+ */
+export function checkApprovedPayees(charges: MessageCharge[], approved: readonly string[]): void {
+  for (const c of charges) {
+    if (c.unit === 'token' && c.to === 'burn') continue;
+    checkPayTo(c.to, { kind: 'bound', address: approved.includes(c.to) ? c.to : null, who: 'a payee you approved' });
+  }
+}
+
+/**
+ * Paid listening (spaces/paidListen.ts) pays the Space's speakers from a plan the user approved. The payees are
+ * checked here, before anything is signed, against `approvedPayees` (what the approval sheet named); it is required,
+ * so no caller can skip the check.
  */
 export async function payForCharges(
   ctx: OneSatContext,
-  m: { ticker: string; handle: string; text: string; charge: SpendCharge },
+  m: { ticker: string; handle: string; text: string; charge: SpendCharge; approvedPayees: readonly string[] },
 ): Promise<{ beef: string; txid: string }> {
+  checkApprovedPayees(m.charge.charges, m.approvedPayees);
   await assertNotPaused('spending');
   const tokenIds = m.charge.charges.flatMap((c) => (c.unit === 'token' ? [c.tokenId] : []));
   if (!tokenIds.length) return payForMessageOnce(ctx, m);
