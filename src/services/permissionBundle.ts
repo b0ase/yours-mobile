@@ -14,7 +14,7 @@
  * Pure (no chrome APIs, timers injected) so it can be unit tested.
  */
 
-import { BLOCK_SITE_BASKET, isReservedBasket } from './reservedBaskets';
+import { BLOCK_SITE_BASKET, basketDisplayName, isReservedBasket } from './reservedBaskets';
 
 export { BLOCK_SITE_BASKET };
 
@@ -485,7 +485,7 @@ const lineDetail = (r: BundleRequest): string => {
       if (r.counterparty) parts.push(`counterparty ${r.counterparty}`);
       break;
     case 'basket':
-      parts.push(`basket "${r.basket ?? ''}"`);
+      parts.push(basketDisplayName(r.basket) === 'Unknown basket' ? 'Unknown basket' : `basket "${r.basket}"`);
       break;
     case 'certificate':
       parts.push(`certificate ${r.certificate?.certType ?? ''}`, `verifier ${r.certificate?.verifier ?? ''}`);
@@ -780,3 +780,6 @@ export const trustCovers = (
   if (r.type === 'basket') return Array.isArray(grant.baskets) && grant.baskets.includes(r.basket);
   return true;
 };
+
+/** Test hook: the Details line for one request. */
+export const lineDetailForTest = (r: BundleRequest) => lineDetail(r);

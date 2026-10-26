@@ -515,7 +515,7 @@ overrides:
   zod@^3: 3.25.76
 
 patchedDependencies:
-  '@bopen-io/wallet-toolbox-client@2.14.5': 74543b15bca4a3a27fb511f98dc8a90cd3590e46942580c3cf0880824f4354f6
+  '@bopen-io/wallet-toolbox-client@2.14.5': 43936a497b9e624d2968b51686606e38e386ea32bc27bc612daa48645d56706a
 
 importers:
 
@@ -523,22 +523,22 @@ importers:
     dependencies:
       '@1sat/actions':
         specifier: 0.0.234
-        version: 0.0.234(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=74543b15bca4a3a27fb511f98dc8a90cd3590e46942580c3cf0880824f4354f6)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)
+        version: 0.0.234(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=43936a497b9e624d2968b51686606e38e386ea32bc27bc612daa48645d56706a)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)
       '@1sat/client':
         specifier: 0.0.63
         version: 0.0.63(@bsv/sdk@2.8.11)
       '@1sat/connect':
         specifier: 0.0.105
-        version: 0.0.105(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(better-call@1.4.0(zod@4.6.5))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.4))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=74543b15bca4a3a27fb511f98dc8a90cd3590e46942580c3cf0880824f4354f6)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(better-call@1.4.0(zod@4.6.5))(nanostores@1.5.4)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(typescript@5.9.3)(zod@4.6.5)
+        version: 0.0.105(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(better-call@1.4.0(zod@4.6.5))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.4))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=43936a497b9e624d2968b51686606e38e386ea32bc27bc612daa48645d56706a)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(better-call@1.4.0(zod@4.6.5))(nanostores@1.5.4)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(typescript@5.9.3)(zod@4.6.5)
       '@1sat/permission-module':
         specifier: 0.0.77
-        version: 0.0.77(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=74543b15bca4a3a27fb511f98dc8a90cd3590e46942580c3cf0880824f4354f6)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)
+        version: 0.0.77(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=43936a497b9e624d2968b51686606e38e386ea32bc27bc612daa48645d56706a)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)
       '@1sat/permission-module-ui':
         specifier: 0.0.72
-        version: 0.0.72(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=74543b15bca4a3a27fb511f98dc8a90cd3590e46942580c3cf0880824f4354f6)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(react@18.3.1)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)
+        version: 0.0.72(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=43936a497b9e624d2968b51686606e38e386ea32bc27bc612daa48645d56706a)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(react@18.3.1)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)
       '@1sat/sweep-ui':
         specifier: 0.0.112
-        version: 0.0.112(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(better-call@1.4.0(zod@4.6.5))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.4))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=74543b15bca4a3a27fb511f98dc8a90cd3590e46942580c3cf0880824f4354f6)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(@types/react@18.3.31)(better-call@1.4.0(zod@4.6.5))(nanostores@1.5.4)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)(typescript@5.9.3)(zod@4.6.5)
+        version: 0.0.112(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(better-call@1.4.0(zod@4.6.5))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.4))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=43936a497b9e624d2968b51686606e38e386ea32bc27bc612daa48645d56706a)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(@types/react@18.3.31)(better-call@1.4.0(zod@4.6.5))(nanostores@1.5.4)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)(typescript@5.9.3)(zod@4.6.5)
       '@1sat/templates':
         specifier: 0.0.43
         version: 0.0.43(@bsv/sdk@2.8.11)
@@ -550,10 +550,10 @@ importers:
         version: 0.0.42(@bsv/sdk@2.8.11)
       '@1sat/wallet':
         specifier: 0.0.120
-        version: 0.0.120(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=74543b15bca4a3a27fb511f98dc8a90cd3590e46942580c3cf0880824f4354f6)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))
+        version: 0.0.120(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=43936a497b9e624d2968b51686606e38e386ea32bc27bc612daa48645d56706a)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))
       '@1sat/wallet-browser':
         specifier: 0.0.106
-        version: 0.0.106(@1sat/client@0.0.63(@bsv/sdk@2.8.11))(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=74543b15bca4a3a27fb511f98dc8a90cd3590e46942580c3cf0880824f4354f6)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))
+        version: 0.0.106(@1sat/client@0.0.63(@bsv/sdk@2.8.11))(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=43936a497b9e624d2968b51686606e38e386ea32bc27bc612daa48645d56706a)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))
       '@bsv/message-box-client':
         specifier: 2.5.4
         version: 2.5.4(@bsv/sdk@2.8.11)(supports-color@7.2.0)
@@ -562,7 +562,7 @@ importers:
         version: 2.8.11
       '@bsv/wallet-toolbox-client':
         specifier: npm:@bopen-io/wallet-toolbox-client@2.14.5
-        version: '@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=74543b15bca4a3a27fb511f98dc8a90cd3590e46942580c3cf0880824f4354f6)(@bsv/sdk@2.8.11)'
+        version: '@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=43936a497b9e624d2968b51686606e38e386ea32bc27bc612daa48645d56706a)(@bsv/sdk@2.8.11)'
       '@capacitor-community/keep-awake':
         specifier: 8.0.1
         version: 8.0.1(@capacitor/core@8.5.2)
@@ -4348,13 +4348,13 @@ packages:
 
 snapshots:
 
-  '@1sat/actions@0.0.234(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=74543b15bca4a3a27fb511f98dc8a90cd3590e46942580c3cf0880824f4354f6)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)':
+  '@1sat/actions@0.0.234(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=43936a497b9e624d2968b51686606e38e386ea32bc27bc612daa48645d56706a)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)':
     dependencies:
       '@1sat/client': 0.0.63(@bsv/sdk@2.8.11)
       '@1sat/templates': 0.0.43(@bsv/sdk@2.8.11)
       '@1sat/types': 0.0.52(@bsv/sdk@2.8.11)
       '@1sat/utils': 0.0.42(@bsv/sdk@2.8.11)
-      '@1sat/wallet': 0.0.120(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=74543b15bca4a3a27fb511f98dc8a90cd3590e46942580c3cf0880824f4354f6)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))
+      '@1sat/wallet': 0.0.120(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=43936a497b9e624d2968b51686606e38e386ea32bc27bc612daa48645d56706a)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))
       '@bsv/message-box-client': 2.5.4(@bsv/sdk@2.8.11)(supports-color@7.2.0)
       '@bsv/sdk': 2.8.11
       '@ipld/dag-cbor': 10.0.2
@@ -4372,9 +4372,9 @@ snapshots:
       '@bsv/sdk': 2.8.11
       '@bsv/wallet-toolbox-client': '@bopen-io/wallet-toolbox-client@2.14.8(@bsv/sdk@2.8.11)'
 
-  '@1sat/connect@0.0.105(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(better-call@1.4.0(zod@4.6.5))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.4))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=74543b15bca4a3a27fb511f98dc8a90cd3590e46942580c3cf0880824f4354f6)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(better-call@1.4.0(zod@4.6.5))(nanostores@1.5.4)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(typescript@5.9.3)(zod@4.6.5)':
+  '@1sat/connect@0.0.105(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(better-call@1.4.0(zod@4.6.5))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.4))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=43936a497b9e624d2968b51686606e38e386ea32bc27bc612daa48645d56706a)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(better-call@1.4.0(zod@4.6.5))(nanostores@1.5.4)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(typescript@5.9.3)(zod@4.6.5)':
     dependencies:
-      '@1sat/wallet': 0.0.120(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=74543b15bca4a3a27fb511f98dc8a90cd3590e46942580c3cf0880824f4354f6)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))
+      '@1sat/wallet': 0.0.120(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=43936a497b9e624d2968b51686606e38e386ea32bc27bc612daa48645d56706a)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))
       '@bsv/sdk': 2.8.11
       '@sigma-auth/better-auth-plugin': 0.0.92(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(better-call@1.4.0(zod@4.6.5))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.4))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@bsv/sdk@2.8.11)(better-auth@1.7.7(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(better-call@1.4.0(zod@4.6.5))(nanostores@1.5.4)(typescript@5.9.3)(zod@4.6.5)
       better-auth: 1.7.7(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -4412,9 +4412,9 @@ snapshots:
       - vue
       - zod
 
-  '@1sat/permission-module-ui@0.0.72(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=74543b15bca4a3a27fb511f98dc8a90cd3590e46942580c3cf0880824f4354f6)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(react@18.3.1)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)':
+  '@1sat/permission-module-ui@0.0.72(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=43936a497b9e624d2968b51686606e38e386ea32bc27bc612daa48645d56706a)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(react@18.3.1)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)':
     dependencies:
-      '@1sat/permission-module': 0.0.77(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=74543b15bca4a3a27fb511f98dc8a90cd3590e46942580c3cf0880824f4354f6)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)
+      '@1sat/permission-module': 0.0.77(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=43936a497b9e624d2968b51686606e38e386ea32bc27bc612daa48645d56706a)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)
       '@1sat/types': 0.0.52(@bsv/sdk@2.8.11)
       react: 18.3.1
     transitivePeerDependencies:
@@ -4425,13 +4425,13 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@1sat/permission-module@0.0.77(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=74543b15bca4a3a27fb511f98dc8a90cd3590e46942580c3cf0880824f4354f6)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)':
+  '@1sat/permission-module@0.0.77(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=43936a497b9e624d2968b51686606e38e386ea32bc27bc612daa48645d56706a)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)':
     dependencies:
-      '@1sat/actions': 0.0.234(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=74543b15bca4a3a27fb511f98dc8a90cd3590e46942580c3cf0880824f4354f6)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)
+      '@1sat/actions': 0.0.234(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=43936a497b9e624d2968b51686606e38e386ea32bc27bc612daa48645d56706a)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)
       '@1sat/templates': 0.0.43(@bsv/sdk@2.8.11)
       '@1sat/types': 0.0.52(@bsv/sdk@2.8.11)
       '@1sat/utils': 0.0.42(@bsv/sdk@2.8.11)
-      '@1sat/wallet': 0.0.120(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=74543b15bca4a3a27fb511f98dc8a90cd3590e46942580c3cf0880824f4354f6)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))
+      '@1sat/wallet': 0.0.120(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=43936a497b9e624d2968b51686606e38e386ea32bc27bc612daa48645d56706a)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))
       '@bsv/sdk': 2.8.11
     transitivePeerDependencies:
       - '@bsv/wallet-toolbox-client'
@@ -4440,11 +4440,11 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@1sat/sweep-ui@0.0.112(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(better-call@1.4.0(zod@4.6.5))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.4))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=74543b15bca4a3a27fb511f98dc8a90cd3590e46942580c3cf0880824f4354f6)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(@types/react@18.3.31)(better-call@1.4.0(zod@4.6.5))(nanostores@1.5.4)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)(typescript@5.9.3)(zod@4.6.5)':
+  '@1sat/sweep-ui@0.0.112(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(better-call@1.4.0(zod@4.6.5))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.4))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=43936a497b9e624d2968b51686606e38e386ea32bc27bc612daa48645d56706a)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(@types/react@18.3.31)(better-call@1.4.0(zod@4.6.5))(nanostores@1.5.4)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)(typescript@5.9.3)(zod@4.6.5)':
     dependencies:
-      '@1sat/actions': 0.0.234(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=74543b15bca4a3a27fb511f98dc8a90cd3590e46942580c3cf0880824f4354f6)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)
+      '@1sat/actions': 0.0.234(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=43936a497b9e624d2968b51686606e38e386ea32bc27bc612daa48645d56706a)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(supports-color@7.2.0)
       '@1sat/client': 0.0.63(@bsv/sdk@2.8.11)
-      '@1sat/connect': 0.0.105(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(better-call@1.4.0(zod@4.6.5))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.4))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=74543b15bca4a3a27fb511f98dc8a90cd3590e46942580c3cf0880824f4354f6)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(better-call@1.4.0(zod@4.6.5))(nanostores@1.5.4)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(typescript@5.9.3)(zod@4.6.5)
+      '@1sat/connect': 0.0.105(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(better-call@1.4.0(zod@4.6.5))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.4))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=43936a497b9e624d2968b51686606e38e386ea32bc27bc612daa48645d56706a)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(better-call@1.4.0(zod@4.6.5))(nanostores@1.5.4)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))(typescript@5.9.3)(zod@4.6.5)
       '@1sat/types': 0.0.52(@bsv/sdk@2.8.11)
       '@1sat/utils': 0.0.42(@bsv/sdk@2.8.11)
       '@bsv/sdk': 2.8.11
@@ -4512,23 +4512,23 @@ snapshots:
 
   '@1sat/vault@0.0.3': {}
 
-  '@1sat/wallet-browser@0.0.106(@1sat/client@0.0.63(@bsv/sdk@2.8.11))(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=74543b15bca4a3a27fb511f98dc8a90cd3590e46942580c3cf0880824f4354f6)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))':
+  '@1sat/wallet-browser@0.0.106(@1sat/client@0.0.63(@bsv/sdk@2.8.11))(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=43936a497b9e624d2968b51686606e38e386ea32bc27bc612daa48645d56706a)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))':
     dependencies:
       '@1sat/client': 0.0.63(@bsv/sdk@2.8.11)
-      '@1sat/wallet': 0.0.120(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=74543b15bca4a3a27fb511f98dc8a90cd3590e46942580c3cf0880824f4354f6)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))
+      '@1sat/wallet': 0.0.120(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=43936a497b9e624d2968b51686606e38e386ea32bc27bc612daa48645d56706a)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))
       '@bsv/sdk': 2.8.11
-      '@bsv/wallet-toolbox-client': '@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=74543b15bca4a3a27fb511f98dc8a90cd3590e46942580c3cf0880824f4354f6)(@bsv/sdk@2.8.11)'
+      '@bsv/wallet-toolbox-client': '@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=43936a497b9e624d2968b51686606e38e386ea32bc27bc612daa48645d56706a)(@bsv/sdk@2.8.11)'
     transitivePeerDependencies:
       - sigma-protocol
 
-  '@1sat/wallet@0.0.120(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=74543b15bca4a3a27fb511f98dc8a90cd3590e46942580c3cf0880824f4354f6)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))':
+  '@1sat/wallet@0.0.120(@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=43936a497b9e624d2968b51686606e38e386ea32bc27bc612daa48645d56706a)(@bsv/sdk@2.8.11))(@bsv/sdk@2.8.11)(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))':
     dependencies:
       '@1sat/client': 0.0.63(@bsv/sdk@2.8.11)
       '@1sat/templates': 0.0.43(@bsv/sdk@2.8.11)
       '@1sat/types': 0.0.52(@bsv/sdk@2.8.11)
       '@bopen-io/templates': 1.2.3(sigma-protocol@0.1.10(@bsv/sdk@2.8.11))
       '@bsv/sdk': 2.8.11
-      '@bsv/wallet-toolbox-client': '@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=74543b15bca4a3a27fb511f98dc8a90cd3590e46942580c3cf0880824f4354f6)(@bsv/sdk@2.8.11)'
+      '@bsv/wallet-toolbox-client': '@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=43936a497b9e624d2968b51686606e38e386ea32bc27bc612daa48645d56706a)(@bsv/sdk@2.8.11)'
       '@msgpack/msgpack': 3.1.3
       fflate: 0.8.3
     transitivePeerDependencies:
@@ -4733,7 +4733,7 @@ snapshots:
     optionalDependencies:
       sigma-protocol: 0.1.10(@bsv/sdk@2.8.11)
 
-  '@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=74543b15bca4a3a27fb511f98dc8a90cd3590e46942580c3cf0880824f4354f6)(@bsv/sdk@2.8.11)':
+  '@bopen-io/wallet-toolbox-client@2.14.5(patch_hash=43936a497b9e624d2968b51686606e38e386ea32bc27bc612daa48645d56706a)(@bsv/sdk@2.8.11)':
     dependencies:
       '@bsv/sdk': 2.8.11
       '@noble/hashes': 2.4.0

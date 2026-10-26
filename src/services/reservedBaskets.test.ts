@@ -6,9 +6,13 @@ import {
   trustedBasketsFrom,
   type BundleRequest,
 } from './permissionBundle';
+import { Wallet as ToolboxWallet, sdk } from '@bsv/wallet-toolbox-client';
+import { lineDetailForTest } from './permissionBundle';
 import {
+  basketDisplayName,
   guardReservedBaskets,
   isReservedBasket,
+  isSpecOpBasket,
   OWN_COIN_REFUSAL,
   revokeBasketGrantsForOriginator,
   revokeReservedBasketGrants,
@@ -168,5 +172,99 @@ describe("b-Aware 25 Oct: a site can't name the wallet's own coins as inputs", (
     await expect(m.createAction({ inputs: [{ outpoint: `${T}.9` }] }, 'site.example')).rejects.toThrow(
       OWN_COIN_REFUSAL,
     );
+  });
+});
+
+// b-Aware 26 Oct 2026 (N2): specOpInvalidChange with the 'all' tag listed spent outputs from every basket, decrypted
+// custom instructions included, after one approval of an unreadable hex basket name.
+describe('special-operation basket names', () => {
+  const SPEC_OPS = [
+    sdk.specOpInvalidChange,
+    sdk.specOpWalletBalance,
+    sdk.specOpSetWalletChangeParams,
+    sdk.specOpWalletManagedUtxos,
+  ];
+
+  test('every toolbox specOp and any unissued 64-hex name counts as reserved', () => {
+    for (const b of [...SPEC_OPS, 'F'.repeat(64), ` ${'0'.repeat(64)} `]) {
+      expect(isSpecOpBasket(b)).toBe(true);
+      expect(isReservedBasket(b)).toBe(true);
+    }
+    expect(isSpecOpBasket('a'.repeat(63))).toBe(false);
+    expect(isSpecOpBasket('bchat posts')).toBe(false);
+  });
+
+  test('listOutputs, relinquishOutput and ensureBasketAccess refuse them to outside sites before anything runs', async () => {
+    const calls: string[] = [];
+    const m = guardReservedBaskets(
+      {
+        ensureBasketAccess: async () => (calls.push('ensure'), true),
+        listOutputs: async () => (calls.push('list'), { outputs: [] }),
+        relinquishOutput: async () => (calls.push('relinquish'), { relinquished: true }),
+      },
+      ADMIN,
+    );
+    for (const b of SPEC_OPS) {
+      await expect(m.listOutputs({ basket: b, tags: ['all'] }, 'site.example')).rejects.toThrow(/reserved/);
+      await expect(m.relinquishOutput({ basket: b }, 'site.example')).rejects.toThrow(/reserved/);
+      await expect(m.ensureBasketAccess({ originator: 'site.example', basket: b })).rejects.toThrow(/reserved/);
+    }
+    expect(calls).toEqual([]);
+    // The wallet itself (admin) still can.
+    await m.listOutputs({ basket: sdk.specOpInvalidChange, tags: ['all'] }, ADMIN);
+    expect(calls).toEqual(['list']);
+  });
+
+  test('stored grants for specOp names are revoked; the wallet keeps its own', async () => {
+    const store = memStore([
+      { type: 'basket', originator: 'site.example', basket: sdk.specOpInvalidChange },
+      { type: 'basket', originator: 'site.example', basket: 'b'.repeat(64) },
+      { type: 'basket', originator: 'site.example', basket: 'bchat posts' },
+      { type: 'basket', originator: ADMIN, basket: sdk.specOpInvalidChange },
+    ]);
+    expect(await revokeReservedBasketGrants(store, ADMIN)).toBe(2);
+    expect(store.all().map((k) => k.basket)).toEqual(['bchat posts', sdk.specOpInvalidChange]);
+  });
+
+  test('grouped grants drop them', () => {
+    expect(withoutReservedBaskets([{ basket: sdk.specOpInvalidChange }, { basket: 'posts' }])).toEqual([
+      { basket: 'posts' },
+    ]);
+  });
+
+  test('sheets name them "Unknown basket"', () => {
+    expect(basketDisplayName(sdk.specOpInvalidChange)).toBe('Unknown basket');
+    expect(basketDisplayName('c'.repeat(40))).toBe('Unknown basket');
+    expect(basketDisplayName('')).toBe('Unknown basket');
+    expect(basketDisplayName('bchat posts')).toBe('bchat posts');
+    expect(lineDetailForTest({ ...base, type: 'basket', basket: sdk.specOpInvalidChange })).toBe('Unknown basket');
+    expect(lineDetailForTest({ ...base, type: 'basket', basket: 'bchat posts' })).toBe('basket "bchat posts"');
+  });
+
+  test('the patched toolbox Wallet refuses specOp baskets to any originator but none or a listed one', async () => {
+    const W = ToolboxWallet as unknown as {
+      prototype: { listOutputs: (a: unknown, o?: string) => Promise<unknown> };
+      bwxSpecOpOriginators: Set<string>;
+    };
+    expect(W.bwxSpecOpOriginators).toBeInstanceOf(Set);
+    const reached: unknown[] = [];
+    // Stops right after the guard: validateAuthAndArgs is the first thing past it.
+    const fake = {
+      validateAuthAndArgs: () => {
+        reached.push(1);
+        throw new Error('past the guard');
+      },
+    };
+    const call = (o?: string) =>
+      W.prototype.listOutputs.call(fake, { basket: sdk.specOpInvalidChange, tags: ['all'] }, o);
+    await expect(call('site.example')).rejects.toThrow(/special operations are for the wallet only/);
+    expect(reached).toEqual([]);
+    await expect(call(undefined)).rejects.toThrow(/past the guard/);
+    W.bwxSpecOpOriginators.add('wallet.example');
+    try {
+      await expect(call('wallet.example')).rejects.toThrow(/past the guard/);
+    } finally {
+      W.bwxSpecOpOriginators.delete('wallet.example');
+    }
   });
 });
