@@ -15,13 +15,14 @@ import {
   relaySocketUrl,
   newClaim,
   isAllowedRelay,
-  verifyPairProof,
+  verifyPairProofs,
   type HelloFrame,
   type PairLink,
   type PairMessage,
   type RelayFrame,
 } from '../../pair/protocol';
 import { inOrder } from '../../pair/in-order';
+import { claimRid, planReturn, type ReturnPlan } from '../../pair/returnTo';
 import { handleSiteCall } from '../dappBrowser';
 import { isMintPrivateCode } from '../../services/mintPrivateAction';
 import { legacyPairedOrigin, pairedOrigin } from '../../services/originKey';
@@ -194,6 +195,12 @@ export type PendingPair = {
   cli: boolean;
   /** The site proved its origin with its well-known pairing key; else the UI says "claims to be". */
   proven: boolean;
+  /**
+   * Where to send the user after Connect (v2 link, proof checked, `ret` on the proven origin), or null. Not yet
+   * claimed: takeReturn() spends the one-time `rid` and returns null if it was already used.
+   */
+  returnPlan: ReturnPlan;
+  takeReturn: () => ReturnPlan;
   confirm: (agent?: AgentGrant) => void;
   cancel: () => void;
 };
@@ -430,6 +437,10 @@ function attach(l: Live) {
     if ((f as RelayFrame).t === 'relay') {
       const v = (f as RelayFrame).verifiedOrigin;
       if (v && v !== stored.origin) forget(stored.c, false); // the channel changed hands: refuse
+      // The site's tab came back (iOS kills its socket while the user is in bWallet, e.g. after a return-to-site):
+      // say `ready` again so it resumes and resends, without relying on the relay's 60 s queue.
+      const rf = f as RelayFrame;
+      if (rf.peer === 'joined' && rf.role === 'site') void reply(l, { t: 'ready' });
       return;
     }
     if (!isSealed(f)) return;
@@ -568,7 +579,13 @@ export function beginPairing(scanned: string, opts: { allowCli?: boolean } = {})
       ws.send(JSON.stringify(hello));
       const { key, code } = await deriveSession(P, link.k, link.c);
       // The relay's origin is only a header; the host is shown plainly only when the site proves it (B3).
-      const proven = !!link.s && f.verifiedOrigin !== CLI_ORIGIN && (await verifyPairProof(link));
+      const proofs =
+        (link.s || link.s2) && f.verifiedOrigin !== CLI_ORIGIN
+          ? await verifyPairProofs(link)
+          : { v1: false, v2: false };
+      const proven = proofs.v1 || proofs.v2;
+      const returnPlan = f.verifiedOrigin === CLI_ORIGIN ? null : planReturn(link, f.verifiedOrigin, proofs.v2);
+      let returnTaken = false;
       // A new pairing starts with nothing. Its key names its own channel, so it never shares another pairing's grants
       // (b-Aware 24 Oct 2026); still withdraw anything left under that key unless this channel is being resumed.
       if (!load().some((s) => s.c === link.c)) await flushRevocations([pairedOrigin(f.verifiedOrigin, link.c)]);
@@ -581,6 +598,12 @@ export function beginPairing(scanned: string, opts: { allowCli?: boolean } = {})
         code,
         cli: f.verifiedOrigin === CLI_ORIGIN && !!opts.allowCli,
         proven,
+        returnPlan,
+        takeReturn: () => {
+          if (!returnPlan || returnTaken) return null;
+          returnTaken = true;
+          return claimRid(returnPlan.rid) ? returnPlan : null;
+        },
         confirm: (agent?: AgentGrant) => {
           if (f.verifiedOrigin === CLI_ORIGIN && (!agent || !opts.allowCli)) return ws.close(); // a CLI must be bound to an agent account
           if (agent && f.verifiedOrigin !== CLI_ORIGIN) return ws.close(); // only a CLI pairing carries an agent grant
