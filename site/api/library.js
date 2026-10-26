@@ -17,6 +17,8 @@ const WALLET_ORIGINS = [
   'tauri://localhost',
   'http://tauri.localhost',
   'https://tauri.localhost',
+  // The bWalletX Chrome extension (its manifest key fixes this ID for every install, store or unpacked).
+  'chrome-extension://bombmmcjghjdlbmcclnhjodgcelnehgl',
 ];
 const allowedOrigins = (env = process.env) =>
   new Set([

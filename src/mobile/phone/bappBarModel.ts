@@ -124,9 +124,17 @@ export const TOP_BAR_FIXED = ['accounts', 'calls', 'bmail', 'media', 'lock'] as 
  * button (bMail = the mailbox) gets none: that button is highlighted instead, so opening bMail never shows
  * a second bMail icon (owner, 19 Oct 2026).
  */
+/**
+ * bApps that already own one of the fixed buttons. The Media button (the play icon) IS bMusic: opening Media from it
+ * used to add a second, bMusic icon to the bar (owner, 26 Oct 2026). Playing or opening Media never changes the bar.
+ */
+const FIXED_FOR: Record<string, (typeof TOP_BAR_FIXED)[number]> = { bmail: 'bmail', bmusic: 'media' };
+
 export const topBarBappForPath = (pathname: string, bars: readonly BappBarDef[] = BAPP_BARS): BappBarDef | null => {
   const def = bappBarForPath(pathname, bars);
-  return def && !(TOP_BAR_FIXED as readonly string[]).includes(def.id) ? def : null;
+  if (!def) return null;
+  const fixed = FIXED_FOR[def.id] ?? def.id;
+  return (TOP_BAR_FIXED as readonly string[]).includes(fixed) ? null : def;
 };
 
 /** Slot ids the phone top bar renders on this path, in order. */

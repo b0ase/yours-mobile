@@ -51,32 +51,39 @@ function replayCache(ttlMs = 2 * SIG_WINDOW_MS + 10_000) {
 const text = (v, max) => typeof v === 'string' && v.trim().length > 0 && v.length <= max && !/[<>]/.test(v);
 const safePath = (p) => typeof p === 'string' && PATH_RE.test(p) && !p.includes('..') && !p.includes('//');
 
-/** The manifest, checked so nothing odd ever reaches the client. null if any album is malformed. */
+/**
+ * The manifest, checked so nothing odd ever reaches the client. A malformed album (or track) is skipped, never the
+ * whole library: one bad entry must not hide the others. null only when the file itself is not a manifest.
+ * Optional per album: thumb (a small cover, e.g. covers/<id>-400.jpg) that the shelf prefers.
+ */
+function parseAlbum(a) {
+  if (!a || !ID_RE.test(String(a.id)) || !text(a.title, 80) || !safePath(a.cover)) return null;
+  if (a.artist !== undefined && !text(a.artist, 80)) return null;
+  const t = a.theme || {};
+  if (!PALETTE.every((k) => typeof t[k] === 'string' && HEX_RE.test(t[k]))) return null;
+  if (!Array.isArray(a.tracks)) return null;
+  const tracks = [];
+  for (const tr of a.tracks.slice(0, MAX_TRACKS)) {
+    if (!tr || !ID_RE.test(String(tr.id)) || !text(tr.title, 120) || !safePath(tr.path)) continue;
+    const d = Number(tr.duration);
+    tracks.push({ id: tr.id, title: tr.title, path: tr.path, ...(d > 0 && d < 86400 ? { duration: d } : {}) });
+  }
+  return {
+    id: a.id,
+    title: a.title,
+    ...(typeof a.artist === 'string' ? { artist: a.artist } : {}),
+    cover: a.cover,
+    ...(safePath(a.thumb) ? { thumb: a.thumb } : {}),
+    theme: Object.fromEntries(PALETTE.map((k) => [k, t[k].toUpperCase()])),
+    tracks,
+  };
+}
+
 function parseManifest(m) {
   if (!m || typeof m !== 'object' || !Array.isArray(m.albums)) return null;
-  const albums = [];
-  for (const a of m.albums.slice(0, MAX_ALBUMS)) {
-    if (!a || !ID_RE.test(String(a.id)) || !text(a.title, 80) || !safePath(a.cover)) return null;
-    if (a.artist !== undefined && !text(a.artist, 80)) return null;
-    const t = a.theme || {};
-    if (!PALETTE.every((k) => typeof t[k] === 'string' && HEX_RE.test(t[k]))) return null;
-    if (!Array.isArray(a.tracks)) return null;
-    const tracks = [];
-    for (const tr of a.tracks.slice(0, MAX_TRACKS)) {
-      if (!tr || !ID_RE.test(String(tr.id)) || !text(tr.title, 120) || !safePath(tr.path)) return null;
-      const d = Number(tr.duration);
-      tracks.push({ id: tr.id, title: tr.title, path: tr.path, ...(d > 0 && d < 86400 ? { duration: d } : {}) });
-    }
-    albums.push({
-      id: a.id,
-      title: a.title,
-      ...(typeof a.artist === 'string' ? { artist: a.artist } : {}),
-      cover: a.cover,
-      theme: Object.fromEntries(PALETTE.map((k) => [k, t[k].toUpperCase()])),
-      tracks,
-    });
-  }
-  return albums;
+  const all = m.albums.slice(0, MAX_ALBUMS);
+  const albums = all.map(parseAlbum).filter(Boolean);
+  return all.length && !albums.length ? null : albums;
 }
 
 /** Supabase Storage reader for the private bucket. null when not configured. */
@@ -144,19 +151,27 @@ function makeLibraryHandler({
     if (keyLimit(`key:${identityKey}`, t)) return [429, { error: 'rate-limited' }];
     if (!aliases || !storage) return [503, { error: 'not_configured' }];
 
+    // The owner check and the manifest read run side by side (one round trip, not two); the manifest is only
+    // used once the key is known to be the owner's.
+    const manifest = storage.readManifest().catch(() => null);
     const row = await aliases.getAlias(ownerAlias);
     if (!row || String(row.identity_key || '').toLowerCase() !== identityKey) return [403, { error: 'forbidden' }];
 
-    const albums = parseManifest(await storage.readManifest());
+    const albums = parseManifest(await manifest);
     if (!albums) return [503, { error: 'not_configured' }];
-    const paths = [...new Set(albums.flatMap((a) => [a.cover, ...a.tracks.map((tr) => tr.path)]))];
+    // Covers, thumbnails and audio are signed in ONE batch call. Signing is a URL only: no audio is read here.
+    const paths = [
+      ...new Set(albums.flatMap((a) => [a.cover, ...(a.thumb ? [a.thumb] : []), ...a.tracks.map((tr) => tr.path)])),
+    ];
     const signed = paths.length ? await storage.signMany(paths, expiresIn) : {};
     const out = [];
     for (const a of albums) {
       const cover = signed[a.cover];
       if (!cover) continue;
+      const { thumb: thumbPath, ...rest } = a;
+      const thumb = thumbPath ? signed[thumbPath] : undefined;
       const tracks = a.tracks.filter((tr) => signed[tr.path]).map(({ path, ...tr }) => ({ ...tr, url: signed[path] }));
-      out.push({ ...a, cover, tracks });
+      out.push({ ...rest, cover, ...(thumb ? { thumb } : {}), tracks });
     }
     // A little under the real expiry, so the client asks again before links die.
     return [200, { expiresAt: t + expiresIn * 1000 - 30_000, albums: out }];

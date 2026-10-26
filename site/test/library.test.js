@@ -140,10 +140,32 @@ describe('library session', () => {
     expect(lib.parseManifest(MANIFEST)).toHaveLength(1);
     const a = MANIFEST.albums[0];
     expect(lib.parseManifest({ albums: [{ ...a, theme: { ...HEX, bg: 'red' } }] })).toBeNull();
+    // An odd track path drops that track only.
     expect(
-      lib.parseManifest({ albums: [{ ...a, tracks: [{ id: '01', title: 'x', path: 'audio/../../etc' }] }] }),
-    ).toBeNull();
+      lib.parseManifest({ albums: [{ ...a, tracks: [{ id: '01', title: 'x', path: 'audio/../../etc' }] }] })[0].tracks,
+    ).toEqual([]);
     expect(lib.parseManifest({ albums: [{ ...a, title: '<script>' }] })).toBeNull();
+  });
+
+  test('one malformed album is skipped; the others still come back', async () => {
+    const good2 = { ...MANIFEST.albums[0], id: 'album-two', cover: 'covers/album-two.jpg' };
+    const bad = { ...MANIFEST.albums[0], id: 'bad', cover: '../secret' };
+    const { session } = setup({ manifest: { albums: [MANIFEST.albums[0], bad, good2] } });
+    const [st, body] = await session(await owner.sign(), 'ip');
+    expect(st).toBe(200);
+    expect(body.albums.map((x) => x.id)).toEqual(['album-one', 'album-two']);
+  });
+
+  test('thumbnails, covers and audio are signed in one batch; thumb is optional', async () => {
+    const withThumb = { ...MANIFEST.albums[0], thumb: 'covers/album-one-400.jpg' };
+    const { session, calls } = setup({ manifest: { albums: [withThumb] } });
+    const [, body] = await session(await owner.sign(), 'ip');
+    expect(calls.signed).toHaveLength(1);
+    expect(calls.signed[0].paths).toContain('covers/album-one-400.jpg');
+    expect(body.albums[0].thumb).toContain('album-one-400.jpg');
+    const plain = setup();
+    const [, b2] = await plain.session(await owner.sign(), 'ip');
+    expect(b2.albums[0].thumb).toBeUndefined();
   });
 });
 
@@ -172,6 +194,7 @@ describe('library route', () => {
     await api({ method: 'OPTIONS', url: '/api/library?op=session', headers: { origin: 'https://evil.example' } }, r2);
     expect(r2.h['access-control-allow-origin']).toBeUndefined();
     expect(api.allowedOrigins({}).has('capacitor://localhost')).toBe(true);
+    expect(api.allowedOrigins({}).has('chrome-extension://bombmmcjghjdlbmcclnhjodgcelnehgl')).toBe(true);
     expect(
       api
         .allowedOrigins({ LIBRARY_EXTRA_ORIGINS: 'chrome-extension://abc, javascript:alert(1)' })
