@@ -266,13 +266,15 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     // "Link your X (Twitter)" is back beside Account name / Add a photo (owner, 24 Oct 2026, reversing the 18 Oct
     // password-only screen). Optional, never a sign-in: fills the editable name + photo, and "Claim your name"
     // then offers $handle if handle@bwalletx.com is free (social/xHandle.ts). Off in store builds (socialLoginEnabled).
+    // Owner, 26 Oct 2026: Google is back beside X ("Link X" / "Link Google", SocialSignIn `create`); Google fills the
+    // name + photo the same way and its Gmail local part is offered on Choose your handle (social/linkedHandles.ts).
     [
       "import { useNavigate } from 'react-router-dom';",
       "import { useNavigate } from 'react-router-dom';\nimport { SocialSignIn } from '../../mobile/social/SocialSignIn';",
     ],
     [
       '        <AccountNameField\n          theme={theme}',
-      "        <SocialSignIn xOnly onProfile={(p) => { if (p.name) setAccountName(p.name); if (p.avatar) setIconURL(p.avatar); }} onClear={(a) => setIconURL((v) => (a && v === a ? '' : v))} onRestore={newWallet ? () => navigate('/restore-wallet') : undefined} />\n        <AccountNameField\n          theme={theme}",
+      "        <SocialSignIn create onProfile={(p) => { if (p.name) setAccountName(p.name); if (p.avatar) setIconURL(p.avatar); }} onClear={(a) => setIconURL((v) => (a && v === a ? '' : v))} onRestore={newWallet ? () => navigate('/restore-wallet') : undefined} />\n        <AccountNameField\n          theme={theme}",
     ],
     // Recovery phrase "Next": don't wait on the background wallet switch (a new wallet's first
     // storage connection can hang), so the button never silently does nothing.
