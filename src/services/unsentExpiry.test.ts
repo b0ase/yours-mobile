@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import {
   DEFAULT_TTL_S,
+  MAX_HOLD_S,
   WATCH_S,
   emptyState,
   expireOnce,
@@ -9,6 +10,7 @@ import {
   resetExpiryLimit,
   runUnsentExpiry,
   splitOutpoint,
+  wocHeight,
   wocSpent,
   type ExpiryDeps,
   type ExpiryState,
@@ -117,10 +119,10 @@ describe('BRC-177 labels', () => {
     expect(isExpired({ mode: 'seconds', value: 300 }, 100, 400, undefined)).toBe(true);
     expect(isExpired({ mode: 'timestamp', value: 500 }, 0, 499, undefined)).toBe(false);
     expect(isExpired({ mode: 'timestamp', value: 500 }, 0, 500, undefined)).toBe(true);
-    expect(isExpired({ mode: 'blockheight', value: 10 }, 0, 9e9, undefined)).toBe(false); // no height: never early
+    expect(isExpired({ mode: 'blockheight', value: 10 }, 9e9 - 100, 9e9, undefined)).toBe(false); // no height: never early (within the 14-day cap)
     expect(isExpired({ mode: 'blockheight', value: 10 }, 0, 0, 9)).toBe(false);
     expect(isExpired({ mode: 'blockheight', value: 10 }, 0, 0, 10)).toBe(true);
-    expect(isExpired({ mode: 'never' }, 0, 9e12, 9e9)).toBe(false);
+    expect(isExpired({ mode: 'never' }, 9e12 - 100, 9e12, 9e9)).toBe(false); // within the 14-day cap
   });
 
   test('outpoints', () => {
@@ -392,5 +394,159 @@ describe('wocSpent', () => {
       return res(404);
     })(`${P}.7`);
     expect(url).toBe(`https://api.whatsonchain.com/v1/bsv/main/tx/${P}/7/spent`);
+  });
+});
+
+// b-Aware 26 Oct 2026 (N1): blockheight deadlines get a real height; every hold is capped at 14 days. Neither may
+// release anything the chain checks would keep.
+describe('BRC-177 block height and the 14-day cap', () => {
+  const HEIGHT_LABEL = ['p nosend expiry blockheight 900000'];
+  const withHeight = (w: ReturnType<typeof world>, h: () => Promise<number | undefined>) => {
+    w.deps.height = h;
+    return w;
+  };
+
+  test('wocHeight reads /chain/info blocks and fails closed to undefined', async () => {
+    const res = (status: number, body: unknown) => async () => new Response(JSON.stringify(body), { status });
+    let url = '';
+    expect(
+      await wocHeight(async (u) => {
+        url = u;
+        return new Response(JSON.stringify({ blocks: 912345 }));
+      })(),
+    ).toBe(912345);
+    expect(url).toBe('https://api.whatsonchain.com/v1/bsv/main/chain/info');
+    expect(await wocHeight(res(500, { blocks: 1 }))()).toBeUndefined();
+    expect(await wocHeight(res(200, { blocks: '912345' }))()).toBeUndefined();
+    expect(await wocHeight(res(200, { blocks: -1 }))()).toBeUndefined();
+    expect(await wocHeight(res(200, {}))()).toBeUndefined();
+    expect(
+      await wocHeight(async () => {
+        throw new Error('offline');
+      })(),
+    ).toBeUndefined();
+    expect(await wocHeight(async () => new Response('not json'))()).toBeUndefined();
+  });
+
+  test('height lookup fails → the blockheight action stays held (not due), nothing aborted', async () => {
+    const w = withHeight(world(), async () => undefined);
+    w.actions = [act(A, [`${P}.0`], HEIGHT_LABEL)];
+    await expireOnce(w.deps);
+    w.advance(DEFAULT_TTL_S * 3);
+    const r = await expireOnce(w.deps);
+    expect(r.kept).toEqual([{ txid: A, reason: 'not-due' }]);
+    expect(w.aborted).toEqual([]);
+  });
+
+  test('height lookup throws → still held', async () => {
+    const w = withHeight(world(), async () => {
+      throw new Error('down');
+    });
+    w.actions = [act(A, [`${P}.0`], HEIGHT_LABEL)];
+    const r = await expireOnce(w.deps);
+    expect(r.kept).toEqual([{ txid: A, reason: 'not-due' }]);
+    expect(w.aborted).toEqual([]);
+  });
+
+  test('below the height → not due; at the height with clean inputs → released through the normal checks', async () => {
+    let h = 899_999;
+    const w = withHeight(world(), async () => h);
+    w.actions = [act(A, [`${P}.0`], HEIGHT_LABEL)];
+    expect((await expireOnce(w.deps)).kept).toEqual([{ txid: A, reason: 'not-due' }]);
+    h = 900_000;
+    const r = await expireOnce(w.deps);
+    expect(r.released).toEqual([A]);
+    expect(w.aborted).toEqual([A]);
+  });
+
+  test('CRITICAL: height passed but an input is spent elsewhere → NOT released', async () => {
+    const w = withHeight(world(), async () => 900_001);
+    w.actions = [act(A, [`${P}.0`], HEIGHT_LABEL)];
+    w.spends.set(`${P}.0`, X);
+    const r = await expireOnce(w.deps);
+    expect(r.released).toEqual([]);
+    expect(w.aborted).toEqual([]);
+    expect(r.kept.map((k) => k.txid)).toEqual([A]);
+    expect(r.kept[0].reason).not.toBe('not-due');
+  });
+
+  test('CRITICAL: height passed but an input is spent by the original → settled via sendWith, NOT released', async () => {
+    const w = withHeight(world(), async () => 900_001);
+    w.actions = [act(A, [`${P}.0`], HEIGHT_LABEL)];
+    w.spends.set(`${P}.0`, A);
+    const r = await expireOnce(w.deps);
+    expect(w.aborted).toEqual([]);
+    expect(r.released).toEqual([]);
+  });
+
+  test('CRITICAL: height passed but an input is unclear → NOT released', async () => {
+    const w = withHeight(world(), async () => 900_001);
+    w.actions = [act(A, [`${P}.0`], HEIGHT_LABEL)];
+    w.unclear.add(`${P}.0`);
+    const r = await expireOnce(w.deps);
+    expect(w.aborted).toEqual([]);
+    expect(r.kept).toEqual([{ txid: A, reason: 'input-unclear' }]);
+  });
+
+  test('CRITICAL: height passed but the original is seen on chain → sendWith, NOT released', async () => {
+    const w = withHeight(world(), async () => 900_001);
+    w.actions = [act(A, [`${P}.0`], HEIGHT_LABEL)];
+    w.seen.add(A);
+    const r = await expireOnce(w.deps);
+    expect(w.aborted).toEqual([]);
+    expect(r.settled).toEqual([A]);
+    expect(w.sent).toEqual([A]);
+  });
+
+  test('cap: never, a far timestamp, a far height and a long duration all come due at 14 days, not before', () => {
+    const far = [
+      { mode: 'never' as const },
+      { mode: 'timestamp' as const, value: 9e12 },
+      { mode: 'blockheight' as const, value: 9e9 },
+      { mode: 'seconds' as const, value: 365 * 86400 },
+    ];
+    for (const p of far) {
+      expect(isExpired(p, 100, 100 + MAX_HOLD_S - 1, undefined)).toBe(false);
+      expect(isExpired(p, 100, 100 + MAX_HOLD_S, undefined)).toBe(true);
+    }
+    expect(MAX_HOLD_S).toBe(14 * 24 * 60 * 60);
+  });
+
+  test('never: held until 14 days, then released only if every chain check passes', async () => {
+    const w = world();
+    w.actions = [act(A, [`${P}.0`], ['p nosend expiry never'])];
+    await expireOnce(w.deps);
+    w.advance(MAX_HOLD_S - 1);
+    expect((await expireOnce(w.deps)).kept).toEqual([{ txid: A, reason: 'never' }]);
+    w.advance(1);
+    const r = await expireOnce(w.deps);
+    expect(r.released).toEqual([A]);
+    expect(w.aborted).toEqual([A]);
+  });
+
+  test('CRITICAL: never past 14 days with an input spent or unclear, or the tx seen → NOT released', async () => {
+    for (const twist of ['spent', 'unclear', 'seen'] as const) {
+      const w = world();
+      w.actions = [act(A, [`${P}.0`], ['p nosend expiry never'])];
+      await expireOnce(w.deps);
+      w.advance(MAX_HOLD_S + 60);
+      if (twist === 'spent') w.spends.set(`${P}.0`, X);
+      if (twist === 'unclear') w.unclear.add(`${P}.0`);
+      if (twist === 'seen') w.seen.add(A);
+      const r = await expireOnce(w.deps);
+      expect(w.aborted).toEqual([]);
+      expect(r.released).toEqual([]);
+    }
+  });
+
+  test('CRITICAL: a height-expired action whose tx turns up during the 404 retries is NOT released', async () => {
+    const w = withHeight(world(), async () => 900_001);
+    w.actions = [act(A, [`${P}.0`], HEIGHT_LABEL)];
+    let calls = 0;
+    const lateLook = async (t: string): Promise<Sighting> => (t === A && ++calls > 2 ? 'seen' : 'missing');
+    w.deps.lookups = [lateLook];
+    const r = await expireOnce(w.deps);
+    expect(w.aborted).toEqual([]);
+    expect(r.released).toEqual([]);
   });
 });

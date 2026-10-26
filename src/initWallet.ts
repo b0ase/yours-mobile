@@ -91,7 +91,7 @@ import {
 import { recoverPaymentByTxid, type TxidRecoverReport } from './services/recoverByTxid';
 import { makePostageReconcileWiring, makeTxidRecoverDeps, sweepCandidateTxids } from './services/recoverByTxidWiring';
 import { reconcilePostage, wocIsMined, type PostageReconcileReport } from './services/postageReconcile';
-import { runUnsentExpiry, storageKV, type ExpiryReport, type NoSendAction } from './services/unsentExpiry';
+import { runUnsentExpiry, storageKV, wocHeight, type ExpiryReport, type NoSendAction } from './services/unsentExpiry';
 import { chainActive } from './services/dappChain';
 import { healthStatus, SYNC_HEALTH_KEY } from './services/storageHealth';
 import type { TokenRecoveryOptions, TokenRecoveryResult } from './services/tokenRecovery';
@@ -1154,6 +1154,8 @@ export const initWallet = async (
               options: { sendWith: [txid], acceptDelayedBroadcast: false },
             }),
           recoverLate: (txid) => recoverTxidImpl(txid),
+          // BRC-177 blockheight deadlines (b-Aware 26 Oct 2026, N1). Undefined on any failure: the action stays held.
+          height: wocHeight(),
           kv: storageKV(baseWallet.keyDeriver.identityKey),
         },
         { force },
