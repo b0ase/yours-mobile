@@ -249,7 +249,10 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
                   className="mt-0.5 accent-green-400"
                 />
                 <div className="flex flex-col min-w-0">
-                  <span className="text-[15px] font-semibold leading-snug" style={{ color: theme.color.global.contrast }}>
+                  <span
+                    className="text-[15px] font-semibold leading-snug"
+                    style={{ color: theme.color.global.contrast }}
+                  >
                     Let this app sign and encrypt with your keys for “{protocolLabel(p.protocolID)}”
                     {p.counterparty ? ` (shared with ${p.counterparty.slice(0, 10)}…)` : ''}
                   </span>

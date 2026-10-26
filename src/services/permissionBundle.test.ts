@@ -743,7 +743,10 @@ describe('never approve a line the user cannot read (mixed careful batch, 24 Oct
       originator: site,
       items: [proto('key', site, { privileged: true }), proto('h1', site, { counterparty: 'self' })],
     });
-    expect(sheetDecisions(m, true, { key: true, h1: false }, false, sheetView(m, true))).toEqual({ key: true, h1: false });
+    expect(sheetDecisions(m, true, { key: true, h1: false }, false, sheetView(m, true))).toEqual({
+      key: true,
+      h1: false,
+    });
   });
 
   test('a careful line that never scrolled onto the screen is hidden, so Allow cannot grant it', () => {
