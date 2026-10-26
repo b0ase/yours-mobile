@@ -5,7 +5,7 @@ take or spend someone's money, read their keys, or make the wallet sign somethin
 to hear from you first, and we pay for it.
 
 The full policy, the reward table and our responses to advisories live at **https://bwalletx.com/b-Aware**
-(machine-readable: `/.well-known/security.txt`). This file is the short form of policy version 3 (25 October 2026).
+(machine-readable: `/.well-known/security.txt`). This file is the short form of policy version 4 (26 October 2026).
 
 ## Report a vulnerability
 
@@ -41,9 +41,17 @@ each month. Reports received before 25 October 2026 keep the earlier terms: 14 d
 from triage.
 
 We pay people we can name, and we record every payout: who, which address, how much, and the transaction. Under
-1 BSV, a stable handle and a paymail or address is enough. For 1 BSV or more (every High and Critical), we need your
-real name and country before we pay; the reward is held for you until you send them. Your name stays private unless
-you ask to be credited by it. Anonymous reporters still get credit, but not payments of 1 BSV or more.
+1 BSV, a stable handle and a paymail or address is enough. For 1 BSV or more (every High and Critical), you need to
+verify your identity with Veriff in bWallet, and we pay only to an address of the wallet that holds that verified
+identity; a typed name and country is no longer enough. The reward is held for you until you verify.
+
+To verify, open bWallet and go to Settings › Identity › Verify your identity (or use the account page on bChatX); it is
+a two-minute ID check. We never see your ID documents: Veriff holds them, and your wallet keeps only a signed
+certificate that says you are verified.
+
+This rule applies to every unpaid reward of 1 BSV or more from 26 October 2026, including reports made before then.
+Anonymous reporters still get credit, but not payments of 1 BSV or more. Rewards are paid when the programme's funding
+arrives, in the order set by the quarterly pool above.
 
 ## Scope
 
