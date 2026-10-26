@@ -18,6 +18,8 @@
  * a transaction (noSend / unsent release logic is elsewhere and unchanged).
  */
 
+import { PRE_APPROVAL_CODED } from './preApprovalTimeout';
+
 export const PROMPT_NOT_SHOWN_CODE = 'ERR_PROMPT_NOT_SHOWN';
 export const PROMPT_NOT_SHOWN_MESSAGE =
   'bWalletX could not show its approval sheet. Click the bWalletX icon in your toolbar, then try again.';
@@ -44,11 +46,12 @@ export function promptExpiredError(): Error & { code: string; status: number } {
 }
 
 const CODED: [string, string, number][] = [
+  ...PRE_APPROVAL_CODED,
   [PROMPT_NOT_SHOWN_MESSAGE, PROMPT_NOT_SHOWN_CODE, 503],
   [PROMPT_EXPIRED_MESSAGE, PROMPT_EXPIRED_CODE, 408],
 ];
 
-/** Adds the code to a `{ success: false, error }` reply whose error is the not-shown or expired failure. */
+/** Adds the code to a `{ success: false, error }` reply whose error is a coded failure (not shown, expired, pre-approval timeout). */
 export function withPromptNotShownCode<R>(response: R): R {
   const r = response as { success?: unknown; error?: unknown; code?: unknown } | null | undefined;
   if (!r || typeof r !== 'object' || r.success !== false || r.code !== undefined) return response;

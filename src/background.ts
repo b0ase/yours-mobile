@@ -81,6 +81,13 @@ import { timedStep, txidRecoverySummary } from './services/recoverByTxid';
 import { foundHeadline, restoredLine, scanNote, type ScanReport } from './services/findMissingCoins';
 import { paymailRestoreSummary } from './mobile/names/paymail';
 import { isEmpty, summarizeActive, switchToLocalVerified, type SwitchDeps } from './services/restoreFromRemote';
+import {
+  fundingTimeoutError,
+  SingleFlight,
+  STEP_TIMEOUT_MS,
+  walletWithDeadline,
+  withStepTimeout,
+} from './services/preApprovalTimeout';
 import { insufficientFundsMessage, isInsufficientFunds, prepareFunding, type FundingSnapshot } from './services/fundingPrep';
 import { mirrorToMiner } from './mobile/minerMirror';
 import { panelUnlockMessages, shouldPushPrompt, type ShownPrompt } from './services/promptQueue';
@@ -980,6 +987,14 @@ export const getWallet = (): WalletInterface | null => {
  * Waits for startup initialization first so we don't launch a popup
  * while the wallet is still auto-initializing from a persisted passKey.
  */
+/** ensureWallet for a site's request, with the pre-approval deadlines (services/preApprovalTimeout.ts). */
+const walletForSiteRequest = (): Promise<WalletInterface> =>
+  walletWithDeadline<WalletInterface>({
+    ready: () => (masterBackupGate.active ? undefined : accountContext?.wallet),
+    open: () => ensureWallet(),
+    awaitingUnlock: () => pendingWalletWaiters.length > 0,
+  });
+
 const ensureWallet = async (suppressPopup = false): Promise<WalletInterface> => {
   await startupInitPromise;
   // During a master backup, wait for it (and the original account to reopen) instead of failing (masterBackupGate.ts).
@@ -2992,7 +3007,9 @@ if (!(
     };
 
     let gateAsk: Promise<boolean> | undefined;
-    ensureWallet(isFromExtension)
+    // A site's call never waits silently on the wallet: settling is capped at 5 s, a locked wallet shows its unlock
+    // UI at once and the person has 60 s to unlock (services/preApprovalTimeout.ts). Our own pages wait as before.
+    (isFromExtension ? ensureWallet(true) : walletForSiteRequest())
       .then(() => {
         console.log('[background] ensureWallet resolved for action:', message.action);
         // Connections log (History › Connections): which outside site or app called, and what.
@@ -5435,6 +5452,7 @@ if (!(
   };
 
   const createActionDedupe = new CreateActionDedupe<ResponseEventDetail>();
+  const fundingPrepFlight = new SingleFlight<FundingSnapshot>();
 
   const processCWICreateAction = async (
     message: { params: CreateActionArgs; originator?: string },
@@ -5447,7 +5465,7 @@ if (!(
     let releaseMicropay: (() => void) | undefined;
     let ownMintIntent: MintIntent | undefined;
     try {
-      const w = await ensureWallet();
+      const w = message.originator === ADMIN_ORIGINATOR ? await ensureWallet() : await walletForSiteRequest();
       await ensureUsbSeen('build and sign a transaction', message.originator);
       // A monthly allowance with a payee allowlist covers only payments to those payees; this call asks otherwise
       // (services/allowanceGuard.ts, payment-safety audit 24 Oct 2026 B2).
@@ -5570,13 +5588,20 @@ if (!(
         console.log('[createAction] continues a site chain: funding preparation skipped');
       } else if (accountContext) {
         const ctx = accountContext;
-        fundingSnap = await prepareFunding({
-          wallet: ctx.baseWallet as unknown as Parameters<typeof prepareFunding>[0]['wallet'],
-          sweep: ctx.sweepDeposits,
-          arriving: arrivingSats,
-          creditArriving: ctx.creditArriving,
-          recoverFailed: ctx.recoverFailed,
-        });
+        // Capped at 5 s (ERR_FUNDING_TIMEOUT), before any sheet or signing: the preparation is not cancelled (a
+        // sweep it broadcast finishes on its own), and a Retry joins the run still going (preApprovalTimeout.ts).
+        const prep = fundingPrepFlight.run(ctx, () =>
+          prepareFunding({
+            wallet: ctx.baseWallet as unknown as Parameters<typeof prepareFunding>[0]['wallet'],
+            sweep: ctx.sweepDeposits,
+            arriving: arrivingSats,
+            creditArriving: ctx.creditArriving,
+            recoverFailed: ctx.recoverFailed,
+          }),
+        );
+        const t0 = Date.now();
+        fundingSnap = isAdmin ? await prep : await withStepTimeout(prep, STEP_TIMEOUT_MS, fundingTimeoutError);
+        console.log(`[createAction] funding preparation took ${Date.now() - t0} ms`);
       } else {
         console.warn('[createAction] no account context: skipping funding preparation');
       }
