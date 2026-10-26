@@ -33,16 +33,23 @@ export const VideoBackground = ({ src, poster, scrim = 'apps', position = 'absol
     !!(navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData;
   const still = reduce || !prefs.animatedBackgrounds || saveData;
   const video = useRef<HTMLVideoElement>(null);
-  const [onScreen, setOnScreen] = useState(true);
+  // Off screen until the observer says otherwise: a hidden kept page (or the Apps layer behind onboarding)
+  // must not download its clip. `seen` flips once, so the clip is fetched only after it first shows.
+  const noObserver = typeof IntersectionObserver === 'undefined';
+  const [onScreen, setOnScreen] = useState(noObserver);
+  const [seen, setSeen] = useState(noObserver);
   const wrap = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const el = wrap.current;
-    if (!el || typeof IntersectionObserver === 'undefined') return;
-    const io = new IntersectionObserver(([e]) => setOnScreen(e.isIntersecting));
+    if (!el || noObserver) return;
+    const io = new IntersectionObserver(([e]) => {
+      setOnScreen(e.isIntersecting);
+      if (e.isIntersecting) setSeen(true);
+    });
     io.observe(el);
     return () => io.disconnect();
-  }, []);
+  }, [noObserver]);
 
   useEffect(() => {
     const v = video.current;
@@ -66,7 +73,7 @@ export const VideoBackground = ({ src, poster, scrim = 'apps', position = 'absol
       document.removeEventListener('touchstart', sync);
       v.pause();
     };
-  }, [still, onScreen]);
+  }, [still, onScreen, seen]);
 
   return (
     <motion.div
@@ -78,7 +85,7 @@ export const VideoBackground = ({ src, poster, scrim = 'apps', position = 'absol
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.6, ease: 'easeOut' }}
     >
-      {still ? (
+      {still || !seen ? (
         <img src={poster} alt="" className="h-full w-full object-cover" style={{ opacity: 0.5 }} />
       ) : (
         <video
@@ -90,7 +97,7 @@ export const VideoBackground = ({ src, poster, scrim = 'apps', position = 'absol
           autoPlay
           playsInline
           disablePictureInPicture
-          preload="auto"
+          preload={onScreen ? 'auto' : 'none'}
           className="h-full w-full object-cover"
           style={{ opacity: 0.5 }}
         />

@@ -20,6 +20,9 @@ import { appIndexForPath, coldStartRedirect, pageForPath, type ScreenId } from '
  */
 
 const mountedScreens = new Set<number>();
+// The Apps layer (wallpaper clip + BrowserPage, ~0.34 MB JS and a 0.6 MB clip) mounts the first time an app
+// screen opens, then stays. Before that (onboarding, a cold start on the Wallet) it isn't loaded at all.
+let appsLayerMounted = false;
 
 const BrowserPage = lazy(() => import('../BrowserPage'));
 const Wallpaper = lazy(() => import('../BrowserPage').then((m) => ({ default: m.AppsWallpaper })));
@@ -67,48 +70,51 @@ export const PhonePage = ({ children }: { children: ReactNode }) => {
   // A cold start lands on the Wallet (screens.ts LANDING), so it is mounted like any other page.
   if (page && (hasLanded() || coldStartRedirect(page.id) === null)) keptPages.add(page.id);
   // App screens: the one on show and its neighbours are mounted; once mounted, a screen stays mounted.
+  if (idx !== null) appsLayerMounted = true;
   if (idx !== null) for (const i of [idx - 1, idx, idx + 1]) if (i >= 0 && i < screens.length) mountedScreens.add(i);
   return (
     <>
       {idx === null && !page && children}
       {/* App screens: one wallpaper that stays still, and the track that moves. */}
-      <div className="absolute inset-0" style={idx === null ? { display: 'none' } : undefined}>
-        <Suspense fallback={null}>
-          <Wallpaper />
-        </Suspense>
-        {!APPS_PAGED ? (
-          // Round 8: one vertical Apps page, every screen a section (sticky headers). No track, no transforms.
-          <div data-phone-screen={0} aria-hidden={idx === null || undefined} className="absolute inset-0">
-            <PeekContext.Provider value={idx === null}>
-              <Suspense fallback={null}>
-                <BrowserPage screen={idx ?? 0} sections />
-              </Suspense>
-            </PeekContext.Provider>
-          </div>
-        ) : (
-          <div ref={idx === null ? undefined : setPageEl} data-phone-track className="relative w-full h-full">
-            {screens.map((_, i) => {
-              if (!mountedScreens.has(i)) return null;
-              const off = idx === null ? 1 : i - idx;
-              return (
-                <div
-                  key={i}
-                  data-phone-screen={i}
-                  aria-hidden={off !== 0 || undefined}
-                  className={`absolute inset-0 ${off === 0 ? '' : Math.abs(off) === 1 ? 'bw-page-off bw-page-near' : 'bw-page-off'}`}
-                  style={off === 0 ? undefined : { transform: `translate3d(${off * 100}%,0,0)` }}
-                >
-                  <PeekContext.Provider value={off !== 0}>
-                    <Suspense fallback={null}>
-                      <BrowserPage screen={i} />
-                    </Suspense>
-                  </PeekContext.Provider>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+      {appsLayerMounted && (
+        <div className="absolute inset-0" style={idx === null ? { display: 'none' } : undefined}>
+          <Suspense fallback={null}>
+            <Wallpaper />
+          </Suspense>
+          {!APPS_PAGED ? (
+            // Round 8: one vertical Apps page, every screen a section (sticky headers). No track, no transforms.
+            <div data-phone-screen={0} aria-hidden={idx === null || undefined} className="absolute inset-0">
+              <PeekContext.Provider value={idx === null}>
+                <Suspense fallback={null}>
+                  <BrowserPage screen={idx ?? 0} sections />
+                </Suspense>
+              </PeekContext.Provider>
+            </div>
+          ) : (
+            <div ref={idx === null ? undefined : setPageEl} data-phone-track className="relative w-full h-full">
+              {screens.map((_, i) => {
+                if (!mountedScreens.has(i)) return null;
+                const off = idx === null ? 1 : i - idx;
+                return (
+                  <div
+                    key={i}
+                    data-phone-screen={i}
+                    aria-hidden={off !== 0 || undefined}
+                    className={`absolute inset-0 ${off === 0 ? '' : Math.abs(off) === 1 ? 'bw-page-off bw-page-near' : 'bw-page-off'}`}
+                    style={off === 0 ? undefined : { transform: `translate3d(${off * 100}%,0,0)` }}
+                  >
+                    <PeekContext.Provider value={off !== 0}>
+                      <Suspense fallback={null}>
+                        <BrowserPage screen={i} />
+                      </Suspense>
+                    </PeekContext.Provider>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
       {/* Pages: mounted once opened, then kept (hidden while another is on screen). */}
       {[...keptPages].map((id) => {
         const here = page?.id === id;

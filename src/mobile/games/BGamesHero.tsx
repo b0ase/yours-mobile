@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import heroVideo from './bgames-hero.mp4';
 import heroPoster from './bgames-hero.jpg';
 
@@ -27,22 +27,39 @@ const motionOk = () => {
 /** `top`: the hero opens the page (pulls up over the page padding); otherwise it sits inside a scrolling list. */
 export const BGamesHero = ({ top = true }: { top?: boolean }) => {
   const [motion] = useState(motionOk);
+  // Nothing heavy until the hero is near the screen: the gameplay clip (1.4 MB) and its display fonts load
+  // the first time it comes within a screen of view, not when the Apps layer mounts behind another page.
+  const ref = useRef<HTMLElement>(null);
+  const [near, setNear] = useState(() => typeof IntersectionObserver === 'undefined');
   useEffect(() => {
-    if (document.getElementById(FONTS_ID)) return;
+    const el = ref.current;
+    if (near || !el) return;
+    const io = new IntersectionObserver(
+      ([e]) => {
+        if (e.isIntersecting) setNear(true);
+      },
+      { rootMargin: '100% 0px' },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [near]);
+  useEffect(() => {
+    if (!near || document.getElementById(FONTS_ID)) return;
     const link = document.createElement('link');
     link.id = FONTS_ID;
     link.rel = 'stylesheet';
     link.href = FONTS;
     document.head.appendChild(link);
-  }, []);
+  }, [near]);
   const code = { fontFamily: '"Space Mono", ui-monospace, monospace', fontSize: 10, letterSpacing: '0.14em' } as const;
   return (
     <header
+      ref={ref}
       className={`relative -mx-4 overflow-hidden${top ? ' -mt-4' : ' rounded-xl'}`}
       style={{ minHeight: 'clamp(300px, 52vh, 560px)', background: PANEL }}
       aria-label="bGames"
     >
-      {motion ? (
+      {motion && near ? (
         <video
           src={heroVideo}
           poster={heroPoster}
@@ -50,7 +67,7 @@ export const BGamesHero = ({ top = true }: { top?: boolean }) => {
           muted
           loop
           playsInline
-          preload="metadata"
+          preload="none"
           className="absolute inset-0 h-full w-full object-cover"
           aria-hidden
         />

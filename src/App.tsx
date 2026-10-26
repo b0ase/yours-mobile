@@ -89,6 +89,13 @@ export const App = () => {
   useEffect(() => {
     if (hasWallet) void import('./pages/BsvWallet');
   }, [hasWallet]);
+  // Once unlocked, warm the Apps chunk in idle time so the first swipe to Home/Apps is instant. Only the JS:
+  // its clips load when they first show (ui/VideoBackground.tsx, games/BGamesHero.tsx).
+  useEffect(() => {
+    if (!hasWallet || isLocked) return;
+    const t = setTimeout(() => void import('./mobile/BrowserPage'), 2000);
+    return () => clearTimeout(t);
+  }, [hasWallet, isLocked]);
 
   // Establish a port connection so the background knows the popup is open.
   // Port disconnects automatically when the popup closes — no timers needed.
