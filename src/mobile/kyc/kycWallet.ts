@@ -163,7 +163,9 @@ const decrypt = async (
       if (!Array.isArray(plaintext) || plaintext.length === 0 || plaintext.length > 32)
         throw new Error(`key is ${Array.isArray(plaintext) ? plaintext.length + ' bytes' : typeof plaintext}`);
     } catch (e) {
-      throw new Error(`Couldn't open the certificate (field "${first}"): ${e instanceof Error ? e.message : String(e)}`);
+      throw new Error(
+        `Couldn't open the certificate (field "${first}"): ${e instanceof Error ? e.message : String(e)}`,
+      );
     }
   }
   // MasterCertificate only calls wallet.decrypt, which WalletInterface provides.
