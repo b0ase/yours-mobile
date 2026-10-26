@@ -12,12 +12,15 @@ import { payForCharges, releasePayment } from '../chat/roomSpend';
 import { useBsvUsd } from '../money/money';
 import { ErrorActions } from '../errors/ErrorActions';
 import {
+  approveListen,
+  checkListenPlan,
   formatSpent,
   limitRaw,
   parsePaidState,
   payPlan,
   planTotal,
   shouldPay,
+  type ListenApproval,
   type PaidClient,
   type PaidConfig,
   type PaidState,
@@ -35,7 +38,7 @@ export default function PaidListening({ client, ticker, role }: Props) {
   const bsvUsd = useBsvUsd();
   const [st, setSt] = useState<PaidState | null>(null);
   const [asked, setAsked] = useState(false);
-  const [approved, setApproved] = useState(false);
+  const [approval, setApproval] = useState<ListenApproval | null>(null);
   const [limitUsd, setLimitUsd] = useState('1');
   const [spent, setSpent] = useState(BigInt(0));
   const [minutes, setMinutes] = useState(0);
@@ -77,14 +80,24 @@ export default function PaidListening({ client, ticker, role }: Props) {
   useEffect(() => {
     if (!listener || !st) return;
     const step = shouldPay({
-      approved,
+      approval,
       plan: st.plan,
       paidThrough: st.me?.paidThrough ?? null,
       now: Date.now(),
       spent,
-      limit,
       busy: busy.current,
     });
+    if (step === 'refuse' && approval && st.plan) {
+      // The plan no longer matches what was approved (new payee, unit or amount): stop and ask again.
+      try {
+        checkListenPlan(st.plan, approval);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+      setApproval(null);
+      setAsked(false);
+      return;
+    }
     if (step === 'limit') {
       setStopped('limit');
       return;
@@ -92,9 +105,10 @@ export default function PaidListening({ client, ticker, role }: Props) {
     if (step !== 'pay' || !st.plan || !st.sig) return;
     busy.current = true;
     const plan = st.plan;
-    void payPlan(apiContext, client, plan, st.sig, { payForMessage: payForCharges, releasePayment })
+    const ok = approval!;
+    void payPlan(apiContext, client, plan, st.sig, ok, { payForMessage: payForCharges, releasePayment })
       .then(() => {
-        setSpent((s) => s + planTotal(plan));
+        setSpent((s) => s + planTotal(plan, ok));
         setMinutes((m) => m + 1);
         setError('');
       })
@@ -103,7 +117,7 @@ export default function PaidListening({ client, ticker, role }: Props) {
         busy.current = false;
         void refresh();
       });
-  }, [listener, st, approved, spent, limit, apiContext, client, refresh]);
+  }, [listener, st, approval, spent, apiContext, client, refresh]);
 
   if (!cfg && !st?.canConfigure) return null;
 
@@ -119,7 +133,7 @@ export default function PaidListening({ client, ticker, role }: Props) {
         </button>
       )}
 
-      {listener && approved && (
+      {listener && approval && (
         <div
           className="mx-3 mt-2 self-start rounded-full px-3 py-1 text-xs"
           style={{ background: '#1d1e23', color: '#fff' }}
@@ -139,7 +153,7 @@ export default function PaidListening({ client, ticker, role }: Props) {
             onClick={() => {
               setStopped('');
               setAsked(false);
-              setApproved(false);
+              setApproval(null);
             }}
           >
             Continue
@@ -160,11 +174,18 @@ export default function PaidListening({ client, ticker, role }: Props) {
           dest={cfg!.dest}
           free={cfg!.freeFirstMinute}
           currency={cfg!.currency}
+          payees={st?.plan ? (cfg!.dest === 'issuer' ? [cfg!.issuerAddress ?? ''] : planPayees(st.plan.charges)) : null}
           limit={limitUsd}
           setLimit={setLimitUsd}
           onYes={() => {
+            try {
+              setApproval(approveListen(cfg!, st?.plan, limit));
+              setError('');
+            } catch (e) {
+              setError(e instanceof Error ? e.message : String(e));
+              return;
+            }
             setAsked(true);
-            setApproved(true);
           }}
           onNo={() => setAsked(true)}
         />
@@ -185,6 +206,9 @@ export default function PaidListening({ client, ticker, role }: Props) {
   );
 }
 
+const planPayees = (charges: { to: string }[]) => [...new Set(charges.map((c) => c.to).filter((t) => t !== 'burn'))];
+const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a);
+
 const destText = (d: PaidConfig['dest']) =>
   d === 'stage' ? 'split between the people on stage' : d === 'issuer' ? "paid to the token's issuer" : 'burned';
 
@@ -193,6 +217,8 @@ function ApproveSheet(p: {
   dest: PaidConfig['dest'];
   free: boolean;
   currency: PaidConfig['currency'];
+  /** Who this approval pays (from the plan being approved); null while there is no plan yet. */
+  payees: string[] | null;
   limit: string;
   setLimit: (v: string) => void;
   onYes: () => void;
@@ -210,6 +236,11 @@ function ApproveSheet(p: {
           {p.price}, {destText(p.dest)}.{p.free ? ' The first minute is free.' : ''} Your wallet pays each minute
           directly; bChatX takes nothing.
         </p>
+        {p.payees && p.dest !== 'burn' && (
+          <p className="mt-2 text-xs" style={{ color: MUTED }}>
+            Pays only: {p.payees.map(shortAddr).join(', ') || 'nobody yet'}. If that changes, you'll be asked again.
+          </p>
+        )}
         <label className="mt-4 block text-sm text-white" htmlFor="paid-limit">
           Most I'll spend this session ({unit.trim()})
         </label>
@@ -231,6 +262,7 @@ function ApproveSheet(p: {
           </button>
           <button
             onClick={p.onYes}
+            disabled={!p.payees}
             className="flex-1 rounded-full py-2.5 font-bold"
             style={{ background: GOLD, color: '#010101' }}
           >

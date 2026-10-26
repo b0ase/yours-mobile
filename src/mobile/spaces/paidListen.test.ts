@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { formatSpent, limitRaw, parsePaidState, payPlan, planTotal, shouldPay, type ListenPlan } from './paidListen';
+import {
+  formatSpent,
+  limitRaw,
+  parsePaidState,
+  payPlan,
+  planTotal,
+  shouldPay,
+  type ListenApproval,
+  type ListenPlan,
+} from './paidListen';
 
 const plan: ListenPlan = {
   v: 1,
@@ -17,23 +26,29 @@ const plan: ListenPlan = {
   issuedAt: 1,
 };
 
+const approval: ListenApproval = {
+  currency: { kind: 'bsv' },
+  dest: 'stage',
+  payees: ['1BjTE7Az3eUWQn4K56SxHJUwwy6zoHYp5g', '13WRxSgUYReyawKo2gbRvKHhDEYb29Xd3K'],
+  limit: BigInt(1_000_000),
+};
+
 describe('paid listening', () => {
   it('totals a plan', () => {
-    expect(planTotal(plan)).toBe(BigInt(50_000));
+    expect(planTotal(plan, approval)).toBe(BigInt(50_000));
   });
 
   it('pays only when approved, near the end of paid time, and under the limit', () => {
     const base = {
-      approved: true,
+      approval,
       plan,
       paidThrough: 100_000,
       now: 90_000,
       spent: BigInt(0),
-      limit: BigInt(1_000_000),
       busy: false,
     };
     expect(shouldPay(base)).toBe('pay');
-    expect(shouldPay({ ...base, approved: false })).toBe('wait');
+    expect(shouldPay({ ...base, approval: null })).toBe('wait');
     expect(shouldPay({ ...base, busy: true })).toBe('wait');
     expect(shouldPay({ ...base, now: 10_000 })).toBe('wait');
     expect(shouldPay({ ...base, spent: BigInt(960_000) })).toBe('limit');
@@ -90,6 +105,7 @@ describe('paid listening', () => {
       { spacePaid: async () => ({}), spacePaidAction: async () => ({ paidThrough: 99 }) },
       plan,
       'sig',
+      approval,
       deps,
     );
     expect(ok).toEqual({ txid: 'tx1', paidThrough: 99 });
@@ -99,7 +115,7 @@ describe('paid listening', () => {
         throw new Error('no');
       },
     };
-    await expect(payPlan({} as never, refuse, plan, 'sig', deps)).rejects.toThrow('no');
+    await expect(payPlan({} as never, refuse, plan, 'sig', approval, deps)).rejects.toThrow('no');
     await new Promise((r) => setTimeout(r, 0));
     expect(calls).toEqual(['sign', 'sign', 'release']);
   });
