@@ -1568,6 +1568,9 @@ let expireSpendRequest: (requestID: string) => void = () => undefined;
  * Bind permission callbacks to the WalletPermissionsManager.
  * These callbacks are triggered when an external app needs permission.
  */
+/** Host only, for [bwx-req] trace lines. */
+const siteHost = (o: string) => o.replace(/^[a-z]+:\/\//i, '').split(/[/?#]/)[0];
+
 const bindPermissionCallbacks = (manager: LocalWalletPermissionsManager) => {
   // Protocol permission (signing, encrypting, HMAC, etc.)
   manager.bindCallback('onProtocolPermissionRequested', async (request: PermissionRequest & { requestID: string }) => {
@@ -1706,6 +1709,7 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
           const blocking = permissionBundler
             .list()
             .find((b) => b.originator === request.originator && b.state === 'shown');
+          if (blocking) console.log(`[bwx-req] queued behind bundle=${blocking.id} host=${siteHost(request.originator)}`);
           if (blocking) watchPrompt({ kind: 'bundle', requestID: blocking.id });
           return;
         }
@@ -4355,6 +4359,14 @@ if (!(
     }
     // Bound to exactly what was on screen: a missing or different hash grants nothing (permissionBundle.ts).
     const result = permissionBundler.resolve(response.bundleID, response.decisions ?? {}, response.seenHash ?? '');
+    // Duplicate sign-in prompt (owner, 26 Oct 2026: Approve did nothing, the same sheet came back, the second Approve
+    // worked; bChatX saw one challenge + one verify). Trace each answer: which bundle, whether it still existed, stale
+    // hash, and whether each granted request still had a waiting caller. Host + counts only, nothing secret.
+    console.log(
+      `[bwx-req] answer bundle=${response.bundleID} host=${bundle ? siteHost(bundle.originator) : '-'} found=${!!bundle} ` +
+        `resolved=${!!result} stale=${!!result?.stale} granted=${result?.granted.length ?? 0} denied=${result?.denied.length ?? 0} ` +
+        `waiting=${result ? result.granted.filter((r) => pendingPermissionRequests.has(r.requestID)).length : 0}`,
+    );
     if (!bundle || !result) {
       sendResponse({ type: 'BUNDLE_PERMISSION_RESPONSE', success: false, error: 'Request expired' });
       return true;

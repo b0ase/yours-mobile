@@ -49,3 +49,37 @@ export const siteName = (originator: string): string => {
   if (parts.length === 3 && parts[1].length <= 3 && parts[2].length === 2) return parts[0] || host;
   return host;
 };
+
+/**
+ * Sheet titles name what the request grants (owner, 26 Oct 2026: "Sign in", "Sign in", "Connect" read the same; to a
+ * person, signing in IS connecting). Pure, display only: nothing here changes what is granted.
+ */
+export const keysName = (text: string): string => /"([^"]+)"/.exec(text)?.[1] ?? '';
+export const sheetTitleText = (
+  kind: string,
+  site: string,
+  model: Pick<SheetModel, 'lines'>,
+): string => {
+  const keys = model.lines.map((l) => keysName(l.text)).find(Boolean);
+  switch (kind) {
+    case 'signin':
+      return `Connect and sign in to ${site}`;
+    case 'private':
+      return `Open your private ${privateTitleLabel(model)} on ${site}`;
+    case 'connect':
+      return keys ? `Connect to ${site} and use your "${keys}" keys` : `Connect to ${site}`;
+    default:
+      return '';
+  }
+};
+
+/**
+ * The main button says when a line the request asked for is left unticked ("Connect without bchat documents"),
+ * so pressing it can never silently grant less than the sheet seems to say. Pure.
+ */
+export const withoutSuffix = (lines: readonly { text: string; isNew?: boolean }[], ticked: (i: number) => boolean) => {
+  const off = lines.filter((l, i) => !l.isNew && !ticked(i));
+  if (!off.length) return '';
+  if (off.length > 1) return ` without ${off.length} permissions`;
+  return ` without ${keysName(off[0].text) || 'one permission'}`;
+};
