@@ -245,7 +245,8 @@ export const HandleOnboarding = () => {
             {roomBusy ? 'Opening your room…' : handleCardTitle(hasName, null)}
           </div>
           <div className="text-[11px]" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
-            {roomError || (hasName ? 'Free. Invite guests or open it to visitors, your choice.' : handleCardText(hasName))}
+            {roomError ||
+              (hasName ? 'Free. Invite guests or open it to visitors, your choice.' : handleCardText(hasName))}
           </div>
         </div>
         <button
