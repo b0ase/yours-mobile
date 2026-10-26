@@ -123,8 +123,13 @@ describe('store build: no buying, no personal token, no bWalletX text', () => {
     expect(src('./tabs/ChatPage.tsx')).toContain('{!STORE_BUILD && <SiteRoomBalance');
   });
 
-  test('Choose your handle: the token + room panel needs paid features', () => {
-    expect(src('./names/HandleFlow.tsx')).toMatch(/PAID_FEATURES_ENABLED \? \(\s*<div[\s\S]*?Your token \+ room/);
+  // Owner, 26 Oct 2026: the launcher left Choose your handle (PersonalTokenLauncher, "Launch your tokens" card).
+  test('the token + room launcher needs paid features, and is not in Choose your handle', () => {
+    expect(src('./names/PersonalTokenLauncher.tsx')).toMatch(
+      /PAID_FEATURES_ENABLED \? \(\s*<div[\s\S]*?Your token \+ room/,
+    );
+    expect(src('./names/HandleFlow.tsx')).not.toContain('Your token + room');
+    expect(src('./names/HandleOnboarding.tsx')).toMatch(/hasName && PAID_FEATURES_ENABLED && !hasRoom/);
   });
 
   test('store-reachable screens take the app name from APP_NAME, not a literal bWalletX', () => {

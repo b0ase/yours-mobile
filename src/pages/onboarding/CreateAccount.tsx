@@ -19,6 +19,10 @@ import { YoursIcon } from '../../components/YoursIcon';
 import { saveAccountDataToChromeStorage } from '../../utils/chromeStorageHelpers';
 import { copySecret } from '../../mobile/secretClipboard';
 import { BackupStep } from '../../mobile/backup/BackupStep';
+import { createBackupFile, saveBackupFile, saveRoute } from '../../mobile/backup/backupFile';
+import { backupCovers, markBackedUp } from '../../mobile/backup/backupState';
+import { strongEnoughForBackup } from '../../mobile/backup/passwordStrength';
+import { isNative } from '../../mobile/native';
 import { clearHelpDeskUnpin } from '../../mobile/chat/helpDeskPin';
 import { isWebApp } from '../../mobile/webApp';
 import { PasskeyBackupButton } from '../../mobile/passkey/PasskeyBackup';
@@ -152,12 +156,36 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
   // "Download encrypted backup" next to Copy (owner, 14 Oct 2026). The backup covers the open account, so the
   // new account is switched to first (as Next does); saving it marks the wallet backed up, so the Wallet tab's
   // backup step after onboarding doesn't ask again.
+  //
+  // Owner, 26 Oct 2026: it took four clicks (Download → retype password + "Make backup file" → "Save backup file" →
+  // "I've saved it"), then back to this card. The master password was typed on the previous screen and is still in
+  // this form, so the file is made with it straight away: one click, then the browser's own save (or the phone's
+  // share sheet). Same encryption, same file (backupFile.ts createBackupFile, which still verifies the password).
+  // A password too weak to lock a file (strongEnoughForBackup) or any failure opens the full BackupStep as before.
+  const [backupBusy, setBackupBusy] = useState(false);
   const openBackup = async () => {
-    await Promise.race([
-      chromeStorageService.switchAccount(identityAddress).catch(() => undefined),
-      new Promise((r) => setTimeout(r, 4000)),
-    ]);
-    setBackupOpen(true);
+    setBackupBusy(true);
+    try {
+      await Promise.race([
+        chromeStorageService.switchAccount(identityAddress).catch(() => undefined),
+        new Promise((r) => setTimeout(r, 4000)),
+      ]);
+      if (!password || !strongEnoughForBackup(password)) return setBackupOpen(true);
+      const file = await createBackupFile(chromeStorageService, password);
+      if (!(await saveBackupFile(file, saveRoute(file, isNative)))) return; // share sheet cancelled: try again
+      const ids = chromeStorageService
+        .getAllAccounts()
+        .map((a) => a.addresses?.identityAddress ?? '')
+        .filter(Boolean);
+      await markBackedUp(chromeStorageService, 'file', Date.now(), backupCovers('file', identityAddress, ids));
+      setBackupSaved(true);
+      addSnackbar('Encrypted backup saved', 'success');
+    } catch (e) {
+      console.error('[create] one-click backup', e);
+      setBackupOpen(true);
+    } finally {
+      setBackupBusy(false);
+    }
   };
 
   const accentLeft = theme.color.component.primaryButtonLeftGradient;
@@ -344,7 +372,7 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
         <button
           type="button"
           onClick={() => void openBackup()}
-          disabled={backupSaved}
+          disabled={backupSaved || backupBusy}
           className="flex items-center gap-2 mt-3 mx-auto"
           style={{ background: 'none', border: 'none', cursor: backupSaved ? 'default' : 'pointer' }}
           data-testid="create-download-backup"
@@ -355,7 +383,7 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
             <FileLock2 size={14} style={{ color: accentLeft }} />
           )}
           <span className="text-xs font-medium underline underline-offset-2" style={{ color: accentLeft }}>
-            {backupSaved ? 'Encrypted backup saved' : 'Download encrypted backup'}
+            {backupSaved ? 'Encrypted backup saved' : backupBusy ? 'Making backup…' : 'Download encrypted backup'}
           </span>
         </button>
         {backupOpen && (
