@@ -45,6 +45,7 @@ scripts/.build-meta.json
 
 # mobile
 /build-mobile
+/build-mobile-maps
 smoke-screens/
 /dist
 /build-web

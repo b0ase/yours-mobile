@@ -84,7 +84,6 @@ import { onPay, takePay, takePayAmount } from '../mobile/wallet/payNav';
 import { onWalletAction, takeWalletAction } from '../mobile/phone/walletAction';
 import { FindTokensButton } from '../mobile/wallet/FindTokensButton';
 import { HiddenTokens } from '../mobile/wallet/HiddenTokens';
-import { BsvPriceChart } from '../mobile/wallet/PriceChart';
 import { OrdinalsAddress } from '../mobile/wallet/OrdinalsAddress';
 import { useTabHome } from '../mobile/tabs/useTabHome';
 import { SendCard } from '../mobile/wallet/send/SendCard';
@@ -95,6 +94,8 @@ import { TokenSwipe } from '../mobile/wallet/TokenSwipe';
 import { openHoldersRoom } from '../mobile/wallet/holdersRoom';
 // Swipe › Lock on a token row (BSV-21 time-locks with receipts, locks/tokenLocks.ts).
 const TokenLockSheet = lazy(() => import('../mobile/locks/TokenLockSheet'));
+// Lazy: PriceChart is also lazy from the Home modules and the wide shell, so it gets its own chunk.
+const BsvPriceChart = lazy(() => import('../mobile/wallet/PriceChart').then((m) => ({ default: m.BsvPriceChart })));
 import { CoinRow } from '../mobile/wallet/CoinRow';
 import { IS_EXTENSION } from '../mobile/extension';
 import { useTokenRows } from '../mobile/wallet/tokenRows';
@@ -2251,7 +2252,9 @@ export const BsvWallet = () => {
           chart when they press send"), so Send opens on who you're paying. */}
       {/* BSV price, last 30 days */}
       <div className="w-full mt-5 mb-5 rounded-2xl p-4" style={{ background: theme.color.global.row }}>
-        <BsvPriceChart />
+        <Suspense fallback={<div style={{ height: 140 }} />}>
+          <BsvPriceChart />
+        </Suspense>
       </div>
       {/* Buy BSV under the chart (owner, 6 Oct 2026). */}
       {BUY_CRYPTO_ENABLED && (

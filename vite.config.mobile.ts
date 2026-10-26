@@ -1,8 +1,8 @@
 import { defineConfig, loadEnv, mergeConfig, type Plugin } from 'vite';
 import { themeTokens } from './vite.theme';
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
-import { resolve } from 'path';
-import { copyFileSync, existsSync, readFileSync, renameSync } from 'fs';
+import { dirname, resolve } from 'path';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync } from 'fs';
 import baseConfig from './vite.config.base';
 import { BRAND, brand as sharedBrand, bcorpText, bcorpColours, brandDefines } from './vite.brand';
 import { splashScript, STORE_SPLASH_SKIP } from './src/mobile/theme/splash';
@@ -835,15 +835,56 @@ const bwalletxIcons = (): Plugin => {
   };
 };
 
+// Moves every *.map out of build-mobile/ into build-mobile-maps/ (same relative paths) once the
+// bundle is written, so debug maps stay on this machine and never ship inside the phone app.
+const mapsOutsideApp = (): Plugin => {
+  let outDir = resolve(__dirname, 'build-mobile');
+  return {
+    name: 'maps-outside-app',
+    apply: 'build',
+    configResolved(config) {
+      outDir = resolve(config.root, config.build.outDir);
+    },
+    closeBundle() {
+      const mapsDir = `${outDir}-maps`;
+      rmSync(mapsDir, { recursive: true, force: true });
+      const walk = (dir: string) => {
+        for (const e of readdirSync(dir, { withFileTypes: true })) {
+          const from = resolve(dir, e.name);
+          if (e.isDirectory()) walk(from);
+          else if (e.name.endsWith('.map')) {
+            const to = resolve(mapsDir, from.slice(outDir.length + 1));
+            mkdirSync(dirname(to), { recursive: true });
+            renameSync(from, to);
+          }
+        }
+      };
+      if (existsSync(outDir)) walk(outDir);
+    },
+  };
+};
+
 export default mergeConfig(
   baseConfig,
   defineConfig({
-    plugins: [brand(), mobileText(), themeTokens(), bcorpText(), bcorpColours(), mobilePages(), bwalletxIcons()],
+    plugins: [
+      brand(),
+      mobileText(),
+      themeTokens(),
+      bcorpText(),
+      bcorpColours(),
+      mobilePages(),
+      bwalletxIcons(),
+      mapsOutsideApp(),
+    ],
     build: {
       outDir: 'build-mobile',
       target: 'es2022',
-      // No source maps in a store app: they carry the source comments of code the store build drops.
-      sourcemap: !STORE_CHANNEL,
+      // No source maps inside the app (they were ~59 MB of build-mobile). Store builds make none: they
+      // carry the source comments of code the store build drops. Private builds make 'hidden' maps
+      // (no sourceMappingURL in the JS) and mapsOutsideApp() moves them to build-mobile-maps/, so
+      // `cap sync` never copies them into the app.
+      sourcemap: STORE_CHANNEL ? false : 'hidden',
       rollupOptions: {
         input: {
           main: resolve(__dirname, 'mobile.html'),
