@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ChevronLeft, Lock, Play } from 'lucide-react';
+import { ChevronLeft, Lock, Pause, Play } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useServiceContext } from '../../../hooks/useServiceContext';
 import { coverSources, fetchLibrary, UNAVAILABLE_TEXT, type LibraryAlbum, type LibraryState } from './library';
 import { closeLibrary, nowPlayingOpen, onNowPlayingOpen, playAlbum, setNowPlayingOpen } from './libraryPlayer';
 import { NowPlaying } from './NowPlaying';
+import { getState, subscribe, toggle } from '../player';
+import { AlbumHeader, AlbumPlayButton, AlbumTrackRow } from '../AlbumParts';
+import { albumFmt } from '../albumLayout';
+import { albumForPlayer, albumOfTrackId, albumStyle, trackOfTrackId } from './albumTheme';
 
 const f = (u: string, i?: RequestInit) => fetch(u, i);
 // Re-ask the server a minute before the signed links run out.
@@ -22,6 +26,8 @@ const OwnerLibrary = () => {
   const [openAlbum, setOpenAlbum] = useState<string | null>(null);
   const [playing, setPlaying] = useState(nowPlayingOpen);
   useEffect(() => onNowPlayingOpen(setPlaying), []);
+  const [player, setPlayer] = useState(getState);
+  useEffect(() => subscribe(setPlayer), []);
 
   const load = useCallback(async () => {
     setState({ status: 'loading' });
@@ -43,7 +49,7 @@ const OwnerLibrary = () => {
     const album = albums?.find((a) => a.id === albumId);
     if (!albums || !album) return;
     // The mini player shows the track and moves on at the end of each song; tapping it opens Now Playing.
-    playAlbum(albums, album, start, () => {
+    playAlbum(album, start, () => {
       navigate('/m/media');
       setNowPlayingOpen(true);
     });
@@ -105,64 +111,104 @@ const OwnerLibrary = () => {
         </div>
       )}
       {album && (
-        <div className="flex flex-col gap-3 min-w-0" aria-label={album.title} role="region">
+        // The album page: the VexVoid album's layout (AlbumParts) in this album's colours, scoped to this box only.
+        <div
+          className="flex flex-col min-w-0"
+          aria-label={album.title}
+          role="region"
+          style={{
+            ...albumStyle(album.theme),
+            border: '1px solid var(--bw-line)',
+            borderRadius: 6,
+            overflow: 'hidden',
+          }}
+        >
           <button
             onClick={() => setOpenAlbum(null)}
-            className="self-start flex items-center gap-1 text-sm"
-            style={{ color: 'var(--bw-accent)' }}
+            className="self-start flex items-center gap-1 text-sm px-4 pt-3"
+            style={{ color: 'var(--bw-accent-hi)' }}
           >
             <ChevronLeft size={16} /> Library
           </button>
-          <div className="w-full max-w-[420px] mx-auto">
-            <Cover album={album} />
-          </div>
-          <div className="min-w-0">
-            <div className="text-lg font-semibold break-words" style={{ color: 'var(--bw-text)' }}>
-              {album.title}
-            </div>
-            <div className="text-xs" style={{ color: 'var(--bw-muted)' }}>
-              {[album.artist, `${album.tracks.length} ${album.tracks.length === 1 ? 'song' : 'songs'}`]
-                .filter(Boolean)
-                .join(' · ')}
-            </div>
-          </div>
-          <div className="flex flex-col rounded-lg overflow-hidden" style={{ background: 'var(--bw-surface)' }}>
-            {album.tracks.length === 0 && (
-              <div className="p-3 text-sm" style={{ color: 'var(--bw-muted)' }}>
-                No tracks uploaded yet.
-              </div>
-            )}
-            {album.tracks.map((t, i) => (
-              <button
-                key={t.id}
-                onClick={() => void play(album.id, i)}
-                className="flex items-center gap-3 px-3 py-2.5 text-left min-w-0"
-                style={{ borderTop: i ? '1px solid var(--bw-line)' : 'none', color: 'var(--bw-text)' }}
-              >
-                <span className="w-5 text-xs tabular-nums shrink-0" style={{ color: 'var(--bw-muted)' }}>
-                  {i + 1}
-                </span>
-                <span className="flex-1 min-w-0 truncate text-sm">{t.title}</span>
-                {t.duration ? (
-                  <span className="text-xs tabular-nums shrink-0" style={{ color: 'var(--bw-muted)' }}>
-                    {mmss(t.duration)}
-                  </span>
-                ) : null}
-                <Play size={14} className="shrink-0" />
-              </button>
-            ))}
-          </div>
+          {(() => {
+            const here = albumOfTrackId(player.queue[player.index]?.id) === album.id;
+            const current = here ? trackOfTrackId(player.queue[player.index]?.id) : null;
+            const total = album.tracks.reduce((n, t) => n + (t.duration ?? 0), 0);
+            return (
+              <>
+                <AlbumHeader
+                  cover={<Cover album={album} />}
+                  title={album.title}
+                  byline={
+                    <span>
+                      {[
+                        album.artist,
+                        `${album.tracks.length} ${album.tracks.length === 1 ? 'track' : 'tracks'}`,
+                        total ? `${Math.max(1, Math.round(total / 60))} min` : '',
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </span>
+                  }
+                >
+                  {album.tracks.length > 0 && (
+                    <div className="mt-2 flex items-center gap-3">
+                      <AlbumPlayButton
+                        playing={here && player.playing}
+                        label={here && player.playing ? 'Pause' : here ? 'Play' : 'Play album'}
+                        icon={here && player.playing ? <Pause size={16} /> : <Play size={16} fill="currentColor" />}
+                        onClick={() => (here ? toggle() : void play(album.id, 0))}
+                      />
+                      {here && (
+                        <button
+                          onClick={() => setNowPlayingOpen(true)}
+                          className="text-sm underline-offset-4 hover:underline"
+                          style={{ color: 'var(--bw-accent-hi)' }}
+                        >
+                          Now playing
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </AlbumHeader>
+                <div
+                  className="flex flex-col px-4 md:px-6 pb-4 md:pb-6"
+                  style={{ borderTop: '1px solid var(--bw-line)' }}
+                >
+                  {album.tracks.length === 0 && (
+                    <div className="py-2 text-sm" style={{ color: 'var(--bw-muted)' }}>
+                      No tracks uploaded yet.
+                    </div>
+                  )}
+                  {album.tracks.map((t, i) => (
+                    <AlbumTrackRow
+                      key={t.id}
+                      n={i + 1}
+                      active={current === t.id}
+                      playing={player.playing}
+                      thumb={album.thumb ?? album.cover}
+                      title={t.title}
+                      duration={t.duration ? albumFmt(t.duration) : undefined}
+                      onClick={() => (current === t.id ? toggle() : void play(album.id, i))}
+                    />
+                  ))}
+                </div>
+              </>
+            );
+          })()}
         </div>
       )}
-      {playing && <NowPlaying onClose={close} />}
+      {playing && (
+        <NowPlaying
+          onClose={close}
+          theme={state.status === 'ok' ? albumForPlayer(player, state.albums)?.theme : undefined}
+        />
+      )}
     </section>
   );
 };
 
 const GRID = 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3';
-
-/** m:ss from the manifest's duration; the audio itself is never fetched to find it. */
-const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
 /**
  * One album cover. The shelf prefers the small thumbnail and falls back to the full cover, then to a plain tile:

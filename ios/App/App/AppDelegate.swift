@@ -11,6 +11,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Media tab: inscription audio keeps playing with the screen locked and
         // shows Now Playing controls (UIBackgroundModes: audio in Info.plist).
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+        try? AVAudioSession.sharedInstance().setActive(true)
         return true
     }
 

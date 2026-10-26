@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { ChevronDown, Pause, Play, SkipBack, SkipForward } from 'lucide-react';
 import { getState, next, previous, seek, subscribe, toggle } from '../player';
+import { albumStyle } from './albumTheme';
+import type { Palette } from './library';
 
 const fmt = (s: number) =>
   isFinite(s) && s > 0 ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '0:00';
@@ -8,9 +10,9 @@ const fmt = (s: number) =>
 /**
  * iPod-style Now Playing for the private library: a square cover the full width of the screen (capped on wide
  * screens), then the track title, a scrub bar and prev / play / next. Phone first; nothing scrolls sideways.
- * Colours come from the theme variables, so it wears the album's palette with the rest of the wallet.
+ * The album's colours are scoped to this overlay only (albumStyle); the wallet underneath keeps the user's theme.
  */
-export const NowPlaying = ({ onClose }: { onClose: () => void }) => {
+export const NowPlaying = ({ onClose, theme }: { onClose: () => void; theme?: Palette }) => {
   const [s, setS] = useState(getState);
   useEffect(() => subscribe(setS), []);
   const track = s.queue[s.index];
@@ -21,7 +23,7 @@ export const NowPlaying = ({ onClose }: { onClose: () => void }) => {
       role="dialog"
       aria-label="Now playing"
       className="fixed inset-0 z-[120] flex flex-col overflow-y-auto overflow-x-hidden"
-      style={{ background: 'var(--bw-bg)', color: 'var(--bw-text)' }}
+      style={theme ? albumStyle(theme) : { background: 'var(--bw-bg)', color: 'var(--bw-text)' }}
     >
       <div className="flex items-center justify-between px-4 pt-[max(env(safe-area-inset-top),12px)] pb-2">
         <button aria-label="Close" title="Close" onClick={onClose} className="p-2 -ml-2">

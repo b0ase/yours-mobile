@@ -27,6 +27,7 @@ import { AddFundsSheet } from '../../onboarding/funnel/FunnelSheets';
 import { TipButton } from '../../tip/TipButton';
 import { SHARE_ALBUMS } from '../shareAlbums';
 import { assertNotPaused } from '../../config/killSwitch';
+import { AlbumHeader, AlbumPlayButton, AlbumTrackRow } from '../AlbumParts';
 
 /** The album's free headline track, played from the wallet's own copy (featured.ts) by the page. */
 export type Headline = { playing: boolean; duration?: number; onPlay: () => void };
@@ -315,22 +316,22 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
       style={{ border: `1px solid ${LINE}`, borderRadius: 6, overflow: 'hidden' }}
     >
       <StillsBanner stills={VEXVOID_STILLS} className="w-full">
-        <div className="flex flex-col md:flex-row gap-5 md:gap-8 p-4 md:p-6">
-          <img
-            src={cover}
-            onError={(e) => {
-              if (e.currentTarget.src !== HEADLINE_ALBUM.cover) e.currentTarget.src = HEADLINE_ALBUM.cover;
-            }}
-            alt={`${title} cover`}
-            className={`w-full md:w-[260px] shrink-0 aspect-square object-cover${invertOnLightClass(artistName)}`}
-            style={{ borderRadius: 6, boxShadow: '0 10px 30px rgba(0,0,0,0.7)', background: '#000' }}
-          />
-          <div className="flex-1 min-w-0 flex flex-col justify-end gap-2">
-            <div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: GOLD }}>
-              Album
-            </div>
-            <h2 className="text-3xl md:text-5xl font-black text-white leading-tight">{title}</h2>
-            <div className="text-sm text-white/80 flex items-center gap-2 flex-wrap">
+        <AlbumHeader
+          onImage
+          title={title}
+          cover={
+            <img
+              src={cover}
+              onError={(e) => {
+                if (e.currentTarget.src !== HEADLINE_ALBUM.cover) e.currentTarget.src = HEADLINE_ALBUM.cover;
+              }}
+              alt={`${title} cover`}
+              className={`w-full aspect-square object-cover${invertOnLightClass(artistName)}`}
+              style={{ borderRadius: 6, boxShadow: '0 10px 30px rgba(0,0,0,0.7)', background: '#000' }}
+            />
+          }
+          byline={
+            <>
               <span>
                 {artist}
                 {m ? ` · ${view!.paid.length + 1} tracks` : ''}
@@ -344,30 +345,29 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
                   />
                 ) : null;
               })()}
-            </div>
-            <div className="text-sm mt-1" style={{ color: '#e6e8ec' }}>
-              Headline track: {HEADLINE_ALBUM.headline.title} · <span style={{ color: GOLD }}>free</span>
-            </div>
-            {sponsored && <SponsorBadge s={sponsor} />}
-            <div className="text-xs" style={{ color: MUTED }}>
-              {sponsored && sponsor?.payToPlayTracks?.length
-                ? 'Tracks 7–12 are pay to play: 1 sat/sec to the artist + network fee'
-                : sponsored
-                  ? ''
-                  : 'Other tracks: 1 sat/sec to the artist + network fee'}
-            </div>
-            <div className="mt-2">
-              <button
-                onClick={playHeadline}
-                className="px-5 py-2 text-sm font-bold inline-flex items-center gap-2"
-                style={{ background: GOLD, color: '#1a1300', borderRadius: 4 }}
-              >
-                {headline.playing ? <Pause size={16} /> : <Play size={16} fill="#1a1300" />}
-                {headline.playing ? 'Pause' : 'Listen free'}
-              </button>
-            </div>
+            </>
+          }
+        >
+          <div className="text-sm mt-1" style={{ color: '#e6e8ec' }}>
+            Headline track: {HEADLINE_ALBUM.headline.title} · <span style={{ color: GOLD }}>free</span>
           </div>
-        </div>
+          {sponsored && <SponsorBadge s={sponsor} />}
+          <div className="text-xs" style={{ color: MUTED }}>
+            {sponsored && sponsor?.payToPlayTracks?.length
+              ? 'Tracks 7–12 are pay to play: 1 sat/sec to the artist + network fee'
+              : sponsored
+                ? ''
+                : 'Other tracks: 1 sat/sec to the artist + network fee'}
+          </div>
+          <div className="mt-2">
+            <AlbumPlayButton
+              playing={headline.playing}
+              label={headline.playing ? 'Pause' : 'Listen free'}
+              icon={headline.playing ? <Pause size={16} /> : <Play size={16} fill="#1a1300" />}
+              onClick={playHeadline}
+            />
+          </div>
+        </AlbumHeader>
       </StillsBanner>
       <div className="flex flex-col gap-3 px-4 md:px-6 pb-4 md:pb-6">
         {sst && (
@@ -512,31 +512,26 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
           </div>
         )}
         <div className="flex flex-col" style={{ borderTop: `1px solid ${LINE}` }}>
-          <button
+          <AlbumTrackRow
+            n={1}
+            active={headline.playing}
+            playing={headline.playing}
+            highlight
+            thumb={thumb(0)}
+            title={HEADLINE_ALBUM.headline.title}
+            tag="Headline track"
+            textClass="text-white"
+            duration={headline.duration ? fmt(headline.duration) : ''}
             onClick={playHeadline}
-            className="flex items-center gap-3 py-2 text-left"
-            style={{ borderBottom: `1px solid ${LINE}`, background: 'rgb(var(--bw-accent-hi-rgb) / 0.06)' }}
-          >
-            <span className="w-6 text-xs text-right" style={{ color: GOLD }}>
-              {headline.playing ? '▶' : 1}
-            </span>
-            <img src={thumb(0)} alt="" className="w-9 h-9 object-cover shrink-0" style={{ borderRadius: 3 }} />
-            <span className="flex-1 min-w-0">
-              <span className="block text-sm text-white truncate">{HEADLINE_ALBUM.headline.title}</span>
-              <span className="block text-[10px] font-bold uppercase tracking-widest" style={{ color: GOLD }}>
-                Headline track
+            badge={
+              <span
+                className="px-2 py-0.5 text-[10px] font-bold uppercase"
+                style={{ border: `1px solid ${GOLD}`, color: GOLD, borderRadius: 4 }}
+              >
+                Free
               </span>
-            </span>
-            <span className="text-xs" style={{ color: MUTED }}>
-              {headline.duration ? fmt(headline.duration) : ''}
-            </span>
-            <span
-              className="px-2 py-0.5 text-[10px] font-bold uppercase"
-              style={{ border: `1px solid ${GOLD}`, color: GOLD, borderRadius: 4 }}
-            >
-              Free
-            </span>
-          </button>
+            }
+          />
           {!m && (
             <div className="py-2 text-xs" style={{ color: MUTED }}>
               {loadError ? 'The other tracks are unavailable right now.' : 'Loading the other tracks…'}
@@ -544,29 +539,25 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
           )}
           {m &&
             view!.paid.map(({ index: i, track: t }, row) => (
-              <button
+              <AlbumTrackRow
                 key={t.trackId}
+                n={row + 2}
+                active={track === i}
+                playing={playing}
+                thumb={thumb(row + 1)}
+                title={t.title}
+                textClass="text-white"
+                duration={fmt(t.segments * m.segmentSeconds)}
                 onClick={() => playAt(i)}
-                className="flex items-center gap-3 py-2 text-left"
-                style={{ borderBottom: `1px solid ${LINE}` }}
-              >
-                <span className="w-6 text-xs text-right" style={{ color: track === i ? GOLD : MUTED }}>
-                  {track === i && playing ? '▶' : row + 2}
-                </span>
-                <img
-                  src={thumb(row + 1)}
-                  alt=""
-                  className="w-9 h-9 object-cover shrink-0"
-                  style={{ borderRadius: 3 }}
-                />
-                <span className="flex-1 min-w-0 text-sm text-white truncate">{t.title}</span>
-                <span className="text-xs" style={{ color: MUTED }}>
-                  {fmt(t.segments * m.segmentSeconds)}
-                </span>
-                <span className="text-[10px] font-bold uppercase" style={{ color: covered(t.trackId) ? GOLD : MUTED }}>
-                  {covered(t.trackId) ? `Sponsored by ${sponsor ? sponsorName(sponsor) : 'VexVoid'}` : '1 sat/sec'}
-                </span>
-              </button>
+                badge={
+                  <span
+                    className="text-[10px] font-bold uppercase"
+                    style={{ color: covered(t.trackId) ? GOLD : MUTED }}
+                  >
+                    {covered(t.trackId) ? `Sponsored by ${sponsor ? sponsorName(sponsor) : 'VexVoid'}` : '1 sat/sec'}
+                  </span>
+                }
+              />
             ))}
         </div>
       </div>

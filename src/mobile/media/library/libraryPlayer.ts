@@ -1,21 +1,11 @@
-import { playQueue, stop, subscribe, type Track } from '../player';
-import { albumForPlayer, libTrackId, wearAlbum } from './albumTheme';
+import { playQueue, stop, type Track } from '../player';
+import { libTrackId } from './albumTheme';
 import type { LibraryAlbum } from './library';
 
 /**
- * Plays library albums through the app's one player (player.ts) and keeps the theme in step with it: the playing
- * track's album is worn, anything else (stop, the mini player's X, another queue) puts the user's theme back.
- * The albums live in memory only, for this session.
+ * Plays library albums through the app's one player (player.ts). Playback never touches the wallet's theme: the
+ * album's colours live only on the player's own container (albumTheme.ts albumStyle).
  */
-let known: LibraryAlbum[] = [];
-let following = false;
-
-const follow = () => {
-  if (following) return;
-  following = true;
-  subscribe((s) => wearAlbum(albumForPlayer(s, known)));
-};
-
 export const libraryQueue = (album: LibraryAlbum, onExpand?: () => void): Track[] =>
   album.tracks.map((t) => ({
     id: libTrackId(album.id, t.id),
@@ -27,17 +17,14 @@ export const libraryQueue = (album: LibraryAlbum, onExpand?: () => void): Track[
     ...(onExpand ? { onExpand } : {}),
   }));
 
-export function playAlbum(albums: LibraryAlbum[], album: LibraryAlbum, start = 0, onExpand?: () => void): void {
-  known = albums;
-  follow();
+export function playAlbum(album: LibraryAlbum, start = 0, onExpand?: () => void): void {
   if (!album.tracks.length) return;
   playQueue(libraryQueue(album, onExpand), Math.max(0, Math.min(start, album.tracks.length - 1)));
 }
 
-/** Closing Now Playing: playback stops and the user's own theme comes back. */
+/** Closing the player: playback stops. Nothing global was changed, so nothing needs putting back. */
 export function closeLibrary(): void {
   stop();
-  wearAlbum(null);
 }
 
 // Now Playing open / closed, shared with the mini player's expand.
