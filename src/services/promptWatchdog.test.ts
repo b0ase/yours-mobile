@@ -3,9 +3,11 @@ import { readFileSync } from 'fs';
 import { PermissionBundler } from './permissionBundle';
 import { replyError } from './userDenied';
 import {
+  PROMPT_BUSY_CODE,
   PROMPT_NOT_SHOWN_CODE,
   PROMPT_NOT_SHOWN_MESSAGE,
   PromptWatchdog,
+  promptBusyError,
   promptNotShownError,
   rejectManagerRequest,
   withPromptNotShownCode,
@@ -26,6 +28,7 @@ const clock = () => {
       return id;
     },
     clearTimer: (h: unknown) => void timers.delete(h as number),
+    now: () => now,
     advance(ms: number) {
       const end = now + ms;
       for (;;) {
@@ -40,7 +43,7 @@ const clock = () => {
   };
 };
 
-const setup = (opts: { pending?: () => boolean; behind?: () => boolean } = {}) => {
+const setup = (opts: { pending?: () => boolean; behind?: () => boolean; busy?: boolean } = {}) => {
   const c = clock();
   const calls: string[] = [];
   const wd = new PromptWatchdog({
@@ -49,6 +52,9 @@ const setup = (opts: { pending?: () => boolean; behind?: () => boolean } = {}) =
     escalate: (p) => calls.push(`escalate ${p.requestID}`),
     fail: (p) => calls.push(`fail ${p.requestID}`),
     confirmMs: 4000,
+    ...(opts.busy
+      ? { failBusy: (p: WatchedPrompt) => calls.push(`busy ${p.requestID}`), busyMs: 20_000, now: () => c.now() }
+      : {}),
     setTimer: c.setTimer,
     clearTimer: c.clearTimer,
   });
@@ -208,5 +214,54 @@ describe('the error the site sees', () => {
       promptNotShownError(),
     );
     expect(denied).toBe(true);
+  });
+});
+
+describe('ERR_PROMPT_BUSY', () => {
+  test('queued > 20 s behind a visible sheet: rejected busy (409), never approved', () => {
+    const { c, calls, wd } = setup({ behind: () => true, busy: true });
+    wd.watch(P);
+    c.advance(19_999);
+    expect(calls).toEqual([]);
+    c.advance(1);
+    expect(calls).toEqual(['busy b1']);
+    expect(wd.watching(P)).toBe(false);
+    c.advance(60_000);
+    expect(calls).toEqual(['busy b1']);
+  });
+
+  test('re-watching a queued prompt does not restart its busy clock', () => {
+    const { c, calls, wd } = setup({ behind: () => true, busy: true });
+    wd.watch(P);
+    c.advance(12_000);
+    wd.watch(P);
+    c.advance(12_000);
+    expect(calls).toEqual(['busy b1']);
+  });
+
+  test('not behind a visible sheet: normal not-shown path, no busy', () => {
+    const { c, calls, wd } = setup({ behind: () => false, busy: true });
+    wd.watch(P);
+    c.advance(30_000);
+    expect(calls).toEqual(['escalate b1', 'fail b1']);
+  });
+
+  test('its turn comes (confirmed) before 20 s: left alone', () => {
+    const { c, calls, wd } = setup({ behind: () => true, busy: true });
+    wd.watch(P);
+    c.advance(15_000);
+    wd.confirm(P);
+    c.advance(60_000);
+    expect(calls).toEqual([]);
+  });
+
+  test('busy carries code 409 through a { success:false } reply', () => {
+    const e = promptBusyError();
+    expect(e.code).toBe(PROMPT_BUSY_CODE);
+    expect(e.status).toBe(409);
+    expect(withPromptNotShownCode({ success: false, error: e.message })).toMatchObject({
+      code: 'ERR_PROMPT_BUSY',
+      status: 409,
+    });
   });
 });
