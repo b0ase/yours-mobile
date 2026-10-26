@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { approvalKindForSheet } from './approvalKind';
 import {
   postPackCompanions,
   allowanceGranted,
@@ -77,6 +78,11 @@ const proto = (id: string, originator = 'bmovies.app', extra: Partial<BundleRequ
   protocolID: [1, 'bmovies ticket'],
   ...extra,
 });
+/** The view of the card the user actually gets for this model (as BundleSheet builds it, Details closed). */
+const cardView = (m: ReturnType<typeof buildSheetModel>) => {
+  const kind = approvalKindForSheet(m);
+  return sheetView(m, kind === 'careful', undefined, kind);
+};
 const basket = (id: string, originator = 'bmovies.app'): BundleRequest => ({
   requestID: id,
   type: 'basket',
@@ -349,12 +355,12 @@ describe('sheetDecisions (chat.bwalletx.com, 23 Oct 2026)', () => {
   test('Allow on the card grants the one protocol line it showed (Details never opened)', () => {
     const m = buildSheetModel({ originator: 'chat.bwalletx.com', items: [history] });
     expect(m.lines[0].checked).toBe(false); // still not pre-ticked in Details (audit C1)
-    expect(sheetDecisions(m, true, {}, false)).toEqual({ h1: true });
+    expect(sheetDecisions(m, true, {}, false, cardView(m))).toEqual({ h1: true });
   });
 
   test('a Like signature is granted by Allow, not answered "Permission denied."', () => {
     const m = buildSheetModel({ originator: 'chat.bwalletx.com', items: [sigma] });
-    expect(sheetDecisions(m, true, {}, false)).toEqual({ s1: true });
+    expect(sheetDecisions(m, true, {}, false, cardView(m))).toEqual({ s1: true });
   });
 
   test('once Details was opened, the ticks decide', () => {
@@ -365,13 +371,15 @@ describe('sheetDecisions (chat.bwalletx.com, 23 Oct 2026)', () => {
 
   test('an untick before Details closed is honoured', () => {
     const m = buildSheetModel({ originator: 'chat.bwalletx.com', items: [history, sigma] });
-    expect(sheetDecisions(m, true, { h1: false }, false)).toEqual({ h1: false, s1: true });
+    expect(sheetDecisions(m, true, { h1: false }, false, cardView(m))).toEqual({ h1: false, s1: true });
   });
 
   test('risky lines keep their tick state; Not now denies everything', () => {
     const risky = proto('p1', 'chat.bwalletx.com', { privileged: true });
     const m = buildSheetModel({ originator: 'chat.bwalletx.com', items: [risky, history, spend('pay', 100)] });
-    expect(sheetDecisions(m, true, {}, false)).toEqual({ p1: false, h1: true, pay: true });
+    // The careful card draws h1 with its own (unticked, audit C1) box, so Allow leaves it denied until ticked.
+    expect(sheetDecisions(m, true, {}, false, cardView(m))).toEqual({ p1: false, h1: false, pay: true });
+    expect(sheetDecisions(m, true, { h1: true }, false, cardView(m))).toEqual({ p1: false, h1: true, pay: true });
     expect(sheetDecisions(m, false, { p1: true }, false)).toEqual({ p1: false, h1: false, pay: false });
   });
 });
@@ -438,7 +446,7 @@ describe('requests that arrive after the user touched a sheet (option A, 24 Oct 
     bundler.add(basket('late', 'evil.example'));
     const model = buildSheetModel(b);
     expect(model.lines.map((l) => l.requestID)).toEqual(['sign']);
-    const d = sheetDecisions(model, true, {}, false);
+    const d = sheetDecisions(model, true, {}, false, cardView(model));
     expect(d).toEqual({ sign: true });
     const res = bundler.resolve(b.id, d)!;
     expect(res.granted.map((r) => r.requestID)).toEqual(['sign']);
@@ -471,8 +479,8 @@ describe('requests that arrive after the user touched a sheet (option A, 24 Oct 
     bundler.add(spend('pay', 5000, 'evil.example'));
     const first = buildSheetModel(b);
     expect(first.payment).toBeUndefined();
-    expect(sheetDecisions(first, true, {}, false).pay).toBeUndefined();
-    bundler.resolve(b.id, sheetDecisions(first, true, {}, false));
+    expect(sheetDecisions(first, true, {}, false, cardView(first)).pay).toBeUndefined();
+    bundler.resolve(b.id, sheetDecisions(first, true, {}, false, cardView(first)));
     clock.tick(400);
     expect(buildSheetModel(ready[1]).payment?.requestID).toBe('pay');
   });
@@ -599,8 +607,8 @@ describe('the live sheet (owner, 24 Oct 2026)', () => {
     bundler.add(basket('late'));
     const model = buildSheetModel(b);
     // Left unticked: not granted, and not answered either (it gets its own sheet, see below).
-    expect(sheetDecisions(model, true, {}, false)).toEqual({ sign: true });
-    expect(sheetDecisions(model, true, { late: true }, false).late).toBe(true);
+    expect(sheetDecisions(model, true, {}, false, cardView(model))).toEqual({ sign: true });
+    expect(sheetDecisions(model, true, { late: true }, false, cardView(model)).late).toBe(true);
   });
 
   test('regression (paid playtest, 25 Oct 2026): Allow never denies a joined line; it gets its own sheet', () => {
@@ -628,7 +636,7 @@ describe('the live sheet (owner, 24 Oct 2026)', () => {
     bundler.add(basket('late'));
     const model = buildSheetModel(b);
     expect(sheetAnswer(model, 'notNow', {}, false).decisions).toEqual({ sign: false, late: false });
-    expect(sheetDecisions(model, true, { late: false }, false)).toEqual({ sign: true, late: false });
+    expect(sheetDecisions(model, true, { late: false }, false, cardView(model))).toEqual({ sign: true, late: false });
   });
 
   test('an approve bound to an older set of lines (hash mismatch) grants nothing', () => {
@@ -638,7 +646,7 @@ describe('the live sheet (owner, 24 Oct 2026)', () => {
     const before = buildSheetModel(b);
     const seen = sheetHash(b.items); // what was on screen when the user tapped
     bundler.add(basket('late')); // arrives before the tap reaches the background
-    const res = bundler.resolve(b.id, sheetDecisions(before, true, {}, false), seen)!;
+    const res = bundler.resolve(b.id, sheetDecisions(before, true, {}, false, cardView(before)), seen)!;
     expect(res.stale).toBe(true);
     expect(res.granted).toHaveLength(0);
     expect(res.denied.map((r) => r.requestID).sort()).toEqual(['late', 'sign']);
@@ -694,7 +702,7 @@ describe('the live sheet (owner, 24 Oct 2026)', () => {
     const model = buildSheetModel(b);
     expect(model.payment).toBeUndefined();
     // Not granted by Allow alone, and not denied: it is carried to a sheet of its own.
-    expect(sheetDecisions(model, true, {}, false).pay).toBeUndefined();
+    expect(sheetDecisions(model, true, {}, false, cardView(model)).pay).toBeUndefined();
   });
 });
 
@@ -708,7 +716,7 @@ describe('never approve a line the user cannot read (mixed careful batch, 24 Oct
 
   test('a line under Details is never granted unless it was shown on the card', () => {
     const m = mixed();
-    const hidden = { hidden: new Set(['bk']) };
+    const hidden = { hidden: new Set(['bk']), faceTicks: new Set(['key']) };
     // Allow without opening Details: the hidden line is left out of the answer, never granted.
     const a = sheetAnswer(m, 'allow', { key: true }, false, hidden);
     expect(a.decisions).toEqual({ key: true });
@@ -785,5 +793,41 @@ describe('labels on the payment sheet', () => {
     });
     expect(model.payment?.labels).toEqual(['tokenblaster']);
     expect(model.payment?.detail).toContain('labels: tokenblaster');
+  });
+});
+
+describe('b-Aware: Allow grants only lines the card showed (unseen lines fail closed)', () => {
+  const o = 'bmovies.app';
+  const keyLine = proto('k1', o, { protocolID: [2, 'bmovies ticket'], counterparty: 'self' });
+  const viewFor = (m: ReturnType<typeof buildSheetModel>) => {
+    const kind = approvalKindForSheet(m);
+    return sheetView(m, kind === 'careful', undefined, kind);
+  };
+
+  test('pay card: an unticked protocol line and an undrawn basket line are not granted', () => {
+    const m = buildSheetModel({ originator: o, items: [keyLine, basket('b1', o), spend('pay', 100, o)] });
+    expect(approvalKindForSheet(m)).toBe('pay');
+    const a = sheetAnswer(m, 'allow', {}, false, viewFor(m));
+    expect(a.decisions.k1).not.toBe(true);
+    expect(a.decisions.b1).not.toBe(true);
+    expect(a.decisions.pay).toBe(true);
+  });
+
+  test('connect card: an unticked protocol line is not granted; the pre-ticked basket it tiles is', () => {
+    const m = buildSheetModel({ originator: o, items: [keyLine, basket('b1', o)] });
+    expect(approvalKindForSheet(m)).toBe('connect');
+    const a = sheetAnswer(m, 'allow', {}, false, viewFor(m));
+    expect(a.decisions.k1).not.toBe(true);
+    expect(a.decisions.b1).toBe(true);
+  });
+
+  test('no view given: nothing undrawn is granted', () => {
+    const m = buildSheetModel({ originator: o, items: [keyLine, basket('b1', o)] });
+    expect(sheetDecisions(m, true, {}, false)).toEqual({ k1: false, b1: false });
+  });
+
+  test('Details opened and ticked: the ticks decide', () => {
+    const m = buildSheetModel({ originator: o, items: [keyLine, spend('pay', 100, o)] });
+    expect(sheetDecisions(m, true, { k1: true }, true, viewFor(m))).toEqual({ k1: true, pay: true });
   });
 });

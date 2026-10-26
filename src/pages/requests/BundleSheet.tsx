@@ -254,7 +254,7 @@ export const BundleSheet = (props: {
       window.removeEventListener('resize', check);
     };
   }, [careful, model]);
-  const view = sheetView(model, careful, careful && !detailsSeen ? seenLines : undefined);
+  const view = sheetView(model, careful, careful && !detailsSeen ? seenLines : undefined, kind);
   // Careful card: "I trust it, allow" waits until every line has been on screen (or Details was opened).
   const mustRead = careful && view.hidden.size > 0;
   const ordinaryLines = careful ? model.lines.filter((l) => !l.risky && !l.isNew) : [];
