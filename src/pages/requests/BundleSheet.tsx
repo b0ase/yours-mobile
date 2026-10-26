@@ -22,7 +22,7 @@ import {
   type BundleRequest,
 } from '../../services/permissionBundle';
 import type { MintSheet } from '../../services/pinnedMint';
-import { approvalKindForSheet, privateTitleLabel, siteName } from '../../services/approvalKind';
+import { approvalKindForSheet, sheetTitleText, siteName, withoutSuffix } from '../../services/approvalKind';
 import { ApprovalCard, Check, Chip, Cross, SiteTile } from '../../components/approval/ApprovalCard';
 import { CARD } from '../../components/approval/cardTheme';
 import { CarefulHero, ConnectHero, PayHero, SignInHero } from '../../components/approval/ApprovalHeroes';
@@ -117,9 +117,9 @@ export const BundleSheet = (props: {
   // "Don't ask again": later sign-in, signing and basket requests from this site need no sheet.
   const canTrust = useMemo(() => sheetCanTrust(request), [request]);
   const [trustSite, setTrustSite] = useState(true);
-  const [details_, setDetails] = useState(false);
-  // Once the ticks have been on screen they decide; until then Allow covers the routine lines (sheetDecisions).
-  const [detailsSeen, setDetailsSeen] = useState(false);
+  // Owner, 26 Oct 2026: nothing is hidden. Every line and its tick is on the sheet, in plain view, so the ticks decide
+  // as drawn (detailsSeen). The careful card already draws every line on its face and keeps its scroll-to-read gate.
+  const [detailsSeen] = useState(() => approvalKindForSheet(model) !== 'careful');
   const [busy, setBusy] = useState(false);
   const [usbError, setUsbError] = useState('');
 
@@ -209,7 +209,7 @@ export const BundleSheet = (props: {
         : kind === 'private'
           ? 'Allow'
           : kind === 'signin'
-            ? 'Sign in'
+            ? 'Connect and sign in'
             : kind === 'pay'
               ? model.mode === 'connectAndPay'
                 ? `Connect & pay ${payLabel}`
@@ -217,6 +217,9 @@ export const BundleSheet = (props: {
               : many
                 ? 'Allow all'
                 : 'Connect';
+  // A requested line left unticked is named on the button (owner, 26 Oct 2026: Connect silently left "bchat
+  // documents" ungranted). Display only: the decisions are the ticks as drawn.
+  const leftOut = withoutSuffix(model.lines, (i) => isChecked(model.lines[i].requestID, model.lines[i].checked));
   const nextAllowance = () => {
     const i = ALLOWANCE_CHOICES_USD.indexOf(allowanceUsd as (typeof ALLOWANCE_CHOICES_USD)[number]);
     const next = ALLOWANCE_CHOICES_USD[(i + 1) % ALLOWANCE_CHOICES_USD.length];
@@ -284,22 +287,30 @@ export const BundleSheet = (props: {
     <label
       key={l.requestID}
       data-line-id={l.requestID}
-      className="flex items-center gap-3 cursor-pointer"
+      className="flex items-start gap-3 cursor-pointer"
       style={{
         minHeight: 44,
-        padding: big ? '10px 14px' : '6px 0',
+        padding: big ? '10px 14px' : '8px 0',
         borderRadius: big ? 14 : 0,
         background: big ? CARD.redChip : undefined,
-        fontSize: big ? 14 : 13,
+        fontSize: 15,
       }}
     >
       <input
         type="checkbox"
         checked={isChecked(l.requestID, l.checked)}
         onChange={() => toggle(l.requestID, l.checked)}
-        style={{ width: 18, height: 18, accentColor: l.risky ? CARD.red : CARD.gold, flexShrink: 0 }}
+        style={{ width: 22, height: 22, accentColor: l.risky ? CARD.red : CARD.gold, flexShrink: 0, marginTop: 1 }}
       />
-      <span style={{ color: l.risky ? '#FF6B6B' : undefined }}>{l.text}</span>
+      {/* Plain words first, large; the protocol / level / counterparty underneath, secondary (owner, 26 Oct 2026). */}
+      <span className="flex flex-col min-w-0" style={{ gap: 2 }}>
+        <span style={{ color: l.risky ? '#FF6B6B' : undefined, fontWeight: 600, lineHeight: 1.3 }}>{l.text}</span>
+        {l.detail && (
+          <span className="break-all" style={{ fontSize: 12, color: CARD.muted }}>
+            {l.detail}
+          </span>
+        )}
+      </span>
     </label>
   );
 
@@ -323,12 +334,12 @@ export const BundleSheet = (props: {
           Signing in as {signingAs}
         </p>
       )}
-      {model.lines.length > 0 && (
-        <p className="m-0" style={{ fontSize: 12, fontWeight: 700, color: CARD.muted }}>
-          Allow this app
+      {!careful && model.lines.some((l) => !l.isNew) && (
+        <p className="m-0" style={{ fontSize: 13, fontWeight: 700, color: CARD.muted }}>
+          This lets {name}:
         </p>
       )}
-      {model.lines.map((l) => lineRow(l))}
+      {!careful && model.lines.filter((l) => !l.isNew).map((l) => lineRow(l))}
       {model.payment && (
         <p className="m-0" style={{ padding: '6px 0' }}>
           Pay <span style={{ color: CARD.gold, fontWeight: 600 }}>{payLabel}</span> now to {request.originator}
@@ -405,9 +416,6 @@ export const BundleSheet = (props: {
         {(model.payment?.recipients?.length ?? 0) > RECIPIENTS_SHOWN && (
           <li>and {(model.payment!.recipients!.length - RECIPIENTS_SHOWN).toLocaleString()} more outputs</li>
         )}
-        {model.lines.map((l) => (
-          <li key={l.requestID}>{l.detail}</li>
-        ))}
         {allowanceSetsUsd > 0 && <li>allowance: monthly spending cap for {request.originator}</li>}
       </ul>
     </div>
@@ -420,7 +428,7 @@ export const BundleSheet = (props: {
   const deny = { label: 'Not now', onClick: () => void send('notNow'), disabled: denyDisabled };
   const block = { label: 'Block this site', onClick: () => void send('block'), disabled: denyDisabled };
   const allow = {
-    label: careful ? 'I trust it, allow' : primary,
+    label: (careful ? 'I trust it, allow' : primary) + (reconnect || mint ? '' : leftOut),
     onClick: () => void send('allow'),
     disabled: allowDisabled,
     busy,
@@ -611,7 +619,7 @@ export const BundleSheet = (props: {
   } else if (kind === 'private') {
     hero = <SignInHero />;
     siteSub = 'Your data';
-    title = <>Use your wallet keys for your {gold(privateTitleLabel(model))}</>;
+    title = <>{gold(sheetTitleText('private', name, model))}</>;
     body = (
       <div className="flex flex-wrap" style={{ gap: 8, marginTop: 4 }}>
         <Chip>
@@ -642,8 +650,8 @@ export const BundleSheet = (props: {
     );
   } else if (kind === 'signin') {
     hero = <SignInHero />;
-    siteSub = 'Sign-in request';
-    title = <>Sign in to {gold(name)}</>;
+    siteSub = 'Connect and sign in';
+    title = <>{gold(sheetTitleText('signin', name, model))}</>;
     body = (
       <>
         {signingAs && (
@@ -676,11 +684,7 @@ export const BundleSheet = (props: {
   } else {
     hero = <ConnectHero site={request.originator} />;
     siteSub = 'Wants to connect';
-    title = (
-      <>
-        Use {gold('bWalletX')} on {name}
-      </>
-    );
+    title = <>{gold(sheetTitleText('connect', name, model))}</>;
     const types = new Set(request.items.map((r) => r.type));
     const tiles: { label: string; icon: ReactNode }[] = [
       { label: types.has('certificate') ? 'Your details' : 'Your name', icon: <PersonIcon /> },
@@ -733,15 +737,12 @@ export const BundleSheet = (props: {
         primary={careful ? deny : allow}
         secondary={careful ? allow : deny}
         tertiary={careful ? block : undefined}
-        details={details}
-        detailsOpen={details_}
-        onToggleDetails={() => {
-          setDetailsSeen(true);
-          setDetails(!details_);
-        }}
         error={usbError || (mustRead ? 'Scroll to read every line before allowing' : '')}
       >
         {body}
+        <div data-testid="approval-lines" style={{ marginTop: 8 }}>
+          {details}
+        </div>
         {newLines.length > 0 && (
           <div className="flex flex-col" data-testid="new-lines" style={{ gap: 4, marginTop: 8 }}>
             {newLines.map((l) => lineRow(l, true))}

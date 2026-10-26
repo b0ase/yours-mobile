@@ -561,8 +561,12 @@ export const buildSheetModel = (bundle: Pick<PermissionBundle, 'originator' | 'i
     // reach a sheet at all (services/reservedProtocols.ts).
     // The public identity key is the other exception: Sign in with bWalletX asks for it first, and an unticked line
     // made Allow answer "denied" for it ("Permission denied." on every site since 5.2.35, 20 Oct 2026).
-    const checked =
-      !risky && !r.addedLive && (r.type !== 'protocol' || r.counterparty === 'anyone' || isIdentityKeyRequest(r));
+    // Owner, 26 Oct 2026: every line is now drawn with its tick on every sheet (BundleSheet, no "Show details"), so a
+    // protocol the request itself asks for is shown TICKED and granted by the main button unless the user unticks it
+    // in plain view. bchatx.com's Connect left "bchat documents" unticked behind Hide details, so Connect granted
+    // nothing it asked for and the site's encrypt failed "Permission denied". Risky and live-joined lines (and any
+    // spend) stay unticked: payments still ask first.
+    const checked = !risky && !r.addedLive;
     lines.push({
       requestID: r.requestID,
       text: r.addedLive ? `New: ${lineText(r)}` : lineText(r),
