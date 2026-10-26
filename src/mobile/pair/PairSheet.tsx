@@ -1,3 +1,4 @@
+import { formatPairCode } from '../../pair/protocol';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, Check, Link2, Loader2, ShieldCheck } from 'lucide-react';
@@ -7,8 +8,10 @@ import { CliPairConfirm } from './CliPairConfirm';
 import { CLI_ORIGIN } from './agentPairing';
 import { IS_EXTENSION } from '../extension';
 import { Capacitor } from '@capacitor/core';
-import { switchBackHint } from './doneHint';
+import { returnHint, switchBackHint } from './doneHint';
 import { Scanner } from '../scan/Scanner';
+import type { ReturnPlan } from '../../pair/returnTo';
+import { openReturn, returnPlatform } from './openReturn';
 
 const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
@@ -19,7 +22,7 @@ type Stage =
   | { k: 'scan' }
   | { k: 'joining' }
   | { k: 'confirm'; p: PendingPair }
-  | { k: 'done'; origin: string; proven?: boolean }
+  | { k: 'done'; origin: string; proven?: boolean; back?: ReturnPlan }
   | { k: 'error'; m: string };
 
 /**
@@ -168,8 +171,12 @@ export default function PairSheet({
             <p className="mt-6 text-sm" style={{ color: MUTED }}>
               Check the website shows the same code:
             </p>
-            <p className="mt-2 font-mono text-4xl font-bold tracking-[0.3em]" style={{ color: GOLD }}>
-              {stage.p.code}
+            <p
+              className={`mt-2 whitespace-nowrap font-mono font-bold ${stage.p.code.length > 4 ? 'text-3xl tracking-[0.15em]' : 'text-4xl tracking-[0.3em]'}`}
+              style={{ color: GOLD }}
+              data-testid="pair-code"
+            >
+              {formatPairCode(stage.p.code)}
             </p>
             <p className="mt-6 text-xs" style={{ color: MUTED }}>
               The site can ask for approvals, which you&apos;ll see here as usual. It can&apos;t move anything without
@@ -185,8 +192,12 @@ export default function PairSheet({
               </button>
               <button
                 onClick={() => {
+                  // Spend the one-time rid before anything else: a replayed link gets the plain done screen.
+                  const back = stage.p.takeReturn();
                   stage.p.confirm();
-                  setStage({ k: 'done', origin: stage.p.origin, proven: stage.p.proven });
+                  setStage({ k: 'done', origin: stage.p.origin, proven: stage.p.proven, back });
+                  // Phone apps: return on their own once 'ready' is on its way. The web wallet needs a tap (popups).
+                  if (back && returnPlatform() !== 'web') setTimeout(() => void openReturn(back), 600);
                 }}
                 className="flex-1 rounded-xl py-3 font-bold"
                 style={{ background: GOLD, color: '#000' }}
@@ -215,12 +226,24 @@ export default function PairSheet({
             <p className="mt-2 text-sm" style={{ color: MUTED }}>
               {IS_EXTENSION
                 ? 'Requests are answered while the bWalletX side panel (or tab) is open; with it closed, CLI requests fail until you open it again.'
-                : switchBackHint(
-                    new URL(stage.origin).host,
-                    Capacitor.getPlatform() === 'ios' || /iPhone|iPad|iPod/i.test(navigator.userAgent),
-                  )}{' '}
+                : stage.back
+                  ? returnHint(new URL(stage.origin).host, returnPlatform() === 'web')
+                  : switchBackHint(
+                      new URL(stage.origin).host,
+                      Capacitor.getPlatform() === 'ios' || /iPhone|iPad|iPod/i.test(navigator.userAgent),
+                    )}{' '}
               Disconnect any time in Settings › Paired websites.
             </p>
+            {stage.back && (
+              <button
+                onClick={() => stage.back && void openReturn(stage.back)}
+                data-testid="pair-return"
+                className="mt-8 w-full rounded-xl py-3 font-bold"
+                style={{ background: GOLD, color: '#000' }}
+              >
+                Return to {new URL(stage.back.ret).host}
+              </button>
+            )}
             <button
               onClick={onClose}
               className="mt-8 w-full rounded-xl py-3 font-bold"
