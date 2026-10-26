@@ -55,11 +55,7 @@ export const siteName = (originator: string): string => {
  * person, signing in IS connecting). Pure, display only: nothing here changes what is granted.
  */
 export const keysName = (text: string): string => /"([^"]+)"/.exec(text)?.[1] ?? '';
-export const sheetTitleText = (
-  kind: string,
-  site: string,
-  model: Pick<SheetModel, 'lines'>,
-): string => {
+export const sheetTitleText = (kind: string, site: string, model: Pick<SheetModel, 'lines'>): string => {
   const keys = model.lines.map((l) => keysName(l.text)).find(Boolean);
   switch (kind) {
     case 'signin':
