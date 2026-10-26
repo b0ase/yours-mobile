@@ -12,6 +12,7 @@ import { listPaymails, type WalletName } from '../names/paymail';
 import { useAccountNames } from '../names/accountNames';
 import { loadSession, SESSION_EVENT } from '../chat/api';
 import { useKyc } from '../kyc/useKyc';
+import { PayoutProofButton } from '../kyc/PayoutProofButton';
 
 /**
  * Settings › Identity › Identity map (owner, 8 Oct 2026): one picture of the current account.
@@ -298,7 +299,9 @@ export const IdentityMap = ({ onClose }: { onClose: () => void }) => {
             ) : undefined
           }
           what="Identity and ID-check strands attached to your identity key. Only the level shows; no ID data is stored here."
-        />
+        >
+          <PayoutProofButton />
+        </Node>
 
         <p className="m-0 mb-2 mt-4 text-xs font-semibold uppercase tracking-widest" style={{ color: MUTED }}>
           Who knows you by which key
