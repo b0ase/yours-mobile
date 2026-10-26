@@ -31,6 +31,32 @@ const ROLES = new Set(['site', 'wallet']);
 // sockets for that role must bring the same one, so a stranger who knows the channel ID can't take it over.
 const CLAIM = /^[A-Za-z0-9_-]{22,64}$/;
 const claimHash = (c) => createHash('sha256').update(c).digest('hex');
+// b-Aware 26 Oct 2026 (N3-1/N3-2): a new site sends `wc`, the SHA-256 (hex) of the wallet claim that only the QR
+// can produce (protocol walletClaimFor(channel, site pubkey)). The relay never sees the QR, so someone who only
+// knows the channel ID can't make that claim, and a wallet that brings it always wins the role.
+const CLAIM_DIGEST = /^[0-9a-f]{64}$/;
+
+/**
+ * Compatibility window for clients from before 26 Oct 2026 (sites without a site claim, wallets with a random
+ * claim). Until this moment the relay still opens a new channel for a site with no claim, and still lets the first
+ * wallet claim win on a channel without a QR-bound one. After it, both are refused. Override with
+ * RELAY_LEGACY_CLAIMS_UNTIL (ISO date) or createRelay({ legacyUntil }) in ms.
+ */
+export const LEGACY_CLAIMS_UNTIL = Date.parse('2026-11-30T00:00:00Z');
+
+/**
+ * Proxies whose x-real-ip we believe (audit N3-obs). Anyone else could send the header to dodge the per-IP limit, so
+ * a direct connection is counted by its socket address. Default: loopback (nginx on the same box).
+ */
+export const DEFAULT_TRUSTED_PROXIES = ['127.0.0.1', '::1', '::ffff:127.0.0.1'];
+
+/** The client's address: x-real-ip only when the socket comes from a trusted proxy. */
+export function clientIp(req, trusted = DEFAULT_TRUSTED_PROXIES) {
+  const peer = (req.socket?.remoteAddress || '').toString();
+  const real = req.headers['x-real-ip'];
+  if (real && trusted.includes(peer)) return String(Array.isArray(real) ? real[0] : real).trim();
+  return peer;
+}
 const other = (role) => (role === 'site' ? 'wallet' : 'site');
 
 /** True for an https origin, or http on localhost (local development). */
@@ -45,7 +71,14 @@ export function acceptableOrigin(origin) {
   }
 }
 
-export function createRelay({ server, now = () => Date.now(), log = () => {} } = {}) {
+export function createRelay({
+  server,
+  now = () => Date.now(),
+  log = () => {},
+  legacyUntil = LEGACY_CLAIMS_UNTIL,
+  trustedProxies = DEFAULT_TRUSTED_PROXIES,
+} = {}) {
+  const legacy = () => now() < legacyUntil;
   const channels = new Map();
   const perIp = new Map();
   const wss = new WebSocketServer({ noServer: true, maxPayload: LIMITS.maxFrame });
@@ -72,8 +105,25 @@ export function createRelay({ server, now = () => Date.now(), log = () => {} } =
   const timer = setInterval(sweep, 30_000);
   timer.unref?.();
 
-  /** A claimed role admits only its claim; an unclaimed role admits anyone (old clients). */
-  const claimOk = (ch, role, claim) => !ch.claims?.[role] || (claim !== null && claimHash(claim) === ch.claims[role]);
+  /** True when this claim is the QR-bound wallet claim the site registered (`wc`). */
+  const qrBound = (ch, role, claim) =>
+    role === 'wallet' && !!ch.walletBinding && !!claim && claimHash(claim) === ch.walletBinding;
+
+  /**
+   * Who may take a role:
+   * - the QR-bound wallet claim always may (it evicts anyone who got there first: N3-2);
+   * - a claimed role admits only its claim;
+   * - an unclaimed role: with a QR binding, only the bound claim (legacy wallets may still take it during the
+   *   compatibility window); without one, any claim, and no claim only during the window.
+   */
+  const claimOk = (ch, role, claim) => {
+    if (qrBound(ch, role, claim)) return true;
+    const held = ch.claims?.[role];
+    if (held) return claim !== null && claimHash(claim) === held;
+    if (legacy()) return true;
+    if (role === 'wallet' && ch.walletBinding) return false;
+    return claim !== null;
+  };
 
   /** Decide whether an upgrade is allowed. Returns { ok, code, reason, ... }. */
   function admit(req) {
@@ -83,8 +133,11 @@ export function createRelay({ server, now = () => Date.now(), log = () => {} } =
     if (!m || !CHANNEL.test(m[1]) || !ROLES.has(role)) return { ok: false, code: 400, reason: 'bad request' };
     const claim = url.searchParams.get('claim');
     if (claim !== null && !CLAIM.test(claim)) return { ok: false, code: 400, reason: 'bad request' };
+    const wc = url.searchParams.get('wc');
+    if (wc !== null && (role !== 'site' || !CLAIM_DIGEST.test(wc)))
+      return { ok: false, code: 400, reason: 'bad request' };
     const id = m[1];
-    const ip = (req.headers['x-real-ip'] || req.socket.remoteAddress || '').toString();
+    const ip = clientIp(req, trustedProxies);
     let ch = channels.get(id);
     const t = now();
 
@@ -99,6 +152,8 @@ export function createRelay({ server, now = () => Date.now(), log = () => {} } =
       const e = Number(url.searchParams.get('e'));
       if (!Number.isFinite(e) || e * 1000 < t || e * 1000 > t + LIMITS.maxQrLifetimeS * 1000)
         return { ok: false, code: 400, reason: 'expiry' };
+      // A new channel needs a site claim, so nobody else can take the site socket later (N3-1).
+      if (claim === null && !legacy()) return { ok: false, code: 403, reason: 'claim required' };
       if ((perIp.get(ip) ?? 0) >= LIMITS.channelsPerIp) return { ok: false, code: 429, reason: 'too many channels' };
       ch = {
         origin,
@@ -111,6 +166,7 @@ export function createRelay({ server, now = () => Date.now(), log = () => {} } =
         lastActive: t,
         rate: { start: t, n: 0 },
         claims: { site: null, wallet: null },
+        walletBinding: wc,
       };
       channels.set(id, ch);
       perIp.set(ip, (perIp.get(ip) ?? 0) + 1);
@@ -130,7 +186,8 @@ export function createRelay({ server, now = () => Date.now(), log = () => {} } =
   function attach(ws, { role, ch, claim }) {
     // Re-check: another socket may have claimed the role between admit and the upgrade finishing.
     if (!claimOk(ch, role, claim ?? null)) return ws.close(4003, 'role claimed');
-    if (claim && !ch.claims[role]) ch.claims[role] = claimHash(claim);
+    if (qrBound(ch, role, claim)) ch.claims[role] = ch.walletBinding;
+    else if (claim && !ch.claims[role]) ch.claims[role] = claimHash(claim);
     ch[role]?.close(4001, 'replaced');
     ch[role] = ws;
     ch.lastActive = now();

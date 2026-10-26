@@ -2,14 +2,16 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { WebSocket } from 'ws';
-import { createRelay, acceptableOrigin } from './relay.mjs';
+import { createHash } from 'node:crypto';
+import { createRelay, acceptableOrigin, clientIp } from './relay.mjs';
 
 const C = 'AAAAAAAAAAAAAAAAAAAAAA'; // 22 chars
 const exp = () => Math.floor(Date.now() / 1000) + 120;
 
 async function boot(opts = {}) {
   const server = http.createServer();
-  const relay = createRelay({ server, ...opts });
+  // Older tests describe the legacy (pre-26 Oct) behaviour; the claim tests below turn the window off.
+  const relay = createRelay({ server, legacyUntil: Infinity, ...opts });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `ws://127.0.0.1:${server.address().port}`;
   return { base, done: () => (relay.close(), new Promise((r) => server.close(r))) };
@@ -145,4 +147,74 @@ test('an unclaimed role keeps the old behaviour (clients without a claim)', asyn
   site.ws.close();
   b.ws.close();
   await done();
+});
+
+// b-Aware 26 Oct 2026: N3-1 (site claim), N3-2 (QR-bound wallet claim), N3-obs (x-real-ip).
+const SITE = 'siteclaimsiteclaim_0001';
+const QRW = 'qrboundwalletclaim_0001';
+const digest = (c) => createHash('sha256').update(c).digest('hex');
+
+test('after the window a new channel needs a site claim, and only that claim can take the site socket', async () => {
+  const { base, done } = await boot({ legacyUntil: 0 });
+  await assert.rejects(open(`${base}/v1/c/${C}?role=site&e=${exp()}`, 'https://a.lol'), /403/);
+  const site = await open(`${base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}`, 'https://a.lol');
+  // A stranger with the channel ID and the right Origin can't replace the site (was 4001 + lockout).
+  await assert.rejects(open(`${base}/v1/c/${C}?role=site`, 'https://a.lol'), /403/);
+  await assert.rejects(open(`${base}/v1/c/${C}?role=site&claim=strangerstrangerstrang`, 'https://a.lol'), /403/);
+  assert.equal(site.ws.readyState, 1);
+  // The real site reconnects with its claim.
+  const again = await open(`${base}/v1/c/${C}?role=site&claim=${SITE}`, 'https://a.lol');
+  await until(() => site.ws.readyState === 3);
+  again.ws.close();
+  await done();
+});
+
+test('during the window a site claim still protects the channel it opened', async () => {
+  const { base, done } = await boot({ legacyUntil: Date.now() + 60_000 });
+  const site = await open(`${base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}`, 'https://a.lol');
+  await assert.rejects(open(`${base}/v1/c/${C}?role=site`, 'https://a.lol'), /403/);
+  site.ws.close();
+  await done();
+});
+
+test('QR-bound wallet claim: a squatter cannot pre-claim the wallet role, and the scanning phone evicts one', async () => {
+  for (const legacyUntil of [0, Date.now() + 60_000]) {
+    const { base, done } = await boot({ legacyUntil });
+    const site = await open(`${base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}&wc=${digest(QRW)}`, 'https://a.lol');
+    if (legacyUntil === 0) {
+      // After the window an unbound claim is refused outright.
+      await assert.rejects(open(`${base}/v1/c/${C}?role=wallet&claim=squattersquattersquat1`), /403/);
+      await assert.rejects(open(`${base}/v1/c/${C}?role=wallet`), /403/);
+    } else {
+      // During the window an old wallet (random claim) may still join, but the QR-bound claim wins.
+      const squat = await open(`${base}/v1/c/${C}?role=wallet&claim=squattersquattersquat1`);
+      const phone = await open(`${base}/v1/c/${C}?role=wallet&claim=${QRW}`);
+      await until(() => squat.ws.readyState === 3);
+      await assert.rejects(open(`${base}/v1/c/${C}?role=wallet&claim=squattersquattersquat1`), /403/);
+      phone.ws.close();
+    }
+    const phone2 = await open(`${base}/v1/c/${C}?role=wallet&claim=${QRW}`);
+    await until(() => phone2.inbox.length);
+    assert.deepEqual(phone2.inbox[0], { t: 'relay', verifiedOrigin: 'https://a.lol' });
+    phone2.ws.close();
+    site.ws.close();
+    await done();
+  }
+});
+
+test('wc is only for the site role and must be a SHA-256 hex digest', async () => {
+  const { base, done } = await boot({ legacyUntil: 0 });
+  await assert.rejects(open(`${base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}&wc=nothex`, 'https://a.lol'), /400/);
+  const site = await open(`${base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}`, 'https://a.lol');
+  await assert.rejects(open(`${base}/v1/c/${C}?role=wallet&claim=${QRW}&wc=${digest(QRW)}`), /400/);
+  site.ws.close();
+  await done();
+});
+
+test('x-real-ip is believed only from a trusted proxy', () => {
+  const req = (remoteAddress, ip) => ({ socket: { remoteAddress }, headers: ip ? { 'x-real-ip': ip } : {} });
+  assert.equal(clientIp(req('127.0.0.1', '203.0.113.9')), '203.0.113.9');
+  assert.equal(clientIp(req('198.51.100.7', '203.0.113.9')), '198.51.100.7');
+  assert.equal(clientIp(req('198.51.100.7')), '198.51.100.7');
+  assert.equal(clientIp(req('10.0.0.2', '203.0.113.9'), ['10.0.0.2']), '203.0.113.9');
 });

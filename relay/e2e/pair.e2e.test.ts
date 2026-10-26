@@ -24,7 +24,8 @@ afterAll(() => {
 
 test('QR → scan → same code → connect → request reaches the wallet and the answer comes back', async () => {
   const server = http.createServer();
-  const relay = createRelay({ server });
+  // The vendored site predates site claims; keep the compatibility path open whatever today's date is.
+  const relay = createRelay({ server, legacyUntil: Infinity });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
   const port = (server.address() as { port: number }).port;
   process.env.NEXT_PUBLIC_PAIR_RELAY = `localhost:${port}`;
