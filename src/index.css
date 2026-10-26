@@ -59,5 +59,6 @@ select optgroup {
    iPhone home indicator plus a small gap, so a list's last rows can scroll fully above the bar.
    Unlayered, so it wins over any Tailwind pb-* utility left on the same element. */
 .bw-dock-pad {
-  padding-bottom: calc(var(--dock-h, 3.75rem) + env(safe-area-inset-bottom, 0px) + 1rem);
+  /* + the mini player docked above the bar (--bw-mini-h, media/MiniPlayer.tsx) while something plays. */
+  padding-bottom: calc(var(--dock-h, 3.75rem) + env(safe-area-inset-bottom, 0px) + var(--bw-mini-h, 0px) + 1rem);
 }

@@ -43,6 +43,7 @@ export const BottomMenu = ({ selected, handleSelect, theme }: BottomMenuProps) =
   return (
     <>
       <div
+        data-bw-bottom-nav
         className="flex items-center w-full absolute bottom-0 z-[100]"
         style={{
           height: '3.75rem',
