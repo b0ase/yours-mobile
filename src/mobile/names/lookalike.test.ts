@@ -20,7 +20,7 @@ const HC_CAPS = {
     '5c55a7fdb7bb': 'https://cloud.handcash.io/api/bsvalias/receive-beef/{alias}@{domain.tld}',
   },
 };
-const OUR_CAPS = { bsvalias: '1.0', capabilities: { pki: 'https://pay.example/id/{alias}@{domain.tld}' } };
+const OUR_CAPS = { bsvalias: '1.0', capabilities: { pki: 'https://pay.bwallet.space/id/{alias}@{domain.tld}' } };
 
 describe('lookalikes', () => {
   test('0/o and 1/l/i swaps', () => {
@@ -39,7 +39,7 @@ describe('resolveHandle did-you-mean', () => {
     'https://cloud.handcash.io/.well-known/bsvalias': HC_CAPS,
     'https://cloud.handcash.io/api/bsvalias/id/': { pubkey: '02ab' },
     'https://bwalletx.com/.well-known/bsvalias': OUR_CAPS,
-    'https://pay.example/id/b0asey@bwalletx.com': { pubkey: '03cd' },
+    'https://pay.bwallet.space/id/b0asey@bwalletx.com': { pubkey: '03cd' },
   };
   test('unknown $name: suggests our lookalike, never the HandCash name', async () => {
     await expect(resolveHandle(mock(routes), { handle: 'boasey' }, 'bwalletx.com')).rejects.toThrow(

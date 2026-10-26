@@ -22,6 +22,7 @@ import {
   wantsManifestSheet,
 } from './services/sessionDenials';
 import { takeLabelsForSheet } from './services/labelsOnSpend';
+import { takeRecipientsForSheet } from './services/spendRecipients';
 import type { AccentId } from './mobile/theme/accents';
 import { revokeOriginatorInAccounts } from './services/accountPermissionStore';
 import { routeBchatUrl } from './services/bchatOrigin';
@@ -1675,6 +1676,9 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
           if (request.type === 'spending' && mintSite) {
             const labels = takeLabelsForSheet(mintSite);
             if (labels.length > 0) (request as BundleRequest).labels = labels;
+            // Where the payment goes (services/spendRecipients.ts, N3-3).
+            const recipients = takeRecipientsForSheet(mintSite);
+            if (recipients.length > 0) (request as BundleRequest).recipients = recipients;
           }
           // A request arriving while this site's sheet is open waits for its own sheet (never joins that one).
           bundle = permissionBundler.add(request as BundledRequest & BundleRequest);

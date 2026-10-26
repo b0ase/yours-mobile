@@ -30,8 +30,8 @@ const realFetch = globalThis.fetch;
 const serve = (pki: Response) =>
   (globalThis.fetch = (async (u: string) =>
     u.includes('.well-known/bsvalias')
-      ? new Response(JSON.stringify({ capabilities: { pki: 'https://pay.test/id/{alias}@{domain.tld}' } }))
-      : u.startsWith('https://pay.test/id/')
+      ? new Response(JSON.stringify({ capabilities: { pki: 'https://pay.bwallet.space/id/{alias}@{domain.tld}' } }))
+      : u.startsWith('https://pay.bwallet.space/id/')
         ? pki
         : new Response('{}')) as typeof fetch);
 

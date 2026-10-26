@@ -2,7 +2,7 @@ import { checkBinding, keyChange, type BindingStatus } from './binding';
 import { ProtoWallet, Utils } from '@bsv/sdk';
 import { SIGN_KEY_ID, SIGN_PROTOCOL, signedMessage } from './paymail';
 import { AMOUNT_HINT, cleanRecipient, isMainnetAddress, looksLikeAmount } from './address';
-import { BWALLET_PAYMAIL_DOMAIN, LEGACY_PAYMAIL_DOMAINS, SIBLING_PAYMAIL_DOMAINS } from './config';
+import { BWALLET_PAYMAIL_API, BWALLET_PAYMAIL_DOMAIN, LEGACY_PAYMAIL_DOMAINS, SIBLING_PAYMAIL_DOMAINS } from './config';
 
 /** Other domains every name answers on (legacy bwallet.space, sibling bmailx.com). Tolerates mocked config. */
 const alsoOurs = (): string[] => [...(LEGACY_PAYMAIL_DOMAINS ?? []), ...(SIBLING_PAYMAIL_DOMAINS ?? [])];
@@ -165,8 +165,57 @@ const tryJson = async <T>(f: Fetch, url: string, init?: RequestInit): Promise<T 
   }
 };
 
-export const fill = (tpl: string, alias: string, domain: string) =>
-  tpl.replace('{alias}', encodeURIComponent(alias)).replace('{domain.tld}', domain);
+/** Our paymail server, which answers for every one of our domains. */
+const OUR_PAYMAIL_HOSTS = new Set(
+  ['pay.bwallet.space', BWALLET_PAYMAIL_API ? new URL(BWALLET_PAYMAIL_API).host : ''].filter(Boolean),
+);
+const OUR_PAYMAIL_DOMAINS = new Set(
+  ['bwalletx.com', BWALLET_PAYMAIL_DOMAIN, ...LEGACY_PAYMAIL_DOMAINS, ...SIBLING_PAYMAIL_DOMAINS].filter(Boolean),
+);
+
+/** The SRV target discoverHost found for each paymail domain: capability URLs may point there too. */
+const srvTargets = new Map<string, string>();
+
+/** An IP literal, or a name that only means something on a private network. */
+const privateHost = (hostname: string) => {
+  const h = hostname.toLowerCase().replace(/\.$/, '');
+  return (
+    !h ||
+    h.startsWith('[') ||
+    h.includes(':') ||
+    /^\d{1,3}(\.\d{1,3}){3}$/.test(h) ||
+    /^(0x[0-9a-f]+|\d+)$/.test(h) ||
+    !h.includes('.') ||
+    /(^|\.)(localhost|local|internal|intranet|lan|home|corp|home\.arpa|arpa)$/.test(h)
+  );
+};
+
+/**
+ * A paymail capability URL for this alias, checked (b-Aware 26 Oct 2026, N3-5): it must be https on the paymail
+ * domain itself or on its SRV target, never an IP address or a private host. A host's document can otherwise send the
+ * wallet to http, to another site, or to something on the user's own network. Throws ResolveError when unsafe.
+ */
+export const fill = (tpl: string, alias: string, domain: string) => {
+  const url = tpl.replace('{alias}', encodeURIComponent(alias)).replace('{domain.tld}', domain);
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    throw new ResolveError(`${domain} gave a capability URL that is not a URL`);
+  }
+  const d = domain.toLowerCase();
+  const host = u.host.toLowerCase();
+  const srv = srvTargets.get(d);
+  const ok =
+    host === d ||
+    host.endsWith(`.${d}`) ||
+    (!!srv && host === srv) ||
+    // Our own names are served by our paymail host (bwalletx.com has no SRV record; its document points there).
+    (OUR_PAYMAIL_DOMAINS.has(d) && OUR_PAYMAIL_HOSTS.has(host));
+  if (u.protocol !== 'https:' || u.username || u.password || privateHost(u.hostname) || !ok)
+    throw new ResolveError(`${domain} gave an unsafe capability URL`);
+  return u.toString();
+};
 
 /** bsvalias host via SRV (handcash.io → cloud.handcash.io), else the domain itself. */
 export const discoverHost = async (f: Fetch, domain: string): Promise<string> => {
@@ -176,7 +225,11 @@ export const discoverHost = async (f: Fetch, domain: string): Promise<string> =>
     const parts = String(ans.data).trim().split(/\s+/);
     const host = parts[3]?.replace(/\.$/, '');
     const port = parts[2];
-    if (host) return port && port !== '443' ? `${host}:${port}` : host;
+    if (host && !privateHost(host)) {
+      const target = (port && port !== '443' ? `${host}:${port}` : host).toLowerCase();
+      srvTargets.set(domain.toLowerCase(), target);
+      return target;
+    }
   }
   return domain;
 };
@@ -219,18 +272,28 @@ export const resolvePaymail = async (f: Fetch, paymail: string, input = paymail)
   const [alias, domain] = paymail.split('@');
   const caps = await getCapabilities(f, domain);
   const r: Partial<Resolved> = { input };
+  // An optional capability with an unsafe URL is skipped, like one that doesn't answer.
+  const capJson = <T>(tpl: string, init?: RequestInit): Promise<T | undefined> => {
+    let url: string;
+    try {
+      url = fill(tpl, alias, domain);
+    } catch {
+      return Promise.resolve(undefined);
+    }
+    return tryJson<T>(f, url, init);
+  };
   if (!isOurDomain(domain)) r.external = domain.toLowerCase();
 
   const prof = str(caps[CAP.publicProfile]);
   if (prof) {
-    const p = await tryJson<Fields>(f, fill(prof, alias, domain));
+    const p = await capJson<Fields>(prof);
     // "Anonymous" / "Account 1" from an old profile is no name: the UI shows the paymail instead.
     r.displayName = str(p?.name) && !isPlaceholderName(str(p?.name)) ? str(p?.name) : undefined;
     r.avatar = str(p?.avatar);
   }
   const pki = str(caps[CAP.pki]);
   if (pki) {
-    const id = await tryJson<Fields & { binding?: unknown }>(f, fill(pki, alias, domain));
+    const id = await capJson<Fields & { binding?: unknown }>(pki);
     r.pubkey = str(id?.pubkey);
     // Our names carry the owner's signed binding: check it here rather than trust our server.
     if (!r.external && r.pubkey) {
@@ -245,7 +308,7 @@ export const resolvePaymail = async (f: Fetch, paymail: string, input = paymail)
 
   const ord = ordCapability(caps);
   if (ord) {
-    const o = await tryJson<Fields & { ordProof?: unknown }>(f, fill(ord, alias, domain));
+    const o = await capJson<Fields & { ordProof?: unknown }>(ord);
     const address = str(o?.address);
     if (address) {
       // b_feedback 67: the host could swap the address. Trust it only with the key owner's signature over it.
@@ -266,7 +329,7 @@ export const resolvePaymail = async (f: Fetch, paymail: string, input = paymail)
   // Fallback: basic address resolution (some servers require a signed request; try unsigned).
   const pd = str(caps[CAP.paymentDestination]);
   if (pd) {
-    const out = await tryJson<{ output?: string }>(f, fill(pd, alias, domain), {
+    const out = await capJson<{ output?: string }>(pd, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ senderHandle: 'bwallet@bwallet', dt: new Date().toISOString(), purpose: 'payment' }),

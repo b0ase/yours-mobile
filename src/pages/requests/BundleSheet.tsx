@@ -29,6 +29,10 @@ import { CarefulHero, ConnectHero, PayHero, SignInHero } from '../../components/
 import { useSheetPrice } from '../../components/DollarAmount';
 import { EnvelopePresets } from '../../components/approval/EnvelopePresets';
 import { envelopeUsdText } from '../../services/envelopes';
+import { escapeDenies, sheetControls } from './sheetControls';
+
+/** Outputs listed under the payment before "and N more" (N3-3). */
+const RECIPIENTS_SHOWN = 12;
 import { ENVELOPES_ENABLED } from '../../mobile/storeBuild';
 import { dollarsFirst, dollarsInline } from '../../utils/dollarsFirst';
 
@@ -257,6 +261,18 @@ export const BundleSheet = (props: {
   const view = sheetView(model, careful, careful && !detailsSeen ? seenLines : undefined, kind);
   // Careful card: "I trust it, allow" waits until every line has been on screen (or Details was opened).
   const mustRead = careful && view.hidden.size > 0;
+  // Escape is "Not now" (N3-4). The latest send/busy are read through a ref so the listener is added once.
+  const escapeRef = useRef({ busy, send });
+  escapeRef.current = { busy, send };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!escapeDenies(e, escapeRef.current.busy)) return;
+      e.preventDefault();
+      void escapeRef.current.send('notNow');
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   const ordinaryLines = careful ? model.lines.filter((l) => !l.risky && !l.isNew) : [];
   // Live sheet: an Allow is bound to exactly the lines on screen (background checks the hash). A line not on
   // screen is never in it, so it can never be granted. Not now and Block decline everything, so they cover all.
@@ -381,6 +397,14 @@ export const BundleSheet = (props: {
       )}
       <ul className="m-0 mt-1 pl-4 break-all" style={{ fontSize: 11, color: CARD.muted }}>
         {model.payment && <li>pay: {model.payment.detail}</li>}
+        {model.payment?.recipients?.slice(0, RECIPIENTS_SHOWN).map((x, i) => (
+          <li key={`to-${i}`} data-testid="pay-recipient">
+            to {x.to}: {x.satoshis.toLocaleString()} sats
+          </li>
+        ))}
+        {(model.payment?.recipients?.length ?? 0) > RECIPIENTS_SHOWN && (
+          <li>and {(model.payment!.recipients!.length - RECIPIENTS_SHOWN).toLocaleString()} more outputs</li>
+        )}
         {model.lines.map((l) => (
           <li key={l.requestID}>{l.detail}</li>
         ))}
@@ -391,12 +415,14 @@ export const BundleSheet = (props: {
 
   // Careful card: three choices (owner, 24 Oct 2026). The large, safe default is Not now (this request only);
   // Block this site really blocks (background stores a block record and revokes its grants).
-  const deny = { label: 'Not now', onClick: () => void send('notNow'), disabled };
-  const block = { label: 'Block this site', onClick: () => void send('block'), disabled };
+  // Refusing never waits for the arm delay or a hold, only for an answer already being sent (N3-4).
+  const { allowDisabled, denyDisabled } = sheetControls({ busy, armed, hold, mustRead });
+  const deny = { label: 'Not now', onClick: () => void send('notNow'), disabled: denyDisabled };
+  const block = { label: 'Block this site', onClick: () => void send('block'), disabled: denyDisabled };
   const allow = {
     label: careful ? 'I trust it, allow' : primary,
     onClick: () => void send('allow'),
-    disabled: disabled || mustRead,
+    disabled: allowDisabled,
     busy,
   };
 
@@ -701,7 +727,7 @@ export const BundleSheet = (props: {
         siteSub={siteSub}
         onClose={() => void send('notNow')}
         closeLabel="Deny and close"
-        closeDisabled={disabled}
+        closeDisabled={denyDisabled}
         hero={hero}
         title={title}
         primary={careful ? deny : allow}

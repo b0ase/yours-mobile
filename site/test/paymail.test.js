@@ -789,7 +789,9 @@ describe('b_feedback 67: destinations the payer can check', () => {
     };
     expect((await h.register({}, { ...body, ordProof: bad }))[0]).toBe(400);
     const good = { timestamp: String(proof.timestamp), signature: proof.signature };
-    expect((await h.register({}, { ...body, ordProof: good }))[0]).toBe(200);
+    // A signed request is used once (N3-6): the retry is signed afresh, as the wallet does.
+    const again = await u.sign('register', { alias: 'eve', ordAddress: ord, nonce: '0'.repeat(32) });
+    expect((await h.register({}, { ...again, ordProof: good }))[0]).toBe(200);
     const [, r] = await h.ord({ handle: 'eve@pay.test' });
     expect(r.address).toBe(ord);
     expect(r.ordProof).toEqual(good);
@@ -858,5 +860,31 @@ describe('reserved alias held for a designated key', () => {
   test('the social form bwalletx.x stays reserved even for the designated key', async () => {
     const { h, owner } = setup();
     expect((await h.register({}, await owner.sign('register', { alias: 'bwalletx.x' })))[0]).toBe(400);
+  });
+});
+
+describe('signed requests are used once (b-Aware 26 Oct 2026, N3-6)', () => {
+  test('the same signed request is refused the second time; a fresh nonce is accepted', async () => {
+    const h = pm.makeHandlers({ store: memStore(), env: ENV });
+    const u = user();
+    const a = await u.sign('apps-get', { nonce: 'a'.repeat(32) });
+    expect((await h.appsGet({}, a))[0]).toBe(200);
+    const replay = await h.appsGet({}, a);
+    expect(replay[0]).not.toBe(200);
+    expect(JSON.stringify(replay[1])).toMatch(/already used/);
+    expect((await h.appsGet({}, await u.sign('apps-get', { nonce: 'b'.repeat(32) })))[0]).toBe(200);
+  });
+
+  test('an older wallet without a nonce: the exact same signature is refused', async () => {
+    const h = pm.makeHandlers({ store: memStore(), env: ENV });
+    const a = await user().sign('apps-get', {});
+    expect((await h.appsGet({}, a))[0]).toBe(200);
+    expect((await h.appsGet({}, a))[0]).not.toBe(200);
+  });
+
+  test('a malformed nonce is refused', async () => {
+    const h = pm.makeHandlers({ store: memStore(), env: ENV });
+    const a = await user().sign('apps-get', { nonce: 'not-a-nonce' });
+    expect((await h.appsGet({}, a))[0]).not.toBe(200);
   });
 });

@@ -23,6 +23,7 @@ import {
 } from '@1sat/wallet-browser';
 import { preserveOriginalErrors } from './services/permissionAbortGuard';
 import { guardReservedBaskets, revokeReservedBasketGrants } from './services/reservedBaskets';
+import { guardSpendRecipients } from './services/spendRecipients';
 import { guardLabelsOnSpend } from './services/labelsOnSpend';
 import { chromeConsentStore, guardSiteTokens } from './services/siteTokens';
 import { guardReservedProtocols, revokeReservedProtocolGrants } from './services/reservedProtocols';
@@ -432,58 +433,62 @@ export const initWallet = async (
   // (services/labelsOnSpend.ts, TokenBlaster playtest 25 Oct 2026).
   // Outermost: sites deliver bought BSV-21 tokens to receive keys the wallet picks, and sell them with the wallet
   // signing its own token inputs behind one sheet; onesat stays reserved (services/siteTokens.ts, docs/SITE-TOKENS.md).
+  // A payment's sheet lists where its outputs go (services/spendRecipients.ts, b-Aware 26 Oct 2026 N3-3).
   const wallet = guardSiteTokens(
-    guardLabelsOnSpend(
-      guardReservedBaskets(
-        guardReservedProtocols(
-          // A message naming another site (a login challenge fetched from good.com) is never signed for evil.com
-          // (services/crossSiteSignGuard.ts, payment-safety audit 24 Oct 2026 B1).
-          guardCrossSiteSigning(
-            preserveOriginalErrors(
-              withLocalSpendLedger(
-                // Envelopes by default: a site's payment goes through without a sheet only when it fits that site's
-                // envelope; stored allowances grant nothing (services/envelopes.ts, owner 24 Oct 2026). With
-                // ALLOWANCES_ENABLED, the old monthly allowance with its per-payment cap and payee allowlist
-                // (services/allowanceGuard.ts, payment-safety audit 24 Oct 2026 B2).
-                ALLOWANCES_ENABLED
-                  ? guardAllowance(
-                      new LocalWalletPermissionsManager(
-                        baseWallet,
-                        ADMIN_ORIGINATOR,
-                        { permissionModules: assetModules },
-                        { store: permissionStore },
-                      ),
-                      { store: permissionStore, adminOriginator: ADMIN_ORIGINATOR, normalize: normalizeOriginator },
-                    )
-                  : ENVELOPES_ENABLED
-                    ? guardEnvelopes(
+    guardSpendRecipients(
+      guardLabelsOnSpend(
+        guardReservedBaskets(
+          guardReservedProtocols(
+            // A message naming another site (a login challenge fetched from good.com) is never signed for evil.com
+            // (services/crossSiteSignGuard.ts, payment-safety audit 24 Oct 2026 B1).
+            guardCrossSiteSigning(
+              preserveOriginalErrors(
+                withLocalSpendLedger(
+                  // Envelopes by default: a site's payment goes through without a sheet only when it fits that site's
+                  // envelope; stored allowances grant nothing (services/envelopes.ts, owner 24 Oct 2026). With
+                  // ALLOWANCES_ENABLED, the old monthly allowance with its per-payment cap and payee allowlist
+                  // (services/allowanceGuard.ts, payment-safety audit 24 Oct 2026 B2).
+                  ALLOWANCES_ENABLED
+                    ? guardAllowance(
                         new LocalWalletPermissionsManager(
                           baseWallet,
                           ADMIN_ORIGINATOR,
                           { permissionModules: assetModules },
                           { store: permissionStore },
                         ),
-                        { envelopes, adminOriginator: ADMIN_ORIGINATOR, normalize: normalizeOriginator },
+                        { store: permissionStore, adminOriginator: ADMIN_ORIGINATOR, normalize: normalizeOriginator },
                       )
-                    : // Store builds have no envelopes (storeBuild.ts ENVELOPES_ENABLED): every payment shows its sheet,
-                      // whatever old monthly grant is stored (services/everySpendAsks.ts, owner 25 Oct 2026).
-                      guardEverySpendAsks(
-                        new LocalWalletPermissionsManager(
-                          baseWallet,
-                          ADMIN_ORIGINATOR,
-                          { permissionModules: assetModules },
-                          { store: permissionStore },
+                    : ENVELOPES_ENABLED
+                      ? guardEnvelopes(
+                          new LocalWalletPermissionsManager(
+                            baseWallet,
+                            ADMIN_ORIGINATOR,
+                            { permissionModules: assetModules },
+                            { store: permissionStore },
+                          ),
+                          { envelopes, adminOriginator: ADMIN_ORIGINATOR, normalize: normalizeOriginator },
+                        )
+                      : // Store builds have no envelopes (storeBuild.ts ENVELOPES_ENABLED): every payment shows its sheet,
+                        // whatever old monthly grant is stored (services/everySpendAsks.ts, owner 25 Oct 2026).
+                        guardEverySpendAsks(
+                          new LocalWalletPermissionsManager(
+                            baseWallet,
+                            ADMIN_ORIGINATOR,
+                            { permissionModules: assetModules },
+                            { store: permissionStore },
+                          ),
+                          { adminOriginator: ADMIN_ORIGINATOR, normalize: normalizeOriginator },
                         ),
-                        { adminOriginator: ADMIN_ORIGINATOR, normalize: normalizeOriginator },
-                      ),
-                spendLedger,
+                  spendLedger,
+                ),
               ),
+              ADMIN_ORIGINATOR,
             ),
             ADMIN_ORIGINATOR,
           ),
           ADMIN_ORIGINATOR,
         ),
-        ADMIN_ORIGINATOR,
+        { adminOriginator: ADMIN_ORIGINATOR, normalize: normalizeOriginator },
       ),
       { adminOriginator: ADMIN_ORIGINATOR, normalize: normalizeOriginator },
     ),

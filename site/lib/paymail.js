@@ -287,6 +287,8 @@ function signedMessage(action, fields) {
   return ['bwallet-paymail', 'v1', action, ...keys.map((k) => `${k}=${fields[k] ?? ''}`)].join('|');
 }
 
+const NONCE_RE = /^[0-9a-f]{32}$/;
+
 /** Verify a BRC-43 signature by `identityKey` (counterparty 'anyone' on the signer side). */
 async function verifySigned(body, action, now = Date.now()) {
   const identityKey = String(body.identityKey || '').toLowerCase();
@@ -295,6 +297,7 @@ async function verifySigned(body, action, now = Date.now()) {
   if (!Number.isFinite(ts) || Math.abs(now - ts) > SIG_WINDOW_MS) return 'Signature expired; check your clock';
   if (!/^[0-9a-f]{16,200}$/i.test(String(body.signature || ''))) return 'Missing signature';
   const fields = { ...(body.fields || {}), identityKey, timestamp: String(ts) };
+  if (fields.nonce !== undefined && !NONCE_RE.test(String(fields.nonce))) return 'Bad nonce';
   try {
     const { valid } = await new ProtoWallet('anyone').verifySignature({
       data: Utils.toArray(signedMessage(action, fields), 'utf8'),
@@ -303,10 +306,38 @@ async function verifySigned(body, action, now = Date.now()) {
       keyID: SIGN_KEY_ID,
       counterparty: identityKey,
     });
-    return valid ? null : 'Bad signature';
+    if (!valid) return 'Bad signature';
   } catch {
     return 'Bad signature';
   }
+  return null;
+}
+
+/**
+ * verifySigned that also refuses a request already accepted inside the time window (b-Aware 26 Oct 2026, N3-6). Keyed
+ * by action, identity key and the request's nonce (fields.nonce, sent by wallets since 26 Oct 2026) or, for older
+ * wallets and actions without one, the signature itself; kept for twice the window. One guard per makeHandlers, in
+ * memory: each server process keeps its own (one process serves pay.bwallet.space). Other services that import
+ * verifySigned keep their own rules (the library keeps its own replay list).
+ */
+function makeReplayGuard({ max = 100_000 } = {}) {
+  const seen = new Map();
+  const firstUse = (key, now) => {
+    if (seen.size > max / 2) for (const [k, until] of seen) if (until <= now) seen.delete(k);
+    const until = seen.get(key);
+    if (until !== undefined && until > now) return false;
+    if (seen.size >= max) seen.delete(seen.keys().next().value);
+    seen.set(key, now + 2 * SIG_WINDOW_MS);
+    return true;
+  };
+  return async function verifySignedOnce(body, action, now = Date.now()) {
+    const err = await verifySigned(body, action, now);
+    if (err) return err;
+    const identityKey = String(body.identityKey || '').toLowerCase();
+    const nonce = body.fields && body.fields.nonce;
+    const once = nonce ? `n:${nonce}` : `s:${String(body.signature).toLowerCase()}`;
+    return firstUse(`${action}|${identityKey}|${once}`, now) ? null : 'This request was already used; try again';
+  };
 }
 
 /** A binding as served publicly: everything a verifier needs to rebuild the signed message. */
@@ -449,6 +480,7 @@ function makeHandlers({
     ? async () => false
     : (handle, receipt) => offers.notifyDirector(handle, receipt, env),
 }) {
+  const verifySignedOnce = makeReplayGuard();
   // Company paymails (PAYMAIL_COMPANIES): the alias row (identity key) is provisioned in the DB by the owner;
   // the env only says which aliases are companies, their registered name + number, and their directors.
   const companyOf = (alias) => offers.companies(env).get(String(alias || '').toLowerCase()) || null;
@@ -585,7 +617,7 @@ function makeHandlers({
     // Signed name binding: the name's current owner signs "alias -> my key, version seq" (seq must go up).
     bind: async (_q, body) => {
       body = body || {};
-      const sigErr = await verifySigned(body, 'bind', now());
+      const sigErr = await verifySignedOnce(body, 'bind', now());
       if (sigErr) return [401, { error: sigErr }];
       const identityKey = String(body.identityKey).toLowerCase();
       const f = body.fields || {};
@@ -624,7 +656,7 @@ function makeHandlers({
     // Two-party handover, step 1: the name's current owner signs "alias -> key B, version seq". Nothing moves yet.
     'handover-release': async (_q, body) => {
       body = body || {};
-      const sigErr = await verifySigned(body, 'release', now());
+      const sigErr = await verifySignedOnce(body, 'release', now());
       if (sigErr) return [401, { error: sigErr }];
       const from = String(body.identityKey).toLowerCase();
       const f = body.fields || {};
@@ -653,7 +685,7 @@ function makeHandlers({
     // The owner takes back a release that hasn't been accepted.
     'handover-cancel': async (_q, body) => {
       body = body || {};
-      const sigErr = await verifySigned(body, 'release-cancel', now());
+      const sigErr = await verifySignedOnce(body, 'release-cancel', now());
       if (sigErr) return [401, { error: sigErr }];
       const alias = String(body.fields?.alias || '').toLowerCase();
       const h = await store.getHandover(alias);
@@ -673,7 +705,7 @@ function makeHandlers({
     // with the binding, so any wallet can check both signatures.
     'handover-accept': async (_q, body) => {
       body = body || {};
-      const sigErr = await verifySigned(body, 'bind', now());
+      const sigErr = await verifySignedOnce(body, 'bind', now());
       if (sigErr) return [401, { error: sigErr }];
       const to = String(body.identityKey).toLowerCase();
       const alias = String(body.fields?.alias || '').toLowerCase();
@@ -835,7 +867,7 @@ function makeHandlers({
     // The company account registers a sealed offer so its payment can be matched. Signed by the company key.
     'offer-register': async (_q, body) => {
       body = body || {};
-      const sigErr = await verifySigned(body, 'offer-register', now());
+      const sigErr = await verifySignedOnce(body, 'offer-register', now());
       if (sigErr) return [401, { error: sigErr }];
       const key = String(body.identityKey).toLowerCase();
       const alias = String(body.fields?.alias || '').toLowerCase();
@@ -856,7 +888,7 @@ function makeHandlers({
     // Receipts for the director (or the company key): newest first. Signed.
     'offer-receipts': async (_q, body) => {
       body = body || {};
-      const sigErr = await verifySigned(body, 'offer-receipts', now());
+      const sigErr = await verifySignedOnce(body, 'offer-receipts', now());
       if (sigErr) return [401, { error: sigErr }];
       if (!store.listReceipts) return [501, { error: 'offers not available' }];
       const key = String(body.identityKey).toLowerCase();
@@ -879,7 +911,7 @@ function makeHandlers({
       if (bad && bad !== RESERVED_MSG) return [400, { error: bad }];
       if (f.ordAddress && !/^1[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(String(f.ordAddress)))
         return [400, { error: 'Invalid ordAddress' }];
-      const sigErr = await verifySigned(body, 'register', now());
+      const sigErr = await verifySignedOnce(body, 'register', now());
       if (sigErr) return [401, { error: sigErr }];
       const identityKey = String(body.identityKey).toLowerCase();
       const ordProof =
@@ -1004,7 +1036,7 @@ function makeHandlers({
 
     // Settings › Identity › Your name: one display name per wallet, written to every name on the key.
     'set-name': async (_q, body) => {
-      const sigErr = await verifySigned(body || {}, 'set-name', now());
+      const sigErr = await verifySignedOnce(body || {}, 'set-name', now());
       if (sigErr) return [401, { error: sigErr }];
       const key = String(body.identityKey).toLowerCase();
       const row = await store.getAliasByKey(key);
@@ -1059,7 +1091,7 @@ function makeHandlers({
     },
 
     inbox: async (_q, body) => {
-      const sigErr = await verifySigned(body || {}, 'inbox', now());
+      const sigErr = await verifySignedOnce(body || {}, 'inbox', now());
       if (sigErr) return [401, { error: sigErr }];
       const rows = await store.listInbox(String(body.identityKey).toLowerCase());
       return [200, { senderIdentityKey: ANYONE_PUB, payments: rows.map(paymentOut) }];
@@ -1068,7 +1100,7 @@ function makeHandlers({
     // Restore from seed (incident 14 Oct 2026): every payment ever received for this key, collected ones too,
     // so a new device can re-internalize receipts whose derivation lives only here. Read-only; no ack.
     history: async (_q, body) => {
-      const sigErr = await verifySigned(body || {}, 'history', now());
+      const sigErr = await verifySignedOnce(body || {}, 'history', now());
       if (sigErr) return [401, { error: sigErr }];
       if (!store.listHistory) return [501, { error: 'history not available' }];
       const rows = await store.listHistory(String(body.identityKey).toLowerCase());
@@ -1076,7 +1108,7 @@ function makeHandlers({
     },
 
     ack: async (_q, body) => {
-      const sigErr = await verifySigned(body || {}, 'ack', now());
+      const sigErr = await verifySignedOnce(body || {}, 'ack', now());
       if (sigErr) return [401, { error: sigErr }];
       const key = String(body.identityKey).toLowerCase();
       const refs = String((body.fields && body.fields.references) || '')
@@ -1100,12 +1132,12 @@ function makeHandlers({
     // Apps › Add app (owner, 5 Oct 2026): the wallet's own list, so a 12-word restore brings it back.
     // Signed by the identity key both ways; the list is private to that wallet.
     appsGet: async (_q, body) => {
-      const sigErr = await verifySigned(body || {}, 'apps-get', now());
+      const sigErr = await verifySignedOnce(body || {}, 'apps-get', now());
       if (sigErr) return [401, { error: sigErr }];
       return [200, { apps: (await store.getApps?.(String(body.identityKey).toLowerCase())) ?? [] }];
     },
     appsPut: async (_q, body) => {
-      const sigErr = await verifySigned(body || {}, 'apps-put', now());
+      const sigErr = await verifySignedOnce(body || {}, 'apps-put', now());
       if (sigErr) return [401, { error: sigErr }];
       let apps;
       try {
@@ -1131,7 +1163,7 @@ function makeHandlers({
 
     // Unlink one of this wallet's names (Settings › Identity). The name becomes free for anyone.
     unlink: async (_q, body) => {
-      const sigErr = await verifySigned(body || {}, 'unlink', now());
+      const sigErr = await verifySignedOnce(body || {}, 'unlink', now());
       if (sigErr) return [401, { error: sigErr }];
       const alias = String(body.fields?.alias || '').toLowerCase();
       const key = String(body.identityKey).toLowerCase();
@@ -1151,7 +1183,7 @@ function makeHandlers({
     // Needs migration STEP A (is_primary + partial unique index). Adding a second plain name also
     // needs STEP B (drop UNIQUE(identity_key, kind)); until then the insert clashes and is refused.
     'names-list': async (_q, body) => {
-      const sigErr = await verifySigned(body || {}, 'names-list', now());
+      const sigErr = await verifySignedOnce(body || {}, 'names-list', now());
       if (sigErr) return [401, { error: sigErr }];
       const key = String(body.identityKey).toLowerCase();
       const main = await store.getAliasByKey(key);
@@ -1174,7 +1206,7 @@ function makeHandlers({
       if (SOCIAL_RE.test(alias)) return [400, { error: 'Extra names are plain names (a-z, 0-9, - or _)' }];
       const bad = validAlias(alias);
       if (bad) return [400, { error: bad }];
-      const sigErr = await verifySigned(body, 'names-add', now());
+      const sigErr = await verifySignedOnce(body, 'names-add', now());
       if (sigErr) return [401, { error: sigErr }];
       const key = String(body.identityKey).toLowerCase();
       const main = await store.getAliasByKeyKind?.(key, 'plain');
@@ -1212,7 +1244,7 @@ function makeHandlers({
     },
 
     'names-primary': async (_q, body) => {
-      const sigErr = await verifySigned(body || {}, 'names-primary', now());
+      const sigErr = await verifySignedOnce(body || {}, 'names-primary', now());
       if (sigErr) return [401, { error: sigErr }];
       const alias = String(body.fields?.alias || '').toLowerCase();
       const key = String(body.identityKey).toLowerCase();
@@ -1229,7 +1261,7 @@ function makeHandlers({
     // name forwards to the main name for 90 days (the rename hold), and the row is renamed to an
     // rm-… tombstone so its payment history stays with the wallet.
     'names-remove': async (_q, body) => {
-      const sigErr = await verifySigned(body || {}, 'names-remove', now());
+      const sigErr = await verifySignedOnce(body || {}, 'names-remove', now());
       if (sigErr) return [401, { error: sigErr }];
       const alias = String(body.fields?.alias || '').toLowerCase();
       const key = String(body.identityKey).toLowerCase();
@@ -1251,7 +1283,7 @@ function makeHandlers({
     },
 
     delete: async (_q, body) => {
-      const sigErr = await verifySigned(body || {}, 'delete', now());
+      const sigErr = await verifySignedOnce(body || {}, 'delete', now());
       if (sigErr) return [401, { error: sigErr }];
       if (!body.fields || body.fields.confirm !== 'DELETE') return [400, { error: 'confirm must be DELETE' }];
       const key = String(body.identityKey).toLowerCase();
@@ -1272,7 +1304,7 @@ function makeHandlers({
       return [200, { key, profile: row.profile, ...(await nameOf(key)) }];
     },
     'bphone-put': async (_q, body) => {
-      const sigErr = await verifySigned(body || {}, 'bphone-put', now());
+      const sigErr = await verifySignedOnce(body || {}, 'bphone-put', now());
       if (sigErr) return [401, { error: sigErr }];
       let raw;
       try {
@@ -1299,7 +1331,7 @@ function makeHandlers({
     },
     // Ask for a call at a time (the callee's listing must take bookings).
     'bphone-book': async (_q, body) => {
-      const sigErr = await verifySigned(body || {}, 'bphone-book', now());
+      const sigErr = await verifySignedOnce(body || {}, 'bphone-book', now());
       if (sigErr) return [401, { error: sigErr }];
       const f = body.fields || {};
       const callee = String(f.calleeKey || '').toLowerCase();
@@ -1335,7 +1367,7 @@ function makeHandlers({
     },
     // Every booking this identity is part of, soonest first.
     'bphone-bookings': async (_q, body) => {
-      const sigErr = await verifySigned(body || {}, 'bphone-bookings', now());
+      const sigErr = await verifySignedOnce(body || {}, 'bphone-bookings', now());
       if (sigErr) return [401, { error: sigErr }];
       const key = String(body.identityKey).toLowerCase();
       const rows = await store.listBookings(key);
@@ -1343,7 +1375,7 @@ function makeHandlers({
     },
     // Callee: confirm / decline / cancel. Caller: cancel. Nothing else moves.
     'bphone-book-act': async (_q, body) => {
-      const sigErr = await verifySigned(body || {}, 'bphone-book-act', now());
+      const sigErr = await verifySignedOnce(body || {}, 'bphone-book-act', now());
       if (sigErr) return [401, { error: sigErr }];
       const f = body.fields || {};
       const key = String(body.identityKey).toLowerCase();
@@ -1422,6 +1454,7 @@ module.exports = {
   dotRefusal,
   SYSTEM_TLDS,
   signedMessage,
+  makeReplayGuard,
   verifySigned,
   deriveDestination,
   parseIncoming,
