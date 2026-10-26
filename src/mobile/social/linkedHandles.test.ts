@@ -57,8 +57,7 @@ describe('suggestions from all linked accounts', () => {
 describe('exactly one primary', () => {
   test('a single selected name is the primary', () => expect(resolvePrimary(['b0ase'], '')).toBe('b0ase'));
   test('the primary stays while selected', () => expect(resolvePrimary(['a', 'b'], 'b')).toBe('b'));
-  test('unselecting the primary with several left asks again', () =>
-    expect(resolvePrimary(['a', 'b'], 'c')).toBe(''));
+  test('unselecting the primary with several left asks again', () => expect(resolvePrimary(['a', 'b'], 'c')).toBe(''));
   test('cannot continue without a primary among the selected', () => {
     expect(canClaimSelection([], '')).toBe(false);
     expect(canClaimSelection(['a', 'b'], '')).toBe(false);

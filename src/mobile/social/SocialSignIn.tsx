@@ -121,14 +121,13 @@ export const SocialSignIn = ({
         ? xPrefill(p)
         : create && p.provider === 'google'
           ? {
-              name:
-                p.display && !isPlaceholderName(p.display) ? p.display : handleFromLinked('google', p.name) || '',
+              name: p.display && !isPlaceholderName(p.display) ? p.display : handleFromLinked('google', p.name) || '',
               avatar: p.avatar || '',
             }
           : {
-            name: p.provider === 'x' ? p.name.replace(/^@/, '') : p.display || p.name.split('@')[0],
-            avatar: p.avatar || '',
-          },
+              name: p.provider === 'x' ? p.name.replace(/^@/, '') : p.display || p.name.split('@')[0],
+              avatar: p.avatar || '',
+            },
     );
   };
   useEffect(() => {
@@ -158,11 +157,7 @@ export const SocialSignIn = ({
   const offerRestore = !!onRestore;
   // Create: is handle@<our domain> free for "Claim your name" to offer next? (Public lookup, nothing claimed.)
   // The $name this link offers next: the X @name, or the Gmail local part (owner, 26 Oct 2026).
-  const xa = !create
-    ? ''
-    : profile?.provider === 'google'
-      ? handleFromLinked('google', profile.name)
-      : xAlias(profile);
+  const xa = !create ? '' : profile?.provider === 'google' ? handleFromLinked('google', profile.name) : xAlias(profile);
   const [xFree, setXFree] = useState<boolean | null>(null);
   useEffect(() => {
     setXFree(null);

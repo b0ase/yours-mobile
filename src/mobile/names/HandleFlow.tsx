@@ -446,7 +446,9 @@ export const HandleFlow = ({
                                 onClick={() => choose(sg.alias, name, alt)}
                                 className="h-7 px-3 rounded-full text-xs font-semibold border-0 cursor-pointer"
                                 style={
-                                  name === alt ? { background: GOLD, color: '#000' } : { background: BORDER, color: '#fff' }
+                                  name === alt
+                                    ? { background: GOLD, color: '#000' }
+                                    : { background: BORDER, color: '#fff' }
                                 }
                               >
                                 ${alt}
@@ -481,9 +483,7 @@ export const HandleFlow = ({
               </div>
             )}
             {extrasDone.length > 0 && (
-              <p className="text-xs text-white m-0">
-                Also yours: {extrasDone.map((a) => `$${a} ✓`).join(', ')}
-              </p>
+              <p className="text-xs text-white m-0">Also yours: {extrasDone.map((a) => `$${a} ✓`).join(', ')}</p>
             )}
             <div
               className="flex items-center gap-1 rounded-xl px-3 h-11"
@@ -572,7 +572,6 @@ export const HandleFlow = ({
             Paymail isn't available in this build. You can still register an on-chain name below.
           </p>
         )}
-
 
         <button
           type="button"

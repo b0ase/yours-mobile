@@ -95,7 +95,11 @@ export const LinkAccounts = ({ owner, onClaim }: { owner: string; onClaim?: (ali
           setError('');
           // Choose your handle offers a $name per linked account (owner, 26 Oct 2026: linkedHandles.ts). Google's
           // local part exists only in this proof, so it's kept on this device now; the link itself stores no email.
-          rememberLinkedHandle(owner, p.profile.provider, p.profile.provider === 'linkedin' ? p.profile.display : p.profile.name);
+          rememberLinkedHandle(
+            owner,
+            p.profile.provider,
+            p.profile.provider === 'linkedin' ? p.profile.display : p.profile.name,
+          );
         })
         .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Could not link that account'))
         .finally(() => setBusy(null));
@@ -170,14 +174,14 @@ export const LinkAccounts = ({ owner, onClaim }: { owner: string; onClaim?: (ali
                   >
                     <Check size={14} strokeWidth={3} /> Linked
                   </span>
-                <button
-                  type="button"
-                  onClick={() => (unlink(owner, p), forgetLinkedHandle(owner, p), clearSocial())}
-                  className="text-xs bg-transparent border-0"
-                  style={{ color: GRAY }}
-                >
-                  Remove
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => (unlink(owner, p), forgetLinkedHandle(owner, p), clearSocial())}
+                    className="text-xs bg-transparent border-0"
+                    style={{ color: GRAY }}
+                  >
+                    Remove
+                  </button>
                 </span>
               ) : (
                 <button
