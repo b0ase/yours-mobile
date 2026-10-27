@@ -520,7 +520,8 @@ function Store() {
       style={{
         position: 'fixed',
         top: 0,
-        left: 0,
+        // Beside the landscape rail (phone/landscape.ts) when it shows; 0 otherwise.
+        left: 'var(--rail-w, 0px)',
         right: 0,
         bottom: 'calc(env(safe-area-inset-bottom) + var(--dock-h, 3.75rem))',
         overscrollBehavior: 'contain',
