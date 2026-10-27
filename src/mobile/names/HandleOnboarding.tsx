@@ -15,6 +15,7 @@ import { HandleFlow } from './HandleFlow';
 import { LINK_ACCOUNTS_ENABLED, PAID_FEATURES_ENABLED, handleCardText } from '../storeBuild';
 import { LinkAccountsStep } from '../social/LinkAccountsStep';
 import { LinkAccountsCard } from '../social/LinkAccountsCard';
+import { FinishPendingLink } from '../social/FinishPendingLink';
 import { getPersonalLink, onPersonalChange } from './personalToken';
 import { existingChoice, recoverPersonalLink } from './claimPersonal';
 import {
@@ -167,7 +168,14 @@ export const HandleOnboarding = () => {
     );
   // An unindexed personal token is offered by the Wallet's indexing list (tokens/WalletIndexing), once.
   // Not before the name check has answered: a restored wallet that owns a name must never be asked for one.
-  const linkCard = LINK_ACCOUNTS_ENABLED && id ? <LinkAccountsCard owner={id} /> : null;
+  // A link started on the first onboarding screen is signed here, after the wallet and its seed step exist.
+  const linkCard =
+    LINK_ACCOUNTS_ENABLED && id ? (
+      <>
+        <FinishPendingLink owner={id} />
+        <LinkAccountsCard owner={id} />
+      </>
+    ) : null;
   // "Launch your tokens" (owner, 26 Oct 2026): the personal token launcher, moved out of onboarding. Optional, later.
   const tokenCard =
     id && synced && hasName && PAID_FEATURES_ENABLED && !hasRoom ? (

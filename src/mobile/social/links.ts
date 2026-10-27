@@ -2,6 +2,8 @@ import type { WalletInterface } from '@bsv/sdk';
 import type { SocialProfile } from '../chat/api';
 import { BWALLET_PAYMAIL_API } from '../names/config';
 import { signRequest } from '../names/paymail';
+import { BMARKETX_API, ebayAvailable } from './ebayLink';
+import { clearUnfinished } from './pendingLink';
 
 /**
  * "Link your accounts" (owner, 18 Oct 2026). bWalletX is not an OAuth sign-in: the wallet IS the account, and a
@@ -13,7 +15,7 @@ import { signRequest } from '../names/paymail';
  * Google gives an "email verified" tick only: the address is never stored, shown or put into a handle (a
  * Gmail-derived handle published addresses before). Nothing here is ever recorded without a real proof.
  */
-export type LinkProvider = 'x' | 'google' | 'github' | 'linkedin' | 'handcash';
+export type LinkProvider = 'x' | 'google' | 'github' | 'linkedin' | 'handcash' | 'ebay';
 export type AccountLink = {
   provider: LinkProvider;
   /** sha256(provider:accountId): a stable id that reveals nothing (never an email). */
@@ -36,6 +38,7 @@ export const PROVIDER_LABEL: Record<LinkProvider, string> = {
   github: 'GitHub',
   linkedin: 'LinkedIn',
   handcash: 'HandCash',
+  ebay: 'eBay',
 };
 
 const sha256Hex = async (s: string) =>
@@ -50,6 +53,8 @@ export function linkHandle(provider: LinkProvider, name: string): string {
     .replace(/^[@$]/, '')
     .toLowerCase();
   if (provider === 'google' || provider === 'linkedin' || n.includes('@')) return '';
+  // eBay user IDs run to 64 characters and may hold '*'.
+  if (provider === 'ebay') return /^[a-z0-9_.*-]{1,64}$/.test(n) ? n : '';
   return /^[a-z0-9_.-]{1,39}$/.test(n) ? n : '';
 }
 
@@ -68,6 +73,7 @@ export function badgeText(l: Pick<AccountLink, 'provider' | 'handle' | 'display'
   if (l.provider === 'google') return 'Google · email verified';
   if (l.provider === 'x') return l.handle ? `@${l.handle} on X` : 'X';
   if (l.provider === 'github') return l.handle ? `${l.handle} on GitHub` : 'GitHub';
+  if (l.provider === 'ebay') return l.handle ? `${l.handle} on eBay` : 'eBay';
   if (l.provider === 'handcash') return l.handle ? `$${l.handle} on HandCash` : 'HandCash';
   return l.display ? `${l.display} on LinkedIn` : 'LinkedIn';
 }
@@ -128,13 +134,17 @@ export async function recordLink(
   };
   if (proof && provider !== 'handcash') link.published = await publishLink(link, proof);
   save(owner, [...getLinks(owner).filter((l) => l.provider !== provider), link]);
+  clearUnfinished(owner, provider);
   return link;
 }
 
 async function publishLink(link: AccountLink, proof: Proof): Promise<boolean> {
-  if (!BWALLET_PAYMAIL_API) return false;
+  // eBay tickets are bMarketX's (ebayLink.ts); the rest are the paymail server's.
+  const url =
+    link.provider === 'ebay' ? `${BMARKETX_API}/api/ebay/wallet/link` : `${BWALLET_PAYMAIL_API}/api/social/link`;
+  if (link.provider !== 'ebay' && !BWALLET_PAYMAIL_API) return false;
   try {
-    const r = await fetch(`${BWALLET_PAYMAIL_API}/api/social/link`, {
+    const r = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -151,17 +161,27 @@ async function publishLink(link: AccountLink, proof: Proof): Promise<boolean> {
   }
 }
 
-export type ProviderState = Record<'x' | 'google' | 'github' | 'linkedin', boolean>;
-/** X and Google have run since 4 Oct; GitHub / LinkedIn only once the server says their OAuth apps are set up. */
-export const DEFAULT_PROVIDERS: ProviderState = { x: true, google: true, github: false, linkedin: false };
+export type ProviderState = Record<'x' | 'google' | 'github' | 'linkedin' | 'ebay', boolean>;
+/**
+ * X and Google have run since 4 Oct; GitHub / LinkedIn only once the server says their OAuth apps are set up; eBay
+ * only once bMarketX's wallet-mode eBay route answers (ebayLink.ts).
+ */
+export const DEFAULT_PROVIDERS: ProviderState = { x: true, google: true, github: false, linkedin: false, ebay: false };
 export async function fetchProviders(f: typeof fetch = fetch): Promise<ProviderState> {
-  if (!BWALLET_PAYMAIL_API) return DEFAULT_PROVIDERS;
+  const ebay = ebayAvailable(f);
+  if (!BWALLET_PAYMAIL_API) return { ...DEFAULT_PROVIDERS, ebay: await ebay };
   try {
     const r = await f(`${BWALLET_PAYMAIL_API}/api/social/providers`);
-    if (!r.ok) return DEFAULT_PROVIDERS;
+    if (!r.ok) return { ...DEFAULT_PROVIDERS, ebay: await ebay };
     const j = (await r.json()) as Partial<ProviderState>;
-    return { x: j.x !== false, google: j.google !== false, github: j.github === true, linkedin: j.linkedin === true };
+    return {
+      x: j.x !== false,
+      google: j.google !== false,
+      github: j.github === true,
+      linkedin: j.linkedin === true,
+      ebay: await ebay,
+    };
   } catch {
-    return DEFAULT_PROVIDERS;
+    return { ...DEFAULT_PROVIDERS, ebay: await ebay };
   }
 }

@@ -169,7 +169,7 @@ const errorOf = (data: unknown, fallback: string) =>
     : '') || fallback;
 
 export interface SocialProfile {
-  provider: 'x' | 'google' | 'github' | 'linkedin';
+  provider: 'x' | 'google' | 'github' | 'linkedin' | 'ebay';
   /** The provider's account id (stable; a renamed @name keeps it). */
   id?: string;
   /** X @name / GitHub login; Google: the email address (never stored or shown); LinkedIn: an opaque id. */
