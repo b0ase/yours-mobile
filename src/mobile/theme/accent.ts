@@ -16,6 +16,7 @@ import {
 import { deriveMix, normaliseMix, type MixSpec } from './mixer';
 import { accentOfPack, parseThemePack, type ThemePack } from './themePack';
 import { rememberSiteTheme } from './siteTheme';
+import { builtinPackForSite } from './themeSites';
 
 /**
  * Applies and stores the app accent (Theme → App colours). Per account on this device only, nothing leaves it.
@@ -253,6 +254,9 @@ export const loadStorePack = (account: string): ThemePack | null =>
 /** Wears a site's theme (Theme › From sites, the site's offer): saved like a store pack and listed under From sites. */
 export function wearSiteTheme(account: string, pack: ThemePack): void {
   rememberSiteTheme(pack);
+  // A site with a built-in pack (b0ase.com → 'b0ase') wears the whole pack, shapes included (themeSites.ts).
+  const builtin = builtinPackForSite(pack.id);
+  if (builtin) return saveAccent(account, builtin);
   saveStorePack(account, pack);
 }
 

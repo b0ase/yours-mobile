@@ -1500,6 +1500,44 @@
         "hi": "#B00E28",
         "lo": "#9E0C24"
       }
+    },
+    {
+      "format": "bwx-theme/1",
+      "id": "b0ase",
+      "label": "b0ase",
+      "blurb": "Techy black, slanted buttons",
+      "creator": "bWalletX",
+      "tier": "free",
+      "preview": [
+        "#000000",
+        "#0A0A0A",
+        "#FFFFFF"
+      ],
+      "look": {
+        "scheme": "dark",
+        "on": "#000000",
+        "bg": "#000000",
+        "surface": "#0A0A0A",
+        "surface2": "#121212",
+        "nav": "#000000",
+        "text": "#F2F2F2",
+        "muted": "#8A8A8A",
+        "line": "#262626",
+        "success": "#22C55E",
+        "danger": "#EF4444",
+        "shadow": "none",
+        "trim": "rgb(255 255 255 / 0.9)",
+        "glow": "none",
+        "fontNum": "'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace",
+        "fontHead": "'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace",
+        "weightHead": 700,
+        "radius": "5px",
+        "radiusCard": "6px",
+        "pattern": "topo",
+        "accent": "#FFFFFF",
+        "hi": "#FFFFFF",
+        "lo": "#D4D4D4"
+      }
     }
   ]
 }
