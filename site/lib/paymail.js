@@ -94,6 +94,7 @@ const PREMIUM_BCORP = [
   'crypto',
   'nft',
   'dex',
+  'bsvex',
 ];
 const BCORP_KEY = '03c96b37e69377c8af33b583067f56444c83a656b05014e8f15003e67250943880';
 
