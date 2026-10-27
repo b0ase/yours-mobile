@@ -1,5 +1,5 @@
 import { keepAnimated } from './animatedAvatar';
-import { bavatarSvg } from '../bavatar/bavatar';
+import { bavatarSvg, isVariant } from '../bavatar/bavatar';
 import { currentAccentId } from '../theme/accent';
 import { accentById } from '../theme/accents';
 import { tintSvg } from '../theme/tint';
@@ -134,15 +134,37 @@ export async function resizeAvatar(file: File, max = 256, quality = 0.85): Promi
  * a copy of bit-sign's lib/bavatar), so the wallet and bChatX show the same picture with no network.
  */
 const bavatarCache = new Map<string, string>();
+/** The minted design this identity shows (bAvatar shuffle, 27 Oct 2026), remembered on this device; 0 = original. */
+const VARIANT_KEY = (key: string) => `bwx.bavatar.variant.${key}`;
+export function bavatarVariant(identityPubKey: string): number {
+  try {
+    const n = Number(localStorage.getItem(VARIANT_KEY(String(identityPubKey).toLowerCase())) || 0);
+    return isVariant(n) ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+export function setBavatarVariant(identityPubKey: string, variant: number) {
+  if (!isVariant(variant) || variant === bavatarVariant(identityPubKey)) return;
+  try {
+    localStorage.setItem(VARIANT_KEY(String(identityPubKey).toLowerCase()), String(variant));
+  } catch {
+    /* storage unavailable: the original design shows */
+  }
+  notifyAvatarChange();
+}
 export function bavatarDataUri(identityPubKey: string | null | undefined): string {
   const key = String(identityPubKey || '').toLowerCase();
   if (!/^0[23][0-9a-f]{64}$/.test(key)) return '';
   // Shown in the app accent (Theme → App colours); gold leaves the art as drawn.
   const accent = currentAccentId();
-  const ck = accent + accentById(accent).accent + ':' + key;
+  const variant = bavatarVariant(key);
+  const ck = accent + accentById(accent).accent + ':' + key + '#' + variant;
   let uri = bavatarCache.get(ck);
   if (!uri) {
-    uri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(tintSvg(bavatarSvg(key, { size: 128 }), accent));
+    uri =
+      'data:image/svg+xml;charset=utf-8,' +
+      encodeURIComponent(tintSvg(bavatarSvg(key, { size: 128, variant }), accent));
     bavatarCache.set(ck, uri);
   }
   return uri;

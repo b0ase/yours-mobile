@@ -1,7 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import type { BavatarMine } from '../chat/api';
 import {
+  BAVATAR_FEE_SATS,
   MAX_BAVATAR_BYTES,
+  bavatarArt,
+  loadPendingBavatar,
+  mintBavatar,
+  recoverPendingBavatar,
+  savePendingBavatar,
   bavatarLabel,
   bavatarMintSvg,
   bavatarNumber,
@@ -44,13 +50,78 @@ describe('bAvatar mint', () => {
     expect(bavatarMintSvg('nope', 'alice', 7)).toBe('');
   });
 
-  test('offer: minted, free for founders, paid after', () => {
-    expect(mintOffer(mine({ minted: { txid: 'a'.repeat(64), outpoint: 'x_0' } }))).toEqual({
-      kind: 'minted',
-      txid: 'a'.repeat(64),
-    });
+  test("offer: free only for a founder's FIRST mint; paid after #1,000 and for every replacement", () => {
+    const minted = { txid: 'a'.repeat(64), outpoint: 'x_0' };
+    expect(mintOffer(mine({ minted }))).toEqual({ kind: 'current' });
+    expect(mintOffer(mine({ minted: { ...minted, variant: 3 } }), 3)).toEqual({ kind: 'current' });
     expect(mintOffer(mine())).toEqual({ kind: 'free' });
-    expect(mintOffer(mine({ number: 1001, founding: false }))).toEqual({ kind: 'paid' });
+    expect(mintOffer(mine(), 5)).toEqual({ kind: 'free' }); // first mint of any design
+    expect(mintOffer(mine({ number: 1001, founding: false }))).toEqual({ kind: 'paid', sats: BAVATAR_FEE_SATS });
+    // A founder replacing their bAvatar pays: the sponsor covers one mint per account.
+    expect(mintOffer(mine({ minted }), 1)).toEqual({ kind: 'paid', sats: BAVATAR_FEE_SATS });
+    expect(mintOffer(mine({ minted: null, mints: 1 }), 1)).toEqual({ kind: 'paid', sats: BAVATAR_FEE_SATS });
+  });
+
+  test('the design number is in the card for #n, and #0 keeps the card unchanged', () => {
+    expect(bavatarMintSvg(KEY, 'alice', 7, 0)).toBe(bavatarMintSvg(KEY, 'alice', 7));
+    expect(bavatarMintSvg(KEY, 'alice', 7)).not.toContain('data-bavatar-design');
+    const v = bavatarMintSvg(KEY, 'alice', 7, 4);
+    expect(v).toContain('data-bavatar-design="4"');
+    expect(v).not.toBe(bavatarMintSvg(KEY, 'alice', 7));
+    expect(bavatarMintSvg(KEY, 'alice', 7, -1)).toBe('');
+  });
+
+  test('save before commit: a spent mint is saved, recovered by re-recording, never re-minted', async () => {
+    const m = new Map<string, string>();
+    const kv = {
+      getItem: (k: string) => m.get(k) ?? null,
+      setItem: (k: string, v: string) => void m.set(k, v),
+      removeItem: (k: string) => void m.delete(k),
+    };
+    const txid = 'b'.repeat(64);
+    savePendingBavatar({ identityKey: KEY, txid, variant: 2, at: 1 }, kv);
+    expect(loadPendingBavatar(KEY, kv)?.variant).toBe(2);
+    const calls: unknown[][] = [];
+    // Server down: the record stays saved.
+    await expect(
+      recoverPendingBavatar(
+        {
+          recordBavatarMint: async () => {
+            throw new Error('offline');
+          },
+        },
+        KEY,
+        kv,
+      ),
+    ).rejects.toThrow('offline');
+    expect(loadPendingBavatar(KEY, kv)).not.toBeNull();
+    const client = {
+      recordBavatarMint: async (...a: unknown[]) => {
+        calls.push(a);
+        return { ok: true };
+      },
+    };
+    expect(await recoverPendingBavatar(client, KEY, kv)).toBe(txid);
+    expect(calls).toEqual([[txid, 2, bavatarArt(KEY, 2)]]);
+    expect(loadPendingBavatar(KEY, kv)).toBeNull();
+    expect(await recoverPendingBavatar(client, KEY, kv)).toBeNull();
+
+    // While a record is waiting, mintBavatar records it and refuses to spend again.
+    savePendingBavatar({ identityKey: KEY, txid, variant: 2, at: 1 }, kv);
+    const ctx = {} as Parameters<typeof mintBavatar>[0];
+    await expect(
+      mintBavatar(ctx, { identityKey: KEY, payAddress: '', mine: mine(), variant: 3, client: client as never, kv }),
+    ).rejects.toThrow(/recorded/);
+    expect(calls.length).toBe(2);
+    expect(loadPendingBavatar(KEY, kv)).toBeNull();
+  });
+
+  test('minting the design you already have spends nothing', async () => {
+    const ctx = {} as Parameters<typeof mintBavatar>[0];
+    const minted = { txid: 'c'.repeat(64), outpoint: 'x_0', variant: 6 };
+    expect(await mintBavatar(ctx, { identityKey: KEY, payAddress: '', mine: mine({ minted }), variant: 6 })).toBe(
+      minted.txid,
+    );
   });
 
   test('sponsor only an unsponsored founder that ran out of funds', () => {
@@ -58,6 +129,11 @@ describe('bAvatar mint', () => {
     expect(shouldSponsor(mine(), undefined)).toBe(false);
     expect(shouldSponsor(mine({ sponsored: true }), 'Insufficient funds')).toBe(false);
     expect(shouldSponsor(mine({ number: 1001, founding: false }), 'Insufficient funds')).toBe(false);
+    // Never for a replacement, even if the earlier mint was never sponsored.
+    expect(shouldSponsor(mine({ minted: { txid: 'a'.repeat(64), outpoint: 'x_0' } }), 'Insufficient funds')).toBe(
+      false,
+    );
+    expect(shouldSponsor(mine({ mints: 2 }), 'Insufficient funds')).toBe(false);
   });
 });
 
