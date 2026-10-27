@@ -92,6 +92,7 @@ import { HandleFlow } from '../names/HandleFlow';
 import { avatarFor, B_AVATAR, pendingBQuestions, rememberAvatar, useAvatars } from '../chat/avatars';
 import { ChatAvatar as Avatar } from '../chat/ChatAvatar';
 import { roomEmoji, roomHeaderBackground, roomListBackdrop, roomOwnerOrigin, useRoomLook } from '../chat/roomLook';
+import { roomBubbles } from '../chat/roomTheme';
 import { gateIconUrl, lockedForMe, lockedLine, roomTokenGate } from '../chat/roomGate';
 import { roomSetupState, shouldOfferRoomSetup } from '../chat/roomSetupPrompt';
 import type { ReplyRef } from '../chat/api';
@@ -764,6 +765,8 @@ const Conversation = ({
   // Dark looks only: a light look keeps the dark room (above), so its art would fade into the wrong colour.
   const backdrop = look?.mode === 'dark' ? roomListBackdrop(look) : null;
   const emoji = look ? roomEmoji(room.metadata) : null;
+  // A room's own bubble colours and accent (chat/roomTheme.ts; $TERRORNODE red/pink). Null: the default look.
+  const bubbles = roomBubbles(room.ticker);
   const askB = () => {
     setDraft((d) => (/^\/b(\s|$)/i.test(d) ? d : `/b ${d}`));
     requestAnimationFrame(() => composer.current?.focus());
@@ -798,6 +801,7 @@ const Conversation = ({
         // GOLD in it (buttons, links, badges) is the room's. A light look keeps the dark room so messages still read.
         background: look?.mode === 'dark' ? look.bg : BG,
         ...(look ? ({ '--bw-accent-hi': look.accentHi, '--bw-accent': look.accent } as CSSProperties) : {}),
+        ...(bubbles ? ({ '--bw-accent-hi': bubbles.accent, '--bw-accent': bubbles.accent } as CSSProperties) : {}),
       }}
     >
       {/* The connected game's room: a short balance card on top (chat/SiteRoomViews.tsx; only for that room).
@@ -816,7 +820,7 @@ const Conversation = ({
                 background: roomHeaderBackground(look),
                 borderBottom: `2px solid ${look.accent}`,
                 // The header's buttons use the accent (GOLD reads this variable).
-                '--bw-accent-hi': look.accentHi,
+                '--bw-accent-hi': bubbles?.accent ?? look.accentHi,
               } as CSSProperties)
             : {
                 paddingTop: 8,
@@ -1174,9 +1178,21 @@ const Conversation = ({
                     borderRadius: 18,
                     borderBottomRightRadius: it.mine ? 6 : 18,
                     borderBottomLeftRadius: it.mine ? 18 : 6,
-                    background: it.mine ? 'linear-gradient(160deg, var(--bw-accent-hi) 0%, #E9B21A 100%)' : PANEL,
-                    color: it.mine ? '#1a1300' : '#f2f2f2',
-                    border: it.mine ? 'none' : `1px solid ${LINE}`,
+                    background: bubbles
+                      ? it.mine
+                        ? bubbles.mineBg
+                        : bubbles.theirsBg
+                      : it.mine
+                        ? 'linear-gradient(160deg, var(--bw-accent-hi) 0%, #E9B21A 100%)'
+                        : PANEL,
+                    color: bubbles
+                      ? it.mine
+                        ? bubbles.mineText
+                        : bubbles.theirsText
+                      : it.mine
+                        ? '#1a1300'
+                        : '#f2f2f2',
+                    border: it.mine ? 'none' : `1px solid ${bubbles ? bubbles.theirsBorder : LINE}`,
                     opacity: it.message.pending && !it.message.failed ? 0.75 : 1,
                   }}
                 >
