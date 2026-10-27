@@ -33,6 +33,8 @@ import { fetchExchangeRate } from '../../utils/wallet';
 import { AgentCallError, CLI_ORIGIN, handleAgentCall, type AgentGrant } from './agentPairing';
 import { ReplyBook } from './replies';
 import { handleBitsignCall, isBitsignAction } from './bitsign';
+import { handleTwetchCall, isTwetchAction, type TwetchWallet } from '../twetch/twetchCalls';
+import type { TwetchStore } from '../twetch/twetchLink';
 import { USER_DENIED_CODE, USER_DENIED_MESSAGE, isUserDenied } from '../../services/userDenied';
 import { PAIR_MIRROR_KEY, toPairMirror } from '../../services/pairedPromptGuard';
 import { closeConnectCardsFor, forgetLogin, handlePairLoginCall, watchConnectCard } from './pairLogin';
@@ -55,6 +57,8 @@ let agentDeps: {
   feeRate?: () => number;
   /** How many accounts the wallet holds; decides whether pre-binding sessions are adopted (see bindToAccount). */
   accountCount?: number;
+  /** The open account's Twetch signing key store (twetch/twetchLink.ts), for twetch.* calls. */
+  twetch?: TwetchStore;
 } = {
   ctx: undefined,
   currentId: undefined,
@@ -416,6 +420,19 @@ async function onRequest(l: Live, id: string, action: string, params: unknown) {
   // origin; ReplyBook above already makes a re-sent id show one pad and get one answer.
   if (isBitsignAction(action))
     return reply(l, { t: 'res', id, ...(await handleBitsignCall(action, params, l.stored.origin)) });
+  // Post to Twetch (twetch/twetchCalls.ts): signs only with the linked Twetch key, only Twetch's login challenge or
+  // a post the user approved on the sheet; the txHex goes back unsent and the site submits it.
+  if (isTwetchAction(action))
+    return reply(l, {
+      t: 'res',
+      id,
+      ...(await handleTwetchCall(action, params, l.stored.origin, {
+        store: agentDeps.twetch,
+        wallet: agentDeps.ctx?.wallet as unknown as TwetchWallet | undefined,
+        bsvUsd,
+        proven: !!l.stored.proven,
+      })),
+    });
   try {
     // Sign-in (pairLogin.ts): one "Sign in to <host> as $handle?" sheet for the login signature, every time; the
     // identity key and the matching chat-key proof go with it. Every other call goes on below, unchanged.

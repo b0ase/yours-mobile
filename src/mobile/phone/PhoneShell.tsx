@@ -2,6 +2,7 @@ import { lazy, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef
 import { AuthRequestHost } from '../auth/AuthSheet';
 import { BrowseLinkHost } from '../browse/BrowseLinkHost';
 import { BitsignHost } from '../pair/BitsignHost';
+import { TwetchHost } from '../twetch/TwetchHost';
 import { PairLoginHost } from '../pair/PairLoginHost';
 import { useReducedMotion } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -9,7 +10,7 @@ import { BottomMenuContext, type MenuItems } from '../../contexts/BottomMenuCont
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { getBappFrameState, openBapp } from '../bappFrame/bappFrame';
 import { usePendingIndexing } from '../tokens/pendingIndexing';
-import { indexingEnabled } from '../storeBuild';
+import { TWETCH_POST_ENABLED, indexingEnabled } from '../storeBuild';
 import { TAB_TAP } from '../tabs/tabs';
 import { onTabRetap } from '../tabs/tabRetap';
 import { badgeText, walletBadgeLabel } from '../tabs/tabBadges';
@@ -617,6 +618,7 @@ const Shell = () => {
       <AuthRequestHost />
       <BrowseLinkHost />
       <BitsignHost />
+      {TWETCH_POST_ENABLED && <TwetchHost />}
       <PairLoginHost />
     </>
   );

@@ -649,3 +649,14 @@ export const ENVELOPES_ENABLED: boolean = !(
   import.meta.env.VITE_CHANNEL === 'ios-store' ||
   import.meta.env.VITE_CHANNEL === 'android-play'
 );
+
+/**
+ * Post to Twetch from bChatX (mobile/twetch/, 27 Oct 2026): the twetch.* paired-site calls and Settings › Twetch.
+ * bWalletX only for now; a store build answers twetch.* with NOT_SUPPORTED and shows no Twetch link. Literal env
+ * check, same env as STORE_BUILD.
+ */
+export const TWETCH_POST_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);

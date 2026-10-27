@@ -847,3 +847,22 @@ describe('App Review 3.1.5(iii): no exchange surfaces in a store build', () => {
     expect(src('./agent/guide.ts')).toContain('MARKET_ENABLED ? MARKET_LINE : STORE_MARKET_LINE');
   });
 });
+
+describe('TWETCH_POST_ENABLED: Post to Twetch is bWalletX only', () => {
+  const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  const cond = (text: string, name: string) =>
+    (new RegExp(`export const ${name}: boolean =\\s*!?\\(?([^;]*?)\\)?;`, 's').exec(text)?.[1] ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  test('inverse of STORE_BUILD, from the same env', async () => {
+    const { TWETCH_POST_ENABLED } = await import('./storeBuild');
+    expect(TWETCH_POST_ENABLED).toBe(!STORE_BUILD);
+    const s = src('./storeBuild.ts');
+    expect(cond(s, 'TWETCH_POST_ENABLED')).toBe(cond(s, 'STORE_BUILD'));
+  });
+  test('the calls, the sheet and the Settings row all sit behind it', () => {
+    expect(src('./twetch/twetchCalls.ts')).toContain('deps.enabled ?? TWETCH_POST_ENABLED');
+    expect(src('./phone/PhoneShell.tsx')).toContain('TWETCH_POST_ENABLED && <TwetchHost />');
+    expect(src('./settings/FeedSettings.tsx')).toContain("TWETCH_POST_ENABLED && screen === 'twetch'");
+  });
+});
