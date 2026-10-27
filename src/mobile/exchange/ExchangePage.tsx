@@ -17,6 +17,7 @@ import { requestMarketToken, takeMarketToken } from '../chat/nav';
 import { MyTokenListings } from '../sell/MyTokenListings';
 import { loadSwaps } from '../swap/swapApi';
 import { PLACEMENT_ENABLED, SWAP_ENABLED } from '../storeBuild';
+import { prefillFromQuery } from '../swap/swapLink';
 /** Exchange › Shares: restricted, no trading (bShares). bWalletX only; dropped from the store bundle. */
 const SharesMarket = PLACEMENT_ENABLED ? lazy(() => import('../placement/SharesMarket')) : null;
 import { useTabHome } from '../tabs/useTabHome';
@@ -574,8 +575,10 @@ const Orders = () => {
  * them to /exchange…).
  */
 const ExchangePage = () => {
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const navigate = useNavigate();
+  // A swap link (swap/swapLink.ts): /m/exchange/swap?from=…&network=…&amount=…&then=bsvex:… fills in, never starts.
+  const swapPrefill = useMemo(() => (SWAP_ENABLED ? prefillFromQuery(search) : null), [search]);
   const rest = pathname.startsWith(EXCHANGE_ROUTE) ? pathname.slice(EXCHANGE_ROUTE.length) : '';
   const view = exchangeView(rest);
   const rate = useRate();
@@ -670,7 +673,13 @@ const ExchangePage = () => {
           <Suspense fallback={<Loading text="Loading swap…" />}>
             {SwapFlow ? (
               <div className="rounded-2xl border border-[#2b2f36] overflow-hidden min-h-[560px]">
-                <SwapFlow inline getAddress={swapAddress} onClose={() => navigate(EXCHANGE_ROUTE)} />
+                <SwapFlow
+                  inline
+                  getAddress={swapAddress}
+                  key={search}
+                  prefill={swapPrefill}
+                  onClose={() => navigate(EXCHANGE_ROUTE)}
+                />
               </div>
             ) : (
               <p className="text-sm" style={{ color: MUTED }}>

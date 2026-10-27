@@ -1,6 +1,7 @@
 import { lazy, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AuthRequestHost } from '../auth/AuthSheet';
 import { BrowseLinkHost } from '../browse/BrowseLinkHost';
+import { SwapLinkHost } from '../swap/SwapLinkHost';
 import { BitsignHost } from '../pair/BitsignHost';
 import { TwetchHost } from '../twetch/TwetchHost';
 import { PairLoginHost } from '../pair/PairLoginHost';
@@ -617,6 +618,7 @@ const Shell = () => {
       )}
       <AuthRequestHost />
       <BrowseLinkHost />
+      <SwapLinkHost />
       <BitsignHost />
       {TWETCH_POST_ENABLED && <TwetchHost />}
       <PairLoginHost />
