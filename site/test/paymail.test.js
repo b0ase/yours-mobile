@@ -687,10 +687,10 @@ describe('name limits', () => {
   });
 });
 
-describe('name pricing (owner, 27 Oct 2026): first name free, extra names $1', () => {
+describe('name pricing (owner, 27 Oct 2026): by length, 5+ free, 4 $10, 3 $100, 1-2 $1000', () => {
   const FEE_ADDR = PrivateKey.fromRandom().toAddress();
   const FENV = { ...ENV, BWALLET_NAME_FEE_ADDRESS: FEE_ADDR, PAYMAIL_ADMIN_SECRET: 'test-admin-secret-0123456789' };
-  const RATE = 50; // $50/BSV → $1 = 2,000,000 sats
+  const RATE = 50; // $50/BSV → $10 = 20,000,000 sats
   const payTx = (sats, to = FEE_ADDR) => {
     const tx = new Transaction();
     tx.addOutput({ lockingScript: new P2PKH().lock(to), satoshis: sats });
@@ -700,7 +700,7 @@ describe('name pricing (owner, 27 Oct 2026): first name free, extra names $1', (
     tx: async (id) => txs.find((t) => t.id('hex') === id) ?? null,
     bsvUsd: async () => RATE,
   });
-  const extraStore = () => {
+  const priceStore = () => {
     const s = antiStore();
     s.receipts = [];
     s.useFeeTx = async (r) => (s.fees.has(r.txid) ? false : (s.fees.add(r.txid), s.receipts.push(r), true));
@@ -713,129 +713,134 @@ describe('name pricing (owner, 27 Oct 2026): first name free, extra names $1', (
     s.listNameFees = async () => s.receipts.map((r) => ({ ...r, created_at: '2026-10-27T00:00:00.000Z' }));
     return s;
   };
-  // bit-sign says nobody owns anything: only the $1 path can add a name.
-  const noBitsign = async () => ({ matches: false, active: false });
 
-  test('fee math: $1 at the rate, 20% slippage; 1 cent default kept', () => {
-    expect(nameFee.EXTRA_NAME_USD).toBe(1);
-    expect(nameFee.requiredSats(RATE, 1)).toBe(2_000_000);
+  test('fee math: tiers by length; sats at the rate; social names free', () => {
+    expect(['alice', 'abcd', 'abc', 'ab', 'a', 'me.x'].map(nameFee.namePriceUsd)).toEqual([0, 10, 100, 1000, 1000, 0]);
+    expect(nameFee.requiredSats(RATE, 10)).toBe(20_000_000);
+    expect(nameFee.requiredSats(RATE, 100)).toBe(200_000_000);
     expect(nameFee.requiredSats(RATE)).toBe(20_000);
-    expect(nameFee.usdLabel(1)).toBe('$1');
+    expect(nameFee.usdLabel(10)).toBe('$10');
     expect(nameFee.usdLabel(0.01)).toBe('1¢');
   });
 
-  test('config: first name free (nameFee null), extra names $1 when the fee address is set', async () => {
+  test('config: nameFee null; namePrices with the address and tiers when the fee is on', async () => {
     expect((await pm.makeHandlers({ store: memStore(), env: ENV }).config())[1]).toMatchObject({
       nameFee: null,
-      extraNameFee: null,
+      namePrices: null,
     });
     expect((await pm.makeHandlers({ store: memStore(), env: FENV }).config())[1]).toMatchObject({
       nameFee: null,
-      extraNameFee: { address: FEE_ADDR, usd: 1 },
+      namePrices: { address: FEE_ADDR, tiers: { 1: 1000, 2: 1000, 3: 100, 4: 10 } },
     });
   });
 
-  test('the first claim and a rename pay nothing, even with the fee on', async () => {
-    const store = extraStore();
+  test('5+ character names are free, first, extra and renamed, any number per key', async () => {
+    const store = priceStore();
     const h = pm.makeHandlers({ store, env: FENV, feeChain: mockChain([]) });
     const u = user();
-    expect((await h.register({}, await u.sign('register', { alias: 'firstfree' })))[0]).toBe(200);
-    expect((await h.register({}, await u.sign('register', { alias: 'renamedfree' })))[0]).toBe(200);
+    expect((await h.register({}, await u.sign('register', { alias: 'freeone' })))[0]).toBe(200);
+    expect((await h['names-add']({}, await u.sign('names-add', { alias: 'freetwo' })))[0]).toBe(200);
+    expect((await h['names-add']({}, await u.sign('names-add', { alias: 'freethree' })))[0]).toBe(200);
     expect(store.receipts).toEqual([]);
-    // Cooldown kept: a second rename inside 30 days is refused.
-    expect((await h.register({}, await u.sign('register', { alias: 'again' })))[0]).toBe(429);
   });
 
-  test('an extra name needs $1: refuses none, underpaid, wrong address and reuse; writes a receipt', async () => {
-    const good = payTx(1_700_000); // ≥ 80% of 2,000,000
-    const low = payTx(1_500_000);
-    const cent = payTx(20_000);
-    const wrong = payTx(3_000_000, PrivateKey.fromRandom().toAddress());
-    const store = extraStore();
-    const h = pm.makeHandlers({
-      store,
-      env: FENV,
-      feeChain: mockChain([good, low, cent, wrong]),
-      handleOwner: noBitsign,
-    });
+  test('a 4-character name needs $10: refuses none, underpaid, wrong address and reuse; writes a receipt', async () => {
+    const good = payTx(16_000_000); // ≥ 80% of 20,000,000
+    const low = payTx(15_000_000);
+    const wrong = payTx(30_000_000, PrivateKey.fromRandom().toAddress());
+    const store = priceStore();
+    const h = pm.makeHandlers({ store, env: FENV, feeChain: mockChain([good, low, wrong]) });
     const u = user();
-    expect((await h.register({}, await u.sign('register', { alias: 'mainname' })))[0]).toBe(200);
-    const [s0, r0] = await h['names-add']({}, await u.sign('names-add', { alias: 'extra1' }));
+    const [s0, r0] = await h.register({}, await u.sign('register', { alias: 'abcd' }));
     expect(s0).toBe(402);
-    expect(r0.extraNameFee).toEqual({ address: FEE_ADDR, usd: 1 });
-    for (const t of [low, cent, wrong])
-      expect((await h['names-add']({}, await u.sign('names-add', { alias: 'extra1', feeTxid: t.id('hex') })))[0]).toBe(
-        402,
-      );
-    const [s1, r1] = await h['names-add']({}, await u.sign('names-add', { alias: 'extra1', feeTxid: good.id('hex') }));
-    expect(s1).toBe(200);
-    expect(r1.added).toBe('extra1@pay.test');
+    expect(r0.namePrice).toEqual({ address: FEE_ADDR, usd: 10 });
+    for (const t of [low, wrong])
+      expect((await h.register({}, await u.sign('register', { alias: 'abcd', feeTxid: t.id('hex') })))[0]).toBe(402);
+    expect(store.aliases.has('abcd')).toBe(false);
+    expect((await h.register({}, await u.sign('register', { alias: 'abcd', feeTxid: good.id('hex') })))[0]).toBe(200);
     expect(store.receipts).toEqual([
       {
         txid: good.id('hex'),
         identity_key: u.identityKey,
-        alias: 'extra1',
-        satoshis: 1_700_000,
-        usd: 1,
+        alias: 'abcd',
+        satoshis: 16_000_000,
+        usd: 10,
         rate: RATE,
-        kind: 'extra',
+        kind: 'claim',
       },
     ]);
-    expect((await h['names-add']({}, await u.sign('names-add', { alias: 'extra2', feeTxid: good.id('hex') })))[0]).toBe(
+    // The same payment can't pay for another 4-character extra name.
+    expect((await h['names-add']({}, await u.sign('names-add', { alias: 'wxyz', feeTxid: good.id('hex') })))[0]).toBe(
       409,
     );
   });
 
-  test('reserved and bCorp-held names are never sellable, even with a valid $1 payment', async () => {
-    const good = payTx(2_000_000);
-    const store = extraStore();
-    const h = pm.makeHandlers({ store, env: FENV, feeChain: mockChain([good]), handleOwner: noBitsign });
+  test('3 characters need $100 and 2 need $1000 (a $10 payment is not enough)', async () => {
+    const ten = payTx(20_000_000);
+    const hundred = payTx(200_000_000);
+    const thousand = payTx(2_000_000_000);
+    const store = priceStore();
+    const h = pm.makeHandlers({ store, env: FENV, feeChain: mockChain([ten, hundred, thousand]) });
     const u = user();
-    await h.register({}, await u.sign('register', { alias: 'buyer' }));
-    for (const alias of ['money', 'gold', 'bwalletx', 'bcorp', 'admin']) {
-      expect((await h['names-add']({}, await u.sign('names-add', { alias, feeTxid: good.id('hex') })))[0]).toBe(400);
-      expect((await h.register({}, await user().sign('register', { alias })))[0]).toBe(400);
-    }
-    expect(store.receipts).toEqual([]);
-    expect(pm.RESERVED_OWNERS.money).toBeTruthy();
+    await h.register({}, await u.sign('register', { alias: 'mainname' }));
+    expect((await h['names-add']({}, await u.sign('names-add', { alias: 'xyz', feeTxid: ten.id('hex') })))[0]).toBe(
+      402,
+    );
+    expect((await h['names-add']({}, await u.sign('names-add', { alias: 'xyz', feeTxid: hundred.id('hex') })))[0]).toBe(
+      200,
+    );
+    expect((await h['names-add']({}, await u.sign('names-add', { alias: 'qz', feeTxid: thousand.id('hex') })))[0]).toBe(
+      200,
+    );
+    expect(store.receipts.map((r) => [r.alias, r.usd, r.kind])).toEqual([
+      ['xyz', 100, 'extra'],
+      ['qz', 1000, 'extra'],
+    ]);
   });
 
-  test('available reports price: free / $1 / taken / reserved / held', async () => {
-    const store = extraStore();
+  test('reserved and bCorp-held names are never sellable, even with a big valid payment', async () => {
+    const big = payTx(2_000_000_000);
+    const store = priceStore();
+    const h = pm.makeHandlers({ store, env: FENV, feeChain: mockChain([big]) });
+    const u = user();
+    await h.register({}, await u.sign('register', { alias: 'buyer' }));
+    for (const alias of ['money', 'ai', 'gold', 'bwalletx', 'bcorp', 'admin']) {
+      expect((await h['names-add']({}, await u.sign('names-add', { alias, feeTxid: big.id('hex') })))[0]).toBe(400);
+      expect((await h.register({}, await user().sign('register', { alias, feeTxid: big.id('hex') })))[0]).toBe(400);
+    }
+    expect(store.receipts).toEqual([]);
+  });
+
+  test('available reports status + priceUsd: free / $10 / $100 / $1000 / taken / reserved / held', async () => {
+    const store = priceStore();
     const h = pm.makeHandlers({ store, env: FENV, feeChain: mockChain([]) });
     const u = user();
-    const anon = await h.available({ alias: 'newname' });
-    expect(anon[1]).toMatchObject({ available: true, status: 'free', price: { usd: 0, extraUsd: 1 } });
-    expect((await h.available({ alias: 'newname', key: u.identityKey }))[1].status).toBe('free');
+    const st = async (alias, key) => {
+      const r = (await h.available({ alias, ...(key ? { key } : {}) }))[1];
+      return [r.status, r.priceUsd];
+    };
+    expect(await st('newname')).toEqual(['free', 0]);
+    expect(await st('abcd')).toEqual(['priced', 10]);
+    expect(await st('abc')).toEqual(['priced', 100]);
+    expect(await st('qz')).toEqual(['priced', 1000]);
     await h.register({}, await u.sign('register', { alias: 'owned' }));
-    expect((await h.available({ alias: 'newname', key: u.identityKey }))[1]).toMatchObject({
-      available: true,
-      status: 'paid',
-      price: { usd: 1, extraUsd: 1 },
-    });
-    expect((await h.available({ alias: 'owned' }))[1]).toMatchObject({ available: false, status: 'taken' });
-    expect((await h.available({ alias: 'owned', key: u.identityKey }))[1].status).toBe('mine');
-    expect((await h.available({ alias: 'admin' }))[1]).toMatchObject({ available: false, status: 'reserved' });
-    expect((await h.available({ alias: 'money' }))[1]).toMatchObject({ available: false, status: 'held' });
-    expect((await h.available({ alias: '-bad' }))[1].status).toBe('invalid');
-    // Fee off: an extra name is free.
-    const off = pm.makeHandlers({ store, env: ENV });
-    expect((await off.available({ alias: 'newname', key: u.identityKey }))[1]).toMatchObject({
-      status: 'free',
-      price: { usd: 0, extraUsd: 0 },
-    });
+    expect(await st('owned')).toEqual(['taken', null]);
+    expect(await st('owned', u.identityKey)).toEqual(['mine', 0]);
+    expect(await st('admin')).toEqual(['reserved', null]);
+    expect(await st('money')).toEqual(['held', null]);
+    expect(await st('-bad')).toEqual(['invalid', null]);
+    // Fee off: everything available is free.
+    expect((await pm.makeHandlers({ store, env: ENV }).available({ alias: 'abc' }))[1].priceUsd).toBe(0);
   });
 
   test('CSV export: needs the admin secret, lists receipts with documented columns', async () => {
-    const good = payTx(2_000_000);
-    const store = extraStore();
-    const h = pm.makeHandlers({ store, env: FENV, feeChain: mockChain([good]), handleOwner: noBitsign });
+    const good = payTx(20_000_000);
+    const store = priceStore();
+    const h = pm.makeHandlers({ store, env: FENV, feeChain: mockChain([good]) });
     const u = user();
-    await h.register({}, await u.sign('register', { alias: 'csvmain' }));
-    await h['names-add']({}, await u.sign('names-add', { alias: 'csvextra', feeTxid: good.id('hex') }));
+    await h.register({}, await u.sign('register', { alias: 'csvb', feeTxid: good.id('hex') }));
     expect((await h['name-fees-export']({}, {}, {}))[0]).toBe(401);
     expect((await h['name-fees-export']({}, {}, { adminSecret: 'wrong' }))[0]).toBe(401);
-    // Unset (or short) secret: always refused.
     const noSecret = pm.makeHandlers({ store, env: { ...FENV, PAYMAIL_ADMIN_SECRET: '' } });
     expect((await noSecret['name-fees-export']({}, {}, { adminSecret: '' }))[0]).toBe(401);
     const [s, csv, headers] = await h['name-fees-export']({}, {}, { adminSecret: FENV.PAYMAIL_ADMIN_SECRET });
@@ -843,33 +848,25 @@ describe('name pricing (owner, 27 Oct 2026): first name free, extra names $1', (
     expect(headers['Content-Type']).toMatch(/text\/csv/);
     const lines = csv.trim().split('\n');
     expect(lines[0]).toBe('created_at,txid,alias,identity_key,kind,usd,satoshis,rate_usd_per_bsv');
-    expect(lines[1]).toBe(
-      `2026-10-27T00:00:00.000Z,${good.id('hex')},csvextra,${u.identityKey},extra,1,2000000,${RATE}`,
-    );
+    expect(lines[1]).toBe(`2026-10-27T00:00:00.000Z,${good.id('hex')},csvb,${u.identityKey},claim,10,20000000,${RATE}`);
     expect(pm.nameFeesCsv([{ alias: '=cmd,1' }]).split('\n')[1]).toBe(`,,"'=cmd,1",,,,,`);
   });
 
   test('a tx the indexers have not seen is accepted from the app once our broadcast takes it', async () => {
-    const tx = payTx(2_000_000);
+    const tx = payTx(20_000_000);
     const sent = [];
-    const store = extraStore();
     const h = pm.makeHandlers({
-      store,
+      store: priceStore(),
       env: FENV,
       feeChain: mockChain([]),
       broadcast: async (t) => void sent.push(t.id('hex')),
-      handleOwner: noBitsign,
     });
-    const u = user();
-    await h.register({}, await u.sign('register', { alias: 'freshmain' }));
-    const body = {
-      ...(await u.sign('names-add', { alias: 'freshextra', feeTxid: tx.id('hex') })),
-      feeTx: tx.toHex(),
-    };
-    expect((await h['names-add']({}, body))[0]).toBe(200);
+    const body = { ...(await user().sign('register', { alias: 'frsh', feeTxid: tx.id('hex') })), feeTx: tx.toHex() };
+    expect((await h.register({}, body))[0]).toBe(200);
     expect(sent).toEqual([tx.id('hex')]);
   });
 });
+
 describe('b_feedback 67: destinations the payer can check', () => {
   test('each P2P output carries the derivation that re-derives its script from the identity key', async () => {
     const store = memStore();

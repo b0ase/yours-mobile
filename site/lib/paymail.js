@@ -716,18 +716,53 @@ function makeHandlers({
     return receipt;
   };
 
+  /**
+   * Check and record the payment for a priced name. Returns null when the name is free or the payment is good
+   * (receipt written), else the [status, body] to send. One fee txid pays for one name.
+   */
+  const payForName = async ({ alias, key, body, kind }) => {
+    // A reserved name's designated owner (e.g. bCorp's held names) takes it without paying.
+    if (reservedOwners[alias] === key) return null;
+    const usd = nameFee.namePriceUsd(alias);
+    const address = nameFee.feeAddress(env);
+    if (!usd || !address) return null;
+    const priceOut = { address, usd };
+    const chk = await nameFee.checkFeeTx({
+      txid: String(body.fields?.feeTxid || '').toLowerCase(),
+      usd,
+      txHex: body.feeTx,
+      address,
+      c: feeChain,
+      broadcast,
+      parse: parseIncoming,
+    });
+    if (!chk.ok) return [402, { error: chk.error, namePrice: priceOut }];
+    if (!store.useFeeTx) return [503, { error: 'Name payments are not available right now' }];
+    const fresh = await store.useFeeTx({
+      txid: String(body.fields.feeTxid).toLowerCase(),
+      identity_key: key,
+      alias,
+      satoshis: chk.satoshis,
+      usd: chk.usd,
+      rate: chk.rate,
+      kind,
+    });
+    return fresh ? null : [409, { error: 'That payment already paid for a name' }];
+  };
+
   return {
     caps: async () => [200, capabilities(env)],
 
-    // What the app needs before claiming a name (owner pricing, 27 Oct 2026): the first name is free
-    // (nameFee null, so older apps claim it without paying); an extra name costs extraNameFee.usd ($1).
+    // What the app needs before claiming a name (owner pricing, 27 Oct 2026): names of 5+ characters are free;
+    // shorter ones cost namePrices.tiers[length] USD, paid to namePrices.address. nameFee (the old flat 1 cent)
+    // is null, so older apps claim free names without paying. namePrices null = all names free (fee off).
     config: async () => {
       const address = nameFee.feeAddress(env);
       return [
         200,
         {
           nameFee: null,
-          extraNameFee: address ? { address, usd: nameFee.EXTRA_NAME_USD } : null,
+          namePrices: address ? { address, tiers: nameFee.PRICE_TIERS } : null,
           nameChangeDays: CHANGE_COOLDOWN_MS / 86_400_000,
         },
       ];
@@ -1097,7 +1132,9 @@ function makeHandlers({
           if ((await store.countIpClaims(ipHash, since)) >= max)
             return [429, { error: 'Too many new names from this network today. Try again tomorrow.' }];
         }
-        // The first name and renaming it are free (owner, 27 Oct 2026); extra names pay in names-add.
+        // Short names cost money (owner, 27 Oct 2026), first claim or rename alike; 5+ characters are free.
+        const paid = await payForName({ alias, key: identityKey, body, kind: isRename ? 'rename' : 'claim' });
+        if (paid) return paid;
       }
       if (mine && mine.alias !== alias && (mine.kind ?? 'plain') === kind) {
         await store.renameAlias(mine.alias, alias);
@@ -1171,39 +1208,33 @@ function makeHandlers({
     },
 
     // Same rules as register: what the claim screen shows. `key` (optional) is the asking wallet.
-    // Same rules as register, plus the price (owner, 27 Oct 2026) so the claim screen and bwalletx.com/names can
-    // show it. status: free | paid | mine | taken | reserved | held (for The Bitcoin Corporation) | invalid.
-    // With `key`, free/paid is exact (a key without a plain name gets its first one free); without it, an
-    // available name is `free` (your first name is free) and `extraUsd` says what an extra one costs.
+    // Same rules as register, plus the price (owner, 27 Oct 2026) for the claim screen and bwalletx.com/names.
+    // status: free | priced | mine | taken | reserved | held (for The Bitcoin Corporation) | invalid.
+    // priceUsd: 0 for free, the USD price for priced, null when it can't be had.
     available: async (q) => {
       const alias = String(q.alias || '').toLowerCase();
       const key = String(q.key || '').toLowerCase();
-      const feeOn = !!nameFee.feeAddress(env);
-      const extraUsd = feeOn ? nameFee.EXTRA_NAME_USD : 0;
-      const priced = (status, usd, rest) => [200, { alias, ...rest, status, price: { usd, extraUsd } }];
+      const out = (status, priceUsd, rest) => [200, { alias, ...rest, status, priceUsd }];
       const bad = validAlias(alias);
       const taken = aliasOk(alias) ? await store.getAlias(alias) : null;
       const mine = !!taken && String(taken.identity_key).toLowerCase() === key;
-      if (mine) return priced('mine', 0, { available: true, reason: 'mine' });
+      if (mine) return out('mine', 0, { available: true, reason: 'mine' });
       if (bad === RESERVED_MSG) {
         if (!(PUBKEY_RE.test(key) && reservedOwners[alias] === key)) {
           const held = PREMIUM_BCORP.includes(alias);
-          return priced(held ? 'held' : 'reserved', null, {
+          return out(held ? 'held' : 'reserved', null, {
             available: false,
             reason: 'reserved',
             message: held ? HELD_EXPLAIN : RESERVED_EXPLAIN,
           });
         }
-      } else if (bad) return priced('invalid', null, { available: false, reason: 'invalid', message: bad });
-      if (taken) return priced('taken', null, { available: false, reason: 'taken' });
+      } else if (bad) return out('invalid', null, { available: false, reason: 'invalid', message: bad });
+      if (taken) return out('taken', null, { available: false, reason: 'taken' });
       const fwd = await liveForward(alias);
-      if (fwd && fwd.identity_key !== key) return priced('taken', null, { available: false, reason: 'taken' });
-      // Social names (.x) are verified, never sold; a key that already has a plain name pays for an extra one.
-      const hasPlain =
-        PUBKEY_RE.test(key) && !SOCIAL_RE.test(alias) ? !!(await store.getAliasByKeyKind?.(key, 'plain')) : false;
-      return hasPlain && extraUsd
-        ? priced('paid', extraUsd, { available: true, reason: null })
-        : priced('free', 0, { available: true, reason: null });
+      if (fwd && fwd.identity_key !== key) return out('taken', null, { available: false, reason: 'taken' });
+      // The designated owner of a reserved name claims it free; everyone else pays by length.
+      const usd = nameFee.feeAddress(env) && reservedOwners[alias] !== key ? nameFee.namePriceUsd(alias) : 0;
+      return out(usd ? 'priced' : 'free', usd, { available: true, reason: null });
     },
 
     // Read-only receipts for paid names, as CSV (owner's books). Server-to-server only: needs the
@@ -1367,58 +1398,9 @@ function makeHandlers({
       // Max 5 plain names per wallet (mirrors bit-sign's /me/handles max).
       const plain = (store.listByKey ? await store.listByKey(key) : []).filter((r) => (r.kind ?? 'plain') === 'plain');
       if (plain.length >= MAX_PLAIN_NAMES) return [409, { error: `A wallet can have up to ${MAX_PLAIN_NAMES} names` }];
-      // Owner pricing (27 Oct 2026): an extra name costs $1 in BSV to BWALLET_NAME_FEE_ADDRESS, checked here
-      // and recorded as a receipt. Without a fee txid the older path still works: a name already paid for on
-      // bit-sign (1p, 15 Oct 2026) by this same identity key. Both fail closed.
-      const address = nameFee.feeAddress(env);
-      const feeTxid = String(body.fields?.feeTxid || '').toLowerCase();
-      if (address && feeTxid) {
-        const chk = await nameFee.checkFeeTx({
-          txid: feeTxid,
-          usd: nameFee.EXTRA_NAME_USD,
-          txHex: body.feeTx,
-          address,
-          c: feeChain,
-          broadcast,
-          parse: parseIncoming,
-        });
-        if (!chk.ok) return [402, { error: chk.error, extraNameFee: { address, usd: nameFee.EXTRA_NAME_USD } }];
-        // The receipt: txid is the key, so one payment pays for one name only.
-        if (!store.useFeeTx) return [503, { error: 'Name payments are not available right now' }];
-        const fresh = await store.useFeeTx({
-          txid: feeTxid,
-          identity_key: key,
-          alias,
-          satoshis: chk.satoshis,
-          usd: chk.usd,
-          rate: chk.rate,
-          kind: 'extra',
-        });
-        if (!fresh) return [409, { error: 'That payment already paid for a name' }];
-      } else {
-        const owner = await handleOwner(alias, key).catch(() => undefined);
-        if (!owner) {
-          if (address)
-            return [
-              402,
-              {
-                error: `Pay the ${nameFee.usdLabel(nameFee.EXTRA_NAME_USD)} name fee first`,
-                extraNameFee: { address, usd: nameFee.EXTRA_NAME_USD },
-              },
-            ];
-          return [503, { error: "Couldn't check your bChatX names. Try again in a minute." }];
-        }
-        if (!owner.matches || !owner.active)
-          return [
-            402,
-            address
-              ? {
-                  error: `Pay the ${nameFee.usdLabel(nameFee.EXTRA_NAME_USD)} name fee first`,
-                  extraNameFee: { address, usd: nameFee.EXTRA_NAME_USD },
-                }
-              : { error: 'Add (and pay for) the name in bChatX first' },
-          ];
-      }
+      // Priced by the name (owner, 27 Oct 2026): 5+ characters free, shorter ones paid and receipted.
+      const paid = await payForName({ alias, key, body, kind: 'extra' });
+      if (paid) return paid;
       let row;
       try {
         row = await store.insertExtraAlias({ alias, identity_key: key });

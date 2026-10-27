@@ -15,9 +15,12 @@ import { showOnWallet } from '../tokens/indexFund';
 import { getPaymail, ownedFromOutputs, setPaymail, syncAccountNames, type OwnedName } from './accountName';
 import { syncBchatHandle } from './bchatHandle';
 import { payNameFee } from './nameFee';
+import { fetchExchangeRate } from '../../utils/wallet';
 import {
   claimPaymail,
-  type NameFee,
+  nameFeeFor,
+  nameFeeLabel,
+  type NamePrices,
   paymailConfig,
   nameChangeBlocked,
   paymailAvailability,
@@ -272,12 +275,18 @@ export const GetYourName = ({
     return () => clearTimeout(t);
   }, [alias, ownPaymail, apiContext.wallet]);
 
-  // 1¢ to claim a new name when the server asks for it (anti-squatting, owner 10 Oct 2026).
-  const [nameFee, setNameFee] = useState<NameFee | null>(null);
+  // Name prices by length (owner, 27 Oct 2026): 5+ characters free, 4 = $10, 3 = $100, 1-2 = $1000.
+  const [prices, setPrices] = useState<NamePrices | null>(null);
+  const [rate, setRate] = useState(0);
   const [feeConfirm, setFeeConfirm] = useState(false);
   useEffect(() => {
-    if (paymailEnabled()) void paymailConfig(f).then((c) => setNameFee(c.nameFee));
+    if (!paymailEnabled()) return;
+    void paymailConfig(f).then((c) => setPrices(c.namePrices));
+    void fetchExchangeRate('main')
+      .then(setRate)
+      .catch(() => undefined);
   }, []);
+  const nameFee = nameFeeFor(prices, alias);
   const claim = async (paid = false) => {
     setFeeConfirm(false);
     if (nameFee && !ownPaymail && !paid) return setFeeConfirm(true);
@@ -727,8 +736,8 @@ export const GetYourName = ({
       <SendConfirmation
         show={feeConfirm}
         theme={theme}
-        lineItems={[{ address: `Claim $${alias}`.slice(0, 16), amount: '1¢' }]}
-        total="1¢"
+        lineItems={[{ address: `Claim $${alias}`.slice(0, 16), amount: nameFeeLabel(nameFee, rate) }]}
+        total={nameFeeLabel(nameFee, rate)}
         isProcessing={busy}
         onConfirm={() => void claim(true)}
         onCancel={() => setFeeConfirm(false)}

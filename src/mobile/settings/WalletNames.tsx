@@ -5,6 +5,7 @@ import { NameHandover } from './NameHandover';
 import {
   listPaymails,
   paymailAvailability,
+  paymailEnabled,
   PAYMAIL_ALIAS_RE,
   toAlias,
   unlinkPaymail,
@@ -17,7 +18,7 @@ import {
   extraFeeLabel,
   loadHandles,
   makeMainName,
-  nextExtraNameFee,
+  extraNameFeeFor,
   removeName,
   type ExtraNameFee,
 } from '../names/extraNames';
@@ -48,22 +49,18 @@ export const WalletNames = () => {
   const { theme } = useTheme();
   const [handles, setHandles] = useState<HandlesInfo | null>(null);
   const [feeConfirm, setFeeConfirm] = useState(false);
-  // Owner pricing (27 Oct 2026): extra names cost $1 in BSV, paid to the paymail server's fee address.
-  const [extraFee, setExtraFee] = useState<ExtraNameFee | null>(null);
+  // Owner pricing (27 Oct 2026): 5+ character names are free; shorter ones are priced, quoted when added.
+  const [nameFee, setNameFee] = useState<ExtraNameFee | null>(null);
   useEffect(() => {
     if (!PAID_FEATURES_ENABLED) return;
     let live = true;
     loadHandles(apiContext)
       .then((h) => live && setHandles(h))
       .catch(() => live && setHandles(null));
-    nextExtraNameFee(apiContext, f)
-      .then((x) => live && setExtraFee(x))
-      .catch(() => live && setExtraFee(null));
     return () => {
       live = false;
     };
   }, [apiContext, tick]);
-  const nameFee: ExtraNameFee | null = extraFee ?? handles?.nextFee ?? null;
   const feeLabel = extraFeeLabel(nameFee);
   const plainCount = names?.filter((n) => n.kind === 'plain').length ?? 0;
   const atMax = plainCount >= (handles?.max ?? 5);
@@ -100,15 +97,23 @@ export const WalletNames = () => {
   const add = async (confirmed = false) => {
     const a = toAlias(draft);
     if (!PAYMAIL_ALIAS_RE.test(a)) return setError('Use a-z, 0-9, - or _ (up to 32)');
-    if (nameFee && !confirmed) {
-      // Check before paying, so nobody pays for a name they can't have.
+    let fee = confirmed ? nameFee : null;
+    if (!confirmed) {
+      setError('');
+      // Check before paying, so nobody pays for a name they can't have; then quote its price.
       const { publicKey } = await apiContext.wallet.getPublicKey({ identityKey: true });
       const a2 = await paymailAvailability(f, a, publicKey).catch(() => null);
       if (a2 && a2.state !== 'free') return setError(a2.message || 'That name is taken');
-      return setFeeConfirm(true);
+      try {
+        fee = await extraNameFeeFor(f, a);
+      } catch (e) {
+        return setError(e instanceof Error ? e.message : 'Could not get the price');
+      }
+      setNameFee(fee);
+      if (fee) return setFeeConfirm(true);
     }
     setFeeConfirm(false);
-    const go = () => addExtraName(apiContext, f, a, nameFee);
+    const go = () => addExtraName(apiContext, f, a, fee);
     if (await run('add', go, 'Could not add that name')) {
       setDraft('');
       setAdding(false);
@@ -231,6 +236,11 @@ export const WalletNames = () => {
             A wallet can have up to {handles?.max ?? 5} names.
           </p>
         )}
+        {adding && (
+          <p className="text-[11px] m-0 mt-2" style={{ color: 'var(--bw-muted)' }}>
+            Names of 5+ letters are free. Short names cost more.
+          </p>
+        )}
         {adding ? (
           <div className="flex items-center gap-2 mt-2">
             <input
@@ -249,7 +259,7 @@ export const WalletNames = () => {
               className="text-xs font-bold rounded px-3 py-1.5 border-0"
               style={{ background: 'var(--bw-accent)', color: 'var(--bw-on-accent)' }}
             >
-              {busy === 'add' ? 'Adding…' : nameFee ? `Add · ${feeLabel}` : 'Add'}
+              {busy === 'add' ? 'Adding…' : 'Add'}
             </button>
             <button
               type="button"
@@ -266,7 +276,7 @@ export const WalletNames = () => {
         ) : (
           // Store build (docs/STORE-AUDIT.md 1.6): only the free paymail, so no paid extra names.
           PAID_FEATURES_ENABLED &&
-          (!!handles || !!extraFee) &&
+          (!!handles || paymailEnabled()) &&
           !atMax &&
           names.some((n) => n.kind === 'plain' && n.main) && (
             <button
@@ -275,7 +285,7 @@ export const WalletNames = () => {
               className="flex items-center gap-1.5 mt-2 text-xs bg-transparent border-0 p-0"
               style={{ color: 'var(--bw-accent)' }}
             >
-              <Plus size={14} /> Add another name{extraFee ? ` · ${feeLabel}` : ''}
+              <Plus size={14} /> Add another name
             </button>
           )
         )}

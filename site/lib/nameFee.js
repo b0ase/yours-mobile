@@ -1,14 +1,21 @@
-// Paymail name fees (owner pricing, 27 Oct 2026): the FIRST @bwalletx.com name per identity key is free, and
-// renaming it is free (once per 30 days). Each EXTRA name on the same key costs EXTRA_NAME_USD ($1), paid in BSV
-// at the live rate to BWALLET_NAME_FEE_ADDRESS. (Was 1 cent per new name, 10 Oct 2026.)
+// Paymail name prices (owner pricing, 27 Oct 2026): priced by the NAME, not by how many a key holds.
+// 5+ characters: free. 4: $10. 3: $100. 1-2: $1000. Reserved / held names are never sold (paymail.js).
+// Social names (.x / .gmail) are free and proof-gated. Paid in BSV at the live rate to BWALLET_NAME_FEE_ADDRESS.
+// (Was 1 cent per new name, 10 Oct 2026.)
 // Env (Vercel only): BWALLET_NAME_FEE_ADDRESS = the revenue address. Empty = fee OFF (nothing changes).
 'use strict';
 const { P2PKH, Transaction } = require('@bsv/sdk');
 
 /** Legacy 1 cent fee (kept for callers that still quote it). */
 const FEE_USD = 0.01;
-/** An extra name on a key that already has one (owner, 27 Oct 2026). */
-const EXTRA_NAME_USD = 1;
+/** USD by plain-alias length (owner, 27 Oct 2026). Anything longer is free. */
+const PRICE_TIERS = Object.freeze({ 1: 1000, 2: 1000, 3: 100, 4: 10 });
+/** The USD price of a (valid, unreserved) alias: 0 = free. Social aliases are free. */
+const namePriceUsd = (alias) => {
+  const a = String(alias || '').toLowerCase();
+  if (a.includes('.')) return 0;
+  return PRICE_TIERS[a.length] || 0;
+};
 /** "$1" / "1¢" for messages. */
 const usdLabel = (usd) => (usd >= 1 ? `$${Number.isInteger(usd) ? usd : usd.toFixed(2)}` : `${Math.round(usd * 100)}¢`);
 /** Rates move between the app quoting and the server checking: accept 20% under the server's price. */
@@ -101,4 +108,14 @@ async function checkFeeTx({
   return { ok: true, satoshis: paid, rate, usd };
 }
 
-module.exports = { FEE_USD, EXTRA_NAME_USD, usdLabel, SLIPPAGE, feeAddress, requiredSats, checkFeeTx, chain };
+module.exports = {
+  FEE_USD,
+  PRICE_TIERS,
+  namePriceUsd,
+  usdLabel,
+  SLIPPAGE,
+  feeAddress,
+  requiredSats,
+  checkFeeTx,
+  chain,
+};

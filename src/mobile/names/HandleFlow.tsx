@@ -1,6 +1,7 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useRef, useState } from 'react';
 import { payNameFee } from './nameFee';
+import { fetchExchangeRate } from '../../utils/wallet';
 import { X } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { getPaymail, setPaymail } from './accountName';
@@ -9,8 +10,11 @@ import {
   claimPaymail,
   isGmailName,
   lookupPaymail,
-  type NameFee,
+  nameFeeFor,
+  nameFeeLabel,
+  type NamePrices,
   paymailConfig,
+  usdText,
   nameChangeBlocked,
   paymailAvailable,
   paymailAvailability,
@@ -36,7 +40,7 @@ import {
   type HandleSource,
 } from '../social/linkedHandles';
 import { getLinks } from '../social/links';
-import { addExtraName, extraFeeLabel, nextExtraNameFee, type ExtraNameFee } from './extraNames';
+import { addExtraName, extraFeeLabel, extraNameFeeFor, type ExtraNameFee } from './extraNames';
 import { ensureNameRooms } from './nameRooms';
 import { BWALLET_PAYMAIL_API, BWALLET_PAYMAIL_DOMAIN, SIBLING_PAYMAIL_DOMAINS } from './config';
 import { AvatarPicker } from './AvatarPicker';
@@ -97,13 +101,17 @@ export const HandleFlow = ({
   const enabled = paymailEnabled();
   const { theme } = useTheme();
   const claimed = (paymail ? paymail.split('@')[0] : '') || getMyName(identityAddress);
-  // 1¢ to claim a new name (anti-squatting, owner 10 Oct 2026); null = free (server fee off).
-  const [nameFee, setNameFee] = useState<NameFee | null>(null);
+  // Name prices by length (owner, 27 Oct 2026): 5+ characters free, 4 = $10, 3 = $100, 1-2 = $1000.
+  const [prices, setPrices] = useState<NamePrices | null>(null);
+  const [rate, setRate] = useState(0);
   const [feeConfirm, setFeeConfirm] = useState(false);
   useEffect(() => {
     if (!enabled) return;
     let live = true;
-    void paymailConfig(f).then((c) => live && setNameFee(c.nameFee));
+    void paymailConfig(f).then((c) => live && setPrices(c.namePrices));
+    void fetchExchangeRate('main')
+      .then((r) => live && setRate(r))
+      .catch(() => undefined);
     return () => {
       live = false;
     };
@@ -170,6 +178,9 @@ export const HandleFlow = ({
   const [extraFee, setExtraFee] = useState<(ExtraNameFee & { alias: string }) | null>(null);
   const queue = useRef<string[]>([]);
   const pending = useRef('');
+  // What claiming `n` costs (null = free); keeping your own name costs nothing.
+  const feeFor = (n: string) => (paymail && paymail.split('@')[0] === n ? null : nameFeeFor(prices, n));
+  const nameFee = feeFor(alias);
   const roomsFor = useRef<{ names: string[]; primary: string }>({ names: [], primary: '' });
   useEffect(() => {
     if (!enabled || paymail || !suggestions.length) return;
@@ -206,7 +217,7 @@ export const HandleFlow = ({
     pending.current = order[0];
     roomsFor.current = { names: order, primary: order[0] };
     setAlias(order[0]);
-    if (nameFee) setFeeConfirm(true);
+    if (feeFor(order[0])) setFeeConfirm(true);
     else void claim({}, order[0]);
   };
   /**
@@ -217,7 +228,7 @@ export const HandleFlow = ({
     while (queue.current.length) {
       const a = queue.current[0];
       if (!approved) {
-        const fee = await nextExtraNameFee(apiContext, f);
+        const fee = await extraNameFeeFor(f, a);
         if (fee) return setExtraFee({ alias: a, ...fee });
       }
       await addExtraName(apiContext, f, a, approved);
@@ -276,14 +287,16 @@ export const HandleFlow = ({
     };
   }, [alias, enabled, paymail, apiContext.wallet]);
 
-  /** Pay the 1¢ name fee with the normal wallet send, then claim with its txid. */
+  /** Pay the name's price with the normal wallet send, then claim with its txid. */
   const payAndClaim = async () => {
     setFeeConfirm(false);
-    if (!nameFee) return claim();
+    const name = pending.current || alias;
+    const fee = feeFor(name);
+    if (!fee) return claim({}, name);
     setBusy(true);
     setMsg('');
     try {
-      await claim(await payNameFee(apiContext, nameFee), pending.current || alias);
+      await claim(await payNameFee(apiContext, fee), name);
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Claim failed');
       setBusy(false);
@@ -385,7 +398,7 @@ export const HandleFlow = ({
                 Your paymail
               </span>
               <span className="text-[10px] font-semibold" style={{ color: nameFee ? GOLD : '#2ecc71' }}>
-                {nameFee ? '1¢ · instant' : paymail ? 'Free · instant' : 'Your first name is free'}
+                {nameFee ? `${usdText(nameFee.usd)} · instant` : 'Free · instant'}
               </span>
             </div>
             {!paymail && suggestions.length > 0 && (
@@ -478,7 +491,7 @@ export const HandleFlow = ({
                       ? 'Tick the names to claim'
                       : !primary
                         ? 'Pick your primary name'
-                        : `Claim ${selected.length === 1 ? `$${primary}` : `${selected.length} names`} · primary $${primary}${nameFee ? ' · 1¢' : ''}`}
+                        : `Claim ${selected.length === 1 ? `$${primary}` : `${selected.length} names`} · primary $${primary}${nameFee ? ` · ${usdText(nameFee.usd)}` : ''}`}
                 </button>
               </div>
             )}
@@ -552,13 +565,13 @@ export const HandleFlow = ({
               <button
                 type="button"
                 disabled={busy || state !== 'free'}
-                onClick={() => (nameFee ? setFeeConfirm(true) : void claim())}
+                onClick={() => ((pending.current = alias), nameFee ? setFeeConfirm(true) : void claim())}
                 className="h-11 rounded-xl text-sm font-bold border-0 cursor-pointer disabled:opacity-40"
                 style={{ background: GOLD, color: '#000' }}
               >
                 {busy
                   ? 'Claiming…'
-                  : `${paymail ? 'Change to' : 'Claim'} ${alias || 'name'}@${BWALLET_PAYMAIL_DOMAIN}${nameFee ? ' · 1¢' : ''}`}
+                  : `${paymail ? 'Change to' : 'Claim'} ${alias || 'name'}@${BWALLET_PAYMAIL_DOMAIN}${nameFee ? ` · ${usdText(nameFee.usd)}` : ''}`}
               </button>
             )}
             {msg && (
@@ -588,8 +601,13 @@ export const HandleFlow = ({
         <SendConfirmation
           show={feeConfirm}
           theme={theme}
-          lineItems={[{ address: `Claim $${alias}`.slice(0, 16), amount: '1¢' }]}
-          total="1¢"
+          lineItems={[
+            {
+              address: `Claim $${pending.current || alias}`.slice(0, 16),
+              amount: nameFeeLabel(feeFor(pending.current || alias), rate),
+            },
+          ]}
+          total={nameFeeLabel(feeFor(pending.current || alias), rate)}
           isProcessing={busy}
           onConfirm={() => void payAndClaim()}
           onCancel={() => setFeeConfirm(false)}

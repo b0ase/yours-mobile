@@ -414,21 +414,48 @@ export const nameChangeBlocked = (current: string | null | undefined, alias: str
 };
 
 export type NameFee = { address: string; usd: number };
+/** Name prices by length (owner pricing, 27 Oct 2026): 5+ characters free, 4 = $10, 3 = $100, 1-2 = $1000. */
+export type NamePrices = { address: string; tiers: Record<string, number> };
 const asFee = (nf: { address?: unknown; usd?: unknown } | null | undefined): NameFee | null =>
   nf && typeof nf.address === 'string' && Number(nf.usd) > 0 ? { address: nf.address, usd: Number(nf.usd) } : null;
+const asPrices = (p: { address?: unknown; tiers?: unknown } | null | undefined): NamePrices | null => {
+  if (!p || typeof p.address !== 'string' || !p.tiers || typeof p.tiers !== 'object') return null;
+  const tiers: Record<string, number> = {};
+  for (const [k, v] of Object.entries(p.tiers as Record<string, unknown>)) if (Number(v) > 0) tiers[k] = Number(v);
+  return { address: p.address, tiers };
+};
 /**
- * The server's name rules (owner pricing, 27 Oct 2026): `nameFee` for a first name / rename (null = free, which it
- * now is) and `extraNameFee` for each extra name on the same key ($1; null = off). Never throws.
+ * The server's name rules: `nameFee` = the old flat fee (now null) and `namePrices` = the price by length (null =
+ * every name free). Never throws.
  */
-export const paymailConfig = async (f: Fetch): Promise<{ nameFee: NameFee | null; extraNameFee: NameFee | null }> => {
-  if (!paymailEnabled()) return { nameFee: null, extraNameFee: null };
+export const paymailConfig = async (f: Fetch): Promise<{ nameFee: NameFee | null; namePrices: NamePrices | null }> => {
+  if (!paymailEnabled()) return { nameFee: null, namePrices: null };
   try {
     const r = await f(api('config'));
     const j = r.ok ? await r.json() : null;
-    return { nameFee: asFee(j?.nameFee), extraNameFee: asFee(j?.extraNameFee) };
+    return { nameFee: asFee(j?.nameFee), namePrices: asPrices(j?.namePrices) };
   } catch {
-    return { nameFee: null, extraNameFee: null };
+    return { nameFee: null, namePrices: null };
   }
+};
+
+/** What claiming `alias` costs (null = free). Social names (.x) are free. Pure; the server has the final say. */
+export const nameFeeFor = (prices: NamePrices | null, alias: string): NameFee | null => {
+  const a = alias.trim().toLowerCase();
+  if (!prices || !a || a.includes('.')) return null;
+  const usd = prices.tiers[String(a.length)] ?? 0;
+  return usd > 0 ? { address: prices.address, usd } : null;
+};
+
+/** "$10" / "$1000" / "1¢". Pure. */
+export const usdText = (usd: number): string =>
+  usd >= 1 ? `$${Number.isInteger(usd) ? usd : usd.toFixed(2)}` : `${Math.round(usd * 100)}¢`;
+
+/** "$10 (≈ 12,345 sats)" at `rate` (USD per BSV), or "$10" without a rate. Pure. */
+export const nameFeeLabel = (fee: NameFee | null, rate: number): string => {
+  if (!fee) return '';
+  const sats = rate > 0 ? Math.ceil((fee.usd / rate) * 1e8) : 0;
+  return sats ? `${usdText(fee.usd)} (≈ ${sats.toLocaleString('en-US')} sats)` : usdText(fee.usd);
 };
 
 /** A legacy .gmail name shows the owner's Gmail address: the app asks them to choose a name. */
