@@ -6,9 +6,19 @@
  *   await window.CWI.twetch.loginSign({ challenge })       → { signature, publicKey, address }
  *   await window.CWI.twetch.buildPost({ text, replyTxid?, files? }) → { txHex, txid }  (unsent: the site submits it)
  *
+ * bChatX (bit-sign src/lib/feed/twetch-wallet.ts) calls the EIP-1193-like shape on the announced provider / window.CWI:
+ *
+ *   await window.CWI.request({ method: 'twetch.status' | 'twetch.loginSign' | 'twetch.buildPost', params })
+ *
+ * Any other method rejects with code NOT_SUPPORTED (an existing request(), if one is ever attached first, keeps
+ * answering non-twetch methods).
+ *
  * Rejects with an Error carrying `code` (see services/twetchSite.ts). `NOT_SUPPORTED` in store builds.
  */
-import { TWETCH_LOGIN, TWETCH_POST, TWETCH_STATUS } from './mobile/twetch/twetchAction';
+import { TWETCH_LOGIN, TWETCH_POST, TWETCH_STATUS, isTwetchAction } from './mobile/twetch/twetchAction';
+
+const notSupported = (method: unknown) =>
+  Object.assign(new Error(`${String(method)} is not supported.`), { code: 'NOT_SUPPORTED' });
 
 export const attachTwetch = (
   target: Record<string, unknown>,
@@ -19,4 +29,11 @@ export const attachTwetch = (
     loginSign: (args: unknown) => transport(TWETCH_LOGIN, args ?? {}),
     buildPost: (args: unknown) => transport(TWETCH_POST, args ?? {}),
   });
+  const prior = typeof target.request === 'function' ? (target.request as (a: unknown) => Promise<unknown>) : undefined;
+  target.request = (args: unknown) => {
+    const { method, params } = (args ?? {}) as { method?: unknown; params?: unknown };
+    if (isTwetchAction(method)) return transport(method, params ?? {});
+    if (typeof method === 'string' && method.startsWith('twetch.')) return Promise.reject(notSupported(method));
+    return prior ? prior(args) : Promise.reject(notSupported(method));
+  };
 };

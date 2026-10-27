@@ -186,6 +186,27 @@ describe('twetch.* through the extension bridge', () => {
     ]);
   });
 
+  test('page side: request({ method, params }) routes the three methods; others are NOT_SUPPORTED', async () => {
+    const sent: [string, unknown][] = [];
+    const cwi: Record<string, unknown> = {};
+    attachTwetch(cwi, async (a, p) => {
+      sent.push([a, p]);
+      return 'ok';
+    });
+    const request = cwi.request as (a: unknown) => Promise<unknown>;
+    expect(await request({ method: 'twetch.status' })).toBe('ok');
+    await request({ method: 'twetch.loginSign', params: { challenge: CHALLENGE } });
+    await request({ method: 'twetch.buildPost', params: { text: 'gm' } });
+    expect(sent).toEqual([
+      ['twetch.status', {}],
+      ['twetch.loginSign', { challenge: CHALLENGE }],
+      ['twetch.buildPost', { text: 'gm' }],
+    ]);
+    await expect(request({ method: 'twetch.deleteAll' })).rejects.toMatchObject({ code: 'NOT_SUPPORTED' });
+    await expect(request({ method: 'eth_accounts' })).rejects.toMatchObject({ code: 'NOT_SUPPORTED' });
+    expect(sent).toHaveLength(3);
+  });
+
   test('wiring: content script forwards, background routes and shows the twetch sheet', () => {
     const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
     expect(src('../content.ts')).toContain('isTwetchAction(type)');
