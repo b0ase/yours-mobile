@@ -118,6 +118,8 @@ const writeQueue = (q: string[]) => {
     /* storage unavailable */
   }
 };
+/** How long a new pairing waits for the leftover-grant revoke before showing the approval (it keeps running). */
+const JOIN_REVOKE_WAIT_MS = 3000;
 /** Revoke every queued originator plus `more`; keep whatever failed for the next try. */
 export async function flushRevocations(more: string[] = []): Promise<void> {
   const pending = [...new Set([...readQueue(), ...more])];
@@ -647,7 +649,13 @@ function connectPairing(
       let returnTaken = false;
       // A new pairing starts with nothing. Its key names its own channel, so it never shares another pairing's grants
       // (b-Aware 24 Oct 2026); still withdraw anything left under that key unless this channel is being resumed.
-      if (!load().some((s) => s.c === link.c)) await flushRevocations([pairedOrigin(f.verifiedOrigin, link.c)]);
+      // Bounded: right after launch the wallet may still be loading, and the revoke waited for it, so the sheet sat on
+      // "Checking the website" (owner, 27 Oct 2026). The queue is written before the first revoke and retried, never dropped.
+      if (!load().some((s) => s.c === link.c))
+        await Promise.race([
+          flushRevocations([pairedOrigin(f.verifiedOrigin, link.c)]),
+          new Promise<void>((r) => setTimeout(r, JOIN_REVOKE_WAIT_MS)),
+        ]);
       if (settled) return;
       settled = true;
       open = true;
