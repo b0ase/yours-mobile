@@ -145,7 +145,7 @@ export const makeTwetchStore = (s: TwetchStorage, c: Crypto): TwetchStore => {
   const openKeys = async () => {
     const { a, id } = current();
     const passKey = await s.getPassKey();
-    if (!passKey || !a.encryptedKeys) throw new Error('bWalletX is locked. Unlock it on your phone.');
+    if (!passKey || !a.encryptedKeys) throw new Error('bWalletX is locked. Unlock it and try again.');
     return { a, id, passKey, keys: JSON.parse(await c.decrypt(a.encryptedKeys, passKey)) as Record<string, unknown> };
   };
   const writeAccount = async (id: string, a: object, patch: object) =>

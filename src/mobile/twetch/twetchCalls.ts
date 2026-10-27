@@ -1,6 +1,8 @@
 /**
  * twetch.* calls from a paired site (bChatX "Post to Twetch"), routed by pair/sessions.ts like bitsign.*:
  *
+ * Also reachable from the Chrome extension (window.CWI.twetch.*, services/twetchSite.ts), same rules.
+ *
  * - `twetch.status()` → `{ linked, handle?, userId?, publicKey? }`. Read-only, no sheet.
  * - `twetch.loginSign({ challenge })` → `{ signature, publicKey, address }`. BSM signature (compact, base64) by the
  *   Twetch key over Twetch's login challenge, and only that: `twetch-login:<64 hex>:<ms>` stamped within 10 minutes.
@@ -29,11 +31,9 @@ import {
   validatePostParams,
 } from './twetchPost';
 
-export const TWETCH_STATUS = 'twetch.status';
-export const TWETCH_LOGIN = 'twetch.loginSign';
-export const TWETCH_POST = 'twetch.buildPost';
-export const isTwetchAction = (action: string) =>
-  action === TWETCH_STATUS || action === TWETCH_LOGIN || action === TWETCH_POST;
+import { TWETCH_LOGIN, TWETCH_STATUS } from './twetchAction';
+
+export { TWETCH_LOGIN, TWETCH_POST, TWETCH_STATUS, isTwetchAction } from './twetchAction';
 
 export const BAD_REQUEST_CODE = 'INVALID_PARAMS';
 export const NOT_LINKED_CODE = 'TWETCH_NOT_LINKED';
@@ -66,7 +66,7 @@ export type TwetchDeps = {
 export type TwetchReply = { result: unknown } | { error: { code: string; message: string } };
 
 const err = (code: string, message: string): TwetchReply => ({ error: { code, message } });
-const LOCKED = err('LOCKED', 'bWalletX is locked. Unlock it on your phone.');
+const LOCKED = err('LOCKED', 'bWalletX is locked. Unlock it and try again.');
 const NOT_LINKED = err(NOT_LINKED_CODE, 'Link your Twetch account in bWalletX first (Settings › Twetch).');
 const DENIED = err(USER_DENIED_CODE, USER_DENIED_MESSAGE);
 

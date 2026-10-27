@@ -8,6 +8,7 @@ import { createCWI, CWIEventName } from '@1sat/wallet-browser';
 import { replyError } from './services/userDenied';
 import { attachSpendingAuthorization } from './spendingAuthPage';
 import { attachMintPrivate } from './mintPrivatePage';
+import { attachTwetch } from './twetchPage';
 
 // Re-export for backwards compatibility
 export { CWIEventName };
@@ -37,6 +38,8 @@ export const CWI: WalletInterface = createCWI(transport as Parameters<typeof cre
 attachSpendingAuthorization(CWI as unknown as Record<string, unknown>);
 // bWalletX: wallet.mintPrivate (services/mintPrivateSite.ts).
 attachMintPrivate(CWI as unknown as Record<string, unknown>, transport);
+// bWalletX: window.CWI.twetch.{status, loginSign, buildPost} (services/twetchSite.ts).
+attachTwetch(CWI as unknown as Record<string, unknown>, transport);
 
 // Inject CWI on window
 if (typeof window !== 'undefined') {
