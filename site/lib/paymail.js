@@ -327,8 +327,6 @@ const RESERVED_OWNERS = Object.freeze({
   bwalletx: '029c1abd9470d485719c512c0d704e6ccf6c1533461eb5884a5d09a6dc3dca55b7',
   // The Bitcoin Corporation Ltd's company account (owner, 27 Oct 2026).
   bcorp: BCORP_KEY,
-  // TERRORNODE (NPG game; its handle owns the $TERRORNODE room): the owner's b0asex key (owner, 27 Oct 2026).
-  terrornode: '0266c15007dfb8c02f90b41abe671d207db317ab3974c1dc012705afc857917c83',
   ...Object.fromEntries(PREMIUM_BCORP.map((n) => [n, BCORP_KEY])),
   // Touman, our first Play beta tester (owner, 27 Oct 2026).
   touman: '030f8d4f47ae853abf8adc939520d360213193709fc846989a436add16d0b946e7',
