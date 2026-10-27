@@ -72,7 +72,8 @@ import { CoinHistory } from '../components/CoinHistory';
 import { getMneeBalance, sendMnee, deriveDepositAddresses, ONESAT_MAINNET_CONTENT_URL } from '@1sat/actions';
 import { MNEE_PROTOCOLS, mneeKeyDerivations } from '../utils/mneeDerivations';
 import { MneeClient } from '@1sat/client';
-import { PrivateKey } from '@bsv/sdk';
+import { PrivateKey, type WalletInterface } from '@bsv/sdk';
+import { sendPaymentNote } from '../mobile/wallet/send/paymentNote';
 import { planAddressScan } from '../services/addressScan';
 import { getLegacyMneeBalance, sweepLegacyMnee } from '../utils/sweepLegacyMnee';
 import { cancelOwnedOrdLockListings } from '../utils/cancelOrdLockListings';
@@ -173,6 +174,9 @@ export const BsvWallet = () => {
 
   const [unlockAttempted, setUnlockAttempted] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  // A send keeps running if the Wallet tab is tapped meanwhile: the home view then says Sending, not Loading.
+  const [sendInFlight, setSendInFlight] = useState(false);
+  const [sendMessage, setSendMessage] = useState('');
   const [sendConfirmation, setSendConfirmation] = useState<{
     icon?: string;
     lineItems: SendLineItem[];
@@ -1098,7 +1102,22 @@ export const BsvWallet = () => {
       onConfirm: async () => {
         setSendConfirmation(null);
         setIsProcessing(true);
+        setSendInFlight(true);
+        try {
+          await confirmSendBsv();
+        } catch (err) {
+          // A thrown send (not a returned error) left the spinner up for good (owner, 27 Oct 2026).
+          console.error('[handleSendBsv] send threw:', err);
+          addSnackbar(getErrorMessage(err instanceof Error ? err.message : String(err)), 'error');
+          refreshUtxos().catch(() => undefined);
+        } finally {
+          setSendInFlight(false);
+          setIsProcessing(false);
+        }
+      },
+    });
 
+    async function confirmSendBsv() {
         let sendRes;
         if (isSendAllBsv) {
           const r = sendRecipients[0];
@@ -1142,8 +1161,18 @@ export const BsvWallet = () => {
         ) {
           addSnackbar('Transaction Successful!', 'success');
         }
-      },
-    });
+        const note = sendMessage;
+        setSendMessage('');
+        if (note.trim() && addressOrder.length === 1) {
+          const amount = `${formatNumberWithCommasAndDecimals(totalSats / BSV_DECIMAL_CONVERSION, 8)} BSV`;
+          sendPaymentNote(apiContext.wallet as unknown as WalletInterface, addressOrder[0], note, amount)
+            .then((sent) => sent && addSnackbar('Message sent by bMail', 'success'))
+            .catch((err) => {
+              console.error('[handleSendBsv] payment message failed:', err);
+              addSnackbar('Paid, but the message could not be sent. Try bMail.', 'info');
+            });
+        }
+    }
   };
 
   // @1sat/actions keeps only error.message, which drops WERR_REVIEW_ACTIONS' per-tx status (owner's $1 send, 17 Oct:
@@ -2256,6 +2285,8 @@ export const BsvWallet = () => {
         onMax={fillInputWithAllBsv}
         onAmountEdited={() => setSatSendAmount(null)}
         onSubmit={(e) => handleSendBsv(e)}
+        message={sendMessage}
+        onMessage={setSendMessage}
       />
 
       {/* Price chart and Buy BSV go BELOW the form (owner, 17 Oct 2026: "No one wants to see the price
@@ -2369,7 +2400,7 @@ export const BsvWallet = () => {
         )}
       </Show>
       <Show when={isProcessing && pageState === 'main'}>
-        <PageLoader theme={theme} message="Loading wallet..." />
+        <PageLoader theme={theme} message={sendInFlight ? 'Sending BSV...' : 'Loading wallet...'} />
       </Show>
       <Show when={isProcessing && pageState === 'send'}>
         <PageLoader theme={theme} message="Sending BSV..." />
