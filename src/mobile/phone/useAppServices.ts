@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { twetchStoreFor } from '../twetch/twetchLink';
+import { TWETCH_POST_ENABLED } from '../storeBuild';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { initPairing, setAgentPairDeps } from '../pair/sessions';
 import { onPairLink, takePairLink } from '../pair/links';
@@ -35,6 +37,7 @@ export const useAppServices = () => {
       currentId: current,
       feeRate: () => chromeStorageService.getCustomFeeRate(),
       accountCount: chromeStorageService.getAllAccounts().length,
+      twetch: TWETCH_POST_ENABLED ? twetchStoreFor(chromeStorageService) : undefined,
     });
   }, [apiContext, current, chromeStorageService]);
   return { pairLink, clearPairLink: () => setPairLink(null) };

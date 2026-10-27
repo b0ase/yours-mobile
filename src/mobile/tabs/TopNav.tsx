@@ -1,4 +1,5 @@
 import { routeFor } from './tabs';
+import { twetchStoreFor } from '../twetch/twetchLink';
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useInPeek } from '../phone/pageEl';
@@ -36,7 +37,7 @@ import { topBarBappForPath } from '../phone/bappBarModel';
 import { startAgentCreate } from '../agents/agentCreate';
 import { AGENT_TOOLS_TITLE, AgentToolsSheet } from '../agents/AgentToolsSheet';
 import { AirdropsNavButton } from '../airdrops/AirdropsNavButton';
-import { TOKENBLASTER_ENABLED, isBWalletX } from '../storeBuild';
+import { TOKENBLASTER_ENABLED, TWETCH_POST_ENABLED, isBWalletX } from '../storeBuild';
 import { TERRORNODE_URL } from '../games/TerrornodeHeroX';
 import { openBapp } from '../bappFrame/bappFrame';
 import { IS_EXTENSION } from '../extension';
@@ -48,6 +49,7 @@ import { usePeerPayLinks } from '../scan/peerpayLinks';
 import { AuthRequestHost } from '../auth/AuthSheet';
 import { BrowseLinkHost } from '../browse/BrowseLinkHost';
 import { BitsignHost } from '../pair/BitsignHost';
+import { TwetchHost } from '../twetch/TwetchHost';
 import { PairLoginHost } from '../pair/PairLoginHost';
 
 const PairSheet = lazy(() => import('../pair/PairSheet'));
@@ -205,6 +207,7 @@ const TopNavBar = () => {
       currentId: current,
       feeRate: () => chromeStorageService.getCustomFeeRate(),
       accountCount: chromeStorageService.getAllAccounts().length,
+      twetch: TWETCH_POST_ENABLED ? twetchStoreFor(chromeStorageService) : undefined,
     });
   }, [apiContext, current, chromeStorageService]);
   // Display name = BAP profile name (else account name); payable handle = OpNS name / paymail. Synced from chain.
@@ -766,6 +769,7 @@ const TopNavBar = () => {
       {!phoneLayoutOn() && <AuthRequestHost />}
       {!phoneLayoutOn() && <BrowseLinkHost />}
       {!phoneLayoutOn() && <BitsignHost />}
+      {!phoneLayoutOn() && TWETCH_POST_ENABLED && <TwetchHost />}
       {!phoneLayoutOn() && <PairLoginHost />}
       {pairOpen && (
         <Suspense fallback={null}>

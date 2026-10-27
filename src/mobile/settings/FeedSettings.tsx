@@ -29,6 +29,7 @@ import {
   Network,
   AtSign,
   PenLine,
+  Send,
 } from 'lucide-react';
 import { ChangePassword } from './ChangePassword';
 import { SEEDLESS_ENABLED } from '../passkey/prf';
@@ -49,6 +50,7 @@ import { DisplayNameField } from './DisplayNameField';
 import { IdentityMap } from './IdentityMap';
 import { IdentityVerification } from '../kyc/IdentityVerification';
 import { SignNoteScreen } from '../notes/SignNoteScreen';
+import { TwetchSettings } from '../twetch/TwetchSettings';
 import {
   B_AGENT_DESC,
   MY_TOKENS_DESC,
@@ -58,6 +60,7 @@ import {
   potsEnabled,
   socialLoginEnabled,
   LINK_ACCOUNTS_ENABLED,
+  TWETCH_POST_ENABLED,
   SUBSCRIPTIONS_DESC,
   SUBSCRIPTIONS_ENABLED,
 } from '../storeBuild';
@@ -630,6 +633,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
     | 'signins'
     | 'verify'
     | 'note'
+    | 'twetch'
     | null
   >(null);
   // A Settings search result opens one of these screens. Only the "wallet" instance takes it, so it opens once.
@@ -748,8 +752,17 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
             label="Sign a note"
             description="An IOU or promise signed with your identity key. Send it by bMail; anyone can check it"
             onClick={() => setScreen('note')}
-            isLast
+            isLast={!TWETCH_POST_ENABLED}
           />
+          {TWETCH_POST_ENABLED && (
+            <Row
+              icon={<Send size={16} />}
+              label="Twetch"
+              description="Keep your Twetch key here so bChatX can post to Twetch for you. Each post asks first"
+              onClick={() => setScreen('twetch')}
+              isLast
+            />
+          )}
         </Section>
       )}
       {acct && (
@@ -1253,6 +1266,11 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
       {screen === 'note' && (
         <Screen title="Sign a note" onBack={() => setScreen(null)}>
           <SignNoteScreen onSent={() => setScreen(null)} />
+        </Screen>
+      )}
+      {TWETCH_POST_ENABLED && screen === 'twetch' && (
+        <Screen title="Twetch" onBack={() => setScreen(null)}>
+          <TwetchSettings />
         </Screen>
       )}
       {screen === 'verify' && (
