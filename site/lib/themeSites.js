@@ -34,6 +34,7 @@ const THEME_SITES = [
   { id: 'bmovies-app', host: 'bmovies.app' },
   { id: 'tokenblaster', host: 'tokenblaster.com' },
   { id: 'bchatx', host: 'bchatx.com' },
+  { id: 'bmarketx', host: 'bmarketx.com' },
 ];
 
 module.exports = { THEME_SITES };
