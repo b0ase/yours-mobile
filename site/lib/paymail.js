@@ -78,6 +78,10 @@ const hashIp = (ip, env = process.env) =>
     : null;
 const dayText = (ms) =>
   new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+/** Premium names held for The Bitcoin Corporation Ltd; only bCorp's key may claim them (owner, 27 Oct 2026). */
+const PREMIUM_BCORP = ['money', 'cash', 'gold', 'news', 'shop', 'store', 'market', 'exchange', 'token', 'tokens', 'ai', 'crypto', 'nft', 'dex'];
+const BCORP_KEY = '03c96b37e69377c8af33b583067f56444c83a656b05014e8f15003e67250943880';
+
 const RESERVED = new Set([
   // Kept for a named person: see RESERVED_OWNERS.
   'touman',
@@ -157,6 +161,79 @@ const RESERVED = new Set([
   'centbee',
   // Held for the owner (10 Oct 2026); assign it to his wallet by hand when he wants it.
   'richard',
+  // Messaging, names and terminal products (owner, 27 Oct 2026: bitchatX.com, bMessageX.com, bNamesX).
+  'bnet',
+  'bms',
+  'bmessage',
+  'bmessagex',
+  'bitchat',
+  'bitchatx',
+  'bterminal',
+  'bterminalx',
+  'bname',
+  'bnamex',
+  'bnames',
+  'bnamesx',
+  // The b*X services.
+  'bmarketx',
+  'bmintx',
+  'bmusicx',
+  'bmoviesx',
+  'bmailx',
+  'bdrivex',
+  'bvaultx',
+  'bwriterx',
+  'bsharesx',
+  'bjobsx',
+  'bnewsx',
+  'bcalx',
+  'bphonex',
+  'bpicsx',
+  'bstorex',
+  'bvideox',
+  'badvertisingx',
+  'terrornode',
+  // Ecosystem names and public figures (held, never sold).
+  'faketoshi',
+  'coingeek',
+  'calvinayre',
+  'bitcoinassociation',
+  'gorillapool',
+  'whatsonchain',
+  'halfinney',
+  'szabo',
+  'jackdorsey',
+  'elonmusk',
+  'jesus',
+  'god',
+  'trump',
+  'biden',
+  'president',
+  'king',
+  'queen',
+  // Big brands (a verified owner can be given the name later, like bwalletx).
+  'apple',
+  'google',
+  'amazon',
+  'microsoft',
+  'tesla',
+  'twitter',
+  'meta',
+  'facebook',
+  'openai',
+  'anthropic',
+  'claude',
+  'chatgpt',
+  'gpt',
+  // Money words people would trust blindly in a payee field.
+  'bch',
+  'wallet',
+  'pay',
+  'bank',
+  // Every one-character name (look-alike risk; owner, 27 Oct 2026). `x` was taken before this list.
+  ...'abcdefghijklmnopqrstuvwxyz0123456789'.split(''),
+  // Premium names held for The Bitcoin Corporation Ltd (owner, 27 Oct 2026): see PREMIUM_BCORP.
+  ...PREMIUM_BCORP,
 ]);
 /**
  * ⚠ A SOCIAL ALIAS IS RESERVED BY ITS BASE NAME. `bcorp.x` is proven by whoever holds X @bcorp,
@@ -228,7 +305,8 @@ const RESERVED_OWNERS = Object.freeze({
   // The bWalletX brand account.
   bwalletx: '029c1abd9470d485719c512c0d704e6ccf6c1533461eb5884a5d09a6dc3dca55b7',
   // The Bitcoin Corporation Ltd's company account (owner, 27 Oct 2026).
-  bcorp: '03c96b37e69377c8af33b583067f56444c83a656b05014e8f15003e67250943880',
+  bcorp: BCORP_KEY,
+  ...Object.fromEntries(PREMIUM_BCORP.map((n) => [n, BCORP_KEY])),
   // Touman, our first Play beta tester (owner, 27 Oct 2026).
   touman: '030f8d4f47ae853abf8adc939520d360213193709fc846989a436add16d0b946e7',
 });
