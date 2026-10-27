@@ -35,6 +35,8 @@ import { ReplyBook } from './replies';
 import { handleBitsignCall, isBitsignAction } from './bitsign';
 import { USER_DENIED_CODE, USER_DENIED_MESSAGE, isUserDenied } from '../../services/userDenied';
 import { PAIR_MIRROR_KEY, toPairMirror } from '../../services/pairedPromptGuard';
+import { closeConnectCardsFor, forgetLogin, handlePairLoginCall, watchConnectCard } from './pairLogin';
+import { accountNamesFor } from '../names/accountNames';
 
 /**
  * The pairing itself has ended (24 h idle, agent grant expired, disconnected, or bound to another account), so the
@@ -205,6 +207,11 @@ export type PendingPair = {
   takeReturn: () => ReturnPlan;
   confirm: (agent?: AgentGrant) => void;
   cancel: () => void;
+  /**
+   * Called once if the card is no longer wanted before Connect or Cancel: the site closed its QR (its socket left the
+   * channel), or it signed in through another pairing meanwhile (pairLogin.ts closeConnectCardsFor).
+   */
+  onGone: (f: () => void) => void;
 };
 
 type Listener = () => void;
@@ -408,6 +415,15 @@ async function onRequest(l: Live, id: string, action: string, params: unknown) {
   if (isBitsignAction(action))
     return reply(l, { t: 'res', id, ...(await handleBitsignCall(action, params, l.stored.origin)) });
   try {
+    // Sign-in (pairLogin.ts): one "Sign in to <host> as $handle?" sheet for the login signature, every time; the
+    // identity key and the matching chat-key proof go with it. Every other call goes on below, unchanged.
+    const login = await handlePairLoginCall(l.stored.c, l.stored.origin, action, params, {
+      wallet: agentDeps.ctx?.wallet as never,
+      handle: () => accountNamesFor(agentDeps.currentId).payable,
+      proven: !!l.stored.proven,
+      onSignedIn: closeConnectCardsFor,
+    });
+    if (login) return reply(l, { t: 'res', id, ...login });
     // The relay's origin is a claim, not proof (audit H1): run under the paired key, never the site's own grants.
     const as = keyOf(l.stored); // this pairing's own key: never shared with another channel claiming the host
     const r = (await handleSiteCall(as, as + '/', action, params, true)) as {
@@ -525,6 +541,7 @@ function connect(c: string) {
 
 /** Disconnect a site: tell it, forget the key, and withdraw every grant and allowance the pairing was given. */
 export function forget(c: string, notify = true) {
+  forgetLogin(c);
   const stored = load().find((s) => s.c === c);
   const l = live.get(c);
   if (l) {
@@ -578,9 +595,35 @@ function connectPairing(
     ws.onerror = () => fail('Could not reach the pairing service. Check your connection and try again.');
     ws.onclose = (ev) =>
       !settled && fail(ev.code === 1006 ? 'This code has expired or was already used.' : 'Pairing closed.');
+    // After the card is up (settled) and until Connect or Cancel: the site leaving, or the channel closing, ends it.
+    let open = false;
+    let goneFns: (() => void)[] = [];
+    let gone = false;
+    let unwatch = () => {};
+    const end = () => {
+      open = false;
+      unwatch();
+    };
+    const supersede = () => {
+      if (!open || gone) return;
+      gone = true;
+      end();
+      ws.onclose = null;
+      try {
+        ws.close();
+      } catch {
+        /* already closed */
+      }
+      goneFns.forEach((g) => g());
+      goneFns = [];
+    };
     ws.onmessage = inOrder(async (ev: MessageEvent) => {
       const f = JSON.parse(String(ev.data)) as RelayFrame;
-      if (f.t !== 'relay' || !f.verifiedOrigin || settled) return;
+      if (settled) {
+        if (f.t === 'relay' && f.peer === 'left' && f.role === 'site') supersede();
+        return;
+      }
+      if (f.t !== 'relay' || !f.verifiedOrigin) return;
       clearTimeout(timer);
       // §4.4: the relay's view of the origin must match the QR. This only catches honest mistakes: a non-browser
       // client can set any Origin header, so the session never gets the site's saved grants (see onRequest).
@@ -607,8 +650,10 @@ function connectPairing(
       if (!load().some((s) => s.c === link.c)) await flushRevocations([pairedOrigin(f.verifiedOrigin, link.c)]);
       if (settled) return;
       settled = true;
-      ws.onclose = null;
+      open = true;
+      ws.onclose = () => supersede();
       ws.onerror = null;
+      unwatch = watchConnectCard(f.verifiedOrigin, supersede);
       resolve({
         origin: f.verifiedOrigin,
         code,
@@ -620,7 +665,14 @@ function connectPairing(
           returnTaken = true;
           return claimRid(returnPlan.rid) ? returnPlan : null;
         },
+        onGone: (g) => {
+          if (gone) g();
+          else goneFns.push(g);
+        },
         confirm: (agent?: AgentGrant) => {
+          if (gone) return;
+          end();
+          ws.onclose = null;
           if (f.verifiedOrigin === CLI_ORIGIN && (!agent || !opts.allowCli)) return ws.close(); // a CLI must be bound to an agent account
           if (agent && f.verifiedOrigin !== CLI_ORIGIN) return ws.close(); // only a CLI pairing carries an agent grant
           const stored: StoredSession = {
@@ -643,7 +695,11 @@ function connectPairing(
           attach(l);
           void reply(l, { t: 'ready' });
         },
-        cancel: () => ws.close(),
+        cancel: () => {
+          end();
+          ws.onclose = null;
+          ws.close();
+        },
       });
     });
   });

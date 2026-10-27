@@ -1,5 +1,5 @@
 import { formatPairCode } from '../../pair/protocol';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, Check, Link2, Loader2, ShieldCheck } from 'lucide-react';
 import { useBackClose } from '../backStack';
@@ -56,6 +56,17 @@ export default function PairSheet({
       .then((p) => setStage({ k: 'confirm', p }))
       .catch((e: unknown) => setStage({ k: 'error', m: e instanceof Error ? e.message : String(e) }));
   };
+  // The site closed this QR, or signed in through another pairing meanwhile: the card is stale, so close it.
+  const pending = stage.k === 'confirm' ? stage.p : null;
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    let live = true;
+    pending?.onGone(() => live && closeRef.current());
+    return () => {
+      live = false;
+    };
+  }, [pending]);
   useEffect(() => {
     if (initial) start(initial);
     // eslint-disable-next-line react-hooks/exhaustive-deps

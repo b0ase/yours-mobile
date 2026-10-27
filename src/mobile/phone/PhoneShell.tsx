@@ -2,6 +2,7 @@ import { lazy, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef
 import { AuthRequestHost } from '../auth/AuthSheet';
 import { BrowseLinkHost } from '../browse/BrowseLinkHost';
 import { BitsignHost } from '../pair/BitsignHost';
+import { PairLoginHost } from '../pair/PairLoginHost';
 import { useReducedMotion } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { BottomMenuContext, type MenuItems } from '../../contexts/BottomMenuContext';
@@ -616,6 +617,7 @@ const Shell = () => {
       <AuthRequestHost />
       <BrowseLinkHost />
       <BitsignHost />
+      <PairLoginHost />
     </>
   );
 };
