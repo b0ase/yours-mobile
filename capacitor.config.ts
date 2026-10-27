@@ -7,6 +7,9 @@ const config: CapacitorConfig = {
   appName: 'bWallet',
   webDir: 'build-mobile',
   backgroundColor: '#010101',
+  // Pages in the wallet's own frame (src/mobile/bappFrame) inherit this WebView's UA: sites detect bWallet with it
+  // (e.g. tokenblaster hides "Play in bWallet" inside the wallet). Same tokens as the native browser (YoursNativePlugin).
+  appendUserAgent: 'bWallet/1 YoursWalletMobile/1',
   // Never log bridge calls: their arguments include keystore values and the passKey.
   loggingBehavior: 'none',
   ios: {
