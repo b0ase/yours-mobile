@@ -486,7 +486,7 @@ const Markets = ({
           )}
           <p className="text-[11px]" style={{ color: MUTED }}>
             {cardsView
-              ? 'Prices are recent 1Sat trades. Market cap = last trade × supply not burned. 24h = the last 144 blocks.'
+              ? 'Prices are recent 1Sat trades. Market cap = last trade × supply not burned, shown only with 3+ trades in 30 days; otherwise "Thin market". 24h = the last 144 blocks.'
               : 'Prices are live 1Sat listings and recent trades. 24h = the last 144 blocks. Swipe a row left for Buy, Sell and Chat, right to Pin or Hide (or long-press it for everything, with Info).'}
           </p>
           {rowActions.sheet}

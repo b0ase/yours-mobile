@@ -316,3 +316,42 @@ export const capLabel = (sats: number, rate: number): string => {
     }
   return usd === null ? `${out} BSV` : `$${out}`;
 };
+
+// ── market cap (only for a live market) ──────────────────────────────────────
+
+/** 30 days of 10-minute blocks. */
+export const MONTH_BLOCKS = 30 * 144;
+
+export type CapView =
+  | { kind: 'cap'; sats: number }
+  /** Too few or too old trades for a market cap: the last price and its age in blocks (null: unknown tip). */
+  | { kind: 'thin'; lastSatsPerToken: number; ageBlocks: number | null }
+  | { kind: 'none' };
+
+/**
+ * Market cap = last trade × circulating, but only when there were at least 3 trades in the last 30 days and the
+ * last one is under 30 days old. One stale trade can't set a market cap. With no chain tip, the market is "thin".
+ */
+export const marketCap = (
+  trades: readonly { height: number; satsPerToken: number }[],
+  tip: number,
+  circulating: bigint,
+  dec: number,
+): CapView => {
+  if (!trades.length) return { kind: 'none' };
+  const last = trades[trades.length - 1];
+  if (!(tip > 0)) return { kind: 'thin', lastSatsPerToken: last.satsPerToken, ageBlocks: null };
+  const age = Math.max(0, tip - last.height);
+  const recent = trades.filter((t) => t.height > tip - MONTH_BLOCKS).length;
+  if (recent < 3 || age >= MONTH_BLOCKS) return { kind: 'thin', lastSatsPerToken: last.satsPerToken, ageBlocks: age };
+  return { kind: 'cap', sats: Math.round((last.satsPerToken * Number(circulating)) / 10 ** dec) };
+};
+
+/** Show a 24h % only with at least 2 trades in the window. */
+export const showChange = (change: number | null, trades24h: number): boolean => change !== null && trades24h >= 2;
+
+/** Board order: 24h volume, then holders (never market cap). */
+export const boardOrder = (
+  a: { volume: number; holders: number | null },
+  b: { volume: number; holders: number | null },
+): number => b.volume - a.volume || (b.holders ?? -1) - (a.holders ?? -1);

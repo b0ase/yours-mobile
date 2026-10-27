@@ -3,7 +3,17 @@ import { BadgeCheck, Copy, ExternalLink } from 'lucide-react';
 import { openExternal } from './useTokenRowActions';
 import { bsvLabel, chainTip, fiatLabel, tokenTrades, unitPriceLabel, type Trade } from './exchangeData';
 import { ScoreRing, ScoreSheet } from './TokenBoard';
-import { ageLabel, capLabel, badges, boardFacts, derive, fairScore, shortAmount, type BoardFacts } from './boardFacts';
+import {
+  ageLabel,
+  capLabel,
+  marketCap,
+  badges,
+  boardFacts,
+  derive,
+  fairScore,
+  shortAmount,
+  type BoardFacts,
+} from './boardFacts';
 
 /**
  * Token page detail (27 Oct 2026): header facts, supply & holders, market cap, recent trades, and an info &
@@ -89,7 +99,7 @@ export const TokenAudit = ({
   const score = fairScore(f, d);
   const proven = badges(f, d);
   const last = trades.length ? trades[trades.length - 1].satsPerToken : null;
-  const mcap = last !== null ? Math.round((last * Number(d.circulating)) / 10 ** f.dec) : null;
+  const cap = marketCap(trades, tip, d.circulating, f.dec);
   const txid = tokenId.split('_')[0];
   const recent = [...trades].reverse().slice(0, 20);
   const copyId = () => {
@@ -146,9 +156,23 @@ export const TokenAudit = ({
           <Fact k="Deployer" v={f.deployer ? short(f.deployer) : 'Contract'} ok={!!f.deployer} />
           <Fact k="Launched" v={f.height && tip ? `${ageLabel(tip - f.height)} ago` : '—'} sub={`block ${f.height}`} />
           <Fact
-            k="Market cap"
-            v={mcap === null ? '—' : capLabel(mcap, rate)}
-            sub={mcap === null ? 'never traded' : `${capLabel(mcap, 0)} · at last trade`}
+            k={cap.kind === 'thin' ? 'Thin market' : 'Market cap'}
+            v={
+              cap.kind === 'cap'
+                ? capLabel(cap.sats, rate)
+                : cap.kind === 'thin'
+                  ? `${unitPriceLabel(cap.lastSatsPerToken)} / token`
+                  : '—'
+            }
+            sub={
+              cap.kind === 'cap'
+                ? capLabel(cap.sats, 0)
+                : cap.kind === 'thin'
+                  ? cap.ageBlocks === null
+                    ? 'last trade'
+                    : `last trade ${ageLabel(cap.ageBlocks)} ago`
+                  : 'never traded'
+            }
           />
           <Fact
             k="Price per 1M"

@@ -5,6 +5,10 @@ import { returnsWords } from '../tokens/returnsWording';
 import {
   SCORE_RULES,
   ageLabel,
+  boardOrder,
+  marketCap,
+  MONTH_BLOCKS,
+  showChange,
   capLabel,
   badges,
   deployFacts,
@@ -179,5 +183,45 @@ describe('labels', () => {
     expect(ageLabel(3)).toBe('30m');
     expect(ageLabel(12)).toBe('2h');
     expect(ageLabel(432)).toBe('3d');
+  });
+});
+
+describe('market cap', () => {
+  const t = (height: number, satsPerToken = 10) => ({ height, satsPerToken });
+  test('3+ trades in 30 days and a fresh last trade: a market cap', () => {
+    expect(marketCap([t(900), t(950), t(990, 20)], 1000, 1000n, 0)).toEqual({ kind: 'cap', sats: 20000 });
+  });
+  test('one stale trade is a thin market with its age, never a cap', () => {
+    expect(marketCap([t(100, 5)], 100 + 4 * MONTH_BLOCKS, 1000n, 0)).toEqual({
+      kind: 'thin',
+      lastSatsPerToken: 5,
+      ageBlocks: 4 * MONTH_BLOCKS,
+    });
+  });
+  test('only 2 recent trades, or a last trade 30+ days old: thin', () => {
+    expect(marketCap([t(900), t(990)], 1000, 1000n, 0).kind).toBe('thin');
+    const tip = 10_000 + MONTH_BLOCKS;
+    expect(marketCap([t(9_990), t(9_995), t(10_000)], tip, 1000n, 0).kind).toBe('thin');
+  });
+  test('no tip: thin; no trades: none', () => {
+    expect(marketCap([t(1), t(2), t(3)], 0, 1000n, 0)).toEqual({ kind: 'thin', lastSatsPerToken: 10, ageBlocks: null });
+    expect(marketCap([], 1000, 1000n, 0).kind).toBe('none');
+  });
+});
+
+describe('24h change and order', () => {
+  test('the % shows only with 2+ trades in 24h', () => {
+    expect(showChange(0, 1)).toBe(false);
+    expect(showChange(null, 5)).toBe(false);
+    expect(showChange(0.1, 2)).toBe(true);
+  });
+  test('board order: 24h volume, then holders', () => {
+    const rows = [
+      { id: 'a', volume: 0, holders: 900 },
+      { id: 'b', volume: 500, holders: 3 },
+      { id: 'c', volume: 0, holders: null },
+      { id: 'd', volume: 0, holders: 1200 },
+    ];
+    expect([...rows].sort(boardOrder).map((r) => r.id)).toEqual(['b', 'd', 'a', 'c']);
   });
 });

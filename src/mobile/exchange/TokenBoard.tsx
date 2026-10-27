@@ -3,11 +3,24 @@ import { useNavigate } from 'react-router-dom';
 import { Flame, Info, ShieldCheck, Sparkles, TrendingUp, Users, X } from 'lucide-react';
 import type { HotRoom } from '../market/indexer';
 import { TokenIcon } from './TokenIcon';
-import { bsvLabel, chainTip, changeLabel, dayStats, tokenTrades, tradeRoute, type DayStats } from './exchangeData';
+import {
+  bsvLabel,
+  chainTip,
+  changeLabel,
+  dayStats,
+  tokenTrades,
+  tradeRoute,
+  unitPriceLabel,
+  type DayStats,
+} from './exchangeData';
 import {
   SCORE_RULES,
   ageLabel,
   capLabel,
+  boardOrder,
+  marketCap,
+  showChange,
+  type CapView,
   badges,
   boardFacts,
   derive,
@@ -35,8 +48,8 @@ type Card = {
   stats: DayStats;
   score: FairScore | null;
   badges: Badge[];
-  /** Market cap in sats (last trade × circulating), null when never traded. */
-  mcap: number | null;
+  /** Market cap only for a live market (boardFacts.marketCap). */
+  cap: CapView;
   burnedLabel: string | null;
 };
 
@@ -167,7 +180,7 @@ const TokenCard = ({
         <div className="flex flex-col min-w-0 flex-1">
           <span className="flex items-baseline gap-2 min-w-0">
             <span className="text-base font-extrabold text-white truncate">${name}</span>
-            {ch !== null && (
+            {ch !== null && card && showChange(ch, card.stats.trades) && (
               <span className="text-xs font-bold shrink-0" style={{ color: ch >= 0 ? GREEN : RED }}>
                 {changeLabel(ch)}
               </span>
@@ -212,14 +225,30 @@ const TokenCard = ({
       <div className="grid grid-cols-2 gap-2 pointer-events-none">
         <div className="flex flex-col">
           <span className="text-[10px] uppercase tracking-wide" style={{ color: MUTED }}>
-            Market cap
+            {card?.cap.kind === 'thin' ? 'Thin market' : 'Market cap'}
           </span>
           <span className="text-sm font-bold text-white">
-            {!card ? '…' : card.mcap === null ? '—' : capLabel(card.mcap, rate)}
+            {!card
+              ? '…'
+              : card.cap.kind === 'cap'
+                ? capLabel(card.cap.sats, rate)
+                : card.cap.kind === 'thin'
+                  ? `${unitPriceLabel(card.cap.lastSatsPerToken)} / token`
+                  : '—'}
           </span>
-          {card?.mcap != null && rate > 0 && (
+          {card?.cap.kind === 'cap' && rate > 0 && (
             <span className="text-[10px]" style={{ color: MUTED }}>
-              {capLabel(card.mcap, 0)} · at last trade
+              {capLabel(card.cap.sats, 0)}
+            </span>
+          )}
+          {card?.cap.kind === 'thin' && (
+            <span className="text-[10px]" style={{ color: MUTED }}>
+              {card.cap.ageBlocks === null ? 'last trade' : `last trade ${ageLabel(card.cap.ageBlocks)} ago`}
+            </span>
+          )}
+          {card?.cap.kind === 'none' && (
+            <span className="text-[10px]" style={{ color: MUTED }}>
+              never traded
             </span>
           )}
         </div>
@@ -311,8 +340,24 @@ export const TokenBoard = ({
   const [shown, setShown] = useState(PAGE);
   const [tip, setTip] = useState(0);
   const [sheet, setSheet] = useState<{ title: string; score: FairScore } | null | false>(false);
-  const visible = list.slice(0, shown);
-  const visibleKey = visible.map((r) => r.ref.id).join(',');
+  const page = list.slice(0, shown);
+  const visibleKey = page.map((r) => r.ref.id).join(',');
+  const visible = page;
+  // Shown order: 24h volume, then holders (loaded cards first; never by market cap).
+  const ordered = useMemo(
+    () =>
+      [...page].sort((a, b) => {
+        const x = cards[a.ref.id];
+        const y = cards[b.ref.id];
+        if (!x || !y) return x ? -1 : y ? 1 : 0;
+        return boardOrder(
+          { volume: x.stats.volume, holders: x.facts?.holders ?? null },
+          { volume: y.stats.volume, holders: y.facts?.holders ?? null },
+        );
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [visibleKey, cards],
+  );
 
   useEffect(() => {
     let live = true;
@@ -328,10 +373,7 @@ export const TokenBoard = ({
           if (!live) return;
           const stats = dayStats(trades, t);
           const d = facts ? derive(facts) : null;
-          const mcap =
-            facts && d && stats.last !== null
-              ? Math.round((stats.last * Number(d.circulating)) / 10 ** facts.dec)
-              : null;
+          const cap: CapView = facts && d ? marketCap(trades, t, d.circulating, facts.dec) : { kind: 'none' };
           setCards((c) => ({
             ...c,
             [id]: {
@@ -339,7 +381,7 @@ export const TokenBoard = ({
               stats,
               score: facts ? fairScore(facts, d!) : null,
               badges: facts ? badges(facts, d!) : [],
-              mcap,
+              cap,
               burnedLabel: facts && d && d.burned > 0n ? `${shortAmount(d.burned, facts.dec)} burned` : null,
             },
           }));
@@ -426,7 +468,7 @@ export const TokenBoard = ({
           </button>
         </div>
         <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3" role="list" aria-label="Tokens">
-          {visible.map((r) => {
+          {ordered.map((r) => {
             const card = cards[r.ref.id];
             return (
               <TokenCard
