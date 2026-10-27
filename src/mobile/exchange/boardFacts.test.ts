@@ -208,9 +208,9 @@ describe('market cap', () => {
     expect(marketCap(tiny, 1000, 1000n, 0).kind).toBe('thin');
   });
   test('a market cap above 1,000,000 BSV is never shown', () => {
-    // 1e9 sats/token × 1.1M tokens = 1.1M BSV
-    expect(marketCap([t(900, 1e9), t(950, 1e9), t(990, 1e9)], 1000, 1_100_000n, 0).kind).toBe('thin');
-    expect(marketCap([t(900, 1e9), t(950, 1e9), t(990, 1e9)], 1000, 1_000_000n, 0).kind).toBe('cap');
+    // 1 BSV/token × 1.1M tokens = 1.1M BSV
+    expect(marketCap([t(900, 1e8), t(950, 1e8), t(990, 1e8)], 1000, 1_100_000n, 0).kind).toBe('thin');
+    expect(marketCap([t(900, 1e8), t(950, 1e8), t(990, 1e8)], 1000, 1_000_000n, 0).kind).toBe('cap');
   });
   test('no tip: thin; no trades: none', () => {
     expect(marketCap([t(1), t(2), t(3)], 0, 1000n, 0)).toEqual({ kind: 'thin', lastSatsPerToken: 10, ageBlocks: null });
