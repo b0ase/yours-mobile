@@ -32,6 +32,7 @@ import type { OneSatContext } from '@1sat/actions';
 import { fetchExchangeRate } from '../../utils/wallet';
 import { AgentCallError, CLI_ORIGIN, handleAgentCall, type AgentGrant } from './agentPairing';
 import { ReplyBook } from './replies';
+import { handleBitsignCall, isBitsignAction } from './bitsign';
 import { USER_DENIED_CODE, USER_DENIED_MESSAGE, isUserDenied } from '../../services/userDenied';
 import { PAIR_MIRROR_KEY, toPairMirror } from '../../services/pairedPromptGuard';
 
@@ -402,6 +403,10 @@ async function onRequest(l: Live, id: string, action: string, params: unknown) {
   if (seen === 'busy') return; // still running: the first run replies
   if (seen !== 'run') return send(l.stored.c, seen.replay); // answered before: re-send, never re-run
   if (l.stored.agent) return onAgentRequest(l, l.stored.agent, id, action, params);
+  // bit-sign phone signing (bitsign.ts): returns a drawing only, never keys or money. Checked against this session's
+  // origin; ReplyBook above already makes a re-sent id show one pad and get one answer.
+  if (isBitsignAction(action))
+    return reply(l, { t: 'res', id, ...(await handleBitsignCall(action, params, l.stored.origin)) });
   try {
     // The relay's origin is a claim, not proof (audit H1): run under the paired key, never the site's own grants.
     const as = keyOf(l.stored); // this pairing's own key: never shared with another channel claiming the host

@@ -44,6 +44,7 @@ import { useSubscribeLinks } from '../pots/subscribeLink';
 import { usePeerPayLinks } from '../scan/peerpayLinks';
 import { AuthRequestHost } from '../auth/AuthSheet';
 import { BrowseLinkHost } from '../browse/BrowseLinkHost';
+import { BitsignHost } from '../pair/BitsignHost';
 
 const PairSheet = lazy(() => import('../pair/PairSheet'));
 const ScanSheet = lazy(() => import('../scan/ScanSheet'));
@@ -735,6 +736,7 @@ const TopNavBar = () => {
       )}
       {!phoneLayoutOn() && <AuthRequestHost />}
       {!phoneLayoutOn() && <BrowseLinkHost />}
+      {!phoneLayoutOn() && <BitsignHost />}
       {pairOpen && (
         <Suspense fallback={null}>
           <PairSheet
