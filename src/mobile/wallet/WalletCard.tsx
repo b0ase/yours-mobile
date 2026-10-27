@@ -560,7 +560,8 @@ const WalletCardInner = ({
                 )}
               </div>
               <div className="bw-wcard-tr">
-                {/* Scan to pay (owner, 9 Oct 2026): 44px target, gold-ring icon like the top bar. */}
+                {/* Scan to pay (owner, 9 Oct 2026): 44px target, gold ring. Owner, 27 Oct 2026: easier to spot,
+                    especially for older eyes, so a bigger icon and a "Scan" word, still gold rather than white. */}
                 <button
                   type="button"
                   aria-label="Scan to pay"
@@ -572,7 +573,8 @@ const WalletCardInner = ({
                   }}
                 >
                   <span>
-                    <ScanLine size={16} />
+                    <ScanLine size={18} strokeWidth={2.25} />
+                    Scan
                   </span>
                 </button>
               </div>
