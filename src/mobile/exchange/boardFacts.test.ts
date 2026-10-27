@@ -187,7 +187,7 @@ describe('labels', () => {
 });
 
 describe('market cap', () => {
-  const t = (height: number, satsPerToken = 10) => ({ height, satsPerToken });
+  const t = (height: number, satsPerToken = 10, totalSats = 2_000_000) => ({ height, satsPerToken, totalSats });
   test('3+ trades in 30 days and a fresh last trade: a market cap', () => {
     expect(marketCap([t(900), t(950), t(990, 20)], 1000, 1000n, 0)).toEqual({ kind: 'cap', sats: 20000 });
   });
@@ -202,6 +202,15 @@ describe('market cap', () => {
     expect(marketCap([t(900), t(990)], 1000, 1000n, 0).kind).toBe('thin');
     const tip = 10_000 + MONTH_BLOCKS;
     expect(marketCap([t(9_990), t(9_995), t(10_000)], tip, 1000n, 0).kind).toBe('thin');
+  });
+  test('under 0.05 BSV traded in 30 days: thin', () => {
+    const tiny = [t(900, 10, 1000), t(950, 10, 1000), t(990, 20, 1000)];
+    expect(marketCap(tiny, 1000, 1000n, 0).kind).toBe('thin');
+  });
+  test('a market cap above 1,000,000 BSV is never shown', () => {
+    // 1e9 sats/token × 1.1M tokens = 1.1M BSV
+    expect(marketCap([t(900, 1e9), t(950, 1e9), t(990, 1e9)], 1000, 1_100_000n, 0).kind).toBe('thin');
+    expect(marketCap([t(900, 1e9), t(950, 1e9), t(990, 1e9)], 1000, 1_000_000n, 0).kind).toBe('cap');
   });
   test('no tip: thin; no trades: none', () => {
     expect(marketCap([t(1), t(2), t(3)], 0, 1000n, 0)).toEqual({ kind: 'thin', lastSatsPerToken: 10, ageBlocks: null });

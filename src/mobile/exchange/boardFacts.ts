@@ -321,6 +321,10 @@ export const capLabel = (sats: number, rate: number): string => {
 
 /** 30 days of 10-minute blocks. */
 export const MONTH_BLOCKS = 30 * 144;
+/** At least this much traded in 30 days (0.05 BSV) before a market cap is shown. */
+export const MIN_MONTH_VOLUME_SATS = 5_000_000;
+/** Never show a market cap above 1,000,000 BSV (all BSV that will ever exist is 21M). */
+export const MAX_CAP_SATS = 1_000_000 * 1e8;
 
 export type CapView =
   | { kind: 'cap'; sats: number }
@@ -330,10 +334,11 @@ export type CapView =
 
 /**
  * Market cap = last trade × circulating, but only when there were at least 3 trades in the last 30 days and the
- * last one is under 30 days old. One stale trade can't set a market cap. With no chain tip, the market is "thin".
+ * last one is under 30 days old, at least 0.05 BSV traded in those 30 days, and the result is no more than
+ * 1,000,000 BSV. One stale or tiny trade can't set a market cap. With no chain tip, the market is "thin".
  */
 export const marketCap = (
-  trades: readonly { height: number; satsPerToken: number }[],
+  trades: readonly { height: number; satsPerToken: number; totalSats?: number }[],
   tip: number,
   circulating: bigint,
   dec: number,
@@ -342,9 +347,12 @@ export const marketCap = (
   const last = trades[trades.length - 1];
   if (!(tip > 0)) return { kind: 'thin', lastSatsPerToken: last.satsPerToken, ageBlocks: null };
   const age = Math.max(0, tip - last.height);
-  const recent = trades.filter((t) => t.height > tip - MONTH_BLOCKS).length;
-  if (recent < 3 || age >= MONTH_BLOCKS) return { kind: 'thin', lastSatsPerToken: last.satsPerToken, ageBlocks: age };
-  return { kind: 'cap', sats: Math.round((last.satsPerToken * Number(circulating)) / 10 ** dec) };
+  const recent = trades.filter((t) => t.height > tip - MONTH_BLOCKS);
+  const volume = recent.reduce((n, t) => n + (t.totalSats ?? 0), 0);
+  const thin: CapView = { kind: 'thin', lastSatsPerToken: last.satsPerToken, ageBlocks: age };
+  if (recent.length < 3 || age >= MONTH_BLOCKS || volume < MIN_MONTH_VOLUME_SATS) return thin;
+  const sats = Math.round((last.satsPerToken * Number(circulating)) / 10 ** dec);
+  return sats > MAX_CAP_SATS ? thin : { kind: 'cap', sats };
 };
 
 /** Show a 24h % only with at least 2 trades in the window. */
