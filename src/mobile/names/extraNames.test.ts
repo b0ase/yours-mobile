@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { PrivateKey } from '@bsv/sdk';
-import { checkNamePayment, handlePaymentOutputs, parsePaymentRequired } from './extraNames';
+import { checkNamePayment, directFee, extraFeeLabel, handlePaymentOutputs, parsePaymentRequired } from './extraNames';
 import { commitmentScript } from '../chat/roomSpend';
 import { parseHandlesInfo } from '../chat/api';
 
@@ -54,5 +54,22 @@ describe('b-Aware 25 Oct: the name fee paid is the one the user confirmed', () =
     expect(() => checkNamePayment(pay, { sats: 2500, to: other })).toThrow(/Nothing was paid/);
     expect(() => checkNamePayment({ ...pay, sats: 2501 }, { sats: 2500, to })).toThrow(/Nothing was paid/);
     expect(() => checkNamePayment({ ...pay, sats: 1_000_000 }, { sats: 1_000_000, to })).toThrow(/Nothing was paid/);
+  });
+});
+
+describe('owner pricing 27 Oct: an extra name is $1 in BSV at the live rate', () => {
+  test('quotes $1 at the rate and labels it "$1 (≈ N sats)"', () => {
+    const q = directFee({ address: to, usd: 1 }, 50)!;
+    expect(q).toEqual({ pence: 0, sats: 2_000_000, to, usd: 1, direct: true });
+    expect(extraFeeLabel(q)).toBe('$1 (≈ 2,000,000 sats)');
+  });
+  test('no quote without a rate, without a fee, or above the $5 ceiling', () => {
+    expect(directFee({ address: to, usd: 1 }, 0)).toBeNull();
+    expect(directFee(null, 50)).toBeNull();
+    expect(directFee({ address: to, usd: 50 }, 50)).toBeNull();
+  });
+  test('bit-sign fees keep their label', () => {
+    expect(extraFeeLabel({ pence: 1, sats: 2500, to })).toBe('1p');
+    expect(extraFeeLabel(null)).toBe('');
   });
 });

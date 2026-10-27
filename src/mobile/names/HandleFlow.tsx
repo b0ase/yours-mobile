@@ -36,7 +36,7 @@ import {
   type HandleSource,
 } from '../social/linkedHandles';
 import { getLinks } from '../social/links';
-import { addExtraName, loadHandles } from './extraNames';
+import { addExtraName, extraFeeLabel, nextExtraNameFee, type ExtraNameFee } from './extraNames';
 import { ensureNameRooms } from './nameRooms';
 import { BWALLET_PAYMAIL_API, BWALLET_PAYMAIL_DOMAIN, SIBLING_PAYMAIL_DOMAINS } from './config';
 import { AvatarPicker } from './AvatarPicker';
@@ -167,7 +167,7 @@ export const HandleFlow = ({
   const [selected, setSelected] = useState<string[]>([]);
   const [primary, setPrimary] = useState('');
   const [extrasDone, setExtrasDone] = useState<string[]>([]);
-  const [extraFee, setExtraFee] = useState<{ alias: string; sats: number; to: string; pence: number } | null>(null);
+  const [extraFee, setExtraFee] = useState<(ExtraNameFee & { alias: string }) | null>(null);
   const queue = useRef<string[]>([]);
   const pending = useRef('');
   const roomsFor = useRef<{ names: string[]; primary: string }>({ names: [], primary: '' });
@@ -213,11 +213,11 @@ export const HandleFlow = ({
    * The other names, one after another through the existing extra-name call (Settings › Names: bit-sign then the
    * paymail server). No atomic multi-claim endpoint exists. A name with a fee asks first (its own confirmation).
    */
-  const addExtras = async (approved: { sats: number; to: string } | null = null) => {
+  const addExtras = async (approved: ExtraNameFee | null = null) => {
     while (queue.current.length) {
       const a = queue.current[0];
       if (!approved) {
-        const fee = (await loadHandles(apiContext)).nextFee;
+        const fee = await nextExtraNameFee(apiContext, f);
         if (fee) return setExtraFee({ alias: a, ...fee });
       }
       await addExtraName(apiContext, f, a, approved);
@@ -233,7 +233,7 @@ export const HandleFlow = ({
     if (r.names.length) await ensureNameRooms(apiContext, identityAddress, r.names, r.primary).catch(() => undefined);
     forgetLinkedHandles(identityAddress);
   };
-  const runExtras = (approved: { sats: number; to: string } | null) => {
+  const runExtras = (approved: ExtraNameFee | null) => {
     setExtraFee(null);
     setBusy(true);
     addExtras(approved)
@@ -385,7 +385,7 @@ export const HandleFlow = ({
                 Your paymail
               </span>
               <span className="text-[10px] font-semibold" style={{ color: nameFee ? GOLD : '#2ecc71' }}>
-                {nameFee ? '1¢ · instant' : 'Free · instant'}
+                {nameFee ? '1¢ · instant' : paymail ? 'Free · instant' : 'Your first name is free'}
               </span>
             </div>
             {!paymail && suggestions.length > 0 && (
@@ -600,12 +600,12 @@ export const HandleFlow = ({
           lineItems={[
             {
               address: `Add $${extraFee?.alias ?? ''}`.slice(0, 16),
-              amount: extraFee ? (extraFee.pence ? `${extraFee.pence}p` : `${extraFee.sats} sats`) : '',
+              amount: extraFeeLabel(extraFee),
             },
           ]}
-          total={extraFee ? (extraFee.pence ? `${extraFee.pence}p` : `${extraFee.sats} sats`) : ''}
+          total={extraFeeLabel(extraFee)}
           isProcessing={busy}
-          onConfirm={() => extraFee && runExtras({ sats: extraFee.sats, to: extraFee.to })}
+          onConfirm={() => extraFee && runExtras(extraFee)}
           onCancel={() => (setExtraFee(null), (queue.current = []), void finishRooms())}
         />
       </div>

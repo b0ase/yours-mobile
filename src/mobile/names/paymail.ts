@@ -188,14 +188,24 @@ export const unlinkPaymail = async (
 type NameSigner = Pick<WalletInterface, 'getPublicKey' | 'createSignature'>;
 const aliasOf = (paymail: string) => paymail.split('@')[0].toLowerCase();
 
-/** Add an extra plain name to this wallet (it receives too; the main name stays main). Pay on bit-sign first (extraNames.ts). */
-export const addPaymail = async (f: Fetch, wallet: NameSigner, alias: string): Promise<string> => {
+/**
+ * Add an extra plain name to this wallet (it receives too; the main name stays main). With `fee` (the $1 extra-name
+ * payment, paymailConfig().extraNameFee) the server checks that payment; without it, that bit-sign says this key
+ * already paid for the name there (extraNames.ts).
+ */
+export const addPaymail = async (
+  f: Fetch,
+  wallet: NameSigner,
+  alias: string,
+  fee: { feeTxid?: string; feeTx?: string } = {},
+): Promise<string> => {
   if (!paymailEnabled()) throw new Error('Paymail is not configured');
   const a = alias.trim().toLowerCase();
   if (!PAYMAIL_ALIAS_RE.test(a)) throw new Error('Use a-z, 0-9, - or _ (up to 32)');
-  const signed = await signRequest(wallet, 'names-add', { alias: a });
-  // The server checks with bit-sign that this identity key owns (has paid for) the name.
-  const j = await postJson(f, api('names-add'), signed);
+  const fields: Record<string, string> = { alias: a };
+  if (fee.feeTxid) fields.feeTxid = fee.feeTxid;
+  const signed = await signRequest(wallet, 'names-add', fields);
+  const j = await postJson(f, api('names-add'), fee.feeTx ? { ...signed, feeTx: fee.feeTx } : signed);
   return String(j.added);
 };
 
@@ -404,21 +414,20 @@ export const nameChangeBlocked = (current: string | null | undefined, alias: str
 };
 
 export type NameFee = { address: string; usd: number };
-/** The server's name rules: where the 1¢ fee for a new name goes (null = no fee). Never throws. */
-export const paymailConfig = async (f: Fetch): Promise<{ nameFee: NameFee | null }> => {
-  if (!paymailEnabled()) return { nameFee: null };
+const asFee = (nf: { address?: unknown; usd?: unknown } | null | undefined): NameFee | null =>
+  nf && typeof nf.address === 'string' && Number(nf.usd) > 0 ? { address: nf.address, usd: Number(nf.usd) } : null;
+/**
+ * The server's name rules (owner pricing, 27 Oct 2026): `nameFee` for a first name / rename (null = free, which it
+ * now is) and `extraNameFee` for each extra name on the same key ($1; null = off). Never throws.
+ */
+export const paymailConfig = async (f: Fetch): Promise<{ nameFee: NameFee | null; extraNameFee: NameFee | null }> => {
+  if (!paymailEnabled()) return { nameFee: null, extraNameFee: null };
   try {
     const r = await f(api('config'));
     const j = r.ok ? await r.json() : null;
-    const nf = j?.nameFee;
-    return {
-      nameFee:
-        nf && typeof nf.address === 'string' && Number(nf.usd) > 0
-          ? { address: nf.address, usd: Number(nf.usd) }
-          : null,
-    };
+    return { nameFee: asFee(j?.nameFee), extraNameFee: asFee(j?.extraNameFee) };
   } catch {
-    return { nameFee: null };
+    return { nameFee: null, extraNameFee: null };
   }
 };
 

@@ -2,10 +2,25 @@ import { useEffect, useState } from 'react';
 import { AtSign, BadgeCheck, Copy, Check, Plus } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { NameHandover } from './NameHandover';
-import { listPaymails, PAYMAIL_ALIAS_RE, toAlias, unlinkPaymail, type WalletName } from '../names/paymail';
+import {
+  listPaymails,
+  paymailAvailability,
+  PAYMAIL_ALIAS_RE,
+  toAlias,
+  unlinkPaymail,
+  type WalletName,
+} from '../names/paymail';
 import { setPaymail } from '../names/accountName';
 import { ErrorActions } from '../errors/ErrorActions';
-import { addExtraName, loadHandles, makeMainName, removeName } from '../names/extraNames';
+import {
+  addExtraName,
+  extraFeeLabel,
+  loadHandles,
+  makeMainName,
+  nextExtraNameFee,
+  removeName,
+  type ExtraNameFee,
+} from '../names/extraNames';
 import type { HandlesInfo } from '../chat/api';
 import { SendConfirmation } from '../../components/SendConfirmation';
 import { useTheme } from '../../hooks/useTheme';
@@ -33,18 +48,23 @@ export const WalletNames = () => {
   const { theme } = useTheme();
   const [handles, setHandles] = useState<HandlesInfo | null>(null);
   const [feeConfirm, setFeeConfirm] = useState(false);
+  // Owner pricing (27 Oct 2026): extra names cost $1 in BSV, paid to the paymail server's fee address.
+  const [extraFee, setExtraFee] = useState<ExtraNameFee | null>(null);
   useEffect(() => {
     if (!PAID_FEATURES_ENABLED) return;
     let live = true;
     loadHandles(apiContext)
       .then((h) => live && setHandles(h))
       .catch(() => live && setHandles(null));
+    nextExtraNameFee(apiContext, f)
+      .then((x) => live && setExtraFee(x))
+      .catch(() => live && setExtraFee(null));
     return () => {
       live = false;
     };
   }, [apiContext, tick]);
-  const nameFee = handles?.nextFee ?? null;
-  const feeLabel = nameFee ? (nameFee.pence ? `${nameFee.pence}p` : `${nameFee.sats} sats`) : '';
+  const nameFee: ExtraNameFee | null = extraFee ?? handles?.nextFee ?? null;
+  const feeLabel = extraFeeLabel(nameFee);
   const plainCount = names?.filter((n) => n.kind === 'plain').length ?? 0;
   const atMax = plainCount >= (handles?.max ?? 5);
   // After any change: re-read the names and cache the main one, so the top bar and Receive follow it.
@@ -80,7 +100,13 @@ export const WalletNames = () => {
   const add = async (confirmed = false) => {
     const a = toAlias(draft);
     if (!PAYMAIL_ALIAS_RE.test(a)) return setError('Use a-z, 0-9, - or _ (up to 32)');
-    if (nameFee && !confirmed) return setFeeConfirm(true);
+    if (nameFee && !confirmed) {
+      // Check before paying, so nobody pays for a name they can't have.
+      const { publicKey } = await apiContext.wallet.getPublicKey({ identityKey: true });
+      const a2 = await paymailAvailability(f, a, publicKey).catch(() => null);
+      if (a2 && a2.state !== 'free') return setError(a2.message || 'That name is taken');
+      return setFeeConfirm(true);
+    }
     setFeeConfirm(false);
     const go = () => addExtraName(apiContext, f, a, nameFee);
     if (await run('add', go, 'Could not add that name')) {
@@ -240,7 +266,7 @@ export const WalletNames = () => {
         ) : (
           // Store build (docs/STORE-AUDIT.md 1.6): only the free paymail, so no paid extra names.
           PAID_FEATURES_ENABLED &&
-          !!handles &&
+          (!!handles || !!extraFee) &&
           !atMax &&
           names.some((n) => n.kind === 'plain' && n.main) && (
             <button
@@ -249,7 +275,7 @@ export const WalletNames = () => {
               className="flex items-center gap-1.5 mt-2 text-xs bg-transparent border-0 p-0"
               style={{ color: 'var(--bw-accent)' }}
             >
-              <Plus size={14} /> Add another name
+              <Plus size={14} /> Add another name{extraFee ? ` · ${feeLabel}` : ''}
             </button>
           )
         )}

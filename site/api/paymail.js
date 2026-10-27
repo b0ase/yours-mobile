@@ -4,7 +4,8 @@
 //   /api/paymail/<op>                         → ?op=<op>   (register, lookup, inbox, ack, delete)
 // Env: PAYMAIL_DOMAIN (primary, default bwallet-nine.vercel.app), PAYMAIL_DOMAINS (optional,
 //      comma-separated extra domains served with the same aliases), PAYMAIL_BASE_URL (optional),
-//      SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ARC_URL / ARC_API_KEY (optional).
+//      SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ARC_URL / ARC_API_KEY (optional),
+//      BWALLET_NAME_FEE_ADDRESS (extra-name $1 fee; unset = off), PAYMAIL_ADMIN_SECRET (CSV export; unset = off).
 'use strict';
 const { makeHandlers } = require('../lib/paymail');
 const { supabaseStore, arcBroadcast } = require('../lib/paymailStore');
@@ -55,6 +56,8 @@ const ROUTES = {
   'handover-cancel': ['POST', 'handover-cancel'],
   'handover-accept': ['POST', 'handover-accept'],
   'handovers-for': ['GET', 'handovers-for'],
+  // Paid-name receipts as CSV (admin only: x-admin-secret = PAYMAIL_ADMIN_SECRET).
+  'name-fees-export': ['GET', 'name-fees-export'],
 };
 
 const hits = new Map();
@@ -123,7 +126,15 @@ module.exports = async function handler(req, res) {
   const body = req.method === 'POST' ? await readJson(req) : {};
   if (body === null) return send(res, 400, { error: 'invalid-json' });
   try {
-    const [status, out] = await handlers[route[1]](q, body, { ip: ip === 'unknown' ? null : ip });
+    const [status, out, headers] = await handlers[route[1]](q, body, {
+      ip: ip === 'unknown' ? null : ip,
+      adminSecret: req.headers['x-admin-secret'] || null,
+    });
+    if (headers && typeof out === 'string') {
+      res.statusCode = status;
+      for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
+      return res.end(out);
+    }
     return send(res, status, out);
   } catch (e) {
     console.error('paymail error', route[1], String(e && e.message ? e.message : e).slice(0, 200));

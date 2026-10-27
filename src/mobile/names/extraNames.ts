@@ -3,8 +3,11 @@ import type { OneSatContext } from '@1sat/actions';
 import { ChatApiError, saveSession, type BchatClient, type HandlesInfo } from '../chat/api';
 import { commitmentScript, NO_SEND, releasePayment, type Commitment } from '../chat/roomSpend';
 import { kycClient, signedInClient } from '../kyc/kycWallet';
-import { addPaymail, makeMainPaymail, removePaymail } from './paymail';
+import { addPaymail, makeMainPaymail, paymailConfig, removePaymail, type NameFee } from './paymail';
 import type { Fetch } from './names';
+import { sendBsv } from '../../utils/guardedSendBsv';
+import { fetchExchangeRate } from '../../utils/wallet';
+import { usdToSats } from '../money/money';
 
 /**
  * Several names per wallet, one main (owner, 15 Oct 2026). bit-sign is where a name is paid for
@@ -46,8 +49,46 @@ export const loadHandles = async (ctx: OneSatContext): Promise<HandlesInfo> => (
  * through its 402 flow (signed, never broadcast by us: bit-sign verifies and broadcasts), then adds the
  * paymail alias. Returns the new paymail.
  */
-/** A name costs 1p; nothing near this is ever a real name fee. */
+/** A bit-sign name costs 1p; nothing near this is ever a real bit-sign name fee. */
 export const MAX_NAME_FEE_SATS = 50_000;
+
+/**
+ * The fee for the next extra name, as the user confirms it. `direct` = the paymail server's $1 fee (owner pricing,
+ * 27 Oct 2026), paid with the normal wallet send to its fee address; otherwise bit-sign's 1p 402 flow.
+ */
+export type ExtraNameFee = { pence: number; sats: number; to: string; usd?: number; direct?: boolean };
+
+/** "$1 (≈ 1,234 sats)" for a direct fee, else "1p" / "N sats". Pure. */
+export const extraFeeLabel = (fee: ExtraNameFee | null): string =>
+  !fee
+    ? ''
+    : fee.direct && fee.usd
+      ? `$${Number.isInteger(fee.usd) ? fee.usd : fee.usd.toFixed(2)} (≈ ${fee.sats.toLocaleString('en-US')} sats)`
+      : fee.pence
+        ? `${fee.pence}p`
+        : `${fee.sats} sats`;
+
+/** Most a direct extra-name fee may cost: $1 plus a margin, never more than $5 whatever the server says. Pure. */
+export const MAX_DIRECT_FEE_USD = 5;
+
+/** A direct fee quote from the server config at `rate` (USD per BSV). Pure. */
+export function directFee(fee: NameFee | null, rate: number): ExtraNameFee | null {
+  if (!fee || !(fee.usd > 0) || fee.usd > MAX_DIRECT_FEE_USD) return null;
+  const sats = usdToSats(fee.usd, rate);
+  if (!sats) return null;
+  return { pence: 0, sats, to: fee.address, usd: fee.usd, direct: true };
+}
+
+/** The next extra name's fee: the paymail server's $1 when it is on, else bit-sign's (loadHandles). */
+export async function nextExtraNameFee(ctx: OneSatContext, f: Fetch): Promise<ExtraNameFee | null> {
+  const { extraNameFee } = await paymailConfig(f);
+  if (extraNameFee) {
+    const q = directFee(extraNameFee, await fetchExchangeRate('main'));
+    if (!q) throw new Error("Couldn't get the BSV price. Try again in a minute.");
+    return q;
+  }
+  return (await loadHandles(ctx)).nextFee;
+}
 
 /**
  * The 402 must ask for no more than the fee the user confirmed, to the same address (b-Aware 25 Oct 2026: the
@@ -64,8 +105,18 @@ export async function addExtraName(
   ctx: OneSatContext,
   f: Fetch,
   alias: string,
-  approved: { sats: number; to: string } | null,
+  approved: ExtraNameFee | { sats: number; to: string } | null,
 ): Promise<string> {
+  // The paymail server's $1 fee: pay exactly what the user confirmed, through the normal wallet send
+  // (its approval sheet), to the server's fee address, then add the name with that txid as the receipt.
+  if (approved && 'direct' in approved && approved.direct) {
+    const { extraNameFee } = await paymailConfig(f);
+    if (!extraNameFee || extraNameFee.address !== approved.to)
+      throw new Error('The name fee address changed. Nothing was paid. Try again.');
+    const res = await sendBsv.execute(ctx, { requests: [{ address: approved.to, satoshis: approved.sats }] });
+    if (res.error || !res.txid) throw new Error(String(res.error ?? 'Payment failed'));
+    return addPaymail(f, ctx.wallet, alias, { feeTxid: res.txid, feeTx: res.tx ? Utils.toHex(res.tx) : undefined });
+  }
   const c = await client(ctx);
   try {
     await c.addHandle(alias);
