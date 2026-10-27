@@ -221,6 +221,13 @@ function supabaseStore(env = process.env, f = fetch) {
           body: JSON.stringify(row),
         })) ?? []
       ).length > 0,
+    // Paid-name receipts, oldest first (admin CSV export). `since` = ISO time, optional.
+    listNameFees: async ({ since } = {}) =>
+      (await req(
+        `bwallet_paymail_name_fees?select=txid,identity_key,alias,satoshis,usd,rate,kind,created_at${
+          since && !Number.isNaN(Date.parse(since)) ? `&created_at=gte.${q(new Date(since).toISOString())}` : ''
+        }&order=created_at.asc&limit=10000`,
+      )) ?? [],
     insertPayment: (row) =>
       req('bwallet_paymail_payments', {
         method: 'POST',

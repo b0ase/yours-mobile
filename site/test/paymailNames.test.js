@@ -248,53 +248,7 @@ describe('several names per wallet', () => {
   });
 });
 
-describe('extra names are paid on bit-sign, checked here', () => {
-  const withOwner = (answer) => {
-    const store = memStore();
-    const u = user();
-    store.aliases.set('one', { alias: 'one', identity_key: u.identityKey, kind: 'plain', is_primary: true });
-    const asked = [];
-    const h = pm.makeHandlers({
-      store,
-      env: { PAYMAIL_DOMAIN: 'pay.test', NODE_ENV: 'test' },
-      handleOwner: async (alias, key) => {
-        asked.push([alias, key]);
-        if (answer === 'down') throw new Error('bit-sign 502');
-        return answer;
-      },
-    });
-    return { store, h, u, asked };
-  };
-  const add = async (h, u, alias) => h['names-add']({}, await u.sign('names-add', { alias }));
-
-  test('accepts when bit-sign says the signing key owns it (no fee here); asks with the signer key', async () => {
-    const { h, u, asked } = withOwner({ matches: true, active: true });
-    expect((await add(h, u, 'two'))[0]).toBe(200);
-    expect(asked).toEqual([['two', u.identityKey]]);
-  });
-  test('refuses no match, inactive, or unknown', async () => {
-    for (const o of [
-      { matches: false, active: true },
-      { matches: true, active: false },
-      { matches: false, active: false },
-    ]) {
-      const { store, h, u } = withOwner(o);
-      expect((await add(h, u, 'two'))[0]).toBe(402);
-      expect(store.aliases.has('two')).toBe(false);
-    }
-  });
-  test('fails closed (503) when bit-sign errors', async () => {
-    const { store, h, u } = withOwner('down');
-    expect((await add(h, u, 'two'))[0]).toBe(503);
-    expect(store.aliases.has('two')).toBe(false);
-  });
-  test('max 5 plain names', async () => {
-    const { store, h, u } = withOwner({ matches: true, active: true });
-    for (const a of ['b', 'c', 'd', 'e'])
-      store.aliases.set(a, { alias: a, identity_key: u.identityKey, kind: 'plain', is_primary: false });
-    expect((await add(h, u, 'six'))[0]).toBe(409);
-  });
-});
+// Extra names are no longer paid on bit-sign (owner pricing, 27 Oct 2026): see paymail.test.js 'name pricing'.
 
 describe('bitsignHandleOwner (fake fetch)', () => {
   const KEY = '02' + 'a'.repeat(64);
