@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Bot, Plus, Search, Sparkles, Star, Terminal, X } from 'lucide-react';
+import { Bot, Gamepad2, Plus, Search, Sparkles, Star, Terminal, X } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { useMenuAccounts, type MenuEntry } from './useMenuAccounts';
 import { AccountRow } from './AccountSwitcher';
@@ -168,6 +168,7 @@ export const SwitchAccountSheet = ({
 export const AgentsSheet = ({
   onClose,
   onAgent,
+  onPlay,
   onAddAgent,
   onTools,
   toolsLabel,
@@ -176,6 +177,8 @@ export const AgentsSheet = ({
   onClose: () => void;
   /** The b agent (classic layout only; the phone layout has the dock b). */
   onAgent?: { label: string; go: () => void };
+  /** bWalletX only: a game to play in the wallet's own browser (Play TERRORNODE). */
+  onPlay?: { label: string; go: () => void };
   onAddAgent?: () => void;
   onTools?: () => void;
   toolsLabel: string;
@@ -190,6 +193,7 @@ export const AgentsSheet = ({
         {onAgent && (
           <SheetAction icon={<Sparkles size={16} color="#fff" />} label={onAgent.label} onClick={onAgent.go} />
         )}
+        {onPlay && <SheetAction icon={<Gamepad2 size={16} color="#fff" />} label={onPlay.label} onClick={onPlay.go} />}
         {onAddAgent && (
           <SheetAction icon={<Plus size={16} color="#fff" />} label="Add agent account" onClick={onAddAgent} />
         )}
