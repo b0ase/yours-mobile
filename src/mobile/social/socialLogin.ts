@@ -5,6 +5,8 @@ import { BWALLET_PAYMAIL_API } from '../names/config';
 import { IS_EXTENSION } from '../extension';
 import { YoursNative } from '../native';
 import { bindLinkedHandles } from './linkedHandles';
+import { BMARKETX_API } from './ebayLink';
+import { bindUnfinished, markUnfinished, pendingExpired } from './pendingLink';
 
 /**
  * "Continue with X / Google" on Create Account (owner, 4 Oct 2026). bWalletX's own sign-in service
@@ -20,7 +22,7 @@ import { bindLinkedHandles } from './linkedHandles';
  *    picks, with a live availability check. Existing <name>.x / <name>.gmail names keep receiving.
  */
 
-export type SocialProvider = 'x' | 'google' | 'github' | 'linkedin';
+export type SocialProvider = 'x' | 'google' | 'github' | 'linkedin' | 'ebay';
 type Pending = {
   provider: SocialProvider;
   secret: string;
@@ -39,13 +41,17 @@ type Pending = {
   returned?: boolean;
   /** Started from the card's "Your picture" sheet: the card takes it (takePictureReturn), not Settings › Connect. */
   purpose?: 'picture';
+  /**
+   * Started on the first onboarding screen (pendingLink.ts): held for SIGNUP_TTL_MS until the wallet and its seed
+   * step exist, then signed by FinishPendingLink. Cleared once that link is signed.
+   */
+  signup?: boolean;
 };
 
 /** Owner of a sign-in started on Create / Restore / Import, before the account (and its identity) exists. */
 export const NEW_ACCOUNT = 'new';
 
 const KEY = 'bwallet.social';
-const TTL_MS = 10 * 60_000;
 const listeners = new Set<() => void>();
 let lastError = '';
 
@@ -54,8 +60,10 @@ const readAny = (): Pending | null => {
     const p = JSON.parse(localStorage.getItem(KEY) || 'null') as Pending | null;
     if (!p) return null;
     // Expired, or a leftover from before sign-ins had an owner (global): drop it.
-    if (!p.owner || !(Date.now() - p.at < TTL_MS)) {
+    if (!p.owner || pendingExpired(p)) {
       localStorage.removeItem(KEY);
+      // A sign-up link that ran out of time: Link your accounts offers "Finish linking" (no ticket kept).
+      if (p.owner && p.signup && p.purpose !== 'picture') markUnfinished(p.owner, p.provider);
       return null;
     }
     return p;
@@ -122,14 +130,37 @@ export const pictureLinkPending = (owner: string) => {
  */
 export const bindSocial = (identityAddress: string) => {
   const p = readAny();
-  if (p && identityAddress && p.owner === NEW_ACCOUNT) write({ ...p, owner: identityAddress });
+  // returned: false, so Settings › Connect doesn't reopen for it: FinishPendingLink signs a sign-up link.
+  if (p && identityAddress && p.owner === NEW_ACCOUNT)
+    write({ ...p, owner: identityAddress, ...(p.signup ? { returned: false } : {}) });
+  bindUnfinished(NEW_ACCOUNT, identityAddress);
   // The $name suggestions linked on Create move with it (owner, 26 Oct 2026: linkedHandles.ts).
   bindLinkedHandles(NEW_ACCOUNT, identityAddress);
 };
 
-// bWalletX's own sign-in service (site/lib/social.js on the paymail server).
-const post = async <T>(op: string, body: unknown): Promise<T> => {
-  const r = await fetch(`${BWALLET_PAYMAIL_API}/api/social/${op}`, {
+/** A sign-up link waiting for `owner` to sign it (FinishPendingLink), once the account exists. */
+export const signupProof = (owner: string) => {
+  const p = read(owner);
+  return owner !== NEW_ACCOUNT && p?.signup && p.ticket && p.profile
+    ? { profile: p.profile, ticket: p.ticket, secret: p.secret }
+    : null;
+};
+/** The sign-up link was signed (or failed and was marked unfinished): it is an ordinary pending sign-in now. */
+export const doneSignup = (owner: string) => {
+  const p = read(owner);
+  if (p?.signup) write({ ...p, signup: false });
+};
+/** The provider a sign-up link is waiting on (first screen: back from the provider or still out there). */
+export const signupPending = (owner: string = NEW_ACCOUNT) => {
+  const p = read(owner);
+  return p?.signup ? { provider: p.provider, back: !!p.profile } : null;
+};
+
+// bWalletX's own sign-in service (site/lib/social.js on the paymail server). eBay: bMarketX's eBay app
+// (bmarketx.com/api/ebay/wallet/*, ebayLink.ts), the one eBay app we have; its secrets stay on that server.
+const post = async <T>(op: string, body: unknown, provider?: SocialProvider): Promise<T> => {
+  const url = provider === 'ebay' ? `${BMARKETX_API}/api/ebay/wallet/${op}` : `${BWALLET_PAYMAIL_API}/api/social/${op}`;
+  const r = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -152,12 +183,18 @@ export async function startSocial(
   // Web wallet: sign in in THIS tab and come back to web.bwalletx.com (owner, 6 Oct 2026: a new tab ended on the
   // phones' "you're signed in" page with no way back to the wallet). The pending secret survives in localStorage.
   const web = !Capacitor.isNativePlatform() && !IS_EXTENSION;
-  const { authorizeUrl: url } = await post<{ authorizeUrl: string }>('start', {
+  const { authorizeUrl: url } = await post<{ authorizeUrl: string }>(
+    'start',
+    {
+      provider,
+      verifier_hash: vh,
+      ...(web ? { return_to: webReturnKey() } : {}),
+    },
     provider,
-    verifier_hash: vh,
-    ...(web ? { return_to: webReturnKey() } : {}),
-  });
-  write({ provider, secret, at: Date.now(), owner, ...(purpose ? { purpose } : {}) });
+  );
+  // Started before the account exists = the first screen's optional link (pendingLink.ts).
+  const signup = owner === NEW_ACCOUNT && !purpose;
+  write({ provider, secret, at: Date.now(), owner, ...(purpose ? { purpose } : {}), ...(signup ? { signup } : {}) });
   if (web) {
     window.location.assign(url);
     return;
@@ -220,6 +257,7 @@ export async function receiveSocialUrl(url: string): Promise<void> {
   const p = readAny();
   if (q.get('error')) {
     lastError = q.get('error') === 'cancelled' ? 'Sign-in cancelled.' : String(q.get('error'));
+    if (p?.signup && q.get('error') !== 'cancelled') markUnfinished(p.owner || NEW_ACCOUNT, p.provider);
     return write(p ? { ...p, ticket: undefined } : null);
   }
   const ticket = q.get('t');
@@ -228,11 +266,12 @@ export async function receiveSocialUrl(url: string): Promise<void> {
     return write(null);
   }
   try {
-    const profile = await post<SocialProfile>('preview', { ticket, secret: p.secret });
+    const profile = await post<SocialProfile>('preview', { ticket, secret: p.secret }, p.provider);
     lastError = '';
     write({ ...p, ticket, profile, returned: true });
   } catch (e) {
     lastError = e instanceof Error ? e.message : 'Sign-in failed';
+    if (p.signup) markUnfinished(p.owner || NEW_ACCOUNT, p.provider);
     write(null);
   }
 }

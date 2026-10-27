@@ -161,10 +161,10 @@ export const HandleFlow = ({
     const found: Partial<Record<HandleSource, string>> = { ...rememberedLinkedHandles(identityAddress) };
     if (xHandle) found.x = xHandle;
     const p = socialProof(identityAddress)?.profile;
-    if (p && p.provider !== 'x' && !found[p.provider])
+    if (p && p.provider !== 'x' && p.provider !== 'ebay' && !found[p.provider])
       found[p.provider] = handleFromLinked(p.provider, p.provider === 'linkedin' ? p.display : p.name);
     for (const l of getLinks(identityAddress)) {
-      if (found[l.provider]) continue;
+      if (l.provider === 'ebay' || found[l.provider]) continue;
       if (l.provider === 'linkedin') found.linkedin = handleFromLinked('linkedin', l.display);
       else if (l.provider !== 'google' && l.handle) found[l.provider] = handleFromLinked(l.provider, l.handle);
     }
