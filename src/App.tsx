@@ -46,6 +46,7 @@ import { PAY_STREAM_ENABLED } from './mobile/storeBuild';
 import { guestMusicRoute } from './mobile/media/artists/guestRoute';
 import { guestNamesRoute } from './mobile/names/store/guestRoute';
 import { guestCheckRoute } from './mobile/bmint/check/guestRoute';
+import { ROOM_TAB_ACTION, ROOM_TAB_EVENT } from './mobile/chat/gameRoomLive';
 
 // bMusic artist/album pages are readable without a wallet on web/Desktop (bWalletX only: prices are not in a store
 // build). Decided once at load from the address bar; only those read-only routes (guestRoute.ts).
@@ -121,6 +122,11 @@ export const App = () => {
           const path = (msg as { path?: unknown }).path;
           void wearActiveSite(typeof o === 'string' ? o : null, typeof path === 'string' ? path : null);
         }
+        return;
+      }
+      // A bChatX room tab playing a game room's video (mobile/chat/gameRoomLive.ts): the room's player listens.
+      if ((msg as { action?: string })?.action === ROOM_TAB_ACTION) {
+        window.dispatchEvent(new CustomEvent(ROOM_TAB_EVENT, { detail: msg }));
         return;
       }
       window.dispatchEvent(new CustomEvent(PANEL_PROMPT_EVENT, { detail: msg }));
