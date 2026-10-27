@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
+import { useEffect, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useBackClose } from '../backStack';
 import { SIG_VIEWBOX, padSize, screenToPad, signatureFromStrokes, strokesToPath, type SigStroke } from './signature';
@@ -19,7 +19,15 @@ const usePortraitPhone = () => {
   return on;
 };
 
-type Props = { onCancel: () => void; onSave: (svgPath: string) => void };
+type Props = {
+  onCancel: () => void;
+  onSave: (svgPath: string) => void;
+  /** Shown above the pad (e.g. the document being signed, for bit-sign phone signing). */
+  details?: ReactNode;
+  /** Replaces the default "Stays on this device" note. */
+  note?: string;
+  saveLabel?: string;
+};
 
 /**
  * Full-screen signing sheet. The pad has the strip's 4:1 shape, so the drawing maps 1:1 onto the
@@ -27,7 +35,7 @@ type Props = { onCancel: () => void; onSave: (svgPath: string) => void };
  * pointer positions are mapped back into the pad's own (unrotated) space, so the saved signature is
  * the same as one drawn in landscape. Pointer events cover finger, stylus (with pressure) and mouse (extension side panel).
  */
-export const SignaturePad = ({ onCancel, onSave }: Props) => {
+export const SignaturePad = ({ onCancel, onSave, details, note, saveLabel = 'Save' }: Props) => {
   useBackClose(true, onCancel);
   const pad = useRef<HTMLDivElement>(null);
   const [strokes, setStrokes] = useState<SigStroke[]>([]);
@@ -99,6 +107,7 @@ export const SignaturePad = ({ onCancel, onSave }: Props) => {
     >
       <div className="bw-sigpad-sheet">
         <div className="bw-sigpad-title">{rotated ? 'Sign along the phone' : 'Sign with your finger'}</div>
+        {details}
         <div
           ref={pad}
           className="bw-sigpad-box"
@@ -115,7 +124,7 @@ export const SignaturePad = ({ onCancel, onSave }: Props) => {
             ×
           </span>
         </div>
-        <p className="bw-sigpad-note">{error || 'Stays on this device. Nothing is sent or put on-chain.'}</p>
+        <p className="bw-sigpad-note">{error || note || 'Stays on this device. Nothing is sent or put on-chain.'}</p>
         <div className="bw-sigpad-btns">
           <button type="button" onClick={() => setStrokes([])} disabled={!strokes.length}>
             Clear
@@ -128,7 +137,7 @@ export const SignaturePad = ({ onCancel, onSave }: Props) => {
             Cancel
           </button>
           <button type="button" className="is-primary" onClick={save} disabled={!strokes.length}>
-            Save
+            {saveLabel}
           </button>
         </div>
       </div>
