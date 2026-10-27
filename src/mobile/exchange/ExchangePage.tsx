@@ -1,6 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { AtSign, MessageCircle, Search, Star } from 'lucide-react';
+import { AtSign, LayoutGrid, List, MessageCircle, Search, Star } from 'lucide-react';
 import { cachedExchangeRate, fetchExchangeRate } from '../../utils/wallet';
 import { sendMessageAsync } from '../../utils/chromeHelpers';
 import { YoursEventName } from '../../inject';
@@ -34,6 +34,7 @@ import { OpnsMarket } from './OpnsMarket';
 import { PodcastMarket } from './PodcastMarket';
 import { MoviesMarket } from './MoviesMarket';
 import { MemepoolMarket } from './MemepoolMarket';
+import { TokenBoard } from './TokenBoard';
 import { LaunchpadPanel } from '../market/launchpad/LaunchpadPanel';
 import { LaunchCoin } from './launch/LaunchCoin';
 import { FilterBar, PlatformPage, PlatformsView } from './Categories';
@@ -76,6 +77,8 @@ const MUTED = '#98A2B3';
 /** Markets row columns: favourite · token · price · 24h (+ volume · for sale from md). */
 const ROW_GRID =
   'grid items-center gap-x-2 grid-cols-[36px_minmax(0,1fr)_96px_56px] md:grid-cols-[36px_minmax(0,1fr)_120px_64px_110px_80px]';
+
+const VIEW_KEY = 'bwallet.exchange.view';
 
 type RowStats = { floor: number | null; live: number; stats: DayStats; trades: Trade[] };
 
@@ -175,6 +178,22 @@ const Markets = ({
     navigate(`${pathname}${s ? `?${s}` : ''}`, { replace: true });
   };
   const [shown, setShown] = useState(40);
+  // Cards (the token board, default) or the compact price list; remembered on this device.
+  const [cardsView, setCardsView] = useState(() => {
+    try {
+      return localStorage.getItem(VIEW_KEY) !== 'list';
+    } catch {
+      return true;
+    }
+  });
+  const pickView = (cards: boolean) => {
+    setCardsView(cards);
+    try {
+      localStorage.setItem(VIEW_KEY, cards ? 'cards' : 'list');
+    } catch {
+      /* private mode */
+    }
+  };
   const rowActions = useTokenRowActions();
   const { prefs, held: heldIds, albums, updateAlbums } = rowActions;
   const [showHidden, setShowHidden] = useState(false);
@@ -211,7 +230,8 @@ const Markets = ({
     [all, albums],
   );
   const nHidden = useMemo(() => hiddenCount(all, (r) => r.ref.id, prefs), [all, prefs]);
-  const visible = list.slice(0, shown);
+  // The list view loads its own row stats; the card board loads its facts (TokenBoard), so none here.
+  const visible = useMemo(() => (cardsView ? [] : list.slice(0, shown)), [cardsView, list, shown]);
   // Tickers more than one token uses: those rows show their short token id so copies can be told apart.
   const shared = useMemo(() => {
     const out = new Set<string>();
@@ -307,7 +327,30 @@ const Markets = ({
           onShares={SharesMarket ? setShares : undefined}
         />
       )}
-      {!shares && <HiddenChip count={nHidden} on={showHidden} onToggle={() => setShowHidden((v) => !v)} />}
+      {!shares && (
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex rounded-xl border border-[#2b2f36] overflow-hidden" role="group" aria-label="Layout">
+            {(
+              [
+                [true, 'Cards', LayoutGrid],
+                [false, 'List', List],
+              ] as const
+            ).map(([v, label, Icon]) => (
+              <button
+                key={label}
+                type="button"
+                aria-pressed={cardsView === v}
+                onClick={() => pickView(v)}
+                className="flex items-center gap-1.5 min-h-[44px] px-3 text-xs font-bold border-0 cursor-pointer"
+                style={{ background: cardsView === v ? '#2a2100' : '#17191E', color: cardsView === v ? GOLD : MUTED }}
+              >
+                <Icon size={14} /> {label}
+              </button>
+            ))}
+          </div>
+          <HiddenChip count={nHidden} on={showHidden} onToggle={() => setShowHidden((v) => !v)} />
+        </div>
+      )}
       {!shares && albums.albums.length > 0 && (
         <AlbumBar
           state={albums}
@@ -336,6 +379,8 @@ const Markets = ({
                     ? 'Star a token to keep it here.'
                     : 'No tokens match.'}
             </p>
+          ) : cardsView ? (
+            <TokenBoard list={list} rate={rate} />
           ) : (
             <div className="rounded-2xl bg-[var(--bw-surface)] border border-[#2b2f36] overflow-hidden">
               <div className="w-full text-sm" role="list" aria-label="Tokens">
@@ -440,8 +485,9 @@ const Markets = ({
             </div>
           )}
           <p className="text-[11px]" style={{ color: MUTED }}>
-            Prices are live 1Sat listings and recent trades. 24h = the last 144 blocks. Swipe a row left for Buy, Sell
-            and Chat, right to Pin or Hide (or long-press it for everything, with Info).
+            {cardsView
+              ? 'Prices are recent 1Sat trades. Market cap = last trade × supply not burned, shown only with 3+ trades in 30 days; otherwise "Thin market". 24h = the last 144 blocks.'
+              : 'Prices are live 1Sat listings and recent trades. 24h = the last 144 blocks. Swipe a row left for Buy, Sell and Chat, right to Pin or Hide (or long-press it for everything, with Info).'}
           </p>
           {rowActions.sheet}
         </>

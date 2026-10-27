@@ -73,6 +73,8 @@ import {
 } from '../storeBuild';
 import { MyTokenListings } from '../sell/MyTokenListings';
 import { TokenFacts } from '../exchange/TokenFacts';
+import { TokenAudit } from '../exchange/TokenAudit';
+import { TokenBoard } from '../exchange/TokenBoard';
 import { STALE_LISTING_MESSAGE, listingSpendState } from './tokenPage';
 import { sellRoute } from '../exchange/rowActions';
 import { useNavigate } from 'react-router-dom';
@@ -664,7 +666,16 @@ const MarketPage = () => {
     : tokenFilter === 'bapps'
       ? tokenRows.filter((r) => isBappToken(r.ref.id))
       : tokenRows;
-  const visibleTokens = filteredTokens.slice(0, shown);
+  // All tokens, no search: the card board (exchange/TokenBoard), which loads its own facts. Personal tokens keep
+  // their rows above it (social / access only, no price talk).
+  const boardMode = kind === 'tokens' && tokenFilter === 'all' && !searched;
+  const boardTokens = useMemo(
+    () => (boardMode ? filteredTokens.filter((r) => !isPersonalTokenId(r.ref.id, knownPersonal())) : []),
+    [boardMode, filteredTokens],
+  );
+  const visibleTokens = boardMode
+    ? filteredTokens.filter((r) => isPersonalTokenId(r.ref.id, knownPersonal()))
+    : filteredTokens.slice(0, shown);
   // Tickers are not unique: flag every ticker more than one token id uses (issuer check on those rows).
   const dupTickers = useMemo(
     () =>
@@ -766,6 +777,9 @@ const MarketPage = () => {
         rooms !== null &&
         directory !== null &&
         !error && <p className="text-xs text-[#98A2B3] text-center py-8">No tokens found.</p>}
+      {boardMode && boardTokens.length > 0 && (
+        <TokenBoard list={boardTokens} rate={cachedExchangeRate()} onOpen={(r) => void openRoom(r)} />
+      )}
       {visibleTokens.map((r, i) => {
         // Personal tokens ($BOASE): social / access only. Badge, no floor, no price talk.
         if (isPersonalTokenId(r.ref.id, personalLinks)) return personalRow(r, i);
@@ -926,6 +940,9 @@ const MarketPage = () => {
       {room.ref.kind === 'bsv21' && !ticketPage && <TokenLinks tokenId={room.ref.id} sym={room.title} />}
       {room.ref.kind === 'bsv21' && !ticketPage && (
         <TokenFacts tokenId={room.ref.id} sym={room.title.replace(/^\$/, '')} priceSats={market?.floorSats ?? null} />
+      )}
+      {room.ref.kind === 'bsv21' && !ticketPage && !isPersonalTokenId(room.ref.id, personalLinks) && (
+        <TokenAudit tokenId={room.ref.id} sym={room.title.replace(/^\$/, '')} rate={cachedExchangeRate()} />
       )}
       {room.ref.kind === 'bsv21' && !ticketPage && SELL_ENABLED && TRADING && (
         <button
