@@ -1,9 +1,12 @@
-import { useEffect, useState } from 'react';
-import { BadgeCheck, Check, Circle, Github, Linkedin, Loader2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { ArrowLeft, BadgeCheck, Check, Circle, Github, Linkedin, Loader2 } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { BWALLET_PAYMAIL_DOMAIN } from '../names/config';
 import { toAlias } from '../names/paymail';
-import { HANDCASH_SIGNIN_ENABLED, LINK_ACCOUNTS_ENABLED } from '../storeBuild';
+import { HANDCASH_SIGNIN_ENABLED, LINK_ACCOUNTS_ENABLED, TWETCH_POST_ENABLED } from '../storeBuild';
+import { TwetchSettings } from '../twetch/TwetchSettings';
+import { twetchHandle, twetchStoreFor, type TwetchLink } from '../twetch/twetchLink';
 import { handcashAvailable, handcashError, onHandCashChange, signOutHandCash, startHandCash } from './handcashLogin';
 import {
   DEFAULT_PROVIDERS,
@@ -39,7 +42,100 @@ const ICON: Record<SocialProvider, JSX.Element> = {
   github: <Github size={16} />,
   linkedin: <Linkedin size={16} />,
 };
-const ROWS: SocialProvider[] = ['x', 'google', 'github', 'linkedin'];
+/** BSV social networks (owner, 27 Oct 2026). Twetch links through Settings › Twetch; the others have no
+ * verification path yet (the Feed only reads them), so they show as coming soon. */
+type BsvNetwork = 'twetch' | 'treechat' | 'peck' | 'fwetch';
+const BSV_LABEL: Record<BsvNetwork, string> = {
+  twetch: 'Twetch',
+  treechat: 'Treechat',
+  peck: 'Peck',
+  fwetch: 'Fwetch',
+};
+const isBsv = (p: SocialProvider | BsvNetwork): p is BsvNetwork => p in BSV_LABEL;
+const ROWS: (SocialProvider | BsvNetwork)[] = [
+  'x',
+  'google',
+  'twetch',
+  'treechat',
+  'peck',
+  'fwetch',
+  'github',
+  'linkedin',
+];
+const LetterMark = ({ c }: { c: string }) => (
+  <span aria-hidden className="text-[15px] font-bold" style={{ color: '#fff' }}>
+    {c}
+  </span>
+);
+const ROW_BORDER = { borderTop: '1px solid rgba(255,255,255,0.06)' };
+const SOON = { background: '#2B2F36', color: GRAY };
+
+/** A Twetch / Treechat / Peck / Fwetch row. Only Twetch can link (bWalletX builds); it reuses Settings › Twetch. */
+const BsvRow = ({ p, first }: { p: BsvNetwork; first: boolean }) => {
+  const { chromeStorageService } = useServiceContext();
+  const live = p === 'twetch' && TWETCH_POST_ENABLED;
+  const store = useMemo(() => (live ? twetchStoreFor(chromeStorageService) : undefined), [live, chromeStorageService]);
+  const [link, setLink] = useState<TwetchLink | undefined>(() => store?.link());
+  const [open, setOpen] = useState(false);
+  const close = () => (setOpen(false), setLink(store?.link()));
+  return (
+    <div className="flex items-center gap-3 px-4 py-3" style={first ? undefined : ROW_BORDER}>
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#0F1013] text-white">
+        <LetterMark c={BSV_LABEL[p][0]} />
+      </span>
+      <div className="flex-1 min-w-0 text-left">
+        <div className="text-sm font-semibold text-white flex items-center gap-1">
+          {BSV_LABEL[p]}
+          {link ? <BadgeCheck size={14} color="var(--bw-accent)" /> : null}
+        </div>
+        <div className="text-[11px] truncate" style={{ color: GRAY }}>
+          {link ? `${twetchHandle(link)} on Twetch · Linked` : live ? 'Post to Twetch from bChatX' : 'Coming soon'}
+        </div>
+      </div>
+      {link ? (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="h-11 px-2.5 rounded-lg text-xs font-bold border-0 flex items-center gap-1"
+          style={{ background: 'rgba(46,204,113,0.15)', color: '#2ecc71' }}
+          data-testid={`linked-${p}`}
+          aria-label={`${BSV_LABEL[p]} linked`}
+        >
+          <Check size={14} strokeWidth={3} /> Linked
+        </button>
+      ) : (
+        <button
+          type="button"
+          disabled={!live}
+          onClick={() => setOpen(true)}
+          className="h-11 min-w-[64px] px-3 rounded-lg text-xs font-bold border-0 flex items-center justify-center"
+          style={live ? { background: 'var(--bw-accent)', color: '#000' } : SOON}
+        >
+          {live ? 'Link' : 'Soon'}
+        </button>
+      )}
+      {open && live
+        ? createPortal(
+            <div className="fixed inset-0 z-[410] flex flex-col" style={{ background: 'var(--bw-bg)' }}>
+              <div
+                className="flex items-center gap-2 px-2 pb-2"
+                style={{ paddingTop: 'max(env(safe-area-inset-top), 12px)' }}
+              >
+                <button onClick={close} aria-label="Back" className="h-11 w-11 bg-transparent border-0">
+                  <ArrowLeft size={20} color="white" />
+                </button>
+                <span className="text-[16px] font-bold text-white">Twetch</span>
+              </div>
+              <div className="px-5 pb-10 overflow-y-auto">
+                <TwetchSettings />
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
+    </div>
+  );
+};
 
 /** The linked accounts as badges (profile / Settings › Identity). Google shows a tick, never the address. */
 export const LinkedBadges = ({ owner }: { owner: string }) => {
@@ -62,7 +158,7 @@ export const LinkedBadges = ({ owner }: { owner: string }) => {
 };
 
 /**
- * "Link your accounts": X, Google, GitHub, LinkedIn rows + the "Link HandCash" card (owner, 18 Oct 2026).
+ * "Link your accounts": X, Google, Twetch, Treechat, Peck, Fwetch, GitHub, LinkedIn rows + the "Link HandCash" card (owner, 18 Oct 2026).
  * Used by the onboarding "Claim your name" step and Settings › Identity. Linking never signs anyone in: it
  * proves the account and the wallet signs the link with its identity key (links.ts). A provider whose OAuth app
  * isn't set up on the server is shown as coming soon, never as a button that fakes a link.
@@ -134,14 +230,11 @@ export const LinkAccounts = ({ owner, onClaim }: { owner: string; onClaim?: (ali
       ) : null}
       <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--bw-surface)' }}>
         {ROWS.map((p, i) => {
+          if (isBsv(p)) return <BsvRow key={p} p={p} first={!i} />;
           const l = linked(p);
           const on = providers[p] && !desktop;
           return (
-            <div
-              key={p}
-              className="flex items-center gap-3 px-4 py-3"
-              style={i ? { borderTop: '1px solid rgba(255,255,255,0.06)' } : undefined}
-            >
+            <div key={p} className="flex items-center gap-3 px-4 py-3" style={i ? ROW_BORDER : undefined}>
               <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#0F1013] text-white">
                 {ICON[p]}
               </span>
@@ -167,7 +260,7 @@ export const LinkAccounts = ({ owner, onClaim }: { owner: string; onClaim?: (ali
                 // button once sign-in and the signed link both succeeded (the link exists only after recordLink).
                 <span className="flex items-center gap-2">
                   <span
-                    className="h-8 px-2.5 rounded-lg text-xs font-bold flex items-center gap-1"
+                    className="h-11 px-2.5 rounded-lg text-xs font-bold flex items-center gap-1"
                     style={{ background: 'rgba(46,204,113,0.15)', color: '#2ecc71' }}
                     data-testid={`linked-${p}`}
                     aria-label={`${PROVIDER_LABEL[p]} linked`}
@@ -177,7 +270,7 @@ export const LinkAccounts = ({ owner, onClaim }: { owner: string; onClaim?: (ali
                   <button
                     type="button"
                     onClick={() => (unlink(owner, p), forgetLinkedHandle(owner, p), clearSocial())}
-                    className="text-xs bg-transparent border-0"
+                    className="h-11 px-2 text-xs bg-transparent border-0"
                     style={{ color: GRAY }}
                   >
                     Remove
@@ -188,7 +281,7 @@ export const LinkAccounts = ({ owner, onClaim }: { owner: string; onClaim?: (ali
                   type="button"
                   disabled={!on || !!busy}
                   onClick={() => void go(p)}
-                  className="h-8 min-w-[64px] px-3 rounded-lg text-xs font-bold border-0 flex items-center justify-center"
+                  className="h-11 min-w-[64px] px-3 rounded-lg text-xs font-bold border-0 flex items-center justify-center"
                   style={
                     on
                       ? { background: 'var(--bw-accent)', color: '#000', opacity: busy && busy !== p ? 0.5 : 1 }
@@ -273,7 +366,7 @@ const LinkHandCash = ({ owner, onClaim }: { owner: string; onClaim?: (alias: str
           <button
             type="button"
             onClick={() => (unlink(owner, 'handcash'), void signOutHandCash())}
-            className="text-xs bg-transparent border-0"
+            className="h-11 px-2 text-xs bg-transparent border-0"
             style={{ color: GRAY }}
           >
             Remove
@@ -289,7 +382,7 @@ const LinkHandCash = ({ owner, onClaim }: { owner: string; onClaim?: (alias: str
                 .catch((e: unknown) => setError(e instanceof Error ? e.message : 'HandCash is unavailable'))
                 .finally(() => setBusy(false));
             }}
-            className="h-8 min-w-[64px] px-3 rounded-lg text-xs font-bold border-0 flex items-center justify-center"
+            className="h-11 min-w-[64px] px-3 rounded-lg text-xs font-bold border-0 flex items-center justify-center"
             style={
               available ? { background: 'var(--bw-accent)', color: '#000' } : { background: '#2B2F36', color: GRAY }
             }
