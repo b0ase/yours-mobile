@@ -56,7 +56,10 @@ import {
   type StreamPass,
   type StreamState,
 } from './services/streamGrants';
-import type { MintPrivatePrompt, StreamGrantPrompt } from './promptProtocol';
+import type { MintPrivatePrompt, StreamGrantPrompt, TwetchPrompt } from './promptProtocol';
+import { isTwetchAction, routeTwetchMessage } from './services/twetchSite';
+import { twetchStoreFor } from './mobile/twetch/twetchLink';
+import type { TwetchAsk, TwetchWallet } from './mobile/twetch/twetchCalls';
 import { isMintPrivateAction, runSiteMintPrivate, type Kv as MintKv } from './services/mintPrivateSite';
 import type { OneSatContext } from '@1sat/actions';
 import { ALLOWANCES_ENABLED } from './services/allowanceFlag';
@@ -1236,12 +1239,16 @@ const pendingStreamGrantRequests = new Map<
 >();
 /** Sites waiting on the "Lock N posts to you" sheet (services/mintPrivateSite.ts). Resolves true only on Allow. */
 const pendingMintPrivateRequests = new Map<string, { request: MintPrivatePrompt; resolve: (allow: boolean) => void }>();
+/** Sites waiting on the Twetch sign-in / post sheet (services/twetchSite.ts). Resolves true only on Allow. */
+const pendingTwetchRequests = new Map<string, { request: TwetchPrompt; resolve: (allow: boolean) => void }>();
 const failPendingStreamGrants = () => {
   for (const p of pendingStreamGrantRequests.values()) p.resolve(null);
   pendingStreamGrantRequests.clear();
   // The private-mint sheet too: lock, account switch or a closed window answers "declined".
   for (const p of pendingMintPrivateRequests.values()) p.resolve(false);
   pendingMintPrivateRequests.clear();
+  for (const p of pendingTwetchRequests.values()) p.resolve(false);
+  pendingTwetchRequests.clear();
 };
 
 /**
@@ -1364,6 +1371,7 @@ const hasQueuedDappUi = (): boolean =>
   pendingUsbChecks.size > 0 ||
   pendingStreamGrantRequests.size > 0 ||
   pendingMintPrivateRequests.size > 0 ||
+  pendingTwetchRequests.size > 0 ||
   pendingPermissionRequests.size > 0 ||
   pendingGroupedPermissionRequests.size > 0 ||
   pendingCounterpartyPermissionRequests.size > 0 ||
@@ -1437,6 +1445,8 @@ const getPendingPromptPayload = (kind: string, requestID?: string): unknown => {
       return requestID ? pendingStreamGrantRequests.get(requestID)?.request : undefined;
     case 'mintPrivate':
       return requestID ? pendingMintPrivateRequests.get(requestID)?.request : undefined;
+    case 'twetch':
+      return requestID ? pendingTwetchRequests.get(requestID)?.request : undefined;
     default:
       return undefined;
   }
@@ -1451,6 +1461,8 @@ const getNextPendingPrompt = (): { kind: PromptKind; requestID: string } | undef
   if (!streamGrant.done) return { kind: 'streamGrant', requestID: streamGrant.value };
   const mintPrivate = pendingMintPrivateRequests.keys().next();
   if (!mintPrivate.done) return { kind: 'mintPrivate', requestID: mintPrivate.value };
+  const twetch = pendingTwetchRequests.keys().next();
+  if (!twetch.done) return { kind: 'twetch', requestID: twetch.value };
   const bundle = permissionBundler.list()[0];
   if (bundle) {
     permissionBundler.flush(bundle.id); // the sheet is asking now: no need to wait out the merge window
@@ -2333,6 +2345,28 @@ if (!(
       void handleMintPrivateSite(normalizeOriginator(derived.originator), message.params).then((r) =>
         sendResponse({ type: message.action, ...r }),
       );
+      return true;
+    }
+    // twetch.* (services/twetchSite.ts, window.CWI.twetch.*): same rules as the paired phone's twetchCalls.ts. The
+    // origin is Chrome's sender.origin; extension pages are refused inside routeTwetchMessage.
+    if (isTwetchAction(message?.action)) {
+      void routeTwetchMessage(message, { origin: sender.origin, isFromExtension }, twetchDeps).then((r) =>
+        sendResponse({ type: message.action, ...r }),
+      );
+      return true;
+    }
+    // The Twetch sheet's answer. Extension pages only: a site can never answer its own sheet.
+    if (message?.action === 'TWETCH_RESPONSE') {
+      if (!isFromExtension) {
+        sendResponse({ type: message.action, success: false, error: 'Unauthorized' });
+        return true;
+      }
+      const requestID = String((message as { requestID?: unknown }).requestID ?? '');
+      const pending = pendingTwetchRequests.get(requestID);
+      pendingTwetchRequests.delete(requestID);
+      pending?.resolve((message as { allow?: unknown }).allow === true && !!pending);
+      sendResponse({ type: message.action, success: !!pending });
+      closeDappPopupIfNoUi();
       return true;
     }
     // The private-mint sheet's answer. Extension pages only: a site can never answer its own sheet.
@@ -4024,6 +4058,41 @@ if (!(
     } catch (e) {
       return { success: false as const, error: e instanceof Error ? e.message : String(e), code: 'ERROR' };
     }
+  };
+
+  /**
+   * What twetch.* needs (services/twetchSite.ts). status reads only the public link (no unlock, no sheet). The
+   * others bring the wallet up (unlock sheet if locked) and run createAction / abortAction as the wallet itself, so
+   * the Twetch sheet is the one approval; the site gets only a signature or the unsent txHex it approved.
+   */
+  const twetchDeps = async (action: string) => {
+    const store = twetchStoreFor(chromeStorageService);
+    if (action === 'twetch.status') return { store, wallet: undefined, bsvUsd: () => Promise.resolve(0) };
+    const wpm = (await ensureWallet()) as unknown as Record<string, (args: unknown, o?: string) => Promise<unknown>>;
+    const wallet = {
+      createAction: (a: unknown) => wpm.createAction(a, ADMIN_ORIGINATOR),
+      abortAction: (a: unknown) => wpm.abortAction(a, ADMIN_ORIGINATOR),
+    } as unknown as TwetchWallet;
+    return {
+      store,
+      wallet,
+      bsvUsd: async () => (await cachedUsdPerBsv().catch(() => undefined)) ?? 0,
+      ask: (ask: TwetchAsk) =>
+        new Promise<boolean>((resolve) => {
+          const requestID = `twetch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          const timer = setTimeout(() => {
+            if (pendingTwetchRequests.delete(requestID)) resolve(false);
+          }, STREAM_GRANT_TIMEOUT_MS);
+          pendingTwetchRequests.set(requestID, {
+            request: { ...ask, requestID, originator: ask.host },
+            resolve: (v) => {
+              clearTimeout(timer);
+              resolve(v);
+            },
+          });
+          showPromptUi('twetch', requestID);
+        }),
+    };
   };
 
   /** requestSpendingAuthorization / revokeSpendingAuthorization / status, from a site (originator already derived). */
@@ -6195,6 +6264,7 @@ if (!(
     // (b-Aware rows 53-54, 24 Oct 2026).
     for (const [, pending] of takePendingFor(pendingStreamGrantRequests, originator)) pending.resolve(null);
     for (const [, pending] of takePendingFor(pendingMintPrivateRequests, originator)) pending.resolve(false);
+    for (const [, pending] of takePendingFor(pendingTwetchRequests, originator)) pending.resolve(false);
     closeDappPopupIfNoUi();
   };
 

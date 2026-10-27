@@ -18,6 +18,7 @@ import icon from '../../assets/bwalletx-ext/icon128.png?inline';
 import { announceWallet, claimWindowCwi } from './discovery';
 import { replyError } from '../services/userDenied';
 import { attachMintPrivate } from '../mintPrivatePage';
+import { attachTwetch } from '../twetchPage';
 
 export { CWIEventName };
 
@@ -45,6 +46,8 @@ const transport = (action: string, params: unknown) =>
 export const CWI: WalletInterface = createCWI(transport as Parameters<typeof createCWI>[0]);
 // wallet.mintPrivate (services/mintPrivateSite.ts): same transport, same originator checks.
 attachMintPrivate(CWI as unknown as Record<string, unknown>, transport);
+// window.CWI.twetch.{status, loginSign, buildPost} (services/twetchSite.ts): same transport, origin from Chrome.
+attachTwetch(CWI as unknown as Record<string, unknown>, transport);
 
 if (typeof window !== 'undefined') {
   const w = window as unknown as { CWI?: WalletInterface };

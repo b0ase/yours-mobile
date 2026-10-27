@@ -9,7 +9,7 @@ const RED = '#F97066';
 
 /**
  * Settings › Twetch: keep your Twetch key in bWalletX as a signing key, so bChatX can post to Twetch for you (each
- * post asks here first). The words are only used on this phone to find the key; only the key is kept, encrypted
+ * post asks here first). The words are only used on this device to find the key; only the key is kept, encrypted
  * with your wallet password. Nothing is sent anywhere except the public key, to look up your Twetch account.
  */
 export function TwetchSettings() {
@@ -73,8 +73,8 @@ export function TwetchSettings() {
   return (
     <div className="flex flex-col gap-3 text-sm" style={{ color: MUTED }}>
       <p>
-        Keep your Twetch key in bWalletX so bChatX can post to Twetch for you. Your words stay on this phone; the key is
-        kept encrypted with your wallet password and is never shown to sites.
+        Keep your Twetch key in bWalletX so bChatX can post to Twetch for you. Your words stay on this device; the key
+        is kept encrypted with your wallet password and is never shown to sites.
       </p>
       <textarea
         value={words}

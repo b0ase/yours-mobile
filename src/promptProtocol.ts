@@ -1,3 +1,5 @@
+import type { TwetchAsk } from './mobile/twetch/twetchCalls';
+
 export type PromptKind =
   | 'unlock'
   | 'permission'
@@ -7,7 +9,8 @@ export type PromptKind =
   | 'oneSatPermission'
   | 'usbCheck'
   | 'streamGrant'
-  | 'mintPrivate';
+  | 'mintPrivate'
+  | 'twetch';
 
 /** A gated wallet call is waiting for a registered USB key to be confirmed present. */
 export interface UsbCheckRequest {
@@ -50,6 +53,13 @@ export interface MintPrivatePrompt {
   sequence?: { chunks: number; index: number; totalPosts?: number; totalSats: number; totalTxs: number };
   usdPerBsv?: number;
 }
+
+/** A site asks to sign in to / post on Twetch with the linked Twetch key (mobile/twetch/twetchCalls.ts TwetchAsk). */
+export type TwetchPrompt = TwetchAsk & {
+  requestID: string;
+  /** Browser-derived, never page-claimed. */
+  originator: string;
+};
 
 export interface PromptRef {
   kind: PromptKind;
