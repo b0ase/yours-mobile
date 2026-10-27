@@ -93,27 +93,47 @@ export function siteThemePack(t: SiteTheme): ThemePack | null {
  * another host, or it fails the checks: a missing theme is normal and never shown as an error.
  */
 export async function fetchSiteTheme(site: ThemeSite, f: typeof fetch = fetch): Promise<ThemePack | null> {
+  const r = await fetchSiteThemeIfChanged(site, null, f);
+  return r === 'unchanged' ? null : r.pack;
+}
+
+/**
+ * fetchSiteTheme with an ETag: 'unchanged' on a 304 for `etag`, else the checked pack (or null) and the new ETag.
+ * Used to refresh a theme that is already worn (siteThemeRefresh.ts) without downloading it every time.
+ */
+export async function fetchSiteThemeIfChanged(
+  site: ThemeSite,
+  etag: string | null,
+  f: typeof fetch = fetch,
+): Promise<'unchanged' | { pack: ThemePack | null; etag: string | null }> {
   const ctl = typeof AbortController === 'function' ? new AbortController() : null;
   const timer = ctl ? setTimeout(() => ctl.abort(), SITE_THEME_TIMEOUT_MS) : null;
+  const none = { pack: null, etag: null };
   try {
     // Never follows a redirect; apex ↔ www is asked directly (sameSiteFetch.ts).
     const r = await fetchNoRedirect(
       `https://${site.host}${SITE_THEME_PATH}`,
-      { credentials: 'omit', cache: 'no-store', ...(ctl ? { signal: ctl.signal } : {}) },
+      {
+        credentials: 'omit',
+        cache: 'no-store',
+        ...(etag ? { headers: { 'If-None-Match': etag } } : {}),
+        ...(ctl ? { signal: ctl.signal } : {}),
+      },
       f,
     );
-    if (!r.ok) return null;
+    if (etag && r.status === 304) return 'unchanged';
+    if (!r.ok) return none;
     if (r.url) {
       const h = new URL(r.url).hostname.toLowerCase();
-      if (h !== site.host && h !== `www.${site.host}`) return null;
+      if (h !== site.host && h !== `www.${site.host}`) return none;
     }
-    if (Number(r.headers?.get?.('content-length') ?? 0) > SITE_THEME_MAX_BYTES) return null;
+    if (Number(r.headers?.get?.('content-length') ?? 0) > SITE_THEME_MAX_BYTES) return none;
     const text = await r.text();
-    if (text.length > SITE_THEME_MAX_BYTES) return null;
+    if (text.length > SITE_THEME_MAX_BYTES) return none;
     const t = parseSiteTheme(JSON.parse(text), site);
-    return t && siteThemeReadable(t) ? siteThemePack(t) : null;
+    return { pack: t && siteThemeReadable(t) ? siteThemePack(t) : null, etag: r.headers?.get?.('etag') ?? null };
   } catch {
-    return null;
+    return none;
   } finally {
     if (timer) clearTimeout(timer);
   }

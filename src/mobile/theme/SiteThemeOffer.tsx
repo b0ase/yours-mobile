@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react';
 import { Check } from 'lucide-react';
 import { wearSiteTheme } from './accent';
 import { fetchSiteTheme, notNowSiteTheme, shouldOfferSiteTheme } from './siteTheme';
+import { refreshWornSiteTheme } from './siteThemeRefresh';
 import type { ThemePack } from './themePack';
 import type { ThemeSite } from './themeSites';
 
 /**
  * "Wear DNS DEX colours?" One compact row offering a family site's theme (siteTheme.ts). Shows nothing while it
  * loads, when the site has no theme file, or when the offer was turned down in the last 30 days. Never applies a
- * theme without the tap. Styled inline so it reads the same on the sign-in sheet, the connect page and the browser.
+ * theme without the tap; a theme the account already wears is quietly refreshed if the site changed it. Styled inline so it reads the same on the sign-in sheet, the connect page and the browser.
  */
 export function SiteThemeOffer({
   site,
@@ -26,13 +27,15 @@ export function SiteThemeOffer({
   useEffect(() => {
     setPack(null);
     setWorn(false);
+    // Already worn: no offer, but pick up any change to the site's file (siteThemeRefresh.ts).
+    void refreshWornSiteTheme(site, account);
     if (!site || !shouldOfferSiteTheme(site.id)) return;
     let off = false;
     void fetchSiteTheme(site).then((p) => !off && setPack(p));
     return () => {
       off = true;
     };
-  }, [site]);
+  }, [site, account]);
 
   // The "Wearing …" note clears itself after a few seconds.
   useEffect(() => {
