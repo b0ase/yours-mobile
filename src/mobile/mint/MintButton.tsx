@@ -201,6 +201,7 @@ export const MintSheet = ({
   const [picked, setPicked] = useState<Picked | null>(null);
   const [kindSel, setKindSel] = useState<MintKind | null>(startTile?.kind ?? null);
   const [source, setSource] = useState<MintSourceId | null>(null);
+  const [moreSources, setMoreSources] = useState(false);
   const [artist, setArtist] = useState('');
   const [album, setAlbum] = useState('');
   const [track, setTrack] = useState('');
@@ -297,7 +298,11 @@ export const MintSheet = ({
   // A platform's "Pick the file" opens the same media tile as tapping it (its type); platforms whose type has no
   // visible tile are not shown.
   const tileForKind = (kind: MintKind) => MINT_TILES.find((t) => t.when() && t.media && t.kind === kind);
-  const sources = MINT_SOURCES.filter((s) => tileForKind(s.kind));
+  // 'archive' sources open Books & documents (the closest existing upload); the rest open their own kind's tile.
+  const tileForSource = (k: (typeof MINT_SOURCES)[number]['kind']) =>
+    k === 'archive' ? MINT_TILES.find((t) => t.when() && t.id === 'books') : tileForKind(k);
+  const sources = MINT_SOURCES.filter((s) => tileForSource(s.kind));
+  const shownSources = moreSources ? sources : sources.filter((s) => s.popular);
 
   const pick = async (file: File | undefined) => {
     setFileError('');
@@ -518,8 +523,12 @@ export const MintSheet = ({
                 <span className="text-xs font-bold" style={{ color: '#ccc' }}>
                   Mint what you already post
                 </span>
-                <div className="flex gap-2 overflow-x-auto pb-1" role="group" aria-label="Mint what you already post">
-                  {sources.map((s) => {
+                <div
+                  className="grid grid-cols-4 gap-x-1 gap-y-2 sm:grid-cols-6"
+                  role="group"
+                  aria-label="Mint what you already post"
+                >
+                  {shownSources.map((s) => {
                     const on = source === s.id;
                     return (
                       <button
@@ -528,7 +537,7 @@ export const MintSheet = ({
                         aria-pressed={on}
                         aria-label={`How to mint from ${s.label}`}
                         onClick={() => setSource(on ? null : s.id)}
-                        className="flex min-h-[44px] min-w-[64px] shrink-0 flex-col items-center gap-1.5 rounded-xl border-0 bg-transparent px-1 py-1 cursor-pointer"
+                        className="flex min-h-[44px] min-w-0 flex-col items-center gap-1.5 rounded-xl border-0 bg-transparent px-1 py-1 cursor-pointer"
                         style={{ color: on ? GOLD : '#ccc' }}
                       >
                         <span
@@ -544,6 +553,23 @@ export const MintSheet = ({
                       </button>
                     );
                   })}
+                  {sources.length > shownSources.length || moreSources ? (
+                    <button
+                      type="button"
+                      aria-expanded={moreSources}
+                      onClick={() => setMoreSources(!moreSources)}
+                      className="flex min-h-[44px] min-w-0 flex-col items-center gap-1.5 rounded-xl border-0 bg-transparent px-1 py-1 cursor-pointer"
+                      style={{ color: '#ccc' }}
+                    >
+                      <span
+                        className="flex h-11 w-11 items-center justify-center rounded-xl text-lg"
+                        style={{ boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.1)' }}
+                      >
+                        {moreSources ? '−' : '+'}
+                      </span>
+                      <span className="text-[11px] leading-none">{moreSources ? 'Fewer' : 'More services'}</span>
+                    </button>
+                  ) : null}
                 </div>
                 <p className="text-[10px] m-0" style={{ color: '#777' }}>
                   Logos belong to their owners.
@@ -568,7 +594,7 @@ export const MintSheet = ({
                         <button
                           type="button"
                           onClick={() => {
-                            const t = tileForKind(s.kind);
+                            const t = tileForSource(s.kind);
                             if (t) openTile(t);
                           }}
                           className="self-start rounded-lg px-3 py-2 text-xs font-bold border-0 cursor-pointer"
