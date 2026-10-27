@@ -19,6 +19,7 @@ import { announceWallet, claimWindowCwi } from './discovery';
 import { replyError } from '../services/userDenied';
 import { attachMintPrivate } from '../mintPrivatePage';
 import { attachTwetch } from '../twetchPage';
+import { attachSwap } from '../swapPage';
 
 export { CWIEventName };
 
@@ -48,6 +49,8 @@ export const CWI: WalletInterface = createCWI(transport as Parameters<typeof cre
 attachMintPrivate(CWI as unknown as Record<string, unknown>, transport);
 // window.CWI.twetch.{status, loginSign, buildPost} (services/twetchSite.ts): same transport, origin from Chrome.
 attachTwetch(CWI as unknown as Record<string, unknown>, transport);
+// window.CWI.swap.{offer, accept} (services/swapSite.ts): bChatX contract swaps, origin from Chrome.
+attachSwap(CWI as unknown as Record<string, unknown>, transport);
 
 if (typeof window !== 'undefined') {
   const w = window as unknown as { CWI?: WalletInterface };

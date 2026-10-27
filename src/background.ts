@@ -56,12 +56,14 @@ import {
   type StreamPass,
   type StreamState,
 } from './services/streamGrants';
-import type { MintPrivatePrompt, StreamGrantPrompt, TwetchPrompt } from './promptProtocol';
+import type { MintPrivatePrompt, StreamGrantPrompt, SwapPrompt, TwetchPrompt } from './promptProtocol';
+import { isSwapAction, runSiteSwap } from './services/swapSite';
+import type { SwapRecord } from './mobile/p2p/swap/swapActions';
 import { isTwetchAction, routeTwetchMessage } from './services/twetchSite';
 import { twetchStoreFor } from './mobile/twetch/twetchLink';
 import type { TwetchAsk, TwetchWallet } from './mobile/twetch/twetchCalls';
 import { isMintPrivateAction, runSiteMintPrivate, type Kv as MintKv } from './services/mintPrivateSite';
-import type { OneSatContext } from '@1sat/actions';
+import { createContext, type OneSatContext } from '@1sat/actions';
 import { ALLOWANCES_ENABLED } from './services/allowanceFlag';
 import { ENVELOPES_ENABLED } from './mobile/storeBuild';
 import {
@@ -1241,6 +1243,8 @@ const pendingStreamGrantRequests = new Map<
 const pendingMintPrivateRequests = new Map<string, { request: MintPrivatePrompt; resolve: (allow: boolean) => void }>();
 /** Sites waiting on the Twetch sign-in / post sheet (services/twetchSite.ts). Resolves true only on Allow. */
 const pendingTwetchRequests = new Map<string, { request: TwetchPrompt; resolve: (allow: boolean) => void }>();
+/** bChatX waiting on the swap sheet (services/swapSite.ts). Resolves true only on Approve. */
+const pendingSwapRequests = new Map<string, { request: SwapPrompt; resolve: (allow: boolean) => void }>();
 const failPendingStreamGrants = () => {
   for (const p of pendingStreamGrantRequests.values()) p.resolve(null);
   pendingStreamGrantRequests.clear();
@@ -1249,6 +1253,8 @@ const failPendingStreamGrants = () => {
   pendingMintPrivateRequests.clear();
   for (const p of pendingTwetchRequests.values()) p.resolve(false);
   pendingTwetchRequests.clear();
+  for (const p of pendingSwapRequests.values()) p.resolve(false);
+  pendingSwapRequests.clear();
 };
 
 /**
@@ -1447,6 +1453,8 @@ const getPendingPromptPayload = (kind: string, requestID?: string): unknown => {
       return requestID ? pendingMintPrivateRequests.get(requestID)?.request : undefined;
     case 'twetch':
       return requestID ? pendingTwetchRequests.get(requestID)?.request : undefined;
+    case 'swap':
+      return requestID ? pendingSwapRequests.get(requestID)?.request : undefined;
     default:
       return undefined;
   }
@@ -1459,6 +1467,8 @@ const getNextPendingPrompt = (): { kind: PromptKind; requestID: string } | undef
   if (!usbCheck.done) return { kind: 'usbCheck', requestID: usbCheck.value };
   const streamGrant = pendingStreamGrantRequests.keys().next();
   if (!streamGrant.done) return { kind: 'streamGrant', requestID: streamGrant.value };
+  const swap = pendingSwapRequests.keys().next();
+  if (!swap.done) return { kind: 'swap', requestID: swap.value };
   const mintPrivate = pendingMintPrivateRequests.keys().next();
   if (!mintPrivate.done) return { kind: 'mintPrivate', requestID: mintPrivate.value };
   const twetch = pendingTwetchRequests.keys().next();
@@ -2364,6 +2374,31 @@ if (!(
       const requestID = String((message as { requestID?: unknown }).requestID ?? '');
       const pending = pendingTwetchRequests.get(requestID);
       pendingTwetchRequests.delete(requestID);
+      pending?.resolve((message as { allow?: unknown }).allow === true && !!pending);
+      sendResponse({ type: message.action, success: !!pending });
+      closeDappPopupIfNoUi();
+      return true;
+    }
+    // window.CWI.swap.{offer, accept} (services/swapSite.ts): bChatX only, origin from Chrome's sender.origin.
+    if (isSwapAction(message?.action)) {
+      if (isFromExtension) {
+        sendResponse({ type: message.action, success: false, error: 'Unauthorized' });
+        return true;
+      }
+      void runSiteSwap(String(message.action), sender.origin, message.params, swapDeps).then((r) =>
+        sendResponse({ type: message.action, ...r }),
+      );
+      return true;
+    }
+    // The swap sheet's answer. Extension pages only: a site can never answer its own sheet.
+    if (message?.action === 'SWAP_RESPONSE') {
+      if (!isFromExtension) {
+        sendResponse({ type: message.action, success: false, error: 'Unauthorized' });
+        return true;
+      }
+      const requestID = String((message as { requestID?: unknown }).requestID ?? '');
+      const pending = pendingSwapRequests.get(requestID);
+      pendingSwapRequests.delete(requestID);
       pending?.resolve((message as { allow?: unknown }).allow === true && !!pending);
       sendResponse({ type: message.action, success: !!pending });
       closeDappPopupIfNoUi();
@@ -4058,6 +4093,52 @@ if (!(
     } catch (e) {
       return { success: false as const, error: e instanceof Error ? e.message : String(e), code: 'ERROR' };
     }
+  };
+
+  /**
+   * What window.CWI.swap needs (services/swapSite.ts). The swap runs as the wallet itself (admin originator), so the
+   * swap sheet below is the one approval and it shows every amount. Swap records (save-before-commit) live in
+   * chrome.storage.local under bwxSwap.<ref>, per account.
+   */
+  const swapDeps = async () => {
+    const wpm = (await ensureWallet()) as unknown as Record<string, (args: unknown, o?: string) => unknown>;
+    const admin = new Proxy(
+      {},
+      { get: (_t, m: string) => (typeof wpm[m] === 'function' ? (args: unknown) => wpm[m](args, ADMIN_ORIGINATOR) : wpm[m]) },
+    ) as unknown as Parameters<typeof createContext>[0];
+    const services = accountContext?.syncContext.services;
+    if (!services) throw new Error('The wallet is still starting up. Try again in a moment.');
+    const who = chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey || 'default';
+    const key = (ref: string) => `bwxSwap.${who}.${ref}`;
+    return {
+      ctx: createContext(admin, { chain: 'main', services }),
+      quote: async () => {
+        const rate = await cachedUsdPerBsv().catch(() => undefined);
+        return rate ? { rate, source: 'bWalletX price feed (cached BSV/USD rate)' } : undefined;
+      },
+      store: {
+        get: (ref: string) =>
+          new Promise<SwapRecord | undefined>((res) =>
+            chrome.storage.local.get(key(ref), (v) => res((v ?? {})[key(ref)] as SwapRecord | undefined)),
+          ),
+        put: (r: SwapRecord) => new Promise<void>((res) => chrome.storage.local.set({ [key(r.ref)]: r }, () => res())),
+      },
+      ask: (sheet: Omit<SwapPrompt, 'requestID' | 'originator'>) =>
+        new Promise<boolean>((resolve) => {
+          const requestID = `swap-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          const timer = setTimeout(() => {
+            if (pendingSwapRequests.delete(requestID)) resolve(false);
+          }, STREAM_GRANT_TIMEOUT_MS);
+          pendingSwapRequests.set(requestID, {
+            request: { ...sheet, requestID, originator: 'www.bchatx.com' },
+            resolve: (v) => {
+              clearTimeout(timer);
+              resolve(v);
+            },
+          });
+          showPromptUi('swap', requestID);
+        }),
+    };
   };
 
   /**
