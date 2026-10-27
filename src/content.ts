@@ -9,6 +9,14 @@ import { originatorForOrigin } from './services/originKey';
 import { forwardCwiCall } from './services/cwiForward';
 import { SUBSCRIPTIONS_ENABLED } from './mobile/storeBuild';
 import { HANDOFF_ENABLED, HANDOFF_WEB_ORIGIN } from './mobile/passkey/extHandoff';
+import {
+  ROOM_PLAYING_ACTION,
+  ROOM_PLAYING_TYPE,
+  ROOM_QUERY_ACTION,
+  ROOM_QUERY_TYPE,
+  parseRoomPlaying,
+  roomTabOrigin,
+} from './mobile/chat/gameRoomLive';
 
 console.log('🌱 Yours Wallet Loaded');
 
@@ -155,6 +163,32 @@ if (SUBSCRIPTIONS_ENABLED) {
   });
 }
 
+// One player at a time (mobile/chat/gameRoomLive.ts): a bChatX room tab says whether it is playing the room's live
+// video, so the side panel shows "Watching in tab" instead of a second player. Only bChatX origins, only the top
+// frame, only the page's own window; the shape is checked here and again in the background (which takes the
+// origin from Chrome). At most 5 a second.
+let roomSec = 0;
+let roomN = 0;
+if (window.top === window && roomTabOrigin(location.origin)) {
+  window.addEventListener('message', (e: MessageEvent) => {
+    if (e.source !== window || e.origin !== location.origin) return;
+    if ((e.data as { type?: unknown } | null)?.type !== ROOM_PLAYING_TYPE) return;
+    const data = parseRoomPlaying(e.data);
+    if (!data) return;
+    const sec = Math.floor(Date.now() / 1000);
+    if (sec !== roomSec) {
+      roomSec = sec;
+      roomN = 0;
+    }
+    if (++roomN > 5) return;
+    try {
+      chrome.runtime.sendMessage({ action: ROOM_PLAYING_ACTION, data })?.catch(() => undefined);
+    } catch {
+      /* extension reloaded */
+    }
+  });
+}
+
 // Passkey hand-off (notes/extension-passkey-handoff.md, VITE_SEEDLESS=1 builds only). web.bwalletx.com posts
 // { type: 'BWX_EXT_HANDOFF', isInvocation: true, msg } to its own window; ONLY that exact origin, from its own window
 // (not a child frame), is forwarded, over Chrome's internal route, to the background, which re-checks sender.origin
@@ -219,6 +253,12 @@ try {
       // Always the wallet's own prompt page, never an address from the message.
       showSheet(`${chrome.runtime.getURL('prompt.html')}?${msg.query}`);
       sendResponse({ ok: true });
+      return false;
+    }
+    // The panel asks open bChatX room tabs to re-announce what they play (mobile/chat/gameRoomLive.ts).
+    if (msg?.action === ROOM_QUERY_ACTION) {
+      if (window.top === window && roomTabOrigin(location.origin))
+        window.postMessage({ type: ROOM_QUERY_TYPE }, location.origin);
       return false;
     }
     if (msg?.action === 'BWX_EXIT_FULLSCREEN') {

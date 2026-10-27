@@ -93,6 +93,7 @@ import { avatarFor, B_AVATAR, pendingBQuestions, rememberAvatar, useAvatars } fr
 import { ChatAvatar as Avatar } from '../chat/ChatAvatar';
 import { roomEmoji, roomHeaderBackground, roomListBackdrop, roomOwnerOrigin, useRoomLook } from '../chat/roomLook';
 import { roomBubbles } from '../chat/roomTheme';
+import { GameRoomPlayer } from '../chat/GameRoomPlayer';
 import { gateIconUrl, lockedForMe, lockedLine, roomTokenGate } from '../chat/roomGate';
 import { roomSetupState, shouldOfferRoomSetup } from '../chat/roomSetupPrompt';
 import type { ReplyRef } from '../chat/api';
@@ -140,6 +141,7 @@ import {
   roomSpacesAllowed,
   MARKET_ENABLED,
   STORE_BUILD,
+  TOKENBLASTER_ENABLED,
   STORE_ROOM_NOTE,
   marketLabel,
   tokenRoomsEnabled,
@@ -942,6 +944,9 @@ const Conversation = ({
         </div>
       </div>
 
+      {/* Game rooms (TERRORNODE): the compact live player (chat/GameRoomPlayer.tsx). Capped height, so the message bar
+          stays on screen. Not in store builds (TOKENBLASTER_ENABLED), like the Play TERRORNODE action. */}
+      {TOKENBLASTER_ENABLED && <GameRoomPlayer client={client} ticker={room.ticker} signedIn={!!client.current} />}
       {/* Spaces: Live now / Join, or Start for the issuer or admin. bWalletX: any room; store: open rooms (free Spaces). */}
       {/* In the wide layout the Space banner sits in the room details column instead. */}
       {!WIDE_ON && (BSPACES_ENABLED || roomSpacesAllowed(room)) && (

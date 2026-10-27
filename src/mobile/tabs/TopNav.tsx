@@ -38,8 +38,7 @@ import { startAgentCreate } from '../agents/agentCreate';
 import { AGENT_TOOLS_TITLE, AgentToolsSheet } from '../agents/AgentToolsSheet';
 import { AirdropsNavButton } from '../airdrops/AirdropsNavButton';
 import { TOKENBLASTER_ENABLED, TWETCH_POST_ENABLED, isBWalletX } from '../storeBuild';
-import { TERRORNODE_URL } from '../games/TerrornodeHeroX';
-import { openBapp } from '../bappFrame/bappFrame';
+import { playTerrornode as playTerrornodeIn } from '../games/playTerrornode';
 import { IS_EXTENSION } from '../extension';
 import { initPairing, setAgentPairDeps } from '../pair/sessions';
 import { onPairLink, takePairLink } from '../pair/links';
@@ -112,12 +111,8 @@ const TopNavBar = () => {
   const phone = usePhoneLayout();
   const { handleSelect } = useBottomMenu();
   const navigate = useNavigate();
-  // The bApps page hosts the in-wallet frame (it shows only while that page is on screen), so go there and open
-  // the game the way the TERRORNODE hero does (BrowserPage go → openBapp; full-screen browser if it can't frame).
-  const playTerrornode = () => {
-    navigate(routeFor('browser') ?? '/browser');
-    void openBapp('TERRORNODE', TERRORNODE_URL);
-  };
+  // Full screen in the wallet's browser (games/playTerrornode.ts; the game room's live player uses it too).
+  const playTerrornode = () => playTerrornodeIn(navigate);
   const pathname = useLocation().pathname;
   const onMedia = pathname.startsWith('/m/media');
   const onLock = pathname.startsWith('/m/lock');

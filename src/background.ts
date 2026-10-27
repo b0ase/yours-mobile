@@ -198,6 +198,7 @@ import { withDefaultExpiry } from './services/grantExpiry';
 import { markPayeeMismatch, parsePayees, payeesAllowed } from './services/allowanceGuard';
 import { ADMIN_ORIGINATOR, initWallet, openAccountStorageForBackup, type AccountContext } from './initWallet';
 import { isExtensionSender, reservedOriginatorRefusal } from './services/adminOriginator';
+import { ROOM_PLAYING_ACTION, ROOM_QUERY_ACTION, ROOM_TAB_ACTION, parseRoomPlaying, roomTabOrigin } from './mobile/chat/gameRoomLive';
 import { isReservedBasket, RESERVED_BASKET_REFUSAL, revokeBasketGrantsForOriginator } from './services/reservedBaskets';
 import { pinnedProtocol, pinnedProtocolRefusal, PINNED_PROTOCOLS_VERSION, versionWithPins } from './services/pinnedProtocols';
 import {
@@ -1334,6 +1335,7 @@ const pushSiteTheme = async (force = false) => {
 chrome.tabs?.onActivated?.addListener(() => void pushSiteTheme());
 chrome.windows?.onFocusChanged?.addListener(() => void pushSiteTheme());
 chrome.tabs?.onRemoved?.addListener((tabId) => {
+  if (roomTabs.delete(tabId)) postToPanels({ action: ROOM_TAB_ACTION, closed: true, tabId });
   const a = siteThemeTabs.delete(tabId);
   if (siteOriginTabs.delete(tabId) || a) void pushSiteTheme();
 });
@@ -1343,6 +1345,8 @@ chrome.tabs?.onUpdated?.addListener((tabId, info) => {
   const a = siteThemeTabs.delete(tabId);
   if (siteOriginTabs.delete(tabId) || a) void pushSiteTheme();
 });
+/** Tabs that announced a game room's live video (gameRoomLive.ts), so a closed one clears the panel's chip. */
+const roomTabs = new Set<number>();
 const postToPanels = (msg: unknown) =>
   activePopupPorts.forEach((p) => {
     try {
@@ -2242,6 +2246,30 @@ if (isInServiceWorker) {
           sitePathTabs.delete(sender.tab.id);
         }
         void pushSiteTheme();
+      }
+      return false;
+    }
+    // One player at a time (mobile/chat/gameRoomLive.ts): a bChatX room tab playing its live video. The origin is
+    // Chrome's, the shape re-checked; panels get only { room, playing, visible, tabId }.
+    if (message?.action === ROOM_PLAYING_ACTION) {
+      if (sender.id === chrome.runtime.id && sender.frameId === 0 && sender.tab?.id !== undefined && roomTabOrigin(sender.origin)) {
+        const data = parseRoomPlaying(message.data);
+        if (data) {
+          roomTabs.add(sender.tab.id);
+          postToPanels({ action: ROOM_TAB_ACTION, ...data, tabId: sender.tab.id });
+        }
+      }
+      return false;
+    }
+    // A newly opened panel asks open room tabs to re-announce (content.ts forwards it to bChatX pages only).
+    if (message?.action === ROOM_QUERY_ACTION) {
+      if (isExtensionSender(sender, chrome.runtime.id)) {
+        chrome.tabs?.query({}, (tabs) => {
+          for (const t of tabs || []) {
+            if (t.id === undefined) continue;
+            chrome.tabs.sendMessage(t.id, { action: ROOM_QUERY_ACTION })?.catch(() => undefined);
+          }
+        });
       }
       return false;
     }
