@@ -1160,9 +1160,13 @@ export class BchatClient {
     return this.call('POST', '/api/bitsign/bavatar/sponsor', { address });
   }
 
-  /** Record the bAvatar inscription so the number shows as minted (once per account). */
-  async recordBavatarMint(txid: string): Promise<{ ok?: boolean }> {
-    return this.call('POST', '/api/bitsign/bavatar/minted', { txid });
+  /**
+   * Record a bAvatar inscription. `variant` is the design number and `art` the plain design SVG
+   * (bavatarSvg(identityKey, { size: 512, variant })): the server redraws it and refuses a mismatch.
+   * The newest recorded design becomes the account's bAvatar on bChatX. Safe to repeat for the same txid.
+   */
+  async recordBavatarMint(txid: string, variant = 0, art?: string): Promise<{ ok?: boolean; variant?: number }> {
+    return this.call('POST', '/api/bitsign/bavatar/minted', { txid, variant, ...(art ? { art } : {}) });
   }
 
   /** Delete this bChat account (identity-key signed; see src/mobile/account/deleteAccount.ts). */
@@ -1283,8 +1287,11 @@ export type BavatarMine = {
   number: number;
   founding: boolean;
   edition: number;
-  minted: { txid: string; outpoint: string } | null;
+  /** The newest recorded mint (the design that is this account's bAvatar), null before the first. */
+  minted: { txid: string; outpoint: string; variant?: number } | null;
   sponsored: boolean;
+  /** How many bAvatars this account has minted (older servers omit it: treat as 0 or 1 from `minted`). */
+  mints?: number;
 };
 
 export type AvatarUploaded = {
