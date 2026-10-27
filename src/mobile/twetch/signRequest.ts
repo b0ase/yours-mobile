@@ -8,8 +8,8 @@
  *
  * The wallet builds that string itself from checked fields and signs nothing else. The only request it signs is
  * POST /v1/posts registering the post this origin just built (and the user approved) with twetch.buildPost:
- * the body must be exactly { userId, content, txHex, replyPostId? } with that txHex and that text. No paidSats /
- * payParams or any other key, so the signature can never authorise a payment or a different post.
+ * the body must be exactly { userId, content, txHex, paidSats?, replyPostId? } with that txHex and that text, and
+ * paidSats (Twetch's record of the miner fee) only equal to that tx's own fee. No payParams or any other key, so the signature can never authorise a payment or a different post.
  */
 
 export const SIGN_METHOD = 'POST';
@@ -17,11 +17,12 @@ export const SIGN_PATH = '/v1/posts';
 export const SIGN_TS_SKEW_MS = 5 * 60 * 1000;
 /** How long a built post may be registered after buildPost handed it over. */
 export const BUILT_TTL_MS = 10 * 60 * 1000;
-const BODY_KEYS = new Set(['userId', 'content', 'txHex', 'replyPostId']);
+const BODY_KEYS = new Set(['userId', 'content', 'txHex', 'replyPostId', 'paidSats']);
 const PARAM_KEYS = new Set(['method', 'path', 'userId', 'ts', 'body', 'message']);
 const BODY_MAX = 200_000;
 
-type Built = { txHex: string; text: string; reply: boolean; at: number };
+/** fee = the built tx's miner fee in sats (inputs − outputs), the only paidSats Twetch's body may carry. */
+type Built = { txHex: string; text: string; reply: boolean; fee: number; at: number };
 const built = new Map<string, Built>();
 
 /** buildPost calls this when it hands txHex to `origin`. Kept in memory only (never stored). */
@@ -83,6 +84,8 @@ export const validateSignRequest = (
   if (typeof o.txHex !== 'string' || o.txHex !== last.txHex) return 'txHex is not the post this wallet built';
   if (typeof o.content !== 'string' || (o.content !== last.text && o.content !== last.text.trim()))
     return 'content is not the text of the post';
+  if (o.paidSats !== undefined && (!Number.isSafeInteger(o.paidSats) || o.paidSats !== last.fee))
+    return 'paidSats must equal the miner fee of the built post';
   if (o.replyPostId !== undefined && (!last.reply || normId(o.replyPostId) === null))
     return 'replyPostId only goes with a reply';
   return out;

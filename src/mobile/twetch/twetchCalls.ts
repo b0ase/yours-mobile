@@ -7,7 +7,7 @@
  * - `twetch.loginSign({ challenge })` → `{ signature, publicKey, address }`. BSM signature (compact, base64) by the
  *   Twetch key over Twetch's login challenge, and only that: `twetch-login:<64 hex>:<ms>` stamped within 10 minutes.
  *   "Sign in to Twetch as @name?" shows the first time per site; after that it signs without a sheet.
- * - `twetch.buildPost({ text, replyTxid?, files? })` → `{ txHex, txid }`. B | MAP | AIP output signed by the Twetch
+ * - `twetch.buildPost({ text, replyTxid?, files? })` → `{ txHex, txid, fee }` (fee = miner fee in sats, inputs − outputs). B | MAP | AIP output signed by the Twetch
  *   key, funded from the wallet's BSV through createAction with noSend. Every post shows a sheet (text + fee). The
  *   SITE submits it to Twetch's API and broadcasts it; the wallet never does.
  *
@@ -192,9 +192,9 @@ export async function handleTwetchCall(
       if (!ok) return DENIED;
       const txHex = tx.toHex();
       handedOff = true;
-      rememberBuilt(origin, { txHex, text: input.text, reply: !!input.replyTxid }, deps.now?.() ?? Date.now());
+      rememberBuilt(origin, { txHex, text: input.text, reply: !!input.replyTxid, fee }, deps.now?.() ?? Date.now());
       (deps.settle ?? defaultSettle)(deps.wallet, txid);
-      return { result: { txHex, txid } };
+      return { result: { txHex, txid, fee } };
     } finally {
       if (!handedOff) await deps.wallet.abortAction({ reference: txid }).catch(() => undefined);
     }

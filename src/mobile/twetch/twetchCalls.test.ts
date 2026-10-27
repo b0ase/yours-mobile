@@ -356,6 +356,24 @@ describe('twetch.signRequest', () => {
     expect(code(await t.call(t.params({ message: 'anything else' })))).toBe(BAD_REQUEST_CODE);
   });
 
+  test("paidSats: only the built tx's exact miner fee (absent is fine)", async () => {
+    const t = await built();
+    expect('result' in (await t.call(t.params({ body: t.body({ paidSats: 200 }) })))).toBe(true); // 10,000 − 9,800
+    for (const v of [199, 201, 200.5, '200', -200, null])
+      expect(code(await t.call(t.params({ body: t.body({ paidSats: v }) })))).toBe(BAD_REQUEST_CODE);
+    expect('result' in (await t.call(t.params()))).toBe(true);
+  });
+
+  test('buildPost returns fee = inputs − outputs', async () => {
+    forgetBuilt();
+    const key = PrivateKey.fromRandom();
+    const { store } = fakeStore(key, linkFor(key));
+    const { wallet } = fakeWallet();
+    const { deps } = depsFor({ store, wallet });
+    const r = (await handleTwetchCall(TWETCH_POST, { text: TEXT }, ORIGIN, deps)) as { result: { fee: number } };
+    expect(r.result.fee).toBe(10_000 - 9_800);
+  });
+
   test('replies may carry replyPostId; plain posts may not', async () => {
     const t = await built({ reply: true });
     expect('result' in (await t.call(t.params({ body: t.body({ replyPostId: 42 }) })))).toBe(true);

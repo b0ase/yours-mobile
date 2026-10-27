@@ -135,8 +135,9 @@ describe('twetch.* through the extension bridge', () => {
     const s = setup(true);
     const r = await routeTwetchMessage({ action: 'twetch.buildPost', params: { text: 'gm' } }, SITE, s.deps);
     expect(r.success).toBe(true);
-    const d = (r as { data: { txHex: string; txid: string } }).data;
+    const d = (r as { data: { txHex: string; txid: string; fee: number } }).data;
     expect(Transaction.fromHex(d.txHex).id('hex')).toBe(d.txid);
+    expect(Number.isSafeInteger(d.fee) && d.fee > 0).toBe(true);
     expect(s.calls.abort).toHaveLength(0);
   });
 
@@ -159,7 +160,12 @@ describe('twetch.* through the extension bridge', () => {
       success: false,
       code: 'INVALID_PARAMS',
     });
-    const paid = { ...params, body: JSON.stringify({ userId: 19, content: 'gm', txHex, paidSats: 5 }) };
+    const fee = (b as { data: { fee: number } }).data.fee;
+    const feeBody = JSON.stringify({ userId: 19, content: 'gm', txHex, paidSats: fee });
+    expect(
+      await routeTwetchMessage({ action: 'twetch.signRequest', params: { ...params, body: feeBody } }, SITE, s.deps),
+    ).toMatchObject({ success: true });
+    const paid = { ...params, body: JSON.stringify({ userId: 19, content: 'gm', txHex, paidSats: fee + 1 }) };
     expect(await routeTwetchMessage({ action: 'twetch.signRequest', params: paid }, SITE, s.deps)).toMatchObject({
       success: false,
       code: 'INVALID_PARAMS',
