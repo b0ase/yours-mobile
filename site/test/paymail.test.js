@@ -808,9 +808,10 @@ describe('reserved alias held for a designated key', () => {
     const h = pm.makeHandlers({ store, env: ENV, reservedOwners: { bwalletx: owner.identityKey } });
     return { owner, store, h };
   };
-  test('the real allowlist maps bwalletx to the brand key only', () => {
+  test('the real allowlist maps bwalletx to the brand key and touman to its tester', () => {
     expect(pm.RESERVED_OWNERS).toEqual({
       bwalletx: '029c1abd9470d485719c512c0d704e6ccf6c1533461eb5884a5d09a6dc3dca55b7',
+      touman: '030f8d4f47ae853abf8adc939520d360213193709fc846989a436add16d0b946e7',
     });
   });
   test('availability shows Reserved for everyone else, and for no key at all', async () => {
