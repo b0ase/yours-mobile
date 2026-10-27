@@ -1129,7 +1129,7 @@ body,
   margin-right: -10px;
 }
 .bw-wcard-scan {
-  width: 44px;
+  min-width: 44px;
   height: 44px;
   margin: -8px 0;
   display: flex;
@@ -1141,15 +1141,18 @@ body,
   -webkit-tap-highlight-color: transparent;
 }
 .bw-wcard-scan > span {
-  width: 30px;
-  height: 30px;
+  height: 34px;
+  padding: 0 12px 0 10px;
+  gap: 6px;
   border-radius: 999px;
   display: flex;
   align-items: center;
   justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
   color: var(--bw-accent-hi);
-  border: 1px solid rgb(var(--bw-accent-hi-rgb) / 0.45);
-  background: rgba(255, 255, 255, 0.06);
+  border: 1.5px solid rgb(var(--bw-accent-hi-rgb) / 0.8);
+  background: rgb(var(--bw-accent-hi-rgb) / 0.12);
 }
 .bw-wcard-scan:active > span {
   background: rgb(var(--bw-accent-hi-rgb) / 0.18);
