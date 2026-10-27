@@ -79,6 +79,8 @@ const hashIp = (ip, env = process.env) =>
 const dayText = (ms) =>
   new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
 const RESERVED = new Set([
+  // Kept for a named person: see RESERVED_OWNERS.
+  'touman',
   // Impersonation and technical names.
   'admin',
   'administrator',
@@ -225,6 +227,10 @@ const RESERVED_MSG = 'That alias is reserved';
 const RESERVED_OWNERS = Object.freeze({
   // The bWalletX brand account.
   bwalletx: '029c1abd9470d485719c512c0d704e6ccf6c1533461eb5884a5d09a6dc3dca55b7',
+  // The Bitcoin Corporation Ltd's company account (owner, 27 Oct 2026).
+  bcorp: '03c96b37e69377c8af33b583067f56444c83a656b05014e8f15003e67250943880',
+  // Touman, our first Play beta tester (owner, 27 Oct 2026).
+  touman: '030f8d4f47ae853abf8adc939520d360213193709fc846989a436add16d0b946e7',
 });
 const RESERVED_EXPLAIN = 'This name is kept for the bWalletX team, so it can’t be claimed.';
 /**
