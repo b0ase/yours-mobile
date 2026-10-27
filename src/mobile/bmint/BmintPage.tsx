@@ -8,10 +8,21 @@ import { setAgentDraft } from '../agent/handoff';
 import { mintTilesShown, MintSheet } from '../mint/MintButton';
 import { canBulkMint } from '../names/bulkAccess';
 import { HandleFlow } from '../names/HandleFlow';
-import { BMINT_NOTES_ENABLED, MARKET_ENABLED, RELEASES_ENABLED, STORE_BUILD } from '../storeBuild';
+import {
+  BMINT_NOTES_ENABLED,
+  GREETING_CARDS_ENABLED,
+  MARKET_ENABLED,
+  RELEASES_ENABLED,
+  STORE_BUILD,
+} from '../storeBuild';
 import { isStudioOwner } from './lib/studioAccess';
 import mintMark from './assets/logos/mint-stamp.svg';
 import { HubArt } from './HubArt';
+import heroImg from './assets/sales/hero.webp';
+import moviesImg from './assets/sales/movies.webp';
+import musicImg from './assets/sales/music.webp';
+import photosImg from './assets/sales/photos.webp';
+import picsImg from './assets/sales/pics.webp';
 import { takeHandOff } from './lib/drop';
 import { useChatHandle } from '../tabs/useTabBadges';
 import { DropHero, Vault } from './Studio';
@@ -171,6 +182,71 @@ const Group = ({ title, tiles, compact }: { title: string; tiles: HubTile[]; com
   </section>
 );
 
+type Service = { id: string; brand: string; title: string; what: string; img: string; to: string };
+
+/**
+ * The sales surface (owner, 27 Oct 2026): sell minting everything valuable to you (private by default, encrypted to
+ * your keys, public only if you choose Reveal) and the paid generative services. Every tile opens an existing screen
+ * (no new routes, no price or mint logic here; the sheet shows the cost before anything is paid). bPics greeting
+ * cards fall back to the bPics screen where cards are not built in. Artwork: assets/sales (webp, ~10 to 40 KB).
+ */
+const SERVICES: Service[] = [
+  {
+    id: 'movie',
+    brand: 'bMovies',
+    title: 'Mint a Movie',
+    what: 'Your film, owned on Bitcoin',
+    img: moviesImg,
+    to: `${BASE}/mint/video`,
+  },
+  {
+    id: 'pics',
+    brand: 'bPics',
+    title: 'AI pictures & cards',
+    what: 'Describe it, we make it',
+    img: picsImg,
+    to: GREETING_CARDS_ENABLED ? `${BASE}/mint/card` : '/m/bpics',
+  },
+  {
+    id: 'music',
+    brand: 'bMusic',
+    title: 'Mint a track',
+    what: 'Tracks fans own and play',
+    img: musicImg,
+    to: `${BASE}/mint/music`,
+  },
+  {
+    id: 'photos',
+    brand: 'Camera roll',
+    title: 'Your photos & art',
+    what: 'Prove it was yours first',
+    img: photosImg,
+    to: `${BASE}/mint/art`,
+  },
+];
+
+const SalesBand = () => (
+  <section className="bm-sales" aria-label="What you can mint">
+    <div className="bm-sales-hero" style={{ backgroundImage: `url(${heroImg})` }}>
+      <h2>Mint everything valuable to you.</h2>
+      <p>
+        Private by default and encrypted to your keys. Public only if you choose <b>Reveal</b>. Paid for in bitcoin,
+        straight from your wallet.
+      </p>
+    </div>
+    <div className="bm-sales-grid">
+      {SERVICES.map((s) => (
+        <Link key={s.id} to={s.to} className="bm-svc" style={{ backgroundImage: `url(${s.img})` }}>
+          <span className="bm-svc-brand">{s.brand}</span>
+          <span className="bm-svc-title">{s.title}</span>
+          <span className="bm-svc-sub">{s.what}</span>
+          <span className="bm-svc-priv">Private by default</span>
+        </Link>
+      ))}
+    </div>
+  </section>
+);
+
 /** The account's display name for the preview card and vault ("$you" until it has one). */
 const useMinterName = () => {
   const { chromeStorageService } = useServiceContext();
@@ -186,6 +262,7 @@ const Landing = ({ owner }: { owner: boolean }) => {
   return (
     <div className="bm-body bm-studio">
       <DropHero name={name} />
+      <SalesBand />
       {make.length > 0 && <Group title="Or start from a type" tiles={make} compact />}
       <Vault name={name} />
       {more.map((g) => (

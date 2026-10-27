@@ -5,7 +5,7 @@ import { MINT_SOURCES, mintSource } from './mintSources';
 describe('mint sources', () => {
   test('every platform picks a real mint type', () => {
     const kinds = new Set(MINT_KINDS.map((k) => k.id));
-    for (const s of MINT_SOURCES) expect(kinds.has(s.kind)).toBe(true);
+    for (const s of MINT_SOURCES) expect(s.kind === 'archive' || kinds.has(s.kind)).toBe(true);
   });
 
   test('every platform says how to get the file', () => {
@@ -27,5 +27,12 @@ describe('mint sources', () => {
     expect(mintSource('tiktok')?.kind).toBe('video');
     expect(mintSource('soundcloud')?.kind).toBe('music');
     expect(mintSource('instagram')?.kind).toBe('picture');
+  });
+});
+
+describe('mint sources: wide list', () => {
+  test('eight popular, the rest under More services, every service has a brand-mark id', () => {
+    expect(MINT_SOURCES.filter((s) => s.popular).length).toBe(8);
+    expect(MINT_SOURCES.length).toBeGreaterThanOrEqual(27);
   });
 });

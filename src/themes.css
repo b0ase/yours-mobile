@@ -851,6 +851,8 @@
     [style*='background-color: rgb(18, 16, 10)'],
     [style*='background: rgb(18, 18, 18)'],
     [style*='background-color: rgb(18, 18, 18)'],
+    [style*='background: rgb(18, 18, 20)'],
+    [style*='background-color: rgb(18, 18, 20)'],
     [style*='background: rgb(18, 19, 22)'],
     [style*='background-color: rgb(18, 19, 22)'],
     [style*='background: rgb(18, 19, 23)'],
@@ -979,6 +981,8 @@
     [style*='background-color: rgb(29, 20, 48)'],
     [style*='background: rgb(29, 22, 6)'],
     [style*='background-color: rgb(29, 22, 6)'],
+    [style*='background: rgb(29, 29, 32)'],
+    [style*='background-color: rgb(29, 29, 32)'],
     [style*='background: rgb(29, 30, 35)'],
     [style*='background-color: rgb(29, 30, 35)'],
     [style*='background: rgb(29, 32, 37)'],
@@ -1461,4 +1465,10 @@ input:-webkit-autofill {
   background-color: #e5242b !important;
   color: #ffffff !important;
   font-weight: 700 !important;
+}
+
+/* The X and TikTok marks are white on the dark Gold/Dark tiles; on the White (mono) surface they turn to ink
+   (both brands allow a black mark on light). Colour marks (YouTube, Facebook...) never change. */
+:root[data-bw-tone='mono'] svg path[data-brand-ink] {
+  fill: #111;
 }
