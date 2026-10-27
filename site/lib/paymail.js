@@ -79,7 +79,22 @@ const hashIp = (ip, env = process.env) =>
 const dayText = (ms) =>
   new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
 /** Premium names held for The Bitcoin Corporation Ltd; only bCorp's key may claim them (owner, 27 Oct 2026). */
-const PREMIUM_BCORP = ['money', 'cash', 'gold', 'news', 'shop', 'store', 'market', 'exchange', 'token', 'tokens', 'ai', 'crypto', 'nft', 'dex'];
+const PREMIUM_BCORP = [
+  'money',
+  'cash',
+  'gold',
+  'news',
+  'shop',
+  'store',
+  'market',
+  'exchange',
+  'token',
+  'tokens',
+  'ai',
+  'crypto',
+  'nft',
+  'dex',
+];
 const BCORP_KEY = '03c96b37e69377c8af33b583067f56444c83a656b05014e8f15003e67250943880';
 
 const RESERVED = new Set([
