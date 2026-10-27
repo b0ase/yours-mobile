@@ -3432,3 +3432,119 @@ html.ww-on .bw-cdes {
 .bw-sigpad-doc span {
   color: var(--bw-wcard-muted, var(--bw-muted, #8e8e89));
 }
+
+/* Landscape phone layout (phone/landscape.ts; owner, 27 Oct 2026: "a landscape version that works when you tip it
+   on its side… like the desktop version"). The Dock sets html[data-rail] while its left rail shows: the dock's
+   tiles and b stack in a slim rail, the top icon row becomes a 44px strip beside it, and pages sit to the right of
+   the rail inside the side safe areas (the notch is left or right in landscape). Portrait never sets it. */
+html[data-rail]:root {
+  --dock-h: 0px;
+  --rail-w: calc(76px + env(safe-area-inset-left, 0px));
+  --rail-top-h: 44px;
+  /* An open chat room (tabs/ChatPage.tsx Conversation) sits beside the rail, under the strip. */
+  --ww-conv-left: var(--rail-w);
+  --ww-conv-right: env(safe-area-inset-right, 0px);
+  --ww-conv-top: var(--rail-top-h);
+}
+html[data-rail] #root {
+  padding-left: var(--rail-w);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+.bw-rail {
+  width: var(--rail-w);
+  padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  box-sizing: border-box;
+}
+/* Rail tiles: a full 44px+ target each; the b keeps its size. */
+.bw-rail > div {
+  width: 72px !important;
+  flex: 0 0 auto;
+}
+.bw-rail > div > button {
+  min-height: 52px;
+}
+/* The top icon row: a compact strip right of the rail, icons grouped on the right like the desktop's top bar. */
+html[data-rail] .bw-topnav {
+  left: var(--rail-w) !important;
+  right: env(safe-area-inset-right, 0px);
+  width: auto !important;
+  height: var(--rail-top-h) !important;
+  grid-template-columns: none !important;
+  grid-auto-flow: column;
+  grid-auto-columns: 44px;
+  justify-content: end;
+  column-gap: 8px;
+  padding: 0 12px;
+  overflow: visible !important;
+}
+/* 36px circles, 44px to tap. */
+html[data-rail] .bw-topnav > * {
+  position: relative;
+}
+html[data-rail] .bw-topnav > button::after,
+html[data-rail] .bw-topnav > div > button::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+}
+/* Pages that clear the 56px top bar clear the 44px strip instead. */
+html[data-rail] .bw-dock-pad.pt-14 {
+  padding-top: var(--rail-top-h);
+}
+
+/* Wallet home: the balance card on the left; price, Buy BSV, History, Swap, Send/Receive on the right, all above
+   the fold at 390–414px high. Everything after them runs full width below, as in portrait. */
+html[data-rail] .bw-dock-pad:has(> .bw-bcar) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 16px;
+  align-content: start;
+  align-items: start;
+  padding-left: 12px;
+  padding-right: 12px;
+  box-sizing: border-box;
+}
+html[data-rail] .bw-dock-pad:has(> .bw-bcar) > * {
+  grid-column: 1 / -1;
+  justify-self: center;
+}
+html[data-rail] .bw-dock-pad:has(> .bw-bcar) > .bw-bcar {
+  grid-column: 1;
+  grid-row: 1 / span 5;
+  width: 100%;
+  max-width: min(398px, calc((100dvh - var(--rail-top-h) - 56px) * 1.62));
+  margin-top: 8px;
+}
+/* The wallet's scroll box (MainContent) keeps 3.75rem for the bottom bar; the rail has none. */
+html[data-rail] div:has(> .bw-dock-pad > .bw-bcar) {
+  height: 100% !important;
+}
+/* The card sizes itself from 100vw in portrait; here it fills its column. */
+html[data-rail] .bw-bcar .bw-wcard-wrap {
+  width: 100%;
+}
+html[data-rail] .bw-bcar .bw-bc-back {
+  min-height: 0;
+}
+html[data-rail] .bw-dock-pad:has(> .bw-bcar) > .bw-toprow,
+html[data-rail] .bw-dock-pad:has(> .bw-bcar) > .bw-swaprow,
+html[data-rail] .bw-dock-pad:has(> .bw-bcar) > .bw-backup-banner,
+html[data-rail] .bw-dock-pad:has(> .bw-bcar) > .bw-sendrow {
+  grid-column: 2;
+  width: 100%;
+  justify-self: stretch;
+}
+html[data-rail] .bw-dock-pad:has(> .bw-bcar) > .bw-toprow {
+  grid-row: 1;
+  margin-top: 8px;
+}
+html[data-rail] .bw-dock-pad:has(> .bw-bcar) > .bw-swaprow {
+  grid-row: 2;
+  margin-bottom: 0;
+}
+html[data-rail] .bw-dock-pad:has(> .bw-bcar) > .bw-backup-banner {
+  grid-row: 3;
+}
+html[data-rail] .bw-dock-pad:has(> .bw-bcar) > .bw-sendrow {
+  grid-row: 4;
+}

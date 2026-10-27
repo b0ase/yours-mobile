@@ -87,7 +87,7 @@ export const BackupGate = ({ sats }: { sats: number }) => {
       {!backedUp && (
         <button
           onClick={() => setRequest({ reason: 'banner' })}
-          className="w-[88%] mt-3 flex items-center gap-2 rounded-xl px-3 py-2.5 text-left border-0"
+          className="bw-backup-banner w-[88%] mt-3 flex items-center gap-2 rounded-xl px-3 py-2.5 text-left border-0"
           style={{ background: '#7A1A16', color: '#FFE4E1' }}
           role="alert"
         >

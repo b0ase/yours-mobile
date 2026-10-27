@@ -1158,8 +1158,10 @@ const MarketPage = () => {
               {tokenList}
               <div className="h-16" />
               <div
-                className="fixed left-0 right-0 z-[60] px-4 py-2"
+                className="fixed right-0 z-[60] px-4 py-2"
                 style={{
+                  // Beside the landscape rail (phone/landscape.ts) when it shows; 0 otherwise.
+                  left: 'var(--rail-w, 0px)',
                   bottom: 'calc(var(--dock-h, 3.75rem) + env(safe-area-inset-bottom))',
                   background: 'linear-gradient(transparent, #010101 35%)',
                 }}

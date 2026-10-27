@@ -13,6 +13,7 @@ import { DOCK_LONG_PRESS_MS, edgeFade, fadeMask, longPressCancelled } from './ge
 import { itemIcon, itemLabel } from './icons';
 import { useThemedIcon } from '../brand/bappIcons';
 import { TabBadge } from '../../components/TabBadge';
+import { useLandscapeRail } from './landscape';
 
 /**
  * The phone layout's dock (docs/PHONE-LAYOUT-PLAN.md §5, §14): left slots · the b · right slots, which scroll
@@ -278,6 +279,14 @@ export const Dock = ({
   dots,
 }: Props) => {
   const reduce = useReducedMotion();
+  // Phone on its side: the same tiles and b, stacked in a rail on the left (landscape.ts, mobile.css).
+  const rail = useLandscapeRail();
+  // <html data-rail> while the rail is on screen: mobile.css moves the top bar and pages beside it.
+  useEffect(() => {
+    if (!rail) return;
+    document.documentElement.setAttribute('data-rail', '');
+    return () => document.documentElement.removeAttribute('data-rail');
+  }, [rail]);
   const [arranging, setArranging] = useState(false);
   const [picked, setPicked] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -373,7 +382,7 @@ export const Dock = ({
       {arranging && (
         <div
           className="absolute left-0 right-0 z-[101] px-3 pb-2 flex flex-col gap-1.5"
-          style={{ bottom: 'var(--dock-h)' }}
+          style={{ bottom: 'var(--dock-h)', left: rail ? 'var(--rail-w)' : undefined }}
           role="toolbar"
           aria-label="Arrange the dock"
         >
@@ -480,48 +489,64 @@ export const Dock = ({
           </div>
         </div>
       )}
-      <nav
-        aria-label="Dock"
-        data-phone-dock
-        data-bw-bottom-nav
-        className="absolute bottom-0 left-0 right-0 z-[100] flex flex-col"
-        style={{ height: 'var(--dock-h)', background: '#0A0B0D', borderTop: '1px solid #1C1C1E' }}
-        onContextMenu={(e) => e.preventDefault()}
-      >
-        <div className="h-4 shrink-0">{dots}</div>
-        <div className="flex-1 min-h-0 flex items-center px-1">
-          <div className="flex-1 flex items-center justify-around min-w-0">
-            {left.map((it, i) => tile(it, i))}
-            {empty && addTile}
-          </div>
+      {rail ? (
+        <nav
+          aria-label="Dock"
+          data-phone-dock
+          data-phone-rail
+          className="bw-rail fixed top-0 bottom-0 left-0 z-[100] flex flex-col items-center justify-evenly"
+          style={{ background: '#0A0B0D', borderRight: '1px solid #1C1C1E' }}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          {left.map((it, i) => tile(it, i))}
+          {empty && addTile}
           <HomeButton onHome={onHome} onAgent={onAgent} disabled={arranging} />
-          <div
-            ref={scroller}
-            onScroll={measure}
-            className="bw-dock-scroll flex-1 min-w-0 flex items-center overflow-x-auto overflow-y-hidden"
-            style={{
-              touchAction: 'pan-x',
-              overscrollBehaviorX: 'contain',
-              scrollSnapType: 'x proximity',
-              scrollBehavior: reduce ? 'auto' : 'smooth',
-              maskImage: fadeMask(fade),
-              WebkitMaskImage: fadeMask(fade),
-              justifyContent: right.length <= 2 ? 'space-around' : undefined,
-            }}
-          >
-            {right.map((it, i) => (
-              <div
-                key={dockKey(it)}
-                // Two or fewer on the right: share the width like the left side (no clipped Chat at 320px).
-                className={right.length <= 2 ? 'flex min-w-0 flex-1 justify-center' : undefined}
-                style={{ scrollSnapAlign: 'start' }}
-              >
-                {tile(it, left.length + i)}
-              </div>
-            ))}
+          {right.map((it, i) => tile(it, left.length + i))}
+        </nav>
+      ) : (
+        <nav
+          aria-label="Dock"
+          data-phone-dock
+          data-bw-bottom-nav
+          className="absolute bottom-0 left-0 right-0 z-[100] flex flex-col"
+          style={{ height: 'var(--dock-h)', background: '#0A0B0D', borderTop: '1px solid #1C1C1E' }}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <div className="h-4 shrink-0">{dots}</div>
+          <div className="flex-1 min-h-0 flex items-center px-1">
+            <div className="flex-1 flex items-center justify-around min-w-0">
+              {left.map((it, i) => tile(it, i))}
+              {empty && addTile}
+            </div>
+            <HomeButton onHome={onHome} onAgent={onAgent} disabled={arranging} />
+            <div
+              ref={scroller}
+              onScroll={measure}
+              className="bw-dock-scroll flex-1 min-w-0 flex items-center overflow-x-auto overflow-y-hidden"
+              style={{
+                touchAction: 'pan-x',
+                overscrollBehaviorX: 'contain',
+                scrollSnapType: 'x proximity',
+                scrollBehavior: reduce ? 'auto' : 'smooth',
+                maskImage: fadeMask(fade),
+                WebkitMaskImage: fadeMask(fade),
+                justifyContent: right.length <= 2 ? 'space-around' : undefined,
+              }}
+            >
+              {right.map((it, i) => (
+                <div
+                  key={dockKey(it)}
+                  // Two or fewer on the right: share the width like the left side (no clipped Chat at 320px).
+                  className={right.length <= 2 ? 'flex min-w-0 flex-1 justify-center' : undefined}
+                  style={{ scrollSnapAlign: 'start' }}
+                >
+                  {tile(it, left.length + i)}
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-      </nav>
+        </nav>
+      )}
     </>
   );
 };
