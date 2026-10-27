@@ -44,6 +44,7 @@ export type PackId =
   | 'leannethedark'
   | 'tokenblaster'
   | 'terrornode'
+  | 'b0ase'
   | EmojiPackId;
 export type AccentId = PackId | 'silver' | 'rose' | 'emerald' | 'sapphire' | 'violet' | 'custom';
 
@@ -749,6 +750,36 @@ export const ACCENTS: readonly Accent[] = [
     radius: '10px',
     radiusCard: '14px',
     pattern: 'stripes',
+  },
+  {
+    // b0ase (owner-approved, 27 Oct 2026): techy black and white, slanted buttons (themes.css draws the shapes).
+    ...BASE,
+    id: 'b0ase',
+    kind: 'theme',
+    group: 'duo',
+    label: 'b0ase',
+    blurb: 'Techy black, slanted buttons',
+    accent: '#FFFFFF',
+    hi: '#FFFFFF',
+    lo: '#D4D4D4',
+    on: '#000000',
+    bg: '#000000',
+    surface: '#0A0A0A',
+    surface2: '#121212',
+    nav: '#000000',
+    text: '#F2F2F2',
+    muted: '#8A8A8A',
+    line: '#262626',
+    success: '#22C55E',
+    danger: '#EF4444',
+    shadow: 'none',
+    trim: 'rgb(255 255 255 / 0.9)',
+    glow: 'none',
+    fontNum: MONO,
+    fontHead: MONO,
+    weightHead: 700,
+    radius: '5px',
+    radiusCard: '6px',
   },
   { ...BASE, id: 'silver', label: 'Silver', accent: '#C3CAD4', hi: '#E6EAF0', lo: '#A7B0BC' },
   { ...BASE, id: 'rose', label: 'Rose', accent: '#FF7AA2', hi: '#FFA8C2', lo: '#F2588A' },

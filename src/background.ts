@@ -1,4 +1,5 @@
 /* global chrome */
+import { siteAfterNavigation } from './mobile/theme/tabSiteNav';
 import { chromeConsentStore } from './services/siteTokens';
 import {
   RECONNECT_ID_PREFIX,
@@ -1339,9 +1340,17 @@ chrome.tabs?.onRemoved?.addListener((tabId) => {
   const a = siteThemeTabs.delete(tabId);
   if (siteOriginTabs.delete(tabId) || a) void pushSiteTheme();
 });
-chrome.tabs?.onUpdated?.addListener((tabId, info) => {
-  // A reload or navigation: the page declares again once it reconnects.
+chrome.tabs?.onUpdated?.addListener((tabId, info, tab) => {
   if (info.status !== 'loading') return;
+  // A same-origin navigation (bmarketx.com → /my right after sign-in) keeps the site's look and moves to the new
+  // path (mobile/theme/tabSiteNav.ts); another origin forgets it, and that page declares again once it connects.
+  const nav = siteAfterNavigation(siteOriginTabs.get(tabId), info.url ?? tab?.url);
+  if (nav.keep) {
+    sitePathTabs.set(tabId, nav.path);
+    void pushSiteTheme();
+    return;
+  }
+  sitePathTabs.delete(tabId);
   const a = siteThemeTabs.delete(tabId);
   if (siteOriginTabs.delete(tabId) || a) void pushSiteTheme();
 });

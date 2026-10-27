@@ -1474,3 +1474,155 @@ input:-webkit-autofill {
 :root[data-bw-tone='mono'] svg path[data-brand-ink] {
   fill: #111;
 }
+
+/* b0ase (owner-approved, 27 Oct 2026): techy black and white. The main buttons stay upright with no fill of their
+   own; a ::before skewed -14deg draws the slanted, softly rounded shape behind the text. None of these classes use
+   ::before elsewhere (mobile.css), so the pseudo-element is free. */
+:root[data-bw-theme='b0ase'] .bw-pill-gold,
+:root[data-bw-theme='b0ase'] .yours-sheet-primary,
+:root[data-bw-theme='b0ase'] .bw-pill-outline,
+:root[data-bw-theme='b0ase'] .yours-sheet-secondary {
+  position: relative;
+  isolation: isolate;
+  background: none !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  color: #fff !important;
+  font-family: var(--bw-font-num, ui-monospace, monospace) !important;
+  /* Mono caps run wide: 13px (the preview's size) keeps RECEIVE inside the three-across row. */
+  font-size: 13px !important;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  transition: color 0.2s;
+}
+:root[data-bw-theme='b0ase'] .bw-pill-gold::before,
+:root[data-bw-theme='b0ase'] .yours-sheet-primary::before,
+:root[data-bw-theme='b0ase'] .bw-pill-outline::before,
+:root[data-bw-theme='b0ase'] .yours-sheet-secondary::before {
+  content: '';
+  position: absolute;
+  inset: 0 6px;
+  z-index: -1;
+  transform: skewX(-14deg);
+  border-radius: 5px;
+  background: #000;
+  border: 1px solid rgb(255 255 255 / 0.5);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.5);
+  transition:
+    background 0.2s,
+    border-color 0.2s,
+    box-shadow 0.2s;
+  pointer-events: none;
+}
+@media (min-resolution: 2dppx) {
+  :root[data-bw-theme='b0ase'] .bw-pill-gold::before,
+  :root[data-bw-theme='b0ase'] .yours-sheet-primary::before,
+  :root[data-bw-theme='b0ase'] .bw-pill-outline::before,
+  :root[data-bw-theme='b0ase'] .yours-sheet-secondary::before {
+    border-width: 0.5px;
+  }
+}
+:root[data-bw-theme='b0ase'] .bw-pill-gold:hover:not(:disabled),
+:root[data-bw-theme='b0ase'] .yours-sheet-primary:hover:not(:disabled) {
+  color: #000 !important;
+}
+:root[data-bw-theme='b0ase'] .bw-pill-gold:hover:not(:disabled)::before,
+:root[data-bw-theme='b0ase'] .yours-sheet-primary:hover:not(:disabled)::before {
+  background: #fff;
+  border-color: #fff;
+  box-shadow: 0 0 22px rgb(255 255 255 / 0.14);
+}
+:root[data-bw-theme='b0ase'] .bw-pill-gold:active::before,
+:root[data-bw-theme='b0ase'] .yours-sheet-primary:active::before {
+  transform: skewX(-14deg) translateY(1px);
+}
+:root[data-bw-theme='b0ase'] .bw-pill-outline::before,
+:root[data-bw-theme='b0ase'] .yours-sheet-secondary::before {
+  border-color: rgb(255 255 255 / 0.2);
+  background: rgb(0 0 0 / 0.6);
+}
+:root[data-bw-theme='b0ase'] .bw-pill-outline:hover::before,
+:root[data-bw-theme='b0ase'] .yours-sheet-secondary:hover::before {
+  border-color: rgb(255 255 255 / 0.45);
+  background: rgb(255 255 255 / 0.08);
+  box-shadow: none;
+}
+:root[data-bw-theme='b0ase'] .bw-pill-gold:focus-visible,
+:root[data-bw-theme='b0ase'] .yours-sheet-primary:focus-visible,
+:root[data-bw-theme='b0ase'] .bw-pill-outline:focus-visible,
+:root[data-bw-theme='b0ase'] .yours-sheet-secondary:focus-visible {
+  outline: none;
+}
+:root[data-bw-theme='b0ase'] .bw-pill-gold:focus-visible::before,
+:root[data-bw-theme='b0ase'] .yours-sheet-primary:focus-visible::before,
+:root[data-bw-theme='b0ase'] .bw-pill-outline:focus-visible::before,
+:root[data-bw-theme='b0ase'] .yours-sheet-secondary:focus-visible::before {
+  box-shadow:
+    0 0 0 2px #000,
+    0 0 0 3px #fff;
+}
+/* Wallet card, sheets and panels: asymmetric corners. */
+:root[data-bw-theme='b0ase'] .bw-wcard-face.is-themed {
+  border-radius: 4px 20px 4px 20px;
+  box-shadow: inset 0 0 0 1px #262626;
+}
+:root[data-bw-theme='b0ase'] .yours-sheet,
+:root[data-bw-theme='b0ase'] .bw-talk-sheet,
+:root[data-bw-theme='b0ase'] .bw-sigpad-sheet,
+:root[data-bw-theme='b0ase'] .bw-idwarn-sheet,
+:root[data-bw-theme='b0ase'] .bw-home-panel,
+:root[data-bw-theme='b0ase'] .bw-cdes-panel {
+  border-radius: 6px 28px 6px 28px !important;
+}
+/* Small chips: the slanted shape is drawn behind, so the text stays upright. */
+:root[data-bw-theme='b0ase'] .bw-home-chip,
+:root[data-bw-theme='b0ase'] .bw-feed-chip,
+:root[data-bw-theme='b0ase'] .bw-theme-chip,
+:root[data-bw-theme='b0ase'] .bw-hid-chip {
+  position: relative;
+  isolation: isolate;
+  border-color: transparent !important;
+  background: transparent !important;
+  border-radius: 3px;
+}
+:root[data-bw-theme='b0ase'] .bw-home-chip::before,
+:root[data-bw-theme='b0ase'] .bw-feed-chip::before,
+:root[data-bw-theme='b0ase'] .bw-theme-chip::before,
+:root[data-bw-theme='b0ase'] .bw-hid-chip::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  transform: skewX(-14deg);
+  border-radius: 3px;
+  background: var(--bw-surface2, #121212);
+  box-shadow: inset 0 0 0 1px #262626;
+  pointer-events: none;
+}
+:root[data-bw-theme='b0ase'] .bw-theme-chip.on {
+  color: #000 !important;
+}
+:root[data-bw-theme='b0ase'] .bw-theme-chip.on::before {
+  background: #fff;
+}
+/* Cards: a short white accent line along the top. */
+:root[data-bw-theme='b0ase'] .bw-card {
+  position: relative;
+}
+:root[data-bw-theme='b0ase'] .bw-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 14px;
+  width: 56px;
+  height: 2px;
+  border-radius: 2px;
+  background: #fff;
+  pointer-events: none;
+}
+:root[data-bw-theme='b0ase'] h1,
+:root[data-bw-theme='b0ase'] h2 {
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
