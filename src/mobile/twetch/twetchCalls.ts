@@ -11,16 +11,23 @@
  *   key, funded from the wallet's BSV through createAction with noSend. Every post shows a sheet (text + fee). The
  *   SITE submits it to Twetch's API and broadcasts it; the wallet never does.
  *
+ * - `twetch.signRequest({ method, path, userId, ts, body })` → `{ signature }`. Twetch's API request signature
+ *   (headers x-twetch-user / x-twetch-ts / x-twetch-sig) for submitting the post the user just approved: BSM
+ *   (compact, base64) by the Twetch key over `${method}\n${path}\n${userId}\n${ts}\n${body}`, a string the wallet
+ *   builds itself from the checked fields (a caller's `message` is never signed). Only POST /v1/posts, only with a
+ *   body that carries exactly the txHex and text of this origin's last buildPost (see signRequest.ts).
+ *
  * Unsent rules (services/unsentGuard.ts): a declined or failed build is aborted before the rawtx leaves the phone.
  * Once txHex is handed to the site it may be broadcast at any time, so the action is never aborted after that: it
  * stays nosend (change spendable) and settleWhenSeen hands it to the wallet's send path when the chain has it.
  */
-import { Transaction } from '@bsv/sdk';
+import { Transaction, Utils } from '@bsv/sdk';
 import { USER_DENIED_CODE, USER_DENIED_MESSAGE } from '../../services/userDenied';
 import { settleWhenSeen, type UnsentWallet } from '../../services/unsentGuard';
 import { TWETCH_POST_ENABLED } from '../storeBuild';
 import { TwetchKeyMismatch, twetchHandle, type TwetchStore } from './twetchLink';
 import {
+  bsmSign,
   buildPostScript,
   feeLabel,
   loginTitle,
@@ -31,9 +38,10 @@ import {
   validatePostParams,
 } from './twetchPost';
 
-import { TWETCH_LOGIN, TWETCH_STATUS } from './twetchAction';
+import { TWETCH_LOGIN, TWETCH_POST, TWETCH_SIGN_REQUEST, TWETCH_STATUS } from './twetchAction';
+import { rememberBuilt, signRequestString, validateSignRequest } from './signRequest';
 
-export { TWETCH_LOGIN, TWETCH_POST, TWETCH_STATUS, isTwetchAction } from './twetchAction';
+export { TWETCH_LOGIN, TWETCH_POST, TWETCH_SIGN_REQUEST, TWETCH_STATUS, isTwetchAction } from './twetchAction';
 
 export const BAD_REQUEST_CODE = 'INVALID_PARAMS';
 export const NOT_LINKED_CODE = 'TWETCH_NOT_LINKED';
@@ -138,7 +146,17 @@ export async function handleTwetchCall(
         result: { signature: signChallenge(v.challenge, key), publicKey: pub.toString(), address: pub.toAddress() },
       };
     }
-    // TWETCH_POST
+    if (action === TWETCH_SIGN_REQUEST) {
+      if (!link) return NOT_LINKED;
+      const v = validateSignRequest(params, origin, link.userId, deps.now?.() ?? Date.now());
+      if (typeof v === 'string') return err(BAD_REQUEST_CODE, v);
+      const key = await deps.store.key(); // refuses on a key / account mismatch
+      // No sheet here, on purpose: the user approved this exact post (text + fee) on the buildPost sheet moments
+      // ago, and validateSignRequest only lets through a POST /v1/posts whose body is that same txHex and text for
+      // the same site. The signature registers the already-approved post with Twetch; it cannot pay or post more.
+      return { result: { signature: bsmSign(Utils.toArray(signRequestString(v), 'utf8'), key) } };
+    }
+    if (action !== TWETCH_POST) return err(DISABLED_CODE, `${action} is not supported.`);
     const input = validatePostParams(params);
     if (typeof input === 'string') return err(BAD_REQUEST_CODE, input);
     if (!link) return NOT_LINKED;
@@ -174,6 +192,7 @@ export async function handleTwetchCall(
       if (!ok) return DENIED;
       const txHex = tx.toHex();
       handedOff = true;
+      rememberBuilt(origin, { txHex, text: input.text, reply: !!input.replyTxid }, deps.now?.() ?? Date.now());
       (deps.settle ?? defaultSettle)(deps.wallet, txid);
       return { result: { txHex, txid } };
     } finally {

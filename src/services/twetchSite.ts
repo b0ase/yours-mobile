@@ -2,8 +2,10 @@
  * twetch.* from a web page through the Chrome extension (bChatX "Post to Twetch" with no paired phone).
  *
  * Page side (cwi.ts): `window.CWI.twetch.status()`, `window.CWI.twetch.loginSign({ challenge })`,
+ * `window.CWI.twetch.signRequest({ method, path, userId, ts, body })`,
  * `window.CWI.twetch.buildPost({ text, replyTxid?, files? })`. Each travels like any CWI call (YoursRequest event →
- * content.ts → chrome.runtime → background.ts) with type 'twetch.status' | 'twetch.loginSign' | 'twetch.buildPost'.
+ * content.ts → chrome.runtime → background.ts) with type 'twetch.status' | 'twetch.loginSign' | 'twetch.buildPost' |
+ * 'twetch.signRequest'.
  * A refusal rejects with an Error carrying `code` (INVALID_PARAMS, TWETCH_NOT_LINKED, TWETCH_KEY_MISMATCH,
  * NOT_SUPPORTED, LOCKED, ERROR, or ERR_PERMISSION_DENIED when the user declined).
  *

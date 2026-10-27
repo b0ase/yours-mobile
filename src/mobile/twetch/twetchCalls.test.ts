@@ -7,6 +7,7 @@ import {
   NOT_LINKED_CODE,
   TWETCH_LOGIN,
   TWETCH_POST,
+  TWETCH_SIGN_REQUEST,
   TWETCH_STATUS,
   handleTwetchCall,
   isTwetchAction,
@@ -18,6 +19,7 @@ import {
 import { TwetchKeyMismatch, matchingKey, type TwetchLink, type TwetchStore } from './twetchLink';
 import { aipMessage, bsmVerifyAddress, dataPushes } from './twetchPost';
 import { USER_DENIED_CODE } from '../../services/userDenied';
+import { BUILT_TTL_MS, forgetBuilt } from './signRequest';
 
 const ORIGIN = 'https://bchatx.com';
 const NOW = 1793083013296;
@@ -298,5 +300,124 @@ describe('matchingKey', () => {
     expect(() => matchingKey(k.toWif(), linkFor(PrivateKey.fromRandom()))).toThrow(TwetchKeyMismatch);
     expect(() => matchingKey(undefined, linkFor(k))).toThrow(TwetchKeyMismatch);
     expect(() => matchingKey('not a wif', linkFor(k))).toThrow(TwetchKeyMismatch);
+  });
+});
+
+describe('twetch.signRequest', () => {
+  const TEXT = 'gm Twetch';
+  /** Link, build (and approve) one post from ORIGIN, return what signRequest needs. */
+  const built = async (over: { reply?: boolean; enabled?: boolean } = {}) => {
+    forgetBuilt();
+    const key = PrivateKey.fromRandom();
+    const { store } = fakeStore(key, linkFor(key));
+    const { wallet } = fakeWallet();
+    const clock = { now: NOW };
+    const { deps, asks } = depsFor({ store, wallet, now: () => clock.now, enabled: over.enabled ?? true });
+    const r = (await handleTwetchCall(
+      TWETCH_POST,
+      { text: TEXT, ...(over.reply && { replyTxid: 'c'.repeat(64) }) },
+      ORIGIN,
+      { ...deps, enabled: true },
+    )) as { result: { txHex: string } };
+    asks.length = 0;
+    const body = (b: Record<string, unknown> = {}) =>
+      JSON.stringify({ userId: 19, content: TEXT, txHex: r.result.txHex, ...b });
+    const params = (p: Record<string, unknown> = {}) => ({
+      method: 'POST',
+      path: '/v1/posts',
+      userId: '19',
+      ts: NOW,
+      body: body(),
+      ...p,
+    });
+    const call = (p: unknown, origin = ORIGIN) => handleTwetchCall(TWETCH_SIGN_REQUEST, p, origin, deps);
+    return { key, deps, asks, clock, body, params, call, txHex: r.result.txHex };
+  };
+  const code = (r: unknown) => (r as { error?: { code: string } }).error?.code;
+
+  test('signs the exact string the wallet builds, with the Twetch key, no sheet', async () => {
+    const t = await built();
+    const r = (await t.call(t.params())) as { result: { signature: string } };
+    const msg = `POST\n/v1/posts\n19\n${NOW}\n${t.body()}`;
+    expect(bsmVerifyAddress(Utils.toArray(msg, 'utf8'), r.result.signature, t.key.toPublicKey().toAddress())).toBe(
+      true,
+    );
+    expect(Object.keys(r.result)).toEqual(['signature']);
+    expect(t.asks).toHaveLength(0);
+  });
+
+  test('a caller message is never signed: equal is ignored, different is refused', async () => {
+    const t = await built();
+    const msg = `POST\n/v1/posts\n19\n${NOW}\n${t.body()}`;
+    const ok = (await t.call(t.params({ message: msg }))) as { result: { signature: string } };
+    expect(bsmVerifyAddress(Utils.toArray(msg, 'utf8'), ok.result.signature, t.key.toPublicKey().toAddress())).toBe(
+      true,
+    );
+    expect(code(await t.call(t.params({ message: 'anything else' })))).toBe(BAD_REQUEST_CODE);
+  });
+
+  test('replies may carry replyPostId; plain posts may not', async () => {
+    const t = await built({ reply: true });
+    expect('result' in (await t.call(t.params({ body: t.body({ replyPostId: 42 }) })))).toBe(true);
+    const p = await built();
+    expect(code(await p.call(p.params({ body: p.body({ replyPostId: 42 }) })))).toBe(BAD_REQUEST_CODE);
+  });
+
+  test('each guard refuses with INVALID_PARAMS', async () => {
+    const t = await built();
+    const bad: Record<string, unknown>[] = [
+      { method: 'GET' },
+      { method: 'post' },
+      { path: '/v1/posts/1' },
+      { path: '/v1/payments' },
+      { ts: NOW - 5 * 60 * 1000 - 1 },
+      { ts: NOW + 5 * 60 * 1000 + 1 },
+      { ts: String(NOW) },
+      { userId: '20' },
+      { userId: 'x19' },
+      { body: t.body({ userId: 20 }) },
+      { body: t.body({ txHex: t.txHex + '00' }) },
+      { body: t.body({ paidSats: 1000 }) },
+      { body: t.body({ payParams: { to: 'x' } }) },
+      { body: t.body({ content: 'something else' }) },
+      { body: 'not json' },
+      { body: '[1]' },
+      { body: { userId: 19 } },
+      { extra: 1 },
+    ];
+    for (const b of bad)
+      expect([JSON.stringify(b).slice(0, 40), code(await t.call(t.params(b)))]).toEqual([
+        JSON.stringify(b).slice(0, 40),
+        BAD_REQUEST_CODE,
+      ]);
+    // Numeric userId compares the same as the string form.
+    expect('result' in (await t.call(t.params({ userId: 19 })))).toBe(true);
+  });
+
+  test("txHex must come from this origin's own buildPost, and expires", async () => {
+    const t = await built();
+    expect(code(await t.call(t.params(), 'https://evil.example'))).toBe(BAD_REQUEST_CODE);
+    t.clock.now = NOW + BUILT_TTL_MS + 1;
+    expect(code(await t.call(t.params({ ts: t.clock.now })))).toBe(BAD_REQUEST_CODE);
+    forgetBuilt();
+    t.clock.now = NOW;
+    expect(code(await t.call(t.params()))).toBe(BAD_REQUEST_CODE);
+  });
+
+  test('key mismatch, not linked, flag off', async () => {
+    const t = await built();
+    const other = PrivateKey.fromRandom();
+    const { store } = fakeStore(other, linkFor(t.key));
+    expect(code(await handleTwetchCall(TWETCH_SIGN_REQUEST, t.params(), ORIGIN, { ...t.deps, store }))).toBe(
+      KEY_MISMATCH_CODE,
+    );
+    const { store: none } = fakeStore(t.key, undefined);
+    expect(code(await handleTwetchCall(TWETCH_SIGN_REQUEST, t.params(), ORIGIN, { ...t.deps, store: none }))).toBe(
+      NOT_LINKED_CODE,
+    );
+    expect(code(await handleTwetchCall(TWETCH_SIGN_REQUEST, t.params(), ORIGIN, { ...t.deps, enabled: false }))).toBe(
+      DISABLED_CODE,
+    );
+    expect(isTwetchAction(TWETCH_SIGN_REQUEST)).toBe(true); // pair/sessions.ts routes every isTwetchAction call here
   });
 });
