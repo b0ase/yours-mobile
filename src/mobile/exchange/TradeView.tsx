@@ -34,6 +34,7 @@ import { TokenIcon } from './TokenIcon';
 import { TokenIdentity } from '../tokens/TokenIdPanel';
 import { PriceChart } from './PriceChart';
 import { TokenFacts } from './TokenFacts';
+import { TokenAudit } from './TokenAudit';
 import { STALE_LISTING_MESSAGE, dropSpent, listingSpendState, nextAsk } from '../market/tokenPage';
 import { chartSeries } from './chartSeries';
 import { TokenLabelsRow } from './Categories';
@@ -291,6 +292,7 @@ export const TradeView = ({
         </p>
       )}
       <TokenFacts tokenId={id} sym={sym} dec={dec} rate={rate} priceSats={price} held={held} />
+      <TokenAudit tokenId={id} sym={sym} rate={rate} trades={trades} />
       <IndexerFundPanel tokenId={id} ticker={sym} />
       {launched && <CreatorVesting tokenId={id} />}
 

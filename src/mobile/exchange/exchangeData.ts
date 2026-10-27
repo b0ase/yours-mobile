@@ -5,7 +5,16 @@
 import { cached } from '../market/indexer';
 
 /** One finished trade of a BSV-21 token: block height, whole-token price and the total paid, in sats. */
-export type Trade = { height: number; satsPerToken: number; totalSats: number; amount: number };
+export type Trade = {
+  height: number;
+  satsPerToken: number;
+  totalSats: number;
+  amount: number;
+  /** The buying transaction, when the row names it. */
+  txid?: string;
+  /** The seller's address (the listing owner), when known. */
+  seller?: string;
+};
 
 /** About one day of blocks (10-minute blocks). */
 export const DAY_BLOCKS = 144;
@@ -24,7 +33,15 @@ export const tokenTrades = (tokenId: string, limit = 100): Promise<Trade[]> =>
     }
   });
 
-type SaleRow = { amt?: string; price?: string; dec?: number; spendHeight?: number; height?: number };
+type SaleRow = {
+  amt?: string;
+  price?: string;
+  dec?: number;
+  spendHeight?: number;
+  height?: number;
+  spend?: string;
+  owner?: string;
+};
 
 /** GorillaPool sale rows → trades, oldest first; rows without a price, amount or height are dropped. */
 export const parseTrades = (rows: unknown): Trade[] => {
@@ -38,6 +55,10 @@ export const parseTrades = (rows: unknown): Trade[] => {
         amount,
         totalSats,
         satsPerToken: amount > 0 ? totalSats / amount : 0,
+        ...(typeof s.spend === 'string' && /^[0-9a-f]{64}$/i.test(s.spend) ? { txid: s.spend.toLowerCase() } : {}),
+        ...(typeof s.owner === 'string' && /^[13][1-9A-HJ-NP-Za-km-z]{24,34}$/.test(s.owner)
+          ? { seller: s.owner }
+          : {}),
       };
     })
     .filter((t) => t.satsPerToken > 0 && t.height > 0 && Number.isFinite(t.satsPerToken))
