@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { loadThread, saveThread, screenContext } from './thread';
+import { loadThread, saveThread, screenContext, threadId } from './thread';
 
 describe('Ask b shared thread', () => {
   it('is per account', () => {
@@ -7,6 +7,19 @@ describe('Ask b shared thread', () => {
     expect(loadThread('a')).toHaveLength(1);
     expect(loadThread('b')).toEqual([]);
     expect(loadThread(null)).toEqual([]);
+  });
+  it('keeps one id per conversation and a new one after it is cleared', () => {
+    saveThread('c', [{ role: 'user', text: 'hi' }]);
+    const id = threadId('c');
+    saveThread('c', [
+      { role: 'user', text: 'hi' },
+      { role: 'assistant', text: 'hello' },
+    ]);
+    expect(threadId('c')).toBe(id);
+    saveThread('c', []);
+    saveThread('c', [{ role: 'user', text: 'new' }]);
+    expect(threadId('c')).not.toBe(id);
+    expect(threadId(null)).toBeNull();
   });
   it('names the screen', () => {
     expect(screenContext('/m/market/x')).toContain('"market"');
