@@ -1,10 +1,23 @@
-// 1 cent fee for a NEW plain paymail name (owner, 10 Oct 2026; anti-squatting). Renames pay too; names
-// that existed before are grandfathered; the forward left behind by a rename is free.
+// Paymail name prices (owner pricing, 27 Oct 2026): priced by the NAME, not by how many a key holds.
+// 5+ characters: free. 4: $10. 3: $100. 1-2: $1000. Reserved / held names are never sold (paymail.js).
+// Social names (.x / .gmail) are free and proof-gated. Paid in BSV at the live rate to BWALLET_NAME_FEE_ADDRESS.
+// (Was 1 cent per new name, 10 Oct 2026.)
 // Env (Vercel only): BWALLET_NAME_FEE_ADDRESS = the revenue address. Empty = fee OFF (nothing changes).
 'use strict';
 const { P2PKH, Transaction } = require('@bsv/sdk');
 
+/** Legacy 1 cent fee (kept for callers that still quote it). */
 const FEE_USD = 0.01;
+/** USD by plain-alias length (owner, 27 Oct 2026). Anything longer is free. */
+const PRICE_TIERS = Object.freeze({ 1: 1000, 2: 1000, 3: 100, 4: 10 });
+/** The USD price of a (valid, unreserved) alias: 0 = free. Social aliases are free. */
+const namePriceUsd = (alias) => {
+  const a = String(alias || '').toLowerCase();
+  if (a.includes('.')) return 0;
+  return PRICE_TIERS[a.length] || 0;
+};
+/** "$1" / "1¢" for messages. */
+const usdLabel = (usd) => (usd >= 1 ? `$${Number.isInteger(usd) ? usd : usd.toFixed(2)}` : `${Math.round(usd * 100)}¢`);
 /** Rates move between the app quoting and the server checking: accept 20% under the server's price. */
 const SLIPPAGE = 0.2;
 const ADDRESS_RE = /^1[1-9A-HJ-NP-Za-km-z]{24,34}$/;
@@ -25,8 +38,8 @@ function feeAddress(env = process.env) {
   return '';
 }
 
-/** Whole sats for $0.01 at `rate` (USD per BSV), rounded up. */
-const requiredSats = (rate) => Math.ceil((FEE_USD / rate) * 1e8);
+/** Whole sats for `usd` (default 1 cent) at `rate` (USD per BSV), rounded up. */
+const requiredSats = (rate, usd = FEE_USD) => Math.ceil((usd / rate) * 1e8);
 
 const WOC = 'https://api.whatsonchain.com/v1/bsv/main';
 let rateCache = { at: 0, rate: 0 };
@@ -59,17 +72,19 @@ const chain = {
 /**
  * Did `txid` pay the name fee to `address`? The app may also send the raw tx (`txHex`): used only when
  * the indexers haven't seen it yet, and then only after our own broadcast of it is accepted.
- * Returns { ok: true, satoshis } or { ok: false, error }.
+ * `usd` is the price (default 1 cent). Returns { ok: true, satoshis, rate, usd } or { ok: false, error }.
  */
 async function checkFeeTx({
   txid,
+  usd = FEE_USD,
   txHex,
   address,
   c = chain,
   broadcast,
   parse = (h) => ({ tx: Transaction.fromHex(h), beefHex: null }),
 }) {
-  if (!/^[0-9a-f]{64}$/.test(String(txid || ''))) return { ok: false, error: 'Pay the 1¢ name fee first' };
+  const label = usdLabel(usd);
+  if (!/^[0-9a-f]{64}$/.test(String(txid || ''))) return { ok: false, error: `Pay the ${label} name fee first` };
   const rate = await c.bsvUsd().catch(() => 0);
   if (!(rate > 0)) return { ok: false, error: "Couldn't check the BSV price. Try again in a minute." };
   let tx = await c.tx(txid).catch(() => null);
@@ -84,13 +99,23 @@ async function checkFeeTx({
       tx = null;
     }
   }
-  if (!tx) return { ok: false, error: "We can't see your 1¢ payment yet. Try again in a moment." };
+  if (!tx) return { ok: false, error: `We can't see your ${label} payment yet. Try again in a moment.` };
   const script = new P2PKH().lock(address).toHex();
   const paid = tx.outputs.filter((o) => o.lockingScript.toHex() === script).reduce((s, o) => s + Number(o.satoshis), 0);
-  const need = requiredSats(rate);
+  const need = requiredSats(rate, usd);
   if (paid < Math.floor(need * (1 - SLIPPAGE)))
-    return { ok: false, error: 'That payment is less than the 1¢ name fee' };
-  return { ok: true, satoshis: paid };
+    return { ok: false, error: `That payment is less than the ${label} name fee` };
+  return { ok: true, satoshis: paid, rate, usd };
 }
 
-module.exports = { FEE_USD, SLIPPAGE, feeAddress, requiredSats, checkFeeTx, chain };
+module.exports = {
+  FEE_USD,
+  PRICE_TIERS,
+  namePriceUsd,
+  usdLabel,
+  SLIPPAGE,
+  feeAddress,
+  requiredSats,
+  checkFeeTx,
+  chain,
+};

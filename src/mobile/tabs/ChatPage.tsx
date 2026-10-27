@@ -268,6 +268,8 @@ import {
 import { MessageMenu, NewRoomSheet, OpenRoomSheet } from '../chat/OpenRoomSheets';
 import { useRoomCard } from '../chat/roomCard';
 import { RoomSettingsSheet } from '../chat/RoomSettingsSheet';
+import { WelcomeCard } from '../chat/WelcomeCard';
+import { AGREEMENT_DRAFT, dismissWelcome, shouldShowWelcome } from '../chat/roomWelcome';
 import { celebrateSend } from '../../components/sent/sent';
 import { ErrorActions } from '../errors/ErrorActions';
 import { LIST_TYPES, THREAD_TYPES, useLive, useLiveHealth, useLiveTyping } from '../chat/live';
@@ -766,6 +768,18 @@ const Conversation = ({
     setDraft((d) => (/^\/b(\s|$)/i.test(d) ? d : `/b ${d}`));
     requestAnimationFrame(() => composer.current?.focus());
   };
+  // b's welcome in a new room (chat/roomWelcome.ts, as on bchatx.com). "Just chat" hides it for this room.
+  const [welcomeHidden, setWelcomeHidden] = useState(false);
+  const welcome =
+    !welcomeHidden &&
+    !loading &&
+    !error &&
+    shouldShowWelcome({
+      ticker: room.ticker,
+      empty: messages.length === 0,
+      dm: !!peer,
+      special: isLounge(room.ticker) || isOfficialRoom(room),
+    });
 
   // Phone layout: Chat stays mounted off to the side (phone/pager.tsx); the open room hides with it (offScreen).
   // Sits between TopNav (3.5rem) and the tab bar (3.75rem) so both stay usable; sheets (z-[150]) still clear it.
@@ -1043,7 +1057,25 @@ const Conversation = ({
             </div>
           </div>
         )}
-        {!loading && !error && messages.length === 0 && (
+        {welcome && (
+          <WelcomeCard
+            onInvite={onInvite}
+            onAgreement={
+              draftable
+                ? () => {
+                    setDraft(AGREEMENT_DRAFT);
+                    requestAnimationFrame(() => composer.current?.focus());
+                  }
+                : null
+            }
+            onInfo={openRoom?.onInfo ?? null}
+            onDismiss={() => {
+              dismissWelcome(room.ticker);
+              setWelcomeHidden(true);
+            }}
+          />
+        )}
+        {!welcome && !loading && !error && messages.length === 0 && (
           <div className="text-center text-xs pt-16" style={{ color: MUTED }}>
             No messages yet. Start the first scene.
           </div>

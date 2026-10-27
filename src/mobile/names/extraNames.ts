@@ -3,8 +3,19 @@ import type { OneSatContext } from '@1sat/actions';
 import { ChatApiError, saveSession, type BchatClient, type HandlesInfo } from '../chat/api';
 import { commitmentScript, NO_SEND, releasePayment, type Commitment } from '../chat/roomSpend';
 import { kycClient, signedInClient } from '../kyc/kycWallet';
-import { addPaymail, makeMainPaymail, removePaymail } from './paymail';
+import {
+  addPaymail,
+  makeMainPaymail,
+  nameFeeFor,
+  paymailConfig,
+  removePaymail,
+  usdText,
+  type NameFee,
+} from './paymail';
 import type { Fetch } from './names';
+import { sendBsv } from '../../utils/guardedSendBsv';
+import { fetchExchangeRate } from '../../utils/wallet';
+import { usdToSats } from '../money/money';
 
 /**
  * Several names per wallet, one main (owner, 15 Oct 2026). bit-sign is where a name is paid for
@@ -46,8 +57,44 @@ export const loadHandles = async (ctx: OneSatContext): Promise<HandlesInfo> => (
  * through its 402 flow (signed, never broadcast by us: bit-sign verifies and broadcasts), then adds the
  * paymail alias. Returns the new paymail.
  */
-/** A name costs 1p; nothing near this is ever a real name fee. */
+/** A bit-sign name costs 1p; nothing near this is ever a real bit-sign name fee. */
 export const MAX_NAME_FEE_SATS = 50_000;
+
+/**
+ * The fee for an extra name, as the user confirms it. `direct` = the paymail server's price for that name (owner
+ * pricing, 27 Oct 2026: by length), paid with the normal wallet send to its fee address.
+ */
+export type ExtraNameFee = { pence: number; sats: number; to: string; usd?: number; direct?: boolean };
+
+/** "$10 (≈ 1,234 sats)" for a direct fee, else "1p" / "N sats". Pure. */
+export const extraFeeLabel = (fee: ExtraNameFee | null): string =>
+  !fee
+    ? ''
+    : fee.direct && fee.usd
+      ? `${usdText(fee.usd)} (≈ ${fee.sats.toLocaleString('en-US')} sats)`
+      : fee.pence
+        ? `${fee.pence}p`
+        : `${fee.sats} sats`;
+
+/** The top price tier ($1000); the app never pays more for a name, whatever the server says. */
+export const MAX_DIRECT_FEE_USD = 1000;
+
+/** A direct fee quote from the server config at `rate` (USD per BSV). Pure. */
+export function directFee(fee: NameFee | null, rate: number): ExtraNameFee | null {
+  if (!fee || !(fee.usd > 0) || fee.usd > MAX_DIRECT_FEE_USD) return null;
+  const sats = usdToSats(fee.usd, rate);
+  if (!sats) return null;
+  return { pence: 0, sats, to: fee.address, usd: fee.usd, direct: true };
+}
+
+/** What adding `alias` costs (null = free): the paymail server's price for that name, quoted at the live rate. */
+export async function extraNameFeeFor(f: Fetch, alias: string): Promise<ExtraNameFee | null> {
+  const fee = nameFeeFor((await paymailConfig(f)).namePrices, alias);
+  if (!fee) return null;
+  const q = directFee(fee, await fetchExchangeRate('main'));
+  if (!q) throw new Error("Couldn't get the BSV price. Try again in a minute.");
+  return q;
+}
 
 /**
  * The 402 must ask for no more than the fee the user confirmed, to the same address (b-Aware 25 Oct 2026: the
@@ -64,8 +111,21 @@ export async function addExtraName(
   ctx: OneSatContext,
   f: Fetch,
   alias: string,
-  approved: { sats: number; to: string } | null,
+  approved: ExtraNameFee | { sats: number; to: string } | null,
 ): Promise<string> {
+  // A priced name: pay exactly what the user confirmed, through the normal wallet send (its approval sheet), to
+  // the server's fee address, then add the name with that txid as the receipt.
+  if (approved && 'direct' in approved && approved.direct) {
+    const fee = nameFeeFor((await paymailConfig(f)).namePrices, alias);
+    if (!fee || fee.address !== approved.to)
+      throw new Error('The name fee address changed. Nothing was paid. Try again.');
+    if (fee.usd !== approved.usd) throw new Error('The name price changed. Nothing was paid. Try again.');
+    const res = await sendBsv.execute(ctx, { requests: [{ address: approved.to, satoshis: approved.sats }] });
+    if (res.error || !res.txid) throw new Error(String(res.error ?? 'Payment failed'));
+    return addPaymail(f, ctx.wallet, alias, { feeTxid: res.txid, feeTx: res.tx ? Utils.toHex(res.tx) : undefined });
+  }
+  // A free name (5+ characters, owner 27 Oct 2026) goes straight to the paymail server; no bit-sign step.
+  if (!approved) return addPaymail(f, ctx.wallet, alias);
   const c = await client(ctx);
   try {
     await c.addHandle(alias);

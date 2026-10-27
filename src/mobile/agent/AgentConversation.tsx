@@ -61,7 +61,9 @@ import { consentTarget, grantConsent, hasConsent } from './consent';
 import { ConsentSheet } from './ConsentSheet';
 import { ObsidianHero } from './ObsidianHero';
 import { AskBar } from './AskBar';
-import { loadThread, saveThread, screenContext } from './thread';
+import { loadThread, saveThread, screenContext, threadId } from './thread';
+import { chatName } from './chatName';
+import { INLINE_ACTIONS_PROMPT, parseInlineActions, type InlineAction } from './inlineActions';
 import { useBWeb } from '../bweb/useBWeb';
 import { bwebContext } from '../bweb/bweb';
 import { FINAL_CODES, clearPending, errorCode, finalText, loadPending, savePending, type PendingPaid } from './pending';
@@ -232,12 +234,37 @@ export const AgentConversation = ({
     : BWALLET_GUIDE;
   // bWeb (Settings › bWeb): the screen line only if allowed, plus the Ask b add-ons you switched on.
   const [bweb] = useBWeb();
-  const system = baseSystem + (bweb.privacy.shareScreen ? screenContext(screen) : '') + bwebContext(bweb);
   const [prefs, setPrefs] = useAgentPrefs();
   const [keyScreen, setKeyScreen] = useState(false);
   // Shared with the floating bar / full page (thread.ts), so "Open full chat" carries the conversation over.
   const [messages, setMessages] = useState<AgentMessage[]>(() => loadThread(accountId));
   useEffect(() => saveThread(accountId, messages), [accountId, messages]);
+  // A memorable name for this chat (chatName.ts, as on bchatx.com), shown in the page and told to b.
+  const chatId = messages.length ? threadId(accountId) : null;
+  const name = chatId ? chatName(chatId, null) : null;
+  // Inline buttons (inlineActions.ts): b may add [[Label|/m/screen]]; a tap only opens that screen, never acts.
+  const system =
+    baseSystem +
+    (bweb.privacy.shareScreen ? screenContext(screen) : '') +
+    bwebContext(bweb) +
+    INLINE_ACTIONS_PROMPT +
+    (name ? `\n\nThis chat is called "${name}".` : '');
+  const actionRow = (actions: InlineAction[]) =>
+    actions.length > 0 && (
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {actions.map((a) => (
+          <button
+            key={a.href}
+            type="button"
+            onClick={() => navigate(a.href)}
+            className="rounded-full px-3 py-1 text-[12px] font-semibold"
+            style={{ border: `1px solid ${LINE}`, color: GOLD, background: 'transparent' }}
+          >
+            {a.label}
+          </button>
+        ))}
+      </div>
+    );
   // A request handed over from elsewhere (e.g. Mint › Contracts) arrives typed in, ready to send (page only).
   const [input, setInput] = useState(() => (float ? '' : takeAgentDraft()));
   const [busy, setBusy] = useState(false);
@@ -704,7 +731,14 @@ export const AgentConversation = ({
             <div ref={floatList} className="askb-bubbles" aria-live="polite" aria-label="Replies from b">
               {visible.map(({ m, i }) => (
                 <div key={i} className={`askb-bubble ${m.role === 'user' ? 'user' : 'b'}`}>
-                  {m.text}
+                  {m.role === 'assistant' ? (
+                    <>
+                      {parseInlineActions(m.text).text}
+                      {actionRow(parseInlineActions(m.text).actions)}
+                    </>
+                  ) : (
+                    m.text
+                  )}
                   <button
                     type="button"
                     className="askb-x"
@@ -833,6 +867,21 @@ export const AgentConversation = ({
 
       <div className="askb-pagepad relative z-10 flex-1 overflow-y-auto px-4 py-4">
         <div className="askb-thread mx-auto w-full flex flex-col gap-4">
+          {name && (
+            <div className="flex items-center justify-center gap-2 text-[11px]" style={{ color: MUTED }}>
+              <span className="font-mono truncate" title="This chat's name">
+                {name}
+              </span>
+              <button
+                type="button"
+                onClick={() => setMessages([])}
+                className="rounded-full px-2 py-0.5 border-0 bg-transparent font-semibold"
+                style={{ color: GOLD }}
+              >
+                New chat
+              </button>
+            </div>
+          )}
           {messages.map((m, i) => (
             <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div
@@ -843,7 +892,8 @@ export const AgentConversation = ({
                     : { background: PANEL, color: '#F2F2F0', border: `1px solid ${LINE}` }
                 }
               >
-                {m.text}
+                {m.role === 'assistant' ? parseInlineActions(m.text).text : m.text}
+                {m.role === 'assistant' && actionRow(parseInlineActions(m.text).actions)}
                 {m.role === 'assistant' && (
                   <button
                     onClick={() => setReportingReply({ text: m.text, index: i })}

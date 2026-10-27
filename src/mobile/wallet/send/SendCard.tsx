@@ -10,6 +10,7 @@ import { NameInput } from '../../names/NameInput';
 import { useContacts } from '../../chat/useContacts';
 import { payTarget } from '../../chat/contacts';
 import { noteContacts } from './payee';
+import { PAYMENT_NOTE_MAX } from './paymentNote';
 import {
   balanceLine,
   fmtBsv,
@@ -56,6 +57,9 @@ type Props = {
   /** The amount was edited after Max: it is no longer a send-all. */
   onAmountEdited: () => void;
   onSubmit: (e: FormEvent<HTMLFormElement>) => void;
+  /** Optional message to the payee, sent sealed by bMail after the payment (one recipient, $handle or paymail). */
+  message?: string;
+  onMessage?: (m: string) => void;
 };
 
 const GOLD = 'var(--bw-accent-hi)';
@@ -439,7 +443,22 @@ export const SendCard = (p: Props) => {
         );
       })}
 
-      {/* Secondary: a quiet outline button. The bMail note stays hidden until it works (live features only). */}
+      {p.onMessage && !p.sendAll && p.rows.length === 1 && (
+        <label className="flex flex-col gap-1 text-xs" style={{ color: gray }}>
+          Message (optional)
+          <textarea
+            value={p.message ?? ''}
+            onChange={(e) => p.onMessage?.(e.target.value)}
+            maxLength={PAYMENT_NOTE_MAX}
+            rows={2}
+            placeholder="Sent sealed by bMail with the payment"
+            className="w-full rounded-xl p-3 text-sm"
+            style={{ background: 'transparent', color: fg, border: `1px solid ${gray}50`, resize: 'vertical' }}
+          />
+        </label>
+      )}
+
+      {/* Secondary: a quiet outline button. */}
       {!p.sendAll && (
         <button
           type="button"
