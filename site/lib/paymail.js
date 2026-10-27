@@ -316,6 +316,12 @@ const RESERVED_MSG = 'That alias is reserved';
  * A reserved plain alias that one designated identity key may claim (owner, 25 Oct 2026). The claim still
  * needs the normal signed register from that key; nobody else can take the name. Identity keys are public.
  */
+/** One-time P2P destinations per alias per hour. Business accounts that take game revenue get more (owner, 27 Oct
+ * 2026: TERRORNODE splits 50/50 to npg and bcorp; 200/h capped paid sessions). Everyone else keeps 200. */
+const P2P_HOURLY_DEFAULT = 200;
+const P2P_HOURLY_LIMITS = Object.freeze({ npg: 20000, bcorp: 20000 });
+const p2pHourlyLimit = (alias) => P2P_HOURLY_LIMITS[alias] ?? P2P_HOURLY_DEFAULT;
+
 const RESERVED_OWNERS = Object.freeze({
   // The bWalletX brand account.
   bwalletx: '029c1abd9470d485719c512c0d704e6ccf6c1533461eb5884a5d09a6dc3dca55b7',
@@ -961,7 +967,8 @@ function makeHandlers({
       if (!Number.isFinite(satoshis) || satoshis < 1 || satoshis > MAX_SATS)
         return [400, { error: 'invalid-satoshis' }];
       const since = new Date(now() - 60 * 60 * 1000).toISOString();
-      if ((await store.countRecentPayments(row.alias, since)) > 200) return [429, { error: 'rate-limited' }];
+      if ((await store.countRecentPayments(row.alias, since)) > p2pHourlyLimit(row.alias))
+        return [429, { error: 'rate-limited' }];
       const out = deriveDestination(row.identity_key, satoshis);
       const reference = Utils.toHex(Random(16));
       await store.insertPayment({
@@ -1605,6 +1612,7 @@ const bookingOut = (r) => ({
 });
 
 module.exports = {
+  P2P_HOURLY_LIMITS,
   FORWARD_MS,
   CHANGE_COOLDOWN_MS,
   hashIp,
