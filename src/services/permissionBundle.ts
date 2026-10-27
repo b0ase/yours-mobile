@@ -42,6 +42,11 @@ export interface BundleRequest {
   addedLive?: boolean;
   /** The wallet's own "Reconnect to <site>?" line after a disconnect (services/reconnectGate.ts). */
   reconnect?: boolean;
+  /**
+   * The wallet's own "use your wallet inside <top>?" line for a site framed by another (services/frameAccess.ts):
+   * the top-level host. Never a grant, never "Don't ask again".
+   */
+  framePair?: string;
 }
 
 /** Most lines that may join one open sheet. More queue for their own sheet. */
@@ -767,7 +772,7 @@ export const isAutoGrantable = (r: BundleRequest): boolean => {
 
 /** The sheet offers "Don't ask again" when at least one ticked line is the routine kind. */
 export const sheetCanTrust = (bundle: Pick<PermissionBundle, 'items'>): boolean =>
-  bundle.items.some((r) => isAutoGrantable(r));
+  !bundle.items.some((r) => r.framePair) && bundle.items.some((r) => isAutoGrantable(r));
 
 /** The baskets a "Don't ask again" covers: only the routine ones that were on the sheet the user approved. */
 export const trustedBasketsFrom = (granted: BundleRequest[]): string[] => [

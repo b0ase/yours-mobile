@@ -1,6 +1,7 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { trueHost, type WornTheme } from './connectSiteTheme';
 import { STRIP, useSiteTheme } from './useSiteTheme';
+import { FRAMED_ARM_MS, originLabel } from '../../services/frameAccess';
 
 /**
  * The approval sheet's frame (docs/SITE-THEME.md). On top, always, the wallet's own strip: fixed colours, the true
@@ -9,7 +10,15 @@ import { STRIP, useSiteTheme } from './useSiteTheme';
  * warnings, Approve / Deny) is the children, untouched: a theme can only dress the frame around it.
  */
 
-export const OriginStrip = ({ originator, themed }: { originator: string; themed: boolean }) => (
+export const OriginStrip = ({
+  originator,
+  themed,
+  embeddedIn,
+}: {
+  originator: string;
+  themed: boolean;
+  embeddedIn?: readonly string[];
+}) => (
   <div
     data-testid="bwx-origin-strip"
     className="flex items-center gap-2 px-3"
@@ -29,7 +38,7 @@ export const OriginStrip = ({ originator, themed }: { originator: string; themed
     </svg>
     <span style={{ color: STRIP.muted }}>bWalletX · request from</span>
     <span className="font-bold truncate" style={{ color: STRIP.text }}>
-      {trueHost(originator)}
+      {originLabel(originator, embeddedIn)}
     </span>
     {themed && (
       <span className="ml-auto whitespace-nowrap" style={{ color: STRIP.muted, fontSize: 10 }}>
@@ -80,23 +89,42 @@ export const SiteThemeFrame = ({
   originator,
   children,
   theme: given,
+  embeddedIn,
 }: {
   originator: string | undefined;
   children: ReactNode;
+  /** Top-level host(s) this site was framed by (from the background, services/frameAccess.ts). */
+  embeddedIn?: readonly string[];
   /** For previews and tests; normally loaded for the originator. */
   theme?: WornTheme | null;
 }) => {
   const loaded = useSiteTheme(given === undefined ? originator : undefined);
   const theme = given === undefined ? loaded : given;
+  const framed = !!embeddedIn?.length;
+  // A framed site's sheet: no tap lands for a moment after it appears (one already on its way can't hit Allow).
+  const [armed, setArmed] = useState(!framed);
+  useEffect(() => {
+    if (!framed) return setArmed(true);
+    setArmed(false);
+    const t = setTimeout(() => setArmed(true), FRAMED_ARM_MS);
+    return () => clearTimeout(t);
+  }, [framed, originator]);
   if (!originator) return <>{children}</>;
   return (
     <div
       className="flex flex-col w-full h-full"
       style={theme ? { boxShadow: `inset 3px 0 0 ${theme.accent}, inset -3px 0 0 ${theme.accent}` } : undefined}
     >
-      <OriginStrip originator={originator} themed={!!theme} />
+      <OriginStrip originator={originator} themed={!!theme} embeddedIn={embeddedIn} />
       {theme && <SiteThemeBanner theme={theme} originator={originator} />}
-      <div className="flex-1 min-h-0 flex items-center justify-center relative">{children}</div>
+      <div
+        className="flex-1 min-h-0 flex items-center justify-center relative"
+        data-testid="bwx-sheet-body"
+        data-armed={armed ? 'true' : 'false'}
+        style={armed ? undefined : { pointerEvents: 'none' }}
+      >
+        {children}
+      </div>
     </div>
   );
 };

@@ -41,7 +41,12 @@ attachMintPrivate(CWI as unknown as Record<string, unknown>, transport);
 // bWalletX: window.CWI.twetch.{status, loginSign, buildPost, signRequest} (services/twetchSite.ts).
 attachTwetch(CWI as unknown as Record<string, unknown>, transport);
 
-// Inject CWI on window
+// Inject CWI on window. In a sub-frame only once the content script says the background allowed this frame
+// (https frame inside an https top; services/frameAccess.ts).
 if (typeof window !== 'undefined') {
-  (window as unknown as { CWI: WalletInterface }).CWI = CWI;
+  const expose = () => {
+    (window as unknown as { CWI: WalletInterface }).CWI = CWI;
+  };
+  if (window.top === window) expose();
+  else self.addEventListener('bwalletx:frame-ok', expose, { once: true });
 }

@@ -49,7 +49,9 @@ attachMintPrivate(CWI as unknown as Record<string, unknown>, transport);
 // window.CWI.twetch.{status, loginSign, buildPost} (services/twetchSite.ts): same transport, origin from Chrome.
 attachTwetch(CWI as unknown as Record<string, unknown>, transport);
 
-if (typeof window !== 'undefined') {
+// In a sub-frame, nothing is exposed until the content script says the background allowed this frame (an https
+// frame inside an https top-level page; services/frameAccess.ts). Every call is re-checked there anyway.
+const exposeWallet = () => {
   const w = window as unknown as { CWI?: WalletInterface };
   let take = true; // until the content script says otherwise
   let other: WalletInterface | undefined; // another wallet's window.CWI, kept to hand back
@@ -73,4 +75,8 @@ if (typeof window !== 'undefined') {
     self.dispatchEvent(new CustomEvent(BWALLETX_REQUEST, { detail: (e as CustomEvent<Detail>).detail }));
   });
   announceWallet({ name: 'bWalletX', icon, rdns: 'com.bwalletx.extension', kind: 'extension' }, CWI);
+};
+if (typeof window !== 'undefined') {
+  if (window.top === window) exposeWallet();
+  else self.addEventListener('bwalletx:frame-ok', exposeWallet, { once: true });
 }
