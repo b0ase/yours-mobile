@@ -189,6 +189,9 @@ describe('twetch.* through the extension bridge', () => {
   test('wiring: content script forwards, background routes and shows the twetch sheet', () => {
     const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
     expect(src('../content.ts')).toContain('isTwetchAction(type)');
+    // The extension's page-side wallet is brand/cwi.ts (vite.brand.ts swaps it in for cwi.ts): both attach it.
+    expect(src('../brand/cwi.ts')).toContain('attachTwetch(CWI');
+    expect(src('../cwi.ts')).toContain('attachTwetch(CWI');
     const bg = src('../background.ts');
     expect(bg).toContain('routeTwetchMessage(message, { origin: sender.origin, isFromExtension }');
     expect(bg).toContain("showPromptUi('twetch', requestID)");
