@@ -13,6 +13,7 @@ import {
   reloadBapp,
   subscribeBappFrame,
 } from './bappFrame';
+import { IMMERSIVE_BUTTON_MS, useImmersiveViewport } from './immersive';
 import { reportSessionSpend } from '../wallet/live/liveBus';
 import { SESSION_SPEND_TYPE } from '../wallet/live/liveLogic';
 import { isAllowedFrameOrigin, parseXdmRequest, toXdmResponse } from './frameBridge';
@@ -167,6 +168,18 @@ export const BappFrameHost = () => {
   const wide = useWide();
   const [layout, setLayout] = useAppLayout(session?.origin);
   const phone = wide && layout === 'mobile';
+  // Phone in landscape: the frame fills the screen over the wallet's bars (immersive.ts). A corner close button
+  // shows for a few seconds, then hides; a tap on the thin top edge brings it back. Back gesture works as before.
+  const immersive = useImmersiveViewport() && !wide;
+  const [exitShown, setExitShown] = useState(true);
+  useEffect(() => {
+    if (!immersive || !exitShown) return;
+    const t = window.setTimeout(() => setExitShown(false), IMMERSIVE_BUTTON_MS);
+    return () => window.clearTimeout(t);
+  }, [immersive, exitShown]);
+  useEffect(() => {
+    if (immersive) setExitShown(true);
+  }, [immersive, session?.key]);
 
   return (
     <>
@@ -184,17 +197,49 @@ export const BappFrameHost = () => {
       )}
       {session && (
         <div
-          className="absolute left-0 right-0 z-[90] flex flex-col"
+          className={immersive ? 'fixed inset-0 z-[950] flex flex-col' : 'absolute left-0 right-0 z-[90] flex flex-col'}
           style={{
-            top: 'calc(var(--wallet-inset-top, 0px) + 3.5rem)',
-            bottom: 'var(--dock-h, 3.75rem)',
-            background: 'var(--bw-bg)',
+            ...(immersive
+              ? {
+                  padding:
+                    'env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)',
+                  background: '#010101',
+                }
+              : {
+                  top: 'calc(var(--wallet-inset-top, 0px) + 3.5rem)',
+                  bottom: 'var(--dock-h, 3.75rem)',
+                  background: 'var(--bw-bg)',
+                }),
             visibility: visible ? 'visible' : 'hidden',
             pointerEvents: visible ? 'auto' : 'none',
           }}
           aria-hidden={!visible}
         >
-          <div className="flex h-9 shrink-0 items-center gap-1 px-1 border-b border-[#1C1C1E]">
+          {immersive && visible && (
+            <>
+              {/* Thin strip along the top edge: a tap brings the close button back. */}
+              <div className="absolute left-0 right-0 top-0 z-[2] h-3" onClick={() => setExitShown(true)} />
+              <button
+                type="button"
+                onClick={closeBapp}
+                aria-label="Close"
+                className="absolute z-[3] flex h-9 w-9 items-center justify-center rounded-full border-0 transition-opacity duration-300"
+                style={{
+                  top: 'calc(env(safe-area-inset-top) + 8px)',
+                  right: 'calc(env(safe-area-inset-right) + 8px)',
+                  background: 'rgba(0,0,0,0.45)',
+                  opacity: exitShown ? 1 : 0,
+                  pointerEvents: exitShown ? 'auto' : 'none',
+                }}
+              >
+                <X size={18} color="#F2F2F0" />
+              </button>
+            </>
+          )}
+          <div
+            className="flex h-9 shrink-0 items-center gap-1 px-1 border-b border-[#1C1C1E]"
+            style={immersive ? { display: 'none' } : undefined}
+          >
             <button type="button" onClick={back} className="w-9 h-9 flex items-center justify-center" aria-label="Back">
               <ChevronLeft size={18} color="#F2F2F0" />
             </button>
@@ -246,6 +291,8 @@ export const BappFrameHost = () => {
               // Same rights as a top-level page in the full-screen browser, minus top navigation.
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads"
               allow="camera; microphone; clipboard-read; clipboard-write; fullscreen; autoplay; encrypted-media"
+              // The page's own Fullscreen API request is honoured where the WebView supports it.
+              allowFullScreen
               referrerPolicy="strict-origin-when-cross-origin"
               style={
                 phone
