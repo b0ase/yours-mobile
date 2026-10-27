@@ -330,6 +330,9 @@ const RESERVED_OWNERS = Object.freeze({
   // TERRORNODE (NPG game; its handle owns the $TERRORNODE room): held by bchatx@ until the owner releases it
   // (owner, 27 Oct 2026).
   terrornode: '030dd811f969987f2f6ec023535cb8839c496fccf4feb7799293ec13ff09d263b7',
+  // bitchat / bitchatx held for bchatx@ (owner, 27 Oct 2026); bitchatx@ takes BSV for the bitchatx.com domain sale.
+  bitchat: '030dd811f969987f2f6ec023535cb8839c496fccf4feb7799293ec13ff09d263b7',
+  bitchatx: '030dd811f969987f2f6ec023535cb8839c496fccf4feb7799293ec13ff09d263b7',
   ...Object.fromEntries(PREMIUM_BCORP.map((n) => [n, BCORP_KEY])),
   // Touman, our first Play beta tester (owner, 27 Oct 2026).
   touman: '030f8d4f47ae853abf8adc939520d360213193709fc846989a436add16d0b946e7',
