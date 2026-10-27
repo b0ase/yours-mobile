@@ -481,6 +481,18 @@ export function bavatarSeed(identityKeyOrName: string): string {
   const v = String(identityKeyOrName).trim().toLowerCase();
   return /^0[23][0-9a-f]{64}$/.test(v) ? v : 'name:' + cleanName(v);
 }
+/**
+ * Designs (owner, 27 Oct 2026: "shuffle"): design #0 is the original picture, drawn from the seed unchanged.
+ * Design #n (n ≥ 1) is drawn from `${seed}#${n}`, so anyone can redraw and check a minted design from
+ * (identity key, n). Throws on anything that isn't a whole number 0…MAX_VARIANT.
+ */
+export const MAX_VARIANT = 9999;
+export const isVariant = (n: unknown): n is number =>
+  Number.isInteger(n) && (n as number) >= 0 && (n as number) <= MAX_VARIANT;
+export function variantSeed(seed: string, variant = 0): string {
+  if (!isVariant(variant)) throw new RangeError('bAvatar design must be a whole number 0–' + MAX_VARIANT);
+  return variant === 0 ? seed : `${seed}#${variant}`;
+}
 export const cleanName = (v: string) =>
   String(v)
     .toLowerCase()
@@ -502,9 +514,12 @@ function paintBlend(ctx: Ctx, S: number, seed: string, x0 = 0, y0 = 0) {
 }
 
 /** The everyday bAvatar: the blend, as an SVG string. `seed` from bavatarSeed(). */
-export function bavatarSvg(identityKeyOrName: string, opts: { size?: number; label?: string } = {}): string {
+export function bavatarSvg(
+  identityKeyOrName: string,
+  opts: { size?: number; label?: string; variant?: number } = {},
+): string {
   const S = opts.size ?? 512,
-    seed = bavatarSeed(identityKeyOrName);
+    seed = variantSeed(bavatarSeed(identityKeyOrName), opts.variant ?? 0);
   const ctx = new SvgCtx('ba' + ((seedFrom('id:' + seed)() * 1e9) >>> 0).toString(36) + '_');
   paintBlend(ctx, S, seed);
   return ctx.toSvg(S, opts.label ?? 'bAvatar');
@@ -531,10 +546,10 @@ export function bavatarArtQrSvg(
   qr: QrMatrix,
   /** `dot` (share of a cell) and `lift` (pale wash over the art) default to the bit-sign values; the
    *  wallet card raises both so every common decoder reads it, not only phone cameras. */
-  opts: { size?: number; dot?: number; lift?: number; pip?: boolean } = {},
+  opts: { size?: number; dot?: number; lift?: number; pip?: boolean; variant?: number } = {},
 ): string {
   const S = opts.size ?? 512,
-    seed = bavatarSeed(identityKeyOrName);
+    seed = variantSeed(bavatarSeed(identityKeyOrName), opts.variant ?? 0);
   const ctx = new SvgCtx('bq' + ((seedFrom('id:' + seed)() * 1e9) >>> 0).toString(36) + '_');
   const n = qr.size,
     quiet = 3,

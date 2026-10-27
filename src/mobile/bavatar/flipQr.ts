@@ -155,9 +155,9 @@ export function compactArtBackGroup(payload: string, artId: string, x: number, y
   );
 }
 
-/** The plain bAvatar art as a `<symbol>` (for `<use>` on both sides of the minted card). */
-export function artSymbol(identityKey: string, id: string): string {
-  return bavatarSvg(String(identityKey).toLowerCase(), { size: 512 })
+/** The plain bAvatar art (design #`variant`, 0 = the original) as a `<symbol>` (for `<use>` on both sides of the minted card). */
+export function artSymbol(identityKey: string, id: string, variant = 0): string {
+  return bavatarSvg(String(identityKey).toLowerCase(), { size: 512, variant })
     .replace(/^<\?xml[^>]*>\s*/, '')
     .replace(/^<svg\b[^>]*?>/, `<symbol id="${id}" viewBox="0 0 512 512">`)
     .replace(/<\/svg>\s*$/, '</symbol>');
