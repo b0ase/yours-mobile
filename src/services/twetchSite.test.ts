@@ -1,11 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { LockingScript, MerklePath, P2PKH, PrivateKey, Transaction } from '@bsv/sdk';
+import { LockingScript, MerklePath, P2PKH, PrivateKey, Transaction, Utils } from '@bsv/sdk';
 import { routeTwetchMessage } from './twetchSite';
 import { DISABLED_CODE, type TwetchAsk, type TwetchDeps, type TwetchWallet } from '../mobile/twetch/twetchCalls';
 import { matchingKey, type TwetchLink, type TwetchStore } from '../mobile/twetch/twetchLink';
 import { USER_DENIED_CODE } from './userDenied';
 import { attachTwetch } from '../twetchPage';
+import { bsmVerifyAddress } from '../mobile/twetch/twetchPost';
 
 const NOW = 1793083013296;
 const CHALLENGE = `twetch-login:${'ab'.repeat(32)}:${NOW}`;
@@ -134,9 +135,41 @@ describe('twetch.* through the extension bridge', () => {
     const s = setup(true);
     const r = await routeTwetchMessage({ action: 'twetch.buildPost', params: { text: 'gm' } }, SITE, s.deps);
     expect(r.success).toBe(true);
-    const d = (r as { data: { txHex: string; txid: string } }).data;
+    const d = (r as { data: { txHex: string; txid: string; fee: number } }).data;
     expect(Transaction.fromHex(d.txHex).id('hex')).toBe(d.txid);
+    expect(Number.isSafeInteger(d.fee) && d.fee > 0).toBe(true);
     expect(s.calls.abort).toHaveLength(0);
+  });
+
+  test('signRequest after an approved buildPost: no sheet, signature over the wallet-built string', async () => {
+    const s = setup(true);
+    const b = await routeTwetchMessage({ action: 'twetch.buildPost', params: { text: 'gm' } }, SITE, s.deps);
+    const txHex = (b as { data: { txHex: string } }).data.txHex;
+    s.asks.length = 0;
+    const body = JSON.stringify({ userId: 19, content: 'gm', txHex });
+    const params = { method: 'POST', path: '/v1/posts', userId: '19', ts: NOW, body, domain: 'x' };
+    const r = await routeTwetchMessage({ action: 'twetch.signRequest', params }, SITE, s.deps);
+    expect(r.success).toBe(true);
+    const sig = (r as { data: { signature: string } }).data.signature;
+    const msg = Utils.toArray(`POST\n/v1/posts\n19\n${NOW}\n${body}`, 'utf8');
+    expect(bsmVerifyAddress(msg, sig, link.address)).toBe(true);
+    expect(s.asks).toHaveLength(0);
+    // Another site cannot reuse it; a payment body is refused.
+    const evil = { origin: 'https://evil.example', isFromExtension: false };
+    expect(await routeTwetchMessage({ action: 'twetch.signRequest', params }, evil, s.deps)).toMatchObject({
+      success: false,
+      code: 'INVALID_PARAMS',
+    });
+    const fee = (b as { data: { fee: number } }).data.fee;
+    const feeBody = JSON.stringify({ userId: 19, content: 'gm', txHex, paidSats: fee });
+    expect(
+      await routeTwetchMessage({ action: 'twetch.signRequest', params: { ...params, body: feeBody } }, SITE, s.deps),
+    ).toMatchObject({ success: true });
+    const paid = { ...params, body: JSON.stringify({ userId: 19, content: 'gm', txHex, paidSats: fee + 1 }) };
+    expect(await routeTwetchMessage({ action: 'twetch.signRequest', params: paid }, SITE, s.deps)).toMatchObject({
+      success: false,
+      code: 'INVALID_PARAMS',
+    });
   });
 
   test('bad params keep the paired error codes', async () => {
@@ -148,7 +181,7 @@ describe('twetch.* through the extension bridge', () => {
 
   test('flag off → NOT_SUPPORTED, no sheet', async () => {
     const s = setup(true, { enabled: false });
-    for (const action of ['twetch.status', 'twetch.loginSign', 'twetch.buildPost']) {
+    for (const action of ['twetch.status', 'twetch.loginSign', 'twetch.buildPost', 'twetch.signRequest']) {
       const r = await routeTwetchMessage({ action, params: { challenge: CHALLENGE, text: 'gm' } }, SITE, s.deps);
       expect(r).toMatchObject({ success: false, code: DISABLED_CODE });
     }
@@ -179,10 +212,12 @@ describe('twetch.* through the extension bridge', () => {
     await t.status();
     await t.loginSign({ challenge: CHALLENGE });
     await t.buildPost({ text: 'gm' });
+    await t.signRequest({ method: 'POST' });
     expect(sent).toEqual([
       ['twetch.status', {}],
       ['twetch.loginSign', { challenge: CHALLENGE }],
       ['twetch.buildPost', { text: 'gm' }],
+      ['twetch.signRequest', { method: 'POST' }],
     ]);
   });
 
@@ -197,14 +232,16 @@ describe('twetch.* through the extension bridge', () => {
     expect(await request({ method: 'twetch.status' })).toBe('ok');
     await request({ method: 'twetch.loginSign', params: { challenge: CHALLENGE } });
     await request({ method: 'twetch.buildPost', params: { text: 'gm' } });
+    await request({ method: 'twetch.signRequest', params: { path: '/v1/posts' } });
     expect(sent).toEqual([
       ['twetch.status', {}],
       ['twetch.loginSign', { challenge: CHALLENGE }],
       ['twetch.buildPost', { text: 'gm' }],
+      ['twetch.signRequest', { path: '/v1/posts' }],
     ]);
     await expect(request({ method: 'twetch.deleteAll' })).rejects.toMatchObject({ code: 'NOT_SUPPORTED' });
     await expect(request({ method: 'eth_accounts' })).rejects.toMatchObject({ code: 'NOT_SUPPORTED' });
-    expect(sent).toHaveLength(3);
+    expect(sent).toHaveLength(4);
   });
 
   test('wiring: content script forwards, background routes and shows the twetch sheet', () => {

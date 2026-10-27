@@ -38,7 +38,7 @@ export const CWI: WalletInterface = createCWI(transport as Parameters<typeof cre
 attachSpendingAuthorization(CWI as unknown as Record<string, unknown>);
 // bWalletX: wallet.mintPrivate (services/mintPrivateSite.ts).
 attachMintPrivate(CWI as unknown as Record<string, unknown>, transport);
-// bWalletX: window.CWI.twetch.{status, loginSign, buildPost} (services/twetchSite.ts).
+// bWalletX: window.CWI.twetch.{status, loginSign, buildPost, signRequest} (services/twetchSite.ts).
 attachTwetch(CWI as unknown as Record<string, unknown>, transport);
 
 // Inject CWI on window
