@@ -45,6 +45,7 @@ import { usePeerPayLinks } from '../scan/peerpayLinks';
 import { AuthRequestHost } from '../auth/AuthSheet';
 import { BrowseLinkHost } from '../browse/BrowseLinkHost';
 import { BitsignHost } from '../pair/BitsignHost';
+import { PairLoginHost } from '../pair/PairLoginHost';
 
 const PairSheet = lazy(() => import('../pair/PairSheet'));
 const ScanSheet = lazy(() => import('../scan/ScanSheet'));
@@ -737,6 +738,7 @@ const TopNavBar = () => {
       {!phoneLayoutOn() && <AuthRequestHost />}
       {!phoneLayoutOn() && <BrowseLinkHost />}
       {!phoneLayoutOn() && <BitsignHost />}
+      {!phoneLayoutOn() && <PairLoginHost />}
       {pairOpen && (
         <Suspense fallback={null}>
           <PairSheet
