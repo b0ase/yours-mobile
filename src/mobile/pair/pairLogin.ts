@@ -30,7 +30,13 @@ export const LOGIN_MAX_AHEAD_MS = 10 * 60 * 1000;
 export const BSM_FOLLOW_MS = 2 * 60 * 1000;
 
 export type LoginRequest = { origin: string; host: string; nonce: string; message: string };
-type Sig = { protocolID?: unknown; keyID?: unknown; counterparty?: unknown; data?: unknown; hashToDirectlySign?: unknown };
+type Sig = {
+  protocolID?: unknown;
+  keyID?: unknown;
+  counterparty?: unknown;
+  data?: unknown;
+  hashToDirectlySign?: unknown;
+};
 
 const obj = (p: unknown): Record<string, unknown> | null =>
   p && typeof p === 'object' && !Array.isArray(p) ? (p as Record<string, unknown>) : null;
