@@ -62,6 +62,19 @@ const isPairLink = (s: string) => {
   }
 };
 
+/** bwalletx://pair?<params> → https://<PAIR_HOST>/pair?<params> (same as pair/links.ts pairLinkFrom). */
+const appSchemePair = (s: string): string | null => {
+  try {
+    const u = new URL(s);
+    if (u.protocol !== 'bwalletx:' || !(u.host === 'pair' || u.pathname.replace(/^\/+/, '') === 'pair')) return null;
+    const q = u.searchParams;
+    q.delete('bwxpair');
+    return `https://${PAIR_HOST}/pair?${q}`;
+  } catch {
+    return null;
+  }
+};
+
 /** "0.001" BSV → 100000 sats, exactly (string maths, no float). Null for anything else. */
 export const bsvToSats = (raw: string): number | null => {
   const s = raw.trim();
@@ -89,6 +102,9 @@ export const parseScan = (raw: string | null | undefined): Scan => {
   if (!text) return { kind: 'text', text: '' };
 
   if (isPairLink(text) || /^bwallet:.*pair/i.test(text)) return { kind: 'pair', text };
+  // bwalletx://pair?… (site/pair.html's app-scheme button; pair/links.ts pairLinkFrom): the same https pair URL.
+  const appPair = appSchemePair(text);
+  if (appPair) return { kind: 'pair', text: appPair };
   if (isOpenLink(text)) return { kind: 'open', text };
   const restore = restoreUrl(text);
   if (restore) return { kind: 'restore', url: restore };
