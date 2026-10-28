@@ -1368,3 +1368,19 @@ html.ww-on:not(.ww-onb) .bw-abook-page > :not(.bw-abook-head) {
   margin-left: auto;
   margin-right: auto;
 }
+
+/* The empty chat pane shows Ask b (owner, 28 Oct 2026). */
+.ww-chat-empty.ww-chat-askb {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  min-height: 0;
+  overflow: hidden;
+}
+.ww-chat-askb-hint {
+  flex-shrink: 0;
+  padding: 6px 0;
+  text-align: center;
+  font-size: 11px;
+  color: var(--bw-muted, #8a8a8a);
+}

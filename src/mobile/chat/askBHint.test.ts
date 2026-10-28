@@ -25,3 +25,12 @@ describe('$b public hint (parity with bit-sign ask-b-modal)', () => {
     expect(PRIVATE_B_ACTION).toBe('Ask privately instead');
   });
 });
+
+describe('wide chat empty pane is Ask b', () => {
+  test('the same AgentPage as /m/ask-b, with the room hint', async () => {
+    const src = await Bun.file(new URL('../wide/WideShell.tsx', import.meta.url)).text();
+    expect(src).toContain("lazy(() => import('../agent/AgentPage'))");
+    expect(src).toContain('data-ask-b-pane');
+    expect(src).toContain('or pick a room on the left');
+  });
+});

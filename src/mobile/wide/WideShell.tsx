@@ -43,11 +43,12 @@ import { wwOpen } from './flag';
 import { useHomeLayout } from '../home/useHomeLayout';
 import { LockCoin } from '../tabs/TopNav';
 import { AgentConversation } from '../agent/AgentConversation';
+const AgentPage = lazy(() => import('../agent/AgentPage'));
 import { useWalletFeed } from './walletFeed';
 import { BappHost } from './BappHost';
 import { PersonPic } from './PersonPic';
 import { useAvatar } from '../names/useAvatar';
-import { WidePage, WideEmpty, WideTitle } from './WidePage';
+import { WidePage, WideTitle } from './WidePage';
 import { WideAuth } from './WideAuth';
 import { useCanInstall, installApp } from './install';
 import { BAPPS, BAPP_ROUTE, bappFromPath, useBappBadge } from './bapps';
@@ -521,11 +522,12 @@ const WideShell = ({ children }: { children: ReactNode }) => {
             </div>
             {view === 'wallet' && !fullWallet && <WalletSide />}
             {view === 'chat' && (
-              <div className="ww-panel ww-chat-empty">
-                <WideEmpty
-                  title="Pick a room"
-                  body="Rooms, DMs and token rooms open here, with the room's members, token gate and live Space beside them."
-                />
+              // No room open (owner, 28 Oct 2026): the same Ask b as /m/ask-b (same prompts, history and threads).
+              <div className="ww-panel ww-chat-empty ww-chat-askb" data-ask-b-pane="">
+                <Suspense fallback={null}>
+                  <AgentPage />
+                </Suspense>
+                <p className="ww-chat-askb-hint">or pick a room on the left</p>
               </div>
             )}
           </div>
