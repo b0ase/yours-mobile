@@ -139,3 +139,31 @@ client id, `exp`, `nonce`). Use `sub` (the identity key) as the stable user id: 
 
 Rotating the key: replace the env var and redeploy. Tokens are 10 minutes, so old ones die quickly. Clients that
 cache the JWKS should refetch on an unknown `kid`.
+
+## Sign in from a site through the extension or a paired phone (bChatX, bit-sign)
+
+Sites that talk to the wallet directly (window.CWI in the extension, or a paired phone) sign in with two calls. Use
+exactly this shape; anything else under these protocols is refused.
+
+```ts
+// 1. The sign-in signature. `text` must be byte-exact bit-sign bwalletLoginMessage(origin, nonce, expiresAt) for
+//    the page's own origin (src/mobile/pair/pairLogin.ts loginMessage), expiring within 10 minutes.
+const { signature } = await wallet.createSignature({
+  protocolID: [2, 'bwallet sign in'],
+  keyID: nonce, // [A-Za-z0-9_-]{8,128}
+  counterparty: 'anyone',
+  data: Array.from(new TextEncoder().encode(text)),
+});
+// 2. Optional, first sign-in in a browser: @1sat/actions signBsm over the SAME text, within 2 minutes.
+//    Answered once, with no second sheet, only after step 1 succeeded for this origin.
+await signBsm.execute(ctx, { message: text });
+```
+
+`[1, 'message signing']` (the BSM key) is reserved for the wallet. Called on its own, or over any other text, it is
+refused with `code: 'ERR_RESERVED_PROTOCOL'` (other protocol refusals carry `ERR_PROTOCOL_REFUSED`; the user saying no
+is `ERR_PERMISSION_DENIED`). Show the user your own message for those codes.
+
+The connect sheet a site gets on its first call is one sentence ("bchatx.com wants to sign you in as $alice"), the
+site's origin, **Sign in** and **Cancel**. Signing in grants the site's own protocols and baskets from its manifest.
+A spending allowance or certificate access is never part of it; the wallet asks for those on their own sheet when the
+site first needs them.
