@@ -56,10 +56,12 @@ export const checkPaymentOutputs = (requests: readonly SendBsvRequest[], outputs
     else wantPlain.push(r.satoshis);
   }
 
-  // A BRC-169 handle payment: one request, one output the wallet built with the approved amount.
+  // A BRC-169 handle payment: one request, one output the wallet built with the approved amount. Only a request
+  // made as a handle may be paid this way: a paymail the sheet showed is never paid to a handle key (b-Aware 25 Oct).
   const handleOuts = outputs.filter((o) => o.outputDescription === HANDLE_DESCRIPTION);
   if (handleOuts.length) {
     if (requests.length !== 1 || outputs.length !== 1) return 'unexpected outputs in a handle payment';
+    if (requests[0].paymail || !requests[0].handle) return 'a paymail payment was routed to a handle';
     return handleOuts[0].satoshis === requests[0].satoshis ? null : 'handle payment amount differs from approved';
   }
 
@@ -252,11 +254,17 @@ type StrictInput = { requireVerified?: boolean };
 const execute: typeof upstreamSendBsv.execute = async (ctx, input: SendBsvInput & StrictInput) => {
   const requests = input?.requests ?? [];
   try {
-    const paymails = requests.map((r) => r.paymail ?? r.handle).filter((p): p is string => !!p);
-    if (paymails.length) {
+    // b-Aware 25 Oct 2026 (kawasanlama): a request made as a paymail is what the pay sheet showed, so it is paid
+    // through the paymail path only, to the destination checked against that paymail's key. Upstream would try it
+    // as a BRC-169 handle first and pay whatever key the domain's handle resolver names instead.
+    const hasPaymail = requests.some((r) => !!r.paymail);
+    const handles = requests.filter((r) => !r.paymail && r.handle).map((r) => r.handle as string);
+    if (hasPaymail && handles.length) throw refused('a payment cannot mix paymails and handles');
+    if (hasPaymail) return await payPaymails(ctx, input);
+    if (handles.length) {
       // BRC-169 handles: upstream builds that output itself from the handle's key, so it has nothing to check.
       let handle = false;
-      for (const p of paymails) if ((await resolvePaymentHandle(p)) !== undefined) handle = true;
+      for (const p of handles) if ((await resolvePaymentHandle(p)) !== undefined) handle = true;
       if (!handle) return await payPaymails(ctx, input);
     }
   } catch (e) {

@@ -231,3 +231,74 @@ describe('b_feedback 67: paymail scripts re-derived from the payee key before si
     expect(destinationCheck(r, 'token')).toBe('unverified');
   });
 });
+
+describe('b-Aware 25 Oct (kawasanlama): a paymail is never rerouted to a BRC-169 handle key', () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+  const handleKey = PrivateKey.fromRandom().toPublicKey().toString();
+
+  /** wedge.test serves paymail (p2p → scriptA) AND BRC-169 handles for the same name (a different key). */
+  const setup = () => {
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input instanceof Request ? input.url : input);
+      const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status });
+      if (url.includes('dns.google')) return json({ Status: 3 });
+      if (url.endsWith('/manifest.json'))
+        return json({ metanet: { handles: { version: '1.0', resolve: 'https://wedge.test/resolve' } } });
+      if (url.includes('/resolve?'))
+        return json({
+          identityKey: handleKey,
+          certificate: { subject: handleKey },
+          messagebox: 'https://wedge.test/mb',
+        });
+      if (url.endsWith('/.well-known/bsvalias'))
+        return json({
+          capabilities: {
+            '2a40af698840': 'https://wedge.test/p2p/{alias}@{domain.tld}',
+            '5c55a7fdb7bb': 'https://wedge.test/beef/{alias}@{domain.tld}',
+          },
+        });
+      if (url.includes('/p2p/')) return json({ outputs: [{ script: scriptA, satoshis: 1000 }], reference: 'ref-1' });
+      if (url.includes('/beef/')) return json({ txid: 'x' });
+      return json({}, 404);
+    }) as typeof fetch;
+    const calls: { outputs: { lockingScript: string; satoshis: number; outputDescription: string }[] }[] = [];
+    const wallet = {
+      getPublicKey: async () => ({ publicKey: PrivateKey.fromRandom().toPublicKey().toString() }),
+      createAction: async (args: (typeof calls)[number]) => {
+        calls.push(args);
+        return { txid: 'deadbeef' };
+      },
+    };
+    return { calls, ctx: { wallet } as unknown as Parameters<typeof sendBsv.execute>[0] };
+  };
+
+  test('a paymail request pays the paymail host destination, not a handle output', async () => {
+    const { calls, ctx } = setup();
+    await sendBsv.execute(ctx, { requests: [{ paymail: PAYMAIL, satoshis: 1000 }] });
+    expect(calls).toHaveLength(1);
+    // Paid as the checked paymail destination (scriptA from the host), never as a handle output.
+    expect(calls[0].outputs.some((o) => o.outputDescription === 'Payment to handle')).toBe(false);
+    expect(calls[0].outputs.map((o) => o.lockingScript)).toEqual([scriptA]);
+  });
+
+  test('the output check refuses a handle output for a paymail request', () => {
+    const handleOut = { satoshis: 1000, lockingScript: scriptB, outputDescription: 'Payment to handle' };
+    expect(checkPaymentOutputs([{ paymail: PAYMAIL, satoshis: 1000 }], [handleOut])).not.toBeNull();
+    expect(checkPaymentOutputs([{ handle: PAYMAIL, satoshis: 1000 }], [handleOut])).toBeNull();
+  });
+
+  test('a send mixing a paymail and a handle is refused before anything is signed', async () => {
+    const { calls, ctx } = setup();
+    const res = await sendBsv.execute(ctx, {
+      requests: [
+        { paymail: PAYMAIL, satoshis: 1000 },
+        { handle: 'other@wedge.test', satoshis: 500 },
+      ],
+    });
+    expect(calls).toHaveLength(0);
+    expect(String(res.error)).toContain('Payment refused');
+  });
+});
