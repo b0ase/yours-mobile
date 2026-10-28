@@ -12,6 +12,7 @@ import {
   type ReleaseReport,
   type UnsentOutcome,
 } from './services/stuckSends';
+import { hardenWalletServices } from './services/wocResilience';
 import {
   createWebWallet,
   createIndexedDbTaskStateStore,
@@ -386,6 +387,9 @@ export const initWallet = async (
     )}`,
   );
 
+  // WhatsOnChain 429s: backoff with jitter, optional VITE_WOC_API_KEY, 1sat -> toolbox provider fallback for raw
+  // tx and proofs (services/wocResilience.ts; owner's $2 send, 28 Oct 2026).
+  if (!hardenWalletServices(toolboxServices)) console.warn('[initWallet] chain-data services not hardened');
   // Big mints need longer than the broadcaster's fixed 30 s to upload (services/bigBroadcast.ts, vexvoid 12 Oct 2026).
   if (!sizeAwareBroadcast(toolboxServices)) console.warn('[initWallet] broadcaster timeout not tunable');
   // Every payment ends here: our screens and dApps through the permissions manager, send-all and background jobs
