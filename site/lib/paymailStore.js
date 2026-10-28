@@ -178,6 +178,15 @@ function supabaseStore(env = process.env, f = fetch) {
     listReceipts: async (alias) =>
       (await req(`subscription_receipts?alias=eq.${q(alias)}&select=record&order=created_at.desc&limit=200`)) || [],
     getBinding: (alias) => one(`bwallet_name_bindings?alias=eq.${q(alias)}&limit=1`),
+    // A released name (unlink / delete wallet) keeps no signed binding, or its next owner could never bind it
+    // (b-Aware 25 Oct 2026, darkasep112: bind answered 409 "signed by another wallet" forever).
+    deleteBinding: (alias) =>
+      req(`bwallet_name_bindings?alias=eq.${q(alias)}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } }),
+    deleteBindingsByKey: (k) =>
+      req(`bwallet_name_bindings?identity_key=eq.${q(k)}`, {
+        method: 'DELETE',
+        headers: { Prefer: 'return=minimal' },
+      }),
     putBinding: (row) =>
       req('bwallet_name_bindings', {
         method: 'POST',
