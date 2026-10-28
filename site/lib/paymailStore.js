@@ -141,6 +141,13 @@ function supabaseStore(env = process.env, f = fetch) {
           `bwallet_paymail_name_events?ip_hash=eq.${q(ipHash)}&created_at=gte.${q(since)}&select=id&limit=1000`,
         )) ?? []
       ).length,
+    // New names (claim or rename) by one wallet since a time: the per-key daily cap (owner, 28 Oct 2026).
+    countKeyClaims: async (identityKey, since) =>
+      (
+        (await req(
+          `bwallet_paymail_name_events?identity_key=eq.${q(identityKey)}&created_at=gte.${q(since)}&select=id&limit=1000`,
+        )) ?? []
+      ).length,
     // Link your accounts (migrations/20261018_social_links.sql): wallet-signed, provider-proved links.
     putSocialLink: (row) =>
       req('bwallet_social_links?on_conflict=provider,account', {

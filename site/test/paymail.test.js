@@ -165,41 +165,41 @@ describe('register', () => {
     // A wallet with a plain name keeps it when it adds its verified X name.
     const w = user();
     expect((await h.register({}, await w.sign('register', { alias: 'wplain' })))[0]).toBe(200);
-    allowed.set('w-x.x', 'ticket-w');
+    allowed.set('w-xy.x', 'ticket-w');
     expect(
       (
         await h.register(
           {},
-          { ...(await w.sign('register', { alias: 'w-x.x' })), social: { ticket: 'ticket-w', secret: 's' } },
+          { ...(await w.sign('register', { alias: 'w-xy.x' })), social: { ticket: 'ticket-w', secret: 's' } },
         )
       )[0],
     ).toBe(200);
     expect(store.aliases.has('wplain')).toBe(true);
-    expect(store.aliases.get('w-x.x').kind).toBe('x');
+    expect(store.aliases.get('w-xy.x').kind).toBe('x');
     // Its owner can update the profile (e.g. publish a photo) without a fresh X sign-in; the name is kept.
     expect(
-      (await h.register({}, await w.sign('register', { alias: 'w-x.x', avatar: 'https://img.test/a.png' })))[0],
+      (await h.register({}, await w.sign('register', { alias: 'w-xy.x', avatar: 'https://img.test/a.png' })))[0],
     ).toBe(200);
-    expect(store.aliases.get('w-x.x').avatar).toBe('https://img.test/a.png');
+    expect(store.aliases.get('w-xy.x').avatar).toBe('https://img.test/a.png');
     // Nobody else can, without proof.
-    expect((await h.register({}, await v.sign('register', { alias: 'w-x.x' })))[0]).toBe(403);
+    expect((await h.register({}, await v.sign('register', { alias: 'w-xy.x' })))[0]).toBe(403);
     // The wallet already had a plain name it chose, so that stays its main name; the X name also receives.
     expect((await h.lookup({ key: w.identityKey }))[1].alias).toBe('wplain');
     // Market › Social: every kind of name, tagged with its kind.
     const people = (await h.social({ provider: 'all' }))[1].accounts;
-    expect(people.find((a) => a.alias === 'w-x.x')?.kind).toBe('x');
+    expect(people.find((a) => a.alias === 'w-xy.x')?.kind).toBe('x');
     expect(people.find((a) => a.alias === 'wplain')?.kind).toBe('plain');
     expect((await h.social({ provider: 'x' }))[1].accounts.every((a) => a.kind === 'x')).toBe(true);
     // Both names are listed, so neither receives invisibly.
     expect((await h.lookup({ key: w.identityKey }))[1].names).toEqual([
       { paymail: 'wplain@pay.test', kind: 'plain', main: true },
-      { paymail: 'w-x.x@pay.test', kind: 'x', main: false },
+      { paymail: 'w-xy.x@pay.test', kind: 'x', main: false },
     ]);
     // Users choose their handle (owner, 9 Oct 2026): a plain rename keeps the X name receiving.
     expect((await h.register({}, await w.sign('register', { alias: 'wother' })))[0]).toBe(200);
     expect(store.aliases.has('wother')).toBe(true);
     expect(store.aliases.has('wplain')).toBe(false);
-    expect(store.aliases.get('w-x.x').kind).toBe('x');
+    expect(store.aliases.get('w-xy.x').kind).toBe('x');
     // A wallet with only a verified X name can still choose a plain handle.
     const x = user();
     allowed.set('xonly.x', 'ticket-x');
@@ -234,9 +234,9 @@ describe('register', () => {
       (await h.appsPut({}, await w.sign('apps-put', { apps: JSON.stringify([{ url: 'http://x.com' }]) })))[0],
     ).toBe(400);
     // Unlink: only the owner can, and the next name becomes main.
-    expect((await h.unlink({}, await v.sign('unlink', { alias: 'w-x.x' })))[0]).toBe(404);
-    expect((await h.unlink({}, await w.sign('unlink', { alias: 'w-x.x' })))[0]).toBe(200);
-    expect(store.aliases.has('w-x.x')).toBe(false);
+    expect((await h.unlink({}, await v.sign('unlink', { alias: 'w-xy.x' })))[0]).toBe(404);
+    expect((await h.unlink({}, await w.sign('unlink', { alias: 'w-xy.x' })))[0]).toBe(200);
+    expect(store.aliases.has('w-xy.x')).toBe(false);
     expect((await h.lookup({ key: w.identityKey }))[1].alias).toBe('wother');
     // Once taken, the same X name can't be registered to a second wallet.
     expect((await h.register({}, { ...(await v.sign('register', { alias: 'b0asex.x' })), social }))[0]).toBe(409);
@@ -828,13 +828,11 @@ describe('name pricing (owner, 27 Oct 2026): by length, 5+ free, 4 $10, 3 $100, 
     expect((await h['names-add']({}, await u.sign('names-add', { alias: 'xyz', feeTxid: hundred.id('hex') })))[0]).toBe(
       200,
     );
+    // Two-character names are now kept for bCorp and staff (owner, 28 Oct 2026): not for sale at any price.
     expect((await h['names-add']({}, await u.sign('names-add', { alias: 'qz', feeTxid: thousand.id('hex') })))[0]).toBe(
-      200,
+      400,
     );
-    expect(store.receipts.map((r) => [r.alias, r.usd, r.kind])).toEqual([
-      ['xyz', 100, 'extra'],
-      ['qz', 1000, 'extra'],
-    ]);
+    expect(store.receipts.map((r) => [r.alias, r.usd, r.kind])).toEqual([['xyz', 100, 'extra']]);
   });
 
   test('reserved and bCorp-held names are never sellable, even with a big valid payment', async () => {
@@ -861,7 +859,7 @@ describe('name pricing (owner, 27 Oct 2026): by length, 5+ free, 4 $10, 3 $100, 
     expect(await st('newname')).toEqual(['free', 0]);
     expect(await st('abcd')).toEqual(['priced', 10]);
     expect(await st('abc')).toEqual(['priced', 100]);
-    expect(await st('qz')).toEqual(['priced', 1000]);
+    expect(await st('qz')).toEqual(['reserved', null]); // two characters: kept for bCorp (28 Oct 2026)
     await h.register({}, await u.sign('register', { alias: 'owned' }));
     expect(await st('owned')).toEqual(['taken', null]);
     expect(await st('owned', u.identityKey)).toEqual(['mine', 0]);
@@ -1065,5 +1063,187 @@ describe('signed requests are used once (b-Aware 26 Oct 2026, N3-6)', () => {
 describe('P2P destination hourly limits', () => {
   test('business accounts (npg, bcorp) get 20000/h, everyone else 200', () => {
     expect(pm.P2P_HOURLY_LIMITS).toEqual({ npg: 20000, bcorp: 20000 });
+  });
+});
+
+// ---- anti-impersonation (owner, 28 Oct 2026: "the fake and phishing problems are real, fix those first") ----
+describe('anti-impersonation handles', () => {
+  const BCORP = '03c96b37e69377c8af33b583067f56444c83a656b05014e8f15003e67250943880';
+  test('look-alikes of reserved names are refused', () => {
+    for (const a of [
+      'adrnin',
+      'he1p',
+      'supp0rt',
+      's3curity',
+      'b-corp',
+      'bc0rp',
+      'b_c_o_r_p',
+      'm0ney',
+      'rnoney',
+      'vvallet',
+      'touma_n',
+    ])
+      expect([a, pm.validAlias(a)]).toEqual([a, 'That alias is reserved']);
+  });
+  test('brand + role word is refused, either way round', () => {
+    for (const a of [
+      'bwalletsupport',
+      'bcorp-help',
+      'bchatx_official',
+      'kintsugiteam',
+      'supportbwallet',
+      'bmailrefund',
+      'b-support',
+      'bsecurity',
+      'bwalletx',
+      'bitcoincorp',
+      'bgitx',
+      'bsignx',
+    ])
+      expect([a, pm.validAlias(a)]).toEqual([a, 'That alias is reserved']);
+  });
+  test('the social suffixes are refused the same way', () => {
+    for (const a of ['bcorpsupport.x', 'bwa11et.x', 'kintsugi.gmail', 'ab.x'])
+      expect([a, pm.validAlias(a)]).toEqual([a, 'That alias is reserved']);
+  });
+  test('every two-character name (00-99 too) is reserved, and anything folding to two', () => {
+    for (const a of ['ab', 'zz', '00', '42', '99', 'a1', 'a-b', 'o_0'])
+      expect([a, pm.validAlias(a)]).toEqual([a, 'That alias is reserved']);
+  });
+  test('1 is read as both l and i', () => {
+    for (const a of ['adm1n', 'k1ntsugi', 'he1p', 'b1tcoincorp', 'offic1al'])
+      expect([a, pm.validAlias(a)]).toEqual([a, 'That alias is reserved']);
+  });
+  test('both brand keys are one list: bCorp and the bWalletX brand account', () => {
+    expect(pm.BRAND_KEYS).toEqual([BCORP, pm.RESERVED_OWNERS.bwalletx]);
+  });
+  test('the bWalletX brand account may claim a held name; others still cannot', async () => {
+    const h = pm.makeHandlers({ store: memStore(), env: ENV });
+    expect((await h.available({ alias: 'bwalletsupport', key: pm.RESERVED_OWNERS.bwalletx }))[1].status).toBe('free');
+    expect((await h.available({ alias: 'bwalletsupport', key: user().identityKey }))[1].status).toBe('reserved');
+  });
+  test('false-positive guards: ordinary names still pass', () => {
+    for (const a of [
+      'bob',
+      'bella',
+      'ab12cd',
+      'bi11y',
+      'mi1es',
+      'a1autos',
+      'abc',
+      'bobcorp',
+      'barbara',
+      'mike_b',
+      'helpful',
+      'walleted',
+      'b0asex',
+    ])
+      expect([a, pm.validAlias(a)]).toEqual([a, null]);
+  });
+  test('bCorp may claim a held name; nobody else can; an existing holder keeps theirs', async () => {
+    const store = memStore();
+    const h = pm.makeHandlers({ store, env: ENV });
+    const u = user();
+    expect((await h.register({}, await u.sign('register', { alias: 'bwalletsupport' })))[0]).toBe(400);
+    expect((await h.available({ alias: 'bwalletsupport', key: u.identityKey }))[1].status).toBe('reserved');
+    expect((await h.available({ alias: 'zz', key: BCORP }))[1].status).toBe('free');
+    // Someone who held "ab" before the rule can still update it.
+    const old = user();
+    store.aliases.set('ab', { alias: 'ab', identity_key: old.identityKey, kind: 'plain', display_name: 'Ab' });
+    expect(
+      (await h.register({}, await old.sign('register', { alias: 'ab', avatar: 'https://img.test/a.png' })))[0],
+    ).toBe(200);
+  });
+  test('renaming away from a now-reserved name leaves no forward; old forwards stay', async () => {
+    const store = memStore();
+    const h = pm.makeHandlers({ store, env: ENV });
+    const u = user();
+    store.aliases.set('bcorp-help', { alias: 'bcorp-help', identity_key: u.identityKey, kind: 'plain' });
+    store.forwards.set('oldfwd', {
+      from_alias: 'oldfwd',
+      to_alias: 'bcorp-help',
+      identity_key: u.identityKey,
+      expires_at: new Date(Date.now() + 1e9).toISOString(),
+    });
+    expect((await h.register({}, await u.sign('register', { alias: 'freshname' })))[0]).toBe(200);
+    expect(store.forwards.has('bcorp-help')).toBe(false);
+    expect(store.forwards.get('oldfwd').to_alias).toBe('freshname');
+    // An ordinary rename still forwards.
+    expect((await h.register({}, await u.sign('register', { alias: 'freshname2' })))[0]).toBe(200);
+    expect(store.forwards.get('freshname').to_alias).toBe('freshname2');
+  });
+});
+
+describe('anti-impersonation display names', () => {
+  test('a brand in the display name is refused at register and set-name', async () => {
+    const store = memStore();
+    store.setDisplayNameByKey = async (k, n) => {
+      for (const r of store.aliases.values()) if (r.identity_key === k) r.display_name = n;
+    };
+    const h = pm.makeHandlers({ store, env: ENV });
+    const u = user();
+    for (const name of [
+      'bCorp Support',
+      'B Wallet',
+      'Bitcoin Corp',
+      'Kintsugi',
+      'bChat0fficial',
+      'b support',
+      'BWALLETX2',
+      'Official B',
+    ])
+      expect([name, (await h.register({}, await u.sign('register', { alias: 'mikename', name })))[0]]).toEqual([
+        name,
+        400,
+      ]);
+    expect((await h.register({}, await u.sign('register', { alias: 'mikename', name: 'Mike B' })))[0]).toBe(200);
+    expect((await h['set-name']({}, await u.sign('set-name', { name: 'bCorp Staff' })))[0]).toBe(400);
+    for (const name of ['Bob', 'Bella Corp', 'Bob Corp', 'Barbara Wallet']) {
+      const [s, r] = await h['set-name']({}, await u.sign('set-name', { name }));
+      expect([name, s, r.name]).toEqual([name, 200, name]);
+    }
+  });
+  test('the guard itself: brand words, spacing and look-alikes; ordinary names pass', async () => {
+    const { brandInDisplayName } = await import('../lib/brandGuard.js');
+    for (const n of [
+      'The Bitcoin Corporation',
+      'bCorp',
+      'b-wallet x',
+      'B C0RP',
+      'K1ntsugi',
+      'Adm1n bCorp',
+      'bmail help desk',
+    ])
+      expect([n, brandInDisplayName(n)]).toEqual([n, true]);
+    for (const n of ['Bob', 'Bella', 'Mike B', 'B. B. King', 'Bob Corp', 'Ab12cd'])
+      expect([n, brandInDisplayName(n)]).toEqual([n, false]);
+  });
+});
+
+describe('daily new-name cap per wallet', () => {
+  test('a 4th new name from one key in 24h is refused with a clear message', async () => {
+    const s = antiStore();
+    s.countKeyClaims = async (k, since) => s.events.filter((e) => e.identity_key === k && e.created_at >= since).length;
+    s.insertExtraAlias = async (r) => {
+      const row = { ...r, kind: 'plain', is_primary: false };
+      s.aliases.set(r.alias, row);
+      return row;
+    };
+    const h = pm.makeHandlers({ store: s, env: ENV });
+    const u = user();
+    expect((await h.register({}, await u.sign('register', { alias: 'mainname' })))[0]).toBe(200);
+    expect((await h['names-add']({}, await u.sign('names-add', { alias: 'extraone' })))[0]).toBe(200);
+    expect((await h['names-add']({}, await u.sign('names-add', { alias: 'extratwo' })))[0]).toBe(200);
+    const [st, r] = await h['names-add']({}, await u.sign('names-add', { alias: 'extrathree' }));
+    expect(st).toBe(429);
+    expect(r.error).toBe('This wallet has taken 3 new names today. Try again tomorrow.');
+  });
+  test('three new names per network per day by default', async () => {
+    const s = antiStore();
+    const h = pm.makeHandlers({ store: s, env: ENV });
+    const ctx = { ip: '203.0.113.9' };
+    for (const a of ['netone', 'nettwo', 'netthree'])
+      expect((await h.register({}, await user().sign('register', { alias: a }), ctx))[0]).toBe(200);
+    expect((await h.register({}, await user().sign('register', { alias: 'netfour' }), ctx))[0]).toBe(429);
   });
 });

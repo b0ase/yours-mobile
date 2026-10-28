@@ -34,6 +34,7 @@ import { SwipeRow, type SwipeAction } from '../swipe/SwipeRow';
 import { showUndo, UndoToastHost } from '../swipe/undo';
 import { binDaysLeft } from './store';
 import { mailSegments } from './links';
+import { asksForSecrets, LOOKALIKE_TEXT, SECRETS_TEXT, senderTrust, VERIFIED_TEXT } from './senderTrust';
 import { listShortcut } from '../swipe/listKeys';
 import { useBackClose } from '../backStack';
 import { isFriend as isCallFriend } from '../calls/friends';
@@ -592,10 +593,27 @@ const Reader = ({
       .finally(() => setBusy(false));
   };
   const credit = !!r.env.replyPaidSats && r.verifiedSats > 0 && !creditUsed;
+  // Display-only anti-phishing (owner, 28 Oct 2026): never blocks delivery.
+  const trust = senderTrust(r.from, label);
   return (
     <div className="flex flex-col gap-3">
       <div className="bw-mail-card p-4 flex flex-col gap-1.5">
         <div className="text-sm text-white font-semibold">From {label}</div>
+        {trust === 'verified' && (
+          <div className="text-[11px] font-semibold" style={{ color: '#32D583' }} data-testid="bmail-verified">
+            ✓ {VERIFIED_TEXT}
+          </div>
+        )}
+        {trust === 'lookalike' && (
+          <div
+            role="alert"
+            className="text-[12px] font-semibold rounded-md px-2 py-1"
+            style={{ color: '#fff', background: '#D92D20' }}
+            data-testid="bmail-lookalike"
+          >
+            {LOOKALIKE_TEXT}
+          </div>
+        )}
         <div className="text-[11px] break-all" style={{ color: MUTED }}>
           {r.from}
         </div>
@@ -618,6 +636,16 @@ const Reader = ({
       ) : (
         <div className="bw-mail-card bw-mail-letter flex flex-col gap-3">
           <div className="text-lg font-bold text-white">{mail.subject || '(no subject)'}</div>
+          {asksForSecrets(`${mail.subject ?? ''}\n${mail.body ?? ''}`) && (
+            <div
+              role="alert"
+              className="text-[12px] font-semibold rounded-md px-3 py-2"
+              style={{ color: '#fff', background: '#B42318' }}
+              data-testid="bmail-secrets-warning"
+            >
+              {SECRETS_TEXT}
+            </div>
+          )}
           <div className="bw-mail-body whitespace-pre-wrap break-words">
             {mailSegments(mail.body, trusted).map((seg, n) =>
               seg.href ? (
