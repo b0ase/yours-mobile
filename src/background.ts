@@ -182,6 +182,7 @@ import { Account, ChromeStorageObject, StorageConfig } from './services/types/ch
 import { ChromeStorageService } from './services/ChromeStorage.service';
 import {
   denyAllOneSatPrompts,
+  denyOneSatPromptsFor,
   getPendingOneSatPrompt,
   handleOneSatPermissionResponse,
   initOneSatPromptBridge,
@@ -6452,6 +6453,8 @@ if (!(
     for (const [, pending] of takePendingFor(pendingStreamGrantRequests, originator)) pending.resolve(null);
     for (const [, pending] of takePendingFor(pendingMintPrivateRequests, originator)) pending.resolve(false);
     for (const [, pending] of takePendingFor(pendingTwetchRequests, originator)) pending.resolve(false);
+    // 1Sat permission-module sheets too (H-6, b-Aware 28 Oct 2026): Approve after Forget site must write nothing.
+    denyOneSatPromptsFor(originator);
     closeDappPopupIfNoUi();
   };
 

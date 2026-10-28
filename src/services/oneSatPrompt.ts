@@ -15,6 +15,7 @@
  */
 
 import type { PromptRequest } from '@1sat/permission-module';
+import { takePendingFor } from './pairedPromptGuard';
 
 export interface OneSatPromptStorageEntry {
   requestID: string;
@@ -92,6 +93,17 @@ export const denyAllOneSatPrompts = (): void => {
   }
   pending.clear();
 };
+
+/**
+ * Deny every pending prompt from `originator` (Forget site / disconnect). Without this an open 1Sat sheet outlived
+ * Forget site, and Approve on it then wrote a lasting grant for the forgotten site (b-Aware 28 Oct 2026, H-6).
+ * Returns the denied requestIDs.
+ */
+export const denyOneSatPromptsFor = (originator: string): string[] =>
+  takePendingFor(pending, originator).map(([id, entry]) => {
+    entry.resolve(false);
+    return id;
+  });
 
 const generateRequestID = (): string => {
   const bytes = crypto.getRandomValues(new Uint8Array(8));
