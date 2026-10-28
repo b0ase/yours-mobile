@@ -42,7 +42,8 @@ export type PayeeDestination = { address: string; pubkey?: string };
 export const payeeDestination = (p: Payee, r: Resolved, opts: { ignorePin?: boolean } = {}): PayeeDestination => {
   const d = destinationFor(r, 'bsv');
   if (!d.ok) {
-    if (r.nameBinding === 'bad' || r.nameBinding === 'changed') throw new PayeeReviewError(d.error, r.pubkey);
+    if (r.nameBinding === 'bad' || r.nameBinding === 'changed' || (r.nameProof && r.nameProof.status !== 'proven'))
+      throw new PayeeReviewError(d.error, r.pubkey);
     throw new Error(d.error);
   }
   if (p.pinnedKey && !opts.ignorePin) {

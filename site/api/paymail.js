@@ -51,6 +51,10 @@ const ROUTES = {
   // Signed name bindings + public log (docs/NAME-BINDINGS.md).
   bind: ['POST', 'bind'],
   'name-log': ['GET', 'name-log'],
+  // Provable names (docs/PROVABLE-NAMES.md): store a provider-signed proof; read one; the archived provider keys.
+  prove: ['POST', 'prove'],
+  'name-proof': ['GET', 'name-proof'],
+  'provider-keys': ['GET', 'provider-keys'],
   // Two-party handovers: the owner releases, the recipient accepts; no operator recovery.
   'handover-release': ['POST', 'handover-release'],
   'handover-cancel': ['POST', 'handover-cancel'],

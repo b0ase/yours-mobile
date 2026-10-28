@@ -15,11 +15,17 @@
 //      GOOGLE_CLIENT_SECRET, GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET, LINKEDIN_CLIENT_ID /
 //      LINKEDIN_CLIENT_SECRET, SOCIAL_BASE_URL (optional, default https://pay.bwallet.space).
 //
+// Provable names (owner, 28 Oct 2026; bitcoin-corp docs/PROVABLE-NAMES.md): start with proof_key (the wallet's
+// identity key) and Google / LinkedIn put proofNonce(proof_key) in the ID token's nonce. The ticket then carries that
+// raw ID token (`it`) so the paymail server can store it as the name's proof (paymail.js 'prove').
+//
 // "Link your accounts" (owner, 18 Oct 2026): the same tickets prove an X / Google / GitHub / LinkedIn account
 // for a link the wallet signs with its identity key. A provider without its env pair answers 503 and
 // `providers` reports it off, so the app shows that row as coming soon instead of a broken button.
 'use strict';
 const crypto = require('crypto');
+const { proofNonce } = require('./nameProof');
+const PUBKEY_RE = /^0[23][0-9a-f]{64}$/;
 
 const TTL_MS = 10 * 60_000;
 const RETURN = 'https://www.bwallet.space/social';
@@ -80,6 +86,9 @@ function openTicket(ticket, secret, env = process.env, now = Date.now()) {
     // New clients: open "Choose your handle" prefilled with suggested_handle (the X @name only).
     choose_handle: true,
     suggested_handle: suggestedHandleFor(t.p, t.name),
+    // Provable names (docs/PROVABLE-NAMES.md): the provider-signed ID token whose nonce binds proof_key. Only when
+    // the sign-in was started with a proof_key; never an access or refresh token.
+    ...(t.it ? { id_token: t.it, proof_key: t.pk } : {}),
   };
 }
 
@@ -117,8 +126,11 @@ const configured = (provider, env) => !!ENV_PAIR[provider] && ENV_PAIR[provider]
 /** Which providers can link right now (no secrets, just on/off). */
 const providers = (env = process.env) => Object.fromEntries(PROVIDERS.map((p) => [p, configured(p, env)]));
 
-function start({ provider, verifier_hash: vh, return_to }, env = process.env, now = Date.now()) {
+function start({ provider, verifier_hash: vh, return_to, proof_key }, env = process.env, now = Date.now()) {
   const r = Object.hasOwn(RETURNS, return_to) && return_to !== 'app' ? return_to : undefined;
+  // Provable names: Google / LinkedIn sign the wallet's key into the ID token's nonce (OpenID Connect).
+  const pk = PUBKEY_RE.test(String(proof_key || '').toLowerCase()) ? String(proof_key).toLowerCase() : undefined;
+  if (proof_key !== undefined && !pk) return [400, { error: 'proof_key must be a compressed public key' }];
   if (!PROVIDERS.includes(provider)) return [400, { error: 'provider must be x, google, github or linkedin' }];
   if (!/^[0-9a-f]{64}$/.test(String(vh || ''))) return [400, { error: 'verifier_hash must be sha256 hex' }];
   const e = now + TTL_MS;
@@ -158,7 +170,8 @@ function start({ provider, verifier_hash: vh, return_to }, env = process.env, no
       client_id: env.LINKEDIN_CLIENT_ID,
       redirect_uri: redirectUri('linkedin', env),
       scope: 'openid profile',
-      state: seal({ p: 'linkedin', vh, e, r }, env),
+      state: seal({ p: 'linkedin', vh, e, r, pk }, env),
+      ...(pk ? { nonce: proofNonce(pk) } : {}),
     }).toString();
     return [200, { authorizeUrl: u.toString() }];
   }
@@ -170,9 +183,10 @@ function start({ provider, verifier_hash: vh, return_to }, env = process.env, no
     redirect_uri: redirectUri('google', env),
     response_type: 'code',
     scope: 'openid email profile',
-    state: seal({ p: 'google', vh, e, r }, env),
+    state: seal({ p: 'google', vh, e, r, pk }, env),
     access_type: 'online',
     prompt: 'select_account',
+    ...(pk ? { nonce: proofNonce(pk) } : {}),
   }).toString();
   return [200, { authorizeUrl: u.toString() }];
 }
@@ -187,6 +201,9 @@ async function callback(provider, q, env = process.env, f = fetch, now = Date.no
     return returnUrl({ error: q.error === 'access_denied' ? 'cancelled' : q.error || 'cancelled' }, to);
   try {
     let user;
+    // The provider-signed ID token, kept only when the sign-in asked for a proof (st.pk). Access tokens are used for
+    // the one profile read below and dropped.
+    let idToken;
     if (provider === 'x') {
       const tok = await f('https://api.x.com/2/oauth2/token', {
         method: 'POST',
@@ -246,6 +263,7 @@ async function callback(provider, q, env = process.env, f = fetch, now = Date.no
         headers: { Authorization: `Bearer ${tok.access_token}` },
       }).then((r) => r.json());
       if (!me.sub) throw new Error('Could not read the LinkedIn account');
+      if (st.pk && typeof tok.id_token === 'string') idToken = tok.id_token;
       // LinkedIn has no public @name: the opaque member id stands in, and only the display name is shown.
       user = { id: String(me.sub), name: String(me.sub), d: me.name, a: me.picture };
     } else {
@@ -267,6 +285,7 @@ async function callback(provider, q, env = process.env, f = fetch, now = Date.no
       // Google's own word that the address is theirs; an unverified email proves nothing.
       if (!u.id || !u.email || u.verified_email !== true) throw new Error('Google did not confirm that email address');
       user = { id: String(u.id), name: u.email, d: u.name, a: u.picture };
+      if (st.pk && typeof tok.id_token === 'string') idToken = tok.id_token;
     }
     const ticket = seal(
       {
@@ -277,6 +296,7 @@ async function callback(provider, q, env = process.env, f = fetch, now = Date.no
         a: user.a,
         vh: st.vh,
         e: now + TTL_MS,
+        ...(idToken ? { it: idToken, pk: st.pk } : {}),
       },
       env,
     );
