@@ -86,6 +86,22 @@ const hashIp = (ip, env = process.env) =>
 const dayText = (ms) =>
   new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
 /** Premium names held for The Bitcoin Corporation Ltd; only bCorp's key may claim them (owner, 27 Oct 2026). */
+/** bCorp's function agents (owner, 28 Oct 2026): blog writer, feature pages, Hodl my b, share cards, bAds director, … */
+const AGENT_HANDLES = [
+  'blog',
+  'features',
+  'hodlmyb',
+  'og',
+  'bads',
+  'releases',
+  'support',
+  'ops',
+  'bugs',
+  'partners',
+  'kintsugi',
+  'agents',
+  'swarm',
+];
 const PREMIUM_BCORP = [
   'money',
   'cash',
@@ -401,6 +417,8 @@ const RESERVED_OWNERS = Object.freeze({
   bitchat: '030dd811f969987f2f6ec023535cb8839c496fccf4feb7799293ec13ff09d263b7',
   bitchatx: '030dd811f969987f2f6ec023535cb8839c496fccf4feb7799293ec13ff09d263b7',
   ...Object.fromEntries(PREMIUM_BCORP.map((n) => [n, BCORP_KEY])),
+  // bCorp's function agents (owner, 28 Oct 2026): each will get its own capped agent key; held by bCorp until then.
+  ...Object.fromEntries(AGENT_HANDLES.map((n) => [n, BCORP_KEY])),
   // Touman, our first Play beta tester (owner, 27 Oct 2026).
   touman: '030f8d4f47ae853abf8adc939520d360213193709fc846989a436add16d0b946e7',
 });
