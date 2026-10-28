@@ -192,7 +192,9 @@ function supabaseStore(env = process.env, f = fetch) {
       )) ?? [],
     // Provable names (migrations/20261028_name_proofs.sql).
     getProof: (alias) =>
-      one(`bwallet_name_proofs?alias=eq.${q(alias)}&select=alias,provider,sub,identity_key,id_token,created_at&limit=1`),
+      one(
+        `bwallet_name_proofs?alias=eq.${q(alias)}&select=alias,provider,sub,identity_key,id_token,created_at&limit=1`,
+      ),
     putProof: (row) =>
       req('bwallet_name_proofs', {
         method: 'POST',
