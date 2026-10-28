@@ -35,6 +35,7 @@ import {
   type UnsentWallet,
 } from '../../services/unsentGuard';
 import { assertNotPaused } from '../config/killSwitch';
+import { cappedOverlayFee } from '../wallet/send/tokenFee';
 
 /** Token id equality (dot or underscore outpoint form). */
 const normalizeBsv21TokenId = (id: string) => id.trim().toLowerCase().replace('.', '_');
@@ -392,12 +393,12 @@ async function payForMessageOnce(
       }),
     });
   }
-  const feeAddr = details.status?.fee_address;
-  const feePer = details.status?.fee_per_output;
-  if (typeof feeAddr === 'string' && feeAddr && typeof feePer === 'number' && feePer > 0) {
+  // Capped (H-5, b-Aware 28 Oct 2026): the indexer's per-output fee is read at spend time.
+  const overlay = cappedOverlayFee(details.status?.fee_address, details.status?.fee_per_output, tokenOuts);
+  if (overlay) {
     outputs.push({
-      lockingScript: new P2PKH().lock(feeAddr).toHex(),
-      satoshis: feePer * tokenOuts,
+      lockingScript: new P2PKH().lock(overlay.address).toHex(),
+      satoshis: overlay.sats,
       outputDescription: 'Overlay processing fee',
     });
   }
