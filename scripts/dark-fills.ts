@@ -71,6 +71,7 @@ export const BG_BLACK_MEDIA = [
   'mobile/exchange/MoviesMarket.tsx',
   'mobile/mint/MintButton.tsx',
   'mobile/chat/RoomMedia.tsx',
+  'mobile/chat/GameRoomPlayer.tsx',
   'mobile/airdrops/AirdropNft.tsx',
   'mobile/spaces/SpaceScreen.tsx',
   'mobile/nfts/NftLibraryPage.tsx',

@@ -198,25 +198,29 @@ export const BundleSheet = (props: {
   const payLabel = model.payment ? dollarsInline(model.payment.satoshis, price) : '';
   const allowanceSetsUsd = showAllowance && allowanceOn && allowanceUsd > 0 ? allowanceUsd : 0;
   const reconnect = request.items.some((r) => r.reconnect);
-  const primary = reconnect
-    ? 'Reconnect'
-    : mint
-      ? `${mint.title.split(' ')[0]} · ${payLabel}`
-      : kind === 'post'
-        ? model.payment
-          ? `Allow & pay ${payLabel}`
-          : 'Allow posting'
-        : kind === 'private'
-          ? 'Allow'
-          : kind === 'signin'
-            ? 'Connect and sign in'
-            : kind === 'pay'
-              ? model.mode === 'connectAndPay'
-                ? `Connect & pay ${payLabel}`
-                : `Pay ${payLabel}`
-              : many
-                ? 'Allow all'
-                : 'Connect';
+  // A site framed by another asking for the first time inside it (services/frameAccess.ts).
+  const framePair = request.items.find((r) => r.framePair)?.framePair;
+  const primary = framePair
+    ? 'Allow inside this site'
+    : reconnect
+      ? 'Reconnect'
+      : mint
+        ? `${mint.title.split(' ')[0]} · ${payLabel}`
+        : kind === 'post'
+          ? model.payment
+            ? `Allow & pay ${payLabel}`
+            : 'Allow posting'
+          : kind === 'private'
+            ? 'Allow'
+            : kind === 'signin'
+              ? 'Connect and sign in'
+              : kind === 'pay'
+                ? model.mode === 'connectAndPay'
+                  ? `Connect & pay ${payLabel}`
+                  : `Pay ${payLabel}`
+                : many
+                  ? 'Allow all'
+                  : 'Connect';
   // A requested line left unticked is named on the button (owner, 26 Oct 2026: Connect silently left "bchat
   // documents" ungranted). Display only: the decisions are the ticks as drawn.
   const leftOut = withoutSuffix(model.lines, (i) => isChecked(model.lines[i].requestID, model.lines[i].checked));
@@ -630,6 +634,24 @@ export const BundleSheet = (props: {
           <Check />
           No money moves
         </Chip>
+      </div>
+    );
+  } else if (framePair) {
+    hero = <ConnectHero site={request.originator} />;
+    siteSub = `Inside ${framePair}`;
+    title = (
+      <>
+        Let {gold(name)} use your wallet inside {gold(framePair)}?
+      </>
+    );
+    body = (
+      <div className="flex flex-col" style={{ gap: 8, marginTop: 4, fontSize: 13 }}>
+        <span>
+          {request.originator} is shown inside {framePair}. Only allow it if you opened it there yourself.
+        </span>
+        <span style={{ color: CARD.muted, fontSize: 12 }}>
+          After this, what you already allowed {request.originator} applies here too.
+        </span>
       </div>
     );
   } else if (reconnect && kind === 'signin') {

@@ -265,6 +265,12 @@ export interface InitWalletOptions {
   beforeSync?: (ctx: { storage: WalletStorageManager }) => Promise<void>;
   /** Runs once the address sync has completed (not on its failure). Errors are logged, never thrown. */
   afterSync?: (ctx: { storage: WalletStorageManager }) => Promise<void>;
+  /**
+   * The address and message-box syncs start once the returned promise resolves (default: at once). The extension
+   * holds them back while a site waits for its approval sheet, so the sheet's permission check is not queued behind
+   * their storage locks (services/sheetFirst.ts).
+   */
+  startSyncsAfter?: () => Promise<void>;
 }
 
 /**
@@ -1002,17 +1008,26 @@ export const initWallet = async (
     if (!addressSync.busy()) quietRun = options?.quiet ?? false;
     return addressSync.run();
   };
-  void resyncAddresses();
+  // Closed (locked, account switched) before the gate opened: the held-back syncs never start on a closed wallet.
+  let walletClosed = false;
+  const syncsMayStart = (options?.startSyncsAfter?.() ?? Promise.resolve()).then(() => {
+    if (walletClosed) throw new Error('wallet closed before its syncs started');
+  });
+  void syncsMayStart.then(
+    () => resyncAddresses(),
+    () => undefined,
+  );
 
   // Sync incoming paymail payments from the message box (fire-and-forget)
-  syncMessages
-    .execute(actionCtx, { messageboxUrl: MESSAGEBOX_URL })
+  void syncsMayStart
+    .then(() => syncMessages.execute(actionCtx, { messageboxUrl: MESSAGEBOX_URL }))
     .then((result) => {
       if (result.processed > 0 || result.failed > 0) {
         console.log('[initWallet] Message box sync complete:', result);
       }
     })
     .catch((error: unknown) => {
+      if (walletClosed) return;
       console.error('[initWallet] Message box sync failed:', error);
     });
 
@@ -1097,6 +1112,7 @@ export const initWallet = async (
     });
 
   const close = async () => {
+    walletClosed = true;
     await destroyWallet();
   };
 

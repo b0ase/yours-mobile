@@ -34,6 +34,7 @@ import { SwipeRow, type SwipeAction } from '../swipe/SwipeRow';
 import { showUndo, UndoToastHost } from '../swipe/undo';
 import { binDaysLeft } from './store';
 import { mailSegments } from './links';
+import { asksForSecrets, LOOKALIKE_TEXT, SECRETS_TEXT, senderTrust, VERIFIED_TEXT } from './senderTrust';
 import { listShortcut } from '../swipe/listKeys';
 import { useBackClose } from '../backStack';
 import { isFriend as isCallFriend } from '../calls/friends';
@@ -83,6 +84,7 @@ import {
   type TierId,
 } from './route';
 import type { Received, Sent } from './store';
+import { SentReader } from './SentReader';
 import { OPEN_BMAIL_EVENT, takeBMailComposeTo, takeBMailDraft, takeBMailMeeting } from './store';
 import { canJoinMeeting, findMeetingLink, MEETING_EARLY_MS } from './meeting';
 import { takeRouteFrom } from '../push/register';
@@ -591,10 +593,27 @@ const Reader = ({
       .finally(() => setBusy(false));
   };
   const credit = !!r.env.replyPaidSats && r.verifiedSats > 0 && !creditUsed;
+  // Display-only anti-phishing (owner, 28 Oct 2026): never blocks delivery.
+  const trust = senderTrust(r.from, label);
   return (
     <div className="flex flex-col gap-3">
       <div className="bw-mail-card p-4 flex flex-col gap-1.5">
         <div className="text-sm text-white font-semibold">From {label}</div>
+        {trust === 'verified' && (
+          <div className="text-[11px] font-semibold" style={{ color: '#32D583' }} data-testid="bmail-verified">
+            ✓ {VERIFIED_TEXT}
+          </div>
+        )}
+        {trust === 'lookalike' && (
+          <div
+            role="alert"
+            className="text-[12px] font-semibold rounded-md px-2 py-1"
+            style={{ color: '#fff', background: '#D92D20' }}
+            data-testid="bmail-lookalike"
+          >
+            {LOOKALIKE_TEXT}
+          </div>
+        )}
         <div className="text-[11px] break-all" style={{ color: MUTED }}>
           {r.from}
         </div>
@@ -617,6 +636,16 @@ const Reader = ({
       ) : (
         <div className="bw-mail-card bw-mail-letter flex flex-col gap-3">
           <div className="text-lg font-bold text-white">{mail.subject || '(no subject)'}</div>
+          {asksForSecrets(`${mail.subject ?? ''}\n${mail.body ?? ''}`) && (
+            <div
+              role="alert"
+              className="text-[12px] font-semibold rounded-md px-3 py-2"
+              style={{ color: '#fff', background: '#B42318' }}
+              data-testid="bmail-secrets-warning"
+            >
+              {SECRETS_TEXT}
+            </div>
+          )}
           <div className="bw-mail-body whitespace-pre-wrap break-words">
             {mailSegments(mail.body, trusted).map((seg, n) =>
               seg.href ? (
@@ -834,8 +863,9 @@ const Compose = ({
   );
 };
 
-const SentRow = ({ s, rate }: { s: Sent; rate: number }) => (
+const SentRow = ({ s, rate, onOpen }: { s: Sent; rate: number; onOpen: () => void }) => (
   <Row
+    onOpen={onOpen}
     avatar={<Avatar label={s.toLabel} color={keyColor(s.to)} />}
     title={`To ${s.toLabel}`}
     bold={false}
@@ -1000,6 +1030,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
   const quarantineCount = quarantineTotal(m.boxes.quarantine.length, drops.visible.length);
   const [tab, setTab] = useState<Tab>(initialTab);
   const [reading, setReading] = useState<Received | null>(null);
+  const [readingSent, setReadingSent] = useState<Sent | null>(null);
   const [example, setExample] = useState<ExampleMail | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [settings, setSettings] = useState(false);
@@ -1051,9 +1082,10 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
   // bPhone friends only (owner, 9 Oct): people I wrote to are not pinned for that alone.
   const isContact = (k: string) => isCallFriend(k);
   const myPriceSats = m.priceSats;
-  const sub = reading || draft || settings || example;
+  const sub = reading || readingSent || draft || settings || example;
   const back = () => {
     setReading(null);
+    setReadingSent(null);
     setExample(null);
     setDraft(null);
     setSettings(false);
@@ -1076,7 +1108,9 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
       ? 'Settings'
       : example
         ? 'Example'
-        : 'Mail';
+        : readingSent
+          ? 'Sent'
+          : 'Mail';
   // Swipe right from the left edge (first 24px) goes back.
   const edgeStart = useRef<{ x: number; y: number } | null>(null);
   const edge = {
@@ -1337,7 +1371,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
   const ptrH = ptr.refreshing ? 40 : ptr.pull;
 
   // In-frame sub-views (reader, settings, example) sit in the content area; Compose is a full-screen sheet over the bars.
-  const inFrameSub = !draft && !!(reading || settings || example);
+  const inFrameSub = !draft && !!(reading || readingSent || settings || example);
   const subHeader = (top: string) => (
     <div
       className="bw-mail-bar sticky top-0 z-10 grid grid-cols-[44px_1fr_44px] items-center gap-2 px-3 pb-2"
@@ -1513,6 +1547,8 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
           </>
         ) : example ? (
           <ExampleReader e={example} onHide={hideExamples} onDelete={() => deleteExample(example.id)} />
+        ) : readingSent ? (
+          <SentReader s={readingSent} money={(sats) => money(sats, m.rate)} />
         ) : reading ? (
           <Reader
             r={m.state.received.find((x) => x.id === reading.id) ?? reading}
@@ -1801,7 +1837,7 @@ export const BMailScreen = ({ onClose, initialTab = 'inbox' }: { onClose: () => 
             )}
             {tab === 'sent' &&
               (m.state.sent.length ? (
-                m.state.sent.map((s) => <SentRow key={s.id} s={s} rate={m.rate} />)
+                m.state.sent.map((s) => <SentRow key={s.id} s={s} rate={m.rate} onOpen={() => setReadingSent(s)} />)
               ) : (
                 <Empty
                   title="Nothing sent yet"

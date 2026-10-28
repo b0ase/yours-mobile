@@ -2,6 +2,7 @@ import { parseRecipient } from '../names/names';
 import { PAIR_HOST } from '../../pair/protocol';
 import { parseAppLink, type AppLink } from '../spaces/invite';
 import { isPeerPayUri, parsePeerPay } from './peerpay';
+import { parseSignLink, parseWebBappLink, type SignLink } from '../chat/signLink';
 
 /**
  * What a scanned QR (or pasted text) means to bWallet. Pure: no network, no side effects.
@@ -17,6 +18,11 @@ export type Scan =
   | { kind: 'person'; handle: string; to: string }
   /** A Space page, invite or room link (https /s/ /i/ /r/ on our hosts, or bwalletx://space|invite|room/…). */
   | { kind: 'join'; url: string; link: AppLink }
+  /** bChatX "Sign on your phone" (web.bwalletx.com/bapp/bchatx?to=/room/<T>?sign=&h=, or the older bare /room/ and /r/
+   * forms): the room on that document and the read, sign and seal page (chat/useSignLinks.ts). */
+  | { kind: 'sign'; url: string; sign: SignLink }
+  /** Any other web.bwalletx.com/bapp/<slug>?to=… link: that bApp's frame screen in the app. */
+  | { kind: 'bapp'; url: string; route: string }
   | { kind: 'text'; text: string };
 
 /** https://www.bwallet.space/open?… (passkey/openHere.ts isOpenLink; inlined to keep this module dependency-free). */
@@ -86,6 +92,12 @@ export const parseScan = (raw: string | null | undefined): Scan => {
   if (isOpenLink(text)) return { kind: 'open', text };
   const restore = restoreUrl(text);
   if (restore) return { kind: 'restore', url: restore };
+
+  // Before room links: a sign QR on /r/<T>?sign=&h= is a document, not a plain room.
+  const sign = parseSignLink(text);
+  if (sign) return { kind: 'sign', url: text, sign };
+  const bapp = parseWebBappLink(text);
+  if (bapp) return { kind: 'bapp', url: text, route: bapp.route };
 
   const link = parseAppLink(text);
   if (link) return { kind: 'join', url: text, link };

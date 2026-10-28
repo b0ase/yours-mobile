@@ -30,6 +30,8 @@ import {
   type SwapRecord,
 } from './swapApi';
 import { pickGate, type AddressState } from './pickGate';
+import { handoffFor, matchCoin, type SwapPrefill } from './swapLink';
+import { BSVEX_HANDOFF_ON } from '../storeBuild';
 import { ErrorActions } from '../errors/ErrorActions';
 import { askB } from '../errors/errorReport';
 
@@ -371,7 +373,9 @@ const Pick = ({
   handle,
   popular,
   all,
+  prefill,
 }: {
+  prefill?: SwapPrefill | null;
   address: string;
   addressState: AddressState;
   onRetryAddress: () => void;
@@ -382,8 +386,17 @@ const Pick = ({
   onCreated: (r: SwapRecord) => void;
   handle?: string;
 }) => {
-  const [coin, setCoin] = useState<SwapCoin>(POPULAR_COINS[0]);
-  const [amount, setAmount] = useState('');
+  // A swap link's coin and amount are only filled in; the user still checks them and taps the button.
+  const [coin, setCoin] = useState<SwapCoin>(() => (prefill && matchCoin(prefill, POPULAR_COINS)) || POPULAR_COINS[0]);
+  const [amount, setAmount] = useState(prefill?.amount ? String(prefill.amount) : '');
+  // A linked coin outside the popular chips is picked once the server's list confirms we offer it.
+  const linked = useRef(!!prefill && !!matchCoin(prefill, POPULAR_COINS));
+  useEffect(() => {
+    if (linked.current || !prefill || !all.length) return;
+    const c = matchCoin(prefill, all);
+    if (c) setCoin(c);
+    linked.current = true;
+  }, [all, prefill]);
   const [refund, setRefund] = useState('');
   const [est, setEst] = useState<{
     toAmount: number | null;
@@ -453,6 +466,7 @@ const Pick = ({
         stage: 'waiting',
         payoutTxid: null,
         validUntil: null,
+        then: prefill?.then ?? null,
       };
       saveSwap(rec);
       onCreated(rec);
@@ -712,6 +726,7 @@ const Track = ({
   useOnResume(poll);
 
   const at = stepIndex(swap.stage);
+  const handoff = handoffFor(swap, BSVEX_HANDOFF_ON);
   const tick = swap.from.toUpperCase();
   const end =
     swap.stage === 'refunded'
@@ -773,6 +788,17 @@ const Track = ({
       </div>
       <div className="px-4 pt-3 pb-4 flex flex-col gap-2">
         {swap.stage === 'done' ? <Cta onClick={onBack}>Back to wallet</Cta> : null}
+        {handoff && (
+          // The swap link's next hop (BSVEX_HANDOFF_ON): only on a tap, in the wallet's own browser.
+          <button
+            type="button"
+            onClick={() => void openDappBrowser(handoff.url)}
+            className="w-full h-12 rounded-2xl text-[15px] font-bold cursor-pointer bg-transparent"
+            style={{ border: `1px solid ${C.gold}`, color: C.gold }}
+          >
+            {handoff.label}
+          </button>
+        )}
         <button
           type="button"
           onClick={() =>
@@ -802,7 +828,10 @@ export const SwapFlow = ({
   resume,
   handle,
   inline = false,
+  prefill,
 }: {
+  /** From a swap link (swapLink.ts): coin, network and amount filled in, nothing started. */
+  prefill?: SwapPrefill | null;
   getAddress: () => Promise<string>;
   onClose: () => void;
   resume?: SwapRecord | null;
@@ -857,6 +886,7 @@ export const SwapFlow = ({
           popular={popular}
           all={all}
           handle={handle}
+          prefill={prefill}
           onBack={onClose}
           onCreated={(r) => {
             setSwap(r);
@@ -867,7 +897,7 @@ export const SwapFlow = ({
     if (step === 'deposit')
       return <Deposit swap={swap} notice={notice} onBack={() => setStep('pick')} onSent={() => setStep('track')} />;
     return <Track swap={swap} onBack={onClose} onUpdate={setSwap} />;
-  }, [step, swap, address, addressState, loadAddress, notice, popular, all, handle, onClose]);
+  }, [step, swap, address, addressState, loadAddress, notice, popular, all, handle, onClose, prefill]);
 
   if (inline)
     return (

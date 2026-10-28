@@ -65,6 +65,12 @@ type PromptScreen =
 const screenOriginator = (s: PromptScreen): string | undefined =>
   'payload' in s ? (s.payload as { originator?: string }).originator || undefined : undefined;
 
+/** Top-level host(s) the asking site was framed by: set by the background only (services/frameAccess.ts). */
+const screenEmbeddedIn = (s: PromptScreen): string[] | undefined => {
+  const v = 'payload' in s ? (s.payload as { embeddedIn?: unknown }).embeddedIn : undefined;
+  return Array.isArray(v) ? v.filter((h): h is string => typeof h === 'string') : undefined;
+};
+
 const WAITING_CLOSE_MS = 10000;
 const EXPIRED_CLOSE_MS = 2000;
 
@@ -349,7 +355,7 @@ const PromptApp = () => {
         )}
         {screen.kind === 'unlock' && <UnlockWallet onUnlock={() => void advance()} />}
         {/* Wallet strip (true origin) + the connected site's theme banner (docs/SITE-THEME.md); the sheet is untouched. */}
-        <SiteThemeFrame originator={screenOriginator(screen)}>
+        <SiteThemeFrame originator={screenOriginator(screen)} embeddedIn={screenEmbeddedIn(screen)}>
           {screen.kind === 'permission' && (
             <PermissionRequestPage key={screen.requestID} request={screen.payload} onResponse={() => void advance()} />
           )}

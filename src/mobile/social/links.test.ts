@@ -25,4 +25,10 @@ describe('Link your accounts', () => {
     expect(JSON.stringify(f)).not.toContain('gmail');
     await expect(linkFields('x', '', 'b0asex')).rejects.toThrow();
   });
+
+  test('eBay: the eBay user ID is the handle', () => {
+    expect(linkHandle('ebay', 'Moisty_Collectibles*')).toBe('moisty_collectibles*');
+    expect(linkHandle('ebay', 'someone@example.com')).toBe('');
+    expect(badgeText({ provider: 'ebay', handle: 'moisty' })).toBe('moisty on eBay');
+  });
 });

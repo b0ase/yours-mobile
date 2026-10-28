@@ -14,6 +14,7 @@ import { useAccountNames } from '../names/accountNames';
 import { Scanner } from './Scanner';
 import { parseScan, type Scan } from './parseScan';
 import { offerAppLink } from '../spaces/inviteLinks';
+import { offerSignOrBappLink } from '../chat/useSignLinks';
 import { parseXInviteLink } from '../chat/xInvites';
 import { APP_NAME, XINVITES_ENABLED } from '../storeBuild';
 
@@ -75,7 +76,11 @@ export default function ScanSheet({
     // A plain payment code goes straight to the Send card (still needs the user's confirm there).
     if (s.kind === 'pay') pay(s.to, s.amountSats);
     // A Space / invite / room link opens its join flow (inviteLinks.ts: Space card, or the room's buy-to-enter screen).
-    else if (s.kind === 'join') {
+    // A bChatX sign QR or another bApp link: routed inside the app (chat/useSignLinks.ts), like the phone camera.
+    else if (s.kind === 'sign' || s.kind === 'bapp') {
+      offerSignOrBappLink(s.url);
+      onClose();
+    } else if (s.kind === 'join') {
       offerAppLink(s.url);
       onClose();
     } else setStage({ k: 'result', s });

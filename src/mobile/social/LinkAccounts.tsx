@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom';
 import { ArrowLeft, BadgeCheck, Check, Circle, Github, Linkedin, Loader2 } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { BWALLET_PAYMAIL_DOMAIN } from '../names/config';
-import { toAlias } from '../names/paymail';
+import { listPaymails, proveName, toAlias } from '../names/paymail';
+import { aliasForClaims } from '../names/proof';
 import { HANDCASH_SIGNIN_ENABLED, LINK_ACCOUNTS_ENABLED, TWETCH_POST_ENABLED } from '../storeBuild';
 import { TwetchSettings } from '../twetch/TwetchSettings';
 import { twetchHandle, twetchStoreFor, type TwetchLink } from '../twetch/twetchLink';
@@ -23,6 +24,7 @@ import {
 } from './links';
 import { clearSocial, onSocialChange, socialError, socialProof, startSocial, type SocialProvider } from './socialLogin';
 import { useHandCashHandle } from './useHandCashHandle';
+import { onUnfinishedChange, unfinishedLinks } from './pendingLink';
 import { forgetLinkedHandle, rememberLinkedHandle } from './linkedHandles';
 
 const GRAY = '#98A2B3';
@@ -41,6 +43,11 @@ const ICON: Record<SocialProvider, JSX.Element> = {
   google: <GMark />,
   github: <Github size={16} />,
   linkedin: <Linkedin size={16} />,
+  ebay: (
+    <span aria-hidden className="text-[15px] font-bold" style={{ color: '#fff' }}>
+      e
+    </span>
+  ),
 };
 /** BSV social networks (owner, 27 Oct 2026). Twetch links through Settings › Twetch; the others have no
  * verification path yet (the Feed only reads them), so they show as coming soon. */
@@ -61,6 +68,7 @@ const ROWS: (SocialProvider | BsvNetwork)[] = [
   'fwetch',
   'github',
   'linkedin',
+  'ebay',
 ];
 const LetterMark = ({ c }: { c: string }) => (
   <span aria-hidden className="text-[15px] font-bold" style={{ color: '#fff' }}>
@@ -157,8 +165,22 @@ export const LinkedBadges = ({ owner }: { owner: string }) => {
   );
 };
 
+/** Store the Google-signed proof on this wallet's `name.gmail` (no such name: nothing to prove, nothing sent). */
+async function proveOwnGmail(
+  wallet: Parameters<typeof proveName>[1],
+  email: string,
+  proof: { ticket: string; secret: string },
+) {
+  const alias = aliasForClaims('google', { email, email_verified: true });
+  if (!alias) return;
+  const { publicKey } = await wallet.getPublicKey({ identityKey: true });
+  const names = await listPaymails(fetch, publicKey).catch(() => []);
+  if (!names.some((n) => n.paymail.split('@')[0].toLowerCase() === alias)) return;
+  await proveName(fetch, wallet, alias, proof);
+}
+
 /**
- * "Link your accounts": X, Google, Twetch, Treechat, Peck, Fwetch, GitHub, LinkedIn rows + the "Link HandCash" card (owner, 18 Oct 2026).
+ * "Link your accounts": X, Google, Twetch, Treechat, Peck, Fwetch, GitHub, LinkedIn, eBay rows + the "Link HandCash" card (owner, 18 Oct 2026).
  * Used by the onboarding "Claim your name" step and Settings › Identity. Linking never signs anyone in: it
  * proves the account and the wallet signs the link with its identity key (links.ts). A provider whose OAuth app
  * isn't set up on the server is shown as coming soon, never as a button that fakes a link.
@@ -169,6 +191,9 @@ export const LinkAccounts = ({ owner, onClaim }: { owner: string; onClaim?: (ali
   const [providers, setProviders] = useState<ProviderState>(DEFAULT_PROVIDERS);
   const [busy, setBusy] = useState<LinkProvider | null>(null);
   const [error, setError] = useState(socialError);
+  // A link started on the first onboarding screen that expired or failed (pendingLink.ts).
+  const [unfinished, setUnfinished] = useState(() => unfinishedLinks(owner));
+  useEffect(() => onUnfinishedChange(() => setUnfinished(unfinishedLinks(owner))), [owner]);
 
   useEffect(() => {
     let live = true;
@@ -191,11 +216,11 @@ export const LinkAccounts = ({ owner, onClaim }: { owner: string; onClaim?: (ali
           setError('');
           // Choose your handle offers a $name per linked account (owner, 26 Oct 2026: linkedHandles.ts). Google's
           // local part exists only in this proof, so it's kept on this device now; the link itself stores no email.
-          rememberLinkedHandle(
-            owner,
-            p.profile.provider,
-            p.profile.provider === 'linkedin' ? p.profile.display : p.profile.name,
-          );
+          const prov = p.profile.provider;
+          if (prov !== 'ebay')
+            rememberLinkedHandle(owner, prov, prov === 'linkedin' ? p.profile.display : p.profile.name);
+          // Provable names: a Google sign-in carrying this wallet's key proves its `name.gmail`, if it has one.
+          if (prov === 'google' && p.profile.id_token) return proveOwnGmail(apiContext.wallet, p.profile.name, p);
         })
         .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Could not link that account'))
         .finally(() => setBusy(null));
@@ -211,7 +236,12 @@ export const LinkAccounts = ({ owner, onClaim }: { owner: string; onClaim?: (ali
     setBusy(p);
     setError('');
     try {
-      await startSocial(p, owner);
+      // Google signs this wallet's identity key into its ID token (provable names, docs PROVABLE-NAMES.md).
+      const key =
+        p === 'google' && apiContext?.wallet
+          ? (await apiContext.wallet.getPublicKey({ identityKey: true }).catch(() => null))?.publicKey
+          : undefined;
+      await startSocial(p, owner, undefined, key);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Linking is unavailable right now');
       setBusy(null);
@@ -233,6 +263,7 @@ export const LinkAccounts = ({ owner, onClaim }: { owner: string; onClaim?: (ali
           if (isBsv(p)) return <BsvRow key={p} p={p} first={!i} />;
           const l = linked(p);
           const on = providers[p] && !desktop;
+          const finish = !l && on && unfinished.includes(p);
           return (
             <div key={p} className="flex items-center gap-3 px-4 py-3" style={i ? ROW_BORDER : undefined}>
               <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#0F1013] text-white">
@@ -246,13 +277,15 @@ export const LinkAccounts = ({ owner, onClaim }: { owner: string; onClaim?: (ali
                 <div className="text-[11px] truncate" style={{ color: GRAY }}>
                   {l
                     ? `${badgeText(l)}${l.published ? '' : ' · signed by your wallet'}`
-                    : on
-                      ? p === 'google'
-                        ? 'Email-verified tick only'
-                        : 'Adds a badge to your profile'
-                      : desktop
-                        ? 'Phone app or web'
-                        : 'Coming soon'}
+                    : finish
+                      ? 'Started at sign-up · not linked yet'
+                      : on
+                        ? p === 'google'
+                          ? 'Email-verified tick only'
+                          : 'Adds a badge to your profile'
+                        : desktop
+                          ? 'Phone app or web'
+                          : 'Coming soon'}
                 </div>
               </div>
               {l ? (
@@ -269,7 +302,7 @@ export const LinkAccounts = ({ owner, onClaim }: { owner: string; onClaim?: (ali
                   </span>
                   <button
                     type="button"
-                    onClick={() => (unlink(owner, p), forgetLinkedHandle(owner, p), clearSocial())}
+                    onClick={() => (unlink(owner, p), p !== 'ebay' && forgetLinkedHandle(owner, p), clearSocial())}
                     className="h-11 px-2 text-xs bg-transparent border-0"
                     style={{ color: GRAY }}
                   >
@@ -281,6 +314,7 @@ export const LinkAccounts = ({ owner, onClaim }: { owner: string; onClaim?: (ali
                   type="button"
                   disabled={!on || !!busy}
                   onClick={() => void go(p)}
+                  data-testid={finish ? `finish-${p}` : undefined}
                   className="h-11 min-w-[64px] px-3 rounded-lg text-xs font-bold border-0 flex items-center justify-center"
                   style={
                     on
@@ -288,7 +322,17 @@ export const LinkAccounts = ({ owner, onClaim }: { owner: string; onClaim?: (ali
                       : { background: '#2B2F36', color: GRAY }
                   }
                 >
-                  {busy === p ? <Loader2 size={14} className="animate-spin" /> : on ? 'Link' : desktop ? '—' : 'Soon'}
+                  {busy === p ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : finish ? (
+                    'Finish linking'
+                  ) : on ? (
+                    'Link'
+                  ) : desktop ? (
+                    '—'
+                  ) : (
+                    'Soon'
+                  )}
                 </button>
               )}
             </div>

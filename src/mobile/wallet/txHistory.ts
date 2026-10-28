@@ -225,7 +225,63 @@ export const buildRows = (
   const prev = ownOutputs(list, own);
   const values = new Map(extraValues);
   for (const t of list) for (const o of t.vout) values.set(`${t.txid}:${o.n}`, o.sats);
-  return list.map((t) => classify(t, own, prev, local.get(t.txid), now, values)).sort((a, b) => b.time - a.time);
+  return newestFirst(list.map((t) => classify(t, own, prev, local.get(t.txid), now, values)));
+};
+
+/**
+ * Activity order (owner, 28 Oct 2026: "the last transaction should be at the top"): unconfirmed first, newest of
+ * those first by their local time; then confirmed, highest block first, then newest time. Ties: txid, so the order
+ * never jumps between loads. Returns a new array.
+ */
+export const newestFirst = <T extends Pick<HistoryRow, 'txid' | 'time' | 'confirmations' | 'blockHeight'>>(
+  rows: T[],
+): T[] => {
+  const pending = (r: T) => !r.confirmations && !r.blockHeight;
+  return [...rows].sort(
+    (a, b) =>
+      Number(pending(b)) - Number(pending(a)) ||
+      (pending(a) ? 0 : (b.blockHeight ?? 0) - (a.blockHeight ?? 0)) ||
+      b.time - a.time ||
+      a.txid.localeCompare(b.txid),
+  );
+};
+
+/**
+ * Unconfirmed txs have no block time: give each the time this device first saw it (kept per txid), so a refresh
+ * does not restamp them all with "now" and they keep their own order at the top.
+ */
+const SEEN_KEY = 'bwx-tx-first-seen';
+type SeenStore = Pick<Storage, 'getItem' | 'setItem'>;
+export const stampUnconfirmed = <T extends Pick<HistoryRow, 'txid' | 'time' | 'confirmations' | 'blockHeight'>>(
+  rows: T[],
+  now = Date.now(),
+  st: SeenStore | null = (() => {
+    try {
+      return globalThis.localStorage ?? null;
+    } catch {
+      return null;
+    }
+  })(),
+): T[] => {
+  let seen: Record<string, number> = {};
+  try {
+    seen = (JSON.parse(st?.getItem(SEEN_KEY) ?? '{}') as Record<string, number>) ?? {};
+  } catch {
+    seen = {};
+  }
+  const next: Record<string, number> = {};
+  const out = rows.map((r) => {
+    if (r.confirmations || r.blockHeight) return r;
+    const at = typeof seen[r.txid] === 'number' ? seen[r.txid] : Math.min(r.time, now);
+    next[r.txid] = at;
+    return { ...r, time: at };
+  });
+  try {
+    st?.setItem(SEEN_KEY, JSON.stringify(next));
+  } catch {
+    /* storage blocked: load time is used */
+  }
+  return out;
 };
 
 /** Txs the wallet funded whose inputs come from txs we have not loaded: fetch these to know the fee. */

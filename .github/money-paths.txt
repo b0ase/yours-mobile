@@ -43,3 +43,17 @@
 ^src/mobile/passkey/(extHandoff|extHandoffStore|openHere)\.ts$
 ^src/mobile/passkey/OpenHereSheet\.tsx$
 ^src/mobile/errors/(phraseGuard|errorReport)\.ts$
+# Payment servers and pay-to-sign flows (owner, 27 Oct 2026: #385/#397 changed the paymail server's fees and
+# payment destinations and merged with this guard passing, because these paths were not listed).
+^site/api/paymail\.js$
+^site/lib/paymail\.js$
+^site/lib/paymailStore\.js$
+^site/lib/nameFee\.js$
+^site/lib/offerReceipts\.js$
+^site/lib/storeReceipt\.js$
+^src/mobile/offer/(accept|company|offer|payload)\.ts$
+^src/mobile/bavatar/mintBavatar\.ts$
+^src/mobile/send/
+^src/mobile/swap/(swapApi|pickGate)\.ts$
+# Wage payments: pay statements, the payment sent with them and their reconciliation.
+^src/mobile/wages/

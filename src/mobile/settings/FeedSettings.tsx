@@ -30,11 +30,15 @@ import {
   AtSign,
   PenLine,
   Send,
+  Plug,
+  Wallet,
 } from 'lucide-react';
 import { ChangePassword } from './ChangePassword';
 import { SEEDLESS_ENABLED } from '../passkey/prf';
 import { PasskeySettings } from '../passkey/PasskeySettings';
 import { ConnectSocial } from './ConnectSocial';
+import { LinkedWallets } from './LinkedWallets';
+import { KINTSUGI_URL } from './linkedWalletsApi';
 import { HandleFlow } from '../names/HandleFlow';
 import { onSocialChange, takeSocialReturn } from '../social/socialLogin';
 import { LinkedBadges } from '../social/LinkAccounts';
@@ -50,6 +54,7 @@ import { DisplayNameField } from './DisplayNameField';
 import { IdentityMap } from './IdentityMap';
 import { IdentityVerification } from '../kyc/IdentityVerification';
 import { SignNoteScreen } from '../notes/SignNoteScreen';
+import { WagesScreen } from '../wages/WagesScreen';
 import { TwetchSettings } from '../twetch/TwetchSettings';
 import {
   B_AGENT_DESC,
@@ -61,6 +66,7 @@ import {
   socialLoginEnabled,
   LINK_ACCOUNTS_ENABLED,
   TWETCH_POST_ENABLED,
+  WAGES_ENABLED,
   SUBSCRIPTIONS_DESC,
   SUBSCRIPTIONS_ENABLED,
 } from '../storeBuild';
@@ -620,6 +626,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
     | 'scan'
     | 'password'
     | 'social'
+    | 'linkedWallets'
     | 'agents'
     | 'pots'
     | 'notifications'
@@ -633,6 +640,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
     | 'signins'
     | 'verify'
     | 'note'
+    | 'pay'
     | 'twetch'
     | null
   >(null);
@@ -742,6 +750,20 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
             </>
           )}
           <Row
+            icon={<Wallet size={16} />}
+            label="Linked wallets"
+            description="Ethereum, BNB Chain, Solana and TRON wallets you've proven are yours. Private to you and bChatX"
+            onClick={() => setScreen('linkedWallets')}
+          />
+          <Divider />
+          <Row
+            icon={<Plug size={16} />}
+            label="Connected services"
+            description="Connect repos to Kintsugi (opens bChatX)"
+            onClick={() => window.open(KINTSUGI_URL, '_blank', 'noopener')}
+          />
+          <Divider />
+          <Row
             icon={<ShieldCheck size={16} />}
             label="Verify your identity"
             description="A two-minute ID check. Shows a Verified identity badge on contracts you sign and unlocks higher limits"
@@ -752,8 +774,17 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
             label="Sign a note"
             description="An IOU or promise signed with your identity key. Send it by bMail; anyone can check it"
             onClick={() => setScreen('note')}
-            isLast={!TWETCH_POST_ENABLED}
+            isLast={!TWETCH_POST_ENABLED && !WAGES_ENABLED}
           />
+          {WAGES_ENABLED && (
+            <Row
+              icon={<FileText size={16} />}
+              label="Pay"
+              description="Pay a worker with a signed pay statement, or check, export and dispute the statements you were paid with"
+              onClick={() => setScreen('pay')}
+              isLast={!TWETCH_POST_ENABLED}
+            />
+          )}
           {TWETCH_POST_ENABLED && (
             <Row
               icon={<Send size={16} />}
@@ -1263,9 +1294,15 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
       {LINK_ACCOUNTS_ENABLED && screen === 'social' && <ConnectSocial onClose={closeSocial} />}
       {handleOpen && <HandleFlow title="Change handle" onClose={() => setHandleOpen(false)} />}
       {screen === 'idmap' && <IdentityMap onClose={() => setScreen(null)} />}
+      {screen === 'linkedWallets' && <LinkedWallets onClose={() => setScreen(null)} />}
       {screen === 'note' && (
         <Screen title="Sign a note" onBack={() => setScreen(null)}>
           <SignNoteScreen onSent={() => setScreen(null)} />
+        </Screen>
+      )}
+      {WAGES_ENABLED && screen === 'pay' && (
+        <Screen title="Pay" onBack={() => setScreen(null)}>
+          <WagesScreen />
         </Screen>
       )}
       {TWETCH_POST_ENABLED && screen === 'twetch' && (

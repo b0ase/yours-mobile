@@ -3,7 +3,7 @@
  * (plaintext copy, since the sealed copy is only readable by the recipient… and us, but we keep it simple),
  * read marks, contacts (people I wrote to) and my price to reach me.
  */
-import type { Envelope, Sealed } from './envelope';
+import type { Envelope, Sealed, SealedOrdinal } from './envelope';
 import { PENNY_POST_USD, type MailMeta } from './route';
 
 export type Received = MailMeta & {
@@ -41,6 +41,9 @@ export type Sent = {
   agreement?: unknown;
   /** Company offer payload sent with this mail (offer/payload.ts): kept so both parties' vaults show it. */
   offer?: unknown;
+  /** NFT and signed note sent with this mail (kept so the sent copy shows what went with it). */
+  ordinal?: SealedOrdinal;
+  note?: unknown;
 };
 export type MailState = {
   received: Received[];

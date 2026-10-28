@@ -42,7 +42,10 @@ const ALIAS_RE = /^[a-z0-9](?:[a-z0-9_-]{0,30}[a-z0-9])?$/;
  * `theirname.gmail`. Registering one needs bit-sign to confirm the caller's key belongs to the
  * account that proved that X username / Gmail address (socialCheck), so nobody else can take it.
  */
-const SOCIAL_RE = /^[a-z0-9](?:[a-z0-9-]{0,28}[a-z0-9])?\.(x|gmail)$/;
+/** The social suffixes a proven name may carry. reservedBase strips exactly these, so adding one here keeps both in step. */
+const SOCIAL_SUFFIXES = ['x', 'gmail'];
+const SOCIAL_RE = new RegExp(`^[a-z0-9](?:[a-z0-9-]{0,28}[a-z0-9])?\\.(${SOCIAL_SUFFIXES.join('|')})$`);
+const SOCIAL_SUFFIX_RE = new RegExp(`\\.(${SOCIAL_SUFFIXES.join('|')})$`);
 const aliasOk = (a) => ALIAS_RE.test(a) || SOCIAL_RE.test(a);
 /**
  * Social names are bWalletX's own record (lib/social.js): `<name>.x` / `<name>.gmail` registers only
@@ -50,8 +53,10 @@ const aliasOk = (a) => ALIAS_RE.test(a) || SOCIAL_RE.test(a);
  * name or Gmail address = one wallet.
  */
 const { openTicket, socialAliasFor } = require('./social');
+const nameProof = require('./nameProof');
 const { makeOpnsResolver } = require('./opnsResolve');
 const { cleanDisplayName, defaultDisplayName, shownDisplayName } = require('./displayName');
+const { lookalike, lookalikeReserved, brandInDisplayName, DISPLAY_NAME_MSG } = require('./brandGuard');
 async function ticketSocialCheck(alias, proof, env = process.env) {
   if (!proof || !proof.ticket || !proof.secret) return 'Continue with X or Google first';
   const p = openTicket(proof.ticket, proof.secret, env);
@@ -64,7 +69,9 @@ const PUBKEY_RE = /^0[23][0-9a-f]{64}$/;
 /** Anti-squatting (owner, 10 Oct 2026): one name change per 30 days per wallet (the first claim is free
  * of it), and at most NAME_IP_DAILY new names per client IP per day (env PAYMAIL_NAMES_PER_IP_DAY). */
 const CHANGE_COOLDOWN_MS = 30 * 24 * 60 * 60 * 1000;
-const NAME_IP_DAILY = 5;
+const NAME_IP_DAILY = 3;
+/** At most this many new names per identity key per 24h (owner, 28 Oct 2026), counted from name events. */
+const NAME_KEY_DAILY = 3;
 const nameFee = require('./nameFee');
 const offers = require('./offerReceipts');
 const crypto = require('crypto');
@@ -79,6 +86,22 @@ const hashIp = (ip, env = process.env) =>
 const dayText = (ms) =>
   new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
 /** Premium names held for The Bitcoin Corporation Ltd; only bCorp's key may claim them (owner, 27 Oct 2026). */
+/** bCorp's function agents (owner, 28 Oct 2026): blog writer, feature pages, Hodl my b, share cards, bAds director, … */
+const AGENT_HANDLES = [
+  'blog',
+  'features',
+  'hodlmyb',
+  'og',
+  'bads',
+  'releases',
+  'support',
+  'ops',
+  'bugs',
+  'partners',
+  'kintsugi',
+  'agents',
+  'swarm',
+];
 const PREMIUM_BCORP = [
   'money',
   'cash',
@@ -94,8 +117,16 @@ const PREMIUM_BCORP = [
   'crypto',
   'nft',
   'dex',
+  'bsvex',
 ];
 const BCORP_KEY = '03c96b37e69377c8af33b583067f56444c83a656b05014e8f15003e67250943880';
+const BWALLETX_KEY = '029c1abd9470d485719c512c0d704e6ccf6c1533461eb5884a5d09a6dc3dca55b7';
+/**
+ * Our own accounts, exempt from the anti-impersonation rules (owner, 28 Oct 2026): they may use the brand in
+ * a display name and claim names held by the guard (2-char, look-alikes, brand + role word).
+ * The Bitcoin Corporation Ltd (bcorp@) and the bWalletX brand account (bwalletx@).
+ */
+const BRAND_KEYS = Object.freeze([BCORP_KEY, BWALLETX_KEY]);
 
 const RESERVED = new Set([
   // Kept for a named person: see RESERVED_OWNERS.
@@ -249,13 +280,62 @@ const RESERVED = new Set([
   ...'abcdefghijklmnopqrstuvwxyz0123456789'.split(''),
   // Premium names held for The Bitcoin Corporation Ltd (owner, 27 Oct 2026): see PREMIUM_BCORP.
   ...PREMIUM_BCORP,
+  // Identity providers and big platforms (owner, 28 Oct 2026): reserved as plain aliases AND as social bases.
+  // Already listed above: google, x, twitter, facebook, meta, apple, microsoft, amazon, handcash, twetch, relayx, centbee.
+  'gmail',
+  'github',
+  'gitlab',
+  'bitbucket',
+  'linkedin',
+  'reddit',
+  'instagram',
+  'threads',
+  'tiktok',
+  'youtube',
+  'discord',
+  'telegram',
+  'whatsapp',
+  'signal',
+  'bluesky',
+  'nostr',
+  'icloud',
+  'outlook',
+  'hotmail',
+  'live',
+  'yahoo',
+  'proton',
+  'protonmail',
+  'ebay',
+  'paypal',
+  'stripe',
+  'coinbase',
+  'binance',
+  'metamask',
+  'phantom',
+  'treechat',
+  'yours',
+  'simply-cash',
 ]);
 /**
  * ⚠ A SOCIAL ALIAS IS RESERVED BY ITS BASE NAME. `bcorp.x` is proven by whoever holds X @bcorp,
  * which need not be us, so the suffix must not let a reserved name back in: `bcorp.x`,
  * `bcorp.gmail` and `bcorp` all refuse. Existing records are untouched (this runs at register).
  */
-const reservedBase = (alias) => RESERVED.has(String(alias).replace(/\.(x|gmail)$/, ''));
+const reservedPlain = (alias) => RESERVED.has(String(alias).replace(SOCIAL_SUFFIX_RE, ''));
+/**
+ * Names held by the anti-impersonation rules (owner, 28 Oct 2026), on top of RESERVED. Only bCorp's key
+ * may claim these (one- and two-character names are kept for bCorp and staff):
+ *  - every two-character name, 00-99 included, and anything that folds to two characters or fewer;
+ *  - look-alikes of a reserved name (lib/brandGuard.js: 0→o, 1→l, 3→e, 5→s, 4→a, rn→m, vv→w, - and _ dropped);
+ *  - a brand (bwallet, bcorp, bchat, kintsugi, …) alone or with a role word (support, help, official, …).
+ * Social suffixes count the same (`bcorpsupport.x`). Existing holders keep theirs (register lets an owner update).
+ */
+const heldByGuard = (alias) => {
+  const base = String(alias).replace(SOCIAL_SUFFIX_RE, '');
+  if (RESERVED.has(base)) return false;
+  return base.length === 2 || lookalike(base).length <= 2 || lookalikeReserved(base, GUARD_TARGETS);
+};
+const reservedBase = (alias) => reservedPlain(alias) || heldByGuard(alias);
 
 const cleanDomain = (d) =>
   String(d || '')
@@ -324,9 +404,12 @@ const p2pHourlyLimit = (alias) => P2P_HOURLY_LIMITS[alias] ?? P2P_HOURLY_DEFAULT
 
 const RESERVED_OWNERS = Object.freeze({
   // The bWalletX brand account.
-  bwalletx: '029c1abd9470d485719c512c0d704e6ccf6c1533461eb5884a5d09a6dc3dca55b7',
+  bwalletx: BWALLETX_KEY,
   // The Bitcoin Corporation Ltd's company account (owner, 27 Oct 2026).
   bcorp: BCORP_KEY,
+  // b is our AI agent (owner, 28 Oct 2026); the earlier squatted b@ was renamed b-0282c9 under the terms'
+  // impersonation clause.
+  b: BCORP_KEY,
   // TERRORNODE (NPG game; its handle owns the $TERRORNODE room): held by bchatx@ until the owner releases it
   // (owner, 27 Oct 2026).
   terrornode: '030dd811f969987f2f6ec023535cb8839c496fccf4feb7799293ec13ff09d263b7',
@@ -334,9 +417,16 @@ const RESERVED_OWNERS = Object.freeze({
   bitchat: '030dd811f969987f2f6ec023535cb8839c496fccf4feb7799293ec13ff09d263b7',
   bitchatx: '030dd811f969987f2f6ec023535cb8839c496fccf4feb7799293ec13ff09d263b7',
   ...Object.fromEntries(PREMIUM_BCORP.map((n) => [n, BCORP_KEY])),
+  // bCorp's function agents (owner, 28 Oct 2026): each will get its own capped agent key; held by bCorp until then.
+  ...Object.fromEntries(AGENT_HANDLES.map((n) => [n, BCORP_KEY])),
   // Touman, our first Play beta tester (owner, 27 Oct 2026).
   touman: '030f8d4f47ae853abf8adc939520d360213193709fc846989a436add16d0b946e7',
 });
+/** What a look-alike is checked against: every reserved name and every designated name. */
+const GUARD_TARGETS = [...new Set([...RESERVED, ...Object.keys(RESERVED_OWNERS)])];
+/** A held name the designated key (or, for anti-impersonation holds, bCorp's key) may claim. */
+const mayClaimReserved = (alias, key, owners = RESERVED_OWNERS) =>
+  owners[alias] === key || (BRAND_KEYS.includes(key) && heldByGuard(alias));
 const RESERVED_EXPLAIN = 'This name is kept for the bWalletX team, so it can’t be claimed.';
 const HELD_EXPLAIN = 'This name is held for The Bitcoin Corporation, so it can’t be claimed.';
 /** Constant-time check of the admin header against PAYMAIL_ADMIN_SECRET (unset = always refused). */
@@ -623,6 +713,10 @@ function makeHandlers({
   notifyOffer = env.NODE_ENV === 'test' || process.env.NODE_ENV === 'test'
     ? async () => false
     : (handle, receipt) => offers.notifyDirector(handle, receipt, env),
+  // The provider's published signing keys (lib/nameProof.js). Off under tests unless injected.
+  providerJwks = env.NODE_ENV === 'test' || process.env.NODE_ENV === 'test'
+    ? async () => []
+    : (provider) => nameProof.fetchJwks(provider),
 }) {
   const verifySignedOnce = makeReplayGuard();
   // Company paymails (PAYMAIL_COMPANIES): the alias row (identity key) is provisioned in the DB by the owner;
@@ -734,7 +828,7 @@ function makeHandlers({
    */
   const payForName = async ({ alias, key, body, kind }) => {
     // A reserved name's designated owner (e.g. bCorp's held names) takes it without paying.
-    if (reservedOwners[alias] === key) return null;
+    if (mayClaimReserved(alias, key, reservedOwners)) return null;
     const usd = nameFee.namePriceUsd(alias);
     const address = nameFee.feeAddress(env);
     if (!usd || !address) return null;
@@ -760,6 +854,47 @@ function makeHandlers({
       kind,
     });
     return fresh ? null : [409, { error: 'That payment already paid for a name' }];
+  };
+
+  // Provable names (docs/PROVABLE-NAMES.md): the provider keys archived in the public name log, oldest first.
+  const archivedKeys = async (provider) =>
+    ((store.providerKeys && (await store.providerKeys(nameProof.jwksAlias(provider)).catch(() => []))) || [])
+      .map((r) => {
+        try {
+          const n = JSON.parse(r.note);
+          return n && n.kid && n.jwk ? { kid: n.kid, jwk: n.jwk, firstSeen: r.created_at } : null;
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+  // Archive every key the provider publishes now that the log hasn't seen (first-seen date = the log entry's).
+  const archiveKeys = async (provider, live) => {
+    const known = new Set((await archivedKeys(provider)).map((k) => k.kid));
+    for (const k of live) {
+      if (known.has(k.kid)) continue;
+      await store.logName({
+        alias: nameProof.jwksAlias(provider),
+        action: 'jwks',
+        actor: 'server',
+        note: JSON.stringify({ provider, kid: k.kid, jwk: k.jwk }),
+      });
+      known.add(k.kid);
+    }
+  };
+  /** A name's stored proof as served publicly, with the archived key it was signed by. */
+  const proofOut = async (p) => {
+    const kid = nameProof.decode(p.id_token)?.header?.kid;
+    const keys = (await archivedKeys(p.provider)).filter((k) => k.kid === kid);
+    return {
+      provider: p.provider,
+      sub: p.sub,
+      identityKey: p.identity_key,
+      idToken: p.id_token,
+      provenAt: p.created_at,
+      keys,
+      scheme: 'OpenID Connect ID token; nonce = sha256("bwalletx-name-proof|v1|" + identityKey) hex',
+    };
   };
 
   return {
@@ -792,6 +927,13 @@ function makeHandlers({
       const b = row.alias && store.getBinding ? await store.getBinding(row.alias).catch(() => null) : null;
       if (b && String(b.identity_key).toLowerCase() === String(row.identity_key).toLowerCase())
         out.binding = bindingOut(b);
+      // Provable names: the provider-signed proof, so the payer's wallet checks it without trusting us.
+      const pr =
+        row.alias && store.getProof && nameProof.providerForAlias(row.alias)
+          ? await store.getProof(row.alias).catch(() => null)
+          : null;
+      if (pr && String(pr.identity_key).toLowerCase() === String(row.identity_key).toLowerCase())
+        out.proof = await proofOut(pr);
       return [200, out];
     },
 
@@ -920,6 +1062,78 @@ function makeHandlers({
       });
       await store.deleteHandover(alias);
       return [200, { binding: bindingOut(b) }];
+    },
+
+    // Provable names, step 1 (docs/PROVABLE-NAMES.md): the owner of `name.gmail` signs in with Google with
+    // proof_key = their identity key, and sends the ticket here signed by that key. We check the ID token as any
+    // wallet will (signature by Google's published key, iss, aud = our client id, nonce = this key, the email gives
+    // this name), refuse a different Google account (sub) for a name that already has a proof, archive Google's keys
+    // in the name log, and keep the raw ID token as the name's proof. Nothing else from the sign-in is kept.
+    prove: async (_q, body) => {
+      body = body || {};
+      const sigErr = await verifySignedOnce(body, 'prove', now());
+      if (sigErr) return [401, { error: sigErr }];
+      if (!store.putProof) return [503, { error: 'Name proofs are not available right now' }];
+      const identityKey = String(body.identityKey).toLowerCase();
+      const alias = String(body.fields?.alias || '').toLowerCase();
+      const provider = nameProof.providerForAlias(alias);
+      if (!provider) return [400, { error: 'Only source-tagged names (like name.gmail) can be proven' }];
+      const t = openTicket(body.ticket, body.secret, env);
+      if (!t) return [401, { error: 'That sign-in has expired. Please sign in again.' }];
+      if (t.provider !== provider || !t.id_token)
+        return [400, { error: `Sign in with ${nameProof.PROVIDERS[provider].label} for this wallet first` }];
+      const live = await providerJwks(provider).catch(() => []);
+      const v = nameProof.verifyIdToken(t.id_token, {
+        provider,
+        aud: env[nameProof.PROVIDERS[provider].aud],
+        identityKey,
+        keys: live,
+        now: now(),
+      });
+      if (!v.ok) return [400, { error: v.error }];
+      if (nameProof.aliasForClaims(provider, v.claims) !== alias)
+        return [403, { error: 'That sign-in is for a different name' }];
+      const row = await store.getAlias(alias);
+      if (!row || String(row.identity_key).toLowerCase() !== identityKey)
+        return [403, { error: 'Only the wallet the name points to can prove it' }];
+      const prev = await store.getProof(alias);
+      if (prev && prev.sub !== String(v.claims.sub))
+        return [409, { error: 'This name was proven by a different account' }];
+      await archiveKeys(provider, live);
+      const p = {
+        alias,
+        provider,
+        sub: String(v.claims.sub),
+        identity_key: identityKey,
+        id_token: t.id_token,
+        created_at: new Date(now()).toISOString(),
+      };
+      await store.putProof(p);
+      await store.logName({
+        alias,
+        identity_key: identityKey,
+        action: 'prove',
+        actor: 'owner',
+        signature: String(body.signature).toLowerCase(),
+        note: JSON.stringify({ provider, sub: p.sub, kid: v.kid, idToken: t.id_token }),
+      });
+      return [200, { proof: await proofOut(p) }];
+    },
+
+    // Public: a name's provider-signed proof (GET /api/paymail/name-proof/<handle>).
+    'name-proof': async ({ handle }) => {
+      const parts = parseHandleParts(handle, env);
+      if (!parts || !store.getProof) return [404, { error: 'not-found' }];
+      const p = await store.getProof(parts.alias);
+      if (!p) return [404, { error: 'No proof for that name' }];
+      return [200, { alias: parts.alias, ...(await proofOut(p)) }];
+    },
+
+    // Public: every provider key archived in the name log (kid -> key, first seen), so old proofs stay checkable.
+    'provider-keys': async (q) => {
+      const provider = String(q.provider || 'google');
+      if (!nameProof.PROVIDERS[provider]) return [400, { error: 'provider' }];
+      return [200, { provider, keys: await archivedKeys(provider) }];
     },
 
     // The public name log, newest first: every change of who a name points to, hash-chained.
@@ -1100,7 +1314,10 @@ function makeHandlers({
         f.ordAddress && body.ordProof ? await checkOrdProof(identityKey, f.ordAddress, body.ordProof) : null;
       if (ordProof === false) return [400, { error: 'Bad ordAddress proof' }];
       const taken = await store.getAlias(alias);
-      const designated = reservedOwners[alias] === identityKey;
+      const designated = mayClaimReserved(alias, identityKey, reservedOwners);
+      // A display name that poses as bWalletX / bCorp is refused (bCorp's own names excepted).
+      if (f.name && !BRAND_KEYS.includes(identityKey) && brandInDisplayName(cleanDisplayName(f.name)))
+        return [400, { error: DISPLAY_NAME_MSG }];
       if (bad === RESERVED_MSG && !designated && !(taken && String(taken.identity_key).toLowerCase() === identityKey))
         return [400, { error: bad }];
       // A verified name needs proof only to claim it; its owner can update the profile without signing in again.
@@ -1145,16 +1362,25 @@ function makeHandlers({
           if ((await store.countIpClaims(ipHash, since)) >= max)
             return [429, { error: 'Too many new names from this network today. Try again tomorrow.' }];
         }
+        if (store.countKeyClaims) {
+          const max = Number(env.PAYMAIL_NAMES_PER_KEY_DAY) || NAME_KEY_DAILY;
+          const since = new Date(now() - 86_400_000).toISOString();
+          if ((await store.countKeyClaims(identityKey, since)) >= max)
+            return [429, { error: `This wallet has taken ${max} new names today. Try again tomorrow.` }];
+        }
         // Short names cost money (owner, 27 Oct 2026), first claim or rename alike; 5+ characters are free.
         const paid = await payForName({ alias, key: identityKey, body, kind: isRename ? 'rename' : 'claim' });
         if (paid) return paid;
       }
       if (mine && mine.alias !== alias && (mine.kind ?? 'plain') === kind) {
         await store.renameAlias(mine.alias, alias);
-        // The old name keeps receiving for 90 days, then is released.
+        // The old name keeps receiving for 90 days, then is released. A name that is now reserved
+        // (anti-impersonation, 28 Oct 2026) gets no forward: it stops resolving at once. Old forwards stay.
         if (store.putForward) {
           if (fwd) await store.deleteForward(alias);
           await store.retargetForwards?.(mine.alias, alias);
+        }
+        if (store.putForward && !reservedBase(mine.alias)) {
           await store.putForward({
             from_alias: mine.alias,
             to_alias: alias,
@@ -1206,6 +1432,8 @@ function makeHandlers({
       const key = String(body.identityKey).toLowerCase();
       const row = await store.getAliasByKey(key);
       if (!row) return [404, { error: 'Claim a name first' }];
+      if (!BRAND_KEYS.includes(key) && brandInDisplayName(cleanDisplayName(body.fields?.name)))
+        return [400, { error: DISPLAY_NAME_MSG }];
       const name = cleanDisplayName(body.fields?.name) || defaultDisplayName(row.alias);
       await store.setDisplayNameByKey(key, name);
       return [200, { name }];
@@ -1233,7 +1461,7 @@ function makeHandlers({
       const mine = !!taken && String(taken.identity_key).toLowerCase() === key;
       if (mine) return out('mine', 0, { available: true, reason: 'mine' });
       if (bad === RESERVED_MSG) {
-        if (!(PUBKEY_RE.test(key) && reservedOwners[alias] === key)) {
+        if (!(PUBKEY_RE.test(key) && mayClaimReserved(alias, key, reservedOwners))) {
           const held = PREMIUM_BCORP.includes(alias);
           return out(held ? 'held' : 'reserved', null, {
             available: false,
@@ -1246,7 +1474,8 @@ function makeHandlers({
       const fwd = await liveForward(alias);
       if (fwd && fwd.identity_key !== key) return out('taken', null, { available: false, reason: 'taken' });
       // The designated owner of a reserved name claims it free; everyone else pays by length.
-      const usd = nameFee.feeAddress(env) && reservedOwners[alias] !== key ? nameFee.namePriceUsd(alias) : 0;
+      const usd =
+        nameFee.feeAddress(env) && !mayClaimReserved(alias, key, reservedOwners) ? nameFee.namePriceUsd(alias) : 0;
       return out(usd ? 'priced' : 'free', usd, { available: true, reason: null });
     },
 
@@ -1407,6 +1636,11 @@ function makeHandlers({
         const since = new Date(now() - 86_400_000).toISOString();
         if ((await store.countIpClaims(ipHash, since)) >= max)
           return [429, { error: 'Too many new names from this network today. Try again tomorrow.' }];
+      }
+      if (store.countKeyClaims) {
+        const max = Number(env.PAYMAIL_NAMES_PER_KEY_DAY) || NAME_KEY_DAILY;
+        if ((await store.countKeyClaims(key, new Date(now() - 86_400_000).toISOString())) >= max)
+          return [429, { error: `This wallet has taken ${max} new names today. Try again tomorrow.` }];
       }
       // Max 5 plain names per wallet (mirrors bit-sign's /me/handles max).
       const plain = (store.listByKey ? await store.listByKey(key) : []).filter((r) => (r.kind ?? 'plain') === 'plain');
@@ -1618,6 +1852,7 @@ const bookingOut = (r) => ({
 });
 
 module.exports = {
+  BRAND_KEYS,
   P2P_HOURLY_LIMITS,
   FORWARD_MS,
   CHANGE_COOLDOWN_MS,

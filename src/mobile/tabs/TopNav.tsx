@@ -17,7 +17,6 @@ import { AnimatePresence, motion } from 'framer-motion';
 import {
   BadgeCheck,
   Bot,
-  Gamepad2,
   ChevronRight,
   Lock,
   LogOut,
@@ -37,17 +36,17 @@ import { topBarBappForPath } from '../phone/bappBarModel';
 import { startAgentCreate } from '../agents/agentCreate';
 import { AGENT_TOOLS_TITLE, AgentToolsSheet } from '../agents/AgentToolsSheet';
 import { AirdropsNavButton } from '../airdrops/AirdropsNavButton';
-import { TOKENBLASTER_ENABLED, TWETCH_POST_ENABLED, isBWalletX } from '../storeBuild';
-import { TERRORNODE_URL } from '../games/TerrornodeHeroX';
-import { openBapp } from '../bappFrame/bappFrame';
+import { TWETCH_POST_ENABLED, isBWalletX } from '../storeBuild';
 import { IS_EXTENSION } from '../extension';
 import { initPairing, setAgentPairDeps } from '../pair/sessions';
 import { onPairLink, takePairLink } from '../pair/links';
 import { useSpaceInviteLinks } from '../spaces/inviteLinks';
+import { useSignLinks } from '../chat/useSignLinks';
 import { useSubscribeLinks } from '../pots/subscribeLink';
 import { usePeerPayLinks } from '../scan/peerpayLinks';
 import { AuthRequestHost } from '../auth/AuthSheet';
 import { BrowseLinkHost } from '../browse/BrowseLinkHost';
+import { SwapLinkHost } from '../swap/SwapLinkHost';
 import { BitsignHost } from '../pair/BitsignHost';
 import { TwetchHost } from '../twetch/TwetchHost';
 import { PairLoginHost } from '../pair/PairLoginHost';
@@ -112,12 +111,6 @@ const TopNavBar = () => {
   const phone = usePhoneLayout();
   const { handleSelect } = useBottomMenu();
   const navigate = useNavigate();
-  // The bApps page hosts the in-wallet frame (it shows only while that page is on screen), so go there and open
-  // the game the way the TERRORNODE hero does (BrowserPage go → openBapp; full-screen browser if it can't frame).
-  const playTerrornode = () => {
-    navigate(routeFor('browser') ?? '/browser');
-    void openBapp('TERRORNODE', TERRORNODE_URL);
-  };
   const pathname = useLocation().pathname;
   const onMedia = pathname.startsWith('/m/media');
   const onLock = pathname.startsWith('/m/lock');
@@ -146,6 +139,7 @@ const TopNavBar = () => {
   // Phone layout: PhoneShell owns pair links, pairing and the CLI wallet context, once (phone/useAppServices.ts).
   // Space invite links (spaces/inviteLinks.ts); PhoneShell owns them in the phone layout.
   useSpaceInviteLinks(!phoneLayoutOn());
+  useSignLinks(!phoneLayoutOn());
   useSubscribeLinks(!phoneLayoutOn());
   usePeerPayLinks(!phoneLayoutOn());
   useEffect(() => {
@@ -579,12 +573,7 @@ const TopNavBar = () => {
                     if (to === -1) navigate(-1);
                     else navigate(to);
                   })}
-                {/* Owner, 27 Oct 2026: play TERRORNODE from the b menu, in the wallet's own browser (already connected). */}
-                {TOKENBLASTER_ENABLED &&
-                  action(<Gamepad2 size={16} color="#fff" />, 'Play TERRORNODE', () => {
-                    setDrawer(false);
-                    playTerrornode();
-                  })}
+                {/* Owner, 28 Oct 2026: no "Play TERRORNODE" in the accounts menu. The game stays on Home, in bApps and in its room. */}
                 {/* Store builds have no agent tools: pairing stays a menu row, as before. */}
                 {!X_MARK &&
                   action(<ScanLine size={16} color="#fff" />, PAIR_LABEL, () => {
@@ -717,19 +706,6 @@ const TopNavBar = () => {
                 }
               : undefined
           }
-          // bWalletX only (owner, 27 Oct 2026): TERRORNODE in the wallet's own browser, like the bApps hero.
-          onPlay={
-            TOKENBLASTER_ENABLED
-              ? {
-                  label: 'Play TERRORNODE',
-                  go: () => {
-                    setSheet(null);
-                    setDrawer(false);
-                    playTerrornode();
-                  },
-                }
-              : undefined
-          }
           // bWalletX only: agent accounts and the tools that drive them (owner, 6 Oct 2026).
           onAddAgent={
             X_MARK
@@ -768,6 +744,7 @@ const TopNavBar = () => {
       )}
       {!phoneLayoutOn() && <AuthRequestHost />}
       {!phoneLayoutOn() && <BrowseLinkHost />}
+      {!phoneLayoutOn() && <SwapLinkHost />}
       {!phoneLayoutOn() && <BitsignHost />}
       {!phoneLayoutOn() && TWETCH_POST_ENABLED && <TwetchHost />}
       {!phoneLayoutOn() && <PairLoginHost />}

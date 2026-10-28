@@ -92,6 +92,8 @@ import { HandleFlow } from '../names/HandleFlow';
 import { avatarFor, B_AVATAR, pendingBQuestions, rememberAvatar, useAvatars } from '../chat/avatars';
 import { ChatAvatar as Avatar } from '../chat/ChatAvatar';
 import { roomEmoji, roomHeaderBackground, roomListBackdrop, roomOwnerOrigin, useRoomLook } from '../chat/roomLook';
+import { roomBubbles } from '../chat/roomTheme';
+import { GameRoomPlayer } from '../chat/GameRoomPlayer';
 import { gateIconUrl, lockedForMe, lockedLine, roomTokenGate } from '../chat/roomGate';
 import { roomSetupState, shouldOfferRoomSetup } from '../chat/roomSetupPrompt';
 import type { ReplyRef } from '../chat/api';
@@ -139,6 +141,7 @@ import {
   roomSpacesAllowed,
   MARKET_ENABLED,
   STORE_BUILD,
+  TOKENBLASTER_ENABLED,
   STORE_ROOM_NOTE,
   marketLabel,
   tokenRoomsEnabled,
@@ -265,6 +268,8 @@ import {
   withoutBlocked,
   type PublicRoom,
 } from '../chat/openRooms';
+import { memberRooms } from '../chat/memberRooms';
+import PendingDocBanner from '../chat/PendingDocBanner';
 import { MessageMenu, NewRoomSheet, OpenRoomSheet } from '../chat/OpenRoomSheets';
 import { useRoomCard } from '../chat/roomCard';
 import { RoomSettingsSheet } from '../chat/RoomSettingsSheet';
@@ -764,6 +769,8 @@ const Conversation = ({
   // Dark looks only: a light look keeps the dark room (above), so its art would fade into the wrong colour.
   const backdrop = look?.mode === 'dark' ? roomListBackdrop(look) : null;
   const emoji = look ? roomEmoji(room.metadata) : null;
+  // A room's own bubble colours and accent (chat/roomTheme.ts; $TERRORNODE red/pink). Null: the default look.
+  const bubbles = roomBubbles(room.ticker);
   const askB = () => {
     setDraft((d) => (/^\/b(\s|$)/i.test(d) ? d : `/b ${d}`));
     requestAnimationFrame(() => composer.current?.focus());
@@ -798,6 +805,7 @@ const Conversation = ({
         // GOLD in it (buttons, links, badges) is the room's. A light look keeps the dark room so messages still read.
         background: look?.mode === 'dark' ? look.bg : BG,
         ...(look ? ({ '--bw-accent-hi': look.accentHi, '--bw-accent': look.accent } as CSSProperties) : {}),
+        ...(bubbles ? ({ '--bw-accent-hi': bubbles.accent, '--bw-accent': bubbles.accent } as CSSProperties) : {}),
       }}
     >
       {/* The connected game's room: a short balance card on top (chat/SiteRoomViews.tsx; only for that room).
@@ -816,7 +824,7 @@ const Conversation = ({
                 background: roomHeaderBackground(look),
                 borderBottom: `2px solid ${look.accent}`,
                 // The header's buttons use the accent (GOLD reads this variable).
-                '--bw-accent-hi': look.accentHi,
+                '--bw-accent-hi': bubbles?.accent ?? look.accentHi,
               } as CSSProperties)
             : {
                 paddingTop: 8,
@@ -938,6 +946,9 @@ const Conversation = ({
         </div>
       </div>
 
+      {/* Game rooms (TERRORNODE): the compact live player (chat/GameRoomPlayer.tsx). Capped height, so the message bar
+          stays on screen. Not in store builds (TOKENBLASTER_ENABLED), like the Play TERRORNODE action. */}
+      {TOKENBLASTER_ENABLED && <GameRoomPlayer client={client} ticker={room.ticker} signedIn={!!client.current} />}
       {/* Spaces: Live now / Join, or Start for the issuer or admin. bWalletX: any room; store: open rooms (free Spaces). */}
       {/* In the wide layout the Space banner sits in the room details column instead. */}
       {!WIDE_ON && (BSPACES_ENABLED || roomSpacesAllowed(room)) && (
@@ -1001,6 +1012,7 @@ const Conversation = ({
           actions={null}
         />
       )}
+      {!peer && <PendingDocBanner room={room} />}
       <div
         ref={scroller}
         onScroll={onScroll}
@@ -1174,9 +1186,21 @@ const Conversation = ({
                     borderRadius: 18,
                     borderBottomRightRadius: it.mine ? 6 : 18,
                     borderBottomLeftRadius: it.mine ? 18 : 6,
-                    background: it.mine ? 'linear-gradient(160deg, var(--bw-accent-hi) 0%, #E9B21A 100%)' : PANEL,
-                    color: it.mine ? '#1a1300' : '#f2f2f2',
-                    border: it.mine ? 'none' : `1px solid ${LINE}`,
+                    background: bubbles
+                      ? it.mine
+                        ? bubbles.mineBg
+                        : bubbles.theirsBg
+                      : it.mine
+                        ? 'linear-gradient(160deg, var(--bw-accent-hi) 0%, #E9B21A 100%)'
+                        : PANEL,
+                    color: bubbles
+                      ? it.mine
+                        ? bubbles.mineText
+                        : bubbles.theirsText
+                      : it.mine
+                        ? '#1a1300'
+                        : '#f2f2f2',
+                    border: it.mine ? 'none' : `1px solid ${bubbles ? bubbles.theirsBorder : LINE}`,
                     opacity: it.message.pending && !it.message.failed ? 0.75 : 1,
                   }}
                 >
@@ -2860,12 +2884,12 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     },
     [gateHeld, gateLook, handle],
   );
+  // Open rooms, plus the private member rooms no other list shows (board / deal / group rooms; chat/memberRooms.ts).
   const myOpen = useMemo(
     () =>
-      (rooms ?? [])
-        .filter(isOpenRoom)
-        .filter((r) => !gateLacking(r))
-        .filter((r) => !q || `${r.name ?? ''} ${r.ticker}`.toLowerCase().includes(q)),
+      [...(rooms ?? []).filter(isOpenRoom).filter((r) => !gateLacking(r)), ...memberRooms(rooms ?? [])].filter(
+        (r) => !q || `${r.name ?? ''} ${r.ticker}`.toLowerCase().includes(q),
+      ),
     [rooms, q, gateLacking],
   );
   const lockedOpen = useMemo(
@@ -3168,11 +3192,27 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     take();
     return onRoomTicker(take);
   }, [handle]);
+  // The list may be the cached one, older than the room the push is about: fetch it fresh once before giving up, and
+  // then open the room by its ticker anyway (the server checks membership). Dropping the tap silently is what the owner
+  // hit on 28 Oct 2026.
+  const pushRefetched = useRef<string | null>(null);
   useEffect(() => {
     if (!pushTicker || !rooms) return;
     const room = rooms.find((r) => r.ticker.toUpperCase() === pushTicker);
-    if (!room) return setPushTicker(null);
-    if (isOpenRoom(room)) {
+    if (!room) {
+      if (pushRefetched.current !== pushTicker) {
+        pushRefetched.current = pushTicker;
+        void fetchRooms(client, identityAddress, 0).catch(() => {
+          setPushTicker(null);
+          openOpenRoom(stubRoom(pushTicker, `$${pushTicker}`, { metadata: {} }));
+        });
+        return;
+      }
+      setPushTicker(null);
+      return openOpenRoom(stubRoom(pushTicker, `$${pushTicker}`, { metadata: {} }));
+    }
+    // Open rooms and private member rooms (a board room with a document to sign) open directly.
+    if (isOpenRoom(room) || memberRooms([room]).length) {
       setPushTicker(null);
       return openOpenRoom(room);
     }

@@ -39,6 +39,8 @@ import { setLocalAvatar } from './avatar';
 import { BWALLET_PAYMAIL_DOMAIN, OPNS_PROFILE_DOMAIN } from './config';
 import { HandleFlow } from './HandleFlow';
 import { useOpnsName } from './OpnsNameCard';
+import { fetchOpnsIndex, opnsVerdict, verdictText, type OpnsVerdict } from './opnsVerify';
+import { cachedMeta, resolveMeta } from '../media/resolveMeta';
 import { adoptOpnsNft } from './opnsAdopt';
 import { setMyName } from './myName';
 import { paymailEnabled } from './paymail';
@@ -460,11 +462,74 @@ export const OpnsNameActions = ({
 };
 
 /** The Name card body for a name NFT by its content URL: reads the name (useOpnsName), nothing for an invalid one. */
+/**
+ * The name's verdict against the OpNS index (opnsVerify.ts). `origin` is used only when traced by the indexer
+ * (tags / resolveMeta), never the outpoint as a stand-in.
+ */
+const useOpnsVerdict = (name: string | null, outpoint?: string, origin?: string): OpnsVerdict | 'checking' => {
+  const { chromeStorageService } = useServiceContext();
+  const a = chromeStorageService.getCurrentAccountObject().account;
+  const ours = [
+    a?.addresses?.ordAddress,
+    a?.addresses?.bsvAddress,
+    a?.addresses?.identityAddress,
+    a?.primaryAddress,
+  ].filter((x): x is string => !!x);
+  const oursKey = ours.join(',');
+  const [v, setV] = useState<OpnsVerdict | 'checking'>('checking');
+  useEffect(() => {
+    if (!name) return;
+    let live = true;
+    setV('checking');
+    void (async () => {
+      const idx = await fetchOpnsIndex(fetch, name);
+      let traced = origin && outpoint && origin.replace('.', '_') !== outpoint.replace('.', '_') ? origin : undefined;
+      if (!traced && outpoint) {
+        await resolveMeta([outpoint]).catch(() => 0);
+        traced = cachedMeta(outpoint)?.origin;
+      }
+      if (live) setV(opnsVerdict(idx, { outpoint, origin: traced }, oursKey.split(',')));
+    })();
+    return () => {
+      live = false;
+    };
+  }, [name, outpoint, origin, oursKey]);
+  return v;
+};
+
+/**
+ * A name NFT's section. Handle / bAvatar / token / sell actions show only when the OpNS index verifies the name as
+ * ours AND the item is not an unsolicited, un-kept gift (`unsolicited`: it is still in Quarantine). Otherwise one
+ * plain line says why, with no actions; Hide / Delete stay on the host screen.
+ */
 export const OpnsNameSection = ({
   url,
   fallback,
+  origin,
+  unsolicited = false,
   ...rest
-}: { url: string | null | undefined; fallback?: string } & Omit<Parameters<typeof OpnsNameActions>[0], 'name'>) => {
+}: {
+  url: string | null | undefined;
+  fallback?: string;
+  /** The NFT's inscription origin as traced by the indexer (tags or resolveMeta), when known. */
+  origin?: string;
+  /** Unsolicited and not kept (Quarantine): never any money or identity actions. */
+  unsolicited?: boolean;
+} & Omit<Parameters<typeof OpnsNameActions>[0], 'name'>) => {
   const { name } = useOpnsName(url, fallback);
-  return name ? <OpnsNameActions name={name} {...rest} /> : null;
+  const verdict = useOpnsVerdict(name, rest.outpoint, origin);
+  if (!name) return null;
+  if (verdict === 'verified' && !unsolicited) return <OpnsNameActions name={name} {...rest} />;
+  return (
+    <section className="flex flex-col gap-2 rounded-2xl bg-[#111216] border border-white/5 p-3">
+      <p className="m-0 text-[15px] leading-snug text-white">
+        {verdict === 'verified' ? `This NFT is the name ${name}. Keep it first to use it.` : verdictText(verdict, name)}
+      </p>
+      {rest.from && (
+        <p className="m-0 text-xs" style={{ color: MUTED }}>
+          {nameOrigin({ from: rest.from })}
+        </p>
+      )}
+    </section>
+  );
 };

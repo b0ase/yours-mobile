@@ -73,6 +73,8 @@ export type Sealed = {
    * like `agreement`; the subject + body always say what it is for older clients.
    */
   offer?: unknown;
+  /** Pay statement or pay dispute (src/mobile/wages/statement.ts parses and checks it). Opaque here, like `note`. */
+  wage?: unknown;
 };
 /** `tags`: the NFT's own ordinal tags (type:, origin:, …) so it lists properly in the recipient's NFTs. */
 export type SealedOrdinal = { txid: string; deliveries: unknown[]; name?: string; tags?: string[] };
@@ -94,12 +96,16 @@ export const OFFER_JSON_MAX = 40_000;
 const offerOk = (o: unknown) => !!o && typeof o === 'object' && JSON.stringify(o).length <= OFFER_JSON_MAX;
 
 const noteOk = (n: unknown) => !!n && typeof n === 'object' && JSON.stringify(n).length <= 6000;
+/** A pay statement with 20 deductions fits well inside this. */
+export const WAGE_JSON_MAX = 12_000;
+const wageOk = (w: unknown) => !!w && typeof w === 'object' && JSON.stringify(w).length <= WAGE_JSON_MAX;
 
 const agreementOk = (a: unknown) => !!a && typeof a === 'object' && JSON.stringify(a).length <= AGREEMENT_JSON_MAX;
 
 export const sealedToBytes = (s: Sealed): number[] => {
   if (s.agreement !== undefined && !agreementOk(s.agreement)) throw new Error('This document is too large to send.');
   if (s.offer !== undefined && !offerOk(s.offer)) throw new Error('This offer is too large to send.');
+  if (s.wage !== undefined && !wageOk(s.wage)) throw new Error('This pay statement is too large to send.');
   return [
     ...new TextEncoder().encode(
       JSON.stringify({
@@ -109,6 +115,7 @@ export const sealedToBytes = (s: Sealed): number[] => {
         ...(ordinalOk(s.ordinal) ? { ordinal: s.ordinal } : {}),
         ...(s.offer !== undefined ? { offer: s.offer } : {}),
         ...(noteOk(s.note) ? { note: s.note } : {}),
+        ...(wageOk(s.wage) ? { wage: s.wage } : {}),
       }),
     ),
   ];
@@ -123,6 +130,7 @@ export const bytesToSealed = (b: number[] | Uint8Array): Sealed => {
   if (ordinalOk(j.ordinal)) out.ordinal = j.ordinal;
   if (offerOk(j.offer)) out.offer = j.offer;
   if (noteOk(j.note)) out.note = j.note;
+  if (wageOk(j.wage)) out.wage = j.wage;
   return out;
 };
 

@@ -9,7 +9,7 @@
  * so a token you already hold (bought, minted, received in a tx you made) is never quarantined, even if someone
  * airdrops more of it (that gap is documented in docs/BMAIL.md).
  */
-import type { AirdropItem, InboxState } from './inbox';
+import { isKeptNft, keptOriginSet, type AirdropItem, type InboxState } from './inbox';
 
 export const normId = (id: string) => (id || '').toLowerCase().replace('.', '_');
 
@@ -37,16 +37,16 @@ export const quarantinedTokenIds = (
   return new Set([...seen].filter((id) => !accepted.has(id) && !mine.has(id)));
 };
 
-/** NFT outpoints in Quarantine (same rule, per item). */
+/** NFT outpoints in Quarantine (same rule, per item; a keep counts by key or by origin: inbox.ts keptOrigins). */
 export const quarantinedNfts = (
   items: AirdropItem[],
-  s: Pick<InboxState, 'kept'> & { trustedIssuers?: string[] },
+  s: Pick<InboxState, 'kept' | 'keptOrigins'> & { trustedIssuers?: string[] },
 ): Set<string> => {
-  const kept = new Set(s.kept);
   const trusted = new Set(s.trustedIssuers ?? []);
+  const origins = keptOriginSet(s);
   return new Set(
     items
-      .filter((i) => i.asset.kind === 'nft' && !kept.has(i.key) && !trusted.has(i.issuer))
+      .filter((i) => i.asset.kind === 'nft' && !isKeptNft(i, s, origins) && !trusted.has(i.issuer))
       .map((i) => normId(i.asset.id)),
   );
 };

@@ -10,16 +10,50 @@ import { originatorForOrigin } from './services/originKey';
 import { forwardCwiCall } from './services/cwiForward';
 import { SUBSCRIPTIONS_ENABLED } from './mobile/storeBuild';
 import { HANDOFF_ENABLED, HANDOFF_WEB_ORIGIN } from './mobile/passkey/extHandoff';
+import {
+  ROOM_PLAYING_ACTION,
+  ROOM_PLAYING_TYPE,
+  ROOM_QUERY_ACTION,
+  ROOM_QUERY_TYPE,
+  parseRoomPlaying,
+  roomTabOrigin,
+} from './mobile/chat/gameRoomLive';
 
 console.log('🌱 Yours Wallet Loaded');
 
 // inject.js runs as a MAIN-world content script (see manifest.json), so
 // window.CWI is bound before any page script executes.
 
+// Sub-frames (manifest all_frames, services/frameAccess.ts): the provider is offered only after the background,
+// reading Chrome's own sender (frame origin, tab URL, document state), says this frame may use the wallet: an https
+// frame inside an https top-level page. The MAIN-world script waits for FRAME_OK_EVENT before setting window.CWI.
+// The background re-checks every call the same way, so a page faking FRAME_OK_EVENT gains nothing.
+const IS_TOP_FRAME = window.top === window;
+let frameOk = IS_TOP_FRAME;
+if (!IS_TOP_FRAME) {
+  try {
+    chrome.runtime.sendMessage({ action: 'bwxFrameCheck' }, (r: { ok?: boolean } | undefined) => {
+      if (chrome.runtime.lastError || r?.ok !== true) return;
+      frameOk = true;
+      const send = () => self.dispatchEvent(new CustomEvent('bwalletx:frame-ok'));
+      send();
+      setTimeout(send, 300); // the MAIN-world script may not be listening yet
+    });
+  } catch {
+    /* extension reloaded */
+  }
+}
+
 // Forward CWI requests from page to background service worker
 self.addEventListener(CustomListenerName.YOURS_REQUEST, (e: Event) => {
   const { type, messageId, params: originalParams = {} } = (e as CustomEvent<RequestEventDetail>).detail;
   if (!type || !(isCWIEventName(type) || isSpendingAuthAction(type) || isMintPrivateAction(type) || isTwetchAction(type) || isSwapAction(type))) return;
+  if (!frameOk) {
+    self.dispatchEvent(
+      new CustomEvent(messageId, { detail: { success: false, error: 'bWalletX only works inside a secure (https) site' } }),
+    );
+    return;
+  }
 
   let params: RequestParams = {};
 
@@ -114,7 +148,7 @@ chrome.storage?.local.get('bwalletxTakeCwi', (r) => {
 let liveSec = 0;
 let liveN = 0;
 window.addEventListener('message', (e: MessageEvent) => {
-  if (e.source !== window || (e.data as { type?: unknown } | null)?.type !== 'bwallet:session-spend') return;
+  if (e.source !== window || !frameOk || (e.data as { type?: unknown } | null)?.type !== 'bwallet:session-spend') return;
   const sec = Math.floor(Date.now() / 1000);
   if (sec !== liveSec) {
     liveSec = sec;
@@ -137,7 +171,7 @@ if (SUBSCRIPTIONS_ENABLED) {
   let subBusy = false;
   window.addEventListener('message', (e: MessageEvent) => {
     const d = e.data as { type?: unknown; isInvocation?: unknown; id?: unknown } | null;
-    if (e.source !== window || d?.type !== 'BWX_SUBSCRIBE' || d.isInvocation !== true) return;
+    if (e.source !== window || !IS_TOP_FRAME || d?.type !== 'BWX_SUBSCRIBE' || d.isInvocation !== true) return;
     const reply = (r: unknown) => window.postMessage(r, location.origin);
     const error = (description: string) =>
       reply({ type: 'BWX_SUBSCRIBE', isInvocation: false, id: d.id, status: 'error', description });
@@ -156,6 +190,32 @@ if (SUBSCRIPTIONS_ENABLED) {
   });
 }
 
+// One player at a time (mobile/chat/gameRoomLive.ts): a bChatX room tab says whether it is playing the room's live
+// video, so the side panel shows "Watching in tab" instead of a second player. Only bChatX origins, only the top
+// frame, only the page's own window; the shape is checked here and again in the background (which takes the
+// origin from Chrome). At most 5 a second.
+let roomSec = 0;
+let roomN = 0;
+if (window.top === window && roomTabOrigin(location.origin)) {
+  window.addEventListener('message', (e: MessageEvent) => {
+    if (e.source !== window || e.origin !== location.origin) return;
+    if ((e.data as { type?: unknown } | null)?.type !== ROOM_PLAYING_TYPE) return;
+    const data = parseRoomPlaying(e.data);
+    if (!data) return;
+    const sec = Math.floor(Date.now() / 1000);
+    if (sec !== roomSec) {
+      roomSec = sec;
+      roomN = 0;
+    }
+    if (++roomN > 5) return;
+    try {
+      chrome.runtime.sendMessage({ action: ROOM_PLAYING_ACTION, data })?.catch(() => undefined);
+    } catch {
+      /* extension reloaded */
+    }
+  });
+}
+
 // Passkey hand-off (notes/extension-passkey-handoff.md, VITE_SEEDLESS=1 builds only). web.bwalletx.com posts
 // { type: 'BWX_EXT_HANDOFF', isInvocation: true, msg } to its own window; ONLY that exact origin, from its own window
 // (not a child frame), is forwarded, over Chrome's internal route, to the background, which re-checks sender.origin
@@ -163,7 +223,7 @@ if (SUBSCRIPTIONS_ENABLED) {
 if (HANDOFF_ENABLED) {
   window.addEventListener('message', (e: MessageEvent) => {
     const d = e.data as { type?: unknown; isInvocation?: unknown; msg?: unknown } | null;
-    if (e.source !== window || e.origin !== HANDOFF_WEB_ORIGIN || d?.type !== 'BWX_EXT_HANDOFF') return;
+    if (e.source !== window || !IS_TOP_FRAME || e.origin !== HANDOFF_WEB_ORIGIN || d?.type !== 'BWX_EXT_HANDOFF') return;
     if (d.isInvocation !== true) return;
     const reply = (ok: boolean) =>
       window.postMessage({ type: 'BWX_EXT_HANDOFF', isInvocation: false, ok }, HANDOFF_WEB_ORIGIN);
@@ -220,6 +280,12 @@ try {
       // Always the wallet's own prompt page, never an address from the message.
       showSheet(`${chrome.runtime.getURL('prompt.html')}?${msg.query}`);
       sendResponse({ ok: true });
+      return false;
+    }
+    // The panel asks open bChatX room tabs to re-announce what they play (mobile/chat/gameRoomLive.ts).
+    if (msg?.action === ROOM_QUERY_ACTION) {
+      if (window.top === window && roomTabOrigin(location.origin))
+        window.postMessage({ type: ROOM_QUERY_TYPE }, location.origin);
       return false;
     }
     if (msg?.action === 'BWX_EXIT_FULLSCREEN') {

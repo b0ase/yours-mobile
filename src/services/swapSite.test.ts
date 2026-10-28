@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { runSiteSwap } from './swapSite';
-import { SWAP_ACCEPT_ACTION, SWAP_OFFER_ACTION } from './swapAction';
+import { SWAP_ACCEPT_ACTION, SWAP_OFFER_ACTION, isSwapOrigin } from './swapAction';
 
 const terms = { ref: 'doc-1', docHash: 'ab'.repeat(32), tokenId: 'aa'.repeat(32) + '_0', amount: '100', priceUsd: 1 };
 const never = async () => {
@@ -13,6 +13,24 @@ describe('swap site calls', () => {
     expect(r).toMatchObject({ success: false, code: 'ORIGIN' });
     const v = await runSiteSwap(SWAP_OFFER_ACTION, 'https://bchatx-preview.vercel.app', { terms }, never);
     expect(v).toMatchObject({ success: false, code: 'ORIGIN' });
+  });
+  test('chat.bwalletx.com (bChatX on our private domain) may ask; lookalikes may not', async () => {
+    expect(isSwapOrigin('https://chat.bwalletx.com')).toBe(true);
+    for (const o of [
+      'http://chat.bwalletx.com',
+      'https://chat.bwalletx.com.evil.example',
+      'https://bwalletx.com',
+      'https://web.bwalletx.com',
+      'chat.bwalletx.com',
+    ])
+      expect(isSwapOrigin(o)).toBe(false);
+    const r = await runSiteSwap(
+      SWAP_OFFER_ACTION,
+      'https://chat.bwalletx.com',
+      { terms: { ...terms, docHash: 'x' } },
+      never,
+    );
+    expect(r).toMatchObject({ success: false, code: 'BAD_REQUEST' });
   });
   test('malformed terms are refused before the wallet is touched', async () => {
     const r = await runSiteSwap(

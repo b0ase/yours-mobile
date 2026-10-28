@@ -30,8 +30,8 @@ function Sheet({ host, handle, proven }: { host: string; handle: string; proven:
           <LogIn size={24} color={GOLD} />
         </span>
         <p id="pair-login-title" className="mt-4 break-all text-lg font-bold text-white" data-testid="pair-login-title">
-          Sign in to {proven ? host : `a site that claims to be ${host}`}
-          {handle ? ` as ${handle}` : ''}?
+          {proven ? host : `A site that claims to be ${host}`} wants to sign you in
+          {handle ? ` as ${handle}` : ''}
         </p>
         {!proven && (
           <p className="mt-2 text-xs" style={{ color: AMBER }}>
@@ -47,7 +47,7 @@ function Sheet({ host, handle, proven }: { host: string; handle: string; proven:
             className="flex-1 rounded-xl py-3 font-semibold text-white"
             style={{ background: PANEL }}
           >
-            Decline
+            Cancel
           </button>
           <button
             onClick={() => answerLogin(true)}
@@ -55,7 +55,7 @@ function Sheet({ host, handle, proven }: { host: string; handle: string; proven:
             style={{ background: GOLD, color: '#000' }}
             data-testid="pair-login-approve"
           >
-            Approve
+            Sign in
           </button>
         </div>
       </div>

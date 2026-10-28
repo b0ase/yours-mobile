@@ -67,3 +67,19 @@ export function familySite(urlOrHost: string | null | undefined): ThemeSite | nu
   const bare = host.startsWith('www.') ? host.slice(4) : host;
   return THEME_SITES.find((s) => s.host === bare) ?? null;
 }
+
+/**
+ * Family sites whose theme is a built-in pack (owner, 27 Oct 2026): "Wear it" on b0ase.com, and the panel on a
+ * connected b0ase.com tab, wear the full b0ase pack (slanted buttons in themes.css), not only the JSON's colours.
+ */
+export const SITE_BUILTIN_PACKS: Readonly<Record<string, 'b0ase'>> = { b0ase: 'b0ase' };
+
+/** The built-in pack for a family site id, a `site-<id>` store-pack id, or a URL / host; null when none. */
+export function builtinPackForSite(idOrUrl: string | null | undefined): 'b0ase' | null {
+  const raw = (idOrUrl ?? '').trim();
+  if (!raw) return null;
+  const id = raw.startsWith('site-') ? raw.slice(5) : raw;
+  if (Object.prototype.hasOwnProperty.call(SITE_BUILTIN_PACKS, id)) return SITE_BUILTIN_PACKS[id] ?? null;
+  const site = familySite(raw);
+  return site ? (SITE_BUILTIN_PACKS[site.id] ?? null) : null;
+}

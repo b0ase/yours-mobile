@@ -1,4 +1,5 @@
-import { BASE_LOOK, type Accent } from './accents';
+import { BASE_LOOK, accentById, type Accent } from './accents';
+import { builtinPackForSite } from './themeSites';
 import { contrast, ensureContrast, mix } from './colour';
 import {
   CONNECT_THEME_EVENT,
@@ -77,7 +78,9 @@ export async function wearActiveSite(origin: string | null, path: string | null 
   }
   const t = await loadConnectTheme(origin, { path }).catch(() => null);
   if (mine !== seq) return;
-  wearSiteLook(t ? siteLookAccent(t) : null);
+  // b0ase.com: the built-in b0ase pack (its slanted shapes need data-bw-theme='b0ase'), not just the JSON colours.
+  const builtin = builtinPackForSite(origin);
+  wearSiteLook(builtin ? accentById(builtin) : t ? siteLookAccent(t) : null);
   // The game's room follows the same root / path sub-theme (store builds never open one).
   setActiveSiteRoom(t?.room && !STORE_BUILD ? { ticker: t.room, origin } : null);
   // The room keeps the site's look after the tab changes (chat/roomLook.ts), while the site stays connected.

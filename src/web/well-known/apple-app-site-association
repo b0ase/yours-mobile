@@ -1,0 +1,24 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": [
+          "ZQ4NX9NJ89.com.bitcoincorp.bwallet.private",
+          "ZQ4NX9NJ89.com.bitcoincorp.bwallet"
+        ],
+        "components": [
+          {
+            "/": "/bapp/*",
+            "comment": "bApp deep links, incl. bChatX 'Sign on your phone' QR (src/mobile/chat/signLink.ts)"
+          }
+        ]
+      }
+    ]
+  },
+  "webcredentials": {
+    "apps": [
+      "ZQ4NX9NJ89.com.bitcoincorp.bwallet.private",
+      "ZQ4NX9NJ89.com.bitcoincorp.bwallet"
+    ]
+  }
+}

@@ -141,6 +141,13 @@ function supabaseStore(env = process.env, f = fetch) {
           `bwallet_paymail_name_events?ip_hash=eq.${q(ipHash)}&created_at=gte.${q(since)}&select=id&limit=1000`,
         )) ?? []
       ).length,
+    // New names (claim or rename) by one wallet since a time: the per-key daily cap (owner, 28 Oct 2026).
+    countKeyClaims: async (identityKey, since) =>
+      (
+        (await req(
+          `bwallet_paymail_name_events?identity_key=eq.${q(identityKey)}&created_at=gte.${q(since)}&select=id&limit=1000`,
+        )) ?? []
+      ).length,
     // Link your accounts (migrations/20261018_social_links.sql): wallet-signed, provider-proved links.
     putSocialLink: (row) =>
       req('bwallet_social_links?on_conflict=provider,account', {
@@ -182,6 +189,22 @@ function supabaseStore(env = process.env, f = fetch) {
     nameLog: async (alias, limit = 200) =>
       (await req(
         `bwallet_name_log?${alias ? `alias=eq.${q(alias)}&` : ''}select=id,alias,identity_key,prev_identity_key,action,actor,seq,signature,note,prev_hash,entry_hash,created_at&order=id.desc&limit=${limit}`,
+      )) ?? [],
+    // Provable names (migrations/20261028_name_proofs.sql).
+    getProof: (alias) =>
+      one(
+        `bwallet_name_proofs?alias=eq.${q(alias)}&select=alias,provider,sub,identity_key,id_token,created_at&limit=1`,
+      ),
+    putProof: (row) =>
+      req('bwallet_name_proofs', {
+        method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify(row),
+      }),
+    // Archived provider keys: name-log entries with action 'jwks' under alias 'jwks:<provider>', oldest first.
+    providerKeys: async (jwksAlias) =>
+      (await req(
+        `bwallet_name_log?alias=eq.${q(jwksAlias)}&action=eq.jwks&select=note,created_at&order=id.asc&limit=1000`,
       )) ?? [],
     // Two-party handovers (migrations/20261017_name_handovers.sql).
     getHandover: (alias) => one(`bwallet_name_handovers?alias=eq.${q(alias)}&limit=1`),

@@ -23,7 +23,9 @@ import { STORE_BUILD, tokenRoomsEnabled } from '../storeBuild';
 import { ReportSheet } from '../ugc/UgcSheets';
 import { SwipeRow } from '../swipe/SwipeRow';
 import { showUndo } from '../swipe/undo';
-import { hideItem, inWalletList, keep, markSeen, type AirdropItem } from './inbox';
+import { hideItem, inWalletList, keep, markSeen, nftOrigins, type AirdropItem } from './inbox';
+import { cachedMeta } from '../media/resolveMeta';
+import { contentOutpoint } from './nftView';
 import { fetchExchangeRate } from '../../utils/wallet';
 import { NftThumb, NftViewer, useSenderName } from './AirdropNft';
 import { trustIssuer } from './quarantine';
@@ -415,7 +417,7 @@ export const AirdropsList = ({ onLeave }: { onLeave: () => void }) => {
       {visible.map((i) => {
         // Swipe (bMail rows): left = Hide (undoable), right = Keep (undoable). Buttons stay on the card too.
         const doKeep = () => {
-          update((s) => keep(s, i.key));
+          update((s) => keep(s, i.key, nftOrigins(i, cachedMeta(contentOutpoint(i))?.origin)));
           afterKeep(i);
           showUndo('Kept', () => {
             update((s) => ({ ...s, kept: s.kept.filter((k) => k !== i.key) }));
@@ -473,11 +475,13 @@ export const AirdropsList = ({ onLeave }: { onLeave: () => void }) => {
               issuerKept={known.has(i.issuer)}
               onLeave={onLeave}
               onKeep={() => {
-                update((s) => keep(s, i.key));
+                update((s) => keep(s, i.key, nftOrigins(i, cachedMeta(contentOutpoint(i))?.origin)));
                 afterKeep(i);
               }}
               onTrust={() => {
-                update((s) => trustIssuer(keep(s, i.key), i.issuer));
+                update((s) =>
+                  trustIssuer(keep(s, i.key, nftOrigins(i, cachedMeta(contentOutpoint(i))?.origin)), i.issuer),
+                );
                 afterKeep(i);
                 showUndo('Trusted: their tokens skip Quarantine', () =>
                   update((s) => ({

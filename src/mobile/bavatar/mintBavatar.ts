@@ -257,6 +257,11 @@ export async function mintBavatar(
   // The ordinal is in the wallet either way. Save first, then tell the server (which switches the picture);
   // a failed record stays saved and is re-sent on the next open, never re-minted.
   savePendingBavatar({ identityKey: input.identityKey, txid: res.txid, variant, at: Date.now() }, kv);
-  await recoverPendingBavatar(client, input.identityKey, kv).catch(() => undefined);
+  if (loadPendingBavatar(input.identityKey, kv)) {
+    await recoverPendingBavatar(client, input.identityKey, kv).catch(() => undefined);
+  } else {
+    // Storage blocked, full or absent: nothing was saved, so tell the server directly (never re-mint).
+    await client.recordBavatarMint(res.txid, variant, bavatarArt(input.identityKey, variant)).catch(() => undefined);
+  }
   return res.txid;
 }

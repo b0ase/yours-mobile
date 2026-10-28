@@ -130,9 +130,6 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '<div className="mx-4 mb-3 empty:hidden"><TokenLinks tokenId={token.info.id} sym={token.info.sym} /></div>\n          {/* Market chart */}',
     ],
   ],
-  // Inscription HTML/SVG: an explicitly empty sandbox (no scripts, opaque origin); upstream's "true" only
-  // worked because it is not a valid token (security audit, 8 Oct 2026).
-  'src/components/Ordinal.tsx': [['sandbox="true"', 'sandbox=""']],
   // Wallet tab: gold "Mint" beside Receive / Send (src/mobile/mint).
   'src/pages/BsvWallet.tsx': [
     [
@@ -803,6 +800,11 @@ export const MOBILE_DEFINES = {
   // Set BWALLET_PAYMAIL_DOMAIN='' to build with paymail off.
   __PAYMAIL_DOMAIN__: JSON.stringify(process.env.BWALLET_PAYMAIL_DOMAIN ?? 'bwalletx.com'),
   __PAYMAIL_API__: JSON.stringify(process.env.BWALLET_PAYMAIL_API ?? 'https://pay.bwallet.space'),
+  // Provable names (src/mobile/names/proof.ts): our OAuth client ids, the `aud` a provider-signed name proof must
+  // carry. Public identifiers, not secrets; set at build time. Empty = this build can't check proofs, so it refuses
+  // to pay provable names (it never pays one it couldn't check).
+  __GOOGLE_CLIENT_ID__: JSON.stringify(process.env.BWALLET_GOOGLE_CLIENT_ID ?? ''),
+  __LINKEDIN_CLIENT_ID__: JSON.stringify(process.env.BWALLET_LINKEDIN_CLIENT_ID ?? ''),
 };
 
 /**

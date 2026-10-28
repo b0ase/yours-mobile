@@ -8,7 +8,7 @@
  * destinationFor and serves a key (payDue does this), so the first verified key becomes the reference.
  * A paymail whose host serves no identity key can't be pinned; it is still checked by destinationFor each time.
  */
-import { destinationFor, type Resolved } from '../names/names';
+import { destinationFor, proofRefusal, type Resolved } from '../names/names';
 import type { Payee } from './pots';
 
 /** The destination could not be verified: don't pay, ask the user to confirm it again. */
@@ -42,7 +42,8 @@ export type PayeeDestination = { address: string; pubkey?: string };
 export const payeeDestination = (p: Payee, r: Resolved, opts: { ignorePin?: boolean } = {}): PayeeDestination => {
   const d = destinationFor(r, 'bsv');
   if (!d.ok) {
-    if (r.nameBinding === 'bad' || r.nameBinding === 'changed') throw new PayeeReviewError(d.error, r.pubkey);
+    if (r.nameBinding === 'bad' || r.nameBinding === 'changed' || proofRefusal(r))
+      throw new PayeeReviewError(d.error, r.pubkey);
     throw new Error(d.error);
   }
   if (p.pinnedKey && !opts.ignorePin) {

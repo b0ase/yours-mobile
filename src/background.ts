@@ -1,4 +1,6 @@
 /* global chrome */
+import { siteAfterNavigation } from './mobile/theme/tabSiteNav';
+import { SheetFirstGate } from './services/sheetFirst';
 import { chromeConsentStore } from './services/siteTokens';
 import {
   RECONNECT_ID_PREFIX,
@@ -30,6 +32,14 @@ import { createMasterBackupGate } from './services/masterBackupGate';
 import { isFullscreenWindow, promptForNewPanel, promptsShowInPanel } from './services/panelPrompt';
 import { isSessionExpired } from './utils/lockTimeout';
 import { originatorForOrigin } from './services/originKey';
+import {
+  FramePairs,
+  FramedContext,
+  framePolicy,
+  isFamilyPair,
+  needsPairApproval,
+  pairKey,
+} from './services/frameAccess';
 import { PAIR_MIRROR_KEY, isPairedOriginator, pairedGrantAllowed, setPairMirror, takePendingFor } from './services/pairedPromptGuard';
 import {
   addGrant,
@@ -190,6 +200,7 @@ import {
   blockActive,
   trustCovers,
   trustedBasketsFrom,
+  sheetCanTrust,
   POST_BASKET,
   POST_PROTOCOL,
   postPackCompanions,
@@ -200,6 +211,7 @@ import { withDefaultExpiry } from './services/grantExpiry';
 import { markPayeeMismatch, parsePayees, payeesAllowed } from './services/allowanceGuard';
 import { ADMIN_ORIGINATOR, initWallet, openAccountStorageForBackup, type AccountContext } from './initWallet';
 import { isExtensionSender, reservedOriginatorRefusal } from './services/adminOriginator';
+import { ROOM_PLAYING_ACTION, ROOM_QUERY_ACTION, ROOM_TAB_ACTION, parseRoomPlaying, roomTabOrigin } from './mobile/chat/gameRoomLive';
 import { isReservedBasket, RESERVED_BASKET_REFUSAL, revokeBasketGrantsForOriginator } from './services/reservedBaskets';
 import { pinnedProtocol, pinnedProtocolRefusal, PINNED_PROTOCOLS_VERSION, versionWithPins } from './services/pinnedProtocols';
 import {
@@ -213,7 +225,13 @@ import {
   type MintSheet,
 } from './services/pinnedMint';
 import { oneShotGrant } from './services/oneShotGrant';
-import { isReservedProtocol, reservedProtocolRefusal, RESERVED_REFUSAL, withoutReservedProtocols } from './services/reservedProtocols';
+import {
+  isReservedProtocol,
+  refusalCode,
+  reservedProtocolRefusal,
+  RESERVED_REFUSAL,
+  withoutReservedProtocols,
+} from './services/reservedProtocols';
 import { healIndexFundActions } from './mobile/tokens/indexFundHeal';
 import { continuesChain, endChain, isAlreadyProcessedAbort, markChainStep, startsChain } from './services/dappChain';
 import { HOSTED_YOURS_IMAGE } from './utils/constants';
@@ -557,6 +575,11 @@ const initializeWallet = (): Promise<WalletInterface | null> => {
 
 /** Set by the service-worker block so the pending import can stream progress to a restore window. */
 let restoreProgressFn: ((message: string) => void) | undefined;
+/**
+ * Holds the address/message syncs and the storage switch back while a site waits for its approval sheet, so a
+ * cold-woken worker shows the sheet first (services/sheetFirst.ts; cold connect 2.1 s -> 1.0 s, 28 Oct 2026).
+ */
+const sheetFirst = new SheetFirstGate();
 /** In-flight pending-restore imports by identity key, so a second init joins rather than duplicates. */
 const pendingImports = new Map<string, Promise<void>>();
 
@@ -695,6 +718,10 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
   };
 
   const startedUnder = lockGeneration;
+  // One decision per open, taken when the wallet is ready (by then the site call that woke the worker has
+  // arrived): both the syncs (inside initWallet) and the storage switch below wait for it.
+  let heavyWorkGate: Promise<void> | undefined;
+  const heavyWorkMayStart = () => (heavyWorkGate ??= sheetFirst.wait());
   // Filled in once initWallet returns; the broadcast callback reads it lazily.
   const mirror: { services?: Parameters<typeof mirrorToMiner>[0] } = {};
   const ctx = await initWallet(chromeStorageService, {
@@ -716,6 +743,7 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
       stage('address sync done');
       await reviewRestoredUtxos(a);
     },
+    startSyncsAfter: heavyWorkMayStart,
   });
   if (lockGeneration !== startedUnder || !(await chromeStorageService.getPassKey())) {
     // Locked while we were initialising (a restore's detached init can run
@@ -743,7 +771,10 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
     // Restore any mined transaction storage holds as failed, so its change counts again ($vexvoid, 11 Oct 2026).
     // Order matters (owner, 14 Oct 2026): both repairs need this device's storage active, so switch first.
     const ctx = accountContext;
-    const localReady = preferLocalStorage(ctx);
+    // After the site's sheet is up (services/sheetFirst.ts): the switch holds storage locks the sheet's check needs.
+    const localReady = heavyWorkMayStart().then(() =>
+      lockGeneration !== startedUnder || accountContext !== ctx ? undefined : preferLocalStorage(ctx),
+    );
     storageSwitch = localReady;
     void localReady.finally(() => {
       if (storageSwitch === localReady) storageSwitch = null;
@@ -1170,6 +1201,46 @@ const askReconnect = (originator: string): Promise<void> =>
     permissionBundler.add(request);
   });
 
+// Framed sites (services/frameAccess.ts): approved (frame origin, top origin) pairs, and which parents each site was
+// recently framed by, so every sheet for it says "inside <top>".
+const FRAME_PAIRS_KEY = 'bwxFramePairs';
+const framePairs = new FramePairs({
+  load: async () => {
+    const got = await chrome.storage.local.get(FRAME_PAIRS_KEY);
+    const v = (got as Record<string, unknown>)[FRAME_PAIRS_KEY];
+    return Array.isArray(v) ? (v as string[]) : [];
+  },
+  save: async (keys) => {
+    await chrome.storage.local.set({ [FRAME_PAIRS_KEY]: keys });
+  },
+});
+const framedContext = new FramedContext();
+/** One pair sheet at a time per pair: calls that arrive while it is open share its answer. */
+const framePairAsks = new Map<string, Promise<void>>();
+/** Messages already let through the pair gate (by object identity, never by anything a page can set). */
+const framePairPassed = new WeakSet<object>();
+let framePairCounter = 0;
+/**
+ * "Let <frame> use your wallet inside <top>?" The first spend/sign from a new (frame, top) pair. Rides the reconnect
+ * request plumbing (RECONNECT_ID_PREFIX: answered here, never sent to the permission manager, never a grant).
+ */
+const askFramePair = (originator: string, topHost: string): Promise<void> =>
+  new Promise<void>((resolve, reject) => {
+    const requestID = `${RECONNECT_ID_PREFIX}frame-${Date.now().toString(36)}-${(framePairCounter++).toString(36)}`;
+    const request = {
+      requestID,
+      type: 'protocol',
+      originator,
+      protocolID: [1, IDENTITY_SHEET_LINE],
+      counterparty: 'self',
+      reconnect: true,
+      framePair: topHost,
+      reason: `Use your wallet inside ${topHost}`,
+    } as unknown as BundledRequest & BundleRequest;
+    pendingPermissionRequests.set(requestID, { request, resolve, reject });
+    permissionBundler.add(request);
+  });
+
 // Pending wallet initialization waiters (for ensureWallet when service worker wakes without passKey)
 const pendingWalletWaiters: {
   resolve: (wallet: WalletInterface) => void;
@@ -1340,15 +1411,26 @@ const pushSiteTheme = async (force = false) => {
 chrome.tabs?.onActivated?.addListener(() => void pushSiteTheme());
 chrome.windows?.onFocusChanged?.addListener(() => void pushSiteTheme());
 chrome.tabs?.onRemoved?.addListener((tabId) => {
+  if (roomTabs.delete(tabId)) postToPanels({ action: ROOM_TAB_ACTION, closed: true, tabId });
   const a = siteThemeTabs.delete(tabId);
   if (siteOriginTabs.delete(tabId) || a) void pushSiteTheme();
 });
-chrome.tabs?.onUpdated?.addListener((tabId, info) => {
-  // A reload or navigation: the page declares again once it reconnects.
+chrome.tabs?.onUpdated?.addListener((tabId, info, tab) => {
   if (info.status !== 'loading') return;
+  // A same-origin navigation (bmarketx.com → /my right after sign-in) keeps the site's look and moves to the new
+  // path (mobile/theme/tabSiteNav.ts); another origin forgets it, and that page declares again once it connects.
+  const nav = siteAfterNavigation(siteOriginTabs.get(tabId), info.url ?? tab?.url);
+  if (nav.keep) {
+    sitePathTabs.set(tabId, nav.path);
+    void pushSiteTheme();
+    return;
+  }
+  sitePathTabs.delete(tabId);
   const a = siteThemeTabs.delete(tabId);
   if (siteOriginTabs.delete(tabId) || a) void pushSiteTheme();
 });
+/** Tabs that announced a game room's live video (gameRoomLive.ts), so a closed one clears the panel's chip. */
+const roomTabs = new Set<number>();
 const postToPanels = (msg: unknown) =>
   activePopupPorts.forEach((p) => {
     try {
@@ -1429,6 +1511,15 @@ const closeDappPopupIfIdle = (): void => {
 
 /** Look up a queued prompt payload for the prompt window by kind/requestID. */
 const getPendingPromptPayload = (kind: string, requestID?: string): unknown => {
+  const payload = getPendingPromptPayloadRaw(kind, requestID);
+  // A site seen inside another site's frame: its sheets name the parent(s) too (services/frameAccess.ts).
+  if (payload && typeof payload === 'object') {
+    const tops = framedContext.topsFor((payload as { originator?: string }).originator, Date.now());
+    if (tops.length) return { ...(payload as object), embeddedIn: tops };
+  }
+  return payload;
+};
+const getPendingPromptPayloadRaw = (kind: string, requestID?: string): unknown => {
   switch (kind) {
     case 'permission':
       return requestID ? pendingPermissionRequests.get(requestID)?.request : undefined;
@@ -1961,6 +2052,7 @@ if (isInServiceWorker) {
 
   showPromptUi = (kind, requestID) => {
     console.log('[background] showPromptUi called', kind, requestID);
+    sheetFirst.notePromptShown();
     if (requestID && kind !== 'unlock') promptWatchdog.watch({ kind, requestID });
     void surfaceOverFullscreen(kind === 'usbCheck' ? undefined : tabForPrompt(kind, requestID));
 
@@ -2045,6 +2137,12 @@ if (isInServiceWorker) {
     } catch {
       /* no user gesture: fall through to the in-page sheet */
     }
+    // A site framed by a parent outside the family never gets the in-page sheet: that sheet lives in the parent's
+    // page, which could cover it. Its prompts use the wallet's own window instead (services/frameAccess.ts).
+    const promptOrigin = requestID
+      ? (getPendingPromptPayloadRaw(kind, requestID) as { originator?: string } | undefined)?.originator
+      : undefined;
+    if (framedContext.framedByStranger(promptOrigin, Date.now())) return false;
     const token = crypto.randomUUID();
     const params = new URLSearchParams({ kind, inpage: token });
     if (requestID) params.set('requestID', requestID);
@@ -2183,6 +2281,7 @@ if (isInServiceWorker) {
   };
 
   showUnlockUi = () => {
+    sheetFirst.notePromptShown();
     // The browser-action popup renders its own unlock UI; never force a
     // window over it just to unlock.
     if (activePopupPorts.size > 0) {
@@ -2213,7 +2312,7 @@ if (isInServiceWorker) {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  chrome.runtime.onMessage.addListener((message: any, sender, answer: CallbackResponse) => {
+  chrome.runtime.onMessage.addListener(function onRuntimeMessage(message: any, sender, answer: CallbackResponse) {
     // Every refusal by the user carries code ERR_PERMISSION_DENIED (services/userDenied.ts), so a site can tell
     // "declined" from "failed" on every path (extension, phone dApp browser, bApp frames, pairing).
     const sendResponse: CallbackResponse = (response) => answer(withPromptNotShownCode(withDenialCode(response)));
@@ -2225,6 +2324,8 @@ if (isInServiceWorker) {
       'from:',
       sender.origin,
     );
+    // A site's wallet call: the wallet's background syncs hold off until its sheet is up (services/sheetFirst.ts).
+    if (message?.originator && !isExtensionSender(sender, chrome.runtime.id)) sheetFirst.noteSiteRequest();
 
     // Passkey hand-off from web.bwalletx.com, forwarded by content.ts (VITE_SEEDLESS=1 only). sender.origin is Chrome's
     // own value for the tab; handleExternalHandoff accepts exactly https://web.bwalletx.com plus the one-time nonce.
@@ -2236,6 +2337,13 @@ if (isInServiceWorker) {
     // Live-balance messages are for the wallet page (src/mobile/wallet/live/liveBus.ts), not the wallet: never
     // answer them here, so a page's session report can never reach a wallet method or a connect prompt.
     if (message?.action === 'bwxSessionSpend' || message?.action === 'bwxLiveSpend') return false;
+    // A sub-frame's content script asks whether to expose window.CWI there (services/frameAccess.ts). Answered from
+    // Chrome's sender only; every later wallet call is checked again the same way, so this is a courtesy, not the gate.
+    if (message?.action === 'bwxFrameCheck') {
+      const f = sender.id === chrome.runtime.id ? framePolicy(sender) : undefined;
+      answer({ ok: !!f && f.ok && f.framed } as unknown as Parameters<CallbackResponse>[0]);
+      return false;
+    }
     // Connected-site theme (mobile/theme/connectTheme.ts): the id comes from the page, the origin from Chrome.
     if (message?.action === 'bwxSiteTheme') {
       if (sender.id === chrome.runtime.id && sender.tab?.id !== undefined && sender.frameId === 0) {
@@ -2252,6 +2360,30 @@ if (isInServiceWorker) {
           sitePathTabs.delete(sender.tab.id);
         }
         void pushSiteTheme();
+      }
+      return false;
+    }
+    // One player at a time (mobile/chat/gameRoomLive.ts): a bChatX room tab playing its live video. The origin is
+    // Chrome's, the shape re-checked; panels get only { room, playing, visible, tabId }.
+    if (message?.action === ROOM_PLAYING_ACTION) {
+      if (sender.id === chrome.runtime.id && sender.frameId === 0 && sender.tab?.id !== undefined && roomTabOrigin(sender.origin)) {
+        const data = parseRoomPlaying(message.data);
+        if (data) {
+          roomTabs.add(sender.tab.id);
+          postToPanels({ action: ROOM_TAB_ACTION, ...data, tabId: sender.tab.id });
+        }
+      }
+      return false;
+    }
+    // A newly opened panel asks open room tabs to re-announce (content.ts forwards it to bChatX pages only).
+    if (message?.action === ROOM_QUERY_ACTION) {
+      if (isExtensionSender(sender, chrome.runtime.id)) {
+        chrome.tabs?.query({}, (tabs) => {
+          for (const t of tabs || []) {
+            if (t.id === undefined) continue;
+            chrome.tabs.sendMessage(t.id, { action: ROOM_QUERY_ACTION })?.catch(() => undefined);
+          }
+        });
       }
       return false;
     }
@@ -2307,6 +2439,52 @@ if (!(
       }
     }
 
+    // Framed sites (services/frameAccess.ts). Everything comes from Chrome's sender (frameId, origin, tab.url,
+    // documentLifecycle), never from the message: an https frame under an https top only, and the first spend/sign
+    // from a new (frame origin, top origin) pair asks afresh. Grants stay keyed to the frame's own origin.
+    if (!isFromExtension) {
+      const frame = framePolicy(sender);
+      if (!frame.ok) {
+        sendResponse({ type: message?.action, success: false, error: frame.error });
+        return true;
+      }
+      if (frame.framed) {
+        const originator = typeof message?.originator === 'string' ? message.originator : frame.frameHost;
+        framedContext.note(originator, frame.topHost, Date.now());
+        const { frameHost, topHost } = frame;
+        if (
+          message &&
+          typeof message === 'object' &&
+          !framePairPassed.has(message) &&
+          needsPairApproval(message.action) &&
+          !isFamilyPair(frameHost, topHost)
+        ) {
+          const key = pairKey(frameHost, topHost);
+          void framePairs
+            .has(frameHost, topHost)
+            .then(async (approved) => {
+              if (approved) return;
+              let ask = framePairAsks.get(key);
+              if (!ask) {
+                ask = askFramePair(originator, topHost)
+                  .then(() => framePairs.add(frameHost, topHost))
+                  .finally(() => framePairAsks.delete(key));
+                framePairAsks.set(key, ask);
+              }
+              await ask;
+            })
+            .then(
+              () => {
+                framePairPassed.add(message);
+                onRuntimeMessage(message, sender, answer);
+              },
+              () => sendResponse({ type: message.action, success: false, error: 'Permission denied by user' }),
+            );
+          return true;
+        }
+      }
+    }
+
     // Wallet-internal protocols (bTrust, Locks, funds, presign…) are never available to an outside site or app,
     // and the refusal comes before any unlock or permission sheet (services/reservedProtocols.ts, audit C1).
     if (!isFromExtension && message?.originator !== ADMIN_ORIGINATOR) {
@@ -2319,7 +2497,7 @@ if (!(
           sender.origin ? normalizeOriginator(sender.origin) : undefined,
         );
       if (refusal) {
-        sendResponse({ type: message.action, success: false, error: refusal });
+        sendResponse({ type: message.action, success: false, error: refusal, code: refusalCode(refusal) });
         return true;
       }
     }
@@ -4603,7 +4781,13 @@ if (!(
         if (sats > 0) await accountContext.envelopes.fill(site, sats);
       }
       // "Don't ask again": routine requests from this site are granted without a sheet from now on.
-      if (response.trustSite && remember && result.granted.length > 0 && accountContext?.permissionStore) {
+      if (
+        response.trustSite &&
+        remember &&
+        result.granted.length > 0 &&
+        sheetCanTrust(bundle) &&
+        accountContext?.permissionStore
+      ) {
         await accountContext.permissionStore.putGrant({
           key: { type: 'basket', originator: normalizeOriginator(bundle.originator), basket: TRUST_SITE_BASKET },
           expiry,

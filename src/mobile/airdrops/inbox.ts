@@ -48,6 +48,13 @@ export type InboxState = {
   onlyKnown: boolean;
   /** Issuers you chose to trust ("Trust this sender"): their airdrops skip Quarantine. */
   trustedIssuers?: string[];
+  /**
+   * Kept NFTs by ORIGIN (normalised `txid_vout`), not by History item (owner, 28 Oct 2026: a kept OpNS name went
+   * back to Quarantine). Keep takes the NFT into the wallet (internalizeAction), which gives its tx an action record,
+   * so the next History scan no longer counts it as unsolicited and the item (and its `kept` key) drops out of the
+   * item list. This list does not depend on the item list, so a keep survives reload and re-sync.
+   */
+  keptOrigins?: string[];
 };
 export const emptyInbox = (): InboxState => ({ seenAt: 0, kept: [], hidden: [], hiddenIssuers: [], onlyKnown: false });
 
@@ -112,10 +119,12 @@ export const visibleItems = (items: AirdropItem[], s: InboxState): AirdropItem[]
   const hidden = new Set(s.hidden);
   const badIssuers = new Set(s.hiddenIssuers);
   const trusted = new Set(s.trustedIssuers ?? []);
-  const knownIssuers = new Set(items.filter((i) => kept.has(i.key)).map((i) => i.issuer));
+  const origins = keptOriginSet(s);
+  const isKept = (i: AirdropItem) => kept.has(i.key) || (i.asset.kind === 'nft' && isKeptNft(i, s, origins));
+  const knownIssuers = new Set(items.filter(isKept).map((i) => i.issuer));
   return items.filter(
     (i) =>
-      !kept.has(i.key) &&
+      !isKept(i) &&
       !hidden.has(i.key) &&
       !badIssuers.has(i.issuer) &&
       !trusted.has(i.issuer) &&
@@ -127,10 +136,13 @@ export const visibleItems = (items: AirdropItem[], s: InboxState): AirdropItem[]
  * Kept NFTs (kept, or from a trusted sender): out of Quarantine, so Wallet › NFTs must show them (AirdropsInbox
  * and MediaSection list the ones the wallet's own NFT list does not have yet, with the reason).
  */
-export const keptNfts = (items: AirdropItem[], s: Pick<InboxState, 'kept' | 'trustedIssuers'>): AirdropItem[] => {
-  const kept = new Set(s.kept);
+export const keptNfts = (
+  items: AirdropItem[],
+  s: Pick<InboxState, 'kept' | 'trustedIssuers' | 'keptOrigins'>,
+): AirdropItem[] => {
   const trusted = new Set(s.trustedIssuers ?? []);
-  return items.filter((i) => i.asset.kind === 'nft' && (kept.has(i.key) || trusted.has(i.issuer)));
+  const origins = keptOriginSet(s);
+  return items.filter((i) => i.asset.kind === 'nft' && (isKeptNft(i, s, origins) || trusted.has(i.issuer)));
 };
 
 /** True when the wallet's NFT list (its ordinals basket) already holds this airdrop: same outpoint, or same tx. */
@@ -162,7 +174,46 @@ export const airdropPointer = (visible: Pick<AirdropItem, 'asset'>[]): string | 
 export const badgeCount = (items: AirdropItem[], s: InboxState) =>
   visibleItems(items, s).filter((i) => i.time > s.seenAt).length;
 
-export const keep = (s: InboxState, key: string): InboxState => ({ ...s, kept: [...new Set([...s.kept, key])] });
+const OUTPOINT = /^[0-9a-f]{64}_\d+$/;
+const normOp = (o: string) => (o || '').toLowerCase().replace('.', '_');
+
+/**
+ * Keep an item. For an NFT, `origins` are its stable ids: the outpoint it arrived at (asset.id) and, when known,
+ * the inscription origin. Both stay the same for the same NFT, so it is only quarantined again if its origin
+ * changes, which cannot happen for the same item.
+ */
+export const keep = (s: InboxState, key: string, origins: (string | undefined)[] = []): InboxState => {
+  const add = origins.map((o) => normOp(o ?? '')).filter((o) => OUTPOINT.test(o));
+  return {
+    ...s,
+    kept: [...new Set([...s.kept, key])],
+    ...(add.length || s.keptOrigins ? { keptOrigins: [...new Set([...(s.keptOrigins ?? []), ...add])] } : {}),
+  };
+};
+
+/** The origins an NFT item is known by: where it arrived (asset.id) and its inscription origin when given. */
+export const nftOrigins = (item: Pick<AirdropItem, 'asset' | 'outpoint'>, origin?: string): string[] =>
+  item.asset.kind === 'nft' ? [item.asset.id, item.outpoint, origin].filter((x): x is string => !!x) : [];
+
+/**
+ * Every kept origin: `keptOrigins` plus the outpoint part of older `kept` keys (`txid:txid_vout`), so keeps made
+ * before this change are not lost (the owner's OpNS name).
+ */
+export const keptOriginSet = (s: Pick<InboxState, 'kept' | 'keptOrigins'>): Set<string> => {
+  const out = new Set((s.keptOrigins ?? []).map(normOp));
+  for (const k of s.kept) {
+    const op = normOp(k.slice(k.indexOf(':') + 1));
+    if (k.includes(':') && OUTPOINT.test(op)) out.add(op);
+  }
+  return out;
+};
+
+/** True when this NFT item was kept, by key or by any of its origins. */
+export const isKeptNft = (
+  item: Pick<AirdropItem, 'key' | 'asset' | 'outpoint'>,
+  s: Pick<InboxState, 'kept' | 'keptOrigins'>,
+  origins: Set<string> = keptOriginSet(s),
+) => s.kept.includes(item.key) || nftOrigins(item).some((o) => origins.has(normOp(o)));
 /** Hide one item and every future item from its issuer. */
 export const hide = (s: InboxState, item: Pick<AirdropItem, 'key' | 'issuer'>): InboxState => ({
   ...s,
@@ -256,6 +307,10 @@ export const activeQuarantine = (): Set<string> => quarantineFor(activeAccount);
 /** Quarantined NFT outpoints (normalised txid_vout) for the active account. */
 export const activeNftQuarantine = (st: Store | null = store()): Set<string> =>
   activeAccount ? quarantinedNfts(loadItems(activeAccount, st).items, loadInbox(activeAccount, st)) : new Set();
+
+/** Kept NFT origins (normalised) for the active account: independent of the History item list. */
+export const activeKeptOrigins = (st: Store | null = store()): Set<string> =>
+  activeAccount ? keptOriginSet(loadInbox(activeAccount, st)) : new Set();
 
 /** Kept (or trusted-sender) NFTs for the active account. */
 export const activeKeptNfts = (st: Store | null = store()): AirdropItem[] =>
