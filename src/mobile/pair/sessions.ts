@@ -27,6 +27,7 @@ import { claimRid, planReturn, type ReturnPlan } from '../../pair/returnTo';
 import { handleSiteCall } from '../dappBrowser';
 import { isMintPrivateCode } from '../../services/mintPrivateAction';
 import { legacyPairedOrigin, pairedOrigin } from '../../services/originKey';
+import { pairedKeyHost, setProvenPairingCheck } from '../../services/crossSiteSignGuard';
 import { appNameFor } from '../storeBuild';
 import type { OneSatContext } from '@1sat/actions';
 import { fetchExchangeRate } from '../../utils/wallet';
@@ -219,6 +220,19 @@ export type PendingPair = {
    */
   onGone: (f: () => void) => void;
 };
+
+/**
+ * The sign guard names a paired session's site only when that pairing proved its origin (b-Aware 25 Oct 2026).
+ * Registered here because the sessions (and their `proven` flag) live in this module.
+ */
+setProvenPairingCheck((originator) => {
+  const want = pairedKeyHost(originator);
+  try {
+    return load().some((s) => !!s.proven && pairedKeyHost(keyOf(s)) === want);
+  } catch {
+    return false;
+  }
+});
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
