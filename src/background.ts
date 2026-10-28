@@ -6025,6 +6025,9 @@ if (!(
         success: false,
         // Heal outcome first: the page cuts long errors, and a long broadcaster reason hid "tap Send again" (19 Oct).
         error: withHealMessage(friendly ?? errorMessage, heal),
+        // For the wallet page's Details panel only (never to sites): which error and where it was thrown (a bare
+        // WERR_INTERNAL says neither).
+        detail: message.originator !== ADMIN_ORIGINATOR ? undefined : `${String((error as { code?: unknown })?.code ?? errorName)}\n${errorStack?.split('\n').slice(0, 6).join('\n') ?? ''}`,
       });
     } finally {
       releasePayeeMark?.();

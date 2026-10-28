@@ -7,6 +7,7 @@ import { isTwetchAction } from './mobile/twetch/twetchAction';
 import { CustomListenerName, RequestEventDetail, RequestParams } from './inject';
 import { originatorForOrigin } from './services/originKey';
 import { forwardCwiCall } from './services/cwiForward';
+import { chromeLocalStore, markAndDetect } from './services/duplicateExtension';
 import { SUBSCRIPTIONS_ENABLED } from './mobile/storeBuild';
 import { HANDOFF_ENABLED, HANDOFF_WEB_ORIGIN } from './mobile/passkey/extHandoff';
 import {
@@ -28,6 +29,11 @@ console.log('🌱 Yours Wallet Loaded');
 // frame inside an https top-level page. The MAIN-world script waits for FRAME_OK_EVENT before setting window.CWI.
 // The background re-checks every call the same way, so a page faking FRAME_OK_EVENT gains nothing.
 const IS_TOP_FRAME = window.top === window;
+// A second wallet extension in this profile (services/duplicateExtension.ts): mark the page, note any other one.
+if (IS_TOP_FRAME) {
+  const store = chromeLocalStore();
+  if (store) markAndDetect(document, chrome.runtime?.id, store);
+}
 let frameOk = IS_TOP_FRAME;
 if (!IS_TOP_FRAME) {
   try {

@@ -5,7 +5,8 @@ import { isSessionExpired } from '../../utils/lockTimeout';
 import { ServiceContext, ServiceContextProps } from '../ServiceContext';
 import { createContext } from '@1sat/actions';
 import { fetchExchangeRate } from '../../utils/wallet';
-import { createChromeCWI, OneSatServices } from '@1sat/wallet-browser';
+import { createCWI, OneSatServices } from '@1sat/wallet-browser';
+import { makeResilientTransport } from '../../utils/resilientChromeTransport';
 import { gateWalletOnUsb } from '../../services/usbPresence';
 import { setChatAccount, setChatReceiveAddress } from '../../mobile/chat/chatAccount';
 
@@ -28,7 +29,12 @@ const initializeServices = async (onUsbRemoved: () => void) => {
   // Create context using ChromeCWI (communicates with service worker via chrome.runtime.sendMessage)
   // USB key security: spend/sign calls from this page first confirm a
   // registered stick is present; two misses in a row lock the wallet.
-  const chromeCWI = gateWalletOnUsb(createChromeCWI(), chromeStorageService, onUsbRemoved);
+  const chromeCWI = gateWalletOnUsb(
+    // Retries once when the message never reached a stopped service worker; never after delivery (no double pay).
+    createCWI(makeResilientTransport() as Parameters<typeof createCWI>[0]),
+    chromeStorageService,
+    onUsbRemoved,
+  );
   const chain = 'main' as const;
   const services = new OneSatServices(chain);
   // chromeCWI is the gated background wallet — module owns apply.

@@ -60,6 +60,9 @@ import { sendMessageAsync } from '../utils/chromeHelpers';
 import { YoursEventName } from '../inject';
 import { useSyncTracker } from '../hooks/useSyncTracker';
 import { getErrorMessage, isValidEmail } from '../utils/tools';
+import { classifySendError, type SendErrorInfo } from '../utils/sendErrors';
+import { SendErrorNotice } from '../components/SendErrorNotice';
+import { chromeLocalStore, duplicateWarningOnce } from '../services/duplicateExtension';
 import { UpgradeNotification } from '../components/UpgradeNotification';
 import { Bsv21TokensList } from '../components/Bsv21TokensList';
 import { ManageTokens } from '../components/ManageTokens';
@@ -144,6 +147,17 @@ export const BsvWallet = () => {
   const isReload = urlParams.get('reload') === 'true' || query === 'reload';
   urlParams.delete('reload');
   const [pageState, setPageState] = useState<PageState>('main');
+  // A failed BSV send, classified (utils/sendErrors.ts); shown with Details + Copy instead of a raw snackbar.
+  const [sendError, setSendError] = useState<SendErrorInfo | null>(null);
+  // The last Error createAction/signAction threw: @1sat/actions returns only its message, which drops code/detail.
+  const lastSendThrow = useRef<unknown>(null);
+  // A second wallet extension in this profile (services/duplicateExtension.ts): warn once per detection.
+  useEffect(() => {
+    const store = chromeLocalStore();
+    if (!store) return;
+    void duplicateWarningOnce(store).then((w) => w && addSnackbar(w, 'info', 12000));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [sendSource, setSendSource] = useState<PageState>('main');
   const [satSendAmount, setSatSendAmount] = useState<number | null>(null);
   const { addSnackbar } = useSnackbar();
@@ -1103,12 +1117,14 @@ export const BsvWallet = () => {
         setSendConfirmation(null);
         setIsProcessing(true);
         setSendInFlight(true);
+        setSendError(null);
+        lastSendThrow.current = null;
         try {
           await confirmSendBsv();
         } catch (err) {
           // A thrown send (not a returned error) left the spinner up for good (owner, 27 Oct 2026).
           console.error('[handleSendBsv] send threw:', err);
-          addSnackbar(getErrorMessage(err instanceof Error ? err.message : String(err)), 'error');
+          setSendError(classifySendError(err));
           refreshUtxos().catch(() => undefined);
         } finally {
           setSendInFlight(false);
@@ -1139,7 +1155,13 @@ export const BsvWallet = () => {
         }
 
         if (!sendRes.txid || sendRes.error) {
-          addSnackbar(getErrorMessage(sendRes.error), 'error');
+          const thrown = lastSendThrow.current;
+          const err =
+            thrown instanceof Error && sendRes.error && thrown.message === sendRes.error
+              ? thrown
+              : sendRes.error || 'The wallet returned no txid';
+          console.error('[handleSendBsv] send failed:', err);
+          setSendError(classifySendError(err));
           setIsProcessing(false);
           // A refused send may have cleared coins spent on another device: show the corrected balance.
           refreshUtxos().catch((err) => console.error('[handleSendBsv] refresh after failed send:', err));
@@ -1186,6 +1208,7 @@ export const BsvWallet = () => {
           return await fn(...a);
         } catch (e) {
           if (e instanceof Error) e.message = describeWalletError(e);
+          lastSendThrow.current = e;
           throw e;
         }
       };
@@ -2319,6 +2342,7 @@ export const BsvWallet = () => {
   return (
     <>
       <TopNav />
+      {sendError && <SendErrorNotice info={sendError} onClose={() => setSendError(null)} />}
       {showBackupPromo && (
         <BackupPromo
           theme={theme}
