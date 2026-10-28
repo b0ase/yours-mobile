@@ -21,6 +21,7 @@ import {
   bsvString,
   fileStem,
   filterRange,
+  newestFirst,
   rangeFor,
   toCsv,
   totals,
@@ -149,7 +150,12 @@ export const HistoryScreen = ({
   const range = useMemo(() => rangeFor(preset, data?.at ?? Date.now(), custom), [preset, custom, data?.at]);
   const rows = useMemo(
     () =>
-      data ? filterCategory(filterRange(data.rows, range) as (HistoryRow & { category: Category })[], category) : [],
+      // Newest first here too, so a copy cached by an older build (or by Friends / bCal) is never shown upside down.
+      data
+        ? newestFirst(
+            filterCategory(filterRange(data.rows, range) as (HistoryRow & { category: Category })[], category),
+          )
+        : [],
     [data, range, category],
   );
   const sum = totals(rows);

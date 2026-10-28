@@ -278,6 +278,8 @@ export const sendMail = async (wallet: WalletInterface, a: SendArgs, deps: SendD
     inReplyTo: a.inReplyTo,
     ...(a.sealed.agreement !== undefined ? { agreement: a.sealed.agreement } : {}),
     ...(a.sealed.offer !== undefined ? { offer: a.sealed.offer } : {}),
+    ...(a.sealed.ordinal ? { ordinal: a.sealed.ordinal } : {}),
+    ...(a.sealed.note !== undefined ? { note: a.sealed.note } : {}),
   };
 };
 

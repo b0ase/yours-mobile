@@ -4,6 +4,8 @@ import { getAgentAccount } from '../agents/agentAccounts';
 import {
   buildRows,
   missingParents,
+  newestFirst,
+  stampUnconfirmed,
   ownOutputs,
   ratesByDay,
   withRates,
@@ -97,5 +99,5 @@ export const loadHistoryRows = async ({
   ]);
   // Daily BSV/USD is cached on the device, so a failed price fetch still has the days seen before.
   // Daily BSV/USD is cached on the device, so a failed price fetch still has the days seen before.
-  return withRates(rows, cacheBsvUsd(ratesByDay(daily)), current);
+  return newestFirst(stampUnconfirmed(withRates(rows, cacheBsvUsd(ratesByDay(daily)), current), now));
 };
