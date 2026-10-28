@@ -27,7 +27,20 @@ const store = (rows) => {
   const log = [];
   return {
     log,
+    aliases,
+    bindings,
     getAlias: async (a) => aliases.get(a) ?? null,
+    countUncollected: async () => 0,
+    deleteAlias: async (a) => void aliases.delete(a),
+    deleteByKey: async (k) => {
+      let n = 0;
+      for (const [a, r] of aliases) if (r.identity_key === k) (aliases.delete(a), n++);
+      return { aliases: n, payments: 0 };
+    },
+    deleteBinding: async (a) => void bindings.delete(a),
+    deleteBindingsByKey: async (k) => {
+      for (const [a, b] of bindings) if (b.identity_key === k) bindings.delete(a);
+    },
     getAliasByKey: async (k) => [...aliases.values()].find((r) => r.identity_key === k) ?? null,
     getForward: async () => null,
     getBinding: async (a) => bindings.get(a) ?? null,
@@ -172,5 +185,47 @@ describe('two-party handover (no operator recovery)', () => {
     await h['handover-release']({}, await a.sign('release', { alias: 'npg', to: b.identityKey, seq: '1' }));
     expect((await h['handover-cancel']({}, await a.sign('release-cancel', { alias: 'npg' })))[0]).toBe(200);
     expect((await h['handover-accept']({}, await b.sign('bind', { alias: 'npg', seq: '1' })))[0]).toBe(404);
+  });
+});
+
+// b-Aware 25 Oct 2026 (darkasep112): a released name kept its signed binding, so its next owner's bind got 409 forever.
+describe('a released name can be bound again by its next owner', () => {
+  const setup = async () => {
+    const first = user();
+    const s = store([{ alias: 'reborn', identity_key: first.identityKey, kind: 'plain' }]);
+    const h = pm.makeHandlers({ store: s, env: ENV });
+    expect((await h.bind({}, await first.sign('bind', { alias: 'reborn', seq: '1' })))[0]).toBe(200);
+    return { first, s, h };
+  };
+  // What register does when the free name is claimed: the alias row now points at the new key.
+  const reclaim = (s, key) => s.aliases.set('reborn', { alias: 'reborn', identity_key: key, kind: 'plain' });
+
+  test('unlink, then a re-claim by another key, then bind succeeds', async () => {
+    const { first, s, h } = await setup();
+    expect((await h.unlink({}, await first.sign('unlink', { alias: 'reborn' })))[0]).toBe(200);
+    expect(s.bindings.has('reborn')).toBe(false);
+    const next = user();
+    reclaim(s, next.identityKey);
+    const [st, out] = await h.bind({}, await next.sign('bind', { alias: 'reborn', seq: '1' }));
+    expect(st).toBe(200);
+    expect(out.binding.seq).toBe(1);
+    const [, pki] = await h.pki({ handle: 'reborn@pay.test' });
+    expect(await verify(pki)).toBe('signed');
+  });
+
+  test('delete wallet, then a re-claim by another key, then bind succeeds', async () => {
+    const { first, s, h } = await setup();
+    expect((await h.delete({}, await first.sign('delete', { confirm: 'DELETE' })))[0]).toBe(200);
+    expect(s.bindings.has('reborn')).toBe(false);
+    const next = user();
+    reclaim(s, next.identityKey);
+    expect((await h.bind({}, await next.sign('bind', { alias: 'reborn', seq: '1' })))[0]).toBe(200);
+  });
+
+  test('without a release, another key still cannot bind (no regression)', async () => {
+    const { s, h } = await setup();
+    const other = user();
+    reclaim(s, other.identityKey); // repointed some other way, e.g. a direct database edit
+    expect((await h.bind({}, await other.sign('bind', { alias: 'reborn', seq: '1' })))[0]).toBe(409);
   });
 });
