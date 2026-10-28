@@ -51,6 +51,8 @@ export type ResponseEventDetail = {
   error?: string | undefined | boolean;
   /** 'ERR_PERMISSION_DENIED' when the user declined (services/userDenied.ts); absent for failures. */
   code?: string;
+  /** Technical detail for the wallet's own Details panel (error code, stack top). Never shown on its own. */
+  detail?: string;
   status?: number;
 };
 
