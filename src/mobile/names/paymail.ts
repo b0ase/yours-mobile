@@ -64,6 +64,7 @@ export const NONCE_ACTIONS: ReadonlySet<string> = new Set([
   'offer-receipts',
   'prove',
   'prove-gist',
+  'name-token-mint',
 ]);
 
 const newNonce = () => Utils.toHex([...crypto.getRandomValues(new Uint8Array(16))]);
@@ -255,6 +256,35 @@ export const gistProofText = async (wallet: NameSigner, alias: string): Promise<
 export const proveWithGist = async (f: Fetch, wallet: NameSigner, alias: string, gist: string): Promise<void> => {
   const signed = await signRequest(wallet, 'prove-gist', { alias: alias.toLowerCase(), gist: gist.trim() });
   await postJson(f, api('prove-gist'), signed);
+};
+
+/**
+ * Your name token (owner, 28 Oct 2026): ask the paymail server to mint this wallet's name as a 1-sat one-of-one
+ * inscription, free (bCorp pays the network fee). The token goes straight to this wallet's ordinal address. Not
+ * "Create a token": that is a different screen, for fungible tokens a user issues.
+ */
+export const mintNameToken = async (
+  f: Fetch,
+  wallet: NameSigner,
+  alias: string,
+  ordAddress: string,
+): Promise<{ origin: string; txid: string }> => {
+  const signed = await signRequest(wallet, 'name-token-mint', { alias: alias.toLowerCase(), ordAddress });
+  return (await postJson(f, api('name-token-mint'), signed)) as { origin: string; txid: string };
+};
+export type NameTokenStatus = {
+  origin: string;
+  outpoint?: string | null;
+  address?: string | null;
+  moved?: boolean;
+  proofApplies?: boolean;
+};
+/** The name's token, if minted: its origin and where it is now (read from the chain by our server). */
+export const nameTokenStatus = async (f: Fetch, alias: string): Promise<NameTokenStatus | null> => {
+  const r = await f(api(`name-token/${alias.toLowerCase()}@${BWALLET_PAYMAIL_DOMAIN}`)).catch(() => null);
+  if (!r?.ok) return null;
+  const j = (await r.json().catch(() => null)) as NameTokenStatus | null;
+  return j && typeof j.origin === 'string' ? j : null;
 };
 
 /** Remove an extra name: it forwards to the main name for 90 days, then is released. */

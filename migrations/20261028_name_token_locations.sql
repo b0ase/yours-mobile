@@ -29,3 +29,8 @@ create table if not exists public.name_token_locations (
   checked_at timestamptz not null default now()
 );
 alter table public.name_token_locations enable row level security;
+
+-- The public name log records each free mint (action 'mint': note = {origin, ordAddress}).
+alter table public.bwallet_name_log drop constraint if exists bwallet_name_log_action_check;
+alter table public.bwallet_name_log add constraint bwallet_name_log_action_check
+  check (action in ('bind', 'claim', 'move', 'release', 'prove', 'jwks', 'mint'));

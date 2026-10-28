@@ -54,6 +54,8 @@ const aliasOk = (a) => ALIAS_RE.test(a) || SOCIAL_RE.test(a);
  */
 const { openTicket, socialAliasFor } = require('./social');
 const nameProof = require('./nameProof');
+const { makeSponsor } = require('./nameTokenMint');
+const { makeNameTokenHolder } = require('./nameTokenHolder');
 const { makeOpnsResolver } = require('./opnsResolve');
 const { cleanDisplayName, defaultDisplayName, shownDisplayName } = require('./displayName');
 const { lookalike, lookalikeReserved, brandInDisplayName, DISPLAY_NAME_MSG } = require('./brandGuard');
@@ -716,6 +718,14 @@ function makeHandlers({
   notifyOffer = env.NODE_ENV === 'test' || process.env.NODE_ENV === 'test'
     ? async () => false
     : (handle, receipt) => offers.notifyDirector(handle, receipt, env),
+  // Free name token mint (lib/nameTokenMint.js): bCorp's sponsor key from env pays. Tests inject their own.
+  mintNameToken = makeSponsor({ env, broadcast }),
+  // Who holds a name token now (lib/nameTokenHolder.js, follows spends on chain). Off under tests unless injected.
+  nameTokenHolder = env.NODE_ENV === 'test' || process.env.NODE_ENV === 'test'
+    ? async () => {
+        throw new Error('chain lookups are off in tests');
+      }
+    : makeNameTokenHolder(),
   // A GitHub gist proof check (lib/nameProof.js checkGist). Off under tests unless injected.
   gistCheck = env.NODE_ENV === 'test' || process.env.NODE_ENV === 'test'
     ? async () => ({ ok: false, error: 'gist checks are off in tests' })
@@ -1198,6 +1208,82 @@ function makeHandlers({
       };
       await storeProof(p, null, body.signature);
       return [200, { proof: await proofOut(p) }];
+    },
+
+    // Your name token (owner, 28 Oct 2026): mint this wallet's name as a 1-sat one-of-one inscription, free (bCorp's
+    // sponsor key pays; lib/nameTokenMint.js). Only the key the name points to can ask, only once per name, and only
+    // after it has signed the name's binding, which the inscription carries. The token goes straight to the owner's
+    // ordinal address. Separate from "Create a token" (fungible tokens a user issues): different action, different
+    // screen, different wording.
+    'name-token-mint': async (_q, body) => {
+      body = body || {};
+      const sigErr = await verifySignedOnce(body, 'name-token-mint', now());
+      if (sigErr) return [401, { error: sigErr }];
+      if (!store.putNameTokenOrigin || !store.nameTokenOrigin)
+        return [503, { error: 'Name tokens are not available right now' }];
+      const identityKey = String(body.identityKey).toLowerCase();
+      const alias = String(body.fields?.alias || '').toLowerCase();
+      const ordAddress = String(body.fields?.ordAddress || '');
+      const row = alias ? await store.getAlias(alias) : null;
+      if (!row || String(row.identity_key).toLowerCase() !== identityKey)
+        return [403, { error: 'Only the wallet the name points to can mint it' }];
+      if (await store.nameTokenOrigin(alias)) return [409, { error: 'This name is already a token' }];
+      const b = store.getBinding ? await store.getBinding(alias) : null;
+      if (!b || String(b.identity_key).toLowerCase() !== identityKey)
+        return [409, { error: 'Sign your name first (it signs itself in the background); try again in a moment' }];
+      try {
+        const m = await mintNameToken({ alias, domain: domain(env), binding: bindingOut(b), ordAddress });
+        await store.putNameTokenOrigin({
+          name: alias,
+          kind: 'paymail',
+          origin: m.origin,
+          minted_by: identityKey,
+          binding_seq: Number(b.seq),
+        });
+        await store.logName({
+          alias,
+          identity_key: identityKey,
+          action: 'mint',
+          actor: 'owner',
+          seq: Number(b.seq),
+          signature: String(body.signature).toLowerCase(),
+          note: JSON.stringify({ origin: m.origin, ordAddress }),
+        });
+        return [200, { origin: m.origin, txid: m.txid }];
+      } catch (e) {
+        return [e && e.status ? e.status : 502, { error: e instanceof Error ? e.message : 'Mint failed' }];
+      }
+    },
+
+    // Public: a name token's origin and who holds it now, read from the chain (GET /api/paymail/name-token/<handle>).
+    // The Proven badge belongs to the minting wallet only: once the token has moved, `proofApplies` is false and
+    // wallets drop the badge until the new holder signs in to the same provider account (PROVABLE-NAMES.md).
+    'name-token': async ({ handle }) => {
+      const parts = parseHandleParts(handle, env);
+      if (!parts || !store.nameTokenOrigin) return [404, { error: 'not-found' }];
+      const o = await store.nameTokenOrigin(parts.alias);
+      if (!o) return [404, { error: 'This name is not a token yet' }];
+      const row = await store.getAlias(parts.alias);
+      let h = null;
+      try {
+        h = await nameTokenHolder(o.origin);
+      } catch {
+        return [200, { alias: parts.alias, origin: o.origin, holder: null, error: 'The chain could not be read' }];
+      }
+      const moved = !h.address || !row || !row.ord_address || h.address !== row.ord_address;
+      return [
+        200,
+        {
+          alias: parts.alias,
+          origin: o.origin,
+          outpoint: h.outpoint,
+          address: h.address,
+          listed: h.listed,
+          burned: h.burned,
+          moved,
+          proofApplies: !moved,
+        },
+      ];
     },
 
     // Public: a name's provider-signed proof (GET /api/paymail/name-proof/<handle>).

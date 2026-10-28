@@ -184,6 +184,8 @@ export interface SocialProfile {
   choose_handle?: boolean;
   /** …prefilled with this: the X @name only, never anything from an email. */
   suggested_handle?: string | null;
+  /** The social name this sign-in can claim (`name.x` / `name.gmail` / `name.github`; LinkedIn: a suggested slug). */
+  social_alias?: string | null;
 }
 
 export type HandlesInfo = {
