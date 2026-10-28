@@ -36,6 +36,7 @@ import {
 import { guardedSendBsv21 } from '../../services/tokenSpendGuard';
 import { checkedContext } from '../p2p/checkedWallet';
 import { verifyCancelArgs, verifyListingArgs } from '../p2p/verify';
+import { cappedOverlayFee } from '../wallet/send/tokenFee';
 
 const normId = (id: string) => id.replace('.', '_');
 const dotted = (outpoint: string) => outpoint.replace('_', '.');
@@ -179,10 +180,11 @@ export async function cancelListing(
     },
   ];
   const fee = details?.status;
-  if (fee?.fee_address && typeof fee.fee_per_output === 'number' && fee.fee_per_output > 0) {
+  const overlayFee = cappedOverlayFee(fee?.fee_address, fee?.fee_per_output, 1); // H-5: capped
+  if (overlayFee) {
     outputs.push({
-      lockingScript: new P2PKH().lock(fee.fee_address).toHex(),
-      satoshis: fee.fee_per_output,
+      lockingScript: new P2PKH().lock(overlayFee.address).toHex(),
+      satoshis: overlayFee.sats,
       outputDescription: 'Overlay processing fee',
       tags: ['fee:overlay'],
     });

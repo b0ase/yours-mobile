@@ -31,6 +31,7 @@ import {
 import { buildInputAssetLabel, buildTokenLabel, readAssetIdTag } from '@1sat/types';
 import { YoursNative } from '../native';
 import { withTokenKeyCheck } from '../../services/tokenSpendGuard';
+import { cappedOverlayFee } from '../wallet/send/tokenFee';
 
 /** The first room (owner, 15 Oct 2026). */
 export const SCAMMERSCARTEL_GATE = 'bsv21:8353949b27e8e16025702ce2b5d9b1ac2dad56d725eb2a38761974a857d98804_0';
@@ -295,12 +296,12 @@ async function fundInvitesOnce(
       }),
     });
   }
-  const feeAddr = details.status?.fee_address;
-  const feePer = details.status?.fee_per_output;
-  if (typeof feeAddr === 'string' && feeAddr && typeof feePer === 'number' && feePer > 0) {
+  // Capped (H-5, b-Aware 28 Oct 2026): the indexer's per-output fee is read at spend time.
+  const overlay = cappedOverlayFee(details.status?.fee_address, details.status?.fee_per_output, tokenOuts);
+  if (overlay) {
     outputs.push({
-      lockingScript: new P2PKH().lock(feeAddr).toHex(),
-      satoshis: feePer * tokenOuts,
+      lockingScript: new P2PKH().lock(overlay.address).toHex(),
+      satoshis: overlay.sats,
       outputDescription: 'Overlay processing fee',
     });
   }
