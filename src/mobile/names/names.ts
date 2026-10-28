@@ -97,6 +97,11 @@ export type Resolved = {
   pubkey?: string;
   /** A bWalletX name's owner-signed binding to `pubkey` (names/binding.ts): signed, not yet signed, or bad. */
   nameBinding?: BindingStatus;
+  /**
+   * The typed bWalletX name is an explicit forward its owner's wallet set (a rename or a removed extra name):
+   * payments go to this name (bare alias), whose binding `nameBinding` describes. Shown, never swapped silently.
+   */
+  forwardsTo?: string;
   /** Where tokens (BSV-21 / ordinals) would go, if this name can receive them. */
   ordAddress?: string;
   /** A $name that wasn't ours but a lookalike is (0/o, 1/l/i): "did you mean $b0asey?" (12 Oct 2026). */
@@ -268,6 +273,30 @@ export const scriptToAddress = (hex: string): string | undefined => {
   return m ? Utils.toBase58Check(Utils.toArray(m[1], 'hex'), [0]) : undefined;
 };
 
+/**
+ * The bare target alias of a forward our host declared for `alias` ({from, to} paymails), or undefined. Only a
+ * forward FROM the typed name to a different name counts; anything else is ignored.
+ */
+export const forwardTarget = (alias: string, fw: unknown): string | undefined => {
+  if (!fw || typeof fw !== 'object') return undefined;
+  const f = fw as { from?: unknown; to?: unknown };
+  const from = String(f.from ?? '')
+    .split('@')[0]
+    .toLowerCase();
+  const to = String(f.to ?? '')
+    .split('@')[0]
+    .toLowerCase();
+  if (!from || !to || from !== alias.toLowerCase() || to === from || !/^[a-z0-9._-]{1,64}$/.test(to)) return undefined;
+  return to;
+};
+
+/** "boase@ forwards to b0asex@ (same owner)": the confirm-card line for a forwarded bWalletX name. */
+export const forwardLabel = (r: Pick<Resolved, 'input' | 'forwardsTo'>): string | undefined => {
+  if (!r.forwardsTo) return undefined;
+  const from = r.input.replace(/^\$/, '').split('@')[0].toLowerCase();
+  return `${from}@ forwards to ${r.forwardsTo}@ (same owner)`;
+};
+
 export const resolvePaymail = async (f: Fetch, paymail: string, input = paymail): Promise<Resolved> => {
   const [alias, domain] = paymail.split('@');
   const caps = await getCapabilities(f, domain);
@@ -293,13 +322,22 @@ export const resolvePaymail = async (f: Fetch, paymail: string, input = paymail)
   }
   const pki = str(caps[CAP.pki]);
   if (pki) {
-    const id = await capJson<Fields & { binding?: unknown }>(pki);
+    const id = await capJson<Fields & { binding?: unknown; forward?: unknown }>(pki);
     r.pubkey = str(id?.pubkey);
     // Our names carry the owner's signed binding: check it here rather than trust our server.
     if (!r.external && r.pubkey) {
-      const status = await checkBinding(alias, r.pubkey, id?.binding);
+      const to = forwardTarget(alias, id?.forward);
+      if (to) r.forwardsTo = to;
+      // A forward's binding is the target's: check it against the target name, never the typed one.
+      const boundTo = to ?? alias;
+      const servedFor = String((id?.binding as { alias?: unknown } | undefined)?.alias ?? '').toLowerCase();
+      const status =
+        servedFor && servedFor !== boundTo.toLowerCase()
+          ? 'mismatch'
+          : await checkBinding(boundTo, r.pubkey, id?.binding);
       const from = (id?.binding as { handover?: { from?: string } } | undefined)?.handover?.from;
-      r.nameBinding = keyChange(alias, r.pubkey, status, from);
+      // The key-change stop stays on the TYPED name: a forward never resets what this wallet remembers for it.
+      r.nameBinding = status === 'mismatch' ? status : keyChange(alias, r.pubkey, status, from);
     }
     // Our host only pays names it knows (pki answers with a key). Without this an unknown alias resolved as payable
     // and failed later at send time as "the paymail host answered 404" (owner, 25 Oct 2026: bwalletx@bwalletx.com).
@@ -554,6 +592,17 @@ export const UNBOUND_NAME =
 export const BAD_BINDING =
   "This name's signed binding doesn't match its key, so it may have been changed without its owner. Not paying it.";
 
+/**
+ * Our host answered the typed name with a different name's binding and no forward (28 Oct 2026: boase@ came back
+ * as b0asex@). Nothing shows the typed name's owner chose that wallet, so it is never paid; no "Pay anyway".
+ */
+export const NAME_MISMATCH =
+  "This name isn't set up in bWalletX: the server answered with a different name's wallet, and its owner hasn't signed this name or set it to forward. Not paying it. Ask them for their exact name.";
+
+/** Shown under a bWalletX name whose owner hasn't signed its binding yet. Payable: the key is still remembered. */
+export const UNSIGNED_NOTE =
+  "Not signed by its owner yet: bWalletX can't prove the owner chose this wallet. If it's a large amount, check the name with them first.";
+
 /** BRC-169 4.4: the name points to a different key than before, with no signed handover. */
 export const KEY_CHANGED =
   "This name now points to a different wallet than before, and its owner didn't sign a handover. Not paying it.";
@@ -564,6 +613,7 @@ export const destinationFor = (
 ): { ok: true; to: string } | { ok: false; error: string } => {
   if (opnsBinding(r) === 'unbound') return { ok: false, error: UNBOUND_NAME };
   if (r.nameBinding === 'bad') return { ok: false, error: BAD_BINDING };
+  if (r.nameBinding === 'mismatch') return { ok: false, error: NAME_MISMATCH };
   if (r.nameBinding === 'changed') return { ok: false, error: KEY_CHANGED };
   if (asset === 'bsv') return { ok: true, to: r.target };
   if (r.ordProofBad) return { ok: false, error: BAD_ORD_PROOF };
