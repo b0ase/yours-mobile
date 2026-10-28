@@ -7,7 +7,11 @@ import { SIGN_KEY_ID, SIGN_PROTOCOL, signedMessage } from './paymail';
  * here without trusting our server: a name quietly repointed in our database has no valid binding for its new key.
  */
 export type NameBinding = { alias: string; identityKey?: string; seq: number; timestamp: string; signature: string };
-export type BindingStatus = 'signed' | 'unsigned' | 'bad' | 'changed';
+/**
+ * 'mismatch': the host answered with ANOTHER name's binding and no forward record (28 Oct 2026: boase@ served as
+ * b0asex@). Not proof of tampering, but nothing says the owner of the typed name chose that wallet: never paid.
+ */
+export type BindingStatus = 'signed' | 'unsigned' | 'bad' | 'changed' | 'mismatch';
 type Handover = { from?: string; releaseSignature?: string; releaseTimestamp?: string };
 
 const verifyBy = async (key: string, action: string, fields: Record<string, string>, sig: string) => {

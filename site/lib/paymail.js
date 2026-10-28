@@ -713,10 +713,6 @@ function makeHandlers({
   now = () => Date.now(),
   socialCheck = ticketSocialCheck,
   reservedOwners = RESERVED_OWNERS,
-  // Off under `bun test` (NODE_ENV=test) so unit tests never call the network; tests inject their own.
-  renamed = env.NODE_ENV === 'test' || process.env.NODE_ENV === 'test'
-    ? async () => null
-    : (alias) => bitsignRenamed(alias, env),
   // OpNS names (lib/opnsResolve.js) for pki / profile / verify only. Off under tests unless injected.
   opns = env.NODE_ENV === 'test' || process.env.NODE_ENV === 'test'
     ? async () => null
@@ -765,20 +761,23 @@ function makeHandlers({
     const p = parseHandleParts(handle, env);
     if (!p || TOMB_RE.test(p.alias)) return [404, { error: 'not-found' }];
     let row = await store.getAlias(p.alias);
-    // An old (or extra) name forwards to the wallet's name (one hop), so payments to it still arrive.
+    let forward = null;
+    // An old (or extra) name forwards to the wallet's name (one hop), so payments to it still arrive. The forward
+    // is a logged row the owner's own wallet created (rename / remove-extra-name), and pki says so out loud
+    // (`forward`) so the payer's wallet shows "old@ forwards to new@" instead of silently swapping names.
     if (!row) {
       const fw = await liveForward(p.alias);
       if (fw) {
         row = await store.getAlias(fw.to_alias);
         if (row && row.identity_key !== fw.identity_key) row = null;
+        if (row) forward = { from: p.alias, to: row.alias, expiresAt: fw.expires_at || null };
       }
     }
-    if (!row) {
-      const to = await renamed(p.alias).catch(() => null);
-      if (to) row = await store.getAlias(to);
-    }
+    // ⚠ No bit-sign fallback (owner, 28 Oct 2026). bit-sign's public profile answers ANY handle on an account with
+    // that account's active handle (an inactive bChatX handle, a merge, a rename), so `boase@` was silently served
+    // as `b0asex@`. A name resolves only to its own row or an explicit forward row; anything else is "no such name".
     if (!row) return [404, { error: 'not-found' }];
-    return [200, { ...row, _domain: p.domain }];
+    return [200, { ...row, _domain: p.domain, ...(forward && { _forward: forward }) }];
   };
   // A claimed alias (or its forward / rename) always wins; only then is the handle tried as an OpNS
   // name bound on chain to an identity key. Read-only answers: no payments, inbox or ord address.
@@ -1008,6 +1007,14 @@ function makeHandlers({
           : null;
       if (pr && String(pr.identity_key).toLowerCase() === String(row.identity_key).toLowerCase())
         out.proof = await proofOut(pr);
+      // Asked for a forwarded name: say so. `handle` and `binding` are the target's; the wallet checks the
+      // binding against `forward.to` and tells the payer "from@ forwards to to@ (same owner)".
+      if (row._forward)
+        out.forward = {
+          from: handleOf(row._forward.from, row._domain),
+          to: handleOf(row._forward.to, row._domain),
+          expiresAt: row._forward.expiresAt,
+        };
       return [200, out];
     },
 

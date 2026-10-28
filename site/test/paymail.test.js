@@ -555,17 +555,18 @@ describe("everything after a dot is the system's", () => {
 });
 
 describe('renamed handles keep receiving', () => {
-  test('an old name answers as the new one via bit-sign', async () => {
+  test('a bit-sign handle on the same account is NOT served as another name (boase@ -> b0asex@, 28 Oct 2026)', async () => {
     const store = memStore();
     const h0 = pm.makeHandlers({ store, env: ENV });
     const u = user();
     expect((await h0.register({}, await u.sign('register', { alias: 'newname' })))[0]).toBe(200);
+    // Even if a caller still passes the old bit-sign lookup, it is never consulted.
     const h = pm.makeHandlers({ store, env: ENV, renamed: async (a) => (a === 'oldname' ? 'newname' : null) });
-    const [s, r] = await h.pki({ handle: 'oldname@pay.test' });
+    for (const fn of ['pki', 'profile', 'p2pDestination', 'ord'])
+      expect((await h[fn]({ handle: 'oldname@pay.test' }, { satoshis: 1000 }))[0]).toBe(404);
+    const [s, r] = await h.pki({ handle: 'newname@pay.test' });
     expect(s).toBe(200);
-    expect(r.pubkey).toBe(u.identityKey);
-    expect(r.handle).toBe('newname@pay.test');
-    expect((await h.pki({ handle: 'nobody@pay.test' }))[0]).toBe(404);
+    expect(r.forward).toBeUndefined();
   });
 
   test('a wallet rename forwards the old name for 90 days, then releases it', async () => {
@@ -614,6 +615,9 @@ describe('renamed handles keep receiving', () => {
     const [s, r] = await h.pki({ handle: 'extraname@pay.test' });
     expect(s).toBe(200);
     expect(r.pubkey).toBe(u.identityKey);
+    // Said out loud, never a silent swap: the wallet shows "extraname@ forwards to mainname@".
+    expect(r.handle).toBe('mainname@pay.test');
+    expect(r.forward).toEqual({ from: 'extraname@pay.test', to: 'mainname@pay.test', expiresAt: null });
     // A forward whose key doesn't own the target is ignored.
     await store.putForward({
       from_alias: 'spoof',

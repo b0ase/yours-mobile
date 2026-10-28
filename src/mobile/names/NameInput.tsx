@@ -11,6 +11,8 @@ import {
   destinationCheck,
   externalLabel,
   NOT_VERIFIED_NOTE,
+  UNSIGNED_NOTE,
+  forwardLabel,
   isOurDomain,
   opnsBinding,
   parseRecipient,
@@ -93,7 +95,7 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
     emit(d.to);
     status.current?.('ready', r);
     // Remember who this name was when you chose to pay it (BRC-169 4.4 key-change check next time).
-    if (r.pubkey && r.nameBinding && r.nameBinding !== 'bad')
+    if (r.pubkey && r.nameBinding && r.nameBinding !== 'bad' && r.nameBinding !== 'mismatch')
       trustCurrentKey(r.input.replace(/^\$/, '').split('@')[0], r.pubkey);
     // ...and which provider account proved it (a different one next time stops the payment).
     if (r.nameProof?.status === 'proven' && r.nameProof.sub)
@@ -281,7 +283,13 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
                   )}
                   {r.nameBinding === 'signed' && (
                     <div className="text-[11px] flex items-center gap-1" style={{ color: '#2ecc71' }}>
-                      <Check size={11} /> Signed by its owner · bound to {short(r.pubkey ?? '')}
+                      <Check size={11} /> Signed by its owner{r.forwardsTo ? ` as ${r.forwardsTo}@` : ''} · bound to{' '}
+                      {short(r.pubkey ?? '')}
+                    </div>
+                  )}
+                  {r.forwardsTo && (
+                    <div data-testid="name-forward" className="text-[11px] break-all" style={{ color: fg }}>
+                      {forwardLabel(r)}
                     </div>
                   )}
                   {r.nameProof?.status === 'proven' && (
@@ -299,8 +307,8 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
                     </div>
                   )}
                   {r.nameBinding === 'unsigned' && (
-                    <div className="text-[11px]" style={{ color: gray }}>
-                      Not signed by its owner yet
+                    <div data-testid="name-unsigned" className="text-[11px]" style={{ color: gray }}>
+                      {UNSIGNED_NOTE}
                     </div>
                   )}
                   {opnsBinding(r) === 'bound' && (
