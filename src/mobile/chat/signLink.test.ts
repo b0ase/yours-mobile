@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { docHashFor, offerSignLink, parseSignLink, phoneSignUrl, takeSignLink } from './signLink';
+import { docHashFor, offerSignLink, parseSignLink, parseWebBappLink, phoneSignUrl, takeSignLink } from './signLink';
 import { signDocUrl } from './pendingDoc';
 
 const ID = '04ea9a26-6e55-4b19-8c16-ee76b8d7397a';
@@ -42,5 +42,26 @@ describe('sign link flow', () => {
   test('without a hash the banner keeps the plain ?doc= page', () => {
     expect(signDocUrl('BCORPBOARD', ID, null)).toBe(`https://www.bchatx.com/room/BCORPBOARD?doc=${ID}`);
     expect(signDocUrl('BCORPBOARD', ID, 'xyz')).toBe(`https://www.bchatx.com/room/BCORPBOARD?doc=${ID}`);
+  });
+});
+
+describe('web.bwalletx.com/bapp links (bChatX PR #549)', () => {
+  const to = encodeURIComponent(`/room/BCORPBOARD?sign=${ID}&h=${H}`);
+  test('the wrapped sign QR is a sign link', () => {
+    expect(parseSignLink(`https://web.bwalletx.com/bapp/bchatx?to=${to}`)).toEqual({
+      ticker: 'BCORPBOARD',
+      docId: ID,
+      hash: H,
+    });
+  });
+  test('other bApp links route to the frame screen; foreign hosts and paths are refused', () => {
+    expect(parseSignLink('https://web.bwalletx.com/bapp/bchatx?to=%2Fu%2Fbmovies')).toBeNull();
+    expect(parseWebBappLink('https://web.bwalletx.com/bapp/bchatx?to=%2Fu%2Fbmovies')).toEqual({
+      route: '/m/bapp/bchatx?to=%2Fu%2Fbmovies',
+      url: 'https://www.bchatx.com/u/bmovies',
+    });
+    expect(parseWebBappLink('https://web.bwalletx.com/bapp/nope?to=%2Fx')).toBeNull();
+    expect(parseWebBappLink(`https://evil.example/bapp/bchatx?to=${to}`)).toBeNull();
+    expect(parseSignLink('https://web.bwalletx.com/bapp/bchatx?to=%2F%2Fevil.example%2Froom%2FX')).toBeNull();
   });
 });

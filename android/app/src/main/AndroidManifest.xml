@@ -45,6 +45,8 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https" android:host="www.bchatx.com" android:pathPrefix="/r/" />
+                <!-- web.bwalletx.com/bapp/bchatx?to=/room/<T>?sign=&h= (bChatX PR #549) and other bApp links. -->
+                <data android:scheme="https" android:host="web.bwalletx.com" android:pathPrefix="/bapp/" />
             </intent-filter>
             <!-- bwalletx://pair?… : site/pair.html "Open in the bWallet app" (a tap on www.bwallet.space itself
                  doesn't count as an app link). Same params as /pair; src/mobile/pair/links.ts pairLinkFrom. -->
