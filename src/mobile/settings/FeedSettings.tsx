@@ -30,11 +30,15 @@ import {
   AtSign,
   PenLine,
   Send,
+  Plug,
+  Wallet,
 } from 'lucide-react';
 import { ChangePassword } from './ChangePassword';
 import { SEEDLESS_ENABLED } from '../passkey/prf';
 import { PasskeySettings } from '../passkey/PasskeySettings';
 import { ConnectSocial } from './ConnectSocial';
+import { LinkedWallets } from './LinkedWallets';
+import { KINTSUGI_URL } from './linkedWalletsApi';
 import { HandleFlow } from '../names/HandleFlow';
 import { onSocialChange, takeSocialReturn } from '../social/socialLogin';
 import { LinkedBadges } from '../social/LinkAccounts';
@@ -620,6 +624,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
     | 'scan'
     | 'password'
     | 'social'
+    | 'linkedWallets'
     | 'agents'
     | 'pots'
     | 'notifications'
@@ -741,6 +746,20 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
               <Divider />
             </>
           )}
+          <Row
+            icon={<Wallet size={16} />}
+            label="Linked wallets"
+            description="Ethereum, BNB Chain, Solana and TRON wallets you've proven are yours. Private to you and bChatX"
+            onClick={() => setScreen('linkedWallets')}
+          />
+          <Divider />
+          <Row
+            icon={<Plug size={16} />}
+            label="Connected services"
+            description="Connect repos to Kintsugi (opens bChatX)"
+            onClick={() => window.open(KINTSUGI_URL, '_blank', 'noopener')}
+          />
+          <Divider />
           <Row
             icon={<ShieldCheck size={16} />}
             label="Verify your identity"
@@ -1263,6 +1282,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
       {LINK_ACCOUNTS_ENABLED && screen === 'social' && <ConnectSocial onClose={closeSocial} />}
       {handleOpen && <HandleFlow title="Change handle" onClose={() => setHandleOpen(false)} />}
       {screen === 'idmap' && <IdentityMap onClose={() => setScreen(null)} />}
+      {screen === 'linkedWallets' && <LinkedWallets onClose={() => setScreen(null)} />}
       {screen === 'note' && (
         <Screen title="Sign a note" onBack={() => setScreen(null)}>
           <SignNoteScreen onSent={() => setScreen(null)} />
