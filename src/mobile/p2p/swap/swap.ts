@@ -23,12 +23,14 @@ import {
   LockingScript,
   OP,
   P2PKH,
+  ProtoWallet,
   Script,
   Spend,
   Transaction,
   TransactionSignature,
   UnlockingScript,
   Utils,
+  type WalletProtocol,
 } from '@bsv/sdk';
 
 /** Hard caps for the first version (owner, 27 Oct 2026). Raise here; tests read the same object. */
@@ -58,8 +60,17 @@ export type SwapTerms = {
   tokenId: string;
   /** Token amount in base units (after decimals), decimal string. */
   amount: string;
-  /** Price in USD the contract names (e.g. 1). */
-  priceUsd: number;
+  /** Price in USD the contract names (e.g. 1). Exactly one of priceUsd / priceSats. */
+  priceUsd?: number;
+  /**
+   * Price in sats, fixed by the contract (offer-first room contracts, owner 28 Oct 2026: "price in sats"). When set,
+   * no exchange rate decides the price; the rate is used only for the $ cap.
+   */
+  priceSats?: number;
+  /** The seller's wallet identity key named in the contract. The price must go to THIS wallet (payeeSig). */
+  sellerKey?: string;
+  /** When the offer stops being acceptable, ms since epoch. */
+  expiresAt?: number;
 };
 
 /** The seller's half, as relayed privately to the buyer. */
@@ -76,6 +87,11 @@ export type SwapOffer = {
   partialTx: string;
   /** BEEF hex holding the token output's source transaction (and its ancestry). */
   tokenBeef: string;
+  /**
+   * When the terms name a seller wallet: that wallet's signature (BRC-3 style, counterparty "anyone") over
+   * payeeMessage(ref, price script, price). Proves the price output pays the wallet the contract names.
+   */
+  payeeSig?: string;
 };
 
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -94,11 +110,55 @@ export const validTerms = (t: unknown): t is SwapTerms => {
     /^[0-9a-f]{64}[_.]\d+$/.test(o.tokenId.toLowerCase()) &&
     typeof o.amount === 'string' &&
     /^[1-9]\d{0,30}$/.test(o.amount) &&
-    typeof o.priceUsd === 'number' &&
-    Number.isFinite(o.priceUsd) &&
-    o.priceUsd > 0
+    (o.priceUsd === undefined) !== (o.priceSats === undefined) &&
+    (o.priceUsd === undefined || (typeof o.priceUsd === 'number' && Number.isFinite(o.priceUsd) && o.priceUsd > 0)) &&
+    (o.priceSats === undefined || (Number.isSafeInteger(o.priceSats) && (o.priceSats as number) > 0)) &&
+    (o.sellerKey === undefined || (typeof o.sellerKey === 'string' && /^0[23][0-9a-f]{64}$/.test(o.sellerKey))) &&
+    (o.expiresAt === undefined || (Number.isSafeInteger(o.expiresAt) && (o.expiresAt as number) > 0))
   );
 };
+
+/** The price in sats these terms fix, or (USD terms) what the seller's rate makes it. */
+export const termsPriceSats = (t: SwapTerms, rate: number) => t.priceSats ?? usdToSats(t.priceUsd ?? 0, rate);
+
+/** Refuses a sats price over the $ cap at the given rate. */
+export const assertSatsWithinCap = (priceSats: number, rate: number) => {
+  if (!Number.isSafeInteger(priceSats) || priceSats <= 0) fail('no price in sats');
+  if (!(rate > 0)) fail('no BSV/USD rate');
+  const usd = (priceSats * rate) / 1e8;
+  if (usd > SWAP_CAPS.maxUsd) fail(`price ${priceSats} sats ($${usd.toFixed(2)}) is over the $${SWAP_CAPS.maxUsd} cap`);
+};
+
+export const assertNotExpired = (t: SwapTerms, now: number) => {
+  if (t.expiresAt !== undefined && now >= t.expiresAt) fail('this offer has expired');
+};
+
+/** Seller-wallet proof that the price output is its own (see SwapOffer.payeeSig). */
+export const PAYEE_PROTOCOL: WalletProtocol = [1, 'bwx swap payee'];
+export const payeeMessage = (ref: string, payScriptHex: string, priceSats: number) =>
+  Utils.toArray(`bwx-swap-payee|${ref}|${payScriptHex.toLowerCase()}|${priceSats}`, 'utf8');
+
+/** The buyer's check that out 0 pays the seller wallet named in the contract. No-op for terms without sellerKey. */
+export async function verifyPayee(offer: SwapOffer, expected: SwapTerms, payScriptHex: string): Promise<void> {
+  if (!expected.sellerKey) return;
+  if (typeof offer.payeeSig !== 'string' || !/^[0-9a-f]{16,200}$/i.test(offer.payeeSig))
+    fail('the offer is not signed by the seller wallet the contract names');
+  let valid = false;
+  try {
+    valid = (
+      await new ProtoWallet('anyone').verifySignature({
+        data: payeeMessage(expected.ref, payScriptHex, offer.priceSats),
+        signature: Utils.toArray(offer.payeeSig!, 'hex'),
+        protocolID: PAYEE_PROTOCOL,
+        keyID: expected.ref,
+        counterparty: expected.sellerKey,
+      })
+    ).valid;
+  } catch {
+    valid = false;
+  }
+  if (!valid) fail('the price does not go to the seller wallet the contract names');
+}
 
 /** Refuses prices over the cap, by the contract and by the sats at the given rate. */
 export const assertWithinCaps = (priceUsd: number, priceSats: number, rate: number) => {
@@ -207,7 +267,12 @@ export type VerifiedOffer = {
  * - exactly two outputs: out 0 pays the price to a P2PKH, out 1 is the swap OP_RETURN with the signed hash;
  * - the price is within the cap at the buyer's own rate.
  */
-export function verifyOffer(offer: SwapOffer, expected: SwapTerms, buyerRate: number): VerifiedOffer {
+export function verifyOffer(
+  offer: SwapOffer,
+  expected: SwapTerms,
+  buyerRate: number,
+  now: number = Date.now(),
+): VerifiedOffer {
   if (offer?.k !== SWAP_PROTOCOL || offer.v !== 1) fail('not a swap offer');
   if (!validTerms(offer.terms) || !validTerms(expected)) fail('malformed terms');
   const t = offer.terms;
@@ -217,11 +282,22 @@ export function verifyOffer(offer: SwapOffer, expected: SwapTerms, buyerRate: nu
   if (normId(t.tokenId) !== normId(expected.tokenId)) fail('the offer is a different token');
   if (t.amount !== expected.amount) fail(`the offer is ${t.amount} tokens, the contract says ${expected.amount}`);
   if (t.priceUsd !== expected.priceUsd) fail(`the offer asks $${t.priceUsd}, the contract says $${expected.priceUsd}`);
-  assertWithinCaps(expected.priceUsd, offer.priceSats, buyerRate);
-  // The seller's sats must be about the contract's dollars at the buyer's rate too (10% slack for price moves).
-  const buyerUsd = (offer.priceSats * buyerRate) / 1e8;
-  if (buyerUsd > expected.priceUsd * 1.1)
-    fail(`the price is $${buyerUsd.toFixed(2)} at today's rate, not $${expected.priceUsd}`);
+  if (t.priceSats !== expected.priceSats)
+    fail(`the offer asks ${t.priceSats} sats, the contract says ${expected.priceSats} sats`);
+  if (t.sellerKey !== expected.sellerKey) fail('the offer names a different seller wallet from the contract');
+  if (t.expiresAt !== expected.expiresAt) fail('the offer expiry differs from the contract');
+  assertNotExpired(expected, now);
+  if (expected.priceSats !== undefined) {
+    // Sats terms: the price is exactly the contract's, no rate involved (the rate only enforces the $ cap).
+    if (offer.priceSats !== expected.priceSats) fail('the seller output is not the agreed price');
+    assertSatsWithinCap(expected.priceSats, buyerRate);
+  } else {
+    const usd = expected.priceUsd!;
+    assertWithinCaps(usd, offer.priceSats, buyerRate);
+    // The seller's sats must be about the contract's dollars at the buyer's rate too (10% slack for price moves).
+    const buyerUsd = (offer.priceSats * buyerRate) / 1e8;
+    if (buyerUsd > usd * 1.1) fail(`the price is $${buyerUsd.toFixed(2)} at today's rate, not $${usd}`);
+  }
 
   let partial: Transaction;
   let beef: Beef;

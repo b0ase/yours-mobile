@@ -25,16 +25,21 @@ import { withBroadcastNow } from '../../../services/bigDelayed';
 import { guardedSendBsv21 } from '../../../services/tokenSpendGuard';
 import { checkedContext } from '../checkedWallet';
 import {
+  PAYEE_PROTOCOL,
   SwapError,
+  assertNotExpired,
+  assertSatsWithinCap,
   assertWithinCaps,
   buildSellerPartial,
+  payeeMessage,
   swapOpReturn,
   tokenAmountOf,
+  termsPriceSats,
   tokenReceiveScript,
-  usdToSats,
   validTerms,
   verifyAcceptArgs,
   verifyOffer,
+  verifyPayee,
   type AcceptArgs,
   type SwapOffer,
   type SwapTerms,
@@ -90,7 +95,7 @@ const parseCi = (raw: string | undefined): Ci | null => {
   }
 };
 
-type Candidate = { outpoint: string; tx: Transaction; vout: number; ci: Ci; beef: Beef };
+type Candidate = { outpoint: string; tx: Transaction; vout: number; ci: Ci; ciRaw: string; beef: Beef };
 
 /** Our own token outputs holding exactly `amount` of the token, with their spend keys. */
 async function exactOutputs(ctx: OneSatContext, tokenId: string, amount: bigint): Promise<Candidate[]> {
@@ -111,8 +116,9 @@ async function exactOutputs(ctx: OneSatContext, tokenId: string, amount: bigint)
     if (!tx || !lock) continue;
     const tok = tokenAmountOf(lock, `${txid}_${vout}`);
     if (!tok || tok.id !== normId(tokenId) || tok.amount !== amount) continue;
-    const ci = parseCi(await ensurePlaintextCi(ctx.wallet, o.customInstructions));
-    if (ci) out.push({ outpoint: `${txid}.${vout}`, tx, vout, ci, beef });
+    const ciRaw = (await ensurePlaintextCi(ctx.wallet, o.customInstructions)) ?? '';
+    const ci = parseCi(ciRaw);
+    if (ci) out.push({ outpoint: `${txid}.${vout}`, tx, vout, ci, ciRaw, beef });
   }
   return out;
 }
@@ -142,14 +148,97 @@ const decOf = (info: TokenInfo) => {
 
 export type RateQuote = { rate: number; source: string };
 
+/**
+ * A token output held for an open offer (owner, 28 Oct 2026: "reserve the token UTXO while the offer is open").
+ * The output is RELINQUISHED from the token basket, so no other send can pick it; release puts it back
+ * (internalizeAction, basket insertion, same instructions). Kept per account by the host (background.ts).
+ */
+export type SwapReservation = {
+  ref: string;
+  outpoint: string;
+  tokenId: string;
+  /** Atomic BEEF hex of the token output's transaction. */
+  beef: string;
+  /** The output's plaintext custom instructions (its spend key), restored on release. */
+  ci: string;
+  expiresAt: number;
+  at: number;
+};
+export type ReservationStore = {
+  list(): Promise<SwapReservation[]>;
+  put(r: SwapReservation): Promise<void>;
+  drop(ref: string): Promise<void>;
+};
+
+/** Default hold for an offer without an expiry: 24 hours. */
+export const DEFAULT_OFFER_MS = 24 * 60 * 60 * 1000;
+
+/** Put a reserved output back in the token basket and forget the reservation. */
+export async function releaseReservation(
+  ctx: OneSatContext,
+  store: ReservationStore,
+  r: SwapReservation,
+): Promise<void> {
+  const vout = Number(dotted(r.outpoint).split('.')[1]);
+  await ctx.wallet
+    .internalizeAction({
+      tx: Utils.toArray(r.beef, 'hex'),
+      outputs: [
+        {
+          outputIndex: vout,
+          protocol: 'basket insertion',
+          insertionRemittance: {
+            basket: BSV21_BASKET,
+            customInstructions: r.ci,
+            tags: bsv21FilterTags({ tokenId: normId(r.tokenId) }),
+          },
+        },
+      ],
+      description: 'Swap offer closed: tokens back',
+    })
+    .catch((e: unknown) => {
+      // Already spent (the buyer completed the swap) is not an error: the reservation is simply over.
+      if (!/spent|double/i.test(e instanceof Error ? e.message : String(e))) throw e;
+    });
+  await store.drop(r.ref);
+}
+
+/** Release one offer's reservation (the room voided it: rejected, countered or expired). */
+export async function releaseSwap(ctx: OneSatContext, store: ReservationStore, ref: string): Promise<boolean> {
+  const r = (await store.list()).find((x) => x.ref === ref);
+  if (!r) return false;
+  await releaseReservation(ctx, store, r);
+  return true;
+}
+
+/** Release every reservation past its expiry. Never throws (one stuck release must not block an offer). */
+export async function releaseExpired(ctx: OneSatContext, store: ReservationStore, now: number): Promise<void> {
+  for (const r of await store.list().catch(() => [] as SwapReservation[])) {
+    if (now >= r.expiresAt) await releaseReservation(ctx, store, r).catch(() => undefined);
+  }
+}
+
 export async function offerSwap(
   ctx: OneSatContext,
-  a: { terms: SwapTerms; quote: RateQuote; ask: Ask },
+  a: { terms: SwapTerms; quote: RateQuote; ask: Ask; reservations?: ReservationStore; now?: () => number },
 ): Promise<SwapOffer> {
   if (!validTerms(a.terms)) throw new SwapError('the contract terms are incomplete');
+  const now = (a.now ?? Date.now)();
   const terms = { ...a.terms, tokenId: normId(a.terms.tokenId) };
-  const priceSats = usdToSats(terms.priceUsd, a.quote.rate);
-  assertWithinCaps(terms.priceUsd, priceSats, a.quote.rate);
+  assertNotExpired(terms, now);
+  const priceSats = termsPriceSats(terms, a.quote.rate);
+  if (terms.priceSats !== undefined) assertSatsWithinCap(priceSats, a.quote.rate);
+  else assertWithinCaps(terms.priceUsd!, priceSats, a.quote.rate);
+  if (terms.sellerKey) {
+    const { publicKey } = await ctx.wallet.getPublicKey({ identityKey: true });
+    if (publicKey.toLowerCase() !== terms.sellerKey.toLowerCase())
+      throw new SwapError('the contract names a different seller wallet. Open bWalletX on the seller account');
+  }
+  if (a.reservations) {
+    await releaseExpired(ctx, a.reservations, now);
+    if ((await a.reservations.list()).some((r) => r.ref === terms.ref))
+      throw new SwapError('this wallet already has an open offer on this contract');
+  }
   const info = await indexedToken(ctx, terms.tokenId);
   const amount = BigInt(terms.amount);
   let found = (await exactOutputs(ctx, terms.tokenId, amount))[0];
@@ -182,6 +271,16 @@ export async function offerSwap(
 
   const payScript = new P2PKH().lock(await defaultPayAddress(ctx));
   const { ci } = found;
+  let payeeSig: string | undefined;
+  if (terms.sellerKey) {
+    const { signature } = await ctx.wallet.createSignature({
+      data: payeeMessage(terms.ref, payScript.toHex(), priceSats),
+      protocolID: PAYEE_PROTOCOL,
+      keyID: terms.ref,
+      counterparty: 'anyone',
+    });
+    payeeSig = Utils.toHex(signature);
+  }
   const counterparty = ci.counterparty ?? 'self';
   const partial = await buildSellerPartial({
     sourceTx: found.tx,
@@ -205,6 +304,20 @@ export async function offerSwap(
       return { signature, publicKey };
     },
   });
+  const tokenBeef = Utils.toHex(found.beef.toBinaryAtomic(found.tx.id('hex')));
+  if (a.reservations) {
+    // Hold the output for this offer: record first (so it can always be released), then take it out of the basket.
+    await a.reservations.put({
+      ref: terms.ref,
+      outpoint: found.outpoint,
+      tokenId: terms.tokenId,
+      beef: tokenBeef,
+      ci: found.ciRaw,
+      expiresAt: terms.expiresAt ?? now + DEFAULT_OFFER_MS,
+      at: now,
+    });
+    await ctx.wallet.relinquishOutput({ basket: BSV21_BASKET, output: found.outpoint });
+  }
   return {
     k: 'bwx-swap',
     v: 1,
@@ -213,7 +326,8 @@ export async function offerSwap(
     rate: a.quote.rate,
     rateSource: a.quote.source,
     partialTx: partial.toHex(),
-    tokenBeef: Utils.toHex(found.beef.toBinaryAtomic(found.tx.id('hex'))),
+    tokenBeef,
+    ...(payeeSig ? { payeeSig } : {}),
   };
 }
 
@@ -233,7 +347,8 @@ export async function acceptSwap(
       'this swap was already started on this device and may have been sent. Check your activity before trying again',
     );
 
-  const v = verifyOffer(a.offer, a.terms, a.quote.rate);
+  const v = verifyOffer(a.offer, a.terms, a.quote.rate, now());
+  await verifyPayee(a.offer, a.terms, v.sellerPayScript);
   const tokenId = normId(a.terms.tokenId);
   const info = await indexedToken(ctx, tokenId);
   await assertValidOutput(ctx, tokenId, v.outpoint);

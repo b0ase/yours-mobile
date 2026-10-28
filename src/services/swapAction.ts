@@ -4,7 +4,10 @@
  */
 export const SWAP_OFFER_ACTION = 'bwxSwapOffer';
 export const SWAP_ACCEPT_ACTION = 'bwxSwapAccept';
-export const isSwapAction = (type: unknown): boolean => type === SWAP_OFFER_ACTION || type === SWAP_ACCEPT_ACTION;
+/** The room voided an open offer (rejected, countered, expired): put the held token output back. No sheet. */
+export const SWAP_RELEASE_ACTION = 'bwxSwapRelease';
+export const isSwapAction = (type: unknown): boolean =>
+  type === SWAP_OFFER_ACTION || type === SWAP_ACCEPT_ACTION || type === SWAP_RELEASE_ACTION;
 
 /**
  * First party only (owner, 27 Oct 2026): bChatX rooms. Exact origins; previews never get swaps.
