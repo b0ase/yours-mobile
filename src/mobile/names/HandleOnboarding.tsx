@@ -16,6 +16,7 @@ import { LINK_ACCOUNTS_ENABLED, PAID_FEATURES_ENABLED, handleCardText } from '..
 import { LinkAccountsStep } from '../social/LinkAccountsStep';
 import { LinkAccountsCard } from '../social/LinkAccountsCard';
 import { FinishPendingLink } from '../social/FinishPendingLink';
+import { YourName } from './YourName';
 import { getPersonalLink, onPersonalChange } from './personalToken';
 import { existingChoice, recoverPersonalLink } from './claimPersonal';
 import {
@@ -173,6 +174,7 @@ export const HandleOnboarding = () => {
     LINK_ACCOUNTS_ENABLED && id ? (
       <>
         <FinishPendingLink owner={id} />
+        <YourName owner={id} />
         <LinkAccountsCard owner={id} />
       </>
     ) : null;

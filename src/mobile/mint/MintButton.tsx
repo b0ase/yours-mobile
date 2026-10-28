@@ -494,7 +494,7 @@ export const MintSheet = ({
             {step === 'ticket'
               ? 'Mint tickets'
               : step === 'token'
-                ? 'Mint a token'
+                ? 'Create a token'
                 : step === 'domain'
                   ? 'Tokenise a domain'
                   : step === 'card'

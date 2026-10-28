@@ -13,7 +13,7 @@ import { getPlatform } from '../../platform';
 import { ObsidianBackdrop } from '../../mobile/ui/ObsidianBackdrop';
 import { SEEDLESS_ENABLED } from '../../mobile/passkey/prf';
 import { SeedlessWelcome } from '../../mobile/passkey/SeedlessWelcome';
-import { SignupLinkPanel } from '../../mobile/social/SignupLinkPanel';
+import { ChooseYourName } from '../../mobile/names/ChooseYourName';
 
 const fadeUp = {
   hidden: { opacity: 0, y: 20 },
@@ -85,8 +85,9 @@ export const Start = () => {
 
         {/* Bottom section — actions */}
         <div className="flex flex-col items-center gap-3 w-full max-w-[420px] mx-auto mb-2 px-1 overflow-visible">
-          {/* Optional link on the first screen, finished after the seed step (owner, 27 Oct 2026). */}
-          <SignupLinkPanel color={contrast} gray={gray} />
+          {/* First step (owner, 28 Oct 2026): Choose your name. The sign-in also links the account (27 Oct), finished
+              after the seed step; the name is claimed and minted as a name token on the wallet home (YourName). */}
+          <ChooseYourName color={contrast} gray={gray} />
           {SEEDLESS_ENABLED ? (
             <SeedlessWelcome />
           ) : (

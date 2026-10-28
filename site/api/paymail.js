@@ -54,6 +54,9 @@ const ROUTES = {
   // Provable names (docs/PROVABLE-NAMES.md): store a provider-signed proof; read one; the archived provider keys.
   prove: ['POST', 'prove'],
   'prove-gist': ['POST', 'prove-gist'],
+  // Your name token: free 1:1 mint (bCorp pays) and its current holder, read from the chain.
+  'name-token-mint': ['POST', 'name-token-mint'],
+  'name-token': ['GET', 'name-token'],
   'name-proof': ['GET', 'name-proof'],
   'provider-keys': ['GET', 'provider-keys'],
   // Two-party handovers: the owner releases, the recipient accepts; no operator recovery.
@@ -119,7 +122,8 @@ module.exports = async function handler(req, res) {
       .split(',')[0]
       .trim() || 'unknown';
   if (limited(ip)) return send(res, 429, { error: 'rate-limited' });
-  if (route[1].startsWith('names-') && limited(ip, 20, nameHits)) return send(res, 429, { error: 'rate-limited' });
+  if ((route[1].startsWith('names-') || route[1] === 'name-token-mint') && limited(ip, 20, nameHits))
+    return send(res, 429, { error: 'rate-limited' });
 
   if (!handlers) {
     const store = supabaseStore();
