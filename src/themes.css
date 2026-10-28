@@ -691,7 +691,11 @@
 /* White: other people's bubbles are white washed with their shade (text #111 on it >= 15:1), $b is cream ringed
    in gold, agents a neutral warm grey. Your own bubble keeps the White theme's light grey above. */
 :root[data-bw-paper] .bw-chat-bubble.is-shaded {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--bw-shade-tint) 7%, #fff) 0%, color-mix(in srgb, var(--bw-shade-tint) 11%, #fff) 100%) !important;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bw-shade-tint) 7%, #fff) 0%,
+    color-mix(in srgb, var(--bw-shade-tint) 11%, #fff) 100%
+  ) !important;
   border: 1px solid color-mix(in srgb, var(--bw-shade-ink-light) 18%, transparent) !important;
 }
 :root[data-bw-paper] .bw-chat-bubble.is-b {

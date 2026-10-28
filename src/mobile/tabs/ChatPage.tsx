@@ -1194,7 +1194,11 @@ const Conversation = ({
                     : {})}
                   className={`bw-chat-bubble${it.mine ? ' is-mine' : ''}${!it.mine && isB(it.message) ? ' is-b' : ''}${!it.mine && !isB(it.message) && !bubbles ? (isBusinessAgentMessage(it.message) ? ' is-agent' : ' is-shaded') : ''} max-w-[80%] px-3 py-[7px] text-[15px] leading-snug select-none`}
                   style={{
-                    ...(it.mine || bubbles ? {} : (shadeVars(isBusinessAgentMessage(it.message) ? AGENT_ACCOUNT_SHADE : shadeOf(it.message.author_handle)) as CSSProperties)),
+                    ...(it.mine || bubbles
+                      ? {}
+                      : (shadeVars(
+                          isBusinessAgentMessage(it.message) ? AGENT_ACCOUNT_SHADE : shadeOf(it.message.author_handle),
+                        ) as CSSProperties)),
                     borderRadius: 18,
                     borderBottomRightRadius: it.mine ? 6 : 18,
                     borderBottomLeftRadius: it.mine ? 18 : 6,
