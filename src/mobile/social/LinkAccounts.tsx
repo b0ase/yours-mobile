@@ -238,7 +238,7 @@ export const LinkAccounts = ({ owner, onClaim }: { owner: string; onClaim?: (ali
     try {
       // Google signs this wallet's identity key into its ID token (provable names, docs PROVABLE-NAMES.md).
       const key =
-        p === 'google' && apiContext?.wallet
+        (p === 'google' || p === 'linkedin') && apiContext?.wallet
           ? (await apiContext.wallet.getPublicKey({ identityKey: true }).catch(() => null))?.publicKey
           : undefined;
       await startSocial(p, owner, undefined, key);

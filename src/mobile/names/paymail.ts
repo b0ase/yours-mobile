@@ -1,6 +1,7 @@
 import type { WalletInterface } from '@bsv/sdk';
 import { Beef, Utils } from '@bsv/sdk';
 import { BWALLET_PAYMAIL_API, BWALLET_PAYMAIL_DOMAIN } from './config';
+import { gistStatement } from './proof';
 import type { Fetch } from './names';
 
 /**
@@ -25,7 +26,7 @@ export const paymailFor = (alias: string) => (paymailEnabled() ? `${alias}@${BWA
 /** Same alias rule as the server. */
 export const PAYMAIL_ALIAS_RE = /^[a-z0-9](?:[a-z0-9_-]{0,30}[a-z0-9])?$/;
 /** Verified social names (b0asex.x, theirname.gmail): only claimable after Continue with X / Google. */
-export const SOCIAL_ALIAS_RE = /^[a-z0-9](?:[a-z0-9-]{0,28}[a-z0-9])?\.(x|gmail)$/;
+export const SOCIAL_ALIAS_RE = /^[a-z0-9](?:[a-z0-9-]{0,28}[a-z0-9])?\.(x|gmail|github|linkedin)$/;
 export const toAlias = (s: string) =>
   s
     .trim()
@@ -62,6 +63,7 @@ export const NONCE_ACTIONS: ReadonlySet<string> = new Set([
   'offer-register',
   'offer-receipts',
   'prove',
+  'prove-gist',
 ]);
 
 const newNonce = () => Utils.toHex([...crypto.getRandomValues(new Uint8Array(16))]);
@@ -232,6 +234,27 @@ export const proveName = async (
 ): Promise<void> => {
   const signed = await signRequest(wallet, 'prove', { alias: alias.toLowerCase() });
   await postJson(f, api('prove'), { ...signed, ticket: proof.ticket, secret: proof.secret });
+};
+
+/**
+ * GitHub names (owner, 28 Oct 2026): the text the owner of `login.github` posts as a public gist: the statement line
+ * and this wallet's signature of it. Signing proves nothing to us by itself; the gist's GitHub owner does.
+ */
+export const gistProofText = async (wallet: NameSigner, alias: string): Promise<string> => {
+  const { publicKey } = await wallet.getPublicKey({ identityKey: true });
+  const st = gistStatement(alias, publicKey);
+  const { signature } = await wallet.createSignature({
+    data: Utils.toArray(st, 'utf8'),
+    protocolID: SIGN_PROTOCOL,
+    keyID: SIGN_KEY_ID,
+    counterparty: 'anyone',
+  });
+  return `${st}\n${Utils.toHex(signature)}\n`;
+};
+/** Ask the paymail server to check the gist (it fetches it from GitHub) and keep it as the name's proof. */
+export const proveWithGist = async (f: Fetch, wallet: NameSigner, alias: string, gist: string): Promise<void> => {
+  const signed = await signRequest(wallet, 'prove-gist', { alias: alias.toLowerCase(), gist: gist.trim() });
+  await postJson(f, api('prove-gist'), signed);
 };
 
 /** Remove an extra name: it forwards to the main name for 90 days, then is released. */
@@ -510,7 +533,7 @@ export const cleanDisplayName = (raw: string | null | undefined): string => {
 export const defaultDisplayName = (alias: string): string => {
   const base = String(alias || '')
     .split('@')[0]
-    .replace(/\.(x|gmail)$/i, '')
+    .replace(/\.(x|gmail|github|linkedin)$/i, '')
     .replace(/[_-]+/g, ' ')
     .trim();
   return base ? base.charAt(0).toUpperCase() + base.slice(1) : '';

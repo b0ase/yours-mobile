@@ -214,8 +214,9 @@ describe('register', () => {
     expect((await h.register({}, await x.sign('register', { alias: 'chosen' })))[0]).toBe(200);
     expect((await h.lookup({ key: x.identityKey }))[1].alias).toBe('chosen');
     expect((await h.pki({ handle: 'xonly.x@pay.test' }))[1].pubkey).toBe(x.identityKey);
-    // New .gmail names are no longer issued (they published the address), even with a valid proof.
+    // Owner, 28 Oct 2026 (provable names): .gmail names are issued again, with a Google sign-in for that address.
     allowed.set('someone.gmail', 'ticket-g');
+    expect((await h.register({}, await v.sign('register', { alias: 'someone.gmail' })))[0]).toBe(403);
     expect(
       (
         await h.register(
@@ -223,7 +224,7 @@ describe('register', () => {
           { ...(await x.sign('register', { alias: 'someone.gmail' })), social: { ticket: 'ticket-g', secret: 's' } },
         )
       )[0],
-    ).toBe(403);
+    ).toBe(200);
     // Apps › Add app: signed save and load, https only.
     const apps = JSON.stringify([{ url: 'https://zanaadu.com', name: 'Zanaadu' }]);
     expect((await h.appsPut({}, await w.sign('apps-put', { apps })))[0]).toBe(200);
@@ -710,17 +711,14 @@ describe('name limits', () => {
     expect(await store.getForward('gone')).toBeNull();
   });
 
-  test('a .gmail-only wallet that picks a name: the .gmail name becomes a 90-day forward', async () => {
+  test('a .gmail-only wallet that picks a plain name keeps its .gmail name (owner, 28 Oct 2026)', async () => {
     const store = antiStore();
     const h = pm.makeHandlers({ store, env: ENV });
     const u = user();
     await store.upsertAlias({ kind: 'gmail', alias: 'someone.gmail', identity_key: u.identityKey });
     expect((await h.lookup({ key: u.identityKey }))[1].alias).toBe('someone.gmail');
     expect((await h.register({}, await u.sign('register', { alias: 'someone' })))[0]).toBe(200);
-    expect(store.aliases.has('someone.gmail')).toBe(false);
-    const fw = await store.getForward('someone.gmail');
-    expect(fw.to_alias).toBe('someone');
-    expect(Date.parse(fw.expires_at) - Date.now()).toBeGreaterThan(89 * DAY);
+    expect(store.aliases.has('someone.gmail')).toBe(true);
     expect((await h.pki({ handle: 'someone.gmail@pay.test' }))[1].pubkey).toBe(u.identityKey);
     expect(store.events[0].kind).toBe('claim');
   });

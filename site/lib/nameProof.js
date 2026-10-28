@@ -11,8 +11,8 @@
 // The wallet checks the same things itself (src/mobile/names/proof.ts); this copy is what the server checks before
 // it stores a proof.
 //
-// TODO (PROVABLE-NAMES.md step 2): GitHub and X have no signed ID token. Their names need a public-post proof (a gist
-// or a post carrying the wallet's signed key) instead; until then `.x` names stay server-checked only.
+// GitHub has no signed ID token: `login.github` is proven by a public gist (checkGist below) carrying the wallet's
+// signed statement. TODO (step 2): X has none either; `.x` names stay server-checked (sign-in ticket) for now.
 'use strict';
 const crypto = require('crypto');
 
@@ -40,7 +40,8 @@ const PROVIDERS = {
     iss: ['https://www.linkedin.com/oauth'],
     jwks: 'https://www.linkedin.com/oauth/openid/jwks',
     aud: 'LINKEDIN_CLIENT_ID',
-    suffix: null,
+    // LinkedIn's token has no public name: `slug.linkedin` is bound to the account (sub) when claimed.
+    suffix: 'linkedin',
   },
 };
 /** `name.gmail` → 'google'; any other name → null (not provable). */
@@ -49,6 +50,75 @@ const providerForAlias = (alias) => {
   if (!m) return null;
   return Object.keys(PROVIDERS).find((p) => PROVIDERS[p].suffix === m[1]) || null;
 };
+
+// ---- GitHub gist proofs -------------------------------------------------------------------------------------------
+const SIGN_PROTOCOL = [2, 'bwallet paymail'];
+const SIGN_KEY_ID = '1';
+const GIST_RE = /^(?:https:\/\/gist\.github\.com\/[A-Za-z0-9-]+\/)?([0-9a-f]{20,40})\/?$/;
+/** The line a `name.github` owner puts in a public gist, followed by their signature of it on the next line. */
+const gistStatement = (alias, identityKey) => `bwalletx-name-proof|v1|${alias}|${String(identityKey).toLowerCase()}`;
+/** Check a gist's text (owner already confirmed): the statement and a valid signature by identityKey. */
+async function verifyGistText(text, alias, identityKey) {
+  const lines = String(text || '')
+    .split(/\r?\n/)
+    .map((l) => l.trim());
+  const i = lines.indexOf(gistStatement(alias, identityKey));
+  if (i < 0) return false;
+  const sig = lines[i + 1] || '';
+  if (!/^[0-9a-f]{16,200}$/i.test(sig)) return false;
+  try {
+    const { ProtoWallet, Utils } = require('@bsv/sdk');
+    const { valid } = await new ProtoWallet('anyone').verifySignature({
+      data: Utils.toArray(gistStatement(alias, identityKey), 'utf8'),
+      signature: Utils.toArray(sig, 'hex'),
+      protocolID: SIGN_PROTOCOL,
+      keyID: SIGN_KEY_ID,
+      counterparty: String(identityKey).toLowerCase(),
+    });
+    return !!valid;
+  } catch {
+    return false;
+  }
+}
+/** Fetch a gist from GitHub and check it proves alias → identityKey. → {ok, sub, login, gist, url} | {ok:false, error}. */
+async function checkGist(gist, alias, identityKey, f = fetch) {
+  const m = GIST_RE.exec(String(gist || '').trim());
+  if (!m) return { ok: false, error: 'Paste the gist link' };
+  const r = await f(`https://api.github.com/gists/${m[1]}`, {
+    headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'bWalletX' },
+  }).catch(() => null);
+  if (!r || !r.ok) return { ok: false, error: 'Could not read that gist' };
+  const g = await r.json().catch(() => null);
+  const login = String(g?.owner?.login || '').toLowerCase();
+  if (!login || `${login}.github` !== alias) return { ok: false, error: 'That gist belongs to another GitHub account' };
+  for (const file of Object.values(g.files || {})) {
+    if (file && !file.truncated && (await verifyGistText(file.content, alias, identityKey)))
+      return { ok: true, sub: String(g.owner.id), login, gist: m[1], url: String(g.html_url || '') };
+  }
+  return { ok: false, error: "The gist does not hold this wallet's signed statement" };
+}
+/** What we store for a gist proof (in the proofs table's token column). */
+const gistEvidence = (g) => JSON.stringify({ gist: g.gist, url: g.url, login: g.login });
+/** A stored gist proof as served publicly: enough for any wallet to fetch the gist and check it. */
+function gistProofOut(p) {
+  let e = {};
+  try {
+    e = JSON.parse(p.id_token);
+  } catch {
+    e = {};
+  }
+  return {
+    provider: 'github',
+    sub: p.sub,
+    identityKey: p.identity_key,
+    gist: e.gist,
+    url: e.url,
+    provenAt: p.created_at,
+    statement: gistStatement(p.alias, p.identity_key),
+    scheme:
+      'public gist by the GitHub login: statement line, then a BRC-43 signature of it ([2,"bwallet paymail"] keyID "1", counterparty anyone)',
+  };
+}
 
 const b64json = (s) => JSON.parse(Buffer.from(s, 'base64url').toString('utf8'));
 function decode(token) {
@@ -129,4 +199,9 @@ module.exports = {
   decode,
   fetchJwks,
   jwksAlias,
+  gistStatement,
+  verifyGistText,
+  checkGist,
+  gistEvidence,
+  gistProofOut,
 };

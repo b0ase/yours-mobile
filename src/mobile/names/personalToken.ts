@@ -29,7 +29,7 @@ export function personalTicker(name: string): string | null {
     .trim()
     .replace(/^\$/, '')
     .split('@')[0]
-    .replace(/\.(x|gmail)$/i, '')
+    .replace(/\.(x|gmail|github|linkedin)$/i, '')
     .toUpperCase();
   return /^[A-Z0-9_-]{1,32}$/.test(s) ? s : null;
 }

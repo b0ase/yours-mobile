@@ -55,16 +55,40 @@ function open(raw, env) {
 }
 const sha256Hex = (s) => crypto.createHash('sha256').update(String(s), 'utf8').digest('hex');
 
-/** X @B0aseX → `b0asex.x`; their.name+t@gmail.com → `theirname.gmail`; anything else null. */
+/**
+ * The one social name a sign-in proves: X @B0aseX → `b0asex.x`; their.name+t@gmail.com → `theirname.gmail`;
+ * GitHub login Octo-Cat → `octo-cat.github`. LinkedIn has no public @name in OpenID Connect, so it proves no name by
+ * itself (null here): see linkedinSlug. Anything else null.
+ */
 function socialAliasFor(provider, name) {
   const n = String(name || '')
     .trim()
     .toLowerCase();
   if (provider === 'x') return /^[a-z0-9_]{1,15}$/.test(n) ? `${n.replace(/_/g, '-')}.x` : null;
+  // GitHub logins: a-z, 0-9 and single hyphens, not at the ends, up to 39 chars. Our names stop at 30 + suffix.
+  if (provider === 'github') return /^[a-z0-9](?:[a-z0-9-]{0,28}[a-z0-9])?$/.test(n) ? `${n}.github` : null;
+  if (provider !== 'google') return null;
   const m = n.match(/^([a-z0-9.+_-]+)@(gmail|googlemail)\.com$/);
   if (!m) return null;
   const local = m[1].split('+')[0].replace(/\./g, '');
   return /^[a-z0-9_-]{1,30}$/.test(local) ? `${local.replace(/_/g, '-')}.gmail` : null;
+}
+
+/**
+ * LinkedIn's suggested name base (owner, 28 Oct 2026). LinkedIn's OpenID Connect profile gives `sub` (stable, unique,
+ * opaque: not user-visible), name / given_name / family_name and picture, but NOT the vanity URL slug
+ * (linkedin.com/in/<slug>): that needs a partner-only API. So the user picks the slug, prefilled from their name
+ * ("Richard Boase" → `richardboase`), and the name is bound to the LinkedIn account (`sub`) on first claim: one
+ * `.linkedin` name per LinkedIn account, and only that account's signed ID token can prove it later.
+ */
+function linkedinSlug(display) {
+  const s = String(display || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
+    .slice(0, 30);
+  return s || null;
 }
 
 /** What a ticket proves, if the secret matches and it hasn't expired. */
@@ -85,6 +109,10 @@ function openTicket(ticket, secret, env = process.env, now = Date.now()) {
     alias: t.p === 'x' ? socialAliasFor(t.p, t.name) : null,
     // New clients: open "Choose your handle" prefilled with suggested_handle (the X @name only).
     choose_handle: true,
+    // The social name this sign-in can claim (`name.x` / `name.gmail` / `name.github`), or for LinkedIn a suggested
+    // `slug.linkedin` the user may edit (it is bound to this LinkedIn account when claimed).
+    social_alias:
+      t.p === 'linkedin' ? (linkedinSlug(t.d) ? `${linkedinSlug(t.d)}.linkedin` : null) : socialAliasFor(t.p, t.name),
     suggested_handle: suggestedHandleFor(t.p, t.name),
     // Provable names (docs/PROVABLE-NAMES.md): the provider-signed ID token whose nonce binds proof_key. Only when
     // the sign-in was started with a proof_key; never an access or refresh token.
@@ -313,6 +341,7 @@ module.exports = {
   callback,
   openTicket,
   socialAliasFor,
+  linkedinSlug,
   suggestedHandleFor,
   seal,
   open,

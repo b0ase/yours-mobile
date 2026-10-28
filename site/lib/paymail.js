@@ -43,7 +43,7 @@ const ALIAS_RE = /^[a-z0-9](?:[a-z0-9_-]{0,30}[a-z0-9])?$/;
  * account that proved that X username / Gmail address (socialCheck), so nobody else can take it.
  */
 /** The social suffixes a proven name may carry. reservedBase strips exactly these, so adding one here keeps both in step. */
-const SOCIAL_SUFFIXES = ['x', 'gmail'];
+const SOCIAL_SUFFIXES = ['x', 'gmail', 'github', 'linkedin'];
 const SOCIAL_RE = new RegExp(`^[a-z0-9](?:[a-z0-9-]{0,28}[a-z0-9])?\\.(${SOCIAL_SUFFIXES.join('|')})$`);
 const SOCIAL_SUFFIX_RE = new RegExp(`\\.(${SOCIAL_SUFFIXES.join('|')})$`);
 const aliasOk = (a) => ALIAS_RE.test(a) || SOCIAL_RE.test(a);
@@ -57,11 +57,27 @@ const nameProof = require('./nameProof');
 const { makeOpnsResolver } = require('./opnsResolve');
 const { cleanDisplayName, defaultDisplayName, shownDisplayName } = require('./displayName');
 const { lookalike, lookalikeReserved, brandInDisplayName, DISPLAY_NAME_MSG } = require('./brandGuard');
-async function ticketSocialCheck(alias, proof, env = process.env) {
-  if (!proof || !proof.ticket || !proof.secret) return 'Continue with X or Google first';
+/** Which sign-in proves a social suffix. */
+const SUFFIX_PROVIDER = { x: 'x', gmail: 'google', github: 'github', linkedin: 'linkedin' };
+const suffixOf = (alias) => String(alias).split('.').pop();
+/**
+ * A social name needs a sign-in ticket from its provider for exactly that account (owner, 28 Oct 2026):
+ * `.x` the X @name, `.gmail` the verified Gmail address, `.github` the GitHub login. `.linkedin` has no public @name,
+ * so the ticket must carry a LinkedIn-signed ID token for this wallet's key; register then binds the name to that
+ * LinkedIn account (sub) as its proof. Returns an error message, or null.
+ */
+async function ticketSocialCheck(alias, proof, env = process.env, identityKey = '') {
+  if (!proof || !proof.ticket || !proof.secret) return 'Sign in with the account this name comes from first';
   const p = openTicket(proof.ticket, proof.secret, env);
   if (!p) return 'That sign-in has expired. Please sign in again.';
-  return p.alias === alias ? null : 'That name does not match your sign-in';
+  const suffix = suffixOf(alias);
+  if (p.provider !== SUFFIX_PROVIDER[suffix]) return 'That name does not match your sign-in';
+  if (suffix === 'linkedin') {
+    if (!p.id_token || !identityKey || p.proof_key !== identityKey)
+      return 'Sign in with LinkedIn again from this wallet to claim this name';
+    return null;
+  }
+  return socialAliasFor(p.provider, p.name) === alias ? null : 'That name does not match your sign-in';
 }
 /** A renamed name keeps forwarding to the new one this long, then is released (owner, 9 Oct 2026). */
 const FORWARD_MS = 90 * 24 * 60 * 60 * 1000;
@@ -468,7 +484,7 @@ function nameFeesCsv(rows) {
  * Continue with X / Google path (ticket-gated below). `.agent` (token agents) and `.bot` (system bots)
  * are never issued by this registry. Unicode dot look-alikes and zero-width characters count.
  */
-const SYSTEM_TLDS = ['agent', 'bot', 'x', 'gmail'];
+const SYSTEM_TLDS = ['agent', 'bot', ...SOCIAL_SUFFIXES];
 const DOT_LIKE = /[.\u00B7\u0387\u2024\u2027\u2219\u22C5\u30FB\u3002\uFE52\uFF0E\uFF61\uFF65\u02D9\u0701\u0702\u2E33]/;
 const DOT_MSG = "Names can't contain a dot. Names after a dot are kept for agents and system accounts.";
 const foldAlias = (a) =>
@@ -719,6 +735,10 @@ function makeHandlers({
   notifyOffer = env.NODE_ENV === 'test' || process.env.NODE_ENV === 'test'
     ? async () => false
     : (handle, receipt) => offers.notifyDirector(handle, receipt, env),
+  // A GitHub gist proof check (lib/nameProof.js checkGist). Off under tests unless injected.
+  gistCheck = env.NODE_ENV === 'test' || process.env.NODE_ENV === 'test'
+    ? async () => ({ ok: false, error: 'gist checks are off in tests' })
+    : (gist, alias, identityKey) => nameProof.checkGist(gist, alias, identityKey),
   // The provider's published signing keys (lib/nameProof.js). Off under tests unless injected.
   providerJwks = env.NODE_ENV === 'test' || process.env.NODE_ENV === 'test'
     ? async () => []
@@ -888,8 +908,56 @@ function makeHandlers({
       known.add(k.kid);
     }
   };
+  /** Keep a proof and log it publicly (the raw token / gist evidence goes in the log note). */
+  const storeProof = async (p, kid, signature, live) => {
+    if (live) await archiveKeys(p.provider, live);
+    await store.putProof(p);
+    await store.logName({
+      alias: p.alias,
+      identity_key: p.identity_key,
+      action: 'prove',
+      actor: 'owner',
+      signature: String(signature || '').toLowerCase(),
+      note: JSON.stringify({ provider: p.provider, sub: p.sub, kid: kid || null, idToken: p.id_token }),
+    });
+  };
+  /**
+   * Claiming `slug.linkedin`: the ticket's LinkedIn-signed ID token must prove this wallet's key, and that LinkedIn
+   * account (sub) must not already hold another `.linkedin` name. Returns {proof, kid, live} or {error, status}.
+   */
+  const linkedinBinding = async (alias, identityKey, social) => {
+    if (!store.putProof) return { error: 'LinkedIn names are not available right now', status: 503 };
+    const t = social && openTicket(social.ticket, social.secret, env);
+    if (!t || t.provider !== 'linkedin' || !t.id_token) return { error: 'Sign in with LinkedIn first' };
+    const live = await providerJwks('linkedin').catch(() => []);
+    const v = nameProof.verifyIdToken(t.id_token, {
+      provider: 'linkedin',
+      aud: env.LINKEDIN_CLIENT_ID,
+      identityKey,
+      keys: live,
+      now: now(),
+    });
+    if (!v.ok) return { error: v.error, status: 400 };
+    const sub = String(v.claims.sub);
+    const other = store.getProofBySub ? await store.getProofBySub('linkedin', sub) : null;
+    if (other && other.alias !== alias)
+      return { error: `This LinkedIn account already has ${other.alias}`, status: 409 };
+    return {
+      kid: v.kid,
+      live,
+      proof: {
+        alias,
+        provider: 'linkedin',
+        sub,
+        identity_key: identityKey,
+        id_token: t.id_token,
+        created_at: new Date(now()).toISOString(),
+      },
+    };
+  };
   /** A name's stored proof as served publicly, with the archived key it was signed by. */
   const proofOut = async (p) => {
+    if (p.provider === 'github') return nameProof.gistProofOut(p);
     const kid = nameProof.decode(p.id_token)?.header?.kid;
     const keys = (await archivedKeys(p.provider)).filter((k) => k.kid === kid);
     return {
@@ -935,7 +1003,7 @@ function makeHandlers({
         out.binding = bindingOut(b);
       // Provable names: the provider-signed proof, so the payer's wallet checks it without trusting us.
       const pr =
-        row.alias && store.getProof && nameProof.providerForAlias(row.alias)
+        row.alias && store.getProof && (nameProof.providerForAlias(row.alias) || /\.github$/.test(row.alias))
           ? await store.getProof(row.alias).catch(() => null)
           : null;
       if (pr && String(pr.identity_key).toLowerCase() === String(row.identity_key).toLowerCase())
@@ -1097,7 +1165,9 @@ function makeHandlers({
         now: now(),
       });
       if (!v.ok) return [400, { error: v.error }];
-      if (nameProof.aliasForClaims(provider, v.claims) !== alias)
+      // Google: the email gives the name. LinkedIn: no name in the token, so the account (sub) the name was bound to
+      // at claim must match.
+      if (provider !== 'linkedin' && nameProof.aliasForClaims(provider, v.claims) !== alias)
         return [403, { error: 'That sign-in is for a different name' }];
       const row = await store.getAlias(alias);
       if (!row || String(row.identity_key).toLowerCase() !== identityKey)
@@ -1105,7 +1175,7 @@ function makeHandlers({
       const prev = await store.getProof(alias);
       if (prev && prev.sub !== String(v.claims.sub))
         return [409, { error: 'This name was proven by a different account' }];
-      await archiveKeys(provider, live);
+      if (!prev && provider === 'linkedin') return [403, { error: 'This name was not claimed with LinkedIn' }];
       const p = {
         alias,
         provider,
@@ -1114,15 +1184,38 @@ function makeHandlers({
         id_token: t.id_token,
         created_at: new Date(now()).toISOString(),
       };
-      await store.putProof(p);
-      await store.logName({
+      await storeProof(p, v.kid, body.signature, live);
+      return [200, { proof: await proofOut(p) }];
+    },
+
+    // GitHub has no signed ID token (PROVABLE-NAMES.md step 2). The owner of `login.github` posts a public gist whose
+    // text is the statement "bwalletx-name-proof|v1|<alias>|<identity key>" and, on the next line, their wallet's
+    // signature of it. We check the gist's owner is that GitHub login and the signature is this key's, then keep the
+    // gist id as the proof. Any wallet can repeat the check against api.github.com itself.
+    'prove-gist': async (_q, body) => {
+      body = body || {};
+      const sigErr = await verifySignedOnce(body, 'prove-gist', now());
+      if (sigErr) return [401, { error: sigErr }];
+      if (!store.putProof) return [503, { error: 'Name proofs are not available right now' }];
+      const identityKey = String(body.identityKey).toLowerCase();
+      const alias = String(body.fields?.alias || '').toLowerCase();
+      if (!alias.endsWith('.github') || !SOCIAL_RE.test(alias)) return [400, { error: 'Only name.github names' }];
+      const row = await store.getAlias(alias);
+      if (!row || String(row.identity_key).toLowerCase() !== identityKey)
+        return [403, { error: 'Only the wallet the name points to can prove it' }];
+      const g = await gistCheck(String(body.fields?.gist || ''), alias, identityKey);
+      if (!g.ok) return [400, { error: g.error }];
+      const prev = await store.getProof(alias);
+      if (prev && prev.sub !== g.sub) return [409, { error: 'This name was proven by a different account' }];
+      const p = {
         alias,
+        provider: 'github',
+        sub: g.sub,
         identity_key: identityKey,
-        action: 'prove',
-        actor: 'owner',
-        signature: String(body.signature).toLowerCase(),
-        note: JSON.stringify({ provider, sub: p.sub, kid: v.kid, idToken: t.id_token }),
-      });
+        id_token: nameProof.gistEvidence(g),
+        created_at: new Date(now()).toISOString(),
+      };
+      await storeProof(p, null, body.signature);
       return [200, { proof: await proofOut(p) }];
     },
 
@@ -1329,7 +1422,7 @@ function makeHandlers({
       // A verified name needs proof only to claim it; its owner can update the profile without signing in again.
       const ownsIt = taken && String(taken.identity_key).toLowerCase() === identityKey;
       if (SOCIAL_RE.test(alias) && !ownsIt) {
-        const refused = await socialCheck(alias, body.social, env);
+        const refused = await socialCheck(alias, body.social, env, identityKey);
         if (refused) return [403, { error: refused }];
       }
       if (taken && taken.identity_key !== identityKey) return [409, { error: 'That name is taken' }];
@@ -1338,13 +1431,20 @@ function makeHandlers({
       if (fwd && fwd.identity_key !== identityKey) return [409, { error: 'That name is taken' }];
       // Verified social names sit beside the plain name (one of each kind per wallet): b0asex.x is
       // added, boase stays. A plain name still renames, keeping the inbox.
-      const kind = SOCIAL_RE.test(alias) ? (alias.endsWith('.x') ? 'x' : 'gmail') : 'plain';
+      const kind = SOCIAL_RE.test(alias) ? suffixOf(alias) : 'plain';
       // One identity per wallet (owner, 4 Oct 2026): a verified X / Google name always wins, so a
       // wallet that has one can't also take a plain name. Plain-name identities are separate accounts.
       // Owner, 9 Oct 2026 (handle rule): users choose their handle. A wallet with a verified .x / .gmail
       // name may take ONE plain handle of its choosing (it becomes the main name); the social name keeps
       // receiving. New .gmail names are no longer issued (they published the address); existing ones work.
-      if (kind === 'gmail' && !ownsIt) return [403, { error: 'Choose a handle instead of your email name.' }];
+      // Owner, 28 Oct 2026 (provable names): `name.gmail` is issued again. Onboarding says on screen that it shows
+      // the Gmail address; the user chooses it over a plain name.
+      // A LinkedIn account claims one `.linkedin` name; its signed ID token becomes the name's proof below.
+      let liProof = null;
+      if (kind === 'linkedin' && !ownsIt) {
+        liProof = await linkedinBinding(alias, identityKey, body.social);
+        if (liProof.error) return [liProof.status || 403, { error: liProof.error }];
+      }
       const mine =
         kind === 'plain' ? await store.getAliasByKey(identityKey) : await store.getAliasByKeyKind?.(identityKey, kind);
       // A new plain name for this wallet (first claim or rename; not a profile update of its own name).
@@ -1418,9 +1518,7 @@ function makeHandlers({
       if (newName) {
         // Legacy .gmail names published the owner's email: once the wallet has a plain name, the
         // .gmail one forwards to it for 90 days, then is released (migrations/20261010_retire_gmail_names.sql).
-        const gmail = await store.getAliasByKeyKind?.(identityKey, 'gmail');
-        if (gmail && store.retireToForward)
-          await store.retireToForward(gmail.alias, alias, identityKey, new Date(now() + FORWARD_MS).toISOString());
+        // Owner, 28 Oct 2026: a .gmail name may again be the account's own name, so it is no longer retired here.
         await store.recordNameEvent?.({
           identity_key: identityKey,
           alias,
@@ -1428,6 +1526,7 @@ function makeHandlers({
           ip_hash: ipHash,
         });
       }
+      if (liProof && liProof.proof) await storeProof(liProof.proof, liProof.kid, body.signature, liProof.live);
       return [200, { paymail: handleOf(row.alias), pubkey: identityKey }];
     },
 
