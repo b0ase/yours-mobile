@@ -1,4 +1,5 @@
 import { checkBinding, keyChange, type BindingStatus } from './binding';
+import { checkNameProof, PROOF_PROVIDERS, type ProofCheck } from './proof';
 import { ProtoWallet, Utils } from '@bsv/sdk';
 import { SIGN_KEY_ID, SIGN_PROTOCOL, signedMessage } from './paymail';
 import { AMOUNT_HINT, cleanRecipient, isMainnetAddress, looksLikeAmount } from './address';
@@ -102,6 +103,8 @@ export type Resolved = {
    * payments go to this name (bare alias), whose binding `nameBinding` describes. Shown, never swapped silently.
    */
   forwardsTo?: string;
+  /** A provable name's provider-signed proof (names/proof.ts, docs PROVABLE-NAMES.md): set only for `name.gmail`. */
+  nameProof?: ProofCheck;
   /** Where tokens (BSV-21 / ordinals) would go, if this name can receive them. */
   ordAddress?: string;
   /** A $name that wasn't ours but a lookalike is (0/o, 1/l/i): "did you mean $b0asey?" (12 Oct 2026). */
@@ -322,7 +325,7 @@ export const resolvePaymail = async (f: Fetch, paymail: string, input = paymail)
   }
   const pki = str(caps[CAP.pki]);
   if (pki) {
-    const id = await capJson<Fields & { binding?: unknown; forward?: unknown }>(pki);
+    const id = await capJson<Fields & { binding?: unknown; forward?: unknown; proof?: unknown }>(pki);
     r.pubkey = str(id?.pubkey);
     // Our names carry the owner's signed binding: check it here rather than trust our server.
     if (!r.external && r.pubkey) {
@@ -338,6 +341,9 @@ export const resolvePaymail = async (f: Fetch, paymail: string, input = paymail)
       const from = (id?.binding as { handover?: { from?: string } } | undefined)?.handover?.from;
       // The key-change stop stays on the TYPED name: a forward never resets what this wallet remembers for it.
       r.nameBinding = status === 'mismatch' ? status : keyChange(alias, r.pubkey, status, from);
+      // Provable names: the provider's own signature says which wallet this name belongs to; checked here.
+      // A forward's proof is the target's (the server serves the target row), so check it against the target.
+      r.nameProof = (await checkNameProof(f, boundTo, r.pubkey, id?.proof)) ?? undefined;
     }
     // Our host only pays names it knows (pki answers with a key). Without this an unknown alias resolved as payable
     // and failed later at send time as "the paymail host answered 404" (owner, 25 Oct 2026: bwalletx@bwalletx.com).
@@ -607,6 +613,19 @@ export const UNSIGNED_NOTE =
 export const KEY_CHANGED =
   "This name now points to a different wallet than before, and its owner didn't sign a handover. Not paying it.";
 
+/** A provable name (name.gmail) whose provider-signed proof is missing, doesn't check out, or names a new account. */
+export const proofRefusal = (r: Pick<Resolved, 'nameProof'>): string | undefined => {
+  const p = r.nameProof;
+  if (!p || p.status === 'proven' || p.status === 'unproven') return undefined;
+  const who = PROOF_PROVIDERS[p.provider].label;
+  if (p.status === 'missing')
+    return `This name has no proof from ${who}, so it may not belong to who it says. Not paying it.`;
+  if (p.status === 'sub-changed')
+    return `This name is now proven by a different ${who} account than before. Not paying it.`;
+  if (p.status === 'unchecked') return `This version of bWalletX can't check ${who} proofs. Not paying it.`;
+  return `This name's proof from ${who} doesn't check out, so it may have been moved without its owner. Not paying it.`;
+};
+
 export const destinationFor = (
   r: Resolved,
   asset: 'bsv' | 'token',
@@ -615,6 +634,8 @@ export const destinationFor = (
   if (r.nameBinding === 'bad') return { ok: false, error: BAD_BINDING };
   if (r.nameBinding === 'mismatch') return { ok: false, error: NAME_MISMATCH };
   if (r.nameBinding === 'changed') return { ok: false, error: KEY_CHANGED };
+  const proofErr = proofRefusal(r);
+  if (proofErr) return { ok: false, error: proofErr };
   if (asset === 'bsv') return { ok: true, to: r.target };
   if (r.ordProofBad) return { ok: false, error: BAD_ORD_PROOF };
   if (r.ordAddress) return { ok: true, to: r.ordAddress };

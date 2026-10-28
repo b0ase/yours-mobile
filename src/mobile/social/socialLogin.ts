@@ -176,6 +176,8 @@ export async function startSocial(
   provider: SocialProvider,
   owner: string = NEW_ACCOUNT,
   purpose?: 'picture',
+  /** Provable names: the wallet's identity key, which Google / LinkedIn sign into the ID token's nonce. */
+  proofKey?: string,
 ): Promise<void> {
   lastError = '';
   const secret = hex(crypto.getRandomValues(new Uint8Array(32)));
@@ -189,6 +191,7 @@ export async function startSocial(
       provider,
       verifier_hash: vh,
       ...(web ? { return_to: webReturnKey() } : {}),
+      ...(proofKey && (provider === 'google' || provider === 'linkedin') ? { proof_key: proofKey } : {}),
     },
     provider,
   );

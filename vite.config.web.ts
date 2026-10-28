@@ -125,6 +125,13 @@ const webShell = (): Plugin => ({
       fileName: 'push-sw.js',
       source: readFileSync(resolve(__dirname, 'src/web/push-sw.js')),
     });
+    // Universal links / app links: web.bwalletx.com/bapp/* opens the installed app (src/mobile/chat/signLink.ts).
+    for (const f of ['apple-app-site-association', 'assetlinks.json'])
+      this.emitFile({
+        type: 'asset',
+        fileName: `.well-known/${f}`,
+        source: readFileSync(resolve(__dirname, `src/web/well-known/${f}`)),
+      });
     // Hosting headers (no framing, no referrer) for Vercel: web.bwalletx.com.
     this.emitFile({
       type: 'asset',

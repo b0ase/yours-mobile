@@ -70,8 +70,12 @@ export const onDmRequest = (fn: () => void) => {
 const ROOM_EVENT = 'bwallet:chat-room-ticker';
 let pendingRoom: { ticker: string; dm: boolean } | null = null;
 
-export const requestRoomByTicker = (ticker: string, dm: boolean) => {
+/** A document in the requested room to offer for signature (a tapped sign_request push). Taken once by the room. */
+let pendingDoc: { ticker: string; doc: string } | null = null;
+
+export const requestRoomByTicker = (ticker: string, dm: boolean, doc?: string) => {
   pendingRoom = { ticker: ticker.replace(/^\$/, '').toUpperCase(), dm };
+  pendingDoc = doc ? { ticker: pendingRoom.ticker, doc } : null;
   requestChatSegment(dm ? 'dms' : 'rooms');
   try {
     window.dispatchEvent(new Event(ROOM_EVENT));
@@ -91,4 +95,13 @@ export const takeRoomTicker = (dm: boolean): string | null => {
 export const onRoomTicker = (fn: () => void) => {
   window.addEventListener(ROOM_EVENT, fn);
   return () => window.removeEventListener(ROOM_EVENT, fn);
+};
+
+/** The document a tap asked this room to open, if it was for this room. Taken once. */
+export const takeRoomDoc = (ticker: string): string | null => {
+  const t = ticker.replace(/^\$/, '').toUpperCase();
+  if (!pendingDoc || pendingDoc.ticker !== t) return null;
+  const d = pendingDoc.doc;
+  pendingDoc = null;
+  return d;
 };

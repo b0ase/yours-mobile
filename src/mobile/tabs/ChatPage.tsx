@@ -268,6 +268,8 @@ import {
   withoutBlocked,
   type PublicRoom,
 } from '../chat/openRooms';
+import { memberRooms } from '../chat/memberRooms';
+import PendingDocBanner from '../chat/PendingDocBanner';
 import { MessageMenu, NewRoomSheet, OpenRoomSheet } from '../chat/OpenRoomSheets';
 import { useRoomCard } from '../chat/roomCard';
 import { RoomSettingsSheet } from '../chat/RoomSettingsSheet';
@@ -1010,6 +1012,7 @@ const Conversation = ({
           actions={null}
         />
       )}
+      {!peer && <PendingDocBanner room={room} />}
       <div
         ref={scroller}
         onScroll={onScroll}
@@ -2881,12 +2884,12 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     },
     [gateHeld, gateLook, handle],
   );
+  // Open rooms, plus the private member rooms no other list shows (board / deal / group rooms; chat/memberRooms.ts).
   const myOpen = useMemo(
     () =>
-      (rooms ?? [])
-        .filter(isOpenRoom)
-        .filter((r) => !gateLacking(r))
-        .filter((r) => !q || `${r.name ?? ''} ${r.ticker}`.toLowerCase().includes(q)),
+      [...(rooms ?? []).filter(isOpenRoom).filter((r) => !gateLacking(r)), ...memberRooms(rooms ?? [])].filter(
+        (r) => !q || `${r.name ?? ''} ${r.ticker}`.toLowerCase().includes(q),
+      ),
     [rooms, q, gateLacking],
   );
   const lockedOpen = useMemo(
@@ -3189,11 +3192,27 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     take();
     return onRoomTicker(take);
   }, [handle]);
+  // The list may be the cached one, older than the room the push is about: fetch it fresh once before giving up, and
+  // then open the room by its ticker anyway (the server checks membership). Dropping the tap silently is what the owner
+  // hit on 28 Oct 2026.
+  const pushRefetched = useRef<string | null>(null);
   useEffect(() => {
     if (!pushTicker || !rooms) return;
     const room = rooms.find((r) => r.ticker.toUpperCase() === pushTicker);
-    if (!room) return setPushTicker(null);
-    if (isOpenRoom(room)) {
+    if (!room) {
+      if (pushRefetched.current !== pushTicker) {
+        pushRefetched.current = pushTicker;
+        void fetchRooms(client, identityAddress, 0).catch(() => {
+          setPushTicker(null);
+          openOpenRoom(stubRoom(pushTicker, `$${pushTicker}`, { metadata: {} }));
+        });
+        return;
+      }
+      setPushTicker(null);
+      return openOpenRoom(stubRoom(pushTicker, `$${pushTicker}`, { metadata: {} }));
+    }
+    // Open rooms and private member rooms (a board room with a document to sign) open directly.
+    if (isOpenRoom(room) || memberRooms([room]).length) {
       setPushTicker(null);
       return openOpenRoom(room);
     }

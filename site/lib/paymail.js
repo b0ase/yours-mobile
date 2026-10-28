@@ -53,6 +53,7 @@ const aliasOk = (a) => ALIAS_RE.test(a) || SOCIAL_RE.test(a);
  * name or Gmail address = one wallet.
  */
 const { openTicket, socialAliasFor } = require('./social');
+const nameProof = require('./nameProof');
 const { makeOpnsResolver } = require('./opnsResolve');
 const { cleanDisplayName, defaultDisplayName, shownDisplayName } = require('./displayName');
 const { lookalike, lookalikeReserved, brandInDisplayName, DISPLAY_NAME_MSG } = require('./brandGuard');
@@ -85,6 +86,23 @@ const hashIp = (ip, env = process.env) =>
 const dayText = (ms) =>
   new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
 /** Premium names held for The Bitcoin Corporation Ltd; only bCorp's key may claim them (owner, 27 Oct 2026). */
+/** bCorp's function agents (owner, 28 Oct 2026): blog writer, feature pages, Hodl my b, share cards, bAds director, … */
+const AGENT_HANDLES = [
+  'blog',
+  'features',
+  'hodlmyb',
+  'og',
+  'bads',
+  'releases',
+  'support',
+  'ops',
+  'bugs',
+  'partners',
+  'kintsugi',
+  'agents',
+  'swarm',
+  'ideas',
+];
 const PREMIUM_BCORP = [
   'money',
   'cash',
@@ -400,6 +418,8 @@ const RESERVED_OWNERS = Object.freeze({
   bitchat: '030dd811f969987f2f6ec023535cb8839c496fccf4feb7799293ec13ff09d263b7',
   bitchatx: '030dd811f969987f2f6ec023535cb8839c496fccf4feb7799293ec13ff09d263b7',
   ...Object.fromEntries(PREMIUM_BCORP.map((n) => [n, BCORP_KEY])),
+  // bCorp's function agents (owner, 28 Oct 2026): each will get its own capped agent key; held by bCorp until then.
+  ...Object.fromEntries(AGENT_HANDLES.map((n) => [n, BCORP_KEY])),
   // Touman, our first Play beta tester (owner, 27 Oct 2026).
   touman: '030f8d4f47ae853abf8adc939520d360213193709fc846989a436add16d0b946e7',
 });
@@ -678,7 +698,12 @@ function makeHandlers({
   socialCheck = ticketSocialCheck,
   reservedOwners = RESERVED_OWNERS,
   // OpNS names (lib/opnsResolve.js) for pki / profile / verify only. Off under tests unless injected.
-  opns = env.NODE_ENV === 'test' || process.env.NODE_ENV === 'test' ? async () => null : makeOpnsResolver(),
+  opns = env.NODE_ENV === 'test' || process.env.NODE_ENV === 'test'
+    ? async () => null
+    : makeOpnsResolver({
+        // Our own mint record first (migrations/20261028_name_token_locations.sql), never an indexer's.
+        originOf: async (name) => (store.nameTokenOrigin ? (await store.nameTokenOrigin(name))?.origin : null),
+      }),
   // Chain access for the 1 cent name fee (lib/nameFee.js); tests inject a mock.
   feeChain = nameFee.chain,
   // Owner of a bit-sign name (lib: bitsignHandleOwner). Tests inject their own.
@@ -690,6 +715,10 @@ function makeHandlers({
   notifyOffer = env.NODE_ENV === 'test' || process.env.NODE_ENV === 'test'
     ? async () => false
     : (handle, receipt) => offers.notifyDirector(handle, receipt, env),
+  // The provider's published signing keys (lib/nameProof.js). Off under tests unless injected.
+  providerJwks = env.NODE_ENV === 'test' || process.env.NODE_ENV === 'test'
+    ? async () => []
+    : (provider) => nameProof.fetchJwks(provider),
 }) {
   const verifySignedOnce = makeReplayGuard();
   // Company paymails (PAYMAIL_COMPANIES): the alias row (identity key) is provisioned in the DB by the owner;
@@ -832,6 +861,47 @@ function makeHandlers({
     return fresh ? null : [409, { error: 'That payment already paid for a name' }];
   };
 
+  // Provable names (docs/PROVABLE-NAMES.md): the provider keys archived in the public name log, oldest first.
+  const archivedKeys = async (provider) =>
+    ((store.providerKeys && (await store.providerKeys(nameProof.jwksAlias(provider)).catch(() => []))) || [])
+      .map((r) => {
+        try {
+          const n = JSON.parse(r.note);
+          return n && n.kid && n.jwk ? { kid: n.kid, jwk: n.jwk, firstSeen: r.created_at } : null;
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+  // Archive every key the provider publishes now that the log hasn't seen (first-seen date = the log entry's).
+  const archiveKeys = async (provider, live) => {
+    const known = new Set((await archivedKeys(provider)).map((k) => k.kid));
+    for (const k of live) {
+      if (known.has(k.kid)) continue;
+      await store.logName({
+        alias: nameProof.jwksAlias(provider),
+        action: 'jwks',
+        actor: 'server',
+        note: JSON.stringify({ provider, kid: k.kid, jwk: k.jwk }),
+      });
+      known.add(k.kid);
+    }
+  };
+  /** A name's stored proof as served publicly, with the archived key it was signed by. */
+  const proofOut = async (p) => {
+    const kid = nameProof.decode(p.id_token)?.header?.kid;
+    const keys = (await archivedKeys(p.provider)).filter((k) => k.kid === kid);
+    return {
+      provider: p.provider,
+      sub: p.sub,
+      identityKey: p.identity_key,
+      idToken: p.id_token,
+      provenAt: p.created_at,
+      keys,
+      scheme: 'OpenID Connect ID token; nonce = sha256("bwalletx-name-proof|v1|" + identityKey) hex',
+    };
+  };
+
   return {
     caps: async () => [200, capabilities(env)],
 
@@ -862,6 +932,13 @@ function makeHandlers({
       const b = row.alias && store.getBinding ? await store.getBinding(row.alias).catch(() => null) : null;
       if (b && String(b.identity_key).toLowerCase() === String(row.identity_key).toLowerCase())
         out.binding = bindingOut(b);
+      // Provable names: the provider-signed proof, so the payer's wallet checks it without trusting us.
+      const pr =
+        row.alias && store.getProof && nameProof.providerForAlias(row.alias)
+          ? await store.getProof(row.alias).catch(() => null)
+          : null;
+      if (pr && String(pr.identity_key).toLowerCase() === String(row.identity_key).toLowerCase())
+        out.proof = await proofOut(pr);
       // Asked for a forwarded name: say so. `handle` and `binding` are the target's; the wallet checks the
       // binding against `forward.to` and tells the payer "from@ forwards to to@ (same owner)".
       if (row._forward)
@@ -998,6 +1075,78 @@ function makeHandlers({
       });
       await store.deleteHandover(alias);
       return [200, { binding: bindingOut(b) }];
+    },
+
+    // Provable names, step 1 (docs/PROVABLE-NAMES.md): the owner of `name.gmail` signs in with Google with
+    // proof_key = their identity key, and sends the ticket here signed by that key. We check the ID token as any
+    // wallet will (signature by Google's published key, iss, aud = our client id, nonce = this key, the email gives
+    // this name), refuse a different Google account (sub) for a name that already has a proof, archive Google's keys
+    // in the name log, and keep the raw ID token as the name's proof. Nothing else from the sign-in is kept.
+    prove: async (_q, body) => {
+      body = body || {};
+      const sigErr = await verifySignedOnce(body, 'prove', now());
+      if (sigErr) return [401, { error: sigErr }];
+      if (!store.putProof) return [503, { error: 'Name proofs are not available right now' }];
+      const identityKey = String(body.identityKey).toLowerCase();
+      const alias = String(body.fields?.alias || '').toLowerCase();
+      const provider = nameProof.providerForAlias(alias);
+      if (!provider) return [400, { error: 'Only source-tagged names (like name.gmail) can be proven' }];
+      const t = openTicket(body.ticket, body.secret, env);
+      if (!t) return [401, { error: 'That sign-in has expired. Please sign in again.' }];
+      if (t.provider !== provider || !t.id_token)
+        return [400, { error: `Sign in with ${nameProof.PROVIDERS[provider].label} for this wallet first` }];
+      const live = await providerJwks(provider).catch(() => []);
+      const v = nameProof.verifyIdToken(t.id_token, {
+        provider,
+        aud: env[nameProof.PROVIDERS[provider].aud],
+        identityKey,
+        keys: live,
+        now: now(),
+      });
+      if (!v.ok) return [400, { error: v.error }];
+      if (nameProof.aliasForClaims(provider, v.claims) !== alias)
+        return [403, { error: 'That sign-in is for a different name' }];
+      const row = await store.getAlias(alias);
+      if (!row || String(row.identity_key).toLowerCase() !== identityKey)
+        return [403, { error: 'Only the wallet the name points to can prove it' }];
+      const prev = await store.getProof(alias);
+      if (prev && prev.sub !== String(v.claims.sub))
+        return [409, { error: 'This name was proven by a different account' }];
+      await archiveKeys(provider, live);
+      const p = {
+        alias,
+        provider,
+        sub: String(v.claims.sub),
+        identity_key: identityKey,
+        id_token: t.id_token,
+        created_at: new Date(now()).toISOString(),
+      };
+      await store.putProof(p);
+      await store.logName({
+        alias,
+        identity_key: identityKey,
+        action: 'prove',
+        actor: 'owner',
+        signature: String(body.signature).toLowerCase(),
+        note: JSON.stringify({ provider, sub: p.sub, kid: v.kid, idToken: t.id_token }),
+      });
+      return [200, { proof: await proofOut(p) }];
+    },
+
+    // Public: a name's provider-signed proof (GET /api/paymail/name-proof/<handle>).
+    'name-proof': async ({ handle }) => {
+      const parts = parseHandleParts(handle, env);
+      if (!parts || !store.getProof) return [404, { error: 'not-found' }];
+      const p = await store.getProof(parts.alias);
+      if (!p) return [404, { error: 'No proof for that name' }];
+      return [200, { alias: parts.alias, ...(await proofOut(p)) }];
+    },
+
+    // Public: every provider key archived in the name log (kid -> key, first seen), so old proofs stay checkable.
+    'provider-keys': async (q) => {
+      const provider = String(q.provider || 'google');
+      if (!nameProof.PROVIDERS[provider]) return [400, { error: 'provider' }];
+      return [200, { provider, keys: await archivedKeys(provider) }];
     },
 
     // The public name log, newest first: every change of who a name points to, hash-chained.

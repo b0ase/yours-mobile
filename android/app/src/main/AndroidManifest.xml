@@ -37,6 +37,17 @@
                 <!-- Prefilled swap: /swap?from=…&network=…&amount=… (src/mobile/swap/swapLink.ts) -->
                 <data android:scheme="https" android:host="www.bwallet.space" android:path="/swap" />
             </intent-filter>
+            <!-- "Sign on your phone" QR from a bChatX document card: www.bchatx.com/r/<TICKER>?sign=<doc>&h=<sha256>
+                 (src/mobile/chat/signLink.ts). Verified by www.bchatx.com/.well-known/assetlinks.json (bit-sign).
+                 Plain /r/<TICKER> room links open the room (src/mobile/spaces/inviteLinks.ts), as on iOS. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="www.bchatx.com" android:pathPrefix="/r/" />
+                <!-- web.bwalletx.com/bapp/bchatx?to=/room/<T>?sign=&h= (bChatX PR #549) and other bApp links. -->
+                <data android:scheme="https" android:host="web.bwalletx.com" android:pathPrefix="/bapp/" />
+            </intent-filter>
             <!-- bwalletx://pair?… : site/pair.html "Open in the bWallet app" (a tap on www.bwallet.space itself
                  doesn't count as an app link). Same params as /pair; src/mobile/pair/links.ts pairLinkFrom. -->
             <intent-filter>
@@ -46,6 +57,8 @@
                 <data android:scheme="bwalletx" android:host="pair" />
                 <data android:scheme="bwalletx" android:host="browse" />
                 <data android:scheme="bwalletx" android:host="swap" />
+                <!-- bwalletx://sign/<TICKER>?sign=&h= : the sign QR's app-scheme form (src/mobile/chat/signLink.ts) -->
+                <data android:scheme="bwalletx" android:host="sign" />
             </intent-filter>
             <!-- peerpay:<identity key>?sats=<n> (BRC-125): pre-fills Send, never sends (src/mobile/scan/peerpayLinks.ts) -->
             <intent-filter>

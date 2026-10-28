@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { AtSign, BadgeCheck, Copy, Check, Plus } from 'lucide-react';
+import { AtSign, BadgeCheck, Copy, Check, MoreHorizontal, Plus } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { NameHandover } from './NameHandover';
 import {
+  bindMyNames,
   listPaymails,
   paymailAvailability,
   paymailEnabled,
@@ -26,8 +27,12 @@ import type { HandlesInfo } from '../chat/api';
 import { SendConfirmation } from '../../components/SendConfirmation';
 import { useTheme } from '../../hooks/useTheme';
 import { PAID_FEATURES_ENABLED } from '../storeBuild';
+import { PROVIDER, actionText, confirmText, nameActions } from './nameActions';
 
 const f = (u: string, i?: RequestInit) => fetch(u, i);
+
+/** The server's cap on plain names per identity key (site/lib/paymail.js MAX_PLAIN_NAMES). */
+const MAX_PLAIN_NAMES = 5;
 
 /**
  * Settings › Identity: every name that receives for this wallet (owner, 4 Oct 2026: a wallet may
@@ -37,14 +42,15 @@ export const WalletNames = () => {
   const { apiContext, chromeStorageService } = useServiceContext();
   const identityAddress = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ?? '';
   const [names, setNames] = useState<WalletName[] | null>(null);
-  const [asking, setAsking] = useState(''); // paymail awaiting a second tap
+  const [menu, setMenu] = useState(''); // paymail whose ⋯ menu is open
+  const [full, setFull] = useState(''); // paymail shown in full (tap / long-press a truncated name)
+  const [confirm, setConfirm] = useState<{ action: 'remove' | 'unlink'; name: WalletName } | null>(null);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [tick, setTick] = useState(0);
   const [copied, setCopied] = useState('');
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState('');
-  const [removing, setRemoving] = useState(''); // paymail in the Remove confirm sheet
   // Extra names are paid once, on bit-sign (1p each; owner, 15 Oct 2026). Its list gives the max and the fee.
   const { theme } = useTheme();
   const [handles, setHandles] = useState<HandlesInfo | null>(null);
@@ -63,7 +69,8 @@ export const WalletNames = () => {
   }, [apiContext, tick]);
   const feeLabel = extraFeeLabel(nameFee);
   const plainCount = names?.filter((n) => n.kind === 'plain').length ?? 0;
-  const atMax = plainCount >= (handles?.max ?? 5);
+  const atMax = plainCount >= (handles?.max ?? MAX_PLAIN_NAMES);
+  const hasMain = !!names?.some((n) => n.kind === 'plain' && n.main);
   // After any change: re-read the names and cache the main one, so the top bar and Receive follow it.
   const refresh = async () => {
     const { publicKey } = await apiContext.wallet.getPublicKey({ identityKey: true });
@@ -113,23 +120,16 @@ export const WalletNames = () => {
       if (fee) return setFeeConfirm(true);
     }
     setFeeConfirm(false);
-    const go = () => addExtraName(apiContext, f, a, fee);
+    // The wallet signs the new name's binding ("name -> my key", docs/NAME-BINDINGS.md) straight after the claim,
+    // so other wallets can check it before paying. A failed signature leaves the name unsigned, never unclaimed.
+    const go = async () => {
+      await addExtraName(apiContext, f, a, fee);
+      const { publicKey } = await apiContext.wallet.getPublicKey({ identityKey: true });
+      await bindMyNames(f, apiContext.wallet, publicKey).catch(() => 0);
+    };
     if (await run('add', go, 'Could not add that name')) {
       setDraft('');
       setAdding(false);
-    }
-  };
-  const unlink = async (pm: string) => {
-    setBusy(pm);
-    setError('');
-    try {
-      await unlinkPaymail(f, apiContext.wallet, pm);
-      await refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not unlink');
-    } finally {
-      setBusy('');
-      setAsking('');
     }
   };
   useEffect(() => {
@@ -149,83 +149,120 @@ export const WalletNames = () => {
     <>
       <NameHandover names={names} onChanged={() => setTick((t) => t + 1)} />
       <div className="px-4 py-3" style={{ borderBottom: '1px solid #ffffff10' }}>
+        <p className="text-sm font-semibold m-0 mb-0.5" style={{ color: 'var(--bw-text)' }}>
+          Names
+        </p>
         <p className="text-xs m-0 mb-2" style={{ color: '#98A2B3' }}>
           {names.length > 1 ? `This wallet receives at ${names.length} names` : 'This wallet receives at'}
         </p>
-        {names.map((n) => (
-          <div key={n.paymail} className="flex items-center gap-2 py-1 text-sm text-white">
-            {n.kind === 'plain' ? (
-              <AtSign size={14} color="#98A2B3" />
-            ) : (
-              <BadgeCheck size={14} color="var(--bw-accent)" />
-            )}
-            <span className="truncate">{n.paymail}</span>
-            {n.main && (
-              <span
-                className="text-[10px] font-bold rounded px-1.5 py-0.5"
-                style={{ background: 'rgb(var(--bw-accent-rgb)/0.13)', color: 'var(--bw-accent)' }}
+        <div role="list" className="flex flex-col">
+          {names.map((n) => {
+            const actions = nameActions(n);
+            return (
+              <div
+                key={n.paymail}
+                role="listitem"
+                data-testid="wallet-name-row"
+                className="grid items-center gap-x-2 py-1.5 text-sm"
+                style={{ gridTemplateColumns: '14px minmax(0,1fr) 40px 24px 28px', color: 'var(--bw-text)' }}
               >
-                MAIN
-              </span>
-            )}
-            <button
-              type="button"
-              aria-label={`Copy ${n.paymail}`}
-              onClick={() => copy(n.paymail)}
-              className="bg-transparent border-0 p-0 shrink-0"
-              style={{ color: 'var(--bw-muted)' }}
-            >
-              {copied === n.paymail ? <Check size={14} color="var(--bw-accent)" /> : <Copy size={14} />}
-            </button>
-            {n.kind === 'plain' ? (
-              !n.main && (
-                <span className="ml-auto flex items-center gap-3 shrink-0">
+                {n.kind === 'plain' ? (
+                  <AtSign size={14} color="#98A2B3" />
+                ) : (
+                  <BadgeCheck size={14} color="var(--bw-accent)" aria-label={`Linked to ${PROVIDER[n.kind]}`} />
+                )}
+                <span
+                  title={n.paymail}
+                  onClick={() => setFull((f) => (f === n.paymail ? '' : n.paymail))}
+                  className={full === n.paymail ? 'break-all' : 'truncate'}
+                  style={{ minWidth: 0 }}
+                >
+                  {n.paymail}
+                </span>
+                <span className="justify-self-start">
+                  {n.main && (
+                    <span
+                      className="text-[10px] font-bold rounded px-1.5 py-0.5"
+                      style={{ background: 'rgb(var(--bw-accent-rgb)/0.13)', color: 'var(--bw-accent)' }}
+                    >
+                      Main
+                    </span>
+                  )}
+                </span>
+                <button
+                  type="button"
+                  aria-label={`Copy ${n.paymail}`}
+                  onClick={() => copy(n.paymail)}
+                  className="bg-transparent border-0 p-0 flex items-center justify-center h-6"
+                  style={{ color: 'var(--bw-muted)' }}
+                >
+                  {copied === n.paymail ? <Check size={14} color="var(--bw-accent)" /> : <Copy size={14} />}
+                </button>
+                <span className="relative flex justify-end">
                   <button
                     type="button"
+                    aria-label={`Options for ${n.paymail}`}
+                    aria-haspopup="menu"
+                    aria-expanded={menu === n.paymail}
                     disabled={!!busy}
-                    onClick={() =>
-                      void run(
-                        n.paymail,
-                        () => makeMainName(apiContext, f, n.paymail),
-                        'Could not change your main name',
-                      )
-                    }
-                    className="text-xs bg-transparent border-0 p-0"
-                    style={{ color: 'var(--bw-accent)' }}
-                  >
-                    {busy === n.paymail ? 'Saving…' : 'Make main'}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!!busy}
-                    onClick={() => setRemoving(n.paymail)}
-                    className="text-xs bg-transparent border-0 p-0"
+                    onClick={() => setMenu((m) => (m === n.paymail ? '' : n.paymail))}
+                    className="bg-transparent border-0 p-0 flex items-center justify-center w-7 h-6 rounded"
                     style={{ color: 'var(--bw-muted)' }}
                   >
-                    Remove
+                    {busy === n.paymail ? <span className="text-[10px]">…</span> : <MoreHorizontal size={16} />}
                   </button>
+                  {menu === n.paymail && (
+                    <>
+                      <div className="fixed inset-0 z-[150]" onClick={() => setMenu('')} />
+                      <div
+                        role="menu"
+                        className="absolute right-0 top-7 z-[160] w-64 max-w-[calc(100vw-32px)] rounded-xl p-1 shadow-lg"
+                        style={{ background: 'var(--bw-card)', border: '1px solid var(--bw-line)' }}
+                      >
+                        {actions.length === 0 && (
+                          <p className="text-xs m-0 px-3 py-2" style={{ color: 'var(--bw-muted)' }}>
+                            This is your main name. To remove it, set another name as main first.
+                          </p>
+                        )}
+                        {actions.map((a) => {
+                          const t = actionText(a, n);
+                          return (
+                            <button
+                              key={a}
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                setMenu('');
+                                if (a === 'main')
+                                  void run(
+                                    n.paymail,
+                                    () => makeMainName(apiContext, f, n.paymail),
+                                    'Could not change your main name',
+                                  );
+                                else setConfirm({ action: a, name: n });
+                              }}
+                              className="block w-full text-left bg-transparent border-0 rounded-lg px-3 py-2"
+                            >
+                              <span
+                                className="block text-sm font-semibold"
+                                style={{ color: a === 'main' ? 'var(--bw-accent)' : 'var(--bw-text)' }}
+                              >
+                                {t.label}
+                              </span>
+                              <span className="block text-[11px] mt-0.5" style={{ color: 'var(--bw-muted)' }}>
+                                {t.hint}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
                 </span>
-              )
-            ) : (
-              <button
-                type="button"
-                disabled={!!busy}
-                onClick={() => (asking === n.paymail ? void unlink(n.paymail) : setAsking(n.paymail))}
-                className="ml-auto text-xs bg-transparent border-0 p-0 shrink-0"
-                style={{ color: asking === n.paymail ? 'var(--bw-accent-hi)' : 'var(--bw-muted)' }}
-              >
-                {busy === n.paymail ? 'Unlinking…' : asking === n.paymail ? 'Tap again to unlink' : 'Unlink'}
-              </button>
-            )}
-          </div>
-        ))}
-        {asking && (
-          <p className="text-[11px] m-0 mt-1" style={{ color: '#98A2B3' }}>
-            {asking} will stop receiving and anyone can claim it.
-            {names.find((n) => n.paymail === asking)?.main ? ' Your next name becomes the main one.' : ''} Tokens you
-            already made are not affected.
-          </p>
-        )}
+              </div>
+            );
+          })}
+        </div>
         {plainCount > 1 && (
           <p className="text-[11px] m-0 mt-1" style={{ color: 'var(--bw-muted)' }}>
             You can change your main name once every 30 days.
@@ -233,12 +270,12 @@ export const WalletNames = () => {
         )}
         {PAID_FEATURES_ENABLED && atMax && (
           <p className="text-[11px] m-0 mt-1" style={{ color: 'var(--bw-muted)' }}>
-            A wallet can have up to {handles?.max ?? 5} names.
+            A wallet can have up to {handles?.max ?? MAX_PLAIN_NAMES} names.
           </p>
         )}
         {adding && (
           <p className="text-[11px] m-0 mt-2" style={{ color: 'var(--bw-muted)' }}>
-            Names of 5+ letters are free. Short names cost more.
+            Up to 5 names on this key. Names of 5+ letters are free; short names cost more. Your wallet signs each one.
           </p>
         )}
         {adding ? (
@@ -246,7 +283,7 @@ export const WalletNames = () => {
             <input
               value={draft}
               onChange={(e) => setDraft(toAlias(e.target.value))}
-              placeholder="another name"
+              placeholder="a name for this wallet"
               autoCapitalize="none"
               autoCorrect="off"
               className="flex-1 min-w-0 rounded px-2 py-1.5 text-sm"
@@ -275,18 +312,29 @@ export const WalletNames = () => {
           </div>
         ) : (
           // Store build (docs/STORE-AUDIT.md 1.6): only the free paymail, so no paid extra names.
+          // Owner, 28 Oct 2026: a clear "Add a name" button, always shown; when a name can't be added it says why.
           PAID_FEATURES_ENABLED &&
-          (!!handles || paymailEnabled()) &&
-          !atMax &&
-          names.some((n) => n.kind === 'plain' && n.main) && (
-            <button
-              type="button"
-              onClick={() => setAdding(true)}
-              className="flex items-center gap-1.5 mt-2 text-xs bg-transparent border-0 p-0"
-              style={{ color: 'var(--bw-accent)' }}
-            >
-              <Plus size={14} /> Add another name
-            </button>
+          (!!handles || paymailEnabled()) && (
+            <>
+              <button
+                type="button"
+                data-testid="add-a-name"
+                disabled={atMax || !hasMain}
+                onClick={() => setAdding(true)}
+                className="flex w-full items-center justify-center gap-1.5 mt-3 rounded-xl py-2.5 text-sm font-bold border-0"
+                style={{
+                  background: atMax || !hasMain ? 'var(--bw-surface)' : 'var(--bw-accent)',
+                  color: atMax || !hasMain ? 'var(--bw-muted)' : 'var(--bw-on-accent)',
+                }}
+              >
+                <Plus size={16} /> Add a name
+              </button>
+              {!hasMain && (
+                <p className="text-[11px] m-0 mt-1" style={{ color: 'var(--bw-muted)' }}>
+                  Choose your main handle first (Change handle, below). Then you can add more names.
+                </p>
+              )}
+            </>
           )
         )}
         <SendConfirmation
@@ -298,11 +346,11 @@ export const WalletNames = () => {
           onConfirm={() => void add(true)}
           onCancel={() => setFeeConfirm(false)}
         />
-        {removing && (
+        {confirm && (
           <div
             className="fixed inset-0 z-[200] flex items-end"
             style={{ background: 'rgb(0 0 0 / 0.5)' }}
-            onClick={() => !busy && setRemoving('')}
+            onClick={() => !busy && setConfirm(null)}
           >
             <div
               role="dialog"
@@ -311,16 +359,17 @@ export const WalletNames = () => {
               style={{ background: 'var(--bw-card)', color: 'var(--bw-text)' }}
               onClick={(e) => e.stopPropagation()}
             >
-              <p className="text-sm font-bold m-0 mb-1">Remove {removing}?</p>
+              <p className="text-sm font-bold m-0 mb-1 break-all">
+                {confirm.action === 'remove' ? 'Remove' : 'Unlink'} {confirm.name.paymail}?
+              </p>
               <p className="text-xs m-0 mb-4" style={{ color: 'var(--bw-muted)' }}>
-                Payments to it go to your main name for 90 days, then the name is released. Its payment history stays in
-                your wallet.
+                {confirmText(confirm.action, confirm.name, names.length - 1)}
               </p>
               <div className="flex gap-2">
                 <button
                   type="button"
                   disabled={!!busy}
-                  onClick={() => setRemoving('')}
+                  onClick={() => setConfirm(null)}
                   className="flex-1 rounded py-2 text-sm"
                   style={{
                     background: 'var(--bw-surface)',
@@ -333,15 +382,26 @@ export const WalletNames = () => {
                 <button
                   type="button"
                   disabled={!!busy}
-                  onClick={() =>
-                    void run(removing, () => removeName(apiContext, f, removing), 'Could not remove').then(() =>
-                      setRemoving(''),
-                    )
-                  }
+                  onClick={() => {
+                    const pm = confirm.name.paymail;
+                    const go =
+                      confirm.action === 'remove'
+                        ? () => removeName(apiContext, f, pm)
+                        : () => unlinkPaymail(f, apiContext.wallet, pm);
+                    void run(pm, go, confirm.action === 'remove' ? 'Could not remove' : 'Could not unlink').then(() =>
+                      setConfirm(null),
+                    );
+                  }}
                   className="flex-1 rounded py-2 text-sm font-bold border-0"
                   style={{ background: 'var(--bw-accent)', color: 'var(--bw-on-accent)' }}
                 >
-                  {busy === removing ? 'Removing…' : 'Remove'}
+                  {busy === confirm.name.paymail
+                    ? confirm.action === 'remove'
+                      ? 'Removing…'
+                      : 'Unlinking…'
+                    : confirm.action === 'remove'
+                      ? 'Remove'
+                      : 'Unlink'}
                 </button>
               </div>
             </div>

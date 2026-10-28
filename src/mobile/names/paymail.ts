@@ -61,6 +61,7 @@ export const NONCE_ACTIONS: ReadonlySet<string> = new Set([
   'release-cancel',
   'offer-register',
   'offer-receipts',
+  'prove',
 ]);
 
 const newNonce = () => Utils.toHex([...crypto.getRandomValues(new Uint8Array(16))]);
@@ -217,6 +218,20 @@ export const makeMainPaymail = async (f: Fetch, wallet: NameSigner, paymail: str
     await signRequest(wallet, 'names-primary', { alias: aliasOf(paymail) }),
   );
   return String(j.main);
+};
+
+/**
+ * Provable names (docs PROVABLE-NAMES.md): attach the provider-signed proof from a Google sign-in started with this
+ * wallet's identity key (startSocial proofKey) to this wallet's `name.gmail`. The server checks it as any wallet will.
+ */
+export const proveName = async (
+  f: Fetch,
+  wallet: NameSigner,
+  alias: string,
+  proof: { ticket: string; secret: string },
+): Promise<void> => {
+  const signed = await signRequest(wallet, 'prove', { alias: alias.toLowerCase() });
+  await postJson(f, api('prove'), { ...signed, ticket: proof.ticket, secret: proof.secret });
 };
 
 /** Remove an extra name: it forwards to the main name for 90 days, then is released. */

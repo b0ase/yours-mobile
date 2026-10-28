@@ -55,3 +55,5 @@
 ^src/mobile/bavatar/mintBavatar\.ts$
 ^src/mobile/send/
 ^src/mobile/swap/(swapApi|pickGate)\.ts$
+# Wage payments: pay statements, the payment sent with them and their reconciliation.
+^src/mobile/wages/

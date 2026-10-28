@@ -24,6 +24,7 @@ import { requestThemeSheet } from '../theme/themeNav';
 import { parseComposeLink } from '../bmail/meeting';
 import { openBMailDraft } from '../bmail/store';
 import { parseAppLink, parsePage, parseSpaceInvite, type AppLink, type RoomPage } from './invite';
+import { isSignLink } from '../chat/signLink';
 
 const ROOM_LINKS = tokenRoomsEnabled();
 const LINKS_ON = BSPACES_ENABLED || ROOM_LINKS;
@@ -34,6 +35,8 @@ const listeners = new Set<() => void>();
 
 /** Accepts a link if this build handles its kind. */
 export const offerAppLink = (url?: string | null) => {
+  // A "Sign on your phone" QR (/r/<T>?sign=&h=) is chat/useSignLinks.ts's, not a plain room link.
+  if (isSignLink(url)) return;
   // bwalletx://theme/<pack> (bwalletx.com/themes Install): Theme › App colours offers that pack, every build.
   const theme = parseThemeLink(url);
   if (theme) return requestThemeSheet(theme);

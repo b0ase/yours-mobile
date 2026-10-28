@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom';
 import { ArrowLeft, BadgeCheck, Check, Circle, Github, Linkedin, Loader2 } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { BWALLET_PAYMAIL_DOMAIN } from '../names/config';
-import { toAlias } from '../names/paymail';
+import { listPaymails, proveName, toAlias } from '../names/paymail';
+import { aliasForClaims } from '../names/proof';
 import { HANDCASH_SIGNIN_ENABLED, LINK_ACCOUNTS_ENABLED, TWETCH_POST_ENABLED } from '../storeBuild';
 import { TwetchSettings } from '../twetch/TwetchSettings';
 import { twetchHandle, twetchStoreFor, type TwetchLink } from '../twetch/twetchLink';
@@ -164,6 +165,20 @@ export const LinkedBadges = ({ owner }: { owner: string }) => {
   );
 };
 
+/** Store the Google-signed proof on this wallet's `name.gmail` (no such name: nothing to prove, nothing sent). */
+async function proveOwnGmail(
+  wallet: Parameters<typeof proveName>[1],
+  email: string,
+  proof: { ticket: string; secret: string },
+) {
+  const alias = aliasForClaims('google', { email, email_verified: true });
+  if (!alias) return;
+  const { publicKey } = await wallet.getPublicKey({ identityKey: true });
+  const names = await listPaymails(fetch, publicKey).catch(() => []);
+  if (!names.some((n) => n.paymail.split('@')[0].toLowerCase() === alias)) return;
+  await proveName(fetch, wallet, alias, proof);
+}
+
 /**
  * "Link your accounts": X, Google, Twetch, Treechat, Peck, Fwetch, GitHub, LinkedIn, eBay rows + the "Link HandCash" card (owner, 18 Oct 2026).
  * Used by the onboarding "Claim your name" step and Settings › Identity. Linking never signs anyone in: it
@@ -204,6 +219,8 @@ export const LinkAccounts = ({ owner, onClaim }: { owner: string; onClaim?: (ali
           const prov = p.profile.provider;
           if (prov !== 'ebay')
             rememberLinkedHandle(owner, prov, prov === 'linkedin' ? p.profile.display : p.profile.name);
+          // Provable names: a Google sign-in carrying this wallet's key proves its `name.gmail`, if it has one.
+          if (prov === 'google' && p.profile.id_token) return proveOwnGmail(apiContext.wallet, p.profile.name, p);
         })
         .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Could not link that account'))
         .finally(() => setBusy(null));
@@ -219,7 +236,12 @@ export const LinkAccounts = ({ owner, onClaim }: { owner: string; onClaim?: (ali
     setBusy(p);
     setError('');
     try {
-      await startSocial(p, owner);
+      // Google signs this wallet's identity key into its ID token (provable names, docs PROVABLE-NAMES.md).
+      const key =
+        p === 'google' && apiContext?.wallet
+          ? (await apiContext.wallet.getPublicKey({ identityKey: true }).catch(() => null))?.publicKey
+          : undefined;
+      await startSocial(p, owner, undefined, key);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Linking is unavailable right now');
       setBusy(null);

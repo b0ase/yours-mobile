@@ -11,6 +11,8 @@
 		<string>applinks:www.bwallet.space</string>
 		<!-- Room X invites: www.bchatx.com/i/x/* (bchatx.com/.well-known/apple-app-site-association). -->
 		<string>applinks:www.bchatx.com</string>
+		<!-- bApp deep links incl. the bChatX sign QR: web.bwalletx.com/bapp/* (src/web/well-known, built into build-web). -->
+		<string>applinks:web.bwalletx.com</string>
 		<!-- Passwords: iOS offers and saves a strong wallet password (iCloud Keychain). -->
 		<string>webcredentials:www.bwallet.space</string>
 		<!-- Passkeys (src/mobile/passkey/nativePasskeys.ts): rpId web.bwalletx.com, never the whole bwalletx.com. -->

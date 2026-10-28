@@ -27,7 +27,7 @@ const RESERVED_HASHES = new Set<number>(
     0x96f7845f, 0x5c1efc8e, 0xec8cb43a, 0x989014a2, 0x3a98170a, 0xa392b7f4, 0x06a1d43a, 0xcd609e3f, 0x8b22ea1d,
     0xf7be44e7, 0xd59296c1, 0x8ef2a248, 0x3f7de0fa, 0x9220f557, 0x5e9de672, 0xd057f30f, 0x82eb9c44, 0xbd16812f,
     0xed10a363, 0x7dcea8b8, 0x94347fb5, 0xeb45ebe9, 0xb9a0b206, 0xcb1fe820, 0x7ce83ef7, 0x37432cf7, 0x4bb19af2,
-    0xae00f773, 0x86730eac, 0x13a25b95, 0xaf904c6c, 0x82c6d7ec, 0xa3b7765b, 0x79245a8c, 0x844bd408,
+    0xae00f773, 0x86730eac, 0x13a25b95, 0xaf904c6c, 0x82c6d7ec, 0xa3b7765b, 0x79245a8c, 0x844bd408, 0x814485bf,
   ].map((h) => h >>> 0),
 );
 
@@ -51,6 +51,14 @@ export const isReservedProtocol = (protocolID: unknown): boolean => {
 };
 
 export const RESERVED_REFUSAL = 'This protocol is reserved for bWalletX itself';
+/**
+ * Codes sent with a refusal so a site can show its own message instead of parsing ours (owner, 28 Oct 2026).
+ * A site that wants to sign a user in uses protocol [2, 'bwallet sign in'] (docs/SIGN-IN-WITH-BWALLETX.md).
+ */
+export const RESERVED_PROTOCOL_CODE = 'ERR_RESERVED_PROTOCOL';
+export const PROTOCOL_REFUSED_CODE = 'ERR_PROTOCOL_REFUSED';
+export const refusalCode = (refusal: string): string =>
+  refusal.startsWith(RESERVED_REFUSAL) ? RESERVED_PROTOCOL_CODE : PROTOCOL_REFUSED_CODE;
 export const LEVEL0_SIGN_REFUSAL =
   'Level-0 keys are shared by every app and are never asked about; bWalletX does not sign with them for apps';
 export const HISTORY_REFUSAL = 'Name at least one label: bWalletX does not share your whole history with apps';

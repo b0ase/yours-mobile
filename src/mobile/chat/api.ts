@@ -178,6 +178,8 @@ export interface SocialProfile {
   avatar?: string | null;
   /** @deprecated users choose their handle (owner, 9 Oct 2026). Old servers: `b0asex.x`; never .gmail now. */
   alias: string | null;
+  /** Provable names: the provider-signed ID token, when the sign-in was started with a proof key. */
+  id_token?: string;
   /** New servers: open "Choose your handle"… */
   choose_handle?: boolean;
   /** …prefilled with this: the X @name only, never anything from an email. */
