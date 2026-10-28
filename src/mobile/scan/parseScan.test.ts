@@ -126,3 +126,12 @@ describe('parseScan: QRs we generate', () => {
     expect(parseScan('https://www.bchatx.com/r/BCORPBOARD').kind).toBe('join');
   });
 });
+
+describe('parseScan: app-scheme pairing', () => {
+  test('bwalletx://pair?… is a pairing code, routed as the https pair URL', () => {
+    const s = parseScan('bwalletx://pair?c=abc&r=relay.example&bwxpair=1');
+    expect(s.kind).toBe('pair');
+    expect(s.kind === 'pair' && s.text).toMatch(/^https:\/\/[^/]+\/pair\?c=abc&r=relay\.example$/);
+    expect(parseScan('bwalletx://swap?x=1').kind).toBe('text');
+  });
+});

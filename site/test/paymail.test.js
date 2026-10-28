@@ -1247,3 +1247,40 @@ describe('daily new-name cap per wallet', () => {
     expect((await h.register({}, await user().sign('register', { alias: 'netfour' }), ctx))[0]).toBe(429);
   });
 });
+
+describe('available: forwards are taken except to their own key (28 Oct 2026)', () => {
+  test('a live forward reads taken to anyone else and "yours (forward)" to its key, which can claim it', async () => {
+    const store = memStore();
+    store.insertExtraAlias = async (r) => {
+      if (await store.getAlias(r.alias)) throw new Error('supabase 409');
+      const row = { ...r, kind: 'plain', is_primary: false };
+      store.aliases.set(r.alias, row);
+      return row;
+    };
+    const h = pm.makeHandlers({ store, env: ENV });
+    const u = user();
+    const other = user();
+    expect((await h.register({}, await u.sign('register', { alias: 'mainname' })))[0]).toBe(200);
+    await store.putForward({ from_alias: 'oldname', to_alias: 'mainname', identity_key: u.identityKey });
+    const noKey = (await h.available({ alias: 'oldname' }))[1];
+    expect([noKey.status, noKey.available, noKey.reason]).toEqual(['taken', false, 'taken']);
+    expect((await h.available({ alias: 'oldname', key: other.identityKey }))[1].status).toBe('taken');
+    const mine = (await h.available({ alias: 'oldname', key: u.identityKey }))[1];
+    expect([mine.status, mine.available, mine.reason]).toEqual(['mine-forward', true, 'forward']);
+    expect(mine.message).toBe('Yours (forwards to mainname@pay.test)');
+    // Another key can't take it; its own key can claim it back.
+    expect((await h['names-add']({}, await other.sign('names-add', { alias: 'oldname' })))[0]).not.toBe(200);
+    expect((await h['names-add']({}, await u.sign('names-add', { alias: 'oldname' })))[0]).toBe(200);
+    expect((await h.available({ alias: 'oldname' }))[1].status).toBe('taken');
+    expect((await h.available({ alias: 'oldname', key: u.identityKey }))[1].status).toBe('mine');
+  });
+  test('an existing alias row is taken to anyone but its key', async () => {
+    const store = memStore();
+    const h = pm.makeHandlers({ store, env: ENV });
+    const u = user();
+    await h.register({}, await u.sign('register', { alias: 'rowname' }));
+    expect((await h.available({ alias: 'rowname' }))[1].status).toBe('taken');
+    expect((await h.available({ alias: 'rowname', key: user().identityKey }))[1].status).toBe('taken');
+    expect((await h.available({ alias: 'rowname', key: u.identityKey }))[1].status).toBe('mine');
+  });
+});
