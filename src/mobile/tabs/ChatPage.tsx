@@ -1012,7 +1012,7 @@ const Conversation = ({
           actions={null}
         />
       )}
-      {!peer && <PendingDocBanner room={room} />}
+      {!peer && <PendingDocBanner room={room} me={me} roomName={title} />}
       <div
         ref={scroller}
         onScroll={onScroll}
