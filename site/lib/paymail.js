@@ -101,6 +101,7 @@ const AGENT_HANDLES = [
   'kintsugi',
   'agents',
   'swarm',
+  'ideas',
 ];
 const PREMIUM_BCORP = [
   'money',
