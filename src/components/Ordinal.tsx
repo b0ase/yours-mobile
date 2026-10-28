@@ -111,7 +111,8 @@ export const Ordinal = (props: OrdinalProps) => {
           <div style={{ ...wrapperBase(size), ...border }} onClick={onClick}>
             <iframe
               src={url}
-              sandbox="true"
+              sandbox=""
+              referrerPolicy="no-referrer"
               style={{
                 height: s,
                 width: s,

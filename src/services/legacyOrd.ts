@@ -111,9 +111,14 @@ export const legacyOrdVisible = (
   outpoint: string,
   legacy: Set<string>,
   kept: { txid: string; outpoint?: string }[],
+  /** Kept NFT origins (airdrops/inbox keptOriginSet): a keep survives the item leaving the History list. */
+  keptOrigins: Set<string> = new Set(),
+  /** The output's inscription origin, when known. */
+  origin?: string,
 ): boolean => {
   const op = normOutpoint(outpoint);
   if (!legacy.has(op)) return true;
+  if (keptOrigins.has(op) || (origin && keptOrigins.has(normOutpoint(origin)))) return true;
   return kept.some((k) => (k.outpoint ? normOutpoint(k.outpoint) === op : op.split('_')[0] === k.txid.toLowerCase()));
 };
 
