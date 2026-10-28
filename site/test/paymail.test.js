@@ -490,6 +490,45 @@ describe('reserved names (owner, 9 Oct 2026)', () => {
   });
 });
 
+describe('identity providers and big platforms (owner, 28 Oct 2026)', () => {
+  const PROVIDERS =
+    'gmail google x twitter github gitlab bitbucket linkedin reddit facebook meta instagram threads tiktok youtube discord telegram whatsapp signal bluesky nostr apple icloud microsoft outlook hotmail live yahoo proton protonmail ebay paypal amazon stripe coinbase binance metamask phantom handcash twetch treechat relayx yours centbee simply-cash'.split(
+      ' ',
+    );
+  test('each provider name is refused plain and as a .x / .gmail social base', () => {
+    for (const n of PROVIDERS)
+      for (const a of [n, `${n}.x`, `${n}.gmail`]) expect([a, pm.validAlias(a)]).toEqual([a, 'That alias is reserved']);
+  });
+  test('look-alikes and ordinary social names still pass', () => {
+    for (const a of ['githubber', 'mylinkedin.x', 'alive', 'alice.gmail', 'b0ase.x'])
+      expect(pm.validAlias(a)).toBeNull();
+  });
+  test('b is held for The Bitcoin Corporation: refused for a random key, allowed for BCORP_KEY', async () => {
+    const bcorp = user();
+    const store = memStore();
+    const h = pm.makeHandlers({ store, env: ENV, reservedOwners: { ...pm.RESERVED_OWNERS, b: bcorp.identityKey } });
+    expect(pm.RESERVED_OWNERS.b).toBe(pm.RESERVED_OWNERS.bcorp);
+    const other = user();
+    expect((await h.available({ alias: 'b', key: other.identityKey }))[1].reason).toBe('reserved');
+    expect((await h.register({}, await other.sign('register', { alias: 'b' })))[1].error).toBe(
+      'That alias is reserved',
+    );
+    expect((await h.available({ alias: 'b', key: bcorp.identityKey }))[1].available).toBe(true);
+    const [s] = await h.register({}, await bcorp.sign('register', { alias: 'b' }));
+    expect(s).toBe(200);
+    expect(store.aliases.get('b').identity_key).toBe(bcorp.identityKey);
+  });
+  test('existing records are untouched: a name already held keeps resolving', async () => {
+    const store = memStore();
+    const h = pm.makeHandlers({ store, env: ENV });
+    const u = user();
+    store.aliases.set('github', { alias: 'github', identity_key: u.identityKey, created_at: new Date().toISOString() });
+    const [s, r] = await h.pki({ handle: 'github@pay.test' });
+    expect(s).toBe(200);
+    expect(r.pubkey).toBe(u.identityKey);
+  });
+});
+
 describe("everything after a dot is the system's", () => {
   test('people can never claim .agent, .bot or any other dotted name', () => {
     for (const a of [
@@ -925,6 +964,7 @@ describe('reserved alias held for a designated key', () => {
     expect(pm.RESERVED_OWNERS).toEqual({
       bwalletx: '029c1abd9470d485719c512c0d704e6ccf6c1533461eb5884a5d09a6dc3dca55b7',
       bcorp: '03c96b37e69377c8af33b583067f56444c83a656b05014e8f15003e67250943880',
+      b: '03c96b37e69377c8af33b583067f56444c83a656b05014e8f15003e67250943880',
       terrornode: '030dd811f969987f2f6ec023535cb8839c496fccf4feb7799293ec13ff09d263b7',
       bitchat: '030dd811f969987f2f6ec023535cb8839c496fccf4feb7799293ec13ff09d263b7',
       bitchatx: '030dd811f969987f2f6ec023535cb8839c496fccf4feb7799293ec13ff09d263b7',
