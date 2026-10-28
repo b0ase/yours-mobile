@@ -32,6 +32,14 @@ import { createMasterBackupGate } from './services/masterBackupGate';
 import { isFullscreenWindow, promptForNewPanel, promptsShowInPanel } from './services/panelPrompt';
 import { isSessionExpired } from './utils/lockTimeout';
 import { originatorForOrigin } from './services/originKey';
+import {
+  FramePairs,
+  FramedContext,
+  framePolicy,
+  isFamilyPair,
+  needsPairApproval,
+  pairKey,
+} from './services/frameAccess';
 import { PAIR_MIRROR_KEY, isPairedOriginator, pairedGrantAllowed, setPairMirror, takePendingFor } from './services/pairedPromptGuard';
 import {
   addGrant,
@@ -190,6 +198,7 @@ import {
   blockActive,
   trustCovers,
   trustedBasketsFrom,
+  sheetCanTrust,
   POST_BASKET,
   POST_PROTOCOL,
   postPackCompanions,
@@ -1184,6 +1193,46 @@ const askReconnect = (originator: string): Promise<void> =>
     permissionBundler.add(request);
   });
 
+// Framed sites (services/frameAccess.ts): approved (frame origin, top origin) pairs, and which parents each site was
+// recently framed by, so every sheet for it says "inside <top>".
+const FRAME_PAIRS_KEY = 'bwxFramePairs';
+const framePairs = new FramePairs({
+  load: async () => {
+    const got = await chrome.storage.local.get(FRAME_PAIRS_KEY);
+    const v = (got as Record<string, unknown>)[FRAME_PAIRS_KEY];
+    return Array.isArray(v) ? (v as string[]) : [];
+  },
+  save: async (keys) => {
+    await chrome.storage.local.set({ [FRAME_PAIRS_KEY]: keys });
+  },
+});
+const framedContext = new FramedContext();
+/** One pair sheet at a time per pair: calls that arrive while it is open share its answer. */
+const framePairAsks = new Map<string, Promise<void>>();
+/** Messages already let through the pair gate (by object identity, never by anything a page can set). */
+const framePairPassed = new WeakSet<object>();
+let framePairCounter = 0;
+/**
+ * "Let <frame> use your wallet inside <top>?" The first spend/sign from a new (frame, top) pair. Rides the reconnect
+ * request plumbing (RECONNECT_ID_PREFIX: answered here, never sent to the permission manager, never a grant).
+ */
+const askFramePair = (originator: string, topHost: string): Promise<void> =>
+  new Promise<void>((resolve, reject) => {
+    const requestID = `${RECONNECT_ID_PREFIX}frame-${Date.now().toString(36)}-${(framePairCounter++).toString(36)}`;
+    const request = {
+      requestID,
+      type: 'protocol',
+      originator,
+      protocolID: [1, IDENTITY_SHEET_LINE],
+      counterparty: 'self',
+      reconnect: true,
+      framePair: topHost,
+      reason: `Use your wallet inside ${topHost}`,
+    } as unknown as BundledRequest & BundleRequest;
+    pendingPermissionRequests.set(requestID, { request, resolve, reject });
+    permissionBundler.add(request);
+  });
+
 // Pending wallet initialization waiters (for ensureWallet when service worker wakes without passKey)
 const pendingWalletWaiters: {
   resolve: (wallet: WalletInterface) => void;
@@ -1450,6 +1499,15 @@ const closeDappPopupIfIdle = (): void => {
 
 /** Look up a queued prompt payload for the prompt window by kind/requestID. */
 const getPendingPromptPayload = (kind: string, requestID?: string): unknown => {
+  const payload = getPendingPromptPayloadRaw(kind, requestID);
+  // A site seen inside another site's frame: its sheets name the parent(s) too (services/frameAccess.ts).
+  if (payload && typeof payload === 'object') {
+    const tops = framedContext.topsFor((payload as { originator?: string }).originator, Date.now());
+    if (tops.length) return { ...(payload as object), embeddedIn: tops };
+  }
+  return payload;
+};
+const getPendingPromptPayloadRaw = (kind: string, requestID?: string): unknown => {
   switch (kind) {
     case 'permission':
       return requestID ? pendingPermissionRequests.get(requestID)?.request : undefined;
@@ -2063,6 +2121,12 @@ if (isInServiceWorker) {
     } catch {
       /* no user gesture: fall through to the in-page sheet */
     }
+    // A site framed by a parent outside the family never gets the in-page sheet: that sheet lives in the parent's
+    // page, which could cover it. Its prompts use the wallet's own window instead (services/frameAccess.ts).
+    const promptOrigin = requestID
+      ? (getPendingPromptPayloadRaw(kind, requestID) as { originator?: string } | undefined)?.originator
+      : undefined;
+    if (framedContext.framedByStranger(promptOrigin, Date.now())) return false;
     const token = crypto.randomUUID();
     const params = new URLSearchParams({ kind, inpage: token });
     if (requestID) params.set('requestID', requestID);
@@ -2232,7 +2296,7 @@ if (isInServiceWorker) {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  chrome.runtime.onMessage.addListener((message: any, sender, answer: CallbackResponse) => {
+  chrome.runtime.onMessage.addListener(function onRuntimeMessage(message: any, sender, answer: CallbackResponse) {
     // Every refusal by the user carries code ERR_PERMISSION_DENIED (services/userDenied.ts), so a site can tell
     // "declined" from "failed" on every path (extension, phone dApp browser, bApp frames, pairing).
     const sendResponse: CallbackResponse = (response) => answer(withPromptNotShownCode(withDenialCode(response)));
@@ -2257,6 +2321,13 @@ if (isInServiceWorker) {
     // Live-balance messages are for the wallet page (src/mobile/wallet/live/liveBus.ts), not the wallet: never
     // answer them here, so a page's session report can never reach a wallet method or a connect prompt.
     if (message?.action === 'bwxSessionSpend' || message?.action === 'bwxLiveSpend') return false;
+    // A sub-frame's content script asks whether to expose window.CWI there (services/frameAccess.ts). Answered from
+    // Chrome's sender only; every later wallet call is checked again the same way, so this is a courtesy, not the gate.
+    if (message?.action === 'bwxFrameCheck') {
+      const f = sender.id === chrome.runtime.id ? framePolicy(sender) : undefined;
+      answer({ ok: !!f && f.ok && f.framed } as unknown as Parameters<CallbackResponse>[0]);
+      return false;
+    }
     // Connected-site theme (mobile/theme/connectTheme.ts): the id comes from the page, the origin from Chrome.
     if (message?.action === 'bwxSiteTheme') {
       if (sender.id === chrome.runtime.id && sender.tab?.id !== undefined && sender.frameId === 0) {
@@ -2349,6 +2420,52 @@ if (!(
       if (message.originator !== expected.originator) {
         sendResponse({ type: message.action, success: false, error: 'Origin mismatch' });
         return true;
+      }
+    }
+
+    // Framed sites (services/frameAccess.ts). Everything comes from Chrome's sender (frameId, origin, tab.url,
+    // documentLifecycle), never from the message: an https frame under an https top only, and the first spend/sign
+    // from a new (frame origin, top origin) pair asks afresh. Grants stay keyed to the frame's own origin.
+    if (!isFromExtension) {
+      const frame = framePolicy(sender);
+      if (!frame.ok) {
+        sendResponse({ type: message?.action, success: false, error: frame.error });
+        return true;
+      }
+      if (frame.framed) {
+        const originator = typeof message?.originator === 'string' ? message.originator : frame.frameHost;
+        framedContext.note(originator, frame.topHost, Date.now());
+        const { frameHost, topHost } = frame;
+        if (
+          message &&
+          typeof message === 'object' &&
+          !framePairPassed.has(message) &&
+          needsPairApproval(message.action) &&
+          !isFamilyPair(frameHost, topHost)
+        ) {
+          const key = pairKey(frameHost, topHost);
+          void framePairs
+            .has(frameHost, topHost)
+            .then(async (approved) => {
+              if (approved) return;
+              let ask = framePairAsks.get(key);
+              if (!ask) {
+                ask = askFramePair(originator, topHost)
+                  .then(() => framePairs.add(frameHost, topHost))
+                  .finally(() => framePairAsks.delete(key));
+                framePairAsks.set(key, ask);
+              }
+              await ask;
+            })
+            .then(
+              () => {
+                framePairPassed.add(message);
+                onRuntimeMessage(message, sender, answer);
+              },
+              () => sendResponse({ type: message.action, success: false, error: 'Permission denied by user' }),
+            );
+          return true;
+        }
       }
     }
 
@@ -4577,7 +4694,13 @@ if (!(
         if (sats > 0) await accountContext.envelopes.fill(site, sats);
       }
       // "Don't ask again": routine requests from this site are granted without a sheet from now on.
-      if (response.trustSite && remember && result.granted.length > 0 && accountContext?.permissionStore) {
+      if (
+        response.trustSite &&
+        remember &&
+        result.granted.length > 0 &&
+        sheetCanTrust(bundle) &&
+        accountContext?.permissionStore
+      ) {
         await accountContext.permissionStore.putGrant({
           key: { type: 'basket', originator: normalizeOriginator(bundle.originator), basket: TRUST_SITE_BASKET },
           expiry,
