@@ -180,11 +180,11 @@ export async function cancelListing(
     },
   ];
   const fee = details?.status;
-  const overlay = cappedOverlayFee(fee?.fee_address, fee?.fee_per_output, 1); // H-5: capped
-  if (overlay) {
+  const overlayFee = cappedOverlayFee(fee?.fee_address, fee?.fee_per_output, 1); // H-5: capped
+  if (overlayFee) {
     outputs.push({
-      lockingScript: new P2PKH().lock(overlay.address).toHex(),
-      satoshis: overlay.sats,
+      lockingScript: new P2PKH().lock(overlayFee.address).toHex(),
+      satoshis: overlayFee.sats,
       outputDescription: 'Overlay processing fee',
       tags: ['fee:overlay'],
     });
