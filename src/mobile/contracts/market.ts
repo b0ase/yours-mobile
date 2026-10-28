@@ -53,20 +53,40 @@ export const publishContract = async (ctx: OneSatContext, env: ContractEnvelope)
 export const contractPriceSats = (env: ContractEnvelope, bsvUsd: number) =>
   env.sale.priceUsd > 0 ? Math.ceil((env.sale.priceUsd / bsvUsd) * 1e8) : 0;
 
-/** Buy a copy: mint the exact published text, paying the author (and the 1% fee) in the same transaction. */
-export const buyContract = async (ctx: OneSatContext, origin: string, bsvUsd: number) => {
-  const c = await getContract(origin);
-  if (c.sold >= c.envelope.sale.copies) throw new Error('Sold out');
-  const sats = contractPriceSats(c.envelope, bsvUsd);
-  if (c.envelope.sale.priceUsd > 0 && !(bsvUsd > 0)) throw new Error('No BSV price right now; try again shortly.');
+/**
+ * Buy a copy: mint the exact published text, paying the author (and the 1% fee) in the same transaction.
+ * `approved` is the listing the buyer saw and pressed Buy on. The catalogue is asked again (sold out?), and the
+ * buy is refused if its price, payee, copies or text differ from what was approved (b-Aware 25 Oct 2026): the
+ * catalogue must never change what is paid or minted between showing it and paying.
+ */
+export const buyContract = async (ctx: OneSatContext, approved: ContractListing, bsvUsd: number) => {
+  const c = await getContract(approved.origin);
+  if (c.origin !== approved.origin || !sameEnvelope(c.envelope, approved.envelope) || c.body !== approved.body)
+    throw new Error('This contract changed since you opened it. Nothing was paid; refresh and check it again.');
+  const env = approved.envelope;
+  if (c.sold >= env.sale.copies) throw new Error('Sold out');
+  if (env.sale.priceUsd > 0 && !(bsvUsd > 0)) throw new Error('No BSV price right now; try again shortly.');
+  const sats = contractPriceSats(env, bsvUsd);
   const paying =
-    sats > 0
-      ? withFeeOutput(withFeeOutput(ctx, marketFeeSats(sats), marketFeeAddress()), sats, c.envelope.sale.payTo)
-      : ctx;
-  const outpoint = await mintJson(paying, c.body, CONTRACT_CONTENT_TYPE, MAP(c.envelope));
+    sats > 0 ? withFeeOutput(withFeeOutput(ctx, marketFeeSats(sats), marketFeeAddress()), sats, env.sale.payTo) : ctx;
+  const outpoint = await mintJson(paying, approved.body, CONTRACT_CONTENT_TYPE, MAP(env));
   await claimContract(ctx, outpoint);
   return outpoint;
 };
+
+/** Key-order-independent deep equality of two envelopes (JSON values only). */
+const canon = (v: unknown): unknown =>
+  Array.isArray(v)
+    ? v.map(canon)
+    : v && typeof v === 'object'
+      ? Object.fromEntries(
+          Object.keys(v as object)
+            .sort()
+            .map((k) => [k, canon((v as Record<string, unknown>)[k])]),
+        )
+      : v;
+export const sameEnvelope = (a: ContractEnvelope, b: ContractEnvelope) =>
+  JSON.stringify(canon(a)) === JSON.stringify(canon(b));
 
 /** Register a copy this wallet holds with the catalogue (counts it as sold; idempotent). */
 export const claimContract = async (ctx: OneSatContext, outpoint: string) => {
