@@ -76,6 +76,8 @@ export type PushRoute = {
   ticker: string;
   id?: string;
   openUrl?: string;
+  /** rooms / dms: a document in that room to open for signature (bit-sign kind sign_request, data.documentId). */
+  doc?: string;
 };
 const REQUEST_ID_RE = /^[A-Za-z0-9-]{1,64}$/;
 const SPACE_SLUG_RE = /^[A-Za-z0-9_-]{1,64}$/;
@@ -93,11 +95,51 @@ const truthy = (v: unknown) => v === true || v === 'true' || v === '1';
  * The room a notification is about: data.ticker (or data.room, or a `/room/<TICKER>` url), as a DM
  * when data.dm is set. Null when it isn't about a room (calls ring through CallScreen instead).
  */
+/**
+ * The custom data of a tapped notification, whichever way the platform hands it over.
+ *
+ * ⚠ iOS NESTS IT. bwalletx-push sends APNs `{aps, data: {...}}`, and Capacitor gives the tap the WHOLE userInfo, so
+ * on an iPhone the ticker sits at `data.data.ticker`, not `data.ticker`. Read only at the top level, every room tap
+ * on iOS routed nowhere (owner, 28 Oct 2026: a $BCORPBOARD signing push opened nothing). FCM and Web Push put the
+ * fields at the top level already; a JSON string (FCM stringifies nested values) is parsed.
+ */
+export const pushData = (data: Record<string, unknown> | null | undefined): Record<string, unknown> | null => {
+  if (!data || typeof data !== 'object') return null;
+  let inner: unknown = data.data;
+  if (typeof inner === 'string') {
+    try {
+      inner = JSON.parse(inner);
+    } catch {
+      inner = null;
+    }
+  }
+  if (inner && typeof inner === 'object' && !Array.isArray(inner)) {
+    const { aps: _aps, data: _data, ...rest } = data;
+    void _aps;
+    void _data;
+    return { ...rest, ...(inner as Record<string, unknown>) };
+  }
+  return data;
+};
+
+const DOC_ID_RE = /^[A-Za-z0-9-]{1,64}$/;
+/** data.documentId (bit-sign sign_request), else a `?doc=<id>` on its /room url. */
+const docFromData = (data: Record<string, unknown>): string | undefined => {
+  const d = typeof data.documentId === 'string' ? data.documentId : undefined;
+  if (d && DOC_ID_RE.test(d)) return d;
+  if (typeof data.url === 'string') {
+    const m = /[?&]doc=([A-Za-z0-9-]{1,64})(?:[&#]|$)/.exec(data.url);
+    if (m) return m[1];
+  }
+  return undefined;
+};
+
 export const routeFromData = (
-  data: Record<string, unknown> | null | undefined,
+  raw: Record<string, unknown> | null | undefined,
   now: number = Date.now(),
 ): PushRoute | null => {
-  if (!data || typeof data !== 'object') return null;
+  const data = pushData(raw);
+  if (!data) return null;
   if (data.kind === 'call') return null;
   if (data.kind === 'meeting_invite') return meetingRoute(data, now);
   if (data.kind === 'sign_in') return { segment: 'signins', ticker: '' };
@@ -120,7 +162,8 @@ export const routeFromData = (
     if (m) ticker = normTicker(decodeURIComponent(m[1]));
   }
   if (!ticker) return null;
-  return { segment: truthy(data.dm) ? 'dms' : 'rooms', ticker };
+  const doc = docFromData(data);
+  return { segment: truthy(data.dm) ? 'dms' : 'rooms', ticker, ...(doc ? { doc } : {}) };
 };
 
 /**
@@ -139,7 +182,13 @@ export const meetingRoute = (data: Record<string, unknown>, now: number): PushRo
 
 /** Web Push click → `?push=dms:ABC` on the page it opens, read back with routeFromQuery. */
 export const routeToQuery = (r: PushRoute) =>
-  `push=${r.segment}:${encodeURIComponent(r.ticker)}${r.segment === 'partner' && r.id ? `/${r.id}` : ''}`;
+  `push=${r.segment}:${encodeURIComponent(r.ticker)}${
+    r.segment === 'partner' && r.id
+      ? `/${r.id}`
+      : (r.segment === 'rooms' || r.segment === 'dms') && r.doc && DOC_ID_RE.test(r.doc)
+        ? `/${r.doc}`
+        : ''
+  }`;
 export const routeFromQuery = (search: string): PushRoute | null => {
   const v = new URLSearchParams(search).get('push');
   if (v === 'signins:' || v === 'signins') return { segment: 'signins', ticker: '' };
@@ -151,9 +200,10 @@ export const routeFromQuery = (search: string): PushRoute | null => {
   const pa = v ? /^partner:([^/]+)(?:\/([A-Za-z0-9-]{1,64}))?$/.exec(v) : null;
   const pt = pa ? normTicker(pa[1]) : null;
   if (pa && pt) return pa[2] ? { segment: 'partner', ticker: pt, id: pa[2] } : { segment: 'partner', ticker: pt };
-  const m = v ? /^(rooms|dms):(.+)$/.exec(v) : null;
+  const m = v ? /^(rooms|dms):([^/]+)(?:\/([A-Za-z0-9-]{1,64}))?$/.exec(v) : null;
   const ticker = m ? normTicker(m[2]) : null;
-  return m && ticker ? { segment: m[1] as PushRoute['segment'], ticker } : null;
+  if (!m || !ticker) return null;
+  return { segment: m[1] as PushRoute['segment'], ticker, ...(m[3] ? { doc: m[3] } : {}) };
 };
 
 /** What a Web Push service worker shows (the server's webPushPayload: {title, body, tag, data, urgent}). */

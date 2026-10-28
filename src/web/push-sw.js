@@ -51,7 +51,14 @@ const routeQuery = (d) => {
   t = t.trim().replace(/^\$/, '').toUpperCase();
   if (!/^[A-Z0-9_.-]{1,64}$/.test(t)) return '';
   const dm = d.dm === true || d.dm === 'true' || d.dm === '1';
-  return `push=${dm ? 'dms' : 'rooms'}:${encodeURIComponent(t)}`;
+  // A document to sign in that room (bit-sign sign_request): data.documentId, else ?doc=<id> on its url.
+  let doc = typeof d.documentId === 'string' ? d.documentId : '';
+  if (!doc && typeof d.url === 'string') {
+    const dm2 = /[?&]doc=([A-Za-z0-9-]{1,64})(?:[&#]|$)/.exec(d.url);
+    if (dm2) doc = dm2[1];
+  }
+  const docPart = /^[A-Za-z0-9-]{1,64}$/.test(doc) ? `/${doc}` : '';
+  return `push=${dm ? 'dms' : 'rooms'}:${encodeURIComponent(t)}${docPart}`;
 };
 
 self.addEventListener('notificationclick', (event) => {
