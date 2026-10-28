@@ -203,3 +203,41 @@ describe('b-Aware 24-25 Oct: encoded and blind challenges', () => {
     expect(crossSiteSignRefusal(caller, { data: bytes('hello world, a plain post') })).toBeNull();
   });
 });
+
+describe('b-Aware 25 Oct (yudhaekasaputra1, widiaaw382): the guard fails closed for outside callers', () => {
+  test('a site-bound message over 64 KB is refused, not waved through', () => {
+    const big = 'good.com wants you to sign in\n' + 'x'.repeat(70 * 1024);
+    expect(crossSiteSignRefusal('evil.com', sig(big))).not.toBeNull();
+    // Even one naming no site: the wallet can't read it, so it can't say it names none.
+    expect(crossSiteSignRefusal('good.com', sig('y'.repeat(70 * 1024)))).not.toBeNull();
+  });
+
+  test('data that is not a byte array is refused', () => {
+    const msg = JSON.stringify({ domain: 'good.com' });
+    expect(crossSiteSignRefusal('evil.com', { data: msg })).not.toBeNull();
+    expect(crossSiteSignRefusal('evil.com', { data: { 0: 1, length: 1 } })).not.toBeNull();
+    expect(crossSiteSignRefusal('evil.com', { data: new Uint8Array(bytes(msg)) })).not.toBeNull();
+  });
+
+  test('IP-literal and localhost sites in the message are bindings', () => {
+    for (const msg of [
+      '10.0.0.5 wants you to sign in',
+      JSON.stringify({ domain: '192.168.1.20' }),
+      JSON.stringify({ origin: 'http://localhost:3000' }),
+      'localhost wallet login: 0123abcd',
+    ]) {
+      expect(crossSiteSignRefusal('evil.com', sig(msg))).not.toBeNull();
+    }
+    expect(crossSiteSignRefusal('10.0.0.5', sig('10.0.0.5 wants you to sign in'))).toBeNull();
+    expect(
+      crossSiteSignRefusal('http://localhost:3000', sig(JSON.stringify({ origin: 'http://localhost:3000' }))),
+    ).toBeNull();
+  });
+
+  test('a caller with no parsable host gets nothing that names a site', () => {
+    const login = 'good.com wants you to sign in';
+    expect(crossSiteSignRefusal('intranet', sig(login))).not.toBeNull();
+    expect(crossSiteSignRefusal('intranet', { hashToDirectlySign: [1, 2, 3] })).toBe(BLIND_SIGN_REFUSAL);
+    expect(crossSiteSignRefusal('intranet', sig('bwx-podcast:42:nonce'))).toBeNull();
+  });
+});
