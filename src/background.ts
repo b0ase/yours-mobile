@@ -223,7 +223,13 @@ import {
   type MintSheet,
 } from './services/pinnedMint';
 import { oneShotGrant } from './services/oneShotGrant';
-import { isReservedProtocol, reservedProtocolRefusal, RESERVED_REFUSAL, withoutReservedProtocols } from './services/reservedProtocols';
+import {
+  isReservedProtocol,
+  refusalCode,
+  reservedProtocolRefusal,
+  RESERVED_REFUSAL,
+  withoutReservedProtocols,
+} from './services/reservedProtocols';
 import { healIndexFundActions } from './mobile/tokens/indexFundHeal';
 import { continuesChain, endChain, isAlreadyProcessedAbort, markChainStep, startsChain } from './services/dappChain';
 import { HOSTED_YOURS_IMAGE } from './utils/constants';
@@ -2481,7 +2487,7 @@ if (!(
           sender.origin ? normalizeOriginator(sender.origin) : undefined,
         );
       if (refusal) {
-        sendResponse({ type: message.action, success: false, error: refusal });
+        sendResponse({ type: message.action, success: false, error: refusal, code: refusalCode(refusal) });
         return true;
       }
     }
