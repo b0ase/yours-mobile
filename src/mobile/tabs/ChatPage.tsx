@@ -1419,7 +1419,10 @@ const Conversation = ({
           )}
           {/* $b is public (owner, 28 Oct 2026): say so where someone else would see it, and offer /b. */}
           {showPublicBHint(draft, members) && (
-            <div className="px-4 pt-1 text-[12px] shrink-0 flex items-center gap-2" style={{ color: MUTED, background: '#0b0b0b' }}>
+            <div
+              className="px-4 pt-1 text-[12px] shrink-0 flex items-center gap-2"
+              style={{ color: MUTED, background: '#0b0b0b' }}
+            >
               <span className="min-w-0">{PUBLIC_B_HINT} ·</span>
               <button
                 type="button"
