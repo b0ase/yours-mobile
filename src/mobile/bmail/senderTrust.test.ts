@@ -1,5 +1,16 @@
 import { describe, expect, test } from 'bun:test';
-import { asksForSecrets, BCORP_KEY, looksLikeBrand, senderTrust } from './senderTrust';
+import {
+  asksForSecrets,
+  BCORP_KEY,
+  BRAND_KEYS,
+  BRANDS,
+  looksLikeBrand,
+  NAME_ROLE_WORDS,
+  ROLE_WORDS,
+  senderTrust,
+} from './senderTrust';
+// The server's list (CommonJS); the two must not drift.
+import guard from '../../../site/lib/brandGuard.js';
 
 const OTHER = `02${'a'.repeat(64)}`;
 
@@ -37,5 +48,19 @@ describe('bMail sender trust (28 Oct 2026)', () => {
       expect([t, asksForSecrets(t)]).toEqual([t, true]);
     for (const t of ['See you at 12', 'Here are my words of thanks', 'The key to success', 'Lunch on Friday?'])
       expect([t, asksForSecrets(t)]).toEqual([t, false]);
+  });
+  test('1 is read as both l and i', () => {
+    for (const l of ['k1ntsugi', 'b1tcoincorp@bwalletx.com', 'bwa11et'])
+      expect([l, looksLikeBrand(l)]).toEqual([l, true]);
+    for (const l of ['bi11y', 'Mi1es']) expect([l, looksLikeBrand(l)]).toEqual([l, false]);
+  });
+  test('the bWalletX brand account is not flagged; only bCorp gets the bCorp badge', () => {
+    expect(senderTrust(BRAND_KEYS[1], 'bwalletx@bwalletx.com')).toBe('none');
+    expect(BRAND_KEYS[0]).toBe(BCORP_KEY);
+  });
+  test('brand lists match site/lib/brandGuard.js', () => {
+    expect([...BRANDS]).toEqual([...guard.BRANDS]);
+    expect([...ROLE_WORDS]).toEqual([...guard.ROLE_WORDS]);
+    expect([...NAME_ROLE_WORDS]).toEqual([...guard.NAME_ROLE_WORDS]);
   });
 });

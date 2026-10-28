@@ -103,6 +103,13 @@ const PREMIUM_BCORP = [
   'bsvex',
 ];
 const BCORP_KEY = '03c96b37e69377c8af33b583067f56444c83a656b05014e8f15003e67250943880';
+const BWALLETX_KEY = '029c1abd9470d485719c512c0d704e6ccf6c1533461eb5884a5d09a6dc3dca55b7';
+/**
+ * Our own accounts, exempt from the anti-impersonation rules (owner, 28 Oct 2026): they may use the brand in
+ * a display name and claim names held by the guard (2-char, look-alikes, brand + role word).
+ * The Bitcoin Corporation Ltd (bcorp@) and the bWalletX brand account (bwalletx@).
+ */
+const BRAND_KEYS = Object.freeze([BCORP_KEY, BWALLETX_KEY]);
 
 const RESERVED = new Set([
   // Kept for a named person: see RESERVED_OWNERS.
@@ -380,7 +387,7 @@ const p2pHourlyLimit = (alias) => P2P_HOURLY_LIMITS[alias] ?? P2P_HOURLY_DEFAULT
 
 const RESERVED_OWNERS = Object.freeze({
   // The bWalletX brand account.
-  bwalletx: '029c1abd9470d485719c512c0d704e6ccf6c1533461eb5884a5d09a6dc3dca55b7',
+  bwalletx: BWALLETX_KEY,
   // The Bitcoin Corporation Ltd's company account (owner, 27 Oct 2026).
   bcorp: BCORP_KEY,
   // b is our AI agent (owner, 28 Oct 2026); the earlier squatted b@ was renamed b-0282c9 under the terms'
@@ -400,7 +407,7 @@ const RESERVED_OWNERS = Object.freeze({
 const GUARD_TARGETS = [...new Set([...RESERVED, ...Object.keys(RESERVED_OWNERS)])];
 /** A held name the designated key (or, for anti-impersonation holds, bCorp's key) may claim. */
 const mayClaimReserved = (alias, key, owners = RESERVED_OWNERS) =>
-  owners[alias] === key || (key === BCORP_KEY && heldByGuard(alias));
+  owners[alias] === key || (BRAND_KEYS.includes(key) && heldByGuard(alias));
 const RESERVED_EXPLAIN = 'This name is kept for the bWalletX team, so it can’t be claimed.';
 const HELD_EXPLAIN = 'This name is held for The Bitcoin Corporation, so it can’t be claimed.';
 /** Constant-time check of the admin header against PAYMAIL_ADMIN_SECRET (unset = always refused). */
@@ -1166,7 +1173,7 @@ function makeHandlers({
       const taken = await store.getAlias(alias);
       const designated = mayClaimReserved(alias, identityKey, reservedOwners);
       // A display name that poses as bWalletX / bCorp is refused (bCorp's own names excepted).
-      if (f.name && identityKey !== BCORP_KEY && brandInDisplayName(cleanDisplayName(f.name)))
+      if (f.name && !BRAND_KEYS.includes(identityKey) && brandInDisplayName(cleanDisplayName(f.name)))
         return [400, { error: DISPLAY_NAME_MSG }];
       if (bad === RESERVED_MSG && !designated && !(taken && String(taken.identity_key).toLowerCase() === identityKey))
         return [400, { error: bad }];
@@ -1282,7 +1289,7 @@ function makeHandlers({
       const key = String(body.identityKey).toLowerCase();
       const row = await store.getAliasByKey(key);
       if (!row) return [404, { error: 'Claim a name first' }];
-      if (key !== BCORP_KEY && brandInDisplayName(cleanDisplayName(body.fields?.name)))
+      if (!BRAND_KEYS.includes(key) && brandInDisplayName(cleanDisplayName(body.fields?.name)))
         return [400, { error: DISPLAY_NAME_MSG }];
       const name = cleanDisplayName(body.fields?.name) || defaultDisplayName(row.alias);
       await store.setDisplayNameByKey(key, name);
@@ -1702,6 +1709,7 @@ const bookingOut = (r) => ({
 });
 
 module.exports = {
+  BRAND_KEYS,
   P2P_HOURLY_LIMITS,
   FORWARD_MS,
   CHANGE_COOLDOWN_MS,

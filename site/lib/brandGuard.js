@@ -45,20 +45,23 @@ const NAME_ROLE_WORDS = Object.freeze(['support', 'official', 'staff', 'admin'])
  * The look-alike fold: lower case, NFKC, zero-width removed, 0→o 1→l 3→e 5→s 4→a, rn→m, vv→w,
  * and `-` / `_` dropped. Two names that fold the same look the same to a reader.
  */
-function lookalike(s) {
+function lookalike(s, one = 'l') {
   return String(s ?? '')
     .normalize('NFKC')
     .replace(/[\u200B-\u200D\u2060\uFEFF\u00AD]/g, '')
     .toLowerCase()
     .replace(/[-_]/g, '')
     .replace(/0/g, 'o')
-    .replace(/1/g, 'l')
+    .replace(/1/g, one)
     .replace(/3/g, 'e')
     .replace(/5/g, 's')
     .replace(/4/g, 'a')
     .replace(/rn/g, 'm')
     .replace(/vv/g, 'w');
 }
+/** `1` reads as both `l` and `i`, so every check runs on both folds and refuses if either matches. */
+const ONE_AS = ['l', 'i'];
+const lookalikes = (s) => [...new Set(ONE_AS.map((one) => lookalike(s, one)))];
 
 const FOLDED_BRANDS = new Set(BRANDS);
 const BRAND_ROLE = new Set();
@@ -77,10 +80,10 @@ const isBrandish = (folded) => FOLDED_BRANDS.has(folded) || BRAND_ROLE.has(folde
  */
 function lookalikeReserved(alias, reserved) {
   const base = String(alias || '').replace(/\.(x|gmail)$/, '');
-  const f = lookalike(base);
-  if (isBrandish(f)) return true;
-  if (f === base) return false; // nothing folded: the plain RESERVED check already covers it
-  for (const r of reserved) if (lookalike(r) === f) return true;
+  const folds = lookalikes(base);
+  if (folds.some(isBrandish)) return true;
+  if (folds.length === 1 && folds[0] === base) return false; // nothing folded: plain RESERVED covers it
+  for (const r of reserved) if (lookalikes(r).some((x) => folds.includes(x))) return true;
   return false;
 }
 
@@ -90,10 +93,13 @@ function lookalikeReserved(alias, reserved) {
  * A lone `b` counts only next to a role word ("b support") or as the whole name, so "Mike B" is fine.
  */
 function brandInDisplayName(name) {
+  return ONE_AS.some((one) => brandWords(name, one));
+}
+function brandWords(name, one) {
   const words = String(name ?? '')
     .normalize('NFKC')
     .split(/[^\p{L}\p{N}_-]+/u)
-    .map(lookalike)
+    .map((w) => lookalike(w, one))
     .filter(Boolean);
   if (words.length === 1 && words[0] === 'b') return true;
   const long = BRANDS.filter((b) => b.length >= 5);
@@ -112,4 +118,14 @@ function brandInDisplayName(name) {
 
 const DISPLAY_NAME_MSG = 'That name looks like bWalletX or The Bitcoin Corporation. Please choose another.';
 
-module.exports = { BRANDS, ROLE_WORDS, lookalike, lookalikeReserved, brandInDisplayName, isBrandish, DISPLAY_NAME_MSG };
+module.exports = {
+  BRANDS,
+  ROLE_WORDS,
+  NAME_ROLE_WORDS,
+  lookalike,
+  lookalikes,
+  lookalikeReserved,
+  brandInDisplayName,
+  isBrandish,
+  DISPLAY_NAME_MSG,
+};

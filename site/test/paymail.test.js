@@ -1110,8 +1110,34 @@ describe('anti-impersonation handles', () => {
     for (const a of ['ab', 'zz', '00', '42', '99', 'a1', 'a-b', 'o_0'])
       expect([a, pm.validAlias(a)]).toEqual([a, 'That alias is reserved']);
   });
+  test('1 is read as both l and i', () => {
+    for (const a of ['adm1n', 'k1ntsugi', 'he1p', 'b1tcoincorp', 'offic1al'])
+      expect([a, pm.validAlias(a)]).toEqual([a, 'That alias is reserved']);
+  });
+  test('both brand keys are one list: bCorp and the bWalletX brand account', () => {
+    expect(pm.BRAND_KEYS).toEqual([BCORP, pm.RESERVED_OWNERS.bwalletx]);
+  });
+  test('the bWalletX brand account may claim a held name; others still cannot', async () => {
+    const h = pm.makeHandlers({ store: memStore(), env: ENV });
+    expect((await h.available({ alias: 'bwalletsupport', key: pm.RESERVED_OWNERS.bwalletx }))[1].status).toBe('free');
+    expect((await h.available({ alias: 'bwalletsupport', key: user().identityKey }))[1].status).toBe('reserved');
+  });
   test('false-positive guards: ordinary names still pass', () => {
-    for (const a of ['bob', 'bella', 'ab12cd', 'abc', 'bobcorp', 'barbara', 'mike_b', 'helpful', 'walleted', 'b0asex'])
+    for (const a of [
+      'bob',
+      'bella',
+      'ab12cd',
+      'bi11y',
+      'mi1es',
+      'a1autos',
+      'abc',
+      'bobcorp',
+      'barbara',
+      'mike_b',
+      'helpful',
+      'walleted',
+      'b0asex',
+    ])
       expect([a, pm.validAlias(a)]).toEqual([a, null]);
   });
   test('bCorp may claim a held name; nobody else can; an existing holder keeps theirs', async () => {
@@ -1179,7 +1205,15 @@ describe('anti-impersonation display names', () => {
   });
   test('the guard itself: brand words, spacing and look-alikes; ordinary names pass', async () => {
     const { brandInDisplayName } = await import('../lib/brandGuard.js');
-    for (const n of ['The Bitcoin Corporation', 'bCorp', 'b-wallet x', 'B C0RP', 'bmail help desk'])
+    for (const n of [
+      'The Bitcoin Corporation',
+      'bCorp',
+      'b-wallet x',
+      'B C0RP',
+      'K1ntsugi',
+      'Adm1n bCorp',
+      'bmail help desk',
+    ])
       expect([n, brandInDisplayName(n)]).toEqual([n, true]);
     for (const n of ['Bob', 'Bella', 'Mike B', 'B. B. King', 'Bob Corp', 'Ab12cd'])
       expect([n, brandInDisplayName(n)]).toEqual([n, false]);

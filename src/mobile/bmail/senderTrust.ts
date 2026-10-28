@@ -5,8 +5,11 @@
 
 /** The Bitcoin Corporation Ltd's identity key (bcorp@bwalletx.com). */
 export const BCORP_KEY = '03c96b37e69377c8af33b583067f56444c83a656b05014e8f15003e67250943880';
+/** The bWalletX brand account (bwalletx@): also shown as verified. Same list as site/lib/paymail.js BRAND_KEYS. */
+export const BWALLETX_KEY = '029c1abd9470d485719c512c0d704e6ccf6c1533461eb5884a5d09a6dc3dca55b7';
+export const BRAND_KEYS: readonly string[] = [BCORP_KEY, BWALLETX_KEY];
 
-const BRANDS = [
+export const BRANDS = [
   'bwallet',
   'bwalletx',
   'bcorp',
@@ -20,7 +23,7 @@ const BRANDS = [
   'b',
   'kintsugi',
 ];
-const ROLE_WORDS = [
+export const ROLE_WORDS = [
   'support',
   'help',
   'helpdesk',
@@ -38,17 +41,17 @@ const ROLE_WORDS = [
   'refund',
   'recovery',
 ];
-const NAME_ROLE_WORDS = ['support', 'official', 'staff', 'admin'];
+export const NAME_ROLE_WORDS = ['support', 'official', 'staff', 'admin'];
 
 /** 0→o 1→l 3→e 5→s 4→a, rn→m, vv→w, - and _ dropped, lower case. */
-export const lookalike = (s: string): string =>
+export const lookalike = (s: string, one = 'l'): string =>
   String(s ?? '')
     .normalize('NFKC')
     .replace(/[\u200B-\u200D\u2060\uFEFF\u00AD]/g, '')
     .toLowerCase()
     .replace(/[-_]/g, '')
     .replace(/0/g, 'o')
-    .replace(/1/g, 'l')
+    .replace(/1/g, one)
     .replace(/3/g, 'e')
     .replace(/5/g, 's')
     .replace(/4/g, 'a')
@@ -67,14 +70,18 @@ const LONG = BRANDS.filter((b) => b.length >= 5);
  * True when a sender label (handle like "bc0rp-support@bwalletx.com", or a display name) poses as us.
  * A lone "b" only counts next to a role word, so "Mike B" is fine.
  */
+/** `1` reads as both `l` and `i`: refuse if either fold matches. */
 export function looksLikeBrand(label: string): boolean {
+  return ['l', 'i'].some((one) => brandWords(label, one));
+}
+function brandWords(label: string, one: string): boolean {
   const local = String(label ?? '')
     .split('@')[0]
     .replace(/\.(x|gmail)$/i, '');
   const words = local
     .normalize('NFKC')
     .split(/[^\p{L}\p{N}_-]+/u)
-    .map(lookalike)
+    .map((w) => lookalike(w, one))
     .filter(Boolean);
   if (words.length === 1 && words[0] === 'b') return true;
   const hit = (w: string) => (w !== 'b' && BRANDISH.has(w)) || LONG.some((b) => w.startsWith(b));
@@ -93,7 +100,10 @@ export type SenderTrust = 'verified' | 'lookalike' | 'none';
 
 /** Verified when the sender's identity key is bCorp's; a look-alike when its name poses as us. */
 export function senderTrust(fromKey: string, label: string): SenderTrust {
-  if (String(fromKey || '').toLowerCase() === BCORP_KEY) return 'verified';
+  const k = String(fromKey || '').toLowerCase();
+  if (k === BCORP_KEY) return 'verified';
+  // Our bWalletX brand account is never flagged as a look-alike (it isn't bCorp, so no bCorp badge).
+  if (BRAND_KEYS.includes(k)) return 'none';
   return looksLikeBrand(label) ? 'lookalike' : 'none';
 }
 
