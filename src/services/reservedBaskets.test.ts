@@ -141,7 +141,9 @@ describe("b-Aware 25 Oct: a site can't name the wallet's own coins as inputs", (
               ? [{ outpoint: `${T}.1` }]
               : a.basket === 'bsv21'
                 ? [{ outpoint: `${T}.2` }]
-                : [],
+                : a.basket === '1sat-deposit'
+                  ? [{ outpoint: `${T}.3` }]
+                  : [],
       }),
       createAction: async (a: unknown) => (created.push(a), { txid: 'x' }),
     };
@@ -153,6 +155,15 @@ describe("b-Aware 25 Oct: a site can't name the wallet's own coins as inputs", (
       await expect(m.createAction({ inputs: [{ outpoint: op }] }, 'site.example')).rejects.toThrow(OWN_COIN_REFUSAL);
       expect(created).toHaveLength(0);
     }
+  });
+  // b-Aware 28 Oct 2026 (fdbayu5, High): '1sat-deposit' was not reserved, so a deposit coin passed this guard.
+  test('a deposit coin (1sat-deposit) named by a site is refused, and the basket is reserved', async () => {
+    for (const op of [`${T}.3`, `${T}_3`]) {
+      const { m, created } = make();
+      await expect(m.createAction({ inputs: [{ outpoint: op }] }, 'site.example')).rejects.toThrow(OWN_COIN_REFUSAL);
+      expect(created).toHaveLength(0);
+    }
+    expect(isReservedBasket('1sat-deposit')).toBe(true);
   });
   test("the site's own inputs, token coins (sell sheet) and the wallet itself still work", async () => {
     const { m, created } = make();

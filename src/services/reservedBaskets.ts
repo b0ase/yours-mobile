@@ -6,6 +6,7 @@
  *
  * The permissions manager upstream reserves only 'default' and names starting 'admin'.
  */
+import { DEPOSIT_BASKET } from '@1sat/types';
 import { takeTokenInsertionTicket } from './siteTokens';
 
 /** Same value as permissionBundle.TRUST_SITE_BASKET (not imported: permissionBundle imports this file). */
@@ -24,6 +25,9 @@ const RESERVED = new Set([
   'fund',
   'funding',
   'vesting',
+  // Deposit coins ('1sat-deposit'): the wallet's own BSV, held for deposits (b-Aware 28 Oct 2026, fdbayu5). Without
+  // it a site could name a deposit coin as an input and, under a fee-covering envelope, take it with no sheet.
+  DEPOSIT_BASKET,
   TRUST_SITE_BASKET,
 ]);
 
