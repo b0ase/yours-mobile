@@ -90,7 +90,7 @@ import {
 } from './services/addressResync';
 import { balanceWithDeposits } from './services/depositBalance';
 import { arrivingSats } from './services/receiveGuard';
-import { recoverySummary } from './services/recoverFailed';
+import { abortTargetKnownOnChain, recoverySummary } from './services/recoverFailed';
 import { timedStep, txidRecoverySummary } from './services/recoverByTxid';
 import { foundHeadline, restoredLine, scanNote, type ScanReport } from './services/findMissingCoins';
 import { paymailRestoreSummary } from './mobile/names/paymail';
@@ -6143,7 +6143,12 @@ if (!(
 
       // Never abort an action whose transaction the network already has: that strands money that really moved.
       const ref = String(message.params?.reference ?? '');
-      if (accountContext && (await accountContext.knownOnChain(ref))) {
+      // A BRC-100 reference is not a txid: check the transaction it names (H-2, b-Aware 28 Oct 2026).
+      const ctx = accountContext;
+      if (
+        ctx &&
+        (await abortTargetKnownOnChain(ref, { txidForReference, knownOnChain: (t) => ctx.knownOnChain(t) }))
+      ) {
         console.warn('[abortAction] transaction is already on chain; not aborting:', ref);
         sendResponse({ type: CWIEventName.ABORT_ACTION, success: true, data: { aborted: false } });
         return true;

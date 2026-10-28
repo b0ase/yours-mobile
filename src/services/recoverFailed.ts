@@ -181,6 +181,27 @@ export function recoverySummary(r: RecoverReport): string {
  * Fails CLOSED: any error or unclear answer counts as known (do not abort). Only a clean "not found" is unknown.
  * A reference that isn't a txid can't be checked on chain and is left to the toolbox (false).
  */
+/**
+ * Abort guard for any reference an outside caller passes (b-Aware 28 Oct 2026, hilmiadi677 H-2): a BRC-100
+ * `reference` is not a txid, so knownOnChain alone skipped the check. Look the reference up in storage and check that
+ * transaction's txid. Fails CLOSED: a failed lookup counts as known (do not abort). No transaction / no txid yet means
+ * nothing was signed, so nothing could have been broadcast.
+ */
+export async function abortTargetKnownOnChain(
+  reference: string,
+  deps: { txidForReference: (ref: string) => Promise<string | null>; knownOnChain: (txid: string) => Promise<boolean> },
+): Promise<boolean> {
+  if (/^[0-9a-f]{64}$/i.test(reference)) return deps.knownOnChain(reference);
+  let txid: string | null;
+  try {
+    txid = await deps.txidForReference(reference);
+  } catch {
+    return true;
+  }
+  if (!txid) return false;
+  return deps.knownOnChain(txid);
+}
+
 export async function knownOnChain(txid: string, getRawTx: (txid: string) => Promise<unknown>): Promise<boolean> {
   if (!/^[0-9a-f]{64}$/i.test(txid)) return false;
   try {
