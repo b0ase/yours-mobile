@@ -1583,11 +1583,23 @@ function makeHandlers({
         }
       } else if (bad) return out('invalid', null, { available: false, reason: 'invalid', message: bad });
       if (taken) return out('taken', null, { available: false, reason: 'taken' });
+      // A live forward (rename / removed extra name) is taken to everyone but the key it belongs to. That key sees
+      // it as its own forward and may claim it back as a name (names-add / register drop the forward).
       const fwd = await liveForward(alias);
-      if (fwd && fwd.identity_key !== key) return out('taken', null, { available: false, reason: 'taken' });
+      if (fwd) {
+        if (!PUBKEY_RE.test(key) || String(fwd.identity_key).toLowerCase() !== key)
+          return out('taken', null, { available: false, reason: 'taken' });
+      }
       // The designated owner of a reserved name claims it free; everyone else pays by length.
       const usd =
         nameFee.feeAddress(env) && !mayClaimReserved(alias, key, reservedOwners) ? nameFee.namePriceUsd(alias) : 0;
+      // Claiming your own forward back costs what names-add charges for it (the same price rule).
+      if (fwd)
+        return out('mine-forward', usd, {
+          available: true,
+          reason: 'forward',
+          message: `Yours (forwards to ${handleOf(fwd.to_alias)})`,
+        });
       return out(usd ? 'priced' : 'free', usd, { available: true, reason: null });
     },
 

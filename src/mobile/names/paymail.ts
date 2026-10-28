@@ -293,6 +293,8 @@ export const paymailAvailability = async (
   if (r.ok) {
     const j = (await r.json()) as { available?: boolean; reason?: string | null; message?: string };
     if (j.reason === 'mine') return { state: 'mine' };
+    // Your own forward (an old or removed name): yours to claim back.
+    if (j.reason === 'forward') return { state: 'free', message: j.message };
     if (j.available) return { state: 'free' };
     if (j.reason === 'reserved' || j.reason === 'invalid') return { state: j.reason, message: j.message };
     return { state: 'taken' };
