@@ -4,6 +4,7 @@ import { isCWIEventName } from '@1sat/wallet-browser';
 import { isSpendingAuthAction } from './services/streamGrants';
 import { isMintPrivateAction } from './services/mintPrivateAction';
 import { isTwetchAction } from './mobile/twetch/twetchAction';
+import { isSwapAction } from './services/swapAction';
 import { CustomListenerName, RequestEventDetail, RequestParams } from './inject';
 import { originatorForOrigin } from './services/originKey';
 import { forwardCwiCall } from './services/cwiForward';
@@ -52,7 +53,7 @@ if (!IS_TOP_FRAME) {
 // Forward CWI requests from page to background service worker
 self.addEventListener(CustomListenerName.YOURS_REQUEST, (e: Event) => {
   const { type, messageId, params: originalParams = {} } = (e as CustomEvent<RequestEventDetail>).detail;
-  if (!type || !(isCWIEventName(type) || isSpendingAuthAction(type) || isMintPrivateAction(type) || isTwetchAction(type))) return;
+  if (!type || !(isCWIEventName(type) || isSpendingAuthAction(type) || isMintPrivateAction(type) || isTwetchAction(type) || isSwapAction(type))) return;
   if (!frameOk) {
     self.dispatchEvent(
       new CustomEvent(messageId, { detail: { success: false, error: 'bWalletX only works inside a secure (https) site' } }),

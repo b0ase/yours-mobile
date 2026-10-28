@@ -1,4 +1,5 @@
 import type { TwetchAsk } from './mobile/twetch/twetchCalls';
+import type { SwapSheet } from './mobile/p2p/swap/swapActions';
 
 export type PromptKind =
   | 'unlock'
@@ -10,7 +11,8 @@ export type PromptKind =
   | 'usbCheck'
   | 'streamGrant'
   | 'mintPrivate'
-  | 'twetch';
+  | 'twetch'
+  | 'swap';
 
 /** A gated wallet call is waiting for a registered USB key to be confirmed present. */
 export interface UsbCheckRequest {
@@ -56,6 +58,13 @@ export interface MintPrivatePrompt {
 
 /** A site asks to sign in to / post on Twetch with the linked Twetch key (mobile/twetch/twetchCalls.ts TwetchAsk). */
 export type TwetchPrompt = TwetchAsk & {
+  requestID: string;
+  /** Browser-derived, never page-claimed. */
+  originator: string;
+};
+
+/** bChatX asks to offer or accept a contract swap (mobile/p2p/swap/swapActions.ts SwapSheet). */
+export type SwapPrompt = SwapSheet & {
   requestID: string;
   /** Browser-derived, never page-claimed. */
   originator: string;
