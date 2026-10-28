@@ -3,6 +3,7 @@ import { AtSign, BadgeCheck, Copy, Check, Plus } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { NameHandover } from './NameHandover';
 import {
+  bindMyNames,
   listPaymails,
   paymailAvailability,
   paymailEnabled,
@@ -28,6 +29,9 @@ import { useTheme } from '../../hooks/useTheme';
 import { PAID_FEATURES_ENABLED } from '../storeBuild';
 
 const f = (u: string, i?: RequestInit) => fetch(u, i);
+
+/** The server's cap on plain names per identity key (site/lib/paymail.js MAX_PLAIN_NAMES). */
+const MAX_PLAIN_NAMES = 5;
 
 /**
  * Settings › Identity: every name that receives for this wallet (owner, 4 Oct 2026: a wallet may
@@ -63,7 +67,8 @@ export const WalletNames = () => {
   }, [apiContext, tick]);
   const feeLabel = extraFeeLabel(nameFee);
   const plainCount = names?.filter((n) => n.kind === 'plain').length ?? 0;
-  const atMax = plainCount >= (handles?.max ?? 5);
+  const atMax = plainCount >= (handles?.max ?? MAX_PLAIN_NAMES);
+  const hasMain = !!names?.some((n) => n.kind === 'plain' && n.main);
   // After any change: re-read the names and cache the main one, so the top bar and Receive follow it.
   const refresh = async () => {
     const { publicKey } = await apiContext.wallet.getPublicKey({ identityKey: true });
@@ -113,7 +118,13 @@ export const WalletNames = () => {
       if (fee) return setFeeConfirm(true);
     }
     setFeeConfirm(false);
-    const go = () => addExtraName(apiContext, f, a, fee);
+    // The wallet signs the new name's binding ("name -> my key", docs/NAME-BINDINGS.md) straight after the claim,
+    // so other wallets can check it before paying. A failed signature leaves the name unsigned, never unclaimed.
+    const go = async () => {
+      await addExtraName(apiContext, f, a, fee);
+      const { publicKey } = await apiContext.wallet.getPublicKey({ identityKey: true });
+      await bindMyNames(f, apiContext.wallet, publicKey).catch(() => 0);
+    };
     if (await run('add', go, 'Could not add that name')) {
       setDraft('');
       setAdding(false);
@@ -149,6 +160,9 @@ export const WalletNames = () => {
     <>
       <NameHandover names={names} onChanged={() => setTick((t) => t + 1)} />
       <div className="px-4 py-3" style={{ borderBottom: '1px solid #ffffff10' }}>
+        <p className="text-sm font-semibold m-0 mb-0.5" style={{ color: 'var(--bw-text)' }}>
+          Names
+        </p>
         <p className="text-xs m-0 mb-2" style={{ color: '#98A2B3' }}>
           {names.length > 1 ? `This wallet receives at ${names.length} names` : 'This wallet receives at'}
         </p>
@@ -165,7 +179,7 @@ export const WalletNames = () => {
                 className="text-[10px] font-bold rounded px-1.5 py-0.5"
                 style={{ background: 'rgb(var(--bw-accent-rgb)/0.13)', color: 'var(--bw-accent)' }}
               >
-                MAIN
+                Main
               </span>
             )}
             <button
@@ -193,7 +207,7 @@ export const WalletNames = () => {
                     className="text-xs bg-transparent border-0 p-0"
                     style={{ color: 'var(--bw-accent)' }}
                   >
-                    {busy === n.paymail ? 'Saving…' : 'Make main'}
+                    {busy === n.paymail ? 'Saving…' : 'Set as main'}
                   </button>
                   <button
                     type="button"
@@ -233,12 +247,12 @@ export const WalletNames = () => {
         )}
         {PAID_FEATURES_ENABLED && atMax && (
           <p className="text-[11px] m-0 mt-1" style={{ color: 'var(--bw-muted)' }}>
-            A wallet can have up to {handles?.max ?? 5} names.
+            A wallet can have up to {handles?.max ?? MAX_PLAIN_NAMES} names.
           </p>
         )}
         {adding && (
           <p className="text-[11px] m-0 mt-2" style={{ color: 'var(--bw-muted)' }}>
-            Names of 5+ letters are free. Short names cost more.
+            Up to 5 names on this key. Names of 5+ letters are free; short names cost more. Your wallet signs each one.
           </p>
         )}
         {adding ? (
@@ -246,7 +260,7 @@ export const WalletNames = () => {
             <input
               value={draft}
               onChange={(e) => setDraft(toAlias(e.target.value))}
-              placeholder="another name"
+              placeholder="a name for this wallet"
               autoCapitalize="none"
               autoCorrect="off"
               className="flex-1 min-w-0 rounded px-2 py-1.5 text-sm"
@@ -275,18 +289,29 @@ export const WalletNames = () => {
           </div>
         ) : (
           // Store build (docs/STORE-AUDIT.md 1.6): only the free paymail, so no paid extra names.
+          // Owner, 28 Oct 2026: a clear "Add a name" button, always shown; when a name can't be added it says why.
           PAID_FEATURES_ENABLED &&
-          (!!handles || paymailEnabled()) &&
-          !atMax &&
-          names.some((n) => n.kind === 'plain' && n.main) && (
-            <button
-              type="button"
-              onClick={() => setAdding(true)}
-              className="flex items-center gap-1.5 mt-2 text-xs bg-transparent border-0 p-0"
-              style={{ color: 'var(--bw-accent)' }}
-            >
-              <Plus size={14} /> Add another name
-            </button>
+          (!!handles || paymailEnabled()) && (
+            <>
+              <button
+                type="button"
+                data-testid="add-a-name"
+                disabled={atMax || !hasMain}
+                onClick={() => setAdding(true)}
+                className="flex w-full items-center justify-center gap-1.5 mt-3 rounded-xl py-2.5 text-sm font-bold border-0"
+                style={{
+                  background: atMax || !hasMain ? 'var(--bw-surface)' : 'var(--bw-accent)',
+                  color: atMax || !hasMain ? 'var(--bw-muted)' : 'var(--bw-on-accent)',
+                }}
+              >
+                <Plus size={16} /> Add a name
+              </button>
+              {!hasMain && (
+                <p className="text-[11px] m-0 mt-1" style={{ color: 'var(--bw-muted)' }}>
+                  Choose your main handle first (Change handle, below). Then you can add more names.
+                </p>
+              )}
+            </>
           )
         )}
         <SendConfirmation

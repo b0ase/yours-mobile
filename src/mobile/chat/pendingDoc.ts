@@ -26,11 +26,18 @@ export const pendingDocOf = (room: Pick<ChatRoom, 'metadata'> | null | undefined
   };
 };
 
-/** The bChatX room page opened on one document, or null for anything that isn't a plain ticker + id. */
-export const signDocUrl = (ticker: string, docId: string): string | null => {
+/**
+ * The bChatX room page opened on one document, or null for anything that isn't a plain ticker + id. With the
+ * document's sha256 (from a scanned "Sign on your phone" QR, chat/signLink.ts) it is bChatX's phone-sign page
+ * (?sign=&h=), which recomputes the hash and refuses on a mismatch before offering to sign.
+ */
+export const signDocUrl = (ticker: string, docId: string, hash?: string | null): string | null => {
   const t = (ticker || '').trim().replace(/^\$/, '').toUpperCase();
   if (!TICKER_RE.test(t) || !ID_RE.test(docId || '')) return null;
-  return `https://www.bchatx.com/room/${encodeURIComponent(t)}?doc=${encodeURIComponent(docId)}`;
+  const base = `https://www.bchatx.com/room/${encodeURIComponent(t)}`;
+  const h = (hash || '').toLowerCase();
+  if (/^[0-9a-f]{64}$/.test(h)) return `${base}?sign=${encodeURIComponent(docId)}&h=${h}`;
+  return `${base}?doc=${encodeURIComponent(docId)}`;
 };
 
 /**
