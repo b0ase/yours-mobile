@@ -102,7 +102,7 @@ export const ContractsMarket = ({ tab = 'all', onTab }: { tab?: ContractsTab; on
     if (!apiContext) return;
     setBusy(c.envelope.sale.priceUsd > 0 ? 'Buying…' : 'Getting…');
     try {
-      await buyContract(apiContext, c.origin, rate);
+      await buyContract(apiContext, c, rate);
       addSnackbar(`${c.envelope.contract.name} is in your wallet.`, 'success');
       refresh();
     } catch (e) {

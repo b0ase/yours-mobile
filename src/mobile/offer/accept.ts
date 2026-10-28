@@ -1,5 +1,6 @@
 import { Utils, type WalletInterface } from '@bsv/sdk';
 import { resultIsQueued, withBroadcastNow } from '../../services/bigDelayed';
+import { checkP2pDestination } from '../../utils/paymailDestination';
 import type { Destination, SubmitMeta } from './company';
 import {
   OfferError,
@@ -79,8 +80,21 @@ export const acceptAndPay = async (deps: AcceptDeps, a: AcceptInput): Promise<Ac
   const completedHash = docHash(embedSignature(offer.html, 'subscriber', a.pngB64));
   const subscriberSig = await signOfferHash(deps.wallet, offer.ref, 'subscriber', completedHash);
 
-  // 3: where to pay.
+  // 3: where to pay. Every output must re-derive from the company's key (the one its seal was checked against) and
+  // the outputs must add up to the quote: the paymail host does not get to choose the payee (b-Aware 28 Oct 2026,
+  // hilmiadi677 H-3; same check as utils/guardedSendBsv.ts for any paymail payment).
   const dest = await deps.destination(quote.sats);
+  const check = checkP2pDestination(offer.companyKey, dest.outputs);
+  if (!check.ok) throw new OfferError(check.error);
+  if (!check.verified)
+    throw new OfferError(
+      "Payment refused: the company's paymail host did not let us check its address. Nothing was sent.",
+    );
+  if (
+    !dest.outputs.every((o) => Number.isSafeInteger(o.satoshis) && o.satoshis > 0) ||
+    dest.outputs.reduce((n, o) => n + o.satoshis, 0) !== quote.sats
+  )
+    throw new OfferError('Payment refused: the payment destination does not match the amount. Nothing was sent.');
 
   // 4: one transaction, broadcast now.
   const args = withBroadcastNow({

@@ -7,9 +7,9 @@ import { payDue } from './payDue';
 import {
   broadcastPnee,
   broadcastRaw,
-  payeeAddress,
   potBalanceSats,
   potPneeUnits,
+  resolvePayee,
   signFromPot,
   signPneeFromPot,
 } from './potSend';
@@ -35,13 +35,20 @@ const confirmCatchUp = async (s: Subscription, missed: number) => {
   );
 };
 
+/**
+ * How the scheduler resolves a payee: the full destination with the payee's key, so payDue can pin the first key
+ * that verified and stop the payment when it changes (payeeBinding.ts). Resolving to the address alone left pinning
+ * inert (b-Aware 25 Oct 2026, mahetagaurang22; 28 Oct hilmiadi677 H-4).
+ */
+export const engineResolve = (p: Subscription['payee']) => resolvePayee(p);
+
 const tick = async () => {
   const e = env;
   if (!e || !listSubs().some((s) => s.status === 'active' || s.status === 'lowFunds')) return;
   const bsvUsd = await fetchExchangeRate('main').catch(() => cachedExchangeRate());
   await payDue({
     bsvUsd,
-    resolve: payeeAddress,
+    resolve: engineResolve,
     sign: (potId, outputs, memo) => signFromPot(e.store, potId, outputs, memo),
     broadcast: broadcastRaw,
     ...(PNEE_POTS_ENABLED

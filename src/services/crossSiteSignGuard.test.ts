@@ -5,6 +5,7 @@ import {
   crossSiteSignRefusal,
   guardCrossSiteSigning,
   sameSite,
+  setProvenPairingCheck,
 } from './crossSiteSignGuard';
 
 const bytes = (s: string) => Array.from(new TextEncoder().encode(s));
@@ -29,9 +30,30 @@ describe('crossSiteSignRefusal (audit 24 Oct B1)', () => {
     const msg = JSON.stringify({ domain: 'bchatx.com' });
     expect(crossSiteSignRefusal('app.bchatx.com', sig(msg))).toBeNull();
     expect(crossSiteSignRefusal('bchatx.com:8443', sig(msg))).toBeNull();
+    // A pairing that proved its origin counts as that site.
+    setProvenPairingCheck(() => true);
     expect(crossSiteSignRefusal('bchatx.com.paired.invalid', sig(msg))).toBeNull();
     expect(crossSiteSignRefusal(`bchatx.com.c${'ab'.repeat(22)}.paired.invalid`, sig(msg))).toBeNull();
     expect(crossSiteSignRefusal(`evil.com.c${'ab'.repeat(22)}.paired.invalid`, sig(msg))).not.toBeNull();
+    setProvenPairingCheck(() => false);
+  });
+
+  test('b-Aware 25 Oct (0xzero): an unproven pairing claiming a site gets no login signature for it', () => {
+    const forged = `good.com.c${'ab'.repeat(22)}.paired.invalid`;
+    const login = 'good.com wants you to sign in with your Bitcoin account:\nNonce: 123';
+    expect(crossSiteSignRefusal(forged, sig(login))).toContain('different site');
+    expect(crossSiteSignRefusal(`https://${forged}`, sig(JSON.stringify({ domain: 'good.com' })))).not.toBeNull();
+    // Blind hashes too, even when the claimed host is one of our chat sites.
+    expect(crossSiteSignRefusal(`bchatx.com.c${'ab'.repeat(22)}.paired.invalid`, { hashToDirectlySign: [1, 2] })).toBe(
+      BLIND_SIGN_REFUSAL,
+    );
+    // Data that names no site still signs.
+    expect(crossSiteSignRefusal(forged, sig('bwx-podcast:42:nonce'))).toBeNull();
+    // Proven only for its own key: another channel claiming the same host stays unproven.
+    setProvenPairingCheck((o) => o.toLowerCase().includes(`c${'cd'.repeat(22)}`));
+    expect(crossSiteSignRefusal(`good.com.c${'cd'.repeat(22)}.paired.invalid`, sig(login))).toBeNull();
+    expect(crossSiteSignRefusal(forged, sig(login))).not.toBeNull();
+    setProvenPairingCheck(() => false);
   });
 
   test('one matching field cannot launder a second, foreign one', () => {

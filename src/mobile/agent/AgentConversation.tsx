@@ -56,7 +56,7 @@ const useNoAgentCredits = (_withClient: unknown, _ready: boolean): AgentCredits 
   setLow: () => {},
 });
 const useCreditsForB = BCREDITS_ENABLED ? useAgentCredits : useNoAgentCredits;
-import { agentAccountPrompt, parseActions, runAgentAction } from '../agents/agentTrade';
+import { agentAccountPrompt, parseActions, runAgentActionSerial } from '../agents/agentTrade';
 import { consentTarget, grantConsent, hasConsent } from './consent';
 import { ConsentSheet } from './ConsentSheet';
 import { ObsidianHero } from './ObsidianHero';
@@ -513,7 +513,7 @@ export const AgentConversation = ({
       try {
         r =
           apiContext && accountId
-            ? await runAgentAction(apiContext, accountId, a, bsvUsd)
+            ? await runAgentActionSerial(apiContext, accountId, a, bsvUsd)
             : { ok: false, text: 'Wallet is locked.' };
       } catch (e) {
         r = { ok: false, text: e instanceof Error ? e.message : String(e) };

@@ -732,9 +732,11 @@ describe('name pricing (owner, 27 Oct 2026): by length, 5+ free, 4 $10, 3 $100, 
   const FEE_ADDR = PrivateKey.fromRandom().toAddress();
   const FENV = { ...ENV, BWALLET_NAME_FEE_ADDRESS: FEE_ADDR, PAYMAIL_ADMIN_SECRET: 'test-admin-secret-0123456789' };
   const RATE = 50; // $50/BSV → $10 = 20,000,000 sats
-  const payTx = (sats, to = FEE_ADDR) => {
+  // A fee payment committing to [identity key, alias] (OP_RETURN), as the app builds it. `for` = null leaves it out.
+  const payTx = (sats, to = FEE_ADDR, forWho = null) => {
     const tx = new Transaction();
     tx.addOutput({ lockingScript: new P2PKH().lock(to), satoshis: sats });
+    if (forWho) tx.addOutput({ lockingScript: Script.fromHex(nameFee.feeCommitHex(...forWho)), satoshis: 1 });
     return tx;
   };
   const mockChain = (txs) => ({
@@ -786,12 +788,12 @@ describe('name pricing (owner, 27 Oct 2026): by length, 5+ free, 4 $10, 3 $100, 
   });
 
   test('a 4-character name needs $10: refuses none, underpaid, wrong address and reuse; writes a receipt', async () => {
-    const good = payTx(16_000_000); // ≥ 80% of 20,000,000
-    const low = payTx(15_000_000);
-    const wrong = payTx(30_000_000, PrivateKey.fromRandom().toAddress());
+    const u = user();
+    const good = payTx(16_000_000, FEE_ADDR, [u.identityKey, 'abcd']); // ≥ 80% of 20,000,000
+    const low = payTx(15_000_000, FEE_ADDR, [u.identityKey, 'abcd']);
+    const wrong = payTx(30_000_000, PrivateKey.fromRandom().toAddress(), [u.identityKey, 'abcd']);
     const store = priceStore();
     const h = pm.makeHandlers({ store, env: FENV, feeChain: mockChain([good, low, wrong]) });
-    const u = user();
     const [s0, r0] = await h.register({}, await u.sign('register', { alias: 'abcd' }));
     expect(s0).toBe(402);
     expect(r0.namePrice).toEqual({ address: FEE_ADDR, usd: 10 });
@@ -810,19 +812,23 @@ describe('name pricing (owner, 27 Oct 2026): by length, 5+ free, 4 $10, 3 $100, 
         kind: 'claim',
       },
     ]);
-    // The same payment can't pay for another 4-character extra name.
+    // The same payment can't pay for another 4-character extra name (it was made for abcd).
     expect((await h['names-add']({}, await u.sign('names-add', { alias: 'wxyz', feeTxid: good.id('hex') })))[0]).toBe(
-      409,
+      402,
     );
+    // Nor, re-used for the same name, a second time.
+    expect(
+      (await h['names-add']({}, await u.sign('names-add', { alias: 'abcd', feeTxid: good.id('hex') })))[0],
+    ).not.toBe(200);
   });
 
   test('3 characters need $100 and 2 need $1000 (a $10 payment is not enough)', async () => {
-    const ten = payTx(20_000_000);
-    const hundred = payTx(200_000_000);
-    const thousand = payTx(2_000_000_000);
+    const u = user();
+    const ten = payTx(20_000_000, FEE_ADDR, [u.identityKey, 'xyz']);
+    const hundred = payTx(200_000_000, FEE_ADDR, [u.identityKey, 'xyz']);
+    const thousand = payTx(2_000_000_000, FEE_ADDR, [u.identityKey, 'qz']);
     const store = priceStore();
     const h = pm.makeHandlers({ store, env: FENV, feeChain: mockChain([ten, hundred, thousand]) });
-    const u = user();
     await h.register({}, await u.sign('register', { alias: 'mainname' }));
     expect((await h['names-add']({}, await u.sign('names-add', { alias: 'xyz', feeTxid: ten.id('hex') })))[0]).toBe(
       402,
@@ -873,10 +879,10 @@ describe('name pricing (owner, 27 Oct 2026): by length, 5+ free, 4 $10, 3 $100, 
   });
 
   test('CSV export: needs the admin secret, lists receipts with documented columns', async () => {
-    const good = payTx(20_000_000);
+    const u = user();
+    const good = payTx(20_000_000, FEE_ADDR, [u.identityKey, 'csvb']);
     const store = priceStore();
     const h = pm.makeHandlers({ store, env: FENV, feeChain: mockChain([good]) });
-    const u = user();
     await h.register({}, await u.sign('register', { alias: 'csvb', feeTxid: good.id('hex') }));
     expect((await h['name-fees-export']({}, {}, {}))[0]).toBe(401);
     expect((await h['name-fees-export']({}, {}, { adminSecret: 'wrong' }))[0]).toBe(401);
@@ -892,7 +898,8 @@ describe('name pricing (owner, 27 Oct 2026): by length, 5+ free, 4 $10, 3 $100, 
   });
 
   test('a tx the indexers have not seen is accepted from the app once our broadcast takes it', async () => {
-    const tx = payTx(20_000_000);
+    const u = user();
+    const tx = payTx(20_000_000, FEE_ADDR, [u.identityKey, 'frsh']);
     const sent = [];
     const h = pm.makeHandlers({
       store: priceStore(),
@@ -900,9 +907,37 @@ describe('name pricing (owner, 27 Oct 2026): by length, 5+ free, 4 $10, 3 $100, 
       feeChain: mockChain([]),
       broadcast: async (t) => void sent.push(t.id('hex')),
     });
-    const body = { ...(await user().sign('register', { alias: 'frsh', feeTxid: tx.id('hex') })), feeTx: tx.toHex() };
+    const body = { ...(await u.sign('register', { alias: 'frsh', feeTxid: tx.id('hex') })), feeTx: tx.toHex() };
     expect((await h.register({}, body))[0]).toBe(200);
     expect(sent).toEqual([tx.id('hex')]);
+  });
+
+  // b-Aware 27 Oct 2026 (hilmiadi677, F-165): the fee txid was a bearer receipt.
+  test('F-165: a fee tx seen on chain cannot be used by another key or for another name', async () => {
+    const victim = user();
+    const thief = user();
+    const paid = payTx(20_000_000, FEE_ADDR, [victim.identityKey, 'abcd']);
+    const store = priceStore();
+    const h = pm.makeHandlers({ store, env: FENV, feeChain: mockChain([paid]) });
+    // The thief races the victim with the victim's txid, for the same name and for another one.
+    expect((await h.register({}, await thief.sign('register', { alias: 'abcd', feeTxid: paid.id('hex') })))[0]).toBe(
+      402,
+    );
+    expect((await h.register({}, await thief.sign('register', { alias: 'wxyz', feeTxid: paid.id('hex') })))[0]).toBe(
+      402,
+    );
+    expect(store.receipts).toEqual([]);
+    // The victim still gets the name the payment was made for.
+    expect((await h.register({}, await victim.sign('register', { alias: 'abcd', feeTxid: paid.id('hex') })))[0]).toBe(
+      200,
+    );
+  });
+
+  test('F-165: a fee tx with no claimant commitment is refused', async () => {
+    const u = user();
+    const bare = payTx(20_000_000);
+    const h = pm.makeHandlers({ store: priceStore(), env: FENV, feeChain: mockChain([bare]) });
+    expect((await h.register({}, await u.sign('register', { alias: 'abcd', feeTxid: bare.id('hex') })))[0]).toBe(402);
   });
 });
 

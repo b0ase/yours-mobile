@@ -1,3 +1,4 @@
+import type { P2pOutput } from '../../utils/paymailDestination';
 import type { WalletInterface } from '@bsv/sdk';
 import { BWALLET_PAYMAIL_API } from '../names/config';
 import { signRequest } from '../names/paymail';
@@ -69,7 +70,7 @@ export const verifyCompany = (
   return { verified: true, reason: '' };
 };
 
-export type Destination = { outputs: { script: string; satoshis: number }[]; reference: string };
+export type Destination = { outputs: P2pOutput[]; reference: string };
 
 export const destination = async (f: Fetch, paymail: string, sats: number): Promise<Destination> => {
   const j = await json(

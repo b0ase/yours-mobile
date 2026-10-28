@@ -41,6 +41,7 @@ import {
   type TokenLockRecord,
 } from './tokenLocks';
 import type { ChromeStorageService } from '../../services/ChromeStorage.service';
+import { cappedOverlayFee } from '../wallet/send/tokenFee';
 
 /** The wallet's token-lock address (seed-derived; never the BSV lock key). */
 export async function tokenLockAddress(ctx: OneSatContext): Promise<string> {
@@ -310,12 +311,12 @@ export async function unlockTokenLock(
       }),
     },
   ];
-  const feeAddr = details?.status?.fee_address;
-  const feePer = details?.status?.fee_per_output;
-  if (typeof feeAddr === 'string' && feeAddr && typeof feePer === 'number' && feePer > 0)
+  // Capped: the indexer's fee goes into a signed output with no sheet showing it (H-5, b-Aware 28 Oct 2026).
+  const overlay = cappedOverlayFee(details?.status?.fee_address, details?.status?.fee_per_output, 1);
+  if (overlay)
     outputs.push({
-      lockingScript: new P2PKH().lock(feeAddr).toHex(),
-      satoshis: feePer,
+      lockingScript: new P2PKH().lock(overlay.address).toHex(),
+      satoshis: overlay.sats,
       outputDescription: 'Overlay processing fee',
       tags: ['fee:overlay'],
     });

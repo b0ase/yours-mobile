@@ -9,6 +9,7 @@ import { replyError } from './services/userDenied';
 import { attachSpendingAuthorization } from './spendingAuthPage';
 import { attachMintPrivate } from './mintPrivatePage';
 import { attachTwetch } from './twetchPage';
+import { attachSwap } from './swapPage';
 
 // Re-export for backwards compatibility
 export { CWIEventName };
@@ -40,6 +41,8 @@ attachSpendingAuthorization(CWI as unknown as Record<string, unknown>);
 attachMintPrivate(CWI as unknown as Record<string, unknown>, transport);
 // bWalletX: window.CWI.twetch.{status, loginSign, buildPost, signRequest} (services/twetchSite.ts).
 attachTwetch(CWI as unknown as Record<string, unknown>, transport);
+// window.CWI.swap.{offer, accept} (services/swapSite.ts): bChatX contract swaps, origin from Chrome.
+attachSwap(CWI as unknown as Record<string, unknown>, transport);
 
 // Inject CWI on window. In a sub-frame only once the content script says the background allowed this frame
 // (https frame inside an https top; services/frameAccess.ts).

@@ -179,6 +179,28 @@ export const textVariants = (text: string): string[] => {
   return [...out];
 };
 
+/**
+ * A phone-paired originator ("<host>[.c<hex>].paired.invalid"). Its host is only what the relay read from an Origin
+ * header, which any non-browser client can set; it names a site only when the site proved its origin at pairing.
+ */
+const PAIRED_RE = /\.paired\.invalid\.?(?::\d+)?(?:\/.*)?$/i;
+export const isPairedOriginator = (originator: string) => PAIRED_RE.test(originator.trim());
+/** Normalised paired key for comparing an originator with a stored session key (scheme, port, path dropped). */
+export const pairedKeyHost = (originator: string) =>
+  originator
+    .trim()
+    .toLowerCase()
+    .replace(/^[a-z]+:\/\//, '')
+    .replace(/\/.*$/, '')
+    .replace(/:\d+$/, '')
+    .replace(/\.$/, '');
+
+/** Which paired originators proved their origin (set by mobile/pair/sessions.ts). Default: none did. */
+let provenPairing: (originator: string) => boolean = () => false;
+export const setProvenPairingCheck = (fn: (originator: string) => boolean) => {
+  provenPairing = fn;
+};
+
 /** Why this outside call must be refused, or null. Only text data that names a site is checked. */
 export const crossSiteSignRefusal = (originator: string | undefined, args: unknown): string | null => {
   if (!originator || !args || typeof args !== 'object') return null;
@@ -189,6 +211,15 @@ export const crossSiteSignRefusal = (originator: string | undefined, args: unkno
   if (data !== undefined) {
     if (!Array.isArray(data)) return `${UNCHECKABLE_REFUSAL} (data is not a byte array)`;
     if (data.length > MAX_SIGN_DATA) return `${UNCHECKABLE_REFUSAL} (message over ${MAX_SIGN_DATA / 1024} KB)`;
+  }
+  // b-Aware 25 Oct 2026 (0xzero): an unproven pairing's host is only claimed. Stripping the pairing suffix let a
+  // forged-origin pairing get a login signature for the site it claimed. It now counts as no site at all: data naming
+  // any site, and blind hashes, are refused; data naming no site signs as before.
+  if (isPairedOriginator(originator) && !provenPairing(originator)) {
+    if ((args as { hashToDirectlySign?: unknown }).hashToDirectlySign !== undefined) return BLIND_SIGN_REFUSAL;
+    const t = decodeText((args as { data?: unknown }).data);
+    const named = t === null ? [] : [...new Set(textVariants(t).flatMap(boundHosts))];
+    return named.length ? `${CROSS_SITE_REFUSAL} (${named[0]}; this pairing did not prove its site)` : null;
   }
   const caller = bareHost(originator);
   if (!caller) {

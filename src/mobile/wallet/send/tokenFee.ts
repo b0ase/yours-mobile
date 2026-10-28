@@ -20,6 +20,26 @@ export const maxOverlayFee = (
     ? { address: feeAddress, sats: feePerOutput * (recipientOutputs + 1) }
     : null;
 
+/**
+ * Most any token path pays the indexer per token output when no sheet confirmed the fee (b-Aware 28 Oct 2026,
+ * hilmiadi677 H-5). `fee_per_output` comes from the indexer at spend time; the default is 1,000 sats.
+ */
+export const MAX_OVERLAY_FEE_PER_OUTPUT = 10_000;
+export const OVERLAY_FEE_REFUSAL = "The token indexer's fee looks wrong, so nothing was sent.";
+
+/**
+ * The overlay fee output for `tokenOuts` token outputs, or null when the token charges nothing. Throws when the
+ * indexer's per-output fee is not a whole number or is above MAX_OVERLAY_FEE_PER_OUTPUT. Use on every token spend
+ * that builds its own fee output (unlock, room messages, invites, cancels). Pure.
+ */
+export const cappedOverlayFee = (feeAddress: unknown, feePerOutput: unknown, tokenOuts: number): OverlayFee | null => {
+  if (typeof feeAddress !== 'string' || !feeAddress || typeof feePerOutput !== 'number' || !(feePerOutput > 0))
+    return null;
+  if (!Number.isSafeInteger(feePerOutput) || feePerOutput > MAX_OVERLAY_FEE_PER_OUTPUT)
+    throw new Error(OVERLAY_FEE_REFUSAL);
+  return { address: feeAddress, sats: feePerOutput * tokenOuts };
+};
+
 type Out = { lockingScript: string; satoshis: number };
 
 /**

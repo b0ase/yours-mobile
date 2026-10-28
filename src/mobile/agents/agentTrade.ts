@@ -16,6 +16,7 @@ import { buyBsv21, type OneSatContext } from '@1sat/actions';
 import { sendBsv } from '../../utils/guardedSendBsv';
 import { assertOrdLockV2 } from '../market/ordlockVersion';
 import { appendAgentLog, getAgentAccount } from './agentAccounts';
+import { serialSpend } from './spendQueue';
 import { checkAgentAction, getLoadedStrategy, getPaperBook, type ActionRequest, type StrategyAction } from './strategy';
 import { describeRules } from './describeRules';
 import { heldBsv21Balances } from '../airdrops/heldBalances';
@@ -198,3 +199,11 @@ export const runAgentAction = async (
   });
   return { ok: true, text: `Bought ${pick.label} for $${usd.toFixed(2)}`, txid: res.txid };
 };
+
+/**
+ * runAgentAction inside serialSpend: the cap check, the sign and the log append run one spend at a time, shared with
+ * paired agents and pot payments (spendQueue.ts). b agent chat must use this (b-Aware 25 Oct 2026). Don't call it
+ * from inside another serialSpend job: the queue would wait on itself.
+ */
+export const runAgentActionSerial = (...args: Parameters<typeof runAgentAction>): Promise<ActionResult> =>
+  serialSpend(() => runAgentAction(...args));

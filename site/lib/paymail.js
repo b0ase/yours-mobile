@@ -652,6 +652,7 @@ function matchOutputs(tx, expected) {
  *   updatePayment(reference, patch)       listInbox(identityKey) → rows (status 'received')
  *   countRecentPayments(alias, sinceIso) → number
  *   deleteByKey(identityKey) → { aliases, payments } (counts)
+ *   deleteBinding(alias), deleteBindingsByKey(identityKey) (signed name bindings of released names)
  * `broadcast(tx, beefHex)` is optional (best-effort).
  */
 /**
@@ -860,6 +861,8 @@ function makeHandlers({
     const priceOut = { address, usd };
     const chk = await nameFee.checkFeeTx({
       txid: String(body.fields?.feeTxid || '').toLowerCase(),
+      key,
+      alias,
       usd,
       txHex: body.feeTx,
       address,
@@ -1715,6 +1718,8 @@ function makeHandlers({
           { error: 'A payment to this name is still arriving. Open the wallet to collect it, then try again.' },
         ];
       await store.deleteAlias(alias);
+      // The name is free for anyone now: drop its signed binding so the next owner can bind it (darkasep112).
+      await store.deleteBinding?.(alias);
       return [200, { unlinked: handleOf(alias) }];
     },
 
@@ -1831,6 +1836,8 @@ function makeHandlers({
       const key = String(body.identityKey).toLowerCase();
       const row = await store.getAliasByKey(key);
       const removed = await store.deleteByKey(key);
+      // Its names are free now: drop the bindings this key signed (b-Aware 25 Oct 2026, darkasep112).
+      await store.deleteBindingsByKey?.(key);
       await store.deleteBphone?.(key);
       return [200, { deleted: true, alias: row ? row.alias : null, ...removed }];
     },
