@@ -149,7 +149,17 @@ const publicRow = (r) => ({
 });
 
 /** Handlers return [status, body]. Deps injected for tests: store, rate() USD per BSV, broadcast(tx, beefHex), env, now(). */
-function makeThemeDepositHandlers({ store, ledger, rate, broadcast, env = process.env, now = () => Date.now() }) {
+function makeThemeDepositHandlers({
+  store,
+  ledger,
+  rate,
+  broadcast,
+  env = process.env,
+  now = () => Date.now(),
+  quoteMs = QUOTE_MS,
+  claimGraceMs = CLAIM_GRACE_MS,
+  actions = {},
+}) {
   if (!ledger || typeof ledger.reserve !== 'function') throw new Error('paid-txid ledger required');
   const config = async () => {
     const usd = depositUsd(env);
@@ -160,7 +170,7 @@ function makeThemeDepositHandlers({ store, ledger, rate, broadcast, env = proces
     const pay = payAddress(env);
     const usd = depositUsd(env);
     if (!pay || !usd) return [503, { error: 'not_configured' }];
-    const sigErr = await verifySigned(body || {}, 'theme-deposit-quote', now());
+    const sigErr = await verifySigned(body || {}, actions.quote || 'theme-deposit-quote', now());
     if (sigErr) return [401, { error: sigErr }];
     const identityKey = String(body.identityKey).toLowerCase();
     const v = validateBrief(body.fields);
@@ -170,7 +180,7 @@ function makeThemeDepositHandlers({ store, ledger, rate, broadcast, env = proces
     const sats = priceSats(r, usd);
     const quoteId = crypto.randomBytes(16).toString('hex');
     const memoHex = memoScript(quoteId).toHex();
-    const expiresAt = new Date(now() + QUOTE_MS).toISOString();
+    const expiresAt = new Date(now() + quoteMs).toISOString();
     await store.insertDeposit({
       ...v.brief,
       identity_key: identityKey,
@@ -197,7 +207,7 @@ function makeThemeDepositHandlers({ store, ledger, rate, broadcast, env = proces
   };
 
   const claim = async (body) => {
-    const sigErr = await verifySigned(body || {}, 'theme-deposit-claim', now());
+    const sigErr = await verifySigned(body || {}, actions.claim || 'theme-deposit-claim', now());
     if (sigErr) return [401, { error: sigErr }];
     const identityKey = String(body.identityKey).toLowerCase();
     const f = body.fields || {};
@@ -211,7 +221,7 @@ function makeThemeDepositHandlers({ store, ledger, rate, broadcast, env = proces
       if (row.txid === txid) return [200, { deposit: publicRow(row) }];
       return [409, { error: 'quote_used' }];
     }
-    if (now() > Date.parse(row.quote_expires_at) + CLAIM_GRACE_MS) return [410, { error: 'quote_expired' }];
+    if (now() > Date.parse(row.quote_expires_at) + claimGraceMs) return [410, { error: 'quote_expired' }];
     let tx;
     let beefHex = null;
     try {
