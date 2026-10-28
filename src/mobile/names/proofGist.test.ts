@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { PrivateKey, ProtoWallet, Utils } from '@bsv/sdk';
 import { checkGistProof, gistStatement, provableProvider, verifyGistText } from './proof';
 
@@ -18,6 +18,25 @@ const signed = async () => {
 const gistFetch = (login: string, text: string, id = 42) =>
   (async () =>
     new Response(JSON.stringify({ owner: { login, id }, files: { 'proof.txt': { content: text } } }))) as never;
+
+// The account-change check remembers the first account in localStorage. Depending on which test files ran first in the
+// same process, CI had none (or a stub that keeps nothing), so the check could not fire. Use a fresh in-memory one here
+// and put the previous one back afterwards.
+const g = globalThis as { localStorage?: unknown };
+let saved: unknown;
+beforeAll(() => {
+  saved = g.localStorage;
+  const mem = new Map<string, string>();
+  g.localStorage = {
+    getItem: (k: string) => mem.get(k) ?? null,
+    setItem: (k: string, v: string) => void mem.set(k, String(v)),
+    removeItem: (k: string) => void mem.delete(k),
+    clear: () => mem.clear(),
+  };
+});
+afterAll(() => {
+  g.localStorage = saved;
+});
 
 describe('GitHub gist proofs (wallet side)', () => {
   test('statement + signature by this key', async () => {
