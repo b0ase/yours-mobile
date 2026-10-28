@@ -203,6 +203,9 @@ function supabaseStore(env = process.env, f = fetch) {
       one(
         `bwallet_name_proofs?alias=eq.${q(alias)}&select=alias,provider,sub,identity_key,id_token,created_at&limit=1`,
       ),
+    // One `.linkedin` name per LinkedIn account: the proof already bound to this provider account, if any.
+    getProofBySub: (provider, sub) =>
+      one(`bwallet_name_proofs?provider=eq.${q(provider)}&sub=eq.${q(sub)}&select=alias,provider,sub&limit=1`),
     putProof: (row) =>
       req('bwallet_name_proofs', {
         method: 'POST',

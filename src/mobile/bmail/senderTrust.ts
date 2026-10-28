@@ -77,7 +77,7 @@ export function looksLikeBrand(label: string): boolean {
 function brandWords(label: string, one: string): boolean {
   const local = String(label ?? '')
     .split('@')[0]
-    .replace(/\.(x|gmail)$/i, '');
+    .replace(/\.(x|gmail|github|linkedin)$/i, '');
   const words = local
     .normalize('NFKC')
     .split(/[^\p{L}\p{N}_-]+/u)

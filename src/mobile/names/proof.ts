@@ -14,8 +14,12 @@
  * The archived keys come from our server, so they are trusted only for tokens issued no later than a day after we
  * first logged the key (a key we "found" later can't vouch for an older token). Step 3 anchors the archive on chain.
  *
- * TODO (PROVABLE-NAMES.md step 2): GitHub and X have no signed ID token; their names need public-post proofs.
+ * LinkedIn (owner, 28 Oct 2026): its token carries no public name, so `slug.linkedin` is bound to the LinkedIn
+ * account (sub) when claimed; the check is the signed token for this key plus the same account as before.
+ * GitHub has no signed ID token: `login.github` is proven by a public gist (checkGistProof), fetched from
+ * api.github.com directly. TODO (PROVABLE-NAMES.md step 2): X has none either; `.x` names stay server-checked.
  */
+import { ProtoWallet, Utils } from '@bsv/sdk';
 
 declare const __GOOGLE_CLIENT_ID__: string;
 declare const __LINKEDIN_CLIENT_ID__: string;
@@ -32,7 +36,12 @@ export type NameProof = { provider?: string; idToken?: string; keys?: ProviderKe
  * this wallet saw a proof for the name before).
  */
 export type ProofStatus = 'proven' | 'unproven' | 'missing' | 'bad' | 'sub-changed' | 'unchecked';
-export type ProofCheck = { status: ProofStatus; provider: ProofProvider; sub?: string; reason?: string };
+export type ProofCheck = {
+  status: ProofStatus;
+  provider: ProofProvider | 'github';
+  sub?: string;
+  reason?: string;
+};
 
 const env = (v: string | undefined) => (typeof v === 'string' ? v.trim() : '');
 
@@ -53,7 +62,7 @@ export const PROOF_PROVIDERS: Record<
     label: 'LinkedIn',
     iss: ['https://www.linkedin.com/oauth'],
     jwks: 'https://www.linkedin.com/oauth/openid/jwks',
-    suffix: null,
+    suffix: 'linkedin',
     clientId: () => env(typeof __LINKEDIN_CLIENT_ID__ === 'undefined' ? undefined : __LINKEDIN_CLIENT_ID__),
   },
 };
@@ -156,7 +165,9 @@ export async function verifyNameProof(
   if (!o.aud || !auds.includes(o.aud)) return { ok: false, reason: 'issued to another app' };
   if (typeof c.sub !== 'string' || !c.sub) return { ok: false, reason: 'no account id' };
   if (c.nonce !== (await proofNonce(o.identityKey))) return { ok: false, reason: 'proves a different wallet' };
-  if (aliasForClaims(o.provider, c) !== o.alias.toLowerCase()) return { ok: false, reason: 'proves a different name' };
+  // LinkedIn names carry no name in the token: the account (sub) continuity check below is what binds them.
+  if (o.provider !== 'linkedin' && aliasForClaims(o.provider, c) !== o.alias.toLowerCase())
+    return { ok: false, reason: 'proves a different name' };
   return { ok: true, sub: c.sub };
 }
 
@@ -206,6 +217,7 @@ export async function checkNameProof(
   identityKey: string,
   proof: unknown,
 ): Promise<ProofCheck | null> {
+  if (/\.github$/i.test(alias)) return checkGistProof(f, alias, identityKey, proof);
   const provider = provableProvider(alias);
   if (!provider) return null;
   const p = proof && typeof proof === 'object' ? (proof as NameProof) : null;
@@ -229,4 +241,68 @@ export async function checkNameProof(
   return { status: 'proven', provider, sub: v.sub };
 }
 
-export const provenByLabel = (provider: ProofProvider) => `Proven by ${PROOF_PROVIDERS[provider].label}`;
+export const provenByLabel = (provider: ProofProvider | 'github') =>
+  `Proven by ${provider === 'github' ? 'GitHub' : PROOF_PROVIDERS[provider].label}`;
+
+/** The statement a `login.github` owner signs and posts in a public gist (same as the server's). */
+export const gistStatement = (alias: string, identityKey: string) =>
+  `bwalletx-name-proof|v1|${alias.toLowerCase()}|${identityKey.toLowerCase()}`;
+
+/** A gist's text proves alias → identityKey: the statement line, then this key's signature of it. */
+export async function verifyGistText(text: string, alias: string, identityKey: string): Promise<boolean> {
+  const lines = String(text || '')
+    .split(/\r?\n/)
+    .map((l) => l.trim());
+  const st = gistStatement(alias, identityKey);
+  const i = lines.indexOf(st);
+  const sig = i >= 0 ? (lines[i + 1] ?? '') : '';
+  if (!/^[0-9a-f]{16,200}$/i.test(sig)) return false;
+  try {
+    const { valid } = await new ProtoWallet('anyone').verifySignature({
+      data: Utils.toArray(st, 'utf8'),
+      signature: Utils.toArray(sig, 'hex'),
+      protocolID: [2, 'bwallet paymail'],
+      keyID: '1',
+      counterparty: identityKey.toLowerCase(),
+    });
+    return valid;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * GitHub names: fetch the gist the proof names straight from api.github.com, check its owner is this login and it
+ * holds this key's signed statement, and that the GitHub account (owner id) is the one this wallet saw before.
+ */
+export async function checkGistProof(
+  f: Fetch,
+  alias: string,
+  identityKey: string,
+  proof: unknown,
+): Promise<ProofCheck> {
+  const provider = 'github' as const;
+  const p = proof && typeof proof === 'object' ? (proof as { provider?: string; gist?: string }) : null;
+  const seen = readSubs()[alias.toLowerCase()];
+  if (!p?.gist) return { status: seen ? 'missing' : 'unproven', provider };
+  if (p.provider !== 'github' || !/^[0-9a-f]{20,40}$/.test(p.gist))
+    return { status: 'bad', provider, reason: 'not a gist proof' };
+  let g: { owner?: { login?: string; id?: number }; files?: Record<string, { content?: string; truncated?: boolean }> };
+  try {
+    const r = await f(`https://api.github.com/gists/${p.gist}`, { headers: { Accept: 'application/vnd.github+json' } });
+    if (!r.ok) return { status: seen ? 'unchecked' : 'unproven', provider };
+    g = (await r.json()) as typeof g;
+  } catch {
+    return { status: seen ? 'unchecked' : 'unproven', provider };
+  }
+  const login = String(g.owner?.login ?? '').toLowerCase();
+  if (`${login}.github` !== alias.toLowerCase()) return { status: 'bad', provider, reason: 'gist by another account' };
+  let ok = false;
+  for (const file of Object.values(g.files ?? {}))
+    if (file && !file.truncated && (await verifyGistText(String(file.content ?? ''), alias, identityKey))) ok = true;
+  if (!ok) return { status: 'bad', provider, reason: 'gist does not prove this wallet' };
+  const sub = String(g.owner?.id ?? '');
+  if (seen && seen !== sub) return { status: 'sub-changed', provider, sub };
+  if (!seen && sub) trustProofSub(alias, sub);
+  return { status: 'proven', provider, sub };
+}

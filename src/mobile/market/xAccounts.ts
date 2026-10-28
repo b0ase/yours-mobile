@@ -47,7 +47,7 @@ export async function xAccountRows(board: HotRoom[]): Promise<HotRoom[]> {
         const meta = await roomMeta('bsv21', ref.id).catch(() => null);
         return {
           ref,
-          title: meta?.title ?? `$${a.alias.replace(/\.(x|gmail)$/, '').toUpperCase()}`,
+          title: meta?.title ?? `$${a.alias.replace(/\.(x|gmail|github|linkedin)$/, '').toUpperCase()}`,
           subtitle:
             a.kind === 'x' || a.alias.endsWith('.x')
               ? `x.com/${a.name ?? a.alias.replace(/\.x$/, '')} ✓`

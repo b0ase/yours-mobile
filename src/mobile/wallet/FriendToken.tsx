@@ -30,7 +30,7 @@ const personalTokenOf = (name: string): Promise<string | null> => {
 const namesFor = (c: Contact) => {
   const raw = c.paymail?.split('@')[0] || c.handle || '';
   const k = personalKey(raw);
-  return k ? [...new Set([k, k.replace(/\.(x|gmail)$/, '')])] : [];
+  return k ? [...new Set([k, k.replace(/\.(x|gmail|github|linkedin)$/, '')])] : [];
 };
 
 /**

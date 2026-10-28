@@ -567,7 +567,7 @@ export const KEY_CHANGED =
 export const proofRefusal = (r: Pick<Resolved, 'nameProof'>): string | undefined => {
   const p = r.nameProof;
   if (!p || p.status === 'proven' || p.status === 'unproven') return undefined;
-  const who = PROOF_PROVIDERS[p.provider].label;
+  const who = p.provider === 'github' ? 'GitHub' : PROOF_PROVIDERS[p.provider].label;
   if (p.status === 'missing')
     return `This name has no proof from ${who}, so it may not belong to who it says. Not paying it.`;
   if (p.status === 'sub-changed')
