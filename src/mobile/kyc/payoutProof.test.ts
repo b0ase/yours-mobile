@@ -207,7 +207,9 @@ describe('b-Aware payout proof', () => {
       ['certifier', 'fields', 'revocationOutpoint', 'serialNumber', 'signature', 'subject', 'type'].sort(),
     );
     expect(Object.keys(file.proof).sort()).toEqual(['address', 'date', 'scheme', 'signature']);
-    expect(json).not.toMatch(/keyring|verifier|privateKey|wif|seed|mnemonic/i);
+    // Field names only: the certificate's encrypted fields and signatures are random base64, which can
+    // spell "wif" or "seed" by chance. The secret values themselves are checked just below.
+    expect(json).not.toMatch(/"(keyring|verifier|privateKey|wif|seed|mnemonic)"\s*:/i);
     for (const v of Object.values(raw.keyring)) expect(json).not.toContain(v);
     expect(json).not.toContain(identity.toHex());
     expect(json).not.toContain(identity.toWif());

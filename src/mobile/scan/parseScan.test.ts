@@ -98,3 +98,31 @@ describe('restore codes ("Put this wallet on your phone")', () => {
       expect(parseScan(u).kind).toBe('text');
   });
 });
+
+describe('parseScan: QRs we generate', () => {
+  const DOC = '04ea9a26-6e55-4b19-8c16-ee76b8d7397a';
+  const H = 'cd'.repeat(32);
+  const sign = { ticker: 'BCORPBOARD', docId: DOC, hash: H };
+  test('bChatX sign QR, bit-sign #549 (web.bwalletx.com/bapp/bchatx?to=…)', () => {
+    const url = `https://web.bwalletx.com/bapp/bchatx?to=${encodeURIComponent(`/room/BCORPBOARD?sign=${DOC}&h=${H}`)}`;
+    expect(parseScan(url)).toEqual({ kind: 'sign', url, sign });
+  });
+  test('bChatX sign QR, bit-sign #544/#546 (www.bchatx.com/room/<T>?sign=&h=)', () => {
+    const url = `https://www.bchatx.com/room/BCORPBOARD?sign=${DOC}&h=${H}`;
+    expect(parseScan(url)).toEqual({ kind: 'sign', url, sign });
+    const fb = `https://chat.bwalletx.com/room/BCORPBOARD?sign=${DOC}&h=${H}`;
+    expect(parseScan(fb)).toEqual({ kind: 'sign', url: fb, sign });
+  });
+  test('bChatX sign QR on /r/ is a document, not a room join', () => {
+    const url = `https://www.bchatx.com/r/BCORPBOARD?sign=${DOC}&h=${H}`;
+    expect(parseScan(url)).toEqual({ kind: 'sign', url, sign });
+  });
+  test('other web.bwalletx.com/bapp links route to the bApp frame', () => {
+    const url = 'https://web.bwalletx.com/bapp/bchatx?to=%2Fu%2Fbmovies';
+    expect(parseScan(url)).toEqual({ kind: 'bapp', url, route: '/m/bapp/bchatx?to=%2Fu%2Fbmovies' });
+  });
+  test('pairing URLs still pair; a plain room link still joins', () => {
+    expect(parseScan('https://www.bwallet.space/pair?c=abc').kind).toBe('pair');
+    expect(parseScan('https://www.bchatx.com/r/BCORPBOARD').kind).toBe('join');
+  });
+});

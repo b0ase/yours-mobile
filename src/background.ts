@@ -223,7 +223,13 @@ import {
   type MintSheet,
 } from './services/pinnedMint';
 import { oneShotGrant } from './services/oneShotGrant';
-import { isReservedProtocol, reservedProtocolRefusal, RESERVED_REFUSAL, withoutReservedProtocols } from './services/reservedProtocols';
+import {
+  isReservedProtocol,
+  refusalCode,
+  reservedProtocolRefusal,
+  RESERVED_REFUSAL,
+  withoutReservedProtocols,
+} from './services/reservedProtocols';
 import { healIndexFundActions } from './mobile/tokens/indexFundHeal';
 import { continuesChain, endChain, isAlreadyProcessedAbort, markChainStep, startsChain } from './services/dappChain';
 import { HOSTED_YOURS_IMAGE } from './utils/constants';
@@ -2481,7 +2487,7 @@ if (!(
           sender.origin ? normalizeOriginator(sender.origin) : undefined,
         );
       if (refusal) {
-        sendResponse({ type: message.action, success: false, error: refusal });
+        sendResponse({ type: message.action, success: false, error: refusal, code: refusalCode(refusal) });
         return true;
       }
     }
@@ -6019,6 +6025,9 @@ if (!(
         success: false,
         // Heal outcome first: the page cuts long errors, and a long broadcaster reason hid "tap Send again" (19 Oct).
         error: withHealMessage(friendly ?? errorMessage, heal),
+        // For the wallet page's Details panel only (never to sites): which error and where it was thrown (a bare
+        // WERR_INTERNAL says neither).
+        detail: message.originator !== ADMIN_ORIGINATOR ? undefined : `${String((error as { code?: unknown })?.code ?? errorName)}\n${errorStack?.split('\n').slice(0, 6).join('\n') ?? ''}`,
       });
     } finally {
       releasePayeeMark?.();

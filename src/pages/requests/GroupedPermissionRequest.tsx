@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { siteName } from '../../services/approvalKind';
 import { markSiteConnected } from '../../mobile/theme/connectSiteTheme';
 import { motion } from 'framer-motion';
-import { Shield, Loader2 } from 'lucide-react';
+import { LogIn, Loader2 } from 'lucide-react';
 import { Show } from '../../components/Show';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { useSnackbar } from '../../hooks/useSnackbar';
@@ -10,7 +9,6 @@ import { useTheme } from '../../hooks/useTheme';
 import { sendMessage } from '../../utils/chromeHelpers';
 import { protocolLabel } from '../../utils/protocols';
 import { isReservedProtocol } from '../../services/reservedProtocols';
-import { ALLOWANCES_ENABLED } from '../../services/allowanceFlag';
 import type {
   GroupedPermissionRequest as GroupedPermissionRequestType,
   GroupedPermissions,
@@ -19,7 +17,7 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { confirmUsbForApproval } from '../../services/usbPresence';
 import { SiteThemeOffer } from '../../mobile/theme/SiteThemeOffer';
 import { familySite } from '../../mobile/theme/themeSites';
-import { DollarAmount, useSheetPrice } from '../../components/DollarAmount';
+import { accountNamesFor } from '../../mobile/names/accountNames';
 import { basketDisplayName } from '../../services/reservedBaskets';
 
 export type GroupedPermissionRequestProps = {
@@ -30,8 +28,6 @@ export type GroupedPermissionRequestProps = {
 export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProps) => {
   const { request, onResponse } = props;
   const { theme } = useTheme();
-  // Dollars first, sats small underneath (owner, 24 Oct 2026). Display only.
-  const price = useSheetPrice();
   const { handleSelect, hideMenu } = useBottomMenu();
   const { addSnackbar } = useSnackbar();
   const [isProcessing, setIsProcessing] = useState(false);
@@ -40,18 +36,13 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
   const themeAccount = chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey ?? '';
   const { permissions } = request;
 
-  // Owner, 26 Oct 2026 (replaces audit C1 here): every line is drawn with its box in plain view, so a protocol the
-  // site's manifest asks for is ticked, and "Connect" grants it unless the user unticks it (bchatx.com's Connect left
-  // "bchat documents" unticked, then encrypt failed "Permission denied"). Reserved protocols are still refused.
-  const [protocolChecked, setProtocolChecked] = useState<boolean[]>(() =>
-    (permissions.protocolPermissions ?? []).map((p) => !isReservedProtocol(p.protocolID)),
-  );
-  const [basketChecked, setBasketChecked] = useState<boolean[]>(() => (permissions.basketAccess ?? []).map(() => true));
-  const [certChecked, setCertChecked] = useState<boolean[]>(() =>
-    (permissions.certificateAccess ?? []).map(() => true),
-  );
-  // Ticked by default (owner, 9 Oct 2026): connecting sets the app's allowance in the same tap.
-  const [spendingChecked, setSpendingChecked] = useState(true);
+  // One plain sentence and one button (owner, 28 Oct 2026: "USERS WANT CLARITY! NOT TINY CHECKBOXES"). Signing in
+  // grants a fixed default bundle: the site's own (non-reserved) protocols and baskets. Certificates and a spending
+  // allowance are never in it; the site asks for those later, each on its own sheet. Reserved protocols stay refused.
+  const account = chromeStorageService.getCurrentAccountObject().account;
+  const rawHandle = accountNamesFor(account?.addresses?.identityAddress, account?.name ?? '').payable?.trim() ?? '';
+  const handle = rawHandle ? (rawHandle.startsWith('$') ? rawHandle : `$${rawHandle}`) : '';
+  const [showDetails, setShowDetails] = useState(false);
 
   useEffect(() => {
     handleSelect('bsv');
@@ -60,18 +51,9 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
 
   const buildGranted = (): Partial<GroupedPermissions> => {
     const granted: Partial<GroupedPermissions> = {};
-    const checkedProtocols = (permissions.protocolPermissions ?? []).filter(
-      (p, i) => protocolChecked[i] && !isReservedProtocol(p.protocolID),
-    );
-    if (checkedProtocols.length > 0) granted.protocolPermissions = checkedProtocols;
-    const checkedBaskets = (permissions.basketAccess ?? []).filter((_, i) => basketChecked[i]);
-    if (checkedBaskets.length > 0) granted.basketAccess = checkedBaskets;
-    const checkedCerts = (permissions.certificateAccess ?? []).filter((_, i) => certChecked[i]);
-    if (checkedCerts.length > 0) granted.certificateAccess = checkedCerts;
-    // Envelopes by default: connecting never sets a monthly allowance (services/allowanceFlag.ts).
-    if (ALLOWANCES_ENABLED && spendingChecked && permissions.spendingAuthorization) {
-      granted.spendingAuthorization = permissions.spendingAuthorization;
-    }
+    const protocols = (permissions.protocolPermissions ?? []).filter((p) => !isReservedProtocol(p.protocolID));
+    if (protocols.length > 0) granted.protocolPermissions = protocols;
+    if (permissions.basketAccess?.length) granted.basketAccess = permissions.basketAccess;
     return granted;
   };
 
@@ -109,22 +91,12 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
   };
 
   const protos = (permissions.protocolPermissions ?? []).filter((p) => !isReservedProtocol(p.protocolID));
-  const site = siteName(request.originator);
-  const groupedTitle = protos.length
-    ? `Connect to ${site} and use your "${protocolLabel(protos[0].protocolID)}" keys`
-    : `Connect to ${site}`;
-  // Unticked requested lines are named on the button, e.g. "Connect without bchat documents".
-  const off = [
-    ...(permissions.protocolPermissions ?? [])
-      .map((p, i) => (!isReservedProtocol(p.protocolID) && !protocolChecked[i] ? protocolLabel(p.protocolID) : ''))
-      .filter(Boolean),
-    ...(permissions.basketAccess ?? []).map((_, i) => (basketChecked[i] ? '' : 'items')).filter(Boolean),
-    ...(permissions.certificateAccess ?? []).map((_, i) => (certChecked[i] ? '' : 'details')).filter(Boolean),
+  const host = request.originator.replace(/^[a-z]+:\/\//i, '').split(/[/?#]/)[0];
+  const title = `${host} wants to sign you in${handle ? ` as ${handle}` : ''}`;
+  const included = [
+    ...protos.map((p) => `Use your keys for “${protocolLabel(p.protocolID)}”`),
+    ...(permissions.basketAccess ?? []).map((b) => `See its own items in “${basketDisplayName(b.basket)}”`),
   ];
-  const leftOut = !off.length ? '' : off.length > 1 ? ` without ${off.length} permissions` : ` without ${off[0]}`;
-  const toggleProtocol = (i: number) => setProtocolChecked((prev) => prev.map((v, j) => (j === i ? !v : v)));
-  const toggleBasket = (i: number) => setBasketChecked((prev) => prev.map((v, j) => (j === i ? !v : v)));
-  const toggleCert = (i: number) => setCertChecked((prev) => prev.map((v, j) => (j === i ? !v : v)));
 
   return (
     <motion.div
@@ -134,211 +106,51 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ type: 'spring', damping: 24, stiffness: 260 }}
     >
-      {/* Header */}
-      <div className="flex items-center gap-3 mb-3">
-        <div
-          className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-          style={{ background: 'rgba(161,255,139,0.12)' }}
-        >
-          <Shield size={18} style={{ color: '#A1FF8B' }} />
-        </div>
-        <div>
-          {/* Titled by what it grants (owner, 26 Oct 2026), not "Permission Request". */}
-          <h1 className="text-lg font-bold leading-tight" style={{ color: theme.color.global.contrast }}>
-            {groupedTitle}
-          </h1>
-          <p className="text-xs mt-0.5" style={{ color: theme.color.global.gray }}>
-            <span className="font-semibold" style={{ color: theme.color.global.contrast }}>
-              {request.originator}
-            </span>{' '}
-            is requesting the following permissions
-          </p>
-        </div>
+      <div
+        className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-4"
+        style={{ background: 'rgba(161,255,139,0.12)' }}
+      >
+        <LogIn size={22} style={{ color: '#A1FF8B' }} />
       </div>
+      <h1
+        className="text-xl font-bold leading-snug text-center break-words"
+        style={{ color: theme.color.global.contrast }}
+        data-testid="connect-title"
+      >
+        {title}
+      </h1>
+      <p className="text-xs mt-2 text-center break-all" style={{ color: theme.color.global.gray }}>
+        Request from{' '}
+        <span className="font-semibold" style={{ color: theme.color.global.contrast }}>
+          {request.originator}
+        </span>
+      </p>
+      <p className="text-sm mt-4 text-center leading-relaxed" style={{ color: theme.color.global.gray }}>
+        Nothing is spent. If {host} later wants anything more, bWalletX will ask you then.
+      </p>
 
       {/* A family site may offer its colours (mobile/theme/siteTheme.ts): a separate tap, never part of the grant. */}
-      <SiteThemeOffer site={familySite(request.originator)} account={themeAccount} style={{ marginBottom: 12 }} />
+      <SiteThemeOffer site={familySite(request.originator)} account={themeAccount} style={{ marginTop: 12 }} />
 
-      {/* Description */}
-      <Show when={!!permissions.description}>
-        <p className="text-xs mb-3 leading-relaxed" style={{ color: theme.color.global.gray }}>
-          {permissions.description}
-        </p>
-      </Show>
-
-      {/* Spending authorization — shown separately above the list, ticked by default */}
-      <Show when={ALLOWANCES_ENABLED && !!permissions.spendingAuthorization}>
-        <motion.div
-          className="w-full rounded-2xl px-4 py-3 mb-3"
-          style={{
-            background: 'rgba(247,144,9,0.08)',
-            border: '1px solid rgba(247,144,9,0.2)',
-          }}
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.06 }}
+      <Show when={included.length > 0}>
+        <button
+          type="button"
+          className="text-xs mt-4 underline self-center"
+          style={{ color: theme.color.global.gray, background: 'transparent' }}
+          onClick={() => setShowDetails((v) => !v)}
         >
-          <p className="text-xs font-bold uppercase tracking-wider pb-1" style={{ color: '#F79009' }}>
-            Spending Authorization
-          </p>
-          <label className="flex items-start gap-3 py-1 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={spendingChecked}
-              onChange={() => setSpendingChecked(!spendingChecked)}
-              className="mt-0.5 accent-orange-400"
-            />
-            <div className="flex flex-col min-w-0">
-              <span className="text-xs font-semibold" style={{ color: '#F79009' }}>
-                This app wants to spend up to
-              </span>
-              <DollarAmount
-                sats={permissions.spendingAuthorization?.amount ?? 0}
-                price={price}
-                size={24}
-                align="left"
-                color="#F79009"
-                mutedColor={theme.color.global.gray}
-              />
-              {permissions.spendingAuthorization?.description && (
-                <span className="text-xs mt-1 opacity-70" style={{ color: theme.color.global.contrast }}>
-                  App says: &ldquo;{permissions.spendingAuthorization.description}&rdquo;
-                </span>
-              )}
-            </div>
-          </label>
-        </motion.div>
+          {showDetails ? 'Hide details' : 'What does signing in allow?'}
+        </button>
+        <Show when={showDetails}>
+          <ul className="text-xs mt-2 leading-relaxed list-disc pl-5" style={{ color: theme.color.global.gray }}>
+            {included.map((line, i) => (
+              <li key={i}>{line}</li>
+            ))}
+          </ul>
+        </Show>
       </Show>
 
-      {/* Permissions list */}
-      <motion.div
-        className="w-full rounded-2xl px-4 py-2 mb-5"
-        style={{
-          background: theme.color.global.row,
-          border: '1px solid rgba(255,255,255,0.06)',
-          maxHeight: '16rem',
-          overflowY: 'auto',
-        }}
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.08 }}
-      >
-        {/* Protocols */}
-        <Show when={!!permissions.protocolPermissions?.length}>
-          <p
-            className="text-xs font-bold uppercase tracking-wider pt-3 pb-1"
-            style={{ color: theme.color.global.gray }}
-          >
-            Protocols
-          </p>
-          {permissions.protocolPermissions?.map((p, i) =>
-            isReservedProtocol(p.protocolID) ? (
-              <p key={`proto-${i}`} className="text-xs py-2" style={{ color: theme.color.global.gray }}>
-                Refused: “{p.protocolID[1]}” is used only by bWalletX itself.
-              </p>
-            ) : (
-              <label
-                key={`proto-${i}`}
-                className="flex items-start gap-3 py-2 cursor-pointer"
-                style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}
-              >
-                <input
-                  type="checkbox"
-                  checked={protocolChecked[i]}
-                  onChange={() => toggleProtocol(i)}
-                  className="mt-0.5 accent-green-400"
-                />
-                <div className="flex flex-col min-w-0">
-                  <span
-                    className="text-[15px] font-semibold leading-snug"
-                    style={{ color: theme.color.global.contrast }}
-                  >
-                    Let this app sign and encrypt with your keys for “{protocolLabel(p.protocolID)}”
-                    {p.counterparty ? ` (shared with ${p.counterparty.slice(0, 10)}…)` : ''}
-                  </span>
-                  <span className="text-xs mt-0.5 opacity-60" style={{ color: theme.color.global.contrast }}>
-                    Any app that asks for this protocol gets the same keys (level {p.protocolID[0]}).
-                  </span>
-                  {p.description && (
-                    <span className="text-xs mt-0.5 opacity-60" style={{ color: theme.color.global.contrast }}>
-                      {p.description}
-                    </span>
-                  )}
-                </div>
-              </label>
-            ),
-          )}
-        </Show>
-
-        {/* Baskets */}
-        <Show when={!!permissions.basketAccess?.length}>
-          <p
-            className="text-xs font-bold uppercase tracking-wider pt-3 pb-1"
-            style={{ color: theme.color.global.gray }}
-          >
-            Baskets
-          </p>
-          {permissions.basketAccess?.map((b, i) => (
-            <label
-              key={`basket-${i}`}
-              className="flex items-start gap-3 py-2 cursor-pointer"
-              style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}
-            >
-              <input
-                type="checkbox"
-                checked={basketChecked[i]}
-                onChange={() => toggleBasket(i)}
-                className="mt-0.5 accent-green-400"
-              />
-              <div className="flex flex-col min-w-0">
-                <span className="text-[15px] font-semibold leading-snug" style={{ color: theme.color.global.contrast }}>
-                  {basketDisplayName(b.basket)}
-                </span>
-                {b.description && (
-                  <span className="text-xs mt-0.5 opacity-60" style={{ color: theme.color.global.contrast }}>
-                    {b.description}
-                  </span>
-                )}
-              </div>
-            </label>
-          ))}
-        </Show>
-
-        {/* Certificates */}
-        <Show when={!!permissions.certificateAccess?.length}>
-          <p
-            className="text-xs font-bold uppercase tracking-wider pt-3 pb-1"
-            style={{ color: theme.color.global.gray }}
-          >
-            Certificates
-          </p>
-          {permissions.certificateAccess?.map((c, i) => (
-            <label
-              key={`cert-${i}`}
-              className="flex items-start gap-3 py-2 cursor-pointer"
-              style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}
-            >
-              <input
-                type="checkbox"
-                checked={certChecked[i]}
-                onChange={() => toggleCert(i)}
-                className="mt-0.5 accent-green-400"
-              />
-              <div className="flex flex-col min-w-0">
-                <span className="text-[15px] font-semibold leading-snug" style={{ color: theme.color.global.contrast }}>
-                  {c.type}
-                </span>
-                <span className="text-xs mt-0.5 opacity-60" style={{ color: theme.color.global.contrast }}>
-                  {c.description} — fields: {c.fields.join(', ')}
-                </span>
-              </div>
-            </label>
-          ))}
-        </Show>
-      </motion.div>
-
-      {/* Actions */}
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-3 mt-6">
         {usbError && (
           <p className="text-xs text-center m-0" style={{ color: '#ef4444' }}>
             {usbError}
@@ -353,14 +165,12 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
           }}
           disabled={isProcessing}
           onClick={handleGrant}
-          whileHover={{ scale: isProcessing ? 1 : 1.02 }}
           whileTap={{ scale: isProcessing ? 1 : 0.97 }}
-          transition={{ type: 'spring', damping: 20, stiffness: 400 }}
+          data-testid="connect-sign-in"
         >
           {isProcessing && <Loader2 size={14} className="animate-spin" />}
-          {`Connect${leftOut}`}
+          Sign in
         </motion.button>
-
         <motion.button
           className="w-full py-3.5 rounded-xl font-semibold text-sm"
           style={{
@@ -371,11 +181,9 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
           }}
           disabled={isProcessing}
           onClick={handleDeny}
-          whileHover={{ scale: isProcessing ? 1 : 1.02 }}
           whileTap={{ scale: isProcessing ? 1 : 0.97 }}
-          transition={{ type: 'spring', damping: 20, stiffness: 400 }}
         >
-          Deny All
+          Cancel
         </motion.button>
       </div>
     </motion.div>

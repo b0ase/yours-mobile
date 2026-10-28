@@ -261,7 +261,17 @@ const live = (row, now) =>
  * Handlers: each returns [status, body]. Deps are injected so tests run without a network:
  * store (themeOrderStore shape), rate() → USD per BSV, broadcast(tx, beefHex) (throws if rejected), env, now().
  */
-function makeThemeOrderHandlers({ store, ledger, rate, broadcast, env = process.env, now = () => Date.now() }) {
+function makeThemeOrderHandlers({
+  store,
+  ledger,
+  rate,
+  broadcast,
+  env = process.env,
+  now = () => Date.now(),
+  quoteMs = QUOTE_MS,
+  claimGraceMs = CLAIM_GRACE_MS,
+  actions = {},
+}) {
   if (!ledger || typeof ledger.reserve !== 'function') throw new Error('paid-txid ledger required');
   const address = () => payAddress(env);
 
@@ -289,7 +299,7 @@ function makeThemeOrderHandlers({ store, ledger, rate, broadcast, env = process.
   const quote = async (body) => {
     const pay = address();
     if (!pay) return [503, { error: 'not_configured' }];
-    const sigErr = await verifySigned(body || {}, 'theme-orders-quote', now());
+    const sigErr = await verifySigned(body || {}, actions.quote || 'theme-orders-quote', now());
     if (sigErr) return [401, { error: sigErr }];
     const identityKey = String(body.identityKey).toLowerCase();
     const v = validateOrder(body.fields, identityKey);
@@ -311,7 +321,7 @@ function makeThemeOrderHandlers({ store, ledger, rate, broadcast, env = process.
     const sats = priceSats(r);
     const quoteId = crypto.randomBytes(16).toString('hex');
     const memoHex = memoScript(quoteId).toHex();
-    const expiresAt = new Date(t + QUOTE_MS).toISOString();
+    const expiresAt = new Date(t + quoteMs).toISOString();
     const base = v.order.renew ? { slug: v.order.slug, renews: v.order.slug, name: null, brand: null } : { ...v.order };
     delete base.renew;
     await store.insertOrder({
@@ -350,7 +360,7 @@ function makeThemeOrderHandlers({ store, ledger, rate, broadcast, env = process.
   };
 
   const claim = async (body) => {
-    const sigErr = await verifySigned(body || {}, 'theme-orders-claim', now());
+    const sigErr = await verifySigned(body || {}, actions.claim || 'theme-orders-claim', now());
     if (sigErr) return [401, { error: sigErr }];
     const identityKey = String(body.identityKey).toLowerCase();
     const f = body.fields || {};
@@ -364,7 +374,7 @@ function makeThemeOrderHandlers({ store, ledger, rate, broadcast, env = process.
       if (row.txid === txid) return [200, { order: publicRow(row) }]; // a retry of a claim that went through
       return [409, { error: 'quote_used' }];
     }
-    if (now() > Date.parse(row.quote_expires_at) + CLAIM_GRACE_MS) return [410, { error: 'quote_expired' }];
+    if (now() > Date.parse(row.quote_expires_at) + claimGraceMs) return [410, { error: 'quote_expired' }];
     // rawtx: a raw tx hex, or the AtomicBEEF hex the wallet's createAction returns (broadcast with its parents).
     let tx;
     let beefHex = null;

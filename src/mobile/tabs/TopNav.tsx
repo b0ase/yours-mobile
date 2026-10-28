@@ -17,7 +17,6 @@ import { AnimatePresence, motion } from 'framer-motion';
 import {
   BadgeCheck,
   Bot,
-  Gamepad2,
   ChevronRight,
   Lock,
   LogOut,
@@ -37,12 +36,12 @@ import { topBarBappForPath } from '../phone/bappBarModel';
 import { startAgentCreate } from '../agents/agentCreate';
 import { AGENT_TOOLS_TITLE, AgentToolsSheet } from '../agents/AgentToolsSheet';
 import { AirdropsNavButton } from '../airdrops/AirdropsNavButton';
-import { TOKENBLASTER_ENABLED, TWETCH_POST_ENABLED, isBWalletX } from '../storeBuild';
-import { playTerrornode as playTerrornodeIn } from '../games/playTerrornode';
+import { TWETCH_POST_ENABLED, isBWalletX } from '../storeBuild';
 import { IS_EXTENSION } from '../extension';
 import { initPairing, setAgentPairDeps } from '../pair/sessions';
 import { onPairLink, takePairLink } from '../pair/links';
 import { useSpaceInviteLinks } from '../spaces/inviteLinks';
+import { useSignLinks } from '../chat/useSignLinks';
 import { useSubscribeLinks } from '../pots/subscribeLink';
 import { usePeerPayLinks } from '../scan/peerpayLinks';
 import { AuthRequestHost } from '../auth/AuthSheet';
@@ -112,8 +111,6 @@ const TopNavBar = () => {
   const phone = usePhoneLayout();
   const { handleSelect } = useBottomMenu();
   const navigate = useNavigate();
-  // Full screen in the wallet's browser (games/playTerrornode.ts; the game room's live player uses it too).
-  const playTerrornode = () => playTerrornodeIn(navigate);
   const pathname = useLocation().pathname;
   const onMedia = pathname.startsWith('/m/media');
   const onLock = pathname.startsWith('/m/lock');
@@ -142,6 +139,7 @@ const TopNavBar = () => {
   // Phone layout: PhoneShell owns pair links, pairing and the CLI wallet context, once (phone/useAppServices.ts).
   // Space invite links (spaces/inviteLinks.ts); PhoneShell owns them in the phone layout.
   useSpaceInviteLinks(!phoneLayoutOn());
+  useSignLinks(!phoneLayoutOn());
   useSubscribeLinks(!phoneLayoutOn());
   usePeerPayLinks(!phoneLayoutOn());
   useEffect(() => {
@@ -575,12 +573,7 @@ const TopNavBar = () => {
                     if (to === -1) navigate(-1);
                     else navigate(to);
                   })}
-                {/* Owner, 27 Oct 2026: play TERRORNODE from the b menu, in the wallet's own browser (already connected). */}
-                {TOKENBLASTER_ENABLED &&
-                  action(<Gamepad2 size={16} color="#fff" />, 'Play TERRORNODE', () => {
-                    setDrawer(false);
-                    playTerrornode();
-                  })}
+                {/* Owner, 28 Oct 2026: no "Play TERRORNODE" in the accounts menu. The game stays on Home, in bApps and in its room. */}
                 {/* Store builds have no agent tools: pairing stays a menu row, as before. */}
                 {!X_MARK &&
                   action(<ScanLine size={16} color="#fff" />, PAIR_LABEL, () => {
@@ -709,19 +702,6 @@ const TopNavBar = () => {
                     const to = agentMenuTarget(pathname);
                     if (to === -1) navigate(-1);
                     else navigate(to);
-                  },
-                }
-              : undefined
-          }
-          // bWalletX only (owner, 27 Oct 2026): TERRORNODE in the wallet's own browser, like the bApps hero.
-          onPlay={
-            TOKENBLASTER_ENABLED
-              ? {
-                  label: 'Play TERRORNODE',
-                  go: () => {
-                    setSheet(null);
-                    setDrawer(false);
-                    playTerrornode();
                   },
                 }
               : undefined

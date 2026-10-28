@@ -666,3 +666,14 @@ export const TWETCH_POST_ENABLED: boolean = !(
   import.meta.env.VITE_CHANNEL === 'ios-store' ||
   import.meta.env.VITE_CHANNEL === 'android-play'
 );
+
+/**
+ * Pay (wage statements, src/mobile/wages/): never in a store build; on in the other builds unless VITE_WAGES=0.
+ * Literal env checks so Vite inlines them and Rollup drops the screen from store bundles.
+ */
+export const WAGES_ENABLED: boolean =
+  !(
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+  ) && import.meta.env.VITE_WAGES !== '0';
