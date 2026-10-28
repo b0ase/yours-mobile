@@ -43,7 +43,7 @@ import { wwOpen } from './flag';
 import { useHomeLayout } from '../home/useHomeLayout';
 import { LockCoin } from '../tabs/TopNav';
 import { AgentConversation } from '../agent/AgentConversation';
-const AgentPage = lazy(() => import('../agent/AgentPage'));
+import { PANE_STARTERS } from '../chat/askBHint';
 import { useWalletFeed } from './walletFeed';
 import { BappHost } from './BappHost';
 import { PersonPic } from './PersonPic';
@@ -522,11 +522,9 @@ const WideShell = ({ children }: { children: ReactNode }) => {
             </div>
             {view === 'wallet' && !fullWallet && <WalletSide />}
             {view === 'chat' && (
-              // No room open (owner, 28 Oct 2026): the same Ask b as /m/ask-b (same prompts, history and threads).
+              // No room open (owner, 28 Oct 2026): the same b, history and threads as /m/ask-b, with the pane's own starters.
               <div className="ww-panel ww-chat-empty ww-chat-askb" data-ask-b-pane="">
-                <Suspense fallback={null}>
-                  <AgentPage />
-                </Suspense>
+                <AgentConversation starters={PANE_STARTERS} screen={pathname} />
                 <p className="ww-chat-askb-hint">or pick a room on the left</p>
               </div>
             )}

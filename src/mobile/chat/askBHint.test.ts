@@ -29,8 +29,23 @@ describe('$b public hint (parity with bit-sign ask-b-modal)', () => {
 describe('wide chat empty pane is Ask b', () => {
   test('the same AgentPage as /m/ask-b, with the room hint', async () => {
     const src = await Bun.file(new URL('../wide/WideShell.tsx', import.meta.url)).text();
-    expect(src).toContain("lazy(() => import('../agent/AgentPage'))");
+    expect(src).toContain('<AgentConversation starters={PANE_STARTERS}');
     expect(src).toContain('data-ask-b-pane');
     expect(src).toContain('or pick a room on the left');
+  });
+});
+
+import { PANE_STARTERS, PANE_GREETING } from './askBHint';
+describe('pane starters', () => {
+  test('greeting and four starters', () => {
+    expect(PANE_GREETING).toBe('What do you want to do?');
+    expect(PANE_STARTERS.map((o) => o.label)).toEqual([
+      'What do you want to do?',
+      'Start a room with someone',
+      'Find a room to join',
+      'Catch me up on my rooms',
+      'Draft a contract or offer in a room',
+    ]);
+    expect(PANE_STARTERS[3].prompt).toMatch(/unread.*mentions.*signature/);
   });
 });

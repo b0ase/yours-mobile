@@ -215,7 +215,10 @@ export const AgentConversation = ({
   autoFocus = false,
   variant = 'page',
   screen,
+  starters,
 }: {
+  /** Context greeting + starters for the hero; default: Ask b's own lines. */
+  starters?: { label: string; prompt: string }[];
   compact?: boolean;
   autoFocus?: boolean;
   /** 'page' = /m/ask-b; 'float' = the bar + dismissable bubbles over every Desktop page (owner, 12 Oct 2026). */
@@ -785,6 +788,7 @@ export const AgentConversation = ({
           <ObsidianHero
             compact={compact}
             extra={MARKET_ENABLED ? QUICK_STARTS : []}
+            options={starters}
             onPick={(prompt) => {
               setInput(prompt);
               document.querySelector<HTMLTextAreaElement>('[data-agent-input]')?.focus();

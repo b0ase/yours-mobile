@@ -30,3 +30,19 @@ export function toPrivateB(draft: string): string {
 
 export const PUBLIC_B_HINT = 'b will answer in front of everyone in this room';
 export const PRIVATE_B_ACTION = 'Ask privately instead';
+
+/** The empty chat pane's opening lines (owner, 28 Oct 2026; bit-sign askBStarters('pane')). Same b, history and threads. */
+export const PANE_GREETING = 'What do you want to do?';
+export const PANE_STARTERS: { label: string; prompt: string }[] = [
+  { label: PANE_GREETING, prompt: 'What can I do here? Give me the options.' },
+  { label: 'Start a room with someone', prompt: 'Help me start a room with someone. Ask me who and what it is for.' },
+  { label: 'Find a room to join', prompt: 'Help me find a room to join. Ask me what I am interested in.' },
+  {
+    label: 'Catch me up on my rooms',
+    prompt: 'Catch me up on my rooms: unread messages, mentions, and anything waiting for my signature.',
+  },
+  {
+    label: 'Draft a contract or offer in a room',
+    prompt: 'Help me draft a contract or an offer in one of my rooms. Ask me which room and what it is.',
+  },
+];
