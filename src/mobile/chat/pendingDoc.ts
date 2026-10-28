@@ -48,3 +48,100 @@ export const docToOffer = (room: Pick<ChatRoom, 'metadata'>, fromPush: string | 
   if (fromPush && ID_RE.test(fromPush)) return fromPush;
   return pendingDocOf(room)?.id ?? null;
 };
+
+/**
+ * Offer-first room contracts (bit-sign lib/room-offer.ts, owner 28 Oct 2026): an unsigned contract is only a draft;
+ * the sender signs it to make an offer; the recipient accepts, rejects or counters. bit-sign mirrors the state onto
+ * metadata.pending_doc.offer. The wallet shows the same words as bChatX; the acts happen on bChatX (it signs).
+ */
+export type OfferStatus = 'draft' | 'offering' | 'offered' | 'accepting' | 'accepted' | 'rejected' | 'superseded';
+export type PendingOffer = {
+  status: OfferStatus;
+  from: string | null;
+  to: string[];
+  reason: string | null;
+  roles: Record<string, string>;
+};
+
+const STATUSES: OfferStatus[] = ['draft', 'offering', 'offered', 'accepting', 'accepted', 'rejected', 'superseded'];
+const norm = (h: unknown) =>
+  String(h ?? '')
+    .trim()
+    .replace(/^\$/, '')
+    .toLowerCase();
+
+export const pendingOfferOf = (room: Pick<ChatRoom, 'metadata'> | null | undefined): PendingOffer | null => {
+  const o = (
+    (room?.metadata as { pending_doc?: { offer?: unknown } } | null | undefined)?.pending_doc as
+      | { offer?: unknown }
+      | undefined
+  )?.offer as Record<string, unknown> | null | undefined;
+  if (!o || typeof o !== 'object' || !STATUSES.includes(o.status as OfferStatus)) return null;
+  const roles: Record<string, string> = {};
+  if (o.roles && typeof o.roles === 'object') {
+    for (const [k, v] of Object.entries(o.roles as Record<string, unknown>)) {
+      if (typeof v === 'string') roles[norm(k)] = v.slice(0, 40);
+    }
+  }
+  return {
+    status: o.status as OfferStatus,
+    from: o.from ? norm(o.from) : null,
+    to: Array.isArray(o.to) ? o.to.map(norm).filter(Boolean) : [],
+    reason: typeof o.reason === 'string' ? o.reason.slice(0, 500) : null,
+    roles,
+  };
+};
+
+const who = (h: string, roles: Record<string, string>) =>
+  roles[h] && roles[h] !== 'Party' ? `$${h} (${roles[h]})` : `$${h}`;
+const names = (hs: string[], roles: Record<string, string>) => {
+  const xs = hs.map((h) => who(h, roles));
+  return xs.length <= 1 ? xs[0] || '' : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
+};
+
+export type OfferBanner = { title: string; line: string; youAre: string | null; button: string | null };
+
+/** The banner for this viewer. The sender and the recipient see different words, as on bChatX. */
+export const offerBanner = (o: PendingOffer, viewer: string): OfferBanner => {
+  const me = norm(viewer);
+  const role = o.roles[me];
+  const youAre = role && role !== 'Party' ? `You are the ${role}` : null;
+  const signers = Object.keys(o.roles);
+  switch (o.status) {
+    case 'draft':
+    case 'offering':
+      return {
+        title: 'Draft, not an offer',
+        line: 'Comment or ask b for changes. To make it an offer, sign it and send it.',
+        youAre,
+        button: signers.includes(me) && o.status === 'draft' ? 'Sign & send as offer' : null,
+      };
+    case 'offered':
+    case 'accepting':
+      if (me === o.from) {
+        return {
+          title: `Offer sent to ${names(o.to, o.roles)}`,
+          line: `Waiting for ${o.to.length > 1 ? 'their signatures' : 'their signature'}.`,
+          youAre,
+          button: null,
+        };
+      }
+      return {
+        title: `Offer from ${who(o.from || '', o.roles)}`,
+        line: o.to.includes(me) ? 'Accept, reject or counter on bChatX.' : `Waiting for ${names(o.to, o.roles)}.`,
+        youAre,
+        button: o.to.includes(me) && o.status === 'offered' ? 'Accept, reject or counter' : null,
+      };
+    case 'accepted':
+      return { title: 'Signed and sealed', line: `Signed by ${names(signers, o.roles)}.`, youAre, button: null };
+    case 'rejected':
+      return {
+        title: 'Offer rejected',
+        line: o.reason ? `Reason: ${o.reason}` : 'No reason given.',
+        youAre,
+        button: null,
+      };
+    case 'superseded':
+      return { title: 'Superseded', line: 'Replaced by a counter-offer.', youAre, button: null };
+  }
+};
