@@ -47,6 +47,7 @@ import { useSubscribeLinks } from '../pots/subscribeLink';
 import { usePeerPayLinks } from '../scan/peerpayLinks';
 import { AuthRequestHost } from '../auth/AuthSheet';
 import { BrowseLinkHost } from '../browse/BrowseLinkHost';
+import { SwapLinkHost } from '../swap/SwapLinkHost';
 import { BitsignHost } from '../pair/BitsignHost';
 import { TwetchHost } from '../twetch/TwetchHost';
 import { PairLoginHost } from '../pair/PairLoginHost';
@@ -763,6 +764,7 @@ const TopNavBar = () => {
       )}
       {!phoneLayoutOn() && <AuthRequestHost />}
       {!phoneLayoutOn() && <BrowseLinkHost />}
+      {!phoneLayoutOn() && <SwapLinkHost />}
       {!phoneLayoutOn() && <BitsignHost />}
       {!phoneLayoutOn() && TWETCH_POST_ENABLED && <TwetchHost />}
       {!phoneLayoutOn() && <PairLoginHost />}

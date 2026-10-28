@@ -62,6 +62,8 @@ export type SwapRecord = {
   payoutTxid: string | null;
   validUntil: string | null;
   notified?: boolean;
+  /** Next hop from a swap link (then=bsvex:…, swapLink.ts), kept so it survives a restart. */
+  then?: string | null;
 };
 
 export const FINAL: ReadonlySet<SwapStage> = /* @__PURE__ */ new Set(['done', 'failed', 'refunded', 'expired']);

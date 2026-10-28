@@ -9,6 +9,7 @@
  *   /m/media/album/<id>    ↔ /bmusic/artist/<artist>/album/<slug>   (albums in media/shareAlbums.ts)
  *   /m/media/artists[/<artist>] ↔ /bmusic/artists[/<artist>]   (in-app artist screens, media/artists/)
  *   /m/exchange[/…]        ↔ /exchange[/…]   (old /market[/…] links open the Exchange; vercel.json 308s them too)
+ *   /m/exchange/swap?from=… ← /swap?from=…    (prefilled swap links, swap/swapLink.ts)
  *   /m/calls[/…]           ↔ /bphone[/…]   (any case, e.g. /bPhone; old /calls links 308 there, vercel.json)
  *   /m/feed                ↔ /bchatx-feed   (old /feed links 308 there, src/web/vercel.json)
  *   /m/media[/…]           ↔ /bmusic[/…]   (the music store; /media is kept for the user's own media, and old
@@ -20,6 +21,7 @@
  * Other top-level app routes (/settings, …) keep their own path.
  */
 import { SHARE_ALBUMS, albumPublicPath } from '../media/shareAlbums';
+import { SWAP_ENABLED } from '../storeBuild';
 
 const TOP = new Set(['/bsv-wallet', '/ord-wallet', '/tools', '/settings', '/browser']);
 /**
@@ -83,6 +85,8 @@ export const toRouter = (pathname: string, search: string): string | null => {
   if (phone) return withQ(`/m/calls${path.slice(phone[0].length)}`);
   if (path === '/bchatx-feed' || path === '/feed') return withQ('/m/feed');
   if (path === '/market' || path.startsWith('/market/')) return withQ(`/m/exchange${path.slice(7)}`);
+  // Prefilled swap links (swap/swapLink.ts): /swap?from=…  →  Exchange › Swap.
+  if (path === '/swap') return SWAP_ENABLED ? withQ('/m/exchange/swap') : null;
   if (path === '/bmusic' || path.startsWith('/bmusic/')) return withQ(`/m/media${path.slice(7)}`);
   if (path === '/wallet') return withQ('/bsv-wallet');
   if (path.startsWith('/wallet/') && WALLET_PAGES.test(path.slice(7))) return withQ(`/m${path.slice(7)}`);

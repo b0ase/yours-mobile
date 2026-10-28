@@ -16,6 +16,10 @@
             "comment": "Open in bWallet's browser (src/mobile/browse)"
           },
           {
+            "/": "/swap",
+            "comment": "Prefilled swap (src/mobile/swap/swapLink.ts)"
+          },
+          {
             "/": "/social",
             "comment": "Continue with X / Google return (src/mobile/social)"
           }

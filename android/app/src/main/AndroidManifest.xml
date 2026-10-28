@@ -34,6 +34,8 @@
                 <data android:scheme="https" android:host="www.bwallet.space" android:path="/social" />
                 <!-- Open in bWallet's browser: /browse?url=<https url> (src/mobile/browse/browseLink.ts) -->
                 <data android:scheme="https" android:host="www.bwallet.space" android:path="/browse" />
+                <!-- Prefilled swap: /swap?from=…&network=…&amount=… (src/mobile/swap/swapLink.ts) -->
+                <data android:scheme="https" android:host="www.bwallet.space" android:path="/swap" />
             </intent-filter>
             <!-- bwalletx://pair?… : site/pair.html "Open in the bWallet app" (a tap on www.bwallet.space itself
                  doesn't count as an app link). Same params as /pair; src/mobile/pair/links.ts pairLinkFrom. -->
@@ -43,6 +45,7 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="bwalletx" android:host="pair" />
                 <data android:scheme="bwalletx" android:host="browse" />
+                <data android:scheme="bwalletx" android:host="swap" />
             </intent-filter>
             <!-- peerpay:<identity key>?sats=<n> (BRC-125): pre-fills Send, never sends (src/mobile/scan/peerpayLinks.ts) -->
             <intent-filter>

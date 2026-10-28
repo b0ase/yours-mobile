@@ -124,6 +124,12 @@ export const SWAP_ENABLED: boolean = !(
   import.meta.env.VITE_CHANNEL === 'android-play'
 );
 /**
+ * After a swap lands, an optional "Continue to bsvex to buy $TICKER" button for links that carry
+ * then=bsvex:<TICKER> (swap/swapLink.ts). Off until bsvex's /t/<ticker>/buy page is ready: the `then` is still
+ * stored with the swap record, nothing is shown. Never opens by itself.
+ */
+export const BSVEX_HANDOFF_ON: boolean = false;
+/**
  * Apps tiles left out of a store build: exchanges / swaps (bApps by name, BSVRadar groups by id). The data
  * itself is gated by MARKET_ENABLED in bapps.ts / radarApps.ts, so the name folds to [] in a store build.
  */
