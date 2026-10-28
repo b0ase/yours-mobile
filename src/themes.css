@@ -679,6 +679,29 @@
   color: var(--bw-text) !important;
   text-decoration: underline;
 }
+/* Warm room bubbles (owner, 28 Oct 2026; same palette as bChatX, chat/bubbleShades.ts). Name and reply author
+   wear the sender's shade: bright ink on dark themes, the deep ink on White (>= 5.5:1). */
+.bw-shade-name {
+  color: var(--bw-ink);
+}
+:root[data-bw-paper] .bw-chat-bubble .bw-shade-name,
+:root[data-bw-paper] .bw-shade-name {
+  color: var(--bw-ink-light) !important;
+}
+/* White: other people's bubbles are white washed with their shade (text #111 on it >= 15:1), $b is cream ringed
+   in gold, agents a neutral warm grey. Your own bubble keeps the White theme's light grey above. */
+:root[data-bw-paper] .bw-chat-bubble.is-shaded {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bw-tint) 7%, #fff) 0%, color-mix(in srgb, var(--bw-tint) 11%, #fff) 100%) !important;
+  border: 1px solid color-mix(in srgb, var(--bw-ink-light) 18%, transparent) !important;
+}
+:root[data-bw-paper] .bw-chat-bubble.is-b {
+  background: linear-gradient(180deg, #fffbf0 0%, #fff5de 100%) !important;
+  border: 1.5px solid #c9961a !important;
+}
+:root[data-bw-paper] .bw-chat-bubble.is-agent {
+  background: linear-gradient(180deg, #f6f4f0 0%, #efebe5 100%) !important;
+  border: 1px solid rgb(60 50 40 / 0.16) !important;
+}
 /* Help Desk card and the live Space banner: white cards. */
 :root[data-bw-paper] :is(.bw-helpdesk-card, .bw-live-banner) {
   background: var(--bw-card) !important;

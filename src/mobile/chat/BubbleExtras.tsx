@@ -1,7 +1,9 @@
+import type { CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { CornerUpLeft, MoreHorizontal, Pencil, Share2, X, Copy } from 'lucide-react';
 import type { ReplyRef } from './api';
 import { mentionParts, QUICK_REACTIONS } from './social';
+import { shadeVars, type BubbleShade } from './bubbleShades';
 
 /**
  * The pieces of a Facebook / WhatsApp-style bubble (chat/social.ts has the rules): reply quote,
@@ -13,18 +15,30 @@ const PANEL = '#121316';
 const LINE = '#1f2127';
 const MUTED = '#8a8f98';
 
-export const ReplyQuote = ({ reply, mine, onTap }: { reply: ReplyRef; mine: boolean; onTap?: () => void }) => (
+/** `shade`: the quoted sender's warm shade (chat/bubbleShades.ts), so the bar and name wear their colour. */
+export const ReplyQuote = ({
+  reply,
+  mine,
+  onTap,
+  shade,
+}: {
+  reply: ReplyRef;
+  mine: boolean;
+  onTap?: () => void;
+  shade?: BubbleShade;
+}) => (
   <button
     type="button"
     onClick={onTap}
     className="block w-full text-left mb-1 px-2 py-1 rounded-lg text-[12px] leading-snug"
     style={{
+      ...(shade && !mine ? (shadeVars(shade) as CSSProperties) : {}),
       background: mine ? 'rgba(0,0,0,0.12)' : 'rgba(255,255,255,0.06)',
-      borderLeft: `3px solid ${mine ? '#5c4800' : GOLD}`,
+      borderLeft: `3px solid ${mine ? '#5c4800' : shade ? 'var(--bw-ink)' : GOLD}`,
       color: mine ? '#3d3000' : '#c9c3ad',
     }}
   >
-    {reply.author && <div className="font-semibold">${reply.author}</div>}
+    {reply.author && <div className={`font-semibold${shade && !mine ? ' bw-shade-name' : ''}`}>${reply.author}</div>}
     <div className="line-clamp-2 break-words">{reply.snippet || 'Message'}</div>
   </button>
 );
