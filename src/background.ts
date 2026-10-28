@@ -230,7 +230,6 @@ import {
   RESERVED_REFUSAL,
   withoutReservedProtocols,
 } from './services/reservedProtocols';
-import { extensionSignInStep } from './services/extensionSignIn';
 import { healIndexFundActions } from './mobile/tokens/indexFundHeal';
 import { continuesChain, endChain, isAlreadyProcessedAbort, markChainStep, startsChain } from './services/dappChain';
 import { HOSTED_YOURS_IMAGE } from './utils/constants';
@@ -2306,7 +2305,7 @@ if (isInServiceWorker) {
   chrome.runtime.onMessage.addListener(function onRuntimeMessage(message: any, sender, answer: CallbackResponse) {
     // Every refusal by the user carries code ERR_PERMISSION_DENIED (services/userDenied.ts), so a site can tell
     // "declined" from "failed" on every path (extension, phone dApp browser, bApp frames, pairing).
-    let sendResponse: CallbackResponse = (response) => answer(withPromptNotShownCode(withDenialCode(response)));
+    const sendResponse: CallbackResponse = (response) => answer(withPromptNotShownCode(withDenialCode(response)));
     console.log(
       '[background] Received message:',
       message.action,
@@ -2478,31 +2477,6 @@ if (!(
 
     // Wallet-internal protocols (bTrust, Locks, funds, presign…) are never available to an outside site or app,
     // and the refusal comes before any unlock or permission sheet (services/reservedProtocols.ts, audit C1).
-    // Sign in with bWalletX from a site in the extension (services/extensionSignIn.ts): bit-sign / bChatX send the
-    // login signature on [2, 'bwallet sign in'], then a BSM proof of the chat key over the SAME text. That proof uses
-    // the reserved [1, 'message signing'] key, so it is answered here, once, only for the text the user just approved
-    // for this exact origin; every other use of that key is still refused below.
-    if (!isFromExtension && message?.originator !== ADMIN_ORIGINATOR && sender.origin) {
-      const follow = extensionSignInStep(sender.origin, String(message?.action ?? ''), message?.params);
-      if (follow.kind === 'bsm' && accountContext) {
-        const base = accountContext.baseWallet;
-        void follow
-          .answer(base as never)
-          .then(
-            (data) => sendResponse({ type: message.action, success: true, data }),
-            (e) => sendResponse({ type: message.action, success: false, error: e instanceof Error ? e.message : String(e) }),
-          );
-        return true;
-      }
-      if (follow.kind === 'login') {
-        const reply = sendResponse;
-        sendResponse = (response) => {
-          if ((response as { success?: boolean })?.success) follow.approved();
-          reply(response);
-        };
-      }
-    }
-
     if (!isFromExtension && message?.originator !== ADMIN_ORIGINATOR) {
       const refusal =
         reservedProtocolRefusal(String(message?.action ?? ''), message?.params) ??
