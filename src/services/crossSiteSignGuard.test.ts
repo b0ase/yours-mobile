@@ -241,3 +241,28 @@ describe('b-Aware 25 Oct (yudhaekasaputra1, widiaaw382): the guard fails closed 
     expect(crossSiteSignRefusal('intranet', sig('bwx-podcast:42:nonce'))).toBeNull();
   });
 });
+
+describe('b-Aware 28 Oct (Jacob Anderson, 0qu5xz): more login wordings bind the site', () => {
+  const unproven = `good.com.c${'ab'.repeat(22)}.paired.invalid`;
+  test.each([
+    'Sign into good.com\nNonce: 8f2a',
+    'Log onto good.com with your wallet. Nonce: 8f2a',
+    'good.com - sign in\nNonce: 8f2a',
+    'good.com: login request 8f2a',
+    'Welcome to good.com! Sign this message. Nonce: 8f2a',
+    'Verify your identity for good.com (nonce 8f2a)',
+    'Authenticate with good.com\nNonce: 8f2a',
+    'Connect to good.com — nonce 8f2a',
+    'good.com requests authentication. Nonce: 8f2a',
+  ])('%p: refused from evil.com and an unproven pairing, allowed from good.com', (msg) => {
+    expect(crossSiteSignRefusal('evil.com', sig(msg))).toContain('different site');
+    expect(crossSiteSignRefusal('good.com', sig(msg))).toBeNull();
+    setProvenPairingCheck(() => false);
+    expect(crossSiteSignRefusal(unproven, sig(msg))).toContain('did not prove its site');
+  });
+
+  test('a plain mention of a site is not a binding', () => {
+    expect(crossSiteSignRefusal('evil.com', sig('Read this on good.com'))).toBeNull();
+    expect(boundHosts('Read this on good.com')).toEqual([]);
+  });
+});

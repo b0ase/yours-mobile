@@ -44,12 +44,20 @@ const BINDING_FIELD = new RegExp(`["']?\\b(${BINDING_KEYS})\\b["']?\\s*[:=]\\s*[
 // text: a prefix such as "Login: " or a JSON string around the line must not hide it.
 // Also IPv4 literals and "localhost" (b-Aware 25 Oct 2026, Widia): a challenge for 10.0.0.5 named no site before.
 const HOST = '((?:(?:[a-z0-9-]+\\.)+[a-z]{2,}|(?:\\d{1,3}\\.){3}\\d{1,3}|localhost)(?::\\d+)?)';
+// b-Aware 28 Oct 2026 (Jacob Anderson, 0qu5xz): "Sign into", "Log onto", "good.com - sign in", "Welcome to good.com"
+// and similar wordings named no site, so another site got the login signature. Punctuation may sit between the host
+// and the phrase, and the common login verbs before a host now bind too.
+const SEP = '[\\s,:\u2013\u2014-]*';
 const SIGN_IN_LINES = [
   new RegExp(
-    `(?:^|[\\s"'\`(:])${HOST}(?: wants you to sign in| (?:wallet |account )?(?:log ?in|sign[ -]?in)\\b)`,
+    `(?:^|[\\s"'\`(:])${HOST}\\b${SEP}(?:wants you to sign in|(?:wallet |account )?(?:log ?in|sign[ -]?in)\\b|(?:requests|requires) (?:authentication|verification|a signature)\\b)`,
     'gim',
   ),
-  new RegExp(`\\b(?:sign|log) ?in to ${HOST}`, 'gi'),
+  new RegExp(`\\b(?:sign|log) ?(?:in ?to|on ?to)\\s+${HOST}`, 'gi'),
+  new RegExp(
+    `\\b(?:welcome to|authenticate(?: (?:to|with|for|on|at))?|verify (?:your )?(?:identity|wallet) (?:for|with|on)|authori[sz]e(?: (?:to|for|with|on))?|connect (?:to|with))\\s+${HOST}`,
+    'gi',
+  ),
 ];
 const HOST_RE = /^(?:[a-z0-9-]+(\.[a-z0-9-]+)+|localhost)$/;
 
