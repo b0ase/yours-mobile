@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   emptyInbox,
   keep,
+  keptOriginSet,
   hide,
+  loadInbox,
+  nftOrigins,
   quarantineFor,
   saveInbox,
   saveItems,
@@ -10,6 +13,10 @@ import {
   visibleItems,
   type AirdropItem,
 } from './inbox';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { legacyOrdVisible } from '../../services/legacyOrd';
+import { viewKind } from './nftView';
 import { normId, quarantinedNfts, quarantinedTokenIds, trustIssuer, withoutQuarantined } from './quarantine';
 
 const tok = (key: string, id: string, issuer = id): AirdropItem => ({
@@ -84,5 +91,62 @@ describe('token quarantine', () => {
 
   it('normId treats txid.vout and txid_vout alike', () => {
     expect(normId('ABC.1')).toBe(normId('abc_1'));
+  });
+});
+
+describe('keep sticks (owner, 28 Oct 2026: a kept OpNS name went back to Quarantine)', () => {
+  const O = 'c3f7189432e4350b61c35c77433960cad528f011c85ca6b75cc4561c5d08c5e3_0';
+  const item = nft(`${O.split('_')[0]}:${O}`, O);
+
+  it('is keyed by origin and survives reload', () => {
+    const st = mem();
+    saveInbox('acct', keep(emptyInbox(), item.key, nftOrigins(item)), st);
+    const s = loadInbox('acct', st);
+    expect(s.keptOrigins).toEqual([O]);
+    expect(quarantinedNfts([item], s).size).toBe(0);
+  });
+
+  it('survives a re-sync that drops the item, then brings it back under another key', () => {
+    const st = mem();
+    saveItems('acct', [item], 1, st);
+    saveInbox('acct', keep(emptyInbox(), item.key, nftOrigins(item)), st);
+    saveItems('acct', [], 2, st); // Keep internalized the tx: History no longer lists it
+    expect(keptOriginSet(loadInbox('acct', st)).has(O)).toBe(true);
+    const back = { ...item, key: 'other:key' };
+    saveItems('acct', [back], 3, st);
+    expect(quarantinedNfts([back], loadInbox('acct', st)).size).toBe(0);
+    expect(visibleItems([back], loadInbox('acct', st))).toEqual([]);
+  });
+
+  it('a keep made before origins were stored still counts (kept key carries the outpoint)', () => {
+    expect(keptOriginSet(keep(emptyInbox(), item.key)).has(O)).toBe(true);
+  });
+
+  it('a different origin is still quarantined', () => {
+    const other = nft('d:x', 'd'.repeat(64) + '_0');
+    expect(quarantinedNfts([other], keep(emptyInbox(), item.key, nftOrigins(item))).size).toBe(1);
+  });
+
+  it('legacy NFT list shows a kept origin with no History item', () => {
+    expect(legacyOrdVisible(O.replace('_', '.'), new Set([O]), [], new Set([O]))).toBe(true);
+    expect(legacyOrdVisible(O, new Set([O]), [], new Set())).toBe(false);
+  });
+});
+
+describe('NFT render sandbox (keeping an NFT never runs its content)', () => {
+  const files = [
+    'src/components/Ordinal.tsx',
+    'src/mobile/media/NftHero.tsx',
+    'src/mobile/media/MediaViewer.tsx',
+    'src/mobile/nfts/NftLibraryPage.tsx',
+    'src/mobile/airdrops/AirdropNft.tsx',
+  ];
+  it.each(files)('%s: every iframe is sandbox="" (no scripts, no same-origin)', (f) => {
+    const src = readFileSync(resolve(process.cwd(), f), 'utf8');
+    for (const m of src.matchAll(/<iframe[\s\S]*?\/?>/g)) expect(m[0]).toMatch(/sandbox=""/);
+  });
+  it('the airdrop viewer never renders SVG or HTML markup', () => {
+    expect(viewKind('image/svg+xml')).toBe('other');
+    expect(viewKind('text/html')).toBe('other');
   });
 });

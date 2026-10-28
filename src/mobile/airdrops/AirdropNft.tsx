@@ -243,7 +243,7 @@ export const NftViewer = ({ item, onClose }: { item: AirdropItem; onClose: () =>
             <div className="w-full shrink-0 overflow-hidden rounded-2xl" style={{ height: '34vh' }}>
               <OpnsNameCard url={content} from={who.label} />
             </div>
-            <OpnsNameSection url={content} from={who.label} held={false} />
+            <OpnsNameSection url={content} from={who.label} held={false} outpoint={contentOutpoint(item)} unsolicited />
           </div>
         )}
         {content && !failed && kind === 'video' && videoSrc === undefined && (
