@@ -1,5 +1,12 @@
 import { beforeAll, describe, expect, test } from 'bun:test';
-import { proofNonce, provableProvider, verifyNameProof, type ProviderKey } from './proof';
+import {
+  checkNameProof,
+  proofNonce,
+  provableProvider,
+  trustProofSub,
+  verifyNameProof,
+  type ProviderKey,
+} from './proof';
 import { destinationFor, proofRefusal, type Resolved } from './names';
 
 // Locally generated test keys only: no real tokens, client ids or secrets.
@@ -117,10 +124,36 @@ describe('provable names: payment stop', () => {
   test('proven pays; missing, bad, sub-changed and unchecked stop', () => {
     expect(destinationFor(r({ status: 'proven', provider: 'google', sub: '1' }), 'bsv').ok).toBe(true);
     expect(destinationFor(r(), 'bsv').ok).toBe(true); // not provable: unaffected
+    expect(destinationFor(r({ status: 'unproven', provider: 'google' }), 'bsv').ok).toBe(true); // first use
     for (const status of ['missing', 'bad', 'sub-changed', 'unchecked'] as const) {
       const d = destinationFor(r({ status, provider: 'google' }), 'bsv');
       expect(d.ok).toBe(false);
       expect(proofRefusal(r({ status, provider: 'google' }))).toContain('Not paying it');
     }
+  });
+});
+
+describe('provable names: trust on first use', () => {
+  beforeAll(() => {
+    if (typeof globalThis.localStorage === 'undefined') {
+      const m = new Map<string, string>();
+      (globalThis as { localStorage?: unknown }).localStorage = {
+        getItem: (k: string) => m.get(k) ?? null,
+        setItem: (k: string, v: string) => void m.set(k, v),
+        removeItem: (k: string) => void m.delete(k),
+      };
+    }
+  });
+  const noFetch = (() => Promise.reject(new Error('no network'))) as unknown as typeof fetch;
+  test('never seen: no proof or an uncheckable build pays as unproven; seen before: both stop', async () => {
+    const proof = { provider: 'google', idToken: 'a.b.c' };
+    expect((await checkNameProof(noFetch, 'first.gmail', KEY, undefined))?.status).toBe('unproven');
+    // This test build has no Google client id, so it can't check: unproven while never seen.
+    expect((await checkNameProof(noFetch, 'first.gmail', KEY, proof))?.status).toBe('unproven');
+    trustProofSub('seen.gmail', '1234567890');
+    expect((await checkNameProof(noFetch, 'seen.gmail', KEY, undefined))?.status).toBe('missing');
+    expect((await checkNameProof(noFetch, 'seen.gmail', KEY, proof))?.status).toBe('unchecked');
+    expect((await checkNameProof(noFetch, 'seen.gmail', KEY, { ...proof, provider: 'x' }))?.status).toBe('bad');
+    expect(await checkNameProof(noFetch, 'plain', KEY, undefined)).toBeNull();
   });
 });

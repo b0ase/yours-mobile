@@ -566,7 +566,7 @@ export const KEY_CHANGED =
 /** A provable name (name.gmail) whose provider-signed proof is missing, doesn't check out, or names a new account. */
 export const proofRefusal = (r: Pick<Resolved, 'nameProof'>): string | undefined => {
   const p = r.nameProof;
-  if (!p || p.status === 'proven') return undefined;
+  if (!p || p.status === 'proven' || p.status === 'unproven') return undefined;
   const who = PROOF_PROVIDERS[p.provider].label;
   if (p.status === 'missing')
     return `This name has no proof from ${who}, so it may not belong to who it says. Not paying it.`;

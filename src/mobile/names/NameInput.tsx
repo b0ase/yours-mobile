@@ -293,6 +293,11 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
                       <Check size={11} /> {provenByLabel(r.nameProof.provider)}
                     </div>
                   )}
+                  {r.nameProof?.status === 'unproven' && (
+                    <div data-testid="name-unproven" className="text-[11px]" style={{ color: gray }}>
+                      Not yet proven
+                    </div>
+                  )}
                   {r.nameBinding === 'unsigned' && (
                     <div className="text-[11px]" style={{ color: gray }}>
                       Not signed by its owner yet

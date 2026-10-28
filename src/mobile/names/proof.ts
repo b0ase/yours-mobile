@@ -24,9 +24,14 @@ export type ProofProvider = 'google' | 'linkedin';
 export type Jwk = { kty: string; kid?: string; n: string; e: string; alg?: string };
 export type ProviderKey = { kid: string; jwk: Jwk; firstSeen?: string };
 export type NameProof = { provider?: string; idToken?: string; keys?: ProviderKey[] };
-/** proven: checks out. missing: a provable name with no proof. bad: a proof that doesn't check out. sub-changed: a
- * different provider account than this wallet saw before. unchecked: this build has no client id to check against. */
-export type ProofStatus = 'proven' | 'missing' | 'bad' | 'sub-changed' | 'unchecked';
+/**
+ * Trust on first use (owner beta rule, 28 Oct 2026):
+ * proven: checks out (badge). unproven: no proof ever seen for this name, or this build can't check and has never
+ * seen one: pays, no badge. Stops: missing (this wallet saw a proof before, now none), bad (a served proof that
+ * doesn't check out), sub-changed (a different provider account than before), unchecked (this build can't check but
+ * this wallet saw a proof for the name before).
+ */
+export type ProofStatus = 'proven' | 'unproven' | 'missing' | 'bad' | 'sub-changed' | 'unchecked';
 export type ProofCheck = { status: ProofStatus; provider: ProofProvider; sub?: string; reason?: string };
 
 const env = (v: string | undefined) => (typeof v === 'string' ? v.trim() : '');
@@ -204,10 +209,11 @@ export async function checkNameProof(
   const provider = provableProvider(alias);
   if (!provider) return null;
   const p = proof && typeof proof === 'object' ? (proof as NameProof) : null;
-  if (!p?.idToken) return { status: 'missing', provider };
+  const seen = readSubs()[alias.toLowerCase()];
+  if (!p?.idToken) return { status: seen ? 'missing' : 'unproven', provider };
   if (p.provider !== provider) return { status: 'bad', provider, reason: 'wrong provider' };
   const aud = PROOF_PROVIDERS[provider].clientId();
-  if (!aud) return { status: 'unchecked', provider };
+  if (!aud) return { status: seen ? 'unchecked' : 'unproven', provider };
   const v = await verifyNameProof(p.idToken, {
     provider,
     alias,
@@ -217,8 +223,9 @@ export async function checkNameProof(
     archived: Array.isArray(p.keys) ? p.keys : [],
   });
   if (!v.ok) return { status: 'bad', provider, reason: v.reason };
-  const seen = readSubs()[alias.toLowerCase()];
   if (seen && seen !== v.sub) return { status: 'sub-changed', provider, sub: v.sub };
+  // First proof this wallet sees for the name: remember its account, so a later missing or swapped proof stops.
+  if (!seen) trustProofSub(alias, v.sub);
   return { status: 'proven', provider, sub: v.sub };
 }
 
