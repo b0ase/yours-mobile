@@ -1,4 +1,5 @@
 import { trustCurrentKey } from './binding';
+import { provenByLabel, trustProofSub } from './proof';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Check, Loader2, X } from 'lucide-react';
 import { Input } from '../../components/Input';
@@ -94,6 +95,9 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
     // Remember who this name was when you chose to pay it (BRC-169 4.4 key-change check next time).
     if (r.pubkey && r.nameBinding && r.nameBinding !== 'bad')
       trustCurrentKey(r.input.replace(/^\$/, '').split('@')[0], r.pubkey);
+    // ...and which provider account proved it (a different one next time stops the payment).
+    if (r.nameProof?.status === 'proven' && r.nameProof.sub)
+      trustProofSub(r.input.replace(/^\$/, '').split('@')[0], r.nameProof.sub);
   };
 
   const onType = (input: string) => {
@@ -280,6 +284,20 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
                       <Check size={11} /> Signed by its owner · bound to {short(r.pubkey ?? '')}
                     </div>
                   )}
+                  {r.nameProof?.status === 'proven' && (
+                    <div
+                      data-testid="name-proven"
+                      className="text-[11px] flex items-center gap-1"
+                      style={{ color: '#2ecc71' }}
+                    >
+                      <Check size={11} /> {provenByLabel(r.nameProof.provider)}
+                    </div>
+                  )}
+                  {r.nameProof?.status === 'unproven' && (
+                    <div data-testid="name-unproven" className="text-[11px]" style={{ color: gray }}>
+                      Not yet proven
+                    </div>
+                  )}
                   {r.nameBinding === 'unsigned' && (
                     <div className="text-[11px]" style={{ color: gray }}>
                       Not signed by its owner yet
@@ -309,6 +327,20 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
                       }}
                     >
                       I've checked with them: trust the new wallet
+                    </button>
+                  )}
+                  {r.nameProof?.status === 'sub-changed' && r.nameProof.sub && (
+                    // Same deliberate override for a name now proven by a different provider account.
+                    <button
+                      type="button"
+                      className="self-start bg-transparent border-0 p-0 text-xs font-semibold underline cursor-pointer"
+                      style={{ color: fg }}
+                      onClick={() => {
+                        trustProofSub(r.input.replace(/^\$/, '').split('@')[0], r.nameProof!.sub!);
+                        onType(text);
+                      }}
+                    >
+                      I've checked with them: trust the new account
                     </button>
                   )}
                 </div>
