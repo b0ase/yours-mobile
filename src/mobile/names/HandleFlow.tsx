@@ -296,7 +296,7 @@ export const HandleFlow = ({
     setBusy(true);
     setMsg('');
     try {
-      await claim(await payNameFee(apiContext, fee), name);
+      await claim(await payNameFee(apiContext, fee, name), name);
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Claim failed');
       setBusy(false);
