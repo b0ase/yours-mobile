@@ -17,6 +17,7 @@ import {
 import { mergeOffers, parseOffer, type OfferSealed } from './payload';
 import { acceptAndPay, retryPending, type Pending, type PendingStore } from './accept';
 import { verifyCompany, type Company } from './company';
+import { brc29Script } from '../../utils/paymailDestination';
 
 // Test data only: random keys, a made-up reference and amount.
 const REF = 'BCORP-OFF-2099-01-001';
@@ -189,7 +190,9 @@ const memPending = (): PendingStore & { xs: Pending[] } => {
 };
 
 const NOW = Date.parse('2099-01-10T12:00:00Z');
-const setup = async (o: { sign?: 'fail'; action?: 'fail' | 'queued' | 'notx'; submit?: 'fail' } = {}) => {
+const setup = async (
+  o: { sign?: 'fail'; action?: 'fail' | 'queued' | 'notx'; submit?: 'fail'; dest?: 'foreign' | 'otherKey' } = {},
+) => {
   const s = await sealedOffer();
   const order: string[] = [];
   const wallet = {
@@ -216,7 +219,19 @@ const setup = async (o: { sign?: 'fail'; action?: 'fail' | 'queued' | 'notx'; su
     wallet: wallet as never,
     destination: mock(async (sats: number) => {
       order.push('dest');
-      return { outputs: [{ script: '76a914' + '00'.repeat(20) + '88ac', satoshis: sats }], reference: 'r'.repeat(32) };
+      if (o.dest === 'foreign')
+        return {
+          outputs: [{ script: '76a914' + '00'.repeat(20) + '88ac', satoshis: sats }],
+          reference: 'r'.repeat(32),
+        };
+      // What our paymail server returns: BRC-29 outputs derived from the company's key, with the derivation.
+      const key = o.dest === 'otherKey' ? PrivateKey.fromRandom().toPublicKey().toString() : s.offer.companyKey;
+      return {
+        outputs: [
+          { script: brc29Script(key, 'p1', 's1'), satoshis: sats, derivationPrefix: 'p1', derivationSuffix: 's1' },
+        ],
+        reference: 'r'.repeat(32),
+      };
     }),
     submit: mock(async (a: unknown) => {
       order.push('submit');
@@ -257,6 +272,16 @@ describe('accept = sign to pay (atomic)', () => {
     // The acceptance a party receives checks out against the offer.
     const [rec] = await mergeOffers([t.s.offer, r.accepted]);
     expect(rec.checks).toEqual({ directorSig: true, companySig: true, completed: true });
+  });
+
+  // b-Aware 28 Oct 2026 (hilmiadi677, H-3): the destination outputs went into createAction unchecked.
+  test('H-3: a destination that is not the company key, or cannot be checked, is refused before paying', async () => {
+    for (const dest of ['foreign', 'otherKey'] as const) {
+      const t = await setup({ dest });
+      await expect(acceptAndPay(t.deps, t.input)).rejects.toThrow('Payment refused');
+      expect(t.wallet.createAction).not.toHaveBeenCalled();
+      expect(t.deps.submit).not.toHaveBeenCalled();
+    }
   });
 
   test('no signature, no payment', async () => {
