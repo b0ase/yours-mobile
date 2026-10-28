@@ -42,7 +42,10 @@ const ALIAS_RE = /^[a-z0-9](?:[a-z0-9_-]{0,30}[a-z0-9])?$/;
  * `theirname.gmail`. Registering one needs bit-sign to confirm the caller's key belongs to the
  * account that proved that X username / Gmail address (socialCheck), so nobody else can take it.
  */
-const SOCIAL_RE = /^[a-z0-9](?:[a-z0-9-]{0,28}[a-z0-9])?\.(x|gmail)$/;
+/** The social suffixes a proven name may carry. reservedBase strips exactly these, so adding one here keeps both in step. */
+const SOCIAL_SUFFIXES = ['x', 'gmail'];
+const SOCIAL_RE = new RegExp(`^[a-z0-9](?:[a-z0-9-]{0,28}[a-z0-9])?\\.(${SOCIAL_SUFFIXES.join('|')})$`);
+const SOCIAL_SUFFIX_RE = new RegExp(`\\.(${SOCIAL_SUFFIXES.join('|')})$`);
 const aliasOk = (a) => ALIAS_RE.test(a) || SOCIAL_RE.test(a);
 /**
  * Social names are bWalletX's own record (lib/social.js): `<name>.x` / `<name>.gmail` registers only
@@ -250,13 +253,48 @@ const RESERVED = new Set([
   ...'abcdefghijklmnopqrstuvwxyz0123456789'.split(''),
   // Premium names held for The Bitcoin Corporation Ltd (owner, 27 Oct 2026): see PREMIUM_BCORP.
   ...PREMIUM_BCORP,
+  // Identity providers and big platforms (owner, 28 Oct 2026): reserved as plain aliases AND as social bases.
+  // Already listed above: google, x, twitter, facebook, meta, apple, microsoft, amazon, handcash, twetch, relayx, centbee.
+  'gmail',
+  'github',
+  'gitlab',
+  'bitbucket',
+  'linkedin',
+  'reddit',
+  'instagram',
+  'threads',
+  'tiktok',
+  'youtube',
+  'discord',
+  'telegram',
+  'whatsapp',
+  'signal',
+  'bluesky',
+  'nostr',
+  'icloud',
+  'outlook',
+  'hotmail',
+  'live',
+  'yahoo',
+  'proton',
+  'protonmail',
+  'ebay',
+  'paypal',
+  'stripe',
+  'coinbase',
+  'binance',
+  'metamask',
+  'phantom',
+  'treechat',
+  'yours',
+  'simply-cash',
 ]);
 /**
  * ⚠ A SOCIAL ALIAS IS RESERVED BY ITS BASE NAME. `bcorp.x` is proven by whoever holds X @bcorp,
  * which need not be us, so the suffix must not let a reserved name back in: `bcorp.x`,
  * `bcorp.gmail` and `bcorp` all refuse. Existing records are untouched (this runs at register).
  */
-const reservedBase = (alias) => RESERVED.has(String(alias).replace(/\.(x|gmail)$/, ''));
+const reservedBase = (alias) => RESERVED.has(String(alias).replace(SOCIAL_SUFFIX_RE, ''));
 
 const cleanDomain = (d) =>
   String(d || '')
@@ -328,6 +366,9 @@ const RESERVED_OWNERS = Object.freeze({
   bwalletx: '029c1abd9470d485719c512c0d704e6ccf6c1533461eb5884a5d09a6dc3dca55b7',
   // The Bitcoin Corporation Ltd's company account (owner, 27 Oct 2026).
   bcorp: BCORP_KEY,
+  // b is our AI agent (owner, 28 Oct 2026); the earlier squatted b@ was renamed b-0282c9 under the terms'
+  // impersonation clause.
+  b: BCORP_KEY,
   // TERRORNODE (NPG game; its handle owns the $TERRORNODE room): held by bchatx@ until the owner releases it
   // (owner, 27 Oct 2026).
   terrornode: '030dd811f969987f2f6ec023535cb8839c496fccf4feb7799293ec13ff09d263b7',
