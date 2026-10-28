@@ -1,5 +1,6 @@
 /* global chrome */
 import { siteAfterNavigation } from './mobile/theme/tabSiteNav';
+import { SheetFirstGate } from './services/sheetFirst';
 import { chromeConsentStore } from './services/siteTokens';
 import {
   RECONNECT_ID_PREFIX,
@@ -557,6 +558,11 @@ const initializeWallet = (): Promise<WalletInterface | null> => {
 
 /** Set by the service-worker block so the pending import can stream progress to a restore window. */
 let restoreProgressFn: ((message: string) => void) | undefined;
+/**
+ * Holds the address/message syncs and the storage switch back while a site waits for its approval sheet, so a
+ * cold-woken worker shows the sheet first (services/sheetFirst.ts; cold connect 2.1 s -> 1.0 s, 28 Oct 2026).
+ */
+const sheetFirst = new SheetFirstGate();
 /** In-flight pending-restore imports by identity key, so a second init joins rather than duplicates. */
 const pendingImports = new Map<string, Promise<void>>();
 
@@ -695,6 +701,10 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
   };
 
   const startedUnder = lockGeneration;
+  // One decision per open, taken when the wallet is ready (by then the site call that woke the worker has
+  // arrived): both the syncs (inside initWallet) and the storage switch below wait for it.
+  let heavyWorkGate: Promise<void> | undefined;
+  const heavyWorkMayStart = () => (heavyWorkGate ??= sheetFirst.wait());
   // Filled in once initWallet returns; the broadcast callback reads it lazily.
   const mirror: { services?: Parameters<typeof mirrorToMiner>[0] } = {};
   const ctx = await initWallet(chromeStorageService, {
@@ -716,6 +726,7 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
       stage('address sync done');
       await reviewRestoredUtxos(a);
     },
+    startSyncsAfter: heavyWorkMayStart,
   });
   if (lockGeneration !== startedUnder || !(await chromeStorageService.getPassKey())) {
     // Locked while we were initialising (a restore's detached init can run
@@ -743,7 +754,10 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
     // Restore any mined transaction storage holds as failed, so its change counts again ($vexvoid, 11 Oct 2026).
     // Order matters (owner, 14 Oct 2026): both repairs need this device's storage active, so switch first.
     const ctx = accountContext;
-    const localReady = preferLocalStorage(ctx);
+    // After the site's sheet is up (services/sheetFirst.ts): the switch holds storage locks the sheet's check needs.
+    const localReady = heavyWorkMayStart().then(() =>
+      lockGeneration !== startedUnder || accountContext !== ctx ? undefined : preferLocalStorage(ctx),
+    );
     storageSwitch = localReady;
     void localReady.finally(() => {
       if (storageSwitch === localReady) storageSwitch = null;
@@ -1964,6 +1978,7 @@ if (isInServiceWorker) {
 
   showPromptUi = (kind, requestID) => {
     console.log('[background] showPromptUi called', kind, requestID);
+    sheetFirst.notePromptShown();
     if (requestID && kind !== 'unlock') promptWatchdog.watch({ kind, requestID });
     void surfaceOverFullscreen(kind === 'usbCheck' ? undefined : tabForPrompt(kind, requestID));
 
@@ -2186,6 +2201,7 @@ if (isInServiceWorker) {
   };
 
   showUnlockUi = () => {
+    sheetFirst.notePromptShown();
     // The browser-action popup renders its own unlock UI; never force a
     // window over it just to unlock.
     if (activePopupPorts.size > 0) {
@@ -2228,6 +2244,8 @@ if (isInServiceWorker) {
       'from:',
       sender.origin,
     );
+    // A site's wallet call: the wallet's background syncs hold off until its sheet is up (services/sheetFirst.ts).
+    if (message?.originator && !isExtensionSender(sender, chrome.runtime.id)) sheetFirst.noteSiteRequest();
 
     // Passkey hand-off from web.bwalletx.com, forwarded by content.ts (VITE_SEEDLESS=1 only). sender.origin is Chrome's
     // own value for the tab; handleExternalHandoff accepts exactly https://web.bwalletx.com plus the one-time nonce.

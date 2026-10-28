@@ -95,7 +95,8 @@ describe('wiring', () => {
   });
   test('startup sync goes through the shared single run', () => {
     expect(init).toContain('singleFlight(');
-    expect(init).toContain('void resyncAddresses();');
+    // Started once the sheet-first gate opens (services/sheetFirst.ts), still through the single run.
+    expect(init).toMatch(/syncsMayStart\.then\(\s*\(\) => resyncAddresses\(\)/);
   });
   test('refresh button asks the wallet to run the shared sync first', () => {
     expect(page).toContain("action: 'RESYNC_ADDRESSES', manual: notifyIfUnchanged");
