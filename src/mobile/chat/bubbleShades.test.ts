@@ -56,6 +56,6 @@ describe('bubbleShades', () => {
     for (let i = 0; pair.length < 2 && i < 500; i++) if (shadeIndex(`u${i}`) === shadeIndex('u0')) pair.push(`u${i}`);
     const pm = assignShades(pair);
     expect(pm.get(pair[0])).not.toBe(pm.get(pair[1]));
-    expect(Object.keys(shadeVars(BUBBLE_SHADES[0]))).toEqual(['--bw-ink', '--bw-ink-light', '--bw-tint']);
+    expect(Object.keys(shadeVars(BUBBLE_SHADES[0]))).toEqual(['--bw-shade-ink', '--bw-shade-ink-light', '--bw-shade-tint']);
   });
 });

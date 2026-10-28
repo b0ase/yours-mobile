@@ -1210,7 +1210,7 @@ const Conversation = ({
                           ? 'linear-gradient(180deg, #221D13 0%, #1A1610 100%)'
                           : isBusinessAgentMessage(it.message)
                             ? 'linear-gradient(180deg, #2C2926 0%, #24221F 100%)'
-                            : 'linear-gradient(180deg, color-mix(in srgb, var(--bw-tint) 14%, #282522) 0%, color-mix(in srgb, var(--bw-tint) 10%, #211F1D) 100%)',
+                            : 'linear-gradient(180deg, color-mix(in srgb, var(--bw-shade-tint) 14%, #282522) 0%, color-mix(in srgb, var(--bw-shade-tint) 10%, #211F1D) 100%)',
                     color: bubbles
                       ? it.mine
                         ? bubbles.mineText
@@ -1228,7 +1228,7 @@ const Conversation = ({
                           ? `1.5px solid ${GOLD}`
                           : isBusinessAgentMessage(it.message)
                             ? '1px solid rgba(214, 200, 180, 0.16)'
-                            : '1px solid color-mix(in srgb, var(--bw-tint) 20%, rgba(255, 255, 255, 0.06))',
+                            : '1px solid color-mix(in srgb, var(--bw-shade-tint) 20%, rgba(255, 255, 255, 0.06))',
                     boxShadow:
                       !it.mine && !bubbles && isB(it.message)
                         ? '0 0 16px -6px color-mix(in srgb, var(--bw-accent-hi) 50%, transparent)'

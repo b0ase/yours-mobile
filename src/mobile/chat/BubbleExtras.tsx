@@ -34,7 +34,7 @@ export const ReplyQuote = ({
     style={{
       ...(shade && !mine ? (shadeVars(shade) as CSSProperties) : {}),
       background: mine ? 'rgba(0,0,0,0.12)' : 'rgba(255,255,255,0.06)',
-      borderLeft: `3px solid ${mine ? '#5c4800' : shade ? 'var(--bw-ink)' : GOLD}`,
+      borderLeft: `3px solid ${mine ? '#5c4800' : shade ? 'var(--bw-shade-ink)' : GOLD}`,
       color: mine ? '#3d3000' : '#c9c3ad',
     }}
   >

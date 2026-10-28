@@ -76,7 +76,7 @@ export function assignShades(handlesInOrder: readonly (string | null | undefined
 
 /** Inline CSS custom properties a room bubble (ChatPage) and its name / reply bar read their shade from. */
 export function shadeVars(shade: BubbleShade): Record<string, string> {
-    return { '--bw-ink': shade.ink, '--bw-ink-light': shade.inkLight, '--bw-tint': shade.tint };
+    return { '--bw-shade-ink': shade.ink, '--bw-shade-ink-light': shade.inkLight, '--bw-shade-tint': shade.tint };
 }
 
 // ── contrast maths (used by the selftest; tiny, so kept beside the palette) ──────────────────

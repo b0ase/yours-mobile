@@ -682,17 +682,17 @@
 /* Warm room bubbles (owner, 28 Oct 2026; same palette as bChatX, chat/bubbleShades.ts). Name and reply author
    wear the sender's shade: bright ink on dark themes, the deep ink on White (>= 5.5:1). */
 .bw-shade-name {
-  color: var(--bw-ink);
+  color: var(--bw-shade-ink);
 }
 :root[data-bw-paper] .bw-chat-bubble .bw-shade-name,
 :root[data-bw-paper] .bw-shade-name {
-  color: var(--bw-ink-light) !important;
+  color: var(--bw-shade-ink-light) !important;
 }
 /* White: other people's bubbles are white washed with their shade (text #111 on it >= 15:1), $b is cream ringed
    in gold, agents a neutral warm grey. Your own bubble keeps the White theme's light grey above. */
 :root[data-bw-paper] .bw-chat-bubble.is-shaded {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--bw-tint) 7%, #fff) 0%, color-mix(in srgb, var(--bw-tint) 11%, #fff) 100%) !important;
-  border: 1px solid color-mix(in srgb, var(--bw-ink-light) 18%, transparent) !important;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bw-shade-tint) 7%, #fff) 0%, color-mix(in srgb, var(--bw-shade-tint) 11%, #fff) 100%) !important;
+  border: 1px solid color-mix(in srgb, var(--bw-shade-ink-light) 18%, transparent) !important;
 }
 :root[data-bw-paper] .bw-chat-bubble.is-b {
   background: linear-gradient(180deg, #fffbf0 0%, #fff5de 100%) !important;
@@ -970,6 +970,8 @@
     [style*='background-color: rgb(26, 21, 5)'],
     [style*='background: rgb(26, 22, 10)'],
     [style*='background-color: rgb(26, 22, 10)'],
+    [style*='background: rgb(26, 22, 16)'],
+    [style*='background-color: rgb(26, 22, 16)'],
     [style*='background: rgb(26, 22, 48)'],
     [style*='background-color: rgb(26, 22, 48)'],
     [style*='background: rgb(26, 22, 8)'],
@@ -1034,8 +1036,12 @@
     [style*='background-color: rgb(31, 33, 40)'],
     [style*='background: rgb(31, 61, 42)'],
     [style*='background-color: rgb(31, 61, 42)'],
+    [style*='background: rgb(33, 31, 29)'],
+    [style*='background-color: rgb(33, 31, 29)'],
     [style*='background: rgb(34, 29, 12)'],
     [style*='background-color: rgb(34, 29, 12)'],
+    [style*='background: rgb(34, 29, 19)'],
+    [style*='background-color: rgb(34, 29, 19)'],
     [style*='background: rgb(34, 34, 34)'],
     [style*='background-color: rgb(34, 34, 34)'],
     [style*='background: rgb(34, 37, 43)'],
@@ -1050,6 +1056,8 @@
     [style*='background-color: rgb(35, 36, 46)'],
     [style*='background: rgb(35, 38, 44)'],
     [style*='background-color: rgb(35, 38, 44)'],
+    [style*='background: rgb(36, 34, 31)'],
+    [style*='background-color: rgb(36, 34, 31)'],
     [style*='background: rgb(36, 57, 44)'],
     [style*='background-color: rgb(36, 57, 44)'],
     [style*='background: rgb(38, 38, 38)'],
@@ -1060,6 +1068,8 @@
     [style*='background-color: rgb(4, 18, 43)'],
     [style*='background: rgb(4, 33, 15)'],
     [style*='background-color: rgb(4, 33, 15)'],
+    [style*='background: rgb(40, 37, 34)'],
+    [style*='background-color: rgb(40, 37, 34)'],
     [style*='background: rgb(41, 47, 51)'],
     [style*='background-color: rgb(41, 47, 51)'],
     [style*='background: rgb(42, 15, 15)'],
@@ -1114,6 +1124,8 @@
     [style*='background-color: rgb(43, 38, 71)'],
     [style*='background: rgb(43, 47, 54)'],
     [style*='background-color: rgb(43, 47, 54)'],
+    [style*='background: rgb(44, 41, 38)'],
+    [style*='background-color: rgb(44, 41, 38)'],
     [style*='background: rgb(46, 37, 16)'],
     [style*='background-color: rgb(46, 37, 16)'],
     [style*='background: rgb(46, 46, 46)'],
