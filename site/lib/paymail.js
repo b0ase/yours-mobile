@@ -860,6 +860,8 @@ function makeHandlers({
     const priceOut = { address, usd };
     const chk = await nameFee.checkFeeTx({
       txid: String(body.fields?.feeTxid || '').toLowerCase(),
+      key,
+      alias,
       usd,
       txHex: body.feeTx,
       address,

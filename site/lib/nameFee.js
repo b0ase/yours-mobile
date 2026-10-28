@@ -4,7 +4,7 @@
 // (Was 1 cent per new name, 10 Oct 2026.)
 // Env (Vercel only): BWALLET_NAME_FEE_ADDRESS = the revenue address. Empty = fee OFF (nothing changes).
 'use strict';
-const { P2PKH, Transaction } = require('@bsv/sdk');
+const { P2PKH, Script, Transaction, Utils } = require('@bsv/sdk');
 
 /** Legacy 1 cent fee (kept for callers that still quote it). */
 const FEE_USD = 0.01;
@@ -21,6 +21,16 @@ const usdLabel = (usd) => (usd >= 1 ? `$${Number.isInteger(usd) ? usd : usd.toFi
 /** Rates move between the app quoting and the server checking: accept 20% under the server's price. */
 const SLIPPAGE = 0.2;
 const ADDRESS_RE = /^1[1-9A-HJ-NP-Za-km-z]{24,34}$/;
+
+/**
+ * The fee tx must commit to who it pays for (b-Aware 27 Oct 2026, F-165): an OP_RETURN output
+ * `OP_0 OP_RETURN "bwalletx-name-fee" <claimant identity key> <alias>` (each pushed as UTF-8). Without it the txid
+ * was a bearer receipt: anyone who saw the fee tx on chain could claim a different alias with it first.
+ */
+const FEE_TAG = 'bwalletx-name-fee';
+const utf8Hex = (v) => Utils.toHex(Utils.toArray(String(v), 'utf8'));
+const feeCommitData = (key, alias) => [FEE_TAG, String(key).toLowerCase(), String(alias).toLowerCase()].map(utf8Hex);
+const feeCommitHex = (key, alias) => Script.fromASM(`OP_0 OP_RETURN ${feeCommitData(key, alias).join(' ')}`).toHex();
 
 let warned = false;
 /** The fee address, or '' when the fee is off (logs once). */
@@ -76,6 +86,8 @@ const chain = {
  */
 async function checkFeeTx({
   txid,
+  key,
+  alias,
   usd = FEE_USD,
   txHex,
   address,
@@ -85,6 +97,7 @@ async function checkFeeTx({
 }) {
   const label = usdLabel(usd);
   if (!/^[0-9a-f]{64}$/.test(String(txid || ''))) return { ok: false, error: `Pay the ${label} name fee first` };
+  if (!key || !alias) return { ok: false, error: 'Name fee check needs the claimant and the name' };
   const rate = await c.bsvUsd().catch(() => 0);
   if (!(rate > 0)) return { ok: false, error: "Couldn't check the BSV price. Try again in a minute." };
   let tx = await c.tx(txid).catch(() => null);
@@ -102,6 +115,9 @@ async function checkFeeTx({
   if (!tx) return { ok: false, error: `We can't see your ${label} payment yet. Try again in a moment.` };
   const script = new P2PKH().lock(address).toHex();
   const paid = tx.outputs.filter((o) => o.lockingScript.toHex() === script).reduce((s, o) => s + Number(o.satoshis), 0);
+  const commit = feeCommitHex(key, alias);
+  if (!tx.outputs.some((o) => o.lockingScript.toHex() === commit))
+    return { ok: false, error: `That payment was not made for ${String(alias).toLowerCase()} by this wallet` };
   const need = requiredSats(rate, usd);
   if (paid < Math.floor(need * (1 - SLIPPAGE)))
     return { ok: false, error: `That payment is less than the ${label} name fee` };
@@ -117,5 +133,7 @@ module.exports = {
   feeAddress,
   requiredSats,
   checkFeeTx,
+  feeCommitData,
+  feeCommitHex,
   chain,
 };

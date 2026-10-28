@@ -293,7 +293,7 @@ export const GetYourName = ({
     setBusy(true);
     setMsg('');
     try {
-      const fee = nameFee && !ownPaymail ? await payNameFee(apiContext, nameFee) : {};
+      const fee = nameFee && !ownPaymail ? await payNameFee(apiContext, nameFee, alias) : {};
       const pm = await claimPaymail(f, apiContext.wallet, alias, {
         ordAddress,
         name: cleanDisplayName(yourName) || cleanDisplayName(profileName) || undefined,
