@@ -683,7 +683,12 @@ function makeHandlers({
     ? async () => null
     : (alias) => bitsignRenamed(alias, env),
   // OpNS names (lib/opnsResolve.js) for pki / profile / verify only. Off under tests unless injected.
-  opns = env.NODE_ENV === 'test' || process.env.NODE_ENV === 'test' ? async () => null : makeOpnsResolver(),
+  opns = env.NODE_ENV === 'test' || process.env.NODE_ENV === 'test'
+    ? async () => null
+    : makeOpnsResolver({
+        // Our own mint record first (migrations/20261028_name_token_locations.sql), never an indexer's.
+        originOf: async (name) => (store.nameTokenOrigin ? (await store.nameTokenOrigin(name))?.origin : null),
+      }),
   // Chain access for the 1 cent name fee (lib/nameFee.js); tests inject a mock.
   feeChain = nameFee.chain,
   // Owner of a bit-sign name (lib: bitsignHandleOwner). Tests inject their own.

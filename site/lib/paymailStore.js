@@ -191,6 +191,14 @@ function supabaseStore(env = process.env, f = fetch) {
         `bwallet_name_log?${alias ? `alias=eq.${q(alias)}&` : ''}select=id,alias,identity_key,prev_identity_key,action,actor,seq,signature,note,prev_hash,entry_hash,created_at&order=id.desc&limit=${limit}`,
       )) ?? [],
     // Provable names (migrations/20261028_name_proofs.sql).
+    // Name tokens: our own record of a token's mint outpoint (migrations/20261028_name_token_locations.sql).
+    nameTokenOrigin: (name) => one(`name_token_origins?name=eq.${q(name)}&select=name,kind,origin&limit=1`),
+    putNameTokenOrigin: (row) =>
+      req('name_token_origins', {
+        method: 'POST',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify(row),
+      }),
     getProof: (alias) =>
       one(
         `bwallet_name_proofs?alias=eq.${q(alias)}&select=alias,provider,sub,identity_key,id_token,created_at&limit=1`,

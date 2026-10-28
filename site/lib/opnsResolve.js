@@ -12,6 +12,8 @@
 'use strict';
 const { PrivateKey, ProtoWallet, PublicKey, PushDrop, Script, Transaction, Utils } = require('@bsv/sdk');
 
+const { makeNameTokenHolder, wocChain } = require('./nameTokenHolder');
+
 const OPNS_PROTOCOL = [0, 'onesat'];
 const MAP_PREFIX = '1PuQa7K62MiKCtssSLKy1kh56WWU7MtUR5';
 const KEY_RE = /^0[23][0-9a-f]{64}$/;
@@ -174,21 +176,42 @@ const getJson = async (f, url) => {
  * Make a cached resolver. `resolve(name, ourDomains)` → `{ name, identityKey, displayName, via }` or null.
  * Results (hits and misses) are cached for TTL_MS; lookups never throw.
  */
-function makeOpnsResolver({ f = fetch, now = () => Date.now(), ttl = TTL_MS } = {}) {
+function makeOpnsResolver({
+  f = fetch,
+  now = () => Date.now(),
+  ttl = TTL_MS,
+  // Our own record of a name's mint outpoint (our mint txids), consulted before any indexer. async name → origin|null.
+  originOf = async () => null,
+  // Who holds the name token now, by following spends on chain (lib/nameTokenHolder.js). Swappable.
+  holder = makeNameTokenHolder({ chain: wocChain(f) }),
+} = {}) {
   const cache = new Map();
+  // The name's current location: our own spend-follower first; GorillaPool's /latest only when the follower can't
+  // tell (an API down). 28 Oct 2026: GorillaPool missed the a47 / aaap gifts, so it is never the first answer.
+  const currentOutpoint = async (txid, vout) => {
+    try {
+      const h = await holder(`${txid}_${vout}`);
+      if (h.burned || h.listed || !h.outpoint) return null;
+      return OUTPOINT_RE.exec(h.outpoint);
+    } catch {
+      const latest = await getJson(f, `${SERVICES.latest}/${txid}_${vout}/latest?script=false`);
+      const lm = latest && typeof latest.outpoint === 'string' ? OUTPOINT_RE.exec(latest.outpoint) : null;
+      return lm && !latest.spend ? lm : null;
+    }
+  };
   const lookup = async (name, ourDomains) => {
-    const rec = await getJson(f, `${SERVICES.opns}/${encodeURIComponent(name)}`);
-    let origin = rec && typeof rec.origin === 'string' ? rec.origin : '';
+    let origin = String((await originOf(name).catch(() => null)) || '');
+    const rec = origin ? null : await getJson(f, `${SERVICES.opns}/${encodeURIComponent(name)}`);
+    if (!origin) origin = rec && typeof rec.origin === 'string' ? rec.origin : '';
     if (!origin) {
       const o = await getJson(f, `${SERVICES.origin}/${encodeURIComponent(name)}`);
       origin = o && typeof o.outpoint === 'string' ? o.outpoint : '';
     }
     const om = OUTPOINT_RE.exec(origin);
     if (!om) return null;
-    // The name's current location; it must be unspent.
-    const latest = await getJson(f, `${SERVICES.latest}/${om[1]}_${om[2]}/latest?script=false`);
-    const lm = latest && typeof latest.outpoint === 'string' ? OUTPOINT_RE.exec(latest.outpoint) : null;
-    if (!lm || latest.spend) return null;
+    // The name's current location; it must be unspent (and not sitting in a listing).
+    const lm = await currentOutpoint(om[1], Number(om[2]));
+    if (!lm) return null;
     const vout = Number(lm[2]);
     const hexRes = await f(`${SERVICES.rawTx}/${lm[1]}/hex`, { signal: AbortSignal.timeout(5000) });
     if (!hexRes.ok) return null;
