@@ -77,7 +77,7 @@ const PushEngine = () => {
       // openUrl from the ticker; it is always https://www.bchatx.com/room/<TICKER>).
       if (r.openUrl && (IS_EXTENSION || isTauri())) openInBrowser(r.openUrl);
       handleSelect(asMenuItem('chat'));
-      requestRoomByTicker(r.ticker, r.segment === 'dms');
+      requestRoomByTicker(r.ticker, r.segment === 'dms', r.doc);
     };
     const off = onPushRoute(go);
     // Web Push: the service worker opened this page with ?push=… or posts to an open one.

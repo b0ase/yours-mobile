@@ -186,3 +186,40 @@ describe('shared account request taps', () => {
     expect(routeFromQuery('?push=partner:ACME/..%2Fx')).toBeNull();
   });
 });
+
+describe('iOS taps and documents to sign (owner, 28 Oct 2026)', () => {
+  const ID = '04ea9a26-6e55-4b19-8c16-ee76b8d7397a';
+  test('iOS: Capacitor hands the whole APNs userInfo, with the fields under data', () => {
+    const userInfo = {
+      aps: { alert: { title: 'Board', body: '$bcorp sent minute.html' }, sound: 'default' },
+      data: { kind: 'room_media', ticker: 'BCORPBOARD', room: 'BCORPBOARD', url: '/chat?room=BCORPBOARD' },
+    };
+    expect(routeFromData(userInfo)).toEqual({ segment: 'rooms', ticker: 'BCORPBOARD' });
+  });
+  test('nested data as a JSON string is read too', () => {
+    expect(routeFromData({ data: JSON.stringify({ ticker: 'NPG', dm: true }) })).toEqual({
+      segment: 'dms',
+      ticker: 'NPG',
+    });
+  });
+  test('sign_request carries the document (documentId, or ?doc= on the url)', () => {
+    expect(
+      routeFromData({
+        aps: {},
+        data: { kind: 'sign_request', ticker: 'BCORPBOARD', documentId: ID, url: `/room/BCORPBOARD?doc=${ID}` },
+      }),
+    ).toEqual({ segment: 'rooms', ticker: 'BCORPBOARD', doc: ID });
+    expect(routeFromData({ url: `/room/BCORPBOARD?doc=${ID}` })).toEqual({
+      segment: 'rooms',
+      ticker: 'BCORPBOARD',
+      doc: ID,
+    });
+    expect(routeFromData({ ticker: 'X', documentId: '../../evil' })).toEqual({ segment: 'rooms', ticker: 'X' });
+  });
+  test('Web Push query round-trips the document', () => {
+    const r = { segment: 'rooms' as const, ticker: 'BCORPBOARD', doc: ID };
+    expect(routeToQuery(r)).toBe(`push=rooms:BCORPBOARD/${ID}`);
+    expect(routeFromQuery(`?${routeToQuery(r)}`)).toEqual(r);
+    expect(routeFromQuery('?push=rooms:BCORPBOARD')).toEqual({ segment: 'rooms', ticker: 'BCORPBOARD' });
+  });
+});
