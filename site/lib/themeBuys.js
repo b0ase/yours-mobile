@@ -105,12 +105,22 @@ function themeBuyStore(env = process.env, f = fetch) {
  * Handlers: each returns [status, body]. Deps injected so tests run without a network:
  * store (themeBuyStore shape), rate() → USD per BSV, broadcast(tx, beefHex) (throws if rejected), env, now().
  */
-function makeThemeBuyHandlers({ store, ledger, rate, broadcast, env = process.env, now = () => Date.now() }) {
+function makeThemeBuyHandlers({
+  store,
+  ledger,
+  rate,
+  broadcast,
+  env = process.env,
+  now = () => Date.now(),
+  quoteMs = QUOTE_MS,
+  claimGraceMs = CLAIM_GRACE_MS,
+  actions = {},
+}) {
   if (!ledger || typeof ledger.reserve !== 'function') throw new Error('paid-txid ledger required');
   const quote = async (body) => {
     const pay = payAddress(env);
     if (!pay) return [503, { error: 'not_configured' }];
-    const sigErr = await verifySigned(body || {}, 'theme-buy-quote', now());
+    const sigErr = await verifySigned(body || {}, actions.quote || 'theme-buy-quote', now());
     if (sigErr) return [401, { error: sigErr }];
     const identityKey = String(body.identityKey).toLowerCase();
     const packId = String((body.fields || {}).pack || '');
@@ -124,7 +134,7 @@ function makeThemeBuyHandlers({ store, ledger, rate, broadcast, env = process.en
     const sats = Math.max(1, priceSats(r, usd) - FEE_ROOM_SATS);
     const quoteId = crypto.randomBytes(16).toString('hex');
     const memoHex = memoScript(quoteId).toHex();
-    const expiresAt = new Date(now() + QUOTE_MS).toISOString();
+    const expiresAt = new Date(now() + quoteMs).toISOString();
     await store.insert({
       identity_key: identityKey,
       pack_id: packId,
@@ -169,7 +179,7 @@ function makeThemeBuyHandlers({ store, ledger, rate, broadcast, env = process.en
   };
 
   const claim = async (body) => {
-    const sigErr = await verifySigned(body || {}, 'theme-buy-claim', now());
+    const sigErr = await verifySigned(body || {}, actions.claim || 'theme-buy-claim', now());
     if (sigErr) return [401, { error: sigErr }];
     const identityKey = String(body.identityKey).toLowerCase();
     const f = body.fields || {};
@@ -183,7 +193,7 @@ function makeThemeBuyHandlers({ store, ledger, rate, broadcast, env = process.en
       if (row.txid === txid) return [200, { pack: row.pack_id, txid }]; // a retry of a claim that went through
       return [409, { error: 'quote_used' }];
     }
-    if (now() > Date.parse(row.quote_expires_at) + CLAIM_GRACE_MS) return [410, { error: 'quote_expired' }];
+    if (now() > Date.parse(row.quote_expires_at) + claimGraceMs) return [410, { error: 'quote_expired' }];
     let tx;
     let beefHex = null;
     try {

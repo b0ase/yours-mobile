@@ -1,6 +1,10 @@
 {
   "rewrites": [
     {
+      "source": "/api/agent/:op",
+      "destination": "/api/agent-buy?op=:op"
+    },
+    {
       "source": "/api/library/:op",
       "destination": "/api/library?op=:op"
     },
