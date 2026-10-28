@@ -3,6 +3,8 @@ import { FileSignature } from 'lucide-react';
 import type { ChatRoom } from './messages';
 import { docToOffer, signDocUrl } from './pendingDoc';
 import { takeRoomDoc } from './segmentNav';
+import { docHashFor } from './signLink';
+import { openDappBrowser } from '../dappBrowser';
 
 /**
  * "A document is waiting for your signature" at the top of a room: the room's pinned pending_doc, or the one a tapped
@@ -13,7 +15,7 @@ const PendingDocBanner = ({ room }: { room: ChatRoom }) => {
   // Taken once, when this room opens: a tap for this room (and this document) highlights the banner.
   const [fromPush] = useState(() => takeRoomDoc(room.ticker));
   const doc = docToOffer(room, fromPush);
-  const href = doc ? signDocUrl(room.ticker, doc) : null;
+  const href = doc ? signDocUrl(room.ticker, doc, docHashFor(room.ticker, doc)) : null;
   if (!href) return null;
   return (
     <div
@@ -31,15 +33,16 @@ const PendingDocBanner = ({ room }: { room: ChatRoom }) => {
           Read it, sign your block and seal on bChatX.
         </div>
       </div>
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="shrink-0 rounded-xl px-3 py-2 text-[13px] font-bold"
+      {/* The wallet's own browser on the phone (connected, so signed in; owner 28 Oct 2026: Safari opened signed
+          out). A tab on the web wallet and extension (openDappBrowser). */}
+      <button
+        type="button"
+        onClick={() => openDappBrowser(href).catch((e) => console.error('[review & sign]', e))}
+        className="shrink-0 rounded-xl px-3 py-2 text-[13px] font-bold border-0"
         style={{ background: 'var(--bw-accent-hi)', color: '#1a1300' }}
       >
         Review &amp; sign
-      </a>
+      </button>
     </div>
   );
 };

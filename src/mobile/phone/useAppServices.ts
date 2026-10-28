@@ -5,6 +5,7 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { initPairing, setAgentPairDeps } from '../pair/sessions';
 import { onPairLink, takePairLink } from '../pair/links';
 import { useSpaceInviteLinks } from '../spaces/inviteLinks';
+import { useSignLinks } from '../chat/useSignLinks';
 import { useSubscribeLinks } from '../pots/subscribeLink';
 import { usePeerPayLinks } from '../scan/peerpayLinks';
 
@@ -25,6 +26,7 @@ export const useAppServices = () => {
     return onPairLink(show);
   }, []);
   useSpaceInviteLinks();
+  useSignLinks();
   useSubscribeLinks();
   usePeerPayLinks();
   useEffect(() => {
