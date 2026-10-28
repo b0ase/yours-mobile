@@ -42,7 +42,8 @@ const BINDING_KEYS = [
 const BINDING_FIELD = new RegExp(`["']?\\b(${BINDING_KEYS})\\b["']?\\s*[:=]\\s*["']?([^\\s"',;}\\]]+)`, 'gi');
 // "<host> wants you to sign in" (SIWE), "<host> wallet login:" and "Sign in to <host>" lines, anywhere in the
 // text: a prefix such as "Login: " or a JSON string around the line must not hide it.
-const HOST = '((?:[a-z0-9-]+\\.)+[a-z]{2,}(?::\\d+)?)';
+// Also IPv4 literals and "localhost" (b-Aware 25 Oct 2026, Widia): a challenge for 10.0.0.5 named no site before.
+const HOST = '((?:(?:[a-z0-9-]+\\.)+[a-z]{2,}|(?:\\d{1,3}\\.){3}\\d{1,3}|localhost)(?::\\d+)?)';
 const SIGN_IN_LINES = [
   new RegExp(
     `(?:^|[\\s"'\`(:])${HOST}(?: wants you to sign in| (?:wallet |account )?(?:log ?in|sign[ -]?in)\\b)`,
@@ -50,7 +51,7 @@ const SIGN_IN_LINES = [
   ),
   new RegExp(`\\b(?:sign|log) ?in to ${HOST}`, 'gi'),
 ];
-const HOST_RE = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/;
+const HOST_RE = /^(?:[a-z0-9-]+(\.[a-z0-9-]+)+|localhost)$/;
 
 /** Lower-case hostname with no port, no trailing dot and no pairing suffix (".c<hex>.paired.invalid"). */
 export const bareHost = (value: string): string | null => {
@@ -77,8 +78,12 @@ export const bareHost = (value: string): string | null => {
  */
 export const sameSite = (a: string, b: string) => a === b || a.endsWith(`.${b}`) || b.endsWith(`.${a}`);
 
+/** Largest `data` the guard reads (and so the largest an outside caller may ask to sign). */
+export const MAX_SIGN_DATA = 64 * 1024;
+export const UNCHECKABLE_REFUSAL = 'The wallet could not check which site this message is for';
+
 const decodeText = (data: unknown): string | null => {
-  if (!Array.isArray(data) || data.length === 0 || data.length > 64 * 1024) return null;
+  if (!Array.isArray(data) || data.length === 0 || data.length > MAX_SIGN_DATA) return null;
   if (!data.every((b) => typeof b === 'number' && b >= 0 && b <= 255)) return null;
   try {
     const text = new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(data as number[]));
@@ -177,8 +182,23 @@ export const textVariants = (text: string): string[] => {
 /** Why this outside call must be refused, or null. Only text data that names a site is checked. */
 export const crossSiteSignRefusal = (originator: string | undefined, args: unknown): string | null => {
   if (!originator || !args || typeof args !== 'object') return null;
+  // b-Aware 25 Oct 2026 (yudhaekasaputra1, widiaaw382): the guard failed open on what it couldn't read. For an outside
+  // caller it now fails closed: data that isn't a byte array, data over MAX_SIGN_DATA, and a caller whose host it
+  // can't parse are refused. A missing `data` (e.g. a hash-only call, handled below) is not a "non-array".
+  const data = (args as { data?: unknown }).data;
+  if (data !== undefined) {
+    if (!Array.isArray(data)) return `${UNCHECKABLE_REFUSAL} (data is not a byte array)`;
+    if (data.length > MAX_SIGN_DATA) return `${UNCHECKABLE_REFUSAL} (message over ${MAX_SIGN_DATA / 1024} KB)`;
+  }
   const caller = bareHost(originator);
-  if (!caller) return null;
+  if (!caller) {
+    // A caller with no parsable host (a single-label name, an extension id) can't be any site a message names: refuse
+    // a blind hash or data that names a site; data naming no site signs as before.
+    if ((args as { hashToDirectlySign?: unknown }).hashToDirectlySign !== undefined) return BLIND_SIGN_REFUSAL;
+    const t = decodeText(data);
+    const named = t === null ? [] : [...new Set(textVariants(t).flatMap(boundHosts))];
+    return named.length ? `${CROSS_SITE_REFUSAL} (${named[0]})` : null;
+  }
   // A bare hash can't be read, so it can't be checked: an outside caller must send the data itself. Our own
   // chat sites are the exception: bChatX AIP-signs every post over a BSM digest, which `data` can't stand in for
   // (owner, 25 Oct 2026: posting broke after the blind-sign refusal).
