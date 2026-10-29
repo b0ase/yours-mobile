@@ -39,6 +39,12 @@ export interface AutoResyncDeps {
   woc?: (outpoint: string) => Promise<WocAnswer>;
   markSpent: (outpoint: string, spender: string) => Promise<number>;
   markUnspent: (outpoint: string) => Promise<number>;
+  /**
+   * Light run (foreground / timer, every few minutes): coins the 1sat index calls unspent are not looked up on
+   * WhatsOnChain one by one, so a big wallet costs a few batched index calls. Spends the index names are still
+   * confirmed with WhatsOnChain as usual. Full runs (at most every AUTO_RESYNC_GAP_MS) do the per-coin fallback.
+   */
+  light?: boolean;
 }
 
 export type AutoResyncReport = {
@@ -94,7 +100,7 @@ export async function autoResyncCoins(d: AutoResyncDeps): Promise<AutoResyncRepo
         const w = await askWoc(o);
         if (w && w.txid.toLowerCase() === ix.toLowerCase()) by = ix;
       } else by = ix;
-    } else {
+    } else if (!d.light) {
       const w = await askWoc(o);
       if (w && w.confirmed && isSpender(w.txid)) by = w.txid;
     }
@@ -121,8 +127,24 @@ export async function autoResyncCoins(d: AutoResyncDeps): Promise<AutoResyncRepo
 
 export const AUTO_RESYNC_KEY = 'bwxAutoCoinResync';
 export const AUTO_RESYNC_GAP_MS = 30 * 60 * 1000;
+/**
+ * Light checks between full ones (owner, 29 Oct 2026: phone showed $3.47 against the extension's $1.95 for the same
+ * account until REFRESH WALLET; the check ran only at unlock and the phone stays unlocked, so coins the extension
+ * spent stayed in the phone's balance for hours). Run on a timer and when the app comes to the front.
+ */
+export const AUTO_RESYNC_LIGHT_GAP_MS = 5 * 60 * 1000;
 
-export type AutoResyncState = Record<string, { at?: number; cleared?: Record<string, string> }>;
+export type AutoResyncState = Record<string, { at?: number; lightAt?: number; cleared?: Record<string, string> }>;
+
+/** Pure: which run is due now: a full one, a light one, or none. */
+export const autoResyncMode = (
+  s: { at?: number; lightAt?: number } | undefined,
+  now: number,
+): 'full' | 'light' | null => {
+  if (shouldAutoResync(s?.at, now)) return 'full';
+  const last = Math.max(s?.at ?? 0, s?.lightAt ?? 0);
+  return now - last >= AUTO_RESYNC_LIGHT_GAP_MS ? 'light' : null;
+};
 
 /** Pure: is a run due for this account (never run, or the last one is older than the gap)? */
 export const shouldAutoResync = (lastAt: number | undefined, now: number, gap = AUTO_RESYNC_GAP_MS): boolean =>
@@ -145,17 +167,20 @@ export async function runAutoResyncIfDue(
 ): Promise<AutoResyncReport | null> {
   const read = async () => ((await kv.get(AUTO_RESYNC_KEY))[AUTO_RESYNC_KEY] as AutoResyncState | undefined) ?? {};
   const state = await read();
-  if (!shouldAutoResync(state[identityKey]?.at, now)) return null;
+  const mode = autoResyncMode(state[identityKey], now);
+  if (!mode) return null;
+  const stamp = mode === 'full' ? { at: now, lightAt: now } : { lightAt: now };
   return withCoinResyncLock(async () => {
     const deps = await load(state[identityKey]?.cleared ?? {});
     // Not ready (no services/storage yet): don't start the wait, the next unlock tries again.
     if (!deps) return null;
     // Written before the run, so a crash mid-run still waits the gap.
-    await kv.set({ [AUTO_RESYNC_KEY]: { ...(await read()), [identityKey]: { ...state[identityKey], at: now } } });
-    const report = await autoResyncCoins(deps);
+    const before = await read();
+    await kv.set({ [AUTO_RESYNC_KEY]: { ...before, [identityKey]: { ...before[identityKey], ...stamp } } });
+    const report = await autoResyncCoins({ ...deps, light: mode === 'light' });
     const latest = await read();
     await kv.set({
-      [AUTO_RESYNC_KEY]: { ...latest, [identityKey]: { ...latest[identityKey], at: now, cleared: report.cleared } },
+      [AUTO_RESYNC_KEY]: { ...latest, [identityKey]: { ...latest[identityKey], ...stamp, cleared: report.cleared } },
     });
     return report;
   });
