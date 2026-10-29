@@ -116,9 +116,10 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       'onClick={() => window.open(`${ONE_SAT_MARKET_URL}/bsv21/${token.info.id}`, \'_blank\')}\n                className="flex items-center justify-center gap-2 flex-1 h-11 rounded-xl text-sm font-bold outline-none border cursor-pointer"',
       'onClick={() => window.open(`${ONE_SAT_MARKET_URL}/bsv21/${token.info.id}`, \'_blank\')}\n                className="hidden"',
     ],
+    // Send is the big pinned button at the bottom now (29 Oct 2026), so Chat closes the action row.
     [
-      "{isProcessing ? 'Sending...' : 'Send'}\n              </motion.button>",
-      "{isProcessing ? 'Sending...' : 'Send'}\n              </motion.button>\n<OpenTokenRoomButton id={token.info.id} />",
+      '                Trade\n              </motion.button>\n            </div>\n          </form>',
+      '                Trade\n              </motion.button>\n<OpenTokenRoomButton id={token.info.id} />\n            </div>\n          </form>',
     ],
     // Token links (website / app / X / Telegram / bChat) under the action buttons, when the issuer set any.
     [
@@ -609,6 +610,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       `<NameInput
                     theme={theme}
                     asset="token"
+                    big
                     onChange={(v) => updateRecipient(recipient.id, 'address', v)}
                     value={recipient.address}
                     style={{ width: '100%', margin: 0 }}

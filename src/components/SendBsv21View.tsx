@@ -8,9 +8,9 @@ import { showAmount, normalize, truncate } from '../utils/format';
 import { sleep } from '../utils/sleep';
 import { getErrorMessage } from '../utils/tools';
 import { isUri } from '../utils/uri';
-import { Input } from './Input';
 import { SendConfirmation, type SendLineItem } from './SendConfirmation';
 import { Bsv21OverlayPrompt, type Bsv21OverlayIssue } from './Bsv21OverlayPrompt';
+import { Input } from './Input';
 import { Show } from './Show';
 import { SpeedBump } from './SpeedBump';
 import { CoinHistory } from './CoinHistory';
@@ -37,7 +37,7 @@ import {
 } from '../services/tokenSendHeal';
 import { sendMessageAsync } from '../utils/chromeHelpers';
 import { AnimatePresence, motion } from 'framer-motion';
-import { AlertTriangle, ArrowLeft, ShoppingCart, Send, Copy, Check, Plus, Trash2, Tag } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ShoppingCart, Send, Copy, Check, Plus, Trash2, Tag, Loader2 } from 'lucide-react';
 import { SellSheet } from '../mobile/sell/SellSheet';
 import { SELL_ENABLED } from '../mobile/sell/sell';
 import { IssuerBadge } from '../mobile/issuer/IssuerBadge';
@@ -611,6 +611,41 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
   const overBalance = groupTotal !== null && groupTotal > maxAmount;
   const submitDisabled = isProcessing || anyRecipientEmpty || overBalance;
 
+  // Plain-words field checks, shown under each field once something is typed (layout only: the submit
+  // handler still runs its own checks before anything is built).
+  const addressError = (a: string) => (a && !validate(a.trim()) ? "That isn't a valid 1Sat address." : '');
+  const amountError = (r: Bsv21Recipient) => {
+    if (!r.amountInput) return '';
+    const a = toAtomic(r.amountInput);
+    if (a === null || a <= 0n) return 'Enter an amount above 0.';
+    if (recipients.length === 1 && a > maxAmount) return `More than your balance (${maxDisplay} ${tokenName}).`;
+    return '';
+  };
+  const disabledReason = isProcessing
+    ? ''
+    : recipients.some((r) => !r.address)
+      ? 'Enter a recipient'
+      : recipients.some((r) => !r.amountInput)
+        ? 'Enter an amount'
+        : recipients.some((r) => addressError(r.address))
+          ? 'Check the recipient address'
+          : overBalance
+            ? 'Amount is more than your balance'
+            : recipients.some((r) => amountError(r))
+              ? 'Check the amount'
+              : '';
+  const sendBlocked = composing && (submitDisabled || !!disabledReason);
+  const indexerFee =
+    overlayFunds && overlayFunds.feePerOutput > 0 ? overlayFunds.feePerOutput * recipients.length : null;
+  const summary =
+    composing && !disabledReason && groupTotal !== null
+      ? `Send ${showAmount(groupTotal, token.info.dec)} ${tokenName} to ${
+          recipients.length > 1 ? `${recipients.length} people` : truncate(recipients[0].address.trim(), 6, 4)
+        }${indexerFee !== null ? ` · indexer fee ≈ ${indexerFee} sats` : ''} · network fee on the next screen`
+      : '';
+  const labelStyle = { color: gray } as const;
+  const fieldBorder = (err: string) => (err ? '#F04438' : gray + '55');
+
   return (
     <Show when={token !== null}>
       {token ? (
@@ -753,7 +788,7 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
           )}
 
           {/* Send form */}
-          <form noValidate onSubmit={(e) => handleSendBSV21(e)} className="flex flex-col w-full px-4 gap-3">
+          <form id="bsv21-send-form" noValidate onSubmit={(e) => handleSendBSV21(e)} className="flex flex-col w-full px-4 gap-3">
             {composing && (<>
             {/* Recipient cards */}
             <AnimatePresence>
@@ -769,7 +804,7 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
                 >
                   {/* Card header */}
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: gray }}>
+                    <span id={`bsv21-to-label-${recipient.id}`} className="text-xs font-semibold uppercase tracking-widest" style={{ color: gray }}>
                       {recipients.length > 1 ? `Recipient ${idx + 1}` : 'Recipient'}
                     </span>
                     {recipients.length > 1 && (
@@ -786,7 +821,9 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
                     )}
                   </div>
 
-                  {/* Address input */}
+                  {/* Address */}
+                  <div className="flex flex-col gap-1.5">
+                    <div role="group" aria-labelledby={`bsv21-to-label-${recipient.id}`} className="w-full [&_div.relative]:!w-full [&_div.relative]:!mx-0 [&_input]:!h-12 [&_input]:!text-base">
                   <Input
                     theme={theme}
                     placeholder="Enter address..."
@@ -795,37 +832,60 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
                     value={recipient.address}
                     style={{ width: '100%', margin: 0 }}
                   />
+                    </div>
+                    {addressError(recipient.address) && (
+                      <p id={`bsv21-to-err-${recipient.id}`} role="alert" className="text-xs m-0" style={{ color: '#F04438' }}>
+                        {addressError(recipient.address)}
+                      </p>
+                    )}
+                  </div>
 
-                  {/* Amount + MAX */}
-                  <div
-                    className="flex items-center w-full rounded-xl border"
-                    style={{ backgroundColor: row, borderColor: gray + '40' }}
-                  >
-                    <input
-                      placeholder="0"
-                      type="text"
-                      inputMode="decimal"
-                      className="flex-1 bg-transparent h-9 px-4 text-sm outline-none border-none"
-                      style={{
-                        color: contrast,
-                        fontFamily: "'Inter', Arial, Helvetica, sans-serif",
-                      }}
-                      value={recipient.amountInput}
-                      onChange={(e) => updateRecipient(recipient.id, 'amountInput', e.target.value)}
-                    />
-                    {recipients.length === 1 && (
-                      <motion.button
-                        type="button"
-                        whileTap={{ scale: 0.93 }}
-                        onClick={() => handleSetMax(recipient.id)}
-                        className="flex items-center gap-1 px-2.5 py-1.5 mr-1.5 rounded-lg border-0 outline-none cursor-pointer shrink-0"
-                        style={{ background: `color-mix(in srgb, ${accent} 9%, transparent)` }}
-                        title="Fill with remaining available amount"
-                      >
-                        <span className="text-[11px] font-bold" style={{ color: accent }}>
-                          MAX
-                        </span>
-                      </motion.button>
+                  {/* Amount + Max */}
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <label htmlFor={`bsv21-amt-${recipient.id}`} className="text-xs font-semibold" style={labelStyle}>
+                        Amount ({tokenName})
+                      </label>
+                      <span className="text-xs" style={labelStyle}>
+                        You have {maxDisplay}
+                      </span>
+                    </div>
+                    <div
+                      className="flex items-center w-full min-w-0 rounded-xl border"
+                      style={{ backgroundColor: theme.color.global.walletBackground, borderColor: fieldBorder(amountError(recipient)) }}
+                    >
+                      <input
+                        id={`bsv21-amt-${recipient.id}`}
+                        placeholder="0"
+                        type="text"
+                        inputMode="decimal"
+                        autoComplete="off"
+                        aria-invalid={!!amountError(recipient)}
+                        aria-describedby={amountError(recipient) ? `bsv21-amt-err-${recipient.id}` : undefined}
+                        className="flex-1 min-w-0 bg-transparent h-14 px-4 text-2xl font-semibold outline-none border-none"
+                        style={{ color: contrast, fontFamily: "'Inter', Arial, Helvetica, sans-serif" }}
+                        value={recipient.amountInput}
+                        onChange={(e) => updateRecipient(recipient.id, 'amountInput', e.target.value)}
+                      />
+                      <span className="text-sm font-semibold shrink-0 pr-2" style={{ color: gray }}>
+                        {tokenName}
+                      </span>
+                      {recipients.length === 1 && (
+                        <button
+                          type="button"
+                          onClick={() => handleSetMax(recipient.id)}
+                          className="h-9 px-3 mr-1.5 rounded-lg border-0 cursor-pointer shrink-0 text-xs font-bold"
+                          style={{ background: `color-mix(in srgb, ${accent} 12%, transparent)`, color: contrast }}
+                          aria-label={`Send all: ${maxDisplay} ${tokenName}`}
+                        >
+                          Max
+                        </button>
+                      )}
+                    </div>
+                    {amountError(recipient) && (
+                      <p id={`bsv21-amt-err-${recipient.id}`} role="alert" className="text-xs m-0" style={{ color: '#F04438' }}>
+                        {amountError(recipient)}
+                      </p>
                     )}
                   </div>
                 </motion.div>
@@ -892,19 +952,6 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
                 <ShoppingCart size={14} />
                 Trade
               </motion.button>
-              <motion.button
-                whileHover={!(composing && submitDisabled) ? { scale: 1.02 } : undefined}
-                whileTap={!(composing && submitDisabled) ? { scale: 0.98 } : undefined}
-                type={composing ? 'submit' : 'button'}
-                onClick={composing ? undefined : () => setComposing(true)}
-                disabled={composing && submitDisabled}
-                className="flex items-center justify-center gap-2 flex-1 h-11 rounded-xl text-sm font-bold outline-none border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                // Same look as Buy · Sell · Chat (owner, 4 Oct 2026).
-                style={{ backgroundColor: 'var(--bw-surface)', borderColor: '#3a2f0c', color: 'var(--bw-accent-hi)' }}
-              >
-                <Send size={14} />
-                {isProcessing ? 'Sending...' : 'Send'}
-              </motion.button>
             </div>
           </form>
 
@@ -921,6 +968,50 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
               />
             </div>
           </Show>
+
+          {/* Primary action: big gold Send, pinned above the dock / safe area so the thumb finds it. */}
+          <div
+            className="sticky z-10 w-full px-4 pt-3 pb-3 mt-4"
+            style={{
+              bottom: 'calc(var(--dock-h, 0px) + env(safe-area-inset-bottom, 0px) + var(--bw-mini-h, 0px))',
+              background: `var(--bw-pack-bg, ${theme.color.global.walletBackground})`,
+              boxShadow: `0 -1px 0 ${gray}22`,
+            }}
+          >
+            {summary && (
+              <p className="text-xs text-center m-0 mb-2" style={{ color: contrast }} aria-live="polite">
+                {summary}
+              </p>
+            )}
+            {composing && disabledReason && (
+              <p id="bsv21-send-reason" className="text-xs text-center m-0 mb-2" style={{ color: gray }} aria-live="polite">
+                {disabledReason}
+              </p>
+            )}
+            <motion.button
+              whileTap={!sendBlocked ? { scale: 0.98 } : undefined}
+              type={composing ? 'submit' : 'button'}
+              form="bsv21-send-form"
+              onClick={composing ? undefined : () => setComposing(true)}
+              disabled={sendBlocked}
+              aria-disabled={sendBlocked}
+              aria-describedby={composing && disabledReason ? 'bsv21-send-reason' : undefined}
+              aria-busy={isProcessing}
+              className="flex items-center justify-center gap-2 w-full rounded-2xl text-base font-bold border-0 outline-none cursor-pointer disabled:cursor-not-allowed focus-visible:ring-2"
+              style={{
+                minHeight: 52,
+                // Theme accent (gold by default; black on the White pack) with its own ink colour.
+                background: sendBlocked
+                  ? `color-mix(in srgb, ${gray} 22%, transparent)`
+                  : 'linear-gradient(180deg, var(--bw-accent-hi, #F5C542) 0%, var(--bw-accent, #D4A017) 100%)',
+                color: sendBlocked ? contrast : 'var(--bw-on-accent, #1A1300)',
+                opacity: sendBlocked ? 0.75 : 1,
+              }}
+            >
+              {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+              {isProcessing ? 'Sending...' : composing ? `Send ${tokenName}` : 'Send'}
+            </motion.button>
+          </div>
         </motion.div>
       ) : (
         <></>
