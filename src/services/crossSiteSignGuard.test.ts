@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   BLIND_SIGN_REFUSAL,
   boundHosts,
+  normaliseKey,
   crossSiteSignRefusal,
   guardCrossSiteSigning,
   sameSite,
@@ -279,5 +280,54 @@ describe('TERRORNODE audit 29 Oct: bit-sign login wording on tokenblaster (www v
     for (const named of ['evil.com', 'tokenblaster.lol.evil.com', 'wwwtokenblaster.lol', 'tokenblaster.lo'])
       expect(crossSiteSignRefusal('https://www.tokenblaster.lol', { data: login(named) })).toMatch(/different site/);
     expect(crossSiteSignRefusal('https://evil.com', { data: login('www.tokenblaster.lol') })).toMatch(/different site/);
+  });
+});
+
+describe('login wordings and camelCase keys (b-Aware 29 Oct, squ11z1)', () => {
+  const cases = [
+    'Sign in with victim.example',
+    'Continue with victim.example',
+    'Continue to victim.example',
+    'Login via victim.example',
+    'Log in with victim.example\nNonce: 1',
+    'Sign-in using victim.example',
+    'Sign up for victim.example',
+    'victim.example wants to connect',
+    'victim.example wants to sign you in',
+    '{"redirectUrl":"https://victim.example/callback","nonce":"n"}',
+    '{"callbackUrl":"https://victim.example/cb"}',
+    '{"returnTo":"https://victim.example"}',
+    '{"rpId":"victim.example"}',
+    '{"relyingParty":"victim.example"}',
+    '{"redirect-uri":"https://victim.example/cb"}',
+    '{"RedirectURI":"https://victim.example/cb"}',
+    '{"postLoginRedirect":"https://victim.example/"}',
+    '{"appOrigin":"https://victim.example"}',
+    '{"expectedDomain":"victim.example"}',
+    'loginUrl=https://victim.example/x&nonce=1',
+  ];
+  test.each(cases)('%s: refused cross-site, allowed for its own site', (msg) => {
+    expect(crossSiteSignRefusal('evil.com', sig(msg))).toContain('different site');
+    expect(crossSiteSignRefusal('victim.example', sig(msg))).toBeNull();
+    expect(crossSiteSignRefusal('www.victim.example', sig(msg))).toBeNull();
+    expect(crossSiteSignRefusal('victim.example.paired.invalid', sig(msg))).not.toBeNull();
+  });
+
+  test('normaliseKey folds camel, Pascal, kebab and snake to one form', () => {
+    for (const k of ['redirectUrl', 'RedirectUrl', 'redirect-url', 'redirect_url', 'REDIRECT_URL', 'redirectURL'])
+      expect(normaliseKey(k)).toBe('redirect_url');
+    expect(normaliseKey('returnTo')).toBe('return_to');
+  });
+
+  test('ordinary messages are unaffected', () => {
+    for (const msg of [
+      'Read this on victim.example',
+      'look at https://victim.example/post/1',
+      'I signed in yesterday, continue reading at victim.example',
+      '{"text":"see https://victim.example","userId":"abc","createdAt":"2026-10-29"}',
+      '{"subdomain":"victim.example","nonce":"n"}',
+      'bwx-podcast:42:nonce',
+    ])
+      expect(crossSiteSignRefusal('evil.com', sig(msg))).toBeNull();
   });
 });

@@ -38,8 +38,26 @@ const BINDING_KEYS = [
   'return_to',
   'return_url',
   'return_uri',
-].join('|');
-const BINDING_FIELD = new RegExp(`["']?\\b(${BINDING_KEYS})\\b["']?\\s*[:=]\\s*["']?([^\\s"',;}\\]]+)`, 'gi');
+];
+const BINDING_SET = new Set(BINDING_KEYS);
+// b-Aware 29 Oct 2026 (squ11z1): the key list was matched with \b on the raw key, so camelCase and kebab-case keys
+// (redirectUrl, callbackUrl, returnTo, rpId, relyingParty, redirect-uri) were never seen. Every key is now read and
+// normalised to snake_case first; a key in the list, or ending in a site-ish word (login_url, app_origin,
+// expected_domain, post_login_redirect), binds.
+const ANY_FIELD = /["']?([A-Za-z_][\w-]*)["']?\s*[:=]\s*["']?([^\s"',;}\]]+)/g;
+const BINDING_SUFFIX =
+  /(?:^|_)(?:url|uri|origin|domain|host|hostname|audience|redirect|callback|return_to|realm|rp_id|relying_party)$/;
+/** camelCase / PascalCase / kebab-case / snake_case key to one snake_case form. */
+export const normaliseKey = (key: string) =>
+  key
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .replace(/[-\s]+/g, '_')
+    .toLowerCase();
+const isBindingKey = (key: string) => {
+  const k = normaliseKey(key);
+  return BINDING_SET.has(k) || BINDING_SUFFIX.test(k);
+};
 // "<host> wants you to sign in" (SIWE), "<host> wallet login:" and "Sign in to <host>" lines, anywhere in the
 // text: a prefix such as "Login: " or a JSON string around the line must not hide it.
 // Also IPv4 literals and "localhost" (b-Aware 25 Oct 2026, Widia): a challenge for 10.0.0.5 named no site before.
@@ -50,12 +68,12 @@ const HOST = '((?:(?:[a-z0-9-]+\\.)+[a-z]{2,}|(?:\\d{1,3}\\.){3}\\d{1,3}|localho
 const SEP = '[\\s,:\u2013\u2014-]*';
 const SIGN_IN_LINES = [
   new RegExp(
-    `(?:^|[\\s"'\`(:])${HOST}\\b${SEP}(?:wants you to sign in|(?:wallet |account )?(?:log ?in|sign[ -]?in)\\b|(?:requests|requires) (?:authentication|verification|a signature)\\b)`,
+    `(?:^|[\\s"'\`(:])${HOST}\\b${SEP}(?:wants you to sign in|(?:wallet |account )?(?:log ?in|sign[ -]?in)\\b|(?:requests|requires) (?:authentication|verification|a signature)\\b|wants to (?:connect|sign you in|sign in|log you in|log in|authenticate|verify)\\b)`,
     'gim',
   ),
   new RegExp(`\\b(?:sign|log) ?(?:in ?to|on ?to)\\s+${HOST}`, 'gi'),
   new RegExp(
-    `\\b(?:welcome to|authenticate(?: (?:to|with|for|on|at))?|verify (?:your )?(?:identity|wallet) (?:for|with|on)|authori[sz]e(?: (?:to|for|with|on))?|connect (?:to|with))\\s+${HOST}`,
+    `\\b(?:welcome to|authenticate(?: (?:to|with|for|on|at))?|verify (?:your )?(?:identity|wallet) (?:for|with|on)|authori[sz]e(?: (?:to|for|with|on))?|connect (?:to|with)|(?:sign|log)[ -]?(?:in|on|up) (?:with|via|at|on|for|through|using)|log[ -]?in (?:to|with|via|at|on|for)|continue (?:with|to))\\s+${HOST}`,
     'gi',
   ),
 ];
@@ -112,7 +130,8 @@ export const boundHosts = (text: string): string[] => {
       if (h) out.add(h);
     }
   }
-  for (const m of text.matchAll(BINDING_FIELD)) {
+  for (const m of text.matchAll(ANY_FIELD)) {
+    if (!isBindingKey(m[1])) continue;
     const h = bareHost(m[2]);
     if (h) out.add(h);
   }
