@@ -98,6 +98,24 @@ export const App = () => {
     return () => clearTimeout(t);
   }, [hasWallet, isLocked]);
 
+  // Coins spent from another device (same seed) leave this device's balance high until checked: ask the background
+  // for its throttled coin check whenever the app/popup is shown (owner, 29 Oct 2026: phone $3.47 vs extension $1.95
+  // until REFRESH WALLET). The background decides whether one is due (services/autoCoinResync.ts).
+  useEffect(() => {
+    if (!hasWallet || isLocked) return;
+    const ask = () => {
+      if (document.visibilityState === 'hidden') return;
+      try {
+        void Promise.resolve(chrome.runtime.sendMessage({ action: 'COIN_CHECK_DUE' })).catch(() => undefined);
+      } catch {
+        /* worker not up yet: its own timer covers it */
+      }
+    };
+    ask();
+    document.addEventListener('visibilitychange', ask);
+    return () => document.removeEventListener('visibilitychange', ask);
+  }, [hasWallet, isLocked]);
+
   // Establish a port connection so the background knows the popup is open.
   // Port disconnects automatically when the popup closes — no timers needed.
   useEffect(() => {

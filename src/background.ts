@@ -139,6 +139,7 @@ import { siteActionError } from './services/siteActionError';
 import { createWithSpentRetry, retryEligible } from './services/spentRetry';
 import {
   AUTO_RESYNC_DELAY_MS,
+  AUTO_RESYNC_LIGHT_GAP_MS,
   readAutoResyncCoins,
   runAutoResyncIfDue,
   type AutoResyncDeps,
@@ -420,6 +421,8 @@ const markSpentStore = (ctx: AccountContext, identityKey: string) => ({
       return n;
     }),
 });
+
+const AUTO_COIN_RESYNC_ALARM = 'auto-coin-resync';
 
 /** Unfinished actions: their txids are not "spenders", and the coins they hold are not checked. */
 const PENDING_STATUSES = ['unsigned', 'nosend', 'sending', 'unprocessed', 'failed'] as const;
@@ -814,31 +817,11 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
     // after this device's store is active, and a while after unlock so the first balance read and the address sync
     // are not queued behind its scan of every coin (owner's big wallet, 19 Oct 2026).
     {
-      const key = chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey || '';
       const gen = lockGeneration;
-      if (key)
-        void localReady
-          .then(() => new Promise((r) => setTimeout(r, AUTO_RESYNC_DELAY_MS)))
-          .then(() =>
-            // Locked or switched account since: skip (the next unlock tries again).
-            lockGeneration !== gen || accountContext !== ctx
-              ? null
-              : runAutoResyncIfDue(
-                  key,
-                  {
-                    get: (k) => chrome.storage.local.get(k),
-                    set: (items) => chrome.storage.local.set(items),
-                  },
-                  (cleared) => autoResyncDeps(ctx, key, cleared),
-                ),
-          )
-          .then((r) => {
-            if (r && (r.released || r.restored)) {
-              console.warn('[background] auto coin resync:', r);
-              notifyBalanceUpdate();
-            }
-          })
-          .catch((err) => console.error('[background] auto coin resync failed:', err));
+      void localReady
+        .then(() => new Promise((r) => setTimeout(r, AUTO_RESYNC_DELAY_MS)))
+        // Locked or switched account since: skip (the timer and the next foreground try again).
+        .then(() => (lockGeneration !== gen || accountContext !== ctx ? undefined : maybeAutoCoinResync()));
     }
     void (async () => {
       await localReady;
@@ -1654,6 +1637,43 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 (globalThis as { document?: Document }).document?.addEventListener('visibilitychange', () => {
   if (pageHidden() === false) maybeResyncAddresses();
+});
+
+/**
+ * Coins spent elsewhere (another device, same seed) stay "spendable" here until checked (services/autoCoinResync.ts).
+ * A full check at most every 30 min, a light batched-index check at most every 5 min, per account (persisted). Runs
+ * after unlock, on a timer, and when the app or popup comes to the front (COIN_CHECK_DUE), so the balance drops by
+ * itself without REFRESH WALLET (owner, 29 Oct 2026: phone $3.47 vs extension $1.95, same account). Never throws.
+ */
+let autoCoinResyncBusy = false;
+const maybeAutoCoinResync = async (): Promise<void> => {
+  const ctx = accountContext;
+  if (!ctx || autoCoinResyncBusy) return;
+  const key = chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey || '';
+  if (!key) return;
+  autoCoinResyncBusy = true;
+  try {
+    const r = await runAutoResyncIfDue(
+      key,
+      { get: (k) => chrome.storage.local.get(k), set: (items) => chrome.storage.local.set(items) },
+      (cleared) => (accountContext === ctx ? autoResyncDeps(ctx, key, cleared) : Promise.resolve(null)),
+    );
+    if (r && (r.released || r.restored)) {
+      console.warn('[background] auto coin resync:', r);
+      notifyBalanceUpdate();
+    }
+  } catch (err) {
+    console.error('[background] auto coin resync failed:', err);
+  } finally {
+    autoCoinResyncBusy = false;
+  }
+};
+chrome.alarms.create(AUTO_COIN_RESYNC_ALARM, { periodInMinutes: AUTO_RESYNC_LIGHT_GAP_MS / 60_000 });
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === AUTO_COIN_RESYNC_ALARM && pageHidden() !== true) void maybeAutoCoinResync();
+});
+(globalThis as { document?: Document }).document?.addEventListener('visibilitychange', () => {
+  if (pageHidden() === false) void maybeAutoCoinResync();
 });
 
 // Ring when the side panel is closed (services/callRinger.ts): every 30 s while unlocked and no
@@ -2725,6 +2745,7 @@ if (!(
       'STORAGE_RESTORE_MISSING_COINS',
       'STORAGE_RECONCILE_POSTAGE',
       'STORAGE_RESYNC_COINS',
+      'COIN_CHECK_DUE',
       'STORAGE_RESTORE_BACKUP',
       'BSV21_FIX_STALE',
       'BSV21_FIX_UNSEEN',
@@ -3113,6 +3134,11 @@ if (!(
           return true;
         case 'STORAGE_RESYNC_COINS':
           processResyncCoins(sendResponse);
+          return true;
+        case 'COIN_CHECK_DUE':
+          // The app/popup came to the front: a throttled check (no-op when one ran recently).
+          void maybeAutoCoinResync();
+          sendResponse({ type: 'COIN_CHECK_DUE', success: true });
           return true;
         case 'STORAGE_RESTORE_BACKUP':
           processRestoreBackup(sendResponse);
