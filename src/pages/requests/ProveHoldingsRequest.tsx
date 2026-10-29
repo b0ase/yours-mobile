@@ -39,7 +39,7 @@ export const ProveHoldingsRequestPage = ({ request, onResponse }: ProveHoldingsR
       </p>
       <div className="flex flex-col gap-2 w-full mt-2" style={{ maxWidth: '18rem' }}>
         <Button theme={theme} type="primary" label="Allow" disabled={busy} onClick={() => respond(true)} />
-        <Button theme={theme} type="secondary-outline" label="Decline" disabled={busy} onClick={() => respond(false)} />
+        <Button theme={theme} type="secondary-outline" label="Not now" disabled={busy} onClick={() => respond(false)} />
       </div>
     </div>
   );
