@@ -134,6 +134,8 @@ import {
   type HealReport,
 } from './services/invalidSendHeal';
 import { refusalFor } from './services/broadcastRefusals';
+import { createExcludingUnprovable } from './services/unprovableCoinRetry';
+import { siteActionError } from './services/siteActionError';
 import { createWithSpentRetry, retryEligible } from './services/spentRetry';
 import {
   AUTO_RESYNC_DELAY_MS,
@@ -322,6 +324,33 @@ const ctxChain = (ctx: AccountContext): string =>
   'main';
 
 /** invalidSendHeal against this account's storage, the 1sat spend index, then WhatsOnChain. Never throws. */
+const NOTHING_SET_ASIDE = { count: 0, restore: async () => {} };
+/**
+ * Set aside (spendable=false) this account's spendable change outputs of one transaction, for one retry; restore puts
+ * back exactly those (services/unprovableCoinRetry.ts). Called after createAction failed, so no storage lock is held.
+ */
+async function setAsideChangeOf(ctx: AccountContext, txid: string): Promise<{ count: number; restore: () => Promise<void> }> {
+  const { account } = chromeStorageService.getCurrentAccountObject();
+  const identityKey = account?.pubKeys?.identityPubKey || '';
+  if (!identityKey) return NOTHING_SET_ASIDE;
+  const ids = await ctx.storage.runAsStorageProvider(async (sp) => {
+    const user = (await sp.findUsers({ partial: { identityKey } }))[0];
+    if (!user) return [] as number[];
+    const out: number[] = [];
+    for (const o of await sp.findOutputs({ partial: { userId: user.userId, txid, spendable: true, change: true } }))
+      if (await sp.updateOutput(o.outputId, { spendable: false })) out.push(o.outputId);
+    return out;
+  });
+  return {
+    count: ids.length,
+    restore: async () => {
+      if (!ids.length) return;
+      await ctx.storage.runAsStorageProvider(async (sp) => {
+        for (const id of ids) await sp.updateOutput(id, { spendable: true });
+      });
+    },
+  };
+}
 async function healRejectedInputs(ctx: AccountContext, error: unknown): Promise<HealReport | null> {
   const { account } = chromeStorageService.getCurrentAccountObject();
   const identityKey = account?.pubKeys?.identityPubKey || '';
@@ -6013,7 +6042,14 @@ if (!(
         // UTXO_SPENT (coins spent from another device): heal, then retry ONCE when safe (services/spentRetry.ts).
         const ctxForHeal = accountContext;
         const outcome = await createWithSpentRetry({
-          create: () => signer.createAction(args, message.originator),
+          // A coin whose parent can't be loaded is set aside for one retry instead of failing the payment
+          // (services/unprovableCoinRetry.ts, TERRORNODE audit 29 Oct 2026).
+          create: () =>
+            createExcludingUnprovable({
+              create: () => signer.createAction(args, message.originator),
+              setAside: (txid) => (ctxForHeal ? setAsideChangeOf(ctxForHeal, txid) : Promise.resolve(NOTHING_SET_ASIDE)),
+              log: (m, d) => console.warn(m, d ?? ''),
+            }),
           heal: (e) => (ctxForHeal ? healRejectedInputs(ctxForHeal, e) : Promise.resolve(null)),
           txKnown: (txid) => (ctxForHeal && ctxChain(ctxForHeal) === 'main' ? wocTxKnown(txid) : Promise.resolve(null)),
           reason: (txid) => refusalFor(txid),
@@ -6125,7 +6161,10 @@ if (!(
         type: CWIEventName.CREATE_ACTION,
         success: false,
         // Heal outcome first: the page cuts long errors, and a long broadcaster reason hid "tap Send again" (19 Oct).
-        error: withHealMessage(friendly ?? errorMessage, heal),
+        ...(message.originator && message.originator !== ADMIN_ORIGINATOR
+          ? // Sites get a plain, specific sentence and the original WERR code (services/siteActionError.ts).
+            siteActionError(error, withHealMessage(friendly ?? errorMessage, heal))
+          : { error: withHealMessage(friendly ?? errorMessage, heal) }),
         // For the wallet page's Details panel only (never to sites): which error and where it was thrown (a bare
         // WERR_INTERNAL says neither).
         detail: message.originator !== ADMIN_ORIGINATOR ? undefined : `${String((error as { code?: unknown })?.code ?? errorName)}\n${errorStack?.split('\n').slice(0, 6).join('\n') ?? ''}`,

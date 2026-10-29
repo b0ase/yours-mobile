@@ -103,8 +103,42 @@ describe('provider fallback', () => {
         getMerklePath: async () => ({}),
       },
     };
-    addProviderFallback(svc);
+    addProviderFallback(svc, { sleep: async () => {} });
     expect(await svc.getRawTx('t')).toBe(orig);
+  });
+  test('own unconfirmed change: the stored raw tx answers, no network lookup', async () => {
+    let net = 0;
+    const svc = {
+      getRawTx: async () => (net++, { error: new Error('not indexed yet') }),
+      getMerklePath: async () => ({}),
+      fallbackServices: { getRawTx: async () => (net++, {}), getMerklePath: async () => ({}) },
+    };
+    addProviderFallback(svc, { localRawTx: async (t) => (t === 'mine' ? [7, 7] : undefined) });
+    expect((await svc.getRawTx('mine')).rawTx).toEqual([7, 7]);
+    expect(net).toBe(0);
+  });
+  test('both fail once, then 1sat answers on the second round (after a pause)', async () => {
+    let n = 0;
+    const waits: number[] = [];
+    const svc = {
+      getRawTx: async () => (n++ === 0 ? { error: new Error('blip') } : { rawTx: [3] }),
+      getMerklePath: async () => ({}),
+      fallbackServices: { getRawTx: async () => ({ error: new Error('woc 404') }), getMerklePath: async () => ({}) },
+    };
+    addProviderFallback(svc, { retryDelayMs: 5, sleep: async (ms) => void waits.push(ms) });
+    expect((await svc.getRawTx('t')).rawTx).toEqual([3]);
+    expect(waits).toEqual([5]);
+  });
+  test('a provider that throws becomes an error result, never a thrown WERR_INTERNAL', async () => {
+    const svc = {
+      getRawTx: async (): Promise<{ rawTx?: number[]; error?: unknown }> => {
+        throw new Error('An internal error has occurred.');
+      },
+      getMerklePath: async () => ({}),
+      fallbackServices: { getRawTx: async () => ({ rawTx: [5] }), getMerklePath: async () => ({}) },
+    };
+    addProviderFallback(svc, { sleep: async () => {} });
+    expect((await svc.getRawTx('t')).rawTx).toEqual([5]);
   });
   test('hardenWalletServices finds the WhatsOnChain provider behind OneSatServices', () => {
     const woc = { request: async () => r200, apiKey: '' };
