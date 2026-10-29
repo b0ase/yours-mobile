@@ -12,7 +12,8 @@ export type PromptKind =
   | 'streamGrant'
   | 'mintPrivate'
   | 'twetch'
-  | 'swap';
+  | 'swap'
+  | 'themeOffer';
 
 /** A gated wallet call is waiting for a registered USB key to be confirmed present. */
 export interface UsbCheckRequest {
@@ -69,6 +70,15 @@ export type SwapPrompt = SwapSheet & {
   /** Browser-derived, never page-claimed. */
   originator: string;
 };
+
+/** A family site offers a look (services/themeOfferSite.ts): Use / Not now / Never for this site. */
+export interface ThemeOfferPrompt {
+  requestID: string;
+  /** Browser-derived, never page-claimed. */
+  originator: string;
+  /** Validated by mobile/theme/themeOffer.ts parseThemeOffer before the sheet sees it. */
+  pack: import('./mobile/theme/themePack').ThemePack;
+}
 
 export interface PromptRef {
   kind: PromptKind;

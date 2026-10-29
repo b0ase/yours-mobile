@@ -5,6 +5,7 @@ import { isSpendingAuthAction } from './services/streamGrants';
 import { isMintPrivateAction } from './services/mintPrivateAction';
 import { isTwetchAction } from './mobile/twetch/twetchAction';
 import { isSwapAction } from './services/swapAction';
+import { isThemeOfferAction } from './services/themeOfferAction';
 import { CustomListenerName, RequestEventDetail, RequestParams } from './inject';
 import { originatorForOrigin } from './services/originKey';
 import { forwardCwiCall } from './services/cwiForward';
@@ -53,7 +54,14 @@ if (!IS_TOP_FRAME) {
 // Forward CWI requests from page to background service worker
 self.addEventListener(CustomListenerName.YOURS_REQUEST, (e: Event) => {
   const { type, messageId, params: originalParams = {} } = (e as CustomEvent<RequestEventDetail>).detail;
-  if (!type || !(isCWIEventName(type) || isSpendingAuthAction(type) || isMintPrivateAction(type) || isTwetchAction(type) || isSwapAction(type))) return;
+  if (!type || !(isCWIEventName(type) || isSpendingAuthAction(type) || isMintPrivateAction(type) || isTwetchAction(type) || isSwapAction(type) || isThemeOfferAction(type))) return;
+  // A theme offer must come from a tap on the page (read here, in the isolated world, where the page can't fake it).
+  if (isThemeOfferAction(type) && !(navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation?.isActive) {
+    self.dispatchEvent(
+      new CustomEvent(messageId, { detail: { success: false, error: 'Offer a theme from a tap on the page' } }),
+    );
+    return;
+  }
   if (!frameOk) {
     self.dispatchEvent(
       new CustomEvent(messageId, { detail: { success: false, error: 'bWalletX only works inside a secure (https) site' } }),

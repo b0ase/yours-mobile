@@ -56,6 +56,36 @@ that id. A site without a theme file simply gets no offer.
 Settings › Theme › From sites, where it can be switched or removed. **Not now** quiets that site for 30 days on this
 device. A worn theme isn't offered again. Free, nothing unlocks, so it is fine in store builds.
 
+## Offer from the page (`window.CWI.theme.offer`)
+
+Owner, 29 Oct 2026: "when a bWalletX is connected on bchatx.com/fwuit the wallet should be able to take on a FWUIT
+theme". First case of a general rule: campaign and brand pages offer their look to the connected wallet; the user
+takes it or skips it in **one** sheet; never forced; easy to switch back; colours only. Extension only for now (the
+phone in-app browser and paired sessions answer `ORIGIN` and show nothing). Code: `src/themeOfferPage.ts` (page),
+`src/services/themeOfferSite.ts` (background), `src/mobile/theme/themeOffer.ts` (checks, rate limit),
+`src/pages/requests/ThemeOfferRequest.tsx` (sheet).
+
+```js
+// From a tap on the page (a button such as "Wear FWUIT in bWalletX"); calls without a tap are refused.
+const r = await window.CWI?.theme?.offer(look); // look: see docs/themes/fwuit-offer.json
+// r.result: 'used' | 'declined' | 'never' | 'skipped' (r.reason: 'locked' | 'asked' | 'worn' | 'never')
+```
+
+- **Who may offer:** family sites only (`themeSites.ts`, same list as the theme file), top frame, https, no port. The
+  origin is Chrome's `sender.origin`, never the page's word; the sheet shows that host.
+- **The look:** the same fields and checks as a v1 theme file above, without `v` (optional, `1`), `livery` or
+  `badge`. `id` is the campaign: 1-24 of `a-z 0-9 -`. Text/cards and `on`/`accent` must reach 4.5:1. Unknown keys
+  are refused. No images, SVG, URLs, CSS or fonts (a logo or card art would need its own review). ≤ 4 KB.
+- **The sheet:** "Use the FWUIT look?", the host, a card preview drawn from the colours, **Use it / Not now / Never for
+  this site**. Use saves it as an ordinary site theme (`site-<site>-<campaign>`, e.g. `site-bchatx-fwuit`) in
+  Settings › Theme › From sites, where the user switches back or removes it.
+- **Limits:** once per site and look per browser session (Not now included); Never for this site is kept
+  (`chrome.storage.local`) and stops every offer from that origin; a look already taken is not offered again unless
+  its colours change. A locked wallet gets no sheet (never an unlock sheet just for colours).
+- **Store edition:** free and cosmetic, nothing to buy: allowed, like the family offer above.
+
+The FWUIT look bit-sign sends from bchatx.com (`/fwuit`, `/fwuit/play`, `/u/fwuit`): `docs/themes/fwuit-offer.json`.
+
 ## Never themed
 
 The official bAcc badge / plate and the Sign in with bWalletX button keep bWalletX yellow on every site.
