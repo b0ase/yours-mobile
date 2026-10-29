@@ -45,7 +45,8 @@ const BINDING_SET = new Set(BINDING_KEYS);
 // normalised to snake_case first; a key in the list, or ending in a site-ish word (login_url, app_origin,
 // expected_domain, post_login_redirect), binds.
 const ANY_FIELD = /["']?([A-Za-z_][\w-]*)["']?\s*[:=]\s*["']?([^\s"',;}\]]+)/g;
-const BINDING_SUFFIX = /(?:^|_)(?:url|uri|origin|domain|host|hostname|audience|redirect|callback|return_to|realm|rp_id|relying_party)$/;
+const BINDING_SUFFIX =
+  /(?:^|_)(?:url|uri|origin|domain|host|hostname|audience|redirect|callback|return_to|realm|rp_id|relying_party)$/;
 /** camelCase / PascalCase / kebab-case / snake_case key to one snake_case form. */
 export const normaliseKey = (key: string) =>
   key
