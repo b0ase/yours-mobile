@@ -1,0 +1,19 @@
+{
+  "id": "fwuit",
+  "label": "FWUIT",
+  "blurb": "Sunny yellow, juicy red, lime and orange",
+  "scheme": "light",
+  "accent": "#E8173A",
+  "hi": "#FF9A1F",
+  "lo": "#B0002A",
+  "on": "#FFFFFF",
+  "bg": "#FFE14D",
+  "surface": "#FFF6B0",
+  "surface2": "#FFEE85",
+  "nav": "#FFE14D",
+  "text": "#1B1B1B",
+  "muted": "#5D4037",
+  "line": "#E0A200",
+  "success": "#3E7D1D",
+  "danger": "#B3001B"
+}

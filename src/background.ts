@@ -66,8 +66,10 @@ import {
   type StreamPass,
   type StreamState,
 } from './services/streamGrants';
-import type { MintPrivatePrompt, StreamGrantPrompt, SwapPrompt, TwetchPrompt } from './promptProtocol';
+import type { MintPrivatePrompt, StreamGrantPrompt, SwapPrompt, ThemeOfferPrompt, TwetchPrompt } from './promptProtocol';
 import { isSwapAction, runSiteSwap } from './services/swapSite';
+import { isThemeOfferAction, runThemeOffer } from './services/themeOfferSite';
+import { EMPTY_MEMORY, type OfferMemory, type ThemeOfferResult } from './mobile/theme/themeOffer';
 import type { SwapRecord, SwapReservation } from './mobile/p2p/swap/swapActions';
 import { isTwetchAction, routeTwetchMessage } from './services/twetchSite';
 import { twetchStoreFor } from './mobile/twetch/twetchLink';
@@ -1329,6 +1331,8 @@ const pendingMintPrivateRequests = new Map<string, { request: MintPrivatePrompt;
 const pendingTwetchRequests = new Map<string, { request: TwetchPrompt; resolve: (allow: boolean) => void }>();
 /** bChatX waiting on the swap sheet (services/swapSite.ts). Resolves true only on Approve. */
 const pendingSwapRequests = new Map<string, { request: SwapPrompt; resolve: (allow: boolean) => void }>();
+/** A family site waiting on the theme offer sheet (services/themeOfferSite.ts). Resolves with the user's answer. */
+const pendingThemeOffers = new Map<string, { request: ThemeOfferPrompt; resolve: (a: ThemeOfferResult) => void }>();
 const failPendingStreamGrants = () => {
   for (const p of pendingStreamGrantRequests.values()) p.resolve(null);
   pendingStreamGrantRequests.clear();
@@ -1339,6 +1343,8 @@ const failPendingStreamGrants = () => {
   pendingTwetchRequests.clear();
   for (const p of pendingSwapRequests.values()) p.resolve(false);
   pendingSwapRequests.clear();
+  for (const p of pendingThemeOffers.values()) p.resolve('declined');
+  pendingThemeOffers.clear();
 };
 
 /**
@@ -1559,6 +1565,8 @@ const getPendingPromptPayloadRaw = (kind: string, requestID?: string): unknown =
       return requestID ? pendingTwetchRequests.get(requestID)?.request : undefined;
     case 'swap':
       return requestID ? pendingSwapRequests.get(requestID)?.request : undefined;
+    case 'themeOffer':
+      return requestID ? pendingThemeOffers.get(requestID)?.request : undefined;
     default:
       return undefined;
   }
@@ -1577,6 +1585,8 @@ const getNextPendingPrompt = (): { kind: PromptKind; requestID: string } | undef
   if (!mintPrivate.done) return { kind: 'mintPrivate', requestID: mintPrivate.value };
   const twetch = pendingTwetchRequests.keys().next();
   if (!twetch.done) return { kind: 'twetch', requestID: twetch.value };
+  const themeOffer = pendingThemeOffers.keys().next();
+  if (!themeOffer.done) return { kind: 'themeOffer', requestID: themeOffer.value };
   const bundle = permissionBundler.list()[0];
   if (bundle) {
     permissionBundler.flush(bundle.id); // the sheet is asking now: no need to wait out the merge window
@@ -2616,6 +2626,32 @@ if (!(
       void runSiteSwap(String(message.action), sender.origin, message.params, swapDeps).then((r) =>
         sendResponse({ type: message.action, ...r }),
       );
+      return true;
+    }
+    // window.CWI.theme.offer (services/themeOfferSite.ts): family sites only, top frame, origin from Chrome.
+    if (isThemeOfferAction(message?.action)) {
+      if (isFromExtension) {
+        sendResponse({ type: message.action, success: false, error: 'Unauthorized' });
+        return true;
+      }
+      void runThemeOffer(sender.origin, sender.frameId === 0, message.params, themeOfferDeps).then((r) =>
+        sendResponse({ type: message.action, ...r }),
+      );
+      return true;
+    }
+    // The theme offer sheet's answer. Extension pages only: a site can never answer its own sheet.
+    if (message?.action === 'THEME_OFFER_RESPONSE') {
+      if (!isFromExtension) {
+        sendResponse({ type: message.action, success: false, error: 'Unauthorized' });
+        return true;
+      }
+      const requestID = String((message as { requestID?: unknown }).requestID ?? '');
+      const pending = pendingThemeOffers.get(requestID);
+      pendingThemeOffers.delete(requestID);
+      const a = (message as { answer?: unknown }).answer;
+      pending?.resolve(a === 'used' || a === 'never' ? a : 'declined');
+      sendResponse({ type: message.action, success: !!pending });
+      closeDappPopupIfNoUi();
       return true;
     }
     // The swap sheet's answer. Extension pages only: a site can never answer its own sheet.
@@ -4334,6 +4370,47 @@ if (!(
    * swap sheet below is the one approval and it shows every amount. Swap records (save-before-commit) live in
    * chrome.storage.local under bwxSwap.<ref>, per account.
    */
+  /**
+   * What window.CWI.theme.offer needs (services/themeOfferSite.ts). Offers shown this session live in
+   * chrome.storage.session; "Never for this site" and looks already taken in chrome.storage.local. A locked wallet
+   * gets no offer (never an unlock sheet just for colours).
+   */
+  const THEME_OFFER_SESSION_KEY = 'bwxThemeOfferShown';
+  const THEME_OFFER_LOCAL_KEY = 'bwxThemeOffers';
+  const themeOfferDeps = {
+    locked: async () => !(await checkIsAuthenticated()),
+    load: async (): Promise<OfferMemory> => {
+      const s = await chrome.storage.session.get(THEME_OFFER_SESSION_KEY).catch(() => ({}) as Record<string, unknown>);
+      const l = await chrome.storage.local.get(THEME_OFFER_LOCAL_KEY).catch(() => ({}) as Record<string, unknown>);
+      const shown = (s as Record<string, unknown>)[THEME_OFFER_SESSION_KEY];
+      const local = ((l as Record<string, unknown>)[THEME_OFFER_LOCAL_KEY] ?? {}) as Partial<OfferMemory>;
+      return {
+        shown: Array.isArray(shown) ? shown.filter((x): x is string => typeof x === 'string') : [],
+        never: Array.isArray(local.never) ? local.never.filter((x): x is string => typeof x === 'string') : [],
+        used: local.used && typeof local.used === 'object' ? (local.used as Record<string, string>) : EMPTY_MEMORY.used,
+      };
+    },
+    save: async (m: OfferMemory) => {
+      await chrome.storage.session.set({ [THEME_OFFER_SESSION_KEY]: m.shown }).catch(() => undefined);
+      await chrome.storage.local.set({ [THEME_OFFER_LOCAL_KEY]: { never: m.never, used: m.used } }).catch(() => undefined);
+    },
+    ask: ({ host, pack }: { host: string; pack: ThemeOfferPrompt['pack'] }) =>
+      new Promise<ThemeOfferResult>((resolve) => {
+        const requestID = `theme-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const timer = setTimeout(() => {
+          if (pendingThemeOffers.delete(requestID)) resolve('declined');
+        }, STREAM_GRANT_TIMEOUT_MS);
+        pendingThemeOffers.set(requestID, {
+          request: { requestID, originator: host, pack },
+          resolve: (v) => {
+            clearTimeout(timer);
+            resolve(v);
+          },
+        });
+        showPromptUi('themeOffer', requestID);
+      }),
+  };
+
   const swapDeps = async () => {
     const wpm = (await ensureWallet()) as unknown as Record<string, (args: unknown, o?: string) => unknown>;
     const admin = new Proxy(

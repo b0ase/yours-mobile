@@ -10,6 +10,7 @@ import { attachSpendingAuthorization } from './spendingAuthPage';
 import { attachMintPrivate } from './mintPrivatePage';
 import { attachTwetch } from './twetchPage';
 import { attachSwap } from './swapPage';
+import { attachThemeOffer } from './themeOfferPage';
 
 // Re-export for backwards compatibility
 export { CWIEventName };
@@ -43,6 +44,8 @@ attachMintPrivate(CWI as unknown as Record<string, unknown>, transport);
 attachTwetch(CWI as unknown as Record<string, unknown>, transport);
 // window.CWI.swap.{offer, accept} (services/swapSite.ts): bChatX contract swaps, origin from Chrome.
 attachSwap(CWI as unknown as Record<string, unknown>, transport);
+// window.CWI.theme.offer (services/themeOfferSite.ts): a family site offers its look, one sheet, origin from Chrome.
+attachThemeOffer(CWI as unknown as Record<string, unknown>, transport);
 
 // Inject CWI on window. In a sub-frame only once the content script says the background allowed this frame
 // (https frame inside an https top; services/frameAccess.ts).
