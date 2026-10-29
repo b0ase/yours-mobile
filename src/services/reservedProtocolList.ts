@@ -61,6 +61,8 @@ export const RESERVED_PROTOCOLS: readonly Protocol[] = [
   [2, 'bwalletx pay statement'],
   // The legacy ordinals key (addresses.ordAddress), watched by the sync (src/services/legacyOrd.ts).
   [2, 'bwalletx legacy ord'],
+  // The legacy pay key (addresses.bsvAddress), whose BSV, tokens and NFTs the sync takes in (src/services/legacyOrd.ts).
+  [2, 'bwalletx legacy pay'],
 ];
 
 /**

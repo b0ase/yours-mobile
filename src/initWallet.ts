@@ -56,7 +56,7 @@ import { decrypt } from './utils/crypto';
 import type { Keys } from './utils/keys';
 import { initSyncContext, type SyncContext } from './initSyncContext';
 import { refileLegacyBaskets } from './services/legacyBaskets';
-import { installLegacyOrdSigner, legacyOrdKey, syncLegacyOrd } from './services/legacyOrd';
+import { installLegacySigner, legacyOrdKey, legacyPayKey, syncLegacyOrd } from './services/legacyOrd';
 import { readReconcileRecord, reconcileStorage } from './services/storageReconcileBackground';
 import { shouldResumeReconcile } from './services/storageReconcile';
 import { showOneSatPrompt } from './services/oneSatPrompt';
@@ -408,11 +408,14 @@ export const initWallet = async (
   // Every payment ends here: our screens and dApps through the permissions manager, send-all and background jobs
   // directly. The `spending` kill switch pauses createAction/signAction on it (mobile/config/killSwitch.ts).
   guardSpending(baseWallet);
-  // The legacy ord address (paymail ordinals go there): its key signs under one wallet-only protocol, so the NFTs
-  // the sync takes in from it send like any other (services/legacyOrd.ts). No key for it (passkey/seedless): skipped.
+  // The legacy ord address (paymail ordinals go there) and legacy pay address: each key signs under its own
+  // wallet-only protocol, so the NFTs, names, tokens and BSV the sync takes in from them spend like any other
+  // (services/legacyOrd.ts). No key for an address (passkey/seedless): that address is skipped.
   const legacyOrdAddress = account?.addresses?.ordAddress;
   const ordKey = legacyOrdKey(keys.ordWif, legacyOrdAddress);
-  if (ordKey) installLegacyOrdSigner(baseWallet, ordKey);
+  const legacyPayAddress = account?.addresses?.bsvAddress;
+  const payKey = legacyPayKey(keys.walletWif, legacyPayAddress);
+  if (ordKey || payKey) installLegacySigner(baseWallet, { ord: ordKey, pay: payKey });
   if (!rememberRefusals(toolboxServices)) console.warn('[initWallet] broadcast refusals not recorded');
   // UnFail's output verdicts read getUtxoStatus: parse api.1sat.app's "txid.vout" (dkg, 14 Oct 2026; services/utxoStatus.ts).
   if (!fixUtxoStatus(toolboxServices)) console.warn('[initWallet] getUtxoStatus not patched (no txo client)');
@@ -986,12 +989,27 @@ export const initWallet = async (
         await sweepDeposit
           .execute(actionCtx, {})
           .catch((err: unknown) => console.error('[initWallet] deposit sweep failed:', err));
-        // NFTs at the legacy ord address join Wallet › NFTs (nothing is moved). Before 'complete' so the list
-        // refresh it triggers sees them.
-        if (ordKey && legacyOrdAddress) {
-          await syncLegacyOrd({ wallet: adminWallet, services: syncContext.services, chain, address: legacyOrdAddress })
-            .then((r) => r.added && console.log('[initWallet] legacy ord address:', r))
-            .catch((err) => console.warn('[initWallet] legacy ord sync failed:', err));
+        // Everything at the legacy addresses joins the wallet (NFTs, names, tokens, BSV; nothing is moved here).
+        // Before 'complete' so the list refresh it triggers sees them.
+        let legacyAdded = 0;
+        const legacy = [
+          ...(ordKey && legacyOrdAddress ? [{ kind: 'ord' as const, address: legacyOrdAddress }] : []),
+          ...(payKey && legacyPayAddress ? [{ kind: 'pay' as const, address: legacyPayAddress }] : []),
+        ];
+        for (const { kind, address } of legacy) {
+          await syncLegacyOrd({ wallet: adminWallet, services: syncContext.services, chain, address, kind })
+            .then((r) => {
+              legacyAdded += r.added;
+              if (r.added) console.log(`[initWallet] legacy ${kind} address:`, r);
+            })
+            .catch((err) => console.warn(`[initWallet] legacy ${kind} sync failed:`, err));
+        }
+        // Plain BSV taken in sits in the deposit basket (already in the balance): move it into funding now, as
+        // for any deposit, so it is spendable without waiting for the next unlock.
+        if (legacyAdded) {
+          await sweepDeposit
+            .execute(actionCtx, {})
+            .catch((err: unknown) => console.error('[initWallet] deposit sweep failed:', err));
         }
         sendSyncStatus({ status: 'complete', ...result });
         // Only a clean run counts as having read the new addresses' history; a failed one keeps the rescan pending.

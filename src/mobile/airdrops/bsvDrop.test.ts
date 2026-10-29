@@ -68,6 +68,13 @@ describe('BSV airdrops in the inbox', () => {
     expect(items[1]).toMatchObject({ asset: { qty: '2500' }, needsMove: false });
   });
 
+  it('a drop already taken in from the legacy address is in the balance, never also "needs moving"', () => {
+    const items = bsvDropItems(rows, txs, opts({ takenIn: new Set([`${marked.txid}_0`]) }));
+    expect(items[0]).toMatchObject({ txid: marked.txid, needsMove: false });
+    // Another vout of the same tx taken in does not count for this output.
+    expect(bsvDropItems(rows, txs, opts({ takenIn: new Set([`${marked.txid}_1`]) }))[0].needsMove).toBe(true);
+  });
+
   it('skips our own sends, payments with an action record, and token rows', () => {
     expect(bsvDropItems(rows, txs, opts({ funded: () => true }))).toEqual([]);
     expect(bsvDropItems(rows, txs, opts({ hasLocal: () => true }))).toEqual([]);

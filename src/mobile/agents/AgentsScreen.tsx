@@ -21,7 +21,7 @@ import {
   spentToday,
   unmarkAgentAccount,
 } from './agentAccounts';
-import { sweepBack } from './sweepBack';
+import { sweepBack, sweepBackTarget } from './sweepBack';
 import { StrategySection } from './StrategySection';
 import { ExportForCli } from './ExportForCli';
 import { IS_EXTENSION } from '../extension';
@@ -267,11 +267,7 @@ const AgentAccountScreen = ({ id, onClose }: { id: string; onClose: () => void }
     setAsking(false);
     setBusy('Sweeping back…');
     try {
-      const r = await sweepBack(apiContext, id, {
-        bsvAddress: dest.addresses.bsvAddress,
-        ordAddress: dest.addresses.ordAddress,
-        label: dest.name || 'your account',
-      });
+      const r = await sweepBack(apiContext, id, sweepBackTarget(dest));
       const moved = [
         r.tokens && `${r.tokens} token${r.tokens === 1 ? '' : 's'}`,
         r.nfts && `${r.nfts} NFTs`,
