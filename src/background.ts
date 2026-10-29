@@ -1755,7 +1755,33 @@ let showUnlockUi: () => void = () => {
 // Prompt watchdog (services/promptWatchdog.ts): set up with the prompt UI in the service worker.
 let watchPrompt: (p: WatchedPrompt) => void = () => undefined;
 // A payment sheet not answered within PROMPT_EXPIRY_MS expires (services/promptWatchdog.ts). Set in the worker.
-let expireSpendRequest: (requestID: string) => void = () => undefined;
+let expireSpendRequest: (requestID: string, kind?: 'permission' | 'groupedPermission' | 'counterpartyPermission') => void =
+  () => undefined;
+/**
+ * The phone/web bridge gave up on a site's call (ERR_WALLET_TIMEOUT, mobile/siteGate.ts): close that site's open
+ * sheets so none can be approved late. `committed`: a createAction/signAction of that site is still running with no
+ * sheet left to close, i.e. it was already approved, so the bridge waits for its real answer instead of saying
+ * "timed out" while a payment may still go out. Set in the worker.
+ */
+let cancelSitePrompts: (originator: string) => { cancelled: number; committed: boolean } = () => ({
+  cancelled: 0,
+  committed: false,
+});
+// Running createAction / signAction calls per site originator (for cancelSitePrompts).
+const payCallsInFlight = new Map<string, number>();
+const trackPayCall = (originator: unknown): (() => void) => {
+  if (typeof originator !== 'string') return () => undefined;
+  const o = normalizeOriginator(originator);
+  payCallsInFlight.set(o, (payCallsInFlight.get(o) ?? 0) + 1);
+  let done = false;
+  return () => {
+    if (done) return;
+    done = true;
+    const n = (payCallsInFlight.get(o) ?? 1) - 1;
+    if (n > 0) payCallsInFlight.set(o, n);
+    else payCallsInFlight.delete(o);
+  };
+};
 
 /**
  * Bind permission callbacks to the WalletPermissionsManager.
@@ -1887,9 +1913,11 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
           return;
         }
         pendingPermissionRequests.set(request.requestID, { request, resolve, reject });
-        // Unanswered payment sheets expire: a retried call (TokenBlaster #105) never meets an old sheet still open.
-        // This rejects the permission request only; nothing has been built or signed yet.
-        if (request.type === 'spending') {
+        // Unanswered sheets expire: a retried call (TokenBlaster #105) never meets an old sheet still open, and a
+        // site's sign never waits for ever on a sheet (bChatX "Sealing…", 29 Oct 2026: protocol, basket and
+        // certificate sheets too, not only payments). This rejects the permission request only; nothing has been
+        // built or signed yet.
+        {
           const id = request.requestID;
           setTimeout(() => {
             if (pendingPermissionRequests.has(id)) expireSpendRequest(id);
@@ -2028,6 +2056,11 @@ const showGroupedPermissionPrompt = async (request: GroupedPermissionRequest): P
   }
   return new Promise((resolve, reject) => {
     pendingGroupedPermissionRequests.set(request.requestID, { request, resolve, reject });
+    // The manifest sheet expires like every other sheet (29 Oct 2026).
+    setTimeout(() => {
+      if (pendingGroupedPermissionRequests.has(request.requestID))
+        expireSpendRequest(request.requestID, 'groupedPermission');
+    }, PROMPT_EXPIRY_MS);
     showPromptUi('groupedPermission', request.requestID);
   });
 };
@@ -2039,6 +2072,10 @@ const showCounterpartyPermissionPrompt = async (request: CounterpartyPermissionR
   }
   return new Promise((resolve, reject) => {
     pendingCounterpartyPermissionRequests.set(request.requestID, { request, resolve, reject });
+    setTimeout(() => {
+      if (pendingCounterpartyPermissionRequests.has(request.requestID))
+        expireSpendRequest(request.requestID, 'counterpartyPermission');
+    }, PROMPT_EXPIRY_MS);
     showPromptUi('counterpartyPermission', request.requestID);
   });
 };
@@ -2350,14 +2387,42 @@ if (isInServiceWorker) {
     log: (msg, p) => console.warn(msg, p.kind, p.requestID),
   });
   watchPrompt = (p) => promptWatchdog.watch(p);
-  expireSpendRequest = (id) => {
-    const bundle = permissionBundler.findByRequest(id);
-    const p: WatchedPrompt = bundle ? { kind: 'bundle', requestID: bundle.id } : { kind: 'permission', requestID: id };
-    console.warn('[background] payment sheet expired unanswered', p.kind, p.requestID);
+  expireSpendRequest = (id, kind = 'permission') => {
+    const bundle = kind === 'permission' ? permissionBundler.findByRequest(id) : undefined;
+    const p: WatchedPrompt = bundle ? { kind: 'bundle', requestID: bundle.id } : { kind, requestID: id };
+    console.warn('[background] sheet expired unanswered', p.kind, p.requestID);
     promptWatchdog.forget(p);
     failUnshownPrompt(p, promptExpiredError());
     // An open sheet reloads and finds its request gone, so its Allow can no longer approve it.
     notifyPromptWindow(p.kind as PromptKind, p.requestID);
+  };
+
+  cancelSitePrompts = (originator) => {
+    const site = normalizeOriginator(originator);
+    const mine = (o: unknown) => typeof o === 'string' && normalizeOriginator(o) === site;
+    const prompts: WatchedPrompt[] = [];
+    const bundles = new Set<string>();
+    for (const [id, { request }] of pendingPermissionRequests) {
+      if (!mine(request.originator)) continue;
+      const bundle = permissionBundler.findByRequest(id);
+      if (bundle) {
+        if (!bundles.has(bundle.id)) prompts.push({ kind: 'bundle', requestID: bundle.id });
+        bundles.add(bundle.id);
+      } else prompts.push({ kind: 'permission', requestID: id });
+    }
+    for (const [id, { request }] of pendingGroupedPermissionRequests)
+      if (mine(request.originator)) prompts.push({ kind: 'groupedPermission', requestID: id });
+    for (const [id, { request }] of pendingCounterpartyPermissionRequests)
+      if (mine(request.originator)) prompts.push({ kind: 'counterpartyPermission', requestID: id });
+    for (const p of prompts) {
+      promptWatchdog.forget(p);
+      failUnshownPrompt(p, promptExpiredError());
+      notifyPromptWindow(p.kind as PromptKind, p.requestID);
+    }
+    const running = payCallsInFlight.get(site) ?? 0;
+    console.warn('[background] site call timed out: closed', prompts.length, 'sheet(s); pay calls running', running);
+    // Each closed sheet stops at most one payment; any running beyond that were already approved.
+    return { cancelled: prompts.length, committed: running > prompts.length };
   };
 
   showUnlockUi = () => {
@@ -2848,6 +2913,8 @@ if (!(
       // The Wallet home's refresh: its handler below was unreachable without this entry (the message fell through
       // to the CWI switch, which never answered, so every refresh waited out its 15 s timeout).
       'RESYNC_ADDRESSES',
+      // The phone/web bridge gave up on a site's call: close its sheets (cancelSitePrompts). Wallet pages only.
+      'SITE_CALL_TIMED_OUT',
     ];
 
     if (noAuthRequired.includes(message.action)) {
@@ -3075,6 +3142,15 @@ if (!(
         case YoursEventName.GET_SOCIAL_PROFILE:
           processGetSocialProfileRequest(sendResponse);
           return true;
+        case 'SITE_CALL_TIMED_OUT': {
+          const originator = (message as { originator?: unknown }).originator;
+          if (typeof originator !== 'string' || !originator) {
+            sendResponse({ type: 'SITE_CALL_TIMED_OUT', success: false, error: 'originator required' });
+            return true;
+          }
+          sendResponse({ type: 'SITE_CALL_TIMED_OUT', success: true, data: cancelSitePrompts(originator) });
+          return true;
+        }
         case 'WALLET_LOCKED': {
           // Gone immediately so lock never waits on hung AuthFetch/storage close.
           dropWalletContext('WALLET_LOCKED');
@@ -3496,11 +3572,16 @@ if (!(
               console.log('[createAction] identical call already running: joined it');
               return true;
             }
-            runDappRequest(processCWICreateAction(message, respond));
+            const donePay = trackPayCall(message.originator);
+            runDappRequest(processCWICreateAction(message, respond).finally(donePay));
             return true;
           }
           case CWIEventName.SIGN_ACTION:
-            runDappRequest(processCWISignAction(message, sendResponse));
+            runDappRequest(
+              Promise.resolve(processCWISignAction(message, sendResponse)).finally(
+                isFromExtension ? () => undefined : trackPayCall(message.originator),
+              ),
+            );
             return true;
           case CWIEventName.ABORT_ACTION:
             runDappRequest(processCWIAbortAction(message, sendResponse));

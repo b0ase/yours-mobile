@@ -32,6 +32,7 @@ import {
   Send,
   Plug,
   Wallet,
+  Fingerprint,
 } from 'lucide-react';
 import { ChangePassword } from './ChangePassword';
 import { SEEDLESS_ENABLED } from '../passkey/prf';
@@ -47,6 +48,7 @@ import { asMenuItem } from '../tabs/tabs';
 import { socialCloseTarget } from '../names/handlePrompt';
 import { BchatClient, defaultHttp, saveSession, type SignInItem } from '../chat/api';
 import { isNative } from '../native';
+import { deviceOwnerAuth } from '../deviceOwnerAuth';
 import { IDMAP_OPEN_EVENT, SIGNINS_OPEN_EVENT, signInRow, takeIdentityMapRequest, takeSignInsRequest } from './signIns';
 import { AgentsScreen } from '../agents/AgentsScreen';
 import { WalletNames } from './WalletNames';
@@ -925,6 +927,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
               label="Token indexing"
               description="One-tap fee for your own tokens"
               onClick={() => setScreen('indexing')}
+              isLast={!IS_EXTENSION}
             />
             {IS_EXTENSION && (
               <>
@@ -934,17 +937,49 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
                   label="Websites"
                   description="Which wallet sites connect to"
                   onClick={() => setScreen('websites')}
+                  isLast
                 />
               </>
             )}
-            <Divider />
+          </Section>
+          <Section title="Security">
             <Row
               icon={<LockKeyhole size={16} />}
               label="Change password"
               description="One password unlocks every account"
               onClick={() => setScreen('password')}
-              isLast={!SEEDLESS_ENABLED}
+              isFirst
+              isLast={!SEEDLESS_ENABLED && !isNative}
             />
+            {isNative && (
+              <>
+                <Divider />
+                <Row
+                  icon={<Fingerprint size={16} />}
+                  label="Face ID / fingerprint for signing and payments"
+                  description={
+                    prefs.confirmWithBiometrics
+                      ? "A site's sign or pay request asks Face ID, fingerprint or your passcode first"
+                      : "Sites' sign and pay requests use the wallet's approval sheet only"
+                  }
+                  right={
+                    <Toggle
+                      label="Face ID / fingerprint for signing and payments"
+                      on={prefs.confirmWithBiometrics}
+                      onChange={(v) => {
+                        // Turning it off needs the owner too, so someone holding an unlocked phone can't.
+                        if (v) setPrefs({ confirmWithBiometrics: true });
+                        else
+                          void deviceOwnerAuth("Confirm it's you to turn this off").then((ok) => {
+                            if (ok) setPrefs({ confirmWithBiometrics: false });
+                          });
+                      }}
+                    />
+                  }
+                  isLast={!SEEDLESS_ENABLED}
+                />
+              </>
+            )}
             {SEEDLESS_ENABLED && (
               <>
                 <Divider />

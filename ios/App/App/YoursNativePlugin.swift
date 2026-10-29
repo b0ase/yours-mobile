@@ -430,15 +430,36 @@ public class YoursNativePlugin: CAPPlugin, CAPBridgedPlugin {
 
     /// Face ID / Touch ID OR the phone's passcode (LAPolicy.deviceOwnerAuthentication). Used to confirm the owner
     /// when the wallet password is forgotten (Change password). Resolves { ok }; a cancel resolves ok: false.
+    /// Face ID / Touch ID first, the phone passcode as the fallback (or straight away when no biometrics are
+    /// enrolled). Resolves { ok, method: "biometric" | "passcode", available }. available false = no biometrics and
+    /// no passcode on this phone. Nothing biometric leaves the device: the OS only answers yes or no.
     @objc func deviceOwnerAuth(_ call: CAPPluginCall) {
+        let reason = call.getString("reason") ?? "Confirm it's you"
+        let bio = LAContext()
+        var error: NSError?
+        if bio.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
+            bio.localizedFallbackTitle = "Use Passcode"
+            bio.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) { ok, err in
+                if ok { return call.resolve(["ok": true, "method": "biometric", "available": true]) }
+                let code = (err as? LAError)?.code
+                if code == .userFallback || code == .biometryLockout {
+                    return self.passcodeAuth(call, reason)
+                }
+                call.resolve(["ok": false, "available": true])
+            }
+            return
+        }
+        passcodeAuth(call, reason)
+    }
+
+    private func passcodeAuth(_ call: CAPPluginCall, _ reason: String) {
         let context = LAContext()
         var error: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
-            return call.resolve(["ok": false])
+            return call.resolve(["ok": false, "available": false])
         }
-        let reason = call.getString("reason") ?? "Confirm it's you"
         context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) { ok, _ in
-            call.resolve(["ok": ok])
+            call.resolve(["ok": ok, "method": "passcode", "available": true])
         }
     }
 

@@ -45,7 +45,7 @@ describe('createAction dedupe (a site Retry while the first call runs)', () => {
   test('background routes site createActions through it', () => {
     const bg = readFileSync(new URL('../background.ts', import.meta.url), 'utf8');
     expect(bg).toContain('const respond = createActionDedupe.begin(key, sendResponse);');
-    expect(bg).toContain('runDappRequest(processCWICreateAction(message, respond));');
+    expect(bg).toContain('runDappRequest(processCWICreateAction(message, respond).finally(donePay));');
   });
 });
 
@@ -57,9 +57,11 @@ describe('payment sheets expire unanswered', () => {
     expect((replyError(reply) as Error & { code?: string }).code).toBe(PROMPT_EXPIRED_CODE);
   });
 
-  test('only spending requests still pending (not approved or signed) are expired, by rejecting the request', () => {
+  test('every sheet still pending (not approved or signed) expires, by rejecting the request', () => {
     const bg = readFileSync(new URL('../background.ts', import.meta.url), 'utf8');
-    expect(bg).toContain("if (request.type === 'spending') {");
+    // All permission sheets, the manifest and counterparty sheets (docs/BIOMETRIC-GATE.md, 29 Oct 2026).
+    expect(bg).toContain("expireSpendRequest(request.requestID, 'groupedPermission');");
+    expect(bg).toContain("expireSpendRequest(request.requestID, 'counterpartyPermission');");
     expect(bg).toContain('if (pendingPermissionRequests.has(id)) expireSpendRequest(id);');
     expect(bg).toContain('failUnshownPrompt(p, promptExpiredError());');
   });

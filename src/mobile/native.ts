@@ -36,7 +36,13 @@ export interface YoursNativePlugin {
    * Face ID / Touch ID / fingerprint OR the phone's passcode (iOS deviceOwnerAuthentication, Android
    * BiometricPrompt + DEVICE_CREDENTIAL). Phones only; optional so the web and desktop shims can leave it out.
    */
-  deviceOwnerAuth?(opts: { reason: string }): Promise<{ ok: boolean }>;
+  deviceOwnerAuth?(opts: { reason: string; subtitle?: string }): Promise<{
+    ok: boolean;
+    /** How the user passed (newer shells; docs/BIOMETRIC-GATE.md). */
+    method?: 'biometric' | 'passcode';
+    /** False when the phone has neither biometrics nor a passcode set up (newer shells). */
+    available?: boolean;
+  }>;
 
   browserOpen(opts: { url: string; provider: string }): Promise<void>;
   browserClose(): Promise<void>;

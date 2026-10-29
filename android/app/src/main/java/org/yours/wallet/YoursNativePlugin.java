@@ -367,10 +367,13 @@ public class YoursNativePlugin extends Plugin {
     @PluginMethod
     public void deviceOwnerAuth(PluginCall call) {
         String reason = call.getString("reason", "Confirm it's you");
+        // Site sign/pay gate (docs/BIOMETRIC-GATE.md) passes the site's host: the reason becomes the title.
+        String subtitle = call.getString("subtitle");
         int allowed = BiometricManager.Authenticators.BIOMETRIC_WEAK | BiometricManager.Authenticators.DEVICE_CREDENTIAL;
         if (BiometricManager.from(getContext()).canAuthenticate(allowed) != BiometricManager.BIOMETRIC_SUCCESS) {
             JSObject no = new JSObject();
             no.put("ok", false);
+            no.put("available", false);
             call.resolve(no);
             return;
         }
@@ -383,6 +386,13 @@ public class YoursNativePlugin extends Plugin {
                     public void onAuthenticationSucceeded(@NonNull BiometricPrompt.AuthenticationResult result) {
                         JSObject ret = new JSObject();
                         ret.put("ok", true);
+                        ret.put("available", true);
+                        ret.put(
+                            "method",
+                            result.getAuthenticationType() == BiometricPrompt.AUTHENTICATION_RESULT_TYPE_BIOMETRIC
+                                ? "biometric"
+                                : "passcode"
+                        );
                         call.resolve(ret);
                     }
 
@@ -390,13 +400,14 @@ public class YoursNativePlugin extends Plugin {
                     public void onAuthenticationError(int code, @NonNull CharSequence message) {
                         JSObject ret = new JSObject();
                         ret.put("ok", false);
+                        ret.put("available", true);
                         call.resolve(ret);
                     }
                 }
             );
             BiometricPrompt.PromptInfo info = new BiometricPrompt.PromptInfo.Builder()
-                .setTitle("Confirm it's you")
-                .setSubtitle(reason)
+                .setTitle(subtitle != null ? reason : "Confirm it's you")
+                .setSubtitle(subtitle != null ? subtitle : reason)
                 .setAllowedAuthenticators(allowed)
                 .build();
             prompt.authenticate(info);

@@ -27,7 +27,7 @@ sed -i '' -E "s#(<string name=\"app_name\">)[^<]*#\1$SHORT#; s#(<string name=\"t
 # iOS home-screen name and Face ID prompt
 PLIST=ios/App/App/Info.plist
 /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName $SHORT" "$PLIST"
-/usr/libexec/PlistBuddy -c "Set :NSFaceIDUsageDescription Unlock $NAME with Face ID instead of typing your password." "$PLIST"
+/usr/libexec/PlistBuddy -c "Set :NSFaceIDUsageDescription Unlock $NAME with Face ID and confirm it is you before you sign or pay." "$PLIST"
 
 bash scripts/gen-native-assets.sh "$BRAND"
 echo "brand set to $NAME — now: MOBILE_BRAND=$BRAND pnpm cap:sync"

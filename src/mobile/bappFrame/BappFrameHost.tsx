@@ -1,4 +1,4 @@
-import { APP_NAME } from '../storeBuild';
+import { APP_NAME, appNameFor, isBWalletX } from '../storeBuild';
 import { useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronLeft, Maximize2, Monitor, RotateCw, Smartphone, X } from 'lucide-react';
@@ -16,7 +16,23 @@ import {
 import { IMMERSIVE_BUTTON_MS, useImmersiveViewport } from './immersive';
 import { reportSessionSpend } from '../wallet/live/liveBus';
 import { SESSION_SPEND_TYPE } from '../wallet/live/liveLogic';
-import { isAllowedFrameOrigin, parseXdmRequest, toXdmResponse } from './frameBridge';
+import {
+  isAllowedFrameOrigin,
+  isWalletRequestMessage,
+  parseXdmRequest,
+  toXdmResponse,
+  walletAnnounceMessage,
+} from './frameBridge';
+import bIcon from '../../../assets/bwallet-ext/icon128.png?inline';
+import bxIcon from '../../../assets/bwalletx-ext/icon128.png?inline';
+
+// One id per app run: the site's dedupe key (brand/discovery.ts).
+const ANNOUNCE = walletAnnounceMessage({
+  name: appNameFor(),
+  icon: isBWalletX() ? bxIcon : bIcon,
+  rdns: 'space.bwallet.mobile',
+  uuid: globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`,
+});
 import { BWX_CHANGED, answerBwx, isBwxOrigin, parseBwx, type BwxDeps } from './bwxBridge';
 import { SUBSCRIPTIONS_ENABLED } from '../storeBuild';
 import { answerSubscribe, parseSubscribeMessage } from '../pots/appSubscribe';
@@ -85,6 +101,11 @@ export const BappFrameHost = () => {
         return;
       }
       if (!isAllowedFrameOrigin(e.origin, BAPP_FRAME_ALLOWLIST)) return;
+      // Discovery: the frame asks which wallet is here (frameBridge.ts isWalletRequestMessage).
+      if (isWalletRequestMessage(e.data)) {
+        win.postMessage(ANNOUNCE, e.origin);
+        return;
+      }
       // Subscribe with bWalletX: any allowlisted bApp, bWalletX only (never in a store build).
       if (SUBSCRIPTIONS_ENABLED) {
         const sub = parseSubscribeMessage(e.data);
@@ -125,6 +146,9 @@ export const BappFrameHost = () => {
   // MemoryRouter adds no entries of its own), then close.
   const nav = useRef({ baseline: -1, lastLen: -1, depth: 0, pendingBack: 0 });
   const onLoad = () => {
+    // Say which wallet is here as soon as the page loads (in-frame discovery, docs/BIOMETRIC-GATE.md).
+    if (session && isAllowedFrameOrigin(session.origin, BAPP_FRAME_ALLOWLIST))
+      frame.current?.contentWindow?.postMessage(ANNOUNCE, session.origin);
     const n = nav.current;
     const len = window.history.length;
     if (n.baseline < 0) n.baseline = len;
