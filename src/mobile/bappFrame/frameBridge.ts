@@ -12,6 +12,7 @@
 import { isCWIEventName } from '@1sat/wallet-browser';
 import { isMintPrivateAction, isMintPrivateCode } from '../../services/mintPrivateAction';
 import { USER_DENIED_CODE, USER_DENIED_MESSAGE, isUserDenied } from '../../services/userDenied';
+import { LAST_VERIFICATION_CALL, SITE_CALL_TIMEOUT_CODE, VERIFICATION_TIMEOUT_CODE } from '../siteGate';
 
 /** Exact origins (scheme://host[:port]) of the given URLs; invalid or non-https URLs are skipped. */
 export const frameAllowlist = (urls: readonly string[]): Set<string> => {
@@ -60,7 +61,11 @@ export const parseXdmRequest = (data: unknown): XdmRequest | null => {
   const d = data as Record<string, unknown>;
   if (d.type !== 'CWI' || d.isInvocation !== true) return null;
   if (typeof d.id !== 'string' || d.id.length === 0 || d.id.length > MAX_ID) return null;
-  if (typeof d.call !== 'string' || !(isCWIEventName(d.call) || isMintPrivateAction(d.call))) return null;
+  if (
+    typeof d.call !== 'string' ||
+    !(isCWIEventName(d.call) || isMintPrivateAction(d.call) || d.call === LAST_VERIFICATION_CALL)
+  )
+    return null;
   const args = d.args === undefined ? {} : d.args;
   if (typeof args !== 'object' || args === null || Array.isArray(args)) return null;
   return { id: d.id, call: d.call, args: args as Record<string, unknown> };
@@ -87,7 +92,8 @@ export const toXdmResponse = (id: string, reply: unknown) => {
     } as const;
   const description = typeof r.error === 'string' && r.error ? r.error : 'Request failed';
   // wallet.mintPrivate refusals keep their code so the site can read it (services/mintPrivateAction.ts).
-  if (isMintPrivateCode(r.code))
+  // Timeouts keep their code so the site can offer Retry (mobile/siteGate.ts, docs/BIOMETRIC-GATE.md).
+  if (isMintPrivateCode(r.code) || r.code === SITE_CALL_TIMEOUT_CODE || r.code === VERIFICATION_TIMEOUT_CODE)
     return { type: 'CWI', isInvocation: false, id, status: 'error', description, code: r.code } as const;
   return { type: 'CWI', isInvocation: false, id, status: 'error', description, code: 1 } as const;
 };
@@ -140,3 +146,19 @@ const sourceListAllows = (sources: string[], parentOrigin: string): boolean => {
 };
 
 const defaultPort = (protocol: string) => (protocol === 'https:' ? '443' : protocol === 'http:' ? '80' : '');
+
+/**
+ * In-frame wallet discovery (docs/BIOMETRIC-GATE.md). The brc100:requestWallet CustomEvent can't cross into a
+ * cross-origin iframe, so bChatX's discovery found nothing in the phone frame (29 Oct 2026). The same names travel
+ * by postMessage instead: the page posts { type: 'brc100:requestWallet' } to window.parent; the wallet answers (and
+ * says so unasked once the frame loads) with { type: 'brc100:announceWallet', info }. info.substrate 'XDM' tells the
+ * page to talk to it with `new WalletClient('XDM')`.
+ */
+export const isWalletRequestMessage = (data: unknown): boolean =>
+  typeof data === 'object' && data !== null && (data as { type?: unknown }).type === 'brc100:requestWallet';
+
+export const walletAnnounceMessage = (info: { name: string; icon: string; rdns: string; uuid: string }) =>
+  ({
+    type: 'brc100:announceWallet',
+    info: { ...info, kind: 'in-app', substrate: 'XDM' },
+  }) as const;

@@ -101,3 +101,41 @@ describe('framing headers', () => {
     );
   });
 });
+
+describe('biometric gate additions (docs/BIOMETRIC-GATE.md)', () => {
+  test('getLastVerification is a valid in-frame call', () => {
+    expect(parseXdmRequest({ type: 'CWI', isInvocation: true, id: '1', call: 'getLastVerification' })).toEqual({
+      id: '1',
+      call: 'getLastVerification',
+      args: {},
+    });
+  });
+  test('timeouts keep their code', () => {
+    expect(toXdmResponse('9', { success: false, error: 'late', code: 'ERR_WALLET_TIMEOUT' })).toMatchObject({
+      status: 'error',
+      code: 'ERR_WALLET_TIMEOUT',
+    });
+    expect(toXdmResponse('9', { success: false, error: 'late', code: 'ERR_USER_VERIFICATION_TIMEOUT' })).toMatchObject({
+      code: 'ERR_USER_VERIFICATION_TIMEOUT',
+    });
+  });
+  test('in-frame discovery messages', async () => {
+    const { isWalletRequestMessage, walletAnnounceMessage } = await import('./frameBridge');
+    expect(isWalletRequestMessage({ type: 'brc100:requestWallet' })).toBe(true);
+    expect(isWalletRequestMessage({ type: 'CWI' })).toBe(false);
+    expect(isWalletRequestMessage(null)).toBe(false);
+    expect(walletAnnounceMessage({ name: 'bWalletX', icon: 'data:', rdns: 'space.bwallet.mobile', uuid: 'u' })).toEqual(
+      {
+        type: 'brc100:announceWallet',
+        info: {
+          name: 'bWalletX',
+          icon: 'data:',
+          rdns: 'space.bwallet.mobile',
+          uuid: 'u',
+          kind: 'in-app',
+          substrate: 'XDM',
+        },
+      },
+    );
+  });
+});

@@ -10,6 +10,7 @@ import { isMintPrivateAction } from '../../services/mintPrivateAction';
 import { CustomListenerName, type RequestEventDetail, type RequestParams } from '../../inject';
 import { CWI } from '../../cwi';
 import { announceWallet } from '../../brand/discovery';
+import { LAST_VERIFICATION_CALL } from '../siteGate';
 import { SUBSCRIPTIONS_ENABLED, appNameFor, isBWalletX } from '../storeBuild';
 import bIcon from '../../../assets/bwallet-ext/icon128.png?inline';
 import bxIcon from '../../../assets/bwalletx-ext/icon128.png?inline';
@@ -47,7 +48,16 @@ const send = (payload: string): Promise<string> => {
 
 self.addEventListener(CustomListenerName.YOURS_REQUEST, (e: Event) => {
   const { type, messageId, params: originalParams = {} } = (e as CustomEvent<RequestEventDetail>).detail;
-  if (!type || !(isCWIEventName(type) || isSpendingAuthAction(type) || isMintPrivateAction(type))) return;
+  if (
+    !type ||
+    !(
+      isCWIEventName(type) ||
+      isSpendingAuthAction(type) ||
+      isMintPrivateAction(type) ||
+      (type as string) === LAST_VERIFICATION_CALL
+    )
+  )
+    return;
 
   let params: RequestParams = {};
   if (Array.isArray(originalParams)) params.data = originalParams;
@@ -81,6 +91,26 @@ if (SUBSCRIPTIONS_ENABLED) {
       .then((reply) => window.postMessage(reply ?? fallback('No answer'), location.origin));
   });
 }
+
+// window.CWI.getLastVerification() (docs/BIOMETRIC-GATE.md): how this site's last sign/pay was confirmed, non-secret.
+(CWI as unknown as Record<string, unknown>).getLastVerification = () =>
+  new Promise((resolve, reject) => {
+    const messageId = `${LAST_VERIFICATION_CALL}-${Date.now()}-${Math.random()}`;
+    self.addEventListener(
+      messageId,
+      (e) => {
+        const d = (e as CustomEvent<{ success?: boolean; data?: unknown; error?: string }>).detail;
+        if (d?.success) resolve(d.data ?? null);
+        else reject(new Error(d?.error || 'Request failed'));
+      },
+      { once: true },
+    );
+    self.dispatchEvent(
+      new CustomEvent(CustomListenerName.YOURS_REQUEST, {
+        detail: { messageId, type: LAST_VERIFICATION_CALL, params: {} },
+      }),
+    );
+  });
 
 // Discovery (wallet-connect spec §3): the in-app browser has exactly one wallet; say which.
 announceWallet(

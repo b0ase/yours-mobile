@@ -50,6 +50,11 @@ export type Prefs = {
    * (6 Apr–5 Apr); 'other' = FIFO in USD, calendar year. Default UK.
    */
   taxCountry: TaxCountry;
+  /**
+   * Settings › "Face ID / fingerprint for signing and payments": a site's sign or pay request asks Face ID /
+   * fingerprint (or the phone passcode) first (mobile/siteGate.ts). On by default; phones only.
+   */
+  confirmWithBiometrics: boolean;
 };
 
 export type TaxCountry = 'uk' | 'other';
@@ -72,6 +77,7 @@ export const DEFAULT_PREFS: Prefs = {
   filterStrong: false,
   sounds: true,
   taxCountry: 'uk',
+  confirmWithBiometrics: true,
 };
 
 const KEY = 'bwallet.prefs';
@@ -115,6 +121,7 @@ export const parsePrefs = (raw: unknown): Prefs => {
     filterStrong: r.filterStrong === true,
     sounds: r.sounds !== false,
     taxCountry: r.taxCountry === 'other' ? 'other' : 'uk',
+    confirmWithBiometrics: r.confirmWithBiometrics !== false,
     // A stored allowLanguageReveal (the retired 18+ opt-in) is dropped here: slurs are blurred per post now.
   };
 };

@@ -47,7 +47,7 @@
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>When you hold the b to talk, bWallet uses Apple speech recognition to turn your words into text for b. Nothing is sent to b until you let go.</string>
 	<key>NSFaceIDUsageDescription</key>
-	<string>Unlock bWallet with Face ID instead of typing your password.</string>
+	<string>Unlock bWallet with Face ID and confirm it is you before you sign or pay.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
