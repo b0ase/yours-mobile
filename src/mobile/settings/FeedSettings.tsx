@@ -927,6 +927,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
               label="Token indexing"
               description="One-tap fee for your own tokens"
               onClick={() => setScreen('indexing')}
+              isLast={!IS_EXTENSION}
             />
             {IS_EXTENSION && (
               <>
@@ -936,15 +937,18 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
                   label="Websites"
                   description="Which wallet sites connect to"
                   onClick={() => setScreen('websites')}
+                  isLast
                 />
               </>
             )}
-            <Divider />
+          </Section>
+          <Section title="Security">
             <Row
               icon={<LockKeyhole size={16} />}
               label="Change password"
               description="One password unlocks every account"
               onClick={() => setScreen('password')}
+              isFirst
               isLast={!SEEDLESS_ENABLED && !isNative}
             />
             {isNative && (

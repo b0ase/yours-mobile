@@ -5,8 +5,9 @@
  * (createAction / signAction), the phone asks Face ID / fingerprint, falling back to the device passcode, before
  * the request reaches the wallet. Biometric data never leaves the device: the OS answers yes or no.
  *
- * - One prompt per user action: a pass covers the same site for GRACE_MS, and calls that arrive while a prompt is
- *   up join it (sign-and-seal = createSignature + createAction = one prompt).
+ * - One prompt per user action: a pass covers the same site's signs for GRACE_MS and at most ONE payment after it
+ *   (sign-and-seal = createSignature + createAction = one prompt). Every payment after a payment asks again.
+ *   Calls from one origin are checked one at a time, in order.
  * - Cancel → the standard denial (ERR_PERMISSION_DENIED). No answer within timeoutMs → ERR_USER_VERIFICATION_TIMEOUT.
  * - No biometrics and no passcode, or the setting off → no prompt (the wallet's own approval sheets still apply);
  *   recorded as verifiedBy 'none'.
@@ -77,8 +78,10 @@ export const createSiteGate = (deps: GateDeps) => {
   const clearTimer = deps.clearTimer ?? ((h: unknown) => clearTimeout(h as ReturnType<typeof setTimeout>));
 
   const last = new Map<string, LastVerification>();
-  const passes = new Map<string, { method: 'biometric' | 'passcode'; until: number }>();
-  const inFlight = new Map<string, Promise<VerifiedBy>>();
+  // payUsed: a payment already rode on this pass; the next payment asks again (owner, 29 Oct 2026).
+  const passes = new Map<string, { method: 'biometric' | 'passcode'; until: number; payUsed: boolean }>();
+  // One gated call per origin at a time, so each one sees the pass the previous one left.
+  const queue = new Map<string, Promise<unknown>>();
 
   const ask = (origin: string, kind: GateKind): Promise<VerifiedBy> =>
     new Promise<VerifiedBy>((resolve, reject) => {
@@ -99,10 +102,8 @@ export const createSiteGate = (deps: GateDeps) => {
         .then(
           (r) =>
             finish(() => {
-              if (r.status === 'ok') {
-                passes.set(origin, { method: r.method, until: now() + graceMs });
-                resolve(r.method);
-              } else if (r.status === 'cancelled') reject(userDeniedError());
+              if (r.status === 'ok') resolve(r.method);
+              else if (r.status === 'cancelled') reject(userDeniedError());
               else resolve('none');
             }),
           // A broken native call is treated like no biometrics: today's approval sheets still guard the request.
@@ -120,16 +121,25 @@ export const createSiteGate = (deps: GateDeps) => {
     let verifiedBy: VerifiedBy;
     if (!deps.enabled()) verifiedBy = 'none';
     else {
-      const pass = passes.get(origin);
-      if (pass && pass.until > now()) verifiedBy = pass.method;
-      else {
-        let p = inFlight.get(origin);
-        if (!p) {
-          p = ask(origin, g.kind).finally(() => inFlight.delete(origin));
-          inFlight.set(origin, p);
+      const run = async (): Promise<VerifiedBy> => {
+        const pass = passes.get(origin);
+        // A pass covers signs, and at most one payment (sign → seal). Every later payment asks again.
+        if (pass && pass.until > now() && (g.kind === 'sign' || !pass.payUsed)) {
+          if (g.kind === 'pay') pass.payUsed = true;
+          return pass.method;
         }
-        verifiedBy = await p;
-      }
+        const m = await ask(origin, g.kind);
+        if (m !== 'none') passes.set(origin, { method: m, until: now() + graceMs, payUsed: g.kind === 'pay' });
+        return m;
+      };
+      const p = (queue.get(origin) ?? Promise.resolve()).catch(() => undefined).then(run);
+      queue.set(origin, p);
+      void p
+        .catch(() => undefined)
+        .finally(() => {
+          if (queue.get(origin) === p) queue.delete(origin);
+        });
+      verifiedBy = await p;
     }
     last.set(origin, { verifiedBy, at: new Date(now()).toISOString(), call: g.call });
     return verifiedBy;

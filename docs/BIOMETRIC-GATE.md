@@ -18,14 +18,14 @@ enrolled, or the user taps "Use Passcode", it asks for the phone passcode instea
 no prompt and the wallet's own approval sheets work as before. The OS only answers yes or no: no biometric data
 reaches the wallet or the site.
 
-**One prompt per user action.** A pass covers the same site for 30 seconds, and calls that arrive while the prompt is
-up wait for that prompt. So the bChatX seal (`createSignature`, then a `createAction` with a 0-sat OP_RETURN) asks
-once.
+**One prompt per user action.** A pass covers the same site's signs for 30 seconds and **at most one payment**. So
+the bChatX seal (`createSignature`, then a `createAction` with a 0-sat OP_RETURN) asks once, but every payment after a
+payment asks again, even inside the 30 seconds. One site's gated calls are checked one at a time, in order.
 
 The gate runs before the request reaches the wallet. The wallet's approval sheets (spend, protocol permission) still
 show after it as usual.
 
-**Settings › "Face ID / fingerprint for signing and payments"** (next to Change password). On by default. Turning it
+**Settings › "Face ID / fingerprint for signing and payments"** (the Security section, with Change password). On by default. Turning it
 off needs Face ID, fingerprint or the passcode too.
 
 ## What the site gets
@@ -69,10 +69,18 @@ hard time limit:
 - `createAction` / `signAction`: 300 s. Building and broadcasting are included.
 - Everything else: 120 s. This covers an unlock plus an approval sheet.
 
-When the limit runs out, the site gets `code: 'ERR_WALLET_TIMEOUT'`, status 504. The wallet step isn't cancelled. A
-payment approved just before the limit could still go out after the site got the timeout, which is why the message
-tells the user to check History before trying again. Spend sheets already expire after 60 s
-(`services/promptWatchdog.ts`), so this is a backstop. It is not the normal path.
+When the limit runs out, the bridge first tells the background (`SITE_CALL_TIMED_OUT`, wallet pages only). The
+background closes every open sheet of that site (permission bundles, manifest, counterparty), so none can be approved
+late. Then:
+
+- If a sheet was closed, or the call wasn't a payment, the site gets `code: 'ERR_WALLET_TIMEOUT'` (status 504).
+- If a `createAction` / `signAction` of that site is still running with no sheet left to close, it was already
+  approved and may still broadcast. The site is **not** told it timed out: the bridge waits for the real answer. No
+  payment ever goes out after a site received `ERR_WALLET_TIMEOUT`.
+
+Every sheet also expires unanswered after 60 s: spend, protocol, basket, certificate, the manifest (grouped) and
+counterparty sheets, in the phone wallet and in the extension (`PROMPT_EXPIRY_MS`, `services/promptWatchdog.ts`).
+Before this, only spend sheets expired. So the 120 s / 300 s limit is a backstop.
 
 Test: `src/mobile/dappBrowser.gate.test.ts` plays the bChatX sequence against a wallet whose `createSignature` never
 answers.

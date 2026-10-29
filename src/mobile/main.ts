@@ -12,7 +12,7 @@ import { handleBack } from './backStack';
 import { phoneBack } from './phone/phoneBack';
 import './phone/flag';
 import { UNOFFICIAL_NOTICE } from './brandText';
-import { initDappBrowser, onOverlayCountChanged, routeWindowOpen } from './dappBrowser';
+import { initDappBrowser, onOverlayCountChanged, routeWindowOpen, setSiteTimeoutNotifier } from './dappBrowser';
 import {
   closeOverlayForFrame,
   handleHostOp,
@@ -130,6 +130,8 @@ const platform: PlatformHooks = { welcomeNotice: UNOFFICIAL_NOTICE, ...(await in
 // internal one, so the background applies its external-caller rules.
 setOverlayCountHandler(onOverlayCountChanged);
 initDappBrowser((id, origin, url) => attachContext(id, window, { id: MOBILE_EXTENSION_ID, url, origin }));
+// A site's call timed out (mobile/siteGate.ts): the background closes that site's sheets so none is approved late.
+setSiteTimeoutNotifier((originator) => mainChrome.runtime.sendMessage({ action: 'SITE_CALL_TIMED_OUT', originator }));
 
 // Web app (web.bwalletx.com, the iPhone route): the wallet's encrypted keys live in this site's storage. Ask the
 // browser to keep it persistent so it isn't cleared under storage pressure (Safari grants this to Home Screen apps;

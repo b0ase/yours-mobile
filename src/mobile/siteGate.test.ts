@@ -84,20 +84,51 @@ describe('site gate', () => {
     expect(gate.lastVerification(SITE)?.call).toBe('createAction');
     // After the grace window it asks again.
     advance(60_000);
-    await gate.check(SITE, 'createAction');
+    await gate.check(SITE, 'createSignature');
     expect(calls.length).toBe(2);
+  });
+
+  test('every payment after a payment asks again, even inside the grace window', async () => {
+    const { gate, calls, advance } = gateWith(async () => ({ status: 'ok', method: 'biometric' }));
+    await gate.check(SITE, 'createSignature');
+    await gate.check(SITE, 'createAction'); // rides the sign's pass
+    advance(1_000);
+    await gate.check(SITE, 'signAction'); // a second payment
+    advance(1_000);
+    await gate.check(SITE, 'createAction'); // and a third
+    expect(calls.length).toBe(3);
     expect(calls[1].startsWith(GATE_REASON.pay)).toBe(true);
   });
 
-  test('concurrent calls join the prompt that is up', async () => {
-    let answer: (r: AuthResult) => void = () => undefined;
-    const { gate, calls } = gateWith(() => new Promise((r) => (answer = r)));
+  test('a payment prompt does not cover a later sign → seal payment', async () => {
+    const { gate, calls } = gateWith(async () => ({ status: 'ok', method: 'biometric' }));
+    await gate.check(SITE, 'createAction');
+    await gate.check(SITE, 'createSignature'); // a sign may use the pass
+    await gate.check(SITE, 'createAction'); // but the pass already paid once
+    expect(calls.length).toBe(2);
+  });
+
+  test('concurrent sign + pay share one prompt; concurrent pay + pay ask twice', async () => {
+    const answers: ((r: AuthResult) => void)[] = [];
+    const { gate, calls } = gateWith(() => new Promise((r) => answers.push(r)));
+    const flush = async () => {
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    };
     const a = gate.check(SITE, 'createSignature');
     const b = gate.check(SITE, 'createAction');
-    await Promise.resolve();
-    answer({ status: 'ok', method: 'biometric' });
+    await flush();
+    answers.shift()!({ status: 'ok', method: 'biometric' });
     expect(await Promise.all([a, b])).toEqual(['biometric', 'biometric']);
     expect(calls.length).toBe(1);
+
+    const c = gate.check(SITE, 'createAction');
+    const d = gate.check(SITE, 'createAction');
+    await flush();
+    answers.shift()!({ status: 'ok', method: 'biometric' });
+    await flush();
+    answers.shift()!({ status: 'ok', method: 'biometric' });
+    await Promise.all([c, d]);
+    expect(calls.length).toBe(3);
   });
 
   test('cancel: the standard BRC-100 denial, and no pass', async () => {
@@ -112,7 +143,7 @@ describe('site gate', () => {
   test('timeout: rejects with a coded error instead of hanging', async () => {
     const { gate, t } = gateWith(() => new Promise(() => undefined));
     const p = gate.check(SITE, 'createSignature').catch((e) => e);
-    await Promise.resolve();
+    for (let i = 0; i < 10; i++) await Promise.resolve();
     expect(t.list[0].ms).toBe(60_000);
     t.fireAll();
     const err = await p;

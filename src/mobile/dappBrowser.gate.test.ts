@@ -24,16 +24,25 @@ const fakeGate = {
 
 let handleSiteCall: typeof import('./dappBrowser').handleSiteCall;
 const reached: string[] = [];
+const timedOut: string[] = [];
+let committed = false;
 beforeAll(async () => {
   const m = await import('./dappBrowser');
   handleSiteCall = m.handleSiteCall;
   m.__setSiteGateForTests(fakeGate, () => 50);
+  m.setSiteTimeoutNotifier(async (o) => {
+    timedOut.push(o);
+    return { success: true, data: { cancelled: committed ? 0 : 1, committed } };
+  });
   m.initDappBrowser(() => ({
     runtime: {
       sendMessage: (msg: { action: string }) => {
         reached.push(msg.action);
         // The step that hung on the phone: createSignature never answers.
         if (msg.action === 'createSignature') return new Promise(() => undefined);
+        // A payment approved and still broadcasting when the limit hits: answers a bit later.
+        if (msg.action === 'createAction')
+          return new Promise((r) => setTimeout(() => r({ success: true, data: { txid: 'ab' } }), 120));
         return Promise.resolve({ success: true, data: { publicKey: '02ab' } });
       },
     },
@@ -77,5 +86,23 @@ describe('handleSiteCall settles every step', () => {
       data: { verifiedBy: 'biometric', at: '2026-10-29T00:00:00.000Z', call: 'createSignature' },
     });
     expect(reached).toEqual([]);
+  });
+
+  test('a timed-out sign closes the site sheets and reports the timeout', async () => {
+    timedOut.length = 0;
+    const r = await handleSiteCall(ORIGIN, URL_, 'createSignature', { data: [1] });
+    expect(r).toMatchObject({ code: 'ERR_WALLET_TIMEOUT' });
+    expect(timedOut).toEqual(['www.bchatx.com']);
+  });
+
+  test('a payment whose sheet was closed reports the timeout (nothing can be approved late)', async () => {
+    committed = false;
+    expect(await handleSiteCall(ORIGIN, URL_, 'createAction', {})).toMatchObject({ code: 'ERR_WALLET_TIMEOUT' });
+  });
+
+  test('an already approved payment never reports a timeout: the real answer comes back', async () => {
+    committed = true;
+    expect(await handleSiteCall(ORIGIN, URL_, 'createAction', {})).toEqual({ success: true, data: { txid: 'ab' } });
+    committed = false;
   });
 });
