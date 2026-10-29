@@ -96,6 +96,37 @@ describe('reserved baskets', () => {
     ]);
   });
 
+  // TERRORNODE audit, 29 Oct 2026: tokenblaster /1satordnance mints deliver the inscription into '1sat'.
+  test('a site may insert (receive) into the ordinals and deposit baskets, but never list, relinquish or use them', async () => {
+    const calls: string[] = [];
+    const m = guardReservedBaskets(
+      {
+        ensureBasketAccess: async () => (calls.push('ensure'), true),
+        listOutputs: async () => (calls.push('list'), { outputs: [] }),
+        relinquishOutput: async () => (calls.push('relinquish'), { relinquished: true }),
+      },
+      ADMIN,
+    );
+    for (const basket of ['1sat', '1sat-deposit']) {
+      expect(await m.ensureBasketAccess({ originator: 'site.example', basket, usageType: 'insertion' })).toBe(true);
+      await expect(m.ensureBasketAccess({ originator: 'site.example', basket, usageType: 'listing' })).rejects.toThrow(
+        /reserved/,
+      );
+      await expect(m.ensureBasketAccess({ originator: 'site.example', basket, usageType: 'removal' })).rejects.toThrow(
+        /reserved/,
+      );
+      await expect(m.ensureBasketAccess({ originator: 'site.example', basket })).rejects.toThrow(/reserved/);
+      await expect(m.listOutputs({ basket }, 'site.example')).rejects.toThrow(/reserved/);
+      await expect(m.relinquishOutput({ basket }, 'site.example')).rejects.toThrow(/reserved/);
+    }
+    // Other wallet baskets stay closed to insertion too.
+    for (const basket of ['default', 'bsv21', 'lock', 'opns'])
+      await expect(
+        m.ensureBasketAccess({ originator: 'site.example', basket, usageType: 'insertion' }),
+      ).rejects.toThrow(/reserved/);
+    expect(calls).toEqual([]);
+  });
+
   test('withoutReservedBaskets drops wallet baskets', () => {
     expect(withoutReservedBaskets([{ basket: 'default' }, { basket: 'x' }])).toEqual([{ basket: 'x' }]);
   });

@@ -266,3 +266,18 @@ describe('b-Aware 28 Oct (Jacob Anderson, 0qu5xz): more login wordings bind the 
     expect(boundHosts('Read this on good.com')).toEqual([]);
   });
 });
+
+describe('TERRORNODE audit 29 Oct: bit-sign login wording on tokenblaster (www vs apex)', () => {
+  const login = (host: string) =>
+    bytes(`Sign in to ${host} with bWallet\nNonce: ${'a1'.repeat(16)}\nIssued At: 2026-10-29T10:00:00.000Z`);
+  test('the named host matches the caller: www. and apex count as the same site, both ways', () => {
+    for (const caller of ['https://www.tokenblaster.lol', 'https://tokenblaster.lol', 'www.tokenblaster.lol'])
+      for (const named of ['www.tokenblaster.lol', 'tokenblaster.lol'])
+        expect(crossSiteSignRefusal(caller, { data: login(named) })).toBeNull();
+  });
+  test('any other named host is still refused', () => {
+    for (const named of ['evil.com', 'tokenblaster.lol.evil.com', 'wwwtokenblaster.lol', 'tokenblaster.lo'])
+      expect(crossSiteSignRefusal('https://www.tokenblaster.lol', { data: login(named) })).toMatch(/different site/);
+    expect(crossSiteSignRefusal('https://evil.com', { data: login('www.tokenblaster.lol') })).toMatch(/different site/);
+  });
+});

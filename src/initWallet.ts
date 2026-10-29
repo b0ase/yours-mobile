@@ -389,7 +389,20 @@ export const initWallet = async (
 
   // WhatsOnChain 429s: backoff with jitter, optional VITE_WOC_API_KEY, 1sat -> toolbox provider fallback for raw
   // tx and proofs (services/wocResilience.ts; owner's $2 send, 28 Oct 2026).
-  if (!hardenWalletServices(toolboxServices)) console.warn('[initWallet] chain-data services not hardened');
+  // Our own transactions (an unconfirmed change coin) are read from local storage before any network lookup. Read
+  // straight from the active provider, never through the manager's locks: the toolbox can ask services for a raw tx
+  // while it holds the writer lock, and a locked read here would wait on it forever (TERRORNODE audit, 29 Oct 2026).
+  const localRawTx = async (txid: string): Promise<number[] | undefined> => {
+    if (!storage.isActiveStorageProvider()) return undefined;
+    const sp = storage.getActive() as unknown as {
+      getProvenOrRawTx?: (t: string) => Promise<{ rawTx?: number[]; proven?: { rawTx?: number[] } }>;
+    };
+    const r = await sp.getProvenOrRawTx?.(txid);
+    const raw = r?.rawTx ?? r?.proven?.rawTx;
+    return raw?.length ? Array.from(raw) : undefined;
+  };
+  if (!hardenWalletServices(toolboxServices, undefined, { localRawTx }))
+    console.warn('[initWallet] chain-data services not hardened');
   // Big mints need longer than the broadcaster's fixed 30 s to upload (services/bigBroadcast.ts, vexvoid 12 Oct 2026).
   if (!sizeAwareBroadcast(toolboxServices)) console.warn('[initWallet] broadcaster timeout not tunable');
   // Every payment ends here: our screens and dApps through the permissions manager, send-all and background jobs

@@ -31,6 +31,19 @@ const RESERVED = new Set([
   TRUST_SITE_BASKET,
 ]);
 
+/**
+ * Reserved baskets a site may still put outputs INTO (receive), never list, relinquish or spend from: the ordinals
+ * basket ('1sat': a site's mint delivers the new inscription there, tokenblaster /1satordnance) and the deposit
+ * basket. Receiving only adds an output to the person's wallet; what the site pays for is still the spend sheet.
+ * Listing, relinquishing and naming these coins as inputs stay refused (fdbayu5 stays fixed). TERRORNODE audit,
+ * 29 Oct 2026.
+ */
+const SITE_INSERTABLE = new Set(['1sat', DEPOSIT_BASKET]);
+
+/** Pure: may an outside originator insert outputs into this reserved basket? */
+export const siteMayInsertInto = (basket: unknown, usageType: unknown): boolean =>
+  usageType === 'insertion' && typeof basket === 'string' && SITE_INSERTABLE.has(basket.trim().toLowerCase());
+
 export const RESERVED_BASKET_REFUSAL = 'This basket is reserved for bWalletX itself';
 
 export const OWN_COIN_REFUSAL = "A site can't spend your wallet's own coins, ordinals or names as its inputs";
@@ -129,6 +142,8 @@ export function guardReservedBaskets<T extends object>(manager: T, adminOriginat
         takeTokenInsertionTicket(args?.originator, args?.basket, args?.usageType)
       )
         return true;
+      // Receiving into the ordinals or deposit basket: allowed, no grant stored, no sheet (siteMayInsertInto).
+      if (args?.originator !== adminOriginator && siteMayInsertInto(args?.basket, args?.usageType)) return true;
       if (args?.originator !== adminOriginator && isReservedBasket(args?.basket))
         throw new Error(`${RESERVED_BASKET_REFUSAL}: "${String(args.basket)}"`);
       return (ensure as (a: unknown) => Promise<boolean>).call(manager, args);

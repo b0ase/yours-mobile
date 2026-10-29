@@ -340,8 +340,10 @@ describe('site tokens: deliveries', () => {
       RESERVED_BASKET_REFUSAL,
     );
     await expect(
-      wallet.createAction({ description: 'x', outputs: [{ lockingScript: '51', satoshis: 1, basket: '1sat' }] }, EVIL),
+      wallet.createAction({ description: 'x', outputs: [{ lockingScript: '51', satoshis: 1, basket: 'opns' }] }, EVIL),
     ).rejects.toThrow(RESERVED_BASKET_REFUSAL);
+    // '1sat' (ordinals) and the deposit basket now take a site's insertion (a mint delivering its inscription,
+    // TERRORNODE audit 29 Oct 2026): reservedBaskets.test.ts covers that listing and relinquishing stay refused.
     expect(calls.filter((c) => c.startsWith('relinquish') || c.startsWith('listOutputs:bsv21:evil'))).toEqual([]);
   });
 });

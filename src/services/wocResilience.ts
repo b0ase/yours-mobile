@@ -104,27 +104,59 @@ export function hardenWhatsOnChain(woc: WocLike | undefined, apiKey?: string, o?
   return true;
 }
 
-/** getRawTx / getMerklePath: api.1sat.app first, then the toolbox chain when 1sat fails. */
-export function addProviderFallback(svc: OneSatLike | undefined): boolean {
+export interface FallbackOptions {
+  /**
+   * The wallet's own copy of a transaction (storage rawTx), checked before any network lookup for getRawTx. An
+   * unconfirmed change coin of ours is often not served yet by api.1sat.app or WhatsOnChain (TERRORNODE audit,
+   * 29 Oct 2026); storage already holds its raw bytes. Never throws: undefined means "not held".
+   */
+  localRawTx?: (txid: string) => Promise<number[] | undefined>;
+  /** Pause before the second try of each provider. Injectable for tests. */
+  retryDelayMs?: number;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+/**
+ * getRawTx / getMerklePath: the wallet's stored copy first (getRawTx only), then api.1sat.app, then the toolbox chain
+ * (WhatsOnChain with backoff), and if both failed one more round of both after a short pause. A provider that throws
+ * is treated as a failed answer, never as a thrown error, so the toolbox sees `{ error }` and not a crash.
+ */
+export function addProviderFallback(svc: OneSatLike | undefined, o: FallbackOptions = {}): boolean {
   const fb = svc?.fallbackServices as
     | { getRawTx?: (t: string) => Promise<Result>; getMerklePath?: (t: string) => Promise<Result> }
     | undefined;
   if (!svc || !fb || typeof svc.getRawTx !== 'function' || typeof svc.getMerklePath !== 'function') return false;
   if (svc.__bwxFallback) return true;
+  const delay = o.retryDelayMs ?? 750;
+  const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const wrap = (key: 'getRawTx' | 'getMerklePath', has: (r: Result) => boolean) => {
     const primary = svc[key]!.bind(svc);
     const second = fb[key]?.bind(fb);
-    if (!second) return;
-    svc[key] = async (txid: string, useNext?: boolean) => {
-      const r = await primary(txid, useNext).catch((e: unknown) => ({ error: e }) as Result);
-      if (has(r)) return r;
+    const tryOne = async (f: (txid: string, useNext?: boolean) => Promise<Result>, txid: string, useNext?: boolean) => {
       try {
-        const s = await second(txid);
-        if (has(s)) return s;
+        return await f(txid, useNext);
       } catch (e) {
-        console.warn(`[services] ${key} fallback failed for ${txid}:`, e);
+        console.warn(`[services] ${key} lookup failed for ${txid}:`, e);
+        return { error: e } as Result;
       }
-      return r;
+    };
+    svc[key] = async (txid: string, useNext?: boolean) => {
+      if (key === 'getRawTx' && o.localRawTx) {
+        const raw = await o.localRawTx(txid).catch(() => undefined);
+        if (raw?.length) return { txid, name: 'wallet-storage', rawTx: raw } as Result;
+      }
+      let first: Result | undefined;
+      for (let round = 0; round < 2; round++) {
+        if (round > 0) await sleep(delay);
+        const r = await tryOne(primary, txid, useNext);
+        if (has(r)) return r;
+        first ??= r;
+        if (second) {
+          const s = await tryOne(second, txid);
+          if (has(s)) return s;
+        }
+      }
+      return first!;
     };
   };
   wrap('getRawTx', (r) => !!r?.rawTx && !r.error);
@@ -143,10 +175,14 @@ export const wocApiKeyFromEnv = (): string => {
 };
 
 /** Apply both to the wallet's OneSatServices (and its toolbox fallback). */
-export function hardenWalletServices(services: unknown, apiKey = wocApiKeyFromEnv()): boolean {
+export function hardenWalletServices(
+  services: unknown,
+  apiKey = wocApiKeyFromEnv(),
+  fallback: FallbackOptions = {},
+): boolean {
   const svc = services as OneSatLike & ToolboxServicesLike;
   const toolbox = svc?.fallbackServices ?? svc;
   const a = hardenWhatsOnChain(toolbox?.whatsonchain, apiKey);
-  const b = addProviderFallback(svc);
+  const b = addProviderFallback(svc, fallback);
   return a || b;
 }
