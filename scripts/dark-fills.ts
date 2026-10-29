@@ -125,6 +125,8 @@ ${END}`;
  */
 export const CSS_KEEP: Record<string, string> = {
   '@theme': 'sweep tab Tailwind theme token, not a fill',
+  '.bw-home-slide': 'Store showcase card: a photo stage behind cover art, dark in every pack',
+  '.bw-home-nav': 'Store showcase arrows sit on the cover art (media stage), dark in every pack',
   '.bwallet-web-banner': 'hazard tape (yellow and black) in every pack, by design',
   '.bw-betagate': 'Start small beta notice: hazard-tape panel, dark in every pack like the web banner',
   '.bw-betagate-tape': 'hazard tape (yellow and black) in every pack, by design',

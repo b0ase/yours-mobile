@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { KeyboardEvent, PointerEvent as RPointerEvent, WheelEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, ShoppingBag } from 'lucide-react';
 import { SHOPS } from '../themeStore/shops';
@@ -11,6 +12,7 @@ import namesArt from './art/store-names.webp';
 import spacesArt from './art/store-spaces.webp';
 import { bavatarSvg } from '../bavatar/bavatar';
 import { useCollapsed } from './collapse';
+import { dragSteps, loopOffset } from './swipe';
 import { CollapseToggle } from './CollapseToggle';
 import { AD_PAGE_URL, adSlideText } from './adSlot';
 import { openExternal } from '../exchange/useTokenRowActions';
@@ -20,6 +22,9 @@ import { TOKENBLASTER_SHOP_ART } from '../theme/tokenblasterShopX';
  * Store showcase (home module, bWalletX only: loaded behind THEME_STORE_PAID_ENABLED like the Store itself).
  * A calm, slowly turning shelf of real things in the Store: the edition themes (Scammers Cartel first), the emoji
  * packs, the VexVoid album, OpNS names and Spaces. Every slide opens its own page.
+ * Swipeable (29 Oct 2026): one featured card with a peek of the next; drag/swipe with momentum + snap, trackpad
+ * swipes, arrows, keyboard and gold pill dots, looping. Cards move by transform inside the clipped stage, so the
+ * page never scrolls sideways and every card is reachable from the dots or arrows.
  */
 type Item = {
   key: string;
@@ -113,15 +118,108 @@ const showcaseItems = (spaces = BSPACES_ENABLED): Item[] => {
 const StoreShowcase = () => {
   const navigate = useNavigate();
   const items = useMemo(() => showcaseItems(), []);
+  const len = items.length;
   const [i, setI] = useState(0);
   const [paused, setPaused] = useState(false);
+  const [dragX, setDragX] = useState(0);
+  const [dragging, setDragging] = useState(false);
   const [collapsed, toggleCollapsed] = useCollapsed('showcase');
+  const stageRef = useRef<HTMLDivElement>(null);
+  const drag = useRef<{
+    id: number;
+    x0: number;
+    y0: number;
+    lastX: number;
+    lastT: number;
+    vx: number;
+    axis: '' | 'x' | 'y';
+  } | null>(null);
+  const moved = useRef(false);
+  const wheel = useRef({ acc: 0, lock: 0 });
   useEffect(() => {
-    if (collapsed || paused || reduced() || items.length < 2) return;
-    const t = setInterval(() => setI((n) => (n + 1) % items.length), ROTATE_MS);
+    if (collapsed || paused || dragging || reduced() || len < 2) return;
+    const t = setInterval(() => setI((n) => (n + 1) % len), ROTATE_MS);
     return () => clearInterval(t);
-  }, [collapsed, paused, items.length]);
-  const go = (d: number) => setI((n) => (n + d + items.length) % items.length);
+  }, [collapsed, paused, dragging, len]);
+  const go = (d: number) => setI((n) => (((n + d) % len) + len) % len);
+  const cardW = () => {
+    const el = stageRef.current?.querySelector<HTMLElement>('.bw-home-slide');
+    return el ? el.offsetWidth + 10 : 300;
+  };
+
+  const onPointerDown = (e: RPointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if ((e.target as HTMLElement).closest('.bw-home-nav')) return;
+    drag.current = {
+      id: e.pointerId,
+      x0: e.clientX,
+      y0: e.clientY,
+      lastX: e.clientX,
+      lastT: e.timeStamp,
+      vx: 0,
+      axis: '',
+    };
+    moved.current = false;
+  };
+  const onPointerMove = (e: RPointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    if (!d || d.id !== e.pointerId) return;
+    const dx = e.clientX - d.x0;
+    const dy = e.clientY - d.y0;
+    if (!d.axis) {
+      if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+      d.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+      if (d.axis === 'x') {
+        try {
+          e.currentTarget.setPointerCapture(e.pointerId);
+        } catch {
+          /* pointer already gone */
+        }
+        setDragging(true);
+      }
+    }
+    if (d.axis !== 'x') return;
+    moved.current = true;
+    const dt = Math.max(1, e.timeStamp - d.lastT);
+    d.vx = 0.8 * ((e.clientX - d.lastX) / dt) + 0.2 * d.vx;
+    d.lastX = e.clientX;
+    d.lastT = e.timeStamp;
+    setDragX(dx);
+  };
+  const endDrag = (e: RPointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    if (!d || d.id !== e.pointerId) return;
+    drag.current = null;
+    if (d.axis === 'x') {
+      const stale = e.timeStamp - d.lastT > 80; // finger held still before lifting: no fling
+      const steps = dragSteps(e.clientX - d.x0, stale ? 0 : d.vx, cardW());
+      if (steps) go(steps);
+    }
+    setDragX(0);
+    setDragging(false);
+  };
+  const onWheel = (e: WheelEvent<HTMLDivElement>) => {
+    if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return; // vertical scroll belongs to the page
+    const w = wheel.current;
+    const now = Date.now();
+    if (now < w.lock) return;
+    w.acc += e.deltaX;
+    if (Math.abs(w.acc) > 40) {
+      go(w.acc > 0 ? 1 : -1);
+      w.acc = 0;
+      w.lock = now + 450; // one card per trackpad swipe
+    }
+  };
+  const onKeyDown = (e: KeyboardEvent<HTMLElement>) => {
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      go(-1);
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      go(1);
+    }
+  };
+
   return (
     <section
       className="bw-home-panel bw-home-show"
@@ -131,6 +229,7 @@ const StoreShowcase = () => {
       onPointerLeave={() => setPaused(false)}
       onFocus={() => setPaused(true)}
       onBlur={() => setPaused(false)}
+      onKeyDown={onKeyDown}
     >
       <header className="bw-home-head">
         <ShoppingBag size={16} className="bw-home-ico" aria-hidden="true" />
@@ -141,51 +240,86 @@ const StoreShowcase = () => {
         <CollapseToggle collapsed={collapsed} onToggle={toggleCollapsed} label="the Store showcase" />
       </header>
       {!collapsed && (
-        <div className="bw-home-stage">
-          {items.map((it, n) => (
-            <button
-              key={it.key}
-              type="button"
-              className={`bw-home-slide${n === i ? ' on' : ''}`}
-              aria-hidden={n !== i}
-              tabIndex={n === i ? 0 : -1}
-              onClick={() => (it.href ? openExternal(it.href) : navigate(it.to))}
-            >
-              <span className="bw-home-art" style={{ background: it.art }} />
-              {it.img && (
-                <img
-                  className="bw-home-artimg"
-                  src={it.img}
-                  alt=""
-                  style={{ objectPosition: it.pos ?? 'center' }}
-                  onError={(e) => {
-                    const fallback = goldArt(it.key);
-                    if (e.currentTarget.src !== fallback) e.currentTarget.src = fallback;
-                  }}
-                />
-              )}
-              <span className="bw-home-cap">
-                {it.logo && it.logo !== it.img && <img src={it.logo} alt="" width={34} height={34} />}
-                <span className="bw-home-tiletext">
-                  <span className="bw-home-kind">{it.kind}</span>
-                  <span className="bw-home-captitle">{it.title}</span>
-                  <span className="bw-home-capsub">{it.blurb}</span>
+        <div
+          ref={stageRef}
+          className={`bw-home-stage${dragging ? ' dragging' : ''}`}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
+          onWheel={onWheel}
+          onDragStart={(e) => e.preventDefault()}
+        >
+          {items.map((it, n) => {
+            const d = len > 1 ? loopOffset(n, i, len) : 0;
+            const near = Math.abs(d) <= 1 || (len > 3 && d === 2 && dragX < 0) || (len > 3 && d === -2 && dragX > 0);
+            return (
+              <button
+                key={it.key}
+                type="button"
+                className={`bw-home-slide${n === i ? ' on' : ''}${near ? '' : ' far'}`}
+                style={{ transform: `translateX(calc(${d} * (100% + 10px) + ${dragX}px))` }}
+                aria-hidden={n !== i}
+                aria-roledescription="slide"
+                aria-label={`${n + 1} of ${len}: ${it.title}`}
+                tabIndex={n === i ? 0 : -1}
+                onClick={(e) => {
+                  if (moved.current) {
+                    e.preventDefault();
+                    moved.current = false;
+                    return;
+                  }
+                  if (n !== i) return go(d);
+                  if (it.href) openExternal(it.href);
+                  else navigate(it.to);
+                }}
+              >
+                <span className="bw-home-art" style={{ background: it.art }} />
+                {it.img && (
+                  <img
+                    className="bw-home-artimg"
+                    src={it.img}
+                    alt=""
+                    draggable={false}
+                    style={{ objectPosition: it.pos ?? 'center' }}
+                    onError={(e) => {
+                      const fallback = goldArt(it.key);
+                      if (e.currentTarget.src !== fallback) e.currentTarget.src = fallback;
+                    }}
+                  />
+                )}
+                <span className="bw-home-cap">
+                  {it.logo && it.logo !== it.img && (
+                    <img src={it.logo} alt="" width={34} height={34} draggable={false} />
+                  )}
+                  <span className="bw-home-tiletext">
+                    <span className="bw-home-kind">{it.kind}</span>
+                    <span className="bw-home-captitle">{it.title}</span>
+                    <span className="bw-home-capsub">{it.blurb}</span>
+                  </span>
                 </span>
-              </span>
-            </button>
-          ))}
+              </button>
+            );
+          })}
           <button type="button" className="bw-home-nav l" aria-label="Previous" onClick={() => go(-1)}>
-            <ChevronLeft size={16} />
+            <ChevronLeft size={18} />
           </button>
           <button type="button" className="bw-home-nav r" aria-label="Next" onClick={() => go(1)}>
-            <ChevronRight size={16} />
+            <ChevronRight size={18} />
           </button>
         </div>
       )}
       {!collapsed && (
-        <div className="bw-home-dots" aria-hidden="true">
+        <div className="bw-home-dots" role="group" aria-label="Choose a card">
           {items.map((it, n) => (
-            <span key={it.key} className={n === i ? 'on' : ''} />
+            <button
+              key={it.key}
+              type="button"
+              className={n === i ? 'on' : ''}
+              aria-label={`Show ${it.title}`}
+              aria-current={n === i ? 'true' : undefined}
+              onClick={() => setI(n)}
+            />
           ))}
         </div>
       )}
