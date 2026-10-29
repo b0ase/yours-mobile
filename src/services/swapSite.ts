@@ -5,8 +5,16 @@
  */
 import type { OneSatContext } from '@1sat/actions';
 import { SwapError, validTerms, type SwapOffer, type SwapTerms } from '../mobile/p2p/swap/swap';
-import { acceptSwap, offerSwap, type Ask, type RateQuote, type SwapStore } from '../mobile/p2p/swap/swapActions';
-import { SWAP_ACCEPT_ACTION, SWAP_OFFER_ACTION, isSwapOrigin } from './swapAction';
+import {
+  acceptSwap,
+  offerSwap,
+  releaseSwap,
+  type Ask,
+  type RateQuote,
+  type ReservationStore,
+  type SwapStore,
+} from '../mobile/p2p/swap/swapActions';
+import { SWAP_ACCEPT_ACTION, SWAP_OFFER_ACTION, SWAP_RELEASE_ACTION, isSwapOrigin } from './swapAction';
 
 export { isSwapAction, isSwapOrigin } from './swapAction';
 
@@ -15,6 +23,8 @@ export type SwapSiteDeps = {
   quote: () => Promise<RateQuote | undefined>;
   ask: Ask;
   store: SwapStore;
+  /** Token outputs held for open offers (swapActions SwapReservation). */
+  reservations?: ReservationStore;
 };
 export type SwapSiteResult = { success: true; data: unknown } | { success: false; error: string; code: string };
 
@@ -30,8 +40,18 @@ export async function runSiteSwap(
 ): Promise<SwapSiteResult> {
   if (!isSwapOrigin(origin)) return { success: false, error: 'Swaps are only available in bChatX', code: 'ORIGIN' };
   const p = (params && typeof params === 'object' ? params : {}) as Record<string, unknown>;
+  if (action === SWAP_RELEASE_ACTION) {
+    if (typeof p.ref !== 'string' || !/^[\w.:-]{1,100}$/.test(p.ref)) return bad('ref missing');
+    try {
+      const d = await deps();
+      if (!d.reservations) return { success: true, data: { released: false } };
+      return { success: true, data: { released: await releaseSwap(d.ctx, d.reservations, p.ref) } };
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e), code: 'ERROR' };
+    }
+  }
   const terms = asTerms(p);
-  if (!terms) return bad('terms must be { ref, docHash, tokenId, amount, priceUsd }');
+  if (!terms) return bad('terms must be { ref, docHash, tokenId, amount, priceUsd | priceSats }');
   if (action === SWAP_ACCEPT_ACTION && (!p.offer || typeof p.offer !== 'object')) return bad('offer missing');
   try {
     const d = await deps();
@@ -39,7 +59,7 @@ export async function runSiteSwap(
     if (!quote)
       return { success: false, error: 'No BSV price yet. Open the wallet once, then try again', code: 'NO_RATE' };
     if (action === SWAP_OFFER_ACTION) {
-      const offer = await offerSwap(d.ctx, { terms, quote, ask: d.ask });
+      const offer = await offerSwap(d.ctx, { terms, quote, ask: d.ask, reservations: d.reservations });
       return { success: true, data: { offer } };
     }
     if (action === SWAP_ACCEPT_ACTION) {

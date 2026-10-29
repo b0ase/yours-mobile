@@ -68,7 +68,7 @@ import {
 } from './services/streamGrants';
 import type { MintPrivatePrompt, StreamGrantPrompt, SwapPrompt, TwetchPrompt } from './promptProtocol';
 import { isSwapAction, runSiteSwap } from './services/swapSite';
-import type { SwapRecord } from './mobile/p2p/swap/swapActions';
+import type { SwapRecord, SwapReservation } from './mobile/p2p/swap/swapActions';
 import { isTwetchAction, routeTwetchMessage } from './services/twetchSite';
 import { twetchStoreFor } from './mobile/twetch/twetchLink';
 import type { TwetchAsk, TwetchWallet } from './mobile/twetch/twetchCalls';
@@ -4302,6 +4302,25 @@ if (!(
           ),
         put: (r: SwapRecord) => new Promise<void>((res) => chrome.storage.local.set({ [key(r.ref)]: r }, () => res())),
       },
+      // Token outputs held for open offers (one map per account), released when the room voids the offer.
+      reservations: (() => {
+        const rk = `bwxSwapRes.${who}`;
+        const all = () =>
+          new Promise<Record<string, SwapReservation>>((res) =>
+            chrome.storage.local.get(rk, (v) => res(((v ?? {})[rk] as Record<string, SwapReservation>) ?? {})),
+          );
+        const save = (m: Record<string, SwapReservation>) =>
+          new Promise<void>((res) => chrome.storage.local.set({ [rk]: m }, () => res()));
+        return {
+          list: async () => Object.values(await all()),
+          put: async (r: SwapReservation) => save({ ...(await all()), [r.ref]: r }),
+          drop: async (ref: string) => {
+            const m = await all();
+            delete m[ref];
+            await save(m);
+          },
+        };
+      })(),
       ask: (sheet: Omit<SwapPrompt, 'requestID' | 'originator'>) =>
         new Promise<boolean>((resolve) => {
           const requestID = `swap-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

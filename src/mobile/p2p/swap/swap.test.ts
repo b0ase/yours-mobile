@@ -1,15 +1,29 @@
 import { describe, expect, test } from 'bun:test';
 import { BSV21 } from '@1sat/templates';
-import { Beef, P2PKH, PrivateKey, ProtoWallet, PublicKey, Spend, Transaction, type WalletProtocol } from '@bsv/sdk';
 import {
+  Beef,
+  P2PKH,
+  PrivateKey,
+  ProtoWallet,
+  PublicKey,
+  Spend,
+  Transaction,
+  Utils,
+  type WalletProtocol,
+} from '@bsv/sdk';
+import {
+  PAYEE_PROTOCOL,
   SWAP_CAPS,
   SWAP_SIGHASH,
   SwapError,
   buildSellerPartial,
   swapOpReturn,
   tokenReceiveScript,
+  payeeMessage,
+  validTerms,
   verifyAcceptArgs,
   verifyOffer,
+  verifyPayee,
   type SwapOffer,
   type SwapTerms,
 } from './swap';
@@ -239,5 +253,99 @@ describe('buyer createAction args', () => {
       () => verifyAcceptArgs({ ...good, inputs: [...good.inputs, { outpoint: 'ee'.repeat(32) + '.0' }] }, e),
       /only the seller/,
     );
+  });
+});
+
+describe('sats-priced contract terms (offer-first room contracts)', () => {
+  const NOW = 1_800_000_000_000;
+  const SATS = 3_000_000; // $0.75 at $25
+  const sellerIdentity = sellerKey.toPublicKey().toString();
+  const satsTerms: SwapTerms = {
+    ref: 'root-1',
+    docHash: 'ab'.repeat(32),
+    tokenId: ID,
+    amount: '100',
+    priceSats: SATS,
+    sellerKey: sellerIdentity,
+    expiresAt: NOW + 60_000,
+  };
+  const payeeSig = async (payHex: string, price = SATS, wallet = sellerWallet) =>
+    Utils.toHex(
+      (
+        await wallet.createSignature({
+          data: payeeMessage(satsTerms.ref, payHex, price),
+          protocolID: PAYEE_PROTOCOL,
+          keyID: satsTerms.ref,
+          counterparty: 'anyone',
+        })
+      ).signature,
+    );
+  const satsOffer = async (over: Partial<{ t: SwapTerms; price: number }> = {}) => {
+    const o = await makeOffer({ t: over.t ?? satsTerms, price: over.price ?? SATS });
+    return { ...o, payeeSig: await payeeSig(sellerPay.toHex(), over.price ?? SATS) };
+  };
+
+  test('happy path: exact sats price, seller wallet proven, not expired', async () => {
+    const offer = await satsOffer();
+    const v = verifyOffer(offer, satsTerms, RATE, NOW);
+    expect(v.priceSats).toBe(SATS);
+    await expect(verifyPayee(offer, satsTerms, v.sellerPayScript)).resolves.toBeUndefined();
+  });
+
+  test('wrong price is refused (terms and output)', async () => {
+    const offer = await satsOffer({ t: { ...satsTerms, priceSats: SATS - 1 }, price: SATS - 1 });
+    refused(() => verifyOffer(offer, satsTerms, RATE, NOW), /says 3000000 sats/);
+    const lying = await satsOffer({ price: SATS - 1 });
+    refused(() => verifyOffer(lying, satsTerms, RATE, NOW), /not the agreed price/);
+  });
+
+  test('tampered partial tx is refused (price output edited after signing)', async () => {
+    const offer = await satsOffer();
+    const tx = Transaction.fromHex(offer.partialTx);
+    tx.outputs[0].satoshis = SATS + 1;
+    refused(() => verifyOffer({ ...offer, partialTx: tx.toHex() }, satsTerms, RATE, NOW), /not the agreed price/);
+    const tx2 = Transaction.fromHex(offer.partialTx);
+    tx2.outputs[0].lockingScript = new P2PKH().lock(PrivateKey.fromRandom().toAddress());
+    refused(() => verifyOffer({ ...offer, partialTx: tx2.toHex() }, satsTerms, RATE, NOW), /does not unlock/);
+  });
+
+  test('wrong payee is refused: price to a wallet the contract does not name', async () => {
+    const offer = await satsOffer();
+    const v = verifyOffer(offer, satsTerms, RATE, NOW);
+    // A different wallet signed the payee proof.
+    const stranger = new ProtoWallet(PrivateKey.fromRandom());
+    const forged = { ...offer, payeeSig: await payeeSig(sellerPay.toHex(), SATS, stranger) };
+    await expect(verifyPayee(forged, satsTerms, v.sellerPayScript)).rejects.toThrow(/seller wallet the contract names/);
+    // The seller's proof, but for another script.
+    const other = new P2PKH().lock(PrivateKey.fromRandom().toAddress()).toHex();
+    await expect(verifyPayee(offer, satsTerms, other)).rejects.toThrow(/seller wallet the contract names/);
+    // No proof at all.
+    await expect(verifyPayee({ ...offer, payeeSig: undefined }, satsTerms, v.sellerPayScript)).rejects.toThrow(
+      /not signed by the seller wallet/,
+    );
+    // Terms naming a different seller wallet.
+    refused(
+      () =>
+        verifyOffer(offer, { ...satsTerms, sellerKey: PrivateKey.fromRandom().toPublicKey().toString() }, RATE, NOW),
+      /different seller wallet/,
+    );
+  });
+
+  test('expired offer is refused', async () => {
+    const offer = await satsOffer();
+    refused(() => verifyOffer(offer, satsTerms, RATE, satsTerms.expiresAt!), /expired/);
+  });
+
+  test('sats price over the $ cap is refused', async () => {
+    const big = { ...satsTerms, priceSats: 100_000_000 };
+    const offer = await satsOffer({ t: big, price: 100_000_000 });
+    refused(() => verifyOffer(offer, big, RATE, NOW), /over the \$10 cap/);
+  });
+
+  test('terms must carry exactly one price', () => {
+    expect(validTerms({ ...satsTerms, priceUsd: 1 })).toBe(false);
+    expect(validTerms({ ...satsTerms, priceSats: undefined })).toBe(false);
+    expect(validTerms(satsTerms)).toBe(true);
+    expect(validTerms({ ...satsTerms, sellerKey: 'nope' })).toBe(false);
   });
 });

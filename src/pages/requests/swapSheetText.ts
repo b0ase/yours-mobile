@@ -10,11 +10,19 @@ export function swapSheetRows(s: SwapSheet & { originator?: string }) {
   const rows: [string, string][] = [
     [s.side === 'offer' ? 'You give' : 'You get', `${s.tokens} ${sym}`],
     [s.side === 'offer' ? 'You get' : 'You pay', price],
-    ['Contract price', usd(s.terms.priceUsd)],
+    [
+      'Contract price',
+      s.terms.priceSats !== undefined
+        ? `${s.terms.priceSats.toLocaleString('en-US')} sats`
+        : usd(s.terms.priceUsd ?? 0),
+    ],
     ['Rate', `$${s.rate.toFixed(2)} per BSV (${s.rateSource})`],
   ];
   if (s.overlayFeeSats > 0) rows.push(['Indexing fee', bsv(s.overlayFeeSats)]);
   rows.push(['Contract', s.terms.ref], ['Document hash', `${s.terms.docHash.slice(0, 16)}…`]);
+  if (s.terms.sellerKey) rows.push(['Seller wallet', `${s.terms.sellerKey.slice(0, 16)}…`]);
+  if (s.terms.expiresAt)
+    rows.push(['Offer expires', new Date(s.terms.expiresAt).toISOString().replace('T', ' ').slice(0, 16) + ' UTC']);
   const title =
     s.side === 'offer'
       ? `Offer ${s.tokens} ${sym} for ${usd(s.usdAtRate)}`

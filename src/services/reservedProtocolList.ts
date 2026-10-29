@@ -17,6 +17,8 @@ export const RESERVED_PROTOCOLS: readonly Protocol[] = [
   [1, 'btrust'],
   // Token registry manifest signer (src/mobile/exchange/registry/manifest.ts).
   [1, 'bsv tokens manifest'],
+  // Atomic swap payee proof (src/mobile/p2p/swap/swap.ts): "the price pays THIS wallet". A site must never mint one.
+  [1, 'bwx swap payee'],
   // The wallet's identity signatures (chat signer, name proofs, identity map).
   [1, 'message signing'],
   // Pre-signed payments / pots / subscriptions (src/mobile/presign/keys.ts).

@@ -84,3 +84,14 @@ describe('swap site calls', () => {
     expect((r as { error: string }).error).toMatch(/already started/);
   });
 });
+
+describe('swap release', () => {
+  test('only bChatX may release, and a ref is required', async () => {
+    const { SWAP_RELEASE_ACTION } = await import('./swapAction');
+    expect((await runSiteSwap(SWAP_RELEASE_ACTION, 'https://evil.example', { ref: 'r' }, never)).success).toBe(false);
+    expect(await runSiteSwap(SWAP_RELEASE_ACTION, 'https://www.bchatx.com', {}, never)).toMatchObject({
+      success: false,
+      code: 'BAD_REQUEST',
+    });
+  });
+});
