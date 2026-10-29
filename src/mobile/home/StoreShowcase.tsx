@@ -125,7 +125,15 @@ const StoreShowcase = () => {
   const [dragging, setDragging] = useState(false);
   const [collapsed, toggleCollapsed] = useCollapsed('showcase');
   const stageRef = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ id: number; x0: number; y0: number; lastX: number; lastT: number; vx: number; axis: '' | 'x' | 'y' } | null>(null);
+  const drag = useRef<{
+    id: number;
+    x0: number;
+    y0: number;
+    lastX: number;
+    lastT: number;
+    vx: number;
+    axis: '' | 'x' | 'y';
+  } | null>(null);
   const moved = useRef(false);
   const wheel = useRef({ acc: 0, lock: 0 });
   useEffect(() => {
@@ -142,7 +150,15 @@ const StoreShowcase = () => {
   const onPointerDown = (e: RPointerEvent<HTMLDivElement>) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     if ((e.target as HTMLElement).closest('.bw-home-nav')) return;
-    drag.current = { id: e.pointerId, x0: e.clientX, y0: e.clientY, lastX: e.clientX, lastT: e.timeStamp, vx: 0, axis: '' };
+    drag.current = {
+      id: e.pointerId,
+      x0: e.clientX,
+      y0: e.clientY,
+      lastX: e.clientX,
+      lastT: e.timeStamp,
+      vx: 0,
+      axis: '',
+    };
     moved.current = false;
   };
   const onPointerMove = (e: RPointerEvent<HTMLDivElement>) => {
@@ -273,7 +289,9 @@ const StoreShowcase = () => {
                   />
                 )}
                 <span className="bw-home-cap">
-                  {it.logo && it.logo !== it.img && <img src={it.logo} alt="" width={34} height={34} draggable={false} />}
+                  {it.logo && it.logo !== it.img && (
+                    <img src={it.logo} alt="" width={34} height={34} draggable={false} />
+                  )}
                   <span className="bw-home-tiletext">
                     <span className="bw-home-kind">{it.kind}</span>
                     <span className="bw-home-captitle">{it.title}</span>
