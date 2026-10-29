@@ -5,6 +5,7 @@ import { isSpendingAuthAction } from './services/streamGrants';
 import { isMintPrivateAction } from './services/mintPrivateAction';
 import { isTwetchAction } from './mobile/twetch/twetchAction';
 import { isSwapAction } from './services/swapAction';
+import { isProveHoldingsAction } from './services/proveHoldingsAction';
 import { isThemeOfferAction } from './services/themeOfferAction';
 import { CustomListenerName, RequestEventDetail, RequestParams } from './inject';
 import { originatorForOrigin } from './services/originKey';
@@ -54,7 +55,7 @@ if (!IS_TOP_FRAME) {
 // Forward CWI requests from page to background service worker
 self.addEventListener(CustomListenerName.YOURS_REQUEST, (e: Event) => {
   const { type, messageId, params: originalParams = {} } = (e as CustomEvent<RequestEventDetail>).detail;
-  if (!type || !(isCWIEventName(type) || isSpendingAuthAction(type) || isMintPrivateAction(type) || isTwetchAction(type) || isSwapAction(type) || isThemeOfferAction(type))) return;
+  if (!type || !(isCWIEventName(type) || isSpendingAuthAction(type) || isMintPrivateAction(type) || isTwetchAction(type) || isSwapAction(type) || isProveHoldingsAction(type) || isThemeOfferAction(type))) return;
   // A theme offer must come from a tap on the page (read here, in the isolated world, where the page can't fake it).
   if (isThemeOfferAction(type) && !(navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation?.isActive) {
     self.dispatchEvent(

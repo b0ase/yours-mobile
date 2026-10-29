@@ -13,6 +13,7 @@ export type PromptKind =
   | 'mintPrivate'
   | 'twetch'
   | 'swap'
+  | 'proveHoldings'
   | 'themeOffer';
 
 /** A gated wallet call is waiting for a registered USB key to be confirmed present. */
@@ -61,6 +62,13 @@ export interface MintPrivatePrompt {
 export type TwetchPrompt = TwetchAsk & {
   requestID: string;
   /** Browser-derived, never page-claimed. */
+  originator: string;
+};
+
+/** bChatX / bit-sign ask to link this wallet's token addresses (services/proveHoldingsSite.ts). */
+export type ProveHoldingsPrompt = {
+  requestID: string;
+  /** Browser-derived host, never page-claimed. */
   originator: string;
 };
 

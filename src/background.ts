@@ -66,7 +66,18 @@ import {
   type StreamPass,
   type StreamState,
 } from './services/streamGrants';
-import type { MintPrivatePrompt, StreamGrantPrompt, SwapPrompt, ThemeOfferPrompt, TwetchPrompt } from './promptProtocol';
+import type {
+  MintPrivatePrompt,
+  ProveHoldingsPrompt,
+  StreamGrantPrompt,
+  SwapPrompt,
+  ThemeOfferPrompt,
+  TwetchPrompt,
+} from './promptProtocol';
+import { isProveHoldingsAction, runSiteProveHoldings } from './services/proveHoldingsSite';
+import { proveHoldings } from './mobile/chat/holdings';
+import { BchatClient, defaultHttp } from './mobile/chat/api';
+import { walletSigner } from './mobile/chat/signer';
 import { isSwapAction, runSiteSwap } from './services/swapSite';
 import { isThemeOfferAction, runThemeOffer } from './services/themeOfferSite';
 import { EMPTY_MEMORY, type OfferMemory, type ThemeOfferResult } from './mobile/theme/themeOffer';
@@ -1329,6 +1340,8 @@ const pendingStreamGrantRequests = new Map<
 const pendingMintPrivateRequests = new Map<string, { request: MintPrivatePrompt; resolve: (allow: boolean) => void }>();
 /** Sites waiting on the Twetch sign-in / post sheet (services/twetchSite.ts). Resolves true only on Allow. */
 const pendingTwetchRequests = new Map<string, { request: TwetchPrompt; resolve: (allow: boolean) => void }>();
+/** bChatX / bit-sign waiting on the link-addresses sheet (services/proveHoldingsSite.ts). True only on Allow. */
+const pendingProveHoldings = new Map<string, { request: ProveHoldingsPrompt; resolve: (allow: boolean) => void }>();
 /** bChatX waiting on the swap sheet (services/swapSite.ts). Resolves true only on Approve. */
 const pendingSwapRequests = new Map<string, { request: SwapPrompt; resolve: (allow: boolean) => void }>();
 /** A family site waiting on the theme offer sheet (services/themeOfferSite.ts). Resolves with the user's answer. */
@@ -1343,6 +1356,8 @@ const failPendingStreamGrants = () => {
   pendingTwetchRequests.clear();
   for (const p of pendingSwapRequests.values()) p.resolve(false);
   pendingSwapRequests.clear();
+  for (const p of pendingProveHoldings.values()) p.resolve(false);
+  pendingProveHoldings.clear();
   for (const p of pendingThemeOffers.values()) p.resolve('declined');
   pendingThemeOffers.clear();
 };
@@ -1479,6 +1494,7 @@ const hasQueuedDappUi = (): boolean =>
   pendingStreamGrantRequests.size > 0 ||
   pendingMintPrivateRequests.size > 0 ||
   pendingTwetchRequests.size > 0 ||
+  pendingProveHoldings.size > 0 ||
   pendingPermissionRequests.size > 0 ||
   pendingGroupedPermissionRequests.size > 0 ||
   pendingCounterpartyPermissionRequests.size > 0 ||
@@ -1565,6 +1581,8 @@ const getPendingPromptPayloadRaw = (kind: string, requestID?: string): unknown =
       return requestID ? pendingTwetchRequests.get(requestID)?.request : undefined;
     case 'swap':
       return requestID ? pendingSwapRequests.get(requestID)?.request : undefined;
+    case 'proveHoldings':
+      return requestID ? pendingProveHoldings.get(requestID)?.request : undefined;
     case 'themeOffer':
       return requestID ? pendingThemeOffers.get(requestID)?.request : undefined;
     default:
@@ -1583,6 +1601,8 @@ const getNextPendingPrompt = (): { kind: PromptKind; requestID: string } | undef
   if (!swap.done) return { kind: 'swap', requestID: swap.value };
   const mintPrivate = pendingMintPrivateRequests.keys().next();
   if (!mintPrivate.done) return { kind: 'mintPrivate', requestID: mintPrivate.value };
+  const prove = pendingProveHoldings.keys().next();
+  if (!prove.done) return { kind: 'proveHoldings', requestID: prove.value };
   const twetch = pendingTwetchRequests.keys().next();
   if (!twetch.done) return { kind: 'twetch', requestID: twetch.value };
   const themeOffer = pendingThemeOffers.keys().next();
@@ -2615,6 +2635,31 @@ if (!(
       pending?.resolve((message as { allow?: unknown }).allow === true && !!pending);
       sendResponse({ type: message.action, success: !!pending });
       closeDappPopupIfNoUi();
+      return true;
+    }
+    // The link-addresses sheet's answer. Extension pages only: a site can never answer its own sheet.
+    if (message?.action === 'PROVE_HOLDINGS_RESPONSE') {
+      if (!isFromExtension) {
+        sendResponse({ type: message.action, success: false, error: 'Unauthorized' });
+        return true;
+      }
+      const requestID = String((message as { requestID?: unknown }).requestID ?? '');
+      const pending = pendingProveHoldings.get(requestID);
+      pendingProveHoldings.delete(requestID);
+      pending?.resolve((message as { allow?: unknown }).allow === true && !!pending);
+      sendResponse({ type: message.action, success: !!pending });
+      closeDappPopupIfNoUi();
+      return true;
+    }
+    // window.CWI.proveHoldings() (services/proveHoldingsSite.ts): bChatX / bit-sign only, origin from Chrome.
+    if (isProveHoldingsAction(message?.action)) {
+      if (isFromExtension) {
+        sendResponse({ type: message.action, success: false, error: 'Unauthorized' });
+        return true;
+      }
+      void runSiteProveHoldings(sender.origin, proveHoldingsDeps).then((r) =>
+        sendResponse({ type: message.action, ...r }),
+      );
       return true;
     }
     // window.CWI.swap.{offer, accept} (services/swapSite.ts): bChatX only, origin from Chrome's sender.origin.
@@ -4409,6 +4454,56 @@ if (!(
         });
         showPromptUi('themeOffer', requestID);
       }),
+  };
+
+  /**
+   * What window.CWI.proveHoldings needs (services/proveHoldingsSite.ts). Allowed sites are remembered per account in
+   * chrome.storage.local (bwxProveGrant.<identity>). The proof runs as the wallet itself (admin originator): it signs
+   * in to bit-sign with the wallet's identity and posts address proofs (mobile/chat/holdings.ts). Signatures only.
+   */
+  const proveGrantKey = () =>
+    `bwxProveGrant.${chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey || 'default'}`;
+  const proveGrants = async (): Promise<string[]> => {
+    const k = proveGrantKey();
+    const v = await chrome.storage.local.get(k).catch(() => ({}) as Record<string, unknown>);
+    const list = (v as Record<string, unknown>)[k];
+    return Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string') : [];
+  };
+  const proveHoldingsDeps = {
+    locked: async () => !(await checkIsAuthenticated()),
+    granted: async (origin: string) => (await proveGrants()).includes(origin),
+    grant: async (origin: string) => {
+      const list = await proveGrants();
+      if (!list.includes(origin)) await chrome.storage.local.set({ [proveGrantKey()]: [...list, origin] });
+    },
+    ask: (host: string) =>
+      new Promise<boolean>((resolve) => {
+        const requestID = `prove-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const timer = setTimeout(() => {
+          if (pendingProveHoldings.delete(requestID)) resolve(false);
+        }, STREAM_GRANT_TIMEOUT_MS);
+        pendingProveHoldings.set(requestID, {
+          request: { requestID, originator: host },
+          resolve: (v) => {
+            clearTimeout(timer);
+            resolve(v);
+          },
+        });
+        showPromptUi('proveHoldings', requestID);
+      }),
+    prove: async () => {
+      const wpm = (await ensureWallet()) as unknown as Record<string, (args: unknown, o?: string) => unknown>;
+      const admin = new Proxy(
+        {},
+        { get: (_t, m: string) => (typeof wpm[m] === 'function' ? (args: unknown) => wpm[m](args, ADMIN_ORIGINATOR) : wpm[m]) },
+      ) as unknown as Parameters<typeof createContext>[0];
+      const services = accountContext?.syncContext.services;
+      if (!services) throw new Error('The wallet is still starting up. Try again in a moment.');
+      const ctx = createContext(admin, { chain: 'main', services });
+      const client = new BchatClient(defaultHttp(false));
+      await client.signIn(walletSigner(ctx));
+      return proveHoldings(ctx, client);
+    },
   };
 
   const swapDeps = async () => {
@@ -6700,6 +6795,7 @@ if (!(
     for (const [, pending] of takePendingFor(pendingStreamGrantRequests, originator)) pending.resolve(null);
     for (const [, pending] of takePendingFor(pendingMintPrivateRequests, originator)) pending.resolve(false);
     for (const [, pending] of takePendingFor(pendingTwetchRequests, originator)) pending.resolve(false);
+    for (const [, pending] of takePendingFor(pendingProveHoldings, originator)) pending.resolve(false);
     // 1Sat permission-module sheets too (H-6, b-Aware 28 Oct 2026): Approve after Forget site must write nothing.
     denyOneSatPromptsFor(originator);
     closeDappPopupIfNoUi();

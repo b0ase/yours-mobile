@@ -31,11 +31,13 @@ import type {
   SwapPrompt,
   ThemeOfferPrompt,
   TwetchPrompt,
+  ProveHoldingsPrompt,
   UsbCheckRequest,
 } from './promptProtocol';
 import { SwapRequestPage } from './pages/requests/SwapRequest';
 import { ThemeOfferRequestPage } from './pages/requests/ThemeOfferRequest';
 import { TwetchRequestPage } from './pages/requests/TwetchRequest';
+import { ProveHoldingsRequestPage } from './pages/requests/ProveHoldingsRequest';
 import { MintPrivateRequestPage } from './pages/requests/MintPrivateRequest';
 import { StreamGrantRequestPage } from './pages/requests/StreamGrantRequest';
 import { EnvelopeRequestPage } from './pages/requests/EnvelopeRequest';
@@ -62,6 +64,7 @@ type PromptScreen =
   | { kind: 'mintPrivate'; requestID: string; payload: MintPrivatePrompt }
   | { kind: 'twetch'; requestID: string; payload: TwetchPrompt }
   | { kind: 'swap'; requestID: string; payload: SwapPrompt }
+  | { kind: 'proveHoldings'; requestID: string; payload: ProveHoldingsPrompt }
   | { kind: 'themeOffer'; requestID: string; payload: ThemeOfferPrompt };
 
 /** The site a request screen is for (from the request the background checked), for the frame's origin strip. */
@@ -406,6 +409,13 @@ const PromptApp = () => {
           )}
           {screen.kind === 'themeOffer' && (
             <ThemeOfferRequestPage key={screen.requestID} request={screen.payload} onResponse={() => void advance()} />
+          )}
+          {screen.kind === 'proveHoldings' && (
+            <ProveHoldingsRequestPage
+              key={screen.requestID}
+              request={screen.payload}
+              onResponse={() => void advance()}
+            />
           )}
           {screen.kind === 'twetch' && (
             <TwetchRequestPage key={screen.requestID} request={screen.payload} onResponse={() => void advance()} />

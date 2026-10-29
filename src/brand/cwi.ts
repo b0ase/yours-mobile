@@ -20,6 +20,7 @@ import { replyError } from '../services/userDenied';
 import { attachMintPrivate } from '../mintPrivatePage';
 import { attachTwetch } from '../twetchPage';
 import { attachSwap } from '../swapPage';
+import { attachProveHoldings } from '../proveHoldingsPage';
 
 export { CWIEventName };
 
@@ -51,6 +52,8 @@ attachMintPrivate(CWI as unknown as Record<string, unknown>, transport);
 attachTwetch(CWI as unknown as Record<string, unknown>, transport);
 // window.CWI.swap.{offer, accept} (services/swapSite.ts): bChatX contract swaps, origin from Chrome.
 attachSwap(CWI as unknown as Record<string, unknown>, transport);
+// window.CWI.proveHoldings() (services/proveHoldingsSite.ts): bChatX / bit-sign link token addresses, origin from Chrome.
+attachProveHoldings(CWI as unknown as Record<string, unknown>, transport);
 
 // In a sub-frame, nothing is exposed until the content script says the background allowed this frame (an https
 // frame inside an https top-level page; services/frameAccess.ts). Every call is re-checked there anyway.
