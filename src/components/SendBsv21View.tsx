@@ -892,6 +892,7 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
               ))}
             </AnimatePresence>
 
+            {recipients.length > 1 && (
             <GroupSendBar
               recipients={recipients}
               setRecipients={setRecipients}
@@ -901,6 +902,7 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
               ticker={tokenName}
               newRecipient={newRecipient}
             />
+            )}
             {/* Add recipient */}
             <motion.button
               whileHover={{ scale: 1.01 }}
@@ -922,56 +924,11 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
 
             </>)}
 
-            {/* Action buttons */}
-            <div className="flex gap-2 mt-1">
-              {SELL_ENABLED && maxAmount > 0n && (
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  type="button"
-                  onClick={() => setSelling(true)}
-                  className="flex items-center justify-center gap-2 flex-1 h-11 rounded-xl text-sm font-bold outline-none border cursor-pointer"
-                  style={{ backgroundColor: 'var(--bw-surface)', borderColor: '#3a2f0c', color: 'var(--bw-accent-hi)' }}
-                >
-                  <Tag size={14} />
-                  Sell
-                </motion.button>
-              )}
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                type="button"
-                onClick={() => window.open(`${ONE_SAT_MARKET_URL}/bsv21/${token.info.id}`, '_blank')}
-                className="flex items-center justify-center gap-2 flex-1 h-11 rounded-xl text-sm font-bold outline-none border cursor-pointer"
-                style={{
-                  backgroundColor: theme.color.global.walletBackground,
-                  borderColor: gray + '40',
-                  color: contrast,
-                }}
-              >
-                <ShoppingCart size={14} />
-                Trade
-              </motion.button>
-            </div>
           </form>
-
-          <Show when={!!token.info.id}>
-            <div className="w-full px-4">
-              <CoinHistory
-                filter={{
-                  type: 'bsv21',
-                  tokenId: token.info.id!,
-                  decimals: token.info.dec,
-                  symbol: token.info.sym,
-                }}
-                refreshKey={successTxId}
-              />
-            </div>
-          </Show>
 
           {/* Primary action: big gold Send, pinned above the dock / safe area so the thumb finds it. */}
           <div
-            className="sticky z-10 w-full px-4 pt-3 pb-3 mt-4"
+            className="sticky z-10 w-full px-4 pt-3 pb-3 mt-3"
             style={{
               bottom: 'calc(var(--dock-h, 0px) + env(safe-area-inset-bottom, 0px) + var(--bw-mini-h, 0px))',
               background: `var(--bw-pack-bg, ${theme.color.global.walletBackground})`,
@@ -1012,6 +969,54 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
               {isProcessing ? 'Sending...' : composing ? `Send ${tokenName}` : 'Send'}
             </motion.button>
           </div>
+
+            {/* Action buttons */}
+            <div className="flex gap-2 px-4 mt-3 mb-4">
+              {SELL_ENABLED && maxAmount > 0n && (
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  type="button"
+                  onClick={() => setSelling(true)}
+                  className="flex items-center justify-center gap-2 flex-1 h-11 rounded-xl text-sm font-bold outline-none border cursor-pointer"
+                  style={{ backgroundColor: 'var(--bw-surface)', borderColor: '#3a2f0c', color: 'var(--bw-accent-hi)' }}
+                >
+                  <Tag size={14} />
+                  Sell
+                </motion.button>
+              )}
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                type="button"
+                onClick={() => window.open(`${ONE_SAT_MARKET_URL}/bsv21/${token.info.id}`, '_blank')}
+                className="flex items-center justify-center gap-2 flex-1 h-11 rounded-xl text-sm font-bold outline-none border cursor-pointer"
+                style={{
+                  backgroundColor: theme.color.global.walletBackground,
+                  borderColor: gray + '40',
+                  color: contrast,
+                }}
+              >
+                <ShoppingCart size={14} />
+                Trade
+              </motion.button>
+            </div>
+            {/* /Action buttons */}
+
+          <Show when={!!token.info.id}>
+            <div className="w-full px-4">
+              <CoinHistory
+                filter={{
+                  type: 'bsv21',
+                  tokenId: token.info.id!,
+                  decimals: token.info.dec,
+                  symbol: token.info.sym,
+                }}
+                refreshKey={successTxId}
+              />
+            </div>
+          </Show>
+
         </motion.div>
       ) : (
         <></>

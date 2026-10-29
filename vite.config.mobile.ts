@@ -109,8 +109,8 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       "import { CoinHistory } from './CoinHistory';\nimport { BuyTokenButton, OpenTokenRoomButton } from '../mobile/chat/OpenTokenRoomButton';",
     ],
     [
-      '{/* Action buttons */}\n            <div className="flex gap-2 mt-1">',
-      '{/* Action buttons */}\n            <div className="flex gap-2 mt-1">\n<BuyTokenButton id={token.info.id} />',
+      '{/* Action buttons */}\n            <div className="flex gap-2 px-4 mt-3 mb-4">',
+      '{/* Action buttons */}\n            <div className="flex gap-2 px-4 mt-3 mb-4">\n<BuyTokenButton id={token.info.id} />',
     ],
     [
       'onClick={() => window.open(`${ONE_SAT_MARKET_URL}/bsv21/${token.info.id}`, \'_blank\')}\n                className="flex items-center justify-center gap-2 flex-1 h-11 rounded-xl text-sm font-bold outline-none border cursor-pointer"',
@@ -118,8 +118,8 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     // Send is the big pinned button at the bottom now (29 Oct 2026), so Chat closes the action row.
     [
-      '                Trade\n              </motion.button>\n            </div>\n          </form>',
-      '                Trade\n              </motion.button>\n<OpenTokenRoomButton id={token.info.id} />\n            </div>\n          </form>',
+      '                Trade\n              </motion.button>\n            </div>\n            {/* /Action buttons */}',
+      '                Trade\n              </motion.button>\n<OpenTokenRoomButton id={token.info.id} />\n            </div>\n            {/* /Action buttons */}',
     ],
     // Token links (website / app / X / Telegram / bChat) under the action buttons, when the issuer set any.
     [
