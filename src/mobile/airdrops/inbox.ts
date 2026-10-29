@@ -84,7 +84,14 @@ export const toItems = (rows: HistoryRow[], hasLocal: (txid: string) => boolean)
 export const bsvDropItems = (
   rows: Pick<HistoryRow, 'txid' | 'time' | 'direction' | 'asset' | 'counterparty'>[],
   txs: Map<string, RawTx>,
-  opts: { own: Set<string>; legacy: Set<string>; funded: (tx: RawTx) => boolean; hasLocal: (txid: string) => boolean },
+  opts: {
+    own: Set<string>;
+    legacy: Set<string>;
+    funded: (tx: RawTx) => boolean;
+    hasLocal: (txid: string) => boolean;
+    /** Outpoints (`txid_vout`) the wallet already took in from a legacy address (services/legacyOrd.ts): in the balance. */
+    takenIn?: Set<string>;
+  },
 ): AirdropItem[] => {
   const out: AirdropItem[] = [];
   const seen = new Set<string>();
@@ -107,7 +114,10 @@ export const bsvDropItems = (
       issuer: marker.tokenId ?? r.counterparty,
       from: r.counterparty,
       ...(marker.tokenId ? { holdersOf: marker.tokenId } : {}),
-      needsMove: mine.some((o) => o.addresses.some((a) => opts.legacy.has(a))),
+      // Taken in from the legacy address already (scan and spend): in the balance, never "needs moving" too.
+      needsMove: mine.some(
+        (o) => o.addresses.some((a) => opts.legacy.has(a)) && !opts.takenIn?.has(`${r.txid.toLowerCase()}_${o.n}`),
+      ),
     });
   }
   return out;

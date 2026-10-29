@@ -6,6 +6,24 @@ import { bsvDropItems, isUnsolicited, loadItems, saveItems, saveSolicited, toIte
 import { noteForTx } from './note';
 import { poisonDataFrom, savePoisonData } from './poison';
 import { withSender } from './sender';
+import { takenInLegacyOther } from '../../services/legacyOrd';
+
+/**
+ * A tx counts as the wallet's own doing when it has an action record, EXCEPT when that record only exists because
+ * the legacy-address sync took in its tokens / BSV (services/legacyOrd.ts takenInLegacyOther): those still arrived
+ * unsolicited, so their tokens stay quarantined until kept and a BSV drop still shows (as in the balance).
+ */
+export const withoutTakenIn = <V extends { description?: string }>(
+  local: Map<string, V>,
+  takenIn: Set<string>,
+): Map<string, V> => {
+  const takenTx = new Set([...takenIn].map((o) => o.split('_')[0]));
+  // Only a record the take-in itself wrote ("Received …", @1sat/actions internalizeBeef): a tx we sent ourselves
+  // (e.g. a sweep back to this account's legacy address) keeps its own record and stays ours.
+  return new Map(
+    [...local].filter(([t, v]) => !(takenTx.has(t.toLowerCase()) && /^Received\b/.test(v.description ?? ''))),
+  );
+};
 
 /** Refresh at most this often in the background (the badge); the inbox screen can force it. */
 export const REFRESH_MS = 10 * 60_000;
@@ -28,7 +46,11 @@ export const refreshAirdrops = (
   const busy = running.get(account);
   if (busy) return busy;
   const p = (async () => {
-    const local = await fetchLocalInfo(wallet?.listActions?.bind(wallet) as Parameters<typeof fetchLocalInfo>[0]);
+    const takenIn = takenInLegacyOther();
+    const local = withoutTakenIn(
+      await fetchLocalInfo(wallet?.listActions?.bind(wallet) as Parameters<typeof fetchLocalInfo>[0]),
+      takenIn,
+    );
     const txs = await fetchAccountTxs(addresses, apiKey, () => undefined, local.keys());
     const own = new Set(addresses);
     const byId = new Map<string, RawTx>(txs.map((t) => [t.txid, t]));
@@ -50,6 +72,7 @@ export const refreshAirdrops = (
         legacy: legacySet,
         funded: (tx) => tx.vin.some((i) => prev.has(`${i.txid}:${i.vout}`)),
         hasLocal: (t) => local.has(t),
+        takenIn,
       }),
     ].sort((a, b) => b.time - a.time);
     // Tokens held by the wallet's own doing never go to Quarantine (quarantine.ts).

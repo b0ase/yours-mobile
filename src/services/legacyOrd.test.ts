@@ -1,7 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { BigNumber, ECDSA, Hash, PrivateKey, PublicKey, Signature } from '@bsv/sdk';
 import {
+  installLegacySigner,
   installLegacyOrdSigner,
+  LEGACY_PAY_KEY_ID,
+  LEGACY_PAY_PROTOCOL,
+  legacyPayKey,
+  takeInLegacyOrd,
+  watchedLegacyPayAddress,
   LEGACY_ORD_KEY_ID,
   LEGACY_ORD_PROTOCOL,
   legacyOrdKey,
@@ -118,5 +124,165 @@ describe('legacyOrdVisible (quarantine wins)', () => {
     expect(legacyOrdVisible(`${A}.0`, legacy, [{ txid: A, outpoint: `${A}_0` }])).toBe(true);
     expect(legacyOrdVisible(`${B}.1`, legacy, [{ txid: B }])).toBe(true);
     expect(legacyOrdVisible(`${B}.1`, legacy, [{ txid: A, outpoint: `${A}_0` }])).toBe(false);
+  });
+});
+
+describe('legacy pay key (walletWif)', () => {
+  const pay = PrivateKey.fromRandom();
+  const payAddr = pay.toPublicKey().toAddress();
+  test('signs the pay protocol with the pay key and the ord protocol with the ord key', async () => {
+    const w = fakeWallet();
+    const undo = installLegacySigner(w as never, { ord: key, pay });
+    expect(watchedLegacyPayAddress()).toBe(payAddr);
+    const hash = Hash.sha256([9]);
+    const args = { protocolID: LEGACY_PAY_PROTOCOL, keyID: LEGACY_PAY_KEY_ID, counterparty: 'self' as const };
+    const { publicKey } = await w.getPublicKey({ ...args, forSelf: true } as never);
+    expect(PublicKey.fromString(publicKey).toAddress()).toBe(payAddr);
+    const { signature } = await w.createSignature({ ...args, hashToDirectlySign: hash } as never);
+    expect(ECDSA.verify(new BigNumber(hash), Signature.fromDER(signature), pay.toPublicKey())).toBe(true);
+    // Plain BSV at the ord address is filed under keyID 'legacy ord': the ord key signs it.
+    const o = await w.getPublicKey({ protocolID: LEGACY_ORD_PROTOCOL, keyID: 'legacy ord' } as never);
+    expect(PublicKey.fromString(o.publicKey).toAddress()).toBe(addr);
+    // The pay protocol never answers the ord keyID, and the reverse.
+    await w.getPublicKey({ protocolID: LEGACY_PAY_PROTOCOL, keyID: 'ord' } as never);
+    await w.getPublicKey({ protocolID: LEGACY_ORD_PROTOCOL, keyID: LEGACY_PAY_KEY_ID } as never);
+    expect(w.calls).toEqual(['getPublicKey', 'getPublicKey']);
+    undo();
+    expect(watchedLegacyPayAddress()).toBeUndefined();
+  });
+
+  test('the pay protocol is refused to outside apps', () => {
+    expect(isReservedProtocol(LEGACY_PAY_PROTOCOL)).toBe(true);
+  });
+
+  test('no WIF (passkey / seedless) or a mismatch: no key, nothing watched, nothing taken in', async () => {
+    expect(legacyPayKey(undefined, payAddr)).toBeUndefined();
+    expect(legacyPayKey(pay.toWif(), addr)).toBeUndefined();
+    expect(watchedLegacyPayAddress()).toBeUndefined();
+    let scanned = 0;
+    const r = await takeInLegacyOrd({
+      wallet: {},
+      services: {
+        owner: {
+          getTxos: () => {
+            scanned++;
+            return (async function* () {})();
+          },
+        },
+      } as never,
+    });
+    expect(r).toEqual({ added: 0, failed: 0 });
+    expect(scanned).toBe(0);
+  });
+});
+
+describe('syncLegacyOrd: tokens, names and plain BSV', () => {
+  const T1 = 'd'.repeat(64);
+  const T2 = 'e'.repeat(64);
+  const T3 = 'f'.repeat(64);
+  const run = (kind: 'ord' | 'pay', held: string[] = []) => {
+    const seen: { txid: string; outputs: unknown[] }[] = [];
+    const baskets: string[] = [];
+    return syncLegacyOrd({
+      address: addr,
+      kind,
+      chain: 'main',
+      services: { beef: { getBeef: async (t: string) => [t.charCodeAt(0)] } } as never,
+      wallet: {
+        listOutputs: async (a: { basket: string }) => {
+          baskets.push(a.basket);
+          return { totalOutputs: held.length, outputs: held.map((outpoint) => ({ outpoint })) };
+        },
+        internalizeAction: async () => ({ accepted: true }),
+      } as never,
+      scan: (async () => ({
+        ordinals: [{ outpoint: `${T1}_0`, satoshis: 1, origin: 'o1' }],
+        opnsNames: [{ outpoint: `${T1}_1`, satoshis: 1 }],
+        bsv21Tokens: [{ tokenId: 'tok_0', outputs: [{ outpoint: `${T2}_0`, satoshis: 1 }] }],
+        funding: [
+          { outpoint: `${T3}_1`, satoshis: 5000 },
+          { outpoint: `${T3}_2`, satoshis: 1 }, // not plain BSV
+        ],
+        runJigs: [{ outpoint: `${T3}_3`, satoshis: 1 }],
+        locked: [{ outpoint: `${T3}_4`, satoshis: 900 }],
+      })) as never,
+      internalize: (async (o: { beef: number[]; outputs: unknown[] }) => {
+        seen.push({ txid: String.fromCharCode(o.beef[0]), outputs: o.outputs });
+        return { txid: '', internalized: o.outputs.length };
+      }) as never,
+    }).then((r) => ({ r, seen, baskets }));
+  };
+  const legacy = (outputIndex: number, suffix: string, protocolID = LEGACY_ORD_PROTOCOL) => ({
+    outputIndex,
+    protocolID,
+    derivationPrefix: 'legacy',
+    derivationSuffix: suffix,
+    counterparty: 'self',
+  });
+
+  test('ord address: NFT keeps keyID ord; name, BSV-21 and BSV are taken in; jigs and locks never', async () => {
+    const { r, seen, baskets } = await run('ord');
+    expect(r).toEqual({ added: 4, failed: 0 });
+    expect(seen).toEqual([
+      {
+        txid: 'd',
+        outputs: [
+          { outputIndex: 0, protocolID: LEGACY_ORD_PROTOCOL, keyID: 'ord', counterparty: 'self' },
+          // The OpNS name, like any ordinal at the ord address.
+          { outputIndex: 1, protocolID: LEGACY_ORD_PROTOCOL, keyID: 'ord', counterparty: 'self' },
+        ],
+      },
+      { txid: 'e', outputs: [legacy(0, 'ord')] },
+      { txid: 'f', outputs: [legacy(1, 'ord')] },
+    ]);
+    // Held anywhere (deposit, funding, tokens, names) counts as held.
+    expect(baskets).toEqual(expect.arrayContaining(['1sat', 'bsv21', 'opns', '1sat-deposit', 'default']));
+  });
+
+  test('pay address: everything under the pay protocol', async () => {
+    const { seen } = await run('pay');
+    expect(seen.map((s) => s.outputs)).toEqual([
+      [legacy(0, 'pay', LEGACY_PAY_PROTOCOL), legacy(1, 'pay', LEGACY_PAY_PROTOCOL)],
+      [legacy(0, 'pay', LEGACY_PAY_PROTOCOL)],
+      [legacy(1, 'pay', LEGACY_PAY_PROTOCOL)],
+    ]);
+  });
+
+  test('outputs the wallet already holds are not taken in again (no double count)', async () => {
+    const { r, seen } = await run('ord', [`${T2}.0`, `${T3}.1`, `${T1}.1`]);
+    expect(r).toEqual({ added: 1, failed: 0 });
+    expect(seen.map((s) => s.txid)).toEqual(['d']);
+  });
+
+  test('BSV-21 rows get their bsv21:<id> tag', async () => {
+    let filed: { outputs: { insertionRemittance?: { tags?: string[] } }[] } | undefined;
+    await syncLegacyOrd({
+      address: addr,
+      chain: 'main',
+      services: { beef: { getBeef: async () => [1] } } as never,
+      wallet: {
+        listOutputs: async () => ({ totalOutputs: 0, outputs: [] }),
+        internalizeAction: async (a: typeof filed) => {
+          filed = a;
+          return { accepted: true };
+        },
+      } as never,
+      scan: (async () => ({ bsv21Tokens: [{ tokenId: 'tok_0', outputs: [{ outpoint: `${T2}_0` }] }] })) as never,
+      internalize: (async (o: { wallet: { internalizeAction: (a: unknown) => Promise<unknown> } }) => {
+        await o.wallet.internalizeAction({
+          tx: [],
+          description: 'Received 1 TEST',
+          outputs: [
+            {
+              outputIndex: 0,
+              protocol: 'basket insertion',
+              insertionRemittance: { basket: 'bsv21', tags: ['id:x_0'], customInstructions: '{"id":"tok_0"}' },
+            },
+          ],
+        });
+        return { txid: '', internalized: 1 };
+      }) as never,
+    });
+    expect(filed?.outputs[0].insertionRemittance?.tags).toEqual(['id:x_0', 'bsv21:tok_0']);
   });
 });

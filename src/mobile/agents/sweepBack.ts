@@ -10,6 +10,22 @@ import { guardedSendBsv21 } from '../../services/tokenSpendGuard';
  * another account: every BSV-21 token, every NFT that isn't listed for sale, then all BSV last (it pays the
  * fees of the earlier steps). Each step is logged; one failing step doesn't stop the others.
  */
+/**
+ * Where a sweep back lands: the destination account's deposit (receive) address, the BRC-29 address its wallet
+ * scans and counts (Account.primaryAddress, persisted when that account's wallet starts), for BSV, tokens and NFTs
+ * alike. Only when that account has never been opened on this device (no primaryAddress yet) do its legacy
+ * addresses stand in; the legacy-address sync (services/legacyOrd.ts) takes those in, so nothing is stranded.
+ */
+export const sweepBackTarget = (dest: {
+  name?: string;
+  primaryAddress?: string;
+  addresses: { bsvAddress: string; ordAddress: string };
+}): { bsvAddress: string; ordAddress: string; label: string } => ({
+  bsvAddress: dest.primaryAddress || dest.addresses.bsvAddress,
+  ordAddress: dest.primaryAddress || dest.addresses.ordAddress,
+  label: dest.name || 'your account',
+});
+
 export type SweepResult = { tokens: number; nfts: number; bsvTxid: string | null; errors: string[] };
 
 export async function sweepBack(
