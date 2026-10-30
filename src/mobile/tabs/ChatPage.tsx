@@ -94,6 +94,7 @@ import { avatarFor, B_AVATAR, pendingBQuestions, rememberAvatar, useAvatars } fr
 import { ChatAvatar as Avatar } from '../chat/ChatAvatar';
 import { roomEmoji, roomHeaderBackground, roomListBackdrop, roomOwnerOrigin, useRoomLook } from '../chat/roomLook';
 import { roomBubbles } from '../chat/roomTheme';
+import { AGENT_ACCOUNT_SHADE, assignShades, shadeFor, shadeVars, type BubbleShade } from '../chat/bubbleShades';
 import { GameRoomPlayer } from '../chat/GameRoomPlayer';
 import { gateIconUrl, lockedForMe, lockedLine, roomTokenGate } from '../chat/roomGate';
 import { roomSetupState, shouldOfferRoomSetup } from '../chat/roomSetupPrompt';
@@ -749,6 +750,16 @@ const Conversation = ({
   // bchat_user_blocks); re-filter when the block list changes.
   const [blockTick, setBlockTick] = useState(0);
   useEffect(() => onUgcChange(() => setBlockTick((n) => n + 1)), []);
+  // Each person's warm bubble shade (chat/bubbleShades.ts, same palette as bChatX rooms): home shade from the
+  // handle, spread across the palette in order of first appearance so two people in a room rarely share. $b is out.
+  const roomShades = useMemo(
+    () => assignShades(messages.map((m) => m.author_handle).filter((h): h is string => !!h && normHandle(h) !== 'b')),
+    [messages],
+  );
+  // $b's own replies: an outlined dark card ringed in gold, never a second yellow bubble beside yours.
+  const isB = (m: { author_handle?: string | null }) => normHandle(m.author_handle ?? '') === 'b';
+  const shadeOf = (h: string | null | undefined): BubbleShade =>
+    roomShades.get((h || '').replace(/^\$/, '').toLowerCase()) ?? shadeFor(h);
   const items = useMemo(() => {
     const shown = withoutBlocked(messages, new Set(blockedHandles())).filter((m) => !isReactionEvent(m));
     return threadItems(hidden?.size ? shown.filter((m) => !hidden.has(m.id)) : shown, me);
@@ -1182,33 +1193,58 @@ const Conversation = ({
                         label: `Message from ${it.mine ? 'you' : `$${it.message.author_handle || 'someone'}`}. Tap for reactions, hold to reply, swipe left to report or block`,
                       })
                     : {})}
-                  className={`bw-chat-bubble${it.mine ? ' is-mine' : ''} max-w-[80%] px-3 py-[7px] text-[15px] leading-snug select-none`}
+                  className={`bw-chat-bubble${it.mine ? ' is-mine' : ''}${!it.mine && isB(it.message) ? ' is-b' : ''}${!it.mine && !isB(it.message) && !bubbles ? (isBusinessAgentMessage(it.message) ? ' is-agent' : ' is-shaded') : ''} max-w-[80%] px-3 py-[7px] text-[15px] leading-snug select-none`}
                   style={{
+                    ...(it.mine || bubbles
+                      ? {}
+                      : (shadeVars(
+                          isBusinessAgentMessage(it.message) ? AGENT_ACCOUNT_SHADE : shadeOf(it.message.author_handle),
+                        ) as CSSProperties)),
                     borderRadius: 18,
                     borderBottomRightRadius: it.mine ? 6 : 18,
                     borderBottomLeftRadius: it.mine ? 18 : 6,
+                    // Owner, 28 Oct 2026: never black bubbles on black. Others get a lifted surface in their own warm
+                    // shade; $b an outlined dark card ringed in gold; agents a neutral warm grey (themes.css).
                     background: bubbles
                       ? it.mine
                         ? bubbles.mineBg
                         : bubbles.theirsBg
                       : it.mine
                         ? 'linear-gradient(160deg, var(--bw-accent-hi) 0%, #E9B21A 100%)'
-                        : PANEL,
+                        : isB(it.message)
+                          ? 'linear-gradient(180deg, #221D13 0%, #1A1610 100%)'
+                          : isBusinessAgentMessage(it.message)
+                            ? 'linear-gradient(180deg, #2C2926 0%, #24221F 100%)'
+                            : 'linear-gradient(180deg, color-mix(in srgb, var(--bw-shade-tint) 14%, #282522) 0%, color-mix(in srgb, var(--bw-shade-tint) 10%, #211F1D) 100%)',
                     color: bubbles
                       ? it.mine
                         ? bubbles.mineText
                         : bubbles.theirsText
                       : it.mine
                         ? '#1a1300'
-                        : '#f2f2f2',
-                    border: it.mine ? 'none' : `1px solid ${bubbles ? bubbles.theirsBorder : LINE}`,
+                        : isB(it.message)
+                          ? '#F6EFE0'
+                          : '#f2f2f2',
+                    border: it.mine
+                      ? 'none'
+                      : bubbles
+                        ? `1px solid ${bubbles.theirsBorder}`
+                        : isB(it.message)
+                          ? `1.5px solid ${GOLD}`
+                          : isBusinessAgentMessage(it.message)
+                            ? '1px solid rgba(214, 200, 180, 0.16)'
+                            : '1px solid color-mix(in srgb, var(--bw-shade-tint) 20%, rgba(255, 255, 255, 0.06))',
+                    boxShadow:
+                      !it.mine && !bubbles && isB(it.message)
+                        ? '0 0 16px -6px color-mix(in srgb, var(--bw-accent-hi) 50%, transparent)'
+                        : undefined,
                     opacity: it.message.pending && !it.message.failed ? 0.75 : 1,
                   }}
                 >
                   {!it.mine && !direct && it.firstOfGroup && it.message.author_handle && (
                     <div
-                      className="text-[12px] font-semibold mb-[2px] flex items-center gap-1.5"
-                      style={{ color: `hsl(${avatarHue(it.message.author_handle)} 70% 72%)` }}
+                      className={`text-[12px] font-semibold mb-[2px] flex items-center gap-1.5${bubbles ? '' : ' bw-shade-name'}`}
+                      style={bubbles ? { color: `hsl(${avatarHue(it.message.author_handle)} 70% 72%)` } : undefined}
                     >
                       ${it.message.author_handle}
                       {normHandle(it.message.author_handle) !== 'b' && (
@@ -1225,7 +1261,13 @@ const Conversation = ({
                       <AiLabel look={look} />
                     </div>
                   )}
-                  {replyOf(it.message) && <ReplyQuote reply={replyOf(it.message)!} mine={it.mine} />}
+                  {replyOf(it.message) && (
+                    <ReplyQuote
+                      reply={replyOf(it.message)!}
+                      mine={it.mine}
+                      shade={bubbles ? undefined : shadeOf(replyOf(it.message)!.author)}
+                    />
+                  )}
                   {(it.message.event_payload as { shared_by?: string } | null)?.shared_by && (
                     <div className="text-[11px] mb-[2px]" style={{ color: it.mine ? '#5c4800' : MUTED }}>
                       Shared by ${(it.message.event_payload as { shared_by?: string }).shared_by}
