@@ -261,7 +261,7 @@ test('a site reply with a pre-approval timeout carries {code, status}', () => {
 describe('background wiring', () => {
   const bg = src('../background.ts');
   test('site requests use the deadline wallet; our own pages do not', () => {
-    expect(bg).toContain('(isFromExtension ? ensureWallet(true) : walletForSiteRequest())');
+    expect(bg).toContain('(isFromExtension ? ensureWallet(true) : walletForSiteRequest(message.originator))');
   });
   test('funding preparation is capped, before signing', () => {
     const i = bg.indexOf('withStepTimeout(prep, STEP_TIMEOUT_MS, fundingTimeoutError)');

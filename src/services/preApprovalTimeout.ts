@@ -100,6 +100,11 @@ export interface WalletWaitDeps<W> extends Timers {
   open: () => Promise<W>;
   /** True while the unlock UI is up and waiting for the person (pendingWalletWaiters is non-empty). */
   awaitingUnlock: () => boolean;
+  /**
+   * True while the wallet setup window (Create / Restore) is up because no wallet exists yet. Setting up takes longer
+   * than typing a password, so the unlock deadline does not apply: the setup wait has its own (services/walletSetupWait.ts).
+   */
+  awaitingSetup?: () => boolean;
   /** Cheap warm-up (the background's startup read). The settle clock starts once it settles. */
   warmUp?: () => Promise<unknown>;
   warmUpCapMs?: number;
@@ -137,6 +142,7 @@ export function walletWithDeadline<W>(deps: WalletWaitDeps<W>): Promise<W> {
         deps,
         () => {
           if (done) return;
+          if (deps.awaitingSetup?.()) return; // the setup wait rejects on its own deadline, close or timeout
           if (!deps.awaitingUnlock()) return finish(() => reject(walletNotReadyError()));
           // The unlock UI is up: give the person the rest of the unlock window.
           h = setT(deps, () => finish(() => reject(walletLockedTimeoutError())), Math.max(0, unlockMs - stepMs));
