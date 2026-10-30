@@ -5,7 +5,13 @@ import { derivePassKey } from '../../services/passKey';
 import { decrypt, encrypt } from '../../utils/crypto';
 import { getKeys } from '../../utils/keys';
 import { AccountExistsError } from '../../services/accountErrors';
-import { normalizePhrase, phraseProblem, restoreErrorMessage } from './restoreHelpers';
+import {
+  looksLikeElectrum,
+  normalizePhrase,
+  otherLanguageOf,
+  phraseProblem,
+  restoreErrorMessage,
+} from './restoreHelpers';
 
 // Password key derivation takes 3 to 5 s here, right at bun's 5 s default: it failed on a busy machine (20 Oct 2026,
 // same cause as #335). A slow test is not a failing test.
@@ -120,7 +126,62 @@ describe('Add account › restore a Twetch phrase into a wallet with several acc
 
   test('a bad phrase is caught before the password step, with the real reason', () => {
     expect(phraseProblem('one two three')).toContain('12 or 24 words');
-    expect(phraseProblem(['notaword', ...TWETCH.split(' ').slice(1)].join(' '))).toContain('valid recovery phrase');
+    expect(phraseProblem(['notaword', ...TWETCH.split(' ').slice(1)].join(' '))).toContain('notaword');
     expect(phraseProblem('')).toBe('Enter your recovery words.');
+  });
+
+  // b_feedback #181 (29 Oct 2026, Android /restore-wallet): things a phone keyboard or paste adds to a right phrase.
+  describe('phone keyboard and paste noise', () => {
+    const words = TWETCH.split(' ');
+    const cases: [string, string][] = [
+      [
+        'autocapitalised first word and trailing period',
+        `${words[0][0].toUpperCase()}${words[0].slice(1)} ${words.slice(1).join(' ')}.`,
+      ],
+      ['non-breaking spaces', words.join('\u00a0')],
+      ['zero-width spaces next to the real ones', words.join('\u200b \u200b')],
+      ['a BOM in front', `\ufeff${TWETCH}`],
+      ['newlines and tabs', words.join('\n\t')],
+      [
+        'full-width letters and ideographic spaces',
+        [...TWETCH].map((c) => (c === ' ' ? '\u3000' : String.fromCharCode(c.charCodeAt(0) + 0xfee0))).join(''),
+      ],
+      [
+        'an accent autocorrect added',
+        `${words[0].replace(/e/, '\u00e9').replace(/a/, '\u00e1')} ${words.slice(1).join(' ')}`,
+      ],
+      ['quotes around the phrase', `"${TWETCH}"`],
+    ];
+    for (const [name, input] of cases)
+      test(name, () => {
+        expect(normalizePhrase(input)).toBe(TWETCH);
+        expect(phraseProblem(input)).toBeNull();
+      });
+
+    test('a wrong checksum still fails after cleaning', () => {
+      const swapped = [words[1], words[0], ...words.slice(2)].join(' ');
+      expect(bip39.validateMnemonic(swapped)).toBe(false);
+      expect(phraseProblem(`${swapped}.`)).not.toBeNull();
+    });
+
+    test('15, 18 and 24-word phrases are accepted', () => {
+      for (const bits of [160, 192, 256]) expect(phraseProblem(bip39.generateMnemonic(bits))).toBeNull();
+    });
+
+    test('a valid Spanish phrase is named, not called misspelt', () => {
+      const es = bip39.generateMnemonic(128, undefined, bip39.wordlists.spanish);
+      expect(otherLanguageOf(es)).toBe('Spanish');
+      expect(phraseProblem(es)).toContain('Spanish');
+    });
+
+    test('an Electrum seed is named', () => {
+      const list = bip39.wordlists.english;
+      let seed = '';
+      for (let i = 0; i < 100000 && !seed; i++) {
+        const p = Array.from({ length: 12 }, () => list[Math.floor(Math.random() * list.length)]).join(' ');
+        if (looksLikeElectrum(p) && !bip39.validateMnemonic(p)) seed = p;
+      }
+      expect(phraseProblem(seed)).toContain('Electrum');
+    });
   });
 });
