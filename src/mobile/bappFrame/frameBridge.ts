@@ -162,3 +162,33 @@ export const walletAnnounceMessage = (info: { name: string; icon: string; rdns: 
     type: 'brc100:announceWallet',
     info: { ...info, kind: 'in-app', substrate: 'XDM' },
   }) as const;
+
+/**
+ * Sibling origins a landing page hands off to (b_feedback #183/#185, 29 Oct 2026): treechat.com frames fine, but every
+ * link on it goes to app.treechat.com, which sends X-Frame-Options: DENY, so the iframe showed
+ * net::ERR_BLOCKED_BY_RESPONSE. Returns up to `max` other https origins under the same parent domain that the page
+ * links to, so the probe can check those too.
+ */
+export const handoffOrigins = (html: string, pageUrl: string, max = 3): string[] => {
+  let page: URL;
+  try {
+    page = new URL(pageUrl);
+  } catch {
+    return [];
+  }
+  const parent = page.hostname.split('.').slice(-2).join('.');
+  const out: string[] = [];
+  for (const m of String(html || '').matchAll(/href\s*=\s*["']?(https:\/\/[^"'\s>]+)/gi)) {
+    let u: URL;
+    try {
+      u = new URL(m[1]);
+    } catch {
+      continue;
+    }
+    const sibling = u.hostname === parent || u.hostname.endsWith(`.${parent}`);
+    if (!sibling || u.origin === page.origin || out.includes(u.origin)) continue;
+    out.push(u.origin);
+    if (out.length >= max) break;
+  }
+  return out;
+};

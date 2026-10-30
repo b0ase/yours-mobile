@@ -3,6 +3,7 @@ import {
   frameAllowlist,
   frameOriginFor,
   framingAllowed,
+  handoffOrigins,
   isAllowedFrameOrigin,
   parseXdmRequest,
   toXdmResponse,
@@ -137,5 +138,27 @@ describe('biometric gate additions (docs/BIOMETRIC-GATE.md)', () => {
         },
       },
     );
+  });
+});
+
+// b_feedback #183/#185: treechat.com frames, but its links go to app.treechat.com (X-Frame-Options: DENY).
+describe('landing pages that hand off to another origin', () => {
+  const html = `<a href="https://app.treechat.com/signup">Join</a><a href='https://app.treechat.com/'>Open</a>
+    <a href="https://treechat.com/about">About</a><a href="https://x.com/treechat">X</a>
+    <a href="http://old.treechat.com/">old</a><a href=https://docs.treechat.com/start>Docs</a>`;
+  test('finds sibling https origins once each, not the page itself or other sites', () => {
+    expect(handoffOrigins(html, 'https://treechat.com')).toEqual([
+      'https://app.treechat.com',
+      'https://docs.treechat.com',
+    ]);
+  });
+  test('caps the number probed and survives junk', () => {
+    expect(handoffOrigins(html, 'https://treechat.com', 1)).toEqual(['https://app.treechat.com']);
+    expect(handoffOrigins('', 'https://treechat.com')).toEqual([]);
+    expect(handoffOrigins(html, 'not a url')).toEqual([]);
+  });
+  test('the refusal that broke Treechat is caught by the header check', () => {
+    const appHeaders = { 'content-security-policy': "frame-ancestors 'none'", 'x-frame-options': 'DENY' };
+    expect(framingAllowed(appHeaders, 'https://localhost')).toBe(false);
   });
 });
