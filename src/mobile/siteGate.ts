@@ -17,8 +17,8 @@
  */
 import { userDeniedError } from '../services/userDenied';
 
-export type VerifiedBy = 'biometric' | 'passcode' | 'none';
-export type GatedCall = 'createSignature' | 'createAction';
+export type VerifiedBy = 'biometric' | 'passcode' | 'password' | 'none';
+export type GatedCall = 'createSignature' | 'createAction' | 'confirmUser';
 export type GateKind = 'sign' | 'pay';
 export type LastVerification = { verifiedBy: VerifiedBy; at: string; call: GatedCall };
 
@@ -40,9 +40,17 @@ export const VERIFY_TIMEOUT_MS = 60_000;
 export const VERIFICATION_TIMEOUT_CODE = 'ERR_USER_VERIFICATION_TIMEOUT';
 export const VERIFICATION_TIMEOUT_MESSAGE = "bWalletX didn't get a Face ID, fingerprint or passcode answer in time.";
 
+/**
+ * Non-standard call a site makes to ask the SAME gate before an act that is not itself a wallet call: the bChatX
+ * Sign sheet (a drawn signature) and Seal sheet (owner, 30 Oct 2026). Gated as a sign; it reaches no wallet code and
+ * returns only `{ verifiedBy }`. One pass still covers the seal's createSignature + createAction that follow.
+ */
+export const CONFIRM_USER_CALL = 'confirmUser';
+
 /** Which calls are gated, as what. signAction finishes a payment createAction started, so it counts as paying. */
 export const gateFor = (call: string): { kind: GateKind; call: GatedCall } | null => {
   if (call === 'createSignature') return { kind: 'sign', call: 'createSignature' };
+  if (call === CONFIRM_USER_CALL) return { kind: 'sign', call: 'confirmUser' };
   if (call === 'createAction' || call === 'signAction') return { kind: 'pay', call: 'createAction' };
   return null;
 };
@@ -52,6 +60,12 @@ export type GateDeps = {
   enabled: () => boolean;
   /** The OS prompt. `host` is shown where the platform has room (Android subtitle). */
   auth: (reason: string, host: string) => Promise<AuthResult>;
+  /**
+   * The fallback when the phone has no biometrics AND no passcode, or its prompt fails: the wallet password.
+   * Resolves true (right password), false (cancelled or wrong). Never skipped silently: with this dep present, an
+   * unavailable OS prompt asks for the password instead of passing as 'none' (owner, 30 Oct 2026).
+   */
+  passwordAuth?: (reason: string, host: string) => Promise<boolean>;
   now?: () => number;
   timeoutMs?: number;
   graceMs?: number;
@@ -79,7 +93,7 @@ export const createSiteGate = (deps: GateDeps) => {
 
   const last = new Map<string, LastVerification>();
   // payUsed: a payment already rode on this pass; the next payment asks again (owner, 29 Oct 2026).
-  const passes = new Map<string, { method: 'biometric' | 'passcode'; until: number; payUsed: boolean }>();
+  const passes = new Map<string, { method: Exclude<VerifiedBy, 'none'>; until: number; payUsed: boolean }>();
   // One gated call per origin at a time, so each one sees the pass the previous one left.
   const queue = new Map<string, Promise<unknown>>();
 
@@ -104,11 +118,37 @@ export const createSiteGate = (deps: GateDeps) => {
             finish(() => {
               if (r.status === 'ok') resolve(r.method);
               else if (r.status === 'cancelled') reject(userDeniedError());
-              else resolve('none');
+              else fallback();
             }),
-          // A broken native call is treated like no biometrics: today's approval sheets still guard the request.
-          () => finish(() => resolve('none')),
+          // A broken native call is treated like no biometrics: the password fallback (or, with none wired, today's
+          // approval sheets) guards the request.
+          () => finish(fallback),
         );
+      function fallback() {
+        if (!deps.passwordAuth) return resolve('none');
+        // The password sheet is the user's answer: still inside the same time limit.
+        done = false;
+        const h2 = setTimer(() => {
+          if (done) return;
+          done = true;
+          reject(timeoutError());
+        }, timeoutMs);
+        deps.passwordAuth(GATE_REASON[kind], hostOf(origin)).then(
+          (ok) => {
+            if (done) return;
+            done = true;
+            clearTimer(h2);
+            if (ok) resolve('password');
+            else reject(userDeniedError());
+          },
+          () => {
+            if (done) return;
+            done = true;
+            clearTimer(h2);
+            reject(userDeniedError());
+          },
+        );
+      }
     });
 
   /**

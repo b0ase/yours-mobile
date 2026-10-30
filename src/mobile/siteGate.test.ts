@@ -191,3 +191,87 @@ describe('withSiteCeiling (bChatX endless "Sealing…")', () => {
     expect(t.list[0].live).toBe(false);
   });
 });
+
+describe('Sign and Seal sheets (owner, 30 Oct 2026)', () => {
+  const withPassword = (auth: () => Promise<AuthResult>, pw: () => Promise<boolean>) => {
+    const t = timers();
+    const asked: string[] = [];
+    const gate = createSiteGate({
+      enabled: () => true,
+      auth,
+      passwordAuth: (reason, host) => {
+        asked.push(`${reason}|${host}`);
+        return pw();
+      },
+      setTimer: t.setTimer,
+      clearTimer: t.clearTimer,
+    });
+    return { gate, asked, t };
+  };
+
+  test('confirmUser is gated as a sign', () => {
+    expect(gateFor('confirmUser')).toEqual({ kind: 'sign', call: 'confirmUser' });
+  });
+
+  test('the bChatX seal signature is gated whatever its protocol ([2, "bitsign document"])', () => {
+    // The gate keys on the BRC-100 call, not its args: createSignature with protocolID [2,'bitsign document'] is a sign.
+    expect(gateFor('createSignature')).toEqual({ kind: 'sign', call: 'createSignature' });
+  });
+
+  test('Sign sheet confirm then the seal: one prompt covers confirmUser, createSignature and the seal createAction', async () => {
+    let n = 0;
+    const { gate } = gateWith(async () => (n++, { status: 'ok', method: 'biometric' }));
+    expect(await gate.check(SITE, 'confirmUser')).toBe('biometric');
+    expect(await gate.check(SITE, 'createSignature')).toBe('biometric');
+    expect(await gate.check(SITE, 'createAction')).toBe('biometric');
+    expect(n).toBe(1);
+  });
+
+  test('no biometrics and no passcode: asks the wallet password, never passes silently', async () => {
+    const { gate, asked } = withPassword(
+      async () => ({ status: 'unavailable' }),
+      async () => true,
+    );
+    expect(await gate.check(SITE, 'createSignature')).toBe('password');
+    expect(asked).toEqual([`${GATE_REASON.sign}|www.bchatx.com`]);
+  });
+
+  test('a broken native prompt also falls back to the password', async () => {
+    const { gate } = withPassword(
+      () => Promise.reject(new Error('plugin')),
+      async () => true,
+    );
+    expect(await gate.check(SITE, 'confirmUser')).toBe('password');
+  });
+
+  test('wrong or cancelled password: the standard denial', async () => {
+    const { gate } = withPassword(
+      async () => ({ status: 'unavailable' }),
+      async () => false,
+    );
+    await expect(gate.check(SITE, 'createSignature')).rejects.toMatchObject({ code: USER_DENIED_CODE });
+  });
+
+  test('an unanswered password sheet times out like the OS prompt', async () => {
+    const { gate, t } = withPassword(
+      async () => ({ status: 'unavailable' }),
+      () => new Promise<boolean>(() => {}),
+    );
+    const p = gate.check(SITE, 'createSignature');
+    await new Promise((r) => setTimeout(r, 0));
+    t.fireAll();
+    await expect(p).rejects.toMatchObject({ code: VERIFICATION_TIMEOUT_CODE });
+  });
+
+  test('a password pass covers the follow-on seal like a biometric one', async () => {
+    let asks = 0;
+    const { gate } = withPassword(
+      async () => ({ status: 'unavailable' }),
+      async () => (asks++, true),
+    );
+    await gate.check(SITE, 'confirmUser');
+    await gate.check(SITE, 'createSignature');
+    await gate.check(SITE, 'createAction');
+    expect(asks).toBe(1);
+  });
+});

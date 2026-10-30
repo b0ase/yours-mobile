@@ -8,6 +8,7 @@ import { isReservedHost } from '../services/adminOriginator';
 import { isPairedHost, originatorForOrigin } from '../services/originKey';
 import { liveBchatUrl } from '../services/bchatOrigin';
 import {
+  CONFIRM_USER_CALL,
   LAST_VERIFICATION_CALL,
   SITE_CALL_TIMEOUT_CODE,
   gateFor,
@@ -114,6 +115,14 @@ export const handleSiteCall = async (origin: string, url: string, type: string, 
   if (isReservedHost(o.host, MOBILE_EXTENSION_ID)) throw new Error('Reserved originator');
   // window.CWI.getLastVerification() (docs/BIOMETRIC-GATE.md): this origin's last gated call, non-secret.
   if (type === LAST_VERIFICATION_CALL) return { success: true, data: siteGate.lastVerification(o.origin) };
+  // confirmUser: the same gate, asked by the site before a Sign or Seal sheet (bChatX). Reaches no wallet code.
+  if (type === CONFIRM_USER_CALL)
+    try {
+      return { success: true, data: { verifiedBy: await siteGate.check(o.origin, type) } };
+    } catch (e) {
+      const err = e as { message?: string; code?: string; status?: number };
+      return { success: false, error: err.message || 'Not confirmed', code: err.code, status: err.status };
+    }
   // wallet.mintPrivate (services/mintPrivateSite.ts) is the one non-standard call sites may make here.
   if (!isCWIEventName(type) && !isMintPrivateAction(type)) throw new Error(`Unsupported request: ${type}`);
   if (url.startsWith(o.origin)) lastUrls.set(o.origin, url);
