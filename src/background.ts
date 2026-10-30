@@ -202,6 +202,7 @@ import type {
 import type { LocalWalletPermissionsManager } from '@1sat/wallet-browser';
 import { deriveDepositAddresses } from '@1sat/actions';
 import { removeWindow } from './utils/chromeHelpers';
+import { promptCloseTarget } from './utils/promptCloseTarget';
 import { Account, ChromeStorageObject, StorageConfig } from './services/types/chromeStorage.types';
 import { ChromeStorageService } from './services/ChromeStorage.service';
 import {
@@ -1506,14 +1507,43 @@ const hasQueuedDappUi = (): boolean =>
   pendingCounterpartyPermissionRequests.size > 0 ||
   getPendingOneSatPrompt() !== undefined;
 
+/**
+ * Close only the prompt surface we opened (utils/promptCloseTarget.ts): our popup window when every tab in it
+ * is ours, else just the prompt tab, and an in-page sheet is hidden. Never a window holding other tabs.
+ */
+const closePromptSurface = async (windowId: number | undefined, sender?: chrome.runtime.MessageSender) => {
+  let window: chrome.windows.Window | undefined;
+  if (windowId !== undefined) window = await chrome.windows.get(windowId, { populate: true }).catch(() => undefined);
+  const target = promptCloseTarget({
+    windowId,
+    window,
+    senderTab: sender?.tab,
+    senderFrameId: sender?.frameId,
+    extOrigin: chrome.runtime.getURL(''),
+    promptUrl: chrome.runtime.getURL('prompt.html'),
+  });
+  if (target.type === 'window') {
+    selfClosedWindowIds.add(target.windowId);
+    removeWindow(target.windowId);
+  } else if (target.type === 'tab') {
+    await chrome.tabs.remove(target.tabId).catch(() => undefined);
+  } else if (target.type === 'sheet') {
+    chrome.tabs?.sendMessage(target.tabId, { action: 'BWX_INPAGE_SHEET_HIDE' }).catch(() => undefined);
+  }
+  if (windowId !== undefined && windowId === popupWindowId) {
+    popupWindowId = undefined;
+    chrome.storage.local.remove('popupWindowId');
+  }
+};
+
 const closeDappPopup = (): void => {
   hidePanelPrompt();
   hideInPageSheet();
   if (!popupWindowId) return;
-  selfClosedWindowIds.add(popupWindowId);
-  removeWindow(popupWindowId);
+  const id = popupWindowId;
   popupWindowId = undefined;
   chrome.storage.local.remove('popupWindowId');
+  void closePromptSurface(id);
 };
 
 /**
@@ -3121,15 +3151,9 @@ if (!(
             sendResponse({ type: 'CLOSE_PROMPT_WINDOW', success: true });
             return true;
           }
-          const windowId = popupWindowId ?? sender.tab?.windowId;
-          if (windowId !== undefined) {
-            selfClosedWindowIds.add(windowId);
-            removeWindow(windowId);
-            if (windowId === popupWindowId) {
-              popupWindowId = undefined;
-              chrome.storage.local.remove('popupWindowId');
-            }
-          }
+          // Was `removeWindow(popupWindowId ?? sender.tab?.windowId)`: with the prompt in a normal tab that
+          // removed the user's whole browser window (site tab included). Close only our own surface.
+          void closePromptSurface(popupWindowId ?? sender.tab?.windowId, sender);
           sendResponse({ type: 'CLOSE_PROMPT_WINDOW', success: true });
           return true;
         }
@@ -4652,6 +4676,7 @@ if (!(
             chrome.storage.local.get(key(ref), (v) => res((v ?? {})[key(ref)] as SwapRecord | undefined)),
           ),
         put: (r: SwapRecord) => new Promise<void>((res) => chrome.storage.local.set({ [key(r.ref)]: r }, () => res())),
+        drop: (ref: string) => new Promise<void>((res) => chrome.storage.local.remove(key(ref), () => res())),
       },
       // Token outputs held for open offers (one map per account), released when the room voids the offer.
       reservations: (() => {
