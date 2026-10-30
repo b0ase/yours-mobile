@@ -166,3 +166,35 @@ describe('background wiring', () => {
     expect(ping).toBeLessThan(gate);
   });
 });
+
+describe('what the site receives (background reply → content forward → window.CWI rejection)', () => {
+  const throughBridge = async (err: Error) => {
+    // background.ts: the .catch of a site call replies { success:false, error: error.message }, and every reply goes
+    // through withPromptNotShownCode(withDenialCode(...)) before it leaves the worker.
+    const { withPromptNotShownCode } = await import('./promptWatchdog');
+    const { forwardCwiCall } = await import('./cwiForward');
+    const { replyError } = await import('./userDenied');
+    const reply = withPromptNotShownCode({ type: 'getPublicKey', success: false, error: err.message });
+    let detail: unknown;
+    forwardCwiCall(
+      { id: 'ext', lastError: undefined, sendMessage: (_m: unknown, cb: (r: unknown) => void) => cb(reply) } as never,
+      { action: 'getPublicKey' },
+      (d) => (detail = d),
+    );
+    return replyError(detail as { error?: unknown; code?: unknown });
+  };
+  test('closed: the code is on .code and in the message', async () => {
+    const e = (await throughBridge(walletSetupClosedError())) as Error & { code?: string };
+    expect(e.code).toBe(WALLET_SETUP_CLOSED_CODE);
+    expect(e.message).toContain(WALLET_SETUP_CLOSED_CODE);
+  });
+  test('timeout: the code is on .code and in the message', async () => {
+    const { walletSetupTimeoutError } = await import('./walletSetupWait');
+    const e = (await throughBridge(walletSetupTimeoutError())) as Error & { code?: string };
+    expect(e.code).toBe(WALLET_SETUP_TIMEOUT_CODE);
+    expect(e.message).toContain(WALLET_SETUP_TIMEOUT_CODE);
+  });
+  test('the background wraps every reply with the coder', () => {
+    expect(src('../background.ts')).toContain('answer(withPromptNotShownCode(withDenialCode(response)))');
+  });
+});

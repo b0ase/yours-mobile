@@ -14,14 +14,20 @@ export const SETUP_WAIT_MS = 5 * 60_000;
 
 export const WALLET_SETUP_CLOSED_CODE = 'ERR_WALLET_SETUP_CLOSED';
 export const WALLET_SETUP_CLOSED_MESSAGE =
-  'bWalletX was closed before a wallet was set up. Nothing was shared; create or restore a wallet in bWalletX, then try again.';
+  'bWalletX was closed before a wallet was set up. Nothing was shared; create or restore a wallet in bWalletX, then try again. (ERR_WALLET_SETUP_CLOSED)';
 export const WALLET_SETUP_TIMEOUT_CODE = 'ERR_WALLET_SETUP_TIMEOUT';
 export const WALLET_SETUP_TIMEOUT_MESSAGE =
-  'No bWalletX wallet was set up in time. Nothing was shared; create or restore a wallet in bWalletX, then try again.';
+  'No bWalletX wallet was set up in time. Nothing was shared; create or restore a wallet in bWalletX, then try again. (ERR_WALLET_SETUP_TIMEOUT)';
 
 const coded = (message: string, code: string, status: number) => Object.assign(new Error(message), { code, status });
 export const walletSetupClosedError = () => coded(WALLET_SETUP_CLOSED_MESSAGE, WALLET_SETUP_CLOSED_CODE, 401);
 export const walletSetupTimeoutError = () => coded(WALLET_SETUP_TIMEOUT_MESSAGE, WALLET_SETUP_TIMEOUT_CODE, 408);
+
+/** [message, code, status] rows so the background's `{success:false, error}` reply carries the code to the site. */
+export const WALLET_SETUP_CODED: [string, string, number][] = [
+  [WALLET_SETUP_CLOSED_MESSAGE, WALLET_SETUP_CLOSED_CODE, 401],
+  [WALLET_SETUP_TIMEOUT_MESSAGE, WALLET_SETUP_TIMEOUT_CODE, 408],
+];
 
 export interface WalletWaiter<W> {
   resolve: (wallet: W) => void;
