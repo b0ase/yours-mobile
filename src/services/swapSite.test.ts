@@ -141,3 +141,12 @@ describe('swap release', () => {
     });
   });
 });
+
+describe('every swap call answers (bChatX 30 Oct 2026: an offer that never returned)', () => {
+  test('a sheet nobody answers still rejects, with "Timed out"', async () => {
+    const hang = async () => new Promise<never>(() => undefined);
+    const r = await runSiteSwap(SWAP_OFFER_ACTION, 'https://www.bchatx.com', { terms }, hang, 20);
+    expect(r).toMatchObject({ success: false, code: 'TIMEOUT' });
+    expect((r as { error: string }).error).toMatch(/^Timed out/);
+  });
+});

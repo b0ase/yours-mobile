@@ -26,6 +26,13 @@ export type SwapSiteDeps = {
   /** Token outputs held for open offers (swapActions SwapReservation). */
   reservations?: ReservationStore;
 };
+
+/** Every swap.offer / accept answers within this (bChatX logs 30 Oct 2026: an offer that never returned). */
+export const SWAP_CALL_LIMIT_MS = 5 * 60 * 1000;
+export const SWAP_CALL_TIMED_OUT = {
+  offer: 'Timed out: the wallet did not finish the offer. Nothing was signed for the buyer. Try again',
+  accept: 'Timed out: the wallet did not finish in time. Check your Activity before trying again',
+};
 export type SwapSiteResult = { success: true; data: unknown } | { success: false; error: string; code: string };
 
 const bad = (error: string): SwapSiteResult => ({ success: false, error, code: 'BAD_REQUEST' });
@@ -33,6 +40,32 @@ const bad = (error: string): SwapSiteResult => ({ success: false, error, code: '
 const asTerms = (p: Record<string, unknown>): SwapTerms | null => (validTerms(p.terms) ? (p.terms as SwapTerms) : null);
 
 export async function runSiteSwap(
+  action: string,
+  origin: string | undefined,
+  params: unknown,
+  deps: () => Promise<SwapSiteDeps>,
+  limitMs = SWAP_CALL_LIMIT_MS,
+): Promise<SwapSiteResult> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<SwapSiteResult>((resolve) => {
+    timer = setTimeout(
+      () =>
+        resolve({
+          success: false,
+          error: action === SWAP_ACCEPT_ACTION ? SWAP_CALL_TIMED_OUT.accept : SWAP_CALL_TIMED_OUT.offer,
+          code: 'TIMEOUT',
+        }),
+      limitMs,
+    );
+  });
+  try {
+    return await Promise.race([runSwap(action, origin, params, deps), late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function runSwap(
   action: string,
   origin: string | undefined,
   params: unknown,
@@ -81,7 +114,8 @@ export async function runSiteSwap(
     return {
       success: false,
       error: msg,
-      code: e instanceof SwapError && /declined/.test(msg) ? 'USER_REFUSED' : 'ERROR',
+      code:
+        e instanceof SwapError && /declined/.test(msg) ? 'USER_REFUSED' : /^Timed out/.test(msg) ? 'TIMEOUT' : 'ERROR',
     };
   }
 }

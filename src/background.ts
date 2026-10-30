@@ -4644,10 +4644,11 @@ if (!(
         };
       })(),
       ask: (sheet: Omit<SwapPrompt, 'requestID' | 'originator'>) =>
-        new Promise<boolean>((resolve) => {
+        new Promise<boolean | 'expired'>((resolve) => {
           const requestID = `swap-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          // Unanswered: "Timed out: nothing was signed", never "you declined".
           const timer = setTimeout(() => {
-            if (pendingSwapRequests.delete(requestID)) resolve(false);
+            if (pendingSwapRequests.delete(requestID)) resolve('expired');
           }, STREAM_GRANT_TIMEOUT_MS);
           pendingSwapRequests.set(requestID, {
             request: { ...sheet, requestID, originator: 'www.bchatx.com' },
