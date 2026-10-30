@@ -174,7 +174,7 @@ export function classifySendError(e: unknown, phase: 'before-sign' | 'send' = 's
   if (/An internal error has occurred|WERR_INTERNAL/i.test(raw))
     return make(
       'wallet-internal',
-      "The wallet couldn't build this payment: it was missing data about one of your coins (usually a lookup to a Bitcoin data service that was busy). Nothing was broadcast. Check History once, then try again in a minute; if it fails again, tap Details and send them to support.",
+      "The wallet couldn't build this payment: it was missing data about one of your coins (usually a lookup to a Bitcoin data service that was busy). Nothing was broadcast. Check History once, then try again in a minute. If it keeps failing and Settings › Storage shows an online storage as active, make This device active and try again; otherwise tap Details and send them to support.",
       'unknown',
     );
 

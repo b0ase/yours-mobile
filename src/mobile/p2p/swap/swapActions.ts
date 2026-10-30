@@ -137,7 +137,15 @@ export type SwapSheet = {
   /** Seller only: a token send to ourselves comes first, to make an output of exactly the amount. */
   split: boolean;
 };
-export type Ask = (sheet: SwapSheet) => Promise<boolean>;
+/** true = allowed; false = declined; 'expired' = the sheet timed out unanswered (nothing was signed). */
+export type Ask = (sheet: SwapSheet) => Promise<boolean | 'expired'>;
+
+export const SWAP_DECLINED = 'you declined';
+export const SWAP_TIMED_OUT = 'Timed out: nothing was signed. Try again';
+function refused(ok: boolean | 'expired'): asserts ok is true {
+  if (ok === 'expired') throw new SwapError(SWAP_TIMED_OUT);
+  if (ok !== true) throw new SwapError(SWAP_DECLINED);
+}
 
 const display = (raw: string, dec: number) =>
   dec > 0 ? (Number(BigInt(raw)) / 10 ** dec).toLocaleString('en-US', { maximumFractionDigits: dec }) : raw;
@@ -218,6 +226,107 @@ export async function releaseExpired(ctx: OneSatContext, store: ReservationStore
   }
 }
 
+/**
+ * The set-aside key for a contract: deterministic per (token, ref), so a retry re-derives the SAME key and the
+ * output's spend record can always be rebuilt. Passed as an explicit lockingScript + customInstructions with
+ * counterparty 'self': sendBsv21 only puts a recipient output in the token basket (with its spend instructions)
+ * when the destination says counterparty 'self'. A bare `destination: {}` derives a random self key but omits
+ * counterparty, so the output was recorded nowhere (no basket, no instructions) and never found again.
+ */
+export async function setAsideDestination(ctx: OneSatContext, tokenId: string, ref: string) {
+  const keyID = `${normId(tokenId)}-setaside-${ref}`.slice(0, 800);
+  const { publicKey } = await ctx.wallet.getPublicKey({
+    protocolID: P1SAT_PROTOCOL,
+    keyID,
+    counterparty: 'self',
+    forSelf: true,
+  });
+  const lockingScript = new P2PKH().lock(PublicKey.fromString(publicKey).toAddress()).toHex();
+  return { keyID, lockingScript, customInstructions: { protocolID: P1SAT_PROTOCOL, keyID, counterparty: 'self' } };
+}
+
+/** Set-aside outputs made in this session, per contract: a retry reuses one instead of sending to itself again. */
+const SET_ASIDE_TTL_MS = 30 * 60 * 1000;
+const setAsides = new Map<string, { c: Candidate; at: number }>();
+const setAsideKey = (tokenId: string, ref: string, amount: bigint) => `${normId(tokenId)}|${ref}|${amount}`;
+function recentSetAside(tokenId: string, ref: string, amount: bigint, now: number): Candidate | undefined {
+  const k = setAsideKey(tokenId, ref, amount);
+  const hit = setAsides.get(k);
+  if (hit && now - hit.at < SET_ASIDE_TTL_MS) return hit.c;
+  setAsides.delete(k);
+  return undefined;
+}
+/** Tests only. */
+export const _resetSetAsides = () => setAsides.clear();
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+export const setAsideTiming = { polls: 5, pollMs: 1000 };
+
+/** One token send to ourselves: `amount` to the contract's set-aside key, the rest back as change. */
+async function setAside(
+  ctx: OneSatContext,
+  terms: SwapTerms,
+  info: TokenInfo,
+  amount: bigint,
+  now: number,
+): Promise<Candidate> {
+  const dest = await setAsideDestination(ctx, terms.tokenId, terms.ref);
+  const res = await guardedSendBsv21.execute(ctx, {
+    tokenId: terms.tokenId,
+    recipients: [
+      {
+        amount: terms.amount,
+        destination: { lockingScript: dest.lockingScript, customInstructions: dest.customInstructions },
+      },
+    ],
+  } as unknown as Parameters<typeof guardedSendBsv21.execute>[1]);
+  if (!res.txid || res.error)
+    throw new SwapError(`could not set aside ${terms.amount} tokens: ${res.error ?? 'not sent'}`);
+  const txid = res.txid.toLowerCase();
+  const ci = { protocolID: P1SAT_PROTOCOL as WalletProtocol, keyID: dest.keyID, counterparty: 'self' };
+  const ciRaw = buildBsv21CustomInstructions({
+    token: { id: terms.tokenId, amt: terms.amount, op: 'transfer', sym: info.token?.sym, dec: decOf(info) },
+    protocolID: P1SAT_PROTOCOL,
+    keyID: dest.keyID,
+    counterparty: 'self',
+  });
+  // Straight from the send result: no wait on the wallet's listing.
+  let found = fromSendResult(res.tx, txid, terms.tokenId, amount, dest.lockingScript, ci, ciRaw);
+  // Fallback: the wallet's own listing (short poll).
+  for (let i = 0; !found && i < setAsideTiming.polls; i++) {
+    if (i) await sleep(setAsideTiming.pollMs);
+    found = (await exactOutputs(ctx, terms.tokenId, amount)).find((c) => c.outpoint.startsWith(txid));
+  }
+  if (!found) throw new SwapError('the set-aside tokens are not in the wallet yet. Try again in a moment');
+  setAsides.set(setAsideKey(terms.tokenId, terms.ref, amount), { c: found, at: now });
+  return found;
+}
+
+function fromSendResult(
+  raw: number[] | Uint8Array | undefined,
+  txid: string,
+  tokenId: string,
+  amount: bigint,
+  p2pkhHex: string,
+  ci: Ci,
+  ciRaw: string,
+): Candidate | undefined {
+  if (!raw?.length) return undefined;
+  try {
+    const beef = Beef.fromBinary(Array.from(raw));
+    const tx = beef.findTxid(txid)?.tx;
+    if (!tx) return undefined;
+    const vout = tx.outputs.findIndex((o, i) => {
+      const hex = o.lockingScript.toHex();
+      const tok = tokenAmountOf(o.lockingScript, `${txid}_${i}`);
+      return hex.endsWith(p2pkhHex) && tok?.id === normId(tokenId) && tok.amount === amount;
+    });
+    return vout < 0 ? undefined : { outpoint: `${txid}.${vout}`, tx, vout, ci, ciRaw, beef };
+  } catch {
+    return undefined;
+  }
+}
+
 export async function offerSwap(
   ctx: OneSatContext,
   a: { terms: SwapTerms; quote: RateQuote; ask: Ask; reservations?: ReservationStore; now?: () => number },
@@ -241,7 +350,8 @@ export async function offerSwap(
   }
   const info = await indexedToken(ctx, terms.tokenId);
   const amount = BigInt(terms.amount);
-  let found = (await exactOutputs(ctx, terms.tokenId, amount))[0];
+  let found: Candidate | undefined =
+    (await exactOutputs(ctx, terms.tokenId, amount))[0] ?? recentSetAside(terms.tokenId, terms.ref, amount, now);
   const ok = await a.ask({
     side: 'offer',
     terms,
@@ -254,20 +364,10 @@ export async function offerSwap(
     overlayFeeSats: found ? 0 : (info.status?.fee_per_output ?? 0) * 2,
     split: !found,
   });
-  if (!ok) throw new SwapError('you declined');
+  refused(ok);
   await assertNotPaused('spending');
 
-  if (!found) {
-    // One token send to ourselves: `amount` to a fresh self key, the rest back as change.
-    const res = await guardedSendBsv21.execute(ctx, {
-      tokenId: terms.tokenId,
-      recipients: [{ amount: terms.amount, destination: {} }],
-    } as Parameters<typeof guardedSendBsv21.execute>[1]);
-    if (!res.txid || res.error)
-      throw new SwapError(`could not set aside ${terms.amount} tokens: ${res.error ?? 'not sent'}`);
-    found = (await exactOutputs(ctx, terms.tokenId, amount)).find((c) => c.outpoint.startsWith(res.txid!))!;
-    if (!found) throw new SwapError('the set-aside tokens are not in the wallet yet. Try again in a moment');
-  }
+  if (!found) found = await setAside(ctx, terms, info, amount, now);
 
   const payScript = new P2PKH().lock(await defaultPayAddress(ctx));
   const { ci } = found;
@@ -377,7 +477,7 @@ export async function acceptSwap(
     overlayFeeSats: feeSats,
     split: false,
   });
-  if (!ok) throw new SwapError('you declined');
+  refused(ok);
 
   const outputs = [
     { lockingScript: v.sellerPayScript, satoshis: v.priceSats, outputDescription: 'Swap: price to seller' },
