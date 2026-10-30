@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Check, Github, Linkedin, Loader2 } from 'lucide-react';
 import { LINK_ACCOUNTS_ENABLED } from '../storeBuild';
+import { handcashAvailable, handcashError, onHandCashChange, startHandCash } from './handcashLogin';
+import { rememberLinkedHandle } from './linkedHandles';
+import { useHandCashHandle } from './useHandCashHandle';
 import { DEFAULT_PROVIDERS, PROVIDER_LABEL, fetchProviders, type ProviderState } from './links';
 import {
   NEW_ACCOUNT,
@@ -44,6 +47,22 @@ export const SignupLinkPanel = ({ color, gray }: { color: string; gray: string }
   const [error, setError] = useState(socialError);
   const [busy, setBusy] = useState<SocialProvider | null>(null);
   const [hidden, setHidden] = useState(skipped);
+  // HandCash (owner, 30 Oct 2026: back as a link option). Native app only (handcashLogin.ts keeps its token in the
+  // Keychain / Keystore). Its $handle is stashed as a $name suggestion for Choose your handle and moves to the new
+  // account with bindSocial; the verified HandCash card itself lives in Settings › Link your accounts.
+  const hc = useHandCashHandle();
+  const [hcBusy, setHcBusy] = useState(false);
+  useEffect(
+    () =>
+      onHandCashChange(() => {
+        setHcBusy(false);
+        if (handcashError()) setError(handcashError());
+      }),
+    [],
+  );
+  useEffect(() => {
+    if (hc) rememberLinkedHandle(NEW_ACCOUNT, 'handcash', hc);
+  }, [hc]);
   useEffect(() => {
     let live = true;
     void fetchProviders().then((p) => live && setProviders(p));
@@ -63,7 +82,8 @@ export const SignupLinkPanel = ({ color, gray }: { color: string; gray: string }
   const desktop = typeof window !== 'undefined' && !!(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
   if (!LINK_ACCOUNTS_ENABLED || desktop) return null;
   const live = ORDER.filter((p) => providers[p]);
-  if (!live.length) return null;
+  const withHandCash = handcashAvailable();
+  if (!live.length && !withHandCash) return null;
 
   if (pending)
     return (
@@ -146,9 +166,38 @@ export const SignupLinkPanel = ({ color, gray }: { color: string; gray: string }
             <span className="truncate">{PROVIDER_LABEL[p]}</span>
           </button>
         ))}
+        {withHandCash && (
+          <button
+            type="button"
+            disabled={!!busy || hcBusy || !!hc}
+            onClick={() => {
+              setHcBusy(true);
+              setError('');
+              startHandCash().catch((e: unknown) => {
+                setError(e instanceof Error ? e.message : 'HandCash is unavailable right now');
+                setHcBusy(false);
+              });
+            }}
+            className="h-10 rounded-lg text-[12px] font-semibold flex items-center justify-center gap-1.5 border cursor-pointer min-w-0"
+            style={{ background: 'transparent', color, borderColor: 'rgba(255,255,255,0.14)' }}
+            data-testid="signup-link-handcash"
+          >
+            {hcBusy ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : hc ? (
+              <Check size={14} color="#2ecc71" strokeWidth={3} />
+            ) : (
+              <span aria-hidden className="text-[13px] font-bold">
+                $
+              </span>
+            )}
+            <span className="truncate">{hc ? `$${hc}` : 'HandCash'}</span>
+          </button>
+        )}
       </div>
       <p className="text-[10px] m-0 text-center" style={{ color: gray }}>
-        Adds a verified badge. Your wallet signs it after you set it up; it never signs you in.
+        Fills your name and photo and suggests your $name. Adds a verified badge. Your wallet signs it after you set it
+        up; it never signs you in.
       </p>
       {error ? (
         <p className="text-[11px] m-0 text-center" style={{ color: '#FDA29B' }}>
