@@ -78,15 +78,15 @@ export const FindMissingCoins = ({ initialScan }: { initialScan?: ScanAnswer['da
         <Search size={16} className="shrink-0 mt-0.5" style={{ color: '#FDB022' }} />
         <div className="flex-1">
           <p className="text-xs font-semibold mb-1" style={{ color: '#F2F4F7' }}>
-            Find missing coins
+            Rescan the chain
           </p>
           <p className="text-[10px] leading-relaxed" style={{ color: '#D0D5DD' }}>
-            {line || 'Coins on chain that the wallet stopped counting. We check this device and your backups.'}
+            {line || 'Make sure your balance includes everything you own. Checks the chain and your backups.'}
           </p>
         </div>
       </div>
       {confirm && found.length > 0 ? (
-        <div className="space-y-2" role="dialog" aria-label="Add missing coins back">
+        <div className="space-y-2" role="dialog" aria-label="Add coins to your balance">
           <p className="text-sm font-semibold" style={{ color: '#F2F4F7' }}>
             {scan!.headline}
           </p>
@@ -116,7 +116,7 @@ export const FindMissingCoins = ({ initialScan }: { initialScan?: ScanAnswer['da
           theme={theme}
           type="primary"
           style={{ background: '#FDB022', color: '#0A0A0B' }}
-          label={busy === 'scan' ? 'Checking…' : busy === 'restore' ? 'Adding back…' : 'Find missing coins'}
+          label={busy === 'scan' ? 'Checking…' : busy === 'restore' ? 'Adding back…' : 'Rescan the chain'}
           onClick={runScan}
           disabled={!!busy}
         />

@@ -15,7 +15,7 @@ type Step = { key: string; title: string; state: StepState; text: string };
 const STEPS: { key: string; title: string }[] = [
   { key: 'sync', title: 'Sync now' },
   { key: 'resync', title: 'Resync coins' },
-  { key: 'missing', title: 'Find missing coins' },
+  { key: 'missing', title: 'Rescan the chain' },
 ];
 
 // Green with white text, AA at any size (owner, 25 Oct 2026: green, "REFRESH WALLET", was a red DON'T PANIC!).

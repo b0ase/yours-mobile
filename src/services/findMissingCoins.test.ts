@@ -57,7 +57,7 @@ describe('scanMissingCoins (read only)', () => {
       inActive: false,
       stores: ['the 1Sat backup (wallet.1sat.app)'],
     });
-    expect(foundHeadline(r)).toBe('We found 28.667 BSV the wallet lost track of. Add it back?');
+    expect(foundHeadline(r)).toBe('We found 28.667 BSV to add to your balance. Add it now?');
   });
 
   test('record in the local (active) store, failed: found, inActive', async () => {

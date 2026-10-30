@@ -124,7 +124,7 @@ export const BASE_SETTINGS: SettingsEntry[] = [
   {
     id: 'troubleshooting',
     label: 'Troubleshooting',
-    description: 'Repair sync, missing coins or tokens, support',
+    description: 'Repair sync, rescan the chain, tokens, support',
     keywords: ['help', 'repair', 'fix', 'sync', 'missing', 'resync', 'support', 'bug', 'problem', 'recover'],
     target: page('troubleshooting'),
   },
