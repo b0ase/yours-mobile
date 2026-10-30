@@ -73,7 +73,13 @@ export const SocialSignIn = ({
   owner = NEW_ACCOUNT,
   check = false,
   create = false,
+  buttons = true,
 }: {
+  /**
+   * false: no Link buttons, only the card for an account already linked on the welcome screen (owner, 30 Oct 2026:
+   * Create your master password no longer offers "Link your X"; linking lives on the first screen).
+   */
+  buttons?: boolean;
   /**
    * Create Account: optional "Link X" / "Link Google" buttons; fill name + photo. Owner, 24 Oct 2026 made this X only;
    * owner, 26 Oct 2026 brought Google back beside it: Google fills the Account Name (its display name, else the
@@ -116,6 +122,8 @@ export const SocialSignIn = ({
       rememberLinkedHandle(owner, 'x', xAlias(p));
     }
     if (create && p.provider === 'google') rememberLinkedHandle(owner, 'google', p.name);
+    if (create && (p.provider === 'github' || p.provider === 'linkedin'))
+      rememberLinkedHandle(owner, p.provider, p.provider === 'linkedin' ? p.display : p.name);
     onProfileRef.current(
       create && p.provider === 'x'
         ? xPrefill(p)
@@ -182,6 +190,7 @@ export const SocialSignIn = ({
   // Not for agent accounts: an agent posting as someone's X account needs its own careful design (owner, 6 Oct 2026).
   if (!socialLoginEnabled() || isAgentCreatePending()) return null;
 
+  if (!profile && !buttons) return null;
   const go = async (provider: SocialProvider) => {
     setBusy(provider);
     setError('');
