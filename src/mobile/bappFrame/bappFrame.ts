@@ -4,7 +4,7 @@ import { STORE_BUILD } from '../storeBuild';
 import { openDappBrowser } from '../dappBrowser';
 import { isNative } from '../native';
 import { IS_EXTENSION } from '../extension';
-import { frameAllowlist, frameOriginFor, framingAllowed } from './frameBridge';
+import { frameAllowlist, frameOriginFor, framingAllowed, handoffOrigins } from './frameBridge';
 import { frameModeFor } from './webFrame';
 import { BCHAT_FALLBACK_ORIGIN, ensureBchatOrigin, liveBchatUrl } from '../../services/bchatOrigin';
 
@@ -48,32 +48,44 @@ export const setBappFrameVisible = (visible: boolean) => {
 // Per-origin result of the header probe, for this app session.
 const probed = new Map<string, boolean>();
 
+type Probe = { ok: boolean; headers: Record<string, string>; body: string };
+/** GET a page natively (or with the extension's host permission), so CORS does not apply. */
+const probe = async (url: string): Promise<Probe> => {
+  if (IS_EXTENSION) {
+    // The extension has host permission for every bApp origin (scripts/build.ts), so CORS doesn't apply.
+    const r = await fetch(url, { method: 'GET', credentials: 'omit', signal: AbortSignal.timeout(6000) });
+    const headers: Record<string, string> = {};
+    r.headers.forEach((v, k) => (headers[k] = v));
+    return { ok: r.ok, headers, body: r.ok ? await r.text() : '' };
+  }
+  const res = await CapacitorHttp.request({
+    url,
+    method: 'GET',
+    responseType: 'text',
+    connectTimeout: 6000,
+    readTimeout: 6000,
+  });
+  const body = typeof res.data === 'string' ? res.data : '';
+  return { ok: res.status >= 200 && res.status < 400, headers: res.headers ?? {}, body };
+};
+
 /**
- * Asks the site (natively, so CORS does not apply) whether it lets the wallet frame it:
- * X-Frame-Options / CSP frame-ancestors. Any failure → not frameable (use full screen).
+ * Asks the site whether it lets the wallet frame it: X-Frame-Options / CSP frame-ancestors, on the page itself and on
+ * the sibling origins it links to (a landing page that hands off to app.<site>, like Treechat). Any failure → not
+ * frameable (use full screen, the native WebView, which those headers do not apply to).
  */
 const canFrame = async (url: string, origin: string): Promise<boolean> => {
   const hit = probed.get(origin);
   if (hit !== undefined) return hit;
   let ok = false;
   try {
-    if (IS_EXTENSION) {
-      // The extension has host permission for every bApp origin (scripts/build.ts), so CORS doesn't apply.
-      const r = await fetch(url, { method: 'GET', credentials: 'omit', signal: AbortSignal.timeout(6000) });
-      const headers: Record<string, string> = {};
-      r.headers.forEach((v, k) => (headers[k] = v));
-      ok = r.ok && framingAllowed(headers, window.location.origin);
-      probed.set(origin, ok);
-      return ok;
+    const first = await probe(url);
+    ok = first.ok && framingAllowed(first.headers, window.location.origin);
+    if (ok) {
+      const siblings = await Promise.all(handoffOrigins(first.body, url).map((o) => probe(`${o}/`).catch(() => null)));
+      // Only a clear refusal counts: a sibling that is down or errors doesn't stop the landing page framing.
+      ok = !siblings.some((p) => p?.ok && !framingAllowed(p.headers, window.location.origin));
     }
-    const res = await CapacitorHttp.request({
-      url,
-      method: 'GET',
-      responseType: 'text',
-      connectTimeout: 6000,
-      readTimeout: 6000,
-    });
-    ok = res.status >= 200 && res.status < 400 && framingAllowed(res.headers ?? {}, window.location.origin);
   } catch {
     ok = false;
   }
