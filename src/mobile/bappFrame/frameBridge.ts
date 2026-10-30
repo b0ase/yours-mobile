@@ -12,7 +12,12 @@
 import { isCWIEventName } from '@1sat/wallet-browser';
 import { isMintPrivateAction, isMintPrivateCode } from '../../services/mintPrivateAction';
 import { USER_DENIED_CODE, USER_DENIED_MESSAGE, isUserDenied } from '../../services/userDenied';
-import { LAST_VERIFICATION_CALL, SITE_CALL_TIMEOUT_CODE, VERIFICATION_TIMEOUT_CODE } from '../siteGate';
+import {
+  CONFIRM_USER_CALL,
+  LAST_VERIFICATION_CALL,
+  SITE_CALL_TIMEOUT_CODE,
+  VERIFICATION_TIMEOUT_CODE,
+} from '../siteGate';
 
 /** Exact origins (scheme://host[:port]) of the given URLs; invalid or non-https URLs are skipped. */
 export const frameAllowlist = (urls: readonly string[]): Set<string> => {
@@ -63,7 +68,12 @@ export const parseXdmRequest = (data: unknown): XdmRequest | null => {
   if (typeof d.id !== 'string' || d.id.length === 0 || d.id.length > MAX_ID) return null;
   if (
     typeof d.call !== 'string' ||
-    !(isCWIEventName(d.call) || isMintPrivateAction(d.call) || d.call === LAST_VERIFICATION_CALL)
+    !(
+      isCWIEventName(d.call) ||
+      isMintPrivateAction(d.call) ||
+      d.call === LAST_VERIFICATION_CALL ||
+      d.call === CONFIRM_USER_CALL
+    )
   )
     return null;
   const args = d.args === undefined ? {} : d.args;

@@ -10,7 +10,7 @@ import { isMintPrivateAction } from '../../services/mintPrivateAction';
 import { CustomListenerName, type RequestEventDetail, type RequestParams } from '../../inject';
 import { CWI } from '../../cwi';
 import { announceWallet } from '../../brand/discovery';
-import { LAST_VERIFICATION_CALL } from '../siteGate';
+import { CONFIRM_USER_CALL, LAST_VERIFICATION_CALL } from '../siteGate';
 import { SUBSCRIPTIONS_ENABLED, appNameFor, isBWalletX } from '../storeBuild';
 import bIcon from '../../../assets/bwallet-ext/icon128.png?inline';
 import bxIcon from '../../../assets/bwalletx-ext/icon128.png?inline';
@@ -54,7 +54,8 @@ self.addEventListener(CustomListenerName.YOURS_REQUEST, (e: Event) => {
       isCWIEventName(type) ||
       isSpendingAuthAction(type) ||
       isMintPrivateAction(type) ||
-      (type as string) === LAST_VERIFICATION_CALL
+      (type as string) === LAST_VERIFICATION_CALL ||
+      (type as string) === CONFIRM_USER_CALL
     )
   )
     return;
@@ -108,6 +109,29 @@ if (SUBSCRIPTIONS_ENABLED) {
     self.dispatchEvent(
       new CustomEvent(CustomListenerName.YOURS_REQUEST, {
         detail: { messageId, type: LAST_VERIFICATION_CALL, params: {} },
+      }),
+    );
+  });
+
+// window.CWI.confirmUser() (docs/BIOMETRIC-GATE.md): Face ID / fingerprint / passcode (or the wallet password) before
+// a site's Sign or Seal sheet. Resolves { verifiedBy }; rejects with the standard denial or the timeout error.
+(CWI as unknown as Record<string, unknown>).confirmUser = () =>
+  new Promise((resolve, reject) => {
+    const messageId = `${CONFIRM_USER_CALL}-${Date.now()}-${Math.random()}`;
+    self.addEventListener(
+      messageId,
+      (e) => {
+        const d = (
+          e as CustomEvent<{ success?: boolean; data?: unknown; error?: string; code?: string; status?: number }>
+        ).detail;
+        if (d?.success) resolve(d.data ?? null);
+        else reject(Object.assign(new Error(d?.error || 'Not confirmed'), { code: d?.code, status: d?.status }));
+      },
+      { once: true },
+    );
+    self.dispatchEvent(
+      new CustomEvent(CustomListenerName.YOURS_REQUEST, {
+        detail: { messageId, type: CONFIRM_USER_CALL, params: {} },
       }),
     );
   });
