@@ -280,9 +280,9 @@ export const foundHeadline = (r: ScanReport): string => {
     // Never "nothing found" when a store wasn't read in full: that is not an answer.
     const notRead = [...(r.unreachable ?? []), ...(r.incomplete ?? [])];
     if (notRead.length) return `Couldn’t finish reading ${notRead.join(', ')}; nothing changed.`;
-    return 'No missing coins found.';
+    return 'Your balance is up to date.';
   }
-  return `We found ${bsv(sats) === '0' ? bsvExact(sats) : bsv(sats)} BSV the wallet lost track of. Add it back?`;
+  return `We found ${bsv(sats) === '0' ? bsvExact(sats) : bsv(sats)} BSV to add to your balance. Add it now?`;
 };
 
 /** One line after a scan with nothing to restore (or alongside the sheet). */

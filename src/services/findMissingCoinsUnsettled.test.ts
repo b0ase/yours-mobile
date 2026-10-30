@@ -44,7 +44,7 @@ describe('scan: failed/unsent transactions are read explicitly', () => {
     expect(r.incomplete).toEqual(['the 1Sat backup (wallet.1sat.app)']);
   });
 
-  test('a partial read never says "No missing coins found"', async () => {
+  test('a partial read never says "Your balance is up to date"', async () => {
     const store: ScanStore = {
       name: 'wallet.1sat.app',
       active: true,
@@ -59,7 +59,7 @@ describe('scan: failed/unsent transactions are read explicitly', () => {
     expect(scanNote(r)).toContain('couldn’t finish reading wallet.1sat.app');
   });
 
-  test('an unreachable store also never reads as "No missing coins found"', async () => {
+  test('an unreachable store also never reads as "Your balance is up to date"', async () => {
     const r = await scanMissingCoins({
       ...base,
       stores: async () => [
@@ -75,14 +75,14 @@ describe('scan: failed/unsent transactions are read explicitly', () => {
     expect(foundHeadline(r)).toBe('Couldn’t finish reading wallet.1sat.app; nothing changed.');
   });
 
-  test('every store read in full and nothing there: "No missing coins found."', async () => {
+  test('every store read in full and nothing there: "Your balance is up to date."', async () => {
     const r = await scanMissingCoins({
       ...base,
       stores: async () => [
         { name: 'this device', active: true, outputs: async () => [], unsettledOutputs: async () => [] },
       ],
     });
-    expect(foundHeadline(r)).toBe('No missing coins found.');
+    expect(foundHeadline(r)).toBe('Your balance is up to date.');
   });
 });
 
