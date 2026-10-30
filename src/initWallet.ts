@@ -154,6 +154,8 @@ const decryptKeys = async (chromeStorageService: ChromeStorageService): Promise<
 /** The receive guard's stuck-output rescue broadcast (receiveRescue.ts). Off: see runReceiveGuard. */
 const RESCUE_AUTO_BROADCAST = false as boolean;
 
+type IdbStoreLike = { get?: (k: number) => Promise<unknown>; delete?: (k: number) => Promise<void> };
+
 export interface AccountContext {
   wallet: LocalWalletPermissionsManager;
   baseWallet: Wallet;
@@ -1301,6 +1303,20 @@ export const initWallet = async (
         abortAction: async (reference) => {
           await baseWallet.abortAction({ reference });
         },
+        // StorageIdb keeps batch reservations in action_batch_outputs keyed by outputId (patched toolbox).
+        releaseReservation: (outputId) =>
+          storage.runAsStorageProvider(async (sp) => {
+            const idb = sp as unknown as {
+              toDbTrx?: (s: string[], m: string) => { objectStore: (n: string) => IdbStoreLike; done: Promise<void> };
+            };
+            if (!idb.toDbTrx) return false;
+            const tx = idb.toDbTrx(['action_batch_outputs'], 'readwrite');
+            const store = tx.objectStore('action_batch_outputs');
+            const held = (await store.get?.(outputId)) != null;
+            if (held) await store.delete?.(outputId);
+            await tx.done;
+            return held;
+          }),
         knownOnChain: (txid) => knownOnChain(txid, (t) => toolboxServices.getRawTx(t)),
         log: (m, d) => console.warn(m, d ?? ''),
       });

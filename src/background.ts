@@ -6381,7 +6381,7 @@ if (!(
                         throw e;
                       const rep = await ctxForHeal.repairNullTxids().catch(() => null);
                       console.warn('[createAction] null-txid repair before one retry:', rep);
-                      if (!rep || (!rep.txidFilled && !rep.setAside && !rep.aborted)) throw e;
+                      if (!rep || (!rep.txidFilled && !rep.setAside && !rep.aborted && !rep.reservationsReleased)) throw e;
                       return signer.createAction(args, message.originator);
                     }
                   },
