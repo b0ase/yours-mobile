@@ -29,7 +29,7 @@ describe('ObsidianBackdrop', () => {
   });
   test('the themed pool is the original shader with its colours as uniforms', () => {
     expect(TINT_FRAG).not.toBe(FRAG);
-    for (const u of ['cB+cS*sheen+cP*spec*.7', 'col+=cG*exp(', 'col=mix(cE,col,smoothstep(1.25,.25,d));'])
+    for (const u of ['cB+cS*sheen*.45+cP*spec*.9', 'col+=cG*exp(', 'col=mix(cE,col,smoothstep(1.25,.25,d));'])
       expect(TINT_FRAG).toContain(u);
     // Everything but the colours is untouched.
     const strip = (f: string) => f.split('void main(){')[1]?.split('float d=length(uv);')[0];
@@ -43,6 +43,16 @@ describe('pool precision (Android 16-bit mediump)', () => {
     for (const src of [FRAG, GOLD_FRAG, TINT_FRAG]) {
       expect(src.startsWith(PRECISION)).toBe(true);
       expect(src).toContain('precision highp float;');
+    }
+  });
+});
+
+describe('kintsugi cracks', () => {
+  test('the obsidian and themed pools carry the gold seams in the same pass', () => {
+    for (const src of [FRAG, TINT_FRAG]) {
+      expect(src).toContain('float ed=vEdge(w);');
+      expect(src.indexOf('float vEdge(')).toBeLessThan(src.indexOf('void main(){'));
+      expect(src.match(/void main\(\)\{/g)?.length).toBe(1);
     }
   });
 });

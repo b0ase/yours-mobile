@@ -15,9 +15,44 @@ const VERT = `attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}`;
  */
 export const PRECISION =
   '#ifdef GL_FRAGMENT_PRECISION_HIGH\nprecision highp float;\n#else\nprecision mediump float;\n#endif\n';
+/**
+ * Kintsugi gold cracks (owner, 30 Oct 2026). Added to a pool shader without touching its own lines: a cheap 3x3
+ * voronoi edge, taken in the pool's own warped space (p*dens + ride*2.2*Q(p) + c*ride*1.5) so the seams ride and
+ * stretch with the waves, filled with gold lit by the same light as the stone. Same pass, no extra uniforms;
+ * reduced motion still gets the one still frame from usePool. Constants: dens 2.6, wid .022, gold .85, ride .7.
+ */
+const KINTSUGI_FNS = `vec2 h2(vec2 p){return fract(sin(vec2(dot(p,vec2(127.1,311.7)),dot(p,vec2(269.5,183.3))))*43758.5453);}
+vec2 Q(vec2 p){return vec2(fbm(p+t*.04),fbm(p+vec2(5.2,1.3)-t*.03));}
+float vEdge(vec2 x){
+vec2 ip=floor(x),fp=fract(x);vec2 mg,mr;float md=8.;
+for(int j=-1;j<=1;j++)for(int i=-1;i<=1;i++){vec2 g=vec2(i,j);vec2 rr=g+h2(ip+g)-fp;float d=dot(rr,rr);if(d<md){md=d;mr=rr;mg=g;}}
+md=8.;
+for(int j=-1;j<=1;j++)for(int i=-1;i<=1;i++){vec2 g=mg+vec2(i,j);vec2 rr=g+h2(ip+g)-fp;
+if(dot(mr-rr,mr-rr)>.00001)md=min(md,dot(.5*(mr+rr),normalize(rr-mr)));}
+return md;}
+void main(){`;
+const KINTSUGI_SEAMS = `{vec2 w=p*2.6+1.54*Q(p)+vec2(c*1.05);
+float ed=vEdge(w);
+float wd=.022*(.55+.9*n(w*1.7+3.1));
+float gap=smoothstep(.28,.42,n(w*.8+11.));
+float seam=(1.-smoothstep(wd*.5,wd,ed))*gap;
+float halo=(1.-smoothstep(wd,wd*4.,ed))*gap;
+float glint=pow(max(dot(reflect(-L,N),vec3(0,0,1)),0.),12.);
+vec3 goldc=mix(vec3(.72,.50,.12),vec3(1.,.86,.45),clamp(glint*1.6+.15*sheen,0.,1.));
+col=mix(col,goldc*(.55+.9*glint),seam*.85);
+col+=vec3(.96,.70,.18)*halo*.068;}
+`;
+/** The pool with kintsugi cracks: helpers before main(), seams right after the stone's colour line. */
+export const withKintsugi = (frag: string) => {
+  const at = frag.indexOf('\n', frag.indexOf('vec3 col='));
+  return frag.slice(0, at + 1).replace('void main(){', KINTSUGI_FNS) + KINTSUGI_SEAMS + frag.slice(at + 1);
+};
+
 // Domain-warped noise as a height field, lit like polished volcanic glass: near-black body, soft white sheen,
-// and a faint warm glow where the gold b sits. Do not change: bwalletx-site/ask-b.html carries the same shader.
-export const FRAG = `${PRECISION}
+// and a faint warm glow where the gold b sits. Since 30 Oct 2026 the "cracks + glass" stone (owner): darker body,
+// tighter specular (pow 90 x.9) and sheen (pow 14 x.45). Height field, motion and glow are the original (bwalletx-site/ask-b.html carries
+// the same shader); withKintsugi adds the gold seams.
+export const FRAG = withKintsugi(`${PRECISION}
 uniform vec2 r;uniform float t;
 float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
@@ -29,13 +64,13 @@ vec2 uv=(gl_FragCoord.xy-.5*r)/min(r.x,r.y);
 vec2 p=uv*1.6;float e=.004;
 float c=H(p);vec3 N=normalize(vec3(c-H(p+vec2(e,0)),c-H(p+vec2(0,e)),.012));
 vec3 L=normalize(vec3(-.4,.6,.7));
-float spec=pow(max(dot(reflect(-L,N),vec3(0,0,1)),0.),38.);
-float sheen=pow(max(dot(N,normalize(vec3(.3,.2,1.))),0.),6.);
+float spec=pow(max(dot(reflect(-L,N),vec3(0,0,1)),0.),90.);
+float sheen=pow(max(dot(N,normalize(vec3(.3,.2,1.))),0.),14.);
 float d=length(uv);
-vec3 col=vec3(.014,.014,.018)+vec3(.09,.095,.115)*sheen+vec3(.7,.71,.76)*spec*.7;
+vec3 col=vec3(.008,.008,.010)+vec3(.09,.095,.115)*sheen*.45+vec3(.7,.71,.76)*spec*.9;
 col+=vec3(.96,.72,.0)*.10*exp(-d*d*5.)*(.6+.4*sheen);
 col*=smoothstep(1.25,.25,d);
-gl_FragColor=vec4(col,1.);}`;
+gl_FragColor=vec4(col,1.);}`);
 
 /**
  * The gold pool (owner, 13 Oct 2026, for the Name Store: "our obsidian pool only golden"): the same height field and
@@ -74,14 +109,14 @@ export const TINT_FRAG = FRAG.replace(
   'uniform vec2 r;uniform float t;',
   'uniform vec2 r;uniform float t;uniform vec3 cB,cS,cP,cG,cE;',
 )
-  .replace('vec3(.014,.014,.018)+vec3(.09,.095,.115)*sheen+vec3(.7,.71,.76)*spec*.7', 'cB+cS*sheen+cP*spec*.7')
+  .replace('vec3(.008,.008,.010)+vec3(.09,.095,.115)*sheen*.45+vec3(.7,.71,.76)*spec*.9', 'cB+cS*sheen*.45+cP*spec*.9')
   .replace('vec3(.96,.72,.0)*.10*', 'cG*')
   .replace('col*=smoothstep(1.25,.25,d);', 'col=mix(cE,col,smoothstep(1.25,.25,d));');
 
 /** Body, sheen, specular, centre glow and edge colours (linear 0–1 RGB) for TINT_FRAG. */
 export type PoolColours = { body: number[]; sheen: number[]; spec: number[]; glow: number[]; edge: number[] };
 export const POOL_GOLD_COLOURS: PoolColours = {
-  body: [0.014, 0.014, 0.018],
+  body: [0.008, 0.008, 0.01],
   sheen: [0.09, 0.095, 0.115],
   spec: [0.7, 0.71, 0.76],
   glow: [0.096, 0.072, 0],
