@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import {
   AlertTriangle,
   ChevronLeft,
@@ -56,6 +56,8 @@ export interface StorageStatusProps {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
+
+const LOCAL_COUNT_KEY = 'bw.storage.lastLocalOutputCount';
 
 function hostFromUrl(url: string): string {
   try {
@@ -144,6 +146,18 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
   // Pending last-remote removal — when set, the SpeedBump is shown and the
   // removal only executes after the user confirms.
   const [pendingRemoveUrl, setPendingRemoveUrl] = useState<string | null>(null);
+  // Pending switch of the active storage to a remote — confirmed first, because a
+  // remote with fewer coins than this device would hide them from the wallet.
+  const [pendingActiveUrl, setPendingActiveUrl] = useState<string | null>(null);
+  // Last coin count seen while This device was active (display only, per viewer).
+  const [lastLocalCount, setLastLocalCount] = useState<number>(() => {
+    try {
+      return Number(localStorage.getItem(LOCAL_COUNT_KEY)) || 0;
+    } catch {
+      return 0;
+    }
+  });
+  const advancedRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const setSubView = (view: SubView) => {
     _setSubView(view);
@@ -241,6 +255,30 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
     setBusyAction(null);
   };
 
+  /** Switching to This device is always safe; switching to a remote asks first. */
+  const requestSetActive = (target: 'local' | string) => {
+    if (target === 'local') {
+      void handleSetActive('local');
+      return;
+    }
+    setPendingActiveUrl(target);
+  };
+
+  // Remember this device's coin count while it is active, so we can warn if a remote has far fewer.
+  useEffect(() => {
+    if (!info || info.storageConfig?.activeRemote || !info.outputCount) return;
+    setLastLocalCount(info.outputCount);
+    try {
+      localStorage.setItem(LOCAL_COUNT_KEY, String(info.outputCount));
+    } catch {
+      // storage unavailable — warning just won't show
+    }
+  }, [info]);
+
+  useEffect(() => {
+    if (showAdvanced) advancedRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [showAdvanced]);
+
   const handleAddRemote = async (url: string) => {
     await runAction('STORAGE_ADD_REMOTE', { url }, 'Remote added');
     setShowProviderPicker(false);
@@ -278,6 +316,28 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
   const activeRemote = storageConfig.activeRemote;
   const localIsActive = !activeRemote;
   const syncStates = info?.syncStates ?? [];
+  const activeCount = info?.outputCount ?? 0;
+  const remoteLooksEmpty = !localIsActive && lastLocalCount > 0 && activeCount < lastLocalCount * 0.5;
+
+  const activeConfirm = (
+    <SpeedBump
+      theme={theme}
+      message={
+        pendingActiveUrl
+          ? `Make ${hostFromUrl(pendingActiveUrl)} your active storage? Your wallet will then show only the coins stored there.${
+              lastLocalCount > 0 ? ` This device has ${lastLocalCount.toLocaleString()} coins.` : ''
+            } If it has fewer, switch back to This device.`
+          : ''
+      }
+      showSpeedBump={!!pendingActiveUrl}
+      onCancel={() => setPendingActiveUrl(null)}
+      onConfirm={() => {
+        const target = pendingActiveUrl;
+        setPendingActiveUrl(null);
+        if (target) void handleSetActive(target);
+      }}
+    />
+  );
 
   // ── Detail view for a single store ─────────────────────────────────────
 
@@ -308,6 +368,7 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
           }}
         />
 
+        {activeConfirm}
         {/* Header */}
         <div className="flex items-center gap-3 mb-5 w-full">
           <motion.button
@@ -441,7 +502,7 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
                 theme={theme}
                 type="primary"
                 label="Make Active"
-                onClick={() => handleSetActive(isLocal ? 'local' : url)}
+                onClick={() => requestSetActive(isLocal ? 'local' : url)}
                 disabled={busy}
                 loading={busyAction === 'active'}
               />
@@ -595,6 +656,31 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
             Your active storage is local. Remotes below are backing up your data. To use this wallet on another device,
             set a remote as active.
           </p>
+        </div>
+      )}
+
+      {activeConfirm}
+      {remoteLooksEmpty && activeRemote && (
+        <div
+          data-testid="remote-low-coins"
+          className="w-full rounded-xl p-4 space-y-3"
+          style={{ background: 'rgba(249,112,102,0.06)', border: '1px solid rgba(249,112,102,0.2)' }}
+        >
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle size={16} style={{ color: '#F97066' }} className="shrink-0 mt-0.5" />
+            <p className="text-[11px] leading-relaxed font-semibold" style={{ color: '#F97066' }}>
+              {hostFromUrl(activeRemote)} has {activeCount.toLocaleString()} of your {lastLocalCount.toLocaleString()}{' '}
+              coins. Keep This device active.
+            </p>
+          </div>
+          <Button
+            theme={theme}
+            type="primary"
+            label="Make This device active"
+            onClick={() => requestSetActive('local')}
+            disabled={busy}
+            loading={busyAction === 'active'}
+          />
         </div>
       )}
 
@@ -837,6 +923,7 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
                 }
                 usageBarColor={localUsage ? usageBarColor(usagePercent(localUsage.used, localUsage.quota)) : undefined}
                 onClick={() => setSubView({ type: 'detail', url: '', isLocal: true })}
+                onMakeActive={busy ? undefined : () => requestSetActive('local')}
                 contrast={contrast}
                 gray={gray}
               />
@@ -858,6 +945,7 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
                     usageText="Unreachable"
                     syncStatus={{ label: 'Offline', color: '#F97066' }}
                     onClick={() => setSubView({ type: 'detail', url, isLocal: false })}
+                    onMakeActive={busy ? undefined : () => requestSetActive(url)}
                     contrast={contrast}
                     gray={gray}
                   />
@@ -875,6 +963,7 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
                     usageText="Connected"
                     syncStatus={sync ?? { label: 'Online', color: '#34D399' }}
                     onClick={() => setSubView({ type: 'detail', url, isLocal: false })}
+                    onMakeActive={busy ? undefined : () => requestSetActive(url)}
                     contrast={contrast}
                     gray={gray}
                   />
@@ -892,6 +981,7 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
                     usageText={statusLoading ? 'Loading...' : 'Connected'}
                     syncStatus={sync}
                     onClick={() => setSubView({ type: 'detail', url, isLocal: false })}
+                    onMakeActive={busy ? undefined : () => requestSetActive(url)}
                     contrast={contrast}
                     gray={gray}
                   />
@@ -914,6 +1004,7 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
                   usageBarColor={barColor}
                   syncStatus={sync}
                   onClick={() => setSubView({ type: 'detail', url, isLocal: false })}
+                  onMakeActive={busy ? undefined : () => requestSetActive(url)}
                   contrast={contrast}
                   gray={gray}
                 />
@@ -952,26 +1043,46 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
         {showAdvanced ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
       </motion.button>
 
-      <AnimatePresence>
-        {showAdvanced && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="w-full overflow-hidden"
-          >
-            <div className="w-full rounded-xl p-4 bg-[var(--bw-surface)]" style={{ border: `1px solid ${gray}15` }}>
-              <p className="text-[9px] uppercase tracking-wider font-semibold mb-1" style={{ color: gray }}>
-                Storage Identity Key
-              </p>
-              <p className="text-[10px] break-all font-mono" style={{ color: contrast }}>
-                {info?.storageIdentityKey ?? '—'}
-              </p>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {showAdvanced && (
+        <div ref={advancedRef} data-testid="storage-advanced" className="w-full space-y-3">
+          <div className="w-full rounded-xl p-4 bg-[var(--bw-surface)]" style={{ border: `1px solid ${gray}15` }}>
+            <p className="text-[9px] uppercase tracking-wider font-semibold mb-2" style={{ color: gray }}>
+              Choose active storage
+            </p>
+            {[{ key: 'local', label: 'This Browser', active: localIsActive }]
+              .concat(remotes.map((url) => ({ key: url, label: hostFromUrl(url), active: activeRemote === url })))
+              .map((row) => (
+                <div key={row.key} className="flex items-center justify-between gap-2 py-1.5">
+                  <span className="text-[11px] font-semibold truncate" style={{ color: contrast }}>
+                    {row.label}
+                  </span>
+                  {row.active ? (
+                    <span className="text-[9px] font-semibold uppercase shrink-0" style={{ color: '#34D399' }}>
+                      In use
+                    </span>
+                  ) : (
+                    <button
+                      onClick={busy ? undefined : () => requestSetActive(row.key)}
+                      disabled={busy}
+                      className="text-[10px] font-semibold px-2 py-1 rounded outline-none cursor-pointer shrink-0 disabled:opacity-50"
+                      style={{ color: contrast, background: 'transparent', border: `1px solid ${gray}40` }}
+                    >
+                      Make active
+                    </button>
+                  )}
+                </div>
+              ))}
+          </div>
+          <div className="w-full rounded-xl p-4 bg-[var(--bw-surface)]" style={{ border: `1px solid ${gray}15` }}>
+            <p className="text-[9px] uppercase tracking-wider font-semibold mb-1" style={{ color: gray }}>
+              Storage Identity Key
+            </p>
+            <p className="text-[10px] break-all font-mono" style={{ color: contrast }}>
+              {info?.storageIdentityKey ?? '—'}
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -988,6 +1099,8 @@ interface StoreCardProps {
   usageBarColor?: string;
   syncStatus?: { label: string; color: string } | null;
   onClick: () => void;
+  /** Shows a "Make active" button beside the row. */
+  onMakeActive?: () => void;
   contrast: string;
   gray: string;
 }
@@ -1002,12 +1115,13 @@ const StoreCard = ({
   usageBarColor: barColor,
   syncStatus,
   onClick,
+  onMakeActive,
   contrast,
   gray,
 }: StoreCardProps) => {
   const roleColor = role === 'active' ? '#34D399' : '#667085';
 
-  return (
+  const card = (
     <button
       onClick={onClick}
       className="flex items-center w-full px-3 py-3 rounded-lg my-1 border-0 outline-none cursor-pointer text-left"
@@ -1066,5 +1180,18 @@ const StoreCard = ({
 
       <ChevronRight size={14} style={{ color: gray }} className="shrink-0 ml-1" />
     </button>
+  );
+  if (isActive || !onMakeActive) return card;
+  return (
+    <div className="flex items-center gap-1.5 w-full">
+      <div className="flex-1 min-w-0">{card}</div>
+      <button
+        onClick={onMakeActive}
+        className="text-[10px] font-semibold px-2 py-2 rounded-lg outline-none cursor-pointer shrink-0"
+        style={{ color: contrast, background: 'transparent', border: `1px solid ${gray}40` }}
+      >
+        Make active
+      </button>
+    </div>
   );
 };
