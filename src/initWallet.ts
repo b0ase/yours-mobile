@@ -1,3 +1,4 @@
+import { repairNullTxids, type NullTxidRepairReport } from './services/nullTxidRepair';
 import { openAccountPermissionStore } from './services/accountPermissionStore';
 import { openSpendLedger, withLocalSpendLedger } from './services/spendLedger';
 import { rememberRefusals } from './services/broadcastRefusals';
@@ -214,6 +215,8 @@ export interface AccountContext {
   referenceBytes: (reference: string) => Promise<number>;
   /** True when the network already knows this txid (never abort such an action). */
   knownOnChain: (txid: string) => Promise<boolean>;
+  /** Fix spendable outputs with no txid and abort stale unsigned actions on the local store (nullTxidRepair.ts). */
+  repairNullTxids: () => Promise<NullTxidRepairReport>;
   /** Call to stop sync and destroy wallet */
   close: () => Promise<void>;
 }
@@ -1261,6 +1264,47 @@ export const initWallet = async (
       });
     },
     knownOnChain: (txid) => knownOnChain(txid, (t) => toolboxServices.getRawTx(t)),
+    repairNullTxids: async () => {
+      // Local store only: never edit the remote's rows from here.
+      if (!storage.isActiveStorageProvider()) return { txidFilled: 0, setAside: 0, aborted: 0, skipped: 0 };
+      const { userId } = await storage.getAuth();
+      return repairNullTxids({
+        spendableOutputs: () =>
+          storage.runAsStorageProvider(async (sp) =>
+            (await sp.findOutputs({ partial: { userId, spendable: true }, noScript: true })).map((o) => ({
+              outputId: o.outputId,
+              transactionId: o.transactionId,
+              txid: o.txid,
+              spendable: o.spendable,
+            })),
+          ),
+        transaction: (transactionId) =>
+          storage.runAsStorageProvider(async (sp) => {
+            const [t] = await sp.findTransactions({ partial: { transactionId }, noRawTx: true });
+            return t ? { transactionId, txid: t.txid, status: t.status, reference: t.reference } : undefined;
+          }),
+        pendingActions: () =>
+          storage.runAsStorageProvider(async (sp) =>
+            (
+              await sp.findTransactions({ partial: { userId }, status: ['unsigned', 'unprocessed'], noRawTx: true })
+            ).map((t) => ({
+              transactionId: t.transactionId,
+              txid: t.txid,
+              status: t.status,
+              reference: t.reference,
+              updated_at: t.updated_at,
+            })),
+          ),
+        updateOutput: async (id, patch) => {
+          await storage.runAsStorageProvider((sp) => sp.updateOutput(id, patch));
+        },
+        abortAction: async (reference) => {
+          await baseWallet.abortAction({ reference });
+        },
+        knownOnChain: (txid) => knownOnChain(txid, (t) => toolboxServices.getRawTx(t)),
+        log: (m, d) => console.warn(m, d ?? ''),
+      });
+    },
     sendWaitingNow: async () => (walletMonitor ? await walletMonitor.runTask('SendWaiting') : ''),
     referenceBytes: (reference) =>
       storage.runAsStorageProvider(async (sp) => {

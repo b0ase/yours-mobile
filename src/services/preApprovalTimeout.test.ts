@@ -265,7 +265,7 @@ describe('background wiring', () => {
   });
   test('funding preparation is capped, before signing', () => {
     const i = bg.indexOf('withStepTimeout(prep, STEP_TIMEOUT_MS, fundingTimeoutError)');
-    const sign = bg.indexOf('create: () => signer.createAction(args, message.originator)');
+    const sign = bg.indexOf('return await signer.createAction(args, message.originator)');
     expect(i).toBeGreaterThan(0);
     expect(i).toBeLessThan(sign);
   });
