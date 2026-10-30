@@ -2900,6 +2900,11 @@ if (!(
       'GET_NEXT_PROMPT',
       'CLOSE_PROMPT_WINDOW',
       'INPAGE_SHEET_CHECK',
+      // The in-page sheet's "Open in bWalletX" and ✕ (prompt-tab.tsx, PanelPrompt.tsx). Their cases below were
+      // unreachable without these entries: the message fell through to the CWI path, never answered, so no window
+      // opened and the caller got "message channel closed" (bChatX /welcome fresh-install test, 30 Oct 2026).
+      'MOVE_PROMPT_TO_WINDOW',
+      'DISMISS_PROMPT_PANEL',
       // Internal UI requests (no external domain)
       YoursEventName.GET_BALANCE,
       YoursEventName.GET_PUB_KEYS,
