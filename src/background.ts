@@ -1003,9 +1003,13 @@ const startupInitPromise = chromeStorageService
     // code, and closing it here would abort enrolment mid-way.
     const extOrigin = chrome.runtime.getURL('');
     const usbUrl = chrome.runtime.getURL('usb.html');
+    const setupUrl = chrome.runtime.getURL('index.html?setupFor=');
     const allWindows = await chrome.windows.getAll({ populate: true });
     for (const w of allWindows) {
       if (w.tabs?.some((t) => t.url?.startsWith(usbUrl))) continue;
+      // The wallet setup window (Create / Restore for a site, showWalletSetupUi): the worker can restart while the
+      // person writes down their words; closing it here threw them out of onboarding.
+      if (w.tabs?.some((t) => t.url?.startsWith(setupUrl))) continue;
       if (w.type === 'popup' && w.id && w.tabs?.some((t) => t.url?.startsWith(extOrigin))) {
         try {
           await chrome.windows.remove(w.id);
@@ -1100,7 +1104,7 @@ const showWalletSetupUi = (originator?: string) => {
     return;
   }
   const host = setupHost(originator);
-  const url = chrome.runtime.getURL('index.html') + (host ? `?setupFor=${encodeURIComponent(host)}` : '');
+  const url = chrome.runtime.getURL(`index.html?setupFor=${host ? encodeURIComponent(host) : ''}`);
   create({ url, type: 'popup', width: 392, height: 600 }, (w) => {
     walletSetupWindowId = w?.id;
   });
@@ -2195,6 +2199,9 @@ if (isInServiceWorker) {
         console.log('[background] switchAccount: storage loaded, initializing wallet');
         await initializeWallet();
         console.log('[background] switchAccount: wallet initialized successfully');
+        // Opened: mark it unlocked and active (as WALLET_UNLOCKED does), so auto-lock Never keeps it open.
+        if ((accountContext as AccountContext | null)?.wallet)
+          await chromeStorageService.update({ isLocked: false, lastActiveTime: Date.now() });
         // Create and Restore both end in this switch: a site that asked before the wallet existed carries on.
         resolveWalletWaiters();
         return (accountContext as AccountContext | null)?.wallet ?? null;
@@ -5888,7 +5895,9 @@ if (!(
     sendResponse: CallbackResponse,
   ) => {
     try {
-      const w = await ensureWallet();
+      // With the site deadlines (preApprovalTimeout.ts): if the wallet locked after the outer check, this answers with
+      // a coded error instead of waiting on an unlock window forever.
+      const w = await walletForSiteRequest(message.originator);
 
       // The permissions manager handles the grouped-permission flow: it
       // fetches the originator's manifest.json and prompts once for any
