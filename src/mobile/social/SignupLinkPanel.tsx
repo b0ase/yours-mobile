@@ -128,7 +128,7 @@ export const SignupLinkPanel = ({ color, gray }: { color: string; gray: string }
     <div className="w-full flex flex-col gap-2" data-testid="signup-link-panel">
       <div className="flex items-center justify-between">
         <span className="text-[12px] font-semibold" style={{ color }}>
-          Link an account <span style={{ color: gray, fontWeight: 400 }}>· optional</span>
+          Bring your accounts
         </span>
         <button
           type="button"
@@ -144,9 +144,12 @@ export const SignupLinkPanel = ({ color, gray }: { color: string; gray: string }
           style={{ color: gray }}
           data-testid="signup-link-skip"
         >
-          Skip
+          Skip for now
         </button>
       </div>
+      <p className="text-[12px] m-0" style={{ color: gray }}>
+        Your name, photo and history come with you, and they're yours.
+      </p>
       <div className="grid grid-cols-3 gap-2">
         {live.map((p) => (
           <button
@@ -196,8 +199,7 @@ export const SignupLinkPanel = ({ color, gray }: { color: string; gray: string }
         )}
       </div>
       <p className="text-[10px] m-0 text-center" style={{ color: gray }}>
-        Fills your name and photo and suggests your $name. Adds a verified badge. Your wallet signs it after you set it
-        up; it never signs you in.
+        We only read your name, photo and username. We never post or change anything there. Unlink anytime in Settings.
       </p>
       {error ? (
         <p className="text-[11px] m-0 text-center" style={{ color: '#FDA29B' }}>
