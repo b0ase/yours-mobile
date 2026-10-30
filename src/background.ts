@@ -78,6 +78,7 @@ import { isProveHoldingsAction, runSiteProveHoldings } from './services/proveHol
 import { proveHoldings } from './mobile/chat/holdings';
 import { BchatClient, defaultHttp } from './mobile/chat/api';
 import { walletSigner } from './mobile/chat/signer';
+import { makeSwapQuote } from './services/swapQuote';
 import { isSwapAction, runSiteSwap } from './services/swapSite';
 import { isThemeOfferAction, runThemeOffer } from './services/themeOfferSite';
 import { EMPTY_MEMORY, type OfferMemory, type ThemeOfferResult } from './mobile/theme/themeOffer';
@@ -4587,6 +4588,21 @@ if (!(
     },
   };
 
+  /** The swap's BSV/USD rate: the swap worker's own cache, else the popup's, else fetched on demand. */
+  const SWAP_RATE_KEY = 'bwxSwapRate';
+  const swapQuote = makeSwapQuote({
+    readCache: () =>
+      new Promise((res) =>
+        chrome.storage.local.get([SWAP_RATE_KEY, 'exchangeRateCache'], (v) => {
+          const own = (v ?? {})[SWAP_RATE_KEY] as { rate: number; timestamp: number } | undefined;
+          const popup = (v ?? {}).exchangeRateCache as { rate: number; timestamp: number } | undefined;
+          res([own, popup].filter(Boolean).sort((a, b) => (b?.timestamp ?? 0) - (a?.timestamp ?? 0))[0]);
+        }),
+      ),
+    writeCache: (r) => new Promise<void>((res) => chrome.storage.local.set({ [SWAP_RATE_KEY]: r }, () => res())),
+    fetch: (...a) => fetch(...a),
+  });
+
   const swapDeps = async () => {
     const wpm = (await ensureWallet()) as unknown as Record<string, (args: unknown, o?: string) => unknown>;
     const admin = new Proxy(
@@ -4599,10 +4615,8 @@ if (!(
     const key = (ref: string) => `bwxSwap.${who}.${ref}`;
     return {
       ctx: createContext(admin, { chain: 'main', services }),
-      quote: async () => {
-        const rate = await cachedUsdPerBsv().catch(() => undefined);
-        return rate ? { rate, source: 'bWalletX price feed (cached BSV/USD rate)' } : undefined;
-      },
+      // Fresh cached rate, else fetched now (WhatsOnChain, then CoinGecko) and cached; throws a clear error if all fail.
+      quote: swapQuote,
       store: {
         get: (ref: string) =>
           new Promise<SwapRecord | undefined>((res) =>

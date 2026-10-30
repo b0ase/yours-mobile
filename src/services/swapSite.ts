@@ -55,9 +55,18 @@ export async function runSiteSwap(
   if (action === SWAP_ACCEPT_ACTION && (!p.offer || typeof p.offer !== 'object')) return bad('offer missing');
   try {
     const d = await deps();
-    const quote = await d.quote();
+    let quote: RateQuote | undefined;
+    try {
+      quote = await d.quote();
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e), code: 'NO_RATE' };
+    }
     if (!quote)
-      return { success: false, error: 'No BSV price yet. Open the wallet once, then try again', code: 'NO_RATE' };
+      return {
+        success: false,
+        error: "Couldn't get the BSV price. Check your connection and try again",
+        code: 'NO_RATE',
+      };
     if (action === SWAP_OFFER_ACTION) {
       const offer = await offerSwap(d.ctx, { terms, quote, ask: d.ask, reservations: d.reservations });
       return { success: true, data: { offer } };
