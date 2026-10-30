@@ -19,6 +19,7 @@
  */
 
 import { PRE_APPROVAL_CODED } from './preApprovalTimeout';
+import { WALLET_SETUP_CODED } from './walletSetupWait';
 
 export const PROMPT_NOT_SHOWN_CODE = 'ERR_PROMPT_NOT_SHOWN';
 export const PROMPT_NOT_SHOWN_MESSAGE =
@@ -61,6 +62,7 @@ export function promptExpiredError(): Error & { code: string; status: number } {
 
 const CODED: [string, string, number][] = [
   ...PRE_APPROVAL_CODED,
+  ...WALLET_SETUP_CODED,
   [PROMPT_NOT_SHOWN_MESSAGE, PROMPT_NOT_SHOWN_CODE, 503],
   [PROMPT_EXPIRED_MESSAGE, PROMPT_EXPIRED_CODE, 408],
   [PROMPT_BUSY_MESSAGE, PROMPT_BUSY_CODE, 409],

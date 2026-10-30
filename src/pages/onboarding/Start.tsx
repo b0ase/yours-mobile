@@ -14,6 +14,17 @@ import { ObsidianBackdrop } from '../../mobile/ui/ObsidianBackdrop';
 import { SEEDLESS_ENABLED } from '../../mobile/passkey/prf';
 import { SeedlessWelcome } from '../../mobile/passkey/SeedlessWelcome';
 import { SignupLinkPanel } from '../../mobile/social/SignupLinkPanel';
+import { setupHost, setupReason } from '../../services/walletSetupWait';
+
+/** Set when a site's request opened this screen (background showWalletSetupUi): the asking site's host. */
+const SETUP_FOR = (() => {
+  try {
+    const raw = new URLSearchParams(window.location.search).get('setupFor');
+    return raw ? (setupHost(raw) ?? null) : null;
+  } catch {
+    return null;
+  }
+})();
 
 const fadeUp = {
   hidden: { opacity: 0, y: 20 },
@@ -86,52 +97,97 @@ export const Start = () => {
         {/* Bottom section — actions */}
         <div className="flex flex-col items-center gap-3 w-full max-w-[420px] mx-auto mb-2 px-1 overflow-visible">
           {/* Optional link on the first screen, finished after the seed step (owner, 27 Oct 2026). */}
+          {SETUP_FOR && (
+            <p role="status" className="w-full text-sm text-center font-semibold px-2" style={{ color: contrast }}>
+              {setupReason(SETUP_FOR)}
+            </p>
+          )}
           <SignupLinkPanel color={contrast} gray={gray} />
           {SEEDLESS_ENABLED ? (
             <SeedlessWelcome />
           ) : (
             <>
-              {/* Primary: Create */}
-              <motion.button
-                variants={fadeUp}
-                initial="hidden"
-                animate="visible"
-                custom={0.28}
-                whileHover={{ scale: 1.025 }}
-                whileTap={{ scale: 0.975 }}
-                transition={{ type: 'spring', stiffness: 380, damping: 22 }}
-                onClick={() => navigate('/create-wallet')}
-                className="w-full rounded-xl h-11 text-sm font-bold tracking-wide"
-                style={{
-                  background: `linear-gradient(135deg, ${accentColor}, ${accentRight})`,
-                  color: theme.color.component.primaryButtonText,
-                }}
-              >
-                Create New Wallet
-              </motion.button>
-
-              {/* Secondary-outline: Restore */}
-              <motion.div
-                variants={fadeUp}
-                initial="hidden"
-                animate="visible"
-                custom={0.36}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                transition={{ type: 'spring', stiffness: 380, damping: 22 }}
-                className="w-full p-px rounded-xl"
-                style={{
-                  background: `linear-gradient(135deg, ${theme.color.component.secondaryOutlineButtonGradientLeft}, ${theme.color.component.secondaryOutlineButtonGradientRight})`,
-                }}
-              >
-                <button
+              {/* Opened for a site: Restore leads, so someone who already has a wallet doesn't make a new identity. */}
+              {SETUP_FOR && (
+                <motion.button
+                  variants={fadeUp}
+                  initial="hidden"
+                  animate="visible"
+                  custom={0.28}
+                  whileHover={{ scale: 1.025 }}
+                  whileTap={{ scale: 0.975 }}
+                  transition={{ type: 'spring', stiffness: 380, damping: 22 }}
                   onClick={() => navigate('/restore-wallet')}
-                  className="w-full rounded-xl h-11 text-sm font-bold tracking-wide border-0 outline-none cursor-pointer"
-                  style={{ backgroundColor: bg, color: contrast }}
+                  className="w-full rounded-xl h-11 text-sm font-bold tracking-wide"
+                  style={{
+                    background: `linear-gradient(135deg, ${accentColor}, ${accentRight})`,
+                    color: theme.color.component.primaryButtonText,
+                  }}
                 >
-                  Restore Wallet
-                </button>
-              </motion.div>
+                  Restore my wallet
+                </motion.button>
+              )}
+              {SETUP_FOR && (
+                <div
+                  className="w-full p-px rounded-xl"
+                  style={{
+                    background: `linear-gradient(135deg, ${theme.color.component.secondaryOutlineButtonGradientLeft}, ${theme.color.component.secondaryOutlineButtonGradientRight})`,
+                  }}
+                >
+                  <button
+                    onClick={() => navigate('/create-wallet')}
+                    className="w-full rounded-xl h-11 text-sm font-bold tracking-wide border-0 outline-none cursor-pointer"
+                    style={{ backgroundColor: bg, color: contrast }}
+                  >
+                    Create a new wallet
+                  </button>
+                </div>
+              )}
+              {!SETUP_FOR && (
+                <>
+                  {/* Primary: Create */}
+                  <motion.button
+                    variants={fadeUp}
+                    initial="hidden"
+                    animate="visible"
+                    custom={0.28}
+                    whileHover={{ scale: 1.025 }}
+                    whileTap={{ scale: 0.975 }}
+                    transition={{ type: 'spring', stiffness: 380, damping: 22 }}
+                    onClick={() => navigate('/create-wallet')}
+                    className="w-full rounded-xl h-11 text-sm font-bold tracking-wide"
+                    style={{
+                      background: `linear-gradient(135deg, ${accentColor}, ${accentRight})`,
+                      color: theme.color.component.primaryButtonText,
+                    }}
+                  >
+                    Create New Wallet
+                  </motion.button>
+
+                  {/* Secondary-outline: Restore */}
+                  <motion.div
+                    variants={fadeUp}
+                    initial="hidden"
+                    animate="visible"
+                    custom={0.36}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    transition={{ type: 'spring', stiffness: 380, damping: 22 }}
+                    className="w-full p-px rounded-xl"
+                    style={{
+                      background: `linear-gradient(135deg, ${theme.color.component.secondaryOutlineButtonGradientLeft}, ${theme.color.component.secondaryOutlineButtonGradientRight})`,
+                    }}
+                  >
+                    <button
+                      onClick={() => navigate('/restore-wallet')}
+                      className="w-full rounded-xl h-11 text-sm font-bold tracking-wide border-0 outline-none cursor-pointer"
+                      style={{ backgroundColor: bg, color: contrast }}
+                    >
+                      Restore Wallet
+                    </button>
+                  </motion.div>
+                </>
+              )}
             </>
           )}
 

@@ -46,6 +46,11 @@ export class KeysService {
       showWelcome: false,
       deviceId: crypto.randomUUID(),
       accountNumber,
+      // A new or restored wallet starts unlocked and active. Without lastActiveTime, isSessionExpired treated the
+      // session as expired even with auto-lock Never (the default): the inactivity alarm and the worker's startup
+      // locked the wallet within a minute of Create (bChatX fresh-install E2E, 30 Oct 2026).
+      isLocked: false,
+      lastActiveTime: Date.now(),
     });
     // passKey goes to session storage (memory-only, not written to disk)
     await this.chromeStorageService.setPassKey(passKey);

@@ -118,6 +118,7 @@ import {
   walletWithDeadline,
   withStepTimeout,
 } from './services/preApprovalTimeout';
+import { setupHost, waitForWalletSetup, walletSetupClosedError } from './services/walletSetupWait';
 import { insufficientFundsMessage, isInsufficientFunds, prepareFunding, type FundingSnapshot } from './services/fundingPrep';
 import { mirrorToMiner } from './mobile/minerMirror';
 import { panelUnlockMessages, shouldPushPrompt, type ShownPrompt } from './services/promptQueue';
@@ -1002,9 +1003,13 @@ const startupInitPromise = chromeStorageService
     // code, and closing it here would abort enrolment mid-way.
     const extOrigin = chrome.runtime.getURL('');
     const usbUrl = chrome.runtime.getURL('usb.html');
+    const setupUrl = chrome.runtime.getURL('index.html?setupFor=');
     const allWindows = await chrome.windows.getAll({ populate: true });
     for (const w of allWindows) {
       if (w.tabs?.some((t) => t.url?.startsWith(usbUrl))) continue;
+      // The wallet setup window (Create / Restore for a site, showWalletSetupUi): the worker can restart while the
+      // person writes down their words; closing it here threw them out of onboarding.
+      if (w.tabs?.some((t) => t.url?.startsWith(setupUrl))) continue;
       if (w.type === 'popup' && w.id && w.tabs?.some((t) => t.url?.startsWith(extOrigin))) {
         try {
           await chrome.windows.remove(w.id);
@@ -1067,16 +1072,53 @@ export const getWallet = (): WalletInterface | null => {
  * while the wallet is still auto-initializing from a persisted passKey.
  */
 /** ensureWallet for a site's request, with the pre-approval deadlines (services/preApprovalTimeout.ts). */
-const walletForSiteRequest = (): Promise<WalletInterface> =>
+const walletForSiteRequest = (originator?: string): Promise<WalletInterface> =>
   walletWithDeadline<WalletInterface>({
     ready: () => (masterBackupGate.active ? undefined : accountContext?.wallet),
-    open: () => ensureWallet(),
+    open: () => ensureWallet(false, originator),
     awaitingUnlock: () => pendingWalletWaiters.length > 0,
+    awaitingSetup: () => walletSetupActive && pendingWalletWaiters.length > 0,
     // A cold-woken worker is not charged for its wake: the settle clock starts after its startup read answers.
     warmUp: () => startupInitPromise,
   });
 
-const ensureWallet = async (suppressPopup = false): Promise<WalletInterface> => {
+/**
+ * No wallet yet and a site asked (services/walletSetupWait.ts): true while its call waits on Create / Restore.
+ * Cleared when a wallet comes up, the setup window closes, or a locked-wallet wait starts.
+ */
+let walletSetupActive = false;
+let walletSetupWindowId: number | undefined;
+const NO_WALLET_MESSAGE = 'No wallet exists - create wallet first';
+
+/** Opens the wallet's start screen (Create / Restore) in its own window, saying which site asked. */
+const showWalletSetupUi = (originator?: string) => {
+  walletSetupActive = true;
+  sheetFirst.notePromptShown();
+  // The toolbar popup or side panel is open: it already shows Create / Restore (pages/onboarding/Start.tsx).
+  if (activePopupPorts.size > 0) return;
+  const create = (chrome as unknown as { windows?: { create?: typeof chrome.windows.create } }).windows?.create;
+  if (!create) {
+    // No windows here (phone / web build): fail the way it always did, at once.
+    walletSetupActive = false;
+    for (const waiter of pendingWalletWaiters.splice(0)) waiter.reject(new Error(NO_WALLET_MESSAGE));
+    return;
+  }
+  const host = setupHost(originator);
+  const url = chrome.runtime.getURL(`index.html?setupFor=${host ? encodeURIComponent(host) : ''}`);
+  create({ url, type: 'popup', width: 392, height: 600 }, (w) => {
+    walletSetupWindowId = w?.id;
+  });
+};
+
+/** A wallet is open (created, restored or switched to): every site call waiting on it carries on. */
+const resolveWalletWaiters = () => {
+  const wallet = accountContext?.wallet;
+  if (!wallet) return;
+  walletSetupActive = false;
+  for (const waiter of pendingWalletWaiters.splice(0)) waiter.resolve(wallet);
+};
+
+const ensureWallet = async (suppressPopup = false, originator?: string): Promise<WalletInterface> => {
   await startupInitPromise;
   // During a master backup, wait for it (and the original account to reopen) instead of failing (masterBackupGate.ts).
   if (masterBackupGate.active) await masterBackupGate.wait();
@@ -1103,7 +1145,14 @@ const ensureWallet = async (suppressPopup = false): Promise<WalletInterface> => 
   const { account } = chromeStorageService.getCurrentAccountObject();
 
   if (!account?.encryptedKeys) {
-    return Promise.reject(new Error('No wallet exists - create wallet first'));
+    // Our own pages handle "no wallet" themselves.
+    if (suppressPopup) return Promise.reject(new Error(NO_WALLET_MESSAGE));
+    // A site asked before any wallet exists (fresh install): open Create / Restore and wait, instead of failing
+    // with an error the person never sees. The call resumes after setup and still meets every permission sheet.
+    return waitForWalletSetup<WalletInterface>({
+      waiters: pendingWalletWaiters,
+      openSetup: () => showWalletSetupUi(originator),
+    });
   }
 
   // Wallet exists but is locked — prompt user to unlock via popup
@@ -1111,6 +1160,7 @@ const ensureWallet = async (suppressPopup = false): Promise<WalletInterface> => 
   if (suppressPopup) {
     return Promise.reject(new Error('Wallet not available'));
   }
+  walletSetupActive = false;
   return new Promise((resolve, reject) => {
     pendingWalletWaiters.push({ resolve, reject });
     if (pendingWalletWaiters.length === 1) {
@@ -2149,6 +2199,11 @@ if (isInServiceWorker) {
         console.log('[background] switchAccount: storage loaded, initializing wallet');
         await initializeWallet();
         console.log('[background] switchAccount: wallet initialized successfully');
+        // Opened: mark it unlocked and active (as WALLET_UNLOCKED does), so auto-lock Never keeps it open.
+        if ((accountContext as AccountContext | null)?.wallet)
+          await chromeStorageService.update({ isLocked: false, lastActiveTime: Date.now() });
+        // Create and Restore both end in this switch: a site that asked before the wallet existed carries on.
+        resolveWalletWaiters();
         return (accountContext as AccountContext | null)?.wallet ?? null;
       } catch (error) {
         console.error('[background] switchAccount: failed to initialize wallet:', error);
@@ -3143,7 +3198,7 @@ if (!(
             sendResponse({ type: 'CLOSE_PROMPT_WINDOW', success: false, data: { prompt: next } });
             return true;
           }
-          if (pendingWalletWaiters.length > 0) {
+          if (pendingWalletWaiters.length > 0 && !walletSetupActive) {
             sendResponse({ type: 'CLOSE_PROMPT_WINDOW', success: false, data: { prompt: { kind: 'unlock' } } });
             return true;
           }
@@ -3544,7 +3599,7 @@ if (!(
     let gateAsk: Promise<boolean> | undefined;
     // A site's call never waits silently on the wallet: settling is capped at 5 s, a locked wallet shows its unlock
     // UI at once and the person has 60 s to unlock (services/preApprovalTimeout.ts). Our own pages wait as before.
-    (isFromExtension ? ensureWallet(true) : walletForSiteRequest())
+    (isFromExtension ? ensureWallet(true) : walletForSiteRequest(message.originator))
       .then(() => {
         console.log('[background] ensureWallet resolved for action:', message.action);
         // Connections log (History › Connections): which outside site or app called, and what.
@@ -5845,7 +5900,9 @@ if (!(
     sendResponse: CallbackResponse,
   ) => {
     try {
-      const w = await ensureWallet();
+      // With the site deadlines (preApprovalTimeout.ts): if the wallet locked after the outer check, this answers with
+      // a coded error instead of waiting on an unlock window forever.
+      const w = await walletForSiteRequest(message.originator);
 
       // The permissions manager handles the grouped-permission flow: it
       // fetches the originator's manifest.json and prompts once for any
@@ -7005,8 +7062,17 @@ if (!(
       }
       const next = getNextPendingPrompt();
       if (next) showPromptUi(next.kind, next.requestID);
-      else if (pendingWalletWaiters.length > 0) showUnlockUi();
+      else if (pendingWalletWaiters.length > 0 && !walletSetupActive) showUnlockUi();
       return;
+    }
+
+    // The wallet setup window closed before a wallet came up: the waiting sites get a clear error.
+    if (closedWindowId === walletSetupWindowId) {
+      walletSetupWindowId = undefined;
+      if (walletSetupActive && !accountContext?.wallet && !reinitPromise) {
+        walletSetupActive = false;
+        for (const waiter of pendingWalletWaiters.splice(0)) waiter.reject(walletSetupClosedError());
+      }
     }
 
     if (closedWindowId === popupWindowId) {
