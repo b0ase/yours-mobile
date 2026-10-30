@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useContext, useState } from 'react';
+import { BottomMenuContext } from '../contexts/BottomMenuContext';
 import type { SendErrorInfo } from '../utils/sendErrors';
 import { errorReportText } from '../mobile/errors/errorReport';
 
@@ -9,6 +10,23 @@ import { errorReportText } from '../mobile/errors/errorReport';
 export const SendErrorNotice = ({ info, onClose }: { info: SendErrorInfo; onClose: () => void }) => {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const menu = useContext(BottomMenuContext);
+  const [switchState, setSwitchState] = useState<'idle' | 'busy' | 'done' | string>('idle');
+  const storageFailing = info.kind === 'storage-remote-failing';
+  // One tap: the same STORAGE_SET_ACTIVE_STORAGE 'local' Settings › Storage sends (merge from the remote, then flip).
+  const useThisDevice = async () => {
+    setSwitchState('busy');
+    try {
+      const r = await chrome.runtime.sendMessage({ action: 'STORAGE_SET_ACTIVE_STORAGE', target: 'local' });
+      setSwitchState(r?.success ? 'done' : String(r?.error || 'Switch failed'));
+    } catch (e) {
+      setSwitchState(e instanceof Error ? e.message : 'Switch failed');
+    }
+  };
+  const openStorage = () => {
+    onClose();
+    menu?.handleSelect('settings', 'storage');
+  };
   // Redacted, with Screen · Version · Edition · Channel appended (mobile/errors/errorReport.ts).
   const report = errorReportText(
     [
@@ -63,6 +81,28 @@ export const SendErrorNotice = ({ info, onClose }: { info: SendErrorInfo; onClos
         {info.moneyMoved === 'no' ? 'Payment not sent' : 'Payment status unclear'}
       </div>
       <div>{info.message}</div>
+      {storageFailing && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8, alignItems: 'center' }}>
+          <button
+            type="button"
+            data-testid="use-this-device"
+            style={{ ...btn, background: '#d4a017', color: '#000', border: 'none', fontWeight: 600 }}
+            disabled={switchState === 'busy' || switchState === 'done'}
+            onClick={useThisDevice}
+          >
+            {switchState === 'busy'
+              ? 'Switching…'
+              : switchState === 'done'
+                ? 'This device is active'
+                : 'Use This device'}
+          </button>
+          <button type="button" style={btn} onClick={openStorage}>
+            Settings › Storage
+          </button>
+          {switchState === 'done' && <span>Now send again.</span>}
+          {!['idle', 'busy', 'done'].includes(switchState) && <span>{switchState}</span>}
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
         <button type="button" style={btn} onClick={() => setOpen((o) => !o)}>
           {open ? 'Hide details' : 'Details'}

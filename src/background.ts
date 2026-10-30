@@ -151,6 +151,11 @@ import { refusalFor } from './services/broadcastRefusals';
 import { createExcludingUnprovable } from './services/unprovableCoinRetry';
 import { siteActionError } from './services/siteActionError';
 import { createWithSpentRetry, retryEligible } from './services/spentRetry';
+import { createWithStorageFailover, failoverEligible } from './services/storageFailover';
+import { isTruthyRequiredError } from './services/nullTxidRepair';
+
+/** Set once the message handlers are built (switchActiveStorage below); used by the createAction failover. */
+let switchActiveStorageRef: ((ctx: AccountContext, target: 'local' | string) => Promise<StorageConfig>) | undefined;
 import {
   AUTO_RESYNC_DELAY_MS,
   AUTO_RESYNC_LIGHT_GAP_MS,
@@ -2885,6 +2890,7 @@ if (!(
       // Storage management (popup internal)
       'STORAGE_GET_INFO',
       'STORAGE_SYNC_BACKUPS',
+      'STORAGE_REPAIR_WALLET',
       'STORAGE_REPAIR_SYNC',
       'STORAGE_RECOVER_MINED',
       'STORAGE_RECOVER_TXID',
@@ -3257,6 +3263,23 @@ if (!(
           return true;
         case 'STORAGE_SYNC_BACKUPS':
           processStorageSyncBackups(sendResponse);
+          return true;
+        case 'STORAGE_REPAIR_WALLET':
+          (async () => {
+            try {
+              await ensureWallet(true);
+              if (!accountContext) throw new Error('Wallet not initialized');
+              const data = await accountContext.repairNullTxids();
+              notifyBalanceUpdate();
+              sendResponse({ type: 'STORAGE_REPAIR_WALLET', success: true, data });
+            } catch (error) {
+              sendResponse({
+                type: 'STORAGE_REPAIR_WALLET',
+                success: false,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          })();
           return true;
         case 'STORAGE_REPAIR_SYNC':
           processStorageRepairSync(sendResponse, Array.isArray(message.tokenIds) ? message.tokenIds : undefined);
@@ -4132,6 +4155,20 @@ if (!(
     return next;
   };
 
+  /** Make `target` the active store (toolbox merge-then-flip) and persist it in the account's storageConfig. */
+  const switchActiveStorage = async (ctx: AccountContext, target: 'local' | string): Promise<StorageConfig> => {
+    await ctx.setActiveStorage(target);
+    return updateStorageConfig((current) => {
+      if (target === 'local') {
+        return { ...current, activeRemote: undefined, remotes: current.remotes ?? [] };
+      }
+      const remotes = current.remotes ?? [];
+      const withTarget = remotes.includes(target) ? remotes : [...remotes, target];
+      return { ...current, activeRemote: target, remotes: withTarget };
+    });
+  };
+  switchActiveStorageRef = switchActiveStorage;
+
   const processStorageSetActiveStorage = async (target: 'local' | string, sendResponse: CallbackResponse) => {
     try {
       await ensureWallet(true);
@@ -4152,15 +4189,7 @@ if (!(
       return;
     }
     try {
-      await accountContext.setActiveStorage(target);
-      const nextConfig = await updateStorageConfig((current) => {
-        if (target === 'local') {
-          return { ...current, activeRemote: undefined, remotes: current.remotes ?? [] };
-        }
-        const remotes = current.remotes ?? [];
-        const withTarget = remotes.includes(target) ? remotes : [...remotes, target];
-        return { ...current, activeRemote: target, remotes: withTarget };
-      });
+      const nextConfig = await switchActiveStorage(accountContext, target);
       sendResponse({
         type: 'STORAGE_SET_ACTIVE_STORAGE',
         success: true,
@@ -6340,7 +6369,31 @@ if (!(
           // (services/unprovableCoinRetry.ts, TERRORNODE audit 29 Oct 2026).
           create: () =>
             createExcludingUnprovable({
-              create: () => signer.createAction(args, message.originator),
+              // Online storage answering WERR_INTERNAL / 5xx twice: send from This device (services/storageFailover.ts).
+              create: () =>
+                createWithStorageFailover({
+                  // "A truthy value is required.": change with no txid was picked. Repair the local store, retry once.
+                  create: async () => {
+                    try {
+                      return await signer.createAction(args, message.originator);
+                    } catch (e) {
+                      if (!ctxForHeal || !isTruthyRequiredError(e) || !ctxForHeal.storage.isActiveStorageProvider())
+                        throw e;
+                      const rep = await ctxForHeal.repairNullTxids().catch(() => null);
+                      console.warn('[createAction] null-txid repair before one retry:', rep);
+                      if (!rep || (!rep.txidFilled && !rep.setAside && !rep.aborted)) throw e;
+                      return signer.createAction(args, message.originator);
+                    }
+                  },
+                  remoteActive: () => !!ctxForHeal && !ctxForHeal.storage.isActiveStorageProvider(),
+                  eligible: !!ctxForHeal && failoverEligible({ continuing, args }),
+                  switchToLocal: async () => {
+                    if (!ctxForHeal || !switchActiveStorageRef) throw new Error('No local store');
+                    await switchActiveStorageRef(ctxForHeal, 'local');
+                    notifyBalanceUpdate();
+                  },
+                  log: (m, d) => console.warn(m, d ?? ''),
+                }).then((o) => o.result),
               setAside: (txid) => (ctxForHeal ? setAsideChangeOf(ctxForHeal, txid) : Promise.resolve(NOTHING_SET_ASIDE)),
               log: (m, d) => console.warn(m, d ?? ''),
             }),

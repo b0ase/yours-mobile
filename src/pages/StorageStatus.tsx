@@ -228,6 +228,8 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
   };
 
   const handleSync = () => triggerSync();
+  // Coins with no txid and stale unsigned actions on This device (services/nullTxidRepair.ts). Never broadcasts.
+  const handleRepairWallet = () => runAction('STORAGE_REPAIR_WALLET', {}, 'Wallet repaired. Try your send again.');
 
   const handleSetActive = async (target: 'local' | string) => {
     setBusyAction('active');
@@ -773,6 +775,18 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
           <RefreshCw size={11} className={syncing ? 'animate-spin' : ''} />
           {syncing ? 'Syncing...' : 'Sync Now'}
         </motion.button>
+        {localIsActive && (
+          <motion.button
+            whileTap={{ scale: 0.98 }}
+            data-testid="repair-wallet"
+            onClick={busy ? undefined : handleRepairWallet}
+            disabled={busy}
+            className="flex items-center justify-center gap-2 w-full mt-2 py-2 rounded-lg text-xs font-medium outline-none cursor-pointer disabled:opacity-50"
+            style={{ color: contrast, background: 'transparent', border: `1px solid ${gray}40` }}
+          >
+            Repair wallet (fix coins that stop sends)
+          </motion.button>
+        )}
       </div>
 
       {/* Backup storage */}

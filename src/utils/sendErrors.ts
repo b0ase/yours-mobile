@@ -21,6 +21,7 @@ export type SendErrorKind =
   | 'locked'
   | 'cancelled'
   | 'wallet-internal'
+  | 'storage-remote-failing'
   | 'unknown';
 
 export interface SendErrorInfo {
@@ -166,6 +167,15 @@ export function classifySendError(e: unknown, phase: 'before-sign' | 'send' = 's
     return make(
       'network',
       'The wallet could not reach a Bitcoin service it needs to build this payment (busy or offline). Nothing was sent. Wait a minute and try again.',
+      'no',
+    );
+
+  // The background's storage failover could not send from This device (services/storageFailover.ts): say which
+  // storage is failing and offer the one-tap switch (SendErrorNotice).
+  if (/WERR_STORAGE_REMOTE_FAILING|online storage \(.*\) is failing/i.test(raw))
+    return make(
+      'storage-remote-failing',
+      "bWalletX's online storage (wallet.1sat.app) is failing for your account. Nothing was sent. Switch to This device in Settings › Storage, then try again.",
       'no',
     );
 
