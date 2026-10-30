@@ -62,6 +62,52 @@ describe('swap site calls', () => {
     expect(asked).toBe(false);
     expect((r as { error: string }).error).toMatch(/over the \$10 cap/);
   });
+  test('priceSats terms still apply the USD cap with an on-demand rate', async () => {
+    let asked = false;
+    const r = await runSiteSwap(
+      SWAP_OFFER_ACTION,
+      'https://www.bchatx.com',
+      {
+        terms: {
+          ref: terms.ref,
+          docHash: terms.docHash,
+          tokenId: terms.tokenId,
+          amount: '100',
+          priceSats: 100_000_000,
+        },
+      },
+      async () => ({
+        ctx: {} as never,
+        quote: async () => ({ rate: 25, source: 'WhatsOnChain BSV/USD rate' }),
+        ask: async () => (asked = true),
+        store: { get: async () => undefined, put: async () => undefined },
+      }),
+    );
+    expect(r.success).toBe(false);
+    expect(asked).toBe(false);
+    expect((r as { error: string }).error).toMatch(/cap/);
+  });
+  test('no rate from any source: clear NO_RATE error, no sheet', async () => {
+    let asked = false;
+    const msg = "Couldn't get the BSV price (tried WhatsOnChain, CoinGecko). Check your connection and try again";
+    const r = await runSiteSwap(
+      SWAP_OFFER_ACTION,
+      'https://www.bchatx.com',
+      {
+        terms: { ref: terms.ref, docHash: terms.docHash, tokenId: terms.tokenId, amount: '100', priceSats: 11_852_554 },
+      },
+      async () => ({
+        ctx: {} as never,
+        quote: async () => {
+          throw new Error(msg);
+        },
+        ask: async () => (asked = true),
+        store: { get: async () => undefined, put: async () => undefined },
+      }),
+    );
+    expect(r).toEqual({ success: false, error: msg, code: 'NO_RATE' });
+    expect(asked).toBe(false);
+  });
   test('an accept already sent on this device returns its txid and never re-sends', async () => {
     const r = await runSiteSwap(SWAP_ACCEPT_ACTION, 'https://www.bchatx.com', { terms, offer: {} }, async () => ({
       ctx: {} as never,
