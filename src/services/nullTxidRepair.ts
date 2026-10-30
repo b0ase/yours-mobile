@@ -18,7 +18,7 @@
 export const STALE_MS = 10 * 60 * 1000;
 
 export const isTruthyRequiredError = (e: unknown): boolean =>
-  /A truthy value is required/i.test(
+  /A truthy value is required|action batch output is missing its txid/i.test(
     e instanceof Error ? e.message : String((e as { message?: unknown })?.message ?? e),
   );
 
@@ -44,6 +44,8 @@ export interface NullTxidRepairDeps {
   pendingActions: () => Promise<RepairTx[]>;
   updateOutput: (outputId: number, patch: { txid?: string; spendable?: boolean }) => Promise<void>;
   abortAction: (reference: string) => Promise<void>;
+  /** Drop an action-batch reservation (action_batch_outputs) held on this output, if any. */
+  releaseReservation?: (outputId: number) => Promise<boolean>;
   knownOnChain: (txid: string) => Promise<boolean>;
   now?: () => number;
   log?: (m: string, d?: unknown) => void;
@@ -54,6 +56,8 @@ export interface NullTxidRepairReport {
   setAside: number;
   aborted: number;
   skipped: number;
+  /** action_batch_outputs entries dropped because they pointed at an output with no txid. */
+  reservationsReleased?: number;
 }
 
 const TXID = /^[0-9a-f]{64}$/i;
@@ -65,6 +69,8 @@ export async function repairNullTxids(d: NullTxidRepairDeps): Promise<NullTxidRe
 
   for (const o of await d.spendableOutputs()) {
     if (o.txid && TXID.test(o.txid)) continue;
+    if (d.releaseReservation && (await d.releaseReservation(o.outputId).catch(() => false)))
+      r.reservationsReleased = (r.reservationsReleased ?? 0) + 1;
     const tx = await d.transaction(o.transactionId);
     if (tx?.txid && TXID.test(tx.txid) && ['completed', 'unproven', 'sending'].includes(tx.status)) {
       await d.updateOutput(o.outputId, { txid: tx.txid });
@@ -97,6 +103,6 @@ export async function repairNullTxids(d: NullTxidRepairDeps): Promise<NullTxidRe
       r.skipped++;
     }
   }
-  if (r.txidFilled || r.setAside || r.aborted) log('[nullTxidRepair] repaired', r);
+  if (r.txidFilled || r.setAside || r.aborted || r.reservationsReleased) log('[nullTxidRepair] repaired', r);
   return r;
 }

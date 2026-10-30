@@ -1,5 +1,5 @@
 diff --git a/out/index.client.cjs b/out/index.client.cjs
-index af2c513176b1265c5a02d8242ac87fc1c6805ad1..3170cd4b096573b8359c0897a2ceb182aaf7a93d 100644
+index af2c513176b1265c5a02d8242ac87fc1c6805ad1..053b27b58df5be83577360062be98bab2527ae8e 100644
 --- a/out/index.client.cjs
 +++ b/out/index.client.cjs
 @@ -3593,6 +3593,10 @@ var EntityOutputTagMap = class EntityOutputTagMap extends EntityBase {
@@ -45,6 +45,24 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..3170cd4b096573b8359c0897a2ceb182
  		const { vargs } = this.validateAuthAndArgs(args, validateListOutputsArgs);
  		if (this.autoKnownTxids && !vargs.knownTxids) vargs.knownTxids = this.getKnownTxids();
  		const storageArgs = this.actionBatch.hasWorkspace && vargs.basket !== "893b7646de0e1c9f741bd6e9169b76a8847ae34adef7bef1e6a285371206d2e8" && !vargs.tags.includes("893b7646de0e1c9f741bd6e9169b76a8847ae34adef7bef1e6a285371206d2e8") ? {
+@@ -17560,7 +17575,7 @@ async function beginActionBatch(storage, auth, args) {
+ 	const explicit = await resolveExplicitOutputs(storage, userId, args.firstAction, outputScriptLengths != null);
+ 	const noSendChange = await resolveNoSendChangeOutputs(storage, userId, args.firstAction);
+ 	const fixedOutputIds = new Set([...explicit.outputs, ...noSendChange.outputs].map((output) => output.outputId));
+-	const availableOutputs = (await storage.findAvailableManagedChangeInputs(userId, changeBasket.basketId, false)).filter((output) => !fixedOutputIds.has(output.outputId));
++	const availableOutputs = (await storage.findAvailableManagedChangeInputs(userId, changeBasket.basketId, false)).filter((output) => !fixedOutputIds.has(output.outputId) && output.txid != null /* bwx: skip outputs with no txid */);
+ 	const availableStatuses = await storage.findTransactionStatusesByIds(userId, availableOutputs.map((output) => output.transactionId));
+ 	const available = availableOutputs.map((output) => ({
+ 		...output,
+@@ -17627,7 +17642,7 @@ async function extendActionBatch(storage, auth, args) {
+ 	const explicit = [...new Map(Object.values(explicitByOutpoint).filter((output) => !alreadyReserved.includes(output.outputId)).map((output) => [output.outputId, output])).values()];
+ 	if (explicit.length > remainingCapacity) throw new WERR_INVALID_PARAMETER("explicitOutpoints", `no more than ${remainingCapacity} additional reserved outputs`);
+ 	const explicitIds = new Set(explicit.map((output) => output.outputId));
+-	const availableOutputs = (await storage.findAvailableManagedChangeInputs(userId, basket.basketId, false)).filter((output) => !explicitIds.has(output.outputId));
++	const availableOutputs = (await storage.findAvailableManagedChangeInputs(userId, basket.basketId, false)).filter((output) => !explicitIds.has(output.outputId) && output.txid != null /* bwx: skip outputs with no txid */);
+ 	const availableStatuses = await storage.findTransactionStatusesByIds(userId, availableOutputs.map((output) => output.transactionId));
+ 	const available = availableOutputs.map((output) => ({
+ 		...output,
 @@ -19797,7 +19812,12 @@ async function loadIdbOutputs(query) {
  	const args = {
  		partial: {
@@ -59,6 +77,15 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..3170cd4b096573b8359c0897a2ceb182
  			spendable: true,
  			...specOp?.managedChangeOnly ? managedChangeOutputFields : {}
  		},
+@@ -20203,7 +20223,7 @@ var StorageIdb = class extends StorageProvider {
+ 			const reservationStore = dbTrx.objectStore("action_batch_outputs");
+ 			if (reservationStore.get == null) throw new WERR_INTERNAL("IndexedDB action_batch_outputs store does not support get");
+ 			const outputs = [];
+-			for (const candidate of (await this.findOutputs(args)).filter(isAutoSpendableChangeOutput)) if (await reservationStore.get(candidate.outputId) == null) outputs.push(candidate);
++			for (const candidate of (await this.findOutputs(args)).filter(isAutoSpendableChangeOutput)) if (candidate.txid != null /* bwx: skip outputs with no txid */ && await reservationStore.get(candidate.outputId) == null) outputs.push(candidate);
+ 			const output = selectCanonicalChange(outputs, targetSatoshis, exactSatoshis);
+ 			if (output != null) {
+ 				await this.updateOutput(output.outputId, {
 @@ -38451,10 +38471,19 @@ var Monitor = class Monitor {
  	async runOnce() {
  		await this.ensureEventSubscriptions();
@@ -112,7 +139,7 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..3170cd4b096573b8359c0897a2ceb182
  			await sp.insertMonitorEvent({
  				created_at: /* @__PURE__ */ new Date(),
 diff --git a/out/index.client.mjs b/out/index.client.mjs
-index 5d9233efe5b3e60fcb88b8f260eb65e871945552..4327504b5a5a0392f03e581870d5143de8d899c1 100644
+index 5d9233efe5b3e60fcb88b8f260eb65e871945552..0f91906598e06c4962b5eef60b0bf19162326643 100644
 --- a/out/index.client.mjs
 +++ b/out/index.client.mjs
 @@ -3558,6 +3558,10 @@ var EntityOutputTagMap = class EntityOutputTagMap extends EntityBase {
@@ -158,6 +185,24 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..4327504b5a5a0392f03e581870d5143d
  		const { vargs } = this.validateAuthAndArgs(args, validateListOutputsArgs$1);
  		if (this.autoKnownTxids && !vargs.knownTxids) vargs.knownTxids = this.getKnownTxids();
  		const storageArgs = this.actionBatch.hasWorkspace && vargs.basket !== "893b7646de0e1c9f741bd6e9169b76a8847ae34adef7bef1e6a285371206d2e8" && !vargs.tags.includes("893b7646de0e1c9f741bd6e9169b76a8847ae34adef7bef1e6a285371206d2e8") ? {
+@@ -17525,7 +17540,7 @@ async function beginActionBatch(storage, auth, args) {
+ 	const explicit = await resolveExplicitOutputs(storage, userId, args.firstAction, outputScriptLengths != null);
+ 	const noSendChange = await resolveNoSendChangeOutputs(storage, userId, args.firstAction);
+ 	const fixedOutputIds = new Set([...explicit.outputs, ...noSendChange.outputs].map((output) => output.outputId));
+-	const availableOutputs = (await storage.findAvailableManagedChangeInputs(userId, changeBasket.basketId, false)).filter((output) => !fixedOutputIds.has(output.outputId));
++	const availableOutputs = (await storage.findAvailableManagedChangeInputs(userId, changeBasket.basketId, false)).filter((output) => !fixedOutputIds.has(output.outputId) && output.txid != null /* bwx: skip outputs with no txid */);
+ 	const availableStatuses = await storage.findTransactionStatusesByIds(userId, availableOutputs.map((output) => output.transactionId));
+ 	const available = availableOutputs.map((output) => ({
+ 		...output,
+@@ -17592,7 +17607,7 @@ async function extendActionBatch(storage, auth, args) {
+ 	const explicit = [...new Map(Object.values(explicitByOutpoint).filter((output) => !alreadyReserved.includes(output.outputId)).map((output) => [output.outputId, output])).values()];
+ 	if (explicit.length > remainingCapacity) throw new WERR_INVALID_PARAMETER("explicitOutpoints", `no more than ${remainingCapacity} additional reserved outputs`);
+ 	const explicitIds = new Set(explicit.map((output) => output.outputId));
+-	const availableOutputs = (await storage.findAvailableManagedChangeInputs(userId, basket.basketId, false)).filter((output) => !explicitIds.has(output.outputId));
++	const availableOutputs = (await storage.findAvailableManagedChangeInputs(userId, basket.basketId, false)).filter((output) => !explicitIds.has(output.outputId) && output.txid != null /* bwx: skip outputs with no txid */);
+ 	const availableStatuses = await storage.findTransactionStatusesByIds(userId, availableOutputs.map((output) => output.transactionId));
+ 	const available = availableOutputs.map((output) => ({
+ 		...output,
 @@ -19762,7 +19777,12 @@ async function loadIdbOutputs(query) {
  	const args = {
  		partial: {
@@ -172,6 +217,15 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..4327504b5a5a0392f03e581870d5143d
  			spendable: true,
  			...specOp?.managedChangeOnly ? managedChangeOutputFields : {}
  		},
+@@ -20168,7 +20188,7 @@ var StorageIdb = class extends StorageProvider {
+ 			const reservationStore = dbTrx.objectStore("action_batch_outputs");
+ 			if (reservationStore.get == null) throw new WERR_INTERNAL("IndexedDB action_batch_outputs store does not support get");
+ 			const outputs = [];
+-			for (const candidate of (await this.findOutputs(args)).filter(isAutoSpendableChangeOutput)) if (await reservationStore.get(candidate.outputId) == null) outputs.push(candidate);
++			for (const candidate of (await this.findOutputs(args)).filter(isAutoSpendableChangeOutput)) if (candidate.txid != null /* bwx: skip outputs with no txid */ && await reservationStore.get(candidate.outputId) == null) outputs.push(candidate);
+ 			const output = selectCanonicalChange(outputs, targetSatoshis, exactSatoshis);
+ 			if (output != null) {
+ 				await this.updateOutput(output.outputId, {
 @@ -38416,10 +38436,19 @@ var Monitor = class Monitor {
  	async runOnce() {
  		await this.ensureEventSubscriptions();

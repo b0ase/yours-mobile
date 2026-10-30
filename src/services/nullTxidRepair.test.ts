@@ -58,3 +58,22 @@ describe('repairNullTxids', () => {
     expect(isTruthyRequiredError(new Error('Insufficient funds'))).toBe(false);
   });
 });
+
+describe('action batch reservations', () => {
+  it('releases a reservation held on an output with no txid and retries on the batch error', async () => {
+    const released: number[] = [];
+    const r = await repairNullTxids({
+      spendableOutputs: async () => [{ outputId: 7, transactionId: 9, txid: null, spendable: true }],
+      transaction: async () => undefined,
+      pendingActions: async () => [],
+      updateOutput: async () => undefined,
+      abortAction: async () => undefined,
+      releaseReservation: async (id) => (released.push(id), true),
+      knownOnChain: async () => false,
+    });
+    expect(released).toEqual([7]);
+    expect(r.reservationsReleased).toBe(1);
+    expect(r.setAside).toBe(1);
+    expect(isTruthyRequiredError(new Error('action batch output is missing its txid'))).toBe(true);
+  });
+});
