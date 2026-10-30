@@ -1,4 +1,5 @@
 import { TipButton } from '../tip/TipButton';
+import { showPublicBHint, toPrivateB, PUBLIC_B_HINT, PRIVATE_B_ACTION } from '../chat/askBHint';
 import bGlyph from '../brand/bwallet-glyph.svg';
 import { B_OUTLINE_D, B_OUTLINE_VIEWBOX } from '../brand/bOutline';
 import { mergeChatRooms } from './tabBadges';
@@ -1415,6 +1416,26 @@ const Conversation = ({
                 requestAnimationFrame(() => composer.current?.focus());
               }}
             />
+          )}
+          {/* $b is public (owner, 28 Oct 2026): say so where someone else would see it, and offer /b. */}
+          {showPublicBHint(draft, members) && (
+            <div
+              className="px-4 pt-1 text-[12px] shrink-0 flex items-center gap-2"
+              style={{ color: MUTED, background: '#0b0b0b' }}
+            >
+              <span className="min-w-0">{PUBLIC_B_HINT} ·</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setDraft((d) => toPrivateB(d));
+                  requestAnimationFrame(() => composer.current?.focus());
+                }}
+                className="shrink-0 font-semibold"
+                style={{ color: GOLD }}
+              >
+                {PRIVATE_B_ACTION}
+              </button>
+            </div>
           )}
           {mustPay(charge) && (
             <div className="px-4 pt-1 text-[11px] shrink-0" style={{ color: MUTED, background: '#0b0b0b' }}>

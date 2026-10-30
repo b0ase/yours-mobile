@@ -36,13 +36,16 @@ export const ObsidianHero = ({
   onPick,
   compact = false,
   extra = [],
+  options,
 }: {
   onPick: (prompt: string) => void;
   compact?: boolean;
   extra?: Option[];
+  /** Context lines in place of the default ones (e.g. the empty chat pane, chat/askBHint.ts). */
+  options?: Option[];
 }) => {
   const [still] = useState(prefersReducedMotion);
-  const lines = [...OPTIONS, ...extra];
+  const lines = options?.length ? options : [...OPTIONS, ...extra];
   // Clock-driven: the line index and fade come from one page-load clock, so re-renders never stack timers
   // or reset to "Ask b" (owner, 12 Oct 2026: fades glitching).
   const [now, setNow] = useState(() => Date.now());
