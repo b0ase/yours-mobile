@@ -20,7 +20,7 @@ import {
   type OneSatContext,
 } from '@1sat/actions';
 import { Beef, P2PKH, PublicKey, Transaction, Utils, type WalletProtocol } from '@bsv/sdk';
-import { assertNotPaused } from '../../config/killSwitch';
+import { FeaturePausedError, assertNotPaused } from '../../config/killSwitch';
 import { withBroadcastNow } from '../../../services/bigDelayed';
 import { guardedSendBsv21 } from '../../../services/tokenSpendGuard';
 import { checkedContext } from '../checkedWallet';
@@ -433,19 +433,109 @@ export async function offerSwap(
 
 /** Local record per contract ref: written BEFORE the spend and again with the txid before the room is told. */
 export type SwapRecord = { ref: string; state: 'signing' | 'sent'; txid?: string; beef?: string; at: number };
-export type SwapStore = { get(ref: string): Promise<SwapRecord | undefined>; put(r: SwapRecord): Promise<void> };
+export type SwapStore = {
+  get(ref: string): Promise<SwapRecord | undefined>;
+  put(r: SwapRecord): Promise<void>;
+  /** Forget a ref: only for a 'signing' record whose spend provably never happened. */
+  drop(ref: string): Promise<void>;
+};
+
+/** A 'signing' record with no txid older than this is checked against the chain on the next accept. */
+export const STALE_SIGNING_MS = 2 * 60 * 1000;
+export const SWAP_ALREADY_STARTED =
+  'this swap was already started on this device and may have been sent. Check your activity before trying again';
+export const SWAP_ALREADY_DONE = 'This swap already completed — check History';
+
+/** The seller's held token outpoint (`txid_vout`) from the offer's partial tx, or null if unreadable. */
+export const heldOutpoint = (offer: SwapOffer): string | null => {
+  try {
+    const inp = Transaction.fromHex(offer.partialTx).inputs[0];
+    const txid = inp?.sourceTXID ?? inp?.sourceTransaction?.id('hex');
+    return txid && inp.sourceOutputIndex !== undefined ? `${txid.toLowerCase()}_${inp.sourceOutputIndex}` : null;
+  } catch {
+    return null;
+  }
+};
+
+/** Which tx spent an outpoint, from WhatsOnChain. Best effort: null when unknown. */
+export type SpentBy = (outpoint: string) => Promise<string | null>;
+export const wocSpentBy: SpentBy = async (outpoint) => {
+  const [txid, vout] = normId(outpoint).split('_');
+  try {
+    const r = await fetch(`https://api.whatsonchain.com/v1/bsv/main/tx/${txid}/${vout}/spent`);
+    if (!r.ok) return null;
+    const j = (await r.json()) as { txid?: string } | null;
+    return typeof j?.txid === 'string' && /^[0-9a-f]{64}$/i.test(j.txid) ? j.txid.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * createAction failed before anything was signed or broadcast: the user declined or the sheet expired, the
+ * trade check or kill switch refused, or the wallet rejected the arguments / had no funds. Only then may the
+ * 'signing' record go straight away; any other failure (it may have been broadcast) keeps it for the chain check.
+ */
+export const failedBeforeSigning = (e: unknown): boolean => {
+  if (e instanceof SwapError || e instanceof FeaturePausedError) return true;
+  const o = e as { code?: unknown; name?: unknown; message?: unknown } | null;
+  const text = `${String(o?.code ?? '')} ${String(o?.name ?? '')} ${String(o?.message ?? e ?? '')}`;
+  if (/broadcast|sent|network|timeout|timed out/i.test(text)) return false;
+  return /WERR_INVALID_PARAMETER|WERR_INSUFFICIENT_FUNDS|WERR_UNAUTHORIZED|WERR_NOT_ACTIVE|denied|declined|refused|rejected|cancel|expired|closed/i.test(
+    text,
+  );
+};
+
+/**
+ * A prior record for this ref. 'sent' → the earlier result. 'signing' without a txid → the earlier attempt may
+ * never have reached createAction (approval window closed, worker died): once it is older than STALE_SIGNING_MS
+ * ask the indexer whether the seller's held outpoint is still unspent. Unspent → forget the record and allow the
+ * retry; spent → it already completed (txid from WhatsOnChain when findable). Anything unsure → refuse as before.
+ */
+async function resolvePrior(
+  ctx: OneSatContext,
+  a: { offer: SwapOffer; terms: SwapTerms; store: SwapStore; spentBy?: SpentBy },
+  prior: SwapRecord,
+  at: number,
+): Promise<{ txid: string; recovered: true } | null> {
+  if (prior.state === 'sent' && prior.txid) return { txid: prior.txid, recovered: true };
+  if (prior.state !== 'signing' || prior.txid || at - prior.at < STALE_SIGNING_MS)
+    throw new SwapError(SWAP_ALREADY_STARTED);
+  const outpoint = heldOutpoint(a.offer);
+  if (!outpoint) throw new SwapError(SWAP_ALREADY_STARTED);
+  const r = await svc(ctx)
+    .bsv21.getOutputStatus(normId(a.terms.tokenId), [outpoint])
+    .catch(() => null);
+  const state = r?.[0]?.state;
+  if (state === 'valid') {
+    await a.store.drop(a.terms.ref);
+    return null;
+  }
+  if (state === 'spent') {
+    const by = await (a.spentBy ?? wocSpentBy)(outpoint).catch(() => null);
+    throw new SwapError(by ? `${SWAP_ALREADY_DONE} (transaction ${by})` : SWAP_ALREADY_DONE);
+  }
+  throw new SwapError(SWAP_ALREADY_STARTED);
+}
 
 export async function acceptSwap(
   ctx: OneSatContext,
-  a: { offer: SwapOffer; terms: SwapTerms; quote: RateQuote; ask: Ask; store: SwapStore; now?: () => number },
+  a: {
+    offer: SwapOffer;
+    terms: SwapTerms;
+    quote: RateQuote;
+    ask: Ask;
+    store: SwapStore;
+    now?: () => number;
+    spentBy?: SpentBy;
+  },
 ): Promise<{ txid: string; recovered?: boolean }> {
   const now = a.now ?? Date.now;
   const prior = await a.store.get(a.terms.ref);
-  if (prior?.state === 'sent' && prior.txid) return { txid: prior.txid, recovered: true };
-  if (prior)
-    throw new SwapError(
-      'this swap was already started on this device and may have been sent. Check your activity before trying again',
-    );
+  if (prior) {
+    const done = await resolvePrior(ctx, a, prior, now());
+    if (done) return done;
+  }
 
   const v = verifyOffer(a.offer, a.terms, a.quote.rate, now());
   await verifyPayee(a.offer, a.terms, v.sellerPayScript);
@@ -515,16 +605,28 @@ export async function acceptSwap(
   );
   // Save before commit: from here on this ref is never spent again from this device.
   await a.store.put({ ref: a.terms.ref, state: 'signing', at: now() });
-  const r = await checked.wallet.createAction(
-    withBroadcastNow({
-      description: `Swap ${a.terms.ref}`.slice(0, 50),
-      inputBEEF: v.beef,
-      inputs: [{ outpoint: dotted(v.outpoint), unlockingScript: v.unlockingScript, inputDescription: 'Seller tokens' }],
-      outputs,
-      options: { randomizeOutputs: false, acceptDelayedBroadcast: false },
-    }),
-  );
-  if (!r?.txid) throw new SwapError('the wallet did not return a transaction, so nothing was sent');
+  let r: Awaited<ReturnType<typeof checked.wallet.createAction>>;
+  try {
+    r = await checked.wallet.createAction(
+      withBroadcastNow({
+        description: `Swap ${a.terms.ref}`.slice(0, 50),
+        inputBEEF: v.beef,
+        inputs: [
+          { outpoint: dotted(v.outpoint), unlockingScript: v.unlockingScript, inputDescription: 'Seller tokens' },
+        ],
+        outputs,
+        options: { randomizeOutputs: false, acceptDelayedBroadcast: false },
+      }),
+    );
+  } catch (e) {
+    // Nothing signed or sent: the ref is free again. Otherwise keep 'signing'; the next accept checks the chain.
+    if (failedBeforeSigning(e)) await a.store.drop(a.terms.ref).catch(() => undefined);
+    throw e;
+  }
+  if (!r?.txid) {
+    await a.store.drop(a.terms.ref).catch(() => undefined);
+    throw new SwapError('the wallet did not return a transaction, so nothing was sent');
+  }
   const txid = r.txid.toLowerCase();
   await a.store.put({ ref: a.terms.ref, state: 'sent', txid, beef: r.tx ? Utils.toHex(r.tx) : undefined, at: now() });
   if (r.tx)
