@@ -15,7 +15,14 @@ const g = globalThis as Record<string, unknown>;
 const savedGlobals = Object.fromEntries(
   ['location', 'sessionStorage', 'localStorage', 'document', 'WebSocket'].map((k) => [k, g[k]]),
 );
+// Module mocks outlive this file in bun's single process too; put the real modules back the same way.
+const dappBrowserPath = new URL('../../src/mobile/dappBrowser.ts', import.meta.url).pathname;
+const storeBuildPath = new URL('../../src/mobile/storeBuild.ts', import.meta.url).pathname;
+const realDappBrowser = { ...(await import(dappBrowserPath)) };
+const realStoreBuild = { ...(await import(storeBuildPath)) };
 afterAll(() => {
+  mock.module(dappBrowserPath, () => realDappBrowser);
+  mock.module(storeBuildPath, () => realStoreBuild);
   for (const [k, v] of Object.entries(savedGlobals)) {
     if (v === undefined) delete g[k];
     else g[k] = v;
@@ -52,17 +59,19 @@ test('QR → scan → same code → connect → request reaches the wallet and t
     }
   };
 
-  mock.module(new URL('../../src/mobile/dappBrowser.ts', import.meta.url).pathname, () => ({
+  mock.module(dappBrowserPath, () => ({
+    ...realDappBrowser,
     handleSiteCall: async (origin: string, _url: string, type: string, params: unknown, paired?: boolean) => {
       expect(paired).toBe(true);
       calls.push({ origin, type, params });
       return { success: true, data: { publicKey: '02' + 'ab'.repeat(32) } };
     },
   }));
-  // Keep every real export (other modules import more than appNameFor) and pin only the app name.
-  const storeBuildPath = new URL('../../src/mobile/storeBuild.ts', import.meta.url).pathname;
-  const realStoreBuild = await import(storeBuildPath);
-  mock.module(storeBuildPath, () => ({ ...realStoreBuild, appNameFor: () => 'bWalletX' }));
+  // Keep every real export (other modules import more than appNameFor) and pin only the default app name.
+  mock.module(storeBuildPath, () => ({
+    ...realStoreBuild,
+    appNameFor: (store = false) => realStoreBuild.appNameFor(store),
+  }));
 
   const site = await import('./fixtures/site/site.ts');
   const phone = await import('../../src/mobile/pair/sessions.ts');
