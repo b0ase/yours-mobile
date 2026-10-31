@@ -644,6 +644,31 @@ describe('BMINT_NOTES_ENABLED: the bMint banknote designer is bWalletX only', ()
   });
 });
 
+describe('USER_NOTES_ENABLED: Make your own note is off by default and never in a store build', () => {
+  const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  const flagFor = (env: Record<string, string>) => {
+    const expr = /export const USER_NOTES_ENABLED: boolean =([^;]*);/s
+      .exec(src('./storeBuild.ts'))![1]
+      .replace(/import\.meta\.env/g, 'env');
+    return new Function('env', `return (${expr});`)(env) as boolean;
+  };
+  test.each([
+    [{}, false],
+    [{ VITE_CHANNEL: 'direct' }, false],
+    [{ VITE_BMINT_USER_NOTES: '1' }, true],
+    [{ VITE_BMINT_USER_NOTES: '1', VITE_STORE_BUILD: '1' }, false],
+    [{ VITE_BMINT_USER_NOTES: '1', VITE_CHANNEL: 'ios-store' }, false],
+    [{ VITE_BMINT_USER_NOTES: '1', VITE_CHANNEL: 'android-play' }, false],
+  ])('%o → %p', (env, enabled) => {
+    expect(flagFor(env)).toBe(enabled);
+  });
+  test('the studio is a lazy import behind the flag, and its hub tile is behind the literal flag', () => {
+    const page = src('./bmint/BmintPage.tsx');
+    expect(page).toMatch(/USER_NOTES_ENABLED\s*\?\s*lazy\(\(\) => import\('\.\/make\/MakeNotePage'\)\)/);
+    expect(page).toMatch(/\.\.\.\(USER_NOTES_ENABLED\s*\?/);
+  });
+});
+
 describe('PLACEMENT_ENABLED: bShares (securities) is bWalletX only', () => {
   test('off exactly when the store flag is on', async () => {
     const { PLACEMENT_ENABLED } = await import('./storeBuild');

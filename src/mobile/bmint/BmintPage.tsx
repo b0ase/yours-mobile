@@ -14,6 +14,7 @@ import {
   MARKET_ENABLED,
   RELEASES_ENABLED,
   STORE_BUILD,
+  USER_NOTES_ENABLED,
 } from '../storeBuild';
 import { isStudioOwner } from './lib/studioAccess';
 import mintMark from './assets/logos/mint-stamp.svg';
@@ -37,6 +38,8 @@ import './bmint.css';
  */
 const NotesPage = BMINT_NOTES_ENABLED ? lazy(() => import('./notes/NotesPage')) : null;
 const NotesShowcase = BMINT_NOTES_ENABLED ? lazy(() => import('./notes/NotesShowcase')) : null;
+// Make your own note (user PoWNotes, NOT official Mint notes): off by default, never in a store build (USER_NOTES_ENABLED).
+const MakeNotePage = USER_NOTES_ENABLED ? lazy(() => import('./make/MakeNotePage')) : null;
 
 // OpNS names (names/OpnsMintPage.tsx, its own chunk) renders inside the shell at /m/bmint/opns.
 const OpnsMintPage = lazy(() => import('../names/OpnsMintPage'));
@@ -93,6 +96,16 @@ const useHub = (owner: boolean) => {
             title: 'Mint names in bulk',
             sub: 'Drop a list; each name is mined into your wallet',
             to: `${BASE}/opns`,
+          },
+        ]
+      : []),
+    ...(USER_NOTES_ENABLED
+      ? [
+          {
+            id: 'make-note',
+            title: 'Make your own note',
+            sub: 'Your design, issued by you. Not an official Mint note',
+            to: `${BASE}/make`,
           },
         ]
       : []),
@@ -352,6 +365,7 @@ export const BmintPage = () => {
         <Suspense fallback={<div className="bm-body bm-msg">Loading…</div>}>
           <Routes>
             {Notes && <Route path="notes" element={<Notes />} />}
+            {MakeNotePage && <Route path="make" element={<MakeNotePage />} />}
             <Route path="opns" element={bulk ? <OpnsMintPage /> : <Navigate to="/m/names" replace />} />
             {OpnsStorePage && <Route path="store" element={<OpnsStorePage />} />}
             <Route path="mint/:type" element={<MintOpen owner={owner} />} />

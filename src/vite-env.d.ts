@@ -21,6 +21,8 @@ interface ImportMetaEnv {
   readonly VITE_ARTIST_PROGRAMME?: string;
   /** '1' = ask the fee pot to pay network fees (off by default; needs the server). */
   readonly VITE_FEE_POT?: string;
+  /** '1' = bMint "Make your own note" (user PoWNotes; off by default; never in store builds; needs bit-sign /api/bmint). */
+  readonly VITE_BMINT_USER_NOTES?: string;
   /** '1' = show "Find people you follow on X" (off by default; needs bit-sign #295 turned on). */
   readonly VITE_X_FOLLOWS_IMPORT?: string;
   /** '1' = passkey seed backup prototype + /passkey-check (off by default; never in store builds). */

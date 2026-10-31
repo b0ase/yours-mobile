@@ -438,6 +438,20 @@ export const BMINT_NOTES_ENABLED: boolean = !(
 );
 
 /**
+ * "Make your own note" (user-made PoWNotes, bmint/make/): OFF by default (VITE_BMINT_USER_NOTES=1 turns it on; it needs
+ * bit-sign's /api/bmint/* routes) and never in a store build, not even as code: a designed note reads as issuing
+ * currency (Apple 3.1.5, Play financial services). Literal env check so Vite inlines it and Rollup drops the lazy
+ * import in bmint/BmintPage.tsx. Store grep: `bwx-bmint-make|Make your own note|NOT official Mint notes`.
+ */
+export const USER_NOTES_ENABLED: boolean =
+  import.meta.env.VITE_BMINT_USER_NOTES === '1' &&
+  !(
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+  );
+
+/**
  * bShares, share registers for any company (docs/BCORP-PLACEMENT.md): the /m/bshares bApp, the Lock page Vault and the
  * Exchange "Shares" filter. Securities never ship in a store build, not even as code: the lazy imports are dropped.
  * Store grep: `bShares|BCORP-PLACEMENT|bcorp-placement|Restricted · not offered publicly|locked 2-of-2|Partnership shares|bwx partnership`.
