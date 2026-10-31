@@ -48,3 +48,6 @@ site/lib/themes.json
 build-desktop/
 src-tauri/target/
 src-tauri/gen/
+
+# Other sessions' scratch worktrees (never formatted)
+.claude/
