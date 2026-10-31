@@ -63,6 +63,30 @@ export function withNoteFee(ctx: OneSatContext, feeSats: number, address = mintF
   return { ...ctx, wallet } as OneSatContext;
 }
 
+/**
+ * Send now, never "later": @1sat/actions' Sigma step asks for acceptDelayedBroadcast, which queues the sends for a
+ * monitor the web wallet does not run, so the note was signed but never posted (31 Oct 2026, $b0asex's first note).
+ * The 2-sat anchor stays noSend and goes out with the note via sendWith.
+ */
+export function withBroadcastNow(ctx: OneSatContext): OneSatContext {
+  const now = <T extends { options?: object }>(args: T): T => ({
+    ...args,
+    options: { ...(args.options ?? {}), acceptDelayedBroadcast: false },
+  });
+  const wallet = new Proxy(ctx.wallet as WalletInterface, {
+    get(target, prop, receiver) {
+      if (prop === 'createAction')
+        return (args: CreateActionArgs, originator?: string) => target.createAction(now(args), originator);
+      if (prop === 'signAction')
+        return (args: Parameters<WalletInterface['signAction']>[0], originator?: string) =>
+          target.signAction(now(args), originator);
+      const v = Reflect.get(target, prop, receiver);
+      return typeof v === 'function' ? v.bind(target) : v;
+    },
+  });
+  return { ...ctx, wallet } as OneSatContext;
+}
+
 /** 1Sat inscription outputs start with the ord envelope: OP_FALSE OP_IF. */
 const hasOrdEnvelope = (hex: string) => /^0063/i.test(hex);
 
@@ -72,7 +96,7 @@ export type MintedNote = { txid: string; origin: string; networkSats: number | n
 export async function inscribeUserNote(ctx: OneSatContext, note: Rendered, feeSats: number): Promise<MintedNote> {
   if (!(await bapSigningKeyId(ctx.wallet as WalletInterface))) throw new Error(NO_BAP_IDENTITY);
   const meter = meterFees(ctx);
-  const res = await inscribe.execute(withNoteFee(meter.ctx, feeSats), {
+  const res = await inscribe.execute(withBroadcastNow(withNoteFee(meter.ctx, feeSats)), {
     base64Content: svgToBase64(note.svg),
     contentType: 'image/svg+xml',
     map: { ...note.map },
