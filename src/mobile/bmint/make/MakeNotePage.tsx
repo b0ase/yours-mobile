@@ -4,42 +4,54 @@ import { SendConfirmation } from '../../../components/SendConfirmation';
 import { useServiceContext } from '../../../hooks/useServiceContext';
 import { useTheme } from '../../../hooks/useTheme';
 import { estimateCost, notifyMinted } from '../../mint/mint';
-import { mintMedia } from '../../mint/mintMedia';
 import { useChatHandle } from '../../tabs/useTabBadges';
+import { loadSession, SESSION_EVENT } from '../../chat/api';
+import { inscribeUserNote, proveSigningKey } from './mintUserNote';
 import {
-  buildNoteMap,
+  cleanTitleInput,
   listNotes,
   normHandle,
   registerNote,
   renderNote,
   svgBytes,
   svgDataUrl,
-  svgToBase64,
-  USER_NOTE_COLOURWAYS,
   USER_NOTE_FACES,
-  USER_NOTE_TEMPLATES,
   validateRender,
+  type Rendered,
   type UserNote,
 } from './userNotes';
 
+const faceLabel = (f: number) => f.toLocaleString('en-GB');
+
+/** The bChatX session bearer (render + register need sign-in); follows sign-in/out. */
+const useChatToken = () => {
+  const [token, setToken] = useState<string | null>(() => loadSession()?.token ?? null);
+  useEffect(() => {
+    const on = () => setToken(loadSession()?.token ?? null);
+    window.addEventListener(SESSION_EVENT, on);
+    return () => window.removeEventListener(SESSION_EVENT, on);
+  }, []);
+  return token;
+};
+
 /**
- * /m/bmint/make: "Make your own note" (USER_NOTES_ENABLED). The user picks a template, colourway, serial, face value and
- * short text; bit-sign renders a safe SVG (shown only through <img src="data:image/svg+xml;base64,…">); the wallet
- * inscribes it with the user's own key after the normal single approval sheet; then bit-sign registers the origin.
+ * /m/bmint/make: "Make your own note" (USER_NOTES_ENABLED). The user picks a face value (which also sets the colourway),
+ * a serial and an 18-character title; bit-sign renders the SVG and its MAP (the SVG is shown only through
+ * <img src="data:image/svg+xml;base64,…">); after the single approval sheet the wallet inscribes exactly that SVG +
+ * MAP, signed with SIGMA by the user's BAP signing key (mintUserNote.ts); then bit-sign registers the origin.
  * These are NOT official Mint notes.
  */
 export const MakeNotePage = () => {
   const { apiContext, chromeStorageService } = useServiceContext();
   const { theme } = useTheme();
   const handle = normHandle(useChatHandle());
+  const token = useChatToken();
 
-  const [template, setTemplate] = useState<string>(USER_NOTE_TEMPLATES[0].id);
-  const [colourway, setColourway] = useState<string>(USER_NOTE_COLOURWAYS[0].id);
   const [serial, setSerial] = useState('1');
   const [face, setFace] = useState<number>(USER_NOTE_FACES[0]);
-  const [text, setText] = useState('');
+  const [title, setTitle] = useState('');
 
-  const [svg, setSvg] = useState<string | null>(null);
+  const [note, setNote] = useState<Rendered | null>(null);
   const [previewError, setPreviewError] = useState('');
   const [loading, setLoading] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -49,22 +61,22 @@ export const MakeNotePage = () => {
   const [notes, setNotes] = useState<UserNote[] | null>(null);
   const [notesError, setNotesError] = useState('');
 
-  const req = { template, colourway, serial: Number(serial), face, text };
+  const req = { serial: Number(serial), face, title };
   const formError = validateRender(req);
 
   // Live preview: re-render (debounced) whenever the form is valid.
   const key = JSON.stringify(req);
   useEffect(() => {
-    setSvg(null);
+    setNote(null);
     if (formError) return setPreviewError(formError);
     setPreviewError('');
     let live = true;
     const t = setTimeout(() => {
       setLoading(true);
-      void renderNote(JSON.parse(key)).then((r) => {
+      void renderNote(JSON.parse(key), { token, issuer: handle }).then((r) => {
         if (!live) return;
         setLoading(false);
-        if (r.ok) setSvg(r.value);
+        if (r.ok) setNote(r.value);
         else setPreviewError(r.error);
       });
     }, 400);
@@ -72,11 +84,11 @@ export const MakeNotePage = () => {
       live = false;
       clearTimeout(t);
     };
-  }, [key, formError]);
+  }, [key, formError, token, handle]);
 
   const loadNotes = useCallback(() => {
     if (!handle) return setNotes([]);
-    void listNotes(handle).then((r) => {
+    void listNotes({ issuer: handle }).then((r) => {
       if (r.ok) {
         setNotes(r.value);
         setNotesError('');
@@ -86,26 +98,24 @@ export const MakeNotePage = () => {
   useEffect(loadNotes, [loadNotes]);
 
   const satsPerKb = chromeStorageService.getCustomFeeRate();
-  const cost = svg ? estimateCost(svgBytes(svg), satsPerKb) : null;
+  const cost = note ? estimateCost(svgBytes(note.svg), satsPerKb) : null;
 
   const mint = async () => {
-    if (!svg || !cost || !handle) return;
+    if (!note || !cost || !handle || !token) return;
     setBusy(true);
     setError('');
     try {
-      const map = buildNoteMap({ issuer: handle, serial: req.serial, face });
-      const res = await mintMedia(apiContext, {
-        base64Content: svgToBase64(svg),
-        contentType: 'image/svg+xml',
-        title: `PoWNote #${req.serial}`,
-        description: '',
-        collection: { kind: 'none' },
-        feeSats: cost.feeSats,
-        map,
-      });
+      const res = await inscribeUserNote(apiContext, note, cost.feeSats);
       notifyMinted();
-      const reg = await registerNote(res.origin);
-      setIssued({ origin: res.origin, registered: reg.ok ? null : reg.error });
+      let registered: string | null = null;
+      try {
+        await proveSigningKey(apiContext.wallet, handle, token);
+        const reg = await registerNote(res.origin, token);
+        registered = reg.ok ? null : reg.error;
+      } catch (e) {
+        registered = e instanceof Error ? e.message : 'Could not register it';
+      }
+      setIssued({ origin: res.origin, registered });
       setConfirming(false);
       loadNotes();
     } catch (e) {
@@ -130,25 +140,19 @@ export const MakeNotePage = () => {
         </p>
       </div>
 
-      {!handle && <p className="bm-msg">Claim a $handle first: your note says who issued it.</p>}
+      {!token ? (
+        <p className="bm-msg">Sign in to bChatX first: your note says who issued it.</p>
+      ) : (
+        !handle && <p className="bm-msg">Claim a $handle first: your note says who issued it.</p>
+      )}
 
       <div style={{ display: 'grid', gap: 12, maxWidth: 520 }}>
         <label>
-          Template
-          <select className={field} value={template} onChange={(e) => setTemplate(e.target.value)}>
-            {USER_NOTE_TEMPLATES.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Colourway
-          <select className={field} value={colourway} onChange={(e) => setColourway(e.target.value)}>
-            {USER_NOTE_COLOURWAYS.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
+          Face value (sets the colours)
+          <select className={field} value={face} onChange={(e) => setFace(Number(e.target.value))}>
+            {USER_NOTE_FACES.map((f) => (
+              <option key={f} value={f}>
+                {faceLabel(f)}
               </option>
             ))}
           </select>
@@ -163,24 +167,20 @@ export const MakeNotePage = () => {
           />
         </label>
         <label>
-          Face value
-          <select className={field} value={face} onChange={(e) => setFace(Number(e.target.value))}>
-            {USER_NOTE_FACES.map((f) => (
-              <option key={f} value={f}>
-                {f}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Short text (optional)
-          <input className={field} maxLength={40} value={text} onChange={(e) => setText(e.target.value)} />
+          Title (up to 18: A-Z, 0-9, space . &apos; ! -)
+          <input
+            className={field}
+            maxLength={18}
+            autoCapitalize="characters"
+            value={title}
+            onChange={(e) => setTitle(cleanTitleInput(e.target.value))}
+          />
         </label>
       </div>
 
       <section aria-label="Preview" style={{ marginTop: 16 }}>
-        {svg ? (
-          <img src={svgDataUrl(svg)} alt="Preview of your note" style={{ width: '100%', maxWidth: 520 }} />
+        {note ? (
+          <img src={svgDataUrl(note.svg)} alt="Preview of your note" style={{ width: '100%', maxWidth: 520 }} />
         ) : (
           <p className="bm-msg">{loading ? 'Drawing your note…' : previewError}</p>
         )}
@@ -201,7 +201,7 @@ export const MakeNotePage = () => {
         <button
           type="button"
           className="bw-pill bw-pill-gold py-3 px-6 font-semibold"
-          disabled={!svg || !handle || busy}
+          disabled={!note || !handle || !token || busy}
           onClick={() => setConfirming(true)}
         >
           Mint this note
@@ -220,9 +220,14 @@ export const MakeNotePage = () => {
           <div className="bm-show-grid">
             {notes.map((n) => (
               <figure key={n.origin} className="bm-show">
-                <img src={`https://ordfs.network/${n.origin}`} alt={`Note ${n.serial ?? ''}`} loading="lazy" />
+                <img
+                  src={`https://ordfs.network/${n.origin}`}
+                  alt={`Note ${n.title ?? n.serial ?? ''}`}
+                  loading="lazy"
+                />
                 <figcaption>
-                  #{n.serial ?? '?'} · {n.face ?? '?'} · Issued by ${handle}
+                  {n.title ?? 'PoWNote'} · #{n.serial ?? '?'} · {n.face ? faceLabel(n.face) : '?'} · Issued by $
+                  {n.issuer}
                 </figcaption>
               </figure>
             ))}
@@ -235,7 +240,9 @@ export const MakeNotePage = () => {
           show={confirming}
           theme={theme}
           lineItems={[
-            { address: `Inscribe your note #${req.serial} (not an official Mint note)`, amount: '' },
+            { address: `Inscribe your note "${title}" #${req.serial} (not an official Mint note)`, amount: '' },
+            { address: 'Signed with your published identity (Sigma); key stays in your wallet', amount: '' },
+            { address: 'Sigma anchor output (2 sats, spent back to your wallet)', amount: '' },
             ...(cost ? [{ address: 'Network fee (est.)', amount: '', sats: cost.networkSats }] : []),
             ...(cost && cost.feeSats > 0 ? [{ address: 'bWallet mint fee (1%)', amount: '', sats: cost.feeSats }] : []),
           ]}

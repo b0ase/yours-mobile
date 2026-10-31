@@ -1,73 +1,71 @@
 /**
  * "Make your own note" (USER_NOTES_ENABLED, storeBuild.ts): user-made PoWNotes. Pure helpers + the bit-sign client.
  *
- * Flow: POST /api/bmint/render → safe SVG made by the server's generator (users never upload SVG) → the wallet inscribes
- * it with the user's OWN key (mint/mintMedia.ts: @1sat/actions inscribe + withFeeOutput + the issuer signature, MAP +
- * AIP by the identity-derived key) → POST /api/bmint/register {origin}. GET /api/bmint/notes?issuer= lists them.
- * The server is not built yet: 404 or a network error reads as "Not open yet".
+ * Contract (bit-sign /api/bmint, owner 31 Oct 2026):
+ *   1. POST /api/bmint/render {serial, face, title} (signed in) → {svg, map}. The server's generator makes the SVG
+ *      (users never upload SVG); face (1000 | 10000 | 100000 | 1000000) also picks the colourway.
+ *   2. The wallet inscribes EXACTLY that svg (image/svg+xml) with metaData = that map, signed with SIGMA on the same
+ *      inscription output by the user's BAP signing key (mintUserNote.ts).
+ *   3. POST /api/bmint/register {origin} (signed in) → {ok, note} or {error}.
+ *   4. GET /api/bmint/notes?issuer= | ?origin= (public).
+ * The server may not be deployed yet: 404 or a network error reads as "Not open yet".
  *
  * These are NOT official Mint notes (those are issued only by The Bitcoin Corporation Mint, notes/NotesPage.tsx).
  */
 export const BMINT_API = 'https://www.bchatx.com';
 export const NOT_OPEN = 'Not open yet';
 
-export const USER_NOTE_TEMPLATES = [
-  { id: 'classic', name: 'Classic' },
-  { id: 'guilloche', name: 'Guilloché' },
-  { id: 'modern', name: 'Modern' },
-] as const;
-export const USER_NOTE_COLOURWAYS = [
-  { id: 'gold', name: 'Gold' },
-  { id: 'emerald', name: 'Emerald' },
-  { id: 'crimson', name: 'Crimson' },
-  { id: 'midnight', name: 'Midnight' },
-] as const;
-export const USER_NOTE_FACES = [1, 5, 10, 20, 50, 100] as const;
+/** Face values; each also selects the note's colourway on the server. */
+export const USER_NOTE_FACES = [1_000, 10_000, 100_000, 1_000_000] as const;
+export type UserNoteFace = (typeof USER_NOTE_FACES)[number];
 export const MAX_SERIAL = 999_999;
-export const MAX_TEXT = 40;
+export const MAX_TITLE = 18;
+export const TITLE_RE = /^[A-Z0-9 .'!-]*$/;
 export const MAX_SVG_BYTES = 200_000;
 
-export type UserNoteTemplate = (typeof USER_NOTE_TEMPLATES)[number]['id'];
-export type UserNoteColourway = (typeof USER_NOTE_COLOURWAYS)[number]['id'];
-export type RenderRequest = {
-  template: string;
-  serial: number;
-  face: number;
-  colourway: string;
-  text?: string;
+export type RenderRequest = { serial: number; face: number; title: string };
+export type NoteMap = {
+  app: 'bmint';
+  type: 'pownote';
+  issuer: string;
+  serial: string;
+  face: string;
+  title: string;
 };
+export type Rendered = { svg: string; map: NoteMap };
 
 /** A whole serial from 1 to MAX_SERIAL. */
 const okSerial = (n: number) => Math.floor(n) === n && n >= 1 && n <= MAX_SERIAL;
+const okFace = (n: number): n is UserNoteFace => (USER_NOTE_FACES as readonly number[]).includes(n);
 
-const has = <T extends { id: string }>(list: readonly T[], id: string) => list.some((t) => t.id === id);
+/** What the title box keeps as you type: upper case, allowed characters only, at most MAX_TITLE. */
+export const cleanTitleInput = (t: string): string =>
+  t
+    .toUpperCase()
+    .replace(/[^A-Z0-9 .'!-]/g, '')
+    .slice(0, MAX_TITLE);
 
-/** null when the render request is valid, else a short message for the form. */
-export function validateRender(r: RenderRequest): string | null {
-  if (!has(USER_NOTE_TEMPLATES, r.template)) return 'Pick a template';
-  if (!has(USER_NOTE_COLOURWAYS, r.colourway)) return 'Pick a colourway';
-  if (!okSerial(r.serial)) return `Serial must be a whole number from 1 to ${MAX_SERIAL}`;
-  if (!(USER_NOTE_FACES as readonly number[]).includes(r.face)) return 'Pick a face value';
-  if (r.text !== undefined) {
-    if (r.text.length > MAX_TEXT) return `Text is at most ${MAX_TEXT} characters`;
-    // Printable text only: no control characters or markup (the server renders it; keep the request plain).
-    if ([...r.text].some((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f || c === '<' || c === '>'))
-      return 'Text can only use plain characters';
-  }
+/** null when the title is valid, else a short message. */
+export function validateTitle(t: string): string | null {
+  if (!t.trim()) return 'Give the note a title';
+  if (t.length > MAX_TITLE) return `Title is at most ${MAX_TITLE} characters`;
+  if (!TITLE_RE.test(t)) return "Title can use A-Z, 0-9, space and . ' ! - only";
   return null;
 }
 
-/** The request body sent to the server: trimmed text, omitted when empty. */
-export function renderBody(r: RenderRequest): RenderRequest {
-  const text = r.text?.trim();
-  return {
-    template: r.template,
-    serial: r.serial,
-    face: r.face,
-    colourway: r.colourway,
-    ...(text ? { text } : {}),
-  };
+/** null when the render request is valid, else a short message for the form. */
+export function validateRender(r: RenderRequest): string | null {
+  if (!okSerial(r.serial)) return `Serial must be a whole number from 1 to ${MAX_SERIAL}`;
+  if (!okFace(r.face)) return 'Pick a face value';
+  return validateTitle(r.title);
 }
+
+/** The request body sent to the server: exactly {serial, face, title}, title trimmed. */
+export const renderBody = (r: RenderRequest): RenderRequest => ({
+  serial: r.serial,
+  face: r.face,
+  title: r.title.trim(),
+});
 
 /** A handle as MAP wants it: no '$', lower case, [a-z0-9._-]. null when it isn't one. */
 export function normHandle(h: string | null | undefined): string | null {
@@ -75,13 +73,22 @@ export function normHandle(h: string | null | undefined): string | null {
   return /^[a-z0-9][a-z0-9._-]{0,63}$/.test(s) ? s : null;
 }
 
-/** MAP for a user-made PoWNote: {app:"bmint", type:"pownote", issuer, serial, face}. All values strings. */
-export function buildNoteMap(f: { issuer: string; serial: number; face: number }): Record<string, string> {
-  const issuer = normHandle(f.issuer);
-  if (!issuer) throw new Error('A $handle is needed to issue a note');
-  if (!okSerial(f.serial)) throw new Error('Bad serial');
-  if (!(USER_NOTE_FACES as readonly number[]).includes(f.face)) throw new Error('Bad face value');
-  return { app: 'bmint', type: 'pownote', issuer, serial: String(f.serial), face: String(f.face) };
+/**
+ * The server's MAP, accepted only if it is exactly {app:"bmint", type:"pownote", issuer, serial, face, title} and
+ * matches what we asked for and who we are. It is inscribed as given (never rebuilt), so the server's byte check holds.
+ */
+export function acceptMap(raw: unknown, want: { issuer: string | null; req: RenderRequest }): NoteMap | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const m = raw as Record<string, unknown>;
+  const keys = Object.keys(m).sort().join(',');
+  if (keys !== 'app,face,issuer,serial,title,type') return null;
+  if (!Object.values(m).every((v) => typeof v === 'string')) return null;
+  const map = m as NoteMap;
+  if (map.app !== 'bmint' || map.type !== 'pownote') return null;
+  if (map.serial !== String(want.req.serial) || map.face !== String(want.req.face)) return null;
+  if (map.title !== want.req.title.trim().replace(/\s+/g, ' ') || validateTitle(map.title)) return null;
+  if (!normHandle(map.issuer) || (want.issuer && normHandle(map.issuer) !== want.issuer)) return null;
+  return { app: map.app, type: map.type, issuer: map.issuer, serial: map.serial, face: map.face, title: map.title };
 }
 
 /** The server's SVG, accepted only if it looks like one SVG document of sane size. Shown via <img> only. */
@@ -128,46 +135,74 @@ async function call(path: string, init?: RequestInit, f: typeof fetch = fetch): 
   return { ok: true, value: body };
 }
 
-const json = (body: unknown): RequestInit => ({
+/** POST JSON, with the bChatX session bearer when there is one (render and register need sign-in). */
+const json = (body: unknown, token?: string | null): RequestInit => ({
   method: 'POST',
-  headers: { 'content-type': 'application/json' },
+  headers: { 'content-type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
   body: JSON.stringify(body),
+  credentials: 'omit',
 });
 
-export async function renderNote(r: RenderRequest, f?: typeof fetch): Promise<ApiResult<string>> {
+export const SIGN_IN = 'Sign in to bChatX first';
+
+export async function renderNote(
+  r: RenderRequest,
+  auth: { token: string | null; issuer: string | null },
+  f?: typeof fetch,
+): Promise<ApiResult<Rendered>> {
   const bad = validateRender(r);
   if (bad) return { ok: false, error: bad };
-  const res = await call('/api/bmint/render', json(renderBody(r)), f);
+  if (!auth.token) return { ok: false, error: SIGN_IN };
+  const res = await call('/api/bmint/render', json(renderBody(r), auth.token), f);
   if (!res.ok) return res;
-  const svg = acceptSvg((res.value as { svg?: unknown } | null)?.svg);
-  return svg ? { ok: true, value: svg } : { ok: false, error: 'The preview could not be read' };
+  const v = res.value as { svg?: unknown; map?: unknown } | null;
+  const svg = acceptSvg(v?.svg);
+  const map = acceptMap(v?.map, { issuer: auth.issuer, req: r });
+  if (!svg) return { ok: false, error: 'The preview could not be read' };
+  if (!map) return { ok: false, error: 'The server sent an unexpected note record' };
+  return { ok: true, value: { svg, map } };
 }
 
-export async function registerNote(origin: string, f?: typeof fetch): Promise<ApiResult<true>> {
+export async function registerNote(origin: string, token: string | null, f?: typeof fetch): Promise<ApiResult<true>> {
   if (!isOrigin(origin)) return { ok: false, error: 'Bad origin' };
-  const res = await call('/api/bmint/register', json({ origin }), f);
+  if (!token) return { ok: false, error: SIGN_IN };
+  const res = await call('/api/bmint/register', json({ origin }, token), f);
   return res.ok ? { ok: true, value: true } : res;
 }
 
-export type UserNote = { origin: string; serial?: number; face?: number; template?: string; colourway?: string };
+export type UserNote = { origin: string; issuer: string; serial?: number; face?: number; title?: string };
 
-export async function listNotes(issuer: string, f?: typeof fetch): Promise<ApiResult<UserNote[]>> {
-  const h = normHandle(issuer);
-  if (!h) return { ok: true, value: [] };
-  const res = await call(`/api/bmint/notes?issuer=${encodeURIComponent(h)}`, undefined, f);
+/** Public list: by issuer ($handle) or by one origin. */
+export async function listNotes(
+  q: { issuer: string } | { origin: string },
+  f?: typeof fetch,
+): Promise<ApiResult<UserNote[]>> {
+  let query: string;
+  if ('origin' in q) {
+    if (!isOrigin(q.origin)) return { ok: true, value: [] };
+    query = `origin=${encodeURIComponent(q.origin.toLowerCase())}`;
+  } else {
+    const h = normHandle(q.issuer);
+    if (!h) return { ok: true, value: [] };
+    query = `issuer=${encodeURIComponent(h)}`;
+  }
+  const res = await call(`/api/bmint/notes?${query}`, undefined, f);
   if (!res.ok) return res;
-  const raw = (res.value as { notes?: unknown } | null)?.notes ?? res.value;
+  const raw = (res.value as { notes?: unknown } | null)?.notes;
   const list = Array.isArray(raw) ? raw : [];
   return {
     ok: true,
     value: list
-      .filter((n): n is Record<string, unknown> => !!n && typeof n === 'object' && isOrigin((n as UserNote).origin))
+      .filter(
+        (n): n is Record<string, unknown> =>
+          !!n && typeof n === 'object' && isOrigin((n as UserNote).origin) && !!normHandle((n as UserNote).issuer),
+      )
       .map((n) => ({
         origin: n.origin as string,
+        issuer: normHandle(n.issuer as string)!,
         ...(typeof n.serial === 'number' && { serial: n.serial }),
         ...(typeof n.face === 'number' && { face: n.face }),
-        ...(typeof n.template === 'string' && { template: n.template }),
-        ...(typeof n.colourway === 'string' && { colourway: n.colourway }),
+        ...(typeof n.title === 'string' && { title: n.title }),
       })),
   };
 }
