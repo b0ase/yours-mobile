@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Check, Github, Linkedin, Loader2 } from 'lucide-react';
+import { Check, Loader2 } from 'lucide-react';
+import { BrandMark } from './BrandMark';
 import { LINK_ACCOUNTS_ENABLED } from '../storeBuild';
 import { DEFAULT_PROVIDERS, PROVIDER_LABEL, fetchProviders, type ProviderState } from './links';
 import {
@@ -12,17 +13,7 @@ import {
   type SocialProvider,
 } from './socialLogin';
 
-const ORDER: SocialProvider[] = ['x', 'google', 'github', 'linkedin', 'ebay'];
-const Mark = ({ p }: { p: SocialProvider }) =>
-  p === 'github' ? (
-    <Github size={14} />
-  ) : p === 'linkedin' ? (
-    <Linkedin size={14} />
-  ) : (
-    <span aria-hidden className="text-[13px] font-bold">
-      {p === 'x' ? '𝕏' : p === 'google' ? 'G' : 'e'}
-    </span>
-  );
+const ORDER: SocialProvider[] = ['x', 'google', 'github', 'linkedin', 'ebay', 'handcash'];
 const SKIP_KEY = 'bw.signupLinkSkipped';
 const skipped = () => {
   try {
@@ -134,16 +125,20 @@ export const SignupLinkPanel = ({ color, gray }: { color: string; gray: string }
             type="button"
             disabled={!!busy}
             onClick={() => void go(p)}
-            className="h-10 rounded-lg text-[12px] font-semibold flex items-center justify-center gap-1.5 border cursor-pointer min-w-0"
+            aria-label={`Link ${PROVIDER_LABEL[p]}`}
+            data-testid={`signup-link-${p}`}
+            className="h-14 rounded-xl text-[11px] font-semibold flex flex-col items-center justify-center gap-1 border cursor-pointer min-w-0"
             style={{
-              background: 'transparent',
+              background: 'rgba(0,0,0,0.35)',
               color,
               borderColor: 'rgba(255,255,255,0.14)',
               opacity: busy && busy !== p ? 0.5 : 1,
             }}
           >
-            {busy === p ? <Loader2 size={14} className="animate-spin" /> : <Mark p={p} />}
-            <span className="truncate">{PROVIDER_LABEL[p]}</span>
+            <span className="h-[18px] flex items-center" style={{ color: 'var(--bw-accent)' }}>
+              {busy === p ? <Loader2 size={18} className="animate-spin" /> : <BrandMark provider={p} />}
+            </span>
+            <span className="truncate max-w-full px-1">{PROVIDER_LABEL[p]}</span>
           </button>
         ))}
       </div>
