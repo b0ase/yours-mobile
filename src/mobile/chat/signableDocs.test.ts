@@ -23,13 +23,13 @@ const prepared = (documentId: string, extra: Record<string, unknown> = {}): Chat
   event_payload: { documentId, ...extra },
   created_at: at(),
 });
-const sealed = (): ChatMessage => ({
+const sealed = (documentId?: string): ChatMessage => ({
   id: `s${n}`,
   author_handle: null,
   kind: 'event',
   event_type: 'contract_sealed',
   body: 'sealed',
-  event_payload: { by: 'bob' },
+  event_payload: documentId ? { by: 'bob', documentId } : { by: 'bob' },
   created_at: at(),
 });
 
@@ -77,11 +77,18 @@ describe('signable documents in a room', () => {
     expect(docButtonLabel('signed')).toBe('Signed · Open');
   });
 
-  test('a seal marks the newest document prepared before it', () => {
+  test('a seal naming a document marks that document sealed', () => {
+    const msgs = [prepared(A, { from_upload: 'a.html' }), prepared(B, { from_upload: 'b.html' }), sealed(A)];
+    const docs = signableDocs(msgs, 'alice');
+    expect(docs.byId.get(A)?.state).toBe('sealed');
+    expect(docs.byId.get(B)?.state).toBe('sign');
+  });
+
+  test('a seal naming no document marks nothing sealed (never guess on a contract)', () => {
     const msgs = [prepared(A, { from_upload: 'a.html' }), prepared(B, { from_upload: 'b.html' }), sealed()];
     const docs = signableDocs(msgs, 'alice');
-    expect(docs.byId.get(B)?.state).toBe('sealed');
     expect(docs.byId.get(A)?.state).toBe('sign');
+    expect(docs.byId.get(B)?.state).toBe('sign');
   });
 
   test('ignores malformed ids and other events', () => {

@@ -5,7 +5,7 @@
  * bit-sign posts a `contract_prepared` event for every signable document (room-actions.ts, room-signable.ts,
  * prepare-doc), carrying `documentId` and, for an uploaded file, `from_upload` (its file name). When a party signs,
  * prepare-doc "send" posts another `contract_prepared` for the same id with `sent_by` = the signer. `contract_sealed`
- * carries no id: it seals the document the room had pinned, which is the newest one prepared before it.
+ * marks a document sealed only when it carries that document's id (today it carries none, so nothing shows Sealed).
  *
  * Nothing here signs or seals; the button only opens bChatX's page for that document (pendingDoc.signDocUrl).
  */
@@ -28,13 +28,14 @@ export const signableDocs = (messages: readonly ChatMessage[], me: string): Sign
   const byId = new Map<string, SignableDoc>();
   const byFile = new Map<string, SignableDoc>();
   const mine = norm(me);
-  let latest: SignableDoc | null = null;
   const ordered = [...messages].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
   for (const m of ordered) {
     if (m.kind !== 'event') continue;
     const p = (m.event_payload ?? {}) as { documentId?: unknown; from_upload?: unknown; sent_by?: unknown };
     if (m.event_type === 'contract_sealed') {
-      if (latest) latest.state = 'sealed';
+      // Only when the event names the document: a guessed "Sealed" on a legal document is worse than none.
+      const sealed = typeof p.documentId === 'string' ? byId.get(p.documentId) : undefined;
+      if (sealed) sealed.state = 'sealed';
       continue;
     }
     if (m.event_type !== 'contract_prepared' || typeof p.documentId !== 'string' || !ID_RE.test(p.documentId)) continue;
@@ -48,7 +49,6 @@ export const signableDocs = (messages: readonly ChatMessage[], me: string): Sign
       byFile.set(p.from_upload, doc);
     }
     if (doc.state === 'sign' && mine && norm(p.sent_by) === mine) doc.state = 'signed';
-    latest = doc;
   }
   return { byId, byFile };
 };
