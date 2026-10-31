@@ -19,8 +19,8 @@
 import { STORE_BUILD } from '../storeBuild';
 import { b64url } from './seedBackup';
 
-/** Compile-time switch, written literally so Vite drops every hand-off path from a build without VITE_SEEDLESS=1. */
-export const HANDOFF_ENABLED: boolean = import.meta.env.VITE_SEEDLESS === '1' && !STORE_BUILD;
+/** Compile-time switch, the same flag as SEEDLESS_ENABLED (prf.ts): on unless VITE_SEEDLESS=0, never in a store build. */
+export const HANDOFF_ENABLED: boolean = import.meta.env.VITE_SEEDLESS !== '0' && !STORE_BUILD;
 
 /**
  * The extension's own passkey buttons (welcome "Sign in with a passkey", Restore's passkey row). Off until passkeys

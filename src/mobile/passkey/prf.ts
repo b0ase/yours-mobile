@@ -9,10 +9,12 @@ const IS_NATIVE = Capacitor.isNativePlatform();
 const Passkeys = registerPlugin<PasskeysPlugin>('Passkeys');
 
 /**
- * Off everywhere unless built with VITE_SEEDLESS=1, and never in a store build (the App Store / Play shells can't
- * use web passkeys for bwalletx.com anyway, see the doc). Written literally so Vite drops the code when off.
+ * On in every non-store build unless built with VITE_SEEDLESS=0 (owner, 31 Oct 2026: the welcome page's passkey
+ * buttons had vanished because no release script set VITE_SEEDLESS=1, so only hand-made builds showed them). Never in
+ * a store build (the App Store / Play shells can't use web passkeys for bwalletx.com anyway, see the doc). Written
+ * literally so Vite drops the code when off.
  */
-export const SEEDLESS_ENABLED: boolean = import.meta.env.VITE_SEEDLESS === '1' && !STORE_BUILD;
+export const SEEDLESS_ENABLED: boolean = import.meta.env.VITE_SEEDLESS !== '0' && !STORE_BUILD;
 
 /**
  * The only hosts that use the wallet's rpId (web.bwalletx.com). An explicit list, never a wildcard over

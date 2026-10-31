@@ -24,12 +24,12 @@ const nonceOf = (url: string) => new URL(url).searchParams.get('n') ?? '';
 
 describe('flag off: the hand-off does nothing', () => {
   test('a message is refused and nothing is stored', async () => {
-    const off = m; // the test environment has no VITE_SEEDLESS, so the flag is off by default
+    // The flag is on by default now (VITE_SEEDLESS=0 or a store build turns it off), so pass it off explicitly.
     const a = fakeArea();
-    const url = await off.startHandoff(a);
+    const url = await m.startHandoff(a);
     const msg = await buildHandoffMessage(nonceOf(url), '123456', WORDS);
-    expect(await off.handleExternalHandoff(msg, HANDOFF_WEB_ORIGIN, a)).toBe(false);
-    expect((await off.readHandoff(a))?.state).toBe('waiting');
+    expect(await m.handleExternalHandoff(msg, HANDOFF_WEB_ORIGIN, a, Date.now(), false)).toBe(false);
+    expect((await m.readHandoff(a))?.state).toBe('waiting');
   });
 });
 

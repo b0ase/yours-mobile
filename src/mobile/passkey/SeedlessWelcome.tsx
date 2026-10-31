@@ -58,7 +58,7 @@ export const SeedlessWelcome = () => {
           }}
         >
           <Fingerprint size={16} />
-          Continue with a passkey
+          Create new wallet with passkey
         </button>
       )}
       {passkeyOk && (
@@ -92,7 +92,7 @@ export const SeedlessWelcome = () => {
           style={{ background: 'transparent', color: contrast, borderColor: accent }}
         >
           <Fingerprint size={16} />
-          Restore with a passkey
+          Sign in with passkey
         </button>
       )}
       <p className="text-[11px] text-center m-0 px-4" style={{ color: gray }}>
