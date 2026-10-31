@@ -72,3 +72,27 @@ describe('bapSigningKeyId', () => {
     expect(await bapSigningKeyId(w([['type:id', 'seq:0']]))).toBeNull();
   });
 });
+
+describe('withBroadcastNow', () => {
+  test('forces acceptDelayedBroadcast false on createAction and signAction, keeping other options', async () => {
+    const seen: unknown[] = [];
+    const wallet = {
+      createAction: async (a: unknown) => (seen.push(a), { txid: 't' }),
+      signAction: async (a: unknown) => (seen.push(a), { txid: 't' }),
+    };
+    const { withBroadcastNow } = await import('./mintUserNote');
+    const ctx = withBroadcastNow({ wallet } as never);
+    await (ctx.wallet as never as typeof wallet).createAction({
+      description: 'x',
+      options: { noSend: true, acceptDelayedBroadcast: true },
+    });
+    await (ctx.wallet as never as typeof wallet).signAction({
+      reference: 'r',
+      options: { acceptDelayedBroadcast: true },
+    });
+    expect(seen).toEqual([
+      { description: 'x', options: { noSend: true, acceptDelayedBroadcast: false } },
+      { reference: 'r', options: { acceptDelayedBroadcast: false } },
+    ]);
+  });
+});
