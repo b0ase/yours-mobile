@@ -37,14 +37,16 @@ export type RenderRequest = {
   text?: string;
 };
 
+/** A whole serial from 1 to MAX_SERIAL. */
+const okSerial = (n: number) => Math.floor(n) === n && n >= 1 && n <= MAX_SERIAL;
+
 const has = <T extends { id: string }>(list: readonly T[], id: string) => list.some((t) => t.id === id);
 
 /** null when the render request is valid, else a short message for the form. */
 export function validateRender(r: RenderRequest): string | null {
   if (!has(USER_NOTE_TEMPLATES, r.template)) return 'Pick a template';
   if (!has(USER_NOTE_COLOURWAYS, r.colourway)) return 'Pick a colourway';
-  if (!Number.isInteger(r.serial) || r.serial < 1 || r.serial > MAX_SERIAL)
-    return `Serial must be a whole number from 1 to ${MAX_SERIAL}`;
+  if (!okSerial(r.serial)) return `Serial must be a whole number from 1 to ${MAX_SERIAL}`;
   if (!(USER_NOTE_FACES as readonly number[]).includes(r.face)) return 'Pick a face value';
   if (r.text !== undefined) {
     if (r.text.length > MAX_TEXT) return `Text is at most ${MAX_TEXT} characters`;
@@ -77,7 +79,7 @@ export function normHandle(h: string | null | undefined): string | null {
 export function buildNoteMap(f: { issuer: string; serial: number; face: number }): Record<string, string> {
   const issuer = normHandle(f.issuer);
   if (!issuer) throw new Error('A $handle is needed to issue a note');
-  if (!Number.isInteger(f.serial) || f.serial < 1 || f.serial > MAX_SERIAL) throw new Error('Bad serial');
+  if (!okSerial(f.serial)) throw new Error('Bad serial');
   if (!(USER_NOTE_FACES as readonly number[]).includes(f.face)) throw new Error('Bad face value');
   return { app: 'bmint', type: 'pownote', issuer, serial: String(f.serial), face: String(f.face) };
 }

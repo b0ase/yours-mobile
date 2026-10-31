@@ -650,7 +650,7 @@ describe('USER_NOTES_ENABLED: Make your own note is off by default and never in 
     const expr = /export const USER_NOTES_ENABLED: boolean =([^;]*);/s
       .exec(src('./storeBuild.ts'))![1]
       .replace(/import\.meta\.env/g, 'env');
-    return new Function('env', `return ${expr};`)(env) as boolean;
+    return new Function('env', `return (${expr});`)(env) as boolean;
   };
   test.each([
     [{}, false],
