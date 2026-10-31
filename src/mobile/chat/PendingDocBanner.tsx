@@ -11,12 +11,13 @@ import { openDappBrowser } from '../dappBrowser';
  * notification named (owner, 28 Oct 2026: a signable minute posted to $BCORPBOARD rang the phone, and the tap had
  * nowhere to land). Review & sign opens the room's bChatX page on that document (chat/pendingDoc.ts).
  */
-const PendingDocBanner = ({ room }: { room: ChatRoom }) => {
+const PendingDocBanner = ({ room, inChat }: { room: ChatRoom; inChat?: (docId: string) => boolean }) => {
   // Taken once, when this room opens: a tap for this room (and this document) highlights the banner.
   const [fromPush] = useState(() => takeRoomDoc(room.ticker));
   const doc = docToOffer(room, fromPush);
   const href = doc ? signDocUrl(room.ticker, doc, docHashFor(room.ticker, doc)) : null;
-  if (!href) return null;
+  // A document whose card in the chat already has its own button needs no second, unnamed one up here.
+  if (!href || !doc || inChat?.(doc)) return null;
   return (
     <div
       className="mx-3 mt-2 rounded-2xl px-3 py-2.5 flex items-center gap-3"
