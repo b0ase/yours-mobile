@@ -272,6 +272,8 @@ import {
 } from '../chat/openRooms';
 import { memberRooms } from '../chat/memberRooms';
 import PendingDocBanner from '../chat/PendingDocBanner';
+import DocSignButton from '../chat/DocSignButton';
+import { cardFileNames, docForMessage, signableDocs } from '../chat/signableDocs';
 import { MessageMenu, NewRoomSheet, OpenRoomSheet } from '../chat/OpenRoomSheets';
 import { useRoomCard } from '../chat/roomCard';
 import { RoomSettingsSheet } from '../chat/RoomSettingsSheet';
@@ -756,6 +758,9 @@ const Conversation = ({
     () => assignShades(messages.map((m) => m.author_handle).filter((h): h is string => !!h && normHandle(h) !== 'b')),
     [messages],
   );
+  // Each signable document gets its own Review & sign button on its card (chat/signableDocs.ts).
+  const roomDocs = useMemo(() => signableDocs(messages, me), [messages, me]);
+  const roomCardFiles = useMemo(() => cardFileNames(messages), [messages]);
   // $b's own replies: an outlined dark card ringed in gold, never a second yellow bubble beside yours.
   const isB = (m: { author_handle?: string | null }) => normHandle(m.author_handle ?? '') === 'b';
   const shadeOf = (h: string | null | undefined): BubbleShade =>
@@ -1024,7 +1029,7 @@ const Conversation = ({
           actions={null}
         />
       )}
-      {!peer && <PendingDocBanner room={room} />}
+      {!peer && <PendingDocBanner room={room} inChat={(id) => roomDocs.byId.has(id)} />}
       <div
         ref={scroller}
         onScroll={onScroll}
@@ -1157,13 +1162,16 @@ const Conversation = ({
               onChanged={poll}
             />
           ) : it.message.kind === 'event' ? (
-            <div key={it.key} className="flex justify-center my-2">
+            <div key={it.key} className="flex flex-col items-center my-2">
               <span
                 className="text-[11px] px-3 py-1 rounded-xl text-center max-w-[85%]"
                 style={{ background: '#141414', color: MUTED }}
               >
                 {it.message.body || 'Room update'}
               </span>
+              {docForMessage(roomDocs, it.message, roomCardFiles) && (
+                <DocSignButton ticker={room.ticker} doc={docForMessage(roomDocs, it.message, roomCardFiles)!} />
+              )}
             </div>
           ) : (
             <Fragment key={it.key}>
@@ -1317,6 +1325,9 @@ const Conversation = ({
                   ) : mediaPayload(it.message) ? (
                     <>
                       <RoomMediaBubble client={client} ticker={room.ticker} message={it.message} />
+                      {docForMessage(roomDocs, it.message, roomCardFiles) && (
+                        <DocSignButton ticker={room.ticker} doc={docForMessage(roomDocs, it.message, roomCardFiles)!} />
+                      )}
                       {it.message.body && mediaPayload(it.message)?.filename !== it.message.body && (
                         <MessageText body={it.message.body} mine={it.mine} me={me} />
                       )}
