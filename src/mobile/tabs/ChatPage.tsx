@@ -809,7 +809,7 @@ const Conversation = ({
   // Sits between TopNav (3.5rem) and the tab bar (3.75rem) so both stay usable; sheets (z-[150]) still clear it.
   return createPortal(
     <div
-      className="fixed z-[110] flex flex-col"
+      className="bw-room-view fixed z-[110] flex flex-col"
       style={{
         display: offScreen ? 'none' : undefined,
         // Wide web layout (wide/wide.css) sets these so the room opens beside the room list.

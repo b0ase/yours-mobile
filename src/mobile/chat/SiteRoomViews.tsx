@@ -44,7 +44,7 @@ export const SiteRoomChip = () => {
         handleSelect(asMenuItem('chat'));
         requestRoomByTicker(r.ticker, false);
       }}
-      className="fixed z-[900] border-0 rounded-full px-3 py-1.5 text-xs font-semibold"
+      className="bw-site-room-chip fixed z-[900] border-0 rounded-full px-3 py-1.5 text-xs font-semibold"
       style={{
         top: 8,
         right: 8,
