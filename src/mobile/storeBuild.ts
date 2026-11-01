@@ -632,6 +632,18 @@ export const GREETING_CARDS_ENABLED: boolean = !(
 );
 
 /**
+ * Mint sheet previews (owner's prototype, 1 Nov 2026, `mint/mintCatalog.ts`): every tile, use and line marked
+ * "Not open yet" (Link an account, Your agent, Sell or license it, Keep it for good, whole-archive upload…) and
+ * Mint a currency (notes and coins). bWalletX only: a store build shows only what works today, not even as text.
+ * Literal env check so Rollup drops the strings. Same env as STORE_BUILD.
+ */
+export const MINT_PREVIEWS_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+
+/**
  * Spicy (18+) image generation in the card / image maker: never in a store build, not even as text (Apple 1.1.4,
  * Play sexual content). Literal env check so Rollup drops `cards/spicy` UI strings. On web it also needs the
  * user's own 18+ switch (cards/spicy.ts). Same env as STORE_BUILD.
