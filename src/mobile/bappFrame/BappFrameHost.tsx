@@ -15,6 +15,8 @@ import {
 } from './bappFrame';
 import { IMMERSIVE_BUTTON_MS, useImmersiveViewport } from './immersive';
 import { reportSessionSpend } from '../wallet/live/liveBus';
+import { handleBitsignCall } from '../pair/bitsign';
+import { bitsignToXdm, parseFrameBitsignRequest } from './frameBitsign';
 import { SESSION_SPEND_TYPE } from '../wallet/live/liveLogic';
 import {
   isAllowedFrameOrigin,
@@ -117,6 +119,14 @@ export const BappFrameHost = () => {
       // Live balance: a framed bApp reporting spends from a session it funded (docs/LIVE-BALANCE.md). Display only.
       if ((e.data as { type?: unknown } | null)?.type === SESSION_SPEND_TYPE) {
         void reportSessionSpend(e.origin, e.data);
+        return;
+      }
+      // bit-sign phone signing (frameBitsign.ts): the native pad over the frame; returns a drawing only.
+      const sig = parseFrameBitsignRequest(e.data, e.origin);
+      if (sig) {
+        void handleBitsignCall(sig.call, sig.args, e.origin).then((reply) =>
+          win.postMessage(bitsignToXdm(sig.id, reply), e.origin),
+        );
         return;
       }
       const req = parseXdmRequest(e.data);
