@@ -11,6 +11,7 @@ import {
   entryAmount,
   entryLabel,
   fmtCredits,
+  fmtMinor,
   fmtPence,
   lowBalanceText,
   parseCreditsInfo,
@@ -211,5 +212,25 @@ describe('creditLines', () => {
     expect(CREDITS_CARD_TITLE).toBe('Credits');
     expect(creditLines(12.7)).toEqual([{ type: 'bcredits', label: 'bCredits — pay for b', balance: 12 }]);
     expect(creditLines(-3)[0].balance).toBe(0);
+  });
+});
+
+describe('credits currency (1 Nov 2026)', () => {
+  test('server currency is read; missing means pence (old servers)', () => {
+    expect(parseCreditsInfo({ currency: 'USD' }).currency).toBe('USD');
+    expect(parseCreditsInfo({ currency: 'GBP' }).currency).toBe('GBP');
+    expect(parseCreditsInfo({}).currency).toBe('GBP');
+    expect(parseCreditsInfo({ currency: 'EUR' }).currency).toBe('GBP');
+  });
+  test('amounts show in the server currency', () => {
+    expect(fmtMinor(40, 'USD')).toBe('40¢');
+    expect(fmtMinor(100, 'USD')).toBe('$1');
+    expect(fmtMinor(1250, 'USD')).toBe('$12.50');
+    expect(fmtMinor(40, 'GBP')).toBe('40p');
+    expect(fmtMinor(2000, 'GBP')).toBe('£20');
+  });
+  test('typed amounts accept $ as well as £', () => {
+    expect(parsePounds('$5')).toBe(500);
+    expect(parsePounds('£5.50')).toBe(550);
   });
 });

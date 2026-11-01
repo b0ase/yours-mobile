@@ -41,7 +41,8 @@ const cleanWords = (s: string): string =>
       w
         .replace(/^\d+[.)]?$/, '')
         .replace(/^\d+[.)]/, '')
-        .replace(/^[^\p{L}]+|[^\p{L}]+$/gu, ''),
+        // \p{M} too: after NFKD a final accent (café, rubí) is a separate mark that must stay on the word.
+        .replace(/^[^\p{L}\p{M}]+|[^\p{L}\p{M}]+$/gu, ''),
     )
     .filter(Boolean)
     .join(' ');

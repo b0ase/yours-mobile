@@ -28,8 +28,13 @@ export const CREDITS_TERMS_FALLBACK = [
   'Top-ups pay for b. Keep it small.',
 ].join(' ');
 
+/** The server's pricing currency (bit-sign creditsCurrency, 1 Nov 2026: USD unless BCREDITS_CURRENCY=GBP). */
+export type CreditsCurrency = 'USD' | 'GBP';
+
 export interface CreditsInfo {
   enabled: boolean;
+  /** Minor units below (pencePerCredit, topupCapPence) are cents for USD, pence for GBP. */
+  currency: CreditsCurrency;
   treasury: string | null;
   pencePerCredit: number;
   topupCapPence: number;
@@ -78,6 +83,8 @@ export function parseCreditsInfo(data: unknown): CreditsInfo {
   const depositReference = isDepositReference(o.depositReference) ? o.depositReference : null;
   return {
     enabled: o.enabled === true && !!treasury && !!depositReference,
+    // A server from before 1 Nov 2026 sends no currency and priced in pence.
+    currency: o.currency === 'USD' ? 'USD' : 'GBP',
     treasury,
     pencePerCredit: pos(o.pencePerCredit, 1, 10_000),
     // Never above £20 whatever the server says: "Keep it small".
@@ -121,6 +128,14 @@ export const fmtCredits = (n: number) => {
 /** "40p" / "£1" / "£12.50" for a number of pence. */
 export const fmtPence = (pence: number) =>
   pence < 100 ? `${Math.round(pence)}p` : `£${(pence / 100).toFixed(pence % 100 ? 2 : 0)}`;
+
+/** Minor units in the server's currency: "40¢" / "$1" / "$12.50", or pence as fmtPence. */
+export const fmtMinor = (minor: number, currency: CreditsCurrency) =>
+  currency === 'GBP'
+    ? fmtPence(minor)
+    : minor < 100
+      ? `${Math.round(minor)}¢`
+      : `$${(minor / 100).toFixed(minor % 100 ? 2 : 0)}`;
 
 export const entryLabel = (e: CreditEntry) =>
   e.kind === 'deposit' ? 'Top up' : e.app === 'b' ? 'b reply' : [e.app, e.action].filter(Boolean).join(' · ') || 'Used';
@@ -172,8 +187,9 @@ export function planTopUp(
 }
 
 /** Parse the "Other amount" box in pounds ("2.50", "£3"). Returns pence or null. */
+/** A typed amount ("5", "£5", "$5.50") → minor units (pence or cents); null when it isn't one. */
 export function parsePounds(input: string): number | null {
-  const t = input.trim().replace(/^£/, '').replace(/,/g, '');
+  const t = input.trim().replace(/^[£$]/, '').replace(/,/g, '');
   if (!/^\d+(\.\d{1,2})?$/.test(t)) return null;
   const p = Math.round(Number(t) * 100);
   return p > 0 ? p : null;
