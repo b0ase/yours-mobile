@@ -141,50 +141,37 @@ describe('Mint sheet catalog (store build)', () => {
   });
 });
 
-describe('our services look like themselves', () => {
+describe('one brand system for our services', () => {
   const read = (env: Record<string, string>) => {
     const code =
-      "const m = await import('./src/mobile/mint/serviceStyles.ts'); console.log(JSON.stringify(Object.fromEntries(Object.entries(m.SERVICE_STYLES).map(([k, v]) => [k, { art: !!v.art, accent: v.accent, mark: v.mark }]))));";
+      "const m = await import('./src/mobile/mint/serviceStyles.ts'); console.log(JSON.stringify(m.SERVICE_STYLES));";
     const r = Bun.spawnSync(['bun', '-e', code], {
       env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
     });
-    return JSON.parse(r.stdout.toString()) as Record<string, { art: boolean; accent: string; mark: string }>;
+    return JSON.parse(r.stdout.toString()) as Record<string, { word: string; accent: string; onAccent: string }>;
   };
 
-  test('every service brand on a card has its own style; bMusicX is blue, bMoviesX red, bMarketX multicolour', () => {
-    const wallet = read({});
-    for (const c of MINT_CARDS)
-      for (const b of c.brands ?? []) if (b.site) expect(Object.keys(wallet)).toContain(b.name);
-    expect(wallet.bMusicX.accent).toBe('#2f6bff');
-    expect(wallet.bMoviesX).toMatchObject({ accent: '#e50914', mark: 'red' });
-    expect(wallet.bMarketX.mark).toBe('multi');
-  });
-
-  test('share art in bWalletX only; a store build draws the brand panel instead', () => {
-    const wallet = read({});
-    for (const n of ['bMusicX', 'bVideoX', 'bMoviesX', 'bPicsX', 'bWriterX', 'bDriveX', 'bVaultX', 'bStoreX'])
-      expect(wallet[n].art).toBe(true);
-    expect(wallet.bModelX.art).toBe(false);
-    for (const v of Object.values(read({ VITE_STORE_BUILD: '1' }))) expect(v.art).toBe(false);
-  });
-
-  test('a store build swaps the art module for an empty one, so no art file ships', () => {
-    const cfg = src('../../../vite.config.mobile.ts');
-    expect(cfg).toMatch(
-      /src\/mobile\/mint\/serviceArtX\.ts'\)\] = resolve\(\s*__dirname,\s*'src\/mobile\/mint\/serviceArtX\.store\.ts'/,
-    );
-    expect(src('./serviceArtX.store.ts')).not.toMatch(/\.webp/);
-    expect(src('./serviceStyles.ts')).not.toMatch(/\.webp/);
-  });
-
-  test('art files are small local webp (40 KB or less)', () => {
-    const { readdirSync, statSync } = require('fs') as typeof import('fs');
-    const dir = new URL('./art/', import.meta.url);
-    const files = readdirSync(dir);
-    expect(files.length).toBeGreaterThan(0);
-    for (const f of files) {
-      expect(f).toMatch(/\.webp$/);
-      expect(statSync(new URL(f, dir)).size).toBeLessThanOrEqual(40 * 1024);
+  test('every service: the name after the b mark, X in its accent; blue bMusicX, red bMoviesX, gold for the rest', () => {
+    const all = read({});
+    for (const c of MINT_CARDS) for (const b of c.brands ?? []) if (b.site) expect(Object.keys(all)).toContain(b.name);
+    for (const [name, st] of Object.entries(all)) {
+      expect(`b${st.word}X`).toBe(name);
+      const want = name === 'bMusicX' ? '#2f6bff' : name === 'bMoviesX' ? '#e50914' : '#ffd24d';
+      expect(st.accent).toBe(want);
     }
+  });
+
+  test('preview-only services are not in a store build', () => {
+    const store = read({ VITE_STORE_BUILD: '1' });
+    for (const n of ['bVaultX', 'bStoreX', 'bMarketX']) expect(store[n]).toBeUndefined();
+    expect(store.bMusicX.word).toBe('Music');
+  });
+
+  test('no share art of ours: no art files, no art module, no per-site logos', () => {
+    const { existsSync } = require('fs') as typeof import('fs');
+    expect(existsSync(new URL('./art', import.meta.url))).toBe(false);
+    expect(existsSync(new URL('./serviceArtX.ts', import.meta.url))).toBe(false);
+    expect(src('../../../vite.config.mobile.ts')).not.toContain('serviceArtX');
+    expect(src('./ServiceBrand.tsx')).not.toMatch(/\.webp|Bebas|BMOVIES/);
   });
 });

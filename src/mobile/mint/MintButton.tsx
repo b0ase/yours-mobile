@@ -320,6 +320,8 @@ export const MintSheet = ({
     } else if ('go' in a) {
       onClose();
       navigate(a.go);
+    } else if ('site' in a) {
+      openSite?.(a.name, `https://${a.site}`);
     } else if ('upload' in a) {
       setMedia({ accept: UPLOAD_ACCEPT, label: 'a photo, video, chat or document' });
       setKindSel(null);
@@ -511,12 +513,9 @@ export const MintSheet = ({
     >
       <div
         className="flex h-[calc(100dvh_-_env(safe-area-inset-top)_-_var(--web-banner-height,0px)_-_24px)] w-full max-w-md flex-col overflow-hidden rounded-t-[22px] border sm:h-[min(860px,calc(100dvh_-_var(--web-banner-height,0px)_-_32px))] sm:max-w-[680px] sm:rounded-[22px]"
-        style={{ background: '#0e0f12', color: '#fff', borderColor: 'rgba(255,255,255,0.09)' }}
+        style={{ background: '#101216', color: '#fff', borderColor: '#262a32' }}
       >
-        <div
-          className="flex flex-none items-center gap-2 border-b px-4 py-3"
-          style={{ borderColor: 'rgba(255,255,255,0.09)' }}
-        >
+        <div className="flex flex-none items-center gap-2 border-b px-4 py-3" style={{ borderColor: '#262a32' }}>
           {/* The file mint has no Back of its own: this one returns to the card that opened it. */}
           {((step === 'choose' && views.length > 1) || (step === 'media' && !busy)) && (
             <button
@@ -529,7 +528,7 @@ export const MintSheet = ({
             </button>
           )}
           <span
-            className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-bold text-lg"
+            className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[17px] font-bold"
             style={{ color: GOLD }}
           >
             {step === 'choose'

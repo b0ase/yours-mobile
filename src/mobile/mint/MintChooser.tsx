@@ -1,18 +1,19 @@
 import {
   AppWindow,
+  ArchiveRestore,
   ArrowLeftRight,
   AtSign,
   Banknote,
-  BookOpen,
   Bot,
   Box,
   Brain,
   ChevronRight,
-  ExternalLink,
-  Clapperboard,
   Coins,
   Dna,
+  ExternalLink,
   FileSignature,
+  FileText,
+  Film,
   Globe,
   HardDrive,
   Image as ImageIcon,
@@ -20,15 +21,15 @@ import {
   Link as LinkIcon,
   Mail,
   Music,
-  Sparkles,
+  Sparkle,
   Ticket,
   TreePine,
-  Upload,
+  Video,
   type LucideIcon,
 } from 'lucide-react';
 import { MINT_PREVIEWS_ENABLED, STORE_BUILD } from '../storeBuild';
 import { BrandMark } from './BrandMark';
-import { BrandPanel, Lockup } from './ServiceBrand';
+import { Lockup, ServiceExample } from './ServiceBrand';
 import { serviceStyle, type ServiceStyle } from './serviceStyles';
 import {
   MINT_SECTIONS,
@@ -62,26 +63,27 @@ export const chooserTitle = (v: ChooserView): string =>
         : 'Mint';
 
 const GOLD = 'var(--bw-accent-hi)';
-const PANEL = '#17191E';
+const PANEL = '#15171c';
 const PANEL2 = '#1d1f25';
-const BORDER = '#3a2f0c';
-const EDGE = 'rgba(255,255,255,0.09)';
-const INK = '#f1eee6';
-const MUTED = '#a3a097';
+const BORDER = '#262a32';
+const EDGE = '#262a32';
+const INK = '#f2f2f0';
+const MUTED = '#9aa0aa';
 const DIM = '#8a877f';
 const BLUE = '#5fd0ff';
 const NOT_OPEN = MINT_PREVIEWS_ENABLED ? 'Not open yet' : '';
 
 const ICONS: Record<MintIconId, LucideIcon> = {
   link: LinkIcon,
-  upload: Upload,
-  spark: Sparkles,
+  upload: ArchiveRestore,
+  spark: Sparkle,
   card: Mail,
   pic: ImageIcon,
   music: Music,
-  film: Clapperboard,
+  film: Film,
+  video: Video,
   box: Box,
-  book: BookOpen,
+  book: FileText,
   globe: Globe,
   note: Banknote,
   coin: Coins,
@@ -111,14 +113,14 @@ type Props = {
 };
 
 export const MintChooser = ({ view, push, back, run, hasFlow, openSite }: Props) => {
-  const available = (a: MintAction) => ('flow' in a ? hasFlow(a.flow) : true);
+  const available = (a: MintAction) => ('flow' in a ? hasFlow(a.flow) : 'site' in a ? !!openSite : true);
   const usesOf = (c: MintCard): MintUse[] => (c.uses ?? []).filter((u) => available(u.action));
   // The card's main button: its own action, else the first use that works today.
   const primary = (c: MintCard): { action: MintAction; label: string } | null => {
     if (c.soon) return null;
     if (c.cta) return available(c.cta) ? { action: c.cta, label: c.ctaLabel ?? 'Start' } : null;
     const u = usesOf(c).find((x) => !isSoon(x.action));
-    return u ? { action: u.action, label: `Start: ${u.title}` } : null;
+    return u ? { action: u.action, label: `Start: ${u.title.charAt(0).toLowerCase()}${u.title.slice(1)}` } : null;
   };
   // A tile shows when it is a preview (only in preview builds) or something on it works in this build.
   const shown = (c: MintCard | undefined): c is MintCard => !!c && (!!c.soon || primary(c) !== null);
@@ -213,7 +215,7 @@ export const MintChooser = ({ view, push, back, run, hasFlow, openSite }: Props)
             <AppButton key={s.id} id={s.id} onClick={() => push({ k: 'app', id: s.id })} />
           ))}
         </AppGrid>
-        <Fine>Can&rsquo;t see yours? Any app that lets you download your data works with Upload your archive.</Fine>
+        <Fine>Can&rsquo;t see yours? Any app that lets you download your data works with Your archive.</Fine>
       </>
     );
   } else if (view.k === 'app') {
@@ -311,8 +313,8 @@ export const MintChooser = ({ view, push, back, run, hasFlow, openSite }: Props)
             <BrandStrip brands={c.brands} openSite={openSite} />
           </>
         )}
-        <h2 className="mb-1.5 mt-4 text-2xl font-bold leading-tight">{c.title}</h2>
-        <p className="m-0 mb-3.5 text-[15px] leading-normal" style={{ color: '#d6d2c7' }}>
+        <h2 className={`mb-1.5 ${svc ? 'mt-0' : 'mt-4'} text-2xl font-bold leading-tight`}>{c.title}</h2>
+        <p className="m-0 mb-3.5 text-[15px] leading-[1.45]" style={{ color: '#c9ccd2' }}>
           {c.pitch}
         </p>
         {MINT_PREVIEWS_ENABLED && c.id === 'link' && (
@@ -325,7 +327,7 @@ export const MintChooser = ({ view, push, back, run, hasFlow, openSite }: Props)
             </AppGrid>
             <Fine>
               These apps let you sign in and share your posts with another app. The rest ({uploadOnly.join(', ')}) only
-              offer a download: use Upload your archive.
+              offer a download: use Your archive.
             </Fine>
           </>
         )}
@@ -348,7 +350,7 @@ export const MintChooser = ({ view, push, back, run, hasFlow, openSite }: Props)
                 isSoon(u.action) ? (
                   <UseRow key={u.id} title={u.title} sub={u.sub} badge={NOT_OPEN} />
                 ) : (
-                  <UseRow key={u.id} title={u.title} sub={u.sub} onClick={() => run(u.action)} />
+                  <UseRow key={u.id} title={u.title} sub={u.sub} onClick={() => run(u.action)} accent={svc?.accent} />
                 ),
               )}
             </div>
@@ -401,10 +403,10 @@ const SectionTitle = ({
   openSite?: (name: string, url: string) => void;
 }) => (
   <div className="mb-2.5 mt-[22px] flex items-center justify-between gap-2">
-    <h3 className="m-0 text-xs font-semibold uppercase" style={{ color: MUTED, letterSpacing: '0.12em' }}>
+    <h3 className="m-0 text-[11px] font-bold uppercase" style={{ color: MUTED, letterSpacing: '0.12em' }}>
       {children}
     </h3>
-    {brand && <BrandRow b={brand} openSite={openSite} size={14} />}
+    {brand && <BrandRow b={brand} openSite={openSite} size={13} />}
   </div>
 );
 
@@ -506,66 +508,49 @@ const AppGrid = ({ children }: { children: React.ReactNode }) => (
   <div className="grid grid-cols-4 gap-x-1 gap-y-2 sm:grid-cols-8">{children}</div>
 );
 
-const Badge = ({ live }: { live: boolean }) =>
-  live ? (
+const Badge = ({ live, big }: { live: boolean; big?: boolean }) =>
+  live || NOT_OPEN ? (
     <span
-      className="rounded-full px-[7px] py-1 text-[9.5px] font-semibold uppercase leading-none"
-      style={{ background: 'rgba(34,211,154,0.14)', color: '#22d39a', letterSpacing: '0.06em' }}
+      className={`whitespace-nowrap rounded-full text-[10px] font-bold leading-[1.45] ${big ? 'px-2 py-[3px]' : 'px-[7px] py-[2px]'}`}
+      style={
+        live ? { background: '#0f2a1b', color: '#3ddc84' } : { background: 'rgba(255,255,255,0.08)', color: MUTED }
+      }
     >
-      Live
-    </span>
-  ) : NOT_OPEN ? (
-    <span
-      className="whitespace-nowrap rounded-full px-[7px] py-1 text-[9.5px] font-semibold uppercase leading-none"
-      style={{ background: 'rgba(255,255,255,0.08)', color: MUTED, letterSpacing: '0.06em' }}
-    >
-      {NOT_OPEN}
+      {live ? 'LIVE' : NOT_OPEN.toUpperCase()}
     </span>
   ) : null;
 
 const Tile = ({ c, onClick }: { c: MintCard; onClick: () => void }) => {
   const Icon = ICONS[c.icon];
   const svc = cardService(c);
-  // Our own services' tiles carry their mark, wordmark and tint, so the sheet reads as a family of distinct services.
   const label = !!c.brands?.length && !svc;
   return (
     <button
       type="button"
       onClick={onClick}
-      className="relative flex h-[132px] min-w-0 flex-col items-start gap-1 overflow-hidden rounded-[14px] border p-3 text-left cursor-pointer transition-transform hover:-translate-y-0.5"
-      style={{
-        borderColor: svc ? `${svc.accent}66` : BORDER,
-        background: svc ? `linear-gradient(160deg, ${svc.tint} 0%, ${PANEL} 72%)` : PANEL,
-        color: INK,
-      }}
+      className="relative flex h-[140px] min-w-0 flex-col items-start overflow-hidden rounded-[16px] border p-3 text-left cursor-pointer transition-transform hover:-translate-y-0.5"
+      style={{ borderColor: BORDER, background: PANEL, color: INK }}
     >
       <span className="absolute right-2.5 top-2.5">
         <Badge live={!c.soon} />
       </span>
-      <span className="flex h-[22px] items-center" style={{ color: svc ? svc.ink : c.id === 'upload' ? BLUE : GOLD }}>
-        <Icon size={22} />
+      <span className="flex h-[22px] items-center" style={{ color: svc?.accent ?? GOLD }}>
+        <Icon size={22} strokeWidth={1.8} />
       </span>
-      <span className="mt-1 line-clamp-2 text-[14.5px] font-semibold leading-tight">{c.title}</span>
-      <span
-        className={`${c.brands?.length ? 'line-clamp-1' : 'line-clamp-2'} text-[11.5px] leading-snug`}
-        style={{ color: MUTED }}
-      >
+      <span className="mt-2 line-clamp-2 text-[15px] font-bold leading-[1.3]">{c.title}</span>
+      <span className="w-full overflow-hidden text-ellipsis whitespace-nowrap text-[12px]" style={{ color: MUTED }}>
         {c.sub}
       </span>
       {svc && (
-        <span className="absolute bottom-2 left-3 right-3 overflow-hidden whitespace-nowrap">
+        <span className="mt-auto flex gap-2 overflow-hidden">
           {c.brands!.map((b) => {
             const st = serviceStyle(b.name);
-            return st ? (
-              <span key={b.name} className="mr-2 inline-block align-middle">
-                <Lockup s={st} size={14} />
-              </span>
-            ) : null;
+            return st ? <Lockup key={b.name} s={st} size={13} /> : null;
           })}
         </span>
       )}
       {label && (
-        <span className="absolute bottom-2 left-3 right-3 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] leading-[1.3]">
+        <span className="mt-auto w-full overflow-hidden text-ellipsis whitespace-nowrap text-[11px] leading-[1.3]">
           {c.brands!.map((b, i) => (
             <span key={b.name}>
               {i > 0 && <span style={{ color: DIM }}> · </span>}
@@ -597,16 +582,12 @@ const BrandRow = ({
 }) => {
   const st = serviceStyle(b.name);
   if (!st) return <BrandChip b={b} openSite={openSite} small={size < 18} />;
+  // Folds to '' in a store build, so the bundle has no outbound link code at all.
   const link = !STORE_BUILD && b.site && openSite ? `https://${b.site}` : '';
   const small = size < 18;
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
       <Lockup s={st} size={size} />
-      {b.role && !small && (
-        <span className="text-[13px]" style={{ color: MUTED }}>
-          {b.role}
-        </span>
-      )}
       {link && (
         <button
           type="button"
@@ -616,7 +597,6 @@ const BrandRow = ({
           style={{ color: MUTED, fontSize: small ? 11 : 13 }}
         >
           {b.site}
-          <ExternalLink size={small ? 10 : 12} color={DIM} />
         </button>
       )}
     </div>
@@ -624,8 +604,8 @@ const BrandRow = ({
 };
 
 /**
- * A card's top when it belongs to our services: each service's lockup row (its own logo, colours and type, plus its
- * domain), then its hero: the site's share art, or (store build, bModelX) its brand panel. Framed in its accent.
+ * A card's top when it belongs to our services (approved mock): the lockup at 22px, its domain and LIVE, then a blank
+ * example of the user's own item for that service (ServiceBrand.tsx), never anything of ours.
  */
 const ServiceHero = ({
   c,
@@ -637,26 +617,17 @@ const ServiceHero = ({
   openSite?: (name: string, url: string) => void;
 }) => (
   <>
-    <div className="mb-3 flex items-start justify-between gap-3">
+    <div className={`mb-3 flex justify-between gap-2.5 ${c.brands!.length > 1 ? 'items-start' : 'items-center'}`}>
       <div className="grid min-w-0 gap-2">
         {c.brands!.map((b) => (
-          <BrandRow key={b.name} b={b} openSite={openSite} size={24} />
+          <BrandRow key={b.name} b={b} openSite={openSite} size={22} />
         ))}
       </div>
-      <span className="mt-1 flex-none">
-        <Badge live={!c.soon} />
+      <span className="flex-none">
+        <Badge live={!c.soon} big />
       </span>
     </div>
-    <div
-      className="relative w-full overflow-hidden rounded-[18px] border"
-      style={{ aspectRatio: '1200 / 630', borderColor: `${s.accent}55`, background: '#000' }}
-    >
-      {s.art ? (
-        <img src={s.art} alt="" className="block h-full w-full object-cover" draggable={false} />
-      ) : (
-        <BrandPanel s={s} />
-      )}
-    </div>
+    <ServiceExample id={c.id} s={s} />
   </>
 );
 
@@ -697,7 +668,11 @@ const Art = ({
 }) => (
   <div
     className="relative grid place-items-center overflow-hidden rounded-[18px] border"
-    style={{ height, background: `radial-gradient(70% 90% at 50% 35%, ${tint}, #0b0c0e 75%)`, borderColor: EDGE }}
+    style={{
+      height,
+      background: `radial-gradient(120% 80% at 80% 0%, ${tint}, transparent 60%), #0d0f13`,
+      borderColor: EDGE,
+    }}
   >
     {badge && <span className="absolute right-3 top-3">{badge}</span>}
     {children}
@@ -710,6 +685,7 @@ const UseRow = ({
   badge,
   live,
   onClick,
+  accent,
 }: {
   title: string;
   sub: string;
@@ -718,36 +694,37 @@ const UseRow = ({
   /** A green Live chip. */
   live?: boolean;
   onClick?: () => void;
+  /** The card's service accent (its chevron). */
+  accent?: string;
 }) => (
   <button
     type="button"
     disabled={!onClick}
     onClick={onClick}
-    className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-0.5 rounded-xl border px-3.5 py-3 text-left"
+    className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 rounded-[14px] border bg-transparent px-3.5 py-3 text-left"
     style={{
       borderColor: BORDER,
-      background: PANEL,
       color: INK,
       cursor: onClick ? 'pointer' : 'default',
       opacity: onClick ? 1 : 0.62,
     }}
   >
-    <span className="flex min-w-0 flex-wrap items-center gap-2 text-sm font-semibold">
+    <span className="flex min-w-0 flex-wrap items-center gap-2 text-[15px]">
       {title}
       {live && <Badge live />}
       {badge && (
         <span
-          className="whitespace-nowrap rounded-full px-[7px] py-1 text-[9.5px] font-semibold uppercase leading-none"
-          style={{ background: 'rgba(255,255,255,0.08)', color: MUTED, letterSpacing: '0.06em' }}
+          className="whitespace-nowrap rounded-full px-[7px] py-[2px] text-[10px] font-bold uppercase leading-[1.45]"
+          style={{ background: 'rgba(255,255,255,0.08)', color: MUTED }}
         >
           {badge}
         </span>
       )}
     </span>
-    <span className="col-start-1 text-xs leading-snug" style={{ color: MUTED }}>
+    <span className="col-start-1 text-[13px] leading-snug" style={{ color: MUTED }}>
       {sub}
     </span>
-    <span className="col-start-2 row-span-2 row-start-1" style={{ color: GOLD }}>
+    <span className="col-start-2 row-span-2 row-start-1 text-[18px]" style={{ color: accent ?? GOLD }}>
       {onClick && <ChevronRight size={18} />}
     </span>
   </button>
@@ -784,7 +761,7 @@ const Foot = ({
   back: () => void;
   label: string;
   onClick?: () => void;
-  /** The card's service: its accent on the main button (gold family keeps the gold gradient). */
+  /** The card's service: its accent on the main button. */
   s?: ServiceStyle;
 }) => (
   <div
@@ -805,10 +782,7 @@ const Foot = ({
       onClick={onClick}
       className="h-[46px] min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap rounded-full border-0 px-3 text-[15px] font-bold"
       style={{
-        background:
-          s && s.accent !== '#ffd24d'
-            ? `linear-gradient(180deg, ${s.accent}, ${s.accent}cc)`
-            : 'linear-gradient(180deg, #ffe58a, #ffd24d 55%, #e0a800)',
+        background: s ? s.accent : 'linear-gradient(180deg, #ffe58a, #ffd24d 55%, #e0a800)',
         color: s ? s.onAccent : '#1a1400',
         opacity: onClick ? 1 : 0.45,
         cursor: onClick ? 'pointer' : 'not-allowed',

@@ -1,198 +1,320 @@
-import { useEffect, useId } from 'react';
-import bebasUrl from '../bmint/assets/fonts/bebas-neue-400.woff2?url';
+import { useId } from 'react';
+import { FileText, Lock } from 'lucide-react';
 import type { ServiceStyle } from './serviceStyles';
 
-/* How each of our services draws its logo and hero (owner, 1 Nov 2026); the data is in serviceStyles.ts. */
+/**
+ * The Mint sheet's brand pieces (owner-approved mock, 1 Nov 2026): one lockup for every service, and a blank example
+ * of the user's own item as each card's hero ("Your track", "Your name", today's date). Nothing of ours (titles,
+ * posters, slogans) is shown.
+ */
 
-/** bMovies' display face, self-hosted (the woff2 bMint ships), loaded once when a bMoviesX lockup first shows. */
-let bebas: Promise<void> | null = null;
-const loadBebas = () =>
-  (bebas ??= (async () => {
-    try {
-      if (typeof FontFace === 'undefined' || !document.fonts) return;
-      document.fonts.add(await new FontFace('Bebas Neue', `url(${bebasUrl})`).load());
-    } catch {
-      // offline: the fallback faces
-    }
-  })());
+const TEXT = '#f2f2f0';
+const MUT = '#9aa0aa';
+const DASH = '1px dashed #3a3f4a';
+const B_PATH = 'M45 12V44.5A33 33 0 1 1 27 72V30L45 12ZM60 57A15 15 0 1 0 60.01 57Z';
 
-const FONTS = {
-  grotesk: "'Space Grotesk', Inter, system-ui, sans-serif",
-  bebas: "'Bebas Neue', Oswald, Impact, sans-serif",
-  heavy: 'Inter, system-ui, sans-serif',
-};
-
-/** The b mark, drawn as the family draws it (bmodelx.com's mark: a chamfered stem and a bowl with its counter). */
-export const BMark = ({ kind, size, fit }: { kind: ServiceStyle['mark']; size: number; fit?: boolean }) => {
-  const id = useId().replace(/:/g, '');
-  const fill =
-    kind === 'red'
-      ? 'url(#r' + id + ')'
-      : kind === 'multi'
-        ? 'url(#m' + id + ')'
-        : kind === 'white'
-          ? '#ffffff'
-          : 'url(#g' + id + ')';
+/** The gold b mark, 1em tall (the family's path and gradient). */
+export const BMark = () => {
+  const id = 'bm' + useId().replace(/:/g, '');
   return (
     <svg
       viewBox="23 8 74 100"
-      width={fit ? undefined : size * 0.74}
-      height={fit ? '100%' : size}
+      width="0.74em"
+      height="1em"
       aria-hidden="true"
       focusable="false"
       style={{ display: 'block', flex: 'none' }}
     >
       <defs>
-        <linearGradient id={'g' + id} gradientUnits="userSpaceOnUse" x1="0" y1="12" x2="0" y2="105">
+        <linearGradient id={id} x1="0" y1="12" x2="0" y2="105" gradientUnits="userSpaceOnUse">
           <stop offset="0" stopColor="#FFE58A" />
           <stop offset=".55" stopColor="#FFD24D" />
           <stop offset="1" stopColor="#C98F00" />
         </linearGradient>
-        <linearGradient id={'r' + id} gradientUnits="userSpaceOnUse" x1="0" y1="12" x2="0" y2="105">
-          <stop offset="0" stopColor="#ff3b3b" />
-          <stop offset="1" stopColor="#b0060f" />
-        </linearGradient>
-        <linearGradient id={'m' + id} gradientUnits="userSpaceOnUse" x1="30" y1="14" x2="90" y2="104">
-          <stop offset="0" stopColor="#e53935" />
-          <stop offset=".34" stopColor="#1e6fe0" />
-          <stop offset=".64" stopColor="#f5b800" />
-          <stop offset="1" stopColor="#43a047" />
-        </linearGradient>
-        <mask id={'k' + id}>
-          <rect x="0" y="0" width="140" height="140" fill="#fff" />
-          <circle cx="60" cy="72" r="15" fill="#000" />
-        </mask>
       </defs>
-      <g fill={fill} mask={'url(#k' + id + ')'}>
-        <polygon points="45,12 45,76 27,76 27,30" />
-        <circle cx="60" cy="72" r="33" />
-      </g>
+      <path fillRule="evenodd" fill={`url(#${id})`} d={B_PATH} />
     </svg>
   );
 };
 
-const ink = (c: string): React.CSSProperties =>
-  c.startsWith('linear-gradient')
-    ? { backgroundImage: c, WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent' }
-    : { color: c };
-
-/** The service's wordmark only (no mark), at `size` px. */
-export const Wordmark = ({ s, size }: { s: ServiceStyle; size: number }) => {
-  useEffect(() => {
-    if (s.font === 'bebas') void loadBebas();
-  }, [s.font]);
-  return (
-    <span
-      className="whitespace-nowrap"
-      style={{
-        fontFamily: FONTS[s.font],
-        fontWeight: s.font === 'bebas' ? 400 : s.font === 'heavy' ? 800 : 700,
-        fontSize: s.font === 'bebas' ? size * 1.2 : size,
-        letterSpacing: s.font === 'bebas' ? '0.01em' : '-0.03em',
-        lineHeight: 1,
-      }}
-    >
-      <span style={ink(s.headInk)}>{s.head}</span>
-      <span style={ink(s.tailInk)}>{s.tail}</span>
-    </span>
-  );
-};
-
-/** Mark + wordmark, the way each site sets its logo. bVideoX sets its wordmark alone. */
+/** One lockup for every service: gold b mark, the name in white, the X in the service's accent. Inter 800. */
 export const Lockup = ({ s, size }: { s: ServiceStyle; size: number }) => (
-  <span className="inline-flex min-w-0 items-center" style={{ gap: size * 0.28 }}>
-    {s.mark !== 'white' && <BMark kind={s.mark} size={size * 1.05} />}
-    <Wordmark s={s} size={size} />
+  <span
+    className="inline-flex items-center whitespace-nowrap"
+    style={{
+      gap: '0.06em',
+      fontFamily: 'Inter, system-ui, sans-serif',
+      fontWeight: 800,
+      letterSpacing: '-0.01em',
+      lineHeight: 1,
+      fontSize: size,
+    }}
+  >
+    <BMark />
+    <span className="whitespace-nowrap">
+      <span style={{ color: TEXT }}>{s.word}</span>
+      <span style={{ color: s.accent }}>X</span>
+    </span>
   </span>
 );
 
-/**
- * The service's own hero when there is no share art (a store build, and bModelX, whose site has none): its tint and
- * visuals (bMusicX's waveform and disc, bMoviesX's film edges, bVideoX's strip, the gold family's glow) with its
- * lockup large in the middle. No pitch, no prices.
- */
-export const BrandPanel = ({ s, children }: { s: ServiceStyle; children?: React.ReactNode }) => (
-  <div
-    className="relative grid h-full w-full place-items-center overflow-hidden"
-    style={{
-      background:
-        s.panel === 'music'
-          ? 'radial-gradient(circle at 30% 40%, #0c2a5c 0%, #050f22 55%, #010101 100%)'
-          : s.panel === 'movies'
-            ? 'radial-gradient(circle at 25% 45%, #5a0008 0%, #1a0003 55%, #000 100%)'
-            : `radial-gradient(circle at 30% 40%, ${s.tint} 0%, #0b0c0e 70%, #000 100%)`,
-    }}
-  >
-    {s.panel === 'music' && (
-      <>
-        <svg
-          className="absolute inset-x-0 bottom-0"
-          width="100%"
-          height="38%"
-          preserveAspectRatio="none"
-          viewBox="0 0 120 40"
-        >
-          {Array.from({ length: 60 }, (_, i) => {
-            const h = 8 + Math.abs(Math.sin(i * 0.9) * 18 + Math.sin(i * 0.37) * 12);
-            return <rect key={i} x={i * 2} y={40 - h} width="1.1" height={h} fill="#2f6bff" opacity="0.55" />;
-          })}
-        </svg>
-        <span
-          className="absolute right-[4%] top-1/2 aspect-square h-[62%] -translate-y-1/2 rounded-full"
-          style={{
-            background: 'repeating-radial-gradient(circle, #0d0d0f 0 2px, #17181c 2px 4px)',
-            boxShadow: '0 0 0 1px rgba(79,134,255,0.35), 0 0 40px rgba(47,107,255,0.25)',
-          }}
-        >
-          <span
-            className="absolute left-1/2 top-1/2 grid aspect-square h-[30%] -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full"
-            style={{ background: '#2f6bff' }}
-          >
-            <BMark kind="white" size={18} />
-          </span>
-        </span>
-      </>
-    )}
-    {s.panel === 'movies' && (
-      <>
-        {[0, 1].map((i) => (
-          <span
-            key={i}
-            className={`absolute inset-x-0 h-3 ${i ? 'bottom-2' : 'top-2'}`}
-            style={{
-              background: 'repeating-linear-gradient(90deg, rgba(255,255,255,0.18) 0 10px, transparent 10px 22px)',
-            }}
-          />
-        ))}
-      </>
-    )}
-    {s.panel === 'video' && (
-      <span
-        className="absolute inset-x-0 bottom-0 h-[34%]"
-        style={{
-          background:
-            'repeating-linear-gradient(90deg, rgba(255,210,77,0.16) 0 64px, transparent 64px 70px), linear-gradient(0deg, rgba(0,0,0,0.6), transparent)',
-        }}
-      />
-    )}
-    {(s.panel === 'gold' || s.panel === 'market') && (
-      <span className="absolute right-[5%] top-[8%] h-[84%] opacity-[0.13]">
-        <BMark kind={s.mark === 'multi' ? 'multi' : 'gold'} size={180} fit />
-      </span>
-    )}
-    <div className={`relative flex flex-col gap-2 ${s.panel === 'movies' ? 'items-center' : 'mr-auto pl-[7%]'}`}>
-      <span className="sm:hidden">
-        <Lockup s={s} size={30} />
-      </span>
-      <span className="hidden sm:block">
-        <Lockup s={s} size={50} />
-      </span>
-      {s.tagline && (
-        <p className="m-0 max-w-[68%] text-[14px] leading-snug" style={{ color: '#a9a69c' }}>
-          {s.tagline}
-        </p>
-      )}
-      {children}
-    </div>
+const today = () => new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+
+const Ex = ({ children }: { children: string }) => (
+  <div className="mb-2.5 text-[10px] font-bold uppercase" style={{ color: MUT, letterSpacing: '0.14em' }}>
+    Example · {children}
   </div>
 );
+
+const Meta = ({ title, lines }: { title: string; lines: string[] }) => (
+  <div className="min-w-0">
+    <b className="block text-[16px]" style={{ color: TEXT }}>
+      {title}
+    </b>
+    {lines.map((l) => (
+      <span key={l} className="block text-[12px]" style={{ color: MUT }}>
+        {l}
+      </span>
+    ))}
+  </div>
+);
+
+const Play = ({ accent, size }: { accent: string; size: number }) => (
+  <span className="grid place-items-center rounded-full" style={{ width: size, height: size, background: accent }}>
+    <svg width={size * 0.4} height={size * 0.4} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M8 5v14l11-7z" fill="#fff" />
+    </svg>
+  </span>
+);
+
+const Frame = ({ on, accent, ratio }: { on?: boolean; accent: string; ratio: string }) => (
+  <i
+    className="block flex-1 rounded-[4px]"
+    style={{ aspectRatio: ratio, background: '#16181d', border: `1px solid ${on ? accent : '#2a2e36'}` }}
+  />
+);
+
+const blankBox: React.CSSProperties = {
+  background: 'linear-gradient(145deg, #1a1d24, #0f1116)',
+  border: DASH,
+  color: '#5a606c',
+};
+
+/** The waveform under "Your track" (the mock's shape, 44 bars in the accent). */
+const WAVE = Array.from(
+  { length: 44 },
+  (_, i) => 20 + Math.round(80 * Math.abs(Math.sin(i * 0.55) * Math.cos(i * 0.21))),
+);
+
+const FileRow = ({ name, size }: { name: string; size: string }) => (
+  <div
+    className="flex items-center gap-2.5 rounded-[10px] px-2.5 py-2"
+    style={{ background: '#0f1116', border: '1px solid #262a32' }}
+  >
+    <FileText size={16} color={MUT} />
+    <span
+      className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[13px]"
+      style={{ color: TEXT }}
+    >
+      {name}
+    </span>
+    <span className="text-[11px]" style={{ color: MUT }}>
+      {size}
+    </span>
+    <span className="inline-flex items-center gap-1 text-[11px] font-semibold" style={{ color: '#d8dbe0' }}>
+      <Lock size={11} /> Private
+    </span>
+  </div>
+);
+
+/**
+ * The hero of a branded card: a blank example of the user's own item for that service, in the hero frame with the
+ * service's accent glow. `id` is the Mint card id.
+ */
+export const ServiceExample = ({ id, s }: { id: string; s: ServiceStyle }) => {
+  const date = today();
+  const by = `Your name · ${date}`;
+  const a = s.accent;
+  let body: React.ReactNode;
+  if (id === 'music')
+    body = (
+      <>
+        <Ex>your track</Ex>
+        <div className="flex items-center gap-3">
+          <div
+            className="grid h-[84px] w-[84px] flex-none place-items-center rounded-[12px] text-center text-[11px]"
+            style={blankBox}
+          >
+            Your
+            <br />
+            cover art
+          </div>
+          <Meta title="Your track" lines={[by, 'Private until you share it']} />
+        </div>
+        <div className="mt-3 flex h-[34px] items-end gap-[3px]">
+          {WAVE.map((h, i) => (
+            <i
+              key={i}
+              className="block flex-1 rounded-[2px]"
+              style={{ height: `${h}%`, background: a, opacity: 0.85 }}
+            />
+          ))}
+        </div>
+      </>
+    );
+  else if (id === 'movies')
+    body = (
+      <>
+        <Ex>your film</Ex>
+        <div
+          className="relative grid place-items-center rounded-[10px]"
+          style={{ aspectRatio: '16 / 9', background: '#050506', border: DASH }}
+        >
+          <Play accent={a} size={46} />
+          <div className="absolute bottom-2 left-2.5 text-[12px]" style={{ color: '#d8dbe0' }}>
+            Your film <span style={{ color: MUT }}>· {by}</span>
+          </div>
+        </div>
+        <div className="mt-2 flex gap-1">
+          {[0, 1, 2, 3, 4].map((i) => (
+            <Frame key={i} on={i === 2} accent={a} ratio="16 / 9" />
+          ))}
+        </div>
+      </>
+    );
+  else if (id === 'videos')
+    body = (
+      <>
+        <Ex>your clip</Ex>
+        <div className="flex items-center gap-3">
+          <div
+            className="relative grid w-[84px] flex-none place-items-center rounded-[10px]"
+            style={{ aspectRatio: '9 / 16', background: '#050506', border: DASH }}
+          >
+            <Play accent={a} size={34} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <Meta title="Your clip" lines={[by, 'Private until you post it']} />
+            <div className="mt-3 flex items-center gap-2">
+              <span className="h-[22px] w-[22px] flex-none rounded-full" style={blankBox} />
+              <span className="text-[12px] font-semibold" style={{ color: TEXT }}>
+                Your channel
+              </span>
+            </div>
+            <div className="mt-2 flex max-w-[150px] gap-1">
+              {[0, 1, 2, 3].map((i) => (
+                <Frame key={i} on={i === 0} accent={a} ratio="9 / 16" />
+              ))}
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  else if (id === 'books')
+    body = (
+      <>
+        <Ex>your document</Ex>
+        <div className="rounded-[8px] px-4 pb-4 pt-3.5 text-[12px]" style={{ background: '#f4f1e8', color: '#1b1b1b' }}>
+          <b className="mb-2 block text-[15px]">Your document</b>
+          {['92%', '86%', '95%', '60%'].map((w) => (
+            <div key={w} className="my-1.5 h-1.5 rounded-[3px]" style={{ width: w, background: '#d9d4c6' }} />
+          ))}
+          <span
+            className="mt-2.5 inline-block rounded-[6px] px-[7px] py-[3px] text-[10px] font-bold"
+            style={{ color: '#7a5a00', border: '1px solid #c9a227' }}
+          >
+            Signed and dated by {by}
+          </span>
+        </div>
+      </>
+    );
+  else if (id === 'art' || id === 'picture')
+    body = (
+      <>
+        <Ex>{id === 'art' ? 'your picture' : 'your idea'}</Ex>
+        {id === 'picture' && (
+          <div className="mb-2.5 rounded-[10px] px-3 py-2.5 text-[13px] italic" style={{ ...blankBox, color: MUT }}>
+            Your idea, in your words
+          </div>
+        )}
+        <div className="grid grid-cols-3 gap-1.5">
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              className="grid aspect-square place-items-center rounded-[8px] text-[11px]"
+              style={{ ...blankBox, ...(i === 1 ? { border: `1px solid ${a}` } : {}) }}
+            >
+              {i === 1 ? (id === 'art' ? 'Your picture' : 'Yours') : ''}
+            </div>
+          ))}
+        </div>
+        <div className="mt-2.5 flex items-center justify-between gap-2">
+          <Meta title={id === 'art' ? 'Your picture' : 'Your picture, by b'} lines={[by]} />
+          {id === 'art' && (
+            <span
+              className="flex-none rounded-[6px] px-[7px] py-[3px] text-[10px] font-bold"
+              style={{ color: '#d8dbe0', border: '1px solid #3a3f4a' }}
+            >
+              No. 1 of 10
+            </span>
+          )}
+        </div>
+      </>
+    );
+  else if (id === '3d')
+    body = (
+      <>
+        <Ex>your model</Ex>
+        <div className="flex items-center gap-3">
+          <svg viewBox="0 0 120 110" className="w-[120px] flex-none" aria-hidden="true">
+            <ellipse cx="60" cy="96" rx="44" ry="8" fill="#1a1d24" />
+            <g fill="none" stroke="#c9ccd2" strokeWidth="1.4" strokeLinejoin="round">
+              <path d="M60 14 92 30v36L60 82 28 66V30z" />
+              <path d="M28 30l32 16 32-16M60 46v36" />
+            </g>
+            <g fill="none" stroke="#5a606c" strokeWidth="1" strokeDasharray="3 3">
+              <path d="M60 14v32M28 66l32-20 32 20" />
+            </g>
+          </svg>
+          <Meta title="Your model" lines={[by, 'Private until you share it']} />
+        </div>
+      </>
+    );
+  else if (id === 'sell')
+    body = (
+      <>
+        <Ex>your listing</Ex>
+        <div className="flex items-center gap-3">
+          <div className="h-[84px] w-[84px] flex-none rounded-[12px]" style={blankBox} />
+          <Meta title="Your item" lines={['Your price', `Listed by ${by}`]} />
+        </div>
+      </>
+    );
+  else
+    body = (
+      <>
+        <Ex>{id === 'keep' ? 'kept for you' : 'your files'}</Ex>
+        <div className="grid gap-1.5">
+          <FileRow name="your-photo.jpg" size="2.1 MB" />
+          <FileRow name="your-chat.txt" size="84 KB" />
+          <FileRow name="your-video.mp4" size="8.6 MB" />
+        </div>
+        <div className="mt-2.5 text-[12px]" style={{ color: MUT }}>
+          {by}
+        </div>
+      </>
+    );
+  return (
+    <div
+      className="relative mb-4 overflow-hidden rounded-[18px] p-4"
+      style={{ background: '#0d0f13', border: '1px solid #262a32' }}
+    >
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0"
+        style={{ background: `radial-gradient(120% 80% at 80% 0%, ${a}2e, transparent 60%)` }}
+      />
+      <div className="relative">{body}</div>
+    </div>
+  );
+};

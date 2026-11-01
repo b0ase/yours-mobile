@@ -27,7 +27,9 @@ export type MintAction =
   /** Pick any one file from a data download: photo, video, audio, chat export or document. */
   | { upload: true }
   /** Not open yet (only ever in MINT_PREVIEWS_ENABLED builds). */
-  | { soon: true };
+  | { soon: true }
+  /** One of our services' sites, opened as a bApp (bWalletX only: never in a store build). */
+  | { site: string; name: string };
 
 export type MintIconId =
   | 'link'
@@ -37,6 +39,7 @@ export type MintIconId =
   | 'pic'
   | 'music'
   | 'film'
+  | 'video'
   | 'box'
   | 'book'
   | 'globe'
@@ -148,8 +151,8 @@ export const MINT_CARDS: MintCard[] = [
     id: 'upload',
     brands: [brand('bDriveX', 'storage')],
     icon: 'upload',
-    title: 'Upload your archive',
-    sub: 'Keep the real thing',
+    title: 'Your archive',
+    sub: 'One file, kept private',
     tint: '#0b2230',
     cta: { upload: true },
     ctaLabel: 'Pick a file from your download',
@@ -295,7 +298,7 @@ export const MINT_CARDS: MintCard[] = [
     title: 'Music',
     sub: 'Tracks fans own and play',
     tint: '#1a1033',
-    pitch: 'Mint a track with its artist, album and cover art. Fans who hold a copy play it in their wallet.',
+    pitch: 'Mint your track with its artist, album and cover art. Fans who hold a copy play it in their wallet.',
     uses: [
       { id: 'single', title: 'A track', sub: 'One track, with cover art', action: { flow: 'music' } },
       ...(RELEASES_ENABLED
@@ -303,7 +306,7 @@ export const MINT_CARDS: MintCard[] = [
             {
               id: 'release',
               title: 'A release',
-              sub: 'A single or album, listed in bMusicX',
+              sub: 'A single or album, listed on bMusicX',
               action: { go: '/m/media/new' },
             },
           ]
@@ -327,7 +330,7 @@ export const MINT_CARDS: MintCard[] = [
   {
     id: 'videos',
     brands: [brand('bVideoX')],
-    icon: 'film',
+    icon: 'video',
     title: 'Videos',
     sub: 'Clips, shorts, channels',
     tint: '#1c1408',
@@ -359,9 +362,10 @@ export const MINT_CARDS: MintCard[] = [
     title: 'Movies & films',
     sub: 'Shorts to features',
     tint: '#3a0306',
-    pitch: 'Mint your film, from a short to a feature, with a poster frame, and keep the record of who made it.',
+    pitch:
+      'Mint your film, from a short to a feature. Pick any frame as the poster, and keep the record of who made it.',
     uses: [
-      { id: 'film', title: 'A film', sub: 'A short or a feature, within the size limit', action: { flow: 'video' } },
+      { id: 'film', title: 'A film', sub: 'A short or a feature', action: { flow: 'video' } },
       { id: 'trailer', title: 'A trailer', sub: 'A teaser for a film you’re making', action: { flow: 'video' } },
     ],
     why: [
@@ -391,12 +395,23 @@ export const MINT_CARDS: MintCard[] = [
     brands: [brand('bWriterX')],
     icon: 'book',
     title: 'Writing & documents',
-    sub: 'Books, ideas, inventions',
+    sub: 'Books, ideas, PDFs',
     tint: '#25200c',
     pitch:
-      'Mint your writing, notes, designs and inventions. The date is proven the moment you mint, and only you can read it.',
+      'Mint a book, an essay, an idea or a PDF. Your name and the date go on it, and it stays private until you choose.',
     uses: [
-      { id: 'book', title: 'A book or essay', sub: 'Ebook, PDF or text', action: { flow: 'books' } },
+      { id: 'document', title: 'A document', sub: 'PDF, ebook, text or markdown', action: { flow: 'books' } },
+      // bwriterx.com, opened as a bApp: bWalletX only (no outbound links in a store build).
+      ...(!STORE_BUILD
+        ? [
+            {
+              id: 'write',
+              title: 'Write it here',
+              sub: 'In bWriterX, saved as you go',
+              action: { site: 'bwriterx.com', name: 'bWriterX' },
+            },
+          ]
+        : []),
       { id: 'idea', title: 'An idea or invention', sub: 'Timestamp it before you share it', action: { flow: 'books' } },
       { id: 'journal', title: 'Journals & notes', sub: 'Private, just for you', action: { flow: 'books' } },
     ],
