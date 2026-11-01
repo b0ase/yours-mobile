@@ -32,7 +32,7 @@ import { setAgentDraft } from '../agent/handoff';
 import { openAgentCreate } from '../agents/agentCreate';
 import { BottomMenuContext } from '../../contexts/BottomMenuContext';
 import { routeFor } from '../tabs/tabs';
-import { GREETING_CARDS_ENABLED, isBWalletX } from '../storeBuild';
+import { GREETING_CARDS_ENABLED, isBWalletX, STORE_BUILD, USER_NOTES_ENABLED } from '../storeBuild';
 import { SendConfirmation } from '../../components/SendConfirmation';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useTheme } from '../../hooks/useTheme';
@@ -120,7 +120,7 @@ const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#17191E';
 const BORDER = '#3a2f0c';
 
-type Step = 'choose' | 'ticket' | 'token' | 'domain' | 'media' | 'done' | 'card' | 'ad';
+type Step = 'choose' | 'ticket' | 'token' | 'domain' | 'media' | 'done' | 'card' | 'picture' | 'ad' | 'currency';
 /** `type` is the content type to inscribe (3D: from magic bytes, not the browser's guess). */
 type Picked = { file: File; url: string; type: string };
 
@@ -481,7 +481,7 @@ export const MintSheet = ({
     // z above the bottom tab bar (BottomMenu z-[100]) so the sheet's lower options aren't hidden.
     <div className="fixed inset-0 z-[150] flex items-end justify-center" style={{ background: 'rgba(0,0,0,0.6)' }}>
       <div
-        className="w-full max-w-md rounded-t-2xl p-4 overflow-y-auto"
+        className="w-full max-w-md sm:max-w-2xl rounded-t-2xl p-4 overflow-y-auto"
         style={{
           background: PANEL,
           color: '#fff',
@@ -499,13 +499,17 @@ export const MintSheet = ({
                   ? 'Tokenise a domain'
                   : step === 'card'
                     ? 'Greeting card'
-                    : step === 'ad' && GREETING_CARDS_ENABLED
-                      ? 'Order a bAd'
-                      : step === 'choose'
-                        ? 'Mint'
-                        : step === 'done'
-                          ? 'Minted'
-                          : 'Mint'}
+                    : step === 'picture' && GREETING_CARDS_ENABLED
+                      ? 'AI picture'
+                      : step === 'currency' && !STORE_BUILD
+                        ? 'Mint a currency'
+                        : step === 'ad' && GREETING_CARDS_ENABLED
+                          ? 'Order a bAd'
+                          : step === 'choose'
+                            ? 'Mint'
+                            : step === 'done'
+                              ? 'Minted'
+                              : 'Mint'}
           </span>
           <button type="button" onClick={onClose} className="bg-transparent border-0 cursor-pointer" aria-label="Close">
             <X size={20} color="#aaa" />
@@ -521,6 +525,39 @@ export const MintSheet = ({
             {sources.length > 0 && (
               <div className="flex flex-col gap-2">
                 <span className="text-xs font-bold" style={{ color: '#ccc' }}>
+                  Mint your life online: two ways
+                </span>
+                {/* Owner, 1 Nov 2026: say plainly how the two ways differ. Linking needs each platform's sign-in, so it
+                    is marked not open yet until a platform is wired up. */}
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {!STORE_BUILD && (
+                    <div className="flex flex-col gap-1 rounded-xl border p-3" style={{ borderColor: BORDER }}>
+                      <span className="flex items-center gap-2 text-sm font-bold" style={{ color: GOLD }}>
+                        <LinkIcon size={16} /> Link an account
+                        <span
+                          className="rounded-full px-2 py-0.5 text-[10px] font-bold"
+                          style={{ background: 'rgba(255,255,255,0.08)', color: '#aaa' }}
+                        >
+                          Not open yet
+                        </span>
+                      </span>
+                      <span className="text-[11px] leading-snug" style={{ color: '#999' }}>
+                        Sign in once and we stamp a fingerprint of every post on chain, signed by you. Proves it&rsquo;s
+                        yours and when you posted it. Your posts stay where they are.
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex flex-col gap-1 rounded-xl border p-3" style={{ borderColor: BORDER }}>
+                    <span className="flex items-center gap-2 text-sm font-bold" style={{ color: '#5fd0ff' }}>
+                      <BookOpen size={16} /> Upload your archive
+                    </span>
+                    <span className="text-[11px] leading-snug" style={{ color: '#999' }}>
+                      Download your posts or data from the app, then pick the file here. It&rsquo;s encrypted to your
+                      wallet before it goes on chain, so only you can open it.
+                    </span>
+                  </div>
+                </div>
+                <span className="text-xs font-bold mt-1" style={{ color: '#ccc' }}>
                   Mint what you already post
                 </span>
                 <div
@@ -589,6 +626,9 @@ export const MintSheet = ({
                           </p>
                         ))}
                         <p className="text-xs m-0" style={{ color: '#999' }}>
+                          {s.kind === 'archive'
+                            ? 'Your file is encrypted to your wallet by default, so only you can open it. '
+                            : ''}
                           Only mint what you made or own. Menus change now and then.
                         </p>
                         <button
@@ -607,7 +647,7 @@ export const MintSheet = ({
                   })()}
               </div>
             )}
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {MINT_TILES.filter((t) => t.when()).map((t) => (
                 <Tile key={t.id} icon={t.icon} title={t.title} sub={t.sub} onClick={() => openTile(t)} />
               ))}
@@ -619,6 +659,55 @@ export const MintSheet = ({
           <Suspense fallback={null}>
             <CardMaker onBack={() => setStep('choose')} onMint={(f, t, to) => void mintCard(f, t, to)} />
           </Suspense>
+        )}
+        {step === 'picture' && CardMaker && (
+          <Suspense fallback={null}>
+            <CardMaker
+              initialKind="image"
+              onBack={() => setStep('choose')}
+              onMint={(f, t, to) => void mintCard(f, t, to)}
+            />
+          </Suspense>
+        )}
+        {step === 'currency' && !STORE_BUILD && (
+          <div className="flex flex-col gap-2">
+            <p className="text-xs m-0" style={{ color: '#999' }}>
+              Your own notes and coins, issued by you and numbered. Collectibles: they don&rsquo;t promise any value.
+            </p>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <Tile
+                icon={<FileText size={18} />}
+                title="Notes"
+                sub={
+                  USER_NOTES_ENABLED
+                    ? 'Your banknote-style PoW note, issued by you'
+                    : 'Banknote-style PoW notes. Not open yet'
+                }
+                onClick={() => {
+                  if (!USER_NOTES_ENABLED) return;
+                  onClose();
+                  navigate('/m/bmint/make');
+                }}
+              />
+              <Tile
+                icon={<Coins size={18} />}
+                title="Coins"
+                sub="Your bAvatar struck as a numbered coin"
+                onClick={() => {
+                  onClose();
+                  navigate('/m/bmint/mint/bavatar');
+                }}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => setStep('choose')}
+              className="self-start bg-transparent border-0 cursor-pointer text-xs"
+              style={{ color: '#aaa' }}
+            >
+              ‹ Back
+            </button>
+          </div>
         )}
         {step === 'ad' && CardMaker && (
           <Suspense fallback={null}>
@@ -1043,11 +1132,21 @@ const MINT_TILES: MintTile[] = [
   // In the store bundle not even as data (GREETING_CARDS_ENABLED inlines to false).
   ...(GREETING_CARDS_ENABLED
     ? [
+        // Split (owner, 1 Nov 2026): someone making pictures all day and someone sending Granny a birthday card
+        // are different jobs, so they get different doors into the same maker.
+        {
+          id: 'picture',
+          icon: <Sparkles size={18} />,
+          title: 'AI pictures',
+          sub: 'Describe it, b paints it, you mint it',
+          when: () => GREETING_CARDS_ENABLED,
+          step: 'picture' as Step,
+        },
         {
           id: 'card',
           icon: <Gift size={18} />,
-          title: 'Greeting card or AI picture',
-          sub: 'Describe it, we make it, you mint it',
+          title: 'Greeting cards',
+          sub: 'Birthdays, Christmas, thank-yous; send it to their $name',
           when: () => GREETING_CARDS_ENABLED,
           step: 'card' as Step,
         },
@@ -1124,6 +1223,18 @@ const MINT_TILES: MintTile[] = [
     when: () => CHOICES.has('ticket'),
     step: 'ticket',
   },
+  ...(!STORE_BUILD
+    ? [
+        {
+          id: 'currency',
+          icon: <Coins size={18} />,
+          title: 'Mint a currency',
+          sub: 'Your own notes and coins, numbered',
+          when: () => !STORE_BUILD && isBWalletX(),
+          step: 'currency' as Step,
+        },
+      ]
+    : []),
   {
     id: 'coin',
     icon: <Coins size={18} />,

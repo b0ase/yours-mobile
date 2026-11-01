@@ -44,23 +44,6 @@ export type MintSource = { id: MintSourceId; label: string; kind: MintSourceKind
 
 export const MINT_SOURCES: MintSource[] = [
   {
-    id: 'youtube',
-    popular: true,
-    label: 'YouTube',
-    kind: 'video',
-    steps: ['In YouTube Studio, open Content, then ⋮ › Download on your video.'],
-  },
-  {
-    id: 'x',
-    popular: true,
-    label: 'X',
-    kind: 'picture',
-    steps: [
-      'Save the image straight from your post.',
-      'For everything: Settings › Your account › Download an archive of your data. Your photos and videos are in it.',
-    ],
-  },
-  {
     id: 'instagram',
     popular: true,
     label: 'Instagram',
@@ -84,6 +67,23 @@ export const MINT_SOURCES: MintSource[] = [
     steps: [
       'Open your photo, then ⋯ › Download.',
       'For everything: Settings › Accounts Center › Download your information.',
+    ],
+  },
+  {
+    id: 'youtube',
+    popular: true,
+    label: 'YouTube',
+    kind: 'video',
+    steps: ['In YouTube Studio, open Content, then ⋮ › Download on your video.'],
+  },
+  {
+    id: 'x',
+    popular: true,
+    label: 'X',
+    kind: 'picture',
+    steps: [
+      'Save the image straight from your post.',
+      'For everything: Settings › Your account › Download an archive of your data. Your photos and videos are in it.',
     ],
   },
   {

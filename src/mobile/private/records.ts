@@ -223,7 +223,7 @@ export function xRevealScript(r: XRecord, reveal: string, parentTxid: string | n
 
 // ── §9 wallet media records ──────────────────────────────────────────────────
 
-export type MediaKind = 'picture' | 'music' | 'video' | '3d' | 'bavatar';
+export type MediaKind = 'picture' | 'music' | 'video' | '3d' | 'bavatar' | 'document';
 export type MediaHeader = {
   v: 1;
   kind: MediaKind;
@@ -238,6 +238,10 @@ export type MediaHeader = {
 /** What a private mint of this content type is, or null when §9 has no kind for it (public mint only). */
 export function mediaKindFor(mime: string, hint?: string | null): MediaKind | null {
   if (hint === 'picture' || hint === 'music' || hint === 'video' || hint === '3d' || hint === 'bavatar') return hint;
+  // Documents and personal archives (owner, 1 Nov 2026): a chat export or a PDF is private by default too. HTML stays
+  // public-only: a website minted to be served has to be readable.
+  if (/^(application\/pdf|application\/epub\+zip|text\/plain|text\/markdown)$/i.test(mime.split(';')[0].trim()))
+    return 'document';
   if (/^image\//i.test(mime)) return 'picture';
   if (/^audio\//i.test(mime)) return 'music';
   if (/^video\//i.test(mime)) return 'video';
