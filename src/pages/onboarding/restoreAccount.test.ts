@@ -159,7 +159,17 @@ describe('Add account › restore a Twetch phrase into a wallet with several acc
       });
 
     test('a wrong checksum still fails after cleaning', () => {
-      const swapped = [words[1], words[0], ...words.slice(2)].join(' ');
+      // A 12-word phrase has a 4-bit checksum, so a random swap still validates about 1 time in 16 (and two equal
+      // words swap to the same phrase). Swap the first word with each other word and keep the first that breaks it.
+      const swapped = words
+        .slice(1)
+        .map((_, i) => {
+          const s = [...words];
+          [s[0], s[i + 1]] = [s[i + 1], s[0]];
+          return s.join(' ');
+        })
+        .find((s) => !bip39.validateMnemonic(s));
+      if (!swapped) throw new Error('no checksum-breaking swap found');
       expect(bip39.validateMnemonic(swapped)).toBe(false);
       expect(phraseProblem(`${swapped}.`)).not.toBeNull();
     });
