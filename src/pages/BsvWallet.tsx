@@ -79,6 +79,10 @@ import { PrivateKey, type WalletInterface } from '@bsv/sdk';
 import { sendPaymentNote } from '../mobile/wallet/send/paymentNote';
 import { planAddressScan } from '../services/addressScan';
 import { getLegacyMneeBalance, sweepLegacyMnee } from '../utils/sweepLegacyMnee';
+import { mneeRefreshGate, type MneePlan } from '../utils/mneeRefreshGate';
+import { syncBackoff } from '../utils/syncBackoff';
+import { invalidateWalletLists } from '../utils/walletReadCache';
+import { errText } from '../utils/sessionCaches';
 import { cancelOwnedOrdLockListings } from '../utils/cancelOrdLockListings';
 import { decrypt } from '../utils/crypto';
 import type { Keys } from '../utils/keys';
@@ -140,7 +144,7 @@ export const BsvWallet = () => {
   const { theme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
-  const { updateBalance, balanceTick, isSyncing, restoreMessage, syncMessage } = useSyncTracker();
+  const { updateBalance, balanceTick, isSyncing, syncDoneTick, restoreMessage, syncMessage } = useSyncTracker();
   const urlParams = new URLSearchParams(location.search);
   const { handleSelect, query } = useBottomMenu();
   const tokenRows = useTokenRows();
@@ -456,16 +460,47 @@ export const BsvWallet = () => {
   };
 
   const MNEE_FETCH_RETRIES = 2;
+  // At most one pending MNEE retry: failed runs used to each schedule their own, and they piled up (1 Nov 2026).
+  const mneeRetryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (mneeRetryTimer.current) clearTimeout(mneeRetryTimer.current);
+    },
+    [],
+  );
 
-  const updateMneeBalance = async (attempt = 0): Promise<number | undefined> => {
-    if (!receiveAddress || !apiContext) return;
+  /**
+   * Refresh the MNEE balance through the gate (utils/mneeRefreshGate.ts): one run at a time per account, gap
+   * discovery once per session, and without `force` at most once a minute (callers in between get the last answer).
+   * `force` is for a tap on refresh, a finished MNEE send / sweep, or a new receive address.
+   */
+  const updateMneeBalance = async ({ force = false, attempt = 0 } = {}): Promise<number | undefined> => {
+    if (!receiveAddress || !apiContext || !identityAddress) return undefined;
+    const r = await mneeRefreshGate.run(identityAddress, (plan) => fetchMneeBalance(plan, attempt), { force });
+    if (!r) return undefined;
+    // Also when the gate answered from its last run (a remounted wallet home starts at 0).
+    setMneeAddresses(r.addresses);
+    setMneeBalance(r.totalDecimal);
+    return r.totalDecimal;
+  };
+  const updateMneeRef = useRef(updateMneeBalance);
+  updateMneeRef.current = updateMneeBalance;
+
+  const fetchMneeBalance = async (
+    plan: MneePlan,
+    attempt: number,
+  ): Promise<{ totalDecimal: number; addresses: string[] } | undefined> => {
     try {
       // Aggregate MNEE balance across all derived deposit addresses for this account,
       // not just the currently selected receive address, since MNEE can be deposited
       // to any previously derived address.
       const { account: acctForMnee } = chromeStorageService.getCurrentAccountObject();
-      const knownMaxKeyIndex = acctForMnee?.settings?.maxKeyIndex ?? 4; // default: 0-4 = 5 addresses
-      const maxKeyIndex = await discoverMneeMaxKeyIndex(knownMaxKeyIndex);
+      const persistedMax = acctForMnee?.settings?.maxKeyIndex ?? 4; // default: 0-4 = 5 addresses
+      let maxKeyIndex = Math.max(persistedMax, plan.knownMaxKeyIndex ?? -1);
+      if (plan.discover) {
+        maxKeyIndex = await discoverMneeMaxKeyIndex(maxKeyIndex);
+        mneeRefreshGate.markDiscovered(identityAddress, maxKeyIndex);
+      }
       const derivations = mneeKeyDerivations(0, maxKeyIndex + 1);
       const res = await getMneeBalance.execute(apiContext, { derivations });
       const seen = new Set((res.balances ?? []).map((b) => b.address));
@@ -477,9 +512,8 @@ export const BsvWallet = () => {
         totalAtomic += extra.totalAtomic;
         for (const b of extra.balances ?? []) seen.add(b.address);
       }
-      const addresses = [...seen];
-      setMneeAddresses(addresses.length ? addresses : [receiveAddress]);
-      setMneeBalance(totalDecimal);
+      const addresses = seen.size ? [...seen] : [receiveAddress];
+      const result = { totalDecimal, addresses };
       // Share the last MNEE balance with the wallet card (the balance cards read it; nothing writes back).
       try {
         localStorage.setItem('bwallet:mnee-balance', String(totalDecimal));
@@ -492,7 +526,7 @@ export const BsvWallet = () => {
       const { account } = chromeStorageService.getCurrentAccountObject();
       // `identityAddress` is from this render; after Add account / a switch / during the master backup's account
       // walk the current account can be another one. Never merge one account's object under another's id.
-      if (!account || account.addresses?.identityAddress !== identityAddress) return totalDecimal;
+      if (!account || account.addresses?.identityAddress !== identityAddress) return result;
 
       const key: keyof ChromeStorageObject = 'accounts';
       const update: Partial<ChromeStorageObject['accounts']> = {
@@ -505,14 +539,20 @@ export const BsvWallet = () => {
         },
       };
       await chromeStorageService.updateNested(key, update);
-      return totalDecimal;
+      return result;
     } catch (error) {
-      console.error(`Failed to update MNEE balance (attempt ${attempt + 1}):`, error);
+      console.error(`Failed to update MNEE balance (attempt ${attempt + 1}):`, errText(error));
       // The first fetch can race service-worker initialization (e.g. storage migration
       // right after an upgrade). A failed lookup would otherwise leave the balance at
-      // zero until the page remounts, so retry with a short backoff.
-      if (attempt < MNEE_FETCH_RETRIES) {
-        setTimeout(() => void updateMneeBalance(attempt + 1), 2000 * (attempt + 1));
+      // zero until the page remounts, so retry with a short backoff: bounded, one pending at a time.
+      if (attempt < MNEE_FETCH_RETRIES && !mneeRetryTimer.current) {
+        mneeRetryTimer.current = setTimeout(
+          () => {
+            mneeRetryTimer.current = null;
+            void updateMneeRef.current({ force: true, attempt: attempt + 1 });
+          },
+          2000 * (attempt + 1),
+        );
       }
       return undefined;
     }
@@ -584,7 +624,7 @@ export const BsvWallet = () => {
           return;
         }
       } catch (error) {
-        console.error('Failed to get receive address:', error);
+        console.error('Failed to get receive address:', errText(error));
       }
       if (!stop && attempt < 6) timer = setTimeout(() => void load(attempt + 1), 1000 * 2 ** attempt);
     };
@@ -651,10 +691,13 @@ export const BsvWallet = () => {
   };
 
   // While the balance is unknown or stale, keep asking every 10 s (owner, 6 Oct 2026: after a restore the
-  // wallet is busy syncing for a minute or more, and "Couldn't refresh" stayed until a manual tap).
+  // wallet is busy syncing for a minute or more, and "Couldn't refresh" stayed until a manual tap). Not while the
+  // address sync is backing off after a failure (utils/syncBackoff.ts): the wallet is busy, and asking adds to it.
   useEffect(() => {
     if (!balanceFailed) return;
-    const t = setInterval(() => void getAndSetBsvBalance(), 10_000);
+    const t = setInterval(() => {
+      if (syncBackoff.ready()) void getAndSetBsvBalance();
+    }, 10_000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [balanceFailed]);
@@ -712,22 +755,22 @@ export const BsvWallet = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Fetch MNEE balance once receiveAddress is available
+  // Fetch MNEE balance once receiveAddress is available. A later change (a new address) refreshes at once.
+  const mneeFirstAddress = useRef('');
   useEffect(() => {
-    if (receiveAddress) {
-      updateMneeBalance();
-    }
+    if (!receiveAddress) return;
+    const changed = !!mneeFirstAddress.current && mneeFirstAddress.current !== receiveAddress;
+    if (!mneeFirstAddress.current) mneeFirstAddress.current = receiveAddress;
+    void updateMneeBalance({ force: changed });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [receiveAddress]);
 
-  // Refresh MNEE when the service worker's address sync finishes, the same trigger
-  // that refreshes the BSV balance. Without this, MNEE was fetched exactly once.
+  // Refresh MNEE when the wallet reports a finished sync (not on every isSyncing toggle, nor after a failed or stuck
+  // one); the gate keeps it to once a minute (owner's iPhone, 1 Nov 2026: overlapping MNEE scans drove a memory kill).
   useEffect(() => {
-    if (!isSyncing && receiveAddress) {
-      updateMneeBalance();
-    }
+    if (syncDoneTick && receiveAddress) void updateMneeBalance();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSyncing]);
+  }, [syncDoneTick]);
 
   // Check for legacy MNEE balance (old address) once wallet is ready
   useEffect(() => {
@@ -745,7 +788,7 @@ export const BsvWallet = () => {
         const balance = await getLegacyMneeBalance(apiContext.services!.mnee, legacyAddr);
         setLegacyMneeBalance(balance);
       } catch (err) {
-        console.error('[legacyMneeCheck]', err);
+        console.error('[legacyMneeCheck]', errText(err));
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -783,7 +826,7 @@ export const BsvWallet = () => {
       } else {
         addSnackbar(`Moved $${result.amount?.toFixed(2)} MNEE to your new wallet!`, 'success');
         setLegacyMneeBalance(0);
-        updateMneeBalance();
+        void updateMneeBalance({ force: true });
         setMneeHistoryRefreshKey((k) => k + 1);
       }
     } catch (err) {
@@ -804,9 +847,15 @@ export const BsvWallet = () => {
    * Re-sync addresses, then reload BSV, MNEE, and BSV-21 balances.
    * With `notifyIfUnchanged`, tell the user when nothing moved so a manual refresh
    * that finds no new funds does not look like it silently failed.
+   * `quiet` is the card's automatic timer: it waits out the back-off after a failed sync (utils/syncBackoff.ts),
+   * and a failed sync then reloads only the BSV balance instead of every dependent job at once (1 Nov 2026).
    */
-  const refreshUtxos = async ({ showLoad = false, notifyIfUnchanged = false } = {}) => {
-    if (isRefreshing) return;
+  const refreshInFlight = useRef(false);
+  const refreshUtxos = async ({ showLoad = false, notifyIfUnchanged = false, quiet = false } = {}) => {
+    // A ref as well as the state: two calls in one tick both saw isRefreshing false.
+    if (isRefreshing || refreshInFlight.current) return;
+    if (quiet && !syncBackoff.ready()) return;
+    refreshInFlight.current = true;
     setIsRefreshing(true);
     if (showLoad) setIsProcessing(true);
     // Snapshot before: BSV in satoshis (not USD, so a rate tick is not "a change").
@@ -834,11 +883,24 @@ export const BsvWallet = () => {
         // Bounded: a hung sync held the whole refresh (and the balance after it) indefinitely (owner, 6 Oct 2026).
         await withTimeout(syncAddresses.execute(apiContext, { count }), BALANCE_TIMEOUT_MS, 'Address sync');
       }
+      syncBackoff.succeed();
+      // A tap on refresh reads fresh lists, not the 10 s page cache (utils/walletReadCache.ts).
+      if (notifyIfUnchanged) invalidateWalletLists();
     } catch (err) {
       synced = false;
-      console.error('[refreshUtxos] syncAddresses failed:', err);
+      const wait = syncBackoff.fail();
+      console.error(
+        '[refreshUtxos] syncAddresses failed:',
+        errText(err),
+        `(next automatic try in ${Math.round(wait / 1000)} s)`,
+      );
     }
     try {
+      if (!synced && !notifyIfUnchanged) {
+        // Back-off: one balance read (it falls back to the last known balance), no MNEE / token / lock reloads.
+        await getAndSetBsvBalance();
+        return;
+      }
       // MNEE and token lookups bounded too: either one hanging kept the card's refresh icon spinning for good
       // (owner, 6 Oct 2026). A late answer still updates the screen; it just isn't waited for.
       const bounded = <T,>(p: Promise<T>, what: string) =>
@@ -848,7 +910,8 @@ export const BsvWallet = () => {
         });
       const [sats, mnee, tokens] = await Promise.all([
         getAndSetBsvBalance(),
-        bounded(updateMneeBalance(), 'MNEE balance'),
+        // A tap refreshes MNEE now; the automatic refresh shares the gate's once-a-minute answer.
+        bounded(updateMneeBalance({ force: notifyIfUnchanged }), 'MNEE balance'),
         bounded(getAndSetAccountAndBsv21s(), 'Tokens'),
       ]);
       if (loadLocks) loadLocks();
@@ -859,14 +922,20 @@ export const BsvWallet = () => {
         mnee === before.mnee &&
         tokens !== undefined &&
         bsv21Signature(tokens) === before.tokens;
+      // Something that answered actually moved (a lookup that didn't answer is not a move).
+      const moved =
+        (sats !== null && sats !== before.sats) ||
+        (mnee !== undefined && mnee !== before.mnee) ||
+        (tokens !== undefined && bsv21Signature(tokens) !== before.tokens);
       if (notifyIfUnchanged && synced && unchanged) {
         showUpToDate();
       }
       // NFTs: reload the list on a manual refresh or when anything moved, so purchases appear without reopening.
-      if (notifyIfUnchanged || !unchanged) notifyMinted();
+      if (notifyIfUnchanged || moved) notifyMinted();
     } finally {
       if (showLoad) setIsProcessing(false);
       setIsRefreshing(false);
+      refreshInFlight.current = false;
     }
   };
 
@@ -933,7 +1002,7 @@ export const BsvWallet = () => {
         setDepositAddresses(response.data);
       }
     } catch (error) {
-      console.error('Failed to get deposit addresses:', error);
+      console.error('Failed to get deposit addresses:', errText(error));
     }
   };
 
@@ -954,7 +1023,7 @@ export const BsvWallet = () => {
         addSnackbar('New address generated!', 'success');
       }
     } catch (error) {
-      console.error('Failed to generate address:', error);
+      console.error('Failed to generate address:', errText(error));
       addSnackbar('Failed to generate address', 'error');
     } finally {
       setGeneratingAddress(false);
@@ -1030,14 +1099,16 @@ export const BsvWallet = () => {
 
           resetMneeRecipients();
           setMneeBalance((prev) => Math.max(0, prev - mneeTotal));
-          updateMneeBalance().catch((err) => console.error('[handleSendMNEE] reconcile refresh failed:', err));
+          updateMneeBalance({ force: true }).catch((err) =>
+            console.error('[handleSendMNEE] reconcile refresh failed:', errText(err)),
+          );
           setMneeHistoryRefreshKey((k) => k + 1);
           setPageState('main');
           if (!celebrateSend(res, { amount: { kind: 'mnee', amount: mneeTotal }, recipients: mneeOrder })) {
             addSnackbar('Transaction Successful!', 'success');
           }
         } catch (error: unknown) {
-          console.error('MNEE transfer error:', error);
+          console.error('MNEE transfer error:', errText(error));
           const errorMessage = error instanceof Error ? error.message : String(error);
           if (errorMessage.includes('status: 423')) {
             addSnackbar('The sending or receiving address may be frozen. Please contact support.', 'error');
@@ -1123,7 +1194,7 @@ export const BsvWallet = () => {
           await confirmSendBsv();
         } catch (err) {
           // A thrown send (not a returned error) left the spinner up for good (owner, 27 Oct 2026).
-          console.error('[handleSendBsv] send threw:', err);
+          console.error('[handleSendBsv] send threw:', errText(err));
           setSendError(classifySendError(err));
           refreshUtxos().catch(() => undefined);
         } finally {
@@ -1160,17 +1231,17 @@ export const BsvWallet = () => {
             thrown instanceof Error && sendRes.error && thrown.message === sendRes.error
               ? thrown
               : sendRes.error || 'The wallet returned no txid';
-          console.error('[handleSendBsv] send failed:', err);
+          console.error('[handleSendBsv] send failed:', errText(err));
           setSendError(classifySendError(err));
           setIsProcessing(false);
           // A refused send may have cleared coins spent on another device: show the corrected balance.
-          refreshUtxos().catch((err) => console.error('[handleSendBsv] refresh after failed send:', err));
+          refreshUtxos().catch((err) => console.error('[handleSendBsv] refresh after failed send:', errText(err)));
           return;
         }
 
         setBsvBalance((prev) => Math.max(0, prev - totalSats / BSV_DECIMAL_CONVERSION));
         rememberSent(identityAddress, addressOrder);
-        refreshUtxos().catch((err) => console.error('[handleSendBsv] reconcile refresh failed:', err));
+        refreshUtxos().catch((err) => console.error('[handleSendBsv] reconcile refresh failed:', errText(err)));
         resetSendState();
         setBsvHistoryRefreshKey((k) => k + 1);
         setPageState('main');
@@ -1190,7 +1261,7 @@ export const BsvWallet = () => {
           sendPaymentNote(apiContext.wallet as unknown as WalletInterface, addressOrder[0], note, amount)
             .then((sent) => sent && addSnackbar('Message sent by bMail', 'success'))
             .catch((err) => {
-              console.error('[handleSendBsv] payment message failed:', err);
+              console.error('[handleSendBsv] payment message failed:', errText(err));
               addSnackbar('Paid, but the message could not be sent. Try bMail.', 'info');
             });
         }
@@ -2417,7 +2488,7 @@ export const BsvWallet = () => {
               // Kick off background reconciliation with the authoritative source —
               // fire-and-forget, doesn't block the UI transition.
               Promise.all([getAndSetAccountAndBsv21s(), getAndSetBsvBalance()]).catch((err) =>
-                console.error('[SendBsv21View] reconcile refresh failed:', err),
+                console.error('[SendBsv21View] reconcile refresh failed:', errText(err)),
               );
             }}
           />

@@ -17,7 +17,7 @@ describe('walletReady', () => {
   test('the app-wide profile and bMail badge lookups wait for it (no "Wallet not available" on first load)', () => {
     const id = readFileSync(new URL('../hooks/useIdentity.ts', import.meta.url), 'utf8');
     expect(id).toContain('const ready = walletReady(chromeStorageService, isLocked);');
-    expect(id).toMatch(/const loadIdentity = useCallback\(async \(\) => \{\n\s+if \(!ready\) \{/);
+    expect(id).toMatch(/const loadIdentity = useCallback\(\s*async \(force = false\) => \{\n\s+if \(!ready\) \{/);
     const mail = readFileSync(new URL('../mobile/bmail/useBMail.ts', import.meta.url), 'utf8');
     expect(mail).toContain('if (wallet && ready)');
     expect(mail).toContain('}, [wallet, ready]);');
