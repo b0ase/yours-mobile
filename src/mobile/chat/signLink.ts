@@ -100,6 +100,16 @@ export const phoneSignUrl = (s: SignLink): string => {
   return u.toString();
 };
 
+/**
+ * The in-app route that opens the signing page inside the bChatX bApp frame (/m/bapp/bchatx?to=/room/…), where the
+ * frame's BRC-100 bridge reaches the wallet and its approval sheets draw on top. Null if bChatX can't be framed.
+ */
+export const signFrameRoute = (s: SignLink): string | null => {
+  const u = new URL(phoneSignUrl(s));
+  const to = `${u.pathname}${u.search}`;
+  return parseWebBappLink(`https://web.bwalletx.com/bapp/bchatx?to=${encodeURIComponent(to)}`)?.route ?? null;
+};
+
 // The hash each scanned document came with, so the room's banner can open the hash-checked page (tickers upper-case).
 const hashes = new Map<string, string>();
 const docKey = (ticker: string, docId: string) => `${ticker.replace(/^\$/, '').toUpperCase()}\n${docId}`;
