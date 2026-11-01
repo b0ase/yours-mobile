@@ -60,6 +60,10 @@ describe('title validation', () => {
 describe('MAP from the server', () => {
   const want = { issuer: 'b0asex', req: ok };
   test('accepted as given', () => expect(acceptMap(map, want)).toEqual(map));
+  test('accepts tpl 1 and 2', () => {
+    expect(acceptMap({ ...map, tpl: '2' }, want)).toEqual({ ...map, tpl: '2' });
+    expect(acceptMap({ ...map, tpl: '1' }, want)).toEqual({ ...map, tpl: '1' });
+  });
   test.each([
     [{ ...map, app: 'x' }],
     [{ ...map, type: 'x' }],
@@ -69,6 +73,8 @@ describe('MAP from the server', () => {
     [{ ...map, issuer: 'someoneelse' }],
     [{ ...map, extra: 'x' }],
     [{ ...map, serial: 1 }],
+    [{ ...map, tpl: '3' }],
+    [{ ...map, tpl: 2 }],
     [{ app: 'bmint', type: 'pownote' }],
     [null],
     [[]],
