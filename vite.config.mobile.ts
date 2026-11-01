@@ -84,6 +84,11 @@ if (STORE_CHANNEL) {
     __dirname,
     'src/mobile/theme/leanneArtX.store.ts',
   );
+  // Mint cards' share art from our services' sites (each carries its site's own pitch): bWalletX only.
+  MOBILE_SWAPS[resolve(__dirname, 'src/mobile/mint/serviceArtX.ts')] = resolve(
+    __dirname,
+    'src/mobile/mint/serviceArtX.store.ts',
+  );
 }
 const brand = () => sharedBrand(MOBILE_SWAPS);
 

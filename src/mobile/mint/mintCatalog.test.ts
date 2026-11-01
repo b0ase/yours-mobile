@@ -84,7 +84,9 @@ describe('Mint sheet catalog (bWalletX build)', () => {
   test('cards carry our services: wordmark name plus its site', () => {
     const sites = (id: string) => mintCard(id)?.brands?.map((b) => `${b.name} ${b.site ?? ''}`.trim());
     expect(sites('music')).toEqual(['bMusicX bmusicx.com']);
-    expect(sites('video')).toEqual(['bVideoX bvideox.com', 'bMoviesX bmoviesx.com']);
+    expect(sites('videos')).toEqual(['bVideoX bvideox.com']);
+    expect(sites('movies')).toEqual(['bMoviesX bmoviesx.com']);
+    expect(mintCard('video')).toBeUndefined();
     expect(sites('art')).toEqual(['bPicsX bpicsx.com']);
     expect(sites('picture')).toEqual(['bPicsX bpicsx.com']);
     expect(sites('books')).toEqual(['bWriterX bwriterx.com']);
@@ -118,7 +120,9 @@ describe('Mint sheet catalog (store build)', () => {
     const ids = cards.map((c) => c.id);
     for (const gone of ['link', 'currency', 'agent', 'sell', 'keep', 'heirs', 'picture', 'card', 'tickets', 'contract'])
       expect(ids).not.toContain(gone);
-    expect(ids).toEqual(expect.arrayContaining(['upload', 'art', 'music', 'video', '3d', 'books', 'website', 'name']));
+    expect(ids).toEqual(
+      expect.arrayContaining(['upload', 'art', 'music', 'videos', 'movies', '3d', 'books', 'website', 'name']),
+    );
     for (const c of cards) {
       expect(c.soon).toBeUndefined();
       expect(c.later ?? []).toEqual([]);
@@ -134,5 +138,53 @@ describe('Mint sheet catalog (store build)', () => {
   test('the bWalletX build keeps the previews', () => {
     const ids = read({}).map((c) => c.id);
     expect(ids).toEqual(expect.arrayContaining(['link', 'currency', 'agent', 'sell', 'keep', 'heirs']));
+  });
+});
+
+describe('our services look like themselves', () => {
+  const read = (env: Record<string, string>) => {
+    const code =
+      "const m = await import('./src/mobile/mint/serviceStyles.ts'); console.log(JSON.stringify(Object.fromEntries(Object.entries(m.SERVICE_STYLES).map(([k, v]) => [k, { art: !!v.art, accent: v.accent, mark: v.mark }]))));";
+    const r = Bun.spawnSync(['bun', '-e', code], {
+      env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
+    });
+    return JSON.parse(r.stdout.toString()) as Record<string, { art: boolean; accent: string; mark: string }>;
+  };
+
+  test('every service brand on a card has its own style; bMusicX is blue, bMoviesX red, bMarketX multicolour', () => {
+    const wallet = read({});
+    for (const c of MINT_CARDS)
+      for (const b of c.brands ?? []) if (b.site) expect(Object.keys(wallet)).toContain(b.name);
+    expect(wallet.bMusicX.accent).toBe('#2f6bff');
+    expect(wallet.bMoviesX).toMatchObject({ accent: '#e50914', mark: 'red' });
+    expect(wallet.bMarketX.mark).toBe('multi');
+  });
+
+  test('share art in bWalletX only; a store build draws the brand panel instead', () => {
+    const wallet = read({});
+    for (const n of ['bMusicX', 'bVideoX', 'bMoviesX', 'bPicsX', 'bWriterX', 'bDriveX', 'bVaultX', 'bStoreX'])
+      expect(wallet[n].art).toBe(true);
+    expect(wallet.bModelX.art).toBe(false);
+    for (const v of Object.values(read({ VITE_STORE_BUILD: '1' }))) expect(v.art).toBe(false);
+  });
+
+  test('a store build swaps the art module for an empty one, so no art file ships', () => {
+    const cfg = src('../../../vite.config.mobile.ts');
+    expect(cfg).toMatch(
+      /src\/mobile\/mint\/serviceArtX\.ts'\)\] = resolve\(\s*__dirname,\s*'src\/mobile\/mint\/serviceArtX\.store\.ts'/,
+    );
+    expect(src('./serviceArtX.store.ts')).not.toMatch(/\.webp/);
+    expect(src('./serviceStyles.ts')).not.toMatch(/\.webp/);
+  });
+
+  test('art files are small local webp (40 KB or less)', () => {
+    const { readdirSync, statSync } = require('fs') as typeof import('fs');
+    const dir = new URL('./art/', import.meta.url);
+    const files = readdirSync(dir);
+    expect(files.length).toBeGreaterThan(0);
+    for (const f of files) {
+      expect(f).toMatch(/\.webp$/);
+      expect(statSync(new URL(f, dir)).size).toBeLessThanOrEqual(40 * 1024);
+    }
   });
 });

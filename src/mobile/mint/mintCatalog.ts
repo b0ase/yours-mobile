@@ -303,7 +303,7 @@ export const MINT_CARDS: MintCard[] = [
             {
               id: 'release',
               title: 'A release',
-              sub: 'A single or album, listed in bMusic',
+              sub: 'A single or album, listed in bMusicX',
               action: { go: '/m/media/new' },
             },
           ]
@@ -323,27 +323,53 @@ export const MINT_CARDS: MintCard[] = [
     later: MINT_PREVIEWS_ENABLED ? ['Paid per second of listening', 'License versions and remixes for a share'] : [],
     facts: { who: 'Private by default; public when you release it.', cost: SIZE, where: VAULT },
   },
+  // Split (owner, 1 Nov 2026): clips and channels are bVideoX, films are bMoviesX. Both open the video mint.
   {
-    id: 'video',
-    brands: [brand('bVideoX', 'clips'), brand('bMoviesX', 'films')],
+    id: 'videos',
+    brands: [brand('bVideoX')],
     icon: 'film',
-    title: 'Videos & films',
-    sub: 'Clips to full films',
-    tint: '#2a0e0e',
-    pitch: 'Mint a clip, a short or a whole film with a cover frame, and keep the record of who made it.',
+    title: 'Videos',
+    sub: 'Clips, shorts, channels',
+    tint: '#1c1408',
+    pitch: 'Mint your clips, shorts and channel videos with a cover frame, signed and dated in your name.',
     uses: [
       { id: 'clip', title: 'A clip or short', sub: 'Up to a few minutes', action: { flow: 'video' } },
-      { id: 'film', title: 'A film', sub: 'A short or a feature, within the size limit', action: { flow: 'video' } },
+      {
+        id: 'channel',
+        title: 'From your channel',
+        sub: 'A video you posted on YouTube, TikTok or Twitch',
+        action: { flow: 'video' },
+      },
       ...(MINT_PREVIEWS_ENABLED
         ? [{ id: 'musicvideo', title: 'A music video', sub: 'Linked to a track you minted', action: SOON }]
         : []),
     ],
     why: [
       'Signed and dated: the record of who made it',
-      'Private by default; public when you release it',
+      'Private by default; public when you post it',
       'Pick any frame as the cover',
     ],
-    later: MINT_PREVIEWS_ENABLED ? ['Listed on bMoviesX or bVideoX', 'Paid per view or per second'] : [],
+    later: MINT_PREVIEWS_ENABLED ? ['Bring your whole channel across in one go', 'Paid per view or per second'] : [],
+    facts: { who: 'Private by default; public when you post it.', cost: SIZE, where: VAULT },
+  },
+  {
+    id: 'movies',
+    brands: [brand('bMoviesX')],
+    icon: 'film',
+    title: 'Movies & films',
+    sub: 'Shorts to features',
+    tint: '#3a0306',
+    pitch: 'Mint your film, from a short to a feature, with a poster frame, and keep the record of who made it.',
+    uses: [
+      { id: 'film', title: 'A film', sub: 'A short or a feature, within the size limit', action: { flow: 'video' } },
+      { id: 'trailer', title: 'A trailer', sub: 'A teaser for a film you’re making', action: { flow: 'video' } },
+    ],
+    why: [
+      'Your name and the date on your film, on chain',
+      'Private by default; public on release day',
+      'Pick any frame as the poster',
+    ],
+    later: MINT_PREVIEWS_ENABLED ? ['Listed on bMoviesX', 'Paid per view'] : [],
     facts: { who: 'Private by default; public when you release it.', cost: SIZE, where: VAULT },
   },
   {
@@ -712,7 +738,7 @@ export const MINT_SECTIONS: { id: string; title: string; cards: string[]; brand?
   {
     id: 'make',
     title: 'Make something new',
-    cards: ['picture', 'card', 'art', 'music', 'video', '3d', 'books', 'website'],
+    cards: ['picture', 'card', 'art', 'music', 'videos', 'movies', '3d', 'books', 'website'],
   },
   { id: 'money', title: 'Money & identity', cards: ['currency', 'token', 'tickets', 'name'] },
   // Every card in these two is bWalletX only, so a store build drops the headings too.
@@ -741,7 +767,7 @@ export const APP_BRANDS: Record<string, MintBrand[]> = {
   youtube: [brand('bVideoX')],
   tiktok: [brand('bVideoX')],
   twitch: [brand('bVideoX')],
-  vimeo: [brand('bVideoX'), brand('bMoviesX')],
+  vimeo: [brand('bVideoX')],
   substack: [brand('bWriterX')],
   medium: [brand('bWriterX')],
   takeout: [brand('bDriveX', 'storage')],

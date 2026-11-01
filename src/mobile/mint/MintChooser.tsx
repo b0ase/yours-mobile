@@ -28,6 +28,8 @@ import {
 } from 'lucide-react';
 import { MINT_PREVIEWS_ENABLED, STORE_BUILD } from '../storeBuild';
 import { BrandMark } from './BrandMark';
+import { BrandPanel, Lockup } from './ServiceBrand';
+import { serviceStyle, type ServiceStyle } from './serviceStyles';
 import {
   MINT_SECTIONS,
   MINT_WAYS,
@@ -285,23 +287,30 @@ export const MintChooser = ({ view, push, back, run, hasFlow, openSite }: Props)
     const Icon = ICONS[c.icon];
     const uses = usesOf(c);
     const main = primary(c);
+    const svc = cardService(c);
     const linkable = MINT_SOURCES.filter((s) => s.link);
     const uploadOnly = MINT_SOURCES.filter((s) => !s.link).map((s) => s.label);
     body = (
       <>
-        <Art tint={c.tint} height={150} badge={<Badge live={!c.soon} />}>
-          <span
-            className="grid h-[76px] w-[76px] place-items-center rounded-[22px]"
-            style={{
-              background: 'rgba(0,0,0,0.35)',
-              color: c.id === 'upload' ? BLUE : GOLD,
-              boxShadow: '0 0 50px rgba(245,184,0,0.25)',
-            }}
-          >
-            <Icon size={40} />
-          </span>
-        </Art>
-        <BrandStrip brands={c.brands} openSite={openSite} />
+        {svc ? (
+          <ServiceHero c={c} s={svc} openSite={openSite} />
+        ) : (
+          <>
+            <Art tint={c.tint} height={150} badge={<Badge live={!c.soon} />}>
+              <span
+                className="grid h-[76px] w-[76px] place-items-center rounded-[22px]"
+                style={{
+                  background: 'rgba(0,0,0,0.35)',
+                  color: c.id === 'upload' ? BLUE : GOLD,
+                  boxShadow: '0 0 50px rgba(245,184,0,0.25)',
+                }}
+              >
+                <Icon size={40} />
+              </span>
+            </Art>
+            <BrandStrip brands={c.brands} openSite={openSite} />
+          </>
+        )}
         <h2 className="mb-1.5 mt-4 text-2xl font-bold leading-tight">{c.title}</h2>
         <p className="m-0 mb-3.5 text-[15px] leading-normal" style={{ color: '#d6d2c7' }}>
           {c.pitch}
@@ -361,9 +370,9 @@ export const MintChooser = ({ view, push, back, run, hasFlow, openSite }: Props)
       </>
     );
     foot = main ? (
-      <Foot back={back} label={main.label} onClick={() => run(main.action)} />
+      <Foot back={back} label={main.label} onClick={() => run(main.action)} s={svc} />
     ) : (
-      <Foot back={back} label={NOT_OPEN} />
+      <Foot back={back} label={NOT_OPEN} s={svc} />
     );
   }
 
@@ -395,7 +404,7 @@ const SectionTitle = ({
     <h3 className="m-0 text-xs font-semibold uppercase" style={{ color: MUTED, letterSpacing: '0.12em' }}>
       {children}
     </h3>
-    {brand && <BrandChip b={brand} openSite={openSite} small />}
+    {brand && <BrandRow b={brand} openSite={openSite} size={14} />}
   </div>
 );
 
@@ -466,9 +475,13 @@ const BrandChip = ({
 const BrandStrip = ({ brands, openSite }: { brands?: MintBrand[]; openSite?: (name: string, url: string) => void }) =>
   brands?.length ? (
     <div className="mt-3 flex flex-wrap gap-2">
-      {brands.map((b) => (
-        <BrandChip key={b.name} b={b} openSite={openSite} />
-      ))}
+      {brands.map((b) =>
+        serviceStyle(b.name) ? (
+          <BrandRow key={b.name} b={b} openSite={openSite} size={22} />
+        ) : (
+          <BrandChip key={b.name} b={b} openSite={openSite} />
+        ),
+      )}
     </div>
   ) : null;
 
@@ -512,17 +525,24 @@ const Badge = ({ live }: { live: boolean }) =>
 
 const Tile = ({ c, onClick }: { c: MintCard; onClick: () => void }) => {
   const Icon = ICONS[c.icon];
+  const svc = cardService(c);
+  // Our own services' tiles carry their mark, wordmark and tint, so the sheet reads as a family of distinct services.
+  const label = !!c.brands?.length && !svc;
   return (
     <button
       type="button"
       onClick={onClick}
-      className="relative flex h-[124px] min-w-0 flex-col items-start gap-1 overflow-hidden rounded-[14px] border p-3 text-left cursor-pointer transition-transform hover:-translate-y-0.5"
-      style={{ borderColor: BORDER, background: PANEL, color: INK }}
+      className="relative flex h-[132px] min-w-0 flex-col items-start gap-1 overflow-hidden rounded-[14px] border p-3 text-left cursor-pointer transition-transform hover:-translate-y-0.5"
+      style={{
+        borderColor: svc ? `${svc.accent}66` : BORDER,
+        background: svc ? `linear-gradient(160deg, ${svc.tint} 0%, ${PANEL} 72%)` : PANEL,
+        color: INK,
+      }}
     >
       <span className="absolute right-2.5 top-2.5">
         <Badge live={!c.soon} />
       </span>
-      <span className="flex h-[22px] items-center" style={{ color: c.id === 'upload' ? BLUE : GOLD }}>
+      <span className="flex h-[22px] items-center" style={{ color: svc ? svc.ink : c.id === 'upload' ? BLUE : GOLD }}>
         <Icon size={22} />
       </span>
       <span className="mt-1 line-clamp-2 text-[14.5px] font-semibold leading-tight">{c.title}</span>
@@ -532,9 +552,21 @@ const Tile = ({ c, onClick }: { c: MintCard; onClick: () => void }) => {
       >
         {c.sub}
       </span>
-      {!!c.brands?.length && (
+      {svc && (
+        <span className="absolute bottom-2 left-3 right-3 overflow-hidden whitespace-nowrap">
+          {c.brands!.map((b) => {
+            const st = serviceStyle(b.name);
+            return st ? (
+              <span key={b.name} className="mr-2 inline-block align-middle">
+                <Lockup s={st} size={14} />
+              </span>
+            ) : null;
+          })}
+        </span>
+      )}
+      {label && (
         <span className="absolute bottom-2 left-3 right-3 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] leading-[1.3]">
-          {c.brands.map((b, i) => (
+          {c.brands!.map((b, i) => (
             <span key={b.name}>
               {i > 0 && <span style={{ color: DIM }}> · </span>}
               <Wordmark name={b.name} />
@@ -545,6 +577,88 @@ const Tile = ({ c, onClick }: { c: MintCard; onClick: () => void }) => {
     </button>
   );
 };
+
+/** The first of our services a card belongs to (its look), if any. */
+const cardService = (c: MintCard): ServiceStyle | undefined =>
+  c.brands?.map((b) => serviceStyle(b.name)).find((x): x is ServiceStyle => !!x);
+
+/**
+ * One of our services as its site sets it: logo lockup, what it is for, and (bWalletX only) its domain, tapping
+ * through to the site. A store build has no `site` and passes no opener, and the link branch folds away.
+ */
+const BrandRow = ({
+  b,
+  openSite,
+  size,
+}: {
+  b: MintBrand;
+  openSite?: (name: string, url: string) => void;
+  size: number;
+}) => {
+  const st = serviceStyle(b.name);
+  if (!st) return <BrandChip b={b} openSite={openSite} small={size < 18} />;
+  const link = !STORE_BUILD && b.site && openSite ? `https://${b.site}` : '';
+  const small = size < 18;
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
+      <Lockup s={st} size={size} />
+      {b.role && !small && (
+        <span className="text-[13px]" style={{ color: MUTED }}>
+          {b.role}
+        </span>
+      )}
+      {link && (
+        <button
+          type="button"
+          onClick={() => openSite!(b.name, link)}
+          aria-label={`Open ${b.name}`}
+          className="inline-flex items-center gap-1 border-0 bg-transparent p-0 cursor-pointer"
+          style={{ color: MUTED, fontSize: small ? 11 : 13 }}
+        >
+          {b.site}
+          <ExternalLink size={small ? 10 : 12} color={DIM} />
+        </button>
+      )}
+    </div>
+  );
+};
+
+/**
+ * A card's top when it belongs to our services: each service's lockup row (its own logo, colours and type, plus its
+ * domain), then its hero: the site's share art, or (store build, bModelX) its brand panel. Framed in its accent.
+ */
+const ServiceHero = ({
+  c,
+  s,
+  openSite,
+}: {
+  c: MintCard;
+  s: ServiceStyle;
+  openSite?: (name: string, url: string) => void;
+}) => (
+  <>
+    <div className="mb-3 flex items-start justify-between gap-3">
+      <div className="grid min-w-0 gap-2">
+        {c.brands!.map((b) => (
+          <BrandRow key={b.name} b={b} openSite={openSite} size={24} />
+        ))}
+      </div>
+      <span className="mt-1 flex-none">
+        <Badge live={!c.soon} />
+      </span>
+    </div>
+    <div
+      className="relative w-full overflow-hidden rounded-[18px] border"
+      style={{ aspectRatio: '1200 / 630', borderColor: `${s.accent}55`, background: '#000' }}
+    >
+      {s.art ? (
+        <img src={s.art} alt="" className="block h-full w-full object-cover" draggable={false} />
+      ) : (
+        <BrandPanel s={s} />
+      )}
+    </div>
+  </>
+);
 
 const AppButton = ({ id, onClick }: { id: MintSourceId; onClick: () => void }) => {
   const s = mintSource(id)!;
@@ -661,7 +775,18 @@ const Fact = ({ label, text }: { label: string; text: string }) => (
   </div>
 );
 
-const Foot = ({ back, label, onClick }: { back: () => void; label: string; onClick?: () => void }) => (
+const Foot = ({
+  back,
+  label,
+  onClick,
+  s,
+}: {
+  back: () => void;
+  label: string;
+  onClick?: () => void;
+  /** The card's service: its accent on the main button (gold family keeps the gold gradient). */
+  s?: ServiceStyle;
+}) => (
   <div
     className="flex flex-none gap-2 border-t px-4 pt-3"
     style={{ borderColor: EDGE, paddingBottom: 'calc(14px + env(safe-area-inset-bottom))' }}
@@ -680,8 +805,11 @@ const Foot = ({ back, label, onClick }: { back: () => void; label: string; onCli
       onClick={onClick}
       className="h-[46px] min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap rounded-full border-0 px-3 text-[15px] font-bold"
       style={{
-        background: 'linear-gradient(180deg, #ffe58a, #ffd24d 55%, #e0a800)',
-        color: '#1a1400',
+        background:
+          s && s.accent !== '#ffd24d'
+            ? `linear-gradient(180deg, ${s.accent}, ${s.accent}cc)`
+            : 'linear-gradient(180deg, #ffe58a, #ffd24d 55%, #e0a800)',
+        color: s ? s.onAccent : '#1a1400',
         opacity: onClick ? 1 : 0.45,
         cursor: onClick ? 'pointer' : 'not-allowed',
       }}
