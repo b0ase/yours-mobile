@@ -4,6 +4,7 @@ import { BWALLET_PAYMAIL_API } from '../names/config';
 import { signRequest } from '../names/paymail';
 import { BMARKETX_API, ebayAvailable } from './ebayLink';
 import { clearUnfinished } from './pendingLink';
+import { LINK_ACCOUNTS_ENABLED } from '../storeBuild';
 
 /**
  * "Link your accounts" (owner, 18 Oct 2026). bWalletX is not an OAuth sign-in: the wallet IS the account, and a
@@ -168,6 +169,9 @@ export type ProviderState = Record<'x' | 'google' | 'github' | 'linkedin' | 'eba
  */
 export const DEFAULT_PROVIDERS: ProviderState = { x: true, google: true, github: false, linkedin: false, ebay: false };
 export async function fetchProviders(f: typeof fetch = fetch): Promise<ProviderState> {
+  // Store builds: the onboarding panel calls this even though it renders nothing there (LINK_ACCOUNTS_ENABLED), so
+  // return before the fetch and Rollup drops the providers URL from the bundle.
+  if (!LINK_ACCOUNTS_ENABLED) return DEFAULT_PROVIDERS;
   const ebay = ebayAvailable(f);
   if (!BWALLET_PAYMAIL_API) return { ...DEFAULT_PROVIDERS, ebay: await ebay };
   try {

@@ -371,6 +371,11 @@
 .bw-bc-back .bw-bc-terms {
   font-size: 11px;
 }
+/* Desktop rail: the card fills its column (mobile.css), so the back drops its portrait min-height. Kept here, not in
+   mobile.css, so the class name stays in this lazy chunk and out of the store bundle. */
+html[data-rail] .bw-bcar .bw-bc-back {
+  min-height: 0;
+}
 
 /* "View contract" (bCredits): the NDS page in a sandboxed frame, Save and Close below. */
 .bw-ag {
