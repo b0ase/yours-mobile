@@ -139,6 +139,7 @@ import { RoomBell } from '../push/RoomBell';
 import {
   APP_NAME,
   BSPACES_ENABLED,
+  BUREAU_ENABLED,
   XINVITES_ENABLED,
   roomSpacesAllowed,
   MARKET_ENABLED,
@@ -758,7 +759,8 @@ const Conversation = ({
     () => assignShades(messages.map((m) => m.author_handle).filter((h): h is string => !!h && normHandle(h) !== 'b')),
     [messages],
   );
-  // Each signable document gets its own Review & sign button on its card (chat/signableDocs.ts).
+  // Each signable document gets its own Review & sign button on its card (chat/signableDocs.ts). Document signing
+  // is Agreements (BUREAU_ENABLED): a store build renders neither the buttons nor the banner, so Rollup drops them.
   const roomDocs = useMemo(() => signableDocs(messages, me), [messages, me]);
   const roomCardFiles = useMemo(() => cardFileNames(messages), [messages]);
   // $b's own replies: an outlined dark card ringed in gold, never a second yellow bubble beside yours.
@@ -809,7 +811,7 @@ const Conversation = ({
   // Sits between TopNav (3.5rem) and the tab bar (3.75rem) so both stay usable; sheets (z-[150]) still clear it.
   return createPortal(
     <div
-      className="fixed z-[110] flex flex-col"
+      className="bw-room-view fixed z-[110] flex flex-col"
       style={{
         display: offScreen ? 'none' : undefined,
         // Wide web layout (wide/wide.css) sets these so the room opens beside the room list.
@@ -1029,7 +1031,7 @@ const Conversation = ({
           actions={null}
         />
       )}
-      {!peer && <PendingDocBanner room={room} inChat={(id) => roomDocs.byId.has(id)} />}
+      {BUREAU_ENABLED && !peer && <PendingDocBanner room={room} inChat={(id) => roomDocs.byId.has(id)} />}
       <div
         ref={scroller}
         onScroll={onScroll}
@@ -1169,7 +1171,7 @@ const Conversation = ({
               >
                 {it.message.body || 'Room update'}
               </span>
-              {docForMessage(roomDocs, it.message, roomCardFiles) && (
+              {BUREAU_ENABLED && docForMessage(roomDocs, it.message, roomCardFiles) && (
                 <DocSignButton ticker={room.ticker} doc={docForMessage(roomDocs, it.message, roomCardFiles)!} />
               )}
             </div>
@@ -1325,7 +1327,7 @@ const Conversation = ({
                   ) : mediaPayload(it.message) ? (
                     <>
                       <RoomMediaBubble client={client} ticker={room.ticker} message={it.message} />
-                      {docForMessage(roomDocs, it.message, roomCardFiles) && (
+                      {BUREAU_ENABLED && docForMessage(roomDocs, it.message, roomCardFiles) && (
                         <DocSignButton ticker={room.ticker} doc={docForMessage(roomDocs, it.message, roomCardFiles)!} />
                       )}
                       {it.message.body && mediaPayload(it.message)?.filename !== it.message.body && (

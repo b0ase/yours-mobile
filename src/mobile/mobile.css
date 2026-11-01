@@ -3523,9 +3523,6 @@ html[data-rail] div:has(> .bw-dock-pad > .bw-bcar) {
 html[data-rail] .bw-bcar .bw-wcard-wrap {
   width: 100%;
 }
-html[data-rail] .bw-bcar .bw-bc-back {
-  min-height: 0;
-}
 html[data-rail] .bw-dock-pad:has(> .bw-bcar) > .bw-toprow,
 html[data-rail] .bw-dock-pad:has(> .bw-bcar) > .bw-swaprow,
 html[data-rail] .bw-dock-pad:has(> .bw-bcar) > .bw-backup-banner,
