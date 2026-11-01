@@ -32,6 +32,7 @@ import type {
   ThemeOfferPrompt,
   TwetchPrompt,
   ProveHoldingsPrompt,
+  SignedPostPrompt,
   UsbCheckRequest,
 } from './promptProtocol';
 import { SwapRequestPage } from './pages/requests/SwapRequest';
@@ -41,7 +42,8 @@ import { ProveHoldingsRequestPage } from './pages/requests/ProveHoldingsRequest'
 import { MintPrivateRequestPage } from './pages/requests/MintPrivateRequest';
 import { StreamGrantRequestPage } from './pages/requests/StreamGrantRequest';
 import { EnvelopeRequestPage } from './pages/requests/EnvelopeRequest';
-import { ENVELOPES_ENABLED } from './mobile/storeBuild';
+import { ENVELOPES_ENABLED, SIGNED_BADGES_ENABLED } from './mobile/storeBuild';
+import { SignedPostRequestPage } from './pages/requests/SignedPostRequest';
 import { SiteThemeFrame } from './mobile/theme/SiteThemeFrame';
 import './index.css';
 
@@ -65,7 +67,8 @@ type PromptScreen =
   | { kind: 'twetch'; requestID: string; payload: TwetchPrompt }
   | { kind: 'swap'; requestID: string; payload: SwapPrompt }
   | { kind: 'proveHoldings'; requestID: string; payload: ProveHoldingsPrompt }
-  | { kind: 'themeOffer'; requestID: string; payload: ThemeOfferPrompt };
+  | { kind: 'themeOffer'; requestID: string; payload: ThemeOfferPrompt }
+  | { kind: 'signedPost'; requestID: string; payload: SignedPostPrompt };
 
 /** The site a request screen is for (from the request the background checked), for the frame's origin strip. */
 const screenOriginator = (s: PromptScreen): string | undefined =>
@@ -416,6 +419,9 @@ const PromptApp = () => {
               request={screen.payload}
               onResponse={() => void advance()}
             />
+          )}
+          {SIGNED_BADGES_ENABLED && screen.kind === 'signedPost' && (
+            <SignedPostRequestPage key={screen.requestID} request={screen.payload} onResponse={() => void advance()} />
           )}
           {screen.kind === 'twetch' && (
             <TwetchRequestPage key={screen.requestID} request={screen.payload} onResponse={() => void advance()} />

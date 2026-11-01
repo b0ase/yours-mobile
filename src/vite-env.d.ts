@@ -33,6 +33,8 @@ interface ImportMetaEnv {
   readonly VITE_PASSKEY_BACKUP_URL?: string;
   /** Pairing relay host for "open on computer" (default relay.bwallet.space). */
   readonly VITE_PAIR_RELAY?: string;
+  /** '1' = signed post badges in the extension (off by default; never in store builds; spends money: owner money-ok). */
+  readonly VITE_SIGNED_BADGES?: string;
 }
 
 interface ImportMeta {

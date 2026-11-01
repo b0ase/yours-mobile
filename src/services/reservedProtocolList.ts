@@ -85,4 +85,7 @@ export const EXTERNAL_OK: readonly (readonly [number, string, string])[] = [
   // Ordinal (token icon) receive keys for sites, the same way: getPublicKey only (siteTokens.ts).
   [1, 'bwalletx ordinal receive', 'Site ordinal receive keys: getPublicKey only (siteTokens.ts)'],
   [1, 'sigma', 'SIGMA post signatures: the wallet asks for it with a first post (permissionBundle.ts POST_PROTOCOL)'],
+  // Babbage AuthSig content proofs (src/signedBadges/, VITE_SIGNED_BADGES=1): an open format other AuthSig apps sign
+  // with too, so a site may ask for it (with the normal permission sheet). The wallet's own Sign sheet uses it as admin.
+  [1, 'authsig', 'AuthSig signed-post proofs (signedBadges/record.ts): shared with AuthSig-compatible apps'],
 ];

@@ -891,3 +891,30 @@ describe('TWETCH_POST_ENABLED: Post to Twetch is bWalletX only', () => {
     expect(src('./settings/FeedSettings.tsx')).toContain("TWETCH_POST_ENABLED && screen === 'twetch'");
   });
 });
+
+describe('SIGNED_BADGES_ENABLED: signed post badges are off by default and never in a store build', () => {
+  const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  const flagFor = (env: Record<string, string>) => {
+    const expr = /export const SIGNED_BADGES_ENABLED: boolean =([^;]*);/s
+      .exec(src('./storeBuild.ts'))![1]
+      .replace(/import\.meta\.env/g, 'env');
+    return new Function('env', `return (${expr});`)(env) as boolean;
+  };
+  test.each([
+    [{}, false],
+    [{ VITE_CHANNEL: 'direct' }, false],
+    [{ VITE_SIGNED_BADGES: '1' }, true],
+    [{ VITE_SIGNED_BADGES: '1', VITE_STORE_BUILD: '1' }, false],
+    [{ VITE_SIGNED_BADGES: '1', VITE_CHANNEL: 'ios-store' }, false],
+    [{ VITE_SIGNED_BADGES: '1', VITE_CHANNEL: 'android-play' }, false],
+  ])('%o → %p', (env, enabled) => {
+    expect(flagFor(env)).toBe(enabled);
+  });
+  test('every entry point calls the feature only behind the flag', () => {
+    expect(src('../content.ts')).toMatch(/if \(SIGNED_BADGES_ENABLED\) startSignedBadges\(\);/);
+    const bg = src('../background.ts');
+    expect(bg).toMatch(/if \(SIGNED_BADGES_ENABLED\) \{\s*signedBadges = installSignedBadges\(/);
+    expect(bg).toMatch(/SIGNED_BADGES_ENABLED && signedBadges\?\.handles\(/);
+    expect(src('../prompt-tab.tsx')).toMatch(/SIGNED_BADGES_ENABLED && screen\.kind === 'signedPost' &&/);
+  });
+});

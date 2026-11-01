@@ -11,7 +11,8 @@ import { CustomListenerName, RequestEventDetail, RequestParams } from './inject'
 import { originatorForOrigin } from './services/originKey';
 import { forwardCwiCall } from './services/cwiForward';
 import { chromeLocalStore, markAndDetect } from './services/duplicateExtension';
-import { SUBSCRIPTIONS_ENABLED } from './mobile/storeBuild';
+import { SIGNED_BADGES_ENABLED, SUBSCRIPTIONS_ENABLED } from './mobile/storeBuild';
+import { startSignedBadges } from './signedBadges/content/start';
 import { HANDOFF_ENABLED, HANDOFF_WEB_ORIGIN } from './mobile/passkey/extHandoff';
 import {
   ROOM_PLAYING_ACTION,
@@ -251,6 +252,10 @@ if (HANDOFF_ENABLED) {
     }
   });
 }
+
+// Signed post badges (src/signedBadges/content/start.ts): "✓ signed by $name" on X, LinkedIn, GitHub and YouTube posts,
+// Sign on the user's own posts, and the selection for the "Sign selected text" menu. VITE_SIGNED_BADGES=1 builds only.
+if (SIGNED_BADGES_ENABLED) startSignedBadges();
 
 // In-page wallet sheet (docs/ONE-SHEET-PERMISSIONS.md §3d). When the side panel can't open, the background asks
 // for the wallet's own approval page (prompt.html, extension origin) as a sheet over this site. It sits in a

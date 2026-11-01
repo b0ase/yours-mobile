@@ -294,8 +294,34 @@ export const EXTENSION_SWAPS: Record<string, string> =
         [resolve(__dirname, 'src/cwi.ts')]: resolve(__dirname, 'src/brand/cwi.ts'),
       };
 
+/**
+ * Signed post badges (src/signedBadges/) off: its entry modules resolve to an empty stand-in, so not even the
+ * sourcemaps carry them. The entry points also call them only behind the literal SIGNED_BADGES_ENABLED flag
+ * (src/mobile/storeBuild.ts), which Rollup drops; this keeps the dead modules out of the graph altogether.
+ */
+const SIGNED_BADGES_ON =
+  process.env.VITE_SIGNED_BADGES === '1' &&
+  !(process.env.VITE_STORE_BUILD === '1' || ['ios-store', 'android-play'].includes(process.env.VITE_CHANNEL ?? ''));
+const SIGNED_BADGES_ENTRIES = new Set(
+  [
+    'src/signedBadges/background.ts',
+    'src/signedBadges/content/start.ts',
+    'src/pages/requests/SignedPostRequest.tsx',
+  ].map((f) => resolve(__dirname, f)),
+);
+export const signedBadgesOff = (): Plugin => ({
+  name: 'bwallet-signed-badges-off',
+  enforce: 'pre',
+  async resolveId(source, importer, options) {
+    if (SIGNED_BADGES_ON || !importer || !/signedBadges|SignedPostRequest/.test(source)) return null;
+    const r = await this.resolve(source, importer, { ...options, skipSelf: true });
+    return r && SIGNED_BADGES_ENTRIES.has(r.id.split('?')[0]) ? resolve(__dirname, 'src/stubs/offFeature.ts') : null;
+  },
+});
+
 /** All brand plugins for one extension bundle. */
 export const extensionBrandPlugins = ({ emitAvatar = false } = {}): Plugin[] => [
+  signedBadgesOff(),
   brand(EXTENSION_SWAPS, { emitAvatar }),
   bcorpText(EXTENSION_TEXT),
   bcorpColours(),
