@@ -55,6 +55,13 @@ export type MintIconId =
 
 export type MintUse = { id: string; title: string; sub: string; action: MintAction };
 
+/**
+ * One of our services a card belongs to, drawn as its wordmark (lowercase b, gold X) under the card's art and on its
+ * tile. `site` is the domain the chip opens: bWalletX only (SITES below), so a store build shows the name and never a
+ * link to an outside site (Apple 3.1.1, Play Payments).
+ */
+export type MintBrand = { name: string; role?: string; site?: string };
+
 export type MintCard = {
   id: string;
   icon: MintIconId;
@@ -74,6 +81,8 @@ export type MintCard = {
   /** The main button when the card has no uses (otherwise the first live use). */
   cta?: MintAction;
   ctaLabel?: string;
+  /** The services it belongs to (wordmarks). */
+  brands?: MintBrand[];
 };
 
 const MB = 1024 * 1024;
@@ -82,6 +91,31 @@ const PRIV = 'Only you. Encrypted to your wallet before it goes on chain.';
 const SIZE = 'Priced by file size. You see the exact price before you pay.';
 const VAULT = 'bMint › Your vault, or your Media tab if you make it public.';
 const SOON: MintAction = { soon: true };
+
+/**
+ * Our services' sites (owner, 1 Nov 2026; each checked live with its own page). Not in a store build, not even as
+ * text: the names stay, the links go. 3D models is bModelX; b3dx.com and bcorpx.com are not ours, never use them.
+ */
+const SITES: Record<string, string> = !STORE_BUILD
+  ? {
+      bMusicX: 'bmusicx.com',
+      bVideoX: 'bvideox.com',
+      bMoviesX: 'bmoviesx.com',
+      bPicsX: 'bpicsx.com',
+      bWriterX: 'bwriterx.com',
+      bDriveX: 'bdrivex.com',
+      bVaultX: 'bvaultx.com',
+      bStoreX: 'bstorex.com',
+      bMarketX: 'bmarketx.com',
+      bJobsX: 'bjobsx.com',
+      bModelX: 'bmodelx.com',
+    }
+  : {};
+export const brand = (name: string, role?: string): MintBrand => ({
+  name,
+  ...(role ? { role } : {}),
+  ...(SITES[name] ? { site: SITES[name] } : {}),
+});
 
 export const MINT_CARDS: MintCard[] = [
   // ── Your past, from the apps you use ──────────────────────────────────────────────────────────────────────
@@ -112,6 +146,7 @@ export const MINT_CARDS: MintCard[] = [
     : []),
   {
     id: 'upload',
+    brands: [brand('bDriveX', 'storage')],
     icon: 'upload',
     title: 'Upload your archive',
     sub: 'Keep the real thing',
@@ -155,6 +190,7 @@ export const MINT_CARDS: MintCard[] = [
     ? [
         {
           id: 'picture',
+          brands: [brand('bPicsX')],
           icon: 'spark' as const,
           title: 'AI pictures',
           sub: 'Describe it, b paints it',
@@ -233,6 +269,7 @@ export const MINT_CARDS: MintCard[] = [
     : []),
   {
     id: 'art',
+    brands: [brand('bPicsX')],
     icon: 'pic',
     title: 'Art & photos',
     sub: 'One-offs or a numbered set',
@@ -253,6 +290,7 @@ export const MINT_CARDS: MintCard[] = [
   },
   {
     id: 'music',
+    brands: [brand('bMusicX')],
     icon: 'music',
     title: 'Music',
     sub: 'Tracks fans own and play',
@@ -287,6 +325,7 @@ export const MINT_CARDS: MintCard[] = [
   },
   {
     id: 'video',
+    brands: [brand('bVideoX', 'clips'), brand('bMoviesX', 'films')],
     icon: 'film',
     title: 'Videos & films',
     sub: 'Clips to full films',
@@ -309,6 +348,7 @@ export const MINT_CARDS: MintCard[] = [
   },
   {
     id: '3d',
+    brands: [brand('bModelX')],
     icon: 'box',
     title: '3D models',
     sub: 'GLB, glTF or USDZ',
@@ -322,6 +362,7 @@ export const MINT_CARDS: MintCard[] = [
   },
   {
     id: 'books',
+    brands: [brand('bWriterX')],
     icon: 'book',
     title: 'Writing & documents',
     sub: 'Books, ideas, inventions',
@@ -402,6 +443,7 @@ export const MINT_CARDS: MintCard[] = [
     : []),
   {
     id: 'token',
+    brands: !STORE_BUILD ? [brand('bWalletX Exchange')] : [],
     icon: 'coin',
     title: 'A token',
     sub: 'Your own coin, fixed supply',
@@ -422,6 +464,7 @@ export const MINT_CARDS: MintCard[] = [
     ? [
         {
           id: 'tickets',
+          brands: [brand('bWalletX Exchange')],
           icon: 'ticket' as const,
           title: 'Tickets & passes',
           sub: 'Entry to rooms and events',
@@ -440,6 +483,7 @@ export const MINT_CARDS: MintCard[] = [
     : []),
   {
     id: 'name',
+    brands: [brand('OpNS')],
     icon: 'at',
     title: 'Your name',
     sub: 'A name or a domain',
@@ -568,6 +612,7 @@ export const MINT_CARDS: MintCard[] = [
         },
         {
           id: 'sell',
+          brands: [brand('bStoreX', 'your shop'), brand('bMarketX', 'the market')],
           icon: 'swap' as const,
           title: 'Sell or license it',
           sub: 'On BSVEX',
@@ -593,6 +638,7 @@ export const MINT_CARDS: MintCard[] = [
         },
         {
           id: 'keep',
+          brands: [brand('bVaultX')],
           icon: 'drive' as const,
           title: 'Keep it for good',
           sub: 'Long-term storage',
@@ -614,6 +660,7 @@ export const MINT_CARDS: MintCard[] = [
     ? [
         {
           id: 'heirs',
+          brands: [brand('bTrust', 'in bWalletX')],
           icon: 'tree' as const,
           title: 'Hand it down',
           sub: 'Your heirs, in bTrust',
@@ -661,7 +708,7 @@ export const MINT_CARDS: MintCard[] = [
 ];
 
 /** The sheet's sections, in order. Ids that aren't in this build's MINT_CARDS are skipped. */
-export const MINT_SECTIONS: { id: string; title: string; cards: string[] }[] = [
+export const MINT_SECTIONS: { id: string; title: string; cards: string[]; brand?: MintBrand }[] = [
   {
     id: 'make',
     title: 'Make something new',
@@ -671,7 +718,7 @@ export const MINT_SECTIONS: { id: string; title: string; cards: string[] }[] = [
   // Every card in these two is bWalletX only, so a store build drops the headings too.
   ...(!STORE_BUILD
     ? [
-        { id: 'work', title: 'Work', cards: ['contract', 'strategy', 'app', 'tradebot'] },
+        { id: 'work', title: 'Work', cards: ['contract', 'strategy', 'app', 'tradebot'], brand: brand('bJobsX') },
         { id: 'use', title: 'Use what you’ve minted', cards: ['heirs', 'agent', 'sell', 'keep'] },
       ]
     : []),
@@ -681,3 +728,21 @@ export const MINT_SECTIONS: { id: string; title: string; cards: string[] }[] = [
 export const MINT_WAYS = ['link', 'upload'];
 
 export const mintCard = (id: string) => MINT_CARDS.find((c) => c.id === id);
+
+/** The service an app's posts belong with (its card's brand strip). */
+export const APP_BRANDS: Record<string, MintBrand[]> = {
+  linkedin: [brand('bJobsX', 'work history')],
+  instagram: [brand('bPicsX')],
+  flickr: [brand('bPicsX')],
+  pinterest: [brand('bPicsX')],
+  icloud: [brand('bPicsX')],
+  soundcloud: [brand('bMusicX')],
+  bandcamp: [brand('bMusicX')],
+  youtube: [brand('bVideoX')],
+  tiktok: [brand('bVideoX')],
+  twitch: [brand('bVideoX')],
+  vimeo: [brand('bVideoX'), brand('bMoviesX')],
+  substack: [brand('bWriterX')],
+  medium: [brand('bWriterX')],
+  takeout: [brand('bDriveX', 'storage')],
+};

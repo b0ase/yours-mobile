@@ -8,6 +8,7 @@ import {
   Box,
   Brain,
   ChevronRight,
+  ExternalLink,
   Clapperboard,
   Coins,
   Dna,
@@ -25,7 +26,7 @@ import {
   Upload,
   type LucideIcon,
 } from 'lucide-react';
-import { MINT_PREVIEWS_ENABLED } from '../storeBuild';
+import { MINT_PREVIEWS_ENABLED, STORE_BUILD } from '../storeBuild';
 import { BrandMark } from './BrandMark';
 import {
   MINT_SECTIONS,
@@ -34,7 +35,9 @@ import {
   type MintAction,
   type MintCard,
   type MintIconId,
+  type MintBrand,
   type MintUse,
+  APP_BRANDS,
 } from './mintCatalog';
 import { MINT_SOURCES, mintSource, type MintSourceId } from './mintSources';
 
@@ -101,9 +104,11 @@ type Props = {
   run: (a: MintAction) => void;
   /** Whether a MINT_TILES flow exists in this build and edition. */
   hasFlow: (id: string) => boolean;
+  /** Opens one of our services' sites (bWalletX only; a store build passes nothing, so brands are names only). */
+  openSite?: (name: string, url: string) => void;
 };
 
-export const MintChooser = ({ view, push, back, run, hasFlow }: Props) => {
+export const MintChooser = ({ view, push, back, run, hasFlow, openSite }: Props) => {
   const available = (a: MintAction) => ('flow' in a ? hasFlow(a.flow) : true);
   const usesOf = (c: MintCard): MintUse[] => (c.uses ?? []).filter((u) => available(u.action));
   // The card's main button: its own action, else the first use that works today.
@@ -185,7 +190,9 @@ export const MintChooser = ({ view, push, back, run, hasFlow }: Props) => {
           if (!cards.length) return null;
           return (
             <section key={sec.id} aria-label={sec.title}>
-              <SectionTitle>{sec.title}</SectionTitle>
+              <SectionTitle brand={sec.brand} openSite={openSite}>
+                {sec.title}
+              </SectionTitle>
               <TileGrid>
                 {cards.map((c) => (
                   <Tile key={c.id} c={c} onClick={() => push({ k: 'card', id: c.id })} />
@@ -219,6 +226,7 @@ export const MintChooser = ({ view, push, back, run, hasFlow }: Props) => {
             <BrandMark id={s.id} size={44} />
           </span>
         </Art>
+        <BrandStrip brands={APP_BRANDS[s.id]} openSite={openSite} />
         <h2 className="mb-1 mt-4 text-2xl font-bold leading-tight">Mint your {s.label}</h2>
         <p className="m-0 mb-3.5 text-[15px] leading-normal" style={{ color: '#d6d2c7' }}>
           {s.what}, kept privately in your wallet for good.
@@ -293,6 +301,7 @@ export const MintChooser = ({ view, push, back, run, hasFlow }: Props) => {
             <Icon size={40} />
           </span>
         </Art>
+        <BrandStrip brands={c.brands} openSite={openSite} />
         <h2 className="mb-1.5 mt-4 text-2xl font-bold leading-tight">{c.title}</h2>
         <p className="m-0 mb-3.5 text-[15px] leading-normal" style={{ color: '#d6d2c7' }}>
           {c.pitch}
@@ -373,14 +382,95 @@ export const MintChooser = ({ view, push, back, run, hasFlow }: Props) => {
   );
 };
 
-const SectionTitle = ({ children }: { children: React.ReactNode }) => (
-  <h3
-    className="mb-2.5 mt-[22px] text-xs font-semibold uppercase tracking-[0.12em]"
-    style={{ color: MUTED, letterSpacing: '0.12em' }}
-  >
-    {children}
-  </h3>
+const SectionTitle = ({
+  children,
+  brand,
+  openSite,
+}: {
+  children: React.ReactNode;
+  brand?: MintBrand;
+  openSite?: (name: string, url: string) => void;
+}) => (
+  <div className="mb-2.5 mt-[22px] flex items-center justify-between gap-2">
+    <h3 className="m-0 text-xs font-semibold uppercase" style={{ color: MUTED, letterSpacing: '0.12em' }}>
+      {children}
+    </h3>
+    {brand && <BrandChip b={brand} openSite={openSite} small />}
+  </div>
 );
+
+/**
+ * A service name in our wordmark style (owner, 1 Nov 2026; as bWallet<X> in the wallet's own header): lowercase b,
+ * gold final X on the b*X names. Other names (OpNS, bTrust) are drawn plain; a trailing word ("Exchange") stays white.
+ */
+const Wordmark = ({ name }: { name: string }) => {
+  const [head, ...rest] = name.split(' ');
+  const x = /^b[A-Z]\w*X$/.test(head);
+  return (
+    <span className="whitespace-nowrap font-extrabold tracking-tight" style={{ color: INK }}>
+      {x ? head.slice(0, -1) : head}
+      {x && <span style={{ color: GOLD }}>X</span>}
+      {rest.length > 0 && <span className="font-bold"> {rest.join(' ')}</span>}
+    </span>
+  );
+};
+
+/**
+ * One brand: the wordmark, what it is for, and (bWalletX only) its domain, tapping through to the site. In a store
+ * build `site` is never set and `openSite` is not passed, so it is a plain label with no link.
+ */
+const BrandChip = ({
+  b,
+  openSite,
+  small,
+}: {
+  b: MintBrand;
+  openSite?: (name: string, url: string) => void;
+  small?: boolean;
+}) => {
+  // Folds to '' in a store build, so the bundle has no outbound link code at all.
+  const link = !STORE_BUILD && b.site && openSite ? `https://${b.site}` : '';
+  const body = (
+    <>
+      <Wordmark name={b.name} />
+      {b.role && !small && <span style={{ color: MUTED }}>&nbsp;{b.role}</span>}
+      {link && (
+        <>
+          <span style={{ color: DIM }}>&nbsp;·&nbsp;</span>
+          <span style={{ color: MUTED }}>{b.site}</span>
+          <ExternalLink size={small ? 10 : 12} className="ml-1 flex-none" color={DIM} />
+        </>
+      )}
+    </>
+  );
+  const cls = `inline-flex min-w-0 items-center rounded-full border ${small ? 'px-2 py-0.5 text-[11px]' : 'px-3 py-1.5 text-[13px]'}`;
+  const style = { borderColor: BORDER, background: 'rgba(245,184,0,0.06)' };
+  return link ? (
+    <button
+      type="button"
+      onClick={() => openSite!(b.name, link)}
+      aria-label={`Open ${b.name}`}
+      className={`${cls} cursor-pointer`}
+      style={style}
+    >
+      {body}
+    </button>
+  ) : (
+    <span className={cls} style={style}>
+      {body}
+    </span>
+  );
+};
+
+/** The services a card belongs to, right under its art. */
+const BrandStrip = ({ brands, openSite }: { brands?: MintBrand[]; openSite?: (name: string, url: string) => void }) =>
+  brands?.length ? (
+    <div className="mt-3 flex flex-wrap gap-2">
+      {brands.map((b) => (
+        <BrandChip key={b.name} b={b} openSite={openSite} />
+      ))}
+    </div>
+  ) : null;
 
 const SubTitle = ({ children }: { children: React.ReactNode }) => (
   <h4 className="mb-2 mt-4 text-[13px] font-semibold" style={{ color: '#e6e2d8' }}>
@@ -436,9 +526,22 @@ const Tile = ({ c, onClick }: { c: MintCard; onClick: () => void }) => {
         <Icon size={22} />
       </span>
       <span className="mt-1 line-clamp-2 text-[14.5px] font-semibold leading-tight">{c.title}</span>
-      <span className="line-clamp-2 text-[11.5px] leading-snug" style={{ color: MUTED }}>
+      <span
+        className={`${c.brands?.length ? 'line-clamp-1' : 'line-clamp-2'} text-[11.5px] leading-snug`}
+        style={{ color: MUTED }}
+      >
         {c.sub}
       </span>
+      {!!c.brands?.length && (
+        <span className="absolute bottom-2 left-3 right-3 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] leading-[1.3]">
+          {c.brands.map((b, i) => (
+            <span key={b.name}>
+              {i > 0 && <span style={{ color: DIM }}> · </span>}
+              <Wordmark name={b.name} />
+            </span>
+          ))}
+        </span>
+      )}
     </button>
   );
 };

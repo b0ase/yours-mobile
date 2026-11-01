@@ -1,6 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'fs';
-import { MINT_CARDS, MINT_SECTIONS, MINT_WAYS, mintCard, type MintAction, type MintCard } from './mintCatalog';
+import {
+  APP_BRANDS,
+  MINT_CARDS,
+  MINT_SECTIONS,
+  MINT_WAYS,
+  mintCard,
+  type MintAction,
+  type MintCard,
+} from './mintCatalog';
 
 const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
 const actions = (c: MintCard): MintAction[] => [...(c.cta ? [c.cta] : []), ...(c.uses ?? []).map((u) => u.action)];
@@ -72,6 +80,25 @@ describe('Mint sheet catalog (bWalletX build)', () => {
   test('no investment or returns wording', () => {
     for (const c of MINT_CARDS) expect(text(c)).not.toMatch(/invest|returns?\b|profit|yield|dividend|guarantee/i);
   });
+
+  test('cards carry our services: wordmark name plus its site', () => {
+    const sites = (id: string) => mintCard(id)?.brands?.map((b) => `${b.name} ${b.site ?? ''}`.trim());
+    expect(sites('music')).toEqual(['bMusicX bmusicx.com']);
+    expect(sites('video')).toEqual(['bVideoX bvideox.com', 'bMoviesX bmoviesx.com']);
+    expect(sites('art')).toEqual(['bPicsX bpicsx.com']);
+    expect(sites('picture')).toEqual(['bPicsX bpicsx.com']);
+    expect(sites('books')).toEqual(['bWriterX bwriterx.com']);
+    expect(sites('upload')).toEqual(['bDriveX bdrivex.com']);
+    expect(sites('keep')).toEqual(['bVaultX bvaultx.com']);
+    expect(sites('sell')).toEqual(['bStoreX bstorex.com', 'bMarketX bmarketx.com']);
+    expect(sites('3d')).toEqual(['bModelX bmodelx.com']);
+    expect(sites('heirs')).toEqual(['bTrust']);
+    expect(sites('name')).toEqual(['OpNS']);
+    expect(MINT_SECTIONS.find((s) => s.id === 'work')?.brand?.site).toBe('bjobsx.com');
+    expect(APP_BRANDS.linkedin.map((b) => b.name)).toEqual(['bJobsX']);
+    // Not ours: never named or linked.
+    expect(JSON.stringify([MINT_CARDS, MINT_SECTIONS, APP_BRANDS])).not.toMatch(/b3dx|bcorpx/i);
+  });
 });
 
 describe('Mint sheet catalog (store build)', () => {
@@ -97,7 +124,11 @@ describe('Mint sheet catalog (store build)', () => {
       expect(c.later ?? []).toEqual([]);
       for (const a of actions(c)) expect('soon' in a).toBe(false);
       expect(text(c)).not.toMatch(/BSVEX|notes? and coins|PoW note|Fingerprint|room|Tokens can lose/i);
+      // Brand names stay; links to outside sites never ship in a store build.
+      for (const b of c.brands ?? []) expect(b.site).toBeUndefined();
     }
+    expect(cards.find((c) => c.id === 'music')?.brands).toEqual([{ name: 'bMusicX' }]);
+    expect(cards.find((c) => c.id === 'token')?.brands).toEqual([]);
   });
 
   test('the bWalletX build keeps the previews', () => {

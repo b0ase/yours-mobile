@@ -33,7 +33,7 @@ import { setAgentDraft } from '../agent/handoff';
 import { openAgentCreate } from '../agents/agentCreate';
 import { BottomMenuContext } from '../../contexts/BottomMenuContext';
 import { routeFor } from '../tabs/tabs';
-import { GREETING_CARDS_ENABLED, isBWalletX } from '../storeBuild';
+import { GREETING_CARDS_ENABLED, isBWalletX, STORE_BUILD } from '../storeBuild';
 import { SendConfirmation } from '../../components/SendConfirmation';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useTheme } from '../../hooks/useTheme';
@@ -304,6 +304,14 @@ export const MintSheet = ({
     }
   };
   const hasFlow = (id: string) => MINT_TILES.some((t) => t.id === id && t.when());
+  // A card's brand chip opens that service's site as a bApp (bWalletX only: a store build has no outbound links, and
+  // Rollup drops this and the lazy import).
+  const openSite = !STORE_BUILD
+    ? (name: string, url: string) => {
+        onClose();
+        void import('../bappFrame/bappFrame').then((m) => m.openBapp(name, url));
+      }
+    : undefined;
   // The chooser's cards (mintCatalog.ts) start real flows through here.
   const run = (a: MintAction) => {
     if ('flow' in a) {
@@ -547,7 +555,9 @@ export const MintSheet = ({
           </button>
         </div>
 
-        {step === 'choose' && <MintChooser view={view} push={pushView} back={popView} run={run} hasFlow={hasFlow} />}
+        {step === 'choose' && (
+          <MintChooser view={view} push={pushView} back={popView} run={run} hasFlow={hasFlow} openSite={openSite} />
+        )}
 
         {step !== 'choose' && (
           <div
