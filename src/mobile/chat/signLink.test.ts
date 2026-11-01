@@ -1,5 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import { docHashFor, offerSignLink, parseSignLink, parseWebBappLink, phoneSignUrl, takeSignLink } from './signLink';
+import {
+  docHashFor,
+  offerSignLink,
+  parseSignLink,
+  parseWebBappLink,
+  phoneSignUrl,
+  signFrameRoute,
+  takeSignLink,
+} from './signLink';
 import { signDocUrl } from './pendingDoc';
 
 const ID = '04ea9a26-6e55-4b19-8c16-ee76b8d7397a';
@@ -64,4 +72,14 @@ describe('web.bwalletx.com/bapp links (bChatX PR #549)', () => {
     expect(parseWebBappLink(`https://evil.example/bapp/bchatx?to=${to}`)).toBeNull();
     expect(parseSignLink('https://web.bwalletx.com/bapp/bchatx?to=%2F%2Fevil.example%2Froom%2FX')).toBeNull();
   });
+});
+
+test('signFrameRoute: a sign QR opens the signing page inside the bChatX frame', () => {
+  const H = 'ab'.repeat(32);
+  const s = parseSignLink(
+    `https://web.bwalletx.com/bapp/bchatx?to=${encodeURIComponent(`/room/HWPEBRIEF?sign=doc-1&h=${H}`)}`,
+  )!;
+  const route = signFrameRoute(s)!;
+  expect(route.startsWith('/m/bapp/bchatx?to=')).toBe(true);
+  expect(decodeURIComponent(route.split('?to=')[1])).toBe(`/room/HWPEBRIEF?sign=doc-1&h=${H}`);
 });
