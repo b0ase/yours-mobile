@@ -123,7 +123,7 @@ export const svgBytes = (svg: string) => new TextEncoder().encode(svg).length;
 
 export const isOrigin = (o: unknown): o is string => typeof o === 'string' && /^[0-9a-f]{64}_\d{1,6}$/i.test(o);
 
-export type ApiResult<T> = { ok: true; value: T } | { ok: false; error: string };
+export type ApiResult<T> = { ok: true; value: T } | { ok: false; error: string; retry?: boolean };
 
 /** fetch → JSON; 404 and network failures read as "Not open yet". */
 async function call(path: string, init?: RequestInit, f: typeof fetch = fetch): Promise<ApiResult<unknown>> {
@@ -142,7 +142,9 @@ async function call(path: string, init?: RequestInit, f: typeof fetch = fetch): 
   }
   if (!res.ok) {
     const msg = (body as { error?: unknown } | null)?.error;
-    return { ok: false, error: typeof msg === 'string' && msg ? msg.slice(0, 200) : `Error ${res.status}` };
+    const retry = res.status === 503 && (body as { retry?: unknown } | null)?.retry === true;
+    const error = typeof msg === 'string' && msg ? msg.slice(0, 200) : `Error ${res.status}`;
+    return retry ? { ok: false, error, retry } : { ok: false, error };
   }
   return { ok: true, value: body };
 }
@@ -175,11 +177,23 @@ export async function renderNote(
   return { ok: true, value: { svg, map } };
 }
 
-export async function registerNote(origin: string, token: string | null, f?: typeof fetch): Promise<ApiResult<true>> {
+/** Register waits: right after broadcast the server may answer 503 {retry:true} ("Not on chain yet"). */
+export const REGISTER_WAITS_MS = [3_000, 5_000, 10_000, 15_000, 20_000, 30_000, 40_000];
+
+export async function registerNote(
+  origin: string,
+  token: string | null,
+  f?: typeof fetch,
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
+): Promise<ApiResult<true>> {
   if (!isOrigin(origin)) return { ok: false, error: 'Bad origin' };
   if (!token) return { ok: false, error: SIGN_IN };
-  const res = await call('/api/bmint/register', json({ origin }, token), f);
-  return res.ok ? { ok: true, value: true } : res;
+  for (let i = 0; ; i++) {
+    const res = await call('/api/bmint/register', json({ origin }, token), f);
+    if (res.ok) return { ok: true, value: true };
+    if (!res.retry || i >= REGISTER_WAITS_MS.length) return res;
+    await sleep(REGISTER_WAITS_MS[i]);
+  }
 }
 
 export type UserNote = { origin: string; issuer: string; serial?: number; face?: number; title?: string };
