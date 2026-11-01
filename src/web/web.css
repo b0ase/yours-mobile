@@ -174,6 +174,7 @@ html:not(.ww-on)
   > :is(
     .fixed.inset-x-0,
     .fixed.inset-0,
+    .bw-room-view,
     .bw-abook,
     .bw-bcal,
     .bw-layer,
@@ -214,6 +215,12 @@ html:not(.ww-on)
     [style*='inset: 0']
   ) {
   top: calc(var(--web-banner-height) + env(safe-area-inset-top)) !important;
+}
+
+/* An open chat room keeps its own top and bottom (under the tool bar, above the tab bar) but stays in the column
+   (owner, 1 Nov 2026: the room opened full width behind the 720px "Set up your room" sheet). Its corner chip too. */
+html:not(.ww-on) .bw-site-room-chip {
+  right: max(8px, calc((100vw - var(--web-max, 100vw)) / 2 + 8px)) !important;
 }
 
 /* The beta banner spans the wallet column, not the window (owner, 19 Oct 2026: "hazard tape is too wide"). */
