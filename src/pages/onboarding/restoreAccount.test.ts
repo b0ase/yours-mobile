@@ -168,6 +168,14 @@ describe('Add account › restore a Twetch phrase into a wallet with several acc
       for (const bits of [160, 192, 256]) expect(phraseProblem(bip39.generateMnemonic(bits))).toBeNull();
     });
 
+    test('Spanish phrases ending a word in an accent are still named (café, rubí)', () => {
+      // ~1 in 12 random Spanish phrases has a word ending in an accent; before 1 Nov 2026 those were not recognised.
+      for (let i = 0; i < 300; i++) {
+        const es = bip39.generateMnemonic(128, undefined, bip39.wordlists.spanish);
+        expect(otherLanguageOf(es)).toBe('Spanish');
+      }
+    });
+
     test('a valid Spanish phrase is named, not called misspelt', () => {
       const es = bip39.generateMnemonic(128, undefined, bip39.wordlists.spanish);
       expect(otherLanguageOf(es)).toBe('Spanish');
