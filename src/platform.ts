@@ -23,6 +23,13 @@ export type QuickUnlock = {
   unlock: () => Promise<boolean>;
   disable?: () => Promise<void>;
   /**
+   * Turns it on from Settings while the wallet is open: forgets an earlier "Not now" and enrols the current
+   * account. Resolves true once it is on.
+   */
+  enable?: () => Promise<boolean>;
+  /** Settings toggle label, e.g. "Unlock with Face ID". */
+  settingLabel?: string;
+  /**
    * Confirms the user with the same biometric prompt, without changing the lock state (Show my 12 words).
    * Resolves true only if the sealed key still opens this account; false if cancelled, broken or not set up.
    */
