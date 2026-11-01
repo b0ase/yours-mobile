@@ -14,7 +14,8 @@ export type PromptKind =
   | 'twetch'
   | 'swap'
   | 'proveHoldings'
-  | 'themeOffer';
+  | 'themeOffer'
+  | 'signedPost';
 
 /** A gated wallet call is waiting for a registered USB key to be confirmed present. */
 export interface UsbCheckRequest {
@@ -86,6 +87,27 @@ export interface ThemeOfferPrompt {
   originator: string;
   /** Validated by mobile/theme/themeOffer.ts parseThemeOffer before the sheet sees it. */
   pack: import('./mobile/theme/themePack').ThemePack;
+}
+
+/**
+ * Sign a post or selected text and record the proof on chain (src/signedBadges/background.ts, VITE_SIGNED_BADGES=1
+ * builds only). The sheet shows exactly this content and the fee; Allow is the only approval.
+ */
+export interface SignedPostPrompt {
+  requestID: string;
+  /** The page's host, from Chrome's sender or tab. */
+  originator: string;
+  kind: 'post' | 'selection';
+  /** "X", "LinkedIn", "GitHub", "YouTube", or the host. */
+  platform: string;
+  /** The exact text that will be signed. */
+  content: string;
+  pageUrl: string;
+  /** Recorded as the post itself (AuthSig's x-post key), not just its text. */
+  onX: boolean;
+  /** Estimated network fee plus the 1-sat token. */
+  feeSats: number;
+  usdPerBsv?: number;
 }
 
 export interface PromptRef {

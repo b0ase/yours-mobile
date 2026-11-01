@@ -691,3 +691,18 @@ export const WAGES_ENABLED: boolean =
     import.meta.env.VITE_CHANNEL === 'ios-store' ||
     import.meta.env.VITE_CHANNEL === 'android-play'
   ) && import.meta.env.VITE_WAGES !== '0';
+
+/**
+ * Signed post badges (src/signedBadges/): the extension signs a post on X, LinkedIn, GitHub or
+ * YouTube (or any selected text) and records the proof on chain in AuthSig's format, and draws "signed by $name"
+ * badges on posts that carry a proof. OFF by default (VITE_SIGNED_BADGES=1 turns it on: it spends money, so it needs
+ * the owner's money-ok) and never in a store build, not even as code. Literal env check so Vite inlines it and Rollup
+ * drops the content-script, background and sheet code. Store grep: `bwxSb|SIGNED_POST_RESPONSE|content-signing|authsig`.
+ */
+export const SIGNED_BADGES_ENABLED: boolean =
+  import.meta.env.VITE_SIGNED_BADGES === '1' &&
+  !(
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+  );

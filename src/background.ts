@@ -89,7 +89,8 @@ import type { TwetchAsk, TwetchWallet } from './mobile/twetch/twetchCalls';
 import { isMintPrivateAction, runSiteMintPrivate, type Kv as MintKv } from './services/mintPrivateSite';
 import { createContext, type OneSatContext } from '@1sat/actions';
 import { ALLOWANCES_ENABLED } from './services/allowanceFlag';
-import { ENVELOPES_ENABLED } from './mobile/storeBuild';
+import { ENVELOPES_ENABLED, SIGNED_BADGES_ENABLED } from './mobile/storeBuild';
+import { installSignedBadges, type SignedBadgesBackground } from './signedBadges/background';
 import {
   DEFAULT_ENVELOPE_USD,
   ENVELOPE_PRESETS_USD,
@@ -1403,6 +1404,8 @@ const pendingProveHoldings = new Map<string, { request: ProveHoldingsPrompt; res
 const pendingSwapRequests = new Map<string, { request: SwapPrompt; resolve: (allow: boolean) => void }>();
 /** A family site waiting on the theme offer sheet (services/themeOfferSite.ts). Resolves with the user's answer. */
 const pendingThemeOffers = new Map<string, { request: ThemeOfferPrompt; resolve: (a: ThemeOfferResult) => void }>();
+/** Signed post badges (src/signedBadges/background.ts): set up in the service worker, VITE_SIGNED_BADGES=1 builds only. */
+let signedBadges: SignedBadgesBackground | undefined;
 const failPendingStreamGrants = () => {
   for (const p of pendingStreamGrantRequests.values()) p.resolve(null);
   pendingStreamGrantRequests.clear();
@@ -1417,6 +1420,7 @@ const failPendingStreamGrants = () => {
   pendingProveHoldings.clear();
   for (const p of pendingThemeOffers.values()) p.resolve('declined');
   pendingThemeOffers.clear();
+  if (SIGNED_BADGES_ENABLED) signedBadges?.failAll();
 };
 
 /**
@@ -1555,6 +1559,7 @@ const hasQueuedDappUi = (): boolean =>
   pendingPermissionRequests.size > 0 ||
   pendingGroupedPermissionRequests.size > 0 ||
   pendingCounterpartyPermissionRequests.size > 0 ||
+  (SIGNED_BADGES_ENABLED && !!signedBadges?.hasPending()) ||
   getPendingOneSatPrompt() !== undefined;
 
 /**
@@ -1672,7 +1677,7 @@ const getPendingPromptPayloadRaw = (kind: string, requestID?: string): unknown =
     case 'themeOffer':
       return requestID ? pendingThemeOffers.get(requestID)?.request : undefined;
     default:
-      return undefined;
+      return SIGNED_BADGES_ENABLED && kind === 'signedPost' ? signedBadges?.promptPayload(requestID) : undefined;
   }
 };
 
@@ -1693,6 +1698,10 @@ const getNextPendingPrompt = (): { kind: PromptKind; requestID: string } | undef
   if (!twetch.done) return { kind: 'twetch', requestID: twetch.value };
   const themeOffer = pendingThemeOffers.keys().next();
   if (!themeOffer.done) return { kind: 'themeOffer', requestID: themeOffer.value };
+  if (SIGNED_BADGES_ENABLED) {
+    const signedPost = signedBadges?.nextPromptID();
+    if (signedPost) return { kind: 'signedPost', requestID: signedPost };
+  }
   const bundle = permissionBundler.list()[0];
   if (bundle) {
     permissionBundler.flush(bundle.id); // the sheet is asking now: no need to wait out the merge window
@@ -2633,6 +2642,10 @@ if (isInServiceWorker) {
       }
       return false;
     }
+    // Signed post badges (src/signedBadges/background.ts): our content script's lookups and Sign clicks, and the sheet's
+    // answer. Checked there against Chrome's sender; never a wallet method. VITE_SIGNED_BADGES=1 builds only.
+    if (SIGNED_BADGES_ENABLED && signedBadges?.handles(message?.action))
+      return signedBadges.onMessage(message, sender, answer as (r: unknown) => void);
     // Subscribe requests are answered by the wallet page (src/mobile/pots/siteSubscribe.ts), never by a wallet method.
     // SUBSCRIPTIONS_ENABLED written out (literal env) so the minifier drops it from a store bundle.
 if (!(
@@ -4650,6 +4663,28 @@ if (!(
         showPromptUi('themeOffer', requestID);
       }),
   };
+
+  // Signed post badges (src/signedBadges/background.ts): the sign runs as the wallet itself (admin originator), so the
+  // one sheet (the exact text and the fee) is the only approval. Literal flag: absent from every other build.
+  if (SIGNED_BADGES_ENABLED) {
+    signedBadges = installSignedBadges({
+      adminWallet: async () => {
+        const wpm = (await ensureWallet()) as unknown as Record<string, (args: unknown, o?: string) => unknown>;
+        return new Proxy(
+          {},
+          { get: (_t, m: string) => (typeof wpm[m] === 'function' ? (args: unknown) => wpm[m](args, ADMIN_ORIGINATOR) : wpm[m]) },
+        ) as unknown as WalletInterface;
+      },
+      identityKey: () => chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey || '',
+      satsPerKb: () => chromeStorageService.getCustomFeeRate(),
+      usdPerBsv: () => cachedUsdPerBsv().catch(() => undefined),
+      showPrompt: (kind, requestID) => showPromptUi(kind as PromptKind, requestID),
+      noteTab: (originator, tab) => dappTabs.set(originator, tab),
+      closePromptIfIdle: () => closeDappPopupIfNoUi(),
+      isExtensionSender: (s) => isExtensionSender(s, chrome.runtime.id),
+      timeoutMs: STREAM_GRANT_TIMEOUT_MS,
+    });
+  }
 
   /**
    * What window.CWI.proveHoldings needs (services/proveHoldingsSite.ts). Allowed sites are remembered per account in

@@ -4,6 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import { resolve } from 'path';
 import { execSync } from 'child_process';
+import { signedBadgesOff } from './vite.brand';
 
 const gitCommit = (() => {
   try {
@@ -75,6 +76,7 @@ export const dropBmintNotesInStore = (): Plugin => ({
 export default defineConfig({
   base: './',
   plugins: [
+    signedBadgesOff(),
     react(),
     tailwindcss(),
     dropDracoInStore(),

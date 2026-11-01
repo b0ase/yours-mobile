@@ -67,6 +67,23 @@ function brandManifest() {
       'https://chat.bwalletx.com/*',
     ]),
   ];
+  // Signed post badges (src/signedBadges/, VITE_SIGNED_BADGES=1 builds only): the "Sign selected text" menu, and the
+  // overlay hosts the proofs are looked up on (the same GlobalKVStore hosts Babbage's AuthSig uses).
+  // Same rule as SIGNED_BADGES_ENABLED (src/mobile/storeBuild.ts): never with a store flag.
+  const store =
+    process.env.VITE_STORE_BUILD === '1' || ['ios-store', 'android-play'].includes(process.env.VITE_CHANNEL ?? '');
+  if (process.env.VITE_SIGNED_BADGES === '1' && !store) {
+    manifest.permissions = [...new Set([...manifest.permissions, 'contextMenus'])];
+    manifest.host_permissions = [
+      ...new Set([
+        ...manifest.host_permissions,
+        'https://overlay-us-1.bsvb.tech/*',
+        'https://overlay-eu-1.bsvb.tech/*',
+        'https://overlay-ap-1.bsvb.tech/*',
+        'https://users.bapp.dev/*',
+      ]),
+    ];
+  }
   manifest.icons = iconSet;
   // Fixed extension ID (owner, 4 Oct 2026): each build is loaded from its own versioned folder
   // (dist/bwalletx-extension-<version>); without a key Chrome derives the ID from the folder path,
