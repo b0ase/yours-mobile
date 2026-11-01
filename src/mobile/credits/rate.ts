@@ -11,6 +11,35 @@ export const parseGeckoGbp = (data: unknown): number | null => {
   return Number.isFinite(g) && g > 0 ? g : null;
 };
 
+export const parseGeckoUsd = (data: unknown): number | null => {
+  const u = Number((data as { 'bitcoin-cash-sv'?: { usd?: unknown } } | null)?.['bitcoin-cash-sv']?.usd);
+  return Number.isFinite(u) && u > 0 ? u : null;
+};
+
+/** BSV in the server's credits currency: USD (the server values USD deposits at the live BSV/USD rate) or GBP. */
+export async function liveRatePerBsv(currency: 'USD' | 'GBP'): Promise<number | null> {
+  if (currency === 'GBP') return liveGbpPerBsv();
+  try {
+    const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin-cash-sv&vs_currencies=usd', {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (res.ok) {
+      const u = parseGeckoUsd(await res.json());
+      if (u) return u;
+    }
+  } catch {
+    /* fall back */
+  }
+  try {
+    const usd = await fetchExchangeRate('main');
+    if (usd > 0) return usd;
+  } catch {
+    /* no rate */
+  }
+  return null;
+}
+
 export async function liveGbpPerBsv(): Promise<number | null> {
   try {
     const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin-cash-sv&vs_currencies=gbp', {

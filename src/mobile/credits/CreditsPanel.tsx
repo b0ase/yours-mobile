@@ -29,7 +29,7 @@ import {
   entryAmount,
   entryLabel,
   fmtCredits,
-  fmtPence,
+  fmtMinor,
   loadPending,
   onCreditsChanged,
   parseCreditsInfo,
@@ -45,7 +45,7 @@ import {
   type Pending,
   type TopUpPlan,
 } from './credits';
-import { liveGbpPerBsv } from './rate';
+import { liveRatePerBsv } from './rate';
 import { accentById } from '../theme/accents';
 import { useAccentId } from '../theme/useAccent';
 
@@ -284,7 +284,7 @@ export default function CreditsPanel() {
                   </div>
                   {line.type === 'bcredits' && enabled && info && (
                     <div className="text-xs mt-1" style={{ color: muted }}>
-                      ≈ {fmtPence(line.balance * info.pencePerCredit)}
+                      ≈ {fmtMinor(line.balance * info.pencePerCredit, info.currency)}
                       {pendingCredits ? ` · ${fmtCredits(pendingCredits)} pending` : ''}
                       {stopped ? ' · Stopped' : ''}
                     </div>
@@ -310,7 +310,7 @@ export default function CreditsPanel() {
             info && (
               <div className="mt-3 text-xs flex flex-col gap-1.5" style={{ color: soft }}>
                 <div>Rate: what each b reply costs to run × {info.markup}, rounded up to whole bCredits.</div>
-                <div>1 bCredit = {fmtPence(info.pencePerCredit)}. No expiry.</div>
+                <div>1 bCredit = {fmtMinor(info.pencePerCredit, info.currency)}. No expiry.</div>
                 <div>Spent so far: {fmtCredits(spent)}</div>
                 <div className="flex gap-2 mt-2">
                   <button
@@ -381,7 +381,7 @@ const TopUpSheet = ({
 
   useEffect(() => {
     let live = true;
-    void liveGbpPerBsv().then((r) => {
+    void liveRatePerBsv(info.currency).then((r) => {
       if (!live) return;
       setGbpPerBsv(r);
       setRateFailed(r === null);
@@ -389,7 +389,7 @@ const TopUpSheet = ({
     return () => {
       live = false;
     };
-  }, []);
+  }, [info.currency]);
 
   const pence = other.trim() ? (parsePounds(other) ?? 0) : pick;
   const planned = gbpPerBsv ? planTopUp(info, pence, gbpPerBsv) : null;
@@ -429,7 +429,7 @@ const TopUpSheet = ({
           siteSub="bCredits for b"
           onClose={() => !busy && setApprove(null)}
           closeDisabled={!!busy}
-          hero={<PayHero amount={fmtPence(approve.pence)} sub={fmtSats(approve.sats)} badge="TOP UP" />}
+          hero={<PayHero amount={fmtMinor(approve.pence, info.currency)} sub={fmtSats(approve.sats)} badge="TOP UP" />}
           title={
             <>
               Get <span style={{ color: CARD.gold }}>{fmtCredits(approve.credits)}</span>
@@ -466,7 +466,7 @@ const TopUpSheet = ({
               border: `1px solid ${LINE}`,
             }}
           >
-            {fmtPence(p)}
+            {fmtMinor(p, info.currency)}
           </button>
         ))}
       </div>
@@ -474,7 +474,7 @@ const TopUpSheet = ({
         inputMode="decimal"
         value={other}
         onChange={(e) => setOther(e.target.value)}
-        placeholder={`Other amount (£, up to ${fmtPence(info.topupCapPence)})`}
+        placeholder={`Other amount (${info.currency === 'USD' ? '$' : '£'}, up to ${fmtMinor(info.topupCapPence, info.currency)})`}
         className="w-full mt-2 rounded-2xl px-3 py-3 bg-transparent text-white outline-none"
         style={{ background: '#17191E', border: `1px solid ${LINE}` }}
       />
@@ -494,14 +494,14 @@ const TopUpSheet = ({
         <div className="font-semibold text-white mb-1">The terms, in plain words</div>
         <ul className="list-disc pl-4 flex flex-col gap-0.5">
           <li>bCredits pay for b, the bWalletX agent. Nothing else.</li>
-          <li>1 bCredit = {fmtPence(info.pencePerCredit)}. You pay in BSV at today’s rate.</li>
+          <li>1 bCredit = {fmtMinor(info.pencePerCredit, info.currency)}. You pay in BSV at today’s rate.</li>
           <li>
             Each b reply costs what it costs to run × {info.markup}, rounded up to whole bCredits. b never runs you into
             debt.
           </li>
           <li>No expiry. They can’t be cashed out, sent or spent anywhere else.</li>
           <li>Non-refundable except where the law requires.</li>
-          <li>Top-ups are up to {fmtPence(info.topupCapPence)} each.</li>
+          <li>Top-ups are up to {fmtMinor(info.topupCapPence, info.currency)} each.</li>
         </ul>
         <div className="mt-2 font-semibold" style={{ color: CARD.gold }}>
           Top-ups pay for b. Keep it small.
@@ -521,7 +521,7 @@ const TopUpSheet = ({
         className="w-full mt-4 rounded-2xl py-3 font-bold disabled:opacity-50"
         style={{ background: GOLD, color: '#1a1300' }}
       >
-        {planned?.ok ? `Top up ${fmtPence(planned.plan.pence)}` : 'Top up'}
+        {planned?.ok ? `Top up ${fmtMinor(planned.plan.pence, info.currency)}` : 'Top up'}
       </button>
     </Sheet>
   );
