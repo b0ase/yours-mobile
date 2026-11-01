@@ -1,0 +1,589 @@
+import {
+  AppWindow,
+  ArrowLeftRight,
+  AtSign,
+  Banknote,
+  BookOpen,
+  Bot,
+  Box,
+  Brain,
+  ChevronRight,
+  Clapperboard,
+  Coins,
+  Dna,
+  FileSignature,
+  Globe,
+  HardDrive,
+  Image as ImageIcon,
+  LineChart,
+  Link as LinkIcon,
+  Mail,
+  Music,
+  Sparkles,
+  Ticket,
+  TreePine,
+  Upload,
+  type LucideIcon,
+} from 'lucide-react';
+import { MINT_PREVIEWS_ENABLED } from '../storeBuild';
+import { BrandMark } from './BrandMark';
+import {
+  MINT_SECTIONS,
+  MINT_WAYS,
+  mintCard,
+  type MintAction,
+  type MintCard,
+  type MintIconId,
+  type MintUse,
+} from './mintCatalog';
+import { MINT_SOURCES, mintSource, type MintSourceId } from './mintSources';
+
+/**
+ * The Mint sheet's first step (owner's prototype, 1 Nov 2026): "Mint your digital DNA", the two ways in (Link an
+ * account, not open yet; Upload your archive), the apps, then every type as same-size tiles. Each tile opens a card
+ * that sells it and starts the real flow (MintButton.tsx runs the action). Content: mintCatalog.ts, mintSources.ts.
+ * Not-open-yet text is behind MINT_PREVIEWS_ENABLED, so a store build has none of it.
+ */
+export type ChooserView = { k: 'home' } | { k: 'card'; id: string } | { k: 'app'; id: MintSourceId } | { k: 'more' };
+
+// eslint-disable-next-line react-refresh/only-export-components -- the sheet's header reads the same titles
+export const chooserTitle = (v: ChooserView): string =>
+  v.k === 'card'
+    ? (mintCard(v.id)?.title ?? 'Mint')
+    : v.k === 'app'
+      ? (mintSource(v.id)?.label ?? 'Mint')
+      : v.k === 'more'
+        ? 'More apps'
+        : 'Mint';
+
+const GOLD = 'var(--bw-accent-hi)';
+const PANEL = '#17191E';
+const PANEL2 = '#1d1f25';
+const BORDER = '#3a2f0c';
+const EDGE = 'rgba(255,255,255,0.09)';
+const INK = '#f1eee6';
+const MUTED = '#a3a097';
+const DIM = '#8a877f';
+const BLUE = '#5fd0ff';
+const NOT_OPEN = MINT_PREVIEWS_ENABLED ? 'Not open yet' : '';
+
+const ICONS: Record<MintIconId, LucideIcon> = {
+  link: LinkIcon,
+  upload: Upload,
+  spark: Sparkles,
+  card: Mail,
+  pic: ImageIcon,
+  music: Music,
+  film: Clapperboard,
+  box: Box,
+  book: BookOpen,
+  globe: Globe,
+  note: Banknote,
+  coin: Coins,
+  ticket: Ticket,
+  at: AtSign,
+  sign: FileSignature,
+  chart: LineChart,
+  app: AppWindow,
+  bot: Bot,
+  brain: Brain,
+  swap: ArrowLeftRight,
+  drive: HardDrive,
+  tree: TreePine,
+};
+
+const isSoon = (a: MintAction) => 'soon' in a;
+
+type Props = {
+  view: ChooserView;
+  push: (v: ChooserView) => void;
+  back: () => void;
+  run: (a: MintAction) => void;
+  /** Whether a MINT_TILES flow exists in this build and edition. */
+  hasFlow: (id: string) => boolean;
+};
+
+export const MintChooser = ({ view, push, back, run, hasFlow }: Props) => {
+  const available = (a: MintAction) => ('flow' in a ? hasFlow(a.flow) : true);
+  const usesOf = (c: MintCard): MintUse[] => (c.uses ?? []).filter((u) => available(u.action));
+  // The card's main button: its own action, else the first use that works today.
+  const primary = (c: MintCard): { action: MintAction; label: string } | null => {
+    if (c.soon) return null;
+    if (c.cta) return available(c.cta) ? { action: c.cta, label: c.ctaLabel ?? 'Start' } : null;
+    const u = usesOf(c).find((x) => !isSoon(x.action));
+    return u ? { action: u.action, label: `Start: ${u.title}` } : null;
+  };
+  // A tile shows when it is a preview (only in preview builds) or something on it works in this build.
+  const shown = (c: MintCard | undefined): c is MintCard => !!c && (!!c.soon || primary(c) !== null);
+
+  let body: React.ReactNode;
+  let foot: React.ReactNode = null;
+
+  if (view.k === 'home') {
+    const ways = MINT_WAYS.map(mintCard).filter(shown);
+    body = (
+      <>
+        <div
+          className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3.5 rounded-[18px] border p-4"
+          style={{ background: 'linear-gradient(150deg, #241b06, #111214 65%)', borderColor: BORDER }}
+        >
+          <span
+            className="grid h-[52px] w-[52px] place-items-center rounded-[14px]"
+            style={{ background: 'rgba(245,184,0,0.12)', color: GOLD }}
+          >
+            <Dna size={26} />
+          </span>
+          <div className="min-w-0">
+            <h1 className="m-0 text-[22px] font-bold leading-tight">Mint your digital DNA</h1>
+            <p className="m-0 mt-1 text-[13px] leading-snug" style={{ color: MUTED }}>
+              Everything you&rsquo;ve made, kept private on Bitcoin, signed and dated by your wallet. Yours to keep, and
+              to reveal only if you choose.
+            </p>
+          </div>
+          <div className="col-span-2 flex flex-wrap gap-1.5">
+            {['Private by default', 'Signed and dated on chain', 'Reveal it only if you choose'].map((p) => (
+              <span
+                key={p}
+                className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px]"
+                style={{ background: 'rgba(255,255,255,0.06)', color: '#d9d5ca' }}
+              >
+                <i className="block h-1.5 w-1.5 rounded-full" style={{ background: GOLD }} />
+                {p}
+              </span>
+            ))}
+          </div>
+        </div>
+        <SectionTitle>Your past, from the apps you use</SectionTitle>
+        <TileGrid>
+          {ways.map((c) => (
+            <Tile key={c.id} c={c} onClick={() => push({ k: 'card', id: c.id })} />
+          ))}
+        </TileGrid>
+        <SectionTitle>Pick an app</SectionTitle>
+        <AppGrid>
+          {MINT_SOURCES.filter((s) => s.popular).map((s) => (
+            <AppButton key={s.id} id={s.id} onClick={() => push({ k: 'app', id: s.id })} />
+          ))}
+          <button
+            type="button"
+            onClick={() => push({ k: 'more' })}
+            className="flex min-w-0 flex-col items-center gap-1.5 border-0 bg-transparent px-0 py-1 cursor-pointer"
+            style={{ color: '#ccc' }}
+          >
+            <span
+              className="flex h-[46px] w-[46px] items-center justify-center rounded-[13px] text-xl"
+              style={{ boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.1)', color: '#aaa' }}
+            >
+              +
+            </span>
+            <span className="h-6 text-center text-[11px] leading-[1.1]">More apps</span>
+          </button>
+        </AppGrid>
+        <Fine>Logos belong to their owners. Only mint what you made or own; illegal material is never allowed.</Fine>
+        {MINT_SECTIONS.map((sec) => {
+          const cards = sec.cards.map(mintCard).filter(shown);
+          if (!cards.length) return null;
+          return (
+            <section key={sec.id} aria-label={sec.title}>
+              <SectionTitle>{sec.title}</SectionTitle>
+              <TileGrid>
+                {cards.map((c) => (
+                  <Tile key={c.id} c={c} onClick={() => push({ k: 'card', id: c.id })} />
+                ))}
+              </TileGrid>
+            </section>
+          );
+        })}
+      </>
+    );
+  } else if (view.k === 'more') {
+    body = (
+      <>
+        <AppGrid>
+          {MINT_SOURCES.filter((s) => !s.popular).map((s) => (
+            <AppButton key={s.id} id={s.id} onClick={() => push({ k: 'app', id: s.id })} />
+          ))}
+        </AppGrid>
+        <Fine>Can&rsquo;t see yours? Any app that lets you download your data works with Upload your archive.</Fine>
+      </>
+    );
+  } else if (view.k === 'app') {
+    const s = mintSource(view.id)!;
+    body = (
+      <>
+        <Art tint="#1b1d22" height={120}>
+          <span
+            className="grid h-[76px] w-[76px] place-items-center rounded-[22px]"
+            style={{ background: '#111', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.1)' }}
+          >
+            <BrandMark id={s.id} size={44} />
+          </span>
+        </Art>
+        <h2 className="mb-1 mt-4 text-2xl font-bold leading-tight">Mint your {s.label}</h2>
+        <p className="m-0 mb-3.5 text-[15px] leading-normal" style={{ color: '#d6d2c7' }}>
+          {s.what}, kept privately in your wallet for good.
+        </p>
+        <SubTitle>What&rsquo;s in your download</SubTitle>
+        <Bullets items={s.get} />
+        <SubTitle>{MINT_PREVIEWS_ENABLED ? 'Two ways' : 'How to mint it'}</SubTitle>
+        <div className="mb-4 grid gap-2">
+          {MINT_PREVIEWS_ENABLED && (
+            <UseRow
+              title={`Link your ${s.label}`}
+              badge={s.link ? NOT_OPEN : 'Download only'}
+              sub={
+                s.link
+                  ? 'Sign in once; every post fingerprinted on chain'
+                  : `${s.label} doesn’t let other apps read your posts, so use your download`
+              }
+              onClick={() => push({ k: 'card', id: 'link' })}
+            />
+          )}
+          <UseRow
+            title="Upload from your download"
+            live
+            sub={s.steps.join(' · ')}
+            onClick={() => run({ upload: true })}
+          />
+        </div>
+        <SubTitle>What it&rsquo;s good for</SubTitle>
+        <Bullets
+          items={[
+            `Proof of when you minted it, even if ${s.label} deletes it`,
+            'Only you can open it: it’s encrypted on this device first',
+            'Reveal it later, if you ever want to show it',
+          ]}
+        />
+        {MINT_PREVIEWS_ENABLED && (
+          <>
+            <SubTitle>{NOT_OPEN}</SubTitle>
+            <Bullets
+              dim
+              items={[
+                'Your agent can learn from it, if you let it',
+                'Sell access on BSVEX, on your terms',
+                'Hand it down to your heirs',
+              ]}
+            />
+          </>
+        )}
+        <Fine>Only mint what you made or own. Menus change now and then.</Fine>
+      </>
+    );
+    foot = <Foot back={back} label={`Pick a file from ${s.label}`} onClick={() => run({ upload: true })} />;
+  } else {
+    const c = mintCard(view.id);
+    if (!c) return null;
+    const Icon = ICONS[c.icon];
+    const uses = usesOf(c);
+    const main = primary(c);
+    const linkable = MINT_SOURCES.filter((s) => s.link);
+    const uploadOnly = MINT_SOURCES.filter((s) => !s.link).map((s) => s.label);
+    body = (
+      <>
+        <Art tint={c.tint} height={150} badge={<Badge live={!c.soon} />}>
+          <span
+            className="grid h-[76px] w-[76px] place-items-center rounded-[22px]"
+            style={{
+              background: 'rgba(0,0,0,0.35)',
+              color: c.id === 'upload' ? BLUE : GOLD,
+              boxShadow: '0 0 50px rgba(245,184,0,0.25)',
+            }}
+          >
+            <Icon size={40} />
+          </span>
+        </Art>
+        <h2 className="mb-1.5 mt-4 text-2xl font-bold leading-tight">{c.title}</h2>
+        <p className="m-0 mb-3.5 text-[15px] leading-normal" style={{ color: '#d6d2c7' }}>
+          {c.pitch}
+        </p>
+        {MINT_PREVIEWS_ENABLED && c.id === 'link' && (
+          <>
+            <SubTitle>Apps you can link ({linkable.length})</SubTitle>
+            <AppGrid>
+              {linkable.map((s) => (
+                <AppButton key={s.id} id={s.id} onClick={() => push({ k: 'app', id: s.id })} />
+              ))}
+            </AppGrid>
+            <Fine>
+              These apps let you sign in and share your posts with another app. The rest ({uploadOnly.join(', ')}) only
+              offer a download: use Upload your archive.
+            </Fine>
+          </>
+        )}
+        {c.id === 'upload' && (
+          <>
+            <SubTitle>Every app with a download ({MINT_SOURCES.length})</SubTitle>
+            <AppGrid>
+              {MINT_SOURCES.map((s) => (
+                <AppButton key={s.id} id={s.id} onClick={() => push({ k: 'app', id: s.id })} />
+              ))}
+            </AppGrid>
+            <Fine>Tap an app for its download steps. Any other app that gives you a data download works too.</Fine>
+          </>
+        )}
+        {uses.length > 0 && (
+          <>
+            <SubTitle>What do you want to do?</SubTitle>
+            <div className="mb-4 grid gap-2">
+              {uses.map((u) =>
+                isSoon(u.action) ? (
+                  <UseRow key={u.id} title={u.title} sub={u.sub} badge={NOT_OPEN} />
+                ) : (
+                  <UseRow key={u.id} title={u.title} sub={u.sub} onClick={() => run(u.action)} />
+                ),
+              )}
+            </div>
+          </>
+        )}
+        <SubTitle>Why mint it</SubTitle>
+        <Bullets items={c.why} />
+        {MINT_PREVIEWS_ENABLED && !!c.later?.length && (
+          <>
+            <SubTitle>{NOT_OPEN}</SubTitle>
+            <Bullets dim items={c.later} />
+          </>
+        )}
+        <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <Fact label="Who sees it" text={c.facts.who} />
+          <Fact label="What it costs" text={c.facts.cost} />
+          <Fact label="Where it lives" text={c.facts.where} />
+        </div>
+      </>
+    );
+    foot = main ? (
+      <Foot back={back} label={main.label} onClick={() => run(main.action)} />
+    ) : (
+      <Foot back={back} label={NOT_OPEN} />
+    );
+  }
+
+  return (
+    <>
+      <div
+        // Remount per view so each card starts at the top.
+        key={view.k === 'card' || view.k === 'app' ? `${view.k}:${view.id}` : view.k}
+        className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 pb-5 pt-4"
+        style={foot ? undefined : { paddingBottom: 'calc(20px + env(safe-area-inset-bottom))' }}
+      >
+        {body}
+      </div>
+      {foot}
+    </>
+  );
+};
+
+const SectionTitle = ({ children }: { children: React.ReactNode }) => (
+  <h3
+    className="mb-2.5 mt-[22px] text-xs font-semibold uppercase tracking-[0.12em]"
+    style={{ color: MUTED, letterSpacing: '0.12em' }}
+  >
+    {children}
+  </h3>
+);
+
+const SubTitle = ({ children }: { children: React.ReactNode }) => (
+  <h4 className="mb-2 mt-4 text-[13px] font-semibold" style={{ color: '#e6e2d8' }}>
+    {children}
+  </h4>
+);
+
+const Fine = ({ children }: { children: React.ReactNode }) => (
+  <p className="m-0 mt-2 text-[11px] leading-snug" style={{ color: DIM }}>
+    {children}
+  </p>
+);
+
+/** Every tile on the sheet is this one size: two across on a phone, four across from 640px. */
+const TileGrid = ({ children }: { children: React.ReactNode }) => (
+  <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">{children}</div>
+);
+
+const AppGrid = ({ children }: { children: React.ReactNode }) => (
+  <div className="grid grid-cols-4 gap-x-1 gap-y-2 sm:grid-cols-8">{children}</div>
+);
+
+const Badge = ({ live }: { live: boolean }) =>
+  live ? (
+    <span
+      className="rounded-full px-[7px] py-1 text-[9.5px] font-semibold uppercase leading-none"
+      style={{ background: 'rgba(34,211,154,0.14)', color: '#22d39a', letterSpacing: '0.06em' }}
+    >
+      Live
+    </span>
+  ) : NOT_OPEN ? (
+    <span
+      className="whitespace-nowrap rounded-full px-[7px] py-1 text-[9.5px] font-semibold uppercase leading-none"
+      style={{ background: 'rgba(255,255,255,0.08)', color: MUTED, letterSpacing: '0.06em' }}
+    >
+      {NOT_OPEN}
+    </span>
+  ) : null;
+
+const Tile = ({ c, onClick }: { c: MintCard; onClick: () => void }) => {
+  const Icon = ICONS[c.icon];
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="relative flex h-[124px] min-w-0 flex-col items-start gap-1 overflow-hidden rounded-[14px] border p-3 text-left cursor-pointer transition-transform hover:-translate-y-0.5"
+      style={{ borderColor: BORDER, background: PANEL, color: INK }}
+    >
+      <span className="absolute right-2.5 top-2.5">
+        <Badge live={!c.soon} />
+      </span>
+      <span className="flex h-[22px] items-center" style={{ color: c.id === 'upload' ? BLUE : GOLD }}>
+        <Icon size={22} />
+      </span>
+      <span className="mt-1 line-clamp-2 text-[14.5px] font-semibold leading-tight">{c.title}</span>
+      <span className="line-clamp-2 text-[11.5px] leading-snug" style={{ color: MUTED }}>
+        {c.sub}
+      </span>
+    </button>
+  );
+};
+
+const AppButton = ({ id, onClick }: { id: MintSourceId; onClick: () => void }) => {
+  const s = mintSource(id)!;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`Mint your ${s.label}`}
+      className="flex min-w-0 flex-col items-center gap-1.5 border-0 bg-transparent px-0 py-1 cursor-pointer"
+      style={{ color: '#ccc' }}
+    >
+      <span
+        className="flex h-[46px] w-[46px] items-center justify-center rounded-[13px]"
+        style={{
+          background: 'linear-gradient(160deg, #1d1d20, #121214)',
+          boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.1), inset 0 1px 0 rgba(255,255,255,0.06)',
+        }}
+      >
+        <BrandMark id={id} size={24} />
+      </span>
+      <span className="h-6 text-center text-[11px] leading-[1.1]">{s.label}</span>
+    </button>
+  );
+};
+
+const Art = ({
+  tint,
+  height,
+  badge,
+  children,
+}: {
+  tint: string;
+  height: number;
+  badge?: React.ReactNode;
+  children: React.ReactNode;
+}) => (
+  <div
+    className="relative grid place-items-center overflow-hidden rounded-[18px] border"
+    style={{ height, background: `radial-gradient(70% 90% at 50% 35%, ${tint}, #0b0c0e 75%)`, borderColor: EDGE }}
+  >
+    {badge && <span className="absolute right-3 top-3">{badge}</span>}
+    {children}
+  </div>
+);
+
+const UseRow = ({
+  title,
+  sub,
+  badge,
+  live,
+  onClick,
+}: {
+  title: string;
+  sub: string;
+  /** A grey status chip (not open yet / download only). */
+  badge?: string;
+  /** A green Live chip. */
+  live?: boolean;
+  onClick?: () => void;
+}) => (
+  <button
+    type="button"
+    disabled={!onClick}
+    onClick={onClick}
+    className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-0.5 rounded-xl border px-3.5 py-3 text-left"
+    style={{
+      borderColor: BORDER,
+      background: PANEL,
+      color: INK,
+      cursor: onClick ? 'pointer' : 'default',
+      opacity: onClick ? 1 : 0.62,
+    }}
+  >
+    <span className="flex min-w-0 flex-wrap items-center gap-2 text-sm font-semibold">
+      {title}
+      {live && <Badge live />}
+      {badge && (
+        <span
+          className="whitespace-nowrap rounded-full px-[7px] py-1 text-[9.5px] font-semibold uppercase leading-none"
+          style={{ background: 'rgba(255,255,255,0.08)', color: MUTED, letterSpacing: '0.06em' }}
+        >
+          {badge}
+        </span>
+      )}
+    </span>
+    <span className="col-start-1 text-xs leading-snug" style={{ color: MUTED }}>
+      {sub}
+    </span>
+    <span className="col-start-2 row-span-2 row-start-1" style={{ color: GOLD }}>
+      {onClick && <ChevronRight size={18} />}
+    </span>
+  </button>
+);
+
+const Bullets = ({ items, dim }: { items: string[]; dim?: boolean }) => (
+  <ul className="m-0 mb-4 grid list-none gap-1.5 p-0">
+    {items.map((w) => (
+      <li key={w} className="flex gap-2.5 text-[13.5px] leading-snug" style={{ color: dim ? DIM : '#dcd8cd' }}>
+        <span className="mt-[7px] block h-1.5 w-1.5 flex-none rounded-full" style={{ background: dim ? DIM : GOLD }} />
+        {w}
+      </li>
+    ))}
+  </ul>
+);
+
+const Fact = ({ label, text }: { label: string; text: string }) => (
+  <div className="rounded-xl border px-3 py-2.5" style={{ background: PANEL2, borderColor: EDGE }}>
+    <small className="mb-1 block text-[10px] font-semibold uppercase" style={{ color: DIM, letterSpacing: '0.08em' }}>
+      {label}
+    </small>
+    <span className="block text-[12.5px] leading-snug" style={{ color: '#d6d2c7' }}>
+      {text}
+    </span>
+  </div>
+);
+
+const Foot = ({ back, label, onClick }: { back: () => void; label: string; onClick?: () => void }) => (
+  <div
+    className="flex flex-none gap-2 border-t px-4 pt-3"
+    style={{ borderColor: EDGE, paddingBottom: 'calc(14px + env(safe-area-inset-bottom))' }}
+  >
+    <button
+      type="button"
+      onClick={back}
+      className="h-[46px] flex-none rounded-full border bg-transparent px-[18px] text-[15px] font-bold cursor-pointer"
+      style={{ borderColor: EDGE, color: INK }}
+    >
+      Back
+    </button>
+    <button
+      type="button"
+      disabled={!onClick}
+      onClick={onClick}
+      className="h-[46px] min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap rounded-full border-0 px-3 text-[15px] font-bold"
+      style={{
+        background: 'linear-gradient(180deg, #ffe58a, #ffd24d 55%, #e0a800)',
+        color: '#1a1400',
+        opacity: onClick ? 1 : 0.45,
+        cursor: onClick ? 'pointer' : 'not-allowed',
+      }}
+    >
+      {label}
+    </button>
+  </div>
+);

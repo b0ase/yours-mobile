@@ -246,7 +246,6 @@ const CHIP: Record<string, string> = {
   art: 'Art',
   picture: 'AI',
   card: 'Cards',
-  currency: 'Currency',
   music: 'Music',
   video: 'Video',
   '3d': '3D',

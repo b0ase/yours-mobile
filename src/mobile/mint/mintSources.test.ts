@@ -31,8 +31,39 @@ describe('mint sources', () => {
 });
 
 describe('mint sources: wide list', () => {
-  test('eight popular, the rest under More services, every service has a brand-mark id', () => {
-    expect(MINT_SOURCES.filter((s) => s.popular).length).toBe(8);
-    expect(MINT_SOURCES.length).toBeGreaterThanOrEqual(27);
+  test('seven popular in the first row, 27 apps in all', () => {
+    expect(MINT_SOURCES.filter((s) => s.popular).map((s) => s.id)).toEqual([
+      'instagram',
+      'tiktok',
+      'facebook',
+      'youtube',
+      'x',
+      'linkedin',
+      'whatsapp',
+    ]);
+    expect(MINT_SOURCES.length).toBe(27);
+  });
+
+  test('18 apps could be linked; the rest (Medium and Substack among them) are upload only', () => {
+    expect(MINT_SOURCES.filter((s) => s.link).length).toBe(18);
+    for (const id of [
+      'medium',
+      'substack',
+      'whatsapp',
+      'telegram',
+      'discord',
+      'snapchat',
+      'bandcamp',
+      'takeout',
+      'icloud',
+    ] as const)
+      expect(mintSource(id)?.link).toBe(false);
+  });
+
+  test('every app says what it holds and what its download contains', () => {
+    for (const s of MINT_SOURCES) {
+      expect(s.what.trim().length).toBeGreaterThan(0);
+      expect(s.get.length).toBeGreaterThan(0);
+    }
   });
 });
