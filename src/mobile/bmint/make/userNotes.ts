@@ -31,6 +31,8 @@ export type NoteMap = {
   serial: string;
   face: string;
   title: string;
+  /** Note art template; absent = template 1. */
+  tpl?: '1' | '2';
 };
 export type Rendered = { svg: string; map: NoteMap };
 
@@ -74,21 +76,31 @@ export function normHandle(h: string | null | undefined): string | null {
 }
 
 /**
- * The server's MAP, accepted only if it is exactly {app:"bmint", type:"pownote", issuer, serial, face, title} and
+ * The server's MAP, accepted only if it is exactly {app:"bmint", type:"pownote", issuer, serial, face, title} (plus an
+ * optional tpl "1" or "2") and
  * matches what we asked for and who we are. It is inscribed as given (never rebuilt), so the server's byte check holds.
  */
 export function acceptMap(raw: unknown, want: { issuer: string | null; req: RenderRequest }): NoteMap | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const m = raw as Record<string, unknown>;
   const keys = Object.keys(m).sort().join(',');
-  if (keys !== 'app,face,issuer,serial,title,type') return null;
+  if (keys !== 'app,face,issuer,serial,title,type' && keys !== 'app,face,issuer,serial,title,tpl,type') return null;
   if (!Object.values(m).every((v) => typeof v === 'string')) return null;
   const map = m as NoteMap;
   if (map.app !== 'bmint' || map.type !== 'pownote') return null;
   if (map.serial !== String(want.req.serial) || map.face !== String(want.req.face)) return null;
   if (map.title !== want.req.title.trim().replace(/\s+/g, ' ') || validateTitle(map.title)) return null;
   if (!normHandle(map.issuer) || (want.issuer && normHandle(map.issuer) !== want.issuer)) return null;
-  return { app: map.app, type: map.type, issuer: map.issuer, serial: map.serial, face: map.face, title: map.title };
+  if ('tpl' in map && map.tpl !== '1' && map.tpl !== '2') return null;
+  const out: NoteMap = {
+    app: map.app,
+    type: map.type,
+    issuer: map.issuer,
+    serial: map.serial,
+    face: map.face,
+    title: map.title,
+  };
+  return 'tpl' in map ? { ...out, tpl: map.tpl } : out;
 }
 
 /** The server's SVG, accepted only if it looks like one SVG document of sane size. Shown via <img> only. */
