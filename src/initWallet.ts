@@ -14,6 +14,7 @@ import {
   type UnsentOutcome,
 } from './services/stuckSends';
 import { hardenWalletServices } from './services/wocResilience';
+import { cacheBlockHeaders, prefetchHeadersOnInternalize } from './services/headerPrefetch';
 import {
   createWebWallet,
   createIndexedDbTaskStateStore,
@@ -408,6 +409,10 @@ export const initWallet = async (
   };
   if (!hardenWalletServices(toolboxServices, undefined, { localRawTx }))
     console.warn('[initWallet] chain-data services not hardened');
+  // A mined transaction's block header, fetched inside internalizeAction's IndexedDB transaction, ended that
+  // transaction ("The transaction finished"): 0.698 BSV never reached the iPhone balance (services/headerPrefetch.ts).
+  if (!cacheBlockHeaders(toolboxServices) || !prefetchHeadersOnInternalize(baseWallet, toolboxServices))
+    console.warn('[initWallet] block headers are not prefetched before internalize');
   // Big mints need longer than the broadcaster's fixed 30 s to upload (services/bigBroadcast.ts, vexvoid 12 Oct 2026).
   if (!sizeAwareBroadcast(toolboxServices)) console.warn('[initWallet] broadcaster timeout not tunable');
   // Every payment ends here: our screens and dApps through the permissions manager, send-all and background jobs
