@@ -1,6 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 import { isPremiumName, lengthTierUsd, nameTierUsd, NAME_TIERS, offerHref } from './tiers';
-import { buyThenGive, categoryOf, normaliseQuery, railNames, resultFor, suggestionsFor } from './inventory';
+import {
+  buyThenGive,
+  categoryOf,
+  DEFAULT_STORE_PAY_ADDRESS,
+  HOUSE_SELLERS,
+  normaliseQuery,
+  railNames,
+  resolveStorePayAddress,
+  resultFor,
+  STORE_PAY_ADDRESS,
+  suggestionsFor,
+} from './inventory';
 import { guestNamesRoute } from './guestRoute';
 import { newSellBatch } from '../opnsSell';
 import type { OpnsListing } from '../opnsSell';
@@ -12,6 +23,38 @@ const L = (name: string, seller = HOUSE, priceSats = 5_000_000): OpnsListing => 
   origin: '',
   priceSats,
   seller,
+});
+
+describe('store pay address (VITE_NAME_STORE_PAY_ADDRESS)', () => {
+  const quiet = () => {};
+  test('unset or blank uses the bwalletx.x default', () => {
+    expect(DEFAULT_STORE_PAY_ADDRESS).toBe('1F4J9KkMoqtznXPJuCgb98LRymssc8MFfd');
+    expect(resolveStorePayAddress(undefined, quiet)).toBe(DEFAULT_STORE_PAY_ADDRESS);
+    expect(resolveStorePayAddress('', quiet)).toBe(DEFAULT_STORE_PAY_ADDRESS);
+    expect(resolveStorePayAddress('   ', quiet)).toBe(DEFAULT_STORE_PAY_ADDRESS);
+  });
+  test('a valid P2PKH address is used (trimmed), with no warning', () => {
+    const warns: string[] = [];
+    expect(resolveStorePayAddress(' 1A3SPh9TwVAwmBv9d8VTczwKq761s1byt7 ', (m) => warns.push(m))).toBe(
+      '1A3SPh9TwVAwmBv9d8VTczwKq761s1byt7',
+    );
+    expect(warns).toEqual([]);
+  });
+  test('a bad checksum, a non-P2PKH version or junk falls back to the default and warns', () => {
+    for (const bad of [
+      '1A3SPh9TwVAwmBv9d8VTczwKq761s1byt8', // checksum broken
+      '3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy', // P2SH (version 0x05)
+      'mipcBbFg9gMiCh81Kj8tqqdgoZub1ZJRfn', // testnet (version 0x6f)
+      'not-an-address',
+    ]) {
+      const warns: string[] = [];
+      expect(resolveStorePayAddress(bad, (m) => warns.push(m))).toBe(DEFAULT_STORE_PAY_ADDRESS);
+      expect(warns.length).toBe(1);
+    }
+  });
+  test('the store pay address is a house seller', () => {
+    expect(HOUSE_SELLERS.has(STORE_PAY_ADDRESS)).toBe(true);
+  });
 });
 
 describe('tier pricing', () => {

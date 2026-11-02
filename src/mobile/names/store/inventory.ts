@@ -2,6 +2,7 @@ import categories from './nameCategories.json';
 import type { Availability } from '../names';
 import type { OpnsListing } from '../opnsSell';
 import { isPremiumName, nameTierUsd } from './tiers';
+import { isMainnetAddress } from '../address';
 
 /**
  * Name Store logic (src/mobile/names/store/NameStorePage.tsx): what a search result says, which listed names
@@ -9,8 +10,27 @@ import { isPremiumName, nameTierUsd } from './tiers';
  * and every state is tested (store.test.ts).
  */
 
-/** bwalletx.x@bwalletx.com, the storefront: sale proceeds and the tier price of a name got in the store pay here. */
-export const STORE_PAY_ADDRESS = '1F4J9KkMoqtznXPJuCgb98LRymssc8MFfd';
+/** bwalletx.x@bwalletx.com (the bCorp brand account): the store's pay address when VITE_NAME_STORE_PAY_ADDRESS is unset. */
+export const DEFAULT_STORE_PAY_ADDRESS = '1F4J9KkMoqtznXPJuCgb98LRymssc8MFfd';
+
+/**
+ * The configured store pay address: a public receive address, never a key. Unset or blank means the default; anything
+ * that is not a mainnet P2PKH address (base58check, version 0x00) also falls back to the default, with a warning, so a
+ * typo in the build env can never send sales to a bad script.
+ */
+export const resolveStorePayAddress = (
+  raw: string | undefined,
+  warn: (msg: string) => void = (msg) => console.warn(msg),
+): string => {
+  const v = (raw ?? '').trim();
+  if (!v) return DEFAULT_STORE_PAY_ADDRESS;
+  if (isMainnetAddress(v)) return v;
+  warn(`VITE_NAME_STORE_PAY_ADDRESS is not a valid P2PKH address; using the default store pay address.`);
+  return DEFAULT_STORE_PAY_ADDRESS;
+};
+
+/** The storefront: sale proceeds and the tier price of a name got in the store pay here (VITE_NAME_STORE_PAY_ADDRESS). */
+export const STORE_PAY_ADDRESS: string = resolveStorePayAddress(import.meta.env?.VITE_NAME_STORE_PAY_ADDRESS);
 
 /** Wallets the house lists from (public addresses, never keys). A listing from one of these is "from us". */
 export const HOUSE_SELLERS: ReadonlySet<string> = new Set([
