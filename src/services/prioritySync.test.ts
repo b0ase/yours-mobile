@@ -52,6 +52,9 @@ const deps = (
       if (coinIds.has(t)) balance.sats += 1_000_000;
     },
     sleep: noSleep,
+    // The original desktop behaviour (all names in one run, as many in flight as coins); phone limits have their own tests.
+    namesPerRun: Infinity,
+    namesConcurrency: 6,
     ...over,
   };
   return { d, store, balance };
@@ -109,6 +112,7 @@ describe('prioritySync', () => {
         if (!coinIds.has(t)) throw new Error(Math.random() < 0.5 ? 'Request failed: 429' : 'timeout');
         return [1];
       },
+      namesPerRun: 1000,
     });
     d.onCoinsReady = () => (coinsReady = true);
     const r = await prioritySync(d);
@@ -227,5 +231,81 @@ describe('prioritySync', () => {
     expect(isRetryable(new Error('The operation timed out'))).toBe(true);
     expect(isRetryable(new Error('Failed to fetch'))).toBe(true);
     expect(isRetryable(new Error('invalid beef'))).toBe(false);
+  });
+});
+
+// Owner, 1 Nov 2026: every launch re-downloaded every name transaction to classify it, and the iPhone web view was
+// killed at ~1.5 GB before any name was marked done, so the next launch started over.
+describe('prioritySync on a phone: bounded memory', () => {
+  test('a transaction once classified as names is never fetched again to classify it', async () => {
+    const { outs, coinIds } = bigWallet(500, 5);
+    const classifiedSet = new Set<string>();
+    const classified = {
+      has: async (t: string) => classifiedSet.has(t),
+      add: async (t: string) => void classifiedSet.add(t),
+    };
+    let fetched = 0;
+    const ourOutputs = async (t: string) => {
+      fetched++;
+      return coinIds.has(t) ? [1_000_000] : [1];
+    };
+    // First run: the names part never gets to run (the app was killed): nothing internalized.
+    const first = deps(outs, coinIds, { classified, ourOutputs, namesPerRun: 0 });
+    await prioritySync(first.d);
+    expect(fetched).toBe(505);
+    expect(classifiedSet.size).toBe(500);
+    fetched = 0;
+    await prioritySync(deps(outs, coinIds, { classified, ourOutputs, namesPerRun: 0, store: first.store }).d);
+    expect(fetched).toBe(0);
+  });
+
+  test('names load in slices; the resume cursor moves only once every name is done', async () => {
+    const { outs, coinIds } = bigWallet(400, 4);
+    const { d, store } = deps(outs, coinIds, { namesPerRun: 150 });
+    const r1 = await prioritySync(d);
+    expect(r1.names).toEqual({ total: 400, failed: 0, deferred: 250 });
+    expect(store.done.size).toBe(154);
+    expect(store.score()).toBe(0);
+    await prioritySync(deps(outs, coinIds, { namesPerRun: 150, store }).d);
+    expect(store.done.size).toBe(304);
+    const r3 = await prioritySync(deps(outs, coinIds, { namesPerRun: 150, store }).d);
+    expect(r3.names.deferred).toBeUndefined();
+    expect(store.done.size).toBe(404);
+    expect(store.score()).toBeGreaterThan(0);
+  });
+});
+
+describe('prioritySync: names classified from indexer tags', () => {
+  test('a transaction the indexer tags as 1-sat items is never downloaded to classify it', async () => {
+    const { outs, coinIds } = bigWallet(300, 3);
+    let fetched = 0;
+    const { d } = deps(outs, coinIds, {
+      isOneSatOnly: async (ops) => ops.every((o) => !coinIds.has(o.substring(0, 64))),
+      ourOutputs: async (t) => {
+        fetched++;
+        return coinIds.has(t) ? [1_000_000] : [1];
+      },
+      namesPerRun: 1000,
+    });
+    const r = await prioritySync(d);
+    expect(fetched).toBe(3);
+    expect(r.coins.found).toBe(3);
+    expect(r.names.total).toBe(300);
+  });
+});
+
+describe('prioritySync: coins use the lean internalizer', () => {
+  test('coin transactions go through internalizeCoin, names through internalize', async () => {
+    const { outs, coinIds } = bigWallet(40, 4);
+    const coinCalls: string[] = [];
+    const nameCalls: string[] = [];
+    const { d } = deps(outs, coinIds, {
+      internalizeCoin: async (t) => void coinCalls.push(t),
+      internalize: async (t) => void nameCalls.push(t),
+    });
+    await prioritySync(d);
+    expect(new Set(coinCalls)).toEqual(coinIds);
+    expect(nameCalls).toHaveLength(40);
+    expect(nameCalls.some((t) => coinIds.has(t))).toBe(false);
   });
 });
