@@ -48,6 +48,24 @@
                 <!-- web.bwalletx.com/bapp/bchatx?to=/room/<T>?sign=&h= (bChatX PR #549) and other bApp links. -->
                 <data android:scheme="https" android:host="web.bwalletx.com" android:pathPrefix="/bapp/" />
             </intent-filter>
+            <!-- bChatX room and invite links land in that room's chat, like Telegram (src/mobile/spaces/inviteLinks.ts,
+                 src/mobile/chat/roomLink.ts): /room/<ref>[?invite=<token>] (the room itself; an invite link joins),
+                 /i/<10-char code> (Space and room invites; never /i/x/, which only the direct flavour claims), /s/…
+                 (Space pages; a build without Spaces shows them in the bChatX frame). Every flavour. Own filter, so
+                 only www.bchatx.com matches these paths. The /s/ pathPrefix keeps the filter path-restricted on
+                 Android < 12, which ignores pathAdvancedPattern (those phones get the web page, whose "Open in app"
+                 uses bwalletx://). -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="www.bchatx.com" />
+                <data android:pathPrefix="/s/" />
+                <data android:pathAdvancedPattern="/i/[a-hjkmnp-z2-9]{10}" />
+                <data android:pathAdvancedPattern="/i/[a-hjkmnp-z2-9]{10}/" />
+                <data android:pathAdvancedPattern="/room/[A-Za-z0-9_-]+" />
+                <data android:pathAdvancedPattern="/room/[A-Za-z0-9_-]+/" />
+            </intent-filter>
             <!-- bwalletx://pair?… : site/pair.html "Open in the bWallet app" (a tap on www.bwallet.space itself
                  doesn't count as an app link). Same params as /pair; src/mobile/pair/links.ts pairLinkFrom. -->
             <intent-filter>
@@ -82,7 +100,8 @@
                 <data android:scheme="bwalletx" android:host="auth" android:pathPrefix="/handcash" />
             </intent-filter>
             <!-- Space pages, invites and room pages: bwalletx://space/<slug>, bwalletx://invite/<code>,
-                 bwalletx://room/<ticker> from the /s/, /i/ and /r/ pages (src/mobile/spaces/inviteLinks.ts). -->
+                 bwalletx://room/<ticker>[?invite=<token>] from the /s/, /i/ and /r/ pages (src/mobile/spaces/inviteLinks.ts).
+                 Every flavour: room links and room invites open the room's chat in the Play build too. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
