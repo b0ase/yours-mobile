@@ -15,17 +15,32 @@ export type AgentAccount = {
   /** Most an agent may spend from this account per UTC day, in USD. null = no cap (the balance is the limit). */
   dailyCapUsd: number | null;
   createdAt: number;
-  /** This account's ghost colour (PixelGhost): its badge on the wallet card and its avatar. Set once. */
+  /** This account's bBot colour (agents/BBot.tsx): its badge on the wallet card and its avatar. Set once. */
+  botColor?: string;
+  /** Legacy (5.1.68 to 5.2.49): the colour stored before the bBot, read once and mapped by botColorOf. */
   ghostColor?: string;
   /** 'pot' = a savings pot that pays standing orders (pots/pots.ts). Pots are hidden from the agents list. */
   kind?: 'agent' | 'pot';
 };
 
 /**
- * Ghost colours for agent accounts (owner, 6 Oct 2026): the four arcade ghosts first, then more. Each new
+ * bBot colours for agent accounts (Head of Design, 2 Nov 2026): gold, mint, iris, azure, lime, steel. Each new
  * agent account takes the first colour no other agent account uses, so the colour tells accounts apart.
  */
-export const GHOST_COLORS = ['#FF0000', '#FFB8FF', '#00FFFF', '#FFB852', '#2ECC71', '#A06BFF', '#FFE14D', '#4D7CFF'];
+export const BOT_COLORS = ['#F5B800', '#2FD58E', '#8B7CFF', '#3D8BFF', '#A8E03A', '#AEB6C2'];
+
+/** Colours stored by builds before the bBot, mapped onto the bBot colours (the first six stay distinct). */
+export const LEGACY_BOT_COLORS: Record<string, string> = {
+  '#FF0000': '#F5B800',
+  '#FFB8FF': '#8B7CFF',
+  '#00FFFF': '#3D8BFF',
+  '#FFB852': '#2FD58E',
+  '#2ECC71': '#A8E03A',
+  '#A06BFF': '#AEB6C2',
+  '#FFE14D': '#F5B800',
+  '#4D7CFF': '#3D8BFF',
+};
+const toBotColor = (c?: string) => (c ? (LEGACY_BOT_COLORS[c.toUpperCase()] ?? c) : undefined);
 
 export type AgentLogEntry = {
   at: number;
@@ -94,15 +109,16 @@ export const isPairableAgent = (id?: string | null) => {
 /** Agent accounts that are agents, not pots: what the agents list and bApps see. */
 export const listAgentsOnly = (): AgentAccount[] => listAgentAccounts().filter((a) => !isPotAccount(a));
 
-/** An agent account's ghost colour, or null for a person's account. Accounts marked before colours existed
- * get a stable one from their address. */
-export const ghostColorOf = (id?: string | null): string | null => {
+/** An agent account's bBot colour, or null for a person's account. Older colours are mapped onto the bBot
+ * colours; accounts marked before colours existed get a stable one from their address. */
+export const botColorOf = (id?: string | null): string | null => {
   const a = getAgentAccount(id);
   if (!a) return null;
-  if (a.ghostColor) return a.ghostColor;
+  const stored = toBotColor(a.botColor ?? a.ghostColor);
+  if (stored) return stored;
   let h = 0;
   for (const ch of a.identityAddress) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return GHOST_COLORS[h % GHOST_COLORS.length];
+  return BOT_COLORS[h % BOT_COLORS.length];
 };
 
 const save = (a: AgentAccount) => write(KEY, { ...read<Store>(KEY, {}), [a.identityAddress]: a });
@@ -114,9 +130,8 @@ export const markAgentAccount = (
   now = Date.now(),
   opts: { kind?: 'agent' | 'pot' } = {},
 ) => {
-  const used = new Set(listAgentAccounts().map((x) => x.ghostColor));
-  const ghostColor =
-    GHOST_COLORS.find((c) => !used.has(c)) ?? GHOST_COLORS[listAgentAccounts().length % GHOST_COLORS.length];
+  const used = new Set(listAgentAccounts().map((x) => toBotColor(x.botColor ?? x.ghostColor)));
+  const botColor = BOT_COLORS.find((c) => !used.has(c)) ?? BOT_COLORS[listAgentAccounts().length % BOT_COLORS.length];
   const a: AgentAccount = {
     identityAddress,
     labels: cleanLabels(labels),
@@ -124,7 +139,7 @@ export const markAgentAccount = (
     // Pots pay standing orders and keep no cap; agents start capped (b-Aware report, 24 Oct 2026).
     dailyCapUsd: opts.kind === 'pot' ? null : DEFAULT_AGENT_DAILY_CAP_USD,
     createdAt: now,
-    ghostColor,
+    botColor,
   };
   if (opts.kind === 'pot') a.kind = 'pot';
   save(a);

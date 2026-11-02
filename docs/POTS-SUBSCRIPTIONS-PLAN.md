@@ -4,7 +4,7 @@ Status: **draft, 7 Oct 2026** · Branch `bwallet` · Owner direction: Monzo-styl
 
 ## 0. Summary
 
-A **pot** is an agent account (`src/mobile/agents/agentAccounts.ts`) with a `pot` record attached. It has its own seed and balance, a ghost colour, Stop/Resume and an activity log. The pot balance is the most you can ever lose. A **subscription** is a rule stored on a pot: payee, amount, period, start, max count. It pays in one of two ways:
+A **pot** is an agent account (`src/mobile/agents/agentAccounts.ts`) with a `pot` record attached. It has its own seed and balance, a bBot colour, Stop/Resume and an activity log. The pot balance is the most you can ever lose. A **subscription** is a rule stored on a pot: payee, amount, period, start, max count. It pays in one of two ways:
 
 - **v1, pay-on-open:** the wallet pays whatever is due when the app opens or resumes, through the same gate agents use. Local notifications are scheduled ahead of time.
 - **v2, presigned nLockTime:** the wallet signs N future payments up front, each spending its own reserved UTXO. The merchant holds them and broadcasts each one on its date. Pause means spending the reserved UTXOs back into the pot.
@@ -133,7 +133,7 @@ What Apple/Play allow:
 
 ## 6. UX
 
-- **Pots screen** (Wallet tab, a "Pots" row with ghost chips): cards show name, ghost, balance, "covers N payments", and a low-funds badge.
+- **Pots screen** (Wallet tab, a "Pots" row with bBot chips): cards show name, bBot, balance, "covers N payments", and a low-funds badge.
 - **Create pot:** name → (optional) payee + amount + period + start + max → fund from the main account (one tx). The confirm screen shows the worst case: "At most $X (the pot balance)".
 - **Subscription card:** payee, amount, "Next: 1 Nov · $4.99", Pause/Resume toggle (one tap, no confirmation needed to pause), history, Cancel.
 - **History:** filter the agent log by `sub-*`, with txid links.

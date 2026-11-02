@@ -15,7 +15,7 @@ opened inside bWalletX (iPhone, Android, web) and usable at its own address in a
 bApps already run in a cross-origin iframe and reach the wallet over BRC-100 XDM
 (`src/mobile/bappFrame/frameBridge.ts`: `{ type: 'CWI', call, args }`, origins from the bApps list only).
 
-Agent data is not BRC-100: flags, ghost colours, labels, caps, logs and Stop live in the wallet
+Agent data is not BRC-100: flags, bBot colours, labels, caps, logs and Stop live in the wallet
 (`src/mobile/agents/agentAccounts.ts`, per device). So add one namespace beside CWI:
 
 ```
@@ -28,35 +28,35 @@ wallet → page: { type: 'BWX', isInvocation: false, id, status: 'success' | 'er
 - **Reads** need no prompt. **Changes** follow the app's rules: Stop / Stop all / Resume are one tap (stopping is
   always safe); raising a cap, Fund and Sweep show the wallet's own confirmation sheet, never a bApp-drawn one.
 - **Outside the wallet** (agents.bwalletx.com in a plain browser) BWX isn't there: bAgents shows a read-only demo
-  with sample ghosts and "Open in bWalletX" / "Get bWalletX", the way /agents does today.
+  with sample bBots and "Open in bWalletX" / "Get bWalletX", the way /agents does today.
 
 ### BWX calls (v1)
 
-| Call                                              | Returns / does                                                                                                          | Prompt                            |
-| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
-| `agents.list`                                     | `[{ id, name, handle, ghostColor, labels, stopped, dailyCapUsd, balanceUsd, spentTodayUsd, isCurrent }]` + `allStopped` | none                              |
-| `agents.log` `{ id, limit }`                      | activity entries (action, detail, usd, txid, rule, at)                                                                  | none                              |
-| `agents.stop` `{ id }` / `agents.resume` `{ id }` | sets Stop; logs it                                                                                                      | none for stop, confirm for resume |
-| `agents.stopAll` / `agents.resumeAll`             | global kill switch                                                                                                      | none / confirm                    |
-| `agents.setCap` `{ id, usd }`                     | daily cap                                                                                                               | confirm when raising or removing  |
-| `agents.setLabels` `{ id, labels }`               | labels                                                                                                                  | none                              |
-| `agents.open` `{ id, screen? }`                   | switches the wallet to that account (Fund / Sweep / Receive)                                                            | wallet's own UI                   |
-| `agents.create`                                   | opens the wallet's Add agent account flow                                                                               | wallet's own UI                   |
-| `events` (push)                                   | `{ type: 'BWX', event: 'agents.changed' }` when anything changes (`onAgentsChange`)                                     | —                                 |
+| Call                                              | Returns / does                                                                                                        | Prompt                            |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| `agents.list`                                     | `[{ id, name, handle, botColor, labels, stopped, dailyCapUsd, balanceUsd, spentTodayUsd, isCurrent }]` + `allStopped` | none                              |
+| `agents.log` `{ id, limit }`                      | activity entries (action, detail, usd, txid, rule, at)                                                                | none                              |
+| `agents.stop` `{ id }` / `agents.resume` `{ id }` | sets Stop; logs it                                                                                                    | none for stop, confirm for resume |
+| `agents.stopAll` / `agents.resumeAll`             | global kill switch                                                                                                    | none / confirm                    |
+| `agents.setCap` `{ id, usd }`                     | daily cap                                                                                                             | confirm when raising or removing  |
+| `agents.setLabels` `{ id, labels }`               | labels                                                                                                                | none                              |
+| `agents.open` `{ id, screen? }`                   | switches the wallet to that account (Fund / Sweep / Receive)                                                          | wallet's own UI                   |
+| `agents.create`                                   | opens the wallet's Add agent account flow                                                                             | wallet's own UI                   |
+| `events` (push)                                   | `{ type: 'BWX', event: 'agents.changed' }` when anything changes (`onAgentsChange`)                                   | —                                 |
 
 Balance per agent: the wallet reads it the way the account switcher does (its cached balance per account), in dollars.
 
 ## Screens (v1)
 
-1. **Ghost house (home)**
-   - Every agent as its ghost in its own colour, a name and labels.
+1. **Bot bay (home)**
+   - Every agent as its bBot in its own colour, a name and labels.
    - Status pill (running / paused / stopped), balance and "today: $x of $cap".
-   - The ghost bobs while running, and turns scared-blue when stopped (arcade nod).
+   - The bBot hovers while running, and dims when stopped.
    - Big **Stop all** at the top, red; it becomes **Resume all** when stopped.
    - "+ New agent" → the wallet's own Add agent account flow.
-   - Empty state: one ghost, "Your first agent", a short explanation and the button.
+   - Empty state: one bBot, "Your first agent", a short explanation and the button.
 2. **Agent**
-   - Large ghost, name and labels (editable), and the address (copy).
+   - Large bBot, name and labels (editable), and the address (copy).
    - Budget block: balance, spent today, daily cap (edit), Fund / Sweep back (hand off to the wallet).
    - Activity log: newest first, dollars first, links to WhatsOnChain; filter by action.
    - Stop / Resume.
@@ -71,17 +71,17 @@ v2:
 - **Strategies:** browse and buy from the Exchange, design one with the b agent or $b, and load it on paper → live (live always confirmed in the wallet).
 - **Paired computers / AIs:** list and revoke.
 - **P&L:** per agent, over time.
-- **Ghost chat:** each agent's own room.
+- **Bot chat:** each agent's own room.
 
 ## Build
 
 - **Repo:** `bitcoin-corp/bagents` (private), Vite + React + TypeScript + Tailwind.
-  - The ghost comes from the same 14×14 bitmap as `src/mobile/agents/PixelGhost.tsx`, kept in step by a test.
+  - The bBot is the same drawing as `src/mobile/agents/BBot.tsx` (master art `src/mobile/brand/bbot/`).
 - **Host:** Vercel project `bagents`, domain `agents.bwalletx.com`.
   - DNS: a CNAME `agents` → `cname.vercel-dns.com` at Fasthosts (owner, unless Fasthosts API access is set up).
   - Headers: framable only by the wallet origins (`frame-ancestors` capacitor://localhost, https://localhost, https://web.bwalletx.com and the extension), not by the world.
 - **Wallet side** (bwalletX), all small:
-  1. Add bAgents to `src/mobile/bapps.ts`, private channels only: not in `storeBuild` editions. Icon: the four ghosts.
+  1. Add bAgents to `src/mobile/bapps.ts`, private channels only: not in `storeBuild` editions. Icon: a bBot.
   2. A BWX handler beside CWI in `BappFrameHost.tsx`: the origin check above plus the calls, implemented over `agentAccounts.ts`. Unit tests for the origin check and each call's validation.
   3. Settings › Agents gets an "Open bAgents" row. Settings › Agents stays as the fallback.
 - **Tests:**
@@ -91,7 +91,7 @@ v2:
 ## Order of work
 
 1. Wallet: the BWX bridge + tests (no visible change yet).
-2. bAgents v1: Ghost house + Agent + Connect against a fake bridge; deploy to `bagents.vercel.app`.
+2. bAgents v1: Bot bay + Agent + Connect against a fake bridge; deploy to `bagents.vercel.app`.
 3. DNS `agents.bwalletx.com`; add the bApp tile (private channels); test in the web wallet, Android and iPhone.
 4. Ship in the next wallet release; announce on X with the /agents share image.
 

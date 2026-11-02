@@ -48,7 +48,7 @@ const SCREENS: readonly string[] = ['fund', 'sweep', 'receive'];
 export type BwxDeps = {
   listAgents: () => AgentAccount[];
   getAgent: (id: string) => AgentAccount | null;
-  ghostColorOf: (id: string) => string | null;
+  botColorOf: (id: string) => string | null;
   /** Display name and $handle of an account on this device. */
   accountInfo: (id: string) => { name: string; handle: string };
   currentId: () => string | undefined;
@@ -98,7 +98,9 @@ export const handleBwx = async (call: string, args: Record<string, unknown>, dep
           id,
           name,
           handle,
-          ghostColor: deps.ghostColorOf(id),
+          botColor: deps.botColorOf(id),
+          // Deprecated alias of botColor for bAgents builds from before 2 Nov 2026. Same bBot colour value.
+          ghostColor: deps.botColorOf(id),
           labels: a.labels,
           stopped: a.stopped,
           dailyCapUsd: a.dailyCapUsd,

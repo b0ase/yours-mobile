@@ -6,28 +6,31 @@
     <title>bWalletX Agents</title>
     <meta
       name="description"
-      content="Give each AI agent its own bWalletX account, its own budget and its own ghost. Run them from the app, the bWalletX CLI or any MCP agent like Claude."
+      content="Give each AI agent its own bWalletX account, its own budget and its own bBot. Run them from the app, the bWalletX CLI or any MCP agent like Claude."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://web.bwalletx.com/agents" />
     <meta property="og:site_name" content="bWalletX" />
-    <meta property="og:title" content="bWalletX Agents: one account, one budget, one ghost per agent" />
+    <meta property="og:title" content="bWalletX Agents: one account, one budget, one bBot per agent" />
     <meta
       property="og:description"
       content="Give each AI agent its own bWalletX account and budget. Run them from the app, the CLI or Claude over MCP. Stop them any time."
     />
-    <meta property="og:image" content="https://web.bwalletx.com/og-agents.png" />
+    <meta property="og:image" content="https://web.bwalletx.com/og-agents-v2.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="Pixel ghosts in red, pink, cyan and orange: bWalletX agent accounts" />
+    <meta
+      property="og:image:alt"
+      content="Four bBots, little helper robots in gold, iris, azure and mint, each with an antenna, a visor and a hover-base: bWalletX agent accounts"
+    />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:site" content="@bWalletX" />
-    <meta name="twitter:title" content="bWalletX Agents: one account, one budget, one ghost per agent" />
+    <meta name="twitter:title" content="bWalletX Agents: one account, one budget, one bBot per agent" />
     <meta
       name="twitter:description"
       content="Give each AI agent its own bWalletX account and budget. Run them from the app, the CLI or Claude over MCP."
     />
-    <meta name="twitter:image" content="https://web.bwalletx.com/og-agents.png" />
+    <meta name="twitter:image" content="https://web.bwalletx.com/og-agents-v2.png" />
     <link rel="icon" href="/favicon.ico" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link
@@ -43,12 +46,6 @@
         --muted: #a7adb8;
         --gold: #f5b800;
         --gold-hi: #ffd24d;
-        --red: #ff0000;
-        --pink: #ffb8ff;
-        --cyan: #00ffff;
-        --orange: #ffb852;
-        --green: #2ecc71;
-        --purple: #a06bff;
       }
       * {
         box-sizing: border-box;
@@ -337,43 +334,58 @@
         .parade .g {
           animation: none;
         }
-        .ga,
-        .gl {
-          animation: none !important;
-          opacity: 1 !important;
+      }
+      /* bBot idle: a gentle hover-bob, a blink and an antenna pulse (still under prefers-reduced-motion). */
+      .bbot {
+        display: inline-block;
+        flex-shrink: 0;
+        overflow: visible;
+      }
+      .bbot-bob {
+        animation: bbot-bob 3.2s ease-in-out infinite;
+      }
+      .bbot-eyes {
+        transform-box: fill-box;
+        transform-origin: center;
+        animation: bbot-blink 5.5s ease-in-out infinite;
+      }
+      .bbot-tip {
+        animation: bbot-pulse 2.4s ease-in-out infinite;
+      }
+      @keyframes bbot-bob {
+        0%,
+        100% {
+          transform: translateY(0);
         }
-        .gb,
-        .gr {
-          animation: none !important;
-          opacity: 0 !important;
+        50% {
+          transform: translateY(-0.45px);
         }
       }
-      .ga,
-      .gl {
-        animation: on 0.5s steps(1, end) infinite;
+      @keyframes bbot-blink {
+        0%,
+        44%,
+        50%,
+        100% {
+          transform: scaleY(1);
+        }
+        47% {
+          transform: scaleY(0.12);
+        }
       }
-      .gb,
-      .gr {
-        animation: off 0.5s steps(1, end) infinite;
-      }
-      .gl,
-      .gr {
-        animation-duration: 1.6s;
-      }
-      @keyframes on {
-        0% {
+      @keyframes bbot-pulse {
+        0%,
+        100% {
           opacity: 1;
         }
         50% {
-          opacity: 0;
+          opacity: 0.55;
         }
       }
-      @keyframes off {
-        0% {
-          opacity: 0;
-        }
-        50% {
-          opacity: 1;
+      @media (prefers-reduced-motion: reduce) {
+        .bbot-bob,
+        .bbot-eyes,
+        .bbot-tip {
+          animation: none;
         }
       }
     </style>
@@ -389,16 +401,16 @@
 
       <div class="hero">
         <div>
-          <h1>Every agent gets <em>its own ghost.</em></h1>
+          <h1>Every agent gets <em>its own bBot.</em></h1>
           <p class="lede">
             Give each AI agent its own bWalletX account, with its own keys and its own budget. It can only spend what
             you put in. You can see everything it does, and you can stop it with one tap.
           </p>
           <div class="parade">
-            <span class="g" data-ghost="#FF0000" data-size="64"></span>
-            <span class="g" data-ghost="#FFB8FF" data-size="64"></span>
-            <span class="g" data-ghost="#00FFFF" data-size="64"></span>
-            <span class="g" data-ghost="#FFB852" data-size="64"></span>
+            <span class="g" data-bot="#F5B800" data-size="64"></span>
+            <span class="g" data-bot="#8B7CFF" data-size="64"></span>
+            <span class="g" data-bot="#3D8BFF" data-size="64"></span>
+            <span class="g" data-bot="#2FD58E" data-size="64"></span>
           </div>
         </div>
 
@@ -415,7 +427,7 @@
             <span class="bal">$812.40</span>
           </div>
           <div class="acct on">
-            <span class="av" style="--c: #ff0000"><span data-ghost="#FF0000" data-size="26"></span></span>
+            <span class="av" style="--c: #f5b800"><span data-bot="#F5B800" data-size="26"></span></span>
             <span
               ><span class="nm">Trader</span><span class="pill run">running</span>
               <div class="sub">Slow accumulator · cap $20/day</div></span
@@ -423,7 +435,7 @@
             <span class="bal">$120.00</span>
           </div>
           <div class="acct">
-            <span class="av" style="--c: #00ffff"><span data-ghost="#00FFFF" data-size="26"></span></span>
+            <span class="av" style="--c: #3d8bff"><span data-bot="#3D8BFF" data-size="26"></span></span>
             <span
               ><span class="nm">Treasurer</span><span class="pill run">running</span>
               <div class="sub">Tops up the other agents</div></span
@@ -431,7 +443,7 @@
             <span class="bal">$64.25</span>
           </div>
           <div class="acct">
-            <span class="av" style="--c: #ffb8ff"><span data-ghost="#FFB8FF" data-size="26"></span></span>
+            <span class="av" style="--c: #8b7cff"><span data-bot="#8B7CFF" data-size="26"></span></span>
             <span
               ><span class="nm">Reporter</span><span class="pill read">read only</span>
               <div class="sub">Daily summary to chat</div></span
@@ -439,7 +451,7 @@
             <span class="bal">$0.00</span>
           </div>
           <div class="acct">
-            <span class="av" style="--c: #ffb852"><span data-ghost="#FFB852" data-size="26"></span></span>
+            <span class="av" style="--c: #2fd58e"><span data-bot="#2FD58E" data-size="26"></span></span>
             <span
               ><span class="nm">Scout</span><span class="pill stop">stopped</span>
               <div class="sub">$HANDLE fund · paused by you</div></span
@@ -453,21 +465,19 @@
 
     <section>
       <div class="wrap">
-        <h2>Your ghost is your agent's face</h2>
+        <h2>Your bBot is your agent's face</h2>
         <p class="muted">
-          Make an account an agent account and it gets a ghost in its own colour. It shows on the wallet card when that
-          account is selected, and it's the account's avatar everywhere: the account menu, Settings and chat. One look
-          tells you which agent you're in.
+          Make an account an agent account and it gets a bBot, a little helper robot, in its own colour. It shows on the
+          wallet card when that account is selected, and it's the account's avatar everywhere: the account menu,
+          Settings and chat. One look tells you which agent you're in.
         </p>
         <div class="colours">
-          <div><span data-ghost="#FF0000" data-size="48"></span><br />1st</div>
-          <div><span data-ghost="#FFB8FF" data-size="48"></span><br />2nd</div>
-          <div><span data-ghost="#00FFFF" data-size="48"></span><br />3rd</div>
-          <div><span data-ghost="#FFB852" data-size="48"></span><br />4th</div>
-          <div><span data-ghost="#2ECC71" data-size="48"></span><br />5th</div>
-          <div><span data-ghost="#A06BFF" data-size="48"></span><br />6th</div>
-          <div><span data-ghost="#FFE14D" data-size="48"></span><br />7th</div>
-          <div><span data-ghost="#4D7CFF" data-size="48"></span><br />8th</div>
+          <div><span data-bot="#F5B800" data-size="48"></span><br />1st</div>
+          <div><span data-bot="#8B7CFF" data-size="48"></span><br />2nd</div>
+          <div><span data-bot="#3D8BFF" data-size="48"></span><br />3rd</div>
+          <div><span data-bot="#2FD58E" data-size="48"></span><br />4th</div>
+          <div><span data-bot="#A8E03A" data-size="48"></span><br />5th</div>
+          <div><span data-bot="#AEB6C2" data-size="48"></span><br />6th</div>
         </div>
       </div>
     </section>
@@ -477,14 +487,14 @@
         <h2>What an agent account can do</h2>
         <div class="grid">
           <div class="card">
-            <div class="ic" data-ghost="#FF0000" data-size="28"></div>
+            <div class="ic" data-bot="#F5B800" data-size="28"></div>
             <h3>Spend only its budget</h3>
             <p class="muted">
               It has its own keys. Its balance is all it can ever spend; your other accounts are never touched.
             </p>
           </div>
           <div class="card">
-            <div class="ic" data-ghost="#00FFFF" data-size="28"></div>
+            <div class="ic" data-bot="#3D8BFF" data-size="28"></div>
             <h3>Follow a strategy</h3>
             <p class="muted">
               Agree the rules in plain words with the b agent, or load a strategy file, and it trades by those rules and
@@ -492,7 +502,7 @@
             </p>
           </div>
           <div class="card">
-            <div class="ic" data-ghost="#FFB8FF" data-size="28"></div>
+            <div class="ic" data-bot="#8B7CFF" data-size="28"></div>
             <h3>Show its work</h3>
             <p class="muted">
               Every action goes in an activity log with links to the transactions. Add labels and a daily spending cap
@@ -500,7 +510,7 @@
             </p>
           </div>
           <div class="card">
-            <div class="ic" data-ghost="#FFB852" data-size="28"></div>
+            <div class="ic" data-bot="#2FD58E" data-size="28"></div>
             <h3>Stop on your word</h3>
             <p class="muted">
               Stop one agent or Stop all agents. A stopped account refuses every spend until you resume it, and Sweep
@@ -580,7 +590,7 @@ claude mcp add bwalletx -- npx -y bwalletx mcp
         <h2>Start in a minute</h2>
         <p class="muted">
           In bWalletX, open the account menu and tap <b>Add agent account</b>, or go to Settings › Agents. Move in a
-          small budget, give it a strategy, and its ghost appears on the card.
+          small budget, give it a strategy, and its bBot appears on the card.
         </p>
         <p><a class="cta" href="/">Open the web wallet</a> &nbsp; <a href="https://bwalletx.com/get">Get the app</a></p>
       </div>
@@ -595,67 +605,38 @@ claude mcp add bwalletx -- npx -y bwalletx mcp
     </footer>
 
     <script>
-      // The app's pixel ghost (src/mobile/agents/PixelGhost.tsx), drawn as SVG from the same 14x14 map.
+      // bBot (agents/BBot.tsx in the wallet): our own helper-robot mascot. Compact drawing below 40px.
       (function () {
-        var BODY = [
-          '.....####.....',
-          '...########...',
-          '..##########..',
-          '.############.',
-          '.############.',
-          '.############.',
-          '##############',
-          '##############',
-          '##############',
-          '##############',
-          '##############',
-          '##############',
-        ];
-        var A = ['##.###..###.##', '#...##..##...#'],
-          B = ['####.####.####', '.##...##...##.'];
-        var W = [
-          [3, 3, 2, 1],
-          [2, 4, 4, 2],
-          [3, 6, 2, 1],
-          [9, 3, 2, 1],
-          [8, 4, 4, 2],
-          [9, 6, 2, 1],
-        ];
-        function px(rows, y0) {
-          var s = '';
-          rows.forEach(function (r, y) {
-            for (var x = 0; x < r.length; x++)
-              if (r[x] === '#') s += '<rect x="' + x + '" y="' + (y0 + y) + '" width="1.02" height="1.02"/>';
-          });
-          return s;
-        }
-        function ghost(c, n) {
+        var DEEP = {
+          '#F5B800': '#8A6400',
+          '#2FD58E': '#0E7A4C',
+          '#8B7CFF': '#4B3BC4',
+          '#3D8BFF': '#1D4FB8',
+          '#A8E03A': '#56800E',
+          '#AEB6C2': '#59626F',
+        };
+        var FULL =
+          '<rect x="4.6" y="20.6" width="14.8" height="2.1" rx="1.05" fill="var(--bb-deep)"/><rect x="6.4" y="20.95" width="11.2" height=".5" rx=".25" fill="var(--bb)" fill-opacity=".55"/><g class="bbot-bob"><rect x="11.35" y="1.9" width="1.3" height="2.8" rx=".65" fill="var(--bb-deep)"/><circle class="bbot-tip" cx="12" cy="1.9" r="1.35" fill="var(--bb)" stroke="var(--bb-deep)" stroke-width=".5"/><rect x="2.7" y="7.2" width="1.7" height="3.4" rx=".7" fill="var(--bb-deep)"/><rect x="19.6" y="7.2" width="1.7" height="3.4" rx=".7" fill="var(--bb-deep)"/><rect x="10.2" y="13.4" width="3.6" height="1.4" fill="var(--bb-deep)"/><rect x="4" y="4.4" width="16" height="9.4" rx="3" fill="var(--bb)" stroke="var(--bb-deep)" stroke-width=".7"/><rect x="6.3" y="5.25" width="3.6" height=".6" rx=".3" fill="#fff" fill-opacity=".5"/><rect x="5.8" y="6.6" width="12.4" height="5.4" rx="2.7" fill="#0F1013"/><rect x="6.9" y="7.2" width="10.2" height=".5" rx=".25" fill="#fff" fill-opacity=".14"/><g class="bbot-eyes"><rect x="8" y="7.9" width="2.8" height="2.8" rx="1.1" fill="var(--bb)"/><rect x="13.2" y="7.9" width="2.8" height="2.8" rx="1.1" fill="var(--bb)"/></g><rect x="6.6" y="14.5" width="10.8" height="5.6" rx="1.8" fill="var(--bb)" stroke="var(--bb-deep)" stroke-width=".7"/><path d="M11.05 15.55V19.1M11.05 18.15a.95 .95 0 1 0 1.9 0a.95 .95 0 1 0-1.9 0" fill="none" stroke="var(--bb-deep)" stroke-width=".6" stroke-linecap="round"/></g>';
+        var COMPACT =
+          '<rect x="4" y="20.5" width="16" height="2.7" rx="1.35" fill="var(--bb-deep)"/><g class="bbot-bob"><rect x="11" y="1.8" width="2" height="2.8" rx="1" fill="var(--bb-deep)"/><circle class="bbot-tip" cx="12" cy="2.1" r="1.8" fill="var(--bb)" stroke="var(--bb-deep)" stroke-width=".7"/><rect x="9.4" y="14.4" width="5.2" height="1.6" fill="var(--bb-deep)"/><rect x="2.8" y="4.3" width="18.4" height="10.6" rx="3.2" fill="var(--bb)" stroke="var(--bb-deep)" stroke-width=".9"/><rect x="4.8" y="6.4" width="14.4" height="6.3" rx="3.15" fill="#0F1013"/><g class="bbot-eyes"><rect x="7" y="7.85" width="3.6" height="3.4" rx="1.4" fill="var(--bb)"/><rect x="13.4" y="7.85" width="3.6" height="3.4" rx="1.4" fill="var(--bb)"/></g><rect x="6.2" y="15.6" width="11.6" height="4.3" rx="1.6" fill="var(--bb)" stroke="var(--bb-deep)" stroke-width=".9"/></g>';
+        function bot(c, n) {
+          var d = DEEP[c.toUpperCase()] || c;
           return (
-            '<svg width="' +
+            '<svg class="bbot" width="' +
             n +
             '" height="' +
             n +
-            '" viewBox="0 0 14 14" shape-rendering="crispEdges" aria-hidden="true">' +
-            '<g fill="' +
+            '" viewBox="0 0 24 24" aria-hidden="true" style="--bb:' +
             c +
+            ';--bb-deep:' +
+            d +
             '">' +
-            px(BODY, 0) +
-            '<g class="ga">' +
-            px(A, 12) +
-            '</g><g class="gb">' +
-            px(B, 12) +
-            '</g></g>' +
-            '<g fill="#fff">' +
-            W.map(function (w) {
-              return '<rect x="' + w[0] + '" y="' + w[1] + '" width="' + w[2] + '" height="' + w[3] + '"/>';
-            }).join('') +
-            '</g>' +
-            '<g fill="#2121DE"><g class="gl"><rect x="2" y="5" width="2" height="2"/><rect x="8" y="5" width="2" height="2"/></g>' +
-            '<g class="gr"><rect x="4" y="5" width="2" height="2"/><rect x="10" y="5" width="2" height="2"/></g></g></svg>'
+            (n < 40 ? COMPACT : FULL) +
+            '</svg>'
           );
         }
-        document.querySelectorAll('[data-ghost]').forEach(function (el) {
-          el.innerHTML = ghost(el.getAttribute('data-ghost'), +el.getAttribute('data-size') || 28);
+        document.querySelectorAll('[data-bot]').forEach(function (el) {
+          el.innerHTML = bot(el.getAttribute('data-bot'), +el.getAttribute('data-size') || 28);
         });
       })();
     </script>

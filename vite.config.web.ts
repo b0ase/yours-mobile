@@ -114,10 +114,17 @@ const webShell = (): Plugin => ({
         fileName: 'og-desktop-v1.png',
         source: readFileSync(resolve(__dirname, 'src/web/og-desktop-v1.png')),
       });
+    // og-agents.png is kept at its old URL (now the bBot card) so posts that shared it refetch a bBot;
+    // the page points at og-agents-v2.png.
     this.emitFile({
       type: 'asset',
       fileName: 'og-agents.png',
       source: readFileSync(resolve(__dirname, 'src/web/og-agents.png')),
+    });
+    this.emitFile({
+      type: 'asset',
+      fileName: 'og-agents-v2.png',
+      source: readFileSync(resolve(__dirname, 'src/web/og-agents-v2.png')),
     });
     // Web Push service worker (src/mobile/push/register.ts registers it from Settings › Notifications).
     this.emitFile({

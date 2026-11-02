@@ -1253,55 +1253,60 @@ body,
   }
 }
 
-/* Agent-account ghost (agents/PixelGhost.tsx): two-frame skirt and glancing eyes, stepped like an arcade
-   sprite. On the wallet card it sits bottom right (owner, 6 Oct 2026). */
-.bw-ghost {
-  image-rendering: pixelated;
+/* Agent-account bBot (agents/BBot.tsx): a gentle hover-bob over its base, a blink and an antenna pulse.
+   On the wallet card it sits bottom right. Still under prefers-reduced-motion. */
+.bw-bbot {
   flex-shrink: 0;
+  overflow: visible;
 }
-.bw-ghost-a,
-.bw-ghost-look-l {
-  animation: bw-ghost-on 0.5s steps(1, end) infinite;
+.bw-bbot-bob {
+  animation: bw-bbot-bob 3.2s ease-in-out infinite;
 }
-.bw-ghost-b,
-.bw-ghost-look-r {
-  animation: bw-ghost-off 0.5s steps(1, end) infinite;
+.bw-bbot-eyes {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: bw-bbot-blink 5.5s ease-in-out infinite;
 }
-.bw-ghost-look-l {
-  animation-duration: 1.6s;
+.bw-bbot-tip {
+  animation: bw-bbot-pulse 2.4s ease-in-out infinite;
 }
-.bw-ghost-look-r {
-  animation-duration: 1.6s;
+@keyframes bw-bbot-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-0.45px);
+  }
 }
-@keyframes bw-ghost-on {
-  0% {
+@keyframes bw-bbot-blink {
+  0%,
+  44%,
+  50%,
+  100% {
+    transform: scaleY(1);
+  }
+  47% {
+    transform: scaleY(0.12);
+  }
+}
+@keyframes bw-bbot-pulse {
+  0%,
+  100% {
     opacity: 1;
   }
   50% {
-    opacity: 0;
-  }
-}
-@keyframes bw-ghost-off {
-  0% {
-    opacity: 0;
-  }
-  50% {
-    opacity: 1;
+    opacity: 0.55;
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .bw-ghost-a,
-  .bw-ghost-look-l {
+  .bw-bbot-bob,
+  .bw-bbot-eyes,
+  .bw-bbot-tip {
     animation: none;
-    opacity: 1;
-  }
-  .bw-ghost-b,
-  .bw-ghost-look-r {
-    animation: none;
-    opacity: 0;
   }
 }
-.bw-wcard-ghost {
+.bw-wcard-bot {
   position: absolute;
   right: 16px;
   bottom: 14px;

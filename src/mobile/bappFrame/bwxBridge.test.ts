@@ -23,7 +23,7 @@ const setup = (agents: AgentAccount[], answer = true, allStopped = false) => {
   const deps: BwxDeps = {
     listAgents: () => [...store.values()],
     getAgent: (id) => store.get(id) ?? null,
-    ghostColorOf: (id) => (store.has(id) ? '#FF0000' : null),
+    botColorOf: (id) => (store.has(id) ? '#F5B800' : null),
     accountInfo: (id) => ({ name: `Agent ${id}`, handle: `$${id}` }),
     currentId: () => 'a1',
     balanceUsd: (id) => (id === 'a1' ? 12.5 : null),

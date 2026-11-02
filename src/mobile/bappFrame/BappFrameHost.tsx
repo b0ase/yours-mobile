@@ -42,7 +42,7 @@ import {
   allAgentsStopped,
   getAgentAccount,
   getAgentLog,
-  ghostColorOf,
+  botColorOf,
   listAgentsOnly,
   onAgentsChange,
   setAgentDailyCap,
@@ -402,7 +402,7 @@ const useBwxDeps = () => {
   const deps: Omit<BwxDeps, 'confirm'> = {
     listAgents: listAgentsOnly,
     getAgent: getAgentAccount,
-    ghostColorOf,
+    botColorOf,
     accountInfo: info,
     currentId: () => chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress,
     // The last balance the Wallet tab saw for that account (sats) at the last known rate; null when either is missing.

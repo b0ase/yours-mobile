@@ -8,8 +8,8 @@ import { useBackClose } from '../backStack';
 import { routeFor } from '../tabs/tabs';
 import { requestPayAfterSwitch } from '../wallet/payNav';
 import { useBsvUsd } from '../money/money';
-import { PixelGhost } from '../agents/PixelGhost';
-import { getAgentAccount, getAgentLog, ghostColorOf, onAgentsChange, setAgentStopped } from '../agents/agentAccounts';
+import { BBot } from '../agents/BBot';
+import { getAgentAccount, getAgentLog, botColorOf, onAgentsChange, setAgentStopped } from '../agents/agentAccounts';
 import { startPotCreate } from '../agents/agentCreate';
 import {
   getPot,
@@ -125,7 +125,7 @@ const PotRow = ({ id, onOpen, rate }: { id: string; onOpen: () => void; rate: nu
       className="flex items-center gap-3 rounded-2xl p-3 border-0 text-left cursor-pointer"
       style={{ background: CARD }}
     >
-      <PixelGhost color={ghostColorOf(id) ?? GOLD} size={24} />
+      <BBot color={botColorOf(id) ?? GOLD} size={24} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="text-sm font-bold text-white truncate">{pot.name}</span>
@@ -339,7 +339,7 @@ const PotScreen = ({
       <div className="flex flex-col gap-3 px-4 pb-10 overflow-y-auto">
         <div className={section} style={{ background: CARD }}>
           <div className="flex items-center gap-2">
-            <PixelGhost color={ghostColorOf(id) ?? GOLD} size={28} />
+            <BBot color={botColorOf(id) ?? GOLD} size={28} />
             <div className="flex-1">
               <div className="text-xl font-bold text-white">{label}</div>
               {PNEE_POTS_ENABLED && (

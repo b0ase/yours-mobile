@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { BWALLET_MARK_ICON } from './personalToken';
-import { ghostColorOf } from '../agents/agentAccounts';
-import { PixelGhost } from '../agents/PixelGhost';
+import { botColorOf } from '../agents/agentAccounts';
+import { BBot } from '../agents/BBot';
 import type { AvatarPlace } from './animatedAvatar';
 import { useAvatarPlayback } from './useAvatarPlayback';
 import { isBavatarSrc, useBavatarShimmer } from './bavatarShimmer';
@@ -17,7 +17,7 @@ export const AccountAvatar = ({
   src: string;
   size?: number;
   ring?: boolean;
-  /** The account's identity address: an agent account shows its ghost instead (agents/PixelGhost). */
+  /** The account's identity address: an agent account shows its bBot instead (agents/BBot). */
   id?: string | null;
   /** Playback (names/animatedAvatar.ts): 'full' animates (own profile, card, headers); 'list' shows a still frame. */
   place?: AvatarPlace;
@@ -26,14 +26,14 @@ export const AccountAvatar = ({
   const play = useAvatarPlayback(src, place);
   const shimmer = useBavatarShimmer();
   useEffect(() => setBroken(false), [src]);
-  const ghost = ghostColorOf(id);
-  if (ghost)
+  const bot = botColorOf(id);
+  if (bot)
     return (
       <span
         className="rounded-full shrink-0 inline-flex items-center justify-center box-border"
-        style={{ width: size, height: size, background: '#0b0b0b', border: ring ? `1.5px solid ${ghost}` : undefined }}
+        style={{ width: size, height: size, background: '#0b0b0b', border: ring ? `1.5px solid ${bot}` : undefined }}
       >
-        <PixelGhost color={ghost} size={Math.round(size * 0.72)} />
+        <BBot color={bot} size={Math.round(size * 0.72)} />
       </span>
     );
   const photo = !!src && !broken;

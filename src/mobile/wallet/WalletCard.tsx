@@ -66,8 +66,8 @@ import { useAccountNames } from '../names/accountNames';
 import { identityRowText } from '../names/identityText';
 import type { BalanceView } from './balanceLoad';
 import { useBackedUp } from '../backup/useBackedUp';
-import { ghostColorOf, onAgentsChange } from '../agents/agentAccounts';
-import { PixelGhost } from '../agents/PixelGhost';
+import { botColorOf, onAgentsChange } from '../agents/agentAccounts';
+import { BBot } from '../agents/BBot';
 import { requestBackupThen } from '../backup/backupState';
 import { useCardSignature } from '../signature/useCardSignature';
 import { cardGoldLevel } from './cardGold';
@@ -239,11 +239,11 @@ const WalletCardInner = ({
   const id = account?.addresses.identityAddress;
   const names = useAccountNames(id, account?.name ?? '', account?.settings?.socialProfile?.displayName ?? '', false);
   const avatar = useAvatar(id);
-  // Agent accounts wear a ghost in their colour (agents/PixelGhost); re-read when agent settings change.
-  const [ghost, setGhost] = useState(() => ghostColorOf(id));
+  // Agent accounts wear a bBot in their colour (agents/BBot); re-read when agent settings change.
+  const [bot, setBot] = useState(() => botColorOf(id));
   useEffect(() => {
-    setGhost(ghostColorOf(id));
-    return onAgentsChange(() => setGhost(ghostColorOf(id)));
+    setBot(botColorOf(id));
+    return onAgentsChange(() => setBot(botColorOf(id)));
   }, [id]);
   const { kyc } = useKyc();
   const verified = kycValid(kyc, Date.now());
@@ -496,15 +496,15 @@ const WalletCardInner = ({
               <span className="bw-wcard-art-shade" aria-hidden="true" />
             </>
           )}
-          {ghost && (
-            <span className="bw-wcard-ghost">
-              <PixelGhost color={ghost} size={34} title="Agent account" />
+          {bot && (
+            <span className="bw-wcard-bot">
+              <BBot color={bot} size={34} title="Agent account" />
             </span>
           )}
           <div className="bw-wcard-head">
             <div className="bw-wcard-top">
               <div className="bw-wcard-holder">
-                {ghost ? (
+                {bot ? (
                   <AccountAvatar src={avatar} size={31} id={id} />
                 ) : (
                   <button
