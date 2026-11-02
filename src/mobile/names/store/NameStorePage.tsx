@@ -678,7 +678,9 @@ const ResultCard = (p: {
     <p className="m-0 text-[32px] sm:text-[40px] font-bold tracking-[-0.03em] leading-none break-all">{r.name}</p>
   );
   const busy = p.busy === r.name;
-  const buyable = MARKET_ENABLED && (r.kind === 'house' || r.kind === 'listed');
+  // UK gate: our own house listings and special names are first sales by bWalletX (CEO, 2 Nov 2026), so they stay
+  // open to a restricted visitor; other owners' listings are resale and stay gated.
+  const buyable = MARKET_ENABLED && (r.kind === 'house' || (r.kind === 'listed' && marketOk));
   const giftBox = (
     <div className="flex flex-col gap-2">
       <label className="inline-flex items-center gap-2 text-sm cursor-pointer select-none" style={{ color: MUTED }}>
@@ -796,7 +798,7 @@ const ResultCard = (p: {
     }
     case 'premium':
       // A store build has no selling or buying (MARKET_ENABLED): premium and listed names just read "Taken".
-      if (!MARKET_ENABLED || !marketOk)
+      if (!MARKET_ENABLED)
         return shell(
           <>
             {title}
@@ -818,7 +820,7 @@ const ResultCard = (p: {
       );
     case 'house':
     case 'listed': {
-      if (!MARKET_ENABLED || !marketOk)
+      if (!MARKET_ENABLED || (r.kind === 'listed' && !marketOk))
         return shell(
           <>
             {title}
@@ -834,7 +836,7 @@ const ResultCard = (p: {
           <p className="m-0 text-lg">
             {r.kind === 'house' ? (
               <>
-                <span style={{ color: GOLD }}>{r.name}</span> is yours for {price}.
+                <span style={{ color: GOLD }}>{r.name}</span> is yours for {price}. Sold by bWalletX.
               </>
             ) : (
               <>Its owner is selling it for {price}.</>
