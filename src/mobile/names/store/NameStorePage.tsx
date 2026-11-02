@@ -37,7 +37,7 @@ import {
   STORE_PAY_ADDRESS,
   type StoreResult,
 } from './inventory';
-import { NAME_TIERS, nameTierUsd, offerHref } from './tiers';
+import { NAME_TIERS, nameTierUsd } from './tiers';
 import { useMarketAllowed } from '../../region/useRegion';
 
 /**
@@ -447,7 +447,6 @@ export const NameStorePage = () => {
                   {t.label} <span style={{ color: MUTED }}>{fmtUsd(t.usd)}</span>
                 </li>
               ))}
-              <li>Special names: make an offer</li>
             </ul>
           )}
         </form>
@@ -797,25 +796,15 @@ const ResultCard = (p: {
       );
     }
     case 'premium':
-      // A store build has no selling or buying (MARKET_ENABLED): premium and listed names just read "Taken".
-      if (!MARKET_ENABLED)
-        return shell(
-          <>
-            {title}
-            <p className="m-0 text-lg" style={{ color: MUTED }}>
-              Taken.
-            </p>
-          </>,
-        );
+      // The premium shortlist is held personally by the owner, not by bCorp (owner, 2 Nov 2026: "the OpNS names at
+      // my own wallet address are, for now, mine"). bCorp can't sell or take offers on names it doesn't own, so these
+      // read "Taken" everywhere until a company-held premium name is checked at render time.
       return shell(
         <>
           {title}
-          <p className="m-0 text-base" style={{ color: MUTED }}>
-            A special name. It isn&apos;t sold at a set price, but we&apos;re happy to hear an offer.
+          <p className="m-0 text-lg" style={{ color: MUTED }}>
+            Taken.
           </p>
-          <a href={offerHref(r.name)} className={btn} style={{ ...goldBtn, alignSelf: 'flex-start' }}>
-            Make an offer
-          </a>
         </>,
       );
     case 'house':
