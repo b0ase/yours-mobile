@@ -8,7 +8,9 @@
  * - The login signature ALWAYS shows one sheet, "Sign in to <host> as $handle?", and is never remembered. It is
  *   recognised by its content, not by a label the site chose: protocol [2, 'bwallet sign in'], counterparty 'anyone',
  *   and data that is exactly bit-sign's challenge text (bit-sign src/lib/bwallet-login.ts bwalletLoginMessage) for
- *   THIS pairing's verified origin, with keyID = its nonce and an expiry in the next few minutes.
+ *   THIS pairing's verified origin, with keyID = its nonce and an expiry in the next few minutes. The SSO hub's
+ *   [2, 'bwalletx id sign in'] is taken only from a pairing whose origin is the hub. The check is the one every
+ *   transport shares (services/signInBinding.ts).
  * - getPublicKey({ identityKey: true }) is answered for a pairing the user already Connected, with no sheet: Connect is
  *   the consent to share who you are with that site.
  * - The BSM chat-key proof is answered with no sheet only when its hash is the BSM hash of the very text the user
@@ -22,21 +24,18 @@
 import { BSM, Utils } from '@bsv/sdk';
 import { MESSAGE_SIGNING_PROTOCOL } from '@1sat/types';
 import { USER_DENIED_CODE, USER_DENIED_MESSAGE } from '../../services/userDenied';
+import { isSignInCall, parseSignInRequest } from '../../services/signInBinding';
 
-export const LOGIN_PROTOCOL_NAME = 'bwallet sign in';
-/** bit-sign issues two-minute nonces; allow a little clock skew, refuse anything further out. */
-export const LOGIN_MAX_AHEAD_MS = 10 * 60 * 1000;
+// The validator is shared by every transport (services/signInBinding.ts); re-exported for existing callers.
+export {
+  LOGIN_MAX_AHEAD_MS,
+  LOGIN_PROTOCOL_NAME,
+  loginMessage,
+  parseLoginRequest,
+  type LoginRequest,
+} from '../../services/signInBinding';
 /** How long after the sign-in sheet the matching chat-key proof may follow without a sheet. */
 export const BSM_FOLLOW_MS = 2 * 60 * 1000;
-
-export type LoginRequest = { origin: string; host: string; nonce: string; message: string };
-type Sig = {
-  protocolID?: unknown;
-  keyID?: unknown;
-  counterparty?: unknown;
-  data?: unknown;
-  hashToDirectlySign?: unknown;
-};
 
 const obj = (p: unknown): Record<string, unknown> | null =>
   p && typeof p === 'object' && !Array.isArray(p) ? (p as Record<string, unknown>) : null;
@@ -47,53 +46,11 @@ const sameProtocol = (p: unknown, want: readonly [number, string]) =>
 const bytes = (v: unknown): number[] | null =>
   Array.isArray(v) && v.every((b) => Number.isInteger(b) && b >= 0 && b <= 255) ? (v as number[]) : null;
 
-/** The exact challenge text bit-sign builds (src/lib/bwallet-login.ts bwalletLoginMessage). */
-export const loginMessage = (origin: string, nonce: string, expiresAt: string) =>
-  [
-    `Sign in to ${new URL(origin).host} with bWallet`,
-    '',
-    'This proves you hold this wallet. It does not spend anything.',
-    '',
-    `Origin: ${origin}`,
-    `Nonce: ${nonce}`,
-    `Expires: ${expiresAt}`,
-  ].join('\n');
-
-/** A createSignature that names the login protocol at all (valid or not). */
-export const isLoginProtocolCall = (action: string, params: unknown) =>
-  action === 'createSignature' && sameProtocol(obj(params)?.protocolID, [2, LOGIN_PROTOCOL_NAME]);
-
 /**
- * The login challenge for `sessionOrigin`, or the reason it is refused. Only a byte-for-byte match of the challenge
- * text for this pairing's own origin counts; anything else under the login protocol is refused outright.
+ * A createSignature that names a sign-in protocol at all (valid or not): [2, 'bwallet sign in'] or the SSO hub's
+ * [2, 'bwalletx id sign in'], in any case or spacing (the SDK derives the same key for ' Bwallet Sign In ').
  */
-export const parseLoginRequest = (params: unknown, sessionOrigin: string, now = Date.now()): LoginRequest | string => {
-  const p = obj(params) as Sig | null;
-  if (!p || !sameProtocol(p.protocolID, [2, LOGIN_PROTOCOL_NAME])) return 'not a sign-in request';
-  if (p.counterparty !== 'anyone') return 'sign-in must use counterparty anyone';
-  if (p.hashToDirectlySign !== undefined) return 'sign-in must sign its text, not a hash';
-  if (typeof p.keyID !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(p.keyID)) return 'bad sign-in nonce';
-  const data = bytes(p.data);
-  if (!data) return 'sign-in text missing';
-  let text: string;
-  try {
-    text = new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(data));
-  } catch {
-    return 'sign-in text is not UTF-8';
-  }
-  let origin: string;
-  try {
-    origin = new URL(sessionOrigin).origin;
-  } catch {
-    return 'bad paired origin';
-  }
-  const m = /\nExpires: (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)$/.exec(text);
-  if (!m) return 'sign-in text not recognised';
-  const exp = Date.parse(m[1]);
-  if (!(exp > now) || exp - now > LOGIN_MAX_AHEAD_MS) return 'sign-in request expired';
-  if (text !== loginMessage(origin, p.keyID, m[1])) return 'sign-in text does not match this site';
-  return { origin, host: new URL(origin).host, nonce: p.keyID, message: text };
-};
+export const isLoginProtocolCall = (action: string, params: unknown) => isSignInCall(action, params);
 
 /** getPublicKey({ identityKey: true }) and nothing that changes what is returned. */
 export const isIdentityKeyCall = (action: string, params: unknown) => {
@@ -159,7 +116,8 @@ export const forgetLogin = (channel: string) => void follows.delete(channel);
 
 /* ---------- the sheet ---------- */
 
-export type LoginAsk = { host: string; handle: string; proven: boolean };
+/** What the sign-in sheet shows: "Sign in to <host>", the full origin under it. Both from the pairing, not the page. */
+export type LoginAsk = { host: string; origin: string; handle: string; proven: boolean };
 type Pending = { ask: LoginAsk; resolve: (ok: boolean) => void };
 let pending: Pending[] = [];
 const listeners = new Set<() => void>();
@@ -238,16 +196,18 @@ export async function handlePairLoginCall(
   now = Date.now(),
 ): Promise<PairLoginReply | null> {
   if (isLoginProtocolCall(action, params)) {
-    const req = parseLoginRequest(params, sessionOrigin, now);
+    // Bound to THIS pairing's origin (services/signInBinding.ts, the same check as every other transport); the hub's
+    // protocol only for a pairing whose origin is the hub.
+    const req = parseSignInRequest(params, sessionOrigin, now);
     if (typeof req === 'string') return { error: { code: 'REJECTED', message: req } };
     if (!deps.wallet) return LOCKED;
     const raw = deps.handle().trim();
     const handle = raw ? (raw.startsWith('$') ? raw : `$${raw}`) : '';
-    const ok = await (deps.ask ?? askLogin)({ host: req.host, handle, proven: deps.proven });
+    const ok = await (deps.ask ?? askLogin)({ host: req.host, origin: req.origin, handle, proven: deps.proven });
     if (!ok) return { error: { code: USER_DENIED_CODE, message: USER_DENIED_MESSAGE } };
     const { signature } = await deps.wallet.createSignature({
-      protocolID: [2, LOGIN_PROTOCOL_NAME],
-      keyID: req.nonce,
+      protocolID: [...req.protocolID],
+      keyID: req.keyID,
       counterparty: 'anyone',
       data: Utils.toArray(req.message, 'utf8'),
     } as never);

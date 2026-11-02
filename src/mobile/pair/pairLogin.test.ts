@@ -5,6 +5,7 @@
 import { describe, expect, test } from 'bun:test';
 import { BSM, Utils } from '@bsv/sdk';
 import { MESSAGE_SIGNING_PROTOCOL } from '@1sat/types';
+import { hubMessage } from '../../services/signInBinding';
 import {
   BSM_FOLLOW_MS,
   closeConnectCardsFor,
@@ -52,7 +53,7 @@ describe('login signature', () => {
       const r = await handlePairLoginCall('CH1', ORIGIN, 'createSignature', login(), d, NOW);
       expect(r).toEqual({ result: { signature: [1, 2, 3] } });
     }
-    expect(asks).toEqual(Array(3).fill({ host: 'www.bchatx.com', handle: '$b0asex', proven: true }));
+    expect(asks).toEqual(Array(3).fill({ host: 'www.bchatx.com', origin: ORIGIN, handle: '$b0asex', proven: true }));
     expect(calls.filter((c) => c.fn === 'createSignature')).toHaveLength(3);
   });
 
@@ -105,6 +106,74 @@ describe('login signature', () => {
       message: loginMessage(ORIGIN, NONCE, EXP),
     });
     expect(typeof parseLoginRequest(login(), 'https://bchatx.com', NOW)).toBe('string');
+  });
+});
+
+describe('origin binding on the pairing path (security review, 2 Nov 2026)', () => {
+  const HUB = 'https://id.bwalletx.com';
+  const T = '2026-10-27T12:00:30.000Z';
+  const hubCall = (text = hubMessage(HUB, NONCE, T), over: Record<string, unknown> = {}) => ({
+    protocolID: [2, 'bwalletx id sign in'],
+    keyID: NONCE,
+    counterparty: 'anyone',
+    data: Utils.toArray(text, 'utf8'),
+    ...over,
+  });
+
+  test("a pairing for one site cannot get another site's challenge signed", async () => {
+    for (const text of [loginMessage(HUB, NONCE, EXP), loginMessage('https://evil.example', NONCE, EXP)]) {
+      const { d, asks, calls } = deps();
+      const r = await handlePairLoginCall('CHB1', ORIGIN, 'createSignature', login({}, text), d, NOW);
+      expect(r && 'error' in r && r.error.code).toBe('REJECTED');
+      expect(asks).toHaveLength(0);
+      expect(calls).toHaveLength(0);
+    }
+  });
+
+  test('the hub protocol from a pairing that is not the hub is refused without a sheet', async () => {
+    for (const text of [hubMessage(HUB, NONCE, T), hubMessage(ORIGIN, NONCE, T)]) {
+      const { d, asks, calls } = deps();
+      const r = await handlePairLoginCall('CHB2', ORIGIN, 'createSignature', hubCall(text), d, NOW);
+      expect(r && 'error' in r && r.error.code).toBe('REJECTED');
+      expect(asks).toHaveLength(0);
+      expect(calls).toHaveLength(0);
+    }
+  });
+
+  test("the hub's own pairing: one sheet naming it, signed under the hub protocol", async () => {
+    const { d, asks, calls } = deps();
+    const r = await handlePairLoginCall('CHB3', HUB, 'createSignature', hubCall(), d, NOW);
+    expect(r).toEqual({ result: { signature: [1, 2, 3] } });
+    expect(asks).toEqual([{ host: 'id.bwalletx.com', origin: HUB, handle: '$b0asex', proven: true }]);
+    expect(calls[0].args).toEqual({
+      protocolID: [2, 'bwalletx id sign in'],
+      keyID: NONCE,
+      counterparty: 'anyone',
+      data: Utils.toArray(hubMessage(HUB, NONCE, T), 'utf8'),
+    });
+  });
+
+  test('a case-varied protocol name is still the sign-in key: bound, and signed under the canonical name', async () => {
+    const { d, asks, calls } = deps();
+    const bad = await handlePairLoginCall(
+      'CHB4',
+      ORIGIN,
+      'createSignature',
+      login({ protocolID: [2, 'Bwallet Sign In'] }, loginMessage('https://evil.example', NONCE, EXP)),
+      d,
+      NOW,
+    );
+    expect(bad && 'error' in bad && bad.error.code).toBe('REJECTED');
+    expect(asks).toHaveLength(0);
+    await handlePairLoginCall(
+      'CHB4',
+      ORIGIN,
+      'createSignature',
+      login({ protocolID: [2, ' BWALLET SIGN IN '] }),
+      d,
+      NOW,
+    );
+    expect(calls[0].args.protocolID).toEqual([2, 'bwallet sign in']);
   });
 });
 

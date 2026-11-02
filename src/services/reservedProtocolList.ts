@@ -70,7 +70,14 @@ export const RESERVED_PROTOCOLS: readonly Protocol[] = [
  * and hashToDirectlySign is refused for the ones in NO_RAW_HASH.
  */
 export const EXTERNAL_OK: readonly (readonly [number, string, string])[] = [
-  [2, 'bwallet sign in', 'Sign in with bWalletX (bwalletx-connect, bit-sign, bChatX)'],
+  // Sign-in protocols: createSignature only over the caller's own challenge, bound to its real origin, never remembered
+  // (services/signInBinding.ts).
+  [2, 'bwallet sign in', 'Sign in with bWalletX (bwalletx-connect, bit-sign, bChatX): origin-bound (signInBinding.ts)'],
+  [
+    2,
+    'bwalletx id sign in',
+    'The b*X sign-on hub: pinned to id.bwalletx.com only (pinnedProtocols.ts, signInBinding.ts)',
+  ],
   // Level 0: apps may read/verify it, but createSignature at level 0 is refused for apps (bit-sign is retired).
   [0, 'fwetch identity', 'bit-sign fwetch feed signatures (verify only for apps)'],
   [2, '3241645161d8', 'BRC-29 payments: every BRC-100 payer derives these keys'],

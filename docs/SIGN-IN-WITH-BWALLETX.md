@@ -155,6 +155,17 @@ const { signature } = await wallet.createSignature({
 });
 ```
 
+The text is checked against the calling page's real origin on every transport (the extension, the in-app browser,
+framed bApps, the web wallet and a paired phone): the origin comes from the browser or the pairing, never from the
+page. Text naming any other origin, any other wording, an expired challenge, `hashToDirectlySign` or a counterparty
+other than `anyone` is refused with `code: 'ERR_PROTOCOL_REFUSED'` before any sheet. A sign-in is never remembered:
+each one shows its sheet, "Sign in to <host>" (`src/services/signInBinding.ts`).
+
+The b\*X sign-on hub has its own protocol, `[2, 'bwalletx id sign in']`, pinned to `https://id.bwalletx.com`
+(plus `http://localhost:3400` in dev builds); any other site is refused for it. Its text is
+`Sign in to id.bwalletx.com · challenge <nonce> · <ISO time>`, the time within 10 minutes of now. Wallets that do this
+advertise pin level 4 or higher in `getVersion` (`; pin=4;`).
+
 Sites must not request `[1, 'message signing']` (no `signBsm`): that key is reserved for the wallet and is refused with
 `code: 'ERR_RESERVED_PROTOCOL'`. Other protocol refusals carry `ERR_PROTOCOL_REFUSED`; the user saying no is
 `ERR_PERMISSION_DENIED`. Show the user your own message for those codes.

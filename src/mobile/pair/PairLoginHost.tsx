@@ -9,7 +9,7 @@ const MUTED = '#98A2B3';
 const AMBER = '#F5A524';
 const PANEL = '#17191E';
 
-function Sheet({ host, handle, proven }: { host: string; handle: string; proven: boolean }) {
+function Sheet({ host, origin, handle, proven }: { host: string; origin: string; handle: string; proven: boolean }) {
   useBackClose(true, () => answerLogin(false));
   return createPortal(
     <div
@@ -29,9 +29,13 @@ function Sheet({ host, handle, proven }: { host: string; handle: string; proven:
         >
           <LogIn size={24} color={GOLD} />
         </span>
+        {/* The site the signature is bound to, from the pairing (services/signInBinding.ts), never from the page. */}
         <p id="pair-login-title" className="mt-4 break-all text-lg font-bold text-white" data-testid="pair-login-title">
-          {proven ? host : `A site that claims to be ${host}`} wants to sign you in
+          Sign in to <span style={{ color: GOLD }}>{host}</span>
           {handle ? ` as ${handle}` : ''}
+        </p>
+        <p className="mt-1 break-all text-xs" style={{ color: MUTED }} data-testid="pair-login-origin">
+          {proven ? origin : `${origin} (claimed, not confirmed)`}
         </p>
         {!proven && (
           <p className="mt-2 text-xs" style={{ color: AMBER }}>

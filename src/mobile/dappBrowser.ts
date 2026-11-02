@@ -5,6 +5,8 @@ import { isMintPrivateAction } from '../services/mintPrivateAction';
 import { YoursNative, isNative } from './native';
 import { MOBILE_EXTENSION_ID } from './protocol';
 import { isReservedHost } from '../services/adminOriginator';
+import { refusalCode } from '../services/reservedProtocols';
+import { signInBindingRefusal } from '../services/signInBinding';
 import { isPairedHost, originatorForOrigin } from '../services/originKey';
 import { liveBchatUrl } from '../services/bchatOrigin';
 import {
@@ -125,6 +127,11 @@ export const handleSiteCall = async (origin: string, url: string, type: string, 
     }
   // wallet.mintPrivate (services/mintPrivateSite.ts) is the one non-standard call sites may make here.
   if (!isCWIEventName(type) && !isMintPrivateAction(type)) throw new Error(`Unsupported request: ${type}`);
+  // Sign-in signatures are bound to this verified origin (services/signInBinding.ts): another site's challenge, or the
+  // SSO hub's protocol from anywhere but the hub, is refused here, before the Face ID gate and any sheet. background.ts
+  // checks again with the sender origin this call carries.
+  const signIn = signInBindingRefusal(type, params, o.origin);
+  if (signIn) return { success: false, error: signIn, code: refusalCode(signIn) };
   if (url.startsWith(o.origin)) lastUrls.set(o.origin, url);
   let chrome = contexts.get(o.origin);
   if (!chrome) {

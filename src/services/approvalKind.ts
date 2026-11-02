@@ -55,10 +55,17 @@ export const siteName = (originator: string): string => {
  * person, signing in IS connecting). Pure, display only: nothing here changes what is granted.
  */
 export const keysName = (text: string): string => /"([^"]+)"/.exec(text)?.[1] ?? '';
-export const sheetTitleText = (kind: string, site: string, model: Pick<SheetModel, 'lines'>): string => {
+export const sheetTitleText = (
+  kind: string,
+  site: string,
+  model: Pick<SheetModel, 'lines'>,
+  /** The caller's full host: a bound sign-in (services/signInBinding.ts) names it whole, "Sign in to id.bwalletx.com". */
+  host?: string,
+): string => {
   const keys = model.lines.map((l) => keysName(l.text)).find(Boolean);
   switch (kind) {
     case 'signin':
+      if (host && model.lines.some((l) => l.boundSignIn)) return `Sign in to ${host}`;
       return `Connect and sign in to ${site}`;
     case 'private':
       return `Open your private ${privateTitleLabel(model)} on ${site}`;

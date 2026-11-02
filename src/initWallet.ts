@@ -38,6 +38,7 @@ import { guardEverySpendAsks, revokeStoredSpendingGrants } from './services/ever
 import { chromeEnvelopeBackend, EnvelopeStore, guardEnvelopes } from './services/envelopes';
 import { ENVELOPES_ENABLED } from './mobile/storeBuild';
 import { guardCrossSiteSigning } from './services/crossSiteSignGuard';
+import { guardSignInProtocols, revokeSignInGrants } from './services/signInBinding';
 import { normalizeOriginator } from '@1sat/wallet';
 import { guardSpending } from './mobile/config/killSwitch';
 import {
@@ -507,48 +508,53 @@ export const initWallet = async (
       guardLabelsOnSpend(
         guardReservedBaskets(
           guardReservedProtocols(
-            // A message naming another site (a login challenge fetched from good.com) is never signed for evil.com
-            // (services/crossSiteSignGuard.ts, payment-safety audit 24 Oct 2026 B1).
-            guardCrossSiteSigning(
-              preserveOriginalErrors(
-                withLocalSpendLedger(
-                  // Envelopes by default: a site's payment goes through without a sheet only when it fits that site's
-                  // envelope; stored allowances grant nothing (services/envelopes.ts, owner 24 Oct 2026). With
-                  // ALLOWANCES_ENABLED, the old monthly allowance with its per-payment cap and payee allowlist
-                  // (services/allowanceGuard.ts, payment-safety audit 24 Oct 2026 B2).
-                  ALLOWANCES_ENABLED
-                    ? guardAllowance(
-                        new LocalWalletPermissionsManager(
-                          baseWallet,
-                          ADMIN_ORIGINATOR,
-                          { permissionModules: assetModules },
-                          { store: permissionStore },
-                        ),
-                        { store: permissionStore, adminOriginator: ADMIN_ORIGINATOR, normalize: normalizeOriginator },
-                      )
-                    : ENVELOPES_ENABLED
-                      ? guardEnvelopes(
+            // Sign-in signatures bound to the caller's origin, the SSO hub's protocol for id.bwalletx.com only, and
+            // sign-in grants never stored (services/signInBinding.ts, security review 2 Nov 2026).
+            guardSignInProtocols(
+              // A message naming another site (a login challenge fetched from good.com) is never signed for evil.com
+              // (services/crossSiteSignGuard.ts, payment-safety audit 24 Oct 2026 B1).
+              guardCrossSiteSigning(
+                preserveOriginalErrors(
+                  withLocalSpendLedger(
+                    // Envelopes by default: a site's payment goes through without a sheet only when it fits that site's
+                    // envelope; stored allowances grant nothing (services/envelopes.ts, owner 24 Oct 2026). With
+                    // ALLOWANCES_ENABLED, the old monthly allowance with its per-payment cap and payee allowlist
+                    // (services/allowanceGuard.ts, payment-safety audit 24 Oct 2026 B2).
+                    ALLOWANCES_ENABLED
+                      ? guardAllowance(
                           new LocalWalletPermissionsManager(
                             baseWallet,
                             ADMIN_ORIGINATOR,
                             { permissionModules: assetModules },
                             { store: permissionStore },
                           ),
-                          { envelopes, adminOriginator: ADMIN_ORIGINATOR, normalize: normalizeOriginator },
+                          { store: permissionStore, adminOriginator: ADMIN_ORIGINATOR, normalize: normalizeOriginator },
                         )
-                      : // Store builds have no envelopes (storeBuild.ts ENVELOPES_ENABLED): every payment shows its sheet,
-                        // whatever old monthly grant is stored (services/everySpendAsks.ts, owner 25 Oct 2026).
-                        guardEverySpendAsks(
-                          new LocalWalletPermissionsManager(
-                            baseWallet,
-                            ADMIN_ORIGINATOR,
-                            { permissionModules: assetModules },
-                            { store: permissionStore },
+                      : ENVELOPES_ENABLED
+                        ? guardEnvelopes(
+                            new LocalWalletPermissionsManager(
+                              baseWallet,
+                              ADMIN_ORIGINATOR,
+                              { permissionModules: assetModules },
+                              { store: permissionStore },
+                            ),
+                            { envelopes, adminOriginator: ADMIN_ORIGINATOR, normalize: normalizeOriginator },
+                          )
+                        : // Store builds have no envelopes (storeBuild.ts ENVELOPES_ENABLED): every payment shows its sheet,
+                          // whatever old monthly grant is stored (services/everySpendAsks.ts, owner 25 Oct 2026).
+                          guardEverySpendAsks(
+                            new LocalWalletPermissionsManager(
+                              baseWallet,
+                              ADMIN_ORIGINATOR,
+                              { permissionModules: assetModules },
+                              { store: permissionStore },
+                            ),
+                            { adminOriginator: ADMIN_ORIGINATOR, normalize: normalizeOriginator },
                           ),
-                          { adminOriginator: ADMIN_ORIGINATOR, normalize: normalizeOriginator },
-                        ),
-                  spendLedger,
+                    spendLedger,
+                  ),
                 ),
+                ADMIN_ORIGINATOR,
               ),
               ADMIN_ORIGINATOR,
             ),
@@ -571,6 +577,10 @@ export const initWallet = async (
   await revokeReservedProtocolGrants(permissionStore, ADMIN_ORIGINATOR)
     .then((n) => n && console.warn(`[initWallet] revoked ${n} app grant(s) for wallet-internal protocols`))
     .catch((e: unknown) => console.warn('[initWallet] reserved-protocol grant cleanup failed:', e));
+  // Upgrade migration (security review 2 Nov 2026): stored sign-in grants are removed, so no site signs in silently.
+  await revokeSignInGrants(permissionStore, ADMIN_ORIGINATOR)
+    .then((n) => n && console.warn(`[initWallet] revoked ${n} stored sign-in grant(s): every sign-in shows its sheet`))
+    .catch((e: unknown) => console.warn('[initWallet] sign-in grant cleanup failed:', e));
   // Upgrade migration (owner 25 Oct 2026): old stored monthly spending grants are removed, so no build can pay a site
   // without a sheet even if a guard were bypassed. Allowances (ALLOWANCES_ENABLED, off in every build) keep theirs.
   if (!ALLOWANCES_ENABLED)

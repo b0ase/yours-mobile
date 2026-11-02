@@ -15,6 +15,7 @@
  */
 
 import { BLOCK_SITE_BASKET, basketDisplayName, isReservedBasket } from './reservedBaskets';
+import { isSignInProtocol } from './signInBinding';
 
 export { BLOCK_SITE_BASKET };
 
@@ -363,6 +364,11 @@ export interface SheetLine {
   privateLabel?: string;
   /** Part of a first post (identity basket or post signature): what the POST card's face describes. */
   post?: boolean;
+  /**
+   * A signature under a sign-in protocol (services/signInBinding.ts): its text was already checked to be this
+   * originator's own challenge, so the line (and a SIGN IN card's title) reads "Sign in to <host>".
+   */
+  boundSignIn?: boolean;
 }
 
 export interface SheetPayment {
@@ -388,6 +394,9 @@ export interface SheetModel {
 }
 
 const protoName = (r: BundleRequest) => String(r.protocolID?.[1] ?? 'unknown');
+/** The host an originator names ("https://id.bwalletx.com" or "id.bwalletx.com" → "id.bwalletx.com"). Display only. */
+export const originHost = (originator: string): string =>
+  originator.replace(/^[a-z][a-z\d+.-]*:\/\//i, '').split(/[/?#]/)[0];
 const protoLevel = (r: BundleRequest) => Number(r.protocolID?.[0] ?? 0);
 
 /** True when a request should never be pre-ticked (plan §3c). */
@@ -578,9 +587,12 @@ export const buildSheetModel = (bundle: Pick<PermissionBundle, 'originator' | 'i
     // nothing it asked for and the site's encrypt failed "Permission denied". Risky and live-joined lines (and any
     // spend) stay unticked: payments still ask first.
     const checked = !risky && !r.addedLive;
+    const boundSignIn = r.type === 'protocol' && isSignInProtocol(r.protocolID);
+    const text = boundSignIn ? `Sign in to ${originHost(bundle.originator)}` : lineText(r);
     lines.push({
       requestID: r.requestID,
-      text: r.addedLive ? `New: ${lineText(r)}` : lineText(r),
+      text: r.addedLive ? `New: ${text}` : text,
+      ...(boundSignIn ? { boundSignIn: true } : {}),
       ...(r.addedLive ? { isNew: true } : {}),
       detail: lineDetail(r),
       risky,
