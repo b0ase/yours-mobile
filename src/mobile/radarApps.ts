@@ -908,3 +908,11 @@ export const RADAR_APPS: RadarApp[] = [
   ...[...MARKET_APPS, ...BSVRADAR_APPS, ...BUY_APPS].map((a): RadarApp => ({ ...a, source: 'bsvradar' })),
   ...METANET_APPS,
 ];
+
+/**
+ * UK gate (region/region.ts): Apps tiles that lead to buying or trading (Markets & collectibles, on-ramps and the
+ * 1Satchel marketplace). bWalletX hides them from a restricted visitor at render time; a store build has none.
+ */
+export const UK_GATED_RADAR_URLS: readonly string[] = RADAR_APPS.filter(
+  (a) => a.group === 'market' || a.group === 'buy' || a.name === '1Satchel',
+).map((a) => a.url);

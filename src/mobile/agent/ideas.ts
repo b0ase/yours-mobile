@@ -18,6 +18,9 @@ export type IdeaTopic =
   | 'Builders';
 export type Idea = { topic: IdeaTopic; label: string };
 
+/** UK gate (region/region.ts): suggestion topics a restricted visitor never sees (buying, selling, launching). */
+export const UK_GATED_TOPICS: readonly IdeaTopic[] = ['Trading', 'Tokens'];
+
 const T = (topic: IdeaTopic, labels: string[]): Idea[] => labels.map((label) => ({ topic, label }));
 
 export const IDEAS: Idea[] = [

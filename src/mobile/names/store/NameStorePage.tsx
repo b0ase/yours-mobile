@@ -38,6 +38,7 @@ import {
   type StoreResult,
 } from './inventory';
 import { NAME_TIERS, nameTierUsd, offerHref } from './tiers';
+import { useMarketAllowed } from '../../region/useRegion';
 
 /**
  * The Name Store (/names, owner-approved 13 Oct 2026): "Get your name on Bitcoin. Yours forever."
@@ -90,6 +91,8 @@ type PendingSell = { name: string; id: string; usd: number; sats: number };
 
 export const NameStorePage = () => {
   const { apiContext, isLocked, chromeStorageService } = useServiceContext();
+  // UK gate (region/region.ts): no resale rails for a restricted visitor; new names are got as before.
+  const marketOk = useMarketAllowed();
   const onWallet = useContext(GuestCtx);
   const guest = !!onWallet || isLocked;
   const account = guest ? undefined : chromeStorageService.getCurrentAccountObject().account;
@@ -532,7 +535,7 @@ export const NameStorePage = () => {
         )}
 
         {/* Browse */}
-        {MARKET_ENABLED && (
+        {MARKET_ENABLED && marketOk && (
           <div className="mt-16 flex flex-col gap-10">
             {RAILS.map((r) => (
               <Rail key={r.id} title={r.title} sub={r.sub} loading={listings === null}>
@@ -648,6 +651,8 @@ const ResultCard = (p: {
   onGive: (n: string) => void;
   onPick: (n: string) => void;
 }) => {
+  // UK gate (region/region.ts): no selling, and listed / premium names read "Taken", for a restricted visitor.
+  const marketOk = useMarketAllowed();
   const r = p.result;
   const shell = (children: ReactNode) => (
     <div
@@ -741,7 +746,7 @@ const ResultCard = (p: {
           ) : (
             <>
               {/* Selling names is exchange functionality: bWalletX only (MARKET_ENABLED, App Review 3.1.5(iii)). */}
-              {MARKET_ENABLED && (
+              {MARKET_ENABLED && marketOk && (
                 <>
                   <div className="flex flex-wrap items-center gap-2">
                     <label className="inline-flex items-center gap-2 text-sm" style={{ color: MUTED }}>
@@ -791,7 +796,7 @@ const ResultCard = (p: {
     }
     case 'premium':
       // A store build has no selling or buying (MARKET_ENABLED): premium and listed names just read "Taken".
-      if (!MARKET_ENABLED)
+      if (!MARKET_ENABLED || !marketOk)
         return shell(
           <>
             {title}
@@ -813,7 +818,7 @@ const ResultCard = (p: {
       );
     case 'house':
     case 'listed': {
-      if (!MARKET_ENABLED)
+      if (!MARKET_ENABLED || !marketOk)
         return shell(
           <>
             {title}

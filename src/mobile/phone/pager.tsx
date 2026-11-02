@@ -6,6 +6,7 @@ import { TermsGate } from '../ugc/UgcSheets';
 import { APPS_PAGED, usePhoneLayout } from './flag';
 import { useAppScreens } from './appScreensStore';
 import { appIndexForPath, coldStartRedirect, pageForPath, type ScreenId } from './screens';
+import { RegionGate } from '../region/RegionGate';
 
 /**
  * Keep-alive and iOS-style paging (docs/PHONE-LAYOUT-PLAN.md §14.3, §14.4). <PhonePage> is patched round
@@ -39,7 +40,12 @@ const pageElement = (id: ScreenId): ReactNode => {
     case 'wallet':
       return <BsvWallet />;
     case 'exchange':
-      return MarketPage ? <MarketPage /> : null;
+      // UK gate (region/RegionGate.tsx): a restricted visitor gets "Not available in the UK", never the page.
+      return MarketPage ? (
+        <RegionGate kind="market">
+          <MarketPage />
+        </RegionGate>
+      ) : null;
     case 'people':
       return <PeopleScreen />;
     case 'feed':

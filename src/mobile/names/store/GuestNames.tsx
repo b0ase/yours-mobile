@@ -6,6 +6,7 @@ import { toPublic } from '../../url/publicUrl';
 import { resumeAt } from '../../url/resume';
 import NameStorePage from './NameStorePage';
 import { MARKET_ENABLED } from '../../storeBuild';
+import { RegionGate } from '../../region/RegionGate';
 // Selling words stay out of the store edition: the stock page only exists with the market.
 const StockPage = MARKET_ENABLED ? lazy(() => import('./StockPage')) : null;
 
@@ -35,9 +36,11 @@ const GuestNames = ({ route, onWallet }: { route: string; onWallet: () => void }
               <Route
                 path="/m/names/store"
                 element={
-                  <Suspense fallback={null}>
-                    <StockPage />
-                  </Suspense>
+                  <RegionGate kind="market">
+                    <Suspense fallback={null}>
+                      <StockPage />
+                    </Suspense>
+                  </RegionGate>
                 }
               />
             )}

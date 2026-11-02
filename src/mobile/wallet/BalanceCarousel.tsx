@@ -58,6 +58,7 @@ import { allCardsSwipe, opensAddressBook } from './addressBookGesture';
 import { BCal } from './BCal';
 import { subscribeAllCards } from './allCardsOpen';
 import './balanceCards.css';
+import { useBuyCryptoAllowed } from '../region/useRegion';
 
 /**
  * Balance cards: the wallet card as a swipe carousel, one card per kind of balance, always shown with its REAL
@@ -635,6 +636,8 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
   const [active, setActive] = useState(0);
   const [tm, setTm] = useState(false);
   const [buyOpen, setBuyOpen] = useState(false);
+  // UK gate (region/region.ts): no Buy BSV on the Top up card for a restricted visitor.
+  const buyOk = useBuyCryptoAllowed();
   // Address book (owner, 15 Oct 2026): pull right past the first card, or the notebook button.
   const [book, setBook] = useState(false);
   // bCal (owner, 15 Oct 2026): the All cards browser's other sideways swipe.
@@ -848,12 +851,13 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
       issuer: 'Fund this wallet',
       colour: '#2a2208',
       logo: '+',
-      backLines: BUY_CRYPTO_ENABLED
-        ? ['Receive BSV from another wallet or an exchange, or buy some with a card.']
-        : ['Receive BSV from another wallet or an exchange.'],
+      backLines:
+        BUY_CRYPTO_ENABLED && buyOk
+          ? ['Receive BSV from another wallet or an exchange, or buy some with a card.']
+          : ['Receive BSV from another wallet or an exchange.'],
       backButtons: [
         { label: 'Receive', run: () => requestWalletAction('receive'), primary: true },
-        ...(BUY_CRYPTO_ENABLED ? [{ label: 'Buy BSV', run: () => setBuyOpen(true) }] : []),
+        ...(BUY_CRYPTO_ENABLED && buyOk ? [{ label: 'Buy BSV', run: () => setBuyOpen(true) }] : []),
       ],
     },
   );
@@ -1006,7 +1010,7 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
         </div>
         {book && <AddressBook onClose={() => setBook(false)} />}
         {cal && <BCal onClose={() => setCal(false)} />}
-        {BUY_CRYPTO_ENABLED && buyOpen && (
+        {BUY_CRYPTO_ENABLED && buyOk && buyOpen && (
           <BuyBsvSheet
             onClose={() => setBuyOpen(false)}
             onReceive={() => {

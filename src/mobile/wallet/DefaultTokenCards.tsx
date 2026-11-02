@@ -17,6 +17,7 @@ import { CoinRow } from './CoinRow';
 import { TokenSwipe } from './TokenSwipe';
 import { useTokenRows } from './tokenRows';
 import { lockRouteFor } from './rowLock';
+import { useMarketAllowed } from '../region/useRegion';
 
 type Bal = { id: string; amount: number; icon: string | null };
 
@@ -33,6 +34,8 @@ type Props = {
 
 export const DefaultTokenCards = ({ onSendToken, onReceive, onChat }: Props = {}) => {
   const rows = useTokenRows();
+  // UK gate (region/region.ts): no buying or selling for a restricted visitor (fail closed).
+  const market = useMarketAllowed();
   const { apiContext, chromeStorageService } = useServiceContext();
   const { theme } = useTheme();
   const navigate = useNavigate();
@@ -81,7 +84,7 @@ export const DefaultTokenCards = ({ onSendToken, onReceive, onChat }: Props = {}
   const pnee = indexed > 0 ? indexed : pending;
   useEffect(() => publishBalance('pnee', pnee, 'PNEEs'), [pnee]);
   const mine = link ? of(link.tokenId) : undefined;
-  const pneeLock = lockRouteFor('pnee', { backPneeLive: MARKET_ENABLED });
+  const pneeLock = lockRouteFor('pnee', { backPneeLive: MARKET_ENABLED && market });
   const sub = (text: string) => (
     <span className="text-xs mt-0.5" style={{ color: theme.color.global.gray }}>
       {text}
@@ -112,14 +115,14 @@ export const DefaultTokenCards = ({ onSendToken, onReceive, onChat }: Props = {}
             // Get PNEEs on the right, like Get MNEE, once the token exists (Exchange › Bonds lists notes and vaults).
             // Store build: no Market, so nothing to get PNEEs from, and no backing (minting against a vault) either.
             action={
-              PNEE_TOKEN_ID && MARKET_ENABLED
-                ? { label: 'Get PNEEs', onClick: () => navigate(routeFor('market') ?? '/m/exchange') }
+              PNEE_TOKEN_ID && MARKET_ENABLED && market
+                ? { label: 'Get PNEEs', onClick: () => navigate(routeFor('market', market) ?? '/m/exchange') }
                 : undefined
             }
             // Back PNEEs: a round lock icon (owner, 10 Oct 2026; the text button covered "USD¢"). Opens the Lock screen
             // in Back PNEEs mode: how much BSV to lock, then the Back PNEEs flow.
             secondaryAction={
-              MARKET_ENABLED
+              market && MARKET_ENABLED
                 ? { label: BACK_PNEE_LABEL, icon: <Lock size={18} />, onClick: () => navigate(BACK_PNEE_ROUTE) }
                 : undefined
             }

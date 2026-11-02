@@ -6,6 +6,8 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { useSwapWatcher as useSwapWatcherImpl } from '../swap/useSwapWatcher';
 import type { SwapRecord } from '../swap/swapApi';
+import { useBuyCryptoAllowed, useChartsAllowed, useSwapAllowed } from '../region/useRegion';
+import { RegionFailedNote } from '../region/RegionGate';
 
 // Portfolio vs market (owner, 10 Oct 2026): the price tile opens it; its own chunk.
 const PortfolioScreen = lazy(() => import('../portfolio/PortfolioScreen'));
@@ -76,6 +78,9 @@ export const BuyBsvCard = ({
 export const BuyBsvButton = ({ onReceive, className }: { onReceive: () => void; className?: string }) => {
   const rate = useLivePrice();
   const [open, setOpen] = useState(false);
+  // UK gate (region/region.ts): no Buy BSV card for a restricted visitor (fail closed).
+  const buyOk = useBuyCryptoAllowed();
+  if (!buyOk) return null;
   return (
     <>
       <BuyBsvCard rate={rate} onClick={() => setOpen(true)} className={className} />
@@ -179,7 +184,7 @@ export const BsvPriceBar = ({
   const change = useDayChange(rate);
   const [open, setOpen] = useState(false);
   const [swapOpen, setSwapOpen] = useState(false);
-  const [portfolioOpen, setPortfolioOpen] = useState(false);
+  const [portfolioOpen, setPortfolioOpenRaw] = useState(false);
   const [resume, setResume] = useState<SwapRecord | null>(null);
   const { addSnackbar } = useSnackbar();
   const { swaps, active } = useSwapWatcher((s) => {
@@ -187,7 +192,13 @@ export const BsvPriceBar = ({
     else if (s.stage === 'refunded') addSnackbar('Your swap was refunded', 'info');
     else if (s.stage === 'failed') addSnackbar('A swap needs attention. Open Swap to see it.', 'error');
   });
-  const swapOn = SWAP_ENABLED && !!SwapFlow && !!getAddress;
+  // UK gate (region/region.ts): Buy BSV becomes Receive and the Swap card goes for a restricted visitor.
+  const buyOk = useBuyCryptoAllowed();
+  const swapOk = useSwapAllowed();
+  // Portfolio vs market is a chart screen: a restricted visitor's price tile opens the plain BSV view instead.
+  const chartsOk = useChartsAllowed();
+  const setPortfolioOpen = (v: boolean) => (v && !chartsOk ? onPrice() : setPortfolioOpenRaw(v));
+  const swapOn = SWAP_ENABLED && swapOk && !!SwapFlow && !!getAddress;
   const row = swapRowButtons(swapOn && !!SwapPromo, false);
   const openSwap = () => {
     setResume(active[0] ?? (swaps[0] && !swaps[0].notified ? swaps[0] : null));
@@ -198,11 +209,11 @@ export const BsvPriceBar = ({
       {/* Wallet top row restored (owner, 19 Oct 2026, as in 5.2.33): price · Buy BSV · History, three equal tiles.
           Desktop hides it (wide.css .bw-toprow): its side pane has the chart and History. */}
       <div className="bw-toprow w-[92%] mb-2 flex items-stretch gap-2">
-        <PriceCell rate={rate} onOpen={() => setPortfolioOpen(true)} change={change} />
+        <PriceCell rate={rate} onOpen={() => setPortfolioOpen(true)} change={chartsOk ? change : null} />
         {/* Store edition (no buying, Apple 3.1.5 / Play): the same gold cell receives instead of buying. */}
         <button
           type="button"
-          onClick={BUY_CRYPTO_ENABLED ? () => setOpen(true) : onReceive}
+          onClick={buyOk && BUY_CRYPTO_ENABLED ? () => setOpen(true) : onReceive}
           className={`${CELL} text-sm font-extrabold`}
           style={{
             background: 'linear-gradient(135deg, var(--bw-accent-lo), var(--bw-accent-hi))',
@@ -210,7 +221,7 @@ export const BsvPriceBar = ({
             color: 'var(--bw-on-accent)',
           }}
         >
-          {BUY_CRYPTO_ENABLED ? 'Buy BSV' : 'Receive'}
+          {buyOk && BUY_CRYPTO_ENABLED ? 'Buy BSV' : 'Receive'}
         </button>
         <HistoryButton className={CELL} />
       </div>
@@ -230,7 +241,9 @@ export const BsvPriceBar = ({
       ) : (
         <div className="mb-2" />
       )}
-      {open && (
+      {/* Lookup failed (not a UK answer): a quiet line with Retry, so nobody is left wondering where Buy went. */}
+      <RegionFailedNote className="w-[92%] mb-2" />
+      {buyOk && open && (
         <BuyBsvSheet
           onClose={() => setOpen(false)}
           onReceive={() => {
@@ -239,7 +252,7 @@ export const BsvPriceBar = ({
           }}
         />
       )}
-      {portfolioOpen && (
+      {portfolioOpen && chartsOk && (
         <Suspense fallback={null}>
           <PortfolioScreen
             onClose={() => setPortfolioOpen(false)}
@@ -313,7 +326,10 @@ const Row = ({
 );
 
 const BuyBsvSheetImpl = ({ onClose, onReceive }: { onClose: () => void; onReceive: () => void }) => {
-  useBackClose(true, onClose);
+  // UK gate (region/region.ts): every caller's sheet is empty for a restricted visitor, whatever its own gate does.
+  const buyOk = useBuyCryptoAllowed();
+  useBackClose(buyOk, onClose);
+  if (!buyOk) return null;
   return createPortal(
     <div className="fixed inset-0 z-[300] flex items-end" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={onClose}>
       <div

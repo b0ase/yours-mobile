@@ -7,6 +7,7 @@ import { BannerActions } from '../../web/BannerActions';
 import { ReportOutboxRunner } from '../agent/reportSend';
 import { setAgentDraft } from '../agent/handoff';
 import { OpenPartnerRequest } from '../placement/partnership/OpenPartnerRequest';
+import { RegionGate } from '../region/RegionGate';
 import {
   ARTIST_PROGRAMME_ENABLED,
   BPOSITIVE_ENABLED,
@@ -38,6 +39,13 @@ const CalendarPage = BSPACES_ENABLED ? lazy(() => import('../spaces/CalendarPage
 const BPositivePage = BPOSITIVE_ENABLED ? lazy(() => import('../bpositive/BPositivePage')) : null;
 // No Market in a store build (storeBuild.ts MARKET_ENABLED): the chunk is not even built.
 const ExchangePage = MARKET_ENABLED ? lazy(() => import('../exchange/ExchangePage')) : null;
+// UK gate (region/RegionGate.tsx): a restricted visitor's deep link to /m/exchange/* gets "Not available in the UK".
+const ExchangeRoute = () =>
+  ExchangePage ? (
+    <RegionGate kind="market">
+      <ExchangePage />
+    </RegionGate>
+  ) : null;
 // bPics (Apps › bPics): picture ordinals; mint, shared library, mine.
 const BPicsPage = lazy(() => import('../bpics/BPicsPage'));
 const FeedTab = lazy(() => import('../feed/FeedTab'));
@@ -169,7 +177,16 @@ const MobileRoutes = () => (
         <Route path="opns-mint" element={<ToOpnsMint />} />
         <Route path="names" element={<NameStorePage />} />
         <Route path="store" element={<ThemeStorePage />} />
-        {StockPage && <Route path="names/store" element={<StockPage />} />}
+        {StockPage && (
+          <Route
+            path="names/store"
+            element={
+              <RegionGate kind="market">
+                <StockPage />
+              </RegionGate>
+            }
+          />
+        )}
         <Route path="calls" element={<CallsPage />} />
         <Route path="you" element={<YouPage />} />
         <Route path="notifications" element={<NotificationsPage />} />
@@ -192,7 +209,7 @@ const MobileRoutes = () => (
         <Route path="games" element={<BrowserPage only="games" />} />
         <Route path="people" element={<PeopleScreen />} />
         {/* The Exchange (was Market, 12 Oct 2026): /m/exchange, /m/exchange/swap, /m/exchange/<token>… */}
-        {ExchangePage && <Route path="exchange/*" element={<ExchangePage />} />}
+        {ExchangePage && <Route path="exchange/*" element={<ExchangeRoute />} />}
         {ExchangePage && <Route path="market/*" element={<Navigate to="/m/exchange" replace />} />}
         {BPositivePage && <Route path="bpositive" element={<BPositivePage />} />}
         {SpacesPage && <Route path="spaces" element={<SpacesPage />} />}

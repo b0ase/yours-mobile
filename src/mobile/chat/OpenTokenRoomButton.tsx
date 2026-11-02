@@ -5,6 +5,7 @@ import { asMenuItem } from '../tabs/tabs';
 import { requestChatRoom, requestMarketToken } from './nav';
 import { MARKET_ENABLED } from '../storeBuild';
 import { tokenKey } from './tokenRooms';
+import { useMarketAllowed } from '../region/useRegion';
 
 /**
  * "Chat" — opens (or starts) this token's chatroom in the Chat tab. Mounted on the Wallet's
@@ -50,7 +51,10 @@ export const OpenTokenRoomButton = ({
 /** Token page "Buy": that token's page in bWalletX's own Market tab (not the external 1Sat site). */
 export const BuyTokenButton = ({ kind = 'bsv21', id }: { kind?: 'bsv21' | 'coll'; id: string | undefined }) => {
   const { handleSelect } = useBottomMenu();
+  // UK gate (region/region.ts): no Buy for a restricted visitor (fail closed).
+  const market = useMarketAllowed();
   if (!id || !MARKET_ENABLED) return null;
+  if (!market) return null;
   return (
     <button
       type="button"

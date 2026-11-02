@@ -199,6 +199,7 @@ import {
   FEED_COLORS,
   feedColor,
   feedDef,
+  feedsFor,
   hasCustomView,
   loadPins,
   migrateFeedId,
@@ -210,6 +211,8 @@ import {
   type FeedId,
 } from './feeds';
 import { BEX_REEL_ENABLED, BMOVIES_FEED_ENABLED, TOKENBLASTER_ENABLED } from '../storeBuild';
+import { RegionGate } from '../region/RegionGate';
+import { useMarketAllowed } from '../region/useRegion';
 
 // bWalletX only: the store build has no bMovies reel, not even as code (storeBuild.ts).
 const BmoviesReel = BMOVIES_FEED_ENABLED ? lazy(() => import('./bmovies/BmoviesReel')) : null;
@@ -1647,6 +1650,8 @@ const IdentitySetupSheet = ({
 // ── page ────────────────────────────────────────────────────────────────────
 
 export const FeedPage = ({ header }: { header?: ReactNode }) => {
+  // UK gate (region/region.ts): swiping never lands on Feed › bExchange for a restricted visitor.
+  const marketOk = useMarketAllowed();
   const { apiContext, chromeStorageService } = useServiceContext();
   const { addSnackbar } = useSnackbar();
   const identity = useIdentity(apiContext, chromeStorageService);
@@ -1708,7 +1713,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
     if (!dir || (news && dir === 1 && (e.target as HTMLElement).closest?.('[data-news-card]'))) return;
     // In the bMovies / bMusic reel a horizontal swipe is a 1p buy/sell; feeds change via the chips there.
     if (isReel(feed)) return;
-    const to = stepFeed(pins, feed, dir);
+    const to = stepFeed(pins, feed, dir, feedsFor(marketOk));
     if (to) pickFeed(to);
   };
   const [story, setStory] = useState<NewsItem | null>(null);
@@ -2166,9 +2171,11 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
               <BappsReel />
             </Suspense>
           ) : feed === 'bexchange' && BexReel ? (
-            <Suspense fallback={null}>
-              <BexReel />
-            </Suspense>
+            <RegionGate kind="market">
+              <Suspense fallback={null}>
+                <BexReel />
+              </Suspense>
+            </RegionGate>
           ) : feed === 'b3d' && B3dFeed ? (
             <Suspense fallback={null}>
               <B3dFeed />

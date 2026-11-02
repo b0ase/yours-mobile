@@ -46,6 +46,7 @@ import { setMyName } from './myName';
 import { paymailEnabled } from './paymail';
 import { getPersonalLink, onPersonalChange, personalKey } from './personalToken';
 import { handlePaymail, nameBavatarUri, nameChips, nameIntro, nameOrigin, tokenblasterLaunchUrl } from './nameCard';
+import { useMarketAllowed } from '../region/useRegion';
 
 const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
@@ -116,6 +117,9 @@ export const OpnsNameActions = ({
   /** The host's Send for this NFT, when it has one. */
   onSend?: () => void;
 }) => {
+  // UK gate (region/region.ts): no selling or token launch for a restricted visitor.
+  const marketOk = useMarketAllowed();
+  const sellOn = MARKET_ENABLED && marketOk;
   const navigate = useNavigate();
   const { theme } = useTheme();
   const { apiContext, chromeStorageService } = useServiceContext();
@@ -356,7 +360,7 @@ export const OpnsNameActions = ({
         )}
 
         {/* 5. Token (TokenBlaster; not in the store edition) */}
-        {MARKET_ENABLED && TOKENBLASTER_ENABLED && (
+        {MARKET_ENABLED && marketOk && TOKENBLASTER_ENABLED && (
           <Row
             icon={<Coins size={20} color={GOLD} />}
             title="Launch a token with this name"
@@ -395,8 +399,8 @@ export const OpnsNameActions = ({
         {owned ? (
           <Row
             icon={<ShoppingBag size={20} color={GOLD} />}
-            title={MARKET_ENABLED ? 'Sell it' : 'Give it away'}
-            sub={MARKET_ENABLED ? 'List it for sale in Wallet › Names.' : 'Give it to someone from Wallet › Names.'}
+            title={sellOn ? 'Sell it' : 'Give it away'}
+            sub={sellOn ? 'List it for sale in Wallet › Names.' : 'Give it to someone from Wallet › Names.'}
             action={
               <button className={`${BIG} bg-[var(--bw-surface)] text-white`} onClick={() => navigate('/m/my-names')}>
                 <ShoppingBag size={16} /> Open Names
@@ -407,7 +411,7 @@ export const OpnsNameActions = ({
           owned === null && (
             <Row
               icon={<ShoppingBag size={20} color={GOLD} />}
-              title={MARKET_ENABLED ? 'Sell it' : 'Give it away'}
+              title={sellOn ? 'Sell it' : 'Give it away'}
               coming={!canAdopt}
               sub={
                 canAdopt

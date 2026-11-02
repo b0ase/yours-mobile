@@ -23,6 +23,7 @@ import { heldBsv21Balances } from '../airdrops/heldBalances';
 import { parseRoom, roomMarket, roomMeta, type Listing } from '../market/indexer';
 import { MODULE_FINISHES, purchaseContext, walletOutpoint } from '../market/walletOutpoint';
 import { marketFeeOptions } from '../market/fee';
+import { marketAllowed } from '../region/region';
 
 export type AgentActionBlock = { kind: StrategyAction; token: string; usd: number; to?: string; amount?: number };
 
@@ -133,6 +134,9 @@ export const runAgentAction = async (
   if (a.kind === 'sell' || a.kind === 'list') return { ok: false, text: 'Selling from chat isn’t available yet.' };
   // Buying tokens is exchange functionality: bWalletX only (MARKET_ENABLED, App Review 3.1.5(iii)).
   if (!MARKET_ENABLED && a.kind !== 'send') return { ok: false, text: 'This edition can only send BSV.' };
+  // UK gate (region/region.ts): no buying for a restricted visitor (fail closed); sending works as usual.
+  if (!marketAllowed() && a.kind !== 'send')
+    return { ok: false, text: 'Buying tokens isn’t available in your region. Sending BSV works as usual.' };
 
   // stop.holdTokens in live mode: how many of the strategy's tokens this account holds now.
   const holding = await strategyHolding(ctx, id);
