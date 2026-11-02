@@ -1,7 +1,10 @@
 import { describe, expect, mock, test } from 'bun:test';
 
 // Native app: a cold start hands the link over via getLaunchUrl, a warm one via appUrlOpen.
-const COLD = 'https://www.bwallet.space/pair?v=1&c=cold';
+// The cold launch is the app-scheme form that @bwalletx/connect and bChatX's "Open in bWalletX" use on a phone
+// (bwalletx://pair?<the pairing params>): the app was not running when Safari handed it over.
+const COLD = 'bwalletx://pair?v=1&c=cold';
+const COLD_HTTPS = 'https://www.bwallet.space/pair?v=1&c=cold';
 let urlOpen: ((e: { url: string }) => void) | undefined;
 // The launch URL is held until the cold-start test releases it, so the result never depends on how many microtasks
 // have run or on which test (bun --randomize) goes first.
@@ -64,14 +67,33 @@ describe('isPairLink', () => {
 });
 
 describe('app link routing', () => {
-  test('cold start: launch URL is held for the pairing screen', async () => {
+  test('cold start: a bwalletx://pair launch URL is held for the pairing screen as the https pairing link', async () => {
     const offered = new Promise<void>((r) => {
       const off = onPairLink(() => (off(), r()));
     });
     releaseLaunch();
     await offered;
-    expect(takePairLink()).toBe(COLD);
+    expect(takePairLink()).toBe(COLD_HTTPS);
     expect(takePairLink()).toBeNull();
+  });
+  test('warm: "Open in bWalletX" on the same phone (bwalletx://pair via appUrlOpen) reaches the pairing screen', () => {
+    // @photokuro, 2 Nov 2026: Safari on his iPhone, www.bchatx.com, Connect bWalletX.
+    const Q =
+      'v=1&r=relay.bwallet.space&c=AAAAAAAAAAAAAAAAAAAAAA&k=02aa&o=https%3A%2F%2Fwww.bchatx.com&e=9999999999&s=3044';
+    let hits = 0;
+    const off = onPairLink(() => hits++);
+    urlOpen?.({ url: `bwalletx://pair?${Q}` });
+    expect(hits).toBe(1);
+    expect(takePairLink()).toBe(`https://www.bwallet.space/pair?${Q}`);
+    // The triple-slash form some browsers produce is the same link.
+    urlOpen?.({ url: `bwalletx:///pair?${Q}` });
+    expect(hits).toBe(2);
+    expect(takePairLink()).toBe(`https://www.bwallet.space/pair?${Q}`);
+    // Other app-scheme links are not pairing links.
+    urlOpen?.({ url: 'bwalletx://browse?url=https%3A%2F%2Fexample.com' });
+    expect(hits).toBe(2);
+    expect(takePairLink()).toBeNull();
+    off();
   });
   test('warm: appUrlOpen pair link notifies listeners; other URLs are ignored', () => {
     let hits = 0;
