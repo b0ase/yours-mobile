@@ -13,6 +13,7 @@ import {
   ALLOWANCE_CHOICES_USD,
   buildSheetModel,
   DEFAULT_ALLOWANCE_USD,
+  originHost,
   sheetCanTrust,
   sheetAnswer,
   sheetHash,
@@ -672,8 +673,9 @@ export const BundleSheet = (props: {
     );
   } else if (kind === 'signin') {
     hero = <SignInHero />;
-    siteSub = 'Connect and sign in';
-    title = <>{gold(sheetTitleText('signin', name, model))}</>;
+    siteSub = model.lines.some((l) => l.boundSignIn) ? 'Sign in: nothing is spent' : 'Connect and sign in';
+    // A bound sign-in names the caller's full host, prominently (services/signInBinding.ts, security review 2 Nov 2026).
+    title = <>{gold(sheetTitleText('signin', name, model, originHost(request.originator)))}</>;
     body = (
       <>
         {signingAs && (

@@ -11,6 +11,8 @@
  * Originators are compared after normalizeOriginator (host[:port], lowercase, default port stripped).
  */
 
+import { HUB_DEV_ORIGIN, HUB_ORIGIN, HUB_PROTOCOL, hubOrigins } from './signInBinding';
+
 type Protocol = readonly [number, string];
 
 export interface PinnedProtocol {
@@ -75,6 +77,18 @@ export const PINNED_PROTOCOLS: readonly PinnedProtocol[] = [
     // bx-starter-kit mint: description `bCalX: 3 private calendar records`.
     mint: { verb: 'Mint', noun: 'calendar record', countFrom: /(\d+) private (?:calendar )?records?/i },
   },
+  {
+    // The b*X single sign-on hub (security review, 2 Nov 2026). Its sign-in signs every b*X site in, so only the hub
+    // may ask for it: id.bwalletx.com (https only, checked on the full origin by signInBinding.ts), plus
+    // localhost:3400 in dev builds. The signed text must be the hub's challenge for that origin, and the grant is
+    // never stored (signInBinding.ts guardSignInProtocols).
+    protocolID: HUB_PROTOCOL,
+    origins: hubOrigins().map((o) => new URL(o).host),
+    label: 'Sign in to bWalletX ID (id.bwalletx.com)',
+    description: `Signs you in to the bWalletX sign-on hub at ${new URL(HUB_ORIGIN).host}${
+      hubOrigins().includes(HUB_DEV_ORIGIN) ? ' (or the local dev hub)' : ''
+    }, which then signs you in to b*X sites. It proves you hold this wallet; nothing is spent.`,
+  },
 ];
 
 const key = (p: Protocol) => `${p[0]}:${p[1].trim().toLowerCase()}`;
@@ -91,9 +105,10 @@ export const pinnedProtocol = (protocolID: unknown): PinnedProtocol | undefined 
 /**
  * Advertised in getVersion's result so a site can check the wallet pins its protocol. Bumped whenever a protocol is
  * added: 1 = bmintx archive (bmintx.com checks >= 1), 2 = + bvideox records (bvideox.com checks >= 2),
- * 3 = + bjobsx, bdrivex, bcalx records (those sites check >= 3).
+ * 3 = + bjobsx, bdrivex, bcalx records (those sites check >= 3), 4 = + bwalletx id sign in, origin-bound sign-in on
+ * every transport (id.bwalletx.com checks >= 4).
  */
-export const PINNED_PROTOCOLS_VERSION = 3;
+export const PINNED_PROTOCOLS_VERSION = 4;
 
 /** BRC-205 `base`: vendor "-" major.minor.patch, no leading zeroes, 7–30 ASCII bytes. */
 const BRC205_BASE = /^[A-Za-z0-9][A-Za-z0-9._-]*-(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;

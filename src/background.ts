@@ -250,6 +250,7 @@ import {
   type MintSheet,
 } from './services/pinnedMint';
 import { oneShotGrant } from './services/oneShotGrant';
+import { signInBindingRefusal } from './services/signInBinding';
 import {
   isReservedProtocol,
   refusalCode,
@@ -2671,6 +2672,18 @@ if (!(
       }
       if (message.originator !== expected.originator) {
         sendResponse({ type: message.action, success: false, error: 'Origin mismatch' });
+        return true;
+      }
+    }
+
+    // Sign-in signatures are bound to the caller's real origin (services/signInBinding.ts, security review 2 Nov 2026):
+    // createSignature under a sign-in protocol must sign exactly this origin's challenge, and the SSO hub's protocol is
+    // for id.bwalletx.com only. sender.origin is Chrome's (or the native WebView's / the bApp frame's), never the page's.
+    // Before the frame sheet below, any unlock and any permission sheet.
+    if (!isFromExtension && message?.originator !== ADMIN_ORIGINATOR) {
+      const refusal = signInBindingRefusal(String(message?.action ?? ''), message?.params, sender.origin);
+      if (refusal) {
+        sendResponse({ type: message?.action, success: false, error: refusal, code: refusalCode(refusal) });
         return true;
       }
     }
