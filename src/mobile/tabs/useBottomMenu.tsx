@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { BottomMenuContext } from '../../contexts/BottomMenuContext';
 import { opensWalletNfts, routeFor, TAB_TAP } from './tabs';
 import { setWalletKind } from '../wallet/walletKind';
+import { marketAllowed } from '../region/region';
 
 /**
  * Mobile swap for src/hooks/useBottomMenu.tsx (vite.config.mobile.ts): same
@@ -30,7 +31,7 @@ export const useBottomMenu = () => {
     if (context.selected === routedSelection) return;
     routedSelection = context.selected;
     if (opensWalletNfts(context.selected)) setWalletKind('nfts');
-    const route = routeFor(context.selected);
+    const route = routeFor(context.selected, marketAllowed());
     // Already there (e.g. the phone layout swiped to it): don't push a duplicate history entry.
     if (route && path.current !== route) navigate(route);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -39,7 +40,7 @@ export const useBottomMenu = () => {
   // A tap on the already-selected tab doesn't change `selected`, so route it here too.
   useEffect(() => {
     const onTap = (e: Event) => {
-      const route = routeFor((e as CustomEvent<string>).detail);
+      const route = routeFor((e as CustomEvent<string>).detail, marketAllowed());
       if (route && path.current !== route) navigate(route);
     };
     window.addEventListener(TAB_TAP, onTap);

@@ -73,6 +73,11 @@ html:root {
   color: #f5b800;
   box-shadow: 0 0 0 2px #f5b800;
 }
+/* UK gate (src/mobile/region/region.ts, BannerActions.tsx): Swap / Buy show only once the region lookup says "not UK". */
+html:not([data-bw-swap]) .bwallet-web-banner__link[data-bw-banner='swap'],
+html:not([data-bw-buy]) .bwallet-web-banner__link[data-bw-banner='buy'] {
+  display: none;
+}
 .bwallet-web-banner__close {
   padding: 2px 9px;
   font-size: 15px;

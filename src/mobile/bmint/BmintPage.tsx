@@ -28,6 +28,7 @@ import { takeHandOff } from './lib/drop';
 import { useChatHandle } from '../tabs/useTabBadges';
 import { DropHero, Vault } from './Studio';
 import './bmint.css';
+import { RegionGate } from '../region/RegionGate';
 
 /**
  * bMint (/m/bmint, Desktop and web): the hub for every mint type the wallet has (useHub below), plus the
@@ -367,7 +368,16 @@ export const BmintPage = () => {
             {Notes && <Route path="notes" element={<Notes />} />}
             {MakeNotePage && <Route path="make" element={<MakeNotePage />} />}
             <Route path="opns" element={bulk ? <OpnsMintPage /> : <Navigate to="/m/names" replace />} />
-            {OpnsStorePage && <Route path="store" element={<OpnsStorePage />} />}
+            {OpnsStorePage && (
+              <Route
+                path="store"
+                element={
+                  <RegionGate kind="market">
+                    <OpnsStorePage />
+                  </RegionGate>
+                }
+              />
+            )}
             <Route path="mint/:type" element={<MintOpen owner={owner} />} />
             <Route path="check" element={<CheckPage />} />
             <Route path="*" element={<Landing owner={owner} />} />

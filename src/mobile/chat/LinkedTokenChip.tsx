@@ -5,6 +5,7 @@ import { MARKET_ENABLED } from '../storeBuild';
 import { openExternal } from '../exchange/useTokenRowActions';
 import { linkedTokenUrl, parseLinkedToken } from './linkedToken';
 import { earnUrl } from '../market/launchpad/noCurve';
+import { useMarketAllowed } from '../region/useRegion';
 
 /**
  * "$SYMBOL" chip in a room's header for its display-only linked token. Opens the token in the Exchange (the
@@ -14,8 +15,10 @@ import { earnUrl } from '../market/launchpad/noCurve';
  */
 export const LinkedTokenChip = ({ metadata, color }: { metadata: unknown; color?: string }) => {
   const { handleSelect } = useBottomMenu();
+  // UK gate (region/region.ts): no buying or selling for a restricted visitor (fail closed).
+  const market = useMarketAllowed();
   const token = parseLinkedToken(metadata);
-  if (!MARKET_ENABLED || !token) return null;
+  if (!MARKET_ENABLED || !market || !token) return null;
   const open = () => {
     const earn = earnUrl(token.id);
     if (earn) {

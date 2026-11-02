@@ -6,6 +6,7 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { isPairableAgent } from '../agents/agentAccounts';
 import { makeGrant, type AgentGrant, type AgentScope } from './agentPairing';
 import { describeMintLimits, makeMintLimits, MAX_MINT_ITEMS, MAX_MINT_USD } from './mintScope';
+import { useMarketAllowed } from '../region/useRegion';
 
 const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
@@ -40,6 +41,8 @@ export const CliPairConfirm = ({
   const id = account?.addresses.identityAddress;
   const agent = isPairableAgent(id); // never a pot: pots keep no daily cap
   const [trade, setTrade] = useState(MARKET_ENABLED);
+  // UK gate (region/region.ts): a restricted visitor's CLI never gets the Buy tokens scope.
+  const market = useMarketAllowed();
   const [send, setSend] = useState(false);
   const [days, setDays] = useState(7);
   // Minting works on any account (e.g. the owner's main one), within the limits set here.
@@ -48,7 +51,7 @@ export const CliPairConfirm = ({
   const [maxUsd, setMaxUsd] = useState(3);
   const limits = makeMintLimits(maxItems, maxUsd);
   const scopes: AgentScope[] = [
-    ...(agent && trade ? ['trade' as AgentScope] : []),
+    ...(agent && trade && market ? ['trade' as AgentScope] : []),
     ...(agent && send ? ['send' as AgentScope] : []),
     ...(mint ? ['mint' as AgentScope] : []),
   ];
@@ -138,6 +141,7 @@ export const CliPairConfirm = ({
         {toggle(true, () => {}, 'See balances, prices and activity', 'Always on')}
         {agent &&
           MARKET_ENABLED &&
+          market &&
           toggle(
             trade,
             setTrade,

@@ -19,6 +19,7 @@ import { MyTokenListings } from '../../sell/MyTokenListings';
 import { SELL_ENABLED } from '../../sell/sell';
 import { RewardCards } from './RewardCards';
 import { coinsById, pickRewards, type HeldToken, type Reward, type RewardCoinFlags } from './rewards';
+import { useMarketAllowed } from '../../region/useRegion';
 
 /** Wallet › Tokens: the Rewards card (game-earned tokens). Renders nothing when you hold none. */
 export const RewardsSection = () => {
@@ -29,7 +30,9 @@ export const RewardsSection = () => {
   const [sending, setSending] = useState<Bsv21Balance | null>(null);
   const [selling, setSelling] = useState<SellTarget | null>(null);
   const navigate = useNavigate();
-  const trading = marketTradingEnabled();
+  // UK gate (region/region.ts): no Buy / Sell for a restricted visitor (fail closed).
+  const marketOk = useMarketAllowed();
+  const trading = marketTradingEnabled() && marketOk;
 
   useEffect(() => {
     let live = true;

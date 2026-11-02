@@ -37,7 +37,8 @@ import {
   STORE_PAY_ADDRESS,
   type StoreResult,
 } from './inventory';
-import { NAME_TIERS, nameTierUsd, offerHref } from './tiers';
+import { NAME_TIERS, nameTierUsd } from './tiers';
+import { useMarketAllowed } from '../../region/useRegion';
 
 /**
  * The Name Store (/names, owner-approved 13 Oct 2026): "Get your name on Bitcoin. Yours forever."
@@ -90,6 +91,8 @@ type PendingSell = { name: string; id: string; usd: number; sats: number };
 
 export const NameStorePage = () => {
   const { apiContext, isLocked, chromeStorageService } = useServiceContext();
+  // UK gate (region/region.ts): no resale rails for a restricted visitor; new names are got as before.
+  const marketOk = useMarketAllowed();
   const onWallet = useContext(GuestCtx);
   const guest = !!onWallet || isLocked;
   const account = guest ? undefined : chromeStorageService.getCurrentAccountObject().account;
@@ -444,7 +447,6 @@ export const NameStorePage = () => {
                   {t.label} <span style={{ color: MUTED }}>{fmtUsd(t.usd)}</span>
                 </li>
               ))}
-              <li>Special names: make an offer</li>
             </ul>
           )}
         </form>
@@ -532,7 +534,7 @@ export const NameStorePage = () => {
         )}
 
         {/* Browse */}
-        {MARKET_ENABLED && (
+        {MARKET_ENABLED && marketOk && (
           <div className="mt-16 flex flex-col gap-10">
             {RAILS.map((r) => (
               <Rail key={r.id} title={r.title} sub={r.sub} loading={listings === null}>
@@ -648,6 +650,8 @@ const ResultCard = (p: {
   onGive: (n: string) => void;
   onPick: (n: string) => void;
 }) => {
+  // UK gate (region/region.ts): no selling, and listed / premium names read "Taken", for a restricted visitor.
+  const marketOk = useMarketAllowed();
   const r = p.result;
   const shell = (children: ReactNode) => (
     <div
@@ -673,7 +677,9 @@ const ResultCard = (p: {
     <p className="m-0 text-[32px] sm:text-[40px] font-bold tracking-[-0.03em] leading-none break-all">{r.name}</p>
   );
   const busy = p.busy === r.name;
-  const buyable = MARKET_ENABLED && (r.kind === 'house' || r.kind === 'listed');
+  // UK gate: our own house listings and special names are first sales by bWalletX (CEO, 2 Nov 2026), so they stay
+  // open to a restricted visitor; other owners' listings are resale and stay gated.
+  const buyable = MARKET_ENABLED && (r.kind === 'house' || (r.kind === 'listed' && marketOk));
   const giftBox = (
     <div className="flex flex-col gap-2">
       <label className="inline-flex items-center gap-2 text-sm cursor-pointer select-none" style={{ color: MUTED }}>
@@ -741,7 +747,7 @@ const ResultCard = (p: {
           ) : (
             <>
               {/* Selling names is exchange functionality: bWalletX only (MARKET_ENABLED, App Review 3.1.5(iii)). */}
-              {MARKET_ENABLED && (
+              {MARKET_ENABLED && marketOk && (
                 <>
                   <div className="flex flex-wrap items-center gap-2">
                     <label className="inline-flex items-center gap-2 text-sm" style={{ color: MUTED }}>
@@ -790,30 +796,20 @@ const ResultCard = (p: {
       );
     }
     case 'premium':
-      // A store build has no selling or buying (MARKET_ENABLED): premium and listed names just read "Taken".
-      if (!MARKET_ENABLED)
-        return shell(
-          <>
-            {title}
-            <p className="m-0 text-lg" style={{ color: MUTED }}>
-              Taken.
-            </p>
-          </>,
-        );
+      // The premium shortlist is held personally by the owner, not by bCorp (owner, 2 Nov 2026: "the OpNS names at
+      // my own wallet address are, for now, mine"). bCorp can't sell or take offers on names it doesn't own, so these
+      // read "Taken" everywhere until a company-held premium name is checked at render time.
       return shell(
         <>
           {title}
-          <p className="m-0 text-base" style={{ color: MUTED }}>
-            A special name. It isn&apos;t sold at a set price, but we&apos;re happy to hear an offer.
+          <p className="m-0 text-lg" style={{ color: MUTED }}>
+            Taken.
           </p>
-          <a href={offerHref(r.name)} className={btn} style={{ ...goldBtn, alignSelf: 'flex-start' }}>
-            Make an offer
-          </a>
         </>,
       );
     case 'house':
     case 'listed': {
-      if (!MARKET_ENABLED)
+      if (!MARKET_ENABLED || (r.kind === 'listed' && !marketOk))
         return shell(
           <>
             {title}
@@ -829,7 +825,7 @@ const ResultCard = (p: {
           <p className="m-0 text-lg">
             {r.kind === 'house' ? (
               <>
-                <span style={{ color: GOLD }}>{r.name}</span> is yours for {price}.
+                <span style={{ color: GOLD }}>{r.name}</span> is yours for {price}. Sold by bWalletX.
               </>
             ) : (
               <>Its owner is selling it for {price}.</>

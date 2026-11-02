@@ -5,11 +5,14 @@ import { isOwned } from './podcasts';
 import { PodcastCard } from './PodcastCard';
 import { PublicPodcasts } from './PublicPodcasts';
 import { RECORDING_NOTE, usePodcasts } from './usePodcasts';
+import { useMarketAllowed } from '../region/useRegion';
 
 const MUTED = '#98A2B3';
 
 /** Feed › bRadio: recorded Spaces as podcasts. Buy opens Exchange › Podcasts (bWalletX only). */
 export const BradioFeed = () => {
+  // UK gate (region/region.ts): no Buy for a restricted visitor.
+  const market = useMarketAllowed();
   const navigate = useNavigate();
   const { items, owned, more } = usePodcasts();
   const open = () => navigate('/m/feed');
@@ -32,7 +35,7 @@ export const BradioFeed = () => {
             owned={isOwned(p, owned)}
             onExpand={open}
             onBuy={
-              MARKET_ENABLED && p.nft?.outpoint && p.nft.price
+              MARKET_ENABLED && market && p.nft?.outpoint && p.nft.price
                 ? () => navigate(`${EXCHANGE_ROUTE}/podcasts?buy=${encodeURIComponent(p.id)}`)
                 : undefined
             }

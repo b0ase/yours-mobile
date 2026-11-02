@@ -10,6 +10,7 @@ import { tokenKey } from '../chat/tokenRooms';
 import { normId, personalKey, personalTicker } from '../names/personalToken';
 import type { Contact } from '../chat/contacts';
 import { verifyIssuer } from '../issuer/issuerVerify';
+import { useMarketAllowed } from '../region/useRegion';
 
 /** name → their personal token id (bit-sign's link: the one real $NAME, not a copycat ticker). */
 const lookups = new Map<string, Promise<string | null>>();
@@ -39,6 +40,8 @@ const namesFor = (c: Contact) => {
  */
 export const FriendToken = ({ c, held }: { c: Contact; held: Bsv21Balance[] }) => {
   const { handleSelect } = useBottomMenu();
+  // UK gate (region/region.ts): no buying or selling for a restricted visitor (fail closed).
+  const market = useMarketAllowed();
   const [tokenId, setTokenId] = useState<string | null>(null);
   const names = namesFor(c);
   useEffect(() => {
@@ -88,7 +91,7 @@ export const FriendToken = ({ c, held }: { c: Contact; held: Bsv21Balance[] }) =
         >
           Room
         </button>
-      ) : !MARKET_ENABLED ? null : (
+      ) : !MARKET_ENABLED ? null : !market ? null : (
         <button
           type="button"
           className={btn}

@@ -63,6 +63,7 @@ import {
 import { BMUSIC_SOURCES, fetchMerged, type Cursors, type VideoSource } from './videoSources';
 import { inReelWindow, phonePoster, useAppVisible, useReelDevLog, useReelVideo } from '../reelMemory';
 import { useInPeek } from '../../phone/pageEl';
+import { useMarketAllowed } from '../../region/useRegion';
 
 const GOLD = '#FFD24D';
 const MUTED = '#8a8f98';
@@ -231,6 +232,8 @@ const Slide = ({
 }) => {
   const [poster, setPoster] = useState<string | null>(c.poster);
   const [posterBroken, setPosterBroken] = useState(false);
+  // UK gate (region/region.ts): no Buy / Sell / Register (token) or swipe trades for a restricted visitor.
+  const market = useMarketAllowed();
   const near = inReelWindow(i, active, shown);
   const playing = shown && i === active;
   const preloading = shown && i === active + 1;
@@ -277,7 +280,7 @@ const Slide = ({
     const s0 = start.current;
     const p = e.changedTouches[0];
     start.current = null;
-    if (!BMOVIES_SWIPE_TRADE_ENABLED || !s0 || !p || !c.ticker || !c.registered) return;
+    if (!BMOVIES_SWIPE_TRADE_ENABLED || !market || !s0 || !p || !c.ticker || !c.registered) return;
     const side = tradeSide(p.clientX - s0.x, p.clientY - s0.y);
     if (side) onTrade(c, side);
   };
@@ -285,7 +288,7 @@ const Slide = ({
   const press = useRef<{ timer: ReturnType<typeof setTimeout>; fired: boolean } | null>(null);
   const pressProps = (side: Side) => ({
     onPointerDown: () => {
-      if (!BMOVIES_SWIPE_TRADE_ENABLED) return;
+      if (!BMOVIES_SWIPE_TRADE_ENABLED || !market) return;
       const st = {
         fired: false,
         timer: setTimeout(() => {
@@ -395,7 +398,9 @@ const Slide = ({
           )}
         </button>
         <div className="mt-3 flex items-center gap-2">
-          {c.registered && c.ticker ? (
+          {!market ? (
+            <span className="min-w-0 flex-1" />
+          ) : c.registered && c.ticker ? (
             <>
               {/* Tap: the clip's trade page on bmovies.app. Long-press (or swipe →/←): a 1p quick trade. */}
               <button
@@ -448,7 +453,7 @@ const Slide = ({
             <Share2 size={16} color="#fff" />
           </button>
         </div>
-        {BMOVIES_SWIPE_TRADE_ENABLED && c.registered && c.ticker ? (
+        {!market ? null : BMOVIES_SWIPE_TRADE_ENABLED && c.registered && c.ticker ? (
           <p className="mt-2 text-center text-[10px]" style={{ color: MUTED }}>
             Swipe → buy 1p · ← sell 1p{BMOVIES_SWIPE_TRADE_MOCK ? ' · practice mode, no money moves' : ''}
           </p>

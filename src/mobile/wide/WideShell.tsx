@@ -62,6 +62,7 @@ const BAPP_PAGES: Record<string, string> = {
   bmusic: '/m/media',
 };
 import './wide.css';
+import { useChartsAllowed, useMarketAllowed } from '../region/useRegion';
 
 const HistoryScreen = lazy(() => import('../wallet/HistoryScreen'));
 const BsvPriceChart = lazy(() => import('../wallet/PriceChart').then((m) => ({ default: m.BsvPriceChart })));
@@ -71,15 +72,18 @@ const Holdings = lazy(() => import('../home/Holdings'));
    here, right of it, the BSV price chart, History right under it, then Holdings. ---------- */
 const WalletSide = () => (
   <div className="ww-side-stack">
-    <div className="ww-panel">
-      <div className="ww-panel-head">
-        <span>BSV price</span>
-        <span className="ww-muted ww-small">WhatsOnChain daily rate</span>
+    {/* UK gate (region/region.ts): no price chart panel for a restricted visitor. */}
+    {useChartsAllowed() && (
+      <div className="ww-panel">
+        <div className="ww-panel-head">
+          <span>BSV price</span>
+          <span className="ww-muted ww-small">WhatsOnChain daily rate</span>
+        </div>
+        <Suspense fallback={null}>
+          <BsvPriceChart />
+        </Suspense>
       </div>
-      <Suspense fallback={null}>
-        <BsvPriceChart />
-      </Suspense>
-    </div>
+    )}
     <div className="ww-panel ww-flush ww-history">
       <Suspense fallback={null}>
         <HistoryScreen inline onClose={() => undefined} />
@@ -173,6 +177,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
   const bmoviesBadge = useBappBadge('bmovies');
   const { chromeStorageService, lockWallet } = useServiceContext();
   const { handleSelect, selected, query } = useBottomMenu();
+  const market = useMarketAllowed();
   const ccy = useCurrency();
   // bMail = airdrops + mail (same as the top-bar mailbox); Chat and Feed unread (tabs/tabBadges.ts).
   const unread = useTabBadges();
@@ -233,7 +238,8 @@ const WideShell = ({ children }: { children: ReactNode }) => {
           to: '/m/credits',
           hidden: hiddenKind('credits'),
         },
-        { id: 'market', label: marketLabel(), icon: I.exchange, to: '/m/exchange', hidden: !MARKET_ENABLED },
+        // UK gate (region/region.ts): no Exchange entry for a restricted visitor.
+        { id: 'market', label: marketLabel(), icon: I.exchange, to: '/m/exchange', hidden: !MARKET_ENABLED || !market },
         { id: 'lock', label: 'Lock BSV', icon: I.lockbsv, to: '/m/lock' },
         // bTrust: recovery slices and passing on. bWalletX only (BTRUST_ENABLED).
         ...(BTRUST_ENABLED ? [{ id: 'btrust', label: 'bTrust', icon: I.shield, to: '/m/btrust' }] : []),

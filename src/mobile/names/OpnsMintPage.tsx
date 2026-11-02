@@ -57,6 +57,7 @@ import { useOpnsVault } from './useOpnsVault';
 import { OpnsVaultCounts, OpnsVaultSection } from './OpnsVaultSection';
 import { isProtected, vaultCounts, vaultedInBatch } from './opnsVault';
 import { nameTierUsd } from './store/tiers';
+import { useMarketAllowed } from '../region/useRegion';
 
 /**
  * bMint › OpNS names (Desktop / web: desktop.bwalletx.com/bmint/opns; old /opns-mint links redirect here).
@@ -168,7 +169,10 @@ export const OpnsMintPage = () => {
   const [buy, setBuy] = useState<{ name: string; outpoint: string; priceSats: number } | null>(null);
   const [buying, setBuying] = useState('');
   // Auto-list each minted name for $1 (bWalletX only; remembered, on by default).
-  const [autoList, setAutoListState] = useState(() => MARKET_ENABLED && loadAutoList());
+  const [autoListPref, setAutoListState] = useState(() => MARKET_ENABLED && loadAutoList());
+  // UK gate (region/region.ts): no auto-listing, sell section or listed prices for a restricted visitor.
+  const marketOk = useMarketAllowed();
+  const autoList = autoListPref && MARKET_ENABLED && marketOk;
   const setAutoList = (v: boolean) => {
     setAutoListState(v);
     saveAutoList(v);
@@ -774,7 +778,7 @@ export const OpnsMintPage = () => {
                   {ordered.map((n) => {
                     const p = plan?.find((x) => x.name === n);
                     const c = checks[n];
-                    const st = c ? searchLabel(c, (sats) => usdOrSats(sats, rate), MARKET_ENABLED) : null;
+                    const st = c ? searchLabel(c, (sats) => usdOrSats(sats, rate), MARKET_ENABLED && marketOk) : null;
                     const label = !c
                       ? 'Checking…'
                       : c.state === 'free' && c.domain === null
@@ -944,7 +948,7 @@ export const OpnsMintPage = () => {
                         (not listed)
                       </p>
                     )}
-                    {MARKET_ENABLED && (
+                    {MARKET_ENABLED && marketOk && (
                       <label className="flex items-center gap-2.5 text-[13px] cursor-pointer" style={{ color: TEXT }}>
                         <input
                           type="checkbox"
@@ -986,7 +990,7 @@ export const OpnsMintPage = () => {
 
         <OpnsVaultSection vault={vault.state} owned={new Set(owned.map((o) => o.name))} onChange={vault.set} />
 
-        {MARKET_ENABLED ? (
+        {MARKET_ENABLED && marketOk ? (
           <OpnsSellSection
             vault={vault.state}
             onVault={vault.set}

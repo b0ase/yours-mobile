@@ -27,6 +27,7 @@ import {
   tokensToLookUp,
   type WalletTicket,
 } from './walletTickets';
+import { useMarketAllowed } from '../region/useRegion';
 
 const GOLD = 'var(--bw-accent-hi)';
 const ELLIPSIS = 'overflow-hidden text-ellipsis whitespace-nowrap';
@@ -37,6 +38,9 @@ type State = { status: 'loading' } | { status: 'error'; message: string } | { st
 /** Wallet → Tickets: tokens this wallet holds that get it into a room, with "Open room". */
 export const TicketsSection = () => {
   const { apiContext, chromeStorageService } = useServiceContext();
+  // UK gate (region/region.ts): no buying or selling for a restricted visitor (fail closed).
+  const market = useMarketAllowed();
+  const sellOn = SELL_ENABLED && market;
   const { handleSelect } = useBottomMenu();
   const identityAddress = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ?? '';
   const [state, setState] = useState<State>({ status: 'loading' });
@@ -173,7 +177,7 @@ export const TicketsSection = () => {
               </div>
               <IssuerBadge tokenId={t.tokenId} compact />
             </div>
-            {SELL_ENABLED && BigInt(t.heldRaw || '0') > 0n && (
+            {sellOn && BigInt(t.heldRaw || '0') > 0n && (
               <button
                 type="button"
                 aria-label={`Sell ${t.symbol}`}
@@ -206,13 +210,13 @@ export const TicketsSection = () => {
           </div>
         );
       })}
-      {SELL_ENABLED && (
+      {sellOn && (
         <>
           <div className="text-xs font-bold text-[#98A2B3] mt-2 px-1">My listings</div>
           <MyTokenListings emptyText="Nothing listed. Tap Sell on a ticket to list it." />
         </>
       )}
-      {SELL_ENABLED && selling && <SellSheet target={selling} onClose={() => setSelling(null)} />}
+      {sellOn && selling && <SellSheet target={selling} onClose={() => setSelling(null)} />}
     </div>
   );
 };

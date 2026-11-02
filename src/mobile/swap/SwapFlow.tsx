@@ -34,6 +34,9 @@ import { handoffFor, matchCoin, type SwapPrefill } from './swapLink';
 import { BSVEX_HANDOFF_ON } from '../storeBuild';
 import { ErrorActions } from '../errors/ErrorActions';
 import { askB } from '../errors/errorReport';
+import { gateView } from '../region/region';
+import { RegionBlocked, type RegionBlockedView } from '../region/RegionGate';
+import { useRegionStatus } from '../region/useRegion';
 
 /** Black / gold, as the approved design (bWalletX palette). */
 const C = {
@@ -822,14 +825,7 @@ const Track = ({
  * The swap screens (Pick → Deposit → Track) as one full-screen layer. `getAddress` returns the wallet's receive
  * address (a fresh deposit address where the wallet can make one). `resume` opens an existing swap on Track.
  */
-export const SwapFlow = ({
-  getAddress,
-  onClose,
-  resume,
-  handle,
-  inline = false,
-  prefill,
-}: {
+type SwapFlowProps = {
   /** From a swap link (swapLink.ts): coin, network and amount filled in, nothing started. */
   prefill?: SwapPrefill | null;
   getAddress: () => Promise<string>;
@@ -838,7 +834,9 @@ export const SwapFlow = ({
   handle?: string;
   /** Render in the page (Exchange › Swap) instead of as a full-screen layer. */
   inline?: boolean;
-}) => {
+};
+
+const SwapFlowImpl = ({ getAddress, onClose, resume, handle, inline = false, prefill }: SwapFlowProps) => {
   const [address, setAddress] = useState('');
   const [addressState, setAddressState] = useState<AddressState>('loading');
   const [all, setAll] = useState<SwapCoin[]>([]);
@@ -926,6 +924,43 @@ export const SwapFlow = ({
     </div>,
     document.body,
   );
+};
+
+/** A restricted visitor's swap layer: the plain region screen with a close button, never the swap. */
+const SwapBlocked = ({ onClose, inline, view }: { onClose: () => void; inline: boolean; view: RegionBlockedView }) => {
+  useBackClose(!inline, onClose);
+  if (inline) return <RegionBlocked view={view} />;
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[300] flex justify-center"
+      style={{ background: C.bg, paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
+    >
+      <div className="relative w-full max-w-[480px] h-full flex flex-col" style={{ color: C.text }}>
+        <button
+          type="button"
+          aria-label="Close"
+          onClick={onClose}
+          className="absolute right-3 top-4 w-11 h-11 grid place-items-center border-0 bg-transparent cursor-pointer z-10"
+        >
+          <X size={20} color={C.muted} />
+        </button>
+        <RegionBlocked view={view} />
+      </div>
+    </div>,
+    document.body,
+  );
+};
+
+/**
+ * UK gate (region/region.ts): every caller (wallet Swap card, Exchange › Swap, swap links, the onboarding funnel) gets
+ * the swap only after a positive "not UK" answer; otherwise the plain region screen. The watcher that finishes swaps
+ * already under way is separate (useSwapWatcher) and keeps running.
+ */
+export const SwapFlow = (props: SwapFlowProps) => {
+  const view = gateView('swap', useRegionStatus());
+  if (view === 'page') return <SwapFlowImpl {...props} />;
+  if (view === 'off') return null;
+  return <SwapBlocked onClose={props.onClose} inline={!!props.inline} view={view} />;
 };
 
 export default SwapFlow;

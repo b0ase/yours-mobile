@@ -3,7 +3,8 @@ import Menu, { type BottomMenuProps } from '../../components/BottomMenu';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { usePendingIndexing } from '../tokens/pendingIndexing';
 import { indexingEnabled, marketLabel } from '../storeBuild';
-import { asMenuItem, TAB_ORDER, TAB_TAP, tabFor } from './tabs';
+import { asMenuItem, TAB_ORDER, TAB_TAP, tabFor, visibleTabs } from './tabs';
+import { useMarketAllowed } from '../region/useRegion';
 import { usePhoneLayout } from '../phone/flag';
 import { WIDE_ON } from '../wide/flag';
 import { onTabRetap } from './tabRetap';
@@ -28,7 +29,11 @@ export default Menu;
 
 export const BottomMenu = ({ selected, handleSelect, theme }: BottomMenuProps) => {
   const phone = usePhoneLayout();
-  const active = tabFor(selected);
+  // UK gate (region/region.ts): no Exchange tab for a restricted visitor, fail closed while the lookup runs.
+  const market = useMarketAllowed();
+  const active = tabFor(selected, market);
+  const shown = visibleTabs(market);
+  const tabs = TABS.filter((t) => shown.includes(t.id));
   // Own tokens whose room isn't set up (minus "Not now"): count on the Wallet tab.
   const { apiContext, chromeStorageService } = useServiceContext();
   const pending = usePendingIndexing(
@@ -51,7 +56,7 @@ export const BottomMenu = ({ selected, handleSelect, theme }: BottomMenuProps) =
           borderTop: '1px solid #1C1C1E',
         }}
       >
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <Menu
             key={t.id}
             label={t.label}

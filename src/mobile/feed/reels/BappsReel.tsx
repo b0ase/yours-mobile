@@ -41,6 +41,8 @@ import './bappsReel.css';
 import { useReel } from './useReel';
 import { inReelWindow, useAppVisible } from '../reelMemory';
 import { useInPeek } from '../../phone/pageEl';
+import { useMarketAllowed } from '../../region/useRegion';
+import { EXCHANGE_BAPPS } from '../../exchangeAppsX';
 
 const GOLD = '#FFD24D';
 const MUTED = '#a3a8b0';
@@ -173,6 +175,8 @@ const AppSlide = ({
   onReport: () => void;
 }) => {
   const navigate = useNavigate();
+  // UK gate (region/region.ts): no Tokenise (Launchpad) for a restricted visitor.
+  const market = useMarketAllowed();
   // Only the card on screen and its neighbours mount content (at most 3); the rest are empty snap slots.
   const near = inReelWindow(i, active, shown);
   const open = () => {
@@ -245,7 +249,7 @@ const AppSlide = ({
                 <Code2 size={15} /> Contribute
               </button>
             )}
-            {LAUNCH_ROUTE && mine && (
+            {LAUNCH_ROUTE && market && mine && (
               <button
                 onClick={() => navigate(`${LAUNCH_ROUTE}${tokeniseQuery(c)}`)}
                 className={chip}
@@ -263,6 +267,8 @@ const AppSlide = ({
 
 const BappsReel = () => {
   const [sort, setSort] = useState<AppSort>('new');
+  // UK gate (region/region.ts): no bExchange card for a restricted visitor.
+  const market = useMarketAllowed();
   const me = useMe();
   // bWeb (Settings › bWeb): bApps you hid stay out of this reel.
   const [bweb] = useBWeb();
@@ -270,10 +276,17 @@ const BappsReel = () => {
   const cards = useMemo(
     () =>
       sortApps(
-        appCards(BAPPS.filter((a) => !(STORE_BUILD && a.privateOnly) && !hidden.split('\n').includes(a.name))),
+        appCards(
+          BAPPS.filter(
+            (a) =>
+              !(STORE_BUILD && a.privateOnly) &&
+              !hidden.split('\n').includes(a.name) &&
+              (market || !EXCHANGE_BAPPS.some((x) => x.name === a.name)),
+          ),
+        ),
         sort,
       ),
-    [sort, hidden],
+    [sort, hidden, market],
   );
   const { box, style, active, toTop } = useReel(cards.length);
   const offScreen = useInPeek();

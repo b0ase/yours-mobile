@@ -19,19 +19,26 @@ export const TAB_ORDER: MobileTab[] = MARKET_ENABLED
   ? ['bsv', 'market', 'browser', 'feed', 'chat']
   : ['bsv', 'browser', 'feed', 'chat'];
 
+/**
+ * The bar a visitor actually sees: no Exchange tab when the UK gate restricts them (region/region.ts, fail closed).
+ * `market` is the effective gate (useMarketAllowed / marketAllowed), so a store build never has the tab either.
+ */
+export const visibleTabs = (market: boolean, order: readonly MobileTab[] = TAB_ORDER): MobileTab[] =>
+  market ? [...order] : order.filter((t) => t !== 'market');
+
 export const asMenuItem = (tab: MobileTab) => tab as MenuItems;
 
 /** Ids that open Wallet on its NFTs (media) view instead of Tokens. */
 export const opensWalletNfts = (selected: string | null) => selected === 'ords';
 
 /** Which bottom-bar tab is lit for a selected id. */
-export const tabFor = (selected: string | null): MobileTab => {
+export const tabFor = (selected: string | null, market: boolean = MARKET_ENABLED): MobileTab => {
   switch (selected) {
     case 'tools':
     case 'settings':
       return 'settings';
     case 'market':
-      return MARKET_ENABLED ? 'market' : 'bsv';
+      return market ? 'market' : 'bsv';
     case 'browser':
     case 'feed':
     case 'chat':
@@ -41,8 +48,8 @@ export const tabFor = (selected: string | null): MobileTab => {
   }
 };
 
-/** Route for a selected id (mobile layout). */
-export const routeFor = (selected: string | null): string | null => {
+/** Route for a selected id (mobile layout). Pass the effective market gate where the UK gate applies. */
+export const routeFor = (selected: string | null, market: boolean = MARKET_ENABLED): string | null => {
   switch (selected) {
     case 'bsv':
     case 'ords':
@@ -50,7 +57,7 @@ export const routeFor = (selected: string | null): string | null => {
     case 'media':
       return '/m/media';
     case 'market':
-      return MARKET_ENABLED ? '/m/exchange' : '/bsv-wallet';
+      return market ? '/m/exchange' : '/bsv-wallet';
     case 'browser':
       return '/browser';
     case 'feed':

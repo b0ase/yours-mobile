@@ -16,6 +16,7 @@ import { PublishStrategy } from '../strategies/PublishStrategy';
 import { myStrategies } from '../strategies/myStrategies';
 import { MARKET_ENABLED } from '../storeBuild';
 import { useServiceContext } from '../../hooks/useServiceContext';
+import { useMarketAllowed } from '../region/useRegion';
 
 const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
@@ -33,6 +34,12 @@ const download = (l: Loaded) =>
  * and rules, switch Paper ↔ Live, unload. Loading always starts in paper mode; Live needs a second tap.
  */
 export const StrategySection = ({ id }: { id: string }) => {
+  // UK gate (region/region.ts): no trading strategies for a restricted visitor (fail closed).
+  const market = useMarketAllowed();
+  return market ? <StrategySectionImpl id={id} /> : null;
+};
+
+const StrategySectionImpl = ({ id }: { id: string }) => {
   const loaded = getLoadedStrategy(id);
   const [text, setText] = useState('');
   const [errors, setErrors] = useState<string[]>([]);

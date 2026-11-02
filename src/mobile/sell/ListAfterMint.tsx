@@ -12,6 +12,7 @@ import type { Curve } from '../../lib/curves';
 import { curveHash } from '../../lib/curves';
 import { SELL_ENABLED } from './sell';
 import { SellSheet } from './SellSheet';
+import { useMarketAllowed } from '../region/useRegion';
 
 export const ListAfterMint = ({
   tokenId,
@@ -25,6 +26,8 @@ export const ListAfterMint = ({
   curve?: Curve | null;
 }) => {
   const { apiContext } = useServiceContext();
+  // UK gate (region/region.ts): no listing for sale for a restricted visitor (fail closed).
+  const market = useMarketAllowed();
   const [held, setHeld] = useState<bigint | null>(null);
   const [open, setOpen] = useState(false);
   const [listed, setListed] = useState(false);
@@ -40,7 +43,7 @@ export const ListAfterMint = ({
       live = false;
     };
   }, [apiContext, tokenId]);
-  if (!SELL_ENABLED || !marketTradingEnabled()) return null;
+  if (!SELL_ENABLED || !marketTradingEnabled() || !market) return null;
   return (
     <div className="flex flex-col gap-2 rounded-xl border p-3" style={{ borderColor: '#2b2f36' }}>
       <div className="text-sm font-bold text-white">List some for sale?</div>

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { MAX_TURNS, looksLikeSecret, transcript, type AgentMessage } from './agent';
-import { BWALLET_GUIDE } from './guide';
+import { BWALLET_GUIDE, GUIDE_VERSION, NOT_IN_UK, NOT_IN_UK_LINE } from './guide';
 
 describe('transcript', () => {
   test('drops blanks and keeps the last MAX_TURNS', () => {
@@ -48,7 +48,7 @@ describe('looksLikeSecret', () => {
 describe('guide', () => {
   test('covers the tabs and the safety rules', () => {
     for (const w of [
-      'Apps · Market · Wallet · Feed · Chat',
+      'Bottom bar: Apps, Wallet (centre, the home tab), Feed and Chat.',
       'Tickets',
       'Sweep from another wallet',
       'bwalletx.com',
@@ -58,10 +58,44 @@ describe('guide', () => {
       expect(BWALLET_GUIDE).toContain(w);
   });
   test('walks people through making things instead of refusing (bWalletX)', () => {
-    for (const w of ['Launch your own coin', 'List an app as a bApp', "app's name", 'its website', 'BRC-100'])
+    for (const w of ['List an app as a bApp', "app's name", 'its website', 'BRC-100', 'Wallet › Mint › Contracts'])
       expect(BWALLET_GUIDE).toContain(w);
     expect(BWALLET_GUIDE).not.toMatch(/only help with bWallet/);
     expect(BWALLET_GUIDE).toContain('never brush people off');
+  });
+});
+
+describe('guide v3: b never steers to buying, selling, swapping or launching tokens (CEO, 2 Nov 2026)', () => {
+  test('version 3 with the bit-sign wording', () => {
+    expect(GUIDE_VERSION).toBe(3);
+    expect(NOT_IN_UK).toBe('not available in the UK');
+    expect(BWALLET_GUIDE).toContain('Never steer anyone to buy, sell, swap or trade a token or coin');
+    expect(BWALLET_GUIDE).toContain(`answer in one line that it is ${NOT_IN_UK} ("${NOT_IN_UK_LINE}")`);
+    expect(BWALLET_GUIDE).toContain(`Trading strategies are trading: ${NOT_IN_UK}`);
+  });
+  test('no market, launch or raise wording anywhere in the guide', () => {
+    for (const banned of [
+      /launchpad/i,
+      /raise into/i,
+      /buy the token/i,
+      /\bmarket\b/i,
+      /exchange/i,
+      /tokenblaster/i,
+      /1sat market/i,
+      /swap into/i,
+      /launch your own coin/i,
+      /\(Sell\)/,
+      /strategies are listed/i,
+    ])
+      expect(BWALLET_GUIDE).not.toMatch(banned);
+  });
+  test('keeps the factual token, ticket and room explanations', () => {
+    for (const w of [
+      'Tickets: tokens that get you into a room',
+      'Chat: token rooms',
+      'Personal tokens are social/access only',
+    ])
+      expect(BWALLET_GUIDE).toContain(w);
   });
 });
 

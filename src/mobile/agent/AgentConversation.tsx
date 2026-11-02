@@ -23,6 +23,7 @@ import {
   type AgentMessage,
 } from './agent';
 import { BWALLET_GUIDE } from './guide';
+import { useMarketAllowed } from '../region/useRegion';
 import { PROVIDERS, callProvider } from './providers';
 import { loadKey } from './keyStore';
 import { KeyScreen } from '../settings/AgentSettings';
@@ -190,23 +191,11 @@ const ConfirmSheet = ({
  * sentence case, no near-duplicates (owner, 14 Oct 2026).
  */
 const QUICK_STARTS: { label: string; prompt: string }[] = [
-  {
-    label: 'Launch a coin',
-    prompt: 'Help me launch my own coin. Ask me for its name, ticker, supply and what it is for.',
-  },
+  // Guide v3 (2 Nov 2026): no "Launch a coin" or strategy buying/selling starts; b doesn't steer to markets.
   {
     label: 'List my app as a bApp',
     prompt:
       'Help me list my app as a bApp with its own token. Ask me for the app name, its website and what the token should do.',
-  },
-  {
-    label: 'Create a strategy',
-    prompt: 'Help me create a strategy. Ask me what I want it to do, which tokens, my budget and when it should stop.',
-  },
-  {
-    label: 'Buy or sell a strategy',
-    prompt:
-      'Help me buy or sell a strategy on Exchange › Contracts › Strategies: compare listings, or fill in the listing spec for mine and suggest a price.',
   },
 ];
 
@@ -232,8 +221,10 @@ export const AgentConversation = ({
   const account = chromeStorageService.getCurrentAccountObject().account;
   const accountId = account?.addresses.identityAddress;
   // bWalletX only: in an agent account b may act, within the account's limits and loaded strategy (agents/agentTrade.ts).
+  // UK gate (region/region.ts): a restricted visitor's agent account is told about sending only, never buying.
+  const market = useMarketAllowed();
   const baseSystem = MARKET_ENABLED
-    ? BWALLET_GUIDE + agentAccountPrompt(accountId, account?.name || 'Agent account')
+    ? BWALLET_GUIDE + agentAccountPrompt(accountId, account?.name || 'Agent account', market)
     : BWALLET_GUIDE;
   // bWeb (Settings › bWeb): the screen line only if allowed, plus the Ask b add-ons you switched on.
   const [bweb] = useBWeb();
@@ -246,6 +237,7 @@ export const AgentConversation = ({
   const chatId = messages.length ? threadId(accountId) : null;
   const name = chatId ? chatName(chatId, null) : null;
   // Inline buttons (inlineActions.ts): b may add [[Label|/m/screen]]; a tap only opens that screen, never acts.
+  // Guide v3 (guide.ts): b never steers anyone to buying, selling, swapping or launching tokens, in every region.
   const system =
     baseSystem +
     (bweb.privacy.shareScreen ? screenContext(screen) : '') +
@@ -787,7 +779,7 @@ export const AgentConversation = ({
         <div className="absolute inset-0 z-0">
           <ObsidianHero
             compact={compact}
-            extra={MARKET_ENABLED ? QUICK_STARTS : []}
+            extra={MARKET_ENABLED && market ? QUICK_STARTS : []}
             options={starters}
             onPick={(prompt) => {
               setInput(prompt);
@@ -951,7 +943,7 @@ export const AgentConversation = ({
         </div>
       </div>
 
-      {MARKET_ENABLED && !input && !busy && messages.length > 0 && (
+      {MARKET_ENABLED && market && !input && !busy && messages.length > 0 && (
         <div className="askb-chips relative z-10 shrink-0 flex flex-wrap gap-1.5 px-3 pb-2">
           {QUICK_STARTS.map((q) => (
             <button

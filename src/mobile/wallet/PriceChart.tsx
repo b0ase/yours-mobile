@@ -4,6 +4,7 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { fetchExchangeRate } from '../../utils/wallet';
 import { tokenSales, type Sale } from '../market/indexer';
 import { currentFx, fiatSymbol, usdToFiat } from '../../utils/displayCurrency';
+import { useChartsAllowed } from '../region/useRegion';
 
 /**
  * Market chart on a token's page (owner, 4 Oct 2026, "like Phantom"): the last sales from GorillaPool,
@@ -119,7 +120,7 @@ const Header = ({ price, unit, change, note }: { price: string; unit: string; ch
 const TOKEN_RANGES = { '24H': 144, '7D': 1008, '30D': 4320, All: Infinity } as const;
 type TokenRange = keyof typeof TOKEN_RANGES;
 
-export const PriceChart = ({ tokenId }: { tokenId: string }) => {
+const PriceChartImpl = ({ tokenId }: { tokenId: string }) => {
   const { apiContext } = useServiceContext();
   const [sales, setSales] = useState<Sale[] | null>(null);
   const [usdPerBsv, setUsdPerBsv] = useState(0);
@@ -182,7 +183,7 @@ const BSV_RANGES = { '7D': 7, '30D': 30 } as const;
 type BsvRange = keyof typeof BSV_RANGES;
 
 /** BSV in dollars over the last 30 days (CoinGecko, WhatsOnChain fallback), on the BSV page. */
-export const BsvPriceChart = () => {
+const BsvPriceChartImpl = () => {
   const [rates, setRates] = useState<{ t: number; p: number }[] | null>(null);
   const [range, setRange] = useState<BsvRange>('30D');
   useEffect(() => {
@@ -227,3 +228,11 @@ export const BsvPriceChart = () => {
     </div>
   );
 };
+
+/**
+ * UK gate (region/region.ts): no price charts for a restricted visitor (fail closed), wherever the chart is mounted
+ * (token page, BSV view, Home module, Desktop side pane). Holdings still show their balance.
+ */
+export const PriceChart = ({ tokenId }: { tokenId: string }) =>
+  useChartsAllowed() ? <PriceChartImpl tokenId={tokenId} /> : null;
+export const BsvPriceChart = () => (useChartsAllowed() ? <BsvPriceChartImpl /> : null);

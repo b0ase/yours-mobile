@@ -23,6 +23,7 @@ import { heldBsv21Balances } from '../airdrops/heldBalances';
 import { parseRoom, roomMarket, roomMeta, type Listing } from '../market/indexer';
 import { MODULE_FINISHES, purchaseContext, walletOutpoint } from '../market/walletOutpoint';
 import { marketFeeOptions } from '../market/fee';
+import { marketAllowed } from '../region/region';
 
 export type AgentActionBlock = { kind: StrategyAction; token: string; usd: number; to?: string; amount?: number };
 
@@ -74,7 +75,11 @@ export const listingPriceUsd = (l: Pick<Listing, 'perTokenSats'>, bsvUsd: number
     : undefined;
 
 /** Extra system-prompt text for an agent account: its strategy and how to ask for actions. Empty otherwise. */
-export const agentAccountPrompt = (id: string | undefined, name: string) => {
+/**
+ * The AGENT ACCOUNT MODE section of b's prompt. `buyAllowed` is the effective market gate (useMarketAllowed): a
+ * restricted (UK or unknown region) visitor's agent is only told about sending, matching runAgentAction's refusal.
+ */
+export const agentAccountPrompt = (id: string | undefined, name: string, buyAllowed = true) => {
   if (!id || !getAgentAccount(id)) return '';
   const l = getLoadedStrategy(id);
   const strategy = l
@@ -90,9 +95,17 @@ AGENT ACCOUNT MODE (this overrides "you cannot do anything" above)
 The current account "${name}" is an agent account: its balance is a budget the user gave you. ${strategy}
 To act, put one fenced block per action at the end of your reply, exactly:
 \`\`\`bwalletx
-{"kind":"buy","token":"<BSV-21 token id, txid_vout>","usd":<most dollars to spend>}
+${
+  buyAllowed
+    ? '{"kind":"buy","token":"<BSV-21 token id, txid_vout>","usd":<most dollars to spend>}'
+    : '{"kind":"send","token":"BSV","to":"<address or paymail>","usd":<dollars of BSV to send>}'
+}
 \`\`\`
-Kinds: "buy" (cheapest listing within usd), "send" (BSV worth usd to "to": an address or paymail). Selling and listing from chat are not available yet.
+${
+  buyAllowed
+    ? 'Kinds: "buy" (cheapest listing within usd), "send" (BSV worth usd to "to": an address or paymail). Selling and listing from chat are not available yet.'
+    : 'Kind: "send" (BSV worth usd to "to": an address or paymail) is the only action here.'
+}
 The wallet checks every action before signing and may refuse it; the result is shown to the user and logged. Never claim an action happened: say what you asked for. At most 3 actions per reply.`;
 };
 
@@ -133,6 +146,9 @@ export const runAgentAction = async (
   if (a.kind === 'sell' || a.kind === 'list') return { ok: false, text: 'Selling from chat isn’t available yet.' };
   // Buying tokens is exchange functionality: bWalletX only (MARKET_ENABLED, App Review 3.1.5(iii)).
   if (!MARKET_ENABLED && a.kind !== 'send') return { ok: false, text: 'This edition can only send BSV.' };
+  // UK gate (region/region.ts): no buying for a restricted visitor (fail closed); sending works as usual.
+  if (!marketAllowed() && a.kind !== 'send')
+    return { ok: false, text: 'Buying tokens isn’t available in your region. Sending BSV works as usual.' };
 
   // stop.holdTokens in live mode: how many of the strategy's tokens this account holds now.
   const holding = await strategyHolding(ctx, id);

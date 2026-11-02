@@ -14,6 +14,7 @@ import { useOpnsVault } from '../names/useOpnsVault';
 import { mergeNames, opnsRows, paymailRows } from './namesList';
 import { copyLink } from '../chat/shareLink';
 import { BWALLET_PAYMAIL_DOMAIN, SIBLING_PAYMAIL_DOMAINS } from '../names/config';
+import { useMarketAllowed } from '../region/useRegion';
 
 const f = (u: string, i?: RequestInit) => fetch(u, i);
 const HEAD = 'm-0 text-xs font-semibold uppercase tracking-widest';
@@ -25,6 +26,8 @@ const HEAD = 'm-0 text-xs font-semibold uppercase tracking-widest';
  * book (wallet/AddressBook.tsx).
  */
 export const NamesSection = () => {
+  // UK gate (region/region.ts): no buying or selling for a restricted visitor (fail closed).
+  const market = useMarketAllowed();
   const navigate = useNavigate();
   const { apiContext, chromeStorageService } = useServiceContext();
   const account = chromeStorageService.getCurrentAccountObject().account;
@@ -181,7 +184,7 @@ export const NamesSection = () => {
               </ul>
             </section>
           )}
-          {MARKET_ENABLED ? (
+          {MARKET_ENABLED && market ? (
             <OpnsSellSection
               vault={vault.state}
               onVault={vault.set}

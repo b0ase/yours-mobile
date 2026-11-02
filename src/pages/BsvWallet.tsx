@@ -125,6 +125,7 @@ import {
   staleBalanceHint,
   saveLastBalance,
 } from '../mobile/wallet/balanceLoad';
+import { useBuyCryptoAllowed, useChartsAllowed } from '../mobile/region/useRegion';
 
 // CopyAddressed feedback state hook — used in receive view
 
@@ -151,6 +152,10 @@ export const BsvWallet = () => {
   const isReload = urlParams.get('reload') === 'true' || query === 'reload';
   urlParams.delete('reload');
   const [pageState, setPageState] = useState<PageState>('main');
+  // UK gate (mobile/region/region.ts): no Get BSV / Get MNEE / Buy BSV or price chart for a restricted visitor.
+  const buyOk = useBuyCryptoAllowed();
+  const chartsOk = useChartsAllowed();
+  const getMneeClick = buyOk ? () => setPageState('getMNEE') : undefined;
   // A failed BSV send, classified (utils/sendErrors.ts); shown with Details + Copy instead of a raw snackbar.
   const [sendError, setSendError] = useState<SendErrorInfo | null>(null);
   // The last Error createAction/signAction threw: @1sat/actions returns only its message, which drops code/detail.
@@ -1841,7 +1846,7 @@ export const BsvWallet = () => {
             onClick={openBsvView}
             // Empty wallet: "Get BSV" where the balance would be, like Get MNEE / Get PNEEs (owner, 6 Oct 2026).
             action={
-              bsvBalance === 0 && BUY_CRYPTO_ENABLED
+              bsvBalance === 0 && BUY_CRYPTO_ENABLED && buyOk
                 ? { label: 'Get BSV', onClick: () => setGetBsvOpen(true) }
                 : undefined
             }
@@ -1890,7 +1895,7 @@ export const BsvWallet = () => {
               usdBalance={mneeBalance}
               showPointer={mneeBalance > 0 || legacyMneeBalance > 0}
               isMNEE
-              onGetMneeClick={BUY_CRYPTO_ENABLED ? () => setPageState('getMNEE') : undefined}
+              onGetMneeClick={BUY_CRYPTO_ENABLED ? getMneeClick : undefined}
               onClick={() => {
                 if (legacyMneeBalance > 0) {
                   setShowLegacyMneePrompt(true);
@@ -2385,12 +2390,14 @@ export const BsvWallet = () => {
 
       {/* Price chart and Buy BSV go BELOW the form (owner, 17 Oct 2026: "No one wants to see the price
           chart when they press send"), so Send opens on who you're paying. */}
-      {/* BSV price, last 30 days */}
+      {/* BSV price, last 30 days (not for a UK-gated visitor: no charts, mobile/region/region.ts) */}
+      {chartsOk && (
       <div className="w-full mt-5 mb-5 rounded-2xl p-4" style={{ background: theme.color.global.row }}>
         <Suspense fallback={<div style={{ height: 140 }} />}>
           <BsvPriceChart />
         </Suspense>
       </div>
+      )}
       {/* Buy BSV under the chart (owner, 6 Oct 2026). */}
       {BUY_CRYPTO_ENABLED && (
         <BuyBsvButton
