@@ -1,4 +1,5 @@
-import { getProfile, listOpns, resolveBapId, type OneSatContext } from '@1sat/actions';
+import { listOpns, type OneSatContext } from '@1sat/actions';
+import { loadBapIdentity } from '../../utils/bapIdentityCache';
 import { PublicKey, type WalletOutput } from '@bsv/sdk';
 import { getMyName, setMyName } from './myName';
 import { opnsNameOf } from './opnsName';
@@ -175,9 +176,11 @@ export const syncAccountNames = async (
   const results = await Promise.allSettled([
     (async () => {
       // Unpublished: no profile name (also clears a name cached here by mistake for another account).
-      if ((await resolveBapId(ctx)) === null) return setCachedProfileName(identityAddress, '');
-      const res = await getProfile.execute(ctx, {});
-      if (res.error) return;
+      // Shared with the profile screens: one BAP load per session unless forced (utils/bapIdentityCache.ts).
+      const bap = await loadBapIdentity(ctx, identityAddress, { force: opts.force });
+      if (!bap.isPublished) return setCachedProfileName(identityAddress, '');
+      const res = bap.profile;
+      if (!res || res.error) return;
       // Always this identity's own answer, even '': a name cached here for another account (before the
       // ctxIdentityAddress guard) is replaced, not kept forever (owner, 8 Oct 2026: "b0ase" on another account's Receive).
       const name = typeof res.profile?.name === 'string' ? res.profile.name.trim() : '';
