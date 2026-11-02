@@ -320,13 +320,28 @@ export const revokeSignInGrants = async (store: GrantStore, adminOriginator: str
 };
 
 type Fn = (...a: unknown[]) => Promise<unknown>;
+type EnsureArgs = {
+  originator?: string;
+  protocolID?: unknown;
+  privileged?: boolean;
+  counterparty?: string;
+  usageType?: string;
+  reason?: string;
+  seekPermission?: boolean;
+};
+
+export const SIGN_IN_PENDING_REFUSAL =
+  'A sign-in from this site is already waiting for your answer; each sign-in gets its own sheet';
 
 /**
  * Wrap the permissions manager (initWallet.ts) so that, whatever path reached it:
  * - createSignature under a sign-in protocol from an outside originator must be bound to that originator's origin;
  * - the hub protocol is refused for any other originator, on every protocol method and before any sheet;
  * - a sign-in grant is never stored: the approval covers the call in flight only (no "don't ask again", no grant that
- *   makes the next sign-in silent), and grouped (manifest) and counterparty grants drop sign-in protocols.
+ *   makes the next sign-in silent), and grouped (manifest) and counterparty grants drop sign-in protocols;
+ * - no stored grant, cached grant, recent-grant cover or on-chain permission token ever answers a sign-in protocol:
+ *   every call asks on its own sheet, never coalesced with another call, and a second sign-in from the same site
+ *   while one is waiting is refused (one sheet per signature).
  */
 export function guardSignInProtocols<T extends object>(
   manager: T,
@@ -355,17 +370,56 @@ export function guardSignInProtocols<T extends object>(
     };
   }
 
+  /**
+   * One fresh approval for one sign-in call. The manager's own ensureProtocolPermission is never used for a sign-in
+   * protocol: it would answer from its store, its in-memory cache, its 15 s "recent grant" cover or an on-chain
+   * permission token without a sheet, and it coalesces identical requests in flight into one sheet. Here each call
+   * gets its own request ID (so nothing coalesces), and a second sign-in from the same site while one is waiting is
+   * refused: one sheet per signature.
+   */
+  const inFlight = new Set<string>();
+  let seq = 0;
+  const freshApproval = async (args: EnsureArgs): Promise<boolean> => {
+    const normalize = m.normalizeOriginator;
+    const enqueue = m.enqueueAndFireEvent;
+    if (typeof normalize !== 'function' || typeof enqueue !== 'function')
+      throw new Error(`${SIGN_IN_REFUSAL}: the wallet cannot ask for this sign-in on its own sheet`);
+    const site = String((normalize as (o: unknown) => string).call(manager, args.originator) || args.originator || '');
+    if (inFlight.has(site)) throw new Error(SIGN_IN_PENDING_REFUSAL);
+    inFlight.add(site);
+    try {
+      const request = {
+        type: 'protocol' as const,
+        originator: site,
+        displayOriginator: args.originator,
+        privileged: !!args.privileged,
+        protocolID: args.protocolID,
+        counterparty: args.counterparty ?? 'self',
+        usageType: args.usageType,
+        reason: args.reason,
+        renewal: false,
+      };
+      seq += 1;
+      return (await (enqueue as Fn).call(manager, request, `signin-${seq}-${now()}`)) === true;
+    } finally {
+      inFlight.delete(site);
+    }
+  };
+
   const ensure = m.ensureProtocolPermission;
   if (typeof ensure === 'function') {
-    m.ensureProtocolPermission = async (args: { originator?: string; protocolID?: unknown }) => {
+    m.ensureProtocolPermission = async (args: EnsureArgs) => {
       const kind = signInKind(args?.protocolID);
       if (kind && isOutside(args?.originator)) {
         if (kind === 'hub') {
           const ok = originsForOriginator(args.originator).some((o) => hubOrigins(opts.dev).includes(o));
           if (!ok) throw new Error(HUB_PROTOCOL_REFUSAL);
         }
-        // Nothing stored may answer a sign-in: the manager checks its store first, so clear it.
+        // Old stored grants are removed too, so no other path can ever find one.
         await forget();
+        if (args.seekPermission === false) throw new Error(`${SIGN_IN_REFUSAL}: a sign-in always asks`);
+        if (!(await freshApproval(args))) throw new Error(`${SIGN_IN_REFUSAL}: not approved`);
+        return true;
       }
       return (ensure as Fn).call(manager, args);
     };

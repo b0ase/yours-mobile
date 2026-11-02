@@ -19,6 +19,7 @@ import {
   originsForOriginator,
   parseSignInRequest,
   revokeSignInGrants,
+  SIGN_IN_PENDING_REFUSAL,
   SIGN_IN_REFUSAL,
   signInBindingRefusal,
   signInKind,
@@ -68,6 +69,20 @@ describe('the shared validator', () => {
     expect(signInBindingRefusal('createSignature', login('https://good.example:8443'), GOOD, NOW)).toContain(
       SIGN_IN_REFUSAL,
     );
+  });
+
+  test('strict: a challenge built for the apex is refused on www (and the other way round)', () => {
+    // Site owners must build the challenge from the page's exact origin (docs/SIGN-IN-WITH-BWALLETX.md).
+    const apex = 'https://example.com';
+    const www = 'https://www.example.com';
+    expect(signInBindingRefusal('createSignature', login(apex), www, NOW)).toContain(
+      'sign-in text does not match this site',
+    );
+    expect(signInBindingRefusal('createSignature', login(www), apex, NOW)).toContain(
+      'sign-in text does not match this site',
+    );
+    expect(signInBindingRefusal('createSignature', login(www), www, NOW)).toBeNull();
+    expect(signInBindingRefusal('createSignature', login(apex), apex, NOW)).toBeNull();
   });
 
   test('the correct origin passes', () => {
@@ -256,7 +271,7 @@ describe('inside the permissions manager', () => {
   const ADMIN = 'admin.test';
 
   /** A real LocalWalletPermissionsManager over a throwaway ProtoWallet: no real wallet data. */
-  const realManager = (guard: boolean) => {
+  const realManager = (guard: boolean, manual = false) => {
     const pw = new ProtoWallet(PrivateKey.fromRandom());
     const base = new Proxy(pw as unknown as Record<string | symbol, unknown>, {
       get(t, k) {
@@ -268,14 +283,36 @@ describe('inside the permissions manager', () => {
     const store = new InMemoryPermissionStore();
     const m = new LocalWalletPermissionsManager(base as never, ADMIN, {}, { store });
     const prompts: string[] = [];
+    const ids: string[] = [];
     m.bindCallback('onProtocolPermissionRequested', async (r: { requestID: string; originator: string }) => {
       prompts.push(r.originator);
-      // What background.ts does on Allow: a grant "for GRANT_DEFAULT_DAYS" (remember on).
-      await m.grantPermission({ requestID: r.requestID, expiry: 0 });
+      ids.push(r.requestID);
+      // What background.ts does on Allow: a grant "for GRANT_DEFAULT_DAYS" (remember on). Manual: the test answers.
+      if (!manual) await m.grantPermission({ requestID: r.requestID, expiry: 0 });
     });
     if (guard) guardSignInProtocols(m, ADMIN, { now: () => Date.now() });
-    return { m, store, prompts };
+    return { m, store, prompts, ids };
   };
+  /** Make the toolbox believe it holds a grant everywhere it looks before asking (store aside). */
+  const injectTokens = (m: object) => {
+    const x = m as Record<string, unknown>;
+    // An on-chain permission token for every protocol (a pre-fix wallet, or a pact minted on chain).
+    x.findProtocolToken = async () => ({
+      txid: 'aa'.repeat(32),
+      outputIndex: 0,
+      outputScript: '',
+      satoshis: 1,
+      originator: 'good.example',
+      expiry: 0,
+      privileged: false,
+      protocol: 'bwallet sign in',
+      securityLevel: 2,
+      counterparty: 'anyone',
+    });
+    // Its in-memory cache and 15 s "recent grant" cover.
+    x.hasRecentOrPendingGrant = async () => true;
+  };
+  const settle = () => new Promise((r) => setTimeout(r, 20));
   const fresh = (origin: string) =>
     login(origin, {}, loginMessage(origin, NONCE, new Date(Date.now() + 60_000).toISOString()));
 
@@ -341,6 +378,100 @@ describe('inside the permissions manager', () => {
     // The hub itself: one sheet, nothing stored.
     await m.createSignature(hub({}, hubMessage(HUB_ORIGIN, NONCE, t)) as never, 'id.bwalletx.com');
     expect(prompts).toEqual(['id.bwalletx.com']);
+  });
+
+  test('an on-chain token, a cached grant or a recent-grant cover never answers a sign-in: a sheet is still required', async () => {
+    // Without the guard the injected token signs silently (proves the injection works).
+    const open = realManager(false);
+    injectTokens(open.m);
+    await open.m.createSignature(fresh(GOOD) as never, 'good.example');
+    expect(open.prompts).toEqual([]);
+    // With the guard: every sign-in asks, both protocols.
+    const { m, prompts } = realManager(true);
+    injectTokens(m);
+    await m.createSignature(fresh(GOOD) as never, 'good.example');
+    await m.createSignature(fresh(GOOD) as never, 'good.example');
+    await m.createSignature(
+      hub({}, hubMessage(HUB_ORIGIN, NONCE, new Date().toISOString())) as never,
+      'id.bwalletx.com',
+    );
+    expect(prompts).toEqual(['good.example', 'good.example', 'id.bwalletx.com']);
+    // And a token is never accepted as "already granted" (hasProtocolPermission asks with seekPermission false).
+    expect(
+      await (m as unknown as { hasProtocolPermission: (p: unknown) => Promise<boolean> }).hasProtocolPermission({
+        originator: 'good.example',
+        privileged: false,
+        protocolID: [2, 'bwallet sign in'],
+        counterparty: 'anyone',
+      }),
+    ).toBe(false);
+    // Other protocols still use their tokens as before.
+    await m.createSignature(
+      { protocolID: [2, 'some app'], keyID: '1', counterparty: 'self', data: [1] } as never,
+      'good.example',
+    );
+    expect(prompts).toHaveLength(3);
+  });
+
+  test('a declined sheet signs nothing', async () => {
+    const { m, ids } = realManager(true, true);
+    const p = m.createSignature(fresh(GOOD) as never, 'good.example');
+    await settle();
+    await m.denyPermission(ids[0]);
+    await expect(p).rejects.toThrow();
+  });
+
+  test('one sheet per signature: parallel sign-ins never share a sheet', async () => {
+    const { m, prompts, ids } = realManager(true, true);
+    const first = m.createSignature(fresh(GOOD) as never, 'good.example');
+    await settle();
+    // The second, while the first is waiting: refused, never joined to the first sheet.
+    await expect(m.createSignature(fresh(GOOD) as never, 'good.example')).rejects.toThrow(SIGN_IN_PENDING_REFUSAL);
+    expect(prompts).toEqual(['good.example']);
+    // Another site is not blocked by it, and gets its own sheet.
+    const other = m.createSignature(fresh('https://other.example') as never, 'other.example');
+    await settle();
+    expect(prompts).toEqual(['good.example', 'other.example']);
+    await m.grantPermission({ requestID: ids[0], expiry: 0 });
+    await m.grantPermission({ requestID: ids[1], expiry: 0 });
+    expect((await first).signature.length).toBeGreaterThan(0);
+    expect((await other).signature.length).toBeGreaterThan(0);
+    // After the answer, the next sign-in gets a fresh sheet with its own request ID.
+    const next = m.createSignature(fresh(GOOD) as never, 'good.example');
+    await settle();
+    expect(prompts).toEqual(['good.example', 'other.example', 'good.example']);
+    expect(new Set(ids).size).toBe(3);
+    await m.grantPermission({ requestID: ids[2], expiry: 0 });
+    await next;
+  });
+
+  test('two parallel sign-ins through the permission prompt path: two request IDs, never coalesced', async () => {
+    // The toolbox keys requests by originator + protocol + counterparty + usage, so identical calls used to share one.
+    const { m, ids } = realManager(true, true);
+    const a = m.ensureProtocolPermission({
+      originator: 'good.example',
+      privileged: false,
+      protocolID: [2, 'bwallet sign in'],
+      counterparty: 'anyone',
+      usageType: 'signing',
+    } as never);
+    await settle();
+    const b = m
+      .ensureProtocolPermission({
+        originator: 'good.example',
+        privileged: false,
+        protocolID: [2, 'bwallet sign in'],
+        counterparty: 'anyone',
+        usageType: 'signing',
+      } as never)
+      .then(
+        () => 'granted',
+        (e: Error) => e.message,
+      );
+    expect(await b).toBe(SIGN_IN_PENDING_REFUSAL);
+    expect(ids).toHaveLength(1);
+    await m.grantPermission({ requestID: ids[0], expiry: 0 });
+    expect(await a).toBe(true);
   });
 
   test('admin calls are untouched (the wallet signs its own wallet-address proof under the shared protocol)', async () => {

@@ -159,7 +159,11 @@ The text is checked against the calling page's real origin on every transport (t
 framed bApps, the web wallet and a paired phone): the origin comes from the browser or the pairing, never from the
 page. Text naming any other origin, any other wording, an expired challenge, `hashToDirectlySign` or a counterparty
 other than `anyone` is refused with `code: 'ERR_PROTOCOL_REFUSED'` before any sheet. A sign-in is never remembered:
-each one shows its sheet, "Sign in to <host>" (`src/services/signInBinding.ts`).
+each one shows its sheet, "Sign in to <host>" (`src/services/signInBinding.ts`). Each sign-in call gets its own sheet;
+a second one from the same site while the first is waiting is refused.
+
+Site owners: build the challenge from the page's exact origin (scheme, host and port, e.g. `https://www.example.com`,
+not `https://example.com`), or the wallet refuses it.
 
 The b\*X sign-on hub has its own protocol, `[2, 'bwalletx id sign in']`, pinned to `https://id.bwalletx.com`
 (plus `http://localhost:3400` in dev builds); any other site is refused for it. Its text is
