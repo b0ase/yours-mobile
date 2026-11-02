@@ -812,6 +812,15 @@ export class BchatClient {
     return this.call('GET', `/api/bitsign/space-pages/${encodeURIComponent(slug)}`, undefined, false);
   }
 
+  /**
+   * Claim a one-use invite link (`/room/<ref>?invite=<token>`, bit-sign lib/invite-link-rules.ts): binds this
+   * signed-in handle to the pending member slot, so the room is mine. Idempotent for the same handle. `ref` is the
+   * ticker or the room's clean address.
+   */
+  async claimRoomInvite(ref: string, token: string): Promise<unknown> {
+    return this.call('POST', `${BchatClient.path(ref)}/claim`, { token });
+  }
+
   /** A room's public page (token / discoverable rooms). `{ page }`. */
   async roomPage(ticker: string): Promise<unknown> {
     return this.call('GET', `/api/bitsign/room-pages/${encodeURIComponent(ticker)}`, undefined, false);

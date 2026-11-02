@@ -134,7 +134,16 @@ import { mediaPayload } from '../chat/roomMediaInfo';
 import { walletSigner } from '../chat/signer';
 import { proveHoldings, walletHoldings } from '../chat/holdings';
 import { onTokenNav, requestChatRoom, requestMarketToken, takeChatRoom } from '../chat/nav';
-import { onRoomTicker, takeDmDraft, takeRoomTicker } from '../chat/segmentNav';
+import { onRoomTicker, requestRoomByTicker, takeDmDraft, takeRoomTicker } from '../chat/segmentNav';
+import {
+  findLinkedRoom,
+  linkedRoomAction,
+  nonMemberAction,
+  onRoomLink,
+  takeRoomLink,
+  type RoomLinkRequest,
+} from '../chat/roomLink';
+import { openBchatxDoor } from '../spaces/inviteLinks';
 import { RoomBell } from '../push/RoomBell';
 import {
   APP_NAME,
@@ -159,7 +168,7 @@ import { loadRoomFilter, saveRoomFilter, type RoomFilter } from '../spaces/roomF
 import { bappForTicker, isBappRoom, type Bapp } from '../chat/bappRooms';
 import { BappRoomCards } from '../chat/BappRoomCards';
 import { SiteRoomBalance } from '../chat/SiteRoomViews';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { guardedSendBsv21 } from '../../services/tokenSpendGuard';
 
 /** Store build: token rooms are listed but never opened, joined or bought into (storeBuild.ts). */
@@ -3302,6 +3311,51 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pushTicker, rooms, entries]);
+
+  // A tapped room or invite link (spaces/inviteLinks.ts → chat/roomLink.ts), like Telegram: an invite link is claimed
+  // first (it is the key), then a room I'm in opens; otherwise the token room's lock, the store note, or bChatX's own
+  // door in the bChatX frame. Never silently back to this list. Waits here until signed in (handle).
+  const navigate = useNavigate();
+  const routeRoomLink = async (req: RoomLinkRequest) => {
+    let claimError = '';
+    if (req.invite) {
+      try {
+        await client.claimRoomInvite(req.ref, req.invite);
+      } catch (e) {
+        if (e instanceof ChatApiError && e.status === 401) return authLost();
+        claimError = errText(e);
+      }
+    }
+    // Fresh: the room may be new to me (just claimed, or newer than the cached list).
+    const all = await fetchRooms(client, identityAddress, 0).catch(() => rooms ?? []);
+    const room = findLinkedRoom(all, req.ref);
+    if (room) {
+      const act = linkedRoomAction(room, ROOMS);
+      if (act.kind === 'dm') return requestRoomByTicker(act.ticker, true);
+      if (act.kind === 'open') return openOpenRoom(room);
+      if (act.kind === 'token') return requestChatRoom(act.key);
+      if (act.kind === 'note') return setListError(STORE_ROOM_NOTE);
+      return setOpen({ room, entry: null });
+    }
+    // Not mine. A private room has no public page (404): that's bChatX's door too.
+    const page = parsePage(await client.roomPage(req.ref).catch(() => null));
+    const act = nonMemberAction(req, page?.kind === 'room' ? page : null, ROOMS);
+    if (act.kind === 'token') return requestChatRoom(act.key);
+    if (act.kind === 'note') return setListError(STORE_ROOM_NOTE);
+    if (claimError) setListError(claimError);
+    openBchatxDoor(act.path, navigate);
+  };
+  const routeRoomLinkRef = useRef(routeRoomLink);
+  routeRoomLinkRef.current = routeRoomLink;
+  useEffect(() => {
+    if (!handle) return;
+    const take = () => {
+      const r = takeRoomLink();
+      if (r) void routeRoomLinkRef.current(r).catch((e) => setListError(errText(e)));
+    };
+    take();
+    return onRoomLink(take);
+  }, [handle]);
 
   /** One token room row (unchanged from the token-only list). */
   const renderTokenRow = ({ e, invite }: (typeof shown)[number]) => {
