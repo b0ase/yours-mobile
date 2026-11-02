@@ -12,7 +12,15 @@ import { StillsBanner } from '../featured/StillsBanner';
 import { StreamEngine } from './engine';
 import { isSponsoredTrack, PerSecondKeySource, pickKeySource, SponsoredKeySource, trackSourceKind } from './keySource';
 import { paymentsPerSecond, SessionPayer, type PayerSnapshot } from './payer';
-import { ACTIVE_SESSIONS, forgetSession, openSession, openSponsoredSession, sweepFirst } from './session';
+import { ACTIVE_SESSIONS, forgetSession, openSponsoredSession, sweepFirst } from './session';
+import {
+  fundPaidSession,
+  newSessionAction,
+  PAID_LISTENING_PAUSED,
+  PAID_LISTENING_PAUSED_NOTE,
+  routeBudgetRequest,
+  type BudgetRequest,
+} from './paidListening';
 import { PayToPlay, SponsorEnded, SponsoredPayer, type SponsorSnapshot } from './sponsor';
 import { PotGauge, SponsorBadge } from './SponsorBadge';
 import { SPONSOR_ALBUM_ID, sponsorName, useManifest, useSponsor } from './useAlbum';
@@ -73,19 +81,27 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
   const [claimNote, setClaimNote] = useState<string | null>(null);
   const asked = useRef<Set<string>>(new Set());
   const { m, error: loadError, view } = useManifest();
-  const [sheet, setSheetRaw] = useState<null | { track: number; from?: number; topUp?: boolean }>(null);
+  const [sheet, setSheetRaw] = useState<null | BudgetRequest>(null);
   /** The funnel's add-funds step: shown instead of the budget sheet while the wallet can't pay for a minute. */
-  const [funds, setFunds] = useState<null | { track: number; from?: number; topUp?: boolean }>(null);
+  const [funds, setFunds] = useState<null | BudgetRequest>(null);
+  /** Paid listening is paused (paidListening.ts): every budget request shows this note instead of the sheet. */
+  const [pausedNote, setPausedNote] = useState(false);
+  const showPaused = useCallback(() => setPausedNote(true), []);
   const satsPerSec = m?.satsPerSegment ?? 1;
   const setSheet = useCallback(
-    (x: null | { track: number; from?: number; topUp?: boolean }) => {
+    (x: null | BudgetRequest) => {
       if (!x) return setSheetRaw(null);
-      const minute = estimateTotal(60, satsPerSec) + SEGMENT_FEE;
-      void getWalletBalance()
-        .then((b) => (b < minute ? setFunds(x) : setSheetRaw(x)))
-        .catch(() => setSheetRaw(x));
+      routeBudgetRequest(x, {
+        showPaused,
+        openSheet: (req) => {
+          const minute = estimateTotal(60, satsPerSec) + SEGMENT_FEE;
+          void getWalletBalance()
+            .then((b) => (b < minute ? setFunds(req) : setSheetRaw(req)))
+            .catch(() => setSheetRaw(req));
+        },
+      });
     },
-    [satsPerSec],
+    [satsPerSec, showPaused],
   );
   /** Sponsored tracks play free; the budget sheet only appears when a pay-to-play track starts or the pot runs out. */
   const sponsorRef = useRef<SponsorStatus | null>(null);
@@ -176,7 +192,8 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
           if (e instanceof PayToPlay) setSheet({ track: engine.index, from: engine.seg });
           else if (e instanceof SponsorEnded) {
             setSponsor((x) => (x ? { ...x, sponsored: false } : x));
-            setNotice({ track: engine.index, from: engine.seg });
+            if (PAID_LISTENING_PAUSED) showPaused();
+            else setNotice({ track: engine.index, from: engine.seg });
           } else setProblem(e instanceof Error ? e.message : String(e));
         },
       });
@@ -200,7 +217,8 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
     setReturned(null);
     try {
       await end();
-      const { id, key, coin } = await openSession(wallet, budget);
+      // Paused: rejects before the wallet is asked, so no createAction runs and no session key is funded.
+      const { id, key, coin } = await fundPaidSession(wallet, budget);
       const payer = new SessionPayer({
         key,
         coin,
@@ -237,8 +255,14 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
     const s = session.current;
     const kind = m ? trackSourceKind(sponsor, m.tracks[index].trackId) : 'perSecond';
     // Each track uses its own source: switching between sponsored and paid starts the other kind of session.
-    if (!s || (kind === 'sponsored') !== !!s.sponsor)
-      return kind === 'sponsored' ? void startSponsored(index) : setSheet({ track: index });
+    if (!s || (kind === 'sponsored') !== !!s.sponsor) {
+      const next = newSessionAction(kind);
+      return next === 'sponsored'
+        ? void startSponsored(index)
+        : next === 'paused'
+          ? showPaused()
+          : setSheet({ track: index });
+    }
     if (s.engine.index === index) return s.engine.paused ? s.engine.resume() : s.engine.pause();
     void s.engine.playTrack(index);
   };
@@ -353,11 +377,13 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
           </div>
           {sponsored && <SponsorBadge s={sponsor} />}
           <div className="text-xs" style={{ color: MUTED }}>
-            {sponsored && sponsor?.payToPlayTracks?.length
-              ? 'Tracks 7–12 are pay to play: 1 sat/sec to the artist + network fee'
-              : sponsored
-                ? ''
-                : 'Other tracks: 1 sat/sec to the artist + network fee'}
+            {PAID_LISTENING_PAUSED
+              ? 'Tracks 7–12: paid listening is paused'
+              : sponsored && sponsor?.payToPlayTracks?.length
+                ? 'Tracks 7–12 are pay to play: 1 sat/sec to the artist + network fee'
+                : sponsored
+                  ? ''
+                  : 'Other tracks: 1 sat/sec to the artist + network fee'}
           </div>
           <div className="mt-2">
             <AlbumPlayButton
@@ -390,6 +416,17 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
                 Last sponsored payment {sst.lastTxid}
               </a>
             )}
+          </div>
+        )}
+        {pausedNote && (
+          <div
+            className="flex flex-wrap items-center gap-3 p-3 text-sm"
+            style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 4 }}
+          >
+            <span className="text-white">{PAID_LISTENING_PAUSED_NOTE}</span>
+            <button onClick={() => setPausedNote(false)} className="text-xs" style={{ color: MUTED }}>
+              OK
+            </button>
           </div>
         )}
         {notice && (
@@ -554,7 +591,11 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
                     className="text-[10px] font-bold uppercase"
                     style={{ color: covered(t.trackId) ? GOLD : MUTED }}
                   >
-                    {covered(t.trackId) ? `Sponsored by ${sponsor ? sponsorName(sponsor) : 'VexVoid'}` : '1 sat/sec'}
+                    {covered(t.trackId)
+                      ? `Sponsored by ${sponsor ? sponsorName(sponsor) : 'VexVoid'}`
+                      : PAID_LISTENING_PAUSED
+                        ? 'Paused'
+                        : '1 sat/sec'}
                   </span>
                 }
               />
@@ -578,7 +619,7 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
           onFunded={() => {
             const f = funds;
             setFunds(null);
-            setSheetRaw(f);
+            routeBudgetRequest(f, { showPaused, openSheet: setSheetRaw });
           }}
           onClose={() => {
             if (funds.topUp) void end();
@@ -586,7 +627,7 @@ export default function StreamAlbum({ headline, autoplay }: { headline: Headline
           }}
         />
       )}
-      {sheet && m && (
+      {sheet && m && !PAID_LISTENING_PAUSED && (
         <BudgetSheet
           albumSeconds={albumSeconds}
           satsPerSecond={m.satsPerSegment}
