@@ -11,6 +11,11 @@ interface ImportMetaEnv {
   readonly VITE_OFFERS?: string;
   readonly VITE_WAGES?: string;
   readonly VITE_OPNS_FEE_ADDRESS?: string;
+  /**
+   * Name Store pay address (src/mobile/names/store/inventory.ts): a public P2PKH receive address, never a key.
+   * Default 1F4J9KkMoqtznXPJuCgb98LRymssc8MFfd (bwalletx.x@bwalletx.com); an invalid value falls back to it with a warning.
+   */
+  readonly VITE_NAME_STORE_PAY_ADDRESS?: string;
   /** Live chat relay base URL (src/mobile/chat/live.ts); default https://rt.b0ase.com. */
   readonly VITE_RT_URL?: string;
   /** '0' = build without the live chat stream. */
