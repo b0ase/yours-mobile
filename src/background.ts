@@ -3852,10 +3852,15 @@ if (!(
       sendResponse({ type: 'STORAGE_SYNC_BACKUPS', success: false, error: 'Wallet not initialized' });
       return;
     }
-    accountContext.storage
-      .updateBackups()
-      .then((log) => {
-        sendResponse({ type: 'STORAGE_SYNC_BACKUPS', success: true, data: { log } });
+    // "Sync with my other devices": pull the backup's changes, then push this device's (services/deviceSync.ts).
+    // A remote-active wallet has nothing to pull; it keeps the plain push to its backups.
+    const ctx = accountContext;
+    ctx
+      .syncDevices()
+      .then(async (r) => {
+        if (!r.ok) throw new Error(r.error);
+        const log = r.pushed ? 'Synced with your other devices' : await ctx.storage.updateBackups();
+        sendResponse({ type: 'STORAGE_SYNC_BACKUPS', success: true, data: { log, pulled: r.pulled } });
       })
       .catch((error: unknown) => {
         console.error('[STORAGE_SYNC_BACKUPS] updateBackups failed:', error);

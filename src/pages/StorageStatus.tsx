@@ -227,13 +227,18 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
   const triggerSync = () => {
     if (syncing) return;
     setSyncing(true);
-    addSnackbar('Syncing backups...', 'info');
+    addSnackbar('Syncing with your other devices...', 'info');
     // Fire and forget — the sync runs in the background service worker.
     // We don't await it because updateBackups() can take minutes for large wallets.
     chrome.runtime.sendMessage({ action: 'STORAGE_SYNC_BACKUPS' }, (response) => {
       setSyncing(false);
       if (response?.success) {
-        addSnackbar('Sync complete', 'success');
+        addSnackbar(
+          response?.data?.pulled
+            ? 'Synced: your other devices’ changes are in, and this one’s are saved'
+            : 'Saved to your backup',
+          'success',
+        );
         fetchInfo();
       } else if (response?.error) {
         addSnackbar(response.error, 'error');
@@ -859,7 +864,7 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
           style={{ color: '#111', background: 'linear-gradient(180deg,#FFD84D,#E8A100)', fontWeight: 700 }}
         >
           <RefreshCw size={11} className={syncing ? 'animate-spin' : ''} />
-          {syncing ? 'Syncing...' : 'Sync Now'}
+          {syncing ? 'Syncing…' : 'Sync with my other devices'}
         </motion.button>
         {localIsActive && (
           <motion.button
