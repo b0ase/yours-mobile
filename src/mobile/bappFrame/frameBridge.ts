@@ -12,6 +12,7 @@
 import { isCWIEventName } from '@1sat/wallet-browser';
 import { isMintPrivateAction, isMintPrivateCode } from '../../services/mintPrivateAction';
 import { USER_DENIED_CODE, USER_DENIED_MESSAGE, isUserDenied } from '../../services/userDenied';
+import { ONE_APPROVAL_SEAL } from '../../services/sealPass';
 import {
   CONFIRM_USER_CALL,
   LAST_VERIFICATION_CALL,
@@ -58,6 +59,15 @@ export const frameOriginFor = (url: string, allowlist: ReadonlySet<string>): str
 
 export type XdmRequest = { id: string; call: string; args: Record<string, unknown> };
 
+/**
+ * bit-sign asks the frame `bitsign.capabilities` (its native-pad probe, bit-sign src/lib/native-pad.ts). The frame has
+ * no native pad, so it says so at once (bChatX opens its own pad over the block straight away instead of waiting 3 s
+ * for an answer that never came), and that the seal's sign and payment are approved on ONE sheet
+ * (services/sealPass.ts). Answered by the frame host itself; it reaches no wallet code.
+ */
+export const FRAME_BITSIGN_CAPABILITIES_CALL = 'bitsign.capabilities';
+export const FRAME_BITSIGN_CAPABILITIES = Object.freeze({ drawSignature: false, [ONE_APPROVAL_SEAL]: true });
+
 const MAX_ID = 128;
 
 /** Validates an XDM invocation; returns null for anything that is not a well-formed BRC-100 call. */
@@ -72,7 +82,8 @@ export const parseXdmRequest = (data: unknown): XdmRequest | null => {
       isCWIEventName(d.call) ||
       isMintPrivateAction(d.call) ||
       d.call === LAST_VERIFICATION_CALL ||
-      d.call === CONFIRM_USER_CALL
+      d.call === CONFIRM_USER_CALL ||
+      d.call === FRAME_BITSIGN_CAPABILITIES_CALL
     )
   )
     return null;

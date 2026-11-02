@@ -32,7 +32,7 @@ describe('bitsign.capabilities', () => {
   test('replies drawSignature:true without showing anything', async () => {
     let asked = false;
     const r = await handleBitsignCall(BITSIGN_CAPABILITIES, {}, ORIGIN, async () => ((asked = true), null));
-    expect(r).toEqual({ result: { drawSignature: true } });
+    expect(r).toEqual({ result: { drawSignature: true, oneApprovalSeal: true } });
     expect(asked).toBe(false);
   });
 });

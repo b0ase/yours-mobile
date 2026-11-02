@@ -2,7 +2,8 @@
  * Phone signing for bChatX / bit-sign (bit-sign docs/PHONE-SIGNING.md): a paired desktop page asks the phone to
  * draw a hand signature for a document, over the same sealed relay channel as the BRC-100 calls.
  *
- * - `bitsign.capabilities` → `{ drawSignature: true }`.
+ * - `bitsign.capabilities` → `{ drawSignature: true, oneApprovalSeal: true }` (oneApprovalSeal: the seal's sign and its
+ *   payment are approved on ONE sheet, services/sealPass.ts; the site still makes the same two calls).
  * - `bitsign.drawSignature` → full-screen pad (BitsignHost) → `{ svg, width: 1000, height: 250 }`, or
  *   `{ code: ERR_PERMISSION_DENIED, message: 'declined' }` on Cancel / close.
  *
@@ -12,6 +13,7 @@
  */
 import { SIG_H, SIG_VIEWBOX, SIG_W, isValidSignature } from '../signature/signature';
 import { USER_DENIED_CODE } from '../../services/userDenied';
+import { ONE_APPROVAL_SEAL } from '../../services/sealPass';
 
 export const BITSIGN_CAPABILITIES = 'bitsign.capabilities';
 export const BITSIGN_DRAW = 'bitsign.drawSignature';
@@ -182,7 +184,7 @@ export async function handleBitsignCall(
   sessionOrigin: string,
   ask: (req: DrawRequest) => Promise<string | null> = askDrawSignature,
 ): Promise<BitsignReply> {
-  if (action === BITSIGN_CAPABILITIES) return { result: { drawSignature: true } };
+  if (action === BITSIGN_CAPABILITIES) return { result: { drawSignature: true, [ONE_APPROVAL_SEAL]: true } };
   const req = validateDrawRequest(params, sessionOrigin);
   if (typeof req === 'string') return { error: { code: BAD_REQUEST_CODE, message: req } };
   const path = await ask(req);

@@ -185,8 +185,20 @@ export const createSiteGate = (deps: GateDeps) => {
     return verifiedBy;
   };
 
+  /**
+   * The person just approved this site's one Seal sheet (services/sealPass.ts), right after the prompt this pass came
+   * from. Its seal payment follows: keep the pass long enough for it (graceMs from now), so reading the sheet never
+   * costs a second Face ID. Only a live pass with its one payment unused is kept; nothing new is ever created here.
+   */
+  const extendPass = (origin: string): void => {
+    const pass = passes.get(origin);
+    if (!pass || pass.payUsed || pass.until <= now()) return;
+    pass.until = Math.max(pass.until, now() + graceMs);
+  };
+
   return {
     check,
+    extendPass,
     lastVerification: (origin: string): LastVerification | null => last.get(origin) ?? null,
     /** Lock / account switch: the next request asks again. */
     clearPasses: () => passes.clear(),

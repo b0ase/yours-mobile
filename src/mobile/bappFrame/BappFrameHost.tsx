@@ -17,6 +17,8 @@ import { IMMERSIVE_BUTTON_MS, useImmersiveViewport } from './immersive';
 import { reportSessionSpend } from '../wallet/live/liveBus';
 import { SESSION_SPEND_TYPE } from '../wallet/live/liveLogic';
 import {
+  FRAME_BITSIGN_CAPABILITIES,
+  FRAME_BITSIGN_CAPABILITIES_CALL,
   isAllowedFrameOrigin,
   isWalletRequestMessage,
   parseXdmRequest,
@@ -121,6 +123,10 @@ export const BappFrameHost = () => {
       }
       const req = parseXdmRequest(e.data);
       if (!req) return;
+      if (req.call === FRAME_BITSIGN_CAPABILITIES_CALL) {
+        win.postMessage(toXdmResponse(req.id, { success: true, data: FRAME_BITSIGN_CAPABILITIES }), e.origin);
+        return;
+      }
       const pageUrl = lastUrlFor(e.origin) ?? session.url;
       handleSiteCall(e.origin, pageUrl, req.call, req.args)
         .catch((error: unknown) => ({ success: false, error: error instanceof Error ? error.message : String(error) }))

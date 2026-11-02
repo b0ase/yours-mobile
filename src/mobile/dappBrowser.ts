@@ -19,7 +19,7 @@ import { siteGate as nativeSiteGate } from './siteGateNative';
 import type { SiteGate } from './siteGate';
 
 // Swappable for tests only (dappBrowser.gate.test.ts).
-let siteGate: Pick<SiteGate, 'check' | 'lastVerification'> = nativeSiteGate;
+let siteGate: Pick<SiteGate, 'check' | 'lastVerification'> & Partial<Pick<SiteGate, 'extendPass'>> = nativeSiteGate;
 let ceilingFor = siteCallTimeoutFor;
 export const __setSiteGateForTests = (g: typeof siteGate, ceiling?: typeof ceilingFor) => {
   siteGate = g;
@@ -147,6 +147,14 @@ export const handleSiteCall = async (origin: string, url: string, type: string, 
     chrome.runtime.sendMessage({ action: type, params: params ?? {}, originator: key.originator }),
   );
   const first = await withSiteCeiling(work, ceilingFor(type));
+  // The person approved this site's one Seal sheet (services/sealPass.ts): its seal payment, next, rides the same
+  // Face ID however long the sheet was read. The marker is the background's, never the site's, and is not passed on.
+  if (type === 'createSignature' && (first as { sealApproved?: unknown } | undefined)?.sealApproved === true) {
+    siteGate.extendPass?.(o.origin);
+    const { sealApproved: _drop, ...rest } = first as Record<string, unknown>;
+    void _drop;
+    return rest;
+  }
   if ((first as { code?: unknown } | undefined)?.code !== SITE_CALL_TIMEOUT_CODE) return first;
   // Timed out: close this site's open sheets so nothing can be approved after the site was told "timed out".
   const answer = await withSiteCeiling(

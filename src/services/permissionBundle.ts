@@ -15,6 +15,7 @@
  */
 
 import { BLOCK_SITE_BASKET, basketDisplayName, isReservedBasket } from './reservedBaskets';
+import type { SealSheet } from './sealPass';
 
 export { BLOCK_SITE_BASKET };
 
@@ -47,6 +48,11 @@ export interface BundleRequest {
    * the top-level host. Never a grant, never "Don't ask again".
    */
   framePair?: string;
+  /**
+   * The wallet's own one Seal sheet for bit-sign's sign-and-seal (services/sealPass.ts): the words to show. A synthetic
+   * line, never sent to the permissions manager; nothing is stored when it is allowed.
+   */
+  seal?: SealSheet;
 }
 
 /** Most lines that may join one open sheet. More queue for their own sheet. */

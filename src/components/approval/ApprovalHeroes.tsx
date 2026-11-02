@@ -143,15 +143,28 @@ export const ConnectHero = ({ site }: { site: string }) => {
   );
 };
 
-export const PayHero = ({ amount, sub, badge = 'PAY' }: { amount: string; sub?: string; badge?: string }) => (
+export const PayHero = ({
+  amount,
+  sub,
+  badge = 'PAY',
+  fontSize,
+}: {
+  amount: string;
+  sub?: string;
+  badge?: string;
+  /** Override for text that is not a price (the Seal sheet's document fingerprint). */
+  fontSize?: string;
+}) => (
   <Panel glow={0.26} column>
     <Contours lines="two" />
     <div
       className="relative"
       style={{
         // "Price loading…" / "3,412 sats" (no price yet) are words, not the dollar figure: smaller.
-        fontSize: amount.length > 10 ? 'min(44px, 6vh)' : amount.length > 6 ? 'min(84px, 10vh)' : 'min(112px, 13vh)',
-        letterSpacing: amount.length > 10 ? -1 : -5,
+        fontSize:
+          fontSize ??
+          (amount.length > 10 ? 'min(44px, 6vh)' : amount.length > 6 ? 'min(84px, 10vh)' : 'min(112px, 13vh)'),
+        letterSpacing: fontSize ? -2 : amount.length > 10 ? -1 : -5,
         lineHeight: 1,
         fontWeight: 800,
         color: CARD.gold,
