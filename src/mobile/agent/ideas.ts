@@ -7,7 +7,6 @@ import { BSPACES_ENABLED, MARKET_ENABLED, SUBSCRIPTIONS_ENABLED } from '../store
  */
 export type IdeaTopic =
   | 'Money & pots'
-  | 'Trading'
   | 'Tokens'
   | 'Spaces'
   | 'Music'
@@ -18,8 +17,11 @@ export type IdeaTopic =
   | 'Builders';
 export type Idea = { topic: IdeaTopic; label: string };
 
-/** UK gate (region/region.ts): suggestion topics a restricted visitor never sees (buying, selling, launching). */
-export const UK_GATED_TOPICS: readonly IdeaTopic[] = ['Trading', 'Tokens'];
+/**
+ * UK gate (region/region.ts): suggestion topics a restricted visitor never sees. Guide v3 (2 Nov 2026) removed every
+ * buy, sell, swap, list, launch and trading-strategy line for everyone; Tokens stays hidden from restricted visitors.
+ */
+export const UK_GATED_TOPICS: readonly IdeaTopic[] = ['Tokens'];
 
 const T = (topic: IdeaTopic, labels: string[]): Idea[] => labels.map((label) => ({ topic, label }));
 
@@ -60,25 +62,11 @@ export const IDEAS: Idea[] = [
   ]),
   ...(MARKET_ENABLED
     ? [
-        ...T('Trading', [
-          'Develop a trading strategy with b',
-          'Set limits on an agent account',
-          'Load a strategy into an agent account',
-          'List my strategy on the Exchange',
-          'Compare strategy listings',
-          'Buy some of a token',
-          'Sell a token I hold',
-          'Set a stop for my strategy',
-          'Curious about a token?',
-        ]),
         ...T('Tokens', [
-          'Launch a token for your community',
           'List my app as a bApp with its own token',
           'Mint a ticket for an event',
           'What is a BSV-21 token?',
           'Why does only one token have a ✓?',
-          'Sell a ticket I hold',
-          'Cancel a token listing',
           'What is token indexing?',
           'Invite someone with a ticket',
         ]),
