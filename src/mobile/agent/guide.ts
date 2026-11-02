@@ -67,3 +67,14 @@ SETTINGS (account drawer › Settings)
 - Sweep from another wallet (Settings › Account & safety): move coins and tokens from an old 12/24-word wallet such as SimplyCash into this account. The phrase is typed into that screen only, never into this chat. Restore › SimplyCash on the restore page starts the same thing for a new wallet.
 
 If you are not sure how something works in bWallet, say so rather than guessing.${MARKET_ENABLED ? MAKING_THINGS : ''}`;
+
+/**
+ * UK gate (region/region.ts): the guide for a visitor the region check restricts. No Exchange, buying, selling or
+ * coin launches, and b is told not to suggest them (CEO ruling 2 Nov 2026). Behind the literal MARKET_ENABLED, so a
+ * store build keeps none of the replaced text.
+ */
+const UK_LINE = `This visitor's region has no Exchange, Swap or Buy BSV. Do not suggest buying, selling, trading, swapping or launching tokens or crypto, and do not talk about prices going up. Holding, sending, receiving, minting for themselves and rooms work as usual.`;
+export const ukRestrictedGuide = (guide: string): string =>
+  MARKET_ENABLED
+    ? guide.replace(MARKET_LINE, `${STORE_MARKET_LINE}\n${UK_LINE}`).replace(TICKET_SELL, '').replace(MAKING_THINGS, '')
+    : guide;

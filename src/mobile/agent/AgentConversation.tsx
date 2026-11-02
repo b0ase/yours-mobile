@@ -22,7 +22,8 @@ import {
   transcript,
   type AgentMessage,
 } from './agent';
-import { BWALLET_GUIDE } from './guide';
+import { BWALLET_GUIDE, ukRestrictedGuide } from './guide';
+import { useMarketAllowed } from '../region/useRegion';
 import { PROVIDERS, callProvider } from './providers';
 import { loadKey } from './keyStore';
 import { KeyScreen } from '../settings/AgentSettings';
@@ -232,6 +233,7 @@ export const AgentConversation = ({
   const account = chromeStorageService.getCurrentAccountObject().account;
   const accountId = account?.addresses.identityAddress;
   // bWalletX only: in an agent account b may act, within the account's limits and loaded strategy (agents/agentTrade.ts).
+  const market = useMarketAllowed();
   const baseSystem = MARKET_ENABLED
     ? BWALLET_GUIDE + agentAccountPrompt(accountId, account?.name || 'Agent account')
     : BWALLET_GUIDE;
@@ -246,8 +248,9 @@ export const AgentConversation = ({
   const chatId = messages.length ? threadId(accountId) : null;
   const name = chatId ? chatName(chatId, null) : null;
   // Inline buttons (inlineActions.ts): b may add [[Label|/m/screen]]; a tap only opens that screen, never acts.
+  // UK gate (region/region.ts): a restricted visitor's b gets the guide without Exchange, buying or coin launches.
   const system =
-    baseSystem +
+    (market ? baseSystem : ukRestrictedGuide(baseSystem)) +
     (bweb.privacy.shareScreen ? screenContext(screen) : '') +
     bwebContext(bweb) +
     INLINE_ACTIONS_PROMPT +
@@ -787,7 +790,7 @@ export const AgentConversation = ({
         <div className="absolute inset-0 z-0">
           <ObsidianHero
             compact={compact}
-            extra={MARKET_ENABLED ? QUICK_STARTS : []}
+            extra={MARKET_ENABLED && market ? QUICK_STARTS : []}
             options={starters}
             onPick={(prompt) => {
               setInput(prompt);
@@ -951,7 +954,7 @@ export const AgentConversation = ({
         </div>
       </div>
 
-      {MARKET_ENABLED && !input && !busy && messages.length > 0 && (
+      {MARKET_ENABLED && market && !input && !busy && messages.length > 0 && (
         <div className="askb-chips relative z-10 shrink-0 flex flex-wrap gap-1.5 px-3 pb-2">
           {QUICK_STARTS.map((q) => (
             <button

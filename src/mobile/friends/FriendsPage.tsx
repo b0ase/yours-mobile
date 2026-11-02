@@ -75,6 +75,7 @@ import {
   type Warning,
 } from './model';
 import './friends.css';
+import { useMarketAllowed } from '../region/useRegion';
 
 // A friend's personal token + "Buy & chat": Exchange builds only (the chunk is dropped from store builds).
 const FriendToken = MARKET_ENABLED ? lazy(() => import('../exchange/FriendToken')) : null;
@@ -489,6 +490,8 @@ const NftPicker = ({ to, onClose }: { to: string; onClose: () => void }) => {
 };
 
 const FriendDetail = ({ fr, data }: { fr: Friend; data: Data }) => {
+  // UK gate (region/region.ts): no buying or selling for a restricted visitor (fail closed).
+  const market = useMarketAllowed();
   const c = fr.contact;
   const navigate = useNavigate();
   const { handleSelect } = useBottomMenu();
@@ -602,7 +605,7 @@ const FriendDetail = ({ fr, data }: { fr: Friend; data: Data }) => {
         </div>
       </div>
 
-      {FriendToken && c.handle && (
+      {FriendToken && market && c.handle && (
         <Suspense fallback={null}>
           <FriendToken handle={c.handle} />
         </Suspense>

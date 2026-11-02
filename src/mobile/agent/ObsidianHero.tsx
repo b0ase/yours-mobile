@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { B_OUTLINE_D, B_OUTLINE_VIEWBOX } from '../brand/bOutline';
 import bGlyph from '../brand/bwalletx-glyph.svg';
-import { IDEAS, ideaPrompt, shuffled } from './ideas';
+import { IDEAS, ideaPrompt, shuffled, UK_GATED_TOPICS } from './ideas';
+import { useMarketAllowed } from '../region/useRegion';
 import { ObsidianBackdrop } from '../ui/ObsidianBackdrop';
 import { prefersReducedMotion } from '../ui/obsidianPool';
 import { accentById, DEFAULT_ACCENT } from '../theme/accents';
@@ -17,9 +18,16 @@ import { useAccentId } from '../theme/useAccent';
 type Option = { label: string; prompt: string };
 
 // "Ask b", then ~100 things b can help with, shuffled once per page load (ideas.ts). Each only fills the bar.
-const OPTIONS: Option[] = [
-  { label: 'Ask b', prompt: 'Hi b. What can you help me with?' },
-  ...shuffled(IDEAS).map((i) => ({ label: i.label, prompt: ideaPrompt(i.label) })),
+const SHUFFLED = shuffled(IDEAS);
+const ASK_B: Option = { label: 'Ask b', prompt: 'Hi b. What can you help me with?' };
+const OPTIONS: Option[] = [ASK_B, ...SHUFFLED.map((i) => ({ label: i.label, prompt: ideaPrompt(i.label) }))];
+// UK gate (region/region.ts): no trading or token-launch suggestions for a restricted visitor.
+const UK_OPTIONS: Option[] = [
+  ASK_B,
+  ...SHUFFLED.filter((i) => !UK_GATED_TOPICS.includes(i.topic)).map((i) => ({
+    label: i.label,
+    prompt: ideaPrompt(i.label),
+  })),
 ];
 
 /** How long each suggestion floats in the pool, and its fade. */
@@ -45,7 +53,8 @@ export const ObsidianHero = ({
   options?: Option[];
 }) => {
   const [still] = useState(prefersReducedMotion);
-  const lines = options?.length ? options : [...OPTIONS, ...extra];
+  const market = useMarketAllowed();
+  const lines = options?.length ? options : [...(market ? OPTIONS : UK_OPTIONS), ...extra];
   // Clock-driven: the line index and fade come from one page-load clock, so re-renders never stack timers
   // or reset to "Ask b" (owner, 12 Oct 2026: fades glitching).
   const [now, setNow] = useState(() => Date.now());

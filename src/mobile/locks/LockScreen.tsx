@@ -98,6 +98,7 @@ import {
   type Curve,
   type CurveKind,
 } from './curves';
+import { useMarketAllowed } from '../region/useRegion';
 
 /**
  * /m/lock — the phone top bar's Lock BSV button (docs/TIME-LOCK-PLAN.md).
@@ -175,9 +176,12 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
   // Wallet › PNEEs lock icon opens /m/lock?back=pnee: the Back PNEEs card first, then how much BSV, then the
   // builder filled in for the PNEEs pot (owner, 10 Oct 2026).
   // The router is a MemoryRouter, so the ?back=pnee lives on the router location, never window.location.
-  const [backPnee, setBackPnee] = useState<'card' | 'amount' | null>(() =>
+  const [backPneeState, setBackPnee] = useState<'card' | 'amount' | null>(() =>
     isBackPneeMode(location.search) ? 'card' : null,
   );
+  // UK gate (region/region.ts): Back PNEEs is an Exchange flow, so a restricted visitor never sees its sheets.
+  const market = useMarketAllowed();
+  const backPnee = market ? backPneeState : null;
   /** Entered from Wallet › PNEEs: closing returns to the Wallet, and a finished lock shows the done card. */
   const [pneeFromWallet, setPneeFromWallet] = useState(() => isBackPneeMode(location.search));
   const [pneeDone, setPneeDone] = useState<number | null>(null);
@@ -925,7 +929,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
                         {t.name}
                       </button>
                     ))}
-                    {MARKET_ENABLED && (
+                    {MARKET_ENABLED && market && (
                       <button
                         onClick={() => setBackPnee('card')}
                         className="rounded-full px-3 py-2 text-xs font-bold"

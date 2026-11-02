@@ -7,6 +7,7 @@ import { EXAMPLE_STRATEGIES } from './examples';
 import { publishStrategy } from './market';
 import { rememberStrategy } from './myStrategies';
 import { publishProblems, sealStrategy, SPEC_LABELS, STRATEGY_DISCLAIMER } from './strategyNft';
+import { useMarketAllowed } from '../region/useRegion';
 
 const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
@@ -30,7 +31,9 @@ export const PublishStrategy = ({ strategy, onClose }: { strategy: Strategy; onC
   const [problems, setProblems] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<string | null>(null);
-  if (!MARKET_ENABLED) return null;
+  // UK gate (region/region.ts): no selling strategies for a restricted visitor.
+  const market = useMarketAllowed();
+  if (!MARKET_ENABLED || !market) return null;
   const payTo = account?.addresses.bsvAddress ?? '';
   const sale = { priceUsd: Number(price), copies: Number(copies), payTo };
   const s: Strategy = { ...base, spec };

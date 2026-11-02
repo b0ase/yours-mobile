@@ -284,6 +284,7 @@ import { celebrateSend } from '../../components/sent/sent';
 import { ErrorActions } from '../errors/ErrorActions';
 import { LIST_TYPES, THREAD_TYPES, useLive, useLiveHealth, useLiveTyping } from '../chat/live';
 import { useRoomFeed } from '../chat/roomFeed';
+import { useMarketAllowed } from '../region/useRegion';
 
 /**
  * Chat › Chatrooms: open rooms (no token, every build) + token rooms (docs/TOKEN-ROOMS.md); 1:1 DMs + contacts live in the DMs
@@ -1789,7 +1790,8 @@ const LockedRoom = ({
   gate: TokenGate;
   heldRaw: string | null;
   members: number | null;
-  onBuy: () => void;
+  /** Null when the Exchange is off for this visitor (store build or the UK gate). */
+  onBuy: (() => void) | null;
   onClose: () => void;
 }) => (
   <Sheet title={gate.key.startsWith('coll:') ? gate.symbol : `$${gate.symbol} room`} onClose={onClose}>
@@ -1807,7 +1809,7 @@ const LockedRoom = ({
           ? `You hold ${amountLabel(heldRaw, gate)}.`
           : 'Holding the token is your membership.'}
       </p>
-      {MARKET_ENABLED && ROOMS && (
+      {MARKET_ENABLED && ROOMS && onBuy && (
         <button
           onClick={onBuy}
           className="mt-2 w-full rounded-2xl py-3 font-bold flex items-center justify-center gap-2"
@@ -2569,6 +2571,8 @@ const SetupRoomRow = ({ token, onDone }: { token: OwnToken; onDone: () => void }
  */
 const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   const myName = useChatDisplayName();
+  // UK gate (region/region.ts): no Buy / Sell / Exchange links for a restricted visitor.
+  const market = useMarketAllowed();
   const { apiContext } = useServiceContext();
   const { handleSelect } = useBottomMenu();
   const online = useOnline();
@@ -3182,7 +3186,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   const buy = (key: string) => {
     const ref = parseTokenKey(key);
     setLocked(null);
-    if (!ref || !MARKET_ENABLED) return;
+    if (!ref || !MARKET_ENABLED || !market) return;
     requestMarketToken(ref);
     handleSelect(asMenuItem('market'));
   };
@@ -3683,7 +3687,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
                     <p className="text-xs mt-1" style={{ color: MUTED }}>
                       Buy a token in Market to join its chatroom.
                     </p>
-                    {MARKET_ENABLED && (
+                    {MARKET_ENABLED && market && (
                       <button
                         onClick={() => handleSelect(asMenuItem('market'))}
                         className="mt-4 rounded-2xl px-5 py-2 text-sm font-bold inline-flex items-center gap-2"
@@ -3711,7 +3715,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           gate={locked.gate}
           heldRaw={locked.heldRaw}
           members={locked.members}
-          onBuy={() => buy(locked.gate.key)}
+          onBuy={market ? () => buy(locked.gate.key) : null}
           onClose={() => setLocked(null)}
         />
       )}
@@ -3727,7 +3731,9 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           onInvite={open.entry && open.entry.key.startsWith('bsv21:') ? () => setInviting(true) : null}
           onXInvites={xManage && xManage === open.room.ticker ? () => setXInvites(true) : null}
           onBans={!openTicker && open.entry ? () => setRoomSettings(true) : null}
-          onMarket={MARKET_ENABLED && open.entry?.key.startsWith('bsv21:') ? () => buy(open.entry!.key) : null}
+          onMarket={
+            MARKET_ENABLED && market && open.entry?.key.startsWith('bsv21:') ? () => buy(open.entry!.key) : null
+          }
           onBounties={openTicker ? null : () => setShowBounties(true)}
           openRoom={
             openTicker
@@ -3811,7 +3817,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
           ticker={open.room.ticker}
           entry={open.entry}
           setup={!roomSettings && roomSetupOffer}
-          onSell={MARKET_ENABLED ? () => sellTickets(open.entry!.key) : null}
+          onSell={MARKET_ENABLED && market ? () => sellTickets(open.entry!.key) : null}
           onBans={() => {
             setRoomSettings(false);
             setRoomSetupOffer(false);

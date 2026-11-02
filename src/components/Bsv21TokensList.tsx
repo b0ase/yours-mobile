@@ -30,6 +30,7 @@ import { ALL_VIEW, filterView, liveView, tokenKey, viewCounts, type AlbumView } 
 import { useListCoin } from '../mobile/wallet/useListCoin';
 import { rowMatchesCoin } from '../mobile/wallet/cardFilter';
 import { hasFocusHost, setFocusedToken } from '../mobile/wallet/cardFocus';
+import { useMarketAllowed } from '../mobile/region/useRegion';
 
 const resolveIcon = (icon: string) => (isUri(icon) ? icon : `${ONESAT_MAINNET_CONTENT_URL}/${icon}`);
 
@@ -86,6 +87,8 @@ const TokenAssetRow = ({ t, usdBalance, still }: { t: Bsv21Balance; usdBalance: 
 
 export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
   const navigate = useNavigate();
+  // UK gate (region/region.ts): no buying or selling for a restricted visitor (fail closed).
+  const market = useMarketAllowed();
   const { tokens: tokensProp, theme, onTokenClick, hideStatusLabels = false } = props;
   const { chromeStorageService, apiContext } = useServiceContext();
   const [priceData, setPriceData] = useState<PriceData[]>([]);
@@ -213,7 +216,7 @@ export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
         onReceive={() => props.onReceive?.()}
         onChat={() => props.onChat?.(t)}
         onLock={() => props.onLock?.(t)}
-        onSell={SELL_ENABLED && marketTradingEnabled() ? () => navigate(sellRoute(t.id)) : undefined}
+        onSell={SELL_ENABLED && market && marketTradingEnabled() ? () => navigate(sellRoute(t.id)) : undefined}
         onFolder={() => setFiling(t)}
       >
         <div

@@ -138,6 +138,9 @@ const webShell = (): Plugin => ({
       fileName: 'vercel.json',
       source: readFileSync(resolve(__dirname, 'src/web/vercel.json')),
     });
+    // UK gate region source (src/mobile/region/region.ts): the /api/geo function. A git build takes it from the repo
+    // root's api/; a CLI upload of build-web (the release flow) needs this copy at build-web/api/geo.mjs.
+    this.emitFile({ type: 'asset', fileName: 'api/geo.mjs', source: readFileSync(resolve(__dirname, 'api/geo.mjs')) });
     // Install UI (Chrome's richer install sheet on desktop): one wide screenshot of the welcome screen.
     this.emitFile({
       type: 'asset',

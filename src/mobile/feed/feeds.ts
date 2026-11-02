@@ -252,15 +252,24 @@ export const rowFeeds = (pins: FeedId[], feeds: readonly FeedDef[] = FEEDS): Fee
   ];
 };
 
+/** UK gate (region/region.ts): the feeds a visitor may open; no bExchange (token prices, Buy / Sell) when restricted. */
+export const feedsFor = (market: boolean, feeds: readonly FeedDef[] = FEEDS): readonly FeedDef[] =>
+  market ? feeds : feeds.filter((f) => f.id !== 'bexchange');
+
 /** The swipe order: the row, then the open feed when it was opened from All feeds. */
-export const swipeOrder = (pins: FeedId[], current: FeedId): FeedId[] => {
-  const row = rowFeeds(pins);
+export const swipeOrder = (pins: FeedId[], current: FeedId, feeds: readonly FeedDef[] = FEEDS): FeedId[] => {
+  const row = rowFeeds(pins, feeds);
   return row.includes(current) ? row : [...row, current];
 };
 
 /** The next (dir 1) or previous (dir -1) feed, or null at either end. */
-export const stepFeed = (pins: FeedId[], current: FeedId, dir: 1 | -1): FeedId | null => {
-  const order = swipeOrder(pins, current);
+export const stepFeed = (
+  pins: FeedId[],
+  current: FeedId,
+  dir: 1 | -1,
+  feeds: readonly FeedDef[] = FEEDS,
+): FeedId | null => {
+  const order = swipeOrder(pins, current, feeds);
   return order[order.indexOf(current) + dir] ?? null;
 };
 

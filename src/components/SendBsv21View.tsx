@@ -52,6 +52,7 @@ import { celebrateSend } from './sent/sent';
 import { P2PKH } from '@bsv/sdk';
 import { maxOverlayFee, withTokenSendGuard, type OverlayFee } from '../mobile/wallet/send/tokenFee';
 import { HOLDER_DROP_ENABLED } from '../mobile/storeBuild';
+import { useChartsAllowed, useMarketAllowed } from '../mobile/region/useRegion';
 
 // Issuer tools › Airdrop to holders: bWalletX only, a lazy chunk the store build drops (storeBuild.ts).
 const HolderDropSheet = HOLDER_DROP_ENABLED ? lazy(() => import('../mobile/holderDrop/HolderDropSheet')) : null;
@@ -131,6 +132,9 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
   const sentAtomicRef = useRef<bigint>(0n);
   const [copied, setCopied] = useState(false);
   const [selling, setSelling] = useState(false);
+  // UK gate (mobile/region/region.ts): a restricted visitor sees the balance only, no price chart, Buy or Sell.
+  const marketOk = useMarketAllowed();
+  const chartsOk = useChartsAllowed();
   const [dropping, setDropping] = useState(false);
   // Recipient fields stay hidden until the owner taps Send (owner, 5 Oct 2026).
   const [composing, setComposing] = useState(!!prefill);
@@ -758,7 +762,7 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
           </div>
 
           {/* Market chart */}
-          <Show when={!!token.info.id}>
+          <Show when={!!token.info.id && chartsOk}>
             <div className="mx-4 mb-5 rounded-2xl p-4" style={{ background: row }}>
               <Suspense fallback={<div style={{ height: 140 }} />}>
                 <PriceChart tokenId={token.info.id} />
@@ -972,7 +976,7 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
 
             {/* Action buttons */}
             <div className="flex gap-2 px-4 mt-3 mb-4">
-              {SELL_ENABLED && maxAmount > 0n && (
+              {SELL_ENABLED && marketOk && maxAmount > 0n && (
                 <motion.button
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
@@ -1040,7 +1044,7 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
           />
         </Suspense>
       )}
-      {SELL_ENABLED && selling && token && (
+      {SELL_ENABLED && marketOk && selling && token && (
         <SellSheet
           target={{ tokenId: token.info.id, symbol: getTokenName(token.info), dec: token.info.dec, heldRaw: maxAmount }}
           onClose={() => setSelling(false)}

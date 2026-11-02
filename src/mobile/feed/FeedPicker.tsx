@@ -11,7 +11,8 @@ import { ChevronDown, ChevronUp, House, LayoutGrid, Pin, Sparkles, X, type Lucid
 import { useBackClose } from '../backStack';
 import { BappIcon } from '../brand/bappIcons';
 import { ALL_FEEDS_ICON, feedIcon, type FeedGlyph, type FeedIcon } from './feedIcons';
-import { FIXED_ROW, GOLD, feedColor, feedDef, feedGroups, rowFeeds, type FeedId } from './feeds';
+import { FIXED_ROW, GOLD, feedColor, feedDef, feedGroups, feedsFor, rowFeeds, type FeedId } from './feeds';
+import { useMarketAllowed } from '../region/useRegion';
 
 const INK = '#1a1300';
 const LINE = '#1f2127';
@@ -102,7 +103,8 @@ export const FeedPicker = ({
   onPick: (id: FeedId) => void;
   onOpenAll: () => void;
 }) => {
-  const row = rowFeeds(pins);
+  // UK gate (region/region.ts): no bExchange chip for a restricted visitor.
+  const row = rowFeeds(pins, feedsFor(useMarketAllowed()));
   return (
     <div className="relative pb-2">
       <div
@@ -155,6 +157,8 @@ export const AllFeedsSheet = ({
   onMovePin: (id: FeedId, dir: 1 | -1) => void;
   onClose: () => void;
 }) => {
+  // UK gate (region/region.ts): no Feed › bExchange (token prices, Buy / Sell) for a restricted visitor.
+  const market = useMarketAllowed();
   useBackClose(true, onClose);
   return createPortal(
     <div className="fixed inset-0 z-[150] flex items-end" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={onClose}>
@@ -214,7 +218,7 @@ export const AllFeedsSheet = ({
             </ol>
           </section>
         )}
-        {feedGroups().map((g) => (
+        {feedGroups(feedsFor(market)).map((g) => (
           <section key={g.id} className="mb-4">
             <h4 className="mb-2 text-[11px] font-bold uppercase tracking-wider" style={{ color: MUTED }}>
               {g.label}

@@ -10,6 +10,7 @@ import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { asMenuItem } from '../tabs/tabs';
 import ModelThumb from '../three3d/ModelThumb';
 import { feedColor } from './feeds';
+import { useMarketAllowed } from '../region/useRegion';
 
 /**
  * Feed › b3D (owner, 15 Oct 2026): the 3D NFTs that Exchange › 3D shows, from the same 1Sat order book
@@ -103,6 +104,8 @@ const Card = ({
 };
 
 export const B3dFeed = () => {
+  // UK gate (region/region.ts): no buying or selling for a restricted visitor (fail closed).
+  const market = useMarketAllowed();
   const [items, setItems] = useState<NftListing[] | null>(null);
   const [pinned, setPinned] = useState<Record<string, NftListing[]>>({});
   const [error, setError] = useState('');
@@ -133,6 +136,7 @@ export const B3dFeed = () => {
 
   const open = (n: NftListing, site?: string) => {
     if (!n.priceSats && site) return void openDappBrowser(site);
+    if (!market) return void (site && openDappBrowser(site));
     requestMarketNft(n);
     handleSelect(asMenuItem('market'));
   };

@@ -46,7 +46,9 @@ import bpicsGlyph from './brand/bpics-glyph.svg';
 import { ArrowRight, Clock, Github, Globe, Lock, Plus, Search, Star, X } from 'lucide-react';
 import { BAPP_GROUPS, bappsIn, type BApp } from './bapps';
 import { ALL_BAPP_ICON_SLUGS, bappIconUrl, useThemedIcon } from './brand/bappIcons';
-import { RADAR_APPS, RADAR_GROUPS } from './radarApps';
+import { RADAR_APPS, RADAR_GROUPS, UK_GATED_RADAR_URLS } from './radarApps';
+import { EXCHANGE_BAPPS } from './exchangeAppsX';
+import { useMarketAllowed } from './region/useRegion';
 import { GAME_SOURCES, gamesFor } from './games/gamesCatalog';
 import { AddAppSheet } from './apps/AddAppSheet';
 import { appIconFor, useUserApps } from './apps/userApps';
@@ -307,6 +309,9 @@ const GAME_SECTIONS = GAME_SOURCES.map((s) => ({
     ),
 })).filter((s) => s.tiles.length > 0);
 const OTHER_SECTIONS = RADAR_SECTIONS.filter((g) => g.label !== 'Games');
+// UK gate (region/region.ts): tiles a restricted visitor does not see (exchanges, markets, on-ramps, the Exchange).
+const UK_GATED_URLS = new Set([...UK_GATED_RADAR_URLS, ...EXCHANGE_BAPPS.map((b) => b.url)]);
+const ukGatedTile = (t: Tile) => UK_GATED_URLS.has(t.url) || t.screen === 'exchange';
 
 const LONG_PRESS_MS = 450;
 /** Keep holding a Home tile this long and Home goes straight into arrange mode (like iPhone). */
@@ -620,6 +625,9 @@ const BrowserPage = ({
   const phone = usePhoneLayout();
   const navigate = useNavigate();
   const lightScheme = useLightScheme();
+  // UK gate (region/region.ts): no exchange / market / on-ramp tiles for a restricted visitor (fail closed).
+  const market = useMarketAllowed();
+  const allowedTile = (t: Tile) => market || !ukGatedTile(t);
   const only: Only | undefined = onlyProp ?? (phone ? 'apps' : undefined);
   const keyboard = useKeyboardInset();
   const reduce = useReducedMotion();
@@ -733,8 +741,10 @@ const BrowserPage = ({
     writeFavourites(next);
   };
   // An app lives in one place: on Home it leaves bApps / Other apps, and returns when removed from Home.
-  const notHome = (tiles: Tile[]) => tiles.filter((t) => !favourites.includes(t.url));
-  const favouriteTiles = favourites.map((u) => ALL_TILES.find((t) => t.url === u)).filter((t): t is Tile => !!t);
+  const notHome = (tiles: Tile[]) => tiles.filter((t) => !favourites.includes(t.url) && allowedTile(t));
+  const favouriteTiles = favourites
+    .map((u) => ALL_TILES.find((t) => t.url === u))
+    .filter((t): t is Tile => !!t && allowedTile(t));
   // Indices come from the visible tiles; map them back to the stored list (which may hold unknown URLs).
   const reorderHome = (from: number, to: number) => {
     const next = moveItem(
@@ -790,7 +800,8 @@ const BrowserPage = ({
 
   // Entrance: the grid settles from slightly zoomed-in, like an iOS home screen after unlock
   // (transform/opacity only). A gentler version replays when the switch picks a page.
-  const grid = (i: number, tiles: Tile[]) => {
+  const grid = (i: number, all: Tile[]) => {
+    const tiles = all.filter(allowedTile);
     const replayed = replay.page === i;
     return (
       <motion.div
@@ -894,6 +905,10 @@ const BrowserPage = ({
 
   /** A tile key (phone/appScreens.ts) → its tile. */
   const keyTile = (k: string): Tile | null => {
+    const t = keyTileAny(k);
+    return t && allowedTile(t) ? t : null;
+  };
+  const keyTileAny = (k: string): Tile | null => {
     const sys = SYS_TILES.find((t) => t.key === k);
     if (sys) return sys;
     if (k.startsWith('screen:')) {
@@ -908,7 +923,7 @@ const BrowserPage = ({
     ...appScreens.screens.flatMap((x) => x.items),
     ...dock.flatMap((i) => (i.kind === 'app' ? [i.url] : [])),
   ]);
-  const notPlaced = (tiles: Tile[]) => tiles.filter((t) => !placed.has(t.url));
+  const notPlaced = (tiles: Tile[]) => tiles.filter((t) => !placed.has(t.url) && allowedTile(t));
 
   /** Phone layout app screen i: its 4 × 6 grid; Home also has Your apps, Recents and More apps below. */
   const screenBody = (i: number, flow = false) => {
@@ -1048,7 +1063,7 @@ const BrowserPage = ({
   const bappsStore = () => (
     <BappsStore
       open={(url, name) => go(url, { name, url } as BApp)}
-      builtins={BAPPS_GROUPED.map(
+      builtins={BAPPS_GROUPED.filter(allowedTile).map(
         (t): StoreItem => ({
           key: t.key,
           name: t.name,
@@ -1060,7 +1075,7 @@ const BrowserPage = ({
           onOpen: () => (isSys(t) ? navigate(t.url) : go(t.url, t.bapp)),
         }),
       )}
-      community={[...OTHER_TILES, ...OTHER_SECTIONS.flatMap((g) => g.tiles)].map(
+      community={[...OTHER_TILES, ...OTHER_SECTIONS.flatMap((g) => g.tiles)].filter(allowedTile).map(
         (t): StoreItem => ({
           key: t.key,
           name: t.name,

@@ -10,6 +10,7 @@ import { FEATURED_TRACKS, featuredQueue } from '../media/featured/featured';
 import { listPots, listSubs, onPotsChange } from '../pots/pots';
 import { useCollapsed } from './collapse';
 import { CollapseToggle } from './CollapseToggle';
+import { useChartsAllowed } from '../region/useRegion';
 
 const HistoryScreen = lazy(() => import('../wallet/HistoryScreen'));
 const PotsScreen = lazy(() => import('../pots/PotsScreen'));
@@ -115,13 +116,15 @@ export const HistoryModule = () => {
 
 // ── BSV price chart ───────────────────────────────────────────────────────────────────────────────────────────
 
-export const PriceChartModule = () => (
-  <Panel title="BSV price" collapseKey="price">
-    <Suspense fallback={<div style={{ height: 140 }} />}>
-      <BsvPriceChart />
-    </Suspense>
-  </Panel>
-);
+// UK gate (region/region.ts): no chart panel for a restricted visitor; store builds unchanged.
+export const PriceChartModule = () =>
+  useChartsAllowed() ? (
+    <Panel title="BSV price" collapseKey="price">
+      <Suspense fallback={<div style={{ height: 140 }} />}>
+        <BsvPriceChart />
+      </Suspense>
+    </Panel>
+  ) : null;
 
 // ── Pots ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
