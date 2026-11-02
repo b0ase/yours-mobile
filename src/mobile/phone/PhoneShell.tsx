@@ -13,6 +13,7 @@ import { getBappFrameState, openBapp } from '../bappFrame/bappFrame';
 import { usePendingIndexing } from '../tokens/pendingIndexing';
 import { TWETCH_POST_ENABLED, indexingEnabled } from '../storeBuild';
 import { TAB_TAP } from '../tabs/tabs';
+import { useMarketAllowed } from '../region/useRegion';
 import { onTabRetap } from '../tabs/tabRetap';
 import { badgeText, walletBadgeLabel } from '../tabs/tabBadges';
 import { useTabBadges } from '../tabs/useTabBadges';
@@ -113,6 +114,12 @@ const Shell = () => {
   const { apiContext, chromeStorageService } = useServiceContext();
   const { pairLink, clearPairLink } = useAppServices();
   const [dock, setDock] = useDock();
+  // UK gate (region/region.ts): no Exchange in the dock for a restricted visitor, fail closed while the lookup runs.
+  const marketOk = useMarketAllowed();
+  const shownDock = useMemo(
+    () => (marketOk ? dock : dock.filter((i) => !(i.kind === 'screen' && i.id === 'exchange'))),
+    [dock, marketOk],
+  );
   const [sendReceive, setSendReceive] = useState(false);
   const [adding, setAdding] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -541,7 +548,7 @@ const Shell = () => {
     <>
       {visible && (
         <Dock
-          items={dock}
+          items={shownDock}
           labels={LABELS}
           activeKey={current ? dockKey({ kind: 'screen', id: current.id }) : null}
           badges={badges}
