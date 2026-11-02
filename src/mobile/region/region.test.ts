@@ -25,7 +25,7 @@ import {
 } from './region';
 import { TAB_ORDER, routeFor, tabFor, visibleTabs } from '../tabs/tabs';
 import { feedsFor } from '../feed/feeds';
-import { ukRestrictedGuide, BWALLET_GUIDE } from '../agent/guide';
+import { BWALLET_GUIDE, GUIDE_VERSION, NOT_IN_UK, NOT_IN_UK_LINE } from '../agent/guide';
 
 /** In-memory Storage stand-in; `broken` throws on every call (private mode, blocked site data). */
 const memStore = (broken = false) => {
@@ -203,12 +203,15 @@ describe('UK region gate: effective gates and routes', () => {
     expect(feedsFor(true).some((f) => f.id === 'bexchange')).toBe(true);
     expect(feedsFor(false).some((f) => f.id === 'bexchange')).toBe(false);
   });
-  test('Ask b: the restricted guide has no Exchange buying or coin launches', () => {
-    const g = ukRestrictedGuide(BWALLET_GUIDE);
-    expect(BWALLET_GUIDE).toContain('Launch a coin');
-    expect(g).not.toContain('Launch a coin');
-    expect(g).not.toContain('Market: buy NFTs');
-    expect(g).toContain('no Exchange, Swap or Buy BSV');
+  test('Ask b: the guide a restricted visitor gets (the same for everyone, v3) never steers to markets', () => {
+    // Guide v3 (CEO, 2 Nov 2026) is not region-conditional: every user, UK or unknown included, gets this text.
+    expect(GUIDE_VERSION).toBe(3);
+    for (const banned of [/launchpad/i, /raise into/i, /buy the token/i, /launch a coin/i, /market:/i, /exchange/i])
+      expect(BWALLET_GUIDE).not.toMatch(banned);
+    expect(NOT_IN_UK).toBe('not available in the UK');
+    expect(BWALLET_GUIDE).toContain(NOT_IN_UK_LINE);
+    expect(NOT_IN_UK_LINE).toBe("That isn't available in the UK.");
+    expect(BWALLET_GUIDE).toContain(`answer in one line that it is ${NOT_IN_UK}`);
   });
 });
 

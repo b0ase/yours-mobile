@@ -869,7 +869,7 @@ describe('App Review 3.1.5(iii): no exchange surfaces in a store build', () => {
     expect(src('./agents/agentTrade.ts')).toContain("if (!MARKET_ENABLED && a.kind !== 'send')");
     expect(src('./agents/AgentsScreen.tsx')).toContain('{MARKET_ENABLED && <StrategySection id={id} />}');
     expect(src('./agent/AgentConversation.tsx')).toContain('!MARKET_ENABLED || baseSystem === BWALLET_GUIDE');
-    expect(src('./agent/guide.ts')).toContain('MARKET_ENABLED ? MARKET_LINE : STORE_MARKET_LINE');
+    expect(src('./agent/guide.ts')).toContain("${MARKET_ENABLED ? MAKING_THINGS : ''}");
   });
 });
 
