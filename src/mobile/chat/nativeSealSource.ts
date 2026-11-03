@@ -12,6 +12,8 @@
  *      refuses unless the stored upload hashes to the QR's sha256, so the phone never signs a different file) and
  *      `keepPending` (the server refuses rather than displace a DIFFERENT pending contract). It also refuses when this
  *      session has no signature block on the result. bit-sign: lib/phone-build-guard.ts.
+ *      The server echoes the source hash it checked (`sourceSha256`); without that echo nothing is signed. A DIFFERENT
+ *      pending contract is refused here too, before the build is asked for.
  *   3. Re-read the pending contract; it must now be the one just built. Then the normal flow continues.
  *
  * Nothing here signs. PURE apart from the injected request (nativeSealSource.test.ts).
@@ -68,11 +70,17 @@ export async function openPendingForLink(
   // No hash, no build: a banner / button that names a document which is no longer pending (or a bad QR).
   const h = (hash || '').toLowerCase();
   if (!docId || !HASH_RE.test(h)) return { ok: false, text: NOT_WAITING };
+  // ⚠ Another contract is pending: refuse HERE as well, before asking for anything. The server refuses too
+  // (keepPending), but a server from before that guard would displace it.
+  if (first) return { ok: false, text: OTHER_PENDING };
 
   const built = await req('POST', `${room}/make-signable`, { mediaId: docId, expectedSha256: h, keepPending: true });
   if (!built.ok) return { ok: false, text: buildRefusal(built) };
   const id = typeof built.body?.documentId === 'string' ? built.body.documentId : '';
   if (!id) return { ok: false, text: NOT_BUILT };
+  // ⚠ The server must say it checked THIS file's hash. A server from before the guard ignores expectedSha256 and
+  // does not echo it, and then nothing is signed.
+  if (String(built.body?.sourceSha256 || '').toLowerCase() !== h) return { ok: false, text: MISMATCH };
 
   const again = pendingOf(await req('GET', `${room}/prepare-doc`));
   if (!again || again.documentId !== id) return { ok: false, text: NOT_BUILT };

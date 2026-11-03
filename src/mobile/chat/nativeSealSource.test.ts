@@ -49,7 +49,10 @@ describe('openPendingForLink', () => {
   });
 
   test('Massey: nothing pending, upload QR → the phone builds it (same call as Sign here) and opens it', async () => {
-    const r = room(null, () => ({ res: { ok: true, status: 200, body: { documentId: DRAFT } }, pin: DRAFT }));
+    const r = room(null, () => ({
+      res: { ok: true, status: 200, body: { documentId: DRAFT, sourceSha256: SHA } },
+      pin: DRAFT,
+    }));
     const out = await openPendingForLink(r.req, T, MEDIA, SHA.toUpperCase());
     expect(out).toMatchObject({ ok: true, built: true, pending: { documentId: DRAFT } });
     expect(r.calls[1]).toEqual([
@@ -65,7 +68,13 @@ describe('openPendingForLink', () => {
       res: { ok: false, status: 409, body: { otherPending: true, error: 'x' } },
     }));
     expect(await openPendingForLink(r.req, T, MEDIA, SHA)).toEqual({ ok: false, text: OTHER_PENDING });
-    expect(r.calls).toHaveLength(2);
+    // Refused on the phone before any build is asked for (an older server would displace it).
+    expect(r.calls.some((c) => c[1].endsWith('/make-signable'))).toBe(false);
+  });
+
+  test('a contract became pending between the two reads → the server refuses, the phone says so', async () => {
+    const r = room(null, () => ({ res: { ok: false, status: 409, body: { otherPending: true } } }));
+    expect(await openPendingForLink(r.req, T, MEDIA, SHA)).toEqual({ ok: false, text: OTHER_PENDING });
   });
 
   test('the server says the hash does not match → nothing signed', async () => {
@@ -84,15 +93,31 @@ describe('openPendingForLink', () => {
     expect(await openPendingForLink(r3.req, T, MEDIA, SHA)).toEqual({ ok: false, text: NOT_WAITING });
   });
 
-  test('no hash (banner, old link) → refused without asking the server to build', async () => {
+  test('a server that did not check the hash (no sourceSha256 echo) → nothing signed', async () => {
     const r = room(null, () => ({ res: { ok: true, status: 200, body: { documentId: DRAFT } }, pin: DRAFT }));
+    expect(await openPendingForLink(r.req, T, MEDIA, SHA)).toEqual({ ok: false, text: MISMATCH });
+    const r2 = room(null, () => ({
+      res: { ok: true, status: 200, body: { documentId: DRAFT, sourceSha256: 'e'.repeat(64) } },
+      pin: DRAFT,
+    }));
+    expect(await openPendingForLink(r2.req, T, MEDIA, SHA)).toEqual({ ok: false, text: MISMATCH });
+  });
+
+  test('no hash (banner, old link) → refused without asking the server to build', async () => {
+    const r = room(null, () => ({
+      res: { ok: true, status: 200, body: { documentId: DRAFT, sourceSha256: SHA } },
+      pin: DRAFT,
+    }));
     expect(await openPendingForLink(r.req, T, MEDIA, null)).toEqual({ ok: false, text: NOT_WAITING });
     expect(await openPendingForLink(r.req, T, MEDIA, 'pending-abc')).toEqual({ ok: false, text: NOT_WAITING });
     expect(r.calls.some((c) => c[1].endsWith('/make-signable'))).toBe(false);
   });
 
   test('built, but the room does not show it as pending → refused, never a different document', async () => {
-    const r = room(null, () => ({ res: { ok: true, status: 200, body: { documentId: DRAFT } }, pin: 'someone-else' }));
+    const r = room(null, () => ({
+      res: { ok: true, status: 200, body: { documentId: DRAFT, sourceSha256: SHA } },
+      pin: 'someone-else',
+    }));
     expect(await openPendingForLink(r.req, T, MEDIA, SHA)).toEqual({ ok: false, text: NOT_BUILT });
     const r2 = room(null, () => ({ res: { ok: true, status: 200, body: {} } }));
     expect(await openPendingForLink(r2.req, T, MEDIA, SHA)).toEqual({ ok: false, text: NOT_BUILT });
