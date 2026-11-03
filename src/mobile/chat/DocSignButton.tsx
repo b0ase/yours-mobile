@@ -3,6 +3,7 @@ import { signDocUrl } from './pendingDoc';
 import { bchatxFrameRoute, docHashFor } from './signLink';
 import { docButtonLabel, type SignableDoc } from './signableDocs';
 import { openDappBrowser } from '../dappBrowser';
+import { nativeSealRoute } from './nativeSeal';
 import { useNavigate } from 'react-router-dom';
 
 /**
@@ -19,6 +20,10 @@ const DocSignButton = ({ ticker, doc }: { ticker: string; doc: SignableDoc }) =>
       type="button"
       onClick={(e) => {
         e.stopPropagation();
+        // ⚠ An unsigned document is signed and sealed NATIVELY (chat/NativeSealPage.tsx, 3 Nov 2026): the web page in the
+        // dApp browser / frame never finished the seal on the phone. Signed or sealed ones open the page to read.
+        const native = sign ? nativeSealRoute(ticker, doc.id) : null;
+        if (native) return navigate(native);
         // In the bApp frame, where the seal's approval reaches the wallet (signLink.bchatxFrameRoute).
         const route = bchatxFrameRoute(href);
         if (route) return navigate(route);

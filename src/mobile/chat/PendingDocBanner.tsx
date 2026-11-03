@@ -5,6 +5,7 @@ import { docToOffer, signDocUrl } from './pendingDoc';
 import { takeRoomDoc } from './segmentNav';
 import { bchatxFrameRoute, docHashFor } from './signLink';
 import { openDappBrowser } from '../dappBrowser';
+import { nativeSealRoute } from './nativeSeal';
 import { useNavigate } from 'react-router-dom';
 
 /**
@@ -41,6 +42,9 @@ const PendingDocBanner = ({ room, inChat }: { room: ChatRoom; inChat?: (docId: s
       <button
         type="button"
         onClick={() => {
+          // ⚠ Signed and sealed NATIVELY in the wallet (chat/NativeSealPage.tsx, 3 Nov 2026), never through a web page.
+          const native = doc ? nativeSealRoute(room.ticker, doc) : null;
+          if (native) return navigate(native);
           const route = bchatxFrameRoute(href);
           if (route) return navigate(route);
           openDappBrowser(href).catch((e) => console.error('[review & sign]', e));

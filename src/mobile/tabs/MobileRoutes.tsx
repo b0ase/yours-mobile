@@ -1,4 +1,5 @@
 import { lazy, Suspense } from 'react';
+import { NativeSealPage } from '../chat/NativeSealPage';
 import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { SectionBoundary } from '../wallet/SectionBoundary';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
@@ -179,6 +180,8 @@ const MobileRoutes = () => (
         <Route path="home" element={<HomeScreen />} />
         <Route path="apps" element={<BrowserPage only="apps" />} />
         <Route path="bapp/:slug" element={<BappLinkPage />} />
+        {/* Review & sign, natively (chat/NativeSealPage.tsx): phone signing never goes through a web page. */}
+        <Route path="seal/:ticker/:doc" element={<NativeSealPage />} />
         {/* Phone layout app screens 2, 3… (phone/pager.tsx renders them; this is the fallback with the switch off). */}
         <Route path="screen/:n" element={<BrowserPage only="apps" />} />
         <Route path="games" element={<BrowserPage only="games" />} />
