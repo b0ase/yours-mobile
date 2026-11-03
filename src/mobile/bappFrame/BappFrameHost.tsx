@@ -19,6 +19,7 @@ import { SESSION_SPEND_TYPE } from '../wallet/live/liveLogic';
 import {
   FRAME_BITSIGN_CAPABILITIES,
   FRAME_BITSIGN_CAPABILITIES_CALL,
+  FRAME_SESSION_CALL,
   isAllowedFrameOrigin,
   isWalletRequestMessage,
   parseXdmRequest,
@@ -59,6 +60,18 @@ import { accountNamesFor } from '../names/accountNames';
 import { loadLastBalance } from '../wallet/balanceLoad';
 import { cachedExchangeRate } from '../../utils/wallet';
 import { useServiceContext } from '../../hooks/useServiceContext';
+import { BchatClient, defaultHttp, loadSession, saveSession } from '../chat/api';
+import { walletSigner } from '../chat/signer';
+import {
+  FRAME_CODE_PATH,
+  accountTag as frameAccountTag,
+  answerFrameSession,
+  singleFlight,
+  type FrameSessionDeps,
+} from '../chat/frameSession';
+import { getChatAccount } from '../chat/chatAccount';
+import { Hash, Utils } from '@bsv/sdk';
+import { isNative } from '../native';
 import { BottomMenuContext } from '../../contexts/BottomMenuContext';
 
 /**
@@ -71,6 +84,7 @@ export const BappFrameHost = () => {
   const frame = useRef<HTMLIFrameElement>(null);
 
   const bwxDeps = useBwxDeps();
+  const frameSessionDeps = useFrameSessionDeps();
   const [ask, setAsk] = useState<{ text: string; resolve: (ok: boolean) => void } | null>(null);
   const askRef = useRef(ask);
   askRef.current = ask;
@@ -125,6 +139,13 @@ export const BappFrameHost = () => {
       if (!req) return;
       if (req.call === FRAME_BITSIGN_CAPABILITIES_CALL) {
         win.postMessage(toXdmResponse(req.id, { success: true, data: FRAME_BITSIGN_CAPABILITIES }), e.origin);
+        return;
+      }
+      // bChatX signs in as this wallet's account (chat/frameSession.ts): bChatX origins only, checked inside.
+      if (req.call === FRAME_SESSION_CALL) {
+        void answerFrameSession(e.origin, req.args, frameSessionDeps.current).then((reply) =>
+          win.postMessage(toXdmResponse(req.id, reply), e.origin),
+        );
         return;
       }
       const pageUrl = lastUrlFor(e.origin) ?? session.url;
@@ -435,6 +456,28 @@ const useBwxDeps = () => {
   const ref = useRef(deps);
   ref.current = deps;
   return ref;
+};
+
+/**
+ * The wallet side of bChatX's in-frame sign-in (chat/frameSession.ts): the active account's stored bChatX session,
+ * a wallet-key sign-in when it has none (the same one the Chat tab does on its own), and the one-time code mint.
+ */
+const useFrameSessionDeps = () => {
+  const { apiContext } = useServiceContext();
+  const ctx = useRef(apiContext);
+  ctx.current = apiContext;
+  const ref = useRef<FrameSessionDeps | null>(null);
+  ref.current ??= {
+    load: () => loadSession(),
+    signIn: singleFlight(async () => {
+      const s = await new BchatClient(defaultHttp(isNative)).signIn(walletSigner(ctx.current));
+      saveSession(s);
+      return s;
+    }),
+    mint: (session) => new BchatClient(defaultHttp(isNative), session).request('POST', FRAME_CODE_PATH, {}),
+    account: () => frameAccountTag(getChatAccount(), (v) => Utils.toHex(Hash.sha256(Utils.toArray(v, 'utf8')))),
+  };
+  return ref as { current: FrameSessionDeps };
 };
 
 /** Wide screen (web, extension tab): apps can be phone-sized or desktop-sized. */
