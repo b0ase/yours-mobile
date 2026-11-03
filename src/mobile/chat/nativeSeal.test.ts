@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   NativeSealError,
   inertHtml,
+  accountHandles,
   fetchSignedCopy,
   myFields,
   nativeRoomSteps,
@@ -268,5 +269,24 @@ describe('fetchSignedCopy (the phone shows the signed copy after sealing)', () =
   });
   test('JSON or empty answers are not a signed copy: null', async () => {
     expect(await fetchSignedCopy(async () => ({ error: 'nope' }), 'T', ['a', ''])).toBeNull();
+  });
+});
+
+describe('accountHandles (every handle on the account signs)', () => {
+  test('handles plus primary, no repeats', () => {
+    expect(accountHandles({ handles: [{ handle: 'b0asex' }, { handle: 'boase' }], primary: 'boase' })).toEqual([
+      'b0asex',
+      'boase',
+    ]);
+  });
+  test('a block bound to $boase is mine when signed in as $b0asex', () => {
+    const fields = [{ id: 'director', signerHandle: 'boase', name: 'Richard William Boase' }] as never;
+    expect(
+      myFields(fields, ['b0asex', ...accountHandles({ handles: [{ handle: 'boase' }] })], new Set()).map((f) => f.id),
+    ).toEqual(['director']);
+  });
+  test('junk → []', () => {
+    expect(accountHandles(null)).toEqual([]);
+    expect(accountHandles({ handles: 'x' })).toEqual([]);
   });
 });

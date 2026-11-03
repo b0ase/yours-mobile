@@ -338,6 +338,20 @@ export interface SigField {
 }
 
 /** The unsigned blocks bound to one of this person's handles (all handles of the same identity key). */
+/**
+ * Every handle the signed-in account holds, from GET /api/bitsign/me/handles ({ handles: [{ handle }], primary }).
+ * A block bound to any of them is yours (owner, 3 Nov 2026: the Massey s561 block is bound to $boase while the phone
+ * signs in as $b0asex, the same account, and the phone said "no signature block"). Bad or empty input → [].
+ */
+export function accountHandles(resp: unknown): string[] {
+  const r = (resp ?? {}) as { handles?: Array<{ handle?: unknown }>; primary?: unknown };
+  const out = new Set<string>();
+  for (const h of Array.isArray(r.handles) ? r.handles : [])
+    if (typeof h?.handle === 'string' && h.handle) out.add(h.handle);
+  if (typeof r.primary === 'string' && r.primary) out.add(r.primary);
+  return [...out];
+}
+
 export function myFields(fields: SigField[], myHandles: string[], signedIds: Set<string>): SigField[] {
   const mine = new Set(myHandles.map((h) => h.replace(/^\$/, '').toLowerCase()).filter(Boolean));
   return fields.filter(

@@ -10,6 +10,7 @@ import {
   NativeSealError,
   inertHtml,
   fetchSignedCopy,
+  accountHandles,
   myFields,
   nativeRoomSteps,
   nativeSignAndSeal,
@@ -158,7 +159,28 @@ export const NativeSealPage = () => {
   }, [ticker, docId]);
 
   const me = loadSession()?.handle ?? '';
-  const mine = useMemo(() => (doc ? myFields(doc.fields, [me], signedFieldIds(doc.html)) : []), [doc, me]);
+  // Every handle on this account counts (accountHandles): a block bound to $boase is yours when you sign in as $b0asex.
+  const [handles, setHandles] = useState<string[]>([]);
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      try {
+        const c = await client();
+        const r = await c.request('GET', '/api/bitsign/me/handles');
+        if (live) setHandles(accountHandles(r));
+      } catch {
+        /* the session handle alone still works */
+      }
+    })();
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const mine = useMemo(
+    () => (doc ? myFields(doc.fields, [me, ...handles], signedFieldIds(doc.html)) : []),
+    [doc, me, handles],
+  );
   const fingerprint = useMemo(
     () => (doc ? Utils.toHex(Hash.sha256(Utils.toArray(doc.html, 'utf8'))).slice(0, 8) : ''),
     [doc],
