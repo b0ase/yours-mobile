@@ -14,6 +14,8 @@ import {
   type UnsentOutcome,
 } from './services/stuckSends';
 import { hardenWalletServices } from './services/wocResilience';
+import { cacheBlockHeaders, prefetchHeadersOnInternalize } from './services/headerPrefetch';
+import { createDeviceSync, notifyOnWalletChanges, type DeviceSyncResult } from './services/deviceSync';
 import {
   createWebWallet,
   createIndexedDbTaskStateStore,
@@ -186,6 +188,8 @@ export interface AccountContext {
   sweepDeposits: () => Promise<{ swept?: number }>;
   /** Credit payments seen on chain at our receive addresses that storage lacks (receive guard), now. */
   creditArriving: () => Promise<void>;
+  /** Pull the owner's other devices' changes from the backup, then push this one's (services/deviceSync.ts). */
+  syncDevices: () => Promise<DeviceSyncResult>;
   /** Restore actions storage marked failed whose transaction is mined (services/recoverFailed.ts). */
   recoverFailed: () => Promise<RecoverReport>;
   /** Recover one mined payment by txid from the derivation any reachable store holds (services/recoverByTxid.ts). */
@@ -408,6 +412,39 @@ export const initWallet = async (
   };
   if (!hardenWalletServices(toolboxServices, undefined, { localRawTx }))
     console.warn('[initWallet] chain-data services not hardened');
+  // A mined transaction's block header, fetched inside internalizeAction's IndexedDB transaction, ended that
+  // transaction ("The transaction finished"): 0.698 BSV never reached the iPhone balance (services/headerPrefetch.ts).
+  if (!cacheBlockHeaders(toolboxServices) || !prefetchHeadersOnInternalize(baseWallet, toolboxServices))
+    console.warn('[initWallet] block headers are not prefetched before internalize');
+  // This device and the owner's others meet only in the backup: push soon after every change, pull on open
+  // (services/deviceSync.ts; the extension showed $0.16 after the phone swept, 2 Nov 2026).
+  const managed = storage as unknown as { _backups?: { storage: unknown }[] };
+  const deviceSync = createDeviceSync({
+    applies: () => storage.isActiveStorageProvider() && (backups?.length ?? 0) > 0,
+    ensureBackup: async () => {
+      if (storage.getBackupStores().length > 0) return true;
+      const url = backups?.[0];
+      if (!url) return false;
+      await Promise.race([
+        addRemote(url),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('backup connect timed out')), 20_000)),
+      ]);
+      return storage.getBackupStores().length > 0;
+    },
+    pull: async () => {
+      const reader = managed._backups?.[0]?.storage;
+      if (!reader) throw new Error('backup storage is not connected');
+      const { identityKey } = await storage.getAuth();
+      await storage.syncFromReader(identityKey, reader as Parameters<typeof storage.syncFromReader>[1]);
+    },
+    push: async () => {
+      await storage.updateBackups();
+    },
+    busy: chainActive,
+    log: (...a) => console.warn(...a),
+  });
+  if (!notifyOnWalletChanges(baseWallet, deviceSync.changed))
+    console.warn('[initWallet] wallet changes do not update the backup');
   // Big mints need longer than the broadcaster's fixed 30 s to upload (services/bigBroadcast.ts, vexvoid 12 Oct 2026).
   if (!sizeAwareBroadcast(toolboxServices)) console.warn('[initWallet] broadcaster timeout not tunable');
   // Every payment ends here: our screens and dApps through the permissions manager, send-all and background jobs
@@ -1057,6 +1094,11 @@ export const initWallet = async (
     () => resyncAddresses(),
     () => undefined,
   );
+  // Bring in what the owner's other devices did since this one last looked (services/deviceSync.ts).
+  void syncsMayStart.then(
+    () => deviceSync.syncNow(),
+    () => undefined,
+  );
 
   // Sync incoming paymail payments from the message box (fire-and-forget)
   void syncsMayStart
@@ -1175,6 +1217,7 @@ export const initWallet = async (
     addressSyncBusy: addressSync.busy,
     sweepDeposits: () => sweepDeposit.execute(actionCtx, {}),
     creditArriving: () => runReceiveGuard(),
+    syncDevices: () => deviceSync.syncNow(),
     recoverFailed: () =>
       runRecoverOnce(() =>
         recoverMinedFailedActions(

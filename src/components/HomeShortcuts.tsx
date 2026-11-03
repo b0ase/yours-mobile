@@ -13,7 +13,7 @@ type StepState = 'waiting' | 'running' | 'ok' | 'failed';
 type Step = { key: string; title: string; state: StepState; text: string };
 
 const STEPS: { key: string; title: string }[] = [
-  { key: 'sync', title: 'Sync now' },
+  { key: 'sync', title: 'Sync with my other devices' },
   { key: 'resync', title: 'Resync coins' },
   { key: 'missing', title: 'Rescan the chain' },
 ];
@@ -23,7 +23,7 @@ const GREEN = '#15803D';
 
 /**
  * Wallet home, at the very bottom (owner, 25 Oct 2026): one green REFRESH WALLET button. It runs the safe recovery
- * routines in order (Sync now → Resync coins → Find missing coins, scan only)
+ * routines in order (Sync with my other devices → Resync coins → Find missing coins, scan only)
  * with a checklist, carrying on past a failed step. It never sends or moves money, never changes which store is active (so no Find mined payments, which can, and no Repair Sync, which can resend or drop token outputs), and
  * never runs Restore from backup and never skips a confirm:
  * coins found by the scan wait for the usual "Add it back" sheet. Recover by txid needs a transaction ID, so it is
@@ -54,10 +54,12 @@ export const HomeShortcuts = () => {
         set(key, 'failed', e instanceof Error ? e.message : 'Failed');
       }
     };
-    // Same message as Settings › Storage › Sync Now.
+    // Same message as the Remote backup screen's "Sync with my other devices": pull, then push (services/deviceSync.ts).
     await attempt('sync', async () => {
       const r = await sendMessageAsync<SyncAnswer>({ action: 'STORAGE_SYNC_BACKUPS' });
-      return r?.success ? { ok: true, text: 'Synced · just now' } : { ok: false, text: r?.error ?? 'Sync failed' };
+      return r?.success
+        ? { ok: true, text: 'Synced with your other devices · just now' }
+        : { ok: false, text: r?.error ?? 'Sync failed' };
     });
     await attempt('resync', () => t.handleResyncCoins());
     // Scan only (read only); any restore waits for the user's "Add it back" below.

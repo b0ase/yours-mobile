@@ -10,6 +10,7 @@ import {
   AppWindow,
   BookOpen,
   Bot,
+  ChevronLeft,
   Box,
   Clapperboard,
   Coins,
@@ -32,7 +33,7 @@ import { setAgentDraft } from '../agent/handoff';
 import { openAgentCreate } from '../agents/agentCreate';
 import { BottomMenuContext } from '../../contexts/BottomMenuContext';
 import { routeFor } from '../tabs/tabs';
-import { GREETING_CARDS_ENABLED, isBWalletX } from '../storeBuild';
+import { GREETING_CARDS_ENABLED, isBWalletX, STORE_BUILD } from '../storeBuild';
 import { SendConfirmation } from '../../components/SendConfirmation';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useTheme } from '../../hooks/useTheme';
@@ -81,8 +82,12 @@ import {
   validateKindFields,
   type MintKind,
 } from './mintKinds';
-import { MINT_SOURCES, mintSource, type MintSourceId } from './mintSources';
-import { BrandMark } from './BrandMark';
+import { chooserTitle, MintChooser, type ChooserView } from './MintChooser';
+import type { MintAction } from './mintCatalog';
+
+/** Upload your archive › one file from a data download: anything the private mint keeps (§9 kinds). */
+const UPLOAD_ACCEPT =
+  'image/*,video/*,audio/*,application/pdf,application/epub+zip,text/plain,text/markdown,.txt,.md,.pdf,.epub';
 
 /** Cover / poster picture: a small JPEG so the companion inscription stays cheap. */
 const POSTER_EDGE = 512;
@@ -120,7 +125,7 @@ const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#17191E';
 const BORDER = '#3a2f0c';
 
-type Step = 'choose' | 'ticket' | 'token' | 'domain' | 'media' | 'done' | 'card' | 'ad';
+type Step = 'choose' | 'ticket' | 'token' | 'domain' | 'media' | 'done' | 'card' | 'picture' | 'ad';
 /** `type` is the content type to inscribe (3D: from magic bytes, not the browser's guess). */
 type Picked = { file: File; url: string; type: string };
 
@@ -200,8 +205,11 @@ export const MintSheet = ({
   );
   const [picked, setPicked] = useState<Picked | null>(null);
   const [kindSel, setKindSel] = useState<MintKind | null>(startTile?.kind ?? null);
-  const [source, setSource] = useState<MintSourceId | null>(null);
-  const [moreSources, setMoreSources] = useState(false);
+  // Where the chooser is (home › a tile's card › an app…); kept while a flow runs, so its Back returns to the card.
+  const [views, setViews] = useState<ChooserView[]>([{ k: 'home' }]);
+  const view = views[views.length - 1];
+  const pushView = (v: ChooserView) => setViews((vs) => [...vs, v]);
+  const popView = () => setViews((vs) => (vs.length > 1 ? vs.slice(0, -1) : vs));
   const [artist, setArtist] = useState('');
   const [album, setAlbum] = useState('');
   const [track, setTrack] = useState('');
@@ -295,14 +303,31 @@ export const MintSheet = ({
       navigate('/m/ask-b');
     }
   };
-  // A platform's "Pick the file" opens the same media tile as tapping it (its type); platforms whose type has no
-  // visible tile are not shown.
-  const tileForKind = (kind: MintKind) => MINT_TILES.find((t) => t.when() && t.media && t.kind === kind);
-  // 'archive' sources open Books & documents (the closest existing upload); the rest open their own kind's tile.
-  const tileForSource = (k: (typeof MINT_SOURCES)[number]['kind']) =>
-    k === 'archive' ? MINT_TILES.find((t) => t.when() && t.id === 'books') : tileForKind(k);
-  const sources = MINT_SOURCES.filter((s) => tileForSource(s.kind));
-  const shownSources = moreSources ? sources : sources.filter((s) => s.popular);
+  const hasFlow = (id: string) => MINT_TILES.some((t) => t.id === id && t.when());
+  // A card's brand chip opens that service's site as a bApp (bWalletX only: a store build has no outbound links, and
+  // Rollup drops this and the lazy import).
+  const openSite = !STORE_BUILD
+    ? (name: string, url: string) => {
+        onClose();
+        void import('../bappFrame/bappFrame').then((m) => m.openBapp(name, url));
+      }
+    : undefined;
+  // The chooser's cards (mintCatalog.ts) start real flows through here.
+  const run = (a: MintAction) => {
+    if ('flow' in a) {
+      const t = MINT_TILES.find((x) => x.id === a.flow && x.when());
+      if (t) openTile(t);
+    } else if ('go' in a) {
+      onClose();
+      navigate(a.go);
+    } else if ('site' in a) {
+      openSite?.(a.name, `https://${a.site}`);
+    } else if ('upload' in a) {
+      setMedia({ accept: UPLOAD_ACCEPT, label: 'a photo, video, chat or document' });
+      setKindSel(null);
+      setStep('media');
+    }
+  };
 
   const pick = async (file: File | undefined) => {
     setFileError('');
@@ -479,33 +504,50 @@ export const MintSheet = ({
 
   return (
     // z above the bottom tab bar (BottomMenu z-[100]) so the sheet's lower options aren't hidden.
-    <div className="fixed inset-0 z-[150] flex items-end justify-center" style={{ background: 'rgba(0,0,0,0.6)' }}>
+    // One fixed size for every step (owner's prototype, 1 Nov 2026): a bottom sheet on a phone, a centred card
+    // (680 wide, up to 860 tall) from 640px; the header stays put and the step scrolls inside.
+    <div
+      className="fixed inset-0 z-[150] flex items-end justify-center sm:items-center sm:p-4"
+      // The web wallet's beta banner (--web-banner-height, web.css) keeps its strip at the top.
+      style={{ background: 'rgba(0,0,0,0.6)', paddingTop: 'var(--web-banner-height, 0px)' }}
+    >
       <div
-        className="w-full max-w-md rounded-t-2xl p-4 overflow-y-auto"
-        style={{
-          background: PANEL,
-          color: '#fff',
-          maxHeight: 'calc(100dvh - env(safe-area-inset-top) - 24px)',
-          paddingBottom: 'calc(16px + env(safe-area-inset-bottom))',
-        }}
+        className="flex h-[calc(100dvh_-_env(safe-area-inset-top)_-_var(--web-banner-height,0px)_-_24px)] w-full max-w-md flex-col overflow-hidden rounded-t-[22px] border sm:h-[min(860px,calc(100dvh_-_var(--web-banner-height,0px)_-_32px))] sm:max-w-[680px] sm:rounded-[22px]"
+        style={{ background: '#101216', color: '#fff', borderColor: '#262a32' }}
       >
-        <div className="flex items-center justify-between mb-3">
-          <span className="font-bold text-lg" style={{ color: GOLD }}>
-            {step === 'ticket'
-              ? 'Mint tickets'
-              : step === 'token'
-                ? 'Mint a token'
-                : step === 'domain'
-                  ? 'Tokenise a domain'
-                  : step === 'card'
-                    ? 'Greeting card'
-                    : step === 'ad' && GREETING_CARDS_ENABLED
-                      ? 'Order a bAd'
-                      : step === 'choose'
-                        ? 'Mint'
-                        : step === 'done'
-                          ? 'Minted'
-                          : 'Mint'}
+        <div className="flex flex-none items-center gap-2 border-b px-4 py-3" style={{ borderColor: '#262a32' }}>
+          {/* The file mint has no Back of its own: this one returns to the card that opened it. */}
+          {((step === 'choose' && views.length > 1) || (step === 'media' && !busy)) && (
+            <button
+              type="button"
+              onClick={() => (step === 'media' ? setStep('choose') : popView())}
+              className="-ml-1 grid h-8 w-8 place-items-center rounded-lg border-0 bg-transparent cursor-pointer"
+              aria-label="Back"
+            >
+              <ChevronLeft size={20} color="#aaa" />
+            </button>
+          )}
+          <span
+            className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[17px] font-bold"
+            style={{ color: GOLD }}
+          >
+            {step === 'choose'
+              ? chooserTitle(view)
+              : step === 'ticket'
+                ? 'Mint tickets'
+                : step === 'token'
+                  ? 'Mint a token'
+                  : step === 'domain'
+                    ? 'Tokenise a domain'
+                    : step === 'card'
+                      ? 'Greeting card'
+                      : step === 'picture' && GREETING_CARDS_ENABLED
+                        ? 'AI picture'
+                        : step === 'ad' && GREETING_CARDS_ENABLED
+                          ? 'Order a bAd'
+                          : step === 'done'
+                            ? 'Minted'
+                            : 'Mint'}
           </span>
           <button type="button" onClick={onClose} className="bg-transparent border-0 cursor-pointer" aria-label="Close">
             <X size={20} color="#aaa" />
@@ -513,478 +555,411 @@ export const MintSheet = ({
         </div>
 
         {step === 'choose' && (
-          <div className="flex flex-col gap-2">
-            <p className="text-xs m-0 mb-1" style={{ color: '#999' }}>
-              What do you want to make? Everything you mint is yours on chain: sell it, send it, or let people collect
-              it.
-            </p>
-            {sources.length > 0 && (
-              <div className="flex flex-col gap-2">
-                <span className="text-xs font-bold" style={{ color: '#ccc' }}>
-                  Mint what you already post
-                </span>
-                <div
-                  className="grid grid-cols-4 gap-x-1 gap-y-2 sm:grid-cols-6"
-                  role="group"
-                  aria-label="Mint what you already post"
-                >
-                  {shownSources.map((s) => {
-                    const on = source === s.id;
-                    return (
+          <MintChooser view={view} push={pushView} back={popView} run={run} hasFlow={hasFlow} openSite={openSite} />
+        )}
+
+        {step !== 'choose' && (
+          <div
+            className="min-h-0 flex-1 overflow-y-auto px-4 pt-3"
+            style={{ paddingBottom: 'calc(16px + env(safe-area-inset-bottom))' }}
+          >
+            {step === 'card' && CardMaker && (
+              <Suspense fallback={null}>
+                <CardMaker onBack={() => setStep('choose')} onMint={(f, t, to) => void mintCard(f, t, to)} />
+              </Suspense>
+            )}
+            {step === 'picture' && CardMaker && (
+              <Suspense fallback={null}>
+                <CardMaker
+                  initialKind="image"
+                  onBack={() => setStep('choose')}
+                  onMint={(f, t, to) => void mintCard(f, t, to)}
+                />
+              </Suspense>
+            )}
+            {step === 'ad' && CardMaker && (
+              <Suspense fallback={null}>
+                <CardMaker
+                  initialKind="ad"
+                  onBack={() => setStep('choose')}
+                  onMint={(f, t, to) => void mintCard(f, t, to)}
+                />
+              </Suspense>
+            )}
+
+            {step === 'ticket' && CHOICES.has('ticket') && (
+              <TicketMint exchangeRate={exchangeRate} onBack={() => setStep('choose')} onClose={onClose} />
+            )}
+
+            {step === 'token' && CHOICES.has('token') && (
+              <TokenMint exchangeRate={exchangeRate} onBack={() => setStep('choose')} onClose={onClose} />
+            )}
+
+            {step === 'domain' && CHOICES.has('token') && (
+              <DomainMint
+                exchangeRate={exchangeRate}
+                onBack={() => setStep('choose')}
+                onClose={onClose}
+                initialDomain={domain}
+              />
+            )}
+
+            {step === 'media' && (
+              <div className="flex flex-col gap-3 text-sm">
+                {kindSel && (
+                  <div
+                    className="grid grid-cols-4 gap-1 rounded-xl p-1 border"
+                    style={{ borderColor: BORDER }}
+                    role="tablist"
+                  >
+                    {MINT_KINDS.map((k) => (
                       <button
-                        key={s.id}
+                        key={k.id}
                         type="button"
-                        aria-pressed={on}
-                        aria-label={`How to mint from ${s.label}`}
-                        onClick={() => setSource(on ? null : s.id)}
-                        className="flex min-h-[44px] min-w-0 flex-col items-center gap-1.5 rounded-xl border-0 bg-transparent px-1 py-1 cursor-pointer"
-                        style={{ color: on ? GOLD : '#ccc' }}
+                        role="tab"
+                        aria-selected={kindSel === k.id}
+                        onClick={() => {
+                          if (k.id === kindSel) return;
+                          setKindSel(k.id);
+                          setMedia({ accept: k.accept, label: k.hint });
+                          setPicked(null);
+                          setPosterFile(null);
+                          setFileError('');
+                        }}
+                        className="rounded-lg py-2 text-xs font-bold border-0 cursor-pointer"
+                        style={
+                          kindSel === k.id
+                            ? { background: GOLD, color: '#1a1400' }
+                            : { background: 'transparent', color: '#ccc' }
+                        }
                       >
-                        <span
-                          className="flex h-11 w-11 items-center justify-center rounded-xl"
-                          style={{
-                            background: 'linear-gradient(160deg, #1d1d20, #121214)',
-                            boxShadow: `inset 0 0 0 1px ${on ? 'var(--bw-accent-hi)' : 'rgba(255,255,255,0.1)'}, inset 0 1px 0 rgba(255,255,255,0.06)`,
-                          }}
-                        >
-                          <BrandMark id={s.id} size={24} />
-                        </span>
-                        <span className="text-[11px] leading-none">{s.label}</span>
+                        {k.label}
                       </button>
-                    );
-                  })}
-                  {sources.length > shownSources.length || moreSources ? (
-                    <button
-                      type="button"
-                      aria-expanded={moreSources}
-                      onClick={() => setMoreSources(!moreSources)}
-                      className="flex min-h-[44px] min-w-0 flex-col items-center gap-1.5 rounded-xl border-0 bg-transparent px-1 py-1 cursor-pointer"
-                      style={{ color: '#ccc' }}
-                    >
-                      <span
-                        className="flex h-11 w-11 items-center justify-center rounded-xl text-lg"
-                        style={{ boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.1)' }}
-                      >
-                        {moreSources ? '−' : '+'}
-                      </span>
-                      <span className="text-[11px] leading-none">{moreSources ? 'Fewer' : 'More services'}</span>
-                    </button>
-                  ) : null}
-                </div>
-                <p className="text-[10px] m-0" style={{ color: '#777' }}>
-                  Logos belong to their owners.
+                    ))}
+                  </div>
+                )}
+                <PrivacyChoice
+                  isPublic={makePublic}
+                  onChange={setMakePublic}
+                  available={!picked || privKind !== null}
+                />
+                <input
+                  ref={inputRef}
+                  type="file"
+                  accept={media.accept}
+                  className="hidden"
+                  onChange={(e) => void pick(e.target.files?.[0])}
+                />
+                <button
+                  type="button"
+                  onClick={() => inputRef.current?.click()}
+                  className="rounded-xl border border-dashed py-4 cursor-pointer bg-transparent"
+                  style={{ borderColor: GOLD, color: GOLD }}
+                >
+                  {picked ? 'Choose a different file' : `Choose ${media.label}`}
+                </button>
+                <p className="text-xs" style={{ color: '#999' }}>
+                  {isPrivate
+                    ? 'Only you can see it: it is encrypted on this device before it goes on chain. You can reveal it later.'
+                    : "Public: anyone can see it on chain, for good. Don't mint anything you don't own or that's illegal."}
                 </p>
-                {source &&
-                  (() => {
-                    const s = mintSource(source)!;
-                    return (
-                      <div
-                        className="flex flex-col gap-2 rounded-xl border p-3"
-                        style={{ borderColor: BORDER }}
-                        aria-live="polite"
-                      >
-                        {s.steps.map((line) => (
-                          <p key={line} className="text-xs m-0" style={{ color: '#ccc' }}>
-                            {line}
-                          </p>
-                        ))}
-                        <p className="text-xs m-0" style={{ color: '#999' }}>
-                          Only mint what you made or own. Menus change now and then.
-                        </p>
+                {picked && (
+                  <div className="rounded-xl overflow-hidden border" style={{ borderColor: BORDER }}>
+                    {kind === 'image' && (
+                      <img src={picked.url} alt="" className="w-full max-h-64 object-contain bg-black" />
+                    )}
+                    {kind === 'video' && (
+                      <video
+                        ref={videoRef}
+                        src={picked.url}
+                        controls
+                        playsInline
+                        className="w-full max-h-64 bg-black"
+                      />
+                    )}
+                    {kind === 'model' && (
+                      <div className="flex items-center gap-2 px-3 py-4 text-sm" style={{ color: '#ddd' }}>
+                        {poster ? (
+                          <img src={poster.url} alt="" className="w-16 h-16 object-contain rounded-lg bg-black" />
+                        ) : (
+                          <Box size={20} color={GOLD} />
+                        )}{' '}
+                        {picked.file.name}
+                      </div>
+                    )}
+                    {kind === 'audio' && <audio src={picked.url} controls className="w-full" />}
+                    {(kind === 'application' || kind === 'text') && (
+                      <div className="flex items-center gap-2 px-3 py-4 text-sm" style={{ color: '#ddd' }}>
+                        <FileText size={20} color={GOLD} /> {picked.file.name}
+                      </div>
+                    )}
+                    <div className="px-3 py-2 text-xs" style={{ color: '#bbb' }}>
+                      {picked.type} · {formatBytes(picked.file.size)}
+                      {kind === 'image' && picked.file.size > DOWNSCALE_SUGGEST_BYTES && (
                         <button
                           type="button"
-                          onClick={() => {
-                            const t = tileForSource(s.kind);
-                            if (t) openTile(t);
-                          }}
-                          className="self-start rounded-lg px-3 py-2 text-xs font-bold border-0 cursor-pointer"
-                          style={{ background: GOLD, color: '#1a1400' }}
+                          onClick={shrink}
+                          className="ml-2 bg-transparent border-0 cursor-pointer underline"
+                          style={{ color: GOLD }}
                         >
-                          Pick the file
+                          Shrink photo (cheaper)
                         </button>
-                      </div>
-                    );
-                  })()}
-              </div>
-            )}
-            <div className="grid grid-cols-2 gap-2">
-              {MINT_TILES.filter((t) => t.when()).map((t) => (
-                <Tile key={t.id} icon={t.icon} title={t.title} sub={t.sub} onClick={() => openTile(t)} />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {step === 'card' && CardMaker && (
-          <Suspense fallback={null}>
-            <CardMaker onBack={() => setStep('choose')} onMint={(f, t, to) => void mintCard(f, t, to)} />
-          </Suspense>
-        )}
-        {step === 'ad' && CardMaker && (
-          <Suspense fallback={null}>
-            <CardMaker
-              initialKind="ad"
-              onBack={() => setStep('choose')}
-              onMint={(f, t, to) => void mintCard(f, t, to)}
-            />
-          </Suspense>
-        )}
-
-        {step === 'ticket' && CHOICES.has('ticket') && (
-          <TicketMint exchangeRate={exchangeRate} onBack={() => setStep('choose')} onClose={onClose} />
-        )}
-
-        {step === 'token' && CHOICES.has('token') && (
-          <TokenMint exchangeRate={exchangeRate} onBack={() => setStep('choose')} onClose={onClose} />
-        )}
-
-        {step === 'domain' && CHOICES.has('token') && (
-          <DomainMint
-            exchangeRate={exchangeRate}
-            onBack={() => setStep('choose')}
-            onClose={onClose}
-            initialDomain={domain}
-          />
-        )}
-
-        {step === 'media' && (
-          <div className="flex flex-col gap-3 text-sm">
-            {kindSel && (
-              <div
-                className="grid grid-cols-4 gap-1 rounded-xl p-1 border"
-                style={{ borderColor: BORDER }}
-                role="tablist"
-              >
-                {MINT_KINDS.map((k) => (
-                  <button
-                    key={k.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={kindSel === k.id}
-                    onClick={() => {
-                      if (k.id === kindSel) return;
-                      setKindSel(k.id);
-                      setMedia({ accept: k.accept, label: k.hint });
-                      setPicked(null);
-                      setPosterFile(null);
-                      setFileError('');
-                    }}
-                    className="rounded-lg py-2 text-xs font-bold border-0 cursor-pointer"
-                    style={
-                      kindSel === k.id
-                        ? { background: GOLD, color: '#1a1400' }
-                        : { background: 'transparent', color: '#ccc' }
-                    }
-                  >
-                    {k.label}
-                  </button>
-                ))}
-              </div>
-            )}
-            <PrivacyChoice isPublic={makePublic} onChange={setMakePublic} available={!picked || privKind !== null} />
-            <input
-              ref={inputRef}
-              type="file"
-              accept={media.accept}
-              className="hidden"
-              onChange={(e) => void pick(e.target.files?.[0])}
-            />
-            <button
-              type="button"
-              onClick={() => inputRef.current?.click()}
-              className="rounded-xl border border-dashed py-4 cursor-pointer bg-transparent"
-              style={{ borderColor: GOLD, color: GOLD }}
-            >
-              {picked ? 'Choose a different file' : `Choose ${media.label}`}
-            </button>
-            <p className="text-xs" style={{ color: '#999' }}>
-              {isPrivate
-                ? 'Only you can see it: it is encrypted on this device before it goes on chain. You can reveal it later.'
-                : "Public: anyone can see it on chain, for good. Don't mint anything you don't own or that's illegal."}
-            </p>
-            {picked && (
-              <div className="rounded-xl overflow-hidden border" style={{ borderColor: BORDER }}>
-                {kind === 'image' && (
-                  <img src={picked.url} alt="" className="w-full max-h-64 object-contain bg-black" />
+                      )}
+                    </div>
+                  </div>
                 )}
-                {kind === 'video' && (
-                  <video ref={videoRef} src={picked.url} controls playsInline className="w-full max-h-64 bg-black" />
+                {fileError && <p style={{ color: '#ff6b6b' }}>{fileError}</p>}
+                {picked && slowLandWarning(txBytes) && (
+                  <p className="text-xs m-0" style={{ color: '#FFB020' }}>
+                    {slowLandWarning(txBytes)}
+                  </p>
                 )}
-                {kind === 'model' && (
-                  <div className="flex items-center gap-2 px-3 py-4 text-sm" style={{ color: '#ddd' }}>
+
+                {picked && !isPrivate && (kindSel === 'music' || kindSel === 'video') && (
+                  <div className="flex items-center gap-2">
                     {poster ? (
-                      <img src={poster.url} alt="" className="w-16 h-16 object-contain rounded-lg bg-black" />
+                      <img src={poster.url} alt="Cover" className="w-14 h-14 object-cover rounded-lg" />
                     ) : (
-                      <Box size={20} color={GOLD} />
-                    )}{' '}
-                    {picked.file.name}
+                      <div
+                        className="w-14 h-14 rounded-lg flex items-center justify-center"
+                        style={{
+                          background: 'radial-gradient(circle at 30% 20%, #4a3806 0%, #1a1405 60%, #0b0c0f 100%)',
+                        }}
+                      >
+                        {kindSel === 'music' ? (
+                          <Music size={20} color={GOLD} />
+                        ) : (
+                          <Clapperboard size={20} color={GOLD} />
+                        )}
+                      </div>
+                    )}
+                    {kindSel === 'music' ? (
+                      <>
+                        <input
+                          ref={coverRef}
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => void pickCover(e.target.files?.[0])}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => coverRef.current?.click()}
+                          className="bg-transparent border rounded-xl px-3 py-2 cursor-pointer text-xs"
+                          style={{ borderColor: BORDER, color: GOLD }}
+                        >
+                          {poster ? 'Change cover art' : 'Add cover art (or keep gold)'}
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => void takeFrame()}
+                        className="bg-transparent border rounded-xl px-3 py-2 cursor-pointer text-xs"
+                        style={{ borderColor: BORDER, color: GOLD }}
+                      >
+                        Use the current frame as the cover
+                      </button>
+                    )}
+                    {poster && (
+                      <button
+                        type="button"
+                        onClick={() => setPosterFile(null)}
+                        className="bg-transparent border-0 cursor-pointer text-xs underline"
+                        style={{ color: '#999' }}
+                      >
+                        Remove
+                      </button>
+                    )}
                   </div>
                 )}
-                {kind === 'audio' && <audio src={picked.url} controls className="w-full" />}
-                {(kind === 'application' || kind === 'text') && (
-                  <div className="flex items-center gap-2 px-3 py-4 text-sm" style={{ color: '#ddd' }}>
-                    <FileText size={20} color={GOLD} /> {picked.file.name}
-                  </div>
+                {posterNote && (
+                  <p className="text-xs m-0" style={{ color: '#999' }}>
+                    {posterNote}
+                  </p>
                 )}
-                <div className="px-3 py-2 text-xs" style={{ color: '#bbb' }}>
-                  {picked.type} · {formatBytes(picked.file.size)}
-                  {kind === 'image' && picked.file.size > DOWNSCALE_SUGGEST_BYTES && (
-                    <button
-                      type="button"
-                      onClick={shrink}
-                      className="ml-2 bg-transparent border-0 cursor-pointer underline"
-                      style={{ color: GOLD }}
-                    >
-                      Shrink photo (cheaper)
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-            {fileError && <p style={{ color: '#ff6b6b' }}>{fileError}</p>}
-            {picked && slowLandWarning(txBytes) && (
-              <p className="text-xs m-0" style={{ color: '#FFB020' }}>
-                {slowLandWarning(txBytes)}
-              </p>
-            )}
 
-            {picked && !isPrivate && (kindSel === 'music' || kindSel === 'video') && (
-              <div className="flex items-center gap-2">
-                {poster ? (
-                  <img src={poster.url} alt="Cover" className="w-14 h-14 object-cover rounded-lg" />
-                ) : (
-                  <div
-                    className="w-14 h-14 rounded-lg flex items-center justify-center"
-                    style={{ background: 'radial-gradient(circle at 30% 20%, #4a3806 0%, #1a1405 60%, #0b0c0f 100%)' }}
-                  >
-                    {kindSel === 'music' ? <Music size={20} color={GOLD} /> : <Clapperboard size={20} color={GOLD} />}
-                  </div>
-                )}
-                {kindSel === 'music' ? (
-                  <>
-                    <input
-                      ref={coverRef}
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => void pickCover(e.target.files?.[0])}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => coverRef.current?.click()}
-                      className="bg-transparent border rounded-xl px-3 py-2 cursor-pointer text-xs"
-                      style={{ borderColor: BORDER, color: GOLD }}
-                    >
-                      {poster ? 'Change cover art' : 'Add cover art (or keep gold)'}
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => void takeFrame()}
-                    className="bg-transparent border rounded-xl px-3 py-2 cursor-pointer text-xs"
-                    style={{ borderColor: BORDER, color: GOLD }}
-                  >
-                    Use the current frame as the cover
-                  </button>
-                )}
-                {poster && (
-                  <button
-                    type="button"
-                    onClick={() => setPosterFile(null)}
-                    className="bg-transparent border-0 cursor-pointer text-xs underline"
-                    style={{ color: '#999' }}
-                  >
-                    Remove
-                  </button>
-                )}
-              </div>
-            )}
-            {posterNote && (
-              <p className="text-xs m-0" style={{ color: '#999' }}>
-                {posterNote}
-              </p>
-            )}
-
-            <input
-              className={input}
-              style={inputStyle}
-              placeholder="Title (required)"
-              value={title}
-              maxLength={100}
-              onChange={(e) => setTitle(e.target.value)}
-              onFocus={(e) => {
-                // The file name is only a suggestion: select it on first focus so typing replaces it.
-                if (shouldSelectTitleOnFocus(titleTouched.current, title)) e.currentTarget.select();
-                titleTouched.current = true;
-              }}
-            />
-            {kindSel === 'music' && (
-              <>
                 <input
                   className={input}
                   style={inputStyle}
-                  placeholder="Artist"
-                  value={artist}
+                  placeholder="Title (required)"
+                  value={title}
                   maxLength={100}
-                  onChange={(e) => setArtist(e.target.value)}
+                  onChange={(e) => setTitle(e.target.value)}
+                  onFocus={(e) => {
+                    // The file name is only a suggestion: select it on first focus so typing replaces it.
+                    if (shouldSelectTitleOnFocus(titleTouched.current, title)) e.currentTarget.select();
+                    titleTouched.current = true;
+                  }}
                 />
-                <div className="flex gap-2">
+                {kindSel === 'music' && (
+                  <>
+                    <input
+                      className={input}
+                      style={inputStyle}
+                      placeholder="Artist"
+                      value={artist}
+                      maxLength={100}
+                      onChange={(e) => setArtist(e.target.value)}
+                    />
+                    <div className="flex gap-2">
+                      <input
+                        className={input}
+                        style={inputStyle}
+                        placeholder="Album"
+                        value={album}
+                        maxLength={100}
+                        onChange={(e) => setAlbum(e.target.value)}
+                      />
+                      <input
+                        className={input}
+                        style={{ ...inputStyle, maxWidth: 96 }}
+                        placeholder="Track #"
+                        inputMode="numeric"
+                        value={track}
+                        maxLength={3}
+                        onChange={(e) => setTrack(e.target.value.replace(/\D/g, ''))}
+                      />
+                    </div>
+                  </>
+                )}
+                {kindSel && !isPrivate && collKind === 'none' && (
+                  <div className="flex gap-2 items-center">
+                    <label className="flex items-center gap-2 text-xs flex-1" style={{ color: '#bbb' }}>
+                      Editions
+                      <input
+                        className={input}
+                        style={{ ...inputStyle, maxWidth: 88 }}
+                        inputMode="numeric"
+                        aria-label="Editions"
+                        value={editions}
+                        maxLength={4}
+                        onChange={(e) => setEditions(e.target.value.replace(/\D/g, ''))}
+                      />
+                    </label>
+                    {kindSel === 'music' && (
+                      <input
+                        className={input}
+                        style={{ ...inputStyle, maxWidth: 170 }}
+                        placeholder="Original price (sats)"
+                        inputMode="numeric"
+                        value={price}
+                        onChange={(e) => setPrice(e.target.value.replace(/\D/g, ''))}
+                      />
+                    )}
+                  </div>
+                )}
+                {kindSel && !isPrivate && editionCount > 1 && (
+                  <p className="text-xs m-0" style={{ color: '#999' }}>
+                    {plan.mode === 'inline'
+                      ? `1 of ${editionCount}: ${editionCount} copies in one transaction, each its own NFT.`
+                      : `1 of ${editionCount}: one numbered master inscription (copies of a big file would multiply the fee).`}
+                  </p>
+                )}
+                <textarea
+                  className={input}
+                  style={inputStyle}
+                  placeholder="Description"
+                  rows={3}
+                  value={description}
+                  maxLength={1000}
+                  onChange={(e) => setDescription(e.target.value)}
+                />
+                {!isPrivate && (
+                  <select
+                    className={input}
+                    style={{ ...inputStyle, background: PANEL }}
+                    value={collKind}
+                    onChange={(e) => setCollKind(e.target.value as Collection['kind'])}
+                  >
+                    <option value="none">No collection</option>
+                    <option value="new">New collection…</option>
+                    {collections.length > 0 && <option value="existing">Add to my collection…</option>}
+                  </select>
+                )}
+                {!isPrivate && collKind === 'new' && (
                   <input
                     className={input}
                     style={inputStyle}
-                    placeholder="Album"
-                    value={album}
+                    placeholder="Collection name"
+                    value={newColl}
                     maxLength={100}
-                    onChange={(e) => setAlbum(e.target.value)}
-                  />
-                  <input
-                    className={input}
-                    style={{ ...inputStyle, maxWidth: 96 }}
-                    placeholder="Track #"
-                    inputMode="numeric"
-                    value={track}
-                    maxLength={3}
-                    onChange={(e) => setTrack(e.target.value.replace(/\D/g, ''))}
-                  />
-                </div>
-              </>
-            )}
-            {kindSel && !isPrivate && collKind === 'none' && (
-              <div className="flex gap-2 items-center">
-                <label className="flex items-center gap-2 text-xs flex-1" style={{ color: '#bbb' }}>
-                  Editions
-                  <input
-                    className={input}
-                    style={{ ...inputStyle, maxWidth: 88 }}
-                    inputMode="numeric"
-                    aria-label="Editions"
-                    value={editions}
-                    maxLength={4}
-                    onChange={(e) => setEditions(e.target.value.replace(/\D/g, ''))}
-                  />
-                </label>
-                {kindSel === 'music' && (
-                  <input
-                    className={input}
-                    style={{ ...inputStyle, maxWidth: 170 }}
-                    placeholder="Original price (sats)"
-                    inputMode="numeric"
-                    value={price}
-                    onChange={(e) => setPrice(e.target.value.replace(/\D/g, ''))}
+                    onChange={(e) => setNewColl(e.target.value)}
                   />
                 )}
+                {!isPrivate && collKind === 'existing' && (
+                  <select
+                    className={input}
+                    style={{ ...inputStyle, background: PANEL }}
+                    value={existingId}
+                    onChange={(e) => setExistingId(e.target.value)}
+                  >
+                    <option value="">Choose a collection</option>
+                    {collections.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {cost && (
+                  <p className="text-xs" style={{ color: '#bbb' }}>
+                    Estimated network fee: {money(cost.networkSats, exchangeRate)} ({fmtBsv(cost.networkSats)})
+                    {cost.txCount > 1 ? ' (2 transactions: collection + item)' : ''}
+                    {cost.feeSats > 0 && <> · bWallet mint fee (1%): {money(cost.feeSats, exchangeRate)}</>} · Total ≈{' '}
+                    {moneyWithSats(cost.totalSats, exchangeRate)}
+                  </p>
+                )}
+                {formError && <p style={{ color: '#ff6b6b' }}>{formError}</p>}
+                <button
+                  type="button"
+                  onClick={review}
+                  className="h-11 rounded-xl font-bold border-0 cursor-pointer"
+                  style={{ background: `linear-gradient(135deg, #FFE27A, #E0A800)`, color: '#1a1400' }}
+                >
+                  {isPrivate ? 'Review private mint' : 'Review public mint'}
+                </button>
               </div>
             )}
-            {kindSel && !isPrivate && editionCount > 1 && (
-              <p className="text-xs m-0" style={{ color: '#999' }}>
-                {plan.mode === 'inline'
-                  ? `1 of ${editionCount}: ${editionCount} copies in one transaction, each its own NFT.`
-                  : `1 of ${editionCount}: one numbered master inscription (copies of a big file would multiply the fee).`}
-              </p>
-            )}
-            <textarea
-              className={input}
-              style={inputStyle}
-              placeholder="Description"
-              rows={3}
-              value={description}
-              maxLength={1000}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-            {!isPrivate && (
-              <select
-                className={input}
-                style={{ ...inputStyle, background: PANEL }}
-                value={collKind}
-                onChange={(e) => setCollKind(e.target.value as Collection['kind'])}
-              >
-                <option value="none">No collection</option>
-                <option value="new">New collection…</option>
-                {collections.length > 0 && <option value="existing">Add to my collection…</option>}
-              </select>
-            )}
-            {!isPrivate && collKind === 'new' && (
-              <input
-                className={input}
-                style={inputStyle}
-                placeholder="Collection name"
-                value={newColl}
-                maxLength={100}
-                onChange={(e) => setNewColl(e.target.value)}
-              />
-            )}
-            {!isPrivate && collKind === 'existing' && (
-              <select
-                className={input}
-                style={{ ...inputStyle, background: PANEL }}
-                value={existingId}
-                onChange={(e) => setExistingId(e.target.value)}
-              >
-                <option value="">Choose a collection</option>
-                {collections.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            )}
-            {cost && (
-              <p className="text-xs" style={{ color: '#bbb' }}>
-                Estimated network fee: {money(cost.networkSats, exchangeRate)} ({fmtBsv(cost.networkSats)})
-                {cost.txCount > 1 ? ' (2 transactions: collection + item)' : ''}
-                {cost.feeSats > 0 && <> · bWallet mint fee (1%): {money(cost.feeSats, exchangeRate)}</>} · Total ≈{' '}
-                {moneyWithSats(cost.totalSats, exchangeRate)}
-              </p>
-            )}
-            {formError && <p style={{ color: '#ff6b6b' }}>{formError}</p>}
-            <button
-              type="button"
-              onClick={review}
-              className="h-11 rounded-xl font-bold border-0 cursor-pointer"
-              style={{ background: `linear-gradient(135deg, #FFE27A, #E0A800)`, color: '#1a1400' }}
-            >
-              {isPrivate ? 'Review private mint' : 'Review public mint'}
-            </button>
-          </div>
-        )}
 
-        {step === 'done' && (
-          <div className="flex flex-col gap-3 text-sm">
-            {isPrivate ? (
-              <p>
-                "{title.trim()}" is minted privately: only you can see it. It is in bMint › Your vault › Private, where
-                you can reveal it later.
-              </p>
-            ) : (
-              <p>
-                "{title.trim()}" was inscribed publicly. It will appear in Media{kindSel === 'music' ? ' › Music' : ''}{' '}
-                shortly
-                {txBytes > 10 * 1024 * 1024 ? ' (Pending until it lands, which can take a few minutes)' : ''}.
-              </p>
+            {step === 'done' && (
+              <div className="flex flex-col gap-3 text-sm">
+                {isPrivate ? (
+                  <p>
+                    "{title.trim()}" is minted privately: only you can see it. It is in bMint › Your vault › Private,
+                    where you can reveal it later.
+                  </p>
+                ) : (
+                  <p>
+                    "{title.trim()}" was inscribed publicly. It will appear in Media
+                    {kindSel === 'music' ? ' › Music' : ''} shortly
+                    {txBytes > 10 * 1024 * 1024 ? ' (Pending until it lands, which can take a few minutes)' : ''}.
+                  </p>
+                )}
+                <a
+                  href={wocTxUrl(txid)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1 break-all"
+                  style={{ color: GOLD }}
+                >
+                  {txid} <ExternalLink size={12} />
+                </a>
+                {cardTo !== null && CardSend && (
+                  <Suspense fallback={null}>
+                    <CardSend txid={txid} title={title.trim()} to={cardTo} />
+                  </Suspense>
+                )}
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="h-11 rounded-xl font-bold border cursor-pointer bg-transparent"
+                  style={{ borderColor: BORDER, color: GOLD }}
+                >
+                  Done
+                </button>
+              </div>
             )}
-            <a
-              href={wocTxUrl(txid)}
-              target="_blank"
-              rel="noreferrer"
-              className="flex items-center gap-1 break-all"
-              style={{ color: GOLD }}
-            >
-              {txid} <ExternalLink size={12} />
-            </a>
-            {cardTo !== null && CardSend && (
-              <Suspense fallback={null}>
-                <CardSend txid={txid} title={title.trim()} to={cardTo} />
-              </Suspense>
-            )}
-            <button
-              type="button"
-              onClick={onClose}
-              className="h-11 rounded-xl font-bold border cursor-pointer bg-transparent"
-              style={{ borderColor: BORDER, color: GOLD }}
-            >
-              Done
-            </button>
           </div>
         )}
       </div>
@@ -1043,11 +1018,21 @@ const MINT_TILES: MintTile[] = [
   // In the store bundle not even as data (GREETING_CARDS_ENABLED inlines to false).
   ...(GREETING_CARDS_ENABLED
     ? [
+        // Split (owner, 1 Nov 2026): someone making pictures all day and someone sending Granny a birthday card
+        // are different jobs, so they get different doors into the same maker.
+        {
+          id: 'picture',
+          icon: <Sparkles size={18} />,
+          title: 'AI pictures',
+          sub: 'Describe it, b paints it, you mint it',
+          when: () => GREETING_CARDS_ENABLED,
+          step: 'picture' as Step,
+        },
         {
           id: 'card',
           icon: <Gift size={18} />,
-          title: 'Greeting card or AI picture',
-          sub: 'Describe it, we make it, you mint it',
+          title: 'Greeting cards',
+          sub: 'Birthdays, Christmas, thank-yous; send it to their $name',
           when: () => GREETING_CARDS_ENABLED,
           step: 'card' as Step,
         },
@@ -1181,28 +1166,3 @@ const MINT_TILES: MintTile[] = [
 // eslint-disable-next-line react-refresh/only-export-components -- the hub reads the same list the sheet shows
 export const mintTilesShown = () =>
   MINT_TILES.filter((t) => t.when()).map(({ id, icon, title, sub, agent }) => ({ id, icon, title, sub, agent }));
-
-const Tile = ({
-  icon,
-  title,
-  sub,
-  onClick,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  sub: string;
-  onClick: () => void;
-}) => (
-  <button
-    type="button"
-    onClick={onClick}
-    className="flex flex-col items-start gap-1 p-3 rounded-xl border text-left cursor-pointer bg-transparent"
-    style={{ borderColor: BORDER, color: '#fff' }}
-  >
-    <span style={{ color: GOLD }}>{icon}</span>
-    <span className="font-bold text-sm leading-tight">{title}</span>
-    <span className="text-[11px] leading-snug" style={{ color: '#999' }}>
-      {sub}
-    </span>
-  </button>
-);

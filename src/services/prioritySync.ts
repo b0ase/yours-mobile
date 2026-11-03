@@ -59,13 +59,37 @@ export type PrioritySyncDeps = {
   concurrency?: number;
   retries?: number;
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * Transactions already found to pay us only 1-sat outputs (names, NFTs, tokens): they go straight to the names
+   * part, never fetched again just to be classified. Owner, 1 Nov 2026: with thousands of OpNS names every launch
+   * re-downloaded every name transaction (up to 738 KB each) to classify it, and the iPhone web view was killed
+   * at ~1.5 GB before the names part could mark any of them done, so the next launch did it all again.
+   */
+  classified?: { has(txid: string): Promise<boolean>; add(txid: string): Promise<void> };
+  /** Most names loaded in one run; the rest wait for later runs (the cursor stays put until they are done). */
+  namesPerRun?: number;
+  /**
+   * True when the indexer already says every unspent output of a transaction is a 1-sat item (inscription, token,
+   * name): it is classified as names from a few hundred bytes of JSON instead of downloading the transaction.
+   * Owner, 1-2 Nov 2026: downloading thousands of name transactions (up to 738 KB each), even with no parsing, grew
+   * the iPhone web view to ~1.5 GB within two minutes; blocking only the address history kept it flat.
+   */
+  isOneSatOnly?: (outpoints: string[]) => Promise<boolean>;
+  /**
+   * Add a coin transaction to the wallet (default: `internalize`). Owner, 2 Nov 2026: the 1sat pipeline downloads
+   * every input's whole source transaction (big OpNS mints) and expands it ~40x, so even a few coins killed the
+   * iPhone web view; coins need only their own outputs.
+   */
+  internalizeCoin?: (txid: string, beef: number[]) => Promise<void>;
+  /** Names in flight at once (default NAMES_CONCURRENCY). */
+  namesConcurrency?: number;
 };
 
 export type PrioritySyncResult = {
   processed: number;
   failed: number;
   coins: { found: number; failed: number };
-  names: { total: number; failed: number };
+  names: { total: number; failed: number; deferred?: number };
   lastScore: number;
   addresses: string[];
 };
@@ -73,6 +97,15 @@ export type PrioritySyncResult = {
 const REORG_SAFE_DEPTH = 6;
 export const DEFAULT_CONCURRENCY = 6;
 export const DEFAULT_RETRIES = 3;
+/**
+ * Names are not loaded by the address sync (owner, 2 Nov 2026: "No reason to constantly be loading them all. It only
+ * needs to be bound to one name"). Loading one goes through the 1sat pipeline, which downloads every input's source
+ * transaction and expanded ~32 MB of downloads to ~1.4 GB on the iPhone. They stay classified (never re-downloaded);
+ * a caller that can afford them passes namesPerRun.
+ */
+export const DEFAULT_NAMES_PER_RUN = 0;
+/** Names load a couple at a time: each is a full BEEF plus its inputs' transactions. */
+export const NAMES_CONCURRENCY = 2;
 
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -173,15 +206,28 @@ export const prioritySync = async (deps: PrioritySyncDeps): Promise<PrioritySync
   report({ part: 'coins', done: 0, total: todo.length, failed: 0, message: coinsMsg() });
   await pool(todo, limit, async (txid) => {
     try {
+      const unspent = (byTxid.get(txid) ?? []).filter((o) => !o.spendTxid).map((o) => o.outpoint);
+      if (
+        (await deps.classified?.has(txid)) ||
+        (deps.isOneSatOnly && (await withRetry(() => deps.isOneSatOnly!(unspent), retries, sleep)))
+      ) {
+        await deps.classified?.add(txid);
+        names.push(txid);
+        checked++;
+        report({ part: 'coins', done: checked, total: todo.length, failed: coinsFailed, message: coinsMsg() });
+        return;
+      }
       const sats = await withRetry(() => deps.ourOutputs(txid), retries, sleep);
       if (sats.some((s) => s > 1)) {
         const beef = await withRetry(() => deps.fetchBeef(txid), retries, sleep);
-        await serial(() => withRetry(() => deps.internalize(txid, beef), retries, sleep));
+        const internalizeCoin = deps.internalizeCoin ?? deps.internalize;
+        await serial(() => withRetry(() => internalizeCoin(txid, beef), retries, sleep));
         await store.add(txid);
         coinsFound++;
         processed++;
       } else {
         names.push(txid);
+        await deps.classified?.add(txid);
       }
     } catch (err) {
       coinsFailed++;
@@ -192,12 +238,15 @@ export const prioritySync = async (deps: PrioritySyncDeps): Promise<PrioritySync
   });
   deps.onCoinsReady?.({ found: coinsFound, failed: coinsFailed });
 
-  // 3. Names and other 1-sat outputs, in the background part.
+  // 3. Names and other 1-sat outputs, in the background part, a bounded slice per run.
+  const namesTotal = names.length;
+  const deferred = Math.max(0, namesTotal - (deps.namesPerRun ?? DEFAULT_NAMES_PER_RUN));
+  if (deferred) names.length = namesTotal - deferred;
   let namesDone = 0;
   let namesFailed = 0;
   const namesMsg = () => `Loading names ${fmt(namesDone)} of ${fmt(names.length)}`;
   if (names.length) report({ part: 'names', done: 0, total: names.length, failed: 0, message: namesMsg() });
-  await pool(names, limit, async (txid) => {
+  await pool(names, deps.namesConcurrency ?? Math.min(limit, NAMES_CONCURRENCY), async (txid) => {
     try {
       const beef = await withRetry(() => deps.fetchBeef(txid), retries, sleep);
       await serial(() => withRetry(() => deps.internalize(txid, beef), retries, sleep));
@@ -212,12 +261,12 @@ export const prioritySync = async (deps: PrioritySyncDeps): Promise<PrioritySync
   });
 
   const failed = coinsFailed + namesFailed;
-  if (failed === 0 && maxSafeScore > lastScore) await store.setLastScore(maxSafeScore);
+  if (failed === 0 && deferred === 0 && maxSafeScore > lastScore) await store.setLastScore(maxSafeScore);
   return {
     processed,
     failed,
     coins: { found: coinsFound, failed: coinsFailed },
-    names: { total: names.length, failed: namesFailed },
+    names: { total: namesTotal, failed: namesFailed, ...(deferred ? { deferred } : {}) },
     lastScore: maxSafeScore,
     addresses,
   };

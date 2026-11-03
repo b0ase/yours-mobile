@@ -1,19 +1,12 @@
 import { keepAnimated } from '../mobile/names/animatedAvatar';
 import { useCallback, useEffect, useState } from 'react';
-import {
-  computeBapId,
-  resolveBapId,
-  updateProfile,
-  getProfile,
-  inscribe,
-  type ProfileResponse,
-  type IdentityResponse,
-} from '@1sat/actions';
+import { updateProfile, inscribe, type IdentityResponse } from '@1sat/actions';
 import type { OneSatContext } from '@1sat/actions';
 import type { ChromeStorageService } from '../services/ChromeStorage.service';
 import type { ChromeStorageObject } from '../services/types/chromeStorage.types';
 import { HOSTED_YOURS_IMAGE } from '../utils/constants';
 import { walletReady } from '../utils/walletReady';
+import { loadBapIdentity } from '../utils/bapIdentityCache';
 import { useServiceContext } from './useServiceContext';
 import { PublicKey } from '@bsv/sdk';
 
@@ -132,44 +125,44 @@ export const useIdentity = (apiContext: OneSatContext, chromeStorageService?: Ch
   const { isLocked } = useServiceContext();
   const ready = walletReady(chromeStorageService, isLocked);
 
-  const loadIdentity = useCallback(async () => {
-    if (!ready) {
-      setState((s) => ({ ...s, loading: false }));
-      return;
-    }
-    setState((s) => ({ ...s, loading: true, error: null }));
-    try {
-      const [bapId, resolvedId] = await Promise.all([computeBapId(apiContext), resolveBapId(apiContext)]);
+  const loadIdentity = useCallback(
+    async (force = false) => {
+      if (!ready) {
+        setState((s) => ({ ...s, loading: false }));
+        return;
+      }
+      setState((s) => ({ ...s, loading: true, error: null }));
+      try {
+        // One load per session per identity, shared by every screen that mounts this hook (utils/bapIdentityCache.ts).
+        const identityAddress = chromeStorageService?.getCurrentAccountObject().account?.addresses?.identityAddress;
+        const { bapId, isPublished, profile: res } = await loadBapIdentity(apiContext, identityAddress, { force });
+        let profile = DEFAULT_PROFILE;
 
-      const isPublished = resolvedId !== null;
-      let profile = DEFAULT_PROFILE;
-
-      if (isPublished) {
-        const res: ProfileResponse = await getProfile.execute(apiContext, {});
-        if (res.profile) {
+        if (isPublished && res?.profile) {
           profile = {
             name: (res.profile.name as string) || DEFAULT_PROFILE.name,
             image: (res.profile.image as string) || DEFAULT_PROFILE.image,
             description: (res.profile.description as string) || DEFAULT_PROFILE.description,
           };
         }
-      }
 
-      // Only cache into the account this wallet context signs as: right after a switch `apiContext` can still be the
-      // previous account's wallet, and its profile name / photo were written into the new account's settings
-      // (owner, 8 Oct 2026: richardwboase.gmail showed "b0ase" on Receive).
-      const { account } = chromeStorageService?.getCurrentAccountObject() ?? {};
-      if (isPublished && account && (await ctxIdentityAddress(apiContext)) === account.addresses.identityAddress)
-        cacheToStorage(profile);
-      setState({ bapId, isPublished, profile, loading: false, error: null });
-    } catch (err) {
-      setState((s) => ({
-        ...s,
-        loading: false,
-        error: err instanceof Error ? err.message : String(err),
-      }));
-    }
-  }, [apiContext, cacheToStorage, chromeStorageService, ready]);
+        // Only cache into the account this wallet context signs as: right after a switch `apiContext` can still be the
+        // previous account's wallet, and its profile name / photo were written into the new account's settings
+        // (owner, 8 Oct 2026: richardwboase.gmail showed "b0ase" on Receive).
+        const { account } = chromeStorageService?.getCurrentAccountObject() ?? {};
+        if (isPublished && account && (await ctxIdentityAddress(apiContext)) === account.addresses.identityAddress)
+          cacheToStorage(profile);
+        setState({ bapId, isPublished, profile, loading: false, error: null });
+      } catch (err) {
+        setState((s) => ({
+          ...s,
+          loading: false,
+          error: err instanceof Error ? err.message : String(err),
+        }));
+      }
+    },
+    [apiContext, cacheToStorage, chromeStorageService, ready],
+  );
 
   useEffect(() => {
     loadIdentity();
@@ -226,7 +219,7 @@ export const useIdentity = (apiContext: OneSatContext, chromeStorageService?: Ch
           setState((s) => ({ ...s, loading: false, error: res.error! }));
           return res;
         }
-        await loadIdentity();
+        await loadIdentity(true);
         return res;
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
@@ -242,6 +235,6 @@ export const useIdentity = (apiContext: OneSatContext, chromeStorageService?: Ch
     prepareAvatar,
     inscribeAvatar,
     saveProfile,
-    reload: loadIdentity,
+    reload: () => loadIdentity(true),
   };
 };

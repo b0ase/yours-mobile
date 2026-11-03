@@ -2,6 +2,8 @@ import { useEffect, useState, useRef } from 'react';
 import { YoursEventName } from '../inject';
 import { useTheme } from './useTheme';
 import { BALANCE_REFRESH_EVENT } from './balanceRefresh';
+import { invalidateWalletLists } from '../utils/walletReadCache';
+import { syncBackoff } from '../utils/syncBackoff';
 
 export type SyncStatusMessage = {
   action: YoursEventName.SYNC_STATUS_UPDATE;
@@ -38,6 +40,9 @@ export const useSyncTracker = () => {
   // a sync happening. Otherwise the UI can get stuck when the popup mounts
   // after the service worker already finished (or dropped) its `complete` event.
   const [isSyncing, setIsSyncing] = useState(false);
+  /** Bumped only when the wallet reports a sync that finished ('complete'), not on errors or the stuck-spinner
+   *  safety net: dependent jobs (the MNEE refresh) key off this instead of every isSyncing toggle (1 Nov 2026). */
+  const [syncDoneTick, setSyncDoneTick] = useState(0);
   /** "Loading your wallet from backup…" while a new device copies the remote store (restore, 14 Oct 2026). */
   const [restoreMessage, setRestoreMessage] = useState('');
   /** What the sync is doing right now, from the wallet's own counts: "Loading names 1,200 of 3,400". */
@@ -110,13 +115,20 @@ export const useSyncTracker = () => {
           break;
 
         case 'coins-ready':
-          // Coins are in: read the balance now, while names keep loading.
+          // Coins are in: read the balance now, while names keep loading. Cached output lists are out of date.
+          invalidateWalletLists();
           setBalanceTick((n) => n + 1);
           break;
 
         case 'complete':
+          // A finished sync: the wallet's outputs may have changed, and the address sync works again.
+          invalidateWalletLists();
+          syncBackoff.succeed();
           if (completeTimeoutRef.current) clearTimeout(completeTimeoutRef.current);
-          completeTimeoutRef.current = setTimeout(finishSync, 3000);
+          completeTimeoutRef.current = setTimeout(() => {
+            setSyncDoneTick((n) => n + 1);
+            finishSync();
+          }, 3000);
           break;
 
         case 'restoring':
@@ -153,6 +165,7 @@ export const useSyncTracker = () => {
     balanceTick,
     theme,
     isSyncing,
+    syncDoneTick,
     restoreMessage,
     syncMessage,
   };

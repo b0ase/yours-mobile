@@ -441,7 +441,9 @@ describe('private by default', () => {
     for (const m of ['image/png', 'audio/mpeg', 'video/mp4', 'model/gltf-binary'])
       expect(r.mintIsPrivate(false, m)).toBe(true);
     expect(r.mintIsPrivate(true, 'image/png')).toBe(false);
-    expect(r.mintIsPrivate(false, 'application/pdf')).toBe(false);
+    // Documents mint privately since 1 Nov 2026; HTML (a website to serve) stays public-only.
+    expect(r.mintIsPrivate(false, 'application/pdf')).toBe(true);
+    expect(r.mintIsPrivate(false, 'text/html')).toBe(false);
     expect(r.mintIsPrivate(false, 'model/x', '3d')).toBe(true);
   });
   test('bAvatar mints privately by default: one 1-sat encrypted record, no clear SVG on chain', async () => {
@@ -478,5 +480,17 @@ describe('private by default', () => {
     expect(head.header.kind).toBe('bavatar');
     expect(head.header.mime).toBe('image/svg+xml');
     expect(calls[0].outputs[0].lockingScript).not.toContain(hex(Utils.toArray('<svg', 'utf8')));
+  });
+});
+
+describe('private documents (1 Nov 2026)', () => {
+  test('PDFs, ebooks, text and markdown mint privately; HTML stays public-only', () => {
+    expect(r.mediaKindFor('application/pdf')).toBe('document');
+    expect(r.mediaKindFor('application/epub+zip')).toBe('document');
+    expect(r.mediaKindFor('text/plain; charset=utf-8')).toBe('document');
+    expect(r.mediaKindFor('text/markdown')).toBe('document');
+    expect(r.mediaKindFor('text/html')).toBeNull();
+    expect(r.mintIsPrivate(false, 'text/plain')).toBe(true);
+    expect(r.mintIsPrivate(true, 'text/plain')).toBe(false);
   });
 });

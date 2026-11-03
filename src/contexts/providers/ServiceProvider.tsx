@@ -9,8 +9,20 @@ import { createCWI, OneSatServices } from '@1sat/wallet-browser';
 import { makeResilientTransport } from '../../utils/resilientChromeTransport';
 import { gateWalletOnUsb } from '../../services/usbPresence';
 import { setChatAccount, setChatReceiveAddress } from '../../mobile/chat/chatAccount';
+import { withWalletReadCache } from '../../utils/walletReadCache';
+import { resetSessionCaches } from '../../utils/sessionCaches';
+import { PublicKey } from '@bsv/sdk';
 
-const initializeServices = async (onUsbRemoved: () => void) => {
+/** True when `publicKey` (hex) is the identity key of the account whose identity address is `identityAddress`. */
+const identityMatches = (publicKey: string, identityAddress: string) => {
+  try {
+    return PublicKey.fromString(publicKey).toAddress() === identityAddress;
+  } catch {
+    return false;
+  }
+};
+
+const initializeServices = async (onUsbRemoved: () => void, isLocked: () => boolean) => {
   const chromeStorageService = new ChromeStorageService();
   // Startup timing (owner, 6 Oct 2026: 40 s blank side panel). Logged so a slow start can be diagnosed from the console.
   const t0 = performance.now();
@@ -35,10 +47,18 @@ const initializeServices = async (onUsbRemoved: () => void) => {
     chromeStorageService,
     onUsbRemoved,
   );
+  // Page-side read cache over the wallet (utils/walletReadCache.ts): public keys once per session, identical
+  // listOutputs shared and reused for 10 s (owner's iPhone, 1 Nov 2026: ~550 getPublicKey/min idle drove a WebView
+  // memory kill). Scoped to the selected account while unlocked; a lock or account change empties it.
+  const { wallet: cachedCWI } = withWalletReadCache(chromeCWI, {
+    scope: () =>
+      isLocked() ? '' : (chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ?? ''),
+    identityMatches,
+  });
   const chain = 'main' as const;
   const services = new OneSatServices(chain);
   // chromeCWI is the gated background wallet — module owns apply.
-  const apiContext = createContext(chromeCWI, {
+  const apiContext = createContext(cachedCWI, {
     chain,
     services,
     isBaseWallet: false,
@@ -57,6 +77,9 @@ export const ServiceProvider: React.FC<{ children: ReactNode }> = ({ children })
   const [isReady, setIsReady] = useState<boolean>(false);
   const [isSwitchingAccount, setIsSwitchingAccount] = useState<boolean>(false);
   const prevIsLockedRef = useRef<boolean | null>(null);
+  // Read by the wallet read cache (no caching while locked).
+  const isLockedRef = useRef(true);
+  isLockedRef.current = isLocked;
   const lockRef = useRef<() => void>(() => setIsLocked(true));
   useEffect(() => {
     if (services?.chromeStorageService) {
@@ -67,6 +90,8 @@ export const ServiceProvider: React.FC<{ children: ReactNode }> = ({ children })
       if (isLocked && prevIsLockedRef.current === false) {
         // Also drop this page's cached passKey, so a later lock check here cannot see the old session.
         void services.chromeStorageService.clearPassKey().catch(() => undefined);
+        // And the page-side session caches (wallet reads, BAP identity, MNEE scan, sync back-off).
+        resetSessionCaches();
         chrome.runtime.sendMessage({ action: 'WALLET_LOCKED' }).catch(() => {});
       }
       prevIsLockedRef.current = isLocked;
@@ -76,7 +101,10 @@ export const ServiceProvider: React.FC<{ children: ReactNode }> = ({ children })
   useEffect(() => {
     const initServices = async () => {
       try {
-        const initializedServices = await initializeServices(() => lockRef.current());
+        const initializedServices = await initializeServices(
+          () => lockRef.current(),
+          () => isLockedRef.current,
+        );
         const { chromeStorageService, apiContext } = initializedServices;
         const { account, lastActiveTime, selectedAccount } = chromeStorageService.getCurrentAccountObject();
         // bit-sign sessions are per account: every bChat call acts as the ACTIVE account.
