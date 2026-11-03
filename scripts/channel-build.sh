@@ -129,7 +129,7 @@ else
   NAME=bWallet
   ICON=AppIcon
   if [[ $CH == ios-private ]]; then
-    APP_ID=$APP_ID.private; NAME="bWalletX"; ICON=AppIconX
+    APP_ID=${IOS_PRIVATE_APP_ID:-$APP_ID.private}; NAME="bWalletX"; ICON=AppIconX
     # The launch storyboard names the "Splash" image: swap in the b+x splash for this build only.
     SPL=ios/App/App/Assets.xcassets
     cp "$SPL"/SplashX.imageset/*.png "$SPL/Splash.imageset/"
