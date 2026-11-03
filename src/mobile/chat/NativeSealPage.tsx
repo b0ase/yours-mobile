@@ -162,13 +162,15 @@ export const NativeSealPage = () => {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col" style={{ background: '#0b0b0d', color: '#e4e4e7' }}>
-      <div className="flex items-center gap-2 px-3 py-2" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+    // Full screen above the Dock / tab bar (z-[100]): the pad's buttons sat under the bottom bar (iPhone, 3 Nov 2026).
+    <div className="fixed inset-0 z-[500] flex min-h-0 flex-col pt-[env(safe-area-inset-top)]" style={{ background: '#0b0b0d', color: '#e4e4e7' }}>
+      <div className="flex items-center gap-2 px-3 py-2" style={{ borderBottom: '1px solid rgba(245,184,0,0.35)' }}>
         <button type="button" onClick={() => navigate(-1)} className="rounded-lg px-2 py-1 text-[14px]" style={{ color: '#a1a1aa' }}>
           ‹ Back
         </button>
-        <div className="min-w-0 flex-1 text-[14px] font-semibold" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {doc?.title ?? 'Document'}
+        <div className="min-w-0 flex-1" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: '#F5B800' }}>Review &amp; sign</div>
+          <div className="text-[14px] font-semibold" style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{doc?.title ?? 'Document'}</div>
         </div>
         {fingerprint && <span className="font-mono text-[11px]" style={{ color: '#71717a' }}>#{fingerprint}</span>}
       </div>
@@ -281,8 +283,8 @@ const SignaturePad = ({ label, onDone }: { label: string; onDone: (svg: string) 
         <button type="button" onClick={() => ((strokes.current = []), draw())} className="min-h-11 rounded-lg px-4 text-[14px]" style={{ border: '1px solid rgba(255,255,255,0.15)' }}>
           Clear
         </button>
-        <button type="button" onClick={done} className="min-h-11 flex-1 rounded-lg text-[14px] font-semibold" style={{ background: '#27272a' }}>
-          Done
+        <button type="button" onClick={done} className="min-h-11 flex-1 rounded-lg text-[15px] font-semibold" style={{ background: '#F5B800', color: '#0b0b0d' }}>
+          Done · next: Seal
         </button>
       </div>
     </div>
