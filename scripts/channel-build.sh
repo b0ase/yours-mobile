@@ -161,7 +161,7 @@ else
     done
     # No iPhone connected right now is not a failure (under pipefail an empty grep would end the run silently).
     PHONES=$(xcrun devicectl list devices 2>/dev/null | awk '/available \(paired\)|connected/' \
-      | grep -oE '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' || true)
+      | grep -oE '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}|[0-9A-F]{8}-[0-9A-F]{16}' | head -1 || true)
     [[ -z $PHONES ]] && echo "  (no iPhone available: skipped)"
     for DEV in $PHONES; do
       UDID=$(xcrun devicectl device info details --device "$DEV" 2>/dev/null | awk -F': ' '/udid/ {print $2; exit}' || true)
