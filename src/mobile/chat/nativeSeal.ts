@@ -24,7 +24,10 @@ export interface SealApiReply {
   status: number;
   body: Record<string, unknown>;
 }
-export type SealApi = (path: 'prepare' | 'compose' | 'commit' | 'recover', body: Record<string, unknown>) => Promise<SealApiReply>;
+export type SealApi = (
+  path: 'prepare' | 'compose' | 'commit' | 'recover',
+  body: Record<string, unknown>,
+) => Promise<SealApiReply>;
 
 /** The two wallet calls this needs, from the wallet's own (no-prompt) interface. */
 export interface SealKeys {
@@ -91,7 +94,8 @@ async function call(api: SealApi, path: Parameters<SealApi>[0], body: Record<str
   const r = await api(path, body);
   if (!r.ok) {
     const code = typeof r.body.code === 'string' ? r.body.code : '';
-    const msg = typeof r.body.error === 'string' && r.body.error ? r.body.error : `The seal ${path} step failed (${r.status}).`;
+    const msg =
+      typeof r.body.error === 'string' && r.body.error ? r.body.error : `The seal ${path} step failed (${r.status}).`;
     throw new NativeSealError(msg, code === 'already_sealed' ? 'already_sealed' : 'refused', r.status);
   }
   return r.body;
@@ -114,10 +118,14 @@ export async function nativeSignAndSeal(input: {
 }): Promise<NativeSealOutcome> {
   const step = (s: SealStep) => input.onStep?.(s);
   step('preparing');
-  const prepared = (await call(input.api, 'prepare', { documentId: input.documentId, fieldIds: input.fieldIds })) as unknown as PreparedSeal;
+  const prepared = (await call(input.api, 'prepare', {
+    documentId: input.documentId,
+    fieldIds: input.fieldIds,
+  })) as unknown as PreparedSeal;
 
   step('approving');
-  if (!(await input.approve(prepared))) throw new NativeSealError('Not sealed: you cancelled. Nothing was signed or paid.', 'cancelled');
+  if (!(await input.approve(prepared)))
+    throw new NativeSealError('Not sealed: you cancelled. Nothing was signed or paid.', 'cancelled');
 
   step('composing');
   const composed = await call(input.api, 'compose', { nonce: prepared.nonce, svg: input.svg.trim() });
@@ -137,15 +145,25 @@ export async function nativeSignAndSeal(input: {
   step('paying');
   const paid = await input.keys.createAction({
     description: 'bit-sign: sign and seal a document',
-    outputs: [{ satoshis: 0, lockingScript: lockingScriptHex, outputDescription: 'Document seal (OP_RETURN, hashes only)' }],
+    outputs: [
+      { satoshis: 0, lockingScript: lockingScriptHex, outputDescription: 'Document seal (OP_RETURN, hashes only)' },
+    ],
     options: { acceptDelayedBroadcast: false, randomizeOutputs: false },
   });
-  if (!paid?.txid || !paid.tx) throw new NativeSealError('The wallet did not return the seal transaction, so nothing was recorded.', 'failed');
+  if (!paid?.txid || !paid.tx)
+    throw new NativeSealError('The wallet did not return the seal transaction, so nothing was recorded.', 'failed');
   const txid = paid.txid.toLowerCase();
   const beefHex = toHex(paid.tx);
 
   // ⚠ PERSIST BEFORE COMMIT: from here on the seal is paid for.
-  input.store.save({ documentId: input.documentId, nonce: prepared.nonce, txid, beefHex, attestation, savedAt: (input.now ?? Date.now)() });
+  input.store.save({
+    documentId: input.documentId,
+    nonce: prepared.nonce,
+    txid,
+    beefHex,
+    attestation,
+    savedAt: (input.now ?? Date.now)(),
+  });
 
   step('committing');
   const body = { nonce: prepared.nonce, attestation, txid, beefHex };
@@ -173,7 +191,11 @@ export async function nativeSignAndSeal(input: {
         recovered = true;
       } else if (r.status !== 0 && r.status < 500 && r.status !== 429) {
         input.store.remove(prepared.nonce);
-        throw new NativeSealError(typeof r.body.error === 'string' ? r.body.error : 'The seal could not be recorded.', 'failed', r.status);
+        throw new NativeSealError(
+          typeof r.body.error === 'string' ? r.body.error : 'The seal could not be recorded.',
+          'failed',
+          r.status,
+        );
       }
     } catch (e) {
       if (e instanceof NativeSealError) throw e;
@@ -215,6 +237,38 @@ export async function recoverNativeSeals(api: SealApi, store: PendingSealStore, 
 }
 
 // ── The drawn signature, in exactly the web pad's format (bit-sign InPlaceSignaturePad / SovereignSignature) ──────────
+
+/** POST to bChatX as the wallet's session; throws on a refusal. */
+export type RoomPost = (path: string, body: Record<string, unknown>) => Promise<unknown>;
+
+/**
+ * The ROOM's steps after a native seal, exactly as the web room does them (bit-sign room page runPhoneRoomSteps):
+ * fully signed → pin the sealed copy (POST /api/bitsign/rooms, which posts the "signed and sealed" row) and clear the
+ * pending pointer (prepare-doc 'sealed'); part-signed → hand the signed copy on (prepare-doc 'send'). Without these the
+ * room kept showing "Ready to sign" after the phone sealed (owner's iPhone, 3 Nov 2026). The seal is already on chain,
+ * so a failure here is the room step only and is safe to retry.
+ */
+export async function nativeRoomSteps(
+  post: RoomPost,
+  ticker: string,
+  manifest: Record<string, unknown> | null,
+  out: Pick<NativeSealOutcome, 'signatureId' | 'txid' | 'docHash' | 'complete'>,
+): Promise<'pinned' | 'handed-on'> {
+  const room = `/api/bitsign/rooms/${encodeURIComponent(ticker)}/prepare-doc`;
+  if (out.complete) {
+    await post('/api/bitsign/rooms', {
+      ticker,
+      documentId: out.signatureId,
+      docTxid: out.txid,
+      docHash: out.docHash,
+      manifest,
+    });
+    await post(room, { action: 'sealed' });
+    return 'pinned';
+  }
+  await post(room, { action: 'send', documentId: out.signatureId });
+  return 'handed-on';
+}
 
 export type PadPoint = { x: number; y: number; pressure: number };
 
@@ -263,7 +317,10 @@ export interface SigField {
 /** The unsigned blocks bound to one of this person's handles (all handles of the same identity key). */
 export function myFields(fields: SigField[], myHandles: string[], signedIds: Set<string>): SigField[] {
   const mine = new Set(myHandles.map((h) => h.replace(/^\$/, '').toLowerCase()).filter(Boolean));
-  return fields.filter((f) => !signedIds.has(f.id) && !!f.signerHandle && mine.has(String(f.signerHandle).replace(/^\$/, '').toLowerCase()));
+  return fields.filter(
+    (f) =>
+      !signedIds.has(f.id) && !!f.signerHandle && mine.has(String(f.signerHandle).replace(/^\$/, '').toLowerCase()),
+  );
 }
 
 /** Blocks the document already shows signed (data-sig-anchor="x" data-signed="true"). */

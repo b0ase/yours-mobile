@@ -10,6 +10,7 @@ import {
   NativeSealError,
   inertHtml,
   myFields,
+  nativeRoomSteps,
   nativeSignAndSeal,
   recoverNativeSeals,
   signedFieldIds,
@@ -17,7 +18,7 @@ import {
   type PadPoint,
   type PendingSeal,
   type PendingSealStore,
-  type PreparedSeal,
+  type NativeSealOutcome,
   type SealApi,
   type SealKeys,
   type SigField,
@@ -46,17 +47,26 @@ const localStore = (): PendingSealStore => {
       /* storage blocked */
     }
   };
-  return { list: read, save: (p) => write([...read().filter((x) => x.nonce !== p.nonce), p]), remove: (n) => write(read().filter((x) => x.nonce !== n)) };
+  return {
+    list: read,
+    save: (p) => write([...read().filter((x) => x.nonce !== p.nonce), p]),
+    remove: (n) => write(read().filter((x) => x.nonce !== n)),
+  };
 };
 
-type Doc = { documentId: string; html: string; fields: SigField[]; title: string };
+type Doc = {
+  documentId: string;
+  html: string;
+  fields: SigField[];
+  title: string;
+  manifest: Record<string, unknown> | null;
+};
 type Phase =
   | { k: 'loading' }
   | { k: 'error'; text: string }
   | { k: 'ready' }
-  | { k: 'approve'; prepared: PreparedSeal }
   | { k: 'working'; text: string }
-  | { k: 'done'; txid: string };
+  | { k: 'done'; out: NativeSealOutcome; roomError: string | null };
 
 const STEP_TEXT: Record<string, string> = {
   preparing: 'Preparing the seal…',
@@ -74,7 +84,6 @@ export const NativeSealPage = () => {
   const [doc, setDoc] = useState<Doc | null>(null);
   const [phase, setPhase] = useState<Phase>({ k: 'loading' });
   const [svg, setSvg] = useState<string | null>(null);
-  const approveRef = useRef<((ok: boolean) => void) | null>(null);
 
   /** The wallet's silent bChatX session (Bearer); signs in with the wallet key when there is none. */
   const client = async (): Promise<BchatClient> => {
@@ -92,7 +101,8 @@ export const NativeSealPage = () => {
       const data = (await c.request('POST', `/api/bitsign/nds/seal/${path}`, body)) as Record<string, unknown>;
       return { ok: true, status: 200, body: data ?? {} };
     } catch (e) {
-      if (e instanceof ChatApiError) return { ok: false, status: e.status, body: (e.data as Record<string, unknown>) ?? { error: e.message } };
+      if (e instanceof ChatApiError)
+        return { ok: false, status: e.status, body: (e.data as Record<string, unknown>) ?? { error: e.message } };
       throw e;
     }
   };
@@ -103,15 +113,28 @@ export const NativeSealPage = () => {
       try {
         const c = await client();
         const r = (await c.request('GET', `/api/bitsign/rooms/${encodeURIComponent(ticker)}/prepare-doc`)) as {
-          pending?: { documentId?: string; html?: string; manifest?: { documentTitle?: string; signatureFields?: SigField[] } | null } | null;
+          pending?: {
+            documentId?: string;
+            html?: string;
+            manifest?: ({ documentTitle?: string; signatureFields?: SigField[] } & Record<string, unknown>) | null;
+          } | null;
         };
         const p = r?.pending;
         if (!live) return;
         if (!p?.documentId || typeof p.html !== 'string' || (docId && p.documentId !== docId)) {
-          setPhase({ k: 'error', text: 'This document is not waiting for your signature (it may already be signed and sealed).' });
+          setPhase({
+            k: 'error',
+            text: 'This document is not waiting for your signature (it may already be signed and sealed).',
+          });
           return;
         }
-        setDoc({ documentId: p.documentId, html: p.html, fields: p.manifest?.signatureFields ?? [], title: p.manifest?.documentTitle || 'Document' });
+        setDoc({
+          documentId: p.documentId,
+          html: p.html,
+          fields: p.manifest?.signatureFields ?? [],
+          title: p.manifest?.documentTitle || 'Document',
+          manifest: p.manifest ?? null,
+        });
         setPhase({ k: 'ready' });
         void recoverNativeSeals(api, localStore(), p.documentId);
       } catch (e) {
@@ -126,7 +149,10 @@ export const NativeSealPage = () => {
 
   const me = loadSession()?.handle ?? '';
   const mine = useMemo(() => (doc ? myFields(doc.fields, [me], signedFieldIds(doc.html)) : []), [doc, me]);
-  const fingerprint = useMemo(() => (doc ? Utils.toHex(Hash.sha256(Utils.toArray(doc.html, 'utf8'))).slice(0, 8) : ''), [doc]);
+  const fingerprint = useMemo(
+    () => (doc ? Utils.toHex(Hash.sha256(Utils.toArray(doc.html, 'utf8'))).slice(0, 8) : ''),
+    [doc],
+  );
 
   const seal = async () => {
     if (!doc || !svg || !mine.length) return;
@@ -143,79 +169,142 @@ export const NativeSealPage = () => {
         keys,
         store: localStore(),
         onStep: (s) => s !== 'approving' && setPhase({ k: 'working', text: STEP_TEXT[s] ?? 'Sealing…' }),
-        // The ONE approval: this sheet (reference, fingerprint, fee), then Face ID / passcode.
-        approve: async (prepared) => {
-          const tapped = await new Promise<boolean>((resolve) => {
-            approveRef.current = resolve;
-            setPhase({ k: 'approve', prepared });
-          });
-          if (!tapped) return false;
+        // The ONE approval: the Seal tap (who, which document, fee shown beside it), then Face ID / passcode. No second
+        // Seal sheet (owner's iPhone, 3 Nov 2026: "it may have asked me to seal twice").
+        approve: async () => {
           const auth = await nativeAuth('Seal this document', 'bChatX');
           return auth.status === 'ok' || auth.status === 'unavailable';
         },
       });
-      setPhase({ k: 'done', txid: out.txid });
+      setPhase({ k: 'done', out, roomError: null });
+      await tellRoom(out);
     } catch (e) {
       const text = e instanceof NativeSealError || e instanceof Error ? e.message : 'The seal did not finish.';
       setPhase({ k: 'error', text });
     }
   };
 
+  /** The room's "signed and sealed" steps (nativeSeal.nativeRoomSteps). Safe to retry: the seal is already on chain. */
+  const tellRoom = async (out: NativeSealOutcome) => {
+    if (!doc) return;
+    try {
+      const c = await client();
+      await nativeRoomSteps((path, body) => c.request('POST', path, body), ticker, doc.manifest, out);
+      setPhase({ k: 'done', out, roomError: null });
+    } catch (e) {
+      setPhase({ k: 'done', out, roomError: e instanceof Error ? e.message : 'The room did not update.' });
+    }
+  };
+
   return (
     // Full screen above the Dock / tab bar (z-[100]): the pad's buttons sat under the bottom bar (iPhone, 3 Nov 2026).
-    <div className="fixed inset-0 z-[500] flex min-h-0 flex-col pt-[env(safe-area-inset-top)]" style={{ background: '#0b0b0d', color: '#e4e4e7' }}>
+    <div
+      className="fixed inset-0 z-[500] flex min-h-0 flex-col pt-[env(safe-area-inset-top)]"
+      style={{ background: '#0b0b0d', color: '#e4e4e7' }}
+    >
       <div className="flex items-center gap-2 px-3 py-2" style={{ borderBottom: '1px solid rgba(245,184,0,0.35)' }}>
-        <button type="button" onClick={() => navigate(-1)} className="rounded-lg px-2 py-1 text-[14px]" style={{ color: '#a1a1aa' }}>
+        <button
+          type="button"
+          onClick={() => navigate(-1)}
+          className="rounded-lg px-2 py-1 text-[14px]"
+          style={{ color: '#a1a1aa' }}
+        >
           ‹ Back
         </button>
         <div className="min-w-0 flex-1" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: '#F5B800' }}>Review &amp; sign</div>
-          <div className="text-[14px] font-semibold" style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{doc?.title ?? 'Document'}</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: '#F5B800' }}>
+            Review &amp; sign
+          </div>
+          <div className="text-[14px] font-semibold" style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {doc?.title ?? 'Document'}
+          </div>
         </div>
-        {fingerprint && <span className="font-mono text-[11px]" style={{ color: '#71717a' }}>#{fingerprint}</span>}
+        {fingerprint && (
+          <span className="font-mono text-[11px]" style={{ color: '#71717a' }}>
+            #{fingerprint}
+          </span>
+        )}
       </div>
-      {doc && <iframe title="Document" sandbox="" srcDoc={inertHtml(doc.html)} className="min-h-0 w-full flex-1" style={{ background: '#fff', border: 0 }} />}
-      <div className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+      {doc && (
+        <iframe
+          title="Document"
+          sandbox=""
+          srcDoc={inertHtml(doc.html)}
+          className="min-h-0 w-full flex-1"
+          style={{ background: '#fff', border: 0 }}
+        />
+      )}
+      <div
+        className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3"
+        style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}
+      >
         {phase.k === 'loading' && <p className="text-[14px]">Opening the document…</p>}
-        {phase.k === 'error' && <p role="alert" className="text-[14px]" style={{ color: '#fca5a5' }}>{phase.text}</p>}
-        {phase.k === 'done' && (
-          <p role="status" className="text-[15px] font-medium" style={{ color: '#6ee7b7' }}>
-            ✓ Signed and sealed · tx {phase.txid.slice(0, 8)}…{phase.txid.slice(-4)}
+        {phase.k === 'error' && (
+          <p role="alert" className="text-[14px]" style={{ color: '#fca5a5' }}>
+            {phase.text}
           </p>
         )}
-        {phase.k === 'working' && <p role="status" className="text-[14px]">{phase.text}</p>}
-        {phase.k === 'approve' && (
-          <div className="rounded-xl p-3" style={{ background: '#18181b', border: '1px solid rgba(245,184,0,0.4)' }}>
-            <div className="text-[15px] font-semibold">Seal {phase.prepared.ref || doc?.title}</div>
-            <div className="mt-1 text-[13px]" style={{ color: '#a1a1aa' }}>
-              Signed as ${me} · #{fingerprint} · network fee about {phase.prepared.estFeeSats} sats
-            </div>
-            <div className="mt-3 flex gap-2">
-              <button type="button" onClick={() => approveRef.current?.(false)} className="min-h-11 flex-1 rounded-lg text-[14px]" style={{ border: '1px solid rgba(255,255,255,0.15)' }}>
-                Not now
-              </button>
-              <button type="button" onClick={() => approveRef.current?.(true)} className="min-h-11 flex-[2] rounded-lg text-[15px] font-semibold" style={{ background: '#F5B800', color: '#0b0b0d' }}>
-                Seal
-              </button>
-            </div>
+        {phase.k === 'done' && (
+          <div>
+            <p role="status" className="text-[15px] font-medium" style={{ color: '#6ee7b7' }}>
+              ✓ Signed and sealed · tx {phase.out.txid.slice(0, 8)}…{phase.out.txid.slice(-4)}
+            </p>
+            {phase.roomError && (
+              <div className="mt-2 flex items-center gap-2">
+                <p role="alert" className="min-w-0 flex-1 text-[13px]" style={{ color: '#fca5a5' }}>
+                  Sealed on chain, but the room did not update ({phase.roomError}).
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void tellRoom(phase.out)}
+                  className="min-h-11 rounded-lg px-4 text-[14px]"
+                  style={{ border: '1px solid rgba(245,184,0,0.5)', color: '#F5B800' }}
+                >
+                  Try again
+                </button>
+              </div>
+            )}
           </div>
         )}
-        {phase.k === 'ready' && doc && (
-          mine.length === 0 ? (
+        {phase.k === 'working' && (
+          <p role="status" className="text-[14px]">
+            {phase.text}
+          </p>
+        )}
+        {phase.k === 'ready' &&
+          doc &&
+          (mine.length === 0 ? (
             <p className="text-[14px]">This document has no signature block for ${me}.</p>
           ) : svg ? (
-            <div className="flex items-center gap-2">
-              <button type="button" onClick={() => setSvg(null)} className="min-h-11 rounded-lg px-4 text-[14px]" style={{ border: '1px solid rgba(255,255,255,0.15)' }}>
-                Redraw
-              </button>
-              <button type="button" onClick={() => void seal()} className="min-h-12 flex-1 rounded-lg text-[15px] font-semibold" style={{ background: '#F5B800', color: '#0b0b0d' }}>
-                Seal
-              </button>
+            <div>
+              <div className="mb-2 text-[13px]" style={{ color: '#a1a1aa' }}>
+                Signed as ${me} · #{fingerprint} · a tiny network fee
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSvg(null)}
+                  className="min-h-11 rounded-lg px-4 text-[14px]"
+                  style={{ border: '1px solid rgba(255,255,255,0.15)' }}
+                >
+                  Redraw
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void seal()}
+                  className="min-h-12 flex-1 rounded-lg text-[15px] font-semibold"
+                  style={{ background: '#F5B800', color: '#0b0b0d' }}
+                >
+                  Seal
+                </button>
+              </div>
             </div>
           ) : (
-            <SignaturePad label={`Sign as ${mine[0].name || `$${me}`}${mine.length > 1 ? ` (fills ${mine.length} blocks)` : ''}`} onDone={setSvg} />
-          )
-        )}
+            <SignaturePad
+              label={`Sign as ${mine[0].name || `$${me}`}${mine.length > 1 ? ` (fills ${mine.length} blocks)` : ''}`}
+              onDone={setSvg}
+            />
+          ))}
       </div>
     </div>
   );
@@ -252,7 +341,9 @@ const SignaturePad = ({ label, onDone }: { label: string; onDone: (svg: string) 
   };
   return (
     <div>
-      <div className="mb-1 text-[13px]" style={{ color: '#a1a1aa' }}>{label}</div>
+      <div className="mb-1 text-[13px]" style={{ color: '#a1a1aa' }}>
+        {label}
+      </div>
       <canvas
         ref={(el) => {
           ref.current = el;
@@ -280,10 +371,20 @@ const SignaturePad = ({ label, onDone }: { label: string; onDone: (svg: string) 
         }}
       />
       <div className="mt-2 flex gap-2">
-        <button type="button" onClick={() => ((strokes.current = []), draw())} className="min-h-11 rounded-lg px-4 text-[14px]" style={{ border: '1px solid rgba(255,255,255,0.15)' }}>
+        <button
+          type="button"
+          onClick={() => ((strokes.current = []), draw())}
+          className="min-h-11 rounded-lg px-4 text-[14px]"
+          style={{ border: '1px solid rgba(255,255,255,0.15)' }}
+        >
           Clear
         </button>
-        <button type="button" onClick={done} className="min-h-11 flex-1 rounded-lg text-[15px] font-semibold" style={{ background: '#F5B800', color: '#0b0b0d' }}>
+        <button
+          type="button"
+          onClick={done}
+          className="min-h-11 flex-1 rounded-lg text-[15px] font-semibold"
+          style={{ background: '#F5B800', color: '#0b0b0d' }}
+        >
           Done · next: Seal
         </button>
       </div>
