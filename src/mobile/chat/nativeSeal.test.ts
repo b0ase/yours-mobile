@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   NativeSealError,
   inertHtml,
+  fetchSignedCopy,
   myFields,
   nativeRoomSteps,
   nativeSignAndSeal,
@@ -244,5 +245,28 @@ describe('nativeRoomSteps (the room hears about a native seal)', () => {
     };
     await expect(nativeRoomSteps(post, 'DRAFTS', null, out)).rejects.toThrow('403');
     expect(calls).toEqual(['/api/bitsign/rooms']);
+  });
+});
+
+describe('fetchSignedCopy (the phone shows the signed copy after sealing)', () => {
+  test('first id that answers with HTML wins; ids tried in order', async () => {
+    const seen: string[] = [];
+    const html = await fetchSignedCopy(
+      async (p) => {
+        seen.push(p);
+        if (p.includes('orig')) throw new Error('404');
+        return '<!doctype html><p>signed</p>';
+      },
+      'DRAFTS',
+      ['orig', 'sig-1'],
+    );
+    expect(html).toBe('<!doctype html><p>signed</p>');
+    expect(seen).toEqual([
+      '/api/bitsign/rooms/DRAFTS/executed?documentId=orig',
+      '/api/bitsign/rooms/DRAFTS/executed?documentId=sig-1',
+    ]);
+  });
+  test('JSON or empty answers are not a signed copy: null', async () => {
+    expect(await fetchSignedCopy(async () => ({ error: 'nope' }), 'T', ['a', ''])).toBeNull();
   });
 });

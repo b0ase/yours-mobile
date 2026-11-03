@@ -9,6 +9,7 @@ import { nativeAuth } from '../siteGateNative';
 import {
   NativeSealError,
   inertHtml,
+  fetchSignedCopy,
   myFields,
   nativeRoomSteps,
   nativeSignAndSeal,
@@ -68,7 +69,7 @@ type Phase =
   | { k: 'error'; text: string }
   | { k: 'ready' }
   | { k: 'working'; text: string }
-  | { k: 'done'; out: NativeSealOutcome; roomError: string | null };
+  | { k: 'done'; out: NativeSealOutcome; roomError: string | null; feeSats: number | null };
 
 const STEP_TEXT: Record<string, string> = {
   preparing: 'Preparing the seal…',
@@ -86,6 +87,7 @@ export const NativeSealPage = () => {
   const [doc, setDoc] = useState<Doc | null>(null);
   const [phase, setPhase] = useState<Phase>({ k: 'loading' });
   const [svg, setSvg] = useState<string | null>(null);
+  const [signedHtml, setSignedHtml] = useState<string | null>(null);
 
   /** The wallet's silent bChatX session (Bearer); signs in with the wallet key when there is none. */
   const client = async (): Promise<BchatClient> => {
@@ -168,6 +170,7 @@ export const NativeSealPage = () => {
       createSignature: (a) => apiContext.wallet.createSignature(a as never) as Promise<{ signature: number[] }>,
       createAction: (a) => apiContext.wallet.createAction(a as never) as Promise<{ txid?: string; tx?: number[] }>,
     };
+    let fee: number | null = null;
     try {
       const out = await nativeSignAndSeal({
         documentId: doc.documentId,
@@ -179,13 +182,22 @@ export const NativeSealPage = () => {
         onStep: (s) => s !== 'approving' && setPhase({ k: 'working', text: STEP_TEXT[s] ?? 'Sealing…' }),
         // The ONE approval: the Seal tap (who, which document, fee shown beside it), then Face ID / passcode. No second
         // Seal sheet (owner's iPhone, 3 Nov 2026: "it may have asked me to seal twice").
-        approve: async () => {
-          const auth = await nativeAuth('Seal this document', 'bChatX');
+        // The fee is named in the Face ID prompt itself, so the one approval is also the payment approval (owner,
+        // 3 Nov 2026: "there was no 'payment' permission request screen on the phone").
+        approve: async (prepared) => {
+          fee = Number.isFinite(prepared.estFeeSats) ? Math.max(1, Math.round(prepared.estFeeSats)) : null;
+          const auth = await nativeAuth(
+            fee ? `Seal this document and pay about ${fee} sats` : 'Seal this document and pay the network fee',
+            'bChatX',
+          );
           return auth.status === 'ok' || auth.status === 'unavailable';
         },
       });
-      setPhase({ k: 'done', out, roomError: null });
-      await tellRoom(out);
+      setPhase({ k: 'done', out, roomError: null, feeSats: fee });
+      await tellRoom(out, fee);
+      const c = await client();
+      const signed = await fetchSignedCopy((path) => c.request('GET', path), ticker, [doc.documentId, out.signatureId]);
+      if (signed) setSignedHtml(signed);
     } catch (e) {
       const text = e instanceof NativeSealError || e instanceof Error ? e.message : 'The seal did not finish.';
       setPhase({ k: 'error', text });
@@ -193,14 +205,14 @@ export const NativeSealPage = () => {
   };
 
   /** The room's "signed and sealed" steps (nativeSeal.nativeRoomSteps). Safe to retry: the seal is already on chain. */
-  const tellRoom = async (out: NativeSealOutcome) => {
+  const tellRoom = async (out: NativeSealOutcome, feeSats: number | null) => {
     if (!doc) return;
     try {
       const c = await client();
       await nativeRoomSteps((path, body) => c.request('POST', path, body), ticker, doc.manifest, out);
-      setPhase({ k: 'done', out, roomError: null });
+      setPhase({ k: 'done', out, roomError: null, feeSats });
     } catch (e) {
-      setPhase({ k: 'done', out, roomError: e instanceof Error ? e.message : 'The room did not update.' });
+      setPhase({ k: 'done', out, roomError: e instanceof Error ? e.message : 'The room did not update.', feeSats });
     }
   };
 
@@ -237,7 +249,7 @@ export const NativeSealPage = () => {
         <iframe
           title="Document"
           sandbox=""
-          srcDoc={inertHtml(doc.html)}
+          srcDoc={inertHtml(signedHtml ?? doc.html)}
           className="min-h-0 w-full flex-1"
           style={{ background: '#fff', border: 0 }}
         />
@@ -257,6 +269,10 @@ export const NativeSealPage = () => {
             <p role="status" className="text-[15px] font-medium" style={{ color: '#6ee7b7' }}>
               ✓ Signed and sealed · tx {phase.out.txid.slice(0, 8)}…{phase.out.txid.slice(-4)}
             </p>
+            <p className="mt-0.5 text-[12px]" style={{ color: '#a1a1aa' }}>
+              {phase.feeSats ? `Network fee paid: about ${phase.feeSats} sats. ` : ''}
+              {signedHtml ? 'Showing your signed copy.' : 'Your signed copy is in the room.'}
+            </p>
             {phase.roomError && (
               <div className="mt-2 flex items-center gap-2">
                 <p role="alert" className="min-w-0 flex-1 text-[13px]" style={{ color: '#fca5a5' }}>
@@ -264,7 +280,7 @@ export const NativeSealPage = () => {
                 </p>
                 <button
                   type="button"
-                  onClick={() => void tellRoom(phase.out)}
+                  onClick={() => void tellRoom(phase.out, phase.feeSats)}
                   className="min-h-11 rounded-lg px-4 text-[14px]"
                   style={{ border: '1px solid rgba(245,184,0,0.5)', color: '#F5B800' }}
                 >
@@ -286,7 +302,7 @@ export const NativeSealPage = () => {
           ) : svg ? (
             <div>
               <div className="mb-2 text-[13px]" style={{ color: '#a1a1aa' }}>
-                Signed as ${me} · #{fingerprint} · a tiny network fee
+                Signed as ${me} · #{fingerprint} · you pay a small network fee (a few hundred sats or less)
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -303,7 +319,7 @@ export const NativeSealPage = () => {
                   className="min-h-12 flex-1 rounded-lg text-[15px] font-semibold"
                   style={{ background: '#F5B800', color: '#0b0b0d' }}
                 >
-                  Seal
+                  Seal &amp; pay
                 </button>
               </div>
             </div>

@@ -270,6 +270,29 @@ export async function nativeRoomSteps(
   return 'handed-on';
 }
 
+/**
+ * The signed copy after a native seal, for the phone to show (owner, 3 Nov 2026: "the document, once signed, did not
+ * have the signature on it on my phone"). Same source as the room card: GET /api/bitsign/rooms/<T>/executed, tried by
+ * each id in order (the original document, then the new signature). Null when none answers with HTML.
+ */
+export async function fetchSignedCopy(
+  get: (path: string) => Promise<unknown>,
+  ticker: string,
+  ids: string[],
+): Promise<string | null> {
+  for (const id of ids.filter(Boolean)) {
+    try {
+      const html = await get(
+        `/api/bitsign/rooms/${encodeURIComponent(ticker)}/executed?documentId=${encodeURIComponent(id)}`,
+      );
+      if (typeof html === 'string' && /<[a-z!]/i.test(html)) return html;
+    } catch {
+      /* try the next id */
+    }
+  }
+  return null;
+}
+
 export type PadPoint = { x: number; y: number; pressure: number };
 
 /** Strokes on a pad of `width`×`height` → the canonical SVG bit-sign's sanitiser accepts byte-for-byte. Null if empty. */
