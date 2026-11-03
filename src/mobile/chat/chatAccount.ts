@@ -6,6 +6,13 @@
 export const LEGACY_SESSION_KEY = 'bwallet.bchat.session';
 
 let chatAccount: string | null = null;
+const accountListeners = new Set<(account: string | null) => void>();
+
+/** Called after every change of the active account (the native Chat's session follows it: chatSession.ts). */
+export const onChatAccountChange = (fn: (account: string | null) => void) => {
+  accountListeners.add(fn);
+  return () => void accountListeners.delete(fn);
+};
 
 export const setChatAccount = (account: string | null | undefined) => {
   const next = account || null;
@@ -17,6 +24,13 @@ export const setChatAccount = (account: string | null | undefined) => {
   } catch {
     /* storage unavailable */
   }
+  accountListeners.forEach((fn) => {
+    try {
+      fn(next);
+    } catch {
+      /* a listener's failure never blocks the switch */
+    }
+  });
 };
 
 export const getChatAccount = () => chatAccount;

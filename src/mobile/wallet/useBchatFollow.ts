@@ -4,6 +4,7 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { loadSession, saveSession } from '../chat/api';
 import { kycClient, signedInClient } from '../kyc/kycWallet';
 import { syncBchatHandle } from '../names/bchatHandle';
+import { loadServerHandles, usableAlias } from '../chat/signInNames';
 import {
   aliasOf,
   decideFollow,
@@ -27,8 +28,18 @@ export const followBchat = async (
   force = false,
 ): Promise<FollowStatus | null> => {
   const pref = loadBchatPref(account);
-  const action = decideFollow({ pref, sessionHandle: chat.handle, alias: aliasOf(paymail), mismatch: chat.mismatch });
-  if (action === 'none') return null;
+  // The paymail's name, unless bit-sign holds it as an inactive alias of this account: then its active handle
+  // (owner, 3 Nov 2026: $b0ase is an extra name of $b0asex, so b0ase@ is never the name to sign in as).
+  const alias = usableAlias(aliasOf(paymail), loadServerHandles(account)?.handles);
+  const ownName = alias === aliasOf(paymail);
+  const action = decideFollow({ pref, sessionHandle: chat.handle, alias, mismatch: chat.mismatch });
+  if (action === 'none') {
+    // Nothing to fix: a failure recorded earlier (e.g. "kept the name" for an inactive alias) no longer applies.
+    const last = loadFollowStatus(account);
+    if (last && !last.ok && chat.handle && pref.mode !== 'off')
+      saveFollowStatus(account, { at: Date.now(), ok: true, handle: chat.handle });
+    return null;
+  }
   if (action === 'clear') {
     saveSession(null);
     return null;
@@ -38,10 +49,9 @@ export const followBchat = async (
   if (action === 'signin') saveSession(null);
   let status: FollowStatus;
   try {
-    if (pref.mode === 'account' && paymail) await syncBchatHandle(ctx, paymail, { signIn: true });
+    if (pref.mode === 'account' && paymail && ownName) await syncBchatHandle(ctx, paymail, { signIn: true });
     if (!loadSession()) await signedInClient(ctx, kycClient());
     const s = loadSession();
-    const alias = aliasOf(paymail);
     if (!s) status = { at: Date.now(), ok: false, error: 'Not signed in' };
     else if (pref.mode === 'account' && alias && aliasOf(s.handle) !== alias)
       // Signed in, but bChatX kept another name: say so in Settings only.

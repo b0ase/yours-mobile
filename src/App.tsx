@@ -61,6 +61,8 @@ const GuestNames = lazy(() => import('./mobile/names/store/GuestNames'));
 // Check this mint (/bmint/check?o=…) works signed out too: a shared check link must open for anyone.
 const GuestCheck = lazy(() => import('./mobile/bmint/check/GuestCheck'));
 
+// Signs the native Chat in to bChatX in the background once the wallet is open (chat/ChatSessionWarmer.tsx).
+const ChatSessionWarmer = lazy(() => import('./mobile/chat/ChatSessionWarmer'));
 // Mobile-only (theme.settings.services.browser); lazy so the extension never loads it.
 const BrowserPage = lazy(() => import('./mobile/BrowserPage'));
 // Lazy, the same chunk as the phone pager's (mobile/phone/pager.tsx), so onboarding and unlock don't parse it.
@@ -269,6 +271,12 @@ export const App = () => {
                         {isNative && !IS_EXTENSION && <CrashResume />}
                         {/* Terms of Use once, right after unlock, for a wallet that never agreed at setup (owner, 3 Nov 2026). */}
                         <TermsOnceSheet hasWallet={hasWallet} locked={isLocked} />
+                        {/* The native Chat's bChatX session, fetched silently for the active account (chat/chatSession.ts). */}
+                        {hasWallet && (
+                          <Suspense fallback={null}>
+                            <ChatSessionWarmer />
+                          </Suspense>
+                        )}
                         <Routes>
                           <Route path="/" element={<Start />} />
                           <Route

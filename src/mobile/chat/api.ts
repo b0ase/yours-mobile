@@ -257,6 +257,13 @@ export class BchatClient {
     return this.session;
   }
 
+  /** Take a session another client saved for this same account (the Wallet card's follow, Settings). */
+  adopt(s: ChatSession | null) {
+    const active = getChatAccount();
+    if (!s?.token || !s.handle || (s.account && active && s.account !== active)) return;
+    this.session = s;
+  }
+
   protected async call<T>(
     method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     path: string,

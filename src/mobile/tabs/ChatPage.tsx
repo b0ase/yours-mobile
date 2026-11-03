@@ -10,7 +10,6 @@ import { heldBsv21Balances } from '../airdrops/heldBalances';
 import { claimDepsFor } from '../chat/claimDeps';
 import { IssuerBadge } from '../issuer/IssuerBadge';
 import { HISTORY_HIDDEN_NOTE, showHistoryNote } from '../chat/history';
-import { logInWalletApp } from '../wallet/connectionLog';
 import {
   type CSSProperties,
   Fragment,
@@ -33,7 +32,6 @@ import {
   Lock,
   Plus,
   ShieldCheck,
-  MessageCircle,
   Search,
   Settings,
   ShoppingCart,
@@ -88,8 +86,15 @@ import { fetchRooms, onRooms, roomsCacheKey, sharedChatClient } from '../chat/sh
 import { peekThread, readThread, warmThreadCache, writeThread } from '../chat/threadCache';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { isNative } from '../native';
-import { BchatClient, ChatApiError, loadSession, needsHandle, saveSession, SESSION_EVENT } from '../chat/api';
-import { HandleFlow } from '../names/HandleFlow';
+import { BchatClient, ChatApiError } from '../chat/api';
+import { ChatSessionPlaceholder } from '../chat/ChatSessionViews';
+import {
+  ensureChatSession,
+  finishHandleClaim,
+  noteChatAuthLost,
+  turnChatOn,
+  useChatSession,
+} from '../chat/chatSession';
 import { avatarFor, B_AVATAR, pendingBQuestions, rememberAvatar, useAvatars } from '../chat/avatars';
 import { ChatAvatar as Avatar } from '../chat/ChatAvatar';
 import { roomEmoji, roomHeaderBackground, roomListBackdrop, roomOwnerOrigin, useRoomLook } from '../chat/roomLook';
@@ -2582,9 +2587,9 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
   const { handleSelect } = useBottomMenu();
   const online = useOnline();
   const client = useMemo(() => sharedChatClient(), []);
-  const [handle, setHandle] = useState<string | null>(client.handle);
-  const [signingIn, setSigningIn] = useState(false);
-  const [authError, setAuthError] = useState('');
+  // The bChatX session is fetched silently for the active account (chat/chatSession.ts): no sign-in step here.
+  const session = useChatSession();
+  const handle = session.kind === 'ready' ? session.handle : null;
 
   const [holdings, setHoldings] = useState<Holding[] | null>(null);
   const [lookups, setLookups] = useState<Record<string, TokenRoomLookup>>({});
@@ -2719,43 +2724,12 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     );
   }, [client, handle, socialAvatar]);
   useEffect(warmThreadCache, []);
-  const autoTried = useRef(false);
   const proved = useRef<Set<string>>(new Set());
   const lookedAt = useRef<Map<string, number>>(new Map());
 
-  const signIn = useCallback(async () => {
-    setSigningIn(true);
-    setAuthError('');
-    try {
-      const s = await client.signIn(walletSigner(apiContext));
-      logInWalletApp('bitcoinchat.online', 'signIn');
-      saveSession(s);
-      setHandle(s.handle);
-    } catch (e) {
-      // A wallet bChat hasn't seen and no handle chosen yet: open Choose your handle right here.
-      const need = needsHandle(e);
-      if (need) setHandleClaim(need);
-      else setAuthError(errText(e));
-    } finally {
-      setSigningIn(false);
-    }
-  }, [client, apiContext]);
-  const [handleClaim, setHandleClaim] = useState<{ claimToken: string; address: string } | null>(null);
-  // After the handle is chosen, finish the sign-in with bit-sign's claim token (falls back to a fresh
-  // sign-in, which now finds the chosen name, if the token has expired).
-  const finishClaim = useCallback(
-    async (paymail: string) => {
-      if (!handleClaim) return;
-      const name = paymail.split('@')[0];
-      const s = await client
-        .claimHandle(handleClaim.claimToken, name, handleClaim.address)
-        .catch(() => client.signIn(walletSigner(apiContext)));
-      saveSession(s);
-      setHandle(s.handle);
-      setHandleClaim(null);
-    },
-    [client, apiContext, handleClaim],
-  );
+  const retrySession = useCallback(() => void ensureChatSession(apiContext, { force: true }), [apiContext]);
+  // A wallet bChatX hasn't seen, with no name of its own: "Choose your handle" finishes the session.
+  const finishClaim = useCallback((paymail: string) => finishHandleClaim(apiContext, paymail), [apiContext]);
 
   // Tapping the Chat tab inside a room goes back to the room list.
   useEffect(() => {
@@ -2766,29 +2740,22 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     return () => window.removeEventListener(TAB_TAP, onTap);
   }, []);
 
+  // The server refused the session: sign in again quietly (chatSession.ts noteChatAuthLost).
   const authLost = useCallback(() => {
-    client.signOut();
-    saveSession(null);
-    setHandle(null);
     setOpen(null);
     setRooms(null);
-  }, [client]);
+    noteChatAuthLost(apiContext);
+  }, [apiContext]);
 
-  // Settings › Sign out of chat clears the stored session while this tab stays mounted: drop the
-  // in-memory one too, or chat keeps using the old token and never signs in again.
+  // Signed out elsewhere (Settings › bChatX off, Delete account): close the room and drop the list.
+  const hadHandle = useRef(!!handle);
   useEffect(() => {
-    const onSession = () => {
-      if (client.current && !loadSession()) {
-        client.signOut();
-        setHandle(null);
-        setOpen(null);
-        setRooms(null);
-        autoTried.current = false;
-      }
-    };
-    window.addEventListener(SESSION_EVENT, onSession);
-    return () => window.removeEventListener(SESSION_EVENT, onSession);
-  }, [client]);
+    if (hadHandle.current && !handle) {
+      setOpen(null);
+      setRooms(null);
+    }
+    hadHandle.current = !!handle;
+  }, [handle]);
 
   useEffect(() => {
     const saved = client.current;
@@ -2799,11 +2766,10 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
       .catch(() => {});
   }, [client, apiContext, authLost]);
 
+  // Normally ChatSessionWarmer has it already; opening Chat asks too (coalesced, and quiet after a failure).
   useEffect(() => {
-    if (handle || autoTried.current || !online) return;
-    autoTried.current = true;
-    void signIn();
-  }, [handle, online, signIn]);
+    if (!handle && online) void ensureChatSession(apiContext, { recheckHandle: true });
+  }, [handle, online, apiContext]);
 
   /** Prove this wallet's token keys to bChat (once per key per visit; signatures only). */
   const prove = useCallback(
@@ -3503,31 +3469,13 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
         )}
 
         {!handle && (
-          <div className="px-6 pt-16 flex flex-col items-center text-center gap-3">
-            <div
-              className="h-16 w-16 rounded-2xl flex items-center justify-center"
-              style={{ background: 'linear-gradient(145deg,#2a2208,#0d0b04)', border: '1px solid #3a2f0c' }}
-            >
-              <MessageCircle size={28} color={GOLD} />
-            </div>
-            <h2 className="text-lg font-bold text-white">Chatrooms</h2>
-            <p className="text-xs" style={{ color: MUTED }}>
-              {ROOMS
-                ? 'Join public rooms, start your own, and chat with the holders of every token you own.'
-                : 'Join public rooms or start your own.'}{' '}
-              Signs in to bChat with this wallet's identity key — no password.
-            </p>
-            <button
-              onClick={signIn}
-              disabled={signingIn || !online}
-              className="mt-2 rounded-2xl px-6 py-3 text-sm font-bold disabled:opacity-50"
-              style={{ background: GOLD, color: '#1a1300' }}
-            >
-              {signingIn ? 'Signing in…' : 'Sign in with wallet'}
-            </button>
-            {authError && <p className="text-xs text-[#F97066]">{authError}</p>}
-            {handleClaim && <HandleFlow onClose={() => setHandleClaim(null)} onClaimed={finishClaim} />}
-          </div>
+          <ChatSessionPlaceholder
+            state={session}
+            label="Loading chatrooms"
+            onRetry={retrySession}
+            onClaimed={finishClaim}
+            onTurnOn={() => void turnChatOn(apiContext)}
+          />
         )}
 
         {handle && (

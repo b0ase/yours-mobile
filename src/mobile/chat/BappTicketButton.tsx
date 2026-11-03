@@ -79,7 +79,7 @@ export const BappTicketButton = ({
   const start = async () => {
     setError('');
     if (isIn) return onEnter();
-    if (!me) return addSnackbar('Sign in to chat first', 'info');
+    if (!me) return addSnackbar('Chat is still connecting. Try again in a moment.', 'info');
     setBusy('…');
     try {
       if (card?.room.open_join) {
