@@ -66,7 +66,17 @@ export type XdmRequest = { id: string; call: string; args: Record<string, unknow
  * (services/sealPass.ts). Answered by the frame host itself; it reaches no wallet code.
  */
 export const FRAME_BITSIGN_CAPABILITIES_CALL = 'bitsign.capabilities';
-export const FRAME_BITSIGN_CAPABILITIES = Object.freeze({ drawSignature: false, [ONE_APPROVAL_SEAL]: true });
+/** bChatX asks the wallet for its session (chat/frameSession.ts). Must match bit-sign src/lib/frame-session-rules.ts. */
+export const FRAME_SESSION_CALL = 'bchatx.frameSession';
+/**
+ * `frameSession`: this wallet answers `bchatx.frameSession` (chat/frameSession.ts), so bChatX in the frame signs in
+ * as the wallet's account by itself. A wallet without it says nothing, and bChatX stops waiting at once.
+ */
+export const FRAME_BITSIGN_CAPABILITIES = Object.freeze({
+  drawSignature: false,
+  [ONE_APPROVAL_SEAL]: true,
+  frameSession: true,
+});
 
 const MAX_ID = 128;
 
@@ -83,7 +93,8 @@ export const parseXdmRequest = (data: unknown): XdmRequest | null => {
       isMintPrivateAction(d.call) ||
       d.call === LAST_VERIFICATION_CALL ||
       d.call === CONFIRM_USER_CALL ||
-      d.call === FRAME_BITSIGN_CAPABILITIES_CALL
+      d.call === FRAME_BITSIGN_CAPABILITIES_CALL ||
+      d.call === FRAME_SESSION_CALL
     )
   )
     return null;
