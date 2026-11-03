@@ -16,7 +16,7 @@ import {
   SLOW_COMMIT_MS,
   createPressGuard,
   estimateSealFee,
-  feeForPrompt,
+  primaryHandleFrom,
   padHasSignature,
   retryAllowed,
   sealButtonLabel,
@@ -116,7 +116,7 @@ type Phase =
 export const NativeSealPage = () => {
   const { ticker = '', doc: docId = '' } = useParams();
   const navigate = useNavigate();
-  const { apiContext } = useServiceContext();
+  const { apiContext, chromeStorageService } = useServiceContext();
   const [doc, setDoc] = useState<Doc | null>(null);
   const [phase, setPhase] = useState<Phase>({ k: 'loading' });
   /** The pad's strokes and size (kept here so the one button can seal them). */
@@ -201,6 +201,28 @@ export const NativeSealPage = () => {
   }, [ticker, docId]);
 
   const me = loadSession()?.handle ?? '';
+  /**
+   * The account's main name for "from $<name>'s wallet" (sheet and receipt): bit-sign's primary for the session
+   * handle ($b0asex → $boase, GET /api/public/handles/primary), else the session handle.
+   */
+  const [shownHandle, setShownHandle] = useState(() => primaryHandleFrom(null, me));
+  useEffect(() => {
+    if (!me) return;
+    let live = true;
+    void (async () => {
+      try {
+        const c = await client();
+        const r = await c.request('GET', `/api/public/handles/primary?h=${encodeURIComponent(me.replace(/^\$/, ''))}`);
+        if (live) setShownHandle(primaryHandleFrom(r, me));
+      } catch {
+        /* the session handle stands */
+      }
+    })();
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me]);
   // Every handle on this account counts (accountHandles): a block bound to $boase is yours when you sign in as $b0asex.
   const [handles, setHandles] = useState<string[]>([]);
   useEffect(() => {
@@ -260,17 +282,21 @@ export const NativeSealPage = () => {
   };
 
   const ref = String((doc?.manifest?.documentRef as string | undefined) || doc?.documentId || '');
+  /** The wallet's own fee rate (sat/kB), the one its createAction pays: the button, sheet and prompt use it. */
+  const satsPerKb = () => chromeStorageService.getCustomFeeRate();
   const estFee = useMemo(
     () =>
       mine.length
         ? estimateSealFee(
             mine.map((f) => f.id),
             ref,
+            satsPerKb(),
           )
         : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [mine, ref],
   );
-  /** The fee the sheet / Face ID named (prepare's estimate), for the receipt when the transaction can't be read. */
+  /** The fee the sheet / Face ID named, for the receipt when the transaction can't be read. */
   const [namedFee, setNamedFee] = useState<number | null>(null);
 
   // A slow commit says so ("Waiting for the network…"), never a frozen line.
@@ -326,14 +352,21 @@ export const NativeSealPage = () => {
         // EVERY seal: the payment sheet, then Face ID / passcode, or the wallet password (sealApproval.ts). Nothing
         // here reads a spending limit, allowance or one-click setting, so nothing can skip it.
         approve: async (prepared) => {
-          fee = feeForPrompt(prepared.estFeeSats);
+          // The wallet's own fee model, with prepare's reference. bit-sign's estFeeSats (1 sat/byte, ~10× the real
+          // fee) is logged only.
+          fee = estimateSealFee(
+            mine.map((f) => f.id),
+            prepared.ref || ref,
+            satsPerKb(),
+          );
+          console.info('[nativeSeal] fee estimate', { wallet: fee, bitsign: prepared.estFeeSats });
           setNamedFee(fee);
-          const p = prepared as typeof prepared & { origHash?: string; handle?: string };
+          const p = prepared as typeof prepared & { origHash?: string };
           const info: SealSheetInfo = {
             title: prepared.title || doc.title,
             ticker: ticker.replace(/^\$/, '').toUpperCase(),
             docHash: typeof p.origHash === 'string' && p.origHash ? p.origHash.slice(0, 8) : fingerprint,
-            handle: (typeof p.handle === 'string' && p.handle ? p.handle : me).replace(/^\$/, ''),
+            handle: shownHandle,
             feeSats: fee,
             blocks: mine.length,
           };
@@ -467,7 +500,7 @@ export const NativeSealPage = () => {
             )}
             {phase.k === 'ready' && inked && (
               <p className="mt-1 text-center text-[12px]" style={{ color: '#a1a1aa' }}>
-                Signed as ${me} · #{fingerprint} · you approve the fee on the next screen
+                Signed as ${shownHandle} · #{fingerprint} · you approve the fee on the next screen
               </p>
             )}
           </div>
@@ -491,7 +524,7 @@ export const NativeSealPage = () => {
               {sealReceipt({
                 actualFeeSats: phase.out.feeSats,
                 estFeeSats: phase.feeSats,
-                handle: me,
+                handle: shownHandle,
                 txid: phase.out.txid,
                 usdPerBsv: price.status === 'ok' ? price.usdPerBsv : null,
               })}

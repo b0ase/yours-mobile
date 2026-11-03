@@ -1,12 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
+import { P2PKH, PrivateKey, SatoshisPerKilobyte, Script, Transaction } from '@bsv/sdk';
 import { NativeSealError, type PadPoint } from './nativeSeal';
 import {
   BROADCASTING_LINE,
   DRAW_HINT,
   createPressGuard,
   estimateSealFee,
-  feeForPrompt,
+  primaryHandleFrom,
+  sealTxBytes,
   padHasSignature,
   retryAllowed,
   sealButtonLabel,
@@ -22,18 +24,79 @@ const line = (y: number, x0: number, x1: number): PadPoint[] =>
 
 describe('one press: "Sign & seal · ~N sats"', () => {
   test('the cost in the label, as the Face ID prompt rounds it', () => {
-    expect(feeForPrompt(75.4)).toBe(75);
-    expect(feeForPrompt(0.2)).toBe(1);
-    expect(feeForPrompt(undefined)).toBeNull();
-    expect(feeForPrompt(Number.NaN)).toBeNull();
-    expect(sealButtonLabel(feeForPrompt(715.2))).toBe('Sign & seal · ~715 sats');
+    expect(sealButtonLabel(estimateSealFee(['sig-1'], 'MIN-011', 100))).toBe('Sign & seal · ~73 sats');
     expect(sealButtonLabel(1)).toBe('Sign & seal · ~1 sat');
     expect(sealButtonLabel(null)).toBe('Sign & seal');
   });
 
-  test("the pre-tap estimate is bit-sign's own formula over the v2 payload (prepare answers the same)", () => {
-    expect(estimateSealFee(['f1'], 'R')).toBe(715);
-    expect(estimateSealFee(['sig-1', 'sig-2'], 'MIN-011')).toBe(730);
+  test("the wallet's own fee model: a minute-011-sized seal is about 75 sats (±30%), not bit-sign's ~715", () => {
+    // Board minute 011 (3 Nov 2026) paid 75 sats at the default 100 sat/kB.
+    for (const [ids, ref] of [
+      [['sig-1'], 'MIN-011'],
+      [['sig-chair'], 'BCORP-MINUTE-011'],
+      [['sig-1', 'sig-2'], 'bcorp-board-minute-011-2026-11-03'],
+    ] as const) {
+      const fee = estimateSealFee([...ids], ref, 100);
+      expect(fee).toBeGreaterThanOrEqual(75 * 0.7);
+      expect(fee).toBeLessThanOrEqual(75 * 1.3);
+    }
+    // Scales with the wallet's rate; a bad rate falls back to the default 100 sat/kB.
+    expect(estimateSealFee(['sig-1'], 'MIN-011', 50)).toBe(Math.ceil(sealTxBytes(['sig-1'], 'MIN-011') * 0.05));
+    expect(estimateSealFee(['sig-1'], 'MIN-011', Number.NaN)).toBe(estimateSealFee(['sig-1'], 'MIN-011', 100));
+  });
+
+  test('the size matches a real signed seal transaction built at the same rate', async () => {
+    const ids = ['sig-1'];
+    const ref = 'MIN-011';
+    const k = PrivateKey.fromRandom();
+    const h = '0'.repeat(64);
+    const payload = JSON.stringify({
+      protocol: 'b0ase-bitsign',
+      version: '2.0',
+      type: 'nds_field_seal',
+      docHash: h,
+      origHash: h,
+      recordHash: h,
+      svgHash: h,
+      fields: ids.join(','),
+      key: `02${h}`,
+      ref,
+      ts: '2026-11-03T12:00:00.000Z',
+    });
+    const src = new Transaction();
+    src.addInput({
+      sourceTXID: '00'.repeat(32),
+      sourceOutputIndex: 0,
+      unlockingScript: new Script(),
+      sequence: 0xffffffff,
+    });
+    src.addOutput({ satoshis: 10_000, lockingScript: new P2PKH().lock(k.toAddress()) });
+    const tx = new Transaction();
+    tx.addInput({ sourceTransaction: src, sourceOutputIndex: 0, unlockingScriptTemplate: new P2PKH().unlock(k) });
+    tx.addOutput({
+      satoshis: 0,
+      lockingScript: Script.fromASM(`OP_FALSE OP_RETURN ${Buffer.from(payload).toString('hex')}`),
+    });
+    tx.addOutput({ change: true, lockingScript: new P2PKH().lock(k.toAddress()) });
+    await tx.fee(new SatoshisPerKilobyte(100));
+    await tx.sign();
+    expect(Math.abs(tx.toBinary().length - sealTxBytes(ids, ref))).toBeLessThanOrEqual(2);
+    expect(Math.abs((tx.getFee() as number) - estimateSealFee(ids, ref, 100))).toBeLessThanOrEqual(1);
+  });
+
+  test("the paying name is the account's main name ($b0asex → $boase), else the session handle", () => {
+    expect(primaryHandleFrom({ primary: { b0asex: 'boase' } }, '$b0asex')).toBe('boase');
+    expect(primaryHandleFrom({ primary: {} }, 'b0asex')).toBe('b0asex');
+    expect(primaryHandleFrom(null, 'B0aseX')).toBe('b0asex');
+    expect(primaryHandleFrom({ primary: { b0asex: '<script>' } }, 'b0asex')).toBe('b0asex');
+    expect(page).toContain('/api/public/handles/primary?h=');
+    expect(page).toContain('handle: shownHandle,');
+    expect(page.match(/handle: shownHandle,/g)?.length).toBe(2); // the sheet and the receipt
+  });
+
+  test("bit-sign's estFeeSats is logged, never shown", () => {
+    const shown = page.split('\n').filter((l) => /prepared\.estFeeSats/.test(l) && !/console\.info/.test(l));
+    expect(shown).toEqual([]);
   });
 
   test('an empty or near-empty pad keeps the button disabled', () => {
@@ -114,17 +177,17 @@ describe('progress, inline under the button', () => {
 describe('receipt and reason', () => {
   const txid = `abcd${'0'.repeat(56)}1234`;
   test('actual fee from the transaction', () => {
-    expect(sealReceipt({ actualFeeSats: 75, estFeeSats: 715, handle: '$b0asex', txid, usdPerBsv: 50 })).toBe(
-      "Paid 75 sats (~0.0038¢) from $b0asex's wallet · abcd…1234",
+    expect(sealReceipt({ actualFeeSats: 75, estFeeSats: 72, handle: '$boase', txid, usdPerBsv: 50 })).toBe(
+      "Paid 75 sats (~0.0038¢) from $boase's wallet · abcd…1234",
     );
   });
   test('the estimate when the transaction could not be read, labelled about; no price → no cents', () => {
-    expect(sealReceipt({ actualFeeSats: undefined, estFeeSats: 715, handle: 'b0asex', txid, usdPerBsv: null })).toBe(
-      "Paid about 715 sats from $b0asex's wallet · abcd…1234",
+    expect(sealReceipt({ actualFeeSats: undefined, estFeeSats: 72, handle: 'boase', txid, usdPerBsv: null })).toBe(
+      "Paid about 72 sats from $boase's wallet · abcd…1234",
     );
   });
   test('the prompt names the document and the fee', () => {
-    expect(sealReason({ title: 'Minute 011', feeSats: 715 })).toBe('Seal Minute 011 on Bitcoin and pay about 715 sats');
+    expect(sealReason({ title: 'Minute 011', feeSats: 72 })).toBe('Seal Minute 011 on Bitcoin and pay about 72 sats');
   });
 });
 
