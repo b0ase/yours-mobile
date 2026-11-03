@@ -140,6 +140,8 @@ describe('double press, double pay', () => {
     expect(retryAllowed(new NativeSealError('x', 'pending_recovery'), true)).toBe(false);
     expect(retryAllowed(new NativeSealError('x', 'failed'), true)).toBe(false);
     expect(retryAllowed(new NativeSealError('x', 'failed'), false)).toBe(false);
+    // Another party sealed first: the payment is recorded, there is nothing to retry.
+    expect(retryAllowed(new NativeSealError('x', 'orphaned'), true)).toBe(false);
   });
 
   test('the page takes the guard before any await and releases it only through retryAllowed', () => {

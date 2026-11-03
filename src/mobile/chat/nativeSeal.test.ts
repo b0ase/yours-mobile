@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { P2PKH, PrivateKey, Script, Transaction } from '@bsv/sdk';
 import {
   feeFromAtomicBeef,
+  isInProgress,
+  retryAfterMs,
   NativeSealError,
   inertHtml,
   accountHandles,
@@ -431,7 +433,7 @@ describe('one press: steps, the pre-tap coin check, the real fee', () => {
   });
 });
 
-describe('the broadcast receipt and commit_in_progress (bit-sign fix/seal-receipt-sweep)', () => {
+describe('the broadcast receipt and in-progress (bit-sign fix/seal-receipt-sweep, a1cc86a1)', () => {
   const seal = (
     over: Parameters<typeof api>[1],
     extra: { receiptTimeoutMs?: number; sleeps?: number[]; rawApi?: SealApi } = {},
@@ -496,45 +498,107 @@ describe('the broadcast receipt and commit_in_progress (bit-sign fix/seal-receip
     expect(Date.now() - t0).toBeLessThan(1_000);
   });
 
-  test('commit answers 409 commit_in_progress → recover waits for the result; never pays again', async () => {
+  const inProgress = (retryAfter?: number) => ({
+    ok: false,
+    status: 429,
+    body: { code: 'commit_in_progress', error: 'being recorded', ...(retryAfter ? { retryAfter } : {}) },
+  });
+
+  test('commit answers 429 commit_in_progress → waits Retry-After, recover reads the result; never pays again', async () => {
     let recovers = 0;
     const sleeps: number[] = [];
     const r = await seal(
       {
-        commit: () => ({ ok: false, status: 409, body: { code: 'commit_in_progress', error: 'being recorded' } }),
+        commit: () => inProgress(15),
         recover: () =>
-          ++recovers < 3
-            ? { ok: false, status: 409, body: { code: 'commit_in_progress' } }
-            : { ok: true, status: 200, body: { ...body, idempotent: true } },
+          ++recovers < 3 ? inProgress(20) : { ok: true, status: 200, body: { ...body, idempotent: true } },
       },
       { sleeps },
     );
     expect(r.out).toMatchObject({ signatureId: 'S', txid: TX, recovered: true });
     expect(paths(r.log)).toEqual(['prepare', 'compose', 'pay', 'receipt', 'commit', 'recover', 'recover', 'recover']);
-    expect(r.log.filter((l) => l.startsWith('pay')).length).toBe(1);
-    expect(sleeps.length).toBe(2);
+    expect(r.log.filter((l) => /^(pay|prepare)/.test(l)).length).toBe(2); // one prepare, one payment
+    expect(sleeps).toEqual([15_000, 20_000, 20_000]); // the server's Retry-After each time, not a fixed wait
     expect(r.store.m.size).toBe(0);
   });
 
-  test('still in progress after every wait → kept on the phone (pending_recovery), never dropped, never paid again', async () => {
-    const r = await seal({
-      commit: () => ({ ok: false, status: 409, body: { code: 'commit_in_progress' } }),
-      recover: () => ({ ok: false, status: 409, body: { code: 'commit_in_progress' } }),
-    });
+  test('in progress is matched by the code at any status; no retryAfter → 15 s', async () => {
+    const sleeps: number[] = [];
+    let n = 0;
+    const r = await seal(
+      {
+        commit: () => ({ ok: false, status: 409, body: { code: 'commit_in_progress' } }),
+        recover: () =>
+          ++n < 2 ? { ok: false, status: 503, body: { code: 'commit_in_progress' } } : { ok: true, status: 200, body },
+      },
+      { sleeps },
+    );
+    expect(r.out).toMatchObject({ signatureId: 'S', recovered: true });
+    expect(sleeps).toEqual([15_000, 15_000]);
+    expect(retryAfterMs({ body: {} })).toBe(15_000);
+    expect(retryAfterMs({ body: { retryAfter: 'x' } })).toBe(15_000);
+    expect(isInProgress({ status: 429, body: {} })).toBe(true);
+    expect(isInProgress({ status: 409, body: { code: 'replayed' } })).toBe(false);
+  });
+
+  test('still in progress after 3 tries → entry kept (pending_recovery), never re-prepared or paid again', async () => {
+    const r = await seal({ commit: () => inProgress(15), recover: () => inProgress(15) });
     expect(r.out).toMatchObject({ code: 'pending_recovery' });
     expect(r.store.m.size).toBe(1);
+    expect(r.log.filter((l) => l.startsWith('recover')).length).toBe(3);
+    expect(r.log.filter((l) => /^(pay|prepare)/.test(l)).length).toBe(2);
+  });
+
+  test('409 replayed from commit and recover is a real refusal: entry cleared, no retry, no second payment', async () => {
+    const replayed = () => ({
+      ok: false,
+      status: 409,
+      body: { code: 'replayed', error: 'already finished with a different tx' },
+    });
+    const sleeps: number[] = [];
+    const r = await seal({ commit: replayed, recover: replayed }, { sleeps });
+    expect(r.out).toMatchObject({ code: 'failed', status: 409 });
+    expect(r.store.m.size).toBe(0);
+    expect(sleeps).toEqual([]);
+    expect(r.log.filter((l) => l.startsWith('recover')).length).toBe(1);
     expect(r.log.filter((l) => l.startsWith('pay')).length).toBe(1);
   });
 
-  test('reopen: recoverNativeSeals keeps an entry the sweep is finishing', async () => {
-    const store = memStore();
-    store.save({ documentId: 'D', nonce: 'N1', txid: TX, beefHex: '00', attestation: 'aa', savedAt: 1 });
-    const done = await recoverNativeSeals(
-      async () => ({ ok: false, status: 409, body: { code: 'commit_in_progress' } }),
-      store,
-      'D',
-    );
-    expect(done).toBe(0);
-    expect(store.m.size).toBe(1);
+  test('commit idempotent:true is success', async () => {
+    const r = await seal({ commit: () => ({ ok: true, status: 200, body: { ...body, idempotent: true } }) });
+    expect(r.out).toEqual(body);
+    expect(paths(r.log)).toEqual(['prepare', 'compose', 'pay', 'receipt', 'commit']);
+  });
+
+  test('an orphaned commit result (success:false) is orphaned: entry cleared, no recover, no retry', async () => {
+    const r = await seal({
+      commit: () => ({
+        ok: true,
+        status: 200,
+        body: { success: false, orphaned: true, txid: TX, docHash: 'H', message: 'Another party sealed it first.' },
+      }),
+    });
+    expect(r.out).toMatchObject({ code: 'orphaned', message: 'Another party sealed it first.' });
+    expect(paths(r.log)).toEqual(['prepare', 'compose', 'pay', 'receipt', 'commit']);
+    expect(r.store.m.size).toBe(0);
+  });
+
+  test('reopen: 429 keeps the entry; success, orphaned or a definitive 4xx clears it', async () => {
+    const one = async (reply: { ok: boolean; status: number; body: Record<string, unknown> }) => {
+      const store = memStore();
+      store.save({ documentId: 'D', nonce: 'N1', txid: TX, beefHex: '00', attestation: 'aa', savedAt: 1 });
+      const done = await recoverNativeSeals(async () => reply, store, 'D');
+      return { done, kept: store.m.size };
+    };
+    expect(await one(inProgress(15))).toEqual({ done: 0, kept: 1 });
+    expect(await one({ ok: false, status: 409, body: { code: 'commit_in_progress' } })).toEqual({ done: 0, kept: 1 });
+    expect(await one({ ok: false, status: 0, body: {} })).toEqual({ done: 0, kept: 1 });
+    expect(await one({ ok: false, status: 502, body: {} })).toEqual({ done: 0, kept: 1 });
+    expect(await one({ ok: true, status: 200, body: { ...body, idempotent: true } })).toEqual({ done: 1, kept: 0 });
+    expect(await one({ ok: true, status: 200, body: { success: false, orphaned: true } })).toEqual({
+      done: 0,
+      kept: 0,
+    });
+    expect(await one({ ok: false, status: 409, body: { code: 'replayed' } })).toEqual({ done: 0, kept: 0 });
   });
 });

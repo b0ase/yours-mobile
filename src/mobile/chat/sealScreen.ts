@@ -128,7 +128,11 @@ export const sealProgress = (step: SealProgress, slow = false): ProgressLine[] =
  */
 export const retryAllowed = (error: unknown, reachedPay: boolean): boolean => {
   if (error instanceof NativeSealError && error.code === 'spent_elsewhere') return true;
-  if (error instanceof NativeSealError && (error.code === 'pending_recovery' || error.code === 'failed')) return false;
+  if (
+    error instanceof NativeSealError &&
+    (error.code === 'pending_recovery' || error.code === 'failed' || error.code === 'orphaned')
+  )
+    return false;
   return !reachedPay;
 };
 

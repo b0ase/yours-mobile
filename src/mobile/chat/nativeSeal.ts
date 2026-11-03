@@ -84,7 +84,14 @@ export type SealStep =
 export class NativeSealError extends Error {
   constructor(
     message: string,
-    readonly code: 'already_sealed' | 'refused' | 'cancelled' | 'pending_recovery' | 'failed' | 'spent_elsewhere',
+    readonly code:
+      | 'already_sealed'
+      | 'refused'
+      | 'cancelled'
+      | 'pending_recovery'
+      | 'failed'
+      | 'spent_elsewhere'
+      | 'orphaned',
     readonly status = 0,
   ) {
     super(message);
@@ -126,11 +133,27 @@ export function feeFromAtomicBeef(tx: number[] | undefined): number | null {
 
 /** The broadcast receipt may hold the seal this long at most; then commit goes ahead regardless. */
 export const RECEIPT_TIMEOUT_MS = 5_000;
-/** commit / recover answered 409 commit_in_progress (the server's sweep is finishing it): wait, then ask recover. */
-export const IN_PROGRESS_WAIT_MS = 4_000;
+/**
+ * "In progress" (bit-sign a1cc86a1): HTTP 429 + Retry-After, body { code: 'commit_in_progress', retryAfter }.
+ * Another request (an earlier attempt, or the server's sweep) is recording this very payment. Never final: keep the
+ * saved payment, wait Retry-After, ask recover again. Matched by 429 OR the code at any status. A 409 is now a real
+ * refusal (replayed, signer_race).
+ */
+export const isInProgress = (r: Pick<SealApiReply, 'status' | 'body'>): boolean =>
+  r.status === 429 || r.body.code === 'commit_in_progress';
+/** Recover is asked at most this many times in one press; then the entry waits for the next open or the sweep. */
 export const IN_PROGRESS_TRIES = 3;
-
-const isInProgress = (r: SealApiReply) => r.status === 409 && r.body.code === 'commit_in_progress';
+export const DEFAULT_RETRY_AFTER_S = 15;
+/** The wait the server asked for (body retryAfter, seconds; the Retry-After header is not visible here). */
+export const retryAfterMs = (r: Pick<SealApiReply, 'body'>): number => {
+  const s = Number(r.body.retryAfter);
+  return (Number.isFinite(s) && s > 0 ? Math.min(s, 120) : DEFAULT_RETRY_AFTER_S) * 1000;
+};
+/** After payment: keep the saved payment for later (network fault, server fault, in progress)? */
+const keepsPayment = (r: Pick<SealApiReply, 'status' | 'body'>): boolean =>
+  r.status === 0 || r.status >= 500 || isInProgress(r);
+/** Another party sealed the document first: the payment is recorded against the session, nothing to retry. */
+const isOrphaned = (b: Record<string, unknown>): boolean => b.orphaned === true;
 
 /**
  * The broadcast receipt (bit-sign /seal/receipt, 3 Nov 2026): tells the server the seal is paid the moment
@@ -279,14 +302,18 @@ export async function nativeSignAndSeal(input: {
   await sendReceipt(input.api, body, input.receiptTimeoutMs ?? RECEIPT_TIMEOUT_MS);
   let out: Record<string, unknown> | null = null;
   let lastErr = '';
+  /** Set by an in-progress answer: wait this long before asking recover. */
+  let waitMs = 0;
   for (let i = 0; i < 2 && !out; i++) {
     try {
       const r = await input.api('commit', body);
+      // 200 (with idempotent:true when the sweep already finished it) or an orphaned result (success:false): done.
       if (r.ok) out = r.body;
       else {
         lastErr = typeof r.body.error === 'string' ? r.body.error : `Commit failed (${r.status}).`;
-        // A refusal will not change on a plain retry: recover. That includes 409 commit_in_progress (the sweep is
-        // finishing this very seal): recover waits for its result. Nothing is ever paid again.
+        // In progress (the sweep is finishing this very seal): wait Retry-After, then recover reads its result.
+        if (isInProgress(r)) waitMs = retryAfterMs(r);
+        // A refusal (409 replayed / signer_race…) will not change on a plain retry: recover gives the final word.
         break;
       }
     } catch (e) {
@@ -298,28 +325,42 @@ export async function nativeSignAndSeal(input: {
     step('recovering');
     const sleep = input.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
     for (let i = 0; i < IN_PROGRESS_TRIES && !out; i++) {
+      if (waitMs) await sleep(waitMs);
+      waitMs = 0;
+      let r: SealApiReply;
       try {
-        const r = await input.api('recover', body);
-        if (r.ok) {
-          out = r.body;
-          recovered = true;
-        } else if (isInProgress(r)) {
-          // Someone (the sweep) holds the claim: wait and ask again for its result; kept on the phone meanwhile.
-          lastErr = typeof r.body.error === 'string' ? r.body.error : 'being recorded right now';
-          if (i < IN_PROGRESS_TRIES - 1) await sleep(IN_PROGRESS_WAIT_MS);
-        } else if (r.status !== 0 && r.status < 500 && r.status !== 429) {
-          input.store.remove(prepared.nonce);
-          throw new NativeSealError(
-            typeof r.body.error === 'string' ? r.body.error : 'The seal could not be recorded.',
-            'failed',
-            r.status,
-          );
-        } else break;
-      } catch (e) {
-        if (e instanceof NativeSealError) throw e;
-        break;
+        r = await input.api('recover', body);
+      } catch {
+        break; // unreachable: kept on the phone
+      }
+      if (r.ok) {
+        out = r.body;
+        recovered = true;
+      } else if (isInProgress(r)) {
+        // Kept on the phone; never re-prepared or paid again. Ask again after the server's Retry-After.
+        lastErr = typeof r.body.error === 'string' ? r.body.error : 'being recorded right now';
+        if (i < IN_PROGRESS_TRIES - 1) waitMs = retryAfterMs(r);
+      } else if (keepsPayment(r)) {
+        break; // network / server fault: kept for the next open
+      } else {
+        // A definitive refusal (4xx other than 429): retrying later will not help.
+        input.store.remove(prepared.nonce);
+        throw new NativeSealError(
+          typeof r.body.error === 'string' ? r.body.error : 'The seal could not be recorded.',
+          'failed',
+          r.status,
+        );
       }
     }
+  }
+  if (out && isOrphaned(out)) {
+    input.store.remove(prepared.nonce);
+    throw new NativeSealError(
+      typeof out.message === 'string' && out.message
+        ? out.message
+        : 'Another party sealed this document first. Your payment is recorded; nothing more to do.',
+      'orphaned',
+    );
   }
   if (!out) {
     throw new NativeSealError(
@@ -346,12 +387,11 @@ export async function recoverNativeSeals(api: SealApi, store: PendingSealStore, 
     if (documentId && p.documentId !== documentId) continue;
     try {
       const r = await api('recover', { nonce: p.nonce, attestation: p.attestation, txid: p.txid, beefHex: p.beefHex });
-      // commit_in_progress: the server's sweep is finishing it right now. Keep it; the next open reads the result.
-      if (isInProgress(r)) continue;
-      if (r.ok || (r.status !== 0 && r.status < 500 && r.status !== 429)) {
-        store.remove(p.nonce);
-        if (r.ok) done++;
-      }
+      // In progress (429 / commit_in_progress), network or server fault: keep it for the next open or the sweep.
+      if (keepsPayment(r)) continue;
+      // Success (idempotent too), an orphaned result, or a definitive refusal: done with it.
+      store.remove(p.nonce);
+      if (r.ok && !isOrphaned(r.body)) done++;
     } catch {
       /* next time */
     }
