@@ -6,6 +6,8 @@ import { isNative } from '../native';
 import { BchatClient, ChatApiError, defaultHttp, loadSession, saveSession } from './api';
 import { walletSigner } from './signer';
 import { nativeAuth } from '../siteGateNative';
+import { askWalletPassword } from '../siteGatePassword';
+import { approveSealPayment } from './sealApproval';
 import {
   NativeSealError,
   inertHtml,
@@ -208,11 +210,12 @@ export const NativeSealPage = () => {
         // 3 Nov 2026: "there was no 'payment' permission request screen on the phone").
         approve: async (prepared) => {
           fee = Number.isFinite(prepared.estFeeSats) ? Math.max(1, Math.round(prepared.estFeeSats)) : null;
-          const auth = await nativeAuth(
+          // ⚠ NEVER A SILENT PASS (security P0, 3 Nov 2026): no Face ID / passcode here means the wallet password.
+          return approveSealPayment(
             fee ? `Seal this document and pay about ${fee} sats` : 'Seal this document and pay the network fee',
             'bChatX',
+            { auth: nativeAuth, passwordAuth: askWalletPassword },
           );
-          return auth.status === 'ok' || auth.status === 'unavailable';
         },
       });
       setPhase({ k: 'done', out, roomError: null, feeSats: fee });
