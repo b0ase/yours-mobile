@@ -11,6 +11,8 @@ import { useTheme } from '../../hooks/useTheme';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { restoreMasterFromZip } from '../../utils/masterImporter';
 import { useNavigate } from 'react-router-dom';
+import { TermsLine } from '../../mobile/ugc/UgcSheets';
+import { acceptTerms } from '../../mobile/ugc/ugc';
 import { YoursIcon } from '../../components/YoursIcon';
 
 export const MasterRestore = () => {
@@ -73,6 +75,7 @@ export const MasterRestore = () => {
       setPasswordError(false);
       await restoreMasterFromZip(chromeStorageService, handleProgress, selectedFile, password);
       addSnackbar('Wallet restored successfully!', 'success');
+      acceptTerms();
       window.location.reload();
     } catch (error) {
       console.error('Error restoring from ZIP file', error);
@@ -276,6 +279,8 @@ export const MasterRestore = () => {
                   )}
                 </AnimatePresence>
 
+                {/* Terms of Use at setup (owner, 3 Nov 2026): restoring agrees (it opens straight into the wallet). */}
+                <TermsLine className="mt-3 px-4" />
                 <div className="mt-3 w-full">
                   <Button theme={theme} type="primary" label="Restore Wallet" disabled={!password} isSubmit />
                 </div>

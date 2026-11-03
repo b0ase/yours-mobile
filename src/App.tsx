@@ -41,6 +41,7 @@ import { isHandoffNotLive } from './mobile/passkey/handoffNotLive';
 import { UrlSync } from './mobile/url/UrlSync';
 import { CrashResume } from './mobile/url/ResumeAfterCrash';
 import { isNative } from './mobile/native';
+import { TermsOnceSheet } from './mobile/ugc/UgcSheets';
 
 import { PAY_STREAM_ENABLED } from './mobile/storeBuild';
 import { guestMusicRoute } from './mobile/media/artists/guestRoute';
@@ -266,6 +267,8 @@ export const App = () => {
                       <Router>
                         {isWebApp() && <UrlSync />}
                         {isNative && !IS_EXTENSION && <CrashResume />}
+                        {/* Terms of Use once, right after unlock, for a wallet that never agreed at setup (owner, 3 Nov 2026). */}
+                        <TermsOnceSheet hasWallet={hasWallet} locked={isLocked} />
                         <Routes>
                           <Route path="/" element={<Start />} />
                           <Route

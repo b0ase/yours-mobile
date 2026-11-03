@@ -1,5 +1,4 @@
 import { TopNav } from '../../components/TopNav';
-import { TermsGate } from '../ugc/UgcSheets';
 import { CallsList } from './CallsList';
 import { VideoBackground } from '../ui/VideoBackground';
 import walletBg from '../brand/bg/wallet-card.mp4';
@@ -33,10 +32,8 @@ const CallsPage = () => (
           </button>
         )}
       </div>
-      <TermsGate compact>
-        {/* No onLeave: Message / Pay switch tab through the router, which leaves this route by itself. */}
-        <CallsList bottomInset="var(--dock-h, 3.75rem)" />
-      </TermsGate>
+      {/* No onLeave: Message / Pay switch tab through the router, which leaves this route by itself. */}
+      <CallsList bottomInset="var(--dock-h, 3.75rem)" />
     </div>
   </div>
 );

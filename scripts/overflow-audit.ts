@@ -191,10 +191,13 @@ const openSettings = async (page: Page) => {
   await clickAria(page, 'Accounts menu');
   await clickByText(page, 'Settings');
 };
+// The one-tap terms sheet after unlock (src/mobile/ugc/UgcSheets.tsx TermsOnceSheet; was a card inside Chat/Feed).
 const acceptTerms = async (page: Page) => {
   await page.evaluate(() => {
-    const b = ([...document.querySelectorAll('button')] as HTMLElement[]).find((e) =>
-      /^(I agree|Agree|Accept)/i.test(e.innerText.trim()),
+    const sheet = document.querySelector('[data-testid="terms-sheet"]');
+    if (!sheet) return;
+    const b = ([...sheet.querySelectorAll('button')] as HTMLElement[]).find((e) =>
+      /^Continue$/i.test(e.innerText.trim()),
     );
     b?.click();
   });

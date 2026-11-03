@@ -14,6 +14,8 @@ import { useTheme } from '../../hooks/useTheme';
 import { sleep } from '../../utils/sleep';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useNavigate } from 'react-router-dom';
+import { TermsLine } from '../../mobile/ugc/UgcSheets';
+import { acceptTerms, termsAccepted } from '../../mobile/ugc/ugc';
 import { useLocation } from 'react-router-dom';
 import { YoursIcon } from '../../components/YoursIcon';
 import { saveAccountDataToChromeStorage } from '../../utils/chromeStorageHelpers';
@@ -492,11 +494,14 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
         transition={{ delay: 0.42 }}
         className="w-full"
       >
+        {/* Terms of Use at setup (owner, 3 Nov 2026): Enter agrees, so Feed, Chat, DMs and Calls just open later. */}
+        {(newWallet || !termsAccepted()) && <TermsLine className="mb-3 px-4" />}
         <Button
           theme={theme}
           type="primary"
           label="Enter"
           onClick={() => {
+            acceptTerms();
             window.location.reload();
           }}
         />

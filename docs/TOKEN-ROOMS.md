@@ -212,8 +212,8 @@ build the Token rooms section is hidden entirely (`tokenRoomsEnabled()` is uncha
 - Safety: long-press a message to report it, block its author or, as staff, delete it. Room info ›
   Report room. Reports and blocks are the store-fixes helpers (`ugc/ugc.ts`, `ugc/UserSafety.tsx`):
   reports land in bit-sign's `content_reports` (kinds `room_message`, `room`), blocks sync to
-  `bchat_user_blocks` and the server also hides blocked authors in open rooms. Chat sits behind
-  the terms gate (`TermsGate`, MobileRoutes), Chatrooms included.
+  `bchat_user_blocks` and the server also hides blocked authors in open rooms. The terms are agreed
+  at account setup or in a one-tap sheet after unlock (3 Nov 2026, `ugc/UgcSheets.tsx`), so Chat opens directly.
 - Seeded: **bWallet Lounge** (ticker `LOUNGE`), bCorp's official public room
   (bit-sign `migrations/20261002_seed_bwallet_lounge.sql`).
 - Code: `src/mobile/chat/openRooms.ts` (pure, tested), `chat/OpenRoomSheets.tsx`, `tabs/ChatPage.tsx`.
