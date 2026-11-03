@@ -62,7 +62,15 @@ import { cachedExchangeRate } from '../../utils/wallet';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { BchatClient, defaultHttp, loadSession, saveSession } from '../chat/api';
 import { walletSigner } from '../chat/signer';
-import { FRAME_CODE_PATH, answerFrameSession, singleFlight, type FrameSessionDeps } from '../chat/frameSession';
+import {
+  FRAME_CODE_PATH,
+  accountTag as frameAccountTag,
+  answerFrameSession,
+  singleFlight,
+  type FrameSessionDeps,
+} from '../chat/frameSession';
+import { getChatAccount } from '../chat/chatAccount';
+import { Hash, Utils } from '@bsv/sdk';
 import { isNative } from '../native';
 import { BottomMenuContext } from '../../contexts/BottomMenuContext';
 
@@ -467,6 +475,7 @@ const useFrameSessionDeps = () => {
       return s;
     }),
     mint: (session) => new BchatClient(defaultHttp(isNative), session).request('POST', FRAME_CODE_PATH, {}),
+    account: () => frameAccountTag(getChatAccount(), (v) => Utils.toHex(Hash.sha256(Utils.toArray(v, 'utf8')))),
   };
   return ref as { current: FrameSessionDeps };
 };

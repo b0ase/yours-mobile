@@ -45,7 +45,21 @@ export type FrameSessionDeps = {
   signIn: () => Promise<ChatSession>;
   /** POST FRAME_CODE_PATH with this session's Bearer token; resolves the JSON body. */
   mint: (session: ChatSession) => Promise<unknown>;
+  /**
+   * An opaque tag for the wallet's ACTIVE account (accountTag below), or null. bChatX stores it with the frame's
+   * session and drops that session the moment the tag changes (an account switch), even for the same handle.
+   */
+  account: () => string | null;
 };
+
+/**
+ * The tag for an account's identity address: a short one-way digest, so the page can tell accounts apart without
+ * learning the address. `digestHex` is sha256 → hex (injected; the frame host passes @bsv/sdk's).
+ */
+export const accountTag = (
+  identityAddress: string | null | undefined,
+  digestHex: (s: string) => string,
+): string | null => (identityAddress ? digestHex(`bwalletx-frame-account|${identityAddress}`).slice(0, 24) : null);
 
 export type FrameSessionReply = { success: true; data: unknown } | { success: false; error: string };
 
@@ -64,7 +78,8 @@ export const answerFrameSession = async (
   const mode = parseFrameSessionMode(args);
   if (!mode) return { success: false, error: 'Unknown request.' };
   try {
-    if (mode === 'whoami') return { success: true, data: { handle: deps.load()?.handle ?? null } };
+    if (mode === 'whoami')
+      return { success: true, data: { handle: deps.load()?.handle ?? null, account: deps.account() } };
     let session = deps.load() ?? (await deps.signIn());
     let body: unknown;
     try {
@@ -78,7 +93,7 @@ export const answerFrameSession = async (
     const code = (body as { code?: unknown } | null)?.code;
     if (typeof code !== 'string' || !CODE_RE.test(code))
       return { success: false, error: 'bChatX sent no sign-in code.' };
-    return { success: true, data: { code, handle: session.handle } };
+    return { success: true, data: { code, handle: session.handle, account: deps.account() } };
   } catch (e) {
     return { success: false, error: errorText(e) };
   }

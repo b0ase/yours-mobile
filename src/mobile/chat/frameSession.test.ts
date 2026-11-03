@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { ChatApiError, type ChatSession } from './api';
-import { answerFrameSession, isBchatFrameOrigin, parseFrameSessionMode, singleFlight } from './frameSession';
+import {
+  accountTag,
+  answerFrameSession,
+  isBchatFrameOrigin,
+  parseFrameSessionMode,
+  singleFlight,
+} from './frameSession';
 
 const S = (token: string, handle = 'b0asex'): ChatSession => ({ token, handle, address: '1Addr' });
 const CODE = 'A'.repeat(43);
@@ -35,6 +41,7 @@ describe('answerFrameSession', () => {
   test('refuses any other framed site, without touching the session', async () => {
     let touched = false;
     const deps = {
+      account: () => 'TAG',
       load: () => ((touched = true), S('t')),
       signIn: async () => ((touched = true), S('t')),
       mint: async () => ((touched = true), { code: CODE }),
@@ -46,15 +53,20 @@ describe('answerFrameSession', () => {
 
   test('whoami answers the stored handle with no server call', async () => {
     let minted = false;
-    const deps = { load: () => S('t', 'alice'), signIn: async () => S('x'), mint: async () => ((minted = true), {}) };
+    const deps = {
+      account: () => 'TAG',
+      load: () => S('t', 'alice'),
+      signIn: async () => S('x'),
+      mint: async () => ((minted = true), {}),
+    };
     expect(await answerFrameSession(BCHATX, { mode: 'whoami' }, deps)).toEqual({
       success: true,
-      data: { handle: 'alice' },
+      data: { handle: 'alice', account: 'TAG' },
     });
     const none = { ...deps, load: () => null };
     expect(await answerFrameSession(BCHATX, { mode: 'whoami' }, none)).toEqual({
       success: true,
-      data: { handle: null },
+      data: { handle: null, account: 'TAG' },
     });
     expect(minted).toBe(false);
   });
@@ -62,31 +74,34 @@ describe('answerFrameSession', () => {
   test('code: uses the stored session; the wallet token is never in the reply', async () => {
     const seen: string[] = [];
     const deps = {
+      account: () => 'TAG',
       load: () => S('wallet-token'),
       signIn: async () => S('fresh'),
       mint: async (s: ChatSession) => (seen.push(s.token), { code: CODE }),
     };
     const r = await answerFrameSession(BCHATX, { mode: 'code' }, deps);
-    expect(r).toEqual({ success: true, data: { code: CODE, handle: 'b0asex' } });
+    expect(r).toEqual({ success: true, data: { code: CODE, handle: 'b0asex', account: 'TAG' } });
     expect(seen).toEqual(['wallet-token']);
     expect(JSON.stringify(r)).not.toContain('wallet-token');
   });
 
   test('code: signs in first when the account has no session yet', async () => {
     const deps = {
+      account: () => 'TAG',
       load: () => null,
       signIn: async () => S('fresh', 'bob'),
       mint: async (s: ChatSession) => ({ code: s.token === 'fresh' ? CODE : 'x' }),
     };
     expect(await answerFrameSession(BCHATX, { mode: 'code' }, deps)).toEqual({
       success: true,
-      data: { code: CODE, handle: 'bob' },
+      data: { code: CODE, handle: 'bob', account: 'TAG' },
     });
   });
 
   test('code: a stale token (401) signs in again once', async () => {
     let signIns = 0;
     const deps = {
+      account: () => 'TAG',
       load: () => S('stale'),
       signIn: async () => (signIns++, S('fresh')),
       mint: async (s: ChatSession) => {
@@ -101,6 +116,7 @@ describe('answerFrameSession', () => {
   test('code: other failures are a one-line error, no retry loop', async () => {
     let signIns = 0;
     const deps = {
+      account: () => 'TAG',
       load: () => S('t'),
       signIn: async () => (signIns++, S('t')),
       mint: async () => {
@@ -115,12 +131,18 @@ describe('answerFrameSession', () => {
   });
 
   test('code: a malformed server answer is refused', async () => {
-    const deps = { load: () => S('t'), signIn: async () => S('t'), mint: async () => ({ code: 'short' }) };
+    const deps = {
+      account: () => 'TAG',
+      load: () => S('t'),
+      signIn: async () => S('t'),
+      mint: async () => ({ code: 'short' }),
+    };
     expect((await answerFrameSession(BCHATX, { mode: 'code' }, deps)).success).toBe(false);
   });
 
   test('code: a wallet bChatX has not seen and no name yet says so plainly', async () => {
     const deps = {
+      account: () => 'TAG',
       load: () => null,
       signIn: async () => {
         throw new ChatApiError('Choose your handle first.', 409, {
@@ -138,7 +160,12 @@ describe('answerFrameSession', () => {
   });
 
   test('unknown mode', async () => {
-    const deps = { load: () => S('t'), signIn: async () => S('t'), mint: async () => ({ code: CODE }) };
+    const deps = {
+      account: () => 'TAG',
+      load: () => S('t'),
+      signIn: async () => S('t'),
+      mint: async () => ({ code: CODE }),
+    };
     expect((await answerFrameSession(BCHATX, { mode: 'steal' }, deps)).success).toBe(false);
   });
 });
@@ -158,4 +185,15 @@ test('singleFlight shares one in-flight sign-in', async () => {
   expect(await a).toBe(1);
   expect(await b).toBe(1);
   expect(await once()).toBe(2);
+});
+
+test('accountTag: stable per account, differs between accounts, never the address itself', () => {
+  const { createHash } = require('node:crypto') as typeof import('node:crypto');
+  const sha = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
+  const a = accountTag('1AccountAAAA', sha);
+  expect(a).toBe(accountTag('1AccountAAAA', sha));
+  expect(a).not.toBe(accountTag('1AccountBBBB', sha));
+  expect(a).toHaveLength(24);
+  expect(a).not.toContain('1AccountAAAA');
+  expect(accountTag(null, sha)).toBeNull();
 });
