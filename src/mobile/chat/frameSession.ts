@@ -50,6 +50,8 @@ export type FrameSessionDeps = {
    * session and drops that session the moment the tag changes (an account switch), even for the same handle.
    */
   account: () => string | null;
+  /** Per-step time limit (tests); FRAME_SESSION_STEP_MS otherwise. */
+  stepMs?: number;
 };
 
 /**
@@ -62,6 +64,31 @@ export const accountTag = (
 ): string | null => (identityAddress ? digestHex(`bwalletx-frame-account|${identityAddress}`).slice(0, 24) : null);
 
 export type FrameSessionReply = { success: true; data: unknown } | { success: false; error: string };
+
+/**
+ * ⚠ EVERY STEP IS BOUNDED (owner's iPhone, 3 Nov 2026: Review & sign in the test build "got so stuck after 15 minutes I
+ * restarted the app", and bit-sign never received one /api/bitsign/auth/frame-code request). A wallet-key sign-in or a
+ * mint that never settles left the page's `bchatx.frameSession` call unanswered, and `singleFlight` kept handing every
+ * retry the same dead promise, so nothing after it could ever work until the app restarted. Now each step ends in a
+ * plain error within this time, and the reply always goes back to the page.
+ */
+export const FRAME_SESSION_STEP_MS = 12_000;
+
+export class FrameSessionTimeout extends Error {
+  constructor(what: string, ms: number) {
+    super(`${what} did not finish within ${Math.round(ms / 1000)}s.`);
+    this.name = 'FrameSessionTimeout';
+  }
+}
+
+/** `p`, or a FrameSessionTimeout after `ms`. The timer never outlives the race. */
+export const withStepTimeout = <T>(what: string, p: Promise<T>, ms = FRAME_SESSION_STEP_MS): Promise<T> => {
+  let t: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    t = setTimeout(() => reject(new FrameSessionTimeout(what, ms)), ms);
+  });
+  return Promise.race([p, timeout]).finally(() => clearTimeout(t));
+};
 
 const errorText = (e: unknown): string => {
   if (needsHandle(e)) return 'Choose your bChatX name in the Chat tab first.';
@@ -80,30 +107,36 @@ export const answerFrameSession = async (
   try {
     if (mode === 'whoami')
       return { success: true, data: { handle: deps.load()?.handle ?? null, account: deps.account() } };
-    let session = deps.load() ?? (await deps.signIn());
+    const ms = deps.stepMs ?? FRAME_SESSION_STEP_MS;
+    const signIn = () => withStepTimeout('Signing in to bChatX with your wallet', deps.signIn(), ms);
+    const mint = (s: ChatSession) => withStepTimeout('Asking bChatX for a sign-in code', deps.mint(s), ms);
+    let session = deps.load() ?? (await signIn());
     let body: unknown;
     try {
-      body = await deps.mint(session);
+      body = await mint(session);
     } catch (e) {
       // The stored token is stale (signed out elsewhere, "This wasn't me", secret rotated): sign in again, once.
       if (!(e instanceof ChatApiError) || e.status !== 401) throw e;
-      session = await deps.signIn();
-      body = await deps.mint(session);
+      session = await signIn();
+      body = await mint(session);
     }
     const code = (body as { code?: unknown } | null)?.code;
     if (typeof code !== 'string' || !CODE_RE.test(code))
       return { success: false, error: 'bChatX sent no sign-in code.' };
     return { success: true, data: { code, handle: session.handle, account: deps.account() } };
   } catch (e) {
+    // Said to the page (one line there) and logged here: a frame that cannot sign in must never fail silently.
+    console.warn('[bchatx.frameSession]', mode, e instanceof Error ? e.message : e);
     return { success: false, error: errorText(e) };
   }
 };
 
 /** One wallet sign-in at a time: a page that asks twice while the first sign-in runs gets the same one. */
-export const singleFlight = <T>(fn: () => Promise<T>): (() => Promise<T>) => {
+export const singleFlight = <T>(fn: () => Promise<T>, ms = FRAME_SESSION_STEP_MS): (() => Promise<T>) => {
   let inflight: Promise<T> | null = null;
   return () => {
-    inflight ??= fn().finally(() => {
+    // Bounded, so a sign-in that never settles cannot hold every later caller hostage (see FRAME_SESSION_STEP_MS).
+    inflight ??= withStepTimeout('Signing in to bChatX with your wallet', fn(), ms).finally(() => {
       inflight = null;
     });
     return inflight;

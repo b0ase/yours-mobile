@@ -6,6 +6,7 @@ import {
   isBchatFrameOrigin,
   parseFrameSessionMode,
   singleFlight,
+  withStepTimeout,
 } from './frameSession';
 
 const S = (token: string, handle = 'b0asex'): ChatSession => ({ token, handle, address: '1Addr' });
@@ -196,4 +197,32 @@ test('accountTag: stable per account, differs between accounts, never the addres
   expect(a).toHaveLength(24);
   expect(a).not.toContain('1AccountAAAA');
   expect(accountTag(null, sha)).toBeNull();
+});
+
+// Owner's iPhone, 3 Nov 2026: Review & sign in the frame "got so stuck after 15 minutes I restarted the app"; bit-sign
+// never received a frame-code request. A step that never settles must still answer the page, and must not poison retries.
+describe('frame session never hangs', () => {
+  const never = <T>() => new Promise<T>(() => {});
+  test('a wallet sign-in that never settles answers the page with an error', async () => {
+    const r = await answerFrameSession(BCHATX, { mode: 'code' }, {
+      account: () => null, load: () => null, signIn: () => never<ChatSession>(), mint: async () => ({ code: CODE }), stepMs: 20,
+    });
+    expect(r.success).toBe(false);
+    expect((r as { error: string }).error).toMatch(/did not finish within/);
+  });
+  test('a mint that never settles answers the page with an error', async () => {
+    const r = await answerFrameSession(BCHATX, { mode: 'code' }, {
+      account: () => null, load: () => S('t'), signIn: async () => S('t'), mint: () => never<unknown>(), stepMs: 20,
+    });
+    expect(r.success).toBe(false);
+  });
+  test('singleFlight: a hung sign-in times out and the NEXT call starts fresh', async () => {
+    let n = 0;
+    const once = singleFlight(() => (++n === 1 ? never<number>() : Promise.resolve(n)), 20);
+    await expect(once()).rejects.toThrow(/did not finish within/);
+    expect(await once()).toBe(2);
+  });
+  test('withStepTimeout passes a value through', async () => {
+    expect(await withStepTimeout('x', Promise.resolve(7), 50)).toBe(7);
+  });
 });

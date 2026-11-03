@@ -66,6 +66,7 @@ import {
   FRAME_CODE_PATH,
   accountTag as frameAccountTag,
   answerFrameSession,
+  isBchatFrameOrigin,
   singleFlight,
   type FrameSessionDeps,
 } from '../chat/frameSession';
@@ -106,7 +107,14 @@ export const BappFrameHost = () => {
           });
     const onMessage = (e: MessageEvent) => {
       const win = frame.current?.contentWindow;
-      if (!win || e.source !== win || e.origin !== session.origin) return;
+      if (!win || e.source !== win) return;
+      // bChatX answers at two origins (services/bchatOrigin.ts): a frame opened on one that lands on the other is still
+      // bChatX. Anything else from our iframe at an unexpected origin is dropped, and SAID, never silently (3 Nov 2026:
+      // the framed sign-in never reached the wallet and nothing logged why).
+      if (e.origin !== session.origin && !(isBchatFrameOrigin(e.origin) && isBchatFrameOrigin(session.origin))) {
+        console.warn('[bapp frame] message from an unexpected origin dropped', e.origin, 'expected', session.origin);
+        return;
+      }
       // BWX (agent data): first-party bAgents only, refused for every other origin (docs/BAGENTS-PLAN.md).
       const bwx = parseBwx(e.data);
       if (bwx) {
