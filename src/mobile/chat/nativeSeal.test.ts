@@ -82,6 +82,8 @@ describe("nativeSignAndSeal: the web client's exact protocol, with the wallet's 
       'compose:{"nonce":"N1","svg":"<svg/>"}',
       'sign:bitsign seal:N1:anyone:3',
       'pay:0:006a:false',
+      // The broadcast receipt, right after the payment and before commit, with commit's exact body.
+      `receipt:{"nonce":"N1","attestation":"0102ff","txid":"${TX}","beefHex":"0909"}`,
       `commit:{"nonce":"N1","attestation":"0102ff","txid":"${TX}","beefHex":"0909"}`,
     ]);
     expect(out).toEqual({ signatureId: 'S', txid: TX, docHash: 'H', complete: true, sealed: true });
@@ -426,5 +428,113 @@ describe('one press: steps, the pre-tap coin check, the real fee', () => {
     expect(feeFromAtomicBeef(tx.toAtomicBEEF(true))).toBe(75);
     expect(feeFromAtomicBeef([9, 9])).toBeNull();
     expect(feeFromAtomicBeef(undefined)).toBeNull();
+  });
+});
+
+describe('the broadcast receipt and commit_in_progress (bit-sign fix/seal-receipt-sweep)', () => {
+  const seal = (
+    over: Parameters<typeof api>[1],
+    extra: { receiptTimeoutMs?: number; sleeps?: number[]; rawApi?: SealApi } = {},
+  ) => {
+    const log: string[] = [];
+    const store = memStore();
+    const p = nativeSignAndSeal({
+      documentId: 'D',
+      fieldIds: ['f1'],
+      svg: '<svg/>',
+      api: extra.rawApi ?? api(log, over),
+      keys: keys(log),
+      store,
+      approve: async () => true,
+      receiptTimeoutMs: extra.receiptTimeoutMs ?? 50,
+      sleep: async (ms) => void extra.sleeps?.push(ms),
+    }).catch((e) => e);
+    return p.then((out) => ({ out, log, store }));
+  };
+  const paths = (log: string[]) => log.map((l) => l.split(':')[0]).filter((x) => x !== 'sign');
+  const body = { signatureId: 'S', txid: TX, docHash: 'H', complete: true, sealed: true };
+
+  for (const [name, reply] of [
+    [
+      '503 receipts_unavailable (server not migrated)',
+      { ok: false, status: 503, body: { code: 'receipts_unavailable' } },
+    ],
+    ['404 not_yours', { ok: false, status: 404, body: { code: 'not_yours' } }],
+    ['409 other_receipt', { ok: false, status: 409, body: { code: 'other_receipt' } }],
+    ['410 beyond_window', { ok: false, status: 410, body: { code: 'beyond_window' } }],
+  ] as const) {
+    test(`receipt fails (${name}) → commit still runs and the seal completes`, async () => {
+      const r = await seal({ receipt: () => reply });
+      expect(paths(r.log)).toEqual(['prepare', 'compose', 'pay', 'receipt', 'commit']);
+      expect(r.out).toEqual(body);
+    });
+  }
+
+  test('receipt throws (network) → commit still runs', async () => {
+    const log: string[] = [];
+    const inner = api(log);
+    const r = await seal(
+      {},
+      { rawApi: async (path, b) => (path === 'receipt' ? Promise.reject(new Error('offline')) : inner(path, b)) },
+    );
+    expect(r.out).toEqual(body);
+    expect(paths(log)).toEqual(['prepare', 'compose', 'commit']);
+  });
+
+  test('receipt hangs → commit goes ahead after the short cap', async () => {
+    const log: string[] = [];
+    const inner = api(log);
+    const t0 = Date.now();
+    const r = await seal(
+      {},
+      {
+        receiptTimeoutMs: 30,
+        rawApi: async (path, b) => (path === 'receipt' ? new Promise<never>(() => undefined) : inner(path, b)),
+      },
+    );
+    expect(r.out).toEqual(body);
+    expect(Date.now() - t0).toBeLessThan(1_000);
+  });
+
+  test('commit answers 409 commit_in_progress → recover waits for the result; never pays again', async () => {
+    let recovers = 0;
+    const sleeps: number[] = [];
+    const r = await seal(
+      {
+        commit: () => ({ ok: false, status: 409, body: { code: 'commit_in_progress', error: 'being recorded' } }),
+        recover: () =>
+          ++recovers < 3
+            ? { ok: false, status: 409, body: { code: 'commit_in_progress' } }
+            : { ok: true, status: 200, body: { ...body, idempotent: true } },
+      },
+      { sleeps },
+    );
+    expect(r.out).toMatchObject({ signatureId: 'S', txid: TX, recovered: true });
+    expect(paths(r.log)).toEqual(['prepare', 'compose', 'pay', 'receipt', 'commit', 'recover', 'recover', 'recover']);
+    expect(r.log.filter((l) => l.startsWith('pay')).length).toBe(1);
+    expect(sleeps.length).toBe(2);
+    expect(r.store.m.size).toBe(0);
+  });
+
+  test('still in progress after every wait → kept on the phone (pending_recovery), never dropped, never paid again', async () => {
+    const r = await seal({
+      commit: () => ({ ok: false, status: 409, body: { code: 'commit_in_progress' } }),
+      recover: () => ({ ok: false, status: 409, body: { code: 'commit_in_progress' } }),
+    });
+    expect(r.out).toMatchObject({ code: 'pending_recovery' });
+    expect(r.store.m.size).toBe(1);
+    expect(r.log.filter((l) => l.startsWith('pay')).length).toBe(1);
+  });
+
+  test('reopen: recoverNativeSeals keeps an entry the sweep is finishing', async () => {
+    const store = memStore();
+    store.save({ documentId: 'D', nonce: 'N1', txid: TX, beefHex: '00', attestation: 'aa', savedAt: 1 });
+    const done = await recoverNativeSeals(
+      async () => ({ ok: false, status: 409, body: { code: 'commit_in_progress' } }),
+      store,
+      'D',
+    );
+    expect(done).toBe(0);
+    expect(store.m.size).toBe(1);
   });
 });

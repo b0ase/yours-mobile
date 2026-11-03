@@ -13,6 +13,9 @@ import { Transaction } from '@bsv/sdk';
  *   wallet.createSignature(recordCanonical bytes)                       → attestation (hex)
  *   wallet.createAction(one 0-sat OP_RETURN output, acceptDelayedBroadcast:false) → txid + AtomicBEEF
  *   SAVE {nonce, txid, beefHex, attestation} locally (the money has moved)
+ *   POST /api/bitsign/nds/seal/receipt {nonce, txid, attestation, beefHex} (≈5 s cap; any failure is ignored: the
+ *                                                                          server's sweep finishes a receipt whose
+ *                                                                          commit never lands)
  *   POST /api/bitsign/nds/seal/commit {nonce, attestation, txid, beefHex} (retry once on a network fault)
  *   on a refusal / lost commit: POST /api/bitsign/nds/seal/recover with the same body.
  * Authenticated with the wallet's silent bChatX session (Bearer, chat/chatSession.ts); the server checks the same
@@ -27,7 +30,7 @@ export interface SealApiReply {
   body: Record<string, unknown>;
 }
 export type SealApi = (
-  path: 'prepare' | 'compose' | 'commit' | 'recover',
+  path: 'prepare' | 'compose' | 'receipt' | 'commit' | 'recover',
   body: Record<string, unknown>,
 ) => Promise<SealApiReply>;
 
@@ -121,6 +124,38 @@ export function feeFromAtomicBeef(tx: number[] | undefined): number | null {
   }
 }
 
+/** The broadcast receipt may hold the seal this long at most; then commit goes ahead regardless. */
+export const RECEIPT_TIMEOUT_MS = 5_000;
+/** commit / recover answered 409 commit_in_progress (the server's sweep is finishing it): wait, then ask recover. */
+export const IN_PROGRESS_WAIT_MS = 4_000;
+export const IN_PROGRESS_TRIES = 3;
+
+const isInProgress = (r: SealApiReply) => r.status === 409 && r.body.code === 'commit_in_progress';
+
+/**
+ * The broadcast receipt (bit-sign /seal/receipt, 3 Nov 2026): tells the server the seal is paid the moment
+ * createAction returns, so its sweep can finish the seal if this phone dies before commit. Fire-and-await with a
+ * short cap; whatever happens (503 receipts_unavailable before the migration, 404/409/410, a network error, a
+ * timeout) the seal goes on to commit as before. Never throws.
+ */
+async function sendReceipt(api: SealApi, body: Record<string, unknown>, timeoutMs: number): Promise<void> {
+  let t: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      api('receipt', body).then((r) => {
+        if (!r.ok) console.warn('[nativeSeal] receipt not recorded (commit goes ahead)', r.status, r.body.code ?? '');
+      }),
+      new Promise<void>((resolve) => {
+        t = setTimeout(resolve, timeoutMs);
+      }),
+    ]);
+  } catch (e) {
+    console.warn('[nativeSeal] receipt failed (commit goes ahead)', e instanceof Error ? e.message : e);
+  } finally {
+    if (t) clearTimeout(t);
+  }
+}
+
 /** Shown when the seal's payment hit a coin already spent elsewhere. Plain words, never the toolbox text. */
 export const SEAL_SPENT_MESSAGE = 'A coin was already spent on another device. Tap Seal & pay again.';
 
@@ -169,6 +204,9 @@ export async function nativeSignAndSeal(input: {
   coins?: { pending: () => boolean; wait: () => Promise<void> };
   onStep?: (s: SealStep) => void;
   now?: () => number;
+  /** Tests: the receipt cap and the wait between commit_in_progress answers. */
+  receiptTimeoutMs?: number;
+  sleep?: (ms: number) => Promise<void>;
 }): Promise<NativeSealOutcome> {
   const step = (s: SealStep) => input.onStep?.(s);
   step('preparing');
@@ -237,6 +275,8 @@ export async function nativeSignAndSeal(input: {
 
   step('committing');
   const body = { nonce: prepared.nonce, attestation, txid, beefHex };
+  // The receipt first (same body as commit), then commit as before whatever the receipt answered.
+  await sendReceipt(input.api, body, input.receiptTimeoutMs ?? RECEIPT_TIMEOUT_MS);
   let out: Record<string, unknown> | null = null;
   let lastErr = '';
   for (let i = 0; i < 2 && !out; i++) {
@@ -245,7 +285,9 @@ export async function nativeSignAndSeal(input: {
       if (r.ok) out = r.body;
       else {
         lastErr = typeof r.body.error === 'string' ? r.body.error : `Commit failed (${r.status}).`;
-        break; // a refusal will not change on a plain retry: recover
+        // A refusal will not change on a plain retry: recover. That includes 409 commit_in_progress (the sweep is
+        // finishing this very seal): recover waits for its result. Nothing is ever paid again.
+        break;
       }
     } catch (e) {
       lastErr = e instanceof Error ? e.message : 'network error'; // retry once with the same nonce + txid
@@ -254,21 +296,29 @@ export async function nativeSignAndSeal(input: {
   let recovered = false;
   if (!out) {
     step('recovering');
-    try {
-      const r = await input.api('recover', body);
-      if (r.ok) {
-        out = r.body;
-        recovered = true;
-      } else if (r.status !== 0 && r.status < 500 && r.status !== 429) {
-        input.store.remove(prepared.nonce);
-        throw new NativeSealError(
-          typeof r.body.error === 'string' ? r.body.error : 'The seal could not be recorded.',
-          'failed',
-          r.status,
-        );
+    const sleep = input.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+    for (let i = 0; i < IN_PROGRESS_TRIES && !out; i++) {
+      try {
+        const r = await input.api('recover', body);
+        if (r.ok) {
+          out = r.body;
+          recovered = true;
+        } else if (isInProgress(r)) {
+          // Someone (the sweep) holds the claim: wait and ask again for its result; kept on the phone meanwhile.
+          lastErr = typeof r.body.error === 'string' ? r.body.error : 'being recorded right now';
+          if (i < IN_PROGRESS_TRIES - 1) await sleep(IN_PROGRESS_WAIT_MS);
+        } else if (r.status !== 0 && r.status < 500 && r.status !== 429) {
+          input.store.remove(prepared.nonce);
+          throw new NativeSealError(
+            typeof r.body.error === 'string' ? r.body.error : 'The seal could not be recorded.',
+            'failed',
+            r.status,
+          );
+        } else break;
+      } catch (e) {
+        if (e instanceof NativeSealError) throw e;
+        break;
       }
-    } catch (e) {
-      if (e instanceof NativeSealError) throw e;
     }
   }
   if (!out) {
@@ -296,6 +346,8 @@ export async function recoverNativeSeals(api: SealApi, store: PendingSealStore, 
     if (documentId && p.documentId !== documentId) continue;
     try {
       const r = await api('recover', { nonce: p.nonce, attestation: p.attestation, txid: p.txid, beefHex: p.beefHex });
+      // commit_in_progress: the server's sweep is finishing it right now. Keep it; the next open reads the result.
+      if (isInProgress(r)) continue;
       if (r.ok || (r.status !== 0 && r.status < 500 && r.status !== 429)) {
         store.remove(p.nonce);
         if (r.ok) done++;
