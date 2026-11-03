@@ -39,7 +39,7 @@ import { loadPrefs } from '../settings/prefs';
 import type { WalletInterface } from '@bsv/sdk';
 import { myKey, openMail, peekMail } from '../bmail/client';
 import { route } from '../bmail/route';
-import { loadMail, openBMail, savePending } from '../bmail/store';
+import { loadMail, savePending } from '../bmail/store';
 import { fetchPeerBPhone } from '../calls/bphone';
 import { getFriends, isFriend as isCallFriend } from '../calls/friends';
 import { shortKey } from '../calls/machine';
@@ -84,7 +84,6 @@ let unsubFeed: (() => void) | null = null;
 let roomTickers = new Map<string, string>();
 
 let resumeSub: { remove: () => Promise<void> } | null = null;
-let tapSub: { remove: () => Promise<void> } | null = null;
 
 const now = () => Date.now();
 /** Longer text for the Desktop Notifications page (wraps to 2 lines there); the phone list and OS notices keep body. */
@@ -369,7 +368,7 @@ async function bchat(m: Me, st: PollState, out: NotifyItem[]) {
           body: excerpt(last?.body ?? ''),
           full: excerpt(last?.body ?? '', FULL),
           at: Date.parse(last?.created_at ?? '') || now(),
-          target: { type: 'room', ticker: r.ticker },
+          target: { type: 'room', ticker: r.ticker, ...(/↔/.test(r.name || '') ? { dm: true } : {}) },
         }),
       );
     }
@@ -666,13 +665,7 @@ export function startNotify(next: Me) {
       void App.addListener('resume', () => me && schedule(1_500))
         .then((h) => (resumeSub = h))
         .catch(() => undefined);
-    if (Capacitor.isNativePlatform())
-      void LocalNotifications.addListener('localNotificationActionPerformed', (a) => {
-        const t = (a.notification?.extra as { target?: { type?: string } } | undefined)?.target;
-        if (t?.type === 'bmail') openBMail();
-      })
-        .then((h) => (tapSub = h))
-        .catch(() => undefined);
+    // Taps on these notices: push/register.ts initPushTaps (one queue with push taps, works from a cold start).
     schedule(5_000);
     // Live chat (chat/live.ts): a new message in an unmuted room polls now instead of in 90 s.
     const lh = liveHub();
@@ -726,8 +719,6 @@ export function stopNotify() {
   feedCheckedAt = 0;
   void resumeSub?.remove();
   resumeSub = null;
-  void tapSub?.remove();
-  tapSub = null;
   if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisible);
 }
 
