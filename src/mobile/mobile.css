@@ -3545,3 +3545,10 @@ html[data-rail] .bw-dock-pad:has(> .bw-bcar) > .bw-backup-banner {
 html[data-rail] .bw-dock-pad:has(> .bw-bcar) > .bw-sendrow {
   grid-row: 4;
 }
+
+/* A vertical swipe that starts on a bottom bar (tab bar, dock, bApp bar) must not drag the page: on iOS it scrolled
+   the document and the bar rode up the screen over black (owner's phone, 3 Nov 2026). pan-x keeps the dock's
+   sideways scroll; taps, long-presses and the bars' own pointer gestures are unaffected. */
+[data-bw-bottom-nav] {
+  touch-action: pan-x;
+}
