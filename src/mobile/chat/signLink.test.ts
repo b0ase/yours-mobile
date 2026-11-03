@@ -5,6 +5,7 @@ import {
   parseSignLink,
   parseWebBappLink,
   phoneSignUrl,
+  bchatxFrameRoute,
   signFrameRoute,
   takeSignLink,
 } from './signLink';
@@ -82,4 +83,16 @@ test('signFrameRoute: a sign QR opens the signing page inside the bChatX frame',
   const route = signFrameRoute(s)!;
   expect(route.startsWith('/m/bapp/bchatx?to=')).toBe(true);
   expect(decodeURIComponent(route.split('?to=')[1])).toBe(`/room/HWPEBRIEF?sign=doc-1&h=${H}`);
+});
+
+test('bchatxFrameRoute: Review & sign and a document button open bChatX in the frame, never the dApp browser', () => {
+  const H = 'cd'.repeat(32);
+  for (const href of [signDocUrl('BCORPBOARD', ID)!, signDocUrl('$bcorpboard', ID, H)!]) {
+    const route = bchatxFrameRoute(href)!;
+    expect(route.startsWith('/m/bapp/bchatx?to=')).toBe(true);
+    const u = new URL(href);
+    expect(decodeURIComponent(route.split('?to=')[1])).toBe(`${u.pathname}${u.search}`);
+  }
+  expect(bchatxFrameRoute(null)).toBeNull();
+  expect(bchatxFrameRoute('not a url')).toBeNull();
 });

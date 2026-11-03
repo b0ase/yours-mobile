@@ -1,14 +1,16 @@
 import { FileSignature } from 'lucide-react';
 import { signDocUrl } from './pendingDoc';
-import { docHashFor } from './signLink';
+import { bchatxFrameRoute, docHashFor } from './signLink';
 import { docButtonLabel, type SignableDoc } from './signableDocs';
 import { openDappBrowser } from '../dappBrowser';
+import { useNavigate } from 'react-router-dom';
 
 /**
  * One document's own button under its card in the chat (chat/signableDocs.ts): opens bChatX's page on THAT document,
  * the same page the room's banner opens. Signed or sealed documents open the same page to read.
  */
 const DocSignButton = ({ ticker, doc }: { ticker: string; doc: SignableDoc }) => {
+  const navigate = useNavigate();
   const href = signDocUrl(ticker, doc.id, docHashFor(ticker, doc.id));
   if (!href) return null;
   const sign = doc.state === 'sign';
@@ -17,6 +19,9 @@ const DocSignButton = ({ ticker, doc }: { ticker: string; doc: SignableDoc }) =>
       type="button"
       onClick={(e) => {
         e.stopPropagation();
+        // In the bApp frame, where the seal's approval reaches the wallet (signLink.bchatxFrameRoute).
+        const route = bchatxFrameRoute(href);
+        if (route) return navigate(route);
         openDappBrowser(href).catch((err) => console.error('[review & sign]', err));
       }}
       onPointerDown={(e) => e.stopPropagation()}
