@@ -89,7 +89,8 @@ const canFrame = async (url: string, origin: string): Promise<boolean> => {
   } catch {
     ok = false;
   }
-  probed.set(origin, ok);
+  // Only a YES is remembered: one failed probe (a network blip) must not keep bChatX out of the frame all session.
+  if (ok) probed.set(origin, ok);
   return ok;
 };
 
@@ -106,11 +107,18 @@ export const openBapp = async (name: string, rawUrl: string): Promise<void> => {
   // Phone apps and the Chrome extension run bApps in-frame (headers probed); the web/Desktop wallet frames only the
   // bApps that allow it (WEB_FRAME_ORIGINS) and opens the rest in a tab.
   const mode = frameModeFor(origin, { native: isNative, extension: IS_EXTENSION });
-  if (mode === 'tab' || !origin) return openDappBrowser(url);
+  if (mode === 'tab' || !origin) {
+    if (isNative) console.warn('[bapp frame] not framed, opening the browser:', name, !origin ? 'origin not allowlisted' : `mode ${mode}`, url);
+    return openDappBrowser(url, { noFrame: true });
+  }
   if (state.session?.origin === origin && state.session.url === url) return set({ visible: true });
   set({ opening: name });
   try {
-    if (mode === 'frame' && !(await canFrame(url, origin))) return await openDappBrowser(url);
+    if (mode === 'frame' && !(await canFrame(url, origin))) {
+      // Said, never silent (3 Nov 2026): a bChatX page in the browser loses the seal's approval.
+      console.warn('[bapp frame] framing refused by the probe (headers / network), opening the browser:', name, url);
+      return await openDappBrowser(url, { noFrame: true });
+    }
     set({ session: { name, url, origin, key: ++seq } });
   } finally {
     set({ opening: null });
@@ -128,5 +136,5 @@ export const closeBapp = () => set({ session: null });
 /** Leave the frame for the full-screen browser (same page, native window.CWI). */
 export const bappFullScreen = (url: string) => {
   closeBapp();
-  return openDappBrowser(url);
+  return openDappBrowser(url, { noFrame: true });
 };

@@ -6286,11 +6286,16 @@ if (!(
           )
         : null;
       if (seal && message.originator && !(await siteBlocked(message.originator))) {
+        console.log('[bwx-seal] createSignature: asking the one Seal sheet', sealSite);
         await askSealSheet(message.originator, sealSheetFor(seal, sealSite));
         sealPasses.approve(sealSite, seal);
         sealRecord = seal.recordHash;
+        console.log('[bwx-seal] createSignature: Seal sheet approved, pass open', sealSite);
+      } else {
+        console.log('[bwx-seal] createSignature: not a seal sign (or site blocked)', sealSite || '(extension)', !!seal);
       }
       await ensureUsbSeen('sign with your keys', message.originator);
+      console.log('[bwx-seal] createSignature: key check passed, signing', sealSite);
       console.log('[background] processCWICreateSignature: ensureWallet resolved, calling w.createSignature...');
       const result = await w.createSignature(message.params, message.originator);
       console.log('[background] processCWICreateSignature: success');

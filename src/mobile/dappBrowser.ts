@@ -54,7 +54,27 @@ export const lastUrlFor = (origin: string) => lastUrls.get(origin);
 
 export const isDappBrowserOpen = () => open;
 
-export const openDappBrowser = async (rawUrl: string) => {
+/**
+ * ⚠ EVERY bChatX PAGE OPENS IN THE bApp FRAME ON THE PHONE (owner's iPhone, 3 Nov 2026, 05:36Z): he tapped a document
+ * card in the Chat tab, which opened chat.bwalletx.com in THIS native dApp browser; there the seal's approval sheet
+ * was answered and the wallet then sat on "Waiting for request…" for minutes with nothing committed. DocSignButton and
+ * PendingDocBanner already went to the frame; every other way in (card links, window.open, room links) came here.
+ * Now any bChatX page URL is handed to the frame (bappFrame.openBapp) unless the caller is the frame's own fallback.
+ */
+export const isBchatPageUrl = (raw: string): boolean => {
+  try {
+    const host = new URL(raw).hostname.toLowerCase();
+    return host === 'www.bchatx.com' || host === 'bchatx.com' || host === 'chat.bwalletx.com';
+  } catch {
+    return false;
+  }
+};
+
+export const openDappBrowser = async (rawUrl: string, opts: { noFrame?: boolean } = {}) => {
+  if (isNative && !opts.noFrame && isBchatPageUrl(rawUrl)) {
+    const { openBapp } = await import('./bappFrame/bappFrame');
+    return openBapp('bChatX', rawUrl);
+  }
   // bChatX links follow the live origin (chat.bwalletx.com while www.bchatx.com is unreachable). Sync: pop-up blockers.
   const url = liveBchatUrl(rawUrl);
   // Web wallet and extension: no in-app browser, and dapp-provider.js isn't in those builds. Open a tab
