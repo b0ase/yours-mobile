@@ -23,6 +23,8 @@ import {
   type SealKeys,
   type SigField,
 } from './nativeSeal';
+import { openPendingForLink, type RoomReq } from './nativeSealSource';
+import { docHashFor } from './signLink';
 
 /**
  * Review, sign and seal a room document NATIVELY (chat/nativeSeal.ts has the why and the protocol). Route:
@@ -112,26 +114,32 @@ export const NativeSealPage = () => {
     void (async () => {
       try {
         const c = await client();
-        const r = (await c.request('GET', `/api/bitsign/rooms/${encodeURIComponent(ticker)}/prepare-doc`)) as {
-          pending?: {
-            documentId?: string;
-            html?: string;
-            manifest?: ({ documentTitle?: string; signatureFields?: SigField[] } & Record<string, unknown>) | null;
-          } | null;
+        // The room's pending contract, or the contract built from the upload a QR names (chat/nativeSealSource.ts):
+        // the owner signs only on his phone, so scanning the card is the whole flow (CEO, 3 Nov 2026).
+        const req: RoomReq = async (method, path, body) => {
+          try {
+            return {
+              ok: true,
+              status: 200,
+              body: ((await c.request(method, path, body)) as Record<string, unknown>) ?? {},
+            };
+          } catch (e) {
+            if (e instanceof ChatApiError)
+              return { ok: false, status: e.status, body: (e.data as Record<string, unknown>) ?? { error: e.message } };
+            throw e;
+          }
         };
-        const p = r?.pending;
+        const out = await openPendingForLink(req, ticker, docId, docHashFor(ticker, docId));
         if (!live) return;
-        if (!p?.documentId || typeof p.html !== 'string' || (docId && p.documentId !== docId)) {
-          setPhase({
-            k: 'error',
-            text: 'This document is not waiting for your signature (it may already be signed and sealed).',
-          });
+        if (!out.ok) {
+          setPhase({ k: 'error', text: out.text });
           return;
         }
+        const p = out.pending;
         setDoc({
           documentId: p.documentId,
           html: p.html,
-          fields: p.manifest?.signatureFields ?? [],
+          fields: (p.manifest?.signatureFields as SigField[] | undefined) ?? [],
           title: p.manifest?.documentTitle || 'Document',
           manifest: p.manifest ?? null,
         });
