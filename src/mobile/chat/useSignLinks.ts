@@ -37,6 +37,8 @@ export const useSignLinks = (enabled = true) => {
     const go = () => {
       const s = takeSignLink();
       if (!s) return;
+      // The wallet's own Review & sign screen (chat/NativeSealPage.tsx): no web page on the phone (3 Nov 2026).
+      if (s.docId) return navigate(`/m/seal/${encodeURIComponent(s.ticker)}/${encodeURIComponent(s.docId)}`);
       requestRoomByTicker(s.ticker, false, s.docId);
       // In the bChatX frame, not the native browser: approval sheets draw over the frame, so Seal reaches the
       // wallet (iPhone, 1 Nov 2026: in the browser the seal waited 90 s and timed out).
