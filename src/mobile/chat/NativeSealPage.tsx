@@ -7,7 +7,25 @@ import { BchatClient, ChatApiError, defaultHttp, loadSession, saveSession } from
 import { walletSigner } from './signer';
 import { nativeAuth } from '../siteGateNative';
 import { askWalletPassword } from '../siteGatePassword';
-import { approveSealPayment } from './sealApproval';
+import { approveSealPayment, approveSealWithSheet } from './sealApproval';
+import { useSheetPrice } from '../../components/DollarAmount';
+import { sendMessageAsync } from '../../utils/chromeHelpers';
+import { SealPaySheet } from './SealPaySheet';
+import {
+  DRAW_HINT,
+  SLOW_COMMIT_MS,
+  createPressGuard,
+  estimateSealFee,
+  feeForPrompt,
+  padHasSignature,
+  retryAllowed,
+  sealButtonLabel,
+  sealProgress,
+  sealReason,
+  sealReceipt,
+  type SealProgress,
+  type SealSheetInfo,
+} from './sealScreen';
 import {
   NativeSealError,
   inertHtml,
@@ -25,6 +43,7 @@ import {
   type NativeSealOutcome,
   type SealApi,
   type SealKeys,
+  type SealStep,
   type SigField,
 } from './nativeSeal';
 import { openPendingForLink, type RoomReq } from './nativeSealSource';
@@ -33,8 +52,26 @@ import { docHashFor } from './signLink';
 /**
  * Review, sign and seal a room document NATIVELY (chat/nativeSeal.ts has the why and the protocol). Route:
  * /m/seal/:ticker/:doc. The document is shown inert (no scripts, sandboxed frame), the person draws in the wallet's
- * own pad, and ONE approval (this sheet + Face ID) seals it with the wallet's own keys.
+ * own pad and presses ONE button, "Sign & seal · ~N sats" (owner, 3 Nov 2026: "Finishing the signature IS sealing
+ * it"). That press shows the wallet's payment approval sheet EVERY time (SealPaySheet), then Face ID / passcode or the
+ * wallet password (sealApproval.ts); approving it composes, signs and broadcasts at once, with the progress inline
+ * under the button (sealScreen.ts) and a receipt at the end.
+ *
+ * Nothing may interrupt drawing (owner's iPhone, 3 Nov 2026: the copy/select menu, the long-press callout and the
+ * magnifier ruined the signature): the whole page is unselectable with no callout (.bw-seal-noselect, mobile.css),
+ * the canvas has touch-action: none and swallows touchstart/touchmove (passive: false), contextmenu and selectstart.
+ * The document itself scrolls inside its own frame, untouched.
  */
+
+/** Stop iOS selection, the callout and the magnifier on this element and everything in it. */
+const NO_SELECT = {
+  userSelect: 'none',
+  WebkitUserSelect: 'none',
+  WebkitTouchCallout: 'none',
+} as const;
+
+/** The pre-tap coin check may hold the press this long at most; the in-flight spent-coin retry is the fallback. */
+const COIN_CHECK_WAIT_MS = 45_000;
 
 const STORE_KEY = 'bwx.nativeSeal.pending';
 const localStore = (): PendingSealStore => {
@@ -71,17 +108,10 @@ type Phase =
   | { k: 'loading' }
   | { k: 'error'; text: string }
   | { k: 'ready'; note?: string }
-  | { k: 'working'; text: string }
+  | { k: 'working'; step: SealStep; slow: boolean }
+  /** Failed in a way that may have paid: no button (the saved seal is finished by recovery on reopen). */
+  | { k: 'failed'; text: string }
   | { k: 'done'; out: NativeSealOutcome; roomError: string | null; feeSats: number | null };
-
-const STEP_TEXT: Record<string, string> = {
-  preparing: 'Preparing the seal…',
-  composing: 'Composing the signed document…',
-  signing: 'Signing with your key…',
-  paying: 'Sealing on chain…',
-  committing: 'Recording the seal…',
-  recovering: 'Finishing the seal…',
-};
 
 export const NativeSealPage = () => {
   const { ticker = '', doc: docId = '' } = useParams();
@@ -89,7 +119,17 @@ export const NativeSealPage = () => {
   const { apiContext } = useServiceContext();
   const [doc, setDoc] = useState<Doc | null>(null);
   const [phase, setPhase] = useState<Phase>({ k: 'loading' });
-  const [svg, setSvg] = useState<string | null>(null);
+  /** The pad's strokes and size (kept here so the one button can seal them). */
+  const pad = useRef<{ strokes: PadPoint[][]; w: number; h: number }>({ strokes: [], w: 0, h: 0 });
+  const [inked, setInked] = useState(false);
+  /** Double press guard: set synchronously on the first press, cleared only when the button may come back. */
+  const press = useRef(createPressGuard()).current;
+  /** The payment step has started: from here a failure may have paid (no retry button). */
+  const reachedPay = useRef(false);
+  const [sheet, setSheet] = useState<{ info: SealSheetInfo; busy: boolean; answer: (ok: boolean) => void } | null>(
+    null,
+  );
+  const price = useSheetPrice();
   const [signedHtml, setSignedHtml] = useState<string | null>(null);
 
   /** The wallet's silent bChatX session (Bearer); signs in with the wallet key when there is none. */
@@ -188,8 +228,83 @@ export const NativeSealPage = () => {
     [doc],
   );
 
-  const seal = async () => {
-    if (!doc || !svg || !mine.length) return;
+  /**
+   * Heal BEFORE the tap: once the pad shows, the wallet's coin check (Settings › Troubleshooting › Resync coins:
+   * clears coins the chain proves were spent on another device) runs in the background, so the press pays straight
+   * away instead of hitting UTXO_SPENT and the in-flight heal + retry (over two minutes on 3 Nov 2026). Silent unless
+   * it is still running when he approves ("Finding a fresh coin…").
+   */
+  const coinCheck = useRef<{ done: boolean; promise: Promise<void> } | null>(null);
+  const padShown = phase.k === 'ready' && mine.length > 0;
+  useEffect(() => {
+    if (!padShown || coinCheck.current) return;
+    const c = { done: false, promise: Promise.resolve() };
+    c.promise = Promise.resolve()
+      .then(() => sendMessageAsync({ action: 'STORAGE_RESYNC_COINS' }))
+      .then(
+        () => undefined,
+        () => undefined,
+      )
+      .finally(() => {
+        c.done = true;
+      });
+    coinCheck.current = c;
+  }, [padShown]);
+  const coins = {
+    pending: () => !!coinCheck.current && !coinCheck.current.done,
+    wait: () =>
+      Promise.race([
+        coinCheck.current?.promise ?? Promise.resolve(),
+        new Promise<void>((r) => setTimeout(r, COIN_CHECK_WAIT_MS)),
+      ]),
+  };
+
+  const ref = String((doc?.manifest?.documentRef as string | undefined) || doc?.documentId || '');
+  const estFee = useMemo(
+    () =>
+      mine.length
+        ? estimateSealFee(
+            mine.map((f) => f.id),
+            ref,
+          )
+        : null,
+    [mine, ref],
+  );
+  /** The fee the sheet / Face ID named (prepare's estimate), for the receipt when the transaction can't be read. */
+  const [namedFee, setNamedFee] = useState<number | null>(null);
+
+  // A slow commit says so ("Waiting for the network…"), never a frozen line.
+  const workingStep = phase.k === 'working' ? phase.step : null;
+  useEffect(() => {
+    if (workingStep !== 'committing') return;
+    const t = setTimeout(
+      () => setPhase((p) => (p.k === 'working' && p.step === 'committing' ? { ...p, slow: true } : p)),
+      SLOW_COMMIT_MS,
+    );
+    return () => clearTimeout(t);
+  }, [workingStep]);
+
+  /** Shows the payment sheet; resolves true on Approve (the sheet stays up, busy, through Face ID), false on Cancel. */
+  const showSheet = (info: SealSheetInfo) =>
+    new Promise<boolean>((resolve) =>
+      setSheet({
+        info,
+        busy: false,
+        answer: (ok) => {
+          if (ok) setSheet((cur) => (cur ? { ...cur, busy: true } : cur));
+          else setSheet(null);
+          resolve(ok);
+        },
+      }),
+    );
+
+  /** The one button. Disabled after the first press; it only comes back after a failure that paid nothing. */
+  const signAndSeal = async () => {
+    if (press.held() || !doc || !mine.length || !padHasSignature(pad.current.strokes)) return;
+    const svg = strokesToSvg(pad.current.strokes, pad.current.w, pad.current.h);
+    if (!svg || !press.take()) return;
+    reachedPay.current = false;
+    setPhase({ k: 'working', step: 'preparing', slow: false });
     const keys: SealKeys = {
       createSignature: (a) => apiContext.wallet.createSignature(a as never) as Promise<{ signature: number[] }>,
       createAction: (a) => apiContext.wallet.createAction(a as never) as Promise<{ txid?: string; tx?: number[] }>,
@@ -203,19 +318,35 @@ export const NativeSealPage = () => {
         api,
         keys,
         store: localStore(),
-        onStep: (s) => s !== 'approving' && setPhase({ k: 'working', text: STEP_TEXT[s] ?? 'Sealing…' }),
-        // The ONE approval: the Seal tap (who, which document, fee shown beside it), then Face ID / passcode. No second
-        // Seal sheet (owner's iPhone, 3 Nov 2026: "it may have asked me to seal twice").
-        // The fee is named in the Face ID prompt itself, so the one approval is also the payment approval (owner,
-        // 3 Nov 2026: "there was no 'payment' permission request screen on the phone").
+        coins,
+        onStep: (s) => {
+          if (s === 'paying') reachedPay.current = true;
+          setPhase({ k: 'working', step: s, slow: false });
+        },
+        // EVERY seal: the payment sheet, then Face ID / passcode, or the wallet password (sealApproval.ts). Nothing
+        // here reads a spending limit, allowance or one-click setting, so nothing can skip it.
         approve: async (prepared) => {
-          fee = Number.isFinite(prepared.estFeeSats) ? Math.max(1, Math.round(prepared.estFeeSats)) : null;
-          // ⚠ NEVER A SILENT PASS (security P0, 3 Nov 2026): no Face ID / passcode here means the wallet password.
-          return approveSealPayment(
-            fee ? `Seal this document and pay about ${fee} sats` : 'Seal this document and pay the network fee',
-            'bChatX',
-            { auth: nativeAuth, passwordAuth: askWalletPassword },
-          );
+          fee = feeForPrompt(prepared.estFeeSats);
+          setNamedFee(fee);
+          const p = prepared as typeof prepared & { origHash?: string; handle?: string };
+          const info: SealSheetInfo = {
+            title: prepared.title || doc.title,
+            ticker: ticker.replace(/^\$/, '').toUpperCase(),
+            docHash: typeof p.origHash === 'string' && p.origHash ? p.origHash.slice(0, 8) : fingerprint,
+            handle: (typeof p.handle === 'string' && p.handle ? p.handle : me).replace(/^\$/, ''),
+            feeSats: fee,
+            blocks: mine.length,
+          };
+          try {
+            return await approveSealWithSheet(info, {
+              showSheet,
+              // ⚠ NEVER A SILENT PASS (security P0, 3 Nov 2026): no Face ID / passcode here means the wallet password.
+              confirm: () =>
+                approveSealPayment(sealReason(info), 'bChatX', { auth: nativeAuth, passwordAuth: askWalletPassword }),
+            });
+          } finally {
+            setSheet(null);
+          }
         },
       });
       setPhase({ k: 'done', out, roomError: null, feeSats: fee });
@@ -224,13 +355,14 @@ export const NativeSealPage = () => {
       const signed = await fetchSignedCopy((path) => c.request('GET', path), ticker, [doc.documentId, out.signatureId]);
       if (signed) setSignedHtml(signed);
     } catch (e) {
-      // A coin spent on another device: nothing was paid; back to the Seal & pay button (drawing kept) with plain words.
-      if (e instanceof NativeSealError && e.code === 'spent_elsewhere') {
-        setPhase({ k: 'ready', note: e.message });
+      const text = e instanceof NativeSealError || e instanceof Error ? e.message : 'The seal did not finish.';
+      if (retryAllowed(e, reachedPay.current)) {
+        // Nothing was paid: the button comes back, drawing kept, with plain words.
+        press.release();
+        setPhase({ k: 'ready', note: text });
         return;
       }
-      const text = e instanceof NativeSealError || e instanceof Error ? e.message : 'The seal did not finish.';
-      setPhase({ k: 'error', text });
+      setPhase({ k: 'failed', text });
     }
   };
 
@@ -246,11 +378,16 @@ export const NativeSealPage = () => {
     }
   };
 
+  const progress: SealProgress | null = phase.k === 'working' ? phase.step : phase.k === 'done' ? 'done' : null;
+  const showPad = (phase.k === 'ready' || phase.k === 'working') && !!doc && mine.length > 0;
+  const buttonOn = phase.k === 'ready' && inked;
+
   return (
     // Full screen above the Dock / tab bar (z-[100]): the pad's buttons sat under the bottom bar (iPhone, 3 Nov 2026).
     <div
-      className="fixed inset-0 z-[500] flex min-h-0 flex-col pt-[env(safe-area-inset-top)]"
-      style={{ background: '#0b0b0d', color: '#e4e4e7' }}
+      className="bw-seal-noselect fixed inset-0 z-[500] flex min-h-0 flex-col pt-[env(safe-area-inset-top)]"
+      data-testid="native-seal-page"
+      style={{ background: '#0b0b0d', color: '#e4e4e7', ...NO_SELECT }}
     >
       <div className="flex items-center gap-2 px-3 py-2" style={{ borderBottom: '1px solid rgba(245,184,0,0.35)' }}>
         <button
@@ -289,18 +426,77 @@ export const NativeSealPage = () => {
         style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}
       >
         {phase.k === 'loading' && <p className="text-[14px]">Opening the document…</p>}
-        {phase.k === 'error' && (
+        {(phase.k === 'error' || phase.k === 'failed') && (
           <p role="alert" className="text-[14px]" style={{ color: '#fca5a5' }}>
             {phase.text}
           </p>
         )}
+        {phase.k === 'ready' && doc && mine.length === 0 && (
+          <p className="text-[14px]">This document has no signature block for ${me}.</p>
+        )}
+        {showPad && (
+          <div>
+            {phase.k === 'ready' && phase.note && (
+              <p role="alert" className="mb-2 text-[14px]" style={{ color: '#fca5a5' }}>
+                {phase.note}
+              </p>
+            )}
+            <SignaturePad
+              label={`Sign as ${mine[0].name || `$${me}`}${mine.length > 1 ? ` (fills ${mine.length} blocks)` : ''}`}
+              locked={phase.k !== 'ready'}
+              onChange={(strokes, w, h) => {
+                pad.current = { strokes, w, h };
+                setInked(padHasSignature(strokes));
+              }}
+            />
+            <button
+              type="button"
+              data-testid="sign-and-seal"
+              disabled={!buttonOn}
+              aria-disabled={!buttonOn}
+              onClick={() => void signAndSeal()}
+              className="mt-2 min-h-12 w-full rounded-lg text-[15px] font-semibold"
+              style={{ background: '#F5B800', color: '#0b0b0d', opacity: buttonOn ? 1 : 0.45 }}
+            >
+              {sealButtonLabel(namedFee ?? estFee)}
+            </button>
+            {phase.k === 'ready' && !inked && (
+              <p className="mt-1 text-center text-[12px]" style={{ color: '#a1a1aa' }}>
+                {DRAW_HINT}
+              </p>
+            )}
+            {phase.k === 'ready' && inked && (
+              <p className="mt-1 text-center text-[12px]" style={{ color: '#a1a1aa' }}>
+                Signed as ${me} · #{fingerprint} · you approve the fee on the next screen
+              </p>
+            )}
+          </div>
+        )}
+        {progress && (
+          <ul role="status" aria-live="polite" className="mt-2 flex flex-col gap-0.5" data-testid="seal-progress">
+            {sealProgress(progress, phase.k === 'working' && phase.slow).map((l) => (
+              <li
+                key={l.text}
+                className="text-[14px]"
+                style={{ color: l.done ? '#6ee7b7' : '#e4e4e7', fontWeight: l.done ? 500 : 400 }}
+              >
+                {l.text}
+              </li>
+            ))}
+          </ul>
+        )}
         {phase.k === 'done' && (
           <div>
-            <p role="status" className="text-[15px] font-medium" style={{ color: '#6ee7b7' }}>
-              ✓ Signed and sealed · tx {phase.out.txid.slice(0, 8)}…{phase.out.txid.slice(-4)}
+            <p className="mt-1 text-[13px]" style={{ color: '#e4e4e7' }} data-testid="seal-receipt">
+              {sealReceipt({
+                actualFeeSats: phase.out.feeSats,
+                estFeeSats: phase.feeSats,
+                handle: me,
+                txid: phase.out.txid,
+                usdPerBsv: price.status === 'ok' ? price.usdPerBsv : null,
+              })}
             </p>
             <p className="mt-0.5 text-[12px]" style={{ color: '#a1a1aa' }}>
-              {phase.feeSats ? `Network fee paid: about ${phase.feeSats} sats. ` : ''}
               {signedHtml ? 'Showing your signed copy.' : 'Your signed copy is in the room.'}
             </p>
             {phase.roomError && (
@@ -320,60 +516,56 @@ export const NativeSealPage = () => {
             )}
           </div>
         )}
-        {phase.k === 'working' && (
-          <p role="status" className="text-[14px]">
-            {phase.text}
-          </p>
-        )}
-        {phase.k === 'ready' &&
-          doc &&
-          (mine.length === 0 ? (
-            <p className="text-[14px]">This document has no signature block for ${me}.</p>
-          ) : svg ? (
-            <div>
-              {phase.note && (
-                <p role="alert" className="mb-2 text-[14px]" style={{ color: '#fca5a5' }}>
-                  {phase.note}
-                </p>
-              )}
-              <div className="mb-2 text-[13px]" style={{ color: '#a1a1aa' }}>
-                Signed as ${me} · #{fingerprint} · you pay a small network fee (a few hundred sats or less)
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setSvg(null)}
-                  className="min-h-11 rounded-lg px-4 text-[14px]"
-                  style={{ border: '1px solid rgba(255,255,255,0.15)' }}
-                >
-                  Redraw
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void seal()}
-                  className="min-h-12 flex-1 rounded-lg text-[15px] font-semibold"
-                  style={{ background: '#F5B800', color: '#0b0b0d' }}
-                >
-                  Seal &amp; pay
-                </button>
-              </div>
-            </div>
-          ) : (
-            <SignaturePad
-              label={`Sign as ${mine[0].name || `$${me}`}${mine.length > 1 ? ` (fills ${mine.length} blocks)` : ''}`}
-              onDone={setSvg}
-            />
-          ))}
       </div>
+      {sheet && (
+        <SealPaySheet
+          info={sheet.info}
+          price={price}
+          busy={sheet.busy}
+          onApprove={() => sheet.answer(true)}
+          onCancel={() => sheet.answer(false)}
+        />
+      )}
     </div>
   );
 };
 
-/** The wallet's own finger pad: strokes → the web pad's exact SVG (nativeSeal.strokesToSvg). */
-const SignaturePad = ({ label, onDone }: { label: string; onDone: (svg: string) => void }) => {
+/**
+ * The wallet's own finger pad: strokes → the web pad's exact SVG (nativeSeal.strokesToSvg). No Done step: the strokes
+ * go up on every change and the page's one Sign & seal button seals them. Nothing may interrupt drawing: no
+ * selection, callout, magnifier, context menu or scroll from a touch on the canvas.
+ */
+const SignaturePad = ({
+  label,
+  locked,
+  onChange,
+}: {
+  label: string;
+  locked: boolean;
+  onChange: (strokes: PadPoint[][], width: number, height: number) => void;
+}) => {
   const ref = useRef<HTMLCanvasElement | null>(null);
+  const wrap = useRef<HTMLDivElement | null>(null);
   const strokes = useRef<PadPoint[][]>([]);
   const cur = useRef<PadPoint[] | null>(null);
+  // React's touch listeners are passive, so preventDefault there is ignored: add real ones (passive: false).
+  useEffect(() => {
+    const c = ref.current;
+    const w = wrap.current;
+    if (!c || !w) return;
+    const stop = (e: Event) => e.preventDefault();
+    const opts: AddEventListenerOptions = { passive: false };
+    c.addEventListener('touchstart', stop, opts);
+    c.addEventListener('touchmove', stop, opts);
+    w.addEventListener('contextmenu', stop);
+    w.addEventListener('selectstart', stop);
+    return () => {
+      c.removeEventListener('touchstart', stop, opts);
+      c.removeEventListener('touchmove', stop, opts);
+      w.removeEventListener('contextmenu', stop);
+      w.removeEventListener('selectstart', stop);
+    };
+  }, []);
   const pt = (e: React.PointerEvent<HTMLCanvasElement>): PadPoint => {
     const r = e.currentTarget.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top, pressure: e.pressure || 0.5 };
@@ -392,16 +584,28 @@ const SignaturePad = ({ label, onDone }: { label: string; onDone: (svg: string) 
       g.stroke();
     }
   };
-  const done = () => {
+  const changed = () => {
     const c = ref.current;
-    if (!c) return;
-    const out = strokesToSvg(strokes.current, c.clientWidth, c.clientHeight);
-    if (out) onDone(out);
+    onChange([...strokes.current], c?.clientWidth ?? 0, c?.clientHeight ?? 0);
   };
   return (
-    <div>
-      <div className="mb-1 text-[13px]" style={{ color: '#a1a1aa' }}>
-        {label}
+    <div ref={wrap} className="bw-seal-pad" data-testid="seal-pad" style={NO_SELECT}>
+      <div className="mb-1 flex items-center gap-2 text-[13px]" style={{ color: '#a1a1aa' }}>
+        <span className="min-w-0 flex-1">{label}</span>
+        {!locked && (
+          <button
+            type="button"
+            onClick={() => {
+              strokes.current = [];
+              draw();
+              changed();
+            }}
+            className="min-h-9 rounded-lg px-3 text-[13px]"
+            style={{ border: '1px solid rgba(255,255,255,0.15)' }}
+          >
+            Clear
+          </button>
+        )}
       </div>
       <canvas
         ref={(el) => {
@@ -412,8 +616,10 @@ const SignaturePad = ({ label, onDone }: { label: string; onDone: (svg: string) 
           }
         }}
         className="h-40 w-full rounded-lg"
-        style={{ background: '#fff', touchAction: 'none' }}
+        style={{ background: '#fff', touchAction: 'none', ...NO_SELECT, pointerEvents: locked ? 'none' : undefined }}
+        onContextMenu={(e) => e.preventDefault()}
         onPointerDown={(e) => {
+          e.preventDefault();
           e.currentTarget.setPointerCapture(e.pointerId);
           cur.current = [pt(e)];
           draw();
@@ -427,26 +633,15 @@ const SignaturePad = ({ label, onDone }: { label: string; onDone: (svg: string) 
           if (cur.current && cur.current.length > 1) strokes.current.push(cur.current);
           cur.current = null;
           draw();
+          changed();
+        }}
+        onPointerCancel={() => {
+          if (cur.current && cur.current.length > 1) strokes.current.push(cur.current);
+          cur.current = null;
+          draw();
+          changed();
         }}
       />
-      <div className="mt-2 flex gap-2">
-        <button
-          type="button"
-          onClick={() => ((strokes.current = []), draw())}
-          className="min-h-11 rounded-lg px-4 text-[14px]"
-          style={{ border: '1px solid rgba(255,255,255,0.15)' }}
-        >
-          Clear
-        </button>
-        <button
-          type="button"
-          onClick={done}
-          className="min-h-11 flex-1 rounded-lg text-[15px] font-semibold"
-          style={{ background: '#F5B800', color: '#0b0b0d' }}
-        >
-          Done · next: Seal
-        </button>
-      </div>
     </div>
   );
 };

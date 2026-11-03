@@ -19,3 +19,22 @@ export const approveSealPayment = async (
   if (r.status === 'unavailable') return deps.passwordAuth(reason, host);
   return false;
 };
+
+/**
+ * The whole seal approval (owner, 3 Nov 2026): EVERY time, the wallet's payment approval sheet (SealPaySheet.tsx:
+ * amount, "Seal <title> on Bitcoin", the room, the document hash), and only after its Approve, Face ID / passcode
+ * (or the wallet password) through approveSealPayment. Takes no spending limit, allowance, one-click setting or
+ * remembered grant: there is nothing here that could skip the sheet. Cancel on the sheet → false, no prompt asked.
+ */
+export const approveSealWithSheet = async <T>(
+  sheet: T,
+  deps: {
+    /** Shows the sheet; resolves true on Approve, false on Cancel / ✕. */
+    showSheet: (sheet: T) => Promise<boolean>;
+    /** approveSealPayment with the phone's prompt and password fallback. */
+    confirm: () => Promise<boolean>;
+  },
+): Promise<boolean> => {
+  if (!(await deps.showSheet(sheet))) return false;
+  return (await deps.confirm()) === true;
+};

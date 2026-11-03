@@ -945,6 +945,25 @@ body,
   line-height: 0;
 }
 
+/* Native seal page (src/mobile/chat/NativeSealPage.tsx): nothing may interrupt drawing. No selection, no long-press
+   callout, no magnifier anywhere on the signing page (owner's iPhone, 3 Nov 2026). Text fields stay selectable. */
+.bw-seal-noselect,
+.bw-seal-noselect * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.bw-seal-noselect input,
+.bw-seal-noselect textarea,
+.bw-seal-noselect [contenteditable='true'] {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+.bw-seal-pad canvas {
+  touch-action: none;
+}
+
 /* Signature pad (src/mobile/signature) */
 .bw-sigpad {
   position: fixed;

@@ -1,3 +1,5 @@
+import { Transaction } from '@bsv/sdk';
+
 /**
  * NATIVE sign + seal of a bChatX room document, inside bWalletX (CTO / owner, 3 Nov 2026: "chat should be IN the
  * wallet"). Phone signing never goes through a web page: the dApp browser's approval stalled on "Waiting for
@@ -66,7 +68,15 @@ export interface PreparedSeal {
   estFeeSats: number;
 }
 
-export type SealStep = 'preparing' | 'approving' | 'composing' | 'signing' | 'paying' | 'committing' | 'recovering';
+export type SealStep =
+  | 'preparing'
+  | 'approving'
+  | 'healing'
+  | 'composing'
+  | 'signing'
+  | 'paying'
+  | 'committing'
+  | 'recovering';
 
 export class NativeSealError extends Error {
   constructor(
@@ -86,6 +96,29 @@ export interface NativeSealOutcome {
   complete: boolean;
   sealed: boolean;
   recovered?: boolean;
+  /** The fee the seal transaction actually paid (inputs − outputs, read from its AtomicBEEF), when it could be read. */
+  feeSats?: number;
+}
+
+/**
+ * Pure: the fee a transaction paid, from its AtomicBEEF (the ancestors it carries give each input's amount). Null when
+ * the bytes don't parse or an input's amount is missing: the caller then shows its estimate, labelled "about".
+ */
+export function feeFromAtomicBeef(tx: number[] | undefined): number | null {
+  if (!tx?.length) return null;
+  try {
+    const t = Transaction.fromAtomicBEEF(tx);
+    let into = 0;
+    for (const i of t.inputs) {
+      const sats = i.sourceTransaction?.outputs[i.sourceOutputIndex]?.satoshis;
+      if (typeof sats !== 'number') return null;
+      into += sats;
+    }
+    const out = t.outputs.reduce((n, o) => n + (o.satoshis ?? 0), 0);
+    return into >= out ? into - out : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Shown when the seal's payment hit a coin already spent elsewhere. Plain words, never the toolbox text. */
@@ -128,6 +161,12 @@ export async function nativeSignAndSeal(input: {
   keys: SealKeys;
   store: PendingSealStore;
   approve: (prepared: PreparedSeal) => Promise<boolean>;
+  /**
+   * The coin check started when the pad opened (so the press pays straight away). Still running after approval →
+   * step 'healing' ("Finding a fresh coin…") and wait for it. `wait` never throws. The in-flight spent-coin retry in
+   * the background's createAction stays the fallback.
+   */
+  coins?: { pending: () => boolean; wait: () => Promise<void> };
   onStep?: (s: SealStep) => void;
   now?: () => number;
 }): Promise<NativeSealOutcome> {
@@ -141,6 +180,11 @@ export async function nativeSignAndSeal(input: {
   step('approving');
   if (!(await input.approve(prepared)))
     throw new NativeSealError('Not sealed: you cancelled. Nothing was signed or paid.', 'cancelled');
+
+  if (input.coins?.pending()) {
+    step('healing');
+    await input.coins.wait().catch(() => undefined);
+  }
 
   step('composing');
   const composed = await call(input.api, 'compose', { nonce: prepared.nonce, svg: input.svg.trim() });
@@ -179,6 +223,7 @@ export async function nativeSignAndSeal(input: {
     throw new NativeSealError('The wallet did not return the seal transaction, so nothing was recorded.', 'failed');
   const txid = paid.txid.toLowerCase();
   const beefHex = toHex(paid.tx);
+  const feeSats = feeFromAtomicBeef(paid.tx);
 
   // ⚠ PERSIST BEFORE COMMIT: from here on the seal is paid for.
   input.store.save({
@@ -240,6 +285,7 @@ export async function nativeSignAndSeal(input: {
     complete: !!out.complete,
     sealed: !!out.sealed,
     ...(recovered ? { recovered: true } : {}),
+    ...(feeSats != null ? { feeSats } : {}),
   };
 }
 

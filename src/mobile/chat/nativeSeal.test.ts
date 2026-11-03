@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { P2PKH, PrivateKey, Script, Transaction } from '@bsv/sdk';
 import {
+  feeFromAtomicBeef,
   NativeSealError,
   inertHtml,
   accountHandles,
@@ -351,5 +353,78 @@ describe('accountHandles (every handle on the account signs)', () => {
   test('junk → []', () => {
     expect(accountHandles(null)).toEqual([]);
     expect(accountHandles({ handles: 'x' })).toEqual([]);
+  });
+});
+
+describe('one press: steps, the pre-tap coin check, the real fee', () => {
+  const run = async (coins?: { pending: () => boolean; wait: () => Promise<void> }, approve = true) => {
+    const log: string[] = [];
+    const steps: string[] = [];
+    const out = await nativeSignAndSeal({
+      documentId: 'D',
+      fieldIds: ['f1'],
+      svg: '<svg/>',
+      api: api(log),
+      keys: keys(log),
+      store: memStore(),
+      coins,
+      approve: async () => (log.push('approve'), approve),
+      onStep: (s) => steps.push(s),
+    }).catch((e) => e);
+    return { out, log, steps };
+  };
+
+  test('progress states in order: approval first, then sign, pay, commit', async () => {
+    const r = await run();
+    expect(r.steps).toEqual(['preparing', 'approving', 'composing', 'signing', 'paying', 'committing']);
+  });
+
+  test('coin check finished before the press: no "Finding a fresh coin…" step', async () => {
+    const r = await run({ pending: () => false, wait: async () => void 0 });
+    expect(r.steps).not.toContain('healing');
+  });
+
+  test('coin check still running: waits for it after approval, before anything is composed or paid', async () => {
+    const order: string[] = [];
+    const r = await run({
+      pending: () => true,
+      wait: async () => void order.push('waited'),
+    });
+    expect(r.steps).toEqual(['preparing', 'approving', 'healing', 'composing', 'signing', 'paying', 'committing']);
+    expect(order).toEqual(['waited']);
+    expect(r.log.indexOf('approve')).toBeLessThan(r.log.findIndex((l) => l.startsWith('compose')));
+  });
+
+  test('a failing coin check never blocks the seal', async () => {
+    const r = await run({ pending: () => true, wait: () => Promise.reject(new Error('boom')) });
+    expect(r.out.txid).toBe(TX);
+  });
+
+  test('cancel at the sheet: no coin wait, nothing composed, signed or paid (compose never reached the server)', async () => {
+    let waited = false;
+    const r = await run({ pending: () => true, wait: async () => void (waited = true) }, false);
+    expect(r.out).toMatchObject({ code: 'cancelled' });
+    expect(waited).toBe(false);
+    expect(r.steps).toEqual(['preparing', 'approving']);
+    expect(r.log.filter((l) => /^(compose|sign|pay|commit|recover)/.test(l))).toEqual([]);
+  });
+
+  test('the actual fee is read from the AtomicBEEF the wallet returns', () => {
+    const k = PrivateKey.fromRandom();
+    const src = new Transaction();
+    src.addInput({
+      sourceTXID: '00'.repeat(32),
+      sourceOutputIndex: 0,
+      unlockingScript: new Script(),
+      sequence: 0xffffffff,
+    });
+    src.addOutput({ satoshis: 1000, lockingScript: new P2PKH().lock(k.toAddress()) });
+    const tx = new Transaction();
+    tx.addInput({ sourceTransaction: src, sourceOutputIndex: 0, unlockingScript: new Script(), sequence: 0xffffffff });
+    tx.addOutput({ satoshis: 0, lockingScript: Script.fromHex('006a') });
+    tx.addOutput({ satoshis: 925, lockingScript: new P2PKH().lock(k.toAddress()) });
+    expect(feeFromAtomicBeef(tx.toAtomicBEEF(true))).toBe(75);
+    expect(feeFromAtomicBeef([9, 9])).toBeNull();
+    expect(feeFromAtomicBeef(undefined)).toBeNull();
   });
 });
