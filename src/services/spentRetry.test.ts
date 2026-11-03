@@ -6,6 +6,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { P2PKH, PrivateKey, Transaction } from '@bsv/sdk';
+import { isSpentCoinError } from '../mobile/chat/nativeSeal';
 import { healInvalidSend, withHealMessage } from './invalidSendHeal';
 import {
   createWithSpentRetry,
@@ -30,7 +31,7 @@ function funding(n: number) {
 type Coin = { spendable: boolean; locked: boolean };
 
 /** A toolbox-like wallet over in-memory storage and a fake network. */
-function simWallet(nCoins: number, spentElsewhere: number[]) {
+function simWallet(nCoins: number, spentElsewhere: number[], opts: { toolboxEvicts?: boolean } = {}) {
   const src = funding(nCoins);
   const srcId = src.id('hex');
   const coins = new Map<string, Coin>();
@@ -62,6 +63,8 @@ function simWallet(nCoins: number, spentElsewhere: number[]) {
       // Toolbox: tx failed → inputs restored spendable (lock released), then WERR_REVIEW_ACTIONS.
       coin.locked = false;
       coin.spendable = true;
+      // Toolbox markStaleInputsAsSpent: when its own UTXO check says spent, the input is set unspendable again.
+      if (opts.toolboxEvicts) coin.spendable = false;
       refusals.set(
         txid,
         `UTXO_SPENT (70): [ProcessTransaction][${txid}] UTXO_SPENT (70): ${op.replace('_', ':')} utxo already spent by tx ${spender}[0]`,
@@ -91,6 +94,7 @@ function simWallet(nCoins: number, spentElsewhere: number[]) {
           c.spendable = false;
           return 1;
         },
+        isSpendable: async (txid, vout) => coins.get(`${txid}_${vout}`)?.spendable ?? null,
       },
       { reason: refusals.get(rejectedTxid(e) ?? '') },
     );
@@ -191,6 +195,62 @@ describe('UTXO_SPENT: coin spent on another device', () => {
     });
     expect(r).toEqual({ ok: false, error: err, retried: false, heal: null });
     expect(healed).toBe(0);
+  });
+});
+
+/**
+ * Owner's iPhone, 3 Nov 2026 14:37Z: native Review & sign of board minute 010, right after the tax policy seal
+ * (5db5b9af…). The broadcaster named eb6dcc27…:2 spent; the toolbox's own stale-input check had already set it
+ * unspendable, so the heal changed 0 rows, reported nothing cleared, and the safe retry never ran ("Coins tried:").
+ */
+describe('UTXO_SPENT after the toolbox already evicted the dead coin (native seal, 3 Nov)', () => {
+  test('invalid-tx → heal counts the coin as cleared → one retry → success', async () => {
+    const w = simWallet(3, [0], { toolboxEvicts: true });
+    const r = await createWithSpentRetry(deps(w));
+    expect(r.heal?.released).toBe(1);
+    expect(r.ok && r.retried).toBe(true);
+    expect(w.calls()).toBe(2);
+    expect(w.accepted).toHaveLength(1);
+    expect(w.accepted[0].inputs).toEqual([`${w.srcId}_1`]);
+  });
+
+  test('no coin cleared (spend not provable, still spendable) → no retry, and a plain message on the seal', async () => {
+    const w = simWallet(3, [0]);
+    const r = await createWithSpentRetry(
+      deps(w, {
+        // Neither the broadcaster's text nor the lookups name the spender: fail closed, nothing cleared.
+        heal: (e) => healInvalidSend(e, async () => null, { markSpent: async () => 0, isSpendable: async () => true }),
+      }),
+    );
+    expect(r.ok).toBe(false);
+    expect(r.retried).toBe(false);
+    expect(r.heal?.released).toBe(0);
+    expect(w.calls()).toBe(1);
+    expect(w.coins.get(`${w.srcId}_0`)?.spendable).toBe(true); // live-looking coin left alone
+    const shown = withHealMessage('rejected by the network as invalid; broadcaster said: UTXO_SPENT (70)', r.heal);
+    expect(isSpentCoinError(new Error(shown))).toBe(true); // → SEAL_SPENT_MESSAGE on the seal page
+  });
+
+  test('rejected tx may have been broadcast → no retry even with the coin cleared', async () => {
+    const w = simWallet(3, [0], { toolboxEvicts: true });
+    const r = await createWithSpentRetry(deps(w, { txKnown: async () => null }));
+    expect(r.heal?.released).toBe(1);
+    expect(r.retried).toBe(false);
+    expect(w.calls()).toBe(1);
+    expect(w.accepted).toHaveLength(0);
+  });
+
+  test('an unknown or unreadable row is never counted as cleared', async () => {
+    for (const isSpendable of [async () => null, async () => Promise.reject(new Error('remote store'))]) {
+      const w = simWallet(3, [0], { toolboxEvicts: true });
+      const r = await createWithSpentRetry(
+        deps(w, {
+          heal: (e) => healInvalidSend(e, async () => OTHER_DEVICE_TX, { markSpent: async () => 0, isSpendable }, {}),
+        }),
+      );
+      expect(r.heal?.released).toBe(0);
+      expect(r.retried).toBe(false);
+    }
   });
 });
 

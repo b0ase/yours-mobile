@@ -391,17 +391,11 @@ async function healRejectedInputs(ctx: AccountContext, error: unknown): Promise<
     const rejected = (error as { reviewActionResults?: { txid?: string; status?: string }[] }).reviewActionResults?.find(
       (r) => r?.status === 'invalidTx',
     )?.txid;
-    return await healInvalidSend(error, (o) => txo.getSpend(o), {
-      markSpent: (txid, vout) =>
-        ctx.storage.runAsStorageProvider(async (sp) => {
-          const user = (await sp.findUsers({ partial: { identityKey } }))[0];
-          if (!user) return 0;
-          let n = 0;
-          for (const o of await sp.findOutputs({ partial: { userId: user.userId, txid, vout, spendable: true } }))
-            n += await sp.updateOutput(o.outputId, { spendable: false });
-          return n;
-        }),
-    }, { fallback: wocSpend, reason: refusalFor(rejected) });
+    // markSpentStore also answers isSpendable: a coin the toolbox already set unspendable counts as cleared (3 Nov 2026).
+    return await healInvalidSend(error, (o) => txo.getSpend(o), markSpentStore(ctx, identityKey), {
+      fallback: wocSpend,
+      reason: refusalFor(rejected),
+    });
   } catch (err) {
     console.error('[createAction] invalidTx heal failed:', err);
     return null;
@@ -450,6 +444,16 @@ const markSpentStore = (ctx: AccountContext, identityKey: string) => ({
         n += await sp.updateOutput(o.outputId, { spendable: false });
       return n;
     }),
+  /** Spendable now? null when there is no row or the active store is remote (runAsStorageProvider throws). */
+  isSpendable: (txid: string, vout: number) =>
+    ctx.storage
+      .runAsStorageProvider(async (sp) => {
+        const user = (await sp.findUsers({ partial: { identityKey } }))[0];
+        if (!user) return null;
+        const rows = await sp.findOutputs({ partial: { userId: user.userId, txid, vout } });
+        return rows.length ? rows.some((o) => !!o.spendable) : null;
+      })
+      .catch(() => null),
 });
 
 const AUTO_COIN_RESYNC_ALARM = 'auto-coin-resync';

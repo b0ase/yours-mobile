@@ -93,6 +93,23 @@ export function namedSpentInputs(reason: string | undefined, inputs: string[]): 
 export interface HealStore {
   /** Mark this outpoint's output spendable: false for the account; resolves how many rows changed. */
   markSpent: (txid: string, vout: number) => Promise<number>;
+  /**
+   * Is this outpoint listed as spendable now? false = storage already holds it unspendable; null = no row, or can't
+   * tell. Owner's iPhone, 3 Nov 2026 (board minute 010 seal, UTXO_SPENT on eb6dcc27…:2): after a refused broadcast
+   * the toolbox's own stale-input check (markStaleInputsAsSpent) can mark the input spendable: false BEFORE this heal
+   * runs, so markSpent changed 0 rows, the heal reported "nothing cleared", and the one safe retry never ran even
+   * though the dead coin was already out of coin selection.
+   */
+  isSpendable?: (txid: string, vout: number) => Promise<boolean | null>;
+}
+
+/** Clear one proven-spent outpoint: rows changed now, or 1 when storage already holds it unspendable. Never throws. */
+async function clearOne(store: HealStore, op: string): Promise<number> {
+  const [txid, v] = op.split('_');
+  const vout = Number(v);
+  const n = await store.markSpent(txid, vout).catch(() => 0);
+  if (n > 0) return n;
+  return (await (store.isSpendable?.(txid, vout) ?? Promise.resolve(null)).catch(() => null)) === false ? 1 : 0;
 }
 
 export type HealReport = { checked: number; released: number; inputs?: string[] };
@@ -147,10 +164,8 @@ export async function healInvalidSend(
     rejectedTxid,
   );
   let released = 0;
-  for (const op of [...named, ...looked]) {
-    const [txid, vout] = op.split('_');
-    released += await store.markSpent(txid, Number(vout)).catch(() => 0);
-  }
+  // Counted when cleared now or already unspendable (clearOne): either way the retry can't pick it again.
+  for (const op of [...named, ...looked]) released += await clearOne(store, op);
   return { checked: inputs.length, released, inputs };
 }
 

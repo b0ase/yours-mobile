@@ -71,7 +71,7 @@ export type SealStep = 'preparing' | 'approving' | 'composing' | 'signing' | 'pa
 export class NativeSealError extends Error {
   constructor(
     message: string,
-    readonly code: 'already_sealed' | 'refused' | 'cancelled' | 'pending_recovery' | 'failed',
+    readonly code: 'already_sealed' | 'refused' | 'cancelled' | 'pending_recovery' | 'failed' | 'spent_elsewhere',
     readonly status = 0,
   ) {
     super(message);
@@ -87,6 +87,21 @@ export interface NativeSealOutcome {
   sealed: boolean;
   recovered?: boolean;
 }
+
+/** Shown when the seal's payment hit a coin already spent elsewhere. Plain words, never the toolbox text. */
+export const SEAL_SPENT_MESSAGE = 'A coin was already spent on another device. Tap Seal & pay again.';
+
+/**
+ * Pure: did the seal's payment fail because a coin was already spent (same seed on another device)? Owner's iPhone,
+ * 3 Nov 2026 14:37Z, board minute 010: "Undelayed createAction or signAction results require review. rejected by the
+ * network as invalid; broadcaster said: UTXO_SPENT (70) … already spent by tx …" was shown raw. The payment runs
+ * through the background's createAction, which already heals the rejected inputs and retries ONCE when that is safe
+ * (services/spentRetry.ts); what reaches this page is the outcome as text, so it is matched here, not retried again.
+ */
+export const isSpentCoinError = (e: unknown): boolean => {
+  const m = e instanceof Error ? e.message : typeof e === 'string' ? e : '';
+  return /UTXO_SPENT|already spent|missing ?inputs|spent elsewhere|spent on another device/i.test(m);
+};
 
 const toHex = (bytes: ArrayLike<number>) => Array.from(bytes, (b) => (b & 0xff).toString(16).padStart(2, '0')).join('');
 
@@ -143,13 +158,23 @@ export async function nativeSignAndSeal(input: {
   const attestation = toHex(signature);
 
   step('paying');
-  const paid = await input.keys.createAction({
-    description: 'bit-sign: sign and seal a document',
-    outputs: [
-      { satoshis: 0, lockingScript: lockingScriptHex, outputDescription: 'Document seal (OP_RETURN, hashes only)' },
-    ],
-    options: { acceptDelayedBroadcast: false, randomizeOutputs: false },
-  });
+  let paid: Awaited<ReturnType<SealKeys['createAction']>>;
+  try {
+    paid = await input.keys.createAction({
+      description: 'bit-sign: sign and seal a document',
+      outputs: [
+        { satoshis: 0, lockingScript: lockingScriptHex, outputDescription: 'Document seal (OP_RETURN, hashes only)' },
+      ],
+      options: { acceptDelayedBroadcast: false, randomizeOutputs: false },
+    });
+  } catch (e) {
+    // Refused, so nothing was paid and nothing is saved for recovery. The raw text stays in the console.
+    if (isSpentCoinError(e)) {
+      console.warn('[nativeSeal] pay refused: coin already spent', e instanceof Error ? e.message : e);
+      throw new NativeSealError(SEAL_SPENT_MESSAGE, 'spent_elsewhere');
+    }
+    throw e;
+  }
   if (!paid?.txid || !paid.tx)
     throw new NativeSealError('The wallet did not return the seal transaction, so nothing was recorded.', 'failed');
   const txid = paid.txid.toLowerCase();

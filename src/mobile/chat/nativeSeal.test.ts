@@ -8,6 +8,7 @@ import {
   nativeRoomSteps,
   nativeSignAndSeal,
   recoverNativeSeals,
+  SEAL_SPENT_MESSAGE,
   signedFieldIds,
   strokesToSvg,
   type PendingSeal,
@@ -165,6 +166,68 @@ describe("nativeSignAndSeal: the web client's exact protocol, with the wallet's 
     const n = await recoverNativeSeals(api([]), store, 'D');
     expect(n).toBe(1);
     expect(store.m.size).toBe(0);
+  });
+});
+
+describe('pay refused: a coin already spent on another device (owner iPhone, 3 Nov 2026 14:37Z)', () => {
+  const RAW =
+    'Undelayed createAction or signAction results require review. rejected by the network as invalid; broadcaster said: UTXO_SPENT (70) … already spent by tx 5db5b9af48bc… Coins tried: eb6dcc27fb…:2.';
+  const failingKeys = (log: string[], err: Error): SealKeys => ({
+    ...keys(log),
+    createAction: async () => (log.push('pay'), Promise.reject(err)),
+  });
+
+  test('plain message, not the toolbox text; nothing saved, nothing committed', async () => {
+    const log: string[] = [];
+    const store = memStore();
+    const err = await nativeSignAndSeal({
+      documentId: 'D',
+      fieldIds: ['f1'],
+      svg: '<svg/>',
+      api: api(log),
+      keys: failingKeys(log, new Error(RAW)),
+      store,
+      approve: async () => true,
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(NativeSealError);
+    expect(err.code).toBe('spent_elsewhere');
+    expect(err.message).toBe(SEAL_SPENT_MESSAGE);
+    expect(err.message).not.toContain('UTXO_SPENT');
+    expect(store.m.size).toBe(0); // not paid: no paid-but-unrecorded entry
+    expect(log.filter((l) => l.startsWith('commit') || l.startsWith('recover'))).toEqual([]);
+    expect(log.filter((l) => l === 'pay')).toHaveLength(1); // the background already made the one safe retry
+  });
+
+  test('the background healed but could not retry safely: same plain message', async () => {
+    const log: string[] = [];
+    const err = await nativeSignAndSeal({
+      documentId: 'D',
+      fieldIds: ['f1'],
+      svg: '<svg/>',
+      api: api(log),
+      keys: failingKeys(
+        log,
+        new Error('Some coins were already spent on another device. Refreshed your balance — please try again.'),
+      ),
+      store: memStore(),
+      approve: async () => true,
+    }).catch((e) => e);
+    expect(err.message).toBe(SEAL_SPENT_MESSAGE);
+  });
+
+  test('other pay failures pass through unchanged', async () => {
+    const log: string[] = [];
+    const boom = new Error('Not enough spendable BSV for this payment.');
+    const err = await nativeSignAndSeal({
+      documentId: 'D',
+      fieldIds: ['f1'],
+      svg: '<svg/>',
+      api: api(log),
+      keys: failingKeys(log, boom),
+      store: memStore(),
+      approve: async () => true,
+    }).catch((e) => e);
+    expect(err).toBe(boom);
   });
 });
 

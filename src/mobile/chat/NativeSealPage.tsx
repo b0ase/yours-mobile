@@ -68,7 +68,7 @@ type Doc = {
 type Phase =
   | { k: 'loading' }
   | { k: 'error'; text: string }
-  | { k: 'ready' }
+  | { k: 'ready'; note?: string }
   | { k: 'working'; text: string }
   | { k: 'done'; out: NativeSealOutcome; roomError: string | null; feeSats: number | null };
 
@@ -221,6 +221,11 @@ export const NativeSealPage = () => {
       const signed = await fetchSignedCopy((path) => c.request('GET', path), ticker, [doc.documentId, out.signatureId]);
       if (signed) setSignedHtml(signed);
     } catch (e) {
+      // A coin spent on another device: nothing was paid; back to the Seal & pay button (drawing kept) with plain words.
+      if (e instanceof NativeSealError && e.code === 'spent_elsewhere') {
+        setPhase({ k: 'ready', note: e.message });
+        return;
+      }
       const text = e instanceof NativeSealError || e instanceof Error ? e.message : 'The seal did not finish.';
       setPhase({ k: 'error', text });
     }
@@ -323,6 +328,11 @@ export const NativeSealPage = () => {
             <p className="text-[14px]">This document has no signature block for ${me}.</p>
           ) : svg ? (
             <div>
+              {phase.note && (
+                <p role="alert" className="mb-2 text-[14px]" style={{ color: '#fca5a5' }}>
+                  {phase.note}
+                </p>
+              )}
               <div className="mb-2 text-[13px]" style={{ color: '#a1a1aa' }}>
                 Signed as ${me} · #{fingerprint} · you pay a small network fee (a few hundred sats or less)
               </div>
