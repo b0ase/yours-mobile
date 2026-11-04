@@ -1739,9 +1739,13 @@ export const BsvWallet = () => {
               {restoreMessage}
             </p>
           )}
-          {/* Still on the online backup: say so, and offer the move now (services/localFirst.ts, review F4). */}
-          <MoveToDeviceNotice />
         </motion.div>
+
+        {/* Still on the online backup: say so, and offer the move now (services/localFirst.ts, review F4). Outside the
+            balance block above: the phone and web builds hide that block (they show WalletCard instead). */}
+        <div className="w-[88%]">
+          <MoveToDeviceNotice />
+        </div>
 
         {/* ── Action buttons ── */}
         <motion.div

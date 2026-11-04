@@ -9,6 +9,7 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { artDataUri, receiptArtUrl } from '../storeReceipt/art';
 import { getBuyQuote, payBuyQuote, type BuyQuote, type BuyResult } from '../themeOrder/api';
 import { MoveToDeviceNotice } from '../../components/MoveToDeviceNotice';
+import { errorLayout } from './buySheetState';
 
 const f: typeof fetch = (u, i) => fetch(u, i);
 
@@ -198,6 +199,8 @@ export function BuySheet({
 
   const q = step.k === 'quoting' ? undefined : (step as { q?: BuyQuote }).q;
   const busy = step.k === 'paying' || step.k === 'quoting';
+  // A payment waiting for the move to this device: the notice and its Retry button first, no price hero (F-D).
+  const layout = errorLayout(step.k === 'error' ? step.msg : undefined);
   return createPortal(
     <div
       className="fixed inset-0 z-[1110] flex flex-col"
@@ -215,10 +218,12 @@ export function BuySheet({
         closeLabel="Close"
         closeDisabled={step.k === 'paying'}
         hero={
-          <PayHero
-            amount={`$${q?.usd ?? 1}`}
-            sub={q ? `${q.sats.toLocaleString()} sats · yours to keep` : 'Getting the price…'}
-          />
+          layout.hero ? (
+            <PayHero
+              amount={`$${q?.usd ?? 1}`}
+              sub={q ? `${q.sats.toLocaleString()} sats · yours to keep` : 'Getting the price…'}
+            />
+          ) : undefined
         }
         title={
           <>
@@ -242,14 +247,17 @@ export function BuySheet({
         }
         detailsOpen={details}
         onToggleDetails={() => setDetails(!details)}
-        error={step.k === 'error' ? step.msg : undefined}
+        error={step.k === 'error' ? layout.error : undefined}
       >
-        <div className="flex flex-wrap" style={{ gap: 8 }}>
-          <Chip>Theme</Chip>
-          <Chip>Yours to keep</Chip>
-          <Chip>Paid in BSV</Chip>
-        </div>
-        {step.k === 'error' && /moving to this device/i.test(step.msg) && <MoveToDeviceNotice />}
+        {layout.notice ? (
+          <MoveToDeviceNotice />
+        ) : (
+          <div className="flex flex-wrap" style={{ gap: 8 }}>
+            <Chip>Theme</Chip>
+            <Chip>Yours to keep</Chip>
+            <Chip>Paid in BSV</Chip>
+          </div>
+        )}
       </ApprovalCard>
     </div>,
     document.body,
