@@ -41,6 +41,8 @@ import {
   registerInboundVerifier,
   walletOwnership,
   walletRecords,
+  HELD_MARK,
+  releaseHeldRows,
 } from './inboundSync';
 import { bsv21FieldsFromOutput } from '@1sat/actions';
 import { bsv21 } from '../mobile/market/launchpad/tokens';
@@ -155,15 +157,26 @@ async function phoneWithBackup() {
   const coin2 = await receive(wallet, kd, 70_000);
   const token = await receiveToken(wallet, kd);
   await sm.updateBackups();
-  const chain: { answer: SpendState['state']; asked: string[] } = { answer: 'unclear', asked: [] };
-  const unregister = registerInboundVerifier(phone.getSettings().storageIdentityKey, kd.identityKey, {
+  /** The fake chain: /spent's answer, and whether WhatsOnChain knows a transaction (per txid, else `known`). */
+  const chain: {
+    answer: SpendState['state'];
+    asked: string[];
+    known: 'known' | 'unknown' | 'unclear';
+    knownFor: Map<string, 'known' | 'unknown' | 'unclear'>;
+  } = { answer: 'unclear', asked: [], known: 'known', knownFor: new Map() };
+  const verifier = {
     owns: walletOwnership(root),
-    spent: async (outpoint) => {
+    spent: async (outpoint: string) => {
       chain.asked.push(outpoint);
-      return chain.answer === 'spent' ? { state: 'spent', by: 'ff'.repeat(32) } : ({ state: chain.answer } as never);
+      return chain.answer === 'spent'
+        ? { state: 'spent' as const, by: 'ff'.repeat(32) }
+        : ({ state: chain.answer } as never);
     },
+    txKnown: async (txid: string) => chain.knownFor.get(txid) ?? chain.known,
+    readRecord: walletRecords(root),
     log: () => undefined,
-  });
+  };
+  const unregister = registerInboundVerifier(phone.getSettings().storageIdentityKey, kd.identityKey, verifier);
   const pull = () => sm.syncFromReader(kd.identityKey, remote as never);
   const row = async (s: StorageIdb, txid: string) => (await s.findOutputs({ partial: { txid, vout: 0 } }))[0];
   /** What a hostile provider answers from now on: its row, rewritten, newer than the phone's. */
@@ -171,7 +184,7 @@ async function phoneWithBackup() {
     const r = await row(remote, txid);
     await remote.updateOutput(r.outputId, { ...patch, updated_at: new Date(Date.now() + 3_600_000) } as never);
   };
-  return { root, kd, remote, phone, sm, wallet, coin, coin2, token, chain, pull, row, forge, unregister };
+  return { root, kd, remote, phone, sm, wallet, coin, coin2, token, chain, verifier, pull, row, forge, unregister };
 }
 
 let uninstall: () => void = () => undefined;
@@ -296,22 +309,17 @@ describe('A3: rows from a remote store never become spendable unchecked', () => 
     expect(got.spendable).toBe(false);
   });
 
-  test("an honest restore: the wallet's own coins arrive spendable, checked offline (the chain is never asked)", async () => {
+  test("an honest restore: the wallet's own coins arrive spendable once the chain confirms them", async () => {
     const d = await phoneWithBackup();
     const fresh = await store(`a3-new-${++n}`);
-    const unregister = registerInboundVerifier(fresh.getSettings().storageIdentityKey, d.kd.identityKey, {
-      owns: walletOwnership(d.root),
-      spent: async (op) => {
-        d.chain.asked.push(op);
-        return { state: 'unclear' };
-      },
-    });
+    d.chain.answer = 'unspent';
+    const unregister = registerInboundVerifier(fresh.getSettings().storageIdentityKey, d.kd.identityKey, d.verifier);
     const sm2 = new WalletStorageManager(d.kd.identityKey, fresh, [d.remote]);
     await sm2.makeAvailable();
     await sm2.setActive(fresh.getSettings().storageIdentityKey);
     await sm2.syncFromReader(d.kd.identityKey, d.remote as never);
     for (const txid of [d.coin, d.coin2, d.token]) expect((await d.row(fresh, txid)).spendable).toBe(true);
-    expect(d.chain.asked).toEqual([]);
+    for (const txid of [d.coin, d.coin2, d.token]) expect(d.chain.asked).toContain(`${txid}.0`);
     unregister();
   });
 
@@ -326,7 +334,8 @@ describe('A3: rows from a remote store never become spendable unchecked', () => 
     let checked = 0;
     const unregister = registerInboundVerifier(`sik-${name}`, d.kd.identityKey, {
       owns: async (row, script) => (checked++, owns(row, script)),
-      spent: async (op) => (asked.push(op), { state: 'unclear' }),
+      spent: async (op) => (asked.push(op), { state: 'unspent' }),
+      txKnown: async () => 'known',
     });
     const remoteUrl = 'https://wallet.1sat.test';
     (d.remote as unknown as { endpointUrl: string }).endpointUrl = remoteUrl;
@@ -354,8 +363,8 @@ describe('A3: rows from a remote store never become spendable unchecked', () => 
     expect(r.ok).toBe(true);
     const spendable = (await local.findOutputs({ partial: {} })).filter((o) => o.spendable);
     expect(spendable.reduce((s, o) => s + o.satoshis, 0)).toBe(50_000 + 70_000 + 1);
-    expect(checked).toBeGreaterThanOrEqual(3); // the copy went through the check: each coin, offline
-    expect(asked).toEqual([]);
+    expect(checked).toBeGreaterThanOrEqual(3); // the copy went through the check: each coin
+    expect(asked.length).toBeGreaterThanOrEqual(3); // ...and the chain was asked about each
     unregister();
   });
 
@@ -460,6 +469,7 @@ describe('F2: a token coin from the backup carries the amount its script says, o
     const unregister = registerInboundVerifier(fresh.getSettings().storageIdentityKey, d.kd.identityKey, {
       owns: walletOwnership(d.root),
       spent: async () => ({ state: 'unspent' }),
+      txKnown: async () => 'known',
       readRecord: walletRecords(d.root),
     });
     const sm2 = new WalletStorageManager(d.kd.identityKey, fresh, [d.remote]);
@@ -478,6 +488,7 @@ describe('F2: a token coin from the backup carries the amount its script says, o
 
   test('an honest token coin arrives spendable with its amount and its bsv21 tag', async () => {
     const d = await phoneWithBackup();
+    d.chain.answer = 'unspent'; // the provider stand-in is a StorageIdb too: its push is checked like a pull
     const txid = await receiveBsv21(d.wallet, d.kd, 100n, { id: TOKEN, amt: '100', op: 'transfer' });
     await d.sm.updateBackups();
     const { sendable } = await restoreAndRead(d);
@@ -488,6 +499,7 @@ describe('F2: a token coin from the backup carries the amount its script says, o
 
   test('an inflated amount in the record: the coin arrives not spendable, so no send can use it', async () => {
     const d = await phoneWithBackup();
+    d.chain.answer = 'unspent'; // the provider stand-in is a StorageIdb too: its push is checked like a pull
     const txid = await receiveBsv21(d.wallet, d.kd, 100n, { id: TOKEN, amt: '100', op: 'transfer' });
     await d.sm.updateBackups();
     const r = await d.row(d.remote, txid);
@@ -501,6 +513,7 @@ describe('F2: a token coin from the backup carries the amount its script says, o
 
   test('a forged amt: tag on a coin whose record has no amount arrives deleted', async () => {
     const d = await phoneWithBackup();
+    d.chain.answer = 'unspent'; // the provider stand-in is a StorageIdb too: its push is checked like a pull
     const txid = await receiveBsv21(d.wallet, d.kd, 100n, { id: TOKEN, op: 'transfer' });
     await d.sm.updateBackups();
     const { userId } = (await d.remote.findUsers({ partial: { identityKey: d.kd.identityKey } }))[0];
@@ -521,6 +534,7 @@ describe('F2: a token coin from the backup carries the amount its script says, o
 
   test('a token tag that matches the script (an honest amt:) still arrives', async () => {
     const d = await phoneWithBackup();
+    d.chain.answer = 'unspent'; // the provider stand-in is a StorageIdb too: its push is checked like a pull
     const txid = await receiveBsv21(d.wallet, d.kd, 100n, { id: TOKEN, op: 'transfer' });
     await d.sm.updateBackups();
     const { userId } = (await d.remote.findUsers({ partial: { identityKey: d.kd.identityKey } }))[0];
@@ -536,5 +550,145 @@ describe('F2: a token coin from the backup carries the amount its script says, o
     } as never);
     const { sendable } = await restoreAndRead(d);
     expect(sendable.find((o) => o.outpoint.startsWith(txid))?.amt).toBe('100');
+  });
+});
+
+/**
+ * Review 16, F4: ways around "arrives not spendable" and the chain check.
+ *  (a) a row planted not spendable went in unchecked, then a newer copy flipped it spendable on WhatsOnChain's word;
+ *  (b) WhatsOnChain answers /spent with 404 for an outpoint it has never seen, which counted as "unspent";
+ *  (c) the backup could rewrite a failed transaction's status, defeating the failed-transaction check;
+ *  (d) the wallet's own coins were never asked of the chain, so a restore took back spent change as spendable.
+ */
+describe('F4: the chain check holds against a two-step plant, a 404, a status rewrite and spent change', () => {
+  type D = Awaited<ReturnType<typeof phoneWithBackup>>;
+  /** The provider plants a transaction and an output, filed like the wallet's change unless `other`. */
+  async function plant(d: D, opts: { spendable: boolean; other?: boolean }) {
+    const { userId } = (await d.remote.findUsers({ partial: { identityKey: d.kd.identityKey } }))[0];
+    const legitTx = (await d.remote.findTransactions({ partial: { userId, txid: d.coin } }))[0];
+    const legitOut = await d.row(d.remote, d.coin);
+    const planted = minedTx(new P2PKH().lock(new PrivateKey(66).toAddress()), 900_000);
+    const ptxid = planted.id('hex');
+    const later = new Date(Date.now() + 3_600_000);
+    const transactionId = await d.remote.insertTransaction({
+      ...legitTx,
+      transactionId: 0,
+      txid: ptxid,
+      reference: Utils.toBase64(Random(12)),
+      rawTx: planted.toBinary(),
+      provenTxId: undefined,
+      created_at: later,
+      updated_at: later,
+    } as never);
+    await d.remote.insertOutput({
+      ...legitOut,
+      outputId: 0,
+      transactionId,
+      txid: ptxid,
+      vout: 0,
+      satoshis: 900_000,
+      lockingScript: planted.outputs[0].lockingScript.toBinary(),
+      ...(opts.other
+        ? {
+            change: false,
+            type: 'custom',
+            providedBy: 'you',
+            purpose: '',
+            derivationPrefix: undefined,
+            derivationSuffix: undefined,
+          }
+        : { derivationPrefix: Utils.toBase64(Random(8)), derivationSuffix: Utils.toBase64(Random(8)) }),
+      spendable: opts.spendable,
+      spentBy: undefined,
+      created_at: later,
+      updated_at: later,
+    } as never);
+    return ptxid;
+  }
+
+  test('(a) a row that arrived not spendable is not made spendable by a newer copy and a WoC answer', async () => {
+    const d = await phoneWithBackup();
+    d.chain.answer = 'unspent';
+    const ptxid = await plant(d, { spendable: false });
+    await d.pull();
+    expect((await d.row(d.phone, ptxid)).spendable).toBe(false);
+    await d.forge(ptxid, { spendable: true });
+    await d.pull();
+    expect((await d.row(d.phone, ptxid)).spendable).toBe(false);
+  });
+
+  test('(b) a 404 from WhatsOnChain is not "unspent": a coin of a transaction the chain does not know is held', async () => {
+    const d = await phoneWithBackup();
+    d.chain.answer = 'unspent'; // /spent: 404
+    const ptxid = await plant(d, { spendable: true, other: true });
+    d.chain.knownFor.set(ptxid, 'unknown'); // /tx/hash: 404
+    await d.pull();
+    const got = await d.row(d.phone, ptxid);
+    expect(got.spendable).toBe(false);
+    expect((got as { spendingDescription?: string }).spendingDescription).toBe(HELD_MARK);
+  });
+
+  test('(c) the backup cannot rewrite a failed transaction to completed and then bring its coin back', async () => {
+    const d = await phoneWithBackup();
+    const mine = await d.row(d.phone, d.coin);
+    await d.phone.updateTransaction(mine.transactionId, { status: 'failed' } as never);
+    await d.phone.updateOutput(mine.outputId, { spendable: false } as never);
+    const { userId } = (await d.remote.findUsers({ partial: { identityKey: d.kd.identityKey } }))[0];
+    const theirs = (await d.remote.findTransactions({ partial: { userId, txid: d.coin } }))[0];
+    await d.remote.updateTransaction(theirs.transactionId, {
+      status: 'completed',
+      updated_at: new Date(Date.now() + 3_600_000),
+    } as never);
+    await d.forge(d.coin, { spendable: true });
+    d.chain.answer = 'unspent';
+    d.chain.knownFor.set(d.coin, 'unknown'); // never on the network
+    await d.pull();
+    const status = async () =>
+      (await d.phone.findTransactions({ partial: { transactionId: mine.transactionId }, noRawTx: true }))[0].status;
+    expect(await status()).toBe('failed');
+    expect((await d.row(d.phone, d.coin)).spendable).toBe(false);
+    await d.forge(d.coin, { spendable: true, spendingDescription: 'again' });
+    await d.pull();
+    expect(await status()).toBe('failed');
+    expect((await d.row(d.phone, d.coin)).spendable).toBe(false);
+  });
+
+  test("(d) a fresh restore asks the chain even about the wallet's own coins: spent change stays not spendable", async () => {
+    const d = await phoneWithBackup();
+    const fresh = await store(`a3-f4d-${++n}`);
+    const unregister = registerInboundVerifier(fresh.getSettings().storageIdentityKey, d.kd.identityKey, {
+      ...d.verifier,
+      spent: async (op: string) =>
+        op === `${d.coin}.0` ? { state: 'spent' as const, by: 'ee'.repeat(32) } : { state: 'unspent' as const },
+    });
+    const sm2 = new WalletStorageManager(d.kd.identityKey, fresh, [d.remote]);
+    await sm2.makeAvailable();
+    await sm2.setActive(fresh.getSettings().storageIdentityKey);
+    await sm2.syncFromReader(d.kd.identityKey, d.remote as never);
+    expect((await d.row(fresh, d.coin)).spendable).toBe(false);
+    expect((await d.row(fresh, d.coin2)).spendable).toBe(true);
+    unregister();
+  });
+
+  test('a coin held because WhatsOnChain did not know its transaction yet is released once it does (no stranding)', async () => {
+    const d = await phoneWithBackup();
+    d.chain.answer = 'unspent';
+    d.chain.knownFor.set(d.coin, 'unknown');
+    const fresh = await store(`a3-hold-${++n}`);
+    const unregister = registerInboundVerifier(fresh.getSettings().storageIdentityKey, d.kd.identityKey, d.verifier);
+    const sm2 = new WalletStorageManager(d.kd.identityKey, fresh, [d.remote]);
+    await sm2.makeAvailable();
+    await sm2.setActive(fresh.getSettings().storageIdentityKey);
+    await sm2.syncFromReader(d.kd.identityKey, d.remote as never);
+    expect((await d.row(fresh, d.coin)).spendable).toBe(false);
+    expect((await d.row(fresh, d.coin2)).spendable).toBe(true);
+    // Still unknown: nothing changes.
+    expect(await releaseHeldRows(fresh as never, d.kd.identityKey, d.verifier)).toEqual({ released: 0, spent: 0 });
+    d.chain.knownFor.set(d.coin, 'known');
+    expect(await releaseHeldRows(fresh as never, d.kd.identityKey, d.verifier)).toEqual({ released: 1, spent: 0 });
+    const got = await d.row(fresh, d.coin);
+    expect(got.spendable).toBe(true);
+    expect((got as { spendingDescription?: string | null }).spendingDescription ?? null).toBeNull();
+    unregister();
   });
 });

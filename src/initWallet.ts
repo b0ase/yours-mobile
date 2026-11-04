@@ -50,8 +50,10 @@ import { guardPModuleSpends } from './services/pModuleSpendGate';
 import {
   installInboundSyncGuard,
   registerInboundVerifier,
+  releaseHeldRows,
   walletOwnership,
   walletRecords,
+  type InboundVerifier,
 } from './services/inboundSync';
 import { chromeEnvelopeBackend, EnvelopeStore, guardEnvelopes } from './services/envelopes';
 import { ENVELOPES_ENABLED } from './mobile/storeBuild';
@@ -117,6 +119,7 @@ import {
   recoverSeedChange,
   registerWalletOriginator,
   wocSpentLookup,
+  wocTxKnownLookup,
   type SeedChangeReport,
 } from './services/seedChange';
 import { makeSeedChangeDeps, seedChangeKV } from './services/seedChangeWiring';
@@ -326,20 +329,24 @@ export interface InitWalletOptions {
 /**
  * Rows a backup store sends become spendable on this device only when the chain or this account's own keys say so
  * (services/inboundSync.ts, b-Aware A3). Set up BEFORE the wallet factory runs: it merges a store that disagrees about
- * which is active into the device store at boot. Returns the unregister.
+ * which is active into the device store at boot. Returns the unregister, and the check itself (releaseHeldRows uses it).
  */
-const checkBackupRows = (keys: Keys, account: Account | undefined, storageIdentityKey: string): (() => void) => {
+const checkBackupRows = (keys: Keys, account: Account | undefined, storageIdentityKey: string) => {
   installInboundSyncGuard(StorageIdb);
   const root = parsePrivateKey(keys.identityWif);
-  return registerInboundVerifier(storageIdentityKey, root.toPublicKey().toString(), {
+  const verifier: InboundVerifier = {
     owns: walletOwnership(root, [
       legacyOrdKey(keys.ordWif, account?.addresses?.ordAddress),
       legacyPayKey(keys.walletWif, account?.addresses?.bsvAddress),
     ]),
-    spent: wocSpentLookup(),
+    // Two WhatsOnChain questions per coin share anonymous WoC's ~3 calls a second.
+    spent: wocSpentLookup({ minIntervalMs: 700 }),
+    txKnown: wocTxKnownLookup({ minIntervalMs: 700 }),
     readRecord: walletRecords(root),
     log: (...a) => console.warn(...a),
-  });
+  };
+  const stop = registerInboundVerifier(storageIdentityKey, root.toPublicKey().toString(), verifier);
+  return Object.assign(stop, { verifier });
 };
 
 /**
@@ -504,6 +511,11 @@ export const initWallet = async (
       if (!reader) throw new Error('backup storage is not connected');
       const { identityKey } = await storage.getAuth();
       await storage.syncFromReader(identityKey, reader as Parameters<typeof storage.syncFromReader>[1]);
+      // Coins held because WhatsOnChain didn't know their transaction yet: looked at again (services/inboundSync.ts).
+      await storage
+        .runAsStorageProvider((sp) => releaseHeldRows(sp as never, identityKey, stopBackupCheck.verifier))
+        .then((r) => r.released && console.warn(`[inbound-sync] released ${r.released} held coin(s)`))
+        .catch((e: unknown) => console.warn('[inbound-sync] held coins not looked at:', e));
     },
     push: async () => {
       await storage.updateBackups();

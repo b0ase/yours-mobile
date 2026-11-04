@@ -192,6 +192,36 @@ export function wocSpentLookup(o: WocOptions = {}): (outpoint: string) => Promis
   };
 }
 
+/**
+ * WhatsOnChain's word on whether a transaction exists (GET /tx/hash/<txid>: 200 known, 404 unknown), paced and retried
+ * like wocSpentLookup. /spent answers 404 for an outpoint WoC has never seen, so a backup row is "unspent" only when its
+ * transaction is known too (services/inboundSync.ts, review 16 F4).
+ */
+export function wocTxKnownLookup(o: WocOptions = {}): (txid: string) => Promise<'known' | 'unknown' | 'unclear'> {
+  const { slot, timed, sleep, net, attempts } = wocPacing(o);
+  return async (txid) => {
+    if (!TXID.test(txid)) return 'unclear';
+    for (let i = 0; i < attempts; i++) {
+      await slot();
+      try {
+        const r = await timed(`https://api.whatsonchain.com/v1/bsv/${net}/tx/hash/${txid}`);
+        if (r.status === 404) return 'unknown';
+        if (r.status === 429 || r.status >= 500) {
+          await sleep(Math.min(8000, 1000 * 2 ** i));
+          continue;
+        }
+        if (!r.ok) return 'unclear';
+        const j = (await r.json().catch(() => null)) as { txid?: unknown; hash?: unknown } | null;
+        const id = typeof j?.txid === 'string' ? j.txid : typeof j?.hash === 'string' ? j.hash : '';
+        return id.toLowerCase() === txid ? 'known' : 'unclear';
+      } catch {
+        await sleep(Math.min(8000, 1000 * 2 ** i));
+      }
+    }
+    return 'unclear';
+  };
+}
+
 /** WhatsOnChain's script hash for a locking script: sha256 of the script's bytes, byte-reversed, as hex. */
 export const wocScriptHash = (scriptHex: string): string =>
   Utils.toHex(Hash.sha256(Utils.toArray(scriptHex, 'hex')).reverse());
