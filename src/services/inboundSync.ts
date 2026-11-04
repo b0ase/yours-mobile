@@ -144,6 +144,15 @@ export type InboundReport = {
   held: number;
   /** Transaction rows kept as the device has them (a failed one revived without chain proof, a rewritten txid). */
   keptTx: number;
+  /**
+   * Wallet change the backup holds as spendable that this page leaves NOT spendable here (kept spent, held, not taken):
+   * the restore switch adds it back before comparing the device with the backup (review 16, F5).
+   */
+  withheldOutputs: number;
+  withheldSats: number;
+  /** Those coins by outpoint, and the coins this page revived (no longer withheld). */
+  withheldCoins: Map<string, number>;
+  revivedCoins: string[];
 };
 
 /** On a row held only because the chain didn't know its transaction yet: releaseHeldRows looks again later. */
@@ -321,6 +330,10 @@ export async function verifyInboundChunk(
     tagsDropped: 0,
     held: 0,
     keptTx: 0,
+    withheldOutputs: 0,
+    withheldSats: 0,
+    withheldCoins: new Map(),
+    revivedCoins: [],
   };
   const outputs = chunk?.outputs ?? [];
   if ((!outputs.length && !chunk?.outputTagMaps?.length && !chunk?.transactions?.length) || !args?.identityKey)
@@ -425,16 +438,27 @@ export async function verifyInboundChunk(
     return !owned && isWalletChange(row) ? 'refuse' : 'check';
   };
 
-  const keep = (o: OutputRow) => {
+  /** The backup counts this row as spendable wallet change and this device won't: the restore switch adds it back. */
+  const withheld = (o: OutputRow, asFiled: OutputRow) => {
+    if (o.spendable !== true || !isWalletChange(asFiled)) return;
+    const sats = typeof o.satoshis === 'number' ? o.satoshis : 0;
+    report.withheldOutputs++;
+    report.withheldSats += sats;
+    if (o.txid) report.withheldCoins.set(`${o.txid}.${o.vout}`, sats);
+  };
+  const keep = (o: OutputRow, filed?: OutputRow) => {
+    if (filed && filed.spendable !== true) withheld(o, filed);
     o.updated_at = new Date(0); // EntityOutput.mergeExisting only applies a strictly newer row: the device's stays
     report.kept++;
   };
   const quarantine = (o: OutputRow) => {
+    withheld(o, o);
     o.spendable = false;
     report.quarantined++;
   };
   /** Not spendable for now: the chain doesn't know its transaction yet. releaseHeldRows looks again. */
   const hold = (o: OutputRow) => {
+    withheld(o, o);
     o.spendable = false;
     o.spendingDescription = HELD_MARK;
     report.held++;
@@ -532,7 +556,7 @@ export async function verifyInboundChunk(
       }
       if (changed) report.pinned++;
       if (o.txid && filed.txid && o.txid !== filed.txid) {
-        keep(o);
+        keep(o, filed);
         continue;
       }
       // Rule 2: back to spendable only on the chain's word. (A row the merge won't apply needs no answer; one whose time
@@ -551,8 +575,10 @@ export async function verifyInboundChunk(
           !!script &&
           (await admissible(filed, script)) === 'check' &&
           (await chainVerdict(filed.txid, filed.vout)) === 'unspent';
-        if (ok) report.revived++;
-        else keep(o);
+        if (ok) {
+          report.revived++;
+          report.revivedCoins.push(`${filed.txid}.${filed.vout}`);
+        } else keep(o, filed);
       }
       continue;
     }
@@ -663,6 +689,7 @@ export async function releaseHeldRows(
     const verdict = await chain(o.txid!, o.vout);
     if (verdict === 'unspent') {
       await store.updateOutput(o.outputId!, { spendable: true, spendingDescription: null });
+      noLongerWithheld(identityKey, [`${o.txid}.${o.vout}`]);
       out.released++;
     } else if (verdict === 'spent') {
       await store.updateOutput(o.outputId!, { spendingDescription: null });
@@ -763,6 +790,23 @@ export function walletOwnership(rootKey: PrivateKey, legacyKeys: (PrivateKey | u
  * takes merges (the USB backup reader only reads; backups are StorageClients).
  */
 const verifiers = new Map<string, InboundVerifier[]>();
+/**
+ * Per account: wallet change the backup counts as spendable that merged pages left NOT spendable here, by outpoint
+ * (sats). A coin leaves the set when a later page revives it or releaseHeldRows releases it.
+ */
+const withheldCoins = new Map<string, Map<string, number>>();
+/** The coins the check is holding back for this account now; the restore switch adds them to the device's side. */
+export const inboundWithheld = (identityKey: string): { outputs: number; sats: number } => {
+  const coins = [...(withheldCoins.get(identityKey)?.values() ?? [])];
+  return { outputs: coins.length, sats: coins.reduce((a, b) => a + b, 0) };
+};
+const noLongerWithheld = (identityKey: string, outpoints: Iterable<string>) => {
+  const coins = withheldCoins.get(identityKey);
+  if (coins) for (const op of outpoints) coins.delete(op);
+};
+/** A page refused because WhatsOnChain couldn't be asked: a pause, not a broken backup (review 16, F5). */
+export const isUncheckedPage = (e: unknown): boolean =>
+  String((e as { message?: unknown } | null)?.message ?? e).includes(UNCHECKED_PAGE);
 /** Device stores that take only checked rows: a page for an account with no verifier is refused, never let through. */
 const deviceStores = new Set<string>();
 
@@ -793,15 +837,25 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
   if (typeof original !== 'function') return () => undefined;
   proto[INSTALLED] = original;
   proto.processSyncChunk = async function (this: DeviceStore, args: SyncArgs, chunk: SyncChunk) {
-    const list = verifiers.get(args?.identityKey ?? '');
+    const identityKey = args?.identityKey ?? '';
+    const list = verifiers.get(identityKey);
     const v = list?.[list.length - 1];
-    if (v) await verifyInboundChunk(this, args, chunk, v);
-    else {
+    if (!v) {
       const sik = this.getSettings?.()?.storageIdentityKey;
       if ((sik && deviceStores.has(sik)) || (args?.toStorageIdentityKey && deviceStores.has(args.toStorageIdentityKey)))
         throw new Error(NO_VERIFIER);
+      return original.call(this, args, chunk);
     }
-    return original.call(this, args, chunk);
+    const report = await verifyInboundChunk(this, args, chunk, v);
+    const merged = await original.call(this, args, chunk);
+    // Recorded only once the page is in: a refused or failed page is fetched again and recorded then.
+    if (report.withheldCoins.size) {
+      const coins = withheldCoins.get(identityKey) ?? new Map<string, number>();
+      for (const [op, sats] of report.withheldCoins) coins.set(op, sats);
+      withheldCoins.set(identityKey, coins);
+    }
+    noLongerWithheld(identityKey, report.revivedCoins);
+    return merged;
   };
   return () => {
     if (own) proto.processSyncChunk = original;
@@ -814,4 +868,5 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
 export const _resetInboundVerifiers = () => {
   verifiers.clear();
   deviceStores.clear();
+  withheldCoins.clear();
 };

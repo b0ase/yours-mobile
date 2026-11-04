@@ -114,6 +114,7 @@ import { recoverOnDevice } from './services/recoverOnDevice';
 import { foundHeadline, restoredLine, scanNote, type ScanReport } from './services/findMissingCoins';
 import { paymailRestoreSummary } from './mobile/names/paymail';
 import { isEmpty, summarizeActive, switchToLocalVerified, type SwitchDeps } from './services/restoreFromRemote';
+import { inboundWithheld, isUncheckedPage } from './services/inboundSync';
 import { ensureLocalStore, type EnsureLocalResult } from './services/localFirst';
 import { markMayBeOut } from './services/refusalRecheck';
 import {
@@ -725,7 +726,9 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
       // The parked chunks may be the whole wallet: keep them for another try
       // (a transient failure, a worker killed mid-import). Give up only after
       // repeated failures so a broken backup cannot stall every unlock.
-      const attempts = await WalletBackupService.notePendingRestoreAttempt(currentIdentityKey);
+      // WhatsOnChain unreachable while the backup's rows were being checked (services/inboundSync.ts) is a pause, not
+      // a broken backup: it never counts toward giving up, so the parked data is not deleted over an outage (review 16 F5).
+      const attempts = isUncheckedPage(error) ? 0 : await WalletBackupService.notePendingRestoreAttempt(currentIdentityKey);
       if (attempts >= PENDING_IMPORT_MAX_ATTEMPTS) {
         console.error(`[background] initializeWallet: giving up on pending restore after ${attempts} attempts`);
         await WalletBackupService.clearAccountPendingRestore(currentIdentityKey);
@@ -1058,6 +1061,8 @@ const restoreDeps = (ctx: NonNullable<typeof accountContext>, remoteUrl: string)
       const { identityKey } = await ctx.storage.getAuth();
       await ctx.storage.syncFromReader(identityKey, store as never);
     },
+    // Coins the inbound check held back are on the device, just not spendable: not "missing" (review 16 F5).
+    withheld: async () => inboundWithheld((await ctx.storage.getAuth()).identityKey),
     progress: (m) => sendRestoreStatus(m),
     log: (...a) => console.log(...a),
   };

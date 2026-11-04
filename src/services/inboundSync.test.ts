@@ -43,6 +43,8 @@ import {
   walletRecords,
   HELD_MARK,
   releaseHeldRows,
+  inboundWithheld,
+  isUncheckedPage,
 } from './inboundSync';
 import { bsv21FieldsFromOutput } from '@1sat/actions';
 import { bsv21 } from '../mobile/market/launchpad/tokens';
@@ -690,5 +692,88 @@ describe('F4: the chain check holds against a two-step plant, a 404, a status re
     expect(got.spendable).toBe(true);
     expect((got as { spendingDescription?: string | null }).spendingDescription ?? null).toBeNull();
     unregister();
+  });
+});
+
+/**
+ * Review 16, F5: the A3 check must not strand an honest restore. The restore switch compared the device's spendable
+ * change with the backup's and rolled back to the backup when it was short, and the backup then refuses every payment;
+ * a coin the check held back made the device "short". And a backup-file import that failed because WhatsOnChain was
+ * down counted toward the 3 tries after which the parked backup is deleted.
+ */
+describe('F5: held-back coins do not strand a restore, and a WhatsOnChain outage never deletes a parked backup', () => {
+  test('a restore that holds back one coin (the chain says it is spent) still moves the account to the device', async () => {
+    const d = await phoneWithBackup();
+    const name = `a3-f5-${++n}`;
+    const local = new StorageIdb(StorageProvider.createStorageBaseOptions('main'));
+    (local as unknown as { dbName: string }).dbName = name;
+    await local.migrate(name, `sik-${name}`);
+    const unregister = registerInboundVerifier(`sik-${name}`, d.kd.identityKey, {
+      ...d.verifier,
+      spent: async (op: string) =>
+        op === `${d.coin}.0` ? { state: 'spent' as const, by: 'ee'.repeat(32) } : { state: 'unspent' as const },
+      txKnown: async () => 'known',
+    });
+    const remoteUrl = 'https://wallet.1sat.test';
+    (d.remote as unknown as { endpointUrl: string }).endpointUrl = remoteUrl;
+    class FakeStorageClient {
+      constructor() {
+        return d.remote;
+      }
+    }
+    const core = await createWalletCore(
+      { privateKey: d.root.toWif(), chain: 'main', activeRemote: remoteUrl, backups: [] } as never,
+      local,
+      { Services, StorageClient: FakeStorageClient, StorageProvider, Wallet, WalletStorageManager } as never,
+    );
+    core.storage.setServices(services);
+    (core.wallet as unknown as { services: unknown }).services = services;
+    const r = await switchToLocalVerified({
+      remoteUrl,
+      activeRemoteUrl: () => core.storage.getStores().find((s) => s.isActive && !s.isConflicting)?.endpointURL,
+      setActiveStorage: core.setActiveStorage,
+      summarize: () => summarizeActive(core.wallet as never),
+      pullRemote: async () => {
+        await core.storage.syncFromReader((await core.storage.getAuth()).identityKey, d.remote as never);
+      },
+      withheld: () => inboundWithheld(d.kd.identityKey), // as background.ts restoreDeps wires it
+    });
+    expect(r.ok).toBe(true);
+    expect((await d.row(local, d.coin)).spendable).toBe(false);
+    expect((await d.row(local, d.coin2)).spendable).toBe(true);
+    unregister();
+  });
+
+  test('withheld coins count as held, not missing; a device genuinely short still stays on the backup', async () => {
+    const remote = { outputs: 3, spendableSats: 300, actions: 3 };
+    const short = { outputs: 2, spendableSats: 200, actions: 3 };
+    const run = async (held: { outputs: number; sats: number }) => {
+      let total = { outputs: 0, sats: 0 };
+      let active: string | undefined = 'r';
+      let pulls = 0;
+      return switchToLocalVerified({
+        remoteUrl: 'r',
+        activeRemoteUrl: () => active,
+        setActiveStorage: async (t) => {
+          active = t === 'local' ? undefined : t;
+          if (t === 'local') total = { outputs: total.outputs + held.outputs, sats: total.sats + held.sats };
+        },
+        summarize: async () => (active ? remote : short),
+        pullRemote: async () => void pulls++,
+        withheld: () => total,
+      });
+    };
+    expect((await run({ outputs: 1, sats: 100 })).ok).toBe(true);
+    expect((await run({ outputs: 0, sats: 0 })).ok).toBe(false);
+  });
+
+  test('an import refused because WhatsOnChain could not be asked is not counted toward deleting the parked backup', () => {
+    expect(isUncheckedPage(new Error(UNCHECKED_PAGE))).toBe(true);
+    expect(isUncheckedPage(new Error('backup file is corrupt'))).toBe(false);
+    const bg = readFileSync(new URL('../background.ts', import.meta.url), 'utf8');
+    expect(bg).toMatch(
+      /const attempts = isUncheckedPage\(error\) \? 0 : await WalletBackupService\.notePendingRestoreAttempt\(currentIdentityKey\);/,
+    );
+    expect(bg).toMatch(/withheld: async \(\) => inboundWithheld\(\(await ctx\.storage\.getAuth\(\)\)\.identityKey\)/);
   });
 });

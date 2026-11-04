@@ -43,6 +43,18 @@ export const isEmpty = (s: StoreSummary) => s.outputs === 0 && s.actions === 0;
 export const covers = (local: StoreSummary, remote: StoreSummary) =>
   local.outputs >= remote.outputs && local.spendableSats >= remote.spendableSats && local.actions >= remote.actions;
 
+export type Withheld = { outputs: number; sats: number };
+/**
+ * The device's summary plus the wallet change the inbound check withheld (services/inboundSync.ts: kept spent, held
+ * for the chain, or not taken). Those rows are on the device, just not spendable, so they are not "missing" (review 16,
+ * F5: an honest restore that held back one coin rolled back to the backup, where every payment is refused).
+ */
+export const withWithheld = (local: StoreSummary, held: Withheld): StoreSummary => ({
+  ...local,
+  outputs: local.outputs + Math.max(0, held.outputs),
+  spendableSats: local.spendableSats + Math.max(0, held.sats),
+});
+
 export type SwitchDeps = {
   remoteUrl: string;
   /** Name of the active store's endpoint, undefined when the device's own store is active. */
@@ -51,6 +63,8 @@ export type SwitchDeps = {
   summarize: () => Promise<StoreSummary>;
   /** One more merge of the remote into the (now local) active store. */
   pullRemote: () => Promise<void>;
+  /** The coins the inbound check is holding back for this account now (inboundSync.inboundWithheld). */
+  withheld?: () => Withheld | Promise<Withheld>;
   progress?: (message: string) => void;
   log?: (...args: unknown[]) => void;
 };
@@ -97,6 +111,9 @@ export async function switchToLocalVerified(d: SwitchDeps): Promise<SwitchResult
   log('[restore] backup holds', remote);
 
   // 2. Switch: the toolbox copies the remote into the device's store first.
+  /** The coins the inbound check is holding back now (they may have come in with the factory's boot copy). */
+  const heldNow = async (): Promise<Withheld> =>
+    (await Promise.resolve(d.withheld?.()).catch(() => undefined)) ?? { outputs: 0, sats: 0 };
   d.progress?.('Loading your wallet from backup… copying to this device');
   try {
     await d.setActiveStorage('local');
@@ -106,7 +123,7 @@ export async function switchToLocalVerified(d: SwitchDeps): Promise<SwitchResult
 
   // 3. Verify; one more pull if short.
   let local = await d.summarize().catch(() => undefined);
-  if (!local || !covers(local, remote)) {
+  if (!local || !covers(withWithheld(local, await heldNow()), remote)) {
     log('[restore] device short after switch', local, 'pulling again');
     try {
       await d.pullRemote();
@@ -115,7 +132,10 @@ export async function switchToLocalVerified(d: SwitchDeps): Promise<SwitchResult
       return backToRemote(`second pull failed: ${String(e)}`, remote, local);
     }
   }
-  if (!covers(local, remote)) return backToRemote('device still holds less than the backup', remote, local);
+  const held = await heldNow();
+  if (held.outputs) log('[restore] the inbound check held back', held, "of the backup's spendable change");
+  if (!covers(withWithheld(local, held), remote))
+    return backToRemote('device still holds less than the backup', remote, local);
   log('[restore] device verified', local);
   return { ok: true, remote, local };
 }
