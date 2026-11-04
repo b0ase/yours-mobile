@@ -110,6 +110,7 @@ import { arrivingSats } from './services/receiveGuard';
 import { abortTargetKnownOnChain, recoverySummary } from './services/recoverFailed';
 import { timedStep, txidRecoverySummary } from './services/recoverByTxid';
 import { seedChangeSummary } from './services/seedChange';
+import { recoverOnDevice } from './services/recoverOnDevice';
 import { foundHeadline, restoredLine, scanNote, type ScanReport } from './services/findMissingCoins';
 import { paymailRestoreSummary } from './mobile/names/paymail';
 import { isEmpty, summarizeActive, switchToLocalVerified, type SwitchDeps } from './services/restoreFromRemote';
@@ -954,6 +955,11 @@ const settleLocalStore = (ctx: NonNullable<typeof accountContext>): Promise<Ensu
       });
     },
     localIsEmpty: async () => isEmpty(await summarizeActive(ctx.baseWallet as never)),
+    // An empty device store: copy the backup in while this device stays active (never a switch to the remote).
+    pullIntoLocal: (remoteUrl) => {
+      console.log('[background] storage: this device is empty; pulling the backup into it (it stays active)');
+      return restoreDeps(ctx, remoteUrl).pullRemote();
+    },
     save: (storageConfig) =>
       chromeStorageService.updateNested('accounts', {
         [account!.addresses.identityAddress]: { storageConfig } as unknown as Account,
@@ -1011,6 +1017,19 @@ const ensureLocalForPayment = async (): Promise<boolean> => {
   });
   await within(run).catch(() => undefined);
   return local();
+};
+
+/**
+ * Move this account to this device now, whatever the backoff says: "Retry moving this account to this device" and
+ * Recover change from my 12 words (services/recoverOnDevice.ts). True once this device's store is active.
+ */
+const moveToDeviceNow = async (): Promise<boolean> => {
+  const id = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress;
+  if (id) {
+    const f = moveFailures.get(id);
+    if (f) f.nextAt = 0;
+  }
+  return ensureLocalForPayment();
 };
 
 /** "Loading your wallet from backup…" on the balance card; undefined = done, null = done without the copy. */
@@ -3426,12 +3445,7 @@ if (!(
           (async () => {
             try {
               await ensureWallet(true);
-              const id = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress;
-              if (id) {
-                const f = moveFailures.get(id);
-                if (f) f.nextAt = 0;
-              }
-              const ok = await ensureLocalForPayment();
+              const ok = await moveToDeviceNow();
               sendResponse({ type: 'STORAGE_MOVE_TO_DEVICE', success: ok, data: moveStatus(), error: ok ? undefined : moveStatus().reason ?? 'not moved yet' });
             } catch (error) {
               sendResponse({ type: 'STORAGE_MOVE_TO_DEVICE', success: false, error: error instanceof Error ? error.message : String(error) });
@@ -4031,12 +4045,29 @@ if (!(
   /**
    * Settings › Troubleshooting › Recover change from my 12 words (services/seedChange.ts). Read only on chain; adds
    * only change it can prove is this wallet's. Resumable: a run that hits its time budget carries on next tap.
+   * It runs on this device's store only: "Waiting for your backup…" while the account moves here, never a refusal
+   * and never the toolbox's raw store error (services/recoverOnDevice.ts, release click-through 4 Nov 2026).
    */
   const processRecoverSeedChange = async (fresh: boolean, sendResponse: CallbackResponse) => {
     try {
       await ensureWallet(true);
       if (!accountContext) throw new Error('Wallet not initialized');
-      const report = await accountContext.recoverSeedChange((step) => sendRecoverProgress('seed', step), { fresh });
+      const progress = (step: string) => sendRecoverProgress('seed', step);
+      const gate = await recoverOnDevice({
+        isLocal: () => !!accountContext?.storage.isActiveStorageProvider(),
+        moveNow: moveToDeviceNow,
+        run: () => {
+          if (!accountContext) throw new Error('Wallet not initialized');
+          return accountContext.recoverSeedChange(progress, { fresh });
+        },
+        progress,
+        log: (...a) => console.warn(...a),
+      });
+      if (!gate.ran) {
+        sendResponse({ type: 'STORAGE_RECOVER_SEED_CHANGE', success: false, data: { summary: gate.message, paused: true } });
+        return;
+      }
+      const report = gate.report;
       sendResponse({
         type: 'STORAGE_RECOVER_SEED_CHANGE',
         success: !report.error,

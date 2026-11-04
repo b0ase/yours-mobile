@@ -9,7 +9,11 @@
  *  1. On every wallet open, for every account still on the remote store (whatever its old "localFirst" flag says),
  *     verify or create the device copy and make it active (services/restoreFromRemote.ts switchToLocalVerified: the
  *     remote's records are merged in, counted, pulled again if short, and the remote is made active again on any
- *     failure, so nothing is lost). An already-local account whose device store is empty is pulled in the same way.
+ *     failure, so nothing is lost). An already-local account whose device store is empty has the backup's records
+ *     pulled INTO the device store, which stays active throughout: once an account is on this device, an open never
+ *     makes the remote active again (release click-through, 4 Nov 2026: the old switch here flipped the active store
+ *     to wallet.1sat.app for seconds on every open of an empty wallet, and left it there when the backup was slow,
+ *     so Recover change refused or hit the toolbox's "does not support StorageProvider" error).
  *  2. HARD RULE: no payment builds change while the remote store is active. A createAction that builds a transaction
  *     first gets the device store made active (waiting for a switch already running); if that can't be done it is
  *     refused with a plain message, and nothing is signed.
@@ -81,6 +85,11 @@ export type EnsureLocalDeps = {
   switchVerified: (remoteUrl: string) => Promise<SwitchResult>;
   /** The device's store, while active, holds nothing (the 14 Oct "empty after restore" state). */
   localIsEmpty: () => Promise<boolean>;
+  /**
+   * Copy the backup's records into this device's store while it stays the active one (the toolbox's syncFromReader).
+   * Never changes which store is active.
+   */
+  pullIntoLocal: (remoteUrl: string) => Promise<void>;
   save: (config: NonNullable<StoreConfigLike>) => Promise<void>;
   /** After a failed switch (the background marks it and rebuilds the wallet on the backup if storage broke). */
   onFailed: (id: string) => Promise<void>;
@@ -91,6 +100,8 @@ export type EnsureLocalDeps = {
 
 export type EnsureLocalResult =
   | { ok: true; how: 'switched' | 'already-local' | 'no-remote' | 'pulled' }
+  /** This device stays active; pulling the backup's records into it failed (the next open or sync tries again). */
+  | { ok: true; how: 'pull-failed'; reason?: string }
   | { ok: false; how: 'failed' | 'failed-this-session' | 'busy' | 'no-account'; reason?: string };
 
 /** Make this device's store the active one for the open account (see the header). Never throws. */
@@ -121,15 +132,21 @@ export async function ensureLocalStore(d: EnsureLocalDeps): Promise<EnsureLocalR
       return { ok: false, how: 'failed', reason: r.reason };
     }
 
-    // Already local-active: an EMPTY device store beside a backup is the incident state ($bug, 14 Oct 2026).
+    // Already local-active: an EMPTY device store beside a backup is the incident state ($bug, 14 Oct 2026). Pull the
+    // backup's records into this device's store; it stays the active one throughout, and nothing is saved, so a slow
+    // or failing backup can never put the account back on the remote (release click-through, 4 Nov 2026).
     if (!(await d.localIsEmpty())) return { ok: true, how: 'already-local' };
-    log('[localFirst] this device holds nothing; loading from the backup');
-    const r = await d.switchVerified(remoteUrl);
-    d.status?.(r.ok ? undefined : null);
-    if (r.ok) return { ok: true, how: 'pulled' };
-    if (r.activeIsRemote) await d.save({ ...config, activeRemote: remoteUrl, remotes, localFirst: false });
-    await d.onFailed(a.id);
-    return { ok: false, how: 'failed', reason: r.reason };
+    log('[localFirst] this device holds nothing; pulling the backup into it (this device stays the active store)');
+    try {
+      await d.pullIntoLocal(remoteUrl);
+      d.status?.(undefined);
+      return { ok: true, how: 'pulled' };
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : String(e);
+      log('[localFirst] could not pull the backup into this device yet; it stays the active store:', reason);
+      d.status?.(null);
+      return { ok: true, how: 'pull-failed', reason };
+    }
   } catch (e) {
     d.status?.(null);
     log('[localFirst] could not settle the active store:', e);

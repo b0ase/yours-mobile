@@ -26,6 +26,9 @@ function harness(
     local: over.localActive ?? !config?.activeRemote,
     config,
     switches: 0,
+    pulls: 0,
+    /** Was the remote ever the active store while this ran (the old switch flipped to it first)? */
+    remoteWasActive: false,
     saved: [] as unknown[],
     failed: [] as string[],
   };
@@ -36,12 +39,16 @@ function harness(
     isLocalActive: () => state.local,
     switchVerified: async (): Promise<SwitchResult> => {
       state.switches++;
+      // As restoreFromRemote.switchToLocalVerified does: the remote is made active first, then the device again.
+      state.local = false;
+      state.remoteWasActive = true;
       if (over.switchOk === false)
         return { ok: false, reason: 'device still holds less than the backup', activeIsRemote: true };
       state.local = true;
       return { ok: true, remote: S, local: S };
     },
     localIsEmpty: async () => false,
+    pullIntoLocal: async () => void state.pulls++,
     save: async (c) => {
       state.saved.push(c);
       state.config = c;
@@ -92,7 +99,50 @@ describe('every account moves to this device on open (P0, 3 Nov 2026)', () => {
     expect(a.state.switches).toBe(0);
     const b = harness({ remotes: [REMOTE], localFirst: true }, { localIsEmpty: async () => true });
     expect(await ensureLocalStore(b.deps)).toEqual({ ok: true, how: 'pulled' });
-    expect(b.state.switches).toBe(1);
+    expect(b.state.pulls).toBe(1);
+    expect(b.state.switches).toBe(0);
+  });
+
+  test('F-C: an empty device store is pulled into while it stays active; the remote is never made active', async () => {
+    // Release click-through, 4 Nov 2026: every open of an empty wallet flipped the active store to wallet.1sat.app
+    // (device → remote → device), and a Recover change in that window was refused or hit the toolbox's
+    // "does not support StorageProvider" error.
+    const b = harness({ remotes: [REMOTE], localFirst: true }, { localIsEmpty: async () => true });
+    let localDuringPull: boolean | undefined;
+    b.deps.pullIntoLocal = async (url) => {
+      expect(url).toBe(REMOTE);
+      localDuringPull = b.deps.isLocalActive();
+      b.state.pulls++;
+    };
+    expect(await ensureLocalStore(b.deps)).toEqual({ ok: true, how: 'pulled' });
+    expect(localDuringPull).toBe(true);
+    expect(b.state.remoteWasActive).toBe(false);
+    expect(b.state.local).toBe(true);
+    expect(b.state.saved).toEqual([]);
+    expect(b.state.failed).toEqual([]);
+  });
+
+  test('F-C: a backup that is slow or failing never puts an on-device account back on the remote', async () => {
+    const b = harness(
+      { remotes: [REMOTE], localFirst: true },
+      {
+        localIsEmpty: async () => true,
+        pullIntoLocal: async () => {
+          throw new Error('Remote storage connection timeout: https://wallet.1sat.app');
+        },
+      },
+    );
+    const r = await ensureLocalStore(b.deps);
+    expect(r).toEqual({
+      ok: true,
+      how: 'pull-failed',
+      reason: 'Remote storage connection timeout: https://wallet.1sat.app',
+    });
+    expect(b.state.remoteWasActive).toBe(false);
+    expect(b.state.local).toBe(true);
+    // Nothing saved: in particular never { activeRemote: REMOTE, localFirst: false } as the old switch path did.
+    expect(b.state.saved).toEqual([]);
+    expect(b.state.failed).toEqual([]);
   });
 
   test('a device-only account (no remote) is fine as it is', async () => {
