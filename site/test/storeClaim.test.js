@@ -36,7 +36,11 @@ const memStore = (names = { insert: 'insert', update: 'update' }) => {
   const s = {
     rows,
     events,
-    getByQuote: async (q) => rows.find((r) => r.quote_id === q) ?? null,
+    // A snapshot, as PostgREST returns: two claims racing both read the row before either writes.
+    getByQuote: async (q) => {
+      const r = rows.find((x) => x.quote_id === q);
+      return r ? { ...r } : null;
+    },
     getByTxid: async (t) => rows.find((r) => r.txid === t) ?? null,
     setTxidIfEmpty: async (id, txid) => {
       const r = rows.find((x) => x.id === id);
