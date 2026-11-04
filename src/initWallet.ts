@@ -95,7 +95,7 @@ import {
 } from './services/findMissingCoins';
 import { recoverPaymentByTxid, type TxidRecoverReport } from './services/recoverByTxid';
 import { makePostageReconcileWiring, makeTxidRecoverDeps, sweepCandidateTxids } from './services/recoverByTxidWiring';
-import { recoverSeedChange, type SeedChangeReport } from './services/seedChange';
+import { recoverSeedChange, registerWalletOriginator, type SeedChangeReport } from './services/seedChange';
 import { makeSeedChangeDeps, seedChangeKV } from './services/seedChangeWiring';
 import { reconcilePostage, wocIsMined, type PostageReconcileReport } from './services/postageReconcile';
 import { runUnsentExpiry, storageKV, wocHeight, type ExpiryReport, type NoSendAction } from './services/unsentExpiry';
@@ -200,7 +200,7 @@ export interface AccountContext {
    * Settings › Troubleshooting › Recover change from my 12 words: walk the chain from every coin and seed address this
    * wallet knows, and add the deterministic change it finds (services/seedChange.ts). Read only on chain; resumable.
    */
-  recoverSeedChange: (progress?: (step: string) => void) => Promise<SeedChangeReport>;
+  recoverSeedChange: (progress?: (step: string) => void, options?: { fresh?: boolean }) => Promise<SeedChangeReport>;
   /** Settings › Storage › Find missing coins: read-only scan of every store (services/findMissingCoins.ts). */
   findMissingCoins: () => Promise<ScanReport>;
   /** Add back coins a scan found (after the user confirmed). Never broadcasts. */
@@ -457,6 +457,9 @@ export const initWallet = async (
   // Every payment ends here: our screens and dApps through the permissions manager, send-all and background jobs
   // directly. The `spending` kill switch pauses createAction/signAction on it (mobile/config/killSwitch.ts).
   guardSpending(baseWallet);
+  // The wallet's own calls (its pages, via the admin originator) may name inputs and still get change the 12 words can
+  // find (sweeps); a site naming inputs gets random change, so it can't replay old inputs as an oracle (services/seedChange.ts).
+  registerWalletOriginator(ADMIN_ORIGINATOR);
   // The legacy ord address (paymail ordinals go there) and legacy pay address: each key signs under its own
   // wallet-only protocol, so the NFTs, names, tokens and BSV the sync takes in from them spend like any other
   // (services/legacyOrd.ts). No key for an address (passkey/seedless): that address is skipped.
@@ -1178,10 +1181,11 @@ export const initWallet = async (
     });
 
   // Settings › Troubleshooting › Recover change from my 12 words (services/seedChange.ts).
-  const recoverSeedChangeImpl = (progress?: (step: string) => void) =>
+  const recoverSeedChangeImpl = (progress?: (step: string) => void, options?: { fresh?: boolean }) =>
     recoverSeedChange(
       makeSeedChangeDeps({
         progress,
+        fresh: options?.fresh,
         storage,
         wallet: baseWallet as never,
         services: toolboxServices as never,

@@ -1,8 +1,8 @@
 diff --git a/out/index.client.cjs b/out/index.client.cjs
-index af2c513176b1265c5a02d8242ac87fc1c6805ad1..3d4117bd3b6b5546f348f42f97bc9f9dccc69f44 100644
+index af2c513176b1265c5a02d8242ac87fc1c6805ad1..194b475510354f570cf33b18a44da9e0c2194841 100644
 --- a/out/index.client.cjs
 +++ b/out/index.client.cjs
-@@ -1411,6 +1411,56 @@ var ScriptTemplateBRC29 = class {
+@@ -1411,6 +1411,88 @@ var ScriptTemplateBRC29 = class {
  	unlockLength = 108;
  };
  //#endregion
@@ -39,9 +39,41 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..3d4117bd3b6b5546f348f42f97bc9f9d
 +function bwxChangeSuffix(vout) {
 +	return (0, _bsv_sdk_primitives_utils.toBase64)((0, _bsv_sdk_primitives_utils.toArray)(String(vout), "utf8"));
 +}
-+function bwxAttachChangeDerivation(wallet, storageArgs) {
++/**
++* Privacy (review M1, 4 Nov 2026): change derived from inputs the CALLER names would let a site replay a past
++* transaction's inputs and read back that transaction's change script. So change is deterministic only for the
++* wallet's own calls (originator undefined or in Wallet.bwxWalletOriginators), or when the wallet picks every input
++* itself (no explicit inputs, no noSendChange). Anything else gets random change, as before the patch.
++*/
++function bwxNormalizeOriginator(originator) {
++	const trimmed = String(originator).trim();
++	try {
++		const url = new URL(trimmed.includes("://") ? trimmed : "https://" + trimmed);
++		return url.hostname ? url.hostname.toLowerCase() : trimmed.toLowerCase();
++	} catch {
++		return trimmed.toLowerCase();
++	}
++}
++function bwxIsWalletOriginator(originator) {
++	if (originator === void 0) return true;
++	if (typeof originator !== "string" || originator.trim() === "") return false;
++	const normalized = bwxNormalizeOriginator(originator);
++	for (const own of Wallet.bwxWalletOriginators) if (bwxNormalizeOriginator(own) === normalized) return true;
++	return false;
++}
++function bwxMarkOriginator(vargs, originator) {
++	Object.defineProperty(vargs, "bwxWalletOriginated", {
++		value: bwxIsWalletOriginator(originator),
++		enumerable: false,
++		configurable: true,
++		writable: true
++	});
++}
++function bwxAttachChangeDerivation(wallet, storageArgs, vargs) {
 +	const keyDeriver = wallet?.keyDeriver;
 +	if (!Wallet.bwxDeterministicChange || keyDeriver == null || typeof keyDeriver.deriveSymmetricKey !== "function") return;
++	const callerNamedInputs = (vargs?.inputs?.length ?? 0) > 0 || (vargs?.options?.noSendChange?.length ?? 0) > 0;
++	if (callerNamedInputs && vargs?.bwxWalletOriginated !== true) return;
 +	Object.defineProperty(storageArgs, "bwxChangePrefix", {
 +		value: (outpoints) => bwxChangePrefix(keyDeriver, outpoints),
 +		enumerable: false,
@@ -59,7 +91,7 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..3d4117bd3b6b5546f348f42f97bc9f9d
  //#region ../src/utility/parseTxScriptOffsets.ts
  function parseTxScriptOffsets(rawTx) {
  	return _bsv_sdk.Transaction.parseScriptOffsets(rawTx);
-@@ -3593,6 +3643,10 @@ var EntityOutputTagMap = class EntityOutputTagMap extends EntityBase {
+@@ -3593,6 +3675,10 @@ var EntityOutputTagMap = class EntityOutputTagMap extends EntityBase {
  	static async mergeFind(storage, userId, ei, syncMap, trx) {
  		const outputId = syncMap.output.idMap[ei.outputId];
  		const outputTagId = syncMap.outputTag.idMap[ei.outputTagId];
@@ -70,7 +102,7 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..3d4117bd3b6b5546f348f42f97bc9f9d
  		const ef = verifyOneOrNone(await storage.findOutputTagMaps({
  			partial: {
  				outputId,
-@@ -5201,6 +5255,10 @@ var EntityTxLabelMap = class EntityTxLabelMap extends EntityBase {
+@@ -5201,6 +5287,10 @@ var EntityTxLabelMap = class EntityTxLabelMap extends EntityBase {
  	static async mergeFind(storage, userId, ei, syncMap, trx) {
  		const transactionId = syncMap.transaction.idMap[ei.transactionId];
  		const txLabelId = syncMap.txLabel.idMap[ei.txLabelId];
@@ -81,15 +113,15 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..3d4117bd3b6b5546f348f42f97bc9f9d
  		const ef = verifyOneOrNone(await storage.findTxLabelMaps({
  			partial: {
  				transactionId,
-@@ -9890,6 +9948,7 @@ async function traceActionStep(wallet, name, parent, callback) {
+@@ -9890,6 +9980,7 @@ async function traceActionStep(wallet, name, parent, callback) {
  async function createNewTx(wallet, vargs, parent) {
  	const logger = vargs.logger;
  	const storageArgs = removeUnlockScripts(vargs);
-+	bwxAttachChangeDerivation(wallet, storageArgs); /* bwx: deterministic change */
++	bwxAttachChangeDerivation(wallet, storageArgs, vargs); /* bwx: deterministic change */
  	const dcr = await traceActionStep(wallet, "wallet.create_action.storage_plan", parent, async () => await wallet.actionBatch.plan(storageArgs) ?? await wallet.storage.createAction(storageArgs));
  	const reference = dcr.reference;
  	const { tx, amount, pdi } = await traceActionStep(wallet, "wallet.create_action.build_signable_transaction", parent, () => buildSignableTransaction(dcr, vargs, wallet));
-@@ -11817,13 +11876,15 @@ async function planAction(state, args) {
+@@ -11817,13 +11908,15 @@ async function planAction(state, args) {
  	const explicit = resolveExplicitInputs(state, args);
  	const funding = await planFunding(state, args, explicit, args.options.noSendChange.map((outpoint) => requireManagedChange(resolveInputOutput(state, outpoint), `noSendChange ${outpoint.txid}.${outpoint.vout}`)));
  	const derivationRandom = repeatableRandom(args.randomVals);
@@ -106,7 +138,7 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..3d4117bd3b6b5546f348f42f97bc9f9d
  	const inputs = [...explicit.map((output, vin) => sdkInputFromExplicit(state, args.inputs[vin], vin, output, args.isSignAction)), ...funding.allocated.map((output, index) => sdkInputFromFunding(state, output, explicit.length + index, args.isSignAction))];
  	const consumedOutpoints = funding.allocated.map(outpointOf);
  	for (const input of args.inputs) consumedOutpoints.push(`${input.outpoint.txid}.${input.outpoint.vout}`);
-@@ -12865,6 +12926,23 @@ function isWalletSigner(args) {
+@@ -12865,6 +12958,31 @@ function isWalletSigner(args) {
  	return "isWalletSigner" in args && args.isWalletSigner;
  }
  var Wallet = class {
@@ -121,6 +153,14 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..3d4117bd3b6b5546f348f42f97bc9f9d
 +	* it again ("Recover change from my 12 words"). See bwxChangePrefix. Tests turn it off to make old random change.
 +	*/
 +	static bwxDeterministicChange = true;
++	/**
++	* bWalletX: originators that are the wallet itself (the app adds its admin originator). Their calls may name inputs and
++	* still get deterministic change (sweeps); a site naming inputs gets random change (review M1).
++	*/
++	static bwxWalletOriginators = /* @__PURE__ */ new Set();
++	static bwxIsWalletOriginator(originator) {
++		return bwxIsWalletOriginator(originator);
++	}
 +	static bwxChangePrefix(keyDeriver, outpoints) {
 +		return bwxChangePrefix(keyDeriver, outpoints);
 +	}
@@ -130,7 +170,7 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..3d4117bd3b6b5546f348f42f97bc9f9d
  	chain;
  	keyDeriver;
  	storage;
-@@ -13092,6 +13170,7 @@ var Wallet = class {
+@@ -13092,6 +13210,7 @@ var Wallet = class {
  	}
  	async listOutputs(args, originator) {
  		(0, _bsv_sdk_wallet_validationHelpers.validateOriginator)(originator);
@@ -138,7 +178,15 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..3d4117bd3b6b5546f348f42f97bc9f9d
  		const { vargs } = this.validateAuthAndArgs(args, validateListOutputsArgs);
  		if (this.autoKnownTxids && !vargs.knownTxids) vargs.knownTxids = this.getKnownTxids();
  		const storageArgs = this.actionBatch.hasWorkspace && vargs.basket !== "893b7646de0e1c9f741bd6e9169b76a8847ae34adef7bef1e6a285371206d2e8" && !vargs.tags.includes("893b7646de0e1c9f741bd6e9169b76a8847ae34adef7bef1e6a285371206d2e8") ? {
-@@ -14116,6 +14195,7 @@ async function createNewOutputs(storage, userId, vargs, ctx, changeOutputs, trx)
+@@ -13388,6 +13507,7 @@ var Wallet = class {
+ 			logger?.log("validated args");
+ 			vargs.includeAllSourceTransactions = this.includeAllSourceTransactions;
+ 			if (this.randomVals != null && this.randomVals.length > 1) vargs.randomVals = [...this.randomVals];
++			bwxMarkOriginator(vargs, originator); /* bwx: deterministic change for the wallet's own calls */
+ 			const brc177Requested = hasBrc177NoSendExpiryLabel(vargs.labels);
+ 			if (brc177Requested) parseBrc177NoSendExpiryLabels(vargs.labels);
+ 			const r = brc177Requested ? await createNoSendExpiryAction(this, auth, vargs) : await createAction$1(this, auth, vargs);
+@@ -14116,6 +14236,7 @@ async function createNewOutputs(storage, userId, vargs, ctx, changeOutputs, trx)
  		});
  	}
  	if (vargs.options.randomizeOutputs) randomizeOutputVouts(newOutputs.map((output) => output.o), vargs.randomVals);
@@ -146,7 +194,7 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..3d4117bd3b6b5546f348f42f97bc9f9d
  	const untagged = newOutputs.filter((output) => output.tags.length === 0);
  	await storage.insertOutputs(untagged.map((output) => output.o), trx);
  	const outputs = [];
-@@ -14732,7 +14812,9 @@ async function fundNewTransactionSdk(storage, userId, vargs, ctx, initialPlan, p
+@@ -14732,7 +14853,9 @@ async function fundNewTransactionSdk(storage, userId, vargs, ctx, initialPlan, p
  		else for (let i = 0; i < count; i++) val.push(rand(0, 255));
  		return (0, _bsv_sdk_primitives_utils.toBase64)(val);
  	};
@@ -157,7 +205,7 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..3d4117bd3b6b5546f348f42f97bc9f9d
  	ctx.derivationPrefix = derivationPrefix;
  	for (const output of ctx.xoutputs) if (output.purpose === "change" && output.derivationSuffix == null) output.derivationSuffix = randomDerivation(16);
  	return {
-@@ -17560,7 +17642,7 @@ async function beginActionBatch(storage, auth, args) {
+@@ -17560,7 +17683,7 @@ async function beginActionBatch(storage, auth, args) {
  	const explicit = await resolveExplicitOutputs(storage, userId, args.firstAction, outputScriptLengths != null);
  	const noSendChange = await resolveNoSendChangeOutputs(storage, userId, args.firstAction);
  	const fixedOutputIds = new Set([...explicit.outputs, ...noSendChange.outputs].map((output) => output.outputId));
@@ -166,7 +214,7 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..3d4117bd3b6b5546f348f42f97bc9f9d
  	const availableStatuses = await storage.findTransactionStatusesByIds(userId, availableOutputs.map((output) => output.transactionId));
  	const available = availableOutputs.map((output) => ({
  		...output,
-@@ -17627,7 +17709,7 @@ async function extendActionBatch(storage, auth, args) {
+@@ -17627,7 +17750,7 @@ async function extendActionBatch(storage, auth, args) {
  	const explicit = [...new Map(Object.values(explicitByOutpoint).filter((output) => !alreadyReserved.includes(output.outputId)).map((output) => [output.outputId, output])).values()];
  	if (explicit.length > remainingCapacity) throw new WERR_INVALID_PARAMETER("explicitOutpoints", `no more than ${remainingCapacity} additional reserved outputs`);
  	const explicitIds = new Set(explicit.map((output) => output.outputId));
@@ -175,7 +223,7 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..3d4117bd3b6b5546f348f42f97bc9f9d
  	const availableStatuses = await storage.findTransactionStatusesByIds(userId, availableOutputs.map((output) => output.transactionId));
  	const available = availableOutputs.map((output) => ({
  		...output,
-@@ -19797,7 +19879,12 @@ async function loadIdbOutputs(query) {
+@@ -19797,7 +19920,12 @@ async function loadIdbOutputs(query) {
  	const args = {
  		partial: {
  			userId,
@@ -189,7 +237,7 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..3d4117bd3b6b5546f348f42f97bc9f9d
  			spendable: true,
  			...specOp?.managedChangeOnly ? managedChangeOutputFields : {}
  		},
-@@ -20203,7 +20290,7 @@ var StorageIdb = class extends StorageProvider {
+@@ -20203,7 +20331,7 @@ var StorageIdb = class extends StorageProvider {
  			const reservationStore = dbTrx.objectStore("action_batch_outputs");
  			if (reservationStore.get == null) throw new WERR_INTERNAL("IndexedDB action_batch_outputs store does not support get");
  			const outputs = [];
@@ -198,7 +246,7 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..3d4117bd3b6b5546f348f42f97bc9f9d
  			const output = selectCanonicalChange(outputs, targetSatoshis, exactSatoshis);
  			if (output != null) {
  				await this.updateOutput(output.outputId, {
-@@ -38451,10 +38538,19 @@ var Monitor = class Monitor {
+@@ -38451,10 +38579,19 @@ var Monitor = class Monitor {
  	async runOnce() {
  		await this.ensureEventSubscriptions();
  		await this.setupTasksOnce();
@@ -219,7 +267,7 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..3d4117bd3b6b5546f348f42f97bc9f9d
  	* Best-effort attempt to (re)register the optional Chaintracks header/reorg
  	* push subscriptions ahead of this scheduler tick.
  	*
-@@ -38514,6 +38610,7 @@ var Monitor = class Monitor {
+@@ -38514,6 +38651,7 @@ var Monitor = class Monitor {
  		const tasks = [];
  		const now = Date.now();
  		for (const task of this._tasks) try {
@@ -227,7 +275,7 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..3d4117bd3b6b5546f348f42f97bc9f9d
  			if (task.trigger(now).run) tasks.push(task);
  		} catch (error_) {
  			await this.logTaskError(task, "trigger", "error0", error_);
-@@ -38522,7 +38619,7 @@ var Monitor = class Monitor {
+@@ -38522,7 +38660,7 @@ var Monitor = class Monitor {
  	}
  	async runScheduledTask(task) {
  		try {
@@ -236,7 +284,7 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..3d4117bd3b6b5546f348f42f97bc9f9d
  			const log = await task.runTask();
  			if (log.length === 0) return;
  			const details = task.name === "MonitorCallHistory" ? "..." : safeDiagnostic(log, 1024);
-@@ -38567,6 +38664,13 @@ var Monitor = class Monitor {
+@@ -38567,6 +38705,13 @@ var Monitor = class Monitor {
  	async logEvent(event, details) {
  		if (typeof event !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(event)) throw new WERR_INVALID_PARAMETER("event", "a bounded control-free monitor event name");
  		const boundedDetails = details == null ? void 0 : safeDiagnostic(details, 8192);
@@ -251,7 +299,7 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..3d4117bd3b6b5546f348f42f97bc9f9d
  			await sp.insertMonitorEvent({
  				created_at: /* @__PURE__ */ new Date(),
 diff --git a/out/index.client.mjs b/out/index.client.mjs
-index 5d9233efe5b3e60fcb88b8f260eb65e871945552..c78f32d374a0bda1864a9ff46dd683d6573ba9bc 100644
+index 5d9233efe5b3e60fcb88b8f260eb65e871945552..63437b27f07c9f70e623e3c6921d7a1a50df6f8c 100644
 --- a/out/index.client.mjs
 +++ b/out/index.client.mjs
 @@ -1,7 +1,7 @@
@@ -263,7 +311,7 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..c78f32d374a0bda1864a9ff46dd683d6
  import { MAXIMUM_SEND_WITH_TRANSACTIONS, parseWalletOutpoint, validateAbortActionArgs, validateAcquireDirectCertificateArgs, validateAcquireIssuanceCertificateArgs, validateCreateActionArgs, validateCreateActionOptions, validateDiscoverByAttributesArgs, validateDiscoverByIdentityKeyArgs, validateInteger, validateInternalizeActionArgs, validateListActionsArgs, validateListCertificatesArgs, validateListOutputsArgs, validateOptionalInteger, validateOriginator, validateProveCertificateArgs, validateRelinquishCertificateArgs, validateRelinquishOutputArgs, validateSatoshis, validateSignActionArgs } from "@bsv/sdk/wallet/validationHelpers";
  import { deleteDB, openDB } from "idb";
  import { AESGCM, AESGCMDecrypt } from "@bsv/sdk/primitives/AESGCM";
-@@ -1376,6 +1376,56 @@ var ScriptTemplateBRC29 = class {
+@@ -1376,6 +1376,88 @@ var ScriptTemplateBRC29 = class {
  	unlockLength = 108;
  };
  //#endregion
@@ -300,9 +348,41 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..c78f32d374a0bda1864a9ff46dd683d6
 +function bwxChangeSuffix(vout) {
 +	return toBase64(toArray(String(vout), "utf8"));
 +}
-+function bwxAttachChangeDerivation(wallet, storageArgs) {
++/**
++* Privacy (review M1, 4 Nov 2026): change derived from inputs the CALLER names would let a site replay a past
++* transaction's inputs and read back that transaction's change script. So change is deterministic only for the
++* wallet's own calls (originator undefined or in Wallet.bwxWalletOriginators), or when the wallet picks every input
++* itself (no explicit inputs, no noSendChange). Anything else gets random change, as before the patch.
++*/
++function bwxNormalizeOriginator(originator) {
++	const trimmed = String(originator).trim();
++	try {
++		const url = new URL(trimmed.includes("://") ? trimmed : "https://" + trimmed);
++		return url.hostname ? url.hostname.toLowerCase() : trimmed.toLowerCase();
++	} catch {
++		return trimmed.toLowerCase();
++	}
++}
++function bwxIsWalletOriginator(originator) {
++	if (originator === void 0) return true;
++	if (typeof originator !== "string" || originator.trim() === "") return false;
++	const normalized = bwxNormalizeOriginator(originator);
++	for (const own of Wallet.bwxWalletOriginators) if (bwxNormalizeOriginator(own) === normalized) return true;
++	return false;
++}
++function bwxMarkOriginator(vargs, originator) {
++	Object.defineProperty(vargs, "bwxWalletOriginated", {
++		value: bwxIsWalletOriginator(originator),
++		enumerable: false,
++		configurable: true,
++		writable: true
++	});
++}
++function bwxAttachChangeDerivation(wallet, storageArgs, vargs) {
 +	const keyDeriver = wallet?.keyDeriver;
 +	if (!Wallet.bwxDeterministicChange || keyDeriver == null || typeof keyDeriver.deriveSymmetricKey !== "function") return;
++	const callerNamedInputs = (vargs?.inputs?.length ?? 0) > 0 || (vargs?.options?.noSendChange?.length ?? 0) > 0;
++	if (callerNamedInputs && vargs?.bwxWalletOriginated !== true) return;
 +	Object.defineProperty(storageArgs, "bwxChangePrefix", {
 +		value: (outpoints) => bwxChangePrefix(keyDeriver, outpoints),
 +		enumerable: false,
@@ -320,7 +400,7 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..c78f32d374a0bda1864a9ff46dd683d6
  //#region ../src/utility/parseTxScriptOffsets.ts
  function parseTxScriptOffsets(rawTx) {
  	return Transaction.parseScriptOffsets(rawTx);
-@@ -3558,6 +3608,10 @@ var EntityOutputTagMap = class EntityOutputTagMap extends EntityBase {
+@@ -3558,6 +3640,10 @@ var EntityOutputTagMap = class EntityOutputTagMap extends EntityBase {
  	static async mergeFind(storage, userId, ei, syncMap, trx) {
  		const outputId = syncMap.output.idMap[ei.outputId];
  		const outputTagId = syncMap.outputTag.idMap[ei.outputTagId];
@@ -331,7 +411,7 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..c78f32d374a0bda1864a9ff46dd683d6
  		const ef = verifyOneOrNone(await storage.findOutputTagMaps({
  			partial: {
  				outputId,
-@@ -5166,6 +5220,10 @@ var EntityTxLabelMap = class EntityTxLabelMap extends EntityBase {
+@@ -5166,6 +5252,10 @@ var EntityTxLabelMap = class EntityTxLabelMap extends EntityBase {
  	static async mergeFind(storage, userId, ei, syncMap, trx) {
  		const transactionId = syncMap.transaction.idMap[ei.transactionId];
  		const txLabelId = syncMap.txLabel.idMap[ei.txLabelId];
@@ -342,15 +422,15 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..c78f32d374a0bda1864a9ff46dd683d6
  		const ef = verifyOneOrNone(await storage.findTxLabelMaps({
  			partial: {
  				transactionId,
-@@ -9855,6 +9913,7 @@ async function traceActionStep(wallet, name, parent, callback) {
+@@ -9855,6 +9945,7 @@ async function traceActionStep(wallet, name, parent, callback) {
  async function createNewTx(wallet, vargs, parent) {
  	const logger = vargs.logger;
  	const storageArgs = removeUnlockScripts(vargs);
-+	bwxAttachChangeDerivation(wallet, storageArgs); /* bwx: deterministic change */
++	bwxAttachChangeDerivation(wallet, storageArgs, vargs); /* bwx: deterministic change */
  	const dcr = await traceActionStep(wallet, "wallet.create_action.storage_plan", parent, async () => await wallet.actionBatch.plan(storageArgs) ?? await wallet.storage.createAction(storageArgs));
  	const reference = dcr.reference;
  	const { tx, amount, pdi } = await traceActionStep(wallet, "wallet.create_action.build_signable_transaction", parent, () => buildSignableTransaction(dcr, vargs, wallet));
-@@ -11782,13 +11841,15 @@ async function planAction(state, args) {
+@@ -11782,13 +11873,15 @@ async function planAction(state, args) {
  	const explicit = resolveExplicitInputs(state, args);
  	const funding = await planFunding(state, args, explicit, args.options.noSendChange.map((outpoint) => requireManagedChange(resolveInputOutput(state, outpoint), `noSendChange ${outpoint.txid}.${outpoint.vout}`)));
  	const derivationRandom = repeatableRandom(args.randomVals);
@@ -367,7 +447,7 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..c78f32d374a0bda1864a9ff46dd683d6
  	const inputs = [...explicit.map((output, vin) => sdkInputFromExplicit(state, args.inputs[vin], vin, output, args.isSignAction)), ...funding.allocated.map((output, index) => sdkInputFromFunding(state, output, explicit.length + index, args.isSignAction))];
  	const consumedOutpoints = funding.allocated.map(outpointOf);
  	for (const input of args.inputs) consumedOutpoints.push(`${input.outpoint.txid}.${input.outpoint.vout}`);
-@@ -12830,6 +12891,23 @@ function isWalletSigner(args) {
+@@ -12830,6 +12923,31 @@ function isWalletSigner(args) {
  	return "isWalletSigner" in args && args.isWalletSigner;
  }
  var Wallet = class {
@@ -382,6 +462,14 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..c78f32d374a0bda1864a9ff46dd683d6
 +	* it again ("Recover change from my 12 words"). See bwxChangePrefix. Tests turn it off to make old random change.
 +	*/
 +	static bwxDeterministicChange = true;
++	/**
++	* bWalletX: originators that are the wallet itself (the app adds its admin originator). Their calls may name inputs and
++	* still get deterministic change (sweeps); a site naming inputs gets random change (review M1).
++	*/
++	static bwxWalletOriginators = /* @__PURE__ */ new Set();
++	static bwxIsWalletOriginator(originator) {
++		return bwxIsWalletOriginator(originator);
++	}
 +	static bwxChangePrefix(keyDeriver, outpoints) {
 +		return bwxChangePrefix(keyDeriver, outpoints);
 +	}
@@ -391,7 +479,7 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..c78f32d374a0bda1864a9ff46dd683d6
  	chain;
  	keyDeriver;
  	storage;
-@@ -13057,6 +13135,7 @@ var Wallet = class {
+@@ -13057,6 +13175,7 @@ var Wallet = class {
  	}
  	async listOutputs(args, originator) {
  		validateOriginator(originator);
@@ -399,7 +487,15 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..c78f32d374a0bda1864a9ff46dd683d6
  		const { vargs } = this.validateAuthAndArgs(args, validateListOutputsArgs$1);
  		if (this.autoKnownTxids && !vargs.knownTxids) vargs.knownTxids = this.getKnownTxids();
  		const storageArgs = this.actionBatch.hasWorkspace && vargs.basket !== "893b7646de0e1c9f741bd6e9169b76a8847ae34adef7bef1e6a285371206d2e8" && !vargs.tags.includes("893b7646de0e1c9f741bd6e9169b76a8847ae34adef7bef1e6a285371206d2e8") ? {
-@@ -14081,6 +14160,7 @@ async function createNewOutputs(storage, userId, vargs, ctx, changeOutputs, trx)
+@@ -13353,6 +13472,7 @@ var Wallet = class {
+ 			logger?.log("validated args");
+ 			vargs.includeAllSourceTransactions = this.includeAllSourceTransactions;
+ 			if (this.randomVals != null && this.randomVals.length > 1) vargs.randomVals = [...this.randomVals];
++			bwxMarkOriginator(vargs, originator); /* bwx: deterministic change for the wallet's own calls */
+ 			const brc177Requested = hasBrc177NoSendExpiryLabel(vargs.labels);
+ 			if (brc177Requested) parseBrc177NoSendExpiryLabels(vargs.labels);
+ 			const r = brc177Requested ? await createNoSendExpiryAction(this, auth, vargs) : await createAction$1(this, auth, vargs);
+@@ -14081,6 +14201,7 @@ async function createNewOutputs(storage, userId, vargs, ctx, changeOutputs, trx)
  		});
  	}
  	if (vargs.options.randomizeOutputs) randomizeOutputVouts(newOutputs.map((output) => output.o), vargs.randomVals);
@@ -407,7 +503,7 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..c78f32d374a0bda1864a9ff46dd683d6
  	const untagged = newOutputs.filter((output) => output.tags.length === 0);
  	await storage.insertOutputs(untagged.map((output) => output.o), trx);
  	const outputs = [];
-@@ -14697,7 +14777,9 @@ async function fundNewTransactionSdk(storage, userId, vargs, ctx, initialPlan, p
+@@ -14697,7 +14818,9 @@ async function fundNewTransactionSdk(storage, userId, vargs, ctx, initialPlan, p
  		else for (let i = 0; i < count; i++) val.push(rand(0, 255));
  		return toBase64(val);
  	};
@@ -418,7 +514,7 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..c78f32d374a0bda1864a9ff46dd683d6
  	ctx.derivationPrefix = derivationPrefix;
  	for (const output of ctx.xoutputs) if (output.purpose === "change" && output.derivationSuffix == null) output.derivationSuffix = randomDerivation(16);
  	return {
-@@ -17525,7 +17607,7 @@ async function beginActionBatch(storage, auth, args) {
+@@ -17525,7 +17648,7 @@ async function beginActionBatch(storage, auth, args) {
  	const explicit = await resolveExplicitOutputs(storage, userId, args.firstAction, outputScriptLengths != null);
  	const noSendChange = await resolveNoSendChangeOutputs(storage, userId, args.firstAction);
  	const fixedOutputIds = new Set([...explicit.outputs, ...noSendChange.outputs].map((output) => output.outputId));
@@ -427,7 +523,7 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..c78f32d374a0bda1864a9ff46dd683d6
  	const availableStatuses = await storage.findTransactionStatusesByIds(userId, availableOutputs.map((output) => output.transactionId));
  	const available = availableOutputs.map((output) => ({
  		...output,
-@@ -17592,7 +17674,7 @@ async function extendActionBatch(storage, auth, args) {
+@@ -17592,7 +17715,7 @@ async function extendActionBatch(storage, auth, args) {
  	const explicit = [...new Map(Object.values(explicitByOutpoint).filter((output) => !alreadyReserved.includes(output.outputId)).map((output) => [output.outputId, output])).values()];
  	if (explicit.length > remainingCapacity) throw new WERR_INVALID_PARAMETER("explicitOutpoints", `no more than ${remainingCapacity} additional reserved outputs`);
  	const explicitIds = new Set(explicit.map((output) => output.outputId));
@@ -436,7 +532,7 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..c78f32d374a0bda1864a9ff46dd683d6
  	const availableStatuses = await storage.findTransactionStatusesByIds(userId, availableOutputs.map((output) => output.transactionId));
  	const available = availableOutputs.map((output) => ({
  		...output,
-@@ -19762,7 +19844,12 @@ async function loadIdbOutputs(query) {
+@@ -19762,7 +19885,12 @@ async function loadIdbOutputs(query) {
  	const args = {
  		partial: {
  			userId,
@@ -450,7 +546,7 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..c78f32d374a0bda1864a9ff46dd683d6
  			spendable: true,
  			...specOp?.managedChangeOnly ? managedChangeOutputFields : {}
  		},
-@@ -20168,7 +20255,7 @@ var StorageIdb = class extends StorageProvider {
+@@ -20168,7 +20296,7 @@ var StorageIdb = class extends StorageProvider {
  			const reservationStore = dbTrx.objectStore("action_batch_outputs");
  			if (reservationStore.get == null) throw new WERR_INTERNAL("IndexedDB action_batch_outputs store does not support get");
  			const outputs = [];
@@ -459,7 +555,7 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..c78f32d374a0bda1864a9ff46dd683d6
  			const output = selectCanonicalChange(outputs, targetSatoshis, exactSatoshis);
  			if (output != null) {
  				await this.updateOutput(output.outputId, {
-@@ -38416,10 +38503,19 @@ var Monitor = class Monitor {
+@@ -38416,10 +38544,19 @@ var Monitor = class Monitor {
  	async runOnce() {
  		await this.ensureEventSubscriptions();
  		await this.setupTasksOnce();
@@ -480,7 +576,7 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..c78f32d374a0bda1864a9ff46dd683d6
  	* Best-effort attempt to (re)register the optional Chaintracks header/reorg
  	* push subscriptions ahead of this scheduler tick.
  	*
-@@ -38479,6 +38575,7 @@ var Monitor = class Monitor {
+@@ -38479,6 +38616,7 @@ var Monitor = class Monitor {
  		const tasks = [];
  		const now = Date.now();
  		for (const task of this._tasks) try {
@@ -488,7 +584,7 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..c78f32d374a0bda1864a9ff46dd683d6
  			if (task.trigger(now).run) tasks.push(task);
  		} catch (error_) {
  			await this.logTaskError(task, "trigger", "error0", error_);
-@@ -38487,7 +38584,7 @@ var Monitor = class Monitor {
+@@ -38487,7 +38625,7 @@ var Monitor = class Monitor {
  	}
  	async runScheduledTask(task) {
  		try {
@@ -497,7 +593,7 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..c78f32d374a0bda1864a9ff46dd683d6
  			const log = await task.runTask();
  			if (log.length === 0) return;
  			const details = task.name === "MonitorCallHistory" ? "..." : safeDiagnostic(log, 1024);
-@@ -38532,6 +38629,13 @@ var Monitor = class Monitor {
+@@ -38532,6 +38670,13 @@ var Monitor = class Monitor {
  	async logEvent(event, details) {
  		if (typeof event !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(event)) throw new WERR_INVALID_PARAMETER("event", "a bounded control-free monitor event name");
  		const boundedDetails = details == null ? void 0 : safeDiagnostic(details, 8192);

@@ -15,12 +15,13 @@ import { Monitor, StorageIdb, StorageProvider, Wallet, WalletStorageManager } fr
 import { sweepBsv } from '@1sat/actions';
 import { fixUtxoStatus } from '../services/utxoStatus';
 import { recoverSeedChange, seedChangeSummary, wocSpentLookup, type SeedChangeState } from '../services/seedChange';
-import { makeSeedChangeDeps } from '../services/seedChangeWiring';
+import { makeSeedChangeDeps, REMOTE_ACTIVE_REFUSAL } from '../services/seedChangeWiring';
 
 const W = Wallet as unknown as {
   bwxChangePrefix: (kd: unknown, outpoints: string[]) => string | undefined;
   bwxChangeSuffix: (vout: number) => string;
   bwxDeterministicChange: boolean;
+  bwxWalletOriginators: Set<string>;
 };
 const HEIGHT = 971004;
 
@@ -272,11 +273,18 @@ describe('deterministic change on the real toolbox', () => {
       expect(o.derivationPrefix).toBe(W.bwxChangePrefix(w.kd, inputsOf(sweepRaw))!);
       expect(o.derivationSuffix).toBe(W.bwxChangeSuffix(o.vout));
     }
-    // A payment funded from wallet change, outputs shuffled (randomizeOutputs default): suffix follows the final vout.
+    // A payment funded from wallet change, outputs shuffled with a pinned shuffle (review 07b): Fisher-Yates on
+    // randomVals [0, 0] moves the payment (planned at vout 0) to vout 1 and the last change output to vout 0, so a
+    // suffix set before the shuffle could not match.
+    (w.wallet as unknown as { randomVals?: number[] }).randomVals = [0, 0];
     const p = await pay(w, chain, 12_345);
+    (w.wallet as unknown as { randomVals?: number[] }).randomVals = undefined;
     const { tx } = mine(chain, await rawOf(w, p.txid!));
     const rows = (await rowsOf(w, p.txid!)).filter((o) => o.change);
     expect(rows.length).toBeGreaterThan(0);
+    expect(tx.outputs[1].satoshis).toBe(12_345);
+    expect(rows.map((o) => o.vout)).toContain(0);
+    expect(rows.find((o) => o.vout === 0)!.derivationSuffix).toBe('MA==');
     const prefix = W.bwxChangePrefix(w.kd, inputsOf(tx.toBinary()))!;
     for (const o of rows) {
       expect(o.derivationPrefix).toBe(prefix);
@@ -469,5 +477,187 @@ describe('recover change from the 12 words', () => {
       expect(stored.includes(needle)).toBe(false);
       expect(lines.some((l) => l.includes(needle))).toBe(false);
     }
+  }, 120000);
+});
+
+describe('review 07b fixes on the real toolbox', () => {
+  test('noSend action batch with a pinned shuffle: change derivation = HMAC prefix of the inputs, suffix = final vout', async () => {
+    const chain = newChain();
+    const services = makeServices(chain);
+    const { w } = await fundedWallet(chain, services);
+    (w.wallet as unknown as { randomVals?: number[] }).randomVals = [0, 0];
+    const staged = await w.wallet.createAction({
+      description: 'theme buy',
+      outputs: [{ lockingScript: someone(), satoshis: 20_000, outputDescription: 'theme' }],
+      options: { noSend: true },
+    });
+    (w.wallet as unknown as { randomVals?: number[] }).randomVals = undefined;
+    expect(await statusOf(w, staged.txid!)).toBeUndefined(); // planned in memory (action batch)
+    // Commit and send it: now its rows exist.
+    await w.wallet.createAction({
+      description: 'send it',
+      options: { sendWith: [staged.txid!], acceptDelayedBroadcast: false },
+    });
+    const ptx = Beef.fromBinary(Utils.toArray(Utils.toHex(staged.tx!), 'hex')).findTxid(staged.txid!)!.tx!;
+    expect(ptx.outputs[1].satoshis).toBe(20_000); // the payment moved from vout 0 to vout 1
+    const rows = (await rowsOf(w, staged.txid!)).filter((o) => o.change);
+    expect(rows.map((o) => o.vout)).toContain(0);
+    const prefix = W.bwxChangePrefix(w.kd, inputsOf(ptx.toBinary()))!;
+    for (const o of rows) {
+      expect(o.derivationPrefix).toBe(prefix);
+      expect(o.derivationSuffix).toBe(W.bwxChangeSuffix(o.vout));
+      const key = w.kd.derivePrivateKey([2, '3241645161d8'], `${prefix} ${o.derivationSuffix}`, w.kd.identityKey);
+      expect(ptx.outputs[o.vout].lockingScript.toHex()).toBe(new P2PKH().lock(key.toAddress()).toHex());
+    }
+  }, 120000);
+
+  /**
+   * Review M1 (the reviewer's oracle test, now a regression): on a restored device a site passes a past payment's exact
+   * inputs to createAction (with their proven parents, no unlocking, nothing signed) and reads the change script out of
+   * the signable transaction. Before the fix it was that payment's change script: the site could walk the user's
+   * payments. Now a site naming inputs gets random change.
+   */
+  test('a site naming inputs gets random change: the createAction oracle no longer learns past change scripts', async () => {
+    const chain = newChain();
+    const services = makeServices(chain);
+    const { w: a, root } = await fundedWallet(chain, services);
+    const T = await pay(a, chain, 250_000);
+    const { tx: Ttx } = mine(chain, await rawOf(a, T.txid!));
+    const tChange = (await rowsOf(a, T.txid!)).filter((o) => o.change);
+    expect(tChange.length).toBeGreaterThan(0);
+    const c = tChange[0].vout;
+    const userChangeOnChain = Ttx.outputs[c].lockingScript.toHex();
+
+    const b = await openWallet(root, `seedchange-oracle-${++dbn}`, services);
+    const siteBeef = new Beef();
+    for (const i of Ttx.inputs) {
+      const parent = Transaction.fromBinary(chain.raw.get(i.sourceTXID!)!);
+      parent.merklePath = proofFor(chain, i.sourceTXID!).merklePath;
+      siteBeef.mergeTransaction(parent);
+    }
+    const filler = someone();
+    const probe = (originator?: string) =>
+      b.wallet.createAction(
+        {
+          description: 'innocent looking',
+          inputBEEF: siteBeef.toBinary(),
+          inputs: Ttx.inputs.map((i) => ({
+            outpoint: `${i.sourceTXID}.${i.sourceOutputIndex}`,
+            unlockingScriptLength: 107,
+            inputDescription: 'site input coin',
+          })),
+          outputs: Array.from({ length: c }, () => ({
+            lockingScript: filler,
+            satoshis: 1000,
+            outputDescription: 'filler output',
+          })),
+          options: { randomizeOutputs: false, signAndProcess: false, noSend: true },
+        },
+        originator,
+      );
+    const site = await probe('evil.example');
+    const siteSees = Transaction.fromAtomicBEEF(site.signableTransaction!.tx).outputs[c].lockingScript.toHex();
+    console.log('[oracle] site learns the same script as T’s change:', siteSees === userChangeOnChain);
+    expect(siteSees).not.toBe(userChangeOnChain);
+    // The wallet's own calls that name inputs (sweeps) keep deterministic change: an originator the app registered.
+    W.bwxWalletOriginators.add('wallet-admin.test');
+    try {
+      await b.wallet.abortAction({ reference: site.signableTransaction!.reference }).catch(() => undefined);
+      const own = await probe('wallet-admin.test');
+      expect(Transaction.fromAtomicBEEF(own.signableTransaction!.tx).outputs[c].lockingScript.toHex()).toBe(
+        userChangeOnChain,
+      );
+    } finally {
+      W.bwxWalletOriginators.delete('wallet-admin.test');
+    }
+  }, 120000);
+
+  test('a site’s payment the wallet funds itself (store, seal, send) still gets change the 12 words can find', async () => {
+    const chain = newChain();
+    const services = makeServices(chain);
+    const { w: a, root, legacyAddress } = await fundedWallet(chain, services);
+    const r = await a.wallet.createAction(
+      {
+        description: 'shop payment',
+        outputs: [{ lockingScript: someone(), satoshis: 33_000, outputDescription: 'shop order' }],
+        options: { acceptDelayedBroadcast: false },
+      },
+      'shop.example',
+    );
+    const { tx } = mine(chain, await rawOf(a, r.txid!));
+    const rows = (await rowsOf(a, r.txid!)).filter((o) => o.change);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const o of rows) expect(o.derivationPrefix).toBe(W.bwxChangePrefix(a.kd, inputsOf(tx.toBinary())));
+    const expected = await balance(a);
+    const b = await openWallet(root, `seedchange-shop-${++dbn}`, services);
+    expect((await recover(b, chain, services, [legacyAddress])).restoredSats).toBe(expected);
+  }, 120000);
+
+  test('a site naming noSendChange gets random change too', async () => {
+    const chain = newChain();
+    const services = makeServices(chain);
+    const { w: a } = await fundedWallet(chain, services);
+    const first = await a.wallet.createAction(
+      {
+        description: 'site chain one',
+        outputs: [{ lockingScript: someone(), satoshis: 5_000, outputDescription: 'first item' }],
+        options: { noSend: true, randomizeOutputs: false },
+      },
+      'shop.example',
+    );
+    const second = await a.wallet.createAction(
+      {
+        description: 'site chain two',
+        outputs: [{ lockingScript: someone(), satoshis: 4_000, outputDescription: 'second item' }],
+        options: { noSend: true, noSendChange: first.noSendChange, randomizeOutputs: false },
+      },
+      'shop.example',
+    );
+    await a.wallet.createAction(
+      { description: 'send both', options: { sendWith: [first.txid!, second.txid!], acceptDelayedBroadcast: false } },
+      'shop.example',
+    );
+    const tx2 = Beef.fromBinary(Utils.toArray(Utils.toHex(second.tx!), 'hex')).findTxid(second.txid!)!.tx!;
+    const rows = (await rowsOf(a, second.txid!)).filter((o) => o.change);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const o of rows) expect(o.derivationPrefix).not.toBe(W.bwxChangePrefix(a.kd, inputsOf(tx2.toBinary())));
+    // The first one named no inputs: the wallet picked them, so its change is deterministic.
+    const tx1 = Beef.fromBinary(Utils.toArray(Utils.toHex(first.tx!), 'hex')).findTxid(first.txid!)!.tx!;
+    for (const o of (await rowsOf(a, first.txid!)).filter((x) => x.change))
+      expect(o.derivationPrefix).toBe(W.bwxChangePrefix(a.kd, inputsOf(tx1.toBinary())));
+  }, 120000);
+
+  test('remote store still active: recovery refuses and changes nothing (review L1)', async () => {
+    const chain = newChain();
+    const services = makeServices(chain);
+    const { w: a, root, legacyAddress } = await fundedWallet(chain, services);
+    mine(chain, await rawOf(a, (await pay(a, chain, 10_000)).txid!));
+    const b = await openWallet(root, `seedchange-remote-${++dbn}`, services);
+    const before = await snapshot(b);
+    const remoteActive = new Proxy(b.storage, {
+      get: (t, p) =>
+        p === 'isActiveStorageProvider' ? () => false : (t as unknown as Record<string | symbol, unknown>)[p],
+    });
+    const r = await recover({ ...b, storage: remoteActive as never }, chain, services, [legacyAddress]);
+    expect(r.error).toBe(REMOTE_ACTIVE_REFUSAL);
+    expect(seedChangeSummary(r)).toMatch(/main copy is still the remote backup/);
+    expect(await snapshot(b)).toEqual(before);
+  }, 120000);
+
+  test('a payment storage holds without its change rows is walked past, and its change is added (review L2)', async () => {
+    const chain = newChain();
+    const services = makeServices(chain);
+    const { w: a } = await fundedWallet(chain, services);
+    const p = await pay(a, chain, 60_000);
+    mine(chain, await rawOf(a, p.txid!));
+    const expected = await balance(a);
+    // An interrupted sync left the payment's row but not its change rows.
+    const idb = (a.db as unknown as { db: { delete: (s: string, k: number) => Promise<void> } }).db;
+    for (const o of (await rowsOf(a, p.txid!)).filter((x) => x.change)) await idb.delete('outputs', o.outputId);
+    expect(await balance(a)).toBeLessThan(expected);
+    // No seed addresses: the walk starts from the coin storage holds as spent by that payment.
+    const r = await recover(a, chain, services, []);
+    expect(r.restoredSats).toBeGreaterThan(0);
+    expect(await balance(a)).toBe(expected);
   }, 120000);
 });

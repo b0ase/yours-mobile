@@ -6,6 +6,10 @@
  * the wallet's services (raw transactions, block proofs, address history) and WhatsOnChain's spend index.
  * Writes: only this wallet's storage, through the toolbox's internalizeAction ('wallet payment' with the derivation), and
  * only for a mined, unspent output storage holds no row for. Nothing is signed or broadcast.
+ *
+ * Only while this device's store is the active one (review L1): with the remote active, the rows that decide whether a
+ * coin is already held live on the remote, and a claim into the device copy could be pushed over a newer remote row.
+ * Recovery waits until the account has moved to the device store (it does on open once a verified copy is pulled).
  */
 import type { MerklePath } from '@bsv/sdk';
 import { atomicBeefOf, timedStep } from './recoverByTxid';
@@ -23,10 +27,21 @@ import {
 
 /** Transaction statuses whose outputs storage treats as real (internalizeAction merges into these). */
 const SETTLED = ['completed', 'unproven', 'sending', 'nosend'];
+/** A spender the walk may stop at (review L2): done or broadcast, and its change rows are in storage. */
+const FINAL = ['completed', 'unproven'];
+export const REMOTE_ACTIVE_REFUSAL =
+  'this account’s main copy is still the remote backup. Lock and unlock the wallet so this device becomes the main copy, then try again. Nothing was changed.';
 const TXID = /^[0-9a-f]{64}$/;
 const PAGE = 1000;
 
-type OutRow = { txid?: string; vout: number; spendable: boolean; spentBy?: number; transactionId: number };
+type OutRow = {
+  txid?: string;
+  vout: number;
+  spendable: boolean;
+  spentBy?: number;
+  transactionId: number;
+  change?: boolean;
+};
 type TxRow = { transactionId: number; txid?: string; status: string };
 
 export type SeedChangeWiring = Omit<TxidWiring, 'wallet' | 'services'> & {
@@ -40,9 +55,12 @@ export type SeedChangeWiring = Omit<TxidWiring, 'wallet' | 'services'> & {
   /** Who spent an outpoint; WhatsOnChain (rate-limited) unless given. */
   spentBy?: (outpoint: string) => Promise<SpendState>;
   kv: SeedChangeKV;
+  /** Start a fresh scan ("Start fresh"). */
+  fresh?: boolean;
   runMs?: number;
   maxDepth?: number;
   maxTxs?: number;
+  now?: () => number;
 };
 
 export function makeSeedChangeDeps(w: SeedChangeWiring): SeedChangeDeps {
@@ -54,24 +72,31 @@ export function makeSeedChangeDeps(w: SeedChangeWiring): SeedChangeDeps {
   const storageOutpoints = async () => {
     const open = new Set<string>();
     const settled = new Set<string>();
-    // This device's store (or the device copy while the remote is active): outputs, and which spender it knows.
+    // This device's (active) store: outputs, and which spender it knows.
     await withRepairStore(w.storage, async (sp, userId) => {
       const txs = (await sp.findTransactions({ partial: { userId }, noRawTx: true })) as unknown as TxRow[];
       const byId = new Map(txs.map((x) => [x.transactionId, x]));
+      const rows: OutRow[] = [];
       for (let offset = 0; offset < 1_000_000; offset += PAGE) {
         const page = (await sp.findOutputs({
           partial: { userId },
           noScript: true,
           paged: { limit: PAGE, offset },
         })) as unknown as OutRow[];
-        for (const o of page) {
-          if (!o.txid || !TXID.test(o.txid)) continue;
-          const outpoint = `${o.txid}.${o.vout}`;
-          const spender = o.spentBy != null ? byId.get(o.spentBy) : undefined;
-          if (!o.spendable && spender?.txid && SETTLED.includes(spender.status)) settled.add(outpoint);
-          else open.add(outpoint);
-        }
+        rows.push(...page);
         if (page.length < PAGE) break;
+      }
+      // Payments whose change rows storage holds: an interrupted sync or a short restore can leave one without them.
+      const withChange = new Set(rows.filter((o) => o.change).map((o) => o.transactionId));
+      for (const o of rows) {
+        if (!o.txid || !TXID.test(o.txid)) continue;
+        const outpoint = `${o.txid}.${o.vout}`;
+        const spender = o.spentBy != null ? byId.get(o.spentBy) : undefined;
+        // Stop the walk only at a spender that is done or broadcast and whose change is held; anything else (stuck,
+        // nosend, change rows missing, unknown) is looked up on chain and walked past.
+        const final =
+          !o.spendable && !!spender?.txid && FINAL.includes(spender.status) && withChange.has(spender.transactionId);
+        (final ? settled : open).add(outpoint);
       }
     });
     // Backups (the remote): coins it holds as unspent that this device doesn't have.
@@ -114,6 +139,7 @@ export function makeSeedChangeDeps(w: SeedChangeWiring): SeedChangeDeps {
   };
 
   const claim = async (txid: string, change: Parameters<SeedChangeDeps['claim']>[1]): Promise<ClaimResult> => {
+    if (!w.storage.isActiveStorageProvider()) throw new Error(REMOTE_ACTIVE_REFUSAL);
     // Mined only: a proof that names this txid. A payment still in the mempool is left for a later run.
     const merklePath: MerklePath | undefined = await t.getMerklePath(txid).catch(() => undefined);
     if (!merklePath?.path?.[0]?.some((l) => l.hash === txid))
@@ -176,7 +202,10 @@ export function makeSeedChangeDeps(w: SeedChangeWiring): SeedChangeDeps {
     getRawTx: (txid) => t.getRawTx(txid),
     claim,
     pushBackups: t.pushBackups,
+    refusal: () => (w.storage.isActiveStorageProvider() ? undefined : REMOTE_ACTIVE_REFUSAL),
+    fresh: w.fresh,
     kv: w.kv,
+    now: w.now,
     progress: w.progress,
     log: w.log,
     runMs: w.runMs,

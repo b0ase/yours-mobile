@@ -3394,7 +3394,7 @@ if (!(
           processRecoverTxid(typeof message.txid === 'string' ? message.txid : '', sendResponse);
           return true;
         case 'STORAGE_RECOVER_SEED_CHANGE':
-          processRecoverSeedChange(sendResponse);
+          processRecoverSeedChange(message.fresh === true, sendResponse);
           return true;
         case 'STORAGE_FIND_MISSING_COINS':
           processFindMissingCoins(sendResponse);
@@ -3926,11 +3926,11 @@ if (!(
    * Settings › Troubleshooting › Recover change from my 12 words (services/seedChange.ts). Read only on chain; adds
    * only change it can prove is this wallet's. Resumable: a run that hits its time budget carries on next tap.
    */
-  const processRecoverSeedChange = async (sendResponse: CallbackResponse) => {
+  const processRecoverSeedChange = async (fresh: boolean, sendResponse: CallbackResponse) => {
     try {
       await ensureWallet(true);
       if (!accountContext) throw new Error('Wallet not initialized');
-      const report = await accountContext.recoverSeedChange((step) => sendRecoverProgress('seed', step));
+      const report = await accountContext.recoverSeedChange((step) => sendRecoverProgress('seed', step), { fresh });
       sendResponse({
         type: 'STORAGE_RECOVER_SEED_CHANGE',
         success: !report.error,

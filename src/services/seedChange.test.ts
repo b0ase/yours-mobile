@@ -11,6 +11,7 @@ import {
   changeDerivation,
   deterministicChangeOf,
   recoverSeedChange,
+  registerWalletOriginator,
   seedChangeSummary,
   wocSpentLookup,
   type FoundChange,
@@ -376,5 +377,228 @@ describe('the walk', () => {
     expect(json).not.toMatch(/derivation|prefix|suffix/i);
     const prefix = W.bwxChangePrefix(kd, [`${c.txs[1]}.1`])!;
     expect(json).not.toContain(prefix);
+  });
+});
+
+/**
+ * Review 07b, M2 (stuck scan), as the reviewer wrote it: a coin storage holds, its change lost and claimed in run 1; a
+ * seed address whose history can never be read (over 4096 entries); later the recovered coin is spent in p2 and p2 is
+ * lost too. Before the fix the scan never re-read storage, kept "unspent" cached and never finished, so p2's change was
+ * never found.
+ */
+function stuckWorld(kd: KeyDeriver) {
+  const someone = new P2PKH().lock(PrivateKey.fromRandom().toAddress());
+  const raw = new Map<string, number[]>();
+  const spent = new Map<string, string>();
+  const mk = (prev: string, sats: number) => {
+    const tx = new Transaction();
+    const [p, v] = prev.split('.');
+    tx.addInput({ sourceTXID: p, sourceOutputIndex: Number(v), unlockingScript: someone });
+    tx.addOutput({ lockingScript: someone, satoshis: 1000 });
+    tx.addOutput({ lockingScript: changeScript(kd, [prev], 1), satoshis: sats });
+    const id = tx.id('hex');
+    raw.set(id, tx.toBinary());
+    spent.set(prev, id);
+    return id;
+  };
+  const coin = `${txid(5)}.0`;
+  const p1 = mk(coin, 50_000);
+  const kv = memKV();
+  const claimed: string[] = [];
+  const world = { storageOpen: [coin], clock: 1_000_000 };
+  const deps: SeedChangeDeps = {
+    keyDeriver: kd as never,
+    storageOutpoints: async () => ({ open: world.storageOpen, settled: [] }),
+    seedAddresses: async () => ['1BusyAddressWithOver4096Entries'],
+    addressHistory: async () => undefined, // never readable
+    spentBy: async (o) => {
+      const by = spent.get(o);
+      return by ? { state: 'spent', by } : { state: 'unspent' };
+    },
+    getRawTx: async (t) => raw.get(t),
+    claim: async (t, ch) =>
+      ch.map((c) => {
+        claimed.push(`${t}.${c.vout}`);
+        return { vout: c.vout, state: 'restored' as const };
+      }),
+    kv,
+    now: () => world.clock,
+  };
+  return { deps, mk, p1, claimed, kv, world };
+}
+
+describe('review 07b fixes: the scan never gets stuck (M2)', () => {
+  test('reviewer’s scenario: a later lost payment is found on the next run, and the unreadable address is given up', async () => {
+    const kd = new KeyDeriver(PrivateKey.fromRandom());
+    const { deps, mk, p1, claimed, kv, world } = stuckWorld(kd);
+    const r1 = await recoverSeedChange(deps);
+    expect(claimed).toEqual([`${p1}.1`]);
+    expect(r1.done).toBe(false); // the busy address is retried next run
+    expect(r1.retry).toBe(1);
+    // An hour later: the recovered coin was spent in p2, and p2 was lost too.
+    const p2 = mk(`${p1}.1`, 40_000);
+    world.storageOpen = [`${p1}.1`];
+    world.clock += 3600_000;
+    const r2 = await recoverSeedChange(deps);
+    expect(claimed).toContain(`${p2}.1`);
+    expect(r2.restoredSats).toBe(50_000 + 40_000);
+    // The address fails its third run and is given up on: the scan finishes and says so.
+    world.clock += 60_000;
+    const r3 = await recoverSeedChange(deps);
+    expect(r3.done).toBe(true);
+    expect(r3.gaveUp).toBe(1);
+    expect(kv.peek()!.gaveUp.map((g) => g.id)).toEqual(['1BusyAddressWithOver4096Entries']);
+    expect(seedChangeSummary(r3)).toMatch(
+      /1 item couldn’t be checked after several tries and was skipped; Start fresh/,
+    );
+  });
+
+  test('the reviewer’s file as written (no clock): p2’s change is found within the same six taps', async () => {
+    const kd = new KeyDeriver(PrivateKey.fromRandom());
+    const { deps, mk, p1, claimed, kv, world } = stuckWorld(kd);
+    deps.now = undefined;
+    const r1 = await recoverSeedChange(deps);
+    expect(claimed).toEqual([`${p1}.1`]);
+    expect(r1.done).toBe(false);
+    const p2 = mk(`${p1}.1`, 40_000);
+    world.storageOpen = [`${p1}.1`];
+    for (let i = 0; i < 5; i++) await recoverSeedChange(deps);
+    expect(claimed.includes(`${p2}.1`)).toBe(true);
+    expect(kv.peek()!.done).toBe(true);
+  });
+
+  test('start points are read on every run; an "unspent" answer older than recheckMs is asked again', async () => {
+    const kd = new KeyDeriver(PrivateKey.fromRandom());
+    const c = fakeChain(kd, 2);
+    let clock = 0;
+    const asked: string[] = [];
+    let open: string[] = [];
+    const { deps } = walkDeps(kd, c, {
+      now: () => clock,
+      seedAddresses: async () => [],
+      storageOutpoints: async () => ({ open, settled: [] }),
+      spentBy: async (o) => {
+        asked.push(o);
+        const by = c.spent.get(o);
+        return by ? { state: 'spent', by } : { state: 'unspent' };
+      },
+      addressHistory: async () => [],
+      maxTries: 99,
+    });
+    // Keep the scan open with a lookup that stays unclear, so later runs resume rather than start fresh.
+    const inner = deps.spentBy;
+    deps.spentBy = async (o) => (o === `${txid(99)}.0` ? { state: 'unclear' } : inner(o));
+    open = [`${txid(99)}.0`, c.tail];
+    await recoverSeedChange(deps);
+    expect(asked.filter((o) => o === c.tail).length).toBe(1);
+    clock += 60_000; // a minute later: the answer stands
+    await recoverSeedChange(deps);
+    expect(asked.filter((o) => o === c.tail).length).toBe(1);
+    clock += 15 * 60_000; // later: asked again
+    open = [...open, `${c.txs[0]}.1`]; // and a new start point from storage is picked up
+    await recoverSeedChange(deps);
+    expect(asked.filter((o) => o === c.tail).length).toBe(2);
+    expect(asked).toContain(`${c.txs[0]}.1`);
+  });
+
+  test('a scan expires after maxRuns runs or maxAgeMs, and Start fresh throws the saved scan away', async () => {
+    const kd = new KeyDeriver(PrivateKey.fromRandom());
+    const c = fakeChain(kd, 1);
+    let clock = 0;
+    const { deps } = walkDeps(kd, c, {
+      now: () => clock,
+      seedAddresses: async () => ['1Busy'],
+      addressHistory: async () => undefined,
+      maxTries: 99,
+      maxRuns: 3,
+      maxAgeMs: 3600_000,
+    });
+    expect((await recoverSeedChange(deps)).runs).toBe(1);
+    expect((await recoverSeedChange(deps)).runs).toBe(2);
+    expect((await recoverSeedChange(deps)).runs).toBe(3);
+    expect((await recoverSeedChange(deps)).runs).toBe(1); // expired by runs
+    clock += 2 * 3600_000;
+    expect((await recoverSeedChange(deps)).runs).toBe(1); // expired by age
+    expect((await recoverSeedChange(deps)).runs).toBe(2);
+    expect((await recoverSeedChange({ ...deps, fresh: true })).runs).toBe(1); // Start fresh
+  });
+});
+
+describe('review 07b fixes: refusal, per-account runs, timeouts, claim budget (L1, L3)', () => {
+  test('a refusal (remote store still active) stops the run before anything is read', async () => {
+    const kd = new KeyDeriver(PrivateKey.fromRandom());
+    const c = fakeChain(kd, 2);
+    let read = 0;
+    const { deps, claimed } = walkDeps(kd, c, {
+      refusal: () => 'this account’s main copy is still the remote backup',
+      storageOutpoints: async () => {
+        read++;
+        return { open: [], settled: [] };
+      },
+    });
+    const r = await recoverSeedChange(deps);
+    expect(r.error).toMatch(/remote backup/);
+    expect(read).toBe(0);
+    expect(claimed).toEqual([]);
+    expect(seedChangeSummary(r)).toMatch(/^Couldn’t run: this account’s main copy/);
+  });
+
+  test('runs are per account: a second account runs its own scan; the same account joins the run in flight', async () => {
+    const kdA = new KeyDeriver(PrivateKey.fromRandom());
+    const kdB = new KeyDeriver(PrivateKey.fromRandom());
+    const a = walkDeps(kdA, fakeChain(kdA, 2));
+    const b = walkDeps(kdB, fakeChain(kdB, 3));
+    const [ra, rb, ra2] = await Promise.all([
+      recoverSeedChange(a.deps),
+      recoverSeedChange(b.deps),
+      recoverSeedChange(a.deps),
+    ]);
+    expect(ra).toBe(ra2);
+    expect(rb).not.toBe(ra);
+    expect(a.claimed.length).toBe(1);
+    expect(b.claimed.length).toBe(1);
+    expect(rb.restoredSats).not.toBe(ra.restoredSats);
+  });
+
+  test('a WhatsOnChain call that never answers times out and is reported unclear', async () => {
+    const look = wocSpentLookup({
+      fetch: () => new Promise<Response>(() => undefined),
+      minIntervalMs: 0,
+      attempts: 2,
+      timeoutMs: 20,
+      sleep: async () => undefined,
+    });
+    const t0 = Date.now();
+    expect(await look(`${txid(4)}.0`)).toEqual({ state: 'unclear' });
+    expect(Date.now() - t0).toBeLessThan(2000);
+  });
+
+  test('claims stay inside the run budget: what doesn’t fit is claimed next run', async () => {
+    const kd = new KeyDeriver(PrivateKey.fromRandom());
+    const c = fakeChain(kd, 2);
+    let clock = 0;
+    const { deps, claimed } = walkDeps(kd, c, { now: () => clock, runMs: 1000 });
+    // The walk itself is instant; the claim finds the budget already spent.
+    const innerSpent = deps.spentBy;
+    deps.spentBy = async (o) => {
+      const r = await innerSpent(o);
+      if (o === c.tail) clock += 5000; // the tail's lookup uses up the whole budget
+      return r;
+    };
+    const r1 = await recoverSeedChange(deps);
+    expect(claimed).toEqual([]);
+    expect(r1.paused).toBe(true);
+    expect(r1.done).toBe(false);
+    const r2 = await recoverSeedChange(deps);
+    expect(claimed.map((x) => `${x.txid}.${x.change.map((y) => y.vout).join(',')}`)).toEqual([c.tail]);
+    expect(r2.restoredSats).toBe(c.tailSats);
+  });
+
+  test('registerWalletOriginator marks the wallet’s own originator for the toolbox', () => {
+    const set = (Wallet as unknown as { bwxWalletOriginators: Set<string> }).bwxWalletOriginators;
+    const before = set.has('wallet-own.test');
+    registerWalletOriginator('wallet-own.test');
+    expect(set.has('wallet-own.test')).toBe(true);
+    if (!before) set.delete('wallet-own.test');
   });
 });

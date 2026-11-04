@@ -132,7 +132,7 @@ export const useRecoveryTools = () => {
   const [recoveringSeed, setRecoveringSeed] = useState(false);
   const [seedResult, setSeedResult] = useState('');
   const [seedPaused, setSeedPaused] = useState(false);
-  const handleRecoverSeedChange = async () => {
+  const handleRecoverSeedChange = async (fresh = false) => {
     if (recoveringSeed) return;
     setRecoveringSeed(true);
     setSeedResult('');
@@ -143,7 +143,7 @@ export const useRecoveryTools = () => {
         success: boolean;
         error?: string;
         data?: { summary?: string; paused?: boolean };
-      }>({ action: 'STORAGE_RECOVER_SEED_CHANGE' });
+      }>({ action: 'STORAGE_RECOVER_SEED_CHANGE', fresh });
       const text = r?.data?.summary ?? r?.error ?? 'No answer from the wallet. Try again.';
       setSeedResult(text);
       setSeedPaused(!!r?.data?.paused || !r?.success);
