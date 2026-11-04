@@ -57,6 +57,16 @@ describe('reserved protocols (audit C1)', () => {
       ).toMatch(/reserved/);
   });
 
+  test('the deterministic-change key is refused to apps: no site can compute change prefixes and link change', async () => {
+    const m = guardReservedProtocols(fakeManager(), ADMIN) as Record<string, (...a: unknown[]) => Promise<unknown>> & {
+      calls: string[];
+    };
+    const k = { protocolID: [2, 'bwx change recovery'], keyID: 'v1', counterparty: 'self', data: [1, 2, 3] };
+    for (const method of ['createHmac', 'verifyHmac', 'encrypt', 'decrypt', 'getPublicKey'])
+      await expect(m[method](k, 'evil.example')).rejects.toThrow(/reserved/);
+    expect(m.calls).toEqual([]);
+  });
+
   test('every reserved protocol is refused on every path, in any case/spacing of the name', () => {
     for (const p of RESERVED_PROTOCOLS) {
       for (const method of METHODS)
