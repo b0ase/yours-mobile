@@ -15,6 +15,7 @@
  * iOS kills the PWA mid-broadcast. UnFail restores any status once the request is queued with a proof, so those
  * are candidates too. A repair counts as 'restored' only when storage, read back, holds spendable outputs.
  */
+import { chainLookups, chainMayHave, type ChainLookup } from './unsentGuard';
 export type StuckStatus = 'failed' | 'unprocessed' | 'unsigned' | 'sending';
 
 export type FailedAction = {
@@ -202,21 +203,16 @@ export async function abortTargetKnownOnChain(
   return deps.knownOnChain(txid);
 }
 
-export async function knownOnChain(txid: string, getRawTx: (txid: string) => Promise<unknown>): Promise<boolean> {
-  if (!/^[0-9a-f]{64}$/i.test(txid)) return false;
-  try {
-    const r = (await getRawTx(txid)) as
-      | { rawTx?: unknown; error?: unknown }
-      | string
-      | number[]
-      | Uint8Array
-      | undefined
-      | null;
-    if (r === undefined || r === null) return false;
-    if (typeof r === 'string' || Array.isArray(r) || r instanceof Uint8Array) return r.length > 0;
-    if ((r as { error?: unknown }).error) return true; // a service error is not a clean "not found"
-    return !!(r as { rawTx?: unknown }).rawTx;
-  } catch {
-    return true;
-  }
+/**
+ * Might the network have this txid? Used before any release (stuck sends, cancel, the abort guard, null-txid repair):
+ * true means "never abort it".
+ *
+ * P0 3 Nov 2026: this used to read toolboxServices.getRawTx, which answers from the wallet's OWN stored copy first and
+ * otherwise returns 1Sat's `{ error }` for a 404, which counted as "known". So it said yes for every signed transaction
+ * and for every txid that is not on chain, and nothing gated on it ever released. Now it asks the chain (WhatsOnChain,
+ * then ARC's record): "not found" from both is "not known"; a sighting, ARC holding it (QUEUED, ANNOUNCED…) or any
+ * unclear answer is still "known" (fail closed). 1Sat's BEEF store is not asked: it holds refused transactions too.
+ */
+export async function knownOnChain(txid: string, lookups: ChainLookup[] = chainLookups()): Promise<boolean> {
+  return chainMayHave(txid, lookups);
 }

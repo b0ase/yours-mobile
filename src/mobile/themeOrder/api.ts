@@ -7,14 +7,26 @@ import { storeReceiptMap, storeReceiptSvg, STORE_RECEIPT_TYPE, type StoreReceipt
 import { BWALLET_PAYMAIL_API } from '../names/config';
 import type { Fetch } from '../names/names';
 import { signRequest } from '../names/paymail';
-import { NO_SEND, releasePayment } from '../chat/roomSpend';
+import { sendMessageAsync } from '../../utils/chromeHelpers';
+import { chainHasSeen, chainLookups, sendThroughWallet, type UnsentWallet } from '../../services/unsentGuard';
 import type { MyOrder, OrderForm } from './form';
+import {
+  localOutbox,
+  pruneOutbox,
+  sendStorePayment,
+  signStorePayment,
+  StorePayError,
+  type BackupAnswer,
+  type OutboxEntry,
+  type StorePayDeps,
+} from './storePay';
 
 /**
  * Client for the theme order server (site/api/theme-orders.js). Every call is signed by the identity key
- * (same BRC-43 scheme as the paymail writes). Payment: the server's quote → ONE approval sheet → the wallet
- * builds the tx without sending it → claim (the server checks outputs + memo, then broadcasts). If the claim
- * fails, the unsent tx is dropped only when the server refused before broadcast and the chain has no copy.
+ * (same BRC-43 scheme as the paymail writes). Payment (P0, 3 Nov 2026; storePay.ts): the server's quote → ONE approval
+ * sheet → the wallet signs the payment and stores it unsent → its rows are backed up → the WALLET broadcasts it →
+ * claim (the server checks outputs + memo, records the txid, and answers paid only once the network has it, else
+ * 202 pending). Nothing is ever aborted once signed; a payment that couldn't go out is kept and finished later.
  */
 
 type Signer = Pick<WalletInterface, 'getPublicKey' | 'createSignature'>;
@@ -42,7 +54,26 @@ const MESSAGES: Record<string, string> = {
   underpaid: 'The payment was less than the price. Nothing was paid.',
   memo_missing: "The payment didn't carry the order reference. Nothing was paid.",
   already_owned: 'You already own this theme.',
+  payment_pending: 'Your payment for this theme is still on its way to the network. It unlocks when it arrives.',
   pack_not_for_sale: "This theme isn't for sale.",
+};
+
+/** The wallet's backup push (background STORE_BACKUP_BEFORE_SEND, services/deviceSync.ts). Fails closed. */
+export const backupThroughWallet = async (): Promise<BackupAnswer> => {
+  try {
+    const r = await sendMessageAsync<{ success?: boolean; error?: string } | undefined>({
+      action: 'STORE_BACKUP_BEFORE_SEND',
+    });
+    return r?.success ? { ok: true } : { ok: false, error: r?.error ?? 'No answer from the wallet' };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+};
+
+/** The app's Store payment deps: the background backup push and this device's outbox for this identity. */
+export const defaultStorePayDeps = async (wallet: Pick<WalletInterface, 'getPublicKey'>): Promise<StorePayDeps> => {
+  const { publicKey } = await wallet.getPublicKey({ identityKey: true });
+  return { backup: backupThroughWallet, outbox: localOutbox(publicKey) };
 };
 
 const post = async <T>(f: Fetch, op: string, body: unknown): Promise<T> => {
@@ -113,26 +144,99 @@ export const quoteOutputs = (q: Quote) => [
   { lockingScript: q.memo_hex, satoshis: 0, outputDescription: 'Theme order reference' },
 ];
 
-/** Call only after the user pressed Pay on the approval sheet. Returns the order the server recorded. */
-export const payQuote = async (ctx: OneSatContext, f: Fetch, q: Quote): Promise<MyOrder> => {
+/** A paid edition the network hasn't shown yet: not paid until it does (the server rechecks on `mine`). */
+export type PaidOrder = MyOrder & { pending?: boolean };
+
+/**
+ * Call only after the user pressed Pay on the approval sheet. Returns the order the server recorded (`pending` while
+ * the network hasn't shown the payment). The payment is signed, backed up, then broadcast by the wallet (storePay.ts).
+ */
+export const payQuote = async (
+  ctx: OneSatContext,
+  f: Fetch,
+  q: Quote,
+  opts: { deps?: StorePayDeps } = {},
+): Promise<PaidOrder> => {
+  const deps = opts.deps ?? (await defaultStorePayDeps(ctx.wallet));
+  // The same quote already signed (its backup failed) or sent: finish that payment, never sign a second one.
+  const kept = pruneOutbox(deps.outbox, now(deps)).find((e) => e.kind === 'order' && e.key === q.quote_id);
+  if (kept) return finishOrder(ctx, f, kept, deps);
   if (Date.parse(q.expires_at) < Date.now()) throw new ThemeOrderError(MESSAGES.quote_expired, 'quote_expired', 410);
   const outputs = quoteOutputs(q);
-  const r = await guardedPay(
+  const signed = await guardedPay(
     { outputs, shown: quoteShown(q), trust: { kind: 'pinned' }, maxSats: MAX_EDITION_SATS },
-    () => ctx.wallet.createAction({ description: 'bWalletX theme edition', outputs, options: NO_SEND }),
+    () => signStorePayment(ctx.wallet as never, { description: 'bWalletX theme edition', outputs }),
   );
-  if (!r.tx || !r.txid) throw new Error('The wallet did not return the payment');
-  try {
-    const signed = await signRequest(ctx.wallet, 'theme-orders-claim', { quote_id: q.quote_id, txid: r.txid });
-    const { order } = await post<{ order: MyOrder }>(f, 'claim', { ...signed, rawtx: Utils.toHex(r.tx) });
-    return order;
-  } catch (e) {
-    // The rawtx has left the device. Drop it only on a refusal before broadcast (4xx) that the chain confirms;
-    // 'broadcast_failed' (502) can follow a broadcast the network took (tx 877d2505…, 25 Oct 2026): keep it.
-    await releasePayment(ctx, r.txid, e);
-    throw e;
-  }
+  const entry: OutboxEntry = {
+    kind: 'order',
+    quoteId: q.quote_id,
+    txid: signed.txid,
+    beefHex: signed.beefHex,
+    key: q.quote_id,
+    label: 'theme edition',
+    state: 'signed',
+    at: now(deps),
+  };
+  deps.outbox.put(entry);
+  return finishOrder(ctx, f, entry, deps);
 };
+
+const now = (deps: StorePayDeps) => (deps.now ?? Date.now)();
+
+/**
+ * Send (if not sent yet) and claim one Store payment. `claimOp` posts the claim; its answer has `pending` on a 202.
+ * Returns the server's body, with `pending: true` when not confirmed yet. Throws StorePayError before anything was
+ * paid (backup failed, refused), a ThemeOrderError with sent=true when the Store won't take a payment that went out.
+ */
+async function sendAndClaim<T extends { pending?: boolean }>(
+  ctx: OneSatContext,
+  entry: OutboxEntry,
+  deps: StorePayDeps,
+  claimOp: () => Promise<T>,
+): Promise<T | { pending: true; unconfirmed: true }> {
+  if (entry.state === 'signed' || entry.state === 'sending')
+    await sendStorePayment(ctx.wallet as unknown as UnsentWallet, entry, deps);
+  const sentEntry: OutboxEntry = { ...entry, state: 'sent' };
+  try {
+    const claimed = await claimOp();
+    if (claimed.pending) deps.outbox.put({ ...sentEntry, state: 'pending', claimedAt: now(deps) });
+    else deps.outbox.drop(entry.txid);
+    return claimed;
+  } catch (e) {
+    // The money has left the wallet: keep it, claim again later (Store open), and never say "nothing was paid".
+    deps.outbox.put({ ...sentEntry, claimedAt: now(deps) });
+    const status = (e as { status?: number }).status;
+    if (e instanceof ThemeOrderError && status && status >= 400 && status < 500) {
+      const err = new ThemeOrderError(
+        `Your payment was sent (${entry.txid.slice(0, 10)}…), but the Store couldn't match it to your order (${e.code}). It's recorded; please contact support with this reference.`,
+        e.code,
+        status,
+      );
+      (err as ThemeOrderError & { sent?: boolean }).sent = true;
+      throw err;
+    }
+    return { pending: true, unconfirmed: true };
+  }
+}
+
+async function finishOrder(ctx: OneSatContext, f: Fetch, entry: OutboxEntry, deps: StorePayDeps): Promise<PaidOrder> {
+  const r = await sendAndClaim(ctx, entry, deps, async () => {
+    const signed = await signRequest(ctx.wallet, 'theme-orders-claim', { quote_id: entry.quoteId, txid: entry.txid });
+    return post<{ order: MyOrder; pending?: boolean }>(f, 'claim', { ...signed, rawtx: entry.beefHex });
+  });
+  if ('order' in r && r.order) return { ...r.order, ...(r.pending ? { pending: true } : {}) };
+  return {
+    id: entry.quoteId,
+    slug: '',
+    name: null,
+    status: 'paid',
+    renews: null,
+    expires_at: null,
+    txid: entry.txid,
+    created_at: null,
+    pending: true,
+  };
+}
 
 export const myOrders = async (f: Fetch, wallet: Signer) =>
   post<{ orders: MyOrder[]; configured: boolean }>(f, 'mine', await signRequest(wallet, 'theme-orders-mine', {}));
@@ -146,7 +250,14 @@ export interface BuyQuote extends Quote {
 export const getBuyQuote = async (f: Fetch, wallet: Signer, pack: string) =>
   post<BuyQuote>(f, 'buy-quote', await signRequest(wallet, 'theme-buy-quote', { pack }));
 
-export type BuyResult = { pack: string; txid: string; receipt?: StoreReceipt; receiptSvg?: string };
+export type BuyResult = {
+  pack: string;
+  txid: string;
+  receipt?: StoreReceipt;
+  receiptSvg?: string;
+  /** Sent, but the network (or the Store) hasn't confirmed it yet: not owned until it does (Store › owned rechecks). */
+  pending?: boolean;
+};
 
 /**
  * The receipt inscription (storeReceipt/receipt.ts): a 1-sat SVG card to a fresh key of the wallet's own ordinals,
@@ -182,13 +293,20 @@ async function receiptOutput(ctx: OneSatContext, r: StoreReceipt, art: string | 
   };
 }
 
-/** Call only after the user pressed Pay on the approval sheet. The receipt rides in the same transaction. */
+/**
+ * Call only after the user pressed Pay on the approval sheet. The receipt rides in the same transaction. The payment
+ * is signed, backed up, then broadcast by the wallet, then claimed (storePay.ts).
+ */
 export const payBuyQuote = async (
   ctx: OneSatContext,
   f: Fetch,
   q: BuyQuote,
-  opts: { label?: string; art?: string | null } = {},
+  opts: { label?: string; art?: string | null; deps?: StorePayDeps } = {},
 ): Promise<BuyResult> => {
+  const deps = opts.deps ?? (await defaultStorePayDeps(ctx.wallet));
+  // This pack already has a payment signed (its backup failed) or sent: finish that one, never sign a second.
+  const kept = pruneOutbox(deps.outbox, now(deps)).find((e) => e.kind === 'buy' && e.key === q.pack);
+  if (kept) return finishBuy(ctx, f, kept, deps);
   if (Date.parse(q.expires_at) < Date.now()) throw new ThemeOrderError(MESSAGES.quote_expired, 'quote_expired', 410);
   const receipt =
     q.receipt && q.receipt.order === q.quote_id ? await receiptOutput(ctx, q.receipt, opts.art ?? null) : null;
@@ -197,27 +315,119 @@ export const payBuyQuote = async (
     { lockingScript: q.memo_hex, satoshis: 0, outputDescription: 'Theme purchase reference' },
     ...(receipt ? [receipt.output] : []),
   ];
-  const r = await guardedPay(
+  const label = opts.label ?? q.receipt?.item.label ?? q.pack;
+  const signed = await guardedPay(
     { outputs, shown: quoteShown(q), trust: { kind: 'pinned' }, maxSats: MAX_THEME_BUY_SATS },
-    () =>
-      ctx.wallet.createAction({
-        // "Theme purchase · NPG": the history labels it (wallet/txHistory.ts).
-        description: `Theme purchase · ${opts.label ?? q.receipt?.item.label ?? q.pack}`,
-        outputs,
-        options: NO_SEND,
-      }),
+    // "Theme purchase · NPG": the history labels it (wallet/txHistory.ts).
+    () => signStorePayment(ctx.wallet as never, { description: `Theme purchase · ${label}`, outputs }),
   );
-  if (!r.tx || !r.txid) throw new Error('The wallet did not return the payment');
-  try {
-    const signed = await signRequest(ctx.wallet, 'theme-buy-claim', { quote_id: q.quote_id, txid: r.txid });
-    const { pack } = await post<{ pack: string }>(f, 'buy-claim', { ...signed, rawtx: Utils.toHex(r.tx) });
-    return { pack, txid: r.txid, ...(receipt && q.receipt ? { receipt: q.receipt, receiptSvg: receipt.svg } : {}) };
-  } catch (e) {
-    // Same rule as payQuote: never abort what the server may have broadcast (tx 877d2505…, 25 Oct 2026).
-    await releasePayment(ctx, r.txid, e);
-    throw e;
-  }
+  const entry: OutboxEntry = {
+    kind: 'buy',
+    quoteId: q.quote_id,
+    txid: signed.txid,
+    beefHex: signed.beefHex,
+    key: q.pack,
+    label,
+    state: 'signed',
+    at: now(deps),
+  };
+  deps.outbox.put(entry);
+  const res = await finishBuy(ctx, f, entry, deps);
+  return { ...res, ...(receipt && q.receipt ? { receipt: q.receipt, receiptSvg: receipt.svg } : {}) };
 };
+
+async function finishBuy(ctx: OneSatContext, f: Fetch, entry: OutboxEntry, deps: StorePayDeps): Promise<BuyResult> {
+  const r = await sendAndClaim(ctx, entry, deps, async () => {
+    const signed = await signRequest(ctx.wallet, 'theme-buy-claim', { quote_id: entry.quoteId, txid: entry.txid });
+    return post<{ pack: string; pending?: boolean }>(f, 'buy-claim', { ...signed, rawtx: entry.beefHex });
+  });
+  return { pack: entry.key, txid: entry.txid, ...(r.pending ? { pending: true } : {}) };
+}
 
 export const ownedThemes = async (f: Fetch, wallet: Signer) =>
   post<{ packs: string[]; configured: boolean }>(f, 'owned', await signRequest(wallet, 'theme-buy-owned', {}));
+
+/** The descriptions payQuote / payBuyQuote give their payments (wallet/txHistory.ts labels them by these). */
+export const STORE_PAYMENT_DESC = /^(Theme purchase · |bWalletX theme edition$)/;
+const TXID_RE = /^[0-9a-f]{64}$/i;
+/** A pending claim is asked again at most this often. */
+export const RECLAIM_EVERY_MS = 10 * 60 * 1000;
+
+type ActionsWallet = UnsentWallet & {
+  listActions: (a: { labels: string[]; limit?: number; offset?: number }) => Promise<{
+    totalActions: number;
+    actions: { txid?: string; status: string; description?: string }[];
+  }>;
+};
+
+let settling: Promise<SettleReport> | null = null;
+export type SettleReport = { finished: string[]; pending: string[]; kept: string[]; settledOld: string[] };
+
+/**
+ * Finish the Store payments this device started, and settle older ones (P0, 3 Nov 2026). Runs when the Store opens.
+ *  - Signed but not sent (its backup failed, or the app closed): back up, send through the wallet, claim.
+ *  - Sent but not confirmed (claim failed, or 202 pending): claim again, at most every RECLAIM_EVERY_MS; the server
+ *    re-posts it and rechecks the network.
+ *  - Store payments signed BEFORE this fix that the wallet still holds as 'nosend' while the network has them
+ *    (WhatsOnChain or ARC; never 1Sat's BEEF store): handed to the wallet's send path. That re-sends the exact
+ *    transaction, nothing new is signed or spent, and its change becomes spendable.
+ * Never aborts anything. One run at a time.
+ */
+export function settleStorePayments(
+  ctx: OneSatContext,
+  f: Fetch,
+  opts: { deps?: StorePayDeps; log?: (m: string) => void } = {},
+): Promise<SettleReport> {
+  if (!settling)
+    settling = settleOnce(ctx, f, opts).finally(() => {
+      settling = null;
+    });
+  return settling;
+}
+
+async function settleOnce(
+  ctx: OneSatContext,
+  f: Fetch,
+  opts: { deps?: StorePayDeps; log?: (m: string) => void },
+): Promise<SettleReport> {
+  const log = opts.log ?? ((m: string) => console.warn(m));
+  const deps = { log, ...(opts.deps ?? (await defaultStorePayDeps(ctx.wallet))) };
+  const report: SettleReport = { finished: [], pending: [], kept: [], settledOld: [] };
+  const t = now(deps);
+  for (const e of pruneOutbox(deps.outbox, t)) {
+    if (e.state === 'pending' && e.claimedAt && t - e.claimedAt < RECLAIM_EVERY_MS) {
+      report.pending.push(e.txid);
+      continue;
+    }
+    try {
+      const r = e.kind === 'buy' ? await finishBuy(ctx, f, e, deps) : await finishOrder(ctx, f, e, deps);
+      (r.pending ? report.pending : report.finished).push(e.txid);
+    } catch (err) {
+      report.kept.push(e.txid);
+      log(`[bwx-store] ${e.txid}: not finished yet (${err instanceof Error ? err.message : String(err)})`);
+    }
+  }
+  const known = new Set(deps.outbox.all().map((e) => e.txid));
+  try {
+    const w = ctx.wallet as unknown as ActionsWallet;
+    const RECENT = 100;
+    const head = await w.listActions({ labels: [], limit: 1 });
+    const offset = Math.max(0, head.totalActions - RECENT);
+    const { actions } = await w.listActions({ labels: [], limit: RECENT, offset });
+    const lookups = deps.lookups ?? chainLookups();
+    for (const a of actions) {
+      const txid = a.txid ?? '';
+      if (a.status !== 'nosend' || !TXID_RE.test(txid) || known.has(txid)) continue;
+      if (!STORE_PAYMENT_DESC.test(a.description ?? '')) continue;
+      if (!(await chainHasSeen(txid, lookups))) continue;
+      const h = await sendThroughWallet(w, txid, { log });
+      if (h === 'sent' || h === 'pending') report.settledOld.push(txid);
+    }
+  } catch (err) {
+    log(`[bwx-store] older Store payments not checked (${err instanceof Error ? err.message : String(err)})`);
+  }
+  return report;
+}
+
+/** For tests: a StorePayError means nothing left the wallet unless `sent`. */
+export const isStorePayError = (e: unknown): e is StorePayError => e instanceof StorePayError;

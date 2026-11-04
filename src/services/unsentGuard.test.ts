@@ -1,10 +1,18 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'fs';
 import {
+  arcLookup,
+  chainHasSeen,
+  chainMayHave,
   chainSaysUnknown,
+  defaultLookups,
+  oneSatLookup,
+  oneSatPresenceLookup,
   refusedBeforeBroadcast,
   releaseAfterHandoff,
+  sendThroughWallet,
   settleWhenSeen,
+  wocLookup,
   type Sighting,
 } from './unsentGuard';
 import { releasePayment } from '../mobile/chat/roomSpend';
@@ -79,10 +87,13 @@ describe('the 16:17 scenario: the server broadcast, then answered with an error'
     expect(w.aborted).toEqual([]);
   });
 
-  test('theme order client routes every failed claim through the guard', () => {
+  test('theme order client: the wallet sends Store payments itself and never aborts one (P0, 3 Nov 2026)', () => {
     const src = readFileSync('src/mobile/themeOrder/api.ts', 'utf8');
     expect(src).not.toContain("e.code === 'broadcast_failed')");
-    expect(src.match(/releasePayment\(ctx, r\.txid, e\)/g)?.length).toBe(2);
+    // No abort path at all: a signed Store payment is backed up, sent by the wallet, claimed, or kept to finish later.
+    expect(src).not.toMatch(/releasePayment|abortAction|releaseAfterHandoff/);
+    expect(src.match(/signStorePayment\(/g)?.length).toBe(2);
+    expect(src).toContain('sendStorePayment(');
   });
 });
 
@@ -146,5 +157,140 @@ describe('releaseAfterHandoff', () => {
     );
     expect(w.aborted).toEqual([]);
     expect(w.sent).toEqual([]);
+  });
+});
+
+describe('"seen" means the network has it (P0, 3 Nov 2026)', () => {
+  const respond =
+    (status: number, body: unknown = {}) =>
+    async () =>
+      new Response(JSON.stringify(body), { status });
+  const offline = async (): Promise<Response> => {
+    throw new TypeError('Failed to fetch');
+  };
+
+  test('1Sat\'s BEEF store: a copy there is never "seen" (it holds refused txs too); 404 is missing', async () => {
+    expect(await oneSatLookup(respond(200))(TXID)).toBe('unclear');
+    expect(await oneSatLookup(respond(404))(TXID)).toBe('missing');
+    expect(await oneSatLookup(offline)(TXID)).toBe('unclear');
+    // unsentExpiry's own variant: a copy leads only to the wallet's own (chain-checked) send of that tx.
+    expect(await oneSatPresenceLookup(respond(200))(TXID)).toBe('seen');
+  });
+
+  test('ARC: SEEN / ACCEPTED / MINED are seen; QUEUED / ANNOUNCED are unclear; 404 / REJECTED missing', async () => {
+    for (const s of ['SEEN_ON_NETWORK', 'SEEN_MULTIPLE_NODES', 'ACCEPTED_BY_NETWORK', 'MINED'])
+      expect(await arcLookup(respond(200, { txStatus: s }))(TXID)).toBe('seen');
+    for (const s of [
+      'QUEUED',
+      'RECEIVED',
+      'STORED',
+      'ANNOUNCED_TO_NETWORK',
+      'SENT_TO_NETWORK',
+      'SEEN_IN_ORPHAN_MEMPOOL',
+    ])
+      expect(await arcLookup(respond(200, { txStatus: s }))(TXID)).toBe('unclear');
+    expect(await arcLookup(respond(200, { txStatus: 'REJECTED' }))(TXID)).toBe('missing');
+    expect(await arcLookup(respond(404))(TXID)).toBe('missing');
+    expect(await arcLookup(respond(500))(TXID)).toBe('unclear');
+    expect(await arcLookup(offline)(TXID)).toBe('unclear');
+  });
+
+  test('"not found" is not known; a sighting, ARC holding it or any error is (fail closed)', async () => {
+    const say = (...a: Sighting[]) => a.map((x) => async () => x);
+    expect(await chainMayHave(TXID, say('missing', 'missing'))).toBe(false);
+    expect(await chainMayHave(TXID, say('missing', 'unclear'))).toBe(true);
+    expect(await chainMayHave(TXID, say('seen', 'missing'))).toBe(true);
+    expect(await chainHasSeen(TXID, say('unclear', 'unclear'))).toBe(false);
+    expect(await chainHasSeen(TXID, say('missing', 'seen'))).toBe(true);
+    // The real lookups: WhatsOnChain 404 + ARC 404 → not known.
+    const f404 = respond(404);
+    expect(await chainMayHave(TXID, [wocLookup(f404), arcLookup(f404)])).toBe(false);
+  });
+
+  test("settleWhenSeen no longer sends a payment just because 1Sat's store has a copy", async () => {
+    const w = fakeWallet();
+    const r = await settleWhenSeen(w, TXID, {
+      ...quiet,
+      lookups: defaultLookups(async (u: string) =>
+        u.includes('1sat.app') ? new Response('{}', { status: 200 }) : new Response('{}', { status: 404 }),
+      ),
+      settleDelaysMs: [0],
+      sleep: async () => undefined,
+    });
+    expect(r).toBe('not-seen');
+    expect(w.sent).toEqual([]);
+  });
+});
+
+describe('sendThroughWallet: the wallet broadcasts a stored payment and says what happened', () => {
+  const wallet = (answer: () => unknown) => ({
+    abortAction: async () => {
+      throw new Error('never aborts');
+    },
+    createAction: async () => {
+      const a = answer();
+      if (a instanceof Error) throw a;
+      return a;
+    },
+  });
+  const err = (fields: Record<string, unknown>) => Object.assign(new Error('WERR_REVIEW_ACTIONS'), fields);
+
+  test("'unproven' sent; 'sending' pending (the wallet keeps retrying)", async () => {
+    expect(
+      await sendThroughWallet(
+        wallet(() => ({ sendWithResults: [{ txid: TXID, status: 'unproven' }] })),
+        TXID,
+        quiet,
+      ),
+    ).toBe('sent');
+    expect(
+      await sendThroughWallet(
+        wallet(() =>
+          err({
+            sendWithResults: [{ txid: TXID, status: 'sending' }],
+            reviewActionResults: [{ txid: TXID, status: 'serviceError' }],
+          }),
+        ),
+        TXID,
+        quiet,
+      ),
+    ).toBe('pending');
+  });
+
+  test("'failed' is a refusal only when the broadcaster answered for it; with no post it is unknown", async () => {
+    expect(
+      await sendThroughWallet(
+        wallet(() =>
+          err({
+            sendWithResults: [{ txid: TXID, status: 'failed' }],
+            reviewActionResults: [{ txid: TXID, status: 'invalidTx' }],
+          }),
+        ),
+        TXID,
+        quiet,
+      ),
+    ).toBe('refused');
+    // The batch / row was gone: the toolbox marks it failed without posting anything (no throw, no answers).
+    expect(
+      await sendThroughWallet(
+        wallet(() => ({ sendWithResults: [{ txid: TXID, status: 'failed' }] })),
+        TXID,
+        quiet,
+      ),
+    ).toBe('unknown');
+    expect(
+      await sendThroughWallet(
+        wallet(() => new Error('offline')),
+        TXID,
+        quiet,
+      ),
+    ).toBe('unknown');
+    expect(
+      await sendThroughWallet(
+        wallet(() => ({})),
+        'not-a-txid',
+        quiet,
+      ),
+    ).toBe('unknown');
   });
 });

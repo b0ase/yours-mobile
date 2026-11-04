@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { DeviceDataNote } from '../../components/DeviceDataNote';
+import { isOnDeviceStore } from '../../services/localFirst';
 import { AccountNameField } from '../../components/AccountNameField';
 import {
   accountNameError,
@@ -816,6 +818,12 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
       >
         Your wallet has been successfully restored.
       </motion.p>
+      {/* Until this account is on this device's store its change may need the device data (services/localFirst.ts). */}
+      {!isOnDeviceStore(chromeStorageService.getCurrentAccountObject().account?.storageConfig) && (
+        <div className="w-full">
+          <DeviceDataNote onDevice={false} />
+        </div>
+      )}
 
       <motion.div
         initial={{ opacity: 0, y: 8 }}

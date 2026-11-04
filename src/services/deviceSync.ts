@@ -95,9 +95,28 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
     }, ms);
   }
 
+  /**
+   * Push now and say whether it worked (Store payments, P0 3 Nov 2026: back up a payment's rows, which hold its change
+   * derivation, BEFORE it is broadcast). The push STARTS after this call, so it carries rows written just before; a run
+   * already in flight is waited for, not joined. A site mid-action is waited for a little, then it is a failure.
+   */
+  const pushNow = async (o: { busyWaitMs?: number[]; sleep?: (ms: number) => Promise<void> } = {}) => {
+    const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+    if (!deps.applies()) return { ok: true, pulled: false, pushed: false } as DeviceSyncResult;
+    for (const wait of o.busyWaitMs ?? [1_000, 2_000, 4_000]) {
+      if (!deps.busy?.()) break;
+      await sleep(wait);
+    }
+    if (deps.busy?.()) return { ok: false, error: 'a site action is in progress' } as DeviceSyncResult;
+    while (running) await running.catch(() => undefined);
+    running = run('push').finally(() => (running = null));
+    return running;
+  };
+
   return {
     /** Pull the other devices' changes, then push this device's ("Sync with my other devices", wallet open). */
     syncNow: () => once('full'),
+    pushNow,
     /** Something changed here: update the backup shortly (debounced; the latest change resets the wait). */
     changed: () => {
       if (failures === 0) schedule(PUSH_DELAY_MS);
@@ -130,4 +149,45 @@ export function notifyOnWalletChanges(wallet: unknown, changed: () => void): boo
     };
   }
   return true;
+}
+
+export type BackupBeforeSend =
+  | { ok: true; how: 'pushed' | 'remote-active' | 'no-backup' }
+  | { ok: false; error: string };
+
+/**
+ * Before a Store payment is broadcast, its new rows (inputs spent, change with its BRC-29 derivation) must be in the
+ * encrypted remote backup (P0, 3 Nov 2026: the 28.67 BSV change of 877d2505… existed only on one device and was lost).
+ *  - this device's store active, a backup configured: push now; ok only if the push went through;
+ *  - the remote store active: the rows were written there (createAction runs on it): ok;
+ *  - no backup configured at all: nothing to push to: ok, logged (the same as every other payment).
+ * A push that fails or takes longer than `timeoutMs` is { ok: false }: the caller must not broadcast.
+ */
+export async function backupBeforeSend(d: {
+  deviceActive: () => boolean;
+  backupConfigured: () => boolean;
+  pushNow: () => Promise<DeviceSyncResult>;
+  timeoutMs?: number;
+  log?: (m: string) => void;
+}): Promise<BackupBeforeSend> {
+  const log = d.log ?? ((m: string) => console.warn(m));
+  if (!d.deviceActive()) return { ok: true, how: 'remote-active' };
+  if (!d.backupConfigured()) {
+    log('[deviceSync] no backup configured: a Store payment goes out with its rows on this device only');
+    return { ok: true, how: 'no-backup' };
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<DeviceSyncResult>((ok) => {
+    timer = setTimeout(() => ok({ ok: false, error: 'the backup took too long' }), d.timeoutMs ?? 60_000);
+  });
+  try {
+    const r = await Promise.race([
+      d.pushNow().catch((e: unknown) => ({ ok: false as const, error: errText(e) })),
+      timeout,
+    ]);
+    if (r.ok && r.pushed) return { ok: true, how: 'pushed' };
+    return { ok: false, error: r.ok ? 'the backup was not updated' : r.error };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }

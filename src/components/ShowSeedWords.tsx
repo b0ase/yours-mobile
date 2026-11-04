@@ -4,6 +4,7 @@ import { PasskeyUnlockButton } from '../mobile/passkey/PasskeyCreate';
 import { SEEDLESS_ENABLED } from '../mobile/passkey/prf';
 import { getPlatform } from '../platform';
 import { copyWithAutoClear, revealSeed, SeedRevealError } from '../utils/seedReveal';
+import { DeviceDataNote } from './DeviceDataNote';
 
 /**
  * Settings › Show my 12 words (owner, 19 Oct 2026). Warning → password (or Face ID / fingerprint where it is set up)
@@ -20,6 +21,11 @@ export type ShowSeedWordsProps = {
   readMnemonic: () => Promise<string | undefined>;
   onDone: () => void;
   onCopied?: (text: string) => void;
+  /**
+   * Is this account on this device's store? false = its change may need this device's data, so the words alone may
+   * not bring all of it back yet (services/localFirst.ts). Undefined: no note.
+   */
+  onDeviceStore?: boolean;
 };
 
 type Step = 'warn' | 'confirm' | 'show';
@@ -28,7 +34,14 @@ const CARD = { backgroundColor: 'var(--bw-surface, #17191E)', border: '1px solid
 const MUTED = { color: 'var(--bw-muted, #98A2B3)' };
 const TEXT = { color: 'var(--bw-text, #FFFFFF)' };
 
-export const ShowSeedWords = ({ accountLabel, verifyPassword, readMnemonic, onDone, onCopied }: ShowSeedWordsProps) => {
+export const ShowSeedWords = ({
+  accountLabel,
+  verifyPassword,
+  readMnemonic,
+  onDone,
+  onCopied,
+  onDeviceStore,
+}: ShowSeedWordsProps) => {
   const [step, setStep] = useState<Step>('warn');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -123,6 +136,7 @@ export const ShowSeedWords = ({ accountLabel, verifyPassword, readMnemonic, onDo
     return (
       <div className="w-full">
         {header}
+        {onDeviceStore !== undefined && <DeviceDataNote onDevice={onDeviceStore} />}
         <div
           className="rounded-xl p-4 mb-4"
           style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)' }}
