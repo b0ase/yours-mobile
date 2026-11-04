@@ -927,4 +927,12 @@ describe('06c M2: an orphan unsent Store payment (signed, never in the outbox) i
     expect(r.released).toEqual([]);
     expect((await txRow(w, orphan.txid))?.status).toBe('nosend');
   });
+
+  test('one look says "not seen" but the retried check is unclear (a 1Sat copy, ARC QUEUED): never released', async () => {
+    const { chain, w, orphan, server } = await orphanWorld(() => [202, { pending: true, unverified: true }]);
+    const { deps } = depsFor(chain, { releaseLookups: [async () => 'missing', async () => 'unclear'] });
+    const r = await api.settleStorePayments({ wallet: w.wallet } as never, server.f, { deps, log: () => undefined });
+    expect(r.released).toEqual([]);
+    expect((await txRow(w, orphan.txid))?.status).toBe('nosend');
+  });
 });
