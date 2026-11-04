@@ -21,7 +21,12 @@
 //      tx: the server reads it from WhatsOnChain and checks it like any other;
 //   7. a payment that matches is honoured even after its quote ran out (owner's policy, 3 Nov 2026);
 //   8. a pending payment the network never got (ARC 404/REJECTED and WhatsOnChain 404, an hour after the quote ran out)
-//      is let go: its txid is cleared so the item can be bought again. If it shows up later, a claim records it.
+//      is let go: its txid is cleared so the item can be bought again. If it shows up later, a claim records it;
+//   9. one item, one payment (b-Aware shdx, 29 Oct 2026): a quote taken before the item was bought stayed payable after
+//      it, so the buyer could be charged twice. `conflict(row, txid)` (the seller's rule: already owned, or another
+//      payment for it on its way) is asked before the txid is recorded, so a claim intent is refused and the wallet
+//      never broadcasts, and asked again right after the write: when two claims for the same item land together,
+//      neither is told to go on while the other holds a txid (at worst both are refused and nothing is paid).
 'use strict';
 
 /** A pending payment is let go only this long after its quote ran out, and only when nobody has it (recheck). */
@@ -57,6 +62,7 @@ async function scriptsVerify(tx) {
  *  - paid(row, txid) → [200, body]: marks the row paid (and its own side effects: notify, expiry, clash);
  *  - paidBody(row) → body for a retry of a claim that already went through;
  *  - pendingBody(row, txid) → the extra fields of a 202 (pack, order…);
+ *  - conflict(row, txid) → null | [status, body]: why this buyer may not pay for this row's item now (rule 9); optional;
  *  - now(), log.
  */
 function makeStoreClaim(deps) {
@@ -76,6 +82,16 @@ function makeStoreClaim(deps) {
     if (typeof deps.setTxidIfEmpty === 'function') return (await deps.setTxidIfEmpty(row.id, txid)) === true;
     await update(row.id, { txid });
     return true;
+  };
+  const conflict = async (row, txid) =>
+    typeof deps.conflict === 'function' ? ((await deps.conflict(row, txid)) ?? null) : null;
+  /** A claim refused by rule 9. Without intent the payer may have broadcast already: say so for a refund by hand. */
+  const refuse = (verdict, { quoteId, txid, intent }) => {
+    if (!intent)
+      log(
+        `store ${kind}: payment ${txid} for quote ${quoteId} refused (${verdict[1]?.error}); refund by hand if it was sent`,
+      );
+    return verdict;
   };
 
   /**
@@ -160,6 +176,9 @@ function makeStoreClaim(deps) {
     if (!resuming) {
       const other = await getByTxid(txid);
       if (other && other.id !== row.id) return [409, { error: 'tx_used' }];
+      // Rule 9: already owned, or another payment for the item on its way: nothing is recorded or sent.
+      const before = await conflict(row, txid);
+      if (before) return refuse(before, { quoteId, txid, intent });
       // One txid, one paid record across orders, purchases and deposits (site/lib/paidTxids.js).
       if ((await ledger.reserve(txid, kind, row.id)) !== 'ok') return [409, { error: 'tx_used' }];
       if (now() > Date.parse(row.quote_expires_at))
@@ -168,6 +187,13 @@ function makeStoreClaim(deps) {
       if (!(await setTxid(row, txid))) {
         const again = await getByQuote(quoteId);
         if (!again || again.txid !== txid) return [409, { error: 'payment_pending' }];
+      }
+      // Rule 9 again, now that this txid is visible: a claim for the same item that wrote at the same moment sees this
+      // one, and this one sees it. Whoever sees another gives way and clears its txid, before anything is sent.
+      const after = await conflict({ ...row, txid }, txid);
+      if (after) {
+        await update(row.id, { txid: null });
+        return refuse(after, { quoteId, txid, intent });
       }
       resuming = true;
     }

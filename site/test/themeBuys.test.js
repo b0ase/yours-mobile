@@ -291,3 +291,107 @@ describe('theme buys', () => {
     expect(store.rows[0].txid).toBe(tx.id('hex'));
   });
 });
+
+/**
+ * b-Aware, shdx (29 Oct 2026): a quote taken before the pack was bought stayed payable after it was owned, so the
+ * same buyer could be charged twice for one pack (two devices, a double tap, a retry, or the agent API). The quote
+ * refused a second quote, but the claim never looked again. The claim now refuses, before any txid is recorded and
+ * before the wallet is told to broadcast (claim intent), when this buyer already owns the pack or has another
+ * payment for it on its way.
+ */
+describe('shdx: one pack, one payment', () => {
+  const intentBody = (u, q, tx) =>
+    u.sign('theme-buy-claim', { quote_id: q.quote_id, txid: tx.id('hex'), intent: '1' }, { rawtx: tx.toHex() });
+
+  test('a second quote taken before the first was paid: its claim intent is refused once the pack is owned', async () => {
+    const { h, store, broadcasts } = setup();
+    const u = user();
+    const [, qa] = await h.quote(await u.sign('theme-buy-quote', { pack: 'vexvoid' }));
+    const [, qb] = await h.quote(await u.sign('theme-buy-quote', { pack: 'vexvoid' }));
+    const txb = payTx(qb);
+    expect((await h.claim(await claimBody(u, qb, txb)))[0]).toBe(200);
+    const txa = payTx(qa, { n: 1 });
+    // The wallet asks before it broadcasts: refused, so it releases the payment unsent.
+    expect(await h.claim(await intentBody(u, qa, txa))).toEqual([409, { error: 'already_owned' }]);
+    // A claim without intent (a payer that only signed) is refused too: nothing broadcast, nothing recorded.
+    expect(await h.claim(await claimBody(u, qa, txa))).toEqual([409, { error: 'already_owned' }]);
+    expect(broadcasts).toEqual([txb.id('hex')]);
+    const rowA = store.rows.find((r) => r.quote_id === qa.quote_id);
+    expect(rowA.txid ?? null).toBeNull();
+    expect(rowA.status).toBe('quoted');
+    expect(store.rows.filter((r) => r.status === 'paid').length).toBe(1);
+  });
+
+  test('two quotes paid one after the other while the first is on its way: the second is refused', async () => {
+    const { h, store, net } = setup();
+    net.arc = 'ANNOUNCED_TO_NETWORK';
+    net.status = 'out';
+    const u = user();
+    const [, qa] = await h.quote(await u.sign('theme-buy-quote', { pack: 'npg' }));
+    const [, qb] = await h.quote(await u.sign('theme-buy-quote', { pack: 'npg' }));
+    const txa = payTx(qa);
+    expect((await h.claim(await intentBody(u, qa, txa)))[0]).toBe(202);
+    const txb = payTx(qb, { n: 1 });
+    expect(await h.claim(await intentBody(u, qb, txb))).toEqual([409, { error: 'payment_pending' }]);
+    expect(store.rows.find((r) => r.quote_id === qb.quote_id).txid ?? null).toBeNull();
+    // The first goes through as before.
+    expect((await h.claim(await claimBody(u, qa, txa)))[0]).toBe(202);
+  });
+
+  test('another buyer, or another pack, is not affected', async () => {
+    const { h } = setup();
+    const a = user(1);
+    const b = user(2);
+    const [, qa] = await h.quote(await a.sign('theme-buy-quote', { pack: 'npgx' }));
+    const [, qb] = await h.quote(await b.sign('theme-buy-quote', { pack: 'npgx' }));
+    const [, qa2] = await h.quote(await a.sign('theme-buy-quote', { pack: 'npg' }));
+    expect((await h.claim(await claimBody(a, qa, payTx(qa))))[0]).toBe(200);
+    expect((await h.claim(await claimBody(b, qb, payTx(qb, { n: 1 }))))[0]).toBe(200);
+    expect((await h.claim(await claimBody(a, qa2, payTx(qa2, { n: 2 }))))[0]).toBe(200);
+  });
+
+  test('two claim intents at the same moment: never both told to broadcast', async () => {
+    const store = memStore();
+    // Both txid writes land before either claim reads again (PostgREST: two requests in flight).
+    let waiting = [];
+    const update = store.update;
+    store.update = async (id, p) => {
+      if (p && typeof p.txid === 'string') {
+        await new Promise((ok) => {
+          waiting.push(ok);
+          if (waiting.length === 2) {
+            for (const w of waiting) w();
+            waiting = [];
+          }
+        });
+      }
+      return update(id, p);
+    };
+    SIGN_AT.t = NOW;
+    const broadcasts = [];
+    const h = tb.makeThemeBuyHandlers({
+      store,
+      ledger: ptx.memoryPaidTxids(),
+      rate: async () => 50,
+      broadcast: async (tx) => (broadcasts.push(tx.id('hex')), { txStatus: 'SEEN_ON_NETWORK', accepted: true }),
+      network: async () => 'out',
+      env: { THEME_ORDER_PAY_ADDRESS: PAY },
+      now: () => NOW,
+      log: () => undefined,
+    });
+    const u = user();
+    const [, qa] = await h.quote(await u.sign('theme-buy-quote', { pack: 'tokenblaster' }));
+    const [, qb] = await h.quote(await u.sign('theme-buy-quote', { pack: 'tokenblaster' }));
+    const answers = await Promise.all([
+      h.claim(await intentBody(u, qa, payTx(qa))),
+      h.claim(await intentBody(u, qb, payTx(qb, { n: 1 }))),
+    ]);
+    const told = answers.filter(([s]) => s === 202);
+    expect(told.length).toBeLessThanOrEqual(1);
+    for (const [s, body] of answers) if (s !== 202) expect(body.error).toBe('payment_pending');
+    // A refused claim leaves its quote with no txid, so the buyer can try again.
+    const withTxid = store.rows.filter((r) => r.txid);
+    expect(withTxid.length).toBe(told.length);
+    expect(broadcasts).toEqual([]);
+  });
+});

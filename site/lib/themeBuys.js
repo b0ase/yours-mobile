@@ -164,11 +164,28 @@ function makeThemeBuyHandlers({
     paid: markPaid,
     paidBody: (row) => ({ pack: row.pack_id, txid: row.txid }),
     pendingBody: (row) => ({ pack: row.pack_id }),
+    // b-Aware shdx (29 Oct 2026): a quote taken before the pack was bought must not be payable once it is owned or
+    // another payment for it is on its way (storeClaim.js rule 9). Same answers as a second quote gets below.
+    conflict: (row, txid) => packConflict(row.identity_key, row.pack_id, { except: row.id, txid }),
     now,
     log,
   });
   const pendingOf = async (identityKey) =>
     typeof store.pending === 'function' ? ((await store.pending(identityKey).catch(() => [])) ?? []) : [];
+  /**
+   * Why this buyer may not pay for this pack now: owned (409 already_owned), or a payment for it on its way that the
+   * network may still take (409 payment_pending). `except` is the row being claimed, `txid` its own payment.
+   */
+  async function packConflict(identityKey, packId, { except, txid } = {}) {
+    if ((await store.owned(identityKey)).some((r) => r.pack_id === packId && (!txid || r.txid !== txid)))
+      return [409, { error: 'already_owned' }];
+    for (const p of (await pendingOf(identityKey)).filter((r) => r.pack_id === packId && r.id !== except)) {
+      const r = await claimer.recheck(p);
+      if (r === 'paid') return [409, { error: 'already_owned' }];
+      if (r === 'pending' || r === 'missing') return [409, { error: 'payment_pending' }];
+    }
+    return null;
+  }
 
   const quote = async (body) => {
     const pay = payAddress(env);
@@ -179,13 +196,9 @@ function makeThemeBuyHandlers({
     const identityKey = String(body.identityKey).toLowerCase();
     const packId = String((body.fields || {}).pack || '');
     if (!Object.prototype.hasOwnProperty.call(PACKS, packId)) return [404, { error: 'pack_not_for_sale' }];
-    if ((await store.owned(identityKey)).some((r) => r.pack_id === packId)) return [409, { error: 'already_owned' }];
-    // A payment for this pack is out and the network hasn't shown it yet: don't take a second one.
-    for (const p of (await pendingOf(identityKey)).filter((r) => r.pack_id === packId)) {
-      const r = await claimer.recheck(p);
-      if (r === 'paid') return [409, { error: 'already_owned' }];
-      if (r === 'pending' || r === 'missing') return [409, { error: 'payment_pending' }];
-    }
+    // Owned, or a payment for this pack is out and the network hasn't shown it yet: don't take a second one.
+    const busy = await packConflict(identityKey, packId);
+    if (busy) return busy;
     const r = await Promise.resolve(rate()).catch(() => 0);
     if (!(r > 0)) return [503, { error: 'price_unavailable' }];
     const usd = PACKS[packId];
