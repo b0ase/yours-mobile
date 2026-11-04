@@ -27,8 +27,11 @@ import {
 
 /** Transaction statuses whose outputs storage treats as real (internalizeAction merges into these). */
 const SETTLED = ['completed', 'unproven', 'sending', 'nosend'];
-/** A spender the walk may stop at (review L2): done or broadcast, and its change rows are in storage. */
-const FINAL = ['completed', 'unproven'];
+/**
+ * A spender storage's word is taken for: mined (completed). An unproven one may never mine (another device's payment can
+ * win), so its coin is asked on chain like any other (review 07c F3).
+ */
+const FINAL = ['completed'];
 export const REMOTE_ACTIVE_REFUSAL =
   'this account’s main copy is still the remote backup. Lock and unlock the wallet so this device becomes the main copy, then try again. Nothing was changed.';
 const TXID = /^[0-9a-f]{64}$/;
@@ -90,9 +93,9 @@ export function makeSeedChangeDeps(w: SeedChangeWiring): SeedChangeDeps {
         if (!o.txid || !TXID.test(o.txid)) continue;
         const outpoint = `${o.txid}.${o.vout}`;
         const spender = o.spentBy != null ? byId.get(o.spentBy) : undefined;
-        // A spender that is done or broadcast is taken from storage (no network call), and the walk still examines it,
-        // so change rows an interrupted sync or short restore left out (all or some) are found. Anything else (stuck,
-        // nosend, sending, unknown) is looked up on chain.
+        // A mined spender is taken from storage (no network call), and the walk still examines it, so change rows an
+        // interrupted sync or short restore left out (all or some) are found. Anything else (unproven, sending, nosend,
+        // stuck, unknown) is looked up on chain.
         if (!o.spendable && spender?.txid && FINAL.includes(spender.status)) settled.set(outpoint, spender.txid);
         else open.add(outpoint);
       }

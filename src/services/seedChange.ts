@@ -213,8 +213,10 @@ export type SeedChangeState = {
   done: boolean;
   /** This scan's one pass re-asking stale "unspent" answers has been made (it runs once the walk has drained). */
   rechecked: boolean;
-  /** Seed addresses whose history is still to be read this run (read before any coin is looked up). */
+  /** Seed addresses whose history is still to be read (a queue; each is read once per scan). */
   addresses: string[];
+  /** Seed addresses read in this scan, and when (the recheck pass reads those older than recheckMs again). */
+  addressesRead: [string, number][];
   /** Transactions to examine, with their walk depth. */
   txs: [string, number][];
   /** Outpoints whose spender is still to be looked up, with their depth. */
@@ -243,12 +245,12 @@ export type SeedChangeDeps = {
   keyDeriver: SeedKeyDeriver;
   /**
    * Start points from storage, read on every run. open: outputs whose spender is looked up on chain. settled: outputs
-   * storage holds as spent by a completed or unproven payment of its own, with that payment's txid. The walk takes the
+   * storage holds as spent by a completed (mined) payment of its own, with that payment's txid. The walk takes the
    * spender from storage (no network call) and still examines it, so change rows missing from storage, all or some, are
    * found (review L2).
    */
   storageOutpoints: () => Promise<{ open: string[]; settled: [string, string][] }>;
-  /** Addresses the seed derives (read on every run, before any coin is looked up). */
+  /** Addresses the seed derives (each history is read once per scan, ahead of coins up to 30% of a run). */
   seedAddresses: () => Promise<string[]>;
   /** Txids in an address's history (funding and spending); undefined when it couldn't be read. */
   addressHistory: (address: string) => Promise<string[] | undefined>;
@@ -317,6 +319,7 @@ const fresh = (now: number): SeedChangeState => ({
   done: false,
   rechecked: false,
   addresses: [],
+  addressesRead: [],
   txs: [],
   outpoints: [],
   examined: [],
@@ -345,7 +348,7 @@ function startState(
   maxRuns: number,
   maxAgeMs: number,
 ) {
-  if (deps.fresh || !loaded || loaded.v !== 3) return fresh(t0);
+  if (deps.fresh || !loaded || loaded.v !== 3 || !Array.isArray(loaded.addressesRead)) return fresh(t0);
   if (loaded.done) {
     const s = fresh(t0);
     const confirmed = new Set(loaded.confirmed);
@@ -393,6 +396,8 @@ async function runOnce(deps: SeedChangeDeps): Promise<SeedChangeReport> {
   const maxRuns = deps.maxRuns ?? 20;
   const maxAgeMs = deps.maxAgeMs ?? 2 * 24 * 3600_000;
   const recheckMs = deps.recheckMs ?? 10 * 60_000;
+  // Address histories may use at most this much of a run while coins are waiting (review 07c F1).
+  const addressMs = Math.floor(walkMs * 0.3);
 
   const refused = deps.refusal?.();
   if (refused) return { ...emptyReport(), error: refused };
@@ -403,6 +408,7 @@ async function runOnce(deps: SeedChangeDeps): Promise<SeedChangeReport> {
   const spends = new Map(s.spends);
   const unspentAt = new Map(s.unspentAt);
   const confirmed = new Set(s.confirmed);
+  const addressesRead = new Map(s.addressesRead);
   const key = (txid: string, vout: number) => `${txid}.${vout}`;
   const found = new Map(s.found.map((f) => [key(f.txid, f.vout), f]));
   const tag = (kind: Retry['kind'], id: string) => `${kind}:${id}`;
@@ -423,6 +429,7 @@ async function runOnce(deps: SeedChangeDeps): Promise<SeedChangeReport> {
     s.spends = [...spends];
     s.unspentAt = [...unspentAt].filter(([o]) => spends.get(o) === '');
     s.confirmed = [...confirmed].filter((o) => !!spends.get(o));
+    s.addressesRead = [...addressesRead];
     s.found = [...found.values()];
     s.updatedAt = now();
     await deps.kv.save(s).catch((e) => log(`[seedChange] saving progress failed: ${String(e)}`));
@@ -469,7 +476,8 @@ async function runOnce(deps: SeedChangeDeps): Promise<SeedChangeReport> {
     const fromStorage = await deps.storageOutpoints();
     const settled = new Map(fromStorage.settled);
     const queued = new Set(s.outpoints.map(([o]) => o));
-    const starts: [string, number][] = [];
+    const openStarts: [string, number][] = [];
+    const settledStarts: [string, number][] = [];
     const enqueue = (o: string, into: [string, number][], depth = 0) => {
       if (!OUTPOINT.test(o) || queued.has(o) || gaveUp.has(tag('outpoint', o))) return;
       const by = spends.get(o);
@@ -477,21 +485,25 @@ async function runOnce(deps: SeedChangeDeps): Promise<SeedChangeReport> {
       queued.add(o);
       into.push([o, depth]);
     };
-    for (const o of fromStorage.open) enqueue(o, starts);
-    for (const [o] of fromStorage.settled) enqueue(o, starts);
+    for (const o of fromStorage.open) enqueue(o, openStarts);
     // Change found earlier and not yet in the wallet whose spend isn't known: look it up.
-    for (const f of found.values()) if (CLAIMABLE.includes(f.state)) enqueue(key(f.txid, f.vout), starts);
-    s.outpoints = [...starts, ...s.outpoints]; // under the walk in progress: deep chains carry on first
+    for (const f of found.values()) if (CLAIMABLE.includes(f.state)) enqueue(key(f.txid, f.vout), openStarts);
+    for (const [o] of fromStorage.settled) enqueue(o, settledStarts);
+    // The stack pops from the end: the walk in progress carries on first, then open coins (where losses are), and only
+    // then storage's settled history, so the transaction cap can't use itself up before an open coin (review 07c F2).
+    s.outpoints = [...settledStarts, ...openStarts, ...s.outpoints];
     progress('Listing the addresses your 12 words make…');
     const seedScripts = new Set<string>();
     for (const a of new Set(await deps.seedAddresses())) {
       const script = p2pkhHex(a);
       if (script) seedScripts.add(script);
-      if (!s.addresses.includes(a) && !gaveUp.has(tag('address', a))) s.addresses.push(a);
+      // Once per scan (review 07c F1): re-reading every address every run could leave no time for any coin.
+      if (!addressesRead.has(a) && !s.addresses.includes(a) && !gaveUp.has(tag('address', a))) s.addresses.push(a);
     }
     await save();
 
     let steps = 0;
+    let addressSpent = 0;
     while (now() - t0 < walkMs) {
       if (++steps % 20 === 0) {
         await save();
@@ -536,16 +548,20 @@ async function runOnce(deps: SeedChangeDeps): Promise<SeedChangeReport> {
         });
         continue;
       }
-      // b. Read one seed address's history before looking up any coin, so addresses are never starved.
-      const a = s.addresses.pop();
-      if (a) {
+      // b. Read one seed address's history, in queue order. Addresses come before coins, up to addressMs of the run
+      //    while coins are waiting, so neither can starve the other (reviews 03261054 and 07c F1).
+      if (s.addresses.length && (addressSpent < addressMs || !s.outpoints.length)) {
+        const a = s.addresses.shift()!;
         progress(`Reading the history of ${a.slice(0, 8)}…`);
+        const before = now();
         const h = await deps.addressHistory(a).catch(() => undefined);
+        addressSpent += now() - before;
         s.stats.addresses++;
         if (!h) {
           fail('address', a, 0);
           continue;
         }
+        addressesRead.set(a, now());
         for (const txid of new Set(h)) if (TXID.test(txid) && !examined.has(txid)) s.txs.push([txid, 0]);
         continue;
       }
@@ -582,17 +598,23 @@ async function runOnce(deps: SeedChangeDeps): Promise<SeedChangeReport> {
         continue;
       }
       // d. The walk has drained. Once per scan, ask again about coins first seen unspent long enough ago that they may
-      //    have been spent (and that payment lost) since; then carry on walking from what that finds.
+      //    have been spent (and that payment lost) since, and read again addresses read that long ago; then carry on
+      //    walking from what that finds.
       if (!s.rechecked) {
         const cutoff = now() - recheckMs;
         const stale = [...spends].filter(([o, v]) => v === '' && (unspentAt.get(o) ?? 0) < cutoff).map(([o]) => o);
-        if (stale.length) {
+        const staleAddresses = [...addressesRead].filter(([, at]) => at < cutoff).map(([a]) => a);
+        if (stale.length || staleAddresses.length) {
           s.rechecked = true;
           progress(`Checking ${stale.length} coins again…`);
           for (const so of stale) {
             spends.delete(so);
             unspentAt.delete(so);
             enqueue(so, s.outpoints);
+          }
+          for (const sa of staleAddresses) {
+            addressesRead.delete(sa);
+            s.addresses.push(sa);
           }
           continue;
         }
@@ -711,6 +733,10 @@ export function seedChangeSummary(r: SeedChangeReport): string {
   if (r.gaveUp > 0)
     parts.push(
       `${r.gaveUp} item${r.gaveUp === 1 ? '' : 's'} couldn’t be checked after several tries and ${r.gaveUp === 1 ? 'was' : 'were'} skipped; Start fresh tries again.`,
+    );
+  if (r.tooDeep > 0)
+    parts.push(
+      `Stopped at this scan’s limit: ${r.tooDeep} more payment${r.tooDeep === 1 ? ' was' : 's were'} not checked, so some change may still be missing.`,
     );
   if (!parts.length)
     parts.push(

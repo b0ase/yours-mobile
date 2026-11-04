@@ -37,11 +37,20 @@ export const reservedOriginatorRefusal = (
   adminOriginator: string,
 ): string | null => {
   if (fromExtension) return null;
-  if (typeof originator === 'string' && originator.trim().toLowerCase() === adminOriginator.toLowerCase()) {
+  // Port-insensitive, like the phone's in-app browser check (review 07c F4): "<extension id>:8443" is still the admin
+  // originator to the toolbox permissions manager, which compares hosts. A scheme, user info or path is dropped first.
+  if (typeof originator === 'string' && isReservedHost(hostOf(originator), adminOriginator))
     return 'Reserved originator';
-  }
   return null;
 };
+
+/** The host[:port] part of an originator that may carry a scheme, user info or path. */
+const hostOf = (originator: string): string =>
+  originator
+    .trim()
+    .replace(/^[a-z][a-z\d+.-]*:\/\//i, '')
+    .replace(/^[^@/]*@/, '')
+    .split(/[/?#]/)[0];
 
 /** A dApp host that would collide with the admin originator (mobile in-app browser / bApp frames). */
 export const isReservedHost = (host: string, adminOriginator: string): boolean => {

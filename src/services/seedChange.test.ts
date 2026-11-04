@@ -797,3 +797,221 @@ describe('re-review fix: a settled spender with only some of its change rows (L2
     expect(r.alreadySats).toBe(7000);
   });
 });
+
+/**
+ * Re-review 07c (model/review/capAndAddrs.test.ts and starveReal.test.ts), ported with assertions. Simulated clock:
+ * 350 ms per WhatsOnChain lookup, 150 ms per transaction fetch, readMs per address history, 4-minute runs.
+ */
+function lostFrom(kd: KeyDeriver, coin: string) {
+  const stranger = new P2PKH().lock(PrivateKey.fromRandom().toAddress());
+  const t = new Transaction();
+  const [p, v] = coin.split('.');
+  t.addInput({ sourceTXID: p, sourceOutputIndex: Number(v), unlockingScript: stranger });
+  t.addOutput({ lockingScript: stranger, satoshis: 100 });
+  t.addOutput({ lockingScript: changeScript(kd, [coin], 1), satoshis: 50_000 });
+  return { id: t.id('hex'), raw: t.toBinary(), tail: `${t.id('hex')}.1` };
+}
+
+describe('re-review 07c F1: seed addresses can’t starve coin lookups', () => {
+  test('200 (and 1000 throttled) seed addresses: a payment lost from a storage coin is still found on the first tap', async () => {
+    for (const [n, readMs] of [
+      [200, 1000],
+      [1000, 2500],
+    ] as const) {
+      let clock = 1e6;
+      const kd = new KeyDeriver(PrivateKey.fromRandom());
+      const coin = `${txid(42)}.0`;
+      const L = lostFrom(kd, coin);
+      const addrs = Array.from({ length: n }, () => PrivateKey.fromRandom().toAddress());
+      const claimed: string[] = [];
+      const kv = memKV();
+      let reads = 0;
+      const deps: SeedChangeDeps = {
+        keyDeriver: kd as never,
+        now: () => clock,
+        kv,
+        storageOutpoints: async () => ({
+          open: [coin, ...Array.from({ length: 300 }, (_, i) => `${txid(i + 100)}.0`)],
+          settled: [],
+        }),
+        seedAddresses: async () => addrs,
+        addressHistory: async () => {
+          clock += readMs;
+          reads++;
+          return [];
+        },
+        spentBy: async (o) => {
+          clock += 350;
+          return o === coin ? { state: 'spent', by: L.id, confirmed: true } : { state: 'unspent' };
+        },
+        getRawTx: async (t) => {
+          clock += 150;
+          return t === L.id ? L.raw : undefined;
+        },
+        claim: async (t, ch) =>
+          ch.map((c) => {
+            claimed.push(`${t}.${c.vout}`);
+            return { vout: c.vout, state: 'restored' as const };
+          }),
+      };
+      const r1 = await recoverSeedChange(deps);
+      clock += 5000;
+      expect(claimed).toEqual([L.tail]);
+      expect(kv.peek()!.stats.lookups).toBeGreaterThan(300);
+      // The rest of the addresses are read on the following taps and the scan finishes. Each address is read once, and
+      // at most once more in the scan's recheck pass (when it was read over recheckMs before the walk drained).
+      let r = r1;
+      for (let i = 0; i < 40 && !r.done; i++) {
+        r = await recoverSeedChange(deps);
+        clock += 5000;
+      }
+      expect(r.done).toBe(true);
+      expect(reads).toBeGreaterThanOrEqual(n);
+      expect(reads).toBeLessThanOrEqual(2 * n);
+    }
+  }, 300000);
+
+  test('realistic: 3000 coins, 33 seed addresses (one busy), a lost chain from a deposit address: found on tap 1', async () => {
+    for (const gap of [5_000, 3_600_000]) {
+      let clock = 1_000_000;
+      const kd = new KeyDeriver(PrivateKey.fromRandom());
+      const stranger = new P2PKH().lock(PrivateKey.fromRandom().toAddress());
+      const raw = new Map<string, number[]>();
+      const spent = new Map<string, string>();
+      const history = new Map<string, string[]>();
+      const add = (tx: Transaction) => {
+        const id = tx.id('hex');
+        raw.set(id, tx.toBinary());
+        for (const i of tx.inputs) spent.set(`${i.sourceTXID}.${i.sourceOutputIndex}`, id);
+        return id;
+      };
+      const seed = Array.from({ length: 33 }, () => PrivateKey.fromRandom().toAddress());
+      for (const a of seed) history.set(a, []);
+      for (let i = 0; i < 200; i++) {
+        const t = new Transaction();
+        t.addInput({ sourceTXID: txid(5_000_000 + i), sourceOutputIndex: 0, unlockingScript: stranger });
+        t.addOutput({ lockingScript: new P2PKH().lock(seed[0]), satoshis: 500 });
+        history.get(seed[0])!.push(add(t));
+      }
+      const D = seed[3];
+      const dep = new Transaction();
+      dep.addInput({ sourceTXID: txid(7_777_777), sourceOutputIndex: 0, unlockingScript: stranger });
+      dep.addOutput({ lockingScript: new P2PKH().lock(D), satoshis: 100_000 });
+      const depId = add(dep);
+      history.get(D)!.push(depId);
+      let prev = `${depId}.0`;
+      let tail = '';
+      for (let i = 0; i < 20; i++) {
+        const t = new Transaction();
+        const [p, v] = prev.split('.');
+        t.addInput({ sourceTXID: p, sourceOutputIndex: Number(v), unlockingScript: stranger });
+        t.addOutput({ lockingScript: stranger, satoshis: 100 });
+        t.addOutput({ lockingScript: changeScript(kd, [prev], 1), satoshis: 90_000 - i * 200 });
+        const id = add(t);
+        if (i === 0) history.get(D)!.push(id);
+        prev = `${id}.1`;
+        tail = prev;
+      }
+      const open = Array.from({ length: 3000 }, (_, i) => `${txid(i + 1)}.0`);
+      const claimed: string[] = [];
+      const deps: SeedChangeDeps = {
+        keyDeriver: kd as never,
+        now: () => clock,
+        storageOutpoints: async () => ({ open, settled: [] }),
+        seedAddresses: async () => seed,
+        addressHistory: async (a) => {
+          clock += 1000;
+          return history.get(a) ?? [];
+        },
+        spentBy: async (op) => {
+          clock += 350;
+          const by = spent.get(op);
+          return by ? { state: 'spent', by, confirmed: true } : { state: 'unspent' };
+        },
+        getRawTx: async (t) => {
+          clock += 150;
+          return raw.get(t);
+        },
+        claim: async (t, ch) =>
+          ch.map((c) => {
+            claimed.push(`${t}.${c.vout}`);
+            return { vout: c.vout, state: 'restored' as const };
+          }),
+        kv: memKV(),
+      };
+      await recoverSeedChange(deps);
+      clock += gap;
+      expect(claimed).toContain(tail);
+    }
+  }, 300000);
+});
+
+describe('re-review 07c F2: open coins before settled history; the limit is reported', () => {
+  function capWorld(lossFromReceived: boolean) {
+    let clock = 1e6;
+    const kd = new KeyDeriver(PrivateKey.fromRandom());
+    const stranger = new P2PKH().lock(PrivateKey.fromRandom().toAddress());
+    const raw = new Map<string, number[]>();
+    const settled: [string, string][] = [];
+    let prev = `${txid(9)}.0`;
+    for (let i = 0; i < 300; i++) {
+      const t = new Transaction();
+      const [p, v] = prev.split('.');
+      t.addInput({ sourceTXID: p, sourceOutputIndex: Number(v), unlockingScript: stranger });
+      t.addOutput({ lockingScript: stranger, satoshis: 1 });
+      const id = t.id('hex');
+      raw.set(id, t.toBinary());
+      settled.push([prev, id]);
+      prev = `${id}.0`;
+    }
+    const received = `${txid(77)}.3`; // a received coin storage thinks unspent (not change of a stored payment)
+    const L = lostFrom(kd, received);
+    raw.set(L.id, L.raw);
+    const claimed: string[] = [];
+    const deps: SeedChangeDeps = {
+      keyDeriver: kd as never,
+      now: () => clock,
+      kv: memKV(),
+      maxTxs: 200, // stands in for the default 20 000
+      storageOutpoints: async () => ({ open: lossFromReceived ? [received] : [], settled }),
+      seedAddresses: async () => [],
+      addressHistory: async () => [],
+      spentBy: async (o) => {
+        clock += 350;
+        return o === received ? { state: 'spent', by: L.id, confirmed: true } : { state: 'unspent' };
+      },
+      getRawTx: async (t) => {
+        clock += 5;
+        return raw.get(t);
+      },
+      claim: async (t, ch) =>
+        ch.map((c) => {
+          claimed.push(`${t}.${c.vout}`);
+          return { vout: c.vout, state: 'restored' as const };
+        }),
+    };
+    return { deps, claimed, L, tick: () => (clock += 5000) };
+  }
+
+  test('a payment lost from an open coin is found before the transaction cap is used up on settled history', async () => {
+    const w = capWorld(true);
+    let r = await recoverSeedChange(w.deps);
+    for (let i = 0; i < 2; i++) {
+      w.tick();
+      r = await recoverSeedChange(w.deps);
+    }
+    expect(w.claimed).toContain(w.L.tail);
+    expect(r.tooDeep).toBeGreaterThan(0);
+    expect(seedChangeSummary(r)).toMatch(/Stopped at this scan’s limit: \d+ more payments were not checked/);
+  }, 120000);
+
+  test('when the cap is hit and nothing was found, the summary never says "no missing change found"', async () => {
+    const w = capWorld(false);
+    const r = await recoverSeedChange(w.deps);
+    expect(r.done).toBe(true);
+    expect(r.tooDeep).toBeGreaterThan(0);
+    const text = seedChangeSummary(r);
+    expect(text).not.toMatch(/no missing change found/);
+    expect(text).toMatch(/some change may still be missing/);
+  }, 120000);
+});

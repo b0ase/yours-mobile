@@ -10,11 +10,28 @@
  */
 import 'fake-indexeddb/auto';
 import { describe, expect, test } from 'bun:test';
-import { Beef, KeyDeriver, MerklePath, P2PKH, PrivateKey, Transaction, Utils } from '@bsv/sdk';
+import {
+  Beef,
+  KeyDeriver,
+  LockingScript,
+  MerklePath,
+  P2PKH,
+  PrivateKey,
+  Transaction,
+  UnlockingScript,
+  Utils,
+} from '@bsv/sdk';
 import { Monitor, StorageIdb, StorageProvider, Wallet, WalletStorageManager } from '@bsv/wallet-toolbox-client';
 import { sweepBsv } from '@1sat/actions';
 import { fixUtxoStatus } from '../services/utxoStatus';
-import { recoverSeedChange, seedChangeSummary, wocSpentLookup, type SeedChangeState } from '../services/seedChange';
+import {
+  changeDerivation,
+  recoverSeedChange,
+  seedChangeSummary,
+  wocSpentLookup,
+  type SeedChangeState,
+} from '../services/seedChange';
+import { brc29Script } from '../services/recoverByTxid';
 import { makeSeedChangeDeps, REMOTE_ACTIVE_REFUSAL } from '../services/seedChangeWiring';
 
 const W = Wallet as unknown as {
@@ -680,5 +697,74 @@ describe('re-review fix on the real toolbox: a payment with only some of its cha
     const r = await recover(a, chain, services, []);
     expect(r.restoredSats).toBe(lost.satoshis);
     expect(await balance(a)).toBe(expected);
+  }, 120000);
+});
+
+describe('re-review 07c F3 on the real toolbox: an unproven spender is not taken as final', () => {
+  test('storage says a coin went to an unproven payment, the chain says another device’s payment: its change is found', async () => {
+    const chain = newChain();
+    const services = makeServices(chain);
+    const { w: a } = await fundedWallet(chain, services);
+    // This device pays P from coin C; P is accepted but never mines (left unproven).
+    const p = await pay(a, chain, 25_000);
+    expect(await statusOf(a, p.txid!)).toBe('unproven');
+    const pTx = Transaction.fromBinary(await rawOf(a, p.txid!));
+    const c = `${pTx.inputs[0].sourceTXID}.${pTx.inputs[0].sourceOutputIndex}`;
+    const cSats = Transaction.fromBinary(chain.raw.get(pTx.inputs[0].sourceTXID!)!).outputs[
+      pTx.inputs[0].sourceOutputIndex
+    ].satoshis!;
+    // Another device with the same seed spent C first, in P', and P' mined. Its change is this wallet's (deterministic).
+    const other = new Transaction();
+    other.addInput({
+      sourceTXID: c.split('.')[0],
+      sourceOutputIndex: Number(c.split('.')[1]),
+      unlockingScript: new UnlockingScript(),
+    });
+    other.addOutput({ lockingScript: LockingScript.fromHex(someone()), satoshis: 1000 });
+    const otherChange = cSats - 1000 - 200;
+    other.addOutput({
+      lockingScript: LockingScript.fromHex(brc29Script(a.kd, changeDerivation(a.kd as never, [c], 1)!)),
+      satoshis: otherChange,
+    });
+    const { txid: otherTxid } = mine(chain, other.toBinary());
+    // The wiring no longer counts C as settled: its spender is only unproven.
+    const deps = makeSeedChangeDeps({
+      storage: a.storage,
+      wallet: a.wallet as never,
+      services: services as never,
+      seedAddresses: () => [],
+      kv: memKV(),
+      log: () => undefined,
+    });
+    const starts = await deps.storageOutpoints();
+    expect(starts.open).toContain(c);
+    expect(starts.settled.map(([o]) => o)).not.toContain(c);
+    const r = await recover(a, chain, services, []);
+    expect(r.restoredSats).toBe(otherChange);
+    expect((await spendable(a)).map((o) => o.outpoint)).toContain(`${otherTxid}.1`);
+  }, 120000);
+
+  test('a completed spender is still taken from storage (no network call for its coin)', async () => {
+    const chain = newChain();
+    const services = makeServices(chain);
+    const { w: a } = await fundedWallet(chain, services);
+    const p = await pay(a, chain, 25_000);
+    mine(chain, await rawOf(a, p.txid!));
+    await a.storage.runAsStorageProvider(async (sp) => {
+      const [t] = await sp.findTransactions({ partial: { txid: p.txid! }, noRawTx: true });
+      await sp.updateTransaction(t.transactionId, { status: 'completed' });
+    });
+    const pTx = Transaction.fromBinary(await rawOf(a, p.txid!));
+    const c = `${pTx.inputs[0].sourceTXID}.${pTx.inputs[0].sourceOutputIndex}`;
+    const starts = await makeSeedChangeDeps({
+      storage: a.storage,
+      wallet: a.wallet as never,
+      services: services as never,
+      seedAddresses: () => [],
+      kv: memKV(),
+      log: () => undefined,
+    }).storageOutpoints();
+    expect(starts.settled).toContainEqual([c, p.txid]);
+    expect(starts.open).not.toContain(c);
   }, 120000);
 });
