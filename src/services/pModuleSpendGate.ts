@@ -26,7 +26,7 @@
  * toolbox untouched. If the manager ever lacks a method the gate needs, every site action routed to a module is
  * refused instead of let through unchecked.
  */
-import { Transaction } from '@bsv/sdk';
+import { P2PKH, PublicKey, Transaction } from '@bsv/sdk';
 import { parseOneInputLabel } from '@1sat/types';
 
 export const HELD_ASSET_REFUSAL =
@@ -36,7 +36,7 @@ export const MODULE_GATE_UNAVAILABLE = "bWalletX couldn't check this payment, so
 /** @1sat/actions PENDING_RESOLVED_SPENDS_KEY (pipeline/spendTargets.js; not exported from the package root). */
 const PENDING_RESOLVED_SPENDS = '__pendingResolvedSpends';
 
-type Output = { lockingScript?: string; satoshis?: number; basket?: unknown };
+type Output = { lockingScript?: string; satoshis?: number; basket?: unknown; customInstructions?: unknown };
 type CreateArgs = {
   labels?: unknown;
   inputs?: { outpoint?: unknown }[];
@@ -68,7 +68,15 @@ type Manager = {
   ) => { netSpent: number; lineItems: unknown[] };
   ensureSpendingAuthorization?: (args: SpendArgs) => Promise<boolean>;
   maybeDecryptMetadata?: (ciphertext: string) => Promise<string>;
-  underlying?: { abortAction?: (args: { reference: string }) => Promise<unknown> };
+  underlying?: {
+    abortAction?: (args: { reference: string }) => Promise<unknown>;
+    getPublicKey?: (args: {
+      protocolID: unknown;
+      keyID: string;
+      counterparty: string;
+      forSelf: boolean;
+    }) => Promise<{ publicKey: string }>;
+  };
 };
 
 /** Pure: does a request name wallet-held assets for a module to load, or bring resolved spends of its own? */
@@ -118,6 +126,11 @@ export function guardPModuleSpends<T extends object>(manager: T, deps: { adminOr
       return call.call(manager, finalArgs, modules, originator);
     if (namesHeldAssets(finalArgs)) throw new Error(HELD_ASSET_REFUSAL);
     const asked = (finalArgs ?? {}) as CreateArgs;
+    // The site's own request, copied NOW: the modules change `finalArgs` in place (review 16, F1: an OrdLock V2
+    // purchase replaces its inputs with the wallet's front-funding coins first, which then counted as the site's money
+    // and took the price off the pay sheet).
+    const siteInputs = (Array.isArray(asked.inputs) ? asked.inputs : []).map((i) => ({ outpoint: i?.outpoint }));
+    const siteOutputs = (Array.isArray(asked.outputs) ? asked.outputs : []).map((o) => outputKey(o));
     // What actually goes to the base wallet's createAction: the last module's transformed request.
     let sent: CreateArgs = asked;
     let gated = false;
@@ -130,13 +143,15 @@ export function guardPModuleSpends<T extends object>(manager: T, deps: { adminOr
         // Storage built what was asked for (the same check the manager makes without a module).
         const resolved = m.verifyRequestedOutputsPresent!(tx, sent);
         // Only inputs the site named itself count as its own money; anything a module added is the wallet's.
-        const { netSpent, lineItems } = m.computeNetSpend!(
+        const { netSpent: gross, lineItems } = m.computeNetSpend!(
           tx,
-          { inputs: asked.inputs ?? [], outputs: sent.outputs ?? [] },
+          { inputs: siteInputs, outputs: sent.outputs ?? [] },
           {},
           {},
           resolved,
         );
+        // Less what a module adds that comes straight back to this wallet (an OrdLock purchase's funding cushion).
+        const netSpent = gross - (await returnedToWallet(m, siteOutputs, sent.outputs ?? []));
         if (netSpent > 0) {
           const ok = await m.ensureSpendingAuthorization!({
             originator,
@@ -172,6 +187,43 @@ export function guardPModuleSpends<T extends object>(manager: T, deps: { adminOr
     return call.call(manager, finalArgs, gatedModules, originator);
   };
   return manager;
+}
+
+const outputKey = (o: Output | undefined) => `${String(o?.lockingScript ?? '').toLowerCase()}:${Number(o?.satoshis)}`;
+
+/**
+ * Satoshis in outputs a module ADDED (not in the site's own request) that pay the wallet itself: the output's record names
+ * a key, and the base wallet derives exactly that P2PKH from it. Anything else (a site output a module re-sealed, an
+ * output to someone else) stays counted as spent.
+ */
+async function returnedToWallet(m: Manager, siteOutputs: string[], sent: Output[]): Promise<number> {
+  const unmatched = [...siteOutputs];
+  let back = 0;
+  for (const o of sent) {
+    const at = unmatched.indexOf(outputKey(o));
+    if (at !== -1) {
+      unmatched.splice(at, 1);
+      continue;
+    }
+    if (!o?.basket || typeof o.customInstructions !== 'string' || typeof m.underlying?.getPublicKey !== 'function')
+      continue;
+    try {
+      const rec = JSON.parse(o.customInstructions) as { protocolID?: unknown; keyID?: unknown; counterparty?: unknown };
+      if (!Array.isArray(rec.protocolID) || typeof rec.keyID !== 'string') continue;
+      const { publicKey } = await m.underlying.getPublicKey({
+        protocolID: rec.protocolID,
+        keyID: rec.keyID,
+        counterparty: typeof rec.counterparty === 'string' ? rec.counterparty : 'self',
+        forSelf: true,
+      });
+      const mine = new P2PKH().lock(PublicKey.fromString(publicKey).toAddress()).toHex();
+      if (String(o.lockingScript ?? '').toLowerCase() === mine && Number.isSafeInteger(o.satoshis))
+        back += o.satoshis as number;
+    } catch {
+      // not provably the wallet's: counted as spent
+    }
+  }
+  return back;
 }
 
 /** The site's description for the sheet: the manager encrypts it in place before the modules run. */

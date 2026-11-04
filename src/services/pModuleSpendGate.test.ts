@@ -14,7 +14,8 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { Beef, MerklePath, P2PKH, PrivateKey, Script, Transaction } from '@bsv/sdk';
+import { Beef, MerklePath, P2PKH, PrivateKey, ProtoWallet, PublicKey, Script, Transaction } from '@bsv/sdk';
+import { OrdLockV2 } from '@1sat/templates';
 import { InMemoryPermissionStore, LocalWalletPermissionsManager, normalizeOriginator } from '@1sat/wallet';
 import { createAssetPermissionModules } from '@1sat/permission-module';
 import { guardEverySpendAsks } from './everySpendAsks';
@@ -200,5 +201,241 @@ describe('D-L: a "p" label no longer skips the wallet spend gate', () => {
     const src = readFileSync(new URL('../initWallet.ts', import.meta.url), 'utf8');
     expect(src).toMatch(/guardPModuleSpends\(\s*new LocalWalletPermissionsManager\(/);
     expect(src).not.toMatch(/\?\s*guardAllowance\(\s*new LocalWalletPermissionsManager\(/);
+  });
+});
+
+/**
+ * Review 16, F1: the 1sat module lays out an OrdLock V2 purchase by REPLACING args.inputs on the request object the gate
+ * also reads, with the wallet's own front-funding coins first. The gate then counted those as the site's money, and the
+ * pay sheet, envelope and ledger saw about the fee instead of the price. A real listing, through the real module and
+ * manager; the base wallet signs with a real key, so the module's own script checks run.
+ */
+describe('F1: an OrdLock V2 purchase is priced on the pay sheet at what it really takes from the wallet', () => {
+  const PRICE = 250_000;
+  /** The toolbox wants a bare domain once a basket is involved. */
+  const BUYER_SITE = 'market.example';
+
+  function keyedBase(root: PrivateKey, held: { outpoint: string; satoshis: number; tx: Transaction }[] = []) {
+    const proto = new ProtoWallet(root);
+    const calls: string[] = [];
+    const known = new Map<string, Transaction>();
+    const coin = (sats: number) => {
+      const t = new Transaction();
+      t.addInput({
+        sourceTXID: '22'.repeat(32),
+        sourceOutputIndex: 0,
+        unlockingScript: new Script(),
+        sequence: 0xffffffff,
+      });
+      t.addOutput({ lockingScript: new P2PKH().lock(new PrivateKey(5).toAddress()), satoshis: sats });
+      t.merklePath = new MerklePath(900_000, [[{ offset: 0, hash: t.id('hex'), txid: true }]]);
+      return t;
+    };
+    const signable = new Map<string, number[]>();
+    let n = 0;
+    const base = {
+      calls,
+      getPublicKey: (a: never) => proto.getPublicKey(a),
+      createSignature: (a: never) => proto.createSignature(a),
+      encrypt: async (a: { plaintext: number[] }) => ({ ciphertext: a.plaintext }),
+      decrypt: async (a: { ciphertext: number[] }) => ({ plaintext: a.ciphertext }),
+      listActions: async () => ({ totalActions: 0, actions: [] }),
+      listOutputs: async (a: { basket?: string }) => {
+        if (a.basket !== '1sat-deposit' || !held.length) return { totalOutputs: 0, outputs: [] };
+        const beef = new Beef();
+        for (const h of held) beef.mergeTransaction(h.tx);
+        return {
+          totalOutputs: held.length,
+          BEEF: beef.toBinary(),
+          outputs: held.map((h) => ({
+            outpoint: h.outpoint,
+            satoshis: h.satoshis,
+            spendable: true,
+            tags: [`hold:${Date.now() + 60_000}`, 'ordlock-funding'],
+            customInstructions: JSON.stringify({ protocolID: [1, 'onesat'], keyID: 'held', counterparty: 'self' }),
+          })),
+        };
+      },
+      createAction: async (args: {
+        inputs?: { outpoint: string }[];
+        inputBEEF?: number[];
+        outputs?: { lockingScript: string; satoshis: number }[];
+        options?: { signAndProcess?: boolean };
+      }) => {
+        const tx = new Transaction();
+        const beef = args.inputBEEF ? Beef.fromBinary(Array.from(args.inputBEEF)) : undefined;
+        let into = 0;
+        for (const i of args.inputs ?? []) {
+          const [txid, vout] = i.outpoint.replace('_', '.').split('.');
+          const src = known.get(txid) ?? beef?.findAtomicTransaction(txid);
+          if (!src) throw new Error(`fake: no source for ${i.outpoint}`);
+          tx.addInput({
+            sourceTransaction: src,
+            sourceOutputIndex: Number(vout),
+            unlockingScript: new Script(),
+            sequence: 0xffffffff,
+          });
+          into += src.outputs[Number(vout)].satoshis ?? 0;
+        }
+        const fund = coin(FUNDS);
+        tx.addInput({
+          sourceTransaction: fund,
+          sourceOutputIndex: 0,
+          unlockingScript: new Script(),
+          sequence: 0xffffffff,
+        });
+        let out = 0;
+        for (const o of args.outputs ?? []) {
+          tx.addOutput({ lockingScript: Script.fromHex(o.lockingScript), satoshis: o.satoshis });
+          out += o.satoshis;
+        }
+        tx.addOutput({
+          lockingScript: new P2PKH().lock(new PrivateKey(6).toAddress()),
+          satoshis: into + FUNDS - out - FEE,
+        });
+        known.set(tx.id('hex'), tx);
+        const atomic = (() => {
+          const b = new Beef();
+          b.mergeTransaction(tx);
+          return b.toBinaryAtomic(tx.id('hex'));
+        })();
+        if (args.options?.signAndProcess === false) {
+          calls.push('createAction');
+          const reference = `ref-${++n}`;
+          signable.set(reference, atomic);
+          return { signableTransaction: { tx: atomic, reference } };
+        }
+        calls.push('prepare'); // the module's own front-funding step (wallet to wallet)
+        return { txid: tx.id('hex'), tx: atomic };
+      },
+      signAction: async (a: { reference: string }) => {
+        calls.push('signAction');
+        const tx = signable.get(a.reference)!;
+        return { txid: Transaction.fromAtomicBEEF(tx).id('hex'), tx };
+      },
+      abortAction: async () => {
+        calls.push('abortAction');
+        return { aborted: true };
+      },
+    };
+    return base;
+  }
+
+  /** A seller's OrdLock V2 listing of a 1-sat ordinal at PRICE, as a site would hand it to the wallet. */
+  const listing = () => {
+    const seller = new PrivateKey(42).toAddress();
+    const lock = OrdLockV2.lock(seller, seller, PRICE);
+    const t = new Transaction();
+    t.addInput({
+      sourceTXID: '33'.repeat(32),
+      sourceOutputIndex: 0,
+      unlockingScript: new Script(),
+      sequence: 0xffffffff,
+    });
+    t.addOutput({ lockingScript: lock, satoshis: 1 });
+    t.merklePath = new MerklePath(900_001, [[{ offset: 0, hash: t.id('hex'), txid: true }]]);
+    const beef = new Beef();
+    beef.mergeTransaction(t);
+    const payout = OrdLockV2.payoutOutput(lock);
+    return {
+      description: 'Buy a listed ordinal',
+      labels: ['p 1sat action'],
+      inputBEEF: beef.toBinary(),
+      inputs: [{ outpoint: `${t.id('hex')}.0`, inputDescription: 'the listing', unlockingScriptLength: 2000 }],
+      outputs: [
+        {
+          lockingScript: payout.lockingScript.toHex(),
+          satoshis: payout.satoshis!,
+          outputDescription: 'pay the seller',
+        },
+        {
+          lockingScript: new P2PKH().lock(new PrivateKey(7).toAddress()).toHex(),
+          satoshis: 1,
+          outputDescription: 'the ordinal',
+          basket: 'bought ordinals',
+        },
+      ],
+    };
+  };
+
+  function purchaseWallet(answer: boolean, held: Parameters<typeof keyedBase>[1] = []) {
+    const root = new PrivateKey(1234);
+    const base = keyedBase(root, held);
+    const store = new InMemoryPermissionStore();
+    const modules = createAssetPermissionModules({
+      wallet: base as never,
+      promptHandler: async () => true,
+      adminOriginator: ADMIN,
+      permissionStore: store as never,
+    });
+    const mgr = new LocalWalletPermissionsManager(base as never, ADMIN, { permissionModules: modules }, {
+      store,
+    } as never);
+    const sheets: number[] = [];
+    (mgr as unknown as Record<string, unknown>).requestPermissionFlow = async (r: {
+      type: string;
+      spending?: { satoshis: number };
+    }) => {
+      if (r.type !== 'spending') return true; // the receive basket's own sheet: approved, not what is tested here
+      sheets.push(r.spending?.satoshis ?? -1);
+      if (!answer) throw new Error('User denied');
+      return true;
+    };
+    const recorded: number[] = [];
+    const ledger = { total: async () => 0, record: async (_o: string, _m: string, s: number) => void recorded.push(s) };
+    const w = withLocalSpendLedger(
+      guardEverySpendAsks(guardPModuleSpends(mgr, { adminOriginator: ADMIN }), {
+        adminOriginator: ADMIN,
+        normalize: normalizeOriginator,
+      }),
+      ledger as never,
+      () => undefined,
+    );
+    return { w, base, sheets, recorded, root };
+  }
+
+  test('Deny: the pay sheet asks for the price (plus fee), and nothing is signed', async () => {
+    const { w, base, sheets } = purchaseWallet(false);
+    await expect(w.createAction(listing() as never, BUYER_SITE)).rejects.toThrow();
+    expect(sheets).toEqual([PRICE + FEE]);
+    expect(base.calls).not.toContain('signAction');
+    expect(base.calls).toContain('abortAction');
+  });
+
+  test("Approve: signed with the module's real unlocks, and the ledger counts the price", async () => {
+    const { w, base, sheets, recorded } = purchaseWallet(true);
+    const r = (await w.createAction(listing() as never, BUYER_SITE)) as { txid?: string };
+    expect(typeof r.txid).toBe('string');
+    expect(sheets).toEqual([PRICE + FEE]);
+    expect(recorded).toEqual([PRICE + FEE]);
+    expect(base.calls.filter((c) => c === 'signAction').length).toBe(1);
+  });
+
+  test('a cushion the module sends back to the wallet is not counted as spent', async () => {
+    const root = new PrivateKey(1234);
+    const proto = new ProtoWallet(root);
+    const { publicKey } = await proto.getPublicKey({
+      protocolID: [1, 'onesat'],
+      keyID: 'held',
+      counterparty: 'self',
+      forSelf: true,
+    });
+    const big = new Transaction();
+    big.addInput({
+      sourceTXID: '44'.repeat(32),
+      sourceOutputIndex: 0,
+      unlockingScript: new Script(),
+      sequence: 0xffffffff,
+    });
+    big.addOutput({
+      lockingScript: new P2PKH().lock(PublicKey.fromString(publicKey).toAddress()),
+      satoshis: PRICE + 90_000,
+    });
+    big.merklePath = new MerklePath(900_002, [[{ offset: 0, hash: big.id('hex'), txid: true }]]);
+    const { w, sheets } = purchaseWallet(false, [
+      { outpoint: `${big.id('hex')}.0`, satoshis: PRICE + 90_000, tx: big },
+    ]);
+    await expect(w.createAction(listing() as never, BUYER_SITE)).rejects.toThrow();
+    expect(sheets).toEqual([PRICE + FEE]);
   });
 });
