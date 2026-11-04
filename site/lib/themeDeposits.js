@@ -124,6 +124,24 @@ function themeDepositStore(env = process.env, f = fetch) {
         headers: { Prefer: 'return=minimal' },
         body: JSON.stringify(patch),
       }),
+    /** Record a txid only if the row has none yet (two claims can't both take one quote). True when this call set it. */
+    setTxidIfEmpty: async (id, txid) =>
+      (
+        (await req(`theme_deposits?id=eq.${q(id)}&txid=is.null`, {
+          method: 'PATCH',
+          headers: { Prefer: 'return=representation' },
+          body: JSON.stringify({ txid }),
+        })) || []
+      ).length > 0,
+    /** This key's deposits paid by a payment the network hasn't shown yet (status 'quoted', txid set; storeClaim.js). */
+    pendingMine: async (identityKey) =>
+      (await req(
+        `theme_deposits?identity_key=eq.${q(identityKey)}&status=eq.quoted&txid=not.is.null&select=*&order=created_at.desc&limit=20`,
+      )) || [],
+    listMine: async (identityKey) =>
+      (await req(
+        `theme_deposits?identity_key=eq.${q(identityKey)}&status=neq.quoted&select=*&order=created_at.desc&limit=50`,
+      )) || [],
     notify: async (kind, payload) => {
       console.log(`[ops] ${kind}`, JSON.stringify(payload).slice(0, 500));
       try {
@@ -160,6 +178,8 @@ function makeThemeDepositHandlers({
   rate,
   broadcast,
   network = async () => 'unclear',
+  fetchTx,
+  recheckBudgetMs,
   env = process.env,
   now = () => Date.now(),
   quoteMs = QUOTE_MS,
@@ -187,6 +207,9 @@ function makeThemeDepositHandlers({
     getByQuote: store.getByQuote,
     getByTxid: store.getByTxid,
     update: store.updateDeposit,
+    recheckBudgetMs,
+    setTxidIfEmpty: typeof store.setTxidIfEmpty === 'function' ? store.setTxidIfEmpty : undefined,
+    fetchTx,
     ledger,
     parse: parseIncoming,
     check: (tx, row) =>
@@ -255,10 +278,33 @@ function makeThemeDepositHandlers({
       quoteId,
       txid: String(f.txid || '').toLowerCase(),
       rawtx: body.rawtx,
+      intent: f.intent === '1',
     });
   };
 
-  return { config, quote, claim };
+  /**
+   * The payer's deposits, after re-checking the pending ones (review 4 Nov 2026, F6): a deposit answered 202 becomes
+   * paid here once the network has it (and its "deposit paid" notice goes out). Deposits are off until the site form
+   * handles 202; this is the path it will poll.
+   */
+  const status = async (body) => {
+    const sigErr = await verifySigned(body || {}, actions.status || 'theme-deposit-status', now());
+    if (sigErr) return [401, { error: sigErr }];
+    const identityKey = String(body.identityKey).toLowerCase();
+    const pending = typeof store.pendingMine === 'function' ? await store.pendingMine(identityKey).catch(() => []) : [];
+    await claimer.recheckAll((pending || []).slice(0, 10));
+    const rows = typeof store.listMine === 'function' ? await store.listMine(identityKey).catch(() => []) : [];
+    const still = typeof store.pendingMine === 'function' ? await store.pendingMine(identityKey).catch(() => []) : [];
+    return [
+      200,
+      {
+        deposits: (rows || []).map(publicRow),
+        pending: (still || []).map((r) => ({ ...publicRow(r), pending: true })),
+      },
+    ];
+  };
+
+  return { config, quote, claim, status };
 }
 
 module.exports = { MEMO_TAG, depositUsd, validateBrief, memoScript, themeDepositStore, makeThemeDepositHandlers };

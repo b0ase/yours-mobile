@@ -9,7 +9,7 @@ const { makeThemeOrderHandlers, themeOrderStore } = require('../lib/themeOrders'
 const { makeThemeBuyHandlers, themeBuyStore } = require('../lib/themeBuys');
 const { makeThemeDepositHandlers, themeDepositStore } = require('../lib/themeDeposits');
 const { agentHandlerOptions, listProducts, makeAgentBuyHandlers } = require('../lib/agentBuy');
-const { arcSubmit, networkStatus, timed } = require('../lib/paymailStore');
+const { arcSubmit, networkStatus, timed, wocTx } = require('../lib/paymailStore');
 const { chain } = require('../lib/nameFee');
 const { paidTxidStore } = require('../lib/paidTxids');
 
@@ -76,6 +76,7 @@ module.exports = async function handler(req, res) {
       rate: () => chain.bsvUsd(),
       broadcast: arcSubmit(),
       network: networkStatus(),
+      fetchTx: wocTx(),
       ...agentHandlerOptions(),
     };
     handlers = makeAgentBuyHandlers({

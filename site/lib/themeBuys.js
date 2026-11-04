@@ -8,7 +8,7 @@ const { OP, P2PKH, Script, Utils } = require('@bsv/sdk');
 const { parseIncoming, verifySigned } = require('./paymail');
 const { checkPayment, payAddress, priceSats, QUOTE_MS, CLAIM_GRACE_MS } = require('./themeOrders');
 const { signReceipt } = require('./storeReceipt');
-const { makeStoreClaim } = require('./storeClaim');
+const { makeStoreClaim, protocolError } = require('./storeClaim');
 
 const FEE_ROOM_SATS = 500;
 
@@ -95,6 +95,15 @@ function themeBuyStore(env = process.env, f = fetch) {
         headers: { Prefer: 'return=minimal' },
         body: JSON.stringify(patch),
       }),
+    /** Record a txid only if the row has none yet (two claims can't both take one quote). True when this call set it. */
+    setTxidIfEmpty: async (id, txid) =>
+      (
+        (await req(`theme_purchases?id=eq.${q(id)}&txid=is.null`, {
+          method: 'PATCH',
+          headers: { Prefer: 'return=representation' },
+          body: JSON.stringify({ txid }),
+        })) || []
+      ).length > 0,
     owned: async (identityKey) =>
       (await req(
         `theme_purchases?identity_key=eq.${q(identityKey)}&status=eq.paid&select=pack_id,txid,paid_at&limit=200`,
@@ -123,6 +132,9 @@ function makeThemeBuyHandlers({
   rate,
   broadcast,
   network = async () => 'unclear',
+  fetchTx,
+  recheckBudgetMs,
+  requireProtocol = false,
   env = process.env,
   now = () => Date.now(),
   quoteMs = QUOTE_MS,
@@ -140,6 +152,9 @@ function makeThemeBuyHandlers({
     getByQuote: store.getByQuote,
     getByTxid: store.getByTxid,
     update: store.update,
+    recheckBudgetMs,
+    setTxidIfEmpty: typeof store.setTxidIfEmpty === 'function' ? store.setTxidIfEmpty : undefined,
+    fetchTx,
     ledger,
     parse: parseIncoming,
     check: (tx, row) =>
@@ -160,6 +175,7 @@ function makeThemeBuyHandlers({
     if (!pay) return [503, { error: 'not_configured' }];
     const sigErr = await verifySigned(body || {}, actions.quote || 'theme-buy-quote', now());
     if (sigErr) return [401, { error: sigErr }];
+    if (requireProtocol && protocolError(body)) return protocolError(body);
     const identityKey = String(body.identityKey).toLowerCase();
     const packId = String((body.fields || {}).pack || '');
     if (!Object.prototype.hasOwnProperty.call(PACKS, packId)) return [404, { error: 'pack_not_for_sale' }];
@@ -168,7 +184,7 @@ function makeThemeBuyHandlers({
     for (const p of (await pendingOf(identityKey)).filter((r) => r.pack_id === packId)) {
       const r = await claimer.recheck(p);
       if (r === 'paid') return [409, { error: 'already_owned' }];
-      if (r === 'pending') return [409, { error: 'payment_pending' }];
+      if (r === 'pending' || r === 'missing') return [409, { error: 'payment_pending' }];
     }
     const r = await Promise.resolve(rate()).catch(() => 0);
     if (!(r > 0)) return [503, { error: 'price_unavailable' }];
@@ -225,6 +241,7 @@ function makeThemeBuyHandlers({
   const claim = async (body) => {
     const sigErr = await verifySigned(body || {}, actions.claim || 'theme-buy-claim', now());
     if (sigErr) return [401, { error: sigErr }];
+    if (requireProtocol && protocolError(body)) return protocolError(body);
     const f = body.fields || {};
     const quoteId = String(f.quote_id || '');
     if (!QUOTE_ID_RE.test(quoteId)) return [400, { error: 'quote_id' }];
@@ -233,6 +250,7 @@ function makeThemeBuyHandlers({
       quoteId,
       txid: String(f.txid || '').toLowerCase(),
       rawtx: body.rawtx,
+      intent: f.intent === '1',
     });
   };
 
@@ -241,7 +259,7 @@ function makeThemeBuyHandlers({
     if (sigErr) return [401, { error: sigErr }];
     const identityKey = String(body.identityKey).toLowerCase();
     // Pending purchases (claimed, not yet seen by the network): newest first, the ones the network has now become paid.
-    for (const p of (await pendingOf(identityKey)).slice(0, 10)) await claimer.recheck(p).catch(() => undefined);
+    await claimer.recheckAll((await pendingOf(identityKey)).slice(0, 10));
     const rows = await store.owned(identityKey);
     return [200, { packs: [...new Set(rows.map((r) => r.pack_id))], configured: !!payAddress(env) }];
   };

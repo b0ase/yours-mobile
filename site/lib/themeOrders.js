@@ -7,7 +7,7 @@
 const crypto = require('crypto');
 const { OP, P2PKH, Script, Utils } = require('@bsv/sdk');
 const { parseIncoming, verifySigned } = require('./paymail');
-const { makeStoreClaim } = require('./storeClaim');
+const { makeStoreClaim, protocolError } = require('./storeClaim');
 
 const PRICE_USD = 99;
 const TERM_DAYS = 365;
@@ -223,6 +223,15 @@ function themeOrderStore(env = process.env, f = fetch) {
         headers: { Prefer: 'return=minimal' },
         body: JSON.stringify(patch),
       }),
+    /** Record a txid only if the row has none yet (two claims can't both take one quote). True when this call set it. */
+    setTxidIfEmpty: async (id, txid) =>
+      (
+        (await req(`theme_orders?id=eq.${q(id)}&txid=is.null`, {
+          method: 'PATCH',
+          headers: { Prefer: 'return=representation' },
+          body: JSON.stringify({ txid }),
+        })) || []
+      ).length > 0,
     /** This key's orders paid by a payment the network hasn't shown yet (status 'quoted', txid set; storeClaim.js). */
     pendingMine: async (identityKey) =>
       (await req(
@@ -278,6 +287,9 @@ function makeThemeOrderHandlers({
   rate,
   broadcast,
   network = async () => 'unclear',
+  fetchTx,
+  recheckBudgetMs,
+  requireProtocol = false,
   env = process.env,
   now = () => Date.now(),
   quoteMs = QUOTE_MS,
@@ -324,6 +336,9 @@ function makeThemeOrderHandlers({
     getByQuote: store.getByQuote,
     getByTxid: store.getByTxid,
     update: store.updateOrder,
+    recheckBudgetMs,
+    setTxidIfEmpty: typeof store.setTxidIfEmpty === 'function' ? store.setTxidIfEmpty : undefined,
+    fetchTx,
     ledger,
     // rawtx: a raw tx hex, or the AtomicBEEF hex the wallet's createAction returns (sent with its parents).
     parse: parseIncoming,
@@ -364,6 +379,7 @@ function makeThemeOrderHandlers({
     if (!pay) return [503, { error: 'not_configured' }];
     const sigErr = await verifySigned(body || {}, actions.quote || 'theme-orders-quote', now());
     if (sigErr) return [401, { error: sigErr }];
+    if (requireProtocol && protocolError(body)) return protocolError(body);
     const identityKey = String(body.identityKey).toLowerCase();
     const v = validateOrder(body.fields, identityKey);
     if (!v.ok) return [400, { error: v.error }];
@@ -371,8 +387,9 @@ function makeThemeOrderHandlers({
     const holders = [];
     for (const r of await store.slugRows(v.order.slug)) {
       if (!live(r, t)) continue;
-      // A pending payment the network never got doesn't hold the slug (storeClaim.js recheck).
-      if (r.status === 'quoted' && r.txid && (await claimer.recheck(r)) === 'dead') continue;
+      // A pending payment holds the slug only while it may land: one nobody has (a forged or refused tx: ARC 404 or
+      // REJECTED and WhatsOnChain 404) doesn't, even inside its hour (storeClaim.js recheck; review F9).
+      if (r.status === 'quoted' && r.txid && ['dead', 'missing'].includes(await claimer.recheck(r))) continue;
       holders.push(r);
     }
     let renewOf = null;
@@ -431,6 +448,7 @@ function makeThemeOrderHandlers({
   const claim = async (body) => {
     const sigErr = await verifySigned(body || {}, actions.claim || 'theme-orders-claim', now());
     if (sigErr) return [401, { error: sigErr }];
+    if (requireProtocol && protocolError(body)) return protocolError(body);
     const f = body.fields || {};
     const quoteId = String(f.quote_id || '');
     if (!QUOTE_ID_RE.test(quoteId)) return [400, { error: 'quote_id' }];
@@ -439,6 +457,7 @@ function makeThemeOrderHandlers({
       quoteId,
       txid: String(f.txid || '').toLowerCase(),
       rawtx: body.rawtx,
+      intent: f.intent === '1',
     });
   };
 
@@ -448,8 +467,7 @@ function makeThemeOrderHandlers({
     const identityKey = String(body.identityKey).toLowerCase();
     // Editions paid by a payment the network hadn't shown yet: the ones it has now become paid.
     if (typeof store.pendingMine === 'function')
-      for (const p of ((await store.pendingMine(identityKey).catch(() => [])) ?? []).slice(0, 10))
-        await claimer.recheck(p).catch(() => undefined);
+      await claimer.recheckAll(((await store.pendingMine(identityKey).catch(() => [])) ?? []).slice(0, 10));
     const rows = await store.listMine(identityKey);
     return [200, { orders: rows.map(publicRow), configured: !!address() }];
   };

@@ -579,6 +579,27 @@ function networkStatus(env = process.env, f = fetch) {
   };
 }
 
+/**
+ * A transaction the network has, read back from WhatsOnChain (a claim whose wallet lost its copy; storeClaim.js).
+ * Resolves the parsed Transaction, or null.
+ */
+function wocTx(f = fetch) {
+  const { Transaction } = require('@bsv/sdk');
+  const tf = timed(f, 8_000);
+  return async (txid) => {
+    if (!/^[0-9a-f]{64}$/.test(String(txid))) return null;
+    try {
+      const r = await tf(`https://api.whatsonchain.com/v1/bsv/main/tx/${txid}/hex`);
+      if (!r.ok) return null;
+      const hex = (await r.text()).trim();
+      const tx = Transaction.fromHex(hex);
+      return tx.id('hex') === txid ? tx : null;
+    } catch {
+      return null;
+    }
+  };
+}
+
 /** True only when the network has the txid (networkStatus 'seen'). Fails closed. */
 const networkSeen =
   (env = process.env, f = fetch) =>
@@ -591,6 +612,7 @@ module.exports = {
   arcSubmit,
   networkStatus,
   networkSeen,
+  wocTx,
   unminedAncestors,
   ARC_ACCEPTED,
   timed,
