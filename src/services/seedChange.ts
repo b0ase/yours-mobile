@@ -42,7 +42,7 @@
  * Runs are per account, WhatsOnChain calls time out, and the claims fit inside the run's time budget. It refuses to run
  * while the remote store is the active one (review L1).
  */
-import { P2PKH, Transaction } from '@bsv/sdk';
+import { Hash, P2PKH, Transaction, Utils } from '@bsv/sdk';
 import { Wallet } from '@bsv/wallet-toolbox-client';
 import { brc29Script, type TxidRecoverDeps } from './recoverByTxid';
 
@@ -110,26 +110,22 @@ export type SpendState =
 
 type F = (url: string, init?: RequestInit) => Promise<Response>;
 
+type WocOptions = {
+  fetch?: F;
+  network?: 'main' | 'test';
+  minIntervalMs?: number;
+  attempts?: number;
+  timeoutMs?: number;
+  sleep?: (ms: number) => Promise<void>;
+};
+
 /**
- * WhatsOnChain's spender for an outpoint ("txid.vout"): GET /tx/<txid>/<vout>/spent, 404 = unspent (the route the wallet
- * already uses, services/unsentExpiry.ts). Calls are spaced (anonymous WhatsOnChain allows about 3 a second), each has a
- * timeout, and a 429, 5xx, timeout or network error is retried with growing waits. Anything still unclear is reported
- * as unclear, never as spent or unspent.
+ * Calls to anonymous WhatsOnChain (about 3 a second): spaced by minIntervalMs, each abandoned after timeoutMs even if
+ * the fetch ignores its abort signal. Shared by the spend and history clients below.
  */
-export function wocSpentLookup(
-  o: {
-    fetch?: F;
-    network?: 'main' | 'test';
-    minIntervalMs?: number;
-    attempts?: number;
-    timeoutMs?: number;
-    sleep?: (ms: number) => Promise<void>;
-  } = {},
-): (outpoint: string) => Promise<SpendState> {
+function wocPacing(o: WocOptions) {
   const f = o.fetch ?? ((u, i) => fetch(u, i));
-  const net = o.network ?? 'main';
   const gap = o.minIntervalMs ?? 350;
-  const attempts = o.attempts ?? 4;
   const timeoutMs = o.timeoutMs ?? 15_000;
   const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   let next = 0;
@@ -143,7 +139,6 @@ export function wocSpentLookup(
     chain = mine.catch(() => undefined);
     return mine;
   };
-  /** One request, abandoned after timeoutMs even if the fetch ignores its abort signal. */
   const timed = async (url: string): Promise<Response> => {
     const ctl = typeof AbortController === 'function' ? new AbortController() : undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -161,6 +156,17 @@ export function wocSpentLookup(
       if (timer) clearTimeout(timer);
     }
   };
+  return { slot, timed, sleep, net: o.network ?? 'main', attempts: o.attempts ?? 4 };
+}
+
+/**
+ * WhatsOnChain's spender for an outpoint ("txid.vout"): GET /tx/<txid>/<vout>/spent, 404 = unspent (the route the wallet
+ * already uses, services/unsentExpiry.ts). Calls are spaced (anonymous WhatsOnChain allows about 3 a second), each has a
+ * timeout, and a 429, 5xx, timeout or network error is retried with growing waits. Anything still unclear is reported
+ * as unclear, never as spent or unspent.
+ */
+export function wocSpentLookup(o: WocOptions = {}): (outpoint: string) => Promise<SpendState> {
+  const { slot, timed, sleep, net, attempts } = wocPacing(o);
   return async (outpoint) => {
     if (!OUTPOINT.test(outpoint)) return { state: 'unclear' };
     const [txid, vout] = outpoint.split('.');
@@ -183,6 +189,78 @@ export function wocSpentLookup(
       }
     }
     return { state: 'unclear' };
+  };
+}
+
+/** WhatsOnChain's script hash for a locking script: sha256 of the script's bytes, byte-reversed, as hex. */
+export const wocScriptHash = (scriptHex: string): string =>
+  Utils.toHex(Hash.sha256(Utils.toArray(scriptHex, 'hex')).reverse());
+
+/**
+ * Every transaction that touched an address, from WhatsOnChain's script history (release click-through, 4 Nov 2026,
+ * F-B). The toolbox's getScriptHashHistory reported WhatsOnChain's 404 for an address with no history as an error, so
+ * every unused seed address read as "the network was busy" and was given up after 3 runs; and it read only the first
+ * page, while WhatsOnChain returns confirmed history 100 entries a page.
+ *  - 404 on the FIRST page of the history call = the address has no history: an empty list. Any other 404 (a later
+ *    page) is unclear.
+ *  - Every page is read, following nextPageToken (?token=…), confirmed and unconfirmed history alike, up to maxPages
+ *    each; a longer history is unclear, never a silently cut list.
+ *  - 429, 5xx, timeouts and network errors are retried with growing waits; an answer that is still unclear, a non-empty
+ *    `error` or a body that isn't a history page gives undefined (unclear), never "no history".
+ */
+export function wocAddressHistory(
+  o: WocOptions & { maxPages?: number } = {},
+): (address: string) => Promise<string[] | undefined> {
+  const { slot, timed, sleep, net, attempts } = wocPacing(o);
+  const maxPages = o.maxPages ?? 200;
+  type Page = { items: unknown[]; next?: string } | 'none' | undefined;
+  const page = async (url: string, first: boolean): Promise<Page> => {
+    for (let i = 0; i < attempts; i++) {
+      await slot();
+      try {
+        const r = await timed(url);
+        if (r.status === 404) return first ? 'none' : undefined;
+        if (r.status === 429 || r.status >= 500) {
+          await sleep(Math.min(8000, 1000 * 2 ** i));
+          continue;
+        }
+        if (!r.ok) return undefined;
+        const j = (await r.json()) as { result?: unknown; nextPageToken?: unknown; error?: unknown };
+        if (!j || !Array.isArray(j.result) || (typeof j.error === 'string' && j.error !== '')) return undefined;
+        const next = typeof j.nextPageToken === 'string' && j.nextPageToken !== '' ? j.nextPageToken : undefined;
+        return { items: j.result, next };
+      } catch {
+        await sleep(Math.min(8000, 1000 * 2 ** i));
+      }
+    }
+    return undefined;
+  };
+  const history = async (hash: string, kind: 'confirmed' | 'unconfirmed'): Promise<string[] | undefined> => {
+    const base = `https://api.whatsonchain.com/v1/bsv/${net}/script/${hash}/${kind}/history`;
+    const out: string[] = [];
+    let token: string | undefined;
+    for (let n = 0; n < maxPages; n++) {
+      const p = await page(token ? `${base}?token=${encodeURIComponent(token)}` : base, n === 0);
+      if (p === 'none') return out;
+      if (!p) return undefined;
+      for (const it of p.items) {
+        const txid = String((it as { tx_hash?: unknown })?.tx_hash ?? '').toLowerCase();
+        if (TXID.test(txid)) out.push(txid);
+      }
+      if (!p.next) return out;
+      token = p.next;
+    }
+    return undefined;
+  };
+  return async (address) => {
+    const script = p2pkhHex(address);
+    if (!script) return [];
+    const hash = wocScriptHash(script);
+    const confirmed = await history(hash, 'confirmed');
+    if (!confirmed) return undefined;
+    const unconfirmed = await history(hash, 'unconfirmed');
+    if (!unconfirmed) return undefined;
+    return [...new Set([...confirmed, ...unconfirmed])];
   };
 }
 

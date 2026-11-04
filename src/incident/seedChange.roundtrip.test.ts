@@ -28,6 +28,8 @@ import {
   changeDerivation,
   recoverSeedChange,
   seedChangeSummary,
+  wocAddressHistory,
+  wocScriptHash,
   wocSpentLookup,
   type SeedChangeState,
 } from '../services/seedChange';
@@ -94,11 +96,19 @@ function makeServices(chain: Chain) {
     nLockTimeIsFinal: async () => true,
     getHeaderForHeight: async () => new Array(80).fill(0),
     hashOutputScript: (s: string) => s,
-    getScriptHashHistory: async (hash: string) => ({
-      name: 'mock',
-      status: 'success',
-      history: (chain.history.get(hash) ?? []).map((txid) => ({ txid })),
-    }),
+    // As the real toolbox answers: WhatsOnChain's 404 for an address with no history comes back as an error (F-B).
+    getScriptHashHistory: async (hash: string) =>
+      chain.history.get(hash)?.length
+        ? {
+            name: 'mock',
+            status: 'success',
+            // The toolbox reads only WhatsOnChain's first page of 100 (F-B).
+            history: chain.history
+              .get(hash)!
+              .slice(0, 100)
+              .map((txid) => ({ txid })),
+          }
+        : { name: 'WoC', status: 'error', error: new Error('WoC getScriptHashConfirmedHistory service unavailable.') },
     getStatusForTxids: async (txids: string[]) => ({
       results: txids.map((txid) => ({ txid, status: chain.mined.has(txid) ? 'mined' : 'unknown', depth: 1 })),
     }),
@@ -122,6 +132,19 @@ function makeServices(chain: Chain) {
 
 /** WhatsOnChain /tx/<txid>/<vout>/spent, answered from the mocked chain (404 = unspent). */
 const fakeWoc = (chain: Chain) => async (url: string) => {
+  // Script history as WhatsOnChain serves it: 100 a page with nextPageToken; confirmed with nothing = 404,
+  // unconfirmed with nothing = 200 and an empty list.
+  const h = /\/script\/([0-9a-f]{64})\/(confirmed|unconfirmed)\/history(?:\?token=(\d+))?$/.exec(url);
+  if (h) {
+    const script = [...chain.history.keys()].find((k) => wocScriptHash(k) === h[1]);
+    const txs = (script ? chain.history.get(script)! : []).filter((t) => (h[2] === 'confirmed') === chain.mined.has(t));
+    if (h[2] === 'confirmed' && !txs.length)
+      return { status: 404, ok: false, json: async () => ({}) } as unknown as Response;
+    const from = Number(h[3] ?? 0);
+    const result = txs.slice(from, from + 100).map((tx_hash) => ({ tx_hash, height: chain.heights.get(tx_hash) ?? 0 }));
+    const nextPageToken = from + 100 < txs.length ? String(from + 100) : '';
+    return { status: 200, ok: true, json: async () => ({ result, nextPageToken, error: '' }) } as unknown as Response;
+  }
   const m = /\/tx\/([0-9a-f]{64})\/(\d+)\/spent$/.exec(url);
   const by = m ? chain.spent.get(`${m[1]}.${m[2]}`) : undefined;
   return (by
@@ -269,6 +292,7 @@ const recover = (w: W8, chain: Chain, services: unknown, seedAddresses: string[]
       services: services as never,
       seedAddresses: () => seedAddresses,
       spentBy: wocSpentLookup({ fetch: fakeWoc(chain), minIntervalMs: 0, sleep: async () => undefined }),
+      addressHistory: wocAddressHistory({ fetch: fakeWoc(chain), minIntervalMs: 0, sleep: async () => undefined }),
       kv,
       log: () => undefined,
     }),
@@ -767,4 +791,54 @@ describe('re-review 07c F3 on the real toolbox: an unproven spender is not taken
     expect(starts.settled).toContainEqual([c, p.txid]);
     expect(starts.open).not.toContain(c);
   }, 120000);
+});
+
+describe('release click-through F-B on the real toolbox: seed-address history from WhatsOnChain', () => {
+  test('unused seed addresses are "no history" (404), not "the network was busy": the scan finishes clean', async () => {
+    const chain = newChain();
+    const services = makeServices(chain);
+    const { w: a, root, legacyAddress } = await fundedWallet(chain, services);
+    const p = await pay(a, chain, 250_000);
+    mine(chain, await rawOf(a, p.txid!));
+    const expected = await balance(a);
+    const b = await openWallet(root, `seedchange-fb-${++dbn}`, services);
+    // The identity and deposit addresses of a new wallet have never been used: WhatsOnChain answers 404.
+    const unused = [PrivateKey.fromRandom().toAddress(), PrivateKey.fromRandom().toAddress()];
+    const r = await recover(b, chain, services, [legacyAddress, ...unused]);
+    const summary = seedChangeSummary(r);
+    console.log('[F-B unused]', summary);
+    expect(r.retry).toBe(0);
+    expect(r.gaveUp).toBe(0);
+    expect(r.done).toBe(true);
+    expect(summary).not.toMatch(/network was busy|couldn’t be checked/);
+    expect(r.restoredSats).toBe(expected);
+  }, 120000);
+
+  test('a seed address with more than 100 transactions: the payment on page 2 is found', async () => {
+    const chain = newChain();
+    const services = makeServices(chain);
+    const { w: a, root, legacyAddress } = await fundedWallet(chain, services);
+    const p = await pay(a, chain, 250_000);
+    mine(chain, await rawOf(a, p.txid!));
+    const expected = await balance(a);
+    // 120 older transactions on the address come first, so the funding and the sweep sit on WhatsOnChain's page 2.
+    const script = new P2PKH().lock(legacyAddress).toHex();
+    const fillers = Array.from({ length: 120 }, (_, i) => {
+      const t = new Transaction();
+      t.addInput({
+        sourceTXID: (900_000 + dbn * 1000 + i).toString(16).padStart(64, '0'),
+        sourceOutputIndex: 0,
+        unlockingScript: new P2PKH().lock(legacyAddress),
+        sequence: 0xffffffff,
+      });
+      t.addOutput({ lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()), satoshis: 1000 + i });
+      return mine(chain, t.toBinary()).txid;
+    });
+    chain.history.set(script, [...fillers, ...chain.history.get(script)!]);
+    const b = await openWallet(root, `seedchange-fb-${++dbn}`, services);
+    const r = await recover(b, chain, services, [legacyAddress]);
+    console.log('[F-B page 2]', seedChangeSummary(r));
+    expect(r.restoredSats).toBe(expected);
+    expect(await balance(b)).toBe(expected);
+  }, 180000);
 });

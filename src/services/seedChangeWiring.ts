@@ -16,6 +16,7 @@ import { atomicBeefOf, timedStep } from './recoverByTxid';
 import { makeTxidRecoverDeps, managedStores, withRepairStore, type TxidWiring } from './recoverByTxidWiring';
 import {
   p2pkhHex,
+  wocAddressHistory,
   wocSpentLookup,
   type ClaimResult,
   type SeedChangeDeps,
@@ -49,14 +50,16 @@ type TxRow = { transactionId: number; txid?: string; status: string };
 
 export type SeedChangeWiring = Omit<TxidWiring, 'wallet' | 'services'> & {
   wallet: TxidWiring['wallet'] & { keyDeriver: SeedKeyDeriver };
-  services: TxidWiring['services'] & {
-    hashOutputScript?: (scriptHex: string) => string;
-    getScriptHashHistory?: (hash: string) => Promise<{ status?: string; history?: { txid?: string }[] } | undefined>;
-  };
+  services: TxidWiring['services'];
   /** Addresses the seed derives (identity, legacy pay and ordinals, deposit addresses). */
   seedAddresses: () => string[] | Promise<string[]>;
   /** Who spent an outpoint; WhatsOnChain (rate-limited) unless given. */
   spentBy?: (outpoint: string) => Promise<SpendState>;
+  /**
+   * Every txid that touched an address (undefined = unclear); WhatsOnChain's script history unless given
+   * (seedChange.ts wocAddressHistory: an unused address's 404 is "no history", every page is read).
+   */
+  addressHistory?: (address: string) => Promise<string[] | undefined>;
   kv: SeedChangeKV;
   /** Start a fresh scan ("Start fresh"). */
   fresh?: boolean;
@@ -130,13 +133,13 @@ export function makeSeedChangeDeps(w: SeedChangeWiring): SeedChangeDeps {
     return { open: [...open], settled: [...settled] as [string, string][] };
   };
 
+  // Not the toolbox's getScriptHashHistory: it read an unused address's 404 as an error ("the network was busy") and
+  // only the first 100 entries (release click-through, 4 Nov 2026, F-B).
+  const history = w.addressHistory ?? wocAddressHistory();
   const addressHistory = async (address: string) => {
-    const script = p2pkhHex(address);
-    // No history service at all (never on the shipped services): skip addresses rather than retry them forever.
-    if (!script || !w.services.hashOutputScript || !w.services.getScriptHashHistory) return [];
-    const r = await w.services.getScriptHashHistory(w.services.hashOutputScript(script));
-    if (r?.status !== 'success' || !Array.isArray(r.history)) return undefined;
-    return r.history.map((h) => (h.txid ?? '').toLowerCase()).filter((x) => TXID.test(x));
+    if (!p2pkhHex(address)) return [];
+    const txids = await history(address);
+    return txids?.map((x) => x.toLowerCase()).filter((x) => TXID.test(x));
   };
 
   const claim = async (txid: string, change: Parameters<SeedChangeDeps['claim']>[1]): Promise<ClaimResult> => {
