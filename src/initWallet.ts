@@ -33,6 +33,7 @@ import {
   Wallet,
   WalletStorageManager,
   StorageClient,
+  StorageIdb,
   LocalWalletPermissionsManager,
   IndexedDbPermissionStore,
 } from '@1sat/wallet-browser';
@@ -46,10 +47,11 @@ import { guardAllowance } from './services/allowanceGuard';
 import { ALLOWANCES_ENABLED } from './services/allowanceFlag';
 import { guardEverySpendAsks, revokeStoredSpendingGrants } from './services/everySpendAsks';
 import { guardPModuleSpends } from './services/pModuleSpendGate';
+import { installInboundSyncGuard, registerInboundVerifier, walletOwnership } from './services/inboundSync';
 import { chromeEnvelopeBackend, EnvelopeStore, guardEnvelopes } from './services/envelopes';
 import { ENVELOPES_ENABLED } from './mobile/storeBuild';
 import { guardCrossSiteSigning } from './services/crossSiteSignGuard';
-import { normalizeOriginator } from '@1sat/wallet';
+import { normalizeOriginator, parsePrivateKey } from '@1sat/wallet';
 import { guardSpending } from './mobile/config/killSwitch';
 import {
   syncMessages,
@@ -106,7 +108,12 @@ import {
 } from './services/findMissingCoins';
 import { recoverPaymentByTxid, type TxidRecoverReport } from './services/recoverByTxid';
 import { makePostageReconcileWiring, makeTxidRecoverDeps, sweepCandidateTxids } from './services/recoverByTxidWiring';
-import { recoverSeedChange, registerWalletOriginator, type SeedChangeReport } from './services/seedChange';
+import {
+  recoverSeedChange,
+  registerWalletOriginator,
+  wocSpentLookup,
+  type SeedChangeReport,
+} from './services/seedChange';
 import { makeSeedChangeDeps, seedChangeKV } from './services/seedChangeWiring';
 import { reconcilePostage, wocIsMined, type PostageReconcileReport } from './services/postageReconcile';
 import { runUnsentExpiry, storageKV, wocHeight, type ExpiryReport, type NoSendAction } from './services/unsentExpiry';
@@ -312,6 +319,24 @@ export interface InitWalletOptions {
 }
 
 /**
+ * Rows a backup store sends become spendable on this device only when the chain or this account's own keys say so
+ * (services/inboundSync.ts, b-Aware A3). Set up BEFORE the wallet factory runs: it merges a store that disagrees about
+ * which is active into the device store at boot. Returns the unregister.
+ */
+const checkBackupRows = (keys: Keys, account: Account | undefined, storageIdentityKey: string): (() => void) => {
+  installInboundSyncGuard(StorageIdb);
+  const root = parsePrivateKey(keys.identityWif);
+  return registerInboundVerifier(storageIdentityKey, root.toPublicKey().toString(), {
+    owns: walletOwnership(root, [
+      legacyOrdKey(keys.ordWif, account?.addresses?.ordAddress),
+      legacyPayKey(keys.walletWif, account?.addresses?.bsvAddress),
+    ]),
+    spent: wocSpentLookup(),
+    log: (...a) => console.warn(...a),
+  });
+};
+
+/**
  * Open storage for the *currently selected* account for master backup only.
  * No address sync, permissions UI, or accountContext side effects.
  * Caller must set selectedAccount before calling, and await close() when done.
@@ -328,6 +353,7 @@ export const openAccountStorageForBackup = async (
   const { account } = chromeStorageService.getCurrentAccountObject();
   const { activeRemote, backups } = resolveStorageConfig(account?.storageConfig);
   const storageIdentityKey = await ensureStorageIdentityKey(chromeStorageService);
+  const stopBackupCheck = checkBackupRows(keys, account, storageIdentityKey);
 
   const { storage, destroy, monitor } = await createWebWallet({
     privateKey: keys.identityWif,
@@ -353,6 +379,7 @@ export const openAccountStorageForBackup = async (
     storage,
     close: async () => {
       await destroy();
+      stopBackupCheck();
     },
   };
 };
@@ -387,6 +414,7 @@ export const initWallet = async (
   const { account } = chromeStorageService.getCurrentAccountObject();
   const { activeRemote, backups } = resolveStorageConfig(account?.storageConfig);
   const storageIdentityKey = await ensureStorageIdentityKey(chromeStorageService);
+  const stopBackupCheck = checkBackupRows(keys, account, storageIdentityKey);
 
   const walletConfig: WebWalletConfig = {
     privateKey: keys.identityWif,
@@ -1271,6 +1299,7 @@ export const initWallet = async (
   const close = async () => {
     walletClosed = true;
     await destroyWallet();
+    stopBackupCheck();
   };
 
   return {
