@@ -1,31 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { FileText, Image as ImageIcon, Paperclip, Play, X } from 'lucide-react';
-import { ROOM_UPLOAD_MAX_BYTES, type BchatClient } from './api';
+import { Download, FileText, Image as ImageIcon, Play } from 'lucide-react';
+import type { BchatClient } from './api';
 import type { ChatMessage } from './messages';
-import { VideoEmbed } from '../feed/VideoEmbed';
-import { formatSize, mediaPayload, messageVideo } from './roomMediaInfo';
+import { formatSize, mediaPayload } from './roomMediaInfo';
 
 /**
- * Photos and videos in chat rooms, and video links in messages.
- *
- *  - MessageVideo: the first YouTube / Vimeo / video-file link in a message as a click-to-play
- *    player (feed/VideoEmbed: nothing loads from YouTube until the tap).
- *  - RoomMediaBubble: an attachment (bit-sign `kind: 'media'`). Bytes are member-gated, so
- *    they are fetched with the session only when shown: images straight away, video and audio
- *    on tap. Nothing autoplays.
- *  - AttachButton: pick a photo or video, see its size against the 25 MB limit and that rooms
- *    are free, then Send. Progress shows while it uploads. Browser builds only.
+ * Attachments in chat rooms: RoomMediaBubble draws one (bit-sign `kind: 'media'`). Bytes are member-gated, so
+ * they are fetched with the session only when shown: images straight away, video and audio on tap, other files
+ * on tap to save (browser builds). Nothing autoplays. Sending lives in the chat bar (chat/ComposerBar.tsx), and
+ * link previews in chat/MessageLinks.tsx.
  */
 const GOLD = 'var(--bw-accent-hi)';
-const LINE = '#1f2127';
-const PANEL = '#121316';
-const MUTED = '#8a8f98';
-
-export const MessageVideo = ({ body }: { body: string | null | undefined }) => {
-  const v = messageVideo(body);
-  return v ? <VideoEmbed video={v} compact /> : null;
-};
 
 export const RoomMediaBubble = ({
   client,
@@ -73,6 +59,28 @@ export const RoomMediaBubble = ({
   if (!p) return null;
   const name = p.filename || 'Attachment';
   const size = typeof p.byte_size === 'number' ? formatSize(p.byte_size) : '';
+  // Other files: saved to this computer on tap (web, extension, Desktop). The phone apps have no download folder
+  // to hand a blob to, so there the file opens from the room on bChatX.
+  const savable = kind === 'file' && !Capacitor.isNativePlatform();
+  const save = async () => {
+    if (!p.media_id || state === 'loading') return;
+    setState('loading');
+    try {
+      const blob = await client.mediaBlob(ticker, p.media_id, mime);
+      const u = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = u;
+      a.download = name;
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(u), 30_000);
+      setState('idle');
+    } catch {
+      setState('error');
+    }
+  };
 
   if (kind === 'image')
     return url ? (
@@ -103,17 +111,23 @@ export const RoomMediaBubble = ({
   return (
     <button
       type="button"
-      onClick={() => (kind === 'file' ? undefined : void load())}
-      disabled={kind === 'file'}
+      onClick={() => (kind === 'file' ? savable && void save() : void load())}
+      disabled={kind === 'file' && !savable}
       className="flex items-center gap-3 rounded-xl px-3 py-3 mb-1 text-left min-w-[14rem]"
       style={{ background: 'rgba(0,0,0,0.3)' }}
-      aria-label={kind === 'file' ? name : `Play ${name}`}
+      aria-label={kind === 'file' ? (savable ? `Save ${name}` : name) : `Play ${name}`}
     >
       <span
         className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full"
         style={{ background: '#000', border: `1px solid color-mix(in srgb, ${GOLD} 40%, transparent)` }}
       >
-        {kind === 'file' ? <FileText size={18} color={GOLD} /> : <Play size={18} color={GOLD} fill={GOLD} />}
+        {kind !== 'file' ? (
+          <Play size={18} color={GOLD} fill={GOLD} />
+        ) : savable ? (
+          <Download size={18} color={GOLD} />
+        ) : (
+          <FileText size={18} color={GOLD} />
+        )}
       </span>
       <span className="min-w-0">
         <span className="block truncate text-[13px] font-semibold">{name}</span>
@@ -123,117 +137,10 @@ export const RoomMediaBubble = ({
             : state === 'error'
               ? 'Could not load. Tap to retry.'
               : kind === 'file'
-                ? `${size}${size ? ' · ' : ''}open the room on bChatX to view`
+                ? `${size}${size ? ' · ' : ''}${savable ? 'tap to save' : 'open the room on bChatX to view'}`
                 : `${kind === 'video' ? 'Video' : 'Audio'}${size ? ` · ${size}` : ''} · tap to play`}
         </span>
       </span>
     </button>
-  );
-};
-
-/** Paperclip → pick → confirm sheet (size, limit, free) → upload with progress. Browser builds only. */
-export const AttachButton = ({
-  client,
-  ticker,
-  onUploaded,
-  disabled,
-}: {
-  client: BchatClient;
-  ticker: string;
-  onUploaded: () => void;
-  disabled?: boolean;
-}) => {
-  const input = useRef<HTMLInputElement>(null);
-  const [picked, setPicked] = useState<File | null>(null);
-  const [progress, setProgress] = useState<number | null>(null);
-  const [error, setError] = useState('');
-  if (Capacitor.isNativePlatform()) return null;
-
-  const tooBig = !!picked && picked.size > ROOM_UPLOAD_MAX_BYTES;
-  const send = async () => {
-    if (!picked || tooBig) return;
-    setError('');
-    setProgress(0);
-    try {
-      await client.uploadMedia(ticker, picked, setProgress);
-      setPicked(null);
-      onUploaded();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Upload failed');
-    } finally {
-      setProgress(null);
-    }
-  };
-  const isVideo = picked?.type.startsWith('video/');
-
-  return (
-    <>
-      <input
-        ref={input}
-        type="file"
-        accept="image/*,video/mp4,video/webm,video/quicktime"
-        hidden
-        onChange={(e) => {
-          setError('');
-          setPicked(e.target.files?.[0] ?? null);
-          e.target.value = '';
-        }}
-      />
-      <button
-        type="button"
-        onClick={() => input.current?.click()}
-        disabled={disabled || progress !== null}
-        aria-label="Send a photo or video"
-        title={`Send a photo or video (up to ${ROOM_UPLOAD_MAX_BYTES / 1024 / 1024} MB)`}
-        className="h-10 w-10 rounded-full flex items-center justify-center shrink-0 disabled:opacity-40"
-        style={{ background: PANEL, border: `1px solid ${LINE}` }}
-      >
-        <Paperclip size={18} color={MUTED} />
-      </button>
-      {picked && (
-        <div className="fixed inset-0 z-[120] flex items-end justify-center" style={{ background: 'rgba(0,0,0,0.6)' }}>
-          <div
-            className="w-full max-w-md rounded-t-2xl p-4 pb-6"
-            style={{ background: '#0b0b0b', border: `1px solid ${LINE}` }}
-          >
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-[15px] font-bold text-white">Send {isVideo ? 'video' : 'photo'}</span>
-              <button type="button" aria-label="Cancel" onClick={() => progress === null && setPicked(null)}>
-                <X size={20} color={MUTED} />
-              </button>
-            </div>
-            <div className="text-[13px] text-white truncate">{picked.name}</div>
-            <div className="text-[12px] mt-1" style={{ color: tooBig ? '#ff7a7a' : MUTED }}>
-              {formatSize(picked.size)} of {ROOM_UPLOAD_MAX_BYTES / 1024 / 1024} MB max
-              {tooBig
-                ? ' · too large for a room. Share a YouTube link instead.'
-                : ' · free · only members of this room can see it'}
-            </div>
-            {progress !== null && (
-              <div className="mt-3 h-2 w-full overflow-hidden rounded-full" style={{ background: PANEL }}>
-                <div
-                  className="h-full"
-                  style={{ width: `${Math.round(progress * 100)}%`, background: GOLD, transition: 'width 0.3s' }}
-                />
-              </div>
-            )}
-            {error && (
-              <div className="mt-2 text-[12px]" style={{ color: '#ff7a7a' }}>
-                {error}
-              </div>
-            )}
-            <button
-              type="button"
-              onClick={() => void send()}
-              disabled={tooBig || progress !== null}
-              className="mt-4 w-full rounded-full py-3 text-[15px] font-bold disabled:opacity-40"
-              style={{ background: GOLD, color: '#1a1300' }}
-            >
-              {progress !== null ? `Uploading… ${Math.round(progress * 100)}%` : 'Send'}
-            </button>
-          </div>
-        </div>
-      )}
-    </>
   );
 };
