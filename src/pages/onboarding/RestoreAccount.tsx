@@ -324,7 +324,9 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
 
   const getRestoreDescription = () => {
     return importWallet === 'yours'
-      ? 'Enter your 12 words. They are all you need; the Yours extension is not required.'
+      ? // Not "the 12 words are enough" (release click-through, 4 Nov 2026): change from before this update can live only on
+        // the device that made it. Same advice as bwalletx.com's restore copy (bwalletx-site 49f9c9a).
+        'Enter your 12 words; the Yours extension is not required. If your old device still works, keep bWalletX on it until this one shows the right balance: some change from before this update is recorded only on the device that made it.'
       : importWallet
       ? 'Enter your seed phrase'
       : 'Enter a seed phrase and use custom derivation paths to import a wallet from anywhere!';
