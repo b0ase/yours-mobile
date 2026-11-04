@@ -76,6 +76,15 @@ export const listActionsNamesNoLabel = (args: unknown): boolean => {
 
 export const RAW_HASH_REFUSAL =
   'Signing a raw hash with these keys could move your money; bWalletX refuses it for apps';
+/**
+ * b-Aware G2 (Hulk, 31 Oct 2026): a protocol name starting "p " is handed to the asset permission module before the
+ * manager's protocol check, and the module passes key operations straight to the base wallet (no sheet, no grant).
+ * Only createSignature keeps a check there (the module's commitment from an approved payment, or its own sheet).
+ */
+export const P_MODULE_PROTOCOL_REFUSAL =
+  'bWalletX does not use its asset-module keys for apps, except to sign a payment';
+/** Exactly the names the toolbox routes to a permission module (delegateToPModuleIfNeeded: startsWith("p ")). */
+const routesToPModule = (name: string) => name.startsWith('p ');
 
 /** Wallet methods whose args carry a protocolID that selects a derived key. */
 const PROTOCOL_METHODS = new Set([
@@ -100,6 +109,7 @@ export const reservedProtocolRefusal = (method: string, args: unknown): string |
   const p = asProtocol(a.protocolID);
   if (!p) return 'Invalid protocolID';
   if (RESERVED_HASHES.has(protocolHash(p))) return `${RESERVED_REFUSAL}: "${p[1]}"`;
+  if (method !== 'createSignature' && routesToPModule(p[1])) return P_MODULE_PROTOCOL_REFUSAL;
   if (method === 'createSignature') {
     // Level-0 keys are shared by every app and the wallet, and the permissions manager never asks for level 0, so
     // any site could get signatures with no sheet. BRC-29 keys receive the user's payments. Both paths are refused:
