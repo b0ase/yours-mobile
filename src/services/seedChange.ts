@@ -111,6 +111,8 @@ export type SpendState =
 type F = (url: string, init?: RequestInit) => Promise<Response>;
 
 type WocOptions = {
+  /** A pacer to share with another lookup (wocChainLookups). */
+  pacing?: ReturnType<typeof wocPacing>;
   fetch?: F;
   network?: 'main' | 'test';
   minIntervalMs?: number;
@@ -166,7 +168,7 @@ function wocPacing(o: WocOptions) {
  * as unclear, never as spent or unspent.
  */
 export function wocSpentLookup(o: WocOptions = {}): (outpoint: string) => Promise<SpendState> {
-  const { slot, timed, sleep, net, attempts } = wocPacing(o);
+  const { slot, timed, sleep, net, attempts } = o.pacing ?? wocPacing(o);
   return async (outpoint) => {
     if (!OUTPOINT.test(outpoint)) return { state: 'unclear' };
     const [txid, vout] = outpoint.split('.');
@@ -198,7 +200,7 @@ export function wocSpentLookup(o: WocOptions = {}): (outpoint: string) => Promis
  * transaction is known too (services/inboundSync.ts, review 16 F4).
  */
 export function wocTxKnownLookup(o: WocOptions = {}): (txid: string) => Promise<'known' | 'unknown' | 'unclear'> {
-  const { slot, timed, sleep, net, attempts } = wocPacing(o);
+  const { slot, timed, sleep, net, attempts } = o.pacing ?? wocPacing(o);
   return async (txid) => {
     if (!TXID.test(txid)) return 'unclear';
     for (let i = 0; i < attempts; i++) {
@@ -220,6 +222,16 @@ export function wocTxKnownLookup(o: WocOptions = {}): (txid: string) => Promise<
     }
     return 'unclear';
   };
+}
+
+/**
+ * Both chain questions the inbound sync check asks (services/inboundSync.ts), sharing ONE pacer so together they stay
+ * within anonymous WhatsOnChain's ~3 calls a second (review 16b, R4: two pacers doubled the rate, and the 429s).
+ */
+export function wocChainLookups(o: WocOptions = {}) {
+  const pacing = wocPacing(o);
+  const shared = { ...o, pacing };
+  return { spent: wocSpentLookup(shared), txKnown: wocTxKnownLookup(shared) };
 }
 
 /** WhatsOnChain's script hash for a locking script: sha256 of the script's bytes, byte-reversed, as hex. */

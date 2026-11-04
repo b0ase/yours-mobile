@@ -17,8 +17,8 @@
  *     sender key, record (customInstructions), change role (type, change, providedBy, purpose). Derivations and amounts
  *     are never merged by the toolbox. Another store may still mark it spent, move or relinquish it, or describe it.
  *  2. A coin the device holds as spent (or not spendable) comes back to spendable only when WhatsOnChain says its
- *     outpoint is unspent. Spent: the device keeps its own row. Unclear: the whole page is refused (nothing merged,
- *     the sync state doesn't move) and the pull is tried again later.
+ *     outpoint is unspent. Spent: the device keeps its own row. Unclear: that coin alone is held (not spendable,
+ *     HELD_MARK) while the rest of the page lands, and releaseHeldRows asks again later (review 16b, R4).
  *  3. A row the device has never seen, arriving spendable, must pay a key the wallet derives itself from that row's own
  *     derivation (BRC-29 prefix/suffix with its sender, exactly as the toolbox signs change; or the protocol and key its
  *     record names; or one of the account's legacy keys), and must be the output it claims to be when the page or the
@@ -320,7 +320,7 @@ const parseSyncMap = (raw: unknown): IdMaps | undefined => {
 
 /**
  * Check one page against the device store and make it safe to merge, in place (rows are rewritten, never removed, so
- * the toolbox's paging is unchanged). Throws UNCHECKED_PAGE when the chain can't answer a question it must.
+ * the toolbox's paging is unchanged). When the chain can't answer, only the coin in question is held (review 16b, R4).
  */
 export async function verifyInboundChunk(
   store: DeviceStore,
@@ -428,11 +428,8 @@ export async function verifyInboundChunk(
 
   const chain = chainChecks(v);
   /** The chain's word on an outpoint, or a refused page when it has none. */
-  const chainVerdict = async (txid: string, vout: number): Promise<'unspent' | 'spent' | 'unknown'> => {
-    const verdict = await chain(txid, vout);
-    if (verdict === 'unclear') throw new Error(UNCHECKED_PAGE);
-    return verdict;
-  };
+  /** The chain's word on one coin. Unclear (WoC throttled or down) holds that coin only (review 16b, R4). */
+  const chainVerdict = (txid: string, vout: number) => chain(txid, vout);
   /**
    * May this row (with this script) be spendable, before asking the chain? A token's record must say what its script says
    * (F2: a forged amount burns tokens on the next send), and wallet change must pay the wallet's own key exactly.
@@ -568,9 +565,8 @@ export async function verifyInboundChunk(
     if (d.rawTx?.length && t.rawTx?.length && hex(d.rawTx) !== hex(t.rawTx)) t.rawTx = d.rawTx;
     const txid = d.txid ?? t.txid;
     if (d.status === 'failed' && t.status !== undefined && t.status !== 'failed') {
-      const known = txid ? await chain.txKnown(txid) : 'unknown';
-      if (known === 'unclear') throw new Error(UNCHECKED_PAGE);
-      if (known !== 'known') keepTx();
+      // Unknown or unclear: kept failed (no change without the chain's word; R4: never the whole page).
+      if ((txid ? await chain.txKnown(txid) : 'unknown') !== 'known') keepTx();
       continue;
     }
     // The other way (review 16b, R3): a backup moving a transaction this device knows to failed, or off completed, or
@@ -639,14 +635,14 @@ export async function verifyInboundChunk(
         // a row that arrived not spendable can't be turned spendable on WhatsOnChain's word alone (review 16, F4).
         const failed = (await deviceTxStatus(filed.transactionId)) === 'failed';
         const script = hex(filed.lockingScript);
-        const ok =
-          !failed &&
-          !!filed.txid &&
-          !!script &&
-          (await admissible(filed, script)) === 'check' &&
-          (await chainVerdict(filed.txid, filed.vout)) === 'unspent';
-        if (ok) {
-          report.revived++;
+        const fit = !failed && !!filed.txid && !!script && (await admissible(filed, script)) === 'check';
+        const verdict = fit ? await chainVerdict(filed.txid!, filed.vout) : 'refuse';
+        if (verdict === 'unspent') report.revived++;
+        else if (verdict === 'unclear') {
+          // Held for the chain, as a new row would be (R4): not spendable, looked at again by releaseHeldRows.
+          o.spendable = false;
+          o.spendingDescription = HELD_MARK;
+          report.held++;
         } else keep(o, filed);
       }
       continue;
@@ -671,7 +667,7 @@ export async function verifyInboundChunk(
     // of a transaction never broadcast, both paying keys the wallet owns.
     const verdict = await chainVerdict(o.txid, o.vout);
     if (verdict === 'spent') quarantine(o);
-    else if (verdict === 'unknown') hold(o);
+    else if (verdict !== 'unspent') hold(o); // unknown to the chain yet, or no answer now: held, released later
   }
 
   // Token tags (amt:, bsv21:, sym:, dec:) are where a send falls back to when a record has no amount or id: one
@@ -720,7 +716,17 @@ export async function verifyInboundChunk(
  * The chain's word on an outpoint: 'unspent' only when WhatsOnChain says so AND knows the transaction (its /spent
  * answers 404 for an outpoint it has never seen). Known transactions are remembered for the run.
  */
-function chainChecks(v: InboundVerifier) {
+/**
+ * "Spent" answers, kept for 10 minutes (review 16b, R4: fewer WhatsOnChain calls on retries). Only "spent": keeping
+ * it can only keep a coin from being spendable for a while. "Known" is not kept: a mempool transaction can be dropped.
+ */
+const SPENT_TTL_MS = 10 * 60_000;
+const spentSeen = new WeakMap<InboundVerifier, Map<string, number>>();
+
+function chainChecks(v: InboundVerifier, now: () => number = Date.now) {
+  let spent = spentSeen.get(v);
+  if (!spent) spentSeen.set(v, (spent = new Map()));
+  const seenSpent = spent;
   const known = new Map<string, Promise<'known' | 'unknown' | 'unclear'>>();
   const txKnown = (txid: string) => {
     if (!known.has(txid))
@@ -731,9 +737,15 @@ function chainChecks(v: InboundVerifier) {
     return known.get(txid)!;
   };
   const verdict = async (txid: string, vout: number): Promise<'unspent' | 'spent' | 'unknown' | 'unclear'> => {
-    const st = await v.spent(`${txid}.${vout}`).catch((): SpendState => ({ state: 'unclear' }));
+    const op = `${txid}.${vout}`;
+    const at = seenSpent.get(op);
+    if (at !== undefined && now() - at < SPENT_TTL_MS) return 'spent';
+    const st = await v.spent(op).catch((): SpendState => ({ state: 'unclear' }));
     if (st.state === 'unclear') return 'unclear';
-    if (st.state === 'spent') return 'spent';
+    if (st.state === 'spent') {
+      seenSpent.set(op, now());
+      return 'spent';
+    }
     const k = await txKnown(txid);
     return k === 'known' ? 'unspent' : k;
   };

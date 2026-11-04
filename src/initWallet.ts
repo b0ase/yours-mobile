@@ -118,8 +118,7 @@ import { makePostageReconcileWiring, makeTxidRecoverDeps, sweepCandidateTxids } 
 import {
   recoverSeedChange,
   registerWalletOriginator,
-  wocSpentLookup,
-  wocTxKnownLookup,
+  wocChainLookups,
   type SeedChangeReport,
 } from './services/seedChange';
 import { makeSeedChangeDeps, seedChangeKV } from './services/seedChangeWiring';
@@ -339,9 +338,8 @@ const checkBackupRows = (keys: Keys, account: Account | undefined, storageIdenti
       legacyOrdKey(keys.ordWif, account?.addresses?.ordAddress),
       legacyPayKey(keys.walletWif, account?.addresses?.bsvAddress),
     ]),
-    // Two WhatsOnChain questions per coin share anonymous WoC's ~3 calls a second.
-    spent: wocSpentLookup({ minIntervalMs: 700 }),
-    txKnown: wocTxKnownLookup({ minIntervalMs: 700 }),
+    // Two WhatsOnChain questions per coin, one pacer: together ~3 calls a second (anonymous WoC).
+    ...wocChainLookups(),
     readRecord: walletRecords(root),
     log: (...a) => console.warn(...a),
   };

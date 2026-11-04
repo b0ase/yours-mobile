@@ -231,16 +231,18 @@ describe('A3: rows from a remote store never become spendable unchecked', () => 
     expect((await d.row(d.phone, d.coin)).spendable).toBe(false);
   });
 
-  test('chain unreachable: the page is refused whole and taken on a later pull', async () => {
+  test('chain unreachable: that coin is held (not spendable) and released once the chain answers', async () => {
     const d = await phoneWithBackup();
     const mine = await d.row(d.phone, d.coin);
     await d.phone.updateOutput(mine.outputId, { spendable: false } as never);
     await d.forge(d.coin, { spendable: true });
     d.chain.answer = 'unclear';
-    await expect(d.pull()).rejects.toThrow(UNCHECKED_PAGE);
-    expect((await d.row(d.phone, d.coin)).spendable).toBe(false);
+    await d.pull(); // no longer refuses the page (review 16b, R4)
+    const held = await d.row(d.phone, d.coin);
+    expect(held.spendable).toBe(false);
+    expect((held as { spendingDescription?: string }).spendingDescription).toBe(HELD_MARK);
     d.chain.answer = 'unspent';
-    await d.pull();
+    expect((await releaseHeldRows(d.phone as never, d.kd.identityKey, d.verifier)).released).toBe(1);
     expect((await d.row(d.phone, d.coin)).spendable).toBe(true);
   });
 
@@ -1070,5 +1072,50 @@ describe('R3: a backup cannot fail a transaction the device knows', () => {
     d.chain.knownFor.set(pendingTxid, 'unknown'); // the chain never had it: failed is right
     await d.pull();
     expect((await deviceTx(d, pendingTxid)).status).toBe('failed');
+  });
+});
+
+/**
+ * Review 16b, R4: one WhatsOnChain hiccup threw away the whole page, with any spent-elsewhere updates on it, and a
+ * restore under throttling never finished. Now only the coin in question is held, and it is asked about again later.
+ */
+describe('R4: a WhatsOnChain hiccup holds one coin, never the page', () => {
+  test("another device's spend still lands while one coin waits for the chain", async () => {
+    const d = await phoneWithBackup();
+    d.chain.answer = 'unspent';
+    const other = await store(`r4-b-${++n}`);
+    const smB = new WalletStorageManager(d.kd.identityKey, other, [d.remote]);
+    await smB.makeAvailable();
+    await smB.setActive(other.getSettings().storageIdentityKey);
+    smB.setServices(services);
+    await smB.syncFromReader(d.kd.identityKey, d.remote as never);
+    const walletB = new Wallet({ chain: 'main', keyDeriver: d.kd, storage: smB, services } as never);
+    const received = await receive(walletB, d.kd, 33_000); // a new coin: the chain will be asked
+    const spentOnB = await d.row(other, d.coin2);
+    await other.updateOutput(spentOnB.outputId, { spendable: false } as never); // spent on device B
+    await smB.updateBackups();
+    d.chain.answer = 'unclear'; // WhatsOnChain throttled
+    await d.pull();
+    expect((await d.row(d.phone, d.coin2)).spendable).toBe(false); // the spend landed
+    expect((await d.row(d.phone, received)).spendable).toBe(false); // held, not dropped
+    d.chain.answer = 'unspent';
+    expect((await releaseHeldRows(d.phone as never, d.kd.identityKey, d.verifier)).released).toBe(1);
+    expect((await d.row(d.phone, received)).spendable).toBe(true);
+  });
+
+  test('a restore with WhatsOnChain down the whole time finishes, every coin held, then released', async () => {
+    const d = await phoneWithBackup();
+    const fresh = await store(`r4-fresh-${++n}`);
+    d.chain.answer = 'unclear';
+    const unregister = registerInboundVerifier(fresh.getSettings().storageIdentityKey, d.kd.identityKey, d.verifier);
+    const sm2 = new WalletStorageManager(d.kd.identityKey, fresh, [d.remote]);
+    await sm2.makeAvailable();
+    await sm2.setActive(fresh.getSettings().storageIdentityKey);
+    await sm2.syncFromReader(d.kd.identityKey, d.remote as never); // completes
+    for (const txid of [d.coin, d.coin2]) expect((await d.row(fresh, txid)).spendable).toBe(false);
+    d.chain.answer = 'unspent';
+    expect((await releaseHeldRows(fresh as never, d.kd.identityKey, d.verifier)).released).toBeGreaterThanOrEqual(2);
+    for (const txid of [d.coin, d.coin2]) expect((await d.row(fresh, txid)).spendable).toBe(true);
+    unregister();
   });
 });
