@@ -56,6 +56,8 @@ export class ThemeOrderError extends Error {
 
 /** Orders are closed until the owner sets THEME_ORDER_PAY_ADDRESS on the server. */
 export const isNotConfigured = (e: unknown) => e instanceof ThemeOrderError && e.code === 'not_configured';
+/** 409 payment_pending: a payment for this theme is already on its way (site/lib/themeBuys.js quote). */
+export const isPaymentPending = (e: unknown) => e instanceof ThemeOrderError && e.code === 'payment_pending';
 
 const MESSAGES: Record<string, string> = {
   not_configured: 'Orders open soon',

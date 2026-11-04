@@ -7,7 +7,7 @@ import { Check } from 'lucide-react';
 import { playChime } from '../../components/sent/chime';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { artDataUri, receiptArtUrl } from '../storeReceipt/art';
-import { getBuyQuote, payBuyQuote, type BuyQuote, type BuyResult } from '../themeOrder/api';
+import { getBuyQuote, isPaymentPending, payBuyQuote, type BuyQuote, type BuyResult } from '../themeOrder/api';
 import { MoveToDeviceNotice } from '../../components/MoveToDeviceNotice';
 import { errorLayout } from './buySheetState';
 
@@ -19,6 +19,8 @@ type Step =
   | { k: 'paying'; q: BuyQuote }
   | { k: 'error'; msg: string; q?: BuyQuote }
   | { k: 'pending'; res: BuyResult }
+  /** The Store says a payment for this theme is already on its way (409 payment_pending): no price, no Pay. */
+  | { k: 'onItsWay' }
   | { k: 'done'; res: BuyResult };
 
 /**
@@ -47,7 +49,11 @@ export function BuySheet({
     let live = true;
     getBuyQuote(f, apiContext.wallet, pack)
       .then((q) => live && setStep({ k: 'ready', q }))
-      .catch((e) => live && setStep({ k: 'error', msg: e instanceof Error ? e.message : 'Could not get a price' }));
+      .catch((e) => {
+        if (!live) return;
+        if (isPaymentPending(e)) setStep({ k: 'onItsWay' });
+        else setStep({ k: 'error', msg: e instanceof Error ? e.message : 'Could not get a price' });
+      });
     return () => {
       live = false;
     };
@@ -72,11 +78,12 @@ export function BuySheet({
     }
   };
 
-  if (step.k === 'pending') {
+  if (step.k === 'pending' || step.k === 'onItsWay') {
+    const title = step.k === 'pending' ? 'Payment sent' : 'Payment on its way';
     return createPortal(
       <div
         role="dialog"
-        aria-label="Payment sent"
+        aria-label={title}
         className="fixed inset-0 z-[1110] flex flex-col items-center overflow-y-auto px-5"
         style={{
           background: CARD.bg,
@@ -84,14 +91,23 @@ export function BuySheet({
           paddingBottom: 'calc(env(safe-area-inset-bottom) + 24px)',
         }}
       >
-        <h2 className="m-0 mt-4 text-center text-2xl font-extrabold text-white">Payment sent</h2>
-        <p className="m-0 mt-2 max-w-[360px] text-center text-sm" style={{ color: '#98A2B3' }}>
-          The network hasn't confirmed it yet. <span style={{ color: CARD.gold }}>{label}</span> unlocks as soon as it
-          does; you don't need to pay again.
-        </p>
-        <p className="m-0 mt-3 text-center text-xs" style={{ color: '#98A2B3' }}>
-          Reference · {step.res.txid.slice(0, 10)}…
-        </p>
+        <h2 className="m-0 mt-4 text-center text-2xl font-extrabold text-white">{title}</h2>
+        {step.k === 'pending' ? (
+          <p className="m-0 mt-2 max-w-[360px] text-center text-sm" style={{ color: '#98A2B3' }}>
+            The network hasn't confirmed it yet. <span style={{ color: CARD.gold }}>{label}</span> unlocks as soon as it
+            does; you don't need to pay again.
+          </p>
+        ) : (
+          <p className="m-0 mt-2 max-w-[360px] text-center text-sm" style={{ color: '#98A2B3' }}>
+            Your payment for <span style={{ color: CARD.gold }}>{label}</span> is still on its way to the network. It
+            unlocks when it arrives; you don't need to pay again.
+          </p>
+        )}
+        {step.k === 'pending' && (
+          <p className="m-0 mt-3 text-center text-xs" style={{ color: '#98A2B3' }}>
+            Reference · {step.res.txid.slice(0, 10)}…
+          </p>
+        )}
         <div className="mt-6 flex w-full max-w-[360px] flex-col gap-2">
           <button
             type="button"
