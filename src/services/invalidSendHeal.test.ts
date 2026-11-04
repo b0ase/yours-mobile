@@ -115,7 +115,7 @@ describe('healInvalidSend', () => {
   });
   test('no tx bytes: nothing to check', async () => {
     const r = await healInvalidSend(review('invalidTx'), async () => T('9'), { markSpent: async () => 1 });
-    expect(r).toEqual({ checked: 0, released: 0, inputs: [] });
+    expect(r).toEqual({ checked: 0, released: 0, inputs: [], spenders: {}, cleared: [] });
   });
 });
 

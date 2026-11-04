@@ -1,8 +1,9 @@
 /**
  * Check the coins a send is about to spend against the chain BEFORE it is signed or broadcast (owner's iPhone,
  * 4 Nov 2026: the same seed is in the Chrome extension, which spent three coins of 87ccbc90… at 14:04Z and 14:33Z; the
- * phone still listed them as spendable, showed ~$10.50 when the truth was ~$0.16, and its $10 send "wouldn't send".
- * The owner no longer trusts the iPhone wallet).
+ * phone still listed them as spendable and showed ~$10.50 when the truth was ~$0.16, so any send that picked them was
+ * bound to be refused. Its $10 send also failed, but the phone stored no transaction, so the cause of that failure is
+ * NOT shown to be this: review 17, F4).
  *
  * Coin selection happens inside the toolbox's storage createAction. This module wraps that one call
  * (WalletStorageManager.createAction) for the wallet's own sends (armCoinPreflight, held by the background around the
@@ -12,52 +13,69 @@
  *      short timeout;
  *   2. a coin counts as spent elsewhere under the automatic coin check's rule (autoCoinResync.ts): the index AND
  *      WhatsOnChain name the same spender (mempool or mined), or WhatsOnChain names a MINED spender, and that spender
- *      is not one of this wallet's own unfinished or failed actions (withoutOwnSpenders: our payment may have gone
- *      out, so picking other coins could pay twice). One unconfirmed source alone never clears a coin: the send goes
- *      ahead as today and the broadcaster decides (its refusal is the second source; invalidSendHeal + spentRetry then
- *      clear the coin and retry once);
+ *      is not a transaction this wallet holds, in any status (withoutOwnSpenders: our payment may have gone out, so
+ *      picking other coins could pay twice). One unconfirmed source alone never clears a coin: the send goes ahead as
+ *      today and the broadcaster decides (its refusal is the second source; invalidSendHeal + spentRetry then clear the
+ *      coin and retry once, never for a spender of ours);
  *   3. if any coin is spent elsewhere: the planned action is aborted (the toolbox's own abortAction: the action is
  *      unsigned, never broadcast, has no txid; its coins are released), the spent coins are marked spendable=false with
  *      the spender recorded (spentBy when storage knows that transaction, and the automatic check's cleared list so a
  *      later run re-checks and can undo it), and storage picks again ONCE. If the new pick is clean the send goes on
  *      with it; if it is short of funds, or picks another spent coin, the send stops with SpentElsewhereError ("Some of
- *      your coins were already spent from another device…"), nothing signed.
+ *      your coins were already spent from another device…"), nothing signed. If the coins can't be marked, it stops
+ *      with a real error instead (picking again would choose them again).
  * Fail open: a lookup that times out or errors leaves that coin as it is. If neither source answers, the send goes
- * ahead exactly as before this module (logged). A failed abort also goes ahead as before: the coins stay locked to the
- * planned action, which would otherwise be stuck.
+ * ahead exactly as before this module (logged). A failed or refused abort also goes ahead as before: the coins stay
+ * locked to the planned action, which would otherwise be stuck.
  */
-import { SPENT_ELSEWHERE_MESSAGE, SPENT_ELSEWHERE_SHORT_MESSAGE } from '../utils/sendErrors';
+import {
+  SPENT_ELSEWHERE_MESSAGE,
+  SPENT_ELSEWHERE_SHORT_MESSAGE,
+  SPENT_ELSEWHERE_STUCK_MESSAGE,
+} from '../utils/sendErrors';
 import { recordAutoCleared, type KV, type WocAnswer } from './autoCoinResync';
 import { isInsufficientFunds } from './fundingPrep';
+import { wocApiKeyFromEnv } from './wocResilience';
 
 const TXID = /^[0-9a-f]{64}$/i;
 
-/** Per lookup. A send waits at most about this long (plus one second per 3 WhatsOnChain lookups after the first 3). */
+/**
+ * Per lookup, including any wait for a WhatsOnChain slot (the app-wide limit of ~3 requests a second,
+ * services/wocLimiter.ts). A lookup that runs out is "can't tell": the send goes ahead as before.
+ */
 export const PREFLIGHT_TIMEOUT_MS = 2_500;
 /** WhatsOnChain lookups per check (the biggest coins first); further coins get the index only. */
 export const PREFLIGHT_MAX_WOC = 6;
-/**
- * WhatsOnChain requests started per second: anonymous WhatsOnChain allows about 3 a second, so a send with up to 3
- * coins waits one round trip, and coins 4–6 start a second later.
- */
-export const PREFLIGHT_WOC_PER_SECOND = 3;
 export const WOC_MAIN = 'https://api.whatsonchain.com/v1/bsv/main';
 export const SPENT_ELSEWHERE_CODE = 'WERR_SPENT_ELSEWHERE';
 
-/** The send stopped before signing: coins it picked were spent from another device, and they are now cleared. */
+/**
+ * The send stopped before signing: coins it picked were spent from another device.
+ *  - 'retry': they are cleared and the re-pick hit another one: trying again picks live coins;
+ *  - 'short': they are cleared and the coins left can't pay for it;
+ *  - 'stuck': they could NOT be marked, so trying again would pick them again: a real error, not "try again".
+ */
 export class SpentElsewhereError extends Error {
   readonly code = SPENT_ELSEWHERE_CODE;
   readonly isError = true;
   constructor(
-    /** The coins left can't pay for it (retrying would only fail). */
-    readonly short: boolean,
-    /** Outpoints ("txid_vout") cleared. */
+    readonly kind: 'retry' | 'short' | 'stuck',
+    /** Outpoints ("txid_vout") found spent elsewhere. */
     readonly cleared: string[],
     /** What storage said on the second pick, if it failed. */
     readonly original?: unknown,
   ) {
-    super(short ? SPENT_ELSEWHERE_SHORT_MESSAGE : SPENT_ELSEWHERE_MESSAGE);
+    super(
+      kind === 'short'
+        ? SPENT_ELSEWHERE_SHORT_MESSAGE
+        : kind === 'stuck'
+          ? SPENT_ELSEWHERE_STUCK_MESSAGE
+          : SPENT_ELSEWHERE_MESSAGE,
+    );
     this.name = SPENT_ELSEWHERE_CODE;
+  }
+  get short(): boolean {
+    return this.kind === 'short';
   }
 }
 
@@ -80,12 +98,7 @@ export interface PreflightLookups {
   woc?: (outpoint: string, signal?: AbortSignal) => Promise<WocAnswer>;
   timeoutMs?: number;
   maxWoc?: number;
-  /** WhatsOnChain requests started per second (0 = no pacing). */
-  wocPerSecond?: number;
-  sleep?: (ms: number) => Promise<void>;
 }
-
-const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** Run f with a deadline; the signal is aborted when it passes. Rejects on timeout. */
 async function withDeadline<T>(f: (signal?: AbortSignal) => Promise<T>, ms: number): Promise<T> {
@@ -111,8 +124,6 @@ const asTxid = (t: unknown): string | null => (typeof t === 'string' && TXID.tes
 /** Pure apart from the lookups: which of these coins another transaction has spent. Never throws. */
 export async function checkCoins(coins: PreflightCoin[], d: PreflightLookups): Promise<PreflightReport> {
   const timeoutMs = d.timeoutMs ?? PREFLIGHT_TIMEOUT_MS;
-  const perSecond = d.wocPerSecond ?? PREFLIGHT_WOC_PER_SECOND;
-  const sleep = d.sleep ?? defaultSleep;
   const ops = coins.map((c) => c.outpoint);
   const indexAsk = d.index;
   const index: Promise<(string | null | undefined)[] | null> = indexAsk
@@ -126,11 +137,9 @@ export async function checkCoins(coins: PreflightCoin[], d: PreflightLookups): P
     .slice(0, d.maxWoc ?? PREFLIGHT_MAX_WOC)
     .map((c) => c.outpoint);
   const woc = Promise.all(
-    wocOrder.map(async (o, i): Promise<[string, WocAnswer | undefined]> => {
+    // Started together: the app-wide WhatsOnChain limiter (services/wocLimiter.ts) spaces them, 3 a second.
+    wocOrder.map(async (o): Promise<[string, WocAnswer | undefined]> => {
       if (!wocAsk) return [o, undefined];
-      // Bursts of `perSecond`, one second apart: never more than that many started in any second.
-      const wait = perSecond > 0 ? Math.floor(i / perSecond) * 1000 : 0;
-      if (wait > 0) await sleep(wait);
       try {
         return [o, await withDeadline((signal) => wocAsk(o, signal), timeoutMs)];
       } catch {
@@ -162,12 +171,34 @@ export async function wocSpentStatus(
 ): Promise<WocAnswer> {
   const [txid, vout] = outpoint.split('_');
   if (!TXID.test(txid) || !/^\d+$/.test(vout ?? '')) throw new Error(`bad outpoint ${outpoint}`);
-  const r = await f(`${WOC_MAIN}/tx/${txid}/${vout}/spent`, { signal, credentials: 'omit' });
+  // The build's optional key (wocResilience.ts) for WhatsOnChain's higher limits; anonymous otherwise.
+  const key = wocApiKeyFromEnv().trim();
+  const r = await f(`${WOC_MAIN}/tx/${txid}/${vout}/spent`, {
+    signal,
+    credentials: 'omit',
+    ...(key ? { headers: { 'woc-api-key': key } } : {}),
+  });
   if (r.status === 404) return null;
   if (!r.ok) throw new Error(`woc ${r.status}`);
   const j = (await r.json()) as { txid?: unknown; status?: unknown };
   if (typeof j.txid !== 'string') throw new Error('woc: no spender');
   return { txid: j.txid, confirmed: j.status === 'confirmed' };
+}
+
+/** Is this outpoint's spend by `spender` mined (WhatsOnChain "confirmed")? null when it can't tell. Never throws. */
+export async function wocSpendMined(
+  outpoint: string,
+  spender: string,
+  f?: typeof fetch,
+  timeoutMs = PREFLIGHT_TIMEOUT_MS,
+): Promise<boolean | null> {
+  try {
+    const w = await withDeadline((signal) => wocSpentStatus(outpoint, signal, f), timeoutMs);
+    if (!w) return false;
+    return w.txid.toLowerCase() === spender.toLowerCase() ? w.confirmed : false;
+  } catch {
+    return null;
+  }
 }
 
 // ── Scope: only the wallet's own sends, while the background holds a scope ────────────────────────────────────────
@@ -270,7 +301,9 @@ export function installCoinPreflight(storage: unknown, d: PreflightDeps): boolea
       }
       log('[coinPreflight] coins spent from another device; releasing this plan before signing', report.spent);
       try {
-        await abort({ reference: String(plan.reference) });
+        const r = (await abort({ reference: String(plan.reference) })) as { aborted?: boolean } | undefined;
+        // The toolbox answers {aborted:false} (no throw) for actions it protects: the plan still stands.
+        if (r?.aborted !== true) throw new Error(`abortAction answered ${JSON.stringify(r)}`);
       } catch (e) {
         // The coins stay locked to the plan: go on as before this check rather than leave them stuck.
         log('[coinPreflight] could not release the plan; sending as before', e instanceof Error ? e.message : e);
@@ -281,12 +314,14 @@ export function installCoinPreflight(storage: unknown, d: PreflightDeps): boolea
         return 0;
       });
       cleared.push(...report.spent.map((c) => c.outpoint));
-      for (const sc of scopes) sc.cleared += Math.max(n, report.spent.length);
-      if (round >= 2) throw new SpentElsewhereError(false, cleared);
+      for (const sc of scopes) sc.cleared += n;
+      // Not recorded: picking again would choose the same dead coins, and "try again" would loop (review 17, F6).
+      if (n < report.spent.length) throw new SpentElsewhereError('stuck', cleared);
+      if (round >= 2) throw new SpentElsewhereError('retry', cleared);
       try {
         plan = (await original(args)) as Planned;
       } catch (e) {
-        if (isInsufficientFunds(e)) throw new SpentElsewhereError(true, cleared, e);
+        if (isInsufficientFunds(e)) throw new SpentElsewhereError('short', cleared, e);
         throw e;
       }
     }
@@ -295,13 +330,11 @@ export function installCoinPreflight(storage: unknown, d: PreflightDeps): boolea
   return true;
 }
 
-/** This wallet's own actions that are not settled; their txids are never "spenders" (autoCoinResync.ts's rule). */
-export const OWN_UNFINISHED_STATUSES = ['unsigned', 'nosend', 'sending', 'unprocessed', 'failed'];
-
 /**
- * Pure: a coin whose spender is one of this wallet's own unfinished or failed actions is not "spent elsewhere": that
- * payment of ours may have gone out (a refusal storage took at face value), so picking other coins here could pay
- * twice. Such coins are left to the broadcaster and the existing heal, exactly as before this check.
+ * Pure: a coin whose spender is a transaction this wallet holds (any status) is not "spent elsewhere": that payment of
+ * ours may have gone out even if storage shows it failed (a refusal taken at face value), so picking other coins here
+ * could pay twice (review 17, F1). Such coins go to the broadcaster; its refusal reaches createWithSpentRetry, which
+ * never retries for a spender of ours and tells the person that payment went out.
  */
 export function withoutOwnSpenders(r: PreflightReport, own: Set<string>): PreflightReport {
   if (!own.size) return r;
@@ -334,6 +367,28 @@ type ManagerForWiring = ManagerLike & {
 };
 
 /**
+ * Which of these txids this account's storage holds, in ANY status (shared by this check and the background's retry
+ * decision, spentRetry.ts ownTxids). Null when storage can't be read (callers then treat every spender as maybe ours).
+ */
+export async function heldTxids(storage: unknown, identityKey: string, txids: string[]): Promise<Set<string> | null> {
+  const m = storage as ManagerForWiring | null;
+  if (!m || typeof m.runAsStorageProvider !== 'function' || !identityKey) return null;
+  try {
+    return await m.runAsStorageProvider(async (sp) => {
+      const user = (await sp.findUsers({ partial: { identityKey } }))[0];
+      const held = new Set<string>();
+      if (!user) return held;
+      for (const txid of new Set(txids.map((t) => t.toLowerCase())))
+        if ((await sp.findTransactions({ partial: { userId: user.userId, txid }, noRawTx: true })).length)
+          held.add(txid);
+      return held;
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Install the check on an account's storage manager with the real lookups (the services' 1sat txo client and
  * WhatsOnChain, mainnet only) and the real marking (this store; the automatic check's cleared list in `kv`).
  */
@@ -356,24 +411,14 @@ export function installCoinPreflightForWallet(
   const mainnet = (o.chain ?? 'main') === 'main';
   const index = txo?.getSpends ? (ops: string[]) => txo.getSpends!(ops) : undefined;
   const woc = mainnet ? (op: string, signal?: AbortSignal) => wocSpentStatus(op, signal, o.fetch) : undefined;
-  /** Which of these txids are this wallet's own unfinished or failed actions (an unreadable store: none). */
-  const ownUnfinished = (txids: string[]) =>
-    m
-      .runAsStorageProvider(async (sp) => {
-        const user = (await sp.findUsers({ partial: { identityKey: o.identityKey } }))[0];
-        const own = new Set<string>();
-        if (!user) return own;
-        for (const txid of new Set(txids)) {
-          const [t] = await sp.findTransactions({ partial: { userId: user.userId, txid }, noRawTx: true });
-          if (t?.status && OWN_UNFINISHED_STATUSES.includes(t.status)) own.add(txid);
-        }
-        return own;
-      })
-      .catch(() => new Set<string>());
   return installCoinPreflight(storage, {
     check: async (coins) => {
       const r = await checkCoins(coins, { ...o.lookups, index, woc });
-      return r.spent.length ? withoutOwnSpenders(r, await ownUnfinished(r.spent.map((c) => c.spender))) : r;
+      if (!r.spent.length) return r;
+      const spenders = r.spent.map((c) => c.spender);
+      // Storage unreadable: every spender may be ours, so nothing is re-picked (the broadcaster decides).
+      const held = (await heldTxids(storage, o.identityKey, spenders)) ?? new Set(spenders);
+      return withoutOwnSpenders(r, held);
     },
     isLocal: () => m.isActiveStorageProvider(),
     markSpent: async (spent) => {

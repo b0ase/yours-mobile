@@ -12,8 +12,8 @@ export type MoneyMoved = 'no' | 'unknown';
 
 /**
  * Coins this device still listed as spendable were spent from another device holding the same seed (owner's iPhone,
- * 4 Nov 2026: the extension spent three coins, the phone's $10 send "wouldn't send"). Said by the background after it
- * cleared those coins: before broadcasting (services/coinPreflight.ts) or after the network refused the send
+ * 4 Nov 2026: the extension spent three coins the phone still counted). Said by the background after it cleared those
+ * coins: before broadcasting (services/coinPreflight.ts) or after the network refused the send
  * (services/invalidSendHeal.ts). Nothing went out.
  */
 export const SPENT_ELSEWHERE_MESSAGE =
@@ -21,10 +21,26 @@ export const SPENT_ELSEWHERE_MESSAGE =
 /** The same, when the coins left are not enough for this payment (try again would only fail). */
 export const SPENT_ELSEWHERE_SHORT_MESSAGE =
   "Some of your coins were already spent from another device. Your balance is updated, and it isn't enough for this payment now. Nothing was sent.";
+/** The check found coins spent elsewhere but could not record that (trying again would pick them again). */
+export const SPENT_ELSEWHERE_STUCK_MESSAGE =
+  "Some of your coins were already spent from another device, but the wallet couldn't update them. Nothing was sent. Go to Settings › Troubleshooting › Resync coins, then send again.";
+/**
+ * The network refused this payment as a double spend, and the other payment using the same coin is not mined yet:
+ * either one may still go through, so nothing is retried (review 17, F2: ARC keeps a double-spend attempt).
+ */
+export const DOUBLE_SPEND_PENDING_MESSAGE =
+  "A coin in this payment was also used by another payment that isn't confirmed yet, so either one may still go through. Nothing more was sent. Check History in a few minutes before you try again.";
+/**
+ * The coin this payment needed was spent by a payment this wallet already holds (one it may have shown as failed):
+ * that payment went out, so nothing is retried (review 17, F1: a retry here paid the same payee twice).
+ */
+export const ownPaymentOutMessage = (txid?: string): string =>
+  `An earlier payment from this wallet already went out using a coin this payment needed${txid ? ` (tx ${txid})` : ''}. Nothing more was sent, so you won't pay twice. Find that payment in History before you send again.`;
 
 export type SendErrorKind =
   | 'worker-restarted'
   | 'other-extension'
+  | 'earlier-payment-out'
   | 'spent-elsewhere'
   | 'insufficient-funds'
   | 'broadcast-failed'
@@ -131,6 +147,12 @@ export function classifySendError(e: unknown, phase: 'before-sign' | 'send' = 's
 
   // The background cleared coins another device had spent (before broadcasting, or after the refusal). Before the
   // insufficient-funds and broadcast rules: its words are specific, never the generic "can't confirm… check History".
+  // A payment of ours already went out with this coin: say so with its short txid (the full one is in `txid`).
+  if (/earlier payment from this wallet already went out/i.test(raw))
+    return make('earlier-payment-out', ownPaymentOutMessage(txid ? `${txid.slice(0, 8)}…` : undefined), 'no');
+  if (/also used by another payment that isn't confirmed yet/i.test(raw))
+    return make('spent-elsewhere', DOUBLE_SPEND_PENDING_MESSAGE, 'unknown');
+  if (/couldn't update them/i.test(raw)) return make('spent-elsewhere', SPENT_ELSEWHERE_STUCK_MESSAGE, 'no');
   if (/already spent (?:on|from) another device|WERR_SPENT_ELSEWHERE/i.test(raw))
     return make(
       'spent-elsewhere',

@@ -11,7 +11,11 @@ import {
   type PreflightCoin,
   type PreflightReport,
 } from './coinPreflight';
-import { SPENT_ELSEWHERE_MESSAGE, SPENT_ELSEWHERE_SHORT_MESSAGE } from '../utils/sendErrors';
+import {
+  SPENT_ELSEWHERE_MESSAGE,
+  SPENT_ELSEWHERE_SHORT_MESSAGE,
+  SPENT_ELSEWHERE_STUCK_MESSAGE,
+} from '../utils/sendErrors';
 
 const T = (c: string) => c.repeat(64);
 const A = `${T('a')}_0`;
@@ -19,7 +23,6 @@ const B = `${T('b')}_1`;
 const C = `${T('c')}_2`;
 const coin = (outpoint: string, satoshis = 1000): PreflightCoin => ({ outpoint, satoshis });
 const never = <X>() => new Promise<X>(() => undefined);
-const instant = async () => undefined;
 
 describe('checkCoins: the automatic check’s rule (two sources, or a mined spend)', () => {
   const run = (
@@ -36,7 +39,6 @@ describe('checkCoins: the automatic check’s rule (two sources, or a mined spen
         if (w === 'err') throw new Error('woc 500');
         return w ?? null;
       },
-      sleep: instant,
     });
 
   test('index and WhatsOnChain name the same spender (mempool counts): spent', async () => {
@@ -71,14 +73,13 @@ describe('checkCoins: the automatic check’s rule (two sources, or a mined spen
     const r = await checkCoins([coin(A), coin(B)], {
       index: async () => [T('9')],
       woc: async () => null,
-      sleep: instant,
     });
     expect(r.spent).toEqual([]);
     expect(r.suspect).toEqual([]);
   });
   test('a hung lookup times out quickly and fails open', async () => {
     const t0 = Date.now();
-    const r = await checkCoins([coin(A)], { index: never, woc: never, timeoutMs: 50, sleep: instant });
+    const r = await checkCoins([coin(A)], { index: never, woc: never, timeoutMs: 50 });
     expect(Date.now() - t0).toBeLessThan(1000);
     expect(r.unknown).toEqual([A]);
   });
@@ -93,40 +94,23 @@ describe('checkCoins: the automatic check’s rule (two sources, or a mined spen
           });
         }),
       timeoutMs: 20,
-      sleep: instant,
     });
     expect(aborted).toBe(true);
   });
   test('WhatsOnChain: the biggest coins first, at most maxWoc', async () => {
     const asked: string[] = [];
-    const slept: number[] = [];
     await checkCoins([coin(A, 10), coin(B, 1000), coin(C, 100)], {
       index: async (ops) => ops.map(() => null),
       woc: async (o) => (asked.push(o), null),
       maxWoc: 2,
-      sleep: async (ms) => void slept.push(ms),
     });
     expect(asked).toEqual([B, C]);
-    expect(slept).toEqual([]); // up to 3 coins: one round trip, no waiting
-  });
-  test('WhatsOnChain: never more than 3 requests started in a second', async () => {
-    const coins = [1, 2, 3, 4, 5, 6, 7].map((n) => coin(`${T(String(n))}_0`, 100 * n));
-    let clock = 0;
-    const starts: number[] = [];
-    await checkCoins(coins, {
-      woc: async () => (starts.push(clock), null),
-      // Each request waits for its own start; the clock is the latest start reached.
-      sleep: async (ms) => void (clock = Math.max(clock, ms)),
-    });
-    expect(starts.length).toBe(6); // PREFLIGHT_MAX_WOC
-    for (let i = 3; i < starts.length; i++) expect(starts[i] - starts[i - 3]).toBeGreaterThanOrEqual(1000);
   });
   test('one batched index call for all coins, run beside WhatsOnChain', async () => {
     const batches: string[][] = [];
     await checkCoins([coin(A), coin(B)], {
       index: async (ops) => (batches.push(ops), [null, null]),
       woc: async () => null,
-      sleep: instant,
     });
     expect(batches).toEqual([[A, B]]);
   });
@@ -232,7 +216,7 @@ function fakeStorage(plans: (string[] | Error)[]) {
         })),
       };
     },
-    abortAction: async ({ reference }: { reference: string }) => void calls.aborted.push(reference),
+    abortAction: async ({ reference }: { reference: string }) => (calls.aborted.push(reference), { aborted: true }),
   };
   return { s, calls };
 }
@@ -252,11 +236,16 @@ describe('installCoinPreflight', () => {
   const install = (
     s: unknown,
     spent: string[],
-    o: { marks?: string[][]; isLocal?: boolean; check?: () => Promise<PreflightReport> } = {},
+    o: {
+      marks?: string[][];
+      isLocal?: boolean;
+      check?: () => Promise<PreflightReport>;
+      markSpent?: () => Promise<number>;
+    } = {},
   ) =>
     installCoinPreflight(s, {
       check: o.check ?? reportFor(spent),
-      markSpent: async (sc) => (o.marks?.push(sc.map((c) => c.outpoint)), sc.length),
+      markSpent: o.markSpent ?? (async (sc) => (o.marks?.push(sc.map((c) => c.outpoint)), sc.length)),
       isLocal: () => o.isLocal ?? true,
       log: () => undefined,
     });
@@ -330,6 +319,26 @@ describe('installCoinPreflight', () => {
     install(b.s, [A], { marks });
     expect(((await create(b.s)) as { reference: string }).reference).toBe('ref1');
     expect(marks).toEqual([]); // the coin stays as it is when its plan can't be released
+  });
+  test('an abort the toolbox refuses ({aborted:false}, no throw) is a failed abort: sends as before (review 17, F7)', async () => {
+    const { s, calls } = fakeStorage([[A], [B]]);
+    s.abortAction = async ({ reference }: { reference: string }) => (calls.aborted.push(reference), { aborted: false });
+    const marks: string[][] = [];
+    install(s, [A], { marks });
+    expect(((await create(s)) as { reference: string }).reference).toBe('ref1');
+    expect(marks).toEqual([]);
+    expect(calls.create).toBe(1); // never picked again over a plan that still holds the coins
+  });
+  test('the spent coins could not be marked: a real error, not the looping "try again" (review 17, F6)', async () => {
+    for (const markSpent of [async () => 0, async () => Promise.reject(new Error('storage busy'))]) {
+      const { s, calls } = fakeStorage([[A], [A]]);
+      install(s, [A], { markSpent });
+      const err = await create(s).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(SpentElsewhereError);
+      expect((err as SpentElsewhereError).kind).toBe('stuck');
+      expect((err as Error).message).toBe(SPENT_ELSEWHERE_STUCK_MESSAGE);
+      expect(calls.create).toBe(1); // not picked again: it would choose the same dead coin
+    }
   });
   test('the remote store active: never checked', async () => {
     const { s, calls } = fakeStorage([[A]]);

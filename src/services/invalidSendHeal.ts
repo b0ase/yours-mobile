@@ -33,20 +33,27 @@ type ReviewError = Error & {
 
 /**
  * WERR_REVIEW_ACTIONS statuses that mean "the network refused this send because of its inputs": REJECTED (invalidTx)
- * and DOUBLE_SPEND_ATTEMPTED (doubleSpend). The toolbox confirms a double spend against the chain before it reports
- * one (confirmDoubleSpend: a txid the network knows becomes success, all-unspent inputs a service error), so a
- * doubleSpend that reaches us failed the action and freed its inputs exactly like invalidTx (owner's iPhone, 4 Nov
- * 2026: coins spent from the extension; before this, a double spend skipped the heal and the one retry).
+ * and DOUBLE_SPEND_ATTEMPTED (doubleSpend). In storage both fail the action and free its inputs, so both are healed
+ * (owner's iPhone, 4 Nov 2026: coins spent from the extension). On the NETWORK they differ: ARC keeps a double-spend
+ * attempt, which is mined if the other payment drops (the toolbox un-fails such txs: TaskReviewDoubleSpends). So after
+ * a doubleSpend the send is retried only when every competing spend is mined (spentRetry.ts; review 17, F2).
  */
 const REFUSED_STATUSES = new Set(['invalidTx', 'doubleSpend']);
 
-/** Pure: the refused transaction's txid (invalidTx or doubleSpend), lowercase, if the error names one. */
-export const refusedTxid = (error: unknown): string | undefined => {
-  const txid = (error as ReviewError | null)?.reviewActionResults?.find((r) =>
-    REFUSED_STATUSES.has(r?.status ?? ''),
-  )?.txid;
-  return typeof txid === 'string' && TXID.test(txid) ? txid.toLowerCase() : undefined;
+/** Pure: the refusal's status ('invalidTx' or 'doubleSpend') and txid (lowercase) if the error names one. */
+export const refusal = (error: unknown): { status: 'invalidTx' | 'doubleSpend'; txid?: string } | undefined => {
+  const r = (error as ReviewError | null)?.reviewActionResults?.find((x) => REFUSED_STATUSES.has(x?.status ?? ''));
+  if (!r) return undefined;
+  const txid = typeof r.txid === 'string' && TXID.test(r.txid) ? r.txid.toLowerCase() : undefined;
+  return { status: r.status as 'invalidTx' | 'doubleSpend', txid };
 };
+
+/** Pure: the refused transaction's txid (invalidTx or doubleSpend), lowercase, if the error names one. */
+export const refusedTxid = (error: unknown): string | undefined => refusal(error)?.txid;
+
+/** Pure: the spender the broadcaster's reason names ("… already spent by tx <txid>"), lowercase. */
+export const reasonSpender = (reason: string | undefined): string | undefined =>
+  /spent by (?:tx )?([0-9a-f]{64})/i.exec(reason ?? '')?.[1]?.toLowerCase();
 
 /** Pure: was this a broadcast the network refused (invalid or a double spend), not a service hiccup? */
 export const isInvalidTxReview = (error: unknown): boolean =>
@@ -78,18 +85,31 @@ export async function provenSpent(
   fallback?: (outpoint: string) => Promise<string | null | undefined>,
   rejectedTxid?: string,
 ): Promise<string[]> {
-  const spent: string[] = [];
+  return Object.keys(await provenSpenders(outpoints, getSpend, fallback, rejectedTxid));
+}
+
+/** provenSpent, with each input's spending txid (lowercase). */
+export async function provenSpenders(
+  outpoints: string[],
+  getSpend: (outpoint: string) => Promise<string | null | undefined>,
+  fallback?: (outpoint: string) => Promise<string | null | undefined>,
+  rejectedTxid?: string,
+): Promise<Record<string, string>> {
+  const spent: Record<string, string> = {};
   const ask = async (f: typeof getSpend, op: string) => {
     try {
       const by = await f(op);
       // The rejected tx itself is not a spender (it never went out).
-      return typeof by === 'string' && TXID.test(by) && by.toLowerCase() !== rejectedTxid?.toLowerCase() ? by : null;
+      return typeof by === 'string' && TXID.test(by) && by.toLowerCase() !== rejectedTxid?.toLowerCase()
+        ? by.toLowerCase()
+        : null;
     } catch {
       return null;
     }
   };
   for (const op of outpoints) {
-    if ((await ask(getSpend, op)) || (fallback && (await ask(fallback, op)))) spent.push(op);
+    const by = (await ask(getSpend, op)) || (fallback && (await ask(fallback, op)));
+    if (by) spent[op] = by;
   }
   return spent;
 }
@@ -113,7 +133,18 @@ export interface HealStore {
   markSpent: (txid: string, vout: number) => Promise<number>;
 }
 
-export type HealReport = { checked: number; released: number; inputs?: string[] };
+export type HealReport = {
+  checked: number;
+  released: number;
+  inputs?: string[];
+  /**
+   * Every input proven spent → the transaction that spent it (null when the broadcaster named the input without its
+   * spender). The retry decision reads these (spentRetry.ts: never retry when a spender is a payment of ours).
+   */
+  spenders?: Record<string, string | null>;
+  /** The inputs whose rows this heal changed (spendable → false). */
+  cleared?: string[];
+};
 
 /**
  * Settings › Troubleshooting › Resync coins (owner, 17 Oct 2026: sends kept failing with UTXO_SPENT after coins were
@@ -147,6 +178,15 @@ export const resyncMessage = (r: HealReport): string =>
     ? `Checked ${r.checked} coins: ${r.released} had already been spent elsewhere and are cleared. Try your send again.`
     : `Checked ${r.checked} coins: all still spendable. Nothing to clear.`;
 
+/** Pure: the coins a heal cleared → their named spender, for the automatic check's cleared list (recordAutoCleared). */
+export const healClearedEntries = (r: HealReport | null | undefined): Record<string, string> =>
+  Object.fromEntries(
+    (r?.cleared ?? []).flatMap((op) => {
+      const by = r?.spenders?.[op];
+      return by ? [[op, by]] : [];
+    }),
+  );
+
 /** After an invalidTx: release the rejected send's inputs proven spent. Never throws. */
 export async function healInvalidSend(
   error: unknown,
@@ -158,18 +198,26 @@ export async function healInvalidSend(
   const inputs = rejectedInputs(error);
   const rejectedTxid = refusedTxid(error);
   const named = namedSpentInputs(opts.reason, inputs);
-  const looked = await provenSpent(
+  const namedBy = reasonSpender(opts.reason);
+  const looked = await provenSpenders(
     inputs.filter((op) => !named.includes(op)),
     getSpend,
     opts.fallback,
     rejectedTxid,
   );
+  const spenders: Record<string, string | null> = {
+    ...Object.fromEntries(named.map((op) => [op, namedBy && namedBy !== rejectedTxid ? namedBy : null])),
+    ...looked,
+  };
   let released = 0;
-  for (const op of [...named, ...looked]) {
+  const cleared: string[] = [];
+  for (const op of Object.keys(spenders)) {
     const [txid, vout] = op.split('_');
-    released += await store.markSpent(txid, Number(vout)).catch(() => 0);
+    const n = await store.markSpent(txid, Number(vout)).catch(() => 0);
+    released += n;
+    if (n > 0) cleared.push(op);
   }
-  return { checked: inputs.length, released, inputs };
+  return { checked: inputs.length, released, inputs, spenders, cleared };
 }
 
 /** What to add to the error the person sees. With nothing cleared, name the coins tried so a report can be traced. */

@@ -146,6 +146,7 @@ import { userDeniedError, withDenialCode } from './services/userDenied';
 import { HANDOFF_ENABLED } from './mobile/passkey/extHandoff';
 import { HANDOFF_ALARM, handleExternalHandoff, sweepExpiredHandoff } from './mobile/passkey/extHandoffStore';
 import {
+  healClearedEntries,
   healInvalidSend,
   withHealMessage,
   isInvalidTxReview,
@@ -158,7 +159,7 @@ import { refusalFor } from './services/broadcastRefusals';
 import { createExcludingUnprovable } from './services/unprovableCoinRetry';
 import { siteActionError } from './services/siteActionError';
 import { createWithSpentRetry, retryEligible } from './services/spentRetry';
-import { armCoinPreflight } from './services/coinPreflight';
+import { armCoinPreflight, heldTxids, wocSpendMined } from './services/coinPreflight';
 import { createWithStorageFailover, failoverEligible } from './services/storageFailover';
 import { isTruthyRequiredError } from './services/nullTxidRepair';
 
@@ -167,8 +168,8 @@ let switchActiveStorageRef: ((ctx: AccountContext, target: 'local' | string) => 
 import {
   AUTO_RESYNC_DELAY_MS,
   AUTO_RESYNC_LIGHT_GAP_MS,
-  AUTO_RESYNC_WOC_GAP_MS,
   readAutoResyncCoins,
+  recordAutoCleared,
   runAutoResyncIfDue,
   type AutoResyncDeps,
   type AutoResyncReader,
@@ -307,13 +308,23 @@ import {
   usbBackupSettings,
   type UsbBackupChunkRequest,
 } from './services/usbBackupBackground';
+import { installWocLimiter } from './services/wocLimiter';
 
+// Every WhatsOnChain request from this worker shares one ~3/s limit (services/wocLimiter.ts; review 17, F5). Before
+// the wallet's services are built, so the toolbox's own WhatsOnChain client is covered too.
+installWocLimiter();
 
 let chromeStorageService = new ChromeStorageService();
 const isInServiceWorker = self?.document === undefined;
 
 // Account context - null if locked or not initialized
 let accountContext: AccountContext | null = null;
+
+/** chrome.storage.local, where the automatic coin check keeps its throttle and cleared list (autoCoinResync.ts). */
+const autoResyncKV = {
+  get: (k: string) => chrome.storage.local.get(k),
+  set: (items: Record<string, unknown>) => chrome.storage.local.set(items),
+};
 
 /** WhatsOnChain's spender for an outpoint (confirmed or mempool); null when unspent (404), throws when it can't tell. */
 async function wocSpend(outpoint: string): Promise<string | null> {
@@ -389,7 +400,7 @@ async function healRejectedInputs(ctx: AccountContext, error: unknown): Promise<
   try {
     // invalidTx or doubleSpend: both are refusals over the inputs (invalidSendHeal.ts REFUSED_STATUSES).
     const rejected = refusedTxid(error);
-    return await healInvalidSend(error, (o) => txo.getSpend(o), {
+    const heal = await healInvalidSend(error, (o) => txo.getSpend(o), {
       markSpent: (txid, vout) =>
         ctx.storage.runAsStorageProvider(async (sp) => {
           const user = (await sp.findUsers({ partial: { identityKey } }))[0];
@@ -400,6 +411,10 @@ async function healRejectedInputs(ctx: AccountContext, error: unknown): Promise<
           return n;
         }),
     }, { fallback: wocSpend, reason: refusalFor(rejected) });
+    // The automatic check re-checks these and puts one back if both sources later call it unspent (a mempool
+    // competitor that was dropped; review 17, F3).
+    await recordAutoCleared(autoResyncKV, identityKey, healClearedEntries(heal));
+    return heal;
   } catch (err) {
     console.error('[createAction] invalidTx heal failed:', err);
     return null;
@@ -492,9 +507,9 @@ async function autoResyncDeps(
     });
   return {
     coins: read.coins,
-    // The biggest coins are checked on WhatsOnChain even when the index says unspent (autoCoinResync.ts bigCoins).
+    // The biggest coins are checked on WhatsOnChain even when the index says unspent (autoCoinResync.ts bigCoins);
+    // paced by the worker-wide WhatsOnChain limiter (services/wocLimiter.ts).
     sats: read.sats,
-    wocGapMs: AUTO_RESYNC_WOC_GAP_MS,
     cleared,
     ownPendingTxids: read.ownPendingTxids,
     ownPendingInputs: read.ownPendingInputs,
@@ -6469,6 +6484,8 @@ if (!(
     let fundingSnap: FundingSnapshot | undefined;
     let streamPass: StreamPassRun | undefined;
     let spentHeal: HealReport | null | undefined;
+    /** The retry stack's plain sentence (an earlier payment went out, a pending double spend), shown instead. */
+    let spentNotice: string | undefined;
     let releasePayeeMark: (() => void) | undefined;
     let releaseMicropay: (() => void) | undefined;
     let ownMintIntent: MintIntent | undefined;
@@ -6676,10 +6693,23 @@ if (!(
           heal: (e) => (ctxForHeal ? healRejectedInputs(ctxForHeal, e) : Promise.resolve(null)),
           txKnown: (txid) => (ctxForHeal && ctxChain(ctxForHeal) === 'main' ? wocTxKnown(txid) : Promise.resolve(null)),
           reason: (txid) => refusalFor(txid),
+          // Never retry when a cleared coin's spender is a payment this wallet holds, any status (review 17, F1).
+          ownTxids: (txids) =>
+            ctxForHeal
+              ? heldTxids(
+                  ctxForHeal.storage,
+                  chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey || '',
+                  txids,
+                )
+              : Promise.resolve(null),
+          // After a double spend, retry only when the competing spend is mined (review 17, F2).
+          spendMined: (op, by) =>
+            ctxForHeal && ctxChain(ctxForHeal) === 'main' ? wocSpendMined(op, by) : Promise.resolve(null),
           eligible: ownSend,
           log: (m, d) => console.warn(m, d ?? ''),
         }).finally(() => preflight.done());
         spentHeal = outcome.heal;
+        if (!outcome.ok) spentNotice = outcome.notice;
         if (spentHeal?.released || preflight.cleared) notifyBalanceUpdate();
         if (!outcome.ok) throw outcome.error;
         if (outcome.retried) console.warn('[createAction] sent on retry after clearing spent coins', spentHeal);
@@ -6784,10 +6814,11 @@ if (!(
         type: CWIEventName.CREATE_ACTION,
         success: false,
         // Heal outcome first: the page cuts long errors, and a long broadcaster reason hid "tap Send again" (19 Oct).
+        // An earlier payment that went out, or a double spend that may still go through, says so instead (spentRetry).
         ...(message.originator && message.originator !== ADMIN_ORIGINATOR
           ? // Sites get a plain, specific sentence and the original WERR code (services/siteActionError.ts).
-            siteActionError(error, withHealMessage(friendly ?? errorMessage, heal))
-          : { error: withHealMessage(friendly ?? errorMessage, heal) }),
+            siteActionError(error, spentNotice ?? withHealMessage(friendly ?? errorMessage, heal))
+          : { error: spentNotice ?? withHealMessage(friendly ?? errorMessage, heal) }),
         // For the wallet page's Details panel only (never to sites): which error and where it was thrown (a bare
         // WERR_INTERNAL says neither).
         detail: message.originator !== ADMIN_ORIGINATOR ? undefined : `${String((error as { code?: unknown })?.code ?? errorName)}\n${errorStack?.split('\n').slice(0, 6).join('\n') ?? ''}`,

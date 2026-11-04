@@ -14,6 +14,7 @@ import {
   retryEligible,
   SPENT_ELSEWHERE_MESSAGE,
 } from './spentRetry';
+import { DOUBLE_SPEND_PENDING_MESSAGE, ownPaymentOutMessage } from '../utils/sendErrors';
 
 const key = PrivateKey.fromRandom();
 const lock = new P2PKH().lock(key.toAddress());
@@ -104,6 +105,9 @@ const deps = (w: ReturnType<typeof simWallet>, over: Partial<Parameters<typeof c
   heal: w.heal,
   txKnown: async (txid: string) => w.known.has(txid),
   reason: (txid: string) => w.refusals.get(txid),
+  // The other device's payment is not one this wallet holds, and (for a double spend) it is mined.
+  ownTxids: async () => new Set<string>(),
+  spendMined: async () => true,
   eligible: true,
   ...over,
 });
@@ -126,15 +130,52 @@ describe('UTXO_SPENT: coin spent on another device', () => {
     expect(w.balance()).toBe(2000);
   });
 
-  test('DOUBLE_SPEND_ATTEMPTED (owner, 4 Nov 2026): healed and retried once, exactly like UTXO_SPENT', async () => {
+  test('DOUBLE_SPEND_ATTEMPTED with the competing spend MINED: healed and retried once', async () => {
     const w = simWallet(3, [0], 'doubleSpend');
-    const r = await createWithSpentRetry(deps(w));
+    const asked: string[][] = [];
+    const r = await createWithSpentRetry(deps(w, { spendMined: async (op, by) => (asked.push([op, by]), true) }));
+    expect(asked).toEqual([[`${w.srcId}_0`, OTHER_DEVICE_TX]]);
     expect(r.ok).toBe(true);
     expect(r.retried).toBe(true);
     expect(r.heal?.released).toBe(1);
     expect(w.accepted).toHaveLength(1);
     expect(w.accepted[0].inputs).toEqual([`${w.srcId}_1`]);
     expect(w.balance()).toBe(1000); // coin 0 cleared, coin 1 spent by the retry
+  });
+
+  test('DOUBLE_SPEND_ATTEMPTED with the competing spend NOT mined (review 17, F2): healed, never retried', async () => {
+    for (const spendMined of [async () => false, async () => null, async () => Promise.reject(new Error('woc down'))]) {
+      const w = simWallet(3, [0], 'doubleSpend');
+      const r = await createWithSpentRetry(deps(w, { spendMined }));
+      expect(r.ok).toBe(false);
+      expect(r.retried).toBe(false);
+      expect(r.heal?.released).toBe(1); // the balance is still corrected
+      expect(w.accepted).toHaveLength(0);
+      expect(r.ok ? undefined : r.notice).toBe(DOUBLE_SPEND_PENDING_MESSAGE);
+    }
+  });
+
+  test("the spent coin's spender is a payment THIS wallet holds (review 17, F1): never retried, the person is told", async () => {
+    const w = simWallet(3, [0]);
+    const r = await createWithSpentRetry(deps(w, { ownTxids: async (t) => new Set(t) }));
+    expect(r.ok).toBe(false);
+    expect(r.retried).toBe(false);
+    expect(w.accepted).toHaveLength(0);
+    expect(r.heal?.released).toBe(1);
+    expect(r.ok ? undefined : r.notice).toBe(ownPaymentOutMessage(OTHER_DEVICE_TX));
+    // Not even a non-eligible caller (a site) is told to "try again".
+    const site = simWallet(3, [0]);
+    const s = await createWithSpentRetry(deps(site, { eligible: false, ownTxids: async (t) => new Set(t) }));
+    expect(s.ok ? undefined : s.notice).toBe(ownPaymentOutMessage(OTHER_DEVICE_TX));
+  });
+
+  test("storage can't say whose the spender is: no retry (fail closed)", async () => {
+    for (const ownTxids of [async () => null, async () => Promise.reject(new Error('locked'))]) {
+      const w = simWallet(3, [0]);
+      const r = await createWithSpentRetry(deps(w, { ownTxids }));
+      expect(r.retried).toBe(false);
+      expect(w.accepted).toHaveLength(0);
+    }
   });
 
   test('retries once with a different input and sends exactly once', async () => {

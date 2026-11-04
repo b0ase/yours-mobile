@@ -14,8 +14,8 @@
  * - One run at a time (shared lock with the manual Resync), at most once per gap per account, persisted so a worker
  *   restart does not reset it.
  * - The biggest coins (bigCoins) are looked up on WhatsOnChain in every run even when the index calls them unspent,
- *   and the app coming to the front runs just that check at most once a minute (owner's iPhone, 4 Nov 2026), paced
- *   under WhatsOnChain's ~3 requests a second. The rule above is unchanged: such a coin clears only on a confirmed
+ *   and the app coming to the front runs just that check at most once a minute (owner's iPhone, 4 Nov 2026), under the
+ *   worker-wide ~3 requests a second (services/wocLimiter.ts). The rule above is unchanged: such a coin clears only on a confirmed
  *   WhatsOnChain spend, or when both sources name the same spender.
  * Any lookup that fails leaves the coin as it is.
  */
@@ -57,10 +57,6 @@ export interface AutoResyncDeps {
    * iPhone, 4 Nov 2026: three coins the extension spent still counted as ~$10.50 on the phone).
    */
   sats?: Record<string, number>;
-  /** Minimum gap between WhatsOnChain requests started by this run (anonymous WhatsOnChain allows about 3 a second). */
-  wocGapMs?: number;
-  sleep?: (ms: number) => Promise<void>;
-  now?: () => number;
 }
 
 export type AutoResyncMode = 'full' | 'light' | 'foreground';
@@ -69,8 +65,6 @@ export type AutoResyncMode = 'full' | 'light' | 'foreground';
 export const AUTO_RESYNC_BIG_COINS = 8;
 /** …stopping once they hold this share of the spendable sats. */
 export const AUTO_RESYNC_BIG_SHARE = 0.95;
-/** 340 ms between WhatsOnChain requests: under its ~3 requests a second for anonymous callers. */
-export const AUTO_RESYNC_WOC_GAP_MS = 340;
 
 /**
  * Pure: the biggest coins, largest first, until they hold `share` of the total or `max` are taken. A stale big coin is
@@ -131,19 +125,12 @@ export async function autoResyncCoins(d: AutoResyncDeps): Promise<AutoResyncRepo
       /* unknown */
     }
   });
-  const now = d.now ?? Date.now;
-  const sleep = d.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  let lastWocAt = -Infinity;
+  // One at a time; the worker-wide WhatsOnChain limiter keeps this and every other caller under ~3 a second
+  // (services/wocLimiter.ts).
   const askWoc = async (o: string): Promise<WocAnswer | undefined> => {
     if (!d.woc) return undefined;
     try {
-      return await withRetry(async () => {
-        // Paced: at most one request per wocGapMs from this run (retries included).
-        const wait = lastWocAt + (d.wocGapMs ?? 0) - now();
-        if (wait > 0) await sleep(wait);
-        lastWocAt = now();
-        return d.woc!(o);
-      });
+      return await withRetry(() => d.woc!(o));
     } catch {
       return undefined;
     }
@@ -256,36 +243,54 @@ export async function runAutoResyncIfDue(
     // Not ready (no services/storage yet): don't start the wait, the next unlock tries again.
     if (!deps) return null;
     // Written before the run, so a crash mid-run still waits the gap.
-    const before = await read();
-    await kv.set({ [AUTO_RESYNC_KEY]: { ...before, [identityKey]: { ...before[identityKey], ...stamp } } });
+    await withStateWrite(async () => {
+      const before = await read();
+      await kv.set({ [AUTO_RESYNC_KEY]: { ...before, [identityKey]: { ...before[identityKey], ...stamp } } });
+    });
     const report = await autoResyncCoins({ ...deps, mode });
-    const latest = await read();
-    // Coins cleared by someone else while this ran (the send check, coinPreflight.ts recordAutoCleared) are kept, so
-    // later runs still re-check them and can undo a mistake.
-    const meanwhile = Object.fromEntries(
-      Object.entries(latest[identityKey]?.cleared ?? {}).filter(([op, by]) => loadedCleared[op] !== by),
-    );
-    await kv.set({
-      [AUTO_RESYNC_KEY]: {
-        ...latest,
-        [identityKey]: { ...latest[identityKey], ...stamp, cleared: { ...report.cleared, ...meanwhile } },
-      },
+    await withStateWrite(async () => {
+      const latest = await read();
+      // Coins cleared by someone else while this ran (the send check and the heal, recordAutoCleared) are kept, so
+      // later runs still re-check them and can undo a mistake.
+      const meanwhile = Object.fromEntries(
+        Object.entries(latest[identityKey]?.cleared ?? {}).filter(([op, by]) => loadedCleared[op] !== by),
+      );
+      await kv.set({
+        [AUTO_RESYNC_KEY]: {
+          ...latest,
+          [identityKey]: { ...latest[identityKey], ...stamp, cleared: { ...report.cleared, ...meanwhile } },
+        },
+      });
     });
     return report;
   });
 }
 
+let stateWrites: Promise<unknown> = Promise.resolve();
 /**
- * Remember coins cleared outside a run (the check before a send, services/coinPreflight.ts) in the same list, so the
- * next runs re-check them and put one back if both sources later call it unspent. Never throws.
+ * Every read-modify-write of the persisted state runs one at a time (review 17, F9: an interleaved write could drop a
+ * cleared entry, and with it that coin's undo). Held only around the read and the write, never across lookups.
+ */
+function withStateWrite<T>(f: () => Promise<T>): Promise<T> {
+  const run = stateWrites.then(f, f);
+  stateWrites = run.catch(() => undefined);
+  return run;
+}
+
+/**
+ * Remember coins cleared outside a run (the check before a send, services/coinPreflight.ts, and the heal after a
+ * refusal, invalidSendHeal.ts) in the same list, so the next runs re-check them and put one back if both sources later
+ * call it unspent. Never throws.
  */
 export async function recordAutoCleared(kv: KV, identityKey: string, entries: Record<string, string>): Promise<void> {
   if (!identityKey || !Object.keys(entries).length) return;
   try {
-    const all = ((await kv.get(AUTO_RESYNC_KEY))[AUTO_RESYNC_KEY] as AutoResyncState | undefined) ?? {};
-    const mine = all[identityKey] ?? {};
-    await kv.set({
-      [AUTO_RESYNC_KEY]: { ...all, [identityKey]: { ...mine, cleared: { ...(mine.cleared ?? {}), ...entries } } },
+    await withStateWrite(async () => {
+      const all = ((await kv.get(AUTO_RESYNC_KEY))[AUTO_RESYNC_KEY] as AutoResyncState | undefined) ?? {};
+      const mine = all[identityKey] ?? {};
+      await kv.set({
+        [AUTO_RESYNC_KEY]: { ...all, [identityKey]: { ...mine, cleared: { ...(mine.cleared ?? {}), ...entries } } },
+      });
     });
   } catch {
     /* the coin stays cleared; only its automatic re-check is lost */

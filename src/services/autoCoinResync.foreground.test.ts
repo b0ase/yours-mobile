@@ -146,23 +146,6 @@ describe('foreground run (the app came to the front)', () => {
   });
 });
 
-describe('WhatsOnChain pacing', () => {
-  test('requests start at least wocGapMs apart (≤ 3 a second)', async () => {
-    const p = phone();
-    let clock = 0;
-    const starts: number[] = [];
-    await autoResyncCoins({
-      ...p.deps({ woc: async () => (starts.push(clock), null) }),
-      mode: 'full',
-      wocGapMs: 340,
-      now: () => clock,
-      sleep: async (ms) => void (clock += ms),
-    });
-    expect(starts).toHaveLength(5);
-    for (let i = 1; i < starts.length; i++) expect(starts[i] - starts[i - 1]).toBeGreaterThanOrEqual(340);
-  });
-});
-
 describe('coins the send check cleared are kept for the re-check', () => {
   test('recordAutoCleared adds to the list; a run that started earlier does not drop them', async () => {
     const p = phone();

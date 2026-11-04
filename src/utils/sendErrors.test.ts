@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { classifySendError, SPENT_ELSEWHERE_MESSAGE, SPENT_ELSEWHERE_SHORT_MESSAGE } from './sendErrors';
+import {
+  classifySendError,
+  DOUBLE_SPEND_PENDING_MESSAGE,
+  ownPaymentOutMessage,
+  SPENT_ELSEWHERE_MESSAGE,
+  SPENT_ELSEWHERE_SHORT_MESSAGE,
+  SPENT_ELSEWHERE_STUCK_MESSAGE,
+} from './sendErrors';
 
 const TXID = 'a'.repeat(64);
 
@@ -46,6 +53,27 @@ describe('classifySendError', () => {
     expect(short).toMatchObject({ kind: 'spent-elsewhere', moneyMoved: 'no', message: SPENT_ELSEWHERE_SHORT_MESSAGE });
     // The heal's text wins over the broadcaster's raw words when both are present.
     expect(classifySendError(`${SPENT_ELSEWHERE_MESSAGE} (UTXO_SPENT, REJECTED)`).kind).toBe('spent-elsewhere');
+  });
+  test('an earlier payment of ours went out (review 17, F1): say so, nothing more sent, the txid for History', () => {
+    const r = classifySendError(ownPaymentOutMessage(TXID));
+    expect(r).toMatchObject({ kind: 'earlier-payment-out', moneyMoved: 'no', txid: TXID });
+    expect(r.message).toBe(ownPaymentOutMessage(`${TXID.slice(0, 8)}…`));
+    expect(r.message).toMatch(/won't pay twice/);
+    expect(r.message).not.toMatch(/try again|another device/i);
+  });
+  test('a double spend that may still go through (review 17, F2): money may move, no "try again" now', () => {
+    expect(classifySendError(DOUBLE_SPEND_PENDING_MESSAGE)).toMatchObject({
+      kind: 'spent-elsewhere',
+      moneyMoved: 'unknown',
+      message: DOUBLE_SPEND_PENDING_MESSAGE,
+    });
+  });
+  test('coins that could not be marked (review 17, F6): a real error with what to do', () => {
+    expect(classifySendError(SPENT_ELSEWHERE_STUCK_MESSAGE)).toMatchObject({
+      kind: 'spent-elsewhere',
+      moneyMoved: 'no',
+      message: SPENT_ELSEWHERE_STUCK_MESSAGE,
+    });
   });
   test('insufficient funds keeps the background numbers', () => {
     const m = 'Insufficient funds: this needs 900 sats, and 100 sats are spendable right now.';
