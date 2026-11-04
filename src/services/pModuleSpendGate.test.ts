@@ -439,3 +439,58 @@ describe('F1: an OrdLock V2 purchase is priced on the pay sheet at what it reall
     expect(sheets).toEqual([PRICE + FEE]);
   });
 });
+
+/**
+ * Review 16, F6: the toolbox registers its own BRC-177 'nosend' module, which leaves the signable transaction for the
+ * manager's normal spend check. The gate wrapped it too, so a site's "p nosend expiry …" payment got an extra pay sheet
+ * and was counted twice in envelopes and the month ledger. Only the asset modules (they finish transactions themselves)
+ * take the gate.
+ */
+describe('F6: a BRC-177 "p nosend" site payment is charged exactly as the toolbox charges it', () => {
+  function chain(gated: boolean) {
+    const base = fakeBase();
+    const store = new InMemoryPermissionStore();
+    const modules = createAssetPermissionModules({
+      wallet: base as never,
+      promptHandler: async () => true,
+      adminOriginator: ADMIN,
+      permissionStore: store as never,
+    });
+    const mgr = new LocalWalletPermissionsManager(base as never, ADMIN, { permissionModules: modules }, {
+      store,
+    } as never);
+    const sheets: number[] = [];
+    (mgr as unknown as Record<string, unknown>).requestPermissionFlow = async (r: {
+      type: string;
+      spending?: { satoshis: number };
+    }) => {
+      if (r.type === 'spending') sheets.push(r.spending?.satoshis ?? -1);
+      return true;
+    };
+    const recorded: number[] = [];
+    const ledger = { total: async () => 0, record: async (_o: string, _m: string, s: number) => void recorded.push(s) };
+    const inner = gated ? guardPModuleSpends(mgr, { adminOriginator: ADMIN }) : mgr;
+    const w = withLocalSpendLedger(
+      guardEverySpendAsks(inner, { adminOriginator: ADMIN, normalize: normalizeOriginator }),
+      ledger as never,
+      () => undefined,
+    );
+    return { w, sheets, recorded };
+  }
+  const nosendPayment = () => ({
+    description: 'Pay later, or reclaim',
+    labels: ['p nosend expiry seconds 3600'],
+    outputs: [{ lockingScript: attacker, satoshis: PAY, outputDescription: 'payment to seller' }],
+    options: { noSend: true },
+  });
+
+  test('same pay sheets and the same ledger entries with the gate as without it', async () => {
+    const plain = chain(false);
+    await plain.w.createAction(nosendPayment() as never, 'shop.example').catch(() => undefined);
+    const gated = chain(true);
+    await gated.w.createAction(nosendPayment() as never, 'shop.example').catch(() => undefined);
+    expect(plain.sheets.length).toBeGreaterThan(0);
+    expect(gated.sheets).toEqual(plain.sheets);
+    expect(gated.recorded).toEqual(plain.recorded);
+  });
+});

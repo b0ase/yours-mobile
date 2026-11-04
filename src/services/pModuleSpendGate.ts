@@ -27,11 +27,14 @@
  * refused instead of let through unchecked.
  */
 import { P2PKH, PublicKey, Transaction } from '@bsv/sdk';
-import { parseOneInputLabel } from '@1sat/types';
+import { PERMISSION_SCHEME_IDS, parseOneInputLabel } from '@1sat/types';
 
 export const HELD_ASSET_REFUSAL =
   "A site can't name your wallet's own ordinals, tokens, names or locks for bWalletX to sign";
 export const MODULE_GATE_UNAVAILABLE = "bWalletX couldn't check this payment, so it was refused";
+
+/** The asset schemes createAssetPermissionModules registers (1sat, opns, bsv21, lock): the modules that finish. */
+const ASSET_SCHEMES = new Set<string>(PERMISSION_SCHEME_IDS);
 
 /** @1sat/actions PENDING_RESOLVED_SPENDS_KEY (pipeline/spendTargets.js; not exported from the package root). */
 const PENDING_RESOLVED_SPENDS = '__pendingResolvedSpends';
@@ -122,7 +125,9 @@ export function guardPModuleSpends<T extends object>(manager: T, deps: { adminOr
   if (!able) return manager;
 
   m.callCreateActionWithPModules = async (finalArgs: unknown, modules: Map<string, PModule>, originator?: string) => {
-    if (!outside(originator) || !(modules instanceof Map) || modules.size === 0)
+    // Only the asset modules finish a transaction themselves. Others (the toolbox's own BRC-177 'nosend') hand the
+    // signable transaction back to the manager's own spend check, so gating them would charge twice (review 16, F6).
+    if (!outside(originator) || !(modules instanceof Map) || ![...modules.keys()].some((k) => ASSET_SCHEMES.has(k)))
       return call.call(manager, finalArgs, modules, originator);
     if (namesHeldAssets(finalArgs)) throw new Error(HELD_ASSET_REFUSAL);
     const asked = (finalArgs ?? {}) as CreateArgs;
@@ -169,21 +174,26 @@ export function guardPModuleSpends<T extends object>(manager: T, deps: { adminOr
 
     const gatedModules = new Map<string, PModule>();
     for (const [scheme, mod] of modules)
-      gatedModules.set(scheme, {
-        onRequest: async (req) => {
-          const r = await mod.onRequest(req);
-          if (req.method === 'createAction' && r?.args && typeof r.args === 'object') sent = r.args as CreateArgs;
-          return r;
-        },
-        onResponse: async (res, ctx) => {
-          // The first module to see the signable transaction is the one that would finish it: gate it there, once.
-          if (ctx?.method === 'createAction' && !gated && (res as SignableResult)?.signableTransaction) {
-            gated = true;
-            await gate(res as SignableResult);
-          }
-          return mod.onResponse(res, ctx);
-        },
-      });
+      gatedModules.set(
+        scheme,
+        !ASSET_SCHEMES.has(scheme)
+          ? mod
+          : {
+              onRequest: async (req) => {
+                const r = await mod.onRequest(req);
+                if (req.method === 'createAction' && r?.args && typeof r.args === 'object') sent = r.args as CreateArgs;
+                return r;
+              },
+              onResponse: async (res, ctx) => {
+                // The first module to see the signable transaction is the one that would finish it: gate it there, once.
+                if (ctx?.method === 'createAction' && !gated && (res as SignableResult)?.signableTransaction) {
+                  gated = true;
+                  await gate(res as SignableResult);
+                }
+                return mod.onResponse(res, ctx);
+              },
+            },
+      );
     return call.call(manager, finalArgs, gatedModules, originator);
   };
   return manager;
