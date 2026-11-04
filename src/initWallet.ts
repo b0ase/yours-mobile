@@ -45,6 +45,7 @@ import { guardReservedProtocols, revokeReservedProtocolGrants } from './services
 import { guardAllowance } from './services/allowanceGuard';
 import { ALLOWANCES_ENABLED } from './services/allowanceFlag';
 import { guardEverySpendAsks, revokeStoredSpendingGrants } from './services/everySpendAsks';
+import { guardPModuleSpends } from './services/pModuleSpendGate';
 import { chromeEnvelopeBackend, EnvelopeStore, guardEnvelopes } from './services/envelopes';
 import { ENVELOPES_ENABLED } from './mobile/storeBuild';
 import { guardCrossSiteSigning } from './services/crossSiteSignGuard';
@@ -540,6 +541,18 @@ export const initWallet = async (
     // are picked up by the module's basket-access checks (and vice versa).
     permissionStore,
   });
+  // The one permissions manager every site call goes through. A "p <scheme>" label or basket hands a site's action to
+  // the asset modules above, which finish it on the base wallet; the action now passes the wallet's spend gate first,
+  // and a site can't name the wallet's own assets for a module to sign (services/pModuleSpendGate.ts, b-Aware D-L).
+  const sitePermissions = guardPModuleSpends(
+    new LocalWalletPermissionsManager(
+      baseWallet,
+      ADMIN_ORIGINATOR,
+      { permissionModules: assetModules },
+      { store: permissionStore },
+    ),
+    { adminOriginator: ADMIN_ORIGINATOR },
+  );
 
   // 5. Wrap with permissions manager for external app access control.
   // Grants persist in IndexedDB (off-chain) via LocalWalletPermissionsManager.
@@ -566,36 +579,23 @@ export const initWallet = async (
                   // ALLOWANCES_ENABLED, the old monthly allowance with its per-payment cap and payee allowlist
                   // (services/allowanceGuard.ts, payment-safety audit 24 Oct 2026 B2).
                   ALLOWANCES_ENABLED
-                    ? guardAllowance(
-                        new LocalWalletPermissionsManager(
-                          baseWallet,
-                          ADMIN_ORIGINATOR,
-                          { permissionModules: assetModules },
-                          { store: permissionStore },
-                        ),
-                        { store: permissionStore, adminOriginator: ADMIN_ORIGINATOR, normalize: normalizeOriginator },
-                      )
+                    ? guardAllowance(sitePermissions, {
+                        store: permissionStore,
+                        adminOriginator: ADMIN_ORIGINATOR,
+                        normalize: normalizeOriginator,
+                      })
                     : ENVELOPES_ENABLED
-                      ? guardEnvelopes(
-                          new LocalWalletPermissionsManager(
-                            baseWallet,
-                            ADMIN_ORIGINATOR,
-                            { permissionModules: assetModules },
-                            { store: permissionStore },
-                          ),
-                          { envelopes, adminOriginator: ADMIN_ORIGINATOR, normalize: normalizeOriginator },
-                        )
+                      ? guardEnvelopes(sitePermissions, {
+                          envelopes,
+                          adminOriginator: ADMIN_ORIGINATOR,
+                          normalize: normalizeOriginator,
+                        })
                       : // Store builds have no envelopes (storeBuild.ts ENVELOPES_ENABLED): every payment shows its sheet,
                         // whatever old monthly grant is stored (services/everySpendAsks.ts, owner 25 Oct 2026).
-                        guardEverySpendAsks(
-                          new LocalWalletPermissionsManager(
-                            baseWallet,
-                            ADMIN_ORIGINATOR,
-                            { permissionModules: assetModules },
-                            { store: permissionStore },
-                          ),
-                          { adminOriginator: ADMIN_ORIGINATOR, normalize: normalizeOriginator },
-                        ),
+                        guardEverySpendAsks(sitePermissions, {
+                          adminOriginator: ADMIN_ORIGINATOR,
+                          normalize: normalizeOriginator,
+                        }),
                   spendLedger,
                 ),
               ),
