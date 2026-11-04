@@ -113,8 +113,8 @@ import { seedChangeSummary } from './services/seedChange';
 import { recoverOnDevice } from './services/recoverOnDevice';
 import { foundHeadline, restoredLine, scanNote, type ScanReport } from './services/findMissingCoins';
 import { paymailRestoreSummary } from './mobile/names/paymail';
-import { isEmpty, summarizeActive, switchToLocalVerified, type SwitchDeps } from './services/restoreFromRemote';
-import { inboundWithheld, isUncheckedPage } from './services/inboundSync';
+import { isEmpty, outpointsOnDevice, summarizeActive, switchToLocalVerified, type SwitchDeps } from './services/restoreFromRemote';
+import { isUncheckedPage } from './services/inboundSync';
 import { ensureLocalStore, type EnsureLocalResult } from './services/localFirst';
 import { markMayBeOut } from './services/refusalRecheck';
 import {
@@ -1061,8 +1061,11 @@ const restoreDeps = (ctx: NonNullable<typeof accountContext>, remoteUrl: string)
       const { identityKey } = await ctx.storage.getAuth();
       await ctx.storage.syncFromReader(identityKey, store as never);
     },
-    // Coins the inbound check held back are on the device, just not spendable: not "missing" (review 16 F5).
-    withheld: async () => inboundWithheld((await ctx.storage.getAuth()).identityKey),
+    // Coins the inbound check held back are on the device, just not spendable: not "missing". Read from the device's
+    // store, so an interrupted restore retried after a restart still completes (review 16 F5, 16b R1).
+    deviceHolds: outpointsOnDevice(ctx.storage as never),
+    // Then a device-sync pull, which also looks again at coins held for the chain (inboundSync.releaseHeldRows).
+    onSwitched: () => void ctx.syncDevices?.().catch(() => undefined),
     progress: (m) => sendRestoreStatus(m),
     log: (...a) => console.log(...a),
   };

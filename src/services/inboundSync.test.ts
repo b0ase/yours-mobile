@@ -31,7 +31,7 @@ import {
   WalletStorageManager,
 } from '@bsv/wallet-toolbox-client';
 import { createWalletCore } from '@1sat/wallet';
-import { summarizeActive, switchToLocalVerified } from './restoreFromRemote';
+import { outpointsOnDevice, summarizeActive, switchToLocalVerified } from './restoreFromRemote';
 import {
   NO_VERIFIER,
   UNCHECKED_PAGE,
@@ -43,7 +43,6 @@ import {
   walletRecords,
   HELD_MARK,
   releaseHeldRows,
-  inboundWithheld,
   isUncheckedPage,
 } from './inboundSync';
 import { bsv21FieldsFromOutput } from '@1sat/actions';
@@ -736,7 +735,7 @@ describe('F5: held-back coins do not strand a restore, and a WhatsOnChain outage
       pullRemote: async () => {
         await core.storage.syncFromReader((await core.storage.getAuth()).identityKey, d.remote as never);
       },
-      withheld: () => inboundWithheld(d.kd.identityKey), // as background.ts restoreDeps wires it
+      deviceHolds: outpointsOnDevice(core.storage as never), // as background.ts restoreDeps wires it
     });
     expect(r.ok).toBe(true);
     expect((await d.row(local, d.coin)).spendable).toBe(false);
@@ -744,27 +743,24 @@ describe('F5: held-back coins do not strand a restore, and a WhatsOnChain outage
     unregister();
   });
 
-  test('withheld coins count as held, not missing; a device genuinely short still stays on the backup', async () => {
-    const remote = { outputs: 3, spendableSats: 300, actions: 3 };
-    const short = { outputs: 2, spendableSats: 200, actions: 3 };
-    const run = async (held: { outputs: number; sats: number }) => {
-      let total = { outputs: 0, sats: 0 };
+  test('coins held back count as present, not missing; a device genuinely short still stays on the backup', async () => {
+    const remote = { outputs: 3, spendableSats: 300, actions: 3, coins: ['a.0', 'b.0', 'c.0'] };
+    const short = { outputs: 2, spendableSats: 200, actions: 3, coins: ['a.0', 'b.0'] };
+    const run = async (onDevice: string[]) => {
       let active: string | undefined = 'r';
-      let pulls = 0;
       return switchToLocalVerified({
         remoteUrl: 'r',
         activeRemoteUrl: () => active,
         setActiveStorage: async (t) => {
           active = t === 'local' ? undefined : t;
-          if (t === 'local') total = { outputs: total.outputs + held.outputs, sats: total.sats + held.sats };
         },
         summarize: async () => (active ? remote : short),
-        pullRemote: async () => void pulls++,
-        withheld: () => total,
+        pullRemote: async () => undefined,
+        deviceHolds: async (ops) => new Set(ops.filter((o) => onDevice.includes(o))),
       });
     };
-    expect((await run({ outputs: 1, sats: 100 })).ok).toBe(true);
-    expect((await run({ outputs: 0, sats: 0 })).ok).toBe(false);
+    expect((await run(['a.0', 'b.0', 'c.0'])).ok).toBe(true); // c.0 is on the device, held back
+    expect((await run(['a.0', 'b.0'])).ok).toBe(false); // c.0 never arrived
   });
 
   test('an import refused because WhatsOnChain could not be asked is not counted toward deleting the parked backup', () => {
@@ -774,7 +770,7 @@ describe('F5: held-back coins do not strand a restore, and a WhatsOnChain outage
     expect(bg).toMatch(
       /const attempts = isUncheckedPage\(error\) \? 0 : await WalletBackupService\.notePendingRestoreAttempt\(currentIdentityKey\);/,
     );
-    expect(bg).toMatch(/withheld: async \(\) => inboundWithheld\(\(await ctx\.storage\.getAuth\(\)\)\.identityKey\)/);
+    expect(bg).toMatch(/deviceHolds: outpointsOnDevice\(ctx\.storage as never\)/);
   });
 });
 
@@ -800,5 +796,66 @@ describe('honest multi-device sync still works after the review fixes', () => {
     expect((await d.row(d.phone, d.coin2)).spendable).toBe(false); // spent elsewhere: taken as is
     expect((await d.row(d.phone, d.coin)).spendable).toBe(true); // untouched
     expect(d.chain.asked).toContain(`${received}.0`);
+  });
+});
+
+/** Review 16b, T4 (R1): the F5 credit lived in memory, so a restore interrupted and retried after a restart stayed stuck. */
+describe('R1: an interrupted restore, retried after a restart, still moves the account to the device', () => {
+  test('T4: attempt 1 is cut off after the copy; after a restart, attempt 2 completes', async () => {
+    const d = await phoneWithBackup();
+    const name = `r16b-f5-${++n}`;
+    const local = new StorageIdb(StorageProvider.createStorageBaseOptions('main'));
+    (local as unknown as { dbName: string }).dbName = name;
+    await local.migrate(name, `sik-${name}`);
+    const verifier = {
+      owns: walletOwnership(d.root),
+      readRecord: walletRecords(d.root),
+      // The backup is stale about one coin: it says spendable, the chain says spent.
+      spent: async (op: string) =>
+        op === `${d.coin}.0` ? { state: 'spent' as const, by: 'ee'.repeat(32) } : { state: 'unspent' as const },
+      txKnown: async () => 'known' as const,
+    };
+    registerInboundVerifier(`sik-${name}`, d.kd.identityKey, verifier);
+    const remoteUrl = 'https://wallet.1sat.test';
+    (d.remote as unknown as { endpointUrl: string }).endpointUrl = remoteUrl;
+    class FakeStorageClient {
+      constructor() {
+        return d.remote;
+      }
+    }
+    const core = await createWalletCore(
+      { privateKey: d.root.toWif(), chain: 'main', activeRemote: remoteUrl, backups: [] } as never,
+      local,
+      { Services, StorageClient: FakeStorageClient, StorageProvider, Wallet, WalletStorageManager } as never,
+    );
+    core.storage.setServices(services);
+    (core.wallet as unknown as { services: unknown }).services = services;
+    const deps = (interrupt: boolean) => {
+      let calls = 0;
+      return {
+        remoteUrl,
+        activeRemoteUrl: () => core.storage.getStores().find((s) => s.isActive && !s.isConflicting)?.endpointURL,
+        setActiveStorage: core.setActiveStorage,
+        summarize: async () => {
+          calls++;
+          if (interrupt && calls === 2) throw new Error('worker interrupted after the copy');
+          return summarizeActive(core.wallet as never);
+        },
+        pullRemote: async () => {
+          if (interrupt) throw new Error('network dropped');
+          await core.storage.syncFromReader((await core.storage.getAuth()).identityKey, d.remote as never);
+        },
+        deviceHolds: outpointsOnDevice(core.storage as never),
+      };
+    };
+    const r1 = await switchToLocalVerified(deps(true));
+    expect(r1.ok).toBe(false);
+    // A restart: nothing in memory survives; initWallet sets the check up again.
+    _resetInboundVerifiers();
+    registerInboundVerifier(`sik-${name}`, d.kd.identityKey, verifier);
+    const r2 = await switchToLocalVerified(deps(false));
+    expect(r2.ok).toBe(true);
+    expect((await d.row(local, d.coin)).spendable).toBe(false); // the spent coin stays held back
+    expect((await d.row(local, d.coin2)).spendable).toBe(true);
   });
 });
