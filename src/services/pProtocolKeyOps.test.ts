@@ -164,3 +164,16 @@ describe('F3: name variants of "p" protocols are refused too; the module probe s
     ).rejects.toThrow(P_MODULE_PROTOCOL_REFUSAL);
   });
 });
+
+describe("the wallet's own module keys still work after the review fixes", () => {
+  for (const name of ['p 1sat', 'p bsv21', 'p opns', 'p lock', 'P 1sat'])
+    test(`the wallet itself uses "${name}" keys at levels 0 and 1 (legacy 1Sat assets included)`, async () => {
+      for (const level of [0, 1] as const) {
+        const { w, asked } = wallet();
+        await w.getPublicKey({ ...common, protocolID: [level, name] } as never, ADMIN);
+        await w.encrypt({ ...common, plaintext: [1], protocolID: [level, name] } as never, ADMIN);
+        await w.createHmac({ ...common, data: [1], protocolID: [level, name] } as never, ADMIN);
+        expect(asked).toEqual(['getPublicKey', 'encrypt', 'createHmac']);
+      }
+    });
+});

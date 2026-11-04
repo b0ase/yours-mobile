@@ -438,6 +438,14 @@ describe('F1: an OrdLock V2 purchase is priced on the pay sheet at what it reall
     await expect(w.createAction(listing() as never, BUYER_SITE)).rejects.toThrow();
     expect(sheets).toEqual([PRICE + FEE]);
   });
+
+  test("the wallet's own OrdLock purchase (its Exchange) is unchanged: the module finishes it, no extra pay sheet", async () => {
+    const { w, base, sheets } = purchaseWallet(false); // Deny would refuse a site; the wallet itself is not asked
+    const r = (await w.createAction(listing() as never, ADMIN)) as { txid?: string };
+    expect(typeof r.txid).toBe('string');
+    expect(sheets).toEqual([]);
+    expect(base.calls.filter((c) => c === 'signAction').length).toBe(1);
+  });
 });
 
 /**
@@ -493,4 +501,16 @@ describe('F6: a BRC-177 "p nosend" site payment is charged exactly as the toolbo
     expect(gated.sheets).toEqual(plain.sheets);
     expect(gated.recorded).toEqual(plain.recorded);
   });
+});
+
+describe("the wallet's own module actions still work after the review fixes (1sat, bsv21, OpNS, locks)", () => {
+  for (const scheme of ['1sat', 'bsv21', 'opns', 'lock'])
+    test(`"p ${scheme} action" from the wallet itself: finished by the module, no pay sheet, nothing refused`, async () => {
+      const { w, base, sheets, recorded } = wallet(false);
+      const r = (await w.createAction(pay([`p ${scheme} action`]) as never, ADMIN)) as { txid?: string };
+      expect(typeof r.txid).toBe('string');
+      expect(sheets).toEqual([]);
+      expect(recorded).toEqual([]);
+      expect(base.calls).toEqual(['createAction', 'signAction']);
+    });
 });

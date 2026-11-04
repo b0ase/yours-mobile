@@ -777,3 +777,28 @@ describe('F5: held-back coins do not strand a restore, and a WhatsOnChain outage
     expect(bg).toMatch(/withheld: async \(\) => inboundWithheld\(\(await ctx\.storage\.getAuth\(\)\)\.identityKey\)/);
   });
 });
+
+describe('honest multi-device sync still works after the review fixes', () => {
+  test("the owner's other device receives a coin and spends one; this device pulls both changes", async () => {
+    const d = await phoneWithBackup();
+    d.chain.answer = 'unspent';
+    // Device B: its own store, the same backup, the same account.
+    const other = await store(`a3-b-${++n}`);
+    const smB = new WalletStorageManager(d.kd.identityKey, other, [d.remote]);
+    await smB.makeAvailable();
+    await smB.setActive(other.getSettings().storageIdentityKey);
+    smB.setServices(services);
+    await smB.syncFromReader(d.kd.identityKey, d.remote as never);
+    const walletB = new Wallet({ chain: 'main', keyDeriver: d.kd, storage: smB, services } as never);
+    const received = await receive(walletB, d.kd, 33_000);
+    const spentOnB = await d.row(other, d.coin2);
+    await other.updateOutput(spentOnB.outputId, { spendable: false } as never);
+    await smB.updateBackups();
+    // This device (A) pulls on open.
+    await d.pull();
+    expect((await d.row(d.phone, received)).spendable).toBe(true); // new coin, the chain confirms it
+    expect((await d.row(d.phone, d.coin2)).spendable).toBe(false); // spent elsewhere: taken as is
+    expect((await d.row(d.phone, d.coin)).spendable).toBe(true); // untouched
+    expect(d.chain.asked).toContain(`${received}.0`);
+  });
+});
