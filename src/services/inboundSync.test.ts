@@ -40,7 +40,10 @@ import {
   isWalletChange,
   registerInboundVerifier,
   walletOwnership,
+  walletRecords,
 } from './inboundSync';
+import { bsv21FieldsFromOutput } from '@1sat/actions';
+import { bsv21 } from '../mobile/market/launchpad/tokens';
 import type { SpendState } from './unsentExpiry';
 
 const HEIGHT = 971_004;
@@ -416,5 +419,122 @@ describe("walletOwnership: the wallet's own keys, from the row's own derivation 
     const row = { vout: 0, customInstructions: Utils.toBase64(ciphertext) };
     expect(await owns(row, new P2PKH().lock(pub.toAddress()).toHex())).toBe(true);
     expect(await owns(row, new P2PKH().lock(new PrivateKey(6).toAddress()).toHex())).toBe(false);
+  });
+});
+
+/**
+ * Review 16, F2: a row the device has never seen kept whatever token record (amount, id) and token tags the backup sent.
+ * A send takes the amount from the record, then from an `amt:` tag (@1sat/actions bsv21FieldsFromOutput), so an
+ * inflated amount builds a transfer the chain rejects and burns the tokens. Now the record and the tags must say what
+ * the coin's own script says.
+ */
+describe('F2: a token coin from the backup carries the amount its script says, or is not spendable', () => {
+  const TOKEN = `${'ab'.repeat(32)}_0`;
+
+  /** A real BSV-21 transfer of `amt` to a wallet token key, filed the way the wallet files token coins. */
+  async function receiveBsv21(w: Wallet, kd: KeyDeriver, amt: bigint, record: Record<string, unknown> | null) {
+    const keyID = `tok-${++n}`;
+    const pub = kd.derivePublicKey([0, 'onesat'], keyID, 'self', true);
+    const tx = minedTx(bsv21(TOKEN, amt, pub.toAddress()), 1);
+    await w.internalizeAction({
+      tx: atomic(tx),
+      outputs: [
+        {
+          outputIndex: 0,
+          protocol: 'basket insertion',
+          insertionRemittance: {
+            basket: 'bsv21',
+            tags: [`bsv21:${TOKEN}`],
+            ...(record ? { customInstructions: JSON.stringify({ protocolID: [0, 'onesat'], keyID, ...record }) } : {}),
+          },
+        },
+      ],
+      description: 'Tokens in',
+    });
+    return tx.id('hex');
+  }
+
+  /** A fresh device restored from the backup, read the way a token send reads it. */
+  async function restoreAndRead(d: Awaited<ReturnType<typeof phoneWithBackup>>) {
+    const fresh = await store(`a3-tok-${++n}`);
+    const unregister = registerInboundVerifier(fresh.getSettings().storageIdentityKey, d.kd.identityKey, {
+      owns: walletOwnership(d.root),
+      spent: async () => ({ state: 'unspent' }),
+      readRecord: walletRecords(d.root),
+    });
+    const sm2 = new WalletStorageManager(d.kd.identityKey, fresh, [d.remote]);
+    await sm2.makeAvailable();
+    await sm2.setActive(fresh.getSettings().storageIdentityKey);
+    await sm2.syncFromReader(d.kd.identityKey, d.remote as never);
+    sm2.setServices(services);
+    const w2 = new Wallet({ chain: 'main', keyDeriver: d.kd, storage: sm2, services } as never);
+    const listed = await w2.listOutputs({ basket: 'bsv21', includeCustomInstructions: true, includeTags: true });
+    unregister();
+    return {
+      fresh,
+      sendable: listed.outputs.map((o) => ({ outpoint: o.outpoint, ...bsv21FieldsFromOutput(o as never) })),
+    };
+  }
+
+  test('an honest token coin arrives spendable with its amount and its bsv21 tag', async () => {
+    const d = await phoneWithBackup();
+    const txid = await receiveBsv21(d.wallet, d.kd, 100n, { id: TOKEN, amt: '100', op: 'transfer' });
+    await d.sm.updateBackups();
+    const { sendable } = await restoreAndRead(d);
+    const mine = sendable.find((o) => o.outpoint.startsWith(txid));
+    expect(mine?.amt).toBe('100');
+    expect(mine?.tokenId).toBe(TOKEN);
+  });
+
+  test('an inflated amount in the record: the coin arrives not spendable, so no send can use it', async () => {
+    const d = await phoneWithBackup();
+    const txid = await receiveBsv21(d.wallet, d.kd, 100n, { id: TOKEN, amt: '100', op: 'transfer' });
+    await d.sm.updateBackups();
+    const r = await d.row(d.remote, txid);
+    await d.forge(txid, {
+      customInstructions: JSON.stringify({ ...JSON.parse(r.customInstructions!), amt: '1000000' }),
+    });
+    const { fresh, sendable } = await restoreAndRead(d);
+    expect(sendable.find((o) => o.outpoint.startsWith(txid))).toBeUndefined();
+    expect((await d.row(fresh, txid)).spendable).toBe(false);
+  });
+
+  test('a forged amt: tag on a coin whose record has no amount arrives deleted', async () => {
+    const d = await phoneWithBackup();
+    const txid = await receiveBsv21(d.wallet, d.kd, 100n, { id: TOKEN, op: 'transfer' });
+    await d.sm.updateBackups();
+    const { userId } = (await d.remote.findUsers({ partial: { identityKey: d.kd.identityKey } }))[0];
+    const out = await d.row(d.remote, txid);
+    const tag = await d.remote.findOrInsertOutputTag(userId, 'amt:999999');
+    const later = new Date(Date.now() + 3_600_000);
+    await d.remote.insertOutputTagMap({
+      outputId: out.outputId,
+      outputTagId: tag.outputTagId,
+      isDeleted: false,
+      created_at: later,
+      updated_at: later,
+    } as never);
+    const { sendable } = await restoreAndRead(d);
+    const mine = sendable.find((o) => o.outpoint.startsWith(txid));
+    expect(mine?.amt).not.toBe('999999');
+  });
+
+  test('a token tag that matches the script (an honest amt:) still arrives', async () => {
+    const d = await phoneWithBackup();
+    const txid = await receiveBsv21(d.wallet, d.kd, 100n, { id: TOKEN, op: 'transfer' });
+    await d.sm.updateBackups();
+    const { userId } = (await d.remote.findUsers({ partial: { identityKey: d.kd.identityKey } }))[0];
+    const out = await d.row(d.remote, txid);
+    const tag = await d.remote.findOrInsertOutputTag(userId, 'amt:100');
+    const later = new Date(Date.now() + 3_600_000);
+    await d.remote.insertOutputTagMap({
+      outputId: out.outputId,
+      outputTagId: tag.outputTagId,
+      isDeleted: false,
+      created_at: later,
+      updated_at: later,
+    } as never);
+    const { sendable } = await restoreAndRead(d);
+    expect(sendable.find((o) => o.outpoint.startsWith(txid))?.amt).toBe('100');
   });
 });

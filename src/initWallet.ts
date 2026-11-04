@@ -47,7 +47,12 @@ import { guardAllowance } from './services/allowanceGuard';
 import { ALLOWANCES_ENABLED } from './services/allowanceFlag';
 import { guardEverySpendAsks, revokeStoredSpendingGrants } from './services/everySpendAsks';
 import { guardPModuleSpends } from './services/pModuleSpendGate';
-import { installInboundSyncGuard, registerInboundVerifier, walletOwnership } from './services/inboundSync';
+import {
+  installInboundSyncGuard,
+  registerInboundVerifier,
+  walletOwnership,
+  walletRecords,
+} from './services/inboundSync';
 import { chromeEnvelopeBackend, EnvelopeStore, guardEnvelopes } from './services/envelopes';
 import { ENVELOPES_ENABLED } from './mobile/storeBuild';
 import { guardCrossSiteSigning } from './services/crossSiteSignGuard';
@@ -332,6 +337,7 @@ const checkBackupRows = (keys: Keys, account: Account | undefined, storageIdenti
       legacyPayKey(keys.walletWif, account?.addresses?.bsvAddress),
     ]),
     spent: wocSpentLookup(),
+    readRecord: walletRecords(root),
     log: (...a) => console.warn(...a),
   });
 };

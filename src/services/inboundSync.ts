@@ -37,10 +37,12 @@ import {
   PrivateKey,
   ProtoWallet,
   PublicKey,
+  Script,
   Transaction,
   Utils,
   type WalletProtocol,
 } from '@bsv/sdk';
+import { BSV20, BSV21 } from '@1sat/templates';
 import { WalletPermissionsManager } from '@bsv/wallet-toolbox-client';
 import type { SpendState } from './unsentExpiry';
 
@@ -89,7 +91,15 @@ type TxRow = {
   rawTx?: Bytes | null;
 };
 type ProvenRow = { txid?: string; rawTx?: Bytes | null };
-export type SyncChunk = { outputs?: OutputRow[]; transactions?: TxRow[]; provenTxs?: ProvenRow[] };
+type TagRow = { outputTagId?: number; tag?: string };
+type TagMapRow = { outputId?: number; outputTagId?: number; isDeleted?: boolean; updated_at?: Date };
+export type SyncChunk = {
+  outputs?: OutputRow[];
+  transactions?: TxRow[];
+  provenTxs?: ProvenRow[];
+  outputTags?: TagRow[];
+  outputTagMaps?: TagMapRow[];
+};
 type SyncArgs = { identityKey?: string; fromStorageIdentityKey?: string; toStorageIdentityKey?: string };
 
 /** The storage provider calls this needs (StorageIdb). */
@@ -99,6 +109,8 @@ export type DeviceStore = {
   findTransactions(a: { partial: Record<string, unknown>; noRawTx?: boolean }): Promise<TxRow[]>;
   findOutputs(a: { partial: Record<string, unknown> }): Promise<OutputRow[]>;
   getProvenOrRawTx?(txid: string): Promise<{ rawTx?: Bytes; proven?: { rawTx?: Bytes } }>;
+  findOutputTags?(a: { partial: Record<string, unknown> }): Promise<TagRow[]>;
+  findOutputTagMaps?(a: { partial: Record<string, unknown> }): Promise<TagMapRow[]>;
   getSettings?(): { storageIdentityKey?: string };
 };
 
@@ -107,10 +119,19 @@ export type InboundVerifier = {
   owns(row: OutputRow, scriptHex: string): Promise<boolean>;
   /** The chain's word on an outpoint "txid.vout" (WhatsOnChain /spent). */
   spent(outpoint: string): Promise<SpendState>;
+  /** A row's record (customInstructions) as JSON, decrypting what the permissions manager encrypted. */
+  readRecord?(customInstructions: string): Promise<Record<string, unknown> | undefined>;
   log?: (...a: unknown[]) => void;
 };
 
-export type InboundReport = { kept: number; quarantined: number; revived: number; pinned: number };
+export type InboundReport = {
+  kept: number;
+  quarantined: number;
+  revived: number;
+  pinned: number;
+  /** Token tags (amt:, bsv21:, sym:, dec:) from another store that its script doesn't bear out, taken as deleted. */
+  tagsDropped: number;
+};
 
 /** Wallet change: what the toolbox's funding picks on its own (managedChangeOutputFields + both derivation halves). */
 export const isWalletChange = (o: OutputRow): boolean =>
@@ -142,7 +163,121 @@ const PINNED = [
   'purpose',
 ] as const;
 
-const parseSyncMap = (raw: unknown): { transaction?: { idMap?: Record<string, number> } } | undefined => {
+type IdMaps = {
+  transaction?: { idMap?: Record<string, number> };
+  output?: { idMap?: Record<string, number> };
+  outputTag?: { idMap?: Record<string, number> };
+};
+
+// ── tokens: what a script says, which is what the chain enforces ──
+
+export type TokenFacts = {
+  kind: 'bsv21' | 'bsv20';
+  /** BSV-21 token id (txid_vout), lowercase; a deploy's is its own outpoint. */
+  id?: string;
+  /** BSV-20 ticker, lowercase. */
+  tick?: string;
+  amt: string;
+  /** deploy+mint / deploy+auth: the inscription itself carries sym and dec. */
+  deploy: boolean;
+  auth: boolean;
+  sym?: string;
+  dec?: string;
+};
+const normId = (id: string) => id.trim().replace('.', '_').toLowerCase();
+
+/** The token an output script carries (BSV-21, else BSV-20), or null. */
+export function tokenFacts(scriptHex: string, txid?: string | null, vout?: number): TokenFacts | null {
+  let script: Script;
+  try {
+    script = Script.fromHex(scriptHex);
+  } catch {
+    return null;
+  }
+  try {
+    const d = BSV21.decode(script);
+    if (d) {
+      const td = d.tokenData as { op?: string; id?: string; sym?: string };
+      const op = String(td.op ?? '');
+      const deploy = op === 'deploy+mint' || op === 'deploy+auth';
+      const id = td.id
+        ? normId(td.id)
+        : deploy && txid && typeof vout === 'number'
+          ? normId(`${txid}_${vout}`)
+          : undefined;
+      return {
+        kind: 'bsv21',
+        id,
+        amt: d.getAmount().toString(),
+        deploy,
+        auth: op === 'auth' || op === 'deploy+auth',
+        sym: deploy && td.sym != null ? String(td.sym) : undefined,
+        dec: deploy ? String(d.getDecimals()) : undefined,
+      };
+    }
+  } catch {
+    // not BSV-21
+  }
+  try {
+    const d = BSV20.decode(script);
+    if (d) {
+      const td = d.tokenData as { tick?: string };
+      return {
+        kind: 'bsv20',
+        tick: td.tick ? String(td.tick).toLowerCase() : undefined,
+        amt: d.getAmount().toString(),
+        deploy: false,
+        auth: false,
+      };
+    }
+  } catch {
+    // not BSV-20
+  }
+  return null;
+}
+
+const str = (v: unknown): string | undefined => (v === undefined || v === null ? undefined : String(v));
+
+/** A record's token fields (where present) say what the script says. Fields a transfer script can't show pass. */
+export function recordAgrees(rec: Record<string, unknown>, f: TokenFacts): boolean {
+  const amt = str(rec.amt);
+  if (amt !== undefined && amt !== f.amt) return false;
+  if (f.kind === 'bsv21') {
+    const id = str(rec.id);
+    if (id !== undefined && (!f.id || normId(id) !== f.id)) return false;
+    if (f.deploy) {
+      const sym = str(rec.sym);
+      const dec = str(rec.dec);
+      if (sym !== undefined && f.sym !== undefined && sym !== f.sym) return false;
+      if (dec !== undefined && f.dec !== undefined && dec !== f.dec) return false;
+    }
+  } else {
+    const tick = str(rec.tick);
+    if (tick !== undefined && tick.toLowerCase() !== f.tick) return false;
+  }
+  return true;
+}
+
+const TOKEN_TAG = /^(amt|bsv21|sym|dec):/i;
+/** A token tag (amount, id, symbol, decimals) the script bears out. sym/dec are only on a deploy inscription. */
+export function tagAgrees(tag: string, f: TokenFacts | null): boolean {
+  const at = tag.indexOf(':');
+  const kind = tag.slice(0, at).toLowerCase();
+  const value = tag.slice(at + 1);
+  if (!f) return false;
+  if (kind === 'amt') return value === f.amt;
+  if (kind === 'bsv21') {
+    if (f.kind !== 'bsv21') return false;
+    if (value.toLowerCase() === 'deploy') return f.deploy;
+    if (value.toLowerCase() === 'auth') return f.auth;
+    return !!f.id && normId(value) === f.id;
+  }
+  if (kind === 'sym') return f.kind === 'bsv21' ? f.deploy && f.sym === value : f.tick === value.toLowerCase();
+  if (kind === 'dec') return f.kind === 'bsv21' && f.deploy && f.dec === value;
+  return false;
+}
+
+const parseSyncMap = (raw: unknown): IdMaps | undefined => {
   if (!raw) return undefined;
   if (typeof raw === 'object') return raw as never;
   try {
@@ -162,16 +297,17 @@ export async function verifyInboundChunk(
   chunk: SyncChunk,
   v: InboundVerifier,
 ): Promise<InboundReport> {
-  const report: InboundReport = { kept: 0, quarantined: 0, revived: 0, pinned: 0 };
+  const report: InboundReport = { kept: 0, quarantined: 0, revived: 0, pinned: 0, tagsDropped: 0 };
   const outputs = chunk?.outputs ?? [];
-  if (!outputs.length || !args?.identityKey) return report;
+  if ((!outputs.length && !chunk?.outputTagMaps?.length) || !args?.identityKey) return report;
   const user = (await store.findUsers({ partial: { identityKey: args.identityKey } }))[0];
   if (!user) return report; // the toolbox refuses a page for an unknown user on its own
   const userId = user.userId;
   const state = args.fromStorageIdentityKey
     ? (await store.findSyncStates({ partial: { storageIdentityKey: args.fromStorageIdentityKey, userId } }))[0]
     : undefined;
-  const idMap = parseSyncMap(state?.syncMap)?.transaction?.idMap ?? {};
+  const maps = parseSyncMap(state?.syncMap);
+  const idMap = maps?.transaction?.idMap ?? {};
   const pageTx = new Map<number, TxRow>();
   for (const t of chunk.transactions ?? []) if (typeof t.transactionId === 'number') pageTx.set(t.transactionId, t);
 
@@ -258,6 +394,49 @@ export async function verifyInboundChunk(
     report.quarantined++;
   };
 
+  /** A record as JSON (the verifier decrypts what the manager encrypted); undefined when it can't be read. */
+  const recordOf = async (ci: string): Promise<Record<string, unknown> | undefined> => {
+    try {
+      const o = JSON.parse(ci) as unknown;
+      return o && typeof o === 'object' ? (o as Record<string, unknown>) : undefined;
+    } catch {
+      return v.readRecord ? v.readRecord(ci).catch(() => undefined) : undefined;
+    }
+  };
+  /** Remote output id → this page's row and the device row the merge files it under. */
+  const pageRows = new Map<number, { row: OutputRow; deviceOutputId?: number }>();
+  const outputOf = async (
+    remoteId: number,
+  ): Promise<{ script?: string; txid?: string | null; vout: number; deviceOutputId?: number } | undefined> => {
+    const page = pageRows.get(remoteId);
+    if (page) {
+      const script = await scriptOf(page.row);
+      return {
+        script: script ?? undefined,
+        txid: page.row.txid,
+        vout: page.row.vout,
+        deviceOutputId: page.deviceOutputId,
+      };
+    }
+    const local = maps?.output?.idMap?.[String(remoteId)];
+    if (typeof local !== 'number') return undefined;
+    const [d] = await store.findOutputs({ partial: { userId, outputId: local } });
+    return d ? { script: hex(d.lockingScript), txid: d.txid, vout: d.vout, deviceOutputId: local } : undefined;
+  };
+  const tagNameOf = async (remoteTagId: number): Promise<string | undefined> => {
+    const page = chunk.outputTags?.find((t) => t.outputTagId === remoteTagId)?.tag;
+    if (typeof page === 'string') return page;
+    const local = maps?.outputTag?.idMap?.[String(remoteTagId)];
+    if (typeof local !== 'number' || typeof store.findOutputTags !== 'function') return undefined;
+    return (await store.findOutputTags({ partial: { outputTagId: local } }))[0]?.tag;
+  };
+  const deviceTagId = async (remoteTagId: number, tag: string): Promise<number | undefined> => {
+    const local = maps?.outputTag?.idMap?.[String(remoteTagId)];
+    if (typeof local === 'number') return local;
+    if (typeof store.findOutputTags !== 'function') return undefined;
+    return (await store.findOutputTags({ partial: { userId, tag } }))[0]?.outputTagId;
+  };
+
   for (const o of outputs) {
     if (!o || typeof o.vout !== 'number') continue;
     const tx = await deviceTx(o.transactionId);
@@ -265,6 +444,7 @@ export async function verifyInboundChunk(
       typeof tx.id === 'number'
         ? (await store.findOutputs({ partial: { userId, transactionId: tx.id, vout: o.vout } }))[0]
         : undefined;
+    if (typeof o.outputId === 'number') pageRows.set(o.outputId, { row: o, deviceOutputId: filed?.outputId });
     if (filed) {
       // Rule 1: what the coin is and how it is signed for stays the device's.
       let changed = false;
@@ -306,12 +486,48 @@ export async function verifyInboundChunk(
       quarantine(o);
       continue;
     }
+    // A token coin's record must say what its script says (review 16, F2: a forged amount burns tokens on the next send).
+    const facts = tokenFacts(script, o.txid, o.vout);
+    if (facts && typeof o.customInstructions === 'string' && o.customInstructions) {
+      const rec = await recordOf(o.customInstructions);
+      if (!rec || !recordAgrees(rec, facts)) {
+        quarantine(o);
+        continue;
+      }
+    }
     if (await v.owns(o, script).catch(() => false)) continue;
     if (isWalletChange(o) || !(await chainSaysUnspent(`${o.txid}.${o.vout}`))) quarantine(o);
   }
-  if (report.kept || report.quarantined || report.revived)
+
+  // Token tags (amt:, bsv21:, sym:, dec:) are where a send falls back to when a record has no amount or id: one
+  // that would newly apply to an output must be borne out by that output's script, or it arrives deleted.
+  for (const tm of chunk.outputTagMaps ?? []) {
+    if (!tm || tm.isDeleted === true || typeof tm.outputTagId !== 'number' || typeof tm.outputId !== 'number') continue;
+    const tag = await tagNameOf(tm.outputTagId);
+    if (tag === undefined) {
+      tm.isDeleted = true; // a tag the device can't name: never a live token tag
+      report.tagsDropped++;
+      continue;
+    }
+    if (!TOKEN_TAG.test(tag)) continue;
+    const out = await outputOf(tm.outputId);
+    if (out?.deviceOutputId !== undefined && typeof store.findOutputTagMaps === 'function') {
+      const localTag = await deviceTagId(tm.outputTagId, tag);
+      if (localTag !== undefined) {
+        const [had] = await store.findOutputTagMaps({
+          partial: { outputId: out.deviceOutputId, outputTagId: localTag },
+        });
+        if (had && had.isDeleted !== true) continue; // already on this device: nothing new
+      }
+    }
+    if (!tagAgrees(tag, out?.script ? tokenFacts(out.script, out.txid, out.vout) : null)) {
+      tm.isDeleted = true;
+      report.tagsDropped++;
+    }
+  }
+  if (report.kept || report.quarantined || report.revived || report.tagsDropped)
     v.log?.(
-      `[inbound-sync] backup page: kept ${report.kept} device row(s), took ${report.quarantined} new row(s) as not spendable, revived ${report.revived} on the chain's word`,
+      `[inbound-sync] backup page: kept ${report.kept} device row(s), took ${report.quarantined} new row(s) as not spendable, revived ${report.revived} on the chain's word, dropped ${report.tagsDropped} token tag(s)`,
     );
   return report;
 }
@@ -326,7 +542,8 @@ const carries = (script: string, pub: PublicKey) =>
 
 type Record_ = { protocolID: [0 | 1 | 2, string]; keyID: string; counterparty?: string };
 
-async function readRecord(proto: ProtoWallet, ci: unknown): Promise<Record_ | undefined> {
+/** A record (customInstructions) as a JSON object: plaintext, or decrypted as the permissions manager encrypts it. */
+async function readJson(proto: ProtoWallet, ci: unknown): Promise<Record<string, unknown> | undefined> {
   if (typeof ci !== 'string' || !ci) return undefined;
   let text = ci;
   try {
@@ -345,11 +562,22 @@ async function readRecord(proto: ProtoWallet, ci: unknown): Promise<Record_ | un
     }
   }
   try {
-    const o = JSON.parse(text) as Partial<Record_>;
-    return Array.isArray(o.protocolID) && typeof o.keyID === 'string' ? (o as Record_) : undefined;
+    const o = JSON.parse(text) as unknown;
+    return o && typeof o === 'object' ? (o as Record<string, unknown>) : undefined;
   } catch {
     return undefined;
   }
+}
+
+async function readRecord(proto: ProtoWallet, ci: unknown): Promise<Record_ | undefined> {
+  const o = (await readJson(proto, ci)) as Partial<Record_> | undefined;
+  return o && Array.isArray(o.protocolID) && typeof o.keyID === 'string' ? (o as Record_) : undefined;
+}
+
+/** `readRecord` for the verifier: the account's records, decrypted with its own key (held in this closure). */
+export function walletRecords(rootKey: PrivateKey) {
+  const proto = new ProtoWallet(rootKey);
+  return (ci: string) => readJson(proto, ci);
 }
 
 /**
