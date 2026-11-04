@@ -9,11 +9,13 @@
  * with those modules, guardReservedProtocols on it. The base wallet is a fake that records what it is asked.
  */
 import { describe, expect, test } from 'bun:test';
+import { Hash, PrivateKey, PublicKey, Utils } from '@bsv/sdk';
 import { InMemoryPermissionStore, LocalWalletPermissionsManager } from '@1sat/wallet';
 import { createAssetPermissionModules } from '@1sat/permission-module';
 import {
   guardReservedProtocols,
   MODULE_PROBE_ANSWER,
+  MODULE_PROBE_LABEL,
   P_MODULE_PROTOCOL_REFUSAL,
   reservedProtocolRefusal,
 } from './reservedProtocols';
@@ -176,4 +178,20 @@ describe("the wallet's own module keys still work after the review fixes", () =>
         expect(asked).toEqual(['getPublicKey', 'encrypt', 'createHmac']);
       }
     });
+});
+
+describe('R7: the module probe answers with a nothing-up-my-sleeve point', () => {
+  test('re-derived from its label (first counter on the curve), valid, and not a key anyone holds', () => {
+    let derived = '';
+    for (let i = 0; i < 100 && !derived; i++) {
+      const x = Utils.toHex(Hash.sha256(Utils.toArray(`${MODULE_PROBE_LABEL}:${i}`, 'utf8')));
+      try {
+        derived = PublicKey.fromString(`02${x}`).toString();
+      } catch {
+        // not on the curve: next counter
+      }
+    }
+    expect(MODULE_PROBE_ANSWER).toBe(derived);
+    expect(MODULE_PROBE_ANSWER).not.toBe(new PrivateKey(1).toPublicKey().toString()); // the 'anyone' key
+  });
 });

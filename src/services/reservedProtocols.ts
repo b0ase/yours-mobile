@@ -98,8 +98,13 @@ export const isModuleProbe = (method: string, args: unknown): boolean => {
   const p = asProtocol((args as { protocolID?: unknown }).protocolID);
   return !!p && p[0] === 0 && p[1].toLowerCase().trim() === MODULE_PROBE_NAME;
 };
-/** Answer to the 1sat module probe: the well-known 'anyone' key (private key 1), never a key of this wallet. */
-export const MODULE_PROBE_ANSWER = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798';
+/**
+ * Answer to the 1sat module probe: a point nobody has the private key for (review 16b, R7), never a key of this wallet.
+ * Nothing up the sleeve: x = sha256("<MODULE_PROBE_LABEL>:0"), the first counter whose x is on secp256k1, even y.
+ * hasOneSatModule throws the key away; a dApp that misused it as an address could not have its funds swept.
+ */
+export const MODULE_PROBE_LABEL = 'bWalletX 1sat module probe: a point with no known private key';
+export const MODULE_PROBE_ANSWER = '0207113b266119c7ae2f6ca99552422f2ee1dade0bda401e82a4ae6729a37c33cf';
 
 /** Wallet methods whose args carry a protocolID that selects a derived key. */
 const PROTOCOL_METHODS = new Set([

@@ -492,6 +492,23 @@ describe('F6: a BRC-177 "p nosend" site payment is charged exactly as the toolbo
     options: { noSend: true },
   });
 
+  test('mixed with an asset module: the same two charges as the toolbox gives a pure BRC-177 payment', async () => {
+    // Review 16b R6: the toolbox's own BRC-177 flow asks twice (a prefunding check, then the payment). With a 1sat
+    // module in the same action, the gate's charge replaces the payment one: still two, never three.
+    const plain = chain(false);
+    await plain.w.createAction(nosendPayment() as never, 'shop.example').catch(() => undefined);
+    const mixed = chain(true);
+    await mixed.w
+      .createAction(
+        { ...nosendPayment(), labels: ['p nosend expiry seconds 3600', 'p 1sat action'] } as never,
+        'shop.example',
+      )
+      .catch(() => undefined);
+    expect(plain.sheets).toEqual([PAY, PAY + FEE]);
+    expect(mixed.sheets).toEqual(plain.sheets);
+    expect(mixed.recorded).toEqual(plain.recorded);
+  });
+
   test('same pay sheets and the same ledger entries with the gate as without it', async () => {
     const plain = chain(false);
     await plain.w.createAction(nosendPayment() as never, 'shop.example').catch(() => undefined);
