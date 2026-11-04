@@ -95,6 +95,8 @@ import {
 } from './services/findMissingCoins';
 import { recoverPaymentByTxid, type TxidRecoverReport } from './services/recoverByTxid';
 import { makePostageReconcileWiring, makeTxidRecoverDeps, sweepCandidateTxids } from './services/recoverByTxidWiring';
+import { recoverSeedChange, type SeedChangeReport } from './services/seedChange';
+import { makeSeedChangeDeps, seedChangeKV } from './services/seedChangeWiring';
 import { reconcilePostage, wocIsMined, type PostageReconcileReport } from './services/postageReconcile';
 import { runUnsentExpiry, storageKV, wocHeight, type ExpiryReport, type NoSendAction } from './services/unsentExpiry';
 import { chainActive } from './services/dappChain';
@@ -194,6 +196,11 @@ export interface AccountContext {
   recoverFailed: () => Promise<RecoverReport>;
   /** Recover one mined payment by txid from the derivation any reachable store holds (services/recoverByTxid.ts). */
   recoverTxid: (txid: string, progress?: (step: string) => void) => Promise<TxidRecoverReport>;
+  /**
+   * Settings › Troubleshooting › Recover change from my 12 words: walk the chain from every coin and seed address this
+   * wallet knows, and add the deterministic change it finds (services/seedChange.ts). Read only on chain; resumable.
+   */
+  recoverSeedChange: (progress?: (step: string) => void) => Promise<SeedChangeReport>;
   /** Settings › Storage › Find missing coins: read-only scan of every store (services/findMissingCoins.ts). */
   findMissingCoins: () => Promise<ScanReport>;
   /** Add back coins a scan found (after the user confirmed). Never broadcasts. */
@@ -1170,6 +1177,31 @@ export const initWallet = async (
       return r;
     });
 
+  // Settings › Troubleshooting › Recover change from my 12 words (services/seedChange.ts).
+  const recoverSeedChangeImpl = (progress?: (step: string) => void) =>
+    recoverSeedChange(
+      makeSeedChangeDeps({
+        progress,
+        storage,
+        wallet: baseWallet as never,
+        services: toolboxServices as never,
+        // Addresses the seed makes: identity, legacy pay and ordinals, and the deposit addresses handed out.
+        seedAddresses: () => {
+          const a = chromeStorageService.getCurrentAccountObject().account?.addresses;
+          return [
+            a?.identityAddress,
+            a?.bsvAddress,
+            a?.ordAddress,
+            ...syncContext.addressManager.getAddresses(),
+          ].filter((x): x is string => !!x);
+        },
+        kv: seedChangeKV(baseWallet.keyDeriver.identityKey),
+      }),
+    ).then((r) => {
+      console.log('[seedChange]', r);
+      return r;
+    });
+
   // Settings › Storage › Find missing coins (services/findMissingCoins.ts).
   const missingCoins = () =>
     makeMissingCoinsDeps({
@@ -1234,6 +1266,7 @@ export const initWallet = async (
         return r;
       }),
     recoverTxid: recoverTxidImpl,
+    recoverSeedChange: recoverSeedChangeImpl,
     findMissingCoins: () => scanMissingCoins(missingCoins().scan),
     restoreMissingCoins: (coins: MissingCoin[]) =>
       restoreMissingCoins(coins, missingCoins().restore).then((r) => {

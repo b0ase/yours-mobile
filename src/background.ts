@@ -108,6 +108,7 @@ import { balanceWithDeposits } from './services/depositBalance';
 import { arrivingSats } from './services/receiveGuard';
 import { abortTargetKnownOnChain, recoverySummary } from './services/recoverFailed';
 import { timedStep, txidRecoverySummary } from './services/recoverByTxid';
+import { seedChangeSummary } from './services/seedChange';
 import { foundHeadline, restoredLine, scanNote, type ScanReport } from './services/findMissingCoins';
 import { paymailRestoreSummary } from './mobile/names/paymail';
 import { isEmpty, summarizeActive, switchToLocalVerified, type SwitchDeps } from './services/restoreFromRemote';
@@ -2984,6 +2985,7 @@ if (!(
       'STORAGE_REPAIR_SYNC',
       'STORAGE_RECOVER_MINED',
       'STORAGE_RECOVER_TXID',
+      'STORAGE_RECOVER_SEED_CHANGE',
       'STORAGE_FIND_MISSING_COINS',
       'STORAGE_RESTORE_MISSING_COINS',
       'STORAGE_RECONCILE_POSTAGE',
@@ -3390,6 +3392,9 @@ if (!(
           return true;
         case 'STORAGE_RECOVER_TXID':
           processRecoverTxid(typeof message.txid === 'string' ? message.txid : '', sendResponse);
+          return true;
+        case 'STORAGE_RECOVER_SEED_CHANGE':
+          processRecoverSeedChange(sendResponse);
           return true;
         case 'STORAGE_FIND_MISSING_COINS':
           processFindMissingCoins(sendResponse);
@@ -3878,7 +3883,7 @@ if (!(
    * (services/recoverFailed.ts), on demand, with a one-line result (dkg sweep, 14 Oct 2026).
    */
   /** Live step text for Settings › Troubleshooting (owner, 15 Oct 2026: no more silent "Checking…"). */
-  const sendRecoverProgress = (kind: 'txid' | 'mined', step: string) => {
+  const sendRecoverProgress = (kind: 'txid' | 'mined' | 'seed', step: string) => {
     chrome.runtime.sendMessage({ action: 'RECOVER_PROGRESS', data: { kind, step } }).catch(() => undefined);
   };
 
@@ -3914,6 +3919,29 @@ if (!(
       });
     } catch (err) {
       sendResponse({ type: 'STORAGE_RECOVER_TXID', success: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  };
+
+  /**
+   * Settings › Troubleshooting › Recover change from my 12 words (services/seedChange.ts). Read only on chain; adds
+   * only change it can prove is this wallet's. Resumable: a run that hits its time budget carries on next tap.
+   */
+  const processRecoverSeedChange = async (sendResponse: CallbackResponse) => {
+    try {
+      await ensureWallet(true);
+      if (!accountContext) throw new Error('Wallet not initialized');
+      const report = await accountContext.recoverSeedChange((step) => sendRecoverProgress('seed', step));
+      sendResponse({
+        type: 'STORAGE_RECOVER_SEED_CHANGE',
+        success: !report.error,
+        data: { report, summary: seedChangeSummary(report), paused: report.paused || !report.done },
+      });
+    } catch (err) {
+      sendResponse({
+        type: 'STORAGE_RECOVER_SEED_CHANGE',
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   };
 

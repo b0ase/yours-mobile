@@ -1,8 +1,65 @@
 diff --git a/out/index.client.cjs b/out/index.client.cjs
-index af2c513176b1265c5a02d8242ac87fc1c6805ad1..053b27b58df5be83577360062be98bab2527ae8e 100644
+index af2c513176b1265c5a02d8242ac87fc1c6805ad1..3d4117bd3b6b5546f348f42f97bc9f9dccc69f44 100644
 --- a/out/index.client.cjs
 +++ b/out/index.client.cjs
-@@ -3593,6 +3593,10 @@ var EntityOutputTagMap = class EntityOutputTagMap extends EntityBase {
+@@ -1411,6 +1411,56 @@ var ScriptTemplateBRC29 = class {
+ 	unlockLength = 108;
+ };
+ //#endregion
++//#region bwx: deterministic change (bWalletX)
++/**
++* bWalletX (3 Nov 2026): wallet change that the 12 words alone can find again.
++*
++* The toolbox picked each change output's BRC-29 derivationPrefix and derivationSuffix at random and kept them only in
++* the storage row, so change was lost with the storage. When the wallet hands over its key callback (createNewTx, while
++* Wallet.bwxDeterministicChange is on):
++*   derivationPrefix = base64(first 16 bytes of HMAC-SHA256(K, "bwx-change-v1\n" + the action's input outpoints
++*                      "txid.vout", lowercase, sorted, joined by "\n"))
++*   derivationSuffix = base64(UTF-8 of the change output's decimal vout in the final transaction)
++*   K = the BRC-42 symmetric key to self for protocol [2, "bwx change recovery"], key "v1". It is derived on use from
++*       the wallet's own key deriver and never returned, stored or logged; storage only receives the finished prefix.
++* Both are ordinary BRC-29 change values, so spending, listOutputs, internalize and sync are unchanged, and older random
++* change keeps working. Outsiders cannot link change addresses: the prefix needs K. A remote storage server
++* (StorageClient) never receives the callback (it is non-enumerable and a function) and keeps making random change.
++*/
++const bwxChangeProtocolID = [2, "bwx change recovery"];
++const bwxOutpointPattern = /^[0-9a-f]{64}\.(?:0|[1-9]\d{0,9})$/;
++function bwxChangePrefix(keyDeriver, outpoints) {
++	if (keyDeriver == null || typeof keyDeriver.deriveSymmetricKey !== "function" || !Array.isArray(outpoints) || outpoints.length === 0) return void 0;
++	const sorted = outpoints.map((outpoint) => String(outpoint).toLowerCase());
++	if (sorted.some((outpoint) => !bwxOutpointPattern.test(outpoint))) return void 0;
++	sorted.sort();
++	const key = keyDeriver.deriveSymmetricKey(bwxChangeProtocolID, "v1", "self").toArray("be", 32);
++	try {
++		return (0, _bsv_sdk_primitives_utils.toBase64)((0, _bsv_sdk_primitives_Hash.sha256hmac)(key, (0, _bsv_sdk_primitives_utils.toArray)(`bwx-change-v1\n${sorted.join("\n")}`, "utf8")).slice(0, 16));
++	} finally {
++		key.fill(0);
++	}
++}
++function bwxChangeSuffix(vout) {
++	return (0, _bsv_sdk_primitives_utils.toBase64)((0, _bsv_sdk_primitives_utils.toArray)(String(vout), "utf8"));
++}
++function bwxAttachChangeDerivation(wallet, storageArgs) {
++	const keyDeriver = wallet?.keyDeriver;
++	if (!Wallet.bwxDeterministicChange || keyDeriver == null || typeof keyDeriver.deriveSymmetricKey !== "function") return;
++	Object.defineProperty(storageArgs, "bwxChangePrefix", {
++		value: (outpoints) => bwxChangePrefix(keyDeriver, outpoints),
++		enumerable: false,
++		configurable: true,
++		writable: true
++	});
++}
++function bwxPrefixFor(args, outpoints) {
++	return typeof args?.bwxChangePrefix === "function" ? args.bwxChangePrefix(outpoints) : void 0;
++}
++function bwxSetChangeSuffixes(outputs) {
++	for (const output of outputs) if (output.providedBy === "storage" && output.purpose === "change") output.derivationSuffix = bwxChangeSuffix(output.vout);
++}
++//#endregion
+ //#region ../src/utility/parseTxScriptOffsets.ts
+ function parseTxScriptOffsets(rawTx) {
+ 	return _bsv_sdk.Transaction.parseScriptOffsets(rawTx);
+@@ -3593,6 +3643,10 @@ var EntityOutputTagMap = class EntityOutputTagMap extends EntityBase {
  	static async mergeFind(storage, userId, ei, syncMap, trx) {
  		const outputId = syncMap.output.idMap[ei.outputId];
  		const outputTagId = syncMap.outputTag.idMap[ei.outputTagId];
@@ -13,7 +70,7 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..053b27b58df5be83577360062be98bab
  		const ef = verifyOneOrNone(await storage.findOutputTagMaps({
  			partial: {
  				outputId,
-@@ -5201,6 +5205,10 @@ var EntityTxLabelMap = class EntityTxLabelMap extends EntityBase {
+@@ -5201,6 +5255,10 @@ var EntityTxLabelMap = class EntityTxLabelMap extends EntityBase {
  	static async mergeFind(storage, userId, ei, syncMap, trx) {
  		const transactionId = syncMap.transaction.idMap[ei.transactionId];
  		const txLabelId = syncMap.txLabel.idMap[ei.txLabelId];
@@ -24,7 +81,32 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..053b27b58df5be83577360062be98bab
  		const ef = verifyOneOrNone(await storage.findTxLabelMaps({
  			partial: {
  				transactionId,
-@@ -12865,6 +12873,12 @@ function isWalletSigner(args) {
+@@ -9890,6 +9948,7 @@ async function traceActionStep(wallet, name, parent, callback) {
+ async function createNewTx(wallet, vargs, parent) {
+ 	const logger = vargs.logger;
+ 	const storageArgs = removeUnlockScripts(vargs);
++	bwxAttachChangeDerivation(wallet, storageArgs); /* bwx: deterministic change */
+ 	const dcr = await traceActionStep(wallet, "wallet.create_action.storage_plan", parent, async () => await wallet.actionBatch.plan(storageArgs) ?? await wallet.storage.createAction(storageArgs));
+ 	const reference = dcr.reference;
+ 	const { tx, amount, pdi } = await traceActionStep(wallet, "wallet.create_action.build_signable_transaction", parent, () => buildSignableTransaction(dcr, vargs, wallet));
+@@ -11817,13 +11876,15 @@ async function planAction(state, args) {
+ 	const explicit = resolveExplicitInputs(state, args);
+ 	const funding = await planFunding(state, args, explicit, args.options.noSendChange.map((outpoint) => requireManagedChange(resolveInputOutput(state, outpoint), `noSendChange ${outpoint.txid}.${outpoint.vout}`)));
+ 	const derivationRandom = repeatableRandom(args.randomVals);
+-	const derivationPrefix = randomDerivation(16, derivationRandom);
++	const bwxPrefix = bwxPrefixFor(args, [...args.inputs.map((input) => `${input.outpoint.txid}.${input.outpoint.vout}`), ...funding.allocated.map(outpointOf)]); /* bwx: deterministic change */
++	const derivationPrefix = bwxPrefix ?? randomDerivation(16, derivationRandom);
+ 	const outputs = requestedOutputs(args);
+ 	const commissionKeyOffset = addStorageCommission(state, outputs);
+ 	applyFundingAdjustment(outputs, funding.maxPossibleSatoshisAdjustment);
+ 	const fixedOutputCount = outputs.length;
+ 	outputs.push(...makeChangeOutputs(state, fixedOutputCount, funding.changeSatoshis, derivationPrefix, derivationRandom));
+ 	if (args.options.randomizeOutputs) randomizeOutputVouts(outputs, args.randomVals);
++	if (bwxPrefix != null) bwxSetChangeSuffixes(outputs); /* bwx: suffix = final vout */
+ 	const inputs = [...explicit.map((output, vin) => sdkInputFromExplicit(state, args.inputs[vin], vin, output, args.isSignAction)), ...funding.allocated.map((output, index) => sdkInputFromFunding(state, output, explicit.length + index, args.isSignAction))];
+ 	const consumedOutpoints = funding.allocated.map(outpointOf);
+ 	for (const input of args.inputs) consumedOutpoints.push(`${input.outpoint.txid}.${input.outpoint.vout}`);
+@@ -12865,6 +12926,23 @@ function isWalletSigner(args) {
  	return "isWalletSigner" in args && args.isWalletSigner;
  }
  var Wallet = class {
@@ -34,10 +116,21 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..053b27b58df5be83577360062be98bab
 +	* rewrites the query to every basket, so a site naming one could read the wallet's reserved baskets.
 +	*/
 +	static bwxSpecOpOriginators = /* @__PURE__ */ new Set();
++	/**
++	* bWalletX (3 Nov 2026): make change from the wallet's key and the action's inputs, so the 12 words alone can find
++	* it again ("Recover change from my 12 words"). See bwxChangePrefix. Tests turn it off to make old random change.
++	*/
++	static bwxDeterministicChange = true;
++	static bwxChangePrefix(keyDeriver, outpoints) {
++		return bwxChangePrefix(keyDeriver, outpoints);
++	}
++	static bwxChangeSuffix(vout) {
++		return bwxChangeSuffix(vout);
++	}
  	chain;
  	keyDeriver;
  	storage;
-@@ -13092,6 +13106,7 @@ var Wallet = class {
+@@ -13092,6 +13170,7 @@ var Wallet = class {
  	}
  	async listOutputs(args, originator) {
  		(0, _bsv_sdk_wallet_validationHelpers.validateOriginator)(originator);
@@ -45,7 +138,26 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..053b27b58df5be83577360062be98bab
  		const { vargs } = this.validateAuthAndArgs(args, validateListOutputsArgs);
  		if (this.autoKnownTxids && !vargs.knownTxids) vargs.knownTxids = this.getKnownTxids();
  		const storageArgs = this.actionBatch.hasWorkspace && vargs.basket !== "893b7646de0e1c9f741bd6e9169b76a8847ae34adef7bef1e6a285371206d2e8" && !vargs.tags.includes("893b7646de0e1c9f741bd6e9169b76a8847ae34adef7bef1e6a285371206d2e8") ? {
-@@ -17560,7 +17575,7 @@ async function beginActionBatch(storage, auth, args) {
+@@ -14116,6 +14195,7 @@ async function createNewOutputs(storage, userId, vargs, ctx, changeOutputs, trx)
+ 		});
+ 	}
+ 	if (vargs.options.randomizeOutputs) randomizeOutputVouts(newOutputs.map((output) => output.o), vargs.randomVals);
++	if (ctx.bwxDeterministicChange) bwxSetChangeSuffixes(newOutputs.map((output) => output.o)); /* bwx: suffix = final vout */
+ 	const untagged = newOutputs.filter((output) => output.tags.length === 0);
+ 	await storage.insertOutputs(untagged.map((output) => output.o), trx);
+ 	const outputs = [];
+@@ -14732,7 +14812,9 @@ async function fundNewTransactionSdk(storage, userId, vargs, ctx, initialPlan, p
+ 		else for (let i = 0; i < count; i++) val.push(rand(0, 255));
+ 		return (0, _bsv_sdk_primitives_utils.toBase64)(val);
+ 	};
+-	const derivationPrefix = randomDerivation(16);
++	const bwxPrefix = bwxPrefixFor(vargs, [...ctx.xinputs.map((input) => `${input.outpoint.txid}.${input.outpoint.vout}`), ...allocatedChange.map((output) => `${output.txid}.${output.vout}`)]); /* bwx: deterministic change */
++	ctx.bwxDeterministicChange = bwxPrefix != null;
++	const derivationPrefix = bwxPrefix ?? randomDerivation(16);
+ 	ctx.derivationPrefix = derivationPrefix;
+ 	for (const output of ctx.xoutputs) if (output.purpose === "change" && output.derivationSuffix == null) output.derivationSuffix = randomDerivation(16);
+ 	return {
+@@ -17560,7 +17642,7 @@ async function beginActionBatch(storage, auth, args) {
  	const explicit = await resolveExplicitOutputs(storage, userId, args.firstAction, outputScriptLengths != null);
  	const noSendChange = await resolveNoSendChangeOutputs(storage, userId, args.firstAction);
  	const fixedOutputIds = new Set([...explicit.outputs, ...noSendChange.outputs].map((output) => output.outputId));
@@ -54,7 +166,7 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..053b27b58df5be83577360062be98bab
  	const availableStatuses = await storage.findTransactionStatusesByIds(userId, availableOutputs.map((output) => output.transactionId));
  	const available = availableOutputs.map((output) => ({
  		...output,
-@@ -17627,7 +17642,7 @@ async function extendActionBatch(storage, auth, args) {
+@@ -17627,7 +17709,7 @@ async function extendActionBatch(storage, auth, args) {
  	const explicit = [...new Map(Object.values(explicitByOutpoint).filter((output) => !alreadyReserved.includes(output.outputId)).map((output) => [output.outputId, output])).values()];
  	if (explicit.length > remainingCapacity) throw new WERR_INVALID_PARAMETER("explicitOutpoints", `no more than ${remainingCapacity} additional reserved outputs`);
  	const explicitIds = new Set(explicit.map((output) => output.outputId));
@@ -63,7 +175,7 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..053b27b58df5be83577360062be98bab
  	const availableStatuses = await storage.findTransactionStatusesByIds(userId, availableOutputs.map((output) => output.transactionId));
  	const available = availableOutputs.map((output) => ({
  		...output,
-@@ -19797,7 +19812,12 @@ async function loadIdbOutputs(query) {
+@@ -19797,7 +19879,12 @@ async function loadIdbOutputs(query) {
  	const args = {
  		partial: {
  			userId,
@@ -77,7 +189,7 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..053b27b58df5be83577360062be98bab
  			spendable: true,
  			...specOp?.managedChangeOnly ? managedChangeOutputFields : {}
  		},
-@@ -20203,7 +20223,7 @@ var StorageIdb = class extends StorageProvider {
+@@ -20203,7 +20290,7 @@ var StorageIdb = class extends StorageProvider {
  			const reservationStore = dbTrx.objectStore("action_batch_outputs");
  			if (reservationStore.get == null) throw new WERR_INTERNAL("IndexedDB action_batch_outputs store does not support get");
  			const outputs = [];
@@ -86,7 +198,7 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..053b27b58df5be83577360062be98bab
  			const output = selectCanonicalChange(outputs, targetSatoshis, exactSatoshis);
  			if (output != null) {
  				await this.updateOutput(output.outputId, {
-@@ -38451,10 +38471,19 @@ var Monitor = class Monitor {
+@@ -38451,10 +38538,19 @@ var Monitor = class Monitor {
  	async runOnce() {
  		await this.ensureEventSubscriptions();
  		await this.setupTasksOnce();
@@ -107,7 +219,7 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..053b27b58df5be83577360062be98bab
  	* Best-effort attempt to (re)register the optional Chaintracks header/reorg
  	* push subscriptions ahead of this scheduler tick.
  	*
-@@ -38514,6 +38543,7 @@ var Monitor = class Monitor {
+@@ -38514,6 +38610,7 @@ var Monitor = class Monitor {
  		const tasks = [];
  		const now = Date.now();
  		for (const task of this._tasks) try {
@@ -115,7 +227,7 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..053b27b58df5be83577360062be98bab
  			if (task.trigger(now).run) tasks.push(task);
  		} catch (error_) {
  			await this.logTaskError(task, "trigger", "error0", error_);
-@@ -38522,7 +38552,7 @@ var Monitor = class Monitor {
+@@ -38522,7 +38619,7 @@ var Monitor = class Monitor {
  	}
  	async runScheduledTask(task) {
  		try {
@@ -124,7 +236,7 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..053b27b58df5be83577360062be98bab
  			const log = await task.runTask();
  			if (log.length === 0) return;
  			const details = task.name === "MonitorCallHistory" ? "..." : safeDiagnostic(log, 1024);
-@@ -38567,6 +38597,13 @@ var Monitor = class Monitor {
+@@ -38567,6 +38664,13 @@ var Monitor = class Monitor {
  	async logEvent(event, details) {
  		if (typeof event !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(event)) throw new WERR_INVALID_PARAMETER("event", "a bounded control-free monitor event name");
  		const boundedDetails = details == null ? void 0 : safeDiagnostic(details, 8192);
@@ -139,10 +251,76 @@ index af2c513176b1265c5a02d8242ac87fc1c6805ad1..053b27b58df5be83577360062be98bab
  			await sp.insertMonitorEvent({
  				created_at: /* @__PURE__ */ new Date(),
 diff --git a/out/index.client.mjs b/out/index.client.mjs
-index 5d9233efe5b3e60fcb88b8f260eb65e871945552..0f91906598e06c4962b5eef60b0bf19162326643 100644
+index 5d9233efe5b3e60fcb88b8f260eb65e871945552..c78f32d374a0bda1864a9ff46dd683d6573ba9bc 100644
 --- a/out/index.client.mjs
 +++ b/out/index.client.mjs
-@@ -3558,6 +3558,10 @@ var EntityOutputTagMap = class EntityOutputTagMap extends EntityBase {
+@@ -1,7 +1,7 @@
+ import { t as __exportAll } from "./rolldown-runtime-D7D4PA-g.mjs";
+ import { AuthFetch, BEEF_V1, BEEF_V2, Beef, BeefParty, BeefTx, BigNumber, BlockHeadersService, CachedKeyDeriver, Certificate, Curve, LocalKVStore, LockingScript, LookupResolver, MasterCertificate, MerklePath, P2PKH, PrivateKey, ProtoWallet, PublicKey, PushDrop, RPuzzle, Random, SHIPBroadcaster, Script, ScriptEvaluationError, Signature, Spend, SymmetricKey, Telemetry, Transaction, TransactionEvidenceCoordinator, TransactionEvidenceError, TransactionSignature, Validation as Validation$1, VerifiableCertificate, WERR_REVIEW_ACTIONS, completeBoundAction, createNonce, createPublicHTTPSFetch, decodeCanonicalPushDrop, defaultHttpClient, defaultTransactionEvidenceLimits, stringifyBRC100, verifyNonce } from "@bsv/sdk";
+ import { Reader, ReaderUint8Array, Writer, fromBase58, toArray, toBase58, toBase64, toHex, toUTF8, toUTF8Strict, toUint8Array } from "@bsv/sdk/primitives/utils";
+-import { SHA256, hash160, hash256, sha256 } from "@bsv/sdk/primitives/Hash";
++import { SHA256, hash160, hash256, sha256, sha256hmac } from "@bsv/sdk/primitives/Hash";
+ import { MAXIMUM_SEND_WITH_TRANSACTIONS, parseWalletOutpoint, validateAbortActionArgs, validateAcquireDirectCertificateArgs, validateAcquireIssuanceCertificateArgs, validateCreateActionArgs, validateCreateActionOptions, validateDiscoverByAttributesArgs, validateDiscoverByIdentityKeyArgs, validateInteger, validateInternalizeActionArgs, validateListActionsArgs, validateListCertificatesArgs, validateListOutputsArgs, validateOptionalInteger, validateOriginator, validateProveCertificateArgs, validateRelinquishCertificateArgs, validateRelinquishOutputArgs, validateSatoshis, validateSignActionArgs } from "@bsv/sdk/wallet/validationHelpers";
+ import { deleteDB, openDB } from "idb";
+ import { AESGCM, AESGCMDecrypt } from "@bsv/sdk/primitives/AESGCM";
+@@ -1376,6 +1376,56 @@ var ScriptTemplateBRC29 = class {
+ 	unlockLength = 108;
+ };
+ //#endregion
++//#region bwx: deterministic change (bWalletX)
++/**
++* bWalletX (3 Nov 2026): wallet change that the 12 words alone can find again.
++*
++* The toolbox picked each change output's BRC-29 derivationPrefix and derivationSuffix at random and kept them only in
++* the storage row, so change was lost with the storage. When the wallet hands over its key callback (createNewTx, while
++* Wallet.bwxDeterministicChange is on):
++*   derivationPrefix = base64(first 16 bytes of HMAC-SHA256(K, "bwx-change-v1\n" + the action's input outpoints
++*                      "txid.vout", lowercase, sorted, joined by "\n"))
++*   derivationSuffix = base64(UTF-8 of the change output's decimal vout in the final transaction)
++*   K = the BRC-42 symmetric key to self for protocol [2, "bwx change recovery"], key "v1". It is derived on use from
++*       the wallet's own key deriver and never returned, stored or logged; storage only receives the finished prefix.
++* Both are ordinary BRC-29 change values, so spending, listOutputs, internalize and sync are unchanged, and older random
++* change keeps working. Outsiders cannot link change addresses: the prefix needs K. A remote storage server
++* (StorageClient) never receives the callback (it is non-enumerable and a function) and keeps making random change.
++*/
++const bwxChangeProtocolID = [2, "bwx change recovery"];
++const bwxOutpointPattern = /^[0-9a-f]{64}\.(?:0|[1-9]\d{0,9})$/;
++function bwxChangePrefix(keyDeriver, outpoints) {
++	if (keyDeriver == null || typeof keyDeriver.deriveSymmetricKey !== "function" || !Array.isArray(outpoints) || outpoints.length === 0) return void 0;
++	const sorted = outpoints.map((outpoint) => String(outpoint).toLowerCase());
++	if (sorted.some((outpoint) => !bwxOutpointPattern.test(outpoint))) return void 0;
++	sorted.sort();
++	const key = keyDeriver.deriveSymmetricKey(bwxChangeProtocolID, "v1", "self").toArray("be", 32);
++	try {
++		return toBase64(sha256hmac(key, toArray(`bwx-change-v1\n${sorted.join("\n")}`, "utf8")).slice(0, 16));
++	} finally {
++		key.fill(0);
++	}
++}
++function bwxChangeSuffix(vout) {
++	return toBase64(toArray(String(vout), "utf8"));
++}
++function bwxAttachChangeDerivation(wallet, storageArgs) {
++	const keyDeriver = wallet?.keyDeriver;
++	if (!Wallet.bwxDeterministicChange || keyDeriver == null || typeof keyDeriver.deriveSymmetricKey !== "function") return;
++	Object.defineProperty(storageArgs, "bwxChangePrefix", {
++		value: (outpoints) => bwxChangePrefix(keyDeriver, outpoints),
++		enumerable: false,
++		configurable: true,
++		writable: true
++	});
++}
++function bwxPrefixFor(args, outpoints) {
++	return typeof args?.bwxChangePrefix === "function" ? args.bwxChangePrefix(outpoints) : void 0;
++}
++function bwxSetChangeSuffixes(outputs) {
++	for (const output of outputs) if (output.providedBy === "storage" && output.purpose === "change") output.derivationSuffix = bwxChangeSuffix(output.vout);
++}
++//#endregion
+ //#region ../src/utility/parseTxScriptOffsets.ts
+ function parseTxScriptOffsets(rawTx) {
+ 	return Transaction.parseScriptOffsets(rawTx);
+@@ -3558,6 +3608,10 @@ var EntityOutputTagMap = class EntityOutputTagMap extends EntityBase {
  	static async mergeFind(storage, userId, ei, syncMap, trx) {
  		const outputId = syncMap.output.idMap[ei.outputId];
  		const outputTagId = syncMap.outputTag.idMap[ei.outputTagId];
@@ -153,7 +331,7 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..0f91906598e06c4962b5eef60b0bf191
  		const ef = verifyOneOrNone(await storage.findOutputTagMaps({
  			partial: {
  				outputId,
-@@ -5166,6 +5170,10 @@ var EntityTxLabelMap = class EntityTxLabelMap extends EntityBase {
+@@ -5166,6 +5220,10 @@ var EntityTxLabelMap = class EntityTxLabelMap extends EntityBase {
  	static async mergeFind(storage, userId, ei, syncMap, trx) {
  		const transactionId = syncMap.transaction.idMap[ei.transactionId];
  		const txLabelId = syncMap.txLabel.idMap[ei.txLabelId];
@@ -164,7 +342,32 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..0f91906598e06c4962b5eef60b0bf191
  		const ef = verifyOneOrNone(await storage.findTxLabelMaps({
  			partial: {
  				transactionId,
-@@ -12830,6 +12838,12 @@ function isWalletSigner(args) {
+@@ -9855,6 +9913,7 @@ async function traceActionStep(wallet, name, parent, callback) {
+ async function createNewTx(wallet, vargs, parent) {
+ 	const logger = vargs.logger;
+ 	const storageArgs = removeUnlockScripts(vargs);
++	bwxAttachChangeDerivation(wallet, storageArgs); /* bwx: deterministic change */
+ 	const dcr = await traceActionStep(wallet, "wallet.create_action.storage_plan", parent, async () => await wallet.actionBatch.plan(storageArgs) ?? await wallet.storage.createAction(storageArgs));
+ 	const reference = dcr.reference;
+ 	const { tx, amount, pdi } = await traceActionStep(wallet, "wallet.create_action.build_signable_transaction", parent, () => buildSignableTransaction(dcr, vargs, wallet));
+@@ -11782,13 +11841,15 @@ async function planAction(state, args) {
+ 	const explicit = resolveExplicitInputs(state, args);
+ 	const funding = await planFunding(state, args, explicit, args.options.noSendChange.map((outpoint) => requireManagedChange(resolveInputOutput(state, outpoint), `noSendChange ${outpoint.txid}.${outpoint.vout}`)));
+ 	const derivationRandom = repeatableRandom(args.randomVals);
+-	const derivationPrefix = randomDerivation(16, derivationRandom);
++	const bwxPrefix = bwxPrefixFor(args, [...args.inputs.map((input) => `${input.outpoint.txid}.${input.outpoint.vout}`), ...funding.allocated.map(outpointOf)]); /* bwx: deterministic change */
++	const derivationPrefix = bwxPrefix ?? randomDerivation(16, derivationRandom);
+ 	const outputs = requestedOutputs(args);
+ 	const commissionKeyOffset = addStorageCommission(state, outputs);
+ 	applyFundingAdjustment(outputs, funding.maxPossibleSatoshisAdjustment);
+ 	const fixedOutputCount = outputs.length;
+ 	outputs.push(...makeChangeOutputs(state, fixedOutputCount, funding.changeSatoshis, derivationPrefix, derivationRandom));
+ 	if (args.options.randomizeOutputs) randomizeOutputVouts(outputs, args.randomVals);
++	if (bwxPrefix != null) bwxSetChangeSuffixes(outputs); /* bwx: suffix = final vout */
+ 	const inputs = [...explicit.map((output, vin) => sdkInputFromExplicit(state, args.inputs[vin], vin, output, args.isSignAction)), ...funding.allocated.map((output, index) => sdkInputFromFunding(state, output, explicit.length + index, args.isSignAction))];
+ 	const consumedOutpoints = funding.allocated.map(outpointOf);
+ 	for (const input of args.inputs) consumedOutpoints.push(`${input.outpoint.txid}.${input.outpoint.vout}`);
+@@ -12830,6 +12891,23 @@ function isWalletSigner(args) {
  	return "isWalletSigner" in args && args.isWalletSigner;
  }
  var Wallet = class {
@@ -174,10 +377,21 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..0f91906598e06c4962b5eef60b0bf191
 +	* rewrites the query to every basket, so a site naming one could read the wallet's reserved baskets.
 +	*/
 +	static bwxSpecOpOriginators = /* @__PURE__ */ new Set();
++	/**
++	* bWalletX (3 Nov 2026): make change from the wallet's key and the action's inputs, so the 12 words alone can find
++	* it again ("Recover change from my 12 words"). See bwxChangePrefix. Tests turn it off to make old random change.
++	*/
++	static bwxDeterministicChange = true;
++	static bwxChangePrefix(keyDeriver, outpoints) {
++		return bwxChangePrefix(keyDeriver, outpoints);
++	}
++	static bwxChangeSuffix(vout) {
++		return bwxChangeSuffix(vout);
++	}
  	chain;
  	keyDeriver;
  	storage;
-@@ -13057,6 +13071,7 @@ var Wallet = class {
+@@ -13057,6 +13135,7 @@ var Wallet = class {
  	}
  	async listOutputs(args, originator) {
  		validateOriginator(originator);
@@ -185,7 +399,26 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..0f91906598e06c4962b5eef60b0bf191
  		const { vargs } = this.validateAuthAndArgs(args, validateListOutputsArgs$1);
  		if (this.autoKnownTxids && !vargs.knownTxids) vargs.knownTxids = this.getKnownTxids();
  		const storageArgs = this.actionBatch.hasWorkspace && vargs.basket !== "893b7646de0e1c9f741bd6e9169b76a8847ae34adef7bef1e6a285371206d2e8" && !vargs.tags.includes("893b7646de0e1c9f741bd6e9169b76a8847ae34adef7bef1e6a285371206d2e8") ? {
-@@ -17525,7 +17540,7 @@ async function beginActionBatch(storage, auth, args) {
+@@ -14081,6 +14160,7 @@ async function createNewOutputs(storage, userId, vargs, ctx, changeOutputs, trx)
+ 		});
+ 	}
+ 	if (vargs.options.randomizeOutputs) randomizeOutputVouts(newOutputs.map((output) => output.o), vargs.randomVals);
++	if (ctx.bwxDeterministicChange) bwxSetChangeSuffixes(newOutputs.map((output) => output.o)); /* bwx: suffix = final vout */
+ 	const untagged = newOutputs.filter((output) => output.tags.length === 0);
+ 	await storage.insertOutputs(untagged.map((output) => output.o), trx);
+ 	const outputs = [];
+@@ -14697,7 +14777,9 @@ async function fundNewTransactionSdk(storage, userId, vargs, ctx, initialPlan, p
+ 		else for (let i = 0; i < count; i++) val.push(rand(0, 255));
+ 		return toBase64(val);
+ 	};
+-	const derivationPrefix = randomDerivation(16);
++	const bwxPrefix = bwxPrefixFor(vargs, [...ctx.xinputs.map((input) => `${input.outpoint.txid}.${input.outpoint.vout}`), ...allocatedChange.map((output) => `${output.txid}.${output.vout}`)]); /* bwx: deterministic change */
++	ctx.bwxDeterministicChange = bwxPrefix != null;
++	const derivationPrefix = bwxPrefix ?? randomDerivation(16);
+ 	ctx.derivationPrefix = derivationPrefix;
+ 	for (const output of ctx.xoutputs) if (output.purpose === "change" && output.derivationSuffix == null) output.derivationSuffix = randomDerivation(16);
+ 	return {
+@@ -17525,7 +17607,7 @@ async function beginActionBatch(storage, auth, args) {
  	const explicit = await resolveExplicitOutputs(storage, userId, args.firstAction, outputScriptLengths != null);
  	const noSendChange = await resolveNoSendChangeOutputs(storage, userId, args.firstAction);
  	const fixedOutputIds = new Set([...explicit.outputs, ...noSendChange.outputs].map((output) => output.outputId));
@@ -194,7 +427,7 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..0f91906598e06c4962b5eef60b0bf191
  	const availableStatuses = await storage.findTransactionStatusesByIds(userId, availableOutputs.map((output) => output.transactionId));
  	const available = availableOutputs.map((output) => ({
  		...output,
-@@ -17592,7 +17607,7 @@ async function extendActionBatch(storage, auth, args) {
+@@ -17592,7 +17674,7 @@ async function extendActionBatch(storage, auth, args) {
  	const explicit = [...new Map(Object.values(explicitByOutpoint).filter((output) => !alreadyReserved.includes(output.outputId)).map((output) => [output.outputId, output])).values()];
  	if (explicit.length > remainingCapacity) throw new WERR_INVALID_PARAMETER("explicitOutpoints", `no more than ${remainingCapacity} additional reserved outputs`);
  	const explicitIds = new Set(explicit.map((output) => output.outputId));
@@ -203,7 +436,7 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..0f91906598e06c4962b5eef60b0bf191
  	const availableStatuses = await storage.findTransactionStatusesByIds(userId, availableOutputs.map((output) => output.transactionId));
  	const available = availableOutputs.map((output) => ({
  		...output,
-@@ -19762,7 +19777,12 @@ async function loadIdbOutputs(query) {
+@@ -19762,7 +19844,12 @@ async function loadIdbOutputs(query) {
  	const args = {
  		partial: {
  			userId,
@@ -217,7 +450,7 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..0f91906598e06c4962b5eef60b0bf191
  			spendable: true,
  			...specOp?.managedChangeOnly ? managedChangeOutputFields : {}
  		},
-@@ -20168,7 +20188,7 @@ var StorageIdb = class extends StorageProvider {
+@@ -20168,7 +20255,7 @@ var StorageIdb = class extends StorageProvider {
  			const reservationStore = dbTrx.objectStore("action_batch_outputs");
  			if (reservationStore.get == null) throw new WERR_INTERNAL("IndexedDB action_batch_outputs store does not support get");
  			const outputs = [];
@@ -226,7 +459,7 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..0f91906598e06c4962b5eef60b0bf191
  			const output = selectCanonicalChange(outputs, targetSatoshis, exactSatoshis);
  			if (output != null) {
  				await this.updateOutput(output.outputId, {
-@@ -38416,10 +38436,19 @@ var Monitor = class Monitor {
+@@ -38416,10 +38503,19 @@ var Monitor = class Monitor {
  	async runOnce() {
  		await this.ensureEventSubscriptions();
  		await this.setupTasksOnce();
@@ -247,7 +480,7 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..0f91906598e06c4962b5eef60b0bf191
  	* Best-effort attempt to (re)register the optional Chaintracks header/reorg
  	* push subscriptions ahead of this scheduler tick.
  	*
-@@ -38479,6 +38508,7 @@ var Monitor = class Monitor {
+@@ -38479,6 +38575,7 @@ var Monitor = class Monitor {
  		const tasks = [];
  		const now = Date.now();
  		for (const task of this._tasks) try {
@@ -255,7 +488,7 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..0f91906598e06c4962b5eef60b0bf191
  			if (task.trigger(now).run) tasks.push(task);
  		} catch (error_) {
  			await this.logTaskError(task, "trigger", "error0", error_);
-@@ -38487,7 +38517,7 @@ var Monitor = class Monitor {
+@@ -38487,7 +38584,7 @@ var Monitor = class Monitor {
  	}
  	async runScheduledTask(task) {
  		try {
@@ -264,7 +497,7 @@ index 5d9233efe5b3e60fcb88b8f260eb65e871945552..0f91906598e06c4962b5eef60b0bf191
  			const log = await task.runTask();
  			if (log.length === 0) return;
  			const details = task.name === "MonitorCallHistory" ? "..." : safeDiagnostic(log, 1024);
-@@ -38532,6 +38562,13 @@ var Monitor = class Monitor {
+@@ -38532,6 +38629,13 @@ var Monitor = class Monitor {
  	async logEvent(event, details) {
  		if (typeof event !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(event)) throw new WERR_INVALID_PARAMETER("event", "a bounded control-free monitor event name");
  		const boundedDetails = details == null ? void 0 : safeDiagnostic(details, 8192);

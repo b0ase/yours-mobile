@@ -1,0 +1,473 @@
+/**
+ * Recover change from my 12 words, end to end on the real wallet-toolbox (patched).
+ *
+ * The incident (28.667 BSV of the owner's, 0.94 BSV of a customer's): change derivations lived only in storage rows,
+ * so a wiped, short-restored or in-memory-lost store stranded the change. With the patch, change is derived from the
+ * wallet's key and the transaction's inputs, so a fresh wallet opened from the same seed finds it again on chain.
+ *
+ * Local only: fake-indexeddb, a mocked chain (WhatsOnChain spend lookups, raw transactions, proofs and address history
+ * are served from the test's own transactions), a mocked broadcaster, random keys. Nothing touches a network.
+ */
+import 'fake-indexeddb/auto';
+import { describe, expect, test } from 'bun:test';
+import { Beef, KeyDeriver, MerklePath, P2PKH, PrivateKey, Transaction, Utils } from '@bsv/sdk';
+import { Monitor, StorageIdb, StorageProvider, Wallet, WalletStorageManager } from '@bsv/wallet-toolbox-client';
+import { sweepBsv } from '@1sat/actions';
+import { fixUtxoStatus } from '../services/utxoStatus';
+import { recoverSeedChange, seedChangeSummary, wocSpentLookup, type SeedChangeState } from '../services/seedChange';
+import { makeSeedChangeDeps } from '../services/seedChangeWiring';
+
+const W = Wallet as unknown as {
+  bwxChangePrefix: (kd: unknown, outpoints: string[]) => string | undefined;
+  bwxChangeSuffix: (vout: number) => string;
+  bwxDeterministicChange: boolean;
+};
+const HEIGHT = 971004;
+
+/** The network, as the mocks see it. */
+type Chain = {
+  mined: Set<string>;
+  /** spent outpoints "txid.vout" -> spending txid */
+  spent: Map<string, string>;
+  /** script hex -> txids touching it (hashOutputScript is the identity in this mock) */
+  history: Map<string, string[]>;
+  raw: Map<string, number[]>;
+  /** each mined tx in its own block (one BUMP per height, as on the real chain) */
+  heights: Map<string, number>;
+};
+const newChain = (): Chain => ({
+  mined: new Set(),
+  spent: new Map(),
+  history: new Map(),
+  raw: new Map(),
+  heights: new Map(),
+});
+
+const proofFor = (chain: Chain, txid: string) => ({
+  name: 'mock',
+  merklePath: new MerklePath(chain.heights.get(txid) ?? HEIGHT, [[{ offset: 0, hash: txid, txid: true }]]),
+  header: {
+    version: 1,
+    previousHash: '00'.repeat(32),
+    merkleRoot: txid,
+    time: 1760421413,
+    bits: 0x1d00ffff,
+    nonce: 0,
+    height: chain.heights.get(txid) ?? HEIGHT,
+    hash: '00'.repeat(32),
+  },
+});
+
+function makeServices(chain: Chain) {
+  const chainTracker = { isValidRootForHeight: async () => true, currentHeight: async () => HEIGHT + 1000 };
+  const txoGet = async (o: string) => {
+    const [txid, vout] = o.split(/[._]/);
+    if (!chain.mined.has(txid)) throw new Error('404 Not Found');
+    const spend = chain.spent.get(`${txid}.${vout}`);
+    return { outpoint: `${txid}.${vout}`, score: 0, ...(spend ? { spend } : {}) };
+  };
+  const svc: Record<string, unknown> = {
+    chain: 'main',
+    txo: { get: txoGet },
+    getChainTracker: async () => chainTracker,
+    getHeight: async () => HEIGHT + 1000,
+    getBsvExchangeRate: async () => 50,
+    getFiatExchangeRate: async () => 1,
+    nLockTimeIsFinal: async () => true,
+    getHeaderForHeight: async () => new Array(80).fill(0),
+    hashOutputScript: (s: string) => s,
+    getScriptHashHistory: async (hash: string) => ({
+      name: 'mock',
+      status: 'success',
+      history: (chain.history.get(hash) ?? []).map((txid) => ({ txid })),
+    }),
+    getStatusForTxids: async (txids: string[]) => ({
+      results: txids.map((txid) => ({ txid, status: chain.mined.has(txid) ? 'mined' : 'unknown', depth: 1 })),
+    }),
+    getRawTx: async (txid: string) => ({ txid, name: 'mock', rawTx: chain.raw.get(txid) }),
+    getMerklePath: async (txid: string) =>
+      chain.mined.has(txid) ? proofFor(chain, txid) : { name: 'mock', notes: [] },
+    postBeef: async (_beef: Beef, txids: string[]) => [
+      { name: 'arc', status: 'success', txidResults: txids.map((txid) => ({ txid, status: 'success' })) },
+    ],
+  };
+  expect(fixUtxoStatus(svc)).toBe(true); // what initWallet installs
+  return new Proxy(svc, {
+    get(t, p) {
+      if (p in t || typeof p === 'symbol' || p === 'then') return (t as Record<string | symbol, unknown>)[p];
+      return async () => {
+        throw new Error(`mock services: ${String(p)} not implemented`);
+      };
+    },
+  });
+}
+
+/** WhatsOnChain /tx/<txid>/<vout>/spent, answered from the mocked chain (404 = unspent). */
+const fakeWoc = (chain: Chain) => async (url: string) => {
+  const m = /\/tx\/([0-9a-f]{64})\/(\d+)\/spent$/.exec(url);
+  const by = m ? chain.spent.get(`${m[1]}.${m[2]}`) : undefined;
+  return (by
+    ? { status: 200, ok: true, json: async () => ({ txid: by, vin: 0, status: 'confirmed' }) }
+    : { status: 404, ok: false, json: async () => ({}) }) as unknown as Response;
+};
+
+let dbn = 0;
+async function openWallet(rootKey: PrivateKey, dbName: string, services: unknown) {
+  const kd = new KeyDeriver(rootKey);
+  const s = new StorageIdb(StorageProvider.createStorageBaseOptions('main'));
+  (s as unknown as { dbName: string }).dbName = dbName; // one DB per "device"
+  await s.migrate(dbName, PrivateKey.fromRandom().toPublicKey().toString());
+  await s.makeAvailable();
+  s.setServices(services as never);
+  const storage = new WalletStorageManager(kd.identityKey, s);
+  await storage.makeAvailable();
+  storage.setServices(services as never);
+  const monitor = new Monitor({
+    chain: 'main',
+    services: services as never,
+    storage,
+    chaintracks: { isValidRootForHeight: async () => true, currentHeight: async () => HEIGHT + 1000 } as never,
+    msecsWaitPerMerkleProofServiceReq: 0,
+    taskRunWaitMsecs: 0,
+    abandonedMsecs: 300000,
+    unprovenAttemptsLimitTest: 10,
+    unprovenAttemptsLimitMain: 144,
+    maxRebroadcastAttempts: 0,
+  } as never);
+  const wallet = new Wallet({ chain: 'main', keyDeriver: kd, storage, services: services as never, monitor } as never);
+  return { wallet, storage, kd, db: s };
+}
+type W8 = Awaited<ReturnType<typeof openWallet>>;
+
+/** The chain mines txid: proof available, its inputs spent by it. */
+function mine(chain: Chain, rawTx: number[]) {
+  const tx = Transaction.fromBinary(rawTx);
+  const txid = tx.id('hex');
+  chain.raw.set(txid, rawTx);
+  chain.mined.add(txid);
+  if (!chain.heights.has(txid)) chain.heights.set(txid, HEIGHT + chain.heights.size);
+  for (const i of tx.inputs) chain.spent.set(`${i.sourceTXID}.${i.sourceOutputIndex}`, txid);
+  return { tx, txid };
+}
+
+/** The raw tx out of the device that made it. */
+const rawOf = async (w: W8, txid: string) =>
+  Array.from(
+    (await w.storage.runAsStorageProvider(
+      async (sp) =>
+        (await sp.findTransactions({ partial: { txid } }))[0]?.rawTx ??
+        (await sp.findProvenTxReqs({ partial: { txid } }))[0]?.rawTx,
+    ))!,
+  );
+
+/**
+ * A wallet funded the way a seed wallet is: coins at a legacy address of the seed, swept in by the wallet (the sweep's
+ * change is the wallet's own). The legacy address's history is on the mocked chain.
+ */
+async function fundedWallet(chain: Chain, services: unknown, root = PrivateKey.fromRandom()) {
+  const w = await openWallet(root, `seedchange-${++dbn}`, services);
+  const legacy = PrivateKey.fromRandom();
+  const legacyAddress = legacy.toAddress();
+  const lockingScript = new P2PKH().lock(legacyAddress);
+  const script = lockingScript.toHex();
+  const beef = new Beef();
+  const inputs = [2_000_000, 3_000_000, 1_500_000].map((sats, i) => {
+    const parent = new Transaction();
+    parent.addInput({
+      sourceTXID: (dbn * 100 + i).toString(16).padStart(64, '0'),
+      sourceOutputIndex: 0,
+      unlockingScript: lockingScript,
+      sequence: 0xffffffff,
+    });
+    parent.addOutput({ lockingScript, satoshis: sats });
+    const txid = parent.id('hex');
+    parent.merklePath = new MerklePath(HEIGHT - 1 - i - dbn * 10, [[{ offset: 0, hash: txid, txid: true }]]);
+    beef.mergeTransaction(parent);
+    chain.raw.set(txid, parent.toBinary());
+    chain.mined.add(txid);
+    chain.history.set(script, [...(chain.history.get(script) ?? []), txid]);
+    return { outpoint: `${txid}_0`, satoshis: sats, lockingScript: script };
+  });
+  const r = (await sweepBsv.execute(
+    { wallet: w.wallet, services: { getBeefForTxid: async () => Beef.fromBinary(beef.toBinary()) } } as never,
+    { inputs, keys: inputs.map(() => legacy) } as never,
+  )) as { txid?: string; error?: string };
+  expect(r.error).toBeUndefined();
+  const sweepTxid = r.txid!;
+  mine(chain, await rawOf(w, sweepTxid));
+  chain.history.set(script, [...chain.history.get(script)!, sweepTxid]); // the sweep spends from the address
+  return { w, root, legacyAddress, sweepTxid };
+}
+
+const someone = () => new P2PKH().lock(PrivateKey.fromRandom().toAddress()).toHex();
+
+async function pay(w: W8, chain: Chain, satoshis: number, options: Record<string, unknown> = {}) {
+  const r = await w.wallet.createAction({
+    description: 'pay someone',
+    outputs: [{ lockingScript: someone(), satoshis, outputDescription: 'payment' }],
+    options: { acceptDelayedBroadcast: false, ...options },
+  });
+  expect(r.txid).toMatch(/^[0-9a-f]{64}$/);
+  return r;
+}
+
+const spendable = async (w: W8) =>
+  (await w.wallet.listOutputs({ basket: 'default', limit: 1000 })).outputs.filter((o) => o.spendable);
+const balance = async (w: W8) => (await spendable(w)).reduce((s, o) => s + o.satoshis, 0);
+const rowsOf = async (w: W8, txid: string) =>
+  w.storage.runAsStorageProvider(async (sp) => sp.findOutputs({ partial: { txid }, noScript: true }));
+const statusOf = async (w: W8, txid: string) =>
+  w.storage.runAsStorageProvider(
+    async (sp) => (await sp.findTransactions({ partial: { txid }, noRawTx: true }))[0]?.status,
+  );
+const snapshot = async (w: W8) =>
+  w.storage.runAsStorageProvider(async (sp) => ({
+    txs: (await sp.findTransactions({ partial: {}, noRawTx: true })).map((t) => [t.txid, t.status]),
+    outs: (await sp.findOutputs({ partial: {}, noScript: true })).map((o) => [
+      o.txid,
+      o.vout,
+      o.satoshis,
+      o.spendable,
+      o.derivationPrefix,
+      o.derivationSuffix,
+    ]),
+  }));
+
+const memKV = () => {
+  let v: SeedChangeState | null = null;
+  return {
+    load: async () => (v ? (JSON.parse(JSON.stringify(v)) as SeedChangeState) : null),
+    save: async (s: SeedChangeState) => void (v = JSON.parse(JSON.stringify(s))),
+    peek: () => v,
+  };
+};
+
+/** The production wiring of the Troubleshooting entry on this wallet, against the mocked chain. */
+const recover = (w: W8, chain: Chain, services: unknown, seedAddresses: string[], kv = memKV()) =>
+  recoverSeedChange(
+    makeSeedChangeDeps({
+      storage: w.storage,
+      wallet: w.wallet as never,
+      services: services as never,
+      seedAddresses: () => seedAddresses,
+      spentBy: wocSpentLookup({ fetch: fakeWoc(chain), minIntervalMs: 0, sleep: async () => undefined }),
+      kv,
+      log: () => undefined,
+    }),
+  );
+
+const inputsOf = (rawTx: number[]) =>
+  Transaction.fromBinary(rawTx).inputs.map((i) => `${i.sourceTXID}.${i.sourceOutputIndex}`);
+
+describe('deterministic change on the real toolbox', () => {
+  test('storage createAction: change derivation = HMAC prefix of the inputs, suffix = final vout; script matches', async () => {
+    const chain = newChain();
+    const services = makeServices(chain);
+    const { w, sweepTxid } = await fundedWallet(chain, services);
+    // The sweep's change (explicit inputs, no wallet funding).
+    const sweepRaw = chain.raw.get(sweepTxid)!;
+    const sweepChange = (await rowsOf(w, sweepTxid)).filter((o) => o.change);
+    expect(sweepChange.length).toBeGreaterThan(0);
+    for (const o of sweepChange) {
+      expect(o.derivationPrefix).toBe(W.bwxChangePrefix(w.kd, inputsOf(sweepRaw))!);
+      expect(o.derivationSuffix).toBe(W.bwxChangeSuffix(o.vout));
+    }
+    // A payment funded from wallet change, outputs shuffled (randomizeOutputs default): suffix follows the final vout.
+    const p = await pay(w, chain, 12_345);
+    const { tx } = mine(chain, await rawOf(w, p.txid!));
+    const rows = (await rowsOf(w, p.txid!)).filter((o) => o.change);
+    expect(rows.length).toBeGreaterThan(0);
+    const prefix = W.bwxChangePrefix(w.kd, inputsOf(tx.toBinary()))!;
+    for (const o of rows) {
+      expect(o.derivationPrefix).toBe(prefix);
+      expect(o.derivationSuffix).toBe(W.bwxChangeSuffix(o.vout));
+      const key = w.kd.derivePrivateKey([2, '3241645161d8'], `${prefix} ${o.derivationSuffix}`, w.kd.identityKey);
+      expect(tx.outputs[o.vout].lockingScript.toHex()).toBe(new P2PKH().lock(key.toAddress()).toHex());
+    }
+  }, 60000);
+
+  test('the key callback reaches local storage but is never enumerable or serialized', async () => {
+    const chain = newChain();
+    const services = makeServices(chain);
+    const { w } = await fundedWallet(chain, services);
+    const seen: Record<string, unknown>[] = [];
+    const orig = w.storage.createAction.bind(w.storage);
+    w.storage.createAction = (async (args: Record<string, unknown>) => {
+      seen.push(args);
+      return orig(args as never);
+    }) as never;
+    await pay(w, chain, 1000);
+    expect(seen.length).toBe(1);
+    expect(typeof seen[0].bwxChangePrefix).toBe('function');
+    expect(Object.keys(seen[0])).not.toContain('bwxChangePrefix');
+    expect(JSON.stringify(seen[0])).not.toContain('bwxChangePrefix');
+    expect({ ...seen[0] }).not.toHaveProperty('bwxChangePrefix');
+  }, 60000);
+});
+
+describe('recover change from the 12 words', () => {
+  test('round trip: pay with change, discard the storage, open from the same seed, recover, spend', async () => {
+    const chain = newChain();
+    const services = makeServices(chain);
+    const { w: a, root, legacyAddress } = await fundedWallet(chain, services);
+    const p = await pay(a, chain, 250_000);
+    mine(chain, await rawOf(a, p.txid!));
+    const p2 = await pay(a, chain, 40_000);
+    mine(chain, await rawOf(a, p2.txid!));
+    const expected = await balance(a);
+    const aRows = (await spendable(a)).map((o) => o.outpoint).sort();
+    expect(expected).toBeGreaterThan(0);
+
+    // Device A's storage is gone. A new wallet from the same seed starts empty.
+    const b = await openWallet(root, `seedchange-new-${++dbn}`, services);
+    expect(await balance(b)).toBe(0);
+
+    const r = await recover(b, chain, services, [legacyAddress]);
+    console.log('[round trip] A had', expected, '| B recovered', r.restoredSats, '|', seedChangeSummary(r));
+    expect(r.done).toBe(true);
+    expect(r.restoredSats).toBe(expected);
+    expect(await balance(b)).toBe(expected);
+    expect((await spendable(b)).map((o) => o.outpoint).sort()).toEqual(aRows);
+    expect(await b.wallet.balance()).toBe(expected);
+    // Mined with a proof: completed, nothing broadcast for it.
+    expect(await statusOf(b, p2.txid!)).toBe('completed');
+
+    // Idempotent: a second run changes nothing and says it's all there.
+    const before = await snapshot(b);
+    const again = await recover(b, chain, services, [legacyAddress]);
+    expect(again.restoredSats).toBe(0);
+    expect(again.alreadySats).toBe(expected);
+    expect(seedChangeSummary(again)).toMatch(/already in your wallet/);
+    expect(await snapshot(b)).toEqual(before);
+
+    // Spendable from the seed alone: the toolbox signs and verifies the unlocking scripts.
+    const spend = await pay(b, chain, 10_000);
+    expect(spend.txid).toMatch(/^[0-9a-f]{64}$/);
+    expect(await balance(b)).toBeLessThan(expected - 10_000);
+  }, 120000);
+
+  test('payment lost from memory (noSend action batch, then a server broadcast it): change found from storage', async () => {
+    const chain = newChain();
+    const services = makeServices(chain);
+    const { w: a } = await fundedWallet(chain, services);
+    const coinsBefore = (await spendable(a)).map((o) => o.outpoint);
+    // The theme-store shape: noSend, the first one of a worker's life is planned in memory (action batch).
+    const p = await a.wallet.createAction({
+      description: 'theme buy',
+      outputs: [{ lockingScript: someone(), satoshis: 100_000, outputDescription: 'theme' }],
+      options: { noSend: true, randomizeOutputs: false },
+    });
+    expect(await statusOf(a, p.txid!)).toBeUndefined(); // staged in memory: no rows at all
+    // The server broadcasts it and it is mined.
+    const ptx = Beef.fromBinary(Utils.toArray(Utils.toHex(p.tx!), 'hex')).findTxid(p.txid!)!.tx!;
+    mine(chain, ptx.toBinary());
+    // The wallet loses the staged batch (lock, account switch, worker restart).
+    await (a.wallet as unknown as { actionBatch: { abort: () => Promise<void> } }).actionBatch.abort();
+    expect((await spendable(a)).map((o) => o.outpoint).sort()).toEqual(coinsBefore.sort()); // spent coins look spendable
+    const changeVouts = ptx.outputs.map((_, v) => v).filter((v) => v > 0);
+    const changeSats = changeVouts.reduce((s, v) => s + (ptx.outputs[v].satoshis ?? 0), 0);
+
+    // No seed addresses: the start point is the coin storage still thinks is unspent.
+    const r = await recover(a, chain, services, []);
+    expect(r.restoredSats).toBe(changeSats);
+    const now = (await spendable(a)).map((o) => o.outpoint);
+    for (const v of changeVouts) expect(now).toContain(`${p.txid}.${v}`);
+    for (const i of ptx.inputs) expect(now).not.toContain(`${i.sourceTXID}.${i.sourceOutputIndex}`); // marked spent
+    expect((await pay(a, chain, 5_000)).txid).toMatch(/^[0-9a-f]{64}$/);
+  }, 120000);
+
+  test('old random change still spends; change behind it can’t be found from the seed alone (said plainly)', async () => {
+    const chain = newChain();
+    const services = makeServices(chain);
+    W.bwxDeterministicChange = false; // the toolbox as it was before the patch
+    let funded: Awaited<ReturnType<typeof fundedWallet>>;
+    try {
+      funded = await fundedWallet(chain, services);
+    } finally {
+      W.bwxDeterministicChange = true;
+    }
+    const { w: a, root, legacyAddress, sweepTxid } = funded;
+    const old = (await rowsOf(a, sweepTxid)).filter((o) => o.change);
+    expect(old.length).toBeGreaterThan(0);
+    for (const o of old)
+      expect(o.derivationPrefix).not.toBe(W.bwxChangePrefix(a.kd, inputsOf(chain.raw.get(sweepTxid)!)));
+    // The random change spends as before, and the payment's own change is now deterministic.
+    const p = await pay(a, chain, 30_000);
+    const { tx } = mine(chain, await rawOf(a, p.txid!));
+    for (const o of (await rowsOf(a, p.txid!)).filter((x) => x.change))
+      expect(o.derivationPrefix).toBe(W.bwxChangePrefix(a.kd, inputsOf(tx.toBinary())));
+    // From the seed alone the walk stops at the old random change: nothing is found, and the summary says why.
+    const b = await openWallet(root, `seedchange-old-${++dbn}`, services);
+    const r = await recover(b, chain, services, [legacyAddress]);
+    expect(r.done).toBe(true);
+    expect(r.restoredSats).toBe(0);
+    expect(await balance(b)).toBe(0);
+    expect(seedChangeSummary(r)).toMatch(/Change from payments made before this update can’t be found this way/);
+  }, 120000);
+
+  test('someone else’s payments are never added', async () => {
+    const chain = newChain();
+    const services = makeServices(chain);
+    const { w: a, legacyAddress } = await fundedWallet(chain, services);
+    mine(chain, await rawOf(a, (await pay(a, chain, 20_000)).txid!));
+    const stranger = await openWallet(PrivateKey.fromRandom(), `seedchange-stranger-${++dbn}`, services);
+    const r = await recover(stranger, chain, services, [legacyAddress]);
+    expect(r.restoredSats).toBe(0);
+    expect(await balance(stranger)).toBe(0);
+  }, 120000);
+
+  test('K never appears in logs, storage or saved progress', async () => {
+    const lines: string[] = [];
+    const methods = ['log', 'info', 'warn', 'error', 'debug'] as const;
+    const orig = methods.map((m) => console[m]);
+    const fmt = (v: unknown) => {
+      try {
+        return typeof v === 'string' ? v : JSON.stringify(v, (_k, x) => (x instanceof Uint8Array ? Array.from(x) : x));
+      } catch {
+        return String(v);
+      }
+    };
+    for (const m of methods) console[m] = (...a: unknown[]) => void lines.push(a.map(fmt).join(' '));
+    const chain = newChain();
+    const services = makeServices(chain);
+    const kv = memKV();
+    let a: W8;
+    let b: W8;
+    try {
+      const f = await fundedWallet(chain, services);
+      a = f.w;
+      mine(chain, await rawOf(a, (await pay(a, chain, 70_000)).txid!));
+      b = await openWallet(f.root, `seedchange-k-${++dbn}`, services);
+      const r = await recover(b, chain, services, [f.legacyAddress], kv);
+      expect(r.restoredSats).toBeGreaterThan(0);
+    } finally {
+      methods.forEach((m, i) => (console[m] = orig[i]));
+    }
+    const k = a!.kd.deriveSymmetricKey([2, 'bwx change recovery'], 'v1', 'self').toArray('be', 32);
+    const kHex = Utils.toHex(k);
+    const kB64 = Utils.toBase64(k);
+    const kJson = JSON.stringify(k).slice(1, -1);
+    // Every row of every object store of both devices, binary as hex and as plain number lists.
+    const dump = async (w: W8) => {
+      const db = (
+        w.db as unknown as { db: { objectStoreNames: ArrayLike<string>; getAll: (s: string) => Promise<unknown[]> } }
+      ).db;
+      const out: string[] = [];
+      for (const name of Array.from(db.objectStoreNames)) {
+        const rows = await db.getAll(name);
+        out.push(
+          JSON.stringify(rows, (_k, x) =>
+            x instanceof Uint8Array ? `${Utils.toHex(Array.from(x))} ${Array.from(x).join(',')}` : x,
+          ),
+        );
+      }
+      return out.join('\n');
+    };
+    const stored = `${await dump(a!)}\n${await dump(b!)}\n${JSON.stringify(kv.peek())}`;
+    expect(stored.length).toBeGreaterThan(1000);
+    for (const needle of [kHex, kB64, kJson]) {
+      expect(stored.includes(needle)).toBe(false);
+      expect(lines.some((l) => l.includes(needle))).toBe(false);
+    }
+  }, 120000);
+});

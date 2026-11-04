@@ -337,6 +337,10 @@ export const Settings = () => {
     recoverTxidResult,
     recoverFailedTxid,
     handleRecoverTxid,
+    recoveringSeed,
+    seedResult,
+    seedPaused,
+    handleRecoverSeedChange,
     resyncing,
     resyncResult,
     handleResyncCoins,
@@ -1427,6 +1431,23 @@ export const Settings = () => {
                 onClick={() => void handleRecoverTxid()}
               />
             </div>
+          </div>
+          <Divider />
+          <div className="flex flex-col gap-2 px-4 py-3">
+            <span className="text-sm font-semibold">Recover change from my 12 words</span>
+            <span className="text-xs opacity-70">
+              {recoveringSeed
+                ? `${recoverStep.seed ?? 'Checking…'}${elapsed('seed')}`
+                : seedResult ||
+                  'Lost change after a wiped, restored or new device? Change from payments made since this update can be found again from your 12 words alone. This only reads the chain and adds coins to this wallet; nothing is sent. It can’t find change from payments made before this update: for those, use Restore from backup or Recover a payment by transaction ID.'}
+            </span>
+            <Button
+              theme={theme}
+              type="secondary"
+              label={recoveringSeed ? 'Checking…' : seedPaused ? 'Carry on' : 'Recover change'}
+              disabled={recoveringSeed}
+              onClick={() => void handleRecoverSeedChange()}
+            />
           </div>
           {repairRecord && repairOutcome && (
             <>

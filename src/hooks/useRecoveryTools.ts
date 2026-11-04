@@ -49,11 +49,11 @@ export const useRecoveryTools = () => {
   };
 
   // Live step + elapsed seconds for the two recovery buttons (owner, 15 Oct 2026: "Checking…" forever).
-  const [recoverStep, setRecoverStep] = useState<{ mined?: string; txid?: string }>({});
-  const [recoverStartedAt, setRecoverStartedAt] = useState<{ mined?: number; txid?: number }>({});
+  const [recoverStep, setRecoverStep] = useState<{ mined?: string; txid?: string; seed?: string }>({});
+  const [recoverStartedAt, setRecoverStartedAt] = useState<{ mined?: number; txid?: number; seed?: number }>({});
   const [, setTick] = useState(0);
   useEffect(() => {
-    const onMsg = (m: { action?: string; data?: { kind?: 'mined' | 'txid'; step?: string } }) => {
+    const onMsg = (m: { action?: string; data?: { kind?: 'mined' | 'txid' | 'seed'; step?: string } }) => {
       if (m?.action !== 'RECOVER_PROGRESS' || !m.data?.kind) return;
       const { kind, step } = m.data;
       setRecoverStep((p) => ({ ...p, [kind]: step }));
@@ -62,11 +62,11 @@ export const useRecoveryTools = () => {
     return () => chrome.runtime.onMessage.removeListener(onMsg);
   }, []);
   useEffect(() => {
-    if (!recoverStartedAt.mined && !recoverStartedAt.txid) return;
+    if (!recoverStartedAt.mined && !recoverStartedAt.txid && !recoverStartedAt.seed) return;
     const t = window.setInterval(() => setTick((n) => n + 1), 1000);
     return () => window.clearInterval(t);
   }, [recoverStartedAt]);
-  const elapsed = (k: 'mined' | 'txid') =>
+  const elapsed = (k: 'mined' | 'txid' | 'seed') =>
     recoverStartedAt[k] ? ` (${Math.floor((Date.now() - recoverStartedAt[k]!) / 1000)} s)` : '';
   const [recoverFailedMined, setRecoverFailedMined] = useState(false);
   const [recoverFailedTxid, setRecoverFailedTxid] = useState(false);
@@ -128,6 +128,37 @@ export const useRecoveryTools = () => {
     }
   };
 
+  // Recover change from my 12 words (3 Nov 2026, services/seedChange.ts): resumable, so a paused run says "Carry on".
+  const [recoveringSeed, setRecoveringSeed] = useState(false);
+  const [seedResult, setSeedResult] = useState('');
+  const [seedPaused, setSeedPaused] = useState(false);
+  const handleRecoverSeedChange = async () => {
+    if (recoveringSeed) return;
+    setRecoveringSeed(true);
+    setSeedResult('');
+    setRecoverStep((p) => ({ ...p, seed: 'Starting…' }));
+    setRecoverStartedAt((p) => ({ ...p, seed: Date.now() }));
+    try {
+      const r = await sendMessageAsync<{
+        success: boolean;
+        error?: string;
+        data?: { summary?: string; paused?: boolean };
+      }>({ action: 'STORAGE_RECOVER_SEED_CHANGE' });
+      const text = r?.data?.summary ?? r?.error ?? 'No answer from the wallet. Try again.';
+      setSeedResult(text);
+      setSeedPaused(!!r?.data?.paused || !r?.success);
+      addSnackbar(text, r?.success ? 'success' : 'error');
+    } catch (error) {
+      const text = error instanceof Error ? error.message : 'Check failed';
+      setSeedResult(text);
+      setSeedPaused(true);
+      addSnackbar(text, 'error');
+    } finally {
+      setRecoveringSeed(false);
+      setRecoverStartedAt((p) => ({ ...p, seed: undefined }));
+    }
+  };
+
   // Resync coins (owner, 17 Oct 2026): clear coins spent from another device, so sends stop failing UTXO_SPENT.
   const [resyncing, setResyncing] = useState(false);
   const [resyncResult, setResyncResult] = useState('');
@@ -178,6 +209,10 @@ export const useRecoveryTools = () => {
     txidValid,
     recoverTxidOk,
     handleRecoverTxid,
+    recoveringSeed,
+    seedResult,
+    seedPaused,
+    handleRecoverSeedChange,
     resyncing,
     resyncResult,
     handleResyncCoins,
