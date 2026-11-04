@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { classifySendError } from './sendErrors';
+import { classifySendError, SPENT_ELSEWHERE_MESSAGE, SPENT_ELSEWHERE_SHORT_MESSAGE } from './sendErrors';
 
 const TXID = 'a'.repeat(64);
 
@@ -30,6 +30,22 @@ describe('classifySendError', () => {
   });
   test('another wallet extension', () => {
     expect(classifySendError('OTHER_WALLET_EXTENSION').kind).toBe('other-extension');
+  });
+  test('coins spent from another device (owner, 4 Nov 2026): plain words, nothing sent, never "check History"', () => {
+    for (const raw of [
+      SPENT_ELSEWHERE_MESSAGE,
+      // The wording before 4 Nov, still classified the same.
+      'Some coins were already spent on another device. Refreshed your balance — please try again.',
+      Object.assign(new Error(SPENT_ELSEWHERE_MESSAGE), { code: 'WERR_SPENT_ELSEWHERE' }),
+    ]) {
+      const r = classifySendError(raw);
+      expect(r).toMatchObject({ kind: 'spent-elsewhere', moneyMoved: 'no', message: SPENT_ELSEWHERE_MESSAGE });
+      expect(r.message).not.toMatch(/check History|can't confirm/i);
+    }
+    const short = classifySendError(SPENT_ELSEWHERE_SHORT_MESSAGE);
+    expect(short).toMatchObject({ kind: 'spent-elsewhere', moneyMoved: 'no', message: SPENT_ELSEWHERE_SHORT_MESSAGE });
+    // The heal's text wins over the broadcaster's raw words when both are present.
+    expect(classifySendError(`${SPENT_ELSEWHERE_MESSAGE} (UTXO_SPENT, REJECTED)`).kind).toBe('spent-elsewhere');
   });
   test('insufficient funds keeps the background numbers', () => {
     const m = 'Insufficient funds: this needs 900 sats, and 100 sats are spendable right now.';

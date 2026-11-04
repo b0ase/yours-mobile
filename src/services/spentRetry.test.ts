@@ -30,7 +30,7 @@ function funding(n: number) {
 type Coin = { spendable: boolean; locked: boolean };
 
 /** A toolbox-like wallet over in-memory storage and a fake network. */
-function simWallet(nCoins: number, spentElsewhere: number[]) {
+function simWallet(nCoins: number, spentElsewhere: number[], refusal: 'invalidTx' | 'doubleSpend' = 'invalidTx') {
   const src = funding(nCoins);
   const srcId = src.id('hex');
   const coins = new Map<string, Coin>();
@@ -70,7 +70,7 @@ function simWallet(nCoins: number, spentElsewhere: number[]) {
         name: 'WERR_REVIEW_ACTIONS',
         txid,
         tx: tx.toAtomicBEEF(true),
-        reviewActionResults: [{ txid, status: 'invalidTx' }],
+        reviewActionResults: [{ txid, status: refusal }],
       });
     }
     coin.locked = false;
@@ -124,6 +124,17 @@ describe('UTXO_SPENT: coin spent on another device', () => {
     expect(w.coins.get(`${w.srcId}_0`)).toEqual({ spendable: false, locked: false });
     for (const i of [1, 2]) expect(w.coins.get(`${w.srcId}_${i}`)).toEqual({ spendable: true, locked: false });
     expect(w.balance()).toBe(2000);
+  });
+
+  test('DOUBLE_SPEND_ATTEMPTED (owner, 4 Nov 2026): healed and retried once, exactly like UTXO_SPENT', async () => {
+    const w = simWallet(3, [0], 'doubleSpend');
+    const r = await createWithSpentRetry(deps(w));
+    expect(r.ok).toBe(true);
+    expect(r.retried).toBe(true);
+    expect(r.heal?.released).toBe(1);
+    expect(w.accepted).toHaveLength(1);
+    expect(w.accepted[0].inputs).toEqual([`${w.srcId}_1`]);
+    expect(w.balance()).toBe(1000); // coin 0 cleared, coin 1 spent by the retry
   });
 
   test('retries once with a different input and sends exactly once', async () => {

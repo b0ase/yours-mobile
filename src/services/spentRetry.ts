@@ -17,18 +17,15 @@
  *     does not answer "unknown txid" (fail closed: no second payment unless we know the first did not happen).
  */
 import type { HealReport } from './invalidSendHeal';
-import { isInvalidTxReview, SPENT_ELSEWHERE_MESSAGE } from './invalidSendHeal';
-
-const TXID = /^[0-9a-f]{64}$/i;
+import { isInvalidTxReview, refusedTxid, SPENT_ELSEWHERE_MESSAGE } from './invalidSendHeal';
 
 export { SPENT_ELSEWHERE_MESSAGE };
 
-/** Pure: the txid of the transaction the network refused (WERR_REVIEW_ACTIONS' invalidTx result). */
-export const rejectedTxid = (error: unknown): string | undefined => {
-  const r = (error as { reviewActionResults?: { txid?: string; status?: string }[] })?.reviewActionResults;
-  const txid = r?.find((x) => x?.status === 'invalidTx')?.txid;
-  return typeof txid === 'string' && TXID.test(txid) ? txid.toLowerCase() : undefined;
-};
+/**
+ * Pure: the txid of the transaction the network refused (WERR_REVIEW_ACTIONS' invalidTx or doubleSpend result; a
+ * double spend is handled like UTXO_SPENT since 4 Nov 2026, invalidSendHeal.ts REFUSED_STATUSES).
+ */
+export const rejectedTxid = (error: unknown): string | undefined => refusedTxid(error);
 
 /** Pure: does the broadcaster's reason name this txid as the spender ("already spent by tx <txid>")? */
 export const reasonNamesSpender = (reason: string | undefined, txid: string): boolean =>

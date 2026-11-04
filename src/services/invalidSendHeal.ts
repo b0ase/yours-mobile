@@ -17,10 +17,10 @@
  * so a flaky API would release live coins.
  */
 import { Transaction } from '@bsv/sdk';
+import { SPENT_ELSEWHERE_MESSAGE } from '../utils/sendErrors';
 
-/** Shown when coins were cleared but the send did not go out. Plain words, no toolbox text. */
-export const SPENT_ELSEWHERE_MESSAGE =
-  'Some coins were already spent on another device. Refreshed your balance — please try again.';
+/** Shown when coins were cleared but the send did not go out. Plain words, no toolbox text (utils/sendErrors.ts). */
+export { SPENT_ELSEWHERE_MESSAGE };
 
 const TXID = /^[0-9a-f]{64}$/i;
 
@@ -31,9 +31,27 @@ type ReviewError = Error & {
   reviewActionResults?: { txid?: string; status?: string }[];
 };
 
-/** Pure: was this a broadcast the network refused as invalid (not a double spend, not a service hiccup)? */
+/**
+ * WERR_REVIEW_ACTIONS statuses that mean "the network refused this send because of its inputs": REJECTED (invalidTx)
+ * and DOUBLE_SPEND_ATTEMPTED (doubleSpend). The toolbox confirms a double spend against the chain before it reports
+ * one (confirmDoubleSpend: a txid the network knows becomes success, all-unspent inputs a service error), so a
+ * doubleSpend that reaches us failed the action and freed its inputs exactly like invalidTx (owner's iPhone, 4 Nov
+ * 2026: coins spent from the extension; before this, a double spend skipped the heal and the one retry).
+ */
+const REFUSED_STATUSES = new Set(['invalidTx', 'doubleSpend']);
+
+/** Pure: the refused transaction's txid (invalidTx or doubleSpend), lowercase, if the error names one. */
+export const refusedTxid = (error: unknown): string | undefined => {
+  const txid = (error as ReviewError | null)?.reviewActionResults?.find((r) =>
+    REFUSED_STATUSES.has(r?.status ?? ''),
+  )?.txid;
+  return typeof txid === 'string' && TXID.test(txid) ? txid.toLowerCase() : undefined;
+};
+
+/** Pure: was this a broadcast the network refused (invalid or a double spend), not a service hiccup? */
 export const isInvalidTxReview = (error: unknown): boolean =>
-  error instanceof Error && ((error as ReviewError).reviewActionResults ?? []).some((r) => r?.status === 'invalidTx');
+  error instanceof Error &&
+  ((error as ReviewError).reviewActionResults ?? []).some((r) => REFUSED_STATUSES.has(r?.status ?? ''));
 
 /** Pure: the outpoints ("txid_vout") the rejected transaction spends, from the error's AtomicBEEF. */
 export function rejectedInputs(error: unknown): string[] {
@@ -65,7 +83,7 @@ export async function provenSpent(
     try {
       const by = await f(op);
       // The rejected tx itself is not a spender (it never went out).
-      return typeof by === 'string' && TXID.test(by) && by !== rejectedTxid ? by : null;
+      return typeof by === 'string' && TXID.test(by) && by.toLowerCase() !== rejectedTxid?.toLowerCase() ? by : null;
     } catch {
       return null;
     }
@@ -138,7 +156,7 @@ export async function healInvalidSend(
 ): Promise<HealReport> {
   if (!isInvalidTxReview(error)) return { checked: 0, released: 0 };
   const inputs = rejectedInputs(error);
-  const rejectedTxid = (error as ReviewError).reviewActionResults?.find((r) => r?.status === 'invalidTx')?.txid;
+  const rejectedTxid = refusedTxid(error);
   const named = namedSpentInputs(opts.reason, inputs);
   const looked = await provenSpent(
     inputs.filter((op) => !named.includes(op)),

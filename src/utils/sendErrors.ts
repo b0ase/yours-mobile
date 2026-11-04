@@ -10,9 +10,22 @@
 
 export type MoneyMoved = 'no' | 'unknown';
 
+/**
+ * Coins this device still listed as spendable were spent from another device holding the same seed (owner's iPhone,
+ * 4 Nov 2026: the extension spent three coins, the phone's $10 send "wouldn't send"). Said by the background after it
+ * cleared those coins: before broadcasting (services/coinPreflight.ts) or after the network refused the send
+ * (services/invalidSendHeal.ts). Nothing went out.
+ */
+export const SPENT_ELSEWHERE_MESSAGE =
+  'Some of your coins were already spent from another device. Your balance is updated, so try again.';
+/** The same, when the coins left are not enough for this payment (try again would only fail). */
+export const SPENT_ELSEWHERE_SHORT_MESSAGE =
+  "Some of your coins were already spent from another device. Your balance is updated, and it isn't enough for this payment now. Nothing was sent.";
+
 export type SendErrorKind =
   | 'worker-restarted'
   | 'other-extension'
+  | 'spent-elsewhere'
   | 'insufficient-funds'
   | 'broadcast-failed'
   | 'broadcast-unknown'
@@ -115,6 +128,15 @@ export function classifySendError(e: unknown, phase: 'before-sign' | 'send' = 's
 
   if (/denied by user|user denied|cancell?ed by (the )?user|USER_DENIED/i.test(raw))
     return make('cancelled', 'You cancelled the payment. Nothing was sent.', 'no');
+
+  // The background cleared coins another device had spent (before broadcasting, or after the refusal). Before the
+  // insufficient-funds and broadcast rules: its words are specific, never the generic "can't confirm… check History".
+  if (/already spent (?:on|from) another device|WERR_SPENT_ELSEWHERE/i.test(raw))
+    return make(
+      'spent-elsewhere',
+      /isn't enough for this payment/i.test(raw) ? SPENT_ELSEWHERE_SHORT_MESSAGE : SPENT_ELSEWHERE_MESSAGE,
+      'no',
+    );
 
   // The background's own funding message already names both numbers: keep it whole.
   if (/^Insufficient funds:/i.test(raw)) return make('insufficient-funds', `${raw} Nothing was sent.`, 'no');

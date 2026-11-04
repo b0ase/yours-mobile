@@ -25,6 +25,7 @@ import {
 import { forceLegacyActionBatch, requireLegacyForNoSend } from './services/actionBatchMode';
 import { requireLocalStoreForChange } from './services/localFirst';
 import { loadMayBeOut, recheckRefusals } from './services/refusalRecheck';
+import { installCoinPreflightForWallet } from './services/coinPreflight';
 import { expiryLookups } from './services/unsentGuard';
 import {
   createWebWallet,
@@ -510,6 +511,16 @@ export const initWallet = async (
   if (!rememberRefusals(toolboxServices)) console.warn('[initWallet] broadcast refusals not recorded');
   // UnFail's output verdicts read getUtxoStatus: parse api.1sat.app's "txid.vout" (dkg, 14 Oct 2026; services/utxoStatus.ts).
   if (!fixUtxoStatus(toolboxServices)) console.warn('[initWallet] getUtxoStatus not patched (no txo client)');
+  // The wallet's own sends check the coins storage picked against the chain before signing; coins another device
+  // spent are cleared and storage picks again once (services/coinPreflight.ts; owner's iPhone, 4 Nov 2026).
+  if (
+    !installCoinPreflightForWallet(storage, toolboxServices, {
+      identityKey: account?.pubKeys?.identityPubKey ?? '',
+      chain,
+      kv: { get: (k) => chrome.storage.local.get(k), set: (items) => chrome.storage.local.set(items) },
+    })
+  )
+    console.warn('[initWallet] coins are not checked against the chain before a send');
 
   // 3. Build the IndexedDB-backed permission store used by
   //    LocalWalletPermissionsManager for basket/cert/spending grants.

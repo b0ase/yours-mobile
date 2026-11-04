@@ -149,6 +149,7 @@ import {
   healInvalidSend,
   withHealMessage,
   isInvalidTxReview,
+  refusedTxid,
   resyncMessage,
   resyncSpent,
   type HealReport,
@@ -157,6 +158,7 @@ import { refusalFor } from './services/broadcastRefusals';
 import { createExcludingUnprovable } from './services/unprovableCoinRetry';
 import { siteActionError } from './services/siteActionError';
 import { createWithSpentRetry, retryEligible } from './services/spentRetry';
+import { armCoinPreflight } from './services/coinPreflight';
 import { createWithStorageFailover, failoverEligible } from './services/storageFailover';
 import { isTruthyRequiredError } from './services/nullTxidRepair';
 
@@ -165,6 +167,7 @@ let switchActiveStorageRef: ((ctx: AccountContext, target: 'local' | string) => 
 import {
   AUTO_RESYNC_DELAY_MS,
   AUTO_RESYNC_LIGHT_GAP_MS,
+  AUTO_RESYNC_WOC_GAP_MS,
   readAutoResyncCoins,
   runAutoResyncIfDue,
   type AutoResyncDeps,
@@ -384,9 +387,8 @@ async function healRejectedInputs(ctx: AccountContext, error: unknown): Promise<
   const txo = (ctx.syncContext.services as unknown as { txo?: { getSpend: (o: string) => Promise<string | null> } }).txo;
   if (!identityKey || !txo) return null;
   try {
-    const rejected = (error as { reviewActionResults?: { txid?: string; status?: string }[] }).reviewActionResults?.find(
-      (r) => r?.status === 'invalidTx',
-    )?.txid;
+    // invalidTx or doubleSpend: both are refusals over the inputs (invalidSendHeal.ts REFUSED_STATUSES).
+    const rejected = refusedTxid(error);
     return await healInvalidSend(error, (o) => txo.getSpend(o), {
       markSpent: (txid, vout) =>
         ctx.storage.runAsStorageProvider(async (sp) => {
@@ -490,6 +492,9 @@ async function autoResyncDeps(
     });
   return {
     coins: read.coins,
+    // The biggest coins are checked on WhatsOnChain even when the index says unspent (autoCoinResync.ts bigCoins).
+    sats: read.sats,
+    wocGapMs: AUTO_RESYNC_WOC_GAP_MS,
     cleared,
     ownPendingTxids: read.ownPendingTxids,
     ownPendingInputs: read.ownPendingInputs,
@@ -1838,7 +1843,8 @@ chrome.alarms.onAlarm.addListener((alarm) => {
  * itself without REFRESH WALLET (owner, 29 Oct 2026: phone $3.47 vs extension $1.95, same account). Never throws.
  */
 let autoCoinResyncBusy = false;
-const maybeAutoCoinResync = async (): Promise<void> => {
+/** foreground: the app/popup came to the front; with no run due, the biggest coins are still checked (≤ once a minute). */
+const maybeAutoCoinResync = async (foreground = false): Promise<void> => {
   const ctx = accountContext;
   if (!ctx || autoCoinResyncBusy) return;
   const key = chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey || '';
@@ -1849,6 +1855,8 @@ const maybeAutoCoinResync = async (): Promise<void> => {
       key,
       { get: (k) => chrome.storage.local.get(k), set: (items) => chrome.storage.local.set(items) },
       (cleared) => (accountContext === ctx ? autoResyncDeps(ctx, key, cleared) : Promise.resolve(null)),
+      Date.now(),
+      { foreground },
     );
     if (r && (r.released || r.restored)) {
       console.warn('[background] auto coin resync:', r);
@@ -1865,7 +1873,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === AUTO_COIN_RESYNC_ALARM && pageHidden() !== true) void maybeAutoCoinResync();
 });
 (globalThis as { document?: Document }).document?.addEventListener('visibilitychange', () => {
-  if (pageHidden() === false) void maybeAutoCoinResync();
+  if (pageHidden() === false) void maybeAutoCoinResync(true);
 });
 
 // Ring when the side panel is closed (services/callRinger.ts): every 30 s while unlocked and no
@@ -3532,8 +3540,9 @@ if (!(
           processResyncCoins(sendResponse);
           return true;
         case 'COIN_CHECK_DUE':
-          // The app/popup came to the front: a throttled check (no-op when one ran recently).
-          void maybeAutoCoinResync();
+          // The app/popup came to the front: a throttled check; with none due, its biggest coins on both sources
+          // (at most once a minute; services/autoCoinResync.ts foreground mode).
+          void maybeAutoCoinResync(true);
           sendResponse({ type: 'COIN_CHECK_DUE', success: true });
           return true;
         case 'STORAGE_RESTORE_BACKUP':
@@ -6627,6 +6636,10 @@ if (!(
       try {
         // UTXO_SPENT (coins spent from another device): heal, then retry ONCE when safe (services/spentRetry.ts).
         const ctxForHeal = accountContext;
+        const ownSend = retryEligible({ isAdmin, continuing, delayed, sendAll: usesSendAllSentinel, args });
+        // Before that: the wallet's own send checks the coins storage picked against the chain before signing; coins
+        // another device spent are cleared and storage picks again once (services/coinPreflight.ts, 4 Nov 2026).
+        const preflight = armCoinPreflight(ownSend);
         const outcome = await createWithSpentRetry({
           // A coin whose parent can't be loaded is set aside for one retry instead of failing the payment
           // (services/unprovableCoinRetry.ts, TERRORNODE audit 29 Oct 2026).
@@ -6663,11 +6676,11 @@ if (!(
           heal: (e) => (ctxForHeal ? healRejectedInputs(ctxForHeal, e) : Promise.resolve(null)),
           txKnown: (txid) => (ctxForHeal && ctxChain(ctxForHeal) === 'main' ? wocTxKnown(txid) : Promise.resolve(null)),
           reason: (txid) => refusalFor(txid),
-          eligible: retryEligible({ isAdmin, continuing, delayed, sendAll: usesSendAllSentinel, args }),
+          eligible: ownSend,
           log: (m, d) => console.warn(m, d ?? ''),
-        });
+        }).finally(() => preflight.done());
         spentHeal = outcome.heal;
-        if (spentHeal?.released) notifyBalanceUpdate();
+        if (spentHeal?.released || preflight.cleared) notifyBalanceUpdate();
         if (!outcome.ok) throw outcome.error;
         if (outcome.retried) console.warn('[createAction] sent on retry after clearing spent coins', spentHeal);
         result = outcome.result;

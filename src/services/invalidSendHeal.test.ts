@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'bun:test';
+import { P2PKH, PrivateKey, Transaction, UnlockingScript } from '@bsv/sdk';
 import {
   healInvalidSend,
   healMessage,
   isInvalidTxReview,
   namedSpentInputs,
   provenSpent,
+  refusedTxid,
   resyncMessage,
   resyncSpent,
 } from './invalidSendHeal';
@@ -17,11 +19,23 @@ const review = (status: string) =>
   });
 
 describe('isInvalidTxReview', () => {
-  test('only invalidTx counts', () => {
+  test('a refusal over the inputs counts: invalidTx and (4 Nov 2026) doubleSpend; a service error does not', () => {
     expect(isInvalidTxReview(review('invalidTx'))).toBe(true);
-    expect(isInvalidTxReview(review('doubleSpend'))).toBe(false);
+    expect(isInvalidTxReview(review('doubleSpend'))).toBe(true);
+    expect(isInvalidTxReview(review('serviceError'))).toBe(false);
     expect(isInvalidTxReview(new Error('x'))).toBe(false);
     expect(isInvalidTxReview('invalidTx')).toBe(false);
+  });
+  test('refusedTxid names the refused tx, lowercase, for either status', () => {
+    expect(refusedTxid(review('doubleSpend'))).toBe(T('a'));
+    expect(refusedTxid(review('invalidTx'))).toBe(T('a'));
+    expect(refusedTxid(review('serviceError'))).toBeUndefined();
+    const upper = Object.assign(new Error('x'), { reviewActionResults: [{ txid: T('A'), status: 'doubleSpend' }] });
+    expect(refusedTxid(upper)).toBe(T('a'));
+    // The toolbox's own "known input already spent" review has an empty txid.
+    expect(
+      refusedTxid(Object.assign(new Error('x'), { reviewActionResults: [{ txid: '', status: 'doubleSpend' }] })),
+    ).toBeUndefined();
   });
 });
 
@@ -64,8 +78,40 @@ describe('namedSpentInputs', () => {
 
 describe('healInvalidSend', () => {
   test('ignores other failures', async () => {
-    const r = await healInvalidSend(review('doubleSpend'), async () => T('9'), { markSpent: async () => 1 });
+    const r = await healInvalidSend(review('serviceError'), async () => T('9'), { markSpent: async () => 1 });
     expect(r).toEqual({ checked: 0, released: 0 });
+  });
+  test('DOUBLE_SPEND_ATTEMPTED heals like REJECTED (owner, 4 Nov 2026): the inputs proven spent are cleared', async () => {
+    const parent = new Transaction();
+    parent.addInput({
+      sourceTXID: T('5'),
+      sourceOutputIndex: 0,
+      unlockingScript: new UnlockingScript(),
+      sequence: 0xffffffff,
+    });
+    parent.addOutput({ lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()), satoshis: 5000 });
+    parent.addOutput({ lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()), satoshis: 5000 });
+    const child = new Transaction();
+    for (const vout of [0, 1])
+      child.addInput({
+        sourceTransaction: parent,
+        sourceOutputIndex: vout,
+        unlockingScript: new UnlockingScript(),
+        sequence: 0xffffffff,
+      });
+    child.addOutput({ lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()), satoshis: 9000 });
+    const err = Object.assign(new Error('Undelayed createAction or signAction results require review.'), {
+      name: 'WERR_REVIEW_ACTIONS',
+      reviewActionResults: [{ txid: child.id('hex'), status: 'doubleSpend', competingTxs: [T('9')] }],
+      tx: child.toAtomicBEEF(),
+    });
+    const pid = parent.id('hex');
+    const marked: string[] = [];
+    const r = await healInvalidSend(err, async (o) => (o === `${pid}_0` ? T('9') : null), {
+      markSpent: async (t, v) => (marked.push(`${t}_${v}`), 1),
+    });
+    expect(marked).toEqual([`${pid}_0`]);
+    expect(r).toMatchObject({ checked: 2, released: 1 });
   });
   test('no tx bytes: nothing to check', async () => {
     const r = await healInvalidSend(review('invalidTx'), async () => T('9'), { markSpent: async () => 1 });
@@ -128,7 +174,9 @@ describe('owner iPhone 19 Oct: WERR_REVIEW_ACTIONS + UTXO_SPENT, heal outcome mu
   });
   test('cleared: the plain message replaces the raw toolbox text', () => {
     const text = withHealMessage(raw + ' x'.repeat(300), { checked: 1, released: 1, inputs: [`${IN}_1`] });
-    expect(text).toBe('Some coins were already spent on another device. Refreshed your balance — please try again.');
+    expect(text).toBe(
+      'Some of your coins were already spent from another device. Your balance is updated, so try again.',
+    );
     expect(text).not.toContain('UTXO_SPENT');
   });
   test('nothing cleared: error unchanged first', () => {
