@@ -7,7 +7,7 @@
 const { makeThemeOrderHandlers, payAddress, themeOrderStore } = require('../lib/themeOrders');
 const { makeThemeBuyHandlers, themeBuyStore } = require('../lib/themeBuys');
 const { depositUsd, makeThemeDepositHandlers, themeDepositStore } = require('../lib/themeDeposits');
-const { arcBroadcast } = require('../lib/paymailStore');
+const { arcSubmit, networkStatus, timed } = require('../lib/paymailStore');
 const { chain } = require('../lib/nameFee');
 const { storeKey } = require('../lib/storeReceipt');
 const { paidTxidStore } = require('../lib/paidTxids');
@@ -80,12 +80,15 @@ module.exports = async function handler(req, res) {
       .trim() || 'unknown';
   if (limited(ip, 30)) return send(res, 429, { error: 'rate-limited' });
   if (!handlers) {
-    const store = themeOrderStore();
-    const buyStore = themeBuyStore();
-    const depositStore = themeDepositStore();
-    const ledger = paidTxidStore();
+    // Every database call has a deadline too: a claim must answer inside the function's time (site/vercel.json).
+    const db = timed(fetch, 15_000);
+    const store = themeOrderStore(process.env, db);
+    const buyStore = themeBuyStore(process.env, db);
+    const depositStore = themeDepositStore(process.env, db);
+    const ledger = paidTxidStore(process.env, db);
     if (!store || !buyStore || !depositStore || !ledger) return send(res, 503, { error: 'not_configured' });
-    const deps = { ledger, rate: () => chain.bsvUsd(), broadcast: arcBroadcast() };
+    // Paid only once the network has the payment; otherwise 202 pending (site/lib/storeClaim.js, P0 3 Nov 2026).
+    const deps = { ledger, rate: () => chain.bsvUsd(), broadcast: arcSubmit(), network: networkStatus() };
     handlers = {
       ...makeThemeOrderHandlers({ store, ...deps }),
       buy: makeThemeBuyHandlers({ store: buyStore, ...deps }),

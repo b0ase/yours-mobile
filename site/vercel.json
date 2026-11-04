@@ -267,5 +267,9 @@
       "destination": "https://bwalletx.com/get",
       "permanent": false
     }
-  ]
+  ],
+  "functions": {
+    "api/theme-orders.js": { "maxDuration": 30 },
+    "api/agent-buy.js": { "maxDuration": 30 }
+  }
 }

@@ -2,7 +2,7 @@
 // for a Branded edition (from $999) or a Native app (by quote). Same quote → one approval → claim flow and the
 // same pay address as theme orders (themeOrders.js): the site signs with the visitor's BRC-100 wallet (Sign in
 // with bWalletX), the claim checks the outputs + memo, then broadcasts. Nothing is recorded as paid unless the
-// tx is accepted.
+// network has the tx: until then the claim answers 202 pending (storeClaim.js, P0 3 Nov 2026).
 // Env (Vercel only, never in git): THEME_ORDER_PAY_ADDRESS (shared with theme orders) and THEME_DEPOSIT_USD
 // (the deposit in whole US dollars; empty = deposits closed: 503 not_configured). Table: migrations/20261018_theme_deposits.sql.
 'use strict';
@@ -10,6 +10,7 @@ const crypto = require('crypto');
 const { OP, Script, Utils, P2PKH } = require('@bsv/sdk');
 const { parseIncoming, verifySigned } = require('./paymail');
 const { checkPayment, payAddress, priceSats, publicUrl } = require('./themeOrders');
+const { makeStoreClaim } = require('./storeClaim');
 
 const MEMO_TAG = 'bwx-theme-deposit';
 const QUOTE_MS = 15 * 60 * 1000;
@@ -148,19 +149,56 @@ const publicRow = (r) => ({
   paid_at: r.paid_at ?? null,
 });
 
-/** Handlers return [status, body]. Deps injected for tests: store, rate() USD per BSV, broadcast(tx, beefHex), env, now(). */
+/**
+ * Handlers return [status, body]. Deps injected for tests: store, rate() USD per BSV, broadcast(tx, beefHex) → arcSubmit
+ * result, network(txid) → networkStatus verdict (paymailStore.js), env, now(). Paid only once the network has the
+ * payment, else 202 pending (storeClaim.js); `claimGraceMs` is no longer a limit (a matching payment is honoured).
+ */
 function makeThemeDepositHandlers({
   store,
   ledger,
   rate,
   broadcast,
+  network = async () => 'unclear',
   env = process.env,
   now = () => Date.now(),
   quoteMs = QUOTE_MS,
-  claimGraceMs = CLAIM_GRACE_MS,
+  claimGraceMs: _claimGraceMs = CLAIM_GRACE_MS, // no longer a limit (storeClaim.js); kept so callers can pass it
   actions = {},
+  log,
 }) {
   if (!ledger || typeof ledger.reserve !== 'function') throw new Error('paid-txid ledger required');
+  const markPaid = async (row, txid) => {
+    const patch = { status: 'paid', txid, paid_at: new Date(now()).toISOString() };
+    await store.updateDeposit(row.id, patch);
+    await store.notify('theme_deposit_paid', {
+      id: row.id,
+      tier: row.tier,
+      brand: row.brand,
+      contact: row.contact,
+      usd: row.quote_usd,
+      sats: row.quote_sats,
+      txid,
+    });
+    return [200, { deposit: publicRow({ ...row, ...patch }) }];
+  };
+  const claimer = makeStoreClaim({
+    kind: 'deposit',
+    getByQuote: store.getByQuote,
+    getByTxid: store.getByTxid,
+    update: store.updateDeposit,
+    ledger,
+    parse: parseIncoming,
+    check: (tx, row) =>
+      checkPayment(tx, { address: row.quote_address, sats: row.quote_sats, memoHex: row.quote_memo_hex }),
+    broadcast,
+    network,
+    paid: markPaid,
+    paidBody: (row) => ({ deposit: publicRow(row) }),
+    pendingBody: (row) => ({ deposit: publicRow(row) }),
+    now,
+    log,
+  });
   const config = async () => {
     const usd = depositUsd(env);
     return [200, { configured: !!(usd && payAddress(env)), usd: usd || null }];
@@ -209,50 +247,15 @@ function makeThemeDepositHandlers({
   const claim = async (body) => {
     const sigErr = await verifySigned(body || {}, actions.claim || 'theme-deposit-claim', now());
     if (sigErr) return [401, { error: sigErr }];
-    const identityKey = String(body.identityKey).toLowerCase();
     const f = body.fields || {};
     const quoteId = String(f.quote_id || '');
-    const txid = String(f.txid || '').toLowerCase();
     if (!QUOTE_ID_RE.test(quoteId)) return [400, { error: 'quote_id' }];
-    if (!/^[0-9a-f]{64}$/.test(txid)) return [400, { error: 'txid' }];
-    const row = await store.getByQuote(quoteId);
-    if (!row || row.identity_key !== identityKey) return [404, { error: 'quote_not_found' }];
-    if (row.status !== 'quoted') {
-      if (row.txid === txid) return [200, { deposit: publicRow(row) }];
-      return [409, { error: 'quote_used' }];
-    }
-    if (now() > Date.parse(row.quote_expires_at) + claimGraceMs) return [410, { error: 'quote_expired' }];
-    let tx;
-    let beefHex = null;
-    try {
-      ({ tx, beefHex } = parseIncoming(body.rawtx));
-    } catch {
-      return [400, { error: 'rawtx' }];
-    }
-    if (tx.id('hex') !== txid) return [400, { error: 'txid_mismatch' }];
-    const bad = checkPayment(tx, { address: row.quote_address, sats: row.quote_sats, memoHex: row.quote_memo_hex });
-    if (bad) return [402, { error: bad }];
-    const other = await store.getByTxid(txid);
-    if (other && other.id !== row.id) return [409, { error: 'tx_used' }];
-    // One txid, one paid record across orders, purchases and deposits (site/lib/paidTxids.js).
-    if ((await ledger.reserve(txid, 'deposit', row.id)) !== 'ok') return [409, { error: 'tx_used' }];
-    try {
-      await broadcast(tx, beefHex);
-    } catch {
-      return [502, { error: 'broadcast_failed' }];
-    }
-    const patch = { status: 'paid', txid, paid_at: new Date(now()).toISOString() };
-    await store.updateDeposit(row.id, patch);
-    await store.notify('theme_deposit_paid', {
-      id: row.id,
-      tier: row.tier,
-      brand: row.brand,
-      contact: row.contact,
-      usd: row.quote_usd,
-      sats: row.quote_sats,
-      txid,
+    return claimer.claim({
+      identityKey: String(body.identityKey).toLowerCase(),
+      quoteId,
+      txid: String(f.txid || '').toLowerCase(),
+      rawtx: body.rawtx,
     });
-    return [200, { deposit: publicRow({ ...row, ...patch }) }];
   };
 
   return { config, quote, claim };
