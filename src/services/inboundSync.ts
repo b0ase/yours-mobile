@@ -281,6 +281,10 @@ export function recordAgrees(rec: Record<string, unknown>, f: TokenFacts): boole
 }
 
 const TOKEN_TAG = /^(amt|bsv21|sym|dec):/i;
+/** A tag id no sync map ever holds (ids start at 1): EntityOutputTagMap.mergeFind skips the row. */
+const UNMAPPED_ID = -1;
+/** A managed tracking id (@1sat/types readAssetIdTag): sends and listings load "this" asset by it. */
+const ID_TAG = /^id:/i;
 /** A token tag (amount, id, symbol, decimals) the script bears out. sym/dec are only on a deploy inscription. */
 export function tagAgrees(tag: string, f: TokenFacts | null): boolean {
   const at = tag.indexOf(':');
@@ -494,6 +498,37 @@ export async function verifyInboundChunk(
     if (typeof local !== 'number' || typeof store.findOutputTags !== 'function') return undefined;
     return (await store.findOutputTags({ partial: { outputTagId: local } }))[0]?.tag;
   };
+  /**
+   * Would this id tag point at a second asset? Another device output already carries it, the target already has a
+   * different id, or this page gives it twice. Any of these: refused, so "send / list this NFT" can't load another.
+   */
+  const idTagTaken = async (
+    tag: string,
+    remoteOutputId: number,
+    deviceOutputId: number | undefined,
+    localTag: number | undefined,
+  ): Promise<boolean> => {
+    const pageOwner = pageIds.get(tag);
+    const pageTag = pageIdOf.get(remoteOutputId);
+    if ((pageOwner !== undefined && pageOwner !== remoteOutputId) || (pageTag !== undefined && pageTag !== tag))
+      return true;
+    if (typeof store.findOutputTagMaps === 'function') {
+      if (localTag !== undefined) {
+        const holders = await store.findOutputTagMaps({ partial: { outputTagId: localTag } });
+        if (holders.some((h) => h.isDeleted !== true && h.outputId !== deviceOutputId)) return true;
+      }
+      if (deviceOutputId !== undefined && typeof store.findOutputTags === 'function') {
+        for (const m of await store.findOutputTagMaps({ partial: { outputId: deviceOutputId } })) {
+          if (m.isDeleted === true || typeof m.outputTagId !== 'number' || m.outputTagId === localTag) continue;
+          const name = (await store.findOutputTags({ partial: { outputTagId: m.outputTagId } }))[0]?.tag;
+          if (name && ID_TAG.test(name) && name.toLowerCase() !== tag) return true;
+        }
+      }
+    }
+    pageIds.set(tag, remoteOutputId);
+    pageIdOf.set(remoteOutputId, tag);
+    return false;
+  };
   const deviceTagId = async (remoteTagId: number, tag: string): Promise<number | undefined> => {
     const local = maps?.outputTag?.idMap?.[String(remoteTagId)];
     if (typeof local === 'number') return local;
@@ -600,29 +635,38 @@ export async function verifyInboundChunk(
 
   // Token tags (amt:, bsv21:, sym:, dec:) are where a send falls back to when a record has no amount or id: one
   // that would newly apply to an output must be borne out by that output's script, or it arrives deleted.
+  // Tracking ids (id:<x>) are how a send or listing loads "this" asset (limit 1): one id, one output (review 16b, R2).
+  /**
+   * Take no part of this tag map. A soft delete is not enough: the device store's tag queries ignore isDeleted
+   * (StorageIdb.outputMatchesTags), so a deleted `id:` map still loads by that id. A map whose tag id the sync can't
+   * map is skipped by the (patched) toolbox merge, and the row stays in the page, so paging is unchanged.
+   */
+  const dropTagMap = (tm: TagMapRow) => {
+    tm.outputTagId = UNMAPPED_ID;
+    tm.isDeleted = true;
+    report.tagsDropped++;
+  };
+  const pageIds = new Map<string, number>(); // id tag (lowercase) -> remote output it went to on this page
+  const pageIdOf = new Map<number, string>(); // remote output -> the id tag it got on this page
   for (const tm of chunk.outputTagMaps ?? []) {
     if (!tm || tm.isDeleted === true || typeof tm.outputTagId !== 'number' || typeof tm.outputId !== 'number') continue;
     const tag = await tagNameOf(tm.outputTagId);
     if (tag === undefined) {
-      tm.isDeleted = true; // a tag the device can't name: never a live token tag
-      report.tagsDropped++;
+      dropTagMap(tm); // a tag the device can't name: never a live token tag or id
       continue;
     }
-    if (!TOKEN_TAG.test(tag)) continue;
+    const isId = ID_TAG.test(tag);
+    if (!isId && !TOKEN_TAG.test(tag)) continue;
     const out = await outputOf(tm.outputId);
-    if (out?.deviceOutputId !== undefined && typeof store.findOutputTagMaps === 'function') {
-      const localTag = await deviceTagId(tm.outputTagId, tag);
-      if (localTag !== undefined) {
-        const [had] = await store.findOutputTagMaps({
-          partial: { outputId: out.deviceOutputId, outputTagId: localTag },
-        });
-        if (had && had.isDeleted !== true) continue; // already on this device: nothing new
-      }
+    const localTag = await deviceTagId(tm.outputTagId, tag);
+    if (out?.deviceOutputId !== undefined && localTag !== undefined && typeof store.findOutputTagMaps === 'function') {
+      const [had] = await store.findOutputTagMaps({ partial: { outputId: out.deviceOutputId, outputTagId: localTag } });
+      if (had && had.isDeleted !== true) continue; // already on this device: nothing new
     }
-    if (!tagAgrees(tag, out?.script ? tokenFacts(out.script, out.txid, out.vout) : null)) {
-      tm.isDeleted = true;
-      report.tagsDropped++;
-    }
+    const refuse = isId
+      ? await idTagTaken(tag.toLowerCase(), tm.outputId, out?.deviceOutputId, localTag)
+      : !tagAgrees(tag, out?.script ? tokenFacts(out.script, out.txid, out.vout) : null);
+    if (refuse) dropTagMap(tm);
   }
   if (report.kept || report.quarantined || report.revived || report.tagsDropped || report.held || report.keptTx)
     v.log?.(

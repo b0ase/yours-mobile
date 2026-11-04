@@ -44,6 +44,7 @@ import { isOpnsType } from '../names/opnsName';
 import { OpnsNameSection } from '../names/OpnsNameActions';
 import { ReceiptBadge } from '../storeReceipt/ReceiptBadge';
 import { isStoreReceipt } from '../storeReceipt/receipt';
+import { ASSET_ID_MISMATCH, assetIdIsOnly } from '../../services/assetIdCheck';
 import {
   BURN_HOLD_MS,
   BURN_WORD,
@@ -204,6 +205,9 @@ export const NftDetail = ({
   const send = async () => {
     const assetId = readAssetIdTag(item.output.tags);
     if (!assetId) return setFailed('This NFT is missing a tracking id and cannot be sent yet. Try Refresh.');
+    // sendOrdinals spends what the id loads: it must be this NFT and no other (review 16b, R2).
+    if (!(await assetIdIsOnly(apiContext.wallet as never, assetId, item.output.outpoint).catch(() => false)))
+      return setFailed(ASSET_ID_MISMATCH);
     setBusy(true);
     setFailed('');
     try {

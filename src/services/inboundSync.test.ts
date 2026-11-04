@@ -47,6 +47,7 @@ import {
 } from './inboundSync';
 import { bsv21FieldsFromOutput } from '@1sat/actions';
 import { bsv21 } from '../mobile/market/launchpad/tokens';
+import { assetIdIsOnly } from './assetIdCheck';
 import type { SpendState } from './unsentExpiry';
 
 const HEIGHT = 971_004;
@@ -857,5 +858,125 @@ describe('R1: an interrupted restore, retried after a restart, still moves the a
     expect(r2.ok).toBe(true);
     expect((await d.row(local, d.coin)).spendable).toBe(false); // the spent coin stays held back
     expect((await d.row(local, d.coin2)).spendable).toBe(true);
+  });
+});
+
+/**
+ * Review 16b, T2 (R2): sends and listings load an NFT by its tracking id (`id:` tag, limit 1). A backup could link
+ * the user's valuable ordinal Y to the id of a cheap ordinal X, so "send X" spent Y.
+ */
+describe('R2: one tracking id, one asset', () => {
+  /** A 1-sat ordinal at a wallet key, in basket '1sat', tagged id:<id> (as stampManagedOutputIds does). */
+  async function receiveOrdinal(w: Wallet, kd: KeyDeriver, id: string) {
+    const keyID = `ord-${++n}`;
+    const pub = kd.derivePublicKey([0, 'onesat'], keyID, 'self', true);
+    const tx = minedTx(new P2PKH().lock(pub.toAddress()), 1);
+    await w.internalizeAction({
+      tx: atomic(tx),
+      outputs: [
+        {
+          outputIndex: 0,
+          protocol: 'basket insertion',
+          insertionRemittance: {
+            basket: '1sat',
+            customInstructions: JSON.stringify({ protocolID: [0, 'onesat'], keyID }),
+            tags: [`id:${id}`],
+          },
+        },
+      ],
+      description: 'Ordinal in',
+    });
+    return tx.id('hex');
+  }
+  const loadById = (d: Awaited<ReturnType<typeof phoneWithBackup>>, id: string) =>
+    d.wallet.listOutputs({
+      basket: '1sat',
+      tags: [`id:${id}`],
+      tagQueryMode: 'all',
+      includeTags: true,
+      limit: 1,
+    } as never);
+
+  test("T2: the backup links Y to X's id; loading X still returns X, and only X", async () => {
+    const d = await phoneWithBackup();
+    d.chain.answer = 'unspent';
+    const yTx = await receiveOrdinal(d.wallet, d.kd, 'yyyyyyyyyyyy');
+    const xTx = await receiveOrdinal(d.wallet, d.kd, 'xxxxxxxxxxxx');
+    await d.sm.updateBackups();
+    const { userId } = (await d.remote.findUsers({ partial: { identityKey: d.kd.identityKey } }))[0];
+    const ry = await d.row(d.remote, yTx);
+    const xTag = (await d.remote.findOutputTags({ partial: { userId, tag: 'id:xxxxxxxxxxxx' } }))[0];
+    const later = new Date(Date.now() + 3_600_000);
+    await d.remote.insertOutputTagMap({
+      outputId: ry.outputId,
+      outputTagId: xTag.outputTagId,
+      isDeleted: false,
+      created_at: later,
+      updated_at: later,
+    } as never);
+    await d.pull();
+    const res = await loadById(d, 'xxxxxxxxxxxx');
+    expect(res.totalOutputs).toBe(1);
+    expect(res.outputs[0]?.outpoint).toBe(`${xTx}.0`);
+    expect(await assetIdIsOnly(d.wallet as never, 'xxxxxxxxxxxx', `${xTx}.0`)).toBe(true);
+  });
+
+  test('a page giving one new id to two outputs: only the first takes it', async () => {
+    const d = await phoneWithBackup();
+    d.chain.answer = 'unspent';
+    const fresh = await store(`r2-fresh-${++n}`);
+    const aTx = await receiveOrdinal(d.wallet, d.kd, 'aaaaaaaaaaaa');
+    const bTx = await receiveOrdinal(d.wallet, d.kd, 'bbbbbbbbbbbb');
+    await d.sm.updateBackups();
+    const { userId } = (await d.remote.findUsers({ partial: { identityKey: d.kd.identityKey } }))[0];
+    const rb = await d.row(d.remote, bTx);
+    const aTag = (await d.remote.findOutputTags({ partial: { userId, tag: 'id:aaaaaaaaaaaa' } }))[0];
+    const later = new Date(Date.now() + 3_600_000);
+    await d.remote.insertOutputTagMap({
+      outputId: rb.outputId,
+      outputTagId: aTag.outputTagId,
+      isDeleted: false,
+      created_at: later,
+      updated_at: later,
+    } as never);
+    const unregister = registerInboundVerifier(fresh.getSettings().storageIdentityKey, d.kd.identityKey, d.verifier);
+    const sm2 = new WalletStorageManager(d.kd.identityKey, fresh, [d.remote]);
+    await sm2.makeAvailable();
+    await sm2.setActive(fresh.getSettings().storageIdentityKey);
+    await sm2.syncFromReader(d.kd.identityKey, d.remote as never);
+    sm2.setServices(services);
+    const w2 = new Wallet({ chain: 'main', keyDeriver: d.kd, storage: sm2, services } as never);
+    const a = await w2.listOutputs({
+      basket: '1sat',
+      tags: ['id:aaaaaaaaaaaa'],
+      tagQueryMode: 'all',
+      limit: 5,
+    } as never);
+    expect(a.totalOutputs).toBe(1);
+    expect(a.outputs[0].outpoint).toBe(`${aTx}.0`);
+    const b = await w2.listOutputs({
+      basket: '1sat',
+      tags: ['id:bbbbbbbbbbbb'],
+      tagQueryMode: 'all',
+      limit: 5,
+    } as never);
+    expect(b.outputs.map((o) => o.outpoint)).toEqual([`${bTx}.0`]); // honest ids still arrive
+    unregister();
+  });
+
+  test('assetIdIsOnly: refuses an id that loads another outpoint, or more than one', async () => {
+    const answer = (outpoints: string[]) => ({
+      listOutputs: async () => ({
+        outputs: outpoints.map((outpoint) => ({ outpoint })),
+        totalOutputs: outpoints.length,
+      }),
+    });
+    const X = `${'ab'.repeat(32)}.0`;
+    const Y = `${'cd'.repeat(32)}.0`;
+    expect(await assetIdIsOnly(answer([X]), 'x', X)).toBe(true);
+    expect(await assetIdIsOnly(answer([X]), 'x', `${'ab'.repeat(32)}_0`)).toBe(true);
+    expect(await assetIdIsOnly(answer([Y]), 'x', X)).toBe(false);
+    expect(await assetIdIsOnly(answer([X, Y]), 'x', X)).toBe(false);
+    expect(await assetIdIsOnly(answer([]), 'x', X)).toBe(false);
   });
 });
