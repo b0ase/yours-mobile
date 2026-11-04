@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CheckCircle, Smartphone } from 'lucide-react';
 import { DEVICE_DATA_COPY, deviceDataState, type DeviceDataState } from '../services/localFirst';
-import { sendMessageAsync } from '../utils/chromeHelpers';
+import { moveStatusSend } from './moveToDevice';
 
 type MoveAnswer =
   | {
@@ -21,7 +21,7 @@ type MoveAnswer =
  */
 export const DeviceDataNote = ({
   state,
-  send = (m: object) => sendMessageAsync<MoveAnswer>(m),
+  send = moveStatusSend,
 }: {
   state?: DeviceDataState;
   send?: (m: object) => Promise<MoveAnswer>;

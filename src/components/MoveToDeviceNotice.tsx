@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Smartphone } from 'lucide-react';
-import { sendMessageAsync } from '../utils/chromeHelpers';
-import { nextTryText } from './moveToDevice';
+import { moveStatusSend, nextTryText } from './moveToDevice';
 
 /** What the background says about moving this account's records to this device (STORAGE_MOVE_STATUS). */
 export type MoveStatus = {
@@ -20,7 +19,7 @@ type Answer = { success?: boolean; data?: MoveStatus; error?: string } | undefin
  * silent refusal. Renders nothing once the account is on this device.
  */
 export const MoveToDeviceNotice = ({
-  send = (m: object) => sendMessageAsync<Answer>(m),
+  send = moveStatusSend,
   pollMs = 60_000,
 }: {
   send?: (m: object) => Promise<Answer>;
