@@ -382,10 +382,22 @@ describe("the owner's $1 test, replayed: one coin, a Store purchase, a restart",
     expect(deps.outbox.all()).toEqual([]);
   });
 
-  test('the txid is in the outbox, and the rows in storage, before the broadcast', async () => {
+  test('the rows (change derivation included) are in storage when the backup is pushed, and the txid in the outbox before the broadcast', async () => {
     const chain: Chain = { post: 'success', seen: new Set(), mined: new Set(), posted: [] };
     const { w } = await oneCoin(chain);
-    const { deps } = depsFor(chain);
+    const atBackup: { status?: string; change?: number } = {};
+    const { deps } = depsFor(chain, {
+      backup: async () => {
+        // What the backup push would carry: the payment's own rows, read straight from storage.
+        const txid = deps.outbox.all()[0]?.txid ?? '';
+        const row = await txRow(w, txid);
+        atBackup.status = row?.status;
+        atBackup.change = row
+          ? (await changeRows(w)).filter((o) => o.transactionId === row.transactionId && o.derivationPrefix).length
+          : 0;
+        return { ok: true };
+      },
+    });
     const at: { outbox?: string; tx?: string } = {};
     chain.onPost = (txid) => {
       at.outbox = deps.outbox.all().find((e) => e.txid === txid)?.state;
@@ -394,6 +406,7 @@ describe("the owner's $1 test, replayed: one coin, a Store purchase, a restart",
     const server = storeServer((op, b) => [200, { pack: 'emoji-cool', txid: b.fields.txid }]);
     const res = await api.payBuyQuote({ wallet: w.wallet } as never, server.f, buyQuote() as never, { deps });
     expect(res.pending).toBeUndefined();
+    expect(atBackup).toEqual({ status: 'nosend', change: 1 });
     expect(at.outbox).toBe('sending');
     expect(at.tx).toBeDefined();
   });
