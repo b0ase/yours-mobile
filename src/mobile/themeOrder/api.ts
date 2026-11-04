@@ -71,6 +71,8 @@ const MESSAGES: Record<string, string> = {
   already_owned: 'You already own this theme.',
   payment_pending: 'Your payment for this theme is still on its way to the network. It unlocks when it arrives.',
   pack_not_for_sale: "This theme isn't for sale.",
+  store_unavailable:
+    "The Store couldn't check your earlier payments just now. Nothing was paid; try again in a minute.",
   update_required: 'Please update bWalletX to buy from the Store.',
 };
 

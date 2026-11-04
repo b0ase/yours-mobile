@@ -54,7 +54,7 @@ const setup = (
   const broadcasts = [];
   const h = tb.makeThemeBuyHandlers({
     store,
-    ledger: ptx.memoryPaidTxids(),
+    ledger: ptx.memoryPaidTxids(() => net.now ?? NOW),
     rate: async () => 50,
     broadcast: async (tx) => {
       broadcasts.push(tx.id('hex'));
@@ -393,5 +393,46 @@ describe('shdx: one pack, one payment', () => {
     const withTxid = store.rows.filter((r) => r.txid);
     expect(withTxid.length).toBe(told.length);
     expect(broadcasts).toEqual([]);
+  });
+});
+
+/**
+ * Review 16, F7 (shdx residuals). (a) A pending payment was let go as "dead" an hour after its QUOTE ran out, even if
+ * its txid had just been recorded (an outbox retry pays an old quote): a second buy then went through and both paid.
+ * Deadness now runs from when the txid was recorded (the paid-txid ledger's time). (b) A database error on the pending
+ * read was taken as "nothing pending" (fail open); it now refuses.
+ */
+describe('F7: shdx residuals', () => {
+  const intentBody = (u, q, tx) =>
+    u.sign('theme-buy-claim', { quote_id: q.quote_id, txid: tx.id('hex'), intent: '1' }, { rawtx: tx.toHex() });
+
+  test('(a) a payment just recorded on an old quote is not let go as dead; a second buy is refused', async () => {
+    const { h, store, net } = setup();
+    net.status = 'missing'; // device B has not broadcast yet
+    const u = user();
+    const [, qOld] = await h.quote(await u.sign('theme-buy-quote', { pack: 'npgx' }));
+    at(net, NOW + 2 * 60 * 60_000); // two hours later the outbox pays the old quote
+    const tx = payTx(qOld);
+    expect((await h.claim(await intentBody(u, qOld, tx)))[0]).toBe(202);
+    // Device A, a minute later: no second quote, and the first payment's txid stays.
+    at(net, NOW + 2 * 60 * 60_000 + 60_000);
+    expect((await h.quote(await u.sign('theme-buy-quote', { pack: 'npgx' })))[1].error).toBe('payment_pending');
+    expect(store.rows.find((r) => r.quote_id === qOld.quote_id).txid).toBe(tx.id('hex'));
+    // An hour after it was recorded and still nowhere: let go, as before.
+    at(net, NOW + 2 * 60 * 60_000 + 61 * 60_000);
+    expect((await h.quote(await u.sign('theme-buy-quote', { pack: 'npgx' })))[0]).toBe(200);
+  });
+
+  test('(b) the pending read failing refuses the claim and the quote instead of letting a second payment through', async () => {
+    const { h, store } = setup();
+    const u = user();
+    const [, qa] = await h.quote(await u.sign('theme-buy-quote', { pack: 'npg' }));
+    store.pending = async () => {
+      throw new Error('supabase 500');
+    };
+    const [s] = await h.claim(await intentBody(u, qa, payTx(qa)));
+    expect(s).toBe(503);
+    expect(store.rows.find((r) => r.quote_id === qa.quote_id).txid ?? null).toBeNull();
+    expect((await h.quote(await u.sign('theme-buy-quote', { pack: 'npg' })))[0]).toBe(503);
   });
 });

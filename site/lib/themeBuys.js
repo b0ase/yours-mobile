@@ -108,10 +108,13 @@ function themeBuyStore(env = process.env, f = fetch) {
       (await req(
         `theme_purchases?identity_key=eq.${q(identityKey)}&status=eq.paid&select=pack_id,txid,paid_at&limit=200`,
       )) || [],
-    /** Paid by a payment the network hasn't shown yet: status still 'quoted', txid set (storeClaim.js). Newest first. */
-    pending: async (identityKey) =>
+    /**
+     * Paid by a payment the network hasn't shown yet: status still 'quoted', txid set (storeClaim.js). Newest first.
+     * With packId, only that pack's (review 16 F7: the 20-row cap could hide the one that matters).
+     */
+    pending: async (identityKey, packId) =>
       (await req(
-        `theme_purchases?identity_key=eq.${q(identityKey)}&status=eq.quoted&txid=not.is.null&select=id,identity_key,pack_id,status,txid,quote_id,quote_expires_at&order=created_at.desc&limit=20`,
+        `theme_purchases?identity_key=eq.${q(identityKey)}${packId ? `&pack_id=eq.${q(packId)}` : ''}&status=eq.quoted&txid=not.is.null&select=id,identity_key,pack_id,status,txid,quote_id,quote_expires_at&order=created_at.desc&limit=20`,
       )) || [],
   };
 }
@@ -179,7 +182,14 @@ function makeThemeBuyHandlers({
   async function packConflict(identityKey, packId, { except, txid } = {}) {
     if ((await store.owned(identityKey)).some((r) => r.pack_id === packId && (!txid || r.txid !== txid)))
       return [409, { error: 'already_owned' }];
-    for (const p of (await pendingOf(identityKey)).filter((r) => r.pack_id === packId && r.id !== except)) {
+    // Read strictly: a database error is not "nothing pending" (review 16 F7, fail closed).
+    let pending;
+    try {
+      pending = typeof store.pending === 'function' ? ((await store.pending(identityKey, packId)) ?? []) : [];
+    } catch {
+      return [503, { error: 'store_unavailable' }];
+    }
+    for (const p of pending.filter((r) => r.pack_id === packId && r.id !== except)) {
       const r = await claimer.recheck(p);
       if (r === 'paid') return [409, { error: 'already_owned' }];
       if (r === 'pending' || r === 'missing') return [409, { error: 'payment_pending' }];

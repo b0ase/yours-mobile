@@ -20,8 +20,9 @@
 //   6. a claim with no rawtx (the wallet lost its copy: a reinstall, a restore) is accepted once the network has the
 //      tx: the server reads it from WhatsOnChain and checks it like any other;
 //   7. a payment that matches is honoured even after its quote ran out (owner's policy, 3 Nov 2026);
-//   8. a pending payment the network never got (ARC 404/REJECTED and WhatsOnChain 404, an hour after the quote ran out)
-//      is let go: its txid is cleared so the item can be bought again. If it shows up later, a claim records it;
+//   8. a pending payment the network never got (ARC 404/REJECTED and WhatsOnChain 404, an hour after the quote ran out
+//      AND an hour after its txid was recorded: review 16 F7, an outbox retry pays an old quote) is let go: its txid
+//      is cleared so the item can be bought again. If it shows up later, a claim records it;
 //   9. one item, one payment (b-Aware shdx, 29 Oct 2026): a quote taken before the item was bought stayed payable after
 //      it, so the buyer could be charged twice. `conflict(row, txid)` (the seller's rule: already owned, or another
 //      payment for it on its way) is asked before the txid is recorded, so a claim intent is refused and the wallet
@@ -109,7 +110,14 @@ function makeStoreClaim(deps) {
       return 'paid';
     }
     if (st !== 'missing') return 'pending';
-    if (now() > Date.parse(row.quote_expires_at) + PENDING_DEAD_MS) {
+    // Dated from the later of the quote running out and the txid being recorded (the paid-txid ledger's time): a
+    // payment recorded a minute ago on a two-hour-old quote is not dead. Can't tell when: not dead (fail closed).
+    const recorded =
+      typeof ledger.reservedAt === 'function'
+        ? await Promise.resolve(ledger.reservedAt(row.txid)).catch(() => Infinity)
+        : undefined;
+    const since = Math.max(Date.parse(row.quote_expires_at), recorded ?? 0);
+    if (now() > since + PENDING_DEAD_MS) {
       log(`store ${kind}: pending payment ${row.txid} never reached the network; quote ${row.quote_id} released`);
       await update(row.id, { txid: null });
       return 'dead';
