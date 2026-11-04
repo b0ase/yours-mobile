@@ -96,6 +96,8 @@ type TxRow = {
 };
 type ProvenRow = { txid?: string; rawTx?: Bytes | null };
 type ReqRow = { txid?: string; status?: string };
+/** Transaction states of a payment this device has made but the network may not have yet. */
+const IN_FLIGHT = new Set(['nosend', 'unsigned', 'unprocessed', 'sending', 'unproven', 'nonfinal']);
 /** Proof-request states in which the toolbox's monitor fails the transaction. */
 const REQ_FAILED = new Set(['invalid', 'doubleSpend']);
 type TagRow = { outputTagId?: number; tag?: string };
@@ -634,8 +636,12 @@ export async function verifyInboundChunk(
         // The device's copy (rule 1 pinned it) must pass what a new row passes, then the chain must know it unspent:
         // a row that arrived not spendable can't be turned spendable on WhatsOnChain's word alone (review 16, F4).
         const failed = (await deviceTxStatus(filed.transactionId)) === 'failed';
+        // This device is spending it in a payment not yet on the network (review 16b, R5): the chain says unspent
+        // because it hasn't seen the spend. Reviving it would let the wallet pick it again and break that payment.
+        const spender = filed.spentBy != null ? await deviceTxStatus(filed.spentBy) : undefined;
+        const inFlight = spender !== undefined && IN_FLIGHT.has(spender);
         const script = hex(filed.lockingScript);
-        const fit = !failed && !!filed.txid && !!script && (await admissible(filed, script)) === 'check';
+        const fit = !failed && !inFlight && !!filed.txid && !!script && (await admissible(filed, script)) === 'check';
         const verdict = fit ? await chainVerdict(filed.txid!, filed.vout) : 'refuse';
         if (verdict === 'unspent') report.revived++;
         else if (verdict === 'unclear') {

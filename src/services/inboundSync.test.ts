@@ -1119,3 +1119,36 @@ describe('R4: a WhatsOnChain hiccup holds one coin, never the page', () => {
     unregister();
   });
 });
+
+/**
+ * Review 16b, T3 (R5): a coin this device is spending in a transaction not yet broadcast (a pot's pre-signed payment,
+ * a BRC-177 anchor, a Store outbox entry) was revived by a newer backup row: the chain hasn't seen the spend, so it
+ * says unspent. The wallet could then pick the coin again and the pre-signed payment would fail.
+ */
+describe("R5: a coin the device is spending in a payment not yet on the network isn't revived", () => {
+  for (const status of ['nosend', 'unsigned', 'unprocessed', 'sending', 'unproven', 'nonfinal'])
+    test(`T3: spent by this device's ${status} transaction: stays spent here`, async () => {
+      const d = await phoneWithBackup();
+      const { userId } = (await d.phone.findUsers({ partial: { identityKey: d.kd.identityKey } }))[0];
+      const T = (await d.phone.findTransactions({ partial: { userId, txid: d.coin2 }, noRawTx: true }))[0];
+      const pending = await d.phone.insertTransaction({
+        ...T,
+        transactionId: 0,
+        txid: Utils.toHex(Random(32)),
+        reference: Utils.toBase64(Random(12)),
+        status,
+        provenTxId: undefined,
+        isOutgoing: true,
+        created_at: new Date(),
+        updated_at: new Date(),
+      } as never);
+      const c = await d.row(d.phone, d.coin);
+      await d.phone.updateOutput(c.outputId, { spendable: false, spentBy: pending } as never);
+      await d.forge(d.coin, { spendable: true, spentBy: undefined });
+      d.chain.answer = 'unspent'; // the chain hasn't seen this device's spend yet
+      await d.pull();
+      const got = await d.row(d.phone, d.coin);
+      expect(got.spendable).toBe(false);
+      expect(got.spentBy).toBe(pending);
+    });
+});
