@@ -95,6 +95,9 @@ type TxRow = {
   updated_at?: Date;
 };
 type ProvenRow = { txid?: string; rawTx?: Bytes | null };
+type ReqRow = { txid?: string; status?: string };
+/** Proof-request states in which the toolbox's monitor fails the transaction. */
+const REQ_FAILED = new Set(['invalid', 'doubleSpend']);
 type TagRow = { outputTagId?: number; tag?: string };
 type TagMapRow = { outputId?: number; outputTagId?: number; isDeleted?: boolean; updated_at?: Date };
 export type SyncChunk = {
@@ -103,6 +106,7 @@ export type SyncChunk = {
   provenTxs?: ProvenRow[];
   outputTags?: TagRow[];
   outputTagMaps?: TagMapRow[];
+  provenTxReqs?: ReqRow[];
 };
 type SyncArgs = { identityKey?: string; fromStorageIdentityKey?: string; toStorageIdentityKey?: string };
 
@@ -115,6 +119,7 @@ export type DeviceStore = {
   getProvenOrRawTx?(txid: string): Promise<{ rawTx?: Bytes; proven?: { rawTx?: Bytes } }>;
   findOutputTags?(a: { partial: Record<string, unknown> }): Promise<TagRow[]>;
   findOutputTagMaps?(a: { partial: Record<string, unknown> }): Promise<TagMapRow[]>;
+  findProvenTxReqs?(a: { partial: Record<string, unknown> }): Promise<ReqRow[]>;
   getSettings?(): { storageIdentityKey?: string };
 };
 
@@ -335,7 +340,13 @@ export async function verifyInboundChunk(
     withheldSats: 0,
   };
   const outputs = chunk?.outputs ?? [];
-  if ((!outputs.length && !chunk?.outputTagMaps?.length && !chunk?.transactions?.length) || !args?.identityKey)
+  if (
+    (!outputs.length &&
+      !chunk?.outputTagMaps?.length &&
+      !chunk?.transactions?.length &&
+      !chunk?.provenTxReqs?.length) ||
+    !args?.identityKey
+  )
     return report;
   const user = (await store.findUsers({ partial: { identityKey: args.identityKey } }))[0];
   if (!user) return report; // the toolbox refuses a page for an unknown user on its own
@@ -555,12 +566,42 @@ export async function verifyInboundChunk(
       continue;
     }
     if (d.rawTx?.length && t.rawTx?.length && hex(d.rawTx) !== hex(t.rawTx)) t.rawTx = d.rawTx;
+    const txid = d.txid ?? t.txid;
     if (d.status === 'failed' && t.status !== undefined && t.status !== 'failed') {
-      const txid = d.txid ?? t.txid;
       const known = txid ? await chain.txKnown(txid) : 'unknown';
       if (known === 'unclear') throw new Error(UNCHECKED_PAGE);
       if (known !== 'known') keepTx();
+      continue;
     }
+    // The other way (review 16b, R3): a backup moving a transaction this device knows to failed, or off completed, or
+    // dropping its proof. The device's monitor would then free the coins it spent (spent on chain) and hide the coins
+    // it made. A transaction the device holds a proof for is never undone from a backup; one without a proof may be
+    // failed only when the chain doesn't know it (a payment another device saw refused). Anything else: kept.
+    const toFailed = t.status === 'failed' && d.status !== 'failed';
+    const offCompleted = d.status === 'completed' && t.status !== undefined && t.status !== 'completed';
+    const dropsProof = d.provenTxId != null && t.provenTxId == null && t.status !== undefined;
+    if (toFailed || offCompleted || dropsProof) {
+      if (d.provenTxId != null || offCompleted || !toFailed) {
+        keepTx();
+        continue;
+      }
+      const known = txid ? await chain.txKnown(txid) : 'unclear';
+      if (known !== 'unknown') keepTx(); // known: it is on chain, not failed; unclear: no change without an answer
+    }
+  }
+
+  // A proof request is what the device's monitor fails a transaction by ('invalid' -> failed). A new request in a
+  // final failed state for a transaction the device already holds arrives as one to be checked again (R3).
+  for (const q of chunk.provenTxReqs ?? []) {
+    if (!q?.txid || !REQ_FAILED.has(String(q.status))) continue;
+    if (!(await store.findTransactions({ partial: { userId, txid: q.txid }, noRawTx: true }))[0]) continue;
+    if (
+      typeof store.findProvenTxReqs === 'function' &&
+      (await store.findProvenTxReqs({ partial: { txid: q.txid } }))[0]
+    )
+      continue; // the device has its own request: the toolbox merge keeps that request's status
+    q.status = 'unknown';
+    report.keptTx++;
   }
 
   for (const o of outputs) {

@@ -980,3 +980,95 @@ describe('R2: one tracking id, one asset', () => {
     expect(await assetIdIsOnly(answer([]), 'x', X)).toBe(false);
   });
 });
+
+/**
+ * Review 16b, T1 (R3): a backup moving a completed transaction to failed (or adding an 'invalid' proof request) made the
+ * device's own monitor (reviewStatus) free the coins it spent, which are spent on chain, and hide the coins it made.
+ */
+describe('R3: a backup cannot fail a transaction the device knows', () => {
+  type D = Awaited<ReturnType<typeof phoneWithBackup>>;
+  const deviceTx = async (d: D, txid: string) => {
+    const { userId } = (await d.phone.findUsers({ partial: { identityKey: d.kd.identityKey } }))[0];
+    return (await d.phone.findTransactions({ partial: { userId, txid }, noRawTx: true }))[0];
+  };
+  const remoteTx = async (d: D, txid: string) => {
+    const { userId } = (await d.remote.findUsers({ partial: { identityKey: d.kd.identityKey } }))[0];
+    return (await d.remote.findTransactions({ partial: { userId, txid }, noRawTx: true }))[0];
+  };
+
+  test('T1: completed -> failed from the backup is refused; reviewStatus then changes nothing', async () => {
+    const d = await phoneWithBackup();
+    d.chain.answer = 'unspent';
+    const T = await deviceTx(d, d.coin);
+    expect(T.status).toBe('completed');
+    // T spent coin2 on this device (as a payment would).
+    const c2 = await d.row(d.phone, d.coin2);
+    await d.phone.updateOutput(c2.outputId, { spendable: false, spentBy: T.transactionId } as never);
+    const RT = await remoteTx(d, d.coin);
+    await d.remote.updateTransaction(RT.transactionId, {
+      status: 'failed',
+      provenTxId: undefined,
+      updated_at: new Date(Date.now() + 3_600_000),
+    } as never);
+    await d.pull();
+    expect((await deviceTx(d, d.coin)).status).toBe('completed');
+    await d.phone.reviewStatus({ agedLimit: new Date() } as never);
+    expect((await d.row(d.phone, d.coin2)).spendable).toBe(false); // still spent
+    expect((await d.row(d.phone, d.coin)).spendable).toBe(true); // the real coin still there
+  });
+
+  test("an 'invalid' proof request from the backup for a transaction the device holds arrives to be checked again", async () => {
+    const d = await phoneWithBackup();
+    d.chain.answer = 'unspent';
+    const later = new Date(Date.now() + 3_600_000);
+    await d.remote.insertProvenTxReq({
+      provenTxReqId: 0,
+      created_at: later,
+      updated_at: later,
+      txid: d.coin,
+      status: 'invalid',
+      attempts: 0,
+      notified: false,
+      history: '{}',
+      notify: '{}',
+      rawTx: [1, 2, 3],
+    } as never);
+    await d.pull();
+    const reqs = await d.phone.findProvenTxReqs({ partial: { txid: d.coin } });
+    expect(reqs.every((r) => r.status !== 'invalid')).toBe(true);
+    await d.phone.reviewStatus({ agedLimit: new Date() } as never);
+    expect((await deviceTx(d, d.coin)).status).toBe('completed');
+    expect((await d.row(d.phone, d.coin)).spendable).toBe(true);
+  });
+
+  test('a payment another device saw refused (no proof, the chain does not know it) still arrives as failed', async () => {
+    const d = await phoneWithBackup();
+    d.chain.answer = 'unspent';
+    const T = await deviceTx(d, d.coin2);
+    const pendingTxid = Utils.toHex(Random(32));
+    await d.phone.insertTransaction({
+      ...T,
+      transactionId: 0,
+      txid: pendingTxid,
+      reference: Utils.toBase64(Random(12)),
+      status: 'unproven',
+      provenTxId: undefined,
+      isOutgoing: true,
+      created_at: new Date(),
+      updated_at: new Date(),
+    } as never);
+    await d.sm.updateBackups();
+    const RT = await remoteTx(d, pendingTxid);
+    await d.remote.updateTransaction(RT.transactionId, {
+      status: 'failed',
+      updated_at: new Date(Date.now() + 3_600_000),
+    } as never);
+    d.chain.knownFor.set(pendingTxid, 'known'); // first: the chain has it, so it is not failed
+    await d.pull();
+    expect((await deviceTx(d, pendingTxid)).status).toBe('unproven');
+    await d.remote.updateTransaction(RT.transactionId, { updated_at: new Date(Date.now() + 7_200_000) } as never);
+    d.chain.knownFor.set(pendingTxid, 'unknown'); // the chain never had it: failed is right
+    await d.pull();
+    expect((await deviceTx(d, pendingTxid)).status).toBe('failed');
+  });
+});
