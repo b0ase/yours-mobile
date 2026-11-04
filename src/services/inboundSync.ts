@@ -937,6 +937,20 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
   };
 }
 
+/** Test hook: take the guard off this class again, whoever installed it (a test that ran the real initWallet). */
+export const _uninstallInboundSyncGuard = (cls: { prototype: object }) => {
+  const proto = cls.prototype as Record<string | symbol, unknown>;
+  const original = proto[INSTALLED];
+  if (typeof original !== 'function') return;
+  if (
+    Object.getPrototypeOf(proto) &&
+    (Object.getPrototypeOf(proto) as Record<string, unknown>).processSyncChunk === original
+  )
+    delete proto.processSyncChunk;
+  else proto.processSyncChunk = original;
+  delete proto[INSTALLED];
+};
+
 /** Test hook: forget every registration. */
 export const _resetInboundVerifiers = () => {
   verifiers.clear();
