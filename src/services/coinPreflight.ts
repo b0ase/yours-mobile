@@ -33,6 +33,7 @@ import {
   SPENT_ELSEWHERE_SHORT_MESSAGE,
   SPENT_ELSEWHERE_STUCK_MESSAGE,
 } from '../utils/sendErrors';
+import { Transaction } from '@bsv/sdk';
 import { recordAutoCleared, type KV, type WocAnswer } from './autoCoinResync';
 import { isInsufficientFunds } from './fundingPrep';
 import { wocApiKeyFromEnv } from './wocResilience';
@@ -387,6 +388,45 @@ export async function heldTxids(storage: unknown, identityKey: string, txids: st
     return null;
   }
 }
+
+/**
+ * Does this transaction of ours (storage's signed copy) pay any of these locking scripts? False when storage has no
+ * raw transaction for it or can't be read: only a yes lets it be called "your earlier payment to this payee" (17b L1).
+ */
+export async function ownTxPaysAny(
+  storage: unknown,
+  identityKey: string,
+  txid: string,
+  scripts: string[],
+): Promise<boolean> {
+  const m = storage as {
+    runAsStorageProvider?: <T>(f: (sp: RawTxReader) => Promise<T>) => Promise<T>;
+  } | null;
+  const want = new Set(scripts.map((s) => s.toLowerCase()).filter(Boolean));
+  if (!m || typeof m.runAsStorageProvider !== 'function' || !identityKey || !want.size) return false;
+  try {
+    const raw = await m.runAsStorageProvider(async (sp) => {
+      const user = (await sp.findUsers({ partial: { identityKey } }))[0];
+      if (!user) return undefined;
+      const [t] = await sp.findTransactions({ partial: { userId: user.userId, txid: txid.toLowerCase() } });
+      if (!t) return undefined; // not this account's
+      // A signed action keeps its bytes in its broadcast request (any status, 'invalid' included) or its proof.
+      const [req] = (await sp.findProvenTxReqs?.({ partial: { txid: txid.toLowerCase() } }).catch(() => [])) ?? [];
+      const r = req?.rawTx ? undefined : await sp.getProvenOrRawTx?.(txid.toLowerCase()).catch(() => undefined);
+      return t.rawTx ?? req?.rawTx ?? r?.rawTx ?? r?.proven?.rawTx;
+    });
+    if (!raw?.length) return false;
+    return Transaction.fromBinary(Array.from(raw)).outputs.some((o) => want.has(o.lockingScript.toHex().toLowerCase()));
+  } catch {
+    return false;
+  }
+}
+type RawTxReader = {
+  findUsers: (a: { partial: { identityKey: string } }) => Promise<{ userId: number }[]>;
+  findTransactions: (a: { partial: { userId: number; txid: string } }) => Promise<{ rawTx?: number[] }[]>;
+  getProvenOrRawTx?: (txid: string) => Promise<{ rawTx?: number[]; proven?: { rawTx?: number[] } } | undefined>;
+  findProvenTxReqs?: (a: { partial: { txid: string } }) => Promise<{ rawTx?: number[] }[]>;
+};
 
 /**
  * Install the check on an account's storage manager with the real lookups (the services' 1sat txo client and

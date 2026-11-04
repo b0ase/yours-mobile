@@ -2,7 +2,12 @@ import { describe, expect, test } from 'bun:test';
 import {
   classifySendError,
   DOUBLE_SPEND_PENDING_MESSAGE,
+  EARLIER_MAYBE_OUT_MESSAGE,
+  OWN_COIN_OTHER_PAYMENT_MESSAGE,
   ownPaymentOutMessage,
+  REFUSED_MAYBE_SENT_MESSAGE,
+  REFUSED_NOT_SENT_MESSAGE,
+  withoutOwnTxids,
   SPENT_ELSEWHERE_MESSAGE,
   SPENT_ELSEWHERE_SHORT_MESSAGE,
   SPENT_ELSEWHERE_STUCK_MESSAGE,
@@ -61,12 +66,57 @@ describe('classifySendError', () => {
     expect(r.message).toMatch(/won't pay twice/);
     expect(r.message).not.toMatch(/try again|another device/i);
   });
-  test('a double spend that may still go through (review 17, F2): money may move, no "try again" now', () => {
-    expect(classifySendError(DOUBLE_SPEND_PENDING_MESSAGE)).toMatchObject({
-      kind: 'spent-elsewhere',
-      moneyMoved: 'unknown',
-      message: DOUBLE_SPEND_PENDING_MESSAGE,
+  test('a double spend that may still go through (review 17 F2, 17b H1): money may move, no "try again" now', () => {
+    for (const raw of [
+      DOUBLE_SPEND_PENDING_MESSAGE,
+      // A BARE double spend (the toolbox text, any path: sites, signAction, the retry's own refusal) is the same.
+      `Undelayed createAction or signAction results require review. double spend: a coin or the listing was already spent (competing ${TXID.slice(0, 12)}…)`,
+      'DOUBLE_SPEND_ATTEMPTED',
+    ]) {
+      const r = classifySendError(raw);
+      expect(r).toMatchObject({
+        kind: 'broadcast-unknown',
+        moneyMoved: 'unknown',
+        message: DOUBLE_SPEND_PENDING_MESSAGE,
+      });
+      expect(r.message).not.toMatch(/unchanged|try again/i);
+    }
+  });
+  test('a refusal says "not sent" only when the background checked the chain (17b M1)', () => {
+    // Bare refusal text: nothing checked the chain, so it may have gone out.
+    for (const raw of [
+      `Undelayed createAction or signAction results require review. rejected by the network as invalid; broadcaster said: UTXO_SPENT (70)`,
+      'REJECTED',
+    ]) {
+      const r = classifySendError(raw);
+      expect(r).toMatchObject({
+        kind: 'broadcast-unknown',
+        moneyMoved: 'unknown',
+        message: REFUSED_MAYBE_SENT_MESSAGE,
+      });
+      expect(r.message).not.toMatch(/unchanged/i);
+    }
+    expect(classifySendError(REFUSED_MAYBE_SENT_MESSAGE).moneyMoved).toBe('unknown');
+    // The background's chain-checked sentence.
+    expect(classifySendError(REFUSED_NOT_SENT_MESSAGE)).toMatchObject({
+      kind: 'broadcast-failed',
+      moneyMoved: 'no',
+      message: REFUSED_NOT_SENT_MESSAGE,
     });
+  });
+  test('an earlier payment of ours to someone else (17b L1): not "you won\'t pay twice"', () => {
+    const r = classifySendError(OWN_COIN_OTHER_PAYMENT_MESSAGE);
+    expect(r).toMatchObject({ kind: 'earlier-payment-out', moneyMoved: 'no', message: OWN_COIN_OTHER_PAYMENT_MESSAGE });
+    expect(r.message).not.toMatch(/won't pay twice/);
+    expect(classifySendError(EARLIER_MAYBE_OUT_MESSAGE)).toMatchObject({
+      kind: 'earlier-payment-out',
+      moneyMoved: 'unknown',
+    });
+  });
+  test('a site never gets the txid of another payment of this wallet (17b L1)', () => {
+    const t = withoutOwnTxids(ownPaymentOutMessage(TXID));
+    expect(t).not.toContain(TXID.slice(0, 8));
+    expect(t).toBe(ownPaymentOutMessage());
   });
   test('coins that could not be marked (review 17, F6): a real error with what to do', () => {
     expect(classifySendError(SPENT_ELSEWHERE_STUCK_MESSAGE)).toMatchObject({
@@ -87,13 +137,13 @@ describe('classifySendError', () => {
     expect(r.kind).toBe('insufficient-funds');
     expect(r.message).toContain('1234');
   });
-  test('broadcast rejected: coins unchanged, reason shown', () => {
+  test('broadcast refused as a double spend: may still go through, the reason kept in Details (17b H1)', () => {
     const r = classifySendError(
       `double spend: a coin or the listing was already spent; broadcaster said: missing inputs. txid ${TXID}`,
     );
-    expect(r.kind).toBe('broadcast-failed');
-    expect(r.message).toMatch(/^Broadcast failed: missing inputs/);
-    expect(r.message).toContain('Your coins are unchanged');
+    expect(r).toMatchObject({ kind: 'broadcast-unknown', moneyMoved: 'unknown', txid: TXID });
+    expect(r.detail).toContain('missing inputs');
+    expect(r.message).not.toContain('Your coins are unchanged');
   });
   test('broadcast unknown: check History, carries txid', () => {
     const r = classifySendError(`broadcast service error, try again (${TXID})`);

@@ -1,18 +1,13 @@
 /**
- * REGRESSION (review 17 of fix/cross-device-coins, 4 Nov 2026): a payment must never go out twice.
+ * REGRESSION (reviews 17 and 17b of fix/cross-device-coins, 4 Nov 2026): a payment must never go out twice, and the
+ * words after a refusal must never say "not sent" when it may still go through.
  *
- * Brought in from the reviewer's scratch test. It drives the REAL wallet-toolbox (fake-indexeddb), the REAL pre-send
- * coin check (coinPreflight.ts), the REAL createWithSpentRetry and healInvalidSend, wired exactly as background.ts
- * processCWICreateAction / healRejectedInputs wire them (armCoinPreflight, heldTxids, wocSpendMined,
- * recordAutoCleared). The chain is mocked: a 1sat-stack broadcaster, ARC's DOUBLE_SPEND_ATTEMPTED, the 1sat index and
- * WhatsOnChain. No network.
- *
- *  A (F1): a payment marked failed had really gone out; the person sends to the same payee again. Before the fix the
- *     heal cleared the coin and the retry paid BOB a second time.
- *  B (F2): another device's payment (mempool) spent the coin; ARC answers DOUBLE_SPEND_ATTEMPTED. Before the fix the
- *     heal + retry paid with other coins, though ARC can still mine the refused tx.
- *  C: the earlier "OWN failed payment" case through the real wiring: never retried, and the person is told.
- *  D (F3): a coin the heal cleared after a double spend is put back by the automatic check when the competitor drops.
+ * Brought in from the reviewers' scratch tests. It drives the REAL wallet-toolbox (fake-indexeddb) through the SAME
+ * send pipeline background.ts processCWICreateAction calls (services/ownSend.ts: sendWithChecks, refusalChecks,
+ * sendFailureText, with the pre-send coin check, the re-tap guard and the retry), and then the page's own mapping
+ * (classifySendError over describeWalletError), so what is asserted is what the person would see. The chain is mocked:
+ * a 1sat-stack broadcaster (REJECTED), ARC's DOUBLE_SPEND_ATTEMPTED, the 1sat index and stack status, and WhatsOnChain
+ * (/tx/hash, /tx/{txid}/{vout}/spent). No network.
  */
 import 'fake-indexeddb/auto';
 import { describe, expect, test } from 'bun:test';
@@ -20,17 +15,26 @@ import { Beef, KeyDeriver, MerklePath, P2PKH, PrivateKey, Random, Transaction, U
 import { Monitor, StorageIdb, StorageProvider, Wallet, WalletStorageManager } from '@bsv/wallet-toolbox-client';
 import { forceLegacyActionBatch } from '../services/actionBatchMode';
 import { fixUtxoStatus } from '../services/utxoStatus';
-import { healClearedEntries, healInvalidSend, isInvalidTxReview, refusedTxid } from '../services/invalidSendHeal';
-import { armCoinPreflight, heldTxids, installCoinPreflightForWallet, wocSpendMined } from '../services/coinPreflight';
-import { createWithSpentRetry } from '../services/spentRetry';
+import { installCoinPreflightForWallet, wocSpendMined } from '../services/coinPreflight';
 import {
-  AUTO_RESYNC_KEY,
-  autoResyncCoins,
-  recordAutoCleared,
-  type AutoResyncState,
-  type KV,
-} from '../services/autoCoinResync';
-import { classifySendError, DOUBLE_SPEND_PENDING_MESSAGE, ownPaymentOutMessage } from '../utils/sendErrors';
+  chainKnowsTx,
+  refusalChecks,
+  sendFailureText,
+  sendWithChecks,
+  type SendChecksContext,
+} from '../services/ownSend';
+import { createSendGuard, type SendGuardState } from '../services/sendGuard';
+import { AUTO_RESYNC_KEY, autoResyncCoins, type AutoResyncState, type KV } from '../services/autoCoinResync';
+import { describeWalletError } from '../brand/walletError';
+import {
+  classifySendError,
+  DOUBLE_SPEND_PENDING_MESSAGE,
+  EARLIER_MAYBE_OUT_MESSAGE,
+  OWN_COIN_OTHER_PAYMENT_MESSAGE,
+  ownPaymentOutMessage,
+  REFUSED_MAYBE_SENT_MESSAGE,
+  REFUSED_NOT_SENT_MESSAGE,
+} from '../utils/sendErrors';
 
 const HEIGHT = 974_050;
 const X = 49_634_148;
@@ -38,33 +42,40 @@ const Y = 6_967_249;
 const Z = 4_488_921;
 const S1 = 600_000;
 const S2 = 340_000;
+const WOC = 'https://api.whatsonchain.com/v1/bsv/main';
 
 type Chain = {
   spentBy: Map<string, string>;
   mined: Set<string>;
   indexMisses: Set<string>;
+  /** WhatsOnChain hasn't seen these yet (its lag after a 1sat-stack broadcast). */
+  wocLag: Set<string>;
   posts: string[];
+  /** The next N posts reach the network, but the broadcaster answers REJECTED. */
   falseRefusals: number;
   utxoStatusDown: boolean;
-  /** Answer a clash with ARC's DOUBLE_SPEND_ATTEMPTED instead of REJECTED. */
+  /** Answer a clash with ARC's DOUBLE_SPEND_ATTEMPTED instead of REJECTED… */
   dsMode: boolean;
-  /** txo.get answers once per outpoint, then can't tell (a flaky / rate-limited 1sat API). */
+  /** …or from the Nth refusal on. */
+  dsFromRefusal?: number;
+  refusals: number;
   flakyGet: boolean;
   getCalls: Map<string, number>;
   onGet?: (o: string) => void;
   raw: Map<string, number[]>;
   reasons: Map<string, string>;
-  /** Every output of every posted tx: payee script → sats. */
   paid: { txid: string; script: string; sats: number }[];
 };
 const newChain = (): Chain => ({
   spentBy: new Map(),
   mined: new Set(),
   indexMisses: new Set(),
+  wocLag: new Set(),
   posts: [],
   falseRefusals: 0,
   utxoStatusDown: false,
   dsMode: false,
+  refusals: 0,
   flakyGet: false,
   getCalls: new Map(),
   raw: new Map(),
@@ -107,6 +118,7 @@ function services(chain: Chain) {
     getScriptHashHistory: async () => ({ status: 'success', history: [] }),
     getBsvExchangeRate: async () => 17,
     getFiatExchangeRate: async () => 1,
+    // The 1Sat stack's status (OneSatServices.getStatusForTxids): known once it took the tx.
     getStatusForTxids: async (txids: string[]) => ({
       status: 'success',
       results: txids.map((txid) => ({
@@ -119,7 +131,6 @@ function services(chain: Chain) {
     getMerklePath: async () => ({ name: 'mock', notes: [] }),
     postBeef: async (beef: Beef, txids: string[]) => {
       if (chain.falseRefusals > 0) {
-        // The tx reaches the network, but the broadcaster answers REJECTED (refusalRecheck.ts's case).
         chain.falseRefusals--;
         for (const t of txids) record(beef, t);
         for (const t of txids) chain.reasons.set(t, 'REJECTED');
@@ -144,7 +155,9 @@ function services(chain: Chain) {
         if (clash)
           refused.push({ txid: t, reason: `UTXO_SPENT (70): utxo already spent by tx ${chain.spentBy.get(clash)}` });
       }
-      if (refused.length && chain.dsMode) {
+      if (refused.length) chain.refusals++;
+      const ds = chain.dsMode || (chain.dsFromRefusal !== undefined && chain.refusals >= chain.dsFromRefusal);
+      if (refused.length && ds) {
         for (const r of refused) chain.reasons.set(r.txid, r.reason);
         return [
           {
@@ -191,11 +204,19 @@ function services(chain: Chain) {
   });
 }
 
-/** WhatsOnChain /tx/{txid}/{vout}/spent over the mocked chain. */
+/** WhatsOnChain over the mocked chain: /tx/hash/{txid} and /tx/{txid}/{vout}/spent. */
 function wocFetch(chain: Chain): typeof fetch {
   return (async (url: string) => {
-    const m = /\/v1\/bsv\/main\/tx\/([0-9a-f]{64})\/(\d+)\/spent$/.exec(String(url));
-    const by = m ? chain.spentBy.get(`${m[1]}_${m[2]}`) : undefined;
+    const u = String(url);
+    const hash = new RegExp(`^${WOC}/tx/hash/([0-9a-f]{64})$`).exec(u);
+    if (hash) {
+      const t = hash[1];
+      const seen = (chain.mined.has(t) || chain.posts.includes(t)) && !chain.wocLag.has(t);
+      return new Response(seen ? JSON.stringify({ txid: t }) : '', { status: seen ? 200 : 404 });
+    }
+    const m = /\/v1\/bsv\/main\/tx\/([0-9a-f]{64})\/(\d+)\/spent$/.exec(u);
+    const op = m ? `${m[1]}_${m[2]}` : '';
+    const by = m && !chain.wocLag.has(op) ? chain.spentBy.get(op) : undefined;
     if (!by) return new Response('', { status: 404 });
     const status = chain.mined.has(by) ? 'confirmed' : 'unconfirmed';
     return new Response(JSON.stringify({ txid: by, vin: 0, status }), { status: 200 });
@@ -276,58 +297,39 @@ const takeIn = (d: Device, p: ReturnType<typeof payment>) =>
   });
 
 const BOB = new P2PKH().lock(PrivateKey.fromRandom().toAddress()).toHex();
+const ALICE = new P2PKH().lock(PrivateKey.fromRandom().toAddress()).toHex();
 
-/** The wallet's own send to BOB (as @1sat/actions sendBsv builds it). */
-const sendToBob = (d: Device, sats: number) =>
-  d.wallet.createAction({
-    description: 'Send 1 payment(s)',
-    outputs: [{ lockingScript: BOB, satoshis: sats, outputDescription: `Payment of ${sats} sats` }],
-    options: { acceptDelayedBroadcast: false },
+type Phone = Awaited<ReturnType<typeof phoneWithCoins>>;
+
+/**
+ * One tap of Send, through the SAME pipeline background.ts processCWICreateAction uses (sendWithChecks with this
+ * account's context and the session re-tap guard), then the page's mapping of the answer (what the person sees).
+ */
+async function tapSend(p: Phone, sats: number, o: { to?: string; ownSend?: boolean; isSite?: boolean } = {}) {
+  const to = o.to ?? BOB;
+  const outputs = [{ lockingScript: to, satoshis: sats, outputDescription: `Payment of ${sats} sats` }];
+  const outcome = await sendWithChecks({
+    create: () =>
+      p.phone.wallet.createAction({
+        description: 'Send 1 payment(s)',
+        outputs,
+        options: { acceptDelayedBroadcast: false },
+      }),
+    outputs,
+    ownSend: o.ownSend ?? true,
+    context: p.context,
+    guard: p.guard,
+    log: () => undefined,
   });
-
-/** background.ts healRejectedInputs: the same lookups, then the cleared coins recorded for the automatic check. */
-const healFor = (d: Device, chain: Chain, kv: KV) => async (error: unknown) => {
-  const svc = d.svc as { txo: { getSpend: (o: string) => Promise<string | null> } };
-  const heal = await healInvalidSend(
-    error,
-    (o: string) => svc.txo.getSpend(o),
-    {
-      markSpent: (txid: string, vout: number) =>
-        d.storage.runAsStorageProvider(async (sp) => {
-          const user = (await sp.findUsers({ partial: { identityKey: d.kd.identityKey } }))[0];
-          if (!user) return 0;
-          let n = 0;
-          for (const o of await sp.findOutputs({ partial: { userId: user.userId, txid, vout, spendable: true } }))
-            n += await sp.updateOutput(o.outputId, { spendable: false });
-          return n;
-        }),
-    },
-    {
-      fallback: async (o: string) => chain.spentBy.get(o) ?? null, // wocSpend: mempool or mined
-      reason: chain.reasons.get(refusedTxid(error) ?? ''),
-    },
-  );
-  await recordAutoCleared(kv, d.kd.identityKey, healClearedEntries(heal));
-  return heal;
-};
-
-/** background.ts processCWICreateAction for the wallet's own send: armCoinPreflight + createWithSpentRetry. */
-async function backgroundSend(d: Device, chain: Chain, kv: KV, sats: number) {
-  const preflight = armCoinPreflight(true);
-  try {
-    return await createWithSpentRetry({
-      create: () => sendToBob(d, sats),
-      heal: healFor(d, chain, kv),
-      txKnown: async (txid: string) => chain.posts.includes(txid) || chain.mined.has(txid), // wocTxKnown
-      reason: (txid: string) => chain.reasons.get(txid),
-      ownTxids: (txids) => heldTxids(d.storage, d.kd.identityKey, txids),
-      spendMined: (op, by) => wocSpendMined(op, by, wocFetch(chain)),
-      eligible: true,
-      log: () => undefined,
-    });
-  } finally {
-    preflight.done();
+  let shown: ReturnType<typeof classifySendError> | undefined;
+  let answer: string | undefined;
+  if (!outcome.ok) {
+    const err = outcome.error;
+    const errorText = err instanceof Error ? describeWalletError(err) : JSON.stringify(err);
+    answer = sendFailureText({ errorText, heal: outcome.heal, notice: outcome.notice, isSite: !!o.isSite });
+    shown = classifySendError(answer, 'send');
   }
+  return { outcome, shown, answer };
 }
 
 async function phoneWithCoins() {
@@ -343,24 +345,41 @@ async function phoneWithCoins() {
     await takeIn(ext, p);
   }
   const kv = memoryKV();
+  const fetch = wocFetch(chain);
   expect(
     installCoinPreflightForWallet(phone.storage, svc, {
       identityKey: kd.identityKey,
       chain: 'main',
       kv,
-      fetch: wocFetch(chain),
+      fetch,
       lookups: { timeoutMs: 500 },
       log: () => undefined,
     }),
   ).toBe(true);
-  return { chain, phone, ext, kv };
+  const context: SendChecksContext = {
+    storage: phone.storage,
+    services: svc,
+    identityKey: kd.identityKey,
+    mainnet: true,
+    kv,
+    fetch,
+    log: () => undefined,
+  };
+  let session: SendGuardState = {};
+  const guard = createSendGuard({
+    load: async () => structuredClone(session),
+    save: async (s) => void (session = structuredClone(s)),
+    txKnown: (txid) => chainKnowsTx(context, txid),
+    spendMined: (op, by) => refusalChecks(context).spendMined(op, by),
+  });
+  return { chain, kd, phone, ext, kv, context, guard };
 }
 
-const paidToBob = (chain: Chain) => chain.paid.filter((p) => p.script === BOB);
+const paidTo = (chain: Chain, script: string) => chain.paid.filter((x) => x.script === script);
 const clearedList = (kv: { m: Record<string, unknown> }, d: Device) =>
   (kv.m[AUTO_RESYNC_KEY] as AutoResyncState | undefined)?.[d.kd.identityKey]?.cleared ?? {};
 
-/** The extension (same seed) pays someone else; its coins are in the mempool, and the 1sat index hasn't seen them. */
+/** The extension (same seed) pays someone else; in the mempool, and the 1sat index hasn't seen it. */
 async function extensionSpends(chain: Chain, ext: Device) {
   const r0 = await ext.wallet.createAction({
     description: 'extension payment',
@@ -379,116 +398,212 @@ async function extensionSpends(chain: Chain, ext: Device) {
   return { tExt, picked };
 }
 
-/** ARC answers DOUBLE_SPEND_ATTEMPTED; the index catches up while the toolbox confirms it, then the 1sat API 429s. */
-function doubleSpendWorld(chain: Chain, picked: string[]) {
+/** ARC answers DOUBLE_SPEND_ATTEMPTED; the index catches up while the toolbox confirms it. */
+function doubleSpendWorld(chain: Chain, picked: string[], o: { flaky?: boolean } = {}) {
   chain.dsMode = true;
   chain.onGet = () => {
     for (const p of picked) chain.indexMisses.delete(p);
   };
-  chain.flakyGet = true;
+  chain.flakyGet = !!o.flaky;
   chain.getCalls.clear();
 }
 
-describe('review 17: a payment never goes out twice through the real retry wiring', () => {
-  test('A (F1): our payment shown as failed went out; the second tap to the same payee pays nothing more', async () => {
-    const { chain, phone, kv } = await phoneWithCoins();
-    // Tap 1 reaches the network (T1), but the broadcaster answers REJECTED and the UTXO check can't tell: storage
-    // marks it failed and frees its coin.
-    chain.falseRefusals = 1;
-    chain.utxoStatusDown = true;
-    const first = await backgroundSend(phone, chain, kv, 3_000_000);
-    expect(first.ok).toBe(false);
-    expect(isInvalidTxReview((first as { error: unknown }).error)).toBe(true);
-    chain.utxoStatusDown = false;
-    const [t1] = chain.posts;
-    // The 1sat index has not indexed T1's spend yet (WhatsOnChain has, in mempool).
-    for (const [o, by] of chain.spentBy) if (by === t1) chain.indexMisses.add(o);
-    // Tap 2: same payee, same amount (the person saw "failed").
-    const second = await backgroundSend(phone, chain, kv, 3_000_000);
-    expect(second.ok).toBe(false);
-    expect(second.retried).toBe(false);
-    expect(paidToBob(chain)).toHaveLength(1); // BOB is paid once (T1), not twice
-    // The person is told that payment went out, with its txid for History; never "try again".
-    const notice = second.ok ? undefined : second.notice;
-    expect(notice).toBe(ownPaymentOutMessage(t1));
-    expect(classifySendError(notice)).toMatchObject({ kind: 'earlier-payment-out', moneyMoved: 'no', txid: t1 });
+/** Tap 1 reaches the network, but the broadcaster answers REJECTED and the UTXO check can't tell (storage: failed). */
+async function falseRefusal(p: Phone, sats: number, to = BOB) {
+  p.chain.falseRefusals = 1;
+  p.chain.utxoStatusDown = true;
+  const first = await tapSend(p, sats, { to });
+  p.chain.utxoStatusDown = false;
+  return { first, t1: p.chain.posts.at(-1)! };
+}
+
+describe('17b M1 + review 17 F1: a payment shown as failed that went out is never paid again', () => {
+  test('A: the first tap says "can\'t confirm", and a second tap of the same payment is stopped: BOB paid once', async () => {
+    const p = await phoneWithCoins();
+    const { first, t1 } = await falseRefusal(p, 3_000_000);
+    expect(first.shown).toMatchObject({ moneyMoved: 'unknown', message: REFUSED_MAYBE_SENT_MESSAGE });
+    const second = await tapSend(p, 3_000_000);
+    expect(second.outcome.ok).toBe(false);
+    expect(paidTo(p.chain, BOB)).toHaveLength(1); // T1 only
+    expect(second.shown).toMatchObject({ kind: 'earlier-payment-out', txid: t1 });
+    expect(second.answer).toBe(ownPaymentOutMessage(t1));
   });
 
-  test('B (F2): DOUBLE_SPEND_ATTEMPTED against a MEMPOOL payment: the coin is cleared but nothing is retried', async () => {
-    const { chain, phone, ext, kv } = await phoneWithCoins();
-    const { tExt, picked } = await extensionSpends(chain, ext);
-    doubleSpendWorld(chain, picked);
-    const r = await backgroundSend(phone, chain, kv, 3_000_000);
-    expect(r.ok).toBe(false);
-    expect(r.retried).toBe(false);
-    expect(r.heal?.released).toBe(1); // the balance is corrected
-    expect(paidToBob(chain)).toHaveLength(0); // no second payment while the refused one may still be mined
-    expect(r.ok ? undefined : r.notice).toBe(DOUBLE_SPEND_PENDING_MESSAGE);
-    // F3: the heal's coin is on the automatic check's list, with its spender, so it can be put back.
-    expect(clearedList(kv, phone)[picked[0]]).toBe(tExt);
+  test('R5: a new coin arrives, so the re-tap would use a different coin: still stopped, BOB paid once', async () => {
+    const p = await phoneWithCoins();
+    const { first } = await falseRefusal(p, 3_000_000);
+    expect(first.shown?.moneyMoved).toBe('unknown');
+    const c = payment(p.kd, 3_100_000);
+    p.chain.mined.add(c.txid);
+    await takeIn(p.phone, c);
+    const second = await tapSend(p, 3_000_000);
+    expect(second.outcome.ok).toBe(false);
+    expect(paidTo(p.chain, BOB)).toHaveLength(1);
   });
 
-  test('B2: the competing payment is MINED: the pre-send check clears the coin before signing; BOB is paid once', async () => {
-    // (The retry after a double spend with a mined competitor is covered in spentRetry.test.ts: with the competitor
-    // mined, WhatsOnChain alone clears the coin here before anything is signed, so no double spend is broadcast.)
-    const { chain, phone, ext, kv } = await phoneWithCoins();
-    const { tExt, picked } = await extensionSpends(chain, ext);
-    chain.mined.add(tExt);
-    doubleSpendWorld(chain, picked);
-    expect(await wocSpendMined(picked[0], tExt, wocFetch(chain))).toBe(true);
-    const r = await backgroundSend(phone, chain, kv, 3_000_000);
-    expect(r.ok).toBe(true);
-    expect(r.retried).toBe(false);
-    expect(paidToBob(chain)).toHaveLength(1);
-    expect(clearedList(kv, phone)[picked[0]]).toBe(tExt);
+  test('A2: a different amount to the same payee picks the dead coin: no retry, and the earlier payment is named', async () => {
+    const p = await phoneWithCoins();
+    const { t1 } = await falseRefusal(p, 3_000_000);
+    for (const [o, by] of p.chain.spentBy) if (by === t1) p.chain.indexMisses.add(o);
+    const second = await tapSend(p, 2_900_000);
+    expect(second.outcome.retried).toBe(false);
+    expect(paidTo(p.chain, BOB)).toHaveLength(1);
+    expect(second.answer).toBe(ownPaymentOutMessage(t1));
+    expect(second.shown).toMatchObject({ kind: 'earlier-payment-out', moneyMoved: 'no' });
   });
 
-  test('C: the "OWN failed payment" case through the real wiring: no retry, and the person is told', async () => {
-    const { chain, phone, kv } = await phoneWithCoins();
-    chain.falseRefusals = 1;
-    chain.utxoStatusDown = true;
-    await backgroundSend(phone, chain, kv, 3_000_000);
-    chain.utxoStatusDown = false;
-    const [t1] = chain.posts;
-    const second = await backgroundSend(phone, chain, kv, 3_000_000);
-    expect(second.ok).toBe(false);
-    expect(second.retried).toBe(false);
-    expect(paidToBob(chain)).toHaveLength(1);
-    expect(second.ok ? undefined : second.notice).toBe(ownPaymentOutMessage(t1));
+  test('R4 / 17b L1: the earlier payment went to ALICE: never "you won\'t pay twice", and a site gets no txid', async () => {
+    const p = await phoneWithCoins();
+    const { t1 } = await falseRefusal(p, 3_000_000, ALICE);
+    for (const [o, by] of p.chain.spentBy) if (by === t1) p.chain.indexMisses.add(o);
+    const own = await tapSend(p, 3_000_000, { to: BOB });
+    expect(paidTo(p.chain, BOB)).toHaveLength(0);
+    expect(own.answer).toBe(OWN_COIN_OTHER_PAYMENT_MESSAGE);
+    expect(own.shown?.message).not.toMatch(/won't pay twice/);
+    // A site's payment that hits the same kind of refusal: no txid of another payment in what the site gets.
+    const p2 = await phoneWithCoins();
+    const r = await falseRefusal(p2, 3_000_000, BOB);
+    for (const [o, by] of p2.chain.spentBy) if (by === r.t1) p2.chain.indexMisses.add(o);
+    const site = await tapSend(p2, 2_000_000, { to: BOB, ownSend: false, isSite: true });
+    expect(site.answer).not.toContain(r.t1.slice(0, 8));
   });
 
-  test('D (F3): the competing payment drops: the automatic check puts the heal-cleared coin back', async () => {
-    const { chain, phone, ext, kv } = await phoneWithCoins();
-    const { tExt, picked } = await extensionSpends(chain, ext);
-    doubleSpendWorld(chain, picked);
-    await backgroundSend(phone, chain, kv, 3_000_000);
+  test('C: the index has caught up (the toolbox clears the coin itself): still no retry, and the person is told', async () => {
+    const p = await phoneWithCoins();
+    const { t1 } = await falseRefusal(p, 3_000_000);
+    const second = await tapSend(p, 2_900_000);
+    expect(second.outcome.retried).toBe(false);
+    expect(paidTo(p.chain, BOB)).toHaveLength(1);
+    expect(second.answer).toBe(ownPaymentOutMessage(t1));
+  });
+});
+
+describe('17b H1: a double spend not proven dead always reads "may still go through"', () => {
+  test("R1: the wallet's own send; the toolbox clears the coin itself (released 0); a re-tap is stopped too", async () => {
+    const p = await phoneWithCoins();
+    const { picked } = await extensionSpends(p.chain, p.ext);
+    doubleSpendWorld(p.chain, picked);
+    const r = await tapSend(p, 3_000_000);
+    expect(r.outcome.ok).toBe(false);
+    expect(r.outcome.retried).toBe(false);
+    expect(r.shown).toMatchObject({ moneyMoved: 'unknown', message: DOUBLE_SPEND_PENDING_MESSAGE });
+    const again = await tapSend(p, 3_000_000);
+    expect(again.shown).toMatchObject({ message: EARLIER_MAYBE_OUT_MESSAGE, moneyMoved: 'unknown' });
+    expect(paidTo(p.chain, BOB)).toHaveLength(0);
+  });
+
+  test("R2: a site's payment refused as a double spend, the coin cleared by the heal", async () => {
+    const p = await phoneWithCoins();
+    const { picked, tExt } = await extensionSpends(p.chain, p.ext);
+    doubleSpendWorld(p.chain, picked, { flaky: true });
+    const r = await tapSend(p, 3_000_000, { ownSend: false, isSite: true });
+    expect(r.outcome.heal?.released).toBe(1);
+    expect(r.shown).toMatchObject({ moneyMoved: 'unknown', message: DOUBLE_SPEND_PENDING_MESSAGE });
+    // Review 17 F3: the heal's coin is on the automatic check's list, with its spender.
+    expect(clearedList(p.kv, p.phone)[picked[0]]).toBe(tExt);
+  });
+
+  test('R3: REJECTED → heal → the one retry is itself refused as a double spend', async () => {
+    const p = await phoneWithCoins();
+    await extensionSpends(p.chain, p.ext); // spends Z
+    await extensionSpends(p.chain, p.ext); // spends Y
+    p.chain.dsFromRefusal = 2;
+    p.chain.flakyGet = true;
+    const r = await tapSend(p, 3_000_000);
+    expect(r.outcome.retried).toBe(true);
+    // Whatever the toolbox makes of the retry's double spend (a confirmed double spend, or a service error when it
+    // can't confirm it), the person is never told "not sent, try again" while it may still go through.
+    expect(r.shown?.moneyMoved).toBe('unknown');
+    expect(r.shown?.message).not.toMatch(/unchanged|so try again/i);
+    expect(paidTo(p.chain, BOB)).toHaveLength(0);
+  });
+
+  test('R7: the competitor is OUR failed-but-sent T1 and every source lags: unknown, BOB paid once', async () => {
+    const p = await phoneWithCoins();
+    const { t1 } = await falseRefusal(p, 3_000_000);
+    for (const [o, by] of p.chain.spentBy)
+      if (by === t1) {
+        p.chain.indexMisses.add(o);
+        p.chain.wocLag.add(o);
+      }
+    p.chain.wocLag.add(t1);
+    p.chain.dsMode = true;
+    const second = await tapSend(p, 2_900_000);
+    expect(second.shown?.moneyMoved).not.toBe('no');
+    expect(paidTo(p.chain, BOB)).toHaveLength(1);
+  });
+
+  test('B2: the competing payment is MINED: the pre-send check clears the coin before signing; BOB paid once', async () => {
+    const p = await phoneWithCoins();
+    const { tExt, picked } = await extensionSpends(p.chain, p.ext);
+    p.chain.mined.add(tExt);
+    doubleSpendWorld(p.chain, picked);
+    expect(await wocSpendMined(picked[0], tExt, wocFetch(p.chain))).toBe(true);
+    const r = await tapSend(p, 3_000_000);
+    expect(r.outcome.ok).toBe(true);
+    expect(r.outcome.cleared).toBe(1);
+    expect(paidTo(p.chain, BOB)).toHaveLength(1);
+  });
+});
+
+describe('honest sends keep working', () => {
+  test('a plain send goes out once', async () => {
+    const p = await phoneWithCoins();
+    const r = await tapSend(p, 3_000_000);
+    expect(r.outcome.ok).toBe(true);
+    expect(paidTo(p.chain, BOB)).toHaveLength(1);
+  });
+  test('a REJECTED the chain confirms (WhatsOnChain 404, stack unknown) says "not sent", and a re-tap goes ahead', async () => {
+    const p = await phoneWithCoins();
+    const { picked } = await extensionSpends(p.chain, p.ext);
+    // The extension's spend is not visible to any source yet: the preflight can't see it; the broadcaster refuses.
+    for (const o of picked) p.chain.wocLag.add(o);
+    p.chain.utxoStatusDown = true;
+    const first = await tapSend(p, 3_000_000, { ownSend: false });
+    p.chain.utxoStatusDown = false;
+    expect(first.shown).toMatchObject({ moneyMoved: 'no', message: REFUSED_NOT_SENT_MESSAGE });
+    // Nothing was recorded against this payment, and once the sources catch up the re-tap uses a live coin.
+    for (const o of picked) {
+      p.chain.wocLag.delete(o);
+      p.chain.indexMisses.delete(o);
+    }
+    const again = await tapSend(p, 3_000_000);
+    expect(again.outcome.ok).toBe(true);
+    expect(paidTo(p.chain, BOB)).toHaveLength(1);
+  });
+});
+
+describe('review 17 F3 / 17b L3: a heal-cleared coin comes back when the competitor drops', () => {
+  test('D', async () => {
+    const p = await phoneWithCoins();
+    const { picked } = await extensionSpends(p.chain, p.ext);
+    doubleSpendWorld(p.chain, picked, { flaky: true });
+    await tapSend(p, 3_000_000);
     const coin = picked[0];
     const spendable = async () =>
       (
-        (await phone.s.findOutputs({ partial: {}, noScript: true })) as unknown as {
+        (await p.phone.s.findOutputs({ partial: {}, noScript: true })) as unknown as {
           txid?: string;
           vout: number;
           spendable: boolean;
         }[]
       ).find((o) => `${o.txid}_${o.vout}` === coin)?.spendable;
     expect(await spendable()).toBe(false);
-    // The extension's payment is dropped from the mempool: both sources now call the coin unspent.
-    chain.spentBy.delete(coin);
-    expect(chain.spentBy.get(coin)).toBeUndefined();
-    const svc = phone.svc as { txo: { getSpends: (b: string[]) => Promise<(string | null)[]> } };
+    p.chain.spentBy.delete(coin);
+    const svc = p.phone.svc as { txo: { getSpends: (b: string[]) => Promise<(string | null)[]> } };
     const r = await autoResyncCoins({
       coins: [],
-      cleared: clearedList(kv, phone),
+      cleared: clearedList(p.kv, p.phone),
       ownPendingTxids: new Set(),
       ownPendingInputs: new Set(),
       getSpends: (b) => svc.txo.getSpends(b),
       woc: async (o) => {
-        const by = chain.spentBy.get(o);
-        return by ? { txid: by, confirmed: chain.mined.has(by) } : null;
+        const by = p.chain.spentBy.get(o);
+        return by ? { txid: by, confirmed: p.chain.mined.has(by) } : null;
       },
       markSpent: async () => 0,
       markUnspent: (o) =>
-        phone.storage.runAsStorageProvider(async (sp) => {
+        p.phone.storage.runAsStorageProvider(async (sp) => {
           const [txid, vout] = o.split('_');
           let n = 0;
           for (const row of await sp.findOutputs({ partial: { txid, vout: Number(vout), spendable: false } }))
@@ -498,7 +613,5 @@ describe('review 17: a payment never goes out twice through the real retry wirin
     });
     expect(r.restored).toBe(1);
     expect(await spendable()).toBe(true);
-    expect(r.cleared[coin]).toBeUndefined();
-    expect(tExt).toMatch(/^[0-9a-f]{64}$/);
   });
 });

@@ -13,18 +13,28 @@
  *   - the caller is not eligible (the wallet's own fixed-amount send only: no dApp, no explicit inputs, no send-all,
  *     no delayed/noSend/signAndProcess:false, no multi-step chain);
  *   - nothing was cleared (retrying would pick the same coins);
- *   - the rejected transaction may have gone out: the broadcaster names it as the spender, or the network lookup
- *     does not answer "unknown txid" (fail closed: no second payment unless we know the first did not happen);
+ *   - the rejected transaction may have gone out: the broadcaster names it as the spender, or WhatsOnChain and the
+ *     1Sat stack don't both say "unknown txid" (fail closed: no second payment unless we know the first did not
+ *     happen). The person is told it may have gone out (17b M1: "not sent" only after that check);
  *   - a cleared coin's spender is a transaction THIS wallet holds, in any status, or can't be named or checked
  *     (review 17, F1, reproduced: a payment shown as failed had gone out; the heal cleared its coin and the retry paid
- *     the same payee again). The person is told that earlier payment went out (ownPaymentOutMessage);
+ *     the same payee again). The person is told that earlier payment went out when it paid the same payee, else that
+ *     a coin went to another payment of this wallet (17b L1);
  *   - after a double spend (DOUBLE_SPEND_ATTEMPTED), unless every competing spend is MINED: ARC keeps the refused tx,
- *     which is mined if the competitor drops (review 17, F2). The coins stay cleared; the person is told either payment
- *     may still go through (DOUBLE_SPEND_PENDING_MESSAGE).
+ *     which is mined if the competitor drops (review 17, F2). The coins stay cleared; the person is told this payment
+ *     may still go through (DOUBLE_SPEND_PENDING_MESSAGE), in either round (17b H1).
+ * Every refusal comes back with the sentence to show (`notice`), and with `mayBeOut` when the refused tx may still be
+ * mined, so the caller can stop a manual re-tap from paying twice (services/sendGuard.ts).
  */
 import type { HealReport } from './invalidSendHeal';
 import { isInvalidTxReview, reasonSpender, refusal, refusedTxid, SPENT_ELSEWHERE_MESSAGE } from './invalidSendHeal';
-import { DOUBLE_SPEND_PENDING_MESSAGE, ownPaymentOutMessage } from '../utils/sendErrors';
+import {
+  DOUBLE_SPEND_PENDING_MESSAGE,
+  OWN_COIN_OTHER_PAYMENT_MESSAGE,
+  ownPaymentOutMessage,
+  REFUSED_MAYBE_SENT_MESSAGE,
+  REFUSED_NOT_SENT_MESSAGE,
+} from '../utils/sendErrors';
 
 export { SPENT_ELSEWHERE_MESSAGE };
 
@@ -77,14 +87,33 @@ export interface SpentRetryDeps<R> {
   ownTxids: (txids: string[]) => Promise<Set<string> | null>;
   /** Is this outpoint's spend by `spender` MINED (WhatsOnChain "confirmed")? null when it can't tell. */
   spendMined: (outpoint: string, spender: string) => Promise<boolean | null>;
+  /** Does this payment of ours pay this send's payee? Absent, false or failing: it is not named as "to this payee". */
+  samePayee?: (ownTxid: string) => Promise<boolean>;
   eligible: boolean;
   log?: (msg: string, data?: unknown) => void;
 }
 
-/** `notice`: the plain sentence to show instead of the heal's "try again" (an earlier payment went out, …). */
+/**
+ * A refused transaction that may still be (or become) on the chain. The caller remembers it against this payment's
+ * payee and amount, so a manual re-tap can't pay twice (services/sendGuard.ts; 17b M1).
+ */
+export type MayBeOut = { txid: string; kind: 'refused' | 'doubleSpend'; competitors: Record<string, string> };
+
+/**
+ * `notice`: the plain sentence the person sees for a refusal (the background shows it instead of the toolbox text).
+ * Every refusal gets one: "not sent" only when the chain confirms it (17b M1), "may still go through" for a double
+ * spend not proven dead (17b H1), and an earlier payment of ours named only when it went to the same payee (17b L1).
+ */
 export type SpentRetryOutcome<R> =
   | { ok: true; result: R; retried: boolean; heal: HealReport | null }
-  | { ok: false; error: unknown; retried: boolean; heal: HealReport | null; notice?: string };
+  | {
+      ok: false;
+      error: unknown;
+      retried: boolean;
+      heal: HealReport | null;
+      notice?: string;
+      mayBeOut?: MayBeOut;
+    };
 
 const addReports = (a: HealReport | null, b: HealReport | null): HealReport | null =>
   !a
@@ -98,6 +127,12 @@ const addReports = (a: HealReport | null, b: HealReport | null): HealReport | nu
           spenders: { ...(a.spenders ?? {}), ...(b.spenders ?? {}) },
           cleared: [...(a.cleared ?? []), ...(b.cleared ?? [])],
         };
+
+/** Call a dependency; a throw (sync or async) is "can't tell". */
+const ask = <T>(f: () => Promise<T>): Promise<T | null> =>
+  Promise.resolve()
+    .then(f)
+    .catch(() => null);
 
 /**
  * The spenders behind a refusal (each proven-spent input's, and the one the broadcaster's reason names), and the first
@@ -114,14 +149,73 @@ async function ownSpender(
   if (fromReason && fromReason !== txid) candidates.add(fromReason);
   const unnamed = named.some((s) => !s);
   if (!candidates.size) return { own: undefined, unnamed };
-  const held = await Promise.resolve()
-    .then(() => d.ownTxids([...candidates]))
-    .catch(() => null);
+  const held = await ask(() => d.ownTxids([...candidates]));
   if (!held) return { own: null, unnamed };
   return { own: [...candidates].find((t) => held.has(t)), unnamed };
 }
 
-/** Run create; after a UTXO_SPENT refusal heal, and retry once when it is safe. Never throws. */
+type Verdict = { retry: boolean; why?: string; notice?: string; mayBeOut?: MayBeOut };
+
+/** What a refusal means, in order of what can still move money. Never throws. */
+async function judge(
+  d: SpentRetryDeps<unknown>,
+  error: unknown,
+  heal: HealReport | null,
+  firstRound: boolean,
+): Promise<Verdict> {
+  const ref = refusal(error);
+  const txid = ref?.txid;
+  const spenders = heal?.spenders ?? {};
+  // 1. A double spend may still be mined (ARC keeps it) unless every competing spend is mined (17b H1, review 17 F2).
+  if (ref?.status === 'doubleSpend') {
+    const named = Object.entries(spenders).filter((e): e is [string, string] => !!e[1]);
+    let dead = named.length > 0 && named.length === Object.keys(spenders).length;
+    if (dead) dead = (await Promise.all(named.map(([op, by]) => ask(() => d.spendMined(op, by))))).every((m) => m);
+    if (!dead)
+      return {
+        retry: false,
+        why: 'double spend: the competing payment is not mined',
+        notice: DOUBLE_SPEND_PENDING_MESSAGE,
+        mayBeOut: txid ? { txid, kind: 'doubleSpend', competitors: Object.fromEntries(named) } : undefined,
+      };
+  }
+  // 2. Has the refused tx itself gone out? Only a clean "not known" lets anyone say "not sent" or pay again (17b M1).
+  const known = txid ? await ask(() => d.txKnown(txid)) : null;
+  if (known !== false || reasonNamesSpender(d.reason?.(txid!), txid!))
+    return {
+      retry: false,
+      why: 'the refused tx may be on the network',
+      notice: REFUSED_MAYBE_SENT_MESSAGE,
+      mayBeOut: txid ? { txid, kind: 'refused', competitors: {} } : undefined,
+    };
+  // 3. A coin spent by a payment this wallet holds (any status): that payment went out. Never retried (review 17 F1);
+  //    it is named as "your earlier payment to this payee" only when it paid the same payee (17b L1).
+  const { own, unnamed } = await ownSpender(d, heal, txid);
+  if (own) {
+    const same = d.samePayee ? (await ask(() => d.samePayee!(own))) === true : false;
+    return {
+      retry: false,
+      why: 'a cleared coin was spent by a payment this wallet holds',
+      notice: same ? ownPaymentOutMessage(own) : OWN_COIN_OTHER_PAYMENT_MESSAGE,
+    };
+  }
+  // 4. The refused tx is not on the chain: "not sent" is true from here.
+  const notSent = heal && heal.released > 0 ? SPENT_ELSEWHERE_MESSAGE : REFUSED_NOT_SENT_MESSAGE;
+  const why = !d.eligible
+    ? 'not eligible'
+    : !firstRound
+      ? 'already retried once'
+      : !heal || heal.released <= 0
+        ? 'nothing cleared'
+        : own === null
+          ? "this wallet's own payments could not be checked"
+          : unnamed
+            ? 'a cleared coin has no named spender'
+            : null;
+  return why ? { retry: false, why, notice: notSent } : { retry: true };
+}
+
+/** Run create; after a refusal heal, and retry once when it is safe. Never throws. */
 export async function createWithSpentRetry<R>(d: SpentRetryDeps<R>): Promise<SpentRetryOutcome<R>> {
   let first: unknown;
   try {
@@ -130,57 +224,27 @@ export async function createWithSpentRetry<R>(d: SpentRetryDeps<R>): Promise<Spe
     first = err;
   }
   if (!isInvalidTxReview(first)) return { ok: false, error: first, retried: false, heal: null };
-  const heal = await d.heal(first).catch(() => null);
-  const txid = rejectedTxid(first);
-  // Whatever happens next, a coin spent by a payment of ours means that payment went out: say so, never retry.
-  const { own, unnamed } = await ownSpender(d as SpentRetryDeps<unknown>, heal, txid);
-  const notice = own ? ownPaymentOutMessage(own) : undefined;
-  const why = (() => {
-    if (own) return 'a cleared coin was spent by a payment this wallet holds';
-    if (!d.eligible) return 'not eligible';
-    if (!heal || heal.released <= 0) return 'nothing cleared';
-    if (!txid) return 'no rejected txid';
-    if (reasonNamesSpender(d.reason?.(txid), txid)) return 'rejected tx named as spender';
-    if (own === null) return "this wallet's own payments could not be checked";
-    if (unnamed) return 'a cleared coin has no named spender';
-    return null;
-  })();
-  if (why) {
-    d.log?.(`[spentRetry] no retry: ${why}`);
-    return { ok: false, error: first, retried: false, heal, notice };
+  const heal = await ask(() => d.heal(first));
+  const v = await judge(d as SpentRetryDeps<unknown>, first, heal, true);
+  if (!v.retry) {
+    d.log?.(`[spentRetry] no retry: ${v.why}`);
+    return { ok: false, error: first, retried: false, heal, notice: v.notice, mayBeOut: v.mayBeOut };
   }
-  if (refusal(first)?.status === 'doubleSpend') {
-    // ARC keeps a double-spend attempt: it is mined if the other payment drops. Retry only when that can't happen.
-    const spent = Object.entries(heal!.spenders ?? {});
-    const mined = await Promise.all(
-      spent.map(([op, by]) =>
-        Promise.resolve()
-          .then(() => d.spendMined(op, by!))
-          .catch(() => null),
-      ),
-    );
-    if (!spent.length || mined.some((m) => m !== true)) {
-      d.log?.('[spentRetry] no retry: double spend with a competing payment not mined yet', { txid, mined });
-      return { ok: false, error: first, retried: false, heal, notice: DOUBLE_SPEND_PENDING_MESSAGE };
-    }
-  }
-  const known = await d.txKnown(txid!).catch(() => null);
-  if (known !== false) {
-    d.log?.('[spentRetry] no retry: the refused tx may be on the network', { txid, known });
-    return { ok: false, error: first, retried: false, heal };
-  }
-  d.log?.('[spentRetry] coins cleared; retrying once with fresh inputs', { txid, released: heal!.released });
+  d.log?.('[spentRetry] coins cleared; retrying once with fresh inputs', { released: heal!.released });
   try {
     return { ok: true, result: await d.create(), retried: true, heal };
   } catch (second) {
-    const heal2 = isInvalidTxReview(second) ? await d.heal(second).catch(() => null) : null;
-    const again = heal2 ? await ownSpender(d as SpentRetryDeps<unknown>, heal2, rejectedTxid(second)) : undefined;
+    if (!isInvalidTxReview(second)) return { ok: false, error: second, retried: true, heal };
+    const heal2 = await ask(() => d.heal(second));
+    const v2 = await judge(d as SpentRetryDeps<unknown>, second, heal2, false);
+    d.log?.(`[spentRetry] the retry was refused too: ${v2.why}`);
     return {
       ok: false,
       error: second,
       retried: true,
       heal: addReports(heal, heal2),
-      notice: again?.own ? ownPaymentOutMessage(again.own) : undefined,
+      notice: v2.notice,
+      mayBeOut: v2.mayBeOut,
     };
   }
 }

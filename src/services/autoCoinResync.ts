@@ -172,7 +172,10 @@ export async function autoResyncCoins(d: AutoResyncDeps): Promise<AutoResyncRepo
       const w = await askWoc(o);
       if (w !== null) continue; // spent, or unknown
     }
-    const n = await d.markUnspent(o).catch(() => 0);
+    // A restore that fails keeps the record, so a later run tries again (17b L3: the coin was left unspendable with no
+    // record of it). Nothing to restore (n = 0: already spendable, or gone) ends the record.
+    const n = await d.markUnspent(o).catch(() => null);
+    if (n === null) continue;
     if (n > 0) restored += n;
     delete cleared[o];
   }
@@ -238,7 +241,8 @@ export async function runAutoResyncIfDue(
   if (!mode) return null;
   const stamp = mode === 'full' ? { at: now, lightAt: now } : mode === 'light' ? { lightAt: now } : { fgAt: now };
   return withCoinResyncLock(async () => {
-    const loadedCleared = state[identityKey]?.cleared ?? {};
+    // Read again under the lock: the list may have changed while this waited for it (17b L3).
+    const loadedCleared = (await read())[identityKey]?.cleared ?? {};
     const deps = await load(loadedCleared);
     // Not ready (no services/storage yet): don't start the wait, the next unlock tries again.
     if (!deps) return null;

@@ -14,7 +14,13 @@ import {
   retryEligible,
   SPENT_ELSEWHERE_MESSAGE,
 } from './spentRetry';
-import { DOUBLE_SPEND_PENDING_MESSAGE, ownPaymentOutMessage } from '../utils/sendErrors';
+import {
+  DOUBLE_SPEND_PENDING_MESSAGE,
+  OWN_COIN_OTHER_PAYMENT_MESSAGE,
+  ownPaymentOutMessage,
+  REFUSED_MAYBE_SENT_MESSAGE,
+  REFUSED_NOT_SENT_MESSAGE,
+} from '../utils/sendErrors';
 
 const key = PrivateKey.fromRandom();
 const lock = new P2PKH().lock(key.toAddress());
@@ -31,7 +37,11 @@ function funding(n: number) {
 type Coin = { spendable: boolean; locked: boolean };
 
 /** A toolbox-like wallet over in-memory storage and a fake network. */
-function simWallet(nCoins: number, spentElsewhere: number[], refusal: 'invalidTx' | 'doubleSpend' = 'invalidTx') {
+function simWallet(
+  nCoins: number,
+  spentElsewhere: number[],
+  refusal: 'invalidTx' | 'doubleSpend' | ((coin: number) => 'invalidTx' | 'doubleSpend') = 'invalidTx',
+) {
   const src = funding(nCoins);
   const srcId = src.id('hex');
   const coins = new Map<string, Coin>();
@@ -71,7 +81,9 @@ function simWallet(nCoins: number, spentElsewhere: number[], refusal: 'invalidTx
         name: 'WERR_REVIEW_ACTIONS',
         txid,
         tx: tx.toAtomicBEEF(true),
-        reviewActionResults: [{ txid, status: refusal }],
+        reviewActionResults: [
+          { txid, status: typeof refusal === 'function' ? refusal(Number(op.split('_')[1])) : refusal },
+        ],
       });
     }
     coin.locked = false;
@@ -162,11 +174,51 @@ describe('UTXO_SPENT: coin spent on another device', () => {
     expect(r.retried).toBe(false);
     expect(w.accepted).toHaveLength(0);
     expect(r.heal?.released).toBe(1);
-    expect(r.ok ? undefined : r.notice).toBe(ownPaymentOutMessage(OTHER_DEVICE_TX));
+    // Not known to have paid this payee (17b L1): "a coin went to another payment of this wallet", no "won't pay twice".
+    expect(r.ok ? undefined : r.notice).toBe(OWN_COIN_OTHER_PAYMENT_MESSAGE);
+    // It paid this payee: then it is named, with its txid (the background strips it for sites).
+    const same = simWallet(3, [0]);
+    const t = await createWithSpentRetry(
+      deps(same, { ownTxids: async (x) => new Set(x), samePayee: async (txid) => txid === OTHER_DEVICE_TX }),
+    );
+    expect(t.ok ? undefined : t.notice).toBe(ownPaymentOutMessage(OTHER_DEVICE_TX));
     // Not even a non-eligible caller (a site) is told to "try again".
     const site = simWallet(3, [0]);
-    const s = await createWithSpentRetry(deps(site, { eligible: false, ownTxids: async (t) => new Set(t) }));
-    expect(s.ok ? undefined : s.notice).toBe(ownPaymentOutMessage(OTHER_DEVICE_TX));
+    const s = await createWithSpentRetry(deps(site, { eligible: false, ownTxids: async (x) => new Set(x) }));
+    expect(s.ok ? undefined : s.notice).toBe(OWN_COIN_OTHER_PAYMENT_MESSAGE);
+  });
+
+  test('17b H1: every double spend not proven dead says "may still go through", in every branch', async () => {
+    // A site (not eligible), the toolbox having cleared the coin itself (released 0), and the retry's own refusal.
+    const site = simWallet(3, [0], 'doubleSpend');
+    const a = await createWithSpentRetry(deps(site, { eligible: false, spendMined: async () => false }));
+    const own = simWallet(3, [0], 'doubleSpend');
+    const b = await createWithSpentRetry(
+      deps(own, { heal: async () => ({ checked: 1, released: 0, spenders: {} }), spendMined: async () => false }),
+    );
+    const two = simWallet(3, [0, 1], (coin) => (coin === 0 ? 'invalidTx' : 'doubleSpend'));
+    const c = await createWithSpentRetry(deps(two, { spendMined: async () => false }));
+    expect(c.retried).toBe(true);
+    for (const r of [a, b, c]) {
+      expect(r.ok).toBe(false);
+      expect(r.ok ? undefined : r.notice).toBe(DOUBLE_SPEND_PENDING_MESSAGE);
+      expect(r.ok ? undefined : r.mayBeOut?.kind).toBe('doubleSpend');
+    }
+    expect(site.accepted.length + own.accepted.length + two.accepted.length).toBe(0);
+  });
+
+  test('17b M1: a refusal says "not sent" only when the chain confirms the tx unknown', async () => {
+    for (const txKnown of [async () => true, async () => null]) {
+      const w = simWallet(3, [0]);
+      const r = await createWithSpentRetry(deps(w, { txKnown }));
+      expect(r.ok ? undefined : r.notice).toBe(REFUSED_MAYBE_SENT_MESSAGE);
+      expect(r.ok ? undefined : r.mayBeOut?.kind).toBe('refused');
+    }
+    // Confirmed unknown, nothing cleared: "not sent" in so many words.
+    const w = simWallet(3, [0]);
+    const r = await createWithSpentRetry(deps(w, { heal: async () => ({ checked: 1, released: 0 }) }));
+    expect(r.ok ? undefined : r.notice).toBe(REFUSED_NOT_SENT_MESSAGE);
+    expect(r.ok ? undefined : r.mayBeOut).toBeUndefined();
   });
 
   test("storage can't say whose the spender is: no retry (fail closed)", async () => {

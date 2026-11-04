@@ -174,3 +174,20 @@ describe('coins the send check cleared are kept for the re-check', () => {
     await recordAutoCleared(bad as never, 'k', { [V1]: SPENDER });
   });
 });
+
+describe('17b L3: a failed undo keeps the record', () => {
+  test('markUnspent throws: the coin stays on the list for the next run; a clean restore ends it', async () => {
+    const p = phone();
+    p.store[V1] = false;
+    const fails = await autoResyncCoins({
+      ...p.deps({ cleared: { [V1]: SPENDER }, markUnspent: async () => Promise.reject(new Error('storage busy')) }),
+      mode: 'light',
+    });
+    expect(fails.restored).toBe(0);
+    expect(fails.cleared[V1]).toBe(SPENDER);
+    const ok = await autoResyncCoins({ ...p.deps({ cleared: fails.cleared }), mode: 'light' });
+    expect(ok.restored).toBe(1);
+    expect(ok.cleared[V1]).toBeUndefined();
+    expect(p.store[V1]).toBe(true);
+  });
+});

@@ -1,4 +1,5 @@
 import './utils/abortSignalPolyfill'; // AbortSignal.timeout / any on iOS 15 (utils/abortTimeout.ts): before anything else
+import { installWocLimiter } from './services/wocLimiter';
 import { Buffer } from 'buffer';
 import process from 'process';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -46,6 +47,8 @@ import { ENVELOPES_ENABLED } from './mobile/storeBuild';
 import { SiteThemeFrame } from './mobile/theme/SiteThemeFrame';
 import './index.css';
 
+// WhatsOnChain requests share the app's one ~3/s budget (services/wocLimiter.ts).
+installWocLimiter();
 global.Buffer = Buffer;
 global.process = process;
 window.Buffer = Buffer;

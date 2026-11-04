@@ -120,7 +120,8 @@ export async function provenSpenders(
  * reason ("txid:vout" or "txid_vout") after a UTXO_SPENT verdict is taken as authoritative.
  */
 export function namedSpentInputs(reason: string | undefined, inputs: string[]): string[] {
-  if (!reason || !/UTXO_SPENT|already spent|missing ?inputs/i.test(reason)) return [];
+  // Not "missing inputs": that usually means a parent the node doesn't know, not a spent coin (17b L3).
+  if (!reason || !/UTXO_SPENT|already spent/i.test(reason)) return [];
   const text = reason.toLowerCase();
   return inputs.filter((op) => {
     const [txid, vout] = op.split('_');
@@ -178,14 +179,14 @@ export const resyncMessage = (r: HealReport): string =>
     ? `Checked ${r.checked} coins: ${r.released} had already been spent elsewhere and are cleared. Try your send again.`
     : `Checked ${r.checked} coins: all still spendable. Nothing to clear.`;
 
+/** The cleared-list value for a coin cleared without a named spender (it is never compared as a txid). */
+export const UNNAMED_SPENDER = 'unnamed';
+
 /** Pure: the coins a heal cleared → their named spender, for the automatic check's cleared list (recordAutoCleared). */
 export const healClearedEntries = (r: HealReport | null | undefined): Record<string, string> =>
-  Object.fromEntries(
-    (r?.cleared ?? []).flatMap((op) => {
-      const by = r?.spenders?.[op];
-      return by ? [[op, by]] : [];
-    }),
-  );
+  // A coin cleared on the broadcaster's word alone has no named spender: it is recorded too (UNNAMED_SPENDER), so the
+  // automatic check can still put it back (17b L3).
+  Object.fromEntries((r?.cleared ?? []).map((op) => [op, r?.spenders?.[op] || UNNAMED_SPENDER]));
 
 /** After an invalidTx: release the rejected send's inputs proven spent. Never throws. */
 export async function healInvalidSend(
@@ -238,6 +239,10 @@ export const healMessage = (r: HealReport): string =>
  */
 export const withHealMessage = (error: string, r: HealReport | null): string => {
   if (!r) return error;
+  // A double spend may still go through (ARC keeps it), and a service error or a queued send has no verdict at all
+  // (the retry may be on its way): never turned into "spent elsewhere, try again" (17b H1).
+  if (/double ?spend|DOUBLE_SPEND|serviceError|service error|unknown|timed? ?out|queued|pending/i.test(error))
+    return error;
   const m = healMessage(r).trim();
   if (!m) return error;
   // Coins cleared (and, for the wallet's own send, one automatic retry already tried): plain words only. The raw

@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { P2PKH, PrivateKey, Transaction, UnlockingScript } from '@bsv/sdk';
 import {
+  healClearedEntries,
   healInvalidSend,
+  UNNAMED_SPENDER,
   healMessage,
   isInvalidTxReview,
   namedSpentInputs,
@@ -182,5 +184,41 @@ describe('owner iPhone 19 Oct: WERR_REVIEW_ACTIONS + UTXO_SPENT, heal outcome mu
   test('nothing cleared: error unchanged first', () => {
     expect(withHealMessage(raw, { checked: 0, released: 0 })).toBe(raw);
     expect(withHealMessage(raw, null)).toBe(raw);
+  });
+});
+
+describe('re-review 17b: undo records and double-spend words', () => {
+  const op = `${'ab'.repeat(32)}_1`;
+  const refusedWith = (reason: string) => {
+    const tx = new Transaction();
+    tx.addInput({
+      sourceTXID: 'ab'.repeat(32),
+      sourceOutputIndex: 1,
+      unlockingScript: new UnlockingScript(),
+      sequence: 0xffffffff,
+    });
+    tx.addOutput({ lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()), satoshis: 1 });
+    const err = Object.assign(new Error('Undelayed createAction or signAction results require review.'), {
+      name: 'WERR_REVIEW_ACTIONS',
+      reviewActionResults: [{ txid: tx.id('hex'), status: 'invalidTx' }],
+      tx: tx.toAtomicBEEF(),
+    });
+    return healInvalidSend(err, async () => null, { markSpent: async () => 1 }, { fallback: async () => null, reason });
+  };
+  test('L3: a coin the broadcaster names without a spender is cleared AND recorded for undo', async () => {
+    const heal = await refusedWith(`UTXO_SPENT (70): ${'ab'.repeat(32)}:1 utxo already spent`);
+    expect(heal.released).toBe(1);
+    expect(healClearedEntries(heal)).toEqual({ [op]: UNNAMED_SPENDER });
+  });
+  test('L3: "missing inputs" (a parent the node does not know) clears nothing', async () => {
+    const heal = await refusedWith(`Missing inputs: ${'ab'.repeat(32)}:1`);
+    expect(heal.released).toBe(0);
+    expect(namedSpentInputs(`Missing inputs: ${'ab'.repeat(32)}:1`, [op])).toEqual([]);
+  });
+  test('H1: a double spend is never turned into "spent elsewhere, try again"', () => {
+    const { withHealMessage } = require('./invalidSendHeal');
+    const ds =
+      'Undelayed createAction or signAction results require review. double spend: a coin or the listing was already spent';
+    expect(withHealMessage(ds, { checked: 1, released: 1 })).toBe(ds);
   });
 });
