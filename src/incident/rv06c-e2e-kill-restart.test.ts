@@ -580,7 +580,10 @@ describe('06c: kill after every step of the Store pay sequence, restart, open th
     net.walletPost = 'success';
     const ins = await nextSend(w2);
     console.log('RISK nextSend ->', JSON.stringify(ins), 'coin', coin);
-    expect(Array.isArray(ins) && ins.includes(coin)).toBe(false); // invariant (iv) holds
+    // Invariant (iv): the next send SUCCEEDS, funded by the held payment's own change, never by the held coin.
+    expect(Array.isArray(ins)).toBe(true);
+    expect((ins as string[]).includes(coin)).toBe(false);
+    expect((ins as string[]).some((o) => o.startsWith(txid!))).toBe(true);
     // The Store gets paid once WhatsOnChain shows the original (the server kept the intent):
     net.wocLag = false;
     const after = await storeOpen(w2, srv, deps);

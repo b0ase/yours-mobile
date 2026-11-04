@@ -290,3 +290,24 @@ describe('06c M1: a payment that was already being sent is marked "may be out" b
     expect(order).toEqual(['send']);
   });
 });
+
+describe('final check (LOW): a first post that ends without a verdict is marked "may be out" too', () => {
+  test('pending first post: marked; accepted first post: not marked', async () => {
+    const marked: string[] = [];
+    const pendingWallet = {
+      ...answering('sent'),
+      createAction: async () => {
+        throw Object.assign(new Error('WERR_REVIEW_ACTIONS'), {
+          sendWithResults: [{ txid: T, status: 'sending' }],
+          reviewActionResults: [{ txid: T, status: 'serviceError' }],
+        });
+      },
+    };
+    const d = base({ markMayBeOut: async (t) => void marked.push(t) });
+    expect(await sendStorePayment(pendingWallet, entry({ state: 'signed' }), d)).toBe('pending');
+    expect(marked).toEqual([T]);
+    marked.length = 0;
+    expect(await sendStorePayment(answering('sent'), entry({ state: 'signed' }), d)).toBe('sent');
+    expect(marked).toEqual([]);
+  });
+});

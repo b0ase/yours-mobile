@@ -1,4 +1,5 @@
 /* global chrome */
+import './utils/abortSignalPolyfill'; // AbortSignal.timeout / any on iOS 15 (utils/abortTimeout.ts): before anything else
 import { siteAfterNavigation } from './mobile/theme/tabSiteNav';
 import { SheetFirstGate } from './services/sheetFirst';
 import { chromeConsentStore } from './services/siteTokens';

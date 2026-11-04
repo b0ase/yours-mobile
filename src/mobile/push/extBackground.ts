@@ -3,6 +3,7 @@
  * (vite.config.background.ts uses this as the entry). The side panel subscribes through this worker's
  * registration (register.ts); here we show what push.bwalletx.com sends and open the room on a click.
  */
+import '../../utils/abortSignalPolyfill'; // AbortSignal.timeout / any on iOS 15 (utils/abortTimeout.ts): before anything else
 import '../../background';
 import { routeFromData, routeToQuery, webNotification } from './logic';
 

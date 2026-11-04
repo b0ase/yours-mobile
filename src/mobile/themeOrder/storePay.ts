@@ -307,6 +307,9 @@ export async function sendStorePayment(
   }
   const h = await sendThroughWallet(wallet, entry.txid, { log });
   if (h === 'sent' || h === 'pending') {
+    // No verdict yet: it may already be out, and SendWaiting will re-post it later (final check, LOW).
+    if (h === 'pending' && entry.state !== 'sending')
+      await Promise.resolve(deps.markMayBeOut?.(entry.txid)).catch(() => undefined);
     softPut(deps.outbox, { ...entry, state: 'sent' }, log);
     return h;
   }

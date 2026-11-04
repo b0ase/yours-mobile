@@ -21,6 +21,8 @@
  * still land. "Not found" everywhere is "not known".
  */
 
+import { deadline } from '../utils/abortTimeout';
+
 export type Sighting = 'seen' | 'missing' | 'unclear';
 export type ChainLookup = (txid: string) => Promise<Sighting>;
 
@@ -38,14 +40,25 @@ const defaultFetch: F = (u, i) => fetch(u, i);
  * storage writer lock, so a hung WhatsOnChain or ARC must not hold storage. A timeout is an 'unclear' answer.
  */
 export const LOOKUP_TIMEOUT_MS = 8_000;
-const timedInit = (): RequestInit => ({ signal: AbortSignal.timeout(LOOKUP_TIMEOUT_MS) });
+/**
+ * One lookup with a deadline that also works on iOS 15 (no AbortSignal.timeout there: utils/abortTimeout.ts). The
+ * timer is cleared once the answer is in.
+ */
+const timedGet = async (f: F, url: string): Promise<Response> => {
+  const d = deadline(LOOKUP_TIMEOUT_MS);
+  try {
+    return await f(url, { signal: d.signal });
+  } finally {
+    d.clear();
+  }
+};
 
 /** WhatsOnChain: 200 seen (mempool or mined), 404 missing, anything else unclear. */
 export const wocLookup =
   (f: F = defaultFetch): ChainLookup =>
   async (txid) => {
     try {
-      const r = await f(`https://api.whatsonchain.com/v1/bsv/main/tx/hash/${txid}`, timedInit());
+      const r = await timedGet(f, `https://api.whatsonchain.com/v1/bsv/main/tx/hash/${txid}`);
       if (r.status === 404) return 'missing';
       return r.ok ? 'seen' : 'unclear';
     } catch {
@@ -74,7 +87,7 @@ export const arcLookup =
   (f: F = defaultFetch, o: { rejectedIsMissing?: boolean } = {}): ChainLookup =>
   async (txid) => {
     try {
-      const r = await f(`${ARC_URL}/v1/tx/${txid}`, timedInit());
+      const r = await timedGet(f, `${ARC_URL}/v1/tx/${txid}`);
       if (r.status === 404) return 'missing';
       if (!r.ok) return 'unclear';
       const s = String(((await r.json().catch(() => ({}))) as { txStatus?: unknown }).txStatus ?? '');
@@ -93,7 +106,7 @@ export const oneSatLookup =
   (f: F = defaultFetch): ChainLookup =>
   async (txid) => {
     try {
-      const r = await f(`https://api.1sat.app/1sat/beef/${txid}`, timedInit());
+      const r = await timedGet(f, `https://api.1sat.app/1sat/beef/${txid}`);
       return r.status === 404 ? 'missing' : 'unclear';
     } catch {
       return 'unclear';
@@ -108,7 +121,7 @@ export const oneSatPresenceLookup =
   (f: F = defaultFetch): ChainLookup =>
   async (txid) => {
     try {
-      const r = await f(`https://api.1sat.app/1sat/beef/${txid}`, timedInit());
+      const r = await timedGet(f, `https://api.1sat.app/1sat/beef/${txid}`);
       if (r.status === 404) return 'missing';
       return r.ok ? 'seen' : 'unclear';
     } catch {
