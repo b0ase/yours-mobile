@@ -661,3 +661,24 @@ describe('review 07b fixes on the real toolbox', () => {
     expect(await balance(a)).toBe(expected);
   }, 120000);
 });
+
+describe('re-review fix on the real toolbox: a payment with only some of its change rows', () => {
+  test('the walk examines the payment storage knows and adds the change row an interrupted sync left out', async () => {
+    const chain = newChain();
+    const services = makeServices(chain);
+    const { w: a } = await fundedWallet(chain, services);
+    const p = await pay(a, chain, 45_000);
+    mine(chain, await rawOf(a, p.txid!));
+    const change = (await rowsOf(a, p.txid!)).filter((x) => x.change);
+    expect(change.length).toBeGreaterThanOrEqual(2); // the default basket wants many coins, so change is split
+    const expected = await balance(a);
+    // An interrupted sync kept the payment and all but one of its change rows.
+    const lost = change[change.length - 1];
+    const idb = (a.db as unknown as { db: { delete: (s: string, k: number) => Promise<void> } }).db;
+    await idb.delete('outputs', lost.outputId);
+    expect(await balance(a)).toBe(expected - lost.satoshis);
+    const r = await recover(a, chain, services, []);
+    expect(r.restoredSats).toBe(lost.satoshis);
+    expect(await balance(a)).toBe(expected);
+  }, 120000);
+});

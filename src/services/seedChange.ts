@@ -31,10 +31,16 @@
  * noSendChange). A site that names inputs gets random change, so it can't replay a past payment's inputs and read its
  * change script back out of a signable transaction. Wallet-funded store, seal and send payments stay recoverable.
  *
- * A scan never gets stuck (review M2): start points are read again every run, an "unspent" answer older than recheckMs
- * is asked again, an item that fails maxTries runs is given up on (and reported), a scan expires after maxRuns runs or
- * maxAgeMs, and "Start fresh" throws the saved scan away. Runs are per account, WhatsOnChain calls time out, and the
- * claims fit inside the run's time budget. It refuses to run while the remote store is the active one (review L1).
+ * A scan always finishes and never starves (reviews M2 and liveness):
+ *  - start points are read again every run, and seed addresses are read before any coin is looked up;
+ *  - an "unspent" answer is reused within a scan; once the walk has drained, answers older than recheckMs are asked
+ *    again in one pass per scan (claims re-check before writing, so an old answer never adds a spent coin);
+ *  - an item that fails maxTries runs is given up on and reported; a scan "expires" after maxRuns runs or maxAgeMs,
+ *    which only gives those items another chance: queues, spends and examined transactions are kept;
+ *  - a finished scan's next tap starts a new scan that keeps the spends WhatsOnChain reported mined;
+ *  - "Start fresh" throws everything away.
+ * Runs are per account, WhatsOnChain calls time out, and the claims fit inside the run's time budget. It refuses to run
+ * while the remote store is the active one (review L1).
  */
 import { P2PKH, Transaction } from '@bsv/sdk';
 import { Wallet } from '@bsv/wallet-toolbox-client';
@@ -96,7 +102,11 @@ export function registerWalletOriginator(originator: string): void {
   W.bwxWalletOriginators?.add(originator);
 }
 
-export type SpendState = { state: 'unspent' } | { state: 'spent'; by: string } | { state: 'unclear' };
+/** A spend answer; confirmed = WhatsOnChain says the spending transaction is mined (such answers never change). */
+export type SpendState =
+  | { state: 'unspent' }
+  | { state: 'spent'; by: string; confirmed?: boolean }
+  | { state: 'unclear' };
 
 type F = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -164,9 +174,9 @@ export function wocSpentLookup(
           continue;
         }
         if (!r.ok) return { state: 'unclear' };
-        const j = (await r.json()) as { txid?: unknown };
+        const j = (await r.json()) as { txid?: unknown; status?: unknown };
         return typeof j.txid === 'string' && TXID.test(j.txid.toLowerCase())
-          ? { state: 'spent', by: j.txid.toLowerCase() }
+          ? { state: 'spent', by: j.txid.toLowerCase(), confirmed: j.status === 'confirmed' }
           : { state: 'unclear' };
       } catch {
         await sleep(Math.min(8000, 1000 * 2 ** i));
@@ -182,7 +192,7 @@ export type FoundEntry = {
   vout: number;
   satoshis: number;
   /**
-   * unspent: found, not added yet. spent: the chain names a spender, so the walk goes on from there.
+   * unspent: found, not added yet. spent: the chain (or storage) names a spender, so the walk goes on from there.
    * restored: added this scan. already: storage already holds it as spendable. held: storage holds a row for it that
    * this tool leaves alone. pending: its transaction isn't mined yet. failed: adding it failed (tried again next run).
    */
@@ -195,25 +205,29 @@ type Retry = { kind: 'tx' | 'outpoint' | 'address'; id: string; depth: number; t
 
 /** Saved between runs (no keys or derivations: only public outpoints, txids and amounts). */
 export type SeedChangeState = {
-  v: 2;
+  v: 3;
   startedAt: number;
   updatedAt: number;
-  /** Runs of this scan so far; a scan older than maxRuns runs or maxAgeMs starts fresh. */
+  /** Runs since the scan began or last expired; expiry only gives items given up on another chance. */
   runs: number;
   done: boolean;
-  /** Seed addresses whose history is still to be read this run. */
+  /** This scan's one pass re-asking stale "unspent" answers has been made (it runs once the walk has drained). */
+  rechecked: boolean;
+  /** Seed addresses whose history is still to be read this run (read before any coin is looked up). */
   addresses: string[];
   /** Transactions to examine, with their walk depth. */
   txs: [string, number][];
   /** Outpoints whose spender is still to be looked up, with their depth. */
   outpoints: [string, number][];
   examined: string[];
-  /** Spender per outpoint looked up ('' = unspent). */
+  /** Spender per outpoint ('' = unspent). */
   spends: [string, string][];
-  /** When each "unspent" answer was given: older than recheckMs at the start of a run, it is asked again. */
+  /** When each "unspent" answer was given (the recheck pass re-asks those older than recheckMs). */
   unspentAt: [string, number][];
+  /** Outpoints whose spend WhatsOnChain reported mined: kept into the next scan, so a re-scan needn't ask again. */
+  confirmed: string[];
   retry: Retry[];
-  /** Items that failed maxTries runs in a row: skipped for the rest of this scan (Start fresh tries them again). */
+  /** Items that failed maxTries runs: skipped until the scan expires or Start fresh. */
   gaveUp: Retry[];
   found: FoundEntry[];
   tooDeep: number;
@@ -228,23 +242,25 @@ export type ClaimResult = { vout: number; state: FoundEntry['state']; detail?: s
 export type SeedChangeDeps = {
   keyDeriver: SeedKeyDeriver;
   /**
-   * Start points from storage, read on every run. open: outputs looked up on chain. settled: outputs storage holds as
-   * spent by a completed or unproven payment of its own whose change rows it also holds (the walk needn't pass them).
+   * Start points from storage, read on every run. open: outputs whose spender is looked up on chain. settled: outputs
+   * storage holds as spent by a completed or unproven payment of its own, with that payment's txid. The walk takes the
+   * spender from storage (no network call) and still examines it, so change rows missing from storage, all or some, are
+   * found (review L2).
    */
-  storageOutpoints: () => Promise<{ open: string[]; settled: string[] }>;
-  /** Addresses the seed derives (read on every run). */
+  storageOutpoints: () => Promise<{ open: string[]; settled: [string, string][] }>;
+  /** Addresses the seed derives (read on every run, before any coin is looked up). */
   seedAddresses: () => Promise<string[]>;
   /** Txids in an address's history (funding and spending); undefined when it couldn't be read. */
   addressHistory: (address: string) => Promise<string[] | undefined>;
   spentBy: (outpoint: string) => Promise<SpendState>;
   getRawTx: (txid: string) => Promise<number[] | undefined>;
-  /** Add unspent change of one mined transaction to storage (never broadcasts). */
+  /** Add unspent change of one mined transaction to storage (never broadcasts; re-checks unspent first). */
   claim: (txid: string, change: FoundChange[]) => Promise<ClaimResult>;
   /** Push to backups once at the end when something was added. */
   pushBackups?: () => Promise<unknown>;
   /** A reason not to run at all (e.g. the remote store is still the active one), or undefined. */
   refusal?: () => string | undefined;
-  /** Throw away the saved scan and start again ("Start fresh"). */
+  /** Throw the saved scan away, confirmed spends included, and start again ("Start fresh"). */
   fresh?: boolean;
   kv: SeedChangeKV;
   progress?: (step: string) => void;
@@ -257,19 +273,22 @@ export type SeedChangeDeps = {
   maxTxs?: number;
   /** Runs an item may fail before it is given up on (default 3). */
   maxTries?: number;
-  /** A scan starts fresh after this many runs (default 20) or this age (default 2 days). */
+  /**
+   * After this many runs (default 20) or this age (default 2 days) a scan expires: items given up on get another chance.
+   * Walk progress (queues, spends, examined transactions, found change) is always kept.
+   */
   maxRuns?: number;
   maxAgeMs?: number;
   /**
-   * An "unspent" answer older than this (default 10 min) is dropped at the start of a run and asked again: the coin may
-   * have been spent (and that payment lost) since. Taps in quick succession share answers, so a wallet with more coins
-   * than one run can look up still finishes its scan.
+   * Once the walk has drained, "unspent" answers older than this (default 10 min) are asked again, once per scan: the
+   * coin may have been spent, and that payment lost, since. Claims re-check before writing, so a stale answer never adds
+   * a spent coin; it only delays finding a later loss until the end of the walk.
    */
   recheckMs?: number;
 };
 
 export type SeedChangeReport = {
-  /** The whole walk finished (nothing queued or waiting to retry). The next run starts a fresh scan. */
+  /** The whole walk finished (nothing queued or waiting to retry). The next run starts a new scan. */
   done: boolean;
   /** This run stopped at its time budget; the next run carries on from the saved state. */
   paused: boolean;
@@ -291,23 +310,56 @@ export type SeedChangeReport = {
 };
 
 const fresh = (now: number): SeedChangeState => ({
-  v: 2,
+  v: 3,
   startedAt: now,
   updatedAt: now,
   runs: 0,
   done: false,
+  rechecked: false,
   addresses: [],
   txs: [],
   outpoints: [],
   examined: [],
   spends: [],
   unspentAt: [],
+  confirmed: [],
   retry: [],
   gaveUp: [],
   found: [],
   tooDeep: 0,
   stats: { lookups: 0, txs: 0, addresses: 0 },
 });
+
+/**
+ * The state this run starts from.
+ * - Start fresh, nothing saved, or an older format: a new scan.
+ * - The last scan finished: a new scan that keeps only the spends WhatsOnChain reported mined (they never change).
+ * - The scan expired (maxRuns runs or maxAgeMs): the same scan, with items given up on queued again. Nothing else is
+ *   reset, so a long walk never loses its progress.
+ * - Otherwise: carry on.
+ */
+function startState(
+  loaded: SeedChangeState | null,
+  deps: SeedChangeDeps,
+  t0: number,
+  maxRuns: number,
+  maxAgeMs: number,
+) {
+  if (deps.fresh || !loaded || loaded.v !== 3) return fresh(t0);
+  if (loaded.done) {
+    const s = fresh(t0);
+    const confirmed = new Set(loaded.confirmed);
+    s.spends = loaded.spends.filter(([o, by]) => by !== '' && confirmed.has(o));
+    s.confirmed = s.spends.map(([o]) => o);
+    return s;
+  }
+  if (loaded.runs >= maxRuns || t0 - loaded.startedAt > maxAgeMs) {
+    for (const r of loaded.gaveUp.splice(0)) loaded.retry.push({ ...r, tries: 0 });
+    loaded.runs = 0;
+    loaded.startedAt = t0;
+  }
+  return loaded;
+}
 
 const bsv = (sats: number) => (sats / 1e8).toFixed(8).replace(/\.?0+$/, '');
 
@@ -345,22 +397,12 @@ async function runOnce(deps: SeedChangeDeps): Promise<SeedChangeReport> {
   const refused = deps.refusal?.();
   if (refused) return { ...emptyReport(), error: refused };
 
-  const loaded = await deps.kv.load().catch(() => null);
-  const keep =
-    !deps.fresh &&
-    loaded?.v === 2 &&
-    !loaded.done &&
-    loaded.runs < maxRuns &&
-    t0 - loaded.startedAt <= maxAgeMs &&
-    Array.isArray(loaded.gaveUp) &&
-    Array.isArray(loaded.unspentAt);
-  const s = keep ? loaded : fresh(t0);
+  const s = startState(await deps.kv.load().catch(() => null), deps, t0, maxRuns, maxAgeMs);
   s.runs++;
   const examined = new Set(s.examined);
-  // Spends stay known. An "unspent" answer goes stale (the coin may have been spent, and that payment lost, since it was
-  // asked), so one older than recheckMs is dropped and asked again this run.
-  const unspentAt = new Map(s.unspentAt.filter(([, at]) => t0 - at < recheckMs));
-  const spends = new Map(s.spends.filter(([o, by]) => by !== '' || unspentAt.has(o)));
+  const spends = new Map(s.spends);
+  const unspentAt = new Map(s.unspentAt);
+  const confirmed = new Set(s.confirmed);
   const key = (txid: string, vout: number) => `${txid}.${vout}`;
   const found = new Map(s.found.map((f) => [key(f.txid, f.vout), f]));
   const tag = (kind: Retry['kind'], id: string) => `${kind}:${id}`;
@@ -380,6 +422,7 @@ async function runOnce(deps: SeedChangeDeps): Promise<SeedChangeReport> {
     s.examined = [...examined];
     s.spends = [...spends];
     s.unspentAt = [...unspentAt].filter(([o]) => spends.get(o) === '');
+    s.confirmed = [...confirmed].filter((o) => !!spends.get(o));
     s.found = [...found.values()];
     s.updatedAt = now();
     await deps.kv.save(s).catch((e) => log(`[seedChange] saving progress failed: ${String(e)}`));
@@ -424,20 +467,28 @@ async function runOnce(deps: SeedChangeDeps): Promise<SeedChangeReport> {
     //    spent and lost again since), and so do the seed addresses' histories.
     progress('Reading this wallet’s records…');
     const fromStorage = await deps.storageOutpoints();
-    const settled = new Set(fromStorage.settled);
+    const settled = new Map(fromStorage.settled);
     const queued = new Set(s.outpoints.map(([o]) => o));
-    const enqueue = (o: string) => {
-      if (!OUTPOINT.test(o) || settled.has(o) || spends.has(o) || queued.has(o) || gaveUp.has(tag('outpoint', o)))
-        return;
+    const starts: [string, number][] = [];
+    const enqueue = (o: string, into: [string, number][], depth = 0) => {
+      if (!OUTPOINT.test(o) || queued.has(o) || gaveUp.has(tag('outpoint', o))) return;
+      const by = spends.get(o);
+      if (by === '' || (by && examined.has(by))) return; // answered and followed already
       queued.add(o);
-      s.outpoints.unshift([o, 0]); // under the walk in progress: deep chains carry on first
+      into.push([o, depth]);
     };
-    for (const o of fromStorage.open) enqueue(o);
-    // Change found earlier and not yet in the wallet: ask again whether it is still unspent.
-    for (const f of found.values()) if (CLAIMABLE.includes(f.state)) enqueue(key(f.txid, f.vout));
+    for (const o of fromStorage.open) enqueue(o, starts);
+    for (const [o] of fromStorage.settled) enqueue(o, starts);
+    // Change found earlier and not yet in the wallet whose spend isn't known: look it up.
+    for (const f of found.values()) if (CLAIMABLE.includes(f.state)) enqueue(key(f.txid, f.vout), starts);
+    s.outpoints = [...starts, ...s.outpoints]; // under the walk in progress: deep chains carry on first
     progress('Listing the addresses your 12 words make…');
-    for (const a of new Set(await deps.seedAddresses()))
+    const seedScripts = new Set<string>();
+    for (const a of new Set(await deps.seedAddresses())) {
+      const script = p2pkhHex(a);
+      if (script) seedScripts.add(script);
       if (!s.addresses.includes(a) && !gaveUp.has(tag('address', a))) s.addresses.push(a);
+    }
     await save();
 
     let steps = 0;
@@ -446,7 +497,7 @@ async function runOnce(deps: SeedChangeDeps): Promise<SeedChangeReport> {
         await save();
         say();
       }
-      // a. Examine a transaction: does it carry this wallet's change?
+      // a. Examine a transaction: does it carry this wallet's change, or pay a seed address?
       const t = s.txs.pop();
       if (t) {
         const [txid, depth] = t;
@@ -468,54 +519,24 @@ async function runOnce(deps: SeedChangeDeps): Promise<SeedChangeReport> {
         }
         examined.add(txid);
         s.stats.txs++;
+        if (depth + 1 > maxDepth) {
+          s.tooDeep++;
+          continue;
+        }
         for (const c of deterministicChangeOf(deps.keyDeriver, tx)) {
           const k = key(txid, c.vout);
           const f = found.get(k) ?? { txid, vout: c.vout, satoshis: c.satoshis, state: 'unspent' };
           found.set(k, f);
-          const by = spends.get(k);
-          if (by) {
-            // Already known to be spent (a start point looked up earlier): its spender is queued or examined.
-            if (CLAIMABLE.includes(f.state)) f.state = 'spent';
-            continue;
-          }
-          if (settled.has(k)) {
-            // Storage holds it as spent by a completed payment of its own whose change it also holds.
-            if (CLAIMABLE.includes(f.state)) f.state = 'spent';
-            continue;
-          }
-          if (queued.has(k)) continue;
-          if (depth + 1 > maxDepth) {
-            s.tooDeep++;
-            continue;
-          }
-          queued.add(k);
-          s.outpoints.push([k, depth + 1]); // depth first: the walk reaches the unspent tail sooner
+          if (spends.get(k) && CLAIMABLE.includes(f.state)) f.state = 'spent';
+          enqueue(k, s.outpoints, depth + 1); // depth first: the walk reaches the unspent tail sooner
         }
+        // A coin paid to a seed address: whoever spent it may have made this wallet's change.
+        tx.outputs.forEach((out, vout) => {
+          if (seedScripts.has(out.lockingScript.toHex())) enqueue(key(txid, vout), s.outpoints, depth + 1);
+        });
         continue;
       }
-      // b. Look up who spent a coin.
-      const o = s.outpoints.pop();
-      if (o) {
-        const [outpoint, depth] = o;
-        queued.delete(outpoint);
-        if (spends.has(outpoint) || settled.has(outpoint)) continue;
-        const r = await deps.spentBy(outpoint).catch((): SpendState => ({ state: 'unclear' }));
-        s.stats.lookups++;
-        if (r.state === 'unclear') {
-          fail('outpoint', outpoint, depth);
-          continue;
-        }
-        spends.set(outpoint, r.state === 'spent' ? r.by : '');
-        if (r.state === 'unspent') {
-          unspentAt.set(outpoint, now());
-          continue;
-        }
-        const f = found.get(outpoint);
-        if (f && CLAIMABLE.includes(f.state)) f.state = 'spent';
-        if (!examined.has(r.by)) s.txs.push([r.by, depth]);
-        continue;
-      }
-      // c. Read one seed address's history: every transaction in it is examined.
+      // b. Read one seed address's history before looking up any coin, so addresses are never starved.
       const a = s.addresses.pop();
       if (a) {
         progress(`Reading the history of ${a.slice(0, 8)}…`);
@@ -528,11 +549,60 @@ async function runOnce(deps: SeedChangeDeps): Promise<SeedChangeReport> {
         for (const txid of new Set(h)) if (TXID.test(txid) && !examined.has(txid)) s.txs.push([txid, 0]);
         continue;
       }
+      // c. Find who spent a coin: storage's own record of a settled payment, a spend known already, or WhatsOnChain.
+      const o = s.outpoints.pop();
+      if (o) {
+        const [outpoint, depth] = o;
+        queued.delete(outpoint);
+        let by = spends.get(outpoint);
+        if (by === '') continue;
+        if (by === undefined && settled.has(outpoint)) {
+          by = settled.get(outpoint)!;
+          spends.set(outpoint, by);
+        }
+        if (by === undefined) {
+          const r = await deps.spentBy(outpoint).catch((): SpendState => ({ state: 'unclear' }));
+          s.stats.lookups++;
+          if (r.state === 'unclear') {
+            fail('outpoint', outpoint, depth);
+            continue;
+          }
+          if (r.state === 'unspent') {
+            spends.set(outpoint, '');
+            unspentAt.set(outpoint, now());
+            continue;
+          }
+          by = r.by;
+          spends.set(outpoint, by);
+          if (r.confirmed) confirmed.add(outpoint);
+        }
+        const f = found.get(outpoint);
+        if (f && CLAIMABLE.includes(f.state)) f.state = 'spent';
+        if (!examined.has(by)) s.txs.push([by, depth]);
+        continue;
+      }
+      // d. The walk has drained. Once per scan, ask again about coins first seen unspent long enough ago that they may
+      //    have been spent (and that payment lost) since; then carry on walking from what that finds.
+      if (!s.rechecked) {
+        const cutoff = now() - recheckMs;
+        const stale = [...spends].filter(([o, v]) => v === '' && (unspentAt.get(o) ?? 0) < cutoff).map(([o]) => o);
+        if (stale.length) {
+          s.rechecked = true;
+          progress(`Checking ${stale.length} coins again…`);
+          for (const so of stale) {
+            spends.delete(so);
+            unspentAt.delete(so);
+            enqueue(so, s.outpoints);
+          }
+          continue;
+        }
+      }
       break;
     }
     const walkDone = !s.txs.length && !s.outpoints.length && !s.addresses.length && !s.retry.length;
 
-    // 3. Claim change found unspent this run (and any an earlier run couldn't add), inside the run's budget.
+    // 3. Claim change found unspent (and any an earlier run couldn't add), inside the run's budget. The claim asks the
+    //    chain again before it writes anything, so an older "unspent" answer can't add a spent coin.
     const byTx = new Map<string, FoundEntry[]>();
     for (const f of found.values())
       if (CLAIMABLE.includes(f.state) && spends.get(key(f.txid, f.vout)) === '')
@@ -542,7 +612,7 @@ async function runOnce(deps: SeedChangeDeps): Promise<SeedChangeReport> {
     let n = 0;
     for (const [txid, entries] of byTx) {
       if (now() - t0 >= runMs) {
-        claimsLeft = true; // carried over: the next run asks again and claims
+        claimsLeft = true; // carried over to the next run
         break;
       }
       progress(`Adding change ${++n} of ${byTx.size}…`);

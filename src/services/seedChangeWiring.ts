@@ -71,7 +71,7 @@ export function makeSeedChangeDeps(w: SeedChangeWiring): SeedChangeDeps {
 
   const storageOutpoints = async () => {
     const open = new Set<string>();
-    const settled = new Set<string>();
+    const settled = new Map<string, string>();
     // This device's (active) store: outputs, and which spender it knows.
     await withRepairStore(w.storage, async (sp, userId) => {
       const txs = (await sp.findTransactions({ partial: { userId }, noRawTx: true })) as unknown as TxRow[];
@@ -86,17 +86,15 @@ export function makeSeedChangeDeps(w: SeedChangeWiring): SeedChangeDeps {
         rows.push(...page);
         if (page.length < PAGE) break;
       }
-      // Payments whose change rows storage holds: an interrupted sync or a short restore can leave one without them.
-      const withChange = new Set(rows.filter((o) => o.change).map((o) => o.transactionId));
       for (const o of rows) {
         if (!o.txid || !TXID.test(o.txid)) continue;
         const outpoint = `${o.txid}.${o.vout}`;
         const spender = o.spentBy != null ? byId.get(o.spentBy) : undefined;
-        // Stop the walk only at a spender that is done or broadcast and whose change is held; anything else (stuck,
-        // nosend, change rows missing, unknown) is looked up on chain and walked past.
-        const final =
-          !o.spendable && !!spender?.txid && FINAL.includes(spender.status) && withChange.has(spender.transactionId);
-        (final ? settled : open).add(outpoint);
+        // A spender that is done or broadcast is taken from storage (no network call), and the walk still examines it,
+        // so change rows an interrupted sync or short restore left out (all or some) are found. Anything else (stuck,
+        // nosend, sending, unknown) is looked up on chain.
+        if (!o.spendable && spender?.txid && FINAL.includes(spender.status)) settled.set(outpoint, spender.txid);
+        else open.add(outpoint);
       }
     });
     // Backups (the remote): coins it holds as unspent that this device doesn't have.
@@ -126,7 +124,7 @@ export function makeSeedChangeDeps(w: SeedChangeWiring): SeedChangeDeps {
         log(`[seedChange] couldn't read ${name}: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
-    return { open: [...open], settled: [...settled] };
+    return { open: [...open], settled: [...settled] as [string, string][] };
   };
 
   const addressHistory = async (address: string) => {

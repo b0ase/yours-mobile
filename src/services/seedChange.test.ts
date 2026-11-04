@@ -119,7 +119,7 @@ describe('WhatsOnChain spend lookup', () => {
       sleep: async () => undefined,
     });
     expect(await look(`${txid(1)}.0`)).toEqual({ state: 'unspent' });
-    expect(await look(`${txid(1)}.1`)).toEqual({ state: 'spent', by: txid(7) });
+    expect(await look(`${txid(1)}.1`)).toEqual({ state: 'spent', by: txid(7), confirmed: true });
     expect(await look(`${txid(1)}.2`)).toEqual({ state: 'unclear' });
     expect(await look(`${txid(1)}.3`)).toEqual({ state: 'unclear' });
     expect(await look(`${txid(1)}_0`)).toEqual({ state: 'unclear' });
@@ -328,7 +328,13 @@ describe('the walk', () => {
     const c = fakeChain(kd, 3);
     const looked: string[] = [];
     const { deps } = walkDeps(kd, c, {
-      storageOutpoints: async () => ({ open: [c.tail], settled: [`${c.txs[0]}.1`, `${c.txs[1]}.1`] }),
+      storageOutpoints: async () => ({
+        open: [c.tail],
+        settled: [
+          [`${c.txs[0]}.1`, c.txs[1]],
+          [`${c.txs[1]}.1`, c.txs[2]],
+        ],
+      }),
       spentBy: async (o) => {
         looked.push(o);
         const by = c.spent.get(o);
@@ -600,5 +606,194 @@ describe('review 07b fixes: refusal, per-account runs, timeouts, claim budget (L
     registerWalletOriginator('wallet-own.test');
     expect(set.has('wallet-own.test')).toBe(true);
     if (!before) set.delete('wallet-own.test');
+  });
+});
+
+/**
+ * Re-review of 50a37356 (liveness): the reviewer's simulations (model/review/recheck.test.ts and starve.test.ts) with a
+ * simulated clock: 350 ms per WhatsOnChain lookup, 150 ms per transaction fetch, 4-minute runs, taps back to back.
+ * Before the fix: 3000 coins never finished, a seed address was never read, and walks needing more than 20 runs (or 2
+ * days) lost their progress on expiry.
+ */
+function sim(o: {
+  open: number;
+  hops: number;
+  seed?: 'deposit-only' | 'with-spend';
+  maxRuns?: number;
+  maxAgeMs?: number;
+  tapGapMs?: number;
+}) {
+  let clock = 1_000_000;
+  const kd = new KeyDeriver(PrivateKey.fromRandom());
+  const someone = new P2PKH().lock(PrivateKey.fromRandom().toAddress());
+  const raw = new Map<string, number[]>();
+  const spent = new Map<string, string>();
+  const seedAddress = PrivateKey.fromRandom().toAddress();
+  let prev = `${txid(999999)}.0`;
+  const startCoin = prev;
+  let firstHop = '';
+  if (o.seed) {
+    // A deposit to a seed address starts the chain: nothing in storage knows it.
+    const dep = new Transaction();
+    dep.addInput({ sourceTXID: txid(777777), sourceOutputIndex: 0, unlockingScript: someone });
+    dep.addOutput({ lockingScript: new P2PKH().lock(seedAddress), satoshis: 100_000 });
+    raw.set(dep.id('hex'), dep.toBinary());
+    prev = `${dep.id('hex')}.0`;
+  }
+  const deposit = prev.slice(0, 64);
+  let tail = '';
+  for (let i = 0; i < o.hops; i++) {
+    const tx = new Transaction();
+    const [p, v] = prev.split('.');
+    tx.addInput({ sourceTXID: p, sourceOutputIndex: Number(v), unlockingScript: someone });
+    tx.addOutput({ lockingScript: changeScript(kd, [prev], 0), satoshis: 1000 });
+    const id = tx.id('hex');
+    if (!firstHop) firstHop = id;
+    raw.set(id, tx.toBinary());
+    spent.set(prev, id);
+    prev = `${id}.0`;
+    tail = prev;
+  }
+  const open = [...(o.seed ? [] : [startCoin]), ...Array.from({ length: o.open }, (_, i) => `${txid(i + 1)}.0`)];
+  const kv = memKV();
+  const claimed: string[] = [];
+  let lookups = 0;
+  let addressReads = 0;
+  const deps: SeedChangeDeps = {
+    keyDeriver: kd as never,
+    now: () => clock,
+    storageOutpoints: async () => ({ open, settled: [] }),
+    seedAddresses: async () => (o.seed ? [seedAddress] : []),
+    addressHistory: async () => {
+      clock += 500;
+      addressReads++;
+      // WhatsOnChain lists the transactions that spend from the address too; the reviewer's mock listed only the deposit.
+      return o.seed === 'with-spend' ? [deposit, firstHop] : [deposit];
+    },
+    spentBy: async (x) => {
+      clock += 350;
+      lookups++;
+      const by = spent.get(x);
+      return by ? { state: 'spent', by, confirmed: true } : { state: 'unspent' };
+    },
+    getRawTx: async (t) => {
+      clock += 150;
+      return raw.get(t);
+    },
+    claim: async (t, ch) =>
+      ch.map((c) => {
+        claimed.push(`${t}.${c.vout}`);
+        return { vout: c.vout, state: 'restored' as const };
+      }),
+    kv,
+    maxRuns: o.maxRuns,
+    maxAgeMs: o.maxAgeMs,
+  };
+  const run = async () => {
+    const r = await recoverSeedChange(deps);
+    clock += o.tapGapMs ?? 5_000;
+    return r;
+  };
+  return { deps, run, tail, claimed, kv, lookups: () => lookups, addressReads: () => addressReads };
+}
+
+describe('re-review fixes: liveness on big wallets and long walks', () => {
+  test('3000 coins in storage, taps back to back: the scan finishes, each coin asked at most twice', async () => {
+    const s = sim({ open: 3000, hops: 0 });
+    let done = 0;
+    for (let i = 1; i <= 45 && !done; i++) if ((await s.run()).done) done = i;
+    expect(done).toBeGreaterThan(0);
+    expect(done).toBeLessThanOrEqual(12);
+    expect(s.lookups()).toBeLessThanOrEqual(2 * 3001);
+  }, 120000);
+
+  test('3000 coins, taps far apart (over recheckMs): still finishes', async () => {
+    const s = sim({ open: 3000, hops: 0, tapGapMs: 3600_000 });
+    let done = 0;
+    for (let i = 1; i <= 45 && !done; i++) if ((await s.run()).done) done = i;
+    expect(done).toBeGreaterThan(0);
+    expect(done).toBeLessThanOrEqual(14);
+  }, 120000);
+
+  test('a walk longer than maxRuns runs keeps its progress through expiry and claims the tail', async () => {
+    const s = sim({ open: 0, hops: 1500, maxRuns: 2 });
+    let done = 0;
+    let examinedBefore = 0;
+    for (let i = 1; i <= 30 && !done; i++) {
+      const r = await s.run();
+      const ex = s.kv.peek()!.examined.length;
+      expect(ex).toBeGreaterThanOrEqual(examinedBefore); // expiry never throws the walk away
+      examinedBefore = ex;
+      if (r.done) done = i;
+    }
+    expect(done).toBeGreaterThan(2); // took more runs than maxRuns
+    expect(s.claimed).toEqual([s.tail]);
+  }, 120000);
+
+  test('a walk spread over more than maxAgeMs keeps its progress too', async () => {
+    const s = sim({ open: 0, hops: 1500, maxAgeMs: 60_000, tapGapMs: 3600_000 });
+    let done = 0;
+    for (let i = 1; i <= 30 && !done; i++) if ((await s.run()).done) done = i;
+    expect(done).toBeGreaterThan(1);
+    expect(s.claimed).toEqual([s.tail]);
+  }, 120000);
+
+  test('3000 coins in storage + a lost chain reachable only from a seed address: found on the first tap', async () => {
+    for (const seed of ['deposit-only', 'with-spend'] as const) {
+      const s = sim({ open: 3000, hops: 20, seed });
+      await s.run();
+      expect(s.addressReads()).toBe(1); // read before any coin
+      expect(s.claimed).toEqual([s.tail]);
+    }
+  }, 120000);
+
+  test('a finished scan’s next tap keeps mined spends: the chain is walked again without asking for them', async () => {
+    const s = sim({ open: 0, hops: 50 });
+    let r = await s.run();
+    while (!r.done) r = await s.run();
+    const first = s.lookups();
+    expect(first).toBe(51); // 50 spends + the unspent tail
+    r = await s.run(); // a new scan
+    expect(s.lookups() - first).toBe(1); // only the tail is asked again
+    expect(r.alreadySats + r.restoredSats).toBeGreaterThan(0);
+  }, 120000);
+});
+
+describe('re-review fix: a settled spender with only some of its change rows (L2 gap)', () => {
+  test('the walk examines the spender storage knows and finds the change row that is missing', async () => {
+    const kd = new KeyDeriver(PrivateKey.fromRandom());
+    const someone = new P2PKH().lock(PrivateKey.fromRandom().toAddress());
+    const coin = `${txid(42)}.0`;
+    const tx = new Transaction();
+    tx.addInput({ sourceTXID: txid(42), sourceOutputIndex: 0, unlockingScript: someone });
+    tx.addOutput({ lockingScript: someone, satoshis: 1000 });
+    tx.addOutput({ lockingScript: changeScript(kd, [coin], 1), satoshis: 7000 });
+    tx.addOutput({ lockingScript: changeScript(kd, [coin], 2), satoshis: 8000 });
+    const T = tx.id('hex');
+    const looked: string[] = [];
+    const claimed: string[] = [];
+    const deps: SeedChangeDeps = {
+      keyDeriver: kd as never,
+      // Storage: the coin is spent by T (completed), T's change at vout 1 is held, the row for vout 2 is missing.
+      storageOutpoints: async () => ({ open: [`${T}.1`], settled: [[coin, T]] }),
+      seedAddresses: async () => [],
+      addressHistory: async () => [],
+      spentBy: async (o) => {
+        looked.push(o);
+        return { state: 'unspent' };
+      },
+      getRawTx: async (t) => (t === T ? tx.toBinary() : undefined),
+      claim: async (t, ch) =>
+        ch.map((c) => {
+          claimed.push(`${t}.${c.vout}`);
+          return { vout: c.vout, state: c.vout === 1 ? ('already' as const) : ('restored' as const) };
+        }),
+      kv: memKV(),
+    };
+    const r = await recoverSeedChange(deps);
+    expect(looked).not.toContain(coin); // storage's spender used, no network call
+    expect(claimed).toContain(`${T}.2`);
+    expect(r.restoredSats).toBe(8000);
+    expect(r.alreadySats).toBe(7000);
   });
 });
