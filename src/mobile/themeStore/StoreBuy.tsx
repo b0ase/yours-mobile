@@ -8,6 +8,7 @@ import { playChime } from '../../components/sent/chime';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { artDataUri, receiptArtUrl } from '../storeReceipt/art';
 import { getBuyQuote, payBuyQuote, type BuyQuote, type BuyResult } from '../themeOrder/api';
+import { MoveToDeviceNotice } from '../../components/MoveToDeviceNotice';
 
 const f: typeof fetch = (u, i) => fetch(u, i);
 
@@ -248,6 +249,7 @@ export function BuySheet({
           <Chip>Yours to keep</Chip>
           <Chip>Paid in BSV</Chip>
         </div>
+        {step.k === 'error' && /moving to this device/i.test(step.msg) && <MoveToDeviceNotice />}
       </ApprovalCard>
     </div>,
     document.body,

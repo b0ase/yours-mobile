@@ -47,6 +47,8 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
   let pushTimer: unknown = null;
   let failures = 0;
   let pendingPush = false;
+  /** When a push last went through (ms), 0 before the first: "Up to date" needs one with nothing waiting. */
+  let lastPushOkAt = 0;
 
   const retryLater = () => {
     const wait = BACKOFF_MS[Math.min(failures - 1, BACKOFF_MS.length - 1)];
@@ -70,6 +72,7 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
       pendingPush = false;
       await deps.push();
       failures = 0;
+      if (!pendingPush) lastPushOkAt = Date.now();
       return { ok: true, pulled, pushed: true };
     } catch (e) {
       failures++;
@@ -123,7 +126,7 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
       else pendingPush = true; // a back-off retry is already scheduled and will carry it
     },
     /** For tests and diagnostics. */
-    state: () => ({ failures, pendingPush, scheduled: !!pushTimer, running: !!running }),
+    state: () => ({ failures, pendingPush, scheduled: !!pushTimer, running: !!running, lastPushOkAt }),
   };
 }
 

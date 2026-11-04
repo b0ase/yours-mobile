@@ -894,6 +894,19 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
  * until the next service-worker start, so a rebuild after the failure can't loop back into the same switch.
  */
 const switchFailedThisSession = new Set<string>();
+/**
+ * Review 4 Nov 2026 (F4): a failed move to this device is retried with backoff (1, 2, 5, 10, 30 minutes), and the user
+ * can retry at once ("Retry moving this account to this device": STORAGE_MOVE_TO_DEVICE). Never a silent permanent
+ * refusal: payments say why they wait and where the retry is.
+ */
+const MOVE_BACKOFF_MS = [60_000, 120_000, 300_000, 600_000, 1_800_000];
+const moveFailures = new Map<string, { failures: number; nextAt: number; reason?: string }>();
+const moveInBackoff = (id: string) => (moveFailures.get(id)?.nextAt ?? 0) > Date.now();
+const noteMoveFailed = (id: string, reason?: string) => {
+  const failures = (moveFailures.get(id)?.failures ?? 0) + 1;
+  const wait = MOVE_BACKOFF_MS[Math.min(failures - 1, MOVE_BACKOFF_MS.length - 1)];
+  moveFailures.set(id, { failures, nextAt: Date.now() + wait, reason: reason ?? moveFailures.get(id)?.reason });
+};
 
 /**
  * The switch to this device's store while it runs. A master backup closes the live wallet to export each account;
@@ -905,6 +918,7 @@ let storageSwitch: Promise<void> | null = null;
 /** After a failed switch: if the active store no longer answers, rebuild the wallet once (it stays on the backup). */
 const recoverAfterFailedSwitch = async (ctx: NonNullable<typeof accountContext>, id: string) => {
   switchFailedThisSession.add(id);
+  noteMoveFailed(id);
   const works = await summarizeActive(ctx.baseWallet as never).then(
     () => true,
     () => false,
@@ -925,7 +939,8 @@ const settleLocalStore = (ctx: NonNullable<typeof accountContext>): Promise<Ensu
   const config = account?.storageConfig as (StorageConfig & { localFirst?: boolean }) | undefined;
   return ensureLocalStore({
     account: () => (account ? { id: account.addresses.identityAddress, config } : null),
-    failedThisSession: (id) => switchFailedThisSession.has(id),
+    // Backoff, not a lockout: the next open, payment or the user's Retry tries again (review F4).
+    failedThisSession: (id) => moveInBackoff(id),
     backupInFlight: () => masterBackupInFlight,
     isLocalActive: () => ctx.storage.isActiveStorageProvider(),
     switchVerified: (remoteUrl) => {
@@ -948,7 +963,29 @@ const settleLocalStore = (ctx: NonNullable<typeof accountContext>): Promise<Ensu
 
 const preferLocalStorage = async (ctx: NonNullable<typeof accountContext>) => {
   const r = await settleLocalStore(ctx);
-  if (!r.ok) console.warn('[background] storage: this device is not the active store yet:', r);
+  const id = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress;
+  if (r.ok && id) moveFailures.delete(id);
+  if (!r.ok) {
+    console.warn('[background] storage: this device is not the active store yet:', r);
+    const entry = id ? moveFailures.get(id) : undefined;
+    if (entry && r.reason) entry.reason = r.reason;
+  }
+};
+
+/** Where the move to this device stands, for the "Retry moving this account to this device" notice. */
+const moveStatus = () => {
+  const ctx = accountContext;
+  const id = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress ?? '';
+  const f = moveFailures.get(id);
+  const backup = ctx?.backupState() ?? { backupConfigured: false, pendingPush: false, failures: 0, lastPushOkAt: 0 };
+  return {
+    onDevice: !!ctx?.storage.isActiveStorageProvider(),
+    moving: !!storageSwitch,
+    failures: f?.failures ?? 0,
+    nextRetryAt: f?.nextAt ?? 0,
+    reason: f?.reason ?? null,
+    backup,
+  };
 };
 
 /**
@@ -2998,6 +3035,8 @@ if (!(
       'STORAGE_GET_INFO',
       'STORAGE_SYNC_BACKUPS',
       'STORE_BACKUP_BEFORE_SEND',
+      'STORAGE_MOVE_STATUS',
+      'STORAGE_MOVE_TO_DEVICE',
       'STORAGE_REPAIR_WALLET',
       'STORAGE_REPAIR_SYNC',
       'STORAGE_RECOVER_MINED',
@@ -3365,6 +3404,26 @@ if (!(
           return true;
         case 'STORAGE_SYNC_BACKUPS':
           processStorageSyncBackups(sendResponse);
+          return true;
+        case 'STORAGE_MOVE_STATUS':
+          sendResponse({ type: 'STORAGE_MOVE_STATUS', success: true, data: moveStatus() });
+          return true;
+        case 'STORAGE_MOVE_TO_DEVICE':
+          // "Retry moving this account to this device": now, whatever the backoff says (review F4).
+          (async () => {
+            try {
+              await ensureWallet(true);
+              const id = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress;
+              if (id) {
+                const f = moveFailures.get(id);
+                if (f) f.nextAt = 0;
+              }
+              const ok = await ensureLocalForPayment();
+              sendResponse({ type: 'STORAGE_MOVE_TO_DEVICE', success: ok, data: moveStatus(), error: ok ? undefined : moveStatus().reason ?? 'not moved yet' });
+            } catch (error) {
+              sendResponse({ type: 'STORAGE_MOVE_TO_DEVICE', success: false, error: error instanceof Error ? error.message : String(error) });
+            }
+          })();
           return true;
         case 'STORE_BACKUP_BEFORE_SEND':
           // A Store payment is broadcast only after its rows (change derivation) are in the backup (P0, 3 Nov 2026;

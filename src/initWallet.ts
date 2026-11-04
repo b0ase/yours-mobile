@@ -1,4 +1,4 @@
-import { repairNullTxids, type NullTxidRepairReport } from './services/nullTxidRepair';
+import { missingLogKV, repairNullTxids, type NullTxidRepairReport } from './services/nullTxidRepair';
 import { openAccountPermissionStore } from './services/accountPermissionStore';
 import { openSpendLedger, withLocalSpendLedger } from './services/spendLedger';
 import { rememberRefusals } from './services/broadcastRefusals';
@@ -22,7 +22,7 @@ import {
   type BackupBeforeSend,
   type DeviceSyncResult,
 } from './services/deviceSync';
-import { forceLegacyActionBatch } from './services/actionBatchMode';
+import { forceLegacyActionBatch, requireLegacyForNoSend } from './services/actionBatchMode';
 import { requireLocalStoreForChange } from './services/localFirst';
 import { recheckRefusals } from './services/refusalRecheck';
 import { expiryLookups } from './services/unsentGuard';
@@ -202,6 +202,8 @@ export interface AccountContext {
   syncDevices: () => Promise<DeviceSyncResult>;
   /** Push this device's rows to the backup now; a Store payment is broadcast only when this is ok (deviceSync.ts). */
   backupBeforeSend: () => Promise<BackupBeforeSend>;
+  /** The backup's state for the honest copy: configured, a push waiting, failures, the last good push. */
+  backupState: () => { backupConfigured: boolean; pendingPush: boolean; failures: number; lastPushOkAt: number };
   /** Restore actions storage marked failed whose transaction is mined (services/recoverFailed.ts). */
   recoverFailed: () => Promise<RecoverReport>;
   /** Recover one mined payment by txid from the derivation any reachable store holds (services/recoverByTxid.ts). */
@@ -411,7 +413,9 @@ export const initWallet = async (
   // No payment may live only in memory: every noSend action is written to storage at signing (P0, 3 Nov 2026: the
   // owner's $1 theme test lost its change on a reload; services/actionBatchMode.ts).
   if (!forceLegacyActionBatch(baseWallet))
-    console.error('[initWallet] action batches could not be set to legacy: noSend payments may live only in memory');
+    console.error('[initWallet] action batches could not be set to legacy: noSend payments are refused');
+  // …and if that ever fails, a noSend payment is refused rather than held in memory (review 4 Nov 2026, F10).
+  requireLegacyForNoSend(baseWallet);
   mark(
     `createWebWallet done; active=${storage.getActiveStoreName?.() ?? '?'} stores=${JSON.stringify(
       storage.getStores?.().map((s) => ({ name: s.storageName, active: s.isActive, enabled: s.isEnabled })) ?? [],
@@ -1251,6 +1255,15 @@ export const initWallet = async (
     sweepDeposits: () => sweepDeposit.execute(actionCtx, {}),
     creditArriving: () => runReceiveGuard(),
     syncDevices: () => deviceSync.syncNow(),
+    backupState: () => {
+      const st = deviceSync.state();
+      return {
+        backupConfigured: (backups?.length ?? 0) > 0,
+        pendingPush: st.pendingPush || st.scheduled || st.running,
+        failures: st.failures,
+        lastPushOkAt: st.lastPushOkAt,
+      };
+    },
     backupBeforeSend: () =>
       backupBeforeSend({
         deviceActive: () => storage.isActiveStorageProvider(),
@@ -1402,6 +1415,8 @@ export const initWallet = async (
             return held;
           }),
         knownOnChain: (txid) => knownOnChain(txid),
+        // A signed action is aborted only after repeated "not found" answers over 30+ minutes (review 4 Nov, F5).
+        missingLog: missingLogKV(baseWallet.keyDeriver.identityKey),
         log: (m, d) => console.warn(m, d ?? ''),
       });
     },

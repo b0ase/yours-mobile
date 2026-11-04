@@ -225,3 +225,26 @@ describe('pushNow / backupBeforeSend: a Store payment is broadcast only after it
     });
   });
 });
+
+describe('the backup state for the honest copy (review 4 Nov 2026, F11)', () => {
+  test('lastPushOkAt is set only by a push that went through', async () => {
+    let fail = true;
+    const sync = createDeviceSync({
+      applies: () => true,
+      ensureBackup: async () => true,
+      pull: async () => undefined,
+      push: async () => {
+        if (fail) throw new Error('offline');
+      },
+      setTimer: () => 0,
+      clearTimer: () => undefined,
+    });
+    await sync.pushNow();
+    expect(sync.state().lastPushOkAt).toBe(0);
+    expect(sync.state().failures).toBe(1);
+    fail = false;
+    await sync.pushNow();
+    expect(sync.state().lastPushOkAt).toBeGreaterThan(0);
+    expect(sync.state().failures).toBe(0);
+  });
+});

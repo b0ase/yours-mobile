@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import {
+  DEVICE_DATA_COPY,
+  deviceDataState,
+  LOCAL_STORE_NEEDED_MESSAGE,
   DEVICE_DATA_NOTE,
   LocalStoreNeededError,
   ensureLocalStore,
@@ -166,9 +169,35 @@ describe('HARD RULE: no payment builds change while the remote store is active',
     expect(DEVICE_DATA_NOTE).toBe(
       "This account's change may need your device data. Keep this device until it shows Up to date.",
     );
-    expect(readFileSync('src/pages/Settings.tsx', 'utf8')).toContain('onDeviceStore={isOnDeviceStore(');
+    expect(readFileSync('src/pages/Settings.tsx', 'utf8')).toMatch(/<ShowSeedWords[\s\S]*?showDeviceData[\s\S]*?\/>/);
     expect(readFileSync('src/pages/onboarding/RestoreAccount.tsx', 'utf8')).toContain(
-      '<DeviceDataNote onDevice={false} />',
+      '<DeviceDataNote state="remote" />',
     );
+  });
+});
+
+describe('review 4 Nov 2026', () => {
+  test('F11: the copy says where the records really are', () => {
+    const b = { backupConfigured: true, pendingPush: false, failures: 0, lastPushOkAt: 1 };
+    expect(deviceDataState({ onDevice: false, ...b })).toBe('remote');
+    expect(deviceDataState({ onDevice: true, ...b })).toBe('up-to-date');
+    expect(deviceDataState({ onDevice: true, ...b, backupConfigured: false })).toBe('device-only');
+    expect(deviceDataState({ onDevice: true, ...b, pendingPush: true })).toBe('device-only');
+    expect(deviceDataState({ onDevice: true, ...b, failures: 2 })).toBe('device-only');
+    expect(deviceDataState({ onDevice: true, ...b, lastPushOkAt: 0 })).toBe('device-only');
+    expect(DEVICE_DATA_COPY['device-only']).toBe(DEVICE_DATA_NOTE);
+    expect(DEVICE_DATA_COPY.remote).toMatch(/online backup/);
+  });
+
+  test('F4: never a silent permanent refusal: the message names the retry; failures back off; the retry is wired', () => {
+    expect(LOCAL_STORE_NEEDED_MESSAGE).toMatch(/Retry moving this account to this device/);
+    expect(LOCAL_STORE_NEEDED_MESSAGE).toMatch(/Nothing was sent/);
+    const bg = readFileSync('src/background.ts', 'utf8');
+    expect(bg).toContain('const MOVE_BACKOFF_MS = [60_000, 120_000, 300_000, 600_000, 1_800_000];');
+    expect(bg).toContain('failedThisSession: (id) => moveInBackoff(id),');
+    expect(bg).toMatch(/'STORAGE_MOVE_STATUS',\s*'STORAGE_MOVE_TO_DEVICE',/); // extension pages only
+    expect(bg).toContain("case 'STORAGE_MOVE_TO_DEVICE':");
+    for (const page of ['src/pages/BsvWallet.tsx', 'src/pages/StorageStatus.tsx', 'src/mobile/themeStore/StoreBuy.tsx'])
+      expect(readFileSync(page, 'utf8')).toContain('<MoveToDeviceNotice');
   });
 });

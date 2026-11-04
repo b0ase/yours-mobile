@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'fs';
 import {
   arcLookup,
+  chainVerdict,
   chainHasSeen,
   chainMayHave,
   chainSaysUnknown,
@@ -90,8 +91,11 @@ describe('the 16:17 scenario: the server broadcast, then answered with an error'
   test('theme order client: the wallet sends Store payments itself and never aborts one (P0, 3 Nov 2026)', () => {
     const src = readFileSync('src/mobile/themeOrder/api.ts', 'utf8');
     expect(src).not.toContain("e.code === 'broadcast_failed')");
-    // No abort path at all: a signed Store payment is backed up, sent by the wallet, claimed, or kept to finish later.
-    expect(src).not.toMatch(/releasePayment|abortAction|releaseAfterHandoff/);
+    // No abort path for a payment that may have gone out: the only release is of one the Store refused BEFORE any
+    // broadcast (claim intent), and it goes through releaseAfterHandoff's ~30 s chain check (review 4 Nov 2026).
+    expect(src).not.toMatch(/releasePayment|abortAction/);
+    expect(src.match(/releaseAfterHandoff\(/g)?.length).toBe(1);
+    expect(src).toMatch(/releaseAfterHandoff\(wallet, txid, \{\s*notBroadcast: true/);
     expect(src.match(/signStorePayment\(/g)?.length).toBe(2);
     expect(src).toContain('sendStorePayment(');
   });
@@ -177,7 +181,7 @@ describe('"seen" means the network has it (P0, 3 Nov 2026)', () => {
     expect(await oneSatPresenceLookup(respond(200))(TXID)).toBe('seen');
   });
 
-  test('ARC: SEEN / ACCEPTED / MINED are seen; QUEUED / ANNOUNCED are unclear; 404 / REJECTED missing', async () => {
+  test('ARC: SEEN / ACCEPTED / MINED are seen; QUEUED / ANNOUNCED unclear; 404 missing; REJECTED missing only in retried checks', async () => {
     for (const s of ['SEEN_ON_NETWORK', 'SEEN_MULTIPLE_NODES', 'ACCEPTED_BY_NETWORK', 'MINED'])
       expect(await arcLookup(respond(200, { txStatus: s }))(TXID)).toBe('seen');
     for (const s of [
@@ -189,7 +193,9 @@ describe('"seen" means the network has it (P0, 3 Nov 2026)', () => {
       'SEEN_IN_ORPHAN_MEMPOOL',
     ])
       expect(await arcLookup(respond(200, { txStatus: s }))(TXID)).toBe('unclear');
-    expect(await arcLookup(respond(200, { txStatus: 'REJECTED' }))(TXID)).toBe('missing');
+    // One snapshot: a GorillaPool refusal says nothing about the wallet's own broadcaster (review F1/F5).
+    expect(await arcLookup(respond(200, { txStatus: 'REJECTED' }))(TXID)).toBe('unclear');
+    expect(await arcLookup(respond(200, { txStatus: 'REJECTED' }), { rejectedIsMissing: true })(TXID)).toBe('missing');
     expect(await arcLookup(respond(404))(TXID)).toBe('missing');
     expect(await arcLookup(respond(500))(TXID)).toBe('unclear');
     expect(await arcLookup(offline)(TXID)).toBe('unclear');
@@ -292,5 +298,29 @@ describe('sendThroughWallet: the wallet broadcasts a stored payment and says wha
         quiet,
       ),
     ).toBe('unknown');
+  });
+});
+
+describe('review 4 Nov 2026: refusals and releases need repeated answers', () => {
+  const say = (...a: Sighting[]) => a.map((x) => async () => x);
+  const fast = { delaysMs: [0, 1, 1], sleep: async () => undefined };
+
+  test('chainVerdict: seen as soon as any retry sees it; missing only when every lookup says so on every retry', async () => {
+    expect(await chainVerdict(TXID, say('missing', 'missing'), fast)).toBe('missing');
+    expect(await chainVerdict(TXID, say('missing', 'unclear'), fast)).toBe('unclear');
+    let n = 0;
+    const lagging = async (): Promise<Sighting> => (++n >= 3 ? 'seen' : 'missing');
+    expect(await chainVerdict(TXID, [lagging], fast)).toBe('seen'); // WhatsOnChain caught up on the third look
+    expect(await chainVerdict('not-a-txid', say('missing'), fast)).toBe('unclear');
+  });
+
+  test('a WhatsOnChain 429 (or 5xx) is unclear, never missing', async () => {
+    const r429 = async () => new Response('rate limited', { status: 429 });
+    const r503 = async () => new Response('', { status: 503 });
+    expect(await wocLookup(r429)(TXID)).toBe('unclear');
+    expect(await wocLookup(r503)(TXID)).toBe('unclear');
+    expect(
+      await chainMayHave(TXID, [wocLookup(r429), arcLookup(async () => new Response('{}', { status: 404 }))]),
+    ).toBe(true);
   });
 });

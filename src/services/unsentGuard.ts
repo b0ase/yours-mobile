@@ -59,11 +59,13 @@ export const ARC_ACCEPTED = new Set([
 export const ARC_URL = 'https://arc.gorillapool.io';
 
 /**
- * ARC's record (GorillaPool, the broadcaster our servers use): an accepted status is seen; 404 or REJECTED /
- * DOUBLE_SPEND is missing; any other status (ARC holds it, the network may not) or error is unclear.
+ * ARC's record (GorillaPool, the broadcaster our servers use): an accepted status is seen; 404 is missing; any other
+ * status (ARC holds it, the network may not) or error is unclear. REJECTED / DOUBLE_SPEND is unclear too unless
+ * `rejectedIsMissing` (review 4 Nov 2026, F1/F5): a GorillaPool refusal says nothing about the wallet's own broadcaster,
+ * so it may count as "missing" only inside a retried check (chainSaysUnknown, chainVerdict), never on one snapshot.
  */
 export const arcLookup =
-  (f: F = defaultFetch): ChainLookup =>
+  (f: F = defaultFetch, o: { rejectedIsMissing?: boolean } = {}): ChainLookup =>
   async (txid) => {
     try {
       const r = await f(`${ARC_URL}/v1/tx/${txid}`);
@@ -71,7 +73,7 @@ export const arcLookup =
       if (!r.ok) return 'unclear';
       const s = String(((await r.json().catch(() => ({}))) as { txStatus?: unknown }).txStatus ?? '');
       if (ARC_ACCEPTED.has(s)) return 'seen';
-      return /REJECTED|DOUBLE_SPEND/i.test(s) ? 'missing' : 'unclear';
+      return o.rejectedIsMissing && /REJECTED|DOUBLE_SPEND/i.test(s) ? 'missing' : 'unclear';
     } catch {
       return 'unclear';
     }
@@ -108,12 +110,40 @@ export const oneSatPresenceLookup =
     }
   };
 
-/** Is it on the network: WhatsOnChain and ARC only. */
+/** Is it on the network, one snapshot: WhatsOnChain and ARC (an ARC refusal is unclear here). */
 export const chainLookups = (f?: F): ChainLookup[] => [wocLookup(f), arcLookup(f)];
-/** Abort checks (every one must say missing) and settle checks (any may say seen): chain plus 1Sat's store. */
-export const defaultLookups = (f?: F): ChainLookup[] => [wocLookup(f), arcLookup(f), oneSatLookup(f)];
-/** unsentExpiry's lookups (see oneSatPresenceLookup). */
-export const expiryLookups = (f?: F): ChainLookup[] => [wocLookup(f), arcLookup(f), oneSatPresenceLookup(f)];
+/** For retried checks only (chainVerdict, chainSaysUnknown): an ARC refusal counts as missing there. */
+export const releaseLookups = (f?: F): ChainLookup[] => [wocLookup(f), arcLookup(f, { rejectedIsMissing: true })];
+/**
+ * Abort checks (every one must say missing on every retry: chainSaysUnknown) and settle checks (any may say seen):
+ * chain plus 1Sat's store.
+ */
+export const defaultLookups = (f?: F): ChainLookup[] => [...releaseLookups(f), oneSatLookup(f)];
+/** unsentExpiry's lookups (see oneSatPresenceLookup); its releases go through chainSaysUnknown's retries. */
+export const expiryLookups = (f?: F): ChainLookup[] => [...releaseLookups(f), oneSatPresenceLookup(f)];
+
+/**
+ * The chain's verdict over ~30 s of retries (review 4 Nov 2026, F1): 'seen' as soon as any lookup sees it; 'missing'
+ * only when every lookup says missing on every retry; otherwise 'unclear'. A refusal is believed only on 'missing'.
+ */
+export async function chainVerdict(
+  txid: string,
+  lookups: ChainLookup[] = releaseLookups(),
+  o: { delaysMs?: number[]; sleep?: (ms: number) => Promise<void> } = {},
+): Promise<Sighting> {
+  if (!TXID.test(txid) || !lookups.length) return 'unclear';
+  const sleep = o.sleep ?? sleepMs;
+  let allMissing = true;
+  for (const d of o.delaysMs ?? RELEASE_CHECK_DELAYS_MS) {
+    if (d > 0) await sleep(d);
+    for (const look of lookups) {
+      const r = await look(txid).catch((): Sighting => 'unclear');
+      if (r === 'seen') return 'seen';
+      if (r !== 'missing') allMissing = false;
+    }
+  }
+  return allMissing ? 'missing' : 'unclear';
+}
 
 /**
  * Might the network have this txid? (P0, 3 Nov 2026.) False only when every lookup cleanly says "not found"; a sighting

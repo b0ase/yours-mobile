@@ -818,10 +818,10 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
       >
         Your wallet has been successfully restored.
       </motion.p>
-      {/* Until this account is on this device's store its change may need the device data (services/localFirst.ts). */}
+      {/* A restored account starts on the online backup and moves to this device when it opens (services/localFirst.ts). */}
       {!isOnDeviceStore(chromeStorageService.getCurrentAccountObject().account?.storageConfig) && (
         <div className="w-full">
-          <DeviceDataNote onDevice={false} />
+          <DeviceDataNote state="remote" />
         </div>
       )}
 

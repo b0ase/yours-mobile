@@ -22,10 +22,10 @@ export type ShowSeedWordsProps = {
   onDone: () => void;
   onCopied?: (text: string) => void;
   /**
-   * Is this account on this device's store? false = its change may need this device's data, so the words alone may
-   * not bring all of it back yet (services/localFirst.ts). Undefined: no note.
+   * Show where this account's records are (DeviceDataNote: on the online backup, on this device only, or Up to date):
+   * the words alone may not bring back change that only this device's data holds (services/localFirst.ts).
    */
-  onDeviceStore?: boolean;
+  showDeviceData?: boolean;
 };
 
 type Step = 'warn' | 'confirm' | 'show';
@@ -40,7 +40,7 @@ export const ShowSeedWords = ({
   readMnemonic,
   onDone,
   onCopied,
-  onDeviceStore,
+  showDeviceData,
 }: ShowSeedWordsProps) => {
   const [step, setStep] = useState<Step>('warn');
   const [password, setPassword] = useState('');
@@ -136,7 +136,7 @@ export const ShowSeedWords = ({
     return (
       <div className="w-full">
         {header}
-        {onDeviceStore !== undefined && <DeviceDataNote onDevice={onDeviceStore} />}
+        {showDeviceData && <DeviceDataNote />}
         <div
           className="rounded-xl p-4 mb-4"
           style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)' }}

@@ -24,15 +24,41 @@ export const remoteUrlOf = (c: StoreConfigLike): string | undefined => c?.active
 /** Is this account's active store this device's own? (No storage config at all is a device-only account.) */
 export const isOnDeviceStore = (c: StoreConfigLike): boolean => !c?.activeRemote;
 
-/** Shown on the restore screen and in Show my 12 words for an account not yet on this device's store. */
-export const DEVICE_DATA_NOTE =
-  "This account's change may need your device data. Keep this device until it shows Up to date.";
-/** The same place once the account is on this device's store. */
-export const DEVICE_DATA_UP_TO_DATE = "Up to date. This account's records are on this device and in your backup.";
+/**
+ * Where this account's records are, for the honest copy (review 4 Nov 2026, F11):
+ *  - 'remote': still on the online backup store (it moves to this device on open);
+ *  - 'device-only': on this device, but the backup is not confirmed up to date (no backup set up, a push waiting or
+ *    failing): the change of recent payments may exist only in this device's data;
+ *  - 'up-to-date': on this device and the last push to the backup went through with nothing waiting.
+ */
+export type DeviceDataState = 'remote' | 'device-only' | 'up-to-date';
+
+export const DEVICE_DATA_COPY: Record<DeviceDataState, string> = {
+  remote:
+    "This account's records are still on the online backup. They move to this device when the wallet opens; payments wait until then.",
+  'device-only': "This account's change may need your device data. Keep this device until it shows Up to date.",
+  'up-to-date': "Up to date. This account's records are on this device and in your backup.",
+};
+/** The owner's copy, word for word (the 'device-only' state). */
+export const DEVICE_DATA_NOTE = DEVICE_DATA_COPY['device-only'];
+export const DEVICE_DATA_UP_TO_DATE = DEVICE_DATA_COPY['up-to-date'];
+
+/** The state from the background's answers (STORAGE_MOVE_STATUS onDevice + the backup's last push). */
+export function deviceDataState(s: {
+  onDevice: boolean;
+  backupConfigured: boolean;
+  pendingPush: boolean;
+  failures: number;
+  lastPushOkAt: number;
+}): DeviceDataState {
+  if (!s.onDevice) return 'remote';
+  if (!s.backupConfigured || s.pendingPush || s.failures > 0 || !s.lastPushOkAt) return 'device-only';
+  return 'up-to-date';
+}
 
 export const LOCAL_STORE_NEEDED_CODE = 'WERR_LOCAL_STORE_NEEDED';
 export const LOCAL_STORE_NEEDED_MESSAGE =
-  "This account is still moving to this device, so it can't make payments yet. Keep the app open until it shows Up to date, then try again. Nothing was sent.";
+  'This account is still moving to this device, so it can\'t make payments yet. Nothing was sent. Tap "Retry moving this account to this device" (on your wallet\'s home, or Settings › Remote backup) to try now; it also retries by itself.';
 
 export class LocalStoreNeededError extends Error {
   readonly code = LOCAL_STORE_NEEDED_CODE;
@@ -46,7 +72,7 @@ export class LocalStoreNeededError extends Error {
 export type EnsureLocalDeps = {
   /** The open account: its id and storage config, or null. */
   account: () => { id: string; config: StoreConfigLike } | null;
-  /** A switch for this account already broke storage this session: don't try again until the next start. */
+  /** A recent move for this account failed: wait for its backoff (the user's Retry clears it). */
   failedThisSession: (id: string) => boolean;
   /** A master backup is exporting accounts: never switch under it. */
   backupInFlight: () => boolean;

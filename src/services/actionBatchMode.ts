@@ -31,3 +31,28 @@ export function forceLegacyActionBatch(wallet: unknown): boolean {
 /** True when every noSend action this wallet signs is written to storage at once. */
 export const actionBatchIsLegacy = (wallet: unknown): boolean =>
   (wallet as { actionBatch?: BatchController } | null)?.actionBatch?.mode === 'legacy';
+
+export const NOSEND_UNSAFE_MESSAGE =
+  "This wallet can't keep an unsent payment safely right now, so nothing was signed. Close and reopen the app, then try again.";
+
+/**
+ * Refuse every noSend createAction while action batches are not 'legacy' (review 4 Nov 2026, F10): such a payment would
+ * live only in memory and a reload would lose its change. Checked live on each call. Returns false when there is no
+ * createAction to wrap.
+ */
+export function requireLegacyForNoSend(wallet: unknown): boolean {
+  const w = wallet as {
+    createAction?: (args: { options?: { noSend?: boolean } } | undefined, originator?: string) => Promise<unknown>;
+  } | null;
+  if (!w || typeof w.createAction !== 'function') return false;
+  const original = w.createAction.bind(w);
+  w.createAction = async (args, originator) => {
+    if (args?.options?.noSend === true && !actionBatchIsLegacy(wallet)) {
+      const e = new Error(NOSEND_UNSAFE_MESSAGE);
+      e.name = 'WERR_NOSEND_UNSAFE';
+      throw e;
+    }
+    return original(args, originator);
+  };
+  return true;
+}

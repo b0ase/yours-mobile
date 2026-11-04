@@ -76,7 +76,6 @@ import { accountNamesFor } from '../mobile/names/accountNames';
 import { currentAccountBackupName } from '../utils/accountBackupName';
 import { useSnackbar } from '../hooks/useSnackbar';
 import { ShowSeedWords } from '../components/ShowSeedWords';
-import { isOnDeviceStore } from '../services/localFirst';
 import { saveBackupFile, saveRoute } from '../mobile/backup/backupFile';
 import { requestSettingsScreen, searchSettings, type SettingsEntry } from '../utils/settingsSearch';
 import { PermissionsManager } from './PermissionsManager';
@@ -2110,7 +2109,7 @@ export const Settings = () => {
         readMnemonic={async () => (await keysService.retrieveKeys()).mnemonic}
         onDone={() => setPage('main')}
         onCopied={(text) => addSnackbar(text, 'info')}
-        onDeviceStore={isOnDeviceStore(chromeStorageService.getCurrentAccountObject().account?.storageConfig)}
+        showDeviceData
       />
     </motion.div>
   );
