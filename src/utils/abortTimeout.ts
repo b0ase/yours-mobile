@@ -14,7 +14,7 @@
  */
 
 type TimeoutFn = (ms: number) => AbortSignal;
-type AnyFn = (signals: AbortSignal[]) => AbortSignal;
+type AnyFn = (signals: Iterable<AbortSignal>) => AbortSignal;
 
 const timeoutError = () => {
   try {
@@ -44,15 +44,31 @@ export function timeoutSignal(ms: number): AbortSignal {
   return native ? native.call(AbortSignal, ms) : deadline(ms).signal;
 }
 
-/** A signal that aborts when any of `signals` does (AbortSignal.any). */
-export function anySignal(signals: AbortSignal[]): AbortSignal {
+/**
+ * A signal that aborts when any of `signals` does (AbortSignal.any). On the first abort it removes its listener from
+ * every input, so a long-lived input (a caller's options.signal combined with a per-request timeout) doesn't collect
+ * one listener per request (06c re-check f66d8ccf, P1).
+ */
+export function anySignal(signals: Iterable<AbortSignal>): AbortSignal {
   const c = new AbortController();
-  for (const s of signals) {
-    if (s.aborted) {
+  const inputs = Array.from(signals);
+  const already = inputs.find((s) => s.aborted);
+  if (already) {
+    c.abort(already.reason);
+    return c.signal;
+  }
+  const attached: Array<[AbortSignal, () => void]> = [];
+  const detach = () => {
+    for (const [s, onAbort] of attached) s.removeEventListener('abort', onAbort);
+    attached.length = 0;
+  };
+  for (const s of inputs) {
+    const onAbort = () => {
+      detach();
       c.abort(s.reason);
-      break;
-    }
-    s.addEventListener('abort', () => c.abort(s.reason), { once: true });
+    };
+    attached.push([s, onAbort]);
+    s.addEventListener('abort', onAbort, { once: true });
   }
   return c.signal;
 }
