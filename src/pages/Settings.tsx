@@ -1441,14 +1441,15 @@ export const Settings = () => {
                 : seedResult ||
                   'Lost change after a wiped, restored or new device? Change from payments made since this update can be found again from your 12 words alone. This only reads the chain and adds coins to this wallet; nothing is sent. It can’t find change from payments made before this update: for those, use Restore from backup or Recover a payment by transaction ID.'}
             </span>
-            <div className="flex gap-2">
+            {/* One button per line: side by side, "Recover change" wrapped onto two lines on a phone (click-through, 4 Nov 2026). */}
+            <div className="flex flex-col gap-1">
               <Button
                 theme={theme}
                 type="secondary"
                 label={recoveringSeed ? 'Checking…' : seedPaused ? 'Carry on' : 'Recover change'}
                 disabled={recoveringSeed}
                 onClick={() => void handleRecoverSeedChange()}
-                style={{ flex: 1, margin: 0 }}
+                style={{ margin: 0, whiteSpace: 'nowrap' }}
               />
               <Button
                 theme={theme}
@@ -1456,7 +1457,7 @@ export const Settings = () => {
                 label="Start fresh"
                 disabled={recoveringSeed}
                 onClick={() => void handleRecoverSeedChange(true)}
-                style={{ margin: 0 }}
+                style={{ margin: 0, whiteSpace: 'nowrap' }}
               />
             </div>
           </div>

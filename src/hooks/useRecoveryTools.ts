@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { RECONCILE_RECORD_KEY, type ReconcileRecord } from '../services/storageReconcile';
 import { sendMessageAsync } from '../utils/chromeHelpers';
+import { seedChangeToast } from './seedChangeToast';
 import { useSnackbar } from './useSnackbar';
 import { useStorageRepair } from './useStorageRepair';
 
@@ -147,12 +148,15 @@ export const useRecoveryTools = () => {
       const text = r?.data?.summary ?? r?.error ?? 'No answer from the wallet. Try again.';
       setSeedResult(text);
       setSeedPaused(!!r?.data?.paused || !r?.success);
-      addSnackbar(text, r?.success ? 'success' : 'error');
+      // One short line: the full result is shown under the button (seedChangeToast.ts).
+      const toast = seedChangeToast(r);
+      addSnackbar(toast.text, toast.type);
     } catch (error) {
       const text = error instanceof Error ? error.message : 'Check failed';
       setSeedResult(text);
       setSeedPaused(true);
-      addSnackbar(text, 'error');
+      const toast = seedChangeToast({ success: false });
+      addSnackbar(toast.text, toast.type);
     } finally {
       setRecoveringSeed(false);
       setRecoverStartedAt((p) => ({ ...p, seed: undefined }));
