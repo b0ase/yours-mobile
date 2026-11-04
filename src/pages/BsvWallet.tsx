@@ -1,4 +1,5 @@
 import { heldBsv21Balances } from '../mobile/airdrops/heldBalances';
+import { MoveToDeviceNotice } from '../components/MoveToDeviceNotice';
 import { migrationRowText } from '../utils/migrationRow';
 import { quarantineFor, setQuarantineAccount } from '../mobile/airdrops/inbox';
 import { withoutQuarantined } from '../mobile/airdrops/quarantine';
@@ -1738,6 +1739,8 @@ export const BsvWallet = () => {
               {restoreMessage}
             </p>
           )}
+          {/* Still on the online backup: say so, and offer the move now (services/localFirst.ts, review F4). */}
+          <MoveToDeviceNotice />
         </motion.div>
 
         {/* ── Action buttons ── */}

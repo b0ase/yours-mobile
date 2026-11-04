@@ -15,6 +15,7 @@ import {
   payQuote,
   quoteFields,
   uploadFile,
+  type PaidOrder,
   type Quote,
 } from './api';
 import {
@@ -43,7 +44,7 @@ type Pay =
   | { k: 'quoting'; step: string }
   | { k: 'ready'; quote: Quote; label: string }
   | { k: 'paying'; quote: Quote; label: string }
-  | { k: 'done'; order: MyOrder }
+  | { k: 'done'; order: PaidOrder }
   | { k: 'error'; msg: string; quote?: Quote; label?: string };
 
 const f: typeof fetch = (u, i) => fetch(u, i);
@@ -304,8 +305,17 @@ export default function ThemeOrderSheet({ onClose, initialTab = 'order' }: { onC
             className="rounded-xl p-3 mb-4 text-[14px]"
             style={{ background: '#17191E', border: '1px solid #2E7D4F' }}
           >
-            <b>Paid. Thank you.</b> {pay.order.slug} is in the queue; we&apos;ll build it and it shows here as it moves
-            to Live.
+            {pay.order.pending ? (
+              <>
+                <b>Payment sent.</b> The network hasn&apos;t confirmed it yet; your edition shows here once it does. You
+                don&apos;t need to pay again.
+              </>
+            ) : (
+              <>
+                <b>Paid. Thank you.</b> {pay.order.slug} is in the queue; we&apos;ll build it and it shows here as it
+                moves to Live.
+              </>
+            )}
           </div>
         )}
         {pay.k === 'error' && !pay.quote && (

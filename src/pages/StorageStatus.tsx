@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { MoveToDeviceNotice } from '../components/MoveToDeviceNotice';
 import { motion } from 'framer-motion';
 import {
   AlertTriangle,
@@ -866,6 +867,7 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
           <RefreshCw size={11} className={syncing ? 'animate-spin' : ''} />
           {syncing ? 'Syncing…' : 'Sync with my other devices'}
         </motion.button>
+        <MoveToDeviceNotice />
         {localIsActive && (
           <motion.button
             whileTap={{ scale: 0.98 }}

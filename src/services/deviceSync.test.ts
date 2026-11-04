@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { BACKOFF_MS, PUSH_DELAY_MS, createDeviceSync, notifyOnWalletChanges } from './deviceSync';
+import { BACKOFF_MS, PUSH_DELAY_MS, backupBeforeSend, createDeviceSync, notifyOnWalletChanges } from './deviceSync';
 
 /** A fake clock: timers run only when the test advances them. */
 const clock = () => {
@@ -123,5 +123,128 @@ describe('device sync: the owner’s devices stay in step through the backup (2 
     await expect(wallet.internalizeAction()).rejects.toThrow('nope');
     await wallet.listOutputs();
     expect(changes).toBe(2);
+  });
+});
+
+describe('pushNow / backupBeforeSend: a Store payment is broadcast only after its rows are backed up (P0, 3 Nov 2026)', () => {
+  test('pushNow starts a NEW push after the call: it never joins one that began before the rows were written', async () => {
+    const order: string[] = [];
+    let release!: () => void;
+    const first = new Promise<void>((r) => (release = r));
+    let n = 0;
+    const sync = createDeviceSync({
+      applies: () => true,
+      ensureBackup: async () => true,
+      pull: async () => undefined,
+      push: async () => {
+        const me = ++n;
+        order.push(`push${me} start`);
+        if (me === 1) await first;
+        order.push(`push${me} end`);
+      },
+      setTimer: () => 0,
+      clearTimer: () => undefined,
+    });
+    const early = sync.syncNow(); // a push already in flight (started before the payment's rows existed)
+    await new Promise((r) => setTimeout(r, 0));
+    const now = sync.pushNow();
+    release();
+    expect((await early).ok).toBe(true);
+    const r = await now;
+    expect(r).toEqual({ ok: true, pulled: false, pushed: true });
+    expect(order).toEqual(['push1 start', 'push1 end', 'push2 start', 'push2 end']);
+  });
+
+  test('pushNow reports a failed push, and waits briefly for a site mid-action before giving up', async () => {
+    const failing = createDeviceSync({
+      applies: () => true,
+      ensureBackup: async () => true,
+      pull: async () => undefined,
+      push: async () => {
+        throw new Error('wallet.1sat.app 503');
+      },
+      setTimer: () => 0,
+      clearTimer: () => undefined,
+    });
+    expect(await failing.pushNow()).toEqual({ ok: false, error: 'wallet.1sat.app 503' });
+    let busy = true;
+    const waits: number[] = [];
+    const busyOne = createDeviceSync({
+      applies: () => true,
+      ensureBackup: async () => true,
+      pull: async () => undefined,
+      push: async () => undefined,
+      busy: () => busy,
+      setTimer: () => 0,
+      clearTimer: () => undefined,
+    });
+    const stillBusy = await busyOne.pushNow({ busyWaitMs: [1, 1], sleep: async (ms) => void waits.push(ms) });
+    expect(stillBusy.ok).toBe(false);
+    expect(waits).toEqual([1, 1]);
+    const freed = busyOne.pushNow({ busyWaitMs: [1], sleep: async () => void (busy = false) });
+    expect(await freed).toEqual({ ok: true, pulled: false, pushed: true });
+  });
+
+  test('backupBeforeSend: ok only when the push went through (or the rows live on the remote store)', async () => {
+    const quiet = () => undefined;
+    const pushed = async () => ({ ok: true as const, pulled: false, pushed: true });
+    const failed = async () => ({ ok: false as const, error: 'offline' });
+    const yes = () => true;
+    const no = () => false;
+    expect(await backupBeforeSend({ deviceActive: yes, backupConfigured: yes, pushNow: pushed, log: quiet })).toEqual({
+      ok: true,
+      how: 'pushed',
+    });
+    expect(await backupBeforeSend({ deviceActive: yes, backupConfigured: yes, pushNow: failed, log: quiet })).toEqual({
+      ok: false,
+      error: 'offline',
+    });
+    // A push that "succeeds" without pushing (backup gone) is not a backup.
+    const notPushed = async () => ({ ok: true as const, pulled: false, pushed: false });
+    expect(
+      (await backupBeforeSend({ deviceActive: yes, backupConfigured: yes, pushNow: notPushed, log: quiet })).ok,
+    ).toBe(false);
+    const threw = async (): Promise<never> => {
+      throw new Error('boom');
+    };
+    expect(await backupBeforeSend({ deviceActive: yes, backupConfigured: yes, pushNow: threw, log: quiet })).toEqual({
+      ok: false,
+      error: 'boom',
+    });
+    const hangs = () => new Promise<never>(() => undefined);
+    expect(
+      await backupBeforeSend({ deviceActive: yes, backupConfigured: yes, pushNow: hangs, timeoutMs: 5, log: quiet }),
+    ).toEqual({ ok: false, error: 'the backup took too long' });
+    expect(await backupBeforeSend({ deviceActive: no, backupConfigured: yes, pushNow: failed, log: quiet })).toEqual({
+      ok: true,
+      how: 'remote-active',
+    });
+    expect(await backupBeforeSend({ deviceActive: yes, backupConfigured: no, pushNow: failed, log: quiet })).toEqual({
+      ok: true,
+      how: 'no-backup',
+    });
+  });
+});
+
+describe('the backup state for the honest copy (review 4 Nov 2026, F11)', () => {
+  test('lastPushOkAt is set only by a push that went through', async () => {
+    let fail = true;
+    const sync = createDeviceSync({
+      applies: () => true,
+      ensureBackup: async () => true,
+      pull: async () => undefined,
+      push: async () => {
+        if (fail) throw new Error('offline');
+      },
+      setTimer: () => 0,
+      clearTimer: () => undefined,
+    });
+    await sync.pushNow();
+    expect(sync.state().lastPushOkAt).toBe(0);
+    expect(sync.state().failures).toBe(1);
+    fail = false;
+    await sync.pushNow();
+    expect(sync.state().lastPushOkAt).toBeGreaterThan(0);
+    expect(sync.state().failures).toBe(0);
   });
 });

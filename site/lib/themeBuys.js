@@ -8,6 +8,7 @@ const { OP, P2PKH, Script, Utils } = require('@bsv/sdk');
 const { parseIncoming, verifySigned } = require('./paymail');
 const { checkPayment, payAddress, priceSats, QUOTE_MS, CLAIM_GRACE_MS } = require('./themeOrders');
 const { signReceipt } = require('./storeReceipt');
+const { makeStoreClaim, protocolError } = require('./storeClaim');
 
 const FEE_ROOM_SATS = 500;
 
@@ -94,38 +95,97 @@ function themeBuyStore(env = process.env, f = fetch) {
         headers: { Prefer: 'return=minimal' },
         body: JSON.stringify(patch),
       }),
+    /** Record a txid only if the row has none yet (two claims can't both take one quote). True when this call set it. */
+    setTxidIfEmpty: async (id, txid) =>
+      (
+        (await req(`theme_purchases?id=eq.${q(id)}&txid=is.null`, {
+          method: 'PATCH',
+          headers: { Prefer: 'return=representation' },
+          body: JSON.stringify({ txid }),
+        })) || []
+      ).length > 0,
     owned: async (identityKey) =>
       (await req(
         `theme_purchases?identity_key=eq.${q(identityKey)}&status=eq.paid&select=pack_id,txid,paid_at&limit=200`,
+      )) || [],
+    /** Paid by a payment the network hasn't shown yet: status still 'quoted', txid set (storeClaim.js). Newest first. */
+    pending: async (identityKey) =>
+      (await req(
+        `theme_purchases?identity_key=eq.${q(identityKey)}&status=eq.quoted&txid=not.is.null&select=id,identity_key,pack_id,status,txid,quote_id,quote_expires_at&order=created_at.desc&limit=20`,
       )) || [],
   };
 }
 
 /**
  * Handlers: each returns [status, body]. Deps injected so tests run without a network:
- * store (themeBuyStore shape), rate() → USD per BSV, broadcast(tx, beefHex) (throws if rejected), env, now().
+ * store (themeBuyStore shape), rate() → USD per BSV, broadcast(tx, beefHex) → arcSubmit result (paymailStore.js,
+ * never throws), network(txid) → 'seen' | 'out' | 'missing' | 'unclear' (paymailStore.js networkStatus), env, now().
+ *
+ * Paid means the network has the payment (storeClaim.js, P0 3 Nov 2026): a claim the network hasn't shown yet is
+ * answered 202 { pending: true } and becomes paid on a claim retry or the buyer's next `owned`; while it is pending
+ * the pack can't be quoted again (409 payment_pending) unless the payment never reached the network.
+ * `claimGraceMs` is no longer a limit: a payment that matches its quote is honoured whenever it arrives.
  */
 function makeThemeBuyHandlers({
   store,
   ledger,
   rate,
   broadcast,
+  network = async () => 'unclear',
+  fetchTx,
+  recheckBudgetMs,
+  requireProtocol = false,
   env = process.env,
   now = () => Date.now(),
   quoteMs = QUOTE_MS,
-  claimGraceMs = CLAIM_GRACE_MS,
+  claimGraceMs: _claimGraceMs = CLAIM_GRACE_MS, // no longer a limit (storeClaim.js); kept so callers can pass it
   actions = {},
+  log,
 }) {
   if (!ledger || typeof ledger.reserve !== 'function') throw new Error('paid-txid ledger required');
+  const markPaid = async (row, txid) => {
+    await store.update(row.id, { status: 'paid', txid, paid_at: new Date(now()).toISOString() });
+    return [200, { pack: row.pack_id, txid }];
+  };
+  const claimer = makeStoreClaim({
+    kind: 'buy',
+    getByQuote: store.getByQuote,
+    getByTxid: store.getByTxid,
+    update: store.update,
+    recheckBudgetMs,
+    setTxidIfEmpty: typeof store.setTxidIfEmpty === 'function' ? store.setTxidIfEmpty : undefined,
+    fetchTx,
+    ledger,
+    parse: parseIncoming,
+    check: (tx, row) =>
+      checkPayment(tx, { address: row.quote_address, sats: row.quote_sats, memoHex: row.quote_memo_hex }),
+    broadcast,
+    network,
+    paid: markPaid,
+    paidBody: (row) => ({ pack: row.pack_id, txid: row.txid }),
+    pendingBody: (row) => ({ pack: row.pack_id }),
+    now,
+    log,
+  });
+  const pendingOf = async (identityKey) =>
+    typeof store.pending === 'function' ? ((await store.pending(identityKey).catch(() => [])) ?? []) : [];
+
   const quote = async (body) => {
     const pay = payAddress(env);
     if (!pay) return [503, { error: 'not_configured' }];
     const sigErr = await verifySigned(body || {}, actions.quote || 'theme-buy-quote', now());
     if (sigErr) return [401, { error: sigErr }];
+    if (requireProtocol && protocolError(body)) return protocolError(body);
     const identityKey = String(body.identityKey).toLowerCase();
     const packId = String((body.fields || {}).pack || '');
     if (!Object.prototype.hasOwnProperty.call(PACKS, packId)) return [404, { error: 'pack_not_for_sale' }];
     if ((await store.owned(identityKey)).some((r) => r.pack_id === packId)) return [409, { error: 'already_owned' }];
+    // A payment for this pack is out and the network hasn't shown it yet: don't take a second one.
+    for (const p of (await pendingOf(identityKey)).filter((r) => r.pack_id === packId)) {
+      const r = await claimer.recheck(p);
+      if (r === 'paid') return [409, { error: 'already_owned' }];
+      if (r === 'pending' || r === 'missing') return [409, { error: 'payment_pending' }];
+    }
     const r = await Promise.resolve(rate()).catch(() => 0);
     if (!(r > 0)) return [503, { error: 'price_unavailable' }];
     const usd = PACKS[packId];
@@ -181,46 +241,26 @@ function makeThemeBuyHandlers({
   const claim = async (body) => {
     const sigErr = await verifySigned(body || {}, actions.claim || 'theme-buy-claim', now());
     if (sigErr) return [401, { error: sigErr }];
-    const identityKey = String(body.identityKey).toLowerCase();
+    if (requireProtocol && protocolError(body)) return protocolError(body);
     const f = body.fields || {};
     const quoteId = String(f.quote_id || '');
-    const txid = String(f.txid || '').toLowerCase();
     if (!QUOTE_ID_RE.test(quoteId)) return [400, { error: 'quote_id' }];
-    if (!/^[0-9a-f]{64}$/.test(txid)) return [400, { error: 'txid' }];
-    const row = await store.getByQuote(quoteId);
-    if (!row || row.identity_key !== identityKey) return [404, { error: 'quote_not_found' }];
-    if (row.status !== 'quoted') {
-      if (row.txid === txid) return [200, { pack: row.pack_id, txid }]; // a retry of a claim that went through
-      return [409, { error: 'quote_used' }];
-    }
-    if (now() > Date.parse(row.quote_expires_at) + claimGraceMs) return [410, { error: 'quote_expired' }];
-    let tx;
-    let beefHex = null;
-    try {
-      ({ tx, beefHex } = parseIncoming(body.rawtx));
-    } catch {
-      return [400, { error: 'rawtx' }];
-    }
-    if (tx.id('hex') !== txid) return [400, { error: 'txid_mismatch' }];
-    const bad = checkPayment(tx, { address: row.quote_address, sats: row.quote_sats, memoHex: row.quote_memo_hex });
-    if (bad) return [402, { error: bad }];
-    const other = await store.getByTxid(txid);
-    if (other && other.id !== row.id) return [409, { error: 'tx_used' }];
-    // One txid, one paid record across orders, purchases and deposits (site/lib/paidTxids.js).
-    if ((await ledger.reserve(txid, 'buy', row.id)) !== 'ok') return [409, { error: 'tx_used' }];
-    try {
-      await broadcast(tx, beefHex);
-    } catch {
-      return [502, { error: 'broadcast_failed' }];
-    }
-    await store.update(row.id, { status: 'paid', txid, paid_at: new Date(now()).toISOString() });
-    return [200, { pack: row.pack_id, txid }];
+    return claimer.claim({
+      identityKey: String(body.identityKey).toLowerCase(),
+      quoteId,
+      txid: String(f.txid || '').toLowerCase(),
+      rawtx: body.rawtx,
+      intent: f.intent === '1',
+    });
   };
 
   const owned = async (body) => {
     const sigErr = await verifySigned(body || {}, 'theme-buy-owned', now());
     if (sigErr) return [401, { error: sigErr }];
-    const rows = await store.owned(String(body.identityKey).toLowerCase());
+    const identityKey = String(body.identityKey).toLowerCase();
+    // Pending purchases (claimed, not yet seen by the network): newest first, the ones the network has now become paid.
+    await claimer.recheckAll((await pendingOf(identityKey)).slice(0, 10));
+    const rows = await store.owned(identityKey);
     return [200, { packs: [...new Set(rows.map((r) => r.pack_id))], configured: !!payAddress(env) }];
   };
 

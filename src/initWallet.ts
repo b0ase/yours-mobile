@@ -1,4 +1,4 @@
-import { repairNullTxids, type NullTxidRepairReport } from './services/nullTxidRepair';
+import { missingLogKV, repairNullTxids, type NullTxidRepairReport } from './services/nullTxidRepair';
 import { openAccountPermissionStore } from './services/accountPermissionStore';
 import { openSpendLedger, withLocalSpendLedger } from './services/spendLedger';
 import { rememberRefusals } from './services/broadcastRefusals';
@@ -15,7 +15,17 @@ import {
 } from './services/stuckSends';
 import { hardenWalletServices } from './services/wocResilience';
 import { cacheBlockHeaders, prefetchHeadersOnInternalize } from './services/headerPrefetch';
-import { createDeviceSync, notifyOnWalletChanges, type DeviceSyncResult } from './services/deviceSync';
+import {
+  backupBeforeSend,
+  createDeviceSync,
+  notifyOnWalletChanges,
+  type BackupBeforeSend,
+  type DeviceSyncResult,
+} from './services/deviceSync';
+import { forceLegacyActionBatch, requireLegacyForNoSend } from './services/actionBatchMode';
+import { requireLocalStoreForChange } from './services/localFirst';
+import { loadMayBeOut, recheckRefusals } from './services/refusalRecheck';
+import { expiryLookups } from './services/unsentGuard';
 import {
   createWebWallet,
   createIndexedDbTaskStateStore,
@@ -190,6 +200,10 @@ export interface AccountContext {
   creditArriving: () => Promise<void>;
   /** Pull the owner's other devices' changes from the backup, then push this one's (services/deviceSync.ts). */
   syncDevices: () => Promise<DeviceSyncResult>;
+  /** Push this device's rows to the backup now; a Store payment is broadcast only when this is ok (deviceSync.ts). */
+  backupBeforeSend: () => Promise<BackupBeforeSend>;
+  /** The backup's state for the honest copy: configured, a push waiting, failures, the last good push. */
+  backupState: () => { backupConfigured: boolean; pendingPush: boolean; failures: number; lastPushOkAt: number };
   /** Restore actions storage marked failed whose transaction is mined (services/recoverFailed.ts). */
   recoverFailed: () => Promise<RecoverReport>;
   /** Recover one mined payment by txid from the derivation any reachable store holds (services/recoverByTxid.ts). */
@@ -281,6 +295,12 @@ export interface InitWalletOptions {
    * their storage locks (services/sheetFirst.ts).
    */
   startSyncsAfter?: () => Promise<void>;
+  /**
+   * Make this device's store the active one (verify or create its copy, then switch). Asked before any payment that
+   * would build change while the remote store is active; resolves true once the device store is active
+   * (services/localFirst.ts). Without it such a payment is refused.
+   */
+  ensureLocalStore?: () => Promise<boolean>;
 }
 
 /**
@@ -390,6 +410,12 @@ export const initWallet = async (
     console.warn('[initWallet] backup storage failed to connect; opening without it:', err);
     return createWebWallet({ ...walletConfig, backups: [] });
   });
+  // No payment may live only in memory: every noSend action is written to storage at signing (P0, 3 Nov 2026: the
+  // owner's $1 theme test lost its change on a reload; services/actionBatchMode.ts).
+  if (!forceLegacyActionBatch(baseWallet))
+    console.error('[initWallet] action batches could not be set to legacy: noSend payments are refused');
+  // …and if that ever fails, a noSend payment is refused rather than held in memory (review 4 Nov 2026, F10).
+  requireLegacyForNoSend(baseWallet);
   mark(
     `createWebWallet done; active=${storage.getActiveStoreName?.() ?? '?'} stores=${JSON.stringify(
       storage.getStores?.().map((s) => ({ name: s.storageName, active: s.isActive, enabled: s.isEnabled })) ?? [],
@@ -450,6 +476,15 @@ export const initWallet = async (
   // Every payment ends here: our screens and dApps through the permissions manager, send-all and background jobs
   // directly. The `spending` kill switch pauses createAction/signAction on it (mobile/config/killSwitch.ts).
   guardSpending(baseWallet);
+  // HARD RULE (P0, 3 Nov 2026): no payment builds change on the remote store; this device's store first, else refused
+  // (services/localFirst.ts: wallet.1sat.app builds its own random change; seed-derived change exists only here).
+  if (
+    !requireLocalStoreForChange(baseWallet, {
+      isLocal: () => storage.isActiveStorageProvider(),
+      ensureLocal: options?.ensureLocalStore,
+    })
+  )
+    console.error('[initWallet] payments are not held to the device store');
   // The legacy ord address (paymail ordinals go there) and legacy pay address: each key signs under its own
   // wallet-only protocol, so the NFTs, names, tokens and BSV the sync takes in from them spend like any other
   // (services/legacyOrd.ts). No key for an address (passkey/seedless): that address is skipped.
@@ -458,6 +493,10 @@ export const initWallet = async (
   const legacyPayAddress = account?.addresses?.bsvAddress;
   const payKey = legacyPayKey(keys.walletWif, legacyPayAddress);
   if (ordKey || payKey) installLegacySigner(baseWallet, { ord: ordKey, pay: payKey });
+  // A refusal is checked against the chain before the toolbox fails the tx and frees its inputs (refusalRecheck.ts).
+  if (!recheckRefusals(toolboxServices)) console.warn('[initWallet] broadcast refusals are not chain-checked');
+  // Resumed Store payments marked "may be out" survive a service-worker restart (06c M1).
+  void loadMayBeOut();
   if (!rememberRefusals(toolboxServices)) console.warn('[initWallet] broadcast refusals not recorded');
   // UnFail's output verdicts read getUtxoStatus: parse api.1sat.app's "txid.vout" (dkg, 14 Oct 2026; services/utxoStatus.ts).
   if (!fixUtxoStatus(toolboxServices)) console.warn('[initWallet] getUtxoStatus not patched (no txo client)');
@@ -1136,7 +1175,7 @@ export const initWallet = async (
         }
         return out;
       }),
-    knownOnChain: (txid) => knownOnChain(txid, (t) => toolboxServices.getRawTx(t)),
+    knownOnChain: (txid) => knownOnChain(txid),
     cancel: (q) =>
       storage.runAsStorageProvider(async (sp) => {
         for (const req of await sp.findProvenTxReqs({ partial: { txid: q.txid } }))
@@ -1218,6 +1257,21 @@ export const initWallet = async (
     sweepDeposits: () => sweepDeposit.execute(actionCtx, {}),
     creditArriving: () => runReceiveGuard(),
     syncDevices: () => deviceSync.syncNow(),
+    backupState: () => {
+      const st = deviceSync.state();
+      return {
+        backupConfigured: (backups?.length ?? 0) > 0,
+        pendingPush: st.pendingPush || st.scheduled || st.running,
+        failures: st.failures,
+        lastPushOkAt: st.lastPushOkAt,
+      };
+    },
+    backupBeforeSend: () =>
+      backupBeforeSend({
+        deviceActive: () => storage.isActiveStorageProvider(),
+        backupConfigured: () => (backups?.length ?? 0) > 0,
+        pushNow: () => deviceSync.pushNow(),
+      }),
     recoverFailed: () =>
       runRecoverOnce(() =>
         recoverMinedFailedActions(
@@ -1278,6 +1332,8 @@ export const initWallet = async (
               options: { sendWith: [txid], acceptDelayedBroadcast: false },
             }),
           recoverLate: (txid) => recoverTxidImpl(txid),
+          // A copy in 1Sat's BEEF store still leads to the wallet's own (chain-checked) send of that tx, never a release.
+          lookups: expiryLookups(),
           // BRC-177 blockheight deadlines (b-Aware 26 Oct 2026, N1). Undefined on any failure: the action stays held.
           height: wocHeight(),
           kv: storageKV(baseWallet.keyDeriver.identityKey),
@@ -1308,7 +1364,7 @@ export const initWallet = async (
         fetchBeef: async (txid) => (await toolboxServices.getBeefForTxid(txid)).toBinary(),
       });
     },
-    knownOnChain: (txid) => knownOnChain(txid, (t) => toolboxServices.getRawTx(t)),
+    knownOnChain: (txid) => knownOnChain(txid),
     repairNullTxids: async () => {
       // Local store only: never edit the remote's rows from here.
       if (!storage.isActiveStorageProvider()) return { txidFilled: 0, setAside: 0, aborted: 0, skipped: 0 };
@@ -1360,7 +1416,9 @@ export const initWallet = async (
             await tx.done;
             return held;
           }),
-        knownOnChain: (txid) => knownOnChain(txid, (t) => toolboxServices.getRawTx(t)),
+        knownOnChain: (txid) => knownOnChain(txid),
+        // A signed action is aborted only after repeated "not found" answers over 30+ minutes (review 4 Nov, F5).
+        missingLog: missingLogKV(baseWallet.keyDeriver.identityKey),
         log: (m, d) => console.warn(m, d ?? ''),
       });
     },

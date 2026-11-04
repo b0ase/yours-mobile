@@ -2109,6 +2109,7 @@ export const Settings = () => {
         readMnemonic={async () => (await keysService.retrieveKeys()).mnemonic}
         onDone={() => setPage('main')}
         onCopied={(text) => addSnackbar(text, 'info')}
+        showDeviceData
       />
     </motion.div>
   );

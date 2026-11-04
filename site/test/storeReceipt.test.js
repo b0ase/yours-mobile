@@ -32,7 +32,7 @@ const quoteFor = async (env) => {
       update: async (id, p) => Object.assign(rows[0], p),
     },
     rate: async () => 50,
-    broadcast: async () => {},
+    broadcast: async () => ({ txStatus: 'SEEN_ON_NETWORK', accepted: true }),
     env,
     now: () => NOW,
   });

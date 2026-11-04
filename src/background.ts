@@ -1,4 +1,5 @@
 /* global chrome */
+import './utils/abortSignalPolyfill'; // AbortSignal.timeout / any on iOS 15 (utils/abortTimeout.ts): before anything else
 import { siteAfterNavigation } from './mobile/theme/tabSiteNav';
 import { SheetFirstGate } from './services/sheetFirst';
 import { chromeConsentStore } from './services/siteTokens';
@@ -111,6 +112,8 @@ import { timedStep, txidRecoverySummary } from './services/recoverByTxid';
 import { foundHeadline, restoredLine, scanNote, type ScanReport } from './services/findMissingCoins';
 import { paymailRestoreSummary } from './mobile/names/paymail';
 import { isEmpty, summarizeActive, switchToLocalVerified, type SwitchDeps } from './services/restoreFromRemote';
+import { ensureLocalStore, type EnsureLocalResult } from './services/localFirst';
+import { markMayBeOut } from './services/refusalRecheck';
 import {
   fundingTimeoutError,
   SingleFlight,
@@ -798,6 +801,8 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
       await reviewRestoredUtxos(a);
     },
     startSyncsAfter: heavyWorkMayStart,
+    // No payment builds change on the remote store: this device's store first (services/localFirst.ts, P0 3 Nov 2026).
+    ensureLocalStore: () => ensureLocalForPayment(),
   });
   if (lockGeneration !== startedUnder || !(await chromeStorageService.getPassKey())) {
     // Locked while we were initialising (a restore's detached init can run
@@ -879,10 +884,11 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
 /**
  * bWallet: keep the wallet's main copy on the device, 1Sat storage as the backup (owner, 4 Oct 2026).
  * 1Sat's remote storage caps BEEF depth at 12, so token buys with a deep ancestry fail while it is
- * active ("Maximum BEEF depth exceeded"). Once per account, switch a remote-active wallet to local,
+ * active ("Maximum BEEF depth exceeded"). On every open, switch a remote-active wallet to local,
  * but only after verifying the device holds everything the remote holds (services/restoreFromRemote.ts;
- * restore incident 14 Oct 2026). Short → stay remote-active and retry next open. Someone who later
- * picks remote again in Wallet Backup keeps that choice (the flag is set).
+ * restore incident 14 Oct 2026). Short → stay remote-active and retry next open. Since 3 Nov 2026 this applies to
+ * every account, including one that picked remote before: no payment builds change on the remote store
+ * (services/localFirst.ts).
  */
 /**
  * Wallets whose switch to this device failed in this session (22 Oct 2026: a brand-new wallet's switch broke the
@@ -890,6 +896,19 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
  * until the next service-worker start, so a rebuild after the failure can't loop back into the same switch.
  */
 const switchFailedThisSession = new Set<string>();
+/**
+ * Review 4 Nov 2026 (F4): a failed move to this device is retried with backoff (1, 2, 5, 10, 30 minutes), and the user
+ * can retry at once ("Retry moving this account to this device": STORAGE_MOVE_TO_DEVICE). Never a silent permanent
+ * refusal: payments say why they wait and where the retry is.
+ */
+const MOVE_BACKOFF_MS = [60_000, 120_000, 300_000, 600_000, 1_800_000];
+const moveFailures = new Map<string, { failures: number; nextAt: number; reason?: string }>();
+const moveInBackoff = (id: string) => (moveFailures.get(id)?.nextAt ?? 0) > Date.now();
+const noteMoveFailed = (id: string, reason?: string) => {
+  const failures = (moveFailures.get(id)?.failures ?? 0) + 1;
+  const wait = MOVE_BACKOFF_MS[Math.min(failures - 1, MOVE_BACKOFF_MS.length - 1)];
+  moveFailures.set(id, { failures, nextAt: Date.now() + wait, reason: reason ?? moveFailures.get(id)?.reason });
+};
 
 /**
  * The switch to this device's store while it runs. A master backup closes the live wallet to export each account;
@@ -901,6 +920,7 @@ let storageSwitch: Promise<void> | null = null;
 /** After a failed switch: if the active store no longer answers, rebuild the wallet once (it stays on the backup). */
 const recoverAfterFailedSwitch = async (ctx: NonNullable<typeof accountContext>, id: string) => {
   switchFailedThisSession.add(id);
+  noteMoveFailed(id);
   const works = await summarizeActive(ctx.baseWallet as never).then(
     () => true,
     () => false,
@@ -911,49 +931,85 @@ const recoverAfterFailedSwitch = async (ctx: NonNullable<typeof accountContext>,
   notifyBalanceUpdate();
 };
 
-const preferLocalStorage = async (ctx: NonNullable<typeof accountContext>) => {
-  try {
-    const { account } = chromeStorageService.getCurrentAccountObject();
-    if (account && switchFailedThisSession.has(account.addresses.identityAddress)) return;
-    if (masterBackupInFlight) return;
-    const config = account?.storageConfig as (StorageConfig & { localFirst?: boolean }) | undefined;
-    if (!account || !config) return;
-    const remoteUrl = config.activeRemote || config.remotes?.[0];
-    if (!remoteUrl) return;
-    const save = (storageConfig: StorageConfig & { localFirst?: boolean }) =>
-      chromeStorageService.updateNested('accounts', {
-        [account.addresses.identityAddress]: { storageConfig } as unknown as Account,
-      });
-    const remotes = config.remotes?.includes(remoteUrl) ? config.remotes : [...(config.remotes ?? []), remoteUrl];
-    const deps = restoreDeps(ctx, remoteUrl);
-
-    if (config.activeRemote && !config.localFirst) {
-      // First open on this device (or a retry after a short pull): switch only once the device holds it all.
+/**
+ * Every open, every account: this device's store is the active one, the remote only the backup (P0, 3 Nov 2026;
+ * services/localFirst.ts). An account still on the remote store, whatever its old localFirst flag, gets its device copy
+ * verified (or created) and switched to; an already-local account with an empty device store is pulled in.
+ */
+const settleLocalStore = (ctx: NonNullable<typeof accountContext>): Promise<EnsureLocalResult> => {
+  const { account } = chromeStorageService.getCurrentAccountObject();
+  const config = account?.storageConfig as (StorageConfig & { localFirst?: boolean }) | undefined;
+  return ensureLocalStore({
+    account: () => (account ? { id: account.addresses.identityAddress, config } : null),
+    // Backoff, not a lockout: the next open, payment or the user's Retry tries again (review F4).
+    failedThisSession: (id) => moveInBackoff(id),
+    backupInFlight: () => masterBackupInFlight,
+    isLocalActive: () => ctx.storage.isActiveStorageProvider(),
+    switchVerified: (remoteUrl) => {
       console.log('[background] storage: switching active to this device after a verified copy of the backup');
-      const r = await switchToLocalVerified(deps);
-      sendRestoreStatus(r.ok ? undefined : null);
-      console.log('[background] storage: verified switch', r);
-      if (r.ok) await save({ ...config, activeRemote: undefined, remotes, localFirst: true });
-      else await recoverAfterFailedSwitch(ctx, account.addresses.identityAddress);
-      return;
-    }
+      return switchToLocalVerified(restoreDeps(ctx, remoteUrl)).then((r) => {
+        console.log('[background] storage: verified switch', r);
+        return r;
+      });
+    },
+    localIsEmpty: async () => isEmpty(await summarizeActive(ctx.baseWallet as never)),
+    save: (storageConfig) =>
+      chromeStorageService.updateNested('accounts', {
+        [account!.addresses.identityAddress]: { storageConfig } as unknown as Account,
+      }),
+    onFailed: (id) => recoverAfterFailedSwitch(ctx, id),
+    status: (m) => sendRestoreStatus(m),
+    log: (...a) => console.log(...a),
+  });
+};
 
-    if (!config.activeRemote) {
-      // Already local-active (switched before this fix): an EMPTY device store beside a backup is the incident
-      // state ($bug, 14 Oct 2026). Pull the backup in, verified; stay on the backup if that fails.
-      const local = await summarizeActive(ctx.baseWallet as never);
-      if (!isEmpty(local)) return;
-      console.log('[background] storage: this device holds nothing; loading from the backup');
-      const r = await switchToLocalVerified(deps);
-      sendRestoreStatus(r.ok ? undefined : null);
-      console.log('[background] storage: recovery from backup', r);
-      if (!r.ok && r.activeIsRemote) await save({ ...config, activeRemote: remoteUrl, remotes, localFirst: false });
-      if (!r.ok) await recoverAfterFailedSwitch(ctx, account.addresses.identityAddress);
-    }
-  } catch (err) {
-    sendRestoreStatus(null);
-    console.warn('[background] storage: could not settle the active store:', err);
+const preferLocalStorage = async (ctx: NonNullable<typeof accountContext>) => {
+  const r = await settleLocalStore(ctx);
+  const id = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress;
+  if (r.ok && id) moveFailures.delete(id);
+  if (!r.ok) {
+    console.warn('[background] storage: this device is not the active store yet:', r);
+    const entry = id ? moveFailures.get(id) : undefined;
+    if (entry && r.reason) entry.reason = r.reason;
   }
+};
+
+/** Where the move to this device stands, for the "Retry moving this account to this device" notice. */
+const moveStatus = () => {
+  const ctx = accountContext;
+  const id = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress ?? '';
+  const f = moveFailures.get(id);
+  const backup = ctx?.backupState() ?? { backupConfigured: false, pendingPush: false, failures: 0, lastPushOkAt: 0 };
+  return {
+    onDevice: !!ctx?.storage.isActiveStorageProvider(),
+    moving: !!storageSwitch,
+    failures: f?.failures ?? 0,
+    nextRetryAt: f?.nextAt ?? 0,
+    reason: f?.reason ?? null,
+    backup,
+  };
+};
+
+/**
+ * A payment would build change while the remote store is active: make this device's store active first, joining a
+ * switch already running (services/localFirst.ts). True once it is; the payment is refused otherwise.
+ */
+const ensureLocalForPayment = async (): Promise<boolean> => {
+  const ctx = accountContext;
+  if (!ctx) return false;
+  const local = () => ctx.storage.isActiveStorageProvider();
+  if (local()) return true;
+  const within = (p: Promise<unknown>) =>
+    Promise.race([p.then(() => undefined), new Promise<void>((r) => setTimeout(r, 90_000))]);
+  if (storageSwitch) await within(storageSwitch).catch(() => undefined);
+  if (local() || accountContext !== ctx) return local();
+  const run = preferLocalStorage(ctx);
+  storageSwitch = run;
+  void run.finally(() => {
+    if (storageSwitch === run) storageSwitch = null;
+  });
+  await within(run).catch(() => undefined);
+  return local();
 };
 
 /** "Loading your wallet from backup…" on the balance card; undefined = done, null = done without the copy. */
@@ -2980,6 +3036,10 @@ if (!(
       // Storage management (popup internal)
       'STORAGE_GET_INFO',
       'STORAGE_SYNC_BACKUPS',
+      'STORE_BACKUP_BEFORE_SEND',
+      'STORE_MAY_BE_OUT',
+      'STORAGE_MOVE_STATUS',
+      'STORAGE_MOVE_TO_DEVICE',
       'STORAGE_REPAIR_WALLET',
       'STORAGE_REPAIR_SYNC',
       'STORAGE_RECOVER_MINED',
@@ -3347,6 +3407,52 @@ if (!(
           return true;
         case 'STORAGE_SYNC_BACKUPS':
           processStorageSyncBackups(sendResponse);
+          return true;
+        case 'STORE_MAY_BE_OUT':
+          // A Store payment about to be re-posted after the app died mid-post may already be out: a refusal of it
+          // must never free its coin on "missing" alone (services/refusalRecheck.ts, 06c M1).
+          void markMayBeOut(String((message as { txid?: unknown }).txid ?? '')).then(
+            () => sendResponse({ type: 'STORE_MAY_BE_OUT', success: true }),
+            (e: unknown) => sendResponse({ type: 'STORE_MAY_BE_OUT', success: false, error: String(e) }),
+          );
+          return true;
+        case 'STORAGE_MOVE_STATUS':
+          sendResponse({ type: 'STORAGE_MOVE_STATUS', success: true, data: moveStatus() });
+          return true;
+        case 'STORAGE_MOVE_TO_DEVICE':
+          // "Retry moving this account to this device": now, whatever the backoff says (review F4).
+          (async () => {
+            try {
+              await ensureWallet(true);
+              const id = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress;
+              if (id) {
+                const f = moveFailures.get(id);
+                if (f) f.nextAt = 0;
+              }
+              const ok = await ensureLocalForPayment();
+              sendResponse({ type: 'STORAGE_MOVE_TO_DEVICE', success: ok, data: moveStatus(), error: ok ? undefined : moveStatus().reason ?? 'not moved yet' });
+            } catch (error) {
+              sendResponse({ type: 'STORAGE_MOVE_TO_DEVICE', success: false, error: error instanceof Error ? error.message : String(error) });
+            }
+          })();
+          return true;
+        case 'STORE_BACKUP_BEFORE_SEND':
+          // A Store payment is broadcast only after its rows (change derivation) are in the backup (P0, 3 Nov 2026;
+          // mobile/themeOrder/storePay.ts). Fails closed: no wallet, no answer, or a failed push = don't broadcast.
+          (async () => {
+            try {
+              await ensureWallet(true);
+              if (!accountContext) throw new Error('Wallet not initialized');
+              const r = await accountContext.backupBeforeSend();
+              sendResponse({ type: 'STORE_BACKUP_BEFORE_SEND', success: r.ok, data: r, error: r.ok ? undefined : r.error });
+            } catch (error) {
+              sendResponse({
+                type: 'STORE_BACKUP_BEFORE_SEND',
+                success: false,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          })();
           return true;
         case 'STORAGE_REPAIR_WALLET':
           (async () => {

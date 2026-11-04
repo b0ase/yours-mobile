@@ -8,6 +8,7 @@ import { playChime } from '../../components/sent/chime';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { artDataUri, receiptArtUrl } from '../storeReceipt/art';
 import { getBuyQuote, payBuyQuote, type BuyQuote, type BuyResult } from '../themeOrder/api';
+import { MoveToDeviceNotice } from '../../components/MoveToDeviceNotice';
 
 const f: typeof fetch = (u, i) => fetch(u, i);
 
@@ -16,11 +17,14 @@ type Step =
   | { k: 'ready'; q: BuyQuote }
   | { k: 'paying'; q: BuyQuote }
   | { k: 'error'; msg: string; q?: BuyQuote }
+  | { k: 'pending'; res: BuyResult }
   | { k: 'done'; res: BuyResult };
 
 /**
- * Buy one store theme ($1): the server's quote → ONE approval sheet → Pay. The wallet builds the payment without
- * sending it and the server checks and broadcasts it, so a refused claim moves no money (themeOrder/api.ts).
+ * Buy one store theme ($1): the server's quote → ONE approval sheet → Pay. The wallet signs the payment, backs it up,
+ * broadcasts it itself and claims it (themeOrder/storePay.ts). "You own it" only once the Store confirms the network
+ * has the payment; until then it says the payment is on its way (P0, 3 Nov 2026). Pay again after an error finishes
+ * the same payment, never a second one.
  */
 export function BuySheet({
   pack,
@@ -49,19 +53,58 @@ export function BuySheet({
   }, [apiContext.wallet, pack]);
 
   const pay = async () => {
-    if (step.k !== 'ready') return;
-    const q = step.q;
+    if (step.k !== 'ready' && !(step.k === 'error' && step.q)) return;
+    const q = step.q!;
     setStep({ k: 'paying', q });
     try {
       // The shop's picture on the receipt (owner: an NPG purchase prints NPG art); plain gold if it can't load.
       const art = await artDataUri(receiptArtUrl(pack));
       const res = await payBuyQuote(apiContext, f, q, { label, art });
+      if (res.pending) {
+        setStep({ k: 'pending', res });
+        return;
+      }
       setStep({ k: 'done', res });
       playChime();
     } catch (e) {
       setStep({ k: 'error', msg: e instanceof Error ? e.message : 'Payment failed', q });
     }
   };
+
+  if (step.k === 'pending') {
+    return createPortal(
+      <div
+        role="dialog"
+        aria-label="Payment sent"
+        className="fixed inset-0 z-[1110] flex flex-col items-center overflow-y-auto px-5"
+        style={{
+          background: CARD.bg,
+          paddingTop: 'calc(env(safe-area-inset-top) + 40px)',
+          paddingBottom: 'calc(env(safe-area-inset-bottom) + 24px)',
+        }}
+      >
+        <h2 className="m-0 mt-4 text-center text-2xl font-extrabold text-white">Payment sent</h2>
+        <p className="m-0 mt-2 max-w-[360px] text-center text-sm" style={{ color: '#98A2B3' }}>
+          The network hasn't confirmed it yet. <span style={{ color: CARD.gold }}>{label}</span> unlocks as soon as it
+          does; you don't need to pay again.
+        </p>
+        <p className="m-0 mt-3 text-center text-xs" style={{ color: '#98A2B3' }}>
+          Reference · {step.res.txid.slice(0, 10)}…
+        </p>
+        <div className="mt-6 flex w-full max-w-[360px] flex-col gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="min-h-[48px] cursor-pointer rounded-2xl border-0 text-base font-bold"
+            style={{ background: CARD.gold, color: '#0B0A08' }}
+          >
+            Done
+          </button>
+        </div>
+      </div>,
+      document.body,
+    );
+  }
 
   if (step.k === 'done') {
     const { res } = step;
@@ -153,7 +196,7 @@ export function BuySheet({
     );
   }
 
-  const q = step.k === 'quoting' ? undefined : step.q;
+  const q = step.k === 'quoting' ? undefined : (step as { q?: BuyQuote }).q;
   const busy = step.k === 'paying' || step.k === 'quoting';
   return createPortal(
     <div
@@ -183,7 +226,7 @@ export function BuySheet({
           </>
         }
         primary={{
-          label: step.k === 'paying' ? 'Paying…' : `Pay $${q?.usd ?? 1}`,
+          label: step.k === 'paying' ? 'Paying…' : step.k === 'error' && q ? 'Try again' : `Pay $${q?.usd ?? 1}`,
           onClick: () => void pay(),
           disabled: busy || !q,
           busy: step.k === 'paying',
@@ -206,6 +249,7 @@ export function BuySheet({
           <Chip>Yours to keep</Chip>
           <Chip>Paid in BSV</Chip>
         </div>
+        {step.k === 'error' && /moving to this device/i.test(step.msg) && <MoveToDeviceNotice />}
       </ApprovalCard>
     </div>,
     document.body,

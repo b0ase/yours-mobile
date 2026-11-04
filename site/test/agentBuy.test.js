@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { P2PKH, PrivateKey, ProtoWallet, Script, Transaction, Utils } from '@bsv/sdk';
 import pm from '../lib/paymail.js';
 import ptx from '../lib/paidTxids.js';
+import pms from '../lib/paymailStore.js';
 import tb from '../lib/themeBuys.js';
 import to from '../lib/themeOrders.js';
 import td from '../lib/themeDeposits.js';
@@ -36,6 +37,7 @@ const rowsStore = (names) => {
     getByQuote: async (q) => rows.find((r) => r.quote_id === q) ?? null,
     getByTxid: async (t) => rows.find((r) => r.txid === t) ?? null,
     owned: async (k) => rows.filter((r) => r.identity_key === k && r.status === 'paid'),
+    pending: async (k) => rows.filter((r) => r.identity_key === k && r.status === 'quoted' && r.txid),
     slugRows: async (slug) => rows.filter((r) => r.slug === slug),
     aliasOwner: async () => null,
     notify: async () => {},
@@ -49,15 +51,22 @@ const rowsStore = (names) => {
   return s;
 };
 
-const setup = (env = ENV) => {
+// net.arc: ARC's answer to the claim's post; net.status: networkStatus (paymailStore.js) for any txid.
+const setup = (env = ENV, net = { arc: 'SEEN_ON_NETWORK', status: 'unclear' }) => {
   clock.t = T0;
   const broadcasts = [];
   const deps = {
     ledger: ptx.memoryPaidTxids(),
     rate: async () => 50,
-    broadcast: async (tx) => broadcasts.push(tx.id('hex')),
+    broadcast: async (tx) => {
+      broadcasts.push(tx.id('hex'));
+      const refused = /REJECTED/.test(net.arc);
+      return { txStatus: net.arc, accepted: !refused && pms.ARC_ACCEPTED.has(net.arc), refused };
+    },
+    network: async () => net.status,
     env,
     now: () => clock.t,
+    log: () => undefined,
     ...ab.agentHandlerOptions(),
   };
   const h = ab.makeAgentBuyHandlers({
@@ -69,7 +78,7 @@ const setup = (env = ENV) => {
     }),
     env,
   });
-  return { h, broadcasts };
+  return { h, broadcasts, net };
 };
 
 const payTx = (q, { sats = q.sats, memo = q.memo_hex, to: addr = PAY } = {}) => {
@@ -135,13 +144,31 @@ describe('agent buy', () => {
     expect((await h.quote(await u.sign(QUOTE, { product: 'theme', pack: 'npgx' })))[1].error).toBe('already_owned');
   });
 
-  test('quote expiry: refused after 5 minutes plus the short grace, nothing broadcast', async () => {
-    const { h, broadcasts } = setup();
+  test('a payment after the 5-minute quote is honoured (owner, 3 Nov 2026); 202 = pending, not bought', async () => {
+    const { h, broadcasts, net } = setup();
     const u = user();
     const [, q] = await h.quote(await u.sign(QUOTE, { product: 'theme', pack: 'npg' }));
     clock.t = T0 + ab.AGENT_QUOTE_MS + ab.AGENT_CLAIM_GRACE_MS + 1;
-    expect(await h.claim(await buyBody(u, 'theme', q, payTx(q)))).toEqual([410, { error: 'quote_expired' }]);
-    expect(broadcasts).toEqual([]);
+    net.arc = 'ANNOUNCED_TO_NETWORK';
+    const tx = payTx(q);
+    const [st, out] = await h.claim(await buyBody(u, 'theme', q, tx));
+    expect(st).toBe(202);
+    expect(out).toMatchObject({ product: 'theme', pack: 'npg', txid: tx.id('hex'), pending: true });
+    expect(broadcasts).toEqual([tx.id('hex')]);
+    // Not bought yet: the theme can't be quoted again while its payment is pending.
+    expect((await h.quote(await u.sign(QUOTE, { product: 'theme', pack: 'npg' })))[1].error).toBe('payment_pending');
+    // The same buy request again, once the network has it: bought.
+    net.status = 'seen';
+    expect(await h.claim(await buyBody(u, 'theme', q, tx))).toEqual([
+      200,
+      { product: 'theme', pack: 'npg', txid: tx.id('hex') },
+    ]);
+  });
+
+  test('the catalogue tells agents what 202 means', async () => {
+    const p = ab.listProducts(ENV);
+    expect(p.buy_answers[202]).toMatch(/pending/);
+    expect(p.buy_answers[200]).toMatch(/bought/);
   });
 
   test('replay: a paid quote cannot pay again, and its tx cannot buy another quote', async () => {

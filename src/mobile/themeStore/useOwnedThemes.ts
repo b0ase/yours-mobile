@@ -21,7 +21,12 @@ export function useOwnedThemes() {
   const load = useCallback(async () => {
     // Store builds sell nothing: no purchase code in their bundle (the inlined flag drops this import).
     if (!THEME_STORE_PAID_ENABLED) return;
-    const { isNotConfigured, ownedThemes } = await import('../themeOrder/api');
+    const { isNotConfigured, ownedThemes, settleStorePayments } = await import('../themeOrder/api');
+    // Finish Store payments this device started (backup failed, claim unconfirmed) and settle older nosend ones the
+    // network has (P0, 3 Nov 2026). In the background; one run at a time however many screens mount this.
+    void settleStorePayments({ wallet: apiContext.wallet } as Parameters<typeof settleStorePayments>[0], f).catch(
+      () => undefined,
+    );
     try {
       const r = await ownedThemes(f, apiContext.wallet);
       rememberOwned(current, r.packs);

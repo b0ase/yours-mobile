@@ -1,3 +1,4 @@
+import './utils/abortSignalPolyfill'; // AbortSignal.timeout / any on iOS 15 (utils/abortTimeout.ts): before anything else
 import { Buffer } from 'buffer';
 import process from 'process';
 import ReactDOM from 'react-dom/client';

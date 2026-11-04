@@ -1,14 +1,15 @@
 // Agent purchase API (site/lib/agentBuy.js). Routed by site/vercel.json:
 //   GET  /api/agent/products       → ?op=products   the catalogue + live prices
 //   POST /api/agent/quote          → ?op=quote      signed; 5-minute single-use quote (USD, sats, MNEE)
-//   POST /api/agent/buy            → ?op=buy        signed; checks the paying tx, broadcasts, grants
+//   POST /api/agent/buy            → ?op=buy        signed; checks the paying tx, broadcasts; 200 bought once the
+//                                                     network has it, 202 pending until then (site/lib/agentBuy.js)
 // Env (Vercel only): as site/api/theme-orders.js (THEME_ORDER_PAY_ADDRESS, THEME_DEPOSIT_USD, SUPABASE_*, ARC_*).
 'use strict';
 const { makeThemeOrderHandlers, themeOrderStore } = require('../lib/themeOrders');
 const { makeThemeBuyHandlers, themeBuyStore } = require('../lib/themeBuys');
 const { makeThemeDepositHandlers, themeDepositStore } = require('../lib/themeDeposits');
 const { agentHandlerOptions, listProducts, makeAgentBuyHandlers } = require('../lib/agentBuy');
-const { arcBroadcast } = require('../lib/paymailStore');
+const { arcSubmit, networkStatus, timed, wocTx } = require('../lib/paymailStore');
 const { chain } = require('../lib/nameFee');
 const { paidTxidStore } = require('../lib/paidTxids');
 
@@ -62,12 +63,22 @@ module.exports = async function handler(req, res) {
   const who = String(body.identityKey || '').toLowerCase();
   if (who && limited(`${op}|key|${who}`, LIMITS[op])) return send(res, 429, { error: 'rate-limited' });
   if (!handlers) {
-    const store = themeOrderStore();
-    const buyStore = themeBuyStore();
-    const depositStore = themeDepositStore();
-    const ledger = paidTxidStore();
+    // Every database call has a deadline too: a claim must answer inside the function's time (site/vercel.json).
+    const db = timed(fetch, 15_000);
+    const store = themeOrderStore(process.env, db);
+    const buyStore = themeBuyStore(process.env, db);
+    const depositStore = themeDepositStore(process.env, db);
+    const ledger = paidTxidStore(process.env, db);
     if (!store || !buyStore || !depositStore || !ledger) return send(res, 503, { error: 'not_configured' });
-    const deps = { ledger, rate: () => chain.bsvUsd(), broadcast: arcBroadcast(), ...agentHandlerOptions() };
+    // Paid only once the network has the payment; otherwise 202 pending (site/lib/storeClaim.js, P0 3 Nov 2026).
+    const deps = {
+      ledger,
+      rate: () => chain.bsvUsd(),
+      broadcast: arcSubmit(),
+      network: networkStatus(),
+      fetchTx: wocTx(),
+      ...agentHandlerOptions(),
+    };
     handlers = makeAgentBuyHandlers({
       buy: makeThemeBuyHandlers({ store: buyStore, ...deps }),
       order: makeThemeOrderHandlers({ store, ...deps }),
