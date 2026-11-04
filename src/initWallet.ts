@@ -24,7 +24,7 @@ import {
 } from './services/deviceSync';
 import { forceLegacyActionBatch, requireLegacyForNoSend } from './services/actionBatchMode';
 import { requireLocalStoreForChange } from './services/localFirst';
-import { recheckRefusals } from './services/refusalRecheck';
+import { loadMayBeOut, recheckRefusals } from './services/refusalRecheck';
 import { expiryLookups } from './services/unsentGuard';
 import {
   createWebWallet,
@@ -495,6 +495,8 @@ export const initWallet = async (
   if (ordKey || payKey) installLegacySigner(baseWallet, { ord: ordKey, pay: payKey });
   // A refusal is checked against the chain before the toolbox fails the tx and frees its inputs (refusalRecheck.ts).
   if (!recheckRefusals(toolboxServices)) console.warn('[initWallet] broadcast refusals are not chain-checked');
+  // Resumed Store payments marked "may be out" survive a service-worker restart (06c M1).
+  void loadMayBeOut();
   if (!rememberRefusals(toolboxServices)) console.warn('[initWallet] broadcast refusals not recorded');
   // UnFail's output verdicts read getUtxoStatus: parse api.1sat.app's "txid.vout" (dkg, 14 Oct 2026; services/utxoStatus.ts).
   if (!fixUtxoStatus(toolboxServices)) console.warn('[initWallet] getUtxoStatus not patched (no txo client)');

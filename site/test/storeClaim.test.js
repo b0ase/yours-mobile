@@ -325,7 +325,8 @@ describe('LOW items', () => {
     const u = user();
     expect(await inApp.quote(await u.sign('theme-buy-quote', { pack: 'npg' }))).toEqual([
       426,
-      { error: 'update_required' },
+      // The sentence itself: an old app shows the server's `error` text as is (06c L3).
+      { error: 'Please update bWalletX to the latest version to buy from the Store.', code: 'update_required' },
     ]);
     const [st, q] = await inApp.quote(await u.sign('theme-buy-quote', { pack: 'npg', store: '2' }));
     expect(st).toBe(200);
@@ -370,5 +371,42 @@ describe('LOW items', () => {
     const f = async (url) =>
       url.includes('/v1/tx/') ? new Response('{}', { status: 404 }) : new Response('rate limited', { status: 429 });
     expect(await pms.networkStatus({}, f)(T)).toBe('unclear');
+  });
+
+  test("06c L5: the edition quote re-checks the slug's pending rows in parallel inside the budget", async () => {
+    SIGN_AT.t = NOW;
+    const net = netModel({ arc: 'ANNOUNCED_TO_NETWORK', status: 'out' });
+    const store = memStore({ insert: 'insertOrder', update: 'updateOrder' });
+    const { d } = deps(net, store, { recheckBudgetMs: 50 });
+    const h = to.makeThemeOrderHandlers(d);
+    const form = (k) => ({
+      slug: 'slowband',
+      name: 'Slow Band',
+      brand: 'Slow',
+      isBrand: '0',
+      link: 'https://slow.example.com',
+      colours: JSON.stringify(['#7fd14a', '#0b2e12']),
+      files: JSON.stringify([{ path: `${k}/${'a'.repeat(64)}.png`, type: 'image/png', size: 1000 }]),
+    });
+    // Three expired pending rows for the slug, from three other buyers (as forged intents could pile up).
+    for (const n of [11, 12, 13])
+      await store.insertOrder({
+        identity_key: user(n).identityKey,
+        slug: 'slowband',
+        status: 'quoted',
+        quote_id: String(n).repeat(16).slice(0, 32),
+        quote_expires_at: new Date(NOW - 1).toISOString(),
+        txid: String(n).padStart(2, '0').repeat(32),
+      });
+    let calls = 0;
+    d.network = () => (calls++, new Promise(() => undefined)); // a hung network
+    const h2 = to.makeThemeOrderHandlers(d);
+    const buyer = user(20);
+    const t0 = Date.now();
+    const [st] = await h2.quote(await buyer.sign('theme-orders-quote', form(buyer.identityKey)));
+    expect(Date.now() - t0).toBeLessThan(1_000);
+    expect(st).toBe(409); // unknown verdicts: the pending rows still hold the slug
+    expect(calls).toBe(3); // all three asked at once
+    void h;
   });
 });

@@ -101,9 +101,19 @@ function makeStoreClaim(deps) {
     return 'missing';
   };
 
-  /** Re-check many pending rows at once, inside RECHECK_BUDGET_MS; the slow ones are simply checked next time. */
-  const recheckAll = async (rows) => {
-    const all = Promise.allSettled((rows || []).map((r) => recheck(r)));
+  /**
+   * Re-check many pending rows at once, inside RECHECK_BUDGET_MS; the slow ones are simply checked next time.
+   * `each(row, verdict)` hears each verdict that came back in time.
+   */
+  const recheckAll = async (rows, each) => {
+    const all = Promise.allSettled(
+      (rows || []).map((r) =>
+        recheck(r).then((v) => {
+          if (each) each(r, v);
+          return v;
+        }),
+      ),
+    );
     await Promise.race([all, new Promise((ok) => setTimeout(ok, deps.recheckBudgetMs ?? RECHECK_BUDGET_MS))]);
   };
 
@@ -185,7 +195,22 @@ function makeStoreClaim(deps) {
  * not in-app clients and aren't gated.
  */
 const STORE_PROTOCOL = '2';
+/**
+ * An old app shows `MESSAGES[error] ?? error`, and its MESSAGES has no entry for a new code, so the body carries the
+ * sentence itself (06c L3); `code` is for anything that reads codes.
+ */
+const UPDATE_REQUIRED_TEXT = 'Please update bWalletX to the latest version to buy from the Store.';
 const protocolError = (body) =>
-  String(((body || {}).fields || {}).store || '') === STORE_PROTOCOL ? null : [426, { error: 'update_required' }];
+  String(((body || {}).fields || {}).store || '') === STORE_PROTOCOL
+    ? null
+    : [426, { error: UPDATE_REQUIRED_TEXT, code: 'update_required' }];
 
-module.exports = { makeStoreClaim, scriptsVerify, protocolError, PENDING_DEAD_MS, RECHECK_BUDGET_MS, STORE_PROTOCOL };
+module.exports = {
+  makeStoreClaim,
+  scriptsVerify,
+  protocolError,
+  PENDING_DEAD_MS,
+  RECHECK_BUDGET_MS,
+  STORE_PROTOCOL,
+  UPDATE_REQUIRED_TEXT,
+};

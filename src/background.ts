@@ -112,6 +112,7 @@ import { foundHeadline, restoredLine, scanNote, type ScanReport } from './servic
 import { paymailRestoreSummary } from './mobile/names/paymail';
 import { isEmpty, summarizeActive, switchToLocalVerified, type SwitchDeps } from './services/restoreFromRemote';
 import { ensureLocalStore, type EnsureLocalResult } from './services/localFirst';
+import { markMayBeOut } from './services/refusalRecheck';
 import {
   fundingTimeoutError,
   SingleFlight,
@@ -3035,6 +3036,7 @@ if (!(
       'STORAGE_GET_INFO',
       'STORAGE_SYNC_BACKUPS',
       'STORE_BACKUP_BEFORE_SEND',
+      'STORE_MAY_BE_OUT',
       'STORAGE_MOVE_STATUS',
       'STORAGE_MOVE_TO_DEVICE',
       'STORAGE_REPAIR_WALLET',
@@ -3404,6 +3406,14 @@ if (!(
           return true;
         case 'STORAGE_SYNC_BACKUPS':
           processStorageSyncBackups(sendResponse);
+          return true;
+        case 'STORE_MAY_BE_OUT':
+          // A Store payment about to be re-posted after the app died mid-post may already be out: a refusal of it
+          // must never free its coin on "missing" alone (services/refusalRecheck.ts, 06c M1).
+          void markMayBeOut(String((message as { txid?: unknown }).txid ?? '')).then(
+            () => sendResponse({ type: 'STORE_MAY_BE_OUT', success: true }),
+            (e: unknown) => sendResponse({ type: 'STORE_MAY_BE_OUT', success: false, error: String(e) }),
+          );
           return true;
         case 'STORAGE_MOVE_STATUS':
           sendResponse({ type: 'STORAGE_MOVE_STATUS', success: true, data: moveStatus() });

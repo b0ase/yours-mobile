@@ -384,20 +384,24 @@ function makeThemeOrderHandlers({
     const v = validateOrder(body.fields, identityKey);
     if (!v.ok) return [400, { error: v.error }];
     const t = now();
-    const holders = [];
-    for (const r of await store.slugRows(v.order.slug)) {
-      if (!live(r, t)) continue;
-      // A pending payment holds the slug only while it may land: one nobody has (a forged or refused tx: ARC 404 or
-      // REJECTED and WhatsOnChain 404) doesn't, even inside its hour (storeClaim.js recheck; review F9).
-      if (r.status === 'quoted' && r.txid && ['dead', 'missing'].includes(await claimer.recheck(r))) continue;
-      holders.push(r);
-    }
+    // Who holds the slug. A live quote always does, even once its buyer's payment is recorded (06c L1: the buyer is
+    // paying; the network may not show it for minutes). Past its quote, a pending payment holds the slug only while
+    // it may land: one nobody has (a forged or refused tx: ARC 404/REJECTED and WhatsOnChain 404) doesn't (review
+    // F9). Pending rows are re-checked in parallel inside the claimer's budget (06c L5).
+    const rows = (await store.slugRows(v.order.slug)).filter((r) => live(r, t));
+    const expiredPending = (r) => r.status === 'quoted' && r.txid && Date.parse(r.quote_expires_at) <= t;
+    const verdicts = new Map();
+    await claimer.recheckAll(rows.filter(expiredPending), (r, verdict) => verdicts.set(r.id, verdict));
+    const holders = rows.filter((r) => !(expiredPending(r) && ['dead', 'missing'].includes(verdicts.get(r.id))));
     let renewOf = null;
     if (v.order.renew) {
       const mine = holders.filter((r) => r.identity_key === identityKey && r.status !== 'quoted');
       if (!mine.length) return [404, { error: 'renew: no edition with that slug' }];
       renewOf = mine;
     } else if (holders.some((r) => r.identity_key !== identityKey)) return [409, { error: 'slug_taken' }];
+    // 06c L2: this buyer already has a payment for this edition on its way: no second quote (and no second $99).
+    else if (holders.some((r) => r.identity_key === identityKey && r.status === 'quoted' && r.txid))
+      return [409, { error: 'payment_pending' }];
     if (v.order.proof) {
       const owner = await store.aliasOwner(v.order.proof.value);
       if (owner !== identityKey) return [403, { error: 'proof: that name is not on this wallet' }];

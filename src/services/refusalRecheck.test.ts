@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { recheckRefusals, recheckResults } from './refusalRecheck';
+import { markMayBeOut, mayBeOut, recheckRefusals, recheckResults } from './refusalRecheck';
 import type { ChainLookup } from './unsentGuard';
 
 const A = 'a'.repeat(64);
@@ -123,5 +123,41 @@ describe('review 4 Nov 2026 F1: a refusal that names this very tx as the spender
       txidResults: { status: string }[];
     }[];
     expect(out[0].txidResults[0].status).toBe('success');
+  });
+});
+
+describe('06c: a resumed Store payment that may be out is never failed on "missing" (M1)', () => {
+  const C = 'c'.repeat(64);
+  const D = 'd'.repeat(64);
+  test('marked "may be out": a generic REJECTED with the chain missing on every retry becomes a service error', async () => {
+    await markMayBeOut(C);
+    expect(mayBeOut(C)).toBe(true);
+    const out = (await recheckResults([refused(C)], [say({ [C]: 'missing' })], () => undefined, fast)) as {
+      txidResults: { status: string; serviceError?: boolean }[];
+    }[];
+    expect(out[0].txidResults[0]).toMatchObject({ status: 'error', serviceError: true });
+    // Not marked: the refusal stands (failed, inputs released), as before.
+    const plain = (await recheckResults([refused(D)], [say({ [D]: 'missing' })], () => undefined, fast)) as {
+      txidResults: { status: string; serviceError?: boolean }[];
+    }[];
+    expect(plain[0].txidResults[0].serviceError).toBeUndefined();
+  });
+
+  test('a refusal naming ANOTHER spender stands at once, with no chain wait (06c L6), even when marked', async () => {
+    await markMayBeOut(C);
+    let asked = 0;
+    const counting: ChainLookup = async () => (asked++, 'missing');
+    const r = {
+      name: '1sat-api',
+      status: 'error',
+      error: new Error(`UTXO_SPENT: input already spent by tx ${B}`),
+      txidResults: [{ txid: C, status: 'error', data: { extraInfo: `already spent by tx ${B}` } }],
+    };
+    const out = (await recheckResults([r], [counting], () => undefined, fast)) as {
+      txidResults: { status: string; serviceError?: boolean }[];
+    }[];
+    expect(out[0].txidResults[0].status).toBe('error');
+    expect(out[0].txidResults[0].serviceError).toBeUndefined();
+    expect(asked).toBe(0);
   });
 });

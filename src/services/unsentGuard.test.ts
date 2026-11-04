@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'fs';
 import {
   arcLookup,
+  chainLookups,
   chainVerdict,
   chainHasSeen,
   chainMayHave,
@@ -93,7 +94,12 @@ describe('the 16:17 scenario: the server broadcast, then answered with an error'
     expect(src).not.toContain("e.code === 'broadcast_failed')");
     // No abort path for a payment that may have gone out: the only release is of one the Store refused BEFORE any
     // broadcast (claim intent), and it goes through releaseAfterHandoff's ~30 s chain check (review 4 Nov 2026).
-    expect(src).not.toMatch(/releasePayment|abortAction/);
+    expect(src).not.toMatch(/releasePayment/);
+    // The one abort (06c M2): an orphan that never reached the outbox, released only after the Store says it never
+    // heard of it and the chain says unknown over the retries, and re-checked right before.
+    expect(src.match(/abortAction\(/g)?.length).toBe(1);
+    const orphan = src.slice(src.indexOf('06c M2: an orphan'), src.indexOf('await w.abortAction('));
+    expect(orphan).toMatch(/storeHeardOf\([\s\S]*chainSaysUnknown\([\s\S]*inOutbox\(txid\) \|\| \(await storeHeardOf/);
     expect(src.match(/releaseAfterHandoff\(/g)?.length).toBe(1);
     expect(src).toMatch(/releaseAfterHandoff\(wallet, txid, \{\s*notBroadcast: true/);
     expect(src.match(/signStorePayment\(/g)?.length).toBe(2);
@@ -322,5 +328,29 @@ describe('review 4 Nov 2026: refusals and releases need repeated answers', () =>
     expect(
       await chainMayHave(TXID, [wocLookup(r429), arcLookup(async () => new Response('{}', { status: 404 }))]),
     ).toBe(true);
+  });
+});
+
+describe('06c: lookups have deadlines; one look never counts an ARC refusal as "missing"', () => {
+  test('every lookup passes an AbortSignal (a hung WhatsOnChain / ARC can not hold storage)', async () => {
+    const signals: unknown[] = [];
+    const f = async (_u: string, init?: RequestInit) => (
+      signals.push(init?.signal),
+      new Response('{}', { status: 404 })
+    );
+    await wocLookup(f)(TXID);
+    await arcLookup(f)(TXID);
+    await oneSatLookup(f)(TXID);
+    await oneSatPresenceLookup(f)(TXID);
+    expect(signals.length).toBe(4);
+    for (const sig of signals) expect(sig).toBeInstanceOf(AbortSignal);
+  });
+
+  test('N15: chainLookups (one look) with ARC REJECTED and WhatsOnChain 404 says "may have it"', async () => {
+    const f = async (u: string) =>
+      u.includes('gorillapool')
+        ? new Response(JSON.stringify({ txStatus: 'REJECTED' }), { status: 200 })
+        : new Response('{}', { status: 404 });
+    expect(await chainMayHave(TXID, chainLookups(f))).toBe(true);
   });
 });

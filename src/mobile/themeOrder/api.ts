@@ -8,9 +8,12 @@ import { BWALLET_PAYMAIL_API } from '../names/config';
 import type { Fetch } from '../names/names';
 import { signRequest } from '../names/paymail';
 import { sendMessageAsync } from '../../utils/chromeHelpers';
+import { markMayBeOut } from '../../services/refusalRecheck';
 import {
   chainHasSeen,
   chainLookups,
+  chainSaysUnknown,
+  defaultLookups,
   releaseAfterHandoff,
   sendThroughWallet,
   type UnsentWallet,
@@ -174,6 +177,13 @@ export function withStoreDeps(ctx: OneSatContext, f: Fetch, deps: StorePayDeps):
           log: deps.log,
         });
       }),
+    markMayBeOut:
+      deps.markMayBeOut ??
+      (async (txid) => {
+        // Same context (tests, a wallet that runs in the page) and the background's broadcaster wrapper.
+        await markMayBeOut(txid);
+        await sendMessageAsync({ action: 'STORE_MAY_BE_OUT', txid }).catch(() => undefined);
+      }),
     actionStatus:
       deps.actionStatus ?? (async (txid) => (await recentActions(wallet, 300)).find((a) => a.txid === txid)?.status),
   };
@@ -266,7 +276,7 @@ export const payQuote = async (
   const kept = pruneOutbox(deps.outbox, now(deps)).find((e) => e.kind === 'order' && e.key === q.quote_id);
   if (kept) {
     const done = await finishOrder(ctx, f, kept, deps).catch((e: unknown) => {
-      if (e instanceof StorePayError && e.code === 'cleared') return null;
+      if (e instanceof StorePayError && (e.code === 'cleared' || e.code === 'refused_cleared')) return null;
       throw e;
     });
     if (done) return done;
@@ -423,7 +433,7 @@ export const payBuyQuote = async (
   const kept = pruneOutbox(deps.outbox, now(deps)).find((e) => e.kind === 'buy' && e.key === q.pack);
   if (kept) {
     const done = await finishBuy(ctx, f, kept, deps).catch((e: unknown) => {
-      if (e instanceof StorePayError && e.code === 'cleared') return null;
+      if (e instanceof StorePayError && (e.code === 'cleared' || e.code === 'refused_cleared')) return null;
       throw e;
     });
     if (done) return done;
@@ -486,7 +496,36 @@ export type SettleReport = {
   settledOld: string[];
   /** Sent Store payments found in the wallet with no outbox entry, claimed from their memo (F2). */
   reclaimed: string[];
+  /** Unsent Store payments that never reached the outbox, the Store or the network, released (06c M2). */
+  released: string[];
 };
+
+/**
+ * Has the Store heard of this txid for this quote? Asked with a claim that carries no rawtx: the server records nothing
+ * it can't see. 'yes' = paid, or recorded as pending (an intent or a claim); 'no' = it holds no such payment; 'unclear'
+ * = no clear answer (never release on that).
+ */
+async function storeHeardOf(
+  ctx: OneSatContext,
+  f: Fetch,
+  memo: { kind: OutboxEntry['kind']; quoteId: string },
+  txid: string,
+): Promise<'yes' | 'no' | 'unclear'> {
+  try {
+    const signed = await signRequest(ctx.wallet, claimAction(memo.kind), {
+      quote_id: memo.quoteId,
+      txid,
+      store: STORE_PROTOCOL,
+    });
+    const r = await post<{ pending?: boolean; unverified?: boolean }>(f, claimOp(memo.kind), signed);
+    return r.unverified ? 'no' : 'yes';
+  } catch (e) {
+    if (!(e instanceof ThemeOrderError)) return 'unclear';
+    if (e.code === 'tx_used') return 'yes'; // the txid is recorded (on another row)
+    if (['rawtx', 'quote_not_found', 'payment_pending', 'quote_used'].includes(e.code)) return 'no';
+    return 'unclear';
+  }
+}
 
 /** Txids the Store has confirmed paid (so the scan doesn't ask again). Small, per identity, best effort. */
 export type ClaimedSet = { has: (txid: string) => boolean; add: (txid: string) => void };
@@ -552,7 +591,7 @@ async function settleOnce(
   const base = opts.deps ?? (await defaultStorePayDeps(ctx.wallet));
   const deps = withStoreDeps(ctx, f, { log, ...base });
   const claimed = opts.claimed ?? localClaimed((await ctx.wallet.getPublicKey({ identityKey: true })).publicKey);
-  const report: SettleReport = { finished: [], pending: [], kept: [], settledOld: [], reclaimed: [] };
+  const report: SettleReport = { finished: [], pending: [], kept: [], settledOld: [], reclaimed: [], released: [] };
   const t = now(deps);
   /** Everything the outbox held at the start of this run: the scan below never claims those a second time. */
   const handled = new Set<string>();
@@ -601,15 +640,40 @@ async function settleOnce(
       );
     }
   }
-  // Store payments signed before this fix, still 'nosend' while the network has them.
+  // Store payments still 'nosend' with no outbox entry.
   const lookups = deps.lookups ?? chainLookups();
+  const inOutbox = (txid: string) => deps.outbox.all().some((e) => e.txid === txid);
   for (const a of actions) {
     const txid = a.txid ?? '';
     if (a.status !== 'nosend' || !TXID_RE.test(txid) || known.has(txid)) continue;
     if (!STORE_PAYMENT_DESC.test(a.description ?? '')) continue;
-    if (!(await chainHasSeen(txid, lookups))) continue;
-    const h = await sendThroughWallet(w, txid, { log });
-    if (h === 'sent' || h === 'pending') report.settledOld.push(txid);
+    // Signed before this fix, and the network has it: hand it to the wallet's send path.
+    if (await chainHasSeen(txid, lookups)) {
+      const h = await sendThroughWallet(w, txid, { log });
+      if (h === 'sent' || h === 'pending') report.settledOld.push(txid);
+      continue;
+    }
+    // 06c M2: an orphan. The app (or the extension popup) died between signing and the outbox write, so it never
+    // reached the Store or the network (both come after that write), yet its nosend row holds the coin for 24 h and
+    // every send fails ("my balance became unspendable"). Release it only when the Store has never heard of it, the
+    // chain shows nothing over ~30 s of retries, and, just before, it is still not in the outbox (a Pay in progress)
+    // and the Store still hasn't heard of it.
+    const memo = (a.outputs ?? []).map((o) => storeMemo(o.lockingScript ?? '')).find(Boolean);
+    if (!memo || inOutbox(txid)) continue;
+    if ((await storeHeardOf(ctx, f, memo, txid)) !== 'no') continue;
+    const gone = await chainSaysUnknown(txid, {
+      lookups: deps.releaseLookups ? [...deps.releaseLookups] : defaultLookups(),
+      delaysMs: deps.recheckDelaysMs,
+      sleep: deps.sleep,
+    });
+    if (!gone || inOutbox(txid) || (await storeHeardOf(ctx, f, memo, txid)) !== 'no') continue;
+    try {
+      await w.abortAction({ reference: txid });
+      report.released.push(txid);
+      log(`[bwx-store] ${txid}: an unsent Store payment that never reached the Store or the network; released`);
+    } catch (err) {
+      log(`[bwx-store] ${txid}: release refused (${err instanceof Error ? err.message : String(err)})`);
+    }
   }
   return report;
 }

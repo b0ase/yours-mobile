@@ -33,13 +33,19 @@ export const SETTLE_DELAYS_MS = [15_000, 30_000, 60_000, 120_000, 240_000, 480_0
 
 type F = (url: string, init?: RequestInit) => Promise<Response>;
 const defaultFetch: F = (u, i) => fetch(u, i);
+/**
+ * Every chain lookup has a deadline (06c L6): refusal checks run inside the broadcaster call, under the wallet's
+ * storage writer lock, so a hung WhatsOnChain or ARC must not hold storage. A timeout is an 'unclear' answer.
+ */
+export const LOOKUP_TIMEOUT_MS = 8_000;
+const timedInit = (): RequestInit => ({ signal: AbortSignal.timeout(LOOKUP_TIMEOUT_MS) });
 
 /** WhatsOnChain: 200 seen (mempool or mined), 404 missing, anything else unclear. */
 export const wocLookup =
   (f: F = defaultFetch): ChainLookup =>
   async (txid) => {
     try {
-      const r = await f(`https://api.whatsonchain.com/v1/bsv/main/tx/hash/${txid}`);
+      const r = await f(`https://api.whatsonchain.com/v1/bsv/main/tx/hash/${txid}`, timedInit());
       if (r.status === 404) return 'missing';
       return r.ok ? 'seen' : 'unclear';
     } catch {
@@ -68,7 +74,7 @@ export const arcLookup =
   (f: F = defaultFetch, o: { rejectedIsMissing?: boolean } = {}): ChainLookup =>
   async (txid) => {
     try {
-      const r = await f(`${ARC_URL}/v1/tx/${txid}`);
+      const r = await f(`${ARC_URL}/v1/tx/${txid}`, timedInit());
       if (r.status === 404) return 'missing';
       if (!r.ok) return 'unclear';
       const s = String(((await r.json().catch(() => ({}))) as { txStatus?: unknown }).txStatus ?? '');
@@ -87,7 +93,7 @@ export const oneSatLookup =
   (f: F = defaultFetch): ChainLookup =>
   async (txid) => {
     try {
-      const r = await f(`https://api.1sat.app/1sat/beef/${txid}`);
+      const r = await f(`https://api.1sat.app/1sat/beef/${txid}`, timedInit());
       return r.status === 404 ? 'missing' : 'unclear';
     } catch {
       return 'unclear';
@@ -102,7 +108,7 @@ export const oneSatPresenceLookup =
   (f: F = defaultFetch): ChainLookup =>
   async (txid) => {
     try {
-      const r = await f(`https://api.1sat.app/1sat/beef/${txid}`);
+      const r = await f(`https://api.1sat.app/1sat/beef/${txid}`, timedInit());
       if (r.status === 404) return 'missing';
       return r.ok ? 'seen' : 'unclear';
     } catch {

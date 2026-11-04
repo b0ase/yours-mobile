@@ -167,7 +167,7 @@ describe('review 4 Nov 2026', () => {
     d.outbox.put(refused);
     const late = { ...d, now: () => 1_000 + REFUSED_KEEP_MS + 1 };
     expect(await sendStorePayment(answering('refused'), refused, late).catch((x: StorePayError) => x.code)).toBe(
-      'cleared',
+      'refused_cleared',
     );
     expect(d.outbox.all()).toEqual([]);
     // Still a live action in the wallet: kept.
@@ -272,5 +272,21 @@ describe('review 4 Nov 2026', () => {
     expect(storeMemo(memo('bwx-theme-order', q))).toEqual({ kind: 'order', quoteId: q });
     expect(storeMemo(memo('bwx-theme-deposit', q))).toBeNull();
     expect(storeMemo('76a914')).toBeNull();
+  });
+});
+
+describe('06c M1: a payment that was already being sent is marked "may be out" before it is re-posted', () => {
+  test('resume of a sending entry marks it first; a first send does not', async () => {
+    const order: string[] = [];
+    const w = {
+      ...answering('sent'),
+      createAction: async () => (order.push('send'), { sendWithResults: [{ txid: T, status: 'unproven' }] }),
+    };
+    const d = base({ markMayBeOut: async (t) => void order.push(`mark ${t.slice(0, 4)}`) });
+    expect(await sendStorePayment(w, entry({ state: 'sending' }), d)).toBe('sent');
+    expect(order).toEqual(['mark abab', 'send']);
+    order.length = 0;
+    expect(await sendStorePayment(w, entry({ state: 'signed' }), d)).toBe('sent');
+    expect(order).toEqual(['send']);
   });
 });

@@ -868,3 +868,63 @@ describe('review 4 Nov 2026 (06b), on the real toolbox', () => {
     }
   });
 });
+
+describe('06c M2: an orphan unsent Store payment (signed, never in the outbox) is released only when safe', () => {
+  const orphanWorld = async (claimAnswer: (b: Body) => [number, unknown]) => {
+    const chain: Chain = { post: 'success', seen: new Set(), mined: new Set(), posted: [] };
+    const { w, coin } = await oneCoin(chain);
+    const q = buyQuote('a1'.repeat(16));
+    const orphan = await signedStorePayment(w, q); // the popup closed before the outbox write
+    const server = storeServer((op, b) => claimAnswer(b), { chain });
+    return { chain, w, coin, orphan, server };
+  };
+
+  test('the Store never heard of it and the chain has nothing: released, the coin funds the next send', async () => {
+    const { chain, w, coin, orphan, server } = await orphanWorld(() => [202, { pending: true, unverified: true }]);
+    const { deps } = depsFor(chain);
+    const r = await api.settleStorePayments({ wallet: w.wallet } as never, server.f, { deps, log: () => undefined });
+    expect(r.released).toEqual([orphan.txid]);
+    expect((await txRow(w, orphan.txid))?.status).toBe('failed');
+    expect(chain.posted).toEqual([]);
+    expect(await nextSend(w)).toContain(coin);
+  });
+
+  test('the Store has heard of it (an intent, the outbox lost): never released', async () => {
+    const { chain, w, orphan, server } = await orphanWorld((b) => [202, { pending: true, txid: b.fields.txid }]);
+    const { deps } = depsFor(chain);
+    const r = await api.settleStorePayments({ wallet: w.wallet } as never, server.f, { deps, log: () => undefined });
+    expect(r.released).toEqual([]);
+    expect((await txRow(w, orphan.txid))?.status).toBe('nosend');
+  });
+
+  test('no clear answer from the Store: never released', async () => {
+    const { chain, w, orphan, server } = await orphanWorld(() => [500, { error: 'server-error' }]);
+    const { deps } = depsFor(chain);
+    const r = await api.settleStorePayments({ wallet: w.wallet } as never, server.f, { deps, log: () => undefined });
+    expect(r.released).toEqual([]);
+    expect((await txRow(w, orphan.txid))?.status).toBe('nosend');
+  });
+
+  test('a Pay in progress writes its outbox entry during the chain check: never released', async () => {
+    const { chain, w, orphan, server } = await orphanWorld(() => [202, { pending: true, unverified: true }]);
+    const outbox = memoryOutbox();
+    const { deps } = depsFor(chain, {
+      outbox,
+      recheckDelaysMs: [0, 1],
+      sleep: async () => {
+        outbox.put({
+          kind: 'buy',
+          quoteId: 'a1'.repeat(16),
+          txid: orphan.txid,
+          beefHex: orphan.beefHex,
+          key: 'emoji-cool',
+          state: 'signed',
+          at: Date.now(),
+        });
+      },
+    });
+    const r = await api.settleStorePayments({ wallet: w.wallet } as never, server.f, { deps, log: () => undefined });
+    expect(r.released).toEqual([]);
+    expect((await txRow(w, orphan.txid))?.status).toBe('nosend');
+  });
+});

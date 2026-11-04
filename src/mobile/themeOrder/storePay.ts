@@ -144,6 +144,11 @@ export type StorePayDeps = {
   releaseUnsent?: (txid: string) => Promise<void>;
   /** The wallet's status for an action: 'failed', 'nosend', 'unproven'…, or undefined when storage has no such action. */
   actionStatus?: (txid: string) => Promise<string | undefined>;
+  /**
+   * Tell the wallet's broadcaster wrapper this txid may already be on the network, before re-posting a payment that was
+   * 'sending' when the app died (services/refusalRecheck.ts markMayBeOut; 06c M1).
+   */
+  markMayBeOut?: (txid: string) => Promise<void>;
   outbox: Outbox;
   /** One-snapshot chain lookups for "has the network got it?" (WhatsOnChain + ARC). */
   lookups?: ChainLookup[];
@@ -166,6 +171,8 @@ export const STORE_PAY_MESSAGES = {
   refused_so_far:
     "The network has refused the payment so far. It's kept: if it turns up on the network it is claimed automatically, and nothing more is taken.",
   cleared: 'An earlier payment for this was never sent and has been cleared. Nothing was paid.',
+  refused_cleared:
+    'An earlier payment for this was refused by the network and never reached it, so it has been cleared. Nothing was paid.',
   not_sent:
     "The payment is saved in your wallet but couldn't be sent just now. It goes out when you're back online. Nothing will be paid twice.",
 } as const;
@@ -259,7 +266,7 @@ export async function sendStorePayment(
     if (now - (entry.refusedAt ?? entry.at) > REFUSED_KEEP_MS && (await deadEntry(entry, deps))) {
       log(`[bwx-store] ${entry.txid}: refused, failed in the wallet and still not on chain after a day; cleared`);
       deps.outbox.drop(entry.txid);
-      throw storeError('cleared', false);
+      throw storeError('refused_cleared', false);
     }
     throw storeError('refused_so_far', true);
   }
@@ -286,6 +293,11 @@ export async function sendStorePayment(
       }
     }
   }
+  // A payment that was already 'sending' when the app died may be out (06c M1): its refusal must not free the coin.
+  if (entry.state === 'sending')
+    await Promise.resolve(deps.markMayBeOut?.(entry.txid)).catch((e: unknown) =>
+      log(`[bwx-store] ${entry.txid}: could not mark it as maybe out (${e instanceof Error ? e.message : String(e)})`),
+    );
   // Recorded before the broadcast: from here a restart re-sends and re-claims this txid, never a new payment.
   try {
     deps.outbox.put({ ...entry, state: 'sending' });
