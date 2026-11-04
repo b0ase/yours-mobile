@@ -3438,6 +3438,12 @@ if (!(
           );
           return true;
         case 'STORAGE_MOVE_STATUS':
+          // Not before the wallet is open: without an account context the store looked "not on this device", so the
+          // notice showed on every open for up to a minute (release click-through, 4 Nov 2026).
+          if (!accountContext) {
+            sendResponse({ type: 'STORAGE_MOVE_STATUS', success: false, error: 'The wallet is still opening' });
+            return true;
+          }
           sendResponse({ type: 'STORAGE_MOVE_STATUS', success: true, data: moveStatus() });
           return true;
         case 'STORAGE_MOVE_TO_DEVICE':

@@ -32,7 +32,8 @@ describe('STORAGE_MOVE_STATUS storm: the components ask with a stable send', () 
   test('the notice polls through a callback that depends on send only', () => {
     const s = src('MoveToDeviceNotice.tsx');
     expect(s).toMatch(/useCallback\(async \(\) => \{[\s\S]*?\}, \[send\]\)/);
-    expect(s).toMatch(/\}, \[load, pollMs\]\);/);
+    expect(s).toMatch(/\}, \[load\]\);/);
+    expect(s).toMatch(/\}, \[load, every\]\);/);
   });
 
   test('every mount uses the default (no inline send that would bring the loop back)', () => {

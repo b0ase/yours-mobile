@@ -17,3 +17,14 @@ export const nextTryText = (nextRetryAt: number, now = Date.now()): string => {
 export function moveStatusSend<T>(m: object): Promise<T> {
   return sendMessageAsync<T>(m);
 }
+
+/** How often the move notice asks while the move is unknown or not done: then it clears soon after the move ends. */
+export const NOTICE_FAST_POLL_MS = 5_000;
+
+/**
+ * The move notice's next ask (release click-through, 4 Nov 2026): every 5 s while the background hasn't answered yet
+ * (the wallet is still opening) or the account isn't on this device, else the steady interval. A plain number, so the
+ * polling effect depends on primitives only (no re-run per render).
+ */
+export const noticePollMs = (status: { onDevice: boolean } | null, steadyMs: number): number =>
+  !status || !status.onDevice ? NOTICE_FAST_POLL_MS : steadyMs;

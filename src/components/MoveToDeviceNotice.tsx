@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Smartphone } from 'lucide-react';
-import { moveStatusSend, nextTryText } from './moveToDevice';
+import { moveStatusSend, nextTryText, noticePollMs } from './moveToDevice';
 
 /** What the background says about moving this account's records to this device (STORAGE_MOVE_STATUS). */
 export type MoveStatus = {
@@ -34,11 +34,15 @@ export const MoveToDeviceNotice = ({
     if (r?.success && r.data) setStatus(r.data);
   }, [send]);
 
+  // Asks at once, then every 5 s until the account is known to be on this device, then every pollMs (moveToDevice.ts).
+  const every = noticePollMs(status, pollMs);
   useEffect(() => {
     void load();
-    const t = setInterval(() => void load(), pollMs);
+  }, [load]);
+  useEffect(() => {
+    const t = setInterval(() => void load(), every);
     return () => clearInterval(t);
-  }, [load, pollMs]);
+  }, [load, every]);
 
   if (!status || status.onDevice) return null;
 
