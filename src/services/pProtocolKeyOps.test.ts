@@ -11,7 +11,14 @@
 import { describe, expect, test } from 'bun:test';
 import { InMemoryPermissionStore, LocalWalletPermissionsManager } from '@1sat/wallet';
 import { createAssetPermissionModules } from '@1sat/permission-module';
-import { guardReservedProtocols, P_MODULE_PROTOCOL_REFUSAL } from './reservedProtocols';
+import {
+  guardReservedProtocols,
+  MODULE_PROBE_ANSWER,
+  P_MODULE_PROTOCOL_REFUSAL,
+  reservedProtocolRefusal,
+} from './reservedProtocols';
+import { hasOneSatModule } from '@1sat/actions';
+import { P1SAT_MODULE_PROTOCOL } from '@1sat/types';
 
 const ADMIN = 'admin.bwalletx.test';
 const SITE = 'https://evil.example';
@@ -107,5 +114,53 @@ describe('G2: "p" protocol names get no key operations for a site without a chec
     const err = await w.getPublicKey({ ...common, protocolID: [1, 'shop pay'] } as never, SITE).catch((e: Error) => e);
     expect(String((err as Error)?.message ?? '')).not.toContain(P_MODULE_PROTOCOL_REFUSAL);
     expect(asked).toEqual([]); // no grant in the store: the base wallet is not asked
+  });
+});
+
+/**
+ * Review 16, F3: the SDK lowercases and trims protocol names before deriving (KeyDeriver.computeInvoiceNumber), so
+ * "P 1sat" and " p 1sat" reach the same keys as "p 1sat" but are not routed to the module and were not refused. At level
+ * 0 the manager grants them with no prompt: [0, 'p 1sat'] is the legacy 1Sat asset key space. F8: the 1sat module probe
+ * (hasOneSatModule) must still say yes, so 1sat dApps can find the module.
+ */
+describe('F3: name variants of "p" protocols are refused too; the module probe still answers', () => {
+  const variants = ['P 1sat', ' p 1sat', 'p 1sat ', 'P 1SAT', '  p bsv21'];
+  for (const name of variants)
+    test(`"${name}" gets no key operation at level 0, 1 or 2`, async () => {
+      for (const level of [0, 1, 2] as const)
+        for (const [method, args] of calls.filter(([m]) => m !== 'revealSpecificKeyLinkage')) {
+          const { w, asked } = wallet();
+          const fn = (w as unknown as Record<string, (a: unknown, o?: string) => Promise<unknown>>)[method];
+          await expect(fn.call(w, { ...args, protocolID: [level, name] }, SITE)).rejects.toThrow(
+            P_MODULE_PROTOCOL_REFUSAL,
+          );
+          expect(asked).toEqual([]);
+        }
+    });
+
+  test('a name variant cannot take createSignature around the module either', async () => {
+    const { w, asked } = wallet();
+    await expect(w.createSignature({ ...common, data: [1], protocolID: [1, 'P 1sat'] } as never, SITE)).rejects.toThrow(
+      P_MODULE_PROTOCOL_REFUSAL,
+    );
+    expect(asked).toEqual([]);
+  });
+
+  test('the 1sat module probe answers yes, with a fixed key and nothing derived', async () => {
+    const { w, asked } = wallet();
+    const asSite = { getPublicKey: (a: unknown) => w.getPublicKey(a as never, SITE) };
+    expect(await hasOneSatModule(asSite as never)).toBe(true);
+    const r = (await w.getPublicKey(
+      { protocolID: P1SAT_MODULE_PROTOCOL, keyID: 'anything', counterparty: 'self' } as never,
+      SITE,
+    )) as { publicKey: string };
+    expect(r.publicKey).toBe(MODULE_PROBE_ANSWER);
+    expect(asked).toEqual([]);
+    // The background's early check lets the probe through to that answer.
+    expect(reservedProtocolRefusal('getPublicKey', { protocolID: P1SAT_MODULE_PROTOCOL, keyID: 'x' })).toBeNull();
+    // Only getPublicKey: the probe protocol signs, encrypts and HMACs nothing.
+    await expect(
+      w.encrypt({ protocolID: P1SAT_MODULE_PROTOCOL, keyID: 'x', plaintext: [1] } as never, SITE),
+    ).rejects.toThrow(P_MODULE_PROTOCOL_REFUSAL);
   });
 });

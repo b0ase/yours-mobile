@@ -85,6 +85,21 @@ export const P_MODULE_PROTOCOL_REFUSAL =
   'bWalletX does not use its asset-module keys for apps, except to sign a payment';
 /** Exactly the names the toolbox routes to a permission module (delegateToPModuleIfNeeded: startsWith("p ")). */
 const routesToPModule = (name: string) => name.startsWith('p ');
+/**
+ * Names whose keys are a module's: the SDK derives from the name lowercased and trimmed (KeyDeriver
+ * computeInvoiceNumber), so "P 1sat" and " p 1sat" are the same keys as "p 1sat" (review 16, F3).
+ */
+const modulesKeys = (name: string) => name.toLowerCase().trim().startsWith('p ');
+/** The 1sat module probe (@1sat/types P1SAT_MODULE_PROTOCOL; @1sat/actions hasOneSatModule). */
+const MODULE_PROBE_NAME = 'p 1sat probe';
+/** Is this the 1sat dApps' "do you have the module?" probe? Answered with a fixed key, nothing derived (F8). */
+export const isModuleProbe = (method: string, args: unknown): boolean => {
+  if (method !== 'getPublicKey' || !args || typeof args !== 'object') return false;
+  const p = asProtocol((args as { protocolID?: unknown }).protocolID);
+  return !!p && p[0] === 0 && p[1].toLowerCase().trim() === MODULE_PROBE_NAME;
+};
+/** Answer to the 1sat module probe: the well-known 'anyone' key (private key 1), never a key of this wallet. */
+export const MODULE_PROBE_ANSWER = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798';
 
 /** Wallet methods whose args carry a protocolID that selects a derived key. */
 const PROTOCOL_METHODS = new Set([
@@ -109,7 +124,11 @@ export const reservedProtocolRefusal = (method: string, args: unknown): string |
   const p = asProtocol(a.protocolID);
   if (!p) return 'Invalid protocolID';
   if (RESERVED_HASHES.has(protocolHash(p))) return `${RESERVED_REFUSAL}: "${p[1]}"`;
-  if (method !== 'createSignature' && routesToPModule(p[1])) return P_MODULE_PROTOCOL_REFUSAL;
+  // A module's keys: only createSignature under the exact name the toolbox hands to the module (which checks it), and
+  // the module probe (answered without a key). Every other way in, any case or spacing, is refused (G2, review 16 F3).
+  if (modulesKeys(p[1]) && !isModuleProbe(method, args)) {
+    if (method !== 'createSignature' || !routesToPModule(p[1])) return P_MODULE_PROTOCOL_REFUSAL;
+  }
   if (method === 'createSignature') {
     // Level-0 keys are shared by every app and the wallet, and the permissions manager never asks for level 0, so
     // any site could get signatures with no sheet. BRC-29 keys receive the user's payments. Both paths are refused:
@@ -160,6 +179,8 @@ export function guardReservedProtocols<T extends object>(manager: T, adminOrigin
     const original = m[method];
     if (typeof original !== 'function') continue;
     m[method] = async (args: unknown, originator?: string) => {
+      // The 1sat module probe: yes, with the well-known 'anyone' key. No key of this wallet is derived or shown.
+      if (isOutside(originator) && isModuleProbe(method, args)) return { publicKey: MODULE_PROBE_ANSWER };
       if (isOutside(originator)) {
         const refusal =
           reservedProtocolRefusal(method, args) ??
