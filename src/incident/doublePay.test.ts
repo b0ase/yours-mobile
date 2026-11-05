@@ -23,6 +23,7 @@ import { rememberRefusals } from '../services/broadcastRefusals';
 import { createUncertainSends, outcomeIsUncertain, type UncertainSends } from '../utils/uncertainSends';
 import { AUTO_RESYNC_KEY, autoResyncCoins, type AutoResyncState, type KV } from '../services/autoCoinResync';
 import { describeWalletError } from '../brand/walletError';
+import { createWithStorageFailover, processActionStarts, StorageMaybeSentError } from '../services/storageFailover';
 import {
   classifySendError,
   DOUBLE_SPEND_PENDING_MESSAGE,
@@ -745,5 +746,68 @@ describe('review 17 F3 / 17b L3: a heal-cleared coin comes back when the competi
     });
     expect(r.restored).toBe(1);
     expect(await spendable()).toBe(true);
+  });
+});
+
+describe('17d P1: the online storage failover never sends a payment twice', () => {
+  /** The phone's storage as an online one: `remote` decides, and its createAction / processAction can be made to fail. */
+  const onlineStore = (p: Phone) => {
+    const st = p.phone.storage as unknown as Record<'createAction' | 'processAction', (a: unknown) => Promise<unknown>>;
+    const realCreate = st.createAction.bind(st);
+    const realProcess = st.processAction.bind(st);
+    const o = { remote: true, switched: 0, createFails: 0, answersLost: 0 };
+    st.createAction = async (a) => {
+      if (o.remote && o.createFails-- > 0)
+        throw Object.assign(new Error('An internal error has occurred.'), { code: 'WERR_INTERNAL' });
+      return realCreate(a);
+    };
+    // The server stores the signed payment and broadcasts it (the real processAction), then its answer is lost.
+    st.processAction = async (a) => {
+      const r = await realProcess(a);
+      if (o.remote && o.answersLost-- > 0) throw new Error('HTTP 504 Gateway Timeout');
+      return r;
+    };
+    return o;
+  };
+  const sendVia = (p: Phone, o: ReturnType<typeof onlineStore>) =>
+    createWithStorageFailover({
+      create: () =>
+        p.phone.wallet.createAction({
+          description: 'Send 1 payment(s)',
+          outputs: [{ lockingScript: BOB, satoshis: 3_000_000, outputDescription: 'Payment of 3000000 sats' }],
+          options: { acceptDelayedBroadcast: false },
+        }),
+      remoteActive: () => o.remote,
+      eligible: true,
+      switchToLocal: async () => {
+        o.switched++;
+        o.remote = false;
+      },
+      processStarts: processActionStarts(p.phone.storage),
+      log: () => undefined,
+    });
+
+  test('the online storage broadcast it, then answered 504: no retry, no switch, "can\'t confirm"; BOB paid once', async () => {
+    const p = await phoneWithCoins();
+    const o = onlineStore(p);
+    o.answersLost = 1;
+    const err = await sendVia(p, o).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(StorageMaybeSentError);
+    expect(o.switched).toBe(0);
+    expect(paidTo(p.chain, BOB)).toHaveLength(1); // before the fix: 2 (the retry built a second payment)
+    expect(classifySendError(err)).toMatchObject({ moneyMoved: 'unknown', message: REFUSED_MAYBE_SENT_MESSAGE });
+  });
+
+  test('a failure BEFORE the payment reached it (the 30 Oct WERR_INTERNAL) still fails over to This device: sent once', async () => {
+    const p = await phoneWithCoins();
+    const o = onlineStore(p);
+    o.createFails = 2;
+    const r = await sendVia(p, o);
+    expect(r.via).toBe('local');
+    expect(o.switched).toBe(1);
+    expect(paidTo(p.chain, BOB)).toHaveLength(1);
   });
 });

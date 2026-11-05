@@ -156,7 +156,12 @@ import {
   sendWithChecks,
   type SendChecksContext,
 } from './services/ownSend';
-import { createWithStorageFailover, failoverEligible } from './services/storageFailover';
+import {
+  createWithStorageFailover,
+  failoverEligible,
+  maybeSentAfterProcess,
+  processActionStarts,
+} from './services/storageFailover';
 import { isTruthyRequiredError } from './services/nullTxidRepair';
 
 /** Set once the message handlers are built (switchActiveStorage below); used by the createAction failover. */
@@ -6653,6 +6658,9 @@ if (!(
                   },
                   remoteActive: () => !!ctxForHeal && !ctxForHeal.storage.isActiveStorageProvider(),
                   eligible: !!ctxForHeal && failoverEligible({ continuing, args }),
+                  // Once the signed payment reached processAction (which broadcasts on the online storage), a failure
+                  // is never retried or failed over: it reads "can't confirm" (17d P1).
+                  processStarts: processActionStarts(ctxForHeal?.storage),
                   switchToLocal: async () => {
                     if (!ctxForHeal || !switchActiveStorageRef) throw new Error('No local store');
                     await switchActiveStorageRef(ctxForHeal, 'local');
@@ -6839,10 +6847,20 @@ if (!(
       );
       if (delayed) console.log(`[signAction] ${bytes} bytes: sending in the background`);
       bigRefBytes.delete(message.params.reference);
+      // A storage failure after the signed payment reached the online storage's processAction may have gone out: it
+      // reads "can't confirm", never "nothing was sent" (17d P1).
+      const signCtx = accountContext;
+      const processStarts = processActionStarts(signCtx?.storage);
+      const startsBefore = processStarts();
       let result = await w.signAction(
         delayed ? withDelayedBroadcast(message.params) : site ? withBroadcastNow(message.params) : message.params,
         message.originator,
-      );
+      ).catch((e: unknown) => {
+        throw maybeSentAfterProcess(e, {
+          remoteActive: !!signCtx && !signCtx.storage.isActiveStorageProvider(),
+          processStarted: processStarts() > startsBefore,
+        });
+      });
       if (result?.txid && (delayed || (site && resultIsQueued(result)))) {
         result = pendingShape(result);
         if (accountContext) {
