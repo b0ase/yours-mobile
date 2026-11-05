@@ -52,6 +52,7 @@ import { bsv21FieldsFromOutput } from '@1sat/actions';
 import { bsv21 } from '../mobile/market/launchpad/tokens';
 import { ASSET_ID_MISMATCH, assetIdIsOnly, guardAssetIdLoads } from './assetIdCheck';
 import { loadBasketOutput } from '@1sat/actions';
+import { eitherChainSource } from './chainSources';
 import type { SpendState } from './unsentExpiry';
 
 const HEIGHT = 971_004;
@@ -125,11 +126,13 @@ async function receive(w: Wallet, kd: KeyDeriver, sats: number) {
   return tx.id('hex');
 }
 
-/** A 1-sat token coin at a wallet key, its record naming that key and an amount. */
+/** The harness's token: a BSV-21 id its coins carry in their scripts, as the wallet's token coins do. */
+const HARNESS_TOKEN = `${'99'.repeat(32)}_0`;
+/** A 1-sat BSV-21 coin at a wallet key, its record naming that key, the token and the amount its script carries. */
 async function receiveToken(w: Wallet, kd: KeyDeriver) {
   const keyID = `tok-${++n}`;
   const pub = kd.derivePublicKey([0, 'onesat'], keyID, 'self', true);
-  const tx = minedTx(new P2PKH().lock(pub.toAddress()), 1);
+  const tx = minedTx(bsv21(HARNESS_TOKEN, 100n, pub.toAddress()), 1);
   await w.internalizeAction({
     tx: atomic(tx),
     outputs: [
@@ -138,7 +141,7 @@ async function receiveToken(w: Wallet, kd: KeyDeriver) {
         protocol: 'basket insertion',
         insertionRemittance: {
           basket: 'tokens-test',
-          customInstructions: JSON.stringify({ protocolID: [0, 'onesat'], keyID, amt: '100' }),
+          customInstructions: JSON.stringify({ protocolID: [0, 'onesat'], keyID, id: HARNESS_TOKEN, amt: '100' }),
         },
       },
     ],
@@ -1647,10 +1650,12 @@ describe('16c: a merge never makes a coin spendable; only the admission list doe
       txid: Utils.toHex(Random(32)),
       vout: 0,
     }));
-    await list.add(d.kd.identityKey, ghosts, now()); // rows the device doesn't hold: each refused, no chain call
+    // Rows the device doesn't hold (yet: their page may still be merging, D3): each waits, no chain call.
+    await list.add(d.kd.identityKey, ghosts, now());
     const r = await admit(d.phone, d.kd.identityKey, d.verifier);
-    expect(r.refused).toBe(25);
-    expect(r.left).toBe(5);
+    expect(r.waiting).toBe(25);
+    expect(r.refused).toBe(0);
+    expect(r.left).toBe(30);
     expect(d.chain.asked).toEqual([]);
     await admit(d.phone, d.kd.identityKey, d.verifier);
     // Two coins waiting, WhatsOnChain unclear: asked once, then the run stops.
@@ -1673,21 +1678,38 @@ describe('16c: a merge never makes a coin spendable; only the admission list doe
     expect(d.chain.asked.length).toBeLessThanOrEqual(1);
   });
 
-  test('C5: a coin whose transaction the chain never learns of is given up on after 3 days, left not spendable', async () => {
+  test('D2: a coin waiting only on the chain is never given up on: admitted whenever the chain learns of it', async () => {
     const d = await phoneWithBackup();
     d.chain.answer = 'unspent';
     d.chain.knownFor.set(d.coin, 'unknown');
     const { fresh, unregister } = await d.restore();
     expect(await waiting(fresh, d.kd.identityKey)).toEqual([`${d.coin}.0`]);
+    for (let i = 0; i < 20; i++) {
+      tick(7 * HOUR);
+      expect((await admit(fresh, d.kd.identityKey, d.verifier)).retired).toBe(0);
+    }
+    expect(await waiting(fresh, d.kd.identityKey)).toEqual([`${d.coin}.0`]); // 5 days on, still asked
+    d.chain.knownFor.set(d.coin, 'known');
+    tick(7 * HOUR);
+    expect((await admit(fresh, d.kd.identityKey, d.verifier)).admitted).toBe(1);
+    expect((await d.row(fresh, d.coin)).spendable).toBe(true);
+    unregister();
+  });
+
+  test("C5/D2: only a wait on this device's own state is given up after 3 days (its own payment still unsent)", async () => {
+    const d = await phoneWithBackup();
+    d.chain.answer = 'unspent';
+    await unsentSpend(d, d.coin);
+    await d.forge(d.coin, { spendable: true, spentBy: undefined });
+    await d.pull();
+    expect(await waiting(d.phone, d.kd.identityKey)).toEqual([`${d.coin}.0`]);
     let retired = 0;
     for (let i = 0; i < 20 && !retired; i++) {
       tick(7 * HOUR);
-      retired = (await admit(fresh, d.kd.identityKey, d.verifier)).retired;
+      retired = (await admit(d.phone, d.kd.identityKey, d.verifier)).retired;
     }
     expect(retired).toBe(1);
-    expect(await waiting(fresh, d.kd.identityKey)).toEqual([]);
-    expect((await d.row(fresh, d.coin)).spendable).toBe(false);
-    unregister();
+    expect((await d.row(d.phone, d.coin)).spendable).toBe(false); // its own payment still spends it
   });
 
   test('C6: the restore switch admits what the copy queued before it compares, with no later pull', async () => {
@@ -1808,5 +1830,374 @@ describe('16c: a merge never makes a coin spendable; only the admission list doe
     await admit(fresh, d.kd.identityKey, d.verifier);
     for (const txid of [d.coin, d.coin2]) expect((await d.row(fresh, txid)).spendable).toBe(true);
     off();
+  });
+});
+
+/**
+ * Review 16d: honest funds must never be stranded (D1-D3, D6), and two more ways a backup's claim stood in for the
+ * chain's (D4, D5, D7). The reviewer's scratch repros, asserting the fixed behaviour, and their honest counterparts.
+ */
+describe('16d: every honest coin comes back; no row stands in for the chain', () => {
+  type D = Awaited<ReturnType<typeof phoneWithBackup>>;
+  const DAY = 24 * HOUR;
+  let clockAt = 1;
+  const later = () => new Date(Date.now() + HOUR * clockAt++);
+  const userOf = async (s: StorageIdb, d: D) =>
+    (await s.findUsers({ partial: { identityKey: d.kd.identityKey } }))[0].userId;
+  /** The device's row for this txid's output 0, found by its transaction (works for a row with no txid). */
+  const rowByTx = async (s: StorageIdb, d: D, txid: string) => {
+    const userId = await userOf(s, d);
+    const t = (await s.findTransactions({ partial: { userId, txid }, noRawTx: true }))[0];
+    return t ? (await s.findOutputs({ partial: { userId, transactionId: t.transactionId, vout: 0 } }))[0] : undefined;
+  };
+  const pullInto = (sm2: WalletStorageManager, d: D) => sm2.syncFromReader(d.kd.identityKey, d.remote as never);
+  const TOKEN = `${'ef'.repeat(32)}_0`;
+  /** The chain's copy of transactions it has, for a verifier that asks for them (D5). */
+  const withChainCopies = (d: D, txs: Transaction[]): InboundVerifier => ({
+    ...d.verifier,
+    chainTx: async (txid: string) => {
+      const k = d.chain.knownFor.get(txid) ?? d.chain.known;
+      if (k === 'unclear') return { state: 'unclear' };
+      const tx = txs.find((t) => t.id('hex') === txid);
+      return k === 'known' && tx ? { state: 'found', rawTx: tx.toBinary() } : { state: 'unknown' };
+    },
+  });
+  /** A transaction row on the backup (a copy of a real one's), no raw bytes unless given. */
+  const backupTx = async (d: D, txid: string, raw?: Transaction, status = 'completed') => {
+    const ru = await userOf(d.remote, d);
+    const RT = (await d.remote.findTransactions({ partial: { userId: ru, txid: d.coin2 }, noRawTx: true }))[0];
+    const t = later();
+    return d.remote.insertTransaction({
+      ...RT,
+      transactionId: 0,
+      txid,
+      reference: Utils.toBase64(Random(12)),
+      status,
+      rawTx: raw ? raw.toBinary() : undefined,
+      provenTxId: undefined,
+      created_at: t,
+      updated_at: t,
+    } as never);
+  };
+  /** Wallet change on the backup at (txid, 0): this script, these satoshis, the derivation given. */
+  const backupChange = async (
+    d: D,
+    transactionId: number,
+    txid: string,
+    script: Script,
+    satoshis: number,
+    derivation: { derivationPrefix: string; derivationSuffix: string; senderIdentityKey?: string },
+  ) => {
+    const legit = await d.row(d.remote, d.coin2);
+    const t = later();
+    await d.remote.insertOutput({
+      ...legit,
+      outputId: 0,
+      transactionId,
+      txid,
+      vout: 0,
+      satoshis,
+      lockingScript: script.toBinary(),
+      scriptLength: script.toBinary().length,
+      scriptOffset: 0,
+      ...derivation,
+      spendable: true,
+      spentBy: undefined,
+      created_at: t,
+      updated_at: t,
+    } as never);
+  };
+
+  test('D1: an honest coin whose row reached the backup with no txid is restored, its txid filled in', async () => {
+    const d = await phoneWithBackup();
+    d.chain.answer = 'unspent';
+    // The origin device pushed this coin while its row had no txid (the 30 Oct "A truthy value is required" rows).
+    const r = await d.row(d.remote, d.coin2);
+    await d.remote.updateOutput(r.outputId, { txid: undefined, updated_at: later() } as never);
+    const { fresh, sm2, unregister } = await d.restore();
+    const got = await rowByTx(fresh, d, d.coin2);
+    expect(got?.spendable).toBe(true);
+    expect(got?.txid).toBe(d.coin2);
+    expect(got?.basketId ?? null).not.toBeNull();
+    // The origin's nullTxidRepair pushes the fixed row later: nothing changes, nothing is stranded.
+    await d.remote.updateOutput(r.outputId, { txid: d.coin2, updated_at: later() } as never);
+    await pullInto(sm2, d);
+    await admit(fresh, d.kd.identityKey, d.verifier);
+    expect((await rowByTx(fresh, d, d.coin2))?.spendable).toBe(true);
+    unregister();
+  });
+
+  test('D1: a coin the device holds without a txid, revived by the backup, is found by its transaction and admitted', async () => {
+    const d = await phoneWithBackup();
+    d.chain.answer = 'unspent';
+    const mine = await d.row(d.phone, d.coin2);
+    await d.phone.updateOutput(mine.outputId, { spendable: false, txid: undefined } as never); // the 30 Oct state
+    await d.forge(d.coin2, { spendable: true });
+    await d.pull();
+    const got = await rowByTx(d.phone, d, d.coin2);
+    expect(got?.spendable).toBe(true);
+    expect(got?.txid).toBe(d.coin2);
+  });
+
+  test('D2: one WhatsOnChain hiccup after day 3 no longer retires an honest coin; it is admitted once WoC answers', async () => {
+    const d = await phoneWithBackup();
+    d.chain.answer = 'unspent';
+    d.chain.knownFor.set(d.coin2, 'unknown'); // WoC lag at restore time for this one
+    const { fresh, unregister } = await d.restore();
+    expect((await d.row(fresh, d.coin)).spendable).toBe(true);
+    expect((await d.row(fresh, d.coin2)).spendable).toBe(false); // waiting
+    tick(4 * DAY);
+    d.chain.knownFor.delete(d.coin2);
+    d.chain.answer = 'unclear'; // throttled (429 x4)
+    const r1 = await admit(fresh, d.kd.identityKey, d.verifier);
+    expect(r1.retired).toBe(0);
+    expect(r1.nextAt).toBeGreaterThan(now()); // the caller's next run is scheduled for it
+    d.chain.answer = 'unspent';
+    tick(2 * MIN);
+    await admit(fresh, d.kd.identityKey, d.verifier);
+    expect((await d.row(fresh, d.coin2)).spendable).toBe(true);
+    unregister();
+  });
+
+  test('D2: while WhatsOnChain has no answer, the second source (the 1Sat stack) decides', async () => {
+    const d = await phoneWithBackup();
+    const woc = { spent: async () => ({ state: 'unclear' as const }), txKnown: async () => 'unclear' as const };
+    const oneSat = {
+      spent: async () => ({ state: 'unspent' as const }),
+      txKnown: async () => 'known' as const,
+      chainTx: async () => ({ state: 'unclear' as const }),
+    };
+    const both = eitherChainSource({ ...woc, chainTx: async () => ({ state: 'unclear' }) }, () => oneSat);
+    const v: InboundVerifier = { ...d.verifier, ...both };
+    const mine = await d.row(d.phone, d.coin);
+    await d.phone.updateOutput(mine.outputId, { spendable: false } as never);
+    await d.forge(d.coin, { spendable: true });
+    await d.merge();
+    expect((await admit(d.phone, d.kd.identityKey, v)).admitted).toBe(1);
+    expect((await d.row(d.phone, d.coin)).spendable).toBe(true);
+  });
+
+  test('D2: admission runs again at the next try, on the 5-minute alarm, and when the app comes to the front', () => {
+    const init = readFileSync(new URL('../initWallet.ts', import.meta.url), 'utf8');
+    expect(init).toMatch(/if \(r\?\.nextAt !== undefined\) admitIn\(r\.nextAt - Date\.now\(\)\)/);
+    expect(init).toMatch(/useSecondSource\(oneSatChainLookups\(toolboxServices\)\)/);
+    const bg = readFileSync(new URL('../background.ts', import.meta.url), 'utf8');
+    expect(bg).toMatch(/alarm\.name === AUTO_COIN_RESYNC_ALARM\) void accountContext\?\.admitBackupRows\(\)/);
+    expect(bg).toMatch(/pageHidden\(\) === false\) void accountContext\?\.admitBackupRows\(\)/);
+  });
+
+  test('D3: a run between a page writing its admissions and its merge: those coins wait, and come back', async () => {
+    const d = await phoneWithBackup();
+    d.chain.answer = 'unspent';
+    const fresh = await store(`d3-race-${++n}`);
+    const off = registerInboundVerifier(fresh.getSettings().storageIdentityKey, d.kd.identityKey, d.verifier);
+    let fired = false;
+    const orig = fresh.findProvenTxs.bind(fresh);
+    // processSyncChunk's own proof lookup runs after the guard wrote the page's admissions, before the merge.
+    (fresh as unknown as { findProvenTxs: typeof orig }).findProvenTxs = async (a: never) => {
+      if (!fired && (a as { txids?: unknown }).txids) {
+        fired = true;
+        await admit(fresh, d.kd.identityKey, d.verifier); // e.g. the onQueued timer from an earlier page
+      }
+      return orig(a);
+    };
+    const sm2 = new WalletStorageManager(d.kd.identityKey, fresh, [d.remote]);
+    await sm2.makeAvailable();
+    await sm2.setActive(fresh.getSettings().storageIdentityKey);
+    sm2.setServices(services);
+    await sm2.syncFromReader(d.kd.identityKey, d.remote as never);
+    expect(fired).toBe(true);
+    tick(2 * MIN);
+    await admit(fresh, d.kd.identityKey, d.verifier);
+    expect((await d.row(fresh, d.coin)).spendable).toBe(true);
+    expect((await d.row(fresh, d.coin2)).spendable).toBe(true);
+    off();
+  });
+
+  test('D4: a plain P2PKH row in the bsv21 basket with a token record (amt, id) is never read as tokens', async () => {
+    const d = await phoneWithBackup();
+    d.chain.answer = 'unspent';
+    const keyID = `tok-${++n}`;
+    const pub = d.kd.derivePublicKey([0, 'onesat'], keyID, 'self', true);
+    const real = minedTx(bsv21(TOKEN, 100n, pub.toAddress()), 1);
+    await d.wallet.internalizeAction({
+      tx: atomic(real),
+      outputs: [
+        {
+          outputIndex: 0,
+          protocol: 'basket insertion',
+          insertionRemittance: {
+            basket: 'bsv21',
+            tags: [`bsv21:${TOKEN}`],
+            customInstructions: JSON.stringify({ protocolID: [0, 'onesat'], keyID, id: TOKEN, amt: '100' }),
+          },
+        },
+      ],
+      description: 'Tokens in',
+    });
+    await d.sm.updateBackups();
+    const honest = await d.row(d.remote, real.id('hex'));
+    // A real 1-sat P2PKH output paying a key the wallet derives (counterparty = the attacker), with a token record.
+    const attacker = PrivateKey.fromRandom().toPublicKey().toString();
+    const key = d.kd.derivePublicKey([0, 'onesat'], 'x1', attacker, false);
+    const planted = minedTx(new P2PKH().lock(key.toAddress()), 1);
+    const ptxid = planted.id('hex');
+    const tid = await backupTx(d, ptxid, planted);
+    const t = later();
+    await d.remote.insertOutput({
+      ...honest,
+      outputId: 0,
+      transactionId: tid,
+      txid: ptxid,
+      vout: 0,
+      satoshis: 1,
+      lockingScript: planted.outputs[0].lockingScript.toBinary(),
+      scriptLength: planted.outputs[0].lockingScript.toBinary().length,
+      scriptOffset: 0,
+      customInstructions: JSON.stringify({
+        protocolID: [0, 'onesat'],
+        keyID: 'x1',
+        counterparty: attacker,
+        id: TOKEN,
+        amt: '1000000',
+      }),
+      spendable: true,
+      spentBy: undefined,
+      created_at: t,
+      updated_at: t,
+    } as never);
+    const { fresh, sm2, unregister } = await d.restore();
+    const w2 = new Wallet({ chain: 'main', keyDeriver: d.kd, storage: sm2, services } as never);
+    const listed = await w2.listOutputs({ basket: 'bsv21', includeCustomInstructions: true, includeTags: true });
+    const read = listed.outputs.map((o) => ({ outpoint: o.outpoint, ...bsv21FieldsFromOutput(o as never) }));
+    expect((await d.row(fresh, ptxid)).spendable).toBe(false);
+    expect(read.find((o) => o.outpoint.startsWith(ptxid))).toBeUndefined();
+    expect(read.find((o) => o.outpoint.startsWith(real.id('hex')))?.amt).toBe('100'); // the honest token still is
+    unregister();
+  });
+
+  test('D5: planted wallet "change" sent with no raw tx is never admitted on the row\'s own word', async () => {
+    const d = await phoneWithBackup();
+    d.chain.answer = 'unspent';
+    const ptxid = Utils.toHex(Random(32));
+    const tid = await backupTx(d, ptxid);
+    const attacker = PrivateKey.fromRandom().toPublicKey();
+    const derivationPrefix = Utils.toBase64(Random(8));
+    const derivationSuffix = Utils.toBase64(Random(8));
+    const pub = d.kd.derivePublicKey(BRC29, `${derivationPrefix} ${derivationSuffix}`, attacker, true);
+    await backupChange(d, tid, ptxid, new P2PKH().lock(pub.toAddress()), 1_000_000_000, {
+      derivationPrefix,
+      derivationSuffix,
+      senderIdentityKey: attacker.toString(),
+    });
+    const { fresh, sm2, unregister } = await d.restore();
+    for (let i = 0; i < 3; i++) {
+      tick(7 * HOUR);
+      await admit(fresh, d.kd.identityKey, d.verifier);
+    }
+    expect((await d.row(fresh, ptxid)).spendable).toBe(false);
+    const w2 = new Wallet({ chain: 'main', keyDeriver: d.kd, storage: sm2, services } as never);
+    const bal = (await w2.listOutputs({ basket: 'default', limit: 100 })).outputs.reduce((s, o) => s + o.satoshis, 0);
+    expect(bal).toBeLessThan(1_000_000_000);
+    unregister();
+  });
+
+  test("D5: the chain's copy of the transaction decides: another script or amount there is refused, a match admitted", async () => {
+    const d = await phoneWithBackup();
+    d.chain.answer = 'unspent';
+    const attacker = PrivateKey.fromRandom().toPublicKey();
+    const der = () => ({ derivationPrefix: Utils.toBase64(Random(8)), derivationSuffix: Utils.toBase64(Random(8)) });
+    const keyOf = (x: { derivationPrefix: string; derivationSuffix: string }) =>
+      new P2PKH().lock(
+        d.kd.derivePublicKey(BRC29, `${x.derivationPrefix} ${x.derivationSuffix}`, attacker, true).toAddress(),
+      );
+    // A real transaction paying a stranger 5,000 sats; the backup's row says it is 10 BSV of wallet change.
+    const forged = der();
+    const real = minedTx(new P2PKH().lock(PrivateKey.fromRandom().toAddress()), 5_000);
+    await backupChange(d, await backupTx(d, real.id('hex')), real.id('hex'), keyOf(forged), 1_000_000_000, {
+      ...forged,
+      senderIdentityKey: attacker.toString(),
+    });
+    // An honest coin whose raw transaction the backup didn't send: the chain's copy matches it.
+    const fair = der();
+    const honest = minedTx(keyOf(fair), 7_000);
+    await backupChange(d, await backupTx(d, honest.id('hex')), honest.id('hex'), keyOf(fair), 7_000, {
+      ...fair,
+      senderIdentityKey: attacker.toString(),
+    });
+    const { fresh, unregister } = await d.restore(withChainCopies(d, [real, honest]));
+    expect((await d.row(fresh, real.id('hex'))).spendable).toBe(false);
+    expect(await waiting(fresh, d.kd.identityKey)).not.toContain(`${real.id('hex')}.0`); // refused, not waiting
+    expect((await d.row(fresh, honest.id('hex'))).spendable).toBe(true);
+    unregister();
+  });
+
+  test('D6: failed here, completed in the backup, the chain has it, the repair finds nothing: settled, inputs spent', async () => {
+    const d = await phoneWithBackup();
+    d.chain.answer = 'unspent';
+    const userId = await userOf(d.phone, d);
+    // X spent this device's coin, then failed here (its broadcast refused); it was mined all the same.
+    const x = new Transaction();
+    x.addInput({ sourceTXID: d.coin, sourceOutputIndex: 0, unlockingScript: new Script(), sequence: 0xffffffff });
+    x.addOutput({ lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()), satoshis: 49_000 });
+    const T = (await d.phone.findTransactions({ partial: { userId, txid: d.coin2 }, noRawTx: true }))[0];
+    const at = new Date();
+    await d.phone.insertTransaction({
+      ...T,
+      transactionId: 0,
+      txid: x.id('hex'),
+      reference: Utils.toBase64(Random(12)),
+      status: 'failed',
+      rawTx: x.toBinary(),
+      provenTxId: undefined,
+      isOutgoing: true,
+      created_at: at,
+      updated_at: at,
+    } as never);
+    await d.sm.updateBackups();
+    const ru = await userOf(d.remote, d);
+    const RX = (await d.remote.findTransactions({ partial: { userId: ru, txid: x.id('hex') }, noRawTx: true }))[0];
+    await d.remote.updateTransaction(RX.transactionId, { status: 'completed', updated_at: later() } as never);
+    const v: InboundVerifier = { ...d.verifier, recover: async () => 'done' as const }; // recoverTxid: 'not-ours'
+    await d.merge();
+    const r = await admitPending(d.phone as never, d.kd.identityKey, v, { now });
+    expect(r.applied).toBe(1);
+    const settled = (await d.phone.findTransactions({ partial: { userId, txid: x.id('hex') }, noRawTx: true }))[0];
+    expect(settled.status).toBe('unproven'); // the monitor proves it from here
+    const coin = await d.row(d.phone, d.coin);
+    expect(coin.spendable).toBe(false); // spent by X, as on chain
+    expect(coin.spentBy).toBe(settled.transactionId);
+  });
+
+  test("D7: this device's own just-broadcast payment is not failed on a backup's word while WoC lags", async () => {
+    const d = await phoneWithBackup();
+    const userId = await userOf(d.phone, d);
+    const T = (await d.phone.findTransactions({ partial: { userId, txid: d.coin2 }, noRawTx: true }))[0];
+    await d.phone.updateTransaction(T.transactionId, { status: 'unproven', provenTxId: undefined } as never);
+    const at = new Date();
+    await d.phone.insertProvenTxReq({
+      provenTxReqId: 0,
+      created_at: at,
+      updated_at: at,
+      txid: d.coin2,
+      status: 'unmined', // its own broadcast went out; its monitor is waiting for the proof
+      attempts: 1,
+      notified: false,
+      history: '{}',
+      notify: '{}',
+      rawTx: [1, 2, 3],
+    } as never);
+    const ru = await userOf(d.remote, d);
+    const RT = (await d.remote.findTransactions({ partial: { userId: ru, txid: d.coin2 }, noRawTx: true }))[0];
+    await d.remote.updateTransaction(RT.transactionId, {
+      status: 'failed',
+      provenTxId: undefined,
+      updated_at: later(),
+    } as never);
+    d.chain.knownFor.set(d.coin2, 'unknown'); // WoC lag (seconds to minutes after broadcast)
+    await d.pull();
+    expect((await d.phone.findTransactions({ partial: { userId, txid: d.coin2 }, noRawTx: true }))[0].status).toBe(
+      'unproven',
+    );
   });
 });

@@ -48,6 +48,7 @@ import { ALLOWANCES_ENABLED } from './services/allowanceFlag';
 import { guardEverySpendAsks, revokeStoredSpendingGrants } from './services/everySpendAsks';
 import { guardPModuleSpends } from './services/pModuleSpendGate';
 import { guardAssetIdLoads } from './services/assetIdCheck';
+import { eitherChainSource, oneSatChainLookups, type ChainLookups } from './services/chainSources';
 import {
   installInboundSyncGuard,
   registerInboundVerifier,
@@ -348,12 +349,20 @@ const checkBackupRows = (keys: Keys, account: Account | undefined, storageIdenti
       legacyPayKey(keys.walletWif, account?.addresses?.bsvAddress),
     ]),
     // Two WhatsOnChain questions per coin, one pacer: together ~3 calls a second (anonymous WoC).
-    ...wocChainLookups(),
+    // WhatsOnChain first; when it has no clear answer, the 1Sat stack (once the factory has made its services): one
+    // outage never decides an honest coin (review 16d, D2).
+    ...eitherChainSource(wocChainLookups(), () => second),
     readRecord: walletRecords(root),
     log: (...a) => console.warn(...a),
   };
   const stop = registerInboundVerifier(storageIdentityKey, root.toPublicKey().toString(), verifier);
-  return Object.assign(stop, { verifier });
+  let second: ChainLookups | undefined;
+  return Object.assign(stop, {
+    verifier,
+    useSecondSource: (s: ChainLookups | undefined) => {
+      second = s;
+    },
+  });
 };
 
 /**
@@ -506,25 +515,38 @@ export const initWallet = async (
   // The device's own store, active or not (during a restore the backup is active and this is the copy's target).
   const deviceStore = (): AdmitStore | undefined =>
     managed._stores?.map((m) => m.storage).find((s): s is StorageIdb => s instanceof StorageIdb) as never;
+  stopBackupCheck.useSecondSource(oneSatChainLookups(toolboxServices));
   let admitClosed = false;
+  let admitTimer: ReturnType<typeof setTimeout> | undefined;
+  let admitAt = Infinity;
+  /** Run admission in `ms` (or sooner, if a run is already due sooner). The service worker's alarm and the app coming
+   *  to the front run it too (background.ts), for when a sleeping worker drops this timer (review 16d, D2). */
+  const admitIn = (ms: number) => {
+    if (admitClosed) return;
+    const at = Date.now() + Math.min(Math.max(ms, 2_000), 6 * 3_600_000);
+    if (admitTimer && admitAt <= at) return;
+    if (admitTimer) clearTimeout(admitTimer);
+    admitAt = at;
+    admitTimer = setTimeout(() => {
+      admitTimer = undefined;
+      admitAt = Infinity;
+      void admitBackupRows();
+    }, at - Date.now());
+  };
   const admitBackupRows = async (): Promise<AdmitReport | undefined> => {
     const device = deviceStore();
     if (!device || admitClosed) return undefined;
     const { identityKey } = await storage.getAuth();
-    return admitPending(device, identityKey, stopBackupCheck.verifier).catch((e: unknown) => {
+    const r = await admitPending(device, identityKey, stopBackupCheck.verifier).catch((e: unknown) => {
       console.warn('[inbound-sync] admission list not worked through:', e);
       return undefined;
     });
+    // Anything left waits for its next try: run again then, never "only at the next unlock" (D2).
+    if (r?.nextAt !== undefined) admitIn(r.nextAt - Date.now());
+    return r;
   };
   // Any merge that left something for the chain (the boot merge, F-C, the Monitor's backup sync): soon after it.
-  let admitTimer: ReturnType<typeof setTimeout> | undefined;
-  stopBackupCheck.verifier.onQueued = () => {
-    if (admitTimer || admitClosed) return;
-    admitTimer = setTimeout(() => {
-      admitTimer = undefined;
-      void admitBackupRows();
-    }, 2_000);
-  };
+  stopBackupCheck.verifier.onQueued = () => admitIn(2_000);
   stopBackupCheck.verifier.onQueued(); // and once at open, for anything left from before
   const deviceSync = createDeviceSync({
     applies: () => storage.isActiveStorageProvider() && (backups?.length ?? 0) > 0,

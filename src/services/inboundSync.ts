@@ -147,6 +147,11 @@ export type InboundVerifier = {
    */
   txKnown?(txid: string): Promise<'known' | 'unknown' | 'unclear'>;
   /**
+   * The transaction as the chain has it (review 16d, D5): a coin the device has no raw transaction for is admitted
+   * only if the chain's output has the row's script and satoshis. Absent: such a coin waits.
+   */
+  chainTx?(txid: string): Promise<ChainTx>;
+  /**
    * The wallet's own repair for a payment it holds as failed that the chain has (services/recoverByTxid.ts): proof,
    * status and outputs, each checked. 'wait': not mined yet, or no answer. Absent: the status alone becomes 'unproven'.
    */
@@ -155,6 +160,9 @@ export type InboundVerifier = {
   onQueued?: () => void;
   log?: (...a: unknown[]) => void;
 };
+
+/** A transaction as the chain has it: its raw bytes (which must hash to the txid), not there, or no clear answer. */
+export type ChainTx = { state: 'found'; rawTx: number[] } | { state: 'unknown' } | { state: 'unclear' };
 
 /** What only the chain can settle: a coin the backup says is spendable, or a status it gives a transaction. */
 export type Admission =
@@ -316,6 +324,8 @@ export function recordAgrees(rec: Record<string, unknown>, f: TokenFacts): boole
 }
 
 const TOKEN_TAG = /^(amt|bsv21|sym|dec):/i;
+/** Record fields only a token's record carries (@1sat/actions writes {id, amt, op}; BSV-20 names a tick). */
+const TOKEN_RECORD_FIELDS = ['amt', 'id', 'op', 'tick'] as const;
 /** A tag id no sync map ever holds (ids start at 1): EntityOutputTagMap.mergeFind skips the row. */
 const UNMAPPED_ID = -1;
 /** A managed tracking id (@1sat/types readAssetIdTag): sends and listings load "this" asset by it. */
@@ -365,9 +375,14 @@ async function recordOf(v: InboundVerifier, ci: string): Promise<Record<string, 
  */
 async function admissibleRow(v: InboundVerifier, row: OutputRow, script: string): Promise<'refuse' | 'check'> {
   const facts = tokenFacts(script, row.txid, row.vout);
-  if (facts && typeof row.customInstructions === 'string' && row.customInstructions) {
+  if (typeof row.customInstructions === 'string' && row.customInstructions) {
     const rec = await recordOf(v, row.customInstructions);
-    if (!rec || !recordAgrees(rec, facts)) return 'refuse';
+    if (facts) {
+      if (!rec || !recordAgrees(rec, facts)) return 'refuse';
+    } else if (rec && TOKEN_RECORD_FIELDS.some((k) => rec[k] !== undefined && rec[k] !== null)) {
+      // A token record on a script that carries no token (D4): a send reads the record, so it would count as tokens.
+      return 'refuse';
+    }
   }
   if (!isWalletChange(row)) return 'check';
   return (await v.owns(row, script).catch(() => false)) ? 'check' : 'refuse';
@@ -620,7 +635,8 @@ export async function verifyInboundChunk(
       // has it; the backup's "spendable" is for the chain to settle (C1: no marker the backup can set decides it).
       if (o.spendable === true && (filed.spendable !== true || filed.spentBy != null)) {
         keep(o, filed);
-        if (filed.txid) admitLater(filed.txid, filed.vout);
+        const txid = filed.txid ?? tx.txid; // a row that came without its txid (D1)
+        if (txid) admitLater(txid, filed.vout);
         continue;
       }
       // A spend link is kept, never removed or moved: the toolbox frees a coin when its linked transaction fails, so
@@ -636,6 +652,9 @@ export async function verifyInboundChunk(
       continue;
     }
     // Rule 3: a row the device has never seen arrives not spendable.
+    // A row pushed without its txid (the 30 Oct "A truthy value is required" rows) takes its transaction's (D1), and is
+    // then checked against that transaction like any other.
+    if (!o.txid && tx.txid) o.txid = tx.txid;
     const claimed = o.spendable === true;
     if (!claimed && o.spentBy != null) {
       // Linked to a completed transaction: spent for good (a completed transaction never fails). Any other link could
@@ -900,7 +919,10 @@ export type AdmitReport = {
   refused: number;
   /** Entries asked about and left for later. */
   waiting: number;
-  /** Entries given up on after 3 days (the coin stays not spendable). */
+  /**
+   * Entries given up on after 3 days of waiting on THIS device's own state (a spender of its own still in flight, an
+   * output of a transaction it holds failed with nothing queued to settle it). Never one waiting on the chain (D2).
+   */
   retired: number;
   /** The run stopped at an unclear chain answer: the rest waits for the next run. */
   deferred: boolean;
@@ -908,14 +930,18 @@ export type AdmitReport = {
   left: number;
   /** Of those, transactions the backup counts as actions that this device still holds as failed (restore check). */
   pendingActions: number;
+  /** When the next entry is due (ms), if any are left: the caller runs again then (D2). */
+  nextAt?: number;
 };
 
-/** Entries one run looks at. Each costs at most two WhatsOnChain calls, and an unclear answer ends the run. */
+/** Entries one run looks at. Each costs at most three chain calls, and an unclear answer ends the run. */
 const RUN_LIMIT = 25;
 const FIRST_WAIT_MS = 60_000;
 const MAX_WAIT_MS = 6 * 3_600_000;
 const SPENT_RECHECK_MS = 3_600_000;
-const RETIRE_AFTER_MS = 3 * 24 * 3_600_000;
+const LOCAL_GIVE_UP_MS = 3 * 24 * 3_600_000;
+/** A device transaction that may already be on the network: sent, or being sent, by this device's monitor. */
+const BROADCAST = new Set(['sending', 'unproven', 'unprocessed']);
 
 const runs = new Map<string, Promise<unknown>>();
 
@@ -942,6 +968,8 @@ export function admitPending(
   return run;
 }
 
+type Waiting = 'chain' | 'local';
+
 async function admitOnce(
   store: AdmitStore,
   identityKey: string,
@@ -964,22 +992,32 @@ async function admitOnce(
     const left = await list.list(identityKey);
     report.left = left.length;
     report.pendingActions = left.filter((e) => e.kind === 'tx' && e.claim !== 'failed').length;
+    report.nextAt = left.length ? Math.min(...left.map((e) => e.nextAt)) : undefined;
     return report;
   };
   const user = (await store.findUsers({ partial: { identityKey } }))[0];
   if (!user) return count();
   const userId = user.userId;
-  const due = (await list.list(identityKey))
+  const all = await list.list(identityKey);
+  const due = all
     .filter((e) => e.nextAt <= now)
     .sort((a, b) => (a.kind !== b.kind ? (a.kind === 'tx' ? -1 : 1) : a.nextAt - b.nextAt))
     .slice(0, opts.limit ?? RUN_LIMIT);
+  /** Transactions still to be settled: a coin of one of them waits as long as its transaction does. */
+  const txQueued = new Set(all.filter((e) => e.kind === 'tx').map((e) => e.txid));
 
   const finish = async (e: PendingAdmission, outcome: 'admitted' | 'applied' | 'refused') => {
     await list.remove(e.key);
+    if (e.kind === 'tx') txQueued.delete(e.txid);
     report[outcome]++;
   };
-  const wait = async (e: PendingAdmission, at?: number) => {
-    if (now - e.firstAt >= RETIRE_AFTER_MS) {
+  /**
+   * Ask again later. An entry waiting on the chain is never given up on (D2): its row passed every local check, and
+   * an honest coin must come back however long WhatsOnChain and the 1Sat stack take. One waiting on this device's own
+   * state is dropped after 3 days, its coin left not spendable (the device's own repairs see it).
+   */
+  const wait = async (e: PendingAdmission, why: Waiting, at?: number) => {
+    if (why === 'local' && now - e.firstAt >= LOCAL_GIVE_UP_MS) {
       await list.remove(e.key);
       report.retired++;
       v.log?.(`[inbound-sync] gave up on ${e.kind} ${e.txid}${e.kind === 'coin' ? `.${e.vout}` : ''}: left as is`);
@@ -988,23 +1026,73 @@ async function admitOnce(
     await list.put({
       ...e,
       tries: e.tries + 1,
-      nextAt: at ?? now + Math.min(MAX_WAIT_MS, FIRST_WAIT_MS * 2 ** e.tries),
+      nextAt: at ?? now + Math.min(MAX_WAIT_MS, FIRST_WAIT_MS * 2 ** Math.min(e.tries, 20)),
     });
     report.waiting++;
   };
-  const knownCache = new Map<string, Promise<'known' | 'unknown' | 'unclear'>>();
-  const known = (txid: string) => {
-    if (!knownCache.has(txid))
-      knownCache.set(
-        txid,
-        v.txKnown ? v.txKnown(txid).catch((): 'unclear' => 'unclear') : Promise.resolve<'unknown'>('unknown'),
-      );
-    return knownCache.get(txid)!;
+  const cache = <T>(ask: (txid: string) => Promise<T>) => {
+    const m = new Map<string, Promise<T>>();
+    return (txid: string) => {
+      if (!m.has(txid)) m.set(txid, ask(txid));
+      return m.get(txid)!;
+    };
   };
+  const known = cache((txid) =>
+    v.txKnown ? v.txKnown(txid).catch((): 'unclear' => 'unclear') : Promise.resolve<'unknown'>('unknown'),
+  );
+  const chainTx = cache((txid) =>
+    v.chainTx
+      ? v.chainTx(txid).catch((): ChainTx => ({ state: 'unclear' }))
+      : Promise.resolve<ChainTx>({ state: 'unclear' }),
+  );
   const txStatus = async (transactionId: number | null | undefined) =>
     typeof transactionId === 'number'
       ? (await store.findTransactions({ partial: { userId, transactionId }, noRawTx: true }))[0]?.status
       : undefined;
+  /**
+   * The raw transaction for `txid` the device holds: its proof's or request's bytes, else its transaction row's. Any
+   * bytes that hash to the txid are that transaction, wherever they came from; bytes that don't are null (refused).
+   */
+  const deviceTx = async (txid: string) => {
+    const r =
+      typeof store.getProvenOrRawTx === 'function'
+        ? await store.getProvenOrRawTx(txid).catch(() => undefined)
+        : undefined;
+    let raw = r?.rawTx ?? r?.proven?.rawTx;
+    if (!raw?.length) raw = (await store.findTransactions({ partial: { userId, txid } }))[0]?.rawTx ?? undefined;
+    return raw?.length ? (parseRawTx(raw, txid) ?? null) : undefined;
+  };
+
+  /**
+   * The chain has a transaction this device holds as failed (C4, D6): not failed. Its status becomes 'unproven' (the
+   * monitor proves it from there) and the coins it spends are marked spent by it, all only if it is still as read.
+   */
+  const settleMined = async (t: TxRow, txid: string) => {
+    let tx = await deviceTx(txid);
+    if (!tx) {
+      const c = await chainTx(txid);
+      tx = c.state === 'found' ? parseRawTx(c.rawTx, txid) : undefined;
+    }
+    return store.transaction(async (trx) => {
+      const [cur] = await store.findTransactions({
+        partial: { userId, transactionId: t.transactionId },
+        noRawTx: true,
+        trx,
+      });
+      if (!cur || cur.status !== 'failed' || (cur.provenTxId ?? null) !== (t.provenTxId ?? null)) return false;
+      await store.updateTransaction(t.transactionId!, { status: 'unproven' }, trx);
+      for (const input of tx?.inputs ?? []) {
+        if (!input.sourceTXID) continue;
+        const [spent] = await store.findOutputs({
+          partial: { userId, txid: input.sourceTXID, vout: input.sourceOutputIndex },
+          trx,
+        });
+        if (spent?.outputId !== undefined && (spent.spendable === true || spent.spentBy == null))
+          await store.updateOutput(spent.outputId, { spendable: false, spentBy: t.transactionId }, trx);
+      }
+      return true;
+    });
+  };
   /** Set a transaction's status if it is still as it was read. */
   const setStatus = (t: TxRow, status: string) =>
     store.transaction(async (trx) => {
@@ -1017,71 +1105,93 @@ async function admitOnce(
       await store.updateTransaction(t.transactionId!, { status }, trx);
       return true;
     });
+  /** This device is tracking the transaction itself: its own proof request, still live (not failed). */
+  const ownRequestLive = async (txid: string) =>
+    typeof store.findProvenTxReqs === 'function' &&
+    (await store.findProvenTxReqs({ partial: { txid } })).some((q) => !REQ_FAILED.has(String(q.status)));
 
   const settleTx = async (e: PendingAdmission) => {
     const [t] = await store.findTransactions({ partial: { userId, txid: e.txid }, noRawTx: true });
-    if (!t || typeof t.transactionId !== 'number') return finish(e, 'refused');
+    // Not there (yet): its page may still be merging, or the app was stopped mid-merge (D3). Asked again shortly.
+    if (!t || typeof t.transactionId !== 'number') return wait(e, 'local');
     const toFailed = e.claim === 'failed';
     if (toFailed ? t.status === 'failed' || t.status === 'completed' || t.provenTxId != null : t.status !== 'failed')
       return finish(e, 'refused'); // settled already, or a transaction never undone from a backup
+    // This device's own payment, sent or being sent and still tracked by its monitor: its monitor decides, not a
+    // backup on WhatsOnChain's word (D7: WoC can take minutes to index a broadcast).
+    if (toFailed && BROADCAST.has(String(t.status)) && (await ownRequestLive(e.txid))) return finish(e, 'refused');
     const k = await known(e.txid);
     if (k === 'unclear') {
       report.deferred = true;
-      return wait(e);
+      return wait(e, 'chain');
     }
     // To failed: only when the chain has never seen it (a payment another device saw refused or aborted).
     if (toFailed)
       return k === 'unknown' && (await setStatus(t, 'failed')) ? finish(e, 'applied') : finish(e, 'refused');
     // From failed: only once the chain has it, through the wallet's own mined-payment repair when there is one.
-    if (k !== 'known') return wait(e);
+    if (k !== 'known') return wait(e, 'chain');
     if (v.recover) {
       const r = await v.recover(e.txid).catch((): 'wait' => 'wait');
-      return r === 'wait' ? wait(e) : finish(e, r === 'restored' ? 'applied' : 'refused');
+      if (r === 'wait') return wait(e, 'chain');
+      if (r === 'restored') return finish(e, 'applied');
+      // Nothing of ours to restore (its change spent elsewhere, or none): the chain still has it, so not failed (D6).
     }
-    return (await setStatus(t, 'unproven')) ? finish(e, 'applied') : finish(e, 'refused');
+    return (await settleMined(t, e.txid)) ? finish(e, 'applied') : finish(e, 'refused');
   };
 
-  /** The row matches the device's raw transaction for it, when the device has one. */
-  const matchesRaw = async (row: OutputRow, script: string) => {
-    if (typeof store.getProvenOrRawTx !== 'function' || !row.txid) return true;
-    const r = await store.getProvenOrRawTx(row.txid).catch(() => undefined);
-    const raw = r?.rawTx ?? r?.proven?.rawTx;
-    if (!raw?.length) return true;
-    const out = parseRawTx(raw, row.txid)?.outputs[row.vout];
-    return (
-      !!out &&
-      out.lockingScript.toHex().toLowerCase() === script &&
-      (typeof row.satoshis !== 'number' || out.satoshis === row.satoshis)
-    );
+  /** The device's row for a coin entry: by its transaction and vout (a row may have no txid: D1), else by outpoint. */
+  const coinRow = async (e: PendingAdmission): Promise<OutputRow | 'many' | undefined> => {
+    const [t] = await store.findTransactions({ partial: { userId, txid: e.txid }, noRawTx: true });
+    const rows =
+      t && typeof t.transactionId === 'number'
+        ? await store.findOutputs({ partial: { userId, transactionId: t.transactionId, vout: e.vout } })
+        : await store.findOutputs({ partial: { userId, txid: e.txid, vout: e.vout } });
+    return rows.length > 1 ? 'many' : rows[0];
   };
+  const sameOutput = (out: { lockingScript: Script; satoshis?: number } | undefined, row: OutputRow, script: string) =>
+    !!out &&
+    out.lockingScript.toHex().toLowerCase() === script &&
+    (typeof row.satoshis !== 'number' || out.satoshis === row.satoshis);
 
   const settleCoin = async (e: PendingAdmission) => {
-    const rows = await store.findOutputs({ partial: { userId, txid: e.txid, vout: e.vout } });
-    const row = rows.length === 1 ? rows[0] : undefined;
-    if (!row || typeof row.outputId !== 'number' || row.spendable === true) return finish(e, 'refused');
+    const vout = e.vout ?? 0;
+    const row = await coinRow(e);
+    if (row === 'many') return finish(e, 'refused');
+    // Not there (yet): its page may still be merging (D3). Asked again shortly.
+    if (!row || typeof row.outputId !== 'number') return wait(e, 'local');
+    if (row.spendable === true) return finish(e, 'refused');
     if (row.basketId == null) return finish(e, 'refused'); // in no basket: a quarantined row, or not the wallet's coin
-    // An output of a transaction this device holds as failed: WhatsOnChain's 404 is no proof (F4). Its transaction
-    // may yet be settled (this run's transactions came first).
-    if ((await txStatus(row.transactionId)) === 'failed') return wait(e);
+    // An output of a transaction this device holds as failed: WhatsOnChain's 404 is no proof (F4). It waits as long as
+    // that transaction is queued to be settled.
+    if ((await txStatus(row.transactionId)) === 'failed') return wait(e, txQueued.has(e.txid) ? 'chain' : 'local');
     // Spent by a payment of this device's not yet on the network (R5, C7): the chain hasn't seen that spend.
     const spender = row.spentBy != null ? await txStatus(row.spentBy) : undefined;
-    if (spender !== undefined && IN_FLIGHT.has(spender)) return wait(e);
+    if (spender !== undefined && IN_FLIGHT.has(spender)) return wait(e, 'local');
     const script = hex(row.lockingScript);
-    if (!script || !(await matchesRaw(row, script)) || (await admissibleRow(v, row, script)) === 'refuse')
-      return finish(e, 'refused'); // C1: what a new row must pass, whatever marker the row carries
-    const st = await v.spent(`${e.txid}.${e.vout}`).catch((): SpendState => ({ state: 'unclear' }));
+    if (!script || (await admissibleRow(v, row, script)) === 'refuse') return finish(e, 'refused'); // C1, D4
+    // What the output really locks and holds (D5): the device's raw transaction, else the chain's. Never the row's word.
+    const local = await deviceTx(e.txid);
+    if (local === null || (local && !sameOutput(local.outputs[vout], row, script))) return finish(e, 'refused');
+    const st = await v.spent(`${e.txid}.${vout}`).catch((): SpendState => ({ state: 'unclear' }));
     if (st.state === 'unclear') {
       report.deferred = true;
-      return wait(e);
+      return wait(e, 'chain');
     }
     if (st.state === 'spent') {
       if (e.spentAt !== undefined && now - e.spentAt >= SPENT_RECHECK_MS) return finish(e, 'refused');
-      return wait({ ...e, spentAt: e.spentAt ?? now }, (e.spentAt ?? now) + SPENT_RECHECK_MS);
+      return wait({ ...e, spentAt: e.spentAt ?? now }, 'chain', (e.spentAt ?? now) + SPENT_RECHECK_MS);
     }
-    // WhatsOnChain answers /spent with 404 for an outpoint it has never seen (F4b): unspent only for a known transaction.
-    const k = await known(e.txid);
-    if (k === 'unclear') report.deferred = true;
-    if (k !== 'known') return wait(e);
+    if (!local) {
+      const c = await chainTx(e.txid);
+      if (c.state === 'unclear') report.deferred = true;
+      if (c.state !== 'found') return wait(e, 'chain');
+      if (!sameOutput(parseRawTx(c.rawTx, e.txid)?.outputs[vout], row, script)) return finish(e, 'refused');
+    } else {
+      // WhatsOnChain answers /spent with 404 for an outpoint it has never seen (F4b): unspent only for a known one.
+      const k = await known(e.txid);
+      if (k === 'unclear') report.deferred = true;
+      if (k !== 'known') return wait(e, 'chain');
+    }
     const ok = await store.transaction(async (trx) => {
       const [cur] = await store.findOutputs({ partial: { userId, outputId: row.outputId }, trx });
       if (
@@ -1091,7 +1201,12 @@ async function admitOnce(
         hex(cur.lockingScript) !== script
       )
         return false;
-      await store.updateOutput(row.outputId!, { spendable: true, spentBy: undefined }, trx);
+      // A row that came without its txid gets it (D1), as nullTxidRepair gives the device's own.
+      await store.updateOutput(
+        row.outputId!,
+        { spendable: true, spentBy: undefined, ...(cur.txid ? {} : { txid: e.txid }) },
+        trx,
+      );
       return true;
     });
     return finish(e, ok ? 'admitted' : 'refused');

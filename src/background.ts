@@ -1872,9 +1872,12 @@ const maybeAutoCoinResync = async (): Promise<void> => {
 chrome.alarms.create(AUTO_COIN_RESYNC_ALARM, { periodInMinutes: AUTO_RESYNC_LIGHT_GAP_MS / 60_000 });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === AUTO_COIN_RESYNC_ALARM && pageHidden() !== true) void maybeAutoCoinResync();
+  // Coins from the backup waiting on the chain: their next try, even if the worker slept through its timer (16d D2).
+  if (alarm.name === AUTO_COIN_RESYNC_ALARM) void accountContext?.admitBackupRows().catch(() => undefined);
 });
 (globalThis as { document?: Document }).document?.addEventListener('visibilitychange', () => {
   if (pageHidden() === false) void maybeAutoCoinResync();
+  if (pageHidden() === false) void accountContext?.admitBackupRows().catch(() => undefined);
 });
 
 // Ring when the side panel is closed (services/callRinger.ts): every 30 s while unlocked and no
