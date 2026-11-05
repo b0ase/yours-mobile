@@ -35,7 +35,7 @@ describe('the pending split reaches the Wallet card', () => {
   test('the card shows "pending" from that store, hidden with the balance, never more than the balance', () => {
     const src = readFileSync(new URL('../mobile/wallet/WalletCard.tsx', import.meta.url), 'utf8');
     expect(src).toContain('useSyncExternalStore(subscribePendingSats, pendingSatsNow');
-    expect(src).toMatch(/const incoming = Math\.min\(Math\.max\(0, sats\)/);
+    expect(src).toMatch(/const incoming = Math\.min\(\s*Math\.max\(0, sats\),\s*useSyncExternalStore\(/);
     expect(src).toMatch(/incoming > 0 && !balanceHidden && \(\s*<span className="bw-wcard-pending"/);
     expect(src).toMatch(/\{' '\}\s*pending\s*<\/span>/);
     const bg = readFileSync(new URL('../background.ts', import.meta.url), 'utf8');
