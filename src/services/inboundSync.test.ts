@@ -5,10 +5,11 @@
  * Local only: fake-indexeddb, the real toolbox (StorageIdb, WalletStorageManager, Wallet), a second StorageIdb
  * standing in for wallet.1sat.app, random keys, and a fake chain answer. The provider's rows are rewritten the way a
  * hostile server would answer getSyncChunk (directly in its tables), then this device pulls with syncFromReader, the
- * call device sync, F-C and the restore switch all use.
+ * call device sync, F-C and the restore switch all use, and works through its admission list (admitPending) as device
+ * sync does after every pull. The stand-in merges what the phone pushes unchecked: in the app it is a StorageClient.
  */
 import 'fake-indexeddb/auto';
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import {
   Beef,
@@ -41,9 +42,11 @@ import {
   registerInboundVerifier,
   walletOwnership,
   walletRecords,
-  HELD_MARK,
-  releaseHeldRows,
+  admitPending,
+  pendingAdmissions,
+  _mergeUnchecked,
   isUncheckedPage,
+  type InboundVerifier,
 } from './inboundSync';
 import { bsv21FieldsFromOutput } from '@1sat/actions';
 import { bsv21 } from '../mobile/market/launchpad/tokens';
@@ -143,12 +146,28 @@ async function receiveToken(w: Wallet, kd: KeyDeriver) {
   return tx.id('hex');
 }
 
+/** The test clock admitPending runs on: real time, moved forward by tick() to reach a waiting entry's next try. */
+const clock = { skew: 0 };
+const now = () => Date.now() + clock.skew;
+const tick = (ms: number) => void (clock.skew += ms);
+const MIN = 60_000;
+const HOUR = 60 * MIN;
+/** What device sync does after each pull, on the test clock. */
+const admit = (s: StorageIdb, identityKey: string, v: InboundVerifier) =>
+  admitPending(s as never, identityKey, v, { now });
+/** What is waiting on this device's admission list, as "txid.vout" or "tx:txid". */
+const waiting = async (s: StorageIdb, identityKey: string) =>
+  (await pendingAdmissions(s as never, identityKey)).map((e) =>
+    e.kind === 'coin' ? `${e.txid}.${e.vout}` : `tx:${e.txid}`,
+  );
+
 /** This phone (device store active) and its backup provider, two coins and a token pushed to the backup. */
 async function phoneWithBackup() {
   const root = PrivateKey.fromRandom();
   const kd = new KeyDeriver(root);
   const tag = ++n;
   const remote = await store(`a3-remote-${tag}`);
+  _mergeUnchecked(remote); // the provider: in the app a StorageClient, never this device's guarded store
   const phone = await store(`a3-phone-${tag}`);
   const sm = new WalletStorageManager(kd.identityKey, phone, [remote]);
   await sm.makeAvailable();
@@ -179,19 +198,58 @@ async function phoneWithBackup() {
     log: () => undefined,
   };
   const unregister = registerInboundVerifier(phone.getSettings().storageIdentityKey, kd.identityKey, verifier);
-  const pull = () => sm.syncFromReader(kd.identityKey, remote as never);
+  /** The merge alone (no admission yet). */
+  const merge = () => sm.syncFromReader(kd.identityKey, remote as never);
+  /** What device sync does on open: the merge, then the admission list. */
+  const pull = async () => {
+    await merge();
+    return admit(phone, kd.identityKey, verifier);
+  };
   const row = async (s: StorageIdb, txid: string) => (await s.findOutputs({ partial: { txid, vout: 0 } }))[0];
   /** What a hostile provider answers from now on: its row, rewritten, newer than the phone's. */
   const forge = async (txid: string, patch: Record<string, unknown>) => {
     const r = await row(remote, txid);
     await remote.updateOutput(r.outputId, { ...patch, updated_at: new Date(Date.now() + 3_600_000) } as never);
   };
-  return { root, kd, remote, phone, sm, wallet, coin, coin2, token, chain, verifier, pull, row, forge, unregister };
+  /** A fresh device restored from the backup: the toolbox copy, then the admission list. */
+  const restore = async (v: InboundVerifier = verifier) => {
+    const fresh = await store(`a3-fresh-${++n}`);
+    const off = registerInboundVerifier(fresh.getSettings().storageIdentityKey, kd.identityKey, v);
+    const sm2 = new WalletStorageManager(kd.identityKey, fresh, [remote]);
+    await sm2.makeAvailable();
+    await sm2.setActive(fresh.getSettings().storageIdentityKey);
+    sm2.setServices(services);
+    await sm2.syncFromReader(kd.identityKey, remote as never);
+    const admitted = await admit(fresh, kd.identityKey, v);
+    return { fresh, sm2, admitted, unregister: off };
+  };
+  return {
+    root,
+    kd,
+    remote,
+    phone,
+    sm,
+    wallet,
+    coin,
+    coin2,
+    token,
+    chain,
+    verifier,
+    merge,
+    pull,
+    restore,
+    row,
+    forge,
+    unregister,
+  };
 }
 
 let uninstall: () => void = () => undefined;
 beforeAll(() => {
   uninstall = installInboundSyncGuard(StorageIdb);
+});
+beforeEach(() => {
+  clock.skew = 0;
 });
 afterAll(() => {
   uninstall();
@@ -227,7 +285,11 @@ describe('A3: rows from a remote store never become spendable unchecked', () => 
     await d.phone.updateOutput(mine.outputId, { spendable: false } as never);
     await d.forge(d.coin, { spendable: true });
     d.chain.answer = 'unspent'; // what /spent says for a transaction the network never had
+    d.chain.knownFor.set(d.coin, 'unknown'); // ...and /tx/hash: it never had it
     await d.pull();
+    expect((await d.row(d.phone, d.coin)).spendable).toBe(false);
+    tick(HOUR);
+    await admit(d.phone, d.kd.identityKey, d.verifier);
     expect((await d.row(d.phone, d.coin)).spendable).toBe(false);
   });
 
@@ -238,11 +300,11 @@ describe('A3: rows from a remote store never become spendable unchecked', () => 
     await d.forge(d.coin, { spendable: true });
     d.chain.answer = 'unclear';
     await d.pull(); // no longer refuses the page (review 16b, R4)
-    const held = await d.row(d.phone, d.coin);
-    expect(held.spendable).toBe(false);
-    expect((held as { spendingDescription?: string }).spendingDescription).toBe(HELD_MARK);
+    expect((await d.row(d.phone, d.coin)).spendable).toBe(false);
+    expect(await waiting(d.phone, d.kd.identityKey)).toEqual([`${d.coin}.0`]);
     d.chain.answer = 'unspent';
-    expect((await releaseHeldRows(d.phone as never, d.kd.identityKey, d.verifier)).released).toBe(1);
+    tick(2 * MIN);
+    expect((await admit(d.phone, d.kd.identityKey, d.verifier)).admitted).toBe(1);
     expect((await d.row(d.phone, d.coin)).spendable).toBe(true);
   });
 
@@ -315,13 +377,8 @@ describe('A3: rows from a remote store never become spendable unchecked', () => 
 
   test("an honest restore: the wallet's own coins arrive spendable once the chain confirms them", async () => {
     const d = await phoneWithBackup();
-    const fresh = await store(`a3-new-${++n}`);
     d.chain.answer = 'unspent';
-    const unregister = registerInboundVerifier(fresh.getSettings().storageIdentityKey, d.kd.identityKey, d.verifier);
-    const sm2 = new WalletStorageManager(d.kd.identityKey, fresh, [d.remote]);
-    await sm2.makeAvailable();
-    await sm2.setActive(fresh.getSettings().storageIdentityKey);
-    await sm2.syncFromReader(d.kd.identityKey, d.remote as never);
+    const { fresh, unregister } = await d.restore();
     for (const txid of [d.coin, d.coin2, d.token]) expect((await d.row(fresh, txid)).spendable).toBe(true);
     for (const txid of [d.coin, d.coin2, d.token]) expect(d.chain.asked).toContain(`${txid}.0`);
     unregister();
@@ -336,11 +393,12 @@ describe('A3: rows from a remote store never become spendable unchecked', () => 
     const asked: string[] = [];
     const owns = walletOwnership(d.root);
     let checked = 0;
-    const unregister = registerInboundVerifier(`sik-${name}`, d.kd.identityKey, {
+    const checking: InboundVerifier = {
       owns: async (row, script) => (checked++, owns(row, script)),
       spent: async (op) => (asked.push(op), { state: 'unspent' }),
       txKnown: async () => 'known',
-    });
+    };
+    const unregister = registerInboundVerifier(`sik-${name}`, d.kd.identityKey, checking);
     const remoteUrl = 'https://wallet.1sat.test';
     (d.remote as unknown as { endpointUrl: string }).endpointUrl = remoteUrl;
     class FakeStorageClient {
@@ -363,11 +421,12 @@ describe('A3: rows from a remote store never become spendable unchecked', () => 
       pullRemote: async () => {
         await core.storage.syncFromReader((await core.storage.getAuth()).identityKey, d.remote as never);
       },
+      admit: () => admit(local, d.kd.identityKey, checking), // as background.ts restoreDeps wires it (C6)
     });
     expect(r.ok).toBe(true);
     const spendable = (await local.findOutputs({ partial: {} })).filter((o) => o.spendable);
     expect(spendable.reduce((s, o) => s + o.satoshis, 0)).toBe(50_000 + 70_000 + 1);
-    expect(checked).toBeGreaterThanOrEqual(3); // the copy went through the check: each coin
+    expect(checked).toBeGreaterThanOrEqual(2); // the copy went through the check: each change coin's key
     expect(asked.length).toBeGreaterThanOrEqual(3); // ...and the chain was asked about each
     unregister();
   });
@@ -469,18 +528,12 @@ describe('F2: a token coin from the backup carries the amount its script says, o
 
   /** A fresh device restored from the backup, read the way a token send reads it. */
   async function restoreAndRead(d: Awaited<ReturnType<typeof phoneWithBackup>>) {
-    const fresh = await store(`a3-tok-${++n}`);
-    const unregister = registerInboundVerifier(fresh.getSettings().storageIdentityKey, d.kd.identityKey, {
+    const { fresh, sm2, unregister } = await d.restore({
       owns: walletOwnership(d.root),
       spent: async () => ({ state: 'unspent' }),
       txKnown: async () => 'known',
       readRecord: walletRecords(d.root),
     });
-    const sm2 = new WalletStorageManager(d.kd.identityKey, fresh, [d.remote]);
-    await sm2.makeAvailable();
-    await sm2.setActive(fresh.getSettings().storageIdentityKey);
-    await sm2.syncFromReader(d.kd.identityKey, d.remote as never);
-    sm2.setServices(services);
     const w2 = new Wallet({ chain: 'main', keyDeriver: d.kd, storage: sm2, services } as never);
     const listed = await w2.listOutputs({ basket: 'bsv21', includeCustomInstructions: true, includeTags: true });
     unregister();
@@ -629,7 +682,7 @@ describe('F4: the chain check holds against a two-step plant, a 404, a status re
     await d.pull();
     const got = await d.row(d.phone, ptxid);
     expect(got.spendable).toBe(false);
-    expect((got as { spendingDescription?: string }).spendingDescription).toBe(HELD_MARK);
+    expect(await waiting(d.phone, d.kd.identityKey)).toEqual([`${ptxid}.0`]); // asked again later
   });
 
   test('(c) the backup cannot rewrite a failed transaction to completed and then bring its coin back', async () => {
@@ -659,16 +712,11 @@ describe('F4: the chain check holds against a two-step plant, a 404, a status re
 
   test("(d) a fresh restore asks the chain even about the wallet's own coins: spent change stays not spendable", async () => {
     const d = await phoneWithBackup();
-    const fresh = await store(`a3-f4d-${++n}`);
-    const unregister = registerInboundVerifier(fresh.getSettings().storageIdentityKey, d.kd.identityKey, {
+    const { fresh, unregister } = await d.restore({
       ...d.verifier,
       spent: async (op: string) =>
         op === `${d.coin}.0` ? { state: 'spent' as const, by: 'ee'.repeat(32) } : { state: 'unspent' as const },
     });
-    const sm2 = new WalletStorageManager(d.kd.identityKey, fresh, [d.remote]);
-    await sm2.makeAvailable();
-    await sm2.setActive(fresh.getSettings().storageIdentityKey);
-    await sm2.syncFromReader(d.kd.identityKey, d.remote as never);
     expect((await d.row(fresh, d.coin)).spendable).toBe(false);
     expect((await d.row(fresh, d.coin2)).spendable).toBe(true);
     unregister();
@@ -678,21 +726,17 @@ describe('F4: the chain check holds against a two-step plant, a 404, a status re
     const d = await phoneWithBackup();
     d.chain.answer = 'unspent';
     d.chain.knownFor.set(d.coin, 'unknown');
-    const fresh = await store(`a3-hold-${++n}`);
-    const unregister = registerInboundVerifier(fresh.getSettings().storageIdentityKey, d.kd.identityKey, d.verifier);
-    const sm2 = new WalletStorageManager(d.kd.identityKey, fresh, [d.remote]);
-    await sm2.makeAvailable();
-    await sm2.setActive(fresh.getSettings().storageIdentityKey);
-    await sm2.syncFromReader(d.kd.identityKey, d.remote as never);
+    const { fresh, unregister } = await d.restore();
     expect((await d.row(fresh, d.coin)).spendable).toBe(false);
     expect((await d.row(fresh, d.coin2)).spendable).toBe(true);
     // Still unknown: nothing changes.
-    expect(await releaseHeldRows(fresh as never, d.kd.identityKey, d.verifier)).toEqual({ released: 0, spent: 0 });
+    tick(2 * MIN);
+    expect((await admit(fresh, d.kd.identityKey, d.verifier)).admitted).toBe(0);
     d.chain.knownFor.set(d.coin, 'known');
-    expect(await releaseHeldRows(fresh as never, d.kd.identityKey, d.verifier)).toEqual({ released: 1, spent: 0 });
-    const got = await d.row(fresh, d.coin);
-    expect(got.spendable).toBe(true);
-    expect((got as { spendingDescription?: string | null }).spendingDescription ?? null).toBeNull();
+    tick(5 * MIN);
+    expect((await admit(fresh, d.kd.identityKey, d.verifier)).admitted).toBe(1);
+    expect((await d.row(fresh, d.coin)).spendable).toBe(true);
+    expect(await waiting(fresh, d.kd.identityKey)).toEqual([]);
     unregister();
   });
 });
@@ -710,12 +754,13 @@ describe('F5: held-back coins do not strand a restore, and a WhatsOnChain outage
     const local = new StorageIdb(StorageProvider.createStorageBaseOptions('main'));
     (local as unknown as { dbName: string }).dbName = name;
     await local.migrate(name, `sik-${name}`);
-    const unregister = registerInboundVerifier(`sik-${name}`, d.kd.identityKey, {
+    const f5: InboundVerifier = {
       ...d.verifier,
       spent: async (op: string) =>
         op === `${d.coin}.0` ? { state: 'spent' as const, by: 'ee'.repeat(32) } : { state: 'unspent' as const },
       txKnown: async () => 'known',
-    });
+    };
+    const unregister = registerInboundVerifier(`sik-${name}`, d.kd.identityKey, f5);
     const remoteUrl = 'https://wallet.1sat.test';
     (d.remote as unknown as { endpointUrl: string }).endpointUrl = remoteUrl;
     class FakeStorageClient {
@@ -739,6 +784,7 @@ describe('F5: held-back coins do not strand a restore, and a WhatsOnChain outage
         await core.storage.syncFromReader((await core.storage.getAuth()).identityKey, d.remote as never);
       },
       deviceHolds: outpointsOnDevice(core.storage as never), // as background.ts restoreDeps wires it
+      admit: () => admit(local, d.kd.identityKey, f5),
     });
     expect(r.ok).toBe(true);
     expect((await d.row(local, d.coin)).spendable).toBe(false);
@@ -774,6 +820,7 @@ describe('F5: held-back coins do not strand a restore, and a WhatsOnChain outage
       /const attempts = isUncheckedPage\(error\) \? 0 : await WalletBackupService\.notePendingRestoreAttempt\(currentIdentityKey\);/,
     );
     expect(bg).toMatch(/deviceHolds: outpointsOnDevice\(ctx\.storage as never\)/);
+    expect(bg).toMatch(/admit: \(\) => ctx\.admitBackupRows\(\)/);
   });
 });
 
@@ -849,6 +896,7 @@ describe('R1: an interrupted restore, retried after a restart, still moves the a
           await core.storage.syncFromReader((await core.storage.getAuth()).identityKey, d.remote as never);
         },
         deviceHolds: outpointsOnDevice(core.storage as never),
+        admit: () => admit(local, d.kd.identityKey, verifier),
       };
     };
     const r1 = await switchToLocalVerified(deps(true));
@@ -926,7 +974,6 @@ describe('R2: one tracking id, one asset', () => {
   test('a page giving one new id to two outputs: only the first takes it', async () => {
     const d = await phoneWithBackup();
     d.chain.answer = 'unspent';
-    const fresh = await store(`r2-fresh-${++n}`);
     const aTx = await receiveOrdinal(d.wallet, d.kd, 'aaaaaaaaaaaa');
     const bTx = await receiveOrdinal(d.wallet, d.kd, 'bbbbbbbbbbbb');
     await d.sm.updateBackups();
@@ -941,12 +988,7 @@ describe('R2: one tracking id, one asset', () => {
       created_at: later,
       updated_at: later,
     } as never);
-    const unregister = registerInboundVerifier(fresh.getSettings().storageIdentityKey, d.kd.identityKey, d.verifier);
-    const sm2 = new WalletStorageManager(d.kd.identityKey, fresh, [d.remote]);
-    await sm2.makeAvailable();
-    await sm2.setActive(fresh.getSettings().storageIdentityKey);
-    await sm2.syncFromReader(d.kd.identityKey, d.remote as never);
-    sm2.setServices(services);
+    const { sm2, unregister } = await d.restore();
     const w2 = new Wallet({ chain: 'main', keyDeriver: d.kd, storage: sm2, services } as never);
     const a = await w2.listOutputs({
       basket: '1sat',
@@ -1099,22 +1141,19 @@ describe('R4: a WhatsOnChain hiccup holds one coin, never the page', () => {
     expect((await d.row(d.phone, d.coin2)).spendable).toBe(false); // the spend landed
     expect((await d.row(d.phone, received)).spendable).toBe(false); // held, not dropped
     d.chain.answer = 'unspent';
-    expect((await releaseHeldRows(d.phone as never, d.kd.identityKey, d.verifier)).released).toBe(1);
+    tick(2 * MIN);
+    expect((await admit(d.phone, d.kd.identityKey, d.verifier)).admitted).toBe(1);
     expect((await d.row(d.phone, received)).spendable).toBe(true);
   });
 
   test('a restore with WhatsOnChain down the whole time finishes, every coin held, then released', async () => {
     const d = await phoneWithBackup();
-    const fresh = await store(`r4-fresh-${++n}`);
     d.chain.answer = 'unclear';
-    const unregister = registerInboundVerifier(fresh.getSettings().storageIdentityKey, d.kd.identityKey, d.verifier);
-    const sm2 = new WalletStorageManager(d.kd.identityKey, fresh, [d.remote]);
-    await sm2.makeAvailable();
-    await sm2.setActive(fresh.getSettings().storageIdentityKey);
-    await sm2.syncFromReader(d.kd.identityKey, d.remote as never); // completes
+    const { fresh, unregister } = await d.restore(); // completes
     for (const txid of [d.coin, d.coin2]) expect((await d.row(fresh, txid)).spendable).toBe(false);
     d.chain.answer = 'unspent';
-    expect((await releaseHeldRows(fresh as never, d.kd.identityKey, d.verifier)).released).toBeGreaterThanOrEqual(2);
+    tick(2 * MIN);
+    expect((await admit(fresh, d.kd.identityKey, d.verifier)).admitted).toBeGreaterThanOrEqual(2);
     for (const txid of [d.coin, d.coin2]) expect((await d.row(fresh, txid)).spendable).toBe(true);
     unregister();
   });
@@ -1126,7 +1165,7 @@ describe('R4: a WhatsOnChain hiccup holds one coin, never the page', () => {
  * says unspent. The wallet could then pick the coin again and the pre-signed payment would fail.
  */
 describe("R5: a coin the device is spending in a payment not yet on the network isn't revived", () => {
-  for (const status of ['nosend', 'unsigned', 'unprocessed', 'sending', 'unproven', 'nonfinal'])
+  for (const status of ['nosend', 'unsigned', 'unprocessed', 'sending', 'unproven', 'nonfinal', 'unfail'])
     test(`T3: spent by this device's ${status} transaction: stays spent here`, async () => {
       const d = await phoneWithBackup();
       const { userId } = (await d.phone.findUsers({ partial: { identityKey: d.kd.identityKey } }))[0];
@@ -1151,4 +1190,574 @@ describe("R5: a coin the device is spending in a payment not yet on the network 
       expect(got.spendable).toBe(false);
       expect(got.spentBy).toBe(pending);
     });
+});
+
+/**
+ * Review 16c: the third review's scratch repros (H1-H5), now asserting the fixed behaviour, and the redesign's own
+ * guarantees: a merge only lowers what is spendable, and a coin becomes spendable only through admitPending.
+ */
+describe('16c: a merge never makes a coin spendable; only the admission list does, after every check', () => {
+  type D = Awaited<ReturnType<typeof phoneWithBackup>>;
+  /** What b47101bc marked held coins with, in a column every backup writes. */
+  const OLD_HELD_MARK = 'bwx: waiting for the chain to show this coin';
+  const TOKEN = `${'cd'.repeat(32)}_0`;
+  let clockAt = 1;
+  const later = () => new Date(Date.now() + HOUR * clockAt++);
+  const userOf = async (s: StorageIdb, d: D) =>
+    (await s.findUsers({ partial: { identityKey: d.kd.identityKey } }))[0].userId;
+  async function receiveBsv21(w: Wallet, kd: KeyDeriver, amt: bigint) {
+    const keyID = `tok-${++n}`;
+    const pub = kd.derivePublicKey([0, 'onesat'], keyID, 'self', true);
+    const tx = minedTx(bsv21(TOKEN, amt, pub.toAddress()), 1);
+    await w.internalizeAction({
+      tx: atomic(tx),
+      outputs: [
+        {
+          outputIndex: 0,
+          protocol: 'basket insertion',
+          insertionRemittance: {
+            basket: 'bsv21',
+            tags: [`bsv21:${TOKEN}`],
+            customInstructions: JSON.stringify({ protocolID: [0, 'onesat'], keyID, id: TOKEN, amt: String(amt) }),
+          },
+        },
+      ],
+      description: 'Tokens in',
+    });
+    return tx.id('hex');
+  }
+  /** The token coins a send would read on this store. */
+  const tokenSend = async (d: D, sm2: WalletStorageManager) => {
+    const w2 = new Wallet({ chain: 'main', keyDeriver: d.kd, storage: sm2, services } as never);
+    const listed = await w2.listOutputs({ basket: 'bsv21', includeCustomInstructions: true, includeTags: true });
+    return listed.outputs.map((o) => ({ outpoint: o.outpoint, ...bsv21FieldsFromOutput(o as never) }));
+  };
+  /** A transaction of the backup's own (a copy of a real one's row), with this status and raw bytes. */
+  const backupTx = async (d: D, status: string, raw?: Transaction) => {
+    const ru = await userOf(d.remote, d);
+    const RT = (await d.remote.findTransactions({ partial: { userId: ru, txid: d.coin2 }, noRawTx: true }))[0];
+    const t = later();
+    const txid = raw ? raw.id('hex') : Utils.toHex(Random(32));
+    const id = await d.remote.insertTransaction({
+      ...RT,
+      transactionId: 0,
+      txid,
+      reference: Utils.toBase64(Random(12)),
+      status,
+      provenTxId: undefined,
+      rawTx: raw ? raw.toBinary() : undefined,
+      created_at: t,
+      updated_at: t,
+    } as never);
+    return { id, txid };
+  };
+  /** A payment of this device's own, not yet on the network, spending `coin` (a pot's pre-signed payment). */
+  const unsentSpend = async (d: D, coin: string, withReq = false) => {
+    const userId = await userOf(d.phone, d);
+    const T = (await d.phone.findTransactions({ partial: { userId, txid: d.coin2 }, noRawTx: true }))[0];
+    const txid = Utils.toHex(Random(32));
+    const id = await d.phone.insertTransaction({
+      ...T,
+      transactionId: 0,
+      txid,
+      reference: Utils.toBase64(Random(12)),
+      status: 'nosend',
+      provenTxId: undefined,
+      isOutgoing: true,
+      created_at: new Date(),
+      updated_at: new Date(),
+    } as never);
+    if (withReq) {
+      const at = new Date();
+      await d.phone.insertProvenTxReq({
+        provenTxReqId: 0,
+        created_at: at,
+        updated_at: at,
+        txid,
+        status: 'nosend',
+        attempts: 0,
+        notified: false,
+        history: '{}',
+        notify: '{}',
+        rawTx: [1, 2, 3],
+      } as never);
+    }
+    const c = await d.row(d.phone, coin);
+    await d.phone.updateOutput(c.outputId, { spendable: false, spentBy: id, updated_at: new Date() } as never);
+    return { id, txid };
+  };
+
+  for (const viaHeld of [false, true])
+    test(`C1/H1${viaHeld ? '' : ' control'}: a real token coin, record amount inflated, sent ${viaHeld ? 'not spendable with the old held mark' : 'spendable'}: never spendable`, async () => {
+      const d = await phoneWithBackup();
+      d.chain.answer = 'unspent';
+      const tok = await receiveBsv21(d.wallet, d.kd, 100n);
+      await d.sm.updateBackups();
+      const r = await d.row(d.remote, tok);
+      await d.remote.updateOutput(r.outputId, {
+        customInstructions: JSON.stringify({ ...JSON.parse(r.customInstructions!), amt: '1000000' }),
+        spendable: !viaHeld,
+        ...(viaHeld ? { spendingDescription: OLD_HELD_MARK } : {}),
+        updated_at: later(),
+      } as never);
+      const { fresh, sm2, unregister } = await d.restore();
+      for (let i = 0; i < 3; i++) {
+        tick(7 * HOUR);
+        await admit(fresh, d.kd.identityKey, d.verifier); // any number of later runs
+      }
+      expect((await tokenSend(d, sm2)).find((o) => o.outpoint.startsWith(tok))).toBeUndefined();
+      expect((await d.row(fresh, tok)).spendable).toBe(false);
+      unregister();
+    });
+
+  test('C1/H1c: planted "change" paying a stranger, sent not spendable with the old held mark: never spendable', async () => {
+    const d = await phoneWithBackup();
+    d.chain.answer = 'unspent';
+    const planted = minedTx(new P2PKH().lock(PrivateKey.fromRandom().toAddress()), 90_000);
+    const { id: tid } = await backupTx(d, 'completed', planted);
+    const r = await d.row(d.remote, d.coin2);
+    const t = later();
+    await d.remote.insertOutput({
+      ...r,
+      outputId: 0,
+      transactionId: tid,
+      txid: planted.id('hex'),
+      vout: 0,
+      satoshis: 90_000,
+      lockingScript: planted.outputs[0].lockingScript.toBinary(),
+      spendable: false,
+      spentBy: undefined,
+      spendingDescription: OLD_HELD_MARK,
+      created_at: t,
+      updated_at: t,
+    } as never);
+    expect(isWalletChange(await d.row(d.remote, planted.id('hex')))).toBe(true);
+    await d.pull();
+    await d.forge(planted.id('hex'), { spendable: true }); // and the two-step plant on top
+    await d.pull();
+    tick(7 * HOUR);
+    await admit(d.phone, d.kd.identityKey, d.verifier);
+    const got = await d.row(d.phone, planted.id('hex'));
+    expect(got.spendable).toBe(false);
+    expect(got.change).toBe(false); // quarantined: never funding's pick, whatever frees it
+    expect(got.basketId ?? null).toBeNull();
+  });
+
+  test("C1/H2: the backup unlinks a coin this device's unsent payment spends (old held mark): it stays spent here", async () => {
+    const d = await phoneWithBackup();
+    const pending = await unsentSpend(d, d.coin);
+    const rc = await d.row(d.remote, d.coin);
+    await d.remote.updateOutput(rc.outputId, {
+      spendable: false,
+      spentBy: undefined,
+      spendingDescription: OLD_HELD_MARK,
+      updated_at: later(),
+    } as never);
+    d.chain.answer = 'unspent'; // the chain hasn't seen the device's unsent payment
+    await d.pull();
+    tick(7 * HOUR);
+    await admit(d.phone, d.kd.identityKey, d.verifier);
+    const got = await d.row(d.phone, d.coin);
+    expect(got.spendable).toBe(false);
+    expect(got.spentBy).toBe(pending.id);
+  });
+
+  test("C2/H3: delete both id maps on one pull, re-add V's id to the cheap NFT on the next: the id still loads only V", async () => {
+    const d = await phoneWithBackup();
+    d.chain.answer = 'unspent';
+    const receiveOrdinal = async (id: string) => {
+      const keyID = `ord-${++n}`;
+      const pub = d.kd.derivePublicKey([0, 'onesat'], keyID, 'self', true);
+      const tx = minedTx(new P2PKH().lock(pub.toAddress()), 1);
+      await d.wallet.internalizeAction({
+        tx: atomic(tx),
+        outputs: [
+          {
+            outputIndex: 0,
+            protocol: 'basket insertion',
+            insertionRemittance: {
+              basket: '1sat',
+              customInstructions: JSON.stringify({ protocolID: [0, 'onesat'], keyID }),
+              tags: [`id:${id}`],
+            },
+          },
+        ],
+        description: 'Ordinal in',
+      });
+      return tx.id('hex');
+    };
+    const vTx = await receiveOrdinal('vvvvvvvvvvvv'); // valuable, received first
+    const cTx = await receiveOrdinal('cccccccccccc'); // cheap
+    await d.sm.updateBackups();
+    const userId = await userOf(d.remote, d);
+    const rv = await d.row(d.remote, vTx);
+    const rc = await d.row(d.remote, cTx);
+    const vTag = (await d.remote.findOutputTags({ partial: { userId, tag: 'id:vvvvvvvvvvvv' } }))[0];
+    const cTag = (await d.remote.findOutputTags({ partial: { userId, tag: 'id:cccccccccccc' } }))[0];
+    const t1 = later();
+    await d.remote.updateOutputTagMap(rv.outputId, vTag.outputTagId, { isDeleted: true, updated_at: t1 } as never);
+    await d.remote.updateOutputTagMap(rc.outputId, cTag.outputTagId, { isDeleted: true, updated_at: t1 } as never);
+    await d.pull(); // page 1: two deletions of tracking ids
+    const t2 = later();
+    await d.remote.insertOutputTagMap({
+      outputId: rc.outputId,
+      outputTagId: vTag.outputTagId,
+      isDeleted: false,
+      created_at: t2,
+      updated_at: t2,
+    } as never);
+    await d.pull(); // page 2: (cheap, id:v)
+    const byV = await d.wallet.listOutputs({
+      basket: '1sat',
+      tags: ['id:vvvvvvvvvvvv'],
+      tagQueryMode: 'all',
+      limit: 5,
+    });
+    expect(byV.outputs.map((o) => o.outpoint)).toEqual([`${vTx}.0`]);
+    const all = await d.wallet.listOutputs({ basket: '1sat', includeTags: true, limit: 10 });
+    const tagsOf = (txid: string) => all.outputs.find((o) => o.outpoint === `${txid}.0`)?.tags ?? [];
+    expect(tagsOf(vTx)).toContain('id:vvvvvvvvvvvv');
+    expect(tagsOf(cTx)).toEqual(['id:cccccccccccc']);
+    expect(await assetIdIsOnly(d.wallet as never, 'vvvvvvvvvvvv', `${vTx}.0`)).toBe(true);
+    expect(await assetIdIsOnly(d.wallet as never, 'cccccccccccc', `${cTx}.0`)).toBe(true);
+  });
+
+  test('C3/H4: the other device aborts an unsent payment; this device frees its input once the chain agrees', async () => {
+    const d = await phoneWithBackup();
+    const userId = await userOf(d.phone, d);
+    const pending = await unsentSpend(d, d.coin, true);
+    await d.sm.updateBackups(); // the backup has the unsent payment too (as another device would)
+    // The other device aborts it (toolbox abortAction): tx failed, its input spendable again, request invalid.
+    const ru = await userOf(d.remote, d);
+    const RT = (await d.remote.findTransactions({ partial: { userId: ru, txid: pending.txid }, noRawTx: true }))[0];
+    const t = later();
+    await d.remote.updateTransaction(RT.transactionId, { status: 'failed', updated_at: t } as never);
+    const rc = await d.row(d.remote, d.coin);
+    await d.remote.updateOutput(rc.outputId, { spendable: true, spentBy: undefined, updated_at: t } as never);
+    const rq = (await d.remote.findProvenTxReqs({ partial: { txid: pending.txid } }))[0];
+    await d.remote.updateProvenTxReq(rq.provenTxReqId, {
+      status: 'invalid',
+      updated_at: new Date(t.getTime() + 5),
+    } as never);
+    d.chain.knownFor.set(pending.txid, 'unknown'); // never broadcast
+    d.chain.answer = 'unspent';
+    await d.pull();
+    const tx = (await d.phone.findTransactions({ partial: { userId, txid: pending.txid }, noRawTx: true }))[0];
+    expect(tx.status).toBe('failed');
+    const got = await d.row(d.phone, d.coin);
+    expect(got.spendable).toBe(true);
+    expect(got.spentBy ?? null).toBeNull();
+  });
+
+  test('C4/H5: failed here, completed in the backup, WhatsOnChain unclear once: settled once it answers', async () => {
+    const d = await phoneWithBackup();
+    const userId = await userOf(d.phone, d);
+    const T = (await d.phone.findTransactions({ partial: { userId, txid: d.coin }, noRawTx: true }))[0];
+    await d.phone.updateTransaction(T.transactionId, { status: 'failed' } as never);
+    const c = await d.row(d.phone, d.coin);
+    await d.phone.updateOutput(c.outputId, { spendable: false } as never);
+    const ru = await userOf(d.remote, d);
+    const RT = (await d.remote.findTransactions({ partial: { userId: ru, txid: d.coin }, noRawTx: true }))[0];
+    await d.remote.updateTransaction(RT.transactionId, { updated_at: later() } as never);
+    const rc = await d.row(d.remote, d.coin);
+    await d.remote.updateOutput(rc.outputId, { spendable: true, updated_at: later() } as never);
+    d.chain.knownFor.set(d.coin, 'unclear'); // WoC throttled for this one lookup
+    d.chain.answer = 'unspent';
+    const first = await d.pull();
+    expect(first.deferred).toBe(true);
+    expect(first.pendingActions).toBe(1); // the restore check counts it as present (C4)
+    const status = async () =>
+      (await d.phone.findTransactions({ partial: { userId, txid: d.coin }, noRawTx: true }))[0].status;
+    expect(await status()).toBe('failed');
+    d.chain.knownFor.set(d.coin, 'known'); // WoC back
+    tick(2 * MIN);
+    await admit(d.phone, d.kd.identityKey, d.verifier);
+    expect(await status()).toBe('unproven');
+    expect((await d.row(d.phone, d.coin)).spendable).toBe(true);
+    const stati = ['completed', 'unprocessed', 'sending', 'unproven', 'unsigned', 'nosend', 'nonfinal'];
+    const listable = async (s: StorageIdb, u: number) =>
+      (await s.findTransactions({ partial: { userId: u }, status: stati, noRawTx: true } as never)).length;
+    expect(await listable(d.phone, userId)).toBe(await listable(d.remote, ru));
+  });
+
+  test("C4: with the wallet's mined-payment repair, a failed->completed correction goes through it, not the backup's word", async () => {
+    const d = await phoneWithBackup();
+    const userId = await userOf(d.phone, d);
+    const T = (await d.phone.findTransactions({ partial: { userId, txid: d.coin }, noRawTx: true }))[0];
+    await d.phone.updateTransaction(T.transactionId, { status: 'failed' } as never);
+    const RT = (
+      await d.remote.findTransactions({ partial: { userId: await userOf(d.remote, d), txid: d.coin }, noRawTx: true })
+    )[0];
+    await d.remote.updateTransaction(RT.transactionId, { updated_at: later() } as never);
+    const asked: string[] = [];
+    d.verifier.recover = async (txid: string) => (asked.push(txid), 'restored' as const);
+    const r = await d.pull();
+    expect(asked).toEqual([d.coin]);
+    expect(r.applied).toBe(1);
+    expect((await d.phone.findTransactions({ partial: { userId, txid: d.coin }, noRawTx: true }))[0].status).toBe(
+      'failed',
+    ); // left to the repair
+  });
+
+  test("C4: a restore whose backup counts an action this device still holds as failed (chain asked) isn't stuck on it", async () => {
+    const remote = { outputs: 2, spendableSats: 200, actions: 3, coins: ['a.0', 'b.0'] };
+    const local = { outputs: 2, spendableSats: 200, actions: 2, coins: ['a.0', 'b.0'] };
+    const run = async (pendingActions: number) => {
+      let active: string | undefined = 'r';
+      return switchToLocalVerified({
+        remoteUrl: 'r',
+        activeRemoteUrl: () => active,
+        setActiveStorage: async (t) => {
+          active = t === 'local' ? undefined : t;
+        },
+        summarize: async () => (active ? remote : local),
+        pullRemote: async () => undefined,
+        deviceHolds: async (ops) => new Set(ops),
+        admit: async () => ({ pendingActions }),
+      });
+    };
+    expect((await run(1)).ok).toBe(true);
+    expect((await run(0)).ok).toBe(false); // genuinely one action short
+  });
+
+  test('N1: a forged token row sent not spendable, linked to a backup transaction marked failed: never freed', async () => {
+    const d = await phoneWithBackup();
+    d.chain.answer = 'unspent';
+    const tok = await receiveBsv21(d.wallet, d.kd, 100n);
+    await d.sm.updateBackups();
+    const r = await d.row(d.remote, tok);
+    const X = await backupTx(d, 'failed'); // no proof request: "safe" for the toolbox to free what it spent
+    await d.remote.updateOutput(r.outputId, {
+      customInstructions: JSON.stringify({ ...JSON.parse(r.customInstructions!), amt: '1000000' }),
+      spendable: false,
+      spentBy: X.id,
+      updated_at: later(),
+    } as never);
+    const { fresh, sm2, unregister } = await d.restore();
+    await fresh.reviewStatus({ agedLimit: new Date() } as never); // the device's own monitor
+    expect((await tokenSend(d, sm2)).find((o) => o.outpoint.startsWith(tok))).toBeUndefined();
+    expect((await d.row(fresh, tok)).spendable).toBe(false);
+    unregister();
+  });
+
+  test('N1: no spend link goes on a coin the device holds as not spendable (a later failure would free it)', async () => {
+    const d = await phoneWithBackup();
+    d.chain.answer = 'unspent';
+    const mine = await d.row(d.phone, d.coin);
+    await d.phone.updateOutput(mine.outputId, { spendable: false } as never); // e.g. spent, or held back here
+    const X = await backupTx(d, 'failed');
+    await d.forge(d.coin, { spendable: false, spentBy: X.id });
+    await d.pull();
+    expect((await d.row(d.phone, d.coin)).spentBy ?? null).toBeNull();
+    await d.phone.reviewStatus({ agedLimit: new Date() } as never);
+    expect((await d.row(d.phone, d.coin)).spendable).toBe(false);
+  });
+
+  test('N1: honest: a coin another device spent arrives spent, linked when that payment is completed', async () => {
+    const d = await phoneWithBackup();
+    const { fresh, unregister } = await d.restore({ ...d.verifier, spent: async () => ({ state: 'unspent' }) });
+    const X = await backupTx(d, 'completed');
+    await d.forge(d.coin2, { spendable: false, spentBy: X.id }); // spent by a completed payment
+    const sm3 = new WalletStorageManager(d.kd.identityKey, fresh, [d.remote]);
+    await sm3.makeAvailable();
+    await sm3.setActive(fresh.getSettings().storageIdentityKey);
+    await sm3.syncFromReader(d.kd.identityKey, d.remote as never);
+    const got = await d.row(fresh, d.coin2);
+    expect(got.spendable).toBe(false); // the device had it spendable: marked spent, link and all
+    expect(got.spentBy).toBeGreaterThan(0);
+    unregister();
+  });
+
+  test('C5: the chain is asked with no storage lock held: the wallet stays usable while WhatsOnChain is slow', async () => {
+    const d = await phoneWithBackup();
+    await d.forge(d.coin, { spendable: true });
+    const mine = await d.row(d.phone, d.coin);
+    await d.phone.updateOutput(mine.outputId, { spendable: false } as never);
+    await d.merge();
+    let answer: (s: SpendState) => void = () => undefined;
+    const slow: InboundVerifier = {
+      ...d.verifier,
+      spent: () => new Promise<SpendState>((resolve) => (answer = resolve)),
+    };
+    const run = admit(d.phone, d.kd.identityKey, slow);
+    await new Promise((r) => setTimeout(r, 20));
+    const meanwhile = await Promise.race([
+      d.sm.runAsStorageProvider(async () => 'locks free'),
+      new Promise((r) => setTimeout(() => r('blocked'), 1500)),
+    ]);
+    expect(meanwhile).toBe('locks free');
+    answer({ state: 'unspent' });
+    expect((await run).admitted).toBe(1);
+  });
+
+  test('C5: one run looks at 25 entries, and stops at the first unclear answer', async () => {
+    const d = await phoneWithBackup();
+    const list = (await import('./inboundSync')).admissionListFor(d.phone.getSettings().storageIdentityKey);
+    const ghosts = Array.from({ length: 30 }, () => ({
+      kind: 'coin' as const,
+      txid: Utils.toHex(Random(32)),
+      vout: 0,
+    }));
+    await list.add(d.kd.identityKey, ghosts, now()); // rows the device doesn't hold: each refused, no chain call
+    const r = await admit(d.phone, d.kd.identityKey, d.verifier);
+    expect(r.refused).toBe(25);
+    expect(r.left).toBe(5);
+    expect(d.chain.asked).toEqual([]);
+    await admit(d.phone, d.kd.identityKey, d.verifier);
+    // Two coins waiting, WhatsOnChain unclear: asked once, then the run stops.
+    for (const c of [d.coin, d.coin2]) {
+      const o = await d.row(d.phone, c);
+      await d.phone.updateOutput(o.outputId, { spendable: false } as never);
+    }
+    await list.add(
+      d.kd.identityKey,
+      [d.coin, d.coin2].map((txid) => ({ kind: 'coin' as const, txid, vout: 0 })),
+      now(),
+    );
+    d.chain.answer = 'unclear';
+    const u = await admit(d.phone, d.kd.identityKey, d.verifier);
+    expect(u.deferred).toBe(true);
+    expect(d.chain.asked.length).toBe(1);
+    // Backed off: an immediate run asks nothing more about the coin it asked.
+    d.chain.asked.length = 0;
+    await admit(d.phone, d.kd.identityKey, d.verifier);
+    expect(d.chain.asked.length).toBeLessThanOrEqual(1);
+  });
+
+  test('C5: a coin whose transaction the chain never learns of is given up on after 3 days, left not spendable', async () => {
+    const d = await phoneWithBackup();
+    d.chain.answer = 'unspent';
+    d.chain.knownFor.set(d.coin, 'unknown');
+    const { fresh, unregister } = await d.restore();
+    expect(await waiting(fresh, d.kd.identityKey)).toEqual([`${d.coin}.0`]);
+    let retired = 0;
+    for (let i = 0; i < 20 && !retired; i++) {
+      tick(7 * HOUR);
+      retired = (await admit(fresh, d.kd.identityKey, d.verifier)).retired;
+    }
+    expect(retired).toBe(1);
+    expect(await waiting(fresh, d.kd.identityKey)).toEqual([]);
+    expect((await d.row(fresh, d.coin)).spendable).toBe(false);
+    unregister();
+  });
+
+  test('C6: the restore switch admits what the copy queued before it compares, with no later pull', async () => {
+    const d = await phoneWithBackup();
+    const name = `c6-${++n}`;
+    const local = new StorageIdb(StorageProvider.createStorageBaseOptions('main'));
+    (local as unknown as { dbName: string }).dbName = name;
+    await local.migrate(name, `sik-${name}`);
+    const v: InboundVerifier = {
+      ...d.verifier,
+      spent: async () => ({ state: 'unspent' }),
+      txKnown: async () => 'known',
+    };
+    const unregister = registerInboundVerifier(`sik-${name}`, d.kd.identityKey, v);
+    const remoteUrl = 'https://wallet.1sat.test';
+    (d.remote as unknown as { endpointUrl: string }).endpointUrl = remoteUrl;
+    class FakeStorageClient {
+      constructor() {
+        return d.remote;
+      }
+    }
+    const core = await createWalletCore(
+      { privateKey: d.root.toWif(), chain: 'main', activeRemote: remoteUrl, backups: [] } as never,
+      local,
+      { Services, StorageClient: FakeStorageClient, StorageProvider, Wallet, WalletStorageManager } as never,
+    );
+    core.storage.setServices(services);
+    (core.wallet as unknown as { services: unknown }).services = services;
+    let switched = false;
+    const r = await switchToLocalVerified({
+      remoteUrl,
+      activeRemoteUrl: () => core.storage.getStores().find((s) => s.isActive && !s.isConflicting)?.endpointURL,
+      setActiveStorage: core.setActiveStorage,
+      summarize: () => summarizeActive(core.wallet as never),
+      pullRemote: async () => undefined,
+      deviceHolds: outpointsOnDevice(core.storage as never),
+      admit: () => admit(local, d.kd.identityKey, v),
+      onSwitched: () => void (switched = true),
+    });
+    expect(r.ok).toBe(true);
+    expect(switched).toBe(true);
+    for (const txid of [d.coin, d.coin2]) expect((await d.row(local, txid)).spendable).toBe(true);
+    unregister();
+  });
+
+  test("C7: a spent answer is asked once more an hour later (a mempool spend can drop), then it's final", async () => {
+    const d = await phoneWithBackup();
+    const mine = await d.row(d.phone, d.coin);
+    await d.phone.updateOutput(mine.outputId, { spendable: false } as never);
+    await d.forge(d.coin, { spendable: true });
+    d.chain.answer = 'spent';
+    await d.pull();
+    expect(await waiting(d.phone, d.kd.identityKey)).toEqual([`${d.coin}.0`]);
+    d.chain.answer = 'unspent'; // its spender was dropped from the mempool
+    tick(HOUR + MIN);
+    expect((await admit(d.phone, d.kd.identityKey, d.verifier)).admitted).toBe(1);
+    // Spent twice, an hour apart: dropped from the list, the coin stays spent.
+    await d.phone.updateOutput(mine.outputId, { spendable: false } as never);
+    await d.forge(d.coin, { spendable: true });
+    d.chain.answer = 'spent';
+    await d.pull();
+    tick(HOUR + MIN);
+    expect((await admit(d.phone, d.kd.identityKey, d.verifier)).refused).toBe(1);
+    expect((await d.row(d.phone, d.coin)).spendable).toBe(false);
+  });
+
+  test("C7: an 'unfail' request or status from the backup is never taken (it would restore outputs on the chain's word)", async () => {
+    const d = await phoneWithBackup();
+    const X = await backupTx(d, 'failed');
+    const at = later();
+    await d.remote.insertProvenTxReq({
+      provenTxReqId: 0,
+      created_at: at,
+      updated_at: at,
+      txid: X.txid,
+      status: 'unfail',
+      attempts: 0,
+      notified: false,
+      history: '{}',
+      notify: '{}',
+      rawTx: [1, 2, 3],
+    } as never);
+    const RT = (await d.remote.findTransactions({ partial: { txid: d.coin }, noRawTx: true }))[0];
+    await d.remote.updateTransaction(RT.transactionId, { status: 'unfail', updated_at: later() } as never);
+    await d.pull();
+    expect((await d.phone.findProvenTxReqs({ partial: { txid: X.txid } })).map((q) => q.status)).toEqual(['unknown']);
+    const userId = await userOf(d.phone, d);
+    expect((await d.phone.findTransactions({ partial: { userId, txid: d.coin }, noRawTx: true }))[0].status).toBe(
+      'completed',
+    );
+  });
+
+  test("a page whose admissions can't be written to the device's list is not taken (fetched again), and isn't a broken backup", async () => {
+    const d = await phoneWithBackup();
+    d.chain.answer = 'unspent';
+    const fresh = await store(`c-list-${++n}`);
+    const off = registerInboundVerifier(fresh.getSettings().storageIdentityKey, d.kd.identityKey, d.verifier);
+    const sm2 = new WalletStorageManager(d.kd.identityKey, fresh, [d.remote]);
+    const idb = globalThis.indexedDB;
+    const open = idb.open.bind(idb);
+    idb.open = ((name: string, version?: number) => {
+      if (name.startsWith('bwx-inbound-admission-')) throw new Error('quota');
+      return open(name, version);
+    }) as typeof idb.open;
+    const copy = async () => {
+      await sm2.makeAvailable();
+      await sm2.setActive(fresh.getSettings().storageIdentityKey); // merges the backup in (it claims to be active)
+      await sm2.syncFromReader(d.kd.identityKey, d.remote as never);
+    };
+    try {
+      const err = await copy().catch((e: unknown) => e);
+      expect(isUncheckedPage(err)).toBe(true);
+    } finally {
+      idb.open = open as typeof idb.open;
+    }
+    expect((await fresh.findOutputs({ partial: { spendable: true } })).length).toBe(0);
+    await copy();
+    await admit(fresh, d.kd.identityKey, d.verifier);
+    for (const txid of [d.coin, d.coin2]) expect((await d.row(fresh, txid)).spendable).toBe(true);
+    off();
+  });
 });

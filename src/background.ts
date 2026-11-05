@@ -1064,7 +1064,8 @@ const restoreDeps = (ctx: NonNullable<typeof accountContext>, remoteUrl: string)
     // Coins the inbound check held back are on the device, just not spendable: not "missing". Read from the device's
     // store, so an interrupted restore retried after a restart still completes (review 16 F5, 16b R1).
     deviceHolds: outpointsOnDevice(ctx.storage as never),
-    // Then a device-sync pull, which also looks again at coins held for the chain (inboundSync.releaseHeldRows).
+    // What the copy left for the chain to settle, worked through on the device's store (inboundSync.admitPending).
+    admit: () => ctx.admitBackupRows(),
     onSwitched: () => void ctx.syncDevices?.().catch(() => undefined),
     progress: (m) => sendRestoreStatus(m),
     log: (...a) => console.log(...a),

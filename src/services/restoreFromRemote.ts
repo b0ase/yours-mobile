@@ -58,8 +58,8 @@ const normOutpoint = (o: string) => (o.length > 64 && o[64] === '_' ? `${o.slice
 
 /**
  * Which of these outpoints ("txid.vout") the device's store holds, in any state. The inbound check (services/
- * inboundSync.ts) may hold a coin back (spent here, held for the chain, not taken): it is on the device, just not
- * spendable, so it is not "missing" (review 16 F5, 16b R1). Read from the store itself, so it holds across restarts.
+ * inboundSync.ts) may leave a coin not spendable (spent here, waiting on the chain, quarantined): it is on the device,
+ * so it is not "missing" (review 16 F5, 16b R1). Read from the store itself, so it holds across restarts.
  */
 type DeviceStorage = {
   getAuth(): Promise<{ userId?: number }>;
@@ -91,7 +91,13 @@ export type SwitchDeps = {
   pullRemote: () => Promise<void>;
   /** Which of these outpoints the device's store holds in any state (outpointsOnDevice). */
   deviceHolds?: (outpoints: string[]) => Promise<Set<string>>;
-  /** After a verified switch: e.g. a device-sync pull, which also looks again at coins held for the chain. */
+  /**
+   * Work through what the inbound check left for the chain to settle (inboundSync.admitPending), right after each copy
+   * (review 16c, C6). `pendingActions`: transactions the backup counts that the device still holds as failed while the
+   * chain is asked (C4); they count as present, as held coins do.
+   */
+  admit?: () => Promise<{ pendingActions?: number } | undefined | void>;
+  /** After a verified switch: e.g. a device-sync pull. */
   onSwitched?: () => void;
   progress?: (message: string) => void;
   log?: (...args: unknown[]) => void;
@@ -143,7 +149,13 @@ export async function switchToLocalVerified(d: SwitchDeps): Promise<SwitchResult
    * Is the device's copy complete? The counts cover the backup's, or (when the counts fall short only because the
    * inbound check held coins back) every coin the backup holds as spendable is on the device in some state.
    */
-  const complete = async (local: StoreSummary): Promise<boolean> => {
+  let heldActions = 0;
+  const admit = async () => {
+    const r = await d.admit?.().catch((e: unknown) => log('[restore] inbound admissions not worked through:', e));
+    heldActions = (r && r.pendingActions) || 0;
+  };
+  const complete = async (found: StoreSummary): Promise<boolean> => {
+    const local = { ...found, actions: found.actions + heldActions };
     if (covers(local, remote)) return true;
     if (!remote.coins || !d.deviceHolds || local.actions < remote.actions) return false;
     const have = await d.deviceHolds(remote.coins).catch(() => new Set<string>());
@@ -159,11 +171,13 @@ export async function switchToLocalVerified(d: SwitchDeps): Promise<SwitchResult
   }
 
   // 3. Verify; one more pull if short.
+  await admit();
   let local = await d.summarize().catch(() => undefined);
   if (!local || !(await complete(local))) {
     log('[restore] device short after switch', local, 'pulling again');
     try {
       await d.pullRemote();
+      await admit();
       local = await d.summarize();
     } catch (e) {
       return backToRemote(`second pull failed: ${String(e)}`, remote, local);

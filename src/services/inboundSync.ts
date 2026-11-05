@@ -7,26 +7,35 @@
  * the device-sync pull on every open (services/deviceSync.ts), F-C's pull into the device store (services/localFirst.ts),
  * the restore switch (services/restoreFromRemote.ts), a backup import, the Monitor's backup sync while the remote is
  * active, and the merge the wallet factory runs at boot when the stores disagree about which is active. The merge
- * trusted the sender: an output row with a newer updated_at overwrote the device's (spendable, spentBy, basket, change
- * role, script, sender key, record), and a new row went in as sent. So a hostile or compromised provider could turn a
- * spent coin spendable again, file a coin as wallet change, rewrite how a coin is signed for, or plant change that
- * isn't the wallet's.
+ * trusted the sender: a newer row overwrote the device's (spendable, spentBy, basket, change role, script, sender key,
+ * record), and a new row went in as sent.
  *
- * The rule, applied to each output row of each page BEFORE the toolbox merges it:
- *  1. A row this device already holds keeps what the coin is and how the wallet signs for it: its script (and offsets),
- *     sender key, record (customInstructions), change role (type, change, providedBy, purpose). Derivations and amounts
- *     are never merged by the toolbox. Another store may still mark it spent, move or relinquish it, or describe it.
- *  2. A coin the device holds as spent (or not spendable) comes back to spendable only when WhatsOnChain says its
- *     outpoint is unspent. Spent: the device keeps its own row. Unclear: that coin alone is held (not spendable,
- *     HELD_MARK) while the rest of the page lands, and releaseHeldRows asks again later (review 16b, R4).
- *  3. A row the device has never seen, arriving spendable, must pay a key the wallet derives itself from that row's own
- *     derivation (BRC-29 prefix/suffix with its sender, exactly as the toolbox signs change; or the protocol and key its
- *     record names; or one of the account's legacy keys), and must be the output it claims to be when the page or the
- *     device has its raw transaction. Wallet change (the only coins payments pick on their own) must be exactly that
- *     P2PKH. Anything else that fails the key check is asked of the chain, as in 2. A row that fails arrives NOT
- *     spendable: kept, visible to repairs, never picked.
- * Honest rows from the owner's other devices pass 3 offline (change and payments are the wallet's own keys), so the
- * chain is asked only about revivals and odd rows.
+ * The design (review 16c, replacing three rounds of patches): a merge only ever lowers what is spendable. It never
+ * makes a coin spendable, never changes what a coin is or how the wallet signs for it, and asks nothing of the network.
+ * What only the chain can settle goes on this device's admission list, a database of its own that no sync writes, and
+ * admitPending works through that list after the merge, outside the storage locks, re-running every check first.
+ *
+ * Per page, before the toolbox merges it (verifyInboundChunk):
+ *  1. A row this device already holds keeps what the coin is and how the wallet signs for it: script (and offsets),
+ *     sender key, record (customInstructions), change role. (The toolbox never merges derivations or amounts.)
+ *  2. Its spendability only goes down. Another store may mark it spent; a coin the device holds as spent or not
+ *     spendable stays so, and the backup's "spendable" goes on the admission list. A spend link is never removed,
+ *     moved to another transaction, or put on a coin the device holds as not spendable: the toolbox frees a coin when
+ *     the transaction linked to it fails (reviewStatus, abortAction), so a link is a "spendable later".
+ *  3. A row the device has never seen arrives not spendable. Claimed spendable: on the admission list. Linked: only to
+ *     a completed transaction (which never fails). Anything that could come back must be the output its transaction
+ *     says and pass the token-record and change-key checks, or it is quarantined: not spendable, no link, in no
+ *     basket, not change, so nothing lists, sends or funds from it whatever frees it later.
+ *  4. Transactions it holds keep their txid and raw bytes. A move to or from failed is the chain's to settle (admission
+ *     list); a proven or completed one is never undone. A failed (or 'unfail') proof request arrives to be checked
+ *     again.
+ *  5. Token tags must match the script (F2); a tracking id (id:) loads one asset (R2), and never comes off one (C2).
+ * admitPending (after each device-sync pull, during a restore, and soon after any merge that queued something):
+ * transactions first (to failed when the chain has never seen it; from failed once it has, through the wallet's own
+ * mined-payment repair), then coins: the row as the device holds it must match its raw transaction, pass the checks
+ * in 3, not be an output of a failed transaction or spent by a payment not yet on the network, and the chain must know
+ * its transaction and say it is unspent. 25 entries a run, stopping at the first unclear answer; a waiting entry backs
+ * off (1 minute, doubling to 6 hours) and is dropped after 3 days, its coin left not spendable.
  *
  * Release rules kept: legacy batch mode (services/actionBatchMode.ts) and "no change on the remote store"
  * (services/localFirst.ts) are untouched; F-C's pull keeps the device store active (this only filters what it merges).
@@ -56,7 +65,7 @@ const METADATA_PROTOCOL = (WalletPermissionsManager as unknown as { METADATA_ENC
   .METADATA_ENCRYPTION_PROTOCOL;
 
 export const UNCHECKED_PAGE =
-  "A page from your backup couldn't be checked against the chain, so none of it was taken. It is tried again later.";
+  "A page from your backup couldn't be checked, so none of it was taken. It is tried again later.";
 export const NO_VERIFIER = 'This device store only takes in backup rows it can check; none is set up for this account';
 
 type Bytes = number[] | Uint8Array;
@@ -96,8 +105,8 @@ type TxRow = {
 };
 type ProvenRow = { txid?: string; rawTx?: Bytes | null };
 type ReqRow = { txid?: string; status?: string };
-/** Transaction states of a payment this device has made but the network may not have yet. */
-const IN_FLIGHT = new Set(['nosend', 'unsigned', 'unprocessed', 'sending', 'unproven', 'nonfinal']);
+/** Transaction states of a payment this device has made but the network may not have yet ('unfail': being re-checked). */
+const IN_FLIGHT = new Set(['nosend', 'unsigned', 'unprocessed', 'sending', 'unproven', 'nonfinal', 'unfail']);
 /** Proof-request states in which the toolbox's monitor fails the transaction. */
 const REQ_FAILED = new Set(['invalid', 'doubleSpend']);
 type TagRow = { outputTagId?: number; tag?: string };
@@ -116,8 +125,8 @@ type SyncArgs = { identityKey?: string; fromStorageIdentityKey?: string; toStora
 export type DeviceStore = {
   findUsers(a: { partial: { identityKey: string } }): Promise<{ userId: number }[]>;
   findSyncStates(a: { partial: { storageIdentityKey: string; userId: number } }): Promise<{ syncMap?: unknown }[]>;
-  findTransactions(a: { partial: Record<string, unknown>; noRawTx?: boolean }): Promise<TxRow[]>;
-  findOutputs(a: { partial: Record<string, unknown> }): Promise<OutputRow[]>;
+  findTransactions(a: { partial: Record<string, unknown>; noRawTx?: boolean; trx?: unknown }): Promise<TxRow[]>;
+  findOutputs(a: { partial: Record<string, unknown>; trx?: unknown }): Promise<OutputRow[]>;
   getProvenOrRawTx?(txid: string): Promise<{ rawTx?: Bytes; proven?: { rawTx?: Bytes } }>;
   findOutputTags?(a: { partial: Record<string, unknown> }): Promise<TagRow[]>;
   findOutputTagMaps?(a: { partial: Record<string, unknown> }): Promise<TagMapRow[]>;
@@ -137,19 +146,39 @@ export type InboundVerifier = {
    * never seen, so "unspent" only counts for a transaction the chain knows (review 16, F4). Absent: never known.
    */
   txKnown?(txid: string): Promise<'known' | 'unknown' | 'unclear'>;
+  /**
+   * The wallet's own repair for a payment it holds as failed that the chain has (services/recoverByTxid.ts): proof,
+   * status and outputs, each checked. 'wait': not mined yet, or no answer. Absent: the status alone becomes 'unproven'.
+   */
+  recover?(txid: string): Promise<'restored' | 'done' | 'wait'>;
+  /** A merge put something on the admission list: run admitPending soon (initWallet schedules it). */
+  onQueued?: () => void;
   log?: (...a: unknown[]) => void;
 };
 
+/** What only the chain can settle: a coin the backup says is spendable, or a status it gives a transaction. */
+export type Admission =
+  | { kind: 'coin'; txid: string; vout: number; claim?: undefined }
+  | {
+      kind: 'tx';
+      txid: string;
+      claim: string;
+      vout?: undefined;
+    };
+
 export type InboundReport = {
+  /** Rows the device holds, kept exactly as it has them (a revival, an unlink or relink, a rewritten txid). */
   kept: number;
+  /** New rows that fail a check: not spendable, no link, no basket, not change. */
   quarantined: number;
-  revived: number;
+  /** Coins the backup says are spendable, left not spendable here and put on the admission list. */
+  queued: number;
   pinned: number;
-  /** Token tags (amt:, bsv21:, sym:, dec:) from another store that its script doesn't bear out, taken as deleted. */
+  /** Token tags (amt:, bsv21:, sym:, dec:) its script doesn't bear out, and id tags that would load a second asset. */
   tagsDropped: number;
-  /** New rows held (not spendable, marked HELD_MARK) because the chain doesn't know their transaction yet. */
-  held: number;
-  /** Transaction rows kept as the device has them (a failed one revived without chain proof, a rewritten txid). */
+  /** Spend links not taken (onto a coin the device holds as not spendable; a new row's, unless to a completed one). */
+  linksDropped: number;
+  /** Transaction rows kept as the device has them, and failed proof requests taken as to be checked again. */
   keptTx: number;
   /**
    * Wallet change the backup holds as spendable that this page leaves NOT spendable here (kept spent, held, not taken).
@@ -157,10 +186,9 @@ export type InboundReport = {
    */
   withheldOutputs: number;
   withheldSats: number;
+  /** For the admission list (the guard writes them before the merge). */
+  admissions: Admission[];
 };
-
-/** On a row held only because the chain didn't know its transaction yet: releaseHeldRows looks again later. */
-export const HELD_MARK = 'bwx: waiting for the chain to show this coin';
 
 /** Wallet change: what the toolbox's funding picks on its own (managedChangeOutputFields + both derivation halves). */
 export const isWalletChange = (o: OutputRow): boolean =>
@@ -320,9 +348,45 @@ const parseSyncMap = (raw: unknown): IdMaps | undefined => {
   }
 };
 
+/** A record as JSON (the verifier decrypts what the manager encrypted); undefined when it can't be read. */
+async function recordOf(v: InboundVerifier, ci: string): Promise<Record<string, unknown> | undefined> {
+  try {
+    const o = JSON.parse(ci) as unknown;
+    return o && typeof o === 'object' ? (o as Record<string, unknown>) : undefined;
+  } catch {
+    return v.readRecord ? v.readRecord(ci).catch(() => undefined) : undefined;
+  }
+}
+
 /**
- * Check one page against the device store and make it safe to merge, in place (rows are rewritten, never removed, so
- * the toolbox's paging is unchanged). When the chain can't answer, only the coin in question is held (review 16b, R4).
+ * May this row (with this script) become spendable, before asking the chain? A token's record must say what its script
+ * says (F2: a forged amount burns tokens on the next send), and wallet change must pay the wallet's own key exactly
+ * (F4a: funding would pick a coin the wallet can't sign). Other rows (a site's outputs) then go to the chain.
+ */
+async function admissibleRow(v: InboundVerifier, row: OutputRow, script: string): Promise<'refuse' | 'check'> {
+  const facts = tokenFacts(script, row.txid, row.vout);
+  if (facts && typeof row.customInstructions === 'string' && row.customInstructions) {
+    const rec = await recordOf(v, row.customInstructions);
+    if (!rec || !recordAgrees(rec, facts)) return 'refuse';
+  }
+  if (!isWalletChange(row)) return 'check';
+  return (await v.owns(row, script).catch(() => false)) ? 'check' : 'refuse';
+}
+
+const parseRawTx = (raw: Bytes | undefined, txid: string): Transaction | undefined => {
+  if (!raw?.length) return undefined;
+  try {
+    const tx = Transaction.fromBinary(Array.from(raw));
+    return tx.id('hex') === txid ? tx : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Make one page safe to merge, in place (rows are rewritten, never removed, so the toolbox's paging is unchanged).
+ * Nothing here asks the network: what only the chain can settle is returned in `report.admissions`, which the guard
+ * writes to the device's admission list before the merge and admitPending works through after it (review 16c).
  */
 export async function verifyInboundChunk(
   store: DeviceStore,
@@ -333,13 +397,14 @@ export async function verifyInboundChunk(
   const report: InboundReport = {
     kept: 0,
     quarantined: 0,
-    revived: 0,
+    queued: 0,
     pinned: 0,
     tagsDropped: 0,
-    held: 0,
+    linksDropped: 0,
     keptTx: 0,
     withheldOutputs: 0,
     withheldSats: 0,
+    admissions: [],
   };
   const outputs = chunk?.outputs ?? [];
   if (
@@ -363,7 +428,7 @@ export async function verifyInboundChunk(
 
   /** The device transaction the merge will file this row's transaction under (EntityTransaction.mergeFind). */
   const txCache = new Map<number, Promise<{ id?: number; txid?: string }>>();
-  const deviceTx = (remoteId: number | undefined): Promise<{ id?: number; txid?: string }> => {
+  const deviceTx = (remoteId: number | null | undefined): Promise<{ id?: number; txid?: string }> => {
     if (typeof remoteId !== 'number') return Promise.resolve({});
     if (!txCache.has(remoteId)) txCache.set(remoteId, lookupTx(remoteId));
     return txCache.get(remoteId)!;
@@ -383,6 +448,10 @@ export async function verifyInboundChunk(
     const local = (await store.findTransactions({ partial: { userId, transactionId: id }, noRawTx: true }))[0];
     return { id, txid: local?.txid ?? undefined };
   };
+  const deviceTxStatus = async (transactionId: number | null | undefined): Promise<string | undefined> =>
+    typeof transactionId === 'number'
+      ? (await store.findTransactions({ partial: { userId, transactionId }, noRawTx: true }))[0]?.status
+      : undefined;
 
   /** A raw transaction for `txid` whose bytes really hash to it: from this page, else from the device. */
   const pageRaw = new Map<string, Bytes>();
@@ -399,13 +468,7 @@ export async function verifyInboundChunk(
       const r = await store.getProvenOrRawTx(txid).catch(() => undefined);
       raw = r?.rawTx ?? r?.proven?.rawTx;
     }
-    if (!raw?.length) return undefined;
-    try {
-      const tx = Transaction.fromBinary(Array.from(raw));
-      return tx.id('hex') === txid ? tx : undefined;
-    } catch {
-      return undefined;
-    }
+    return parseRawTx(raw, txid);
   };
 
   /** The script this row really locks, or null when the row contradicts its own transaction. */
@@ -423,132 +486,39 @@ export async function verifyInboundChunk(
     return said;
   };
 
-  const deviceTxStatus = async (transactionId: number | undefined): Promise<string | undefined> =>
-    typeof transactionId === 'number'
-      ? (await store.findTransactions({ partial: { userId, transactionId }, noRawTx: true }))[0]?.status
-      : undefined;
-
-  const chain = chainChecks(v);
-  /** The chain's word on an outpoint, or a refused page when it has none. */
-  /** The chain's word on one coin. Unclear (WoC throttled or down) holds that coin only (review 16b, R4). */
-  const chainVerdict = (txid: string, vout: number) => chain(txid, vout);
-  /**
-   * May this row (with this script) be spendable, before asking the chain? A token's record must say what its script says
-   * (F2: a forged amount burns tokens on the next send), and wallet change must pay the wallet's own key exactly.
-   * 'owned' rows and other rows (a site's outputs, which the wallet can't sign anyway) then go to the chain.
-   */
-  const admissible = async (row: OutputRow, script: string): Promise<'refuse' | 'check'> => {
-    const facts = tokenFacts(script, row.txid, row.vout);
-    if (facts && typeof row.customInstructions === 'string' && row.customInstructions) {
-      const rec = await recordOf(row.customInstructions);
-      if (!rec || !recordAgrees(rec, facts)) return 'refuse';
-    }
-    const owned = await v.owns(row, script).catch(() => false);
-    return !owned && isWalletChange(row) ? 'refuse' : 'check';
-  };
-
-  /** The backup counts this row as spendable wallet change and this device won't: the restore switch adds it back. */
+  /** The backup counts this row as spendable wallet change and this device doesn't (yet): for the log. */
   const withheld = (o: OutputRow, asFiled: OutputRow) => {
     if (o.spendable !== true || !isWalletChange(asFiled)) return;
-    const sats = typeof o.satoshis === 'number' ? o.satoshis : 0;
     report.withheldOutputs++;
-    report.withheldSats += sats;
+    report.withheldSats += typeof o.satoshis === 'number' ? o.satoshis : 0;
   };
   const keep = (o: OutputRow, filed?: OutputRow) => {
     if (filed && filed.spendable !== true) withheld(o, filed);
     o.updated_at = new Date(0); // EntityOutput.mergeExisting only applies a strictly newer row: the device's stays
     report.kept++;
   };
+  /**
+   * Not spendable, no link, in no basket, not change: nothing lists, sends or funds from it, even if a toolbox repair
+   * later frees it. Kept (the row stays in the page), so the restore check still finds the outpoint on the device.
+   */
   const quarantine = (o: OutputRow) => {
     withheld(o, o);
     o.spendable = false;
+    o.spentBy = undefined;
+    o.basketId = undefined;
+    o.change = false;
     report.quarantined++;
   };
-  /** Not spendable for now: the chain doesn't know its transaction yet. releaseHeldRows looks again. */
-  const hold = (o: OutputRow) => {
-    withheld(o, o);
-    o.spendable = false;
-    o.spendingDescription = HELD_MARK;
-    report.held++;
+  const admitLater = (txid: string, vout: number) => {
+    report.admissions.push({ kind: 'coin', txid, vout });
+    report.queued++;
   };
 
-  /** A record as JSON (the verifier decrypts what the manager encrypted); undefined when it can't be read. */
-  const recordOf = async (ci: string): Promise<Record<string, unknown> | undefined> => {
-    try {
-      const o = JSON.parse(ci) as unknown;
-      return o && typeof o === 'object' ? (o as Record<string, unknown>) : undefined;
-    } catch {
-      return v.readRecord ? v.readRecord(ci).catch(() => undefined) : undefined;
-    }
-  };
-  /** Remote output id → this page's row and the device row the merge files it under. */
-  const pageRows = new Map<number, { row: OutputRow; deviceOutputId?: number }>();
-  const outputOf = async (
-    remoteId: number,
-  ): Promise<{ script?: string; txid?: string | null; vout: number; deviceOutputId?: number } | undefined> => {
-    const page = pageRows.get(remoteId);
-    if (page) {
-      const script = await scriptOf(page.row);
-      return {
-        script: script ?? undefined,
-        txid: page.row.txid,
-        vout: page.row.vout,
-        deviceOutputId: page.deviceOutputId,
-      };
-    }
-    const local = maps?.output?.idMap?.[String(remoteId)];
-    if (typeof local !== 'number') return undefined;
-    const [d] = await store.findOutputs({ partial: { userId, outputId: local } });
-    return d ? { script: hex(d.lockingScript), txid: d.txid, vout: d.vout, deviceOutputId: local } : undefined;
-  };
-  const tagNameOf = async (remoteTagId: number): Promise<string | undefined> => {
-    const page = chunk.outputTags?.find((t) => t.outputTagId === remoteTagId)?.tag;
-    if (typeof page === 'string') return page;
-    const local = maps?.outputTag?.idMap?.[String(remoteTagId)];
-    if (typeof local !== 'number' || typeof store.findOutputTags !== 'function') return undefined;
-    return (await store.findOutputTags({ partial: { outputTagId: local } }))[0]?.tag;
-  };
-  /**
-   * Would this id tag point at a second asset? Another device output already carries it, the target already has a
-   * different id, or this page gives it twice. Any of these: refused, so "send / list this NFT" can't load another.
-   */
-  const idTagTaken = async (
-    tag: string,
-    remoteOutputId: number,
-    deviceOutputId: number | undefined,
-    localTag: number | undefined,
-  ): Promise<boolean> => {
-    const pageOwner = pageIds.get(tag);
-    const pageTag = pageIdOf.get(remoteOutputId);
-    if ((pageOwner !== undefined && pageOwner !== remoteOutputId) || (pageTag !== undefined && pageTag !== tag))
-      return true;
-    if (typeof store.findOutputTagMaps === 'function') {
-      if (localTag !== undefined) {
-        const holders = await store.findOutputTagMaps({ partial: { outputTagId: localTag } });
-        if (holders.some((h) => h.isDeleted !== true && h.outputId !== deviceOutputId)) return true;
-      }
-      if (deviceOutputId !== undefined && typeof store.findOutputTags === 'function') {
-        for (const m of await store.findOutputTagMaps({ partial: { outputId: deviceOutputId } })) {
-          if (m.isDeleted === true || typeof m.outputTagId !== 'number' || m.outputTagId === localTag) continue;
-          const name = (await store.findOutputTags({ partial: { outputTagId: m.outputTagId } }))[0]?.tag;
-          if (name && ID_TAG.test(name) && name.toLowerCase() !== tag) return true;
-        }
-      }
-    }
-    pageIds.set(tag, remoteOutputId);
-    pageIdOf.set(remoteOutputId, tag);
-    return false;
-  };
-  const deviceTagId = async (remoteTagId: number, tag: string): Promise<number | undefined> => {
-    const local = maps?.outputTag?.idMap?.[String(remoteTagId)];
-    if (typeof local === 'number') return local;
-    if (typeof store.findOutputTags !== 'function') return undefined;
-    return (await store.findOutputTags({ partial: { userId, tag } }))[0]?.outputTagId;
-  };
-
-  // Transactions the device already holds (review 16, F4): their txid and raw bytes stay the device's, and one the
-  // device holds as failed changes status only when the chain knows it. Otherwise a page could flip failed to
-  // completed and a later page revive its outputs on WhatsOnChain's 404.
+  // Transactions the device already holds (review 16, F4; 16b, R3): their txid and raw bytes stay the device's. A move
+  // between failed and not failed is the chain's to settle: the device's status stays and the backup's goes on the
+  // admission list. A proven or completed transaction is never undone from a backup, and none is set to 'unfail' (a
+  // re-check that restores its outputs on the chain's word alone).
+  const keptTx = new Set<number>();
   for (const t of chunk.transactions ?? []) {
     if (!t) continue;
     let d = t.txid ? (await store.findTransactions({ partial: { userId, txid: t.txid } }))[0] : undefined;
@@ -558,6 +528,7 @@ export async function verifyInboundChunk(
       t.updated_at = new Date(0);
       t.provenTxId = undefined; // no "proof evidence" path around the time check (EntityTransaction.mergeExisting)
       t.noSendExpiryState = d.noSendExpiryState;
+      if (typeof t.transactionId === 'number') keptTx.add(t.transactionId);
       report.keptTx++;
     };
     if (d.txid && t.txid && d.txid !== t.txid) {
@@ -566,42 +537,58 @@ export async function verifyInboundChunk(
     }
     if (d.rawTx?.length && t.rawTx?.length && hex(d.rawTx) !== hex(t.rawTx)) t.rawTx = d.rawTx;
     const txid = d.txid ?? t.txid;
-    if (d.status === 'failed' && t.status !== undefined && t.status !== 'failed') {
-      // Unknown or unclear: kept failed (no change without the chain's word; R4: never the whole page).
-      if ((txid ? await chain.txKnown(txid) : 'unknown') !== 'known') keepTx();
+    if (t.status === 'unfail' && d.status !== 'unfail') {
+      keepTx();
       continue;
     }
-    // The other way (review 16b, R3): a backup moving a transaction this device knows to failed, or off completed, or
-    // dropping its proof. The device's monitor would then free the coins it spent (spent on chain) and hide the coins
-    // it made. A transaction the device holds a proof for is never undone from a backup; one without a proof may be
-    // failed only when the chain doesn't know it (a payment another device saw refused). Anything else: kept.
+    if (d.status === 'failed' && t.status !== undefined && t.status !== 'failed') {
+      keepTx();
+      if (txid) report.admissions.push({ kind: 'tx', txid, claim: t.status });
+      continue;
+    }
     const toFailed = t.status === 'failed' && d.status !== 'failed';
     const offCompleted = d.status === 'completed' && t.status !== undefined && t.status !== 'completed';
     const dropsProof = d.provenTxId != null && t.provenTxId == null && t.status !== undefined;
     if (toFailed || offCompleted || dropsProof) {
-      if (d.provenTxId != null || offCompleted || !toFailed) {
-        keepTx();
-        continue;
-      }
-      const known = txid ? await chain.txKnown(txid) : 'unclear';
-      if (known !== 'unknown') keepTx(); // known: it is on chain, not failed; unclear: no change without an answer
+      keepTx();
+      if (toFailed && !offCompleted && d.provenTxId == null && txid)
+        report.admissions.push({ kind: 'tx', txid, claim: 'failed' });
     }
   }
 
-  // A proof request is what the device's monitor fails a transaction by ('invalid' -> failed). A new request in a
-  // final failed state for a transaction the device already holds arrives as one to be checked again (R3).
+  // A proof request is what the device's monitor fails a transaction by ('invalid' -> failed, which frees the coins
+  // linked to it), and 'unfail' restores a failed one's outputs on the chain's word alone. Such a request, new to the
+  // device, arrives as one to be checked again (R3): for a transaction the device holds or this page brings, and any
+  // 'unfail'. A request the device has keeps its own status (EntityProvenTxReq.mergeExisting never changes it).
+  const pageTxids = new Set((chunk.transactions ?? []).map((t) => t?.txid).filter((x): x is string => !!x));
   for (const q of chunk.provenTxReqs ?? []) {
-    if (!q?.txid || !REQ_FAILED.has(String(q.status))) continue;
-    if (!(await store.findTransactions({ partial: { userId, txid: q.txid }, noRawTx: true }))[0]) continue;
+    if (!q?.txid) continue;
+    const status = String(q.status);
+    if (!REQ_FAILED.has(status) && status !== 'unfail') continue;
     if (
       typeof store.findProvenTxReqs === 'function' &&
       (await store.findProvenTxReqs({ partial: { txid: q.txid } }))[0]
     )
-      continue; // the device has its own request: the toolbox merge keeps that request's status
+      continue;
+    if (
+      status !== 'unfail' &&
+      !pageTxids.has(q.txid) &&
+      !(await store.findTransactions({ partial: { userId, txid: q.txid }, noRawTx: true }))[0]
+    )
+      continue;
     q.status = 'unknown';
     report.keptTx++;
   }
 
+  /** The status a row's spender has once this page is merged: this page's row, unless it was kept; else the device's. */
+  const spenderStatus = async (remoteTxId: number): Promise<string | undefined> => {
+    const page = pageTx.get(remoteTxId);
+    if (page && !keptTx.has(remoteTxId)) return page.status;
+    return deviceTxStatus((await deviceTx(remoteTxId)).id);
+  };
+
+  /** Remote output id → this page's row and the device row the merge files it under. */
+  const pageRows = new Map<number, { row: OutputRow; deviceOutputId?: number }>();
   for (const o of outputs) {
     if (!o || typeof o.vout !== 'number') continue;
     const tx = await deviceTx(o.transactionId);
@@ -627,58 +614,127 @@ export async function verifyInboundChunk(
         keep(o, filed);
         continue;
       }
-      // Rule 2: back to spendable only on the chain's word. (A row the merge won't apply needs no answer; one whose time
-      // can't be read is checked.) WhatsOnChain answers "unspent" for an outpoint it has never seen, so an output of a
-      // transaction this device holds as failed (never on the network) is not brought back from another store.
-      const newer = !(time(o.updated_at) <= time(filed.updated_at));
-      const reviving = o.spendable === true && (filed.spendable !== true || filed.spentBy != null);
-      if (newer && reviving) {
-        // The device's copy (rule 1 pinned it) must pass what a new row passes, then the chain must know it unspent:
-        // a row that arrived not spendable can't be turned spendable on WhatsOnChain's word alone (review 16, F4).
-        const failed = (await deviceTxStatus(filed.transactionId)) === 'failed';
-        // This device is spending it in a payment not yet on the network (review 16b, R5): the chain says unspent
-        // because it hasn't seen the spend. Reviving it would let the wallet pick it again and break that payment.
-        const spender = filed.spentBy != null ? await deviceTxStatus(filed.spentBy) : undefined;
-        const inFlight = spender !== undefined && IN_FLIGHT.has(spender);
-        const script = hex(filed.lockingScript);
-        const fit = !failed && !inFlight && !!filed.txid && !!script && (await admissible(filed, script)) === 'check';
-        const verdict = fit ? await chainVerdict(filed.txid!, filed.vout) : 'refuse';
-        if (verdict === 'unspent') report.revived++;
-        else if (verdict === 'unclear') {
-          // Held for the chain, as a new row would be (R4): not spendable, looked at again by releaseHeldRows.
-          o.spendable = false;
-          o.spendingDescription = HELD_MARK;
-          report.held++;
-        } else keep(o, filed);
+      // A row the merge won't apply changes nothing; one whose time can't be read is treated as newer.
+      if (time(o.updated_at) <= time(filed.updated_at)) continue;
+      // Rule 2: spendability only goes down. A coin the device holds as spent or not spendable stays as the device
+      // has it; the backup's "spendable" is for the chain to settle (C1: no marker the backup can set decides it).
+      if (o.spendable === true && (filed.spendable !== true || filed.spentBy != null)) {
+        keep(o, filed);
+        if (filed.txid) admitLater(filed.txid, filed.vout);
+        continue;
+      }
+      // A spend link is kept, never removed or moved: the toolbox frees a coin when its linked transaction fails, so
+      // unlinking a coin the device's unsent payment spends (16c H2) or moving it to a transaction the backup then
+      // fails would free it unchecked. Nor does a link go on a coin the device holds as not spendable (N1).
+      if (filed.spentBy != null) {
+        const to = o.spentBy != null ? (await deviceTx(o.spentBy)).id : undefined;
+        if (to !== filed.spentBy) keep(o, filed);
+      } else if (o.spentBy != null && filed.spendable !== true) {
+        o.spentBy = undefined;
+        report.linksDropped++;
       }
       continue;
     }
-    if (o.spendable !== true) continue;
-    // Rule 3: a row the device has never seen.
+    // Rule 3: a row the device has never seen arrives not spendable.
+    const claimed = o.spendable === true;
+    if (!claimed && o.spentBy != null) {
+      // Linked to a completed transaction: spent for good (a completed transaction never fails). Any other link could
+      // free it later without a check (N1: a backup's failed transaction with no proof request), so it goes.
+      if ((await spenderStatus(o.spentBy)) === 'completed') continue;
+      o.spentBy = undefined;
+      report.linksDropped++;
+    }
     const twin = o.txid ? (await store.findOutputs({ partial: { userId, txid: o.txid, vout: o.vout } }))[0] : undefined;
     if (twin || (tx.txid && o.txid && tx.txid !== o.txid) || !o.txid) {
       quarantine(o); // a second row for an outpoint the device files elsewhere, or a row at odds with its transaction
       continue;
     }
     const script = await scriptOf(o);
-    if (!script) {
+    if (!script || (await admissibleRow(v, o, script)) === 'refuse') {
       quarantine(o);
       continue;
     }
-    if ((await admissible(o, script)) === 'refuse') {
-      quarantine(o);
-      continue;
+    if (claimed) {
+      // Even the wallet's own coins are asked of the chain (review 16, F4d): a backup can hand back spent change.
+      withheld(o, o);
+      o.spendable = false;
+      o.spentBy = undefined;
+      admitLater(o.txid, o.vout);
     }
-    // Even the wallet's own coins are asked of the chain (review 16, F4): a backup can hand back spent change, or change
-    // of a transaction never broadcast, both paying keys the wallet owns.
-    const verdict = await chainVerdict(o.txid, o.vout);
-    if (verdict === 'spent') quarantine(o);
-    else if (verdict !== 'unspent') hold(o); // unknown to the chain yet, or no answer now: held, released later
   }
 
   // Token tags (amt:, bsv21:, sym:, dec:) are where a send falls back to when a record has no amount or id: one
   // that would newly apply to an output must be borne out by that output's script, or it arrives deleted.
-  // Tracking ids (id:<x>) are how a send or listing loads "this" asset (limit 1): one id, one output (review 16b, R2).
+  // Tracking ids (id:<x>) are how a send, burn or listing loads "this" asset (limit 1): one id, one output (R2, C2).
+  const outputOf = async (
+    remoteId: number,
+  ): Promise<{ script?: string; txid?: string | null; vout: number; deviceOutputId?: number } | undefined> => {
+    const page = pageRows.get(remoteId);
+    if (page) {
+      const script = await scriptOf(page.row);
+      return {
+        script: script ?? undefined,
+        txid: page.row.txid,
+        vout: page.row.vout,
+        deviceOutputId: page.deviceOutputId,
+      };
+    }
+    const local = maps?.output?.idMap?.[String(remoteId)];
+    if (typeof local !== 'number') return undefined;
+    const [d] = await store.findOutputs({ partial: { userId, outputId: local } });
+    return d ? { script: hex(d.lockingScript), txid: d.txid, vout: d.vout, deviceOutputId: local } : undefined;
+  };
+  const tagNameOf = async (remoteTagId: number): Promise<string | undefined> => {
+    const page = chunk.outputTags?.find((t) => t.outputTagId === remoteTagId)?.tag;
+    if (typeof page === 'string') return page;
+    const local = maps?.outputTag?.idMap?.[String(remoteTagId)];
+    if (typeof local !== 'number' || typeof store.findOutputTags !== 'function') return undefined;
+    return (await store.findOutputTags({ partial: { outputTagId: local } }))[0]?.tag;
+  };
+  const deviceTagId = async (remoteTagId: number, tag: string): Promise<number | undefined> => {
+    const local = maps?.outputTag?.idMap?.[String(remoteTagId)];
+    if (typeof local === 'number') return local;
+    if (typeof store.findOutputTags !== 'function') return undefined;
+    return (await store.findOutputTags({ partial: { userId, tag } }))[0]?.outputTagId;
+  };
+  const deviceMap = async (deviceOutputId: number | undefined, localTag: number | undefined) =>
+    deviceOutputId !== undefined && localTag !== undefined && typeof store.findOutputTagMaps === 'function'
+      ? (await store.findOutputTagMaps({ partial: { outputId: deviceOutputId, outputTagId: localTag } }))[0]
+      : undefined;
+  const pageIds = new Map<string, number>(); // id tag (lowercase) -> remote output it went to on this page
+  const pageIdOf = new Map<number, string>(); // remote output -> the id tag it got on this page
+  /**
+   * Would this id tag point at a second asset? Another device output carries it, the target already has a different
+   * id, or this page gives it twice. Deleted maps count (C2): the device store's tag queries ignore isDeleted
+   * (StorageIdb.outputMatchesTags), so a deleted `id:` map still loads by that id.
+   */
+  const idTagTaken = async (
+    tag: string,
+    remoteOutputId: number,
+    deviceOutputId: number | undefined,
+    localTag: number | undefined,
+  ): Promise<boolean> => {
+    const pageOwner = pageIds.get(tag);
+    const pageTag = pageIdOf.get(remoteOutputId);
+    if ((pageOwner !== undefined && pageOwner !== remoteOutputId) || (pageTag !== undefined && pageTag !== tag))
+      return true;
+    if (typeof store.findOutputTagMaps === 'function') {
+      if (localTag !== undefined) {
+        const holders = await store.findOutputTagMaps({ partial: { outputTagId: localTag } });
+        if (holders.some((h) => h.outputId !== deviceOutputId)) return true;
+      }
+      if (deviceOutputId !== undefined && typeof store.findOutputTags === 'function') {
+        for (const m of await store.findOutputTagMaps({ partial: { outputId: deviceOutputId } })) {
+          if (typeof m.outputTagId !== 'number' || m.outputTagId === localTag) continue;
+          const name = (await store.findOutputTags({ partial: { outputTagId: m.outputTagId } }))[0]?.tag;
+          if (name && ID_TAG.test(name) && name.toLowerCase() !== tag) return true;
+        }
+      }
+    }
+    pageIds.set(tag, remoteOutputId);
+    pageIdOf.set(remoteOutputId, tag);
+    return false;
+  };
   /**
    * Take no part of this tag map. A soft delete is not enough: the device store's tag queries ignore isDeleted
    * (StorageIdb.outputMatchesTags), so a deleted `id:` map still loads by that id. A map whose tag id the sync can't
@@ -689,11 +745,19 @@ export async function verifyInboundChunk(
     tm.isDeleted = true;
     report.tagsDropped++;
   };
-  const pageIds = new Map<string, number>(); // id tag (lowercase) -> remote output it went to on this page
-  const pageIdOf = new Map<number, string>(); // remote output -> the id tag it got on this page
   for (const tm of chunk.outputTagMaps ?? []) {
-    if (!tm || tm.isDeleted === true || typeof tm.outputTagId !== 'number' || typeof tm.outputId !== 'number') continue;
+    if (!tm || typeof tm.outputTagId !== 'number' || typeof tm.outputId !== 'number') continue;
     const tag = await tagNameOf(tm.outputTagId);
+    if (tm.isDeleted === true) {
+      // A tracking id comes off an asset only on this device (C2): taken off from a backup, it could then be put on
+      // another NFT, while the old map still matches every load by that id. Nothing honest removes one.
+      if (tag !== undefined && ID_TAG.test(tag)) {
+        const out = await outputOf(tm.outputId);
+        const had = await deviceMap(out?.deviceOutputId, await deviceTagId(tm.outputTagId, tag));
+        if (had && had.isDeleted !== true) dropTagMap(tm);
+      }
+      continue;
+    }
     if (tag === undefined) {
       dropTagMap(tm); // a tag the device can't name: never a live token tag or id
       continue;
@@ -702,96 +766,346 @@ export async function verifyInboundChunk(
     if (!isId && !TOKEN_TAG.test(tag)) continue;
     const out = await outputOf(tm.outputId);
     const localTag = await deviceTagId(tm.outputTagId, tag);
-    if (out?.deviceOutputId !== undefined && localTag !== undefined && typeof store.findOutputTagMaps === 'function') {
-      const [had] = await store.findOutputTagMaps({ partial: { outputId: out.deviceOutputId, outputTagId: localTag } });
-      if (had && had.isDeleted !== true) continue; // already on this device: nothing new
-    }
+    if (await deviceMap(out?.deviceOutputId, localTag)) continue; // this pair is already on the device
     const refuse = isId
       ? await idTagTaken(tag.toLowerCase(), tm.outputId, out?.deviceOutputId, localTag)
       : !tagAgrees(tag, out?.script ? tokenFacts(out.script, out.txid, out.vout) : null);
     if (refuse) dropTagMap(tm);
   }
-  if (report.kept || report.quarantined || report.revived || report.tagsDropped || report.held || report.keptTx)
+  if (
+    report.kept ||
+    report.quarantined ||
+    report.queued ||
+    report.tagsDropped ||
+    report.linksDropped ||
+    report.keptTx ||
+    report.admissions.length
+  )
     v.log?.(
-      `[inbound-sync] backup page: kept ${report.kept} device row(s) and ${report.keptTx} transaction(s), took ${report.quarantined} new row(s) as not spendable, held ${report.held} for the chain, revived ${report.revived} on the chain's word, dropped ${report.tagsDropped} token tag(s)`,
+      `[inbound-sync] backup page: kept ${report.kept} device row(s) and ${report.keptTx} transaction(s), quarantined ${report.quarantined} new row(s), ${report.admissions.length} for the chain to settle, dropped ${report.linksDropped} spend link(s) and ${report.tagsDropped} tag(s)`,
     );
   return report;
 }
 
-/**
- * The chain's word on an outpoint: 'unspent' only when WhatsOnChain says so AND knows the transaction (its /spent
- * answers 404 for an outpoint it has never seen). Known transactions are remembered for the run.
- */
-/**
- * "Spent" answers, kept for 10 minutes (review 16b, R4: fewer WhatsOnChain calls on retries). Only "spent": keeping
- * it can only keep a coin from being spendable for a while. "Known" is not kept: a mempool transaction can be dropped.
- */
-const SPENT_TTL_MS = 10 * 60_000;
-const spentSeen = new WeakMap<InboundVerifier, Map<string, number>>();
+// ── the admission list: this device's own, never written by a sync ──
 
-function chainChecks(v: InboundVerifier, now: () => number = Date.now) {
-  let spent = spentSeen.get(v);
-  if (!spent) spentSeen.set(v, (spent = new Map()));
-  const seenSpent = spent;
-  const known = new Map<string, Promise<'known' | 'unknown' | 'unclear'>>();
-  const txKnown = (txid: string) => {
-    if (!known.has(txid))
-      known.set(
+/** A coin a backup says is spendable, or a transaction status only the chain can settle, waiting on this device. */
+export type PendingAdmission = Admission & {
+  key: string;
+  identityKey: string;
+  firstAt: number;
+  nextAt: number;
+  tries: number;
+  /** When the chain first said this coin is spent: asked once more an hour later (a mempool spend can be dropped). */
+  spentAt?: number;
+};
+
+export type AdmissionList = {
+  /** Add these; an entry already there keeps its tries and times (a transaction's claim is updated). */
+  add(identityKey: string, items: Admission[], now: number): Promise<void>;
+  list(identityKey: string): Promise<PendingAdmission[]>;
+  put(e: PendingAdmission): Promise<void>;
+  remove(key: string): Promise<void>;
+};
+
+const admissionKey = (identityKey: string, a: Admission) =>
+  a.kind === 'coin' ? `${identityKey}|coin|${a.txid}.${a.vout}` : `${identityKey}|tx|${a.txid}`;
+
+/** Its own IndexedDB database per device store: the toolbox sync only writes the wallet's own tables. */
+export const admissionDbName = (storageIdentityKey: string) => `bwx-inbound-admission-${storageIdentityKey}`;
+const ADMISSION_STORE = 'pending';
+
+const idbRequest = <T>(r: IDBRequest<T>) =>
+  new Promise<T>((resolve, reject) => {
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
+
+function idbAdmissionList(name: string): AdmissionList {
+  let opened: Promise<IDBDatabase> | undefined;
+  const db = () =>
+    (opened ??= new Promise<IDBDatabase>((resolve, reject) => {
+      const r = indexedDB.open(name, 1);
+      r.onupgradeneeded = () => {
+        if (!r.result.objectStoreNames.contains(ADMISSION_STORE))
+          r.result.createObjectStore(ADMISSION_STORE, { keyPath: 'key' });
+      };
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+    }).catch((e: unknown) => {
+      opened = undefined;
+      throw e;
+    }));
+  const withStore = async <T>(mode: IDBTransactionMode, body: (s: IDBObjectStore) => Promise<T>): Promise<T> => {
+    const t = (await db()).transaction(ADMISSION_STORE, mode);
+    const done = new Promise<void>((resolve, reject) => {
+      t.oncomplete = () => resolve();
+      t.onerror = t.onabort = () => reject(t.error);
+    });
+    const out = await body(t.objectStore(ADMISSION_STORE));
+    await done;
+    return out;
+  };
+  return {
+    add: (identityKey, items, now) =>
+      withStore('readwrite', async (s) => {
+        for (const a of items) {
+          const key = admissionKey(identityKey, a);
+          const had = (await idbRequest(s.get(key))) as PendingAdmission | undefined;
+          s.put(
+            had
+              ? { ...had, ...(a.kind === 'tx' ? { claim: a.claim } : {}) }
+              : { ...a, key, identityKey, firstAt: now, nextAt: now, tries: 0 },
+          );
+        }
+      }),
+    list: (identityKey) =>
+      withStore('readonly', async (s) =>
+        ((await idbRequest(s.getAll())) as PendingAdmission[]).filter((e) => e.identityKey === identityKey),
+      ),
+    put: (e) => withStore('readwrite', async (s) => void (await idbRequest(s.put(e)))),
+    remove: (key) => withStore('readwrite', async (s) => void (await idbRequest(s.delete(key)))),
+  };
+}
+
+const lists = new Map<string, AdmissionList>();
+/** The admission list of the device store with this storage identity key. */
+export function admissionListFor(storageIdentityKey: string): AdmissionList {
+  let l = lists.get(storageIdentityKey);
+  if (!l) lists.set(storageIdentityKey, (l = idbAdmissionList(admissionDbName(storageIdentityKey))));
+  return l;
+}
+
+/** What is waiting on this device for this account (Settings diagnostics, tests). */
+export const pendingAdmissions = (store: { getSettings(): { storageIdentityKey: string } }, identityKey: string) =>
+  admissionListFor(store.getSettings().storageIdentityKey).list(identityKey);
+
+// ── admitPending: the only way a coin from another store becomes spendable here ──
+
+type Trx = unknown;
+/** The device store calls admitPending needs (StorageIdb). */
+export type AdmitStore = Omit<DeviceStore, 'getSettings'> & {
+  getSettings(): { storageIdentityKey: string };
+  transaction<T>(scope: (trx: Trx) => Promise<T>): Promise<T>;
+  updateOutput(id: number, update: Record<string, unknown>, trx?: Trx): Promise<unknown>;
+  updateTransaction(id: number, update: Record<string, unknown>, trx?: Trx): Promise<unknown>;
+};
+
+export type AdmitReport = {
+  /** Coins made spendable. */
+  admitted: number;
+  /** Transaction statuses settled (failed on the chain's word, or a mined payment repaired). */
+  applied: number;
+  /** Entries dropped: the row failed a check, the chain says spent or on chain, or nothing is left to settle. */
+  refused: number;
+  /** Entries asked about and left for later. */
+  waiting: number;
+  /** Entries given up on after 3 days (the coin stays not spendable). */
+  retired: number;
+  /** The run stopped at an unclear chain answer: the rest waits for the next run. */
+  deferred: boolean;
+  /** Entries still on the list after this run. */
+  left: number;
+  /** Of those, transactions the backup counts as actions that this device still holds as failed (restore check). */
+  pendingActions: number;
+};
+
+/** Entries one run looks at. Each costs at most two WhatsOnChain calls, and an unclear answer ends the run. */
+const RUN_LIMIT = 25;
+const FIRST_WAIT_MS = 60_000;
+const MAX_WAIT_MS = 6 * 3_600_000;
+const SPENT_RECHECK_MS = 3_600_000;
+const RETIRE_AFTER_MS = 3 * 24 * 3_600_000;
+
+const runs = new Map<string, Promise<unknown>>();
+
+/**
+ * Work through this device's admission list for this account, outside the storage locks (C5): reads, then the
+ * chain's word, then one IndexedDB transaction that writes only if the row is still as it was read. Runs one at a
+ * time per store and account. Transactions first, so a coin whose spender another device aborted is free (C3).
+ */
+export function admitPending(
+  store: AdmitStore,
+  identityKey: string,
+  v: InboundVerifier,
+  opts: { now?: () => number; limit?: number } = {},
+): Promise<AdmitReport> {
+  const key = `${store.getSettings().storageIdentityKey}|${identityKey}`;
+  const run = (runs.get(key) ?? Promise.resolve())
+    .catch(() => undefined)
+    .then(() => admitOnce(store, identityKey, v, opts));
+  runs.set(key, run);
+  run.then(
+    () => runs.get(key) === run && runs.delete(key),
+    () => runs.get(key) === run && runs.delete(key),
+  );
+  return run;
+}
+
+async function admitOnce(
+  store: AdmitStore,
+  identityKey: string,
+  v: InboundVerifier,
+  opts: { now?: () => number; limit?: number },
+): Promise<AdmitReport> {
+  const now = opts.now?.() ?? Date.now();
+  const list = admissionListFor(store.getSettings().storageIdentityKey);
+  const report: AdmitReport = {
+    admitted: 0,
+    applied: 0,
+    refused: 0,
+    waiting: 0,
+    retired: 0,
+    deferred: false,
+    left: 0,
+    pendingActions: 0,
+  };
+  const count = async () => {
+    const left = await list.list(identityKey);
+    report.left = left.length;
+    report.pendingActions = left.filter((e) => e.kind === 'tx' && e.claim !== 'failed').length;
+    return report;
+  };
+  const user = (await store.findUsers({ partial: { identityKey } }))[0];
+  if (!user) return count();
+  const userId = user.userId;
+  const due = (await list.list(identityKey))
+    .filter((e) => e.nextAt <= now)
+    .sort((a, b) => (a.kind !== b.kind ? (a.kind === 'tx' ? -1 : 1) : a.nextAt - b.nextAt))
+    .slice(0, opts.limit ?? RUN_LIMIT);
+
+  const finish = async (e: PendingAdmission, outcome: 'admitted' | 'applied' | 'refused') => {
+    await list.remove(e.key);
+    report[outcome]++;
+  };
+  const wait = async (e: PendingAdmission, at?: number) => {
+    if (now - e.firstAt >= RETIRE_AFTER_MS) {
+      await list.remove(e.key);
+      report.retired++;
+      v.log?.(`[inbound-sync] gave up on ${e.kind} ${e.txid}${e.kind === 'coin' ? `.${e.vout}` : ''}: left as is`);
+      return;
+    }
+    await list.put({
+      ...e,
+      tries: e.tries + 1,
+      nextAt: at ?? now + Math.min(MAX_WAIT_MS, FIRST_WAIT_MS * 2 ** e.tries),
+    });
+    report.waiting++;
+  };
+  const knownCache = new Map<string, Promise<'known' | 'unknown' | 'unclear'>>();
+  const known = (txid: string) => {
+    if (!knownCache.has(txid))
+      knownCache.set(
         txid,
         v.txKnown ? v.txKnown(txid).catch((): 'unclear' => 'unclear') : Promise.resolve<'unknown'>('unknown'),
       );
-    return known.get(txid)!;
+    return knownCache.get(txid)!;
   };
-  const verdict = async (txid: string, vout: number): Promise<'unspent' | 'spent' | 'unknown' | 'unclear'> => {
-    const op = `${txid}.${vout}`;
-    const at = seenSpent.get(op);
-    if (at !== undefined && now() - at < SPENT_TTL_MS) return 'spent';
-    const st = await v.spent(op).catch((): SpendState => ({ state: 'unclear' }));
-    if (st.state === 'unclear') return 'unclear';
+  const txStatus = async (transactionId: number | null | undefined) =>
+    typeof transactionId === 'number'
+      ? (await store.findTransactions({ partial: { userId, transactionId }, noRawTx: true }))[0]?.status
+      : undefined;
+  /** Set a transaction's status if it is still as it was read. */
+  const setStatus = (t: TxRow, status: string) =>
+    store.transaction(async (trx) => {
+      const [cur] = await store.findTransactions({
+        partial: { userId, transactionId: t.transactionId },
+        noRawTx: true,
+        trx,
+      });
+      if (!cur || cur.status !== t.status || (cur.provenTxId ?? null) !== (t.provenTxId ?? null)) return false;
+      await store.updateTransaction(t.transactionId!, { status }, trx);
+      return true;
+    });
+
+  const settleTx = async (e: PendingAdmission) => {
+    const [t] = await store.findTransactions({ partial: { userId, txid: e.txid }, noRawTx: true });
+    if (!t || typeof t.transactionId !== 'number') return finish(e, 'refused');
+    const toFailed = e.claim === 'failed';
+    if (toFailed ? t.status === 'failed' || t.status === 'completed' || t.provenTxId != null : t.status !== 'failed')
+      return finish(e, 'refused'); // settled already, or a transaction never undone from a backup
+    const k = await known(e.txid);
+    if (k === 'unclear') {
+      report.deferred = true;
+      return wait(e);
+    }
+    // To failed: only when the chain has never seen it (a payment another device saw refused or aborted).
+    if (toFailed)
+      return k === 'unknown' && (await setStatus(t, 'failed')) ? finish(e, 'applied') : finish(e, 'refused');
+    // From failed: only once the chain has it, through the wallet's own mined-payment repair when there is one.
+    if (k !== 'known') return wait(e);
+    if (v.recover) {
+      const r = await v.recover(e.txid).catch((): 'wait' => 'wait');
+      return r === 'wait' ? wait(e) : finish(e, r === 'restored' ? 'applied' : 'refused');
+    }
+    return (await setStatus(t, 'unproven')) ? finish(e, 'applied') : finish(e, 'refused');
+  };
+
+  /** The row matches the device's raw transaction for it, when the device has one. */
+  const matchesRaw = async (row: OutputRow, script: string) => {
+    if (typeof store.getProvenOrRawTx !== 'function' || !row.txid) return true;
+    const r = await store.getProvenOrRawTx(row.txid).catch(() => undefined);
+    const raw = r?.rawTx ?? r?.proven?.rawTx;
+    if (!raw?.length) return true;
+    const out = parseRawTx(raw, row.txid)?.outputs[row.vout];
+    return (
+      !!out &&
+      out.lockingScript.toHex().toLowerCase() === script &&
+      (typeof row.satoshis !== 'number' || out.satoshis === row.satoshis)
+    );
+  };
+
+  const settleCoin = async (e: PendingAdmission) => {
+    const rows = await store.findOutputs({ partial: { userId, txid: e.txid, vout: e.vout } });
+    const row = rows.length === 1 ? rows[0] : undefined;
+    if (!row || typeof row.outputId !== 'number' || row.spendable === true) return finish(e, 'refused');
+    if (row.basketId == null) return finish(e, 'refused'); // in no basket: a quarantined row, or not the wallet's coin
+    // An output of a transaction this device holds as failed: WhatsOnChain's 404 is no proof (F4). Its transaction
+    // may yet be settled (this run's transactions came first).
+    if ((await txStatus(row.transactionId)) === 'failed') return wait(e);
+    // Spent by a payment of this device's not yet on the network (R5, C7): the chain hasn't seen that spend.
+    const spender = row.spentBy != null ? await txStatus(row.spentBy) : undefined;
+    if (spender !== undefined && IN_FLIGHT.has(spender)) return wait(e);
+    const script = hex(row.lockingScript);
+    if (!script || !(await matchesRaw(row, script)) || (await admissibleRow(v, row, script)) === 'refuse')
+      return finish(e, 'refused'); // C1: what a new row must pass, whatever marker the row carries
+    const st = await v.spent(`${e.txid}.${e.vout}`).catch((): SpendState => ({ state: 'unclear' }));
+    if (st.state === 'unclear') {
+      report.deferred = true;
+      return wait(e);
+    }
     if (st.state === 'spent') {
-      seenSpent.set(op, now());
-      return 'spent';
+      if (e.spentAt !== undefined && now - e.spentAt >= SPENT_RECHECK_MS) return finish(e, 'refused');
+      return wait({ ...e, spentAt: e.spentAt ?? now }, (e.spentAt ?? now) + SPENT_RECHECK_MS);
     }
-    const k = await txKnown(txid);
-    return k === 'known' ? 'unspent' : k;
+    // WhatsOnChain answers /spent with 404 for an outpoint it has never seen (F4b): unspent only for a known transaction.
+    const k = await known(e.txid);
+    if (k === 'unclear') report.deferred = true;
+    if (k !== 'known') return wait(e);
+    const ok = await store.transaction(async (trx) => {
+      const [cur] = await store.findOutputs({ partial: { userId, outputId: row.outputId }, trx });
+      if (
+        !cur ||
+        cur.spendable === true ||
+        (cur.spentBy ?? null) !== (row.spentBy ?? null) ||
+        hex(cur.lockingScript) !== script
+      )
+        return false;
+      await store.updateOutput(row.outputId!, { spendable: true, spentBy: undefined }, trx);
+      return true;
+    });
+    return finish(e, ok ? 'admitted' : 'refused');
   };
-  return Object.assign(verdict, { txKnown });
-}
 
-type ReleaseStore = DeviceStore & { updateOutput(id: number, update: Record<string, unknown>): Promise<unknown> };
-
-/**
- * Look again at rows held for the chain (HELD_MARK): spendable once the chain knows the transaction and the coin is
- * unspent; the mark goes once it is spent. Unclear: left for next time. Runs after each device-sync pull, so an honest
- * coin pulled before WhatsOnChain had its transaction is not stranded.
- */
-export async function releaseHeldRows(
-  store: ReleaseStore,
-  identityKey: string,
-  v: InboundVerifier,
-): Promise<{ released: number; spent: number }> {
-  const out = { released: 0, spent: 0 };
-  const user = (await store.findUsers({ partial: { identityKey } }))[0];
-  if (!user) return out;
-  const held = (await store.findOutputs({ partial: { userId: user.userId, spendable: false } })).filter(
-    (o) =>
-      (o as { spendingDescription?: string }).spendingDescription === HELD_MARK &&
-      o.spentBy == null &&
-      typeof o.outputId === 'number' &&
-      !!o.txid,
-  );
-  const chain = chainChecks(v);
-  for (const o of held) {
-    const verdict = await chain(o.txid!, o.vout);
-    if (verdict === 'unspent') {
-      await store.updateOutput(o.outputId!, { spendable: true, spendingDescription: null });
-      out.released++;
-    } else if (verdict === 'spent') {
-      await store.updateOutput(o.outputId!, { spendingDescription: null });
-      out.spent++;
-    }
+  for (const e of due) {
+    if (report.deferred) break;
+    await (e.kind === 'tx' ? settleTx(e) : settleCoin(e));
   }
-  return out;
+  if (report.admitted || report.applied || report.retired)
+    v.log?.(
+      `[inbound-sync] admitted ${report.admitted} coin(s), settled ${report.applied} transaction(s), gave up on ${report.retired}`,
+    );
+  return count();
 }
 
 // ── the wallet's own keys ──
@@ -885,7 +1199,7 @@ export function walletOwnership(rootKey: PrivateKey, legacyKeys: (PrivateKey | u
  * takes merges (the USB backup reader only reads; backups are StorageClients).
  */
 const verifiers = new Map<string, InboundVerifier[]>();
-/** A page refused because WhatsOnChain couldn't be asked: a pause, not a broken backup (review 16, F5). */
+/** A page refused because it couldn't be checked (its admissions not written): a pause, not a broken backup (F5). */
 export const isUncheckedPage = (e: unknown): boolean =>
   String((e as { message?: unknown } | null)?.message ?? e).includes(UNCHECKED_PAGE);
 /** Device stores that take only checked rows: a page for an account with no verifier is refused, never let through. */
@@ -927,8 +1241,26 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
         throw new Error(NO_VERIFIER);
       return original.call(this, args, chunk);
     }
-    await verifyInboundChunk(this, args, chunk, v);
-    return original.call(this, args, chunk);
+    const report = await verifyInboundChunk(this, args, chunk, v);
+    if (report.admissions.length) {
+      // Written before the merge: a page whose admissions can't be kept is not taken (it is fetched again).
+      const sik = this.getSettings?.()?.storageIdentityKey;
+      try {
+        if (!sik) throw new Error('no storage identity key');
+        await admissionListFor(sik).add(identityKey, report.admissions, Date.now());
+      } catch (e) {
+        v.log?.('[inbound-sync] admission list not written:', e);
+        throw new Error(UNCHECKED_PAGE);
+      }
+    }
+    const merged = await original.call(this, args, chunk);
+    if (report.admissions.length)
+      try {
+        v.onQueued?.();
+      } catch {
+        // scheduling only
+      }
+    return merged;
   };
   return () => {
     if (own) proto.processSyncChunk = original;
@@ -955,4 +1287,10 @@ export const _uninstallInboundSyncGuard = (cls: { prototype: object }) => {
 export const _resetInboundVerifiers = () => {
   verifiers.clear();
   deviceStores.clear();
+};
+
+/** Test hook: this store merges unchecked (a stand-in for the provider, which in the app is a StorageClient). */
+export const _mergeUnchecked = (store: object) => {
+  const original = (Object.getPrototypeOf(store) as Record<symbol, unknown>)[INSTALLED];
+  if (typeof original === 'function') (store as { processSyncChunk?: unknown }).processSyncChunk = original;
 };
