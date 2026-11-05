@@ -79,26 +79,131 @@ export interface GuardDeps {
   ownerSync: (addresses: string[]) => AsyncIterable<OwnerSyncOutput>;
   /** Satoshis of one output, when the stream doesn't carry them (raw tx lookup). */
   outputSats: (outpoint: string) => Promise<number>;
-  /** Every outpoint wallet storage holds, any basket, spendable or not. */
+  /** The outpoints wallet storage lists as spendable (listOutputs over the wallet's baskets). */
   walletOutpoints: () => Promise<string[]>;
+  /**
+   * Of these outpoints, the ones storage already accounts for though listOutputs no longer lists them: spent by one of
+   * the wallet's own transactions that is out or going out (services/heldOutpoints.ts). Owner, 5 Nov 2026: the deposit
+   * sweep spent the payment, listOutputs dropped it, the indexer still listed it unspent, and it counted twice.
+   */
+  accountedFor?: (outpoints: string[]) => Promise<Iterable<string>>;
+}
+
+/**
+ * The indexer's owner stream sends one row per state of an outpoint (seen in the mempool, mined, spent), so one outpoint
+ * can come several times. One entry each; spent when any of its rows names a spender.
+ */
+export function latestState<T extends { outpoint: string; spendTxid?: string }>(
+  rows: Iterable<T>,
+): Map<string, T & { spendTxid?: string }> {
+  const out = new Map<string, T & { spendTxid?: string }>();
+  for (const r of rows) {
+    const k = normOutpoint(r.outpoint);
+    const had = out.get(k);
+    out.set(k, { ...(had ?? r), ...r, outpoint: k, spendTxid: had?.spendTxid || r.spendTxid || undefined });
+  }
+  return out;
 }
 
 /** Ask the indexer about our receive addresses and report what wallet storage is missing. */
 export async function checkReceiveAddresses(addresses: string[], deps: GuardDeps): Promise<UncreditedResult> {
   const unique = [...new Set(addresses.filter(Boolean))];
   if (!unique.length) return { satoshis: 0, outputs: [], txids: [] };
+  const rows: OwnerSyncOutput[] = [];
+  for await (const o of deps.ownerSync(unique)) rows.push(o);
+  const known = new Set(Array.from(await deps.walletOutpoints(), normOutpoint));
+  let candidates = [...latestState(rows).values()].filter(
+    (o) => !o.spendTxid && !known.has(o.outpoint) && !isMoved(o.outpoint),
+  );
+  if (candidates.length && deps.accountedFor) {
+    const accounted = new Set(Array.from(await deps.accountedFor(candidates.map((o) => o.outpoint)), normOutpoint));
+    candidates = candidates.filter((o) => !accounted.has(o.outpoint));
+  }
   const chain: ChainOutput[] = [];
-  for await (const o of deps.ownerSync(unique)) {
-    if (o.spendTxid) continue;
+  for (const o of candidates) {
     const satoshis = typeof o.satoshis === 'number' ? o.satoshis : await deps.outputSats(o.outpoint);
     chain.push({ outpoint: o.outpoint, satoshis, address: '' });
   }
-  return findUncredited(chain, await deps.walletOutpoints());
+  return findUncredited(chain, known);
 }
 
-/** Last guard result, so the balance can count money still arriving. Cleared when nothing is missing. */
-let arriving: { satoshis: number; at: number } = { satoshis: 0, at: 0 };
-export const setArriving = (satoshis: number) => {
-  arriving = { satoshis, at: Date.now() };
+// ── What the balance adds for money on chain that storage does not count yet ──
+
+/**
+ * Outputs on chain at our receive addresses that storage did not hold when last checked ("arriving"). Kept as outpoints,
+ * not a number: every balance read asks storage again and drops the ones it now holds (arrivingNow), so a payment the
+ * address sync or the receive watcher has since taken in is never counted twice. Owner, 5 Nov 2026: the old number
+ * stayed until the next guard run, on top of the deposit (and then the sweep) that held the same dollar.
+ */
+const arriving = new Map<string, number>();
+/** Replace the list with the guard's latest result. */
+export const setArriving = (outputs: ChainOutput[]) => {
+  arriving.clear();
+  addArriving(outputs);
 };
-export const arrivingSats = () => arriving.satoshis;
+/** Add outputs seen on chain that storage does not hold yet (the receive watcher, while it takes them in). */
+export const addArriving = (outputs: ChainOutput[]) => {
+  for (const o of outputs) if (o.satoshis > 0) arriving.set(normOutpoint(o.outpoint), o.satoshis);
+};
+/** Forget outputs that are spent on chain or now in storage. */
+export const dropArriving = (outpoints: Iterable<string>) => {
+  for (const o of outpoints) arriving.delete(normOutpoint(o));
+};
+/** The last known arriving total (for messages; the balance uses arrivingNow). */
+export const arrivingSats = () => [...arriving.values()].reduce((t, s) => t + s, 0);
+export const arrivingOutputs = (): ChainOutput[] =>
+  [...arriving].map(([outpoint, satoshis]) => ({ outpoint, satoshis, address: '' }));
+
+/**
+ * Receipts seen in the mempool and not yet mined (the receive watcher notes them). They are part of the balance like any
+ * other money storage holds; the card shows them as "pending" until a block has them. Forgotten when the watcher sees
+ * them mined, or after UNCONFIRMED_TTL_MS so a watcher that stopped never leaves "pending" up for good.
+ */
+const unconfirmed = new Map<string, { satoshis: number; at: number }>();
+export const UNCONFIRMED_TTL_MS = 2 * 60 * 60 * 1000;
+export const noteUnconfirmed = (outputs: ChainOutput[], at = Date.now()) => {
+  for (const o of outputs) if (o.satoshis > 0) unconfirmed.set(normOutpoint(o.outpoint), { satoshis: o.satoshis, at });
+};
+export const noteConfirmed = (outpoints: Iterable<string>) => {
+  for (const o of outpoints) unconfirmed.delete(normOutpoint(o));
+};
+
+/**
+ * What the balance adds now for money storage does not count, and how much of the balance is pending. `accountedFor`
+ * names the outpoints storage now counts (services/heldOutpoints.ts); without it, or if it fails, arriving counts as
+ * before. counted: arriving outputs storage still lacks. pending: those, plus unconfirmed receipts storage holds.
+ */
+export async function arrivingNow(
+  accountedFor?: (outpoints: string[]) => Promise<Iterable<string>>,
+  now = Date.now(),
+): Promise<{ counted: number; pending: number }> {
+  for (const [k, u] of unconfirmed) if (now - u.at > UNCONFIRMED_TTL_MS) unconfirmed.delete(k);
+  const asked = [...new Set([...arriving.keys(), ...unconfirmed.keys()])];
+  let held = new Set<string>();
+  if (asked.length && accountedFor) {
+    try {
+      held = new Set(Array.from(await accountedFor(asked), normOutpoint));
+    } catch {
+      /* storage can't say: arriving counts as it did, unconfirmed shows nothing */
+    }
+  }
+  let counted = 0;
+  let pending = 0;
+  for (const [k, sats] of [...arriving]) {
+    if (held.has(k)) {
+      arriving.delete(k); // storage holds it now: counted there
+      continue;
+    }
+    counted += sats;
+    pending += sats;
+  }
+  for (const [k, u] of unconfirmed) if (held.has(k)) pending += u.satoshis;
+  return { counted, pending };
+}
+
+/** Tests only. */
+export const _resetReceiveState = () => {
+  arriving.clear();
+  unconfirmed.clear();
+  moved.clear();
+};

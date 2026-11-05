@@ -105,7 +105,6 @@ import {
   refreshShouldSync,
   shouldResync,
 } from './services/addressResync';
-import { balanceWithDeposits } from './services/depositBalance';
 import { arrivingSats } from './services/receiveGuard';
 import { abortTargetKnownOnChain, recoverySummary } from './services/recoverFailed';
 import { timedStep, txidRecoverySummary } from './services/recoverByTxid';
@@ -5632,13 +5631,16 @@ if (!(
       });
       return;
     }
-    // Received-but-not-yet-swept deposits count too (services/depositBalance.ts).
-    balanceWithDeposits(accountContext.baseWallet)
-      .then((satoshis) => {
+    // Received-but-not-yet-swept deposits count too, and money still arriving, each once (services/depositBalance.ts).
+    // `data` stays the total (sites read it); `pending` is the part not yet in a block, for the card.
+    accountContext
+      .balanceSplit()
+      .then(({ total, pending }) => {
         sendResponse({
           type: YoursEventName.GET_BALANCE,
           success: true,
-          data: satoshis,
+          data: total,
+          pending,
         });
       })
       .catch((error) => {

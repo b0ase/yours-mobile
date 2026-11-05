@@ -108,6 +108,8 @@ import {
   restoreMoved,
   setArriving,
 } from './services/receiveGuard';
+import { accountedVia, type DeviceReads, type HeldStore } from './services/heldOutpoints';
+import { balanceSplit, type BalanceSplit } from './services/depositBalance';
 import { internalizeBackoff } from './services/internalizeBackoff';
 import { fixUtxoStatus, utxoStatusFromTxo } from './services/utxoStatus';
 import { restorePaymailHistory, type PaymailRestoreReport } from './mobile/names/paymail';
@@ -222,6 +224,11 @@ export interface AccountContext {
   sweepDeposits: () => Promise<{ swept?: number }>;
   /** Credit payments seen on chain at our receive addresses that storage lacks (receive guard), now. */
   creditArriving: () => Promise<void>;
+  /**
+   * The balance the wallet shows and how much of it is pending (services/depositBalance.ts balanceSplit). Money on chain
+   * that storage lacks is checked against the device store on every read, so nothing counts twice (owner, 5 Nov 2026).
+   */
+  balanceSplit: () => Promise<BalanceSplit>;
   /** Pull the owner's other devices' changes from the backup, then push this one's (services/deviceSync.ts). */
   syncDevices: () => Promise<DeviceSyncResult>;
   /**
@@ -1000,6 +1007,18 @@ export const initWallet = async (
     return { address, derivationPrefix: hit.derivationPrefix, derivationSuffix: hit.derivationSuffix };
   };
 
+  // What the device store holds for an outpoint, spent or not (services/heldOutpoints.ts). Read straight from the active
+  // provider, never through the manager's locks (as localRawTx). The remote store active: none (arriving counts as before).
+  const deviceReads: DeviceReads = async () => {
+    if (!storage.isActiveStorageProvider()) return undefined;
+    const { userId } = await storage.getAuth();
+    if (typeof userId !== 'number') return undefined;
+    return { store: storage.getActive() as unknown as HeldStore, userId };
+  };
+  // Owner, 5 Nov 2026 ($3.42 for $2.42): the sweep had spent the payment, listOutputs no longer listed it, the indexer
+  // still did, and it counted as arriving on top of the sweep's change. The guard and the balance ask storage itself.
+  const accountedFor = accountedVia(deviceReads);
+
   // The address the Receive screen shows must always count (services/receiveGuard.ts; owner, 10 Oct 2026:
   // $5 at the $vexvoid receive address never showed). Runs after every address sync, clean or not.
   const receiveGuardOnce = async () => {
@@ -1031,9 +1050,10 @@ export const initWallet = async (
       ownerSync: (a) => syncContext.services.owner.sync(a),
       outputSats,
       walletOutpoints,
+      accountedFor,
     });
     if (!first.satoshis) {
-      setArriving(0);
+      setArriving([]);
       return;
     }
     console.warn(
@@ -1087,6 +1107,7 @@ export const initWallet = async (
       ownerSync: (a) => syncContext.services.owner.sync(a),
       outputSats,
       walletOutpoints,
+      accountedFor,
     });
     // Still missing after a direct internalize: storage won't take this txid (services/receiveRescue.ts). Spend
     // each stuck output back to the same address in a fresh transaction and credit that one instead.
@@ -1154,11 +1175,13 @@ export const initWallet = async (
           ownerSync: (a) => syncContext.services.owner.sync(a),
           outputSats,
           walletOutpoints,
+          accountedFor,
         });
       }
     }
-    // Whatever is still missing counts as arriving, so the balance never shows $0 for it.
-    setArriving(final.satoshis);
+    // Whatever is still missing counts as arriving, so the balance never shows $0 for it. Each balance read checks these
+    // outpoints against storage again (services/receiveGuard.ts arrivingNow).
+    setArriving(final.outputs);
     if (final.satoshis) sendSyncStatus({ status: 'arriving', satoshis: final.satoshis });
   };
   // One receive-guard run at a time: overlapping runs each internalized and swept the same outputs.
@@ -1429,6 +1452,7 @@ export const initWallet = async (
     addressSyncBusy: addressSync.busy,
     sweepDeposits: () => sweepDeposit.execute(actionCtx, {}),
     creditArriving: () => runReceiveGuard(),
+    balanceSplit: () => balanceSplit(baseWallet, { accountedFor }),
     syncDevices: () => deviceSync.syncNow(),
     admitBackupRows,
     backupState: () => {

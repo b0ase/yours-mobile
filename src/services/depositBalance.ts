@@ -9,7 +9,7 @@
  * every unlock (initWallet) so the money also becomes spendable without waiting for the next sync.
  */
 import { DEPOSIT_BASKET } from '@1sat/types';
-import { arrivingSats } from './receiveGuard';
+import { arrivingNow } from './receiveGuard';
 
 interface DepositLister {
   listOutputs(args: { basket: string; limit?: number; offset?: number }): Promise<{
@@ -62,17 +62,42 @@ export async function inFlightChangeSats(wallet: ActionLister): Promise<number> 
   return total;
 }
 
-/** Funding balance plus anything still waiting in the deposit basket. A failed deposit read never hides the rest. */
-export async function balanceWithDeposits(
+/** The balance and how much of it is still pending (received, not yet in a block). pending is part of total. */
+export type BalanceSplit = { total: number; pending: number };
+
+export type BalanceOptions = {
+  /** Of these outpoints, the ones wallet storage now counts (services/heldOutpoints.ts, via initWallet). */
+  accountedFor?: (outpoints: string[]) => Promise<Iterable<string>>;
+};
+
+/**
+ * Funding balance plus anything still waiting in the deposit basket, change on its way, and money on chain at our
+ * receive addresses that storage still lacks. A failed deposit read never hides the rest.
+ *
+ * Storage is read first and the arriving outputs are checked against storage after it (owner, 5 Nov 2026: $3.42 for
+ * $2.42). A payment that lands in storage between the two reads is then counted by storage or by neither for that one
+ * read, never by both.
+ */
+export async function balanceSplit(
   wallet: DepositLister & { balance(): Promise<number> } & Partial<ActionLister>,
-): Promise<number> {
+  opts: BalanceOptions = {},
+): Promise<BalanceSplit> {
   const [funded, waiting, changeOnTheWay] = await Promise.all([
     wallet.balance(),
     depositBasketSats(wallet).catch(() => 0),
     wallet.listActions ? inFlightChangeSats(wallet as ActionLister).catch(() => 0) : 0,
   ]);
-  // Plus anything on chain at our receive addresses that storage still lacks (services/receiveGuard.ts).
-  return funded + waiting + changeOnTheWay + arrivingSats();
+  const { counted, pending } = await arrivingNow(opts.accountedFor);
+  const total = funded + waiting + changeOnTheWay + counted;
+  return { total, pending: Math.max(0, Math.min(total, pending)) };
+}
+
+/** The balance alone (balanceSplit's total). */
+export async function balanceWithDeposits(
+  wallet: DepositLister & { balance(): Promise<number> } & Partial<ActionLister>,
+  opts: BalanceOptions = {},
+): Promise<number> {
+  return (await balanceSplit(wallet, opts)).total;
 }
 
 /**
