@@ -204,9 +204,19 @@ const rawOf = async (w: W8, txid: string) =>
 /**
  * A wallet funded the way a seed wallet is: coins at a legacy address of the seed, swept in by the wallet (the sweep's
  * change is the wallet's own). The legacy address's history is on the mocked chain.
+ *
+ * The toolbox splits the sweep's change into coins of random sizes, and that decides how many change outputs a later
+ * payment gets (the payment spends the smallest coin that covers it, and a small surplus can't be split). A test that
+ * needs a given number of change outputs pins `randomVals` for the sweep, so the coins are the same every run.
  */
-async function fundedWallet(chain: Chain, services: unknown, root = PrivateKey.fromRandom()) {
+async function fundedWallet(
+  chain: Chain,
+  services: unknown,
+  root = PrivateKey.fromRandom(),
+  { randomVals }: { randomVals?: number[] } = {},
+) {
   const w = await openWallet(root, `seedchange-${++dbn}`, services);
+  (w.wallet as unknown as { randomVals?: number[] }).randomVals = randomVals;
   const legacy = PrivateKey.fromRandom();
   const legacyAddress = legacy.toAddress();
   const lockingScript = new P2PKH().lock(legacyAddress);
@@ -233,6 +243,7 @@ async function fundedWallet(chain: Chain, services: unknown, root = PrivateKey.f
     { wallet: w.wallet, services: { getBeefForTxid: async () => Beef.fromBinary(beef.toBinary()) } } as never,
     { inputs, keys: inputs.map(() => legacy) } as never,
   )) as { txid?: string; error?: string };
+  (w.wallet as unknown as { randomVals?: number[] }).randomVals = undefined;
   expect(r.error).toBeUndefined();
   const sweepTxid = r.txid!;
   mine(chain, await rawOf(w, sweepTxid));
@@ -703,24 +714,80 @@ describe('review 07b fixes on the real toolbox', () => {
   }, 120000);
 });
 
+/**
+ * Every change output of a payment is the seed's: its row carries the HMAC prefix of the inputs and suffix = its vout,
+ * the script on chain is the one that derivation gives, and the payment itself is the only output that isn't a change
+ * row (no output of the wallet's escapes the check).
+ */
+const expectAllChangeFromSeed = async (w: W8, tx: Transaction, paid: number) => {
+  const txid = tx.id('hex');
+  const change = (await rowsOf(w, txid)).filter((o) => o.change);
+  const prefix = W.bwxChangePrefix(w.kd, inputsOf(tx.toBinary()))!;
+  expect(prefix).toBeTruthy();
+  for (const o of change) {
+    expect(o.derivationPrefix).toBe(prefix);
+    expect(o.derivationSuffix).toBe(W.bwxChangeSuffix(o.vout));
+    const key = w.kd.derivePrivateKey([2, '3241645161d8'], `${prefix} ${o.derivationSuffix}`, w.kd.identityKey);
+    expect(tx.outputs[o.vout].lockingScript.toHex()).toBe(new P2PKH().lock(key.toAddress()).toHex());
+  }
+  const notChange = tx.outputs.map((_, v) => v).filter((v) => !change.some((o) => o.vout === v));
+  expect(notChange.map((v) => tx.outputs[v].satoshis)).toEqual([paid]);
+  return change;
+};
+
 describe('re-review fix on the real toolbox: a payment with only some of its change rows', () => {
-  test('the walk examines the payment storage knows and adds the change row an interrupted sync left out', async () => {
+  // The funding sweep is pinned (see fundedWallet). Unpinned, the 45,000-sat payment had one change output in about 1
+  // run in 7, so "all but one of its change rows" could not be set up and the test failed at random.
+  test('the walk examines the payment storage knows and adds back whichever change row an interrupted sync left out', async () => {
     const chain = newChain();
     const services = makeServices(chain);
-    const { w: a } = await fundedWallet(chain, services);
+    const { w: a, root, legacyAddress } = await fundedWallet(chain, services, undefined, { randomVals: [0, 0] });
     const p = await pay(a, chain, 45_000);
-    mine(chain, await rawOf(a, p.txid!));
-    const change = (await rowsOf(a, p.txid!)).filter((x) => x.change);
-    expect(change.length).toBeGreaterThanOrEqual(2); // the default basket wants many coins, so change is split
+    const { tx } = mine(chain, await rawOf(a, p.txid!));
+    const change = await expectAllChangeFromSeed(a, tx, 45_000);
+    expect(change.length).toBeGreaterThanOrEqual(2); // pinned funding: the payment's change is split
     const expected = await balance(a);
-    // An interrupted sync kept the payment and all but one of its change rows.
-    const lost = change[change.length - 1];
+    const aCoins = (await spendable(a)).map((o) => o.outpoint).sort();
     const idb = (a.db as unknown as { db: { delete: (s: string, k: number) => Promise<void> } }).db;
-    await idb.delete('outputs', lost.outputId);
-    expect(await balance(a)).toBe(expected - lost.satoshis);
-    const r = await recover(a, chain, services, []);
-    expect(r.restoredSats).toBe(lost.satoshis);
-    expect(await balance(a)).toBe(expected);
+    // Each change output in turn is the one an interrupted sync left out: the walk adds every one of them back.
+    for (const lost of change) {
+      await idb.delete('outputs', lost.outputId);
+      expect(await balance(a)).toBe(expected - lost.satoshis);
+      const r = await recover(a, chain, services, []);
+      expect(r.restoredSats).toBe(lost.satoshis);
+      expect(await balance(a)).toBe(expected);
+      const back = (await rowsOf(a, p.txid!)).find((o) => o.vout === lost.vout && o.change)!;
+      expect([back.derivationPrefix, back.derivationSuffix]).toEqual([lost.derivationPrefix, lost.derivationSuffix]);
+    }
+    // And from the 12 words alone on a new device: every coin, this payment's change included, comes back.
+    const b = await openWallet(root, `seedchange-partial-${++dbn}`, services);
+    const r = await recover(b, chain, services, [legacyAddress]);
+    expect(r.done).toBe(true);
+    expect(r.restoredSats).toBe(expected);
+    expect((await spendable(b)).map((o) => o.outpoint).sort()).toEqual(aCoins);
+  }, 120000);
+
+  test('a payment whose change is too small to split (one change output, under 5,000 sats) is found from the seed', async () => {
+    const chain = newChain();
+    const services = makeServices(chain);
+    const { w: a, root, legacyAddress } = await fundedWallet(chain, services, undefined, { randomVals: [0, 0] });
+    // Pay all but 3,000 sats of the biggest coin: only that coin covers it, and what's left can't be split.
+    const coins = (await spendable(a)).map((o) => o.satoshis).sort((x, y) => y - x);
+    const amount = coins[0] - 3_000;
+    expect(coins[1]).toBeLessThan(amount);
+    const p = await pay(a, chain, amount);
+    const { tx } = mine(chain, await rawOf(a, p.txid!));
+    const change = await expectAllChangeFromSeed(a, tx, amount);
+    expect(change.length).toBe(1);
+    expect(change[0].satoshis).toBeLessThan(5_000);
+    const expected = await balance(a);
+    const aCoins = (await spendable(a)).map((o) => o.outpoint).sort();
+    const b = await openWallet(root, `seedchange-single-${++dbn}`, services);
+    const r = await recover(b, chain, services, [legacyAddress]);
+    expect(r.done).toBe(true);
+    expect(r.restoredSats).toBe(expected);
+    expect((await spendable(b)).map((o) => o.outpoint).sort()).toEqual(aCoins);
+    expect(aCoins).toContain(`${p.txid}.${change[0].vout}`);
   }, 120000);
 });
 
