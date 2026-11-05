@@ -6,6 +6,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { P2PKH, PrivateKey, Transaction } from '@bsv/sdk';
+import { DeviceNotActiveError } from './deviceActive';
 import { healInvalidSend, withHealMessage } from './invalidSendHeal';
 import {
   createWithSpentRetry,
@@ -303,6 +304,20 @@ describe('UTXO_SPENT: coin spent on another device', () => {
     expect(svc.ok ? undefined : svc.notice).toBe(REFUSED_MAYBE_SENT_MESSAGE);
     const short = await run(Object.assign(new Error('Insufficient funds'), { name: 'WERR_INSUFFICIENT_FUNDS' }));
     expect(short.ok ? undefined : short.notice).toBe(SPENT_ELSEWHERE_SHORT_MESSAGE);
+    // Refused before anything was built because this device's store wasn't active yet: its own "Nothing was sent".
+    const notActive = await run(new DeviceNotActiveError());
+    expect(notActive.ok ? undefined : notActive.notice).toBeUndefined();
+    expect(classifySendError(notActive.ok ? undefined : notActive.error)).toMatchObject({ moneyMoved: 'no' });
+    // The toolbox's raw refusal after a heal (a step that may follow signing) keeps "can't confirm".
+    const raw = await run(
+      Object.assign(
+        new Error(
+          "WalletStorageManager is not accessing user's active storage or there are conflicting active stores configured.",
+        ),
+        { name: 'WERR_NOT_ACTIVE' },
+      ),
+    );
+    expect(raw.ok ? undefined : raw.notice).toBe(REFUSED_MAYBE_SENT_MESSAGE);
   });
 
   test('never retries when nothing could be cleared (would pick the same coin)', async () => {

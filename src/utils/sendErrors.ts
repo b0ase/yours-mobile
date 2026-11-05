@@ -74,6 +74,15 @@ export const OWN_PAYMENTS_UNCHECKED_MESSAGE =
  */
 export const DELIVERY_UNCONFIRMED_MESSAGE =
   "Your payment went out on chain, but the recipient's wallet service didn't confirm it received it. Don't send it again; check History.";
+/**
+ * The toolbox refused a payment at its first step because this device's store was not the enabled active store (the
+ * backup named another device's store; services/deviceActive.ts) and making it active again didn't finish in time.
+ * Nothing was built or signed (P0, 5 Nov 2026: the owner's iPhone showed this as "can't confirm").
+ */
+export const DEVICE_NOT_ACTIVE_MESSAGE =
+  "This device's wallet was catching up with your other devices, so this payment didn't start. Nothing was sent. Try again in a moment.";
+/** DEVICE_NOT_ACTIVE_MESSAGE, however it is carried (a site's text, a retry's notice). */
+export const DEVICE_NOT_ACTIVE_PATTERN = /wallet was catching up with your other devices/i;
 /** For a site's answer: the txid of another payment of this wallet is never shared (17b L1, privacy). */
 export const withoutOwnTxids = (text: string): string => text.replace(/ \(tx [0-9a-f]{8,64}…?\)/gi, '');
 
@@ -93,6 +102,7 @@ export type SendErrorKind =
   | 'wallet-internal'
   | 'storage-remote-failing'
   | 'payment-refused'
+  | 'device-not-active'
   | 'unknown';
 
 export interface SendErrorInfo {
@@ -190,6 +200,9 @@ export function classifySendError(e: unknown, phase: 'before-sign' | 'send' = 's
 
   if (/denied by user|user denied|cancell?ed by (the )?user|USER_DENIED/i.test(raw))
     return make('cancelled', 'You cancelled the payment. Nothing was sent.', 'no');
+
+  // The background refused it before the toolbox built anything (services/deviceActive.ts): provably not sent.
+  if (DEVICE_NOT_ACTIVE_PATTERN.test(raw)) return make('device-not-active', DEVICE_NOT_ACTIVE_MESSAGE, 'no');
 
   // The background's own sentences after a refusal or the coin check (services/spentRetry.ts, coinPreflight.ts).
   // Before the insufficient-funds and broadcast rules: they are specific.

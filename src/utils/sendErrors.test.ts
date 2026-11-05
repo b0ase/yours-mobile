@@ -3,6 +3,7 @@ import {
   classifySendError,
   DOUBLE_SPEND_PENDING_MESSAGE,
   DELIVERY_UNCONFIRMED_MESSAGE,
+  DEVICE_NOT_ACTIVE_MESSAGE,
   MISSING_PARENT_MESSAGE,
   OWN_COIN_OTHER_PAYMENT_MESSAGE,
   ownPaymentOutMessage,
@@ -17,6 +18,29 @@ import {
 const TXID = 'a'.repeat(64);
 
 describe('classifySendError', () => {
+  test("P0 5 Nov 2026: refused before the build because this device's store wasn't active: nothing was sent", () => {
+    const e = Object.assign(new Error(DEVICE_NOT_ACTIVE_MESSAGE), {
+      name: 'WERR_NOT_ACTIVE',
+      code: 'WERR_NOT_ACTIVE',
+      detail:
+        "WalletStorageManager is not accessing user's active storage or there are conflicting active stores configured.",
+    });
+    for (const phase of ['send', 'before-sign'] as const) {
+      const r = classifySendError(e, phase);
+      expect(r).toMatchObject({ kind: 'device-not-active', moneyMoved: 'no', message: DEVICE_NOT_ACTIVE_MESSAGE });
+      expect(r.message).toMatch(/Nothing was sent\. Try again/);
+      expect(r.message).not.toMatch(/can't confirm/i);
+      expect(r.detail).toContain('conflicting active stores'); // the toolbox's reason stays behind Details
+    }
+    // As a site or the Store sheet carries it (plain text).
+    expect(classifySendError(DEVICE_NOT_ACTIVE_MESSAGE).moneyMoved).toBe('no');
+  });
+  test('the toolbox\'s bare WERR_NOT_ACTIVE (its step unknown here) stays honest: "can\'t confirm" while sending', () => {
+    const raw =
+      "WalletStorageManager is not accessing user's active storage or there are conflicting active stores configured.";
+    expect(classifySendError(raw, 'send')).toMatchObject({ kind: 'unknown', moneyMoved: 'unknown' });
+    expect(classifySendError(raw, 'before-sign')).toMatchObject({ moneyMoved: 'no' });
+  });
   test('toolbox WERR_INTERNAL (the owner 28 Oct failure) is explained, never raw', () => {
     const e = Object.assign(new Error('An internal error has occurred.'), { code: 'WERR_INTERNAL' });
     const r = classifySendError(e);

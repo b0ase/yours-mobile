@@ -30,6 +30,7 @@
 import type { HealReport } from './invalidSendHeal';
 import { isInvalidTxReview, reasonSpender, refusal, refusedTxid, SPENT_ELSEWHERE_MESSAGE } from './invalidSendHeal';
 import {
+  DEVICE_NOT_ACTIVE_PATTERN,
   DOUBLE_SPEND_PENDING_MESSAGE,
   MISSING_PARENT_MESSAGE,
   OWN_COIN_OTHER_PAYMENT_MESSAGE,
@@ -230,6 +231,8 @@ const presignNotice = (e: unknown): string | undefined => {
   if (isInsufficientFunds(e)) return SPENT_ELSEWHERE_SHORT_MESSAGE;
   const code = String((e as { code?: unknown; name?: unknown } | null)?.code ?? (e as { name?: unknown })?.name ?? '');
   if (/^WERR_(SPENT_ELSEWHERE|INVALID_PARAMETER|INSUFFICIENT_FUNDS|LOCAL_STORE_NEEDED)/.test(code)) return undefined;
+  // Refused before anything was built because this device's store wasn't active yet (services/deviceActive.ts).
+  if (DEVICE_NOT_ACTIVE_PATTERN.test(String((e as { message?: unknown } | null)?.message ?? ''))) return undefined;
   return REFUSED_MAYBE_SENT_MESSAGE;
 };
 

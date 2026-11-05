@@ -25,6 +25,7 @@ import {
 } from './services/deviceSync';
 import { forceLegacyActionBatch, requireLegacyForNoSend } from './services/actionBatchMode';
 import { requireLocalStoreForChange } from './services/localFirst';
+import { keepDeviceStoreActive } from './services/deviceActive';
 import { loadMayBeOut, recheckRefusals } from './services/refusalRecheck';
 import { installCoinPreflightForWallet } from './services/coinPreflight';
 import { expiryLookups } from './services/unsentGuard';
@@ -477,6 +478,18 @@ export const initWallet = async (
     console.warn('[initWallet] backup storage failed to connect; opening without it:', err);
     return createWebWallet({ ...walletConfig, backups: [] });
   });
+  // This device's store stays the enabled active store for its payments, receipts and backup pushes, whatever another
+  // device wrote into the backup (P0, 5 Nov 2026: the owner's 1p test was refused with WERR_NOT_ACTIVE after the backup
+  // connected late; services/deviceActive.ts). First on the manager, so the later wrappers (the coin check) run over it.
+  const openedAccount = account?.addresses?.identityAddress;
+  const keepActive = keepDeviceStoreActive(storage, {
+    deviceIntended: () => {
+      const current = chromeStorageService.getCurrentAccountObject().account;
+      return !!current && current.addresses.identityAddress === openedAccount && !current.storageConfig?.activeRemote;
+    },
+    setDeviceActive: () => setActiveStorage('local'),
+  });
+  if (!keepActive) console.error("[initWallet] this device's store is not kept active (no storage manager to wrap)");
   // No payment may live only in memory: every noSend action is written to storage at signing (P0, 3 Nov 2026: the
   // owner's $1 theme test lost its change on a reload; services/actionBatchMode.ts).
   if (!forceLegacyActionBatch(baseWallet))
@@ -553,7 +566,12 @@ export const initWallet = async (
   const deviceSync = createDeviceSync({
     applies: () => storage.isActiveStorageProvider() && (backups?.length ?? 0) > 0,
     ensureBackup: async () => {
+      // A backup naming another device's store is merged and this device made active again first (deviceActive).
+      if (keepActive?.needsHeal()) await keepActive.heal('device sync');
       if (storage.getBackupStores().length > 0) return true;
+      // One set aside after a failed merge reconnects here; while one still conflicts, no second connection is opened.
+      if (keepActive && (await keepActive.reattach())) return true;
+      if (storage.getConflictingStores().length > 0) return false;
       const url = backups?.[0];
       if (!url) return false;
       await Promise.race([
@@ -1389,6 +1407,7 @@ export const initWallet = async (
   const close = async () => {
     walletClosed = true;
     admitClosed = true;
+    keepActive?.stop();
     if (admitTimer) clearTimeout(admitTimer);
     admitTimer = undefined;
     await destroyWallet();

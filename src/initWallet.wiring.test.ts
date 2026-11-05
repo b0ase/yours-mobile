@@ -312,4 +312,20 @@ describe('the real initWallet wiring', () => {
     expect(pull).toMatch(/await storage\.syncFromReader\([\s\S]*\},\s*\(\) => admitIn\(0\)/);
     expect(pull).not.toContain('await admitBackupRows()');
   });
+
+  test("this device's store is kept active (P0, 5 Nov 2026), under the coin check, which wraps over it", async () => {
+    const m = ctx.storage as unknown as {
+      __bwxDeviceActive?: { needsHeal(): boolean };
+      __bwxCoinPreflight?: boolean;
+      isActiveEnabled: boolean;
+    };
+    expect(m.__bwxDeviceActive).toBeDefined();
+    expect(m.isActiveEnabled).toBe(true);
+    expect(m.__bwxDeviceActive!.needsHeal()).toBe(false);
+    expect(m.__bwxCoinPreflight).toBe(true);
+    // Installed first: the coin check's createAction calls through it (initWallet installs it before the check).
+    const src = readFileSync(new URL('./initWallet.ts', import.meta.url), 'utf8');
+    expect(src.indexOf('keepDeviceStoreActive(storage')).toBeGreaterThan(0);
+    expect(src.indexOf('keepDeviceStoreActive(storage')).toBeLessThan(src.indexOf('installCoinPreflightForWallet('));
+  });
 });
