@@ -33,6 +33,7 @@ import {
   DOUBLE_SPEND_PENDING_MESSAGE,
   MISSING_PARENT_MESSAGE,
   OWN_COIN_OTHER_PAYMENT_MESSAGE,
+  OWN_PAYMENTS_UNCHECKED_MESSAGE,
   ownPaymentOutMessage,
   REFUSED_MAYBE_SENT_MESSAGE,
   REFUSED_NOT_SENT_MESSAGE,
@@ -200,7 +201,14 @@ async function judge(
       notice: same ? ownPaymentOutMessage(own) : OWN_COIN_OTHER_PAYMENT_MESSAGE,
     };
   }
-  // 5. Proven not sent: "not sent" is true from here.
+  // 5. Proven not sent: "not sent" is true from here, unless this wallet's own payments couldn't be read: the coin's
+  //    spender may then be an earlier payment of ours to this payee, so never "try again" (17d L3).
+  if (own === null)
+    return {
+      retry: false,
+      why: "this wallet's own payments could not be checked",
+      notice: OWN_PAYMENTS_UNCHECKED_MESSAGE,
+    };
   const notSent = heal && heal.released > 0 ? SPENT_ELSEWHERE_MESSAGE : REFUSED_NOT_SENT_MESSAGE;
   const why = !d.eligible
     ? 'not eligible'
@@ -208,11 +216,9 @@ async function judge(
       ? 'already retried once'
       : !heal || heal.released <= 0
         ? 'nothing cleared'
-        : own === null
-          ? "this wallet's own payments could not be checked"
-          : unnamed
-            ? 'a cleared coin has no named spender'
-            : null;
+        : unnamed
+          ? 'a cleared coin has no named spender'
+          : null;
   return why ? { retry: false, why, notice: notSent } : { retry: true };
 }
 

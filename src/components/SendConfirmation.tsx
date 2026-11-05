@@ -7,6 +7,7 @@ import { Show } from './Show';
 import { PageLoader } from './PageLoader';
 import { lineItemLabel } from './sendLineItemLabel';
 import { DollarAmount, useSheetPrice } from './DollarAmount';
+import { EARLIER_UNKNOWN_MESSAGE } from '../utils/uncertainSends';
 
 export type SendLineItem = {
   address: string;
@@ -47,6 +48,8 @@ export type SendConfirmationProps = {
    * the sheet asks "Send another anyway?" and Cancel becomes the default button.
    */
   earlier?: { recipient: string; amount: string; sentAt: string }[];
+  /** The device store couldn't be read in time, so earlier sends are unknown (17d L5): the sheet says so. */
+  earlierUnknown?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 };
@@ -62,6 +65,7 @@ export const SendConfirmation = (props: SendConfirmationProps) => {
     usdPerBsv,
     isProcessing = false,
     earlier = [],
+    earlierUnknown = false,
     onConfirm,
     onCancel,
   } = props;
@@ -166,6 +170,17 @@ export const SendConfirmation = (props: SendConfirmationProps) => {
                       ))}
                       <span className="block font-bold mt-1">Send another anyway?</span>
                     </span>
+                  </div>
+                )}
+
+                {!warn && earlierUnknown && (
+                  <div
+                    role="status"
+                    className="flex items-start gap-2 w-full mb-4 px-3 py-2 rounded-lg text-sm text-left"
+                    style={{ background: 'rgba(245,158,11,0.12)', color: contrast }}
+                  >
+                    <AlertTriangle size={16} className="shrink-0 mt-0.5" style={{ color: '#F59E0B' }} />
+                    <span>{EARLIER_UNKNOWN_MESSAGE}</span>
                   </div>
                 )}
 

@@ -14,8 +14,10 @@
  *     check before a send) goes to the front of its context's queue, so it is never starved by a long walk.
  *   - Elsewhere, a local limiter with a split budget (the worker 2 a second, a page 1) on a monotonic clock.
  *   - A request whose signal aborts while it waits gives its place up (it never takes a slot).
- *   - A 429, or a request that fails outright (WhatsOnChain's rate-limit page has no CORS headers, so the browser hides
- *     it as a network error), holds every request back for one fixed WOC_PAUSE_MS; pauses never stack.
+ *   - A 429, or a request that fails outright with a network error (WhatsOnChain's rate-limit page has no CORS
+ *     headers, so the browser hides it as a TypeError), holds every request back for one fixed WOC_PAUSE_MS; pauses
+ *     never stack. A request that times out or is aborted (a slow answer, not a refusal) never pauses the others (17d
+ *     L2).
  * Keyed and anonymous requests share the one budget (the key's real limit isn't known here). Other hosts never wait.
  */
 
@@ -208,6 +210,10 @@ export const isWocRequest = (input: unknown): boolean => urlOf(input)?.startsWit
 
 type Scope = { fetch?: typeof fetch; __bwxWocLimited?: boolean };
 
+/** fetch's own network failure ("Failed to fetch", "Load failed"): a TypeError, never a TimeoutError or AbortError. */
+const isNetworkFailure = (e: unknown): boolean =>
+  e instanceof TypeError || (e as { name?: unknown } | null)?.name === 'TypeError';
+
 /**
  * Route every WhatsOnChain request made through `scope.fetch` (default: this context's global fetch) through the
  * pacer: the app-wide Web Locks one when available, else a local one at `localPerSecond` (the worker's share is 2, a
@@ -232,8 +238,9 @@ export function installWocLimiter(
     try {
       r = await original(input, init);
     } catch (e) {
-      // A failure with no answer: often WhatsOnChain's rate-limit page, which the browser hides (no CORS headers).
-      if ((e as { name?: unknown } | null)?.name !== 'AbortError') pacer.pause();
+      // A network failure with no answer: often WhatsOnChain's rate-limit page, which the browser hides (no CORS
+      // headers). A time-out or an abort is only slowness: it doesn't hold back everyone else (17d L2).
+      if (isNetworkFailure(e)) pacer.pause();
       throw e;
     }
     if (r.status === 429) pacer.pause();

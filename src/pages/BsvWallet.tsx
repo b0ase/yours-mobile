@@ -204,6 +204,8 @@ export const BsvWallet = () => {
     totalSats?: number;
     /** Earlier sends to these recipients that may already have gone out (utils/uncertainSends.ts). */
     earlier?: { recipient: string; amount: string; sentAt: string }[];
+    /** The device store couldn't be read in time (17d L5). */
+    earlierUnknown?: boolean;
     onConfirm: () => void;
   } | null>(null);
   // Get identityAddress from chrome storage (selected account)
@@ -1183,21 +1185,23 @@ export const BsvWallet = () => {
       payee: payeeNote(identityAddress, addr, pendingMeta(addr)),
     }));
 
-    // A re-tap must not pay twice (third review 17c): an earlier send to the same recipient, as typed, whose outcome is
-    // uncertain makes the sheet ask "Send another anyway?" with Cancel first (utils/uncertainSends.ts).
+    // A re-tap must not pay twice (third reviews 17c/17d): an earlier send to the same recipient, as typed, whose outcome
+    // is open makes the sheet ask "Send another anyway?" with Cancel first (utils/uncertainSends.ts). The note is written
+    // when Send is confirmed, before the request goes out, so a hang followed by an app kill or reload still asks.
     const recentSends = createUncertainSends(deviceKV());
+    // What the person typed: on phones the name box hands up the address a name resolved to (17d L1).
+    const typedFor = (addr: string) => pendingMeta(addr)?.input || addr;
+    const typed = addressOrder.map(typedFor);
     const amountFor = (addr: string) => {
       const bsv = (consolidated.get(addr) ?? 0) / BSV_DECIMAL_CONVERSION;
       return exchangeRate > 0 ? `$${(bsv * exchangeRate).toFixed(2)}` : `${formatNumberWithCommasAndDecimals(bsv, 8)} BSV`;
     };
-    const rememberUncertain = (info: SendErrorInfo) => {
-      if (outcomeIsUncertain(info))
-        void recentSends.note(
-          identityAddress,
-          addressOrder.map((a) => ({ recipient: a, amount: amountFor(a) })),
-        );
+    /** The outcome is known: drop the note on success or a proven "not sent"; keep it while it may have gone out. */
+    const settleNote = (info: SendErrorInfo | null) => {
+      if (!info || !outcomeIsUncertain(info)) void recentSends.clear(identityAddress, typed);
     };
-    const earlier = (await recentSends.pending(identityAddress, addressOrder)).map((e) => ({
+    const checked = await recentSends.check(identityAddress, typed);
+    const earlier = checked.earlier.map((e) => ({
       recipient: e.recipient,
       amount: e.amount,
       sentAt: sentAtLabel(e.at),
@@ -1209,14 +1213,18 @@ export const BsvWallet = () => {
       total: `${formatNumberWithCommasAndDecimals(totalSats / BSV_DECIMAL_CONVERSION, 8)} BSV`,
       totalSats,
       earlier,
+      earlierUnknown: checked.unavailable,
       onConfirm: async () => {
         setSendConfirmation(null);
-        // "Send anyway" after the warning: the person has seen it; don't ask again for this recipient.
-        if (earlier.length) void recentSends.clear(identityAddress, addressOrder);
         setIsProcessing(true);
         setSendInFlight(true);
         setSendError(null);
         lastSendThrow.current = null;
+        // Before the request goes out (17d M2). Time-limited: a store that hangs never holds the payment.
+        await recentSends.note(
+          identityAddress,
+          addressOrder.map((a) => ({ recipient: typedFor(a), amount: amountFor(a) })),
+        );
         try {
           await confirmSendBsv();
         } catch (err) {
@@ -1224,7 +1232,7 @@ export const BsvWallet = () => {
           console.error('[handleSendBsv] send threw:', errText(err));
           const info = classifySendError(err);
           setSendError(info);
-          rememberUncertain(info);
+          settleNote(info);
           refreshUtxos().catch(() => undefined);
         } finally {
           setSendInFlight(false);
@@ -1267,7 +1275,7 @@ export const BsvWallet = () => {
           console.error('[handleSendBsv] send failed:', errText(err));
           const info = classifySendError(err);
           setSendError(info);
-          rememberUncertain(info);
+          settleNote(info);
           setIsProcessing(false);
           // A refused send may have cleared coins spent on another device: show the corrected balance.
           refreshUtxos().catch((err) => console.error('[handleSendBsv] refresh after failed send:', errText(err)));
@@ -1276,13 +1284,14 @@ export const BsvWallet = () => {
 
         setBsvBalance((prev) => Math.max(0, prev - totalSats / BSV_DECIMAL_CONVERSION));
         rememberSent(identityAddress, addressOrder);
+        // Sent: no reminder, except when the payee's host didn't confirm it (the note stays, 17c H2).
+        if (!deliveryUnconfirmed) settleNote(null);
         refreshUtxos().catch((err) => console.error('[handleSendBsv] reconcile refresh failed:', errText(err)));
         resetSendState();
         setBsvHistoryRefreshKey((k) => k + 1);
         setPageState('main');
         if (deliveryUnconfirmed) {
           console.warn('[handleSendBsv] sent, but the payee host did not confirm delivery:', sendRes.error);
-          rememberUncertain(classifySendError(sendRes.error));
           addSnackbar(DELIVERY_UNCONFIRMED_MESSAGE, 'info');
         } else if (
           !celebrateSend(sendRes, {
@@ -2564,6 +2573,7 @@ export const BsvWallet = () => {
         usdPerBsv={exchangeRate}
         isProcessing={isProcessing}
         earlier={sendConfirmation?.earlier}
+        earlierUnknown={sendConfirmation?.earlierUnknown}
         onConfirm={() => sendConfirmation?.onConfirm()}
         onCancel={() => setSendConfirmation(null)}
       />

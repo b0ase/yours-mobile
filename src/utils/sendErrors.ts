@@ -63,6 +63,12 @@ export const OWN_COIN_OTHER_PAYMENT_MESSAGE =
 export const MISSING_PARENT_MESSAGE =
   "A coin in this payment comes from a payment the network can't find yet, so it was set aside for now. We'll check again and put it back when that payment shows up. We can't confirm whether this payment went out. Check History before sending again.";
 /**
+ * The refused payment can't go out, but this wallet's own payments couldn't be read, so the coin's spender may be an
+ * earlier payment of ours to the same payee (17d L3): never "try again".
+ */
+export const OWN_PAYMENTS_UNCHECKED_MESSAGE =
+  "We couldn't check this wallet's recent payments, so we can't confirm whether an earlier payment to this payee already went out. Check History before sending again.";
+/**
  * A $name payment that went out on chain, but the payee's wallet host didn't confirm it received the payment details
  * (guardedSendBsv.ts 'delivery-failed:'). It must never read "Nothing was sent" (17c H2).
  */
@@ -86,6 +92,7 @@ export type SendErrorKind =
   | 'cancelled'
   | 'wallet-internal'
   | 'storage-remote-failing'
+  | 'payment-refused'
   | 'unknown';
 
 export interface SendErrorInfo {
@@ -188,6 +195,9 @@ export function classifySendError(e: unknown, phase: 'before-sign' | 'send' = 's
   // Before the insufficient-funds and broadcast rules: they are specific.
   // A payment of ours to this payee already went out with this coin: say so with its short txid (the full one is in
   // `txid`, for Details).
+  // Before the next rule: it also mentions "an earlier payment to this payee already went out", as a question (17d L3).
+  if (/couldn't check this wallet's recent payments/i.test(raw))
+    return make('earlier-payment-out', OWN_PAYMENTS_UNCHECKED_MESSAGE, 'unknown');
   if (/earlier payment to this payee already went out/i.test(raw))
     return make('earlier-payment-out', ownPaymentOutMessage(txid ? `${txid.slice(0, 8)}…` : undefined), 'yes');
   if (/an earlier payment from this wallet went out using a coin/i.test(raw))
@@ -198,6 +208,15 @@ export function classifySendError(e: unknown, phase: 'before-sign' | 'send' = 's
     return make('broadcast-unknown', MISSING_PARENT_MESSAGE, 'unknown');
   if (/can't confirm whether this went out/i.test(raw))
     return make('broadcast-unknown', REFUSED_MAYBE_SENT_MESSAGE, 'unknown');
+  // Refused by the wallet's own checks before anything was signed (guardedSendBsv.ts, paymailDestination.ts), or a
+  // send-all to a paymail, which @1sat/actions refuses before building (17d L4: these never read "can't confirm").
+  if (/^Payment refused: [\s\S]*Nothing was sent\.?$/i.test(raw)) return make('payment-refused', raw, 'no');
+  if (/sendAllBsv does not support paymail/i.test(raw))
+    return make(
+      'payment-refused',
+      "Send all can't go to a paymail or $name. Nothing was sent. Send a fixed amount, or send all to an address.",
+      'no',
+    );
   if (/already spent by another payment, so nothing was sent/i.test(raw))
     return make('broadcast-failed', REFUSED_NOT_SENT_MESSAGE, 'no');
   if (/couldn't update them/i.test(raw)) return make('spent-elsewhere', SPENT_ELSEWHERE_STUCK_MESSAGE, 'no');
@@ -266,12 +285,13 @@ export function classifySendError(e: unknown, phase: 'before-sign' | 'send' = 's
       'no',
     );
 
-  // @bsv/wallet-toolbox WERR_INTERNAL: "An internal error has occurred." It is thrown while building the payment
-  // (coin data, proofs, the storage commit), before the broadcast. See PR notes for the throw sites.
+  // @bsv/wallet-toolbox WERR_INTERNAL: "An internal error has occurred." Usually thrown while building the payment
+  // (coin data, proofs, the storage commit), but an online storage's processAction can answer it after it broadcast
+  // (17d P1), so it never says "nothing was broadcast" (17d L4: it is `unknown`, and the Send page's note stays).
   if (/An internal error has occurred|WERR_INTERNAL/i.test(raw))
     return make(
       'wallet-internal',
-      "The wallet couldn't build this payment: it was missing data about one of your coins (usually a lookup to a Bitcoin data service that was busy). Nothing was broadcast. Check History once, then try again in a minute. If it keeps failing and Settings › Storage shows an online storage as active, make This device active and try again; otherwise tap Details and send them to support.",
+      "The wallet couldn't finish this payment: it was missing data about one of your coins (usually a lookup to a Bitcoin data service that was busy). We can't confirm whether it went out, so check History before you try again in a minute. If it keeps failing and Settings › Storage shows an online storage as active, make This device active and try again; otherwise tap Details and send them to support.",
       'unknown',
     );
 

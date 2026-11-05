@@ -22,7 +22,10 @@ describe('classifySendError', () => {
     const r = classifySendError(e);
     expect(r.kind).toBe('wallet-internal');
     expect(r.message).not.toContain('An internal error has occurred');
-    expect(r.message).toMatch(/Nothing was broadcast/);
+    // 17d L4: it is `unknown`, so it never says "Nothing was broadcast".
+    expect(r.moneyMoved).toBe('unknown');
+    expect(r.message).not.toMatch(/Nothing was (broadcast|sent)/);
+    expect(r.message).toMatch(/can't confirm whether it went out/);
     expect(r.detail).toContain('An internal error has occurred');
     expect(r.detail).toContain('WERR_INTERNAL');
   });
@@ -132,6 +135,15 @@ describe('classifySendError', () => {
       kind: 'broadcast-unknown',
       moneyMoved: 'unknown',
     });
+  });
+  test('17d L4: our own pre-sign refusals say "Nothing was sent" and mean it (no); never "can\'t confirm"', () => {
+    const own = 'Payment refused: outputs do not match the approved payments. Nothing was sent.';
+    expect(classifySendError(own)).toMatchObject({ kind: 'payment-refused', moneyMoved: 'no', message: own });
+    const all = classifySendError('sendAllBsv does not support paymail — use sendBsv with a fixed amount');
+    expect(all).toMatchObject({ kind: 'payment-refused', moneyMoved: 'no' });
+    expect(all.message).toMatch(/Nothing was sent/);
+    // Before: both fell to the generic "can't confirm whether it went out" (unknown).
+    for (const r of [classifySendError(own), all]) expect(r.message).not.toMatch(/can't confirm/i);
   });
   test('a site never gets the txid of another payment of this wallet (17b L1)', () => {
     const t = withoutOwnTxids(ownPaymentOutMessage(TXID));

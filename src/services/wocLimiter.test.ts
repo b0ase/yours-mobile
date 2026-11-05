@@ -9,6 +9,7 @@ import {
   type LocksLike,
   type Pacer,
 } from './wocLimiter';
+import { deadline } from '../utils/abortTimeout';
 
 /** A manual clock: timers fire when the clock is advanced past them. */
 function clock() {
@@ -228,6 +229,20 @@ describe('installWocLimiter', () => {
     mode = 'abort';
     await scope.fetch('https://api.whatsonchain.com/v1/bsv/main/x').catch(() => undefined);
     expect(spy.pauses()).toBe(1);
+  });
+  test('17d L2 (reviewer W1): a request that times out (deadline TimeoutError) does not pause everyone else', async () => {
+    const scope = {
+      fetch: ((_u: string, i?: RequestInit) =>
+        new Promise((_, rej) => i?.signal?.addEventListener('abort', () => rej(i.signal!.reason)))) as never,
+    } as { fetch: typeof fetch };
+    const spy = pacerSpy();
+    installWocLimiter(scope, { pacer: spy.pacer });
+    const d = deadline(20);
+    const name = await scope
+      .fetch('https://api.whatsonchain.com/v1/bsv/main/tx/hash/00', { signal: d.signal })
+      .catch((e: { name?: string }) => e?.name);
+    expect(name).toBe('TimeoutError');
+    expect(spy.pauses()).toBe(0); // before the fix: 1 (a 2 s app-wide pause per slow request)
   });
   test('recognises a WhatsOnChain request given as a string, URL or Request', () => {
     expect(isWocRequest('https://api.whatsonchain.com/v1/bsv/main/tx/hash/aa')).toBe(true);

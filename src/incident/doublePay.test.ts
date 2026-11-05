@@ -337,14 +337,15 @@ const ALICE_TYPED = 'alice@handcash.io';
 /**
  * One tap of Send, as the wallet's own Send page does it (pages/BsvWallet.tsx): first the re-tap confirm over the
  * recipient as typed (utils/uncertainSends.ts; Cancel is the default, `sendAnyway` is the person pressing "Send
- * anyway"), then the SAME pipeline background.ts processCWICreateAction uses, then the page's mapping of the answer,
- * and an uncertain outcome is remembered against the recipient. A site's call (`ownSend: false`) never goes through
- * the Send page, so it is never asked.
+ * anyway"); on confirm the recipient is noted BEFORE the request goes out (17d M2); then the SAME pipeline background.ts
+ * processCWICreateAction uses, then the page's mapping of the answer: a success or a proven "not sent" drops the note,
+ * anything else keeps it. `killed`: the page dies mid-send (an app kill, a reload, a closed popup) and never sees the
+ * answer. A site's call (`ownSend: false`) never goes through the Send page, so it is never asked.
  */
 async function tapSend(
   p: Phone,
   sats: number,
-  o: { to?: string; typed?: string; ownSend?: boolean; isSite?: boolean; sendAnyway?: boolean } = {},
+  o: { to?: string; typed?: string; ownSend?: boolean; isSite?: boolean; sendAnyway?: boolean; killed?: boolean } = {},
 ) {
   const to = o.to ?? BOB;
   const typed = o.typed ?? (to === ALICE ? ALICE_TYPED : BOB_TYPED);
@@ -354,7 +355,7 @@ async function tapSend(
     const earlier = await p.recent.pending(account, [typed]);
     if (earlier.length && !o.sendAnyway)
       return { asked: earlier, outcome: undefined, shown: undefined, answer: undefined };
-    if (earlier.length) await p.recent.clear(account, [typed]);
+    await p.recent.note(account, [{ recipient: typed, amount: `${sats} sats` }]);
   }
   const outputs = [{ lockingScript: to, satoshis: sats, outputDescription: `Payment of ${sats} sats` }];
   const outcome = await sendWithChecks({
@@ -369,6 +370,7 @@ async function tapSend(
     context: p.context,
     log: () => undefined,
   });
+  if (o.killed) return { asked: [], outcome, shown: undefined, answer: undefined };
   let shown: ReturnType<typeof classifySendError> | undefined;
   let answer: string | undefined;
   if (!outcome.ok) {
@@ -376,9 +378,8 @@ async function tapSend(
     const errorText = err instanceof Error ? describeWalletError(err) : JSON.stringify(err);
     answer = sendFailureText({ errorText, heal: outcome.heal, notice: outcome.notice, isSite: !!o.isSite });
     shown = classifySendError(answer, 'send');
-    if (ownSend && outcomeIsUncertain(shown))
-      await p.recent.note(account, [{ recipient: typed, amount: `${sats} sats` }]);
   }
+  if (ownSend && (!shown || !outcomeIsUncertain(shown))) await p.recent.clear(account, [typed]);
   return { asked: [], outcome, shown, answer };
 }
 
@@ -420,7 +421,7 @@ async function phoneWithCoins() {
   // The Send page's device store (chrome.storage.local): a fresh instance per tap, like a reload would be.
   const pageStore = memoryKV();
   const recent: UncertainSends = createUncertainSends(pageStore);
-  return { chain, kd, phone, ext, kv, context, recent };
+  return { chain, kd, phone, ext, kv, context, recent, pageStore };
 }
 
 /** A coin arrives that covers the payment by itself (so a re-tap would pick it, not the earlier payment's coin). */
@@ -542,6 +543,16 @@ describe('17c: a refusal that may have gone out is never "not sent", and the re-
     expect((await p.recent.pending(p.kd.identityKey, [BOB_TYPED])).length).toBe(0);
   });
 
+  test('17d M2: the send hangs and the app is killed before the answer: the next tap is still asked; BOB paid once', async () => {
+    const p = await phoneWithCoins();
+    const first = await tapSend(p, 3_000_000, { killed: true }); // it went out; the page never heard back
+    expect(first.outcome?.ok).toBe(true);
+    // The app restarts: a new Send page over the same device store.
+    p.recent = createUncertainSends(p.pageStore);
+    const again = await tapSend(p, 3_000_000);
+    expect(again.asked.map((e) => e.recipient)).toEqual([BOB_TYPED]); // before the fix: [] (not asked)
+    expect(paidTo(p.chain, BOB)).toHaveLength(1);
+  });
   test('A + C (review 17 F1): "Send anyway" with the same payee picking the dead coin: no retry, the earlier payment named', async () => {
     const p = await phoneWithCoins();
     const { t1 } = await falseRefusal(p, 3_000_000);

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import {
   createUncertainSends,
   outcomeIsUncertain,
+  EARLIER_UNKNOWN_MESSAGE,
   recipientKey,
   UNCERTAIN_SEND_WINDOW_MS,
   UNCERTAIN_SENDS_KEY,
@@ -22,8 +23,12 @@ const memoryKV = (): KV & { m: Record<string, unknown> } => {
 describe('recipientKey: what the person typed', () => {
   test('a paymail or $name is case-insensitive and trimmed; an address keeps its case', () => {
     expect(recipientKey('  Bob@HandCash.io ')).toBe('bob@handcash.io');
-    expect(recipientKey('$Bob')).toBe('$bob');
     expect(recipientKey(' 1BoatSLRHtKNngkdXEeobR76b53LETtpyT ')).toBe('1BoatSLRHtKNngkdXEeobR76b53LETtpyT');
+  });
+  test('17d L1: $bob, $Bob@bwalletx.com and bob@bwalletx.com are one person (a $name is name@bwalletx.com)', () => {
+    for (const typed of ['$Bob', ' $bob@BWalletX.com', 'bob@bwalletx.com'])
+      expect(recipientKey(typed)).toBe('bob@bwalletx.com');
+    expect(recipientKey('$bob@handcash.io')).toBe('bob@handcash.io');
   });
 });
 
@@ -66,13 +71,31 @@ describe('createUncertainSends (17c: key on what the person typed, kept on the d
     await g.clear('acct', ['$bob']);
     expect(await g.pending('acct', ['$bob'])).toEqual([]);
   });
-  test('a broken store never blocks a send', async () => {
+  test('a broken store never blocks a send, and the sheet is told it could not check', async () => {
     const g = createUncertainSends({
       get: async () => Promise.reject(new Error('quota')),
       set: async () => Promise.reject(new Error('quota')),
     });
     await g.note('acct', [{ recipient: '$bob', amount: '$1.00' }]);
     expect(await g.pending('acct', ['$bob'])).toEqual([]);
+    expect(await g.check('acct', ['$bob'])).toEqual({ earlier: [], unavailable: true });
+  });
+  test('17d L5: a store that HANGS gives up after the time limit (the sheet opens and says it could not check)', async () => {
+    const never = new Promise<never>(() => undefined);
+    const g = createUncertainSends({ get: () => never, set: () => never }, Date.now, 30);
+    const t0 = Date.now();
+    expect(await g.check('acct', ['$bob'])).toEqual({ earlier: [], unavailable: true }); // before: never resolved
+    await g.note('acct', [{ recipient: '$bob', amount: '$1.00' }]); // the send is never held
+    await g.clear('acct', ['$bob']);
+    expect(Date.now() - t0).toBeLessThan(1_000);
+    expect(EARLIER_UNKNOWN_MESSAGE).toMatch(/couldn't check .*check History/);
+  });
+  test("a note made while the store can't be read never overwrites the reminders already there", async () => {
+    const kv = memoryKV();
+    await createUncertainSends(kv, () => 5).note('acct', [{ recipient: '$alice', amount: '$1.00' }]);
+    const flaky = { get: async () => Promise.reject(new Error('busy')), set: kv.set };
+    await createUncertainSends(flaky, () => 6).note('acct', [{ recipient: '$bob', amount: '$1.00' }]);
+    expect(await createUncertainSends(kv, () => 7).pending('acct', ['$alice'])).toHaveLength(1);
   });
 });
 
@@ -91,7 +114,11 @@ describe('only the wallet’s own Send page asks: sites, pots, subscriptions and
     const users = files
       .filter((f) => /from '[./]+utils\/uncertainSends'|from '\.\/uncertainSends'/.test(readFileSync(f, 'utf8')))
       .map((f) => f.slice(src.length));
-    expect(users).toEqual(['pages/BsvWallet.tsx']);
+    // The confirm sheet takes only its "couldn't check" sentence from it.
+    expect(users.sort()).toEqual(['components/SendConfirmation.tsx', 'pages/BsvWallet.tsx']);
+    expect(readFileSync(join(src, 'components/SendConfirmation.tsx'), 'utf8')).toMatch(
+      /import \{ EARLIER_UNKNOWN_MESSAGE \} from '\.\.\/utils\/uncertainSends';/,
+    );
   });
   test('the background send path has no re-tap guard (no new refusal path for sites or agents)', () => {
     for (const f of ['background.ts', 'services/ownSend.ts', 'services/spentRetry.ts']) {

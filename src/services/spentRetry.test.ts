@@ -16,9 +16,11 @@ import {
   SPENT_ELSEWHERE_MESSAGE,
 } from './spentRetry';
 import {
+  classifySendError,
   DOUBLE_SPEND_PENDING_MESSAGE,
   SPENT_ELSEWHERE_SHORT_MESSAGE,
   OWN_COIN_OTHER_PAYMENT_MESSAGE,
+  OWN_PAYMENTS_UNCHECKED_MESSAGE,
   ownPaymentOutMessage,
   REFUSED_MAYBE_SENT_MESSAGE,
   REFUSED_NOT_SENT_MESSAGE,
@@ -239,12 +241,15 @@ describe('UTXO_SPENT: coin spent on another device', () => {
     expect(provenNotSent('a'.repeat(64), undefined, { checked: 1, released: 0, inputs: [], spenders: {} })).toBe(false);
   });
 
-  test("storage can't say whose the spender is: no retry (fail closed)", async () => {
+  test('storage can\'t say whose the spender is: no retry (fail closed), and never "try again" (17d L3)', async () => {
     for (const ownTxids of [async () => null, async () => Promise.reject(new Error('locked'))]) {
       const w = simWallet(3, [0]);
       const r = await createWithSpentRetry(deps(w, { ownTxids }));
       expect(r.retried).toBe(false);
       expect(w.accepted).toHaveLength(0);
+      // Before: SPENT_ELSEWHERE_MESSAGE ("spent from another device… try again", moneyMoved 'no').
+      expect(r.ok ? undefined : r.notice).toBe(OWN_PAYMENTS_UNCHECKED_MESSAGE);
+      expect(classifySendError(OWN_PAYMENTS_UNCHECKED_MESSAGE).moneyMoved).toBe('unknown');
     }
   });
 
