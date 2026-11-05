@@ -56,9 +56,12 @@ export const ownPaymentOutMessage = (txid?: string): string =>
  */
 export const OWN_COIN_OTHER_PAYMENT_MESSAGE =
   "An earlier payment from this wallet went out using a coin this payment needed. If it was to this payee, don't send again. Check History first.";
-/** A coin whose parent payment never reached the network was set aside, so sends stop failing on it (17c L3). */
+/**
+ * A coin whose parent payment the network can't find was set aside for now, so sends stop failing on it (17c L3). It
+ * comes back by itself once that payment shows up (17d M1: never "won't use it again").
+ */
 export const MISSING_PARENT_MESSAGE =
-  "A coin in this payment came from a payment that never reached the network, so the wallet set it aside and won't use it again. We can't confirm whether this payment went out. Check History before sending again.";
+  "A coin in this payment comes from a payment the network can't find yet, so it was set aside for now. We'll check again and put it back when that payment shows up. We can't confirm whether this payment went out. Check History before sending again.";
 /**
  * A $name payment that went out on chain, but the payee's wallet host didn't confirm it received the payment details
  * (guardedSendBsv.ts 'delivery-failed:'). It must never read "Nothing was sent" (17c H2).
@@ -191,7 +194,7 @@ export function classifySendError(e: unknown, phase: 'before-sign' | 'send' = 's
     return make('earlier-payment-out', OWN_COIN_OTHER_PAYMENT_MESSAGE, 'unknown');
   if (/one of its coins was also used by another payment/i.test(raw))
     return make('broadcast-unknown', DOUBLE_SPEND_PENDING_MESSAGE, 'unknown');
-  if (/came from a payment that never reached the network/i.test(raw))
+  if (/comes from a payment the network can't find yet/i.test(raw))
     return make('broadcast-unknown', MISSING_PARENT_MESSAGE, 'unknown');
   if (/can't confirm whether this went out/i.test(raw))
     return make('broadcast-unknown', REFUSED_MAYBE_SENT_MESSAGE, 'unknown');

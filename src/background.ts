@@ -150,6 +150,7 @@ import { createExcludingUnprovable } from './services/unprovableCoinRetry';
 import { siteActionError } from './services/siteActionError';
 import { retryEligible } from './services/spentRetry';
 import {
+  chainKnowsTx,
   healRefusedInputs,
   sendFailureText,
   sendWithChecks,
@@ -488,6 +489,8 @@ async function autoResyncDeps(
     woc: ctxChain(ctx) === 'main' ? wocSpendStatus : undefined,
     markSpent: (o, by) => setSpendable(o, false, by),
     markUnspent: (o) => setSpendable(o, true),
+    // A coin set aside for a parent the network couldn't find comes back once that parent is seen (17d M1).
+    txSeen: (txid) => chainKnowsTx(sendChecksContext(ctx), txid),
   };
 }
 // Set while wallet is reinitializing (e.g. account switch) to prevent

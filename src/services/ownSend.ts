@@ -19,7 +19,7 @@ import {
   withHealMessage,
   type HealReport,
 } from './invalidSendHeal';
-import { recordAutoCleared, type KV } from './autoCoinResync';
+import { ORPHAN_MARK, recordAutoCleared, type KV } from './autoCoinResync';
 import { refusalFor } from './broadcastRefusals';
 import { wocLookup } from './unsentGuard';
 import { withoutOwnTxids } from '../utils/sendErrors';
@@ -37,15 +37,20 @@ export type SendChecksContext = {
   kv: KV;
   fetch?: typeof fetch;
   log?: (m: string, d?: unknown) => void;
+  /** The clock for the second look at an unnamed missing parent (tests). */
+  now?: () => number;
 };
 
 type Txo = { getSpend?: (o: string) => Promise<string | null | undefined> };
 type StackStatus = { getStatusForTxids?: (t: string[]) => Promise<{ results?: { txid?: string; status?: string }[] }> };
+type OutputRow = { outputId: number; change?: boolean; type?: string; basketId?: number | null };
 type MarkingProvider = {
   findUsers: (a: { partial: { identityKey: string } }) => Promise<{ userId: number }[]>;
   findOutputs: (a: {
     partial: { userId: number; txid: string; vout: number; spendable: boolean };
-  }) => Promise<{ outputId: number }[]>;
+    noScript?: boolean;
+  }) => Promise<OutputRow[]>;
+  findOutputBaskets: (a: { partial: { userId: number; name: string } }) => Promise<{ basketId: number }[]>;
   updateOutput: (id: number, u: { spendable: boolean }) => Promise<number>;
   findTransactions: (a: {
     partial: { userId: number; txid: string };
@@ -53,8 +58,30 @@ type MarkingProvider = {
   }) => Promise<{ status?: string; provenTxId?: number | null }[]>;
 };
 
-/** Our own actions still on their way out: their change is never called "never reached the network". */
-const IN_FLIGHT = ['sending', 'unprocessed', 'unsigned', 'nosend'];
+/** Our own actions still on their way out (or mined): their change is never set aside as having no parent. */
+const IN_FLIGHT = ['sending', 'unprocessed', 'unsigned', 'nosend', 'nonfinal', 'unfail'];
+/** Unnamed: our own payment the network accepted is also left alone (17d M1: it may not be indexed yet). */
+const IN_FLIGHT_OR_UNPROVEN = [...IN_FLIGHT, 'unproven'];
+/**
+ * A "Missing inputs" that names no input: a coin's parent must be unknown on two refusals at least this far apart
+ * before the coin is set aside (17d M1: WhatsOnChain can lag minutes behind a fresh payment).
+ */
+export const ORPHAN_SECOND_LOOK_MS = 10 * 60 * 1000;
+/** A first look older than this is stale: it starts the wait again. */
+const ORPHAN_FIRST_LOOK_TTL_MS = 24 * 60 * 60 * 1000;
+export const ORPHAN_SUSPECTS_KEY = 'bwxOrphanSuspects';
+type Suspects = Record<string, Record<string, number>>;
+
+/** The inputs a "Missing inputs" reason names: by outpoint (txid:vout) when it gives any, else by parent txid. */
+export function missingNamed(reason: string | undefined, inputs: string[]): string[] {
+  const t = (reason ?? '').toLowerCase();
+  if (!t) return [];
+  const exact = inputs.filter((op) => {
+    const [txid, vout] = op.toLowerCase().split('_');
+    return t.includes(`${txid}:${vout}`) || t.includes(`${txid}_${vout}`);
+  });
+  return exact.length ? exact : inputs.filter((op) => t.includes(op.split('_')[0].toLowerCase()));
+}
 
 const ask = <T>(f: () => Promise<T>): Promise<T | null> =>
   Promise.resolve()
@@ -81,10 +108,18 @@ export async function chainKnowsTx(c: SendChecksContext | null, txid: string): P
 
 /**
  * After a refusal: clear the inputs the chain proves spent (invalidSendHeal.ts), and record them on the automatic
- * check's list so it can put one back if both sources later call it unspent (review 17 F3, 17b L3). After a "missing
- * inputs" refusal, a coin whose parent payment never reached the network (unknown to WhatsOnChain and the 1Sat stack,
- * not mined in storage, not one of our own payments still going out) is set aside, so every send stops failing on it
- * (17c L3; Find missing coins brings it back if that payment confirms later). Never throws.
+ * check's list so it can put one back if both sources later call it unspent (review 17 F3, 17b L3).
+ *
+ * After a "Missing inputs" refusal, a coin whose parent payment the network can't find is set aside for now, so every
+ * send stops failing on it (17c L3), within strict limits (17d M1):
+ *   - only the input(s) the broadcaster's reason names (or the only input). An input it doesn't name needs the parent
+ *     unknown on two refusals at least ORPHAN_SECOND_LOOK_MS apart, and is never set aside when the parent is a
+ *     payment of ours still going out or accepted but not mined ('unproven');
+ *   - the parent must be unknown to WhatsOnChain (404) and the 1Sat stack, and not mined or in flight in storage;
+ *   - only plain change in the default basket (P2PKH): ordinals, tokens, locks and OpNS names are never touched;
+ *   - each one is recorded on the automatic check's list with ORPHAN_MARK, and that check puts the coin back as soon
+ *     as its parent shows up (autoCoinResync.ts txSeen).
+ * Never throws.
  */
 export async function healRefusedInputs(c: SendChecksContext | null, error: unknown): Promise<HealReport | null> {
   const txo = (c?.services as { txo?: Txo } | null)?.txo;
@@ -114,25 +149,11 @@ export async function healRefusedInputs(c: SendChecksContext | null, error: unkn
     );
     await recordAutoCleared(c.kv, c.identityKey, healClearedEntries(heal));
     if (/missing ?inputs/i.test(reason ?? '')) {
-      const orphaned: string[] = [];
-      for (const op of rejectedInputs(error)) {
-        if (heal.spenders?.[op]) continue; // spent: the heal handled it
-        const [parent, vout] = op.split('_');
-        const mine = await ask(() =>
-          run(async (sp) => {
-            const user = (await sp.findUsers({ partial: { identityKey: c.identityKey } }))[0];
-            return user
-              ? (await sp.findTransactions({ partial: { userId: user.userId, txid: parent }, noRawTx: true }))[0]
-              : undefined;
-          }),
-        );
-        if (mine?.provenTxId != null || (mine?.status && IN_FLIGHT.includes(mine.status))) continue;
-        if ((await chainKnowsTx(c, parent)) !== false) continue;
-        if ((await ask(() => setAside(parent, Number(vout)))) ?? 0) orphaned.push(op);
-      }
+      const orphaned = await setAsideOrphans(c, run, rejectedInputs(error), reason, heal);
       if (orphaned.length) {
-        c.log?.('[ownSend] coins whose parent never reached the network were set aside', orphaned);
+        c.log?.("[ownSend] coins whose parent the network can't find were set aside for now", orphaned);
         heal.orphaned = orphaned;
+        await recordAutoCleared(c.kv, c.identityKey, Object.fromEntries(orphaned.map((op) => [op, ORPHAN_MARK])));
       }
     }
     return heal;
@@ -141,6 +162,91 @@ export async function healRefusedInputs(c: SendChecksContext | null, error: unkn
     return null;
   }
 }
+
+/** 17d M1: the inputs of a "Missing inputs" refusal that are set aside, within the limits healRefusedInputs states. */
+async function setAsideOrphans(
+  c: SendChecksContext,
+  run: <T>(f: (sp: MarkingProvider) => Promise<T>) => Promise<T>,
+  inputs: string[],
+  reason: string | undefined,
+  heal: HealReport,
+): Promise<string[]> {
+  const named = missingNamed(reason, inputs);
+  const sure = new Set(named.length ? named : inputs.length === 1 ? inputs : []);
+  const now = (c.now ?? Date.now)();
+  let suspects: Suspects | null = null;
+  const orphaned: string[] = [];
+  for (const op of inputs) {
+    if (heal.spenders?.[op] !== undefined) continue; // spent: the heal handled it
+    const [parent, voutText] = op.split('_');
+    const vout = Number(voutText);
+    // Plain change in the default basket, still spendable: nothing else is ever set aside here.
+    const rows = await ask(() =>
+      run(async (sp) => {
+        const user = (await sp.findUsers({ partial: { identityKey: c.identityKey } }))[0];
+        if (!user) return null;
+        const basket = (await sp.findOutputBaskets({ partial: { userId: user.userId, name: 'default' } }))[0];
+        if (!basket) return null;
+        const outs = await sp.findOutputs({
+          partial: { userId: user.userId, txid: parent, vout, spendable: true },
+          noScript: true,
+        });
+        const change = outs.filter((o) => o.change === true && o.type === 'P2PKH' && o.basketId === basket.basketId);
+        const mine = (await sp.findTransactions({ partial: { userId: user.userId, txid: parent }, noRawTx: true }))[0];
+        return { change, mine };
+      }),
+    );
+    if (!rows?.change.length) continue;
+    const status = rows.mine?.status;
+    if (rows.mine?.provenTxId != null || status === 'completed') continue;
+    if (status && (sure.has(op) ? IN_FLIGHT : IN_FLIGHT_OR_UNPROVEN).includes(status)) continue;
+    if ((await chainKnowsTx(c, parent)) !== false) {
+      if (suspects?.[c.identityKey]?.[op]) delete suspects[c.identityKey][op];
+      continue;
+    }
+    if (!sure.has(op)) {
+      // Not named: the first look only notes it; a second one at least ORPHAN_SECOND_LOOK_MS later sets it aside.
+      suspects ??= await readSuspects(c);
+      const mineSeen = (suspects[c.identityKey] ??= {});
+      const first = mineSeen[op];
+      const fresh = typeof first === 'number' && now - first <= ORPHAN_FIRST_LOOK_TTL_MS && now >= first;
+      if (!fresh) {
+        mineSeen[op] = now;
+        continue;
+      }
+      if (now - first < ORPHAN_SECOND_LOOK_MS) continue;
+      delete mineSeen[op];
+    }
+    const n = await ask(() =>
+      run(async (sp) => {
+        let k = 0;
+        for (const o of rows.change) k += await sp.updateOutput(o.outputId, { spendable: false });
+        return k;
+      }),
+    );
+    if (n) orphaned.push(op);
+  }
+  if (suspects) await writeSuspects(c, suspects);
+  return orphaned;
+}
+
+const readSuspects = async (c: SendChecksContext): Promise<Suspects> => {
+  try {
+    return ((await c.kv.get(ORPHAN_SUSPECTS_KEY))[ORPHAN_SUSPECTS_KEY] as Suspects | undefined) ?? {};
+  } catch {
+    return {};
+  }
+};
+const writeSuspects = async (c: SendChecksContext, s: Suspects): Promise<void> => {
+  const now = (c.now ?? Date.now)();
+  for (const acct of Object.values(s))
+    for (const [op, at] of Object.entries(acct ?? {})) if (now - at > ORPHAN_FIRST_LOOK_TTL_MS) delete acct[op];
+  try {
+    await c.kv.set({ [ORPHAN_SUSPECTS_KEY]: s });
+  } catch {
+    /* the first look is forgotten: the coin just waits longer */
+  }
+};
 
 /** What a refused send needs for one account. Without an account every answer is "can't tell". */
 export function refusalChecks(c: SendChecksContext | null) {

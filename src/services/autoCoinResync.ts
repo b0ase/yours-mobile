@@ -28,6 +28,13 @@ const POOL = 4;
 
 export type WocAnswer = { txid: string; confirmed: boolean } | null;
 
+/**
+ * The cleared-list value for a coin set aside because the network couldn't find its parent payment (ownSend.ts, 17d
+ * M1). Such a coin is never restored by the "both sources call it unspent" rule (an outpoint of a transaction the chain
+ * doesn't have also reads unspent); it comes back once its parent is seen (txSeen).
+ */
+export const ORPHAN_MARK = 'orphan';
+
 export interface AutoResyncDeps {
   /** Default-basket outputs storage lists as spendable ("txid_vout"). */
   coins: string[];
@@ -43,6 +50,12 @@ export interface AutoResyncDeps {
   woc?: (outpoint: string) => Promise<WocAnswer>;
   markSpent: (outpoint: string, spender: string) => Promise<number>;
   markUnspent: (outpoint: string) => Promise<number>;
+  /**
+   * Does the chain know this transaction (WhatsOnChain /tx/hash, or the 1Sat stack calls it known or mined)? true,
+   * false, or null when it can't tell. A coin set aside because its parent couldn't be found (ORPHAN_MARK) comes back
+   * only when this answers true for its parent.
+   */
+  txSeen?: (txid: string) => Promise<boolean | null>;
   /**
    * Light run (foreground / timer, every few minutes): coins the 1sat index calls unspent are not looked up on
    * WhatsOnChain one by one, so a big wallet costs a few batched index calls. Spends the index names are still
@@ -106,7 +119,9 @@ export async function autoResyncCoins(d: AutoResyncDeps): Promise<AutoResyncRepo
   // The biggest coins get WhatsOnChain whatever the index says; a foreground run looks at nothing else.
   const big = new Set(d.sats && d.woc ? bigCoins(unheld, d.sats) : []);
   const coins = mode === 'foreground' ? unheld.filter((o) => big.has(o)) : unheld;
-  const recheck = mode === 'foreground' ? [] : Object.keys(d.cleared).filter((o) => !d.ownPendingInputs.has(o));
+  const later = mode === 'foreground' ? [] : Object.keys(d.cleared).filter((o) => !d.ownPendingInputs.has(o));
+  const recheck = later.filter((o) => d.cleared[o] !== ORPHAN_MARK);
+  const orphans = later.filter((o) => d.cleared[o] === ORPHAN_MARK);
   const all = [...new Set([...coins, ...recheck])];
 
   // 1sat index, batched; a batch that fails is unknown (undefined in the map → no verdict).
@@ -174,6 +189,16 @@ export async function autoResyncCoins(d: AutoResyncDeps): Promise<AutoResyncRepo
     }
     // A restore that fails keeps the record, so a later run tries again (17b L3: the coin was left unspendable with no
     // record of it). Nothing to restore (n = 0: already spendable, or gone) ends the record.
+    const n = await d.markUnspent(o).catch(() => null);
+    if (n === null) continue;
+    if (n > 0) restored += n;
+    delete cleared[o];
+  }
+  // A coin set aside for a parent the network couldn't find: back as soon as that parent is seen (17d M1).
+  for (const o of orphans) {
+    if (!d.txSeen) break;
+    const seen = await d.txSeen(o.split('_')[0]).catch(() => null);
+    if (seen !== true) continue;
     const n = await d.markUnspent(o).catch(() => null);
     if (n === null) continue;
     if (n > 0) restored += n;
