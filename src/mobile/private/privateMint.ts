@@ -2,6 +2,7 @@ import { executeTrackedAction, inscribe, type OneSatContext } from '@1sat/action
 import { Hash, PublicKey, Script, Transaction, Utils, type CreateActionArgs, type WalletInterface } from '@bsv/sdk';
 import { publish } from '../feed/feedApi';
 import { fileToBase64, withFeeOutput } from '../mint/mint';
+import { LocationBlockedError, locationVerdict, type LocationVerdict } from './location';
 import {
   ARCHIVE_PROTOCOL,
   assembleMedia,
@@ -240,6 +241,10 @@ export async function revealMedia(
   item: PrivateItem,
 ): Promise<{ postTxid: string; inscription?: string }> {
   const { mime, name, bytes } = item.header;
+  // P0 (CEO ruling 5 Nov 2026): nothing with (possible) location metadata is published until stripping ships.
+  // Checked here, before anything is built or sent, so no caller can get round it.
+  const verdict = locationVerdict(item.file, mime);
+  if (verdict !== 'none') throw new LocationBlockedError(verdict, mime);
   const file = Array.from(item.file);
   if (revealsInline(mime, bytes)) {
     const postTxid = await publish(
@@ -268,6 +273,56 @@ export async function revealMedia(
     [REVEAL_LABEL],
   );
   return { postTxid, inscription };
+}
+
+/** Splits a reveal into the items that may go out and the ones blocked for location metadata. */
+export function planReveal<T extends PrivateItem>(
+  items: T[],
+): { ok: T[]; blocked: { item: T; verdict: LocationVerdict }[] } {
+  const ok: T[] = [];
+  const blocked: { item: T; verdict: LocationVerdict }[] = [];
+  for (const item of items) {
+    const verdict = locationVerdict(item.file, item.header.mime);
+    if (verdict === 'none') ok.push(item);
+    else blocked.push({ item, verdict });
+  }
+  return { ok, blocked };
+}
+
+/** A multi-item reveal stopped part way: `done` of `total` went out, the rest stay private. */
+export class RevealStoppedError extends Error {
+  constructor(
+    public done: number,
+    public total: number,
+    cause: unknown,
+  ) {
+    super(cause instanceof Error ? cause.message : 'reveal failed');
+    this.name = 'RevealStoppedError';
+  }
+}
+
+/**
+ * "Reveal all": skips every item blocked for location metadata (nothing is sent for them) and reveals the rest one
+ * after another. Run only after the deliberate press on the sheet.
+ */
+export async function revealMany<T extends PrivateItem>(
+  ctx: OneSatContext,
+  items: T[],
+  opts: { reveal?: typeof revealMedia; onEach?: (done: number, total: number) => void } = {},
+): Promise<{ revealed: T[]; blocked: { item: T; verdict: LocationVerdict }[] }> {
+  const { ok, blocked } = planReveal(items);
+  const reveal = opts.reveal ?? revealMedia;
+  let n = 0;
+  for (const item of ok) {
+    try {
+      await reveal(ctx, item);
+    } catch (e) {
+      throw new RevealStoppedError(n, ok.length, e);
+    }
+    n++;
+    opts.onEach?.(n, ok.length);
+  }
+  return { revealed: ok, blocked };
 }
 
 // ── mintPrivate({ source: 'x', items }) ──────────────────────────────────────
