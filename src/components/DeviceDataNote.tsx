@@ -8,7 +8,13 @@ type MoveAnswer =
       success?: boolean;
       data?: {
         onDevice: boolean;
-        backup?: { backupConfigured: boolean; pendingPush: boolean; failures: number; lastPushOkAt: number };
+        backup?: {
+          backupConfigured: boolean;
+          pendingPush: boolean;
+          failures: number;
+          lastPushOkAt: number;
+          paused?: boolean;
+        };
       };
     }
   | undefined;

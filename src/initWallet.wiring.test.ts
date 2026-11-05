@@ -328,4 +328,18 @@ describe('the real initWallet wiring', () => {
     expect(src.indexOf('keepDeviceStoreActive(storage')).toBeGreaterThan(0);
     expect(src.indexOf('keepDeviceStoreActive(storage')).toBeLessThan(src.indexOf('installCoinPreflightForWallet('));
   });
+
+  test('review 19: device sync connects through ensureBackupConnected; explicit switches go through userSwitch; paused is reported', async () => {
+    const src = readFileSync(new URL('./initWallet.ts', import.meta.url), 'utf8');
+    expect(src).toContain(
+      'ensureBackup: () => ensureBackupConnected({ storage, keep: keepActive, url: backups?.[0], addRemote })',
+    );
+    expect(src).toContain('setActiveStorage: switchActiveAs(keepActive, setActiveStorage)');
+    // This account has no backup configured: device sync has nothing to connect, nothing is paused.
+    expect(ctx.backupState()).toMatchObject({ backupConfigured: false, paused: false });
+    expect(await ctx.syncDevices()).toEqual({ ok: true, pulled: false, pushed: false });
+    // The wrapped switch still switches (to this device: a no-op here) and leaves the store enabled.
+    await ctx.setActiveStorage('local');
+    expect((ctx.storage as unknown as { isActiveEnabled: boolean }).isActiveEnabled).toBe(true);
+  });
 });

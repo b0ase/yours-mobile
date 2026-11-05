@@ -33,14 +33,18 @@ export const isOnDeviceStore = (c: StoreConfigLike): boolean => !c?.activeRemote
  *  - 'remote': still on the online backup store (it moves to this device on open);
  *  - 'device-only': on this device, but the backup is not confirmed up to date (no backup set up, a push waiting or
  *    failing): the change of recent payments may exist only in this device's data;
+ *  - 'backup-paused': on this device; the backup stopped answering during a merge and is set aside, reconnecting by
+ *    itself on a back-off (services/deviceActive.ts, review 19 F4): nothing is backed up until it answers;
  *  - 'up-to-date': on this device and the last push to the backup went through with nothing waiting.
  */
-export type DeviceDataState = 'remote' | 'device-only' | 'up-to-date';
+export type DeviceDataState = 'remote' | 'device-only' | 'backup-paused' | 'up-to-date';
 
 export const DEVICE_DATA_COPY: Record<DeviceDataState, string> = {
   remote:
     "This account's records are still on the online backup. They move to this device when the wallet opens; payments wait until then.",
   'device-only': "This account's change may need your device data. Keep this device until it shows Up to date.",
+  'backup-paused':
+    "Your online backup isn't answering, so it's paused and retrying by itself. This account's change may need your device data. Keep this device until it shows Up to date.",
   'up-to-date': "Up to date. This account's records are on this device and in your backup.",
 };
 /** The owner's copy, word for word (the 'device-only' state). */
@@ -54,8 +58,10 @@ export function deviceDataState(s: {
   pendingPush: boolean;
   failures: number;
   lastPushOkAt: number;
+  paused?: boolean;
 }): DeviceDataState {
   if (!s.onDevice) return 'remote';
+  if (s.paused) return 'backup-paused';
   if (!s.backupConfigured || s.pendingPush || s.failures > 0 || !s.lastPushOkAt) return 'device-only';
   return 'up-to-date';
 }

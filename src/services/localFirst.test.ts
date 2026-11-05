@@ -235,6 +235,9 @@ describe('review 4 Nov 2026', () => {
     expect(deviceDataState({ onDevice: true, ...b, pendingPush: true })).toBe('device-only');
     expect(deviceDataState({ onDevice: true, ...b, failures: 2 })).toBe('device-only');
     expect(deviceDataState({ onDevice: true, ...b, lastPushOkAt: 0 })).toBe('device-only');
+    // Review 19 F4: a backup set aside after a failed merge says so, and that it retries by itself.
+    expect(deviceDataState({ onDevice: true, ...b, paused: true })).toBe('backup-paused');
+    expect(deviceDataState({ onDevice: false, ...b, paused: true })).toBe('remote');
     expect(DEVICE_DATA_COPY['device-only']).toBe(DEVICE_DATA_NOTE);
     expect(DEVICE_DATA_COPY.remote).toMatch(/online backup/);
   });

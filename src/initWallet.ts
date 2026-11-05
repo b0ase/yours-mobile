@@ -25,7 +25,7 @@ import {
 } from './services/deviceSync';
 import { forceLegacyActionBatch, requireLegacyForNoSend } from './services/actionBatchMode';
 import { requireLocalStoreForChange } from './services/localFirst';
-import { keepDeviceStoreActive } from './services/deviceActive';
+import { ensureBackupConnected, keepDeviceStoreActive, switchActiveAs } from './services/deviceActive';
 import { loadMayBeOut, recheckRefusals } from './services/refusalRecheck';
 import { installCoinPreflightForWallet } from './services/coinPreflight';
 import { expiryLookups } from './services/unsentGuard';
@@ -232,7 +232,14 @@ export interface AccountContext {
   /** Push this device's rows to the backup now; a Store payment is broadcast only when this is ok (deviceSync.ts). */
   backupBeforeSend: () => Promise<BackupBeforeSend>;
   /** The backup's state for the honest copy: configured, a push waiting, failures, the last good push. */
-  backupState: () => { backupConfigured: boolean; pendingPush: boolean; failures: number; lastPushOkAt: number };
+  backupState: () => {
+    backupConfigured: boolean;
+    pendingPush: boolean;
+    failures: number;
+    lastPushOkAt: number;
+    /** The backup is set aside (it stopped answering during a merge) and reconnects on a back-off. */
+    paused: boolean;
+  };
   /** Restore actions storage marked failed whose transaction is mined (services/recoverFailed.ts). */
   recoverFailed: () => Promise<RecoverReport>;
   /** Recover one mined payment by txid from the derivation any reachable store holds (services/recoverByTxid.ts). */
@@ -565,21 +572,9 @@ export const initWallet = async (
   stopBackupCheck.verifier.onQueued(); // and once at open, for anything left from before
   const deviceSync = createDeviceSync({
     applies: () => storage.isActiveStorageProvider() && (backups?.length ?? 0) > 0,
-    ensureBackup: async () => {
-      // A backup naming another device's store is merged and this device made active again first (deviceActive).
-      if (keepActive?.needsHeal()) await keepActive.heal('device sync');
-      if (storage.getBackupStores().length > 0) return true;
-      // One set aside after a failed merge reconnects here; while one still conflicts, no second connection is opened.
-      if (keepActive && (await keepActive.reattach())) return true;
-      if (storage.getConflictingStores().length > 0) return false;
-      const url = backups?.[0];
-      if (!url) return false;
-      await Promise.race([
-        addRemote(url),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('backup connect timed out')), 20_000)),
-      ]);
-      return storage.getBackupStores().length > 0;
-    },
+    // A backup naming another store is healed first; a set-aside one only reconnects on its probe and back-off, never
+    // as a second connection (services/deviceActive.ts, review 19 F1/F5).
+    ensureBackup: () => ensureBackupConnected({ storage, keep: keepActive, url: backups?.[0], addRemote }),
     // What the pull left for the chain to settle runs soon after, outside every storage lock; not awaited here (F-A).
     pull: pullThenAdmitSoon(
       async () => {
@@ -1422,7 +1417,8 @@ export const initWallet = async (
     remoteStorage,
     permissionStore,
     envelopes,
-    setActiveStorage,
+    // Settings › Storage, Restore from backup and the move to this device: no pending heal undoes them (review 19, F3).
+    setActiveStorage: switchActiveAs(keepActive, setActiveStorage),
     addRemote,
     recoverTokens,
     fixStaleToken,
@@ -1442,6 +1438,8 @@ export const initWallet = async (
         pendingPush: st.pendingPush || st.scheduled || st.running,
         failures: st.failures,
         lastPushOkAt: st.lastPushOkAt,
+        // A backup set aside after a failed merge, reconnecting on its back-off (review 19, F4).
+        paused: keepActive?.paused().paused ?? false,
       };
     },
     backupBeforeSend: () =>

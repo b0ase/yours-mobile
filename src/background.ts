@@ -988,7 +988,13 @@ const moveStatus = () => {
   const ctx = accountContext;
   const id = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress ?? '';
   const f = moveFailures.get(id);
-  const backup = ctx?.backupState() ?? { backupConfigured: false, pendingPush: false, failures: 0, lastPushOkAt: 0 };
+  const backup = ctx?.backupState() ?? {
+    backupConfigured: false,
+    pendingPush: false,
+    failures: 0,
+    lastPushOkAt: 0,
+    paused: false,
+  };
   return {
     onDevice: !!ctx?.storage.isActiveStorageProvider(),
     moving: !!storageSwitch,

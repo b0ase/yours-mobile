@@ -16,7 +16,13 @@ import { Services, StorageIdb, StorageProvider, Wallet, WalletStorageManager } f
 import { createWalletCore } from '@1sat/wallet';
 import { forceLegacyActionBatch } from '../services/actionBatchMode';
 import { armCoinPreflight, installCoinPreflightForWallet } from '../services/coinPreflight';
-import { keepDeviceStoreActive } from '../services/deviceActive';
+import {
+  ensureBackupConnected,
+  keepDeviceStoreActive,
+  switchActiveAs,
+  type KeepDeviceActiveDeps,
+} from '../services/deviceActive';
+import { createDeviceSync } from '../services/deviceSync';
 import * as IS from '../services/inboundSync';
 import { classifySendError } from '../utils/sendErrors';
 
@@ -133,8 +139,10 @@ async function server(svc: never): Promise<Server> {
 
 /**
  * One connection, as the toolbox's StorageClient is: not a StorageProvider, `endpointUrl`, the connect handshake in
- * makeAvailable (slowed by `connectMs`), every call answered by the server's store (failing while `down`, waiting on
- * `hang` for sync reads). Its own properties (the factory's 507 wrapper) stay on the connection.
+ * makeAvailable (slowed by `connectMs`; its settings cached after the first answer, as StorageClientBase does, so a later
+ * makeAvailable makes no request even while the backup is down: review 19, F1), every other call answered by the
+ * server's store (failing while `down`, waiting on `hang` for sync reads). Its own properties (the factory's 507
+ * wrapper, the heal's deadlines) stay on the connection.
  */
 function connect(srv: Server) {
   class StorageClient {}
@@ -150,9 +158,11 @@ function connect(srv: Server) {
       if (p === 'destroy') return async () => undefined;
       if (p === 'makeAvailable')
         return async () => {
+          // As the real StorageClientBase: the settings are cached after the first answer (no request after that).
+          if (own.__settings) return own.__settings;
           if (srv.connectMs) await sleep(srv.connectMs);
           if (srv.down) throw new Error('network: wallet.1sat.test did not answer');
-          return srv.store.makeAvailable();
+          return (own.__settings = await srv.store.makeAvailable());
         };
       const v = (srv.store as unknown as Record<PropertyKey, unknown>)[p];
       if (typeof v !== 'function') return v;
@@ -214,13 +224,14 @@ async function open(
 type Open = Awaited<ReturnType<typeof open>>;
 
 /** The fix exactly as initWallet installs it, right after the factory returns. */
-const withFix = (d: Open, o: { healWaitMs?: number; log?: (...a: unknown[]) => void } = {}) =>
+type FixOptions = Omit<Partial<KeepDeviceActiveDeps>, 'setDeviceActive'>;
+const withFix = (d: Open, o: FixOptions = {}) =>
   keepDeviceStoreActive(d.storage, {
     deviceIntended: () => true,
     setDeviceActive: () => d.core.setActiveStorage('local'),
-    log: o.log ?? (() => undefined),
-    healWaitMs: o.healWaitMs,
-  });
+    log: () => undefined,
+    ...o,
+  })!;
 
 /** Which store the backup's user row names as the account's active store. */
 const backupNames = async (srv: Server, identityKey: string) =>
@@ -544,18 +555,19 @@ describe('the fix: this device stays the active store for its own payments', () 
     await p.wallet.destroy();
   });
 
-  test('the backup drops during the heal: it is set aside for this session, the payment goes out, and it is reconnected and healed later', async () => {
+  test('the backup drops during the heal: it is set aside, the payment goes out, and it reconnects and is healed by itself later', async () => {
     const s = await phoneWithCoins();
     const ext = await open(s.root, newDevice('extension'), s.srv, s.svc, { remoteActive: true });
     await ext.wallet.destroy();
     const { p } = await reopenWithSlowBackup(s); // conflicting
     s.srv.down = true;
-    const keep = withFix(p);
+    const keep = withFix(p, { retryMs: [100] });
     const r = await pay(p.wallet);
     expect(s.chain.posts).toEqual([r.txid]);
     expect(p.storage.getAllStores()).toEqual([s.phone.sik]); // the backup is out of this session for now
+    expect(keep.paused().paused).toBe(true);
     s.srv.down = false;
-    expect(await keep.reattach()).toBe(true); // device sync's reconnect
+    await until(() => !keep.paused().paused && p.storage.isActiveEnabled); // reconnected on its back-off, by itself
     expect(p.storage.isActiveEnabled).toBe(true);
     expect(p.storage.getBackupStores()).toEqual([s.srv.sik]);
     expect(await backupNames(s.srv, s.kd.identityKey)).toBe(s.phone.sik);
@@ -585,6 +597,198 @@ describe('the fix: this device stays the active store for its own payments', () 
     // Try again: it goes out.
     const r = await pay(p.wallet);
     expect(s.chain.posts).toEqual([r.txid]);
+    keep.stop();
+    await p.wallet.destroy();
+  });
+});
+
+/** Review 19 (c7ef7bde): its repros R1-R4 on the client that caches its settings, now asserting the fixed behaviour. */
+describe('review 19: a backup that is down, hung, chosen, or registered twice', () => {
+  /** The conflicting state after the extension's open and a late connect, then the backup goes down. */
+  const conflictedThenDown = async () => {
+    const s = await phoneWithCoins();
+    const ext = await open(s.root, newDevice('extension'), s.srv, s.svc, { remoteActive: true });
+    await ext.wallet.destroy();
+    const { p } = await reopenWithSlowBackup(s);
+    expect(p.storage.isActiveEnabled).toBe(false);
+    return { s, p };
+  };
+  const readsAnswer = async (p: Open, ms = 1_500) =>
+    Promise.race([
+      Promise.all([p.wallet.listOutputs({ basket: 'default' } as never), p.storage.getAuth()]).then(() => 'answered'),
+      sleep(ms).then(() => 'blocked'),
+    ]);
+
+  test('R1 (F1): device sync right after the backup was set aside, and later tries while it is still down, never wedge the wallet', async () => {
+    const { s, p } = await conflictedThenDown();
+    s.srv.down = true;
+    const keep = withFix(p, { retryMs: [150, 150] });
+    const first = await pay(p.wallet);
+    expect(p.storage.getAllStores()).toEqual([s.phone.sik]);
+    // initWallet's ensureBackup in the same device-sync run: no reconnect (before the fix it re-added the dead backup).
+    const ensure = () => ensureBackupConnected({ storage: p.storage, keep, url: REMOTE, addRemote: p.core.addRemote });
+    expect(await ensure()).toBe(false);
+    expect(p.storage.getAllStores()).toEqual([s.phone.sik]);
+    // Its back-off comes round while the backup is still down: the probe fails, nothing is added.
+    await sleep(400);
+    expect(keep.paused()).toMatchObject({ paused: true });
+    expect(keep.paused().failures).toBeGreaterThanOrEqual(2);
+    expect(await ensure()).toBe(false);
+    expect(p.storage.isAvailable()).toBe(true);
+    expect(p.storage.getAllStores()).toEqual([s.phone.sik]);
+    expect(await readsAnswer(p)).toBe('answered');
+    expect(p.storage.getBackupStores()).toEqual([]); // no throw inside ensureBackup either
+    const second = await pay(p.wallet, 500);
+    expect(s.chain.posts).toEqual([first.txid, second.txid]);
+    // Back up: it reconnects by itself and is merged; device sync then finds it.
+    s.srv.down = false;
+    await until(() => !keep.paused().paused && p.storage.isActiveEnabled);
+    expect(p.storage.getAllStores()).toEqual([s.phone.sik, s.srv.sik]);
+    expect(await ensure()).toBe(true);
+    expect(await backupNames(s.srv, s.kd.identityKey)).toBe(s.phone.sik);
+    keep.stop();
+    await p.wallet.destroy();
+  });
+
+  test('R1 through device sync (initWallet wiring): a sync while the backup is down fails softly, the next one after it is back pushes', async () => {
+    const { s, p } = await conflictedThenDown();
+    s.srv.down = true;
+    const keep = withFix(p, { retryMs: [100] });
+    const ds = createDeviceSync({
+      applies: () => p.storage.isActiveStorageProvider(),
+      ensureBackup: () => ensureBackupConnected({ storage: p.storage, keep, url: REMOTE, addRemote: p.core.addRemote }),
+      pull: async () => {
+        const reader = (p.storage as unknown as { _backups?: { storage: unknown }[] })._backups?.[0]?.storage;
+        if (!reader) throw new Error('backup storage is not connected');
+        await p.storage.syncFromReader(s.kd.identityKey, reader as never);
+      },
+      push: async () => {
+        await p.storage.updateBackups();
+      },
+      log: () => undefined,
+    });
+    expect(await ds.syncNow()).toMatchObject({ ok: false });
+    expect(await readsAnswer(p)).toBe('answered');
+    const r = await pay(p.wallet);
+    s.srv.down = false;
+    await until(() => !keep.paused().paused);
+    expect(await ds.syncNow()).toEqual({ ok: true, pulled: true, pushed: true });
+    // The payment made while the backup was paused is on the backup now.
+    expect((await s.srv.store.findTransactions({ partial: { txid: r.txid } })).length).toBe(1);
+    keep.stop();
+    await p.wallet.destroy();
+  });
+
+  test('R2: a backup-only row (random change built on the remote, and an aborted noSend: 877d2505’s shape) survives the heal and later pushes', async () => {
+    const s = await phoneWithCoins();
+    const unguard = IS.installInboundSyncGuard(StorageIdb);
+    const stop = IS.registerInboundVerifier(s.phone.sik, s.kd.identityKey, {
+      owns: IS.walletOwnership(s.root),
+      readRecord: IS.walletRecords(s.root),
+      spent: async () => ({ state: 'unclear' }),
+      log: () => undefined,
+    });
+    IS._mergeUnchecked(s.srv.store);
+    try {
+      const ext = await open(s.root, newDevice('extension'), s.srv, s.svc, { remoteActive: true, unchecked: true });
+      const done = await pay(ext.wallet, 1_000);
+      const ns = (await ext.wallet.createAction({
+        description: 'store nosend',
+        outputs: [
+          {
+            lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()).toHex(),
+            satoshis: 700,
+            outputDescription: 'store theme',
+          },
+        ],
+        options: { noSend: true, acceptDelayedBroadcast: false },
+      } as never)) as { tx: number[] };
+      const nsTxid = Transaction.fromAtomicBEEF(ns.tx).id('hex');
+      const ref = ((await s.srv.store.findTransactions({ partial: { txid: nsTxid } }))[0] as { reference: string })
+        .reference;
+      await ext.wallet.abortAction({ reference: ref });
+      await ext.wallet.destroy();
+      const snap = async (txid: string) =>
+        (await s.srv.store.findOutputs({ partial: { txid } })).map((o) => ({
+          vout: o.vout,
+          spendable: o.spendable,
+          spentBy: o.spentBy,
+          basketId: o.basketId,
+          change: o.change,
+          dp: o.derivationPrefix,
+          ds: o.derivationSuffix,
+          ci: o.customInstructions,
+          sik: o.senderIdentityKey,
+          u: new Date(o.updated_at as Date).getTime(),
+        }));
+      const before = { done: await snap(done.txid), ns: await snap(nsTxid) };
+      expect(before.done.some((o) => o.change && o.dp && o.ds)).toBe(true);
+
+      const { p, keep } = await reopenWithSlowBackup(s, true);
+      expect(p.storage.isActiveEnabled).toBe(true);
+      await p.storage.updateBackups();
+      await pay(p.wallet, 300);
+      await p.storage.updateBackups();
+      expect({ done: await snap(done.txid), ns: await snap(nsTxid) }).toEqual(before);
+      // The phone's copies keep the derivation pair (Find mined payments can rebuild from them).
+      const copies = (await p.local.findOutputs({ partial: {} })).filter(
+        (o) => (o.txid === done.txid || o.txid === nsTxid) && o.change,
+      );
+      expect(copies.length).toBeGreaterThan(0);
+      expect(copies.every((o) => !!o.derivationPrefix && !!o.derivationSuffix)).toBe(true);
+      keep!.stop();
+      await p.wallet.destroy();
+    } finally {
+      stop();
+      unguard();
+      IS._resetInboundVerifiers();
+    }
+  });
+
+  test('R3 (F2): a backup that hangs mid-merge holds the storage locks only until its deadline; reads, receipts and payments go on', async () => {
+    const { s, p } = await conflictedThenDown();
+    let release: () => void = () => undefined;
+    s.srv.hang = new Promise<void>((r) => (release = r));
+    const keep = withFix(p, { backupCallMs: 300, retryMs: [60_000] });
+    await sleep(50); // the scheduled heal has started and holds the locks
+    const t0 = Date.now();
+    expect(await readsAnswer(p, 3_000)).toBe('answered');
+    expect(Date.now() - t0).toBeLessThan(1_500);
+    await until(() => keep.paused().paused); // the hung backup is set aside right after its merge fails
+    const r = await pay(p.wallet);
+    expect(s.chain.posts).toEqual([r.txid]);
+    release();
+    s.srv.hang = undefined;
+    keep.stop();
+    await p.wallet.destroy();
+  });
+
+  test('R4 (F3): a heal pending when Restore or Settings makes the remote active does not flip it back', async () => {
+    const { s, p } = await conflictedThenDown();
+    const keep = withFix(p); // schedules a heal
+    const setActiveStorage = switchActiveAs(keep, p.core.setActiveStorage); // ctx.setActiveStorage, as initWallet
+    await setActiveStorage(REMOTE);
+    expect(p.storage.isActiveStorageProvider()).toBe(false);
+    await sleep(300);
+    expect(p.storage.isActiveStorageProvider()).toBe(false);
+    expect(await backupNames(s.srv, s.kd.identityKey)).toBe(s.srv.sik);
+    // The move back to this device (explicit) works, and heals apply again after it.
+    await setActiveStorage('local');
+    expect(p.storage.isActiveStorageProvider()).toBe(true);
+    expect(p.storage.isActiveEnabled).toBe(true);
+    keep.stop();
+    await p.wallet.destroy();
+  });
+
+  test('F5: the same backup connected twice (the late connect and addRemote) is registered once', async () => {
+    const { s, p } = await conflictedThenDown();
+    await p.core.addRemote(REMOTE); // a second, prompt connection: its setActive heals, both stay registered
+    expect(p.storage.getAllStores()).toEqual([s.phone.sik, s.srv.sik, s.srv.sik]);
+    const keep = withFix(p);
+    await until(() => p.storage.getAllStores().length === 2);
+    expect(p.storage.getAllStores()).toEqual([s.phone.sik, s.srv.sik]);
+    expect(p.storage.isActiveEnabled).toBe(true);
+    await p.storage.updateBackups();
     keep.stop();
     await p.wallet.destroy();
   });
