@@ -86,6 +86,7 @@ const SubscriptionsTab = SUBSCRIPTIONS_ENABLED ? lazy(() => import('../pots/Subs
 import { verifyLockTx, type VerifyResult } from './verify';
 import { fmtToken } from './receipt';
 import { TokenLocksSection } from './TokenLocksSection';
+import { BsvLocksSection } from './BsvLocksSection';
 import { ARTIST_PROGRAMME_ENABLED } from '../storeBuild';
 import { registerBacking } from '../media/artists/programme/api';
 import { TEMPLATE_CONFIRM, TEMPLATE_NOTE, TEMPLATES, reviewAllowed, type LockTemplate } from './templates';
@@ -712,6 +713,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
               ) : (
                 [...plans].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(renderPlan)
               )}
+              <BsvLocksSection height={height} plans={plans} onChanged={() => void refresh()} />
               <TokenLocksSection height={height} />
               <button
                 className="text-xs py-2 flex items-center gap-1 justify-center"

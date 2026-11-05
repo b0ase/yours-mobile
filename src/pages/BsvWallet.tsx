@@ -755,6 +755,34 @@ export const BsvWallet = () => {
     setLockData(lockData);
   };
 
+  // A restored wallet / new device: find its BSV locks on chain once (seed-derived lock key, 1Sat's indexer), file
+  // them into the lock basket, then refresh the Locks row (which also auto-claims any that are ready). Quiet unless found.
+  const bsvLockScanTried = useRef(new Set<string>());
+  useEffect(() => {
+    if (!identityAddress || !apiContext.services || bsvLockScanTried.current.has(identityAddress)) return;
+    bsvLockScanTried.current.add(identityAddress);
+    let live = true;
+    void (async () => {
+      try {
+        const { bsvLocksScanned, scanBsvLocks } = await import('../mobile/locks/lockFinder');
+        if (bsvLocksScanned(identityAddress)) return;
+        const res = await scanBsvLocks(apiContext, identityAddress);
+        if (!live || res.added === 0) return;
+        setLockData(await getLockData.execute(apiContext, {}));
+        snackRef.current(
+          `Found ${res.added} BSV lock${res.added === 1 ? '' : 's'} on chain. See Pots & Locks › Locks.`,
+          'info',
+          5000,
+        );
+      } catch {
+        // indexer down: the next open tries again, and Find my locks is always there
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [identityAddress, apiContext]);
+
   useEffect(() => {
     if (loadLocks) loadLocks();
     getAndSetBsvBalance();
