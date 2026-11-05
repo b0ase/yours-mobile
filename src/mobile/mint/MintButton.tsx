@@ -7,6 +7,12 @@ import { MAX_PRIVATE_BYTES, mintPrivateMedia, privateMediaBytes } from '../priva
 import { mediaKindFor, mintIsPrivate } from '../private/records';
 import { PrivacyChoice } from '../private/PrivacyChoice';
 import {
+  locationVerdict,
+  privateMintLocationNote,
+  publicMintBlockedMessage,
+  type LocationVerdict,
+} from '../private/location';
+import {
   AppWindow,
   BookOpen,
   Bot,
@@ -239,6 +245,24 @@ export const MintSheet = ({
 
   useEffect(() => () => void (picked && URL.revokeObjectURL(picked.url)), [picked]);
 
+  // Location metadata in the picked file (P0, CEO ruling 5 Nov 2026): a public mint is refused, a private one gets a
+  // note. null = not checked yet (or no file).
+  const [location, setLocation] = useState<LocationVerdict | null>(null);
+  useEffect(() => {
+    setLocation(null);
+    if (!picked) return;
+    // Photos, videos and audio carry location metadata; documents, pages and 3D models are not checked.
+    if (!/^(image|video|audio)\//i.test(picked.type)) return setLocation('none');
+    let live = true;
+    picked.file
+      .arrayBuffer()
+      .then((buf) => live && setLocation(locationVerdict(new Uint8Array(buf), picked.type)))
+      .catch(() => live && setLocation('unknown'));
+    return () => {
+      live = false;
+    };
+  }, [picked]);
+
   // The wallet's own collections (parents it holds), for "Add to existing collection".
   useEffect(() => {
     if (step !== 'media') return;
@@ -426,6 +450,10 @@ export const MintSheet = ({
     if (!size.ok) return setFormError(size.message);
     if (!isPrivate && collKind === 'existing' && collection.kind !== 'existing')
       return setFormError('Choose a collection.');
+    if (!(isPrivate && privKind)) {
+      if (location === null) return setFormError('Checking this file for location data… try again in a moment.');
+      if (location !== 'none') return setFormError(publicMintBlockedMessage(picked.type, location));
+    }
     const err = isPrivate
       ? validateForm({ title, description, collection: { kind: 'none' } })
       : (validateForm({ title, description, collection }) ??
@@ -440,6 +468,11 @@ export const MintSheet = ({
     if (blockedText({ title, description, collection })) {
       setConfirming(false);
       return setFormError(BLOCKED_MESSAGE);
+    }
+    // A public mint never publishes location metadata (re-checked here: the file may have changed since review).
+    if (!(isPrivate && privKind) && location !== 'none') {
+      setConfirming(false);
+      return setFormError(publicMintBlockedMessage(picked.type, location ?? 'unknown'));
     }
     setBusy(true);
     try {
@@ -663,6 +696,13 @@ export const MintSheet = ({
                     ? 'Only you can see it: it is encrypted on this device before it goes on chain. You can reveal it later.'
                     : "Public: anyone can see it on chain, for good. Don't mint anything you don't own or that's illegal."}
                 </p>
+                {picked && location && location !== 'none' && (
+                  <p className="text-xs m-0" role="status" style={{ color: '#FFB020' }}>
+                    {isPrivate && privKind
+                      ? privateMintLocationNote(picked.type, location)
+                      : publicMintBlockedMessage(picked.type, location)}
+                  </p>
+                )}
                 {picked && (
                   <div className="rounded-xl overflow-hidden border" style={{ borderColor: BORDER }}>
                     {kind === 'image' && (

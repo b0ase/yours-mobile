@@ -60,6 +60,7 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { resolveImageUrl, useIdentity } from '../../hooks/useIdentity';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { getErrorMessage } from '../../utils/tools';
+import { locationVerdict, postBlockedMessage } from '../private/location';
 import { openDappBrowser } from '../dappBrowser';
 import { REMOTE_ACTIONS, actionLabel, postActions, type PostAction } from './sources';
 import { fileToBase64, formatBytes, txFeeSats } from '../mint/mint';
@@ -949,12 +950,18 @@ const Composer = ({
       if (/^image\//i.test(file.type)) {
         if (items.filter((i) => i.kind === 'image').length >= MAX_POST_IMAGES)
           throw new Error(`Up to ${MAX_POST_IMAGES} images per post.`);
+        // Re-drawn on a canvas: the JPEG that goes out carries no EXIF / GPS. Checked anyway (P0, 5 Nov 2026).
         const blob = await shrinkImage(file);
         const part = await toPart(blob, 'image/jpeg', `image${items.length + 1}.jpg`);
+        const v = locationVerdict(part.bytes, 'image/jpeg');
+        if (v !== 'none') throw new Error(postBlockedMessage('image/jpeg', v));
         return { ...base, kind: 'image' as const, mime: 'image/jpeg', bytes: blob.size, part };
       }
       const plan = planAv(file.size, file.type);
       if (plan.mode === 'reject') throw new Error(plan.message);
+      // Video / audio go out byte for byte: refuse any with location metadata (©xyz, ISO 6709, XMP GPS…).
+      const v = locationVerdict(new Uint8Array(await file.arrayBuffer()), file.type);
+      if (v !== 'none') throw new Error(postBlockedMessage(file.type, v));
       const av = kind as 'video' | 'audio';
       const poster = av === 'video' ? await videoPoster(file) : null;
       if (plan.mode === 'inline')
