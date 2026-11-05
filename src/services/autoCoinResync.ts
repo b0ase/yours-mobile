@@ -13,6 +13,10 @@
  *   unspent is restored to spendable (a mistake can always be undone).
  * - One run at a time (shared lock with the manual Resync), at most once per gap per account, persisted so a worker
  *   restart does not reset it.
+ * - The biggest coins (bigCoins) are looked up on WhatsOnChain in every run even when the index calls them unspent,
+ *   and the app coming to the front runs just that check at most once a minute (owner's iPhone, 4 Nov 2026), under the
+ *   worker-wide ~3 requests a second (services/wocLimiter.ts). The rule above is unchanged: such a coin clears only on a confirmed
+ *   WhatsOnChain spend, or when both sources name the same spender.
  * Any lookup that fails leaves the coin as it is.
  */
 import { mapPool, withRetry } from './storageReconcile';
@@ -23,6 +27,13 @@ export const AUTO_SPENDS_BATCH = 100;
 const POOL = 4;
 
 export type WocAnswer = { txid: string; confirmed: boolean } | null;
+
+/**
+ * The cleared-list value for a coin set aside because the network couldn't find its parent payment (ownSend.ts, 17d
+ * M1). Such a coin is never restored by the "both sources call it unspent" rule (an outpoint of a transaction the chain
+ * doesn't have also reads unspent); it comes back once its parent is seen (txSeen).
+ */
+export const ORPHAN_MARK = 'orphan';
 
 export interface AutoResyncDeps {
   /** Default-basket outputs storage lists as spendable ("txid_vout"). */
@@ -40,11 +51,57 @@ export interface AutoResyncDeps {
   markSpent: (outpoint: string, spender: string) => Promise<number>;
   markUnspent: (outpoint: string) => Promise<number>;
   /**
+   * Does the chain know this transaction (WhatsOnChain /tx/hash, or the 1Sat stack calls it known or mined)? true,
+   * false, or null when it can't tell. A coin set aside because its parent couldn't be found (ORPHAN_MARK) comes back
+   * only when this answers true for its parent.
+   */
+  txSeen?: (txid: string) => Promise<boolean | null>;
+  /**
    * Light run (foreground / timer, every few minutes): coins the 1sat index calls unspent are not looked up on
    * WhatsOnChain one by one, so a big wallet costs a few batched index calls. Spends the index names are still
    * confirmed with WhatsOnChain as usual. Full runs (at most every AUTO_RESYNC_GAP_MS) do the per-coin fallback.
    */
   light?: boolean;
+  /** Overrides `light`. 'foreground': only the biggest coins (bigCoins), both lookups each, no undo pass. */
+  mode?: AutoResyncMode;
+  /**
+   * Satoshis per coin. With it, the biggest coins (bigCoins) are looked up on WhatsOnChain even when the 1sat index
+   * calls them unspent or can't answer, in every mode: the index can miss a spend made from another device (owner's
+   * iPhone, 4 Nov 2026: three coins the extension spent still counted as ~$10.50 on the phone).
+   */
+  sats?: Record<string, number>;
+}
+
+export type AutoResyncMode = 'full' | 'light' | 'foreground';
+
+/** At most this many coins get the WhatsOnChain check whatever the index says… */
+export const AUTO_RESYNC_BIG_COINS = 8;
+/** …stopping once they hold this share of the spendable sats. */
+export const AUTO_RESYNC_BIG_SHARE = 0.95;
+
+/**
+ * Pure: the biggest coins, largest first, until they hold `share` of the total or `max` are taken. A stale big coin is
+ * what makes a balance wrong and a send fail; the small ones are left to the batched index and the full pass.
+ */
+export function bigCoins(
+  coins: string[],
+  sats: Record<string, number>,
+  max = AUTO_RESYNC_BIG_COINS,
+  share = AUTO_RESYNC_BIG_SHARE,
+): string[] {
+  const valued = coins
+    .map((o) => ({ o, s: Number(sats[o]) > 0 ? Number(sats[o]) : 0 }))
+    .filter((c) => c.s > 0)
+    .sort((a, b) => b.s - a.s || (a.o < b.o ? -1 : 1));
+  const total = valued.reduce((n, c) => n + c.s, 0);
+  const out: string[] = [];
+  let held = 0;
+  for (const c of valued) {
+    if (out.length >= max || (out.length > 0 && held >= total * share)) break;
+    out.push(c.o);
+    held += c.s;
+  }
+  return out;
 }
 
 export type AutoResyncReport = {
@@ -57,8 +114,14 @@ export type AutoResyncReport = {
 /** Pure core. Never throws for lookup failures (fail closed per coin). */
 export async function autoResyncCoins(d: AutoResyncDeps): Promise<AutoResyncReport> {
   const isSpender = (t: unknown): t is string => typeof t === 'string' && TXID.test(t) && !d.ownPendingTxids.has(t);
-  const coins = d.coins.filter((o) => !d.ownPendingInputs.has(o));
-  const recheck = Object.keys(d.cleared).filter((o) => !d.ownPendingInputs.has(o));
+  const mode: AutoResyncMode = d.mode ?? (d.light ? 'light' : 'full');
+  const unheld = d.coins.filter((o) => !d.ownPendingInputs.has(o));
+  // The biggest coins get WhatsOnChain whatever the index says; a foreground run looks at nothing else.
+  const big = new Set(d.sats && d.woc ? bigCoins(unheld, d.sats) : []);
+  const coins = mode === 'foreground' ? unheld.filter((o) => big.has(o)) : unheld;
+  const later = mode === 'foreground' ? [] : Object.keys(d.cleared).filter((o) => !d.ownPendingInputs.has(o));
+  const recheck = later.filter((o) => d.cleared[o] !== ORPHAN_MARK);
+  const orphans = later.filter((o) => d.cleared[o] === ORPHAN_MARK);
   const all = [...new Set([...coins, ...recheck])];
 
   // 1sat index, batched; a batch that fails is unknown (undefined in the map → no verdict).
@@ -77,6 +140,8 @@ export async function autoResyncCoins(d: AutoResyncDeps): Promise<AutoResyncRepo
       /* unknown */
     }
   });
+  // One at a time; the worker-wide WhatsOnChain limiter keeps this and every other caller under ~3 a second
+  // (services/wocLimiter.ts).
   const askWoc = async (o: string): Promise<WocAnswer | undefined> => {
     if (!d.woc) return undefined;
     try {
@@ -90,7 +155,9 @@ export async function autoResyncCoins(d: AutoResyncDeps): Promise<AutoResyncRepo
   let released = 0;
   let restored = 0;
   for (const o of coins) {
-    if (!index.has(o)) continue;
+    // An index that can't answer leaves a coin alone, except a big one: WhatsOnChain alone can still clear it below,
+    // with a confirmed spend.
+    if (!index.has(o) && !big.has(o)) continue;
     let by: string | null = null;
     const ix = index.get(o);
     if (isSpender(ix)) {
@@ -100,7 +167,9 @@ export async function autoResyncCoins(d: AutoResyncDeps): Promise<AutoResyncRepo
         const w = await askWoc(o);
         if (w && w.txid.toLowerCase() === ix.toLowerCase()) by = ix;
       } else by = ix;
-    } else if (!d.light) {
+    } else if (mode === 'full' || big.has(o)) {
+      // The same rule as the full pass: a WhatsOnChain spend clears a coin the index calls unspent only once it is
+      // CONFIRMED (a mempool spend seen by one source alone never clears a coin).
       const w = await askWoc(o);
       if (w && w.confirmed && isSpender(w.txid)) by = w.txid;
     }
@@ -118,7 +187,20 @@ export async function autoResyncCoins(d: AutoResyncDeps): Promise<AutoResyncRepo
       const w = await askWoc(o);
       if (w !== null) continue; // spent, or unknown
     }
-    const n = await d.markUnspent(o).catch(() => 0);
+    // A restore that fails keeps the record, so a later run tries again (17b L3: the coin was left unspendable with no
+    // record of it). Nothing to restore (n = 0: already spendable, or gone) ends the record.
+    const n = await d.markUnspent(o).catch(() => null);
+    if (n === null) continue;
+    if (n > 0) restored += n;
+    delete cleared[o];
+  }
+  // A coin set aside for a parent the network couldn't find: back as soon as that parent is seen (17d M1).
+  for (const o of orphans) {
+    if (!d.txSeen) break;
+    const seen = await d.txSeen(o.split('_')[0]).catch(() => null);
+    if (seen !== true) continue;
+    const n = await d.markUnspent(o).catch(() => null);
+    if (n === null) continue;
     if (n > 0) restored += n;
     delete cleared[o];
   }
@@ -133,17 +215,29 @@ export const AUTO_RESYNC_GAP_MS = 30 * 60 * 1000;
  * spent stayed in the phone's balance for hours). Run on a timer and when the app comes to the front.
  */
 export const AUTO_RESYNC_LIGHT_GAP_MS = 5 * 60 * 1000;
+/**
+ * The app or popup came to the front (COIN_CHECK_DUE) and no light run is due: check just the biggest coins on both
+ * sources, at most this often (owner's iPhone, 4 Nov 2026: coins the extension spent were still counted ~16 minutes
+ * later). A few requests a time, so opening the app catches a stale big coin within seconds.
+ */
+export const AUTO_RESYNC_FOREGROUND_GAP_MS = 60 * 1000;
 
-export type AutoResyncState = Record<string, { at?: number; lightAt?: number; cleared?: Record<string, string> }>;
+export type AutoResyncState = Record<
+  string,
+  { at?: number; lightAt?: number; fgAt?: number; cleared?: Record<string, string> }
+>;
 
-/** Pure: which run is due now: a full one, a light one, or none. */
+/** Pure: which run is due now: a full one, a light one, a foreground one (only when asked for), or none. */
 export const autoResyncMode = (
-  s: { at?: number; lightAt?: number } | undefined,
+  s: { at?: number; lightAt?: number; fgAt?: number } | undefined,
   now: number,
-): 'full' | 'light' | null => {
+  o: { foreground?: boolean } = {},
+): AutoResyncMode | null => {
   if (shouldAutoResync(s?.at, now)) return 'full';
   const last = Math.max(s?.at ?? 0, s?.lightAt ?? 0);
-  return now - last >= AUTO_RESYNC_LIGHT_GAP_MS ? 'light' : null;
+  if (now - last >= AUTO_RESYNC_LIGHT_GAP_MS) return 'light';
+  if (!o.foreground) return null;
+  return now - Math.max(last, s?.fgAt ?? 0) >= AUTO_RESYNC_FOREGROUND_GAP_MS ? 'foreground' : null;
 };
 
 /** Pure: is a run due for this account (never run, or the last one is older than the gap)? */
@@ -164,26 +258,72 @@ export async function runAutoResyncIfDue(
   kv: KV,
   load: (cleared: Record<string, string>) => Promise<AutoResyncDeps | null>,
   now = Date.now(),
+  o: { foreground?: boolean } = {},
 ): Promise<AutoResyncReport | null> {
   const read = async () => ((await kv.get(AUTO_RESYNC_KEY))[AUTO_RESYNC_KEY] as AutoResyncState | undefined) ?? {};
   const state = await read();
-  const mode = autoResyncMode(state[identityKey], now);
+  const mode = autoResyncMode(state[identityKey], now, o);
   if (!mode) return null;
-  const stamp = mode === 'full' ? { at: now, lightAt: now } : { lightAt: now };
+  const stamp = mode === 'full' ? { at: now, lightAt: now } : mode === 'light' ? { lightAt: now } : { fgAt: now };
   return withCoinResyncLock(async () => {
-    const deps = await load(state[identityKey]?.cleared ?? {});
+    // Read again under the lock: the list may have changed while this waited for it (17b L3).
+    const loadedCleared = (await read())[identityKey]?.cleared ?? {};
+    const deps = await load(loadedCleared);
     // Not ready (no services/storage yet): don't start the wait, the next unlock tries again.
     if (!deps) return null;
     // Written before the run, so a crash mid-run still waits the gap.
-    const before = await read();
-    await kv.set({ [AUTO_RESYNC_KEY]: { ...before, [identityKey]: { ...before[identityKey], ...stamp } } });
-    const report = await autoResyncCoins({ ...deps, light: mode === 'light' });
-    const latest = await read();
-    await kv.set({
-      [AUTO_RESYNC_KEY]: { ...latest, [identityKey]: { ...latest[identityKey], ...stamp, cleared: report.cleared } },
+    await withStateWrite(async () => {
+      const before = await read();
+      await kv.set({ [AUTO_RESYNC_KEY]: { ...before, [identityKey]: { ...before[identityKey], ...stamp } } });
+    });
+    const report = await autoResyncCoins({ ...deps, mode });
+    await withStateWrite(async () => {
+      const latest = await read();
+      // Coins cleared by someone else while this ran (the send check and the heal, recordAutoCleared) are kept, so
+      // later runs still re-check them and can undo a mistake.
+      const meanwhile = Object.fromEntries(
+        Object.entries(latest[identityKey]?.cleared ?? {}).filter(([op, by]) => loadedCleared[op] !== by),
+      );
+      await kv.set({
+        [AUTO_RESYNC_KEY]: {
+          ...latest,
+          [identityKey]: { ...latest[identityKey], ...stamp, cleared: { ...report.cleared, ...meanwhile } },
+        },
+      });
     });
     return report;
   });
+}
+
+let stateWrites: Promise<unknown> = Promise.resolve();
+/**
+ * Every read-modify-write of the persisted state runs one at a time (review 17, F9: an interleaved write could drop a
+ * cleared entry, and with it that coin's undo). Held only around the read and the write, never across lookups.
+ */
+function withStateWrite<T>(f: () => Promise<T>): Promise<T> {
+  const run = stateWrites.then(f, f);
+  stateWrites = run.catch(() => undefined);
+  return run;
+}
+
+/**
+ * Remember coins cleared outside a run (the check before a send, services/coinPreflight.ts, and the heal after a
+ * refusal, invalidSendHeal.ts) in the same list, so the next runs re-check them and put one back if both sources later
+ * call it unspent. Never throws.
+ */
+export async function recordAutoCleared(kv: KV, identityKey: string, entries: Record<string, string>): Promise<void> {
+  if (!identityKey || !Object.keys(entries).length) return;
+  try {
+    await withStateWrite(async () => {
+      const all = ((await kv.get(AUTO_RESYNC_KEY))[AUTO_RESYNC_KEY] as AutoResyncState | undefined) ?? {};
+      const mine = all[identityKey] ?? {};
+      await kv.set({
+        [AUTO_RESYNC_KEY]: { ...all, [identityKey]: { ...mine, cleared: { ...(mine.cleared ?? {}), ...entries } } },
+      });
+    });
+  } catch {
+    /* the coin stays cleared; only its automatic re-check is lost */
+  }
 }
 
 /** How long after unlock the automatic check waits, so the first balance read and address sync go first. */
@@ -191,7 +331,7 @@ export const AUTO_RESYNC_DELAY_MS = 45_000;
 /** Outputs read per storage-lock hold; the lock is released between pages so the balance can read in between. */
 export const AUTO_RESYNC_PAGE = 500;
 
-type Row = { txid?: string; vout: number; spendable: boolean; spentBy?: number | null };
+type Row = { txid?: string; vout: number; satoshis?: number; spendable: boolean; spentBy?: number | null };
 /** The few reads the check needs from the active store (a WalletStorageProvider reader). */
 export interface AutoResyncReader {
   findUsers: (a: { partial: { identityKey: string } }) => Promise<{ userId: number }[]>;
@@ -211,6 +351,8 @@ export interface AutoResyncReader {
 export type AutoResyncRead = {
   userId: number;
   coins: string[];
+  /** Satoshis of each spendable coin (for bigCoins). */
+  sats: Record<string, number>;
   ownPendingTxids: Set<string>;
   ownPendingInputs: Set<string>;
 };
@@ -247,6 +389,7 @@ export async function readAutoResyncCoins(
   const pendingIds = new Set(head.pending.map((t) => t.transactionId));
   const ownPendingTxids = new Set(head.pending.map((t) => t.txid).filter((t): t is string => !!t));
   const coins: string[] = [];
+  const sats: Record<string, number> = {};
   const ownPendingInputs = new Set<string>();
   for (let offset = 0; ; offset += page) {
     // The store may switch (or lock) between pages: stop rather than read another store.
@@ -261,10 +404,13 @@ export async function readAutoResyncCoins(
     for (const o of rows) {
       if (!o.txid) continue;
       const op = `${o.txid}_${o.vout}`;
-      if (o.spendable) coins.push(op);
+      if (o.spendable) {
+        coins.push(op);
+        sats[op] = Number(o.satoshis) || 0;
+      }
       if (o.spentBy != null && pendingIds.has(o.spentBy)) ownPendingInputs.add(op);
     }
     if (rows.length < page) break;
   }
-  return { userId: head.userId, coins, ownPendingTxids, ownPendingInputs };
+  return { userId: head.userId, coins, sats, ownPendingTxids, ownPendingInputs };
 }

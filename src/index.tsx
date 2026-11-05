@@ -10,6 +10,7 @@ import './index.css';
 import { applyBootAccent } from './mobile/theme/accent';
 import { nameFailedFetch } from './utils/nameFailedFetch';
 import { installBchatFetch } from './services/bchatOrigin';
+import { installWocLimiter } from './services/wocLimiter';
 import { lazy, Suspense } from 'react';
 import { SEEDLESS_ENABLED } from './mobile/passkey/prf';
 import { takeHandCashWebReturn } from './mobile/passkey/handcashWeb';
@@ -20,6 +21,8 @@ window.Buffer = Buffer;
 nameFailedFetch();
 // bChatX requests follow the live origin (www.bchatx.com, else chat.bwalletx.com).
 installBchatFetch();
+// WhatsOnChain requests from the page share one ~3/s limit, as the background's do (services/wocLimiter.ts).
+installWocLimiter();
 // App accent (Theme → App colours) before the first paint: the extension popup/side panel and the web edition.
 applyBootAccent();
 
