@@ -261,7 +261,11 @@ export const prioritySync = async (deps: PrioritySyncDeps): Promise<PrioritySync
   });
 
   const failed = coinsFailed + namesFailed;
-  if (failed === 0 && deferred === 0 && maxSafeScore > lastScore) await store.setLastScore(maxSafeScore);
+  // Deferred names hold the cursor only when this sync loads names (namesPerRun > 0), so a later slice is streamed again.
+  // With names not loaded here at all (the default), holding it for them meant every run re-read the whole history
+  // (owner, 5 Nov 2026: a minute-long rescan behind every payment). They stay classified; failures still hold it.
+  const namesHold = deferred > 0 && (deps.namesPerRun ?? DEFAULT_NAMES_PER_RUN) > 0;
+  if (failed === 0 && !namesHold && maxSafeScore > lastScore) await store.setLastScore(maxSafeScore);
   return {
     processed,
     failed,
