@@ -20,6 +20,7 @@ import { makeCoinIntake, type CoinKey } from '../services/prioritySyncRun';
 import { _resetReceiveState, checkReceiveAddresses, setArriving } from '../services/receiveGuard';
 import { createPullTrigger, createReceiveWatch, type ReceiveWatchDeps } from '../services/receiveWatch';
 import { makeSpendCheck } from '../services/spendCheck';
+import { createTakenRecheck } from '../services/takenRecheck';
 
 const key = PrivateKey.fromRandom();
 const RECEIVE = key.toPublicKey().toAddress();
@@ -186,5 +187,61 @@ describe('M2: a copy on the remote store does not count the swept dollar twice',
     setArriving(r.outputs);
     expect(r.satoshis).toBe(0);
     expect((await balanceSplit(w, { accountedFor: remoteActive })).total).toBe(TRUTH);
+  });
+});
+
+describe('H1 leftover (review 20 re-check): the index lags, so a swept coin was taken in; one re-check puts it right', () => {
+  test('taken in on an "unspent" that was only index lag: 13,999,980 until the re-check, then 7,999,980', async () => {
+    const p = payment();
+    const s = new FakeStore();
+    s.out(s.tx('e'.repeat(64), 'completed'), 0, BEFORE, 'default', true);
+    const w = s.wallet();
+    const accountedFor = accountedVia(async () => ({ store: s.held(), userId: 1 }));
+    // The 1sat index has not seen the extension's sweep yet; WhatsOnChain can't answer.
+    const index = new Map<string, string>();
+    const spends = makeSpendCheck({
+      index: spendIndex(index),
+      woc: async () => {
+        throw new Error('woc 503');
+      },
+      wocFor: 'unanswered',
+    });
+    const pulls: number[] = [];
+    const known = async (txids: string[]) => knownTxids(s.held(), 1, txids);
+    const recheck = createTakenRecheck({
+      spends,
+      heldTxids: known,
+      // Lower spendability only (initWallet: storage.updateOutput, and the automatic coin check's cleared list).
+      markSpent: async (outpoint, spender) => {
+        const [txid, vout] = outpoint.split('.');
+        const row = s.row(txid, Number(vout));
+        if (!row?.spendable) return 0;
+        row.spendable = false;
+        const by = s.txs.find((t) => t.txid === spender);
+        if (by) row.spentBy = by.transactionId;
+        return 1;
+      },
+      askPull: () => (pulls.push(1), true),
+    });
+    // The address sync's intake (fails open), remembering what it took in on that answer.
+    const intake = makeCoinIntake({
+      wallet: w as never,
+      keyByHash,
+      processed: { has: async () => false, add: async () => undefined },
+      lock: createInternalizeLock(),
+      spends,
+      knownTxids: known,
+      unknownSpend: 'take',
+      onTaken: (ops) => recheck.add(ops),
+    });
+    expect(await intake.take(p.txid, Array.from(p.beef))).toBe('taken');
+    pullAndAdmit(s);
+    expect((await balanceSplit(w, { accountedFor })).total).toBe(TRUTH + ONE); // 13,999,980: the reviewer's probe
+    // The index catches up; the next watcher look or guard run re-checks what was taken in.
+    index.set(`${p.txid}.0`, SWEEP);
+    await recheck.run({ force: true });
+    expect((await balanceSplit(w, { accountedFor })).total).toBe(TRUTH); // 7,999,980
+    expect(pulls.length).toBe(0); // the spender is already here (the pull brought it): nothing more to pull
+    expect(recheck.size()).toBe(0);
   });
 });

@@ -164,6 +164,8 @@ export type ReceiveWatchDeps = {
   intake: () => Promise<Pick<CoinIntake, 'coins' | 'take'>>;
   /** The balance changed (shown pending, or taken in): the UI reads it now. */
   changed: (found: number) => void;
+  /** Coins taken in on an "unspent" answer, asked about again (services/takenRecheck.ts; review 20 re-check, H1). */
+  recheck?: () => Promise<unknown>;
   /** Per-transaction back-off for one that will not come in (services/internalizeBackoff.ts; review 20, L4). */
   backoff?: { due(txid: string): boolean; fail(txid: string, err?: unknown): number; clear(txid: string): void };
   /** Tests only: shorter STREAM_TIMEOUT_MS / FROM_DEADLINE_MS. */
@@ -261,6 +263,7 @@ export function createReceiveWatch(deps: ReceiveWatchDeps) {
     );
     const rows = await collect(addresses, from);
     if (!inFront() || !deps.active()) return { ...r, skipped: 'inactive' };
+    await deps.recheck?.().catch(() => undefined);
 
     const byOutpoint = latestState(rows);
     const latest = [...byOutpoint.values()];
@@ -274,7 +277,8 @@ export function createReceiveWatch(deps: ReceiveWatchDeps) {
 
     /** Spent outputs: never arriving; a spender this wallet does not hold means another copy took it: pull. */
     const settleSpent = async (outpoints: string[], spenders: string[]) => {
-      dropArriving(outpoints);
+      // Not those the guard keeps while their spender's change waits for admission here (M5).
+      dropArriving(outpoints, { keepWaiting: true });
       if (!spenders.length) return;
       const known = await deps.knownTxids(spenders);
       const foreign = spenders.filter((t) => !known.has(t));

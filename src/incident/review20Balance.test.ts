@@ -10,8 +10,15 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { DEPOSIT_BASKET } from '@1sat/types';
 import { FakeStore } from '../testing/fakeWalletStore';
 import { balanceSplit } from '../services/depositBalance';
-import { accountedVia } from '../services/heldOutpoints';
-import { _resetReceiveState, addArriving, arrivingNow, setArriving } from '../services/receiveGuard';
+import { accountedVia, carriesVia, waitingVia } from '../services/heldOutpoints';
+import {
+  _resetReceiveState,
+  addArriving,
+  arrivingNow,
+  checkReceiveAddresses,
+  setArriving,
+} from '../services/receiveGuard';
+import { makeSpendCheck } from '../services/spendCheck';
 
 const P = 'a'.repeat(64);
 const SW = 'b'.repeat(64);
@@ -65,22 +72,59 @@ describe('review 20: each outpoint counts once at every moment of a balance read
     expect((await arrivingNow(async () => [])).counted).toBe(0);
   });
 
-  test('M5: a pulled spender whose change waits for admission does not hide the payment', async () => {
+  /** The guard as initWallet runs it: the owner stream still lists P unspent; the spend index names SW. */
+  const guardRun = async (s: FakeStore) => {
+    const read = async () => ({ store: s.held(), userId: 1 });
+    const g = await checkReceiveAddresses(['1Receive'], {
+      ownerSync: () =>
+        (async function* () {
+          yield { outpoint: `${P}.0`, score: 1_793_900_000.5 };
+        })(),
+      outputSats: async () => ONE,
+      walletOutpoints: async () => [],
+      accountedFor: accountedVia(read),
+      spends: makeSpendCheck({ index: async (b) => b.map(() => SW) }),
+      waitingSpenders: waitingVia(read),
+    });
+    setArriving(g.outputs);
+  };
+  const balance = (s: FakeStore) => {
+    const read = async () => ({ store: s.held(), userId: 1 });
+    return balanceSplit(s.wallet(), { accountedFor: accountedVia(read), spenderCarries: carriesVia(read) });
+  };
+
+  test('M5 (real flow): a pulled sweep whose change waits for admission: P counts until then, then the change', async () => {
     const s = new FakeStore();
     s.out(s.tx(E, 'completed'), 0, BEFORE, 'default', true);
-    const w = s.wallet();
-    const accountedFor = accountedVia(async () => ({ store: s.held(), userId: 1 }));
-    // This device took P, then the pull brought the other copy's sweep SW and lowered P (spent by SW). SW's change C
-    // arrives not spendable, on the admission list.
+    // This device took P; the pull brought the other copy's sweep SW and lowered P (spent by SW); SW's change C waits.
     const p = s.out(s.tx(P, 'unproven'), 0, ONE, DEPOSIT_BASKET, false);
-    addArriving([{ outpoint: `${P}.0`, satoshis: ONE, address: '' }]);
     const sw = s.tx(SW, 'unproven');
     p.spendable = false;
     p.spentBy = sw.transactionId;
     const c = s.out(sw, 0, ONE - FEE, 'default', true, false);
-    expect((await balanceSplit(w, { accountedFor })).total).toBe(BEFORE + ONE); // was 2,000,000; the fee shows on admission
+    await guardRun(s);
+    expect((await balance(s)).total).toBe(BEFORE + ONE); // was 2,000,000 (the reviewer's probe)
     c.spendable = true; // admitted
-    expect((await balanceSplit(w, { accountedFor })).total).toBe(BEFORE + ONE - FEE);
+    expect((await balance(s)).total).toBe(BEFORE + ONE - FEE);
+  });
+
+  test('M5: the pull left P unlinked (its spender not completed yet): once before admission, once after', async () => {
+    const s = new FakeStore();
+    s.out(s.tx(E, 'completed'), 0, BEFORE, 'default', true);
+    const p = s.out(s.tx(P, 'unproven'), 0, ONE, DEPOSIT_BASKET, false);
+    p.spendable = false; // lowered by the merge, no spend link (SW is not completed)
+    const c = s.out(s.tx(SW, 'unproven'), 0, ONE - FEE, 'default', true, false);
+    await guardRun(s);
+    expect((await balance(s)).total).toBe(BEFORE + ONE);
+    c.spendable = true;
+    expect((await balance(s)).total).toBe(BEFORE + ONE - FEE); // never BEFORE + 2 × ONE
+  });
+
+  test('M5: a spender this device does not hold yet (no pull so far) is not counted on its word: P is left out', async () => {
+    const s = new FakeStore();
+    s.out(s.tx(E, 'completed'), 0, BEFORE, 'default', true);
+    await guardRun(s);
+    expect((await balance(s)).total).toBe(BEFORE);
   });
 
   test('our own sweep with its change counted, or a payment out with no change here: the value is accounted', async () => {

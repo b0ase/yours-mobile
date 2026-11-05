@@ -105,13 +105,16 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
   const once = (mode: 'full' | 'push'): Promise<DeviceSyncResult> => {
     if (!running) return start(mode);
     if (mode === 'push' || runningMode === 'full') return running;
+    // Waits until nothing but a full sync runs: a pushNow (a Store payment's backup-before-send) that started while the
+    // first push ran is waited for too, never run alongside (review 20 re-check, N4).
     if (!fullAfter)
-      fullAfter = running
-        .catch(() => undefined)
-        .then(() => {
-          fullAfter = null;
-          return running && runningMode === 'full' ? running : start('full');
-        });
+      fullAfter = (async () => {
+        // Read fresh after every await (a pushNow may have started meanwhile).
+        const now = () => ({ r: running as Promise<DeviceSyncResult> | null, m: runningMode as typeof runningMode });
+        for (let c = now(); c.r && c.m !== 'full'; c = now()) await c.r.catch(() => undefined);
+        fullAfter = null;
+        return now().r ?? start('full');
+      })();
     return fullAfter;
   };
 

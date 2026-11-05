@@ -213,6 +213,11 @@ export const makeCoinIntake = (d: {
   foreignSpend?: (spenders: string[]) => void;
   /** The spend check can't answer: take the coin as before ('take', the address sync) or wait ('skip', the watcher). */
   unknownSpend?: 'take' | 'skip';
+  /**
+   * The outputs just taken in. An "unspent" answer can be the index lagging behind another copy's sweep, so these are
+   * asked about again for a while (services/takenRecheck.ts; review 20 re-check, H1).
+   */
+  onTaken?: (outpoints: string[]) => void;
 }): CoinIntake => {
   const lock = d.lock ?? createInternalizeLock();
   const parse = (txid: string, beef: number[]) => {
@@ -262,6 +267,7 @@ export const makeCoinIntake = (d: {
           description: `Received ${satoshis} sats`.slice(0, 50),
         });
         if (complete) await d.processed.add(txid);
+        d.onTaken?.(outputs.map((o) => `${txid}.${o.outputIndex}`));
         return 'taken';
       });
     },
@@ -280,6 +286,8 @@ export const runPrioritySync = async (
     spends?: SpendCheck;
     knownTxids?: (txids: string[]) => Promise<Set<string>>;
     foreignSpend?: (spenders: string[]) => void;
+    /** Coins taken in on an "unspent" or unclear answer, to be asked about again (services/takenRecheck.ts). */
+    onTaken?: (outpoints: string[]) => void;
   },
 ): Promise<PrioritySyncResult> => {
   const services = ctx.services;
@@ -307,6 +315,7 @@ export const runPrioritySync = async (
     knownTxids: opts.knownTxids,
     foreignSpend: opts.foreignSpend,
     unknownSpend: 'take',
+    onTaken: opts.onTaken,
   });
   try {
     const { height } = await ctx.wallet.getHeight({});
@@ -343,6 +352,13 @@ export const runPrioritySync = async (
         // Spent elsewhere (or unclear): not recorded, so a later run looks again once the indexer has the spend.
         return r === 'spent' || r === 'unclear' ? 'skipped' : undefined;
       },
+      // One batched spend lookup for every candidate before the coins are taken in one by one (review 20 re-check, N3);
+      // the spend check keeps the answers a while (cacheMs), so each take() asks no one.
+      beforeCoins: opts.spends
+        ? async (outpoints) => {
+            await opts.spends!(outpoints).catch(() => undefined);
+          }
+        : undefined,
       onProgress: opts.onProgress,
       onCoinsReady: opts.onCoinsReady,
     });

@@ -68,6 +68,8 @@ export type BalanceSplit = { total: number; pending: number };
 export type BalanceOptions = {
   /** Of these outpoints, the ones wallet storage now counts (services/heldOutpoints.ts, via initWallet). */
   accountedFor?: (outpoints: string[]) => Promise<Iterable<string>>;
+  /** Of these spenders, the ones whose change here counts now (services/heldOutpoints.ts carriesVia; M5). */
+  spenderCarries?: (spenders: string[]) => Promise<Iterable<string>>;
 };
 
 /**
@@ -83,13 +85,13 @@ export async function balanceSplit(
   wallet: DepositLister & { balance(): Promise<number> } & Partial<ActionLister>,
   opts: BalanceOptions = {},
 ): Promise<BalanceSplit> {
-  const heldBefore = await arrivingHeld(opts.accountedFor);
+  const heldBefore = await arrivingHeld(opts.accountedFor, opts.spenderCarries);
   const [funded, waiting, changeOnTheWay] = await Promise.all([
     wallet.balance(),
     depositBasketSats(wallet).catch(() => 0),
     wallet.listActions ? inFlightChangeSats(wallet as ActionLister).catch(() => 0) : 0,
   ]);
-  const { counted, pending } = await arrivingNow(opts.accountedFor, Date.now(), heldBefore);
+  const { counted, pending } = await arrivingNow(opts.accountedFor, Date.now(), heldBefore, opts.spenderCarries);
   const total = funded + waiting + changeOnTheWay + counted;
   return { total, pending: Math.max(0, Math.min(total, pending)) };
 }

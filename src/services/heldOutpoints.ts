@@ -122,3 +122,49 @@ export const accountedVia =
     const states = await outpointStates(r.store, r.userId, outpoints);
     return [...states].filter(([, s]) => s === 'accounted').map(([k]) => k);
   };
+
+/**
+ * Spending transactions as this device sees them (review 20 re-check, M5): 'absent' (not here: not pulled yet),
+ * 'waiting' (here, but some output of it waits for admission: not spendable, not spent, in a basket), or 'carries' (here,
+ * and every output of it here counts, or it has none: a payment out). By transaction id, no user scan.
+ */
+export type SpenderState = 'absent' | 'waiting' | 'carries';
+
+export async function spenderStates(
+  store: HeldStore,
+  userId: number,
+  txids: Iterable<string>,
+): Promise<Map<string, SpenderState>> {
+  const out = new Map<string, SpenderState>();
+  for (const txid of new Set(txids)) {
+    const [t] = await store.findTransactions({ partial: { userId, txid }, noRawTx: true });
+    if (typeof t?.transactionId !== 'number') {
+      out.set(txid, 'absent');
+      continue;
+    }
+    const outs = await store.findOutputs({ partial: { transactionId: t.transactionId }, noScript: true });
+    out.set(
+      txid,
+      outs.some((o) => o.spendable !== true && o.spentBy == null && o.basketId != null) ? 'waiting' : 'carries',
+    );
+  }
+  return out;
+}
+
+const spendersIn =
+  (read: DeviceReads, want: SpenderState) =>
+  async (txids: string[]): Promise<string[]> => {
+    const r = txids.length ? await read() : undefined;
+    if (!r) return [];
+    return [...(await spenderStates(r.store, r.userId, txids))].filter(([, s]) => s === want).map(([t]) => t);
+  };
+
+/**
+ * The receive guard: of these spenders, the ones this device holds whose change still waits for admission. A payment
+ * one of them spent keeps counting as arriving until that change is admitted, instead of vanishing for minutes while
+ * WhatsOnChain catches up (review 20 re-check, M5). A spender not here is not taken at its word (H1).
+ */
+export const waitingVia = (read: DeviceReads) => spendersIn(read, 'waiting');
+
+/** The balance: of these spenders, the ones whose outputs here count now (an arriving entry of theirs is then dropped). */
+export const carriesVia = (read: DeviceReads) => spendersIn(read, 'carries');

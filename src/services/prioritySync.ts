@@ -83,6 +83,8 @@ export type PrioritySyncDeps = {
   internalizeCoin?: (txid: string, beef: number[]) => Promise<void | 'skipped'>;
   /** Names in flight at once (default NAMES_CONCURRENCY). */
   namesConcurrency?: number;
+  /** Before the coins part, with every unspent output of the transactions it will look at (one batched spend check). */
+  beforeCoins?: (outpoints: string[]) => Promise<void>;
 };
 
 export type PrioritySyncResult = {
@@ -192,6 +194,11 @@ export const prioritySync = async (deps: PrioritySyncDeps): Promise<PrioritySync
     if (await store.has(txid)) continue;
     todo.push(txid);
   }
+
+  if (todo.length && deps.beforeCoins)
+    await deps.beforeCoins(
+      todo.flatMap((t) => (byTxid.get(t) ?? []).filter((o) => !o.spendTxid).map((o) => o.outpoint)),
+    );
 
   // 2. Coins: classify each (raw tx, parallel) and take the ones paying >1 sat at once.
   let checked = 0;
