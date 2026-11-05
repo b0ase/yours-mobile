@@ -224,14 +224,48 @@ export function wocTxKnownLookup(o: WocOptions = {}): (txid: string) => Promise<
   };
 }
 
+/** A transaction as the chain has it: its raw bytes (which hash to the txid), not there, or no clear answer. */
+export type ChainTxAnswer = { state: 'found'; rawTx: number[] } | { state: 'unknown' } | { state: 'unclear' };
+
 /**
- * Both chain questions the inbound sync check asks (services/inboundSync.ts), sharing ONE pacer so together they stay
+ * A transaction's raw bytes from WhatsOnChain (GET /tx/<txid>/hex), paced and retried like wocSpentLookup: what an
+ * output really locks and holds, whatever a backup row claims (services/inboundSync.ts, review 16d D5). 404 is
+ * unknown; bytes that don't hash to the txid are unclear, never "found".
+ */
+export function wocRawTxLookup(o: WocOptions = {}): (txid: string) => Promise<ChainTxAnswer> {
+  const { slot, timed, sleep, net, attempts } = o.pacing ?? wocPacing(o);
+  return async (txid) => {
+    if (!TXID.test(txid)) return { state: 'unclear' };
+    for (let i = 0; i < attempts; i++) {
+      await slot();
+      try {
+        const r = await timed(`https://api.whatsonchain.com/v1/bsv/${net}/tx/${txid}/hex`);
+        if (r.status === 404) return { state: 'unknown' };
+        if (r.status === 429 || r.status >= 500) {
+          await sleep(Math.min(8000, 1000 * 2 ** i));
+          continue;
+        }
+        if (!r.ok) return { state: 'unclear' };
+        const text = (await r.text()).trim().toLowerCase();
+        if (!/^[0-9a-f]+$/.test(text)) return { state: 'unclear' };
+        const tx = Transaction.fromHex(text);
+        return tx.id('hex') === txid ? { state: 'found', rawTx: tx.toBinary() } : { state: 'unclear' };
+      } catch {
+        await sleep(Math.min(8000, 1000 * 2 ** i));
+      }
+    }
+    return { state: 'unclear' };
+  };
+}
+
+/**
+ * The chain questions the inbound sync check asks (services/inboundSync.ts), sharing ONE pacer so together they stay
  * within anonymous WhatsOnChain's ~3 calls a second (review 16b, R4: two pacers doubled the rate, and the 429s).
  */
 export function wocChainLookups(o: WocOptions = {}) {
   const pacing = wocPacing(o);
   const shared = { ...o, pacing };
-  return { spent: wocSpentLookup(shared), txKnown: wocTxKnownLookup(shared) };
+  return { spent: wocSpentLookup(shared), txKnown: wocTxKnownLookup(shared), chainTx: wocRawTxLookup(shared) };
 }
 
 /** WhatsOnChain's script hash for a locking script: sha256 of the script's bytes, byte-reversed, as hex. */
