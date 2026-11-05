@@ -22,6 +22,10 @@ import { armCoinPreflight, installCoinPreflightForWallet, SpentElsewhereError } 
 import { registerWalletOriginator } from '../services/seedChange';
 import { classifySendError, SPENT_ELSEWHERE_MESSAGE, SPENT_ELSEWHERE_SHORT_MESSAGE } from '../utils/sendErrors';
 
+/** Real wallet-toolbox end to end: a time limit a busy machine can't reach (see incident/doublePay.test.ts). */
+const E2E_TIMEOUT_MS = 30_000;
+const e2e = (name: string, fn: () => Promise<unknown>) => test(name, fn, E2E_TIMEOUT_MS);
+
 const HEIGHT = 974_050;
 // 87ccbc90… vouts 4, 1, 0 (spent by the extension), 2 and 6 (still unspent).
 const X = 49_634_148;
@@ -355,7 +359,7 @@ const reopen = (d: Device) => openDevice(d.name, d.kd, d.svc, false);
 const ALL = X + Y + Z + S1 + S2;
 
 describe('cross-device coins (owner, 4 Nov 2026): a coin spent from the other device', () => {
-  test('BEFORE (no check): the phone still counts the coin, picks it, and the network refuses the send', async () => {
+  e2e('BEFORE (no check): the phone still counts the coin, picks it, and the network refuses the send', async () => {
     const { chain, phone, ext, coins } = await twoDevices({ check: false });
     const spent = await send(ext, 4_000_000);
     expect(spent.inputs).toEqual([coins.Z.coin]); // the extension spent vout 0 (4,488,921)
@@ -371,7 +375,7 @@ describe('cross-device coins (owner, 4 Nov 2026): a coin spent from the other de
     expect(r.reqs.some((q) => q.status === 'invalid')).toBe(true);
   });
 
-  test('AFTER: the send succeeds with other coins; the dead coin is cleared before anything is signed', async () => {
+  e2e('AFTER: the send succeeds with other coins; the dead coin is cleared before anything is signed', async () => {
     const { chain, phone, ext, coins, kv } = await twoDevices();
     const spent = await send(ext, 4_000_000);
     expect(spent.inputs).toEqual([coins.Z.coin]);
@@ -395,7 +399,7 @@ describe('cross-device coins (owner, 4 Nov 2026): a coin spent from the other de
     await expectNoJunk(again, [ok.txid, ok2.txid]);
   });
 
-  test("AFTER, the incident's $10 send at 14:10: not enough left, a clear message, nothing signed", async () => {
+  e2e("AFTER, the incident's $10 send at 14:10: not enough left, a clear message, nothing signed", async () => {
     const { chain, phone, ext, coins } = await twoDevices();
     await send(ext, 4_000_000); // 14:04 tokenblaster payment from the extension: vout 0
     let err: unknown;
@@ -414,24 +418,27 @@ describe('cross-device coins (owner, 4 Nov 2026): a coin spent from the other de
     expect(r.coin(coins.Z.coin)?.spendable).toBe(false);
   });
 
-  test('both coins the second pick used were also spent: stop after one re-pick, "try again", nothing signed', async () => {
-    const { chain, phone, ext, coins } = await twoDevices();
-    await send(ext, 4_000_000); // Z
-    await send(ext, 6_000_000); // Y
-    let err: unknown;
-    await send(phone, 3_000_000).catch((e) => (err = e));
-    expect(err).toBeInstanceOf(SpentElsewhereError);
-    expect((err as SpentElsewhereError).short).toBe(false);
-    expect(classifySendError((err as Error).message).message).toBe(SPENT_ELSEWHERE_MESSAGE);
-    expect(chain.posts).toHaveLength(2);
-    // Try again: the next tap sends with a live coin.
-    const ok = await send(phone, 3_000_000);
-    expect(ok.inputs).not.toContain(coins.Z.coin);
-    expect(ok.inputs).not.toContain(coins.Y.coin);
-    await expectNoJunk(await reopen(phone), [ok.txid]);
-  });
+  e2e(
+    'both coins the second pick used were also spent: stop after one re-pick, "try again", nothing signed',
+    async () => {
+      const { chain, phone, ext, coins } = await twoDevices();
+      await send(ext, 4_000_000); // Z
+      await send(ext, 6_000_000); // Y
+      let err: unknown;
+      await send(phone, 3_000_000).catch((e) => (err = e));
+      expect(err).toBeInstanceOf(SpentElsewhereError);
+      expect((err as SpentElsewhereError).short).toBe(false);
+      expect(classifySendError((err as Error).message).message).toBe(SPENT_ELSEWHERE_MESSAGE);
+      expect(chain.posts).toHaveLength(2);
+      // Try again: the next tap sends with a live coin.
+      const ok = await send(phone, 3_000_000);
+      expect(ok.inputs).not.toContain(coins.Z.coin);
+      expect(ok.inputs).not.toContain(coins.Y.coin);
+      await expectNoJunk(await reopen(phone), [ok.txid]);
+    },
+  );
 
-  test('a mined spend the 1sat index has not seen: WhatsOnChain alone (confirmed) clears it', async () => {
+  e2e('a mined spend the 1sat index has not seen: WhatsOnChain alone (confirmed) clears it', async () => {
     const { chain, phone, ext, coins } = await twoDevices();
     const spent = await send(ext, 4_000_000);
     chain.mined.add(spent.txid);
@@ -441,18 +448,21 @@ describe('cross-device coins (owner, 4 Nov 2026): a coin spent from the other de
     expect((await rows(phone)).coin(coins.Z.coin)?.spendable).toBe(false);
   });
 
-  test('one unconfirmed source only (index lags, WhatsOnChain mempool): not cleared here; the broadcaster decides', async () => {
-    const { chain, phone, ext, coins } = await twoDevices();
-    await send(ext, 4_000_000);
-    chain.indexMisses.add(coins.Z.coin);
-    let err: unknown;
-    await send(phone, 3_000_000).catch((e) => (err = e));
-    // As before this fix: refused by the network, which the existing heal + one retry handle (spentRetry.ts).
-    expect(isInvalidTxReview(err)).toBe(true);
-    expect(chain.lookups.woc).toBeGreaterThan(0);
-  });
+  e2e(
+    'one unconfirmed source only (index lags, WhatsOnChain mempool): not cleared here; the broadcaster decides',
+    async () => {
+      const { chain, phone, ext, coins } = await twoDevices();
+      await send(ext, 4_000_000);
+      chain.indexMisses.add(coins.Z.coin);
+      let err: unknown;
+      await send(phone, 3_000_000).catch((e) => (err = e));
+      // As before this fix: refused by the network, which the existing heal + one retry handle (spentRetry.ts).
+      expect(isInvalidTxReview(err)).toBe(true);
+      expect(chain.lookups.woc).toBeGreaterThan(0);
+    },
+  );
 
-  test('the chain unreachable: the send is never blocked by the check (fails open, as before)', async () => {
+  e2e('the chain unreachable: the send is never blocked by the check (fails open, as before)', async () => {
     const { chain, phone } = await twoDevices();
     chain.indexDown = true;
     chain.wocDown = true;
@@ -463,7 +473,7 @@ describe('cross-device coins (owner, 4 Nov 2026): a coin spent from the other de
     expect(chain.posts).toEqual([ok.txid]);
   });
 
-  test("the scope covers the wallet's own originator only: a site's payment is never checked", async () => {
+  e2e("the scope covers the wallet's own originator only: a site's payment is never checked", async () => {
     registerWalletOriginator('admin.bwalletx.test'); // initWallet registers ADMIN_ORIGINATOR the same way
     const site = await twoDevices();
     await send(site.ext, 4_000_000);
@@ -480,7 +490,7 @@ describe('cross-device coins (owner, 4 Nov 2026): a coin spent from the other de
     expect(ok.inputs).not.toContain(own.coins.Z.coin);
   });
 
-  test("the coin's spender is the phone's OWN failed payment (it may have gone out): never re-picked here", async () => {
+  e2e("the coin's spender is the phone's OWN failed payment (it may have gone out): never re-picked here", async () => {
     const { chain, phone } = await twoDevices();
     // The phone's first send reaches the network but is answered REJECTED, and the UTXO check can't tell: storage
     // marks it failed and frees its coin (the case refusalRecheck.ts exists for).
@@ -497,7 +507,7 @@ describe('cross-device coins (owner, 4 Nov 2026): a coin spent from the other de
     expect(chain.posts).toEqual([t1]);
   });
 
-  test("not the wallet's own send (no scope held): untouched, no lookups", async () => {
+  e2e("not the wallet's own send (no scope held): untouched, no lookups", async () => {
     const { chain, phone } = await twoDevices();
     const ok = await send(phone, 3_000_000, false);
     expect(ok.cleared).toBe(0);

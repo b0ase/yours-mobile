@@ -33,6 +33,13 @@ import {
   REFUSED_MAYBE_SENT_MESSAGE,
 } from '../utils/sendErrors';
 
+/**
+ * Each case drives the real wallet-toolbox end to end (two IndexedDB stores, real signing). On a busy machine (load
+ * average 32, 5 Nov 2026) the first case ran past bun's 5 s default; the time limit here is one load can't reach.
+ */
+const E2E_TIMEOUT_MS = 30_000;
+const e2e = (name: string, fn: () => Promise<unknown>) => test(name, fn, E2E_TIMEOUT_MS);
+
 const HEIGHT = 974_050;
 const X = 49_634_148;
 const Y = 6_967_249;
@@ -479,26 +486,32 @@ const BOB3 = new P2PKH().lock(PrivateKey.fromRandom().toAddress()).toHex();
 const toBob = (c: Chain) => paidTo(c, BOB).length + paidTo(c, BOB2).length + paidTo(c, BOB3).length;
 
 describe('17c: a refusal that may have gone out is never "not sent", and the re-tap is asked first', () => {
-  test('S1 (17b M1 residual): false REJECTED, WoC lagging, the stack following its own refusal: "can\'t confirm"; the re-tap is asked; BOB paid once', async () => {
-    const p = await phoneWithCoins();
-    p.chain.wocLagNew = true;
-    const { first } = await falseRefusal(p, 3_000_000);
-    expect(first.shown).toMatchObject({ moneyMoved: 'unknown', message: REFUSED_MAYBE_SENT_MESSAGE });
-    await newCoin(p, 3_100_000);
-    const second = await tapSend(p, 3_000_000);
-    expect(second.asked).toHaveLength(1); // "Your earlier payment of … may already have gone out. Send another anyway?"
-    expect(toBob(p.chain)).toBe(1);
-  });
+  e2e(
+    'S1 (17b M1 residual): false REJECTED, WoC lagging, the stack following its own refusal: "can\'t confirm"; the re-tap is asked; BOB paid once',
+    async () => {
+      const p = await phoneWithCoins();
+      p.chain.wocLagNew = true;
+      const { first } = await falseRefusal(p, 3_000_000);
+      expect(first.shown).toMatchObject({ moneyMoved: 'unknown', message: REFUSED_MAYBE_SENT_MESSAGE });
+      await newCoin(p, 3_100_000);
+      const second = await tapSend(p, 3_000_000);
+      expect(second.asked).toHaveLength(1); // "Your earlier payment of … may already have gone out. Send another anyway?"
+      expect(toBob(p.chain)).toBe(1);
+    },
+  );
 
-  test('S2: a dollar amount re-priced a minute later (+37 sats) is still the same payment to the person: asked', async () => {
-    const p = await phoneWithCoins();
-    await falseRefusal(p, 3_000_000);
-    await newCoin(p, 3_100_000);
-    expect((await tapSend(p, 3_000_037)).asked).toHaveLength(1);
-    expect(toBob(p.chain)).toBe(1);
-  });
+  e2e(
+    'S2: a dollar amount re-priced a minute later (+37 sats) is still the same payment to the person: asked',
+    async () => {
+      const p = await phoneWithCoins();
+      await falseRefusal(p, 3_000_000);
+      await newCoin(p, 3_100_000);
+      expect((await tapSend(p, 3_000_037)).asked).toHaveLength(1);
+      expect(toBob(p.chain)).toBe(1);
+    },
+  );
 
-  test('S3: the same $name payee gets a fresh address each time: still asked (keyed on what was typed)', async () => {
+  e2e('S3: the same $name payee gets a fresh address each time: still asked (keyed on what was typed)', async () => {
     const p = await phoneWithCoins();
     await falseRefusal(p, 3_000_000);
     await newCoin(p, 3_100_000);
@@ -506,65 +519,80 @@ describe('17c: a refusal that may have gone out is never "not sent", and the re-
     expect(toBob(p.chain)).toBe(1);
   });
 
-  test('S4 (17c M1): "Send anyway" reuses the dead coin: neutral words, never "send again"; the next tap is asked again', async () => {
-    const p = await phoneWithCoins();
-    const { t1 } = await falseRefusal(p, 3_000_000, BOB);
-    for (const [o, by] of p.chain.spentBy) if (by === t1) p.chain.indexMisses.add(o);
-    const second = await tapSend(p, 3_000_000, { to: BOB2, sendAnyway: true });
-    expect(second.answer).toBe(OWN_COIN_OTHER_PAYMENT_MESSAGE);
-    expect(second.shown?.moneyMoved).toBe('unknown');
-    expect(second.shown?.message).not.toMatch(/someone else|then send again/i);
-    expect((await tapSend(p, 3_000_000, { to: BOB3 })).asked).toHaveLength(1);
-    expect(toBob(p.chain)).toBe(1);
-  });
+  e2e(
+    'S4 (17c M1): "Send anyway" reuses the dead coin: neutral words, never "send again"; the next tap is asked again',
+    async () => {
+      const p = await phoneWithCoins();
+      const { t1 } = await falseRefusal(p, 3_000_000, BOB);
+      for (const [o, by] of p.chain.spentBy) if (by === t1) p.chain.indexMisses.add(o);
+      const second = await tapSend(p, 3_000_000, { to: BOB2, sendAnyway: true });
+      expect(second.answer).toBe(OWN_COIN_OTHER_PAYMENT_MESSAGE);
+      expect(second.shown?.moneyMoved).toBe('unknown');
+      expect(second.shown?.message).not.toMatch(/someone else|then send again/i);
+      expect((await tapSend(p, 3_000_000, { to: BOB3 })).asked).toHaveLength(1);
+      expect(toBob(p.chain)).toBe(1);
+    },
+  );
 
-  test('S5 (17c M3): recorded while WoC was down; WoC back but lagging: still asked (no chain look decides it)', async () => {
-    const p = await phoneWithCoins();
-    p.chain.wocDown = true;
-    const { first } = await falseRefusal(p, 3_000_000);
-    expect(first.shown?.moneyMoved).toBe('unknown');
-    p.chain.wocDown = false;
-    p.chain.wocLagNew = true;
-    await newCoin(p, 3_100_000);
-    expect((await tapSend(p, 3_000_000)).asked).toHaveLength(1);
-    expect(toBob(p.chain)).toBe(1);
-  });
+  e2e(
+    'S5 (17c M3): recorded while WoC was down; WoC back but lagging: still asked (no chain look decides it)',
+    async () => {
+      const p = await phoneWithCoins();
+      p.chain.wocDown = true;
+      const { first } = await falseRefusal(p, 3_000_000);
+      expect(first.shown?.moneyMoved).toBe('unknown');
+      p.chain.wocDown = false;
+      p.chain.wocLagNew = true;
+      await newCoin(p, 3_100_000);
+      expect((await tapSend(p, 3_000_000)).asked).toHaveLength(1);
+      expect(toBob(p.chain)).toBe(1);
+    },
+  );
 
-  test('S7 (17c M4): the refusal names ANOTHER spender, WoC down: proven, the coin is cleared and the one retry pays BOB once', async () => {
-    const p = await phoneWithCoins();
-    const { picked } = await extensionSpends(p.chain, p.ext);
-    for (const o of picked) p.chain.wocLag.add(o);
-    p.chain.utxoStatusDown = true;
-    p.chain.wocDown = true;
-    const first = await tapSend(p, 3_000_000);
-    expect(first.outcome?.ok).toBe(true);
-    expect(first.outcome?.retried).toBe(true);
-    expect(toBob(p.chain)).toBe(1);
-    // Nothing is held against BOB: the next payment to him goes ahead without a question.
-    expect((await p.recent.pending(p.kd.identityKey, [BOB_TYPED])).length).toBe(0);
-  });
+  e2e(
+    'S7 (17c M4): the refusal names ANOTHER spender, WoC down: proven, the coin is cleared and the one retry pays BOB once',
+    async () => {
+      const p = await phoneWithCoins();
+      const { picked } = await extensionSpends(p.chain, p.ext);
+      for (const o of picked) p.chain.wocLag.add(o);
+      p.chain.utxoStatusDown = true;
+      p.chain.wocDown = true;
+      const first = await tapSend(p, 3_000_000);
+      expect(first.outcome?.ok).toBe(true);
+      expect(first.outcome?.retried).toBe(true);
+      expect(toBob(p.chain)).toBe(1);
+      // Nothing is held against BOB: the next payment to him goes ahead without a question.
+      expect((await p.recent.pending(p.kd.identityKey, [BOB_TYPED])).length).toBe(0);
+    },
+  );
 
-  test('17d M2: the send hangs and the app is killed before the answer: the next tap is still asked; BOB paid once', async () => {
-    const p = await phoneWithCoins();
-    const first = await tapSend(p, 3_000_000, { killed: true }); // it went out; the page never heard back
-    expect(first.outcome?.ok).toBe(true);
-    // The app restarts: a new Send page over the same device store.
-    p.recent = createUncertainSends(p.pageStore);
-    const again = await tapSend(p, 3_000_000);
-    expect(again.asked.map((e) => e.recipient)).toEqual([BOB_TYPED]); // before the fix: [] (not asked)
-    expect(paidTo(p.chain, BOB)).toHaveLength(1);
-  });
-  test('A + C (review 17 F1): "Send anyway" with the same payee picking the dead coin: no retry, the earlier payment named', async () => {
-    const p = await phoneWithCoins();
-    const { t1 } = await falseRefusal(p, 3_000_000);
-    const second = await tapSend(p, 2_900_000, { sendAnyway: true });
-    expect(second.outcome?.retried).toBe(false);
-    expect(second.answer).toBe(ownPaymentOutMessage(t1));
-    expect(second.shown).toMatchObject({ kind: 'earlier-payment-out', moneyMoved: 'yes', txid: t1 });
-    expect(toBob(p.chain)).toBe(1);
-  });
+  e2e(
+    '17d M2: the send hangs and the app is killed before the answer: the next tap is still asked; BOB paid once',
+    async () => {
+      const p = await phoneWithCoins();
+      const first = await tapSend(p, 3_000_000, { killed: true }); // it went out; the page never heard back
+      expect(first.outcome?.ok).toBe(true);
+      // The app restarts: a new Send page over the same device store.
+      p.recent = createUncertainSends(p.pageStore);
+      const again = await tapSend(p, 3_000_000);
+      expect(again.asked.map((e) => e.recipient)).toEqual([BOB_TYPED]); // before the fix: [] (not asked)
+      expect(paidTo(p.chain, BOB)).toHaveLength(1);
+    },
+  );
+  e2e(
+    'A + C (review 17 F1): "Send anyway" with the same payee picking the dead coin: no retry, the earlier payment named',
+    async () => {
+      const p = await phoneWithCoins();
+      const { t1 } = await falseRefusal(p, 3_000_000);
+      const second = await tapSend(p, 2_900_000, { sendAnyway: true });
+      expect(second.outcome?.retried).toBe(false);
+      expect(second.answer).toBe(ownPaymentOutMessage(t1));
+      expect(second.shown).toMatchObject({ kind: 'earlier-payment-out', moneyMoved: 'yes', txid: t1 });
+      expect(toBob(p.chain)).toBe(1);
+    },
+  );
 
-  test('R4 / 17b L1: the earlier payment went to ALICE: never "won\'t pay twice", and a site gets no txid', async () => {
+  e2e('R4 / 17b L1: the earlier payment went to ALICE: never "won\'t pay twice", and a site gets no txid', async () => {
     const p = await phoneWithCoins();
     const { t1 } = await falseRefusal(p, 3_000_000, ALICE);
     for (const [o, by] of p.chain.spentBy) if (by === t1) p.chain.indexMisses.add(o);
@@ -581,7 +609,7 @@ describe('17c: a refusal that may have gone out is never "not sent", and the re-
 });
 
 describe('17b H1: a double spend not proven dead always reads "can\'t confirm"', () => {
-  test("R1: the wallet's own send; the toolbox clears the coin itself (released 0); the re-tap is asked", async () => {
+  e2e("R1: the wallet's own send; the toolbox clears the coin itself (released 0); the re-tap is asked", async () => {
     const p = await phoneWithCoins();
     const { picked } = await extensionSpends(p.chain, p.ext);
     doubleSpendWorld(p.chain, picked);
@@ -592,7 +620,7 @@ describe('17b H1: a double spend not proven dead always reads "can\'t confirm"',
     expect(paidTo(p.chain, BOB)).toHaveLength(0);
   });
 
-  test("R2: a site's payment refused as a double spend, the coin cleared by the heal", async () => {
+  e2e("R2: a site's payment refused as a double spend, the coin cleared by the heal", async () => {
     const p = await phoneWithCoins();
     const { picked, tExt } = await extensionSpends(p.chain, p.ext);
     doubleSpendWorld(p.chain, picked, { flaky: true });
@@ -602,7 +630,7 @@ describe('17b H1: a double spend not proven dead always reads "can\'t confirm"',
     expect(clearedList(p.kv, p.phone)[picked[0]]).toBe(tExt);
   });
 
-  test('R3: REJECTED → heal → the one retry is itself refused as a double spend', async () => {
+  e2e('R3: REJECTED → heal → the one retry is itself refused as a double spend', async () => {
     const p = await phoneWithCoins();
     await extensionSpends(p.chain, p.ext);
     await extensionSpends(p.chain, p.ext);
@@ -614,7 +642,7 @@ describe('17b H1: a double spend not proven dead always reads "can\'t confirm"',
     expect(paidTo(p.chain, BOB)).toHaveLength(0);
   });
 
-  test('R7: the competitor is OUR failed-but-sent T1 and every source lags: unknown, BOB paid once', async () => {
+  e2e('R7: the competitor is OUR failed-but-sent T1 and every source lags: unknown, BOB paid once', async () => {
     const p = await phoneWithCoins();
     const { t1 } = await falseRefusal(p, 3_000_000);
     for (const [o, by] of p.chain.spentBy)
@@ -629,21 +657,24 @@ describe('17b H1: a double spend not proven dead always reads "can\'t confirm"',
     expect(paidTo(p.chain, BOB)).toHaveLength(1);
   });
 
-  test('B2: the competing payment is MINED: the pre-send check clears the coin before signing; BOB paid once', async () => {
-    const p = await phoneWithCoins();
-    const { tExt, picked } = await extensionSpends(p.chain, p.ext);
-    p.chain.mined.add(tExt);
-    doubleSpendWorld(p.chain, picked);
-    expect(await wocSpendMined(picked[0], tExt, wocFetch(p.chain))).toBe(true);
-    const r = await tapSend(p, 3_000_000);
-    expect(r.outcome?.ok).toBe(true);
-    expect(r.outcome?.cleared).toBe(1);
-    expect(paidTo(p.chain, BOB)).toHaveLength(1);
-  });
+  e2e(
+    'B2: the competing payment is MINED: the pre-send check clears the coin before signing; BOB paid once',
+    async () => {
+      const p = await phoneWithCoins();
+      const { tExt, picked } = await extensionSpends(p.chain, p.ext);
+      p.chain.mined.add(tExt);
+      doubleSpendWorld(p.chain, picked);
+      expect(await wocSpendMined(picked[0], tExt, wocFetch(p.chain))).toBe(true);
+      const r = await tapSend(p, 3_000_000);
+      expect(r.outcome?.ok).toBe(true);
+      expect(r.outcome?.cleared).toBe(1);
+      expect(paidTo(p.chain, BOB)).toHaveLength(1);
+    },
+  );
 });
 
 describe('17c L3: a coin whose parent never reached the network stops failing every send', () => {
-  test('the coin is set aside after one "Missing inputs", the person is told, and the next send goes out', async () => {
+  e2e('the coin is set aside after one "Missing inputs", the person is told, and the next send goes out', async () => {
     const p = await phoneWithCoins();
     // A payment of ours that the chain later forgets (it lost a race): its change is a phantom coin.
     const lost = await tapSend(p, 3_000_000, { to: ALICE });
@@ -671,7 +702,7 @@ describe('17c L3: a coin whose parent never reached the network stops failing ev
 });
 
 describe('honest sends keep working (no new refusal paths)', () => {
-  test('a plain send goes out once; a second payment to the same person after a SUCCESS is not asked', async () => {
+  e2e('a plain send goes out once; a second payment to the same person after a SUCCESS is not asked', async () => {
     const p = await phoneWithCoins();
     expect((await tapSend(p, 3_000_000)).outcome?.ok).toBe(true);
     const again = await tapSend(p, 3_000_000);
@@ -679,15 +710,18 @@ describe('honest sends keep working (no new refusal paths)', () => {
     expect(again.outcome?.ok).toBe(true);
     expect(paidTo(p.chain, BOB)).toHaveLength(2);
   });
-  test("a site's (or an agent's) payment is never asked, even right after an uncertain one to the same payee", async () => {
-    const p = await phoneWithCoins();
-    await falseRefusal(p, 3_000_000);
-    await newCoin(p, 3_100_000);
-    const site = await tapSend(p, 3_000_000, { ownSend: false, isSite: true });
-    expect(site.asked).toHaveLength(0);
-    expect(site.outcome).toBeDefined();
-  });
-  test('a REJECTED naming another spender says "not sent" and is not held against the payee', async () => {
+  e2e(
+    "a site's (or an agent's) payment is never asked, even right after an uncertain one to the same payee",
+    async () => {
+      const p = await phoneWithCoins();
+      await falseRefusal(p, 3_000_000);
+      await newCoin(p, 3_100_000);
+      const site = await tapSend(p, 3_000_000, { ownSend: false, isSite: true });
+      expect(site.asked).toHaveLength(0);
+      expect(site.outcome).toBeDefined();
+    },
+  );
+  e2e('a REJECTED naming another spender says "not sent" and is not held against the payee', async () => {
     const p = await phoneWithCoins();
     const { picked } = await extensionSpends(p.chain, p.ext);
     for (const o of picked) p.chain.wocLag.add(o);
@@ -707,7 +741,7 @@ describe('honest sends keep working (no new refusal paths)', () => {
 });
 
 describe('review 17 F3 / 17b L3: a heal-cleared coin comes back when the competitor drops', () => {
-  test('D', async () => {
+  e2e('D', async () => {
     const p = await phoneWithCoins();
     const { picked } = await extensionSpends(p.chain, p.ext);
     doubleSpendWorld(p.chain, picked, { flaky: true });
@@ -787,27 +821,33 @@ describe('17d P1: the online storage failover never sends a payment twice', () =
       log: () => undefined,
     });
 
-  test('the online storage broadcast it, then answered 504: no retry, no switch, "can\'t confirm"; BOB paid once', async () => {
-    const p = await phoneWithCoins();
-    const o = onlineStore(p);
-    o.answersLost = 1;
-    const err = await sendVia(p, o).then(
-      () => null,
-      (e: unknown) => e,
-    );
-    expect(err).toBeInstanceOf(StorageMaybeSentError);
-    expect(o.switched).toBe(0);
-    expect(paidTo(p.chain, BOB)).toHaveLength(1); // before the fix: 2 (the retry built a second payment)
-    expect(classifySendError(err)).toMatchObject({ moneyMoved: 'unknown', message: REFUSED_MAYBE_SENT_MESSAGE });
-  });
+  e2e(
+    'the online storage broadcast it, then answered 504: no retry, no switch, "can\'t confirm"; BOB paid once',
+    async () => {
+      const p = await phoneWithCoins();
+      const o = onlineStore(p);
+      o.answersLost = 1;
+      const err = await sendVia(p, o).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect(err).toBeInstanceOf(StorageMaybeSentError);
+      expect(o.switched).toBe(0);
+      expect(paidTo(p.chain, BOB)).toHaveLength(1); // before the fix: 2 (the retry built a second payment)
+      expect(classifySendError(err)).toMatchObject({ moneyMoved: 'unknown', message: REFUSED_MAYBE_SENT_MESSAGE });
+    },
+  );
 
-  test('a failure BEFORE the payment reached it (the 30 Oct WERR_INTERNAL) still fails over to This device: sent once', async () => {
-    const p = await phoneWithCoins();
-    const o = onlineStore(p);
-    o.createFails = 2;
-    const r = await sendVia(p, o);
-    expect(r.via).toBe('local');
-    expect(o.switched).toBe(1);
-    expect(paidTo(p.chain, BOB)).toHaveLength(1);
-  });
+  e2e(
+    'a failure BEFORE the payment reached it (the 30 Oct WERR_INTERNAL) still fails over to This device: sent once',
+    async () => {
+      const p = await phoneWithCoins();
+      const o = onlineStore(p);
+      o.createFails = 2;
+      const r = await sendVia(p, o);
+      expect(r.via).toBe('local');
+      expect(o.switched).toBe(1);
+      expect(paidTo(p.chain, BOB)).toHaveLength(1);
+    },
+  );
 });
