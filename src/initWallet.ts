@@ -33,6 +33,7 @@ import {
   Wallet,
   WalletStorageManager,
   StorageClient,
+  StorageIdb,
   LocalWalletPermissionsManager,
   IndexedDbPermissionStore,
 } from '@1sat/wallet-browser';
@@ -45,10 +46,23 @@ import { guardReservedProtocols, revokeReservedProtocolGrants } from './services
 import { guardAllowance } from './services/allowanceGuard';
 import { ALLOWANCES_ENABLED } from './services/allowanceFlag';
 import { guardEverySpendAsks, revokeStoredSpendingGrants } from './services/everySpendAsks';
+import { guardPModuleSpends } from './services/pModuleSpendGate';
+import { guardAssetIdLoads } from './services/assetIdCheck';
+import { eitherChainSource, oneSatChainLookups, type ChainLookups } from './services/chainSources';
+import {
+  installInboundSyncGuard,
+  registerInboundVerifier,
+  admitPending,
+  walletOwnership,
+  walletRecords,
+  type AdmitReport,
+  type AdmitStore,
+  type InboundVerifier,
+} from './services/inboundSync';
 import { chromeEnvelopeBackend, EnvelopeStore, guardEnvelopes } from './services/envelopes';
 import { ENVELOPES_ENABLED } from './mobile/storeBuild';
 import { guardCrossSiteSigning } from './services/crossSiteSignGuard';
-import { normalizeOriginator } from '@1sat/wallet';
+import { normalizeOriginator, parsePrivateKey } from '@1sat/wallet';
 import { guardSpending } from './mobile/config/killSwitch';
 import {
   syncMessages,
@@ -105,7 +119,12 @@ import {
 } from './services/findMissingCoins';
 import { recoverPaymentByTxid, type TxidRecoverReport } from './services/recoverByTxid';
 import { makePostageReconcileWiring, makeTxidRecoverDeps, sweepCandidateTxids } from './services/recoverByTxidWiring';
-import { recoverSeedChange, registerWalletOriginator, type SeedChangeReport } from './services/seedChange';
+import {
+  recoverSeedChange,
+  registerWalletOriginator,
+  wocChainLookups,
+  type SeedChangeReport,
+} from './services/seedChange';
 import { makeSeedChangeDeps, seedChangeKV } from './services/seedChangeWiring';
 import { reconcilePostage, wocIsMined, type PostageReconcileReport } from './services/postageReconcile';
 import { runUnsentExpiry, storageKV, wocHeight, type ExpiryReport, type NoSendAction } from './services/unsentExpiry';
@@ -202,6 +221,11 @@ export interface AccountContext {
   creditArriving: () => Promise<void>;
   /** Pull the owner's other devices' changes from the backup, then push this one's (services/deviceSync.ts). */
   syncDevices: () => Promise<DeviceSyncResult>;
+  /**
+   * Work through what the inbound check left for the chain to settle on this device (services/inboundSync.ts
+   * admitPending), whichever store is active: after a restore copy, before its counts are compared.
+   */
+  admitBackupRows: () => Promise<AdmitReport | undefined>;
   /** Push this device's rows to the backup now; a Store payment is broadcast only when this is ok (deviceSync.ts). */
   backupBeforeSend: () => Promise<BackupBeforeSend>;
   /** The backup's state for the honest copy: configured, a push waiting, failures, the last good push. */
@@ -311,6 +335,37 @@ export interface InitWalletOptions {
 }
 
 /**
+ * Rows a backup store sends become spendable on this device only when the chain or this account's own keys say so
+ * (services/inboundSync.ts, b-Aware A3). Set up BEFORE the wallet factory runs: it merges a store that disagrees about
+ * which is active into the device store at boot. Returns the unregister, and the check itself: admitPending runs
+ * with it, and initWallet adds its scheduling (onQueued) and the mined-payment repair (recover) once they exist.
+ */
+const checkBackupRows = (keys: Keys, account: Account | undefined, storageIdentityKey: string) => {
+  installInboundSyncGuard(StorageIdb);
+  const root = parsePrivateKey(keys.identityWif);
+  const verifier: InboundVerifier = {
+    owns: walletOwnership(root, [
+      legacyOrdKey(keys.ordWif, account?.addresses?.ordAddress),
+      legacyPayKey(keys.walletWif, account?.addresses?.bsvAddress),
+    ]),
+    // Two WhatsOnChain questions per coin, one pacer: together ~3 calls a second (anonymous WoC).
+    // WhatsOnChain first; when it has no clear answer, the 1Sat stack (once the factory has made its services): one
+    // outage never decides an honest coin (review 16d, D2).
+    ...eitherChainSource(wocChainLookups(), () => second),
+    readRecord: walletRecords(root),
+    log: (...a) => console.warn(...a),
+  };
+  const stop = registerInboundVerifier(storageIdentityKey, root.toPublicKey().toString(), verifier);
+  let second: ChainLookups | undefined;
+  return Object.assign(stop, {
+    verifier,
+    useSecondSource: (s: ChainLookups | undefined) => {
+      second = s;
+    },
+  });
+};
+
+/**
  * Open storage for the *currently selected* account for master backup only.
  * No address sync, permissions UI, or accountContext side effects.
  * Caller must set selectedAccount before calling, and await close() when done.
@@ -327,6 +382,7 @@ export const openAccountStorageForBackup = async (
   const { account } = chromeStorageService.getCurrentAccountObject();
   const { activeRemote, backups } = resolveStorageConfig(account?.storageConfig);
   const storageIdentityKey = await ensureStorageIdentityKey(chromeStorageService);
+  const stopBackupCheck = checkBackupRows(keys, account, storageIdentityKey);
 
   const { storage, destroy, monitor } = await createWebWallet({
     privateKey: keys.identityWif,
@@ -352,6 +408,7 @@ export const openAccountStorageForBackup = async (
     storage,
     close: async () => {
       await destroy();
+      stopBackupCheck();
     },
   };
 };
@@ -386,6 +443,7 @@ export const initWallet = async (
   const { account } = chromeStorageService.getCurrentAccountObject();
   const { activeRemote, backups } = resolveStorageConfig(account?.storageConfig);
   const storageIdentityKey = await ensureStorageIdentityKey(chromeStorageService);
+  const stopBackupCheck = checkBackupRows(keys, account, storageIdentityKey);
 
   const walletConfig: WebWalletConfig = {
     privateKey: keys.identityWif,
@@ -423,6 +481,8 @@ export const initWallet = async (
     console.error('[initWallet] action batches could not be set to legacy: noSend payments are refused');
   // …and if that ever fails, a noSend payment is refused rather than held in memory (review 4 Nov 2026, F10).
   requireLegacyForNoSend(baseWallet);
+  // An NFT's tracking id loads exactly one asset for every send, burn, listing cancel and name adopt (review 16c, C2).
+  if (!guardAssetIdLoads(baseWallet)) console.error('[initWallet] loads by tracking id are not checked');
   mark(
     `createWebWallet done; active=${storage.getActiveStoreName?.() ?? '?'} stores=${JSON.stringify(
       storage.getStores?.().map((s) => ({ name: s.storageName, active: s.isActive, enabled: s.isEnabled })) ?? [],
@@ -451,7 +511,43 @@ export const initWallet = async (
     console.warn('[initWallet] block headers are not prefetched before internalize');
   // This device and the owner's others meet only in the backup: push soon after every change, pull on open
   // (services/deviceSync.ts; the extension showed $0.16 after the phone swept, 2 Nov 2026).
-  const managed = storage as unknown as { _backups?: { storage: unknown }[] };
+  const managed = storage as unknown as { _backups?: { storage: unknown }[]; _stores?: { storage: unknown }[] };
+  // The device's own store, active or not (during a restore the backup is active and this is the copy's target).
+  const deviceStore = (): AdmitStore | undefined =>
+    managed._stores?.map((m) => m.storage).find((s): s is StorageIdb => s instanceof StorageIdb) as never;
+  stopBackupCheck.useSecondSource(oneSatChainLookups(toolboxServices));
+  let admitClosed = false;
+  let admitTimer: ReturnType<typeof setTimeout> | undefined;
+  let admitAt = Infinity;
+  /** Run admission in `ms` (or sooner, if a run is already due sooner). The service worker's alarm and the app coming
+   *  to the front run it too (background.ts), for when a sleeping worker drops this timer (review 16d, D2). */
+  const admitIn = (ms: number) => {
+    if (admitClosed) return;
+    const at = Date.now() + Math.min(Math.max(ms, 2_000), 6 * 3_600_000);
+    if (admitTimer && admitAt <= at) return;
+    if (admitTimer) clearTimeout(admitTimer);
+    admitAt = at;
+    admitTimer = setTimeout(() => {
+      admitTimer = undefined;
+      admitAt = Infinity;
+      void admitBackupRows();
+    }, at - Date.now());
+  };
+  const admitBackupRows = async (): Promise<AdmitReport | undefined> => {
+    const device = deviceStore();
+    if (!device || admitClosed) return undefined;
+    const { identityKey } = await storage.getAuth();
+    const r = await admitPending(device, identityKey, stopBackupCheck.verifier).catch((e: unknown) => {
+      console.warn('[inbound-sync] admission list not worked through:', e);
+      return undefined;
+    });
+    // Anything left waits for its next try: run again then, never "only at the next unlock" (D2).
+    if (r?.nextAt !== undefined) admitIn(r.nextAt - Date.now());
+    return r;
+  };
+  // Any merge that left something for the chain (the boot merge, F-C, the Monitor's backup sync): soon after it.
+  stopBackupCheck.verifier.onQueued = () => admitIn(2_000);
+  stopBackupCheck.verifier.onQueued(); // and once at open, for anything left from before
   const deviceSync = createDeviceSync({
     applies: () => storage.isActiveStorageProvider() && (backups?.length ?? 0) > 0,
     ensureBackup: async () => {
@@ -469,6 +565,8 @@ export const initWallet = async (
       if (!reader) throw new Error('backup storage is not connected');
       const { identityKey } = await storage.getAuth();
       await storage.syncFromReader(identityKey, reader as Parameters<typeof storage.syncFromReader>[1]);
+      // What the pull left for the chain to settle: no storage lock is held while WhatsOnChain answers.
+      await admitBackupRows();
     },
     push: async () => {
       await storage.updateBackups();
@@ -540,6 +638,18 @@ export const initWallet = async (
     // are picked up by the module's basket-access checks (and vice versa).
     permissionStore,
   });
+  // The one permissions manager every site call goes through. A "p <scheme>" label or basket hands a site's action to
+  // the asset modules above, which finish it on the base wallet; the action now passes the wallet's spend gate first,
+  // and a site can't name the wallet's own assets for a module to sign (services/pModuleSpendGate.ts, b-Aware D-L).
+  const sitePermissions = guardPModuleSpends(
+    new LocalWalletPermissionsManager(
+      baseWallet,
+      ADMIN_ORIGINATOR,
+      { permissionModules: assetModules },
+      { store: permissionStore },
+    ),
+    { adminOriginator: ADMIN_ORIGINATOR },
+  );
 
   // 5. Wrap with permissions manager for external app access control.
   // Grants persist in IndexedDB (off-chain) via LocalWalletPermissionsManager.
@@ -566,36 +676,23 @@ export const initWallet = async (
                   // ALLOWANCES_ENABLED, the old monthly allowance with its per-payment cap and payee allowlist
                   // (services/allowanceGuard.ts, payment-safety audit 24 Oct 2026 B2).
                   ALLOWANCES_ENABLED
-                    ? guardAllowance(
-                        new LocalWalletPermissionsManager(
-                          baseWallet,
-                          ADMIN_ORIGINATOR,
-                          { permissionModules: assetModules },
-                          { store: permissionStore },
-                        ),
-                        { store: permissionStore, adminOriginator: ADMIN_ORIGINATOR, normalize: normalizeOriginator },
-                      )
+                    ? guardAllowance(sitePermissions, {
+                        store: permissionStore,
+                        adminOriginator: ADMIN_ORIGINATOR,
+                        normalize: normalizeOriginator,
+                      })
                     : ENVELOPES_ENABLED
-                      ? guardEnvelopes(
-                          new LocalWalletPermissionsManager(
-                            baseWallet,
-                            ADMIN_ORIGINATOR,
-                            { permissionModules: assetModules },
-                            { store: permissionStore },
-                          ),
-                          { envelopes, adminOriginator: ADMIN_ORIGINATOR, normalize: normalizeOriginator },
-                        )
+                      ? guardEnvelopes(sitePermissions, {
+                          envelopes,
+                          adminOriginator: ADMIN_ORIGINATOR,
+                          normalize: normalizeOriginator,
+                        })
                       : // Store builds have no envelopes (storeBuild.ts ENVELOPES_ENABLED): every payment shows its sheet,
                         // whatever old monthly grant is stored (services/everySpendAsks.ts, owner 25 Oct 2026).
-                        guardEverySpendAsks(
-                          new LocalWalletPermissionsManager(
-                            baseWallet,
-                            ADMIN_ORIGINATOR,
-                            { permissionModules: assetModules },
-                            { store: permissionStore },
-                          ),
-                          { adminOriginator: ADMIN_ORIGINATOR, normalize: normalizeOriginator },
-                        ),
+                        guardEverySpendAsks(sitePermissions, {
+                          adminOriginator: ADMIN_ORIGINATOR,
+                          normalize: normalizeOriginator,
+                        }),
                   spendLedger,
                 ),
               ),
@@ -1218,6 +1315,13 @@ export const initWallet = async (
       if (r.result === 'restored') internalizeBackoff.clear(r.txid);
       return r;
     });
+  // A payment this device holds as failed that the backup says went through and the chain has: repaired the way
+  // Settings › Find mined payments repairs it, never by taking the backup's word (services/inboundSync.ts).
+  stopBackupCheck.verifier.recover = async (txid) => {
+    const r = await recoverTxidImpl(txid);
+    if (r.result === 'restored') return 'restored';
+    return r.result === 'not-mined' || r.result === 'error' ? 'wait' : 'done';
+  };
 
   // Settings › Troubleshooting › Recover change from my 12 words (services/seedChange.ts).
   const recoverSeedChangeImpl = (progress?: (step: string) => void, options?: { fresh?: boolean }) =>
@@ -1270,7 +1374,11 @@ export const initWallet = async (
 
   const close = async () => {
     walletClosed = true;
+    admitClosed = true;
+    if (admitTimer) clearTimeout(admitTimer);
+    admitTimer = undefined;
     await destroyWallet();
+    stopBackupCheck();
   };
 
   return {
@@ -1293,6 +1401,7 @@ export const initWallet = async (
     sweepDeposits: () => sweepDeposit.execute(actionCtx, {}),
     creditArriving: () => runReceiveGuard(),
     syncDevices: () => deviceSync.syncNow(),
+    admitBackupRows,
     backupState: () => {
       const st = deviceSync.state();
       return {

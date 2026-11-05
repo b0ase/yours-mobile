@@ -113,7 +113,8 @@ import { seedChangeSummary } from './services/seedChange';
 import { recoverOnDevice } from './services/recoverOnDevice';
 import { foundHeadline, restoredLine, scanNote, type ScanReport } from './services/findMissingCoins';
 import { paymailRestoreSummary } from './mobile/names/paymail';
-import { isEmpty, summarizeActive, switchToLocalVerified, type SwitchDeps } from './services/restoreFromRemote';
+import { isEmpty, outpointsOnDevice, summarizeActive, switchToLocalVerified, type SwitchDeps } from './services/restoreFromRemote';
+import { isUncheckedPage } from './services/inboundSync';
 import { ensureLocalStore, type EnsureLocalResult } from './services/localFirst';
 import { markMayBeOut } from './services/refusalRecheck';
 import {
@@ -725,7 +726,9 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
       // The parked chunks may be the whole wallet: keep them for another try
       // (a transient failure, a worker killed mid-import). Give up only after
       // repeated failures so a broken backup cannot stall every unlock.
-      const attempts = await WalletBackupService.notePendingRestoreAttempt(currentIdentityKey);
+      // WhatsOnChain unreachable while the backup's rows were being checked (services/inboundSync.ts) is a pause, not
+      // a broken backup: it never counts toward giving up, so the parked data is not deleted over an outage (review 16 F5).
+      const attempts = isUncheckedPage(error) ? 0 : await WalletBackupService.notePendingRestoreAttempt(currentIdentityKey);
       if (attempts >= PENDING_IMPORT_MAX_ATTEMPTS) {
         console.error(`[background] initializeWallet: giving up on pending restore after ${attempts} attempts`);
         await WalletBackupService.clearAccountPendingRestore(currentIdentityKey);
@@ -1058,6 +1061,12 @@ const restoreDeps = (ctx: NonNullable<typeof accountContext>, remoteUrl: string)
       const { identityKey } = await ctx.storage.getAuth();
       await ctx.storage.syncFromReader(identityKey, store as never);
     },
+    // Coins the inbound check held back are on the device, just not spendable: not "missing". Read from the device's
+    // store, so an interrupted restore retried after a restart still completes (review 16 F5, 16b R1).
+    deviceHolds: outpointsOnDevice(ctx.storage as never),
+    // What the copy left for the chain to settle, worked through on the device's store (inboundSync.admitPending).
+    admit: () => ctx.admitBackupRows(),
+    onSwitched: () => void ctx.syncDevices?.().catch(() => undefined),
     progress: (m) => sendRestoreStatus(m),
     log: (...a) => console.log(...a),
   };
@@ -1863,9 +1872,12 @@ const maybeAutoCoinResync = async (): Promise<void> => {
 chrome.alarms.create(AUTO_COIN_RESYNC_ALARM, { periodInMinutes: AUTO_RESYNC_LIGHT_GAP_MS / 60_000 });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === AUTO_COIN_RESYNC_ALARM && pageHidden() !== true) void maybeAutoCoinResync();
+  // Coins from the backup waiting on the chain: their next try, even if the worker slept through its timer (16d D2).
+  if (alarm.name === AUTO_COIN_RESYNC_ALARM) void accountContext?.admitBackupRows().catch(() => undefined);
 });
 (globalThis as { document?: Document }).document?.addEventListener('visibilitychange', () => {
   if (pageHidden() === false) void maybeAutoCoinResync();
+  if (pageHidden() === false) void accountContext?.admitBackupRows().catch(() => undefined);
 });
 
 // Ring when the side panel is closed (services/callRinger.ts): every 30 s while unlocked and no
