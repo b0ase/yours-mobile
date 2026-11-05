@@ -1334,8 +1334,10 @@ describe('16c: a merge never makes a coin spendable; only the admission list doe
     } as never);
     expect(isWalletChange(await d.row(d.remote, planted.id('hex')))).toBe(true);
     await d.pull();
-    await d.forge(planted.id('hex'), { spendable: true }); // and the two-step plant on top
-    await d.pull();
+    // ...and the two-step plant on top: a newer copy, spendable, with the chain saying unspent.
+    const rp = await d.row(d.remote, planted.id('hex'));
+    await d.remote.updateOutput(rp.outputId, { spendable: true, updated_at: later() } as never);
+    expect((await d.pull()).refused).toBe(1); // it reached the admission list, and was refused there
     tick(7 * HOUR);
     await admit(d.phone, d.kd.identityKey, d.verifier);
     const got = await d.row(d.phone, planted.id('hex'));
