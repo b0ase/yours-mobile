@@ -16,8 +16,18 @@ import {
 const PW = 'correct horse battery staple';
 const LEGACY_SALT = '00112233445566778899aabbccddeeff';
 
+/**
+ * PBKDF2 at 600k rounds is CPU-heavy, and a test here runs several. On a busy machine one ran past bun's default 5 s
+ * (full-suite loop, 5 Nov 2026: 5891 ms), and its abandoned work kept writing into the next test's store (that test
+ * then failed too). So these tests get a time limit that load can't reach, and each test first waits for the one
+ * before it to finish (kdfTest / beforeEach), so a store is never shared.
+ */
+const KDF_TEST_TIMEOUT_MS = 60_000;
+let inFlight: Promise<unknown> | undefined;
+const kdfTest = (name: string, fn: () => Promise<unknown>) => test(name, () => (inFlight = fn()), KDF_TEST_TIMEOUT_MS);
+
 describe('password key derivation', () => {
-  test('legacy 100k salt: unchanged golden value, and Web Crypto agrees with crypto-js', async () => {
+  kdfTest('legacy 100k salt: unchanged golden value, and Web Crypto agrees with crypto-js', async () => {
     const k = await deriveKey(PW, LEGACY_SALT);
     expect(k).toBe('7f795f6b204d36c5d1749d64fd20167c1273cf892a6bb6969b2fd83700308801');
     expect(await pbkdf2Hex(PW, LEGACY_SALT, LEGACY_KDF_ITERATIONS)).toBe(k);
@@ -25,7 +35,7 @@ describe('password key derivation', () => {
     expect(await pbkdf2Hex(PW, LEGACY_SALT, 1000)).toBe(cj.toString(CryptoJS.enc.Hex));
   });
 
-  test('new salts name 600k and round-trip a keystore entry', async () => {
+  kdfTest('new salts name 600k and round-trip a keystore entry', async () => {
     const salt = generateWalletSalt();
     expect(salt.startsWith(`pbkdf2:${KDF_ITERATIONS}:`)).toBe(true);
     expect(saltIterations(salt)).toBe(KDF_ITERATIONS);
@@ -38,7 +48,7 @@ describe('password key derivation', () => {
     expect(await deriveKey('wrong password', salt)).not.toBe(key);
   });
 
-  test('salt parsing: legacy, tagged, and refusals', async () => {
+  kdfTest('salt parsing: legacy, tagged, and refusals', async () => {
     expect(saltIterations(LEGACY_SALT)).toBe(LEGACY_KDF_ITERATIONS);
     expect(isLegacySalt(LEGACY_SALT)).toBe(true);
     expect(isLegacySalt(undefined)).toBe(false);
@@ -106,6 +116,9 @@ const service = async () => {
 };
 
 beforeEach(async () => {
+  // A test that ran out of time is still running: let it finish before this test's store is set up.
+  await inFlight?.catch(() => undefined);
+  inFlight = undefined;
   failSet = false;
   session = {};
   const oldKey = await deriveKey(PW, LEGACY_SALT);
@@ -117,10 +130,10 @@ beforeEach(async () => {
       '1W': { addresses: { identityAddress: '1W' } },
     },
   };
-});
+}, KDF_TEST_TIMEOUT_MS);
 
 describe('upgradeKdf: 100k wallet moves to 600k after a password unlock', () => {
-  test('re-encrypts every account under the 600k key, swaps the session key, old key stops working', async () => {
+  kdfTest('re-encrypts every account under the 600k key, swaps the session key, old key stops working', async () => {
     const svc = await service();
     const before = structuredClone(local.accounts);
     expect(await svc.upgradeKdf(PW)).toBe(true);
@@ -136,7 +149,7 @@ describe('upgradeKdf: 100k wallet moves to 600k after a password unlock', () => 
     expect(await svc.upgradeKdf(PW)).toBe(false);
   });
 
-  test('a wrong password changes nothing', async () => {
+  kdfTest('a wrong password changes nothing', async () => {
     const svc = await service();
     const snap = structuredClone(local);
     expect(await svc.upgradeKdf('not the password')).toBe(false);
@@ -144,7 +157,7 @@ describe('upgradeKdf: 100k wallet moves to 600k after a password unlock', () => 
     expect(session.passKey).toBe(await deriveKey(PW, LEGACY_SALT));
   });
 
-  test('USB key security on: skipped, nothing changes', async () => {
+  kdfTest('USB key security on: skipped, nothing changes', async () => {
     local.usbSecurity = { enabled: true };
     const svc = await service();
     const snap = structuredClone(local);
@@ -152,7 +165,7 @@ describe('upgradeKdf: 100k wallet moves to 600k after a password unlock', () => 
     expect(local).toEqual(snap);
   });
 
-  test('a blob that will not open: nothing is written, the old wallet still opens', async () => {
+  kdfTest('a blob that will not open: nothing is written, the old wallet still opens', async () => {
     local.accounts['1B'].encryptedKeys = 'v2:' + '00'.repeat(40);
     const svc = await service();
     const snap = structuredClone(local);
@@ -161,7 +174,7 @@ describe('upgradeKdf: 100k wallet moves to 600k after a password unlock', () => 
     expect(await decrypt(local.accounts['1A'].encryptedKeys, await deriveKey(PW, LEGACY_SALT))).toBe(plainA);
   });
 
-  test('a failed write keeps the old key in the session (old data still opens)', async () => {
+  kdfTest('a failed write keeps the old key in the session (old data still opens)', async () => {
     const svc = await service();
     failSet = true;
     const snap = structuredClone(local);
@@ -170,7 +183,7 @@ describe('upgradeKdf: 100k wallet moves to 600k after a password unlock', () => 
     expect(await svc.getPassKey()).toBe(await deriveKey(PW, LEGACY_SALT));
   });
 
-  test('old AES-CBC keystore entries are carried over to the 600k key as AES-GCM', async () => {
+  kdfTest('old AES-CBC keystore entries are carried over to the 600k key as AES-GCM', async () => {
     const oldKey = await deriveKey(PW, LEGACY_SALT);
     const salt = CryptoJS.lib.WordArray.random(16);
     const iv = CryptoJS.lib.WordArray.random(16);
@@ -184,35 +197,41 @@ describe('upgradeKdf: 100k wallet moves to 600k after a password unlock', () => 
     expect(await decrypt(local.accounts['1B'].encryptedKeys, await deriveKey(PW, local.salt))).toBe(plainB);
   });
 
-  test('killed between the two writes (phones store accounts and salt separately): unlock repairs the salt', async () => {
-    local.selectedAccount = '1A';
-    const svc = await service();
-    expect(await svc.upgradeKdf(PW)).toBe(true);
-    const newSalt = local.salt;
-    // New blobs, old salt, recovery note still there.
-    local.salt = LEGACY_SALT;
-    local.kdfPending = { prevSalt: LEGACY_SALT, salt: newSalt };
-    (svc as any).storage = local;
-    expect(await svc.verifyPassword('wrong password')).toBe(false);
-    expect(local.salt).toBe(LEGACY_SALT);
-    expect(await svc.verifyPassword(PW)).toBe(true);
-    expect(local.salt).toBe(newSalt);
-    expect(local.kdfPending).toBeNull();
-    expect(await svc.getPassKey()).toBe(await deriveKey(PW, newSalt));
-  });
+  kdfTest(
+    'killed between the two writes (phones store accounts and salt separately): unlock repairs the salt',
+    async () => {
+      local.selectedAccount = '1A';
+      const svc = await service();
+      expect(await svc.upgradeKdf(PW)).toBe(true);
+      const newSalt = local.salt;
+      // New blobs, old salt, recovery note still there.
+      local.salt = LEGACY_SALT;
+      local.kdfPending = { prevSalt: LEGACY_SALT, salt: newSalt };
+      (svc as any).storage = local;
+      expect(await svc.verifyPassword('wrong password')).toBe(false);
+      expect(local.salt).toBe(LEGACY_SALT);
+      expect(await svc.verifyPassword(PW)).toBe(true);
+      expect(local.salt).toBe(newSalt);
+      expect(local.kdfPending).toBeNull();
+      expect(await svc.getPassKey()).toBe(await deriveKey(PW, newSalt));
+    },
+  );
 
-  test('killed the other way round (new salt, old blobs): unlock goes back to the old salt, upgrade retries', async () => {
-    local.selectedAccount = '1A';
-    const svc = await service();
-    const pendingSalt = generateWalletSalt();
-    local.salt = pendingSalt;
-    local.kdfPending = { prevSalt: LEGACY_SALT, salt: pendingSalt };
-    (svc as any).storage = local;
-    expect(await svc.verifyPassword(PW)).toBe(true);
-    expect(local.salt).toBe(LEGACY_SALT);
-    expect(await svc.upgradeKdf(PW)).toBe(true);
-    expect(await decrypt(local.accounts['1A'].encryptedKeys, await deriveKey(PW, local.salt))).toBe(plainA);
-  });
+  kdfTest(
+    'killed the other way round (new salt, old blobs): unlock goes back to the old salt, upgrade retries',
+    async () => {
+      local.selectedAccount = '1A';
+      const svc = await service();
+      const pendingSalt = generateWalletSalt();
+      local.salt = pendingSalt;
+      local.kdfPending = { prevSalt: LEGACY_SALT, salt: pendingSalt };
+      (svc as any).storage = local;
+      expect(await svc.verifyPassword(PW)).toBe(true);
+      expect(local.salt).toBe(LEGACY_SALT);
+      expect(await svc.upgradeKdf(PW)).toBe(true);
+      expect(await decrypt(local.accounts['1A'].encryptedKeys, await deriveKey(PW, local.salt))).toBe(plainA);
+    },
+  );
 
   test('the unlock screen runs it, only with the USB key off', async () => {
     const { readFileSync } = await import('node:fs');
