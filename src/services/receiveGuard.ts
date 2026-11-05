@@ -167,6 +167,7 @@ export const noteUnconfirmed = (outputs: ChainOutput[], at = Date.now()) => {
 export const noteConfirmed = (outpoints: Iterable<string>) => {
   for (const o of outpoints) unconfirmed.delete(normOutpoint(o));
 };
+export const unconfirmedOutpoints = () => [...unconfirmed.keys()];
 
 /**
  * What the balance adds now for money storage does not count, and how much of the balance is pending. `accountedFor`

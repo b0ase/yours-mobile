@@ -46,6 +46,7 @@ import {
   pendingAdmissions,
   _mergeUnchecked,
   isUncheckedPage,
+  PROMPT_RETRY_MS,
   type InboundVerifier,
 } from './inboundSync';
 import { bsv21FieldsFromOutput } from '@1sat/actions';
@@ -2199,5 +2200,59 @@ describe('16d: every honest coin comes back; no row stands in for the chain', ()
     expect((await d.phone.findTransactions({ partial: { userId, txid: d.coin2 }, noRawTx: true }))[0].status).toBe(
       'unproven',
     );
+  });
+});
+
+describe('5 Nov 2026: a pull the receive watcher asked for is admitted within seconds, under every check', () => {
+  /** The phone holds coin2 as not spendable; the backup (the other device) says spendable: an admission entry. */
+  const listed = async () => {
+    const d = await phoneWithBackup();
+    d.chain.answer = 'unspent';
+    d.chain.knownFor.set(d.coin2, 'unknown'); // WhatsOnChain has not indexed the other device's transaction yet
+    const mine = await d.row(d.phone, d.coin2);
+    await d.phone.updateOutput(mine.outputId, { spendable: false } as never);
+    await d.forge(d.coin2, { spendable: true });
+    return d;
+  };
+
+  test('entries from that pull are asked again every few seconds inside the window, tries not counted', async () => {
+    const d = await listed();
+    const from = now();
+    await d.merge();
+    const prompt = { from, until: from + 2 * MIN };
+    const r1 = await admitPending(d.phone as never, d.kd.identityKey, d.verifier, { now, prompt });
+    expect(r1.waiting).toBe(1);
+    expect(r1.admitted).toBe(0);
+    expect(r1.nextAt! - now()).toBeLessThanOrEqual(PROMPT_RETRY_MS);
+    expect(r1.nextAt! - now()).toBeGreaterThan(PROMPT_RETRY_MS - 1_000);
+    expect((await pendingAdmissions(d.phone as never, d.kd.identityKey))[0].tries).toBe(0);
+    expect((await d.row(d.phone, d.coin2)).spendable).toBe(false); // nothing admitted before the chain says so
+    tick(PROMPT_RETRY_MS);
+    d.chain.knownFor.delete(d.coin2);
+    const r2 = await admitPending(d.phone as never, d.kd.identityKey, d.verifier, { now, prompt });
+    expect(r2.admitted).toBe(1);
+    expect((await d.row(d.phone, d.coin2)).spendable).toBe(true);
+  });
+
+  test('entries listed before the pull, and any entry once the window has passed, keep the 1-minute doubling', async () => {
+    const d = await listed();
+    await d.merge();
+    await admit(d.phone, d.kd.identityKey, d.verifier); // tries 1, next in a minute
+    tick(MIN);
+    const from = now(); // a later pull: this entry was listed before it
+    const r = await admitPending(d.phone as never, d.kd.identityKey, d.verifier, {
+      now,
+      prompt: { from, until: from + 2 * MIN },
+    });
+    expect(r.nextAt! - now()).toBeGreaterThan(2 * MIN - 1_000); // doubled, not the prompt retry
+    const d2 = await listed();
+    const from2 = now();
+    await d2.merge();
+    tick(3 * MIN); // the window is over
+    const r2 = await admitPending(d2.phone as never, d2.kd.identityKey, d2.verifier, {
+      now,
+      prompt: { from: from2, until: from2 + 2 * MIN },
+    });
+    expect(r2.nextAt! - now()).toBeGreaterThan(MIN - 1_000);
   });
 });

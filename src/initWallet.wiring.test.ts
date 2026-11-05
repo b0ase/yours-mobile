@@ -22,6 +22,7 @@ import {
   _uninstallInboundSyncGuard,
   admissionListFor,
 } from './services/inboundSync';
+import { outpointStates } from './services/heldOutpoints';
 
 type Store = Record<string, unknown>;
 const local: Store = {};
@@ -341,5 +342,26 @@ describe('the real initWallet wiring', () => {
     // The wrapped switch still switches (to this device: a no-op here) and leaves the store enabled.
     await ctx.setActiveStorage('local');
     expect((ctx.storage as unknown as { isActiveEnabled: boolean }).isActiveEnabled).toBe(true);
+  });
+
+  test('5 Nov 2026: the balance and the receive guard read the real device store, spent or not (no double count)', async () => {
+    const live = await plantChange({ sats: 31_000, spendable: true });
+    const held = await plantChange({ sats: 32_000, spendable: false });
+    const { d, userId } = await device();
+    const states = await outpointStates(d as never, userId, [
+      `${live.txid}.0`,
+      `${held.txid}_0`,
+      `${'ab'.repeat(32)}.0`,
+    ]);
+    expect([...states]).toEqual([
+      [`${live.txid}.0`, 'accounted'],
+      [`${held.txid}.0`, 'stored'],
+      [`${'ab'.repeat(32)}.0`, 'absent'],
+    ]);
+    const split = await ctx.balanceSplit();
+    expect(split.pending).toBe(0);
+    expect(split.total).toBe(await ctx.baseWallet.balance());
+    // The watcher is wired but idle: no page has said it is in front.
+    expect(typeof ctx.receiveWatch.foreground).toBe('function');
   });
 });

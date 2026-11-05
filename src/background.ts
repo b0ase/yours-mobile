@@ -546,6 +546,19 @@ chrome.runtime.onConnect.addListener((port) => {
 });
 
 /**
+ * Instant receive (services/receiveWatch.ts): the wallet's pages say when they are in front (APP_FOREGROUND, repeated
+ * every 30 s while visible) and when they are not (APP_BACKGROUND), next to COIN_CHECK_DUE (App.tsx). The extension's
+ * service worker has no document to ask. Kept here too, for a wallet context that opens after the page said so.
+ */
+let appFrontUntil = 0;
+const APP_FRONT_LEASE_MS = 75_000;
+const appInFront = () => appFrontUntil > Date.now() && pageHidden() !== true;
+const setAppFront = (on: boolean) => {
+  appFrontUntil = on ? Date.now() + APP_FRONT_LEASE_MS : 0;
+  accountContext?.receiveWatch.foreground(on && pageHidden() !== true);
+};
+
+/**
  * Send a balance update notification to the popup.
  * Uses the SYNC_STATUS_UPDATE event which useSyncTracker listens for.
  */
@@ -816,6 +829,8 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
   }
   stage('initWallet done');
   accountContext = ctx;
+  // The page said it was in front before this wallet existed: start watching the receive addresses now.
+  if (appInFront()) ctx.receiveWatch.foreground(true);
   mirror.services = ctx.syncContext.services as unknown as Parameters<typeof mirrorToMiner>[0];
   console.log('[background] initializeWallet: initWallet returned, accountContext:', !!accountContext);
 
@@ -3089,6 +3104,9 @@ if (!(
       'STORAGE_RECONCILE_POSTAGE',
       'STORAGE_RESYNC_COINS',
       'COIN_CHECK_DUE',
+      // The wallet's own pages in front / not (services/receiveWatch.ts). Extension pages only.
+      'APP_FOREGROUND',
+      'APP_BACKGROUND',
       'STORAGE_RESTORE_BACKUP',
       'BSV21_FIX_STALE',
       'BSV21_FIX_UNSEEN',
@@ -3555,6 +3573,12 @@ if (!(
           // (at most once a minute; services/autoCoinResync.ts foreground mode).
           void maybeAutoCoinResync(true);
           sendResponse({ type: 'COIN_CHECK_DUE', success: true });
+          return true;
+        case 'APP_FOREGROUND':
+        case 'APP_BACKGROUND':
+          // The receive watcher looks every ~3 s while a wallet page is in front (services/receiveWatch.ts).
+          setAppFront(message.action === 'APP_FOREGROUND');
+          sendResponse({ type: message.action, success: true });
           return true;
         case 'STORAGE_RESTORE_BACKUP':
           processRestoreBackup(sendResponse);

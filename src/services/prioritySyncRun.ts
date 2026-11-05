@@ -13,6 +13,7 @@ import {
 import { DEPOSIT_BASKET, LEGACY_ONESAT_PROTOCOL, ONESAT_PROTOCOL } from '@1sat/types';
 import { Beef, OP, PublicKey, Utils, type InternalizeOutput, type Transaction, type WalletProtocol } from '@bsv/sdk';
 import { prioritySync, type PartProgress, type PrioritySyncResult } from './prioritySync';
+import { createInternalizeLock, type InternalizeLock } from './internalizeLock';
 
 const SYNC_PROTOCOLS = [ONESAT_PROTOCOL, LEGACY_ONESAT_PROTOCOL] as WalletProtocol[];
 
@@ -119,28 +120,23 @@ export const coinOutputs = (
   return { outputs, satoshis };
 };
 
-export const runPrioritySync = async (
-  ctx: OneSatContext,
-  opts: {
-    count: number;
-    onProgress?: (p: PartProgress) => void;
-    onCoinsReady?: (r: { found: number; failed: number }) => void;
-  },
-): Promise<PrioritySyncResult> => {
-  const services = ctx.services;
-  if (!services) throw new Error('address sync needs services');
-  // No IndexedDB (a test runner, a server): the stock action, which picks its own store.
-  if (typeof indexedDB === 'undefined') {
-    const r = await syncAddresses.execute(ctx, { count: opts.count });
-    return { ...r, coins: { found: 0, failed: 0 }, names: { total: 0, failed: r.failed } };
-  }
+/** The keys the address sync scans: SYNC_PROTOCOLS x `count` deposit indexes, as the 1sat pipeline derives them. */
+export type SyncKeys = {
+  identityKey: string;
+  addresses: string[];
+  /** P2PKH hash (hex) of each address. */
+  hashes: Set<string>;
+  keyByHash: Map<string, CoinKey>;
+  addressDerivations: Parameters<typeof internalizeBeef>[0]['addressDerivations'];
+};
 
-  const { publicKey: identityKey } = await ctx.wallet.getPublicKey({ identityKey: true });
+export const deriveSyncKeys = async (wallet: OneSatContext['wallet'], count: number): Promise<SyncKeys> => {
+  const { publicKey: identityKey } = await wallet.getPublicKey({ identityKey: true });
   const derivations: Derivation[] = [];
   for (const protocolID of SYNC_PROTOCOLS) {
-    for (let i = 0; i < opts.count; i++) {
+    for (let i = 0; i < count; i++) {
       const derivationSuffix = String(i);
-      const { publicKey } = await ctx.wallet.getPublicKey({
+      const { publicKey } = await wallet.getPublicKey({
         protocolID,
         keyID: `${DEFAULT_DEPOSIT_PREFIX} ${derivationSuffix}`,
         forSelf: true,
@@ -155,7 +151,6 @@ export const runPrioritySync = async (
     }
   }
   const addresses = derivations.map((d) => d.address);
-  const hashes = new Set(addresses.map(pkhHex));
   const addressDerivations = new Map(
     derivations.map((d) => [
       d.address,
@@ -168,11 +163,98 @@ export const runPrioritySync = async (
         counterparty: 'self',
       },
     ]),
-  ) as unknown as Parameters<typeof internalizeBeef>[0]['addressDerivations'];
+  ) as unknown as SyncKeys['addressDerivations'];
+  return {
+    identityKey,
+    addresses,
+    hashes: new Set(addresses.map(pkhHex)),
+    keyByHash: new Map<string, CoinKey>(derivations.map((d) => [pkhHex(d.address), d])),
+    addressDerivations,
+  };
+};
 
-  const keyByHash = new Map<string, CoinKey>(derivations.map((d) => [pkhHex(d.address), d]));
+/** The processed-tx store's two calls the intake needs (ProcessedTxStoreIdb). */
+export type ProcessedTxids = { has(txid: string): Promise<boolean>; add(txid: string): Promise<void> };
+
+/**
+ * Taking a plain-coin payment into the wallet: the one path the address sync's coins part and the receive watcher
+ * (services/receiveWatch.ts) share. Its outputs paying our keys go into the deposit basket with the record the 1sat
+ * pipeline writes; the address sync's sweep then moves them into funding as before.
+ */
+export type CoinIntake = {
+  /** Our plain coin outputs of `txid` in this BEEF (bare P2PKH to one of our keys, more than 1 sat). */
+  coins(txid: string, beef: number[]): { vout: number; satoshis: number }[];
+  /**
+   * Take `txid`'s coin outputs in, once: under the shared internalize lock, skipped when the processed store already
+   * has the txid ('already'), recorded there after ('taken'). 'none': it pays us no plain coin; nothing written.
+   */
+  take(txid: string, beef: number[]): Promise<'taken' | 'already' | 'none'>;
+};
+
+export const makeCoinIntake = (d: {
+  wallet: Pick<OneSatContext['wallet'], 'internalizeAction'>;
+  keyByHash: Map<string, CoinKey>;
+  processed: ProcessedTxids;
+  lock?: InternalizeLock;
+}): CoinIntake => {
+  const lock = d.lock ?? createInternalizeLock();
+  const parse = (txid: string, beef: number[]) => {
+    const beefObj = Beef.fromBinary(beef);
+    const tx = beefObj.findTxid(txid)?.tx;
+    if (!tx) throw new Error(`Transaction ${txid} is not in its BEEF`);
+    return { beefObj, tx };
+  };
+  return {
+    coins: (txid, beef) => {
+      const { tx } = parse(txid, beef);
+      return coinOutputs(tx, d.keyByHash, 'probe').outputs.map((o) => ({
+        vout: o.outputIndex,
+        satoshis: tx.outputs[o.outputIndex].satoshis ?? 0,
+      }));
+    },
+    take: (txid, beef) =>
+      lock(async () => {
+        if (await d.processed.has(txid)) return 'already';
+        const { beefObj, tx } = parse(txid, beef);
+        const { outputs, satoshis } = coinOutputs(tx, d.keyByHash, randomActionId());
+        if (!outputs.length) return 'none';
+        await d.wallet.internalizeAction({
+          tx: beefObj.toBinaryAtomic(txid),
+          outputs,
+          description: `Received ${satoshis} sats`.slice(0, 50),
+        });
+        await d.processed.add(txid);
+        return 'taken';
+      }),
+  };
+};
+
+export const runPrioritySync = async (
+  ctx: OneSatContext,
+  opts: {
+    count: number;
+    onProgress?: (p: PartProgress) => void;
+    onCoinsReady?: (r: { found: number; failed: number }) => void;
+    /** The internalize lock shared with the receive guard and the receive watcher (services/internalizeLock.ts). */
+    lock?: InternalizeLock;
+  },
+): Promise<PrioritySyncResult> => {
+  const services = ctx.services;
+  if (!services) throw new Error('address sync needs services');
+  // No IndexedDB (a test runner, a server): the stock action, which picks its own store.
+  if (typeof indexedDB === 'undefined') {
+    const r = await syncAddresses.execute(ctx, { count: opts.count });
+    return { ...r, coins: { found: 0, failed: 0 }, names: { total: 0, failed: r.failed } };
+  }
+
+  const lock = opts.lock ?? createInternalizeLock();
+  const { identityKey, addresses, hashes, keyByHash, addressDerivations } = await deriveSyncKeys(
+    ctx.wallet,
+    opts.count,
+  );
 
   const store = new ProcessedTxStoreIdb(identityKey);
+  const intake = makeCoinIntake({ wallet: ctx.wallet, keyByHash, processed: store, lock });
   try {
     const { height } = await ctx.wallet.getHeight({});
     return await prioritySync({
@@ -192,26 +274,19 @@ export const runPrioritySync = async (
         if (!beef) throw new Error(`Failed to load BEEF for ${txid}`);
         return Array.from(beef);
       },
-      internalize: async (_txid, beef) => {
-        await internalizeBeef({
-          beef: Uint8Array.from(beef),
-          addressDerivations,
-          wallet: ctx.wallet,
-          services,
-          chain: ctx.chain,
-        });
-      },
+      internalize: (_txid, beef) =>
+        lock(async () => {
+          await internalizeBeef({
+            beef: Uint8Array.from(beef),
+            addressDerivations,
+            wallet: ctx.wallet,
+            services,
+            chain: ctx.chain,
+          });
+        }),
+      // The receive watcher may have taken it in since the scan: take() checks the processed store inside the lock.
       internalizeCoin: async (txid, beef) => {
-        const beefObj = Beef.fromBinary(beef);
-        const tx = beefObj.findTxid(txid)?.tx;
-        if (!tx) throw new Error(`Transaction ${txid} is not in its BEEF`);
-        const { outputs, satoshis } = coinOutputs(tx, keyByHash, randomActionId());
-        if (!outputs.length) return;
-        await ctx.wallet.internalizeAction({
-          tx: beefObj.toBinaryAtomic(txid),
-          outputs,
-          description: `Received ${satoshis} sats`.slice(0, 50),
-        });
+        await intake.take(txid, beef);
       },
       onProgress: opts.onProgress,
       onCoinsReady: opts.onCoinsReady,
