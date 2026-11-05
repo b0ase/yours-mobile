@@ -50,7 +50,8 @@ import {
 } from './inboundSync';
 import { bsv21FieldsFromOutput } from '@1sat/actions';
 import { bsv21 } from '../mobile/market/launchpad/tokens';
-import { assetIdIsOnly } from './assetIdCheck';
+import { ASSET_ID_MISMATCH, assetIdIsOnly, guardAssetIdLoads } from './assetIdCheck';
+import { loadBasketOutput } from '@1sat/actions';
 import type { SpendState } from './unsentExpiry';
 
 const HEIGHT = 971_004;
@@ -1420,6 +1421,52 @@ describe('16c: a merge never makes a coin spendable; only the admission list doe
     expect(tagsOf(cTx)).toEqual(['id:cccccccccccc']);
     expect(await assetIdIsOnly(d.wallet as never, 'vvvvvvvvvvvv', `${vTx}.0`)).toBe(true);
     expect(await assetIdIsOnly(d.wallet as never, 'cccccccccccc', `${cTx}.0`)).toBe(true);
+  });
+
+  test('C2: every load of one asset by its tracking id (burn, cancel, adopt) refuses an id two outputs carry', async () => {
+    const d = await phoneWithBackup();
+    const ord = async (id: string) => {
+      const keyID = `ord-${++n}`;
+      const pub = d.kd.derivePublicKey([0, 'onesat'], keyID, 'self', true);
+      const tx = minedTx(new P2PKH().lock(pub.toAddress()), 1);
+      await d.wallet.internalizeAction({
+        tx: atomic(tx),
+        outputs: [
+          {
+            outputIndex: 0,
+            protocol: 'basket insertion',
+            insertionRemittance: {
+              basket: '1sat',
+              customInstructions: JSON.stringify({ protocolID: [0, 'onesat'], keyID }),
+              tags: [`id:${id}`],
+            },
+          },
+        ],
+        description: 'Ordinal in',
+      });
+      return tx.id('hex');
+    };
+    const one = await ord('oooooooooooo');
+    const w = new Wallet({ chain: 'main', keyDeriver: d.kd, storage: d.sm, services } as never);
+    expect(guardAssetIdLoads(w)).toBe(true);
+    const loaded = await loadBasketOutput(w as never, '1sat', 'oooooooooooo');
+    expect('output' in loaded && loaded.output.outpoint).toBe(`${one}.0`); // honest: one asset, loads
+    // Two outputs carrying one id (however they got there): the loader every spend uses is refused.
+    const other = await ord('pppppppppppp');
+    const userId = await userOf(d.phone, d);
+    const tag = (await d.phone.findOutputTags({ partial: { userId, tag: 'id:oooooooooooo' } }))[0];
+    const at = new Date();
+    await d.phone.insertOutputTagMap({
+      outputId: (await d.row(d.phone, other)).outputId,
+      outputTagId: tag.outputTagId,
+      isDeleted: false,
+      created_at: at,
+      updated_at: at,
+    } as never);
+    await expect(loadBasketOutput(w as never, '1sat', 'oooooooooooo')).rejects.toThrow(ASSET_ID_MISMATCH);
+    expect(readFileSync(new URL('../initWallet.ts', import.meta.url), 'utf8')).toMatch(
+      /guardAssetIdLoads\(baseWallet\)/,
+    );
   });
 
   test('C3/H4: the other device aborts an unsent payment; this device frees its input once the chain agrees', async () => {

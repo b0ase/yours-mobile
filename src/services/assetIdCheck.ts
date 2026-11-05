@@ -34,3 +34,32 @@ export async function assetIdIsOnly(
   const total = typeof r.totalOutputs === 'number' ? r.totalOutputs : r.outputs.length;
   return total === 1 && r.outputs.length === 1 && norm(r.outputs[0].outpoint) === norm(outpoint);
 }
+
+type ListArgs = { limit?: number; tags?: unknown };
+type Listing = { totalOutputs?: number; outputs: unknown[] };
+
+/** One asset loaded by its tracking id: one `id:` tag, limit 1 (@1sat/actions loadBasketOutput). */
+const loadsOneAssetById = (args: ListArgs | undefined) =>
+  args?.limit === 1 &&
+  Array.isArray(args.tags) &&
+  args.tags.length === 1 &&
+  typeof args.tags[0] === 'string' &&
+  /^id:/i.test(args.tags[0]);
+
+/**
+ * Every spend of one asset by its tracking id loads it through listOutputs with that id and limit 1 (@1sat/actions
+ * loadBasketOutput): send, burn, cancel a listing, adopt an OpNS name. On the wallet every one of those reaches, such a
+ * load that matches more than one output is refused, so none of them can spend "the first one" (review 16c, C2: the
+ * per-screen checks covered sends only). Returns false when the wallet can't be wrapped.
+ */
+export function guardAssetIdLoads(wallet: unknown): boolean {
+  const w = wallet as { listOutputs?: (args: ListArgs, originator?: string) => Promise<Listing> } | null;
+  if (!w || typeof w.listOutputs !== 'function') return false;
+  const original = w.listOutputs.bind(w);
+  w.listOutputs = async (args, originator) => {
+    const r = await original(args, originator);
+    if (loadsOneAssetById(args) && (r.totalOutputs ?? r.outputs.length) > 1) throw new Error(ASSET_ID_MISMATCH);
+    return r;
+  };
+  return true;
+}

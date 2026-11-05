@@ -47,6 +47,7 @@ import { guardAllowance } from './services/allowanceGuard';
 import { ALLOWANCES_ENABLED } from './services/allowanceFlag';
 import { guardEverySpendAsks, revokeStoredSpendingGrants } from './services/everySpendAsks';
 import { guardPModuleSpends } from './services/pModuleSpendGate';
+import { guardAssetIdLoads } from './services/assetIdCheck';
 import {
   installInboundSyncGuard,
   registerInboundVerifier,
@@ -471,6 +472,8 @@ export const initWallet = async (
     console.error('[initWallet] action batches could not be set to legacy: noSend payments are refused');
   // …and if that ever fails, a noSend payment is refused rather than held in memory (review 4 Nov 2026, F10).
   requireLegacyForNoSend(baseWallet);
+  // An NFT's tracking id loads exactly one asset for every send, burn, listing cancel and name adopt (review 16c, C2).
+  if (!guardAssetIdLoads(baseWallet)) console.error('[initWallet] loads by tracking id are not checked');
   mark(
     `createWebWallet done; active=${storage.getActiveStoreName?.() ?? '?'} stores=${JSON.stringify(
       storage.getStores?.().map((s) => ({ name: s.storageName, active: s.isActive, enabled: s.isEnabled })) ?? [],
