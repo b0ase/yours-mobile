@@ -19,6 +19,7 @@ import {
   backupBeforeSend,
   createDeviceSync,
   notifyOnWalletChanges,
+  pullThenAdmitSoon,
   type BackupBeforeSend,
   type DeviceSyncResult,
 } from './services/deviceSync';
@@ -561,14 +562,16 @@ export const initWallet = async (
       ]);
       return storage.getBackupStores().length > 0;
     },
-    pull: async () => {
-      const reader = managed._backups?.[0]?.storage;
-      if (!reader) throw new Error('backup storage is not connected');
-      const { identityKey } = await storage.getAuth();
-      await storage.syncFromReader(identityKey, reader as Parameters<typeof storage.syncFromReader>[1]);
-      // What the pull left for the chain to settle: no storage lock is held while WhatsOnChain answers.
-      await admitBackupRows();
-    },
+    // What the pull left for the chain to settle runs soon after, outside every storage lock; not awaited here (F-A).
+    pull: pullThenAdmitSoon(
+      async () => {
+        const reader = managed._backups?.[0]?.storage;
+        if (!reader) throw new Error('backup storage is not connected');
+        const { identityKey } = await storage.getAuth();
+        await storage.syncFromReader(identityKey, reader as Parameters<typeof storage.syncFromReader>[1]);
+      },
+      () => admitIn(0),
+    ),
     push: async () => {
       await storage.updateBackups();
     },

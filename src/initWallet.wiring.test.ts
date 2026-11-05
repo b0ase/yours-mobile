@@ -306,9 +306,10 @@ describe('the real initWallet wiring', () => {
     expect(wocAsked.some((u) => u.includes(theirs.txid))).toBe(false); // refused on the key check, before the chain
   });
 
-  test('every device-sync pull works through the admission list after the merge', () => {
+  test('every device-sync pull schedules the admission list after the merge, without awaiting it (review 18, F-A)', () => {
     const src = readFileSync(new URL('./initWallet.ts', import.meta.url), 'utf8');
-    const pull = src.slice(src.indexOf('    pull: async () => {'), src.indexOf('    push: async () => {'));
-    expect(pull).toMatch(/await storage\.syncFromReader\([\s\S]*await admitBackupRows\(\)/);
+    const pull = src.slice(src.indexOf('    pull: pullThenAdmitSoon('), src.indexOf('    push: async () => {'));
+    expect(pull).toMatch(/await storage\.syncFromReader\([\s\S]*\},\s*\(\) => admitIn\(0\)/);
+    expect(pull).not.toContain('await admitBackupRows()');
   });
 });

@@ -132,6 +132,19 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
 
 export type DeviceSync = ReturnType<typeof createDeviceSync>;
 
+/**
+ * The device-sync pull: merge the backup's changes, then only SCHEDULE the chain checks for what the merge held back.
+ * Awaiting them here made a Store payment's backup-before-send (60 s) wait behind a whole admission run on the first
+ * open after the release, and fail with "the backup took too long" (final review 18, F-A). Admission runs outside every
+ * storage lock and retries on its own timer, the alarm and app focus, so nothing depends on it finishing in the pull.
+ */
+export function pullThenAdmitSoon(merge: () => Promise<void>, admitSoon: () => void): () => Promise<void> {
+  return async () => {
+    await merge();
+    admitSoon();
+  };
+}
+
 type Mutating = 'createAction' | 'signAction' | 'internalizeAction' | 'abortAction' | 'relinquishOutput';
 const MUTATING: Mutating[] = ['createAction', 'signAction', 'internalizeAction', 'abortAction', 'relinquishOutput'];
 
