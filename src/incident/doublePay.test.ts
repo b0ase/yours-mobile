@@ -1,13 +1,15 @@
 /**
- * REGRESSION (reviews 17 and 17b of fix/cross-device-coins, 4 Nov 2026): a payment must never go out twice, and the
+ * REGRESSION (reviews 17, 17b and 17c of fix/cross-device-coins, Nov 2026): a payment must never go out twice, and the
  * words after a refusal must never say "not sent" when it may still go through.
  *
  * Brought in from the reviewers' scratch tests. It drives the REAL wallet-toolbox (fake-indexeddb) through the SAME
- * send pipeline background.ts processCWICreateAction calls (services/ownSend.ts: sendWithChecks, refusalChecks,
- * sendFailureText, with the pre-send coin check, the re-tap guard and the retry), and then the page's own mapping
- * (classifySendError over describeWalletError), so what is asserted is what the person would see. The chain is mocked:
- * a 1sat-stack broadcaster (REJECTED), ARC's DOUBLE_SPEND_ATTEMPTED, the 1sat index and stack status, and WhatsOnChain
- * (/tx/hash, /tx/{txid}/{vout}/spent). No network.
+ * send pipeline background.ts processCWICreateAction calls (services/ownSend.ts: sendWithChecks, sendFailureText, with
+ * the pre-send coin check and the retry), then the page's own mapping (classifySendError over describeWalletError),
+ * and the Send page's re-tap confirm (utils/uncertainSends.ts, keyed on the recipient as typed, Cancel by default), so
+ * what is asserted is what the person would see and do. The chain is mocked: a 1sat-stack broadcaster (REJECTED,
+ * "Missing inputs"), ARC's DOUBLE_SPEND_ATTEMPTED, the 1sat index and stack status (a tx the stack refused reads
+ * "unknown", as OneSatServices maps it), and WhatsOnChain (/tx/hash, /tx/{txid}/{vout}/spent; down, or lagging). No
+ * network.
  */
 import 'fake-indexeddb/auto';
 import { describe, expect, test } from 'bun:test';
@@ -16,24 +18,18 @@ import { Monitor, StorageIdb, StorageProvider, Wallet, WalletStorageManager } fr
 import { forceLegacyActionBatch } from '../services/actionBatchMode';
 import { fixUtxoStatus } from '../services/utxoStatus';
 import { installCoinPreflightForWallet, wocSpendMined } from '../services/coinPreflight';
-import {
-  chainKnowsTx,
-  refusalChecks,
-  sendFailureText,
-  sendWithChecks,
-  type SendChecksContext,
-} from '../services/ownSend';
-import { createSendGuard, type SendGuardState } from '../services/sendGuard';
+import { sendFailureText, sendWithChecks, type SendChecksContext } from '../services/ownSend';
+import { rememberRefusals } from '../services/broadcastRefusals';
+import { createUncertainSends, outcomeIsUncertain, type UncertainSends } from '../utils/uncertainSends';
 import { AUTO_RESYNC_KEY, autoResyncCoins, type AutoResyncState, type KV } from '../services/autoCoinResync';
 import { describeWalletError } from '../brand/walletError';
 import {
   classifySendError,
   DOUBLE_SPEND_PENDING_MESSAGE,
-  EARLIER_MAYBE_OUT_MESSAGE,
+  MISSING_PARENT_MESSAGE,
   OWN_COIN_OTHER_PAYMENT_MESSAGE,
   ownPaymentOutMessage,
   REFUSED_MAYBE_SENT_MESSAGE,
-  REFUSED_NOT_SENT_MESSAGE,
 } from '../utils/sendErrors';
 
 const HEIGHT = 974_050;
@@ -50,6 +46,12 @@ type Chain = {
   indexMisses: Set<string>;
   /** WhatsOnChain hasn't seen these yet (its lag after a 1sat-stack broadcast). */
   wocLag: Set<string>;
+  /** WhatsOnChain sees only MINED transactions (its lag for every new one). */
+  wocLagNew: boolean;
+  /** WhatsOnChain answers 500 to everything. */
+  wocDown: boolean;
+  /** The stack's status follows its own refusal (OneSatServices maps REJECTED to "unknown"). */
+  stackRefused: Set<string>;
   posts: string[];
   /** The next N posts reach the network, but the broadcaster answers REJECTED. */
   falseRefusals: number;
@@ -71,6 +73,9 @@ const newChain = (): Chain => ({
   mined: new Set(),
   indexMisses: new Set(),
   wocLag: new Set(),
+  wocLagNew: false,
+  wocDown: false,
+  stackRefused: new Set(),
   posts: [],
   falseRefusals: 0,
   utxoStatusDown: false,
@@ -123,7 +128,11 @@ function services(chain: Chain) {
       status: 'success',
       results: txids.map((txid) => ({
         txid,
-        status: chain.mined.has(txid) ? 'mined' : chain.posts.includes(txid) ? 'known' : 'unknown',
+        status: chain.mined.has(txid)
+          ? 'mined'
+          : chain.posts.includes(txid) && !chain.stackRefused.has(txid)
+            ? 'known'
+            : 'unknown',
         depth: 1,
       })),
     }),
@@ -134,6 +143,7 @@ function services(chain: Chain) {
         chain.falseRefusals--;
         for (const t of txids) record(beef, t);
         for (const t of txids) chain.reasons.set(t, 'REJECTED');
+        for (const t of txids) chain.stackRefused.add(t);
         return [
           {
             name: '1sat-api',
@@ -144,6 +154,23 @@ function services(chain: Chain) {
               status: 'error',
               data: { txStatus: 'REJECTED', extraInfo: 'REJECTED' },
             })),
+          },
+        ];
+      }
+      // A parent the network never saw: "Missing inputs" (the change of a payment that never got anywhere).
+      for (const t of txids) {
+        const tx = beef.findTxid(t)?.tx;
+        const orphan =
+          tx && inputsOf(tx).find((o) => !chain.mined.has(o.split('_')[0]) && !chain.posts.includes(o.split('_')[0]));
+        if (!orphan) continue;
+        const reason = `Missing inputs: ${orphan.replace('_', ':')}`;
+        chain.reasons.set(t, reason);
+        return [
+          {
+            name: '1sat-api',
+            status: 'error',
+            error: new Error(reason),
+            txidResults: [{ txid: t, status: 'error', data: { txStatus: 'REJECTED', extraInfo: reason } }],
           },
         ];
       }
@@ -208,15 +235,17 @@ function services(chain: Chain) {
 function wocFetch(chain: Chain): typeof fetch {
   return (async (url: string) => {
     const u = String(url);
+    if (chain.wocDown) return new Response('', { status: 500 });
     const hash = new RegExp(`^${WOC}/tx/hash/([0-9a-f]{64})$`).exec(u);
     if (hash) {
       const t = hash[1];
-      const seen = (chain.mined.has(t) || chain.posts.includes(t)) && !chain.wocLag.has(t);
+      const seen = (chain.mined.has(t) || (chain.posts.includes(t) && !chain.wocLagNew)) && !chain.wocLag.has(t);
       return new Response(seen ? JSON.stringify({ txid: t }) : '', { status: seen ? 200 : 404 });
     }
     const m = /\/v1\/bsv\/main\/tx\/([0-9a-f]{64})\/(\d+)\/spent$/.exec(u);
     const op = m ? `${m[1]}_${m[2]}` : '';
-    const by = m && !chain.wocLag.has(op) ? chain.spentBy.get(op) : undefined;
+    let by = m && !chain.wocLag.has(op) ? chain.spentBy.get(op) : undefined;
+    if (by && chain.wocLagNew && !chain.mined.has(by)) by = undefined;
     if (!by) return new Response('', { status: 404 });
     const status = chain.mined.has(by) ? 'confirmed' : 'unconfirmed';
     return new Response(JSON.stringify({ txid: by, vin: 0, status }), { status: 200 });
@@ -301,12 +330,32 @@ const ALICE = new P2PKH().lock(PrivateKey.fromRandom().toAddress()).toHex();
 
 type Phone = Awaited<ReturnType<typeof phoneWithCoins>>;
 
+/** The recipient as the person typed it on the Send page (a $name payee gets a fresh script every time). */
+const BOB_TYPED = 'bob@handcash.io';
+const ALICE_TYPED = 'alice@handcash.io';
+
 /**
- * One tap of Send, through the SAME pipeline background.ts processCWICreateAction uses (sendWithChecks with this
- * account's context and the session re-tap guard), then the page's mapping of the answer (what the person sees).
+ * One tap of Send, as the wallet's own Send page does it (pages/BsvWallet.tsx): first the re-tap confirm over the
+ * recipient as typed (utils/uncertainSends.ts; Cancel is the default, `sendAnyway` is the person pressing "Send
+ * anyway"), then the SAME pipeline background.ts processCWICreateAction uses, then the page's mapping of the answer,
+ * and an uncertain outcome is remembered against the recipient. A site's call (`ownSend: false`) never goes through
+ * the Send page, so it is never asked.
  */
-async function tapSend(p: Phone, sats: number, o: { to?: string; ownSend?: boolean; isSite?: boolean } = {}) {
+async function tapSend(
+  p: Phone,
+  sats: number,
+  o: { to?: string; typed?: string; ownSend?: boolean; isSite?: boolean; sendAnyway?: boolean } = {},
+) {
   const to = o.to ?? BOB;
+  const typed = o.typed ?? (to === ALICE ? ALICE_TYPED : BOB_TYPED);
+  const ownSend = o.ownSend ?? true;
+  const account = p.kd.identityKey;
+  if (ownSend) {
+    const earlier = await p.recent.pending(account, [typed]);
+    if (earlier.length && !o.sendAnyway)
+      return { asked: earlier, outcome: undefined, shown: undefined, answer: undefined };
+    if (earlier.length) await p.recent.clear(account, [typed]);
+  }
   const outputs = [{ lockingScript: to, satoshis: sats, outputDescription: `Payment of ${sats} sats` }];
   const outcome = await sendWithChecks({
     create: () =>
@@ -316,9 +365,8 @@ async function tapSend(p: Phone, sats: number, o: { to?: string; ownSend?: boole
         options: { acceptDelayedBroadcast: false },
       }),
     outputs,
-    ownSend: o.ownSend ?? true,
+    ownSend,
     context: p.context,
-    guard: p.guard,
     log: () => undefined,
   });
   let shown: ReturnType<typeof classifySendError> | undefined;
@@ -328,14 +376,18 @@ async function tapSend(p: Phone, sats: number, o: { to?: string; ownSend?: boole
     const errorText = err instanceof Error ? describeWalletError(err) : JSON.stringify(err);
     answer = sendFailureText({ errorText, heal: outcome.heal, notice: outcome.notice, isSite: !!o.isSite });
     shown = classifySendError(answer, 'send');
+    if (ownSend && outcomeIsUncertain(shown))
+      await p.recent.note(account, [{ recipient: typed, amount: `${sats} sats` }]);
   }
-  return { outcome, shown, answer };
+  return { asked: [], outcome, shown, answer };
 }
 
 async function phoneWithCoins() {
   const chain = newChain();
   const kd = new KeyDeriver(PrivateKey.fromRandom());
   const svc = services(chain);
+  // As initWallet does: the broadcaster's reason for each refusal is kept for the heal and the judgement.
+  expect(rememberRefusals(svc)).toBe(true);
   const phone = await openDevice(`dp-phone-${++dbn}`, kd, svc);
   const ext = await openDevice(`dp-ext-${dbn}`, kd, services(chain), true);
   for (const sats of [X, Y, Z, S1, S2]) {
@@ -365,15 +417,18 @@ async function phoneWithCoins() {
     fetch,
     log: () => undefined,
   };
-  let session: SendGuardState = {};
-  const guard = createSendGuard({
-    load: async () => structuredClone(session),
-    save: async (s) => void (session = structuredClone(s)),
-    txKnown: (txid) => chainKnowsTx(context, txid),
-    spendMined: (op, by) => refusalChecks(context).spendMined(op, by),
-  });
-  return { chain, kd, phone, ext, kv, context, guard };
+  // The Send page's device store (chrome.storage.local): a fresh instance per tap, like a reload would be.
+  const pageStore = memoryKV();
+  const recent: UncertainSends = createUncertainSends(pageStore);
+  return { chain, kd, phone, ext, kv, context, recent };
 }
+
+/** A coin arrives that covers the payment by itself (so a re-tap would pick it, not the earlier payment's coin). */
+const newCoin = async (p: Phone, sats: number) => {
+  const c = payment(p.kd, sats);
+  p.chain.mined.add(c.txid);
+  await takeIn(p.phone, c);
+};
 
 const paidTo = (chain: Chain, script: string) => chain.paid.filter((x) => x.script === script);
 const clearedList = (kv: { m: Record<string, unknown> }, d: Device) =>
@@ -417,78 +472,111 @@ async function falseRefusal(p: Phone, sats: number, to = BOB) {
   return { first, t1: p.chain.posts.at(-1)! };
 }
 
-describe('17b M1 + review 17 F1: a payment shown as failed that went out is never paid again', () => {
-  test('A: the first tap says "can\'t confirm", and a second tap of the same payment is stopped: BOB paid once', async () => {
+const BOB2 = new P2PKH().lock(PrivateKey.fromRandom().toAddress()).toHex(); // bob@ again: a fresh derivation
+const BOB3 = new P2PKH().lock(PrivateKey.fromRandom().toAddress()).toHex();
+const toBob = (c: Chain) => paidTo(c, BOB).length + paidTo(c, BOB2).length + paidTo(c, BOB3).length;
+
+describe('17c: a refusal that may have gone out is never "not sent", and the re-tap is asked first', () => {
+  test('S1 (17b M1 residual): false REJECTED, WoC lagging, the stack following its own refusal: "can\'t confirm"; the re-tap is asked; BOB paid once', async () => {
     const p = await phoneWithCoins();
-    const { first, t1 } = await falseRefusal(p, 3_000_000);
+    p.chain.wocLagNew = true;
+    const { first } = await falseRefusal(p, 3_000_000);
     expect(first.shown).toMatchObject({ moneyMoved: 'unknown', message: REFUSED_MAYBE_SENT_MESSAGE });
+    await newCoin(p, 3_100_000);
     const second = await tapSend(p, 3_000_000);
-    expect(second.outcome.ok).toBe(false);
-    expect(paidTo(p.chain, BOB)).toHaveLength(1); // T1 only
-    expect(second.shown).toMatchObject({ kind: 'earlier-payment-out', txid: t1 });
-    expect(second.answer).toBe(ownPaymentOutMessage(t1));
+    expect(second.asked).toHaveLength(1); // "Your earlier payment of … may already have gone out. Send another anyway?"
+    expect(toBob(p.chain)).toBe(1);
   });
 
-  test('R5: a new coin arrives, so the re-tap would use a different coin: still stopped, BOB paid once', async () => {
+  test('S2: a dollar amount re-priced a minute later (+37 sats) is still the same payment to the person: asked', async () => {
     const p = await phoneWithCoins();
+    await falseRefusal(p, 3_000_000);
+    await newCoin(p, 3_100_000);
+    expect((await tapSend(p, 3_000_037)).asked).toHaveLength(1);
+    expect(toBob(p.chain)).toBe(1);
+  });
+
+  test('S3: the same $name payee gets a fresh address each time: still asked (keyed on what was typed)', async () => {
+    const p = await phoneWithCoins();
+    await falseRefusal(p, 3_000_000);
+    await newCoin(p, 3_100_000);
+    expect((await tapSend(p, 3_000_000, { to: BOB2 })).asked).toHaveLength(1);
+    expect(toBob(p.chain)).toBe(1);
+  });
+
+  test('S4 (17c M1): "Send anyway" reuses the dead coin: neutral words, never "send again"; the next tap is asked again', async () => {
+    const p = await phoneWithCoins();
+    const { t1 } = await falseRefusal(p, 3_000_000, BOB);
+    for (const [o, by] of p.chain.spentBy) if (by === t1) p.chain.indexMisses.add(o);
+    const second = await tapSend(p, 3_000_000, { to: BOB2, sendAnyway: true });
+    expect(second.answer).toBe(OWN_COIN_OTHER_PAYMENT_MESSAGE);
+    expect(second.shown?.moneyMoved).toBe('unknown');
+    expect(second.shown?.message).not.toMatch(/someone else|then send again/i);
+    expect((await tapSend(p, 3_000_000, { to: BOB3 })).asked).toHaveLength(1);
+    expect(toBob(p.chain)).toBe(1);
+  });
+
+  test('S5 (17c M3): recorded while WoC was down; WoC back but lagging: still asked (no chain look decides it)', async () => {
+    const p = await phoneWithCoins();
+    p.chain.wocDown = true;
     const { first } = await falseRefusal(p, 3_000_000);
     expect(first.shown?.moneyMoved).toBe('unknown');
-    const c = payment(p.kd, 3_100_000);
-    p.chain.mined.add(c.txid);
-    await takeIn(p.phone, c);
-    const second = await tapSend(p, 3_000_000);
-    expect(second.outcome.ok).toBe(false);
-    expect(paidTo(p.chain, BOB)).toHaveLength(1);
+    p.chain.wocDown = false;
+    p.chain.wocLagNew = true;
+    await newCoin(p, 3_100_000);
+    expect((await tapSend(p, 3_000_000)).asked).toHaveLength(1);
+    expect(toBob(p.chain)).toBe(1);
   });
 
-  test('A2: a different amount to the same payee picks the dead coin: no retry, and the earlier payment is named', async () => {
+  test('S7 (17c M4): the refusal names ANOTHER spender, WoC down: proven, the coin is cleared and the one retry pays BOB once', async () => {
+    const p = await phoneWithCoins();
+    const { picked } = await extensionSpends(p.chain, p.ext);
+    for (const o of picked) p.chain.wocLag.add(o);
+    p.chain.utxoStatusDown = true;
+    p.chain.wocDown = true;
+    const first = await tapSend(p, 3_000_000);
+    expect(first.outcome?.ok).toBe(true);
+    expect(first.outcome?.retried).toBe(true);
+    expect(toBob(p.chain)).toBe(1);
+    // Nothing is held against BOB: the next payment to him goes ahead without a question.
+    expect((await p.recent.pending(p.kd.identityKey, [BOB_TYPED])).length).toBe(0);
+  });
+
+  test('A + C (review 17 F1): "Send anyway" with the same payee picking the dead coin: no retry, the earlier payment named', async () => {
     const p = await phoneWithCoins();
     const { t1 } = await falseRefusal(p, 3_000_000);
-    for (const [o, by] of p.chain.spentBy) if (by === t1) p.chain.indexMisses.add(o);
-    const second = await tapSend(p, 2_900_000);
-    expect(second.outcome.retried).toBe(false);
-    expect(paidTo(p.chain, BOB)).toHaveLength(1);
+    const second = await tapSend(p, 2_900_000, { sendAnyway: true });
+    expect(second.outcome?.retried).toBe(false);
     expect(second.answer).toBe(ownPaymentOutMessage(t1));
-    expect(second.shown).toMatchObject({ kind: 'earlier-payment-out', moneyMoved: 'no' });
+    expect(second.shown).toMatchObject({ kind: 'earlier-payment-out', moneyMoved: 'yes', txid: t1 });
+    expect(toBob(p.chain)).toBe(1);
   });
 
-  test('R4 / 17b L1: the earlier payment went to ALICE: never "you won\'t pay twice", and a site gets no txid', async () => {
+  test('R4 / 17b L1: the earlier payment went to ALICE: never "won\'t pay twice", and a site gets no txid', async () => {
     const p = await phoneWithCoins();
     const { t1 } = await falseRefusal(p, 3_000_000, ALICE);
     for (const [o, by] of p.chain.spentBy) if (by === t1) p.chain.indexMisses.add(o);
     const own = await tapSend(p, 3_000_000, { to: BOB });
+    expect(own.asked).toHaveLength(0); // a different recipient
     expect(paidTo(p.chain, BOB)).toHaveLength(0);
     expect(own.answer).toBe(OWN_COIN_OTHER_PAYMENT_MESSAGE);
-    expect(own.shown?.message).not.toMatch(/won't pay twice/);
-    // A site's payment that hits the same kind of refusal: no txid of another payment in what the site gets.
     const p2 = await phoneWithCoins();
     const r = await falseRefusal(p2, 3_000_000, BOB);
     for (const [o, by] of p2.chain.spentBy) if (by === r.t1) p2.chain.indexMisses.add(o);
     const site = await tapSend(p2, 2_000_000, { to: BOB, ownSend: false, isSite: true });
     expect(site.answer).not.toContain(r.t1.slice(0, 8));
   });
-
-  test('C: the index has caught up (the toolbox clears the coin itself): still no retry, and the person is told', async () => {
-    const p = await phoneWithCoins();
-    const { t1 } = await falseRefusal(p, 3_000_000);
-    const second = await tapSend(p, 2_900_000);
-    expect(second.outcome.retried).toBe(false);
-    expect(paidTo(p.chain, BOB)).toHaveLength(1);
-    expect(second.answer).toBe(ownPaymentOutMessage(t1));
-  });
 });
 
-describe('17b H1: a double spend not proven dead always reads "may still go through"', () => {
-  test("R1: the wallet's own send; the toolbox clears the coin itself (released 0); a re-tap is stopped too", async () => {
+describe('17b H1: a double spend not proven dead always reads "can\'t confirm"', () => {
+  test("R1: the wallet's own send; the toolbox clears the coin itself (released 0); the re-tap is asked", async () => {
     const p = await phoneWithCoins();
     const { picked } = await extensionSpends(p.chain, p.ext);
     doubleSpendWorld(p.chain, picked);
     const r = await tapSend(p, 3_000_000);
-    expect(r.outcome.ok).toBe(false);
-    expect(r.outcome.retried).toBe(false);
+    expect(r.outcome?.retried).toBe(false);
     expect(r.shown).toMatchObject({ moneyMoved: 'unknown', message: DOUBLE_SPEND_PENDING_MESSAGE });
-    const again = await tapSend(p, 3_000_000);
-    expect(again.shown).toMatchObject({ message: EARLIER_MAYBE_OUT_MESSAGE, moneyMoved: 'unknown' });
+    expect((await tapSend(p, 3_000_000)).asked).toHaveLength(1);
     expect(paidTo(p.chain, BOB)).toHaveLength(0);
   });
 
@@ -497,24 +585,20 @@ describe('17b H1: a double spend not proven dead always reads "may still go thro
     const { picked, tExt } = await extensionSpends(p.chain, p.ext);
     doubleSpendWorld(p.chain, picked, { flaky: true });
     const r = await tapSend(p, 3_000_000, { ownSend: false, isSite: true });
-    expect(r.outcome.heal?.released).toBe(1);
+    expect(r.outcome?.heal?.released).toBe(1);
     expect(r.shown).toMatchObject({ moneyMoved: 'unknown', message: DOUBLE_SPEND_PENDING_MESSAGE });
-    // Review 17 F3: the heal's coin is on the automatic check's list, with its spender.
     expect(clearedList(p.kv, p.phone)[picked[0]]).toBe(tExt);
   });
 
   test('R3: REJECTED → heal → the one retry is itself refused as a double spend', async () => {
     const p = await phoneWithCoins();
-    await extensionSpends(p.chain, p.ext); // spends Z
-    await extensionSpends(p.chain, p.ext); // spends Y
+    await extensionSpends(p.chain, p.ext);
+    await extensionSpends(p.chain, p.ext);
     p.chain.dsFromRefusal = 2;
     p.chain.flakyGet = true;
     const r = await tapSend(p, 3_000_000);
-    expect(r.outcome.retried).toBe(true);
-    // Whatever the toolbox makes of the retry's double spend (a confirmed double spend, or a service error when it
-    // can't confirm it), the person is never told "not sent, try again" while it may still go through.
+    expect(r.outcome?.retried).toBe(true);
     expect(r.shown?.moneyMoved).toBe('unknown');
-    expect(r.shown?.message).not.toMatch(/unchanged|so try again/i);
     expect(paidTo(p.chain, BOB)).toHaveLength(0);
   });
 
@@ -528,7 +612,7 @@ describe('17b H1: a double spend not proven dead always reads "may still go thro
       }
     p.chain.wocLag.add(t1);
     p.chain.dsMode = true;
-    const second = await tapSend(p, 2_900_000);
+    const second = await tapSend(p, 2_900_000, { sendAnyway: true });
     expect(second.shown?.moneyMoved).not.toBe('no');
     expect(paidTo(p.chain, BOB)).toHaveLength(1);
   });
@@ -540,35 +624,72 @@ describe('17b H1: a double spend not proven dead always reads "may still go thro
     doubleSpendWorld(p.chain, picked);
     expect(await wocSpendMined(picked[0], tExt, wocFetch(p.chain))).toBe(true);
     const r = await tapSend(p, 3_000_000);
-    expect(r.outcome.ok).toBe(true);
-    expect(r.outcome.cleared).toBe(1);
+    expect(r.outcome?.ok).toBe(true);
+    expect(r.outcome?.cleared).toBe(1);
     expect(paidTo(p.chain, BOB)).toHaveLength(1);
   });
 });
 
-describe('honest sends keep working', () => {
-  test('a plain send goes out once', async () => {
+describe('17c L3: a coin whose parent never reached the network stops failing every send', () => {
+  test('the coin is set aside after one "Missing inputs", the person is told, and the next send goes out', async () => {
     const p = await phoneWithCoins();
-    const r = await tapSend(p, 3_000_000);
-    expect(r.outcome.ok).toBe(true);
+    // A payment of ours that the chain later forgets (it lost a race): its change is a phantom coin.
+    const lost = await tapSend(p, 3_000_000, { to: ALICE });
+    const lostTxid = (lost.outcome as { ok: true; result: { txid?: string } }).result.txid!;
+    p.chain.posts.splice(p.chain.posts.indexOf(lostTxid), 1);
+    for (const [o, by] of [...p.chain.spentBy]) if (by === lostTxid) p.chain.spentBy.delete(o);
+    // Only the phantom change is spendable for this send, so it is the coin picked.
+    type Out = { outputId: number; txid?: string; spendable: boolean; change: boolean };
+    const held = ((await p.phone.s.findOutputs({ partial: {}, noScript: true })) as unknown as Out[]).filter(
+      (o) => o.spendable && o.change && o.txid !== lostTxid,
+    );
+    for (const o of held) await p.phone.s.updateOutput(o.outputId, { spendable: false });
+    const phantom = ((await p.phone.s.findOutputs({ partial: { txid: lostTxid }, noScript: true })) as unknown as Out[])
+      .filter((o) => o.spendable)
+      .map((o) => `${lostTxid}_${(o as unknown as { vout: number }).vout}`);
+    const first = await tapSend(p, 100_000);
+    for (const o of held) await p.phone.s.updateOutput(o.outputId, { spendable: true });
+    expect(first.outcome?.heal?.orphaned?.length).toBeGreaterThan(0);
+    for (const op of first.outcome?.heal?.orphaned ?? []) expect(phantom).toContain(op);
+    expect(first.shown).toMatchObject({ moneyMoved: 'unknown', message: MISSING_PARENT_MESSAGE });
+    const next = await tapSend(p, 100_000, { sendAnyway: true });
+    expect(next.outcome?.ok).toBe(true);
     expect(paidTo(p.chain, BOB)).toHaveLength(1);
   });
-  test('a REJECTED the chain confirms (WhatsOnChain 404, stack unknown) says "not sent", and a re-tap goes ahead', async () => {
+});
+
+describe('honest sends keep working (no new refusal paths)', () => {
+  test('a plain send goes out once; a second payment to the same person after a SUCCESS is not asked', async () => {
+    const p = await phoneWithCoins();
+    expect((await tapSend(p, 3_000_000)).outcome?.ok).toBe(true);
+    const again = await tapSend(p, 3_000_000);
+    expect(again.asked).toHaveLength(0);
+    expect(again.outcome?.ok).toBe(true);
+    expect(paidTo(p.chain, BOB)).toHaveLength(2);
+  });
+  test("a site's (or an agent's) payment is never asked, even right after an uncertain one to the same payee", async () => {
+    const p = await phoneWithCoins();
+    await falseRefusal(p, 3_000_000);
+    await newCoin(p, 3_100_000);
+    const site = await tapSend(p, 3_000_000, { ownSend: false, isSite: true });
+    expect(site.asked).toHaveLength(0);
+    expect(site.outcome).toBeDefined();
+  });
+  test('a REJECTED naming another spender says "not sent" and is not held against the payee', async () => {
     const p = await phoneWithCoins();
     const { picked } = await extensionSpends(p.chain, p.ext);
-    // The extension's spend is not visible to any source yet: the preflight can't see it; the broadcaster refuses.
     for (const o of picked) p.chain.wocLag.add(o);
     p.chain.utxoStatusDown = true;
     const first = await tapSend(p, 3_000_000, { ownSend: false });
     p.chain.utxoStatusDown = false;
-    expect(first.shown).toMatchObject({ moneyMoved: 'no', message: REFUSED_NOT_SENT_MESSAGE });
-    // Nothing was recorded against this payment, and once the sources catch up the re-tap uses a live coin.
+    expect(first.shown?.moneyMoved).toBe('no');
     for (const o of picked) {
       p.chain.wocLag.delete(o);
       p.chain.indexMisses.delete(o);
     }
     const again = await tapSend(p, 3_000_000);
-    expect(again.outcome.ok).toBe(true);
+    expect(again.asked).toHaveLength(0);
+    expect(again.outcome?.ok).toBe(true);
     expect(paidTo(p.chain, BOB)).toHaveLength(1);
   });
 });

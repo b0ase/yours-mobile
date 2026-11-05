@@ -45,8 +45,11 @@ const TXID = /^[0-9a-f]{64}$/i;
  * services/wocLimiter.ts). A lookup that runs out is "can't tell": the send goes ahead as before.
  */
 export const PREFLIGHT_TIMEOUT_MS = 2_500;
-/** WhatsOnChain lookups per check (the biggest coins first); further coins get the index only. */
-export const PREFLIGHT_MAX_WOC = 6;
+/**
+ * WhatsOnChain lookups per check (the biggest coins first); further coins get the index only. Four start within about
+ * a second under the app-wide 3/s limit, well inside the deadline (17c L2).
+ */
+export const PREFLIGHT_MAX_WOC = 4;
 export const WOC_MAIN = 'https://api.whatsonchain.com/v1/bsv/main';
 export const SPENT_ELSEWHERE_CODE = 'WERR_SPENT_ELSEWHERE';
 
@@ -177,6 +180,8 @@ export async function wocSpentStatus(
   const r = await f(`${WOC_MAIN}/tx/${txid}/${vout}/spent`, {
     signal,
     credentials: 'omit',
+    // Ahead of this context's other WhatsOnChain requests (wocLimiter.ts): a send is waiting on it (17c L2).
+    priority: 'high',
     ...(key ? { headers: { 'woc-api-key': key } } : {}),
   });
   if (r.status === 404) return null;

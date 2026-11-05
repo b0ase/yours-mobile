@@ -150,14 +150,11 @@ import { createExcludingUnprovable } from './services/unprovableCoinRetry';
 import { siteActionError } from './services/siteActionError';
 import { retryEligible } from './services/spentRetry';
 import {
-  chainKnowsTx,
   healRefusedInputs,
-  refusalChecks,
   sendFailureText,
   sendWithChecks,
   type SendChecksContext,
 } from './services/ownSend';
-import { createSendGuard, SEND_GUARD_KEY, type SendGuardState } from './services/sendGuard';
 import { createWithStorageFailover, failoverEligible } from './services/storageFailover';
 import { isTruthyRequiredError } from './services/nullTxidRepair';
 
@@ -394,14 +391,6 @@ const sendChecksContext = (ctx: AccountContext | null): SendChecksContext | null
 /** After a refusal (invalidTx or doubleSpend): clear the inputs the chain proves spent, recorded for undo. */
 const healRejectedInputs = (ctx: AccountContext, error: unknown): Promise<HealReport | null> =>
   healRefusedInputs(sendChecksContext(ctx), error);
-/** A re-tap of a refused payment that may have gone out is checked first (services/sendGuard.ts; 17b M1). */
-const sendGuard = createSendGuard({
-  load: async () =>
-    ((await chrome.storage.session.get(SEND_GUARD_KEY))[SEND_GUARD_KEY] as SendGuardState | undefined) ?? {},
-  save: (s) => chrome.storage.session.set({ [SEND_GUARD_KEY]: s }),
-  txKnown: (txid) => chainKnowsTx(sendChecksContext(accountContext), txid),
-  spendMined: (op, by) => refusalChecks(sendChecksContext(accountContext)).spendMined(op, by),
-});
 /**
  * Clear every coin storage lists as spendable that the chain proves was spent (resyncSpent, fail closed: only coins
  * with a named spending txid). Owner's iPhone, 19 Oct 2026: ~$51 of coins spent from another device holding the same
@@ -6633,9 +6622,9 @@ if (!(
 
       let result: Awaited<ReturnType<typeof signer.createAction>>;
       try {
-        // The money path in one place (services/ownSend.ts): for the wallet's own send, a re-tap of a refused payment
-        // that may have gone out is checked first (sendGuard.ts), the coins storage picks are checked on chain before
-        // signing (coinPreflight.ts), and a refusal is healed, judged and retried at most once (spentRetry.ts).
+        // The money path in one place (services/ownSend.ts): for the wallet's own send the coins storage picks are
+        // checked on chain before signing (coinPreflight.ts), and a refusal is healed, judged and retried at most once
+        // (spentRetry.ts). A manual re-tap is guarded on the Send page (utils/uncertainSends.ts).
         const ctxForHeal = accountContext;
         const ownSend = retryEligible({ isAdmin, continuing, delayed, sendAll: usesSendAllSentinel, args });
         const outcome = await sendWithChecks({
@@ -6674,7 +6663,6 @@ if (!(
           outputs: args.outputs,
           ownSend,
           context: sendChecksContext(ctxForHeal),
-          guard: sendGuard,
           log: (m, d) => console.warn(m, d ?? ''),
         });
         spentHeal = outcome.heal;

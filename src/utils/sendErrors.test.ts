@@ -2,7 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import {
   classifySendError,
   DOUBLE_SPEND_PENDING_MESSAGE,
-  EARLIER_MAYBE_OUT_MESSAGE,
+  DELIVERY_UNCONFIRMED_MESSAGE,
+  MISSING_PARENT_MESSAGE,
   OWN_COIN_OTHER_PAYMENT_MESSAGE,
   ownPaymentOutMessage,
   REFUSED_MAYBE_SENT_MESSAGE,
@@ -61,7 +62,7 @@ describe('classifySendError', () => {
   });
   test('an earlier payment of ours went out (review 17, F1): say so, nothing more sent, the txid for History', () => {
     const r = classifySendError(ownPaymentOutMessage(TXID));
-    expect(r).toMatchObject({ kind: 'earlier-payment-out', moneyMoved: 'no', txid: TXID });
+    expect(r).toMatchObject({ kind: 'earlier-payment-out', moneyMoved: 'yes', txid: TXID });
     expect(r.message).toBe(ownPaymentOutMessage(`${TXID.slice(0, 8)}…`));
     expect(r.message).toMatch(/won't pay twice/);
     expect(r.message).not.toMatch(/try again|another device/i);
@@ -104,12 +105,31 @@ describe('classifySendError', () => {
       message: REFUSED_NOT_SENT_MESSAGE,
     });
   });
-  test('an earlier payment of ours to someone else (17b L1): not "you won\'t pay twice"', () => {
+  test('an earlier payment of ours not proven to this payee (17c M1): neutral, unknown, never "send again"', () => {
     const r = classifySendError(OWN_COIN_OTHER_PAYMENT_MESSAGE);
-    expect(r).toMatchObject({ kind: 'earlier-payment-out', moneyMoved: 'no', message: OWN_COIN_OTHER_PAYMENT_MESSAGE });
-    expect(r.message).not.toMatch(/won't pay twice/);
-    expect(classifySendError(EARLIER_MAYBE_OUT_MESSAGE)).toMatchObject({
+    expect(r).toMatchObject({
       kind: 'earlier-payment-out',
+      moneyMoved: 'unknown',
+      message: OWN_COIN_OTHER_PAYMENT_MESSAGE,
+    });
+    expect(r.message).not.toMatch(/won't pay twice|someone else|then send again/i);
+    expect(r.message).toMatch(/don't send again/);
+  });
+  test('17c H2 (S6): a $name payment broadcast but not confirmed by the payee host is SENT, never "Nothing was sent"', () => {
+    for (const raw of [
+      'delivery-failed: Failed to fetch',
+      'delivery-failed: P2P send failed: 429',
+      'delivery-failed: The operation timed out.',
+      'delivery-failed: P2P send failed: 503',
+    ]) {
+      const r = classifySendError(raw);
+      expect(r).toMatchObject({ kind: 'sent-unconfirmed', moneyMoved: 'yes', message: DELIVERY_UNCONFIRMED_MESSAGE });
+      expect(r.message).not.toMatch(/nothing was sent/i);
+    }
+  });
+  test('17c L3: a coin whose parent never reached the network: set aside, unknown', () => {
+    expect(classifySendError(MISSING_PARENT_MESSAGE)).toMatchObject({
+      kind: 'broadcast-unknown',
       moneyMoved: 'unknown',
     });
   });

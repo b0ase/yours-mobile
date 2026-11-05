@@ -42,6 +42,11 @@ export type SendConfirmationProps = {
   /** USD per BSV the screen already has; fetched when missing. Display only. */
   usdPerBsv?: number;
   isProcessing?: boolean;
+  /**
+   * Earlier sends to these recipients whose outcome is still uncertain (utils/uncertainSends.ts; third review 17c):
+   * the sheet asks "Send another anyway?" and Cancel becomes the default button.
+   */
+  earlier?: { recipient: string; amount: string; sentAt: string }[];
   onConfirm: () => void;
   onCancel: () => void;
 };
@@ -56,9 +61,11 @@ export const SendConfirmation = (props: SendConfirmationProps) => {
     totalSats,
     usdPerBsv,
     isProcessing = false,
+    earlier = [],
     onConfirm,
     onCancel,
   } = props;
+  const warn = earlier.length > 0;
   // Dollars first, sats small underneath (owner, 24 Oct 2026).
   const price = useSheetPrice(usdPerBsv);
 
@@ -141,6 +148,26 @@ export const SendConfirmation = (props: SendConfirmationProps) => {
                 <h2 className="text-xl font-bold mb-4" style={{ color: contrast }}>
                   Confirm Send
                 </h2>
+
+                {/* An earlier send to the same recipient may already have gone out (17c): ask before paying again. */}
+                {warn && (
+                  <div
+                    role="alert"
+                    className="flex items-start gap-2 w-full mb-4 px-3 py-2 rounded-lg text-sm text-left"
+                    style={{ background: 'rgba(245,158,11,0.12)', color: contrast }}
+                  >
+                    <AlertTriangle size={16} className="shrink-0 mt-0.5" style={{ color: '#F59E0B' }} />
+                    <span>
+                      {earlier.map((e) => (
+                        <span key={e.recipient} className="block">
+                          Your earlier payment of {e.amount} to {e.recipient} may already have gone out (sent {e.sentAt}
+                          ).
+                        </span>
+                      ))}
+                      <span className="block font-bold mt-1">Send another anyway?</span>
+                    </span>
+                  </div>
+                )}
 
                 {/* Line items */}
                 <div className="w-full mb-4 space-y-3 overflow-y-auto" style={{ maxHeight: '12rem' }}>
@@ -247,10 +274,20 @@ export const SendConfirmation = (props: SendConfirmationProps) => {
                 {/* Action buttons */}
                 <div className="flex items-center gap-3 w-[87%]">
                   <div className="flex-1">
-                    <Button theme={theme} type="secondary-outline" label="Cancel" onClick={onCancel} />
+                    <Button
+                      theme={theme}
+                      type={warn ? 'primary' : 'secondary-outline'}
+                      label="Cancel"
+                      onClick={onCancel}
+                    />
                   </div>
                   <div className="flex-1">
-                    <Button theme={theme} type="primary" label="Send" onClick={onConfirm} />
+                    <Button
+                      theme={theme}
+                      type={warn ? 'secondary-outline' : 'primary'}
+                      label={warn ? 'Send anyway' : 'Send'}
+                      onClick={onConfirm}
+                    />
                   </div>
                 </div>
               </motion.div>

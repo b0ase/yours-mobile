@@ -8,7 +8,8 @@
  * Pure: no chrome, no React. Tested in sendErrors.test.ts.
  */
 
-export type MoneyMoved = 'no' | 'unknown';
+/** 'yes': it went out on chain (e.g. a $name payment whose delivery to the payee's host failed afterwards). */
+export type MoneyMoved = 'no' | 'unknown' | 'yes';
 
 /**
  * Coins this device still listed as spendable were spent from another device holding the same seed (owner's iPhone,
@@ -25,21 +26,23 @@ export const SPENT_ELSEWHERE_SHORT_MESSAGE =
 export const SPENT_ELSEWHERE_STUCK_MESSAGE =
   "Some of your coins were already spent from another device, but the wallet couldn't update them. Nothing was sent. Go to Settings › Troubleshooting › Resync coins, then send again.";
 /**
- * The network refused this payment as a double spend (DOUBLE_SPEND_ATTEMPTED) and the other payment using the same coin
- * is not proven mined: ARC keeps the refused transaction and mines it if the other one drops, so this payment MAY
- * STILL GO THROUGH (review 17 F2, 17b H1). Never "not sent, try again".
+ * The default after ANY attempt that may have been broadcast and didn't clearly succeed (17c): a refusal can come for a
+ * transaction that already went out (refusalRecheck.ts), and WhatsOnChain lags, so its 404 proves nothing. Only hard
+ * proof says "not sent" (REFUSED_NOT_SENT_MESSAGE).
+ */
+export const REFUSED_MAYBE_SENT_MESSAGE = "We can't confirm whether this went out. Check History before sending again.";
+/**
+ * DOUBLE_SPEND_ATTEMPTED with the other payment not proven mined: ARC keeps the refused transaction and mines it if the
+ * other one drops (review 17 F2, 17b H1).
  */
 export const DOUBLE_SPEND_PENDING_MESSAGE =
-  'The network held this payment back because one of its coins was also used by another payment. It may still go through until that one settles. Nothing more was sent. Check History in a few minutes before you send again.';
+  "We can't confirm whether this went out: one of its coins was also used by another payment, and either may still go through. Check History before sending again.";
 /**
- * The network refused this payment (REJECTED), but it is not confirmed absent from the chain: a refusal can come for a
- * transaction that already went out (refusalRecheck.ts). Only REFUSED_NOT_SENT_MESSAGE may say "not sent" (17b M1).
+ * Hard proof it can't go out: the broadcaster named a DIFFERENT transaction as the spender of this payment's input, or
+ * every input is known spent by other transactions (17c: never on a WhatsOnChain 404 alone).
  */
-export const REFUSED_MAYBE_SENT_MESSAGE =
-  "The network refused this payment, but we can't confirm yet that it didn't go out. Nothing more was sent. Check History in a few minutes before you send again.";
-/** A refusal checked against the chain: WhatsOnChain and the 1Sat stack don't know the transaction. */
 export const REFUSED_NOT_SENT_MESSAGE =
-  "The network refused this payment and it isn't on the chain, so nothing was sent and your coins are unchanged. Refresh, then try again.";
+  'The network refused this payment because a coin in it was already spent by another payment, so nothing was sent. Refresh, then try again.';
 /**
  * The coin this payment needed was spent by an earlier payment of this wallet TO THE SAME PAYEE (one it may have shown
  * as failed): that payment went out, so nothing is retried (review 17, F1: a retry here paid the same payee twice).
@@ -47,19 +50,29 @@ export const REFUSED_NOT_SENT_MESSAGE =
  */
 export const ownPaymentOutMessage = (txid?: string): string =>
   `Your earlier payment to this payee already went out${txid ? ` (tx ${txid})` : ''}. Nothing more was sent, so you won't pay twice. Find it in History.`;
-/** The same coin went to an earlier payment of this wallet that may have been to someone else (17b L1). */
+/**
+ * The coin went to an earlier payment of this wallet that isn't proven to be to this payee: a $name payee gets a fresh
+ * address each time, so "someone else" is never claimed (17c M1), and nobody is told to send again.
+ */
 export const OWN_COIN_OTHER_PAYMENT_MESSAGE =
-  'A coin this payment needed was already used by an earlier payment from this wallet, which may have been to someone else. Nothing more was sent. Check History, then send again.';
+  "An earlier payment from this wallet went out using a coin this payment needed. If it was to this payee, don't send again. Check History first.";
+/** A coin whose parent payment never reached the network was set aside, so sends stop failing on it (17c L3). */
+export const MISSING_PARENT_MESSAGE =
+  "A coin in this payment came from a payment that never reached the network, so the wallet set it aside and won't use it again. We can't confirm whether this payment went out. Check History before sending again.";
+/**
+ * A $name payment that went out on chain, but the payee's wallet host didn't confirm it received the payment details
+ * (guardedSendBsv.ts 'delivery-failed:'). It must never read "Nothing was sent" (17c H2).
+ */
+export const DELIVERY_UNCONFIRMED_MESSAGE =
+  "Your payment went out on chain, but the recipient's wallet service didn't confirm it received it. Don't send it again; check History.";
 /** For a site's answer: the txid of another payment of this wallet is never shared (17b L1, privacy). */
 export const withoutOwnTxids = (text: string): string => text.replace(/ \(tx [0-9a-f]{8,64}…?\)/gi, '');
-/** The last try at this same payment (same payee and amount) may have gone out and isn't confirmed either way. */
-export const EARLIER_MAYBE_OUT_MESSAGE =
-  "Your last try at this same payment may have gone out, and that isn't confirmed yet. Nothing more was sent. Check History; if it isn't there in a few minutes, send again.";
 
 export type SendErrorKind =
   | 'worker-restarted'
   | 'other-extension'
   | 'earlier-payment-out'
+  | 'sent-unconfirmed'
   | 'spent-elsewhere'
   | 'insufficient-funds'
   | 'broadcast-failed'
@@ -131,6 +144,10 @@ export function classifySendError(e: unknown, phase: 'before-sign' | 'send' = 's
     ...(txid ? { txid } : {}),
   });
 
+  // A $name payment broadcast on chain whose delivery to the payee's host failed afterwards: it went out (17c H2). First,
+  // so its "Failed to fetch" / "429" / "timed out" never reads as a network failure with "Nothing was sent".
+  if (/delivery-failed:/i.test(raw)) return make('sent-unconfirmed', DELIVERY_UNCONFIRMED_MESSAGE, 'yes');
+
   if (/another wallet extension|OTHER_WALLET_EXTENSION/i.test(raw))
     return make(
       'other-extension',
@@ -164,21 +181,21 @@ export function classifySendError(e: unknown, phase: 'before-sign' | 'send' = 's
   if (/denied by user|user denied|cancell?ed by (the )?user|USER_DENIED/i.test(raw))
     return make('cancelled', 'You cancelled the payment. Nothing was sent.', 'no');
 
-  // The background's own sentences after a refusal or the coin check (services/spentRetry.ts, coinPreflight.ts,
-  // sendGuard.ts). Before the insufficient-funds and broadcast rules: they are specific.
+  // The background's own sentences after a refusal or the coin check (services/spentRetry.ts, coinPreflight.ts).
+  // Before the insufficient-funds and broadcast rules: they are specific.
   // A payment of ours to this payee already went out with this coin: say so with its short txid (the full one is in
   // `txid`, for Details).
   if (/earlier payment to this payee already went out/i.test(raw))
-    return make('earlier-payment-out', ownPaymentOutMessage(txid ? `${txid.slice(0, 8)}…` : undefined), 'no');
-  if (/already used by an earlier payment from this wallet/i.test(raw))
-    return make('earlier-payment-out', OWN_COIN_OTHER_PAYMENT_MESSAGE, 'no');
-  if (/last try at this same payment may have gone out/i.test(raw))
-    return make('earlier-payment-out', EARLIER_MAYBE_OUT_MESSAGE, 'unknown');
-  if (/held this payment back because one of its coins/i.test(raw))
+    return make('earlier-payment-out', ownPaymentOutMessage(txid ? `${txid.slice(0, 8)}…` : undefined), 'yes');
+  if (/an earlier payment from this wallet went out using a coin/i.test(raw))
+    return make('earlier-payment-out', OWN_COIN_OTHER_PAYMENT_MESSAGE, 'unknown');
+  if (/one of its coins was also used by another payment/i.test(raw))
     return make('broadcast-unknown', DOUBLE_SPEND_PENDING_MESSAGE, 'unknown');
-  if (/can't confirm yet that it didn't go out/i.test(raw))
+  if (/came from a payment that never reached the network/i.test(raw))
+    return make('broadcast-unknown', MISSING_PARENT_MESSAGE, 'unknown');
+  if (/can't confirm whether this went out/i.test(raw))
     return make('broadcast-unknown', REFUSED_MAYBE_SENT_MESSAGE, 'unknown');
-  if (/refused this payment and it isn't on the chain/i.test(raw))
+  if (/already spent by another payment, so nothing was sent/i.test(raw))
     return make('broadcast-failed', REFUSED_NOT_SENT_MESSAGE, 'no');
   if (/couldn't update them/i.test(raw)) return make('spent-elsewhere', SPENT_ELSEWHERE_STUCK_MESSAGE, 'no');
   if (/already spent (?:on|from) another device|WERR_SPENT_ELSEWHERE/i.test(raw))

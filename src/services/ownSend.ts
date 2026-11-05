@@ -2,18 +2,25 @@
  * The money path of the background's createAction, in one place (re-review 17b, L4). background.ts
  * processCWICreateAction calls these, and the end-to-end tests drive the same functions with the real wallet-toolbox,
  * so what is tested is what runs:
- *   - refusalChecks: the chain checks a refused send needs (the heal, "is the refused tx known", "is that spender ours",
- *     "is the competing spend mined");
- *   - sendWithChecks: the re-tap guard (sendGuard.ts), the pre-send coin check (coinPreflight.ts), and one safe retry
- *     (spentRetry.ts) around the caller's createAction stack;
+ *   - refusalChecks: what a refused send needs (the heal, "is that spender ours", "is the competing spend mined");
+ *   - sendWithChecks: the pre-send coin check (coinPreflight.ts) and one safe retry (spentRetry.ts) around the caller's
+ *     createAction stack;
  *   - sendFailureText: the sentence the page or the site gets (sites never get another payment's txid).
+ * A manual re-tap is guarded on the Send page, by the recipient the person typed (utils/uncertainSends.ts; 17c), not
+ * here: chain data lags, and the page knows who the person meant to pay.
  */
 import { armCoinPreflight, heldTxids, ownTxPaysAny, wocSpendMined, wocSpentStatus } from './coinPreflight';
 import { createWithSpentRetry, type SpentRetryOutcome } from './spentRetry';
-import { healClearedEntries, healInvalidSend, refusedTxid, withHealMessage, type HealReport } from './invalidSendHeal';
+import {
+  healClearedEntries,
+  healInvalidSend,
+  rejectedInputs,
+  refusedTxid,
+  withHealMessage,
+  type HealReport,
+} from './invalidSendHeal';
 import { recordAutoCleared, type KV } from './autoCoinResync';
 import { refusalFor } from './broadcastRefusals';
-import { paymentKey, SendGuardError, type SendGuard } from './sendGuard';
 import { wocLookup } from './unsentGuard';
 import { withoutOwnTxids } from '../utils/sendErrors';
 
@@ -40,7 +47,14 @@ type MarkingProvider = {
     partial: { userId: number; txid: string; vout: number; spendable: boolean };
   }) => Promise<{ outputId: number }[]>;
   updateOutput: (id: number, u: { spendable: boolean }) => Promise<number>;
+  findTransactions: (a: {
+    partial: { userId: number; txid: string };
+    noRawTx: true;
+  }) => Promise<{ status?: string; provenTxId?: number | null }[]>;
 };
+
+/** Our own actions still on their way out: their change is never called "never reached the network". */
+const IN_FLIGHT = ['sending', 'unprocessed', 'unsigned', 'nosend'];
 
 const ask = <T>(f: () => Promise<T>): Promise<T | null> =>
   Promise.resolve()
@@ -48,45 +62,9 @@ const ask = <T>(f: () => Promise<T>): Promise<T | null> =>
     .catch(() => null);
 
 /**
- * After a refusal: clear the inputs the chain proves spent (invalidSendHeal.ts), and record them on the automatic
- * check's list so it can put one back if both sources later call it unspent (review 17 F3, 17b L3). Never throws.
- */
-export async function healRefusedInputs(c: SendChecksContext | null, error: unknown): Promise<HealReport | null> {
-  const txo = (c?.services as { txo?: Txo } | null)?.txo;
-  const storage = c?.storage as { runAsStorageProvider?: <T>(f: (sp: MarkingProvider) => Promise<T>) => Promise<T> };
-  if (!c || !c.identityKey || !txo?.getSpend || typeof storage?.runAsStorageProvider !== 'function') return null;
-  try {
-    const heal = await healInvalidSend(
-      error,
-      (o) => txo.getSpend!(o),
-      {
-        markSpent: (txid, vout) =>
-          storage.runAsStorageProvider!(async (sp) => {
-            const user = (await sp.findUsers({ partial: { identityKey: c.identityKey } }))[0];
-            if (!user) return 0;
-            let n = 0;
-            for (const o of await sp.findOutputs({ partial: { userId: user.userId, txid, vout, spendable: true } }))
-              n += await sp.updateOutput(o.outputId, { spendable: false });
-            return n;
-          }),
-      },
-      {
-        // WhatsOnChain names mempool and mined spenders alike.
-        fallback: c.mainnet ? async (o) => (await wocSpentStatus(o, undefined, c.fetch))?.txid ?? null : undefined,
-        reason: refusalFor(refusedTxid(error)),
-      },
-    );
-    await recordAutoCleared(c.kv, c.identityKey, healClearedEntries(heal));
-    return heal;
-  } catch (err) {
-    c.log?.('[ownSend] the heal after a refusal failed', err instanceof Error ? err.message : err);
-    return null;
-  }
-}
-
-/**
- * Is this txid known to the chain? true when WhatsOnChain has it or the 1Sat stack calls it known or mined; false only
- * when WhatsOnChain answers 404 and the stack doesn't know it; null otherwise (17b M1).
+ * Is this txid known to the chain? true when WhatsOnChain has it or the 1Sat stack calls it known or mined; false when
+ * WhatsOnChain answers 404 and the stack doesn't know it; null otherwise. A false here is NEVER proof that a refused
+ * payment didn't go out (WhatsOnChain lags; 17c H1): it is used only to find a coin's parent that never got anywhere.
  */
 export async function chainKnowsTx(c: SendChecksContext | null, txid: string): Promise<boolean | null> {
   if (!c) return null;
@@ -101,11 +79,73 @@ export async function chainKnowsTx(c: SendChecksContext | null, txid: string): P
   return woc === 'missing' ? false : null;
 }
 
-/** The chain checks createWithSpentRetry needs for one account. Without an account every answer is "can't tell". */
+/**
+ * After a refusal: clear the inputs the chain proves spent (invalidSendHeal.ts), and record them on the automatic
+ * check's list so it can put one back if both sources later call it unspent (review 17 F3, 17b L3). After a "missing
+ * inputs" refusal, a coin whose parent payment never reached the network (unknown to WhatsOnChain and the 1Sat stack,
+ * not mined in storage, not one of our own payments still going out) is set aside, so every send stops failing on it
+ * (17c L3; Find missing coins brings it back if that payment confirms later). Never throws.
+ */
+export async function healRefusedInputs(c: SendChecksContext | null, error: unknown): Promise<HealReport | null> {
+  const txo = (c?.services as { txo?: Txo } | null)?.txo;
+  const storage = c?.storage as { runAsStorageProvider?: <T>(f: (sp: MarkingProvider) => Promise<T>) => Promise<T> };
+  if (!c || !c.identityKey || !txo?.getSpend || typeof storage?.runAsStorageProvider !== 'function') return null;
+  const run = storage.runAsStorageProvider.bind(storage);
+  const setAside = (txid: string, vout: number) =>
+    run(async (sp) => {
+      const user = (await sp.findUsers({ partial: { identityKey: c.identityKey } }))[0];
+      if (!user) return 0;
+      let n = 0;
+      for (const o of await sp.findOutputs({ partial: { userId: user.userId, txid, vout, spendable: true } }))
+        n += await sp.updateOutput(o.outputId, { spendable: false });
+      return n;
+    });
+  try {
+    const reason = refusalFor(refusedTxid(error));
+    const heal = await healInvalidSend(
+      error,
+      (o) => txo.getSpend!(o),
+      { markSpent: setAside },
+      {
+        // WhatsOnChain names mempool and mined spenders alike.
+        fallback: c.mainnet ? async (o) => (await wocSpentStatus(o, undefined, c.fetch))?.txid ?? null : undefined,
+        reason,
+      },
+    );
+    await recordAutoCleared(c.kv, c.identityKey, healClearedEntries(heal));
+    if (/missing ?inputs/i.test(reason ?? '')) {
+      const orphaned: string[] = [];
+      for (const op of rejectedInputs(error)) {
+        if (heal.spenders?.[op]) continue; // spent: the heal handled it
+        const [parent, vout] = op.split('_');
+        const mine = await ask(() =>
+          run(async (sp) => {
+            const user = (await sp.findUsers({ partial: { identityKey: c.identityKey } }))[0];
+            return user
+              ? (await sp.findTransactions({ partial: { userId: user.userId, txid: parent }, noRawTx: true }))[0]
+              : undefined;
+          }),
+        );
+        if (mine?.provenTxId != null || (mine?.status && IN_FLIGHT.includes(mine.status))) continue;
+        if ((await chainKnowsTx(c, parent)) !== false) continue;
+        if ((await ask(() => setAside(parent, Number(vout)))) ?? 0) orphaned.push(op);
+      }
+      if (orphaned.length) {
+        c.log?.('[ownSend] coins whose parent never reached the network were set aside', orphaned);
+        heal.orphaned = orphaned;
+      }
+    }
+    return heal;
+  } catch (err) {
+    c.log?.('[ownSend] the heal after a refusal failed', err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+/** What a refused send needs for one account. Without an account every answer is "can't tell". */
 export function refusalChecks(c: SendChecksContext | null) {
   return {
     heal: (error: unknown) => healRefusedInputs(c, error),
-    txKnown: (txid: string) => chainKnowsTx(c, txid),
     reason: (txid: string) => refusalFor(txid),
     ownTxids: (txids: string[]) => (c ? heldTxids(c.storage, c.identityKey, txids) : Promise.resolve(null)),
     spendMined: (op: string, by: string) =>
@@ -117,9 +157,9 @@ export type RefusalChecks = ReturnType<typeof refusalChecks>;
 export type SendWithChecksOutcome<R> = SpentRetryOutcome<R> & { cleared: number };
 
 /**
- * Run the caller's createAction stack with the wallet's own-send protections. For the wallet's own fixed-amount send
- * (`ownSend`): the re-tap guard first, then the pre-send coin check is armed, and a refusal that may have gone out is
- * remembered. For every caller: a refusal is healed and judged (one retry only for the wallet's own send). Never throws.
+ * Run the caller's createAction stack with the wallet's own-send protections: for the wallet's own fixed-amount send
+ * (`ownSend`) the pre-send coin check is armed and one safe retry is allowed; for every caller a refusal is healed and
+ * judged. Never throws.
  */
 export async function sendWithChecks<R>(o: {
   create: () => Promise<R>;
@@ -128,26 +168,10 @@ export async function sendWithChecks<R>(o: {
   ownSend: boolean;
   context: SendChecksContext | null;
   checks?: RefusalChecks;
-  guard?: SendGuard;
   log?: (m: string, d?: unknown) => void;
 }): Promise<SendWithChecksOutcome<R>> {
   const c = o.context;
   const checks = o.checks ?? refusalChecks(c);
-  const key = o.ownSend && c ? paymentKey(c.identityKey, o.outputs) : null;
-  if (key && o.guard) {
-    const g = await o.guard.check(key);
-    if (!g.go) {
-      o.log?.('[ownSend] an earlier try of this payment may have gone out; not sending again', { txid: g.txid });
-      return {
-        ok: false,
-        error: new SendGuardError(g.message, g.txid),
-        retried: false,
-        heal: null,
-        notice: g.message,
-        cleared: 0,
-      };
-    }
-  }
   const scripts = (o.outputs ?? []).map((x) => x.lockingScript ?? '').filter(Boolean);
   const preflight = armCoinPreflight(o.ownSend);
   let outcome: SpentRetryOutcome<R>;
@@ -162,7 +186,6 @@ export async function sendWithChecks<R>(o: {
   } finally {
     preflight.done();
   }
-  if (!outcome.ok && outcome.mayBeOut && key && o.guard) await o.guard.record(key, outcome.mayBeOut);
   return { ...outcome, cleared: preflight.cleared };
 }
 

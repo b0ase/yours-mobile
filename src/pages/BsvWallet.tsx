@@ -61,7 +61,8 @@ import { sendMessageAsync } from '../utils/chromeHelpers';
 import { YoursEventName } from '../inject';
 import { useSyncTracker } from '../hooks/useSyncTracker';
 import { getErrorMessage, isValidEmail } from '../utils/tools';
-import { classifySendError, type SendErrorInfo } from '../utils/sendErrors';
+import { classifySendError, DELIVERY_UNCONFIRMED_MESSAGE, type SendErrorInfo } from '../utils/sendErrors';
+import { createUncertainSends, deviceKV, outcomeIsUncertain, sentAtLabel } from '../utils/uncertainSends';
 import { SendErrorNotice } from '../components/SendErrorNotice';
 import { chromeLocalStore, duplicateWarningOnce } from '../services/duplicateExtension';
 import { UpgradeNotification } from '../components/UpgradeNotification';
@@ -201,6 +202,8 @@ export const BsvWallet = () => {
     lineItems: SendLineItem[];
     total: string;
     totalSats?: number;
+    /** Earlier sends to these recipients that may already have gone out (utils/uncertainSends.ts). */
+    earlier?: { recipient: string; amount: string; sentAt: string }[];
     onConfirm: () => void;
   } | null>(null);
   // Get identityAddress from chrome storage (selected account)
@@ -1180,13 +1183,36 @@ export const BsvWallet = () => {
       payee: payeeNote(identityAddress, addr, pendingMeta(addr)),
     }));
 
+    // A re-tap must not pay twice (third review 17c): an earlier send to the same recipient, as typed, whose outcome is
+    // uncertain makes the sheet ask "Send another anyway?" with Cancel first (utils/uncertainSends.ts).
+    const recentSends = createUncertainSends(deviceKV());
+    const amountFor = (addr: string) => {
+      const bsv = (consolidated.get(addr) ?? 0) / BSV_DECIMAL_CONVERSION;
+      return exchangeRate > 0 ? `$${(bsv * exchangeRate).toFixed(2)}` : `${formatNumberWithCommasAndDecimals(bsv, 8)} BSV`;
+    };
+    const rememberUncertain = (info: SendErrorInfo) => {
+      if (outcomeIsUncertain(info))
+        void recentSends.note(
+          identityAddress,
+          addressOrder.map((a) => ({ recipient: a, amount: amountFor(a) })),
+        );
+    };
+    const earlier = (await recentSends.pending(identityAddress, addressOrder)).map((e) => ({
+      recipient: e.recipient,
+      amount: e.amount,
+      sentAt: sentAtLabel(e.at),
+    }));
+
     setSendConfirmation({
       icon: bsvCoin,
       lineItems,
       total: `${formatNumberWithCommasAndDecimals(totalSats / BSV_DECIMAL_CONVERSION, 8)} BSV`,
       totalSats,
+      earlier,
       onConfirm: async () => {
         setSendConfirmation(null);
+        // "Send anyway" after the warning: the person has seen it; don't ask again for this recipient.
+        if (earlier.length) void recentSends.clear(identityAddress, addressOrder);
         setIsProcessing(true);
         setSendInFlight(true);
         setSendError(null);
@@ -1196,7 +1222,9 @@ export const BsvWallet = () => {
         } catch (err) {
           // A thrown send (not a returned error) left the spinner up for good (owner, 27 Oct 2026).
           console.error('[handleSendBsv] send threw:', errText(err));
-          setSendError(classifySendError(err));
+          const info = classifySendError(err);
+          setSendError(info);
+          rememberUncertain(info);
           refreshUtxos().catch(() => undefined);
         } finally {
           setSendInFlight(false);
@@ -1226,14 +1254,20 @@ export const BsvWallet = () => {
           sendRes = await sendBsv.execute(sendContext(), { requests: sendRecipients });
         }
 
-        if (!sendRes.txid || sendRes.error) {
+        // A $name payment broadcast on chain whose delivery to the payee's host failed afterwards (third review 17c,
+        // H2): it WAS sent. It takes the sent path with a warning, never the error flow's "Nothing was sent".
+        const deliveryUnconfirmed =
+          !!sendRes.txid && typeof sendRes.error === 'string' && /^delivery-failed:/.test(sendRes.error);
+        if (!deliveryUnconfirmed && (!sendRes.txid || sendRes.error)) {
           const thrown = lastSendThrow.current;
           const err =
             thrown instanceof Error && sendRes.error && thrown.message === sendRes.error
               ? thrown
               : sendRes.error || 'The wallet returned no txid';
           console.error('[handleSendBsv] send failed:', errText(err));
-          setSendError(classifySendError(err));
+          const info = classifySendError(err);
+          setSendError(info);
+          rememberUncertain(info);
           setIsProcessing(false);
           // A refused send may have cleared coins spent on another device: show the corrected balance.
           refreshUtxos().catch((err) => console.error('[handleSendBsv] refresh after failed send:', errText(err)));
@@ -1246,7 +1280,11 @@ export const BsvWallet = () => {
         resetSendState();
         setBsvHistoryRefreshKey((k) => k + 1);
         setPageState('main');
-        if (
+        if (deliveryUnconfirmed) {
+          console.warn('[handleSendBsv] sent, but the payee host did not confirm delivery:', sendRes.error);
+          rememberUncertain(classifySendError(sendRes.error));
+          addSnackbar(DELIVERY_UNCONFIRMED_MESSAGE, 'info');
+        } else if (
           !celebrateSend(sendRes, {
             amount: { kind: 'bsv', sats: totalSats },
             recipients: addressOrder,
@@ -2525,6 +2563,7 @@ export const BsvWallet = () => {
         totalSats={sendConfirmation?.totalSats}
         usdPerBsv={exchangeRate}
         isProcessing={isProcessing}
+        earlier={sendConfirmation?.earlier}
         onConfirm={() => sendConfirmation?.onConfirm()}
         onCancel={() => setSendConfirmation(null)}
       />

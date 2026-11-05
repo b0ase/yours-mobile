@@ -4,9 +4,8 @@ import {
   createRateLimiter,
   installWocLimiter,
   isWocRequest,
-  retryAfterMs,
   WOC_LOCK,
-  WOC_PAUSE_MAX_MS,
+  WOC_PAUSE_MS,
   type LocksLike,
   type Pacer,
 } from './wocLimiter';
@@ -45,6 +44,19 @@ describe('createRateLimiter (the fallback without Web Locks)', () => {
     expect(got).toEqual([0, 1, 2, 3, 4, 5, 6]);
     expect(l.waiting()).toBe(0);
   });
+  test('17c L2: a priority request (the coin check before a send) goes ahead of waiting ones', async () => {
+    const c = clock();
+    const l = createRateLimiter({ max: 1, windowMs: 1000, now: c.now, setTimer: c.setTimer });
+    const got: string[] = [];
+    await l.slot();
+    void l.slot().then(() => got.push('walk 1'));
+    void l.slot().then(() => got.push('walk 2'));
+    void l.slot(undefined, true).then(() => got.push('send check'));
+    await c.advance(1000);
+    expect(got).toEqual(['send check']);
+    await c.advance(1000);
+    expect(got).toEqual(['send check', 'walk 1']);
+  });
   test('17b L2: a request aborted while queued gives its place up and never takes a slot', async () => {
     const c = clock();
     const l = createRateLimiter({ max: 1, windowMs: 1000, now: c.now, setTimer: c.setTimer });
@@ -60,19 +72,20 @@ describe('createRateLimiter (the fallback without Web Locks)', () => {
     expect(await aborted).toBe('AbortError');
     expect(l.waiting()).toBe(1);
     await c.advance(1000);
-    expect(next).toBe(true); // the abandoned request's slot went to the next one
-    // Already aborted: refused at once, nothing queued.
+    expect(next).toBe(true);
     const pre = new AbortController();
     pre.abort();
     expect(await l.slot(pre.signal).catch((e: Error) => e.name)).toBe('AbortError');
   });
-  test('17b L2: a 429 pause holds every request back for its length', async () => {
+  test('17c L1: a 429 pause is a fixed backoff, and pauses never stack', async () => {
     const c = clock();
-    const l = createRateLimiter({ max: 3, windowMs: 1000, now: c.now, setTimer: c.setTimer });
-    l.pause(5_000);
+    const l = createRateLimiter({ max: 3, windowMs: 1000, pauseMs: 2_000, now: c.now, setTimer: c.setTimer });
+    l.pause();
+    await c.advance(1_500);
+    l.pause(); // a second 429 while paused: not extended
     let got = false;
     void l.slot().then(() => (got = true));
-    await c.advance(4_999);
+    await c.advance(499);
     expect(got).toBe(false);
     await c.advance(1);
     expect(got).toBe(true);
@@ -92,11 +105,12 @@ describe('createRateLimiter (the fallback without Web Locks)', () => {
   });
 });
 
-/** Web Locks stand-in: one FIFO lock per name, `signal` leaves the queue. */
+/** Web Locks stand-in: one FIFO lock per name. */
 function fakeLocks() {
   type Entry = { cb: () => Promise<void>; done: (v: unknown) => void; fail: (e: unknown) => void };
   const queues = new Map<string, Entry[]>();
   const held = new Set<string>();
+  let requests = 0;
   const run = (name: string) => {
     if (held.has(name)) return;
     const next = (queues.get(name) ?? []).shift();
@@ -111,91 +125,109 @@ function fakeLocks() {
       });
   };
   const locks: LocksLike = {
-    request: (name, options, cb) =>
+    request: (name, _options, cb) =>
       new Promise((done, fail) => {
+        requests++;
         const q = queues.get(name) ?? [];
-        const entry: Entry = { cb, done, fail };
-        q.push(entry);
+        q.push({ cb, done, fail });
         queues.set(name, q);
-        options.signal?.addEventListener('abort', () => {
-          const i = q.indexOf(entry);
-          if (i >= 0) {
-            q.splice(i, 1);
-            fail(new DOMException('Aborted', 'AbortError'));
-          }
-        });
         run(name);
       }),
   };
-  return { locks, names: () => [...queues.keys()] };
+  return { locks, names: () => [...queues.keys()], requests: () => requests };
 }
 
 describe('createLockPacer (app-wide: every context of the origin shares one lock)', () => {
-  test('one request start per gap across all callers, in order; an abort leaves the queue', async () => {
-    const { locks, names } = fakeLocks();
-    const sleeps: (() => void)[] = [];
-    const pacer = createLockPacer(locks, { gapMs: 334, sleep: () => new Promise<void>((r) => sleeps.push(r)) });
-    const got: number[] = [];
-    void pacer.slot().then(() => got.push(1));
+  test('one start per gap; this context asks for the lock one at a time; priority first; abort leaves', async () => {
+    const { locks, names, requests } = fakeLocks();
+    const gaps: (() => void)[] = [];
+    const pacer = createLockPacer(locks, { gapMs: 334, sleep: () => new Promise<void>((r) => gaps.push(r)) });
+    const got: string[] = [];
+    void pacer.slot().then(() => got.push('a'));
     const ac = new AbortController();
-    const second = pacer.slot(ac.signal).catch((e: Error) => e.name);
-    void pacer.slot().then(() => got.push(3));
+    const b = pacer.slot(ac.signal).catch((e: Error) => e.name);
+    void pacer.slot().then(() => got.push('c'));
+    void pacer.slot(undefined, true).then(() => got.push('send check'));
     await tick();
-    expect(got).toEqual([1]); // the first holds the lock for its gap
+    expect(got).toEqual(['a']);
+    expect(requests()).toBe(1); // one lock request outstanding per context
     ac.abort();
-    expect(await second).toBe('AbortError');
-    sleeps.shift()!(); // the gap ends
+    expect(await b).toBe('AbortError');
+    gaps.shift()!();
     await tick();
-    expect(got).toEqual([1, 3]);
+    expect(got).toEqual(['a', 'send check']);
+    gaps.shift()!();
+    await tick();
+    expect(got).toEqual(['a', 'send check', 'c']);
     expect(names()).toEqual([WOC_LOCK]);
   });
-  test('a pause holds the shared lock, capped', async () => {
-    const { locks } = fakeLocks();
+  test('17c L1: a pause holds the shared lock once; a second one while it runs is not stacked', async () => {
+    const { locks, requests } = fakeLocks();
     const asked: number[] = [];
-    const pacer = createLockPacer(locks, { sleep: async (ms) => void asked.push(ms) });
-    pacer.pause(60_000);
+    let release!: () => void;
+    const pacer = createLockPacer(locks, {
+      sleep: (ms) => (asked.push(ms), new Promise<void>((r) => (release = r))),
+    });
+    pacer.pause();
+    pacer.pause();
     await tick();
-    expect(asked).toEqual([WOC_PAUSE_MAX_MS]);
-  });
-});
-
-describe('retryAfterMs', () => {
-  const r = (v: string | null) => ({ headers: { get: () => v } });
-  test('seconds, a date, the default, and the cap', () => {
-    expect(retryAfterMs(r('5'))).toBe(5_000);
-    expect(retryAfterMs(r(new Date(10_000).toUTCString()), 4_000)).toBe(6_000);
-    expect(retryAfterMs(r(null))).toBe(2_000);
-    expect(retryAfterMs(r('3600'))).toBe(WOC_PAUSE_MAX_MS);
+    expect(asked).toEqual([WOC_PAUSE_MS]);
+    expect(requests()).toBe(1);
+    release();
   });
 });
 
 describe('installWocLimiter', () => {
-  test('only WhatsOnChain requests wait; a 429 pauses for Retry-After; the signal reaches the pacer', async () => {
+  const pacerSpy = () => {
+    const slots: { signal?: AbortSignal; priority?: boolean }[] = [];
+    let pauses = 0;
+    const pacer: Pacer = {
+      slot: async (signal, priority) => void slots.push({ signal, priority }),
+      pause: () => void pauses++,
+    };
+    return { pacer, slots, pauses: () => pauses };
+  };
+  test('only WhatsOnChain requests wait; the signal and priority reach the pacer; a 429 pauses', async () => {
     const calls: string[] = [];
     const scope = {
       fetch: (async (u: string) => {
         calls.push(String(u));
-        return String(u).endsWith('/busy')
-          ? new Response('', { status: 429, headers: { 'retry-after': '7' } })
-          : new Response('ok');
+        return String(u).endsWith('/busy') ? new Response('', { status: 429 }) : new Response('ok');
       }) as unknown as typeof fetch,
     };
-    const slots: (AbortSignal | undefined)[] = [];
-    const paused: number[] = [];
-    const pacer: Pacer = { slot: async (s) => void slots.push(s), pause: (ms) => void paused.push(ms) };
-    expect(installWocLimiter(scope, { pacer })).toBe(true);
+    const spy = pacerSpy();
+    expect(installWocLimiter(scope, { pacer: spy.pacer })).toBe(true);
     const ac = new AbortController();
-    await scope.fetch('https://api.whatsonchain.com/v1/bsv/main/tx/aa/0/spent', { signal: ac.signal });
+    await scope.fetch('https://api.whatsonchain.com/v1/bsv/main/tx/aa/0/spent', {
+      signal: ac.signal,
+      priority: 'high',
+    } as RequestInit);
     await scope.fetch('https://api.1sat.app/1sat/txo/spends');
     await scope.fetch('https://api.whatsonchain.com/v1/bsv/main/busy');
-    expect(slots).toEqual([ac.signal, undefined]);
-    expect(paused).toEqual([7_000]);
+    expect(spy.slots).toEqual([
+      { signal: ac.signal, priority: true },
+      { signal: undefined, priority: false },
+    ]);
+    expect(spy.pauses()).toBe(1);
     expect(calls).toHaveLength(3);
-    // Idempotent: a second install doesn't wrap twice.
-    expect(installWocLimiter(scope)).toBe(true);
-    await scope.fetch('https://api.whatsonchain.com/v1/bsv/main/chain/info');
-    expect(slots).toHaveLength(3);
+    expect(installWocLimiter(scope)).toBe(true); // idempotent
     expect(installWocLimiter({})).toBe(false);
+  });
+  test('17c L1: a 429 hidden by CORS (a thrown network error) pauses too; our own abort does not', async () => {
+    let mode: 'cors' | 'abort' = 'cors';
+    const scope = {
+      fetch: (async () => {
+        if (mode === 'cors') throw new TypeError('Failed to fetch');
+        throw new DOMException('Aborted', 'AbortError');
+      }) as unknown as typeof fetch,
+    };
+    const spy = pacerSpy();
+    installWocLimiter(scope, { pacer: spy.pacer });
+    await scope.fetch('https://api.whatsonchain.com/v1/bsv/main/x').catch(() => undefined);
+    expect(spy.pauses()).toBe(1);
+    mode = 'abort';
+    await scope.fetch('https://api.whatsonchain.com/v1/bsv/main/x').catch(() => undefined);
+    expect(spy.pauses()).toBe(1);
   });
   test('recognises a WhatsOnChain request given as a string, URL or Request', () => {
     expect(isWocRequest('https://api.whatsonchain.com/v1/bsv/main/tx/hash/aa')).toBe(true);

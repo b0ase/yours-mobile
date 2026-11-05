@@ -145,6 +145,8 @@ export type HealReport = {
   spenders?: Record<string, string | null>;
   /** The inputs whose rows this heal changed (spendable → false). */
   cleared?: string[];
+  /** Inputs set aside because their parent payment never reached the network (ownSend.ts healRefusedInputs). */
+  orphaned?: string[];
 };
 
 /**
@@ -198,8 +200,13 @@ export async function healInvalidSend(
   if (!isInvalidTxReview(error)) return { checked: 0, released: 0 };
   const inputs = rejectedInputs(error);
   const rejectedTxid = refusedTxid(error);
-  const named = namedSpentInputs(opts.reason, inputs);
   const namedBy = reasonSpender(opts.reason);
+  // The broadcaster named a DIFFERENT spender without the outpoint: with one input there is only one it can mean (17c,
+  // S7: otherwise a blind index and WhatsOnChain leave the coin in place and every send fails on it).
+  const named =
+    namedSpentInputs(opts.reason, inputs).length || inputs.length !== 1 || !namedBy || namedBy === rejectedTxid
+      ? namedSpentInputs(opts.reason, inputs)
+      : inputs;
   const looked = await provenSpenders(
     inputs.filter((op) => !named.includes(op)),
     getSpend,
