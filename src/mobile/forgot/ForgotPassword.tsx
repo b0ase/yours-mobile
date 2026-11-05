@@ -12,7 +12,7 @@ export const ForgotPassword = ({ theme }: { theme: Theme }) => {
     if (busy) return;
     const ok = await sheet(
       'Restore with recovery phrase?',
-      "This removes the wallet stored on this device and lets you restore it from your 12-word recovery phrase. Your funds stay safe on the blockchain as long as you have the phrase. Without it, you can't get this wallet back.",
+      "This removes the wallet stored on this device. You can restore it from your 12 words, but some coins also need this wallet's records: change from older versions, payments from other wallets or to your $name, and time-locked coins. If your wallet has a Remote Backup, those come back with your 12 words; a backup file needs the password it was made with. If you're not sure, email support@bwalletx.com before you remove anything.",
       'Remove and restore',
       'Cancel',
     );
