@@ -17,13 +17,13 @@
 
 export type OutpointState = 'accounted' | 'stored' | 'absent';
 
-type OutputRow = { transactionId?: number; spendable?: boolean; spentBy?: number | null };
+type OutputRow = { transactionId?: number; spendable?: boolean; spentBy?: number | null; basketId?: number | null };
 type TxRow = { transactionId?: number; status?: string };
 
 /** The StorageIdb reads used here (the device store; `userId` from storage.getAuth()). */
 export type HeldStore = {
   findOutputs(args: {
-    partial: { userId: number; txid?: string; transactionId?: number; vout: number };
+    partial: { userId?: number; txid?: string; transactionId?: number; vout?: number };
     noScript?: boolean;
   }): Promise<OutputRow[]>;
   findTransactions(args: {
@@ -58,6 +58,22 @@ export async function outpointStates(
       );
     return statusById.get(id);
   };
+  /**
+   * A spender carries the value here only once its outputs here count: none still waits for admission (not spendable,
+   * not spent, in a basket). Review 20, M5: a sweep pulled from the other device, its change not admitted yet, hid the
+   * payment for minutes. A payment out with no change here carries it (it left). By transaction id, no user scan.
+   */
+  const carriesById = new Map<number, boolean>();
+  const carries = async (spender: number) => {
+    if (!carriesById.has(spender))
+      carriesById.set(
+        spender,
+        !(await store.findOutputs({ partial: { transactionId: spender }, noScript: true })).some(
+          (o) => o.spendable !== true && o.spentBy == null && o.basketId != null,
+        ),
+      );
+    return carriesById.get(spender)!;
+  };
   for (const op of outpoints) {
     const { key, txid, vout } = split(op);
     if (out.has(key) || !txid || !Number.isInteger(vout)) continue;
@@ -74,7 +90,8 @@ export async function outpointStates(
     let state: OutpointState = 'stored';
     for (const r of rows) {
       if (!COUNTED.has((await status(r.transactionId)) ?? '')) continue;
-      if (r.spendable === true || COUNTED.has((await status(r.spentBy)) ?? '')) state = 'accounted';
+      if (r.spendable === true || (COUNTED.has((await status(r.spentBy)) ?? '') && (await carries(r.spentBy!))))
+        state = 'accounted';
     }
     out.set(key, state);
   }

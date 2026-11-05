@@ -9,7 +9,7 @@
  * every unlock (initWallet) so the money also becomes spendable without waiting for the next sync.
  */
 import { DEPOSIT_BASKET } from '@1sat/types';
-import { arrivingNow } from './receiveGuard';
+import { arrivingHeld, arrivingNow } from './receiveGuard';
 
 interface DepositLister {
   listOutputs(args: { basket: string; limit?: number; offset?: number }): Promise<{
@@ -74,20 +74,22 @@ export type BalanceOptions = {
  * Funding balance plus anything still waiting in the deposit basket, change on its way, and money on chain at our
  * receive addresses that storage still lacks. A failed deposit read never hides the rest.
  *
- * Storage is read first and the arriving outputs are checked against storage after it (owner, 5 Nov 2026: $3.42 for
- * $2.42). A payment that lands in storage between the two reads is then counted by storage or by neither for that one
- * read, never by both.
+ * The arriving outputs are checked against storage before AND after the storage reads, and one storage held at either
+ * check is not counted as arriving (owner, 5 Nov 2026: $3.42 for $2.42; review 20, L1). A payment that lands in storage
+ * between the reads is caught by the second check; one that storage counted and then a sweep's createAction took (the
+ * unsigned window, during the reads) by the first. Either way it counts once, never twice.
  */
 export async function balanceSplit(
   wallet: DepositLister & { balance(): Promise<number> } & Partial<ActionLister>,
   opts: BalanceOptions = {},
 ): Promise<BalanceSplit> {
+  const heldBefore = await arrivingHeld(opts.accountedFor);
   const [funded, waiting, changeOnTheWay] = await Promise.all([
     wallet.balance(),
     depositBasketSats(wallet).catch(() => 0),
     wallet.listActions ? inFlightChangeSats(wallet as ActionLister).catch(() => 0) : 0,
   ]);
-  const { counted, pending } = await arrivingNow(opts.accountedFor);
+  const { counted, pending } = await arrivingNow(opts.accountedFor, Date.now(), heldBefore);
   const total = funded + waiting + changeOnTheWay + counted;
   return { total, pending: Math.max(0, Math.min(total, pending)) };
 }

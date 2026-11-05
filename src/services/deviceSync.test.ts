@@ -109,6 +109,27 @@ describe('device sync: the owner’s devices stay in step through the backup (2 
     expect(calls).toEqual(['pull', 'push']);
   });
 
+  test('review 20, L6: a pull asked for while a push runs is not swallowed by it: the pull runs once the push is done', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const calls: string[] = [];
+    const { sync } = harness({
+      pull: async () => void calls.push('pull'),
+      push: async () => {
+        calls.push('push');
+        await gate;
+      },
+    });
+    const pushing = sync.pushNow();
+    await new Promise((r) => setTimeout(r, 0));
+    const a = sync.syncNow();
+    const b = sync.syncNow(); // a second ask while the first waits: one pull
+    release();
+    await Promise.all([pushing, a, b]);
+    expect(calls).toEqual(['push', 'pull', 'push']);
+    expect(await a).toMatchObject({ ok: true, pulled: true });
+  });
+
   test('wallet writes report a change, even when they throw', async () => {
     let changes = 0;
     const wallet = {

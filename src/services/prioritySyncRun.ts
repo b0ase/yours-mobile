@@ -14,6 +14,7 @@ import { DEPOSIT_BASKET, LEGACY_ONESAT_PROTOCOL, ONESAT_PROTOCOL } from '@1sat/t
 import { Beef, OP, PublicKey, Utils, type InternalizeOutput, type Transaction, type WalletProtocol } from '@bsv/sdk';
 import { prioritySync, type PartProgress, type PrioritySyncResult } from './prioritySync';
 import { createInternalizeLock, type InternalizeLock } from './internalizeLock';
+import { spentIn, type SpendCheck } from './spendCheck';
 
 const SYNC_PROTOCOLS = [ONESAT_PROTOCOL, LEGACY_ONESAT_PROTOCOL] as WalletProtocol[];
 
@@ -26,7 +27,7 @@ type Derivation = {
 };
 
 /** The P2PKH hash of each address, as hex, for spotting our outputs in a raw tx (bare or after an inscription). */
-const pkhHex = (address: string) => Utils.toHex(Utils.fromBase58Check(address).data as number[]);
+export const pkhHex = (address: string) => Utils.toHex(Utils.fromBase58Check(address).data as number[]);
 
 /**
  * Satoshis of each output whose script holds a P2PKH to one of `hashes` (bare or after an inscription), read
@@ -181,14 +182,18 @@ export type ProcessedTxids = { has(txid: string): Promise<boolean>; add(txid: st
  * (services/receiveWatch.ts) share. Its outputs paying our keys go into the deposit basket with the record the 1sat
  * pipeline writes; the address sync's sweep then moves them into funding as before.
  */
+export type IntakeResult = 'taken' | 'already' | 'none' | 'spent' | 'unclear';
+
 export type CoinIntake = {
   /** Our plain coin outputs of `txid` in this BEEF (bare P2PKH to one of our keys, more than 1 sat). */
   coins(txid: string, beef: number[]): { vout: number; satoshis: number }[];
   /**
    * Take `txid`'s coin outputs in, once: under the shared internalize lock, skipped when the processed store already
    * has the txid ('already'), recorded there after ('taken'). 'none': it pays us no plain coin; nothing written.
+   * 'spent': every coin output is already spent (another copy of this wallet swept it; review 20, H1): nothing written,
+   * nothing recorded. 'unclear': the spend check could not answer and this intake skips what it can't check.
    */
-  take(txid: string, beef: number[]): Promise<'taken' | 'already' | 'none'>;
+  take(txid: string, beef: number[]): Promise<IntakeResult>;
 };
 
 export const makeCoinIntake = (d: {
@@ -196,6 +201,18 @@ export const makeCoinIntake = (d: {
   keyByHash: Map<string, CoinKey>;
   processed: ProcessedTxids;
   lock?: InternalizeLock;
+  /**
+   * Spent already, mempool included (services/spendCheck.ts)? Asked before the lock is taken. Owner, 5 Nov 2026 (review
+   * 20, H1): the owner stream lists a payment unspent until its sweep is mined, so the other copy of this wallet took in
+   * a payment the extension had swept, and counted it on top of the sweep's change.
+   */
+  spends?: SpendCheck;
+  /** Of these txids, the ones storage holds (our own spends): a spender it does not hold means another copy took it. */
+  knownTxids?: (txids: string[]) => Promise<Set<string>>;
+  /** Another copy of this wallet spent these outputs: ask for a device-sync pull (services/receiveWatch.ts). */
+  foreignSpend?: (spenders: string[]) => void;
+  /** The spend check can't answer: take the coin as before ('take', the address sync) or wait ('skip', the watcher). */
+  unknownSpend?: 'take' | 'skip';
 }): CoinIntake => {
   const lock = d.lock ?? createInternalizeLock();
   const parse = (txid: string, beef: number[]) => {
@@ -212,20 +229,42 @@ export const makeCoinIntake = (d: {
         satoshis: tx.outputs[o.outputIndex].satoshis ?? 0,
       }));
     },
-    take: (txid, beef) =>
-      lock(async () => {
+    take: async (txid, beef) => {
+      const { beefObj, tx } = parse(txid, beef);
+      let { outputs } = coinOutputs(tx, d.keyByHash, randomActionId());
+      if (!outputs.length) return 'none';
+      // Outside the lock: a network call never holds up the other intakes.
+      let complete = true;
+      if (d.spends) {
+        const ops = outputs.map((o) => `${txid}.${o.outputIndex}`);
+        const answer = await d.spends(ops).catch(() => new Map<string, string | null>());
+        const { spent, spenders } = spentIn(answer, ops);
+        if (spenders.length) {
+          const ours = (await d.knownTxids?.(spenders).catch(() => new Set<string>())) ?? new Set<string>();
+          const foreign = spenders.filter((t) => !ours.has(t));
+          if (foreign.length) d.foreignSpend?.(foreign);
+        }
+        const unclear = ops.filter((o) => !answer.has(o));
+        const skip = new Set([...spent, ...(d.unknownSpend === 'skip' ? unclear : [])]);
+        if (skip.size) {
+          outputs = outputs.filter((o) => !skip.has(`${txid}.${o.outputIndex}`));
+          // Only what is spent elsewhere may be left out of the record; an output skipped as unclear is tried again.
+          complete = !(d.unknownSpend === 'skip' && unclear.length);
+        }
+        if (!outputs.length) return spent.length ? 'spent' : 'unclear';
+      }
+      return lock(async () => {
         if (await d.processed.has(txid)) return 'already';
-        const { beefObj, tx } = parse(txid, beef);
-        const { outputs, satoshis } = coinOutputs(tx, d.keyByHash, randomActionId());
-        if (!outputs.length) return 'none';
+        const satoshis = outputs.reduce((t, o) => t + (tx.outputs[o.outputIndex].satoshis ?? 0), 0);
         await d.wallet.internalizeAction({
           tx: beefObj.toBinaryAtomic(txid),
           outputs,
           description: `Received ${satoshis} sats`.slice(0, 50),
         });
-        await d.processed.add(txid);
+        if (complete) await d.processed.add(txid);
         return 'taken';
-      }),
+      });
+    },
   };
 };
 
@@ -237,6 +276,10 @@ export const runPrioritySync = async (
     onCoinsReady?: (r: { found: number; failed: number }) => void;
     /** The internalize lock shared with the receive guard and the receive watcher (services/internalizeLock.ts). */
     lock?: InternalizeLock;
+    /** Spent already, mempool included? A coin another copy of this wallet swept is not taken in (review 20, H1). */
+    spends?: SpendCheck;
+    knownTxids?: (txids: string[]) => Promise<Set<string>>;
+    foreignSpend?: (spenders: string[]) => void;
   },
 ): Promise<PrioritySyncResult> => {
   const services = ctx.services;
@@ -254,7 +297,17 @@ export const runPrioritySync = async (
   );
 
   const store = new ProcessedTxStoreIdb(identityKey);
-  const intake = makeCoinIntake({ wallet: ctx.wallet, keyByHash, processed: store, lock });
+  // The spend check fails open here, as before it existed: a payment is never left out because an index is down.
+  const intake = makeCoinIntake({
+    wallet: ctx.wallet,
+    keyByHash,
+    processed: store,
+    lock,
+    spends: opts.spends,
+    knownTxids: opts.knownTxids,
+    foreignSpend: opts.foreignSpend,
+    unknownSpend: 'take',
+  });
   try {
     const { height } = await ctx.wallet.getHeight({});
     return await prioritySync({
@@ -286,7 +339,9 @@ export const runPrioritySync = async (
         }),
       // The receive watcher may have taken it in since the scan: take() checks the processed store inside the lock.
       internalizeCoin: async (txid, beef) => {
-        await intake.take(txid, beef);
+        const r = await intake.take(txid, beef);
+        // Spent elsewhere (or unclear): not recorded, so a later run looks again once the indexer has the spend.
+        return r === 'spent' || r === 'unclear' ? 'skipped' : undefined;
       },
       onProgress: opts.onProgress,
       onCoinsReady: opts.onCoinsReady,

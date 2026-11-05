@@ -32,14 +32,20 @@ describe('the pending split reaches the Wallet card', () => {
     off();
   });
 
-  test('the card shows "pending" from that store, hidden with the balance, never more than the balance', () => {
-    const src = readFileSync(new URL('../mobile/wallet/WalletCard.tsx', import.meta.url), 'utf8');
-    expect(src).toContain('useSyncExternalStore(subscribePendingSats, pendingSatsNow');
-    expect(src).toMatch(/const incoming = Math\.min\(\s*Math\.max\(0, sats\),\s*useSyncExternalStore\(/);
-    expect(src).toMatch(/incoming > 0 && !balanceHidden && \(\s*<span className="bw-wcard-pending"/);
-    expect(src).toMatch(/\{' '\}\s*pending\s*<\/span>/);
-    const bg = readFileSync(new URL('../background.ts', import.meta.url), 'utf8');
-    expect(bg).toMatch(/\.balanceSplit\(\)\s*\.then\(\(\{ total, pending \}\)/);
-    expect(bg).toMatch(/data: total,\s*pending,/);
+  test('the card shows "pending" from that store: hidden with the balance, never more than it, dollars or sats', async () => {
+    const { renderToStaticMarkup } = await import('react-dom/server');
+    const { createElement } = await import('react');
+    const { PendingLine } = await import('../mobile/wallet/PendingLine');
+    const html = (p: Parameters<typeof PendingLine>[0]) => renderToStaticMarkup(createElement(PendingLine, p));
+    const base = { sats: 14_675_380, pending: 6_065_200, unit: 'bsv' as const, rate: 0, hidden: false };
+    expect(html(base)).toContain('6,065,200 sats pending');
+    expect(html({ ...base, unit: 'usd', rate: 16.5 })).toMatch(/\$1\.00 pending/);
+    expect(html({ ...base, hidden: true })).toBe('');
+    expect(html({ ...base, pending: 0 })).toBe('');
+    expect(html({ ...base, sats: 1_000, pending: 6_065_200 })).toContain('1,000 sats pending'); // never more than shown
+    // The card renders it from the store getWalletBalance publishes (utils/pendingBalance.ts).
+    const card = readFileSync(new URL('../mobile/wallet/WalletCard.tsx', import.meta.url), 'utf8');
+    expect(card).toContain('useSyncExternalStore(subscribePendingSats, pendingSatsNow');
+    expect(card).toMatch(/<PendingLine sats=\{sats\} pending=\{incoming\}/);
   });
 });

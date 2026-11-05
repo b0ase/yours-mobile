@@ -58,6 +58,7 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { formatUSD } from '../../utils/format';
 import { pendingSatsNow, subscribePendingSats } from '../../utils/pendingBalance';
+import { PendingLine } from './PendingLine';
 import { useDisplayCurrency } from '../../hooks/useDisplayCurrency';
 import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
@@ -169,10 +170,7 @@ const WalletCardInner = ({
   }, [sats, known]);
   const pendingSats = sats - displayedSats(sats, live.pending);
   // Received and counted, not yet in a block (services/receiveWatch.ts): shown as "pending" under the amount.
-  const incoming = Math.min(
-    Math.max(0, sats),
-    useSyncExternalStore(subscribePendingSats, pendingSatsNow, () => 0),
-  );
+  const incoming = useSyncExternalStore(subscribePendingSats, pendingSatsNow, () => 0);
   const shownSats = known ? sats - pendingSats : sats;
   const count = useCountUp(shownSats, known);
   const animSats = known ? count.value : sats;
@@ -648,12 +646,7 @@ const WalletCardInner = ({
                 <span className={`bw-wcard-sats${upToDate ? ' is-uptodate' : ''}`}>
                   {upToDate ? 'Up to date' : unit === 'usd' ? cardSats(animSats) : formatUSD(animUsd)}
                 </span>
-                {incoming > 0 && !balanceHidden && (
-                  <span className="bw-wcard-pending" role="status">
-                    {unit === 'usd' && rate > 0 ? formatUSD((incoming * rate) / 100_000_000) : cardSats(incoming)}{' '}
-                    pending
-                  </span>
-                )}
+                <PendingLine sats={sats} pending={incoming} unit={unit} rate={rate} hidden={balanceHidden} />
                 <UpToDateAnnouncer done={upToDate} label="Balance is up to date" />
                 <LiveTicker hidden={balanceHidden} />
               </>
