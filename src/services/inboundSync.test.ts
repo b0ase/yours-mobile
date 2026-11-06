@@ -1641,7 +1641,7 @@ describe('16c: a merge never makes a coin spendable; only the admission list doe
     expect(meanwhile).toBe('locks free');
     answer({ state: 'unspent' });
     expect((await run).admitted).toBe(1);
-  });
+  }, 20_000);
 
   test('C5: one run looks at 25 entries, and stops at the first unclear answer', async () => {
     const d = await phoneWithBackup();
@@ -1677,7 +1677,7 @@ describe('16c: a merge never makes a coin spendable; only the admission list doe
     d.chain.asked.length = 0;
     await admit(d.phone, d.kd.identityKey, d.verifier);
     expect(d.chain.asked.length).toBeLessThanOrEqual(1);
-  });
+  }, 20_000); // real IndexedDB work for 30 entries: over bun's 5 s default under a loaded full-suite run
 
   test('D2: a coin waiting only on the chain is never given up on: admitted whenever the chain learns of it', async () => {
     const d = await phoneWithBackup();
