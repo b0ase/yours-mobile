@@ -208,8 +208,15 @@ describe('H1 leftover (review 20 re-check): the index lags, so a swept coin was 
     });
     const pulls: number[] = [];
     const known = async (txids: string[]) => knownTxids(s.held(), 1, txids);
+    /** WhatsOnChain: down at intake time, then it sees the other copy's sweep in the mempool. */
+    let wocUp = false;
     const recheck = createTakenRecheck({
-      spends,
+      index: spendIndex(index),
+      woc: async () => {
+        if (!wocUp) throw new Error('woc 503');
+        return { txid: SWEEP, confirmed: false };
+      },
+      ownPendingTxids: async () => new Set(),
       heldTxids: known,
       // Lower spendability only (initWallet: storage.updateOutput, and the automatic coin check's cleared list).
       markSpent: async (outpoint, spender) => {
@@ -221,6 +228,7 @@ describe('H1 leftover (review 20 re-check): the index lags, so a swept coin was 
         if (by) row.spentBy = by.transactionId;
         return 1;
       },
+      markUnspent: async () => 0,
       askPull: () => (pulls.push(1), true),
     });
     // The address sync's intake (fails open), remembering what it took in on that answer.
@@ -237,8 +245,12 @@ describe('H1 leftover (review 20 re-check): the index lags, so a swept coin was 
     expect(await intake.take(p.txid, Array.from(p.beef))).toBe('taken');
     pullAndAdmit(s);
     expect((await balanceSplit(w, { accountedFor })).total).toBe(TRUTH + ONE); // 13,999,980: the reviewer's probe
-    // The index catches up; the next watcher look or guard run re-checks what was taken in.
+    // A single source is never enough (the automatic coin check's rule): the index alone, still not marked.
     index.set(`${p.txid}.0`, SWEEP);
+    await recheck.run({ force: true });
+    expect((await balanceSplit(w, { accountedFor })).total).toBe(TRUTH + ONE);
+    // Both see the other copy's sweep (the mempool is fine): the next watcher look or guard run puts it right.
+    wocUp = true;
     await recheck.run({ force: true });
     expect((await balanceSplit(w, { accountedFor })).total).toBe(TRUTH); // 7,999,980
     expect(pulls.length).toBe(0); // the spender is already here (the pull brought it): nothing more to pull

@@ -83,8 +83,12 @@ export type PrioritySyncDeps = {
   internalizeCoin?: (txid: string, beef: number[]) => Promise<void | 'skipped'>;
   /** Names in flight at once (default NAMES_CONCURRENCY). */
   namesConcurrency?: number;
-  /** Before the coins part, with every unspent output of the transactions it will look at (one batched spend check). */
-  beforeCoins?: (outpoints: string[]) => Promise<void>;
+  /**
+   * A transaction just classified as paying us a coin: its unspent outputs, before its download. Coin candidates only:
+   * never names (review 20, second re-check, R1: every name output went to the spend check first, 3,002 WhatsOnChain
+   * lookups before the first coin with the index rate-limited).
+   */
+  checkCoin?: (outpoints: string[]) => Promise<void>;
 };
 
 export type PrioritySyncResult = {
@@ -195,11 +199,6 @@ export const prioritySync = async (deps: PrioritySyncDeps): Promise<PrioritySync
     todo.push(txid);
   }
 
-  if (todo.length && deps.beforeCoins)
-    await deps.beforeCoins(
-      todo.flatMap((t) => (byTxid.get(t) ?? []).filter((o) => !o.spendTxid).map((o) => o.outpoint)),
-    );
-
   // 2. Coins: classify each (raw tx, parallel) and take the ones paying >1 sat at once.
   let checked = 0;
   let coinsFound = 0;
@@ -228,6 +227,7 @@ export const prioritySync = async (deps: PrioritySyncDeps): Promise<PrioritySync
       }
       const sats = await withRetry(() => deps.ourOutputs(txid), retries, sleep);
       if (sats.some((s) => s > 1)) {
+        await deps.checkCoin?.(unspent).catch(() => undefined);
         const beef = await withRetry(() => deps.fetchBeef(txid), retries, sleep);
         const internalizeCoin = deps.internalizeCoin ?? deps.internalize;
         const r = await serial(() => withRetry(() => internalizeCoin(txid, beef), retries, sleep));

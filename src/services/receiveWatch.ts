@@ -263,7 +263,7 @@ export function createReceiveWatch(deps: ReceiveWatchDeps) {
     );
     const rows = await collect(addresses, from);
     if (!inFront() || !deps.active()) return { ...r, skipped: 'inactive' };
-    await deps.recheck?.().catch(() => undefined);
+    void deps.recheck?.().catch(() => undefined); // not waited for: instant receive never stalls on it (R2)
 
     const byOutpoint = latestState(rows);
     const latest = [...byOutpoint.values()];

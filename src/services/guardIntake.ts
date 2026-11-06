@@ -25,6 +25,11 @@ export type GuardIntakeDeps = {
   internalize: (beef: number[] | Uint8Array) => Promise<{ internalized: number }>;
   lock: InternalizeLock;
   backoff: { due(txid: string): boolean; fail(txid: string, err?: unknown): number; clear(txid: string): void };
+  /**
+   * Outputs just internalized: an "unspent" can be the index lagging behind another copy's sweep, so they are asked about
+   * again for a while (services/takenRecheck.ts; review 20, second re-check, R3).
+   */
+  onInternalized?: (outpoints: string[]) => void;
 };
 
 /** 'taken-since' when every output is counted now, 'held' when all are in storage but some not counted, else null. */
@@ -68,6 +73,7 @@ export async function guardIntake(
         out.push({ txid, outcome: r.settled });
       } else if (r.internalized) {
         d.backoff.clear(txid);
+        d.onInternalized?.(ops);
         out.push({ txid, outcome: 'internalized' });
       } else {
         d.backoff.fail(txid, 'no output matched');

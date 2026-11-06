@@ -8,6 +8,7 @@ import { Beef, LockingScript, P2PKH, PrivateKey, ProtoWallet, Transaction } from
 import { DEPOSIT_BASKET } from '@1sat/types';
 import { createInternalizeLock } from './internalizeLock';
 import { deriveSyncKeys, runPrioritySync } from './prioritySyncRun';
+import { DEFAULT_CONCURRENCY } from './prioritySync';
 import { makeSpendCheck } from './spendCheck';
 
 const setup = async (spender?: string) => {
@@ -95,7 +96,7 @@ describe('the address sync shares the intake rules (review 20)', () => {
 });
 
 describe('N3 (review 20 re-check): a restore asks the spend index in batches, not once per coin', () => {
-  test('ten coin transactions: one batched spend lookup before the coins are taken in', async () => {
+  test('ten coin transactions: the spend lookups of the coins checked together share one request', async () => {
     const proto = new ProtoWallet(PrivateKey.fromRandom());
     const internalized: string[] = [];
     const wallet = {
@@ -140,6 +141,67 @@ describe('N3 (review 20 re-check): a restore asks the spend index in batches, no
     const r = await runPrioritySync({ wallet, services, chain: 'main' } as never, { count: 1, spends });
     expect(r.coins.found).toBe(10);
     expect(internalized.length).toBe(10);
-    expect(indexCalls).toBe(1);
+    // Was 10 (one per coin): the coins part checks DEFAULT_CONCURRENCY at once, and those share one request.
+    expect(indexCalls).toBeLessThanOrEqual(Math.ceil(10 / DEFAULT_CONCURRENCY));
+  });
+});
+
+describe('R1 (review 20, second re-check): only coin candidates are spend-checked, never names', () => {
+  test('300 names and 2 coins with the index rate-limited: WhatsOnChain is asked about the 2 coins only', async () => {
+    const proto = new ProtoWallet(PrivateKey.fromRandom());
+    const wallet = {
+      getPublicKey: (a: Parameters<ProtoWallet['getPublicKey']>[0]) => proto.getPublicKey(a),
+      getHeight: async () => ({ height: 974_210 }),
+      internalizeAction: async () => ({ accepted: true }),
+    };
+    const keys = await deriveSyncKeys(wallet as never, 1);
+    const mk = (i: number, sats: number) => {
+      const tx = new Transaction();
+      tx.addInput({
+        sourceTXID: (i + 1).toString(16).padStart(64, '0'),
+        sourceOutputIndex: 0,
+        unlockingScript: LockingScript.fromHex('00'),
+        sequence: 0xffffffff,
+      });
+      tx.addOutput({ lockingScript: new P2PKH().lock(keys.addresses[0]), satoshis: sats });
+      return tx;
+    };
+    const names = Array.from({ length: 300 }, (_, i) => mk(i, 1));
+    const coins = [mk(900, 2_000_000), mk(901, 3_000_000)];
+    const all = [...names, ...coins];
+    const byId = new Map(all.map((t) => [t.id('hex'), t]));
+    const nameIds = new Set(names.map((t) => t.id('hex')));
+    const services = {
+      owner: {
+        sync: async function* () {
+          for (const t of all) yield { outpoint: `${t.id('hex')}.0`, score: 974_000 };
+        },
+      },
+      beef: {
+        getRawTx: async (id: string) => Uint8Array.from(byId.get(id)!.toBinary()),
+        getBeef: async (id: string) => {
+          const b = new Beef();
+          b.mergeTransaction(byId.get(id)!);
+          return Uint8Array.from(b.toBinary());
+        },
+      },
+      // The indexer tags the names as inscriptions: classified without a download.
+      txo: {
+        getBatch: async (ops: string[]) => ops.map((o) => (nameIds.has(o.slice(0, 64)) ? { data: { insc: {} } } : {})),
+      },
+    };
+    let woc = 0;
+    const spends = makeSpendCheck({
+      index: async () => {
+        throw Object.assign(new Error('429 Too Many Requests'), { status: 429 });
+      },
+      woc: async () => (woc++, null),
+      wocFor: 'unanswered',
+      cacheMs: 120_000,
+      sleep: async () => undefined,
+    });
+    const r = await runPrioritySync({ wallet, services, chain: 'main' } as never, { count: 1, spends });
+    expect(r.coins.found).toBe(2);
+    expect(woc).toBe(2); // was 302: every name output went to the spend check first
   });
 });

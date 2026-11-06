@@ -169,6 +169,7 @@ let switchActiveStorageRef: ((ctx: AccountContext, target: 'local' | string) => 
 import {
   AUTO_RESYNC_DELAY_MS,
   AUTO_RESYNC_LIGHT_GAP_MS,
+  OWN_PENDING_STATUSES,
   readAutoResyncCoins,
   runAutoResyncIfDue,
   type AutoResyncDeps,
@@ -445,7 +446,7 @@ const markSpentStore = (ctx: AccountContext, identityKey: string) => ({
 const AUTO_COIN_RESYNC_ALARM = 'auto-coin-resync';
 
 /** Unfinished actions: their txids are not "spenders", and the coins they hold are not checked. */
-const PENDING_STATUSES = ['unsigned', 'nosend', 'sending', 'unprocessed', 'failed'] as const;
+const PENDING_STATUSES = OWN_PENDING_STATUSES;
 
 /** Inputs for autoCoinResync from this account's storage: default-basket coins, pending actions. */
 async function autoResyncDeps(

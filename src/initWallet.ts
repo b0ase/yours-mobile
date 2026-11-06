@@ -24,6 +24,7 @@ import {
 import { makeSpendCheck, wocSpendLookup } from './services/spendCheck';
 import { createTakenRecheck } from './services/takenRecheck';
 import { recordAutoCleared } from './services/autoCoinResync';
+import { wocSpentStatus } from './services/coinPreflight';
 import { guardIntake } from './services/guardIntake';
 import { sizeAwareBroadcast } from './services/bigBroadcast';
 import {
@@ -136,6 +137,7 @@ import {
   waitingVia,
   knownTxids,
   outpointStates,
+  ownPendingTxids,
   type DeviceReads,
   type HeldStore,
   type OutpointState,
@@ -1130,10 +1132,35 @@ export const initWallet = async (
       );
     return n;
   };
+  /** Put back a coin the re-check marked whose spender was dropped: only a row still as the mark left it. */
+  const markUnspentHere = async (outpoint: string, spender: string): Promise<number> => {
+    if (!storage.isActiveStorageProvider()) return 0;
+    const { userId } = await storage.getAuth();
+    const [txid, vout] = normOutpoint(outpoint).split('.');
+    return storage.runAsStorageProvider(async (sp) => {
+      const by = (await sp.findTransactions({ partial: { userId, txid: spender }, noRawTx: true }))[0];
+      let changed = 0;
+      for (const o of await sp.findOutputs({
+        partial: { userId, txid, vout: Number(vout), spendable: false },
+        noScript: true,
+      }))
+        if (o.spentBy == null || (by && o.spentBy === by.transactionId))
+          changed += await sp.updateOutput(o.outputId, { spendable: true, spentBy: undefined });
+      return changed;
+    });
+  };
+  // The automatic coin check's rule, not a new one (review 20, second re-check, Q1): the index first, in batches;
+  // WhatsOnChain (3 s, then "can't tell") only to confirm a spender the index names; never our own unfinished actions.
   const recheck = createTakenRecheck({
-    spends: spendsAll,
+    index: spendIndex ?? (async () => Promise.reject(new Error('no spend index'))),
+    woc: (op) => wocSpentStatus(op, AbortSignal.timeout(3_000)),
+    ownPendingTxids: async () => {
+      const r = await deviceReads();
+      return r ? ownPendingTxids(r.store, r.userId) : new Set<string>();
+    },
     heldTxids: (t) => heldTxids(t),
     markSpent: markSpentHere,
+    markUnspent: markUnspentHere,
     askPull: (sp) => askPull(sp),
     log: (...a) => console.warn(...a),
   });
@@ -1157,8 +1184,8 @@ export const initWallet = async (
       console.log('[receiveGuard] a site action is in progress; check deferred');
       return;
     }
-    // Coins taken in on an "unspent" that may have been the index lagging: asked about again (H1).
-    await recheck.run().catch(() => undefined);
+    // Coins taken in on an "unspent" that may have been the index lagging: asked about again (H1). Not waited for.
+    void recheck.run().catch(() => undefined);
     const shown = chromeStorageService.getCurrentAccountObject().account?.primaryAddress;
     const addresses = [...(shown ? [shown] : []), ...syncContext.addressManager.getAddresses()];
     const walletOutpoints = async () => {
@@ -1224,6 +1251,8 @@ export const initWallet = async (
         }),
       lock: internalizeLock,
       backoff: internalizeBackoff,
+      // What the guard takes in is re-checked too (review 20, second re-check, R3).
+      onInternalized: (ops) => recheck.add(ops),
     })) {
       if (r.outcome === 'internalized') console.log(`[receiveGuard] internalized ${r.txid}`);
       else if (r.outcome === 'no-match') console.warn(`[receiveGuard] ${r.txid}: no output matched our derivations`);

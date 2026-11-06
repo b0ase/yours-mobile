@@ -28,6 +28,9 @@ const POOL = 4;
 
 export type WocAnswer = { txid: string; confirmed: boolean } | null;
 
+/** The wallet's own unfinished actions: their txids are never spenders, and the coins they hold are not checked. */
+export const OWN_PENDING_STATUSES = ['unsigned', 'nosend', 'sending', 'unprocessed', 'failed'] as const;
+
 /**
  * The cleared-list value for a coin set aside because the network couldn't find its parent payment (ownSend.ts, 17d
  * M1). Such a coin is never restored by the "both sources call it unspent" rule (an outpoint of a transaction the chain
@@ -73,6 +76,30 @@ export interface AutoResyncDeps {
 }
 
 export type AutoResyncMode = 'full' | 'light' | 'foreground';
+
+/**
+ * The spender a coin may be cleared for, or null: the rule above (b-Aware 24 Oct 2026, review 17 F1), shared with the
+ * re-check of coins just taken in (services/takenRecheck.ts) so there is one rule.
+ *  - The index names a spender (not one of the wallet's own unfinished actions): where WhatsOnChain is available it must
+ *    name the same one, mempool or confirmed; one source never clears a coin. Without WhatsOnChain, the index alone.
+ *  - The index calls it unspent or can't tell: only a CONFIRMED WhatsOnChain spend clears it, and only where the caller
+ *    allows WhatsOnChain alone (`confirmedAlone`). A WhatsOnChain mempool spend never clears a coin by itself.
+ */
+export async function clearingSpender(
+  ix: string | null | undefined,
+  askWoc: (() => Promise<WocAnswer | undefined>) | undefined,
+  isSpender: (t: unknown) => t is string,
+  confirmedAlone: boolean,
+): Promise<string | null> {
+  if (isSpender(ix)) {
+    if (!askWoc) return ix;
+    const w = await askWoc();
+    return w && w.txid.toLowerCase() === ix.toLowerCase() ? ix : null;
+  }
+  if (!confirmedAlone || !askWoc) return null;
+  const w = await askWoc();
+  return w && w.confirmed && isSpender(w.txid) ? w.txid : null;
+}
 
 /** At most this many coins get the WhatsOnChain check whatever the index says… */
 export const AUTO_RESYNC_BIG_COINS = 8;
@@ -158,21 +185,13 @@ export async function autoResyncCoins(d: AutoResyncDeps): Promise<AutoResyncRepo
     // An index that can't answer leaves a coin alone, except a big one: WhatsOnChain alone can still clear it below,
     // with a confirmed spend.
     if (!index.has(o) && !big.has(o)) continue;
-    let by: string | null = null;
-    const ix = index.get(o);
-    if (isSpender(ix)) {
-      // One source never clears a coin on its own (b-Aware report, 24 Oct 2026): where WhatsOnChain is available
-      // (mainnet) it must name the same spender, mempool or confirmed. Unspent or unknown there: leave the coin.
-      if (d.woc) {
-        const w = await askWoc(o);
-        if (w && w.txid.toLowerCase() === ix.toLowerCase()) by = ix;
-      } else by = ix;
-    } else if (mode === 'full' || big.has(o)) {
-      // The same rule as the full pass: a WhatsOnChain spend clears a coin the index calls unspent only once it is
-      // CONFIRMED (a mempool spend seen by one source alone never clears a coin).
-      const w = await askWoc(o);
-      if (w && w.confirmed && isSpender(w.txid)) by = w.txid;
-    }
+    // One source never clears a coin on its own; a WhatsOnChain mempool spend alone never does (clearingSpender).
+    const by = await clearingSpender(
+      index.get(o),
+      d.woc ? () => askWoc(o) : undefined,
+      isSpender,
+      mode === 'full' || big.has(o),
+    );
     if (!by) continue;
     const n = await d.markSpent(o, by).catch(() => 0);
     if (n > 0) {

@@ -14,11 +14,12 @@
  *  - 'absent': no row at all.
  * Reads only, straight from the device store: nothing here writes or locks.
  */
+import { OWN_PENDING_STATUSES } from './autoCoinResync';
 
 export type OutpointState = 'accounted' | 'stored' | 'absent';
 
 type OutputRow = { transactionId?: number; spendable?: boolean; spentBy?: number | null; basketId?: number | null };
-type TxRow = { transactionId?: number; status?: string };
+type TxRow = { transactionId?: number; status?: string; txid?: string | null };
 
 /** The StorageIdb reads used here (the device store; `userId` from storage.getAuth()). */
 export type HeldStore = {
@@ -27,7 +28,7 @@ export type HeldStore = {
     noScript?: boolean;
   }): Promise<OutputRow[]>;
   findTransactions(args: {
-    partial: { userId: number; txid?: string; transactionId?: number };
+    partial: { userId: number; txid?: string; transactionId?: number; status?: string };
     noRawTx?: boolean;
   }): Promise<TxRow[]>;
 };
@@ -168,3 +169,12 @@ export const waitingVia = (read: DeviceReads) => spendersIn(read, 'waiting');
 
 /** The balance: of these spenders, the ones whose outputs here count now (an arriving entry of theirs is then dropped). */
 export const carriesVia = (read: DeviceReads) => spendersIn(read, 'carries');
+
+/** Txids of this wallet's own unfinished actions (the automatic coin check's OWN_PENDING_STATUSES), device store. */
+export async function ownPendingTxids(store: HeldStore, userId: number): Promise<Set<string>> {
+  const out = new Set<string>();
+  for (const status of OWN_PENDING_STATUSES)
+    for (const t of await store.findTransactions({ partial: { userId, status }, noRawTx: true }))
+      if (t.txid) out.add(t.txid.toLowerCase());
+  return out;
+}

@@ -70,3 +70,17 @@ describe('the receive guard takes in what storage lacks (review 20, M1 and L3)',
     expect(c.backoff.due(T)).toBe(false);
   });
 });
+
+describe('R3 (review 20, second re-check): what the guard takes in goes on the re-check list too', () => {
+  test('internalized outputs are reported; skipped, held or failed ones are not', async () => {
+    const taken: string[][] = [];
+    const a = deps(all('absent'));
+    a.d.onInternalized = (ops) => void taken.push(ops);
+    await guardIntake(missing, a.d);
+    expect(taken).toEqual([[`${T}.0`]]);
+    const b = deps(all('stored'));
+    b.d.onInternalized = (ops) => void taken.push(ops);
+    await guardIntake(missing, b.d);
+    expect(taken.length).toBe(1);
+  });
+});

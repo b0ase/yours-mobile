@@ -274,6 +274,31 @@ export const makeCoinIntake = (d: {
   };
 };
 
+/**
+ * Calls made within `waitMs` of each other (up to `max` outputs) go to `fn` as one batch; each caller waits for it.
+ * The coins part checks a few transactions at once (its pool), so their spend lookups share one index request.
+ */
+export const coalesce = (fn: (outpoints: string[]) => Promise<unknown>, waitMs = 25, max = 100) => {
+  let queue: { ops: string[]; done: () => void }[] = [];
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const fire = () => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+    const q = queue;
+    queue = [];
+    void Promise.resolve()
+      .then(() => fn(q.flatMap((x) => x.ops)))
+      .catch(() => undefined)
+      .finally(() => q.forEach((x) => x.done()));
+  };
+  return (outpoints: string[]) =>
+    new Promise<void>((done) => {
+      queue.push({ ops: outpoints, done });
+      if (queue.reduce((n, x) => n + x.ops.length, 0) >= max) fire();
+      else if (!timer) timer = setTimeout(fire, waitMs);
+    });
+};
+
 export const runPrioritySync = async (
   ctx: OneSatContext,
   opts: {
@@ -352,13 +377,9 @@ export const runPrioritySync = async (
         // Spent elsewhere (or unclear): not recorded, so a later run looks again once the indexer has the spend.
         return r === 'spent' || r === 'unclear' ? 'skipped' : undefined;
       },
-      // One batched spend lookup for every candidate before the coins are taken in one by one (review 20 re-check, N3);
-      // the spend check keeps the answers a while (cacheMs), so each take() asks no one.
-      beforeCoins: opts.spends
-        ? async (outpoints) => {
-            await opts.spends!(outpoints).catch(() => undefined);
-          }
-        : undefined,
+      // Each coin candidate is spend-checked as it is found, the concurrent ones in one batch (N3), names never (R1);
+      // the spend check keeps the answers a while (cacheMs), so its take() asks no one again.
+      checkCoin: opts.spends ? coalesce(opts.spends) : undefined,
       onProgress: opts.onProgress,
       onCoinsReady: opts.onCoinsReady,
     });
