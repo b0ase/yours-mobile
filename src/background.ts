@@ -114,6 +114,7 @@ import { recoverOnDevice } from './services/recoverOnDevice';
 import { foundHeadline, restoredLine, scanNote, type ScanReport } from './services/findMissingCoins';
 import { paymailRestoreSummary } from './mobile/names/paymail';
 import { isEmpty, outpointsOnDevice, summarizeActive, switchToLocalVerified, type SwitchDeps } from './services/restoreFromRemote';
+import { asRestore } from './services/fullPass';
 import { isUncheckedPage } from './services/inboundSync';
 import { ensureLocalStore, type EnsureLocalResult } from './services/localFirst';
 import { markMayBeOut } from './services/refusalRecheck';
@@ -833,6 +834,15 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
     startSyncsAfter: heavyWorkMayStart,
     // No payment builds change on the remote store: this device's store first (services/localFirst.ts, P0 3 Nov 2026).
     ensureLocalStore: () => ensureLocalForPayment(),
+    // One line on the balance card's sync label (a full re-pull over mobile data: services/fullPass.ts).
+    notice: (message) => {
+      chrome.runtime
+        .sendMessage({
+          action: YoursEventName.SYNC_STATUS_UPDATE,
+          data: { status: 'progress', pending: 0, done: 0, failed: 0, message },
+        })
+        .catch(() => undefined);
+    },
   });
   if (lockGeneration !== startedUnder || !(await chromeStorageService.getPassKey())) {
     // Locked while we were initialising (a restore's detached init can run
@@ -1084,7 +1094,8 @@ const restoreDeps = (ctx: NonNullable<typeof accountContext>, remoteUrl: string)
   return {
     remoteUrl,
     activeRemoteUrl,
-    setActiveStorage: ctx.setActiveStorage,
+    // A restore's merges run whole, whatever re-pull is under way (services/fullPass.ts, re-check N2).
+    setActiveStorage: (target) => asRestore(() => ctx.setActiveStorage(target)),
     summarize: () => summarizeActive(ctx.baseWallet as never),
     pullRemote: async () => {
       const store = (
@@ -1092,7 +1103,7 @@ const restoreDeps = (ctx: NonNullable<typeof accountContext>, remoteUrl: string)
       )._stores.find((s) => s.storage.endpointUrl === remoteUrl)?.storage;
       if (!store) throw new Error('backup store not connected');
       const { identityKey } = await ctx.storage.getAuth();
-      await ctx.storage.syncFromReader(identityKey, store as never);
+      await asRestore(() => ctx.storage.syncFromReader(identityKey, store as never));
     },
     // Coins the inbound check held back are on the device, just not spendable: not "missing". Read from the device's
     // store, so an interrupted restore retried after a restart still completes (review 16 F5, 16b R1).
