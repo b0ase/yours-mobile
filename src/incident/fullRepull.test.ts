@@ -757,30 +757,37 @@ describe('review 23: the push re-sends parents within limits, only to a backup; 
 });
 
 describe.skipIf(process.env.BWX_FULLPASS_BENCH !== '1')('the full re-pull: cost (BWX_FULLPASS_BENCH=1)', () => {
-  test('rows, bytes and time per full pass at 1k / 5k / 20k outputs', async () => {
-    const rows: string[] = [];
-    for (const n of [1_000, 5_000, 20_000]) {
-      const d = await phoneWith(n);
-      try {
+  for (const n of (process.env.BWX_FULLPASS_SIZES ?? '1000,5000,20000').split(',').map(Number))
+    test(
+      `rows, bytes and time per full pass at ${n} outputs`,
+      async () => {
         let t = Date.now();
-        const s0 = { ...d.stats };
-        await d.pullToEnd();
-        const first = { ms: Date.now() - t, ...diff(d.stats, s0) };
-        await d.admit();
-        const s1 = { ...d.stats };
-        t = Date.now();
-        expect(await d.pull(Date.now() + FULL_PASS_EVERY_MS + 1)).toBe('started');
-        const slices = 1 + (await d.pullToEnd());
-        const again = { ms: Date.now() - t, ...diff(d.stats, s1), slices };
-        rows.push(
-          `${n} outputs | first pull: ${first.items} rows, ${first.pages} pages, ${mb(first.binBytes)} bin / ${mb(first.jsonBytes)} JSON, ${first.ms} ms | daily re-pull: ${again.items} rows, ${again.pages} pages, ${mb(again.binBytes)} bin / ${mb(again.jsonBytes)} JSON, ${again.ms} ms in ${again.slices} slices`,
-        );
-      } finally {
-        d.off();
-      }
-    }
-    console.log(['[full re-pull cost]', ...rows].join('\n'));
-  }, 1_800_000);
+        const d = await phoneWith(n);
+        const setup = Date.now() - t;
+        try {
+          t = Date.now();
+          const s0 = { ...d.stats };
+          await d.pull();
+          const first = { ms: Date.now() - t, ...diff(d.stats, s0) };
+          await d.admit();
+          const s1 = { ...d.stats };
+          t = Date.now();
+          expect(await d.pull(Date.now() + FULL_PASS_EVERY_MS + 1)).toBe('started');
+          let slices = 1;
+          while ((await d.state()).when == null) {
+            await d.pull();
+            slices++;
+          }
+          const again = { ms: Date.now() - t, ...diff(d.stats, s1), slices };
+          console.log(
+            `[full re-pull cost] ${n} outputs (setup ${setup} ms; the open's merge took the first pass) | an incremental pull with every row inside the 15-min overlap: ${first.items} rows, ${mb(first.binBytes)} binary, ${first.ms} ms | daily re-pull: ${again.items} rows, ${again.pages} pages, ${mb(again.binBytes)} binary / ${mb(again.jsonBytes)} JSON, ${again.ms} ms in ${again.slices} slices`,
+          );
+        } finally {
+          d.off();
+        }
+      },
+      3 * 3_600_000,
+    );
 });
 
 const diff = (a: Stats, b: Stats): Stats => ({
