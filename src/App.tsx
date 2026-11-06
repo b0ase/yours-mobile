@@ -101,19 +101,34 @@ export const App = () => {
   // Coins spent from another device (same seed) leave this device's balance high until checked: ask the background
   // for its throttled coin check whenever the app/popup is shown (owner, 29 Oct 2026: phone $3.47 vs extension $1.95
   // until REFRESH WALLET). The background decides whether one is due (services/autoCoinResync.ts).
+  // The same moments tell the background whether a wallet page is in front (APP_FOREGROUND / APP_BACKGROUND): while it
+  // is, the receive watcher asks the indexer about the receive addresses every ~3 s, so a payment shows at once as
+  // pending (services/receiveWatch.ts; owner, 5 Nov 2026). Repeated every 30 s while visible: the worker holds it on a
+  // lease, so a page that closes without saying so stops the watcher by itself.
   useEffect(() => {
     if (!hasWallet || isLocked) return;
-    const ask = () => {
-      if (document.visibilityState === 'hidden') return;
+    const send = (action: 'COIN_CHECK_DUE' | 'APP_FOREGROUND' | 'APP_BACKGROUND') => {
       try {
-        void Promise.resolve(chrome.runtime.sendMessage({ action: 'COIN_CHECK_DUE' })).catch(() => undefined);
+        void Promise.resolve(chrome.runtime.sendMessage({ action })).catch(() => undefined);
       } catch {
         /* worker not up yet: its own timer covers it */
       }
     };
+    const ask = () => {
+      if (document.visibilityState === 'hidden') return send('APP_BACKGROUND');
+      send('COIN_CHECK_DUE');
+      send('APP_FOREGROUND');
+    };
     ask();
+    const beat = setInterval(() => {
+      if (document.visibilityState !== 'hidden') send('APP_FOREGROUND');
+    }, 30_000);
     document.addEventListener('visibilitychange', ask);
-    return () => document.removeEventListener('visibilitychange', ask);
+    return () => {
+      clearInterval(beat);
+      document.removeEventListener('visibilitychange', ask);
+      send('APP_BACKGROUND');
+    };
   }, [hasWallet, isLocked]);
 
   // Establish a port connection so the background knows the popup is open.

@@ -44,6 +44,9 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
   const clearTimer = deps.clearTimer ?? ((t) => clearTimeout(t as ReturnType<typeof setTimeout>));
   const log = deps.log ?? (() => undefined);
   let running: Promise<DeviceSyncResult> | null = null;
+  let runningMode: 'full' | 'push' | null = null;
+  /** A full sync asked for while a push runs: it starts when that push ends (review 20, L6). */
+  let fullAfter: Promise<DeviceSyncResult> | null = null;
   let pushTimer: unknown = null;
   let failures = 0;
   let pendingPush = false;
@@ -83,10 +86,36 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
     }
   };
 
-  /** One sync at a time; a request while one runs joins it. */
-  const once = (mode: 'full' | 'push') => {
-    if (!running) running = run(mode).finally(() => (running = null));
-    return running;
+  const start = (mode: 'full' | 'push') => {
+    runningMode = mode;
+    const r = run(mode).finally(() => {
+      if (running === r) {
+        running = null;
+        runningMode = null;
+      }
+    });
+    running = r;
+    return r;
+  };
+  /**
+   * One sync at a time; a request while one runs joins it. A pull asked for while only a push runs is not swallowed by
+   * it (review 20, L6: the receive watcher's pull, asked because another device swept a payment, joined the debounced
+   * push of the watcher's own take and pulled nothing): it waits for that push, then pulls.
+   */
+  const once = (mode: 'full' | 'push'): Promise<DeviceSyncResult> => {
+    if (!running) return start(mode);
+    if (mode === 'push' || runningMode === 'full') return running;
+    // Waits until nothing but a full sync runs: a pushNow (a Store payment's backup-before-send) that started while the
+    // first push ran is waited for too, never run alongside (review 20 re-check, N4).
+    if (!fullAfter)
+      fullAfter = (async () => {
+        // Read fresh after every await (a pushNow may have started meanwhile).
+        const now = () => ({ r: running as Promise<DeviceSyncResult> | null, m: runningMode as typeof runningMode });
+        for (let c = now(); c.r && c.m !== 'full'; c = now()) await c.r.catch(() => undefined);
+        fullAfter = null;
+        return now().r ?? start('full');
+      })();
+    return fullAfter;
   };
 
   function schedule(ms: number) {
@@ -112,8 +141,7 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
     }
     if (deps.busy?.()) return { ok: false, error: 'a site action is in progress' } as DeviceSyncResult;
     while (running) await running.catch(() => undefined);
-    running = run('push').finally(() => (running = null));
-    return running;
+    return start('push');
   };
 
   return {

@@ -105,7 +105,6 @@ import {
   refreshShouldSync,
   shouldResync,
 } from './services/addressResync';
-import { balanceWithDeposits } from './services/depositBalance';
 import { arrivingSats } from './services/receiveGuard';
 import { abortTargetKnownOnChain, recoverySummary } from './services/recoverFailed';
 import { timedStep, txidRecoverySummary } from './services/recoverByTxid';
@@ -170,6 +169,7 @@ let switchActiveStorageRef: ((ctx: AccountContext, target: 'local' | string) => 
 import {
   AUTO_RESYNC_DELAY_MS,
   AUTO_RESYNC_LIGHT_GAP_MS,
+  OWN_PENDING_STATUSES,
   readAutoResyncCoins,
   runAutoResyncIfDue,
   type AutoResyncDeps,
@@ -446,7 +446,7 @@ const markSpentStore = (ctx: AccountContext, identityKey: string) => ({
 const AUTO_COIN_RESYNC_ALARM = 'auto-coin-resync';
 
 /** Unfinished actions: their txids are not "spenders", and the coins they hold are not checked. */
-const PENDING_STATUSES = ['unsigned', 'nosend', 'sending', 'unprocessed', 'failed'] as const;
+const PENDING_STATUSES = OWN_PENDING_STATUSES;
 
 /** Inputs for autoCoinResync from this account's storage: default-basket coins, pending actions. */
 async function autoResyncDeps(
@@ -545,6 +545,19 @@ chrome.runtime.onConnect.addListener((port) => {
     });
   }
 });
+
+/**
+ * Instant receive (services/receiveWatch.ts): the wallet's pages say when they are in front (APP_FOREGROUND, repeated
+ * every 30 s while visible) and when they are not (APP_BACKGROUND), next to COIN_CHECK_DUE (App.tsx). The extension's
+ * service worker has no document to ask. Kept here too, for a wallet context that opens after the page said so.
+ */
+let appFrontUntil = 0;
+const APP_FRONT_LEASE_MS = 75_000;
+const appInFront = () => appFrontUntil > Date.now() && pageHidden() !== true;
+const setAppFront = (on: boolean) => {
+  appFrontUntil = on ? Date.now() + APP_FRONT_LEASE_MS : 0;
+  accountContext?.receiveWatch.foreground(on && pageHidden() !== true);
+};
 
 /**
  * Send a balance update notification to the popup.
@@ -817,6 +830,8 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
   }
   stage('initWallet done');
   accountContext = ctx;
+  // The page said it was in front before this wallet existed: start watching the receive addresses now.
+  if (appInFront()) ctx.receiveWatch.foreground(true);
   mirror.services = ctx.syncContext.services as unknown as Parameters<typeof mirrorToMiner>[0];
   console.log('[background] initializeWallet: initWallet returned, accountContext:', !!accountContext);
 
@@ -3090,6 +3105,9 @@ if (!(
       'STORAGE_RECONCILE_POSTAGE',
       'STORAGE_RESYNC_COINS',
       'COIN_CHECK_DUE',
+      // The wallet's own pages in front / not (services/receiveWatch.ts). Extension pages only.
+      'APP_FOREGROUND',
+      'APP_BACKGROUND',
       'STORAGE_RESTORE_BACKUP',
       'BSV21_FIX_STALE',
       'BSV21_FIX_UNSEEN',
@@ -3556,6 +3574,12 @@ if (!(
           // (at most once a minute; services/autoCoinResync.ts foreground mode).
           void maybeAutoCoinResync(true);
           sendResponse({ type: 'COIN_CHECK_DUE', success: true });
+          return true;
+        case 'APP_FOREGROUND':
+        case 'APP_BACKGROUND':
+          // The receive watcher looks every ~3 s while a wallet page is in front (services/receiveWatch.ts).
+          setAppFront(message.action === 'APP_FOREGROUND');
+          sendResponse({ type: message.action, success: true });
           return true;
         case 'STORAGE_RESTORE_BACKUP':
           processRestoreBackup(sendResponse);
@@ -5632,13 +5656,16 @@ if (!(
       });
       return;
     }
-    // Received-but-not-yet-swept deposits count too (services/depositBalance.ts).
-    balanceWithDeposits(accountContext.baseWallet)
-      .then((satoshis) => {
+    // Received-but-not-yet-swept deposits count too, and money still arriving, each once (services/depositBalance.ts).
+    // `data` stays the total (sites read it); `pending` is the part not yet in a block, for the card.
+    accountContext
+      .balanceSplit()
+      .then(({ total, pending }) => {
         sendResponse({
           type: YoursEventName.GET_BALANCE,
           success: true,
-          data: satoshis,
+          data: total,
+          pending,
         });
       })
       .catch((error) => {

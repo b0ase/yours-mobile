@@ -80,9 +80,15 @@ export type PrioritySyncDeps = {
    * every input's whole source transaction (big OpNS mints) and expands it ~40x, so even a few coins killed the
    * iPhone web view; coins need only their own outputs.
    */
-  internalizeCoin?: (txid: string, beef: number[]) => Promise<void>;
+  internalizeCoin?: (txid: string, beef: number[]) => Promise<void | 'skipped'>;
   /** Names in flight at once (default NAMES_CONCURRENCY). */
   namesConcurrency?: number;
+  /**
+   * A transaction just classified as paying us a coin: its unspent outputs, before its download. Coin candidates only:
+   * never names (review 20, second re-check, R1: every name output went to the spend check first, 3,002 WhatsOnChain
+   * lookups before the first coin with the index rate-limited).
+   */
+  checkCoin?: (outpoints: string[]) => Promise<void>;
 };
 
 export type PrioritySyncResult = {
@@ -197,6 +203,8 @@ export const prioritySync = async (deps: PrioritySyncDeps): Promise<PrioritySync
   let checked = 0;
   let coinsFound = 0;
   let coinsFailed = 0;
+  /** Coins left out because they are already spent elsewhere (review 20, H1): not recorded; they hold the cursor. */
+  let coinsSkipped = 0;
   let processed = 0;
   const names: string[] = [];
   const coinsMsg = () =>
@@ -219,12 +227,16 @@ export const prioritySync = async (deps: PrioritySyncDeps): Promise<PrioritySync
       }
       const sats = await withRetry(() => deps.ourOutputs(txid), retries, sleep);
       if (sats.some((s) => s > 1)) {
+        await deps.checkCoin?.(unspent).catch(() => undefined);
         const beef = await withRetry(() => deps.fetchBeef(txid), retries, sleep);
         const internalizeCoin = deps.internalizeCoin ?? deps.internalize;
-        await serial(() => withRetry(() => internalizeCoin(txid, beef), retries, sleep));
-        await store.add(txid);
-        coinsFound++;
-        processed++;
+        const r = await serial(() => withRetry(() => internalizeCoin(txid, beef), retries, sleep));
+        if (r === 'skipped') coinsSkipped++;
+        else {
+          await store.add(txid);
+          coinsFound++;
+          processed++;
+        }
       } else {
         names.push(txid);
         await deps.classified?.add(txid);
@@ -261,7 +273,15 @@ export const prioritySync = async (deps: PrioritySyncDeps): Promise<PrioritySync
   });
 
   const failed = coinsFailed + namesFailed;
-  if (failed === 0 && deferred === 0 && maxSafeScore > lastScore) await store.setLastScore(maxSafeScore);
+  // Deferred names hold the cursor only when this sync loads names (namesPerRun > 0), so a later slice is streamed again.
+  // With names not loaded here at all (the default), holding it for them meant every run re-read the whole history
+  // (owner, 5 Nov 2026: a minute-long rescan behind every payment). They stay classified; failures still hold it.
+  const namesHold = deferred > 0 && (deps.namesPerRun ?? DEFAULT_NAMES_PER_RUN) > 0;
+  // (Review 20, L7.) The cursor also trusts the indexer to have taken in every event at or below it when it answers
+  // (its lazy JungleBus sync). Name transactions behind it are never streamed again: a caller that later sets
+  // namesPerRun above 0 must reset the cursor first (services/addressScan.ts resetSyncCursor).
+  if (failed === 0 && coinsSkipped === 0 && !namesHold && maxSafeScore > lastScore)
+    await store.setLastScore(maxSafeScore);
   return {
     processed,
     failed,

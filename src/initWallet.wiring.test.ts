@@ -22,6 +22,7 @@ import {
   _uninstallInboundSyncGuard,
   admissionListFor,
 } from './services/inboundSync';
+import { outpointStates } from './services/heldOutpoints';
 
 type Store = Record<string, unknown>;
 const local: Store = {};
@@ -46,6 +47,8 @@ const area = (s: Store) => ({
   },
 });
 const wocAsked: string[] = [];
+/** Every URL fetched (the receive watcher's look at the 1Sat indexer included). */
+const allAsked: string[] = [];
 /** Transactions WhatsOnChain "has" (its /tx/hash answers 200), and outpoints it has as spent. */
 const wocKnows = new Set<string>();
 stubGlobals({
@@ -56,6 +59,7 @@ stubGlobals({
   // No network: WhatsOnChain says "not found" to everything but the transactions it is told it has; URLs recorded.
   fetch: async (url: unknown) => {
     const u = String(url);
+    allAsked.push(u);
     if (u.includes('whatsonchain')) wocAsked.push(u);
     const hash = /\/tx\/hash\/([0-9a-f]{64})$/.exec(u)?.[1];
     if (hash && wocKnows.has(hash)) return new Response(JSON.stringify({ txid: hash }), { status: 200 });
@@ -341,5 +345,34 @@ describe('the real initWallet wiring', () => {
     // The wrapped switch still switches (to this device: a no-op here) and leaves the store enabled.
     await ctx.setActiveStorage('local');
     expect((ctx.storage as unknown as { isActiveEnabled: boolean }).isActiveEnabled).toBe(true);
+  });
+
+  test('5 Nov 2026: the balance and the receive guard read the real device store, spent or not (no double count)', async () => {
+    const live = await plantChange({ sats: 31_000, spendable: true });
+    const held = await plantChange({ sats: 32_000, spendable: false });
+    const { d, userId } = await device();
+    const states = await outpointStates(d as never, userId, [
+      `${live.txid}.0`,
+      `${held.txid}_0`,
+      `${'ab'.repeat(32)}.0`,
+    ]);
+    expect([...states]).toEqual([
+      [`${live.txid}.0`, 'accounted'],
+      [`${held.txid}.0`, 'stored'],
+      [`${'ab'.repeat(32)}.0`, 'absent'],
+    ]);
+    const split = await ctx.balanceSplit();
+    expect(split.pending).toBe(0);
+    expect(split.total).toBe(await ctx.baseWallet.balance());
+    // The watcher is wired but idle: no page has said it is in front.
+    expect(typeof ctx.receiveWatch.foreground).toBe('function');
+  });
+
+  test('the receive watcher asks the indexer nothing before the syncs may start, even with the page in front', async () => {
+    const before = allAsked.length;
+    ctx.receiveWatch.foreground(true); // this test holds the syncs back (startSyncsAfter never resolves)
+    await new Promise((r) => setTimeout(r, 150));
+    ctx.receiveWatch.foreground(false);
+    expect(allAsked.slice(before).filter((u) => u.includes('/1sat/owner/sync'))).toEqual([]);
   });
 });

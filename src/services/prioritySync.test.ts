@@ -309,3 +309,52 @@ describe('prioritySync: coins use the lean internalizer', () => {
     expect(nameCalls.some((t) => coinIds.has(t))).toBe(false);
   });
 });
+
+// Owner, 5 Nov 2026: with names never loaded by the address sync (namesPerRun 0), the deferred names held the cursor at
+// 0, so every minute's run re-read the wallet's whole history before a new payment could show.
+describe('prioritySync: the cursor moves when names are not loaded here', () => {
+  const streamFrom = (outs: SyncOutputLike[], froms: (number | undefined)[]) =>
+    async function* (_a: string[], from: number | undefined) {
+      froms.push(from);
+      for (const o of outs) if (from === undefined || o.score >= from) yield o;
+    };
+
+  test('namesPerRun 0: a clean run moves the cursor past the classified names; the next run reads only from there', async () => {
+    const { outs, coinIds } = bigWallet(300, 3);
+    const froms: (number | undefined)[] = [];
+    const { d, store, balance } = deps(outs, coinIds, { namesPerRun: 0, stream: streamFrom(outs, froms) });
+    const r = await prioritySync(d);
+    expect(r.names).toMatchObject({ total: 300, deferred: 300 });
+    expect(balance.sats).toBe(3_000_000);
+    expect(store.score()).toBe(800_302);
+    let ours = 0;
+    const again = await prioritySync(
+      deps(outs, coinIds, {
+        namesPerRun: 0,
+        store,
+        stream: streamFrom(outs, froms),
+        ourOutputs: async (t) => (ours++, coinIds.has(t) ? [1_000_000] : [1]),
+      }).d,
+    );
+    expect(froms).toEqual([undefined, 800_302]);
+    expect(again.coins.found).toBe(0);
+    expect(ours).toBeLessThanOrEqual(1); // only the last transaction, at the cursor itself
+  });
+
+  test('a failed coin still holds the cursor, and a sync that loads names still waits for its slices', async () => {
+    const { outs, coinIds } = bigWallet(50, 2);
+    const failing = deps(outs, coinIds, {
+      namesPerRun: 0,
+      retries: 0,
+      fetchBeef: async (t) => {
+        if (coinIds.has(t)) throw new Error('invalid beef');
+        return [1];
+      },
+    });
+    expect((await prioritySync(failing.d)).coins.failed).toBe(2);
+    expect(failing.store.score()).toBe(0);
+    const slices = deps(outs, coinIds, { namesPerRun: 10 });
+    expect((await prioritySync(slices.d)).names.deferred).toBe(40);
+    expect(slices.store.score()).toBe(0);
+  });
+});

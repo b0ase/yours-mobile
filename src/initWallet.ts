@@ -4,7 +4,28 @@ import { openSpendLedger, withLocalSpendLedger } from './services/spendLedger';
 import { rememberRefusals } from './services/broadcastRefusals';
 import { knownOnChain, recoverMinedFailedActions, type RecoverReport } from './services/recoverFailed';
 import { singleFlight } from './services/addressResync';
-import { runPrioritySync } from './services/prioritySyncRun';
+import {
+  allOneSat,
+  deriveSyncKeys,
+  makeCoinIntake,
+  outputsPaying,
+  pkhHex,
+  runPrioritySync,
+  type CoinIntake,
+} from './services/prioritySyncRun';
+import { createInternalizeLock } from './services/internalizeLock';
+import {
+  createPullTrigger,
+  createReceiveWatch,
+  ownerSyncReader,
+  watchFrom,
+  type TxClass,
+} from './services/receiveWatch';
+import { makeSpendCheck, wocSpendLookup } from './services/spendCheck';
+import { createTakenRecheck } from './services/takenRecheck';
+import { recordAutoCleared } from './services/autoCoinResync';
+import { wocSpentStatus } from './services/coinPreflight';
+import { guardIntake } from './services/guardIntake';
 import { sizeAwareBroadcast } from './services/bigBroadcast';
 import {
   releaseStuckSends,
@@ -58,6 +79,7 @@ import {
   admitPending,
   walletOwnership,
   walletRecords,
+  type AdmitOptions,
   type AdmitReport,
   type AdmitStore,
   type InboundVerifier,
@@ -73,6 +95,7 @@ import {
   internalizeBeef,
   signP2PKHInput,
   deriveDepositAddresses,
+  ProcessedTxStoreIdb,
   createContext as createActionContext,
 } from '@1sat/actions';
 import { BSV21_BASKET, DEPOSIT_BASKET, FUNDING_BASKET, ONESAT_BASKET, ONESAT_PROTOCOL } from '@1sat/types';
@@ -108,6 +131,18 @@ import {
   restoreMoved,
   setArriving,
 } from './services/receiveGuard';
+import {
+  accountedVia,
+  carriesVia,
+  waitingVia,
+  knownTxids,
+  outpointStates,
+  ownPendingTxids,
+  type DeviceReads,
+  type HeldStore,
+  type OutpointState,
+} from './services/heldOutpoints';
+import { balanceSplit, type BalanceSplit } from './services/depositBalance';
 import { internalizeBackoff } from './services/internalizeBackoff';
 import { fixUtxoStatus, utxoStatusFromTxo } from './services/utxoStatus';
 import { restorePaymailHistory, type PaymailRestoreReport } from './mobile/names/paymail';
@@ -222,6 +257,16 @@ export interface AccountContext {
   sweepDeposits: () => Promise<{ swept?: number }>;
   /** Credit payments seen on chain at our receive addresses that storage lacks (receive guard), now. */
   creditArriving: () => Promise<void>;
+  /**
+   * The balance the wallet shows and how much of it is pending (services/depositBalance.ts balanceSplit). Money on chain
+   * that storage lacks is checked against the device store on every read, so nothing counts twice (owner, 5 Nov 2026).
+   */
+  balanceSplit: () => Promise<BalanceSplit>;
+  /**
+   * Instant receive (services/receiveWatch.ts): the UI in front (APP_FOREGROUND) watches the receive addresses every
+   * ~3 s; APP_BACKGROUND stops it.
+   */
+  receiveWatch: { foreground: (on: boolean) => void };
   /** Pull the owner's other devices' changes from the backup, then push this one's (services/deviceSync.ts). */
   syncDevices: () => Promise<DeviceSyncResult>;
   /**
@@ -555,14 +600,19 @@ export const initWallet = async (
       void admitBackupRows();
     }, at - Date.now());
   };
+  /** Set by every device-sync pull: what that pull lists is retried every few seconds for a while (inboundSync.ts). */
+  let admitPrompt: AdmitOptions['prompt'];
+  const PROMPT_ADMIT_MS = 2 * 60_000;
   const admitBackupRows = async (): Promise<AdmitReport | undefined> => {
     const device = deviceStore();
     if (!device || admitClosed) return undefined;
     const { identityKey } = await storage.getAuth();
-    const r = await admitPending(device, identityKey, stopBackupCheck.verifier).catch((e: unknown) => {
-      console.warn('[inbound-sync] admission list not worked through:', e);
-      return undefined;
-    });
+    const r = await admitPending(device, identityKey, stopBackupCheck.verifier, { prompt: admitPrompt }).catch(
+      (e: unknown) => {
+        console.warn('[inbound-sync] admission list not worked through:', e);
+        return undefined;
+      },
+    );
     // Anything left waits for its next try: run again then, never "only at the next unlock" (D2).
     if (r?.nextAt !== undefined) admitIn(r.nextAt - Date.now());
     return r;
@@ -581,6 +631,9 @@ export const initWallet = async (
         const reader = managed._backups?.[0]?.storage;
         if (!reader) throw new Error('backup storage is not connected');
         const { identityKey } = await storage.getAuth();
+        // What this pull lists is asked about every few seconds for a while, not after the 1-minute doubling: a sweep
+        // the other device made must not hide its dollar here for minutes (review 20, M5; services/inboundSync.ts).
+        admitPrompt = { from: Date.now(), until: Date.now() + PROMPT_ADMIT_MS };
         await storage.syncFromReader(identityKey, reader as Parameters<typeof storage.syncFromReader>[1]);
       },
       () => admitIn(0),
@@ -1000,14 +1053,139 @@ export const initWallet = async (
     return { address, derivationPrefix: hit.derivationPrefix, derivationSuffix: hit.derivationSuffix };
   };
 
+  // What the device store holds for an outpoint, spent or not (services/heldOutpoints.ts). Read straight from the active
+  // provider, never through the manager's locks (as localRawTx). The remote store active: none (arriving counts as before).
+  const deviceReads: DeviceReads = async () => {
+    if (!storage.isActiveStorageProvider()) return undefined;
+    const { userId } = await storage.getAuth();
+    if (typeof userId !== 'number') return undefined;
+    return { store: storage.getActive() as unknown as HeldStore, userId };
+  };
+  // Owner, 5 Nov 2026 ($3.42 for $2.42): the sweep had spent the payment, listOutputs no longer listed it, the indexer
+  // still did, and it counted as arriving on top of the sweep's change. The guard and the balance ask storage itself.
+  const accountedFor = accountedVia(deviceReads);
+  /** What the device store holds for each outpoint; undefined with the remote store active (no device store to ask). */
+  const deviceStates = async (outpoints: string[]): Promise<Map<string, OutpointState> | undefined> => {
+    const r = await deviceReads();
+    return r ? outpointStates(r.store, r.userId, outpoints) : undefined;
+  };
+  // No device store: every outpoint reads as held, so the watcher takes nothing in (it never runs then anyway).
+  const statesOf = async (outpoints: string[]): Promise<Map<string, OutpointState>> =>
+    (await deviceStates(outpoints)) ?? new Map(outpoints.map((o) => [normOutpoint(o), 'stored' as OutpointState]));
+  /** Of these txids, the ones storage holds (our own spends). No device store: all, so nothing asks for a pull. */
+  const heldTxids = async (txids: string[]) => {
+    const r = await deviceReads();
+    return r ? knownTxids(r.store, r.userId, txids) : new Set(txids);
+  };
+  // Spent already, mempool included? The owner stream lists a spend only once it is mined, so a payment the other copy
+  // of this wallet swept seconds ago still looks unspent there (review 20, H1 and M2; services/spendCheck.ts). The 1sat
+  // spend index first (batched, 429 back-off), WhatsOnChain second (paced app-wide, services/wocLimiter.ts).
+  const txoSpends = (syncContext.services as unknown as { txo?: { getSpends?: (o: string[]) => Promise<unknown[]> } })
+    .txo;
+  const spendIndex = txoSpends?.getSpends
+    ? (b: string[]) => txoSpends.getSpends!(b) as Promise<(string | null | undefined)[]>
+    : undefined;
+  // coinPreflight's hardened lookup, its request aborted after 3 s (review 20 re-check, N1: a bare fetch that never
+  // answered stalled the watcher, the guard and the address sync's coin queue).
+  const wocSpender = wocSpendLookup(3_000);
+  /** The receive guard and the watcher: few outputs, both sources each. */
+  const spendsAll = makeSpendCheck({ index: spendIndex, woc: wocSpender, wocFor: 'all' });
+  /**
+   * The address sync, which may take in hundreds of coins at a restore: one batched lookup for all of them first, kept
+   * two minutes (N3); WhatsOnChain only where the index can't tell. What it takes in is re-checked (takenRecheck below).
+   */
+  const spendsSync = makeSpendCheck({ index: spendIndex, woc: wocSpender, wocFor: 'unanswered', cacheMs: 120_000 });
+  // Another copy of this wallet spent one of our receive outputs: a device-sync pull, throttled (services/receiveWatch.ts);
+  // then a guard run, so a payment whose spender's change now waits here for admission shows meanwhile (M5).
+  let guardSoon: () => void = () => undefined;
+  const askPull = createPullTrigger({
+    pull: () => deviceSync.syncNow().then(() => guardSoon()),
+    log: (...a) => console.warn(...a),
+  });
+  /**
+   * Mark a coin another copy of this wallet spent as spent here: spendability only goes down, on this device's store
+   * only, and the automatic coin check re-checks it (its cleared list) and puts it back if both sources later call it
+   * unspent (services/autoCoinResync.ts). Review 20 re-check, H1.
+   */
+  const markSpentHere = async (outpoint: string, spender: string): Promise<number> => {
+    if (!storage.isActiveStorageProvider()) return 0;
+    const { userId } = await storage.getAuth();
+    const [txid, vout] = normOutpoint(outpoint).split('.');
+    const n = await storage.runAsStorageProvider(async (sp) => {
+      const by = (await sp.findTransactions({ partial: { userId, txid: spender }, noRawTx: true }))[0];
+      let changed = 0;
+      for (const o of await sp.findOutputs({
+        partial: { userId, txid, vout: Number(vout), spendable: true },
+        noScript: true,
+      }))
+        changed += await sp.updateOutput(o.outputId, {
+          spendable: false,
+          ...(by ? { spentBy: by.transactionId } : {}),
+        });
+      return changed;
+    });
+    if (n)
+      await recordAutoCleared(
+        { get: (k) => chrome.storage.local.get(k), set: (items) => chrome.storage.local.set(items) },
+        account?.pubKeys?.identityPubKey ?? '',
+        { [`${txid}_${vout}`]: spender },
+      );
+    return n;
+  };
+  /** Put back a coin the re-check marked whose spender was dropped: only a row still as the mark left it. */
+  const markUnspentHere = async (outpoint: string, spender: string): Promise<number> => {
+    if (!storage.isActiveStorageProvider()) return 0;
+    const { userId } = await storage.getAuth();
+    const [txid, vout] = normOutpoint(outpoint).split('.');
+    return storage.runAsStorageProvider(async (sp) => {
+      const by = (await sp.findTransactions({ partial: { userId, txid: spender }, noRawTx: true }))[0];
+      let changed = 0;
+      for (const o of await sp.findOutputs({
+        partial: { userId, txid, vout: Number(vout), spendable: false },
+        noScript: true,
+      }))
+        if (o.spentBy == null || (by && o.spentBy === by.transactionId))
+          changed += await sp.updateOutput(o.outputId, { spendable: true, spentBy: undefined });
+      return changed;
+    });
+  };
+  // The automatic coin check's rule, not a new one (review 20, second re-check, Q1): the index first, in batches;
+  // WhatsOnChain (3 s, then "can't tell") only to confirm a spender the index names; never our own unfinished actions.
+  const recheck = createTakenRecheck({
+    index: spendIndex ?? (async () => Promise.reject(new Error('no spend index'))),
+    woc: (op) => wocSpentStatus(op, AbortSignal.timeout(3_000)),
+    ownPendingTxids: async () => {
+      const r = await deviceReads();
+      return r ? ownPendingTxids(r.store, r.userId) : new Set<string>();
+    },
+    heldTxids: (t) => heldTxids(t),
+    markSpent: markSpentHere,
+    markUnspent: markUnspentHere,
+    askPull: (sp) => askPull(sp),
+    log: (...a) => console.warn(...a),
+  });
+  const pullForForeign = async (spenders: string[] | undefined) => {
+    if (!spenders?.length) return;
+    const ours = await heldTxids(spenders).catch(() => new Set(spenders));
+    const foreign = spenders.filter((t) => !ours.has(t));
+    if (foreign.length) askPull(foreign);
+  };
+  // One internalize at a time across the address sync, the receive guard and the receive watcher; each checks "already
+  // in?" inside it, so a payment two of them find in the same seconds is taken in once (services/internalizeLock.ts).
+  const internalizeLock = createInternalizeLock();
+
   // The address the Receive screen shows must always count (services/receiveGuard.ts; owner, 10 Oct 2026:
   // $5 at the $vexvoid receive address never showed). Runs after every address sync, clean or not.
   const receiveGuardOnce = async () => {
+    // When this run's look at the indexer began: a stale result never wipes what the watcher added since (review 20, L2).
+    const since = Date.now();
     // Never between the steps of a connected site's multi-step action (services/dappChain.ts).
     if (chainActive()) {
       console.log('[receiveGuard] a site action is in progress; check deferred');
       return;
     }
+    // Coins taken in on an "unspent" that may have been the index lagging: asked about again (H1). Not waited for.
+    void recheck.run().catch(() => undefined);
     const shown = chromeStorageService.getCurrentAccountObject().account?.primaryAddress;
     const addresses = [...(shown ? [shown] : []), ...syncContext.addressManager.getAddresses()];
     const walletOutpoints = async () => {
@@ -1031,9 +1209,13 @@ export const initWallet = async (
       ownerSync: (a) => syncContext.services.owner.sync(a),
       outputSats,
       walletOutpoints,
+      accountedFor,
+      spends: spendsAll,
+      waitingSpenders: waitingVia(deviceReads),
     });
+    void pullForForeign(first.spenders);
     if (!first.satoshis) {
-      setArriving(0);
+      setArriving([], since);
       return;
     }
     console.warn(
@@ -1054,30 +1236,38 @@ export const initWallet = async (
         counterparty: 'self',
       });
     }
-    for (const txid of first.txids) {
-      // A txid that storage can't take (e.g. its action is marked failed) is not retried on every sync.
-      if (!internalizeBackoff.due(txid)) continue;
-      try {
-        const beef = await syncContext.services.beef.getBeef(txid);
-        const r = await internalizeBeef({
-          beef,
+    // Each missing transaction, directly (services/guardIntake.ts): not what the device store already holds (L3), and as
+    // before with the remote store active (M1); under the shared internalize lock, re-checked inside it.
+    for (const r of await guardIntake(first.outputs, {
+      states: deviceStates,
+      getBeef: async (txid) => syncContext.services.beef.getBeef(txid),
+      internalize: (beef) =>
+        internalizeBeef({
+          beef: Uint8Array.from(beef),
           addressDerivations: derivations as Parameters<typeof internalizeBeef>[0]['addressDerivations'],
           wallet: adminWallet,
           services: syncContext.services,
           chain,
+        }),
+      lock: internalizeLock,
+      backoff: internalizeBackoff,
+      // What the guard takes in is re-checked too (review 20, second re-check, R3).
+      onInternalized: (ops) => recheck.add(ops),
+    })) {
+      if (r.outcome === 'internalized') console.log(`[receiveGuard] internalized ${r.txid}`);
+      else if (r.outcome === 'no-match') console.warn(`[receiveGuard] ${r.txid}: no output matched our derivations`);
+      else if (r.outcome === 'held')
+        console.warn(
+          `[receiveGuard] ${r.txid}: held in storage but not counted (waiting on admission?); not rewritten`,
+        );
+      else if (r.outcome === 'failed') {
+        const err = r.error;
+        console.error(`[receiveGuard] internalize ${r.txid} failed:`, err);
+        sendSyncStatus({
+          status: 'receive-failed',
+          txid: r.txid,
+          error: err instanceof Error ? err.message : String(err),
         });
-        // internalizeBeef resolves with internalized: 0 when no output matched a derivation: not a success.
-        if (r.internalized) {
-          internalizeBackoff.clear(txid);
-          console.log(`[receiveGuard] internalized ${txid} (${r.internalized} output(s))`);
-        } else {
-          internalizeBackoff.fail(txid, 'no output matched');
-          console.warn(`[receiveGuard] ${txid}: no output matched our derivations`);
-        }
-      } catch (err) {
-        const wait = internalizeBackoff.fail(txid, err);
-        console.error(`[receiveGuard] internalize ${txid} failed (next try in ${Math.round(wait / 60000)} min):`, err);
-        sendSyncStatus({ status: 'receive-failed', txid, error: err instanceof Error ? err.message : String(err) });
       }
     }
     await sweepDeposit
@@ -1087,6 +1277,9 @@ export const initWallet = async (
       ownerSync: (a) => syncContext.services.owner.sync(a),
       outputSats,
       walletOutpoints,
+      accountedFor,
+      spends: spendsAll,
+      waitingSpenders: waitingVia(deviceReads),
     });
     // Still missing after a direct internalize: storage won't take this txid (services/receiveRescue.ts). Spend
     // each stuck output back to the same address in a fresh transaction and credit that one instead.
@@ -1127,13 +1320,15 @@ export const initWallet = async (
               protocolID: ONESAT_PROTOCOL as WalletProtocol,
               counterparty: 'self',
             });
-          const r = await internalizeBeef({
-            beef: Uint8Array.from(beef),
-            addressDerivations: map as Parameters<typeof internalizeBeef>[0]['addressDerivations'],
-            wallet: adminWallet,
-            services: syncContext.services,
-            chain,
-          });
+          const r = await internalizeLock(() =>
+            internalizeBeef({
+              beef: Uint8Array.from(beef),
+              addressDerivations: map as Parameters<typeof internalizeBeef>[0]['addressDerivations'],
+              wallet: adminWallet,
+              services: syncContext.services,
+              chain,
+            }),
+          );
           return r.internalized;
         },
         protocolID: ONESAT_PROTOCOL as WalletProtocol,
@@ -1154,17 +1349,22 @@ export const initWallet = async (
           ownerSync: (a) => syncContext.services.owner.sync(a),
           outputSats,
           walletOutpoints,
+          accountedFor,
+          spends: spendsAll,
+          waitingSpenders: waitingVia(deviceReads),
         });
       }
     }
-    // Whatever is still missing counts as arriving, so the balance never shows $0 for it.
-    setArriving(final.satoshis);
+    // Whatever is still missing counts as arriving, so the balance never shows $0 for it. Each balance read checks these
+    // outpoints against storage again (services/receiveGuard.ts arrivingNow).
+    setArriving(final.outputs, since);
     if (final.satoshis) sendSyncStatus({ status: 'arriving', satoshis: final.satoshis });
   };
   // One receive-guard run at a time: overlapping runs each internalized and swept the same outputs.
   const receiveGuardFlight = singleFlight(receiveGuardOnce);
   const runReceiveGuard = () => receiveGuardFlight.run();
   const guard = () => runReceiveGuard().catch((err) => console.error('[receiveGuard] failed:', err));
+  guardSoon = () => void guard();
 
   // One address sync at a time, shared by the startup run, the background alarm and the refresh button
   // (services/addressResync.ts). A quiet run (the alarm) shows no spinner; its 'complete' still refreshes the balance.
@@ -1180,6 +1380,12 @@ export const initWallet = async (
     // (services/prioritySync.ts; owner, 25 Oct 2026: a big restored wallet's balance crept up for minutes).
     await runPrioritySync(actionCtx, {
       count: scanPlan.count,
+      lock: internalizeLock,
+      // A coin another copy of this wallet already swept is not taken in (review 20, H1); fails open when unclear.
+      spends: spendsSync,
+      knownTxids: heldTxids,
+      foreignSpend: (spenders) => void askPull(spenders),
+      onTaken: (ops) => recheck.add(ops),
       onProgress: (p) => {
         if (!quiet)
           sendSyncStatus({
@@ -1272,6 +1478,126 @@ export const initWallet = async (
     () => deviceSync.syncNow(),
     () => undefined,
   );
+
+  // Instant receive (services/receiveWatch.ts; owner, 5 Nov 2026: the iPhone showed neither $1 after 20 minutes in front).
+  // The address sync's own coin intake, made on first use (it derives the keys), recording in its processed-tx store.
+  let watchKit:
+    | Promise<{ intake: CoinIntake; store: ProcessedTxStoreIdb; classified: ProcessedTxStoreIdb; hashes: Set<string> }>
+    | undefined;
+  const watchIntake = () =>
+    (watchKit ??= (async () => {
+      const keys = await deriveSyncKeys(actionCtx.wallet, scanPlan.count);
+      const store = new ProcessedTxStoreIdb(keys.identityKey);
+      // The address sync's own store of transactions known to pay us only 1-sat items (names, tokens): never downloaded.
+      const classified = new ProcessedTxStoreIdb(`${keys.identityKey}:classified-1sat`);
+      const intake = makeCoinIntake({
+        wallet: actionCtx.wallet,
+        keyByHash: keys.keyByHash,
+        processed: store,
+        lock: internalizeLock,
+        spends: spendsAll,
+        knownTxids: heldTxids,
+        foreignSpend: (spenders) => void askPull(spenders),
+        unknownSpend: 'skip',
+        onTaken: (ops) => recheck.add(ops),
+      });
+      return { intake, store, classified, hashes: keys.hashes };
+    })().catch((e: unknown) => {
+      watchKit = undefined;
+      throw e;
+    }));
+  /** Raw transactions classified per look (each a payment's few hundred bytes, or an untagged mint's more). */
+  const RAW_PER_LOOK = 6;
+  const ownerBase = (syncContext.services.owner as unknown as { baseUrl?: string }).baseUrl;
+  const watchStream = ownerBase ? ownerSyncReader(ownerBase) : undefined;
+  let tip = { height: 0, at: 0 };
+  // Held back with the other syncs while a site waits for its sheet (startSyncsAfter, services/sheetFirst.ts).
+  let syncsOpen = false;
+  void syncsMayStart.then(
+    () => void (syncsOpen = true),
+    () => undefined,
+  );
+  const receiveWatchAddresses = () => {
+    const shown = chromeStorageService.getCurrentAccountObject().account?.primaryAddress;
+    return [...(shown ? [shown] : []), ...syncContext.addressManager.getAddresses()];
+  };
+  const receiveWatch = createReceiveWatch({
+    // This device's store only, never between a site's steps (as the receive guard), never before the syncs may start.
+    active: () => syncsOpen && !walletClosed && storage.isActiveStorageProvider() && !chainActive(),
+    addresses: () => receiveWatchAddresses(),
+    // The tip, at most once a minute; the watcher gives this a deadline (review 20, M3).
+    from: async () => {
+      if (Date.now() - tip.at > 60_000)
+        await baseWallet
+          .getHeight({})
+          .then(({ height }) => void (tip = { height, at: Date.now() }))
+          .catch(() => undefined);
+      return watchFrom(tip.height, Date.now());
+    },
+    // Read with an AbortSignal, so a look that runs out of time closes its request (M3).
+    stream: (a, from, signal) =>
+      watchStream ? watchStream(a, from, signal) : syncContext.services.owner.sync(a, from),
+    states: statesOf,
+    knownTxids: heldTxids,
+    processed: async (txid) => (await watchIntake()).store.has(txid),
+    // Payments first, names never downloaded (review 20, M4): the address sync's classified store; then the indexer's
+    // tags, one call for every candidate (kept for this run only: the watcher sees only the receive outputs, not the
+    // whole transaction); then the raw transaction, a few per look, against every key the address sync scans and the
+    // receive addresses (a verdict "pays us no coin" is then the address sync's own, and is kept in its store).
+    classify: async (txids, byTxid) => {
+      const kit = await watchIntake();
+      const out = new Map<string, TxClass>();
+      const rest: string[] = [];
+      for (const t of txids) {
+        if (await kit.classified.has(t).catch(() => false)) out.set(t, 'not-coin');
+        else rest.push(t);
+      }
+      const ops = rest.flatMap((t) => byTxid.get(t) ?? []);
+      if (ops.length) {
+        const rows = await syncContext.services.txo.getBatch(ops, { tags: ['*'] }).catch(() => undefined as unknown);
+        if (Array.isArray(rows) && rows.length === ops.length) {
+          let i = 0;
+          for (const t of rest) {
+            const n = (byTxid.get(t) ?? []).length;
+            if (allOneSat(rows.slice(i, i + n) as Parameters<typeof allOneSat>[0])) out.set(t, 'not-coin');
+            i += n;
+          }
+        }
+      }
+      const hashes = new Set([...kit.hashes, ...receiveWatchAddresses().map(pkhHex)]);
+      let raw = 0;
+      for (const t of rest) {
+        if (out.has(t)) continue;
+        if (raw++ >= RAW_PER_LOOK) {
+          out.set(t, 'later');
+          continue;
+        }
+        try {
+          if (outputsPaying(await syncContext.services.beef.getRawTx(t), hashes).some((v) => v > 1)) out.set(t, 'coin');
+          else {
+            out.set(t, 'not-coin');
+            await kit.classified.add(t).catch(() => undefined);
+          }
+        } catch {
+          out.set(t, 'later');
+        }
+      }
+      return out;
+    },
+    spends: spendsAll,
+    askPull,
+    recheck: () => recheck.run(),
+    backoff: internalizeBackoff,
+    fetchBeef: async (txid) => {
+      const beef = await syncContext.services.beef.getBeef(txid);
+      if (!beef) throw new Error(`Failed to load BEEF for ${txid}`);
+      return Array.from(beef);
+    },
+    intake: async () => (await watchIntake()).intake,
+    changed: (found) => sendSyncStatus({ status: 'coins-ready', found, failed: 0 }),
+    // warn: the iPhone's worker relays warn and error only (review 20, L10).
+    log: (...a) => console.warn(...a),
+  });
 
   // Sync incoming paymail payments from the message box (fire-and-forget)
   void syncsMayStart
@@ -1402,6 +1728,13 @@ export const initWallet = async (
   const close = async () => {
     walletClosed = true;
     admitClosed = true;
+    receiveWatch.stop();
+    void watchKit
+      ?.then(async (k) => {
+        await k.store.close();
+        await k.classified.close();
+      })
+      .catch(() => undefined);
     keepActive?.stop();
     if (admitTimer) clearTimeout(admitTimer);
     admitTimer = undefined;
@@ -1429,6 +1762,8 @@ export const initWallet = async (
     addressSyncBusy: addressSync.busy,
     sweepDeposits: () => sweepDeposit.execute(actionCtx, {}),
     creditArriving: () => runReceiveGuard(),
+    balanceSplit: () => balanceSplit(baseWallet, { accountedFor, spenderCarries: carriesVia(deviceReads) }),
+    receiveWatch: { foreground: (on) => receiveWatch.foreground(on) },
     syncDevices: () => deviceSync.syncNow(),
     admitBackupRows,
     backupState: () => {

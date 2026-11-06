@@ -940,6 +940,12 @@ const FIRST_WAIT_MS = 60_000;
 const MAX_WAIT_MS = 6 * 3_600_000;
 const SPENT_RECHECK_MS = 3_600_000;
 const LOCAL_GIVE_UP_MS = 3 * 24 * 3_600_000;
+/**
+ * Inside a prompt window (opts.prompt): an entry that arrived with that pull is asked again after this, not after the
+ * 1-minute-doubling wait, and its tries are not counted. Owner, 5 Nov 2026: the phone's watcher sees the extension sweep
+ * a payment and pulls at once; the sweep's change must then show within seconds, not minutes. Every check is the same.
+ */
+export const PROMPT_RETRY_MS = 5_000;
 /** A device transaction that may already be on the network: sent, or being sent, by this device's monitor. */
 const BROADCAST = new Set(['sending', 'unproven', 'unprocessed']);
 
@@ -950,11 +956,18 @@ const runs = new Map<string, Promise<unknown>>();
  * chain's word, then one IndexedDB transaction that writes only if the row is still as it was read. Runs one at a
  * time per store and account. Transactions first, so a coin whose spender another device aborted is free (C3).
  */
+export type AdmitOptions = {
+  now?: () => number;
+  limit?: number;
+  /** Entries first listed at or after `from` are retried every PROMPT_RETRY_MS until `until` (a watcher's pull). */
+  prompt?: { from: number; until: number };
+};
+
 export function admitPending(
   store: AdmitStore,
   identityKey: string,
   v: InboundVerifier,
-  opts: { now?: () => number; limit?: number } = {},
+  opts: AdmitOptions = {},
 ): Promise<AdmitReport> {
   const key = `${store.getSettings().storageIdentityKey}|${identityKey}`;
   const run = (runs.get(key) ?? Promise.resolve())
@@ -974,7 +987,7 @@ async function admitOnce(
   store: AdmitStore,
   identityKey: string,
   v: InboundVerifier,
-  opts: { now?: () => number; limit?: number },
+  opts: AdmitOptions,
 ): Promise<AdmitReport> {
   const now = opts.now?.() ?? Date.now();
   const list = admissionListFor(store.getSettings().storageIdentityKey);
@@ -1023,11 +1036,16 @@ async function admitOnce(
       v.log?.(`[inbound-sync] gave up on ${e.kind} ${e.txid}${e.kind === 'coin' ? `.${e.vout}` : ''}: left as is`);
       return;
     }
-    await list.put({
-      ...e,
-      tries: e.tries + 1,
-      nextAt: at ?? now + Math.min(MAX_WAIT_MS, FIRST_WAIT_MS * 2 ** Math.min(e.tries, 20)),
-    });
+    const prompt = at === undefined && !!opts.prompt && e.firstAt >= opts.prompt.from && now < opts.prompt.until;
+    await list.put(
+      prompt
+        ? { ...e, nextAt: now + PROMPT_RETRY_MS }
+        : {
+            ...e,
+            tries: e.tries + 1,
+            nextAt: at ?? now + Math.min(MAX_WAIT_MS, FIRST_WAIT_MS * 2 ** Math.min(e.tries, 20)),
+          },
+    );
     report.waiting++;
   };
   const cache = <T>(ask: (txid: string) => Promise<T>) => {
