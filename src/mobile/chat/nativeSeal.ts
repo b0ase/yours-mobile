@@ -1,6 +1,7 @@
 import { Transaction } from '@bsv/sdk';
 import { NATIVE_SEAL_ENABLED } from '../storeBuild';
 import { SPENT_ELSEWHERE_SHORT_MESSAGE, SPENT_ELSEWHERE_STUCK_MESSAGE } from '../../utils/sendErrors';
+import { browserWakeClock, waitForCoinCheck, type WakeClock } from './coinWait';
 
 /**
  * NATIVE sign + seal of a bChatX room document, inside bWalletX (CTO / owner, 3 Nov 2026: "chat should be IN the
@@ -64,6 +65,48 @@ export interface PendingSealStore {
   save(p: PendingSeal): void;
   remove(nonce: string): void;
 }
+
+/**
+ * Documents this device has sealed (or seen sealed by another party at commit), by document id. The double-pay guard
+ * (owner's iPhone, 6 Nov 2026: doc 2ddfb0ce was sealed from the phone AND the desktop and paid twice): a document
+ * listed here, saved paid-but-unrecorded in the PendingSealStore, or being sealed right now is never sealed again from
+ * this device. bit-sign cannot yet say a seal is in flight on ANOTHER device of the same account (prepare's one-signer
+ * hold skips the same handle), so this guard is this device's only.
+ */
+export interface SealLedger {
+  has(documentId: string): boolean;
+  add(documentId: string): void;
+}
+
+/** Shown instead of a second seal. */
+export const ALREADY_SEALED_MESSAGE = 'Already sealed. Nothing more to sign or pay for this document.';
+
+/** Seals running now in this app, by document id (a second page or route for the same document is refused). */
+const inFlight = new Set<string>();
+
+/** Pure-ish: is this document sealed, paid-but-unrecorded, or being sealed from this device? */
+export const sealedHere = (documentId: string, store: PendingSealStore, ledger?: SealLedger | null): boolean => {
+  if (!documentId) return false;
+  if (inFlight.has(documentId)) return true;
+  try {
+    if (ledger?.has(documentId)) return true;
+  } catch {
+    /* unreadable ledger: the other checks stand */
+  }
+  try {
+    return store.list().some((p) => p.documentId === documentId);
+  } catch {
+    return false;
+  }
+};
+
+const markSealed = (ledger: SealLedger | null | undefined, documentId: string) => {
+  try {
+    ledger?.add(documentId);
+  } catch {
+    /* storage blocked: the server's own checks remain */
+  }
+};
 
 export interface PreparedSeal {
   nonce: string;
@@ -209,9 +252,12 @@ async function call(api: SealApi, path: Parameters<SealApi>[0], body: Record<str
   const r = await api(path, body);
   if (!r.ok) {
     const code = typeof r.body.code === 'string' ? r.body.code : '';
+    // Sealed already (prepare), or another seal landed since prepare (compose's signer_race): never a second seal.
+    if (code === 'already_sealed' || code === 'signer_race')
+      throw new NativeSealError(ALREADY_SEALED_MESSAGE, 'already_sealed', r.status);
     const msg =
       typeof r.body.error === 'string' && r.body.error ? r.body.error : `The seal ${path} step failed (${r.status}).`;
-    throw new NativeSealError(msg, code === 'already_sealed' ? 'already_sealed' : 'refused', r.status);
+    throw new NativeSealError(msg, 'refused', r.status);
   }
   return r.body;
 }
@@ -227,19 +273,44 @@ export async function nativeSignAndSeal(input: {
   api: SealApi;
   keys: SealKeys;
   store: PendingSealStore;
+  /** Documents sealed from this device: one listed here is never sealed again (the double-pay guard). */
+  ledger?: SealLedger | null;
   approve: (prepared: PreparedSeal) => Promise<boolean>;
   /**
    * The coin check started when the pad opened (so the press pays straight away). Still running after approval →
-   * step 'healing' ("Finding a fresh coin…") and wait for it. `wait` never throws. The in-flight spent-coin retry in
-   * the background's createAction stays the fallback.
+   * step 'healing' ("Finding a fresh coin…") and wait for `done`, at most COIN_WAIT_CAP_MS on the wall clock
+   * (coinWait.ts), and not at all when `storageBusy` says a backup heal or sync holds the storage locks. The in-flight
+   * spent-coin retry in the background's createAction is the fallback either way.
    */
-  coins?: { pending: () => boolean; wait: () => Promise<void> };
+  coins?: { pending: () => boolean; done: Promise<unknown>; storageBusy?: () => Promise<boolean> };
+  /** Tests: the clock the coin wait runs on (default: Date.now + the page's wake events). */
+  clock?: WakeClock;
   onStep?: (s: SealStep) => void;
+  /** A step has taken long enough to say why ('healing' after 2 s). */
+  onSlow?: (s: SealStep) => void;
   now?: () => number;
   /** Tests: the receipt cap and the wait between commit_in_progress answers. */
   receiptTimeoutMs?: number;
   sleep?: (ms: number) => Promise<void>;
 }): Promise<NativeSealOutcome> {
+  // ⚠ ONE SEAL PER DOCUMENT FROM THIS DEVICE: sealed before, paid and waiting to be recorded, or running now.
+  if (sealedHere(input.documentId, input.store, input.ledger))
+    throw new NativeSealError(ALREADY_SEALED_MESSAGE, 'already_sealed');
+  inFlight.add(input.documentId);
+  try {
+    const out = await signAndSealOnce(input);
+    markSealed(input.ledger, input.documentId);
+    return out;
+  } catch (e) {
+    // Another party sealed first: the document is sealed, so it is never offered again from here either.
+    if (e instanceof NativeSealError && e.code === 'orphaned') markSealed(input.ledger, input.documentId);
+    throw e;
+  } finally {
+    inFlight.delete(input.documentId);
+  }
+}
+
+async function signAndSealOnce(input: Parameters<typeof nativeSignAndSeal>[0]): Promise<NativeSealOutcome> {
   const step = (s: SealStep) => input.onStep?.(s);
   step('preparing');
   const prepared = (await call(input.api, 'prepare', {
@@ -253,7 +324,13 @@ export async function nativeSignAndSeal(input: {
 
   if (input.coins?.pending()) {
     step('healing');
-    await input.coins.wait().catch(() => undefined);
+    const why = await waitForCoinCheck({
+      done: input.coins.done,
+      storageBusy: input.coins.storageBusy,
+      clock: input.clock ?? browserWakeClock(),
+      onSlow: () => input.onSlow?.('healing'),
+    });
+    if (why !== 'done') console.info('[nativeSeal] paying without waiting for the coin check:', why);
   }
 
   step('composing');
@@ -390,7 +467,12 @@ export async function nativeSignAndSeal(input: {
 }
 
 /** Finish paid-but-unrecorded seals saved on this phone (for this document, or all). Never throws. */
-export async function recoverNativeSeals(api: SealApi, store: PendingSealStore, documentId?: string): Promise<number> {
+export async function recoverNativeSeals(
+  api: SealApi,
+  store: PendingSealStore,
+  documentId?: string,
+  ledger?: SealLedger | null,
+): Promise<number> {
   let done = 0;
   for (const p of store.list()) {
     if (documentId && p.documentId !== documentId) continue;
@@ -400,6 +482,8 @@ export async function recoverNativeSeals(api: SealApi, store: PendingSealStore, 
       if (keepsPayment(r)) continue;
       // Success (idempotent too), an orphaned result, or a definitive refusal: done with it.
       store.remove(p.nonce);
+      // Recorded (or sealed first by another party): sealed either way, never offered again from here.
+      if (r.ok) markSealed(ledger, p.documentId);
       if (r.ok && !isOrphaned(r.body)) done++;
     } catch {
       /* next time */

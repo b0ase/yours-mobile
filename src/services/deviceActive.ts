@@ -149,6 +149,8 @@ export type KeepDeviceActive = {
   reattach: () => Promise<boolean>;
   /** A backup is set aside and retrying (the device data note says so). */
   paused: () => BackupPause;
+  /** A heal (the merge that holds every storage lock) is running now. A seal skips its coin wait then (coinWait.ts). */
+  healing: () => boolean;
   /** An explicit switch: waits for a running heal, and no heal undoes it. */
   userSwitch: <T>(to: 'device' | 'remote', run: () => Promise<T>) => Promise<T>;
   stop: () => void;
@@ -462,6 +464,7 @@ export function keepDeviceStoreActive(storage: unknown, d: KeepDeviceActiveDeps)
     needsHeal,
     heal,
     reattach,
+    healing: () => !!inflight,
     paused: () => {
       const all = [...setAside.values()];
       return {

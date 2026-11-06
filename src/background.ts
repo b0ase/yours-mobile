@@ -1042,6 +1042,7 @@ const moveStatus = () => {
     failures: 0,
     lastPushOkAt: 0,
     paused: false,
+    storageBusy: false,
   };
   return {
     onDevice: !!ctx?.storage.isActiveStorageProvider(),
@@ -1049,7 +1050,8 @@ const moveStatus = () => {
     failures: f?.failures ?? 0,
     nextRetryAt: f?.nextAt ?? 0,
     reason: f?.reason ?? null,
-    backup,
+    // A move to this device holds the storage too (the seal's coin wait skips itself then, chat/coinWait.ts).
+    backup: { ...backup, storageBusy: backup.storageBusy || !!storageSwitch },
   };
 };
 

@@ -361,7 +361,7 @@ describe('accountHandles (every handle on the account signs)', () => {
 });
 
 describe('one press: steps, the pre-tap coin check, the real fee', () => {
-  const run = async (coins?: { pending: () => boolean; wait: () => Promise<void> }, approve = true) => {
+  const run = async (coins?: { pending: () => boolean; done: Promise<unknown> }, approve = true) => {
     const log: string[] = [];
     const steps: string[] = [];
     const out = await nativeSignAndSeal({
@@ -384,7 +384,7 @@ describe('one press: steps, the pre-tap coin check, the real fee', () => {
   });
 
   test('coin check finished before the press: no "Finding a fresh coin…" step', async () => {
-    const r = await run({ pending: () => false, wait: async () => void 0 });
+    const r = await run({ pending: () => false, done: Promise.resolve() });
     expect(r.steps).not.toContain('healing');
   });
 
@@ -392,7 +392,7 @@ describe('one press: steps, the pre-tap coin check, the real fee', () => {
     const order: string[] = [];
     const r = await run({
       pending: () => true,
-      wait: async () => void order.push('waited'),
+      done: Promise.resolve().then(() => void order.push('waited')),
     });
     expect(r.steps).toEqual(['preparing', 'approving', 'healing', 'composing', 'signing', 'paying', 'committing']);
     expect(order).toEqual(['waited']);
@@ -400,13 +400,15 @@ describe('one press: steps, the pre-tap coin check, the real fee', () => {
   });
 
   test('a failing coin check never blocks the seal', async () => {
-    const r = await run({ pending: () => true, wait: () => Promise.reject(new Error('boom')) });
+    const done = Promise.reject(new Error('boom'));
+    done.catch(() => undefined);
+    const r = await run({ pending: () => true, done });
     expect(r.out.txid).toBe(TX);
   });
 
   test('cancel at the sheet: no coin wait, nothing composed, signed or paid (compose never reached the server)', async () => {
     let waited = false;
-    const r = await run({ pending: () => true, wait: async () => void (waited = true) }, false);
+    const r = await run({ pending: () => (waited = true), done: new Promise<void>(() => undefined) }, false);
     expect(r.out).toMatchObject({ code: 'cancelled' });
     expect(waited).toBe(false);
     expect(r.steps).toEqual(['preparing', 'approving']);

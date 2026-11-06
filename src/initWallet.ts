@@ -287,6 +287,8 @@ export interface AccountContext {
     lastPushOkAt: number;
     /** The backup is set aside (it stopped answering during a merge) and reconnects on a back-off. */
     paused: boolean;
+    /** A heal or a device sync is running: it holds the storage locks, so a coin check would only queue behind it. */
+    storageBusy: boolean;
   };
   /** Restore actions storage marked failed whose transaction is mined (services/recoverFailed.ts). */
   recoverFailed: () => Promise<RecoverReport>;
@@ -1863,6 +1865,7 @@ export const initWallet = async (
         lastPushOkAt: st.lastPushOkAt,
         // A backup set aside after a failed merge, reconnecting on its back-off (review 19, F4).
         paused: keepActive?.paused().paused ?? false,
+        storageBusy: (keepActive?.healing() ?? false) || st.running,
       };
     },
     backupBeforeSend: () =>

@@ -27,6 +27,7 @@ import {
   type SealSheetInfo,
 } from './sealScreen';
 import {
+  ALREADY_SEALED_MESSAGE,
   NativeSealError,
   inertHtml,
   fetchSignedCopy,
@@ -35,11 +36,13 @@ import {
   nativeRoomSteps,
   nativeSignAndSeal,
   recoverNativeSeals,
+  sealedHere,
   signedFieldIds,
   strokesToSvg,
   type PadPoint,
   type PendingSeal,
   type PendingSealStore,
+  type SealLedger,
   type NativeSealOutcome,
   type SealApi,
   type SealKeys,
@@ -70,10 +73,41 @@ const NO_SELECT = {
   WebkitTouchCallout: 'none',
 } as const;
 
-/** The pre-tap coin check may hold the press this long at most; the in-flight spent-coin retry is the fallback. */
-const COIN_CHECK_WAIT_MS = 45_000;
-
 const STORE_KEY = 'bwx.nativeSeal.pending';
+/** Documents sealed from this device (the double-pay guard, nativeSeal.SealLedger). Newest last, at most 500. */
+const SEALED_KEY = 'bwx.nativeSeal.sealed';
+const localLedger = (): SealLedger => {
+  const read = (): string[] => {
+    try {
+      const v = JSON.parse(localStorage.getItem(SEALED_KEY) || '[]');
+      return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+    } catch {
+      return [];
+    }
+  };
+  return {
+    has: (id) => read().includes(id),
+    add: (id) => {
+      try {
+        localStorage.setItem(SEALED_KEY, JSON.stringify([...read().filter((x) => x !== id), id].slice(-500)));
+      } catch {
+        /* storage blocked: the in-flight and server checks remain */
+      }
+    },
+  };
+};
+
+/**
+ * A backup heal or device sync holds the storage locks right now (background STORAGE_MOVE_STATUS backup.storageBusy):
+ * the coin check would only queue behind it, so the seal pays without waiting for it (chat/coinWait.ts).
+ */
+const storageBusy = async (): Promise<boolean> => {
+  const r = (await sendMessageAsync({ action: 'STORAGE_MOVE_STATUS' }).catch(() => null)) as {
+    success?: boolean;
+    data?: { backup?: { storageBusy?: boolean } };
+  } | null;
+  return r?.success === true && r.data?.backup?.storageBusy === true;
+};
 const localStore = (): PendingSealStore => {
   const read = (): PendingSeal[] => {
     try {
@@ -188,8 +222,11 @@ export const NativeSealPage = () => {
           title: p.manifest?.documentTitle || 'Document',
           manifest: p.manifest ?? null,
         });
-        setPhase({ k: 'ready' });
-        void recoverNativeSeals(api, localStore(), p.documentId);
+        // Sealed from this device already, or paid and waiting to be recorded: never a second seal (6 Nov 2026).
+        if (sealedHere(p.documentId, localStore(), localLedger()))
+          setPhase({ k: 'error', text: ALREADY_SEALED_MESSAGE });
+        else setPhase({ k: 'ready' });
+        void recoverNativeSeals(api, localStore(), p.documentId, localLedger());
       } catch (e) {
         if (live) setPhase({ k: 'error', text: e instanceof Error ? e.message : 'Could not open the document.' });
       }
@@ -272,14 +309,15 @@ export const NativeSealPage = () => {
       });
     coinCheck.current = c;
   }, [padShown]);
-  const coins = {
+  /**
+   * Read at the press. The wait is on the wall clock with an ~8 s cap and none at all while a heal or sync holds the
+   * storage (chat/coinWait.ts): a setTimeout here froze with the app in the background (owner's iPhone, 6 Nov 2026).
+   */
+  const coins = () => ({
     pending: () => !!coinCheck.current && !coinCheck.current.done,
-    wait: () =>
-      Promise.race([
-        coinCheck.current?.promise ?? Promise.resolve(),
-        new Promise<void>((r) => setTimeout(r, COIN_CHECK_WAIT_MS)),
-      ]),
-  };
+    done: coinCheck.current?.promise ?? Promise.resolve(),
+    storageBusy,
+  });
 
   const ref = String((doc?.manifest?.documentRef as string | undefined) || doc?.documentId || '');
   /** The wallet's own fee rate (sat/kB), the one its createAction pays: the button, sheet and prompt use it. */
@@ -344,11 +382,14 @@ export const NativeSealPage = () => {
         api,
         keys,
         store: localStore(),
-        coins,
+        ledger: localLedger(),
+        coins: coins(),
         onStep: (s) => {
           if (s === 'paying') reachedPay.current = true;
           setPhase({ k: 'working', step: s, slow: false });
         },
+        // "Checking your coins — …" under "Finding a fresh coin…" once the wait passes 2 s.
+        onSlow: (s) => setPhase((p) => (p.k === 'working' && p.step === s ? { ...p, slow: true } : p)),
         // EVERY seal: the payment sheet, then Face ID / passcode, or the wallet password (sealApproval.ts). Nothing
         // here reads a spending limit, allowance or one-click setting, so nothing can skip it.
         approve: async (prepared) => {

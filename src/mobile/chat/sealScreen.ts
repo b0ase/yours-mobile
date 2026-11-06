@@ -19,6 +19,8 @@ export const BROADCASTING_LINE = 'Broadcasting… (can take a minute)';
 export const ON_CHAIN_LINE = 'On chain ✓';
 /** The coin check started when the pad opened is still running when he presses. */
 export const FRESH_COIN_LINE = 'Finding a fresh coin…';
+/** Under FRESH_COIN_LINE once the coin wait passes 2 s (chat/coinWait.ts); it moves on by itself at the cap. */
+export const COIN_SLOW_LINE = 'Checking your coins — this can take a few seconds after the app wakes';
 export const WAITING_NETWORK_LINE = 'Waiting for the network…';
 /** The commit counts as slow (and says so) after this long. */
 export const SLOW_COMMIT_MS = 10_000;
@@ -105,7 +107,12 @@ export const sealProgress = (step: SealProgress, slow = false): ProgressLine[] =
     case 'approving':
       return [{ text: 'Waiting for your approval…', done: false }];
     case 'healing':
-      return [{ text: FRESH_COIN_LINE, done: false }];
+      return slow
+        ? [
+            { text: FRESH_COIN_LINE, done: false },
+            { text: COIN_SLOW_LINE, done: false },
+          ]
+        : [{ text: FRESH_COIN_LINE, done: false }];
     case 'composing':
     case 'signing':
       return [{ text: 'Signing…', done: false }];
@@ -128,6 +135,8 @@ export const sealProgress = (step: SealProgress, slow = false): ProgressLine[] =
  */
 export const retryAllowed = (error: unknown, reachedPay: boolean): boolean => {
   if (error instanceof NativeSealError && error.code === 'spent_elsewhere') return true;
+  // Sealed already (on this device, or the server says so): never a second seal, so never the button again.
+  if (error instanceof NativeSealError && error.code === 'already_sealed') return false;
   if (
     error instanceof NativeSealError &&
     (error.code === 'pending_recovery' || error.code === 'failed' || error.code === 'orphaned')
