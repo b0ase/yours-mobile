@@ -10,7 +10,7 @@
  * Pure (no React, no wallet) so sealScreen.test.ts can pin every label and rule.
  */
 import { fmtDollars, satsToUsd } from '../../utils/dollarsFirst';
-import { NativeSealError, type PadPoint, type SealStep } from './nativeSeal';
+import { ALREADY_SEALED_MESSAGE, NativeSealError, type PadPoint, type SealHere, type SealStep } from './nativeSeal';
 
 export const DRAW_HINT = 'Draw your signature';
 export const SIGNED_LINE = 'Signed ✓';
@@ -22,6 +22,31 @@ export const FRESH_COIN_LINE = 'Finding a fresh coin…';
 /** Under FRESH_COIN_LINE once the coin wait passes 2 s (chat/coinWait.ts); it moves on by itself at the cap. */
 export const COIN_SLOW_LINE = 'Checking your coins — this can take a few seconds after the app wakes';
 export const WAITING_NETWORK_LINE = 'Waiting for the network…';
+/** A payment from this phone for this seal is saved and being recorded (recovery runs on open). */
+export const RECORDING_LINE = 'Paid, being recorded…';
+/** A seal of this document by this account is running in this app right now (a page left while it paid). */
+export const IN_FLIGHT_LINE = 'Sealing now… it finishes on its own.';
+/** Recovery ended and the payment is still not recorded: kept on the phone for the next open. */
+export const STILL_RECORDING_LINE =
+  'Paid, still being recorded. It is saved on this phone and finishes the next time you open this document.';
+
+/**
+ * What the screen shows on open for what this device knows about the seal (nativeSeal.sealStateHere), before and
+ * after recovery: null = the pad. 'sealed' is only a hint; the server's already_sealed is the authority.
+ */
+export const openingNotice = (state: SealHere, recovered: boolean): { text: string; busy: boolean } | null => {
+  switch (state) {
+    case 'sealed':
+      return { text: ALREADY_SEALED_MESSAGE, busy: false };
+    case 'recording':
+      return recovered ? { text: STILL_RECORDING_LINE, busy: false } : { text: RECORDING_LINE, busy: true };
+    case 'in_flight':
+      return { text: IN_FLIGHT_LINE, busy: true };
+    case 'none':
+      return null;
+  }
+};
+
 /** The commit counts as slow (and says so) after this long. */
 export const SLOW_COMMIT_MS = 10_000;
 
@@ -137,6 +162,8 @@ export const retryAllowed = (error: unknown, reachedPay: boolean): boolean => {
   if (error instanceof NativeSealError && error.code === 'spent_elsewhere') return true;
   // Sealed already (on this device, or the server says so): never a second seal, so never the button again.
   if (error instanceof NativeSealError && error.code === 'already_sealed') return false;
+  // This version is out of date (signer_race): the page offers the latest version instead of the same button.
+  if (error instanceof NativeSealError && error.code === 'newer_version') return false;
   if (
     error instanceof NativeSealError &&
     (error.code === 'pending_recovery' || error.code === 'failed' || error.code === 'orphaned')

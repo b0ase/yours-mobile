@@ -2,6 +2,7 @@ import { Transaction } from '@bsv/sdk';
 import { NATIVE_SEAL_ENABLED } from '../storeBuild';
 import { SPENT_ELSEWHERE_SHORT_MESSAGE, SPENT_ELSEWHERE_STUCK_MESSAGE } from '../../utils/sendErrors';
 import { browserWakeClock, waitForCoinCheck, type WakeClock } from './coinWait';
+import { WALL_TIMEOUT, withinWallClock } from '../../services/wallClock';
 
 /**
  * NATIVE sign + seal of a bChatX room document, inside bWalletX (CTO / owner, 3 Nov 2026: "chat should be IN the
@@ -59,6 +60,9 @@ export interface PendingSeal {
   beefHex: string;
   attestation: string;
   savedAt: number;
+  /** Who signed which blocks (sealKey). Missing on payments saved before 6 Nov 2026. */
+  identityKey?: string;
+  fieldIds?: string[];
 }
 export interface PendingSealStore {
   list(): PendingSeal[];
@@ -67,42 +71,103 @@ export interface PendingSealStore {
 }
 
 /**
- * Documents this device has sealed (or seen sealed by another party at commit), by document id. The double-pay guard
- * (owner's iPhone, 6 Nov 2026: doc 2ddfb0ce was sealed from the phone AND the desktop and paid twice): a document
- * listed here, saved paid-but-unrecorded in the PendingSealStore, or being sealed right now is never sealed again from
- * this device. bit-sign cannot yet say a seal is in flight on ANOTHER device of the same account (prepare's one-signer
- * hold skips the same handle), so this guard is this device's only.
+ * What this device has sealed (or seen sealed by another party at commit). The double-pay guard (owner's iPhone, 6 Nov
+ * 2026: doc 2ddfb0ce was sealed from the phone AND the desktop and paid twice). A seal is keyed by WHO signs WHICH
+ * blocks of WHICH document (sealKey): another account on this phone, or other blocks of the same document, still sign.
+ * bit-sign never rewrites a document under its id (every version, part-signed copy and seal is a new row), so the key
+ * stays true. It is only a fast hint: the server's own already_sealed answer is the authority. bit-sign cannot yet say
+ * a seal is in flight on ANOTHER device of the same account, so the in-flight part of this guard is this device's only.
  */
 export interface SealLedger {
-  has(documentId: string): boolean;
-  add(documentId: string): void;
+  has(key: string): boolean;
+  add(key: string): void;
 }
+
+/** Who (identity key) signs which blocks (field ids, any order) of which document. */
+export const sealKey = (identityKey: string, documentId: string, fieldIds: readonly string[]): string =>
+  `${(identityKey || '').toLowerCase()}|${documentId}|${[...new Set(fieldIds)].sort().join(',')}`;
 
 /** Shown instead of a second seal. */
 export const ALREADY_SEALED_MESSAGE = 'Already sealed. Nothing more to sign or pay for this document.';
+/** bit-sign signer_race (compose): another party sealed since this seal started. Nothing was signed or paid. */
+export const NEWER_VERSION_MESSAGE =
+  'Someone sealed this document since you opened it. Open the latest version and sign again. Nothing was signed or paid.';
+/** bit-sign signer_busy: the same account is sealing it on another device right now. */
+export const BUSY_ELSEWHERE_MESSAGE =
+  'This document is being sealed on another of your devices. Nothing was signed or paid here.';
+/** Not paid: the seal took longer than bit-sign's signing session (the app slept between approval and payment). */
+export const EXPIRED_HOLD_MESSAGE =
+  'Not sealed: this took too long and the signing session ended. Nothing was paid. Tap Sign & seal again.';
+/** Not paid: the page was left before the payment started. */
+export const LEFT_PAGE_MESSAGE = 'Not sealed: you left the page. Nothing was paid.';
 
-/** Seals running now in this app, by document id (a second page or route for the same document is refused). */
-const inFlight = new Set<string>();
+/**
+ * How long a seal may hold its key on this device at most, on the wall clock, whatever happens to it (a hung
+ * createAction, a frozen app). bit-sign's signing session lasts 10 minutes, so a seal still running after that can no
+ * longer be recorded anyway.
+ */
+export const SEAL_HOLD_MAX_MS = 10 * 60_000;
 
-/** Pure-ish: is this document sealed, paid-but-unrecorded, or being sealed from this device? */
-export const sealedHere = (documentId: string, store: PendingSealStore, ledger?: SealLedger | null): boolean => {
-  if (!documentId) return false;
-  if (inFlight.has(documentId)) return true;
-  try {
-    if (ledger?.has(documentId)) return true;
-  } catch {
-    /* unreadable ledger: the other checks stand */
-  }
-  try {
-    return store.list().some((p) => p.documentId === documentId);
-  } catch {
-    return false;
-  }
+type Hold = { paying: boolean; abandoned: false | 'left' | 'expired' };
+/** Seals running now in this app, by sealKey (a second page or route for the same seal is refused). */
+const inFlight = new Map<string, Hold>();
+
+/**
+ * The page was left: release the seal's hold so the document can be sealed again, but ONLY if its payment has not
+ * started (then it never will: the abandoned seal stops before paying). Once it is paying, the hold stays until it
+ * settles or SEAL_HOLD_MAX_MS pass. True when released.
+ */
+export const abandonSeal = (key: string): boolean => {
+  const h = inFlight.get(key);
+  if (!h || h.paying) return false;
+  h.abandoned = 'left';
+  inFlight.delete(key);
+  return true;
 };
 
-const markSealed = (ledger: SealLedger | null | undefined, documentId: string) => {
+export type SealHere = 'none' | 'in_flight' | 'recording' | 'sealed';
+
+/**
+ * What this device knows about one seal: running now, paid and waiting to be recorded (PendingSealStore), recorded
+ * (the ledger), or nothing. A saved payment from before keys were stored matches by document id alone.
+ */
+export const sealStateHere = (
+  identityKey: string,
+  documentId: string,
+  fieldIds: readonly string[],
+  store: PendingSealStore,
+  ledger?: SealLedger | null,
+): SealHere => {
+  if (!documentId) return 'none';
+  const key = sealKey(identityKey, documentId, fieldIds);
+  if (inFlight.has(key)) return 'in_flight';
   try {
-    ledger?.add(documentId);
+    if (
+      store
+        .list()
+        .some(
+          (p) =>
+            p.documentId === documentId &&
+            (p.identityKey === undefined ||
+              p.fieldIds === undefined ||
+              sealKey(p.identityKey, p.documentId, p.fieldIds) === key),
+        )
+    )
+      return 'recording';
+  } catch {
+    /* unreadable store: the other checks stand */
+  }
+  try {
+    if (ledger?.has(key)) return 'sealed';
+  } catch {
+    /* unreadable ledger: the server's checks remain */
+  }
+  return 'none';
+};
+
+const markSealed = (ledger: SealLedger | null | undefined, key: string) => {
+  try {
+    ledger?.add(key);
   } catch {
     /* storage blocked: the server's own checks remain */
   }
@@ -131,6 +196,7 @@ export class NativeSealError extends Error {
     message: string,
     readonly code:
       | 'already_sealed'
+      | 'newer_version'
       | 'refused'
       | 'cancelled'
       | 'pending_recovery'
@@ -252,9 +318,17 @@ async function call(api: SealApi, path: Parameters<SealApi>[0], body: Record<str
   const r = await api(path, body);
   if (!r.ok) {
     const code = typeof r.body.code === 'string' ? r.body.code : '';
-    // Sealed already (prepare), or another seal landed since prepare (compose's signer_race): never a second seal.
-    if (code === 'already_sealed' || code === 'signer_race')
-      throw new NativeSealError(ALREADY_SEALED_MESSAGE, 'already_sealed', r.status);
+    // Sealed already: never a second seal.
+    if (code === 'already_sealed') throw new NativeSealError(ALREADY_SEALED_MESSAGE, 'already_sealed', r.status);
+    // Another party sealed since this started (compose): this version is out of date; open the latest and sign again.
+    if (code === 'signer_race') throw new NativeSealError(NEWER_VERSION_MESSAGE, 'newer_version', r.status);
+    // Being sealed on another of this account's devices: a plain refusal, nothing signed or paid.
+    if (code === 'signer_busy')
+      throw new NativeSealError(
+        typeof r.body.error === 'string' && r.body.error ? r.body.error : BUSY_ELSEWHERE_MESSAGE,
+        'refused',
+        r.status,
+      );
     const msg =
       typeof r.body.error === 'string' && r.body.error ? r.body.error : `The seal ${path} step failed (${r.status}).`;
     throw new NativeSealError(msg, 'refused', r.status);
@@ -273,8 +347,10 @@ export async function nativeSignAndSeal(input: {
   api: SealApi;
   keys: SealKeys;
   store: PendingSealStore;
-  /** Documents sealed from this device: one listed here is never sealed again (the double-pay guard). */
+  /** Seals recorded from this device (sealKey): one listed here is never sealed again (the double-pay guard). */
   ledger?: SealLedger | null;
+  /** The wallet's identity key: part of the seal's key (another account on this phone signs on its own). */
+  identityKey?: string;
   approve: (prepared: PreparedSeal) => Promise<boolean>;
   /**
    * The coin check started when the pad opened (so the press pays straight away). Still running after approval →
@@ -293,24 +369,38 @@ export async function nativeSignAndSeal(input: {
   receiptTimeoutMs?: number;
   sleep?: (ms: number) => Promise<void>;
 }): Promise<NativeSealOutcome> {
-  // ⚠ ONE SEAL PER DOCUMENT FROM THIS DEVICE: sealed before, paid and waiting to be recorded, or running now.
-  if (sealedHere(input.documentId, input.store, input.ledger))
+  // ⚠ ONE SEAL PER SIGNER, DOCUMENT AND BLOCKS FROM THIS DEVICE: recorded, paid and being recorded, or running now.
+  const key = sealKey(input.identityKey ?? '', input.documentId, input.fieldIds);
+  if (sealStateHere(input.identityKey ?? '', input.documentId, input.fieldIds, input.store, input.ledger) !== 'none')
     throw new NativeSealError(ALREADY_SEALED_MESSAGE, 'already_sealed');
-  inFlight.add(input.documentId);
+  const hold: Hold = { paying: false, abandoned: false };
+  inFlight.set(key, hold);
+  const release = () => {
+    if (inFlight.get(key) === hold) inFlight.delete(key);
+  };
+  // Never held past SEAL_HOLD_MAX_MS on the wall clock, even by a seal that hangs: then it may not start paying either.
+  let settle = () => undefined as void;
+  const settled = new Promise<void>((r) => (settle = r));
+  void withinWallClock(settled, SEAL_HOLD_MAX_MS, { clock: input.clock }).then((r) => {
+    if (r !== WALL_TIMEOUT) return;
+    if (!hold.paying) hold.abandoned = 'expired';
+    release();
+  });
   try {
-    const out = await signAndSealOnce(input);
-    markSealed(input.ledger, input.documentId);
+    const out = await signAndSealOnce(input, hold);
+    markSealed(input.ledger, key);
     return out;
   } catch (e) {
     // Another party sealed first: the document is sealed, so it is never offered again from here either.
-    if (e instanceof NativeSealError && e.code === 'orphaned') markSealed(input.ledger, input.documentId);
+    if (e instanceof NativeSealError && e.code === 'orphaned') markSealed(input.ledger, key);
     throw e;
   } finally {
-    inFlight.delete(input.documentId);
+    release();
+    settle();
   }
 }
 
-async function signAndSealOnce(input: Parameters<typeof nativeSignAndSeal>[0]): Promise<NativeSealOutcome> {
+async function signAndSealOnce(input: Parameters<typeof nativeSignAndSeal>[0], hold: Hold): Promise<NativeSealOutcome> {
   const step = (s: SealStep) => input.onStep?.(s);
   step('preparing');
   const prepared = (await call(input.api, 'prepare', {
@@ -348,6 +438,10 @@ async function signAndSealOnce(input: Parameters<typeof nativeSignAndSeal>[0]): 
   });
   const attestation = toHex(signature);
 
+  // Left (abandonSeal) or held too long: stop here, before any money moves. From here the hold stays until settled.
+  if (hold.abandoned)
+    throw new NativeSealError(hold.abandoned === 'left' ? LEFT_PAGE_MESSAGE : EXPIRED_HOLD_MESSAGE, 'cancelled');
+  hold.paying = true;
   step('paying');
   let paid: Awaited<ReturnType<SealKeys['createAction']>>;
   try {
@@ -380,6 +474,8 @@ async function signAndSealOnce(input: Parameters<typeof nativeSignAndSeal>[0]): 
     beefHex,
     attestation,
     savedAt: (input.now ?? Date.now)(),
+    identityKey: input.identityKey ?? '',
+    fieldIds: [...input.fieldIds],
   });
 
   step('committing');
@@ -483,7 +579,7 @@ export async function recoverNativeSeals(
       // Success (idempotent too), an orphaned result, or a definitive refusal: done with it.
       store.remove(p.nonce);
       // Recorded (or sealed first by another party): sealed either way, never offered again from here.
-      if (r.ok) markSealed(ledger, p.documentId);
+      if (r.ok) markSealed(ledger, sealKey(p.identityKey ?? '', p.documentId, p.fieldIds ?? []));
       if (r.ok && !isOrphaned(r.body)) done++;
     } catch {
       /* next time */

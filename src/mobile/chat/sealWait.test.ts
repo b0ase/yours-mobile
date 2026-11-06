@@ -1,17 +1,37 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import {
   ALREADY_SEALED_MESSAGE,
+  BUSY_ELSEWHERE_MESSAGE,
+  LEFT_PAGE_MESSAGE,
+  NEWER_VERSION_MESSAGE,
   NativeSealError,
+  SEAL_HOLD_MAX_MS,
+  abandonSeal,
   nativeSignAndSeal,
   recoverNativeSeals,
-  sealedHere,
+  sealKey,
+  sealStateHere,
   type PendingSeal,
   type SealApi,
   type SealKeys,
   type SealLedger,
 } from './nativeSeal';
 import { COIN_WAIT_CAP_MS, COIN_WAIT_SLOW_MS, type WakeClock } from './coinWait';
-import { COIN_SLOW_LINE, FRESH_COIN_LINE, retryAllowed, sealProgress } from './sealScreen';
+import {
+  COIN_SLOW_LINE,
+  FRESH_COIN_LINE,
+  RECORDING_LINE,
+  STILL_RECORDING_LINE,
+  openingNotice,
+  retryAllowed,
+  sealProgress,
+} from './sealScreen';
+
+/** The seal()'s default key: no identity key, document D, block f1. */
+const KEY_D = sealKey('', 'D', ['f1']);
+const stateD = (store: Parameters<typeof sealStateHere>[3], ledger?: Parameters<typeof sealStateHere>[4]) =>
+  sealStateHere('', 'D', ['f1'], store, ledger);
 
 /**
  * The seal must never sit on "Finding a fresh coin…" (owner's iPhone, 6 Nov 2026, doc 2ddfb0ce): the app woke from an
@@ -120,8 +140,8 @@ describe('the coin wait runs on the wall clock, never on a timer that can freeze
     let out: unknown = null;
     void seal({ log, steps, clock: f.clock, coins: { pending: () => true, done: never } }).then((o) => (out = o));
     await until(() => steps.includes('healing'));
-    // An hour in the background: no tick ever ran. The wall clock moved.
-    f.advance(60 * 60_000);
+    // Minutes in the background: no tick ever ran. The wall clock moved.
+    f.advance(5 * 60_000);
     expect(log).not.toContain('pay');
     f.wake(); // visibilitychange / pageshow / focus
     await until(() => out !== null);
@@ -136,7 +156,7 @@ describe('the coin wait runs on the wall clock, never on a timer that can freeze
     const log: string[] = [];
     let out: unknown = null;
     void seal({ log, clock: f.clock, coins: { pending: () => true, done: never } }).then((o) => (out = o));
-    await until(() => f.listeners() > 0);
+    await until(() => f.listeners() > 2); // the hold's deadline (2) and the coin wait's (2)
     f.advance(COIN_WAIT_CAP_MS - 1);
     f.tick();
     await flush();
@@ -163,7 +183,7 @@ describe('the coin wait runs on the wall clock, never on a timer that can freeze
       let out: unknown = null;
       void seal({ log, steps, coins: { pending: () => true, done: never } }).then((o) => (out = o));
       await until(() => steps.includes('healing'));
-      t += 10 * 60_000;
+      t += 5 * 60_000;
       doc.dispatchEvent(new Event('visibilitychange'));
       await until(() => out !== null);
       expect(log).toContain('pay');
@@ -182,7 +202,7 @@ describe('the coin wait runs on the wall clock, never on a timer that can freeze
     const log: string[] = [];
     let out: unknown = null;
     void seal({ log, clock: f.clock, coins: { pending: () => true, done } }).then((o) => (out = o));
-    await until(() => f.listeners() > 0);
+    await until(() => f.listeners() > 2); // the hold's deadline (2) and the coin wait's (2)
     finish();
     await until(() => out !== null);
     expect(log).toContain('pay');
@@ -234,7 +254,7 @@ describe('a wait over 2 s says what it is doing', () => {
     void seal({ log, clock: f.clock, onSlow: (s) => slow.push(s), coins: { pending: () => true, done: never } }).then(
       (o) => (out = o),
     );
-    await until(() => f.listeners() > 0);
+    await until(() => f.listeners() > 2); // the hold's deadline (2) and the coin wait's (2)
     f.advance(1_900);
     f.tick();
     expect(slow).toEqual([]);
@@ -254,7 +274,7 @@ describe('no second seal for a document already sealed (or being sealed) from th
     const ledger = memLedger();
     const log: string[] = [];
     await seal({ log, ledger });
-    expect(ledger.s.has('D')).toBe(true);
+    expect(ledger.s.has(KEY_D)).toBe(true);
     const e = await seal({ log, ledger }).catch((x) => x);
     expect(e).toBeInstanceOf(NativeSealError);
     expect(e.code).toBe('already_sealed');
@@ -271,8 +291,8 @@ describe('no second seal for a document already sealed (or being sealed) from th
     const e = await seal({ log, store }).catch((x) => x);
     expect(e.code).toBe('already_sealed');
     expect(log).toEqual([]);
-    expect(sealedHere('D', store, memLedger())).toBe(true);
-    expect(sealedHere('OTHER', store, memLedger())).toBe(false);
+    expect(stateD(store, memLedger())).toBe('recording');
+    expect(sealStateHere('', 'OTHER', ['f1'], store, memLedger())).toBe('none');
   });
 
   test('a seal in flight for this document → a second one is refused', async () => {
@@ -287,21 +307,54 @@ describe('no second seal for a document already sealed (or being sealed) from th
     await first;
     expect(log.filter((l) => l === 'pay').length).toBe(1);
     // Done and not recorded as sealed (no ledger given): the in-flight hold is gone.
-    expect(sealedHere('D-flight', memStore(), memLedger())).toBe(false);
+    expect(sealStateHere('', 'D-flight', ['f1'], memStore(), memLedger())).toBe('none');
   });
 
-  test('the server says another seal landed since prepare (signer_race) → "Already sealed", no button back', async () => {
+  test('signer_race (another party sealed since this started) → "open the latest version", not "Already sealed"', async () => {
     const log: string[] = [];
     const e = await seal({
       log,
+      documentId: 'D-race',
       api: api(log, {
         compose: () => ({ ok: false, status: 409, body: { error: 'Another party sealed…', code: 'signer_race' } }),
       }),
     }).catch((x) => x);
+    expect(e.code).toBe('newer_version');
+    expect(e.message).toBe(NEWER_VERSION_MESSAGE);
+    expect(e.message).not.toContain('Already sealed');
+    expect(log).not.toContain('pay');
+    expect(retryAllowed(e, false)).toBe(false); // the page offers "Open the latest version" instead
+  });
+
+  test('the server says already_sealed → "Already sealed", no button back', async () => {
+    const log: string[] = [];
+    const e = await seal({
+      log,
+      documentId: 'D-sealed',
+      api: api(log, { prepare: () => ({ ok: false, status: 409, body: { code: 'already_sealed' } }) }),
+    }).catch((x) => x);
     expect(e.code).toBe('already_sealed');
     expect(e.message).toBe(ALREADY_SEALED_MESSAGE);
-    expect(log).not.toContain('pay');
     expect(retryAllowed(e, false)).toBe(false);
+  });
+
+  test("signer_busy (being sealed on another of your devices) → a plain refusal, the server's words, nothing paid", async () => {
+    const log: string[] = [];
+    const words = 'This document is being sealed on another of your devices';
+    const e = await seal({
+      log,
+      documentId: 'D-busy',
+      api: api(log, { prepare: () => ({ ok: false, status: 409, body: { error: words, code: 'signer_busy' } }) }),
+    }).catch((x) => x);
+    expect(e.code).toBe('refused');
+    expect(e.message).toBe(words);
+    expect(log).not.toContain('pay');
+    expect(retryAllowed(e, false)).toBe(true); // nothing paid: the button comes back with that line, no spinner
+    const bare = await seal({
+      documentId: 'D-busy2',
+      api: api([], { compose: () => ({ ok: false, status: 409, body: { code: 'signer_busy' } }) }),
+    }).catch((x) => x);
+    expect(bare.message).toBe(BUSY_ELSEWHERE_MESSAGE);
   });
 
   test('an orphaned result (another party sealed first) is recorded as sealed here too', async () => {
@@ -312,16 +365,176 @@ describe('no second seal for a document already sealed (or being sealed) from th
       ledger,
       api: api(log, { commit: () => ({ ok: true, status: 200, body: { orphaned: true, success: false } }) }),
     }).catch((x) => x);
-    expect(ledger.s.has('D')).toBe(true);
+    expect(ledger.s.has(KEY_D)).toBe(true);
   });
 
   test('a seal finished by recovery on reopen is recorded as sealed', async () => {
     const store = memStore();
-    store.save({ documentId: 'D', nonce: 'N0', txid: TX, beefHex: '99', attestation: 'aa', savedAt: 1 });
+    store.save({
+      documentId: 'D',
+      nonce: 'N0',
+      txid: TX,
+      beefHex: '99',
+      attestation: 'aa',
+      savedAt: 1,
+      identityKey: '',
+      fieldIds: ['f1'],
+    });
     const ledger = memLedger();
     const n = await recoverNativeSeals(api([]), store, 'D', ledger);
     expect(n).toBe(1);
-    expect(ledger.s.has('D')).toBe(true);
-    expect(sealedHere('D', store, ledger)).toBe(true);
+    expect(ledger.s.has(KEY_D)).toBe(true);
+    expect(stateD(store, ledger)).toBe('sealed');
+  });
+});
+
+describe('the ledger is keyed by who signs which blocks of which document', () => {
+  test('another account on this phone, or other blocks, still sign; the same account and blocks do not', async () => {
+    const ledger = memLedger();
+    const log: string[] = [];
+    await seal({ log, ledger, documentId: 'K', identityKey: '02AAA', fieldIds: ['b', 'a'] });
+    // Same signer, same blocks (any order, any case of the key): refused before the server is asked.
+    const again = await seal({ log, ledger, documentId: 'K', identityKey: '02aaa', fieldIds: ['a', 'b'] }).catch(
+      (x) => x,
+    );
+    expect(again.code).toBe('already_sealed');
+    // Another account on this phone: signs.
+    await seal({ log, ledger, documentId: 'K', identityKey: '02bbb', fieldIds: ['a', 'b'] });
+    // The same account, another block: signs.
+    await seal({ log, ledger, documentId: 'K', identityKey: '02aaa', fieldIds: ['c'] });
+    expect(log.filter((l) => l === 'pay').length).toBe(3);
+    expect(ledger.s.has('K')).toBe(false); // never by document id alone
+  });
+
+  test('a saved payment carries its signer and blocks, so it only holds that seal', async () => {
+    const store = memStore();
+    let ok = true;
+    await seal({
+      documentId: 'P',
+      identityKey: '02aaa',
+      store,
+      api: api([], {
+        commit: () => ({ ok: false, status: 503, body: {} }),
+        recover: () => ({ ok: false, status: 503, body: {} }),
+      }),
+    }).catch(() => (ok = false));
+    expect(ok).toBe(false); // pending_recovery: saved
+    expect(store.list()[0]).toMatchObject({ documentId: 'P', identityKey: '02aaa', fieldIds: ['f1'] });
+    expect(sealStateHere('02aaa', 'P', ['f1'], store)).toBe('recording');
+    expect(sealStateHere('02bbb', 'P', ['f1'], store)).toBe('none');
+    expect(sealStateHere('02aaa', 'P', ['f2'], store)).toBe('none');
+    // One saved before keys were stored matches by document id alone (the safe side).
+    store.save({ documentId: 'OLD', nonce: 'N9', txid: TX, beefHex: '99', attestation: 'aa', savedAt: 1 });
+    expect(sealStateHere('02bbb', 'OLD', ['x'], store)).toBe('recording');
+  });
+});
+
+describe('on open: a paid-but-unrecorded seal says "Paid, being recorded…", then the real result', () => {
+  test('before recovery ends: being recorded (busy), never "Already sealed"', () => {
+    expect(RECORDING_LINE).toBe('Paid, being recorded…');
+    expect(openingNotice('recording', false)).toEqual({ text: RECORDING_LINE, busy: true });
+    expect(openingNotice('recording', false)?.text).not.toContain('Already sealed');
+  });
+  test('after recovery: recorded → Already sealed; still saved → still being recorded; refused → the pad', async () => {
+    const store = memStore();
+    const ledger = memLedger();
+    store.save({
+      documentId: 'D',
+      nonce: 'N0',
+      txid: TX,
+      beefHex: '99',
+      attestation: 'aa',
+      savedAt: 1,
+      identityKey: '',
+      fieldIds: ['f1'],
+    });
+    expect(openingNotice(stateD(store, ledger), false)?.text).toBe(RECORDING_LINE);
+    await recoverNativeSeals(api([]), store, 'D', ledger);
+    expect(openingNotice(stateD(store, ledger), true)?.text).toBe(ALREADY_SEALED_MESSAGE);
+    expect(openingNotice('recording', true)).toEqual({ text: STILL_RECORDING_LINE, busy: false });
+    expect(openingNotice('none', true)).toBeNull();
+  });
+});
+
+describe('a hung seal never blocks its document until restart', () => {
+  test('left before paying: the hold is released and the abandoned seal never pays', async () => {
+    let approve!: (ok: boolean) => void;
+    const log: string[] = [];
+    const first = seal({ log, documentId: 'H1', approve: () => new Promise<boolean>((r) => (approve = r)) }).catch(
+      (x) => x,
+    );
+    await until(() => typeof approve === 'function'); // the approval sheet is up
+    const key = sealKey('', 'H1', ['f1']);
+    expect(sealStateHere('', 'H1', ['f1'], memStore())).toBe('in_flight');
+    expect(abandonSeal(key)).toBe(true); // the page unmounted
+    expect(sealStateHere('', 'H1', ['f1'], memStore())).toBe('none');
+    approve(true); // the old flow wakes up after the page is gone
+    const e = await first;
+    expect(e.code).toBe('cancelled');
+    expect(e.message).toBe(LEFT_PAGE_MESSAGE);
+    expect(log).not.toContain('pay');
+    await seal({ log, documentId: 'H1' }); // a new page seals it once
+    expect(log.filter((l) => l === 'pay').length).toBe(1);
+  });
+
+  test('left while paying: the hold stays (a second seal could pay twice)', async () => {
+    const log: string[] = [];
+    let paid!: () => void;
+    const hung: SealKeys = {
+      createSignature: async () => ({ signature: [1] }),
+      createAction: () => new Promise((r) => (paid = () => r({ txid: TX, tx: [9, 9] }))),
+    };
+    const first = seal({ log, documentId: 'H2', keys: hung, steps: log });
+    await until(() => log.includes('paying'));
+    expect(abandonSeal(sealKey('', 'H2', ['f1']))).toBe(false);
+    expect((await seal({ documentId: 'H2' }).catch((x) => x)).code).toBe('already_sealed');
+    paid();
+    await first;
+    expect(sealStateHere('', 'H2', ['f1'], memStore())).toBe('none'); // released on settle
+  });
+
+  test('a seal that hangs forever lets go after SEAL_HOLD_MAX_MS on the wall clock (frozen timers, a wake)', async () => {
+    const f = frozenClock();
+    const log: string[] = [];
+    const hung: SealKeys = {
+      createSignature: async () => ({ signature: [1] }),
+      createAction: () => new Promise(() => undefined),
+    };
+    void seal({ log, documentId: 'H3', keys: hung, clock: f.clock, steps: log });
+    await until(() => log.includes('paying'));
+    expect(sealStateHere('', 'H3', ['f1'], memStore())).toBe('in_flight');
+    f.advance(SEAL_HOLD_MAX_MS - 1);
+    f.wake();
+    await flush();
+    expect(sealStateHere('', 'H3', ['f1'], memStore())).toBe('in_flight');
+    f.advance(1);
+    f.wake();
+    await flush();
+    expect(sealStateHere('', 'H3', ['f1'], memStore())).toBe('none');
+  });
+
+  test('released on an error too', async () => {
+    const e = await seal({
+      documentId: 'H4',
+      api: api([], { compose: () => ({ ok: false, status: 500, body: { error: 'boom' } }) }),
+    }).catch((x) => x);
+    expect(e.code).toBe('refused');
+    expect(sealStateHere('', 'H4', ['f1'], memStore())).toBe('none');
+  });
+});
+
+describe('the page wires the guard (NativeSealPage.tsx)', () => {
+  const page = readFileSync(new URL('./NativeSealPage.tsx', import.meta.url), 'utf8');
+  test('the seal key carries the identity key; the opening notice waits for recovery; the hold is let go on unmount', () => {
+    expect(page).toContain('identityKey: myKey');
+    expect(page).toMatch(/sealStateHere\(myKey, doc\.documentId, ids/);
+    expect(page).toMatch(/recovery\.current \?\? Promise\.resolve\(0\)\)[\s\S]{0,80}show\(true\)/);
+    expect(page).toMatch(/\(\) => \(\) => \{\s*if \(holdKey\.current\) abandonSeal\(holdKey\.current\);/);
+    expect(page).not.toContain('ALREADY_SEALED_MESSAGE });'); // never "Already sealed" straight from the saved payment
+  });
+  test('signer_race offers the latest version, never the same button', () => {
+    expect(page).toContain("e.code === 'newer_version'");
+    expect(page).toContain('Open the latest version');
+    expect(page).toContain('setReload((n) => n + 1)');
   });
 });

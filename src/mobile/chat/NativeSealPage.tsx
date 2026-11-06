@@ -16,6 +16,7 @@ import {
   SLOW_COMMIT_MS,
   createPressGuard,
   estimateSealFee,
+  openingNotice,
   primaryHandleFrom,
   padHasSignature,
   retryAllowed,
@@ -27,8 +28,8 @@ import {
   type SealSheetInfo,
 } from './sealScreen';
 import {
-  ALREADY_SEALED_MESSAGE,
   NativeSealError,
+  abandonSeal,
   inertHtml,
   fetchSignedCopy,
   accountHandles,
@@ -36,7 +37,8 @@ import {
   nativeRoomSteps,
   nativeSignAndSeal,
   recoverNativeSeals,
-  sealedHere,
+  sealKey,
+  sealStateHere,
   signedFieldIds,
   strokesToSvg,
   type PadPoint,
@@ -74,7 +76,7 @@ const NO_SELECT = {
 } as const;
 
 const STORE_KEY = 'bwx.nativeSeal.pending';
-/** Documents sealed from this device (the double-pay guard, nativeSeal.SealLedger). Newest last, at most 500. */
+/** Seals recorded from this device by sealKey (identity · document · blocks; nativeSeal.SealLedger). At most 500. */
 const SEALED_KEY = 'bwx.nativeSeal.sealed';
 const localLedger = (): SealLedger => {
   const read = (): string[] => {
@@ -145,6 +147,10 @@ type Phase =
   | { k: 'working'; step: SealStep; slow: boolean }
   /** Failed in a way that may have paid: no button (the saved seal is finished by recovery on reopen). */
   | { k: 'failed'; text: string }
+  /** What this device already knows about this seal (sealScreen.openingNotice): sealed, or paid and being recorded. */
+  | { k: 'notice'; text: string; busy: boolean }
+  /** Another party sealed since this version was opened (signer_race): open the latest version. Nothing was paid. */
+  | { k: 'stale'; text: string }
   | { k: 'done'; out: NativeSealOutcome; roomError: string | null; feeSats: number | null };
 
 export const NativeSealPage = () => {
@@ -165,6 +171,20 @@ export const NativeSealPage = () => {
   );
   const price = useSheetPrice();
   const [signedHtml, setSignedHtml] = useState<string | null>(null);
+  /** Bumped by "Open the latest version": the document is read again from the room. */
+  const [reload, setReload] = useState(0);
+  /** This account's identity key: part of the seal's key, so another account on this phone signs on its own. */
+  const myKey = chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey ?? '';
+  /** Recovery of this document's saved payments, started on open (the opening notice waits for it). */
+  const recovery = useRef<Promise<number> | null>(null);
+  /** The key a press is holding; released on unmount when its payment has not started (nativeSeal.abandonSeal). */
+  const holdKey = useRef<string | null>(null);
+  useEffect(
+    () => () => {
+      if (holdKey.current) abandonSeal(holdKey.current);
+    },
+    [],
+  );
 
   /** The wallet's silent bChatX session (Bearer); signs in with the wallet key when there is none. */
   const client = async (): Promise<BchatClient> => {
@@ -190,6 +210,12 @@ export const NativeSealPage = () => {
 
   useEffect(() => {
     let live = true;
+    if (reload) {
+      setDoc(null);
+      setSignedHtml(null);
+      setPhase({ k: 'loading' });
+      press.release();
+    }
     void (async () => {
       try {
         const c = await client();
@@ -222,11 +248,8 @@ export const NativeSealPage = () => {
           title: p.manifest?.documentTitle || 'Document',
           manifest: p.manifest ?? null,
         });
-        // Sealed from this device already, or paid and waiting to be recorded: never a second seal (6 Nov 2026).
-        if (sealedHere(p.documentId, localStore(), localLedger()))
-          setPhase({ k: 'error', text: ALREADY_SEALED_MESSAGE });
-        else setPhase({ k: 'ready' });
-        void recoverNativeSeals(api, localStore(), p.documentId, localLedger());
+        setPhase({ k: 'ready' });
+        recovery.current = recoverNativeSeals(api, localStore(), p.documentId, localLedger());
       } catch (e) {
         if (live) setPhase({ k: 'error', text: e instanceof Error ? e.message : 'Could not open the document.' });
       }
@@ -235,7 +258,7 @@ export const NativeSealPage = () => {
       live = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ticker, docId]);
+  }, [ticker, docId, reload]);
 
   const me = loadSession()?.handle ?? '';
   /**
@@ -282,6 +305,36 @@ export const NativeSealPage = () => {
     () => (doc ? myFields(doc.fields, [me, ...handles], signedFieldIds(doc.html)) : []),
     [doc, me, handles],
   );
+  /**
+   * What this device already knows about THIS seal (this account, this document, these blocks), once the blocks are
+   * known: recorded → "Already sealed"; paid and saved → "Paid, being recorded…" until recovery ends, then the real
+   * result. Only a hint: the server's already_sealed is the authority, so 'none' shows the pad.
+   */
+  const opened = useRef('');
+  useEffect(() => {
+    if (!doc || !mine.length) return;
+    const ids = mine.map((f) => f.id);
+    const key = sealKey(myKey, doc.documentId, ids);
+    if (opened.current === key) return;
+    opened.current = key;
+    let live = true;
+    const show = (recovered: boolean) => {
+      const n = openingNotice(sealStateHere(myKey, doc.documentId, ids, localStore(), localLedger()), recovered);
+      setPhase((p) =>
+        p.k !== 'ready' && p.k !== 'notice' ? p : n ? { k: 'notice', text: n.text, busy: n.busy } : { k: 'ready' },
+      );
+      return n;
+    };
+    if (show(false)?.busy)
+      void (recovery.current ?? Promise.resolve(0))
+        .catch(() => 0)
+        .then(() => {
+          if (live) show(true);
+        });
+    return () => {
+      live = false;
+    };
+  }, [doc, mine, myKey]);
   const fingerprint = useMemo(
     () => (doc ? Utils.toHex(Hash.sha256(Utils.toArray(doc.html, 'utf8'))).slice(0, 8) : ''),
     [doc],
@@ -368,6 +421,11 @@ export const NativeSealPage = () => {
     const svg = strokesToSvg(pad.current.strokes, pad.current.w, pad.current.h);
     if (!svg || !press.take()) return;
     reachedPay.current = false;
+    holdKey.current = sealKey(
+      myKey,
+      doc.documentId,
+      mine.map((f) => f.id),
+    );
     setPhase({ k: 'working', step: 'preparing', slow: false });
     const keys: SealKeys = {
       createSignature: (a) => apiContext.wallet.createSignature(a as never) as Promise<{ signature: number[] }>,
@@ -383,6 +441,7 @@ export const NativeSealPage = () => {
         keys,
         store: localStore(),
         ledger: localLedger(),
+        identityKey: myKey,
         coins: coins(),
         onStep: (s) => {
           if (s === 'paying') reachedPay.current = true;
@@ -430,6 +489,11 @@ export const NativeSealPage = () => {
       if (signed) setSignedHtml(signed);
     } catch (e) {
       const text = e instanceof NativeSealError || e instanceof Error ? e.message : 'The seal did not finish.';
+      // This version is out of date (another party sealed since it opened): offer the latest, never the same button.
+      if (e instanceof NativeSealError && e.code === 'newer_version') {
+        setPhase({ k: 'stale', text });
+        return;
+      }
       if (retryAllowed(e, reachedPay.current)) {
         // Nothing was paid: the button comes back, drawing kept, with plain words.
         press.release();
@@ -504,6 +568,33 @@ export const NativeSealPage = () => {
           <p role="alert" className="text-[14px]" style={{ color: '#fca5a5' }}>
             {phase.text}
           </p>
+        )}
+        {phase.k === 'notice' && (
+          <p
+            role="status"
+            aria-live="polite"
+            className="text-[14px]"
+            data-testid="seal-notice"
+            style={{ color: '#e4e4e7' }}
+          >
+            {phase.text}
+          </p>
+        )}
+        {phase.k === 'stale' && (
+          <div className="flex flex-col gap-2">
+            <p role="alert" className="text-[14px]" style={{ color: '#fca5a5' }}>
+              {phase.text}
+            </p>
+            <button
+              type="button"
+              data-testid="seal-open-latest"
+              onClick={() => setReload((n) => n + 1)}
+              className="min-h-12 w-full rounded-lg text-[15px] font-semibold"
+              style={{ background: '#F5B800', color: '#0b0b0d' }}
+            >
+              Open the latest version
+            </button>
+          </div>
         )}
         {phase.k === 'ready' && doc && mine.length === 0 && (
           <p className="text-[14px]">This document has no signature block for ${me}.</p>
