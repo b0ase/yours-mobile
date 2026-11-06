@@ -2317,6 +2317,43 @@ describe('6 Nov 2026: an admission entry that waited for its row is not held bac
     expect((await admit(d.phone, d.kd.identityKey, d.verifier)).admitted).toBe(1);
   });
 
+  test('review: a chain-waiting entry that a page lists again keeps its back-off and is not prompt-polled', async () => {
+    const d = await stale({ waitingFor: 'other', tries: 3, nextIn: HOUR });
+    const from = now();
+    await d.forge(d.coin2, { spendable: true }); // a page carrying it again
+    await d.merge();
+    const [e] = await pendingAdmissions(d.phone as never, d.kd.identityKey);
+    expect([e.tries, e.nextAt > now()]).toEqual([3, true]);
+    const prompt = { from, until: from + 2 * MIN };
+    const r = await admitPending(d.phone as never, d.kd.identityKey, d.verifier, { now, prompt });
+    expect(r.admitted).toBe(0);
+    expect(d.chain.asked).toEqual([]); // WhatsOnChain is not asked early, nor every 5 s
+  });
+
+  test("review: the row look-ups rotate, so entries past a run's budget are reached on the next runs", async () => {
+    const d = await stale({ waitingFor: 'row' }); // coin2's row is here; its entry waits as if it weren't
+    const list = (await import('./inboundSync')).admissionListFor(sikOf(d));
+    // Five entries whose rows never come, all sorting before coin2's, all with the stale back-off.
+    for (let i = 0; i < 5; i++)
+      await list.put({
+        kind: 'coin',
+        txid: `000${i}${Utils.toHex(Random(30))}`,
+        vout: 0,
+        key: `${d.kd.identityKey}|coin|!${i}.0`, // '!' sorts before any txid
+        identityKey: d.kd.identityKey,
+        firstAt: now() - 5 * HOUR,
+        nextAt: now() + 4 * HOUR,
+        tries: 9,
+        waitingFor: 'row',
+      });
+    // limit 1: four row look-ups a run.
+    const run = () => admitPending(d.phone as never, d.kd.identityKey, d.verifier, { now, limit: 1 });
+    let admitted = 0;
+    for (let i = 0; i < 3; i++) admitted += (await run()).admitted;
+    expect(admitted).toBe(1);
+    expect((await d.row(d.phone, d.coin2)).spendable).toBe(true);
+  });
+
   test('a row still missing waits as before, with no chain call, and is marked as waiting for its row', async () => {
     const d = await phoneWithBackup();
     const list = (await import('./inboundSync')).admissionListFor(sikOf(d));

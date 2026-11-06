@@ -869,8 +869,6 @@ export type PendingAdmission = Admission & {
   tries: number;
   /** When the chain first said this coin is spent: asked once more an hour later (a mempool spend can be dropped). */
   spentAt?: number;
-  /** When a merge last put it on the list (firstAt, or a later page carrying it again): the prompt window's test. */
-  queuedAt?: number;
   /**
    * What the last wait was for: 'row' when this device had no row for it yet (its page not merged), else 'other'.
    * Missing on entries written before 6 Nov 2026.
@@ -880,9 +878,10 @@ export type PendingAdmission = Admission & {
 
 export type AdmissionList = {
   /**
-   * Add these. An entry already there keeps its first time, and is due again at once with its tries reset: the page
-   * carrying it again is news its back-off never saw (6 Nov 2026: a coin whose row had not merged yet kept a 4-hour wait
-   * after the row came). A transaction's claim is updated.
+   * Add these. An entry already there keeps its first time; one that waited for its row is due again at once with its
+   * tries reset: the page carrying it again is news its back-off never saw (6 Nov 2026: a coin whose row had not merged
+   * yet kept a 4-hour wait after the row came). One waiting on the chain keeps its back-off. A transaction's claim is
+   * updated.
    */
   add(identityKey: string, items: Admission[], now: number): Promise<void>;
   list(identityKey: string): Promise<PendingAdmission[]>;
@@ -934,16 +933,17 @@ function idbAdmissionList(name: string): AdmissionList {
         for (const a of items) {
           const key = admissionKey(identityKey, a);
           const had = (await idbRequest(s.get(key))) as PendingAdmission | undefined;
+          // Only an entry that waited for its row (or one from before the reason was kept) starts again: one waiting on
+          // the chain keeps its back-off, so WhatsOnChain is not asked again early (review, 6 Nov 2026).
+          const fresh = had && (had.waitingFor === undefined || had.waitingFor === 'row');
           s.put(
             had
               ? {
                   ...had,
                   ...(a.kind === 'tx' ? { claim: a.claim } : {}),
-                  tries: 0,
-                  nextAt: Math.min(had.nextAt, now),
-                  queuedAt: now,
+                  ...(fresh ? { tries: 0, nextAt: Math.min(had.nextAt, now) } : {}),
                 }
-              : { ...a, key, identityKey, firstAt: now, nextAt: now, tries: 0, queuedAt: now },
+              : { ...a, key, identityKey, firstAt: now, nextAt: now, tries: 0 },
           );
         }
       }),
@@ -1019,6 +1019,8 @@ export const PROMPT_RETRY_MS = 5_000;
 const BROADCAST = new Set(['sending', 'unproven', 'unprocessed']);
 
 const runs = new Map<string, Promise<unknown>>();
+/** The last entry whose row each list's pre-pass looked up, by store and account: the next run goes on after it. */
+const lastLooked = new Map<string, string>();
 
 /**
  * Work through this device's admission list for this account, outside the storage locks (C5): reads, then the
@@ -1096,10 +1098,23 @@ async function admitOnce(
   // back-off counted tries that could never succeed (6 Nov 2026: the phone's f8e91f14:0 and a1972e3f:0, 12.1M sats, held
   // not spendable for hours after the deep pull merged their rows). Entries from before the reason was kept are looked
   // at once. Only reads of this device's store here (a bounded number per run); every check still runs below.
-  let looks = 4 * (opts.limit ?? RUN_LIMIT);
-  for (const e of all) {
-    if (e.nextAt <= now || e.tries === 0 || (e.waitingFor !== undefined && e.waitingFor !== 'row')) continue;
-    if (looks-- <= 0) break;
+  // The look-ups go round the list (by key, starting after the last one looked at), so a long list is covered over
+  // a few runs rather than its first entries every time.
+  const candidates = all
+    .filter((e) => e.nextAt > now && e.tries > 0 && (e.waitingFor === undefined || e.waitingFor === 'row'))
+    .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  const key = `${store.getSettings().storageIdentityKey}|${identityKey}`;
+  const last = lastLooked.get(key);
+  const start =
+    last === undefined
+      ? 0
+      : Math.max(
+          0,
+          candidates.findIndex((e) => e.key > last),
+        );
+  const turn = [...candidates.slice(start), ...candidates.slice(0, start)].slice(0, 4 * (opts.limit ?? RUN_LIMIT));
+  for (const e of turn) {
+    lastLooked.set(key, e.key);
     if (await hasRow(store, userId, e)) {
       e.nextAt = now;
       e.tries = 0;
@@ -1129,8 +1144,7 @@ async function admitOnce(
       v.log?.(`[inbound-sync] gave up on ${e.kind} ${e.txid}${e.kind === 'coin' ? `.${e.vout}` : ''}: left as is`);
       return;
     }
-    const prompt =
-      at === undefined && !!opts.prompt && (e.queuedAt ?? e.firstAt) >= opts.prompt.from && now < opts.prompt.until;
+    const prompt = at === undefined && !!opts.prompt && e.firstAt >= opts.prompt.from && now < opts.prompt.until;
     await list.put(
       prompt
         ? { ...e, waitingFor, nextAt: now + PROMPT_RETRY_MS }
