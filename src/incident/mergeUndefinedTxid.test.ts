@@ -23,6 +23,7 @@ import { StorageIdb, StorageProvider, Wallet, WalletStorageManager } from '@bsv/
 import { forceLegacyActionBatch } from '../services/actionBatchMode';
 import { DEPOSIT_BASKET } from '@1sat/types';
 import * as IS from '../services/inboundSync';
+import { _setPullOverlap } from '../services/fullPass';
 
 const E2E_TIMEOUT_MS = 60_000;
 const HEIGHT = 971_004;
@@ -307,8 +308,11 @@ const LOGGED_PAGE =
 let uninstall = () => undefined as void;
 beforeAll(() => {
   uninstall = IS.installInboundSyncGuard(StorageIdb);
+  // The owner's late pushes were later than a pull's overlap (services/fullPass.ts): here, any delay at all is.
+  _setPullOverlap(0);
 });
 afterAll(() => {
+  _setPullOverlap();
   uninstall();
   IS._resetInboundVerifiers();
 });
@@ -446,6 +450,183 @@ describe('6 Nov: a backup page naming a payment an earlier pull skipped', () => 
       } finally {
         for (const x of o.offs) x();
       }
+    },
+    E2E_TIMEOUT_MS,
+  );
+});
+
+/** Review 23's probes and the CEO's two-device check (6 Nov 2026), on the release's 15-minute pull overlap. */
+describe('review 23: late pushes, and the parents a push re-sends', () => {
+  const skipped = (logs: string[]) => logs.filter((l) => /earlier pull skipped|no record of/.test(l));
+
+  test(
+    'M1 (P5): a deposit the extension pushed late, that nothing later refers to, reaches the phone and counts',
+    async () => {
+      const o = await owner();
+      try {
+        await o.phone.pull(); // the incident's catch-up
+        _setPullOverlap(); // the release's overlap from here on
+        const d4 = deposit(o.kd, o.chain, 777_000);
+        await d4.takeIn(o.ext.wallet); // made before the phone's next pull
+        await sleep(5);
+        const x = deposit(o.kd, o.chain, 1_000);
+        await x.takeIn(o.phone.wallet);
+        await o.phone.push();
+        await o.phone.pull(); // the phone's cursor moves past D4
+        await o.ext.push(); // D4 lands with its older time
+        await o.phone.pull();
+        expect((await o.phone.s.findTransactions({ partial: { txid: d4.txid } })).length).toBe(1);
+        await admit(o.phone, o);
+        expect((await spendableSet(o.phone.s)).get(`${d4.txid}.0`)).toBe(777_000);
+      } finally {
+        _setPullOverlap(0);
+        for (const x of o.offs) x();
+      }
+    },
+    E2E_TIMEOUT_MS,
+  );
+
+  test(
+    'M1 (P7): a payment the extension pushed late leaves none of its spent coins spendable on the phone',
+    async () => {
+      const o = await owner();
+      try {
+        await o.phone.pull();
+        await admit(o.phone, o);
+        await o.phone.push();
+        await o.ext.pull();
+        await admit(o.ext, o);
+        _setPullOverlap();
+        const r = await o.ext.wallet.createAction({
+          description: 'pay someone',
+          outputs: [
+            {
+              lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()).toHex(),
+              satoshis: 9_000_000,
+              outputDescription: 'payee',
+            },
+          ],
+          options: { acceptDelayedBroadcast: false, randomizeOutputs: false },
+        });
+        const spentByExt = [...o.chain.spentBy].filter(([, by]) => by === r.txid).map(([op]) => op);
+        expect(spentByExt.length).toBeGreaterThan(0);
+        await sleep(5);
+        const x = deposit(o.kd, o.chain, 1_000);
+        await x.takeIn(o.phone.wallet);
+        await o.phone.push();
+        await o.phone.pull(); // the phone's cursor passes the extension's payment
+        await o.ext.push(); // the payment lands with its older time
+        await o.phone.pull();
+        const have = await spendableSet(o.phone.s);
+        expect(spentByExt.filter((op) => have.has(op))).toEqual([]);
+      } finally {
+        _setPullOverlap(0);
+        for (const x of o.offs) x();
+      }
+    },
+    E2E_TIMEOUT_MS,
+  );
+
+  test(
+    'L1 (P3): a parent the push re-sends never sets the backup back from completed (its clock behind the phone)',
+    async () => {
+      const o = await owner();
+      try {
+        const x = deposit(o.kd, o.chain, 50_000);
+        await x.takeIn(o.phone.wallet, false); // unproven on the phone
+        await o.phone.push();
+        await sleep(5);
+        const later = deposit(o.kd, o.chain, 2_000);
+        await later.takeIn(o.phone.wallet); // the backup's cursor for the phone moves past X
+        await o.phone.push();
+        const [bt] = await o.backup.findTransactions({ partial: { txid: x.txid } });
+        const [pt] = await o.phone.s.findTransactions({ partial: { txid: x.txid } });
+        // The server's monitor proves it, with a clock 60 s behind the phone's.
+        const provedAt = new Date(pt.updated_at!.getTime() - 60_000);
+        await o.backup.updateTransaction(bt.transactionId!, { status: 'completed', updated_at: provedAt } as never);
+        await sleep(5);
+        // The phone touches the coin: its output row is newer, its transaction row is not.
+        const [po] = await o.phone.s.findOutputs({ partial: { txid: x.txid, vout: 0 } });
+        await o.phone.s.updateOutput(po.outputId!, { outputDescription: 'touched' } as never);
+        expect(await errOf(o.phone.push())).toBeUndefined();
+        const [bt2] = await o.backup.findTransactions({ partial: { txid: x.txid } });
+        expect(bt2.status).toBe('completed');
+        expect(bt2.updated_at!.getTime()).toBe(provedAt.getTime());
+        expect((await o.backup.findOutputs({ partial: { txid: x.txid, vout: 0 } }))[0].outputDescription).toBe(
+          'touched',
+        );
+      } finally {
+        for (const x of o.offs) x();
+      }
+    },
+    E2E_TIMEOUT_MS,
+  );
+
+  /**
+   * The CEO's check on L1: the phone pays from a coin of X, a deposit the extension made and the phone took in through
+   * the backup, and pushes the payment with X as its parent (epoch time, no proof). The extension's next pull takes
+   * the payment in; X never changes on the backup.
+   */
+  const payFromBackupCoin = async (overlap: number | undefined) => {
+    const o = await owner();
+    try {
+      await o.phone.pull();
+      await admit(o.phone, o);
+      await o.phone.push();
+      await o.ext.pull();
+      await admit(o.ext, o);
+      _setPullOverlap(overlap);
+      const x = deposit(o.kd, o.chain, 400_000);
+      await x.takeIn(o.ext.wallet); // mined: completed
+      await sleep(5);
+      const y = deposit(o.kd, o.chain, 1_000);
+      await y.takeIn(o.phone.wallet);
+      await o.phone.push();
+      await o.ext.pull(); // the extension's cursor passes X before X reaches the backup
+      await o.ext.push();
+      await o.phone.pull();
+      await admit(o.phone, o);
+      const [bx] = await o.backup.findTransactions({ partial: { txid: x.txid } });
+      expect(bx.status).toBe('completed');
+      const p = await sweep(o.phone.wallet, o.kd, [`${x.txid}.0`]);
+      await o.phone.push(); // the payment, X:0 spent, and X as its parent
+      const [bx2] = await o.backup.findTransactions({ partial: { txid: x.txid } });
+      expect([bx2.status, bx2.updated_at!.getTime(), bx2.provenTxId]).toEqual([
+        'completed',
+        bx.updated_at!.getTime(),
+        bx.provenTxId,
+      ]);
+      o.logs.length = 0;
+      const rewinds: number[] = [];
+      for (let i = 0; i < 3; i++) {
+        expect(await errOf(o.ext.pull())).toBeUndefined();
+        rewinds.push(skipped(o.logs).length);
+      }
+      // The extension has the payment and X:0 spent; its own X is still completed.
+      expect((await o.ext.s.findTransactions({ partial: { txid: p } })).length).toBe(1);
+      const [ex] = await o.ext.s.findOutputs({ partial: { txid: x.txid, vout: 0 } });
+      expect(ex.spendable).toBe(false);
+      expect((await o.ext.s.findTransactions({ partial: { txid: x.txid } }))[0].status).toBe('completed');
+      expect((await o.backup.findTransactions({ partial: { txid: x.txid } }))[0].status).toBe('completed');
+      return rewinds;
+    } finally {
+      _setPullOverlap(0);
+      for (const x of o.offs) x();
+    }
+  };
+
+  test(
+    'L1, two devices: with the overlap the other device takes the payment and its parent in a normal pull; X stays completed',
+    async () => {
+      expect(await payFromBackupCoin(undefined)).toEqual([0, 0, 0]);
+    },
+    E2E_TIMEOUT_MS,
+  );
+
+  test(
+    'L1, two devices: past the overlap the other device rewinds once, never on every pass; X stays completed',
+    async () => {
+      expect(await payFromBackupCoin(0)).toEqual([1, 1, 1]); // one rewind, then quiet
     },
     E2E_TIMEOUT_MS,
   );

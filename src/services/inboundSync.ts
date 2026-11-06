@@ -52,8 +52,18 @@ import {
   type WalletProtocol,
 } from '@bsv/sdk';
 import { BSV20, BSV21 } from '@1sat/templates';
-import { EntitySyncState, WalletPermissionsManager } from '@bsv/wallet-toolbox-client';
+import { WalletPermissionsManager } from '@bsv/wallet-toolbox-client';
 import type { SpendState } from './unsentExpiry';
+import {
+  afterPage,
+  beforePage,
+  overlapped,
+  passFromStart,
+  rewind,
+  syncStateFor,
+  updateMark,
+  type SyncStateRow,
+} from './fullPass';
 
 /** The toolbox's BRC-29 payment protocol (change and received payments). */
 const BRC29: [2, string] = [2, '3241645161d8'];
@@ -96,6 +106,7 @@ export type OutputRow = {
   updated_at?: Date;
 };
 type TxRow = {
+  inputBEEF?: Bytes | null;
   transactionId?: number;
   txid?: string | null;
   reference?: string | null;
@@ -127,6 +138,12 @@ type SyncArgs = {
   toStorageIdentityKey?: string;
   /** The pass's cursor: rows the reader changed at or after this (none: a pass from the start). */
   since?: Date | string;
+  /** The writer's sync state for this reader (what the toolbox reloads). */
+  syncStateId?: number;
+  maxItems?: number;
+  maxRoughSize?: number;
+  /** Set by the toolbox's own sync loops (syncFromReader, syncToWriter), never by an export or a USB backup. */
+  includeNextCheckpoint?: boolean;
 };
 
 /** The storage provider calls this needs (StorageIdb). */
@@ -166,6 +183,8 @@ export type InboundVerifier = {
   recover?(txid: string): Promise<'restored' | 'done' | 'wait'>;
   /** A merge put something on the admission list: run admitPending soon (initWallet schedules it). */
   onQueued?: () => void;
+  /** A pass from the start we started paused (a slice used up, or a heal left it): pull again soon (initWallet). */
+  onMore?: () => void;
   log?: (...a: unknown[]) => void;
 };
 
@@ -1344,30 +1363,29 @@ export function walletOwnership(rootKey: PrivateKey, legacyKeys: (PrivateKey | u
 // Such a page is not merged: the cursor goes back to the start and the same sync carries on from there, so the missing
 // transactions come first and every row is checked as usual. A pass from the start that still can't file a row stops.
 
-type SyncStateRow = { syncStateId?: number; syncMap?: unknown };
-type SyncStateStore = DeviceStore & { updateSyncState(id: number, update: Record<string, unknown>): Promise<unknown> };
-
-/** This device's sync state for the page's reader (the one the toolbox's processSyncChunk reads), if any. */
-async function readerSyncState(store: DeviceStore, args: SyncArgs): Promise<SyncStateRow | undefined> {
-  if (!args?.identityKey || !args.fromStorageIdentityKey) return undefined;
-  const user = (await store.findUsers({ partial: { identityKey: args.identityKey } }))[0];
-  if (!user) return undefined;
-  return (
-    await store.findSyncStates({ partial: { storageIdentityKey: args.fromStorageIdentityKey, userId: user.userId } })
-  )[0] as SyncStateRow | undefined;
-}
+/**
+ * This device's sync state for the page's reader: the row the toolbox's processSyncChunk reloads, by the page's
+ * syncStateId when it names one (review 23, L4: a stray second row is never the one rewound).
+ */
+const readerSyncState = (store: DeviceStore, args: SyncArgs): Promise<SyncStateRow | undefined> =>
+  syncStateFor(store, args?.identityKey, args?.fromStorageIdentityKey, args?.syncStateId);
 
 /**
  * The reader's transaction ids this page files rows under (outputs, commissions: the merges that refuse a page for an
  * unknown one) that neither this page nor the sync map knows.
  */
-export async function unfiledTransactions(store: DeviceStore, args: SyncArgs, chunk: SyncChunk): Promise<number[]> {
+export async function unfiledTransactions(
+  store: DeviceStore,
+  args: SyncArgs,
+  chunk: SyncChunk,
+  row?: SyncStateRow,
+): Promise<number[]> {
   const rows = [
     ...(chunk?.outputs ?? []),
     ...((chunk as { commissions?: { transactionId?: number }[] })?.commissions ?? []),
   ];
   if (!rows.length) return [];
-  const idMap = parseSyncMap((await readerSyncState(store, args))?.syncMap)?.transaction?.idMap ?? {};
+  const idMap = parseSyncMap((row ?? (await readerSyncState(store, args)))?.syncMap)?.transaction?.idMap ?? {};
   const onPage = new Set((chunk.transactions ?? []).map((t) => t?.transactionId));
   const unfiled = new Set<number>();
   for (const r of rows) {
@@ -1377,35 +1395,64 @@ export async function unfiledTransactions(store: DeviceStore, args: SyncArgs, ch
   return [...unfiled];
 }
 
-/** Start the next pass from the reader at the beginning: no time cursor, every offset 0. The id maps are kept. */
-async function rewindSync(store: SyncStateStore, row: SyncStateRow) {
-  const ss = new EntitySyncState(row as never);
-  ss.when = undefined;
-  for (const m of Object.values(ss.syncMap as unknown as Record<string, unknown>))
-    if (m && typeof m === 'object' && 'count' in m) (m as { count: number }).count = 0;
-  await ss.updateStorage(store as never, false);
-}
+/** Entities a page carries after its outputs (getSyncChunk's order). */
+const AFTER_OUTPUTS = [
+  'txLabelMaps',
+  'outputTagMaps',
+  'certificates',
+  'certificateFields',
+  'commissions',
+  'provenTxReqs',
+] as const;
 
 /**
  * The same gap going the other way: this device's pages to a backup. A transaction this device took in from a backup
- * keeps its old time, so a push from this device's cursor never sends it, while the coins under it (spent since, newer)
+ * keeps its old time, so a push from the backup's cursor never sends it, while the coins under it (spent since, newer)
  * are sent; the backup's merge can't file them and refuses the push (setActive's propagate, updateBackups). Each push
- * page therefore carries the transactions its coins are filed under. The backup files those under its own copy by txid
- * and leaves it as it is (not newer), so nothing it holds changes; a backup that lacks one takes it as any page's.
+ * page therefore carries the transactions its coins are filed under.
+ *  - Only so the backup can file them (review 23, L1): each goes as keepTx sends a kept row, with the epoch as its time,
+ *    no proof id, no expiry state and no input BEEF, so the backup's copy (found by txid) is never changed by it: a
+ *    completed transaction is never set back to unproven or failed. Such a parent is always older than the backup's
+ *    cursor for this device, so the backup holds it already (it came from there) or was sent it before; a backup that
+ *    lacks one anyway inserts it, and another copy that then meets it unfiled rewinds once to take it in.
+ *  - Within the page's limits (L2): at most a quarter of its items and of its rough size go to parents; the page's
+ *    outputs end where that runs out (with nothing after them), and the next page goes on from there.
+ *  - Only in a toolbox sync to a backup (L3): an export, a USB backup or a Repair Sync index reads the store as it is.
  */
-async function withParentTransactions(store: DeviceStore, chunk: SyncChunk) {
+async function withParentTransactions(store: DeviceStore, args: SyncArgs, chunk: SyncChunk) {
   const outputs = chunk?.outputs ?? [];
   if (!outputs.length) return;
   const onPage = new Set((chunk.transactions ?? []).map((t) => t?.transactionId));
-  const missing = new Set<number>();
-  for (const o of outputs)
-    if (typeof o?.transactionId === 'number' && !onPage.has(o.transactionId)) missing.add(o.transactionId);
-  if (!missing.size) return;
-  const transactions = chunk.transactions ?? (chunk.transactions = []);
-  for (const transactionId of missing) {
-    const t = (await store.findTransactions({ partial: { transactionId } }))[0];
-    if (t) transactions.push(t);
+  const budget = Math.max(64_000, Math.floor((args?.maxRoughSize ?? 10_000_000) / 4));
+  const maxParents = Math.max(1, Math.floor((args?.maxItems ?? 1_000) / 4));
+  const added = new Set<number>();
+  const parents: TxRow[] = [];
+  let used = 0;
+  for (let i = 0; i < outputs.length; i++) {
+    const id = outputs[i]?.transactionId;
+    if (typeof id !== 'number' || onPage.has(id) || added.has(id)) continue;
+    const t = (await store.findTransactions({ partial: { transactionId: id } }))[0];
+    if (!t) continue;
+    const size = (t.rawTx?.length ?? 0) + 512;
+    if (parents.length && (used + size > budget || parents.length >= maxParents)) {
+      chunk.outputs = outputs.slice(0, i);
+      for (const k of AFTER_OUTPUTS) {
+        const rows = (chunk as Record<string, unknown[] | undefined>)[k];
+        if (rows) rows.length = 0; // fetched again after the rest of the outputs
+      }
+      break;
+    }
+    parents.push({
+      ...t,
+      updated_at: new Date(0),
+      provenTxId: undefined,
+      noSendExpiryState: undefined,
+      inputBEEF: undefined,
+    } as TxRow);
+    added.add(id);
+    used += size;
   }
+  if (parents.length) (chunk.transactions ?? (chunk.transactions = [])).push(...parents);
 }
 
 // ── installation ──
@@ -1436,6 +1483,9 @@ export function registerInboundVerifier(storageIdentityKey: string, identityKey:
 
 const INSTALLED = Symbol.for('bwx.inboundSync.original');
 const READER = Symbol.for('bwx.inboundSync.reader');
+const CHECKPOINT = Symbol.for('bwx.inboundSync.checkpoint');
+/** Passes rewound by an unfiled page and not finished yet, by device and reader: one rewind per pass (L4). */
+const rewound = new Set<string>();
 type ProcessSyncChunk = (this: DeviceStore, args: SyncArgs, chunk: SyncChunk) => Promise<unknown>;
 type GetSyncChunk = (this: DeviceStore, args: unknown) => Promise<SyncChunk>;
 
@@ -1459,8 +1509,22 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
     proto.getSyncChunk = async function (this: DeviceStore, args: unknown) {
       const chunk = await read.call(this, args);
       const sik = this.getSettings?.()?.storageIdentityKey;
-      if (sik && deviceStores.has(sik)) await withParentTransactions(this, chunk);
+      const a = args as SyncArgs;
+      if (sik && deviceStores.has(sik) && a?.includeNextCheckpoint === true && a.fromStorageIdentityKey === sik)
+        await withParentTransactions(this, a, chunk);
       return chunk;
+    };
+  }
+  // A pull starts a little before the newest time it has seen (review 23, M1): a row another copy pushed a few minutes
+  // late, with its own older time, still comes. Rows this device holds come again as no-ops (an equal time).
+  const ownCheckpoint = Object.prototype.hasOwnProperty.call(proto, 'getSyncCheckpoint');
+  const checkpoint = proto.getSyncCheckpoint as ((...a: unknown[]) => Promise<{ since?: Date }>) | undefined;
+  if (typeof checkpoint === 'function') {
+    proto[CHECKPOINT] = checkpoint;
+    proto.getSyncCheckpoint = async function (this: DeviceStore, ...a: unknown[]) {
+      const c = await checkpoint.apply(this, a);
+      const sik = this.getSettings?.()?.storageIdentityKey;
+      return sik && deviceStores.has(sik) && c ? { ...c, since: overlapped(c.since) } : c;
     };
   }
   proto.processSyncChunk = async function (this: DeviceStore, args: SyncArgs, chunk: SyncChunk) {
@@ -1473,19 +1537,48 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
         throw new Error(NO_VERIFIER);
       return original.call(this, args, chunk);
     }
-    const unfiled = await unfiledTransactions(this, args, chunk);
+    const deviceSik = this.getSettings?.()?.storageIdentityKey ?? '';
+    const passKey = `${deviceSik}|${args?.fromStorageIdentityKey ?? ''}`;
+    let row = await readerSyncState(this, args);
+    const fromStart = args?.since == null;
+    const more = () => {
+      try {
+        v.onMore?.();
+      } catch {
+        // scheduling only
+      }
+    };
+    // A heal leaves a pass from the start to the device-sync pulls (services/fullPass.ts; review 23, M2).
+    if (beforePage(deviceSik, fromStart) === 'stop') {
+      more();
+      return { done: true, inserts: 0, updates: 0 }; // not merged: the checkpoint stays where it was
+    }
+    const unfiled = await unfiledTransactions(this, args, chunk, row);
     if (unfiled.length) {
-      // Once per pass: a pass that already started from the beginning stops, so this can never loop.
-      const row = args?.since != null ? await readerSyncState(this, args) : undefined;
-      if (typeof row?.syncStateId !== 'number') {
-        v.log?.(`[inbound-sync] backup page names ${unfiled.length} payment(s) this device has no record of`);
+      // Once per pass: a pass that already started from the beginning stops, and so does one this has rewound already
+      // (L4), so this never loops. It asks for a pass from the start again on the next heal.
+      if (fromStart || typeof row?.syncStateId !== 'number' || rewound.has(passKey)) {
+        const rows = (chunk.outputs ?? [])
+          .filter((o) => typeof o?.transactionId === 'number' && unfiled.includes(o.transactionId))
+          .map((o) => `${o.txid ?? '?'}.${o.vout} (backup transaction ${o.transactionId})`);
+        // L5: a backup holding such a row never sends its transaction; a retry can't take it. Named for support.
+        v.log?.(
+          `[inbound-sync] backup page names ${unfiled.length} payment(s) this device has no record of and the backup doesn't send, even from the start: ${rows.slice(0, 20).join(', ')}${rows.length > 20 ? ` and ${rows.length - 20} more` : ''}`,
+        );
+        if (row && typeof row.syncStateId === 'number') await updateMark(this, row, { due: 'unfiled' });
         throw new Error(UNFILED_PAGE);
       }
-      await rewindSync(this as SyncStateStore, row);
+      await rewind(this, row);
+      rewound.add(passKey);
       v.log?.(
         `[inbound-sync] backup page names ${unfiled.length} payment(s) an earlier pull skipped: pulling this backup again from the start`,
       );
-      // Not merged, nothing queued. No checkpoint: the toolbox's sync loop reloads the rewound one and carries on.
+      // Not merged, nothing queued. No checkpoint: the toolbox's sync loop reloads the rewound one and carries on, or
+      // (a heal) leaves it to the device-sync pulls.
+      if (beforePage(deviceSik, true) === 'stop') {
+        more();
+        return { done: true, inserts: 0, updates: 0 };
+      }
       return { done: false, inserts: 0, updates: 0 };
     }
     const report = await verifyInboundChunk(this, args, chunk, v);
@@ -1500,14 +1593,38 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
         throw new Error(UNCHECKED_PAGE);
       }
     }
-    const merged = await original.call(this, args, chunk);
+    const merged = (await original.call(this, args, chunk)) as
+      | { done?: boolean; nextCheckpoint?: { since?: Date } }
+      | undefined;
     if (report.admissions.length)
       try {
         v.onQueued?.();
       } catch {
         // scheduling only
       }
-    return merged;
+    if (!merged) return merged;
+    if (merged.done) {
+      if (fromStart) {
+        // A pass from the start completed (ours, or a store's first): the daily one is next due in 24 h.
+        rewound.delete(passKey);
+        row = await readerSyncState(this, args);
+        if (row && typeof row.syncStateId === 'number' && !passFromStart(row))
+          await updateMark(this, row, { doneAt: Date.now(), startedAt: undefined, due: undefined });
+      }
+      return merged;
+    }
+    // The same overlap as the checkpoint this pass started from (getSyncCheckpoint below, for the same stores): one
+    // cursor per pass.
+    const next =
+      merged.nextCheckpoint && deviceStores.has(deviceSik)
+        ? { ...merged.nextCheckpoint, since: overlapped(merged.nextCheckpoint.since) }
+        : undefined;
+    const out = next ? { ...merged, nextCheckpoint: next } : merged;
+    if (afterPage(deviceSik) === 'yield') {
+      more();
+      return { ...out, done: true }; // this slice is used up: the checkpoint has this page, the next pull goes on
+    }
+    return out;
   };
   return () => {
     if (own) proto.processSyncChunk = original;
@@ -1517,6 +1634,11 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
       if (ownRead) proto.getSyncChunk = read;
       else delete proto.getSyncChunk;
       delete proto[READER];
+    }
+    if (typeof checkpoint === 'function') {
+      if (ownCheckpoint) proto.getSyncCheckpoint = checkpoint;
+      else delete proto.getSyncCheckpoint;
+      delete proto[CHECKPOINT];
     }
   };
 }
@@ -1533,12 +1655,18 @@ export const _uninstallInboundSyncGuard = (cls: { prototype: object }) => {
     delete proto.processSyncChunk;
   else proto.processSyncChunk = original;
   delete proto[INSTALLED];
+  const parent = Object.getPrototypeOf(proto) as Record<string, unknown> | null;
   const read = proto[READER];
   if (typeof read === 'function') {
-    const parent = Object.getPrototypeOf(proto) as Record<string, unknown> | null;
     if (parent && parent.getSyncChunk === read) delete proto.getSyncChunk;
     else proto.getSyncChunk = read;
     delete proto[READER];
+  }
+  const checkpoint = proto[CHECKPOINT];
+  if (typeof checkpoint === 'function') {
+    if (parent && parent.getSyncCheckpoint === checkpoint) delete proto.getSyncCheckpoint;
+    else proto.getSyncCheckpoint = checkpoint;
+    delete proto[CHECKPOINT];
   }
 };
 

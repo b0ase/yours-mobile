@@ -84,6 +84,7 @@ import {
   type AdmitStore,
   type InboundVerifier,
 } from './services/inboundSync';
+import { FULL_PASS_NEXT_SLICE_MS, requestFullPass, withDeadlines, withFullPassMode } from './services/fullPass';
 import { chromeEnvelopeBackend, EnvelopeStore, guardEnvelopes } from './services/envelopes';
 import { ENVELOPES_ENABLED } from './mobile/storeBuild';
 import { guardCrossSiteSigning } from './services/crossSiteSignGuard';
@@ -534,12 +535,52 @@ export const initWallet = async (
   // device wrote into the backup (P0, 5 Nov 2026: the owner's 1p test was refused with WERR_NOT_ACTIVE after the backup
   // connected late; services/deviceActive.ts). First on the manager, so the later wrappers (the coin check) run over it.
   const openedAccount = account?.addresses?.identityAddress;
+  /** This device's own store and its storage identity key (the merges' writer), from the manager's stores. */
+  const ownStore = () =>
+    (storage as unknown as { _stores?: { storage: unknown }[] })._stores
+      ?.map((m) => m.storage)
+      .find((s): s is StorageIdb => s instanceof StorageIdb);
+  const ownSik = () => ownStore()?.getSettings().storageIdentityKey;
+  /**
+   * A full re-pull from a backup when one is due (services/fullPass.ts): a daily one, a store's first, or one a failure
+   * asked for. Never in the way of the sync itself: a failure here is logged and the sync goes on.
+   */
+  const fullPassIfDue = async (readerSik: string | undefined, failed = false) => {
+    const own = ownStore();
+    if (!own || !readerSik) return;
+    try {
+      const { identityKey } = await storage.getAuth();
+      const r = await requestFullPass({ manager: storage, store: own as never, identityKey, readerSik, failed });
+      if (r === 'started')
+        console.warn('[deviceSync] pulling the backup again from the start (a full pass, in slices)');
+    } catch (e) {
+      console.warn('[deviceSync] a full pass could not be asked for:', e);
+    }
+  };
+  /** The last heal's merge failed: the next heal asks for a full pass (b). */
+  let healFailed = false;
   const keepActive = keepDeviceStoreActive(storage, {
     deviceIntended: () => {
       const current = chromeStorageService.getCurrentAccountObject().account;
       return !!current && current.addresses.identityAddress === openedAccount && !current.storageConfig?.activeRemote;
     },
-    setDeviceActive: () => setActiveStorage('local'),
+    // A heal stays short: a full pass is asked for here when due but left to the device-sync pulls (fullPass.ts).
+    setDeviceActive: async () => {
+      let conflicting: string[] = [];
+      try {
+        conflicting = storage.getConflictingStores();
+      } catch {
+        // not available
+      }
+      for (const sik of conflicting) await fullPassIfDue(sik, healFailed);
+      try {
+        await withFullPassMode(ownSik(), 'defer', () => setActiveStorage('local'));
+        healFailed = false;
+      } catch (e) {
+        healFailed = true;
+        throw e;
+      }
+    },
   });
   if (!keepActive) console.error("[initWallet] this device's store is not kept active (no storage manager to wrap)");
   // No payment may live only in memory: every noSend action is written to storage at signing (P0, 3 Nov 2026: the
@@ -634,7 +675,14 @@ export const initWallet = async (
         // What this pull lists is asked about every few seconds for a while, not after the 1-minute doubling: a sweep
         // the other device made must not hide its dollar here for minutes (review 20, M5; services/inboundSync.ts).
         admitPrompt = { from: Date.now(), until: Date.now() + PROMPT_ADMIT_MS };
-        await storage.syncFromReader(identityKey, reader as Parameters<typeof storage.syncFromReader>[1]);
+        // Once a day (and on a store's first open, or when a failure asked) the pull starts from the beginning; such
+        // a pass runs in slices so payments never wait on it (services/fullPass.ts).
+        await fullPassIfDue(
+          (reader as { getSettings?: () => { storageIdentityKey?: string } }).getSettings?.()?.storageIdentityKey,
+        );
+        // Each backup request has a deadline, so a stalled backup frees the storage locks in seconds (review 23, M2).
+        const bounded = withDeadlines(reader as object) as Parameters<typeof storage.syncFromReader>[1];
+        await withFullPassMode(ownSik(), 'slice', () => storage.syncFromReader(identityKey, bounded));
       },
       () => admitIn(0),
     ),
@@ -644,6 +692,15 @@ export const initWallet = async (
     busy: chainActive,
     log: (...a) => console.warn(...a),
   });
+  // A full pass paused (a slice used up, or a heal left it): the next slice a moment later, sends in between.
+  let moreTimer: ReturnType<typeof setTimeout> | undefined;
+  stopBackupCheck.verifier.onMore = () => {
+    if (moreTimer || admitClosed) return;
+    moreTimer = setTimeout(() => {
+      moreTimer = undefined;
+      void deviceSync.syncNow();
+    }, FULL_PASS_NEXT_SLICE_MS);
+  };
   if (!notifyOnWalletChanges(baseWallet, deviceSync.changed))
     console.warn('[initWallet] wallet changes do not update the backup');
   // Big mints need longer than the broadcaster's fixed 30 s to upload (services/bigBroadcast.ts, vexvoid 12 Oct 2026).
@@ -1738,6 +1795,8 @@ export const initWallet = async (
     keepActive?.stop();
     if (admitTimer) clearTimeout(admitTimer);
     admitTimer = undefined;
+    if (moreTimer) clearTimeout(moreTimer);
+    moreTimer = undefined;
     await destroyWallet();
     stopBackupCheck();
   };

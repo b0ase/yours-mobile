@@ -315,8 +315,22 @@ describe('the real initWallet wiring', () => {
   test('every device-sync pull schedules the admission list after the merge, without awaiting it (review 18, F-A)', () => {
     const src = readFileSync(new URL('./initWallet.ts', import.meta.url), 'utf8');
     const pull = src.slice(src.indexOf('    pull: pullThenAdmitSoon('), src.indexOf('    push: async () => {'));
-    expect(pull).toMatch(/await storage\.syncFromReader\([\s\S]*\},\s*\(\) => admitIn\(0\)/);
+    // The merge runs in the full-pass slice mode (services/fullPass.ts), awaited; then admission is scheduled.
+    expect(pull).toMatch(
+      /await withFullPassMode\(ownSik\(\), 'slice', \(\) => storage\.syncFromReader\([\s\S]*\},\s*\(\) => admitIn\(0\)/,
+    );
     expect(pull).not.toContain('await admitBackupRows()');
+    // Its backup requests have deadlines, and a full pass is asked for first when due (services/fullPass.ts).
+    expect(pull).toMatch(/await fullPassIfDue\([\s\S]*withDeadlines\(reader/);
+  });
+
+  test('a heal leaves a pass from the start to the device-sync pulls, and a failed one asks for a full pass (review 23, M2)', () => {
+    const src = readFileSync(new URL('./initWallet.ts', import.meta.url), 'utf8');
+    const heal = src.slice(src.indexOf('    setDeviceActive: async () => {'), src.indexOf('  if (!keepActive)'));
+    expect(heal).toMatch(/fullPassIfDue\(sik, healFailed\)/);
+    expect(heal).toMatch(/withFullPassMode\(ownSik\(\), 'defer', \(\) => setActiveStorage\('local'\)\)/);
+    expect(heal).toMatch(/healFailed = true;\s*throw e;/);
+    expect(src).toMatch(/verifier\.onMore = \(\) =>[\s\S]*deviceSync\.syncNow\(\)/);
   });
 
   test("this device's store is kept active (P0, 5 Nov 2026), under the coin check, which wraps over it", async () => {
