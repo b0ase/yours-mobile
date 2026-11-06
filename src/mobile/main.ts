@@ -114,7 +114,22 @@ worker.addEventListener('message', (e) => {
     // runtime.sendMessage waited forever (owner, 6 Oct 2026: balance, tokens and sync all timing out).
     console.error('[background worker] failed to start:', e.data.message);
     hub.markBackgroundReady();
-  } else if (e.data?.t === 'console') console[e.data.level as 'error' | 'warn' | 'log']('[background]', e.data.text);
+  } else if (e.data?.t === 'console') {
+    console[e.data.level as 'error' | 'warn' | 'log']('[background]', e.data.text);
+    // Private test builds only (owner's re-test, 6 Nov 2026): keep the sync lines where a container copy can read them.
+    if (
+      import.meta.env.VITE_CHANNEL === 'ios-private' &&
+      /^\[(deviceActive|deviceSync|inbound-sync|fullPass)/.test(String(e.data.text))
+    )
+      try {
+        const k = 'bwx.diag.syncLog';
+        const prev = JSON.parse(localStorage.getItem(k) ?? '[]') as unknown[];
+        const entry = { at: new Date().toISOString(), level: e.data.level, text: String(e.data.text).slice(0, 1000) };
+        localStorage.setItem(k, JSON.stringify([...prev, entry].slice(-200)));
+      } catch {
+        // diagnostics never change behaviour
+      }
+  }
 });
 worker.addEventListener('error', (e) => console.error('[background worker]', e.message, e));
 worker.postMessage({ t: 'init', rootUrl, version: __MOBILE_VERSION__ });
