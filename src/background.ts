@@ -108,6 +108,7 @@ import {
 import { arrivingSats } from './services/receiveGuard';
 import { abortTargetKnownOnChain, recoverySummary } from './services/recoverFailed';
 import { timedStep, txidRecoverySummary } from './services/recoverByTxid';
+import { storeFingerprint } from './services/lockScanStore';
 import { seedChangeSummary } from './services/seedChange';
 import { recoverOnDevice } from './services/recoverOnDevice';
 import { foundHeadline, restoredLine, scanNote, type ScanReport } from './services/findMissingCoins';
@@ -3099,6 +3100,7 @@ if (!(
       'STORAGE_REPAIR_SYNC',
       'STORAGE_RECOVER_MINED',
       'STORAGE_RECOVER_TXID',
+      'LOCK_SCAN_STORE',
       'STORAGE_RECOVER_SEED_CHANGE',
       'STORAGE_FIND_MISSING_COINS',
       'STORAGE_RESTORE_MISSING_COINS',
@@ -3556,6 +3558,9 @@ if (!(
           return true;
         case 'STORAGE_RECOVER_TXID':
           processRecoverTxid(typeof message.txid === 'string' ? message.txid : '', sendResponse);
+          return true;
+        case 'LOCK_SCAN_STORE':
+          processLockScanStore(sendResponse);
           return true;
         case 'STORAGE_RECOVER_SEED_CHANGE':
           processRecoverSeedChange(message.fresh === true, sendResponse);
@@ -4090,6 +4095,19 @@ if (!(
       });
     } catch (err) {
       sendResponse({ type: 'STORAGE_RECOVER_TXID', success: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  };
+
+  /** Find my locks (mobile/locks/lockFinder.ts): which store a scan files into, so a recreated store is scanned again. */
+  const processLockScanStore = async (sendResponse: CallbackResponse) => {
+    try {
+      await ensureWallet(true);
+      if (!accountContext) throw new Error('Wallet not initialized');
+      const identityKey = chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey || '';
+      const store = await storeFingerprint(accountContext.storage as never, identityKey);
+      sendResponse({ type: 'LOCK_SCAN_STORE', success: true, data: { store } });
+    } catch (err) {
+      sendResponse({ type: 'LOCK_SCAN_STORE', success: false, error: err instanceof Error ? err.message : String(err) });
     }
   };
 

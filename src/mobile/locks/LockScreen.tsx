@@ -37,9 +37,7 @@ import {
   fmtUsd,
   MAX_PIECES,
   defaultSurplusTo,
-  payoutFor,
   percentAmounts,
-  surplusHeight,
   type SurplusTo,
   planStatus,
   resplitTail,
@@ -59,7 +57,7 @@ import {
   confirmOpensText,
 } from './schedule';
 import {
-  claimMatured,
+  claimLocks,
   createLock,
   freshRate,
   loadPlans,
@@ -68,6 +66,8 @@ import {
   syncClaimed,
   walletLockOutpoints,
 } from './lockApi';
+import { planPayouts } from './claimPayouts';
+import { claimRate } from './lockScanWiring';
 import { BackPneeAmountSheet } from '../notes/BackPneeAmountSheet';
 import { BackPneeSheet } from '../notes/BackPneeSheet';
 import { BackPneeDoneSheet } from '../notes/BackPneeDoneSheet';
@@ -86,6 +86,7 @@ const SubscriptionsTab = SUBSCRIPTIONS_ENABLED ? lazy(() => import('../pots/Subs
 import { verifyLockTx, type VerifyResult } from './verify';
 import { fmtToken } from './receipt';
 import { TokenLocksSection } from './TokenLocksSection';
+import { BsvLocksSection } from './BsvLocksSection';
 import { ARTIST_PROGRAMME_ENABLED } from '../storeBuild';
 import { registerBacking } from '../media/artists/programme/api';
 import { TEMPLATE_CONFIRM, TEMPLATE_NOTE, TEMPLATES, reviewAllowed, type LockTemplate } from './templates';
@@ -470,52 +471,17 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
     setBusy(true);
     try {
       const before = plans;
-      await claimMatured(apiContext);
+      // The plans' own matured pieces, in claims of at most 50; payouts only for what was really spent (review 21 N1).
+      const ready = before.flatMap((p) =>
+        p.pieces.filter((x) => !x.claimed && x.height <= height).map((x) => `${x.txid}.${x.vout}`),
+      );
+      const claimed = await claimLocks(apiContext, {
+        outpoints: ready,
+        satsPerKb: await claimRate(chromeStorageService),
+      });
+      if (claimed.error) addSnackbar(`Some locks weren’t claimed yet (${claimed.error}). Tap Claim again.`, 'info');
       const todays = await freshRate();
-      const out: NonNullable<typeof payouts> = [];
-      for (const p of before) {
-        const ready = p.pieces.filter((x) => !x.claimed && x.height <= height);
-        if (!ready.length) continue;
-        const target = surplusHeight(p, height);
-        const lines: string[] = [];
-        let surplus = 0;
-        let batch: ReturnType<typeof resplitTail> | undefined;
-        for (const x of ready) {
-          if (x.tail && p.pendingAmounts?.length) {
-            batch = resplitTail(p.pendingAmounts, x.height, p.frequency ?? 'daily', p.customDays);
-            lines.push(
-              `${fmtBsv(p.pendingAmounts[0])} payout. The remaining ${p.pendingAmounts.length - 1} payouts were held in one lock and are now in your wallet.`,
-            );
-            continue;
-          }
-          if (p.mode !== 'usd-target' || !x.usdTarget) {
-            lines.push(`${fmtBsv(x.sats)} to your wallet`);
-            continue;
-          }
-          const r = payoutFor(x.sats, x.usdTarget, todays, target != null);
-          if (r.kind === 'wait')
-            lines.push(`${fmtBsv(x.sats)} claimed. ${r.reason} The full piece is in your wallet as BSV.`);
-          else if (r.kind === 'short') {
-            x.paidUsd = r.paidUsd;
-            lines.push(`Paid ${fmtUsd(r.paidUsd)} of ${fmtUsd(r.targetUsd)} (${fmtBsv(r.paySats)})`);
-          } else {
-            x.paidUsd = r.paidUsd;
-            surplus += r.surplusSats;
-            lines.push(
-              `Paid ${fmtUsd(r.paidUsd)} (${fmtBsv(r.paySats)})${r.relock ? `, surplus ${fmtBsv(r.surplusSats)}` : ''}`,
-            );
-          }
-        }
-        out.push({
-          plan: p,
-          lines,
-          relock:
-            surplus && target != null
-              ? { height: target, sats: surplus, usdTarget: p.usdPerPayout, extend: p.surplusTo === 'extend' }
-              : undefined,
-          batch: batch?.pieces.length ? batch : undefined,
-        });
-      }
+      const out = planPayouts(before, height, claimed.spent, todays);
       savePlans(
         account,
         loadPlans(account, chromeStorageService).map((p) => before.find((b) => b.id === p.id) ?? p),
@@ -712,6 +678,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
               ) : (
                 [...plans].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(renderPlan)
               )}
+              <BsvLocksSection height={height} plans={plans} onChanged={() => void refresh()} />
               <TokenLocksSection height={height} />
               <button
                 className="text-xs py-2 flex items-center gap-1 justify-center"

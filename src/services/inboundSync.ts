@@ -106,7 +106,7 @@ type TxRow = {
 type ProvenRow = { txid?: string; rawTx?: Bytes | null };
 type ReqRow = { txid?: string; status?: string };
 /** Transaction states of a payment this device has made but the network may not have yet ('unfail': being re-checked). */
-const IN_FLIGHT = new Set(['nosend', 'unsigned', 'unprocessed', 'sending', 'unproven', 'nonfinal', 'unfail']);
+export const IN_FLIGHT = new Set(['nosend', 'unsigned', 'unprocessed', 'sending', 'unproven', 'nonfinal', 'unfail']);
 /** Proof-request states in which the toolbox's monitor fails the transaction. */
 const REQ_FAILED = new Set(['invalid', 'doubleSpend']);
 type TagRow = { outputTagId?: number; tag?: string };

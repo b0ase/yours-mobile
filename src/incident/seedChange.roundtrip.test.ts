@@ -31,6 +31,7 @@ import {
   wocAddressHistory,
   wocScriptHash,
   wocSpentLookup,
+  type SeedChangeReport,
   type SeedChangeState,
 } from '../services/seedChange';
 import { brc29Script } from '../services/recoverByTxid';
@@ -295,7 +296,14 @@ const memKV = () => {
 };
 
 /** The production wiring of the Troubleshooting entry on this wallet, against the mocked chain. */
-const recover = (w: W8, chain: Chain, services: unknown, seedAddresses: string[], kv = memKV()) =>
+const recover = (
+  w: W8,
+  chain: Chain,
+  services: unknown,
+  seedAddresses: string[],
+  kv = memKV(),
+  opts: { now?: () => number } = {},
+) =>
   recoverSeedChange(
     makeSeedChangeDeps({
       storage: w.storage,
@@ -306,8 +314,33 @@ const recover = (w: W8, chain: Chain, services: unknown, seedAddresses: string[]
       addressHistory: wocAddressHistory({ fetch: fakeWoc(chain), minIntervalMs: 0, sleep: async () => undefined }),
       kv,
       log: () => undefined,
+      now: opts.now,
     }),
   );
+
+/**
+ * Tap "Carry on" until the scan is done: a run that reaches its time budget pauses and the next one resumes from the
+ * saved state (what a slow or busy device does). restoredSats is the total over all runs (it lives in the saved state).
+ */
+const recoverAll = async (
+  w: W8,
+  chain: Chain,
+  services: unknown,
+  seedAddresses: string[],
+  opts: { now?: () => number; maxRuns?: number } = {},
+) => {
+  const kv = memKV();
+  let r = await recover(w, chain, services, seedAddresses, kv, opts);
+  for (let i = 1; i < (opts.maxRuns ?? 50) && (!r.done || r.paused); i++)
+    r = await recover(w, chain, services, seedAddresses, kv, opts);
+  return r;
+};
+
+/** A clock that jumps `stepMs` on every read: every step looks slow, as on a loaded machine. */
+const slowClock = (stepMs: number) => {
+  let t = 1_700_000_000_000;
+  return () => (t += stepMs);
+};
 
 const inputsOf = (rawTx: number[]) =>
   Transaction.fromBinary(rawTx).inputs.map((i) => `${i.sourceTXID}.${i.sourceOutputIndex}`);
@@ -881,14 +914,16 @@ describe('release click-through F-B on the real toolbox: seed-address history fr
     expect(r.restoredSats).toBe(expected);
   }, 120000);
 
-  test('a seed address with more than 100 transactions: the payment on page 2 is found', async () => {
+  /** 120 older transactions on the address come first, so the funding and the sweep sit on WhatsOnChain's page 2. */
+  const pageTwo = async (
+    run: (b: W8, chain: Chain, services: unknown, addrs: string[]) => Promise<SeedChangeReport>,
+  ) => {
     const chain = newChain();
     const services = makeServices(chain);
     const { w: a, root, legacyAddress } = await fundedWallet(chain, services);
     const p = await pay(a, chain, 250_000);
     mine(chain, await rawOf(a, p.txid!));
     const expected = await balance(a);
-    // 120 older transactions on the address come first, so the funding and the sweep sit on WhatsOnChain's page 2.
     const script = new P2PKH().lock(legacyAddress).toHex();
     const fillers = Array.from({ length: 120 }, (_, i) => {
       const t = new Transaction();
@@ -903,9 +938,33 @@ describe('release click-through F-B on the real toolbox: seed-address history fr
     });
     chain.history.set(script, [...fillers, ...chain.history.get(script)!]);
     const b = await openWallet(root, `seedchange-fb-${++dbn}`, services);
-    const r = await recover(b, chain, services, [legacyAddress]);
-    console.log('[F-B page 2]', seedChangeSummary(r));
+    const r = await run(b, chain, services, [legacyAddress]);
+    console.log('[F-B page 2]', seedChangeSummary(r), `(${r.runs} run${r.runs === 1 ? '' : 's'})`);
+    expect(r.done).toBe(true);
     expect(r.restoredSats).toBe(expected);
     expect(await balance(b)).toBe(expected);
-  }, 180000);
+  };
+
+  // One run reaches page 2. The clock is frozen, so a busy machine can't make the run pause at its time budget: the
+  // only way to fail is a run that really stops short of page 2 (review 21 re-check).
+  test('a seed address with more than 100 transactions: one run finds the payment on page 2', async () => {
+    await pageTwo(async (b, chain, services, addrs) => {
+      const frozen = 1_700_000_000_000;
+      const r = await recover(b, chain, services, addrs, memKV(), { now: () => frozen });
+      expect(r.runs).toBe(1);
+      expect(r.paused).toBe(false);
+      return r;
+    });
+  }, 600000);
+
+  // Review 21: under load (tsc and probes alongside) one run reached its 4-minute budget and paused. A busy device
+  // pauses the same way; carrying on from the saved state must still find the page-2 payment. Every clock read here
+  // jumps 5 s, so every run pauses at its budget, deterministically.
+  test('the payment on page 2 is found even when every run reaches its time budget (carry on until done)', async () => {
+    await pageTwo(async (b, chain, services, addrs) => {
+      const r = await recoverAll(b, chain, services, addrs, { now: slowClock(5_000) });
+      expect(r.runs).toBeGreaterThan(1); // it did pause and carry on
+      return r;
+    });
+  }, 600000);
 });

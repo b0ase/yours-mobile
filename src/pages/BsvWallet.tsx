@@ -54,7 +54,7 @@ import { BackupPromo } from '../components/BackupPromo';
 import lockIcon from '../assets/lock.svg';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useServiceContext } from '../hooks/useServiceContext';
-import { getLockData, sendAllBsv, syncAddresses, unlockBsv, type Bsv21Balance, type LockData } from '@1sat/actions';
+import { getLockData, sendAllBsv, syncAddresses, type Bsv21Balance, type LockData } from '@1sat/actions';
 import { sendBsv } from '../utils/guardedSendBsv';
 import { getWalletBalance, fetchExchangeRate, cachedExchangeRate } from '../utils/wallet';
 import { sendMessageAsync } from '../utils/chromeHelpers';
@@ -755,6 +755,37 @@ export const BsvWallet = () => {
     setLockData(lockData);
   };
 
+  // A restored wallet / new device: find its BSV locks on chain once per device store (seed-derived lock key, 1Sat's
+  // indexer), file them into the lock basket, then refresh the Locks row (which also auto-claims any that are ready).
+  // After a failed run it waits (1 h doubling to 24 h) before trying again. Quiet unless found.
+  const bsvLockScanTried = useRef(new Set<string>());
+  useEffect(() => {
+    if (!identityAddress || !apiContext.services || bsvLockScanTried.current.has(identityAddress)) return;
+    bsvLockScanTried.current.add(identityAddress);
+    let live = true;
+    void (async () => {
+      try {
+        const { bsvLocksScanDue, scanBsvLocks } = await import('../mobile/locks/lockFinder');
+        const { lockScanOptions } = await import('../mobile/locks/lockScanWiring');
+        const opts = await lockScanOptions();
+        if (!live || !bsvLocksScanDue(identityAddress, opts.store)) return;
+        const res = await scanBsvLocks(apiContext, identityAddress, opts);
+        if (!live || res.added === 0) return;
+        setLockData(await getLockData.execute(apiContext, {}));
+        snackRef.current(
+          `Found ${res.added} BSV lock${res.added === 1 ? '' : 's'} on chain. See Pots & Locks › Locks.`,
+          'info',
+          5000,
+        );
+      } catch {
+        // indexer down: the next open tries again, and Find my locks is always there
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [identityAddress, apiContext]);
+
   useEffect(() => {
     if (loadLocks) loadLocks();
     getAndSetBsvBalance();
@@ -948,18 +979,21 @@ export const BsvWallet = () => {
   useEffect(() => {
     if (!identityAddress || isSyncing) return;
     getAndSetBsvBalance();
-    // Auto-unlock: attempt to unlock matured coins via CWI
+    // Auto-unlock: claim matured locks via CWI. Only locks worth more than their fee at this wallet's rate (and locks
+    // Find my locks added from 1,000 sats), in claims of at most 50 (lockApi.claimLocks): anyone can pay dust locks
+    // to the public lock address (review 21 M2, N3).
     if (!unlockAttempted && lockData?.unlockable) {
       (async () => {
-        const res = await unlockBsv.execute(apiContext, {});
+        const { claimMatured } = await import('../mobile/locks/lockApi');
+        const { claimRate } = await import('../mobile/locks/lockScanWiring');
+        const satsPerKb = await claimRate(chromeStorageService);
+        const txid = await claimMatured(apiContext, { satsPerKb }).catch(() => undefined);
         setUnlockAttempted(true);
-        if (res.txid) {
+        if (txid) {
           await refreshUtxos();
           await sleep(1000);
           addSnackbar('Successfully unlocked coins!', 'success');
         }
-        // Note: unlockBsv may return error if it requires direct key access
-        // In that case, unlocking happens on the service worker side
       })();
     }
 

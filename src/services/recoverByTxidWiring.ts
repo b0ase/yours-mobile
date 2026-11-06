@@ -6,6 +6,7 @@ import { Beef, Hash, MerklePath, Transaction, Utils } from '@bsv/sdk';
 import type { KeyDeriver } from '@bsv/sdk';
 import type { StorageProvider, Wallet, WalletStorageManager } from '@bsv/wallet-toolbox-client';
 import { timedStep, type Derivation, type TxidRecoverDeps } from './recoverByTxid';
+import { IN_FLIGHT } from './inboundSync';
 
 type Row = {
   outputId: number;
@@ -212,6 +213,47 @@ export function makeTxidRecoverDeps(w: TxidWiring): TxidRecoverDeps {
           partial: { userId, transactionId: t.transactionId },
         })) as unknown as Row[];
         return { tx: { transactionId: t.transactionId, status: t.status, provenTxId: t.provenTxId }, outputs };
+      }),
+    inFlightSpends: async (txid) =>
+      withRepairStore(storage, async (sp, userId) => {
+        const held = new Set<number>();
+        const statusOf = new Map<number, string | undefined>();
+        const status = async (id: number) => {
+          if (!statusOf.has(id))
+            statusOf.set(
+              id,
+              (await sp.findTransactions({ partial: { userId, transactionId: id }, noRawTx: true }))[0]?.status,
+            );
+          return statusOf.get(id);
+        };
+        // A row still linked to its spender (a link to its own transaction is a broken link: nothing spends itself).
+        const [t] = (await sp.findTransactions({ partial: { userId, txid }, noRawTx: true })) as unknown as TxRow[];
+        if (t)
+          for (const o of (await sp.findOutputs({
+            partial: { userId, transactionId: t.transactionId },
+            noScript: true,
+          })) as unknown as Row[])
+            if (
+              typeof o.spentBy === 'number' &&
+              o.spentBy !== t.transactionId &&
+              IN_FLIGHT.has((await status(o.spentBy)) ?? '')
+            )
+              held.add(o.vout);
+        // Any in-flight transaction of this device that names one of txid's outputs as an input (links can be gone).
+        for (const st of IN_FLIGHT)
+          for (const p of await sp.findTransactions({ partial: { userId, status: st as never } })) {
+            const raw = p.rawTx?.length
+              ? p.rawTx
+              : (await sp.findProvenTxReqs({ partial: { txid: p.txid ?? '' } }))[0]?.rawTx;
+            if (!raw?.length) continue;
+            try {
+              for (const i of Transaction.fromBinary(Array.from(raw)).inputs)
+                if (i.sourceTXID === txid) held.add(i.sourceOutputIndex);
+            } catch {
+              // unreadable: its links (above) are all there is to go on
+            }
+          }
+        return held;
       }),
     internalize: async (args) => {
       if (storage.isActiveStorageProvider()) {
