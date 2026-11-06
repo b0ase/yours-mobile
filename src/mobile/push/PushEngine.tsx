@@ -2,7 +2,7 @@ import { useContext, useEffect, useMemo } from 'react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { BottomMenuContext } from '../../contexts/BottomMenuContext';
 import { loadSession, SESSION_EVENT } from '../chat/api';
-import { requestRoomByTicker } from '../chat/segmentNav';
+import { requestChatSegment, requestRoomByTicker } from '../chat/segmentNav';
 import { asMenuItem } from '../tabs/tabs';
 import { requestSignIns } from '../settings/signIns';
 import { isNative } from '../native';
@@ -11,7 +11,7 @@ import { routeFromQuery, type PushRoute } from './logic';
 import { onPushRoute, syncPush, takeRouteFrom } from './register';
 import { offerAppLink } from '../spaces/inviteLinks';
 import { requestPartnerRequest } from '../placement/partnership/openRequest';
-import { openBMailDraft, openBMailMeeting } from '../bmail/store';
+import { openBMail, openBMailDraft, openBMailMeeting } from '../bmail/store';
 import { COMPOSE_QUERY_KEYS, parseComposeQuery } from '../bmail/meeting';
 import { IS_EXTENSION } from '../extension';
 import { isTauri } from '../webApp';
@@ -71,8 +71,14 @@ const PushEngine = () => {
       if (r.segment === 'space') return offerAppLink(`bwalletx://space/${r.ticker}`);
       // Shared account request: the Lock page › Partnership shares, scrolled to the request.
       if (r.segment === 'partner') return requestPartnerRequest(r.ticker, r.id ?? null);
-      // meeting_invite before it starts: the bMail Inbox, on the invite (owner, 26 Oct 2026).
-      if (r.segment === 'mail') return openBMailMeeting(r.ticker);
+      // meeting_invite before it starts: the bMail Inbox, on the invite (owner, 26 Oct 2026). No ticker: the Inbox.
+      if (r.segment === 'mail') return r.ticker ? openBMailMeeting(r.ticker) : openBMail();
+      // A chat notice that names no room: the Chat tab. A missed call: Chat › Calls.
+      if (r.segment === 'chat' || r.segment === 'calls') {
+        handleSelect(asMenuItem('chat'));
+        if (r.segment === 'calls') requestChatSegment('calls');
+        return;
+      }
       // A live meeting on Desktop or the extension also opens the bChatX room page (logic.ts meetingRoute builds
       // openUrl from the ticker; it is always https://www.bchatx.com/room/<TICKER>).
       if (r.openUrl && (IS_EXTENSION || isTauri())) openInBrowser(r.openUrl);

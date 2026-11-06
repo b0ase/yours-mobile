@@ -262,6 +262,15 @@ import {
 } from './services/pinnedMint';
 import { oneShotGrant } from './services/oneShotGrant';
 import {
+  SEAL_PROTOCOL,
+  SEAL_REQUEST_PREFIX,
+  SealPasses,
+  isSealRequestId,
+  readSealSign,
+  sealSheetFor,
+  type SealSheet,
+} from './services/sealPass';
+import {
   isReservedProtocol,
   refusalCode,
   reservedProtocolRefusal,
@@ -396,7 +405,10 @@ const sendChecksContext = (ctx: AccountContext | null): SendChecksContext | null
         log: (m, d) => console.warn(m, d ?? ''),
       }
     : null;
-/** After a refusal (invalidTx or doubleSpend): clear the inputs the chain proves spent, recorded for undo. */
+/**
+ * After a refusal (invalidTx or doubleSpend): clear the inputs the chain proves spent, recorded for undo. A coin the
+ * toolbox already set unspendable counts as cleared (ownSend.ts healRefusedInputs isSpendable; sign-and-seal 5cd462ce).
+ */
 const healRejectedInputs = (ctx: AccountContext, error: unknown): Promise<HealReport | null> =>
   healRefusedInputs(sendChecksContext(ctx), error);
 /**
@@ -1390,6 +1402,38 @@ const askReconnect = (originator: string): Promise<void> =>
     permissionBundler.add(request);
   });
 
+/**
+ * One Seal sheet for bit-sign's sign-and-seal (services/sealPass.ts, owner 2 Nov 2026). sealPasses: per site, the
+ * approval that lets exactly that seal's sign and its very next matching payment through. The sheet is a synthetic
+ * line (never sent to the permissions manager) carrying the seal's words; it stores nothing.
+ */
+const sealPasses = new SealPasses();
+let sealSheetCounter = 0;
+const askSealSheet = (originator: string, seal: SealSheet): Promise<void> =>
+  new Promise<void>((resolve, reject) => {
+    const requestID = `${SEAL_REQUEST_PREFIX}${Date.now().toString(36)}-${(sealSheetCounter++).toString(36)}`;
+    const request = {
+      requestID,
+      type: 'protocol',
+      originator,
+      protocolID: [...SEAL_PROTOCOL],
+      counterparty: 'anyone',
+      reason: seal.title,
+      seal,
+    } as unknown as BundledRequest & BundleRequest;
+    pendingPermissionRequests.set(requestID, { request, resolve, reject });
+    // Unanswered, it expires like every other sheet (nothing was signed or paid).
+    setTimeout(() => {
+      if (pendingPermissionRequests.has(requestID)) expireSpendRequest(requestID);
+    }, PROMPT_EXPIRY_MS);
+    try {
+      permissionBundler.add(request);
+    } catch (error) {
+      pendingPermissionRequests.delete(requestID);
+      reject(error instanceof Error ? error : new Error(String(error)));
+    }
+  });
+
 // Framed sites (services/frameAccess.ts): approved (frame origin, top origin) pairs, and which parents each site was
 // recently framed by, so every sheet for it says "inside <top>".
 const FRAME_PAIRS_KEY = 'bwxFramePairs';
@@ -2067,6 +2111,17 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
     if (request.type === 'spending') pass.charged = request.spending?.satoshis;
     return accountContext.wallet.grantPermission(oneShotGrant(request.requestID));
   }
+  // The one Seal sheet already approved this seal's sign or its matching payment (services/sealPass.ts). Answered
+  // below, after the blocked-site check, for a current pairing only.
+  const sealCovered =
+    !!mintSite &&
+    !!accountContext?.wallet &&
+    pairedGrantAllowed(request.originator) &&
+    (sealPasses.coversProtocol(
+      { ...request, originator: mintSite },
+      protocolCalls.count(mintSite, [SEAL_PROTOCOL[0], SEAL_PROTOCOL[1]]),
+    ) ||
+      sealPasses.coversSpend({ ...request, originator: mintSite }, payCallsInFlight.get(mintSite) ?? 0));
   const deniedThisSession =
     request.originator && request.originator !== ADMIN_ORIGINATOR && isBasketRead(request)
       ? basketDenials.has(normalizeOriginator(request.originator), request.basket)
@@ -2083,6 +2138,14 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
         if (blocked) {
           accountContext?.wallet.denyPermission(request.requestID).catch(() => undefined);
           reject(new Error(BLOCKED_SITE_REFUSAL));
+          return;
+        }
+        if (sealCovered && accountContext?.wallet) {
+          console.log(`[bwx-req] seal pass covers ${request.type} host=${siteHost(request.originator)}`);
+          accountContext.wallet
+            .grantPermission(oneShotGrant(request.requestID))
+            .then(() => resolve())
+            .catch((error: unknown) => reject(error instanceof Error ? error : new Error(String(error))));
           return;
         }
         if (trusted && accountContext?.wallet) {
@@ -2535,7 +2598,7 @@ if (isInServiceWorker) {
     const failPermission = (id: string) => {
       const pending = pendingPermissionRequests.get(id);
       pendingPermissionRequests.delete(id);
-      if (!isReconnectRequestId(id)) rejectManagerRequest(wallet, id, err).catch(() => undefined);
+      if (!isReconnectRequestId(id) && !isSealRequestId(id)) rejectManagerRequest(wallet, id, err).catch(() => undefined);
       pending?.reject(err);
     };
     switch (kind) {
@@ -3861,7 +3924,19 @@ if (!(
               console.log('[createAction] identical call already running: joined it');
               return true;
             }
-            const donePay = trackPayCall(message.originator);
+            const donePayCall = trackPayCall(message.originator);
+            // The site's next payment after a Seal sheet: its spend rides that sheet only if it is that seal
+            // (services/sealPass.ts). Either way this call uses the pass up.
+            const sealSiteKey =
+              typeof message.originator === 'string' && message.originator !== ADMIN_ORIGINATOR
+                ? normalizeOriginator(message.originator)
+                : '';
+            if (sealSiteKey && sealPasses.beginAction(sealSiteKey, message.params))
+              console.log(`[createAction] seal pass: this is the approved seal of ${siteHost(sealSiteKey)}`);
+            const donePay = () => {
+              if (sealSiteKey) sealPasses.endAction(sealSiteKey);
+              donePayCall();
+            };
             runDappRequest(processCWICreateAction(message, respond).finally(donePay));
             return true;
           }
@@ -4735,9 +4810,9 @@ if (!(
     pendingPermissionRequests.delete(response.requestID);
     permissionBundler.removeRequest(response.requestID);
 
-    if (isReconnectRequestId(response.requestID)) {
+    if (isReconnectRequestId(response.requestID) || isSealRequestId(response.requestID)) {
       if (response.granted) pending.resolve();
-      else pending.reject(new Error('Permission denied by user'));
+      else pending.reject(isSealRequestId(response.requestID) ? userDeniedError() : new Error('Permission denied by user'));
       closeDappPopupIfNoUi();
       return true;
     }
@@ -5382,6 +5457,18 @@ if (!(
         trustSite: false,
       };
     }
+    // A Seal sheet answers this one seal: nothing remembered, no allowance, envelope or trust (services/sealPass.ts).
+    if (bundle?.items.some((i) => isSealRequestId(i.requestID))) {
+      response = {
+        ...response,
+        allowanceUsd: 0,
+        allowancePerPaymentUsd: 0,
+        allowancePayees: undefined,
+        envelopeUsd: 0,
+        trustSite: false,
+        remember: false,
+      };
+    }
     // Bound to exactly what was on screen: a missing or different hash grants nothing (permissionBundle.ts).
     const result = permissionBundler.resolve(response.bundleID, response.decisions ?? {}, response.seenHash ?? '');
     // Duplicate sign-in prompt (owner, 26 Oct 2026: Approve did nothing, the same sheet came back, the second Approve
@@ -5498,7 +5585,7 @@ if (!(
           const pending = pendingPermissionRequests.get(r.requestID);
           pendingPermissionRequests.delete(r.requestID);
           if (!pending) return;
-          if (isReconnectRequestId(r.requestID)) return pending.resolve();
+          if (isReconnectRequestId(r.requestID) || isSealRequestId(r.requestID)) return pending.resolve();
           try {
             if (!wallet) throw new Error('Wallet is locked');
             await wallet.grantPermission({ requestID: r.requestID, expiry });
@@ -5512,6 +5599,7 @@ if (!(
           pendingPermissionRequests.delete(r.requestID);
           if (!pending) return;
           if (isReconnectRequestId(r.requestID)) return pending.reject(new Error('Permission denied by user'));
+          if (isSealRequestId(r.requestID)) return pending.reject(userDeniedError());
           // A blocked sheet is handled by the block itself; a plain No to a basket read stands for the session.
           if (!response.block) noteBasketDenial(r as BundleRequest);
           try {
@@ -6427,20 +6515,46 @@ if (!(
     message: { params: CreateSignatureArgs; originator?: string },
     sendResponse: CallbackResponse,
   ) => {
+    let sealSite = '';
+    let sealRecord = '';
     try {
       console.log('[background] processCWICreateSignature: entering, originator:', message.originator);
       const w = await ensureWallet();
+      // bit-sign's sign-and-seal (services/sealPass.ts): ONE Seal sheet now, for this sign and its payment. Only a
+      // site's call, for this account's own identity key, from a site that is not blocked; anything else as before.
+      sealSite =
+        message.originator && message.originator !== ADMIN_ORIGINATOR ? normalizeOriginator(message.originator) : '';
+      const seal = sealSite
+        ? readSealSign(
+            message.params,
+            chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey || '',
+          )
+        : null;
+      if (seal && message.originator && !(await siteBlocked(message.originator))) {
+        console.log('[bwx-seal] createSignature: asking the one Seal sheet', sealSite);
+        await askSealSheet(message.originator, sealSheetFor(seal, sealSite));
+        sealPasses.approve(sealSite, seal);
+        sealRecord = seal.recordHash;
+        console.log('[bwx-seal] createSignature: Seal sheet approved, pass open', sealSite);
+      } else {
+        console.log('[bwx-seal] createSignature: not a seal sign (or site blocked)', sealSite || '(extension)', !!seal);
+      }
       await ensureUsbSeen('sign with your keys', message.originator);
+      console.log('[bwx-seal] createSignature: key check passed, signing', sealSite);
       console.log('[background] processCWICreateSignature: ensureWallet resolved, calling w.createSignature...');
       const result = await w.createSignature(message.params, message.originator);
       console.log('[background] processCWICreateSignature: success');
+      if (sealRecord) sealPasses.signed(sealSite, sealRecord);
       sendResponse({
         type: CWIEventName.CREATE_SIGNATURE,
         success: true,
         data: result,
+        // For the phone bridge only (mobile/dappBrowser.ts): keep the Face ID pass for the seal payment. Not sent on.
+        ...(sealRecord ? { sealApproved: true } : {}),
       });
     } catch (error) {
       console.error('[background] processCWICreateSignature: error:', error);
+      if (sealRecord) sealPasses.drop(sealSite);
       sendResponse({
         type: CWIEventName.CREATE_SIGNATURE,
         success: false,
@@ -7248,7 +7362,8 @@ if (!(
   // closed the side panel while a prompt was showing in it.
   denyAllPendingPrompts = () => {
       for (const [requestID, pending] of pendingPermissionRequests) {
-        if (!isReconnectRequestId(requestID)) accountContext?.wallet.denyPermission(requestID).catch(console.error);
+        if (!isReconnectRequestId(requestID) && !isSealRequestId(requestID))
+          accountContext?.wallet.denyPermission(requestID).catch(console.error);
         pending.reject(new Error('User dismissed the request'));
       }
       pendingPermissionRequests.clear();

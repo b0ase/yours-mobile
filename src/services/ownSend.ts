@@ -43,11 +43,11 @@ export type SendChecksContext = {
 
 type Txo = { getSpend?: (o: string) => Promise<string | null | undefined> };
 type StackStatus = { getStatusForTxids?: (t: string[]) => Promise<{ results?: { txid?: string; status?: string }[] }> };
-type OutputRow = { outputId: number; change?: boolean; type?: string; basketId?: number | null };
+type OutputRow = { outputId: number; change?: boolean; type?: string; basketId?: number | null; spendable?: boolean };
 type MarkingProvider = {
   findUsers: (a: { partial: { identityKey: string } }) => Promise<{ userId: number }[]>;
   findOutputs: (a: {
-    partial: { userId: number; txid: string; vout: number; spendable: boolean };
+    partial: { userId: number; txid: string; vout: number; spendable?: boolean };
     noScript?: boolean;
   }) => Promise<OutputRow[]>;
   findOutputBaskets: (a: { partial: { userId: number; name: string } }) => Promise<{ basketId: number }[]>;
@@ -135,12 +135,24 @@ export async function healRefusedInputs(c: SendChecksContext | null, error: unkn
         n += await sp.updateOutput(o.outputId, { spendable: false });
       return n;
     });
+  /**
+   * Spendable now? false = this device's store already holds it unspendable (the toolbox's stale-input check after the
+   * refused broadcast, owner's iPhone 3 Nov 2026, sign-and-seal 5cd462ce); null = no row, or the store can't be read
+   * (a remote store throws): never counted.
+   */
+  const isSpendable = (txid: string, vout: number) =>
+    run(async (sp) => {
+      const user = (await sp.findUsers({ partial: { identityKey: c.identityKey } }))[0];
+      if (!user) return null;
+      const rows = await sp.findOutputs({ partial: { userId: user.userId, txid, vout }, noScript: true });
+      return rows.length ? rows.some((o) => !!o.spendable) : null;
+    }).catch(() => null);
   try {
     const reason = refusalFor(refusedTxid(error));
     const heal = await healInvalidSend(
       error,
       (o) => txo.getSpend!(o),
-      { markSpent: setAside },
+      { markSpent: setAside, isSpendable },
       {
         // WhatsOnChain names mempool and mined spenders alike.
         fallback: c.mainnet ? async (o) => (await wocSpentStatus(o, undefined, c.fetch))?.txid ?? null : undefined,

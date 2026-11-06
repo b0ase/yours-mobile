@@ -953,6 +953,25 @@ body,
   line-height: 0;
 }
 
+/* Native seal page (src/mobile/chat/NativeSealPage.tsx): nothing may interrupt drawing. No selection, no long-press
+   callout, no magnifier anywhere on the signing page (owner's iPhone, 3 Nov 2026). Text fields stay selectable. */
+.bw-seal-noselect,
+.bw-seal-noselect * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.bw-seal-noselect input,
+.bw-seal-noselect textarea,
+.bw-seal-noselect [contenteditable='true'] {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+.bw-seal-pad canvas {
+  touch-action: none;
+}
+
 /* Signature pad (src/mobile/signature) */
 .bw-sigpad {
   position: fixed;
@@ -3552,4 +3571,11 @@ html[data-rail] .bw-dock-pad:has(> .bw-bcar) > .bw-backup-banner {
 }
 html[data-rail] .bw-dock-pad:has(> .bw-bcar) > .bw-sendrow {
   grid-row: 4;
+}
+
+/* A vertical swipe that starts on a bottom bar (tab bar, dock, bApp bar) must not drag the page: on iOS it scrolled
+   the document and the bar rode up the screen over black (owner's phone, 3 Nov 2026). pan-x keeps the dock's
+   sideways scroll; taps, long-presses and the bars' own pointer gestures are unaffected. */
+[data-bw-bottom-nav] {
+  touch-action: pan-x;
 }

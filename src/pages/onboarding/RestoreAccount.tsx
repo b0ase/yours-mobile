@@ -11,6 +11,8 @@ import {
 } from '../../utils/accountNameRules';
 import { BetaGate } from '../../mobile/sweep/BetaGate';
 import { useNavigate } from 'react-router-dom';
+import { TermsLine } from '../../mobile/ugc/UgcSheets';
+import { acceptTerms, termsAccepted } from '../../mobile/ugc/ugc';
 import { PasswordFields } from '../../mobile/names/PasswordFields';
 import { useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -833,11 +835,14 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
         transition={{ delay: 0.42 }}
         className="w-full"
       >
+        {/* Terms of Use at setup (owner, 3 Nov 2026): Enter agrees, so Feed, Chat, DMs and Calls just open later. */}
+        {(newWallet || !termsAccepted()) && <TermsLine className="mb-3 px-4" />}
         <Button
           theme={theme}
           type="primary"
           label="Enter"
           onClick={() => {
+            acceptTerms();
             window.location.reload();
           }}
         />

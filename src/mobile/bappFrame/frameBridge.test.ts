@@ -6,6 +6,7 @@ import {
   handoffOrigins,
   isAllowedFrameOrigin,
   parseXdmRequest,
+  FRAME_BITSIGN_CAPABILITIES,
   toXdmResponse,
 } from './frameBridge';
 
@@ -42,6 +43,12 @@ describe('XDM request validation', () => {
   test('accepts a well-formed BRC-100 call', () => {
     expect(parseXdmRequest(ok)).toEqual({ id: 'abc', call: 'getPublicKey', args: { identityKey: true } });
     expect(parseXdmRequest({ ...ok, args: undefined })?.args).toEqual({});
+  });
+  test('bitsign.capabilities: accepted, answered by the frame (no native pad, one-approval seal)', () => {
+    expect(parseXdmRequest({ ...ok, call: 'bitsign.capabilities', args: {} })?.call).toBe('bitsign.capabilities');
+    expect(FRAME_BITSIGN_CAPABILITIES).toEqual({ drawSignature: false, oneApprovalSeal: true, frameSession: true });
+    // Only the capabilities probe: the native pad itself is not offered in the frame.
+    expect(parseXdmRequest({ ...ok, call: 'bitsign.drawSignature' })).toBeNull();
   });
   test('rejects malformed or foreign messages', () => {
     expect(parseXdmRequest(null)).toBeNull();
@@ -161,4 +168,10 @@ describe('landing pages that hand off to another origin', () => {
     const appHeaders = { 'content-security-policy': "frame-ancestors 'none'", 'x-frame-options': 'DENY' };
     expect(framingAllowed(appHeaders, 'https://localhost')).toBe(false);
   });
+});
+
+test('bchatx.frameSession is a call the frame accepts (answered by the frame host for bChatX only)', () => {
+  const ok = { type: 'CWI', isInvocation: true, id: 'abc', call: 'bchatx.frameSession', args: { mode: 'code' } };
+  expect(parseXdmRequest(ok)).toEqual({ id: 'abc', call: 'bchatx.frameSession', args: { mode: 'code' } });
+  expect(parseXdmRequest({ ...ok, call: 'bchatx.frameToken' })).toBeNull();
 });

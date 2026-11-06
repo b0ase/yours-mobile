@@ -118,6 +118,9 @@ const addReports = (a: HealReport | null, b: HealReport | null): HealReport | nu
           inputs: [...(a.inputs ?? []), ...(b.inputs ?? [])],
           spenders: { ...(a.spenders ?? {}), ...(b.spenders ?? {}) },
           cleared: [...(a.cleared ?? []), ...(b.cleared ?? [])],
+          ...(a.alreadyOff?.length || b.alreadyOff?.length
+            ? { alreadyOff: [...(a.alreadyOff ?? []), ...(b.alreadyOff ?? [])] }
+            : {}),
           orphaned: [...(a.orphaned ?? []), ...(b.orphaned ?? [])],
         };
 

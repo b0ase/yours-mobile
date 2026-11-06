@@ -19,6 +19,9 @@ import { handleBitsignCall } from '../pair/bitsign';
 import { bitsignToXdm, parseFrameBitsignRequest } from './frameBitsign';
 import { SESSION_SPEND_TYPE } from '../wallet/live/liveLogic';
 import {
+  FRAME_BITSIGN_CAPABILITIES,
+  FRAME_BITSIGN_CAPABILITIES_CALL,
+  FRAME_SESSION_CALL,
   isAllowedFrameOrigin,
   isWalletRequestMessage,
   parseXdmRequest,
@@ -59,6 +62,19 @@ import { accountNamesFor } from '../names/accountNames';
 import { loadLastBalance } from '../wallet/balanceLoad';
 import { cachedExchangeRate } from '../../utils/wallet';
 import { useServiceContext } from '../../hooks/useServiceContext';
+import { BchatClient, defaultHttp, loadSession, saveSession } from '../chat/api';
+import { walletSigner } from '../chat/signer';
+import {
+  FRAME_CODE_PATH,
+  accountTag as frameAccountTag,
+  answerFrameSession,
+  isBchatFrameOrigin,
+  singleFlight,
+  type FrameSessionDeps,
+} from '../chat/frameSession';
+import { getChatAccount } from '../chat/chatAccount';
+import { Hash, Utils } from '@bsv/sdk';
+import { isNative } from '../native';
 import { BottomMenuContext } from '../../contexts/BottomMenuContext';
 
 /**
@@ -71,6 +87,7 @@ export const BappFrameHost = () => {
   const frame = useRef<HTMLIFrameElement>(null);
 
   const bwxDeps = useBwxDeps();
+  const frameSessionDeps = useFrameSessionDeps();
   const [ask, setAsk] = useState<{ text: string; resolve: (ok: boolean) => void } | null>(null);
   const askRef = useRef(ask);
   askRef.current = ask;
@@ -92,7 +109,14 @@ export const BappFrameHost = () => {
           });
     const onMessage = (e: MessageEvent) => {
       const win = frame.current?.contentWindow;
-      if (!win || e.source !== win || e.origin !== session.origin) return;
+      if (!win || e.source !== win) return;
+      // bChatX answers at two origins (services/bchatOrigin.ts): a frame opened on one that lands on the other is still
+      // bChatX. Anything else from our iframe at an unexpected origin is dropped, and SAID, never silently (3 Nov 2026:
+      // the framed sign-in never reached the wallet and nothing logged why).
+      if (e.origin !== session.origin && !(isBchatFrameOrigin(e.origin) && isBchatFrameOrigin(session.origin))) {
+        console.warn('[bapp frame] message from an unexpected origin dropped', e.origin, 'expected', session.origin);
+        return;
+      }
       // BWX (agent data): first-party bAgents only, refused for every other origin (docs/BAGENTS-PLAN.md).
       const bwx = parseBwx(e.data);
       if (bwx) {
@@ -131,6 +155,17 @@ export const BappFrameHost = () => {
       }
       const req = parseXdmRequest(e.data);
       if (!req) return;
+      if (req.call === FRAME_BITSIGN_CAPABILITIES_CALL) {
+        win.postMessage(toXdmResponse(req.id, { success: true, data: FRAME_BITSIGN_CAPABILITIES }), e.origin);
+        return;
+      }
+      // bChatX signs in as this wallet's account (chat/frameSession.ts): bChatX origins only, checked inside.
+      if (req.call === FRAME_SESSION_CALL) {
+        void answerFrameSession(e.origin, req.args, frameSessionDeps.current).then((reply) =>
+          win.postMessage(toXdmResponse(req.id, reply), e.origin),
+        );
+        return;
+      }
       const pageUrl = lastUrlFor(e.origin) ?? session.url;
       handleSiteCall(e.origin, pageUrl, req.call, req.args)
         .catch((error: unknown) => ({ success: false, error: error instanceof Error ? error.message : String(error) }))
@@ -439,6 +474,28 @@ const useBwxDeps = () => {
   const ref = useRef(deps);
   ref.current = deps;
   return ref;
+};
+
+/**
+ * The wallet side of bChatX's in-frame sign-in (chat/frameSession.ts): the active account's stored bChatX session,
+ * a wallet-key sign-in when it has none (the same one the Chat tab does on its own), and the one-time code mint.
+ */
+const useFrameSessionDeps = () => {
+  const { apiContext } = useServiceContext();
+  const ctx = useRef(apiContext);
+  ctx.current = apiContext;
+  const ref = useRef<FrameSessionDeps | null>(null);
+  ref.current ??= {
+    load: () => loadSession(),
+    signIn: singleFlight(async () => {
+      const s = await new BchatClient(defaultHttp(isNative)).signIn(walletSigner(ctx.current));
+      saveSession(s);
+      return s;
+    }),
+    mint: (session) => new BchatClient(defaultHttp(isNative), session).request('POST', FRAME_CODE_PATH, {}),
+    account: () => frameAccountTag(getChatAccount(), (v) => Utils.toHex(Hash.sha256(Utils.toArray(v, 'utf8')))),
+  };
+  return ref as { current: FrameSessionDeps };
 };
 
 /** Wide screen (web, extension tab): apps can be phone-sized or desktop-sized. */

@@ -146,7 +146,29 @@ EULA/terms acceptance with zero tolerance for objectionable content. Play's UGC 
 Fixes: (1) set `BWALLET_MARKET_REPORT_URL` to a bit-sign moderation endpoint and commit to a 24-hour
 response; (2) add Report and Block to DMs (bit-sign needs a block list for bChat DMs); (3) add a
 terms/EULA acceptance screen on first run with a zero-tolerance clause, plus a link in Settings; (4) publish a
-support contact in the app and on the store listing.
+support contact in the app and on the store listing. (All done on `feat/store-fixes`, 2 Oct 2026; the table above
+is the original audit.)
+
+**Where the terms are agreed (owner, 3 Nov 2026; replaces the card inside Feed / Chat / DMs / Calls).** The
+acceptance is part of account setup, so it comes before any UGC in every build, store builds included:
+
+- **Create / restore / import / master restore:** the last step carries one line above its button: "By continuing
+  you agree to the Terms of Use. We remove objectionable content and ban abusive accounts. Anything written to the
+  blockchain is public and permanent." ("Terms of Use" opens bchatx.com/terms#conduct). Tapping Enter / Restore
+  Wallet records the acceptance (`acceptTerms()`, `TERMS_VERSION` in `src/mobile/ugc/ugc.ts`, stored on the device).
+  Files: `pages/onboarding/{CreateAccount,RestoreAccount,ImportAccount,MasterRestore}.tsx`, `ugc/UgcSheets.tsx` `TermsLine`.
+- **Existing wallets that never agreed (or agreed to an older `TERMS_VERSION`), and paths that open the wallet
+  without a last setup step (passkey restore):** the same line as a small sheet with one Continue, right after
+  unlock (`TermsOnceSheet`, mounted once inside the router in `App.tsx`). It covers every screen until tapped and
+  can't be dismissed otherwise (`termsSheetNeeded` in `ugc.ts`, tested in `ugc/termsAtSetup.test.ts`).
+- **No path skips it:** Feed, Chat, DMs and Calls live behind the unlock screen (`App.tsx` renders the router only
+  when unlocked), and the sheet shows whenever a wallet is open and the terms aren't agreed. There is no
+  watch-only or guest mode with UGC: the guest pages (Name Store, Check a mint, bMusic artist pages) have no Feed,
+  Chat, DMs or Calls; a web deep link to `/m/feed`, `/m/chat`, `/m/calls`, `/m/bpics` or `/m/spaces` without a wallet
+  still gets the sheet.
+- Feed, Chat, DMs and Calls now just open. Report and Block on messages and profiles are unchanged. The long
+  bullet list (and its "we review every report within 24 hours" line) is gone from the app; Settings › Help & safety
+  keeps "Terms of use" (the same line, agreed state, full terms) and "Contact and reports" (support@bwalletx.com).
 
 ## 7. Account deletion (Apple 5.1.1(v); Google Play account deletion)
 
@@ -305,8 +327,8 @@ Contact everywhere: support@bwalletx.com.
   (bit-sign `POST /api/bitsign/account/delete`, identity-key signature, fresh sign-in), clears local data, and removes the
   account from the phone (the existing account-removal steps, or a full wipe when it is the only account). Web page for
   Google: https://www.bitcoinchat.online/delete-account (still served there, never redirected; the app links https://www.bchatx.com/delete-account).
-- **UGC (section 6).** Terms with a zero-tolerance clause (bchatx.com/terms#conduct) must be agreed once before
-  Feed, Chat/DMs or Calls (`src/mobile/ugc/`), and are linked in Settings. DMs have Report / Block in the conversation
+- **UGC (section 6).** Terms with a zero-tolerance clause (bchatx.com/terms#conduct) are agreed at account setup
+  (see "Where the terms are agreed" in section 6), and are linked in Settings. DMs have Report / Block in the conversation
   header; Feed profiles have Report or block. Blocks hide DMs and messages locally and go to bit-sign
   `/api/bitsign/me/blocks`, which refuses 1:1 messages both ways. Feed/Market reports now default to bit-sign
   `POST /api/bitsign/report` (`content_reports`, rate-limited). **Someone must review `content_reports` daily (24 h).**
@@ -342,7 +364,7 @@ The owner approved free Spaces in bWallet. `FREE_SPACES_ENABLED` and `roomSpaces
 
 - **Allowed in the store build:** the bWallet Lounge and other open (non-token) rooms show their Space banner. Users can listen, ask to speak, speak and chat. Nothing is bought, sold or unlocked by holding a token.
 - **Still bWalletX only (`BSPACES_ENABLED`):** Spaces in token rooms, the Spaces home and its tile, New Space, and paid entry ("Pay at the door", tickets). DoorKeeper and NewSpaceSheet are lazy chunks behind the inlined flag, so the store bundle contains none of their text. The store grep now also checks `Listeners pay|Pay at the door`.
-- **Moderation (Apple 1.2 / Play UGC):** in a Space anyone can report or block another person (person menu) or a chat message (flag on each message); blocked people's messages are hidden. Hosts and moderators keep mute, move to audience and remove. A "Community rules" link sits under the Space chat. The Chat tab, where Spaces open, is already behind the terms gate (`TermsGate`).
+- **Moderation (Apple 1.2 / Play UGC):** in a Space anyone can report or block another person (person menu) or a chat message (flag on each message); blocked people's messages are hidden. Hosts and moderators keep mute, move to audience and remove. A "Community rules" link sits under the Space chat. The terms are agreed at setup / unlock before the Chat tab, where Spaces open, is reachable (section 6, 3 Nov 2026).
 - **Android background audio:** `SpaceSessionService` (FOREGROUND_SERVICE_MEDIA_PLAYBACK + FOREGROUND_SERVICE_MICROPHONE) starts when a user joins a Space and stops when they leave, with an ongoing notification and a Leave button. This is what the Play foreground-service declaration describes.
 
 **Open question, Google Play (not decided):** Play's policies are looser than Apple 3.1.1 on blockchain tokens, and holding a token you already own to enter a room may be allowed there. Token-gated rooms stay off in the Play build too until someone checks the current Play policy wording (Blockchain-based content / tokenized digital assets) and the owner decides.
@@ -383,6 +405,7 @@ The owner approved free Spaces in bWallet. `FREE_SPACES_ENABLED` and `roomSpaces
 - **Exchange › Movies (15 Oct 2026):** bMovies Originals only (our own productions, no source tweet), each with its movie token (BSV-21, keyed on token ID; buying opens the movie's room) and its clip NFTs (1Sat OrdLock, play in the media player). `exchange/MoviesMarket.tsx` and `exchange/movies.ts` (GET `https://www.bmovies.app/api/originals`) are only imported by the Exchange chunk (`MARKET_ENABLED`), so a store build has none of it. Until bmovies.app ships that endpoint the tab shows an honest empty state. The store grep also checks `api/originals|Back this movie|Own a clip|Exchange · Movies|bMovies Originals`.
 
 - **Room X invites (15 Oct 2026, bWalletX only, `XINVITES_ENABLED`):** a room host's Invites sheet (`chat/XInvitesSheet.tsx`: one transaction sends the gate token plus sats to a fresh one-time key per @handle, links carry the key in the fragment) and the invitee's claim screen (`chat/XInviteClaim.tsx`: verify X, sweep the key) are lazy chunks behind the inlined flag; link routing in `spaces/inviteLinks.ts` and `scan/ScanSheet.tsx` sits behind the same flag. Token transfers that admit someone to a token room (2.1), so never in a store build. The store grep also checks `x-invites|Whoever opens this link|bwx.xinvites`.
+- **Room and invite links (2 Nov 2026, every build):** `bwalletx://room/…`, `/r/<T>`, `/room/<ref>[?invite=<token>]` and `/i/<code>` open the room's chat in the store edition too (`spaces/inviteLinks.ts`, `chat/roomLink.ts`). Only the routing is ungated: a room the user is a member of opens (open and private rooms are already in every build), an invite link joins through bit-sign's existing claim (invite links are refused in token rooms), and a token room still never opens in a store build: it shows `STORE_ROOM_NOTE`, with no Buy and no web door. Other non-members see bChatX's own page for the room in the bChatX frame. No new visible strings.
 - **Sign in with HandCash (15 Oct 2026, bWalletX only, `HANDCASH_SIGNIN_ENABLED`):** "Sign in with HandCash" beside Continue with X / Google (Create Account, Settings › Connect), "Claim name@bwalletx.com · First claim on your HandCash name", and Address book › Import "Bring in my HandCash friends". Same treatment as X (`socialLoginEnabled`): a third-party login for the account with no Sign in with Apple beside it is an Apple 4.8 risk, and HandCash is a competing wallet brand. The flag is a literal env check, so the store bundle has none of it. The store grep also checks `Sign in with HandCash|handcash-friends|auth/native/exchange|Bring in my HandCash|First claim on your HandCash`.
 - **Airdrop to holders (16 Oct 2026, bWalletX only, `HOLDER_DROP_ENABLED`):** token page › Issuer tools › "Airdrop to holders" (`holderDrop/HolderDropSheet.tsx`, pure logic in `holderDrop/holderDrop.ts`): snapshot a BSV-21 token's holders (GorillaPool holders API, keyed on token ID), send a fixed or pro-rata amount of the token, another BSV-21 you hold, or BSV (always carrying the bWalletX airdrop marker so it shows in the holders' inbox), one approval sheet for the whole drop then one transaction per batch, resumable with a per-drop ledger of paid addresses so nobody is paid twice, CSV receipt. Rewarding a token's holders is token-gated value (section 2), so the sheet is a lazy chunk behind the inlined flag and the entry row sits behind the same flag. The store grep also checks `Airdrop to holders|bwx.holderdrop`.
 - **bPositive (16 Oct 2026, bWalletX only, `BPOSITIVE_ENABLED`):** journeys with three witnesses, daily check-ins and pledges between friends (`bpositive/`, bit-sign `/api/bitsign/bpositive/*`, PR #299). Pledges are signed promises; no money moves. The site page says "Not in the store edition", so the page is a lazy chunk behind the inlined flag and its Apps tile sits behind the same literal env check. 18+ confirmation, Report and Block on every journey you don't own. The store grep also checks `bitsign/bpositive|A promise, no money moves`.

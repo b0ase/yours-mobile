@@ -132,6 +132,30 @@ export function namedSpentInputs(reason: string | undefined, inputs: string[]): 
 export interface HealStore {
   /** Mark this outpoint's output spendable: false for the account; resolves how many rows changed. */
   markSpent: (txid: string, vout: number) => Promise<number>;
+  /**
+   * Is this outpoint listed as spendable now? false = storage already holds it unspendable; null = no row, or can't
+   * tell. Owner's iPhone, 3 Nov 2026 (board minute 010 seal, UTXO_SPENT on eb6dcc27…:2): after a refused broadcast
+   * the toolbox's own stale-input check (markStaleInputsAsSpent) can mark the input spendable: false BEFORE this heal
+   * runs, so markSpent changed 0 rows, the heal reported "nothing cleared", and the one safe retry never ran even
+   * though the dead coin was already out of coin selection.
+   */
+  isSpendable?: (txid: string, vout: number) => Promise<boolean | null>;
+}
+
+/**
+ * Clear one proven-spent outpoint. `changed`: rows this heal set unspendable now; `already`: nothing changed, but storage
+ * already holds it unspendable (the toolbox's own stale-input check got there first, 3 Nov 2026). An unknown row, a
+ * remote store or an unreadable answer is never `already`. Never throws.
+ */
+async function clearOne(store: HealStore, op: string): Promise<{ changed: number; already: boolean }> {
+  const [txid, v] = op.split('_');
+  const vout = Number(v);
+  const changed = await store.markSpent(txid, vout).catch(() => 0);
+  if (changed > 0) return { changed, already: false };
+  const spendable = await Promise.resolve()
+    .then(() => store.isSpendable?.(txid, vout) ?? null)
+    .catch(() => null);
+  return { changed: 0, already: spendable === false };
 }
 
 export type HealReport = {
@@ -145,6 +169,12 @@ export type HealReport = {
   spenders?: Record<string, string | null>;
   /** The inputs whose rows this heal changed (spendable → false). */
   cleared?: string[];
+  /**
+   * Proven-spent inputs storage already held unspendable (the toolbox's stale-input check, 3 Nov 2026): counted in
+   * `released` (the retry can't pick them again) but NOT in `cleared`, because this heal changed nothing there, so
+   * nothing goes on the automatic check's undo list for them.
+   */
+  alreadyOff?: string[];
   /** Inputs set aside because their parent payment never reached the network (ownSend.ts healRefusedInputs). */
   orphaned?: string[];
 };
@@ -219,13 +249,21 @@ export async function healInvalidSend(
   };
   let released = 0;
   const cleared: string[] = [];
+  const alreadyOff: string[] = [];
+  // Counted when cleared now or already unspendable (clearOne): either way the retry can't pick it again. Whether the
+  // retry runs is still decided by every guard in spentRetry.ts judge (proof it can't go out, not our own spender,
+  // every spender named, double spends mined, orphans, one retry only).
   for (const op of Object.keys(spenders)) {
-    const [txid, vout] = op.split('_');
-    const n = await store.markSpent(txid, Number(vout)).catch(() => 0);
-    released += n;
-    if (n > 0) cleared.push(op);
+    const r = await clearOne(store, op);
+    if (r.changed > 0) {
+      released += r.changed;
+      cleared.push(op);
+    } else if (r.already) {
+      released += 1;
+      alreadyOff.push(op);
+    }
   }
-  return { checked: inputs.length, released, inputs, spenders, cleared };
+  return { checked: inputs.length, released, inputs, spenders, cleared, ...(alreadyOff.length ? { alreadyOff } : {}) };
 }
 
 /** What to add to the error the person sees. With nothing cleared, name the coins tried so a report can be traced. */

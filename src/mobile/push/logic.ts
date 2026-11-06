@@ -71,8 +71,12 @@ export const deviceBody = (o: {
  * the meeting starts). `openUrl`: a bChatX room page to ALSO open in a browser tab (meeting already live; Desktop and
  * the extension only, PushEngine.tsx). Owner, 26 Oct 2026.
  */
+/**
+ * `chat`: the Chat tab (a chat notification that names no usable room); `calls`: Chat › Calls (a missed call notice).
+ * Both have ticker ''. A `mail` route with ticker '' opens the bMail Inbox (a local "New mail" notice).
+ */
 export type PushRoute = {
-  segment: 'rooms' | 'dms' | 'signins' | 'space' | 'partner' | 'mail';
+  segment: 'rooms' | 'dms' | 'signins' | 'space' | 'partner' | 'mail' | 'chat' | 'calls';
   ticker: string;
   id?: string;
   openUrl?: string;
@@ -134,6 +138,10 @@ const docFromData = (data: Record<string, unknown>): string | undefined => {
   return undefined;
 };
 
+/** Kinds that are chat messages: a tap opens Chat even when the room is missing. */
+const CHAT_KINDS = new Set(['room_message', 'room_mention', 'b_answer', 'message', 'dm', 'chat', 'mention']);
+const CHAT_ROUTE: PushRoute = { segment: 'chat', ticker: '' };
+
 export const routeFromData = (
   raw: Record<string, unknown> | null | undefined,
   now: number = Date.now(),
@@ -161,7 +169,9 @@ export const routeFromData = (
     const m = /\/room\/([^/?#]+)/.exec(data.url);
     if (m) ticker = normTicker(decodeURIComponent(m[1]));
   }
-  if (!ticker) return null;
+  // A chat notification without a usable room still opens Chat rather than nothing (owner, 3 Nov 2026: tapping a
+  // message notification did not open the chat). Other kinds without a route (payments…) just open the app.
+  if (!ticker) return CHAT_KINDS.has(String(data.kind ?? '')) || truthy(data.dm) ? CHAT_ROUTE : null;
   const doc = docFromData(data);
   return { segment: truthy(data.dm) ? 'dms' : 'rooms', ticker, ...(doc ? { doc } : {}) };
 };
@@ -180,6 +190,27 @@ export const meetingRoute = (data: Record<string, unknown>, now: number): PushRo
   return { segment: 'rooms', ticker, openUrl: bchatxRoomUrl(ticker) };
 };
 
+/**
+ * A tapped LOCAL notification (notify/engine.ts schedules them while the app runs, `extra: {notifyId, target}`) → where
+ * to go, through the same queue as push taps so it works from a cold start too. Room → that room (DMs page when `dm`),
+ * calls → Chat › Calls, bmail → the Inbox. Posts and wallet notices just open the app.
+ */
+export const routeFromLocalExtra = (extra: unknown): PushRoute | null => {
+  const t = (extra && typeof extra === 'object' ? (extra as { target?: unknown }).target : null) as {
+    type?: unknown;
+    ticker?: unknown;
+    dm?: unknown;
+  } | null;
+  if (!t || typeof t !== 'object') return null;
+  if (t.type === 'room') {
+    const ticker = normTicker(t.ticker);
+    return ticker ? { segment: t.dm === true ? 'dms' : 'rooms', ticker } : CHAT_ROUTE;
+  }
+  if (t.type === 'calls') return { segment: 'calls', ticker: '' };
+  if (t.type === 'bmail') return { segment: 'mail', ticker: '' };
+  return null;
+};
+
 /** Web Push click → `?push=dms:ABC` on the page it opens, read back with routeFromQuery. */
 export const routeToQuery = (r: PushRoute) =>
   `push=${r.segment}:${encodeURIComponent(r.ticker)}${
@@ -192,6 +223,7 @@ export const routeToQuery = (r: PushRoute) =>
 export const routeFromQuery = (search: string): PushRoute | null => {
   const v = new URLSearchParams(search).get('push');
   if (v === 'signins:' || v === 'signins') return { segment: 'signins', ticker: '' };
+  if (v === 'chat:' || v === 'chat') return CHAT_ROUTE;
   const sp = v ? /^space:([A-Za-z0-9_-]{1,64})$/.exec(v) : null;
   if (sp) return { segment: 'space', ticker: sp[1] };
   const ml = v ? /^mail:(.+)$/.exec(v) : null;

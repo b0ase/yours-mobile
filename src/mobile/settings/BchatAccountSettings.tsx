@@ -16,6 +16,7 @@ import {
 } from '../wallet/bchatFollow';
 import { followBchat } from '../wallet/useBchatFollow';
 import { BioField } from './BioField';
+import { handlesStale, loadServerHandles, saveServerHandles, usableAlias } from '../chat/signInNames';
 
 const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
@@ -31,7 +32,9 @@ export const BchatAccountSettings = () => {
   const { account, selectedAccount } = chromeStorageService.getCurrentAccountObject();
   const id = selectedAccount ?? '';
   const names = useAccountNames(id, account?.name ?? '', account?.settings?.socialProfile?.displayName ?? '', false);
-  const alias = aliasOf(names.paymail);
+  // Never an inactive alias (an extra name bit-sign can't sign in as): the account's active handle instead.
+  const [serverHandles, setServerHandles] = useState(() => loadServerHandles(id));
+  const alias = usableAlias(aliasOf(names.paymail), serverHandles?.handles);
   const [pref, setPref] = useState<BchatPref>(() => loadBchatPref(id));
   const [status, setStatus] = useState<FollowStatus | null>(() => loadFollowStatus(id));
   const [session, setSession] = useState(() => loadSession());
@@ -46,6 +49,23 @@ export const BchatAccountSettings = () => {
     window.addEventListener(SESSION_EVENT, read);
     return () => window.removeEventListener(SESSION_EVENT, read);
   }, [id]);
+
+  // Which of this account's names bit-sign can sign in as (signInNames.ts); refreshed when stale.
+  useEffect(() => {
+    if (!id || !session || !handlesStale(serverHandles)) return;
+    let live = true;
+    void new BchatClient(defaultHttp(isNative), session)
+      .listHandles()
+      .then((info) => {
+        if (!live) return;
+        saveServerHandles(id, info.handles);
+        setServerHandles(loadServerHandles(id));
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [id, session, serverHandles]);
 
   const choose = async (next: BchatPref) => {
     if (!id) return;

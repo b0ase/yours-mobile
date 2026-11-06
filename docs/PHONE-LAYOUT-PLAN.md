@@ -13,7 +13,7 @@ Status: **plan for owner review. No code changes are approved.**
 - **`src/mobile/tabs/BottomMenu.tsx`** is the 3.75rem bar. It shows the Wallet badge for pending indexing.
 - **`src/mobile/tabs/useBottomMenu.tsx`** routes `BottomMenuContext.selected`. It has a module-level `routedSelection` guard and handles TAB_TAP re-taps.
 - **`src/mobile/tabs/useTabHome.ts`**: re-tapping a tab resets that tab's inner screens. Many pages subscribe to it.
-- **`src/mobile/tabs/MobileRoutes.tsx`** holds the `/m/*` routes: settings, media, agent, market, plus feed and chat wrapped in `TermsGate`.
+- **`src/mobile/tabs/MobileRoutes.tsx`** holds the `/m/*` routes: settings, media, agent, market, plus feed and chat (no terms gate since 3 Nov 2026: the terms are agreed at setup / unlock).
 - **`src/mobile/tabs/TopNav.tsx`** (269 lines) is a 5-slot bar: Accounts drawer · Calls · centre **b** (toggles `/m/agent`) · Media · Settings.
   - It also owns pair links (`takePairLink` / `onPairLink` from `src/mobile/pair/links.ts`), `initPairing()`, `setAgentPairDeps`, the account drawer, CallsSheet, AgentToolsSheet, PairSheet and HandleFlow.
   - TopNav is mounted inside each page (BrowserPage, Media, the agent page), so many instances exist.
@@ -113,7 +113,7 @@ Refactors:
 - **`src/mobile/tabs/useBottomMenu.tsx`**: keeps its contract. `routeFor` is now resolved through `screens.ts`. On selection it also tells the pager to scroll to that page (`window` event `bwallet:phone-go` with a ScreenId).
 - **`src/mobile/tabs/tabs.ts`**: keeps its exports for compatibility. `TAB_ORDER` is marked deprecated. `tabFor` / `routeFor` delegate to `screens.ts`.
 - **`src/mobile/tabs/useTabHome.ts`**: keep the existing `TAB_TAP` semantics. A dock tap or dot tap on the current page fires `TAB_TAP` with the legacy id, so every existing inner-screen reset keeps working unchanged.
-- **`src/mobile/tabs/MobileRoutes.tsx`** and `src/App.tsx` (via vite.config.mobile.ts patches): add `/m/home`, `/m/apps`, `/m/games`, `/m/people` and `/m/people/:id`. `/browser` stays as an alias to Apps. The strip pager is mounted as the layout that wraps these routes, so URL ↔ page stays in sync and Back works. Feed and Chat keep `TermsGate`.
+- **`src/mobile/tabs/MobileRoutes.tsx`** and `src/App.tsx` (via vite.config.mobile.ts patches): add `/m/home`, `/m/apps`, `/m/games`, `/m/people` and `/m/people/:id`. `/browser` stays as an alias to Apps. The strip pager is mounted as the layout that wraps these routes, so URL ↔ page stays in sync and Back works. Feed and Chat open directly (terms agreed at setup / unlock, 3 Nov 2026).
 
 **Routing principle:** the URL stays the source of truth. A swipe calls `navigate(route, { replace: true })`, so swiping does not fill the back stack. Dot and dock taps also use `replace`. Opening an inner screen (token page, person page) pushes as it does today. Android Back from a strip page that is not HOME goes to HOME. Back from HOME behaves as it does today.
 

@@ -77,6 +77,12 @@ export class ProtocolCalls {
     };
   }
 
+  /** How many protocol calls this site has running on this protocol (services/sealPass.ts: the seal's sign is alone). */
+  count(origin: string, pid: Pid): number {
+    const c = this.calls.get(keyOf(origin, pid));
+    return c ? c.encrypt + c.other : 0;
+  }
+
   /** True when only self-encrypts are running for this site+protocol (so a protocol request is one of them). */
   onlyEncrypt(origin: string, pid: Pid): boolean {
     const c = this.calls.get(keyOf(origin, pid));

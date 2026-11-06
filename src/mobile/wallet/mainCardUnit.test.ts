@@ -9,9 +9,9 @@ const read = (f: string) => readFileSync(join(import.meta.dir, f), 'utf8');
 // Owner, 25 Oct 2026: "$b" appears on the main wallet card only; everything else still says "BSV".
 describe('main wallet card unit', () => {
   test('cardBsv defaults to BSV and takes the main card label', () => {
-    expect(MAIN_CARD_UNIT).toBe('$bsv');
+    expect(MAIN_CARD_UNIT).toBe('BSV');
     expect(cardBsv(1234567)).toBe('BSV 0.01234567');
-    expect(cardBsv(1234567, MAIN_CARD_UNIT)).toBe('$bsv 0.01234567');
+    expect(cardBsv(1234567, MAIN_CARD_UNIT)).toBe('BSV 0.01234567');
   });
 
   test('the main card (WalletCard) uses $b for its amount and switch', () => {

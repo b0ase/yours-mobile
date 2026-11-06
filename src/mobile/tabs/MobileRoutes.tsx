@@ -1,6 +1,6 @@
 import { lazy, Suspense } from 'react';
+import { NativeSealPage } from '../chat/NativeSealPage';
 import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
-import { TermsGate } from '../ugc/UgcSheets';
 import { SectionBoundary } from '../wallet/SectionBoundary';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { BannerActions } from '../../web/BannerActions';
@@ -141,14 +141,7 @@ const MobileRoutes = () => (
         {JoinArtistPage && <Route path="media/artists/join" element={<JoinArtistPage />} />}
         <Route path="media/artists/:slug" element={ArtistsPage ? <ArtistsPage /> : <MediaPage />} />
         {AddReleasePage && <Route path="media/new" element={<AddReleasePage />} />}
-        <Route
-          path="bpics"
-          element={
-            <TermsGate>
-              <BPicsPage />
-            </TermsGate>
-          }
-        />
+        <Route path="bpics" element={<BPicsPage />} />
         {/* The top bar's centre b: the b agent. */}
         <Route path="ask-b" element={<AskB />} />
         {/* Everything you told b, and where each report stands (18 Oct 2026). */}
@@ -187,6 +180,8 @@ const MobileRoutes = () => (
         <Route path="home" element={<HomeScreen />} />
         <Route path="apps" element={<BrowserPage only="apps" />} />
         <Route path="bapp/:slug" element={<BappLinkPage />} />
+        {/* Review & sign, natively (chat/NativeSealPage.tsx): phone signing never goes through a web page. */}
+        <Route path="seal/:ticker/:doc" element={<NativeSealPage />} />
         {/* Phone layout app screens 2, 3… (phone/pager.tsx renders them; this is the fallback with the switch off). */}
         <Route path="screen/:n" element={<BrowserPage only="apps" />} />
         <Route path="games" element={<BrowserPage only="games" />} />
@@ -197,32 +192,11 @@ const MobileRoutes = () => (
         {BPositivePage && <Route path="bpositive" element={<BPositivePage />} />}
         {SpacesPage && <Route path="spaces" element={<SpacesPage />} />}
         {CalendarPage && <Route path="calendar" element={<CalendarPage />} />}
-        {/* Shared spaces: the terms (zero tolerance, Apple 1.2) are agreed once before first use. */}
-        <Route
-          path="feed"
-          element={
-            <TermsGate>
-              <FeedTab />
-            </TermsGate>
-          }
-        />
-        <Route
-          path="chat"
-          element={
-            <TermsGate>
-              <ChatPage />
-            </TermsGate>
-          }
-        />
+        {/* Shared spaces just open: the terms (zero tolerance, Apple 1.2) are agreed at setup / unlock (ugc/UgcSheets.tsx TermsOnceSheet). */}
+        <Route path="feed" element={<FeedTab />} />
+        <Route path="chat" element={<ChatPage />} />
         {/* Chat › bApps on its own URL (/chat/bapps on Desktop and web): every bApp room, entry by ticket. */}
-        <Route
-          path="chat/bapps"
-          element={
-            <TermsGate>
-              <ChatPage />
-            </TermsGate>
-          }
-        />
+        <Route path="chat/bapps" element={<ChatPage />} />
       </Routes>
     </Suspense>
   </SectionBoundary>

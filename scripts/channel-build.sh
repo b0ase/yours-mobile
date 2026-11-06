@@ -129,7 +129,7 @@ else
   NAME=bWallet
   ICON=AppIcon
   if [[ $CH == ios-private ]]; then
-    APP_ID=$APP_ID.private; NAME="bWalletX"; ICON=AppIconX
+    APP_ID=${IOS_PRIVATE_APP_ID:-$APP_ID.private}; NAME="bWalletX"; ICON=AppIconX
     # The launch storyboard names the "Splash" image: swap in the b+x splash for this build only.
     SPL=ios/App/App/Assets.xcassets
     cp "$SPL"/SplashX.imageset/*.png "$SPL/Splash.imageset/"
@@ -161,10 +161,10 @@ else
     done
     # No iPhone connected right now is not a failure (under pipefail an empty grep would end the run silently).
     PHONES=$(xcrun devicectl list devices 2>/dev/null | awk '/available \(paired\)|connected/' \
-      | grep -oE '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' || true)
+      | grep -oE '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}|[0-9A-F]{8}-[0-9A-F]{16}' | head -1 || true)
     [[ -z $PHONES ]] && echo "  (no iPhone available: skipped)"
     for DEV in $PHONES; do
-      UDID=$(xcrun devicectl device info details --device "$DEV" 2>/dev/null | awk -F': ' '/udid/ {print $2; exit}' || true)
+      UDID=$(xcrun devicectl device info details --device "$DEV" 2>/dev/null | awk -F': ' 'tolower($0) ~ /udid/ {print $2; exit}' || true)
       [[ -z $UDID ]] && { echo "    ✗ iPhone $DEV dropped out before install (unlock it and retry)"; continue; }
       echo "▸ iPhone $DEV"
       xb -configuration Debug -destination "id=$UDID" -derivedDataPath "/tmp/bw-$CH-dev" build

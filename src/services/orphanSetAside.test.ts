@@ -76,8 +76,13 @@ function world(o: {
           const s = status.get(partial.txid);
           return s ? [{ status: s, provenTxId: null, txid: partial.txid }] : [];
         },
-        findOutputs: async ({ partial }: { partial: { txid: string; vout: number; spendable: boolean } }) =>
-          rows.filter((r) => r.txid === partial.txid && r.vout === partial.vout && r.spendable === partial.spendable),
+        findOutputs: async ({ partial }: { partial: { txid: string; vout: number; spendable?: boolean } }) =>
+          rows.filter(
+            (r) =>
+              r.txid === partial.txid &&
+              r.vout === partial.vout &&
+              (partial.spendable === undefined || r.spendable === partial.spendable),
+          ),
         updateOutput: async (id: number, u: { spendable: boolean }) => {
           const r = rows.find((x) => x.outputId === id);
           if (!r || r.spendable === u.spendable) return 0;
@@ -237,5 +242,49 @@ describe('17d M1: the automatic check puts a set-aside coin back once its parent
     const r = await autoResyncCoins({ ...deps({ [op]: ORPHAN_MARK }, null, restored), mode: 'light' });
     expect(restored).toEqual([]);
     expect(r.cleared).toEqual({ [op]: ORPHAN_MARK });
+  });
+});
+
+/**
+ * test/phone-1106 merge (sign-and-seal 5cd462ce onto the candidate line): after a refused broadcast the toolbox's own
+ * stale-input check can set the input unspendable before this heal runs. The real healRefusedInputs counts it as
+ * released (so the one guarded retry can run), but it is not "cleared" by us and never goes on the undo list.
+ */
+describe('UTXO_SPENT on a coin the toolbox already set unspendable (native seal, 3 Nov)', () => {
+  const OTHER = 'e'.repeat(64);
+  test('counted as released, reported alreadyOff, not cleared, not recorded for undo', async () => {
+    const w = world({
+      parents: [parent(1_000)],
+      reason: ([id]) => `UTXO_SPENT (70): ${id}:0 utxo already spent by tx ${OTHER}[0]`,
+      rows: [{ spendable: false }],
+    });
+    const heal = await w.refuse();
+    expect(heal?.released).toBe(1);
+    expect(heal?.cleared).toEqual([]);
+    expect(heal?.alreadyOff).toEqual([`${w.ids[0]}_0`]);
+    expect(heal?.spenders).toEqual({ [`${w.ids[0]}_0`]: OTHER });
+    expect(w.recorded()).toEqual({});
+  });
+  test('a coin storage still lists as spendable is cleared and recorded, as before', async () => {
+    const w = world({
+      parents: [parent(1_000)],
+      reason: ([id]) => `UTXO_SPENT (70): ${id}:0 utxo already spent by tx ${OTHER}[0]`,
+    });
+    const heal = await w.refuse();
+    expect(heal?.released).toBe(1);
+    expect(heal?.cleared).toEqual([`${w.ids[0]}_0`]);
+    expect(heal?.alreadyOff).toBeUndefined();
+    expect(w.rows[0].spendable).toBe(false);
+    expect(w.recorded()).toEqual({ [`${w.ids[0]}_0`]: OTHER });
+  });
+  test('no row for the coin: never counted', async () => {
+    const w = world({
+      parents: [parent(1_000)],
+      reason: ([id]) => `UTXO_SPENT (70): ${id}:0 utxo already spent by tx ${OTHER}[0]`,
+      rows: [{ txid: 'f'.repeat(64) }],
+    });
+    const heal = await w.refuse();
+    expect(heal?.released).toBe(0);
+    expect(heal?.alreadyOff).toBeUndefined();
   });
 });
