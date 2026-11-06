@@ -138,7 +138,7 @@ export const DeleteAccountScreen = ({ onBack }: { onBack: () => void }) => {
             <p className="text-xs" style={{ color: MUTED }}>
               {others.length
                 ? 'Next, this account is removed from this phone and bWallet switches to your other account.'
-                : 'Next, the wallet is removed from this phone. Funds stay on the blockchain and can only be recovered with your recovery phrase.'}
+                : "Next, the wallet is removed from this phone. Funds stay on the blockchain. To get them all back you need your recovery phrase and this wallet's backup. Back up first: Settings › This account › Account › Wallet Backup."}
             </p>
             <button
               onClick={() => void removeFromDevice()}
