@@ -31,9 +31,7 @@ import { EnvelopePresets } from '../../components/approval/EnvelopePresets';
 import { envelopeUsdText } from '../../services/envelopes';
 import { escapeDenies, sheetControls } from './sheetControls';
 import { SEAL_BUTTON, SEAL_SITE_SUB, SealHero, SealSheetBody, SealTitle } from './SealSheetBody';
-
-/** Outputs listed under the payment before "and N more" (N3-3). */
-const RECIPIENTS_SHOWN = 12;
+import { PaymentRecipients } from './PaymentRecipients';
 import { ENVELOPES_ENABLED } from '../../mobile/storeBuild';
 import { dollarsFirst, dollarsInline } from '../../utils/dollarsFirst';
 
@@ -418,14 +416,7 @@ export const BundleSheet = (props: {
       )}
       <ul className="m-0 mt-1 pl-4 break-all" style={{ fontSize: 11, color: CARD.muted }}>
         {model.payment && <li>pay: {model.payment.detail}</li>}
-        {model.payment?.recipients?.slice(0, RECIPIENTS_SHOWN).map((x, i) => (
-          <li key={`to-${i}`} data-testid="pay-recipient">
-            to {x.to}: {x.satoshis.toLocaleString()} sats
-          </li>
-        ))}
-        {(model.payment?.recipients?.length ?? 0) > RECIPIENTS_SHOWN && (
-          <li>and {(model.payment!.recipients!.length - RECIPIENTS_SHOWN).toLocaleString()} more outputs</li>
-        )}
+        <PaymentRecipients recipients={model.payment?.recipients} />
         {allowanceSetsUsd > 0 && <li>allowance: monthly spending cap for {request.originator}</li>}
       </ul>
     </div>

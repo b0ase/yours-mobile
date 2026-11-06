@@ -501,6 +501,13 @@ const lineText = (r: BundleRequest): string => {
   }
 };
 
+/** Recipients largest first (stable), so the biggest payees always lead (0xrard #2). */
+export const sortedRecipients = <T extends { satoshis: number }>(list: T[] | undefined): T[] =>
+  (list ?? [])
+    .map((x, i) => ({ x, i }))
+    .sort((a, b) => b.x.satoshis - a.x.satoshis || a.i - b.i)
+    .map(({ x }) => x);
+
 const lineDetail = (r: BundleRequest): string => {
   const parts: string[] = [];
   switch (r.type) {
@@ -567,7 +574,10 @@ export const buildSheetModel = (bundle: Pick<PermissionBundle, 'originator' | 'i
         lines.push({
           requestID: r.requestID,
           text: `${r.addedLive ? 'New: pay' : 'Also pay'} ${sats.toLocaleString()} sats`,
-          detail: lineDetail(r),
+          // Its payees too, every one, largest first (0xrard: never hide where money goes).
+          detail: [lineDetail(r), ...sortedRecipients(r.recipients).map((x) => `to ${x.to}: ${x.satoshis} sats`)].join(
+            ' · ',
+          ),
           risky: true,
           checked: false,
           ...(r.addedLive ? { isNew: true } : {}),
