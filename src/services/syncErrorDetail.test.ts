@@ -118,6 +118,19 @@ describe('6 Nov 2026: a failed sync says which backup call failed, on what, and 
     );
   });
 
+  test('re-check: letters-only base64, base64url, bare byte lists and capital or dashed seed words are cut', () => {
+    const b64 = 'QUJDREVGR0hJSktMTU5P'; // 16+ base64 letters, no digit, + or /
+    const url = 'ab-cd_efghijkl-mnopqrst_uvwx'; // base64url
+    const bytes = '12,34,56,78,90,12,34,56,78,9'; // String(Uint8Array): no brackets
+    const seed = 'Abandon-Ability-Able-About-Above-Absent';
+    const e = new Error(`bad ${b64} ${url} ${bytes} ${seed}. 42 left`);
+    e.name = 'TransactionInactiveError';
+    const line = syncErrorDetail(e);
+    for (const w of ['R0hJSktM', 'efghijkl', 'mnopqrst', '56,78', 'Ability', 'Absent']) expect(line).not.toContain(w);
+    expect(line).toStartWith('TransactionInactiveError: bad ');
+    expect(line).toContain('. 42 left');
+  });
+
   test('review: it never throws, whatever the error is', () => {
     const hostile = {
       get name(): string {

@@ -107,17 +107,17 @@ export function tagStorageClientErrors(cls: { prototype: object }): () => void {
 
 const cut = (m: string) => `${m.slice(0, 4)}…`;
 /**
- * Anything that could be key material is cut (review, 6 Nov 2026): a run of 6 or more lowercase 3-8 letter words (a seed
- * phrase's words),
- * a byte array of more than 8 numbers, 16 or more hex characters, and 16 or more base64 characters that carry a digit,
- * + or / (so a long name like TransactionInactiveError stays readable).
+ * Anything that could be key material is cut (review, 6 Nov 2026): a run of 6 or more 3-8 letter words in any case,
+ * joined by spaces, commas, - or _ (a seed phrase), a run of more than 8 numbers with or without brackets (bytes), and
+ * any run of 16 or more base64, base64url or hex characters. Only CamelCase error names such as
+ * TransactionInactiveError stay readable.
  */
+const ERROR_NAME = /^(?:[A-Z][a-z]+)+(?:Error|Exception)$/;
 const scrub = (s: string) =>
   s
-    .replace(/\b[a-z]{3,8}(?:[\s,]+[a-z]{3,8}){5,}\b/g, '[words cut]')
-    .replace(/\[\s*\d+(?:\s*,\s*\d+){8,}\s*(?:,\s*)?\]?/g, '[bytes cut]')
-    .replace(/\b[0-9a-fA-F]{16,}\b/g, cut)
-    .replace(/[A-Za-z0-9+/]{16,}={0,2}/g, (m) => (/[0-9+/]/.test(m) ? cut(m) : m));
+    .replace(/\b[a-z]{3,8}(?:[\s,_-]+[a-z]{3,8}){5,}\b/gi, '[words cut]')
+    .replace(/\[?\s*\d+(?:\s*,\s*\d+){8,}\s*(?:,\s*)?\]?/g, '[bytes cut]')
+    .replace(/[A-Za-z0-9+/_-]{16,}={0,2}/g, (m) => (ERROR_NAME.test(m) ? m : cut(m)));
 
 /** The first few frames of a stack, each as "function@file:line" (Safari's and V8's formats). */
 function frames(stack: string | undefined, max = 4): string | undefined {
