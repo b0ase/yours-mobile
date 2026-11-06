@@ -12,8 +12,9 @@
  *   keyID and its key is this account's identity key) and shows ONE "Seal" sheet BEFORE signing: the document's
  *   fingerprint, who signs, the site, and the network fee cap. Nothing is stored by that sheet.
  * - Allow arms a pass for that site. The pass lets through exactly:
- *     a) the protocol request of THAT createSignature (one-shot grant), only while it is the site's only call on the
- *        seal protocol, and
+ *     a) the protocol request of THAT createSignature, once, with a one-use grant (stored already expired, so the
+ *        next seal-protocol signature asks), only while it is the site's only call on the seal protocol; any other
+ *        seal-protocol signature the site asks for meanwhile is refused (signing), and
  *     b) the spend of the site's VERY NEXT createAction, within SEAL_PASS_MS of the signature, if and only if that
  *        action is the seal of the record just signed: a single 0-sat OP_RETURN output whose payload's recordHash is
  *        sha256(the signed bytes) and whose origHash / svgHash / key / ref / ts are the record's own, no inputs of
@@ -95,6 +96,10 @@ export const canonicalJson = (value: unknown): string => {
 
 const isProtocol = (p: unknown): boolean =>
   Array.isArray(p) && p.length === 2 && p[0] === SEAL_PROTOCOL[0] && p[1] === SEAL_PROTOCOL[1];
+/** Is this protocolID bit-sign's seal protocol? */
+export const isSealProtocol = isProtocol;
+/** A seal-protocol signature asked for while an approved seal's own is being made (SealPasses.signing). */
+export const SEAL_BUSY_REFUSAL = 'A seal is being signed for this site. Try again once it is done.';
 
 const shortText = (v: unknown, max: number): v is string => typeof v === 'string' && v.length <= max && !CTRL.test(v);
 
@@ -257,13 +262,22 @@ export type SealPermissionRequest = {
   spending?: { satoshis?: number };
 };
 
-type Pass = { seal: SealSign; state: 'approved' | 'signed' | 'paying'; until: number; spent?: boolean };
+type Pass = {
+  seal: SealSign;
+  state: 'approved' | 'signed' | 'paying';
+  until: number;
+  spent?: boolean;
+  /** The seal's one protocol request has been answered: no other is (one use, b-Aware triage 6 Nov 2026). */
+  protocolUsed?: boolean;
+};
 
 /**
  * One live pass per site (origins normalised by the caller). approve → signed → paying → gone.
  *
  *  approve(site, seal)     the person tapped Allow on the Seal sheet
- *  coversProtocol(req, n)  the protocol request of that createSignature (n = the site's calls on the seal protocol)
+ *  signing(site)           that seal's signature is still to be made (other seal-protocol signs are refused)
+ *  coversProtocol(req, n)  the protocol request of that createSignature (n = the site's calls on the seal protocol);
+ *                          once, answered with a one-use grant (oneShotGrant.ts oneUseGrant)
  *  signed(site, hash)      that createSignature answered
  *  beginAction(site, args) the site's next createAction started: true when it is the seal (the pass is used up
  *                          either way)
@@ -298,17 +312,27 @@ export class SealPasses {
     this.passes.delete(site);
   }
 
+  /**
+   * True while an approved seal's own signature is being made for this site. Every other createSignature on the seal
+   * protocol from the site is refused until then, so nothing can share that one answer (background.ts).
+   */
+  signing(site: string): boolean {
+    return this.live(site)?.state === 'approved';
+  }
+
   coversProtocol(req: SealPermissionRequest, callsOnProtocol: number): boolean {
     const p = req.originator ? this.live(req.originator) : undefined;
-    return (
+    const covered =
       !!p &&
       p.state === 'approved' &&
+      !p.protocolUsed &&
       req.type === 'protocol' &&
       !req.privileged &&
       isProtocol(req.protocolID) &&
       req.counterparty === 'anyone' &&
-      callsOnProtocol === 1
-    );
+      callsOnProtocol === 1;
+    if (covered) p.protocolUsed = true;
+    return covered;
   }
 
   beginAction(site: string, args: unknown): boolean {

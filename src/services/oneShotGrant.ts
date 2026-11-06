@@ -14,3 +14,11 @@ export const oneShotGrant = (requestID: string, now = Date.now()) => ({
   ephemeral: true,
   expiry: oneShotExpiry(now),
 });
+
+/**
+ * grantPermission arguments that answer ONLY the request in flight (the one Seal sheet, services/sealPass.ts). The
+ * manager still stores the grant, so it is stored already expired (1 = one second after 1970; 0 would mean never):
+ * the waiting call is released by the answer itself, and the very next call on that protocol finds no grant and asks.
+ * Before 5.2.51 a seal's answer was oneShotGrant, a minute of sheet-free seal signatures (b-Aware triage 6 Nov 2026).
+ */
+export const oneUseGrant = (requestID: string) => ({ requestID, ephemeral: true, expiry: 1 });

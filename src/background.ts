@@ -261,11 +261,13 @@ import {
   type MintIntent,
   type MintSheet,
 } from './services/pinnedMint';
-import { oneShotGrant } from './services/oneShotGrant';
+import { oneShotGrant, oneUseGrant } from './services/oneShotGrant';
 import {
+  SEAL_BUSY_REFUSAL,
   SEAL_PROTOCOL,
   SEAL_REQUEST_PREFIX,
   SealPasses,
+  isSealProtocol,
   isSealRequestId,
   readSealSign,
   sealSheetFor,
@@ -2169,8 +2171,9 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
         }
         if (sealCovered && accountContext?.wallet) {
           console.log(`[bwx-req] seal pass covers ${request.type} host=${siteHost(request.originator)}`);
+          // This one request only: the next seal-protocol signature asks (oneUseGrant, b-Aware triage 6 Nov 2026).
           accountContext.wallet
-            .grantPermission(oneShotGrant(request.requestID))
+            .grantPermission(oneUseGrant(request.requestID))
             .then(() => resolve())
             .catch((error: unknown) => reject(error instanceof Error ? error : new Error(String(error))));
           return;
@@ -6564,6 +6567,10 @@ if (!(
       // site's call, for this account's own identity key, from a site that is not blocked; anything else as before.
       sealSite =
         message.originator && message.originator !== ADMIN_ORIGINATOR ? normalizeOriginator(message.originator) : '';
+      // While an approved seal's own signature is being made, no other seal-protocol signature from the site may
+      // share its one answer (services/sealPass.ts signing).
+      if (sealSite && isSealProtocol(message.params?.protocolID) && sealPasses?.signing(sealSite))
+        throw new Error(SEAL_BUSY_REFUSAL);
       // Store builds: no Seal sheet (storeBuild.ts NATIVE_SEAL_ENABLED written out, literal env, review 24 S1); the
       // sign asks as before.
       const seal =
