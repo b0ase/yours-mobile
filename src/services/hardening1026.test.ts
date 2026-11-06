@@ -2,7 +2,7 @@
 import { describe, expect, test } from 'bun:test';
 import { PrivateKey, ProtoWallet, Utils } from '@bsv/sdk';
 import { escapeDenies, sheetControls } from '../pages/requests/sheetControls';
-import { describeLockingScript, guardSpendRecipients, takeRecipientsForSheet } from './spendRecipients';
+import { describeLockingScript, guardSpendRecipients, recipientsForSheet } from './spendRecipients';
 import { buildSheetModel, type BundleRequest } from './permissionBundle';
 import { discoverHost, fill } from '../mobile/names/names';
 import { NONCE_ACTIONS, signRequest, signedMessage } from '../mobile/names/paymail';
@@ -43,11 +43,24 @@ describe('N3-3: the payment sheet lists where the outputs go', () => {
   });
 
   test('the outputs of the running action reach the sheet, and are gone after it', async () => {
-    let seen: unknown[] = [];
+    let seen: unknown = null;
+    // The spending request the manager raises for this action: line items are its own outputs, in order.
+    const request = {
+      requestID: 'spend:site.example:request:1',
+      type: 'spending',
+      spending: {
+        satoshis: 1010,
+        lineItems: [
+          { type: 'output', satoshis: 1000, description: 'pay' },
+          { type: 'output', satoshis: 0, description: 'memo' },
+          { type: 'fee', satoshis: 10, description: 'Network fee' },
+        ],
+      },
+    };
     const m = guardSpendRecipients(
       {
         createAction: async () => {
-          seen = takeRecipientsForSheet('site.example');
+          seen = recipientsForSheet('site.example', request);
           return {};
         },
       },
@@ -62,11 +75,11 @@ describe('N3-3: the payment sheet lists where the outputs go', () => {
       },
       'site.example',
     );
-    expect(seen).toEqual([
+    expect((seen as { recipients: unknown }).recipients).toEqual([
       { to: addr, satoshis: 1000 },
       { to: 'data (OP_RETURN)', satoshis: 0 },
     ]);
-    expect(takeRecipientsForSheet('site.example')).toEqual([]);
+    expect(recipientsForSheet('site.example', { ...request, requestID: 'spend:site.example:request:2' })).toBeNull();
   });
 
   test('the sheet model carries them on the payment', () => {

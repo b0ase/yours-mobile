@@ -35,6 +35,8 @@ export interface BundleRequest {
   labels?: string[];
   /** Where this payment's outputs go (services/spendRecipients.ts), shown on its sheet. */
   recipients?: { to: string; satoshis: number }[];
+  /** sha256 of the scripts + amounts of the action those recipients were read from; Allow checks it (0xrard). */
+  recipientsHash?: string;
   reason?: string;
   /**
    * Joined the sheet while it was on screen (live sheet). Shown as "New: …", never pre-ticked, and never covered
@@ -62,9 +64,10 @@ export const MAX_LIVE_CHANGES = 3;
  * A short, stable fingerprint of exactly the requests a sheet shows (order-independent). The sheet sends the
  * hash of what was on screen when the user tapped; the background answers only if it still matches.
  */
-export const sheetHash = (items: Pick<BundleRequest, 'requestID'>[]): string => {
+export const sheetHash = (items: Pick<BundleRequest, 'requestID' | 'recipientsHash'>[]): string => {
   const text = items
-    .map((i) => i.requestID)
+    // A payment's line covers the recipient list it showed (services/spendRecipients.ts).
+    .map((i) => (i.recipientsHash ? `${i.requestID}#${i.recipientsHash}` : i.requestID))
     .sort()
     .join('\n');
   let h = 0x811c9dc5;

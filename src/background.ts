@@ -25,7 +25,7 @@ import {
   wantsManifestSheet,
 } from './services/sessionDenials';
 import { takeLabelsForSheet } from './services/labelsOnSpend';
-import { takeRecipientsForSheet } from './services/spendRecipients';
+import { recipientsForSheet, spendApprovalMatches } from './services/spendRecipients';
 import type { AccentId } from './mobile/theme/accents';
 import { revokeOriginatorInAccounts } from './services/accountPermissionStore';
 import { routeBchatUrl } from './services/bchatOrigin';
@@ -2189,9 +2189,14 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
           if (request.type === 'spending' && mintSite) {
             const labels = takeLabelsForSheet(mintSite);
             if (labels.length > 0) (request as BundleRequest).labels = labels;
-            // Where the payment goes (services/spendRecipients.ts, N3-3).
-            const recipients = takeRecipientsForSheet(mintSite);
-            if (recipients.length > 0) (request as BundleRequest).recipients = recipients;
+            // Where THIS payment goes: its own action's outputs, bound to this request, never the site's latest
+            // (services/spendRecipients.ts, N3-3; 0xrard 6 Nov 2026). Refused when the wallet cannot tell which.
+            const shown = recipientsForSheet(mintSite, request as BundleRequest);
+            if (shown && 'refuse' in shown) throw new Error(shown.refuse);
+            if (shown) {
+              (request as BundleRequest).recipients = shown.recipients;
+              (request as BundleRequest).recipientsHash = shown.hash;
+            }
           }
           // A request arriving while this site's sheet is open waits for its own sheet (never joins that one).
           bundle = permissionBundler.add(request as BundledRequest & BundleRequest);
@@ -5497,7 +5502,15 @@ if (!(
       };
     }
     // Bound to exactly what was on screen: a missing or different hash grants nothing (permissionBundle.ts).
-    const result = permissionBundler.resolve(response.bundleID, response.decisions ?? {}, response.seenHash ?? '');
+    const resolved = permissionBundler.resolve(response.bundleID, response.decisions ?? {}, response.seenHash ?? '');
+    // A payment's Allow pays only the outputs its sheet listed: the list must still be its own action's (0xrard,
+    // services/spendRecipients.ts). If not, nothing on the sheet is granted and it says the request changed.
+    const mismatch = !!resolved?.granted.some((r) => !spendApprovalMatches(r as BundleRequest));
+    if (mismatch && bundle) console.warn(`[bwx-req] payment list no longer its own action host=${siteHost(bundle.originator)}`);
+    const result =
+      resolved && mismatch
+        ? { ...resolved, granted: [], denied: [...resolved.denied, ...resolved.granted], stale: true }
+        : resolved;
     // Duplicate sign-in prompt (owner, 26 Oct 2026: Approve did nothing, the same sheet came back, the second Approve
     // worked; bChatX saw one challenge + one verify). Trace each answer: which bundle, whether it still existed, stale
     // hash, and whether each granted request still had a waiting caller. Host + counts only, nothing secret.
