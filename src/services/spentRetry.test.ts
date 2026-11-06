@@ -359,7 +359,7 @@ describe('UTXO_SPENT after the toolbox already evicted the dead coin (native sea
     const w = simWallet(3, [0], 'invalidTx', { toolboxEvicts: true });
     const r = await createWithSpentRetry(deps(w));
     expect(r.heal?.released).toBe(1);
-    // The heal changed no row: the coin is reported as already off, never put on the automatic check's undo list.
+    // The heal changed no row: the coin is reported as already off (recorded for the undo too: healClearedEntries).
     expect(r.heal?.cleared).toEqual([]);
     expect(r.heal?.alreadyOff).toEqual([`${w.srcId}_0`]);
     expect(r.ok && r.retried).toBe(true);

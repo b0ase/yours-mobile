@@ -248,11 +248,11 @@ describe('17d M1: the automatic check puts a set-aside coin back once its parent
 /**
  * test/phone-1106 merge (sign-and-seal 5cd462ce onto the candidate line): after a refused broadcast the toolbox's own
  * stale-input check can set the input unspendable before this heal runs. The real healRefusedInputs counts it as
- * released (so the one guarded retry can run), but it is not "cleared" by us and never goes on the undo list.
+ * released (so the one guarded retry can run); it is not "cleared" by us, but it is recorded for the undo (24 L1).
  */
 describe('UTXO_SPENT on a coin the toolbox already set unspendable (native seal, 3 Nov)', () => {
   const OTHER = 'e'.repeat(64);
-  test('counted as released, reported alreadyOff, not cleared, not recorded for undo', async () => {
+  test('counted as released, reported alreadyOff, not cleared, recorded with its spender for the undo (24 L1)', async () => {
     const w = world({
       parents: [parent(1_000)],
       reason: ([id]) => `UTXO_SPENT (70): ${id}:0 utxo already spent by tx ${OTHER}[0]`,
@@ -263,7 +263,8 @@ describe('UTXO_SPENT on a coin the toolbox already set unspendable (native seal,
     expect(heal?.cleared).toEqual([]);
     expect(heal?.alreadyOff).toEqual([`${w.ids[0]}_0`]);
     expect(heal?.spenders).toEqual({ [`${w.ids[0]}_0`]: OTHER });
-    expect(w.recorded()).toEqual({});
+    // Review 24 L1: on the automatic check's list, so it comes back if both lookups later call it unspent.
+    expect(w.recorded()).toEqual({ [`${w.ids[0]}_0`]: OTHER });
   });
   test('a coin storage still lists as spendable is cleared and recorded, as before', async () => {
     const w = world({

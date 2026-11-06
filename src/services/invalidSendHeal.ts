@@ -171,8 +171,9 @@ export type HealReport = {
   cleared?: string[];
   /**
    * Proven-spent inputs storage already held unspendable (the toolbox's stale-input check, 3 Nov 2026): counted in
-   * `released` (the retry can't pick them again) but NOT in `cleared`, because this heal changed nothing there, so
-   * nothing goes on the automatic check's undo list for them.
+   * `released` (the retry can't pick them again) but not in `cleared` (this heal changed no row). They still go on the
+   * automatic check's list with their spender (healClearedEntries, review 24 L1), so one both lookups later call
+   * unspent comes back; nothing else ever revisits a coin the toolbox lowered.
    */
   alreadyOff?: string[];
   /** Inputs set aside because their parent payment never reached the network (ownSend.ts healRefusedInputs). */
@@ -217,8 +218,11 @@ export const UNNAMED_SPENDER = 'unnamed';
 /** Pure: the coins a heal cleared → their named spender, for the automatic check's cleared list (recordAutoCleared). */
 export const healClearedEntries = (r: HealReport | null | undefined): Record<string, string> =>
   // A coin cleared on the broadcaster's word alone has no named spender: it is recorded too (UNNAMED_SPENDER), so the
-  // automatic check can still put it back (17b L3).
-  Object.fromEntries((r?.cleared ?? []).map((op) => [op, r?.spenders?.[op] || UNNAMED_SPENDER]));
+  // automatic check can still put it back (17b L3). So is one storage already held unspendable (alreadyOff, review 24
+  // L1): the undo still needs both lookups to call it unspent, and never touches our own pending actions' inputs.
+  Object.fromEntries(
+    [...(r?.cleared ?? []), ...(r?.alreadyOff ?? [])].map((op) => [op, r?.spenders?.[op] || UNNAMED_SPENDER]),
+  );
 
 /** After an invalidTx: release the rejected send's inputs proven spent. Never throws. */
 export async function healInvalidSend(

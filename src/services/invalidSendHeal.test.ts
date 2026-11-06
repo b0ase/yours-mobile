@@ -210,6 +210,21 @@ describe('re-review 17b: undo records and double-spend words', () => {
     expect(heal.released).toBe(1);
     expect(healClearedEntries(heal)).toEqual({ [op]: UNNAMED_SPENDER });
   });
+  test('review 24 L1: a coin storage already held unspendable is recorded for undo too, with its spender', () => {
+    const live = `${'cd'.repeat(32)}_0`;
+    const off = `${'ef'.repeat(32)}_2`;
+    const spender = '9'.repeat(64);
+    expect(
+      healClearedEntries({
+        checked: 2,
+        released: 2,
+        inputs: [live, off],
+        spenders: { [live]: null, [off]: spender },
+        cleared: [live],
+        alreadyOff: [off],
+      }),
+    ).toEqual({ [live]: UNNAMED_SPENDER, [off]: spender });
+  });
   test('L3: "missing inputs" (a parent the node does not know) clears nothing', async () => {
     const heal = await refusedWith(`Missing inputs: ${'ab'.repeat(32)}:1`);
     expect(heal.released).toBe(0);
