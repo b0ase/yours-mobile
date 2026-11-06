@@ -669,7 +669,15 @@ export async function verifyInboundChunk(
       }
       // A row the merge won't apply changes nothing; one whose time can't be read is treated as newer.
       if (time(o.updated_at) <= time(filed.updated_at)) {
-        if (opts.requeueHeld && o.spendable === true && filed.spendable !== true && filed.spentBy == null) {
+        // Only a row carrying the backup's own time (an admission given up on). A row the device lowered itself
+        // (heal, already-off, orphan, hold) is newer and keeps its own both-lookups undo as the only way back (R1).
+        if (
+          opts.requeueHeld &&
+          time(o.updated_at) === time(filed.updated_at) &&
+          o.spendable === true &&
+          filed.spendable !== true &&
+          filed.spentBy == null
+        ) {
           const txid = filed.txid ?? tx.txid;
           if (txid) admitLater(txid, filed.vout);
         }
