@@ -1,5 +1,6 @@
 import { Transaction } from '@bsv/sdk';
 import { NATIVE_SEAL_ENABLED } from '../storeBuild';
+import { SPENT_ELSEWHERE_SHORT_MESSAGE, SPENT_ELSEWHERE_STUCK_MESSAGE } from '../../utils/sendErrors';
 
 /**
  * NATIVE sign + seal of a bChatX room document, inside bWalletX (CTO / owner, 3 Nov 2026: "chat should be IN the
@@ -180,6 +181,9 @@ async function sendReceipt(api: SealApi, body: Record<string, unknown>, timeoutM
   }
 }
 
+/** "Nothing sent" answers where a re-tap can't succeed (review 24 L2): shown as the background words them. */
+const SEAL_RETRY_FUTILE = [SPENT_ELSEWHERE_STUCK_MESSAGE, SPENT_ELSEWHERE_SHORT_MESSAGE];
+
 /** Shown when the seal's payment hit a coin already spent elsewhere. Plain words, never the toolbox text. */
 export const SEAL_SPENT_MESSAGE = 'A coin was already spent on another device. Tap Seal & pay again.';
 
@@ -192,6 +196,10 @@ export const SEAL_SPENT_MESSAGE = 'A coin was already spent on another device. T
  */
 export const isSpentCoinError = (e: unknown): boolean => {
   const m = e instanceof Error ? e.message : typeof e === 'string' ? e : '';
+  // Review 24 L2: two "nothing sent" answers where tapping again can't succeed keep the background's own words: the
+  // coins couldn't be updated (a re-tap picks the same dead coin; it says to Resync coins), or what is left is too
+  // little for this payment.
+  if (SEAL_RETRY_FUTILE.some((t) => m.includes(t))) return false;
   return /UTXO_SPENT|already spent|missing ?inputs|spent elsewhere|spent on another device/i.test(m);
 };
 

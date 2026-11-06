@@ -21,6 +21,7 @@ import {
   classifySendError,
   DOUBLE_SPEND_PENDING_MESSAGE,
   SPENT_ELSEWHERE_SHORT_MESSAGE,
+  SPENT_ELSEWHERE_STUCK_MESSAGE,
   OWN_COIN_OTHER_PAYMENT_MESSAGE,
   OWN_PAYMENTS_UNCHECKED_MESSAGE,
   ownPaymentOutMessage,
@@ -434,6 +435,15 @@ describe('UTXO_SPENT after the toolbox already evicted the dead coin (native sea
       ownPaymentOutMessage(),
     ])
       expect(isSpentCoinError(new Error(maybeOut))).toBe(false);
+  });
+
+  test('review 24 L2: "Tap Seal & pay again" is not offered where a re-tap cannot succeed', () => {
+    // The coins couldn't be updated (a re-tap picks the same dead coin), or what is left is too little: the
+    // background's own words are shown instead.
+    for (const futile of [SPENT_ELSEWHERE_STUCK_MESSAGE, SPENT_ELSEWHERE_SHORT_MESSAGE])
+      expect(isSpentCoinError(new Error(`createAction failed: ${futile}`))).toBe(false);
+    // A plain "spent elsewhere, balance updated, try again" still is.
+    expect(isSpentCoinError(new Error(SPENT_ELSEWHERE_MESSAGE))).toBe(true);
   });
 
   test('an unknown or unreadable row is never counted as cleared', async () => {
