@@ -20,8 +20,9 @@ import {
 } from '@1sat/actions';
 import { buildInscriptionScript, Lock } from '@1sat/templates';
 import { P2PKH, PublicKey, Random, Utils } from '@bsv/sdk';
+import { readAssetIdTag } from '@1sat/types';
 import { buildReceipt, receiptMap, receiptSvg, type Receipt, type ReceiptIdentity, type ReceiptMode } from './receipt';
-import { MAX_PIECES, mergePlans, type LockMode, type LockPlan, type PlanPiece } from './schedule';
+import { MAX_PIECES, MIN_PIECE_SATS, mergePlans, type LockMode, type LockPlan, type PlanPiece } from './schedule';
 import type { ChromeStorageService } from '../../services/ChromeStorage.service';
 
 const LOCK_KEY_ID = 'lock';
@@ -246,19 +247,62 @@ export async function walletLockOutpoints(
   }));
 }
 
-/** Mark plan pieces whose output is no longer in the lock basket as claimed. */
+/**
+ * Plan pieces against the lock basket: a matured piece whose output is no longer there is claimed; a piece whose
+ * output IS there is not claimed, whatever the plan said (a restore can bring plans back before "Find my locks" files
+ * their locks; review 21 L4).
+ */
 export function syncClaimed(plans: LockPlan[], unspent: Set<string>, height: number): LockPlan[] {
   return plans.map((p) => ({
     ...p,
-    pieces: p.pieces.map((x) =>
-      x.claimed || unspent.has(`${x.txid}.${x.vout}`) || x.height > height ? x : { ...x, claimed: true },
-    ),
+    pieces: p.pieces.map((x) => {
+      if (unspent.has(`${x.txid}.${x.vout}`)) return x.claimed ? { ...x, claimed: false } : x;
+      return x.claimed || x.height > height ? x : { ...x, claimed: true };
+    }),
   }));
 }
 
-/** Claim every matured lock on the account, across all plans, in one transaction (unlockBsv). */
+/** Outpoints of the plan pieces not yet claimed (a claimed piece never hides a lock that is in the wallet). */
+export function unclaimedOutpoints(plans: LockPlan[]): Set<string> {
+  return new Set(plans.flatMap((p) => p.pieces.filter((x) => !x.claimed).map((x) => `${x.txid}.${x.vout}`)));
+}
+
+/** The smallest lock a claim spends, and the most locks one claim takes (each input carries ~1.2 kB of script). */
+export const CLAIM_MIN_SATS = MIN_PIECE_SATS;
+export const CLAIM_MAX_INPUTS = 50;
+
+/**
+ * Which matured locks a claim may spend (review 21 M2): anyone can pay dust to the public lock address, and an input
+ * costs about 125 sats of fee, so only locks of at least CLAIM_MIN_SATS (the lock flow's own minimum) with an `id:` tag
+ * are taken, oldest first, at most CLAIM_MAX_INPUTS. Each one recovers far more than its fee.
+ */
+export function claimableLocks(
+  outputs: { outpoint: string; satoshis: number; tags?: string[] }[],
+  height: number,
+): { ids: string[]; sats: number } {
+  const ready = outputs
+    .map((o) => ({
+      o,
+      until: Number.parseInt(o.tags?.find((t) => t.startsWith('until:'))?.slice(6) ?? '0', 10),
+      id: readAssetIdTag(o.tags),
+    }))
+    .filter((x) => x.id && x.until > 0 && x.until <= height && x.o.satoshis >= CLAIM_MIN_SATS)
+    .sort((a, b) => a.until - b.until)
+    .slice(0, CLAIM_MAX_INPUTS);
+  return { ids: ready.map((x) => x.id!), sats: ready.reduce((t, x) => t + x.o.satoshis, 0) };
+}
+
+/**
+ * Claim the matured locks on the account, across all plans, in one transaction (unlockBsv by id). Only the locks
+ * claimableLocks allows: dust never costs the user a fee, and one claim never grows past CLAIM_MAX_INPUTS inputs.
+ */
 export async function claimMatured(ctx: OneSatContext): Promise<string> {
-  const res = await unlockBsv.execute(ctx, {});
+  if (!ctx.services) throw new Error('The wallet services are not ready.');
+  const height = await ctx.services.chaintracks.currentHeight();
+  const listed = await listLocks.execute(ctx, { limit: 10000 });
+  const { ids } = claimableLocks('outputs' in listed && listed.outputs ? listed.outputs : [], height);
+  if (!ids.length) throw new Error('Nothing is ready to claim yet.');
+  const res = await unlockBsv.execute(ctx, { ids });
   if ('error' in res && res.error)
     throw new Error(res.error === 'no-matured-locks' ? 'Nothing is ready to claim yet.' : res.error);
   if (!('txid' in res) || !res.txid) throw new Error('The wallet did not return a transaction id.');

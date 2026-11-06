@@ -5,6 +5,9 @@
  * Local only: fake-indexeddb, a mocked chain (raw transactions, proofs, spends), a mocked 1Sat indexer (owner sync,
  * own:<address> search, spends, BEEF) served from the test's own transactions, a mocked broadcaster, random keys.
  * Nothing touches a network.
+ *
+ * The indexer is modelled as its own view of the chain, as in production: its search and its spend check both read
+ * what IT knows (`chain.indexed`), which may lag the chain the toolbox sees.
  */
 import 'fake-indexeddb/auto';
 import { describe, expect, test } from 'bun:test';
@@ -20,10 +23,11 @@ import {
   type WalletProtocol,
 } from '@bsv/sdk';
 import { Monitor, StorageIdb, StorageProvider, Wallet, WalletStorageManager } from '@bsv/wallet-toolbox-client';
-import { listLocks, sweepBsv, unlockBsv, type OneSatContext } from '@1sat/actions';
+import { listLocks, P1SAT_PROTOCOL, sweepBsv, unlockBsv, type OneSatContext } from '@1sat/actions';
 import { buildInscriptionScript, Lock } from '@1sat/templates';
 import { keepGlobals } from '../../testing/stubGlobals';
 import { fixUtxoStatus } from '../../services/utxoStatus';
+import { storeFingerprint } from '../../services/lockScanStore';
 
 keepGlobals('localStorage');
 const kv = new Map<string, string>();
@@ -34,8 +38,8 @@ const kv = new Map<string, string>();
   clear: () => kv.clear(),
 };
 
-const { createLock, lockAddress } = await import('./lockApi');
-const { bsvLocksScanned, bsvScanLine, findBsvLocks, foundLockIdTag, LOCK_CUSTOM_INSTRUCTIONS } =
+const { claimMatured, createLock, lockAddress } = await import('./lockApi');
+const { bsvLocksScanDue, bsvScanLine, findBsvLocks, foundLockIdTag, LOCK_CUSTOM_INSTRUCTIONS } =
   await import('./lockFinder');
 
 const HEIGHT = 971_004;
@@ -45,21 +49,30 @@ const ACCOUNT = '1LockFinderAccount';
 
 type Chain = {
   mined: Set<string>;
-  /** spent outpoints "txid.vout" -> spending txid */
+  /** spent outpoints "txid.vout" -> spending txid (the chain's truth, what the toolbox's services see) */
   spent: Map<string, string>;
+  /** the spends 1Sat's indexer knows (its search and its spend check both read this) */
+  indexed: Map<string, string>;
+  /** outpoints the indexer's search still lists although its spend index has the spend */
+  staleSearch: Set<string>;
+  /** a hostile indexer: own:<address> lists every output of every mined transaction */
+  hostile: boolean;
   raw: Map<string, number[]>;
   heights: Map<string, number>;
   tip: number;
-  /** outpoints the indexer still lists as unspent after the chain spent them (indexer lag) */
-  stale: Set<string>;
+  /** txids handed to the broadcaster */
+  posted: string[];
 };
 const newChain = (): Chain => ({
   mined: new Set(),
   spent: new Map(),
+  indexed: new Map(),
+  staleSearch: new Set(),
+  hostile: false,
   raw: new Map(),
   heights: new Map(),
   tip: HEIGHT + 1000,
-  stale: new Set(),
+  posted: [],
 });
 
 const pathFor = (chain: Chain, txid: string) =>
@@ -91,9 +104,10 @@ function toolboxServices(chain: Chain) {
     getRawTx: async (txid: string) => ({ txid, name: 'mock', rawTx: chain.raw.get(txid) }),
     getMerklePath: async (txid: string) =>
       chain.mined.has(txid) ? { name: 'mock', merklePath: pathFor(chain, txid) } : { name: 'mock', notes: [] },
-    postBeef: async (_beef: Beef, txids: string[]) => [
-      { name: 'arc', status: 'success', txidResults: txids.map((txid) => ({ txid, status: 'success' })) },
-    ],
+    postBeef: async (_beef: Beef, txids: string[]) => {
+      chain.posted.push(...txids);
+      return [{ name: 'arc', status: 'success', txidResults: txids.map((txid) => ({ txid, status: 'success' })) }];
+    },
   };
   expect(fixUtxoStatus(svc)).toBe(true);
   return new Proxy(svc, {
@@ -108,10 +122,7 @@ function toolboxServices(chain: Chain) {
 
 /** api.1sat.app as the finder and unlockBsv use it (OneSatServices: owner, txo, getBeefForTxid, chaintracks). */
 function oneSatIndexer(chain: Chain, calls: string[] = []) {
-  const ownerOf = (txid: string, vout: number): string | null => {
-    const out = Transaction.fromBinary(chain.raw.get(txid)!).outputs[vout];
-    return Lock.decode(out.lockingScript)?.address ?? null;
-  };
+  const outputsOf = (txid: string) => Transaction.fromBinary(chain.raw.get(txid)!).outputs;
   return {
     owner: {
       async *getTxos(owner: string) {
@@ -120,24 +131,23 @@ function oneSatIndexer(chain: Chain, calls: string[] = []) {
       },
     },
     txo: {
-      search: async (key: string, opts: { unspent?: boolean }) => {
+      search: async (key: string, opts: { unspent?: boolean; sats?: boolean }) => {
         calls.push(`search ${key}`);
         expect(opts.unspent).toBe(true);
         const owner = key.replace(/^own:/, '');
-        const hits: { outpoint: string }[] = [];
-        for (const txid of chain.mined) {
-          const n = Transaction.fromBinary(chain.raw.get(txid)!).outputs.length;
-          for (let v = 0; v < n; v++) {
+        const hits: { outpoint: string; score: number; satoshis?: number }[] = [];
+        for (const txid of chain.mined)
+          outputsOf(txid).forEach((out, v) => {
             const op = `${txid}.${v}`;
-            if (ownerOf(txid, v) === owner && (!chain.spent.has(op) || chain.stale.has(op)))
-              hits.push({ outpoint: op });
-          }
-        }
+            const listed = chain.hostile || Lock.decode(out.lockingScript)?.address === owner;
+            if (listed && (!chain.indexed.has(op) || chain.staleSearch.has(op)))
+              hits.push({ outpoint: op, score: hits.length, ...(opts.sats ? { satoshis: out.satoshis } : {}) });
+          });
         return hits;
       },
       getSpends: async (ops: string[]) => {
         calls.push(`spends ${ops.length}`);
-        return ops.map((o) => chain.spent.get(o.replace('_', '.')) ?? null);
+        return ops.map((o) => chain.indexed.get(o.replace('_', '.')) ?? null);
       },
     },
     getBeefForTxid: async (txid: string) => {
@@ -184,13 +194,17 @@ type W8 = Awaited<ReturnType<typeof openWallet>>;
 const ctxOf = (w: W8, chain: Chain, calls?: string[]) =>
   ({ wallet: w.wallet, services: oneSatIndexer(chain, calls), chain: 'main' }) as unknown as OneSatContext;
 
-function mine(chain: Chain, rawTx: number[]) {
+/** The chain mines the tx; the indexer sees its spends too unless `indexed: false`. */
+function mine(chain: Chain, rawTx: number[], { indexed = true } = {}) {
   const tx = Transaction.fromBinary(rawTx);
   const txid = tx.id('hex');
   chain.raw.set(txid, rawTx);
   chain.mined.add(txid);
   if (!chain.heights.has(txid)) chain.heights.set(txid, HEIGHT + chain.heights.size);
-  for (const i of tx.inputs) chain.spent.set(`${i.sourceTXID}.${i.sourceOutputIndex}`, txid);
+  for (const i of tx.inputs) {
+    chain.spent.set(`${i.sourceTXID}.${i.sourceOutputIndex}`, txid);
+    if (indexed) chain.indexed.set(`${i.sourceTXID}.${i.sourceOutputIndex}`, txid);
+  }
   return { tx, txid };
 }
 
@@ -279,6 +293,18 @@ async function deviceWithLocks(chain: Chain) {
   return { a, root, lockTxid };
 }
 
+/** A transaction nobody funds (inputs are made up): only its outputs matter to the finder. */
+function mineOutputs(chain: Chain, outs: { lockingScript: ReturnType<typeof Lock.lock>; satoshis: number }[]) {
+  const t = new Transaction();
+  t.addInput({
+    sourceTXID: (++dbn * 7919).toString(16).padStart(64, '0'),
+    sourceOutputIndex: 0,
+    unlockingScript: new UnlockingScript(),
+  });
+  for (const o of outs) t.addOutput(o);
+  return mine(chain, t.toBinary());
+}
+
 describe('Find my locks on the real toolbox', () => {
   test('round trip: lock → wipe storage → open from the seed → find → unlock spends it', async () => {
     const chain = newChain();
@@ -295,13 +321,16 @@ describe('Find my locks on the real toolbox', () => {
     chain.tip = MATURE + 1;
     expect(await unlockBsv.execute(ctxB, {})).toEqual({ error: 'no-matured-locks' });
 
-    const r = await findBsvLocks(ctxB, ACCOUNT);
+    const postedBefore = chain.posted.length;
+    const store = await storeFingerprint(b.storage as never, b.kd.identityKey);
+    const r = await findBsvLocks(ctxB, ACCOUNT, { store });
     console.log('[lock finder round trip]', JSON.stringify(r));
-    expect(r).toEqual({ found: 2, added: 2, addedSats: 80_000, already: 0, spent: 0, failed: [] });
-    expect(bsvLocksScanned(ACCOUNT)).toBe(true);
-    // Only the 1Sat indexer was asked, about the seed's lock address.
+    expect(r).toEqual({ found: 2, added: 2, addedSats: 80_000, already: 0, spent: 0, retry: [], repair: [] });
+    expect(bsvLocksScanDue(ACCOUNT, store)).toBe(false);
+    // Only the 1Sat indexer was asked, about the seed's lock address; nothing was broadcast for a mined lock.
     const addr = await lockAddress(ctxB);
     expect(calls).toEqual([`sync ${addr}`, `search own:${addr}`, 'spends 2']);
+    expect(chain.posted.slice(postedBefore)).toEqual([]);
 
     // Filed exactly as the lock flow files them: same basket, same custom instructions, until: + id: tags.
     const bLocks = await locksOf(b);
@@ -321,7 +350,7 @@ describe('Find my locks on the real toolbox', () => {
     // The Wallet's Locks row reads the same rows.
     const listed = await listLocks.execute(ctxB, { limit: 100 });
     expect('outputs' in listed && listed.outputs.length).toBe(2);
-    // Mined with its proof: completed, nothing broadcast for it.
+    // Mined with its proof: completed.
     const st = await b.storage.runAsStorageProvider(
       async (sp) => (await sp.findTransactions({ partial: { txid: lockTxid }, noRawTx: true }))[0]?.status,
     );
@@ -329,8 +358,8 @@ describe('Find my locks on the real toolbox', () => {
 
     // Idempotent: a second run files nothing and changes nothing.
     const before = await snapshot(b);
-    const again = await findBsvLocks(ctxB, ACCOUNT);
-    expect(again).toEqual({ found: 2, added: 0, addedSats: 0, already: 2, spent: 0, failed: [] });
+    const again = await findBsvLocks(ctxB, ACCOUNT, { store });
+    expect(again).toEqual({ found: 2, added: 0, addedSats: 0, already: 2, spent: 0, retry: [], repair: [] });
     expect(await snapshot(b)).toEqual(before);
 
     // Unlock (unchanged @1sat/actions unlockBsv) spends the matured lock with the seed's key.
@@ -365,15 +394,18 @@ describe('Find my locks on the real toolbox', () => {
     expect((await locksOf(b)).map((o) => o.outpoint)).toEqual([`${lockTxid}.1`]);
     console.log('[lock finder round trip] unlocked', u.txid, '| balance', balBefore, '→', balAfter);
 
-    // Already in storage and spent (the unlock isn't mined, the indexer still lists the lock): never revived.
+    // Already in storage and spent (the unlock isn't mined, the indexer still says unspent): never revived, and it is
+    // needs-repair (not retried on every open) rather than "added".
     const spentRow = await rowOf(b, lockTxid, 0);
     expect(spentRow?.spendable).toBe(false);
     const beforeRerun = await snapshot(b);
-    const rerun = await findBsvLocks(ctxB, ACCOUNT);
+    const rerun = await findBsvLocks(ctxB, ACCOUNT, { store });
     expect(rerun.added).toBe(0);
     expect(rerun.already).toBe(1);
-    expect(rerun.failed).toHaveLength(1);
-    expect(rerun.failed[0]).toMatch(new RegExp(`^${lockTxid}\\.0: not listed by the wallet`));
+    expect(rerun.retry).toEqual([]);
+    expect(rerun.repair).toEqual([
+      `${lockTxid}.0: this device holds it as spent or not usable yet (an unlock in flight?)`,
+    ]);
     expect((await rowOf(b, lockTxid, 0))?.spendable).toBe(false);
     expect((await locksOf(b)).map((o) => o.outpoint)).toEqual([`${lockTxid}.1`]);
     expect(await balance(b)).toBe(balAfter);
@@ -382,19 +414,19 @@ describe('Find my locks on the real toolbox', () => {
     expect(afterRerun.tags).toEqual(beforeRerun.tags);
   }, 120000);
 
-  test('a lock the chain shows spent is left out, even when the indexer still lists it', async () => {
+  test('a lock the indexer knows is spent is left out, even when its own search still lists it', async () => {
     const chain = newChain();
     const { root, lockTxid, a } = await deviceWithLocks(chain);
-    // Device A unlocks the matured lock and the unlock is mined; the indexer lags and still lists it as unspent.
+    // Device A unlocks the matured lock and the unlock is mined. The indexer's spend index has it; its search lags.
     chain.tip = MATURE + 1;
     const u = (await unlockBsv.execute(ctxOf(a, chain), {})) as { txid?: string };
     expect(u.txid).toMatch(/^[0-9a-f]{64}$/);
     mine(chain, await rawOf(a, u.txid!));
-    chain.stale.add(`${lockTxid}.0`);
+    chain.staleSearch.add(`${lockTxid}.0`);
 
     const c = await openWallet(root, chain);
-    const r = await findBsvLocks(ctxOf(c, chain), `${ACCOUNT}-c`);
-    expect(r).toEqual({ found: 2, added: 1, addedSats: 30_000, already: 0, spent: 1, failed: [] });
+    const r = await findBsvLocks(ctxOf(c, chain), `${ACCOUNT}-c`, {});
+    expect(r).toEqual({ found: 2, added: 1, addedSats: 30_000, already: 0, spent: 1, retry: [], repair: [] });
     expect((await locksOf(c)).map((o) => o.outpoint)).toEqual([`${lockTxid}.1`]);
     expect(await rowOf(c, lockTxid, 0)).toBeUndefined();
     expect(await unlockBsv.execute(ctxOf(c, chain), {})).toEqual({ error: 'no-matured-locks' });
@@ -404,12 +436,12 @@ describe('Find my locks on the real toolbox', () => {
     const chain = newChain();
     const { a } = await deviceWithLocks(chain);
     const before = await snapshot(a);
-    const r = await findBsvLocks(ctxOf(a, chain), `${ACCOUNT}-a`);
-    expect(r).toEqual({ found: 2, added: 0, addedSats: 0, already: 2, spent: 0, failed: [] });
+    const r = await findBsvLocks(ctxOf(a, chain), `${ACCOUNT}-a`, {});
+    expect(r).toEqual({ found: 2, added: 0, addedSats: 0, already: 2, spent: 0, retry: [], repair: [] });
     expect(await snapshot(a)).toEqual(before);
   }, 120000);
 
-  test('only exact locks to this seed are filed: other owners, inscribed or token-wrapped locks are ignored', async () => {
+  test('a hostile listing: a stranger’s lock, an inscribed lock, 0-sat and dust locks under our address are not filed', async () => {
     const chain = newChain();
     const { root, lockTxid } = await deviceWithLocks(chain);
     const b = await openWallet(root, chain);
@@ -417,23 +449,24 @@ describe('Find my locks on the real toolbox', () => {
     const mine1 = await lockAddress(ctxB);
     const P1SAT: WalletProtocol = [0, 'onesat'];
     expect(new KeyDeriver(root).derivePrivateKey(P1SAT, 'lock', 'self').toAddress()).toBe(mine1);
-    // A transaction that pays: a stranger's lock, a lock to our address inside an inscription, and a 0-sat lock.
-    const t = new Transaction();
-    t.addInput({ sourceTXID: 'ab'.repeat(32), sourceOutputIndex: 0, unlockingScript: new UnlockingScript() });
-    t.addOutput({ lockingScript: Lock.lock(PrivateKey.fromRandom().toAddress(), MATURE), satoshis: 7_000 });
-    t.addOutput({
-      lockingScript: buildInscriptionScript(Lock.lock(mine1, MATURE), new TextEncoder().encode('hi'), 'text/plain'),
-      satoshis: 1,
-    });
-    t.addOutput({ lockingScript: Lock.lock(mine1, MATURE), satoshis: 0 });
-    mine(chain, t.toBinary());
+    mineOutputs(chain, [
+      { lockingScript: Lock.lock(PrivateKey.fromRandom().toAddress(), MATURE), satoshis: 7_000 },
+      {
+        lockingScript: buildInscriptionScript(Lock.lock(mine1, MATURE), new TextEncoder().encode('hi'), 'text/plain'),
+        satoshis: 5_000,
+      },
+      { lockingScript: Lock.lock(mine1, MATURE), satoshis: 0 },
+      { lockingScript: Lock.lock(mine1, HEIGHT - 10), satoshis: 1 },
+      { lockingScript: Lock.lock(mine1, HEIGHT - 10), satoshis: 999 },
+    ]);
+    chain.hostile = true; // own:<our address> now lists every output above (and the funding coins)
 
-    const r = await findBsvLocks(ctxB, `${ACCOUNT}-b`);
-    expect(r).toEqual({ found: 2, added: 2, addedSats: 80_000, already: 0, spent: 0, failed: [] });
+    const r = await findBsvLocks(ctxB, `${ACCOUNT}-b`, {});
+    expect(r).toMatchObject({ found: 2, added: 2, addedSats: 80_000, retry: [], repair: [] });
     expect((await locksOf(b)).map((o) => o.outpoint)).toEqual([`${lockTxid}.0`, `${lockTxid}.1`]);
   }, 120000);
 
-  test('indexer or spend check down: throws, files nothing, and the device is not marked scanned', async () => {
+  test('the spend check is down: nothing is filed, the scan stays due and is retried later', async () => {
     const chain = newChain();
     const { root } = await deviceWithLocks(chain);
     const b = await openWallet(root, chain);
@@ -448,27 +481,96 @@ describe('Find my locks on the real toolbox', () => {
       },
     };
     const before = await snapshot(b);
-    await expect(
-      findBsvLocks({ wallet: b.wallet, services: down } as unknown as OneSatContext, `${ACCOUNT}-down`),
-    ).rejects.toThrow('spends down');
+    const r = await findBsvLocks({ wallet: b.wallet, services: down } as unknown as OneSatContext, `${ACCOUNT}-down`, {
+      store: 'S',
+    });
+    expect(r.added).toBe(0);
+    expect(r.retry).toHaveLength(2);
     expect(await snapshot(b)).toEqual(before);
-    expect(bsvLocksScanned(`${ACCOUNT}-down`)).toBe(false);
+    expect(bsvLocksScanDue(`${ACCOUNT}-down`, 'S', Date.now() + 3_600_001)).toBe(true);
   }, 120000);
+});
+
+describe('Claim guard on the real toolbox: dust in the lock basket never costs the user fees', () => {
+  test('40 matured 1-sat locks planted in the basket plus one real lock: only the real one is claimed', async () => {
+    const chain = newChain();
+    const { root, lockTxid } = await deviceWithLocks(chain);
+    const b = await openWallet(root, chain);
+    const ctxB = ctxOf(b, chain);
+    expect((await findBsvLocks(ctxB, `${ACCOUNT}-dust`, {})).added).toBe(2);
+    // Someone pays 40 exact 1-sat matured locks to the public lock address, and something files them (an older
+    // build, another wallet, a sync): they sit in the lock basket with the normal tags.
+    const addr = await lockAddress(ctxB);
+    const { txid: dustTxid } = mineOutputs(
+      chain,
+      Array.from({ length: 40 }, () => ({ lockingScript: Lock.lock(addr, HEIGHT - 10), satoshis: 1 })),
+    );
+    const dustBeef = new Beef();
+    const dtx = Transaction.fromBinary(chain.raw.get(dustTxid)!);
+    dtx.merklePath = pathFor(chain, dustTxid);
+    dustBeef.mergeTransaction(dtx);
+    await b.wallet.internalizeAction({
+      tx: dustBeef.toBinaryAtomic(dustTxid),
+      outputs: dtx.outputs.map((_, v) => ({
+        outputIndex: v,
+        protocol: 'basket insertion' as const,
+        insertionRemittance: {
+          basket: 'lock',
+          customInstructions: JSON.stringify({ protocolID: P1SAT_PROTOCOL, keyID: 'lock' }),
+          tags: [`until:${HEIGHT - 10}`, `id:${'d'.repeat(16)}_${v}`],
+        },
+      })),
+      description: 'planted dust locks',
+    });
+    expect(await locksOf(b)).toHaveLength(42);
+
+    chain.tip = MATURE + 1;
+    const balBefore = await balance(b);
+    const txid = await claimMatured(ctxB);
+    const utx = Transaction.fromBinary(await rawOf(b, txid));
+    expect(utx.inputs.map((i) => `${i.sourceTXID}.${i.sourceOutputIndex}`)).toEqual([`${lockTxid}.0`]);
+    const balAfter = await balance(b);
+    console.log(
+      '[claim guard] balance',
+      balBefore,
+      '→',
+      balAfter,
+      '| dust left in the basket:',
+      (await locksOf(b)).length - 1,
+    );
+    expect(balAfter).toBeGreaterThan(balBefore + 49_000);
+    // Only dust left ready: nothing to claim, and nothing is spent on it.
+    await expect(claimMatured(ctxB)).rejects.toThrow('Nothing is ready to claim yet.');
+    expect(await balance(b)).toBe(balAfter);
+  }, 120000);
+});
+
+describe('L3 on the real toolbox: the device store fingerprint', () => {
+  test('a store opened again is the same store; a new store for the same seed is a different one', async () => {
+    const chain = newChain();
+    const root = PrivateKey.fromRandom();
+    const a = await openWallet(root, chain);
+    const b = await openWallet(root, chain);
+    const fa = await storeFingerprint(a.storage as never, a.kd.identityKey);
+    expect(fa).toMatch(/\|\d{4}-\d\d-\d\dT/);
+    expect(await storeFingerprint(a.storage as never, a.kd.identityKey)).toBe(fa);
+    expect(await storeFingerprint(b.storage as never, b.kd.identityKey)).not.toBe(fa);
+  }, 60000);
 });
 
 describe('Find my locks: what the Locks tab says', () => {
   const done = (s: Partial<import('./lockFinder').BsvLockScan>) =>
     bsvScanLine({
       kind: 'done',
-      scan: { found: 0, added: 0, addedSats: 0, already: 0, spent: 0, failed: [], ...s },
+      scan: { found: 0, added: 0, addedSats: 0, already: 0, spent: 0, retry: [], repair: [], ...s },
     });
 
-  test('found, added, already, spent and not-yet-added are each said plainly', () => {
+  test('found, added, already, spent, retry-later and needs-repair are each said plainly', () => {
     expect(done({})).toBe('No BSV locks found on chain for this wallet.');
     expect(done({ found: 2, added: 2 })).toBe('Found 2 locks on chain (2 added to your wallet).');
     expect(done({ found: 1, already: 1 })).toBe('Found 1 lock on chain, all already in your wallet.');
-    expect(done({ found: 3, added: 1, spent: 1, failed: ['x: y'] })).toBe(
-      "Found 3 locks on chain (1 added to your wallet). 1 already unlocked. 1 couldn't be added yet; try again later.",
+    expect(done({ found: 3, added: 1, spent: 1, retry: ['x: y'], repair: ['p: q'] })).toBe(
+      "Found 3 locks on chain (1 added to your wallet). 1 already unlocked. 1 couldn't be checked yet; tried again later. 1 needs a repair: p: q",
     );
     expect(bsvScanLine({ kind: 'idle' })).toBeNull();
     expect(bsvScanLine({ kind: 'scanning', detail: 'Looking for locks…' })).toBe('Looking for locks…');

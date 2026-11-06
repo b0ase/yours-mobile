@@ -1,18 +1,19 @@
 /**
  * Pots & Locks › Locks › BSV locks: "Find my locks" files this wallet's BSV time-locks from the chain into the wallet
  * (lockFinder.findBsvLocks: the seed's lock key, 1Sat's indexer, no server of ours). Below it, the locks the wallet
- * holds that no plan on this device lists (a restored wallet, a new device, feed locks), with Claim when one is ready.
- * Runs once by itself on a device that has never looked, like Find my token locks.
+ * holds that no unclaimed plan piece on this device lists (a restored wallet, a new device, feed locks), with Claim
+ * when some are ready. Runs by itself once per device store (backing off after a failed run), like Find my token locks.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Search, Unlock } from 'lucide-react';
 import { listLocks, unlockBsv } from '@1sat/actions';
-import { readAssetIdTag } from '@1sat/types';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { fmtBsv, type LockPlan } from './schedule';
 import { canUnlock, countdown } from './tokenLocks';
-import { bsvLocksScanned, bsvScanLine, scanBsvLocks, type BsvLockScan } from './lockFinder';
+import { claimableLocks, unclaimedOutpoints } from './lockApi';
+import { bsvLockRepairs, bsvLocksScanDue, bsvScanLine, scanBsvLocks, type BsvLockScan } from './lockFinder';
+import { lockScanOptions } from './lockScanWiring';
 
 const GOLD = 'var(--bw-accent)';
 const PANEL = '#17191E';
@@ -21,7 +22,7 @@ const MUTED = '#98A2B3';
 const RED = '#F97066';
 const GREEN = '#32D583';
 
-type Row = { outpoint: string; satoshis: number; until: number; id?: string };
+type Row = { outpoint: string; satoshis: number; until: number; tags?: string[] };
 type ScanState =
   | { kind: 'idle' }
   | { kind: 'scanning'; detail: string }
@@ -39,17 +40,18 @@ export const BsvLocksSection = ({
 }) => {
   const { apiContext, chromeStorageService } = useServiceContext();
   const { addSnackbar } = useSnackbar();
-  const account = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress ?? '';
+  const account = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ?? '';
   const [rows, setRows] = useState<Row[]>([]);
   const [state, setState] = useState<ScanState>({ kind: 'idle' });
+  const [repairs, setRepairs] = useState<string[]>(() => (account ? bsvLockRepairs(account) : []));
   const [busy, setBusy] = useState(false);
   const live = useRef(true);
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    live.current = true; // StrictMode mounts twice in development
+    return () => {
       live.current = false;
-    },
-    [],
-  );
+    };
+  }, []);
   const changed = useRef(onChanged);
   changed.current = onChanged;
 
@@ -63,7 +65,7 @@ export const BsvLocksSection = ({
           outpoint: o.outpoint.replace('_', '.'),
           satoshis: o.satoshis,
           until: Number.parseInt(o.tags?.find((t) => t.startsWith('until:'))?.slice(6) ?? '0', 10),
-          id: readAssetIdTag(o.tags),
+          tags: o.tags,
         })),
       );
     } catch {
@@ -72,47 +74,53 @@ export const BsvLocksSection = ({
   }, [apiContext]);
   useEffect(() => void reload(), [reload]);
 
-  const run = useCallback(async () => {
-    if (!account || !apiContext.services) return;
-    setState({ kind: 'scanning', detail: 'Starting…' });
-    try {
-      const scan = await scanBsvLocks(
-        apiContext,
-        account,
-        (detail) => live.current && setState({ kind: 'scanning', detail }),
-      );
-      if (!live.current) return;
-      setState({ kind: 'done', scan });
-      await reload();
-      if (scan.added) changed.current();
-    } catch (e) {
-      if (live.current)
-        setState({
-          kind: 'error',
-          message: `Couldn't search the chain right now${e instanceof Error && e.message ? ` (${e.message})` : ''}. Your locks are safe; try again later.`,
+  const run = useCallback(
+    async (auto = false) => {
+      if (!account || !apiContext.services) return;
+      try {
+        const opts = await lockScanOptions();
+        if (auto && !bsvLocksScanDue(account, opts.store)) return;
+        if (!live.current) return;
+        setState({ kind: 'scanning', detail: 'Starting…' });
+        const scan = await scanBsvLocks(apiContext, account, {
+          ...opts,
+          onProgress: (detail) => live.current && setState({ kind: 'scanning', detail }),
         });
-    }
-  }, [apiContext, account, reload]);
+        if (!live.current) return;
+        setState({ kind: 'done', scan });
+        setRepairs(scan.retry.length ? bsvLockRepairs(account) : scan.repair);
+        await reload();
+        if (scan.added) changed.current();
+      } catch (e) {
+        if (live.current)
+          setState({
+            kind: 'error',
+            message: `Couldn't search the chain right now${e instanceof Error && e.message ? ` (${e.message})` : ''}. Your locks are safe; try again later.`,
+          });
+      }
+    },
+    [apiContext, account, reload],
+  );
 
   const autoTried = useRef(false);
   useEffect(() => {
-    if (autoTried.current || !account || !apiContext.services || bsvLocksScanned(account)) return;
+    if (autoTried.current || !account || !apiContext.services) return;
     autoTried.current = true;
-    void run();
+    void run(true);
   }, [account, apiContext.services, run]);
 
-  const planned = useMemo(() => new Set(plans.flatMap((p) => p.pieces.map((x) => `${x.txid}.${x.vout}`))), [plans]);
+  const planned = useMemo(() => unclaimedOutpoints(plans), [plans]);
   const unplanned = rows.filter((r) => r.until > 0 && !planned.has(r.outpoint)).sort((a, b) => a.until - b.until);
-  const ready = unplanned.filter((r) => height > 0 && canUnlock(r.until, height) && r.id);
-  const readySats = ready.reduce((s, r) => s + r.satoshis, 0);
+  // Dust never costs a fee and one claim stays small (lockApi.claimableLocks).
+  const ready = claimableLocks(unplanned, height);
 
   const claim = async () => {
     setBusy(true);
     try {
-      const res = await unlockBsv.execute(apiContext, { ids: ready.map((r) => r.id!) });
+      const res = await unlockBsv.execute(apiContext, { ids: ready.ids });
       if ('error' in res && res.error)
         throw new Error(res.error === 'no-matured-locks' ? 'Nothing is ready to claim yet.' : res.error);
-      addSnackbar(`Claimed ${fmtBsv(readySats)} back to your wallet.`, 'success');
+      addSnackbar(`Claimed ${fmtBsv(ready.sats)} back to your wallet.`, 'success');
       await reload();
       changed.current();
     } catch (e) {
@@ -123,6 +131,7 @@ export const BsvLocksSection = ({
   };
 
   const line = bsvScanLine(state);
+  const showRepairs = state.kind !== 'done' && repairs.length > 0;
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
@@ -144,6 +153,11 @@ export const BsvLocksSection = ({
           {line}
         </div>
       )}
+      {showRepairs && (
+        <div className="text-xs" style={{ color: MUTED }}>
+          {repairs.length} lock{repairs.length === 1 ? '' : 's'} on chain couldn’t be added: {repairs.join('; ')}
+        </div>
+      )}
       {unplanned.map((r) => {
         const open = height > 0 && canUnlock(r.until, height);
         return (
@@ -163,7 +177,7 @@ export const BsvLocksSection = ({
           </div>
         );
       })}
-      {ready.length > 0 && (
+      {ready.ids.length > 0 && (
         <button
           type="button"
           disabled={busy}
@@ -171,7 +185,7 @@ export const BsvLocksSection = ({
           className="self-start flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-bold"
           style={{ background: GOLD, color: '#1a1300' }}
         >
-          <Unlock size={13} /> {busy ? 'Claiming…' : `Claim ${fmtBsv(readySats)}`}
+          <Unlock size={13} /> {busy ? 'Claiming…' : `Claim ${fmtBsv(ready.sats)}`}
         </button>
       )}
     </div>
