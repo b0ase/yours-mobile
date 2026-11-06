@@ -10,7 +10,14 @@
  * Pure (no React, no wallet) so sealScreen.test.ts can pin every label and rule.
  */
 import { fmtDollars, satsToUsd } from '../../utils/dollarsFirst';
-import { ALREADY_SEALED_MESSAGE, NativeSealError, type PadPoint, type SealHere, type SealStep } from './nativeSeal';
+import {
+  ALREADY_SEALED_MESSAGE,
+  MAY_HAVE_PAID_MESSAGE,
+  NativeSealError,
+  type PadPoint,
+  type SealHere,
+  type SealStep,
+} from './nativeSeal';
 
 export const DRAW_HINT = 'Draw your signature';
 export const SIGNED_LINE = 'Signed ✓';
@@ -42,6 +49,8 @@ export const openingNotice = (state: SealHere, recovered: boolean): { text: stri
       return recovered ? { text: STILL_RECORDING_LINE, busy: false } : { text: RECORDING_LINE, busy: true };
     case 'in_flight':
       return { text: IN_FLIGHT_LINE, busy: true };
+    case 'unsure':
+      return { text: MAY_HAVE_PAID_MESSAGE, busy: false };
     case 'none':
       return null;
   }
@@ -160,6 +169,8 @@ export const sealProgress = (step: SealProgress, slow = false): ProgressLine[] =
  */
 export const retryAllowed = (error: unknown, reachedPay: boolean): boolean => {
   if (error instanceof NativeSealError && error.code === 'spent_elsewhere') return true;
+  // The wallet proved nothing went out (and the nonce was cancelled): a clean retry.
+  if (error instanceof NativeSealError && error.code === 'not_paid') return true;
   // Sealed already (on this device, or the server says so): never a second seal, so never the button again.
   if (error instanceof NativeSealError && error.code === 'already_sealed') return false;
   // This version is out of date (signer_race): the page offers the latest version instead of the same button.

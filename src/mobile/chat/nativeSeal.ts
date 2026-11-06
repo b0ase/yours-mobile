@@ -1,6 +1,11 @@
 import { Transaction } from '@bsv/sdk';
 import { NATIVE_SEAL_ENABLED } from '../storeBuild';
-import { SPENT_ELSEWHERE_SHORT_MESSAGE, SPENT_ELSEWHERE_STUCK_MESSAGE } from '../../utils/sendErrors';
+import {
+  SPENT_ELSEWHERE_SHORT_MESSAGE,
+  SPENT_ELSEWHERE_STUCK_MESSAGE,
+  classifySendError,
+  type SendErrorKind,
+} from '../../utils/sendErrors';
 import { browserWakeClock, waitForCoinCheck, type WakeClock } from './coinWait';
 import { WALL_TIMEOUT, withinWallClock } from '../../services/wallClock';
 
@@ -34,7 +39,7 @@ export interface SealApiReply {
   body: Record<string, unknown>;
 }
 export type SealApi = (
-  path: 'prepare' | 'compose' | 'receipt' | 'commit' | 'recover',
+  path: 'prepare' | 'compose' | 'receipt' | 'commit' | 'recover' | 'cancel',
   body: Record<string, unknown>,
 ) => Promise<SealApiReply>;
 
@@ -125,7 +130,7 @@ export const abandonSeal = (key: string): boolean => {
   return true;
 };
 
-export type SealHere = 'none' | 'in_flight' | 'recording' | 'sealed';
+export type SealHere = 'none' | 'in_flight' | 'recording' | 'unsure' | 'sealed';
 
 /**
  * What this device knows about one seal: running now, paid and waiting to be recorded (PendingSealStore), recorded
@@ -142,18 +147,18 @@ export const sealStateHere = (
   const key = sealKey(identityKey, documentId, fieldIds);
   if (inFlight.has(key)) return 'in_flight';
   try {
-    if (
-      store
-        .list()
-        .some(
-          (p) =>
-            p.documentId === documentId &&
-            (p.identityKey === undefined ||
-              p.fieldIds === undefined ||
-              sealKey(p.identityKey, p.documentId, p.fieldIds) === key),
-        )
-    )
-      return 'recording';
+    const saved = store
+      .list()
+      .filter(
+        (p) =>
+          p.documentId === documentId &&
+          (p.identityKey === undefined ||
+            p.fieldIds === undefined ||
+            sealKey(p.identityKey, p.documentId, p.fieldIds) === key),
+      );
+    // A payment with its transaction in hand is recorded by /recover; one without (an unclear failure) only waits.
+    if (saved.some((p) => p.beefHex)) return 'recording';
+    if (saved.length) return 'unsure';
   } catch {
     /* unreadable store: the other checks stand */
   }
@@ -172,6 +177,66 @@ const markSealed = (ledger: SealLedger | null | undefined, key: string) => {
     /* storage blocked: the server's own checks remain */
   }
 };
+
+/**
+ * createAction failed and it is NOT certain that nothing went out (a broadcast was tried, a network error or timeout
+ * during it, a txid in the answer). The nonce is never cancelled then, and no retry is offered.
+ */
+export const MAY_HAVE_PAID_MESSAGE = 'This seal may have been paid — it will be checked and recorded.';
+/**
+ * How long an unclear payment (MAY_HAVE_PAID_MESSAGE, no transaction in hand to recover with) holds this seal on this
+ * device: past bit-sign's 10-minute signing session, so the server can no longer record that attempt anyway.
+ */
+export const UNSURE_HOLD_MS = 15 * 60_000;
+/** How long a cancel may take at most before the seal goes on without it (it is best effort). */
+export const CANCEL_TIMEOUT_MS = 3_000;
+
+/**
+ * The failure kinds where the wallet itself says nothing was built, signed or broadcast (utils/sendErrors.ts
+ * moneyMoved 'no'). 'network' is NOT here: a network error during createAction can be one during its broadcast.
+ */
+const NOTHING_SENT_KINDS = new Set<SendErrorKind>([
+  'cancelled',
+  'locked',
+  'insufficient-funds',
+  'spent-elsewhere',
+  'payment-refused',
+  'device-not-active',
+  'other-extension',
+  'worker-restarted',
+  'storage-full',
+  'storage-remote-failing',
+  'broadcast-failed',
+]);
+
+/**
+ * Pure: does this createAction failure PROVE no seal transaction exists or went out? Only then is the nonce cancelled
+ * (bit-sign never recovers a cancelled nonce). Any doubt, a txid in the answer, or an unknown kind → false.
+ */
+export const provablyNotPaid = (e: unknown): boolean => {
+  if (e && typeof e === 'object' && typeof (e as { txid?: unknown }).txid === 'string') return false;
+  const info = classifySendError(e, 'send');
+  return info.moneyMoved === 'no' && !info.txid && NOTHING_SENT_KINDS.has(info.kind);
+};
+
+/**
+ * bit-sign POST /seal/cancel {nonce}: this seal will never be paid, so a retry can prepare and compose again without
+ * signer_busy. Best effort, once, at most CANCEL_TIMEOUT_MS: 404 (an older server, or not ours), 409 (being
+ * recorded / already used), 503 (seal_v2_unavailable), a network error or a timeout are all ignored. Never throws.
+ */
+async function cancelSeal(api: SealApi, nonce: string, clock?: WakeClock): Promise<void> {
+  try {
+    const r = await withinWallClock(
+      api('cancel', { nonce }).catch(() => null),
+      CANCEL_TIMEOUT_MS,
+      { clock },
+    );
+    if (r && r !== WALL_TIMEOUT && !r.ok && r.status !== 404 && r.status !== 503)
+      console.info('[nativeSeal] cancel not taken (harmless):', r.status, r.body.code ?? '');
+  } catch {
+    /* harmless */
+  }
+}
 
 export interface PreparedSeal {
   nonce: string;
@@ -202,6 +267,7 @@ export class NativeSealError extends Error {
       | 'pending_recovery'
       | 'failed'
       | 'spent_elsewhere'
+      | 'not_paid'
       | 'orphaned',
     readonly status = 0,
   ) {
@@ -400,6 +466,36 @@ export async function nativeSignAndSeal(input: {
   }
 }
 
+/** The txid an unclear failure names, if any (kept with the held record for support; recovery needs the BEEF too). */
+const txidIn = (e: unknown): string => {
+  const own = e && typeof e === 'object' ? (e as { txid?: unknown }).txid : undefined;
+  if (typeof own === 'string' && /^[0-9a-f]{64}$/i.test(own)) return own.toLowerCase();
+  return '';
+};
+
+/** An unclear payment: hold this seal on this phone (PendingSealStore, no BEEF) so it is never paid again from here. */
+function holdUnclearPayment(
+  input: Parameters<typeof nativeSignAndSeal>[0],
+  nonce: string,
+  attestation: string,
+  e: unknown,
+) {
+  try {
+    input.store.save({
+      documentId: input.documentId,
+      nonce,
+      txid: txidIn(e),
+      beefHex: '',
+      attestation,
+      savedAt: (input.now ?? Date.now)(),
+      identityKey: input.identityKey ?? '',
+      fieldIds: [...input.fieldIds],
+    });
+  } catch {
+    /* storage blocked: the in-flight hold and the server's checks remain */
+  }
+}
+
 async function signAndSealOnce(input: Parameters<typeof nativeSignAndSeal>[0], hold: Hold): Promise<NativeSealOutcome> {
   const step = (s: SealStep) => input.onStep?.(s);
   step('preparing');
@@ -408,6 +504,24 @@ async function signAndSealOnce(input: Parameters<typeof nativeSignAndSeal>[0], h
     fieldIds: input.fieldIds,
   })) as unknown as PreparedSeal;
 
+  /** Set once createAction may have built or broadcast something: from then on the nonce is only cancelled on proof. */
+  let mayHavePaid = false;
+  try {
+    return await afterPrepare(input, hold, prepared, () => (mayHavePaid = true));
+  } catch (e) {
+    // Nothing can have been paid (before the payment, or a refusal that proves it): free the nonce for a clean retry.
+    if (!mayHavePaid) await cancelSeal(input.api, prepared.nonce, input.clock);
+    throw e;
+  }
+}
+
+async function afterPrepare(
+  input: Parameters<typeof nativeSignAndSeal>[0],
+  hold: Hold,
+  prepared: PreparedSeal,
+  paymentMayHaveGoneOut: () => void,
+): Promise<NativeSealOutcome> {
+  const step = (s: SealStep) => input.onStep?.(s);
   step('approving');
   if (!(await input.approve(prepared)))
     throw new NativeSealError('Not sealed: you cancelled. Nothing was signed or paid.', 'cancelled');
@@ -453,15 +567,22 @@ async function signAndSealOnce(input: Parameters<typeof nativeSignAndSeal>[0], h
       options: { acceptDelayedBroadcast: false, randomizeOutputs: false },
     });
   } catch (e) {
-    // Refused, so nothing was paid and nothing is saved for recovery. The raw text stays in the console.
-    if (isSpentCoinError(e)) {
-      console.warn('[nativeSeal] pay refused: coin already spent', e instanceof Error ? e.message : e);
-      throw new NativeSealError(SEAL_SPENT_MESSAGE, 'spent_elsewhere');
+    console.warn('[nativeSeal] pay failed', e instanceof Error ? e.message : e);
+    if (provablyNotPaid(e)) {
+      // Refused before anything went out: nothing paid, nothing saved; the nonce is cancelled and the button returns.
+      if (isSpentCoinError(e)) throw new NativeSealError(SEAL_SPENT_MESSAGE, 'spent_elsewhere');
+      throw new NativeSealError(e instanceof Error && e.message ? e.message : 'The payment was refused.', 'not_paid');
     }
-    throw e;
+    // ⚠ ANY DOUBT: it may have gone out. Never cancel the nonce, never offer a retry; this seal is held on this phone.
+    paymentMayHaveGoneOut();
+    holdUnclearPayment(input, prepared.nonce, attestation, e);
+    throw new NativeSealError(MAY_HAVE_PAID_MESSAGE, 'pending_recovery');
   }
-  if (!paid?.txid || !paid.tx)
+  if (!paid?.txid || !paid.tx) {
+    paymentMayHaveGoneOut();
     throw new NativeSealError('The wallet did not return the seal transaction, so nothing was recorded.', 'failed');
+  }
+  paymentMayHaveGoneOut();
   const txid = paid.txid.toLowerCase();
   const beefHex = toHex(paid.tx);
   const feeSats = feeFromAtomicBeef(paid.tx);
@@ -568,10 +689,17 @@ export async function recoverNativeSeals(
   store: PendingSealStore,
   documentId?: string,
   ledger?: SealLedger | null,
+  now?: () => number,
 ): Promise<number> {
   let done = 0;
   for (const p of store.list()) {
     if (documentId && p.documentId !== documentId) continue;
+    // An unclear payment with no transaction in hand: nothing to recover with. Held until bit-sign's session is long
+    // over (UNSURE_HOLD_MS), then let go so this phone can seal again.
+    if (!p.beefHex) {
+      if ((now ?? Date.now)() - p.savedAt >= UNSURE_HOLD_MS) store.remove(p.nonce);
+      continue;
+    }
     try {
       const r = await api('recover', { nonce: p.nonce, attestation: p.attestation, txid: p.txid, beefHex: p.beefHex });
       // In progress (429 / commit_in_progress), network or server fault: keep it for the next open or the sweep.

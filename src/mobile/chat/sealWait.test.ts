@@ -4,6 +4,8 @@ import {
   ALREADY_SEALED_MESSAGE,
   BUSY_ELSEWHERE_MESSAGE,
   LEFT_PAGE_MESSAGE,
+  MAY_HAVE_PAID_MESSAGE,
+  UNSURE_HOLD_MS,
   NEWER_VERSION_MESSAGE,
   NativeSealError,
   SEAL_HOLD_MAX_MS,
@@ -536,5 +538,135 @@ describe('the page wires the guard (NativeSealPage.tsx)', () => {
     expect(page).toContain("e.code === 'newer_version'");
     expect(page).toContain('Open the latest version');
     expect(page).toContain('setReload((n) => n + 1)');
+  });
+});
+
+describe('bit-sign seal cancel: only when createAction proves nothing went out', () => {
+  const failingPay = (log: string[], errs: unknown[]): SealKeys => ({
+    createSignature: async () => ({ signature: [1, 2, 3] }),
+    createAction: async () => {
+      log.push('pay');
+      const e = errs.shift();
+      if (e) throw e;
+      return { txid: TX, tx: [9, 9] };
+    },
+  });
+
+  test('a definite refusal cancels the nonce, then a clean retry seals once', async () => {
+    const log: string[] = [];
+    const store = memStore();
+    const ledger = memLedger();
+    const keys = failingPay(log, [new Error('Not enough spendable BSV for this payment.')]);
+    const e = await seal({ log, documentId: 'C1', store, ledger, keys }).catch((x) => x);
+    expect(e.code).toBe('not_paid');
+    expect(retryAllowed(e, true)).toBe(true); // the button comes back
+    expect(log.filter((l) => l === 'cancel')).toHaveLength(1);
+    expect(log.indexOf('cancel')).toBeGreaterThan(log.indexOf('pay'));
+    expect(store.m.size).toBe(0);
+    expect(sealStateHere('', 'C1', ['f1'], store, ledger)).toBe('none');
+    const out = await seal({ log, documentId: 'C1', store, ledger, keys }); // the retry
+    expect(out.txid).toBe(TX);
+    expect(log.filter((l) => l === 'pay')).toHaveLength(2);
+    expect(log.filter((l) => l === 'cancel')).toHaveLength(1);
+  });
+
+  test('a user decline and a pre-payment failure cancel too (nothing was ever paid)', async () => {
+    const log: string[] = [];
+    await seal({ log, documentId: 'C2', approve: async () => false }).catch((x) => x);
+    expect(log).toEqual(['prepare', 'cancel']);
+    const log2: string[] = [];
+    await seal({
+      log: log2,
+      documentId: 'C3',
+      keys: { createSignature: () => Promise.reject(new Error('locked')), createAction: async () => ({}) },
+    }).catch((x) => x);
+    expect(log2).toEqual(['prepare', 'compose', 'cancel']);
+  });
+
+  for (const [name, err] of [
+    ['a network error during the broadcast', new Error('Failed to fetch')],
+    ['a timeout', new Error('The request timed out')],
+    ['a broadcast that needs review', new Error('Undelayed createAction or signAction results require review.')],
+    [
+      'an answer carrying a txid',
+      Object.assign(new Error('Payment refused: Nothing was sent.'), { txid: 'cd'.repeat(32) }),
+    ],
+    ['an unknown error', new Error('something odd')],
+  ] as const)
+    test(`${name}: no cancel, the record is kept, "may have been paid", no retry`, async () => {
+      const log: string[] = [];
+      const store = memStore();
+      const docId = `U-${name}`;
+      const e = await seal({ log, documentId: docId, store, keys: failingPay(log, [err]) }).catch((x) => x);
+      expect(e.code).toBe('pending_recovery');
+      expect(e.message).toBe(MAY_HAVE_PAID_MESSAGE);
+      expect(retryAllowed(e, true)).toBe(false);
+      expect(log).not.toContain('cancel');
+      expect(log).not.toContain('commit');
+      expect(store.list()).toMatchObject([{ documentId: docId, nonce: 'N1', beefHex: '' }]);
+      expect(sealStateHere('', docId, ['f1'], store)).toBe('unsure');
+      expect((await seal({ documentId: docId, store }).catch((x) => x)).code).toBe('already_sealed');
+    });
+
+  test('the held unclear record: never sent to /recover; let go after UNSURE_HOLD_MS (past the signing session)', async () => {
+    const store = memStore();
+    store.save({
+      documentId: 'U9',
+      nonce: 'N9',
+      txid: '',
+      beefHex: '',
+      attestation: 'aa',
+      savedAt: 1_000,
+      identityKey: '',
+      fieldIds: ['f1'],
+    });
+    const log: string[] = [];
+    await recoverNativeSeals(api(log), store, 'U9', null, () => 1_000 + UNSURE_HOLD_MS - 1);
+    expect(log).toEqual([]);
+    expect(store.m.size).toBe(1);
+    expect(openingNotice(sealStateHere('', 'U9', ['f1'], store), true)?.text).toBe(MAY_HAVE_PAID_MESSAGE);
+    await recoverNativeSeals(api(log), store, 'U9', null, () => 1_000 + UNSURE_HOLD_MS);
+    expect(log).toEqual([]);
+    expect(store.m.size).toBe(0);
+  });
+
+  test('a cancel that fails (404, 409, 503, a network error, or never answers) is ignored', async () => {
+    const answers: (() => Promise<{ ok: boolean; status: number; body: Record<string, unknown> }>)[] = [
+      async () => ({ ok: false, status: 404, body: { code: 'not_yours' } }),
+      async () => ({ ok: false, status: 409, body: { code: 'commit_in_progress' } }),
+      async () => ({ ok: false, status: 503, body: { code: 'seal_v2_unavailable' } }),
+      () => Promise.reject(new Error('Failed to fetch')),
+    ];
+    for (const [i, answer] of answers.entries()) {
+      const log: string[] = [];
+      const base = api(log);
+      const e = await seal({
+        log,
+        documentId: `X${i}`,
+        api: (path, body) => (path === 'cancel' ? (log.push('cancel'), answer()) : base(path, body)),
+        keys: failingPay(log, [new Error('Not enough spendable BSV for this payment.')]),
+      }).catch((x) => x);
+      expect(e.code).toBe('not_paid');
+      expect(log.filter((l) => l === 'cancel')).toHaveLength(1); // once: no retry loop
+    }
+    // Never answers: the seal goes on after CANCEL_TIMEOUT_MS on the wall clock.
+    const f = frozenClock();
+    const log: string[] = [];
+    const base = api(log);
+    let out: unknown = null;
+    void seal({
+      log,
+      documentId: 'X-hang',
+      clock: f.clock,
+      api: (path, body) => (path === 'cancel' ? (log.push('cancel'), new Promise(() => undefined)) : base(path, body)),
+      keys: failingPay(log, [new Error('Not enough spendable BSV for this payment.')]),
+    }).catch((x) => (out = x));
+    await until(() => log.includes('cancel'));
+    await flush();
+    expect(out).toBeNull();
+    f.advance(3_000);
+    f.wake();
+    await until(() => out !== null);
+    expect((out as NativeSealError).code).toBe('not_paid');
   });
 });

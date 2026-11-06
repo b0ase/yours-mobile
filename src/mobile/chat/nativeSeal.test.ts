@@ -13,6 +13,7 @@ import {
   nativeSignAndSeal,
   recoverNativeSeals,
   SEAL_SPENT_MESSAGE,
+  MAY_HAVE_PAID_MESSAGE,
   signedFieldIds,
   strokesToSvg,
   type PendingSeal,
@@ -183,7 +184,9 @@ describe('pay refused: a coin already spent on another device (owner iPhone, 3 N
     createAction: async () => (log.push('pay'), Promise.reject(err)),
   });
 
-  test('plain message, not the toolbox text; nothing saved, nothing committed', async () => {
+  // 6 Nov 2026 (bit-sign seal cancel): this text says a broadcast was tried and needs review, so it is NOT proof that
+  // nothing went out. No retry and no cancel; the seal is held on this phone instead.
+  test('a broadcast that needs review: "may have been paid", held on the phone, no commit, no cancel', async () => {
     const log: string[] = [];
     const store = memStore();
     const err = await nativeSignAndSeal({
@@ -196,11 +199,11 @@ describe('pay refused: a coin already spent on another device (owner iPhone, 3 N
       approve: async () => true,
     }).catch((e) => e);
     expect(err).toBeInstanceOf(NativeSealError);
-    expect(err.code).toBe('spent_elsewhere');
-    expect(err.message).toBe(SEAL_SPENT_MESSAGE);
+    expect(err.code).toBe('pending_recovery');
+    expect(err.message).toBe(MAY_HAVE_PAID_MESSAGE);
     expect(err.message).not.toContain('UTXO_SPENT');
-    expect(store.m.size).toBe(0); // not paid: no paid-but-unrecorded entry
-    expect(log.filter((l) => l.startsWith('commit') || l.startsWith('recover'))).toEqual([]);
+    expect([...store.m.values()]).toMatchObject([{ documentId: 'D', nonce: 'N1', beefHex: '' }]); // held here
+    expect(log.filter((l) => /^(commit|recover|cancel)/.test(l))).toEqual([]);
     expect(log.filter((l) => l === 'pay')).toHaveLength(1); // the background already made the one safe retry
   });
 
@@ -221,7 +224,7 @@ describe('pay refused: a coin already spent on another device (owner iPhone, 3 N
     expect(err.message).toBe(SEAL_SPENT_MESSAGE);
   });
 
-  test('other pay failures pass through unchanged', async () => {
+  test("other refusals that prove nothing went out: the wallet's words, the nonce cancelled, a clean retry", async () => {
     const log: string[] = [];
     const boom = new Error('Not enough spendable BSV for this payment.');
     const err = await nativeSignAndSeal({
@@ -233,7 +236,10 @@ describe('pay refused: a coin already spent on another device (owner iPhone, 3 N
       store: memStore(),
       approve: async () => true,
     }).catch((e) => e);
-    expect(err).toBe(boom);
+    expect(err).toBeInstanceOf(NativeSealError);
+    expect(err.code).toBe('not_paid');
+    expect(err.message).toBe(boom.message);
+    expect(log.filter((l) => l.startsWith('cancel'))).toEqual(['cancel:{"nonce":"N1"}']);
   });
 });
 
