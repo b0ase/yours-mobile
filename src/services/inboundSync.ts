@@ -52,7 +52,7 @@ import {
   type WalletProtocol,
 } from '@bsv/sdk';
 import { BSV20, BSV21 } from '@1sat/templates';
-import { WalletPermissionsManager } from '@bsv/wallet-toolbox-client';
+import { EntitySyncState, WalletPermissionsManager } from '@bsv/wallet-toolbox-client';
 import type { SpendState } from './unsentExpiry';
 
 /** The toolbox's BRC-29 payment protocol (change and received payments). */
@@ -67,6 +67,8 @@ const METADATA_PROTOCOL = (WalletPermissionsManager as unknown as { METADATA_ENC
 export const UNCHECKED_PAGE =
   "A page from your backup couldn't be checked, so none of it was taken. It is tried again later.";
 export const NO_VERIFIER = 'This device store only takes in backup rows it can check; none is set up for this account';
+export const UNFILED_PAGE =
+  'A page from your backup names a payment this device has no record of, so none of it was taken. It is tried again later.';
 
 type Bytes = number[] | Uint8Array;
 export type OutputRow = {
@@ -119,7 +121,13 @@ export type SyncChunk = {
   outputTagMaps?: TagMapRow[];
   provenTxReqs?: ReqRow[];
 };
-type SyncArgs = { identityKey?: string; fromStorageIdentityKey?: string; toStorageIdentityKey?: string };
+type SyncArgs = {
+  identityKey?: string;
+  fromStorageIdentityKey?: string;
+  toStorageIdentityKey?: string;
+  /** The pass's cursor: rows the reader changed at or after this (none: a pass from the start). */
+  since?: Date | string;
+};
 
 /** The storage provider calls this needs (StorageIdb). */
 export type DeviceStore = {
@@ -1323,6 +1331,83 @@ export function walletOwnership(rootKey: PrivateKey, legacyKeys: (PrivateKey | u
   };
 }
 
+// ── rows filed under a transaction this device was never sent (6 Nov 2026) ──
+//
+// The toolbox pulls a backup incrementally: each pass asks for rows changed at or after the newest time it has seen
+// (the sync state's `when`), and a row's time is the time on the device that wrote it. Another copy of the wallet
+// (the owner's extension) pushes its rows later than it makes them, so a payment it made before this device's last
+// pull arrives on the backup with an older time and no later pass sends it. When that copy then spends the payment's
+// coin, the coin's row is newer and comes alone: the toolbox files a row under its transaction through the sync map
+// (EntityOutput.mergeFind), finds none, and refuses the whole page ("args.partial.transactionId ... must be not
+// undefined"). Every merge from that backup then stops at the same page, so this device never takes the other's coins
+// in and never pushes its own (the iPhone, 5 Nov 09:47Z onwards).
+// Such a page is not merged: the cursor goes back to the start and the same sync carries on from there, so the missing
+// transactions come first and every row is checked as usual. A pass from the start that still can't file a row stops.
+
+type SyncStateRow = { syncStateId?: number; syncMap?: unknown };
+type SyncStateStore = DeviceStore & { updateSyncState(id: number, update: Record<string, unknown>): Promise<unknown> };
+
+/** This device's sync state for the page's reader (the one the toolbox's processSyncChunk reads), if any. */
+async function readerSyncState(store: DeviceStore, args: SyncArgs): Promise<SyncStateRow | undefined> {
+  if (!args?.identityKey || !args.fromStorageIdentityKey) return undefined;
+  const user = (await store.findUsers({ partial: { identityKey: args.identityKey } }))[0];
+  if (!user) return undefined;
+  return (
+    await store.findSyncStates({ partial: { storageIdentityKey: args.fromStorageIdentityKey, userId: user.userId } })
+  )[0] as SyncStateRow | undefined;
+}
+
+/**
+ * The reader's transaction ids this page files rows under (outputs, commissions: the merges that refuse a page for an
+ * unknown one) that neither this page nor the sync map knows.
+ */
+export async function unfiledTransactions(store: DeviceStore, args: SyncArgs, chunk: SyncChunk): Promise<number[]> {
+  const rows = [
+    ...(chunk?.outputs ?? []),
+    ...((chunk as { commissions?: { transactionId?: number }[] })?.commissions ?? []),
+  ];
+  if (!rows.length) return [];
+  const idMap = parseSyncMap((await readerSyncState(store, args))?.syncMap)?.transaction?.idMap ?? {};
+  const onPage = new Set((chunk.transactions ?? []).map((t) => t?.transactionId));
+  const unfiled = new Set<number>();
+  for (const r of rows) {
+    const id = r?.transactionId;
+    if (typeof id === 'number' && !onPage.has(id) && typeof idMap[String(id)] !== 'number') unfiled.add(id);
+  }
+  return [...unfiled];
+}
+
+/** Start the next pass from the reader at the beginning: no time cursor, every offset 0. The id maps are kept. */
+async function rewindSync(store: SyncStateStore, row: SyncStateRow) {
+  const ss = new EntitySyncState(row as never);
+  ss.when = undefined;
+  for (const m of Object.values(ss.syncMap as unknown as Record<string, unknown>))
+    if (m && typeof m === 'object' && 'count' in m) (m as { count: number }).count = 0;
+  await ss.updateStorage(store as never, false);
+}
+
+/**
+ * The same gap going the other way: this device's pages to a backup. A transaction this device took in from a backup
+ * keeps its old time, so a push from this device's cursor never sends it, while the coins under it (spent since, newer)
+ * are sent; the backup's merge can't file them and refuses the push (setActive's propagate, updateBackups). Each push
+ * page therefore carries the transactions its coins are filed under. The backup files those under its own copy by txid
+ * and leaves it as it is (not newer), so nothing it holds changes; a backup that lacks one takes it as any page's.
+ */
+async function withParentTransactions(store: DeviceStore, chunk: SyncChunk) {
+  const outputs = chunk?.outputs ?? [];
+  if (!outputs.length) return;
+  const onPage = new Set((chunk.transactions ?? []).map((t) => t?.transactionId));
+  const missing = new Set<number>();
+  for (const o of outputs)
+    if (typeof o?.transactionId === 'number' && !onPage.has(o.transactionId)) missing.add(o.transactionId);
+  if (!missing.size) return;
+  const transactions = chunk.transactions ?? (chunk.transactions = []);
+  for (const transactionId of missing) {
+    const t = (await store.findTransactions({ partial: { transactionId } }))[0];
+    if (t) transactions.push(t);
+  }
+}
+
 // ── installation ──
 
 /**
@@ -1350,12 +1435,15 @@ export function registerInboundVerifier(storageIdentityKey: string, identityKey:
 }
 
 const INSTALLED = Symbol.for('bwx.inboundSync.original');
+const READER = Symbol.for('bwx.inboundSync.reader');
 type ProcessSyncChunk = (this: DeviceStore, args: SyncArgs, chunk: SyncChunk) => Promise<unknown>;
+type GetSyncChunk = (this: DeviceStore, args: unknown) => Promise<SyncChunk>;
 
 /**
  * Wrap processSyncChunk on the device store class (StorageIdb) so every merge for a registered account is checked first,
  * including the one the wallet factory runs before initWallet can touch the instance. A merge into a registered device
- * store for an account with no check is refused. Anything else passes as before. Idempotent; returns the uninstall.
+ * store for an account with no check is refused. Anything else passes as before. A device store's pages to a backup
+ * carry the transactions their coins are filed under (withParentTransactions). Idempotent; returns the uninstall.
  */
 export function installInboundSyncGuard(cls: { prototype: object }): () => void {
   const proto = cls.prototype as Record<string | symbol, unknown>;
@@ -1364,6 +1452,17 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
   const original = proto.processSyncChunk as ProcessSyncChunk | undefined;
   if (typeof original !== 'function') return () => undefined;
   proto[INSTALLED] = original;
+  const ownRead = Object.prototype.hasOwnProperty.call(proto, 'getSyncChunk');
+  const read = proto.getSyncChunk as GetSyncChunk | undefined;
+  if (typeof read === 'function') {
+    proto[READER] = read;
+    proto.getSyncChunk = async function (this: DeviceStore, args: unknown) {
+      const chunk = await read.call(this, args);
+      const sik = this.getSettings?.()?.storageIdentityKey;
+      if (sik && deviceStores.has(sik)) await withParentTransactions(this, chunk);
+      return chunk;
+    };
+  }
   proto.processSyncChunk = async function (this: DeviceStore, args: SyncArgs, chunk: SyncChunk) {
     const identityKey = args?.identityKey ?? '';
     const list = verifiers.get(identityKey);
@@ -1373,6 +1472,21 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
       if ((sik && deviceStores.has(sik)) || (args?.toStorageIdentityKey && deviceStores.has(args.toStorageIdentityKey)))
         throw new Error(NO_VERIFIER);
       return original.call(this, args, chunk);
+    }
+    const unfiled = await unfiledTransactions(this, args, chunk);
+    if (unfiled.length) {
+      // Once per pass: a pass that already started from the beginning stops, so this can never loop.
+      const row = args?.since != null ? await readerSyncState(this, args) : undefined;
+      if (typeof row?.syncStateId !== 'number') {
+        v.log?.(`[inbound-sync] backup page names ${unfiled.length} payment(s) this device has no record of`);
+        throw new Error(UNFILED_PAGE);
+      }
+      await rewindSync(this as SyncStateStore, row);
+      v.log?.(
+        `[inbound-sync] backup page names ${unfiled.length} payment(s) an earlier pull skipped: pulling this backup again from the start`,
+      );
+      // Not merged, nothing queued. No checkpoint: the toolbox's sync loop reloads the rewound one and carries on.
+      return { done: false, inserts: 0, updates: 0 };
     }
     const report = await verifyInboundChunk(this, args, chunk, v);
     if (report.admissions.length) {
@@ -1399,6 +1513,11 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
     if (own) proto.processSyncChunk = original;
     else delete proto.processSyncChunk;
     delete proto[INSTALLED];
+    if (typeof read === 'function') {
+      if (ownRead) proto.getSyncChunk = read;
+      else delete proto.getSyncChunk;
+      delete proto[READER];
+    }
   };
 }
 
@@ -1414,6 +1533,13 @@ export const _uninstallInboundSyncGuard = (cls: { prototype: object }) => {
     delete proto.processSyncChunk;
   else proto.processSyncChunk = original;
   delete proto[INSTALLED];
+  const read = proto[READER];
+  if (typeof read === 'function') {
+    const parent = Object.getPrototypeOf(proto) as Record<string, unknown> | null;
+    if (parent && parent.getSyncChunk === read) delete proto.getSyncChunk;
+    else proto.getSyncChunk = read;
+    delete proto[READER];
+  }
 };
 
 /** Test hook: forget every registration. */

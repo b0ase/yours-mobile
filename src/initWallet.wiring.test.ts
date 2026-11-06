@@ -266,6 +266,8 @@ describe('the real initWallet wiring', () => {
       .processSyncChunk(
         { identityKey, fromStorageIdentityKey: 'backup-under-test', toStorageIdentityKey: sik } as never,
         {
+          // The page carries the coin's transaction: a row the merge couldn't file is refused before any check.
+          transactions: [{ transactionId: 999, txid, status: 'unproven', updated_at: new Date() }],
           outputs: [
             {
               outputId: 1,
