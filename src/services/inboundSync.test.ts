@@ -2256,3 +2256,79 @@ describe('5 Nov 2026: a pull the receive watcher asked for is admitted within se
     expect(r2.nextAt! - now()).toBeGreaterThan(MIN - 1_000);
   });
 });
+
+/**
+ * 6 Nov 2026, the owner's iPhone: f8e91f14:0, a1972e3f:0 and c9959acb:2/:3 (about 12.1M sats) were queued while every
+ * page merge was rolling back, so each try found no row and waited with a doubling back-off (tries 9, next try ~4 h
+ * away). The 07:46 deep pull then merged their rows and listed them again, but the list kept the old timer, so the
+ * coins stayed not spendable for hours. Re-listing, or the row being here now, makes an entry due at once.
+ */
+describe('6 Nov 2026: an admission entry that waited for its row is not held back once the row is here', () => {
+  const sikOf = (d: Awaited<ReturnType<typeof phoneWithBackup>>) => d.phone.getSettings().storageIdentityKey;
+  /** The phone holds coin2 as not spendable; the backup says spendable; the entry carries the earlier tries. */
+  const stale = async (entry: Partial<{ waitingFor: 'row' | 'other'; tries: number; nextIn: number }> = {}) => {
+    const d = await phoneWithBackup();
+    d.chain.answer = 'unspent';
+    const mine = await d.row(d.phone, d.coin2);
+    await d.phone.updateOutput(mine.outputId, { spendable: false } as never);
+    const list = (await import('./inboundSync')).admissionListFor(sikOf(d));
+    await list.put({
+      kind: 'coin',
+      txid: d.coin2,
+      vout: 0,
+      key: `${d.kd.identityKey}|coin|${d.coin2}.0`,
+      identityKey: d.kd.identityKey,
+      firstAt: now() - 5 * HOUR,
+      nextAt: now() + (entry.nextIn ?? 4 * HOUR),
+      tries: entry.tries ?? 9,
+      ...(entry.waitingFor ? { waitingFor: entry.waitingFor } : {}),
+    });
+    return d;
+  };
+
+  test('a pull that lists the coin again resets its back-off: admitted on the chain word, not 4 hours later', async () => {
+    const d = await stale({ waitingFor: 'row' });
+    await d.forge(d.coin2, { spendable: true }); // the page carrying it again (a deep pull)
+    await d.merge();
+    const [e] = await pendingAdmissions(d.phone as never, d.kd.identityKey);
+    expect(e.tries).toBe(0);
+    expect(e.nextAt).toBeLessThanOrEqual(now());
+    expect(e.firstAt).toBeLessThan(now() - 4 * HOUR); // its first time is kept (the 3-day give-up counts from it)
+    const r = await admit(d.phone, d.kd.identityKey, d.verifier);
+    expect(r.admitted).toBe(1);
+    expect((await d.row(d.phone, d.coin2)).spendable).toBe(true);
+    expect(d.chain.asked).toEqual([`${d.coin2}.0`]); // the chain still decided
+  });
+
+  test("an entry left from before (no reason kept) whose row is here now is due: the phone's held coins", async () => {
+    const d = await stale(); // as the phone's list holds them: tries 9, no reason
+    const r = await admit(d.phone, d.kd.identityKey, d.verifier);
+    expect(r.admitted).toBe(1);
+    expect((await d.row(d.phone, d.coin2)).spendable).toBe(true);
+  });
+
+  test('an entry that waited on the chain keeps its back-off: no early question', async () => {
+    const d = await stale({ waitingFor: 'other', tries: 3, nextIn: HOUR });
+    const r = await admit(d.phone, d.kd.identityKey, d.verifier);
+    expect(r.admitted).toBe(0);
+    expect(d.chain.asked).toEqual([]);
+    expect((await d.row(d.phone, d.coin2)).spendable).toBe(false);
+    tick(HOUR);
+    expect((await admit(d.phone, d.kd.identityKey, d.verifier)).admitted).toBe(1);
+  });
+
+  test('a row still missing waits as before, with no chain call, and is marked as waiting for its row', async () => {
+    const d = await phoneWithBackup();
+    const list = (await import('./inboundSync')).admissionListFor(sikOf(d));
+    const ghost = Utils.toHex(Random(32));
+    await list.add(d.kd.identityKey, [{ kind: 'coin', txid: ghost, vout: 0 }], now());
+    const r = await admit(d.phone, d.kd.identityKey, d.verifier);
+    expect(r.waiting).toBe(1);
+    expect(d.chain.asked).toEqual([]);
+    const [e] = await pendingAdmissions(d.phone as never, d.kd.identityKey);
+    expect([e.tries, e.waitingFor]).toEqual([1, 'row']);
+    // The next run, before its time: still missing, so still not due and not asked about.
+    expect((await admit(d.phone, d.kd.identityKey, d.verifier)).waiting).toBe(0);
+    expect(d.chain.asked).toEqual([]);
+  });
+});

@@ -869,10 +869,21 @@ export type PendingAdmission = Admission & {
   tries: number;
   /** When the chain first said this coin is spent: asked once more an hour later (a mempool spend can be dropped). */
   spentAt?: number;
+  /** When a merge last put it on the list (firstAt, or a later page carrying it again): the prompt window's test. */
+  queuedAt?: number;
+  /**
+   * What the last wait was for: 'row' when this device had no row for it yet (its page not merged), else 'other'.
+   * Missing on entries written before 6 Nov 2026.
+   */
+  waitingFor?: 'row' | 'other';
 };
 
 export type AdmissionList = {
-  /** Add these; an entry already there keeps its tries and times (a transaction's claim is updated). */
+  /**
+   * Add these. An entry already there keeps its first time, and is due again at once with its tries reset: the page
+   * carrying it again is news its back-off never saw (6 Nov 2026: a coin whose row had not merged yet kept a 4-hour wait
+   * after the row came). A transaction's claim is updated.
+   */
   add(identityKey: string, items: Admission[], now: number): Promise<void>;
   list(identityKey: string): Promise<PendingAdmission[]>;
   put(e: PendingAdmission): Promise<void>;
@@ -925,8 +936,14 @@ function idbAdmissionList(name: string): AdmissionList {
           const had = (await idbRequest(s.get(key))) as PendingAdmission | undefined;
           s.put(
             had
-              ? { ...had, ...(a.kind === 'tx' ? { claim: a.claim } : {}) }
-              : { ...a, key, identityKey, firstAt: now, nextAt: now, tries: 0 },
+              ? {
+                  ...had,
+                  ...(a.kind === 'tx' ? { claim: a.claim } : {}),
+                  tries: 0,
+                  nextAt: Math.min(had.nextAt, now),
+                  queuedAt: now,
+                }
+              : { ...a, key, identityKey, firstAt: now, nextAt: now, tries: 0, queuedAt: now },
           );
         }
       }),
@@ -1035,6 +1052,17 @@ export function admitPending(
 
 type Waiting = 'chain' | 'local';
 
+/** This device holds a row for the entry: its transaction (a tx entry), or that transaction's output (a coin). */
+async function hasRow(store: AdmitStore, userId: number, e: PendingAdmission): Promise<boolean> {
+  const [t] = await store.findTransactions({ partial: { userId, txid: e.txid }, noRawTx: true });
+  if (e.kind === 'tx') return !!t && typeof t.transactionId === 'number';
+  const rows =
+    t && typeof t.transactionId === 'number'
+      ? await store.findOutputs({ partial: { userId, transactionId: t.transactionId, vout: e.vout } })
+      : await store.findOutputs({ partial: { userId, txid: e.txid, vout: e.vout } });
+  return rows.some((r) => typeof r.outputId === 'number');
+}
+
 async function admitOnce(
   store: AdmitStore,
   identityKey: string,
@@ -1064,6 +1092,19 @@ async function admitOnce(
   if (!user) return count();
   const userId = user.userId;
   const all = await list.list(identityKey);
+  // An entry waiting for its row (its page not merged then) is due once the row is here, its back-off reset: the
+  // back-off counted tries that could never succeed (6 Nov 2026: the phone's f8e91f14:0 and a1972e3f:0, 12.1M sats, held
+  // not spendable for hours after the deep pull merged their rows). Entries from before the reason was kept are looked
+  // at once. Only reads of this device's store here (a bounded number per run); every check still runs below.
+  let looks = 4 * (opts.limit ?? RUN_LIMIT);
+  for (const e of all) {
+    if (e.nextAt <= now || e.tries === 0 || (e.waitingFor !== undefined && e.waitingFor !== 'row')) continue;
+    if (looks-- <= 0) break;
+    if (await hasRow(store, userId, e)) {
+      e.nextAt = now;
+      e.tries = 0;
+    }
+  }
   const due = all
     .filter((e) => e.nextAt <= now)
     .sort((a, b) => (a.kind !== b.kind ? (a.kind === 'tx' ? -1 : 1) : a.nextAt - b.nextAt))
@@ -1081,19 +1122,21 @@ async function admitOnce(
    * an honest coin must come back however long WhatsOnChain and the 1Sat stack take. One waiting on this device's own
    * state is dropped after 3 days, its coin left not spendable (the device's own repairs see it).
    */
-  const wait = async (e: PendingAdmission, why: Waiting, at?: number) => {
+  const wait = async (e: PendingAdmission, why: Waiting, at?: number, waitingFor: 'row' | 'other' = 'other') => {
     if (why === 'local' && now - e.firstAt >= LOCAL_GIVE_UP_MS) {
       await list.remove(e.key);
       report.retired++;
       v.log?.(`[inbound-sync] gave up on ${e.kind} ${e.txid}${e.kind === 'coin' ? `.${e.vout}` : ''}: left as is`);
       return;
     }
-    const prompt = at === undefined && !!opts.prompt && e.firstAt >= opts.prompt.from && now < opts.prompt.until;
+    const prompt =
+      at === undefined && !!opts.prompt && (e.queuedAt ?? e.firstAt) >= opts.prompt.from && now < opts.prompt.until;
     await list.put(
       prompt
-        ? { ...e, nextAt: now + PROMPT_RETRY_MS }
+        ? { ...e, waitingFor, nextAt: now + PROMPT_RETRY_MS }
         : {
             ...e,
+            waitingFor,
             tries: e.tries + 1,
             nextAt: at ?? now + Math.min(MAX_WAIT_MS, FIRST_WAIT_MS * 2 ** Math.min(e.tries, 20)),
           },
@@ -1183,7 +1226,7 @@ async function admitOnce(
   const settleTx = async (e: PendingAdmission) => {
     const [t] = await store.findTransactions({ partial: { userId, txid: e.txid }, noRawTx: true });
     // Not there (yet): its page may still be merging, or the app was stopped mid-merge (D3). Asked again shortly.
-    if (!t || typeof t.transactionId !== 'number') return wait(e, 'local');
+    if (!t || typeof t.transactionId !== 'number') return wait(e, 'local', undefined, 'row');
     const toFailed = e.claim === 'failed';
     if (toFailed ? t.status === 'failed' || t.status === 'completed' || t.provenTxId != null : t.status !== 'failed')
       return finish(e, 'refused'); // settled already, or a transaction never undone from a backup
@@ -1228,7 +1271,7 @@ async function admitOnce(
     const row = await coinRow(e);
     if (row === 'many') return finish(e, 'refused');
     // Not there (yet): its page may still be merging (D3). Asked again shortly.
-    if (!row || typeof row.outputId !== 'number') return wait(e, 'local');
+    if (!row || typeof row.outputId !== 'number') return wait(e, 'local', undefined, 'row');
     if (row.spendable === true) return finish(e, 'refused');
     if (row.basketId == null) return finish(e, 'refused'); // in no basket: a quarantined row, or not the wallet's coin
     // An output of a transaction this device holds as failed: WhatsOnChain's 404 is no proof (F4). It waits as long as
