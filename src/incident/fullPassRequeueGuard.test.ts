@@ -17,7 +17,7 @@
  * the heal the app runs (syncFromReader, setActive with the backup naming another store). The chain is a map. No network.
  */
 import 'fake-indexeddb/auto';
-import { beforeAll, describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { Beef, KeyDeriver, MerklePath, P2PKH, PrivateKey, Random, Transaction, Utils } from '@bsv/sdk';
 import { StorageIdb, StorageProvider, Wallet, WalletStorageManager } from '@bsv/wallet-toolbox-client';
 import { forceLegacyActionBatch } from '../services/actionBatchMode';
@@ -308,11 +308,15 @@ async function _heal(dev: Device, o: Owner) {
 const _LOGGED_PAGE =
   '[inbound-sync] backup page: kept 1 device row(s) and 1 transaction(s), quarantined 0 new row(s), 6 for the chain to settle, dropped 3 spend link(s) and 0 tag(s)';
 
-const _uninstall = () => undefined as void;
+let uninstall = () => undefined as void;
 beforeAll(() => {
   uninstall = IS.installInboundSyncGuard(StorageIdb);
   // The owner's late pushes were later than a pull's overlap (services/fullPass.ts): here, any delay at all is.
   _setPullOverlap(0);
+});
+afterAll(() => {
+  uninstall();
+  _setPullOverlap();
 });
 
 describe('review 24 R1: a full pass never re-queues a coin the device lowered', () => {
