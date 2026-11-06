@@ -394,6 +394,9 @@ export interface InitWalletOptions {
   notice?: (text: string) => void;
 }
 
+// A backup call that fails names itself and its page in the sync log (services/syncErrorDetail.ts, 6 Nov 2026).
+tagStorageClientErrors(StorageClient);
+
 /**
  * Rows a backup store sends become spendable on this device only when the chain or this account's own keys say so
  * (services/inboundSync.ts, b-Aware A3). Set up BEFORE the wallet factory runs: it merges a store that disagrees about
@@ -402,8 +405,6 @@ export interface InitWalletOptions {
  */
 const checkBackupRows = (keys: Keys, account: Account | undefined, storageIdentityKey: string) => {
   installInboundSyncGuard(StorageIdb);
-  // A backup call that fails names itself and its page in the sync log (services/syncErrorDetail.ts, 6 Nov 2026).
-  tagStorageClientErrors(StorageClient);
   const root = parsePrivateKey(keys.identityWif);
   const verifier: InboundVerifier = {
     owns: walletOwnership(root, [
