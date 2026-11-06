@@ -77,12 +77,25 @@ describe('takenRecheck uses the automatic coin check’s rule (review 20, second
     expect(h.pulls).toEqual([]);
   });
 
-  test('the undo: a spender later dropped (WhatsOnChain no longer has it) puts the coin back, even if the index still names it', async () => {
+  test('the undo waits for both sources: WhatsOnChain 404 twice while the index still names the spender keeps it marked', async () => {
     const h = harness({ index: { [P]: X }, woc: { [P]: { txid: X, confirmed: false } } });
     h.r.add([P]);
     await h.r.run({ force: true });
     expect(h.marked.length).toBe(1);
-    h.woc.set(P, null as never); // dropped from the mempool; the index keeps its stale answer
+    h.woc.set(P, null as never); // WhatsOnChain flaps; the index still names X
+    for (let i = 0; i < 3; i++) {
+      h.clock.t += RECHECK_GAP_MS;
+      await h.r.run();
+    }
+    expect(h.restored).toEqual([]);
+  });
+
+  test('the undo: both sources now call it unspent (the spender was dropped), twice in a row: put back', async () => {
+    const h = harness({ index: { [P]: X }, woc: { [P]: { txid: X, confirmed: false } } });
+    h.r.add([P]);
+    await h.r.run({ force: true });
+    h.woc.set(P, null as never);
+    h.index.set(P, null);
     h.clock.t += RECHECK_GAP_MS;
     await h.r.run();
     expect(h.restored).toEqual([]); // once could be a lag: asked again

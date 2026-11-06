@@ -101,6 +101,19 @@ export async function clearingSpender(
   return w && w.confirmed && isSpender(w.txid) ? w.txid : null;
 }
 
+/**
+ * The undo rule, shared with services/takenRecheck.ts: a cleared coin goes back only when both lookups call it unspent:
+ * the index answers null (not "can't tell", not a spender) and, where WhatsOnChain is available, it answers 404.
+ */
+export async function bothCallUnspent(
+  ix: string | null | undefined,
+  askWoc: (() => Promise<WocAnswer | undefined>) | undefined,
+): Promise<boolean> {
+  if (ix !== null) return false;
+  if (!askWoc) return true;
+  return (await askWoc()) === null;
+}
+
 /** At most this many coins get the WhatsOnChain check whatever the index says… */
 export const AUTO_RESYNC_BIG_COINS = 8;
 /** …stopping once they hold this share of the spendable sats. */
@@ -201,11 +214,8 @@ export async function autoResyncCoins(d: AutoResyncDeps): Promise<AutoResyncRepo
   }
   // Undo: a coin we cleared that both lookups now call unspent goes back to spendable.
   for (const o of recheck) {
-    if (!index.has(o) || index.get(o) !== null) continue;
-    if (d.woc) {
-      const w = await askWoc(o);
-      if (w !== null) continue; // spent, or unknown
-    }
+    if (!(await bothCallUnspent(index.has(o) ? index.get(o) : undefined, d.woc ? () => askWoc(o) : undefined)))
+      continue; // spent, or unknown
     // A restore that fails keeps the record, so a later run tries again (17b L3: the coin was left unspendable with no
     // record of it). Nothing to restore (n = 0: already spendable, or gone) ends the record.
     const n = await d.markUnspent(o).catch(() => null);

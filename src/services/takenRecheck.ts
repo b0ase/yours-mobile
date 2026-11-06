@@ -10,11 +10,11 @@
  * names, a few per run (review 20, second re-check, R2). A coin is marked spent here only under the automatic coin
  * check's own rule (autoCoinResync.ts clearingSpender; second re-check, Q1): both sources name the same spender, and it
  * is not one of this wallet's own unfinished actions (unsigned, nosend, sending, unprocessed, failed). Spendability only
- * goes down, and a pull is asked for when the spender is not here. A mark is watched for MARKED_FOR_MS: a spender
- * WhatsOnChain no longer has on two runs in a row (dropped from the mempool) puts the coin back, whatever the index
- * still says; a confirmed spend is final.
+ * goes down, and a pull is asked for when the spender is not here. A mark is watched for MARKED_FOR_MS: when both
+ * sources call the coin unspent on two runs in a row (the spender was dropped), under the coin check's own undo rule
+ * (bothCallUnspent), it goes back; a confirmed spend is final.
  */
-import { clearingSpender, type WocAnswer } from './autoCoinResync';
+import { bothCallUnspent, clearingSpender, type WocAnswer } from './autoCoinResync';
 
 export const RECHECK_FOR_MS = 10 * 60_000;
 export const RECHECK_GAP_MS = 15_000;
@@ -131,20 +131,32 @@ export function createTakenRecheck(d: {
       foreign.push(by);
     }
 
-    // The undo: a spender WhatsOnChain no longer has, twice in a row, was dropped: the coin comes back.
+    // The undo, under the coin check's own rule (autoCoinResync bothCallUnspent): only when the index answers unspent
+    // AND WhatsOnChain says not spent, on two runs in a row. While either still names the spender it stays marked (a
+    // WhatsOnChain that flaps never undoes a real spend; third re-check). WhatsOnChain naming it mined: final.
     let restored = 0;
     for (const k of dueMarked) {
       const m = marked.get(k);
-      if (!m || !askWoc) continue;
-      const w = await askWoc(k)();
-      if (w === undefined) continue; // can't tell (or out of lookups this run)
-      if (w && w.txid.toLowerCase() === m.spender) {
-        if (w.confirmed)
-          marked.delete(k); // mined: final
-        else marked.set(k, { ...m, misses: 0 });
+      if (!m) continue;
+      let w: WocAnswer | undefined;
+      const clear = await bothCallUnspent(
+        ix.get(k),
+        askWoc
+          ? async () => {
+              w = await askWoc(k)();
+              return w;
+            }
+          : undefined,
+      );
+      if (w && w.confirmed && w.txid.toLowerCase() === m.spender) {
+        marked.delete(k); // mined: final
         continue;
       }
-      if (w !== null) continue; // another spender: leave it marked; the coin check owns that case
+      if (!clear) {
+        // A source still names a spender: the count starts again. Neither could answer: left as it was.
+        if (typeof ix.get(k) === 'string' || w) marked.set(k, { ...m, misses: 0 });
+        continue;
+      }
       if (m.misses + 1 < UNDO_AFTER) {
         marked.set(k, { ...m, misses: m.misses + 1 });
         continue;
@@ -153,7 +165,7 @@ export function createTakenRecheck(d: {
       if (n < 0) continue;
       marked.delete(k);
       if (n > 0) restored++;
-      d.log?.(`[takenRecheck] ${k}: its spender ${m.spender} was dropped; put back`);
+      d.log?.(`[takenRecheck] ${k}: both sources call it unspent (its spender ${m.spender} was dropped); put back`);
     }
 
     if (spent) d.log?.(`[takenRecheck] ${spent} coin(s) taken in here were already spent elsewhere: marked spent`);
