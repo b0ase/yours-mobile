@@ -43,6 +43,7 @@
 
 import { DEVICE_NOT_ACTIVE_MESSAGE } from '../utils/sendErrors';
 import { syncErrorDetail } from './syncErrorDetail';
+import { WALL_TIMEOUT, withinWallClock, type WakeClock } from './wallClock';
 
 /** The toolbox's own refusal (WalletStorageManager.getAuth): thrown before the call does anything. */
 const MANAGER_NOT_ACTIVE = /not accessing user's active storage or there are conflicting active stores/i;
@@ -123,8 +124,13 @@ export type KeepDeviceActiveDeps = {
   /** Make this device's store active through the toolbox: merge the conflicting stores in, then point every store here. */
   setDeviceActive: () => Promise<void>;
   log?: (...a: unknown[]) => void;
-  /** How long a payment waits for a heal already running before it is refused (nothing built). Default 45 s. */
+  /**
+   * How long a payment waits for a heal already running before it is refused (nothing built). Default 45 s, on the
+   * wall clock (services/wallClock.ts): a frozen WKWebView timer never stretches it.
+   */
   healWaitMs?: number;
+  /** Tests: the clock the heal wait runs on (default: Date.now + the page's wake events). */
+  clock?: WakeClock;
   /** Each backup request during a heal, and each reconnect probe, gets this long. Default 20 s. */
   backupCallMs?: number;
   /** After this long a heal's further backup requests fail at once, so it ends and frees the locks. Default 120 s. */
@@ -181,6 +187,8 @@ export function keepDeviceStoreActive(storage: unknown, d: KeepDeviceActiveDeps)
   if (m.__bwxDeviceActive) return m.__bwxDeviceActive;
   const log = d.log ?? ((...a: unknown[]) => console.warn(...a));
   const healWaitMs = d.healWaitMs ?? 45_000;
+  /** A running heal, or WALL_TIMEOUT once healWaitMs have passed on the wall clock. */
+  const healWait = (p: Promise<boolean>) => withinWallClock(p, healWaitMs, { clock: d.clock });
   const callMs = d.backupCallMs ?? 20_000;
   const retryMs = d.retryMs?.length ? d.retryMs : [30_000, 60_000, 120_000, 300_000, 600_000];
   const backoff = (failures: number) => retryMs[Math.min(Math.max(failures, 1) - 1, retryMs.length - 1)];
@@ -439,16 +447,18 @@ export function keepDeviceStoreActive(storage: unknown, d: KeepDeviceActiveDeps)
     const call = (original as (...a: unknown[]) => Promise<unknown>).bind(m);
     m[name] = async (...a: unknown[]) => {
       if (needsHeal()) {
-        const healed = await within(heal(name), healWaitMs);
+        // On the wall clock (6 Nov 2026): a setTimeout here froze with the app asleep and held "Broadcasting…".
+        const healed = await healWait(heal(name));
         // Still running: the merge holds every storage lock, so the call would only queue behind it.
-        if (healed === TIMEOUT && name === 'createAction') throw new DeviceNotActiveError('the heal is still running');
+        if (healed === WALL_TIMEOUT && name === 'createAction')
+          throw new DeviceNotActiveError('the heal is still running');
       }
       try {
         return await call(...a);
       } catch (e) {
         if (!isManagerNotActive(e) || !needsHeal()) throw refused(name, e);
         log(`[deviceActive] ${name} was refused as not active; healing and trying it once more`);
-        if ((await within(heal(name), healWaitMs)) !== true) throw refused(name, e);
+        if ((await healWait(heal(name))) !== true) throw refused(name, e);
         try {
           return await call(...a);
         } catch (again) {

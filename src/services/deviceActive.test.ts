@@ -168,6 +168,96 @@ describe('keepDeviceStoreActive', () => {
     release();
   });
 
+  /**
+   * The heal wait runs on the WALL CLOCK (6 Nov 2026, the second frozen timer): WKWebView freezes setTimeout while the
+   * app is in the background, so a 45 s timer could hold "Broadcasting…" for as long as the app slept. Date.now keeps
+   * moving; the page waking re-checks the deadline. A heal still running at the deadline still refuses the build.
+   */
+  describe('the heal wait: frozen timers, a moving Date.now', () => {
+    const frozen = async (run: (h: { advance: (ms: number) => void; wake: () => void }) => Promise<void>) => {
+      const g = globalThis as unknown as Record<string, unknown>;
+      const saved = { st: g.setTimeout, si: g.setInterval, now: Date.now, doc: g.document };
+      let t = 7_000_000;
+      const doc = new EventTarget();
+      try {
+        g.setTimeout = (() => 0) as never; // frozen: never fires
+        g.setInterval = (() => 0) as never;
+        Date.now = () => t;
+        g.document = doc;
+        await run({
+          advance: (ms) => void (t += ms),
+          wake: () => void doc.dispatchEvent(new Event('visibilitychange')),
+        });
+      } finally {
+        g.setTimeout = saved.st;
+        g.setInterval = saved.si;
+        Date.now = saved.now;
+        g.document = saved.doc;
+      }
+    };
+    const flush = async () => {
+      for (let i = 0; i < 50; i++) await Promise.resolve();
+    };
+
+    test('past the deadline on the wall clock, the wake refuses the build: nothing built, "Nothing was sent"', async () => {
+      await frozen(async ({ advance, wake }) => {
+        const f = manager({ conflicting: true });
+        keepDeviceStoreActive(f.m, {
+          deviceIntended: () => true,
+          setDeviceActive: () => new Promise<void>(() => undefined), // the merge holds the locks and never ends
+          healWaitMs: 45_000,
+          ...quiet,
+        });
+        let e: unknown = 'pending';
+        void f.m.createAction().then(
+          () => (e = 'built'),
+          (x: unknown) => (e = x),
+        );
+        await flush();
+        advance(10_000);
+        wake();
+        await flush();
+        expect(e).toBe('pending'); // before the deadline: still waiting for the heal
+        advance(60 * 60_000); // an hour asleep: no timer ran
+        wake();
+        await flush();
+        expect(e).toBeInstanceOf(DeviceNotActiveError);
+        expect(f.calls).toEqual([]); // never built while the heal held the locks
+      });
+    });
+
+    test('the heal finishing before the deadline lets the build go ahead (it never ran beside the heal)', async () => {
+      await frozen(async ({ advance, wake }) => {
+        const f = manager({ conflicting: true });
+        let release: () => void = () => undefined;
+        let healed = false;
+        keepDeviceStoreActive(f.m, {
+          deviceIntended: () => true,
+          setDeviceActive: () =>
+            new Promise<void>((r) => {
+              release = () => {
+                f.m._conflictingActives = [];
+                healed = true;
+                r();
+              };
+            }),
+          healWaitMs: 45_000,
+          ...quiet,
+        });
+        const order: string[] = [];
+        const p = f.m.createAction().then(() => order.push(healed ? 'built after heal' : 'built during heal'));
+        await flush();
+        advance(5_000);
+        wake();
+        await flush();
+        expect(f.calls).toEqual([]);
+        release();
+        await p;
+        expect(order).toEqual(['built after heal']);
+      });
+    });
+  });
+
   test('a refused build after a heal that could not enable the store says "Nothing was sent", with the reason behind Details', async () => {
     const f = manager({ conflicting: true, deviceSelected: true });
     keepDeviceStoreActive(f.m, {
