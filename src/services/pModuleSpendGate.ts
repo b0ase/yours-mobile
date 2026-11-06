@@ -28,6 +28,7 @@
  */
 import { P2PKH, PublicKey, Transaction } from '@bsv/sdk';
 import { PERMISSION_SCHEME_IDS, parseOneInputLabel } from '@1sat/types';
+import { noteModuleOutputs } from './spendRecipients';
 
 export const HELD_ASSET_REFUSAL =
   "A site can't name your wallet's own ordinals, tokens, names or locks for bWalletX to sign";
@@ -157,6 +158,9 @@ export function guardPModuleSpends<T extends object>(manager: T, deps: { adminOr
         );
         // Less what a module adds that comes straight back to this wallet (an OrdLock purchase's funding cushion).
         const netSpent = gross - (await returnedToWallet(m, siteOutputs, sent.outputs ?? []));
+        // The sheet lists what the module really sends (these are the line items below), not what the site asked
+        // for (spendRecipients.ts; review of 0xrard, 6 Nov 2026).
+        noteModuleOutputs(originator, sent.outputs ?? []);
         if (netSpent > 0) {
           const ok = await m.ensureSpendingAuthorization!({
             originator,

@@ -25,7 +25,13 @@ import {
   wantsManifestSheet,
 } from './services/sessionDenials';
 import { takeLabelsForSheet } from './services/labelsOnSpend';
-import { recipientsForSheet, spendApprovalMatches } from './services/spendRecipients';
+import {
+  NO_PAYEES_REFUSAL,
+  recipientsForSheet,
+  releaseSpendRuns,
+  spendApprovalMatches,
+} from './services/spendRecipients';
+import { permissionSite } from './services/permissionSite';
 import type { AccentId } from './mobile/theme/accents';
 import { revokeOriginatorInAccounts } from './services/accountPermissionStore';
 import { routeBchatUrl } from './services/bchatOrigin';
@@ -603,6 +609,8 @@ const dropWalletContext = (reason: string) => {
   void closeUsbBackupReader();
   const ctx = accountContext;
   accountContext = null;
+  // Running site actions stop holding their sites (services/spendRecipients.ts); none of them is ever shown again.
+  releaseSpendRuns();
   if (!ctx) return;
   console.log(`[background] dropWalletContext (${reason}): gone immediately`);
   void ctx.close().catch((err) => console.error(`[background] close after ${reason}:`, err));
@@ -2034,7 +2042,8 @@ let cancelSitePrompts: (originator: string) => { cancelled: number; committed: b
 const payCallsInFlight = new Map<string, number>();
 const trackPayCall = (originator: unknown): (() => void) => {
   if (typeof originator !== 'string') return () => undefined;
-  const o = normalizeOriginator(originator);
+  // The manager's site key: the seal pass looks these up by the request's hostname (services/permissionSite.ts).
+  const o = permissionSite(originator);
   payCallsInFlight.set(o, (payCallsInFlight.get(o) ?? 0) + 1);
   let done = false;
   return () => {
@@ -2112,6 +2121,9 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
   // A pinned site's paid action (services/pinnedMint.ts): its self-encrypts, and its own label while its
   // createAction runs, go through for that one call (ephemeral, nothing stored); its spend is the one sheet.
   const mintSite = request.originator && request.originator !== ADMIN_ORIGINATOR ? normalizeOriginator(request.originator) : '';
+  // The manager's own site key (hostname only, services/permissionSite.ts): the seal pass, protocol and pay calls,
+  // spend recipients and labels are all keyed with it, so a port never makes a second site.
+  const permSite = mintSite ? permissionSite(request.originator) : '';
   if (mintSite && accountContext?.wallet) {
     const asSite = { ...request, originator: mintSite };
     const now = Date.now();
@@ -2143,14 +2155,14 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
     import.meta.env.VITE_CHANNEL === 'android-play'
   ) &&
     sealPasses !== null &&
-    !!mintSite &&
+    !!permSite &&
     !!accountContext?.wallet &&
     pairedGrantAllowed(request.originator) &&
     (sealPasses.coversProtocol(
-      { ...request, originator: mintSite },
-      protocolCalls.count(mintSite, [SEAL_PROTOCOL[0], SEAL_PROTOCOL[1]]),
+      { ...request, originator: permSite },
+      protocolCalls.count(permSite, [SEAL_PROTOCOL[0], SEAL_PROTOCOL[1]]),
     ) ||
-      sealPasses.coversSpend({ ...request, originator: mintSite }, payCallsInFlight.get(mintSite) ?? 0));
+      sealPasses.coversSpend({ ...request, originator: permSite }, payCallsInFlight.get(permSite) ?? 0));
   const deniedThisSession =
     request.originator && request.originator !== ADMIN_ORIGINATOR && isBasketRead(request)
       ? basketDenials.has(normalizeOriginator(request.originator), request.basket)
@@ -2189,17 +2201,20 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
         let bundle;
         try {
           // New labels of this payment's action go on its sheet (services/labelsOnSpend.ts), not a sheet of their own.
-          if (request.type === 'spending' && mintSite) {
-            const labels = takeLabelsForSheet(mintSite);
-            if (labels.length > 0) (request as BundleRequest).labels = labels;
+          if (request.type === 'spending' && permSite) {
             // Where THIS payment goes: its own action's outputs, bound to this request, never the site's latest
-            // (services/spendRecipients.ts, N3-3; 0xrard 6 Nov 2026). Refused when the wallet cannot tell which.
-            const shown = recipientsForSheet(mintSite, request as BundleRequest);
+            // (services/spendRecipients.ts, N3-3; 0xrard 6 Nov 2026). Refused when the wallet cannot tell which, and
+            // a paying sheet always lists its payees: none bound, no sheet.
+            const shown = recipientsForSheet(permSite, request as BundleRequest);
             if (shown && 'refuse' in shown) throw new Error(shown.refuse);
+            if (!shown && (request.spending?.satoshis ?? 0) > 0) throw new Error(NO_PAYEES_REFUSAL);
             if (shown) {
               (request as BundleRequest).recipients = shown.recipients;
               (request as BundleRequest).recipientsHash = shown.hash;
             }
+            // Its own action's new labels (services/labelsOnSpend.ts), matched the same way.
+            const labels = takeLabelsForSheet(permSite, request as BundleRequest);
+            if (labels.length > 0) (request as BundleRequest).labels = labels;
           }
           // A request arriving while this site's sheet is open waits for its own sheet (never joins that one).
           bundle = permissionBundler.add(request as BundledRequest & BundleRequest);
@@ -2720,7 +2735,7 @@ if (isInServiceWorker) {
       failUnshownPrompt(p, promptExpiredError());
       notifyPromptWindow(p.kind as PromptKind, p.requestID);
     }
-    const running = payCallsInFlight.get(site) ?? 0;
+    const running = payCallsInFlight.get(permissionSite(originator)) ?? 0;
     console.warn('[background] site call timed out: closed', prompts.length, 'sheet(s); pay calls running', running);
     // Each closed sheet stops at most one payment; any running beyond that were already approved.
     return { cancelled: prompts.length, committed: running > prompts.length };
@@ -3855,7 +3870,7 @@ if (!(
     const trackProtocolCall = (run: () => Promise<unknown>): Promise<unknown> => {
       const end =
         !isFromExtension && typeof message?.originator === 'string' && message.originator !== ADMIN_ORIGINATOR
-          ? protocolCalls.start(String(message.action), normalizeOriginator(message.originator), message.params)
+          ? protocolCalls.start(String(message.action), permissionSite(message.originator), message.params)
           : () => undefined;
       return Promise.resolve()
         .then(run)
@@ -3964,7 +3979,7 @@ if (!(
             // (services/sealPass.ts). Either way this call uses the pass up.
             const sealSiteKey =
               sealPasses !== null && typeof message.originator === 'string' && message.originator !== ADMIN_ORIGINATOR
-                ? normalizeOriginator(message.originator)
+                ? permissionSite(message.originator)
                 : '';
             if (sealSiteKey && sealPasses?.beginAction(sealSiteKey, message.params))
               console.log(`[createAction] seal pass: this is the approved seal of ${siteHost(sealSiteKey)}`);
@@ -4856,6 +4871,15 @@ if (!(
     if (response.granted && !pairedGrantAllowed(pending.request.originator)) {
       accountContext?.wallet.denyPermission(response.requestID).catch(console.error);
       pending.reject(new Error('This pairing has ended'));
+      closeDappPopupIfNoUi();
+      return true;
+    }
+
+    // A payment's answer pays only the outputs its sheet listed (services/spendRecipients.ts, review of 0xrard).
+    if (response.granted && !spendApprovalMatches(pending.request as BundleRequest)) {
+      console.warn(`[bwx-req] payment list no longer its own action host=${siteHost(pending.request.originator)}`);
+      accountContext?.wallet.denyPermission(response.requestID).catch(console.error);
+      pending.reject(new Error('This request changed while you were answering, so nothing was allowed. Ask the site to try again.'));
       closeDappPopupIfNoUi();
       return true;
     }
@@ -5957,6 +5981,7 @@ if (!(
     const closeLiveWallet = async (reason: string) => {
       const ctx = accountContext;
       accountContext = null;
+      releaseSpendRuns();
       if (!ctx) return;
       console.log(`[MasterBackup] closing live wallet (${reason})`);
       // The USB backup reader shares the database the export is about to walk.
@@ -6565,8 +6590,8 @@ if (!(
       const w = await ensureWallet();
       // bit-sign's sign-and-seal (services/sealPass.ts): ONE Seal sheet now, for this sign and its payment. Only a
       // site's call, for this account's own identity key, from a site that is not blocked; anything else as before.
-      sealSite =
-        message.originator && message.originator !== ADMIN_ORIGINATOR ? normalizeOriginator(message.originator) : '';
+      // The manager's site key (hostname only), as every seal check uses (services/permissionSite.ts).
+      sealSite = message.originator && message.originator !== ADMIN_ORIGINATOR ? permissionSite(message.originator) : '';
       // While an approved seal's own signature is being made, no other seal-protocol signature from the site may
       // share its one answer (services/sealPass.ts signing).
       if (sealSite && isSealProtocol(message.params?.protocolID) && sealPasses?.signing(sealSite))

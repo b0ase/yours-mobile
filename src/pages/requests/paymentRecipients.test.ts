@@ -43,4 +43,9 @@ describe('0xrard #2: no paying output is hidden', () => {
     expect(also.detail).toContain(`to ${REAL.to}: 250000 sats`);
     expect(also.detail.indexOf(REAL.to)).toBeLessThan(also.detail.indexOf(DUST[0].to));
   });
+
+  test('an action with no outputs says it pays only the network fee; an unknown list draws nothing', () => {
+    expect(renderToStaticMarkup(h(PaymentRecipients, { recipients: [] }))).toContain('only the network fee');
+    expect(renderToStaticMarkup(h(PaymentRecipients, {}))).toBe('');
+  });
 });

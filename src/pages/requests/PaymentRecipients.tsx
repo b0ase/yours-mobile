@@ -10,8 +10,9 @@ const ROW_PX = 17;
  * 6 Nov 2026, 0xrard #2). A long list scrolls and says how many outputs and how much in all.
  */
 export const PaymentRecipients = ({ recipients }: { recipients?: { to: string; satoshis: number }[] }) => {
+  if (!recipients) return null;
   const rows = sortedRecipients(recipients);
-  if (rows.length === 0) return null;
+  if (rows.length === 0) return <li data-testid="pay-recipient">no outputs: only the network fee</li>;
   const items = rows.map((x, i) => (
     <li key={`to-${i}`} data-testid="pay-recipient">
       to {x.to}: {x.satoshis.toLocaleString()} sats

@@ -176,7 +176,7 @@ describe('background.ts binds the list to the request and checks it on Allow', (
   const bg = readFileSync(join(import.meta.dir, '..', 'background.ts'), 'utf8');
   test('the spend sheet takes its own request outputs, never a per-site list', () => {
     expect(bg).not.toContain('takeRecipientsForSheet');
-    expect(bg).toContain('recipientsForSheet(mintSite, request as BundleRequest)');
+    expect(bg).toContain('recipientsForSheet(permSite, request as BundleRequest)');
     expect(bg).toContain("if (shown && 'refuse' in shown) throw new Error(shown.refuse);");
   });
   test('Allow grants a payment only when its list is still its own action', () => {

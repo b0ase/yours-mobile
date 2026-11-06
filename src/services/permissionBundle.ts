@@ -567,7 +567,10 @@ export const buildSheetModel = (bundle: Pick<PermissionBundle, 'originator' | 'i
           description: r.spending?.lineItems?.find((l) => l.description)?.description ?? r.reason,
           detail: lineDetail(r),
           ...(r.labels?.length ? { labels: [...r.labels] } : {}),
-          ...(r.recipients?.length ? { recipients: r.recipients.map((x) => ({ ...x })) } : {}),
+          // Bound (recipientsHash) even when empty: an action with no outputs pays only the network fee.
+          ...(r.recipients?.length || r.recipientsHash !== undefined
+            ? { recipients: (r.recipients ?? []).map((x) => ({ ...x })) }
+            : {}),
         };
       } else {
         // A second (or live-added) spend: shown as its own line, never pre-ticked.
