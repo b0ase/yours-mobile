@@ -26,8 +26,15 @@ const {
   findBsvLocks,
   scanBsvLocks,
 } = await import('./lockFinder');
-const { CLAIM_MAX_INPUTS, claimFeePerInput, claimableLocks, foundLockIdTag, syncClaimed, unclaimedOutpoints } =
-  await import('./lockApi');
+const {
+  CLAIM_MAX_INPUTS,
+  claimFeePerInput,
+  claimSatsPerKb,
+  claimableLocks,
+  foundLockIdTag,
+  syncClaimed,
+  unclaimedOutpoints,
+} = await import('./lockApi');
 const { planPayouts } = await import('./claimPayouts');
 const { localKeysFor } = await import('../account/deleteAccount');
 type Plan = import('./schedule').LockPlan;
@@ -243,6 +250,47 @@ describe('Claim rule (N3): own locks pay for themselves; locks the finder adds k
     const many = Array.from({ length: 80 }, (_, i) => own(10_000 + i, HEIGHT - 1, 100 + i));
     expect(claimableLocks(many, HEIGHT).picks).toHaveLength(80);
     expect(CLAIM_MAX_INPUTS).toBe(50);
+  });
+});
+
+describe('Lows (re-check 2): until from the script; a remote store is priced conservatively', () => {
+  const withScript = (sats: number, scriptUntil: number, tag: string, n: number, address = ADDR) => ({
+    outpoint: `${H(n)}.0`,
+    satoshis: sats,
+    lockingScript: Lock.lock(address, scriptUntil).toHex(),
+    tags: [tag, `id:${H(n).slice(0, 16)}_0`],
+  });
+  test('the script decides when a lock matures; a row whose tag would break unlockBsv is skipped, never claimed', () => {
+    // unlockBsv reads the tag for "matured" and for nLockTime, so a pick needs: script until <= tag until <= height.
+    const rows = [
+      withScript(5_000, HEIGHT + 500, 'until:1', 1), // tag says matured, script says not: would fail the whole claim
+      withScript(6_000, HEIGHT - 5, 'until:abc', 2), // garbage tag: unlockBsv would skip it
+      withScript(7_000, HEIGHT - 5, `until:${HEIGHT + 9_999}`, 3), // tag says not matured: unlockBsv would skip it
+      withScript(8_000, HEIGHT - 5, `until:${HEIGHT - 1}`, 4), // tag later than the script, still matured: fine
+      withScript(9_000, HEIGHT - 5, `until:${HEIGHT - 5}`, 5), // consistent
+    ];
+    const c = claimableLocks(rows, HEIGHT, { lockAddress: ADDR });
+    expect(c.picks.map((p) => p.outpoint).sort()).toEqual([`${H(4)}.0`, `${H(5)}.0`].sort());
+    expect(c.picks.every((p) => p.until === HEIGHT - 5)).toBe(true); // until from the script
+  });
+
+  test('a lock script to another address in the basket is never picked (the wallet could not sign it)', () => {
+    const stranger = PrivateKey.fromRandom().toAddress();
+    const c = claimableLocks([withScript(9_000, HEIGHT - 5, `until:${HEIGHT - 5}`, 4, stranger)], HEIGHT, {
+      lockAddress: ADDR,
+    });
+    expect(c.picks).toEqual([]);
+  });
+
+  test('device store: the wallet’s rate; remote or unknown store: at least 1,000 sat/kB', () => {
+    expect(claimSatsPerKb(100, 'yours-ab|2026-11-01T00:00:00.000Z')).toBe(100);
+    expect(claimSatsPerKb(100, 'remote-key|remote')).toBe(1_000);
+    expect(claimSatsPerKb(100, undefined)).toBe(1_000);
+    expect(claimSatsPerKb(2_000, 'remote-key|remote')).toBe(2_000);
+    // A 900-sat own lock: claimable at the device's rate, not when the remote prices the claim.
+    const own = { outpoint: `${H(5)}.0`, satoshis: 900, tags: [`until:${HEIGHT - 1}`, `id:${H(5).slice(0, 16)}_0`] };
+    expect(claimableLocks([own], HEIGHT, { satsPerKb: claimSatsPerKb(100, 'yours-ab|x') }).picks).toHaveLength(1);
+    expect(claimableLocks([own], HEIGHT, { satsPerKb: claimSatsPerKb(100, 'k|remote') }).picks).toHaveLength(0);
   });
 });
 

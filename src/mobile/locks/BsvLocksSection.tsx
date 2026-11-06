@@ -11,9 +11,9 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { fmtBsv, type LockPlan } from './schedule';
 import { canUnlock, countdown } from './tokenLocks';
-import { claimLocks, claimableLocks, unclaimedOutpoints } from './lockApi';
+import { claimLocks, claimSatsPerKb, claimableLocks, unclaimedOutpoints } from './lockApi';
 import { bsvLockRepairs, bsvLocksScanDue, bsvScanLine, scanBsvLocks, type BsvLockScan } from './lockFinder';
-import { lockScanOptions } from './lockScanWiring';
+import { claimRate, lockScanOptions } from './lockScanWiring';
 
 const GOLD = 'var(--bw-accent)';
 const PANEL = '#17191E';
@@ -112,7 +112,14 @@ export const BsvLocksSection = ({
   const planned = useMemo(() => unclaimedOutpoints(plans), [plans]);
   const unplanned = rows.filter((r) => r.until > 0 && !planned.has(r.outpoint)).sort((a, b) => a.until - b.until);
   // Only locks worth more than their fee at this wallet's rate; dust never costs a fee (lockApi.claimableLocks).
-  const satsPerKb = chromeStorageService.getCustomFeeRate();
+  const [satsPerKb, setSatsPerKb] = useState(() => claimSatsPerKb(chromeStorageService.getCustomFeeRate(), undefined));
+  useEffect(() => {
+    let on = true;
+    void claimRate(chromeStorageService).then((r) => on && setSatsPerKb(r));
+    return () => {
+      on = false;
+    };
+  }, [chromeStorageService]);
   const ready = claimableLocks(unplanned, height, { satsPerKb });
 
   const claim = async () => {

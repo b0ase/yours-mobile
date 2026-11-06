@@ -67,6 +67,7 @@ import {
   walletLockOutpoints,
 } from './lockApi';
 import { planPayouts } from './claimPayouts';
+import { claimRate } from './lockScanWiring';
 import { BackPneeAmountSheet } from '../notes/BackPneeAmountSheet';
 import { BackPneeSheet } from '../notes/BackPneeSheet';
 import { BackPneeDoneSheet } from '../notes/BackPneeDoneSheet';
@@ -476,7 +477,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
       );
       const claimed = await claimLocks(apiContext, {
         outpoints: ready,
-        satsPerKb: chromeStorageService.getCustomFeeRate(),
+        satsPerKb: await claimRate(chromeStorageService),
       });
       if (claimed.error) addSnackbar(`Some locks weren’t claimed yet (${claimed.error}). Tap Claim again.`, 'info');
       const todays = await freshRate();

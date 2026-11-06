@@ -296,6 +296,18 @@ async function deviceWithLocks(chain: Chain) {
   return { a, root, lockTxid };
 }
 
+/**
+ * The lock outputs a claim spent. A funded wallet's claim may also carry one of its own coins (the toolbox picks change
+ * at random), so tests on a funded wallet compare these, not the whole input list.
+ */
+const lockInputsOf = (chain: Chain, tx: Transaction) =>
+  tx.inputs
+    .filter((i) => {
+      const raw = chain.raw.get(i.sourceTXID!);
+      return !!raw && !!Lock.decode(Transaction.fromBinary(raw).outputs[i.sourceOutputIndex].lockingScript);
+    })
+    .map((i) => `${i.sourceTXID}.${i.sourceOutputIndex}`);
+
 /** A transaction nobody funds (inputs are made up): only its outputs matter to the finder. */
 function mineOutputs(chain: Chain, outs: { lockingScript: ReturnType<typeof Lock.lock>; satoshis: number }[]) {
   const t = new Transaction();
@@ -592,7 +604,7 @@ describe('N3 on the real toolbox: an own small lock is claimable, planted dust i
     const before = await balance(a);
     const txid = await claimMatured(ctxA);
     const utx = Transaction.fromBinary(await rawOf(a, txid));
-    expect(utx.inputs.map((i) => `${i.sourceTXID}.${i.sourceOutputIndex}`)).toEqual([`${plan.txids[0]}.0`]);
+    expect(lockInputsOf(chain, utx)).toEqual([`${plan.txids[0]}.0`]);
     const after = await balance(a);
     console.log(
       '[N3] 900-sat own lock claimed: balance',
@@ -645,7 +657,7 @@ describe('N1 on the real toolbox: a plan with 60 matured pieces is claimed in fu
     expect(r.spent).toEqual(new Set(ready));
     expect(r.sats).toBe(59 * 2_000 + 15_000);
     const inputs = (await Promise.all(r.txids.map(async (t) => Transaction.fromBinary(await rawOf(a, t))))).map(
-      (t) => t.inputs.length,
+      (t) => lockInputsOf(chain, t).length,
     );
     expect(inputs.sort((x, y) => x - y)).toEqual([10, 50]);
     expect((await locksOf(a)).map((o) => o.outpoint)).toEqual([`${other.txids[0]}.0`]); // only the unplanned one left
@@ -693,7 +705,7 @@ describe('N2 on the real toolbox: a lock whose transaction this device holds as 
     const before = await balance(a);
     const txid = await claimMatured(ctxOf(a, chain));
     const utx = Transaction.fromBinary(await rawOf(a, txid));
-    expect(utx.inputs.map((i) => `${i.sourceTXID}.${i.sourceOutputIndex}`)).toEqual([`${lockTxid}.0`]);
+    expect(lockInputsOf(chain, utx)).toEqual([`${lockTxid}.0`]);
     expect(await balance(a)).toBeGreaterThan(before + 49_000);
   }, 180000);
 
@@ -708,6 +720,125 @@ describe('N2 on the real toolbox: a lock whose transaction this device holds as 
     expect(r.repair).toEqual([`${lockTxid}.0: this device holds it as spent or not usable yet (an unlock in flight?)`]);
     expect((await rowOf(a, lockTxid, 0))?.spendable).toBe(false);
     expect((await locksOf(a)).map((o) => o.outpoint)).toEqual([`${lockTxid}.1`]);
+  }, 180000);
+});
+
+describe('N4 on the real toolbox: a repair never revives a lock whose unlock is still in flight', () => {
+  const recoverWith = (w: W8, txid: string) =>
+    recoverPaymentByTxid(
+      txid,
+      makeTxidRecoverDeps({
+        storage: w.storage,
+        wallet: w.wallet as never,
+        services: w.services as never,
+        log: () => undefined,
+      }),
+    );
+  const rowState = async (w: W8, txid: string, vout: number) => {
+    const r = await rowOf(w, txid, vout);
+    return r ? { spendable: r.spendable, spentBy: r.spentBy ?? null } : null;
+  };
+  const statusOf = (w: W8, txid: string) =>
+    w.storage.runAsStorageProvider(
+      async (sp) => (await sp.findTransactions({ partial: { txid }, noRawTx: true }))[0]?.status,
+    );
+  /** Device A locks, then claims the matured lock: the unlock U is posted, not mined, unknown to chain and indexer. */
+  const unlockInFlight = async (chain: Chain) => {
+    const { a, lockTxid } = await deviceWithLocks(chain);
+    chain.tip = MATURE + 1;
+    const u = await claimMatured(ctxOf(a, chain));
+    expect(await statusOf(a, u)).toBe('unproven');
+    return { a, lockTxid, u };
+  };
+
+  test('Q1a: Recover by transaction ID on the lock tx while its unlock is unproven: the lock stays spent by it', async () => {
+    const chain = newChain();
+    const { a, lockTxid, u } = await unlockInFlight(chain);
+    const before = await rowState(a, lockTxid, 0);
+    expect(before?.spendable).toBe(false);
+    expect(before?.spentBy).not.toBeNull();
+    // A change row held unspendable with no spender, so the wallet's own record doesn't answer "already".
+    await a.storage.runAsStorageProvider(async (sp) => {
+      const ch = (await sp.findOutputs({ partial: { txid: lockTxid }, noScript: true })).find(
+        (o) => o.change && o.spendable,
+      );
+      if (ch) await sp.updateOutput(ch.outputId, { spendable: false, spentBy: undefined });
+    });
+    const r = await recoverWith(a, lockTxid);
+    expect(await rowState(a, lockTxid, 0)).toEqual(before);
+    expect(r.outputs.find((o) => o.vout === 0)).toMatchObject({ state: 'unknown-spend' });
+    expect(r.outputs.find((o) => o.vout === 0)?.detail).toMatch(/not yet on the network/);
+    expect((await locksOf(a)).map((o) => o.outpoint)).toEqual([`${lockTxid}.1`]);
+    expect(await statusOf(a, u)).toBe('unproven');
+  }, 180000);
+
+  test('Q1c: the lock tx held as failed after its unlock went out (no spend link left): not revived', async () => {
+    const chain = newChain();
+    const { a, lockTxid } = await unlockInFlight(chain);
+    await a.storage.runAsStorageProvider(async (sp) => {
+      const t = (await sp.findTransactions({ partial: { txid: lockTxid }, noRawTx: true }))[0];
+      await sp.updateTransactionStatus('failed', t.transactionId);
+    });
+    expect((await rowState(a, lockTxid, 0))?.spendable).toBe(false);
+    const r = await recoverWith(a, lockTxid);
+    expect(r.outputs.find((o) => o.vout === 0)).toMatchObject({ state: 'unknown-spend' });
+    expect((await rowState(a, lockTxid, 0))?.spendable).toBe(false);
+    // The future lock (no unlock spends it) is repaired with the transaction.
+    expect((await locksOf(a)).map((o) => o.outpoint)).toEqual([`${lockTxid}.1`]);
+  }, 180000);
+
+  test('Q1c through the automatic scan: the finder’s repair call files only the lock nothing in flight spends', async () => {
+    const chain = newChain();
+    const { a, lockTxid } = await unlockInFlight(chain);
+    await a.storage.runAsStorageProvider(async (sp) => {
+      const t = (await sp.findTransactions({ partial: { txid: lockTxid }, noRawTx: true }))[0];
+      await sp.updateTransactionStatus('failed', t.transactionId);
+    });
+    const repairTxid = async (txid: string) => {
+      const r = await recoverWith(a, txid);
+      return r.result === 'restored' || r.result === 'already';
+    };
+    const r = await findBsvLocks(ctxOf(a, chain), `${ACCOUNT}-q1c`, { store: 'S', repairTxid });
+    expect(r.added).toBe(1);
+    expect(r.addedSats).toBe(30_000);
+    expect(r.repair).toEqual([`${lockTxid}.0: this device holds it as spent or not usable yet (an unlock in flight?)`]);
+    expect((await rowState(a, lockTxid, 0))?.spendable).toBe(false);
+    expect((await locksOf(a)).map((o) => o.outpoint)).toEqual([`${lockTxid}.1`]);
+  }, 180000);
+});
+
+describe('Low (re-check 2): a lock row with a wrong until: tag cannot block claims', () => {
+  test('the script says FUTURE, the tag says matured: it is left out and the real matured lock still claims', async () => {
+    const chain = newChain();
+    const { a, lockTxid } = await deviceWithLocks(chain);
+    const ctxA = ctxOf(a, chain);
+    const addr = await lockAddress(ctxA);
+    const { txid: bad } = mineOutputs(chain, [{ lockingScript: Lock.lock(addr, FUTURE), satoshis: 5_000 }]);
+    const beef = new Beef();
+    const tx = Transaction.fromBinary(chain.raw.get(bad)!);
+    tx.merklePath = pathFor(chain, bad);
+    beef.mergeTransaction(tx);
+    await a.wallet.internalizeAction({
+      tx: beef.toBinaryAtomic(bad),
+      outputs: [
+        {
+          outputIndex: 0,
+          protocol: 'basket insertion' as const,
+          insertionRemittance: {
+            basket: 'lock',
+            customInstructions: JSON.stringify({ protocolID: P1SAT_PROTOCOL, keyID: 'lock' }),
+            tags: ['until:1', `id:${bad.slice(0, 16)}_0`], // a backup's wrong tag
+          },
+        },
+      ],
+      description: 'row with a wrong tag',
+    });
+    chain.tip = MATURE + 1;
+    const txid = await claimMatured(ctxA);
+    const utx = Transaction.fromBinary(await rawOf(a, txid));
+    expect(lockInputsOf(chain, utx)).toEqual([`${lockTxid}.0`]);
+    expect(utx.lockTime).toBe(MATURE);
+    expect((await locksOf(a)).map((o) => o.outpoint).sort()).toEqual([`${bad}.0`, `${lockTxid}.1`].sort());
   }, 180000);
 });
 

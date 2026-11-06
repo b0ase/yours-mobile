@@ -87,6 +87,12 @@ export type TxidRecoverDeps = {
   runTimeoutMs?: number;
   /** Rows the active store holds for txid; undefined when the active store can't be read directly (remote). */
   activeRows: (txid: string) => Promise<ActiveRows | undefined>;
+  /**
+   * Outputs of txid (vouts) that a transaction of this device not yet on the network spends: a row's spentBy in an
+   * in-flight status, or an input of such a transaction (failing a transaction clears its outputs' spend links). The
+   * chain can't see those spends yet, so "unspent" there is no reason to make them spendable (inboundSync's rule).
+   */
+  inFlightSpends?: (txid: string) => Promise<Set<number>>;
   internalize: (args: {
     tx: number[];
     outputs: {
@@ -333,6 +339,11 @@ async function recoverInner(rawTxid: string, deps: TxidRecoverDeps): Promise<Txi
     const rows = await step('device rows', 'Restoring…', 'Couldn’t read this device’s wallet records', () =>
       deps.activeRows(txid),
     );
+    const held = deps.inFlightSpends
+      ? await step('in-flight spends', 'Restoring…', 'Couldn’t read this device’s pending payments', () =>
+          deps.inFlightSpends!(txid),
+        )
+      : new Set<number>();
     const toInternalize: { vout: number; d: Derivation }[] = [];
     const toRepair: { vout: number; outputId: number }[] = [];
     for (let vout = 0; vout < tx.outputs.length; vout++) {
@@ -347,6 +358,15 @@ async function recoverInner(rawTxid: string, deps: TxidRecoverDeps): Promise<Txi
       const row = rows?.outputs.find((o) => o.vout === vout);
       if (row?.spendable && rows?.tx && SETTLED_FOR_INTERNALIZE.includes(rows.tx.status)) {
         report.outputs.push({ vout, satoshis, state: 'already' });
+        continue;
+      }
+      if (held.has(vout)) {
+        report.outputs.push({
+          vout,
+          satoshis,
+          state: 'unknown-spend',
+          detail: 'spent by a payment of this device not yet on the network',
+        });
         continue;
       }
       if (lock && !(row && rows?.tx)) {

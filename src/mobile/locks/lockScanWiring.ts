@@ -9,6 +9,7 @@
 import { sendMessageAsync } from '../../utils/chromeHelpers';
 import { withTimeout } from '../withTimeout';
 import type { FindBsvLocksOptions } from './lockFinder';
+import { claimSatsPerKb } from './lockApi';
 
 /** The fingerprint of the store the wallet writes to now; undefined when the background can't say. */
 export async function lockScanStore(): Promise<string | undefined> {
@@ -37,4 +38,9 @@ export async function repairLockTxid(txid: string): Promise<boolean> {
 /** The options every app-side scan passes: this store, and the payment repair. */
 export async function lockScanOptions(): Promise<Pick<FindBsvLocksOptions, 'store' | 'repairTxid'>> {
   return { store: await lockScanStore(), repairTxid: repairLockTxid };
+}
+
+/** The fee rate to price a claim at: the wallet's own on the device store, a conservative one otherwise (lockApi). */
+export async function claimRate(cs: { getCustomFeeRate(): number }): Promise<number> {
+  return claimSatsPerKb(cs.getCustomFeeRate(), await lockScanStore());
 }

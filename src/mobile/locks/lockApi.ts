@@ -19,7 +19,7 @@ import {
   type OneSatContext,
 } from '@1sat/actions';
 import { buildInscriptionScript, Lock } from '@1sat/templates';
-import { Hash, P2PKH, PublicKey, Random, Transaction, Utils } from '@bsv/sdk';
+import { Beef, Hash, P2PKH, PublicKey, Random, Script, Transaction, Utils } from '@bsv/sdk';
 import { readAssetIdTag } from '@1sat/types';
 import { buildReceipt, receiptMap, receiptSvg, type Receipt, type ReceiptIdentity, type ReceiptMode } from './receipt';
 import { MAX_PIECES, MIN_PIECE_SATS, mergePlans, type LockMode, type LockPlan, type PlanPiece } from './schedule';
@@ -291,27 +291,55 @@ export const claimFeePerInput = (satsPerKb: number = FEE_PER_KB) =>
 
 export type ClaimPick = { outpoint: string; id: string; satoshis: number; until: number };
 
+/** The fee rate below which a claim priced by a store other than this device's is never assumed (sat/kB). */
+export const REMOTE_CLAIM_SATS_PER_KB = 1_000;
+
+/**
+ * The rate claims are priced at. On the device store the toolbox charges the wallet's own rate. With the remote store
+ * active (or when the store can't be told, `store` undefined) the remote's fee model prices the claim and may charge
+ * more, so the rule assumes at least REMOTE_CLAIM_SATS_PER_KB (1 sat/byte, ten times the default): a lock only just
+ * above the fee at our rate is then left, never claimed at a loss. `store` is lockScanStore()'s fingerprint.
+ */
+export const claimSatsPerKb = (rate: number, store: string | undefined): number =>
+  store === undefined || store.endsWith('|remote') ? Math.max(rate, REMOTE_CLAIM_SATS_PER_KB) : rate;
+
 /**
  * Which matured locks a claim may spend (review 21 M2, N3). Every claim path goes through this, and no claim spends
  * more in fees than it recovers:
- * - matured, with an `id:` tag (unlockBsv spends by it);
- * - worth more than its fee at the wallet's rate (each input pays its own fee and the claim's overhead);
+ * - matured by its lock script (`until` read from the script when the row carries it; re-check 2), with an `id:` tag
+ *   (unlockBsv spends by it). unlockBsv reads the `until:` tag for "matured" and for nLockTime, so the tag must lie
+ *   between the script's height and the tip, or the row is skipped: one bad tag can never sink a whole claim;
+ * - a script to `lockAddress` when given (anything else in the basket can't be signed for);
+ * - worth more than its fee at the claim's rate (each input pays its own fee and the claim's overhead);
  * - a lock "Find my locks" filed (it may be anyone's dust): at least FOUND_CLAIM_MIN_SATS as well.
  * Oldest first. claimLocks splits the picks into claims of at most CLAIM_MAX_INPUTS.
  */
 export function claimableLocks(
-  outputs: { outpoint: string; satoshis: number; tags?: string[] }[],
+  outputs: { outpoint: string; satoshis: number; tags?: string[]; lockingScript?: string }[],
   height: number,
-  { satsPerKb = FEE_PER_KB }: { satsPerKb?: number } = {},
+  { satsPerKb = FEE_PER_KB, lockAddress: address }: { satsPerKb?: number; lockAddress?: string } = {},
 ): { ids: string[]; sats: number; picks: ClaimPick[] } {
   const fee = claimFeePerInput(satsPerKb);
   const picks: ClaimPick[] = [];
   for (const o of outputs) {
     const op = o.outpoint.replace(/_(\d+)$/, '.$1');
     const [txid, vout] = op.split('.');
-    const until = Number.parseInt(o.tags?.find((t) => t.startsWith('until:'))?.slice(6) ?? '0', 10);
+    const tagRaw = o.tags?.find((t) => t.startsWith('until:'))?.slice(6) ?? '';
+    const tagUntil = /^\d{1,10}$/.test(tagRaw) ? Number(tagRaw) : NaN;
+    let until = tagUntil;
+    if (o.lockingScript) {
+      let d: ReturnType<typeof Lock.decode> = null;
+      try {
+        d = Lock.decode(Script.fromHex(o.lockingScript));
+      } catch {
+        d = null;
+      }
+      if (!d || (address && d.address !== address)) continue;
+      if (!(d.until > 0) || !(tagUntil >= d.until)) continue; // unlockBsv's nLockTime would fail the script
+      until = d.until;
+    } else if (address) continue; // can't check whose lock it is
     const id = readAssetIdTag(o.tags);
-    if (!id || !(until > 0) || until > height || !(o.satoshis > fee)) continue;
+    if (!id || !(until > 0) || until > height || !(tagUntil <= height) || !(o.satoshis > fee)) continue;
     const found = `id:${id}` === foundLockIdTag(txid ?? '', Number(vout));
     if (found && o.satoshis < FOUND_CLAIM_MIN_SATS) continue;
     picks.push({ outpoint: op, id, satoshis: o.satoshis, until });
@@ -354,13 +382,26 @@ export async function claimLocks(
 ): Promise<ClaimResult> {
   if (!ctx.services) throw new Error('The wallet services are not ready.');
   const height = await ctx.services.chaintracks.currentHeight();
-  const listed = await listLocks.execute(ctx, { limit: 10000 });
-  const rows = 'outputs' in listed && listed.outputs ? listed.outputs : [];
+  // The scripts come from the transactions (the BEEF unlockBsv signs from): rows a wallet took in by internalizeAction
+  // are listed without their locking script.
+  const listed = await listLocks.execute(ctx, { limit: 10000, include: 'entire transactions' });
+  const listedRows = 'outputs' in listed && listed.outputs ? listed.outputs : [];
+  let beef: Beef | undefined;
+  try {
+    beef = 'BEEF' in listed && listed.BEEF?.length ? Beef.fromBinary(Array.from(listed.BEEF)) : undefined;
+  } catch {
+    beef = undefined;
+  }
+  const rows = listedRows.map((r) => {
+    const [txid, vout] = r.outpoint.replace(/_(\d+)$/, '.$1').split('.');
+    return { ...r, lockingScript: beef?.findTxid(txid)?.tx?.outputs[Number(vout)]?.lockingScript?.toHex() };
+  });
+  const address = await lockAddress(ctx);
   const want = opts.outpoints ? new Set([...opts.outpoints].map((o) => o.replace(/_(\d+)$/, '.$1'))) : null;
   const { picks } = claimableLocks(
     want ? rows.filter((r) => want.has(r.outpoint.replace(/_(\d+)$/, '.$1'))) : rows,
     height,
-    { satsPerKb: opts.satsPerKb },
+    { satsPerKb: opts.satsPerKb, lockAddress: address },
   );
   if (!picks.length) throw new Error('Nothing is ready to claim yet.');
   const result: ClaimResult = { txids: [], spent: new Set(), sats: 0 };

@@ -985,9 +985,9 @@ export const BsvWallet = () => {
     if (!unlockAttempted && lockData?.unlockable) {
       (async () => {
         const { claimMatured } = await import('../mobile/locks/lockApi');
-        const txid = await claimMatured(apiContext, { satsPerKb: chromeStorageService.getCustomFeeRate() }).catch(
-          () => undefined,
-        );
+        const { claimRate } = await import('../mobile/locks/lockScanWiring');
+        const satsPerKb = await claimRate(chromeStorageService);
+        const txid = await claimMatured(apiContext, { satsPerKb }).catch(() => undefined);
         setUnlockAttempted(true);
         if (txid) {
           await refreshUtxos();
