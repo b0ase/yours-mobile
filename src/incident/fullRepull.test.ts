@@ -25,6 +25,10 @@ import {
   withFullPassMode,
   _setPullOverlap,
   withDeadlines,
+  asRestore,
+  passUnderWay,
+  type FullPassRequest,
+  type SyncStateRow,
 } from '../services/fullPass';
 
 const T = 120_000;
@@ -246,7 +250,7 @@ async function phoneWith(outputs: number) {
   const sik = phone.getSettings().storageIdentityKey;
   const backupSik = backup.getSettings().storageIdentityKey;
   /** A device-sync pull, as initWallet runs it: the full pass asked for when due, then the merge in slices. */
-  const pull = async (now?: number, failed = false) => {
+  const pull = async (now?: number, failed = false, extra: Partial<FullPassRequest> = {}) => {
     const asked = await requestFullPass({
       manager: sm as never,
       store: phone as never,
@@ -254,18 +258,21 @@ async function phoneWith(outputs: number) {
       readerSik: backupSik,
       now,
       failed,
+      ...extra,
     });
     await withFullPassMode(sik, 'slice', () => sm.syncFromReader(kd.identityKey, client as never));
     return asked;
   };
   const state = async () => (await syncStateFor(phone as never, kd.identityKey, backupSik))!;
-  /** Pull until the pass from the start completes; the number of pulls (slices) it took. */
+  /** Pull until the pass under way (from the start, deep or incremental) completes; the pulls (slices) it took. */
   const pullToEnd = async (max = 10_000) => {
     let pulls = 0;
+    let st: SyncStateRow;
     do {
       await pull();
       pulls++;
-    } while ((await state()).when == null && pulls < max);
+      st = await state();
+    } while ((st.when == null || passUnderWay(st)) && pulls < max);
     return pulls;
   };
   /** The admission list worked through (a run takes 25 entries): the number admitted. */
@@ -320,132 +327,182 @@ afterAll(() => {
   IS._resetInboundVerifiers();
 });
 
-describe('the full re-pull: when it runs', () => {
+const DAY = 24 * 3_600_000;
+
+/** A transaction another copy pushed late (its time `age` ms ago) with one spendable coin, straight into the backup. */
+async function latePush(b: StorageIdb, identityKey: string, age: number, sats: number) {
+  const { user } = await b.findOrInsertUser(identityKey);
+  const tx = new Transaction();
+  tx.addInput({
+    sourceTXID: hex32(),
+    sourceOutputIndex: 0,
+    unlockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()),
+    sequence: 0xffffffff,
+  });
+  tx.addOutput({ lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()), satoshis: sats });
+  const at = new Date(Date.now() - age);
+  const transactionId = await b.insertTransaction({
+    userId: user.userId,
+    status: 'completed',
+    reference: Utils.toBase64(Random(12)),
+    isOutgoing: false,
+    satoshis: 0,
+    description: 'pushed late',
+    version: 1,
+    lockTime: 0,
+    txid: tx.id('hex'),
+    rawTx: tx.toBinary(),
+    created_at: at,
+    updated_at: at,
+  } as never);
+  const script = tx.outputs[0].lockingScript.toBinary();
+  await b.insertOutput({
+    userId: user.userId,
+    transactionId,
+    vout: 0,
+    satoshis: sats,
+    spendable: true,
+    change: false,
+    type: 'custom',
+    providedBy: 'you',
+    purpose: '',
+    outputDescription: 'late',
+    basketId: await basketOf(b, user.userId),
+    txid: tx.id('hex'),
+    lockingScript: script,
+    scriptLength: script.length,
+    created_at: at,
+    updated_at: at,
+  } as never);
+  return tx.id('hex');
+}
+
+describe('the re-pull schedule (review 23 re-check)', () => {
   test(
-    '(c) a fresh store: its first pull is the pass from the start and is recorded; a store with no record starts one',
+    'a fresh install or restore pulls from the start at once; an install from before this release waits a random 0-72 h',
     async () => {
       const d = await phoneWith(400);
       try {
         // The store's first merge (here the open's, the backup naming itself active) is a pass from the start, and it
-        // is recorded: the first pull after it has nothing due.
+        // is recorded: nothing is due after it.
         expect(await d.count()).toEqual({ outputs: 400, transactions: 100 });
-        const done = markOf(await d.state()).doneAt;
-        expect(typeof done).toBe('number');
+        expect(typeof markOf(await d.state()).doneAt).toBe('number');
         expect(await d.pull()).toBe('not-due');
-        // The first open on this release (or a restore into a store that has synced before): no record yet.
-        await updateMark(d.phone as never, await d.state(), { doneAt: undefined });
-        expect(await d.pull()).toBe('started');
-        expect(markOf(await d.state()).doneAt).toBeGreaterThanOrEqual(done!);
-      } finally {
-        d.off();
-      }
-    },
-    T,
-  );
-
-  test(
-    '(a) once a day: not again within 24 h, again after; the pass from the start brings a row the cursor skipped',
-    async () => {
-      const d = await phoneWith(200);
-      try {
+        // An install that synced before this release: no record yet. Its first full pass waits (here 36 h).
+        await updateMark(d.phone as never, await d.state(), { doneAt: undefined, firstAt: undefined });
+        const t0 = Date.now();
+        expect(await d.pull(t0, false, { random: () => 0.5 })).toBe('not-due');
+        expect(markOf(await d.state()).firstAt).toBe(t0 + 36 * 3_600_000);
+        expect(await d.pull(t0 + 35 * 3_600_000)).toBe('deep'); // the daily deep pull still runs meanwhile
         await d.pullToEnd();
-        const at = Date.now();
-        expect(await d.pull(at + 3_600_000)).toBe('not-due');
-        // A row another copy pushed late, with an older time: no incremental pull sends it.
-        const { user } = await d.backup.findOrInsertUser(d.kd.identityKey);
-        const tx = new Transaction();
-        tx.addInput({
-          sourceTXID: hex32(),
-          sourceOutputIndex: 0,
-          unlockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()),
-          sequence: 0xffffffff,
-        });
-        tx.addOutput({ lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()), satoshis: 7_777 });
-        const old = new Date(Date.now() - 3_600_000);
-        const transactionId = await d.backup.insertTransaction({
-          userId: user.userId,
-          status: 'completed',
-          reference: 'late',
-          isOutgoing: false,
-          satoshis: 0,
-          description: 'pushed late',
-          version: 1,
-          lockTime: 0,
-          txid: tx.id('hex'),
-          rawTx: tx.toBinary(),
-          created_at: old,
-          updated_at: old,
-        } as never);
-        const script = tx.outputs[0].lockingScript.toBinary();
-        await d.backup.insertOutput({
-          userId: user.userId,
-          transactionId,
-          vout: 0,
-          satoshis: 7_777,
-          spendable: true,
-          change: false,
-          type: 'custom',
-          providedBy: 'you',
-          purpose: '',
-          outputDescription: 'late',
-          basketId: await basketOf(d.backup, user.userId),
-          txid: tx.id('hex'),
-          lockingScript: script,
-          scriptLength: script.length,
-          created_at: old,
-          updated_at: old,
-        } as never);
-        await d.pull(at + 3_600_000);
-        expect((await d.phone.findOutputs({ partial: { txid: tx.id('hex') } })).length).toBe(0);
-        expect(await d.pull(at + FULL_PASS_EVERY_MS + 1)).toBe('started');
-        await d.pullToEnd();
-        const [row] = await d.phone.findOutputs({ partial: { txid: tx.id('hex') } });
-        expect(row?.spendable).toBe(false); // arrived, held for the chain like any backup coin
-        d.built.txids.add(tx.id('hex'));
-        await d.admit();
-        expect(await d.spendable()).toContain(`${tx.id('hex')}.0`);
-      } finally {
-        d.off();
-      }
-    },
-    T,
-  );
-
-  test(
-    "(b) a failed heal merge asks for one at the next heal; a page it can't file asks to start again; a heal leaves it to the pulls",
-    async () => {
-      const d = await phoneWith(200);
-      try {
-        await d.pullToEnd();
-        expect(await d.pull()).toBe('not-due');
-        // The next heal after a failed one: a full pass, though the last is minutes old.
-        expect(
-          await requestFullPass({
-            manager: d.sm as never,
-            store: d.phone as never,
-            identityKey: d.kd.identityKey,
-            readerSik: d.backupSik,
-            failed: true,
-          }),
-        ).toBe('started');
-        // The heal itself (its merge in 'defer' mode, as initWallet runs setActive) merges none of it and is quick:
-        // the device-sync pulls are asked to carry it.
-        const before = d.stats.pages;
-        await withFullPassMode(d.sik, 'defer', () => d.sm.syncFromReader(d.kd.identityKey, d.backup as never));
-        expect(d.more.n).toBeGreaterThan(0);
-        expect((await d.state()).when).toBeUndefined();
-        expect(d.stats.pages).toBe(before);
+        expect(await d.pull(t0 + 37 * 3_600_000)).toBe('started');
         await d.pullToEnd();
         expect(typeof markOf(await d.state()).doneAt).toBe('number');
+      } finally {
+        d.off();
+      }
+    },
+    T,
+  );
 
-        // A row filed under a transaction the backup doesn't have, met in a pass from the start: UNFILED_PAGE, and the
-        // next request starts the pass again even though one is under way.
+  test(
+    'daily: a deep pull from 48 h back brings a row pushed hours late; weekly: the full pass brings one days late',
+    async () => {
+      const d = await phoneWith(200);
+      try {
+        await d.pullToEnd();
+        const hours = await latePush(d.backup, d.kd.identityKey, 3 * 3_600_000, 11_111);
+        const days = await latePush(d.backup, d.kd.identityKey, 3 * DAY, 22_222);
+        d.built.txids.add(hours);
+        d.built.txids.add(days);
+        const t0 = Date.now();
+        expect(await d.pull(t0 + 3_600_000)).toBe('not-due');
+        await d.pullToEnd();
+        const has = async (txid: string) => (await d.phone.findOutputs({ partial: { txid } })).length;
+        expect([await has(hours), await has(days)]).toEqual([0, 0]); // past the 15-min overlap
+        expect(await d.pull(t0 + DAY + 1)).toBe('deep');
+        await d.pullToEnd();
+        expect([await has(hours), await has(days)]).toEqual([1, 0]);
+        expect(await d.pull(t0 + DAY + 2)).toBe('not-due'); // once a day
+        expect(await d.pull(t0 + 8 * DAY)).toBe('started');
+        await d.pullToEnd();
+        expect([await has(hours), await has(days)]).toEqual([1, 1]);
+        await d.admit();
+        const spendable = await d.spendable();
+        expect(spendable).toContain(`${hours}.0`);
+        expect(spendable).toContain(`${days}.0`);
+      } finally {
+        d.off();
+      }
+    },
+    T,
+  );
+
+  test(
+    'weekly on a phone: only on Wi-Fi; off Wi-Fi for 14 days, once on mobile data with a one-line notice of its size',
+    async () => {
+      const d = await phoneWith(400);
+      try {
+        await d.pullToEnd();
+        const done = markOf(await d.state()).doneAt!;
+        const notices: number[] = [];
+        const phone = (wifi: boolean | undefined) => ({
+          phone: true,
+          wifi: async () => wifi,
+          onMobileData: (mb: number) => void notices.push(mb),
+        });
+        /** The pass completes on the test's clock (the guard stamps real time). */
+        const finish = async (at: number) => {
+          await d.pullToEnd();
+          await updateMark(d.phone as never, await d.state(), { doneAt: at, deepDoneAt: at });
+        };
+        // A week on: on mobile data, no full pass (the deep pull instead); on Wi-Fi, the full pass.
+        expect(await d.pull(done + 8 * DAY, false, phone(false))).toBe('deep');
+        await finish(done); // the deep pull only; the last full pass stays a week old
+        expect(await d.pull(done + 8 * DAY + 1, false, phone(true))).toBe('started');
+        await finish(done + 8 * DAY + 1);
+        expect(notices).toEqual([]);
+        // Then off Wi-Fi: 13 days on, still nothing on mobile data; 14 days on, once, with the notice.
+        const wifiAt = markOf(await d.state()).wifiAt!;
+        expect(wifiAt).toBe(done + 8 * DAY + 1);
+        expect(await d.pull(wifiAt + 13 * DAY, false, phone(false))).toBe('deep');
+        await finish(done + 8 * DAY + 1);
+        expect(notices).toEqual([]);
+        expect(await d.pull(wifiAt + 14 * DAY, false, phone(false))).toBe('started');
+        expect(notices.length).toBe(1);
+        expect(notices[0]).toBeGreaterThanOrEqual(1);
+        await finish(wifiAt + 14 * DAY);
+        // Not again a week later while still off Wi-Fi: 14 days from that pass.
+        expect(await d.pull(wifiAt + 21 * DAY + 1, false, phone(false))).toBe('deep');
+        expect(notices.length).toBe(1);
+        // A network the phone can't tell counts as not Wi-Fi; the web wallet and the extension: any network.
+        await finish(wifiAt + 14 * DAY);
+        expect(await d.pull(wifiAt + 22 * DAY, false, { phone: false, wifi: async () => undefined })).toBe('started');
+      } finally {
+        d.off();
+      }
+    },
+    T,
+  );
+
+  test(
+    'on demand, rate-limited (N1): one full pass per 24 h from errors; retries resume and never start a new one',
+    async () => {
+      const d = await phoneWith(200);
+      try {
+        await d.pullToEnd();
+        const t0 = Date.now();
+        expect(await d.pull(t0, true)).toBe('started'); // a failed heal: a full pass
+        await d.pullToEnd();
+        expect(await d.pull(t0 + 3_600_000, true)).not.toBe('started'); // another failed heal within 24 h
+        await d.pullToEnd();
+        // A row the backup never sends the transaction of (an orphan): every retry resumes the stuck pass, a few pages.
         const { user } = await d.backup.findOrInsertUser(d.kd.identityKey);
         await d.backup.insertOutput({
           userId: user.userId,
-          transactionId: 99_999,
+          transactionId: 987_654,
           vout: 0,
-          satoshis: 1,
+          satoshis: 5_000,
           spendable: false,
           change: false,
           type: 'custom',
@@ -456,23 +513,98 @@ describe('the full re-pull: when it runs', () => {
           lockingScript: [0x51],
           scriptLength: 1,
         } as never);
-        let e: unknown;
-        try {
-          await d.pull(Date.now() + FULL_PASS_EVERY_MS + 1); // the daily pass
-          await d.pullToEnd(50);
-        } catch (x) {
-          e = x;
+        const plans: string[] = [];
+        const pages: number[] = [];
+        for (let i = 0; i < 6; i++) {
+          const p0 = d.stats.pages;
+          const r = await d.pull(t0 + 2 * 3_600_000 + i * 60_000, i % 2 === 1).then(
+            (x) => x,
+            (e: unknown) => String(e),
+          );
+          plans.push(r);
+          pages.push(d.stats.pages - p0);
         }
-        expect(String(e)).toContain(IS.UNFILED_PAGE);
+        expect(plans.some((p) => p === 'started')).toBe(false);
+        expect(Math.max(...pages.slice(1))).toBeLessThanOrEqual(5); // the pages up to the stuck one, never the whole pass
         expect(markOf(await d.state()).due).toBe('unfiled');
+        // A day after the last error-driven pass: one more pass from the start; it meets the orphan, and the next day's
+        // limit starts again from there.
+        expect(await d.pull(t0 + DAY + 1).catch((e: unknown) => String(e))).toContain(IS.UNFILED_PAGE);
+        expect(typeof markOf(await d.state()).onDemandAt).toBe('number');
+        // (The guard stamps real time; here that pass ran on the test's clock.)
+        await updateMark(d.phone as never, await d.state(), { onDemandAt: t0 + DAY + 1 });
+        for (let i = 0; i < 3; i++)
+          expect(
+            await requestFullPass({
+              manager: d.sm as never,
+              store: d.phone as never,
+              identityKey: d.kd.identityKey,
+              readerSik: d.backupSik,
+              now: t0 + DAY + 2 + i * 3_600_000,
+              failed: true,
+            }),
+          ).toBe('resuming');
+      } finally {
+        d.off();
+      }
+    },
+    T,
+  );
+
+  test(
+    "a merge with no mode (the wallet factory's at open) leaves a pass we started to the pulls (N2); a restore runs it",
+    async () => {
+      const d = await phoneWith(400);
+      try {
+        await d.pullToEnd();
         expect(
           await requestFullPass({
             manager: d.sm as never,
             store: d.phone as never,
             identityKey: d.kd.identityKey,
             readerSik: d.backupSik,
+            now: Date.now() + 8 * DAY,
           }),
         ).toBe('started');
+        const more = d.more.n;
+        const t = Date.now();
+        await d.sm.syncFromReader(d.kd.identityKey, d.backup as never); // no mode: as createWalletCore's setActive
+        expect(Date.now() - t).toBeLessThan(2_000);
+        expect(d.more.n).toBe(more + 1);
+        const st = await d.state();
+        expect([st.when, passUnderWay(st)]).toEqual([undefined, false]); // nothing merged, nothing moved
+        // An explicit restore runs the pass whole, as before.
+        await asRestore(() => d.sm.syncFromReader(d.kd.identityKey, d.backup as never));
+        const after = await d.state();
+        expect(after.when).toBeDefined();
+        expect(typeof markOf(after).doneAt).toBe('number');
+      } finally {
+        d.off();
+      }
+    },
+    T,
+  );
+
+  test(
+    'a pass from the start asks the chain again about coins whose admission was given up (N3)',
+    async () => {
+      const d = await phoneWith(400);
+      try {
+        await d.pullToEnd();
+        const list = IS.admissionListFor(d.sik);
+        const queued = await list.list(d.kd.identityKey);
+        expect(queued.length).toBe(d.built.unspent.length);
+        for (const e of queued) await list.remove(e.key); // given up after 3 days
+        expect(await d.spendable()).toEqual([]);
+        expect(await d.pull(Date.now() + 8 * DAY)).toBe('started');
+        await d.pullToEnd();
+        expect((await list.list(d.kd.identityKey)).length).toBe(d.built.unspent.length);
+        await d.admit();
+        expect(await d.spendable()).toEqual([...d.built.unspent].sort());
+        // Admitted coins are not queued again by the next full pass (no double admission).
+        expect(await d.pull(Date.now() + 16 * DAY)).toBe('started');
+        await d.pullToEnd();
+        expect(await list.list(d.kd.identityKey)).toEqual([]);
       } finally {
         d.off();
       }

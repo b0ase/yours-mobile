@@ -23,7 +23,7 @@ import { StorageIdb, StorageProvider, Wallet, WalletStorageManager } from '@bsv/
 import { forceLegacyActionBatch } from '../services/actionBatchMode';
 import { DEPOSIT_BASKET } from '@1sat/types';
 import * as IS from '../services/inboundSync';
-import { _setPullOverlap } from '../services/fullPass';
+import { _setPullOverlap, withFullPassMode } from '../services/fullPass';
 
 const E2E_TIMEOUT_MS = 60_000;
 const HEIGHT = 971_004;
@@ -95,7 +95,7 @@ async function device(name: string, kd: KeyDeriver, backup: StorageIdb, svc: nev
   expect(forceLegacyActionBatch(wallet)).toBe(true);
   const sik = s.getSettings().storageIdentityKey;
   /** A pull, as device sync runs it on every open. */
-  const pull = () => sm.syncFromReader(kd.identityKey, backup as never);
+  const pull = () => withFullPassMode(sik, 'slice', () => sm.syncFromReader(kd.identityKey, backup as never));
   return { s, sm, wallet, sik, pull, push: () => sm.updateBackups() };
 }
 type Device = Awaited<ReturnType<typeof device>>;
@@ -299,7 +299,9 @@ async function heal(dev: Device, o: Owner) {
   await dev.sm.makeAvailable();
   expect(dev.sm.getConflictingStores()).toEqual([o.backup.getSettings().storageIdentityKey]);
   expect(dev.sm.isActiveEnabled).toBe(false);
-  await dev.sm.setActive(dev.sik);
+  // As initWallet runs it: a heal leaves a deep or full pass to the device-sync pulls, which follow it.
+  await withFullPassMode(dev.sik, 'defer', () => dev.sm.setActive(dev.sik));
+  await dev.pull();
 }
 
 const LOGGED_PAGE =

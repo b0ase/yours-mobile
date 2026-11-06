@@ -85,6 +85,7 @@ import {
   type InboundVerifier,
 } from './services/inboundSync';
 import { FULL_PASS_NEXT_SLICE_MS, requestFullPass, withDeadlines, withFullPassMode } from './services/fullPass';
+import { isPhone, onWifi } from './services/networkKind';
 import { chromeEnvelopeBackend, EnvelopeStore, guardEnvelopes } from './services/envelopes';
 import { ENVELOPES_ENABLED } from './mobile/storeBuild';
 import { guardCrossSiteSigning } from './services/crossSiteSignGuard';
@@ -388,6 +389,8 @@ export interface InitWalletOptions {
    * (services/localFirst.ts). Without it such a payment is refused.
    */
   ensureLocalStore?: () => Promise<boolean>;
+  /** A one-line notice for the owner (the extension shows it on the balance card's sync line). */
+  notice?: (text: string) => void;
 }
 
 /**
@@ -550,9 +553,21 @@ export const initWallet = async (
     if (!own || !readerSik) return;
     try {
       const { identityKey } = await storage.getAuth();
-      const r = await requestFullPass({ manager: storage, store: own as never, identityKey, readerSik, failed });
+      const r = await requestFullPass({
+        manager: storage,
+        store: own as never,
+        identityKey,
+        readerSik,
+        failed,
+        phone: isPhone(),
+        wifi: onWifi,
+        // A phone off Wi-Fi 14 days: the weekly pass runs once on mobile data, and says so in one line.
+        onMobileData: (mb) => options?.notice?.(`Checking your whole wallet over mobile data, about ${mb} MB`),
+      });
       if (r === 'started')
         console.warn('[deviceSync] pulling the backup again from the start (a full pass, in slices)');
+      if (r === 'deep')
+        console.warn('[deviceSync] pulling the last 48 hours of the backup again (the daily deep pull)');
     } catch (e) {
       console.warn('[deviceSync] a full pass could not be asked for:', e);
     }

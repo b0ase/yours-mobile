@@ -57,9 +57,12 @@ import type { SpendState } from './unsentExpiry';
 import {
   afterPage,
   beforePage,
+  markOf,
+  onDemandAllowed,
   overlapped,
   passFromStart,
   rewind,
+  rewindDeep,
   syncStateFor,
   updateMark,
   type SyncStateRow,
@@ -435,6 +438,14 @@ export async function verifyInboundChunk(
   args: SyncArgs,
   chunk: SyncChunk,
   v: InboundVerifier,
+  opts: {
+    /**
+     * A pass from the start (review 23 re-check, N3): a coin the backup holds as spendable that this device holds as
+     * not spendable and unlinked goes on the admission list again, even when the rows are equal (an admission given up
+     * after 3 days). The chain still decides.
+     */
+    requeueHeld?: boolean;
+  } = {},
 ): Promise<InboundReport> {
   const report: InboundReport = {
     kept: 0,
@@ -657,7 +668,13 @@ export async function verifyInboundChunk(
         continue;
       }
       // A row the merge won't apply changes nothing; one whose time can't be read is treated as newer.
-      if (time(o.updated_at) <= time(filed.updated_at)) continue;
+      if (time(o.updated_at) <= time(filed.updated_at)) {
+        if (opts.requeueHeld && o.spendable === true && filed.spendable !== true && filed.spentBy == null) {
+          const txid = filed.txid ?? tx.txid;
+          if (txid) admitLater(txid, filed.vout);
+        }
+        continue;
+      }
       // Rule 2: spendability only goes down. A coin the device holds as spent or not spendable stays as the device
       // has it; the backup's "spendable" is for the chain to settle (C1: no marker the backup can set decides it).
       if (o.spendable === true && (filed.spendable !== true || filed.spentBy != null)) {
@@ -1548,40 +1565,49 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
         // scheduling only
       }
     };
-    // A heal leaves a pass from the start to the device-sync pulls (services/fullPass.ts; review 23, M2).
-    if (beforePage(deviceSik, fromStart) === 'stop') {
+    const mark = markOf(row);
+    /** A deep or full pass this device started: the device-sync pulls carry it (services/fullPass.ts). */
+    const ours = fromStart ? typeof mark.startedAt === 'number' : typeof mark.deepStartedAt === 'number';
+    // A heal, or a merge with no mode (the factory's at open), leaves it to the pulls (review 23, M2; re-check N2).
+    if (beforePage(deviceSik, { fromStart, ours }) === 'stop') {
       more();
       return { done: true, inserts: 0, updates: 0 }; // not merged: the checkpoint stays where it was
     }
     const unfiled = await unfiledTransactions(this, args, chunk, row);
     if (unfiled.length) {
-      // Once per pass: a pass that already started from the beginning stops, and so does one this has rewound already
-      // (L4), so this never loops. It asks for a pass from the start again on the next heal.
-      if (fromStart || typeof row?.syncStateId !== 'number' || rewound.has(passKey)) {
+      const id = typeof row?.syncStateId === 'number' ? row : undefined;
+      // Escalate, never loop: an incremental pass goes back DEEP_OVERLAP_MS; a deep pass goes back to the start when
+      // the 24 h limit for error-driven full passes allows (re-check N1); a pass from the start, or one whose rewind
+      // didn't land in the row the toolbox reads (L4), stops here.
+      const deep = !fromStart && !!id && !ours && !rewound.has(passKey);
+      const full = !fromStart && !!id && ours && !mark.startedAt && onDemandAllowed(mark);
+      if (!deep && !full) {
         const rows = (chunk.outputs ?? [])
           .filter((o) => typeof o?.transactionId === 'number' && unfiled.includes(o.transactionId))
           .map((o) => `${o.txid ?? '?'}.${o.vout} (backup transaction ${o.transactionId})`);
         // L5: a backup holding such a row never sends its transaction; a retry can't take it. Named for support.
         v.log?.(
-          `[inbound-sync] backup page names ${unfiled.length} payment(s) this device has no record of and the backup doesn't send, even from the start: ${rows.slice(0, 20).join(', ')}${rows.length > 20 ? ` and ${rows.length - 20} more` : ''}`,
+          `[inbound-sync] backup page names ${unfiled.length} payment(s) this device has no record of and the backup doesn't send${fromStart ? ', even from the start' : ''}: ${rows.slice(0, 20).join(', ')}${rows.length > 20 ? ` and ${rows.length - 20} more` : ''}`,
         );
-        if (row && typeof row.syncStateId === 'number') await updateMark(this, row, { due: 'unfiled' });
+        // The next full pass for it: not before 24 h from now (a pass from the start that met it counts as one).
+        if (id) await updateMark(this, id, fromStart ? { due: 'unfiled', onDemandAt: Date.now() } : { due: 'unfiled' });
         throw new Error(UNFILED_PAGE);
       }
-      await rewind(this, row);
+      if (deep) await rewindDeep(this, id!);
+      else await rewind(this, id!, Date.now(), { onDemandAt: Date.now() });
       rewound.add(passKey);
       v.log?.(
-        `[inbound-sync] backup page names ${unfiled.length} payment(s) an earlier pull skipped: pulling this backup again from the start`,
+        `[inbound-sync] backup page names ${unfiled.length} payment(s) an earlier pull skipped: pulling this backup again ${deep ? 'from 48 h back' : 'from the start'}`,
       );
       // Not merged, nothing queued. No checkpoint: the toolbox's sync loop reloads the rewound one and carries on, or
-      // (a heal) leaves it to the device-sync pulls.
-      if (beforePage(deviceSik, true) === 'stop') {
+      // (a heal, the factory's merge) leaves it to the device-sync pulls.
+      if (beforePage(deviceSik, { fromStart: !deep, ours: true }) === 'stop') {
         more();
         return { done: true, inserts: 0, updates: 0 };
       }
       return { done: false, inserts: 0, updates: 0 };
     }
-    const report = await verifyInboundChunk(this, args, chunk, v);
+    const report = await verifyInboundChunk(this, args, chunk, v, { requeueHeld: fromStart });
     if (report.admissions.length) {
       // Written before the merge: a page whose admissions can't be kept is not taken (it is fetched again).
       const sik = this.getSettings?.()?.storageIdentityKey;
@@ -1604,12 +1630,19 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
       }
     if (!merged) return merged;
     if (merged.done) {
-      if (fromStart) {
-        // A pass from the start completed (ours, or a store's first): the daily one is next due in 24 h.
-        rewound.delete(passKey);
+      rewound.delete(passKey);
+      if (fromStart || ours) {
+        // A pass from the start (ours, or a store's first) or a deep pull completed: recorded for the schedule.
         row = await readerSyncState(this, args);
+        const now = Date.now();
         if (row && typeof row.syncStateId === 'number' && !passFromStart(row))
-          await updateMark(this, row, { doneAt: Date.now(), startedAt: undefined, due: undefined });
+          await updateMark(
+            this,
+            row,
+            fromStart
+              ? { doneAt: now, deepDoneAt: now, startedAt: undefined, deepStartedAt: undefined, due: undefined }
+              : { deepDoneAt: now, deepStartedAt: undefined },
+          );
       }
       return merged;
     }

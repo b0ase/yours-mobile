@@ -333,6 +333,18 @@ describe('the real initWallet wiring', () => {
     expect(src).toMatch(/verifier\.onMore = \(\) =>[\s\S]*deviceSync\.syncNow\(\)/);
   });
 
+  test('the re-pull schedule knows the phone and its network, and says so before a pass on mobile data (re-check)', () => {
+    const src = readFileSync(new URL('./initWallet.ts', import.meta.url), 'utf8');
+    const ask = src.slice(src.indexOf('const fullPassIfDue'), src.indexOf('let healFailed'));
+    expect(ask).toMatch(/phone: isPhone\(\),\s*wifi: onWifi,/);
+    expect(ask).toContain('Checking your whole wallet over mobile data, about ${mb} MB');
+    const bg = readFileSync(new URL('./background.ts', import.meta.url), 'utf8');
+    expect(bg).toMatch(/notice: \(message\) =>[\s\S]*status: 'progress'[\s\S]*message/);
+    // A restore's merges run whole (re-check N2).
+    expect(bg).toMatch(/setActiveStorage: \(target\) => asRestore\(\(\) => ctx\.setActiveStorage\(target\)\)/);
+    expect(bg).toMatch(/asRestore\(\(\) => ctx\.storage\.syncFromReader\(identityKey, store as never\)\)/);
+  });
+
   test("this device's store is kept active (P0, 5 Nov 2026), under the coin check, which wraps over it", async () => {
     const m = ctx.storage as unknown as {
       __bwxDeviceActive?: { needsHeal(): boolean };
