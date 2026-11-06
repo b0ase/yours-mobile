@@ -45,6 +45,7 @@ import {
   type PendingSeal,
   type PendingSealStore,
   type SealLedger,
+  type SealTxLookup,
   type NativeSealOutcome,
   type SealApi,
   type SealKeys,
@@ -76,6 +77,8 @@ const NO_SELECT = {
 } as const;
 
 const STORE_KEY = 'bwx.nativeSeal.pending';
+/** How many of the newest wallet actions an unsure seal is looked for in (it was made minutes or hours ago). */
+const SEAL_LOOKUP_ACTIONS = 200;
 /** Seals recorded from this device by sealKey (identity · document · blocks; nativeSeal.SealLedger). At most 500. */
 const SEALED_KEY = 'bwx.nativeSeal.sealed';
 const localLedger = (): SealLedger => {
@@ -196,6 +199,43 @@ export const NativeSealPage = () => {
     return new BchatClient(defaultHttp(isNative), s);
   };
 
+  /**
+   * An unsure seal's transaction in this wallet's own storage (nativeSeal.SealTxLookup): the newest actions, by the
+   * seal's output script; its AtomicBEEF from the wallet's chain services. Any failure → null (held, never dropped).
+   */
+  const txLookup = (): SealTxLookup => ({
+    find: async (script) => {
+      try {
+        const w = apiContext.wallet;
+        const total = (await w.listActions({ labels: [], limit: 1, offset: 0 })).totalActions;
+        const n = Math.min(total, SEAL_LOOKUP_ACTIONS);
+        const { actions } = await w.listActions({
+          labels: [],
+          includeOutputs: true,
+          includeOutputLockingScripts: true,
+          limit: Math.max(n, 1),
+          offset: Math.max(total - n, 0),
+        });
+        const hit = actions.find((a) =>
+          a.outputs?.some((o) => o.lockingScript?.toLowerCase() === script.toLowerCase()),
+        );
+        return hit?.txid ? { found: true, txid: hit.txid } : { found: false };
+      } catch {
+        return null;
+      }
+    },
+    beef: async (txid) => {
+      try {
+        const services = apiContext.services as unknown as {
+          getBeefForTxid?: (t: string) => Promise<{ toBinaryAtomic(t: string): number[] }>;
+        };
+        return services?.getBeefForTxid ? (await services.getBeefForTxid(txid)).toBinaryAtomic(txid) : null;
+      } catch {
+        return null;
+      }
+    },
+  });
+
   const api: SealApi = async (path, body) => {
     const c = await client();
     try {
@@ -249,7 +289,7 @@ export const NativeSealPage = () => {
           manifest: p.manifest ?? null,
         });
         setPhase({ k: 'ready' });
-        recovery.current = recoverNativeSeals(api, localStore(), p.documentId, localLedger());
+        recovery.current = recoverNativeSeals(api, localStore(), p.documentId, localLedger(), txLookup());
       } catch (e) {
         if (live) setPhase({ k: 'error', text: e instanceof Error ? e.message : 'Could not open the document.' });
       }

@@ -5,7 +5,6 @@ import {
   BUSY_ELSEWHERE_MESSAGE,
   LEFT_PAGE_MESSAGE,
   MAY_HAVE_PAID_MESSAGE,
-  UNSURE_HOLD_MS,
   NEWER_VERSION_MESSAGE,
   NativeSealError,
   SEAL_HOLD_MAX_MS,
@@ -495,24 +494,53 @@ describe('a hung seal never blocks its document until restart', () => {
     expect(sealStateHere('', 'H2', ['f1'], memStore())).toBe('none'); // released on settle
   });
 
-  test('a seal that hangs forever lets go after SEAL_HOLD_MAX_MS on the wall clock (frozen timers, a wake)', async () => {
+  test('a seal hung BEFORE paying lets go after SEAL_HOLD_MAX_MS on the wall clock, and then never pays', async () => {
     const f = frozenClock();
     const log: string[] = [];
+    let approve!: (ok: boolean) => void;
+    let out: unknown = null;
+    void seal({
+      log,
+      documentId: 'H3',
+      clock: f.clock,
+      approve: () => new Promise<boolean>((r) => (approve = r)),
+    }).catch((x) => (out = x));
+    await until(() => typeof approve === 'function');
+    f.advance(SEAL_HOLD_MAX_MS);
+    f.wake();
+    await flush();
+    expect(sealStateHere('', 'H3', ['f1'], memStore())).toBe('none');
+    approve(true);
+    await until(() => out !== null);
+    expect((out as NativeSealError).code).toBe('cancelled');
+    expect(log).not.toContain('pay');
+  });
+
+  test('a PAYING seal survives a 10+ minute sleep: the hold stays, and its unsure record is on the phone', async () => {
+    const f = frozenClock();
+    const log: string[] = [];
+    const store = memStore();
     const hung: SealKeys = {
       createSignature: async () => ({ signature: [1] }),
       createAction: () => new Promise(() => undefined),
     };
-    void seal({ log, documentId: 'H3', keys: hung, clock: f.clock, steps: log });
+    void seal({ log, documentId: 'H5', store, keys: hung, clock: f.clock, steps: log });
     await until(() => log.includes('paying'));
-    expect(sealStateHere('', 'H3', ['f1'], memStore())).toBe('in_flight');
-    f.advance(SEAL_HOLD_MAX_MS - 1);
+    expect(store.list()).toMatchObject([{ documentId: 'H5', nonce: 'N1', beefHex: '', lockingScriptHex: '006a' }]);
+    f.advance(SEAL_HOLD_MAX_MS + 60 * 60_000); // asleep for over an hour mid-payment
     f.wake();
+    f.tick();
     await flush();
-    expect(sealStateHere('', 'H3', ['f1'], memStore())).toBe('in_flight');
-    f.advance(1);
-    f.wake();
-    await flush();
-    expect(sealStateHere('', 'H3', ['f1'], memStore())).toBe('none');
+    expect(sealStateHere('', 'H5', ['f1'], store)).toBe('in_flight');
+    expect((await seal({ documentId: 'H5', store }).catch((x) => x)).code).toBe('already_sealed');
+    // Recovery leaves a seal that is still paying alone.
+    let asked = 0;
+    await recoverNativeSeals(api([]), store, 'H5', null, {
+      find: async () => (asked++, { found: false }),
+      beef: async () => null,
+    });
+    expect(asked).toBe(0);
+    expect(store.m.size).toBe(1);
   });
 
   test('released on an error too', async () => {
@@ -608,25 +636,110 @@ describe('bit-sign seal cancel: only when createAction proves nothing went out',
       expect((await seal({ documentId: docId, store }).catch((x) => x)).code).toBe('already_sealed');
     });
 
-  test('the held unclear record: never sent to /recover; let go after UNSURE_HOLD_MS (past the signing session)', async () => {
+  const unsure = (over: Partial<PendingSeal> = {}): PendingSeal => ({
+    documentId: 'U9',
+    nonce: 'N9',
+    txid: '',
+    beefHex: '',
+    attestation: 'aa',
+    savedAt: 1_000,
+    identityKey: '',
+    fieldIds: ['f1'],
+    lockingScriptHex: '006a',
+    ...over,
+  });
+  const T2 = 'ef'.repeat(32);
+
+  test("an unsure record is found in the wallet's own storage, saved with its BEEF and recorded by /recover", async () => {
     const store = memStore();
-    store.save({
-      documentId: 'U9',
-      nonce: 'N9',
-      txid: '',
-      beefHex: '',
-      attestation: 'aa',
-      savedAt: 1_000,
-      identityKey: '',
-      fieldIds: ['f1'],
-    });
+    store.save(unsure());
+    const ledger = memLedger();
+    const bodies: Record<string, unknown>[] = [];
+    const found: string[] = [];
+    const n = await recoverNativeSeals(
+      async (path, body) => (path === 'recover' && bodies.push(body), api([])(path, body)),
+      store,
+      'U9',
+      ledger,
+      { find: async (script) => (found.push(script), { found: true, txid: T2 }), beef: async () => [9, 9] },
+    );
+    expect(found).toEqual(['006a']);
+    expect(bodies).toEqual([{ nonce: 'N9', attestation: 'aa', txid: T2, beefHex: '0909' }]);
+    expect(n).toBe(1);
+    expect(store.m.size).toBe(0);
+    expect(ledger.s.has(sealKey('', 'U9', ['f1']))).toBe(true);
+  });
+
+  test('none was ever built → nothing was paid: released and the nonce cancelled', async () => {
+    const store = memStore();
+    store.save(unsure());
     const log: string[] = [];
-    await recoverNativeSeals(api(log), store, 'U9', null, () => 1_000 + UNSURE_HOLD_MS - 1);
-    expect(log).toEqual([]);
-    expect(store.m.size).toBe(1);
+    await recoverNativeSeals(api(log), store, 'U9', null, {
+      find: async () => ({ found: false }),
+      beef: async () => null,
+    });
+    expect(store.m.size).toBe(0);
+    expect(log).toEqual(['cancel']);
+  });
+
+  test('unknown → never dropped: no lookup, a failed lookup, or no BEEF yet (the txid learnt is kept)', async () => {
+    const store = memStore();
+    store.save(unsure());
+    const log: string[] = [];
+    await recoverNativeSeals(api(log), store, 'U9');
+    await recoverNativeSeals(api(log), store, 'U9', null, { find: async () => null, beef: async () => [1] });
+    await recoverNativeSeals(api(log), store, 'U9', null, {
+      find: () => Promise.reject(new Error('db closed')),
+      beef: async () => [1],
+    });
+    expect(store.list()).toMatchObject([{ nonce: 'N9', beefHex: '', txid: '' }]);
+    await recoverNativeSeals(api(log), store, 'U9', null, {
+      find: async () => ({ found: true, txid: T2 }),
+      beef: async () => null,
+    });
+    expect(store.list()).toMatchObject([{ nonce: 'N9', beefHex: '', txid: T2 }]);
+    expect(log).toEqual([]); // never /recover without the BEEF, never a cancel
     expect(openingNotice(sealStateHere('', 'U9', ['f1'], store), true)?.text).toBe(MAY_HAVE_PAID_MESSAGE);
-    await recoverNativeSeals(api(log), store, 'U9', null, () => 1_000 + UNSURE_HOLD_MS);
-    expect(log).toEqual([]);
+  });
+
+  test('a storage error (QuotaExceeded) during createAction may come after the broadcast: no cancel, held', async () => {
+    for (const msg of ['QuotaExceededError: The quota has been exceeded.', 'WERR_STORAGE_REMOTE_FAILING']) {
+      const log: string[] = [];
+      const store = memStore();
+      const keys: SealKeys = {
+        createSignature: async () => ({ signature: [1] }),
+        createAction: async () => (log.push('pay'), Promise.reject(new Error(msg))),
+      };
+      const e = await seal({ log, documentId: `Q-${msg}`, store, keys }).catch((x) => x);
+      expect(e.code).toBe('pending_recovery');
+      expect(e.message).toBe(MAY_HAVE_PAID_MESSAGE);
+      expect(log).not.toContain('cancel');
+      expect(store.list()).toMatchObject([{ beefHex: '', lockingScriptHex: '006a' }]);
+    }
+  });
+
+  test('a txid with no transaction: held with that txid, "may have been paid", then recovered by its BEEF', async () => {
+    const log: string[] = [];
+    const store = memStore();
+    const keys: SealKeys = {
+      createSignature: async () => ({ signature: [1] }),
+      createAction: async () => (log.push('pay'), { txid: T2.toUpperCase() }),
+    };
+    const e = await seal({ log, documentId: 'T1', store, keys }).catch((x) => x);
+    expect(e.code).toBe('pending_recovery');
+    expect(e.message).toBe(MAY_HAVE_PAID_MESSAGE);
+    expect(retryAllowed(e, true)).toBe(false);
+    expect(log).not.toContain('cancel');
+    expect(log).not.toContain('commit');
+    expect(store.list()).toMatchObject([{ documentId: 'T1', txid: T2, beefHex: '' }]);
+    expect(sealStateHere('', 'T1', ['f1'], store)).toBe('unsure');
+    let found = 0;
+    const n = await recoverNativeSeals(api([]), store, 'T1', null, {
+      find: async () => (found++, { found: false }),
+      beef: async (t) => (t === T2 ? [7] : null),
+    });
+    expect(found).toBe(0); // the txid is known: no search, never "none was built"
+    expect(n).toBe(1);
     expect(store.m.size).toBe(0);
   });
 

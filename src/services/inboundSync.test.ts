@@ -1711,7 +1711,7 @@ describe('16c: a merge never makes a coin spendable; only the admission list doe
     }
     expect(retired).toBe(1);
     expect((await d.row(d.phone, d.coin)).spendable).toBe(false); // its own payment still spends it
-  });
+  }, 20_000); // real IndexedDB work, like the other C5 tests: over bun's 5 s default under a loaded full-suite run
 
   test('C6: the restore switch admits what the copy queued before it compares, with no later pull', async () => {
     const d = await phoneWithBackup();

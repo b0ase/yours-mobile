@@ -68,6 +68,22 @@ export interface PendingSeal {
   /** Who signed which blocks (sealKey). Missing on payments saved before 6 Nov 2026. */
   identityKey?: string;
   fieldIds?: string[];
+  /**
+   * The seal's OP_RETURN output script, on an UNSURE record (beefHex '': the payment may or may not have gone out).
+   * Recovery looks the transaction up in this wallet's own storage by it (SealTxLookup).
+   */
+  lockingScriptHex?: string;
+}
+
+/**
+ * Finds an unsure seal's transaction in this wallet's own storage (the page wires listActions + the services' BEEF).
+ * `find`: the action whose outputs include the seal's script; { found: false } only when the wallet answered and has
+ * no such action (then none was ever built: the toolbox stores an action before it signs or broadcasts it); null
+ * when it could not tell. `beef`: the AtomicBEEF for a txid, null when it can't be had yet.
+ */
+export interface SealTxLookup {
+  find(lockingScriptHex: string): Promise<{ found: false } | { found: true; txid: string } | null>;
+  beef(txid: string): Promise<number[] | null>;
 }
 export interface PendingSealStore {
   list(): PendingSeal[];
@@ -183,11 +199,6 @@ const markSealed = (ledger: SealLedger | null | undefined, key: string) => {
  * during it, a txid in the answer). The nonce is never cancelled then, and no retry is offered.
  */
 export const MAY_HAVE_PAID_MESSAGE = 'This seal may have been paid — it will be checked and recorded.';
-/**
- * How long an unclear payment (MAY_HAVE_PAID_MESSAGE, no transaction in hand to recover with) holds this seal on this
- * device: past bit-sign's 10-minute signing session, so the server can no longer record that attempt anyway.
- */
-export const UNSURE_HOLD_MS = 15 * 60_000;
 /** How long a cancel may take at most before the seal goes on without it (it is best effort). */
 export const CANCEL_TIMEOUT_MS = 3_000;
 
@@ -204,9 +215,9 @@ const NOTHING_SENT_KINDS = new Set<SendErrorKind>([
   'device-not-active',
   'other-extension',
   'worker-restarted',
-  'storage-full',
-  'storage-remote-failing',
   'broadcast-failed',
+  // NOT 'storage-full' (QuotaExceeded) or 'storage-remote-failing': the toolbox can throw them from a storage write
+  // AFTER the broadcast, and a cancel + retry there would lose the first seal and pay twice. Unsure instead.
 ]);
 
 /**
@@ -449,7 +460,10 @@ export async function nativeSignAndSeal(input: {
   const settled = new Promise<void>((r) => (settle = r));
   void withinWallClock(settled, SEAL_HOLD_MAX_MS, { clock: input.clock }).then((r) => {
     if (r !== WALL_TIMEOUT) return;
-    if (!hold.paying) hold.abandoned = 'expired';
+    // ⚠ PAYING: never let go on time (the app slept mid-payment, 6 Nov 2026). Its unsure record is saved; the hold
+    // ends when createAction settles, or with the app, and then the record is resolved by recovery (SealTxLookup).
+    if (hold.paying) return;
+    hold.abandoned = 'expired';
     release();
   });
   try {
@@ -473,23 +487,28 @@ const txidIn = (e: unknown): string => {
   return '';
 };
 
-/** An unclear payment: hold this seal on this phone (PendingSealStore, no BEEF) so it is never paid again from here. */
-function holdUnclearPayment(
+/**
+ * An UNSURE record: the payment may have gone out. Saved BEFORE createAction (and again with a txid when one is
+ * known), so a crash, a sleep or an unclear failure always leaves it on this phone; recovery resolves it.
+ */
+function saveUnsure(
   input: Parameters<typeof nativeSignAndSeal>[0],
   nonce: string,
   attestation: string,
-  e: unknown,
+  lockingScriptHex: string,
+  txid = '',
 ) {
   try {
     input.store.save({
       documentId: input.documentId,
       nonce,
-      txid: txidIn(e),
+      txid,
       beefHex: '',
       attestation,
       savedAt: (input.now ?? Date.now)(),
       identityKey: input.identityKey ?? '',
       fieldIds: [...input.fieldIds],
+      lockingScriptHex,
     });
   } catch {
     /* storage blocked: the in-flight hold and the server's checks remain */
@@ -555,6 +574,8 @@ async function afterPrepare(
   // Left (abandonSeal) or held too long: stop here, before any money moves. From here the hold stays until settled.
   if (hold.abandoned)
     throw new NativeSealError(hold.abandoned === 'left' ? LEFT_PAGE_MESSAGE : EXPIRED_HOLD_MESSAGE, 'cancelled');
+  // ⚠ BEFORE ANY MONEY MOVES: an unsure record, so nothing that happens next can leave this seal unaccounted for.
+  saveUnsure(input, prepared.nonce, attestation, lockingScriptHex);
   hold.paying = true;
   step('paying');
   let paid: Awaited<ReturnType<SealKeys['createAction']>>;
@@ -569,18 +590,22 @@ async function afterPrepare(
   } catch (e) {
     console.warn('[nativeSeal] pay failed', e instanceof Error ? e.message : e);
     if (provablyNotPaid(e)) {
-      // Refused before anything went out: nothing paid, nothing saved; the nonce is cancelled and the button returns.
+      // Refused before anything went out: nothing paid, the unsure record goes, the nonce is cancelled, button back.
+      input.store.remove(prepared.nonce);
       if (isSpentCoinError(e)) throw new NativeSealError(SEAL_SPENT_MESSAGE, 'spent_elsewhere');
       throw new NativeSealError(e instanceof Error && e.message ? e.message : 'The payment was refused.', 'not_paid');
     }
     // ⚠ ANY DOUBT: it may have gone out. Never cancel the nonce, never offer a retry; this seal is held on this phone.
     paymentMayHaveGoneOut();
-    holdUnclearPayment(input, prepared.nonce, attestation, e);
+    if (txidIn(e)) saveUnsure(input, prepared.nonce, attestation, lockingScriptHex, txidIn(e));
     throw new NativeSealError(MAY_HAVE_PAID_MESSAGE, 'pending_recovery');
   }
   if (!paid?.txid || !paid.tx) {
+    // A txid with no transaction (or neither): it may well have gone out. The unsure record stays (with the txid).
     paymentMayHaveGoneOut();
-    throw new NativeSealError('The wallet did not return the seal transaction, so nothing was recorded.', 'failed');
+    const t = typeof paid?.txid === 'string' && /^[0-9a-f]{64}$/i.test(paid.txid) ? paid.txid.toLowerCase() : '';
+    if (t) saveUnsure(input, prepared.nonce, attestation, lockingScriptHex, t);
+    throw new NativeSealError(MAY_HAVE_PAID_MESSAGE, 'pending_recovery');
   }
   paymentMayHaveGoneOut();
   const txid = paid.txid.toLowerCase();
@@ -683,24 +708,64 @@ async function afterPrepare(
   };
 }
 
-/** Finish paid-but-unrecorded seals saved on this phone (for this document, or all). Never throws. */
+/**
+ * An unsure record (no BEEF): look its transaction up in this wallet's own storage. Found with its BEEF → saved as an
+ * ordinary paid record, which /recover then records (bit-sign records a paid seal even on a cancelled session). The
+ * wallet says none was ever built → nothing was paid: released, and the nonce cancelled. Anything unknown (no lookup,
+ * no script, the lookup failed, the BEEF not to be had yet) → held, never dropped while a transaction might exist.
+ * True when the record now carries its BEEF.
+ */
+async function resolveUnsure(
+  api: SealApi,
+  store: PendingSealStore,
+  p: PendingSeal,
+  lookup: SealTxLookup | undefined,
+): Promise<boolean> {
+  if (!lookup) return false;
+  let txid = p.txid;
+  if (!txid) {
+    if (!p.lockingScriptHex) return false;
+    const f = await lookup.find(p.lockingScriptHex).catch(() => null);
+    if (!f) return false;
+    if (!f.found) {
+      store.remove(p.nonce);
+      await cancelSeal(api, p.nonce);
+      return false;
+    }
+    txid = f.txid.toLowerCase();
+  }
+  const tx = await lookup.beef(txid).catch(() => null);
+  if (!tx?.length) {
+    if (txid !== p.txid) store.save({ ...p, txid }); // keep what was learnt
+    return false;
+  }
+  store.save({ ...p, txid, beefHex: toHex(tx) });
+  return true;
+}
+
+/**
+ * Finish seals saved on this phone (for this document, or all): paid-but-unrecorded ones through /recover, unsure ones
+ * through the wallet's own storage first (resolveUnsure). A seal running right now is left alone. Never throws.
+ */
 export async function recoverNativeSeals(
   api: SealApi,
   store: PendingSealStore,
   documentId?: string,
   ledger?: SealLedger | null,
-  now?: () => number,
+  lookup?: SealTxLookup,
 ): Promise<number> {
   let done = 0;
-  for (const p of store.list()) {
+  for (const saved of store.list()) {
+    let p = saved;
     if (documentId && p.documentId !== documentId) continue;
-    // An unclear payment with no transaction in hand: nothing to recover with. Held until bit-sign's session is long
-    // over (UNSURE_HOLD_MS), then let go so this phone can seal again.
-    if (!p.beefHex) {
-      if ((now ?? Date.now)() - p.savedAt >= UNSURE_HOLD_MS) store.remove(p.nonce);
-      continue;
-    }
+    // Still being paid in this app (a page left mid-payment): its own flow settles it.
+    if (p.fieldIds && inFlight.has(sealKey(p.identityKey ?? '', p.documentId, p.fieldIds))) continue;
     try {
+      if (!p.beefHex) {
+        if (!(await resolveUnsure(api, store, p, lookup))) continue;
+        p = store.list().find((x) => x.nonce === saved.nonce) ?? p;
+        if (!p.beefHex) continue;
+      }
       const r = await api('recover', { nonce: p.nonce, attestation: p.attestation, txid: p.txid, beefHex: p.beefHex });
       // In progress (429 / commit_in_progress), network or server fault: keep it for the next open or the sweep.
       if (keepsPayment(r)) continue;
