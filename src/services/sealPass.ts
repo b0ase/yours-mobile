@@ -195,6 +195,11 @@ export const opReturnData = (scriptHex: unknown): Uint8Array | null => {
 };
 
 const ALLOWED_TOP = new Set(['description', 'outputs', 'options', 'labels']);
+/**
+ * The v2 seal payload's keys, exactly (bit-sign src/lib/nds-seal-record.ts SealPayloadV2 / buildSealPayloadV2). Review
+ * 24 L3: a key outside this set (a site adding its own data to the one OP_RETURN the person approved) is refused.
+ */
+const SEAL_PAYLOAD_KEYS = 'docHash,fields,key,origHash,protocol,recordHash,ref,svgHash,ts,type,version';
 const ALLOWED_OPTIONS = new Set(['acceptDelayedBroadcast', 'randomizeOutputs']);
 
 /** Is this createAction exactly the seal of `seal`? Pure; no clock. */
@@ -220,7 +225,8 @@ export const sealActionMatches = (seal: SealSign, args: unknown): boolean => {
   } catch {
     return false;
   }
-  if (!p || typeof p !== 'object') return false;
+  if (!p || typeof p !== 'object' || Array.isArray(p)) return false;
+  if (Object.keys(p).sort().join(',') !== SEAL_PAYLOAD_KEYS) return false;
   return (
     p.protocol === 'b0ase-bitsign' &&
     p.version === '2.0' &&

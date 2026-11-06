@@ -146,6 +146,11 @@ describe('sealActionMatches: the seal transaction of the record just signed', ()
     ).toBe(false);
     expect(sealActionMatches(s, actionArgs(payloadFor(record(), { fields: 'sig-director,sig-other' })))).toBe(false);
     expect(sealActionMatches(s, actionArgs(payloadFor(record(), { type: 'transfer' })))).toBe(false);
+    // Review 24 L3: exactly bit-sign's v2 keys; a site's extra data in the approved OP_RETURN is refused.
+    expect(sealActionMatches(s, actionArgs(payloadFor(record(), { note: 'buy $XYZ' })))).toBe(false);
+    expect(sealActionMatches(s, actionArgs(payloadFor(record(), { data: 'x'.repeat(500) })))).toBe(false);
+    const { docHash: _drop, ...missing } = payloadFor();
+    expect(sealActionMatches(s, actionArgs(missing))).toBe(false);
   });
 
   test('money to anyone, extra outputs, site inputs, labels or other options do not match', () => {
