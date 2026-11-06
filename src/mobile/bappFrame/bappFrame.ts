@@ -108,7 +108,13 @@ export const openBapp = async (name: string, rawUrl: string): Promise<void> => {
   // bApps that allow it (WEB_FRAME_ORIGINS) and opens the rest in a tab.
   const mode = frameModeFor(origin, { native: isNative, extension: IS_EXTENSION });
   if (mode === 'tab' || !origin) {
-    if (isNative) console.warn('[bapp frame] not framed, opening the browser:', name, !origin ? 'origin not allowlisted' : `mode ${mode}`, url);
+    if (isNative)
+      console.warn(
+        '[bapp frame] not framed, opening the browser:',
+        name,
+        !origin ? 'origin not allowlisted' : `mode ${mode}`,
+        url,
+      );
     return openDappBrowser(url, { noFrame: true });
   }
   if (state.session?.origin === origin && state.session.url === url) return set({ visible: true });

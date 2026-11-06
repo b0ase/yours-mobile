@@ -204,16 +204,32 @@ test('accountTag: stable per account, differs between accounts, never the addres
 describe('frame session never hangs', () => {
   const never = <T>() => new Promise<T>(() => {});
   test('a wallet sign-in that never settles answers the page with an error', async () => {
-    const r = await answerFrameSession(BCHATX, { mode: 'code' }, {
-      account: () => null, load: () => null, signIn: () => never<ChatSession>(), mint: async () => ({ code: CODE }), stepMs: 20,
-    });
+    const r = await answerFrameSession(
+      BCHATX,
+      { mode: 'code' },
+      {
+        account: () => null,
+        load: () => null,
+        signIn: () => never<ChatSession>(),
+        mint: async () => ({ code: CODE }),
+        stepMs: 20,
+      },
+    );
     expect(r.success).toBe(false);
     expect((r as { error: string }).error).toMatch(/did not finish within/);
   });
   test('a mint that never settles answers the page with an error', async () => {
-    const r = await answerFrameSession(BCHATX, { mode: 'code' }, {
-      account: () => null, load: () => S('t'), signIn: async () => S('t'), mint: () => never<unknown>(), stepMs: 20,
-    });
+    const r = await answerFrameSession(
+      BCHATX,
+      { mode: 'code' },
+      {
+        account: () => null,
+        load: () => S('t'),
+        signIn: async () => S('t'),
+        mint: () => never<unknown>(),
+        stepMs: 20,
+      },
+    );
     expect(r.success).toBe(false);
   });
   test('singleFlight: a hung sign-in times out and the NEXT call starts fresh', async () => {
