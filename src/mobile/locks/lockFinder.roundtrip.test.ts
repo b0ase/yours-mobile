@@ -28,6 +28,8 @@ import { buildInscriptionScript, Lock } from '@1sat/templates';
 import { keepGlobals } from '../../testing/stubGlobals';
 import { fixUtxoStatus } from '../../services/utxoStatus';
 import { storeFingerprint } from '../../services/lockScanStore';
+import { recoverPaymentByTxid } from '../../services/recoverByTxid';
+import { makeTxidRecoverDeps } from '../../services/recoverByTxidWiring';
 
 keepGlobals('localStorage');
 const kv = new Map<string, string>();
@@ -38,7 +40,8 @@ const kv = new Map<string, string>();
   clear: () => kv.clear(),
 };
 
-const { claimMatured, createLock, lockAddress } = await import('./lockApi');
+const { claimLocks, claimMatured, createLock, lockAddress } = await import('./lockApi');
+const { planPayouts } = await import('./claimPayouts');
 const { bsvLocksScanDue, bsvScanLine, findBsvLocks, foundLockIdTag, LOCK_CUSTOM_INSTRUCTIONS } =
   await import('./lockFinder');
 
@@ -187,7 +190,7 @@ async function openWallet(rootKey: PrivateKey, chain: Chain) {
     maxRebroadcastAttempts: 0,
   } as never);
   const wallet = new Wallet({ chain: 'main', keyDeriver: kd, storage, services: services as never, monitor } as never);
-  return { wallet, storage, kd };
+  return { wallet, storage, kd, services };
 }
 type W8 = Awaited<ReturnType<typeof openWallet>>;
 
@@ -543,6 +546,169 @@ describe('Claim guard on the real toolbox: dust in the lock basket never costs t
     await expect(claimMatured(ctxB)).rejects.toThrow('Nothing is ready to claim yet.');
     expect(await balance(b)).toBe(balAfter);
   }, 120000);
+});
+
+/** Plant `n` matured 1-sat exact locks to the wallet's lock address straight into its lock basket (id-tagged). */
+async function plantDust(w: W8, chain: Chain, ctx: OneSatContext, n: number) {
+  const addr = await lockAddress(ctx);
+  const { txid } = mineOutputs(
+    chain,
+    Array.from({ length: n }, () => ({ lockingScript: Lock.lock(addr, HEIGHT - 10), satoshis: 1 })),
+  );
+  const beef = new Beef();
+  const tx = Transaction.fromBinary(chain.raw.get(txid)!);
+  tx.merklePath = pathFor(chain, txid);
+  beef.mergeTransaction(tx);
+  await w.wallet.internalizeAction({
+    tx: beef.toBinaryAtomic(txid),
+    outputs: tx.outputs.map((_, v) => ({
+      outputIndex: v,
+      protocol: 'basket insertion' as const,
+      insertionRemittance: {
+        basket: 'lock',
+        customInstructions: JSON.stringify({ protocolID: P1SAT_PROTOCOL, keyID: 'lock' }),
+        tags: [`until:${HEIGHT - 10}`, `id:${txid.slice(0, 16)}_${v}`],
+      },
+    })),
+    description: 'planted dust locks',
+  });
+  return txid;
+}
+
+describe('N3 on the real toolbox: an own small lock is claimable, planted dust is not', () => {
+  test('a 900-sat lock this wallet made is claimed at a profit; 40 planted 1-sat locks are left alone', async () => {
+    const chain = newChain();
+    const { w: a } = await fundedWallet(chain);
+    const ctxA = ctxOf(a, chain);
+    const plan = await createLock(ctxA, `${ACCOUNT}-n3`, {
+      label: 'Small',
+      mode: 'date',
+      pieces: [{ height: MATURE, sats: 900 }],
+    });
+    mine(chain, await rawOf(a, plan.txids[0]));
+    await plantDust(a, chain, ctxA, 40);
+    expect(await locksOf(a)).toHaveLength(41);
+    chain.tip = MATURE + 1;
+    const before = await balance(a);
+    const txid = await claimMatured(ctxA);
+    const utx = Transaction.fromBinary(await rawOf(a, txid));
+    expect(utx.inputs.map((i) => `${i.sourceTXID}.${i.sourceOutputIndex}`)).toEqual([`${plan.txids[0]}.0`]);
+    const after = await balance(a);
+    console.log(
+      '[N3] 900-sat own lock claimed: balance',
+      before,
+      '→',
+      after,
+      '| dust left:',
+      (await locksOf(a)).length,
+    );
+    expect(after).toBeGreaterThan(before);
+    expect(after).toBeLessThan(before + 900);
+    expect(await locksOf(a)).toHaveLength(40);
+    await expect(claimMatured(ctxA)).rejects.toThrow('Nothing is ready to claim yet.');
+    expect(await balance(a)).toBe(after);
+  }, 120000);
+});
+
+describe('N1 on the real toolbox: a plan with 60 matured pieces is claimed in full, in claims of at most 50', () => {
+  test('60 pieces (the tail last): two claims, every piece spent, the payouts and the tail offer match', async () => {
+    const chain = newChain();
+    const { w: a } = await fundedWallet(chain);
+    const ctxA = ctxOf(a, chain);
+    const pieces = Array.from({ length: 60 }, (_, i) => ({
+      height: MATURE - 100 + i,
+      sats: i === 59 ? 15_000 : 2_000,
+      ...(i === 59 ? { tail: true } : {}),
+    }));
+    const plan = await createLock(ctxA, `${ACCOUNT}-n1`, {
+      label: 'Daily',
+      mode: 'percent',
+      pieces,
+      pendingAmounts: [5_000, 5_000, 5_000],
+      frequency: 'daily',
+    });
+    mine(chain, await rawOf(a, plan.txids[0]));
+    chain.tip = MATURE + 1;
+    const ready = plan.pieces.map((x) => `${x.txid}.${x.vout}`);
+    // Feed locks or other matured locks compete for a claim's 50 slots: one older unplanned lock here.
+    const other = await createLock(ctxA, `${ACCOUNT}-n1x`, {
+      label: 'Other',
+      mode: 'date',
+      pieces: [{ height: HEIGHT, sats: 3_000 }],
+    });
+    mine(chain, await rawOf(a, other.txids[0]));
+    const before = await balance(a);
+
+    const r = await claimLocks(ctxA, { outpoints: ready });
+    expect(r.error).toBeUndefined();
+    expect(r.txids).toHaveLength(2);
+    expect(r.spent).toEqual(new Set(ready));
+    expect(r.sats).toBe(59 * 2_000 + 15_000);
+    const inputs = (await Promise.all(r.txids.map(async (t) => Transaction.fromBinary(await rawOf(a, t))))).map(
+      (t) => t.inputs.length,
+    );
+    expect(inputs.sort((x, y) => x - y)).toEqual([10, 50]);
+    expect((await locksOf(a)).map((o) => o.outpoint)).toEqual([`${other.txids[0]}.0`]); // only the unplanned one left
+    const after = await balance(a);
+    expect(after).toBeGreaterThan(before + r.sats - 60 * 200);
+
+    const out = planPayouts([plan], chain.tip, r.spent, 50);
+    expect(out[0].lines).toHaveLength(60);
+    expect(out[0].batch).toBeDefined(); // the tail was really claimed, so "Lock next payouts" is right
+  }, 180000);
+});
+
+describe('N2 on the real toolbox: a lock whose transaction this device holds as failed', () => {
+  const failLockTx = (w: W8, txid: string) =>
+    w.storage.runAsStorageProvider(async (sp) => {
+      const t = (await sp.findTransactions({ partial: { txid }, noRawTx: true }))[0];
+      await sp.updateTransactionStatus('failed', t.transactionId);
+    });
+  const repairWith = (w: W8, calls: string[]) => async (txid: string) => {
+    calls.push(txid);
+    const r = await recoverPaymentByTxid(
+      txid,
+      makeTxidRecoverDeps({
+        storage: w.storage,
+        wallet: w.wallet as never,
+        services: w.services as never,
+        log: () => undefined,
+      }),
+    );
+    return r.result === 'restored' || r.result === 'already';
+  };
+
+  test('the payment repair restores the lock rows too; the finder files them and the lock claims', async () => {
+    const chain = newChain();
+    const { a, lockTxid } = await deviceWithLocks(chain);
+    await failLockTx(a, lockTxid);
+    expect(await locksOf(a)).toEqual([]); // failed: its outputs are not spendable
+    const calls: string[] = [];
+    const r = await findBsvLocks(ctxOf(a, chain), `${ACCOUNT}-n2`, { store: 'S', repairTxid: repairWith(a, calls) });
+    console.log('[N2]', JSON.stringify(r));
+    expect(calls).toEqual([lockTxid]);
+    expect(r).toMatchObject({ added: 2, addedSats: 80_000, retry: [], repair: [] });
+    expect((await locksOf(a)).map((o) => o.outpoint)).toEqual([`${lockTxid}.0`, `${lockTxid}.1`]);
+    chain.tip = MATURE + 1;
+    const before = await balance(a);
+    const txid = await claimMatured(ctxOf(a, chain));
+    const utx = Transaction.fromBinary(await rawOf(a, txid));
+    expect(utx.inputs.map((i) => `${i.sourceTXID}.${i.sourceOutputIndex}`)).toEqual([`${lockTxid}.0`]);
+    expect(await balance(a)).toBeGreaterThan(before + 49_000);
+  }, 180000);
+
+  test('the repair never revives a lock the chain shows spent, even when the indexer still says unspent', async () => {
+    const chain = newChain();
+    const { a, lockTxid } = await deviceWithLocks(chain);
+    await failLockTx(a, lockTxid);
+    chain.spent.set(`${lockTxid}.0`, 'ef'.repeat(32)); // the chain (the toolbox's services) knows; the indexer doesn't
+    const r = await findBsvLocks(ctxOf(a, chain), `${ACCOUNT}-n2s`, { store: 'S', repairTxid: repairWith(a, []) });
+    expect(r.added).toBe(1);
+    expect(r.addedSats).toBe(30_000);
+    expect(r.repair).toEqual([`${lockTxid}.0: this device holds it as spent or not usable yet (an unlock in flight?)`]);
+    expect((await rowOf(a, lockTxid, 0))?.spendable).toBe(false);
+    expect((await locksOf(a)).map((o) => o.outpoint)).toEqual([`${lockTxid}.1`]);
+  }, 180000);
 });
 
 describe('L3 on the real toolbox: the device store fingerprint', () => {

@@ -19,11 +19,12 @@ import {
   type OneSatContext,
 } from '@1sat/actions';
 import { buildInscriptionScript, Lock } from '@1sat/templates';
-import { P2PKH, PublicKey, Random, Utils } from '@bsv/sdk';
+import { Hash, P2PKH, PublicKey, Random, Transaction, Utils } from '@bsv/sdk';
 import { readAssetIdTag } from '@1sat/types';
 import { buildReceipt, receiptMap, receiptSvg, type Receipt, type ReceiptIdentity, type ReceiptMode } from './receipt';
 import { MAX_PIECES, MIN_PIECE_SATS, mergePlans, type LockMode, type LockPlan, type PlanPiece } from './schedule';
 import type { ChromeStorageService } from '../../services/ChromeStorage.service';
+import { FEE_PER_KB } from '../../utils/constants';
 
 const LOCK_KEY_ID = 'lock';
 const planKey = (account: string) => `bwx.lockPlans.${account}`;
@@ -267,46 +268,131 @@ export function unclaimedOutpoints(plans: LockPlan[]): Set<string> {
   return new Set(plans.flatMap((p) => p.pieces.filter((x) => !x.claimed).map((x) => `${x.txid}.${x.vout}`)));
 }
 
-/** The smallest lock a claim spends, and the most locks one claim takes (each input carries ~1.2 kB of script). */
-export const CLAIM_MIN_SATS = MIN_PIECE_SATS;
+/**
+ * The `id:` tracking tag "Find my locks" gives a lock it files: `id:<16 hex>_<vout>`, the shape @1sat/actions stamps
+ * (`<actionId>_<index>`), with the action id derived from the txid so every device gives the same lock the same id.
+ * It also tells a found lock (which may be anyone's dust) from one this wallet made (a random action id).
+ */
+export const foundLockIdTag = (txid: string, vout: number): string =>
+  `id:${Utils.toHex(Hash.sha256(Utils.toArray(`bwx found lock\n${txid.toLowerCase()}`, 'utf8')).slice(0, 8))}_${vout}`;
+
+/** Locks "Find my locks" adds (anyone can pay to the public lock address) are claimed only from this amount up. */
+export const FOUND_CLAIM_MIN_SATS = MIN_PIECE_SATS;
+/** The most locks one claim spends; more are claimed in further transactions. */
 export const CLAIM_MAX_INPUTS = 50;
+/** One lock input: outpoint + sequence + the ~1.2 kB unlocking script (unlockBsv budgets 1,205 bytes). */
+const CLAIM_INPUT_BYTES = 1_250;
+/** A claim's own bytes (version, counts, lock time, the change output): charged to every input, to be safe. */
+const CLAIM_OVERHEAD_BYTES = 60;
+
+/** The fee one lock input costs at `satsPerKb` (the wallet's fee rate), its share of the claim's overhead included. */
+export const claimFeePerInput = (satsPerKb: number = FEE_PER_KB) =>
+  Math.ceil(((CLAIM_INPUT_BYTES + CLAIM_OVERHEAD_BYTES) * Math.max(1, satsPerKb)) / 1000);
+
+export type ClaimPick = { outpoint: string; id: string; satoshis: number; until: number };
 
 /**
- * Which matured locks a claim may spend (review 21 M2): anyone can pay dust to the public lock address, and an input
- * costs about 125 sats of fee, so only locks of at least CLAIM_MIN_SATS (the lock flow's own minimum) with an `id:` tag
- * are taken, oldest first, at most CLAIM_MAX_INPUTS. Each one recovers far more than its fee.
+ * Which matured locks a claim may spend (review 21 M2, N3). Every claim path goes through this, and no claim spends
+ * more in fees than it recovers:
+ * - matured, with an `id:` tag (unlockBsv spends by it);
+ * - worth more than its fee at the wallet's rate (each input pays its own fee and the claim's overhead);
+ * - a lock "Find my locks" filed (it may be anyone's dust): at least FOUND_CLAIM_MIN_SATS as well.
+ * Oldest first. claimLocks splits the picks into claims of at most CLAIM_MAX_INPUTS.
  */
 export function claimableLocks(
   outputs: { outpoint: string; satoshis: number; tags?: string[] }[],
   height: number,
-): { ids: string[]; sats: number } {
-  const ready = outputs
-    .map((o) => ({
-      o,
-      until: Number.parseInt(o.tags?.find((t) => t.startsWith('until:'))?.slice(6) ?? '0', 10),
-      id: readAssetIdTag(o.tags),
-    }))
-    .filter((x) => x.id && x.until > 0 && x.until <= height && x.o.satoshis >= CLAIM_MIN_SATS)
-    .sort((a, b) => a.until - b.until)
-    .slice(0, CLAIM_MAX_INPUTS);
-  return { ids: ready.map((x) => x.id!), sats: ready.reduce((t, x) => t + x.o.satoshis, 0) };
+  { satsPerKb = FEE_PER_KB }: { satsPerKb?: number } = {},
+): { ids: string[]; sats: number; picks: ClaimPick[] } {
+  const fee = claimFeePerInput(satsPerKb);
+  const picks: ClaimPick[] = [];
+  for (const o of outputs) {
+    const op = o.outpoint.replace(/_(\d+)$/, '.$1');
+    const [txid, vout] = op.split('.');
+    const until = Number.parseInt(o.tags?.find((t) => t.startsWith('until:'))?.slice(6) ?? '0', 10);
+    const id = readAssetIdTag(o.tags);
+    if (!id || !(until > 0) || until > height || !(o.satoshis > fee)) continue;
+    const found = `id:${id}` === foundLockIdTag(txid ?? '', Number(vout));
+    if (found && o.satoshis < FOUND_CLAIM_MIN_SATS) continue;
+    picks.push({ outpoint: op, id, satoshis: o.satoshis, until });
+  }
+  picks.sort((a, b) => a.until - b.until);
+  return { ids: picks.map((p) => p.id), sats: picks.reduce((t, p) => t + p.satoshis, 0), picks };
 }
 
+export type ClaimResult = {
+  txids: string[];
+  /** Outpoints the claims actually spent (read from the signed transactions). */
+  spent: Set<string>;
+  sats: number;
+  /** A later claim failed after earlier ones went through: what it said. */
+  error?: string;
+};
+
+/** The outpoints a signed claim spends, from its AtomicBEEF (or raw tx). */
+const inputsOf = (tx: unknown): Set<string> | null => {
+  if (!tx) return null;
+  const bytes = Array.from(tx as ArrayLike<number>);
+  for (const parse of [() => Transaction.fromAtomicBEEF(bytes), () => Transaction.fromBinary(bytes)])
+    try {
+      return new Set(
+        parse().inputs.map((i) => `${i.sourceTXID ?? i.sourceTransaction?.id('hex')}.${i.sourceOutputIndex}`),
+      );
+    } catch {
+      // try the next format
+    }
+  return null;
+};
+
 /**
- * Claim the matured locks on the account, across all plans, in one transaction (unlockBsv by id). Only the locks
- * claimableLocks allows: dust never costs the user a fee, and one claim never grows past CLAIM_MAX_INPUTS inputs.
+ * Claim matured locks (all claimable ones, or only `outpoints`) in transactions of at most CLAIM_MAX_INPUTS inputs
+ * (review 21 N1), and say exactly which were spent. Throws when nothing could be claimed.
  */
-export async function claimMatured(ctx: OneSatContext): Promise<string> {
+export async function claimLocks(
+  ctx: OneSatContext,
+  opts: { outpoints?: Iterable<string>; satsPerKb?: number } = {},
+): Promise<ClaimResult> {
   if (!ctx.services) throw new Error('The wallet services are not ready.');
   const height = await ctx.services.chaintracks.currentHeight();
   const listed = await listLocks.execute(ctx, { limit: 10000 });
-  const { ids } = claimableLocks('outputs' in listed && listed.outputs ? listed.outputs : [], height);
-  if (!ids.length) throw new Error('Nothing is ready to claim yet.');
-  const res = await unlockBsv.execute(ctx, { ids });
-  if ('error' in res && res.error)
-    throw new Error(res.error === 'no-matured-locks' ? 'Nothing is ready to claim yet.' : res.error);
-  if (!('txid' in res) || !res.txid) throw new Error('The wallet did not return a transaction id.');
-  return res.txid;
+  const rows = 'outputs' in listed && listed.outputs ? listed.outputs : [];
+  const want = opts.outpoints ? new Set([...opts.outpoints].map((o) => o.replace(/_(\d+)$/, '.$1'))) : null;
+  const { picks } = claimableLocks(
+    want ? rows.filter((r) => want.has(r.outpoint.replace(/_(\d+)$/, '.$1'))) : rows,
+    height,
+    { satsPerKb: opts.satsPerKb },
+  );
+  if (!picks.length) throw new Error('Nothing is ready to claim yet.');
+  const result: ClaimResult = { txids: [], spent: new Set(), sats: 0 };
+  for (let i = 0; i < picks.length; i += CLAIM_MAX_INPUTS) {
+    const chunk = picks.slice(i, i + CLAIM_MAX_INPUTS);
+    const res = await unlockBsv.execute(ctx, { ids: chunk.map((p) => p.id) });
+    const txid = 'txid' in res ? res.txid : undefined;
+    if (('error' in res && res.error) || !txid) {
+      const raw = 'error' in res && res.error ? String(res.error) : '';
+      const msg =
+        raw === 'no-matured-locks'
+          ? 'Nothing is ready to claim yet.'
+          : raw || 'The wallet did not return a transaction id.';
+      if (!result.txids.length) throw new Error(msg);
+      result.error = msg;
+      break;
+    }
+    result.txids.push(txid);
+    const spent = inputsOf('tx' in res ? res.tx : undefined);
+    for (const p of chunk)
+      if (!spent || spent.has(p.outpoint)) {
+        result.spent.add(p.outpoint);
+        result.sats += p.satoshis;
+      }
+  }
+  return result;
+}
+
+/** Claim every claimable matured lock (claimLocks); returns the last claim's txid. */
+export async function claimMatured(ctx: OneSatContext, opts: { satsPerKb?: number } = {}): Promise<string> {
+  const r = await claimLocks(ctx, opts);
+  return r.txids[r.txids.length - 1];
 }
 
 /** Today's BSV/USD for a payout. Fresh only: no cached or guessed price is ever used to pay out. */

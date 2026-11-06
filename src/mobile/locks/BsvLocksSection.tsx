@@ -6,12 +6,12 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Search, Unlock } from 'lucide-react';
-import { listLocks, unlockBsv } from '@1sat/actions';
+import { listLocks } from '@1sat/actions';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { fmtBsv, type LockPlan } from './schedule';
 import { canUnlock, countdown } from './tokenLocks';
-import { claimableLocks, unclaimedOutpoints } from './lockApi';
+import { claimLocks, claimableLocks, unclaimedOutpoints } from './lockApi';
 import { bsvLockRepairs, bsvLocksScanDue, bsvScanLine, scanBsvLocks, type BsvLockScan } from './lockFinder';
 import { lockScanOptions } from './lockScanWiring';
 
@@ -111,16 +111,18 @@ export const BsvLocksSection = ({
 
   const planned = useMemo(() => unclaimedOutpoints(plans), [plans]);
   const unplanned = rows.filter((r) => r.until > 0 && !planned.has(r.outpoint)).sort((a, b) => a.until - b.until);
-  // Dust never costs a fee and one claim stays small (lockApi.claimableLocks).
-  const ready = claimableLocks(unplanned, height);
+  // Only locks worth more than their fee at this wallet's rate; dust never costs a fee (lockApi.claimableLocks).
+  const satsPerKb = chromeStorageService.getCustomFeeRate();
+  const ready = claimableLocks(unplanned, height, { satsPerKb });
 
   const claim = async () => {
     setBusy(true);
     try {
-      const res = await unlockBsv.execute(apiContext, { ids: ready.ids });
-      if ('error' in res && res.error)
-        throw new Error(res.error === 'no-matured-locks' ? 'Nothing is ready to claim yet.' : res.error);
-      addSnackbar(`Claimed ${fmtBsv(ready.sats)} back to your wallet.`, 'success');
+      const r = await claimLocks(apiContext, { outpoints: ready.picks.map((p) => p.outpoint), satsPerKb });
+      addSnackbar(
+        `Claimed ${fmtBsv(r.sats)} back to your wallet.${r.error ? ' Some locks are left; tap Claim again.' : ''}`,
+        'success',
+      );
       await reload();
       changed.current();
     } catch (e) {

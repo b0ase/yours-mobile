@@ -26,7 +26,9 @@ const {
   findBsvLocks,
   scanBsvLocks,
 } = await import('./lockFinder');
-const { claimableLocks, syncClaimed, unclaimedOutpoints } = await import('./lockApi');
+const { CLAIM_MAX_INPUTS, claimFeePerInput, claimableLocks, foundLockIdTag, syncClaimed, unclaimedOutpoints } =
+  await import('./lockApi');
+const { planPayouts } = await import('./claimPayouts');
 const { localKeysFor } = await import('../account/deleteAccount');
 type Plan = import('./schedule').LockPlan;
 
@@ -206,27 +208,81 @@ describe('M2: dust and 1-sat outputs are never downloaded or filed', () => {
   });
 });
 
-describe('Claim guard: auto-claim never spends more in fees than it recovers', () => {
-  const row = (sats: number, until: number, id = `id:${H(sats + until).slice(0, 16)}_0`) => ({
-    outpoint: `${H(sats + until)}.0`,
+describe('Claim rule (N3): own locks pay for themselves; locks the finder adds keep the 1,000-sat floor', () => {
+  const own = (sats: number, until: number, n = sats + until) => ({
+    outpoint: `${H(n)}.0`,
     satoshis: sats,
-    tags: [`until:${until}`, id],
+    tags: [`until:${until}`, `id:${H(n).slice(0, 16)}_0`], // a random action id, as the lock flow stamps
   });
-  test('only matured locks at or above the floor with an id: tag, at most 50 per claim', () => {
+  const found = (sats: number, until: number, n = sats + until) => ({
+    outpoint: `${H(n)}.0`,
+    satoshis: sats,
+    tags: [`until:${until}`, foundLockIdTag(H(n), 0)],
+  });
+  test('matured + id-tagged; own locks claimable when worth more than their fee; found locks need 1,000 sats', () => {
     const rows = [
-      row(1, HEIGHT - 1),
-      row(999, HEIGHT - 1),
-      row(50_000, HEIGHT - 1),
-      row(60_000, HEIGHT + 1),
-      { ...row(70_000, HEIGHT), tags: [`until:${HEIGHT}`] },
+      own(1, HEIGHT - 1, 1),
+      own(900, HEIGHT - 1, 2),
+      own(50_000, HEIGHT - 1, 3),
+      own(60_000, HEIGHT + 1, 4), // not matured
+      { ...own(70_000, HEIGHT, 5), tags: [`until:${HEIGHT}`] }, // no id: unlockBsv can't sign it
+      found(999, HEIGHT - 1, 6),
+      found(1_000, HEIGHT - 1, 7),
     ];
     const c = claimableLocks(rows, HEIGHT);
-    expect(c.ids).toEqual([`${H(50_000 + HEIGHT - 1).slice(0, 16)}_0`]);
-    expect(c.sats).toBe(50_000);
-    const many = Array.from({ length: 80 }, (_, i) => row(10_000 + i, HEIGHT - 1));
-    const m = claimableLocks(many, HEIGHT);
-    expect(m.ids).toHaveLength(50);
-    expect(m.sats).toBeGreaterThan(m.ids.length * 1_000);
+    expect(c.picks.map((p) => p.outpoint).sort()).toEqual([`${H(2)}.0`, `${H(3)}.0`, `${H(7)}.0`].sort());
+    expect(c.sats).toBe(900 + 50_000 + 1_000);
+    expect(c.ids).toContain(`${H(2).slice(0, 16)}_0`);
+    // At a high custom fee rate (1 sat/byte) a 900-sat lock costs more to claim than it holds: left alone.
+    const dear = claimableLocks(rows, HEIGHT, { satsPerKb: 1_000 });
+    expect(dear.picks.map((p) => p.outpoint)).not.toContain(`${H(2)}.0`);
+    expect(dear.sats).toBeGreaterThan(dear.picks.length * claimFeePerInput(1_000));
+  });
+
+  test('no cap in the rule itself: claimLocks splits it into claims of at most 50', () => {
+    const many = Array.from({ length: 80 }, (_, i) => own(10_000 + i, HEIGHT - 1, 100 + i));
+    expect(claimableLocks(many, HEIGHT).picks).toHaveLength(80);
+    expect(CLAIM_MAX_INPUTS).toBe(50);
+  });
+});
+
+describe('N1: plan payouts count only the locks a claim actually spent', () => {
+  const txid = H(77);
+  const plan = (): Plan => ({
+    id: txid,
+    label: 'Daily',
+    mode: 'percent',
+    txids: [txid],
+    createdAt: '2026-11-01T00:00:00.000Z',
+    frequency: 'daily',
+    pendingAmounts: [5_000, 5_000, 5_000],
+    pieces: Array.from({ length: 60 }, (_, i) => ({
+      vout: i,
+      height: HEIGHT - 100 + i,
+      sats: i === 59 ? 15_000 : 2_000,
+      txid,
+      ...(i === 59 ? { tail: true } : {}),
+    })),
+  });
+  const all = new Set(Array.from({ length: 60 }, (_, i) => `${txid}.${i}`));
+
+  test('all 60 spent: 60 lines and the "Lock next payouts" batch for the tail', () => {
+    const out = planPayouts([plan()], HEIGHT, all, 50);
+    expect(out).toHaveLength(1);
+    expect(out[0].lines).toHaveLength(60);
+    expect(out[0].batch).toBeDefined();
+  });
+
+  test('the tail not spent (left locked): no line for it and no re-lock offer', () => {
+    const spent = new Set([...all].filter((o) => o !== `${txid}.59`));
+    const out = planPayouts([plan()], HEIGHT, spent, 50);
+    expect(out[0].lines).toHaveLength(59);
+    expect(out[0].batch).toBeUndefined();
+    expect(out[0].lines.join(' ')).not.toMatch(/remaining .* payouts/);
+  });
+
+  test('nothing spent: no payout card at all', () => {
+    expect(planPayouts([plan()], HEIGHT, new Set(), 50)).toEqual([]);
   });
 });
 

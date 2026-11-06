@@ -24,7 +24,9 @@
  * Idempotent: an output already spendable is reported and left alone. Nothing that isn't provably ours is added.
  * Coins on a legacy address of this wallet (not BRC-29) are reported, not imported: Sweep moves those.
  */
-import { Beef, MerklePath, P2PKH, Transaction } from '@bsv/sdk';
+import { Beef, MerklePath, P2PKH, Transaction, type TransactionOutput } from '@bsv/sdk';
+import { Lock } from '@1sat/templates';
+import { P1SAT_PROTOCOL } from '@1sat/types';
 import type { KeyDeriver } from '@bsv/sdk';
 
 export const BRC29_PROTOCOL: [2, string] = [2, '3241645161d8'];
@@ -129,6 +131,27 @@ export type TxidRecoverReport = {
   restoredSats: number;
   error?: string;
 };
+
+/** This seed's time-lock address (P1SAT_PROTOCOL, keyID 'lock', self: what every lock of the wallet pays to). */
+export function ownLockAddress(kd: TxidRecoverDeps['keyDeriver']): string | undefined {
+  try {
+    return kd.derivePrivateKey(P1SAT_PROTOCOL, 'lock', 'self').toAddress();
+  } catch {
+    return undefined;
+  }
+}
+
+/** Exactly Lock.lock(<this seed's lock address>, until), nothing around it. */
+export function isOwnLock(out: Pick<TransactionOutput, 'lockingScript' | 'satoshis'>, lockAddress: string): boolean {
+  if (!out.satoshis || out.satoshis < 1) return false;
+  const d = Lock.decode(out.lockingScript);
+  return (
+    !!d &&
+    d.address === lockAddress &&
+    d.until > 0 &&
+    Lock.lock(lockAddress, d.until).toHex() === out.lockingScript.toHex()
+  );
+}
 
 /** The P2PKH script hex a BRC-29 derivation pair locks to, for this wallet's identity key. */
 export function brc29Script(
@@ -294,7 +317,14 @@ async function recoverInner(rawTxid: string, deps: TxidRecoverDeps): Promise<Txi
       if (s) legacy.set(s, a.label);
     }
 
-    if (!owned.size && !legacy.size && unreachable.length)
+    // This seed's own time locks (review 21 N2): when a lock transaction is held as failed, its lock rows went
+    // unspendable with it. They are repaired with the transaction (same conclusive-unspent check, same storage
+    // transaction), never imported here: they aren't BRC-29, and Find my locks files a lock the device has no row for.
+    const lockAddress = ownLockAddress(deps.keyDeriver);
+    const ownLocks = new Set<number>();
+    if (lockAddress) tx.outputs.forEach((o, vout) => isOwnLock(o, lockAddress) && ownLocks.add(vout));
+
+    if (!owned.size && !legacy.size && !ownLocks.size && unreachable.length)
       return {
         ...report,
         result: 'error',
@@ -309,13 +339,23 @@ async function recoverInner(rawTxid: string, deps: TxidRecoverDeps): Promise<Txi
       const satoshis = tx.outputs[vout].satoshis ?? 0;
       const d = owned.get(vout);
       const legacyLabel = legacy.get(scripts[vout]);
-      if (!d && !legacyLabel) {
+      const lock = !d && !legacyLabel && ownLocks.has(vout);
+      if (!d && !legacyLabel && !lock) {
         report.outputs.push({ vout, satoshis, state: 'not-ours' });
         continue;
       }
       const row = rows?.outputs.find((o) => o.vout === vout);
       if (row?.spendable && rows?.tx && SETTLED_FOR_INTERNALIZE.includes(rows.tx.status)) {
         report.outputs.push({ vout, satoshis, state: 'already' });
+        continue;
+      }
+      if (lock && !(row && rows?.tx)) {
+        report.outputs.push({
+          vout,
+          satoshis,
+          state: 'not-ours',
+          detail: 'a time lock of this wallet (Find my locks)',
+        });
         continue;
       }
       const unspent = await step('utxo status', 'Checking it’s unspent…', 'Couldn’t check the coin is unspent', () =>
@@ -327,6 +367,10 @@ async function recoverInner(rawTxid: string, deps: TxidRecoverDeps): Promise<Txi
       }
       if (unspent !== true) {
         report.outputs.push({ vout, satoshis, state: 'unknown-spend', detail: 'the chain gave no clear answer' });
+        continue;
+      }
+      if (lock && row) {
+        toRepair.push({ vout, outputId: row.outputId });
         continue;
       }
       if (!d) {

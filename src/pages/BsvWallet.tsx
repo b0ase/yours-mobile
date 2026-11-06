@@ -979,12 +979,15 @@ export const BsvWallet = () => {
   useEffect(() => {
     if (!identityAddress || isSyncing) return;
     getAndSetBsvBalance();
-    // Auto-unlock: claim matured locks via CWI. Only locks worth more than their fee, at most 50 a claim
-    // (lockApi.claimableLocks): anyone can pay dust locks to the public lock address (review 21 M2).
+    // Auto-unlock: claim matured locks via CWI. Only locks worth more than their fee at this wallet's rate (and locks
+    // Find my locks added from 1,000 sats), in claims of at most 50 (lockApi.claimLocks): anyone can pay dust locks
+    // to the public lock address (review 21 M2, N3).
     if (!unlockAttempted && lockData?.unlockable) {
       (async () => {
         const { claimMatured } = await import('../mobile/locks/lockApi');
-        const txid = await claimMatured(apiContext).catch(() => undefined);
+        const txid = await claimMatured(apiContext, { satsPerKb: chromeStorageService.getCustomFeeRate() }).catch(
+          () => undefined,
+        );
         setUnlockAttempted(true);
         if (txid) {
           await refreshUtxos();

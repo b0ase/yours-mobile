@@ -945,8 +945,16 @@ describe('release click-through F-B on the real toolbox: seed-address history fr
     expect(await balance(b)).toBe(expected);
   };
 
-  test('a seed address with more than 100 transactions: the payment on page 2 is found', async () => {
-    await pageTwo((b, chain, services, addrs) => recoverAll(b, chain, services, addrs));
+  // One run reaches page 2. The clock is frozen, so a busy machine can't make the run pause at its time budget: the
+  // only way to fail is a run that really stops short of page 2 (review 21 re-check).
+  test('a seed address with more than 100 transactions: one run finds the payment on page 2', async () => {
+    await pageTwo(async (b, chain, services, addrs) => {
+      const frozen = 1_700_000_000_000;
+      const r = await recover(b, chain, services, addrs, memKV(), { now: () => frozen });
+      expect(r.runs).toBe(1);
+      expect(r.paused).toBe(false);
+      return r;
+    });
   }, 600000);
 
   // Review 21: under load (tsc and probes alongside) one run reached its 4-minute budget and paused. A busy device

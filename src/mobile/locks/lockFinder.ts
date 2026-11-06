@@ -29,10 +29,10 @@
  */
 import { listLocks, P1SAT_PROTOCOL, type OneSatContext } from '@1sat/actions';
 import { Lock } from '@1sat/templates';
-import { Hash, Utils, type Beef, type Transaction, type WalletInterface } from '@bsv/sdk';
+import type { Beef, Transaction, WalletInterface } from '@bsv/sdk';
 import { mapPool } from '../../services/storageReconcile';
 import { withTimeout } from '../withTimeout';
-import { lockAddress } from './lockApi';
+import { foundLockIdTag, lockAddress } from './lockApi';
 import { MIN_PIECE_SATS } from './schedule';
 import { splitOutpoint } from './tokenLocks';
 
@@ -55,12 +55,7 @@ const TXID = /^[0-9a-f]{64}$/;
 /** Toolbox refusals that will not change by trying again. */
 const REFUSAL = /invalid status|already assigned to a different basket|wallet-managed change|cannot be reclassified/i;
 
-/**
- * The `id:` tracking tag for a found lock: `id:<16 hex>_<vout>`, the shape @1sat/actions stamps (`<actionId>_<index>`).
- * The action id is derived from the txid, so every device that finds the same lock gives it the same id.
- */
-export const foundLockIdTag = (txid: string, vout: number): string =>
-  `id:${Utils.toHex(Hash.sha256(Utils.toArray(`bwx found lock\n${txid.toLowerCase()}`, 'utf8')).slice(0, 8))}_${vout}`;
+export { foundLockIdTag };
 
 /** The tags a lock created by this wallet carries (the id: differs only in its random action id). */
 export const foundLockTags = (txid: string, vout: number, until: number): string[] => [
