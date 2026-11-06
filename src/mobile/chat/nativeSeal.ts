@@ -82,8 +82,61 @@ export interface PendingSeal {
  * when it could not tell. `beef`: the AtomicBEEF for a txid, null when it can't be had yet.
  */
 export interface SealTxLookup {
-  find(lockingScriptHex: string): Promise<{ found: false } | { found: true; txid: string } | null>;
+  /** `sinceMs`: when the record was saved; the search starts a minute before it. */
+  find(lockingScriptHex: string, sinceMs: number): Promise<{ found: false } | { found: true; txid: string } | null>;
   beef(txid: string): Promise<number[] | null>;
+}
+
+/** The wallet's listActions, as findSealAction needs it (BRC-100 ListActionsArgs / ListActionsResult, narrowed). */
+export type ListActionsFn = (args: {
+  labels: string[];
+  includeOutputs: boolean;
+  includeOutputLockingScripts: boolean;
+  limit: number;
+  offset: number;
+}) => Promise<{
+  totalActions: number;
+  actions: { txid: string; outputs?: { lockingScript?: string }[] }[];
+}>;
+
+/** One listActions page while looking for a seal. */
+export const SEAL_LOOKUP_PAGE = 100;
+
+/**
+ * The seal's action in this wallet's own storage, by its OP_RETURN output script, made since `sinceMs` − 1 minute
+ * (toolbox BRC-114 label "action time from <ms>"), paged to the end. Searched TWICE: the ordinary list, which omits
+ * actions marked failed, and the failed ones (toolbox specOpFailedActions, read only: never 'unfail', which rewrites
+ * their status). ARC can still mine a "failed" transaction, so one found there is NOT "none built".
+ * { found: false } only when BOTH lists answered to the end with no match; any error (a storage that rejects the time
+ * filter, a closed database) → null, and the seal stays held.
+ */
+export async function findSealAction(
+  listActions: ListActionsFn,
+  lockingScriptHex: string,
+  sinceMs: number,
+  failedLabel: string,
+): Promise<{ found: false } | { found: true; txid: string } | null> {
+  const want = lockingScriptHex.toLowerCase();
+  const from = `action time from ${Math.max(0, Math.floor(sinceMs - 60_000))}`;
+  try {
+    for (const labels of [[from], [from, failedLabel]]) {
+      for (let offset = 0; offset < 1_000_000; offset += SEAL_LOOKUP_PAGE) {
+        const r = await listActions({
+          labels,
+          includeOutputs: true,
+          includeOutputLockingScripts: true,
+          limit: SEAL_LOOKUP_PAGE,
+          offset,
+        });
+        const hit = r.actions.find((a) => a.outputs?.some((o) => o.lockingScript?.toLowerCase() === want));
+        if (hit?.txid) return { found: true, txid: hit.txid };
+        if (r.actions.length < SEAL_LOOKUP_PAGE || offset + r.actions.length >= r.totalActions) break;
+      }
+    }
+    return { found: false };
+  } catch {
+    return null;
+  }
 }
 export interface PendingSealStore {
   list(): PendingSeal[];
@@ -725,7 +778,7 @@ async function resolveUnsure(
   let txid = p.txid;
   if (!txid) {
     if (!p.lockingScriptHex) return false;
-    const f = await lookup.find(p.lockingScriptHex).catch(() => null);
+    const f = await lookup.find(p.lockingScriptHex, p.savedAt).catch(() => null);
     if (!f) return false;
     if (!f.found) {
       store.remove(p.nonce);

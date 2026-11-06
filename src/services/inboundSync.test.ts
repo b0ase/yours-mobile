@@ -1628,12 +1628,20 @@ describe('16c: a merge never makes a coin spendable; only the admission list doe
     await d.phone.updateOutput(mine.outputId, { spendable: false } as never);
     await d.merge();
     let answer: (s: SpendState) => void = () => undefined;
+    // The check below runs only once the chain is really being asked: a fixed 20 ms wait raced a loaded full-suite run
+    // (admit had not reached spent() yet, so answer() was the no-op and the run never ended).
+    let asking: () => void = () => undefined;
+    const asked = new Promise<void>((r) => (asking = r));
     const slow: InboundVerifier = {
       ...d.verifier,
-      spent: () => new Promise<SpendState>((resolve) => (answer = resolve)),
+      spent: () =>
+        new Promise<SpendState>((resolve) => {
+          answer = resolve;
+          asking();
+        }),
     };
     const run = admit(d.phone, d.kd.identityKey, slow);
-    await new Promise((r) => setTimeout(r, 20));
+    await asked;
     const meanwhile = await Promise.race([
       d.sm.runAsStorageProvider(async () => 'locks free'),
       new Promise((r) => setTimeout(() => r('blocked'), 1500)),

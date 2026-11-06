@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Hash, Utils } from '@bsv/sdk';
+import { sdk as toolboxSdk } from '@bsv/wallet-toolbox-client';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { isNative } from '../native';
 import { BchatClient, ChatApiError, defaultHttp, loadSession, saveSession } from './api';
@@ -46,6 +47,8 @@ import {
   type PendingSealStore,
   type SealLedger,
   type SealTxLookup,
+  type ListActionsFn,
+  findSealAction,
   type NativeSealOutcome,
   type SealApi,
   type SealKeys,
@@ -77,8 +80,6 @@ const NO_SELECT = {
 } as const;
 
 const STORE_KEY = 'bwx.nativeSeal.pending';
-/** How many of the newest wallet actions an unsure seal is looked for in (it was made minutes or hours ago). */
-const SEAL_LOOKUP_ACTIONS = 200;
 /** Seals recorded from this device by sealKey (identity · document · blocks; nativeSeal.SealLedger). At most 500. */
 const SEALED_KEY = 'bwx.nativeSeal.sealed';
 const localLedger = (): SealLedger => {
@@ -200,30 +201,18 @@ export const NativeSealPage = () => {
   };
 
   /**
-   * An unsure seal's transaction in this wallet's own storage (nativeSeal.SealTxLookup): the newest actions, by the
-   * seal's output script; its AtomicBEEF from the wallet's chain services. Any failure → null (held, never dropped).
+   * An unsure seal's transaction in this wallet's own storage (nativeSeal.SealTxLookup / findSealAction): every
+   * action since the record was saved, failed ones too, by the seal's output script; its AtomicBEEF from the wallet's
+   * chain services. Any failure → null (held, never dropped).
    */
   const txLookup = (): SealTxLookup => ({
-    find: async (script) => {
-      try {
-        const w = apiContext.wallet;
-        const total = (await w.listActions({ labels: [], limit: 1, offset: 0 })).totalActions;
-        const n = Math.min(total, SEAL_LOOKUP_ACTIONS);
-        const { actions } = await w.listActions({
-          labels: [],
-          includeOutputs: true,
-          includeOutputLockingScripts: true,
-          limit: Math.max(n, 1),
-          offset: Math.max(total - n, 0),
-        });
-        const hit = actions.find((a) =>
-          a.outputs?.some((o) => o.lockingScript?.toLowerCase() === script.toLowerCase()),
-        );
-        return hit?.txid ? { found: true, txid: hit.txid } : { found: false };
-      } catch {
-        return null;
-      }
-    },
+    find: (script, sinceMs) =>
+      findSealAction(
+        (args) => apiContext.wallet.listActions(args) as ReturnType<ListActionsFn>,
+        script,
+        sinceMs,
+        toolboxSdk.specOpFailedActions,
+      ),
     beef: async (txid) => {
       try {
         const services = apiContext.services as unknown as {

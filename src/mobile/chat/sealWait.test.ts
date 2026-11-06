@@ -9,6 +9,8 @@ import {
   NativeSealError,
   SEAL_HOLD_MAX_MS,
   abandonSeal,
+  findSealAction,
+  type ListActionsFn,
   nativeSignAndSeal,
   recoverNativeSeals,
   sealKey,
@@ -781,5 +783,118 @@ describe('bit-sign seal cancel: only when createAction proves nothing went out',
     f.wake();
     await until(() => out !== null);
     expect((out as NativeSealError).code).toBe('not_paid');
+  });
+});
+
+describe("findSealAction: the unsure seal in the wallet's own storage, failed ones and old ones too", () => {
+  const FAILED = 'failed-spec-op-label';
+  type Row = { txid: string; status: string; at: number; script: string };
+  /** The toolbox's listActions on IndexedDB, as far as this needs it (listActionsIdb): status filter, BRC-114 from, paging. */
+  const wallet = (rows: Row[], o: { rejectTime?: boolean; failFailed?: boolean } = {}) => {
+    const calls: string[][] = [];
+    const list: ListActionsFn = async (args) => {
+      calls.push(args.labels);
+      const fromLabel = args.labels.find((l) => l.startsWith('action time from '));
+      if (fromLabel && o.rejectTime) throw new Error('WERR_INVALID_PARAMETER: labels');
+      const failed = args.labels.includes(FAILED);
+      if (failed && o.failFailed) throw new Error('db closed');
+      const from = fromLabel ? Number(fromLabel.slice('action time from '.length)) : 0;
+      const ordinary = ['completed', 'unprocessed', 'sending', 'unproven', 'unsigned', 'nosend', 'nonfinal'];
+      const hits = rows
+        .filter((r) => (failed ? r.status === 'failed' : ordinary.includes(r.status)) && r.at >= from)
+        .sort((a, b) => a.at - b.at);
+      return {
+        totalActions: hits.length,
+        actions: hits
+          .slice(args.offset, args.offset + args.limit)
+          .map((r) => ({ txid: r.txid, outputs: [{ lockingScript: r.script }] })),
+      };
+    };
+    return { list, calls };
+  };
+  const SEAL = '006a7b22';
+  const T = (i: number) => i.toString(16).padStart(64, '0');
+  const others = (n: number, from: number) =>
+    Array.from({ length: n }, (_, i) => ({ txid: T(i + 1000), status: 'completed', at: from + i, script: '76a9' }));
+
+  test('a seal the toolbox marked failed is found (so it is NOT released): ARC can still mine it', async () => {
+    const w = wallet([...others(5, 10_000), { txid: T(1), status: 'failed', at: 10_500, script: SEAL }]);
+    expect(await findSealAction(w.list, SEAL, 10_400, FAILED)).toEqual({ found: true, txid: T(1) });
+    expect(w.calls.some((l) => l.includes(FAILED))).toBe(true);
+    expect(w.calls.flat()).not.toContain('unfail'); // read only: never rewrites a status
+
+    // Through recovery: the record is held (no BEEF yet), never released or cancelled.
+    const store = memStore();
+    store.save({
+      documentId: 'F1',
+      nonce: 'NF',
+      txid: '',
+      beefHex: '',
+      attestation: 'aa',
+      savedAt: 10_400,
+      identityKey: '',
+      fieldIds: ['f1'],
+      lockingScriptHex: SEAL,
+    });
+    const log: string[] = [];
+    await recoverNativeSeals(api(log), store, 'F1', null, {
+      find: (script, since) => findSealAction(w.list, script, since, FAILED),
+      beef: async () => null,
+    });
+    expect(store.list()).toMatchObject([{ nonce: 'NF', txid: T(1), beefHex: '' }]);
+    expect(log).not.toContain('cancel');
+  });
+
+  test('a seal older than 200 actions is still found: searched from its own time, paged to the end', async () => {
+    const rows = [
+      ...others(20, 1_000), // before the record: outside the time filter
+      ...others(260, 100_000),
+      { txid: T(2), status: 'unproven', at: 100_400, script: SEAL },
+      ...others(300, 110_000), // 300 newer actions on top
+    ];
+    const w = wallet(rows);
+    expect(await findSealAction(w.list, SEAL, 100_100, FAILED)).toEqual({ found: true, txid: T(2) });
+    expect(w.calls.every((l) => l[0] === 'action time from 40100')).toBe(true); // savedAt − 60 s
+    expect(w.calls.length).toBeGreaterThan(2); // more than one page
+  });
+
+  test('"none was built" only when BOTH lists answered to the end with no match', async () => {
+    const w = wallet([...others(250, 1_000)]);
+    expect(await findSealAction(w.list, SEAL, 1_000, FAILED)).toEqual({ found: false });
+    expect(w.calls.filter((l) => l.includes(FAILED)).length).toBeGreaterThan(0);
+    const half = wallet([...others(3, 1_000)], { failFailed: true });
+    expect(await findSealAction(half.list, SEAL, 1_000, FAILED)).toBeNull();
+  });
+
+  test('storage rejects the time filter → null, and the seal stays held', async () => {
+    const w = wallet([{ txid: T(3), status: 'completed', at: 5_000, script: SEAL }], { rejectTime: true });
+    expect(await findSealAction(w.list, SEAL, 5_000, FAILED)).toBeNull();
+    const store = memStore();
+    store.save({
+      documentId: 'R1',
+      nonce: 'NR',
+      txid: '',
+      beefHex: '',
+      attestation: 'aa',
+      savedAt: 5_000,
+      identityKey: '',
+      fieldIds: ['f1'],
+      lockingScriptHex: SEAL,
+    });
+    const log: string[] = [];
+    await recoverNativeSeals(api(log), store, 'R1', null, {
+      find: (script, since) => findSealAction(w.list, script, since, FAILED),
+      beef: async () => [1],
+    });
+    expect(store.list()).toMatchObject([{ nonce: 'NR', beefHex: '' }]);
+    expect(log).toEqual([]);
+  });
+
+  test("the page searches with the toolbox's own failed-actions label, from the record's time", () => {
+    const page = readFileSync(new URL('./NativeSealPage.tsx', import.meta.url), 'utf8');
+    expect(page).toContain('toolboxSdk.specOpFailedActions');
+    expect(page).toMatch(/find: \(script, sinceMs\) =>\s*findSealAction\(/);
+    expect(page).not.toContain('97d4eb1e49215e3374cc2c1939a7c43a55e95c7427bf2d45ed63e3b4e0c88153');
+    expect(page).not.toContain("'unfail'");
   });
 });
