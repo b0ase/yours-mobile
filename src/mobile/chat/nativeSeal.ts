@@ -1,4 +1,5 @@
 import { Transaction } from '@bsv/sdk';
+import { NATIVE_SEAL_ENABLED } from '../storeBuild';
 
 /**
  * NATIVE sign + seal of a bChatX room document, inside bWalletX (CTO / owner, 3 Nov 2026: "chat should be IN the
@@ -546,8 +547,12 @@ export function inertHtml(html: string): string {
     .replace(/(href|src)\s*=\s*(["'])\s*(javascript|vbscript):[^"']*\2/gi, '$1="#"');
 }
 
-/** The native Review & sign screen for one room document (MobileRoutes "seal/:ticker/:doc"). Null for a bad ref. */
+/**
+ * The native Review & sign screen for one room document (MobileRoutes "seal/:ticker/:doc"). Null for a bad ref, and
+ * always null in a store build (storeBuild.ts NATIVE_SEAL_ENABLED: the screen isn't there; callers open bChatX's page).
+ */
 export const nativeSealRoute = (ticker: string, docId: string): string | null => {
+  if (!NATIVE_SEAL_ENABLED) return null;
   const t = (ticker || '').trim().replace(/^\$/, '').toUpperCase();
   if (!/^[A-Z0-9_.-]{1,64}$/.test(t) || !/^[A-Za-z0-9-]{1,64}$/.test(docId || '')) return null;
   return `/m/seal/${encodeURIComponent(t)}/${encodeURIComponent(docId)}`;

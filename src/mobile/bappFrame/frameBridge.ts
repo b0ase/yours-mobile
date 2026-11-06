@@ -13,6 +13,7 @@ import { isCWIEventName } from '@1sat/wallet-browser';
 import { isMintPrivateAction, isMintPrivateCode } from '../../services/mintPrivateAction';
 import { USER_DENIED_CODE, USER_DENIED_MESSAGE, isUserDenied } from '../../services/userDenied';
 import { ONE_APPROVAL_SEAL } from '../../services/sealPass';
+import { NATIVE_SEAL_ENABLED } from '../storeBuild';
 import {
   CONFIRM_USER_CALL,
   LAST_VERIFICATION_CALL,
@@ -74,7 +75,8 @@ export const FRAME_SESSION_CALL = 'bchatx.frameSession';
  */
 export const FRAME_BITSIGN_CAPABILITIES = Object.freeze({
   drawSignature: false,
-  [ONE_APPROVAL_SEAL]: true,
+  // One Seal sheet: bWalletX only; a store build has none, so bit-sign keeps its own two prompts (review 24, S1).
+  [ONE_APPROVAL_SEAL]: NATIVE_SEAL_ENABLED,
   frameSession: true,
 });
 

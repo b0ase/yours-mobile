@@ -14,6 +14,7 @@
 import { SIG_H, SIG_VIEWBOX, SIG_W, isValidSignature } from '../signature/signature';
 import { USER_DENIED_CODE } from '../../services/userDenied';
 import { ONE_APPROVAL_SEAL } from '../../services/sealPass';
+import { NATIVE_SEAL_ENABLED } from '../storeBuild';
 
 export const BITSIGN_CAPABILITIES = 'bitsign.capabilities';
 export const BITSIGN_DRAW = 'bitsign.drawSignature';
@@ -184,7 +185,8 @@ export async function handleBitsignCall(
   sessionOrigin: string,
   ask: (req: DrawRequest) => Promise<string | null> = askDrawSignature,
 ): Promise<BitsignReply> {
-  if (action === BITSIGN_CAPABILITIES) return { result: { drawSignature: true, [ONE_APPROVAL_SEAL]: true } };
+  if (action === BITSIGN_CAPABILITIES)
+    return { result: { drawSignature: true, [ONE_APPROVAL_SEAL]: NATIVE_SEAL_ENABLED } };
   const req = validateDrawRequest(params, sessionOrigin);
   if (typeof req === 'string') return { error: { code: BAD_REQUEST_CODE, message: req } };
   const path = await ask(req);

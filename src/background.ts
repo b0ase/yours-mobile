@@ -1407,7 +1407,15 @@ const askReconnect = (originator: string): Promise<void> =>
  * approval that lets exactly that seal's sign and its very next matching payment through. The sheet is a synthetic
  * line (never sent to the permissions manager) carrying the seal's words; it stores nothing.
  */
-const sealPasses = new SealPasses();
+// Null in a store build (as storeBuild.ts NATIVE_SEAL_ENABLED, review 24 S1): no seal pass exists there, even as code.
+// NATIVE_SEAL_ENABLED written out (literal env) so the minifier drops the seal pass from a store bundle.
+const sealPasses: SealPasses | null = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+)
+  ? new SealPasses()
+  : null;
 let sealSheetCounter = 0;
 const askSealSheet = (originator: string, seal: SealSheet): Promise<void> =>
   new Promise<void>((resolve, reject) => {
@@ -2113,7 +2121,15 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
   }
   // The one Seal sheet already approved this seal's sign or its matching payment (services/sealPass.ts). Answered
   // below, after the blocked-site check, for a current pairing only.
+  // Not in a store build (storeBuild.ts NATIVE_SEAL_ENABLED written out, literal env, so the minifier drops it; review
+  // 24 S1): there a seal gets its two usual sheets.
   const sealCovered =
+    !(
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+  ) &&
+    sealPasses !== null &&
     !!mintSite &&
     !!accountContext?.wallet &&
     pairedGrantAllowed(request.originator) &&
@@ -3928,13 +3944,13 @@ if (!(
             // The site's next payment after a Seal sheet: its spend rides that sheet only if it is that seal
             // (services/sealPass.ts). Either way this call uses the pass up.
             const sealSiteKey =
-              typeof message.originator === 'string' && message.originator !== ADMIN_ORIGINATOR
+              sealPasses !== null && typeof message.originator === 'string' && message.originator !== ADMIN_ORIGINATOR
                 ? normalizeOriginator(message.originator)
                 : '';
-            if (sealSiteKey && sealPasses.beginAction(sealSiteKey, message.params))
+            if (sealSiteKey && sealPasses?.beginAction(sealSiteKey, message.params))
               console.log(`[createAction] seal pass: this is the approved seal of ${siteHost(sealSiteKey)}`);
             const donePay = () => {
-              if (sealSiteKey) sealPasses.endAction(sealSiteKey);
+              if (sealSiteKey) sealPasses?.endAction(sealSiteKey);
               donePayCall();
             };
             runDappRequest(processCWICreateAction(message, respond).finally(donePay));
@@ -6524,16 +6540,35 @@ if (!(
       // site's call, for this account's own identity key, from a site that is not blocked; anything else as before.
       sealSite =
         message.originator && message.originator !== ADMIN_ORIGINATOR ? normalizeOriginator(message.originator) : '';
-      const seal = sealSite
+      // Store builds: no Seal sheet (storeBuild.ts NATIVE_SEAL_ENABLED written out, literal env, review 24 S1); the
+      // sign asks as before.
+      const seal =
+        !(
+          import.meta.env.VITE_STORE_BUILD === '1' ||
+          import.meta.env.VITE_CHANNEL === 'ios-store' ||
+          import.meta.env.VITE_CHANNEL === 'android-play'
+        ) &&
+        sealPasses !== null &&
+        sealSite
         ? readSealSign(
             message.params,
             chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey || '',
           )
         : null;
-      if (seal && message.originator && !(await siteBlocked(message.originator))) {
+      // NATIVE_SEAL_ENABLED written out (literal env) so the minifier drops the Seal sheet from a store bundle.
+      if (
+        !(
+          import.meta.env.VITE_STORE_BUILD === '1' ||
+          import.meta.env.VITE_CHANNEL === 'ios-store' ||
+          import.meta.env.VITE_CHANNEL === 'android-play'
+        ) &&
+        seal &&
+        message.originator &&
+        !(await siteBlocked(message.originator))
+      ) {
         console.log('[bwx-seal] createSignature: asking the one Seal sheet', sealSite);
         await askSealSheet(message.originator, sealSheetFor(seal, sealSite));
-        sealPasses.approve(sealSite, seal);
+        sealPasses?.approve(sealSite, seal);
         sealRecord = seal.recordHash;
         console.log('[bwx-seal] createSignature: Seal sheet approved, pass open', sealSite);
       } else {
@@ -6544,7 +6579,7 @@ if (!(
       console.log('[background] processCWICreateSignature: ensureWallet resolved, calling w.createSignature...');
       const result = await w.createSignature(message.params, message.originator);
       console.log('[background] processCWICreateSignature: success');
-      if (sealRecord) sealPasses.signed(sealSite, sealRecord);
+      if (sealRecord) sealPasses?.signed(sealSite, sealRecord);
       sendResponse({
         type: CWIEventName.CREATE_SIGNATURE,
         success: true,
@@ -6554,7 +6589,7 @@ if (!(
       });
     } catch (error) {
       console.error('[background] processCWICreateSignature: error:', error);
-      if (sealRecord) sealPasses.drop(sealSite);
+      if (sealRecord) sealPasses?.drop(sealSite);
       sendResponse({
         type: CWIEventName.CREATE_SIGNATURE,
         success: false,
