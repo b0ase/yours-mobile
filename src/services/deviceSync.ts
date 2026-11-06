@@ -16,6 +16,8 @@
  * backup uses; a push is updateBackups.
  */
 
+import { syncErrorDetail } from './syncErrorDetail';
+
 export type DeviceSyncResult = { ok: true; pulled: boolean; pushed: boolean } | { ok: false; error: string };
 
 export type DeviceSyncDeps = {
@@ -81,7 +83,7 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
       failures++;
       pendingPush = true;
       const wait = retryLater();
-      log(`[deviceSync] ${mode} failed (retry in ${Math.round(wait / 60_000)} min):`, errText(e));
+      log(`[deviceSync] ${mode} failed (retry in ${Math.round(wait / 60_000)} min):`, syncErrorDetail(e));
       return { ok: false, error: errText(e) };
     }
   };

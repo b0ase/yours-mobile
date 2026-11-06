@@ -42,6 +42,7 @@
  */
 
 import { DEVICE_NOT_ACTIVE_MESSAGE } from '../utils/sendErrors';
+import { syncErrorDetail } from './syncErrorDetail';
 
 /** The toolbox's own refusal (WalletStorageManager.getAuth): thrown before the call does anything. */
 const MANAGER_NOT_ACTIVE = /not accessing user's active storage or there are conflicting active stores/i;
@@ -310,7 +311,9 @@ export function keepDeviceStoreActive(storage: unknown, d: KeepDeviceActiveDeps)
     try {
       await d.setDeviceActive();
     } catch (e) {
-      log('[deviceActive] the merge did not complete:', errText(e));
+      // The whole error, the backup call and its page (services/syncErrorDetail.ts): "An internal error has occurred."
+      // alone could not say which call failed (owner's iPhone, 6 Nov 2026).
+      log('[deviceActive] the merge did not complete:', syncErrorDetail(e));
     } finally {
       disarm();
     }

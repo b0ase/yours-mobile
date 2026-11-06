@@ -84,6 +84,7 @@ import {
   type AdmitStore,
   type InboundVerifier,
 } from './services/inboundSync';
+import { syncErrorDetail, tagStorageClientErrors } from './services/syncErrorDetail';
 import { FULL_PASS_NEXT_SLICE_MS, requestFullPass, withDeadlines, withFullPassMode } from './services/fullPass';
 import { isPhone, onWifi } from './services/networkKind';
 import { chromeEnvelopeBackend, EnvelopeStore, guardEnvelopes } from './services/envelopes';
@@ -401,6 +402,8 @@ export interface InitWalletOptions {
  */
 const checkBackupRows = (keys: Keys, account: Account | undefined, storageIdentityKey: string) => {
   installInboundSyncGuard(StorageIdb);
+  // A backup call that fails names itself and its page in the sync log (services/syncErrorDetail.ts, 6 Nov 2026).
+  tagStorageClientErrors(StorageClient);
   const root = parsePrivateKey(keys.identityWif);
   const verifier: InboundVerifier = {
     owns: walletOwnership(root, [
@@ -927,6 +930,11 @@ export const initWallet = async (
         satoshis: typeof data.satoshis === 'number' ? data.satoshis : undefined,
       };
       chrome.storage.local.set({ [SYNC_HEALTH_KEY(keys.identityAddress)]: health }).catch(() => undefined);
+      // Which step failed, and how, in the sync log (the banner shows the message alone; owner's iPhone, 6 Nov 2026).
+      if (health.status !== 'complete' && health.status !== 'offline' && health.status !== 'arriving')
+        console.warn(
+          `[deviceSync] wallet sync failing (${data.status}): ${typeof data.detail === 'string' ? data.detail : (error ?? '')}`,
+        );
     }
     chrome.runtime
       .sendMessage({
@@ -1085,7 +1093,11 @@ export const initWallet = async (
     })
     .catch((err: unknown) => {
       console.error('[initWallet] deposit sweep failed:', err);
-      sendSyncStatus({ status: 'sweep-failed', error: err instanceof Error ? err.message : String(err) });
+      sendSyncStatus({
+        status: 'sweep-failed',
+        error: err instanceof Error ? err.message : String(err),
+        detail: `deposit sweep: ${syncErrorDetail(err)}`,
+      });
     });
 
   // Deposit derivation for one of our addresses: the address manager's window first, then a wider scan (an
@@ -1339,6 +1351,7 @@ export const initWallet = async (
           status: 'receive-failed',
           txid: r.txid,
           error: err instanceof Error ? err.message : String(err),
+          detail: `receive guard ${r.txid}: ${syncErrorDetail(err)}`,
         });
       }
     }
@@ -1526,7 +1539,7 @@ export const initWallet = async (
       })
       .catch((error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
-        sendSyncStatus({ status: 'error', message });
+        sendSyncStatus({ status: 'error', message, detail: `address sync: ${syncErrorDetail(error)}` });
         console.error('[initWallet] Address sync failed:', error);
         void guard();
         recoverTokens().catch((err) => console.error('[initWallet] token recovery failed:', err));
