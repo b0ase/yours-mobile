@@ -2,6 +2,7 @@ import { contrast, ensureContrast, hexToHsl, hslToHex, mix, pickReadable, rgbTri
 import { EMOJI_PACK_IDS, EMOJI_THEMES, type EmojiPackId, type EmojiTheme } from './emojiThemes';
 import { tokenblasterEditions } from './tokenblasterX';
 import { leanneEditions } from './leanneX';
+import { darkGroundInks } from './contrastGuard';
 
 export { contrast, rgbTriplet };
 
@@ -862,7 +863,22 @@ export const packVars = (a: Accent): Record<string, string> => ({
   '--bw-radius-card': a.radiusCard,
   '--bw-weight-head': String(a.weightHead),
   '--bw-tint': a.tint ?? a.surface2,
+  // Inks for the wallet card face that stays dark inside a light pack (an own picture under its shade): the accent
+  // stop moved until it reads on that dark ground, and the ink on it. Only light packs use them (themes.css), so
+  // dark packs and Gold are unchanged.
+  ...darkInkVars(a),
 });
+
+const darkInkVars = (a: Accent): Record<string, string> => {
+  const d = darkGroundInks(a);
+  return {
+    '--bw-dark-ground-hi': d.hi,
+    '--bw-dark-ground-hi-rgb': rgbTriplet(d.hi),
+    '--bw-dark-ground-lo': d.lo,
+    '--bw-dark-ground-lo-rgb': rgbTriplet(d.lo),
+    '--bw-dark-ground-on': d.on,
+  };
+};
 
 /** Every variable any pack may set (so switching packs can clear the previous one's). */
 export const ALL_VARS = Object.keys(packVars(ACCENTS[0] as Accent));

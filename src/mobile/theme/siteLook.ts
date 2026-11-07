@@ -11,6 +11,7 @@ import {
   type WornTheme,
 } from './connectSiteTheme';
 import { wearSiteLook } from './accent';
+import { guardLook } from './contrastGuard';
 import { setActiveSiteRoom } from '../chat/siteRoom';
 import { rememberRoomSite } from '../chat/roomLook';
 import { STORE_BUILD } from '../storeBuild';
@@ -19,18 +20,23 @@ import { STORE_BUILD } from '../storeBuild';
  * The whole extension view in a connected site's colours (docs/SITE-THEME.md "The whole view"). Built only from a
  * theme that already passed parseConnectTheme (#RRGGBB colours, contrast checked): no CSS, fonts or images from the
  * site reach the page. Derived shades are checked again so secondary text stays readable.
+ *
+ * Light themes (COO report, 7 Nov 2026, ArtechEx): the look starts from the dark Gold base, so a light theme must also
+ * replace the base's dark-ground parts: a light card design (not the dark topo under a dark shade), a soft shadow, and
+ * success / danger dark enough for paper. Every pair then goes through the contrast guard (contrastGuard.ts). Dark
+ * themes are left exactly as before.
  */
 export function siteLookAccent(t: WornTheme): Accent {
   const light = t.mode === 'light';
   const lifted = mix(t.surface, t.text, 0.06);
   const surface2 = contrast(t.text, lifted) >= 4.5 ? lifted : t.surface;
-  return {
+  const look: Accent = {
     ...BASE_LOOK,
     id: 'custom',
     kind: 'theme',
     label: t.name,
     scheme: t.mode,
-    ...(light ? { paper: true } : {}),
+    ...(light ? { paper: true, pattern: 'paper', shadow: LIGHT_SHADOW } : {}),
     accent: t.accent,
     hi: t.accentHi,
     lo: mix(t.accent, t.bg, 0.3),
@@ -43,7 +49,11 @@ export function siteLookAccent(t: WornTheme): Accent {
     muted: ensureContrast(mix(t.text, t.surface, 0.35), [t.bg, t.surface, surface2], 4.5),
     line: mix(t.surface, t.text, 0.15),
   };
+  return light ? guardLook(look) : look;
 }
+
+/** The paper packs' soft shadow (the base's 50% black shadow is for a black page). */
+const LIGHT_SHADOW = '0 1px 2px rgb(0 0 0 / 0.05), 0 6px 18px rgb(0 0 0 / 0.08)';
 
 /** Hosts that hold wallet permissions (History › Connections' list), from the background. Empty on any failure. */
 async function grantHosts(): Promise<string[]> {

@@ -82,6 +82,13 @@ is picked by the wallet.
   contrast-checked again). It is never saved. It reverts when the tab changes to another site, reloads, closes,
   the site disconnects (`bwallet:disconnect`, see `src/services/reconnectGate.ts`), the user revokes it, or a
   switch below is turned off. A bundled pack the page names (`<meta name="bwalletx-theme">`) wins over the file.
+- Light themes in the whole view (7 Nov 2026, ArtechEx): `mode: "light"` gets the light-pack rules every light
+  pack shares (`src/themes.css`, `[data-bw-pack='light']`): hard-coded white text takes the theme's `text`, Gold's
+  greys take its checked muted ink, dark fills and the dock become the theme's surface / nav, text on accent fills
+  takes the on-accent ink, and the wallet card is a light card with a light design. A card that keeps a dark face
+  (its own picture) keeps light ink. Every derived pair goes through `src/mobile/theme/contrastGuard.ts`: text
+  below 4.5:1 (icons 3:1) on its own ground falls back to a readable ink. Dark themes are unchanged.
+  `src/mobile/theme/siteLookRender.test.ts` renders the main view in headless Chrome and checks the painted pairs.
 - "Connected" means the user approved a sheet from that site in this build, **or** the site already holds wallet
   permissions (History › Connections lists it). The second case covers sites approved before site themes shipped
   (25 Oct 2026): the panel asks the background's permission list once and remembers the answer. `www.` and the apex
