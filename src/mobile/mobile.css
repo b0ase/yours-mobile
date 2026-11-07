@@ -1059,6 +1059,8 @@ body,
 /* Document signing (SignaturePad sideways): lengthwise on a landscape phone, fixed, the strip on the left and the
    buttons in a column on the right. A portrait phone shows only the turn prompt (.bw-sigpad-turn). */
 .bw-sigpad.is-sideways {
+  /* Full screen and opaque: nothing of the page behind shows, in either orientation. */
+  background: var(--bw-bg, #0b0b0d);
   padding: max(8px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right))
     max(8px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
 }
@@ -1096,13 +1098,13 @@ body,
 }
 .bw-sigpad-side button {
   min-height: 40px;
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 14px;
+  font-weight: 600;
   color: var(--bw-text, #f2f2f0);
   background: rgb(var(--bw-text-rgb, 255 255 255) / 0.08);
   border: 1px solid rgb(var(--bw-text-rgb, 255 255 255) / 0.16);
-  border-radius: 999px;
-  padding: 7px 12px;
+  border-radius: 10px;
+  padding: 8px 12px;
   cursor: pointer;
 }
 .bw-sigpad-side button:disabled {
@@ -1125,10 +1127,90 @@ body,
   padding: 4px 6px;
   font-size: 11px;
 }
+.bw-sigpad-side .bw-sigpad-side-cancel {
+  background: transparent;
+  border-color: transparent;
+  color: var(--bw-wcard-muted, #8e8e89);
+}
+/* Portrait prompt: full screen, centred, calm; two plain stacked buttons at the bottom. */
 .bw-sigpad-turn {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
   align-items: center;
+  padding: max(24px, env(safe-area-inset-top)) 24px max(20px, env(safe-area-inset-bottom));
+  background: var(--bw-bg, #0b0b0d);
+  color: var(--bw-text, #f2f2f0);
   text-align: center;
-  width: min(100%, 360px);
+}
+.bw-sigpad-turn-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+}
+.bw-sigpad-turn-phone {
+  color: var(--bw-accent-hi, #f5b800);
+  animation: bw-sigpad-turn 900ms ease-in-out 400ms 1 both;
+}
+@keyframes bw-sigpad-turn {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(-90deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bw-sigpad-turn-phone {
+    animation: none;
+  }
+}
+.bw-sigpad-turn-title {
+  margin: 0;
+  max-width: 320px;
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.bw-sigpad-turn-doc {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--bw-wcard-muted, #8e8e89);
+}
+.bw-sigpad-turn-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.bw-sigpad-turn-btns {
+  display: flex;
+  width: 100%;
+  max-width: 380px;
+  flex-direction: column;
+  gap: 8px;
+}
+.bw-sigpad-turn-secondary,
+.bw-sigpad-turn-text {
+  min-height: 48px;
+  font-size: 16px;
+  font-weight: 600;
+  border-radius: 12px;
+  cursor: pointer;
+}
+.bw-sigpad-turn-secondary {
+  color: var(--bw-text, #f2f2f0);
+  background: rgb(var(--bw-text-rgb, 255 255 255) / 0.08);
+  border: 1px solid rgb(var(--bw-text-rgb, 255 255 255) / 0.16);
+}
+.bw-sigpad-turn-text {
+  color: var(--bw-wcard-muted, #8e8e89);
+  background: transparent;
+  border: 0;
 }
 .bw-sigpad-title {
   font-size: 13px;
