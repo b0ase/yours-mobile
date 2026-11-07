@@ -1,19 +1,30 @@
 /**
  * Own payments go first (owner's seal, 7 Nov 2026, doc dbb9beec): the seal's one createAction took ~25 s, ten seconds
- * after the app opened, while the open-time device sync (pull, then a push with no deadline) held the toolbox's single
- * first-come-first-served storage queue.
+ * after the app opened, while the open-time device sync held the toolbox's single first-come-first-served storage queue.
  *
- * The repro below runs the REAL pieces (createDeviceSync, the push view, the own-payment gate, the full-pass page guard)
- * over a fake storage manager whose locks are the toolbox's own algorithm (WalletStorageManager.getActiveLock /
- * releaseActiveLock: one FIFO per lock kind, a writer takes reader + writer, a sync takes reader + writer + sync) and
- * whose sync loop is syncToWriter's: load the checkpoint from the writer's durable state, then page by page
- * getSyncChunk → processSyncChunk until a page says done. The backup's processSyncChunk commits each page and its
- * checkpoint together, as the toolbox's does (one transaction). Time is virtual.
+ * The rule (review of perf/phone-seal-speed, 7 Nov 2026): a PUSH never yields mid-cycle. Its checkpoint is a `since`
+ * plus a per-entity offset over this device's rows filtered by updated_at, so a payment that writes during a paused
+ * cycle (it spends old coin X: X.updated_at moves inside the filtered set) shifts the offsets: the resumed scan skips a
+ * row, and `when` then moves past X's update, so the backup keeps X spendable for good. Own payments go first only
+ * BEFORE a push cycle starts or BETWEEN backups. The pull's page yield stays (fullPass afterPage: why it is safe there).
+ *
+ * The fakes model the real getSyncChunk: rows keyed by id, `updated_at >= since`, ordered by id, skip `offset`; the
+ * backup commits each page with its checkpoint (since, offset, when) and refuses a page whose checkpoint doesn't match
+ * (requireMatchingCheckpoint); an empty page ends the cycle (since ← when, offset ← 0). The storage queue is the
+ * toolbox's lock algorithm; the push loop is syncToWriter's; the push itself is the real makeBackupPush. Virtual time.
  */
 import { describe, expect, test } from 'bun:test';
 import { createOwnPaymentGate } from './ownPayments';
-import { PUSH_CALL_MS, pushView } from './pushView';
-import { createDeviceSync } from './deviceSync';
+import {
+  IN_FLIGHT_MAX_AGE_MS,
+  PUSH_CALL_MS,
+  PUSH_SMALL_CALL_MS,
+  SETTLE_WAIT_MS,
+  createInFlight,
+  makeBackupPush,
+  pushView,
+} from './pushView';
+import { BACKOFF_MS, createDeviceSync } from './deviceSync';
 import { afterPage, beforePage, paymentYields, withFullPassMode } from './fullPass';
 
 // ── virtual time ─────────────────────────────────────────────────────────────
@@ -38,7 +49,6 @@ const vclock = () => {
     setTimer,
     clearTimer,
     sleep: (ms: number) => new Promise<void>((r) => setTimer(r, ms)),
-    /** Run timers in time order until `until` (virtual ms) or nothing is left. */
     async runUntil(until: number) {
       await settle();
       for (;;) {
@@ -54,13 +64,97 @@ const vclock = () => {
     },
   };
 };
+type Clock = ReturnType<typeof vclock>;
 
-// ── the toolbox's lock queue and syncToWriter loop, over fakes ───────────────
-const fakeManager = (c: ReturnType<typeof vclock>, local: string[], pageSize: number, readMs: number) => {
+// ── this device's store: the real getSyncChunk shape ─────────────────────────
+type Row = { id: number; updated_at: number; spendable: boolean };
+/** Rows 1..n, row i last changed at 10·i − 1000, before the test's clock starts at 0 (row 1 is the oldest coin). */
+const deviceStore = (n: number) => {
+  const rows = new Map<number, Row>();
+  for (let i = 1; i <= n; i++) rows.set(i, { id: i, updated_at: 10 * i - 1000, spendable: true });
+  let nextId = n + 1;
+  return {
+    rows,
+    getSyncChunk(args: { since: number; offset: number }, limit: number): Row[] {
+      return [...rows.values()]
+        .filter((r) => r.updated_at >= args.since)
+        .sort((a, b) => a.id - b.id)
+        .slice(args.offset, args.offset + limit)
+        .map((r) => ({ ...r }));
+    },
+    /** A payment: spends old coin `id` (an UPDATE of an existing low-id row), then inserts its change. */
+    spend(id: number, at: number) {
+      const x = rows.get(id)!;
+      rows.set(id, { ...x, spendable: false, updated_at: at });
+      const change = nextId++;
+      rows.set(change, { id: change, updated_at: at + 1, spendable: true });
+      return change;
+    },
+  };
+};
+
+// ── the backup: page + checkpoint commit together ────────────────────────────
+/** Already holds rows 1-4 from an earlier cycle (its checkpoint: since −950, row 5's time), so a cycle scans rows 5.. */
+const backupStore = (c: Clock, o: { pageMs: number; answerLate?: Map<number, number> }) => {
+  const rows = new Map<number, Row>();
+  for (let i = 1; i <= 4; i++) rows.set(i, { id: i, updated_at: 10 * i - 1000, spendable: true });
+  const received = new Map<number, number>(); // id+version → times it arrived
+  let ckpt = { since: -950, offset: 0, when: -950 };
+  let calls = 0;
+  const starts: number[] = [];
+  let concurrent = 0;
+  let maxConcurrent = 0;
+  return {
+    rows,
+    received,
+    maxConcurrent: () => maxConcurrent,
+    starts,
+    ckpt: () => ckpt,
+    writer: {
+      async makeAvailable() {
+        return {};
+      },
+      async getSyncCheckpoint() {
+        return { since: ckpt.since, offset: ckpt.offset };
+      },
+      async processSyncChunk(args: { since: number; offset: number }, chunk: { rows: Row[] }) {
+        const n = calls++;
+        starts.push(c.now());
+        concurrent++;
+        maxConcurrent = Math.max(maxConcurrent, concurrent);
+        try {
+          await c.sleep(o.pageMs);
+          if (args.since !== ckpt.since || args.offset !== ckpt.offset) throw new Error('checkpoint changed');
+          for (const r of chunk.rows) {
+            const have = rows.get(r.id);
+            if (!have || have.updated_at <= r.updated_at) rows.set(r.id, { ...r });
+            const k = r.id * 1e6 + r.updated_at;
+            received.set(k, (received.get(k) ?? 0) + 1);
+          }
+          if (!chunk.rows.length) ckpt = { since: ckpt.when, offset: 0, when: ckpt.when };
+          else
+            ckpt = {
+              since: ckpt.since,
+              offset: ckpt.offset + chunk.rows.length,
+              when: Math.max(ckpt.when, ...chunk.rows.map((r) => r.updated_at)),
+            };
+          // Committed. A late answer: the client's deadline may already have given up on it.
+          const late = o.answerLate?.get(n);
+          if (late) await c.sleep(late);
+          return { done: chunk.rows.length === 0 };
+        } finally {
+          concurrent--;
+        }
+      },
+    },
+  };
+};
+
+// ── the toolbox's lock queue and syncToWriter loop ───────────────────────────
+const fakeManager = (c: Clock, device: ReturnType<typeof deviceStore>, pageSize: number, readMs: number) => {
   const readerLocks: (() => void)[] = [];
   const writerLocks: (() => void)[] = [];
   const syncLocks: (() => void)[] = [];
-  // WalletStorageManager.getActiveLock / releaseActiveLock, verbatim in behaviour.
   const getLock = async (q: (() => void)[]) => {
     let resolveNew = () => {};
     const p = new Promise<void>((r) => {
@@ -96,179 +190,266 @@ const fakeManager = (c: ReturnType<typeof vclock>, local: string[], pageSize: nu
       release(readerLocks);
     }
   };
-  type Writer = {
-    makeAvailable(): Promise<unknown>;
-    getSyncCheckpoint(): Promise<{ since: number }>;
-    processSyncChunk(args: { since: number }, chunk: { rows: string[]; next: number }): Promise<{ done: boolean }>;
-  };
-  // syncToWriter: checkpoint from the writer, then pages until done; the local reader reads `pageSize` rows a page.
-  const syncToWriter = (writer: Writer) =>
-    runAsSync(async () => {
-      await writer.makeAvailable();
-      let args = { since: (await writer.getSyncCheckpoint()).since };
-      for (;;) {
-        await c.sleep(readMs); // reader.getSyncChunk on this device
-        const rows = local.slice(args.since, args.since + pageSize);
-        const r = await writer.processSyncChunk(args, { rows, next: args.since + rows.length });
-        if (r.done) break;
-        args = { since: (await writer.getSyncCheckpoint()).since };
-      }
-    });
-  return { runAsWriter, syncToWriter, queued: () => readerLocks.length };
-};
-
-/** The backup: each page and its checkpoint commit together; `slowPages` take `slowMs`, and may never answer. */
-const fakeBackup = (c: ReturnType<typeof vclock>, o: { pageMs: number; hangOnce?: Set<number> }) => {
-  const received: string[] = [];
-  let since = 0;
-  let calls = 0;
-  return {
-    received,
-    get since() {
-      return since;
+  type Writer = ReturnType<typeof backupStore>['writer'];
+  const authCalls: unknown[] = [];
+  const storage = {
+    async getAuth(mustBeActive?: boolean) {
+      authCalls.push(mustBeActive);
+      return { identityKey: 'id', userId: 1 };
     },
-    writer: {
-      async makeAvailable() {
-        return {};
-      },
-      async getSyncCheckpoint() {
-        return { since };
-      },
-      async processSyncChunk(args: { since: number }, chunk: { rows: string[]; next: number }) {
-        const n = calls++;
-        if (o.hangOnce?.has(n)) {
-          o.hangOnce.delete(n);
-          await new Promise(() => undefined); // never answers (the deadline must end it)
+    syncToWriter: (_auth: unknown, writer: Writer) =>
+      runAsSync(async () => {
+        await writer.makeAvailable();
+        let args = await writer.getSyncCheckpoint();
+        for (;;) {
+          await c.sleep(readMs); // getSyncChunk on this device
+          const r = await writer.processSyncChunk(args, { rows: device.getSyncChunk(args, pageSize) });
+          if (r.done) break;
+          args = await writer.getSyncCheckpoint();
         }
-        await c.sleep(o.pageMs);
-        if (args.since !== since) throw new Error('checkpoint changed'); // requireMatchingCheckpoint
-        received.push(...chunk.rows);
-        since = chunk.next;
-        return { done: chunk.rows.length === 0 };
-      },
-    },
+      }),
   };
+  return { runAsWriter, storage, authCalls };
 };
 
-const ROWS = Array.from({ length: 12 }, (_, i) => `row${i}`);
+/** The removed rule, kept to show what it broke: answer a committed page as the last when a payment waits. */
+const midCycleYield = <W extends ReturnType<typeof backupStore>['writer']>(
+  w: W,
+  waiting: () => boolean,
+  onYield: () => void,
+): W => ({
+  ...w,
+  makeAvailable: () => w.makeAvailable(),
+  getSyncCheckpoint: () => w.getSyncCheckpoint(),
+  processSyncChunk: async (args, chunk) => {
+    const r = await w.processSyncChunk(args, chunk);
+    if (r.done || !waiting()) return r;
+    onYield();
+    return { ...r, done: true };
+  },
+});
 
-/** The device sync wired as initWallet wires it: the push through pushView, yielding to own payments. */
-const rig = (o: { pageMs?: number; hangOnce?: Set<number> } = {}) => {
+const rig = (o: { pageMs?: number; answerLate?: Map<number, number>; oldRule?: boolean; rows?: number } = {}) => {
   const c = vclock();
   const gate = createOwnPaymentGate();
-  const mgr = fakeManager(c, ROWS, 2, 50);
-  const backup = fakeBackup(c, { pageMs: o.pageMs ?? 1_000, hangOnce: o.hangOnce });
+  const device = deviceStore(o.rows ?? 12);
+  const mgr = fakeManager(c, device, 2, 50);
+  const backup = backupStore(c, { pageMs: o.pageMs ?? 1_000, answerLate: o.answerLate });
+  const inFlight = new WeakMap<object, ReturnType<typeof createInFlight>>();
+  const timers = { setTimer: c.setTimer, clearTimer: c.clearTimer, now: c.now };
   const log: string[] = [];
+  const newRulePush = makeBackupPush({
+    storage: mgr.storage as never,
+    backups: () => [{ storage: backup.writer }],
+    waiting: gate.waiting,
+    inFlightFor: (s) => {
+      let f = inFlight.get(s);
+      if (!f) inFlight.set(s, (f = createInFlight(timers)));
+      return f;
+    },
+    ...timers,
+  });
+  const oldRulePush = async () => {
+    let yielded = false;
+    await mgr.storage.syncToWriter(
+      {},
+      midCycleYield(backup.writer, gate.waiting, () => (yielded = true)),
+    );
+    return yielded ? ('yielded' as const) : undefined;
+  };
   const sync = createDeviceSync({
     applies: () => true,
     ensureBackup: async () => true,
     pull: async () => undefined,
-    push: async () => {
-      let yielded = false;
-      await mgr.syncToWriter(
-        pushView(backup.writer, {
-          waiting: gate.waiting,
-          onYield: () => (yielded = true),
-          setTimer: c.setTimer,
-          clearTimer: c.clearTimer,
-        }),
-      );
-      return yielded ? 'yielded' : undefined;
-    },
+    push: o.oldRule ? oldRulePush : newRulePush,
     yieldTo: gate,
-    setTimer: c.setTimer,
-    clearTimer: c.clearTimer,
+    ...timers,
     now: c.now,
     log: (...a) => void log.push(a.map(String).join(' ')),
   });
-  /** An own payment: the gate first (as the background's createAction does), then the storage queue. */
-  const pay = async (holdMs: number) => {
+  /** An own payment spending old coin `id`: the gate first (as the background's createAction does), then the queue. */
+  const pay = async (id: number, holdMs = 300) => {
     const end = gate.begin();
     const askedAt = c.now();
     try {
       return await mgr.runAsWriter(async () => {
         const waited = c.now() - askedAt;
+        device.spend(id, c.now());
         await c.sleep(holdMs);
         return waited;
       });
     } finally {
       end();
+      sync.changed(); // as notifyOnWalletChanges does after every createAction
     }
   };
-  return { c, gate, mgr, backup, sync, pay, log };
+  /** Does the backup hold exactly what this device holds (every row, its latest version)? */
+  const inStep = () =>
+    [...device.rows.values()].every((r) => {
+      const b = backup.rows.get(r.id);
+      return b && b.spendable === r.spendable && b.updated_at === r.updated_at;
+    });
+  return { c, gate, device, mgr, backup, sync, pay, inStep, log };
 };
 
-describe('own payments go first: the repro (seal 7 Nov 2026)', () => {
-  test('a payment during a slow push gets the queue at the next page boundary, then the push finishes, each row once', async () => {
-    const { c, backup, sync, pay } = rig({ pageMs: 1_000 });
-    const pushed = sync.syncNow();
-    await c.runUntil(1_500); // the push is in its second page (pages end at 1050 ms, 2100 ms, …)
-    expect(backup.received.length).toBe(2);
-    let waited = -1;
-    void pay(300).then((w) => (waited = w));
-    await c.runUntil(60_000);
-    // Before: queued behind all 7 pages (~7 s, unbounded with a stalled backup). Now: the page in flight only.
-    expect(waited).toBeGreaterThanOrEqual(0);
-    expect(waited).toBeLessThan(1_100);
-    const r = await pushed;
-    expect(r.ok).toBe(true);
-    expect(backup.received).toEqual(ROWS); // every row, exactly once, in order
-    expect(sync.state().pendingPush).toBe(false);
+describe('push: own payments never pause a cycle (review 7 Nov 2026, HIGH)', () => {
+  test('(a) regression: the old mid-cycle yield loses the spend of old coin X; the backup keeps it spendable', async () => {
+    const { c, sync, pay, backup, inStep } = rig({ oldRule: true });
+    void sync.syncNow();
+    await c.runUntil(1_500); // second page in flight
+    void pay(1); // spends row 1: it enters the cycle's scan (updated_at >= −950, by id) in front of the offset
+    await c.runUntil(10 * 60_000); // every retry and the debounced push after the payment
+    expect(backup.rows.get(1)?.spendable).toBe(true); // lost for good
+    expect(inStep()).toBe(false);
   });
 
-  test('a page the backup never answers times out (no success), is retried on the back-off, and nothing is lost', async () => {
-    const { c, backup, sync, log } = rig({ pageMs: 500, hangOnce: new Set([2]) });
-    const first = await (async () => {
-      const p = sync.syncNow();
-      await c.runUntil(PUSH_CALL_MS + 5_000);
-      return p;
-    })();
-    expect(first.ok).toBe(false);
-    expect(sync.state().pendingPush).toBe(true); // never treated as done
-    expect(log.some((l) => l.includes('[deviceSync] full failed'))).toBe(true);
-    expect(backup.received).toEqual(ROWS.slice(0, 4)); // the two committed pages stay
-    await c.runUntil(PUSH_CALL_MS + 5_000 + 61_000); // the 1-minute back-off retry
-    expect(backup.received).toEqual(ROWS);
-    expect(sync.state().pendingPush).toBe(false);
-  });
-
-  test('two own payments in a row both go before the sync, and the sync still moves on between them', async () => {
-    const { c, backup, sync, pay } = rig({ pageMs: 1_000 });
+  test('(b) the new rule: the payment waits for the cycle in flight, then the next cycle sends every changed row', async () => {
+    const { c, sync, pay, backup, inStep } = rig();
     const pushed = sync.syncNow();
     await c.runUntil(1_500);
-    const waits: number[] = [];
-    void pay(400).then((w) => waits.push(w)); // gets the queue at 2100 ms, done at 2500 ms
-    await c.runUntil(3_000); // the sync resumed at 2500 ms: its next page is in flight
-    expect(waits.length).toBe(1);
-    expect(backup.received.length).toBe(4);
-    void pay(400).then((w) => waits.push(w)); // the next one, in a row
-    await c.runUntil(3_600);
-    // Not starved: the page in flight committed before the second payment took the queue (3550 ms).
-    expect(backup.received.length).toBe(6);
-    await c.runUntil(60_000);
-    expect(waits.length).toBe(2);
-    for (const w of waits) expect(w).toBeLessThan(1_100);
+    let waited = -1;
+    void pay(1).then((w) => (waited = w));
+    await c.runUntil(10 * 60_000);
     expect((await pushed).ok).toBe(true);
-    expect(backup.received).toEqual(ROWS);
+    // The cycle in flight: rows 5-12 in 4 pages + the empty last page, 1.05 s each, ends at 5.25 s; asked at 1.5 s.
+    expect(waited).toBeGreaterThan(0);
+    expect(waited).toBeLessThanOrEqual(5_250 - 1_500);
+    expect(backup.rows.get(1)?.spendable).toBe(false);
+    expect(inStep()).toBe(true);
   });
 
-  test('a sync asked for while an own payment runs starts only after it, so the payment never queues behind it', async () => {
-    const { c, backup, sync, pay } = rig({ pageMs: 1_000 });
+  test('a push asked for while an own payment runs starts after it; the payment never queues behind it', async () => {
+    const { c, sync, pay, inStep } = rig();
     let waited = -1;
-    void pay(2_000).then((w) => (waited = w));
+    void pay(3, 2_000).then((w) => (waited = w));
     await c.runUntil(10);
     const pushed = sync.syncNow();
-    await c.runUntil(1_000);
-    expect(backup.received.length).toBe(0);
-    await c.runUntil(60_000);
+    await c.runUntil(10 * 60_000);
     expect(waited).toBe(0);
     expect((await pushed).ok).toBe(true);
-    expect(backup.received).toEqual(ROWS);
+    expect(inStep()).toBe(true);
+  });
+
+  test('(c) a page the backup committed but answered after the deadline: neither lost nor sent twice', async () => {
+    // Call 2 (rows 9-10) commits, then answers 90 s later; the client gives up at PUSH_CALL_MS.
+    const { c, sync, backup, inStep, log } = rig({ pageMs: 500, answerLate: new Map([[2, 90_000]]) });
+    const first = sync.syncNow();
+    await c.runUntil(PUSH_CALL_MS + 5_000);
+    expect((await first).ok).toBe(false); // never success
+    expect(sync.state().pendingPush).toBe(true);
+    expect(log.some((l) => l.includes('did not answer in time'))).toBe(true);
+    await c.runUntil(PUSH_CALL_MS + 5_000 + BACKOFF_MS[0] + 60_000);
+    expect(inStep()).toBe(true);
+    for (const [, n] of backup.received) expect(n).toBe(1); // no row version arrived twice
+    expect(backup.maxConcurrent()).toBe(1); // never a second processSyncChunk alongside the late one
+  });
+
+  test('a backup still answering an earlier request is not sent a second page (in flight), and that is a failure', async () => {
+    const { c, sync, backup, log } = rig({ pageMs: 500, answerLate: new Map([[2, 10 * 60_000]]) });
+    void sync.syncNow();
+    await c.runUntil(PUSH_CALL_MS + 5_000 + BACKOFF_MS[0] + SETTLE_WAIT_MS + 5_000);
+    expect(backup.maxConcurrent()).toBe(1);
+    expect(log.some((l) => l.includes('still answering an earlier request'))).toBe(true);
+    expect(sync.state().pendingPush).toBe(true);
+  });
+
+  test('a deadline failure backs off at most 4 minutes, never the 30-minute end of the ladder', async () => {
+    const { c, sync, log } = rig({ pageMs: 500, answerLate: new Map([[0, 1e12]]) });
+    void sync.syncNow();
+    await c.runUntil(3 * 60 * 60_000);
+    const waits = log
+      .filter((l) => l.includes('failed (retry in'))
+      .map((l) => Number(/retry in (\d+) min/.exec(l)?.[1]));
+    expect(waits.length).toBeGreaterThanOrEqual(3);
+    expect(Math.max(...waits)).toBeLessThanOrEqual(4);
   });
 });
 
-describe('the pull yields too (full-pass page guard, slice mode)', () => {
-  test("after a merged page, a waiting own payment ends the slice ('yield'); without one, a short slice goes on", async () => {
+describe('a request that never settles expires (re-review 7 Nov 2026, MED)', () => {
+  test('no second request to that backup inside IN_FLIGHT_MAX_AGE_MS; after it, the push goes on and catches up', async () => {
+    // Call 2 commits, then never answers (a callback-based fetch on WKWebView has no timeout of its own).
+    const { c, sync, backup, inStep } = rig({ pageMs: 500, answerLate: new Map([[2, 1e15]]) });
+    void sync.syncNow();
+    const hungAt = 1_150; // call 2 starts after two 550 ms pages and this page's 50 ms read
+    await c.runUntil(hungAt + IN_FLIGHT_MAX_AGE_MS - 1);
+    expect(backup.starts.length).toBe(3); // nothing after the hung call inside the window
+    expect(inStep()).toBe(false); // rows 11-12 still waiting
+    await c.runUntil(hungAt + IN_FLIGHT_MAX_AGE_MS + 10 * 60_000);
+    expect(backup.starts.length).toBeGreaterThan(3); // the push went on after the expiry
+    expect(backup.starts.slice(3).every((t) => t >= hungAt + IN_FLIGHT_MAX_AGE_MS)).toBe(true);
+    expect(inStep()).toBe(true); // from the backup's checkpoint (the hung page had committed): nothing lost
+    for (const [, n] of backup.received) expect(n).toBe(1); // nor sent twice
+    expect(sync.state().pendingPush).toBe(false);
+  });
+  test('createInFlight: a never-settling entry is dropped after its maximum age', async () => {
+    const c = vclock();
+    const f = createInFlight({ setTimer: c.setTimer, clearTimer: c.clearTimer, now: c.now, maxAgeMs: 1_000 });
+    f.add(new Promise(() => undefined));
+    let early: boolean | null = null;
+    void f.settled(500).then((v) => (early = v));
+    await c.runUntil(600);
+    expect(early).toBe(false);
+    let late: boolean | null = null;
+    void f.settled(500).then((v) => (late = v));
+    await c.runUntil(1_200); // the entry passes its age while the push waits: it may go
+    expect(late).toBe(true);
+  });
+});
+
+describe('push deadlines: 60 s for a page, 20 s for the small calls (re-review speed follow-up)', () => {
+  test('a stalled small call fails at PUSH_SMALL_CALL_MS; processSyncChunk gets PUSH_CALL_MS', async () => {
+    const c = vclock();
+    const never = () => new Promise(() => undefined);
+    const v = pushView(
+      { getSyncCheckpoint: never, findOrInsertSyncStateAuth: never, processSyncChunk: never },
+      { inFlight: createInFlight(), setTimer: c.setTimer, clearTimer: c.clearTimer },
+    );
+    const ended: Record<string, number> = {};
+    for (const k of ['getSyncCheckpoint', 'findOrInsertSyncStateAuth', 'processSyncChunk'] as const)
+      void (v[k] as () => Promise<unknown>)().catch(() => (ended[k] = c.now()));
+    await c.runUntil(PUSH_CALL_MS + 1);
+    expect(PUSH_SMALL_CALL_MS).toBe(20_000);
+    expect(ended.getSyncCheckpoint).toBe(PUSH_SMALL_CALL_MS);
+    expect(ended.findOrInsertSyncStateAuth).toBe(PUSH_SMALL_CALL_MS);
+    expect(ended.processSyncChunk).toBe(PUSH_CALL_MS);
+  });
+});
+
+describe('makeBackupPush: the real push wiring (initWallet)', () => {
+  test('getAuth(true) once, each backup in turn; a waiting payment goes first only BETWEEN backups', async () => {
+    const order: string[] = [];
+    let paying = false;
+    let arrives = true;
+    const storage = {
+      getAuth: async (mustBeActive?: boolean) => (order.push(`auth:${mustBeActive}`), { identityKey: 'k' }),
+      syncToWriter: async (_a: unknown, w: { name: string }) => {
+        order.push(`push:${w.name}`);
+        if (arrives) paying = true; // a payment arrives during the first backup's cycle; that cycle is NOT interrupted
+      },
+    };
+    const push = makeBackupPush({
+      storage: storage as never,
+      backups: () => [{ storage: { name: 'A' } }, { storage: { name: 'B' } }],
+      waiting: () => paying,
+      inFlightFor: () => createInFlight(),
+    });
+    expect(await push()).toBe('yielded');
+    expect(order).toEqual(['auth:true', 'push:A']);
+    paying = false;
+    arrives = false;
+    order.length = 0;
+    expect(await push()).toBeUndefined();
+    expect(order).toEqual(['auth:true', 'push:A', 'push:B']);
+  });
+  test('the view keeps a deadline but never answers a page as the last one', async () => {
+    const w = { processSyncChunk: async () => ({ done: false }) };
+    const v = pushView(w, { inFlight: createInFlight() });
+    expect(await v.processSyncChunk()).toEqual({ done: false });
+  });
+});
+
+describe('the pull yields at a page (full-pass page guard, slice mode)', () => {
+  test("after a merged page, a waiting own payment ends the slice ('yield'); without one it goes on", async () => {
     const gate = createOwnPaymentGate();
     const sik = 'device-sik-own-payments';
     await withFullPassMode(sik, 'slice', async () => {
@@ -277,7 +458,7 @@ describe('the pull yields too (full-pass page guard, slice mode)', () => {
       const end = gate.begin();
       const before = paymentYields();
       expect(afterPage(sik, 2, gate)).toBe('yield');
-      expect(paymentYields()).toBe(before + 1); // the device-sync pull reads this to carry on in the same run
+      expect(paymentYields()).toBe(before + 1);
       end();
       expect(afterPage(sik, 3, gate)).toBe('go');
     });
@@ -296,13 +477,13 @@ describe('the pull yields too (full-pass page guard, slice mode)', () => {
 describe('the own-payment gate', () => {
   test('waiting while any payment runs; idle resolves when the last ends; end is idempotent', async () => {
     const gate = createOwnPaymentGate();
-    await gate.idle(); // idle at once with none
+    await gate.idle();
     const a = gate.begin();
     const b = gate.begin();
     let idle = false;
     void gate.idle().then(() => (idle = true));
     a();
-    a(); // a second end of the same payment changes nothing
+    a();
     await Promise.resolve();
     expect(gate.waiting()).toBe(true);
     expect(idle).toBe(false);

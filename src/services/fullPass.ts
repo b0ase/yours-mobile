@@ -318,7 +318,16 @@ export function beforePage(deviceSik: string, page: PageKind, now = Date.now()):
 /**
  * For the guard, after a merged page: 'yield' ends this sync (its slice is used up, or an own payment is waiting; the
  * checkpoint has the page). A device-sync pull ('slice') lets a payment from the wallet's own pages go first (owner's
- * seal, 7 Nov 2026: services/ownPayments.ts); the next slice carries on once it has finished.
+ * seal, 7 Nov 2026: services/ownPayments.ts); the same device-sync run carries on once it has finished.
+ *
+ * ⚠ WHY A PULL MAY PAUSE MID-PASS WHEN A PUSH MAY NOT (review, 7 Nov 2026; services/pushView.ts). A checkpoint's
+ * offsets index the READER's rows filtered by updated_at. A push reads this device's store, which the payment writes, so
+ * a paused push cycle can skip a row. A pull reads the BACKUP: the payment writes only this device's store, and this
+ * device's push can't run while the pull is paused (it comes after the pull in the same run, and a Store payment's
+ * pushNow waits for the running run), so the pause changes nothing the pull's offsets index. Rows other devices push to
+ * the backup can land between any two pages, paused or not (there is no lock across devices); those are what the
+ * 3-second slices already live with and the 15-minute overlap (PULL_OVERLAP_MS) and the daily full pass bring in. The
+ * merge keeps the newer updated_at, so the payment's own rows are not overwritten by older backup copies.
  */
 export function afterPage(
   deviceSik: string,

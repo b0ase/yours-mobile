@@ -93,7 +93,7 @@ import {
   withFullPassMode,
 } from './services/fullPass';
 import { ownPayments } from './services/ownPayments';
-import { pushView } from './services/pushView';
+import { createInFlight, makeBackupPush, type InFlight } from './services/pushView';
 import { isPhone, onWifi } from './services/networkKind';
 import { chromeEnvelopeBackend, EnvelopeStore, guardEnvelopes } from './services/envelopes';
 import { ENVELOPES_ENABLED } from './mobile/storeBuild';
@@ -690,6 +690,20 @@ export const initWallet = async (
   // Any merge that left something for the chain (the boot merge, F-C, the Monitor's backup sync): soon after it.
   stopBackupCheck.verifier.onQueued = () => admitIn(2_000);
   stopBackupCheck.verifier.onQueued(); // and once at open, for anything left from before
+  // updateBackups as the device sync runs it (services/pushView.ts): each backup's cycle whole, a deadline on each
+  // request, no second request to a backup still answering a timed-out one, and own payments first only before a cycle
+  // or between backups (owner's seal and its review, 7 Nov 2026).
+  const pushInFlight = new WeakMap<object, InFlight>();
+  const backupPush = makeBackupPush({
+    storage: storage as unknown as Parameters<typeof makeBackupPush>[0]['storage'],
+    backups: () => managed._backups ?? [],
+    waiting: ownPayments.waiting,
+    inFlightFor: (backup) => {
+      let f = pushInFlight.get(backup);
+      if (!f) pushInFlight.set(backup, (f = createInFlight()));
+      return f;
+    },
+  });
   const deviceSync = createDeviceSync({
     applies: () => storage.isActiveStorageProvider() && (backups?.length ?? 0) > 0,
     // A backup naming another store is healed first; a set-aside one only reconnects on its probe and back-off, never
@@ -719,15 +733,7 @@ export const initWallet = async (
       () => admitIn(0),
     ),
     push: async () => {
-      // updateBackups, one backup at a time through the push view (services/pushView.ts): a deadline on each request,
-      // and own payments go first (owner's seal, 7 Nov 2026). A yield leaves the rest for the next push.
-      const auth = await storage.getAuth(true);
-      let yielded = false;
-      for (const b of managed._backups ?? []) {
-        const view = pushView(b.storage as object, { waiting: ownPayments.waiting, onYield: () => (yielded = true) });
-        await storage.syncToWriter(auth, view as Parameters<typeof storage.syncToWriter>[1]);
-        if (yielded) return 'yielded';
-      }
+      return backupPush();
     },
     yieldTo: ownPayments,
     busy: chainActive,
