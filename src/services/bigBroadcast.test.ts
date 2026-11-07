@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { BASE_TIMEOUT_MS, MAX_TIMEOUT_MS, broadcastTimeoutMs, sizeAwareBroadcast } from './bigBroadcast';
+import {
+  BASE_TIMEOUT_MS,
+  MAX_TIMEOUT_MS,
+  SLOW_BROADCAST_MS,
+  broadcastTimeoutMs,
+  sizeAwareBroadcast,
+} from './bigBroadcast';
 
 describe('broadcastTimeoutMs', () => {
   test('small txs keep the base timeout', () => {
@@ -43,5 +49,37 @@ describe('sizeAwareBroadcast', () => {
   test('leaves services without an arcade client alone', () => {
     expect(sizeAwareBroadcast({ postBeef: async () => [] })).toBe(false);
     expect(sizeAwareBroadcast(null)).toBe(false);
+  });
+});
+
+describe("sizeAwareBroadcast: a slow broadcast says how long it took (owner's seal, 7 Nov 2026: 25 s unexplained)", () => {
+  const timed = (ms: number, fail = false) => {
+    let t = 1_000;
+    const lines: string[] = [];
+    const services = {
+      arcade: { timeout: BASE_TIMEOUT_MS },
+      postBeef: async () => {
+        t += ms;
+        if (fail) throw new Error('no verdict');
+        return [{ status: 'success' }];
+      },
+    };
+    sizeAwareBroadcast(services, () => undefined, { now: () => t, slowLog: (m) => void lines.push(m) });
+    return { services, lines };
+  };
+  test('at or over SLOW_BROADCAST_MS: one [payTiming] line with the time, size and txid prefix', async () => {
+    const { services, lines } = timed(SLOW_BROADCAST_MS + 1_500);
+    await services.postBeef({ toBinary: () => new Uint8Array(400) } as never, ['ab'.repeat(32)] as never);
+    expect(lines).toEqual([`[payTiming] broadcast took ${SLOW_BROADCAST_MS + 1_500} ms (400 bytes, abababababab…)`]);
+  });
+  test('a quick broadcast logs nothing', async () => {
+    const { services, lines } = timed(SLOW_BROADCAST_MS - 1);
+    await services.postBeef({ toBinary: () => [1] } as never, ['x'] as never);
+    expect(lines).toEqual([]);
+  });
+  test('a slow broadcast that throws is timed too, and still throws', async () => {
+    const { services, lines } = timed(SLOW_BROADCAST_MS, true);
+    await expect(services.postBeef({ toBinary: () => [1] } as never, [] as never)).rejects.toThrow('no verdict');
+    expect(lines[0]).toStartWith(`[payTiming] broadcast took ${SLOW_BROADCAST_MS} ms`);
   });
 });

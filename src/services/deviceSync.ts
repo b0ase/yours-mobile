@@ -34,9 +34,16 @@ export type DeviceSyncDeps = {
   log?: (...a: unknown[]) => void;
   setTimer?: (fn: () => void, ms: number) => unknown;
   clearTimer?: (t: unknown) => void;
+  /** Tests: the clock a run is timed on (SLOW_SYNC_MS). */
+  now?: () => number;
 };
 
 export const PUSH_DELAY_MS = 20_000;
+/**
+ * A run this long is logged with its pull and push times: it holds the storage locks a payment queues behind (owner's
+ * seal, 7 Nov 2026: one createAction took ~25 s just after the app opened, when the open-time sync runs).
+ */
+export const SLOW_SYNC_MS = 2_000;
 export const BACKOFF_MS = [60_000, 120_000, 240_000, 480_000, 960_000, 1_800_000];
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -45,6 +52,7 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
   const setTimer = deps.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
   const clearTimer = deps.clearTimer ?? ((t) => clearTimeout(t as ReturnType<typeof setTimeout>));
   const log = deps.log ?? (() => undefined);
+  const now = deps.now ?? Date.now;
   let running: Promise<DeviceSyncResult> | null = null;
   let runningMode: 'full' | 'push' | null = null;
   /** A full sync asked for while a push runs: it starts when that push ends (review 20, L6). */
@@ -70,12 +78,17 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
     try {
       if (!(await deps.ensureBackup())) throw new Error('backup storage is not connected');
       let pulled = false;
+      const t0 = now();
       if (mode === 'full') {
         await deps.pull();
         pulled = true;
       }
+      const t1 = now();
       pendingPush = false;
       await deps.push();
+      const t2 = now();
+      if (t2 - t0 >= SLOW_SYNC_MS)
+        log(`[deviceSync] ${mode} took ${t2 - t0} ms (${pulled ? `pull ${t1 - t0} ms, ` : ''}push ${t2 - t1} ms)`);
       failures = 0;
       if (!pendingPush) lastPushOkAt = Date.now();
       return { ok: true, pulled, pushed: true };

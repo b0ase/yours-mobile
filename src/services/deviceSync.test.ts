@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { BACKOFF_MS, PUSH_DELAY_MS, backupBeforeSend, createDeviceSync, notifyOnWalletChanges } from './deviceSync';
+import {
+  BACKOFF_MS,
+  PUSH_DELAY_MS,
+  SLOW_SYNC_MS,
+  backupBeforeSend,
+  createDeviceSync,
+  notifyOnWalletChanges,
+} from './deviceSync';
 
 /** A fake clock: timers run only when the test advances them. */
 const clock = () => {
@@ -295,5 +302,29 @@ describe('the backup state for the honest copy (review 4 Nov 2026, F11)', () => 
     await sync.pushNow();
     expect(sync.state().lastPushOkAt).toBeGreaterThan(0);
     expect(sync.state().failures).toBe(0);
+  });
+});
+
+describe("device sync: a long run says how long it held the storage (owner's seal, 7 Nov 2026)", () => {
+  const timedSync = (pullMs: number, pushMs: number) => {
+    let t = 0;
+    const lines: string[] = [];
+    const { sync } = harness({
+      pull: async () => void (t += pullMs),
+      push: async () => void (t += pushMs),
+      now: () => t,
+      log: (...a) => void lines.push(a.map(String).join(' ')),
+    });
+    return { sync, lines };
+  };
+  test('a full sync at or over SLOW_SYNC_MS logs its pull and push times', async () => {
+    const { sync, lines } = timedSync(SLOW_SYNC_MS, 700);
+    await sync.syncNow();
+    expect(lines).toEqual([`[deviceSync] full took ${SLOW_SYNC_MS + 700} ms (pull ${SLOW_SYNC_MS} ms, push 700 ms)`]);
+  });
+  test('a quick one logs nothing', async () => {
+    const { sync, lines } = timedSync(100, 100);
+    await sync.syncNow();
+    expect(lines).toEqual([]);
   });
 });

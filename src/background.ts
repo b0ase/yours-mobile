@@ -185,6 +185,7 @@ import {
   type WocAnswer,
 } from './services/autoCoinResync';
 import { withCoinResyncLock } from './services/coinResyncLock';
+import { payTimer } from './services/payTiming';
 import type {
   ListOutputsArgs,
   RelinquishOutputArgs,
@@ -6738,9 +6739,12 @@ if (!(
     let releasePayeeMark: (() => void) | undefined;
     let releaseMicropay: (() => void) | undefined;
     let ownMintIntent: MintIntent | undefined;
+    // Own payments only: where the time goes, one warn line (services/payTiming.ts; owner's seal, 7 Nov 2026).
+    const timing = message.originator === ADMIN_ORIGINATOR ? payTimer() : null;
     try {
       const w = message.originator === ADMIN_ORIGINATOR ? await ensureWallet() : await walletForSiteRequest();
       await ensureUsbSeen('build and sign a transaction', message.originator);
+      timing?.mark('wallet+usb');
       // A monthly allowance with a payee allowlist covers only payments to those payees; this call asks otherwise
       // (services/allowanceGuard.ts, payment-safety audit 24 Oct 2026 B2).
       if (
@@ -6876,6 +6880,7 @@ if (!(
         const t0 = Date.now();
         fundingSnap = isAdmin ? await prep : await withStepTimeout(prep, STEP_TIMEOUT_MS, fundingTimeoutError);
         console.log(`[createAction] funding preparation took ${Date.now() - t0} ms`);
+        timing?.mark('funding');
       } else {
         console.warn('[createAction] no account context: skipping funding preparation');
       }
@@ -6952,6 +6957,9 @@ if (!(
         if (!outcome.ok) throw outcome.error;
         if (outcome.retried) console.warn('[createAction] sent on retry after clearing spent coins', spentHeal);
         result = outcome.result;
+        // Storage queue + build + sign + broadcast; a slow broadcast logs its own share (bigBroadcast.ts).
+        timing?.mark('build+sign+broadcast');
+        if (timing) console.warn(timing.line('own createAction'));
       } catch (err) {
         // Queued to retry is not a failure: the wallet will send it. Say so, and guard against paying again.
         if (queuedSend(err)) {
@@ -7035,6 +7043,7 @@ if (!(
       // describeWalletError: WERR_REVIEW_ACTIONS' per-tx status (doubleSpend, invalidTx…) only survives as text here.
       const errorMessage = error instanceof Error ? describeWalletError(error) : JSON.stringify(error);
       const errorStack = error instanceof Error ? error.stack : undefined;
+      if (timing) console.warn(timing.line('own createAction (failed)'));
       console.error('[createAction] Error:', errorName, errorMessage);
       if (errorStack) console.error('[createAction] Stack:', errorStack);
       const friendly = fundingSnap && isInsufficientFunds(error) ? insufficientFundsMessage(error, fundingSnap) : null;
