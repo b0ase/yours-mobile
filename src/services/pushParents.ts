@@ -20,20 +20,23 @@
  *    epoch as its time, no proof id, no expiry state, no input BEEF. The backup's copy is never changed by it, so a
  *    completed transaction is never set back to unproven, whatever the clocks of the copies that wrote it. Nothing else
  *    is changed: status, txid, reference, amounts and raw bytes go as this device holds them (review 23, L1).
- *  - A no-op parent transaction goes only in a state the backup's abandoned-task check leaves alone: never unsigned or
- *    unprocessed (a backup lacking it would fail it and free its inputs), nor nonfinal, unfail, or a nosend with an
- *    expiry. A row whose parent can't go is held back: taken off this page (the paging still counts it as read) and
- *    logged, and sent on a later page once its parent can go (reviews of 13196734 and 96f2cda1).
+ *  - A no-op parent transaction goes in any state but unsigned or unprocessed: a backup that lacks it would fail those
+ *    as abandoned and free their inputs. A row whose parent is one of those ends the page just before it: the rows
+ *    before it go, it and the rest are not counted as read, and the pass waits there. Those states don't last on this
+ *    device: the wallet's own TaskFailAbandoned fails such a transaction once it is 5 minutes old (abandonedMsecs,
+ *    @1sat/wallet's factory), at the next monitor run (each wallet open), and a failed one goes. A page that would
+ *    carry nothing is not sent: the push ends and the device sync retries on its back-off (reviews of 13196734,
+ *    96f2cda1 and 721a7a7d).
  *  - A parent at or after the cursor is a row this pass owes the backup anyway (the paging skipped it): it goes
  *    unchanged, with its proof row, so the backup gets the whole row.
  *  - The page's paging stays exact. The backup adds every row of a page to that entity's offset, so rows are added only
  *    to an entity this pass has already read in full (getSyncChunk reads entities in order: a later entity's list on
  *    the page shows it). A quarter of the page's items and of its rough size at most go to parents (L2): the page's rows
- *    end where that runs out, nothing after them goes, and the next page goes on from there. What a page added and held
- *    back is kept, before the page goes, in a small database of this file's own, and taken off (or put back on) the
- *    backup's offsets before the next page is read: a relaunch goes on exactly where the pass was. Only when that
- *    record doesn't fit the backup's offsets are the entities that take parents read again from the pass's start
- *    (their rows come again as no-ops; none is skipped).
+ *    end where that runs out, nothing after them goes, and the next page goes on from there. What a page added is
+ *    kept, before the page goes, in a small database of this file's own, and taken off the backup's offsets before the
+ *    next page is read: a relaunch goes on exactly where the pass was. Only when that record doesn't fit the backup's
+ *    offsets (or is lost) are the five entities that take parents read again from the pass's start (their rows come
+ *    again as no-ops; none is skipped).
  *  - The wallet's own rows are never written: they are read, copied and sent.
  */
 
@@ -80,17 +83,7 @@ export type ParentStore = {
   findTxLabels(a: Paged): Promise<Row[]>;
   findOutputTags(a: Paged): Promise<Row[]>;
   findProvenTxs(a: Paged): Promise<Row[]>;
-  findTxLabelMaps?(a: Paged): Promise<Row[]>;
-  findOutputTagMaps?(a: Paged): Promise<Row[]>;
-  findCommissions?(a: Paged): Promise<Row[]>;
 };
-
-/** A row held back from a page, by its key (never its contents). */
-export type HeldRef =
-  | { key: 'outputs'; outputId: number }
-  | { key: 'txLabelMaps'; transactionId: number; txLabelId: number }
-  | { key: 'outputTagMaps'; outputId: number; outputTagId: number }
-  | { key: 'commissions'; commissionId: number };
 
 /** What a page was given. */
 export type ParentsReport = {
@@ -105,11 +98,9 @@ export type ParentsReport = {
   deferred: number;
   /** Entities a parent was needed for but this pass hasn't read in full: left alone (getSyncChunk never builds one). */
   notExhausted: string[];
-  /** Rows taken off the page because a parent can't go yet, with a line for the log each. */
-  held: { ref: HeldRef; line: string }[];
-  /** Rows held back earlier, sent on this page. */
-  resent: HeldRef[];
-  /** Per entity: rows added to the page (parents and resent rows) less rows held back. Goes into the offsets. */
+  /** The page ends before a row whose parent can't go yet: that parent. */
+  waitsFor?: { txid: string; status: string };
+  /** Per entity: rows added to the page. Goes into the offsets. */
   net: Partial<Record<PageKey, number>>;
 };
 
@@ -145,15 +136,8 @@ const NAME = Object.fromEntries(ORDER) as Record<PageKey, string>;
 /** The entities that take parents: read again from the pass's start when the record of the pass is lost. */
 const PARENT_ENTITIES = ['provenTx', 'outputTag', 'txLabel', 'transaction', 'output'];
 
-/**
- * States a transaction may go in as a no-op parent. The backup's TaskFailAbandoned fails aged unsigned and unprocessed
- * transactions and frees their inputs; nonfinal and unfail are in flux; a nosend with an expiry has its own lifecycle.
- */
-const sendableAsNoOp = (t: Row): boolean => {
-  const s = String(t.status);
-  if (s === 'completed' || s === 'unproven' || s === 'sending' || s === 'failed') return true;
-  return s === 'nosend' && t.noSendExpiryMode == null;
-};
+/** A no-op parent may go in any state the backup's TaskFailAbandoned leaves alone (it fails aged unsigned and unprocessed). */
+const sendableAsNoOp = (t: Row): boolean => t.status !== 'unsigned' && t.status !== 'unprocessed';
 
 const time = (d: unknown): number =>
   d instanceof Date ? d.getTime() : d == null ? NaN : new Date(d as string).getTime();
@@ -174,31 +158,17 @@ const ID_KEY: Partial<Record<PageKey, string>> = {
   outputs: 'outputId',
 };
 type ParentKey = 'transactions' | 'outputs' | 'txLabels' | 'outputTags' | 'provenTxs';
-type ChildKey = HeldRef['key'];
-
-const refOf = (key: ChildKey, r: Row): HeldRef | undefined => {
-  if (key === 'outputs') return num(r.outputId) === undefined ? undefined : { key, outputId: r.outputId as number };
-  if (key === 'txLabelMaps')
-    return num(r.transactionId) === undefined || num(r.txLabelId) === undefined
-      ? undefined
-      : { key, transactionId: r.transactionId as number, txLabelId: r.txLabelId as number };
-  if (key === 'outputTagMaps')
-    return num(r.outputId) === undefined || num(r.outputTagId) === undefined
-      ? undefined
-      : { key, outputId: r.outputId as number, outputTagId: r.outputTagId as number };
-  return num(r.commissionId) === undefined ? undefined : { key, commissionId: r.commissionId as number };
-};
-const sameRef = (a: HeldRef, b: HeldRef) => JSON.stringify(a) === JSON.stringify(b);
+type ChildKey = 'outputs' | 'txLabelMaps' | 'outputTagMaps' | 'commissions';
 
 /**
- * Add to `page` the parents its rows need and it doesn't hold, hold back rows whose parents can't go yet, and send
- * rows held back earlier whose parents can go now (see the file comment). Reads only.
+ * Add to `page` the parents its rows need and it doesn't hold, and end the page before a row whose parent can't go yet
+ * (see the file comment). Reads only.
  */
 export async function addMissingParents(
   store: ParentStore,
   args: PushArgs,
   page: PushPage,
-  opts: { filed?: Map<string, Set<number>>; held?: HeldRef[] } = {},
+  opts: { filed?: Map<string, Set<number>> } = {},
 ): Promise<ParentsReport> {
   const report: ParentsReport = {
     transactions: 0,
@@ -209,13 +179,11 @@ export async function addMissingParents(
     older: 0,
     deferred: 0,
     notExhausted: [],
-    held: [],
-    resent: [],
     net: {},
   };
   const CHILD_KEYS: ChildKey[] = ['outputs', 'txLabelMaps', 'outputTagMaps', 'commissions'];
   const hasChildren = CHILD_KEYS.some((k) => (page[k] as Rows)?.length);
-  if ((!hasChildren && !opts.held?.length) || !args.identityKey) return report;
+  if (!hasChildren || !args.identityKey) return report;
   const userId = num((await store.findUsers({ partial: { identityKey: args.identityKey } }))[0]?.userId);
   if (userId === undefined) return report;
 
@@ -261,20 +229,6 @@ export async function addMissingParents(
     if (key === 'outputTags') return one(await store.findOutputTags({ partial: { userId, outputTagId: id } }));
     return one(await store.findProvenTxs({ partial: { provenTxId: id } }));
   };
-  const readHeld = async (ref: HeldRef): Promise<Row | undefined> => {
-    const one = (r: Row[] | undefined) => r?.[0];
-    if (ref.key === 'outputs') return read('outputs', ref.outputId);
-    if (ref.key === 'txLabelMaps')
-      return one(
-        await store.findTxLabelMaps?.({ partial: { transactionId: ref.transactionId, txLabelId: ref.txLabelId } }),
-      );
-    if (ref.key === 'outputTagMaps')
-      return one(
-        await store.findOutputTagMaps?.({ partial: { outputId: ref.outputId, outputTagId: ref.outputTagId } }),
-      );
-    return one(await store.findCommissions?.({ partial: { userId, commissionId: ref.commissionId } }));
-  };
-
   /** The copy of a parent that goes: unchanged in the pass's window, a no-op (L1) before it. */
   const copyOf = (key: ParentKey, r: Row): Row => {
     if (inWindow(r)) return r;
@@ -343,18 +297,6 @@ export async function addMissingParents(
       ),
     commissions: (r, out) => need('transactions', r.transactionId, out),
   };
-  const describeHeld = (key: ChildKey, r: Row, h: { txid: string; status: string }) => {
-    const what =
-      key === 'outputs'
-        ? `coin ${String(r.txid ?? h.txid)}:${String(r.vout)}`
-        : key === 'txLabelMaps'
-          ? `label link of ${h.txid}`
-          : key === 'outputTagMaps'
-            ? `tag link of output #${String(r.outputId)}`
-            : `commission of ${h.txid}`;
-    return `[deviceSync] push: ${what} held back: its transaction ${h.txid} is ${h.status}; it goes once that moves on`;
-  };
-
   const added: Pending[] = [];
   const take = (out: Pending[]) => {
     for (const p of out) {
@@ -365,30 +307,7 @@ export async function addMissingParents(
     size += out.reduce((s, p) => s + sizeOf(p.row), 0);
   };
 
-  // Rows held back earlier: sent now if their entity has been read in full and their parents can go.
-  for (const ref of opts.held ?? []) {
-    if (!readInFull(ref.key, false)) continue;
-    const row = await readHeld(ref);
-    if (!row) {
-      report.resent.push(ref); // gone from this device: nothing to send, off the list
-      continue;
-    }
-    const children = (page[ref.key] as Rows) ?? [];
-    if (children.some((c) => sameRef(refOf(ref.key, c)!, ref))) {
-      report.resent.push(ref); // on this page anyway
-      continue;
-    }
-    const out: Pending[] = [];
-    const r = await NEEDS[ref.key](row, out);
-    if (!r.ok) continue; // still can't go
-    const more = out.reduce((s, p) => s + sizeOf(p.row), 0) + sizeOf(row);
-    if (rows > 0 && (rows + out.length + 1 > maxRows || size + more > maxSize)) break;
-    take([...out, { key: ref.key, row }]);
-    report.resent.push(ref);
-  }
-
   // This page's own rows.
-  const holdAt = new Map<ChildKey, Set<number>>();
   let cut: { key: PageKey; at: number } | undefined;
   outer: for (const key of CHILD_KEYS) {
     const children = (page[key] as Rows) ?? [];
@@ -396,10 +315,11 @@ export async function addMissingParents(
       const out: Pending[] = [];
       const r = await NEEDS[key](children[i], out);
       if (!r.ok) {
-        const ref = r.hold ? refOf(key, children[i]) : undefined;
-        if (r.hold && ref) {
-          (holdAt.get(key) ?? holdAt.set(key, new Set()).get(key)!).add(i);
-          report.held.push({ ref, line: describeHeld(key, children[i], r.hold) });
+        if (r.hold) {
+          // The page ends here; this row and the rest wait (not counted as read) until its parent can go.
+          report.waitsFor = r.hold;
+          cut = { key, at: i };
+          break outer;
         }
         continue; // not read in full (never with getSyncChunk): left as it was
       }
@@ -413,20 +333,11 @@ export async function addMissingParents(
     }
   }
 
-  // Held rows come off the page; the offsets still count them as read (net), so the paging goes on past them.
-  for (const [key, at] of holdAt) {
-    const children = page[key] as Row[];
-    (page as Record<string, unknown>)[key] = children.filter((_, i) => !at.has(i));
-    bump(key, -at.size);
-  }
   if (cut) {
     // This child and everything after it in getSyncChunk's order goes on the next page (the offsets resume there).
     const from = ORDER.findIndex(([k]) => k === cut!.key);
-    const before = holdAt.get(cut.key as ChildKey);
-    const original = (page[cut.key] as Row[]).length + (before?.size ?? 0);
-    const keptOwn = cut.at - (before?.size ?? 0); // held rows were all before the cut
-    (page as Record<string, unknown>)[cut.key] = (page[cut.key] as Row[]).slice(0, keptOwn);
-    report.deferred += original - cut.at;
+    report.deferred += (page[cut.key] as Row[]).length - cut.at;
+    (page as Record<string, unknown>)[cut.key] = (page[cut.key] as Row[]).slice(0, cut.at);
     for (const [k] of ORDER.slice(from + 1)) {
       const r = page[k] as Rows;
       if (r?.length) {
@@ -452,10 +363,9 @@ export function describeParents(r: ParentsReport): string | undefined {
   const parts = (['transactions', 'outputs', 'txLabels', 'outputTags', 'provenTxs'] as const)
     .filter((k) => r[k] > 0)
     .map((k) => `${k} ${r[k]}`);
-  if (!parts.length && !r.notExhausted.length && !r.resent.length) return undefined;
+  if (!parts.length && !r.notExhausted.length) return undefined;
   const extra = [
     r.older ? `${r.older} older than the cursor (no-op copies)` : '',
-    r.resent.length ? `${r.resent.length} row(s) held back earlier` : '',
     r.deferred ? `${r.deferred} row(s) moved to the next page` : '',
     r.notExhausted.length ? `not added (entity not sent in full): ${r.notExhausted.join(', ')}` : '',
   ].filter(Boolean);
@@ -468,14 +378,14 @@ export function describeParents(r: ParentsReport): string | undefined {
 
 /**
  * One push pass as this device has sent it: per entity, how far the backup's offset runs ahead of what this device has
- * read (rows added less rows held back, on pages the backup committed), and the page last sent. Ids only, no rows.
+ * read (rows added, on pages the backup committed), and the page last sent. Ids only, no rows.
  */
 type Pass = {
   since: number;
   ahead: Record<string, number>;
   last?: { start: Record<string, number>; len: Record<string, number>; net: Record<string, number> };
 };
-type Kept = { pass?: Pass; held?: HeldRef[] };
+type Kept = { pass?: Pass };
 
 const DB_NAME = 'bwx-push-passes';
 const STORE = 'kv';
@@ -484,6 +394,9 @@ const memory = new Map<string, Kept>();
 const filedBy = new Map<string, Map<string, Set<number>>>();
 /** Ids the last page carried: filed once the next page's offsets show the backup committed it. */
 const pendingIds = new Map<string, Map<string, number[]>>();
+/** The last "waits for" line per pass, logged once a cycle (the device sync's back-off is minutes). */
+const waitLogged = new Map<string, { line: string; at: number }>();
+const WAIT_LOG_MS = 60_000;
 let opened: Promise<IDBDatabase | undefined> | undefined;
 const db = (): Promise<IDBDatabase | undefined> =>
   (opened ??= new Promise<IDBDatabase | undefined>((resolve) => {
@@ -530,6 +443,7 @@ export const _forgetPushMemory = () => {
   memory.clear();
   filedBy.clear();
   pendingIds.clear();
+  waitLogged.clear();
 };
 /** Test hook: forget every pass, kept records too. */
 export const _resetPushPasses = async () => {
@@ -541,7 +455,7 @@ const offsetsOf = (args: PushArgs) =>
   Object.fromEntries(ORDER.map(([, name]) => [name, args.offsets?.find((o) => o.name === name)?.offset ?? 0]));
 
 /**
- * getSyncChunk for a push page, with its parents and held-back rows (addMissingParents) and with the paging kept exact
+ * getSyncChunk for a push page, with its parents (addMissingParents) and with the paging kept exact
  * (see the file comment). Anything that isn't a push page is read as it is.
  */
 export async function readPushPage(
@@ -562,16 +476,14 @@ export async function readPushPage(
    * and any the record had moved, are read again from the pass's start; their rows the backup holds come again as
    * no-ops (the merge applies only a strictly newer row), and none is skipped.
    */
-  const rebase = (from?: Pass) => {
+  const rebase = () => {
     const ahead: Record<string, number> = {};
-    for (const [, name] of ORDER)
-      if (PARENT_ENTITIES.includes(name) || (from?.ahead[name] ?? 0) !== 0 || (from?.last?.net[name] ?? 0) !== 0)
-        ahead[name] = server[name];
+    for (const [, name] of ORDER) if (PARENT_ENTITIES.includes(name)) ahead[name] = server[name];
     filedBy.delete(key);
     pendingIds.delete(key);
     return { since, ahead } as Pass;
   };
-  if (!pass || pass.since !== since) pass = fresh ? { since, ahead: {} } : rebase(pass);
+  if (!pass || pass.since !== since) pass = fresh ? { since, ahead: {} } : rebase();
   else if (pass.last) {
     const { start, len, net } = pass.last;
     const committed = ORDER.every(([, name]) => server[name] === start[name] + (len[name] ?? 0));
@@ -588,8 +500,8 @@ export async function readPushPage(
       }
       filedBy.set(key, filed);
     } else if (refused) pass = { since, ahead: pass.ahead };
-    else pass = rebase(pass);
-  } else if (!fresh) pass = rebase(pass);
+    else pass = rebase();
+  } else if (!fresh) pass = rebase();
   const current = pass;
 
   const own = Object.fromEntries(
@@ -597,7 +509,7 @@ export async function readPushPage(
   );
   const ownArgs: PushArgs = { ...args, offsets: ORDER.map(([, name]) => ({ name, offset: own[name] })) };
   const page = await read(ownArgs);
-  const report = await addMissingParents(store, ownArgs, page, { filed: filedBy.get(key), held: kept.held });
+  const report = await addMissingParents(store, ownArgs, page, { filed: filedBy.get(key) });
 
   // Ids this page carries: filed once the backup commits it (the next page's offsets show it).
   const carried = new Map<string, number[]>();
@@ -612,9 +524,16 @@ export async function readPushPage(
   pendingIds.set(key, carried);
   const net: Record<string, number> = {};
   for (const [k, n] of Object.entries(report.net)) if (n) net[NAME[k as PageKey]] = n;
-  let held = (kept.held ?? []).filter((h) => !report.resent.some((r) => sameRef(r, h)));
-  for (const h of report.held) if (!held.some((x) => sameRef(x, h.ref))) held.push(h.ref);
-  held = held.slice(-1_000);
+  if (report.waitsFor) {
+    const line = `[deviceSync] push waits for ${report.waitsFor.txid} (${report.waitsFor.status})`;
+    const t = waitLogged.get(key);
+    if (!t || t.line !== line || Date.now() - t.at > WAIT_LOG_MS) {
+      waitLogged.set(key, { line, at: Date.now() });
+      log(line);
+    }
+    // Nothing before it: no page goes (an empty page would end the pass and move the backup's cursor past the row).
+    if (ORDER.every(([k]) => !(page[k] as Rows)?.length)) throw new Error(line.replace('[deviceSync] ', ''));
+  }
   await save(key, {
     pass: {
       since,
@@ -625,10 +544,8 @@ export async function readPushPage(
         net,
       },
     },
-    held,
   });
   const line = describeParents(report);
   if (line) log(line);
-  for (const h of report.held) log(h.line);
   return page;
 }

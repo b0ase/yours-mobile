@@ -433,61 +433,78 @@ describe('a relaunch in the middle of a push pass skips nothing', () => {
 });
 
 /**
- * A coin whose transaction can't go as a no-op (re-review of 96f2cda1): it must not hold the whole page back. It is
- * taken off the page, logged, and sent once its transaction moves on.
+ * A coin whose transaction is unsigned or unprocessed (third review): a backup that lacks such a transaction would fail
+ * it as abandoned, so it never goes as a no-op parent. The page ends just before the coin, what comes before it is
+ * committed, and the pass waits there until this device's own TaskFailAbandoned fails it (5 minutes, at the next
+ * monitor run) or it moves on; then the coin goes. A page with nothing before the coin is not sent.
  */
-describe('a row whose parent cannot go yet is held back, never the page', () => {
-  const stuck = async (status: string, extra: Row = {}) => {
-    const w = await world();
-    const { pulled } = await pulledThenAdmitted(w, 3, 1);
-    const p = pulled[1];
-    const T0 = new Date(Date.now() - 4 * DAY);
-    await w.server.updateTransaction(p.serverTx, { status, updated_at: T0, ...extra } as never);
-    await w.phone.updateTransaction(p.phoneTx, { status, updated_at: T0, ...extra } as never);
+describe('a coin whose transaction is unsigned or unprocessed waits; the pass goes on once that moves on', () => {
+  const captureLog = () => {
     const lines: string[] = [];
     const spy = spyOn(console, 'log').mockImplementation((...a: unknown[]) => void lines.push(a.map(String).join(' ')));
+    return { lines, restore: () => spy.mockRestore() };
+  };
+  /** 3 pulled transactions with a coin each; the 2nd is `status` on both copies, with the backup's old time. */
+  const stuck = async (status: string) => {
+    const w = await world();
+    const { pulled, since } = await pulledThenAdmitted(w, 3, 1);
+    const p = pulled[1];
+    const T0 = new Date(Date.now() - 4 * DAY);
+    await w.server.updateTransaction(p.serverTx, { status, updated_at: T0 } as never);
+    await w.phone.updateTransaction(p.phoneTx, { status, updated_at: T0 } as never);
+    return { w, p, pulled, since };
+  };
+  const firstPushWaits = async (w: World, p: { txid: string }, status: string, pulled: { txid: string }[]) => {
+    const log = captureLog();
     try {
-      await w.push(); // the page commits
+      // The page before the coin commits; the next one would start with it and carry nothing: not sent.
+      await expect(w.push()).rejects.toThrow(`push waits for ${p.txid} (${status})`);
     } finally {
-      spy.mockRestore();
+      log.restore();
     }
-    return { w, p, pulled, lines };
+    expect(log.lines.filter((l) => l.includes('push waits for'))).toEqual([
+      `[deviceSync] push waits for ${p.txid} (${status})`,
+    ]);
+    expect((await serverCoin(w, pulled[0].txid, 0)).spendable).toBe(true); // before it: committed
+    expect((await serverCoin(w, p.txid, 0)).spendable).toBe(false); // it and the rest wait
+    expect((await serverCoin(w, pulled[2].txid, 0)).spendable).toBe(false);
+    expect((await w.server.findTransactions({ partial: { txid: p.txid } }))[0].status).toBe(status);
   };
 
-  for (const [status, extra] of [
-    ['failed', {}],
-    ['nosend', {}],
-    ['completed', {}],
-  ] as [string, Row][])
-    test(`a ${status} transaction goes with its coin`, async () => {
-      const { w, p, pulled, lines } = await stuck(status, extra);
-      for (const q of pulled) expect((await serverCoin(w, q.txid, 0)).spendable).toBe(true);
-      expect(lines.filter((l) => l.includes('held back'))).toEqual([]);
-      expect((await w.server.findTransactions({ partial: { transactionId: p.serverTx } }))[0].status).toBe(status);
-    });
+  for (const status of ['unsigned', 'unprocessed'])
+    for (const after of ['failed', 'completed'])
+      for (const relaunch of ['none', 'memory', 'record lost'] as const)
+        test(`${status} → ${after}, relaunch: ${relaunch}`, async () => {
+          const { w, p, pulled, since } = await stuck(status);
+          await firstPushWaits(w, p, status, pulled);
+          // A retry while it is still stuck: still nothing past it, nothing skipped.
+          await expect(w.push()).rejects.toThrow('push waits for');
+          if (relaunch === 'memory') _forgetPushMemory();
+          if (relaunch === 'record lost') await _resetPushPasses();
+          // The wallet's abandoned-task check fails it (or it goes out and is mined): the row joins the pass's window.
+          await w.phone.updateTransaction(p.phoneTx, { status: after } as never);
+          await w.push();
+          for (const q of pulled) expect((await serverCoin(w, q.txid, 0)).spendable).toBe(true);
+          expect((await w.server.findTransactions({ partial: { txid: p.txid } }))[0].status).toBe(after);
+          // Every row the pass owes went, as itself.
+          const owed = await w.phone.findOutputs({ partial: { userId: w.pu }, since });
+          for (const o of owed)
+            expect([
+              o.outputId,
+              w.pages.some((pg) => (pg.outputs ?? []).some((r) => r.outputId === o.outputId)),
+            ]).toEqual([o.outputId, true]);
+        });
 
-  for (const [status, extra] of [
-    ['unsigned', {}],
-    ['unprocessed', {}],
-    ['nonfinal', {}],
-    ['unfail', {}],
-    ['nosend', { noSendExpiryMode: 'blocks' }],
-  ] as [string, Row][])
-    test(`a ${status}${extra.noSendExpiryMode ? ' (with an expiry)' : ''} transaction: its coin is held back, logged, and sent later`, async () => {
-      const { w, p, pulled, lines } = await stuck(status, extra);
-      // The page committed: the other coins are filed; this one waits, and the log names it and why.
-      for (const q of pulled.filter((q) => q !== p)) expect((await serverCoin(w, q.txid, 0)).spendable).toBe(true);
-      expect((await serverCoin(w, p.txid, 0)).spendable).toBe(false);
-      expect(lines.filter((l) => l.includes('held back'))).toEqual([
-        `[deviceSync] push: coin ${p.txid}:0 held back: its transaction ${p.txid} is ${status}; it goes once that moves on`,
-      ]);
-      expect((await w.server.findTransactions({ partial: { transactionId: p.serverTx } }))[0].status).toBe(status);
-      // A relaunch, then the transaction is mined: the next push carries it in its window, and the held coin with it.
+  for (const kind of ['refuse', 'timeoutCommitted'] as const)
+    test(`a ${kind} right after the transaction clears: the coin still arrives`, async () => {
+      const { w, p, pulled } = await stuck('unsigned');
+      await firstPushWaits(w, p, 'unsigned', pulled);
+      await w.phone.updateTransaction(p.phoneTx, { status: 'failed' } as never);
+      w.faultAt(1, kind);
+      await w.push().catch(() => undefined);
       _forgetPushMemory();
-      await w.phone.updateTransaction(p.phoneTx, { status: 'completed', noSendExpiryMode: undefined } as never);
       await w.push();
-      expect((await serverCoin(w, p.txid, 0)).spendable).toBe(true);
-      expect((await w.server.findTransactions({ partial: { transactionId: p.serverTx } }))[0].status).toBe('completed');
+      for (const q of pulled) expect((await serverCoin(w, q.txid, 0)).spendable).toBe(true);
     });
 });
 
@@ -787,30 +804,32 @@ describe('addMissingParents on its own', () => {
     expect(p.transactions).toHaveLength(0);
   });
 
-  test('a no-op parent goes in a state the backup leaves alone; otherwise its coin comes off the page', async () => {
+  test('a no-op parent goes in any state but unsigned or unprocessed; before those the page ends', async () => {
     for (const parent of [
       { status: 'completed' },
       { status: 'unproven' },
       { status: 'sending' },
       { status: 'failed' },
       { status: 'nosend' },
-    ]) {
-      const p = page();
-      const r = await addMissingParents(store(parent), args, p);
-      expect([parent.status, p.transactions.length, p.outputs.length, r.held.length]).toEqual([parent.status, 1, 1, 0]);
-    }
-    for (const parent of [
-      { status: 'unsigned' },
-      { status: 'unprocessed' },
+      { status: 'nosend', noSendExpiryMode: 'blocks' },
       { status: 'nonfinal' },
       { status: 'unfail' },
-      { status: 'nosend', noSendExpiryMode: 'blocks' },
     ]) {
       const p = page();
       const r = await addMissingParents(store(parent), args, p);
-      expect([parent.status, p.transactions.length, p.outputs.length]).toEqual([parent.status, 0, 0]);
-      expect(r.held.map((h) => h.ref)).toEqual([{ key: 'outputs', outputId: 1 }]);
-      expect(r.net).toEqual({ outputs: -1 }); // read, not sent: the offsets go on past it
+      expect([parent.status, p.transactions.length, p.outputs.length, r.waitsFor]).toEqual([
+        parent.status,
+        1,
+        1,
+        undefined,
+      ]);
+    }
+    for (const status of ['unsigned', 'unprocessed']) {
+      const p = page();
+      const r = await addMissingParents(store({ status }), args, p);
+      expect([status, p.transactions.length, p.outputs.length]).toEqual([status, 0, 0]);
+      expect(r.waitsFor).toEqual({ txid: '#5', status });
+      expect(r.net).toEqual({}); // not counted as read: the next page starts with it
     }
   });
 });
