@@ -338,7 +338,7 @@ standalone document. No BRC number has been chosen or claimed.
 
 ## Reference implementation
 
-bWalletX (open source, MIT), repository `github.com/b0ase/yours-mobile`:
+bWalletX (open source, Open BSV License), repository `github.com/b0ase/yours-mobile`:
 
 - Verification: `src/mobile/names/binding.ts` (`checkBinding`)
 - Message format and signing: `src/mobile/names/paymail.ts` (`signedMessage`, `signRequest`)

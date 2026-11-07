@@ -177,4 +177,11 @@ Or [create an issue](https://github.com/bitcoin-corp/bwallet/issues) and the tea
 
 ## License
 
-[MIT License](https://opensource.org/licenses/MIT)
+- **Our code** (The Bitcoin Corporation Ltd and bWalletX contributors): [Open BSV License Version 6](LICENSE). It may only be used with the Bitcoin SV (BSV) blockchain.
+- **Yours Wallet code** this fork builds on (© 2024 Daniel Wagner, David Case): stays [MIT](LICENSE-MIT).
+- **Earlier releases** published under MIT stay MIT.
+- **Written specs** in `docs/`: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- **Third-party code and fonts** keep their own licences.
+- **Names and logos** (bWalletX, bWallet, The Bitcoin Corporation) are trademarks and are not licensed; the trademark policy is unchanged.
+
+See [NOTICE](NOTICE) for details.

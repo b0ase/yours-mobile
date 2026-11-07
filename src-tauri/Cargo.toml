@@ -3,7 +3,7 @@ name = "bwalletx-desktop"
 version = "5.2.32"
 description = "bWalletX Desktop"
 authors = ["The Bitcoin Corporation Ltd"]
-license = "MIT"
+license-file = "../LICENSE"
 edition = "2021"
 
 [lib]
