@@ -7,6 +7,7 @@ import {
   pushEnvFor,
   roomNotifyFor,
   routeFromData,
+  routeFromLocalExtra,
   routeFromQuery,
   routeToQuery,
   toServerPrefs,
@@ -93,7 +94,8 @@ describe('payload → route', () => {
     expect(routeFromData({ room: 'abc' })).toEqual({ segment: 'rooms', ticker: 'ABC' });
     expect(routeFromData({ kind: 'b_answer', url: '/room/HELP?x=1' })).toEqual({ segment: 'rooms', ticker: 'HELP' });
     expect(routeFromData({ kind: 'call', ticker: 'ABC' })).toBeNull();
-    expect(routeFromData({ kind: 'room_message', ticker: 'bad ticker!' })).toBeNull();
+    // A chat message whose room is unusable still opens the Chat tab.
+    expect(routeFromData({ kind: 'room_message', ticker: 'bad ticker!' })).toEqual({ segment: 'chat', ticker: '' });
     expect(routeFromData(undefined)).toBeNull();
     expect(routeFromData({})).toBeNull();
   });
@@ -221,5 +223,51 @@ describe('iOS taps and documents to sign (owner, 28 Oct 2026)', () => {
     expect(routeToQuery(r)).toBe(`push=rooms:BCORPBOARD/${ID}`);
     expect(routeFromQuery(`?${routeToQuery(r)}`)).toEqual(r);
     expect(routeFromQuery('?push=rooms:BCORPBOARD')).toEqual({ segment: 'rooms', ticker: 'BCORPBOARD' });
+  });
+});
+
+describe('notification tap → where it opens (owner, 3 Nov 2026)', () => {
+  test('iOS push: the room fields sit under data (whole userInfo), DMs open the DMs page', () => {
+    const userInfo = {
+      aps: { alert: { title: '$alice', body: '$alice sent you a message' }, badge: 3 },
+      data: { kind: 'room_message', ticker: 'ALICEBOB', room: 'ALICEBOB', url: 'https://x/room/ALICEBOB', dm: true },
+    };
+    expect(routeFromData(userInfo)).toEqual({ segment: 'dms', ticker: 'ALICEBOB' });
+    const group = { aps: {}, data: { kind: 'room_message', ticker: 'builders', dm: false } };
+    expect(routeFromData(group)).toEqual({ segment: 'rooms', ticker: 'BUILDERS' });
+  });
+  test('Android push: flat string data', () => {
+    expect(routeFromData({ kind: 'room_mention', ticker: 'NPG', dm: 'false' })).toEqual({
+      segment: 'rooms',
+      ticker: 'NPG',
+    });
+  });
+  test('a chat push without a room opens the Chat tab; other kinds without a route open nothing', () => {
+    expect(routeFromData({ kind: 'room_message' })).toEqual({ segment: 'chat', ticker: '' });
+    expect(routeFromData({ aps: {}, data: { kind: 'b_answer' } })).toEqual({ segment: 'chat', ticker: '' });
+    expect(routeFromData({ dm: 'true' })).toEqual({ segment: 'chat', ticker: '' });
+    expect(routeFromData({ kind: 'payment' })).toBeNull();
+    expect(routeFromData({ kind: 'call' })).toBeNull();
+  });
+  test('local notices (notify/engine.ts extra.target)', () => {
+    expect(routeFromLocalExtra({ notifyId: 'chat:BUILD:1', target: { type: 'room', ticker: 'build' } })).toEqual({
+      segment: 'rooms',
+      ticker: 'BUILD',
+    });
+    expect(routeFromLocalExtra({ target: { type: 'room', ticker: 'DM-AB', dm: true } })).toEqual({
+      segment: 'dms',
+      ticker: 'DM-AB',
+    });
+    expect(routeFromLocalExtra({ target: { type: 'room', ticker: '<bad>' } })).toEqual({ segment: 'chat', ticker: '' });
+    expect(routeFromLocalExtra({ target: { type: 'calls' } })).toEqual({ segment: 'calls', ticker: '' });
+    expect(routeFromLocalExtra({ target: { type: 'bmail' } })).toEqual({ segment: 'mail', ticker: '' });
+    expect(routeFromLocalExtra({ target: { type: 'post', txid: 'x' } })).toBeNull();
+    expect(routeFromLocalExtra({ target: null })).toBeNull();
+    expect(routeFromLocalExtra(undefined)).toBeNull();
+    expect(routeFromLocalExtra('junk')).toBeNull();
+  });
+  test('the Chat route survives a Web Push click query', () => {
+    const r = { segment: 'chat' as const, ticker: '' };
+    expect(routeFromQuery(`?${routeToQuery(r)}`)).toEqual(r);
   });
 });
