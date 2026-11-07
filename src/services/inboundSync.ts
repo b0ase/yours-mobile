@@ -57,6 +57,7 @@ import type { SpendState } from './unsentExpiry';
 import {
   afterPage,
   beforePage,
+  finishTail,
   markOf,
   onDemandAllowed,
   overlapped,
@@ -64,6 +65,7 @@ import {
   rewind,
   rewindDeep,
   syncStateFor,
+  tailUnderWay,
   updateMark,
   type SyncStateRow,
 } from './fullPass';
@@ -1631,8 +1633,10 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
       }
     };
     const mark = markOf(row);
-    /** A deep or full pass this device started: the device-sync pulls carry it (services/fullPass.ts). */
-    const ours = fromStart ? typeof mark.startedAt === 'number' : typeof mark.deepStartedAt === 'number';
+    /** A tail pass (rows that reached the backup late with old times: services/pullTail.ts), not one from the start. */
+    const tail = fromStart && tailUnderWay(mark);
+    /** A deep, full or tail pass this device started: the device-sync pulls carry it (services/fullPass.ts). */
+    const ours = fromStart ? typeof mark.startedAt === 'number' || tail : typeof mark.deepStartedAt === 'number';
     // A heal, or a merge with no mode (the factory's at open), leaves it to the pulls (review 23, M2; re-check N2).
     if (beforePage(deviceSik, { fromStart, ours }) === 'stop') {
       more();
@@ -1652,10 +1656,20 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
           .map((o) => `${o.txid ?? '?'}.${o.vout} (backup transaction ${o.transactionId})`);
         // L5: a backup holding such a row never sends its transaction; a retry can't take it. Named for support.
         v.log?.(
-          `[inbound-sync] backup page names ${unfiled.length} payment(s) this device has no record of and the backup doesn't send${fromStart ? ', even from the start' : ''}: ${rows.slice(0, 20).join(', ')}${rows.length > 20 ? ` and ${rows.length - 20} more` : ''}`,
+          `[inbound-sync] backup page names ${unfiled.length} payment(s) this device has no record of and the backup doesn't send${fromStart && !tail ? ', even from the start' : ''}: ${rows.slice(0, 20).join(', ')}${rows.length > 20 ? ` and ${rows.length - 20} more` : ''}`,
         );
-        // The next full pass for it: not before 24 h from now (a pass from the start that met it counts as one).
-        if (id) await updateMark(this, id, fromStart ? { due: 'unfiled', onDemandAt: Date.now() } : { due: 'unfiled' });
+        // The next full pass for it: not before 24 h from now (a pass from the start that met it counts as one). A tail
+        // pass that met it (its transaction lies before the tail) asks for a full pass when the 24 h limit allows.
+        if (id)
+          await updateMark(
+            this,
+            id,
+            tail
+              ? { due: 'unfiled', tailStartedAt: undefined, tailFromWhen: undefined }
+              : fromStart
+                ? { due: 'unfiled', onDemandAt: Date.now() }
+                : { due: 'unfiled' },
+          );
         throw new Error(UNFILED_PAGE);
       }
       if (deep) await rewindDeep(this, id!);
@@ -1696,7 +1710,11 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
     if (!merged) return merged;
     if (merged.done) {
       rewound.delete(passKey);
-      if (fromStart || ours) {
+      if (tail) {
+        // A tail pass completed: the cursor goes back where it was; recorded as a tail pass, never as a full one.
+        row = await readerSyncState(this, args);
+        if (row && typeof row.syncStateId === 'number') await finishTail(this, row);
+      } else if (fromStart || ours) {
         // A pass from the start (ours, or a store's first) or a deep pull completed: recorded for the schedule.
         row = await readerSyncState(this, args);
         const now = Date.now();

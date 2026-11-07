@@ -28,6 +28,7 @@
  *    resumes it and never starts a new one. It never sets a backup aside on its own.
  */
 import { EntitySyncState } from '@bsv/wallet-toolbox-client';
+import { findTailOffsets, mergedIds, type GetSyncChunk } from './pullTail';
 
 const HOUR = 3_600_000;
 /** A true full pass, weekly (review 23 re-check: the cost schedule). */
@@ -79,6 +80,14 @@ export type FullPassMark = {
   firstAt?: number;
   /** The last request made on Wi-Fi (ms), at most hourly: a phone off Wi-Fi 14 days runs one pass on mobile data. */
   wifiAt?: number;
+  /** The last tail check (requestTailPass), whatever it found (ms). */
+  tailCheckedAt?: number;
+  /** A tail pass under way (the cursor unset, offsets at the first rows this device never had). */
+  tailStartedAt?: number;
+  /** The cursor before that tail pass (ms; absent when there was none): put back when it completes. */
+  tailFromWhen?: number;
+  /** The last tail pass that completed (ms). */
+  tailDoneAt?: number;
 };
 
 export type SyncStateRow = { syncStateId?: number; when?: unknown; syncMap?: unknown };
@@ -363,3 +372,75 @@ export function withDeadlines<T extends object>(reader: T, callMs = PULL_CALL_MS
     },
   });
 }
+
+// ── rows that reach the backup late, with old times (services/pullTail.ts; extension, 6 Nov 2026) ──
+
+/** How often the tail check runs (two one-row probes per entity when nothing is missing). */
+export const TAIL_CHECK_EVERY_MS = 6 * HOUR;
+
+export type TailPlan = 'tail' | 'in-step' | 'not-due' | 'busy' | 'unknown';
+
+/**
+ * Before a device-sync pull: every TAIL_CHECK_EVERY_MS, look for backup rows this device never merged (rows another
+ * copy pushed late, with times older than the cursor, which no incremental pull asks for). Found: the next pull is a
+ * TAIL pass, the cursor unset and each entity's offset at its first such row, so it reads only from there in the
+ * backup's insert order; when it completes the cursor is put back where it was (the inbound guard: finishTail). Never
+ * while a pass is under way. The probes run outside the storage lock; the rewind is written under it.
+ */
+export async function requestTailPass(o: {
+  manager: { runAsSync<T>(fn: (sync: unknown) => Promise<T>): Promise<T> };
+  store: SyncStateStore;
+  identityKey: string;
+  readerSik: string;
+  /** The backup as the pull reads it (its own deadlines). */
+  reader: { getSyncChunk: GetSyncChunk };
+  now?: number;
+}): Promise<TailPlan> {
+  const now = o.now ?? Date.now();
+  const busy = (r: SyncStateRow | undefined) =>
+    !r || typeof r.syncStateId !== 'number' || passFromStart(r) || passUnderWay(r);
+  const row0 = await o.manager.runAsSync(() => syncStateFor(o.store, o.identityKey, o.readerSik));
+  if (busy(row0)) return 'busy';
+  const mark0 = markOf(row0);
+  if (typeof mark0.tailCheckedAt === 'number' && now - mark0.tailCheckedAt < TAIL_CHECK_EVERY_MS) return 'not-due';
+  const toSik = (o.store as { getSettings?: () => { storageIdentityKey?: string } }).getSettings?.()
+    ?.storageIdentityKey;
+  const offsets = await findTailOffsets(
+    (a) => o.reader.getSyncChunk(a),
+    { identityKey: o.identityKey, fromStorageIdentityKey: o.readerSik, toStorageIdentityKey: toSik ?? '' },
+    mergedIds(row0!.syncMap),
+  ).catch(() => undefined);
+  return o.manager.runAsSync(async () => {
+    const row = await syncStateFor(o.store, o.identityKey, o.readerSik);
+    if (busy(row)) return 'busy';
+    if (offsets === undefined) return 'unknown'; // the backup didn't answer: asked again on the next pull
+    if (!offsets) {
+      await updateMark(o.store, row!, { tailCheckedAt: now });
+      return 'in-step';
+    }
+    await write(o.store, row!, (ss) => {
+      const from = row!.when == null ? undefined : new Date(row!.when as string | Date).getTime();
+      ss.when = undefined;
+      const sm = ss.syncMap as unknown as Record<string, { count?: number }>;
+      for (const { name, offset } of offsets) if (sm[name] && typeof sm[name] === 'object') sm[name].count = offset;
+      setMark(ss, { ...markOf(row), tailCheckedAt: now, tailStartedAt: now, tailFromWhen: from });
+    });
+    return 'tail';
+  });
+}
+
+/** A tail pass (and not a pass from the start) is under way on this sync state. */
+export const tailUnderWay = (mark: FullPassMark) =>
+  typeof mark.tailStartedAt === 'number' && typeof mark.startedAt !== 'number';
+
+/**
+ * A tail pass completed (the inbound guard, after the toolbox set the cursor to the newest time it has seen): the
+ * cursor goes back to where it was before the pass, so a row updated meanwhile at an offset before the tail still
+ * comes on the next incremental pull; recorded as a tail pass, never as a full pass.
+ */
+export const finishTail = (store: SyncStateStore, row: SyncStateRow, now = Date.now()) =>
+  write(store, row, (ss) => {
+    const mark = markOf(row);
+    if (typeof mark.tailFromWhen === 'number') ss.when = new Date(mark.tailFromWhen);
+    setMark(ss, { ...mark, tailStartedAt: undefined, tailFromWhen: undefined, tailDoneAt: now });
+  });

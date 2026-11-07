@@ -322,6 +322,10 @@ describe('the real initWallet wiring', () => {
     expect(pull).not.toContain('await admitBackupRows()');
     // Its backup requests have deadlines, and a full pass is asked for first when due (services/fullPass.ts).
     expect(pull).toMatch(/await fullPassIfDue\([\s\S]*withDeadlines\(reader/);
+    // Then the tail check for rows pushed late with old times, before the merge (services/pullTail.ts, 6 Nov 2026).
+    expect(pull).toMatch(
+      /await fullPassIfDue\(backupSik\)[\s\S]*await requestTailPass\(\{[\s\S]*storage\.syncFromReader/,
+    );
   });
 
   test('a heal leaves a pass from the start to the device-sync pulls, and a failed one asks for a full pass (review 23, M2)', () => {
