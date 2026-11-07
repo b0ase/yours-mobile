@@ -80,11 +80,12 @@ export async function findTailOffsets(
   base: Record<string, unknown>,
   merged: Record<string, number[]>,
   memo: TailMemo = {},
-): Promise<{ tail: { name: string; offset: number }[] | null; memo: Required<TailMemo> }> {
+  log: (m: string) => void = (m) => console.warn(m),
+): Promise<{ tail: { name: string; offset: number }[] | null; memo: Required<TailMemo>; skipped?: string }> {
   const counts: number[] = [];
   /** The row of entity `i` at `offset` (earlier entities skipped by their counts): its id, `true` (no id), or none. */
   const probe = async (i: number, offset: number): Promise<number | true | undefined> => {
-    if (offset > TAIL_OFFSET_CAP) throw new Error(`tail check: offset ${offset} past the backup's cap`);
+    if (offset > TAIL_OFFSET_CAP) throw new PastCap();
     const offsets = TAIL_ENTITIES.map((e, j) => ({ name: e.name, offset: j < i ? counts[j] : j === i ? offset : 0 }));
     const chunk = await get({ ...base, since: undefined, maxItems: 1, maxRoughSize: 10_000_000, offsets });
     const e = TAIL_ENTITIES[i];
@@ -148,8 +149,23 @@ export async function findTailOffsets(
 
   const starts = new Map<string, number>();
   const seen: Record<string, number> = { ...(memo.seen ?? {}) };
-  const outCounts: Record<string, number> = {};
-  for (let i = 0; i < TAIL_ENTITIES.length; i++) {
+  const outCounts: Record<string, number> = { ...(memo.counts ?? {}) };
+  let skipped: string | undefined;
+  for (let i = 0; i < TAIL_ENTITIES.length && !skipped; i++) {
+    const e = TAIL_ENTITIES[i];
+    try {
+      await checkEntity(i);
+    } catch (err) {
+      if (!(err instanceof PastCap)) throw err;
+      // More rows than a probe may skip: this entity, and every one after it (their probes would skip it), are left to
+      // the weekly full pass.
+      skipped = e.name;
+      log(
+        `[tail-check] ${e.name} has more than ${TAIL_OFFSET_CAP} rows on the backup: it and the tables after it are left to the weekly full pass`,
+      );
+    }
+  }
+  async function checkEntity(i: number) {
     const e = TAIL_ENTITIES[i];
     const guess = memo.counts?.[e.name] ?? 0;
     if (!e.id) {
@@ -157,7 +173,7 @@ export async function findTailOffsets(
       counts[i] = await countOf(i, guess);
       if (parentTail && counts[i] > 0) starts.set(e.name, 0);
       outCounts[e.name] = counts[i];
-      continue;
+      return;
     }
     const all = merged[e.name] ?? [];
     const x = seen[e.name];
@@ -187,9 +203,14 @@ export async function findTailOffsets(
     } else starts.set(e.name, tail);
   }
   const memoOut = { seen, counts: outCounts };
+  // An entity too large to skip by offset: no tail pass at all (it would have to page past that entity too).
+  if (skipped) return { tail: null, memo: memoOut, skipped };
   if (!starts.size) return { tail: null, memo: memoOut };
   return {
     tail: TAIL_ENTITIES.map((e, i) => ({ name: e.name, offset: starts.get(e.name) ?? counts[i] })),
     memo: memoOut,
   };
 }
+
+/** A probe would pass TAIL_OFFSET_CAP. */
+class PastCap extends Error {}

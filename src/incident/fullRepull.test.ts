@@ -1078,11 +1078,26 @@ describe('review of 8d59e33b: a stuck pass, an offset cap, an unfiled tail', () 
         d.built.txids.add(late);
         const t0 = Date.now();
         await stuck(d, t0 - 30 * 3_600_000); // started "6 Nov 07:52", a day and more ago
-        // The old build saved no cursor at the rewind: the last good one comes from the newest times the map has seen.
+        // The old build saved no cursor at the rewind: the last good one comes from the newest times the map has seen
+        // for transactions and outputs (baskets, tags and labels rarely change: their times are months old).
         await updateMark(d.phone as never, await d.state(), { fromWhen: undefined });
+        const sm = JSON.parse(String((await d.state()).syncMap)) as Record<string, { maxUpdated_at?: string }>;
+        const expected = Math.min(+new Date(sm.transaction.maxUpdated_at!), +new Date(sm.output.maxUpdated_at!));
+        await d.sm.runAsSync(async () => {
+          // A basket last touched months ago (the incident: 27 Oct for baskets, 1 Nov for labels).
+          const row = await d.state();
+          const m = JSON.parse(String(row.syncMap)) as Record<string, { maxUpdated_at?: string }>;
+          m.outputBasket.maxUpdated_at = new Date(t0 - 120 * DAY).toISOString();
+          await d.phone.updateSyncState(row.syncStateId!, { syncMap: JSON.stringify(m) } as never);
+        });
+        // Not on wall-clock age: only when its offsets stop moving for STUCK_PASS_MS of uptime.
+        expect(await ask(d, t0)).toBe('resuming');
+        let plan = '';
+        for (let m = 1; m <= 40 && plan !== 'abandoned'; m++) plan = await ask(d, t0 + m * 60_000);
+        expect(plan).toBe('abandoned');
         d.o.failAfterPages = undefined;
-        expect(await ask(d, t0)).toBe('abandoned');
         const st = await d.state();
+        expect(+new Date(st.when as string)).toBe(expected); // hours before the pass, never the basket's months
         expect(st.when == null).toBe(false);
         expect(passUnderWay(st)).toBe(false);
         expect(markOf(st).startedAt).toBeUndefined();
@@ -1102,7 +1117,44 @@ describe('review of 8d59e33b: a stuck pass, an offset cap, an unfiled tail', () 
     T,
   );
 
-  test('a pass from the start that has not moved for 30 minutes of uptime is given up; gaps (asleep) do not count', async () => {
+  test('a long pass that keeps moving is never given up, even opened briefly once a day for a week', async () => {
+    const d = await phoneWith(400);
+    try {
+      await d.pullToEnd();
+      const t0 = Date.now();
+      await d.sm.runAsSync(async () => rewind(d.phone as never, await d.state(), t0, { onDemandAt: t0 }));
+      _setFullPassSlice(0); // one page a pull: the pass takes many opens
+      for (let day = 0; day < 7; day++) {
+        const at = t0 + day * DAY;
+        expect(await ask(d, at)).not.toBe('abandoned');
+        await d.pull(at);
+      }
+      expect(passUnderWay(await d.state()) || markOf(await d.state()).doneAt !== undefined).toBe(true);
+      expect(markOf(await d.state()).abandonedAt).toBeUndefined();
+    } finally {
+      _setFullPassSlice();
+      d.off();
+    }
+  });
+
+  test('a stuck pass on a phone opened briefly each day is still given up (each open counts up to 5 minutes)', async () => {
+    const d = await phoneWith(200);
+    try {
+      await d.pullToEnd();
+      const t0 = Date.now();
+      await stuck(d, t0);
+      let plan = '';
+      let opens = 0;
+      while (opens < 20 && plan !== 'abandoned') plan = await ask(d, t0 + ++opens * DAY);
+      expect(plan).toBe('abandoned');
+      expect(opens).toBeLessThanOrEqual(STUCK_PASS_MS / (5 * 60_000) + 1);
+    } finally {
+      d.o.failAfterPages = undefined;
+      d.off();
+    }
+  });
+
+  test('a pass from the start that has not moved for 30 minutes of uptime is given up; a long gap counts 5 minutes', async () => {
     const d = await phoneWith(200);
     try {
       await d.pullToEnd();
@@ -1120,7 +1172,7 @@ describe('review of 8d59e33b: a stuck pass, an offset cap, an unfiled tail', () 
         minutes++;
       }
       expect(plan).toBe('abandoned');
-      expect(minutes).toBeGreaterThanOrEqual(STUCK_PASS_MS / 60_000 - 1);
+      expect(minutes).toBeGreaterThanOrEqual(STUCK_PASS_MS / 60_000 - 6);
       expect(minutes).toBeLessThan(STUCK_PASS_MS / 60_000 + 3);
       // A cursor saved at the rewind is the one put back.
       expect((await d.state()).when == null).toBe(false);

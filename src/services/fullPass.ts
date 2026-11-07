@@ -176,11 +176,12 @@ export const rewind = (store: SyncStateStore, row: SyncStateRow, now = Date.now(
     });
   });
 
-/** A pass from the start that hasn't moved for this long of wallet uptime is given up (review of 8d59e33b). */
+/**
+ * A pass from the start whose offsets haven't moved for this long of wallet uptime is given up (review of 8d59e33b
+ * and its re-review). Never on wall-clock age: a phone opened briefly each day still finishes a long sliced pass.
+ */
 export const STUCK_PASS_MS = 30 * 60_000;
-/** Or once it is this old, moving or not. */
-export const STALE_PASS_MS = 24 * HOUR;
-/** Two checks further apart than this are not counted as uptime (the wallet was closed or asleep). */
+/** Each check counts at most this much uptime since the one before (the wallet may have been closed or asleep). */
 const UPTIME_GAP_MS = 5 * 60_000;
 
 const countsKey = (row: SyncStateRow) => {
@@ -193,15 +194,18 @@ const countsKey = (row: SyncStateRow) => {
 };
 
 /**
- * The last good cursor for an abandoned pass: the one saved when it started, else the OLDEST newest-time any entity
- * has seen (a later one would skip rows updated between the two; the tail check brings rows that arrived late).
+ * The last good cursor for an abandoned pass: the one saved when it started, else the older of the newest times seen
+ * for transactions and outputs (re-review of ae32009c: baskets, tags and labels rarely change, so their newest times are
+ * months old, and the oldest over every entity re-pulled the wallet's history). A later cursor than the real one would
+ * skip rows updated between the two; rows that arrived late are the tail check's. The catch-up is a device-sync pull:
+ * sliced and yielding like any other (afterPage).
  */
 export const lastGoodWhen = (row: SyncStateRow): number | undefined => {
   const mark = markOf(row);
   if (typeof mark.fromWhen === 'number') return mark.fromWhen;
   const m = parse(row.syncMap) ?? {};
-  const times = Object.values(m)
-    .map((e) => (e && typeof e === 'object' ? (e as { maxUpdated_at?: unknown }).maxUpdated_at : undefined))
+  const times = ['transaction', 'output']
+    .map((k) => (m[k] && typeof m[k] === 'object' ? (m[k] as { maxUpdated_at?: unknown }).maxUpdated_at : undefined))
     .filter((t): t is string | Date => t != null)
     .map((t) => new Date(t).getTime())
     .filter((t) => Number.isFinite(t));
@@ -210,19 +214,19 @@ export const lastGoodWhen = (row: SyncStateRow): number | undefined => {
 
 /**
  * A pass from the start under way: note its progress, and say whether it is stuck (its offsets unchanged for
- * STUCK_PASS_MS of uptime, or older than STALE_PASS_MS). Writes the progress mark. Extension, 6-7 Nov 2026: a pass
- * started at 07:52 on 6 Nov sat at transaction offset 63 for a day, and while it is under way nothing else pulls.
+ * STUCK_PASS_MS of uptime; each check adds the time since the one before, at most UPTIME_GAP_MS, so checks hours or
+ * days apart still add up). Writes the progress mark. Extension, 6-7 Nov 2026: a pass started at 07:52 on 6 Nov sat
+ * at transaction offset 63 for a day, and while it is under way nothing else pulls.
  */
 async function stuckPass(store: SyncStateStore, row: SyncStateRow, now: number): Promise<boolean> {
   const mark = markOf(row);
   const key = countsKey(row);
-  if (typeof mark.startedAt === 'number' && now - mark.startedAt >= STALE_PASS_MS) return true;
   if (mark.progressKey !== key) {
     await updateMark(store, row, { progressKey: key, progressSeenAt: now, stuckMs: 0 });
     return false;
   }
   const gap = now - (mark.progressSeenAt ?? now);
-  const stuckMs = (mark.stuckMs ?? 0) + (gap > 0 && gap <= UPTIME_GAP_MS ? gap : 0);
+  const stuckMs = (mark.stuckMs ?? 0) + Math.min(Math.max(0, gap), UPTIME_GAP_MS);
   if (stuckMs >= STUCK_PASS_MS) return true;
   await updateMark(store, row, { progressSeenAt: now, stuckMs });
   return false;
@@ -523,6 +527,7 @@ export async function requestTailPass(o: {
       return 'unknown';
     }
     if (!found.tail) {
+      // In step, or an entity too large to check (logged; the weekly full pass covers it): checked either way.
       await updateMark(o.store, row!, { tailCheckedAt: now, tailSeen: found.memo.seen, tailCounts: found.memo.counts });
       return 'in-step';
     }

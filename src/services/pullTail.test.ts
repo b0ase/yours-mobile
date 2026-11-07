@@ -83,12 +83,47 @@ describe("findTailOffsets: the first backup row this device never merged, by the
     expect((await findTailOffsets(b.get, {}, rows, first.memo)).tail).toBeNull();
     expect(b.probes() - before).toBeLessThanOrEqual(2 * TAIL_ENTITIES.length + 6);
   });
-  test('an offset cap: never past TAIL_OFFSET_CAP; a refused probe throws (the caller backs off)', async () => {
+  test('a backup that refuses a probe (its own lower cap): throws (the caller backs off 30 min)', async () => {
     const b = backup({ transaction: [1, 2, 3] }, 2);
     await expect(findTailOffsets(b.get, {}, { transaction: [1, 2] })).rejects.toThrow();
-    const big = backup({}, TAIL_OFFSET_CAP);
-    await findTailOffsets(big.get, {}, {});
-    expect(big.maxOffset()).toBeLessThanOrEqual(TAIL_OFFSET_CAP);
+  });
+  test('an entity past TAIL_OFFSET_CAP rows: no throw; it and the entities after it are left unchecked, with a log line', async () => {
+    const huge = range(1, TAIL_OFFSET_CAP + 5);
+    const b = backup({ provenTx: [1, 2], output: huge, provenTxReq: [1, 2, 3] }, TAIL_OFFSET_CAP);
+    const logs: string[] = [];
+    const r = await findTailOffsets(b.get, {}, { provenTx: [1], output: huge, provenTxReq: [1, 2] }, {}, (m) =>
+      logs.push(m),
+    );
+    expect(b.maxOffset()).toBeLessThanOrEqual(TAIL_OFFSET_CAP);
+    // No tail pass then (it could not skip that entity either); the weekly full pass covers it.
+    expect(r.tail).toBeNull();
+    expect(r.skipped).toBe('output');
+    expect(logs.join(' ')).toContain('output');
+  });
+  test("RB's wallet size (extension copy, 7 Nov: 395 proofs, 430 txs, 1,735 outputs, 942 label links, 852 tag links, 395 requests): a few dozen probes", async () => {
+    const rows = {
+      provenTx: range(4_000, 4_394),
+      outputBasket: range(1, 10),
+      outputTag: range(1, 371),
+      txLabel: range(1, 61),
+      transaction: range(8_000, 8_429),
+      output: range(57_000, 58_734),
+      txLabelMap: range(1, 942),
+      outputTagMap: range(1, 852),
+      provenTxReq: range(6_000, 6_394),
+    };
+    const b = backup(structuredClone(rows), TAIL_OFFSET_CAP);
+    const first = await findTailOffsets(b.get, {}, rows);
+    expect(first.tail).toBeNull();
+    expect(b.probes()).toBeLessThanOrEqual(80); // the first check finds the link tables' counts
+    const before = b.probes();
+    // A row that reaches the backup late gets a new, higher id (8430), whatever its times say.
+    b.rows.transaction.push(8_430);
+    const r = await findTailOffsets(b.get, {}, rows, first.memo);
+    expect(offsetOf(r, 'transaction')).toBe(430);
+    expect(offsetOf(r, 'txLabelMap')).toBe(0);
+    expect(offsetOf(r, 'outputTagMap')).toBe(852);
+    expect(b.probes() - before).toBeLessThanOrEqual(45);
   });
 });
 
