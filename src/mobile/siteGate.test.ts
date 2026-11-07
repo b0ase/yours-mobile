@@ -88,6 +88,34 @@ describe('site gate', () => {
     expect(calls.length).toBe(2);
   });
 
+  test('one Seal sheet (services/sealPass.ts): reading it never costs a second prompt', async () => {
+    const { gate, calls, advance } = gateWith(async () => ({ status: 'ok', method: 'biometric' }));
+    await gate.check(SITE, 'confirmUser'); // Seal pressed: Face ID
+    await gate.check(SITE, 'createSignature'); // rides it; the Seal sheet opens
+    advance(28_000); // the person reads the sheet, then Allow
+    gate.extendPass(SITE);
+    advance(10_000); // 38 s after the prompt: past the plain grace window
+    await gate.check(SITE, 'createAction'); // the seal payment rides the same prompt
+    expect(calls.length).toBe(1);
+    // Still one payment per prompt: the next one asks.
+    gate.extendPass(SITE);
+    await gate.check(SITE, 'createAction');
+    expect(calls.length).toBe(2);
+  });
+
+  test('extendPass never creates or revives a pass', async () => {
+    const { gate, calls } = gateWith(async () => ({ status: 'ok', method: 'biometric' }));
+    gate.extendPass(SITE); // no pass yet
+    await gate.check(SITE, 'createAction');
+    expect(calls.length).toBe(1);
+    const b = gateWith(async () => ({ status: 'ok', method: 'biometric' }));
+    await b.gate.check(SITE, 'createSignature');
+    b.advance(31_000); // expired
+    b.gate.extendPass(SITE);
+    await b.gate.check(SITE, 'createAction');
+    expect(b.calls.length).toBe(2);
+  });
+
   test('every payment after a payment asks again, even inside the grace window', async () => {
     const { gate, calls, advance } = gateWith(async () => ({ status: 'ok', method: 'biometric' }));
     await gate.check(SITE, 'createSignature');

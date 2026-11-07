@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { DeviceDataNote } from '../../components/DeviceDataNote';
+import { isOnDeviceStore } from '../../services/localFirst';
 import { AccountNameField } from '../../components/AccountNameField';
 import {
   accountNameError,
@@ -9,6 +11,8 @@ import {
 } from '../../utils/accountNameRules';
 import { BetaGate } from '../../mobile/sweep/BetaGate';
 import { useNavigate } from 'react-router-dom';
+import { TermsLine } from '../../mobile/ugc/UgcSheets';
+import { acceptTerms, termsAccepted } from '../../mobile/ugc/ugc';
 import { PasswordFields } from '../../mobile/names/PasswordFields';
 import { useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -322,7 +326,9 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
 
   const getRestoreDescription = () => {
     return importWallet === 'yours'
-      ? 'Enter your 12 words. They are all you need; the Yours extension is not required.'
+      ? // Not "the 12 words are enough" (release click-through, 4 Nov 2026): change from before this update can live only on
+        // the device that made it. Same advice as bwalletx.com's restore copy (bwalletx-site 49f9c9a).
+        'Enter your 12 words; the Yours extension is not required. If your old device still works, keep bWalletX on it until this one shows the right balance: some change from before this update is recorded only on the device that made it.'
       : importWallet
       ? 'Enter your seed phrase'
       : 'Enter a seed phrase and use custom derivation paths to import a wallet from anywhere!';
@@ -816,6 +822,12 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
       >
         Your wallet has been successfully restored.
       </motion.p>
+      {/* A restored account starts on the online backup and moves to this device when it opens (services/localFirst.ts). */}
+      {!isOnDeviceStore(chromeStorageService.getCurrentAccountObject().account?.storageConfig) && (
+        <div className="w-full">
+          <DeviceDataNote state="remote" />
+        </div>
+      )}
 
       <motion.div
         initial={{ opacity: 0, y: 8 }}
@@ -823,11 +835,14 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
         transition={{ delay: 0.42 }}
         className="w-full"
       >
+        {/* Terms of Use at setup (owner, 3 Nov 2026): Enter agrees, so Feed, Chat, DMs and Calls just open later. */}
+        {(newWallet || !termsAccepted()) && <TermsLine className="mb-3 px-4" />}
         <Button
           theme={theme}
           type="primary"
           label="Enter"
           onClick={() => {
+            acceptTerms();
             window.location.reload();
           }}
         />

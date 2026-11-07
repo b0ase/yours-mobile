@@ -7,12 +7,20 @@
  *   Space page (old/private) https://<host>/s/<slug>   bwalletx://space/<slug>
  *   Invite (ephemeral)      https://<host>/i/<code>    bwalletx://invite/<code>
  *   Room page (permanent)   https://<host>/r/<ticker>  bwalletx://room/<ticker>[?buy=1]
+ *   Room itself             https://<host>/room/<ref>[?invite=<token>]  bwalletx://room/<ref>?invite=<token>
+ *     <ref> is the ticker, or the clean address of a room without one (`r_7kq2m9ab`, optionally after a
+ *     slug: bit-sign lib/room-ref.ts). `invite` is a one-use join link (bit-sign lib/invite-link-rules.ts):
+ *     whoever opens it signed in becomes a member (POST rooms/<ref>/claim).
  *
  * <host> is bchatx.com (the planned base), bwalletx.com, bit-sign.online or bitcoinchat.online.
  */
 
 const CODE = /^[a-hjkmnp-z2-9]{10}$/;
 const TICKER = /^[A-Za-z0-9_-]{1,32}$/;
+/** A room without a real ticker: `r_` + 8 base-36 chars, optionally after a slug of its name. */
+const ROOM_REF = /^(?:[A-Za-z0-9-]{1,80}-)?r_[0-9a-z]{8}$/i;
+/** bit-sign's invite-link token (24 random bytes, base64url). */
+const INVITE_TOKEN = /^[A-Za-z0-9_-]{16,128}$/;
 const WEB_HOSTS = new Set([
   ...['bchatx.com', 'bwalletx.com', 'bit-sign.online', 'bitcoinchat.online'].flatMap((h) => [h, `www.${h}`]),
   'chat.bwalletx.com',
@@ -21,11 +29,23 @@ const WEB_HOSTS = new Set([
 export const isSpaceInviteCode = (s: string) => CODE.test(s);
 export const isSpaceSlug = isSpaceInviteCode;
 export const isRoomTicker = (s: string) => TICKER.test(s);
+/** A ticker or a clean room address (what /room/<ref> takes). */
+export const isRoomRef = (s: string) => TICKER.test(s) || ROOM_REF.test(s);
 
 export type AppLink =
   | { kind: 'space'; slug: string }
   | { kind: 'invite'; code: string }
-  | { kind: 'room'; ticker: string; buy: boolean };
+  | { kind: 'room'; ticker: string; buy: boolean; invite?: string };
+
+const roomLink = (ticker: string, u: URL): AppLink => {
+  const invite = u.searchParams.get('invite') ?? '';
+  return {
+    kind: 'room',
+    ticker,
+    buy: u.searchParams.get('buy') === '1',
+    ...(INVITE_TOKEN.test(invite) ? { invite } : {}),
+  };
+};
 
 /** What a link opens, or null when it is none of ours. */
 export const parseAppLink = (url: string | null | undefined): AppLink | null => {
@@ -44,10 +64,17 @@ export const parseAppLink = (url: string | null | undefined): AppLink | null => 
       if (ep && isRoomTicker(decodeURIComponent(ep[1])) && isSpaceSlug(decodeURIComponent(ep[2]))) {
         return { kind: 'space', slug: decodeURIComponent(ep[2]) };
       }
-      const m = u.pathname.match(/^\/([sir])\/([^/]+)\/?$/);
+      const m = u.pathname.match(/^\/([sir]|room)\/([^/]+)\/?$/);
       if (!m) return null;
-      kind = { s: 'space', i: 'invite', r: 'room' }[m[1]] ?? '';
+      kind = { s: 'space', i: 'invite', r: 'room', room: 'room' }[m[1]] ?? '';
       arg = m[2];
+      // /room/<ref> is the room itself (not the /r/ public page): any ref, but never the New room page, and a
+      // GitHub-held position (?gh=) needs the web's GitHub proof, so it stays a web link.
+      if (m[1] === 'room') {
+        const ref = decodeURIComponent(arg);
+        if (!isRoomRef(ref) || ref.toLowerCase() === 'new' || u.searchParams.has('gh')) return null;
+        return roomLink(ref, u);
+      }
     } else return null;
     arg = decodeURIComponent(arg);
     if (kind === 'space' && isSpaceSlug(arg)) return { kind, slug: arg };
@@ -55,11 +82,44 @@ export const parseAppLink = (url: string | null | undefined): AppLink | null => 
     if (kind === 'space' && u.protocol === 'https:' && isRoomTicker(arg))
       return { kind: 'room', ticker: arg.toUpperCase(), buy: false };
     if (kind === 'invite' && isSpaceInviteCode(arg)) return { kind, code: arg };
-    if (kind === 'room' && isRoomTicker(arg)) return { kind, ticker: arg, buy: u.searchParams.get('buy') === '1' };
+    if (kind === 'room' && (u.protocol === 'bwalletx:' ? isRoomRef(arg) : isRoomTicker(arg))) return roomLink(arg, u);
     return null;
   } catch {
     return null;
   }
+};
+
+/**
+ * A bChatX page link this build could not open in the app (a Space link without Spaces, a sub-page of a room,
+ * a link that failed to parse): its path, so the app shows it in bChatX's own frame rather than dropping a link
+ * the phone handed us. Only the paths the app claims (/r/, /i/, /room/, /s/); never /i/x/ (X invites have their
+ * own routing, and their key is in the fragment).
+ */
+export const bchatxDoorPath = (url: string | null | undefined): string | null => {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'https:' || !WEB_HOSTS.has(u.host) || u.username || u.password) return null;
+    if (!/^\/(r|i|room|s)\/[^/]/.test(u.pathname) || /^\/i\/x\//.test(u.pathname)) return null;
+    return `${u.pathname}${u.search}`;
+  } catch {
+    return null;
+  }
+};
+
+/** A link to open: one the app parses, or a bChatX page shown in the bChatX frame. */
+export type PendingLink = AppLink | { kind: 'door'; path: string };
+
+/**
+ * What a link opens in this build: the parsed link, or (a Space page without Spaces, a room sub-page, anything
+ * else on the paths the app claims) the bChatX page in the frame. Null for links that aren't ours.
+ */
+export const appLinkFor = (url: string | null | undefined, spaces: boolean): PendingLink | null => {
+  const link = parseAppLink(url);
+  if (link?.kind === 'space' && !spaces) return { kind: 'door', path: `/s/${link.slug}` };
+  if (link) return link;
+  const path = bchatxDoorPath(url);
+  return path ? { kind: 'door', path } : null;
 };
 
 export type InviteEntry =

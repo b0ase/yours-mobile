@@ -1,10 +1,31 @@
-import { repairNullTxids, type NullTxidRepairReport } from './services/nullTxidRepair';
+import { missingLogKV, repairNullTxids, type NullTxidRepairReport } from './services/nullTxidRepair';
 import { openAccountPermissionStore } from './services/accountPermissionStore';
 import { openSpendLedger, withLocalSpendLedger } from './services/spendLedger';
 import { rememberRefusals } from './services/broadcastRefusals';
 import { knownOnChain, recoverMinedFailedActions, type RecoverReport } from './services/recoverFailed';
 import { singleFlight } from './services/addressResync';
-import { runPrioritySync } from './services/prioritySyncRun';
+import {
+  allOneSat,
+  deriveSyncKeys,
+  makeCoinIntake,
+  outputsPaying,
+  pkhHex,
+  runPrioritySync,
+  type CoinIntake,
+} from './services/prioritySyncRun';
+import { createInternalizeLock } from './services/internalizeLock';
+import {
+  createPullTrigger,
+  createReceiveWatch,
+  ownerSyncReader,
+  watchFrom,
+  type TxClass,
+} from './services/receiveWatch';
+import { makeSpendCheck, wocSpendLookup } from './services/spendCheck';
+import { createTakenRecheck } from './services/takenRecheck';
+import { recordAutoCleared } from './services/autoCoinResync';
+import { wocSpentStatus } from './services/coinPreflight';
+import { guardIntake } from './services/guardIntake';
 import { sizeAwareBroadcast } from './services/bigBroadcast';
 import {
   releaseStuckSends,
@@ -15,7 +36,20 @@ import {
 } from './services/stuckSends';
 import { hardenWalletServices } from './services/wocResilience';
 import { cacheBlockHeaders, prefetchHeadersOnInternalize } from './services/headerPrefetch';
-import { createDeviceSync, notifyOnWalletChanges, type DeviceSyncResult } from './services/deviceSync';
+import {
+  backupBeforeSend,
+  createDeviceSync,
+  notifyOnWalletChanges,
+  pullThenAdmitSoon,
+  type BackupBeforeSend,
+  type DeviceSyncResult,
+} from './services/deviceSync';
+import { forceLegacyActionBatch, requireLegacyForNoSend } from './services/actionBatchMode';
+import { requireLocalStoreForChange } from './services/localFirst';
+import { ensureBackupConnected, keepDeviceStoreActive, switchActiveAs } from './services/deviceActive';
+import { loadMayBeOut, recheckRefusals } from './services/refusalRecheck';
+import { installCoinPreflightForWallet } from './services/coinPreflight';
+import { expiryLookups } from './services/unsentGuard';
 import {
   createWebWallet,
   createIndexedDbTaskStateStore,
@@ -23,6 +57,7 @@ import {
   Wallet,
   WalletStorageManager,
   StorageClient,
+  StorageIdb,
   LocalWalletPermissionsManager,
   IndexedDbPermissionStore,
 } from '@1sat/wallet-browser';
@@ -35,10 +70,37 @@ import { guardReservedProtocols, revokeReservedProtocolGrants } from './services
 import { guardAllowance } from './services/allowanceGuard';
 import { ALLOWANCES_ENABLED } from './services/allowanceFlag';
 import { guardEverySpendAsks, revokeStoredSpendingGrants } from './services/everySpendAsks';
+import { guardPModuleSpends } from './services/pModuleSpendGate';
+import { guardAssetIdLoads } from './services/assetIdCheck';
+import { eitherChainSource, oneSatChainLookups, type ChainLookups } from './services/chainSources';
+import {
+  installInboundSyncGuard,
+  registerInboundVerifier,
+  admitPending,
+  walletOwnership,
+  walletRecords,
+  type AdmitOptions,
+  type AdmitReport,
+  type AdmitStore,
+  type InboundVerifier,
+} from './services/inboundSync';
+import { syncErrorDetail, tagStorageClientErrors } from './services/syncErrorDetail';
+import {
+  FULL_PASS_NEXT_SLICE_MS,
+  paymentYields,
+  requestFullPass,
+  requestTailPass,
+  withDeadlines,
+  withFullPassMode,
+} from './services/fullPass';
+import { ownPayments } from './services/ownPayments';
+import { retryOnceOnIdbAbort } from './services/idbAbortRetry';
+import { createInFlight, makeBackupPush, type InFlight } from './services/pushView';
+import { isPhone, onWifi } from './services/networkKind';
 import { chromeEnvelopeBackend, EnvelopeStore, guardEnvelopes } from './services/envelopes';
 import { ENVELOPES_ENABLED } from './mobile/storeBuild';
 import { guardCrossSiteSigning } from './services/crossSiteSignGuard';
-import { normalizeOriginator } from '@1sat/wallet';
+import { normalizeOriginator, parsePrivateKey } from '@1sat/wallet';
 import { guardSpending } from './mobile/config/killSwitch';
 import {
   syncMessages,
@@ -46,6 +108,7 @@ import {
   internalizeBeef,
   signP2PKHInput,
   deriveDepositAddresses,
+  ProcessedTxStoreIdb,
   createContext as createActionContext,
 } from '@1sat/actions';
 import { BSV21_BASKET, DEPOSIT_BASKET, FUNDING_BASKET, ONESAT_BASKET, ONESAT_PROTOCOL } from '@1sat/types';
@@ -81,6 +144,18 @@ import {
   restoreMoved,
   setArriving,
 } from './services/receiveGuard';
+import {
+  accountedVia,
+  carriesVia,
+  waitingVia,
+  knownTxids,
+  outpointStates,
+  ownPendingTxids,
+  type DeviceReads,
+  type HeldStore,
+  type OutpointState,
+} from './services/heldOutpoints';
+import { balanceSplit, type BalanceSplit } from './services/depositBalance';
 import { internalizeBackoff } from './services/internalizeBackoff';
 import { fixUtxoStatus, utxoStatusFromTxo } from './services/utxoStatus';
 import { restorePaymailHistory, type PaymailRestoreReport } from './mobile/names/paymail';
@@ -95,6 +170,13 @@ import {
 } from './services/findMissingCoins';
 import { recoverPaymentByTxid, type TxidRecoverReport } from './services/recoverByTxid';
 import { makePostageReconcileWiring, makeTxidRecoverDeps, sweepCandidateTxids } from './services/recoverByTxidWiring';
+import {
+  recoverSeedChange,
+  registerWalletOriginator,
+  wocChainLookups,
+  type SeedChangeReport,
+} from './services/seedChange';
+import { makeSeedChangeDeps, seedChangeKV } from './services/seedChangeWiring';
 import { reconcilePostage, wocIsMined, type PostageReconcileReport } from './services/postageReconcile';
 import { runUnsentExpiry, storageKV, wocHeight, type ExpiryReport, type NoSendAction } from './services/unsentExpiry';
 import { chainActive } from './services/dappChain';
@@ -188,12 +270,45 @@ export interface AccountContext {
   sweepDeposits: () => Promise<{ swept?: number }>;
   /** Credit payments seen on chain at our receive addresses that storage lacks (receive guard), now. */
   creditArriving: () => Promise<void>;
+  /**
+   * The balance the wallet shows and how much of it is pending (services/depositBalance.ts balanceSplit). Money on chain
+   * that storage lacks is checked against the device store on every read, so nothing counts twice (owner, 5 Nov 2026).
+   */
+  balanceSplit: () => Promise<BalanceSplit>;
+  /**
+   * Instant receive (services/receiveWatch.ts): the UI in front (APP_FOREGROUND) watches the receive addresses every
+   * ~3 s; APP_BACKGROUND stops it.
+   */
+  receiveWatch: { foreground: (on: boolean) => void };
   /** Pull the owner's other devices' changes from the backup, then push this one's (services/deviceSync.ts). */
   syncDevices: () => Promise<DeviceSyncResult>;
+  /**
+   * Work through what the inbound check left for the chain to settle on this device (services/inboundSync.ts
+   * admitPending), whichever store is active: after a restore copy, before its counts are compared.
+   */
+  admitBackupRows: () => Promise<AdmitReport | undefined>;
+  /** Push this device's rows to the backup now; a Store payment is broadcast only when this is ok (deviceSync.ts). */
+  backupBeforeSend: () => Promise<BackupBeforeSend>;
+  /** The backup's state for the honest copy: configured, a push waiting, failures, the last good push. */
+  backupState: () => {
+    backupConfigured: boolean;
+    pendingPush: boolean;
+    failures: number;
+    lastPushOkAt: number;
+    /** The backup is set aside (it stopped answering during a merge) and reconnects on a back-off. */
+    paused: boolean;
+    /** A heal or a device sync is running: it holds the storage locks, so a coin check would only queue behind it. */
+    storageBusy: boolean;
+  };
   /** Restore actions storage marked failed whose transaction is mined (services/recoverFailed.ts). */
   recoverFailed: () => Promise<RecoverReport>;
   /** Recover one mined payment by txid from the derivation any reachable store holds (services/recoverByTxid.ts). */
   recoverTxid: (txid: string, progress?: (step: string) => void) => Promise<TxidRecoverReport>;
+  /**
+   * Settings › Troubleshooting › Recover change from my 12 words: walk the chain from every coin and seed address this
+   * wallet knows, and add the deterministic change it finds (services/seedChange.ts). Read only on chain; resumable.
+   */
+  recoverSeedChange: (progress?: (step: string) => void, options?: { fresh?: boolean }) => Promise<SeedChangeReport>;
   /** Settings › Storage › Find missing coins: read-only scan of every store (services/findMissingCoins.ts). */
   findMissingCoins: () => Promise<ScanReport>;
   /** Add back coins a scan found (after the user confirmed). Never broadcasts. */
@@ -281,7 +396,49 @@ export interface InitWalletOptions {
    * their storage locks (services/sheetFirst.ts).
    */
   startSyncsAfter?: () => Promise<void>;
+  /**
+   * Make this device's store the active one (verify or create its copy, then switch). Asked before any payment that
+   * would build change while the remote store is active; resolves true once the device store is active
+   * (services/localFirst.ts). Without it such a payment is refused.
+   */
+  ensureLocalStore?: () => Promise<boolean>;
+  /** A one-line notice for the owner (the extension shows it on the balance card's sync line). */
+  notice?: (text: string) => void;
 }
+
+// A backup call that fails names itself and its page in the sync log (services/syncErrorDetail.ts, 6 Nov 2026).
+tagStorageClientErrors(StorageClient);
+
+/**
+ * Rows a backup store sends become spendable on this device only when the chain or this account's own keys say so
+ * (services/inboundSync.ts, b-Aware A3). Set up BEFORE the wallet factory runs: it merges a store that disagrees about
+ * which is active into the device store at boot. Returns the unregister, and the check itself: admitPending runs
+ * with it, and initWallet adds its scheduling (onQueued) and the mined-payment repair (recover) once they exist.
+ */
+const checkBackupRows = (keys: Keys, account: Account | undefined, storageIdentityKey: string) => {
+  installInboundSyncGuard(StorageIdb);
+  const root = parsePrivateKey(keys.identityWif);
+  const verifier: InboundVerifier = {
+    owns: walletOwnership(root, [
+      legacyOrdKey(keys.ordWif, account?.addresses?.ordAddress),
+      legacyPayKey(keys.walletWif, account?.addresses?.bsvAddress),
+    ]),
+    // Two WhatsOnChain questions per coin, one pacer: together ~3 calls a second (anonymous WoC).
+    // WhatsOnChain first; when it has no clear answer, the 1Sat stack (once the factory has made its services): one
+    // outage never decides an honest coin (review 16d, D2).
+    ...eitherChainSource(wocChainLookups(), () => second),
+    readRecord: walletRecords(root),
+    log: (...a) => console.warn(...a),
+  };
+  const stop = registerInboundVerifier(storageIdentityKey, root.toPublicKey().toString(), verifier);
+  let second: ChainLookups | undefined;
+  return Object.assign(stop, {
+    verifier,
+    useSecondSource: (s: ChainLookups | undefined) => {
+      second = s;
+    },
+  });
+};
 
 /**
  * Open storage for the *currently selected* account for master backup only.
@@ -300,6 +457,7 @@ export const openAccountStorageForBackup = async (
   const { account } = chromeStorageService.getCurrentAccountObject();
   const { activeRemote, backups } = resolveStorageConfig(account?.storageConfig);
   const storageIdentityKey = await ensureStorageIdentityKey(chromeStorageService);
+  const stopBackupCheck = checkBackupRows(keys, account, storageIdentityKey);
 
   const { storage, destroy, monitor } = await createWebWallet({
     privateKey: keys.identityWif,
@@ -325,6 +483,7 @@ export const openAccountStorageForBackup = async (
     storage,
     close: async () => {
       await destroy();
+      stopBackupCheck();
     },
   };
 };
@@ -359,6 +518,7 @@ export const initWallet = async (
   const { account } = chromeStorageService.getCurrentAccountObject();
   const { activeRemote, backups } = resolveStorageConfig(account?.storageConfig);
   const storageIdentityKey = await ensureStorageIdentityKey(chromeStorageService);
+  const stopBackupCheck = checkBackupRows(keys, account, storageIdentityKey);
 
   const walletConfig: WebWalletConfig = {
     privateKey: keys.identityWif,
@@ -390,6 +550,80 @@ export const initWallet = async (
     console.warn('[initWallet] backup storage failed to connect; opening without it:', err);
     return createWebWallet({ ...walletConfig, backups: [] });
   });
+  // This device's store stays the enabled active store for its payments, receipts and backup pushes, whatever another
+  // device wrote into the backup (P0, 5 Nov 2026: the owner's 1p test was refused with WERR_NOT_ACTIVE after the backup
+  // connected late; services/deviceActive.ts). First on the manager, so the later wrappers (the coin check) run over it.
+  const openedAccount = account?.addresses?.identityAddress;
+  /** This device's own store and its storage identity key (the merges' writer), from the manager's stores. */
+  const ownStore = () =>
+    (storage as unknown as { _stores?: { storage: unknown }[] })._stores
+      ?.map((m) => m.storage)
+      .find((s): s is StorageIdb => s instanceof StorageIdb);
+  const ownSik = () => ownStore()?.getSettings().storageIdentityKey;
+  /**
+   * A full re-pull from a backup when one is due (services/fullPass.ts): a daily one, a store's first, or one a failure
+   * asked for. Never in the way of the sync itself: a failure here is logged and the sync goes on.
+   */
+  const fullPassIfDue = async (readerSik: string | undefined, failed = false) => {
+    const own = ownStore();
+    if (!own || !readerSik) return;
+    try {
+      const { identityKey } = await storage.getAuth();
+      const r = await requestFullPass({
+        manager: storage,
+        store: own as never,
+        identityKey,
+        readerSik,
+        failed,
+        phone: isPhone(),
+        wifi: onWifi,
+        // A phone off Wi-Fi 14 days: the weekly pass runs once on mobile data, and says so in one line.
+        onMobileData: (mb) => options?.notice?.(`Checking your whole wallet over mobile data, about ${mb} MB`),
+      });
+      if (r === 'started')
+        console.warn('[deviceSync] pulling the backup again from the start (a full pass, in slices)');
+      if (r === 'deep')
+        console.warn('[deviceSync] pulling the last 48 hours of the backup again (the daily deep pull)');
+      if (r === 'abandoned')
+        console.warn('[deviceSync] a pull from the start had stopped moving: given up, the ordinary pulls run again');
+    } catch (e) {
+      console.warn('[deviceSync] a full pass could not be asked for:', e);
+    }
+  };
+  /** The last heal's merge failed: the next heal asks for a full pass (b). */
+  let healFailed = false;
+  const keepActive = keepDeviceStoreActive(storage, {
+    deviceIntended: () => {
+      const current = chromeStorageService.getCurrentAccountObject().account;
+      return !!current && current.addresses.identityAddress === openedAccount && !current.storageConfig?.activeRemote;
+    },
+    // A heal stays short: a full pass is asked for here when due but left to the device-sync pulls (fullPass.ts).
+    setDeviceActive: async () => {
+      let conflicting: string[] = [];
+      try {
+        conflicting = storage.getConflictingStores();
+      } catch {
+        // not available
+      }
+      for (const sik of conflicting) await fullPassIfDue(sik, healFailed);
+      try {
+        await withFullPassMode(ownSik(), 'defer', () => setActiveStorage('local'));
+        healFailed = false;
+      } catch (e) {
+        healFailed = true;
+        throw e;
+      }
+    },
+  });
+  if (!keepActive) console.error("[initWallet] this device's store is not kept active (no storage manager to wrap)");
+  // No payment may live only in memory: every noSend action is written to storage at signing (P0, 3 Nov 2026: the
+  // owner's $1 theme test lost its change on a reload; services/actionBatchMode.ts).
+  if (!forceLegacyActionBatch(baseWallet))
+    console.error('[initWallet] action batches could not be set to legacy: noSend payments are refused');
+  // …and if that ever fails, a noSend payment is refused rather than held in memory (review 4 Nov 2026, F10).
+  requireLegacyForNoSend(baseWallet);
+  // An NFT's tracking id loads exactly one asset for every send, burn, listing cancel and name adopt (review 16c, C2).
+  if (!guardAssetIdLoads(baseWallet)) console.error('[initWallet] loads by tracking id are not checked');
   mark(
     `createWebWallet done; active=${storage.getActiveStoreName?.() ?? '?'} stores=${JSON.stringify(
       storage.getStores?.().map((s) => ({ name: s.storageName, active: s.isActive, enabled: s.isEnabled })) ?? [],
@@ -418,31 +652,123 @@ export const initWallet = async (
     console.warn('[initWallet] block headers are not prefetched before internalize');
   // This device and the owner's others meet only in the backup: push soon after every change, pull on open
   // (services/deviceSync.ts; the extension showed $0.16 after the phone swept, 2 Nov 2026).
-  const managed = storage as unknown as { _backups?: { storage: unknown }[] };
+  const managed = storage as unknown as { _backups?: { storage: unknown }[]; _stores?: { storage: unknown }[] };
+  // The device's own store, active or not (during a restore the backup is active and this is the copy's target).
+  const deviceStore = (): AdmitStore | undefined =>
+    managed._stores?.map((m) => m.storage).find((s): s is StorageIdb => s instanceof StorageIdb) as never;
+  stopBackupCheck.useSecondSource(oneSatChainLookups(toolboxServices));
+  let admitClosed = false;
+  let admitTimer: ReturnType<typeof setTimeout> | undefined;
+  let admitAt = Infinity;
+  /** Run admission in `ms` (or sooner, if a run is already due sooner). The service worker's alarm and the app coming
+   *  to the front run it too (background.ts), for when a sleeping worker drops this timer (review 16d, D2). */
+  const admitIn = (ms: number) => {
+    if (admitClosed) return;
+    const at = Date.now() + Math.min(Math.max(ms, 2_000), 6 * 3_600_000);
+    if (admitTimer && admitAt <= at) return;
+    if (admitTimer) clearTimeout(admitTimer);
+    admitAt = at;
+    admitTimer = setTimeout(() => {
+      admitTimer = undefined;
+      admitAt = Infinity;
+      void admitBackupRows();
+    }, at - Date.now());
+  };
+  /** Set by every device-sync pull: what that pull lists is retried every few seconds for a while (inboundSync.ts). */
+  let admitPrompt: AdmitOptions['prompt'];
+  const PROMPT_ADMIT_MS = 2 * 60_000;
+  const admitBackupRows = async (): Promise<AdmitReport | undefined> => {
+    const device = deviceStore();
+    if (!device || admitClosed) return undefined;
+    const { identityKey } = await storage.getAuth();
+    const r = await admitPending(device, identityKey, stopBackupCheck.verifier, { prompt: admitPrompt }).catch(
+      (e: unknown) => {
+        console.warn('[inbound-sync] admission list not worked through:', e);
+        return undefined;
+      },
+    );
+    // Anything left waits for its next try: run again then, never "only at the next unlock" (D2).
+    if (r?.nextAt !== undefined) admitIn(r.nextAt - Date.now());
+    return r;
+  };
+  // Any merge that left something for the chain (the boot merge, F-C, the Monitor's backup sync): soon after it.
+  stopBackupCheck.verifier.onQueued = () => admitIn(2_000);
+  stopBackupCheck.verifier.onQueued(); // and once at open, for anything left from before
+  // updateBackups as the device sync runs it (services/pushView.ts): each backup's cycle whole, a deadline on each
+  // request, no second request to a backup still answering a timed-out one, and own payments first only before a cycle
+  // or between backups (owner's seal and its review, 7 Nov 2026).
+  const pushInFlight = new WeakMap<object, InFlight>();
+  const backupPush = makeBackupPush({
+    storage: storage as unknown as Parameters<typeof makeBackupPush>[0]['storage'],
+    backups: () => managed._backups ?? [],
+    waiting: ownPayments.waiting,
+    inFlightFor: (backup) => {
+      let f = pushInFlight.get(backup);
+      if (!f) pushInFlight.set(backup, (f = createInFlight()));
+      return f;
+    },
+  });
   const deviceSync = createDeviceSync({
     applies: () => storage.isActiveStorageProvider() && (backups?.length ?? 0) > 0,
-    ensureBackup: async () => {
-      if (storage.getBackupStores().length > 0) return true;
-      const url = backups?.[0];
-      if (!url) return false;
-      await Promise.race([
-        addRemote(url),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('backup connect timed out')), 20_000)),
-      ]);
-      return storage.getBackupStores().length > 0;
-    },
-    pull: async () => {
-      const reader = managed._backups?.[0]?.storage;
-      if (!reader) throw new Error('backup storage is not connected');
-      const { identityKey } = await storage.getAuth();
-      await storage.syncFromReader(identityKey, reader as Parameters<typeof storage.syncFromReader>[1]);
-    },
+    // A backup naming another store is healed first; a set-aside one only reconnects on its probe and back-off, never
+    // as a second connection (services/deviceActive.ts, review 19 F1/F5).
+    ensureBackup: () => ensureBackupConnected({ storage, keep: keepActive, url: backups?.[0], addRemote }),
+    // What the pull left for the chain to settle runs soon after, outside every storage lock; not awaited here (F-A).
+    pull: pullThenAdmitSoon(
+      async () => {
+        const reader = managed._backups?.[0]?.storage;
+        if (!reader) throw new Error('backup storage is not connected');
+        const { identityKey } = await storage.getAuth();
+        // What this pull lists is asked about every few seconds for a while, not after the 1-minute doubling: a sweep
+        // the other device made must not hide its dollar here for minutes (review 20, M5; services/inboundSync.ts).
+        admitPrompt = { from: Date.now(), until: Date.now() + PROMPT_ADMIT_MS };
+        // Once a day (and on a store's first open, or when a failure asked) the pull starts from the beginning; such
+        // a pass runs in slices so payments never wait on it (services/fullPass.ts).
+        const backupSik = (reader as { getSettings?: () => { storageIdentityKey?: string } }).getSettings?.()
+          ?.storageIdentityKey;
+        await fullPassIfDue(backupSik);
+        // Rows another copy pushed late, with times older than the cursor (extension, 6 Nov 2026: 8734977f never
+        // arrived): every TAIL_CHECK_EVERY_MS, found by the backup's insert order with one-row probes, and pulled from
+        // the first one (services/pullTail.ts). Its own deadlines; never while a pass is under way.
+        const own = ownStore();
+        if (own && backupSik) {
+          const plan = await requestTailPass({
+            manager: storage,
+            store: own as never,
+            identityKey,
+            readerSik: backupSik,
+            reader: withDeadlines(reader as object) as never,
+          }).catch(() => 'unknown');
+          if (plan === 'tail')
+            console.warn(
+              '[deviceSync] the backup has rows this device never had (pushed late): pulling from the first',
+            );
+        }
+        // Each backup request has a deadline, so a stalled backup frees the storage locks in seconds (review 23, M2).
+        const bounded = withDeadlines(reader as object) as Parameters<typeof storage.syncFromReader>[1];
+        // Own payments go first (fullPass afterPage): a pull that ended for one carries on in this run after it.
+        const yieldsBefore = paymentYields();
+        await withFullPassMode(ownSik(), 'slice', () => storage.syncFromReader(identityKey, bounded));
+        return paymentYields() > yieldsBefore ? ('yielded' as const) : undefined;
+      },
+      () => admitIn(0),
+    ),
     push: async () => {
-      await storage.updateBackups();
+      return backupPush();
     },
+    yieldTo: ownPayments,
     busy: chainActive,
     log: (...a) => console.warn(...a),
   });
+  // A full pass paused (a slice used up, or a heal left it): the next slice a moment later, sends in between.
+  let moreTimer: ReturnType<typeof setTimeout> | undefined;
+  stopBackupCheck.verifier.onMore = () => {
+    if (moreTimer || admitClosed) return;
+    moreTimer = setTimeout(() => {
+      moreTimer = undefined;
+      void deviceSync.syncNow();
+    }, FULL_PASS_NEXT_SLICE_MS);
+  };
   if (!notifyOnWalletChanges(baseWallet, deviceSync.changed))
     console.warn('[initWallet] wallet changes do not update the backup');
   // Big mints need longer than the broadcaster's fixed 30 s to upload (services/bigBroadcast.ts, vexvoid 12 Oct 2026).
@@ -450,6 +776,18 @@ export const initWallet = async (
   // Every payment ends here: our screens and dApps through the permissions manager, send-all and background jobs
   // directly. The `spending` kill switch pauses createAction/signAction on it (mobile/config/killSwitch.ts).
   guardSpending(baseWallet);
+  // HARD RULE (P0, 3 Nov 2026): no payment builds change on the remote store; this device's store first, else refused
+  // (services/localFirst.ts: wallet.1sat.app builds its own random change; seed-derived change exists only here).
+  if (
+    !requireLocalStoreForChange(baseWallet, {
+      isLocal: () => storage.isActiveStorageProvider(),
+      ensureLocal: options?.ensureLocalStore,
+    })
+  )
+    console.error('[initWallet] payments are not held to the device store');
+  // The wallet's own calls (its pages, via the admin originator) may name inputs and still get change the 12 words can
+  // find (sweeps); a site naming inputs gets random change, so it can't replay old inputs as an oracle (services/seedChange.ts).
+  registerWalletOriginator(ADMIN_ORIGINATOR);
   // The legacy ord address (paymail ordinals go there) and legacy pay address: each key signs under its own
   // wallet-only protocol, so the NFTs, names, tokens and BSV the sync takes in from them spend like any other
   // (services/legacyOrd.ts). No key for an address (passkey/seedless): that address is skipped.
@@ -458,9 +796,23 @@ export const initWallet = async (
   const legacyPayAddress = account?.addresses?.bsvAddress;
   const payKey = legacyPayKey(keys.walletWif, legacyPayAddress);
   if (ordKey || payKey) installLegacySigner(baseWallet, { ord: ordKey, pay: payKey });
+  // A refusal is checked against the chain before the toolbox fails the tx and frees its inputs (refusalRecheck.ts).
+  if (!recheckRefusals(toolboxServices)) console.warn('[initWallet] broadcast refusals are not chain-checked');
+  // Resumed Store payments marked "may be out" survive a service-worker restart (06c M1).
+  void loadMayBeOut();
   if (!rememberRefusals(toolboxServices)) console.warn('[initWallet] broadcast refusals not recorded');
   // UnFail's output verdicts read getUtxoStatus: parse api.1sat.app's "txid.vout" (dkg, 14 Oct 2026; services/utxoStatus.ts).
   if (!fixUtxoStatus(toolboxServices)) console.warn('[initWallet] getUtxoStatus not patched (no txo client)');
+  // The wallet's own sends check the coins storage picked against the chain before signing; coins another device
+  // spent are cleared and storage picks again once (services/coinPreflight.ts; owner's iPhone, 4 Nov 2026).
+  if (
+    !installCoinPreflightForWallet(storage, toolboxServices, {
+      identityKey: account?.pubKeys?.identityPubKey ?? '',
+      chain,
+      kv: { get: (k) => chrome.storage.local.get(k), set: (items) => chrome.storage.local.set(items) },
+    })
+  )
+    console.warn('[initWallet] coins are not checked against the chain before a send');
 
   // 3. Build the IndexedDB-backed permission store used by
   //    LocalWalletPermissionsManager for basket/cert/spending grants.
@@ -491,6 +843,18 @@ export const initWallet = async (
     // are picked up by the module's basket-access checks (and vice versa).
     permissionStore,
   });
+  // The one permissions manager every site call goes through. A "p <scheme>" label or basket hands a site's action to
+  // the asset modules above, which finish it on the base wallet; the action now passes the wallet's spend gate first,
+  // and a site can't name the wallet's own assets for a module to sign (services/pModuleSpendGate.ts, b-Aware D-L).
+  const sitePermissions = guardPModuleSpends(
+    new LocalWalletPermissionsManager(
+      baseWallet,
+      ADMIN_ORIGINATOR,
+      { permissionModules: assetModules },
+      { store: permissionStore },
+    ),
+    { adminOriginator: ADMIN_ORIGINATOR },
+  );
 
   // 5. Wrap with permissions manager for external app access control.
   // Grants persist in IndexedDB (off-chain) via LocalWalletPermissionsManager.
@@ -517,36 +881,23 @@ export const initWallet = async (
                   // ALLOWANCES_ENABLED, the old monthly allowance with its per-payment cap and payee allowlist
                   // (services/allowanceGuard.ts, payment-safety audit 24 Oct 2026 B2).
                   ALLOWANCES_ENABLED
-                    ? guardAllowance(
-                        new LocalWalletPermissionsManager(
-                          baseWallet,
-                          ADMIN_ORIGINATOR,
-                          { permissionModules: assetModules },
-                          { store: permissionStore },
-                        ),
-                        { store: permissionStore, adminOriginator: ADMIN_ORIGINATOR, normalize: normalizeOriginator },
-                      )
+                    ? guardAllowance(sitePermissions, {
+                        store: permissionStore,
+                        adminOriginator: ADMIN_ORIGINATOR,
+                        normalize: normalizeOriginator,
+                      })
                     : ENVELOPES_ENABLED
-                      ? guardEnvelopes(
-                          new LocalWalletPermissionsManager(
-                            baseWallet,
-                            ADMIN_ORIGINATOR,
-                            { permissionModules: assetModules },
-                            { store: permissionStore },
-                          ),
-                          { envelopes, adminOriginator: ADMIN_ORIGINATOR, normalize: normalizeOriginator },
-                        )
+                      ? guardEnvelopes(sitePermissions, {
+                          envelopes,
+                          adminOriginator: ADMIN_ORIGINATOR,
+                          normalize: normalizeOriginator,
+                        })
                       : // Store builds have no envelopes (storeBuild.ts ENVELOPES_ENABLED): every payment shows its sheet,
                         // whatever old monthly grant is stored (services/everySpendAsks.ts, owner 25 Oct 2026).
-                        guardEverySpendAsks(
-                          new LocalWalletPermissionsManager(
-                            baseWallet,
-                            ADMIN_ORIGINATOR,
-                            { permissionModules: assetModules },
-                            { store: permissionStore },
-                          ),
-                          { adminOriginator: ADMIN_ORIGINATOR, normalize: normalizeOriginator },
-                        ),
+                        guardEverySpendAsks(sitePermissions, {
+                          adminOriginator: ADMIN_ORIGINATOR,
+                          normalize: normalizeOriginator,
+                        }),
                   spendLedger,
                 ),
               ),
@@ -629,6 +980,11 @@ export const initWallet = async (
         satoshis: typeof data.satoshis === 'number' ? data.satoshis : undefined,
       };
       chrome.storage.local.set({ [SYNC_HEALTH_KEY(keys.identityAddress)]: health }).catch(() => undefined);
+      // Which step failed, and how, in the sync log (the banner shows the message alone; owner's iPhone, 6 Nov 2026).
+      if (health.status !== 'complete' && health.status !== 'offline' && health.status !== 'arriving')
+        console.warn(
+          `[deviceSync] wallet sync failing (${data.status}): ${typeof data.detail === 'string' ? data.detail : (error ?? '')}`,
+        );
     }
     chrome.runtime
       .sendMessage({
@@ -787,7 +1143,11 @@ export const initWallet = async (
     })
     .catch((err: unknown) => {
       console.error('[initWallet] deposit sweep failed:', err);
-      sendSyncStatus({ status: 'sweep-failed', error: err instanceof Error ? err.message : String(err) });
+      sendSyncStatus({
+        status: 'sweep-failed',
+        error: err instanceof Error ? err.message : String(err),
+        detail: `deposit sweep: ${syncErrorDetail(err)}`,
+      });
     });
 
   // Deposit derivation for one of our addresses: the address manager's window first, then a wider scan (an
@@ -827,14 +1187,139 @@ export const initWallet = async (
     return { address, derivationPrefix: hit.derivationPrefix, derivationSuffix: hit.derivationSuffix };
   };
 
+  // What the device store holds for an outpoint, spent or not (services/heldOutpoints.ts). Read straight from the active
+  // provider, never through the manager's locks (as localRawTx). The remote store active: none (arriving counts as before).
+  const deviceReads: DeviceReads = async () => {
+    if (!storage.isActiveStorageProvider()) return undefined;
+    const { userId } = await storage.getAuth();
+    if (typeof userId !== 'number') return undefined;
+    return { store: storage.getActive() as unknown as HeldStore, userId };
+  };
+  // Owner, 5 Nov 2026 ($3.42 for $2.42): the sweep had spent the payment, listOutputs no longer listed it, the indexer
+  // still did, and it counted as arriving on top of the sweep's change. The guard and the balance ask storage itself.
+  const accountedFor = accountedVia(deviceReads);
+  /** What the device store holds for each outpoint; undefined with the remote store active (no device store to ask). */
+  const deviceStates = async (outpoints: string[]): Promise<Map<string, OutpointState> | undefined> => {
+    const r = await deviceReads();
+    return r ? outpointStates(r.store, r.userId, outpoints) : undefined;
+  };
+  // No device store: every outpoint reads as held, so the watcher takes nothing in (it never runs then anyway).
+  const statesOf = async (outpoints: string[]): Promise<Map<string, OutpointState>> =>
+    (await deviceStates(outpoints)) ?? new Map(outpoints.map((o) => [normOutpoint(o), 'stored' as OutpointState]));
+  /** Of these txids, the ones storage holds (our own spends). No device store: all, so nothing asks for a pull. */
+  const heldTxids = async (txids: string[]) => {
+    const r = await deviceReads();
+    return r ? knownTxids(r.store, r.userId, txids) : new Set(txids);
+  };
+  // Spent already, mempool included? The owner stream lists a spend only once it is mined, so a payment the other copy
+  // of this wallet swept seconds ago still looks unspent there (review 20, H1 and M2; services/spendCheck.ts). The 1sat
+  // spend index first (batched, 429 back-off), WhatsOnChain second (paced app-wide, services/wocLimiter.ts).
+  const txoSpends = (syncContext.services as unknown as { txo?: { getSpends?: (o: string[]) => Promise<unknown[]> } })
+    .txo;
+  const spendIndex = txoSpends?.getSpends
+    ? (b: string[]) => txoSpends.getSpends!(b) as Promise<(string | null | undefined)[]>
+    : undefined;
+  // coinPreflight's hardened lookup, its request aborted after 3 s (review 20 re-check, N1: a bare fetch that never
+  // answered stalled the watcher, the guard and the address sync's coin queue).
+  const wocSpender = wocSpendLookup(3_000);
+  /** The receive guard and the watcher: few outputs, both sources each. */
+  const spendsAll = makeSpendCheck({ index: spendIndex, woc: wocSpender, wocFor: 'all' });
+  /**
+   * The address sync, which may take in hundreds of coins at a restore: one batched lookup for all of them first, kept
+   * two minutes (N3); WhatsOnChain only where the index can't tell. What it takes in is re-checked (takenRecheck below).
+   */
+  const spendsSync = makeSpendCheck({ index: spendIndex, woc: wocSpender, wocFor: 'unanswered', cacheMs: 120_000 });
+  // Another copy of this wallet spent one of our receive outputs: a device-sync pull, throttled (services/receiveWatch.ts);
+  // then a guard run, so a payment whose spender's change now waits here for admission shows meanwhile (M5).
+  let guardSoon: () => void = () => undefined;
+  const askPull = createPullTrigger({
+    pull: () => deviceSync.syncNow().then(() => guardSoon()),
+    log: (...a) => console.warn(...a),
+  });
+  /**
+   * Mark a coin another copy of this wallet spent as spent here: spendability only goes down, on this device's store
+   * only, and the automatic coin check re-checks it (its cleared list) and puts it back if both sources later call it
+   * unspent (services/autoCoinResync.ts). Review 20 re-check, H1.
+   */
+  const markSpentHere = async (outpoint: string, spender: string): Promise<number> => {
+    if (!storage.isActiveStorageProvider()) return 0;
+    const { userId } = await storage.getAuth();
+    const [txid, vout] = normOutpoint(outpoint).split('.');
+    const n = await storage.runAsStorageProvider(async (sp) => {
+      const by = (await sp.findTransactions({ partial: { userId, txid: spender }, noRawTx: true }))[0];
+      let changed = 0;
+      for (const o of await sp.findOutputs({
+        partial: { userId, txid, vout: Number(vout), spendable: true },
+        noScript: true,
+      }))
+        changed += await sp.updateOutput(o.outputId, {
+          spendable: false,
+          ...(by ? { spentBy: by.transactionId } : {}),
+        });
+      return changed;
+    });
+    if (n)
+      await recordAutoCleared(
+        { get: (k) => chrome.storage.local.get(k), set: (items) => chrome.storage.local.set(items) },
+        account?.pubKeys?.identityPubKey ?? '',
+        { [`${txid}_${vout}`]: spender },
+      );
+    return n;
+  };
+  /** Put back a coin the re-check marked whose spender was dropped: only a row still as the mark left it. */
+  const markUnspentHere = async (outpoint: string, spender: string): Promise<number> => {
+    if (!storage.isActiveStorageProvider()) return 0;
+    const { userId } = await storage.getAuth();
+    const [txid, vout] = normOutpoint(outpoint).split('.');
+    return storage.runAsStorageProvider(async (sp) => {
+      const by = (await sp.findTransactions({ partial: { userId, txid: spender }, noRawTx: true }))[0];
+      let changed = 0;
+      for (const o of await sp.findOutputs({
+        partial: { userId, txid, vout: Number(vout), spendable: false },
+        noScript: true,
+      }))
+        if (o.spentBy == null || (by && o.spentBy === by.transactionId))
+          changed += await sp.updateOutput(o.outputId, { spendable: true, spentBy: undefined });
+      return changed;
+    });
+  };
+  // The automatic coin check's rule, not a new one (review 20, second re-check, Q1): the index first, in batches;
+  // WhatsOnChain (3 s, then "can't tell") only to confirm a spender the index names; never our own unfinished actions.
+  const recheck = createTakenRecheck({
+    index: spendIndex ?? (async () => Promise.reject(new Error('no spend index'))),
+    woc: (op) => wocSpentStatus(op, AbortSignal.timeout(3_000)),
+    ownPendingTxids: async () => {
+      const r = await deviceReads();
+      return r ? ownPendingTxids(r.store, r.userId) : new Set<string>();
+    },
+    heldTxids: (t) => heldTxids(t),
+    markSpent: markSpentHere,
+    markUnspent: markUnspentHere,
+    askPull: (sp) => askPull(sp),
+    log: (...a) => console.warn(...a),
+  });
+  const pullForForeign = async (spenders: string[] | undefined) => {
+    if (!spenders?.length) return;
+    const ours = await heldTxids(spenders).catch(() => new Set(spenders));
+    const foreign = spenders.filter((t) => !ours.has(t));
+    if (foreign.length) askPull(foreign);
+  };
+  // One internalize at a time across the address sync, the receive guard and the receive watcher; each checks "already
+  // in?" inside it, so a payment two of them find in the same seconds is taken in once (services/internalizeLock.ts).
+  const internalizeLock = createInternalizeLock();
+
   // The address the Receive screen shows must always count (services/receiveGuard.ts; owner, 10 Oct 2026:
   // $5 at the $vexvoid receive address never showed). Runs after every address sync, clean or not.
   const receiveGuardOnce = async () => {
+    // When this run's look at the indexer began: a stale result never wipes what the watcher added since (review 20, L2).
+    const since = Date.now();
     // Never between the steps of a connected site's multi-step action (services/dappChain.ts).
     if (chainActive()) {
       console.log('[receiveGuard] a site action is in progress; check deferred');
       return;
     }
+    // Coins taken in on an "unspent" that may have been the index lagging: asked about again (H1). Not waited for.
+    void recheck.run().catch(() => undefined);
     const shown = chromeStorageService.getCurrentAccountObject().account?.primaryAddress;
     const addresses = [...(shown ? [shown] : []), ...syncContext.addressManager.getAddresses()];
     const walletOutpoints = async () => {
@@ -858,9 +1343,13 @@ export const initWallet = async (
       ownerSync: (a) => syncContext.services.owner.sync(a),
       outputSats,
       walletOutpoints,
+      accountedFor,
+      spends: spendsAll,
+      waitingSpenders: waitingVia(deviceReads),
     });
+    void pullForForeign(first.spenders);
     if (!first.satoshis) {
-      setArriving(0);
+      setArriving([], since);
       return;
     }
     console.warn(
@@ -881,30 +1370,39 @@ export const initWallet = async (
         counterparty: 'self',
       });
     }
-    for (const txid of first.txids) {
-      // A txid that storage can't take (e.g. its action is marked failed) is not retried on every sync.
-      if (!internalizeBackoff.due(txid)) continue;
-      try {
-        const beef = await syncContext.services.beef.getBeef(txid);
-        const r = await internalizeBeef({
-          beef,
+    // Each missing transaction, directly (services/guardIntake.ts): not what the device store already holds (L3), and as
+    // before with the remote store active (M1); under the shared internalize lock, re-checked inside it.
+    for (const r of await guardIntake(first.outputs, {
+      states: deviceStates,
+      getBeef: async (txid) => syncContext.services.beef.getBeef(txid),
+      internalize: (beef) =>
+        internalizeBeef({
+          beef: Uint8Array.from(beef),
           addressDerivations: derivations as Parameters<typeof internalizeBeef>[0]['addressDerivations'],
           wallet: adminWallet,
           services: syncContext.services,
           chain,
+        }),
+      lock: internalizeLock,
+      backoff: internalizeBackoff,
+      // What the guard takes in is re-checked too (review 20, second re-check, R3).
+      onInternalized: (ops) => recheck.add(ops),
+    })) {
+      if (r.outcome === 'internalized') console.log(`[receiveGuard] internalized ${r.txid}`);
+      else if (r.outcome === 'no-match') console.warn(`[receiveGuard] ${r.txid}: no output matched our derivations`);
+      else if (r.outcome === 'held')
+        console.warn(
+          `[receiveGuard] ${r.txid}: held in storage but not counted (waiting on admission?); not rewritten`,
+        );
+      else if (r.outcome === 'failed') {
+        const err = r.error;
+        console.error(`[receiveGuard] internalize ${r.txid} failed:`, err);
+        sendSyncStatus({
+          status: 'receive-failed',
+          txid: r.txid,
+          error: err instanceof Error ? err.message : String(err),
+          detail: `receive guard ${r.txid}: ${syncErrorDetail(err)}`,
         });
-        // internalizeBeef resolves with internalized: 0 when no output matched a derivation: not a success.
-        if (r.internalized) {
-          internalizeBackoff.clear(txid);
-          console.log(`[receiveGuard] internalized ${txid} (${r.internalized} output(s))`);
-        } else {
-          internalizeBackoff.fail(txid, 'no output matched');
-          console.warn(`[receiveGuard] ${txid}: no output matched our derivations`);
-        }
-      } catch (err) {
-        const wait = internalizeBackoff.fail(txid, err);
-        console.error(`[receiveGuard] internalize ${txid} failed (next try in ${Math.round(wait / 60000)} min):`, err);
-        sendSyncStatus({ status: 'receive-failed', txid, error: err instanceof Error ? err.message : String(err) });
       }
     }
     await sweepDeposit
@@ -914,6 +1412,9 @@ export const initWallet = async (
       ownerSync: (a) => syncContext.services.owner.sync(a),
       outputSats,
       walletOutpoints,
+      accountedFor,
+      spends: spendsAll,
+      waitingSpenders: waitingVia(deviceReads),
     });
     // Still missing after a direct internalize: storage won't take this txid (services/receiveRescue.ts). Spend
     // each stuck output back to the same address in a fresh transaction and credit that one instead.
@@ -954,13 +1455,15 @@ export const initWallet = async (
               protocolID: ONESAT_PROTOCOL as WalletProtocol,
               counterparty: 'self',
             });
-          const r = await internalizeBeef({
-            beef: Uint8Array.from(beef),
-            addressDerivations: map as Parameters<typeof internalizeBeef>[0]['addressDerivations'],
-            wallet: adminWallet,
-            services: syncContext.services,
-            chain,
-          });
+          const r = await internalizeLock(() =>
+            internalizeBeef({
+              beef: Uint8Array.from(beef),
+              addressDerivations: map as Parameters<typeof internalizeBeef>[0]['addressDerivations'],
+              wallet: adminWallet,
+              services: syncContext.services,
+              chain,
+            }),
+          );
           return r.internalized;
         },
         protocolID: ONESAT_PROTOCOL as WalletProtocol,
@@ -981,17 +1484,22 @@ export const initWallet = async (
           ownerSync: (a) => syncContext.services.owner.sync(a),
           outputSats,
           walletOutpoints,
+          accountedFor,
+          spends: spendsAll,
+          waitingSpenders: waitingVia(deviceReads),
         });
       }
     }
-    // Whatever is still missing counts as arriving, so the balance never shows $0 for it.
-    setArriving(final.satoshis);
+    // Whatever is still missing counts as arriving, so the balance never shows $0 for it. Each balance read checks these
+    // outpoints against storage again (services/receiveGuard.ts arrivingNow).
+    setArriving(final.outputs, since);
     if (final.satoshis) sendSyncStatus({ status: 'arriving', satoshis: final.satoshis });
   };
   // One receive-guard run at a time: overlapping runs each internalized and swept the same outputs.
   const receiveGuardFlight = singleFlight(receiveGuardOnce);
   const runReceiveGuard = () => receiveGuardFlight.run();
   const guard = () => runReceiveGuard().catch((err) => console.error('[receiveGuard] failed:', err));
+  guardSoon = () => void guard();
 
   // One address sync at a time, shared by the startup run, the background alarm and the refresh button
   // (services/addressResync.ts). A quiet run (the alarm) shows no spinner; its 'complete' still refreshes the balance.
@@ -1005,28 +1513,38 @@ export const initWallet = async (
     }
     // Coins first, then names/ordinals in the background, each part with its own progress and failures
     // (services/prioritySync.ts; owner, 25 Oct 2026: a big restored wallet's balance crept up for minutes).
-    await runPrioritySync(actionCtx, {
-      count: scanPlan.count,
-      onProgress: (p) => {
-        if (!quiet)
-          sendSyncStatus({
-            status: 'progress',
-            pending: Math.max(0, p.total - p.done),
-            done: p.done,
-            failed: p.failed,
-            part: p.part,
-            total: p.total,
-            message: p.message,
-          });
-      },
-      onCoinsReady: (r) => {
-        // The balance is complete now: let the Wallet tab read it while names keep loading.
-        sendSyncStatus({ status: 'coins-ready', ...r });
-        sweepDeposit
-          .execute(actionCtx, {})
-          .catch((err: unknown) => console.error('[initWallet] deposit sweep failed:', err));
-      },
-    })
+    // A transaction WebKit aborted (the app suspended, 7 Nov 2026) runs once more before the banner says so
+    // (services/idbAbortRetry.ts).
+    await retryOnceOnIdbAbort(() =>
+      runPrioritySync(actionCtx, {
+        count: scanPlan.count,
+        lock: internalizeLock,
+        // A coin another copy of this wallet already swept is not taken in (review 20, H1); fails open when unclear.
+        spends: spendsSync,
+        knownTxids: heldTxids,
+        foreignSpend: (spenders) => void askPull(spenders),
+        onTaken: (ops) => recheck.add(ops),
+        onProgress: (p) => {
+          if (!quiet)
+            sendSyncStatus({
+              status: 'progress',
+              pending: Math.max(0, p.total - p.done),
+              done: p.done,
+              failed: p.failed,
+              part: p.part,
+              total: p.total,
+              message: p.message,
+            });
+        },
+        onCoinsReady: (r) => {
+          // The balance is complete now: let the Wallet tab read it while names keep loading.
+          sendSyncStatus({ status: 'coins-ready', ...r });
+          sweepDeposit
+            .execute(actionCtx, {})
+            .catch((err: unknown) => console.error('[initWallet] deposit sweep failed:', err));
+        },
+      }),
+    )
       .then(async (result) => {
         await sweepDeposit
           .execute(actionCtx, {})
@@ -1075,7 +1593,7 @@ export const initWallet = async (
       })
       .catch((error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
-        sendSyncStatus({ status: 'error', message });
+        sendSyncStatus({ status: 'error', message, detail: `address sync: ${syncErrorDetail(error)}` });
         console.error('[initWallet] Address sync failed:', error);
         void guard();
         recoverTokens().catch((err) => console.error('[initWallet] token recovery failed:', err));
@@ -1099,6 +1617,126 @@ export const initWallet = async (
     () => deviceSync.syncNow(),
     () => undefined,
   );
+
+  // Instant receive (services/receiveWatch.ts; owner, 5 Nov 2026: the iPhone showed neither $1 after 20 minutes in front).
+  // The address sync's own coin intake, made on first use (it derives the keys), recording in its processed-tx store.
+  let watchKit:
+    | Promise<{ intake: CoinIntake; store: ProcessedTxStoreIdb; classified: ProcessedTxStoreIdb; hashes: Set<string> }>
+    | undefined;
+  const watchIntake = () =>
+    (watchKit ??= (async () => {
+      const keys = await deriveSyncKeys(actionCtx.wallet, scanPlan.count);
+      const store = new ProcessedTxStoreIdb(keys.identityKey);
+      // The address sync's own store of transactions known to pay us only 1-sat items (names, tokens): never downloaded.
+      const classified = new ProcessedTxStoreIdb(`${keys.identityKey}:classified-1sat`);
+      const intake = makeCoinIntake({
+        wallet: actionCtx.wallet,
+        keyByHash: keys.keyByHash,
+        processed: store,
+        lock: internalizeLock,
+        spends: spendsAll,
+        knownTxids: heldTxids,
+        foreignSpend: (spenders) => void askPull(spenders),
+        unknownSpend: 'skip',
+        onTaken: (ops) => recheck.add(ops),
+      });
+      return { intake, store, classified, hashes: keys.hashes };
+    })().catch((e: unknown) => {
+      watchKit = undefined;
+      throw e;
+    }));
+  /** Raw transactions classified per look (each a payment's few hundred bytes, or an untagged mint's more). */
+  const RAW_PER_LOOK = 6;
+  const ownerBase = (syncContext.services.owner as unknown as { baseUrl?: string }).baseUrl;
+  const watchStream = ownerBase ? ownerSyncReader(ownerBase) : undefined;
+  let tip = { height: 0, at: 0 };
+  // Held back with the other syncs while a site waits for its sheet (startSyncsAfter, services/sheetFirst.ts).
+  let syncsOpen = false;
+  void syncsMayStart.then(
+    () => void (syncsOpen = true),
+    () => undefined,
+  );
+  const receiveWatchAddresses = () => {
+    const shown = chromeStorageService.getCurrentAccountObject().account?.primaryAddress;
+    return [...(shown ? [shown] : []), ...syncContext.addressManager.getAddresses()];
+  };
+  const receiveWatch = createReceiveWatch({
+    // This device's store only, never between a site's steps (as the receive guard), never before the syncs may start.
+    active: () => syncsOpen && !walletClosed && storage.isActiveStorageProvider() && !chainActive(),
+    addresses: () => receiveWatchAddresses(),
+    // The tip, at most once a minute; the watcher gives this a deadline (review 20, M3).
+    from: async () => {
+      if (Date.now() - tip.at > 60_000)
+        await baseWallet
+          .getHeight({})
+          .then(({ height }) => void (tip = { height, at: Date.now() }))
+          .catch(() => undefined);
+      return watchFrom(tip.height, Date.now());
+    },
+    // Read with an AbortSignal, so a look that runs out of time closes its request (M3).
+    stream: (a, from, signal) =>
+      watchStream ? watchStream(a, from, signal) : syncContext.services.owner.sync(a, from),
+    states: statesOf,
+    knownTxids: heldTxids,
+    processed: async (txid) => (await watchIntake()).store.has(txid),
+    // Payments first, names never downloaded (review 20, M4): the address sync's classified store; then the indexer's
+    // tags, one call for every candidate (kept for this run only: the watcher sees only the receive outputs, not the
+    // whole transaction); then the raw transaction, a few per look, against every key the address sync scans and the
+    // receive addresses (a verdict "pays us no coin" is then the address sync's own, and is kept in its store).
+    classify: async (txids, byTxid) => {
+      const kit = await watchIntake();
+      const out = new Map<string, TxClass>();
+      const rest: string[] = [];
+      for (const t of txids) {
+        if (await kit.classified.has(t).catch(() => false)) out.set(t, 'not-coin');
+        else rest.push(t);
+      }
+      const ops = rest.flatMap((t) => byTxid.get(t) ?? []);
+      if (ops.length) {
+        const rows = await syncContext.services.txo.getBatch(ops, { tags: ['*'] }).catch(() => undefined as unknown);
+        if (Array.isArray(rows) && rows.length === ops.length) {
+          let i = 0;
+          for (const t of rest) {
+            const n = (byTxid.get(t) ?? []).length;
+            if (allOneSat(rows.slice(i, i + n) as Parameters<typeof allOneSat>[0])) out.set(t, 'not-coin');
+            i += n;
+          }
+        }
+      }
+      const hashes = new Set([...kit.hashes, ...receiveWatchAddresses().map(pkhHex)]);
+      let raw = 0;
+      for (const t of rest) {
+        if (out.has(t)) continue;
+        if (raw++ >= RAW_PER_LOOK) {
+          out.set(t, 'later');
+          continue;
+        }
+        try {
+          if (outputsPaying(await syncContext.services.beef.getRawTx(t), hashes).some((v) => v > 1)) out.set(t, 'coin');
+          else {
+            out.set(t, 'not-coin');
+            await kit.classified.add(t).catch(() => undefined);
+          }
+        } catch {
+          out.set(t, 'later');
+        }
+      }
+      return out;
+    },
+    spends: spendsAll,
+    askPull,
+    recheck: () => recheck.run(),
+    backoff: internalizeBackoff,
+    fetchBeef: async (txid) => {
+      const beef = await syncContext.services.beef.getBeef(txid);
+      if (!beef) throw new Error(`Failed to load BEEF for ${txid}`);
+      return Array.from(beef);
+    },
+    intake: async () => (await watchIntake()).intake,
+    changed: (found) => sendSyncStatus({ status: 'coins-ready', found, failed: 0 }),
+    // warn: the iPhone's worker relays warn and error only (review 20, L10).
+    log: (...a) => console.warn(...a),
+  });
 
   // Sync incoming paymail payments from the message box (fire-and-forget)
   void syncsMayStart
@@ -1136,7 +1774,7 @@ export const initWallet = async (
         }
         return out;
       }),
-    knownOnChain: (txid) => knownOnChain(txid, (t) => toolboxServices.getRawTx(t)),
+    knownOnChain: (txid) => knownOnChain(txid),
     cancel: (q) =>
       storage.runAsStorageProvider(async (sp) => {
         for (const req of await sp.findProvenTxReqs({ partial: { txid: q.txid } }))
@@ -1169,6 +1807,39 @@ export const initWallet = async (
       if (r.result === 'restored') internalizeBackoff.clear(r.txid);
       return r;
     });
+  // A payment this device holds as failed that the backup says went through and the chain has: repaired the way
+  // Settings › Find mined payments repairs it, never by taking the backup's word (services/inboundSync.ts).
+  stopBackupCheck.verifier.recover = async (txid) => {
+    const r = await recoverTxidImpl(txid);
+    if (r.result === 'restored') return 'restored';
+    return r.result === 'not-mined' || r.result === 'error' ? 'wait' : 'done';
+  };
+
+  // Settings › Troubleshooting › Recover change from my 12 words (services/seedChange.ts).
+  const recoverSeedChangeImpl = (progress?: (step: string) => void, options?: { fresh?: boolean }) =>
+    recoverSeedChange(
+      makeSeedChangeDeps({
+        progress,
+        fresh: options?.fresh,
+        storage,
+        wallet: baseWallet as never,
+        services: toolboxServices as never,
+        // Addresses the seed makes: identity, legacy pay and ordinals, and the deposit addresses handed out.
+        seedAddresses: () => {
+          const a = chromeStorageService.getCurrentAccountObject().account?.addresses;
+          return [
+            a?.identityAddress,
+            a?.bsvAddress,
+            a?.ordAddress,
+            ...syncContext.addressManager.getAddresses(),
+          ].filter((x): x is string => !!x);
+        },
+        kv: seedChangeKV(baseWallet.keyDeriver.identityKey),
+      }),
+    ).then((r) => {
+      console.log('[seedChange]', r);
+      return r;
+    });
 
   // Settings › Storage › Find missing coins (services/findMissingCoins.ts).
   const missingCoins = () =>
@@ -1195,7 +1866,21 @@ export const initWallet = async (
 
   const close = async () => {
     walletClosed = true;
+    admitClosed = true;
+    receiveWatch.stop();
+    void watchKit
+      ?.then(async (k) => {
+        await k.store.close();
+        await k.classified.close();
+      })
+      .catch(() => undefined);
+    keepActive?.stop();
+    if (admitTimer) clearTimeout(admitTimer);
+    admitTimer = undefined;
+    if (moreTimer) clearTimeout(moreTimer);
+    moreTimer = undefined;
     await destroyWallet();
+    stopBackupCheck();
   };
 
   return {
@@ -1206,7 +1891,8 @@ export const initWallet = async (
     remoteStorage,
     permissionStore,
     envelopes,
-    setActiveStorage,
+    // Settings › Storage, Restore from backup and the move to this device: no pending heal undoes them (review 19, F3).
+    setActiveStorage: switchActiveAs(keepActive, setActiveStorage),
     addRemote,
     recoverTokens,
     fixStaleToken,
@@ -1217,7 +1903,28 @@ export const initWallet = async (
     addressSyncBusy: addressSync.busy,
     sweepDeposits: () => sweepDeposit.execute(actionCtx, {}),
     creditArriving: () => runReceiveGuard(),
+    balanceSplit: () => balanceSplit(baseWallet, { accountedFor, spenderCarries: carriesVia(deviceReads) }),
+    receiveWatch: { foreground: (on) => receiveWatch.foreground(on) },
     syncDevices: () => deviceSync.syncNow(),
+    admitBackupRows,
+    backupState: () => {
+      const st = deviceSync.state();
+      return {
+        backupConfigured: (backups?.length ?? 0) > 0,
+        pendingPush: st.pendingPush || st.scheduled || st.running,
+        failures: st.failures,
+        lastPushOkAt: st.lastPushOkAt,
+        // A backup set aside after a failed merge, reconnecting on its back-off (review 19, F4).
+        paused: keepActive?.paused().paused ?? false,
+        storageBusy: (keepActive?.healing() ?? false) || st.running,
+      };
+    },
+    backupBeforeSend: () =>
+      backupBeforeSend({
+        deviceActive: () => storage.isActiveStorageProvider(),
+        backupConfigured: () => (backups?.length ?? 0) > 0,
+        pushNow: () => deviceSync.pushNow(),
+      }),
     recoverFailed: () =>
       runRecoverOnce(() =>
         recoverMinedFailedActions(
@@ -1234,6 +1941,7 @@ export const initWallet = async (
         return r;
       }),
     recoverTxid: recoverTxidImpl,
+    recoverSeedChange: recoverSeedChangeImpl,
     findMissingCoins: () => scanMissingCoins(missingCoins().scan),
     restoreMissingCoins: (coins: MissingCoin[]) =>
       restoreMissingCoins(coins, missingCoins().restore).then((r) => {
@@ -1278,6 +1986,8 @@ export const initWallet = async (
               options: { sendWith: [txid], acceptDelayedBroadcast: false },
             }),
           recoverLate: (txid) => recoverTxidImpl(txid),
+          // A copy in 1Sat's BEEF store still leads to the wallet's own (chain-checked) send of that tx, never a release.
+          lookups: expiryLookups(),
           // BRC-177 blockheight deadlines (b-Aware 26 Oct 2026, N1). Undefined on any failure: the action stays held.
           height: wocHeight(),
           kv: storageKV(baseWallet.keyDeriver.identityKey),
@@ -1308,7 +2018,7 @@ export const initWallet = async (
         fetchBeef: async (txid) => (await toolboxServices.getBeefForTxid(txid)).toBinary(),
       });
     },
-    knownOnChain: (txid) => knownOnChain(txid, (t) => toolboxServices.getRawTx(t)),
+    knownOnChain: (txid) => knownOnChain(txid),
     repairNullTxids: async () => {
       // Local store only: never edit the remote's rows from here.
       if (!storage.isActiveStorageProvider()) return { txidFilled: 0, setAside: 0, aborted: 0, skipped: 0 };
@@ -1360,7 +2070,9 @@ export const initWallet = async (
             await tx.done;
             return held;
           }),
-        knownOnChain: (txid) => knownOnChain(txid, (t) => toolboxServices.getRawTx(t)),
+        knownOnChain: (txid) => knownOnChain(txid),
+        // A signed action is aborted only after repeated "not found" answers over 30+ minutes (review 4 Nov, F5).
+        missingLog: missingLogKV(baseWallet.keyDeriver.identityKey),
         log: (m, d) => console.warn(m, d ?? ''),
       });
     },

@@ -63,6 +63,9 @@ export const RESERVED_PROTOCOLS: readonly Protocol[] = [
   [2, 'bwalletx legacy ord'],
   // The legacy pay key (addresses.bsvAddress), whose BSV, tokens and NFTs the sync takes in (src/services/legacyOrd.ts).
   [2, 'bwalletx legacy pay'],
+  // Deterministic change (toolbox patch; src/services/seedChange.ts): its HMAC key makes every change prefix. An app
+  // allowed createHmac / encrypt under it could compute those prefixes and link this wallet's change addresses.
+  [2, 'bwx change recovery'],
 ];
 
 /**
@@ -85,4 +88,5 @@ export const EXTERNAL_OK: readonly (readonly [number, string, string])[] = [
   // Ordinal (token icon) receive keys for sites, the same way: getPublicKey only (siteTokens.ts).
   [1, 'bwalletx ordinal receive', 'Site ordinal receive keys: getPublicKey only (siteTokens.ts)'],
   [1, 'sigma', 'SIGMA post signatures: the wallet asks for it with a first post (permissionBundle.ts POST_PROTOCOL)'],
+  [2, 'bitsign seal', "bit-sign's document seal: one Seal sheet for its sign and its payment (sealPass.ts)"],
 ];

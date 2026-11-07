@@ -10,6 +10,15 @@
 // their own actions, so a Store signature can't be replayed here. Quotes last 5 minutes, are single use (the row's
 // status + the shared paid-txid ledger), and the claim checks the outputs pay THEME_ORDER_PAY_ADDRESS exactly the
 // quoted sats with the quote's memo before broadcasting. The agent pays the network fee: no house-absorbed costs.
+//
+// Buy answers (P0, 3 Nov 2026; site/lib/storeClaim.js):
+//   200 { product, … }                 the network has the payment: bought, granted to the key.
+//   202 { product, pending: true, … }  the payment is recorded but the network hasn't shown it yet. NOT bought yet.
+//                                      Send the same buy request again later (same quote_id, txid, rawtx): it turns
+//                                      200 once the network has it. A payment that matches its quote is honoured even
+//                                      after the 5-minute quote ran out. Broadcast the payment from your own wallet too.
+//   502 { error: 'broadcast_failed', pending: true }  ARC refused it and the network doesn't have it.
+//   409 payment_pending                another payment for this quote (or this theme) is still on its way.
 'use strict';
 const { PACKS, PACK_LABELS } = require('./themeBuys');
 const { payAddress, PRICE_USD } = require('./themeOrders');
@@ -34,6 +43,11 @@ function listProducts(env = process.env) {
     currency: 'USD',
     pay_with: ['bsv'],
     quote_ttl_seconds: AGENT_QUOTE_MS / 1000,
+    buy_answers: {
+      200: 'bought: the network has the payment',
+      202: 'pending: payment recorded, the network has not shown it yet; not bought yet. Repeat the same buy request later; it answers 200 once the network has it.',
+      note: 'Broadcast the payment from your own wallet as well. A payment that matches its quote is honoured even after the quote expires.',
+    },
     products: [
       ...Object.keys(PACKS).map((id) => ({
         product: 'theme',
@@ -100,7 +114,8 @@ function makeAgentBuyHandlers({ buy, order, deposit, env = process.env }) {
     const product = productOf(body);
     if (!PRODUCT_KINDS.has(product)) return [404, { error: 'unknown_product' }];
     const [status, out] = await pick(product).claim(body);
-    return [status, status === 200 ? { product, ...out } : out];
+    // 202 = recorded, not yet seen by the network: pending, not bought (storeClaim.js).
+    return [status, status === 200 || status === 202 ? { product, ...out } : out];
   };
 
   return { products, quote, claim };

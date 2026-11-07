@@ -257,6 +257,13 @@ export class BchatClient {
     return this.session;
   }
 
+  /** Take a session another client saved for this same account (the Wallet card's follow, Settings). */
+  adopt(s: ChatSession | null) {
+    const active = getChatAccount();
+    if (!s?.token || !s.handle || (s.account && active && s.account !== active)) return;
+    this.session = s;
+  }
+
   protected async call<T>(
     method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     path: string,
@@ -810,6 +817,15 @@ export class BchatClient {
   /** A Space's permanent page (public). `{ page }`. */
   async spacePage(slug: string): Promise<unknown> {
     return this.call('GET', `/api/bitsign/space-pages/${encodeURIComponent(slug)}`, undefined, false);
+  }
+
+  /**
+   * Claim a one-use invite link (`/room/<ref>?invite=<token>`, bit-sign lib/invite-link-rules.ts): binds this
+   * signed-in handle to the pending member slot, so the room is mine. Idempotent for the same handle. `ref` is the
+   * ticker or the room's clean address.
+   */
+  async claimRoomInvite(ref: string, token: string): Promise<unknown> {
+    return this.call('POST', `${BchatClient.path(ref)}/claim`, { token });
   }
 
   /** A room's public page (token / discoverable rooms). `{ page }`. */

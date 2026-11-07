@@ -75,12 +75,17 @@ The wallet signs bChat's own challenge directly, with nothing loaded in a WebVie
 
 1. `walletSigner(apiContext)` (`src/mobile/chat/signer.ts`) gets the identity address
    from the same `MESSAGE_SIGNING_PROTOCOL` / `identity` key as bChat web, then signs with
-   `signBsm.execute(apiContext, {message})`. The wallet's normal approval rules apply.
+   `signBsm.execute(apiContext, {message})`. These in-app calls run as the wallet itself (the admin originator,
+   `src/initWallet.ts`), so no approval sheet shows; sites' signing rules are unchanged.
 2. `BchatClient.signIn` (`src/mobile/chat/api.ts`) runs challenge → sign → verify with
    `kind:'yours'`, then keeps `{token, handle, address}`. If the wallet signs with a
    different address, it requests a fresh challenge for that address.
-3. Every request sends `Authorization: Bearer <token>`. A 401 clears the session and shows
-   "Sign in with wallet" again. Sign-in runs once automatically when the tab opens.
+3. Every request sends `Authorization: Bearer <token>`. No visible sign-in (owner, 3 Nov 2026): the session is
+   fetched silently for the active account on unlock and on account switch (`chat/chatSession.ts`,
+   `ChatSessionWarmer.tsx`); Chat and DMs show a skeleton meanwhile, one line + Retry on failure, and
+   "Choose your handle" only for a wallet with no name yet. A 401 drops the session and signs in again quietly
+   (not in a loop). Settings › bChatX "Off" still keeps an account out of bChatX. Names bit-sign holds as
+   inactive aliases (`/me/handles` `primary: false`) are never used as the sign-in name (`chat/signInNames.ts`).
 4. The session is stored in WebView `localStorage` (`bwallet.bchat.session`) together with
    the identity address. It is dropped if the active wallet identity changes. It is a chat
    session token only: no keys, and nothing committed.

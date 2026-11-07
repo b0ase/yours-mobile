@@ -10,12 +10,25 @@
  *   1. every spendable output with no txid: copy its transaction's txid when that transaction has one; otherwise
  *      mark it spendable=false so the picker skips it (the coin is not deleted; Find missing coins can add it back);
  *   2. every action left 'unsigned' or 'unprocessed' for more than STALE_MS: abortAction, which releases the coins it
- *      locked. Never one whose txid the network knows (it may have gone out).
+ *      locked. Never one whose txid the network knows (it may have gone out). An action WITH a txid (signed: it may
+ *      have been posted) is aborted only after MISSING_CHECKS "not found" answers spread over at least
+ *      MISSING_SPAN_MS (review 4 Nov 2026, F5: one WhatsOnChain 404 + one ARC 404 was enough, and a slow tx like
+ *      5916dd14 took 16 minutes to show; the toolbox's abort has no chain check of its own for 'unprocessed').
  *
  * Pure apart from the injected deps. Tested in nullTxidRepair.test.ts.
  */
 
 export const STALE_MS = 10 * 60 * 1000;
+/** A signed action is aborted only after this many "not found" answers… */
+export const MISSING_CHECKS = 3;
+/** …the first and the last at least this far apart. */
+export const MISSING_SPAN_MS = 30 * 60 * 1000;
+
+/** Persisted "not found" sightings per txid (any "may have it" answer clears them). */
+export type MissingLog = {
+  load: () => Promise<Record<string, number[]>>;
+  save: (m: Record<string, number[]>) => Promise<void>;
+};
 
 export const isTruthyRequiredError = (e: unknown): boolean =>
   /A truthy value is required|action batch output is missing its txid/i.test(
@@ -47,6 +60,8 @@ export interface NullTxidRepairDeps {
   /** Drop an action-batch reservation (action_batch_outputs) held on this output, if any. */
   releaseReservation?: (outputId: number) => Promise<boolean>;
   knownOnChain: (txid: string) => Promise<boolean>;
+  /** Where "not found" answers are kept between runs. Without it a signed action is never aborted (fail closed). */
+  missingLog?: MissingLog;
   now?: () => number;
   log?: (m: string, d?: unknown) => void;
 }
@@ -81,6 +96,8 @@ export async function repairNullTxids(d: NullTxidRepairDeps): Promise<NullTxidRe
     }
   }
 
+  const seenMissing = d.missingLog ? await d.missingLog.load().catch(() => ({}) as Record<string, number[]>) : {};
+  let logChanged = false;
   for (const a of await d.pendingActions()) {
     if (a.status !== 'unsigned' && a.status !== 'unprocessed') continue;
     const at = a.updated_at ? new Date(a.updated_at).getTime() : 0;
@@ -91,9 +108,26 @@ export async function repairNullTxids(d: NullTxidRepairDeps): Promise<NullTxidRe
     if (a.txid && TXID.test(a.txid)) {
       const known = await d.knownOnChain(a.txid).catch(() => true); // fail closed: unknown = may have gone out
       if (known) {
+        if (seenMissing[a.txid]) {
+          delete seenMissing[a.txid];
+          logChanged = true;
+        }
         r.skipped++;
         continue;
       }
+      // Not found now: count it, and abort only after repeated answers over time.
+      const times = [...(seenMissing[a.txid] ?? []), now].slice(-10);
+      seenMissing[a.txid] = times;
+      logChanged = true;
+      if (!d.missingLog || times.length < MISSING_CHECKS || now - times[0] < MISSING_SPAN_MS) {
+        log('[nullTxidRepair] not found yet; checking again later before any abort', {
+          txid: a.txid,
+          checks: times.length,
+        });
+        r.skipped++;
+        continue;
+      }
+      delete seenMissing[a.txid];
     }
     try {
       await d.abortAction(a.reference);
@@ -103,6 +137,28 @@ export async function repairNullTxids(d: NullTxidRepairDeps): Promise<NullTxidRe
       r.skipped++;
     }
   }
+  if (logChanged && d.missingLog) await d.missingLog.save(seenMissing).catch(() => undefined);
   if (r.txidFilled || r.setAside || r.aborted || r.reservationsReleased) log('[nullTxidRepair] repaired', r);
   return r;
+}
+
+/** chrome.storage.local (extension, phone shim) or localStorage: the "not found" sightings for one identity. */
+export function missingLogKV(identityKey: string): MissingLog {
+  const key = `bwx.nullTxidMissing.v1.${identityKey.slice(0, 16)}`;
+  type ChromeLocal = {
+    get: (k: string) => Promise<Record<string, unknown>>;
+    set: (items: Record<string, unknown>) => Promise<void>;
+  };
+  const local = (globalThis as { chrome?: { storage?: { local?: ChromeLocal } } }).chrome?.storage?.local;
+  return {
+    load: async () => {
+      if (local) return ((await local.get(key))[key] as Record<string, number[]> | undefined) ?? {};
+      const raw = globalThis.localStorage?.getItem(key);
+      return raw ? (JSON.parse(raw) as Record<string, number[]>) : {};
+    },
+    save: async (m) => {
+      if (local) await local.set({ [key]: m });
+      else globalThis.localStorage?.setItem(key, JSON.stringify(m));
+    },
+  };
 }

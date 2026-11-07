@@ -6,14 +6,30 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { P2PKH, PrivateKey, Transaction } from '@bsv/sdk';
+import { isSpentCoinError } from '../mobile/chat/nativeSeal';
+import { DeviceNotActiveError } from './deviceActive';
 import { healInvalidSend, withHealMessage } from './invalidSendHeal';
 import {
   createWithSpentRetry,
+  provenNotSent,
   reasonNamesSpender,
   rejectedTxid,
   retryEligible,
   SPENT_ELSEWHERE_MESSAGE,
 } from './spentRetry';
+import {
+  classifySendError,
+  DOUBLE_SPEND_PENDING_MESSAGE,
+  SPENT_ELSEWHERE_SHORT_MESSAGE,
+  SPENT_ELSEWHERE_STUCK_MESSAGE,
+  OWN_COIN_OTHER_PAYMENT_MESSAGE,
+  OWN_PAYMENTS_UNCHECKED_MESSAGE,
+  ownPaymentOutMessage,
+  REFUSED_MAYBE_SENT_MESSAGE,
+  REFUSED_NOT_SENT_MESSAGE,
+  MISSING_PARENT_MESSAGE,
+  DELIVERY_UNCONFIRMED_MESSAGE,
+} from '../utils/sendErrors';
 
 const key = PrivateKey.fromRandom();
 const lock = new P2PKH().lock(key.toAddress());
@@ -30,7 +46,12 @@ function funding(n: number) {
 type Coin = { spendable: boolean; locked: boolean };
 
 /** A toolbox-like wallet over in-memory storage and a fake network. */
-function simWallet(nCoins: number, spentElsewhere: number[]) {
+function simWallet(
+  nCoins: number,
+  spentElsewhere: number[],
+  refusal: 'invalidTx' | 'doubleSpend' | ((coin: number) => 'invalidTx' | 'doubleSpend') = 'invalidTx',
+  opts: { toolboxEvicts?: boolean } = {},
+) {
   const src = funding(nCoins);
   const srcId = src.id('hex');
   const coins = new Map<string, Coin>();
@@ -62,6 +83,8 @@ function simWallet(nCoins: number, spentElsewhere: number[]) {
       // Toolbox: tx failed → inputs restored spendable (lock released), then WERR_REVIEW_ACTIONS.
       coin.locked = false;
       coin.spendable = true;
+      // Toolbox markStaleInputsAsSpent: when its own UTXO check says spent, the input is set unspendable again.
+      if (opts.toolboxEvicts) coin.spendable = false;
       refusals.set(
         txid,
         `UTXO_SPENT (70): [ProcessTransaction][${txid}] UTXO_SPENT (70): ${op.replace('_', ':')} utxo already spent by tx ${spender}[0]`,
@@ -70,7 +93,9 @@ function simWallet(nCoins: number, spentElsewhere: number[]) {
         name: 'WERR_REVIEW_ACTIONS',
         txid,
         tx: tx.toAtomicBEEF(true),
-        reviewActionResults: [{ txid, status: 'invalidTx' }],
+        reviewActionResults: [
+          { txid, status: typeof refusal === 'function' ? refusal(Number(op.split('_')[1])) : refusal },
+        ],
       });
     }
     coin.locked = false;
@@ -91,6 +116,7 @@ function simWallet(nCoins: number, spentElsewhere: number[]) {
           c.spendable = false;
           return 1;
         },
+        isSpendable: async (txid, vout) => coins.get(`${txid}_${vout}`)?.spendable ?? null,
       },
       { reason: refusals.get(rejectedTxid(e) ?? '') },
     );
@@ -102,8 +128,10 @@ function simWallet(nCoins: number, spentElsewhere: number[]) {
 const deps = (w: ReturnType<typeof simWallet>, over: Partial<Parameters<typeof createWithSpentRetry>[0]> = {}) => ({
   create: () => w.create(500),
   heal: w.heal,
-  txKnown: async (txid: string) => w.known.has(txid),
   reason: (txid: string) => w.refusals.get(txid),
+  // The other device's payment is not one this wallet holds, and (for a double spend) it is mined.
+  ownTxids: async () => new Set<string>(),
+  spendMined: async () => true,
   eligible: true,
   ...over,
 });
@@ -124,6 +152,114 @@ describe('UTXO_SPENT: coin spent on another device', () => {
     expect(w.coins.get(`${w.srcId}_0`)).toEqual({ spendable: false, locked: false });
     for (const i of [1, 2]) expect(w.coins.get(`${w.srcId}_${i}`)).toEqual({ spendable: true, locked: false });
     expect(w.balance()).toBe(2000);
+  });
+
+  test('DOUBLE_SPEND_ATTEMPTED with the competing spend MINED: healed and retried once', async () => {
+    const w = simWallet(3, [0], 'doubleSpend');
+    const asked: string[][] = [];
+    const r = await createWithSpentRetry(deps(w, { spendMined: async (op, by) => (asked.push([op, by]), true) }));
+    expect(asked).toEqual([[`${w.srcId}_0`, OTHER_DEVICE_TX]]);
+    expect(r.ok).toBe(true);
+    expect(r.retried).toBe(true);
+    expect(r.heal?.released).toBe(1);
+    expect(w.accepted).toHaveLength(1);
+    expect(w.accepted[0].inputs).toEqual([`${w.srcId}_1`]);
+    expect(w.balance()).toBe(1000); // coin 0 cleared, coin 1 spent by the retry
+  });
+
+  test('DOUBLE_SPEND_ATTEMPTED with the competing spend NOT mined (review 17, F2): healed, never retried', async () => {
+    for (const spendMined of [async () => false, async () => null, async () => Promise.reject(new Error('woc down'))]) {
+      const w = simWallet(3, [0], 'doubleSpend');
+      const r = await createWithSpentRetry(deps(w, { spendMined }));
+      expect(r.ok).toBe(false);
+      expect(r.retried).toBe(false);
+      expect(r.heal?.released).toBe(1); // the balance is still corrected
+      expect(w.accepted).toHaveLength(0);
+      expect(r.ok ? undefined : r.notice).toBe(DOUBLE_SPEND_PENDING_MESSAGE);
+    }
+  });
+
+  test("the spent coin's spender is a payment THIS wallet holds (review 17, F1): never retried, the person is told", async () => {
+    const w = simWallet(3, [0]);
+    const r = await createWithSpentRetry(deps(w, { ownTxids: async (t) => new Set(t) }));
+    expect(r.ok).toBe(false);
+    expect(r.retried).toBe(false);
+    expect(w.accepted).toHaveLength(0);
+    expect(r.heal?.released).toBe(1);
+    // Not known to have paid this payee (17b L1): "a coin went to another payment of this wallet", no "won't pay twice".
+    expect(r.ok ? undefined : r.notice).toBe(OWN_COIN_OTHER_PAYMENT_MESSAGE);
+    // It paid this payee: then it is named, with its txid (the background strips it for sites).
+    const same = simWallet(3, [0]);
+    const t = await createWithSpentRetry(
+      deps(same, { ownTxids: async (x) => new Set(x), samePayee: async (txid) => txid === OTHER_DEVICE_TX }),
+    );
+    expect(t.ok ? undefined : t.notice).toBe(ownPaymentOutMessage(OTHER_DEVICE_TX));
+    // Not even a non-eligible caller (a site) is told to "try again".
+    const site = simWallet(3, [0]);
+    const s = await createWithSpentRetry(deps(site, { eligible: false, ownTxids: async (x) => new Set(x) }));
+    expect(s.ok ? undefined : s.notice).toBe(OWN_COIN_OTHER_PAYMENT_MESSAGE);
+  });
+
+  test('17b H1: every double spend not proven dead says "may still go through", in every branch', async () => {
+    // A site (not eligible), the toolbox having cleared the coin itself (released 0), and the retry's own refusal.
+    const site = simWallet(3, [0], 'doubleSpend');
+    const a = await createWithSpentRetry(deps(site, { eligible: false, spendMined: async () => false }));
+    const own = simWallet(3, [0], 'doubleSpend');
+    const b = await createWithSpentRetry(
+      deps(own, { heal: async () => ({ checked: 1, released: 0, spenders: {} }), spendMined: async () => false }),
+    );
+    const two = simWallet(3, [0, 1], (coin) => (coin === 0 ? 'invalidTx' : 'doubleSpend'));
+    const c = await createWithSpentRetry(deps(two, { spendMined: async () => false }));
+    expect(c.retried).toBe(true);
+    for (const r of [a, b, c]) {
+      expect(r.ok).toBe(false);
+      expect(r.ok ? undefined : r.notice).toBe(DOUBLE_SPEND_PENDING_MESSAGE);
+    }
+    expect(site.accepted.length + own.accepted.length + two.accepted.length).toBe(0);
+  });
+
+  test('17c: "not sent" only with hard proof; a refusal without it says "can\'t confirm" and is never retried', async () => {
+    // No spender named, and no input known spent by another tx: the refused tx may have gone out.
+    for (const heal of [
+      async () => ({ checked: 1, released: 0 }),
+      async () => ({ checked: 1, released: 1, inputs: ['ab'.repeat(32) + '_0'], spenders: {}, cleared: [] }),
+    ]) {
+      const w = simWallet(3, [0]);
+      const r = await createWithSpentRetry(deps(w, { reason: () => 'REJECTED', heal }));
+      expect(r.retried).toBe(false);
+      expect(r.ok ? undefined : r.notice).toBe(REFUSED_MAYBE_SENT_MESSAGE);
+    }
+    // The broadcaster named a DIFFERENT spender (17c M4: whatever WhatsOnChain says): proof.
+    const named = simWallet(3, [0]);
+    const r = await createWithSpentRetry(
+      deps(named, {
+        heal: async () => ({ checked: 1, released: 0 }),
+        reason: () => `UTXO_SPENT spent by tx ${'f'.repeat(64)}`,
+      }),
+    );
+    expect(r.ok ? undefined : r.notice).toBe(REFUSED_NOT_SENT_MESSAGE);
+    // Every input known spent by another tx, no reason at all: proof too.
+    expect(
+      provenNotSent('a'.repeat(64), undefined, {
+        checked: 1,
+        released: 1,
+        inputs: ['b'.repeat(64) + '_0'],
+        spenders: { ['b'.repeat(64) + '_0']: 'c'.repeat(64) },
+      }),
+    ).toBe(true);
+    expect(provenNotSent('a'.repeat(64), undefined, { checked: 1, released: 0, inputs: [], spenders: {} })).toBe(false);
+  });
+
+  test('storage can\'t say whose the spender is: no retry (fail closed), and never "try again" (17d L3)', async () => {
+    for (const ownTxids of [async () => null, async () => Promise.reject(new Error('locked'))]) {
+      const w = simWallet(3, [0]);
+      const r = await createWithSpentRetry(deps(w, { ownTxids }));
+      expect(r.retried).toBe(false);
+      expect(w.accepted).toHaveLength(0);
+      // Before: SPENT_ELSEWHERE_MESSAGE ("spent from another device… try again", moneyMoved 'no').
+      expect(r.ok ? undefined : r.notice).toBe(OWN_PAYMENTS_UNCHECKED_MESSAGE);
+      expect(classifySendError(OWN_PAYMENTS_UNCHECKED_MESSAGE).moneyMoved).toBe('unknown');
+    }
   });
 
   test('retries once with a different input and sends exactly once', async () => {
@@ -154,23 +290,42 @@ describe('UTXO_SPENT: coin spent on another device', () => {
     expect(w.accepted[0].inputs).toEqual([`${w.srcId}_2`]);
   });
 
-  test('never retries when the refused tx may have reached the network', async () => {
-    for (const txKnown of [async () => true, async () => null, async () => Promise.reject(new Error('down'))]) {
-      const w = simWallet(3, [0]);
-      const r = await createWithSpentRetry(deps(w, { txKnown }));
-      expect(r.ok).toBe(false);
-      expect(r.retried).toBe(false);
-      expect(w.calls()).toBe(1);
-    }
-  });
-
-  test('never retries when the broadcaster names the refused tx itself as the spender', async () => {
+  test('never retries when the broadcaster names the refused tx itself as the spender (it went out)', async () => {
     const w = simWallet(3, [0]);
     const r = await createWithSpentRetry(
       deps(w, { reason: (txid) => `UTXO_SPENT (70): x:0 utxo already spent by tx ${txid}[0]` }),
     );
     expect(r.retried).toBe(false);
     expect(w.calls()).toBe(1);
+    expect(r.ok ? undefined : r.notice).toBe(REFUSED_MAYBE_SENT_MESSAGE);
+  });
+
+  test('17c L4: the retry fails without a refusal: "can\'t confirm" unless it failed before signing', async () => {
+    const run = async (second: Error) => {
+      const w = simWallet(3, [0]);
+      let n = 0;
+      return createWithSpentRetry(
+        deps(w, { create: async () => (n++ === 0 ? w.create(500) : Promise.reject(second)) }),
+      );
+    };
+    const svc = await run(Object.assign(new Error('broadcast service error'), { name: 'WERR_REVIEW_ACTIONS' }));
+    expect(svc.ok ? undefined : svc.notice).toBe(REFUSED_MAYBE_SENT_MESSAGE);
+    const short = await run(Object.assign(new Error('Insufficient funds'), { name: 'WERR_INSUFFICIENT_FUNDS' }));
+    expect(short.ok ? undefined : short.notice).toBe(SPENT_ELSEWHERE_SHORT_MESSAGE);
+    // Refused before anything was built because this device's store wasn't active yet: its own "Nothing was sent".
+    const notActive = await run(new DeviceNotActiveError());
+    expect(notActive.ok ? undefined : notActive.notice).toBeUndefined();
+    expect(classifySendError(notActive.ok ? undefined : notActive.error)).toMatchObject({ moneyMoved: 'no' });
+    // The toolbox's raw refusal after a heal (a step that may follow signing) keeps "can't confirm".
+    const raw = await run(
+      Object.assign(
+        new Error(
+          "WalletStorageManager is not accessing user's active storage or there are conflicting active stores configured.",
+        ),
+        { name: 'WERR_NOT_ACTIVE' },
+      ),
+    );
+    expect(raw.ok ? undefined : raw.notice).toBe(REFUSED_MAYBE_SENT_MESSAGE);
   });
 
   test('never retries when nothing could be cleared (would pick the same coin)', async () => {
@@ -186,11 +341,122 @@ describe('UTXO_SPENT: coin spent on another device', () => {
     const r = await createWithSpentRetry({
       create: async () => Promise.reject(err),
       heal: async () => (healed++, null),
-      txKnown: async () => false,
+      ownTxids: async () => new Set<string>(),
+      spendMined: async () => null,
       eligible: true,
     });
     expect(r).toEqual({ ok: false, error: err, retried: false, heal: null });
     expect(healed).toBe(0);
+  });
+});
+
+/**
+ * Owner's iPhone, 3 Nov 2026 14:37Z: native Review & sign of board minute 010, right after the tax policy seal
+ * (5db5b9af…). The broadcaster named eb6dcc27…:2 spent; the toolbox's own stale-input check had already set it
+ * unspendable, so the heal changed 0 rows, reported nothing cleared, and the safe retry never ran ("Coins tried:").
+ */
+describe('UTXO_SPENT after the toolbox already evicted the dead coin (native seal, 3 Nov)', () => {
+  test('invalid-tx → heal counts the coin as cleared → one retry → success', async () => {
+    const w = simWallet(3, [0], 'invalidTx', { toolboxEvicts: true });
+    const r = await createWithSpentRetry(deps(w));
+    expect(r.heal?.released).toBe(1);
+    // The heal changed no row: the coin is reported as already off (recorded for the undo too: healClearedEntries).
+    expect(r.heal?.cleared).toEqual([]);
+    expect(r.heal?.alreadyOff).toEqual([`${w.srcId}_0`]);
+    expect(r.ok && r.retried).toBe(true);
+    expect(w.calls()).toBe(2);
+    expect(w.accepted).toHaveLength(1);
+    expect(w.accepted[0].inputs).toEqual([`${w.srcId}_1`]);
+  });
+
+  test('no coin cleared (spend not provable, still spendable) → no retry, and a plain message on the seal', async () => {
+    const w = simWallet(3, [0]);
+    const r = await createWithSpentRetry(
+      deps(w, {
+        // Neither the broadcaster's text nor the lookups name the spender: fail closed, nothing cleared.
+        heal: (e) => healInvalidSend(e, async () => null, { markSpent: async () => 0, isSpendable: async () => true }),
+      }),
+    );
+    expect(r.ok).toBe(false);
+    expect(r.retried).toBe(false);
+    expect(r.heal?.released).toBe(0);
+    expect(w.calls()).toBe(1);
+    expect(w.coins.get(`${w.srcId}_0`)?.spendable).toBe(true); // live-looking coin left alone
+    const shown = withHealMessage('rejected by the network as invalid; broadcaster said: UTXO_SPENT (70)', r.heal);
+    expect(isSpentCoinError(new Error(shown))).toBe(true); // → SEAL_SPENT_MESSAGE on the seal page
+    // What the background really answers (ownSend sendFailureText: the notice wins): proven not sent, so the seal's
+    // "Tap Seal & pay again" is true.
+    expect(r.ok ? undefined : r.notice).toBe(REFUSED_NOT_SENT_MESSAGE);
+    expect(isSpentCoinError(new Error(REFUSED_NOT_SENT_MESSAGE))).toBe(true);
+  });
+
+  // Merged onto the candidate line (test/phone-1106): its txKnown dep is gone; "may have been broadcast" is now the
+  // absence of hard proof it can't go out (17c provenNotSent). An already-off coin never skips that or any other guard.
+  test('rejected tx may have been broadcast → no retry even with the coin cleared', async () => {
+    const w = simWallet(3, [0], 'invalidTx', { toolboxEvicts: true });
+    // The broadcaster names the refused tx itself as the spender: it went out.
+    const r = await createWithSpentRetry(
+      deps(w, { reason: (txid) => `UTXO_SPENT (70): x:0 utxo already spent by tx ${txid}[0]` }),
+    );
+    expect(r.heal?.released).toBe(1);
+    expect(r.retried).toBe(false);
+    expect(w.calls()).toBe(1);
+    expect(w.accepted).toHaveLength(0);
+    expect(r.ok ? undefined : r.notice).toBe(REFUSED_MAYBE_SENT_MESSAGE);
+  });
+
+  test('an already-off coin spent by a payment THIS wallet holds: never retried (review 17 F1 still holds)', async () => {
+    const w = simWallet(3, [0], 'invalidTx', { toolboxEvicts: true });
+    const r = await createWithSpentRetry(deps(w, { ownTxids: async (t) => new Set(t) }));
+    expect(r.heal?.released).toBe(1);
+    expect(r.retried).toBe(false);
+    expect(w.accepted).toHaveLength(0);
+    expect(r.ok ? undefined : r.notice).toBe(OWN_COIN_OTHER_PAYMENT_MESSAGE);
+  });
+
+  test('an already-off coin after a double spend not proven dead: never retried (review 17 F2 still holds)', async () => {
+    const w = simWallet(3, [0], 'doubleSpend', { toolboxEvicts: true });
+    const r = await createWithSpentRetry(deps(w, { spendMined: async () => false }));
+    expect(r.heal?.released).toBe(1);
+    expect(r.retried).toBe(false);
+    expect(w.accepted).toHaveLength(0);
+    expect(r.ok ? undefined : r.notice).toBe(DOUBLE_SPEND_PENDING_MESSAGE);
+  });
+
+  test('the seal never says "Tap Seal & pay again" for a payment that may have gone out', () => {
+    for (const maybeOut of [
+      REFUSED_MAYBE_SENT_MESSAGE,
+      DOUBLE_SPEND_PENDING_MESSAGE,
+      OWN_COIN_OTHER_PAYMENT_MESSAGE,
+      OWN_PAYMENTS_UNCHECKED_MESSAGE,
+      MISSING_PARENT_MESSAGE,
+      DELIVERY_UNCONFIRMED_MESSAGE,
+      ownPaymentOutMessage('d'.repeat(64)),
+      ownPaymentOutMessage(),
+    ])
+      expect(isSpentCoinError(new Error(maybeOut))).toBe(false);
+  });
+
+  test('review 24 L2: "Tap Seal & pay again" is not offered where a re-tap cannot succeed', () => {
+    // The coins couldn't be updated (a re-tap picks the same dead coin), or what is left is too little: the
+    // background's own words are shown instead.
+    for (const futile of [SPENT_ELSEWHERE_STUCK_MESSAGE, SPENT_ELSEWHERE_SHORT_MESSAGE])
+      expect(isSpentCoinError(new Error(`createAction failed: ${futile}`))).toBe(false);
+    // A plain "spent elsewhere, balance updated, try again" still is.
+    expect(isSpentCoinError(new Error(SPENT_ELSEWHERE_MESSAGE))).toBe(true);
+  });
+
+  test('an unknown or unreadable row is never counted as cleared', async () => {
+    for (const isSpendable of [async () => null, async () => Promise.reject(new Error('remote store'))]) {
+      const w = simWallet(3, [0], 'invalidTx', { toolboxEvicts: true });
+      const r = await createWithSpentRetry(
+        deps(w, {
+          heal: (e) => healInvalidSend(e, async () => OTHER_DEVICE_TX, { markSpent: async () => 0, isSpendable }, {}),
+        }),
+      );
+      expect(r.heal?.released).toBe(0);
+      expect(r.retried).toBe(false);
+    }
   });
 });
 

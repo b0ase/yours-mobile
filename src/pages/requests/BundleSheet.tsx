@@ -30,9 +30,8 @@ import { useSheetPrice } from '../../components/DollarAmount';
 import { EnvelopePresets } from '../../components/approval/EnvelopePresets';
 import { envelopeUsdText } from '../../services/envelopes';
 import { escapeDenies, sheetControls } from './sheetControls';
-
-/** Outputs listed under the payment before "and N more" (N3-3). */
-const RECIPIENTS_SHOWN = 12;
+import { SEAL_BUTTON, SEAL_SITE_SUB, SealHero, SealSheetBody, SealTitle } from './SealSheetBody';
+import { PaymentRecipients } from './PaymentRecipients';
 import { ENVELOPES_ENABLED } from '../../mobile/storeBuild';
 import { dollarsFirst, dollarsInline } from '../../utils/dollarsFirst';
 
@@ -144,6 +143,9 @@ export const BundleSheet = (props: {
   // The allowance line shows when the price is known and the site has none yet.
   // A mint sheet is for this one mint: never an allowance or "don't ask again" (the background enforces it too).
   const mint = request.mint && model.payment && model.lines.every((l) => !l.risky) ? request.mint : undefined;
+  // bit-sign's sign-and-seal (services/sealPass.ts): the wallet's own one Seal sheet, alone on the sheet. If anything
+  // else joined it, the ordinary lines show instead (and the Allow covers only what is on screen, as always).
+  const seal = request.items.length === 1 ? request.items[0].seal : undefined;
   // Pay in the moment (owner, 24 Oct 2026): these sheets never offer a monthly allowance.
   const showAllowance = false as boolean;
   // "Put $X in <site>'s envelope" / "Top up the envelope": a payment from a micropayments site, or one with an envelope.
@@ -177,7 +179,7 @@ export const BundleSheet = (props: {
         allowanceUsd: answer.mayStore && showAllowance && allowanceOn ? allowanceUsd : 0,
         envelopeUsd: answer.mayStore && showEnvelope ? envelopeUsd : 0,
         remember: answer.mayStore && remember,
-        trustSite: !mint && answer.mayStore && remember && canTrust && trustSite,
+        trustSite: !mint && !seal && answer.mayStore && remember && canTrust && trustSite,
         block: answer.block,
       });
       if (res && res.success === false && res.error) {
@@ -206,21 +208,23 @@ export const BundleSheet = (props: {
       ? 'Reconnect'
       : mint
         ? `${mint.title.split(' ')[0]} · ${payLabel}`
-        : kind === 'post'
-          ? model.payment
-            ? `Allow & pay ${payLabel}`
-            : 'Allow posting'
-          : kind === 'private'
-            ? 'Allow'
-            : kind === 'signin'
-              ? 'Connect and sign in'
-              : kind === 'pay'
-                ? model.mode === 'connectAndPay'
-                  ? `Connect & pay ${payLabel}`
-                  : `Pay ${payLabel}`
-                : many
-                  ? 'Allow all'
-                  : 'Connect';
+        : seal
+          ? SEAL_BUTTON
+          : kind === 'post'
+            ? model.payment
+              ? `Allow & pay ${payLabel}`
+              : 'Allow posting'
+            : kind === 'private'
+              ? 'Allow'
+              : kind === 'signin'
+                ? 'Connect and sign in'
+                : kind === 'pay'
+                  ? model.mode === 'connectAndPay'
+                    ? `Connect & pay ${payLabel}`
+                    : `Pay ${payLabel}`
+                  : many
+                    ? 'Allow all'
+                    : 'Connect';
   // A requested line left unticked is named on the button (owner, 26 Oct 2026: Connect silently left "bchat
   // documents" ungranted). Display only: the decisions are the ticks as drawn.
   const leftOut = withoutSuffix(model.lines, (i) => isChecked(model.lines[i].requestID, model.lines[i].checked));
@@ -412,14 +416,7 @@ export const BundleSheet = (props: {
       )}
       <ul className="m-0 mt-1 pl-4 break-all" style={{ fontSize: 11, color: CARD.muted }}>
         {model.payment && <li>pay: {model.payment.detail}</li>}
-        {model.payment?.recipients?.slice(0, RECIPIENTS_SHOWN).map((x, i) => (
-          <li key={`to-${i}`} data-testid="pay-recipient">
-            to {x.to}: {x.satoshis.toLocaleString()} sats
-          </li>
-        ))}
-        {(model.payment?.recipients?.length ?? 0) > RECIPIENTS_SHOWN && (
-          <li>and {(model.payment!.recipients!.length - RECIPIENTS_SHOWN).toLocaleString()} more outputs</li>
-        )}
+        <PaymentRecipients recipients={model.payment?.recipients} />
         {allowanceSetsUsd > 0 && <li>allowance: monthly spending cap for {request.originator}</li>}
       </ul>
     </div>
@@ -432,7 +429,7 @@ export const BundleSheet = (props: {
   const deny = { label: 'Not now', onClick: () => void send('notNow'), disabled: denyDisabled };
   const block = { label: 'Block this site', onClick: () => void send('block'), disabled: denyDisabled };
   const allow = {
-    label: (careful ? 'I trust it, allow' : primary) + (reconnect || mint ? '' : leftOut),
+    label: (careful ? 'I trust it, allow' : primary) + (reconnect || mint || seal ? '' : leftOut),
     onClick: () => void send('allow'),
     disabled: allowDisabled,
     busy,
@@ -445,7 +442,13 @@ export const BundleSheet = (props: {
   const gold = (t: string) => <span style={{ color: CARD.gold }}>{t}</span>;
 
   const satsText = (sats: number) => dollarsInline(sats, price);
-  if (mint && kind !== 'careful') {
+  if (seal && kind !== 'careful') {
+    // One approval for the whole seal (owner, 2 Nov 2026): SealSheetBody.tsx.
+    hero = <SealHero seal={seal} />;
+    siteSub = SEAL_SITE_SUB;
+    title = <SealTitle seal={seal} />;
+    body = <SealSheetBody seal={seal} feeText={satsText(seal.maxSats)} signingAs={signingAs || undefined} />;
+  } else if (mint && kind !== 'careful') {
     // One button, one approval (owner, 24 Oct 2026): what will happen, then the price, then the button.
     hero = <PayHero amount={payAmount?.main ?? ''} sub={payAmount?.sub} />;
     siteSub = 'One approval for all of it';
@@ -762,9 +765,11 @@ export const BundleSheet = (props: {
         error={usbError || (mustRead ? 'Scroll to read every line before allowing' : '')}
       >
         {body}
-        <div data-testid="approval-lines" style={{ marginTop: 8 }}>
-          {details}
-        </div>
+        {!(seal && !careful) && (
+          <div data-testid="approval-lines" style={{ marginTop: 8 }}>
+            {details}
+          </div>
+        )}
         {newLines.length > 0 && (
           <div className="flex flex-col" data-testid="new-lines" style={{ gap: 4, marginTop: 8 }}>
             {newLines.map((l) => lineRow(l, true))}

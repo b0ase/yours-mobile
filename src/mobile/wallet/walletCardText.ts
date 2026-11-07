@@ -14,10 +14,10 @@ export const memberSince = (createdAt?: number): string => {
 export const shortAddr = (a: string): string => (a && a.length > 14 ? `${a.slice(0, 6)}…${a.slice(-6)}` : a);
 
 /**
- * The unit label on the main wallet card only (owner, 25 Oct 2026): "$b" is our short name for BSV there.
- * Everywhere else (token cards, Buy, Swap, Receive, Send, fees, history, Exchange, b) still says "BSV".
+ * The unit label on the main wallet card. Back to the standard "BSV" (owner, 3 Nov 2026: "change it back to the
+ * standard BSV (no $BSV either please)"); the 25 Oct "$bsv" card-only label is retired. Same as every other screen.
  */
-export const MAIN_CARD_UNIT = '$bsv';
+export const MAIN_CARD_UNIT = 'BSV';
 
 /** "BSV 0.01234567" from sats (8 dp, trailing zeros kept to 2). The main wallet card passes MAIN_CARD_UNIT. */
 export const cardBsv = (sats: number, label = 'BSV'): string => {

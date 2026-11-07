@@ -2,7 +2,6 @@ import { lazy, Suspense, useSyncExternalStore, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import { hasLanded, keptPages, keptSnapshot, keptSubscribe, PeekContext, setPageEl } from './pageEl';
 import { MARKET_ENABLED } from '../storeBuild';
-import { TermsGate } from '../ugc/UgcSheets';
 import { APPS_PAGED, usePhoneLayout } from './flag';
 import { useAppScreens } from './appScreensStore';
 import { appIndexForPath, coldStartRedirect, pageForPath, type ScreenId } from './screens';
@@ -43,17 +42,9 @@ const pageElement = (id: ScreenId): ReactNode => {
     case 'people':
       return <PeopleScreen />;
     case 'feed':
-      return (
-        <TermsGate>
-          <FeedTab />
-        </TermsGate>
-      );
+      return <FeedTab />;
     case 'chat':
-      return (
-        <TermsGate>
-          <ChatPage />
-        </TermsGate>
-      );
+      return <ChatPage />;
     default:
       return null;
   }

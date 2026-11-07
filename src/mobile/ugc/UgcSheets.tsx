@@ -1,5 +1,7 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
+import { useTermsAccepted } from './useTermsAccepted';
 import { createPortal } from 'react-dom';
+import { useLocation } from 'react-router-dom';
 import { ShieldCheck } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { isNative } from '../native';
@@ -8,12 +10,11 @@ import { openDappBrowser } from '../dappBrowser';
 import {
   REPORT_REASONS,
   SUPPORT_EMAIL,
-  TERMS_POINTS,
+  TERMS_LINE,
   TERMS_URL,
   acceptTerms,
-  onUgcChange,
   sendReport,
-  termsAccepted,
+  termsSheetNeeded,
   type Report,
 } from './ugc';
 
@@ -22,88 +23,76 @@ const PANEL = '#17191E';
 const LINE = '#2b2f36';
 const MUTED = '#98A2B3';
 
-const useTermsAccepted = () => {
-  const [ok, setOk] = useState(termsAccepted);
-  useEffect(() => onUgcChange(() => setOk(termsAccepted())), []);
-  return ok;
-};
-
-/** The terms card: the zero-tolerance summary, a link to the full text, and Agree. */
-export const TermsCard = ({ onAgree, agreed }: { onAgree?: () => void; agreed?: boolean }) => (
-  <div
-    className="w-full rounded-2xl p-5 flex flex-col gap-3"
-    style={{ background: PANEL, border: `1px solid ${LINE}` }}
+/**
+ * The one terms line (owner, 3 Nov 2026), set just above the last Continue of create / restore and in the sheet
+ * below. The Continue it sits over calls acceptTerms(). "Terms of Use" opens the full text.
+ */
+export const TermsLine = ({
+  className = '',
+  color = MUTED,
+  size = 11,
+  align = 'center',
+}: {
+  className?: string;
+  color?: string;
+  size?: number;
+  align?: 'center' | 'left';
+}) => (
+  <p
+    className={`m-0 leading-snug ${className}`}
+    style={{ color, fontSize: size, textAlign: align }}
+    data-testid="terms-line"
   >
-    <div className="flex items-center gap-2">
-      <ShieldCheck size={20} color={GOLD} />
-      <span className="text-base font-bold text-white">Terms of use</span>
-    </div>
-    <p className="text-xs" style={{ color: MUTED }}>
-      Feed, Chat, messages and calls are shared with other people. By using them you agree to the bWallet and bChat
-      terms, including:
-    </p>
-    <ul className="flex flex-col gap-2">
-      {TERMS_POINTS.map((p) => (
-        <li key={p} className="text-[13px] leading-snug text-white flex gap-2">
-          <span style={{ color: GOLD }}>•</span>
-          <span>{p}</span>
-        </li>
-      ))}
-    </ul>
+    {TERMS_LINE.before}
     <button
+      type="button"
       onClick={() => void openDappBrowser(TERMS_URL)}
-      className="self-start text-xs underline"
-      style={{ color: GOLD }}
+      className="inline p-0 m-0 border-0 bg-transparent underline cursor-pointer"
+      style={{ color: GOLD, fontSize: 'inherit', lineHeight: 'inherit' }}
     >
-      Read the full terms
+      {TERMS_LINE.link}
     </button>
-    {agreed ? (
-      <p className="text-xs" style={{ color: '#5ad17a' }}>
-        You agreed to these terms on this device.
-      </p>
-    ) : (
-      <button
-        onClick={() => {
-          acceptTerms();
-          onAgree?.();
-        }}
-        className="mt-1 rounded-full py-3 text-sm font-bold"
-        style={{ background: GOLD, color: '#1a1300' }}
-      >
-        Agree
-      </button>
-    )}
-  </div>
+    {TERMS_LINE.after}
+  </p>
 );
 
 /**
- * Shows `children` only once the terms are agreed on this device. Until then the tab shows the
- * terms card in place of its content (Feed, Chat / DMs, Calls).
+ * A wallet that never agreed (made before 3 Nov 2026, or agreed to an older TERMS_VERSION): the same line once,
+ * as a small sheet right after unlock, one tap Continue. It covers everything until then, so Feed, Chat, DMs and
+ * Calls are never reachable without it, in every build. Mounted once inside the router (App.tsx).
  */
-export const TermsGate = ({ children, compact }: { children: ReactNode; compact?: boolean }) => {
-  const ok = useTermsAccepted();
-  if (ok) return <>{children}</>;
-  if (compact)
-    return (
-      <div className="px-4 pb-4">
-        <TermsCard />
+export const TermsOnceSheet = ({ hasWallet, locked }: { hasWallet: boolean; locked: boolean }) => {
+  const { pathname } = useLocation();
+  const accepted = useTermsAccepted();
+  if (!termsSheetNeeded({ accepted, hasWallet, locked, pathname })) return null;
+  return createPortal(
+    <div className="fixed inset-0 z-[1200] flex items-end bg-black/60" data-testid="terms-sheet">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Terms of Use"
+        className="w-full rounded-t-2xl px-5 pt-5 flex flex-col gap-4"
+        style={{ background: PANEL, paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.25rem)' }}
+      >
+        <div className="flex items-start gap-3">
+          <ShieldCheck size={20} color={GOLD} className="shrink-0 mt-0.5" />
+          <TermsLine align="left" size={13} color="#fff" />
+        </div>
+        <button
+          type="button"
+          onClick={acceptTerms}
+          className="rounded-full py-3 text-sm font-bold border-0"
+          style={{ background: GOLD, color: '#1a1300' }}
+        >
+          Continue
+        </button>
       </div>
-    );
-  return (
-    <div
-      className="w-full h-full overflow-y-auto px-4 flex flex-col items-center"
-      style={{
-        paddingTop: 'calc(var(--wallet-inset-top, 0px) + 4.5rem)',
-        paddingBottom: '7rem',
-        background: 'var(--bw-bg)',
-      }}
-    >
-      <TermsCard />
-    </div>
+    </div>,
+    document.body,
   );
 };
 
-/** Settings › Terms of use: the same card, full screen, with Back. */
+/** Settings › Terms of use: the line, whether this device agreed, the full text, and the contact. */
 export const TermsScreen = ({ onBack }: { onBack: () => void }) => {
   useBackClose(true, onBack);
   const ok = useTermsAccepted();
@@ -119,7 +108,36 @@ export const TermsScreen = ({ onBack }: { onBack: () => void }) => {
         </button>
       </div>
       <div className="flex-1 overflow-y-auto p-4 pb-24">
-        <TermsCard agreed={ok} />
+        <div
+          className="w-full rounded-2xl p-5 flex flex-col gap-3"
+          style={{ background: PANEL, border: `1px solid ${LINE}` }}
+        >
+          <div className="flex items-center gap-2">
+            <ShieldCheck size={20} color={GOLD} />
+            <span className="text-base font-bold text-white">Terms of use</span>
+          </div>
+          <TermsLine align="left" size={13} color="#fff" />
+          <button
+            onClick={() => void openDappBrowser(TERMS_URL)}
+            className="self-start text-xs underline"
+            style={{ color: GOLD }}
+          >
+            Read the full terms
+          </button>
+          {ok ? (
+            <p className="text-xs" style={{ color: '#5ad17a' }}>
+              You agreed to these terms on this device.
+            </p>
+          ) : (
+            <button
+              onClick={acceptTerms}
+              className="mt-1 rounded-full py-3 text-sm font-bold"
+              style={{ background: GOLD, color: '#1a1300' }}
+            >
+              Continue
+            </button>
+          )}
+        </div>
         <p className="mt-4 text-xs" style={{ color: MUTED }}>
           Questions or reports: {SUPPORT_EMAIL}
         </p>

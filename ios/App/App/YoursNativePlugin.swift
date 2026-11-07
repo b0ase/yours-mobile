@@ -14,6 +14,7 @@ class YoursBridgeViewController: CAPBridgeViewController {
     override open func capacitorDidLoad() {
         bridge?.registerPluginInstance(YoursNativePlugin())
         bridge?.registerPluginInstance(PasskeysPlugin())
+        bridge?.registerPluginInstance(AppBadgePlugin())
         installBridgeGate()
     }
 

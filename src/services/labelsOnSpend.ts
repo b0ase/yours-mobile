@@ -10,31 +10,60 @@
  *  - The label is let through for THIS action only; no label grant is stored, so the next payment shows it again.
  *  - If the payment's sheet did not open (an envelope or an earlier grant answered it), the label still asks on its
  *    own sheet before anything is signed. Nothing is ever applied without the user seeing it.
- *  - One action per site at a time; a second concurrent action from the same site keeps the old behaviour.
+ *  - Per action: a label is deferred only while its action is the site's only one running, and goes on the sheet of
+ *    that action's own spend (matched by its outputs). Any other label asks on its own sheet.
  */
+import { routesToModule } from './pModuleSpendGate';
+import { permissionSite } from './permissionSite';
+import { lineItemsMatch } from './spendRecipients';
+
+/** The toolbox's "as much as is left" output amount. */
+const MAX_POSSIBLE_SATOSHIS = 0x775f05a073fff;
 
 export type LabelRun = {
   /** Labels waiting to be shown on this action's spend sheet. */
   labels: string[];
   /** The spend sheet opened with them on it. */
   shown: boolean;
+  /** May defer its labels: a certain wallet-funded payment, not routed to a permission module. */
+  eligible: boolean;
+  /** Its output amounts, to find its spend request by line items (spendRecipients.ts lineItemsMatch). */
+  sats: (number | undefined)[];
 };
 
-const runs = new Map<string, LabelRun>();
+/**
+ * Per action, never per site (review of fix/sheet-recipients, 6 Nov 2026): every createAction of a site has its own
+ * run, keyed by the manager's site key (permissionSite.ts, hostname only). A label is deferred only while its action
+ * is the site's ONLY one running, so the label call is certainly that action's; the labels go on the sheet of the
+ * spend request whose line items are that action's outputs, and nowhere else.
+ */
+const runs = new Map<string, LabelRun[]>();
 
-/** The action running for a site (background.ts reads it when the spend sheet is built). */
-export const labelRunFor = (originator: string | undefined): LabelRun | undefined =>
-  originator ? runs.get(originator) : undefined;
+/** The site's only running action (background.ts and tests); undefined when none or several run. */
+export const labelRunFor = (originator: string | undefined): LabelRun | undefined => {
+  const list = originator ? runs.get(permissionSite(originator)) : undefined;
+  return list?.length === 1 ? list[0] : undefined;
+};
 
-/** The spend sheet for this site is about to open: put its pending labels on it. Returns the labels shown. */
-export const takeLabelsForSheet = (originator: string | undefined): string[] => {
-  const run = labelRunFor(originator);
-  if (!run || run.labels.length === 0) return [];
+type SpendLike = { spending?: { lineItems?: unknown }; lineItems?: unknown };
+
+/** The run whose deferred labels belong to this spend: its outputs are the spend's line items. */
+const pendingFor = (originator: string | undefined, spend: SpendLike | undefined): LabelRun | undefined => {
+  const list = originator ? (runs.get(permissionSite(originator)) ?? []) : [];
+  const items = spend?.spending?.lineItems ?? spend?.lineItems;
+  const found = list.filter((r) => r.labels.length > 0 && !r.shown && lineItemsMatch(r.sats, items));
+  return found.length === 1 ? found[0] : undefined;
+};
+
+/** The spend sheet for this request is about to open: put its own action's pending labels on it. */
+export const takeLabelsForSheet = (originator: string | undefined, request?: SpendLike): string[] => {
+  const run = pendingFor(originator, request);
+  if (!run) return [];
   run.shown = true;
   return [...run.labels];
 };
 
-type Output = { satoshis?: unknown };
+type Output = { satoshis?: unknown; basket?: unknown };
 type CreateArgs = { labels?: unknown; outputs?: Output[]; inputs?: unknown[] };
 
 /** Will the manager certainly ask for a spend? Wallet-funded (no site inputs) and paying something. */
@@ -45,12 +74,13 @@ export const certainSpend = (args: CreateArgs | undefined): boolean => {
 };
 
 type LabelArgs = { originator?: string; label: string; reason?: string; seekPermission?: boolean; usageType?: string };
-type SpendArgs = { originator?: string; satoshis: number };
+type SpendArgs = { originator?: string; satoshis: number; lineItems?: unknown };
 type Fn<A, R> = (a: A) => Promise<R>;
 
 export type LabelGuardDeps = {
   adminOriginator: string;
-  normalize: (o: string) => string;
+  /** Unused: runs are keyed with permissionSite (the manager's own form). Kept for callers. */
+  normalize?: (o: string) => string;
 };
 
 /**
@@ -67,24 +97,34 @@ export function guardLabelsOnSpend<T extends object>(manager: T, deps: LabelGuar
   const config = (m.config ?? {}) as { seekPermissionWhenApplyingActionLabels?: boolean };
 
   m.createAction = async (args: CreateArgs, originator?: string) => {
-    const site = originator && originator !== deps.adminOriginator ? deps.normalize(originator) : '';
-    const mine: LabelRun | undefined =
-      site && !runs.has(site) && Array.isArray(args?.labels) && args.labels.length > 0 && certainSpend(args)
-        ? { labels: [], shown: false }
-        : undefined;
-    if (mine) runs.set(site, mine);
+    const site = originator && originator !== deps.adminOriginator ? permissionSite(originator) : '';
+    if (!site) return create.call(manager, args, originator);
+    const outputs = Array.isArray(args?.outputs) ? args.outputs : [];
+    const mine: LabelRun = {
+      labels: [],
+      shown: false,
+      eligible: Array.isArray(args?.labels) && args.labels.length > 0 && certainSpend(args) && !routesToModule(args),
+      sats: outputs.map((o) =>
+        typeof o?.satoshis === 'number' && o.satoshis !== MAX_POSSIBLE_SATOSHIS ? o.satoshis : undefined,
+      ),
+    };
+    runs.set(site, [...(runs.get(site) ?? []), mine]);
     try {
       return await create.call(manager, args, originator);
     } finally {
-      if (mine && runs.get(site) === mine) runs.delete(site);
+      const left = (runs.get(site) ?? []).filter((r) => r !== mine);
+      if (left.length) runs.set(site, left);
+      else runs.delete(site);
     }
   };
 
   m.ensureLabelAccess = async (args: LabelArgs) => {
-    const site = args?.originator ? deps.normalize(args.originator) : '';
-    const run = site ? runs.get(site) : undefined;
+    const site = args?.originator ? permissionSite(args.originator) : '';
+    // Only while the site has exactly one action running is this label call certainly that action's.
+    const run = labelRunFor(site);
     if (
       !run ||
+      !run.eligible ||
       run.shown ||
       args.usageType !== 'apply' ||
       config.seekPermissionWhenApplyingActionLabels === false ||
@@ -113,8 +153,10 @@ export function guardLabelsOnSpend<T extends object>(manager: T, deps: LabelGuar
 
   m.ensureSpendingAuthorization = async (args: SpendArgs) => {
     const ok = await spend.call(manager, args);
-    const site = args?.originator ? deps.normalize(args.originator) : '';
-    const run = site ? runs.get(site) : undefined;
+    // This spend's own action (by its line items); with no line items, the site's only action, if any.
+    const run =
+      pendingFor(args?.originator, args) ??
+      (Array.isArray(args?.lineItems) ? undefined : labelRunFor(args?.originator));
     if (run && !run.shown && run.labels.length > 0) {
       // The payment did not reach a sheet: the labels ask on their own, before anything is signed.
       const pending = run.labels.splice(0);

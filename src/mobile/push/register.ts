@@ -10,6 +10,7 @@
  */
 import { App } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
+import { LocalNotifications } from '@capacitor/local-notifications';
 import { PushNotifications } from '@capacitor/push-notifications';
 import { CHANNEL } from '../channel';
 import { STORE_BUILD } from '../storeBuild';
@@ -20,6 +21,7 @@ import {
   deviceBody,
   PUSH_ORIGIN,
   routeFromData,
+  routeFromLocalExtra,
   type DeviceBody,
   type PushPlatform,
   type PushRoute,
@@ -67,6 +69,8 @@ export class PushApi {
   unregister = (id: string) => this.call<{ ok: boolean }>('DELETE', `/v1/devices/${encodeURIComponent(id)}`);
   prefs = () => this.call<ServerPrefs>('GET', '/v1/prefs');
   putPrefs = (p: ServerPrefs) => this.call<ServerPrefs>('PUT', '/v1/prefs', p);
+  /** The app icon's number (unread chat + bMail): pushes then carry it as aps.badge / notification_count. */
+  badge = (count: number) => this.call<{ ok: boolean }>('PUT', '/v1/badge', { count });
   roomPrefs = () => this.call<{ rooms: Record<string, RoomNotify> }>('GET', '/v1/rooms/prefs');
   putRoomPref = (ticker: string, notify: RoomNotify) =>
     this.call<{ ticker: string; notify: RoomNotify }>(
@@ -163,6 +167,14 @@ export const initPushTaps = () => {
     const r = routeFromData(a.notification?.data as Record<string, unknown> | undefined);
     if (r) deliverRoute(r);
   });
+  // Local notices (notify/engine.ts, shown while the app runs) go through the same queue: registered here, at startup,
+  // so a tap that launches the app is held until PushEngine (after unlock) opens it. Capacitor keeps the tap event
+  // for the first listener; notify/engine.ts no longer has its own (owner, 3 Nov 2026: a tapped "1 new message"
+  // notice opened nothing, the engine's listener only knew bMail).
+  void LocalNotifications.addListener('localNotificationActionPerformed', (a) => {
+    const r = routeFromLocalExtra(a.notification?.extra);
+    if (r) deliverRoute(r);
+  }).catch(() => undefined);
   if (PUSH_PLATFORM === 'android')
     void PushNotifications.createChannel({
       id: 'chat',
@@ -313,6 +325,41 @@ const doSync = async (session: ChatSession | null, { ask = false }: { ask?: bool
   if (cur.deviceId && cur.handle === session.handle && cur.key === key && cur.bearer === session.token) return;
   const { id } = await new PushApi(session.token).register(body);
   write({ enabled: cur.enabled, deviceId: id, handle: session.handle, bearer: session.token, key });
+};
+
+// ── App icon number ─────────────────────────────────────────────────────────────────────────────
+
+export const BADGE_REPORT_DELAY_MS = 3000;
+let badgeTimer: ReturnType<typeof setTimeout> | undefined;
+let badgeSent: string | null = null;
+
+/**
+ * Tell the push server the app icon's number (tabs/iconBadge.ts), so a push while the app is closed shows it plus the
+ * messages pushed since. Only with a registered device (its handle and bearer). Waits BADGE_REPORT_DELAY_MS so the
+ * counts settle (they start at 0 while loading); skips a number already sent unless `force` (back from the background).
+ */
+export const reportBadge = (
+  count: number,
+  force = false,
+  {
+    api = (bearer: string) => new PushApi(bearer),
+    delayMs = BADGE_REPORT_DELAY_MS,
+  }: { api?: (bearer: string) => Pick<PushApi, 'badge'>; delayMs?: number } = {},
+) => {
+  if (badgeTimer !== undefined) clearTimeout(badgeTimer);
+  badgeTimer = setTimeout(() => {
+    badgeTimer = undefined;
+    const s = read();
+    if (!s.deviceId || !s.bearer || !s.handle) return;
+    const key = `${s.handle}|${count}`;
+    if (!force && key === badgeSent) return;
+    badgeSent = key;
+    void api(s.bearer)
+      .badge(count)
+      .catch(() => {
+        badgeSent = null;
+      });
+  }, delayMs);
 };
 
 /** Settings master switch. Turning it on from a tap may show the permission prompt. */

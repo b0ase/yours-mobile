@@ -7,7 +7,9 @@ const deps = { adminOriginator: ADMIN, normalize: (o: string) => o.toLowerCase()
 type Call = { kind: string; args: unknown };
 
 /** A fake manager whose createAction runs the label checks then the spend check, as the toolbox does. */
-const fakeManager = (opts: { granted?: string[]; sheet?: (site: string) => void } = {}) => {
+const fakeManager = (
+  opts: { granted?: string[]; sheet?: (site: string, spend: { lineItems?: unknown }) => void } = {},
+) => {
   const calls: Call[] = [];
   const m = {
     config: { seekPermissionWhenApplyingActionLabels: true },
@@ -15,9 +17,9 @@ const fakeManager = (opts: { granted?: string[]; sheet?: (site: string) => void 
       calls.push({ kind: 'labelSheet', args });
       return true;
     },
-    async ensureSpendingAuthorization(args: { originator?: string; satoshis: number }) {
+    async ensureSpendingAuthorization(args: { originator?: string; satoshis: number; lineItems?: unknown }) {
       calls.push({ kind: 'spend', args });
-      opts.sheet?.(args.originator ?? '');
+      opts.sheet?.(args.originator ?? '', args);
       return true;
     },
     async hasProtocolPermission(p: { protocolID: [number, string] }) {
@@ -27,7 +29,9 @@ const fakeManager = (opts: { granted?: string[]; sheet?: (site: string) => void 
       for (const label of args.labels ?? [])
         await (this as typeof m).ensureLabelAccess({ originator, label, usageType: 'apply' });
       const sats = (args.outputs ?? []).reduce((s, o) => s + o.satoshis, 0);
-      if (sats > 0) await (this as typeof m).ensureSpendingAuthorization({ originator, satoshis: sats });
+      // As the toolbox: the spend's line items are this action's outputs.
+      const lineItems = (args.outputs ?? []).map((o) => ({ type: 'output', satoshis: o.satoshis, description: '' }));
+      if (sats > 0) await (this as typeof m).ensureSpendingAuthorization({ originator, satoshis: sats, lineItems });
       return { ok: true };
     },
   };
@@ -48,7 +52,7 @@ describe('certainSpend', () => {
 describe('guardLabelsOnSpend', () => {
   test('a new label shows on the spend sheet, not on its own sheet', async () => {
     let shown: string[] = [];
-    const { m, calls } = fakeManager({ sheet: (site) => (shown = takeLabelsForSheet(site)) });
+    const { m, calls } = fakeManager({ sheet: (site, spend) => (shown = takeLabelsForSheet(site, spend)) });
     guardLabelsOnSpend(m, deps);
     await m.createAction({ labels: ['tokenblaster'], outputs: [{ satoshis: 500 }] }, 'game.example');
     expect(shown).toEqual(['tokenblaster']);
@@ -64,21 +68,21 @@ describe('guardLabelsOnSpend', () => {
   });
 
   test('already-granted label goes the normal way', async () => {
-    const { m, calls } = fakeManager({ granted: ['tokenblaster'], sheet: (s) => takeLabelsForSheet(s) });
+    const { m, calls } = fakeManager({ granted: ['tokenblaster'], sheet: (s, spend) => takeLabelsForSheet(s, spend) });
     guardLabelsOnSpend(m, deps);
     await m.createAction({ labels: ['tokenblaster'], outputs: [{ satoshis: 500 }] }, 'game.example');
     expect(calls.map((c) => c.kind)).toEqual(['labelSheet', 'spend']);
   });
 
   test('admin-only labels are never deferred', async () => {
-    const { m, calls } = fakeManager({ sheet: (s) => takeLabelsForSheet(s) });
+    const { m, calls } = fakeManager({ sheet: (s, spend) => takeLabelsForSheet(s, spend) });
     guardLabelsOnSpend(m, deps);
     await m.createAction({ labels: ['admin originator x', 'p 1sat x'], outputs: [{ satoshis: 5 }] }, 'game.example');
     expect(calls.filter((c) => c.kind === 'labelSheet')).toHaveLength(2);
   });
 
   test('no payment: labels ask as before', async () => {
-    const { m, calls } = fakeManager({ sheet: (s) => takeLabelsForSheet(s) });
+    const { m, calls } = fakeManager({ sheet: (s, spend) => takeLabelsForSheet(s, spend) });
     guardLabelsOnSpend(m, deps);
     await m.createAction({ labels: ['score'], outputs: [{ satoshis: 0 }] }, 'game.example');
     expect(calls.map((c) => c.kind)).toEqual(['labelSheet']);

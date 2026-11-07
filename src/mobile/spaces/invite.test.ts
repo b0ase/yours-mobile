@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  appLinkFor,
+  bchatxDoorPath,
   inviteShareText,
   parseAppLink,
   parseManagedInvites,
@@ -104,5 +106,95 @@ describe('managed invites', () => {
     expect(parseMaxUses('0')).toBeNull();
     expect(parseMaxUses('1.5')).toBeNull();
     expect(parseMaxUses('200000')).toBeNull();
+  });
+});
+
+describe('room links open the room (owner, 2 Nov 2026)', () => {
+  const tok = 'Zk3_q-9xYb2LmNp0QrStUvWx';
+  test('/room/<ref>: the room itself, by ticker or clean address', () => {
+    expect(parseAppLink('https://www.bchatx.com/room/BOASECONNOR')).toEqual({
+      kind: 'room',
+      ticker: 'BOASECONNOR',
+      buy: false,
+    });
+    expect(parseAppLink('https://www.bchatx.com/room/BCORPBOARD/')).toEqual({
+      kind: 'room',
+      ticker: 'BCORPBOARD',
+      buy: false,
+    });
+    expect(parseAppLink('https://www.bchatx.com/room/atomic-swap-test-r_7kq2m9ab')).toEqual({
+      kind: 'room',
+      ticker: 'atomic-swap-test-r_7kq2m9ab',
+      buy: false,
+    });
+  });
+  test('an invite link carries its token, on /room/, /r/ and the app scheme', () => {
+    expect(parseAppLink(`https://www.bchatx.com/room/BOASECONNOR?invite=${tok}`)).toEqual({
+      kind: 'room',
+      ticker: 'BOASECONNOR',
+      buy: false,
+      invite: tok,
+    });
+    expect(parseAppLink(`https://chat.bwalletx.com/r/X?invite=${tok}`)).toMatchObject({ invite: tok });
+    expect(parseAppLink(`bwalletx://room/name-r_7kq2m9ab?invite=${tok}`)).toEqual({
+      kind: 'room',
+      ticker: 'name-r_7kq2m9ab',
+      buy: false,
+      invite: tok,
+    });
+  });
+  test('a malformed token is dropped, the room still opens', () => {
+    expect(parseAppLink('https://www.bchatx.com/room/X?invite=short')).toEqual({
+      kind: 'room',
+      ticker: 'X',
+      buy: false,
+    });
+  });
+  test('not a room link: New room, sub-pages, GitHub-held positions, other hosts', () => {
+    expect(parseAppLink('https://www.bchatx.com/room/new')).toBeNull();
+    expect(parseAppLink('https://www.bchatx.com/room/X/video')).toBeNull();
+    expect(parseAppLink(`https://www.bchatx.com/room/X?gh=${tok}`)).toBeNull();
+    expect(parseAppLink('https://www.bchatx.com/room/..%2Fx')).toBeNull();
+    expect(parseAppLink('https://evil.example/room/X')).toBeNull();
+  });
+});
+
+describe('appLinkFor: what a link opens in this build', () => {
+  test('room links and invites in every build, the store one included', () => {
+    for (const spaces of [true, false]) {
+      expect(appLinkFor('bwalletx://room/BOASECONNOR', spaces)).toEqual({
+        kind: 'room',
+        ticker: 'BOASECONNOR',
+        buy: false,
+      });
+      expect(appLinkFor('https://www.bchatx.com/i/abcdefgh23', spaces)).toEqual({ kind: 'invite', code: 'abcdefgh23' });
+      expect(appLinkFor('bwalletx://invite/abcdefgh23', spaces)).toEqual({ kind: 'invite', code: 'abcdefgh23' });
+    }
+  });
+  test('a Space page without Spaces shows in the bChatX frame, never dropped', () => {
+    expect(appLinkFor('https://www.bchatx.com/s/abcdefgh23', true)).toEqual({ kind: 'space', slug: 'abcdefgh23' });
+    expect(appLinkFor('https://www.bchatx.com/s/abcdefgh23', false)).toEqual({ kind: 'door', path: '/s/abcdefgh23' });
+    expect(appLinkFor('bwalletx://space/abcdefgh23', false)).toEqual({ kind: 'door', path: '/s/abcdefgh23' });
+  });
+  test('a claimed path the app cannot parse goes to the frame; other links are not ours', () => {
+    expect(appLinkFor('https://www.bchatx.com/room/X/video', true)).toEqual({ kind: 'door', path: '/room/X/video' });
+    expect(appLinkFor('https://www.bchatx.com/room/X?gh=abcdefghijklmnop', true)).toEqual({
+      kind: 'door',
+      path: '/room/X?gh=abcdefghijklmnop',
+    });
+    expect(appLinkFor('https://www.bchatx.com/u/bmovies', true)).toBeNull();
+    expect(appLinkFor('https://www.bwallet.space/pair?x=1', true)).toBeNull();
+    expect(appLinkFor('bwalletx://pair?x=1', true)).toBeNull();
+  });
+});
+
+describe('bchatxDoorPath', () => {
+  test('only the claimed bChatX paths, never X invites', () => {
+    expect(bchatxDoorPath('https://www.bchatx.com/r/X?buy=1')).toBe('/r/X?buy=1');
+    expect(bchatxDoorPath('https://www.bchatx.com/i/x/abcd#k=secret')).toBeNull();
+    expect(bchatxDoorPath('https://www.bchatx.com/room/')).toBeNull();
+    expect(bchatxDoorPath('https://user:pw@www.bchatx.com/r/X')).toBeNull();
+    expect(bchatxDoorPath('http://www.bchatx.com/r/X')).toBeNull();
+    expect(bchatxDoorPath('https://evil.example/r/X')).toBeNull();
   });
 });

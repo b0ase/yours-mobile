@@ -655,6 +655,14 @@ body,
   font-size: 11px;
   color: var(--bw-wcard-muted, #8e8e89);
 }
+/* Money received and counted, not yet in a block (services/receiveWatch.ts): "$1.00 pending", in the card's own ink. */
+.bw-wcard-pending {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--bw-wcard-muted, #8e8e89);
+}
 /* A manual refresh found nothing new: the sats line briefly reads "Up to date" in the card's own ink. */
 .bw-wcard-face .bw-wcard-sync.is-uptodate {
   color: inherit !important;
@@ -945,6 +953,25 @@ body,
   line-height: 0;
 }
 
+/* Native seal page (src/mobile/chat/NativeSealPage.tsx): nothing may interrupt drawing. No selection, no long-press
+   callout, no magnifier anywhere on the signing page (owner's iPhone, 3 Nov 2026). Text fields stay selectable. */
+.bw-seal-noselect,
+.bw-seal-noselect * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.bw-seal-noselect input,
+.bw-seal-noselect textarea,
+.bw-seal-noselect [contenteditable='true'] {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+.bw-seal-pad canvas {
+  touch-action: none;
+}
+
 /* Signature pad (src/mobile/signature) */
 .bw-sigpad {
   position: fixed;
@@ -955,6 +982,9 @@ body,
   justify-content: center;
   padding: 16px;
   background: rgba(0, 0, 0, 0.78);
+  /* Fixed while drawing: no scroll, rubber-band bounce or pinch-zoom (SignaturePad.tsx also stops touchmove). */
+  touch-action: none;
+  overscroll-behavior: none;
 }
 .bw-sigpad-sheet {
   width: min(100%, 760px);
@@ -1025,6 +1055,162 @@ body,
 }
 .bw-sigpad.is-rotated .bw-sigpad-box {
   max-height: none;
+}
+/* Document signing (SignaturePad sideways): lengthwise on a landscape phone, fixed, the strip on the left and the
+   buttons in a column on the right. A portrait phone shows only the turn prompt (.bw-sigpad-turn). */
+.bw-sigpad.is-sideways {
+  /* Full screen and opaque: nothing of the page behind shows, in either orientation. */
+  background: var(--bw-bg, #0b0b0d);
+  padding: max(8px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right))
+    max(8px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+}
+.bw-sigpad.is-sideways .bw-sigpad-sheet {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 980px;
+  max-height: 100%;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 12px;
+  padding: 12px;
+}
+.bw-sigpad-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+}
+.bw-sigpad.is-sideways .bw-sigpad-box {
+  /* The strip keeps its 4:1 shape inside whatever height a landscape phone leaves. */
+  width: min(100%, calc((100dvh - 150px) * 4));
+  max-height: none;
+  align-self: center;
+}
+.bw-sigpad.is-sideways .bw-sigpad-side {
+  display: flex;
+  width: 128px;
+  flex: none;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+}
+.bw-sigpad-side button {
+  min-height: 40px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--bw-text, #f2f2f0);
+  background: rgb(var(--bw-text-rgb, 255 255 255) / 0.08);
+  border: 1px solid rgb(var(--bw-text-rgb, 255 255 255) / 0.16);
+  border-radius: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.bw-sigpad-side button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.bw-sigpad-side .is-primary {
+  min-height: 48px;
+  color: #000;
+  background: linear-gradient(135deg, var(--bw-accent-hi), var(--bw-accent-lo));
+  border: 0;
+}
+.bw-sigpad-side-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.bw-sigpad-side-row button {
+  min-height: 32px;
+  padding: 4px 6px;
+  font-size: 11px;
+}
+.bw-sigpad-side .bw-sigpad-side-cancel {
+  background: transparent;
+  border-color: transparent;
+  color: var(--bw-wcard-muted, #8e8e89);
+}
+/* Portrait prompt: full screen, centred, calm; two plain stacked buttons at the bottom. */
+.bw-sigpad-turn {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: max(24px, env(safe-area-inset-top)) 24px max(20px, env(safe-area-inset-bottom));
+  background: var(--bw-bg, #0b0b0d);
+  color: var(--bw-text, #f2f2f0);
+  text-align: center;
+}
+.bw-sigpad-turn-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+}
+.bw-sigpad-turn-phone {
+  color: var(--bw-accent-hi, #f5b800);
+  animation: bw-sigpad-turn 900ms ease-in-out 400ms 1 both;
+}
+@keyframes bw-sigpad-turn {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(-90deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bw-sigpad-turn-phone {
+    animation: none;
+  }
+}
+.bw-sigpad-turn-title {
+  margin: 0;
+  max-width: 320px;
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.bw-sigpad-turn-doc {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--bw-wcard-muted, #8e8e89);
+}
+.bw-sigpad-turn-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.bw-sigpad-turn-btns {
+  display: flex;
+  width: 100%;
+  max-width: 380px;
+  flex-direction: column;
+  gap: 8px;
+}
+.bw-sigpad-turn-secondary,
+.bw-sigpad-turn-text {
+  min-height: 48px;
+  font-size: 16px;
+  font-weight: 600;
+  border-radius: 12px;
+  cursor: pointer;
+}
+.bw-sigpad-turn-secondary {
+  color: var(--bw-text, #f2f2f0);
+  background: rgb(var(--bw-text-rgb, 255 255 255) / 0.08);
+  border: 1px solid rgb(var(--bw-text-rgb, 255 255 255) / 0.16);
+}
+.bw-sigpad-turn-text {
+  color: var(--bw-wcard-muted, #8e8e89);
+  background: transparent;
+  border: 0;
 }
 .bw-sigpad-title {
   font-size: 13px;
@@ -3544,4 +3730,11 @@ html[data-rail] .bw-dock-pad:has(> .bw-bcar) > .bw-backup-banner {
 }
 html[data-rail] .bw-dock-pad:has(> .bw-bcar) > .bw-sendrow {
   grid-row: 4;
+}
+
+/* A vertical swipe that starts on a bottom bar (tab bar, dock, bApp bar) must not drag the page: on iOS it scrolled
+   the document and the bar rode up the screen over black (owner's phone, 3 Nov 2026). pan-x keeps the dock's
+   sideways scroll; taps, long-presses and the bars' own pointer gestures are unaffected. */
+[data-bw-bottom-nav] {
+  touch-action: pan-x;
 }

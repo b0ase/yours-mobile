@@ -57,6 +57,20 @@ describe('reservedOriginatorRefusal (H1)', () => {
     expect(reservedOriginatorRefusal(false, 'example.com', EXT)).toBeNull();
     expect(reservedOriginatorRefusal(false, undefined, EXT)).toBeNull();
   });
+
+  test('port-insensitive, like the phone (review 07c F4): a port, scheme, user info, path or trailing dot is still the admin', () => {
+    for (const o of [
+      `${EXT}:8443`,
+      `${EXT}.`,
+      `https://${EXT}:443/x`,
+      `HTTPS://user@${EXT.toUpperCase()}/`,
+      ` ${EXT}:1 `,
+    ])
+      expect(reservedOriginatorRefusal(false, o, EXT)).toBe('Reserved originator');
+    for (const o of [`${EXT}x`, `${EXT}.example.com`, `x${EXT}:8443`, `https://example.com/${EXT}`])
+      expect(reservedOriginatorRefusal(false, o, EXT)).toBeNull();
+    expect(reservedOriginatorRefusal(true, `${EXT}:8443`, EXT)).toBeNull();
+  });
 });
 
 describe('isReservedHost (mobile in-app browser)', () => {

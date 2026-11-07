@@ -17,10 +17,10 @@
  * so a flaky API would release live coins.
  */
 import { Transaction } from '@bsv/sdk';
+import { SPENT_ELSEWHERE_MESSAGE } from '../utils/sendErrors';
 
-/** Shown when coins were cleared but the send did not go out. Plain words, no toolbox text. */
-export const SPENT_ELSEWHERE_MESSAGE =
-  'Some coins were already spent on another device. Refreshed your balance — please try again.';
+/** Shown when coins were cleared but the send did not go out. Plain words, no toolbox text (utils/sendErrors.ts). */
+export { SPENT_ELSEWHERE_MESSAGE };
 
 const TXID = /^[0-9a-f]{64}$/i;
 
@@ -31,9 +31,34 @@ type ReviewError = Error & {
   reviewActionResults?: { txid?: string; status?: string }[];
 };
 
-/** Pure: was this a broadcast the network refused as invalid (not a double spend, not a service hiccup)? */
+/**
+ * WERR_REVIEW_ACTIONS statuses that mean "the network refused this send because of its inputs": REJECTED (invalidTx)
+ * and DOUBLE_SPEND_ATTEMPTED (doubleSpend). In storage both fail the action and free its inputs, so both are healed
+ * (owner's iPhone, 4 Nov 2026: coins spent from the extension). On the NETWORK they differ: ARC keeps a double-spend
+ * attempt, which is mined if the other payment drops (the toolbox un-fails such txs: TaskReviewDoubleSpends). So after
+ * a doubleSpend the send is retried only when every competing spend is mined (spentRetry.ts; review 17, F2).
+ */
+const REFUSED_STATUSES = new Set(['invalidTx', 'doubleSpend']);
+
+/** Pure: the refusal's status ('invalidTx' or 'doubleSpend') and txid (lowercase) if the error names one. */
+export const refusal = (error: unknown): { status: 'invalidTx' | 'doubleSpend'; txid?: string } | undefined => {
+  const r = (error as ReviewError | null)?.reviewActionResults?.find((x) => REFUSED_STATUSES.has(x?.status ?? ''));
+  if (!r) return undefined;
+  const txid = typeof r.txid === 'string' && TXID.test(r.txid) ? r.txid.toLowerCase() : undefined;
+  return { status: r.status as 'invalidTx' | 'doubleSpend', txid };
+};
+
+/** Pure: the refused transaction's txid (invalidTx or doubleSpend), lowercase, if the error names one. */
+export const refusedTxid = (error: unknown): string | undefined => refusal(error)?.txid;
+
+/** Pure: the spender the broadcaster's reason names ("… already spent by tx <txid>"), lowercase. */
+export const reasonSpender = (reason: string | undefined): string | undefined =>
+  /spent by (?:tx )?([0-9a-f]{64})/i.exec(reason ?? '')?.[1]?.toLowerCase();
+
+/** Pure: was this a broadcast the network refused (invalid or a double spend), not a service hiccup? */
 export const isInvalidTxReview = (error: unknown): boolean =>
-  error instanceof Error && ((error as ReviewError).reviewActionResults ?? []).some((r) => r?.status === 'invalidTx');
+  error instanceof Error &&
+  ((error as ReviewError).reviewActionResults ?? []).some((r) => REFUSED_STATUSES.has(r?.status ?? ''));
 
 /** Pure: the outpoints ("txid_vout") the rejected transaction spends, from the error's AtomicBEEF. */
 export function rejectedInputs(error: unknown): string[] {
@@ -60,18 +85,31 @@ export async function provenSpent(
   fallback?: (outpoint: string) => Promise<string | null | undefined>,
   rejectedTxid?: string,
 ): Promise<string[]> {
-  const spent: string[] = [];
+  return Object.keys(await provenSpenders(outpoints, getSpend, fallback, rejectedTxid));
+}
+
+/** provenSpent, with each input's spending txid (lowercase). */
+export async function provenSpenders(
+  outpoints: string[],
+  getSpend: (outpoint: string) => Promise<string | null | undefined>,
+  fallback?: (outpoint: string) => Promise<string | null | undefined>,
+  rejectedTxid?: string,
+): Promise<Record<string, string>> {
+  const spent: Record<string, string> = {};
   const ask = async (f: typeof getSpend, op: string) => {
     try {
       const by = await f(op);
       // The rejected tx itself is not a spender (it never went out).
-      return typeof by === 'string' && TXID.test(by) && by !== rejectedTxid ? by : null;
+      return typeof by === 'string' && TXID.test(by) && by.toLowerCase() !== rejectedTxid?.toLowerCase()
+        ? by.toLowerCase()
+        : null;
     } catch {
       return null;
     }
   };
   for (const op of outpoints) {
-    if ((await ask(getSpend, op)) || (fallback && (await ask(fallback, op)))) spent.push(op);
+    const by = (await ask(getSpend, op)) || (fallback && (await ask(fallback, op)));
+    if (by) spent[op] = by;
   }
   return spent;
 }
@@ -82,7 +120,8 @@ export async function provenSpent(
  * reason ("txid:vout" or "txid_vout") after a UTXO_SPENT verdict is taken as authoritative.
  */
 export function namedSpentInputs(reason: string | undefined, inputs: string[]): string[] {
-  if (!reason || !/UTXO_SPENT|already spent|missing ?inputs/i.test(reason)) return [];
+  // Not "missing inputs": that usually means a parent the node doesn't know, not a spent coin (17b L3).
+  if (!reason || !/UTXO_SPENT|already spent/i.test(reason)) return [];
   const text = reason.toLowerCase();
   return inputs.filter((op) => {
     const [txid, vout] = op.split('_');
@@ -93,9 +132,53 @@ export function namedSpentInputs(reason: string | undefined, inputs: string[]): 
 export interface HealStore {
   /** Mark this outpoint's output spendable: false for the account; resolves how many rows changed. */
   markSpent: (txid: string, vout: number) => Promise<number>;
+  /**
+   * Is this outpoint listed as spendable now? false = storage already holds it unspendable; null = no row, or can't
+   * tell. Owner's iPhone, 3 Nov 2026 (board minute 010 seal, UTXO_SPENT on eb6dcc27…:2): after a refused broadcast
+   * the toolbox's own stale-input check (markStaleInputsAsSpent) can mark the input spendable: false BEFORE this heal
+   * runs, so markSpent changed 0 rows, the heal reported "nothing cleared", and the one safe retry never ran even
+   * though the dead coin was already out of coin selection.
+   */
+  isSpendable?: (txid: string, vout: number) => Promise<boolean | null>;
 }
 
-export type HealReport = { checked: number; released: number; inputs?: string[] };
+/**
+ * Clear one proven-spent outpoint. `changed`: rows this heal set unspendable now; `already`: nothing changed, but storage
+ * already holds it unspendable (the toolbox's own stale-input check got there first, 3 Nov 2026). An unknown row, a
+ * remote store or an unreadable answer is never `already`. Never throws.
+ */
+async function clearOne(store: HealStore, op: string): Promise<{ changed: number; already: boolean }> {
+  const [txid, v] = op.split('_');
+  const vout = Number(v);
+  const changed = await store.markSpent(txid, vout).catch(() => 0);
+  if (changed > 0) return { changed, already: false };
+  const spendable = await Promise.resolve()
+    .then(() => store.isSpendable?.(txid, vout) ?? null)
+    .catch(() => null);
+  return { changed: 0, already: spendable === false };
+}
+
+export type HealReport = {
+  checked: number;
+  released: number;
+  inputs?: string[];
+  /**
+   * Every input proven spent → the transaction that spent it (null when the broadcaster named the input without its
+   * spender). The retry decision reads these (spentRetry.ts: never retry when a spender is a payment of ours).
+   */
+  spenders?: Record<string, string | null>;
+  /** The inputs whose rows this heal changed (spendable → false). */
+  cleared?: string[];
+  /**
+   * Proven-spent inputs storage already held unspendable (the toolbox's stale-input check, 3 Nov 2026): counted in
+   * `released` (the retry can't pick them again) but not in `cleared` (this heal changed no row). They still go on the
+   * automatic check's list with their spender (healClearedEntries, review 24 L1), so one both lookups later call
+   * unspent comes back; nothing else ever revisits a coin the toolbox lowered.
+   */
+  alreadyOff?: string[];
+  /** Inputs set aside because their parent payment never reached the network (ownSend.ts healRefusedInputs). */
+  orphaned?: string[];
+};
 
 /**
  * Settings › Troubleshooting › Resync coins (owner, 17 Oct 2026: sends kept failing with UTXO_SPENT after coins were
@@ -129,6 +212,18 @@ export const resyncMessage = (r: HealReport): string =>
     ? `Checked ${r.checked} coins: ${r.released} had already been spent elsewhere and are cleared. Try your send again.`
     : `Checked ${r.checked} coins: all still spendable. Nothing to clear.`;
 
+/** The cleared-list value for a coin cleared without a named spender (it is never compared as a txid). */
+export const UNNAMED_SPENDER = 'unnamed';
+
+/** Pure: the coins a heal cleared → their named spender, for the automatic check's cleared list (recordAutoCleared). */
+export const healClearedEntries = (r: HealReport | null | undefined): Record<string, string> =>
+  // A coin cleared on the broadcaster's word alone has no named spender: it is recorded too (UNNAMED_SPENDER), so the
+  // automatic check can still put it back (17b L3). So is one storage already held unspendable (alreadyOff, review 24
+  // L1): the undo still needs both lookups to call it unspent, and never touches our own pending actions' inputs.
+  Object.fromEntries(
+    [...(r?.cleared ?? []), ...(r?.alreadyOff ?? [])].map((op) => [op, r?.spenders?.[op] || UNNAMED_SPENDER]),
+  );
+
 /** After an invalidTx: release the rejected send's inputs proven spent. Never throws. */
 export async function healInvalidSend(
   error: unknown,
@@ -138,20 +233,41 @@ export async function healInvalidSend(
 ): Promise<HealReport> {
   if (!isInvalidTxReview(error)) return { checked: 0, released: 0 };
   const inputs = rejectedInputs(error);
-  const rejectedTxid = (error as ReviewError).reviewActionResults?.find((r) => r?.status === 'invalidTx')?.txid;
-  const named = namedSpentInputs(opts.reason, inputs);
-  const looked = await provenSpent(
+  const rejectedTxid = refusedTxid(error);
+  const namedBy = reasonSpender(opts.reason);
+  // The broadcaster named a DIFFERENT spender without the outpoint: with one input there is only one it can mean (17c,
+  // S7: otherwise a blind index and WhatsOnChain leave the coin in place and every send fails on it).
+  const named =
+    namedSpentInputs(opts.reason, inputs).length || inputs.length !== 1 || !namedBy || namedBy === rejectedTxid
+      ? namedSpentInputs(opts.reason, inputs)
+      : inputs;
+  const looked = await provenSpenders(
     inputs.filter((op) => !named.includes(op)),
     getSpend,
     opts.fallback,
     rejectedTxid,
   );
+  const spenders: Record<string, string | null> = {
+    ...Object.fromEntries(named.map((op) => [op, namedBy && namedBy !== rejectedTxid ? namedBy : null])),
+    ...looked,
+  };
   let released = 0;
-  for (const op of [...named, ...looked]) {
-    const [txid, vout] = op.split('_');
-    released += await store.markSpent(txid, Number(vout)).catch(() => 0);
+  const cleared: string[] = [];
+  const alreadyOff: string[] = [];
+  // Counted when cleared now or already unspendable (clearOne): either way the retry can't pick it again. Whether the
+  // retry runs is still decided by every guard in spentRetry.ts judge (proof it can't go out, not our own spender,
+  // every spender named, double spends mined, orphans, one retry only).
+  for (const op of Object.keys(spenders)) {
+    const r = await clearOne(store, op);
+    if (r.changed > 0) {
+      released += r.changed;
+      cleared.push(op);
+    } else if (r.already) {
+      released += 1;
+      alreadyOff.push(op);
+    }
   }
-  return { checked: inputs.length, released, inputs };
+  return { checked: inputs.length, released, inputs, spenders, cleared, ...(alreadyOff.length ? { alreadyOff } : {}) };
 }
 
 /** What to add to the error the person sees. With nothing cleared, name the coins tried so a report can be traced. */
@@ -172,6 +288,10 @@ export const healMessage = (r: HealReport): string =>
  */
 export const withHealMessage = (error: string, r: HealReport | null): string => {
   if (!r) return error;
+  // A double spend may still go through (ARC keeps it), and a service error or a queued send has no verdict at all
+  // (the retry may be on its way): never turned into "spent elsewhere, try again" (17b H1).
+  if (/double ?spend|DOUBLE_SPEND|serviceError|service error|unknown|timed? ?out|queued|pending/i.test(error))
+    return error;
   const m = healMessage(r).trim();
   if (!m) return error;
   // Coins cleared (and, for the wallet's own send, one automatic retry already tried): plain words only. The raw

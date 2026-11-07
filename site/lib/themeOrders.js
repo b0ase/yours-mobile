@@ -7,6 +7,7 @@
 const crypto = require('crypto');
 const { OP, P2PKH, Script, Utils } = require('@bsv/sdk');
 const { parseIncoming, verifySigned } = require('./paymail');
+const { makeStoreClaim, protocolError } = require('./storeClaim');
 
 const PRICE_USD = 99;
 const TERM_DAYS = 365;
@@ -214,7 +215,7 @@ function themeOrderStore(env = process.env, f = fetch) {
     /** Rows that hold a slug: anything paid or later (not declined), plus live quotes. */
     slugRows: async (slug) =>
       (await req(
-        `theme_orders?slug=eq.${q(slug)}&status=neq.declined&select=identity_key,status,quote_expires_at,expires_at&limit=50`,
+        `theme_orders?slug=eq.${q(slug)}&status=neq.declined&select=id,identity_key,status,quote_id,quote_expires_at,expires_at,txid,renews,slug,name,brand,quote_usd,quote_sats&limit=50`,
       )) || [],
     updateOrder: (id, patch) =>
       req(`theme_orders?id=eq.${q(id)}`, {
@@ -222,6 +223,20 @@ function themeOrderStore(env = process.env, f = fetch) {
         headers: { Prefer: 'return=minimal' },
         body: JSON.stringify(patch),
       }),
+    /** Record a txid only if the row has none yet (two claims can't both take one quote). True when this call set it. */
+    setTxidIfEmpty: async (id, txid) =>
+      (
+        (await req(`theme_orders?id=eq.${q(id)}&txid=is.null`, {
+          method: 'PATCH',
+          headers: { Prefer: 'return=representation' },
+          body: JSON.stringify({ txid }),
+        })) || []
+      ).length > 0,
+    /** This key's orders paid by a payment the network hasn't shown yet (status 'quoted', txid set; storeClaim.js). */
+    pendingMine: async (identityKey) =>
+      (await req(
+        `theme_orders?identity_key=eq.${q(identityKey)}&status=eq.quoted&txid=not.is.null&select=id,identity_key,slug,name,brand,status,renews,expires_at,txid,quote_id,quote_usd,quote_sats,quote_expires_at,created_at&order=created_at.desc&limit=20`,
+      )) || [],
     listMine: async (identityKey) =>
       (await req(
         `theme_orders?identity_key=eq.${q(identityKey)}&status=neq.quoted&select=id,slug,name,brand,status,expires_at,txid,created_at&order=created_at.desc&limit=50`,
@@ -253,27 +268,90 @@ function themeOrderStore(env = process.env, f = fetch) {
   };
 }
 
+/** Rows that hold a slug: paid or later, a live quote, or a quote whose payment is pending (storeClaim.js). */
 const live = (row, now) =>
   ['paid', 'building', 'review', 'live'].includes(row.status) ||
-  (row.status === 'quoted' && Date.parse(row.quote_expires_at) > now);
+  (row.status === 'quoted' && (!!row.txid || Date.parse(row.quote_expires_at) > now));
 
 /**
  * Handlers: each returns [status, body]. Deps are injected so tests run without a network:
- * store (themeOrderStore shape), rate() → USD per BSV, broadcast(tx, beefHex) (throws if rejected), env, now().
+ * store (themeOrderStore shape), rate() → USD per BSV, broadcast(tx, beefHex) → arcSubmit result (paymailStore.js,
+ * never throws), network(txid) → 'seen' | 'out' | 'missing' | 'unclear' (paymailStore.js networkStatus), env, now().
+ * A claim is paid only once the network has the payment, else 202 pending (storeClaim.js, P0 3 Nov 2026); a pending
+ * edition holds its slug, and becomes paid on a claim retry or the owner's next `mine`. `claimGraceMs` is no longer a
+ * limit: a payment that matches its quote is honoured whenever it arrives.
  */
 function makeThemeOrderHandlers({
   store,
   ledger,
   rate,
   broadcast,
+  network = async () => 'unclear',
+  fetchTx,
+  recheckBudgetMs,
+  requireProtocol = false,
   env = process.env,
   now = () => Date.now(),
   quoteMs = QUOTE_MS,
-  claimGraceMs = CLAIM_GRACE_MS,
+  claimGraceMs: _claimGraceMs = CLAIM_GRACE_MS, // no longer a limit (storeClaim.js); kept so callers can pass it
   actions = {},
+  log,
 }) {
   if (!ledger || typeof ledger.reserve !== 'function') throw new Error('paid-txid ledger required');
   const address = () => payAddress(env);
+
+  /** The payment is on the network: the edition is paid (or goes to review if another payer took the slug first). */
+  const markPaid = async (row, txid) => {
+    const t = now();
+    const year = TERM_DAYS * 24 * 60 * 60 * 1000;
+    const from = row.renews && row.expires_at && Date.parse(row.expires_at) > t ? Date.parse(row.expires_at) : t;
+    // A paid slug can race another payer inside the quote window: the later one goes to review (refund by hand).
+    const clash =
+      !row.renews &&
+      (await store.slugRows(row.slug)).some(
+        (r) => r.identity_key !== row.identity_key && ['paid', 'building', 'review', 'live'].includes(r.status),
+      );
+    const patch = {
+      status: clash ? 'review' : 'paid',
+      txid,
+      paid_at: new Date(t).toISOString(),
+      expires_at: new Date(from + year).toISOString(),
+    };
+    await store.updateOrder(row.id, patch);
+    const done = { ...row, ...patch };
+    await store.notify(row.renews ? 'theme_order_renewed' : 'theme_order_paid', {
+      id: row.id,
+      slug: row.slug,
+      name: row.name,
+      brand: row.brand,
+      usd: row.quote_usd,
+      sats: row.quote_sats,
+      txid,
+      clash,
+    });
+    return [200, { order: publicRow(done) }];
+  };
+  const claimer = makeStoreClaim({
+    kind: 'order',
+    getByQuote: store.getByQuote,
+    getByTxid: store.getByTxid,
+    update: store.updateOrder,
+    recheckBudgetMs,
+    setTxidIfEmpty: typeof store.setTxidIfEmpty === 'function' ? store.setTxidIfEmpty : undefined,
+    fetchTx,
+    ledger,
+    // rawtx: a raw tx hex, or the AtomicBEEF hex the wallet's createAction returns (sent with its parents).
+    parse: parseIncoming,
+    check: (tx, row) =>
+      checkPayment(tx, { address: row.quote_address, sats: row.quote_sats, memoHex: row.quote_memo_hex }),
+    broadcast,
+    network,
+    paid: markPaid,
+    paidBody: (row) => ({ order: publicRow(row) }),
+    pendingBody: (row) => ({ order: publicRow(row) }),
+    now,
+    log,
+  });
 
   const upload = async (body) => {
     const sigErr = await verifySigned(body || {}, 'theme-orders-upload', now());
@@ -301,17 +379,29 @@ function makeThemeOrderHandlers({
     if (!pay) return [503, { error: 'not_configured' }];
     const sigErr = await verifySigned(body || {}, actions.quote || 'theme-orders-quote', now());
     if (sigErr) return [401, { error: sigErr }];
+    if (requireProtocol && protocolError(body)) return protocolError(body);
     const identityKey = String(body.identityKey).toLowerCase();
     const v = validateOrder(body.fields, identityKey);
     if (!v.ok) return [400, { error: v.error }];
     const t = now();
-    const holders = (await store.slugRows(v.order.slug)).filter((r) => live(r, t));
+    // Who holds the slug. A live quote always does, even once its buyer's payment is recorded (06c L1: the buyer is
+    // paying; the network may not show it for minutes). Past its quote, a pending payment holds the slug only while
+    // it may land: one nobody has (a forged or refused tx: ARC 404/REJECTED and WhatsOnChain 404) doesn't (review
+    // F9). Pending rows are re-checked in parallel inside the claimer's budget (06c L5).
+    const rows = (await store.slugRows(v.order.slug)).filter((r) => live(r, t));
+    const expiredPending = (r) => r.status === 'quoted' && r.txid && Date.parse(r.quote_expires_at) <= t;
+    const verdicts = new Map();
+    await claimer.recheckAll(rows.filter(expiredPending), (r, verdict) => verdicts.set(r.id, verdict));
+    const holders = rows.filter((r) => !(expiredPending(r) && ['dead', 'missing'].includes(verdicts.get(r.id))));
     let renewOf = null;
     if (v.order.renew) {
       const mine = holders.filter((r) => r.identity_key === identityKey && r.status !== 'quoted');
       if (!mine.length) return [404, { error: 'renew: no edition with that slug' }];
       renewOf = mine;
     } else if (holders.some((r) => r.identity_key !== identityKey)) return [409, { error: 'slug_taken' }];
+    // 06c L2: this buyer already has a payment for this edition on its way: no second quote (and no second $99).
+    else if (holders.some((r) => r.identity_key === identityKey && r.status === 'quoted' && r.txid))
+      return [409, { error: 'payment_pending' }];
     if (v.order.proof) {
       const owner = await store.aliasOwner(v.order.proof.value);
       if (owner !== identityKey) return [403, { error: 'proof: that name is not on this wallet' }];
@@ -362,74 +452,27 @@ function makeThemeOrderHandlers({
   const claim = async (body) => {
     const sigErr = await verifySigned(body || {}, actions.claim || 'theme-orders-claim', now());
     if (sigErr) return [401, { error: sigErr }];
-    const identityKey = String(body.identityKey).toLowerCase();
+    if (requireProtocol && protocolError(body)) return protocolError(body);
     const f = body.fields || {};
     const quoteId = String(f.quote_id || '');
-    const txid = String(f.txid || '').toLowerCase();
     if (!QUOTE_ID_RE.test(quoteId)) return [400, { error: 'quote_id' }];
-    if (!/^[0-9a-f]{64}$/.test(txid)) return [400, { error: 'txid' }];
-    const row = await store.getByQuote(quoteId);
-    if (!row || row.identity_key !== identityKey) return [404, { error: 'quote_not_found' }];
-    if (row.status !== 'quoted') {
-      if (row.txid === txid) return [200, { order: publicRow(row) }]; // a retry of a claim that went through
-      return [409, { error: 'quote_used' }];
-    }
-    if (now() > Date.parse(row.quote_expires_at) + claimGraceMs) return [410, { error: 'quote_expired' }];
-    // rawtx: a raw tx hex, or the AtomicBEEF hex the wallet's createAction returns (broadcast with its parents).
-    let tx;
-    let beefHex = null;
-    try {
-      ({ tx, beefHex } = parseIncoming(body.rawtx));
-    } catch {
-      return [400, { error: 'rawtx' }];
-    }
-    if (tx.id('hex') !== txid) return [400, { error: 'txid_mismatch' }];
-    const bad = checkPayment(tx, { address: row.quote_address, sats: row.quote_sats, memoHex: row.quote_memo_hex });
-    if (bad) return [402, { error: bad }];
-    const other = await store.getByTxid(txid);
-    if (other && other.id !== row.id) return [409, { error: 'tx_used' }];
-    // One txid, one paid record across orders, purchases and deposits (site/lib/paidTxids.js).
-    if ((await ledger.reserve(txid, 'order', row.id)) !== 'ok') return [409, { error: 'tx_used' }];
-    // The tx must be on the network: our broadcast is accepted (or already known), else nothing is recorded.
-    try {
-      await broadcast(tx, beefHex);
-    } catch {
-      return [502, { error: 'broadcast_failed' }];
-    }
-    const t = now();
-    const year = TERM_DAYS * 24 * 60 * 60 * 1000;
-    const from = row.renews && row.expires_at && Date.parse(row.expires_at) > t ? Date.parse(row.expires_at) : t;
-    // A paid slug can race another payer inside the quote window: the later one goes to review (refund by hand).
-    const clash =
-      !row.renews &&
-      (await store.slugRows(row.slug)).some(
-        (r) => r.identity_key !== identityKey && ['paid', 'building', 'review', 'live'].includes(r.status),
-      );
-    const patch = {
-      status: clash ? 'review' : 'paid',
-      txid,
-      paid_at: new Date(t).toISOString(),
-      expires_at: new Date(from + year).toISOString(),
-    };
-    await store.updateOrder(row.id, patch);
-    const done = { ...row, ...patch };
-    await store.notify(row.renews ? 'theme_order_renewed' : 'theme_order_paid', {
-      id: row.id,
-      slug: row.slug,
-      name: row.name,
-      brand: row.brand,
-      usd: row.quote_usd,
-      sats: row.quote_sats,
-      txid,
-      clash,
+    return claimer.claim({
+      identityKey: String(body.identityKey).toLowerCase(),
+      quoteId,
+      txid: String(f.txid || '').toLowerCase(),
+      rawtx: body.rawtx,
+      intent: f.intent === '1',
     });
-    return [200, { order: publicRow(done) }];
   };
 
   const mine = async (body) => {
     const sigErr = await verifySigned(body || {}, 'theme-orders-mine', now());
     if (sigErr) return [401, { error: sigErr }];
-    const rows = await store.listMine(String(body.identityKey).toLowerCase());
+    const identityKey = String(body.identityKey).toLowerCase();
+    // Editions paid by a payment the network hadn't shown yet: the ones it has now become paid.
+    if (typeof store.pendingMine === 'function')
+      await claimer.recheckAll(((await store.pendingMine(identityKey).catch(() => [])) ?? []).slice(0, 10));
+    const rows = await store.listMine(identityKey);
     return [200, { orders: rows.map(publicRow), configured: !!address() }];
   };
 

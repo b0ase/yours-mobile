@@ -22,6 +22,19 @@ export const CHAIN_LABEL: Record<LinkChain, string> = {
   sol: 'Solana',
   trx: 'TRON',
 };
+/** The browser wallet that signs for each chain (the same pairs bChatX offers). */
+export type LinkWallet = 'metamask' | 'phantom' | 'tronlink';
+export const CHAIN_WALLET: Record<LinkChain, LinkWallet> = {
+  eth: 'metamask',
+  bnb: 'metamask',
+  sol: 'phantom',
+  trx: 'tronlink',
+};
+export const WALLET_NAME: Record<LinkWallet, string> = {
+  metamask: 'MetaMask',
+  phantom: 'Phantom',
+  tronlink: 'TronLink',
+};
 export type LinkedWallet = { id: string; chain: LinkChain; address: string; verifiedAt: string };
 
 export const LINK_PATH = '/api/bitsign/identity/connect/wallet';

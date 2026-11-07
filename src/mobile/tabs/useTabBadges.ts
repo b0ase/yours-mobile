@@ -4,8 +4,12 @@ import { useAirdrops } from '../airdrops/useAirdrops';
 import { useBMailUnread } from '../bmail/useBMail';
 import { loadSession, SESSION_EVENT } from '../chat/api';
 import { roomKeyOf, useListPrefs } from '../chat/listPrefs';
-import { setIconBadge } from './iconBadge';
+import { reportBadge } from '../push/register';
+import { appIconTotal, setBadgeReporter, setIconBadge } from './iconBadge';
 import { badgesVersion, chatUnread, chatUnreadSplit, feedNew, markFeedViewed, subscribeBadges } from './tabBadges';
+
+// The app icon's number also goes to the push server, so pushes while the app is closed carry it (iconBadge.ts).
+setBadgeReporter(reportBadge);
 
 /** The signed-in chat handle (null when signed out), live across sign in / out. */
 export const useChatHandle = () => {
@@ -34,8 +38,9 @@ export const useTabBadges = () => {
   const muted = new Set(prefs.muted);
   const chat = handle ? chatUnread((t) => muted.has(roomKeyOf(t))) : 0;
   const bmail = useBMailBadge();
-  // The extension's toolbar icon shows the same bMail number (iconBadge.ts; a no-op outside the extension).
-  useEffect(() => setIconBadge(bmail), [bmail]);
+  // The app icon (phone home screen, extension toolbar): Chat + bMail, 0 clears it (iconBadge.ts).
+  const icon = appIconTotal(chat, bmail);
+  useEffect(() => setIconBadge(icon), [icon]);
   return { chat, feed: feedNew(), bmail };
 };
 

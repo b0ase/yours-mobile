@@ -54,6 +54,8 @@ export type ResponseEventDetail = {
   /** Technical detail for the wallet's own Details panel (error code, stack top). Never shown on its own. */
   detail?: string;
   status?: number;
+  /** GET_BALANCE: the part of `data` (the total, in satoshis) not yet in a block (services/depositBalance.ts). */
+  pending?: number;
 };
 
 export type ResponseEvent = {

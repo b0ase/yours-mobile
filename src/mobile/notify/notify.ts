@@ -48,7 +48,7 @@ export const CATEGORIES = Object.keys(CATEGORY_LABELS) as NotifyCategory[];
 /** What tapping a notification opens. */
 export type NotifyTarget =
   | { type: 'post'; txid: string; twetchId?: number }
-  | { type: 'room'; ticker: string }
+  | { type: 'room'; ticker: string; dm?: boolean }
   | { type: 'wallet' }
   | { type: 'calls' }
   | { type: 'bmail' };

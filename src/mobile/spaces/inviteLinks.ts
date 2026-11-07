@@ -2,34 +2,34 @@
  * Space pages, invites and room pages opening the app (invite.ts parses them):
  *   bwalletx://space/<slug>  · https://<host>/s/<slug>  → the Spaces screen on that Space    (BSPACES_ENABLED)
  *   bwalletx://invite/<code> · https://<host>/i/<code>  → counts a use, then the Space or the room
- *   bwalletx://room/<ticker> · https://<host>/r/<ticker> → the room; without the token, its existing
- *                                                          get-entry (locked) screen with Buy   (token rooms)
+ *   bwalletx://room/<ticker> · https://<host>/r/<ticker> → the room's chat (chat/roomLink.ts)
+ *   https://<host>/room/<ref>[?invite=<token>]           → the room's chat; an invite link is claimed first
  * The https forms need universal / app links (docs/BSPACES-PLAN.md, "To make it live").
  *
- * Gating: Space links only with BSPACES_ENABLED (inlined, so a store build drops them); room links
- * and room invites follow token rooms (tokenRoomsEnabled(), off in a store build). Held until a
- * screen with the router takes it.
+ * Gating: Space pages only with BSPACES_ENABLED (inlined, so a store build drops them). Room links and room
+ * invites open in every build (owner, 2 Nov 2026: a room link lands in that room's chat, like Telegram): only the
+ * routing is ungated; a token room still opens only in bWalletX (the store build shows its note, never Buy).
+ * A bChatX link this build doesn't open in the app shows in the bChatX frame rather than being dropped.
+ * Held until a screen with the router takes it.
  */
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { App as CapApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
-import { BSPACES_ENABLED, tokenRoomsEnabled, XINVITES_ENABLED } from '../storeBuild';
+import { BSPACES_ENABLED, XINVITES_ENABLED } from '../storeBuild';
 import { offerXInvite, openXInviteInBrowser, parseXInviteLink } from '../chat/xInvites';
 import { BchatClient, defaultHttp, loadSession } from '../chat/api';
-import { requestChatRoom } from '../chat/nav';
+import { bchatxDoorRoute, bchatxDoorUrl, requestRoomLink } from '../chat/roomLink';
+import { openDappBrowser } from '../dappBrowser';
 import { isNative } from '../native';
 import { parseThemeLink } from '../theme/themeLink';
 import { requestThemeSheet } from '../theme/themeNav';
 import { parseComposeLink } from '../bmail/meeting';
 import { openBMailDraft } from '../bmail/store';
-import { parseAppLink, parsePage, parseSpaceInvite, type AppLink, type RoomPage } from './invite';
+import { appLinkFor, parseSpaceInvite, type PendingLink } from './invite';
 import { isSignLink } from '../chat/signLink';
 
-const ROOM_LINKS = tokenRoomsEnabled();
-const LINKS_ON = BSPACES_ENABLED || ROOM_LINKS;
-
-let pending: AppLink | null = null;
+let pending: PendingLink | null = null;
 let xPending = false;
 const listeners = new Set<() => void>();
 
@@ -56,14 +56,12 @@ export const offerAppLink = (url?: string | null) => {
     listeners.forEach((l) => l());
     return;
   }
-  const link = parseAppLink(url);
+  const link = appLinkFor(url, BSPACES_ENABLED);
   if (!link) return;
-  if (link.kind === 'space' && !BSPACES_ENABLED) return;
-  if (link.kind === 'room' && !ROOM_LINKS) return;
-  if (link.kind === 'invite' && !LINKS_ON) return;
   pending = link;
   listeners.forEach((l) => l());
 };
+
 export const takeAppLink = () => {
   const c = pending;
   pending = null;
@@ -80,23 +78,17 @@ if (Capacitor.isNativePlatform()) {
 
 const client = () => new BchatClient(defaultHttp(isNative), loadSession());
 
-/** The room's token key from its public page; null when it has none (then the chat list opens). */
-const roomKey = (page: RoomPage | null) => {
-  const g = page?.gate;
-  return g?.key && (g.kind === 'bsv21' || g.kind === 'coll') ? g.key : null;
+/** A bChatX page inside the bChatX frame (its BRC-100 bridge reaches the wallet), else the in-app browser. */
+export const openBchatxDoor = (path: string, go: (path: string) => void) => {
+  const route = bchatxDoorRoute(path);
+  if (route) return go(route);
+  go('/m/chat');
+  openDappBrowser(bchatxDoorUrl(path)).catch((e) => console.error('[room link]', e));
 };
 
-/**
- * Opens a room: requestChatRoom(key) shows the room to a holder and the existing locked screen
- * (entry rule, Buy in the Market) to anyone else, so "buy to enter" reuses that flow.
- */
-const openRoom = async (ticker: string, go: (path: string) => void) => {
-  const page = await client()
-    .roomPage(ticker)
-    .then(parsePage)
-    .catch(() => null);
-  const key = roomKey(page?.kind === 'room' ? page : null);
-  if (key) requestChatRoom(key);
+/** The room's chat: the Chatrooms page takes it once signed in (chat/roomLink.ts decides member / invite / door). */
+const openRoom = (ref: string, invite: string | null, door: string | null, go: (path: string) => void) => {
+  requestRoomLink({ ref, invite, door });
   go('/m/chat');
 };
 
@@ -104,7 +96,7 @@ const openRoom = async (ticker: string, go: (path: string) => void) => {
 export const useSpaceInviteLinks = (enabled = true) => {
   const navigate = useNavigate();
   useEffect(() => {
-    if (!LINKS_ON || !enabled) return;
+    if (!enabled) return;
     const go = () => {
       if (xPending) {
         xPending = false;
@@ -113,20 +105,21 @@ export const useSpaceInviteLinks = (enabled = true) => {
       }
       const link = takeAppLink();
       if (!link) return;
+      if (link.kind === 'door') return openBchatxDoor(link.path, navigate);
       if (link.kind === 'space') return navigate(`/m/spaces?space=${link.slug}`);
-      if (link.kind === 'room') return void openRoom(link.ticker, navigate);
-      // An invite: what it opens is only known from the server.
+      if (link.kind === 'room') return openRoom(link.ticker, link.invite ?? null, null, navigate);
+      // An invite: what it opens is only known from the server (this counts one use).
       void (async () => {
         const inv = parseSpaceInvite(
           await client()
             .openInvite(link.code)
             .catch(() => null),
         );
-        if (inv?.target.kind === 'room') {
-          if (ROOM_LINKS) await openRoom(inv.target.ticker, navigate);
-          return;
-        }
-        if (BSPACES_ENABLED) navigate(`/m/spaces?invite=${link.code}`);
+        const door = `/i/${link.code}`;
+        if (inv?.target.kind === 'room') return openRoom(inv.target.ticker, null, door, navigate);
+        if (inv && BSPACES_ENABLED) return navigate(`/m/spaces?invite=${link.code}`);
+        // Unknown invite, or a Space without Spaces in this build: bChatX's invite page says what it is.
+        openBchatxDoor(door, navigate);
       })();
     };
     go();

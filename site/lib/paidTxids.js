@@ -31,11 +31,18 @@ function paidTxidStore(env = process.env, f = fetch) {
       const h = await holder(txid);
       return h && h.kind === kind && h.ref_id === String(refId) ? 'ok' : 'used';
     },
+    /** When this txid was first recorded (ms), undefined when it never was. Throws when the database can't say. */
+    reservedAt: async (txid) => {
+      const r = await f(`${url}/rest/v1/theme_paid_txids?txid=eq.${q(txid)}&select=created_at&limit=1`, { headers });
+      if (!r.ok) throw new Error(`supabase ${r.status}`);
+      const at = (await r.json())?.[0]?.created_at;
+      return at ? Date.parse(at) : undefined;
+    },
   };
 }
 
 /** In-memory ledger with the same contract (tests, and one ledger shared by all three handler sets). */
-function memoryPaidTxids() {
+function memoryPaidTxids(now = () => Date.now()) {
   const m = new Map();
   return {
     rows: m,
@@ -43,11 +50,12 @@ function memoryPaidTxids() {
       if (!KINDS.has(kind)) throw new Error('kind');
       const h = m.get(txid);
       if (!h) {
-        m.set(txid, { kind, ref_id: String(refId) });
+        m.set(txid, { kind, ref_id: String(refId), at: now() });
         return 'ok';
       }
       return h.kind === kind && h.ref_id === String(refId) ? 'ok' : 'used';
     },
+    reservedAt: async (txid) => m.get(txid)?.at,
   };
 }
 

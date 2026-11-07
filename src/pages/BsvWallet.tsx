@@ -1,4 +1,5 @@
 import { heldBsv21Balances } from '../mobile/airdrops/heldBalances';
+import { MoveToDeviceNotice } from '../components/MoveToDeviceNotice';
 import { migrationRowText } from '../utils/migrationRow';
 import { quarantineFor, setQuarantineAccount } from '../mobile/airdrops/inbox';
 import { withoutQuarantined } from '../mobile/airdrops/quarantine';
@@ -53,14 +54,15 @@ import { BackupPromo } from '../components/BackupPromo';
 import lockIcon from '../assets/lock.svg';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useServiceContext } from '../hooks/useServiceContext';
-import { getLockData, sendAllBsv, syncAddresses, unlockBsv, type Bsv21Balance, type LockData } from '@1sat/actions';
+import { getLockData, sendAllBsv, syncAddresses, type Bsv21Balance, type LockData } from '@1sat/actions';
 import { sendBsv } from '../utils/guardedSendBsv';
 import { getWalletBalance, fetchExchangeRate, cachedExchangeRate } from '../utils/wallet';
 import { sendMessageAsync } from '../utils/chromeHelpers';
 import { YoursEventName } from '../inject';
 import { useSyncTracker } from '../hooks/useSyncTracker';
 import { getErrorMessage, isValidEmail } from '../utils/tools';
-import { classifySendError, type SendErrorInfo } from '../utils/sendErrors';
+import { classifySendError, DELIVERY_UNCONFIRMED_MESSAGE, type SendErrorInfo } from '../utils/sendErrors';
+import { createUncertainSends, deviceKV, outcomeIsUncertain, sentAtLabel } from '../utils/uncertainSends';
 import { SendErrorNotice } from '../components/SendErrorNotice';
 import { chromeLocalStore, duplicateWarningOnce } from '../services/duplicateExtension';
 import { UpgradeNotification } from '../components/UpgradeNotification';
@@ -200,6 +202,10 @@ export const BsvWallet = () => {
     lineItems: SendLineItem[];
     total: string;
     totalSats?: number;
+    /** Earlier sends to these recipients that may already have gone out (utils/uncertainSends.ts). */
+    earlier?: { recipient: string; amount: string; sentAt: string }[];
+    /** The device store couldn't be read in time (17d L5). */
+    earlierUnknown?: boolean;
     onConfirm: () => void;
   } | null>(null);
   // Get identityAddress from chrome storage (selected account)
@@ -749,6 +755,37 @@ export const BsvWallet = () => {
     setLockData(lockData);
   };
 
+  // A restored wallet / new device: find its BSV locks on chain once per device store (seed-derived lock key, 1Sat's
+  // indexer), file them into the lock basket, then refresh the Locks row (which also auto-claims any that are ready).
+  // After a failed run it waits (1 h doubling to 24 h) before trying again. Quiet unless found.
+  const bsvLockScanTried = useRef(new Set<string>());
+  useEffect(() => {
+    if (!identityAddress || !apiContext.services || bsvLockScanTried.current.has(identityAddress)) return;
+    bsvLockScanTried.current.add(identityAddress);
+    let live = true;
+    void (async () => {
+      try {
+        const { bsvLocksScanDue, scanBsvLocks } = await import('../mobile/locks/lockFinder');
+        const { lockScanOptions } = await import('../mobile/locks/lockScanWiring');
+        const opts = await lockScanOptions();
+        if (!live || !bsvLocksScanDue(identityAddress, opts.store)) return;
+        const res = await scanBsvLocks(apiContext, identityAddress, opts);
+        if (!live || res.added === 0) return;
+        setLockData(await getLockData.execute(apiContext, {}));
+        snackRef.current(
+          `Found ${res.added} BSV lock${res.added === 1 ? '' : 's'} on chain. See Pots & Locks › Locks.`,
+          'info',
+          5000,
+        );
+      } catch {
+        // indexer down: the next open tries again, and Find my locks is always there
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [identityAddress, apiContext]);
+
   useEffect(() => {
     if (loadLocks) loadLocks();
     getAndSetBsvBalance();
@@ -942,18 +979,21 @@ export const BsvWallet = () => {
   useEffect(() => {
     if (!identityAddress || isSyncing) return;
     getAndSetBsvBalance();
-    // Auto-unlock: attempt to unlock matured coins via CWI
+    // Auto-unlock: claim matured locks via CWI. Only locks worth more than their fee at this wallet's rate (and locks
+    // Find my locks added from 1,000 sats), in claims of at most 50 (lockApi.claimLocks): anyone can pay dust locks
+    // to the public lock address (review 21 M2, N3).
     if (!unlockAttempted && lockData?.unlockable) {
       (async () => {
-        const res = await unlockBsv.execute(apiContext, {});
+        const { claimMatured } = await import('../mobile/locks/lockApi');
+        const { claimRate } = await import('../mobile/locks/lockScanWiring');
+        const satsPerKb = await claimRate(chromeStorageService);
+        const txid = await claimMatured(apiContext, { satsPerKb }).catch(() => undefined);
         setUnlockAttempted(true);
-        if (res.txid) {
+        if (txid) {
           await refreshUtxos();
           await sleep(1000);
           addSnackbar('Successfully unlocked coins!', 'success');
         }
-        // Note: unlockBsv may return error if it requires direct key access
-        // In that case, unlocking happens on the service worker side
       })();
     }
 
@@ -1179,23 +1219,54 @@ export const BsvWallet = () => {
       payee: payeeNote(identityAddress, addr, pendingMeta(addr)),
     }));
 
+    // A re-tap must not pay twice (third reviews 17c/17d): an earlier send to the same recipient, as typed, whose outcome
+    // is open makes the sheet ask "Send another anyway?" with Cancel first (utils/uncertainSends.ts). The note is written
+    // when Send is confirmed, before the request goes out, so a hang followed by an app kill or reload still asks.
+    const recentSends = createUncertainSends(deviceKV());
+    // What the person typed: on phones the name box hands up the address a name resolved to (17d L1).
+    const typedFor = (addr: string) => pendingMeta(addr)?.input || addr;
+    const typed = addressOrder.map(typedFor);
+    const amountFor = (addr: string) => {
+      const bsv = (consolidated.get(addr) ?? 0) / BSV_DECIMAL_CONVERSION;
+      return exchangeRate > 0 ? `$${(bsv * exchangeRate).toFixed(2)}` : `${formatNumberWithCommasAndDecimals(bsv, 8)} BSV`;
+    };
+    /** The outcome is known: drop the note on success or a proven "not sent"; keep it while it may have gone out. */
+    const settleNote = (info: SendErrorInfo | null) => {
+      if (!info || !outcomeIsUncertain(info)) void recentSends.clear(identityAddress, typed);
+    };
+    const checked = await recentSends.check(identityAddress, typed);
+    const earlier = checked.earlier.map((e) => ({
+      recipient: e.recipient,
+      amount: e.amount,
+      sentAt: sentAtLabel(e.at),
+    }));
+
     setSendConfirmation({
       icon: bsvCoin,
       lineItems,
       total: `${formatNumberWithCommasAndDecimals(totalSats / BSV_DECIMAL_CONVERSION, 8)} BSV`,
       totalSats,
+      earlier,
+      earlierUnknown: checked.unavailable,
       onConfirm: async () => {
         setSendConfirmation(null);
         setIsProcessing(true);
         setSendInFlight(true);
         setSendError(null);
         lastSendThrow.current = null;
+        // Before the request goes out (17d M2). Time-limited: a store that hangs never holds the payment.
+        await recentSends.note(
+          identityAddress,
+          addressOrder.map((a) => ({ recipient: typedFor(a), amount: amountFor(a) })),
+        );
         try {
           await confirmSendBsv();
         } catch (err) {
           // A thrown send (not a returned error) left the spinner up for good (owner, 27 Oct 2026).
           console.error('[handleSendBsv] send threw:', errText(err));
-          setSendError(classifySendError(err));
+          const info = classifySendError(err);
+          setSendError(info);
+          settleNote(info);
           refreshUtxos().catch(() => undefined);
         } finally {
           setSendInFlight(false);
@@ -1225,14 +1296,20 @@ export const BsvWallet = () => {
           sendRes = await sendBsv.execute(sendContext(), { requests: sendRecipients });
         }
 
-        if (!sendRes.txid || sendRes.error) {
+        // A $name payment broadcast on chain whose delivery to the payee's host failed afterwards (third review 17c,
+        // H2): it WAS sent. It takes the sent path with a warning, never the error flow's "Nothing was sent".
+        const deliveryUnconfirmed =
+          !!sendRes.txid && typeof sendRes.error === 'string' && /^delivery-failed:/.test(sendRes.error);
+        if (!deliveryUnconfirmed && (!sendRes.txid || sendRes.error)) {
           const thrown = lastSendThrow.current;
           const err =
             thrown instanceof Error && sendRes.error && thrown.message === sendRes.error
               ? thrown
               : sendRes.error || 'The wallet returned no txid';
           console.error('[handleSendBsv] send failed:', errText(err));
-          setSendError(classifySendError(err));
+          const info = classifySendError(err);
+          setSendError(info);
+          settleNote(info);
           setIsProcessing(false);
           // A refused send may have cleared coins spent on another device: show the corrected balance.
           refreshUtxos().catch((err) => console.error('[handleSendBsv] refresh after failed send:', errText(err)));
@@ -1241,11 +1318,16 @@ export const BsvWallet = () => {
 
         setBsvBalance((prev) => Math.max(0, prev - totalSats / BSV_DECIMAL_CONVERSION));
         rememberSent(identityAddress, addressOrder);
+        // Sent: no reminder, except when the payee's host didn't confirm it (the note stays, 17c H2).
+        if (!deliveryUnconfirmed) settleNote(null);
         refreshUtxos().catch((err) => console.error('[handleSendBsv] reconcile refresh failed:', errText(err)));
         resetSendState();
         setBsvHistoryRefreshKey((k) => k + 1);
         setPageState('main');
-        if (
+        if (deliveryUnconfirmed) {
+          console.warn('[handleSendBsv] sent, but the payee host did not confirm delivery:', sendRes.error);
+          addSnackbar(DELIVERY_UNCONFIRMED_MESSAGE, 'info');
+        } else if (
           !celebrateSend(sendRes, {
             amount: { kind: 'bsv', sats: totalSats },
             recipients: addressOrder,
@@ -1739,6 +1821,12 @@ export const BsvWallet = () => {
             </p>
           )}
         </motion.div>
+
+        {/* Still on the online backup: say so, and offer the move now (services/localFirst.ts, review F4). Outside the
+            balance block above: the phone and web builds hide that block (they show WalletCard instead). */}
+        <div className="w-[88%]">
+          <MoveToDeviceNotice />
+        </div>
 
         {/* ── Action buttons ── */}
         <motion.div
@@ -2518,6 +2606,8 @@ export const BsvWallet = () => {
         totalSats={sendConfirmation?.totalSats}
         usdPerBsv={exchangeRate}
         isProcessing={isProcessing}
+        earlier={sendConfirmation?.earlier}
+        earlierUnknown={sendConfirmation?.earlierUnknown}
         onConfirm={() => sendConfirmation?.onConfirm()}
         onCancel={() => setSendConfirmation(null)}
       />

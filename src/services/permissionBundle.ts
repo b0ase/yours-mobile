@@ -15,6 +15,7 @@
  */
 
 import { BLOCK_SITE_BASKET, basketDisplayName, isReservedBasket } from './reservedBaskets';
+import type { SealSheet } from './sealPass';
 
 export { BLOCK_SITE_BASKET };
 
@@ -34,6 +35,8 @@ export interface BundleRequest {
   labels?: string[];
   /** Where this payment's outputs go (services/spendRecipients.ts), shown on its sheet. */
   recipients?: { to: string; satoshis: number }[];
+  /** sha256 of the scripts + amounts of the action those recipients were read from; Allow checks it (0xrard). */
+  recipientsHash?: string;
   reason?: string;
   /**
    * Joined the sheet while it was on screen (live sheet). Shown as "New: …", never pre-ticked, and never covered
@@ -47,6 +50,11 @@ export interface BundleRequest {
    * the top-level host. Never a grant, never "Don't ask again".
    */
   framePair?: string;
+  /**
+   * The wallet's own one Seal sheet for bit-sign's sign-and-seal (services/sealPass.ts): the words to show. A synthetic
+   * line, never sent to the permissions manager; nothing is stored when it is allowed.
+   */
+  seal?: SealSheet;
 }
 
 /** Most lines that may join one open sheet. More queue for their own sheet. */
@@ -56,9 +64,10 @@ export const MAX_LIVE_CHANGES = 3;
  * A short, stable fingerprint of exactly the requests a sheet shows (order-independent). The sheet sends the
  * hash of what was on screen when the user tapped; the background answers only if it still matches.
  */
-export const sheetHash = (items: Pick<BundleRequest, 'requestID'>[]): string => {
+export const sheetHash = (items: Pick<BundleRequest, 'requestID' | 'recipientsHash'>[]): string => {
   const text = items
-    .map((i) => i.requestID)
+    // A payment's line covers the recipient list it showed (services/spendRecipients.ts).
+    .map((i) => (i.recipientsHash ? `${i.requestID}#${i.recipientsHash}` : i.requestID))
     .sort()
     .join('\n');
   let h = 0x811c9dc5;
@@ -492,6 +501,13 @@ const lineText = (r: BundleRequest): string => {
   }
 };
 
+/** Recipients largest first (stable), so the biggest payees always lead (0xrard #2). */
+export const sortedRecipients = <T extends { satoshis: number }>(list: T[] | undefined): T[] =>
+  (list ?? [])
+    .map((x, i) => ({ x, i }))
+    .sort((a, b) => b.x.satoshis - a.x.satoshis || a.i - b.i)
+    .map(({ x }) => x);
+
 const lineDetail = (r: BundleRequest): string => {
   const parts: string[] = [];
   switch (r.type) {
@@ -551,14 +567,20 @@ export const buildSheetModel = (bundle: Pick<PermissionBundle, 'originator' | 'i
           description: r.spending?.lineItems?.find((l) => l.description)?.description ?? r.reason,
           detail: lineDetail(r),
           ...(r.labels?.length ? { labels: [...r.labels] } : {}),
-          ...(r.recipients?.length ? { recipients: r.recipients.map((x) => ({ ...x })) } : {}),
+          // Bound (recipientsHash) even when empty: an action with no outputs pays only the network fee.
+          ...(r.recipients?.length || r.recipientsHash !== undefined
+            ? { recipients: (r.recipients ?? []).map((x) => ({ ...x })) }
+            : {}),
         };
       } else {
         // A second (or live-added) spend: shown as its own line, never pre-ticked.
         lines.push({
           requestID: r.requestID,
           text: `${r.addedLive ? 'New: pay' : 'Also pay'} ${sats.toLocaleString()} sats`,
-          detail: lineDetail(r),
+          // Its payees too, every one, largest first (0xrard: never hide where money goes).
+          detail: [lineDetail(r), ...sortedRecipients(r.recipients).map((x) => `to ${x.to}: ${x.satoshis} sats`)].join(
+            ' · ',
+          ),
           risky: true,
           checked: false,
           ...(r.addedLive ? { isNew: true } : {}),

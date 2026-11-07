@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, Check, ImageOff, Send, Tag, X } from 'lucide-react';
 import { cancelOrdinalListing, listOrdinals, sendOrdinals } from '@1sat/actions';
 import { readAssetIdTag } from '@1sat/types';
+import { ASSET_ID_MISMATCH, assetIdIsOnly } from '../services/assetIdCheck';
 import { Ordinal } from '../components/Ordinal';
 import { PageLoader } from '../components/PageLoader';
 import { Show } from '../components/Show';
@@ -376,6 +377,12 @@ export const OrdWallet = () => {
       for (const ordinal of selectedOrdinals) {
         const id = requireAssetId(ordinal);
         if (!id) {
+          setIsProcessing(false);
+          return;
+        }
+        // sendOrdinals spends what the id loads: it must be this ordinal and no other (review 16b, R2).
+        if (!(await assetIdIsOnly(apiContext.wallet as never, id, ordinal.outpoint).catch(() => false))) {
+          addSnackbar(ASSET_ID_MISMATCH, 'error');
           setIsProcessing(false);
           return;
         }

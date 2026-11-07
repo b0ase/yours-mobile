@@ -1,8 +1,10 @@
 /**
  * User-generated content safety (Apple 1.2, Google Play UGC policy):
  *
- *  - Terms of use with a zero-tolerance clause, agreed once before first use of Feed, Chat, DMs
- *    or Calls (stored on this device; the text is hosted at bchatx.com/terms#conduct).
+ *  - Terms of use with a zero-tolerance clause, agreed at account setup (owner, 3 Nov 2026): one line above the last
+ *    Continue of create / restore, or a one-tap sheet after unlock for a wallet that never agreed (TermsLine,
+ *    TermsOnceSheet in UgcSheets.tsx). Stored on this device; the text is hosted at bchatx.com/terms#conduct. Feed,
+ *    Chat, DMs and Calls just open: setup / unlock always comes before them.
  *  - Reports go to bit-sign POST /api/bitsign/report (content_reports), which the owner must act
  *    on within 24 hours.
  *  - Blocked bChat handles: hidden locally (DMs, messages, calls) and sent to bit-sign
@@ -55,14 +57,32 @@ export const acceptTerms = () => {
   emit();
 };
 
-/** The in-app summary of the terms (full text: TERMS_URL). */
-export const TERMS_POINTS = [
-  'No objectionable content: nothing illegal, sexually explicit, hateful, violent, threatening, harassing, exploitative of children, self-harm promoting, spam or scams.',
-  'No abusive users. There is zero tolerance: we remove offending content and ban offending accounts.',
-  'Report content or users with Report, and block anyone with Block. We review every report within 24 hours.',
-  'Posts and payments written to the blockchain are public and permanent. We can remove them from our apps but not from the chain.',
-  `Contact: ${SUPPORT_EMAIL}`,
-];
+/**
+ * The one line shown at setup and in the sheet (full text: TERMS_URL). "Terms of Use" is the link; owner's
+ * wording, 3 Nov 2026. The long in-app list (and its "24 hours" promise) is gone.
+ */
+export const TERMS_LINE = {
+  before: 'By continuing you agree to the ',
+  link: 'Terms of Use',
+  after:
+    '. We remove objectionable content and ban abusive accounts. Anything written to the blockchain is public and permanent.',
+} as const;
+
+/** Setup screens: the routes that create or restore a wallet (their own last step carries the line). */
+const SETUP_PATHS = ['/', '/create-wallet', '/restore-wallet', '/import-wallet', '/master-restore'];
+/** Screens with other people's content (Feed, Chat, DMs, Calls, bPics, Spaces). */
+const UGC_PREFIXES = ['/m/feed', '/m/chat', '/m/calls', '/m/bpics', '/m/spaces', '/m/calendar'];
+
+export const isSetupPath = (pathname: string) => SETUP_PATHS.includes(pathname.replace(/(.)\/+$/, '$1'));
+export const isUgcPath = (pathname: string) => UGC_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+
+/**
+ * Show the one-tap terms sheet? Only once the wallet is open (the lock screen comes first), never over the setup
+ * screens (their last step has the line), and only until this device has agreed to the current TERMS_VERSION.
+ * Without a wallet (a deep link on the web) it still covers any screen with other people's content.
+ */
+export const termsSheetNeeded = (s: { accepted: boolean; hasWallet: boolean; locked: boolean; pathname: string }) =>
+  !s.accepted && !s.locked && !isSetupPath(s.pathname) && (s.hasWallet || isUgcPath(s.pathname));
 
 // ── Reports ──
 

@@ -41,6 +41,7 @@ import { isHandoffNotLive } from './mobile/passkey/handoffNotLive';
 import { UrlSync } from './mobile/url/UrlSync';
 import { CrashResume } from './mobile/url/ResumeAfterCrash';
 import { isNative } from './mobile/native';
+import { TermsOnceSheet } from './mobile/ugc/UgcSheets';
 
 import { PAY_STREAM_ENABLED } from './mobile/storeBuild';
 import { guestMusicRoute } from './mobile/media/artists/guestRoute';
@@ -60,6 +61,8 @@ const GuestNames = lazy(() => import('./mobile/names/store/GuestNames'));
 // Check this mint (/bmint/check?o=…) works signed out too: a shared check link must open for anyone.
 const GuestCheck = lazy(() => import('./mobile/bmint/check/GuestCheck'));
 
+// Signs the native Chat in to bChatX in the background once the wallet is open (chat/ChatSessionWarmer.tsx).
+const ChatSessionWarmer = lazy(() => import('./mobile/chat/ChatSessionWarmer'));
 // Mobile-only (theme.settings.services.browser); lazy so the extension never loads it.
 const BrowserPage = lazy(() => import('./mobile/BrowserPage'));
 // Lazy, the same chunk as the phone pager's (mobile/phone/pager.tsx), so onboarding and unlock don't parse it.
@@ -101,19 +104,34 @@ export const App = () => {
   // Coins spent from another device (same seed) leave this device's balance high until checked: ask the background
   // for its throttled coin check whenever the app/popup is shown (owner, 29 Oct 2026: phone $3.47 vs extension $1.95
   // until REFRESH WALLET). The background decides whether one is due (services/autoCoinResync.ts).
+  // The same moments tell the background whether a wallet page is in front (APP_FOREGROUND / APP_BACKGROUND): while it
+  // is, the receive watcher asks the indexer about the receive addresses every ~3 s, so a payment shows at once as
+  // pending (services/receiveWatch.ts; owner, 5 Nov 2026). Repeated every 30 s while visible: the worker holds it on a
+  // lease, so a page that closes without saying so stops the watcher by itself.
   useEffect(() => {
     if (!hasWallet || isLocked) return;
-    const ask = () => {
-      if (document.visibilityState === 'hidden') return;
+    const send = (action: 'COIN_CHECK_DUE' | 'APP_FOREGROUND' | 'APP_BACKGROUND') => {
       try {
-        void Promise.resolve(chrome.runtime.sendMessage({ action: 'COIN_CHECK_DUE' })).catch(() => undefined);
+        void Promise.resolve(chrome.runtime.sendMessage({ action })).catch(() => undefined);
       } catch {
         /* worker not up yet: its own timer covers it */
       }
     };
+    const ask = () => {
+      if (document.visibilityState === 'hidden') return send('APP_BACKGROUND');
+      send('COIN_CHECK_DUE');
+      send('APP_FOREGROUND');
+    };
     ask();
+    const beat = setInterval(() => {
+      if (document.visibilityState !== 'hidden') send('APP_FOREGROUND');
+    }, 30_000);
     document.addEventListener('visibilitychange', ask);
-    return () => document.removeEventListener('visibilitychange', ask);
+    return () => {
+      clearInterval(beat);
+      document.removeEventListener('visibilitychange', ask);
+      send('APP_BACKGROUND');
+    };
   }, [hasWallet, isLocked]);
 
   // Establish a port connection so the background knows the popup is open.
@@ -266,6 +284,14 @@ export const App = () => {
                       <Router>
                         {isWebApp() && <UrlSync />}
                         {isNative && !IS_EXTENSION && <CrashResume />}
+                        {/* Terms of Use once, right after unlock, for a wallet that never agreed at setup (owner, 3 Nov 2026). */}
+                        <TermsOnceSheet hasWallet={hasWallet} locked={isLocked} />
+                        {/* The native Chat's bChatX session, fetched silently for the active account (chat/chatSession.ts). */}
+                        {hasWallet && (
+                          <Suspense fallback={null}>
+                            <ChatSessionWarmer />
+                          </Suspense>
+                        )}
                         <Routes>
                           <Route path="/" element={<Start />} />
                           <Route

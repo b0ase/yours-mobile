@@ -6,6 +6,7 @@ import { listPaymails } from '../names/paymail';
 import { getPaymail } from '../names/accountName';
 import { pickHandleAlias } from '../names/handlePrompt';
 import { getChatAccount } from './chatAccount';
+import { isInactiveAlias, loadServerHandles, usableNames } from './signInNames';
 import { WALLET_ADDRESS_KEY_ID, WALLET_ADDRESS_PROTOCOL, walletAddressMessage } from './walletAddress';
 
 /**
@@ -32,10 +33,13 @@ export const walletSigner = (ctx: OneSatContext): ChatSigner => ({
   // name is not a handle (and a .gmail one would publish the address), so those wait for "Choose your handle".
   // Every name the wallet owns counts, not just the main one (a main b0asex.x still has a plain b0asex), and a
   // failed lookup falls back to the account's cached paymail, so an owned handle is never asked for again.
+  // A name bit-sign holds as an inactive alias (an extra name) can't be signed in as: never offered (signInNames.ts).
   handle: async () => {
     const { publicKey } = await ctx.wallet.getPublicKey({ identityKey: true });
     const names = await listPaymails((u, i) => fetch(u, i), publicKey).catch(() => []);
-    return pickHandleAlias(names, getPaymail(getChatAccount() ?? undefined));
+    const server = loadServerHandles(getChatAccount())?.handles;
+    const cached = getPaymail(getChatAccount() ?? undefined);
+    return pickHandleAlias(usableNames(names, server), isInactiveAlias(cached, server) ? '' : cached);
   },
   // Must match bit-sign src/lib/adopt-wallet-name.ts (adoptMessage, ADOPT_PROTOCOL, ADOPT_KEY_ID).
   identityProof: async (nonce) => {

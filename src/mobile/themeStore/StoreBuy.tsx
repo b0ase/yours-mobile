@@ -7,7 +7,9 @@ import { Check } from 'lucide-react';
 import { playChime } from '../../components/sent/chime';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { artDataUri, receiptArtUrl } from '../storeReceipt/art';
-import { getBuyQuote, payBuyQuote, type BuyQuote, type BuyResult } from '../themeOrder/api';
+import { getBuyQuote, isPaymentPending, payBuyQuote, type BuyQuote, type BuyResult } from '../themeOrder/api';
+import { MoveToDeviceNotice } from '../../components/MoveToDeviceNotice';
+import { errorLayout } from './buySheetState';
 
 const f: typeof fetch = (u, i) => fetch(u, i);
 
@@ -16,11 +18,16 @@ type Step =
   | { k: 'ready'; q: BuyQuote }
   | { k: 'paying'; q: BuyQuote }
   | { k: 'error'; msg: string; q?: BuyQuote }
+  | { k: 'pending'; res: BuyResult }
+  /** The Store says a payment for this theme is already on its way (409 payment_pending): no price, no Pay. */
+  | { k: 'onItsWay' }
   | { k: 'done'; res: BuyResult };
 
 /**
- * Buy one store theme ($1): the server's quote → ONE approval sheet → Pay. The wallet builds the payment without
- * sending it and the server checks and broadcasts it, so a refused claim moves no money (themeOrder/api.ts).
+ * Buy one store theme ($1): the server's quote → ONE approval sheet → Pay. The wallet signs the payment, backs it up,
+ * broadcasts it itself and claims it (themeOrder/storePay.ts). "You own it" only once the Store confirms the network
+ * has the payment; until then it says the payment is on its way (P0, 3 Nov 2026). Pay again after an error finishes
+ * the same payment, never a second one.
  */
 export function BuySheet({
   pack,
@@ -42,26 +49,79 @@ export function BuySheet({
     let live = true;
     getBuyQuote(f, apiContext.wallet, pack)
       .then((q) => live && setStep({ k: 'ready', q }))
-      .catch((e) => live && setStep({ k: 'error', msg: e instanceof Error ? e.message : 'Could not get a price' }));
+      .catch((e) => {
+        if (!live) return;
+        if (isPaymentPending(e)) setStep({ k: 'onItsWay' });
+        else setStep({ k: 'error', msg: e instanceof Error ? e.message : 'Could not get a price' });
+      });
     return () => {
       live = false;
     };
   }, [apiContext.wallet, pack]);
 
   const pay = async () => {
-    if (step.k !== 'ready') return;
-    const q = step.q;
+    if (step.k !== 'ready' && !(step.k === 'error' && step.q)) return;
+    const q = step.q!;
     setStep({ k: 'paying', q });
     try {
       // The shop's picture on the receipt (owner: an NPG purchase prints NPG art); plain gold if it can't load.
       const art = await artDataUri(receiptArtUrl(pack));
       const res = await payBuyQuote(apiContext, f, q, { label, art });
+      if (res.pending) {
+        setStep({ k: 'pending', res });
+        return;
+      }
       setStep({ k: 'done', res });
       playChime();
     } catch (e) {
       setStep({ k: 'error', msg: e instanceof Error ? e.message : 'Payment failed', q });
     }
   };
+
+  if (step.k === 'pending' || step.k === 'onItsWay') {
+    const title = step.k === 'pending' ? 'Payment sent' : 'Payment on its way';
+    return createPortal(
+      <div
+        role="dialog"
+        aria-label={title}
+        className="fixed inset-0 z-[1110] flex flex-col items-center overflow-y-auto px-5"
+        style={{
+          background: CARD.bg,
+          paddingTop: 'calc(env(safe-area-inset-top) + 40px)',
+          paddingBottom: 'calc(env(safe-area-inset-bottom) + 24px)',
+        }}
+      >
+        <h2 className="m-0 mt-4 text-center text-2xl font-extrabold text-white">{title}</h2>
+        {step.k === 'pending' ? (
+          <p className="m-0 mt-2 max-w-[360px] text-center text-sm" style={{ color: '#98A2B3' }}>
+            The network hasn't confirmed it yet. <span style={{ color: CARD.gold }}>{label}</span> unlocks as soon as it
+            does; you don't need to pay again.
+          </p>
+        ) : (
+          <p className="m-0 mt-2 max-w-[360px] text-center text-sm" style={{ color: '#98A2B3' }}>
+            Your payment for <span style={{ color: CARD.gold }}>{label}</span> is still on its way to the network. It
+            unlocks when it arrives; you don't need to pay again.
+          </p>
+        )}
+        {step.k === 'pending' && (
+          <p className="m-0 mt-3 text-center text-xs" style={{ color: '#98A2B3' }}>
+            Reference · {step.res.txid.slice(0, 10)}…
+          </p>
+        )}
+        <div className="mt-6 flex w-full max-w-[360px] flex-col gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="min-h-[48px] cursor-pointer rounded-2xl border-0 text-base font-bold"
+            style={{ background: CARD.gold, color: '#0B0A08' }}
+          >
+            Done
+          </button>
+        </div>
+      </div>,
+      document.body,
+    );
+  }
 
   if (step.k === 'done') {
     const { res } = step;
@@ -153,8 +213,10 @@ export function BuySheet({
     );
   }
 
-  const q = step.k === 'quoting' ? undefined : step.q;
+  const q = step.k === 'quoting' ? undefined : (step as { q?: BuyQuote }).q;
   const busy = step.k === 'paying' || step.k === 'quoting';
+  // A payment waiting for the move to this device: the notice and its Retry button first, no price hero (F-D).
+  const layout = errorLayout(step.k === 'error' ? step.msg : undefined);
   return createPortal(
     <div
       className="fixed inset-0 z-[1110] flex flex-col"
@@ -172,10 +234,12 @@ export function BuySheet({
         closeLabel="Close"
         closeDisabled={step.k === 'paying'}
         hero={
-          <PayHero
-            amount={`$${q?.usd ?? 1}`}
-            sub={q ? `${q.sats.toLocaleString()} sats · yours to keep` : 'Getting the price…'}
-          />
+          layout.hero ? (
+            <PayHero
+              amount={`$${q?.usd ?? 1}`}
+              sub={q ? `${q.sats.toLocaleString()} sats · yours to keep` : 'Getting the price…'}
+            />
+          ) : undefined
         }
         title={
           <>
@@ -183,7 +247,7 @@ export function BuySheet({
           </>
         }
         primary={{
-          label: step.k === 'paying' ? 'Paying…' : `Pay $${q?.usd ?? 1}`,
+          label: step.k === 'paying' ? 'Paying…' : step.k === 'error' && q ? 'Try again' : `Pay $${q?.usd ?? 1}`,
           onClick: () => void pay(),
           disabled: busy || !q,
           busy: step.k === 'paying',
@@ -199,13 +263,17 @@ export function BuySheet({
         }
         detailsOpen={details}
         onToggleDetails={() => setDetails(!details)}
-        error={step.k === 'error' ? step.msg : undefined}
+        error={step.k === 'error' ? layout.error : undefined}
       >
-        <div className="flex flex-wrap" style={{ gap: 8 }}>
-          <Chip>Theme</Chip>
-          <Chip>Yours to keep</Chip>
-          <Chip>Paid in BSV</Chip>
-        </div>
+        {layout.notice ? (
+          <MoveToDeviceNotice />
+        ) : (
+          <div className="flex flex-wrap" style={{ gap: 8 }}>
+            <Chip>Theme</Chip>
+            <Chip>Yours to keep</Chip>
+            <Chip>Paid in BSV</Chip>
+          </div>
+        )}
       </ApprovalCard>
     </div>,
     document.body,

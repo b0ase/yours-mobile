@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react';
 import { mergeChatRooms } from '../tabs/tabBadges';
 import { createPortal } from 'react-dom';
-import { MessageCircle, Plus, Search, Users, WifiOff, X } from 'lucide-react';
+import { Plus, Search, Users, WifiOff, X } from 'lucide-react';
 import { isBlocked, onUgcChange } from '../ugc/ugc';
 import { syncBlocks } from '../ugc/blocks';
 import { TopNav } from '../../components/TopNav';
@@ -12,14 +12,14 @@ import { SegmentRow, SegmentTitle } from '../feed/ChatSegments';
 import { loadFollows } from '../feed/store';
 import { getFriends, onFriends, refreshFriends } from '../calls/friends';
 import { onDmRequest, onRoomTicker, takeDmRequest, takeRoomTicker } from './segmentNav';
-import { BchatClient, ChatApiError, needsHandle, saveSession } from './api';
+import { BchatClient, ChatApiError } from './api';
+import { ChatSessionPlaceholder } from './ChatSessionViews';
+import { ensureChatSession, finishHandleClaim, noteChatAuthLost, turnChatOn, useChatSession } from './chatSession';
 import { dmsCacheKey, fetchRooms, onRooms, sharedChatClient } from './sharedRooms';
 import { readListCache } from '../ui/listCache';
 import { afterPaint } from '../ui/afterPaint';
 import { useInPeek } from '../phone/pageEl';
 import { SkeletonRows } from './SkeletonRows';
-import { HandleFlow } from '../names/HandleFlow';
-import { walletSigner } from './signer';
 import { dmPeer, listTimeLabel, previewText, roomActivity, roomTitle, type ChatRoom } from './messages';
 import { ChatAvatar } from './ChatAvatar';
 import { useAvatars } from './avatars';
@@ -104,10 +104,10 @@ export const DmsPage = ({
   const client = useMemo(() => sharedChatClient(), []);
   const { chromeStorageService } = useServiceContext();
   const identityAddress = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ?? '';
-  const [handle, setHandle] = useState<string | null>(client.handle);
+  // The bChatX session is fetched silently for the active account (chatSession.ts): no sign-in step here.
+  const session = useChatSession();
+  const handle = session.kind === 'ready' ? session.handle : null;
   const [online, setOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine);
-  const [signingIn, setSigningIn] = useState(false);
-  const [authError, setAuthError] = useState('');
   // Cache first, like the room list: the last DMs list shows at once (chat/sharedRooms.ts writes it).
   const [rooms, setRooms] = useState<ChatRoom[] | null>(() => readListCache<ChatRoom>(dmsCacheKey(identityAddress)));
   // Chat tab badge: a DM opened or marked read clears at once.
@@ -136,46 +136,20 @@ export const DmsPage = ({
     };
   }, []);
 
-  const signIn = useCallback(async () => {
-    setSigningIn(true);
-    setAuthError('');
-    try {
-      const s = await client.signIn(walletSigner(apiContext));
-      saveSession(s);
-      setHandle(s.handle);
-    } catch (e) {
-      // A wallet bChat hasn't seen and no handle chosen yet: open Choose your handle right here.
-      const need = needsHandle(e);
-      if (need) setHandleClaim(need);
-      else setAuthError(errText(e));
-    } finally {
-      setSigningIn(false);
-    }
-  }, [client, apiContext]);
-  const [handleClaim, setHandleClaim] = useState<{ claimToken: string; address: string } | null>(null);
-  // After the handle is chosen, finish the sign-in with bit-sign's claim token (falls back to a fresh
-  // sign-in, which now finds the chosen name, if the token has expired).
-  const finishClaim = useCallback(
-    async (paymail: string) => {
-      if (!handleClaim) return;
-      const name = paymail.split('@')[0];
-      const s = await client
-        .claimHandle(handleClaim.claimToken, name, handleClaim.address)
-        .catch(() => client.signIn(walletSigner(apiContext)));
-      saveSession(s);
-      setHandle(s.handle);
-      setHandleClaim(null);
-    },
-    [client, apiContext, handleClaim],
-  );
+  const retrySession = useCallback(() => void ensureChatSession(apiContext, { force: true }), [apiContext]);
+  // A wallet bChatX hasn't seen, with no name of its own: "Choose your handle" finishes the session.
+  const finishClaim = useCallback((paymail: string) => finishHandleClaim(apiContext, paymail), [apiContext]);
+  // Normally ChatSessionWarmer has it already; opening DMs asks too (coalesced, and quiet after a failure).
+  useEffect(() => {
+    if (!handle && online) void ensureChatSession(apiContext, { recheckHandle: true });
+  }, [handle, online, apiContext]);
 
+  // The server refused the session: sign in again quietly (chatSession.ts noteChatAuthLost).
   const authLost = useCallback(() => {
-    client.signOut();
-    saveSession(null);
-    setHandle(null);
     setOpen(null);
     setRooms(null);
-  }, [client]);
+    noteChatAuthLost(apiContext);
+  }, [apiContext]);
 
   const refresh = useCallback(
     (force?: unknown) => {
@@ -407,23 +381,13 @@ export const DmsPage = ({
         )}
 
         {!handle && (
-          <div className="px-6 pt-16 flex flex-col items-center text-center gap-3">
-            <MessageCircle size={28} color={GOLD} />
-            <h2 className="text-lg font-bold text-white">Direct messages</h2>
-            <p className="text-xs" style={{ color: MUTED }}>
-              Private 1:1 chats on bChat. Signs in with this wallet's identity key — no password.
-            </p>
-            <button
-              onClick={signIn}
-              disabled={signingIn || !online}
-              className="mt-2 rounded-2xl px-6 py-3 text-sm font-bold disabled:opacity-50"
-              style={{ background: GOLD, color: '#1a1300' }}
-            >
-              {signingIn ? 'Signing in…' : 'Sign in with wallet'}
-            </button>
-            {authError && <p className="text-xs text-[#F97066]">{authError}</p>}
-            {handleClaim && <HandleFlow onClose={() => setHandleClaim(null)} onClaimed={finishClaim} />}
-          </div>
+          <ChatSessionPlaceholder
+            state={session}
+            label="Loading messages"
+            onRetry={retrySession}
+            onClaimed={finishClaim}
+            onTurnOn={() => void turnChatOn(apiContext)}
+          />
         )}
 
         {handle && dms === null && !listError && <SkeletonRows label="Loading messages" />}

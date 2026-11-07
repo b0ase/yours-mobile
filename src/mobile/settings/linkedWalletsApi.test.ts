@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { Utils } from '@bsv/sdk';
 import {
+  CHAIN_WALLET,
   inPlaceChains,
+  LINK_CHAINS,
   LINK_PATH,
   linkInPlace,
   listLinks,
@@ -10,6 +12,7 @@ import {
   shortAddress,
   signerFor,
   unlink,
+  WALLET_NAME,
   type Requester,
 } from './linkedWalletsApi';
 
@@ -121,5 +124,30 @@ describe('linked wallets: link flow', () => {
     ).rejects.toThrow();
     expect(signed).toBe(false);
     expect(calls).toHaveLength(1);
+  });
+});
+
+describe('linked wallets: the wallet shown for each chain', () => {
+  test('every chain names the wallet that signs for it, as bChatX does', () => {
+    expect(LINK_CHAINS.map((c) => WALLET_NAME[CHAIN_WALLET[c]])).toEqual([
+      'MetaMask',
+      'MetaMask',
+      'Phantom',
+      'TronLink',
+    ]);
+  });
+
+  test('the in-place signer for each chain is the wallet named on its row', () => {
+    const eth = { request: async () => ['0xabc'] };
+    const phantom = {
+      solana: {
+        connect: async () => ({ publicKey: { toString: () => 'S' } }),
+        signMessage: async () => new Uint8Array(),
+      },
+    };
+    const tronWeb = { defaultAddress: { base58: 'T1' }, trx: { signMessageV2: async () => 's' } };
+    const only = (w: string) =>
+      providersOf(w === 'metamask' ? { ethereum: eth } : w === 'phantom' ? { phantom } : { tronWeb });
+    for (const c of LINK_CHAINS) expect(signerFor(c, only(CHAIN_WALLET[c]))).not.toBeNull();
   });
 });

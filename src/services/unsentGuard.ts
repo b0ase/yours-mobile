@@ -10,11 +10,18 @@
  *  - once the rawtx has left the device, abort ONLY when the server gave an explicit "not broadcast" answer (a
  *    refusal it makes before broadcasting: HTTP 4xx) AND the chain still says unknown after ~30 s of retries
  *    (WhatsOnChain + 1Sat, every answer a clean 404);
- *  - otherwise keep the action as it is (nosend: its change stays spendable) and watch for it on chain; when the
- *    network has it, hand it to the wallet's normal sending path (createAction sendWith) so storage marks it sent
- *    and the monitor completes it with its proof.
+ *  - otherwise keep the action as it is (nosend: its change is NOT spendable meanwhile; the funder skips nosend
+ *    actions although the balance counts them) and watch for it on chain; when the network has it, hand it to the
+ *    wallet's normal sending path (createAction sendWith) so storage marks it sent and the monitor completes it.
  * Every decision is logged as a [bwx-unsent] line.
+ *
+ * "Seen" (P0, 3 Nov 2026) means the network has it: WhatsOnChain 200, or ARC SEEN_ON_NETWORK / ACCEPTED / MINED.
+ * 1Sat's BEEF store holds every transaction uploaded to it, ones the network refused included, so a copy there is
+ * never "seen" (it only stops an abort). ARC holding it without the network (QUEUED, ANNOUNCED…) is unclear: it may
+ * still land. "Not found" everywhere is "not known".
  */
+
+import { deadline } from '../utils/abortTimeout';
 
 export type Sighting = 'seen' | 'missing' | 'unclear';
 export type ChainLookup = (txid: string) => Promise<Sighting>;
@@ -28,13 +35,30 @@ export const SETTLE_DELAYS_MS = [15_000, 30_000, 60_000, 120_000, 240_000, 480_0
 
 type F = (url: string, init?: RequestInit) => Promise<Response>;
 const defaultFetch: F = (u, i) => fetch(u, i);
+/**
+ * Every chain lookup has a deadline (06c L6): refusal checks run inside the broadcaster call, under the wallet's
+ * storage writer lock, so a hung WhatsOnChain or ARC must not hold storage. A timeout is an 'unclear' answer.
+ */
+export const LOOKUP_TIMEOUT_MS = 8_000;
+/**
+ * One lookup with a deadline that also works on iOS 15 (no AbortSignal.timeout there: utils/abortTimeout.ts). The
+ * timer is cleared once the answer is in.
+ */
+const timedGet = async (f: F, url: string): Promise<Response> => {
+  const d = deadline(LOOKUP_TIMEOUT_MS);
+  try {
+    return await f(url, { signal: d.signal });
+  } finally {
+    d.clear();
+  }
+};
 
 /** WhatsOnChain: 200 seen (mempool or mined), 404 missing, anything else unclear. */
 export const wocLookup =
   (f: F = defaultFetch): ChainLookup =>
   async (txid) => {
     try {
-      const r = await f(`https://api.whatsonchain.com/v1/bsv/main/tx/hash/${txid}`);
+      const r = await timedGet(f, `https://api.whatsonchain.com/v1/bsv/main/tx/hash/${txid}`);
       if (r.status === 404) return 'missing';
       return r.ok ? 'seen' : 'unclear';
     } catch {
@@ -42,12 +66,62 @@ export const wocLookup =
     }
   };
 
-/** 1Sat: the BEEF of a transaction the indexer has. 200 seen, 404 missing, anything else unclear. */
+/** ARC statuses that mean the network itself has the transaction (QUEUED, STORED, ANNOUNCED… only say ARC has it). */
+export const ARC_ACCEPTED = new Set([
+  'SEEN_ON_NETWORK',
+  'SEEN_MULTIPLE_NODES',
+  'ACCEPTED_BY_NETWORK',
+  'MINED',
+  'IMMUTABLE',
+  'CONFIRMED',
+]);
+export const ARC_URL = 'https://arc.gorillapool.io';
+
+/**
+ * ARC's record (GorillaPool, the broadcaster our servers use): an accepted status is seen; 404 is missing; any other
+ * status (ARC holds it, the network may not) or error is unclear. REJECTED / DOUBLE_SPEND is unclear too unless
+ * `rejectedIsMissing` (review 4 Nov 2026, F1/F5): a GorillaPool refusal says nothing about the wallet's own broadcaster,
+ * so it may count as "missing" only inside a retried check (chainSaysUnknown, chainVerdict), never on one snapshot.
+ */
+export const arcLookup =
+  (f: F = defaultFetch, o: { rejectedIsMissing?: boolean } = {}): ChainLookup =>
+  async (txid) => {
+    try {
+      const r = await timedGet(f, `${ARC_URL}/v1/tx/${txid}`);
+      if (r.status === 404) return 'missing';
+      if (!r.ok) return 'unclear';
+      const s = String(((await r.json().catch(() => ({}))) as { txStatus?: unknown }).txStatus ?? '');
+      if (ARC_ACCEPTED.has(s)) return 'seen';
+      return o.rejectedIsMissing && /REJECTED|DOUBLE_SPEND/i.test(s) ? 'missing' : 'unclear';
+    } catch {
+      return 'unclear';
+    }
+  };
+
+/**
+ * 1Sat's BEEF store: 404 missing; a copy there is only "uploaded" (it holds refused transactions too), so it is
+ * unclear, never seen (P0, 3 Nov 2026).
+ */
 export const oneSatLookup =
   (f: F = defaultFetch): ChainLookup =>
   async (txid) => {
     try {
-      const r = await f(`https://api.1sat.app/1sat/beef/${txid}`);
+      const r = await timedGet(f, `https://api.1sat.app/1sat/beef/${txid}`);
+      return r.status === 404 ? 'missing' : 'unclear';
+    } catch {
+      return 'unclear';
+    }
+  };
+
+/**
+ * For unsentExpiry only: a copy in 1Sat's BEEF store counts as "seen", because what it triggers there is the wallet's
+ * own send of that exact transaction (sendWith), whose verdict is chain-checked (services/refusalRecheck.ts).
+ */
+export const oneSatPresenceLookup =
+  (f: F = defaultFetch): ChainLookup =>
+  async (txid) => {
+    try {
+      const r = await timedGet(f, `https://api.1sat.app/1sat/beef/${txid}`);
       if (r.status === 404) return 'missing';
       return r.ok ? 'seen' : 'unclear';
     } catch {
@@ -55,7 +129,59 @@ export const oneSatLookup =
     }
   };
 
-export const defaultLookups = (f?: F): ChainLookup[] => [wocLookup(f), oneSatLookup(f)];
+/** Is it on the network, one snapshot: WhatsOnChain and ARC (an ARC refusal is unclear here). */
+export const chainLookups = (f?: F): ChainLookup[] => [wocLookup(f), arcLookup(f)];
+/** For retried checks only (chainVerdict, chainSaysUnknown): an ARC refusal counts as missing there. */
+export const releaseLookups = (f?: F): ChainLookup[] => [wocLookup(f), arcLookup(f, { rejectedIsMissing: true })];
+/**
+ * Abort checks (every one must say missing on every retry: chainSaysUnknown) and settle checks (any may say seen):
+ * chain plus 1Sat's store.
+ */
+export const defaultLookups = (f?: F): ChainLookup[] => [...releaseLookups(f), oneSatLookup(f)];
+/** unsentExpiry's lookups (see oneSatPresenceLookup); its releases go through chainSaysUnknown's retries. */
+export const expiryLookups = (f?: F): ChainLookup[] => [...releaseLookups(f), oneSatPresenceLookup(f)];
+
+/**
+ * The chain's verdict over ~30 s of retries (review 4 Nov 2026, F1): 'seen' as soon as any lookup sees it; 'missing'
+ * only when every lookup says missing on every retry; otherwise 'unclear'. A refusal is believed only on 'missing'.
+ */
+export async function chainVerdict(
+  txid: string,
+  lookups: ChainLookup[] = releaseLookups(),
+  o: { delaysMs?: number[]; sleep?: (ms: number) => Promise<void> } = {},
+): Promise<Sighting> {
+  if (!TXID.test(txid) || !lookups.length) return 'unclear';
+  const sleep = o.sleep ?? sleepMs;
+  let allMissing = true;
+  for (const d of o.delaysMs ?? RELEASE_CHECK_DELAYS_MS) {
+    if (d > 0) await sleep(d);
+    for (const look of lookups) {
+      const r = await look(txid).catch((): Sighting => 'unclear');
+      if (r === 'seen') return 'seen';
+      if (r !== 'missing') allMissing = false;
+    }
+  }
+  return allMissing ? 'missing' : 'unclear';
+}
+
+/**
+ * Might the network have this txid? (P0, 3 Nov 2026.) False only when every lookup cleanly says "not found"; a sighting
+ * or any unclear answer is true (fail closed: never abort what may be out). The wallet's own stored copy and 1Sat's
+ * BEEF store are not asked: neither says anything about the network.
+ */
+export async function chainMayHave(txid: string, lookups: ChainLookup[] = chainLookups()): Promise<boolean> {
+  if (!TXID.test(txid)) return false;
+  if (!lookups.length) return true;
+  for (const look of lookups) if ((await look(txid).catch((): Sighting => 'unclear')) !== 'missing') return true;
+  return false;
+}
+
+/** Any lookup has seen it (the network has it). */
+export async function chainHasSeen(txid: string, lookups: ChainLookup[] = chainLookups()): Promise<boolean> {
+  if (!TXID.test(txid)) return false;
+  for (const look of lookups) if ((await look(txid).catch((): Sighting => 'unclear')) === 'seen') return true;
+  return false;
+}
 
 const sleepMs = (ms: number) => new Promise<void>((ok) => setTimeout(ok, ms));
 
@@ -152,8 +278,9 @@ export type SettleResult = 'sent' | 'not-seen' | 'send-failed' | 'no-wallet-send
 /**
  * Watch a kept action; when the chain has it, ask the wallet to send it (createAction sendWith). The network
  * already holds it, so this only moves storage from 'nosend' to sent: the monitor then fetches the proof and the
- * change counts as settled. If it is never seen the action stays nosend (change still spendable) for the
- * wallet's background review and Settings › Find missing coins.
+ * change counts as settled. If it is never seen the action stays nosend for the wallet's background review and
+ * Settings › Find missing coins. NB: the funder never spends a nosend action's change (wallet-toolbox funds only from
+ * completed / unproven / sending), although the balance counts it.
  */
 export async function settleWhenSeen(
   wallet: UnsentWallet,
@@ -186,4 +313,65 @@ export async function settleWhenSeen(
   }
   log(`[bwx-unsent] ${txid}: not seen on chain yet; left pending for the wallet's review`);
   return 'not-seen';
+}
+
+export type HandOffResult = 'sent' | 'pending' | 'refused' | 'unknown';
+
+type SendResults = {
+  sendWithResults?: { txid: string; status: string }[];
+  /** The broadcaster's per-txid answers: `notDelayedResults` on a result, `reviewActionResults` on WERR_REVIEW_ACTIONS. */
+  notDelayedResults?: { txid: string; status: string }[];
+  reviewActionResults?: { txid: string; status: string }[];
+};
+
+/**
+ * Broadcast a stored, unsent payment through the wallet's own send path, now (P0, 3 Nov 2026). Store payments use it
+ * (mobile/themeOrder/storePay.ts) once their rows are backed up.
+ *
+ * createAction({ sendWith: [txid] }) builds, signs and spends nothing new: storage sends that exact transaction as
+ * AtomicBEEF with every unmined ancestor through the wallet's broadcaster, and from then on treats it like any send:
+ * retried while the service is unreachable ('sending', the Monitor's SendWaiting), its proof fetched, and failed with
+ * its inputs released only on a network refusal (which services/refusalRecheck.ts checks against the chain first).
+ * Never aborts, never throws.
+ *  - 'sent': the broadcaster accepted it ('unproven'; NB 1Sat counts QUEUED / ANNOUNCED as accepted, so this is not
+ *    proof the network has it: the Store's server decides "paid");
+ *  - 'pending': no verdict yet ('sending'): the wallet keeps retrying it;
+ *  - 'refused': the network refused it (a broadcast verdict, after the chain re-check): the toolbox failed it and gave
+ *    its inputs back;
+ *  - 'unknown': nothing was posted, or the wallet couldn't say (e.g. no stored row for that txid: never "refused").
+ */
+export async function sendThroughWallet(
+  wallet: UnsentWallet,
+  txid: string,
+  o: { log?: (m: string) => void } = {},
+): Promise<HandOffResult> {
+  const log = o.log ?? ((m: string) => console.warn(m));
+  if (!TXID.test(txid) || !wallet.createAction) return 'unknown';
+  const verdict = (r: SendResults | undefined, how: string): HandOffResult | null => {
+    const mine = r?.sendWithResults?.find((x) => x.txid === txid);
+    if (!mine) return null;
+    const posted = (r?.notDelayedResults ?? r?.reviewActionResults)?.find((x) => x.txid === txid);
+    log(`[bwx-unsent] ${txid}: wallet send ${mine.status}${posted ? ` (${posted.status})` : ' (not posted)'}${how}`);
+    if (mine.status === 'unproven') return 'sent';
+    if (mine.status === 'sending') return 'pending';
+    // 'failed' counts as a refusal only when the broadcaster actually answered for it; without a post (no stored row,
+    // a request that wasn't ready) nothing went out and nothing was refused.
+    if (mine.status === 'failed') return posted ? 'refused' : 'unknown';
+    return 'unknown';
+  };
+  try {
+    const r = (await wallet.createAction({
+      description: 'Send a Store payment',
+      options: { sendWith: [txid], acceptDelayedBroadcast: false },
+    })) as SendResults | undefined;
+    return verdict(r, '') ?? 'unknown';
+  } catch (e) {
+    // With acceptDelayedBroadcast:false any result but 'unproven' comes back as WERR_REVIEW_ACTIONS carrying the
+    // sendWithResults and the broadcaster's answers as reviewActionResults (wallet-toolbox
+    // throwIfAnyUnsuccessfulCreateActions).
+    const v = verdict(e as SendResults, ', reported as an error');
+    if (v) return v;
+    log(`[bwx-unsent] ${txid}: the wallet's send failed (${e instanceof Error ? e.message : String(e)})`);
+    return 'unknown';
+  }
 }

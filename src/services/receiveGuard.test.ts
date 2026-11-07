@@ -51,13 +51,13 @@ describe('receive guard: the address the Receive screen shows always counts', ()
   });
 
   test('money still missing after a retry is counted in the balance as arriving, never $0', async () => {
-    setArriving(25_432_350);
+    setArriving([{ outpoint: `${PAYMENT}.0`, satoshis: 25_432_350, address: receive }]);
     const wallet = {
       balance: async () => 0,
       listOutputs: async () => ({ totalOutputs: 0, outputs: [] }),
     };
     expect(await balanceWithDeposits(wallet)).toBe(25_432_350);
-    setArriving(0);
+    setArriving([]);
     expect(arrivingSats()).toBe(0);
     expect(await balanceWithDeposits(wallet)).toBe(0);
   });

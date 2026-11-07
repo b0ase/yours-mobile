@@ -3,24 +3,27 @@ import crypto from 'crypto';
 import { P2PKH, PrivateKey, ProtoWallet, Script, Transaction, Utils } from '@bsv/sdk';
 import pm from '../lib/paymail.js';
 import ptx from '../lib/paidTxids.js';
+import pms from '../lib/paymailStore.js';
 import to from '../lib/themeOrders.js';
 
 const NOW = 1_800_000_000_000;
 const PAY = new PrivateKey(7).toPublicKey().toAddress();
+/** The clock requests are signed at (tests that move the server's clock move this with it). */
+const SIGN_AT = { t: NOW };
 
 const user = (n = 42) => {
   const priv = new PrivateKey(n);
   const wallet = new ProtoWallet(priv);
   const identityKey = priv.toPublicKey().toString();
   const sign = async (action, fields = {}, extra = {}) => {
-    const all = { ...fields, identityKey, timestamp: String(NOW) };
+    const all = { ...fields, identityKey, timestamp: String(SIGN_AT.t) };
     const { signature } = await wallet.createSignature({
       data: Utils.toArray(pm.signedMessage(action, all), 'utf8'),
       protocolID: pm.SIGN_PROTOCOL,
       keyID: pm.SIGN_KEY_ID,
       counterparty: 'anyone',
     });
-    return { identityKey, timestamp: NOW, fields, signature: Utils.toHex(signature), ...extra };
+    return { identityKey, timestamp: SIGN_AT.t, fields, signature: Utils.toHex(signature), ...extra };
   };
   return { identityKey, sign };
 };
@@ -43,6 +46,7 @@ const memStore = () => {
         p,
       ),
     listMine: async (k) => rows.filter((r) => r.identity_key === k && r.status !== 'quoted'),
+    pendingMine: async (k) => rows.filter((r) => r.identity_key === k && r.status === 'quoted' && r.txid),
     aliasOwner: async (a) => aliases.get(a) ?? null,
     uploadFile: async function (path) {
       this.uploads.push(path);
@@ -53,18 +57,29 @@ const memStore = () => {
   };
 };
 
-const setup = (env = { THEME_ORDER_PAY_ADDRESS: PAY }) => {
+// net.arc: what ARC answers the claim's post; net.status: networkStatus (paymailStore.js) for any txid; net.now: the clock.
+const setup = (
+  env = { THEME_ORDER_PAY_ADDRESS: PAY },
+  net = { arc: 'SEEN_ON_NETWORK', status: 'unclear', now: NOW },
+) => {
+  SIGN_AT.t = NOW;
   const store = memStore();
   const broadcasts = [];
   const h = to.makeThemeOrderHandlers({
     store,
     ledger: ptx.memoryPaidTxids(),
     rate: async () => 50,
-    broadcast: async (tx) => broadcasts.push(tx.id('hex')),
+    broadcast: async (tx) => {
+      broadcasts.push(tx.id('hex'));
+      const refused = /REJECTED/.test(net.arc);
+      return { txStatus: net.arc, accepted: !refused && pms.ARC_ACCEPTED.has(net.arc), refused };
+    },
+    network: async () => net.status,
     env,
-    now: () => NOW,
+    now: () => net.now ?? NOW,
+    log: () => undefined,
   });
-  return { store, h, broadcasts };
+  return { store, h, broadcasts, net };
 };
 
 const formFor = (identityKey, over = {}) => ({
@@ -225,24 +240,82 @@ describe('claim', () => {
     expect(store.rows[0].status).toBe('quoted');
   });
 
-  test("another wallet can't claim the quote; a failed broadcast records nothing", async () => {
-    const { h, q, store } = await quoted();
+  test("another wallet can't claim the quote; ARC refused and nobody has it: 502, not paid, then let go", async () => {
+    const { h, q, store, net } = await quoted();
     const tx = payTx(q);
     const thief = user(5);
     expect((await h.claim(await claimBody(thief, q, tx)))[0]).toBe(404);
-    const bad = to.makeThemeOrderHandlers({
+    net.arc = 'REJECTED';
+    net.status = 'missing';
+    const u = user();
+    const [st, out] = await h.claim(await claimBody(u, q, tx));
+    expect(st).toBe(502);
+    expect(out.error).toBe('broadcast_failed');
+    expect(store.rows[0].status).toBe('quoted');
+    // The txid stays on the row (pending) until the payment is shown never to have reached the network.
+    expect(store.rows[0].txid).toBe(tx.id('hex'));
+    SIGN_AT.t = net.now = NOW + 15 * 60_000 + 61 * 60_000;
+    await h.mine(await u.sign('theme-orders-mine'));
+    expect(store.rows[0].txid).toBeNull();
+    expect(store.rows[0].status).toBe('quoted');
+  });
+
+  test('ANNOUNCED is not paid: 202 pending, the slug is held, and mine marks it paid once the network has it', async () => {
+    const { h, u, q, store, net } = await quoted();
+    net.arc = 'ANNOUNCED_TO_NETWORK';
+    net.status = 'out';
+    const tx = payTx(q);
+    const [st, out] = await h.claim(await claimBody(u, q, tx));
+    expect(st).toBe(202);
+    expect(out.pending).toBe(true);
+    expect(out.status).toBe('ANNOUNCED_TO_NETWORK');
+    expect(store.rows[0].status).toBe('quoted');
+    expect(store.rows[0].txid).toBe(tx.id('hex'));
+    expect(store.events).toEqual([]);
+    // Another payer can't take the slug while this payment is pending, even after the quote ran out.
+    SIGN_AT.t = net.now = NOW + 20 * 60_000;
+    const other = user(9);
+    expect((await h.quote(await other.sign('theme-orders-quote', formFor(other.identityKey))))[1].error).toBe(
+      'slug_taken',
+    );
+    net.status = 'seen';
+    const [, m] = await h.mine(await u.sign('theme-orders-mine'));
+    expect(m.orders.map((o) => [o.slug, o.status])).toEqual([['vexvoid', 'paid']]);
+    expect(store.events[0].kind).toBe('theme_order_paid');
+  });
+
+  test('a payment that matches is honoured after the quote ran out (owner, 3 Nov 2026)', async () => {
+    const { h, u, q, store, net } = await quoted();
+    SIGN_AT.t = net.now = NOW + 3 * 24 * 60 * 60_000;
+    const [st, out] = await h.claim(await claimBody(u, q, payTx(q)));
+    expect(st).toBe(200);
+    expect(out.order.status).toBe('paid');
+    expect(store.rows[0].status).toBe('paid');
+  });
+
+  test('the txid is on the row before ARC is called', async () => {
+    SIGN_AT.t = NOW;
+    const store = memStore();
+    let atBroadcast;
+    const h = to.makeThemeOrderHandlers({
       store,
       ledger: ptx.memoryPaidTxids(),
       rate: async () => 50,
-      broadcast: async () => {
-        throw new Error('arc 400');
+      broadcast: async (tx) => {
+        atBroadcast = store.rows[0].txid;
+        expect(atBroadcast).toBe(tx.id('hex'));
+        return { txStatus: 'SEEN_ON_NETWORK', accepted: true };
       },
+      network: async () => 'unclear',
       env: { THEME_ORDER_PAY_ADDRESS: PAY },
       now: () => NOW,
+      log: () => undefined,
     });
     const u = user();
-    expect((await bad.claim(await claimBody(u, q, tx)))[1].error).toBe('broadcast_failed');
-    expect(store.rows[0].status).toBe('quoted');
+    const [, q] = await h.quote(await u.sign('theme-orders-quote', formFor(u.identityKey)));
+    const tx = payTx(q);
+    expect((await h.claim(await claimBody(u, q, tx)))[0]).toBe(200);
+    expect(atBroadcast).toBe(tx.id('hex'));
   });
 });
 

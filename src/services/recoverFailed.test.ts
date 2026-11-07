@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'bun:test';
 import { knownOnChain, recoverMinedFailedActions, recoverySummary, type FailedAction } from './recoverFailed';
 import { healStrandedStreamActions } from './streamHeal';
@@ -131,19 +132,31 @@ describe('restored means spendable, read back (dkg, 14 Oct 2026)', () => {
 });
 
 describe('never abort what the network already has', () => {
-  test('knownOnChain', async () => {
-    expect(await knownOnChain(T1, async () => ({ rawTx: [1] }))).toBe(true);
-    expect(await knownOnChain(T1, async () => '0100')).toBe(true);
-    expect(await knownOnChain(T1, async () => ({ rawTx: undefined }))).toBe(false);
-    expect(await knownOnChain(T1, async () => undefined)).toBe(false);
-    expect(await knownOnChain('not-a-txid', async () => ({ rawTx: [1] }))).toBe(false);
-    // fails closed: errors count as known, so nothing is aborted
-    expect(await knownOnChain(T1, async () => ({ error: 'service down' }))).toBe(true);
+  test('knownOnChain asks the chain: "not found" everywhere is not known; anything else is (fails closed)', async () => {
+    const say = (...answers: ('seen' | 'missing' | 'unclear')[]) => answers.map((a) => async () => a);
+    expect(await knownOnChain(T1, say('missing', 'missing'))).toBe(false);
+    expect(await knownOnChain(T1, say('missing', 'seen'))).toBe(true);
+    expect(await knownOnChain(T1, say('seen', 'missing'))).toBe(true);
+    // ARC holding it (QUEUED / ANNOUNCED) or any error is unclear: never abort on doubt.
+    expect(await knownOnChain(T1, say('missing', 'unclear'))).toBe(true);
     expect(
-      await knownOnChain(T1, async () => {
-        throw new Error('offline');
-      }),
+      await knownOnChain(T1, [
+        async () => 'missing',
+        async () => {
+          throw new Error('offline');
+        },
+      ]),
     ).toBe(true);
+    expect(await knownOnChain('not-a-txid', say('seen'))).toBe(false);
+    expect(await knownOnChain(T1, [])).toBe(true);
+  });
+
+  test("knownOnChain never reads the wallet's own copy or 1Sat's BEEF store (P0, 3 Nov 2026)", () => {
+    const src = readFileSync('src/services/recoverFailed.ts', 'utf8');
+    const fn = src.slice(src.indexOf('export async function knownOnChain'));
+    expect(fn.slice(0, 300)).not.toMatch(/getRawTx|oneSat/);
+    const init = readFileSync('src/initWallet.ts', 'utf8');
+    expect(init).not.toContain('knownOnChain(txid, (t) => toolboxServices.getRawTx(t))');
   });
 
   test('stream heal skips a step already on chain', async () => {

@@ -1,4 +1,4 @@
-import { Utils } from '@bsv/sdk';
+import { PublicKey, Utils } from '@bsv/sdk';
 import type { OneSatContext } from '@1sat/actions';
 import { BchatClient, ChatApiError, defaultHttp, saveSession } from '../chat/api';
 import { isNative } from '../native';
@@ -8,6 +8,7 @@ import type { Fetch } from '../names/names';
 import { clearConsents } from '../agent/consent';
 import { clearUgcLocal, normHandle } from '../ugc/ugc';
 import { clearHelpDeskUnpin } from '../chat/helpDeskPin';
+import { bsvLockScanKeys } from '../locks/lockFinder';
 
 /**
  * Settings › Delete account (Apple 5.1.1(v); Google Play account deletion).
@@ -46,12 +47,28 @@ export type DeleteResult = {
 /** "Choose a bChat handle first" = this wallet never made a bChat account: nothing to delete there. */
 const noBchatAccount = (e: unknown) => e instanceof ChatApiError && e.status === 401 && /handle/i.test(e.message);
 
-/** Local keys this module clears for the account (the session, KYC copies, consents, blocks). */
-export const localKeysFor = (identityKey: string) => [
-  `bwallet.kyc.summary.${identityKey}`,
-  `bwallet.kyc.investor.${identityKey}`,
-  `bwallet.kyc.audit.${identityKey}`,
-];
+/** The account's identity address (what the lock-scan flags are keyed by), or '' for a malformed key. */
+const addressOf = (identityKey: string) => {
+  try {
+    return PublicKey.fromString(identityKey).toAddress();
+  } catch {
+    return '';
+  }
+};
+
+/**
+ * Local keys this module clears for the account (the session, KYC copies, consents, blocks), and the lock-scan flags:
+ * importing the same 12 words again must scan for its locks again (review 21 L3).
+ */
+export const localKeysFor = (identityKey: string) => {
+  const address = addressOf(identityKey);
+  return [
+    `bwallet.kyc.summary.${identityKey}`,
+    `bwallet.kyc.investor.${identityKey}`,
+    `bwallet.kyc.audit.${identityKey}`,
+    ...(address ? [...bsvLockScanKeys(address), `bwx.tokenLocks.scanned.${address}`] : []),
+  ];
+};
 
 export const deleteAccount = async (
   ctx: OneSatContext,

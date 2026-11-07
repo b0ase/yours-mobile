@@ -3,8 +3,10 @@ import { FileSignature } from 'lucide-react';
 import type { ChatRoom } from './messages';
 import { docToOffer, signDocUrl } from './pendingDoc';
 import { takeRoomDoc } from './segmentNav';
-import { docHashFor } from './signLink';
+import { bchatxFrameRoute, docHashFor } from './signLink';
 import { openDappBrowser } from '../dappBrowser';
+import { nativeSealRoute } from './nativeSeal';
+import { useNavigate } from 'react-router-dom';
 
 /**
  * "A document is waiting for your signature" at the top of a room: the room's pinned pending_doc, or the one a tapped
@@ -13,6 +15,7 @@ import { openDappBrowser } from '../dappBrowser';
  */
 const PendingDocBanner = ({ room, inChat }: { room: ChatRoom; inChat?: (docId: string) => boolean }) => {
   // Taken once, when this room opens: a tap for this room (and this document) highlights the banner.
+  const navigate = useNavigate();
   const [fromPush] = useState(() => takeRoomDoc(room.ticker));
   const doc = docToOffer(room, fromPush);
   const href = doc ? signDocUrl(room.ticker, doc, docHashFor(room.ticker, doc)) : null;
@@ -34,11 +37,18 @@ const PendingDocBanner = ({ room, inChat }: { room: ChatRoom; inChat?: (docId: s
           Read it, sign your block and seal on bChatX.
         </div>
       </div>
-      {/* The wallet's own browser on the phone (connected, so signed in; owner 28 Oct 2026: Safari opened signed
-          out). A tab on the web wallet and extension (openDappBrowser). */}
+      {/* bChatX in the bApp frame, where the seal's approval reaches the wallet (signLink.bchatxFrameRoute); the dApp
+          browser / a tab only when bChatX can't be framed. */}
       <button
         type="button"
-        onClick={() => openDappBrowser(href).catch((e) => console.error('[review & sign]', e))}
+        onClick={() => {
+          // ⚠ Signed and sealed NATIVELY in the wallet (chat/NativeSealPage.tsx, 3 Nov 2026), never through a web page.
+          const native = doc ? nativeSealRoute(room.ticker, doc) : null;
+          if (native) return navigate(native);
+          const route = bchatxFrameRoute(href);
+          if (route) return navigate(route);
+          openDappBrowser(href).catch((e) => console.error('[review & sign]', e));
+        }}
         className="shrink-0 rounded-xl px-3 py-2 text-[13px] font-bold border-0"
         style={{ background: 'var(--bw-accent-hi)', color: '#1a1300' }}
       >

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { P2PKH, PrivateKey, ProtoWallet, Script, Transaction, Utils } from '@bsv/sdk';
 import pm from '../lib/paymail.js';
 import ptx from '../lib/paidTxids.js';
+import pms from '../lib/paymailStore.js';
 import td from '../lib/themeDeposits.js';
 
 const NOW = 1_800_000_000_000;
@@ -44,18 +45,25 @@ const memStore = () => {
   };
 };
 
-const setup = (env = ENV, ledger = ptx.memoryPaidTxids()) => {
+// net.arc: ARC's answer to the claim's post; net.status: networkStatus (paymailStore.js) for any txid.
+const setup = (env = ENV, ledger = ptx.memoryPaidTxids(), net = { arc: 'SEEN_ON_NETWORK', status: 'unclear' }) => {
   const store = memStore();
   const broadcasts = [];
   const h = td.makeThemeDepositHandlers({
     store,
     ledger,
     rate: async () => 50,
-    broadcast: async (tx) => broadcasts.push(tx.id('hex')),
+    broadcast: async (tx) => {
+      broadcasts.push(tx.id('hex'));
+      const refused = /REJECTED/.test(net.arc);
+      return { txStatus: net.arc, accepted: !refused && pms.ARC_ACCEPTED.has(net.arc), refused };
+    },
+    network: async () => net.status,
     env,
     now: () => NOW,
+    log: () => undefined,
   });
-  return { store, h, broadcasts };
+  return { store, h, broadcasts, net };
 };
 
 const brief = (over = {}) => ({
@@ -205,5 +213,19 @@ describe('one payment, one paid record (shared pay address)', () => {
     expect(await l.reserve(t, 'order', 'o2')).toBe('used');
     expect(await l.reserve(t, 'deposit', 'o1')).toBe('used');
     expect(await l.reserve(t, 'buy', 'b1')).toBe('used');
+  });
+
+  test('a deposit ARC only announced is pending (202), not paid, with no "paid" notice', async () => {
+    const { h, store, net } = setup();
+    net.arc = 'ANNOUNCED_TO_NETWORK';
+    const u = user();
+    const [, q] = await h.quote(await u.sign('theme-deposit-quote', brief()));
+    const tx = payFor(q);
+    const [st, out] = await claim(h, u, q, tx);
+    expect(st).toBe(202);
+    expect(out.pending).toBe(true);
+    expect(store.rows[0].status).toBe('quoted');
+    expect(store.rows[0].txid).toBe(tx.id('hex'));
+    expect(store.events ?? []).toEqual([]);
   });
 });

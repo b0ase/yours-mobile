@@ -25,6 +25,41 @@ payment asks again, even inside the 30 seconds. One site's gated calls are check
 The gate runs before the request reaches the wallet. The wallet's approval sheets (spend, protocol permission) still
 show after it as usual.
 
+## Seal: one Face ID, one sheet (owner, 2 Nov 2026)
+
+"I don't like the seal asking the phone twice. The signature, then the seal button. One smooth motion."
+
+bit-sign's seal makes two standard calls: `createSignature` (protocol `[2,'bitsign seal']`, keyID = the seal nonce,
+counterparty `anyone`, data = the canonical seal record) and then `createAction` (one 0-sat OP_RETURN). They used to
+raise two sheets. Now (`src/services/sealPass.ts`):
+
+1. Seal → Face ID (bChatX's `confirmUser`, or the `createSignature` gate).
+2. ONE "Seal" sheet, shown before signing: the document's fingerprint (`#` + first 8 hex of its sha256, as the phone
+   shows it), who signs and as what, the site, and "network fee only, at most 1,000 sats". It stores nothing (no
+   remember, trust, allowance or envelope).
+3. Allow → the wallet signs, then pays the seal with no second sheet, and the site shows "Signed and sealed · tx".
+
+What the one Allow covers, and nothing more:
+
+- the protocol request of that `createSignature`, while it is the site's only call on the seal protocol;
+- the spend of the site's **very next** `createAction`, within 60 s of the signature, only if it is exactly the seal of
+  the record just signed: one 0-sat `OP_FALSE OP_RETURN` output whose payload carries `recordHash` = sha256 of the
+  signed bytes and the record's own `origHash`, `svgHash`, `key`, `ref`, `ts` and field ids; no site inputs or
+  inputBEEF, no labels, no basket, only the `acceptDelayedBroadcast` / `randomizeOutputs` options; a spend of at most
+  1,000 sats; and the site's only payment in flight.
+
+Anything else asks as before: another site, a different hash or document, money to an address, an amount over the cap,
+a late call, a second payment. The next `createAction` uses the pass up whether it matches or not. A blocked site or an
+ended pairing gets no pass. The record must name this account's identity key.
+
+Face ID: approving the Seal sheet keeps the gate's pass for the seal payment (`extendPass`), so reading the sheet for
+longer than 30 s never brings a second prompt. Still one payment per prompt.
+
+Sites: the calls are unchanged, so every other BRC-100 wallet (and older bWalletX) works with its own two prompts.
+`bitsign.capabilities` answers `oneApprovalSeal: true` (paired sessions and the bApp frame; the frame also says
+`drawSignature: false`, so bChatX opens its own pad at once instead of waiting 3 s). bit-sign uses it only to word its
+status line.
+
 **Settings › "Face ID / fingerprint for signing and payments"** (the Security section, with Change password). On by default. Turning it
 off needs Face ID, fingerprint or the passcode too.
 

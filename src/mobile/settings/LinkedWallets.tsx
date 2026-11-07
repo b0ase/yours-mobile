@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, Lock } from 'lucide-react';
+import { ArrowLeft, ExternalLink, Lock } from 'lucide-react';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { useBackClose } from '../backStack';
 import { BchatClient, defaultHttp, loadSession, SESSION_EVENT } from '../chat/api';
 import { isNative } from '../native';
+import { ChainBadge, WalletLogo } from './LinkWalletMarks';
 import {
   BCHATX_ACCOUNT_URL,
   CHAIN_LABEL,
+  CHAIN_WALLET,
   inPlaceChains,
+  LINK_CHAINS,
   linkDate,
   linkInPlace,
   listLinks,
@@ -17,6 +20,7 @@ import {
   shortAddress,
   signerFor,
   unlink,
+  WALLET_NAME,
   type LinkChain,
   type LinkedWallet,
   type Requester,
@@ -133,15 +137,19 @@ export const LinkedWallets = ({ onClose }: { onClose: () => void }) => {
           <div
             key={l.id}
             className="rounded-xl p-3 flex flex-col gap-1"
-            style={{ background: 'rgba(255,255,255,0.04)' }}
+            style={{ background: 'var(--bw-surface)', boxShadow: 'inset 0 0 0 1px var(--bw-line)' }}
           >
             <div className="flex items-center justify-between gap-2">
-              <span className="text-white text-sm font-semibold" title={l.address}>
-                {shortAddress(l.address)}
+              <span className="flex min-w-0 items-center gap-2">
+                <WalletLogo wallet={CHAIN_WALLET[l.chain]} />
+                <span className="text-white text-sm font-semibold" title={l.address}>
+                  {shortAddress(l.address)}
+                </span>
+                <ChainBadge chain={l.chain} />
               </span>
               <button
                 className={btn}
-                style={{ background: 'transparent', color: '#F97066' }}
+                style={{ background: 'transparent', color: '#F97066', minHeight: 44, flexShrink: 0 }}
                 disabled={busy === l.id}
                 onClick={() => void remove(l)}
               >
@@ -149,7 +157,7 @@ export const LinkedWallets = ({ onClose }: { onClose: () => void }) => {
               </button>
             </div>
             <span className="text-xs" style={{ color: MUTED }}>
-              {CHAIN_LABEL[l.chain]}
+              {WALLET_NAME[CHAIN_WALLET[l.chain]]}
               {linkDate(l.verifiedAt) ? ` · linked ${linkDate(l.verifiedAt)}` : ''}
             </span>
             <span className="text-xs flex items-center gap-1" style={{ color: MUTED }}>
@@ -160,29 +168,40 @@ export const LinkedWallets = ({ onClose }: { onClose: () => void }) => {
         {session && (
           <div className="flex flex-col gap-2 mt-2">
             <span className="text-white text-sm font-semibold">Link a wallet</span>
-            {chains.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {chains.map((c) => (
+            {/* Signs in place where the browser wallet is injected; elsewhere every row opens bChatX's Link card. */}
+            <div className="flex flex-col gap-2">
+              {(chains.length > 0 ? chains : LINK_CHAINS).map((c) => {
+                const inPlace = chains.length > 0;
+                const name = WALLET_NAME[CHAIN_WALLET[c]];
+                return (
                   <button
                     key={c}
-                    className={btn}
-                    style={{ background: GOLD, color: '#000' }}
+                    className="flex w-full items-center gap-3 rounded-xl border-0 px-3 py-2 text-left"
+                    style={{
+                      minHeight: 52,
+                      background: 'var(--bw-surface)',
+                      boxShadow: 'inset 0 0 0 1px var(--bw-line)',
+                      opacity: busy && busy !== c ? 0.5 : 1,
+                    }}
                     disabled={!!busy}
-                    onClick={() => void link(c)}
+                    aria-label={inPlace ? `Link ${name} on ${CHAIN_LABEL[c]}` : `Link ${name} on bChatX`}
+                    onClick={() => (inPlace ? void link(c) : window.open(BCHATX_ACCOUNT_URL, '_blank', 'noopener'))}
                   >
-                    {busy === c ? 'Waiting for your wallet…' : CHAIN_LABEL[c]}
+                    <WalletLogo wallet={CHAIN_WALLET[c]} />
+                    <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className="text-sm font-semibold" style={{ color: 'var(--bw-text)' }}>
+                        {name}
+                      </span>
+                      <ChainBadge chain={c} />
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1 text-sm font-semibold" style={{ color: GOLD }}>
+                      {busy === c ? 'Waiting…' : inPlace ? 'Link' : 'bChatX'}
+                      {!inPlace && <ExternalLink size={14} aria-hidden />}
+                    </span>
                   </button>
-                ))}
-              </div>
-            ) : (
-              <button
-                className={btn}
-                style={{ background: GOLD, color: '#000', alignSelf: 'flex-start' }}
-                onClick={() => window.open(BCHATX_ACCOUNT_URL, '_blank', 'noopener')}
-              >
-                Link on bChatX
-              </button>
-            )}
+                );
+              })}
+            </div>
             {chains.length === 0 && (
               <span className="text-xs" style={{ color: MUTED }}>
                 MetaMask, Phantom and TronLink live in your browser, so linking opens bChatX there. Come back here when
