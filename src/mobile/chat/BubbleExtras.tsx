@@ -1,9 +1,12 @@
-import type { CSSProperties } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { CornerUpLeft, MoreHorizontal, Pencil, Share2, X, Copy } from 'lucide-react';
-import type { ReplyRef } from './api';
+import type { BchatClient, ReplyRef } from './api';
 import { mentionParts, QUICK_REACTIONS } from './social';
 import { shadeVars, type BubbleShade } from './bubbleShades';
+import { bigEmojiCount } from './emoji';
+import { linkParts, previewPlan } from './linkify';
+import { ChatLink, MessagePreview } from './MessageLinks';
 
 /**
  * The pieces of a Facebook / WhatsApp-style bubble (chat/social.ts has the rules): reply quote,
@@ -43,28 +46,75 @@ export const ReplyQuote = ({
   </button>
 );
 
-/** Message text with `$handle` mentions drawn as chips (me highlighted). */
-export const MessageText = ({ body, mine, me }: { body: string; mine: boolean; me: string }) => (
-  <span className="whitespace-pre-wrap break-words">
-    {mentionParts(body).map((p, i) =>
-      p.mention ? (
-        <span
-          key={i}
-          className="font-semibold rounded px-[2px]"
-          style={{
-            color: mine ? '#3d2a00' : GOLD,
-            background:
-              p.mention === me.replace(/^\$/, '').toLowerCase() ? 'rgb(var(--bw-accent-hi-rgb) / 0.22)' : 'transparent',
-          }}
-        >
-          {p.text}
-        </span>
-      ) : (
-        <span key={i}>{p.text}</span>
-      ),
-    )}
-  </span>
-);
+/**
+ * Message text with http(s) links as real links (chat/MessageLinks.tsx) and `$handle` mentions drawn as chips (me
+ * highlighted). Links first, so a `$` inside a URL is never a mention. A message of only 1–3 emoji is drawn large,
+ * in the device's own emoji font.
+ */
+export const MessageText = ({ body, mine, me }: { body: string; mine: boolean; me: string }) => {
+  const big = bigEmojiCount(body);
+  const self = me.replace(/^\$/, '').toLowerCase();
+  return (
+    <span
+      className="whitespace-pre-wrap break-words"
+      style={big ? { fontSize: big === 1 ? 44 : big === 2 ? 36 : 30, lineHeight: 1.15 } : undefined}
+    >
+      {linkParts(body).map((l, i) =>
+        l.href ? (
+          <ChatLink key={i} href={l.href} text={l.text} mine={mine} />
+        ) : (
+          mentionParts(l.text).map((p, j) =>
+            p.mention ? (
+              <span
+                key={`${i}.${j}`}
+                className="font-semibold rounded px-[2px]"
+                style={{
+                  color: mine ? '#3d2a00' : GOLD,
+                  background: p.mention === self ? 'rgb(var(--bw-accent-hi-rgb) / 0.22)' : 'transparent',
+                }}
+              >
+                {p.text}
+              </span>
+            ) : (
+              <span key={`${i}.${j}`}>{p.text}</span>
+            ),
+          )
+        ),
+      )}
+    </span>
+  );
+};
+
+/**
+ * A text message's body: its text, then the preview under its first link (chat/linkify.ts previewPlan). A message that
+ * is only a GIPHY link shows just the GIF; if the GIF won't load, its link shows instead.
+ */
+export const MessageBody = ({
+  body,
+  mine,
+  me,
+  encrypted,
+  client,
+}: {
+  body: string;
+  mine: boolean;
+  me: string;
+  /** The room is end-to-end encrypted: no card fetch, GIFs and videos wait for a tap. */
+  encrypted: boolean;
+  client: Pick<BchatClient, 'unfurl'>;
+}) => {
+  const [gifFailed, setGifFailed] = useState(false);
+  const plan = previewPlan(body, { encrypted });
+  const gifOnly = plan.kind === 'gif' && plan.only && !gifFailed;
+  return (
+    <>
+      {!gifOnly && <MessageText body={body} mine={mine} me={me} />}
+      {!(plan.kind === 'gif' && gifFailed) && (
+        <MessagePreview plan={plan} encrypted={encrypted} client={client} onGifError={() => setGifFailed(true)} />
+      )}
+    </>
+  );
+};
 
 export const ReactionChips = ({
   list,

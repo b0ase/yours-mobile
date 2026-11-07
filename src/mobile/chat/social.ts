@@ -1,5 +1,6 @@
 import type { ChatMessage } from './messages';
 import type { ReplyRef } from './api';
+import { gifOrText } from './giphyLink';
 
 /**
  * Facebook / WhatsApp-style room chat, matching bChat on the web (bit-sign room page):
@@ -72,7 +73,8 @@ export const replyOf = (m: ChatMessage): ReplyRef | null => {
 export const replyRefFor = (m: ChatMessage): ReplyRef => ({
   id: m.id,
   author: m.author_handle ? norm(m.author_handle) : null,
-  snippet: (m.body ?? '').replace(/\s+/g, ' ').trim().slice(0, 140),
+  // A GIF-only message quotes as "GIF", not its long GIPHY link (as bChatX does).
+  snippet: gifOrText((m.body ?? '').replace(/\s+/g, ' ').trim()).slice(0, 140),
 });
 
 /** A private $b row (question or answer) only I can see. */
