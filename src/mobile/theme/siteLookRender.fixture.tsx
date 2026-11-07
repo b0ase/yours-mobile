@@ -97,6 +97,16 @@ const View = () => (
       </button>
       <HistoryButton className="flex-1 basis-0 min-w-0 h-14 rounded-xl flex items-center justify-center border cursor-pointer" />
     </div>
+    {/* The red LIVE pill as Spaces draw it (spaces/GreenRoom.tsx): white on red in every pack. */}
+    <div className="w-[92%] mb-2">
+      <span
+        data-fixture-live-pill
+        className="rounded px-1.5 py-[1px] text-[10px] font-bold"
+        style={{ background: '#D92D20', color: '#fff' }}
+      >
+        LIVE
+      </span>
+    </div>
     <div className="bw-swaprow w-[92%] -mb-1 flex items-stretch gap-2">
       <SwapPromo active={null} onOpen={() => undefined} />
     </div>
@@ -117,7 +127,7 @@ const View = () => (
         items={[...DEFAULT_DOCK]}
         labels={{}}
         activeKey="screen:wallet"
-        badges={{}}
+        badges={{ 'screen:feed': '99+', 'screen:chat': '11' }}
         onOpen={() => undefined}
         onHome={() => undefined}
         onAgent={() => undefined}

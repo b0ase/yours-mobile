@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { contrast } from './colour';
+import { contrast, mix } from './colour';
 import {
   DARK_CARD_GROUND,
   DARK_CARD_INK,
@@ -97,6 +97,33 @@ const ARTECHEX: Accent = {
 };
 
 describe('guardLook', () => {
+  // Review of 33ac39c6: `on` was picked against the accent stops BEFORE the guard darkened them, so Buy BSV's black
+  // text sat at 4.01:1 (periwinkle) and 3.71:1 (orange) on the stops actually painted.
+  const stopsRead = (g: Accent) => {
+    for (const fill of [g.accent, g.hi, g.lo]) expect([fill, contrast(g.on, fill) >= TEXT_RATIO]).toEqual([fill, true]);
+  };
+  test('on-accent is picked after the stops are guarded (periwinkle: accent #5B6CFF, accentHi #8A96FF)', () => {
+    const g = guardLook({
+      ...ARTECHEX,
+      accent: '#5B6CFF',
+      hi: '#8A96FF',
+      lo: mix('#5B6CFF', ARTECHEX.bg, 0.3),
+      on: '#000000',
+    });
+    expect(g.hi).not.toBe('#8A96FF');
+    stopsRead(g);
+  });
+  test('on-accent is picked after the stops are guarded (orange)', () => {
+    const g = guardLook({
+      ...ARTECHEX,
+      accent: '#C2590A',
+      hi: '#F28C28',
+      lo: mix('#C2590A', ARTECHEX.bg, 0.3),
+      on: '#000000',
+    });
+    stopsRead(g);
+    for (const bg of [g.bg, g.surface, g.surface2]) expect(contrast(g.hi, bg)).toBeGreaterThanOrEqual(TEXT_RATIO);
+  });
   test('a light look built on the dark base: success/danger and on-accent are made readable', () => {
     const g = guardLook({ ...ARTECHEX, on: '#000000' });
     const grounds = [g.bg, g.surface, g.surface2];
@@ -125,6 +152,14 @@ describe('darkGroundInks', () => {
     expect(d.on).toBe('#000000');
     expect(contrast(d.hi, DARK_CARD_GROUND)).toBeGreaterThanOrEqual(TEXT_RATIO);
     expect(contrast(d.on, d.hi)).toBeGreaterThanOrEqual(TEXT_RATIO);
+  });
+  test('the $name pill fades from hi to lo on that face: its ink reads on both stops', () => {
+    for (const a of [ARTECHEX, ...ACCENTS.filter((x) => x.scheme === 'light')]) {
+      const d = darkGroundInks(a);
+      for (const stop of [d.hi, d.lo])
+        expect([a.id, stop, contrast(d.on, stop) >= TEXT_RATIO]).toEqual([a.id, stop, true]);
+      expect(contrast(d.hi, DARK_CARD_GROUND)).toBeGreaterThanOrEqual(TEXT_RATIO);
+    }
   });
   test('Gold keeps its own gold on the dark card', () => {
     const gold = ACCENTS.find((a) => a.id === 'gold') as Accent;

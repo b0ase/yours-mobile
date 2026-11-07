@@ -11,6 +11,7 @@ import {
   type Reading,
 } from '../../testing/siteLookRender';
 import { ICON_RATIO, TEXT_RATIO } from './contrastGuard';
+import { ACCENTS } from './accents';
 
 /**
  * The COO's report (7 Nov 2026): RB connected artechex.com, whose v2 theme is mode "light". The whole-view look left
@@ -72,4 +73,59 @@ describe.skipIf(!chromePath())('main wallet view in a connected site’s light t
     expect(failures(rs)).toEqual([]);
     expect(rs.find((r) => r.name === 'card: balance')?.fg).toBe('#F2F2F0');
   }, 60_000);
+});
+
+/** Every bundled light pack (White, the paper and Mono packs, Nautical, White/Black). */
+const LIGHT_PACKS = ACCENTS.filter((a) => a.kind === 'theme' && a.scheme === 'light').map((a) => a.id);
+
+describe.skipIf(!chromePath())('light packs that now share every light-pack rule (Nautical, White/Black)', () => {
+  let browser: Browser | null = null;
+  let dir = '';
+  beforeAll(async () => {
+    dir = await buildFixture();
+    browser = await launchChrome();
+  }, 60_000);
+  afterAll(async () => {
+    await browser?.close();
+  });
+  for (const pack of ['nautical', 'whiteblack']) {
+    test(`${pack}: the main view reads, the red LIVE pill keeps white text`, async () => {
+      const page = await openView(browser as Browser, dir, { theme: null, identityPubKey: KEY, pack });
+      const rs = await measure(page, MAIN_VIEW_TARGETS);
+      await page.close();
+      expect(failures(rs)).toEqual([]);
+      expect(rs.find((r) => r.name.startsWith('live pill'))?.fg).toBe('#FFFFFF');
+    }, 60_000);
+  }
+});
+
+/**
+ * Review of 33ac39c6 (HIGH): the store edition's card is always yellow and never themed, so the rule for a dark
+ * unthemed face put light ink on yellow (Scan 1.45:1) and black on the black $name chip (1.07:1).
+ */
+describe.skipIf(!chromePath())('store edition (yellow card) in every light pack and a light site theme', () => {
+  let browser: Browser | null = null;
+  let dir = '';
+  beforeAll(async () => {
+    dir = await buildFixture({ store: true });
+    browser = await launchChrome();
+  }, 60_000);
+  afterAll(async () => {
+    await browser?.close();
+  });
+  test('the yellow card keeps its black ink and black chips; the rest of the view reads', async () => {
+    const bad: string[] = [];
+    for (const fx of [
+      { theme: ARTECHEX, identityPubKey: KEY, label: 'ArtechEx' },
+      ...LIGHT_PACKS.map((pack) => ({ theme: null, identityPubKey: KEY, pack, label: pack })),
+    ]) {
+      const page = await openView(browser as Browser, dir, fx);
+      const yellow = await page.evaluate(() => !!document.querySelector('.bw-wcard.is-yellow'));
+      const rs = await measure(page, MAIN_VIEW_TARGETS);
+      await page.close();
+      if (!yellow) bad.push(`${fx.label}: no yellow card`);
+      bad.push(...failures(rs).map((f) => `${fx.label}: ${f}`));
+    }
+    expect(bad).toEqual([]);
+  }, 120_000);
 });

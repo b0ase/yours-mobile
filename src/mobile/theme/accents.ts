@@ -871,7 +871,13 @@ export const packVars = (a: Accent): Record<string, string> => ({
 
 const darkInkVars = (a: Accent): Record<string, string> => {
   const d = darkGroundInks(a);
-  return { '--bw-dark-ground-hi': d.hi, '--bw-dark-ground-hi-rgb': rgbTriplet(d.hi), '--bw-dark-ground-on': d.on };
+  return {
+    '--bw-dark-ground-hi': d.hi,
+    '--bw-dark-ground-hi-rgb': rgbTriplet(d.hi),
+    '--bw-dark-ground-lo': d.lo,
+    '--bw-dark-ground-lo-rgb': rgbTriplet(d.lo),
+    '--bw-dark-ground-on': d.on,
+  };
 };
 
 /** Every variable any pack may set (so switching packs can clear the previous one's). */

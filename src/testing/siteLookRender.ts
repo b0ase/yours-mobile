@@ -34,7 +34,8 @@ export async function launchChrome(): Promise<Browser | null> {
 }
 
 /** Bundles the fixture and compiles the app CSS into a temp folder; returns the folder. */
-export async function buildFixture(): Promise<string> {
+/** `store`: the store edition (bWallet: the yellow card, Apps in the dock), as VITE_STORE_BUILD=1 builds it. */
+export async function buildFixture(opts: { store?: boolean } = {}): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), 'bw-sitelook-'));
   const built = await Bun.build({
     entrypoints: [join(import.meta.dir, '..', 'mobile', 'theme', 'siteLookRender.fixture.tsx')],
@@ -45,7 +46,12 @@ export async function buildFixture(): Promise<string> {
     loader: { '.svg': 'file', '.png': 'file', '.jpg': 'file', '.webp': 'file', '.woff2': 'file', '.woff': 'file' },
     define: {
       'process.env.NODE_ENV': '"production"',
-      'import.meta.env': '{"MODE":"production","DEV":false,"PROD":true}',
+      'import.meta.env': JSON.stringify({
+        MODE: 'production',
+        DEV: false,
+        PROD: true,
+        ...(opts.store ? { VITE_STORE_BUILD: '1' } : {}),
+      }),
     },
   });
   if (!built.success) throw new Error(built.logs.map(String).join('\n'));
@@ -226,6 +232,8 @@ export const MAIN_VIEW_TARGETS: Target[] = [
   { name: 'card: Get your $name', kind: 'text', select: '.bw-wcard-front .bw-wcard-getname' },
   { name: 'card: address line', kind: 'text', select: '.bw-wcard-front .bw-wcard-addr' },
   { name: 'card: $ / BSV switch (on)', kind: 'text', select: '.bw-wcard-front .bw-wcard-unit button.is-on' },
+  { name: 'live pill (#D92D20, white text)', kind: 'text', select: '[data-fixture-live-pill]' },
+  { name: 'dock: badge', kind: 'text', select: 'nav[data-phone-dock] .bw-unread-badge', all: true },
   { name: 'dock: icon', kind: 'icon', select: 'nav[data-phone-dock] button:not(.bw-dock-b) svg', all: true },
   {
     name: 'dock: label',
