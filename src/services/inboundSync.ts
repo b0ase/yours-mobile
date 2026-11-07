@@ -1539,6 +1539,10 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
      * while this check waited on it): the store's own identity says what a push from it is.
      */
     proto.getSyncChunk = async function (this: DeviceStore, args: unknown) {
+      // A provider stand-in in tests (_mergeUnchecked) serves pages as wallet.1sat.app does: as they are.
+      const own = (this as unknown as Record<string, unknown>).processSyncChunk;
+      if (Object.prototype.hasOwnProperty.call(this, 'processSyncChunk') && own === original)
+        return (await read.call(this, args)) as SyncChunk;
       return (await readPushPage(
         this as unknown as ParentStore,
         args as PushArgs,
