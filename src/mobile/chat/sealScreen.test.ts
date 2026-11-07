@@ -107,12 +107,24 @@ describe('one press: "Sign & seal · ~N sats"', () => {
     expect(padHasSignature([line(10, 0, 25), line(30, 0, 25)])).toBe(true); // two short strokes add up
   });
 
-  test('the page: exactly one button after drawing, with the cost; no Done / Confirm / Seal step', () => {
-    expect(page.match(/data-testid="sign-and-seal"/g)?.length).toBe(1);
-    expect(page).toContain('{sealButtonLabel(namedFee ?? estFee)}');
-    expect(page).toContain('disabled={!buttonOn}');
-    expect(page).toContain("const buttonOn = phase.k === 'ready' && inked;");
-    expect(page).toContain('{DRAW_HINT}');
+  test('PAD FIRST (owner, 7 Nov 2026): the card-back pad opens on the verified document; Sign & seal is its button', () => {
+    // The pad is the wallet's card-back SignaturePad, lengthwise, with Review and Sign & seal on the right.
+    expect(page).toMatch(/import \{ SignaturePad \} from '\.\.\/signature\/SignaturePad'/);
+    expect(page.match(/<SignaturePad\b/g)?.length).toBe(1);
+    expect(page).toMatch(/<SignaturePad[\s\S]{0,80}sideways/);
+    expect(page).toContain('saveLabel={sealButtonLabel(namedFee ?? estFee)}');
+    // Only once the document is open and checked (phase ready), and only on the pad view.
+    expect(page).toContain("const showPad = phase.k === 'ready' && !!doc && mine.length > 0 && view === 'pad';");
+    expect(page).toContain("const [view, setView] = useState<'pad' | 'review'>('pad');");
+    // Review shows the document and comes back to the pad with the drawing kept.
+    expect(page).toMatch(/onReview=\{\(strokes\) => \{\s*kept\.current = strokes;\s*setView\('review'\);/);
+    expect(page).toContain('initialStrokes={kept.current}');
+    expect(page).toContain('data-testid="seal-back-to-pad"');
+    // The short hash, to compare with the desktop.
+    expect(page).toContain('Document {shortDocHash}');
+    // No second sign button on the page, no in-page canvas.
+    expect(page).not.toContain('data-testid="sign-and-seal"');
+    expect(page).not.toContain('<canvas');
     expect(DRAW_HINT).toBe('Draw your signature');
     for (const gone of ['Done · next', 'Seal &amp; pay', 'onDone', 'Use this signature', 'Redraw'])
       expect(page).not.toContain(gone);
@@ -195,24 +207,19 @@ describe('receipt and reason', () => {
 
 describe('nothing may interrupt drawing', () => {
   const css = src('../mobile.css');
-  test('the whole page and the pad: no selection, no callout; the canvas: touch-action none', () => {
+  const pad = src('../signature/SignaturePad.tsx');
+  test('the whole page: no selection, no callout', () => {
     expect(page).toContain('className="bw-seal-noselect fixed inset-0');
     expect(page).toMatch(/userSelect: 'none',\s*WebkitUserSelect: 'none',\s*WebkitTouchCallout: 'none'/);
     expect(page).toContain("style={{ background: '#0b0b0d', color: '#e4e4e7', ...NO_SELECT }}");
-    expect(page).toContain('className="bw-seal-pad" data-testid="seal-pad" style={NO_SELECT}');
-    expect(page).toMatch(/touchAction: 'none', \.\.\.NO_SELECT/);
     expect(css).toMatch(
       /\.bw-seal-noselect,\s*\.bw-seal-noselect \* \{[^}]*-webkit-user-select: none;[^}]*user-select: none;[^}]*-webkit-touch-callout: none;/,
     );
-    expect(css).toMatch(/\.bw-seal-pad canvas \{\s*touch-action: none;/);
   });
-  test('touchstart / touchmove prevented (passive: false); contextmenu and selectstart within the pad', () => {
-    expect(page).toContain('const opts: AddEventListenerOptions = { passive: false };');
-    expect(page).toContain("c.addEventListener('touchstart', stop, opts);");
-    expect(page).toContain("c.addEventListener('touchmove', stop, opts);");
-    expect(page).toContain("w.addEventListener('contextmenu', stop);");
-    expect(page).toContain("w.addEventListener('selectstart', stop);");
-    expect(page).toContain('const stop = (e: Event) => e.preventDefault();');
+  test('the pad (SignaturePad): fixed, touch-action none, no callout, no context menu', () => {
+    expect(css).toMatch(/\.bw-sigpad-box \{[^}]*touch-action: none;[^}]*-webkit-touch-callout: none;/);
+    expect(pad).toContain("addEventListener('touchmove', stop, { passive: false })");
+    expect(pad).toContain('onContextMenu={(e) => e.preventDefault()}');
   });
   test('text fields stay selectable; the document scrolls in its own frame', () => {
     expect(css).toMatch(
