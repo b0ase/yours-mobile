@@ -99,7 +99,7 @@ export type ParentsReport = {
   /** Entities a parent was needed for but this pass hasn't read in full: left alone (getSyncChunk never builds one). */
   notExhausted: string[];
   /** The page ends before a row whose parent can't go yet: that parent. */
-  waitsFor?: { txid: string; status: string; updatedAt: number };
+  waitsFor?: { txid: string; status: string };
   /** Per entity: rows added to the page. Goes into the offsets. */
   net: Partial<Record<PageKey, number>>;
 };
@@ -242,7 +242,7 @@ export async function addMissingParents(
   };
 
   /** ok: the parents (deepest first) are in `out` or need nothing; hold: one can't go yet; leave: not read in full. */
-  type Need = { ok: true } | { ok: false; hold?: { txid: string; status: string; updatedAt: number } };
+  type Need = { ok: true } | { ok: false; hold?: { txid: string; status: string } };
   const OK: Need = { ok: true };
   const planned = new Set<string>();
   const need = async (key: ParentKey, id: unknown, out: Pending[]): Promise<Need> => {
@@ -254,10 +254,7 @@ export async function addMissingParents(
     if (!row) return OK; // this device doesn't hold it either: nothing to send (the toolbox decides as before)
     if (!readInFull(key)) return { ok: false };
     if (key === 'transactions' && !inWindow(row) && !sendableAsNoOp(row))
-      return {
-        ok: false,
-        hold: { txid: String(row.txid ?? `#${n}`), status: String(row.status), updatedAt: time(row.updated_at) },
-      };
+      return { ok: false, hold: { txid: String(row.txid ?? `#${n}`), status: String(row.status) } };
     const copy = copyOf(key, row);
     if (key === 'transactions' && copy.provenTxId != null) {
       const r = await need('provenTxs', copy.provenTxId, out);
@@ -400,20 +397,6 @@ const pendingIds = new Map<string, Map<string, number[]>>();
 /** The last "waits for" line per pass, logged once a cycle (the device sync's back-off is minutes). */
 const waitLogged = new Map<string, { line: string; at: number }>();
 const WAIT_LOG_MS = 60_000;
-/** The wallet's abandoned-task cut-off (abandonedMsecs in @1sat/wallet's factory). */
-const ABANDONED_MS = 5 * 60_000;
-/** The sweep is asked for at most this often. */
-const SWEEP_EVERY_MS = 3 * 60_000;
-let sweep: (() => Promise<unknown>) | undefined;
-let lastSweepAt = 0;
-/**
- * What runs the wallet's abandoned-task sweep now (initWallet: walletMonitor.runTask('FailAbandoned')). A push waiting
- * for a transaction over the cut-off asks for it, so the transaction fails (and goes) without waiting for the next
- * wallet open. undefined: none.
- */
-export function setPushWaitSweep(fn: (() => Promise<unknown>) | undefined) {
-  sweep = fn;
-}
 let opened: Promise<IDBDatabase | undefined> | undefined;
 const db = (): Promise<IDBDatabase | undefined> =>
   (opened ??= new Promise<IDBDatabase | undefined>((resolve) => {
@@ -461,7 +444,6 @@ export const _forgetPushMemory = () => {
   filedBy.clear();
   pendingIds.clear();
   waitLogged.clear();
-  lastSweepAt = 0;
 };
 /** Test hook: forget every pass, kept records too. */
 export const _resetPushPasses = async () => {
@@ -548,16 +530,6 @@ export async function readPushPage(
     if (!t || t.line !== line || Date.now() - t.at > WAIT_LOG_MS) {
       waitLogged.set(key, { line, at: Date.now() });
       log(line);
-    }
-    // Over the cut-off: the sweep would fail it now; ask for it once the push has let go of the storage (it takes the
-    // storage provider, which this page's sync holds).
-    const now = Date.now();
-    if (sweep && now - report.waitsFor.updatedAt > ABANDONED_MS && now - lastSweepAt > SWEEP_EVERY_MS) {
-      lastSweepAt = now;
-      const run = sweep;
-      setTimeout(() => {
-        run().catch((e: unknown) => log(`[deviceSync] the abandoned-task sweep failed: ${String(e)}`));
-      }, 0);
     }
     // Nothing before it: no page goes (an empty page would end the pass and move the backup's cursor past the row).
     if (ORDER.every(([k]) => !(page[k] as Rows)?.length)) throw new Error(line.replace('[deviceSync] ', ''));

@@ -22,14 +22,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from '
 import { PrivateKey, Random, Utils } from '@bsv/sdk';
 import { StorageIdb, StorageProvider, WalletStorageManager } from '@bsv/wallet-toolbox-client';
 import * as IS from '../services/inboundSync';
-import {
-  _forgetPushMemory,
-  _resetPushPasses,
-  addMissingParents,
-  readPushPage,
-  setPushWaitSweep,
-  type ParentStore,
-} from '../services/pushParents';
+import { _forgetPushMemory, _resetPushPasses, addMissingParents, type ParentStore } from '../services/pushParents';
 
 const READER = Symbol.for('bwx.inboundSync.reader');
 const DAY = 86_400_000;
@@ -502,52 +495,14 @@ describe('a coin whose transaction is unsigned or unprocessed waits; the pass go
             ]).toEqual([o.outputId, true]);
         });
 
-  test("a stale unsigned parent: the wallet's abandoned-task sweep runs now, fails it, and the next push sends the coin", async () => {
-    const { w, p, pulled } = await stuck('unsigned');
-    let sweeps = 0;
-    // The wallet's TaskFailAbandoned as initWallet wires it (walletMonitor.runTask('FailAbandoned')): stale unsigned
-    // and unprocessed transactions to failed, through the toolbox's own status change.
-    setPushWaitSweep(async () => {
-      sweeps++;
-      const old = Date.now() - 5 * 60_000;
-      for (const t of await w.phone.findTransactions({ partial: { userId: w.pu } }))
-        if ((t.status === 'unsigned' || t.status === 'unprocessed') && ms(t.updated_at) < old)
-          await w.phone.updateTransactionStatus('failed', t.transactionId);
-    });
-    try {
-      await firstPushWaits(w, p, 'unsigned', pulled);
-      await new Promise((r) => setTimeout(r, 20)); // the sweep runs once the push has let go of the storage
-      expect(sweeps).toBe(1);
-      expect((await w.phone.findTransactions({ partial: { transactionId: p.phoneTx } }))[0].status).toBe('failed');
-      await w.push();
-      // Every coin arrived as the phone now holds it (the failed transaction's own coin is no longer spendable).
-      for (const q of pulled) {
-        const mine = (await w.phone.findOutputs({ partial: { txid: q.txid, vout: 0 } }))[0];
-        const theirs = await serverCoin(w, q.txid, 0);
-        expect([q.txid, theirs.spendable, ms(theirs.updated_at)]).toEqual([
-          q.txid,
-          mine.spendable,
-          ms(mine.updated_at),
-        ]);
-      }
-      expect((await w.server.findTransactions({ partial: { txid: p.txid } }))[0].status).toBe('failed');
-    } finally {
-      setPushWaitSweep(undefined);
-    }
-  });
-
-  test('the sweep runs at most once every few minutes', async () => {
-    const { w, p, pulled } = await stuck('unsigned');
-    let sweeps = 0;
-    setPushWaitSweep(async () => void sweeps++);
-    try {
-      await firstPushWaits(w, p, 'unsigned', pulled);
-      await expect(w.push()).rejects.toThrow('push waits for');
-      await new Promise((r) => setTimeout(r, 20));
-      expect(sweeps).toBe(1);
-    } finally {
-      setPushWaitSweep(undefined);
-    }
+  test('a waiting push never runs a wallet task: a stale unsigned transaction stays unsigned until the wallet-open sweep', async () => {
+    const pushParents = await import('../services/pushParents');
+    expect(Object.keys(pushParents).filter((k) => /sweep|task|monitor/i.test(k))).toEqual([]);
+    const { w, p, pulled } = await stuck('unsigned'); // its time is 4 days old: well past the 5-minute cut-off
+    await firstPushWaits(w, p, 'unsigned', pulled);
+    await expect(w.push()).rejects.toThrow('push waits for');
+    await new Promise((r) => setTimeout(r, 20));
+    expect((await w.phone.findTransactions({ partial: { transactionId: p.phoneTx } }))[0].status).toBe('unsigned');
   });
 
   for (const kind of ['refuse', 'timeoutCommitted'] as const)
@@ -853,39 +808,6 @@ describe('addMissingParents on its own', () => {
     expect(s1.scans).toBe(0);
   });
 
-  test('the abandoned-task sweep is asked for only when the waiting parent is over 5 minutes old', async () => {
-    const sweepFor = async (ageMs: number) => {
-      _forgetPushMemory();
-      let sweeps = 0;
-      setPushWaitSweep(async () => void sweeps++);
-      const now = Date.now();
-      const st = store({ status: 'unsigned', updated_at: new Date(now - ageMs) });
-      const pushArgs = {
-        ...args,
-        since: new Date(now),
-        fromStorageIdentityKey: 'phone',
-        toStorageIdentityKey: 'backup',
-        includeNextCheckpoint: true,
-      };
-      try {
-        await expect(
-          readPushPage(
-            st,
-            pushArgs,
-            async () => page(),
-            () => undefined,
-          ),
-        ).rejects.toThrow('push waits for');
-        await new Promise((r) => setTimeout(r, 5));
-      } finally {
-        setPushWaitSweep(undefined);
-      }
-      return sweeps;
-    };
-    expect(await sweepFor(60_000)).toBe(0);
-    expect(await sweepFor(10 * 60_000)).toBe(1);
-  });
-
   test('a parent an earlier page of the pass carried is not sent again', async () => {
     const p = page();
     await addMissingParents(store(), args, p, { filed: new Map([['transactions', new Set([5])]]) });
@@ -916,7 +838,7 @@ describe('addMissingParents on its own', () => {
       const p = page();
       const r = await addMissingParents(store({ status }), args, p);
       expect([status, p.transactions.length, p.outputs.length]).toEqual([status, 0, 0]);
-      expect(r.waitsFor).toMatchObject({ txid: '#5', status });
+      expect(r.waitsFor).toEqual({ txid: '#5', status });
       expect(r.net).toEqual({}); // not counted as read: the next page starts with it
     }
   });

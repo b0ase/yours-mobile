@@ -85,7 +85,6 @@ import {
   type InboundVerifier,
 } from './services/inboundSync';
 import { syncErrorDetail, tagStorageClientErrors } from './services/syncErrorDetail';
-import { setPushWaitSweep } from './services/pushParents';
 import { FULL_PASS_NEXT_SLICE_MS, requestFullPass, withDeadlines, withFullPassMode } from './services/fullPass';
 import { isPhone, onWifi } from './services/networkKind';
 import { chromeEnvelopeBackend, EnvelopeStore, guardEnvelopes } from './services/envelopes';
@@ -605,17 +604,6 @@ export const initWallet = async (
     },
   });
   if (!keepActive) console.error("[initWallet] this device's store is not kept active (no storage manager to wrap)");
-  // A push that waits for a stale unsigned or unprocessed transaction runs the abandoned-task sweep now instead of at
-  // the next wallet open (services/pushParents.ts): the transaction fails, and then it goes with its coins.
-  setPushWaitSweep(
-    walletMonitor
-      ? async () => {
-          if (!storage.isActiveStorageProvider()) return;
-          const out = (await walletMonitor.runTask('FailAbandoned')).trim();
-          if (out) console.log(`[deviceSync] abandoned-task sweep: ${out}`);
-        }
-      : undefined,
-  );
   // No payment may live only in memory: every noSend action is written to storage at signing (P0, 3 Nov 2026: the
   // owner's $1 theme test lost its change on a reload; services/actionBatchMode.ts).
   if (!forceLegacyActionBatch(baseWallet))
@@ -1841,7 +1829,6 @@ export const initWallet = async (
     if (moreTimer) clearTimeout(moreTimer);
     moreTimer = undefined;
     await destroyWallet();
-    setPushWaitSweep(undefined);
     stopBackupCheck();
   };
 
