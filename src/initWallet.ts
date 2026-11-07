@@ -93,6 +93,7 @@ import {
   withFullPassMode,
 } from './services/fullPass';
 import { ownPayments } from './services/ownPayments';
+import { retryOnceOnIdbAbort } from './services/idbAbortRetry';
 import { createInFlight, makeBackupPush, type InFlight } from './services/pushView';
 import { isPhone, onWifi } from './services/networkKind';
 import { chromeEnvelopeBackend, EnvelopeStore, guardEnvelopes } from './services/envelopes';
@@ -1492,34 +1493,38 @@ export const initWallet = async (
     }
     // Coins first, then names/ordinals in the background, each part with its own progress and failures
     // (services/prioritySync.ts; owner, 25 Oct 2026: a big restored wallet's balance crept up for minutes).
-    await runPrioritySync(actionCtx, {
-      count: scanPlan.count,
-      lock: internalizeLock,
-      // A coin another copy of this wallet already swept is not taken in (review 20, H1); fails open when unclear.
-      spends: spendsSync,
-      knownTxids: heldTxids,
-      foreignSpend: (spenders) => void askPull(spenders),
-      onTaken: (ops) => recheck.add(ops),
-      onProgress: (p) => {
-        if (!quiet)
-          sendSyncStatus({
-            status: 'progress',
-            pending: Math.max(0, p.total - p.done),
-            done: p.done,
-            failed: p.failed,
-            part: p.part,
-            total: p.total,
-            message: p.message,
-          });
-      },
-      onCoinsReady: (r) => {
-        // The balance is complete now: let the Wallet tab read it while names keep loading.
-        sendSyncStatus({ status: 'coins-ready', ...r });
-        sweepDeposit
-          .execute(actionCtx, {})
-          .catch((err: unknown) => console.error('[initWallet] deposit sweep failed:', err));
-      },
-    })
+    // A transaction WebKit aborted (the app suspended, 7 Nov 2026) runs once more before the banner says so
+    // (services/idbAbortRetry.ts).
+    await retryOnceOnIdbAbort(() =>
+      runPrioritySync(actionCtx, {
+        count: scanPlan.count,
+        lock: internalizeLock,
+        // A coin another copy of this wallet already swept is not taken in (review 20, H1); fails open when unclear.
+        spends: spendsSync,
+        knownTxids: heldTxids,
+        foreignSpend: (spenders) => void askPull(spenders),
+        onTaken: (ops) => recheck.add(ops),
+        onProgress: (p) => {
+          if (!quiet)
+            sendSyncStatus({
+              status: 'progress',
+              pending: Math.max(0, p.total - p.done),
+              done: p.done,
+              failed: p.failed,
+              part: p.part,
+              total: p.total,
+              message: p.message,
+            });
+        },
+        onCoinsReady: (r) => {
+          // The balance is complete now: let the Wallet tab read it while names keep loading.
+          sendSyncStatus({ status: 'coins-ready', ...r });
+          sweepDeposit
+            .execute(actionCtx, {})
+            .catch((err: unknown) => console.error('[initWallet] deposit sweep failed:', err));
+        },
+      }),
+    )
       .then(async (result) => {
         await sweepDeposit
           .execute(actionCtx, {})

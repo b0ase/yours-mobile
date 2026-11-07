@@ -1,4 +1,5 @@
 import { IndexedDbPermissionStore } from '@1sat/wallet-browser';
+import { retryReadsOnIdbAbort } from './idbAbortRetry';
 
 /**
  * App grants (site approvals, basket/protocol/spending grants, the monthly allowance) belong to one account
@@ -71,7 +72,8 @@ export async function openAccountPermissionStore(
   accountId: string,
   accountCount: number,
 ): Promise<IndexedDbPermissionStore> {
-  const store = new IndexedDbPermissionStore({ scope: permissionScopeFor(accountId) });
+  // An aborted read (WebKit suspending the app, 7 Nov 2026) is read again once (services/idbAbortRetry.ts).
+  const store = retryReadsOnIdbAbort(new IndexedDbPermissionStore({ scope: permissionScopeFor(accountId) }));
   try {
     const { result, count } = await migrateLegacyGrants(store, accountCount);
     if (result !== 'none') console.warn(`[permissions] legacy shared grants ${result} (${count})`);
