@@ -665,7 +665,9 @@ describe('the full re-pull: how it runs', () => {
   test(
     'it resumes from its checkpoint across the heal deadline: no row fetched twice beyond one page, none missed',
     async () => {
-      const d = await phoneWith(3_000);
+      // 1,500 outputs (was 3,000): the same many-page pass and deadline cut at half the work. At 3,000 it took ~40 s
+      // alone and timed out at 120 s in a loaded full run (test/phone-1107, 7 Nov 2026), with nothing hanging.
+      const d = await phoneWith(1_500);
       try {
         await d.pullToEnd();
         await d.admit();
@@ -692,11 +694,11 @@ describe('the full re-pull: how it runs', () => {
         ).toBe('resuming');
         d.o.failAfterPages = undefined;
         await d.pullToEnd();
-        const total = 3_000 + 750 * 3; // outputs + transactions, proofs and proof requests
+        const total = 1_500 + 375 * 3; // outputs + transactions, proofs and proof requests
         const fetched = d.stats.items - items0;
         expect(fetched).toBeGreaterThanOrEqual(total);
         expect(fetched).toBeLessThan(total + 1_000); // at most the page the deadline cut, again
-        expect(await d.count()).toEqual({ outputs: 3_000, transactions: 750 });
+        expect(await d.count()).toEqual({ outputs: 1_500, transactions: 375 });
         expect(await IS.pendingAdmissions(d.phone as never, d.kd.identityKey)).toEqual([]);
         expect(await d.spendable()).toEqual(spendable);
       } finally {
