@@ -38,6 +38,12 @@ export type DeviceSyncDeps = {
 
 export const PUSH_DELAY_MS = 20_000;
 export const BACKOFF_MS = [60_000, 120_000, 240_000, 480_000, 960_000, 1_800_000];
+/**
+ * A push that waits for a transaction to move on (services/pushParents.ts: unsigned or unprocessed, failed by the
+ * wallet's abandoned-task sweep within minutes) is retried this soon, however many times it waited.
+ */
+export const WAIT_BACKOFF_MS = 60_000;
+export const isPushWait = (e: unknown): boolean => /push waits for /.test(errText(e));
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -82,7 +88,7 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
     } catch (e) {
       failures++;
       pendingPush = true;
-      const wait = retryLater();
+      const wait = isPushWait(e) ? (schedule(WAIT_BACKOFF_MS), WAIT_BACKOFF_MS) : retryLater();
       log(`[deviceSync] ${mode} failed (retry in ${Math.round(wait / 60_000)} min):`, syncErrorDetail(e));
       return { ok: false, error: errText(e) };
     }

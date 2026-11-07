@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { BACKOFF_MS, PUSH_DELAY_MS, backupBeforeSend, createDeviceSync, notifyOnWalletChanges } from './deviceSync';
+import {
+  BACKOFF_MS,
+  PUSH_DELAY_MS,
+  WAIT_BACKOFF_MS,
+  backupBeforeSend,
+  createDeviceSync,
+  notifyOnWalletChanges,
+} from './deviceSync';
 
 /** A fake clock: timers run only when the test advances them. */
 const clock = () => {
@@ -295,5 +302,36 @@ describe('the backup state for the honest copy (review 4 Nov 2026, F11)', () => 
     await sync.pushNow();
     expect(sync.state().lastPushOkAt).toBeGreaterThan(0);
     expect(sync.state().failures).toBe(0);
+  });
+});
+
+describe('a push that waits for a transaction to move on retries soon (services/pushParents.ts)', () => {
+  test('"push waits for" is retried within a minute, however many times it failed, not on the 30-minute back-off', async () => {
+    let waits = true;
+    const { sync, c } = harness({
+      push: async () => {
+        if (waits) throw new Error(`push waits for ${'ab'.repeat(32)} (unsigned)`);
+      },
+    });
+    for (let i = 0; i < 8; i++) {
+      await sync.syncNow();
+      expect(c.pending()).toEqual([WAIT_BACKOFF_MS]);
+    }
+    expect(WAIT_BACKOFF_MS).toBeLessThanOrEqual(60_000);
+    waits = false;
+    expect((await sync.syncNow()).ok).toBe(true);
+    expect(sync.state().failures).toBe(0);
+  });
+
+  test('any other failure still climbs the usual back-off', async () => {
+    const { sync, c } = harness({
+      push: async () => {
+        throw new Error('WERR_INTERNAL: An internal error has occurred.');
+      },
+    });
+    await sync.syncNow();
+    expect(c.pending()).toEqual([BACKOFF_MS[0]]);
+    await sync.syncNow();
+    expect(c.pending()).toEqual([BACKOFF_MS[1]]);
   });
 });
