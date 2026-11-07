@@ -23,6 +23,18 @@
  * broadcaster's own sizing (bigBroadcast.ts) allows ~16 s per MB on top of 30 s; most pages are a few kB.
  */
 export const PUSH_CALL_MS = 60_000;
+/**
+ * The small requests (makeAvailable, getSyncCheckpoint, findOrInsertUser, findOrInsertSyncStateAuth): a stalled
+ * backup can't hold a payment for a minute on one of these (re-review, 7 Nov 2026).
+ */
+export const PUSH_SMALL_CALL_MS = 20_000;
+/**
+ * A timed-out request still counted as running on the backup's side at most this long (re-review, 7 Nov 2026, MED: a
+ * callback-based fetch on WKWebView may never settle, which blocked every later push, and so every Store payment's
+ * backup-before-send, until the app restarted). bit-sign's longest function runs 60 s; the backup service's own
+ * request limit is well under this.
+ */
+export const IN_FLIGHT_MAX_AGE_MS = 5 * 60_000;
 /** How long a push waits for its backup's earlier, timed-out request to settle before it fails (and backs off). */
 export const SETTLE_WAIT_MS = 30_000;
 const PUSH_CALLS = new Set([
@@ -36,6 +48,7 @@ const PUSH_CALLS = new Set([
 type Timers = {
   setTimer?: (fn: () => void, ms: number) => unknown;
   clearTimer?: (t: unknown) => void;
+  now?: () => number;
 };
 const timersOf = (t: Timers) => ({
   setTimer: t.setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms)),
@@ -49,37 +62,50 @@ export interface InFlight {
   settled(waitMs: number): Promise<boolean>;
 }
 
-export function createInFlight(t: Timers = {}): InFlight {
+export function createInFlight(t: Timers & { maxAgeMs?: number } = {}): InFlight {
   const { setTimer, clearTimer } = timersOf(t);
-  const pending = new Set<Promise<unknown>>();
+  const now = t.now ?? Date.now;
+  const maxAgeMs = t.maxAgeMs ?? IN_FLIGHT_MAX_AGE_MS;
+  /** Each request that timed out on our side → when it did. Settled ones leave; ones older than maxAgeMs expire. */
+  const pending = new Map<Promise<unknown>, number>();
+  const prune = () => {
+    for (const [p, at] of pending) if (now() - at >= maxAgeMs) pending.delete(p);
+  };
   return {
     add(call) {
       const p = call.then(
         () => undefined,
         () => undefined,
       );
-      pending.add(p);
+      pending.set(p, now());
       void p.then(() => pending.delete(p));
     },
     async settled(waitMs) {
+      prune();
       if (!pending.size) return true;
+      // Wait for them to settle, or to expire, whichever comes first, at most waitMs.
+      const untilExpiry = Math.max(0, ...[...pending.values()].map((at) => at + maxAgeMs - now()));
       let timer: unknown;
-      const all = Promise.all([...pending]).then(() => true);
-      const out = await Promise.race([
-        all,
-        new Promise<boolean>((r) => {
-          timer = setTimer(() => r(false), waitMs);
+      await Promise.race([
+        Promise.all([...pending.keys()]),
+        new Promise<void>((r) => {
+          timer = setTimer(r, Math.min(waitMs, untilExpiry));
         }),
       ]);
       clearTimer(timer);
-      return out && !pending.size;
+      prune();
+      return !pending.size;
     },
   };
 }
 
 /** The backup with a deadline on each push request; a request that timed out is recorded in `inFlight`. */
-export function pushView<T extends object>(writer: T, o: Timers & { inFlight: InFlight; callMs?: number }): T {
+export function pushView<T extends object>(
+  writer: T,
+  o: Timers & { inFlight: InFlight; callMs?: number; smallCallMs?: number },
+): T {
   const callMs = o.callMs ?? PUSH_CALL_MS;
+  const smallCallMs = o.smallCallMs ?? PUSH_SMALL_CALL_MS;
   const { setTimer, clearTimer } = timersOf(o);
   return new Proxy(writer, {
     get(target, p) {
@@ -95,10 +121,13 @@ export function pushView<T extends object>(writer: T, o: Timers & { inFlight: In
         return Promise.race([
           call,
           new Promise((_, reject) => {
-            timer = setTimer(() => {
-              o.inFlight.add(call); // still running on the backup's side: no second request until it settles
-              reject(new Error(`network: the backup did not answer in time (${name})`));
-            }, callMs);
+            timer = setTimer(
+              () => {
+                o.inFlight.add(call); // still running on the backup's side: no second request until it settles
+                reject(new Error(`network: the backup did not answer in time (${name})`));
+              },
+              name === 'processSyncChunk' ? callMs : smallCallMs,
+            );
           }),
         ]).finally(() => clearTimer(timer));
       };

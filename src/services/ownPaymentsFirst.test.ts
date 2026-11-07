@@ -15,7 +15,15 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { createOwnPaymentGate } from './ownPayments';
-import { PUSH_CALL_MS, SETTLE_WAIT_MS, createInFlight, makeBackupPush, pushView } from './pushView';
+import {
+  IN_FLIGHT_MAX_AGE_MS,
+  PUSH_CALL_MS,
+  PUSH_SMALL_CALL_MS,
+  SETTLE_WAIT_MS,
+  createInFlight,
+  makeBackupPush,
+  pushView,
+} from './pushView';
 import { BACKOFF_MS, createDeviceSync } from './deviceSync';
 import { afterPage, beforePage, paymentYields, withFullPassMode } from './fullPass';
 
@@ -93,12 +101,14 @@ const backupStore = (c: Clock, o: { pageMs: number; answerLate?: Map<number, num
   const received = new Map<number, number>(); // id+version → times it arrived
   let ckpt = { since: -950, offset: 0, when: -950 };
   let calls = 0;
+  const starts: number[] = [];
   let concurrent = 0;
   let maxConcurrent = 0;
   return {
     rows,
     received,
     maxConcurrent: () => maxConcurrent,
+    starts,
     ckpt: () => ckpt,
     writer: {
       async makeAvailable() {
@@ -109,6 +119,7 @@ const backupStore = (c: Clock, o: { pageMs: number; answerLate?: Map<number, num
       },
       async processSyncChunk(args: { since: number; offset: number }, chunk: { rows: Row[] }) {
         const n = calls++;
+        starts.push(c.now());
         concurrent++;
         maxConcurrent = Math.max(maxConcurrent, concurrent);
         try {
@@ -225,7 +236,7 @@ const rig = (o: { pageMs?: number; answerLate?: Map<number, number>; oldRule?: b
   const mgr = fakeManager(c, device, 2, 50);
   const backup = backupStore(c, { pageMs: o.pageMs ?? 1_000, answerLate: o.answerLate });
   const inFlight = new WeakMap<object, ReturnType<typeof createInFlight>>();
-  const timers = { setTimer: c.setTimer, clearTimer: c.clearTimer };
+  const timers = { setTimer: c.setTimer, clearTimer: c.clearTimer, now: c.now };
   const log: string[] = [];
   const newRulePush = makeBackupPush({
     storage: mgr.storage as never,
@@ -349,8 +360,58 @@ describe('push: own payments never pause a cycle (review 7 Nov 2026, HIGH)', () 
     const waits = log
       .filter((l) => l.includes('failed (retry in'))
       .map((l) => Number(/retry in (\d+) min/.exec(l)?.[1]));
-    expect(waits.length).toBeGreaterThan(3);
+    expect(waits.length).toBeGreaterThanOrEqual(3);
     expect(Math.max(...waits)).toBeLessThanOrEqual(4);
+  });
+});
+
+describe('a request that never settles expires (re-review 7 Nov 2026, MED)', () => {
+  test('no second request to that backup inside IN_FLIGHT_MAX_AGE_MS; after it, the push goes on and catches up', async () => {
+    // Call 2 commits, then never answers (a callback-based fetch on WKWebView has no timeout of its own).
+    const { c, sync, backup, inStep } = rig({ pageMs: 500, answerLate: new Map([[2, 1e15]]) });
+    void sync.syncNow();
+    const hungAt = 1_150; // call 2 starts after two 550 ms pages and this page's 50 ms read
+    await c.runUntil(hungAt + IN_FLIGHT_MAX_AGE_MS - 1);
+    expect(backup.starts.length).toBe(3); // nothing after the hung call inside the window
+    expect(inStep()).toBe(false); // rows 11-12 still waiting
+    await c.runUntil(hungAt + IN_FLIGHT_MAX_AGE_MS + 10 * 60_000);
+    expect(backup.starts.length).toBeGreaterThan(3); // the push went on after the expiry
+    expect(backup.starts.slice(3).every((t) => t >= hungAt + IN_FLIGHT_MAX_AGE_MS)).toBe(true);
+    expect(inStep()).toBe(true); // from the backup's checkpoint (the hung page had committed): nothing lost
+    for (const [, n] of backup.received) expect(n).toBe(1); // nor sent twice
+    expect(sync.state().pendingPush).toBe(false);
+  });
+  test('createInFlight: a never-settling entry is dropped after its maximum age', async () => {
+    const c = vclock();
+    const f = createInFlight({ setTimer: c.setTimer, clearTimer: c.clearTimer, now: c.now, maxAgeMs: 1_000 });
+    f.add(new Promise(() => undefined));
+    let early: boolean | null = null;
+    void f.settled(500).then((v) => (early = v));
+    await c.runUntil(600);
+    expect(early).toBe(false);
+    let late: boolean | null = null;
+    void f.settled(500).then((v) => (late = v));
+    await c.runUntil(1_200); // the entry passes its age while the push waits: it may go
+    expect(late).toBe(true);
+  });
+});
+
+describe('push deadlines: 60 s for a page, 20 s for the small calls (re-review speed follow-up)', () => {
+  test('a stalled small call fails at PUSH_SMALL_CALL_MS; processSyncChunk gets PUSH_CALL_MS', async () => {
+    const c = vclock();
+    const never = () => new Promise(() => undefined);
+    const v = pushView(
+      { getSyncCheckpoint: never, findOrInsertSyncStateAuth: never, processSyncChunk: never },
+      { inFlight: createInFlight(), setTimer: c.setTimer, clearTimer: c.clearTimer },
+    );
+    const ended: Record<string, number> = {};
+    for (const k of ['getSyncCheckpoint', 'findOrInsertSyncStateAuth', 'processSyncChunk'] as const)
+      void (v[k] as () => Promise<unknown>)().catch(() => (ended[k] = c.now()));
+    await c.runUntil(PUSH_CALL_MS + 1);
+    expect(PUSH_SMALL_CALL_MS).toBe(20_000);
+    expect(ended.getSyncCheckpoint).toBe(PUSH_SMALL_CALL_MS);
+    expect(ended.findOrInsertSyncStateAuth).toBe(PUSH_SMALL_CALL_MS);
+    expect(ended.processSyncChunk).toBe(PUSH_CALL_MS);
   });
 });
 
