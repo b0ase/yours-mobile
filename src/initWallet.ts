@@ -580,6 +580,8 @@ export const initWallet = async (
         console.warn('[deviceSync] pulling the backup again from the start (a full pass, in slices)');
       if (r === 'deep')
         console.warn('[deviceSync] pulling the last 48 hours of the backup again (the daily deep pull)');
+      if (r === 'abandoned')
+        console.warn('[deviceSync] a pull from the start had stopped moving: given up, the ordinary pulls run again');
     } catch (e) {
       console.warn('[deviceSync] a full pass could not be asked for:', e);
     }
