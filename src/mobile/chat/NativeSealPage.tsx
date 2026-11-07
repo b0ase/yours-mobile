@@ -57,7 +57,7 @@ import { openPendingForLink, type RoomReq } from './nativeSealSource';
 import { docHashFor } from './signLink';
 import { SignaturePad } from '../signature/SignaturePad';
 import type { SigStroke } from '../signature/signature';
-import { checkStrictSvg, shortHash, signatureSvg } from '../pair/bitsign';
+import { checkStrictSvg, signatureSvg } from '../pair/bitsign';
 
 /**
  * Review, sign and seal a room document NATIVELY (chat/nativeSeal.ts has the why and the protocol). Route:
@@ -558,7 +558,8 @@ export const NativeSealPage = () => {
   const showPad = phase.k === 'ready' && !!doc && mine.length > 0 && view === 'pad';
   // The hash the desktop shows (the QR's), to compare; the opened bytes' own fingerprint when there is none.
   const docHash = docHashFor(ticker, docId);
-  const shortDocHash = docHash ? shortHash(docHash) : `#${fingerprint}`;
+  // The desktop's short code: # and the first 8 of the hash.
+  const shortDocHash = docHash ? `#${docHash.slice(0, 8)}` : `#${fingerprint}`;
 
   return (
     // Full screen above the Dock / tab bar (z-[100]): the pad's buttons sat under the bottom bar (iPhone, 3 Nov 2026).
@@ -663,6 +664,11 @@ export const NativeSealPage = () => {
                 ? phase.note
                 : `Signed as $${shownHandle} · you approve the fee on the next screen`
             }
+            turnInfo={{
+              title: doc?.title ?? 'Document',
+              code: docHash ? `#${docHash.slice(0, 8)}` : `#${fingerprint}`,
+              signer: `$${shownHandle}`,
+            }}
             details={
               <div className="bw-sigpad-doc">
                 <strong>{doc?.title ?? 'Document'}</strong>
@@ -675,7 +681,7 @@ export const NativeSealPage = () => {
             }
           />
         )}
-        {phase.k === 'ready' && doc && mine.length > 0 && (
+        {!showPad && phase.k === 'ready' && doc && mine.length > 0 && (
           <div>
             {phase.note && (
               <p role="alert" className="mb-2 text-[14px]" style={{ color: '#fca5a5' }}>

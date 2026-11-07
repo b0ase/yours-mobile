@@ -56,11 +56,30 @@ describe('SignaturePad wiring', () => {
     expect(src).toContain('bw-sigpad-side');
     expect(css).toMatch(/\.bw-sigpad\.is-sideways \.bw-sigpad-side \{[^}]*flex-direction: column/);
   });
-  test('portrait with rotation lock is not a trap: the turn prompt offers Review as well as Cancel', () => {
+  test('portrait prompt (owner, 7 Nov 2026 iPhone review): full screen, calm, no refresh icon, two plain buttons', () => {
     const turn = src.slice(src.indexOf("mode === 'turn' ?"), src.indexOf(') : sideways ?'));
     expect(turn).toContain('Turn your phone sideways to sign');
-    expect(turn).toMatch(/onReview && \(\s*<button type="button" onClick=\{\(\) => onReview\(strokes\)\}>\s*Review/);
-    expect(turn).toContain('Cancel');
+    expect(turn).not.toContain('RotateCw');
+    expect(src).not.toMatch(/import \{ RotateCw \}/);
+    expect(turn).toContain('<TurnPhone />'); // the phone outline that turns
+    expect(src).toMatch(/const TurnPhone = \(\) => \(\s*<svg className="bw-sigpad-turn-phone"/);
+    expect(turn).toMatch(
+      /onReview && \(\s*<button[^>]*className="bw-sigpad-turn-secondary"[^>]*onClick=\{\(\) => onReview\(strokes\)\}[^>]*>\s*Review document/,
+    );
+    expect(turn).toMatch(/className="bw-sigpad-turn-text"[^>]*onClick=\{onCancel\}[^>]*>\s*Cancel/);
+    expect(turn).toContain('Signing as');
+    // Not the landscape sheet squeezed into portrait.
+    expect(turn).not.toContain('bw-sigpad-sheet');
+    // Full screen and opaque in both orientations; the turn animation once, and none for reduced motion.
+    expect(css).toMatch(/\.bw-sigpad\.is-sideways \{[^}]*background: var\(--bw-bg, #0b0b0d\)/);
+    expect(css).toMatch(/\.bw-sigpad-turn \{[^}]*position: absolute;[^}]*inset: 0/);
+    expect(css).toMatch(/\.bw-sigpad-turn-phone \{[^}]*animation: bw-sigpad-turn [^;]*1 both/);
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.bw-sigpad-turn-phone \{\s*animation: none/);
+    expect(css).toMatch(/\.bw-sigpad-turn-secondary,\s*\.bw-sigpad-turn-text \{[^}]*border-radius: 12px/);
+  });
+  test('landscape column: normal rounded buttons, gold only on Sign & seal', () => {
+    expect(css).toMatch(/\.bw-sigpad-side button \{[^}]*border-radius: 10px/);
+    expect(css).not.toMatch(/\.bw-sigpad-side button \{[^}]*border-radius: 999px/);
   });
   test('Review keeps the drawing; the pad can start from a kept drawing', () => {
     expect(src).toMatch(/onReview\?: \(strokes: SigStroke\[\]\) => void/);

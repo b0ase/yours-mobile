@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { useBackClose } from '../backStack';
-import { RotateCw } from 'lucide-react';
 import {
   SIG_H,
   SIG_VIEWBOX,
@@ -49,7 +48,17 @@ type Props = {
   onReview?: (strokes: SigStroke[]) => void;
   /** Start from a kept drawing (after a Review), in the 1000 × 250 box. */
   initialStrokes?: SigStroke[];
+  /** The portrait prompt's quiet lines: the document, its short code (the desktop's #first 8) and the signer. */
+  turnInfo?: { title: string; code: string; signer?: string };
 };
+
+/** A phone outline that turns 90° once (the prompt's only motion; none with reduced motion, mobile.css). */
+const TurnPhone = () => (
+  <svg className="bw-sigpad-turn-phone" viewBox="0 0 64 64" width="72" height="72" aria-hidden="true">
+    <rect x="21" y="8" width="22" height="40" rx="4" fill="none" stroke="currentColor" strokeWidth="2.5" />
+    <line x1="29" y1="42" x2="35" y2="42" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+  </svg>
+);
 
 /** The page under the sheet must not scroll, bounce or zoom while the pad is up. */
 const useFixedWhileOpen = (sheet: RefObject<HTMLDivElement | null>) => {
@@ -88,6 +97,7 @@ export const SignaturePad = ({
   sideways = false,
   onReview,
   initialStrokes,
+  turnInfo,
 }: Props) => {
   useBackClose(true, onCancel);
   const pad = useRef<HTMLDivElement>(null);
@@ -178,18 +188,29 @@ export const SignaturePad = ({
       aria-label="Draw your signature"
     >
       {mode === 'turn' ? (
-        <div className="bw-sigpad-sheet bw-sigpad-turn" data-testid="sigpad-turn">
-          <RotateCw size={36} aria-hidden="true" />
-          <div className="bw-sigpad-title">Turn your phone sideways to sign</div>
-          {details}
-          {/* Rotation lock on: not a trap. Review (the document) and Cancel, as in the landscape column. */}
-          <div className="bw-sigpad-btns">
+        // Portrait (owner's iPhone review, 7 Nov 2026): full screen and calm, never the strip squeezed in. Turning to
+        // landscape shows the pad with the drawing kept; rotation lock on is not a trap (Review document / Cancel).
+        <div className="bw-sigpad-turn" data-testid="sigpad-turn">
+          <div className="bw-sigpad-turn-main">
+            <TurnPhone />
+            <h2 className="bw-sigpad-turn-title">Turn your phone sideways to sign</h2>
+            {turnInfo ? (
+              <div className="bw-sigpad-turn-doc">
+                <span>{turnInfo.title}</span>
+                <span className="bw-sigpad-turn-code">{turnInfo.code}</span>
+                {turnInfo.signer && <span>Signing as {turnInfo.signer}</span>}
+              </div>
+            ) : (
+              details
+            )}
+          </div>
+          <div className="bw-sigpad-turn-btns">
             {onReview && (
-              <button type="button" onClick={() => onReview(strokes)}>
-                Review
+              <button type="button" className="bw-sigpad-turn-secondary" onClick={() => onReview(strokes)}>
+                Review document
               </button>
             )}
-            <button type="button" onClick={onCancel}>
+            <button type="button" className="bw-sigpad-turn-text" onClick={onCancel}>
               Cancel
             </button>
           </div>
@@ -219,7 +240,7 @@ export const SignaturePad = ({
                 Undo
               </button>
             </div>
-            <button type="button" onClick={onCancel}>
+            <button type="button" className="bw-sigpad-side-cancel" onClick={onCancel}>
               Cancel
             </button>
           </div>

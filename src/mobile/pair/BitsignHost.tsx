@@ -58,6 +58,7 @@ export function BitsignHost() {
           : undefined
       }
       saveLabel={req.review ? 'Sign & seal' : 'Done'}
+      turnInfo={{ title: req.title || 'Document', code: `#${req.docHash.slice(0, 8)}`, signer: who || undefined }}
       note={
         req.review
           ? `Sends only this drawing to ${hostOf(req.origin)}. You approve the seal and its fee next.`

@@ -120,6 +120,12 @@ describe('one press: "Sign & seal · ~N sats"', () => {
     expect(page).toMatch(/onReview=\{\(strokes\) => \{\s*kept\.current = strokes;\s*setView\('review'\);/);
     expect(page).toContain('initialStrokes={kept.current}');
     expect(page).toContain('data-testid="seal-back-to-pad"');
+    // While the pad is up nothing of the page shows: the bottom bar and its footer render only on the Review view.
+    expect(page).toContain("{!showPad && phase.k === 'ready' && doc && mine.length > 0 && (");
+    // The portrait prompt's short code is the desktop's (#first 8 of the hash).
+    expect(page).toMatch(
+      /turnInfo=\{\{[\s\S]{0,200}code: docHash \? `#\$\{docHash\.slice\(0, 8\)\}` : `#\$\{fingerprint\}`/,
+    );
     // A newer version starts clean: no old drawing pre-fills a version not yet seen.
     expect(page).toMatch(
       /onClick=\{\(\) => \{\s*kept\.current = undefined;\s*setView\('pad'\);\s*setReload\(\(n\) => n \+ 1\);/,
