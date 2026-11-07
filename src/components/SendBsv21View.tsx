@@ -7,7 +7,6 @@ import { ONE_SAT_MARKET_URL } from '../utils/constants';
 import { showAmount, normalize, truncate } from '../utils/format';
 import { sleep } from '../utils/sleep';
 import { getErrorMessage } from '../utils/tools';
-import { tokenIconUrl } from '../mobile/tokens/officialTokens';
 import { SendConfirmation, type SendLineItem } from './SendConfirmation';
 import { Bsv21OverlayPrompt, type Bsv21OverlayIssue } from './Bsv21OverlayPrompt';
 import { Input } from './Input';
