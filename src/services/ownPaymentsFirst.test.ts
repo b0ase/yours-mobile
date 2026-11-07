@@ -14,7 +14,7 @@ import { describe, expect, test } from 'bun:test';
 import { createOwnPaymentGate } from './ownPayments';
 import { PUSH_CALL_MS, pushView } from './pushView';
 import { createDeviceSync } from './deviceSync';
-import { afterPage, beforePage, withFullPassMode } from './fullPass';
+import { afterPage, beforePage, paymentYields, withFullPassMode } from './fullPass';
 
 // ── virtual time ─────────────────────────────────────────────────────────────
 const vclock = () => {
@@ -275,7 +275,9 @@ describe('the pull yields too (full-pass page guard, slice mode)', () => {
       expect(beforePage(sik, { fromStart: false, ours: false }, 0)).toBe('go');
       expect(afterPage(sik, 1, gate)).toBe('go');
       const end = gate.begin();
+      const before = paymentYields();
       expect(afterPage(sik, 2, gate)).toBe('yield');
+      expect(paymentYields()).toBe(before + 1); // the device-sync pull reads this to carry on in the same run
       end();
       expect(afterPage(sik, 3, gate)).toBe('go');
     });

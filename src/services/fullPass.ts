@@ -326,10 +326,17 @@ export function afterPage(
   payments: Pick<OwnPaymentGate, 'waiting'> = ownPayments,
 ): 'yield' | 'go' {
   if (restoring > 0 || !modes.get(deviceSik)) return 'go';
-  if (modes.get(deviceSik) === 'slice' && payments.waiting()) return 'yield';
+  if (modes.get(deviceSik) === 'slice' && payments.waiting()) {
+    paymentYieldCount++;
+    return 'yield';
+  }
   const start = sliceStart.get(deviceSik);
   return start !== undefined && now - start >= sliceMs ? 'yield' : 'go';
 }
+
+/** Pulls ended for an own payment so far: the device-sync pull compares it before and after to carry on at once. */
+let paymentYieldCount = 0;
+export const paymentYields = () => paymentYieldCount;
 
 let sliceMs = FULL_PASS_SLICE_MS;
 /** Test hook: the slice length (ms); no argument restores the default. */

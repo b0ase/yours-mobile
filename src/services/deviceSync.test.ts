@@ -328,3 +328,31 @@ describe("device sync: a long run says how long it held the storage (owner's sea
     expect(lines).toEqual([]);
   });
 });
+
+describe('device sync: a pull that let an own payment go first carries on in the same run (7 Nov 2026)', () => {
+  test("pull 'yielded' → waits for the payment, pulls again from its checkpoint, then pushes", async () => {
+    const calls: string[] = [];
+    let pulls = 0;
+    let release = () => {};
+    let paying = true;
+    const idle = () => (paying ? new Promise<void>((r) => (release = r)) : Promise.resolve());
+    const { sync } = harness({
+      pull: async () => {
+        calls.push(`pull${++pulls}`);
+        if (pulls > 1) return undefined;
+        paying = true; // a payment arrived during the first pull, which ended for it
+        return 'yielded';
+      },
+      push: async () => void calls.push('push'),
+      yieldTo: { idle },
+    });
+    paying = false; // the run starts with no payment
+    const done = sync.syncNow();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(calls).toEqual(['pull1']); // waiting for the payment, not pulling or pushing
+    paying = false;
+    release();
+    expect(await done).toEqual({ ok: true, pulled: true, pushed: true });
+    expect(calls).toEqual(['pull1', 'pull2', 'push']);
+  });
+});

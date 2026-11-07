@@ -25,8 +25,11 @@ export type DeviceSyncDeps = {
   applies: () => boolean;
   /** Connect the configured backup if it isn't connected; resolves true when one is connected. */
   ensureBackup: () => Promise<boolean>;
-  /** Bring the backup's changes into this device's store. */
-  pull: () => Promise<void>;
+  /**
+   * Bring the backup's changes into this device's store. 'yielded': it ended after a merged page to let an own payment
+   * go first (fullPass afterPage); the run pulls again from that checkpoint once the payment has finished.
+   */
+  pull: () => Promise<void | 'yielded'>;
   /**
    * Copy this device's changes to the backup. 'yielded': it stopped after a committed page to let an own payment go
    * first (services/pushView.ts); the run pushes again from the backup's checkpoint once the payment has finished.
@@ -87,14 +90,17 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
       if (!(await deps.ensureBackup())) throw new Error('backup storage is not connected');
       let pulled = false;
       const t0 = now();
+      let yields = 0;
       if (mode === 'full') {
-        // A pull that yielded to a payment ends its slice there; the next slice (fullPass onMore) carries it on.
-        await deps.pull();
+        // A pull that yielded to an own payment carries on here, after it, from its checkpoint.
+        while ((await deps.pull()) === 'yielded') {
+          yields++;
+          await idle();
+        }
         pulled = true;
       }
       const t1 = now();
       pendingPush = false;
-      let yields = 0;
       for (;;) {
         await idle();
         if ((await deps.push()) !== 'yielded') break;
@@ -197,10 +203,11 @@ export type DeviceSync = ReturnType<typeof createDeviceSync>;
  * open after the release, and fail with "the backup took too long" (final review 18, F-A). Admission runs outside every
  * storage lock and retries on its own timer, the alarm and app focus, so nothing depends on it finishing in the pull.
  */
-export function pullThenAdmitSoon(merge: () => Promise<void>, admitSoon: () => void): () => Promise<void> {
+export function pullThenAdmitSoon<R>(merge: () => Promise<R>, admitSoon: () => void): () => Promise<R> {
   return async () => {
-    await merge();
+    const r = await merge();
     admitSoon();
+    return r;
   };
 }
 
