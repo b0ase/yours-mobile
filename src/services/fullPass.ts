@@ -28,7 +28,7 @@
  *    resumes it and never starts a new one. It never sets a backup aside on its own.
  */
 import { EntitySyncState } from '@bsv/wallet-toolbox-client';
-import { findTailOffsets, mergedIds, type GetSyncChunk } from './pullTail';
+import { findTailOffsets, highestIds, mergedIds, type GetSyncChunk } from './pullTail';
 
 const HOUR = 3_600_000;
 /** A true full pass, weekly (review 23 re-check: the cost schedule). */
@@ -88,6 +88,18 @@ export type FullPassMark = {
   tailFromWhen?: number;
   /** The last tail pass that completed (ms). */
   tailDoneAt?: number;
+  /** Per entity: the highest backup id confirmed merged (pullTail TailMemo.seen). */
+  tailSeen?: Record<string, number>;
+  /** Per entity: the backup's row count at the last check (pullTail TailMemo.counts). */
+  tailCounts?: Record<string, number>;
+  /** The cursor when this pass from the start was started (ms): put back if the pass is abandoned. */
+  fromWhen?: number;
+  /** A pass from the start: its offsets as last seen, and how long (wallet uptime) they have not moved. */
+  progressKey?: string;
+  progressSeenAt?: number;
+  stuckMs?: number;
+  /** The last pass from the start given up as stuck (ms): no new one for ON_DEMAND_GAP_MS. */
+  abandonedAt?: number;
 };
 
 export type SyncStateRow = { syncStateId?: number; when?: unknown; syncMap?: unknown };
@@ -148,9 +160,89 @@ const resetCounts = (ss: EntitySyncState) => {
 /** Start the next pass at the beginning: no time cursor, every offset 0, the id maps kept; marked as ours. */
 export const rewind = (store: SyncStateStore, row: SyncStateRow, now = Date.now(), patch: FullPassMark = {}) =>
   write(store, row, (ss) => {
+    const from = row.when == null ? undefined : new Date(row.when as string | Date).getTime();
     ss.when = undefined;
     resetCounts(ss);
-    setMark(ss, { ...markOf(row), deepStartedAt: undefined, ...patch, startedAt: now, due: undefined });
+    setMark(ss, {
+      ...markOf(row),
+      deepStartedAt: undefined,
+      ...patch,
+      startedAt: now,
+      due: undefined,
+      fromWhen: from ?? markOf(row).fromWhen,
+      progressKey: undefined,
+      progressSeenAt: undefined,
+      stuckMs: undefined,
+    });
+  });
+
+/** A pass from the start that hasn't moved for this long of wallet uptime is given up (review of 8d59e33b). */
+export const STUCK_PASS_MS = 30 * 60_000;
+/** Or once it is this old, moving or not. */
+export const STALE_PASS_MS = 24 * HOUR;
+/** Two checks further apart than this are not counted as uptime (the wallet was closed or asleep). */
+const UPTIME_GAP_MS = 5 * 60_000;
+
+const countsKey = (row: SyncStateRow) => {
+  const m = parse(row.syncMap) ?? {};
+  return Object.entries(m)
+    .filter(([, e]) => !!e && typeof e === 'object' && 'count' in (e as object))
+    .map(([k, e]) => `${k}:${(e as { count: number }).count}`)
+    .sort()
+    .join(',');
+};
+
+/**
+ * The last good cursor for an abandoned pass: the one saved when it started, else the OLDEST newest-time any entity
+ * has seen (a later one would skip rows updated between the two; the tail check brings rows that arrived late).
+ */
+export const lastGoodWhen = (row: SyncStateRow): number | undefined => {
+  const mark = markOf(row);
+  if (typeof mark.fromWhen === 'number') return mark.fromWhen;
+  const m = parse(row.syncMap) ?? {};
+  const times = Object.values(m)
+    .map((e) => (e && typeof e === 'object' ? (e as { maxUpdated_at?: unknown }).maxUpdated_at : undefined))
+    .filter((t): t is string | Date => t != null)
+    .map((t) => new Date(t).getTime())
+    .filter((t) => Number.isFinite(t));
+  return times.length ? Math.min(...times) : undefined;
+};
+
+/**
+ * A pass from the start under way: note its progress, and say whether it is stuck (its offsets unchanged for
+ * STUCK_PASS_MS of uptime, or older than STALE_PASS_MS). Writes the progress mark. Extension, 6-7 Nov 2026: a pass
+ * started at 07:52 on 6 Nov sat at transaction offset 63 for a day, and while it is under way nothing else pulls.
+ */
+async function stuckPass(store: SyncStateStore, row: SyncStateRow, now: number): Promise<boolean> {
+  const mark = markOf(row);
+  const key = countsKey(row);
+  if (typeof mark.startedAt === 'number' && now - mark.startedAt >= STALE_PASS_MS) return true;
+  if (mark.progressKey !== key) {
+    await updateMark(store, row, { progressKey: key, progressSeenAt: now, stuckMs: 0 });
+    return false;
+  }
+  const gap = now - (mark.progressSeenAt ?? now);
+  const stuckMs = (mark.stuckMs ?? 0) + (gap > 0 && gap <= UPTIME_GAP_MS ? gap : 0);
+  if (stuckMs >= STUCK_PASS_MS) return true;
+  await updateMark(store, row, { progressSeenAt: now, stuckMs });
+  return false;
+}
+
+/** Give a stuck pass from the start up: the last good cursor back, its offsets reset, no new one for a day. */
+const abandonPass = (store: SyncStateStore, row: SyncStateRow, when: number, now: number) =>
+  write(store, row, (ss) => {
+    ss.when = new Date(when);
+    resetCounts(ss);
+    setMark(ss, {
+      ...markOf(row),
+      startedAt: undefined,
+      fromWhen: undefined,
+      due: undefined,
+      progressKey: undefined,
+      progressSeenAt: undefined,
+      stuckMs: undefined,
+      abandonedAt: now,
+    });
   });
 
 /**
@@ -200,7 +292,7 @@ export type FullPassRequest = {
   onMobileData?: (mb: number) => void;
 };
 
-export type FullPassPlan = 'started' | 'deep' | 'resuming' | 'not-due';
+export type FullPassPlan = 'started' | 'deep' | 'resuming' | 'not-due' | 'abandoned';
 
 /** About how many MB a full pass from this backup brings, from what this device holds. */
 export async function fullPassMb(store: unknown, identityKey: string): Promise<number> {
@@ -228,13 +320,21 @@ export async function requestFullPass(o: FullPassRequest): Promise<FullPassPlan>
     const row = await syncStateFor(o.store, o.identityKey, o.readerSik);
     if (!row || typeof row.syncStateId !== 'number') return 'resuming'; // never pulled: the first pull is one
     const mark = markOf(row);
-    const onDemand = (mark.due !== undefined || o.failed === true) && onDemandAllowed(mark, now);
+    // A pass from the start given up as stuck: none again (asked by errors or by the week) for ON_DEMAND_GAP_MS.
+    const held = typeof mark.abandonedAt === 'number' && now - mark.abandonedAt < ON_DEMAND_GAP_MS;
+    const onDemand = !held && (mark.due !== undefined || o.failed === true) && onDemandAllowed(mark, now);
     if (passFromStart(row) || passUnderWay(row)) {
       // A pass under way is resumed, whatever a retry asks; unless it stopped at a row it can't file and the 24 h
       // limit allows one more pass from the start.
       if (mark.due === 'unfiled' && onDemand) {
         await rewind(o.store, row, now, { onDemandAt: now });
         return 'started';
+      }
+      // A stuck pass from the start (ours) is given up, so the pulls and the tail check run again.
+      const good = passFromStart(row) && typeof mark.startedAt === 'number' ? lastGoodWhen(row) : undefined;
+      if (good !== undefined && (await stuckPass(o.store, row, now))) {
+        await abandonPass(o.store, row, good, now);
+        return 'abandoned';
       }
       return 'resuming';
     }
@@ -249,7 +349,7 @@ export async function requestFullPass(o: FullPassRequest): Promise<FullPassPlan>
     const patch: FullPassMark = {};
     if (o.phone && wifi === true && (wifiAt === undefined || now - wifiAt >= HOUR)) patch.wifiAt = wifiAt = now;
     const lastFull = typeof mark.doneAt === 'number' ? mark.doneAt : undefined;
-    const fullDue = lastFull === undefined || now - lastFull >= FULL_PASS_EVERY_MS;
+    const fullDue = !held && (lastFull === undefined || now - lastFull >= FULL_PASS_EVERY_MS);
     if (fullDue && lastFull === undefined && firstAt === undefined)
       patch.firstAt = firstAt = now + Math.floor((o.random ?? Math.random)() * FIRST_PASS_SPREAD_MS);
     if (Object.keys(patch).length) await updateMark(o.store, row, patch);
@@ -375,8 +475,10 @@ export function withDeadlines<T extends object>(reader: T, callMs = PULL_CALL_MS
 
 // ── rows that reach the backup late, with old times (services/pullTail.ts; extension, 6 Nov 2026) ──
 
-/** How often the tail check runs (two one-row probes per entity when nothing is missing). */
+/** How often the tail check runs (about two one-row probes per entity when nothing is missing). */
 export const TAIL_CHECK_EVERY_MS = 6 * HOUR;
+/** After a check the backup refused or couldn't answer: again this soon, not before every pull. */
+export const TAIL_RETRY_MS = 30 * 60_000;
 
 export type TailPlan = 'tail' | 'in-step' | 'not-due' | 'busy' | 'unknown';
 
@@ -385,7 +487,8 @@ export type TailPlan = 'tail' | 'in-step' | 'not-due' | 'busy' | 'unknown';
  * copy pushed late, with times older than the cursor, which no incremental pull asks for). Found: the next pull is a
  * TAIL pass, the cursor unset and each entity's offset at its first such row, so it reads only from there in the
  * backup's insert order; when it completes the cursor is put back where it was (the inbound guard: finishTail). Never
- * while a pass is under way. The probes run outside the storage lock; the rewind is written under it.
+ * while a pass is under way. The probes run outside the storage lock; the rewind is written under it. A refused or
+ * failed check is tried again after TAIL_RETRY_MS.
  */
 export async function requestTailPass(o: {
   manager: { runAsSync<T>(fn: (sync: unknown) => Promise<T>): Promise<T> };
@@ -405,25 +508,38 @@ export async function requestTailPass(o: {
   if (typeof mark0.tailCheckedAt === 'number' && now - mark0.tailCheckedAt < TAIL_CHECK_EVERY_MS) return 'not-due';
   const toSik = (o.store as { getSettings?: () => { storageIdentityKey?: string } }).getSettings?.()
     ?.storageIdentityKey;
-  const offsets = await findTailOffsets(
+  const found = await findTailOffsets(
     (a) => o.reader.getSyncChunk(a),
     { identityKey: o.identityKey, fromStorageIdentityKey: o.readerSik, toStorageIdentityKey: toSik ?? '' },
     mergedIds(row0!.syncMap),
+    { seen: mark0.tailSeen, counts: mark0.tailCounts },
   ).catch(() => undefined);
   return o.manager.runAsSync(async () => {
     const row = await syncStateFor(o.store, o.identityKey, o.readerSik);
     if (busy(row)) return 'busy';
-    if (offsets === undefined) return 'unknown'; // the backup didn't answer: asked again on the next pull
-    if (!offsets) {
-      await updateMark(o.store, row!, { tailCheckedAt: now });
+    if (!found) {
+      // Refused (an offset cap) or unanswered: due again in TAIL_RETRY_MS.
+      await updateMark(o.store, row!, { tailCheckedAt: now - TAIL_CHECK_EVERY_MS + TAIL_RETRY_MS });
+      return 'unknown';
+    }
+    if (!found.tail) {
+      await updateMark(o.store, row!, { tailCheckedAt: now, tailSeen: found.memo.seen, tailCounts: found.memo.counts });
       return 'in-step';
     }
+    const tail = found.tail;
     await write(o.store, row!, (ss) => {
       const from = row!.when == null ? undefined : new Date(row!.when as string | Date).getTime();
       ss.when = undefined;
       const sm = ss.syncMap as unknown as Record<string, { count?: number }>;
-      for (const { name, offset } of offsets) if (sm[name] && typeof sm[name] === 'object') sm[name].count = offset;
-      setMark(ss, { ...markOf(row), tailCheckedAt: now, tailStartedAt: now, tailFromWhen: from });
+      for (const { name, offset } of tail) if (sm[name] && typeof sm[name] === 'object') sm[name].count = offset;
+      setMark(ss, {
+        ...markOf(row),
+        tailCheckedAt: now,
+        tailStartedAt: now,
+        tailFromWhen: from,
+        tailSeen: found.memo.seen,
+        tailCounts: found.memo.counts,
+      });
     });
     return 'tail';
   });
@@ -436,11 +552,30 @@ export const tailUnderWay = (mark: FullPassMark) =>
 /**
  * A tail pass completed (the inbound guard, after the toolbox set the cursor to the newest time it has seen): the
  * cursor goes back to where it was before the pass, so a row updated meanwhile at an offset before the tail still
- * comes on the next incremental pull; recorded as a tail pass, never as a full pass.
+ * comes on the next incremental pull; recorded as a tail pass, never as a full pass. Every backup row up to the
+ * highest id now in the map has been read, so a purged row's hole below it is never compared again (`tailSeen`).
  */
 export const finishTail = (store: SyncStateStore, row: SyncStateRow, now = Date.now()) =>
   write(store, row, (ss) => {
     const mark = markOf(row);
     if (typeof mark.tailFromWhen === 'number') ss.when = new Date(mark.tailFromWhen);
-    setMark(ss, { ...mark, tailStartedAt: undefined, tailFromWhen: undefined, tailDoneAt: now });
+    setMark(ss, {
+      ...mark,
+      tailStartedAt: undefined,
+      tailFromWhen: undefined,
+      tailDoneAt: now,
+      tailSeen: { ...(mark.tailSeen ?? {}), ...highestIds(mergedIds(row.syncMap)) },
+    });
+  });
+
+/**
+ * A tail pass that can't go on (it met a row whose transaction lies before the tail): the cursor back where it was and
+ * the offsets reset, so it never looks like a pass under way; `patch` says what comes next (a full pass when due).
+ */
+export const abandonTail = (store: SyncStateStore, row: SyncStateRow, patch: FullPassMark = {}) =>
+  write(store, row, (ss) => {
+    const mark = markOf(row);
+    if (typeof mark.tailFromWhen === 'number') ss.when = new Date(mark.tailFromWhen);
+    resetCounts(ss);
+    setMark(ss, { ...mark, tailStartedAt: undefined, tailFromWhen: undefined, ...patch });
   });

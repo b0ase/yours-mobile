@@ -5,14 +5,20 @@
  *
  * The toolbox pages a pull by `updated_at >= since`, but WITHOUT a cursor (since unset) it pages each entity in the
  * backup's own primary-key order (StorageKnex pagingOrder; the same in StorageIdb) with a plain offset. The backup's ids
- * only grow, so that order is the order rows reached the backup. This device's sync state for the backup keeps, per
- * entity, the backup ids of every row it has merged (its idMap). So the first row this device never had is found by
- * comparing the backup's id at an offset with the k-th smallest id in the map, with one-row probes: two per entity when
- * nothing is missing (the last row the map knows, and whether anything follows it), a binary search otherwise. A pass
- * then reads only from there (requestTailPass, services/fullPass.ts).
+ * only grow, so that order is the order rows reached the backup. This device's sync state keeps, per entity, the backup
+ * ids of every row it has merged (its idMap). The first row this device never had is found by comparing the backup's
+ * id at an offset with the matching id in the map, using one-row probes.
  *
- * A row the backup deleted (but the map still names) makes the search stop earlier, so the pass reads a little more,
- * never less. A missing row and a deleted row that cancel out exactly are left to the weekly full pass.
+ * Review of 8d59e33b (7 Nov 2026):
+ *  - A probe skips the entities before the probed one with their REAL row counts, never a huge offset (a server's
+ *    offset cap refuses those, and OFFSET 1e9 walks every row). Counts are found as the check goes (each entity's,
+ *    in the toolbox's order) and kept for the next check, so an unchanged one costs two probes.
+ *  - Only ids above the highest backup id already confirmed (`seen`, per entity) are compared: a row the backup purged
+ *    (the monitor drops failed transactions after 5 days) leaves a hole in the map below that line, and is never read
+ *    again.
+ *  - The link tables (no ids of their own, paged by their composite key) are read from 0 only when their parent entity
+ *    has rows this device never had (label links ← transactions, tag links ← outputs, certificate fields ←
+ *    certificates); otherwise they are skipped.
  */
 
 /** The toolbox's entity order (EntitySyncState.makeRequestSyncChunkArgs) and each entity's chunk key and id field. */
@@ -23,18 +29,26 @@ export const TAIL_ENTITIES = [
   { name: 'txLabel', key: 'txLabels', id: 'txLabelId' },
   { name: 'transaction', key: 'transactions', id: 'transactionId' },
   { name: 'output', key: 'outputs', id: 'outputId' },
-  { name: 'txLabelMap', key: 'txLabelMaps', id: null },
-  { name: 'outputTagMap', key: 'outputTagMaps', id: null },
+  { name: 'txLabelMap', key: 'txLabelMaps', id: null, parent: 'transaction' },
+  { name: 'outputTagMap', key: 'outputTagMaps', id: null, parent: 'output' },
   { name: 'certificate', key: 'certificates', id: 'certificateId' },
-  { name: 'certificateField', key: 'certificateFields', id: null },
+  { name: 'certificateField', key: 'certificateFields', id: null, parent: 'certificate' },
   { name: 'commission', key: 'commissions', id: 'commissionId' },
   { name: 'provenTxReq', key: 'provenTxReqs', id: 'provenTxReqId' },
 ] as const;
 
-/** An offset past any entity's end: the probe's earlier entities return nothing. */
-const PAST_END = 1_000_000_000;
+/** Above this offset a probe is not sent (the smallest backup profile caps offsets at 100k): the check fails. */
+export const TAIL_OFFSET_CAP = 100_000;
 
 export type GetSyncChunk = (args: Record<string, unknown>) => Promise<Record<string, unknown>>;
+
+/** What a check keeps for the next one (in the sync state's full-pass mark). */
+export type TailMemo = {
+  /** Per entity with ids: the highest backup id confirmed merged; rows at or below it are never compared again. */
+  seen?: Record<string, number>;
+  /** Per entity: the backup's row count at the last check (the first guess this time). */
+  counts?: Record<string, number>;
+};
 
 /** The backup ids this device has merged, per entity (the sync state's syncMap idMaps). */
 export function mergedIds(syncMap: unknown): Record<string, number[]> {
@@ -49,58 +63,133 @@ export function mergedIds(syncMap: unknown): Record<string, number[]> {
   return out;
 }
 
+/** Per entity with ids: the highest backup id in the map (what a completed tail pass confirms). */
+export const highestIds = (merged: Record<string, number[]>): Record<string, number> =>
+  Object.fromEntries(
+    TAIL_ENTITIES.filter((e) => e.id && merged[e.name]?.length).map((e) => [e.name, merged[e.name].at(-1)!]),
+  );
+
 /**
- * Per-entity offsets for a tail pass: for an entity with ids, the offset of the first backup row this device never
- * merged (or its end when none); for the link entities (no ids of their own, paged by their composite key), 0. Null
- * when nothing is missing. `base` carries identityKey, fromStorageIdentityKey, toStorageIdentityKey.
+ * The tail: per entity, the offset of the first backup row this device never merged (its row count when none; a link
+ * table at 0 when its parent has such rows). `tail` is null when nothing is missing. Throws when the backup refuses
+ * a probe (or a count passes TAIL_OFFSET_CAP). `base` carries identityKey, fromStorageIdentityKey and
+ * toStorageIdentityKey.
  */
 export async function findTailOffsets(
   get: GetSyncChunk,
   base: Record<string, unknown>,
   merged: Record<string, number[]>,
-): Promise<{ name: string; offset: number }[] | null> {
-  const probe = async (index: number, offset: number): Promise<number | undefined> => {
-    const offsets = TAIL_ENTITIES.map((e, i) => ({
-      name: e.name,
-      offset: i < index ? PAST_END : i === index ? offset : 0,
-    }));
+  memo: TailMemo = {},
+): Promise<{ tail: { name: string; offset: number }[] | null; memo: Required<TailMemo> }> {
+  const counts: number[] = [];
+  /** The row of entity `i` at `offset` (earlier entities skipped by their counts): its id, `true` (no id), or none. */
+  const probe = async (i: number, offset: number): Promise<number | true | undefined> => {
+    if (offset > TAIL_OFFSET_CAP) throw new Error(`tail check: offset ${offset} past the backup's cap`);
+    const offsets = TAIL_ENTITIES.map((e, j) => ({ name: e.name, offset: j < i ? counts[j] : j === i ? offset : 0 }));
     const chunk = await get({ ...base, since: undefined, maxItems: 1, maxRoughSize: 10_000_000, offsets });
-    const e = TAIL_ENTITIES[index];
+    const e = TAIL_ENTITIES[i];
     const row = (chunk[e.key] as Record<string, unknown>[] | undefined)?.[0];
-    const id = row?.[e.id as string];
-    return typeof id === 'number' ? id : undefined;
+    if (!row) return undefined;
+    if (!e.id) return true;
+    const id = row[e.id];
+    return typeof id === 'number' ? id : true;
   };
+  const exists = async (i: number, k: number) => k >= 0 && (await probe(i, k)) !== undefined;
+  /**
+   * The backup's row count for entity `i`: the first offset with no row. Rows below `known` are known to exist. From
+   * the last check's count as a guess: two probes when it is unchanged.
+   */
+  const countOf = async (i: number, guess: number, known = 0): Promise<number> => {
+    let lo = known - 1; // highest offset known to have a row
+    let hi: number; // an offset known to have none
+    if (guess > known && (await exists(i, guess - 1))) {
+      lo = guess - 1;
+      hi = guess;
+      while (await exists(i, hi)) {
+        lo = hi;
+        hi = Math.min(TAIL_OFFSET_CAP + 1, Math.max(hi + 1, hi * 2));
+      }
+    } else if (guess > known) {
+      hi = guess - 1; // shrunk (rows purged): between known and the guess
+    } else {
+      hi = Math.max(known, 0);
+      while (await exists(i, hi)) {
+        lo = hi;
+        hi = Math.min(TAIL_OFFSET_CAP + 1, Math.max(hi + 1, hi * 2));
+      }
+    }
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (await exists(i, mid)) lo = mid;
+      else hi = mid;
+    }
+    return hi;
+  };
+  /** The first offset whose backup id is above `x` (ids only grow with the offset). */
+  const firstAbove = async (i: number, x: number, guess: number): Promise<number> => {
+    const above = async (k: number) => {
+      const id = await probe(i, k);
+      return id === undefined || (typeof id === 'number' && id > x);
+    };
+    if (guess > 0 && !(await above(guess - 1)) && (await above(guess))) return guess;
+    let lo = -1; // not above
+    let hi = Math.max(1, guess);
+    while (!(await above(hi))) {
+      lo = hi;
+      hi = Math.min(TAIL_OFFSET_CAP + 1, hi * 2);
+    }
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (await above(mid)) hi = mid;
+      else lo = mid;
+    }
+    return hi;
+  };
+
   const starts = new Map<string, number>();
-  let missing = false;
+  const seen: Record<string, number> = { ...(memo.seen ?? {}) };
+  const outCounts: Record<string, number> = {};
   for (let i = 0; i < TAIL_ENTITIES.length; i++) {
     const e = TAIL_ENTITIES[i];
-    if (!e.id) continue;
-    const m = merged[e.name] ?? [];
+    const guess = memo.counts?.[e.name] ?? 0;
+    if (!e.id) {
+      const parentTail = starts.has(e.parent);
+      counts[i] = await countOf(i, guess);
+      if (parentTail && counts[i] > 0) starts.set(e.name, 0);
+      outCounts[e.name] = counts[i];
+      continue;
+    }
+    const all = merged[e.name] ?? [];
+    const x = seen[e.name];
+    const below = x === undefined ? 0 : all.filter((id) => id <= x).length;
+    const m = x === undefined ? all : all.filter((id) => id > x);
+    const k0 = x === undefined ? 0 : await firstAbove(i, x, below);
     const n = m.length;
-    let start = n;
+    let tail: number | undefined;
     if (n === 0) {
-      if ((await probe(i, 0)) === undefined) continue; // none on either side
-      start = 0;
-    } else if ((await probe(i, n - 1)) === m[n - 1]) {
-      // Every row up to the last one this device knows is in step; anything after it is new to this device.
-      if ((await probe(i, n)) === undefined) {
-        starts.set(e.name, n);
-        continue;
-      }
+      if (await exists(i, k0)) tail = k0;
+    } else if ((await probe(i, k0 + n - 1)) === m[n - 1]) {
+      if (await exists(i, k0 + n)) tail = k0 + n;
     } else {
-      // The first offset where the backup's row is not the one this device has at that place.
-      let lo = 0;
-      let hi = n - 1;
+      let lo = k0;
+      let hi = k0 + n - 1;
       while (lo < hi) {
         const mid = (lo + hi) >> 1;
-        if ((await probe(i, mid)) === m[mid]) lo = mid + 1;
+        if ((await probe(i, mid)) === m[mid - k0]) lo = mid + 1;
         else hi = mid;
       }
-      start = lo;
+      tail = lo;
     }
-    starts.set(e.name, start);
-    missing = true;
+    counts[i] = tail === undefined ? k0 + n : await countOf(i, guess, tail);
+    outCounts[e.name] = counts[i];
+    if (tail === undefined) {
+      if (n) seen[e.name] = m[n - 1];
+    } else starts.set(e.name, tail);
   }
-  if (!missing) return null;
-  return TAIL_ENTITIES.map((e) => ({ name: e.name, offset: e.id ? (starts.get(e.name) ?? 0) : 0 }));
+  const memoOut = { seen, counts: outCounts };
+  if (!starts.size) return { tail: null, memo: memoOut };
+  return {
+    tail: TAIL_ENTITIES.map((e, i) => ({ name: e.name, offset: starts.get(e.name) ?? counts[i] })),
+    memo: memoOut,
+  };
 }

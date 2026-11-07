@@ -55,6 +55,7 @@ import { BSV20, BSV21 } from '@1sat/templates';
 import { WalletPermissionsManager } from '@bsv/wallet-toolbox-client';
 import type { SpendState } from './unsentExpiry';
 import {
+  abandonTail,
   afterPage,
   beforePage,
   finishTail,
@@ -1660,16 +1661,9 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
         );
         // The next full pass for it: not before 24 h from now (a pass from the start that met it counts as one). A tail
         // pass that met it (its transaction lies before the tail) asks for a full pass when the 24 h limit allows.
-        if (id)
-          await updateMark(
-            this,
-            id,
-            tail
-              ? { due: 'unfiled', tailStartedAt: undefined, tailFromWhen: undefined }
-              : fromStart
-                ? { due: 'unfiled', onDemandAt: Date.now() }
-                : { due: 'unfiled' },
-          );
+        if (id && tail) await abandonTail(this, id, { due: 'unfiled' });
+        else if (id)
+          await updateMark(this, id, fromStart ? { due: 'unfiled', onDemandAt: Date.now() } : { due: 'unfiled' });
         throw new Error(UNFILED_PAGE);
       }
       if (deep) await rewindDeep(this, id!);

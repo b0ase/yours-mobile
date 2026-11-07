@@ -1,12 +1,21 @@
 import { describe, expect, test } from 'bun:test';
-import { TAIL_ENTITIES, findTailOffsets, mergedIds } from './pullTail';
+import { TAIL_ENTITIES, TAIL_OFFSET_CAP, findTailOffsets, highestIds, mergedIds } from './pullTail';
 
-/** A backup as getSyncChunk pages it with no cursor: each entity in id order, a plain offset, `maxItems` rows. */
-const backup = (rows: Record<string, number[]>) => {
+/**
+ * A backup as getSyncChunk pages it with no cursor: entities in the toolbox's order, each in id order with a plain
+ * offset, `maxItems` rows in all (an earlier entity whose offset is short of its end fills the page first, as the
+ * server does). `cap`: offsets above it are refused (the smallest profile's 100k).
+ */
+const backup = (rows: Record<string, number[]>, cap = Infinity) => {
+  const offsetsSeen: number[] = [];
   let probes = 0;
   const get = async (a: Record<string, unknown>) => {
     probes++;
     const offsets = a.offsets as { name: string; offset: number }[];
+    for (const o of offsets) {
+      offsetsSeen.push(o.offset);
+      if (o.offset > cap) throw new Error(`offset ${o.offset} exceeds the cap`);
+    }
     let left = a.maxItems as number;
     const out: Record<string, unknown> = {};
     TAIL_ENTITIES.forEach((e, i) => {
@@ -17,22 +26,33 @@ const backup = (rows: Record<string, number[]>) => {
     });
     return out;
   };
-  return { get, probes: () => probes };
+  return { get, probes: () => probes, maxOffset: () => Math.max(0, ...offsetsSeen), rows };
 };
-const offsetOf = (r: { name: string; offset: number }[] | null, name: string) =>
-  r?.find((o) => o.name === name)?.offset;
+const offsetOf = (r: { tail: { name: string; offset: number }[] | null }, name: string) =>
+  r.tail?.find((o) => o.name === name)?.offset;
+const range = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
 
 describe("findTailOffsets: the first backup row this device never merged, by the backup's insert order", () => {
-  test('in step: null, two probes per entity that has rows', async () => {
-    const b = backup({ transaction: [10, 20, 30], output: [5, 6] });
-    expect(await findTailOffsets(b.get, {}, { transaction: [10, 20, 30], output: [5, 6] })).toBeNull();
-    expect(b.probes()).toBeLessThanOrEqual(2 * 2 + (TAIL_ENTITIES.filter((e) => e.id).length - 2));
+  test('in step: null; earlier entities skipped by their real counts, never a huge offset', async () => {
+    const b = backup({ provenTx: range(1, 40), transaction: [10, 20, 30], output: [5, 6], txLabelMap: [1, 2, 3] });
+    const r = await findTailOffsets(b.get, {}, { provenTx: range(1, 40), transaction: [10, 20, 30], output: [5, 6] });
+    expect(r.tail).toBeNull();
+    expect(b.maxOffset()).toBeLessThanOrEqual(41);
+    expect(r.memo.counts).toMatchObject({ provenTx: 40, transaction: 3, output: 2, txLabelMap: 3 });
+    expect(r.memo.seen).toMatchObject({ provenTx: 40, transaction: 30, output: 6 });
   });
-  test('a row inserted late with an id among the others (38521 between 38520 and 38522): found at its offset', async () => {
-    const b = backup({ transaction: [38519, 38520, 38521, 38522, 38600] });
+  test('a row inserted late among the others (38521 between 38520 and 38522): found at its offset', async () => {
+    const b = backup({ transaction: [38519, 38520, 38521, 38522, 38600], txLabelMap: [1, 2] });
     const r = await findTailOffsets(b.get, {}, { transaction: [38519, 38520, 38522, 38600] });
     expect(offsetOf(r, 'transaction')).toBe(2);
-    expect(offsetOf(r, 'txLabelMap')).toBe(0); // link rows have no ids: read again from the start
+    expect(offsetOf(r, 'txLabelMap')).toBe(0); // its parent has a missing row: label links read again
+    expect(offsetOf(r, 'outputTagMap')).toBe(0); // (no rows: count 0)
+  });
+  test('link tables are skipped (at their counts) when their parents are in step', async () => {
+    const b = backup({ transaction: [1, 2], output: [1, 2, 3], outputTagMap: range(1, 50), provenTxReq: [1, 2] });
+    const r = await findTailOffsets(b.get, {}, { transaction: [1, 2], output: [1, 2, 3], provenTxReq: [1] });
+    expect(offsetOf(r, 'provenTxReq')).toBe(1);
+    expect(offsetOf(r, 'outputTagMap')).toBe(50);
   });
   test('new rows after the last one this device knows: the tail starts right after it', async () => {
     const b = backup({ output: [1, 2, 3, 4, 5] });
@@ -42,9 +62,33 @@ describe("findTailOffsets: the first backup row this device never merged, by the
     const b = backup({ commission: [7] });
     expect(offsetOf(await findTailOffsets(b.get, {}, {}), 'commission')).toBe(0);
   });
-  test('a row the backup deleted (still in the map): the tail starts earlier, never later', async () => {
-    const b = backup({ transaction: [1, 2, 4, 5, 6] }); // 3 purged on the backup, 6 new
-    expect(offsetOf(await findTailOffsets(b.get, {}, { transaction: [1, 2, 3, 4, 5] }), 'transaction')).toBe(2);
+  test('a purged backup row: one tail from the hole, then never again once `seen` passes it', async () => {
+    const b = backup({ transaction: [1, 2, 4, 5, 6] }); // 3 purged on the backup (failed tx, 5 days), 6 new
+    const first = await findTailOffsets(b.get, {}, { transaction: [1, 2, 3, 4, 5] });
+    expect(offsetOf(first, 'transaction')).toBe(2); // earlier, never later
+    // The tail pass merges 4, 5, 6; it completes and confirms the highest id it holds.
+    const after = { transaction: [1, 2, 3, 4, 5, 6] };
+    const memo = { seen: highestIds(after), counts: first.memo.counts };
+    const again = await findTailOffsets(b.get, {}, after, memo);
+    expect(again.tail).toBeNull(); // the hole at 3 is below `seen`: not read again
+    b.rows.transaction.push(7); // a new row later: found above `seen`
+    const third = await findTailOffsets(b.get, {}, after, again.memo);
+    expect(offsetOf(third, 'transaction')).toBe(5);
+  });
+  test('with `seen`, an unchanged backup costs two probes per entity', async () => {
+    const rows = { provenTx: range(1, 300), transaction: range(1, 120), output: range(1, 480) };
+    const b = backup(rows);
+    const first = await findTailOffsets(b.get, {}, rows);
+    const before = b.probes();
+    expect((await findTailOffsets(b.get, {}, rows, first.memo)).tail).toBeNull();
+    expect(b.probes() - before).toBeLessThanOrEqual(2 * TAIL_ENTITIES.length + 6);
+  });
+  test('an offset cap: never past TAIL_OFFSET_CAP; a refused probe throws (the caller backs off)', async () => {
+    const b = backup({ transaction: [1, 2, 3] }, 2);
+    await expect(findTailOffsets(b.get, {}, { transaction: [1, 2] })).rejects.toThrow();
+    const big = backup({}, TAIL_OFFSET_CAP);
+    await findTailOffsets(big.get, {}, {});
+    expect(big.maxOffset()).toBeLessThanOrEqual(TAIL_OFFSET_CAP);
   });
 });
 
@@ -53,5 +97,6 @@ describe('mergedIds', () => {
     const sm = { transaction: { idMap: { '38521': 9, '100': 1, '2000': 5 } }, output: { idMap: {} } };
     expect(mergedIds(JSON.stringify(sm)).transaction).toEqual([100, 2000, 38521]);
     expect(mergedIds(sm).output).toEqual([]);
+    expect(highestIds(mergedIds(sm))).toEqual({ transaction: 38521 });
   });
 });
