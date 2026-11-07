@@ -90,8 +90,6 @@ import { testersEnabled } from '../testers/checkin';
 import { PairedSitesList } from '../pair/PairedSitesList';
 import { IS_EXTENSION } from '../extension';
 
-/** bit-sign's branded Verify-your-identity page (Veriff). Shows only verified / not and the date. */
-
 const PairSheet = lazy(() => import('../pair/PairSheet'));
 const PotsScreen = lazy(() => import('../pots/PotsScreen'));
 import { TermsScreen } from '../ugc/UgcSheets';
