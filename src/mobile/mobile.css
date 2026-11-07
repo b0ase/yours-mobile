@@ -982,6 +982,9 @@ body,
   justify-content: center;
   padding: 16px;
   background: rgba(0, 0, 0, 0.78);
+  /* Fixed while drawing: no scroll, rubber-band bounce or pinch-zoom (SignaturePad.tsx also stops touchmove). */
+  touch-action: none;
+  overscroll-behavior: none;
 }
 .bw-sigpad-sheet {
   width: min(100%, 760px);
@@ -1052,6 +1055,80 @@ body,
 }
 .bw-sigpad.is-rotated .bw-sigpad-box {
   max-height: none;
+}
+/* Document signing (SignaturePad sideways): lengthwise on a landscape phone, fixed, the strip on the left and the
+   buttons in a column on the right. A portrait phone shows only the turn prompt (.bw-sigpad-turn). */
+.bw-sigpad.is-sideways {
+  padding: max(8px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right))
+    max(8px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+}
+.bw-sigpad.is-sideways .bw-sigpad-sheet {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 980px;
+  max-height: 100%;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 12px;
+  padding: 12px;
+}
+.bw-sigpad-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+}
+.bw-sigpad.is-sideways .bw-sigpad-box {
+  /* The strip keeps its 4:1 shape inside whatever height a landscape phone leaves. */
+  width: min(100%, calc((100dvh - 150px) * 4));
+  max-height: none;
+  align-self: center;
+}
+.bw-sigpad.is-sideways .bw-sigpad-side {
+  display: flex;
+  width: 128px;
+  flex: none;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+}
+.bw-sigpad-side button {
+  min-height: 40px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--bw-text, #f2f2f0);
+  background: rgb(var(--bw-text-rgb, 255 255 255) / 0.08);
+  border: 1px solid rgb(var(--bw-text-rgb, 255 255 255) / 0.16);
+  border-radius: 999px;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+.bw-sigpad-side button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.bw-sigpad-side .is-primary {
+  min-height: 48px;
+  color: #000;
+  background: linear-gradient(135deg, var(--bw-accent-hi), var(--bw-accent-lo));
+  border: 0;
+}
+.bw-sigpad-side-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.bw-sigpad-side-row button {
+  min-height: 32px;
+  padding: 4px 6px;
+  font-size: 11px;
+}
+.bw-sigpad-turn {
+  align-items: center;
+  text-align: center;
+  width: min(100%, 360px);
 }
 .bw-sigpad-title {
   font-size: 13px;

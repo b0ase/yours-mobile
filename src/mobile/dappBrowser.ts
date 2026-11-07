@@ -17,6 +17,7 @@ import {
 } from './siteGate';
 import { siteGate as nativeSiteGate } from './siteGateNative';
 import type { SiteGate } from './siteGate';
+import { answerDappBitsign } from './bappFrame/frameBitsign';
 
 // Swappable for tests only (dappBrowser.gate.test.ts).
 let siteGate: Pick<SiteGate, 'check' | 'lastVerification'> & Partial<Pick<SiteGate, 'extendPass'>> = nativeSiteGate;
@@ -213,7 +214,11 @@ export const initDappBrowser = (createContext: ContextFactory) => {
         type === 'BWX_SUBSCRIBE'
       )
         response = await (await import('./pots/siteSubscribe')).answerSiteSubscribe(req.origin, params);
-      else response = await handleSiteCall(req.origin, req.url ?? '', type, params);
+      // bit-sign phone signing (bappFrame/frameBitsign.ts): the wallet's card-back pad; returns a drawing only.
+      else
+        response =
+          (await answerDappBitsign(req.origin, type, params, { cover: sheetOverBrowser })) ??
+          (await handleSiteCall(req.origin, req.url ?? '', type, params));
     } catch (error) {
       response = { success: false, error: error instanceof Error ? error.message : String(error) };
     }

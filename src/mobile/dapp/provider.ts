@@ -12,6 +12,8 @@ import { CWI } from '../../cwi';
 import { announceWallet } from '../../brand/discovery';
 import { CONFIRM_USER_CALL, LAST_VERIFICATION_CALL } from '../siteGate';
 import { SUBSCRIPTIONS_ENABLED, appNameFor, isBWalletX } from '../storeBuild';
+import { isBitsignAction } from '../pair/bitsignCalls';
+import { BCHAT_ORIGINS } from '../../services/bchatOrigin';
 import bIcon from '../../../assets/bwallet-ext/icon128.png?inline';
 import bxIcon from '../../../assets/bwalletx-ext/icon128.png?inline';
 
@@ -55,7 +57,8 @@ self.addEventListener(CustomListenerName.YOURS_REQUEST, (e: Event) => {
       isSpendingAuthAction(type) ||
       isMintPrivateAction(type) ||
       (type as string) === LAST_VERIFICATION_CALL ||
-      (type as string) === CONFIRM_USER_CALL
+      (type as string) === CONFIRM_USER_CALL ||
+      isBitsignAction(type)
     )
   )
     return;
@@ -135,6 +138,31 @@ if (SUBSCRIPTIONS_ENABLED) {
       }),
     );
   });
+
+// window.CWI.bitsign(call, args) (pair/bitsign.ts, bappFrame/frameBitsign.ts): bit-sign's phone signing in this
+// browser, the same two calls the bApp frame answers over XDM (bitsign.capabilities, bitsign.drawSignature). Resolves
+// the result ({ svg, width, height }: a drawing, never keys); rejects with { code } (ERR_PERMISSION_DENIED = Cancel).
+// Offered on bChatX pages only; the wallet checks the origin again (from the WebView, not from here).
+if ((BCHAT_ORIGINS as readonly string[]).includes(location.origin))
+  (CWI as unknown as Record<string, unknown>).bitsign = (call: string, args?: unknown) =>
+    new Promise((resolve, reject) => {
+      if (typeof call !== 'string' || !isBitsignAction(call)) return reject(new Error(`Unsupported request: ${call}`));
+      const messageId = `${call}-${Date.now()}-${Math.random()}`;
+      self.addEventListener(
+        messageId,
+        (e) => {
+          const d = (e as CustomEvent<{ success?: boolean; data?: unknown; error?: string; code?: string }>).detail;
+          if (d?.success) resolve(d.data ?? null);
+          else reject(Object.assign(new Error(d?.error || 'Request failed'), { code: d?.code }));
+        },
+        { once: true },
+      );
+      self.dispatchEvent(
+        new CustomEvent(CustomListenerName.YOURS_REQUEST, {
+          detail: { messageId, type: call, params: args && typeof args === 'object' ? args : {} },
+        }),
+      );
+    });
 
 // Discovery (wallet-connect spec §3): the in-app browser has exactly one wallet; say which.
 announceWallet(

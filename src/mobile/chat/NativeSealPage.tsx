@@ -19,7 +19,6 @@ import {
   estimateSealFee,
   openingNotice,
   primaryHandleFrom,
-  padHasSignature,
   retryAllowed,
   sealButtonLabel,
   sealProgress,
@@ -41,8 +40,6 @@ import {
   sealKey,
   sealStateHere,
   signedFieldIds,
-  strokesToSvg,
-  type PadPoint,
   type PendingSeal,
   type PendingSealStore,
   type SealLedger,
@@ -57,6 +54,9 @@ import {
 } from './nativeSeal';
 import { openPendingForLink, type RoomReq } from './nativeSealSource';
 import { docHashFor } from './signLink';
+import { SignaturePad } from '../signature/SignaturePad';
+import type { SigStroke } from '../signature/signature';
+import { checkStrictSvg, shortHash, signatureSvg } from '../pair/bitsign';
 
 /**
  * Review, sign and seal a room document NATIVELY (chat/nativeSeal.ts has the why and the protocol). Route:
@@ -163,9 +163,12 @@ export const NativeSealPage = () => {
   const { apiContext, chromeStorageService } = useServiceContext();
   const [doc, setDoc] = useState<Doc | null>(null);
   const [phase, setPhase] = useState<Phase>({ k: 'loading' });
-  /** The pad's strokes and size (kept here so the one button can seal them). */
-  const pad = useRef<{ strokes: PadPoint[][]; w: number; h: number }>({ strokes: [], w: 0, h: 0 });
-  const [inked, setInked] = useState(false);
+  /**
+   * PAD FIRST (owner, 7 Nov 2026): the card-back pad opens as soon as the document is open and checked; Review shows
+   * the document and comes back to the pad with the drawing kept (in the 1000 × 250 box).
+   */
+  const [view, setView] = useState<'pad' | 'review'>('pad');
+  const kept = useRef<SigStroke[] | undefined>(undefined);
   /** Double press guard: set synchronously on the first press, cleared only when the button may come back. */
   const press = useRef(createPressGuard()).current;
   /** The payment step has started: from here a failure may have paid (no retry button). */
@@ -445,10 +448,11 @@ export const NativeSealPage = () => {
     );
 
   /** The one button. Disabled after the first press; it only comes back after a failure that paid nothing. */
-  const signAndSeal = async () => {
-    if (press.held() || !doc || !mine.length || !padHasSignature(pad.current.strokes)) return;
-    const svg = strokesToSvg(pad.current.strokes, pad.current.w, pad.current.h);
-    if (!svg || !press.take()) return;
+  const signAndSeal = async (svgPath: string) => {
+    if (press.held() || !doc || !mine.length) return;
+    // The pad's path → the same strict 1000 × 250 SVG the bitsign bridge sends (pair/bitsign.ts), checked before use.
+    const svg = signatureSvg(svgPath);
+    if (!svg || checkStrictSvg(svg) || !press.take()) return;
     reachedPay.current = false;
     holdKey.current = sealKey(
       myKey,
@@ -546,8 +550,10 @@ export const NativeSealPage = () => {
   };
 
   const progress: SealProgress | null = phase.k === 'working' ? phase.step : phase.k === 'done' ? 'done' : null;
-  const showPad = (phase.k === 'ready' || phase.k === 'working') && !!doc && mine.length > 0;
-  const buttonOn = phase.k === 'ready' && inked;
+  const showPad = phase.k === 'ready' && !!doc && mine.length > 0 && view === 'pad';
+  // The hash the desktop shows (the QR's), to compare; the opened bytes' own fingerprint when there is none.
+  const docHash = docHashFor(ticker, docId);
+  const shortDocHash = docHash ? shortHash(docHash) : `#${fingerprint}`;
 
   return (
     // Full screen above the Dock / tab bar (z-[100]): the pad's buttons sat under the bottom bar (iPhone, 3 Nov 2026).
@@ -617,7 +623,11 @@ export const NativeSealPage = () => {
             <button
               type="button"
               data-testid="seal-open-latest"
-              onClick={() => setReload((n) => n + 1)}
+              onClick={() => {
+                kept.current = undefined;
+                setView('pad');
+                setReload((n) => n + 1);
+              }}
               className="min-h-12 w-full rounded-lg text-[15px] font-semibold"
               style={{ background: '#F5B800', color: '#0b0b0d' }}
             >
@@ -629,41 +639,56 @@ export const NativeSealPage = () => {
           <p className="text-[14px]">This document has no signature block for ${me}.</p>
         )}
         {showPad && (
+          <SignaturePad
+            key={reload}
+            sideways
+            initialStrokes={kept.current}
+            saveLabel={sealButtonLabel(namedFee ?? estFee)}
+            onCancel={() => navigate(-1)}
+            onReview={(strokes) => {
+              kept.current = strokes;
+              setView('review');
+            }}
+            onSave={(path, strokes) => {
+              kept.current = strokes;
+              void signAndSeal(path);
+            }}
+            note={
+              phase.k === 'ready' && phase.note
+                ? phase.note
+                : `Signed as $${shownHandle} · you approve the fee on the next screen`
+            }
+            details={
+              <div className="bw-sigpad-doc">
+                <strong>{doc?.title ?? 'Document'}</strong>
+                <span>Document {shortDocHash}</span>
+                <span>
+                  Sign as {mine[0].name || `$${me}`}
+                  {mine.length > 1 ? ` (fills ${mine.length} blocks)` : ''}
+                </span>
+              </div>
+            }
+          />
+        )}
+        {phase.k === 'ready' && doc && mine.length > 0 && (
           <div>
-            {phase.k === 'ready' && phase.note && (
+            {phase.note && (
               <p role="alert" className="mb-2 text-[14px]" style={{ color: '#fca5a5' }}>
                 {phase.note}
               </p>
             )}
-            <SignaturePad
-              label={`Sign as ${mine[0].name || `$${me}`}${mine.length > 1 ? ` (fills ${mine.length} blocks)` : ''}`}
-              locked={phase.k !== 'ready'}
-              onChange={(strokes, w, h) => {
-                pad.current = { strokes, w, h };
-                setInked(padHasSignature(strokes));
-              }}
-            />
             <button
               type="button"
-              data-testid="sign-and-seal"
-              disabled={!buttonOn}
-              aria-disabled={!buttonOn}
-              onClick={() => void signAndSeal()}
-              className="mt-2 min-h-12 w-full rounded-lg text-[15px] font-semibold"
-              style={{ background: '#F5B800', color: '#0b0b0d', opacity: buttonOn ? 1 : 0.45 }}
+              data-testid="seal-back-to-pad"
+              onClick={() => setView('pad')}
+              className="min-h-12 w-full rounded-lg text-[15px] font-semibold"
+              style={{ background: '#F5B800', color: '#0b0b0d' }}
             >
-              {sealButtonLabel(namedFee ?? estFee)}
+              {kept.current?.length ? 'Back to signing' : DRAW_HINT}
             </button>
-            {phase.k === 'ready' && !inked && (
-              <p className="mt-1 text-center text-[12px]" style={{ color: '#a1a1aa' }}>
-                {DRAW_HINT}
-              </p>
-            )}
-            {phase.k === 'ready' && inked && (
-              <p className="mt-1 text-center text-[12px]" style={{ color: '#a1a1aa' }}>
-                Signed as ${shownHandle} · #{fingerprint} · you approve the fee on the next screen
-              </p>
-            )}
+            <p className="mt-1 text-center text-[12px]" style={{ color: '#a1a1aa' }}>
+              Document {shortDocHash} · signing as ${shownHandle}
+            </p>
           </div>
         )}
         {progress && (
@@ -720,122 +745,6 @@ export const NativeSealPage = () => {
           onCancel={() => sheet.answer(false)}
         />
       )}
-    </div>
-  );
-};
-
-/**
- * The wallet's own finger pad: strokes → the web pad's exact SVG (nativeSeal.strokesToSvg). No Done step: the strokes
- * go up on every change and the page's one Sign & seal button seals them. Nothing may interrupt drawing: no
- * selection, callout, magnifier, context menu or scroll from a touch on the canvas.
- */
-const SignaturePad = ({
-  label,
-  locked,
-  onChange,
-}: {
-  label: string;
-  locked: boolean;
-  onChange: (strokes: PadPoint[][], width: number, height: number) => void;
-}) => {
-  const ref = useRef<HTMLCanvasElement | null>(null);
-  const wrap = useRef<HTMLDivElement | null>(null);
-  const strokes = useRef<PadPoint[][]>([]);
-  const cur = useRef<PadPoint[] | null>(null);
-  // React's touch listeners are passive, so preventDefault there is ignored: add real ones (passive: false).
-  useEffect(() => {
-    const c = ref.current;
-    const w = wrap.current;
-    if (!c || !w) return;
-    const stop = (e: Event) => e.preventDefault();
-    const opts: AddEventListenerOptions = { passive: false };
-    c.addEventListener('touchstart', stop, opts);
-    c.addEventListener('touchmove', stop, opts);
-    w.addEventListener('contextmenu', stop);
-    w.addEventListener('selectstart', stop);
-    return () => {
-      c.removeEventListener('touchstart', stop, opts);
-      c.removeEventListener('touchmove', stop, opts);
-      w.removeEventListener('contextmenu', stop);
-      w.removeEventListener('selectstart', stop);
-    };
-  }, []);
-  const pt = (e: React.PointerEvent<HTMLCanvasElement>): PadPoint => {
-    const r = e.currentTarget.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top, pressure: e.pressure || 0.5 };
-  };
-  const draw = () => {
-    const c = ref.current;
-    const g = c?.getContext('2d');
-    if (!c || !g) return;
-    g.clearRect(0, 0, c.width, c.height);
-    g.strokeStyle = '#111';
-    g.lineWidth = 2.5;
-    g.lineCap = 'round';
-    for (const s of [...strokes.current, ...(cur.current ? [cur.current] : [])]) {
-      g.beginPath();
-      s.forEach((p, i) => (i ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y)));
-      g.stroke();
-    }
-  };
-  const changed = () => {
-    const c = ref.current;
-    onChange([...strokes.current], c?.clientWidth ?? 0, c?.clientHeight ?? 0);
-  };
-  return (
-    <div ref={wrap} className="bw-seal-pad" data-testid="seal-pad" style={NO_SELECT}>
-      <div className="mb-1 flex items-center gap-2 text-[13px]" style={{ color: '#a1a1aa' }}>
-        <span className="min-w-0 flex-1">{label}</span>
-        {!locked && (
-          <button
-            type="button"
-            onClick={() => {
-              strokes.current = [];
-              draw();
-              changed();
-            }}
-            className="min-h-9 rounded-lg px-3 text-[13px]"
-            style={{ border: '1px solid rgba(255,255,255,0.15)' }}
-          >
-            Clear
-          </button>
-        )}
-      </div>
-      <canvas
-        ref={(el) => {
-          ref.current = el;
-          if (el && el.width !== el.clientWidth) {
-            el.width = el.clientWidth;
-            el.height = el.clientHeight;
-          }
-        }}
-        className="h-40 w-full rounded-lg"
-        style={{ background: '#fff', touchAction: 'none', ...NO_SELECT, pointerEvents: locked ? 'none' : undefined }}
-        onContextMenu={(e) => e.preventDefault()}
-        onPointerDown={(e) => {
-          e.preventDefault();
-          e.currentTarget.setPointerCapture(e.pointerId);
-          cur.current = [pt(e)];
-          draw();
-        }}
-        onPointerMove={(e) => {
-          if (!cur.current) return;
-          cur.current.push(pt(e));
-          draw();
-        }}
-        onPointerUp={() => {
-          if (cur.current && cur.current.length > 1) strokes.current.push(cur.current);
-          cur.current = null;
-          draw();
-          changed();
-        }}
-        onPointerCancel={() => {
-          if (cur.current && cur.current.length > 1) strokes.current.push(cur.current);
-          cur.current = null;
-          draw();
-          changed();
-        }}
-      />
     </div>
   );
 };

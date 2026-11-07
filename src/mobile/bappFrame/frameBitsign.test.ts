@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { handleBitsignCall } from '../pair/bitsign';
-import { bitsignToXdm, parseFrameBitsignRequest } from './frameBitsign';
+import { bitsignToXdm, parseFrameBitsignRequest, withFrameCapabilities } from './frameBitsign';
 
 const BCHAT = 'https://chat.bwalletx.com';
 const H = 'ab'.repeat(32);
@@ -59,5 +59,21 @@ describe('frameBitsign', () => {
       status: 'success',
       result: { drawSignature: true },
     });
+  });
+});
+
+describe('frame capabilities for bChatX', () => {
+  // bit-sign's frame sign-in (frame-session-client.ts) reads `frameSession` from bitsign.capabilities; for a bChatX
+  // origin that call is answered here (the pad), so the frame's own flags must ride along.
+  test('the pad answer carries frameSession and keeps drawSignature: true', async () => {
+    const reply = withFrameCapabilities(
+      'bitsign.capabilities',
+      await handleBitsignCall('bitsign.capabilities', {}, BCHAT),
+    );
+    expect(reply).toMatchObject({ result: { drawSignature: true, review: true, frameSession: true } });
+  });
+  test('a drawing answer is untouched', async () => {
+    const r = await handleBitsignCall('bitsign.drawSignature', draw().args, BCHAT, async () => null);
+    expect(withFrameCapabilities('bitsign.drawSignature', r)).toEqual(r);
   });
 });

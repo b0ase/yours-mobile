@@ -77,6 +77,17 @@ export const strokeOutline = (stroke: SigStroke): number[][] =>
 export const strokesToPath = (strokes: SigStroke[], outlineTol = 0.6): string =>
   strokes.map((s) => polygonToPath(simplifyPoints(strokeOutline(s) as SigPoint[], outlineTol))).join('');
 
+/** One pad-pixel point → the 1000 × 250 box, unclamped (the live preview's mapping; saving clamps). */
+export const toBoxPoint = (x: number, y: number, p: number, w: number, h: number): SigPoint =>
+  w > 0 && h > 0 ? [(x * SIG_W) / w, (y * SIG_H) / h, p] : [0, 0, p];
+
+/**
+ * How the pad shows. `sideways` (document signing, owner 7 Nov 2026): lengthwise on a landscape phone only; a
+ * portrait phone gets the turn prompt, never a rotated pad. The card-back strip keeps its rotated portrait sheet.
+ */
+export const padMode = (o: { sideways: boolean; portraitPhone: boolean }): 'pad' | 'turn' | 'rotated' =>
+  !o.portraitPhone ? 'pad' : o.sideways ? 'turn' : 'rotated';
+
 /**
  * Pad strokes (pixels) → stored path. Simplifies harder until it fits SIG_MAX_BYTES; returns ''
  * for an empty drawing or one that cannot be made to fit.
