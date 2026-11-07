@@ -65,6 +65,81 @@ const fetchHttp: Http = async ({ method, url, headers, body }) => {
 
 export const defaultHttp = (native: boolean): Http => (native ? nativeHttp : fetchHttp);
 
+/** One multipart field: text, or a file (or a slice of one). */
+export type FormPart = { key: string; value: string } | { key: string; file: Blob; fileName: string };
+export type FormPost = (url: string, authorization: string, parts: FormPart[]) => Promise<HttpResponse>;
+
+const fetchFormPost: FormPost = async (url, Authorization, parts) => {
+  const form = new FormData();
+  for (const p of parts) {
+    if ('file' in p) form.append(p.key, p.file, p.fileName);
+    else form.append(p.key, p.value);
+  }
+  const res = await fetch(url, { method: 'POST', headers: { Authorization }, body: form, credentials: 'omit' });
+  return { status: res.status, data: await res.json().catch(() => null) };
+};
+
+/** Bytes → base64 in 32 KB steps (one String.fromCharCode over megabytes overflows the stack). */
+export const bytesToBase64 = (bytes: Uint8Array): string => {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+};
+
+/**
+ * The phone apps' multipart form, as Capacitor's native HTTP wants it (`dataType: 'formData'`): one entry per field,
+ * every value a string, files as base64. Both native layers write no body without a multipart Content-Type, and add
+ * the boundary themselves.
+ */
+export const nativeFormData = async (parts: FormPart[]) =>
+  Promise.all(
+    parts.map(async (p) =>
+      'file' in p
+        ? {
+            key: p.key,
+            type: 'base64File',
+            value: bytesToBase64(new Uint8Array(await p.file.arrayBuffer())),
+            fileName: p.fileName.replace(/["\r\n]/g, '_'),
+            contentType: p.file.type || 'application/octet-stream',
+          }
+        : { key: p.key, type: 'string', value: p.value },
+    ),
+  );
+
+const nativeFormPost: FormPost = async (url, Authorization, parts) => {
+  const res = await CapacitorHttp.request({
+    method: 'POST',
+    url: await routeBchatUrl(url),
+    headers: { Authorization, 'Content-Type': 'multipart/form-data' },
+    data: await nativeFormData(parts),
+    dataType: 'formData',
+    responseType: 'json',
+  });
+  return { status: res.status, data: res.data };
+};
+
+/** A GIF from bit-sign's GIPHY proxy: a small preview for the grid and the GIF URL that is sent. */
+export type GifResult = { id: string; preview: string; url: string };
+
+/** `{ gifs: [...] }` → GIFs whose preview and URL are https GIPHY addresses (anything else is dropped). */
+export const parseGifResults = (data: unknown): GifResult[] => {
+  const list = (data as { gifs?: unknown } | null)?.gifs;
+  if (!Array.isArray(list)) return [];
+  const giphy = (s: unknown): s is string => {
+    if (typeof s !== 'string') return false;
+    try {
+      const u = new URL(s);
+      return u.protocol === 'https:' && /(^|\.)giphy\.com$/i.test(u.hostname);
+    } catch {
+      return false;
+    }
+  };
+  return list
+    .filter((g): g is Record<string, unknown> => !!g && typeof g === 'object')
+    .filter((g) => giphy(g.preview) && giphy(g.url))
+    .map((g) => ({ id: String(g.id ?? g.url), preview: g.preview as string, url: g.url as string }));
+};
+
 export class ChatApiError extends Error {
   constructor(
     message: string,
@@ -579,50 +654,74 @@ export class BchatClient {
   }
 
   /**
-   * Upload a photo or video into a room (bit-sign POST rooms/[ticker]/media, or /media/chunk in
+   * Upload a photo, video, voice note or file into a room (bit-sign POST rooms/[ticker]/media, or /media/chunk in
    * 3 MB parts above 4 MB, as bChatX does). Free; the room's members see it in the thread.
-   * Browser builds only (web, desktop, extension): the phone apps' HTTP bridge has no multipart.
+   * Browser builds (web, desktop, extension) post FormData with fetch. The phone apps send the same multipart form
+   * through native HTTP (`dataType: 'formData'`, which Capacitor's iOS and Android layers turn into multipart), as
+   * every other bChat call there does, so the WebView's origin never meets CORS.
    */
   async uploadMedia(ticker: string, file: File, onProgress?: (fraction: number) => void): Promise<void> {
     if (file.size > ROOM_UPLOAD_MAX_BYTES)
       throw new ChatApiError(`Files can be up to ${ROOM_UPLOAD_MAX_BYTES / 1024 / 1024} MB.`, 413);
     const Authorization = this.bearer();
     const base = `${this.origin}${BchatClient.path(ticker)}/media`;
-    const post = async (url: string, form: FormData) => {
-      const res = await fetch(url, { method: 'POST', headers: { Authorization }, body: form, credentials: 'omit' });
-      const data = (await res.json().catch(() => null)) as {
-        error?: string;
-        skipped?: { reason: string }[];
-        assembled?: boolean;
-      } | null;
-      if (!res.ok) throw new ChatApiError(data?.error || `Upload failed (${res.status})`, res.status, data);
+    const send = this.formPost ?? (Capacitor.isNativePlatform() ? nativeFormPost : fetchFormPost);
+    const post = async (url: string, parts: FormPart[]) => {
+      let res: HttpResponse;
+      try {
+        res = await send(url, Authorization, parts);
+      } catch (e) {
+        throw new ChatApiError(e instanceof Error ? e.message : 'Network error', 0);
+      }
+      const data = res.data as { error?: string; skipped?: { reason: string }[]; assembled?: boolean } | null;
+      if (res.status < 200 || res.status >= 300)
+        throw new ChatApiError(data?.error || `Upload failed (${res.status})`, res.status, data);
       if (data?.skipped?.length) throw new ChatApiError(data.skipped[0].reason, 400, data);
       return data;
     };
+    const name = file.name || 'file';
     if (file.size <= ROOM_SINGLE_REQUEST_BYTES) {
-      const form = new FormData();
-      form.append('file', file, file.name);
       onProgress?.(0.1);
-      await post(base, form);
+      await post(base, [{ key: 'file', file, fileName: name }]);
       onProgress?.(1);
       return;
     }
     const uploadId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
     const total = Math.ceil(file.size / ROOM_CHUNK_BYTES);
     for (let seq = 0; seq < total; seq++) {
-      const form = new FormData();
-      form.append('uploadId', uploadId);
-      form.append('seq', String(seq));
-      form.append('total', String(total));
-      form.append('chunk', file.slice(seq * ROOM_CHUNK_BYTES, (seq + 1) * ROOM_CHUNK_BYTES), `${file.name}.part${seq}`);
-      if (seq === total - 1) {
-        form.append('filename', file.name);
-        form.append('mime', file.type || '');
-      }
-      const data = await post(`${base}/chunk`, form);
+      const parts: FormPart[] = [
+        { key: 'uploadId', value: uploadId },
+        { key: 'seq', value: String(seq) },
+        { key: 'total', value: String(total) },
+        {
+          key: 'chunk',
+          file: file.slice(seq * ROOM_CHUNK_BYTES, (seq + 1) * ROOM_CHUNK_BYTES),
+          fileName: `${name}.part${seq}`,
+        },
+      ];
+      if (seq === total - 1) parts.push({ key: 'filename', value: name }, { key: 'mime', value: file.type || '' });
+      const data = await post(`${base}/chunk`, parts);
       onProgress?.((seq + 1) / total);
       if (seq === total - 1 && !data?.assembled) throw new ChatApiError('Upload did not complete', 500);
     }
+  }
+
+  /** Tests: replace the multipart transport. */
+  formPost: FormPost | null = null;
+
+  /**
+   * Open Graph previews for links in a room message (bit-sign GET /api/bitsign/unfurl). Signed in, so bit-sign may
+   * fetch a page it has not cached; it refuses private hosts and caches per URL. Callers gate it first
+   * (chat/linkify.ts loadLinkCard: never in an encrypted room).
+   */
+  async unfurl(url: string): Promise<unknown> {
+    return this.call('GET', `/api/bitsign/unfurl?url=${encodeURIComponent(url)}`);
+  }
+
+  /** GIF search through bit-sign's GIPHY proxy (the key stays on the server). Empty query: trending. */
+  async gifSearch(query: string, limit = 24): Promise<GifResult[]> {
+    const q = encodeURIComponent(query.trim());
+    return parseGifResults(await this.call<unknown>('GET', `/api/bitsign/giphy/search?q=${q}&limit=${limit}`));
   }
 
   /** Toggle my emoji reaction on a message (bit-sign appends a `reaction` event; toggled server-side). */

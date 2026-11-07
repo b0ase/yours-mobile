@@ -131,6 +131,16 @@ const disable = async () => {
   await flag.set(DECLINED);
 };
 
+/** Settings → Security toggle on: an earlier "Not now" or "Stop using" no longer blocks it. */
+const enable = async (): Promise<boolean> => {
+  const { passKey } = await chromeApi.storage.session.get('passKey');
+  const { id, encryptedKeys } = await selectedAccount();
+  if (typeof passKey !== 'string' || !id || !encryptedKeys) return false;
+  await flag.clear(DECLINED);
+  await enrol(id, passKey);
+  return isEnrolled();
+};
+
 // Unlock --------------------------------------------------------------------
 
 const unlock = async (): Promise<boolean> => {
@@ -271,6 +281,8 @@ export const initBiometricUnlock = async (chrome: any): Promise<PlatformHooks> =
       isAvailable: isEnrolled,
       unlock,
       disable,
+      enable,
+      settingLabel: `Unlock with ${label()}`,
       verify,
       autoPrompt: true,
       notice,

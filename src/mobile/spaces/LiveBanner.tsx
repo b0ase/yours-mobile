@@ -40,6 +40,8 @@ export const LiveBanner = ({
   gated = true,
   spaceOpen = false,
   autoOpen = false,
+  openSignal = 0,
+  onCallable,
 }: {
   client: BchatClient;
   /** The wallet, for the inline "Claim admin" fallback when starting is refused. */
@@ -54,6 +56,10 @@ export const LiveBanner = ({
   spaceOpen?: boolean;
   /** Open the always-open Space as soon as it's known (the Lounge card's Join). Once per mount. */
   autoOpen?: boolean;
+  /** Each increase: join the live Space, or start one when this person may host (the chat bar's "+" › Call). */
+  openSignal?: number;
+  /** What `openSignal` would do here now: join, start, or nothing. */
+  onCallable?: (what: 'join' | 'start' | null) => void;
 }) => {
   const [state, setState] = useState<SpaceState | null>(null);
   /** Live per the public route, when the member-gated read failed (see BchatClient.spaceLivePublic). */
@@ -128,6 +134,18 @@ export const LiveBanner = ({
 
   const host = canHostRoom({ me, createdBy, youAreIssuer: issuer, spaceOpen });
   const space = state?.space ?? null;
+
+  const joinable = !!meta?.alwaysOpen || !!space || publicLive;
+  const callable = joinable ? 'join' : host ? 'start' : null;
+  useEffect(() => onCallable?.(callable), [callable, onCallable]);
+  const handledSignal = useRef(openSignal);
+  useEffect(() => {
+    if (openSignal === handledSignal.current) return;
+    handledSignal.current = openSignal;
+    if (meta?.alwaysOpen) setOpen({ always: true });
+    else if (joinable) setOpen({});
+    else if (host) setNaming(true);
+  }, [openSignal, meta, joinable, host]);
 
   return (
     <>

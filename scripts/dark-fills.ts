@@ -3,7 +3,8 @@
  * a mono-tone sweep selector in themes.css, so a hard-coded dark fill turns into the White surface; dark Tailwind
  * fills (bg-[#17191E], hover:bg-[#1f2128], bg-zinc-900) are swept the same way, and dark stylesheet backgrounds
  * must carry a pack override or a CSS_KEEP reason (uncoveredDarkCss). Gold and Dark
- * packs never match (the block is scoped to data-bw-tone='mono').
+ * packs never match (the block is scoped to light packs, data-bw-pack='light': White, Mono, paper, Nautical,
+ * White/Black and a connected site's light theme, 7 Nov 2026).
  *
  *   bun scripts/dark-fills.ts        rewrites the generated block in src/themes.css
  *   cardPatternsLight.test.ts        fails CI when a new dark hex has no selector
@@ -104,7 +105,7 @@ export function renderBlock(fills: string[], classes: string[] = []): string {
     .join('\n')
     .replace(/,$/, '');
   return `${BEGIN}
-:root[data-bw-tone='mono']
+:root[data-bw-pack='light']
   :is(
 ${sel}
   ):not(
@@ -239,7 +240,7 @@ function twBlock(classes: string[]): string {
   const rule = (list: string[], bg: string) =>
     list.length
       ? `
-:root[data-bw-tone='mono']
+:root[data-bw-pack='light']
   :is(
 ${list.map((c) => `    ${twSelector(c)}`).join(',\n')}
   )${NOT_MEDIA} {

@@ -386,6 +386,17 @@
   color: var(--bw-text) !important;
   --bc-ink: var(--bw-text);
 }
+:root[data-bw-pack='light'] .bw-wcard-face.is-themed {
+  /* Light packs (COO report, 7 Nov 2026: a light site theme kept the dark shade over its card): the card's own
+     muted and OK inks come from the pack, the dark shade goes, and so does the accent glow, which put the Scan
+     pill's accent ink on its own hue. Mono packs replace this with the tint card below. */
+  background: linear-gradient(160deg, var(--bw-card) 0%, var(--bw-card2) 100%);
+  border: 1px solid var(--bw-line);
+  box-shadow: var(--bw-shadow);
+  color: var(--bw-text);
+  --bw-wcard-muted: var(--bw-muted);
+  --bw-wcard-ok: var(--bw-success);
+}
 :root[data-bw-tone='mono'] .bw-wcard-face.is-themed {
   background:
     radial-gradient(120% 90% at 100% 0%, var(--bw-tint) 0%, transparent 60%),
@@ -396,12 +407,47 @@
   --bw-wcard-muted: var(--bw-muted);
   --bw-wcard-ok: var(--bw-success);
 }
-:root[data-bw-tone='mono'] .is-themed .bw-wcard-art {
+:root[data-bw-pack='light'] .is-themed .bw-wcard-art {
   opacity: 0.28;
   filter: none !important;
 }
-:root[data-bw-tone='mono'] .is-themed .bw-wcard-art-shade {
+:root[data-bw-pack='light'] .is-themed .bw-wcard-art-shade {
   background: none;
+}
+/* Light packs outside Mono (Nautical, White/Black) draw a dark design under ink text: fainter still, so the card's
+   muted ink and accent keep 4.5:1 (Mono keeps the owner's 0.28; paper packs show their light designs at full). */
+:root[data-bw-pack='light']:not([data-bw-tone='mono']):not([data-bw-paper]) .is-themed .bw-wcard-art {
+  opacity: 0.1;
+}
+/* The card's embossed address (#d9d4c5 with a dark drop shadow) is for the dark card: on a light card it is the
+   card's muted ink, flat. */
+:root[data-bw-pack='light'] .is-themed .bw-wcard-addr {
+  color: var(--bw-wcard-muted);
+  text-shadow: none;
+}
+/* The store edition's yellow card (bWallet, WalletCard YELLOW_CARD) is never themed and always light: its accent
+   ink is the card's own black (mobile.css .is-yellow: #0b0b0c, 8.9:1 on its darkest yellow), with gold on the black
+   chips, not the pack's accent (a light pack's red, green or blue on yellow is 2.6-4:1). */
+:root[data-bw-pack='light'] .bw-wcard.is-yellow .bw-wcard-face {
+  --bw-accent-hi: #0b0b0c;
+  --bw-accent-hi-rgb: 11 11 12;
+  --bw-accent-lo: #0b0b0c;
+  --bw-accent-lo-rgb: 11 11 12;
+  --bw-on-accent: #ffd24d;
+}
+/* …and a card face that keeps its dark look in a light pack (an own picture under the dark shade) keeps light ink
+   (never the store edition's yellow card, which is unthemed too but light, with its own black ink):
+   the pack's ink and accent stop would be dark on dark. --bw-dark-ground-* is the accent moved until it reads on the
+   dark face (contrastGuard.ts darkGroundInks), so the handle, Scan pill and $/BSV switch stay readable. */
+:root[data-bw-pack='light'] .bw-wcard:not(.is-yellow) .bw-wcard-face:not(.is-themed) {
+  --bw-accent-hi: var(--bw-dark-ground-hi);
+  --bw-accent-hi-rgb: var(--bw-dark-ground-hi-rgb);
+  --bw-accent-lo: var(--bw-dark-ground-lo);
+  --bw-accent-lo-rgb: var(--bw-dark-ground-lo-rgb);
+  --bw-on-accent: var(--bw-dark-ground-on);
+  --bw-text: #f2f2f0;
+  --bw-text-rgb: 242 242 240;
+  --bw-muted: #98a2b3;
 }
 :root[data-bw-tone='mono'] .bw-bc.is-themed {
   background: var(--bw-card) !important;
@@ -468,16 +514,103 @@
   svg:is([stroke='#fff'], [stroke='#FFFFFF'], [stroke='#F2F2F0'], [stroke='white']) {
   stroke: var(--bw-text);
 }
-/* Mono sweep: inline white text (style={{ color: '#fff' }}) on the pack's white panels and pages takes the ink.
-   Mono has no dark fills (accent fills become a light tint above), so this cannot land dark on dark; text on photos,
-   video and scrims keeps its white. */
-:root[data-bw-tone='mono']
+/* Light sweep: inline white text (style={{ color: '#fff' }}) on the pack's light panels and pages takes the ink.
+   Every light pack, not only Mono (COO report, 7 Nov 2026: a light site theme left the price, History and "Swap into
+   BSV" white on paper). Hard-coded dark fills turn light below, and Gold-era code never puts white on an accent fill
+   (gold is bright), so this cannot land dark on dark; text on photos, video, scrims and the dark card face keeps its
+   white. */
+:root[data-bw-pack='light']
   :is([style*='color: rgb(255, 255, 255)'], [style*='color: rgb(242, 242, 240)'], [style*='color: white']):not(
-    :is(.bg-black\/50, .bg-black\/60, .bg-black\/65, .bg-black\/70, .bg-black\/80, .bw-videobg, .bw-pack) *
-  ):not(.bw-pack):not(.bw-unread-badge):not([style*='background: rgb(240, 68, 56)']):not(
-    [style*='background-color: rgb(240, 68, 56)']
+    :is(
+        .bg-black\/50,
+        .bg-black\/60,
+        .bg-black\/65,
+        .bg-black\/70,
+        .bg-black\/80,
+        .bw-videobg,
+        .bw-pack,
+        .bw-wcard:not(.is-yellow) .bw-wcard-face:not(.is-themed)
+      )
+      *
+  ):not(.bw-pack):not(.bw-unread-badge):not(
+    :is(
+      [style*='background: rgb(240, 68, 56)'],
+      [style*='background-color: rgb(240, 68, 56)'],
+      [style*='background: rgb(217, 45, 32)'],
+      [style*='background-color: rgb(217, 45, 32)'],
+      [style*='background: rgb(229, 36, 43)'],
+      [style*='background-color: rgb(229, 36, 43)'],
+      [style*='background: rgb(239, 68, 68)'],
+      [style*='background-color: rgb(239, 68, 68)'],
+      [style*='background: rgb(220, 38, 38)'],
+      [style*='background-color: rgb(220, 38, 38)']
+    )
   ) {
+  /* Red pills (LIVE, recording, unread: #D92D20, #F04438 …) keep their white text: ink on red is under 4.5:1. */
   color: var(--bw-text) !important;
+}
+/* …and the Gold base's inline greys (#98A2B3, #8E8E89: 2.5:1 on white) take the pack's checked muted ink. */
+:root[data-bw-pack='light']
+  :is([style*='color: rgb(152, 162, 179)'], [style*='color: rgb(142, 142, 137)']):not(
+    :is(
+        .bg-black\/50,
+        .bg-black\/60,
+        .bg-black\/65,
+        .bg-black\/70,
+        .bg-black\/80,
+        .bw-videobg,
+        .bw-pack,
+        .bw-wcard:not(.is-yellow) .bw-wcard-face:not(.is-themed)
+      )
+      *
+  ) {
+  color: var(--bw-muted) !important;
+}
+/* Accent fills in a light pack whose accent is dark (a light site theme's navy, Nautical's red): Gold-era code puts
+   black text on the bright gold fill (color: #000 / #010101), which is black on navy here. The fill keeps its colour
+   and the text takes the pack's on-accent ink (contrast-checked against all three accent stops). Mono packs turn
+   these fills into a light tint instead (above). */
+:root[data-bw-pack='light']:not([data-bw-tone='mono'])
+  :is(
+    .bw-bc-stop,
+    [style*='var(--bw-accent-hi), var(--bw-accent-lo)'],
+    [style*='var(--bw-accent-lo), var(--bw-accent-hi)'],
+    [style*='var(--bw-accent-hi) 0%, var(--bw-accent-lo)'],
+    [style*='var(--bw-accent-lo) 0%, var(--bw-accent-hi)'],
+    [style*='background: var(--bw-accent)'],
+    [style*='background: var(--bw-accent-hi)'],
+    [style*='background: var(--bw-accent-lo)'],
+    [style*='background-color: var(--bw-accent)'],
+    [style*='background-color: var(--bw-accent-hi)'],
+    [style*='background-color: var(--bw-accent-lo)'],
+    .bg-\[var\(--bw-accent\)\],
+    .bg-\[var\(--bw-accent-hi\)\],
+    .bg-\[var\(--bw-accent-lo\)\],
+    .bw-wcard-getname,
+    .askb-send,
+    .askb-bubble.user,
+    .bw-cdes-done,
+    .bw-idwarn-go,
+    .bw-mixer-base button.on,
+    .bw-sigpad-btns .is-primary,
+    .bw-bc-logo,
+    .bw-wcard-unit button.is-on
+  ) {
+  /* (On the store edition's yellow card the on-accent ink is its gold, on its black chips: see .is-yellow below.) */
+  color: var(--bw-on-accent) !important;
+}
+/* The Gold base's dock bar (#0A0B0D) is the pack's nav in a light pack, like the tab bar (Mono packs keep the swept
+   white / paper-shade bar the owner approved, 16 Oct 2026). */
+:root[data-bw-pack='light']:not([data-bw-tone='mono']) nav[data-phone-dock][data-bw-bottom-nav] {
+  background: var(--bw-nav) !important;
+  border-color: var(--bw-line) !important;
+}
+/* Wallet top row: today's % change in the pack's checked success / danger (the Gold greens and reds are for black). */
+:root[data-bw-pack='light'] .bw-daychange.is-up {
+  color: var(--bw-success) !important;
+}
+:root[data-bw-pack='light'] .bw-daychange.is-down {
+  color: var(--bw-danger) !important;
 }
 /* Screens over the dark obsidian pool (unlock, welcome, create, restore; ui/ObsidianBackdrop without a pack) keep
    Gold's light-on-dark ink in every pack, so headings and labels never land dark on the dark art. */
@@ -533,8 +666,9 @@
 
 /* Mono sweep for hard-coded dark fills (owner, 16 Oct 2026, Exchange › Names: selected chips were near-black pills).
    Inline dark / dark-gold backgrounds (#2a2100 chips, #0b0c0f panels …) take the white surface, the pack's ink and
-   a dark hairline, so a selected chip reads as a white pill with a dark outline. Gold and dark packs are untouched. */
-:root[data-bw-tone='mono']
+   a dark hairline, so a selected chip reads as a white pill with a dark outline. Every light pack (7 Nov 2026); Gold
+   and dark packs are untouched. */
+:root[data-bw-pack='light']
   :is(
     [style*='background: rgb(11, 11, 13)'],
     [style*='background-color: rgb(11, 11, 13)'],
@@ -758,7 +892,7 @@
 }
 
 /* dark-fills:begin (generated by scripts/dark-fills.ts; do not edit by hand) */
-:root[data-bw-tone='mono']
+:root[data-bw-pack='light']
   :is(
     [style*='background: rgb(0, 0, 17)'],
     [style*='background-color: rgb(0, 0, 17)'],
@@ -1034,6 +1168,8 @@
     [style*='background-color: rgb(27, 22, 8)'],
     [style*='background: rgb(27, 27, 27)'],
     [style*='background-color: rgb(27, 27, 27)'],
+    [style*='background: rgb(27, 27, 29)'],
+    [style*='background-color: rgb(27, 27, 29)'],
     [style*='background: rgb(27, 28, 32)'],
     [style*='background-color: rgb(27, 28, 32)'],
     [style*='background: rgb(27, 29, 34)'],
@@ -1319,7 +1455,7 @@
   color: var(--bw-text) !important;
   border-color: rgb(0 0 0 / 0.18) !important;
 }
-:root[data-bw-tone='mono']
+:root[data-bw-pack='light']
   :is(
     .bg-\[\#08090b\],
     .bg-\[\#0B0B0D\],
@@ -1340,7 +1476,7 @@
   background: var(--bw-surface) !important;
   color: var(--bw-text) !important;
 }
-:root[data-bw-tone='mono']
+:root[data-bw-pack='light']
   :is(
     .active\:bg-\[\#111\]:active,
     .bg-\[\#1d2026\],
@@ -1360,8 +1496,8 @@
 /* dark-fills:end */
 
 /* White: dark gradient cards (bChat token cards, credits cards, bMovies register banner) go white with a hairline.
-   Full-screen stages (Spaces, Calls, Sent) and artwork placeholders keep their dark art. */
-:root[data-bw-tone='mono']
+   Full-screen stages (Spaces, Calls, Sent) and artwork placeholders keep their dark art. Every light pack. */
+:root[data-bw-pack='light']
   :is(
     [style*='rgb(42, 34, 8), rgb(13, 11, 4)'],
     [style*='rgb(27, 22, 8) 0%, rgb(11, 10, 8) 60%'],
@@ -1510,7 +1646,7 @@ input:-webkit-autofill {
 /* White and paper packs: stylesheet cards that were hard-coded dark (owner, 16 Oct 2026: the Hidden tokens head card
    stayed black). The sweep in scripts/dark-fills.ts only reads inline hex, so cardPatternsLight.test.ts now also fails
    on any dark background in src/*.css without a pack override here (or a CSS_KEEP reason for scrims and stages). */
-:root[data-bw-tone='mono']
+:root[data-bw-pack='light']
   :is(
     .bw-hid,
     .bw-hid-head,
@@ -1529,22 +1665,22 @@ input:-webkit-autofill {
   background: var(--bw-surface) !important;
   color: var(--bw-text) !important;
 }
-:root[data-bw-tone='mono'] :is(.bw-hid-head, .ww-card, .ww-cmd, .bx-tip, .bw-pull-cue[data-ready='1']) {
+:root[data-bw-pack='light'] :is(.bw-hid-head, .ww-card, .ww-cmd, .bx-tip, .bw-pull-cue[data-ready='1']) {
   border: 1px solid rgb(0 0 0 / 0.14);
   box-shadow:
     0 1px 2px rgb(0 0 0 / 0.05),
     0 8px 22px rgb(0 0 0 / 0.07) !important;
 }
-:root[data-bw-tone='mono'] .bw-hid {
+:root[data-bw-pack='light'] .bw-hid {
   background: var(--bw-bg) !important;
 }
-:root[data-bw-tone='mono'] :is(.ww-sidebar, .bx-dock, .bwx-bapp-sections) {
+:root[data-bw-pack='light'] :is(.ww-sidebar, .bx-dock, .bwx-bapp-sections) {
   border-color: rgb(0 0 0 / 0.12) !important;
 }
-:root[data-bw-tone='mono'] .bw-hid-sub {
+:root[data-bw-pack='light'] .bw-hid-sub {
   color: var(--bw-muted);
 }
-:root[data-bw-tone='mono'] .bw-hid-close {
+:root[data-bw-pack='light'] .bw-hid-close {
   color: var(--bw-text);
   background: rgb(0 0 0 / 0.06);
 }
