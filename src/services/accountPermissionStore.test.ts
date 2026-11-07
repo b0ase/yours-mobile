@@ -16,10 +16,12 @@ import {
 
 const SITE = 'acctgrants.example';
 const signIn = { data: [1], protocolID: [2, 'bwallet sign in'], keyID: 'n', counterparty: 'anyone' };
+// Unique per run: fake-indexeddb is one process-wide store, shared with any other file that opens permission stores.
+const RUN = Math.random().toString(36).slice(2, 10);
 let n = 0;
 const ids = () => {
   n++;
-  return { A: `1AccountA${n}`, B: `1AccountB${n}` };
+  return { A: `1AccountA${RUN}${n}`, B: `1AccountB${RUN}${n}` };
 };
 
 const protocolGrant = (originator = SITE) =>
@@ -47,6 +49,8 @@ const allowance = () =>
 
 const manager = (s: IndexedDbPermissionStore) => {
   let prompts = 0;
+  let prompted = () => {};
+  const promptedOnce = new Promise<void>((r) => (prompted = r));
   const w = {
     createSignature: async () => ({ signature: [1] }),
     getPublicKey: async () => ({ publicKey: '02' + '11'.repeat(32) }),
@@ -56,17 +60,20 @@ const manager = (s: IndexedDbPermissionStore) => {
   const mgr = new LocalWalletPermissionsManager(w as never, 'wallet-admin-id', {}, { store: s } as never);
   mgr.bindCallback('onProtocolPermissionRequested', (async () => {
     prompts++;
+    prompted();
   }) as never);
-  return { mgr, prompts: () => prompts };
+  return { mgr, prompts: () => prompts, promptedOnce };
 };
+/**
+ * Allowed (the call resolves without a prompt) or pending (the manager asked). Decided by which happens, never by a
+ * wall-clock race: a 300 ms timer here lost to a slow fake-indexeddb under the full suite's load and failed the test
+ * at 311 ms (7 Nov 2026).
+ */
 const signOutcome = async (s: IndexedDbPermissionStore) => {
   const m = manager(s);
   const p = m.mgr.createSignature(signIn as never, SITE);
   p.catch(() => undefined);
-  const outcome = await Promise.race([
-    p.then(() => 'allowed'),
-    new Promise((r) => setTimeout(() => r('pending'), 300)),
-  ]);
+  const outcome = await Promise.race([p.then(() => 'allowed'), m.promptedOnce.then(() => 'pending')]);
   return { outcome, prompts: m.prompts() };
 };
 

@@ -324,6 +324,20 @@ describe('the real initWallet wiring', () => {
     expect(pull).toMatch(/await fullPassIfDue\([\s\S]*withDeadlines\(reader/);
   });
 
+  test('an address sync whose IDB transaction was aborted runs once more before the banner (7 Nov 2026)', () => {
+    const src = readFileSync(new URL('./initWallet.ts', import.meta.url), 'utf8');
+    const sync = src.slice(
+      src.indexOf('  const addressSync = singleFlight('),
+      src.indexOf('  const resyncAddresses = '),
+    );
+    expect(sync).toMatch(/await retryOnceOnIdbAbort\(\(\) =>\s*runPrioritySync\(actionCtx,/);
+    // The banner (status 'error') is only in the catch after the retry.
+    const retryAt = sync.indexOf('retryOnceOnIdbAbort(');
+    const bannerAt = sync.indexOf("sendSyncStatus({ status: 'error'");
+    expect(retryAt).toBeGreaterThan(-1);
+    expect(bannerAt).toBeGreaterThan(retryAt);
+  });
+
   test('the device-sync push is makeBackupPush over every backup; own payments go first only before or between cycles (7 Nov 2026)', () => {
     const src = readFileSync(new URL('./initWallet.ts', import.meta.url), 'utf8');
     const push = src.slice(
