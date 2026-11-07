@@ -16,9 +16,8 @@ import { USER_DENIED_CODE } from '../../services/userDenied';
 import { ONE_APPROVAL_SEAL } from '../../services/sealPass';
 import { NATIVE_SEAL_ENABLED } from '../storeBuild';
 
-export const BITSIGN_CAPABILITIES = 'bitsign.capabilities';
-export const BITSIGN_DRAW = 'bitsign.drawSignature';
-export const isBitsignAction = (action: string) => action === BITSIGN_CAPABILITIES || action === BITSIGN_DRAW;
+import { BITSIGN_CAPABILITIES } from './bitsignCalls';
+export { BITSIGN_CAPABILITIES, BITSIGN_DRAW, isBitsignAction } from './bitsignCalls';
 
 export const TITLE_MAX = 120;
 export const SHORT_MAX = 60;

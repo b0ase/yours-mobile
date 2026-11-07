@@ -9,9 +9,21 @@
  *                  (code 'ERR_PERMISSION_DENIED' + 'declined' on Cancel; 'INVALID_PARAMS' on bad args)
  *
  * `bitsign.capabilities` answers { drawSignature: true }. bChatX origins only. PURE: frameBitsign.test.ts.
+ *
+ * The full-screen dApp browser has no parent to post to: there the page calls window.CWI.bitsign(call, args)
+ * (dapp/provider.ts), the native bridge brings it here with the WebView's own origin, and answerDappBitsign gives
+ * the same answer in the browser's { success, data } shape (dappBitsign.test.ts).
  */
 import { BCHAT_ORIGINS } from '../../services/bchatOrigin';
-import { isBitsignAction, type BitsignReply } from '../pair/bitsign';
+import {
+  BAD_REQUEST_CODE,
+  BITSIGN_DRAW,
+  askDrawSignature,
+  handleBitsignCall,
+  isBitsignAction,
+  type BitsignReply,
+  type DrawRequest,
+} from '../pair/bitsign';
 
 const MAX_ID = 128;
 
@@ -40,3 +52,46 @@ export const bitsignToXdm = (id: string, reply: BitsignReply) =>
         description: reply.error.message,
         code: reply.error.code,
       } as const);
+
+export type DappBitsignReply = { success: true; data: unknown } | { success: false; error: string; code?: string };
+
+// One pad at a time from the browser: a second draw while one is open is refused, not queued behind it.
+let dappDrawing = false;
+
+/**
+ * A bitsign.* call from the dApp browser, or null when `type` is not one (the normal CWI path then). `origin` is the
+ * native WebView's main-frame origin, never the page's say-so. `cover` steps the browser aside while the pad is up
+ * (it draws in the wallet WebView, underneath); `ask` shows the pad (tests pass their own).
+ */
+export const answerDappBitsign = async (
+  origin: string,
+  type: string,
+  params: unknown,
+  deps: { ask?: (req: DrawRequest) => Promise<string | null>; cover?: (on: boolean) => void } = {},
+): Promise<DappBitsignReply | null> => {
+  if (!isBitsignAction(type)) return null;
+  if (!(BCHAT_ORIGINS as readonly string[]).includes(origin))
+    return { success: false, error: `Unsupported request: ${type}` };
+  const draw = type === BITSIGN_DRAW;
+  if (draw && dappDrawing) return { success: false, error: 'A signature pad is already open', code: BAD_REQUEST_CODE };
+  const ask = deps.ask ?? askDrawSignature;
+  if (draw) dappDrawing = true;
+  let reply: BitsignReply;
+  try {
+    reply = await handleBitsignCall(type, params, origin, async (req) => {
+      deps.cover?.(true);
+      try {
+        return await ask(req);
+      } finally {
+        deps.cover?.(false);
+      }
+    });
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : String(e) };
+  } finally {
+    if (draw) dappDrawing = false;
+  }
+  return 'result' in reply
+    ? { success: true, data: reply.result }
+    : { success: false, error: reply.error.message, code: reply.error.code };
+};
