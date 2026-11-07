@@ -1,7 +1,5 @@
 import { TipButton } from '../tip/TipButton';
 import { showPublicBHint, toPrivateB, PUBLIC_B_HINT, PRIVATE_B_ACTION } from '../chat/askBHint';
-import bGlyph from '../brand/bwallet-glyph.svg';
-import { B_OUTLINE_D, B_OUTLINE_VIEWBOX } from '../brand/bOutline';
 import { mergeChatRooms } from './tabBadges';
 import { claimIssuerAdmin } from '../chat/autoClaim';
 import { WIDE_ON } from '../wide/flag';
@@ -26,7 +24,6 @@ import { useBackClose } from '../backStack';
 import { createPortal } from 'react-dom';
 import {
   ArrowLeft,
-  ArrowUp,
   Coins,
   Info,
   Lock,
@@ -121,6 +118,7 @@ import { messageGestures } from '../chat/messageGestures';
 import { haptic } from '../swipe/haptics';
 import {
   MentionPicker,
+  MessageBody,
   MessageText,
   ReactionBar,
   ReactionChips,
@@ -134,7 +132,12 @@ import { commissionCardNo, parseCommissionCommand } from '../chat/commissions';
 import { AiLabel, BusinessSheet, OrderCard } from '../chat/BusinessAgentViews';
 import { isBusinessAgentMessage, orderCardInfo, orderStatuses, useBusinessPresence } from '../chat/businessAgent';
 import { bDraftInfo, canAskBDraft } from '../chat/bDraft';
-import { AttachButton, MessageVideo, RoomMediaBubble } from '../chat/RoomMedia';
+import { RoomMediaBubble } from '../chat/RoomMedia';
+import { ComposerBar } from '../chat/ComposerBar';
+import type { CallKind } from '../chat/composerOptions';
+import { roomIsEncrypted } from '../chat/linkify';
+import { callsReady, dial } from '../calls/store';
+import { resolveCallee } from '../calls/peer';
 import { mediaPayload } from '../chat/roomMediaInfo';
 import { walletSigner } from '../chat/signer';
 import { proveHoldings, walletHoldings } from '../chat/holdings';
@@ -474,7 +477,9 @@ const Conversation = ({
   const [charge, setCharge] = useState<SpendCharge | null>(null);
   /** The room's issuer address, from the room lookup: a message charge may only pay this (or burn). */
   const [issuerAddress, setIssuerAddress] = useState<string | null>(null);
-  const [confirmSend, setConfirmSend] = useState<{ text: string; existing?: ChatMessage } | null>(null);
+  const [confirmSend, setConfirmSend] = useState<{ text: string; existing?: ChatMessage; keepDraft?: boolean } | null>(
+    null,
+  );
   /** A payment already made for an optimistic message: a retry reuses it (bit-sign is idempotent per txid). */
   const paidFor = useRef(new Map<string, { beef: string; rule: string; txid: string }>());
   const entryKey = entry?.key ?? null;
@@ -671,7 +676,8 @@ const Conversation = ({
     if (el.scrollTop < 120) loadOlder();
   };
 
-  const send = (text: string, existing?: ChatMessage) => {
+  /** `keepDraft`: a picked GIF goes out on its own and leaves what you were typing. */
+  const send = (text: string, existing?: ChatMessage, keepDraft = false) => {
     const body = text.trim();
     if (!body) return;
     // /commission opens the composer (chat/CommissionCard.tsx); it is never posted as a message.
@@ -688,13 +694,13 @@ const Conversation = ({
       entryKey &&
       needsConfirm(charge, loadPrefs(entryKey), spentThisSession(entryKey))
     ) {
-      setConfirmSend({ text: body, existing });
+      setConfirmSend({ text: body, existing, keepDraft });
       return;
     }
-    post(body, existing, prior ? null : mustPay(charge) ? charge : null);
+    post(body, existing, prior ? null : mustPay(charge) ? charge : null, keepDraft);
   };
 
-  const post = (body: string, existing: ChatMessage | undefined, pay: SpendCharge | null) => {
+  const post = (body: string, existing: ChatMessage | undefined, pay: SpendCharge | null, keepDraft = false) => {
     const localId = existing?.localId ?? `l${Date.now()}-${++localSeq.current}`;
     const quoting = existing ? replyOf(existing) : replyTo;
     const optimistic: ChatMessage = {
@@ -710,7 +716,7 @@ const Conversation = ({
     stickToBottom.current = true;
     setMessages((cur) => cur.filter((m) => m.localId !== localId).concat(optimistic));
     if (!existing) {
-      setDraft('');
+      if (!keepDraft) setDraft('');
       setReplyTo(null);
     }
     const go = async () => {
@@ -807,6 +813,28 @@ const Conversation = ({
   const askB = () => {
     setDraft((d) => (/^\/b(\s|$)/i.test(d) ? d : `/b ${d}`));
     requestAnimationFrame(() => composer.current?.focus());
+  };
+  // An end-to-end encrypted conversation (bChatX E2EE DMs): links get no card fetch (chat/linkify.ts).
+  const encrypted = useMemo(() => roomIsEncrypted(room, messages), [room, messages]);
+  // "+" › Call: a DM rings the other person (bPhone, by their $handle's identity key); a room joins or starts its
+  // Space through the room's LiveBanner, which says which of the two this person can do.
+  const [spaceCall, setSpaceCall] = useState<'join' | 'start' | null>(null);
+  const [spaceSignal, setSpaceSignal] = useState(0);
+  const callKind = useMemo<CallKind>(
+    () => (peer ? { kind: 'dm', peer } : spaceCall ? { kind: spaceCall } : null),
+    [peer, spaceCall],
+  );
+  const startCall = async (): Promise<string | void> => {
+    if (!peer) {
+      setSpaceSignal((n) => n + 1);
+      return;
+    }
+    if (!callsReady()) return 'Calls are still starting. Try again in a moment.';
+    try {
+      void dial(await resolveCallee((u, i) => fetch(u, i), `$${peer}`));
+    } catch (e) {
+      return e instanceof Error ? e.message : `Could not call $${peer}`;
+    }
   };
   // b's welcome in a new room (chat/roomWelcome.ts, as on bchatx.com). "Just chat" hides it for this room.
   const [welcomeHidden, setWelcomeHidden] = useState(false);
@@ -995,6 +1023,8 @@ const Conversation = ({
           gated={!!entry}
           spaceOpen={roomSpaceOpen(room)}
           autoOpen={autoJoinSpace}
+          openSignal={spaceSignal}
+          onCallable={setSpaceCall}
         />
       )}
       {WIDE_ON && (
@@ -1039,6 +1069,8 @@ const Conversation = ({
                 gated={!!entry}
                 spaceOpen={roomSpaceOpen(room)}
                 autoOpen={autoJoinSpace}
+                openSignal={spaceSignal}
+                onCallable={setSpaceCall}
               />
             ) : null
           }
@@ -1349,10 +1381,13 @@ const Conversation = ({
                       )}
                     </>
                   ) : (
-                    <>
-                      <MessageText body={it.message.body || ''} mine={it.mine} me={me} />
-                      <MessageVideo body={it.message.body} />
-                    </>
+                    <MessageBody
+                      body={it.message.body || ''}
+                      mine={it.mine}
+                      me={me}
+                      encrypted={encrypted}
+                      client={client}
+                    />
                   )}
                   {isPrivateB(it.message) && (
                     <div
@@ -1511,93 +1546,27 @@ const Conversation = ({
               {costLine(charge, entry?.gate.symbol ?? '', chargeDec(charge))}
             </div>
           )}
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              send(draft);
-            }}
-            className="flex items-end gap-2 px-3 pt-2 shrink-0"
-            style={{
-              paddingBottom: 8,
-              background: '#0b0b0b',
-              borderTop: `1px solid ${LINE}`,
-            }}
-          >
-            {/* Photos and videos (free; hidden in rooms that charge per message). */}
-            {!mustPay(charge) && (
-              <AttachButton client={client} ticker={room.ticker} onUploaded={poll} disabled={!online} />
-            )}
-            <button
-              type="button"
-              onClick={askB}
-              aria-label={`Ask $b, the ${APP_NAME} assistant`}
-              title="Ask b"
-              className="h-10 w-10 rounded-full flex items-center justify-center shrink-0"
-              style={{
-                background: '#1a1608',
-                color: GOLD,
-                border: `1px solid color-mix(in srgb, ${GOLD} 33%, transparent)`,
-              }}
-            >
-              {/* The gold b mark (owner, 18 Oct 2026: was the text "/b"); the white/edition themes swap in the outline b. */}
-              <img src={bGlyph} alt="" width={22} height={22} draggable={false} className="bw-dock-b-gold" />
-              <svg
-                className="bw-dock-b-outline"
-                width={22}
-                height={22}
-                viewBox={B_OUTLINE_VIEWBOX}
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-                strokeLinejoin="round"
-                strokeLinecap="round"
-                aria-hidden="true"
-              >
-                <path d={B_OUTLINE_D} vectorEffect="non-scaling-stroke" />
-              </svg>
-            </button>
-            {draftable && (
-              <button
-                type="button"
-                onClick={() => setDrafting(true)}
-                disabled={!online}
-                aria-label="Ask b to draft an agreement or summarise terms"
-                title="Ask b to draft"
-                className="h-10 px-3 rounded-full flex items-center justify-center shrink-0 text-[13px]"
-                style={{ background: '#111', color: GOLD, border: `1px solid ${LINE}` }}
-              >
-                Draft
-              </button>
-            )}
-            <textarea
-              ref={composer}
-              value={draft}
-              onChange={(e) => {
-                setDraft(e.target.value);
-                pingTyping(e.target.value);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey && !isNative) {
-                  e.preventDefault();
-                  send(draft);
-                }
-              }}
-              rows={1}
-              maxLength={4000}
-              placeholder={online ? 'Message' : 'Offline'}
-              className="flex-1 resize-none rounded-2xl px-4 py-[9px] text-[15px] text-white outline-none max-h-32"
-              style={{ background: PANEL, border: `1px solid ${LINE}` }}
-            />
-            <button
-              type="submit"
-              disabled={!draft.trim()}
-              aria-label="Send"
-              className="h-10 w-10 rounded-full flex items-center justify-center shrink-0 disabled:opacity-40"
-              style={{ background: GOLD }}
-            >
-              <ArrowUp size={20} color="#1a1300" strokeWidth={2.6} />
-            </button>
-          </form>
+          <ComposerBar
+            client={client}
+            ticker={room.ticker}
+            draft={draft}
+            setDraft={setDraft}
+            onDraftInput={pingTyping}
+            onSend={(text) => send(text)}
+            onSendGif={(url) => send(url, undefined, true)}
+            inputRef={composer}
+            online={online}
+            // Photos, files and voice notes are free; hidden in rooms that charge per message.
+            uploads={!mustPay(charge)}
+            enterSends={!isNative}
+            onUploaded={poll}
+            call={callKind}
+            onCall={startCall}
+            draftable={draftable}
+            onDraft={() => setDrafting(true)}
+            onAskB={askB}
+            askBLabel={`Ask $b, the ${APP_NAME} assistant`}
+          />
         </>
       )}
       {acting && (
@@ -1667,7 +1636,7 @@ const Conversation = ({
           onPay={() => {
             const c = confirmSend;
             setConfirmSend(null);
-            post(c.text, c.existing, charge);
+            post(c.text, c.existing, charge, c.keepDraft);
           }}
         />
       )}

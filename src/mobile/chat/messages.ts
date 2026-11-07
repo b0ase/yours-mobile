@@ -3,6 +3,7 @@
  * separators, room titles and previews. No I/O, so it is unit-tested directly.
  */
 import { HELP_DESK_NAME, isLounge } from './loungeInfo';
+import { gifOrText } from './giphyLink';
 
 /** A bChat room message as returned by /api/bitsign/rooms/[ticker]/messages. */
 export interface ChatMessage {
@@ -253,7 +254,9 @@ export const previewText = (room: ChatRoom, me: string) => {
   if (isLounge(room.ticker)) return HELP_DESK_PREVIEW;
   const m = room.last_message;
   if (!m) return room.access_note || 'No messages yet';
-  const body = (m.body || '').replace(/\s+/g, ' ').trim() || (m.kind === 'event' ? 'Room update' : 'Attachment');
+  // A GIF-only message reads "GIF" in the list, not its GIPHY link.
+  const body =
+    gifOrText((m.body || '').replace(/\s+/g, ' ').trim()) || (m.kind === 'event' ? 'Room update' : 'Attachment');
   if (m.kind !== 'event' && m.author_handle && normHandle(m.author_handle) === normHandle(me)) return `You: ${body}`;
   if (m.kind !== 'event' && m.author_handle && !isDirectRoom(room)) return `$${normHandle(m.author_handle)}: ${body}`;
   return body;
