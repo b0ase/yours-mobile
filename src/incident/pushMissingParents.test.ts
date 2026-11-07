@@ -18,11 +18,11 @@
  * guard is installed as initWallet installs it, with no store registered (the phone's state on 7 Nov). No keys.
  */
 import 'fake-indexeddb/auto';
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { PrivateKey, Random, Utils } from '@bsv/sdk';
 import { StorageIdb, StorageProvider, WalletStorageManager } from '@bsv/wallet-toolbox-client';
 import * as IS from '../services/inboundSync';
-import { _resetPushPasses, addMissingParents, type ParentStore } from '../services/pushParents';
+import { _forgetPushMemory, _resetPushPasses, addMissingParents, type ParentStore } from '../services/pushParents';
 
 const READER = Symbol.for('bwx.inboundSync.reader');
 const DAY = 86_400_000;
@@ -103,6 +103,8 @@ async function world() {
   const pu = (await phone.findOrInsertUser(identityKey)).user.userId;
   const su = (await server.findOrInsertUser(identityKey)).user.userId;
   const pages: Page[] = [];
+  /** Per captured page: the pass it belongs to (its cursor) and whether the backup refused it. */
+  const passOf = new WeakMap<Page, { since: number; refused: boolean }>();
   const s = server as unknown as { processSyncChunk: (a: unknown, c: Page) => Promise<{ done: boolean }> };
   const merge = s.processSyncChunk.bind(server);
   let yieldAfter: number | undefined;
@@ -115,6 +117,8 @@ async function world() {
     );
     const f = fault && ++pageNo === fault.at ? fault.kind : undefined;
     if (f) fault = undefined; // once
+    const meta = { since: ms((a as { since?: unknown }).since ?? 0), refused: f === 'refuse' };
+    passOf.set(pages[pages.length - 1], meta);
     if (f === 'refuse') throw new Error('network: the backup refused the page');
     const r = await merge(a, c);
     if (f === 'timeoutCommitted') throw new Error('network: the backup did not answer in time (processSyncChunk)');
@@ -153,6 +157,7 @@ async function world() {
     withoutCarrier,
     yieldOnce: () => void (yieldAfter = 1),
     faultAt,
+    passOf,
   };
 }
 type World = Awaited<ReturnType<typeof world>>;
@@ -193,7 +198,9 @@ beforeAll(() => {
   IS._resetInboundVerifiers();
   IS.installInboundSyncGuard(StorageIdb);
 });
-beforeEach(() => _resetPushPasses());
+beforeEach(async () => {
+  await _resetPushPasses();
+});
 afterAll(() => IS._resetInboundVerifiers());
 
 describe('a push page carries the rows its own are filed under', () => {
@@ -359,7 +366,7 @@ describe('a push page carries the rows its own are filed under', () => {
  */
 describe('a relaunch in the middle of a push pass skips nothing', () => {
   /** A pass of several pages; a fault on page `at`; the app relaunches; meanwhile a payment and a proof land. */
-  const scenario = async (kind: 'refuse' | 'timeoutCommitted' | 'kill', at: number) => {
+  const scenario = async (kind: 'refuse' | 'timeoutCommitted' | 'kill', at: number, lost = false) => {
     const w = await world();
     const { pulled, since } = await pulledThenAdmitted(w, 20, 3);
     const first = pulled[0]; // its coins are on the first page, which carries it as a no-op parent
@@ -369,7 +376,9 @@ describe('a relaunch in the middle of a push pass skips nothing', () => {
     w.pages.length = 0;
     w.faultAt(at, kind);
     await w.push().catch(() => undefined);
-    _resetPushPasses(); // the relaunch
+    // The relaunch: this process's memory is gone; the record kept before each page stays (unless `lost`).
+    if (lost) await _resetPushPasses();
+    else _forgetPushMemory();
     const txid = hex();
     await w.phone.insertTransaction(txRow(w.pu, 9_999, txid, new Date()) as never);
     await w.phone.insertOutput(outRow(w.pu, 99_999, 9_999, txid, 0, new Date(), { spendable: true }) as never);
@@ -395,13 +404,91 @@ describe('a relaunch in the middle of a push pass skips nothing', () => {
     // Re-sent rows were no-ops: one row per transaction and coin on the backup.
     expect(await w.server.findTransactions({ partial: { txid } })).toHaveLength(1);
     for (const p of pulled) expect(await w.server.findOutputs({ partial: { txid: p.txid } })).toHaveLength(3);
-    return w.pages.length;
+    // With the kept record the pass goes on where it was: no coin is read again (a restart from 0 would re-send them
+    // and grow the backup's offsets by a whole pass).
+    // Counted per pass, over the pages the backup committed (a refused page comes again whole, by design).
+    const committedSends = new Map<string, number>();
+    for (const pg of w.pages) {
+      const m = w.passOf.get(pg);
+      if (!m || m.refused) continue;
+      for (const o of pg.outputs ?? []) {
+        const k = `${m.since}|${String(o.outputId)}`;
+        committedSends.set(k, (committedSends.get(k) ?? 0) + 1);
+      }
+    }
+    const twice = [...committedSends].filter(([, n]) => n > 1).map(([k]) => k);
+    if (!lost) expect(twice).toEqual([]);
+    return { pages: w.pages.length, resent: twice.length };
   };
   for (const kind of ['kill', 'refuse', 'timeoutCommitted'] as const)
-    for (const at of [1, 2, 3]) // the pass has 4 pages; the 4th is its empty last one
-      test(`${kind} on page ${at}, then a relaunch`, async () => {
-        expect(await scenario(kind, at)).toBeGreaterThan(at);
+    for (const at of [1, 2, 3]) {
+      // every page of the pass: two with rows, then its empty last one
+      test(`${kind} on page ${at}, then a relaunch: it goes on where it was`, async () => {
+        expect((await scenario(kind, at)).pages).toBeGreaterThan(at);
       });
+      test(`${kind} on page ${at}, then a relaunch with the record lost: read again, nothing skipped`, async () => {
+        expect((await scenario(kind, at, true)).pages).toBeGreaterThan(at);
+      });
+    }
+});
+
+/**
+ * A coin whose transaction can't go as a no-op (re-review of 96f2cda1): it must not hold the whole page back. It is
+ * taken off the page, logged, and sent once its transaction moves on.
+ */
+describe('a row whose parent cannot go yet is held back, never the page', () => {
+  const stuck = async (status: string, extra: Row = {}) => {
+    const w = await world();
+    const { pulled } = await pulledThenAdmitted(w, 3, 1);
+    const p = pulled[1];
+    const T0 = new Date(Date.now() - 4 * DAY);
+    await w.server.updateTransaction(p.serverTx, { status, updated_at: T0, ...extra } as never);
+    await w.phone.updateTransaction(p.phoneTx, { status, updated_at: T0, ...extra } as never);
+    const lines: string[] = [];
+    const spy = spyOn(console, 'log').mockImplementation((...a: unknown[]) => void lines.push(a.map(String).join(' ')));
+    try {
+      await w.push(); // the page commits
+    } finally {
+      spy.mockRestore();
+    }
+    return { w, p, pulled, lines };
+  };
+
+  for (const [status, extra] of [
+    ['failed', {}],
+    ['nosend', {}],
+    ['completed', {}],
+  ] as [string, Row][])
+    test(`a ${status} transaction goes with its coin`, async () => {
+      const { w, p, pulled, lines } = await stuck(status, extra);
+      for (const q of pulled) expect((await serverCoin(w, q.txid, 0)).spendable).toBe(true);
+      expect(lines.filter((l) => l.includes('held back'))).toEqual([]);
+      expect((await w.server.findTransactions({ partial: { transactionId: p.serverTx } }))[0].status).toBe(status);
+    });
+
+  for (const [status, extra] of [
+    ['unsigned', {}],
+    ['unprocessed', {}],
+    ['nonfinal', {}],
+    ['unfail', {}],
+    ['nosend', { noSendExpiryMode: 'blocks' }],
+  ] as [string, Row][])
+    test(`a ${status}${extra.noSendExpiryMode ? ' (with an expiry)' : ''} transaction: its coin is held back, logged, and sent later`, async () => {
+      const { w, p, pulled, lines } = await stuck(status, extra);
+      // The page committed: the other coins are filed; this one waits, and the log names it and why.
+      for (const q of pulled.filter((q) => q !== p)) expect((await serverCoin(w, q.txid, 0)).spendable).toBe(true);
+      expect((await serverCoin(w, p.txid, 0)).spendable).toBe(false);
+      expect(lines.filter((l) => l.includes('held back'))).toEqual([
+        `[deviceSync] push: coin ${p.txid}:0 held back: its transaction ${p.txid} is ${status}; it goes once that moves on`,
+      ]);
+      expect((await w.server.findTransactions({ partial: { transactionId: p.serverTx } }))[0].status).toBe(status);
+      // A relaunch, then the transaction is mined: the next push carries it in its window, and the held coin with it.
+      _forgetPushMemory();
+      await w.phone.updateTransaction(p.phoneTx, { status: 'completed', noSendExpiryMode: undefined } as never);
+      await w.push();
+      expect((await serverCoin(w, p.txid, 0)).spendable).toBe(true);
+      expect((await w.server.findTransactions({ partial: { transactionId: p.serverTx } }))[0].status).toBe('completed');
+    });
 });
 
 /**
@@ -633,7 +720,7 @@ describe("the phone's 7 Nov page", () => {
     expect(w.pages[0].provenTxReqs!.reduce((m, r) => Math.max(m, (r.rawTx as number[]).length), 0)).toBe(2485);
 
     w.pages.length = 0;
-    _resetPushPasses();
+    await _resetPushPasses();
     await w.push();
     // The parents' share of a 64-row page is 16 and the coins' 16 parents use it up, so the label links (and what
     // follows them) go on the next page, with their labels.
@@ -700,17 +787,30 @@ describe('addMissingParents on its own', () => {
     expect(p.transactions).toHaveLength(0);
   });
 
-  test("a no-op parent goes only if completed, unproven or sending (the backup's abandoned-task check fails the rest)", async () => {
-    for (const status of ['completed', 'unproven', 'sending']) {
+  test('a no-op parent goes in a state the backup leaves alone; otherwise its coin comes off the page', async () => {
+    for (const parent of [
+      { status: 'completed' },
+      { status: 'unproven' },
+      { status: 'sending' },
+      { status: 'failed' },
+      { status: 'nosend' },
+    ]) {
       const p = page();
-      await addMissingParents(store({ status }), args, p);
-      expect([status, p.transactions.length]).toEqual([status, 1]);
+      const r = await addMissingParents(store(parent), args, p);
+      expect([parent.status, p.transactions.length, p.outputs.length, r.held.length]).toEqual([parent.status, 1, 1, 0]);
     }
-    for (const status of ['unsigned', 'unprocessed', 'nosend', 'nonfinal', 'failed', 'unfail']) {
+    for (const parent of [
+      { status: 'unsigned' },
+      { status: 'unprocessed' },
+      { status: 'nonfinal' },
+      { status: 'unfail' },
+      { status: 'nosend', noSendExpiryMode: 'blocks' },
+    ]) {
       const p = page();
-      await addMissingParents(store({ status }), args, p);
-      expect([status, p.transactions.length]).toEqual([status, 0]);
-      expect(p.outputs).toHaveLength(1); // the coin stays as it was: it files once its transaction moves on
+      const r = await addMissingParents(store(parent), args, p);
+      expect([parent.status, p.transactions.length, p.outputs.length]).toEqual([parent.status, 0, 0]);
+      expect(r.held.map((h) => h.ref)).toEqual([{ key: 'outputs', outputId: 1 }]);
+      expect(r.net).toEqual({ outputs: -1 }); // read, not sent: the offsets go on past it
     }
   });
 });
