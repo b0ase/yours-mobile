@@ -40,6 +40,7 @@ const THEME_SITES = [
   { id: 'bgamesx', host: 'bgamesx.com' },
   { id: 'bmoviesx', host: 'bmoviesx.com' },
   { id: 'bradiox', host: 'bradiox.com' },
+  { id: 'badvertisingx', host: 'badvertisingx.com' },
 ];
 
 module.exports = { THEME_SITES };
