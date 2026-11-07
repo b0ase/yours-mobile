@@ -16,6 +16,8 @@ import {
   MAY_HAVE_PAID_MESSAGE,
   signedFieldIds,
   strokesToSvg,
+  warmSealRoutes,
+  SEAL_WARM_ROUTES,
   type PendingSeal,
   type SealApi,
   type SealKeys,
@@ -608,5 +610,38 @@ describe('the broadcast receipt and in-progress (bit-sign fix/seal-receipt-sweep
       kept: 0,
     });
     expect(await one({ ok: false, status: 409, body: { code: 'replayed' } })).toEqual({ done: 0, kept: 0 });
+  });
+});
+
+describe('warmSealRoutes (7 Nov 2026: prepare and commit each paid a ~1 s cold start inside the seal)', () => {
+  test('one GET per seal step the press waits on, never the cancel or recover routes', async () => {
+    const seen: string[] = [];
+    warmSealRoutes(async (p) => void seen.push(p));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(seen).toEqual([
+      '/api/bitsign/nds/seal/prepare',
+      '/api/bitsign/nds/seal/compose',
+      '/api/bitsign/nds/seal/commit',
+    ]);
+    expect([...SEAL_WARM_ROUTES]).not.toContain('cancel');
+    expect([...SEAL_WARM_ROUTES]).not.toContain('recover');
+  });
+  test('never throws and never rejects, whatever the GET does (405, network error, synchronous throw)', async () => {
+    let calls = 0;
+    expect(() =>
+      warmSealRoutes((p) => {
+        calls++;
+        if (p.endsWith('prepare')) throw new Error('sync boom');
+        return Promise.reject(new Error('405'));
+      }),
+    ).not.toThrow();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(calls).toBe(3);
+  });
+  test('returns at once: the pad never waits on a warm-up', () => {
+    let resolved = false;
+    warmSealRoutes(() => new Promise(() => undefined));
+    resolved = true;
+    expect(resolved).toBe(true);
   });
 });

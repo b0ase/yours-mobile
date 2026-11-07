@@ -372,6 +372,25 @@ export function feeFromAtomicBeef(tx: number[] | undefined): number | null {
   }
 }
 
+/**
+ * The seal steps the press waits on, warmed when the pad shows (warmSealRoutes).
+ * Owner's iPhone, 7 Nov 2026 (doc dbb9beec): bit-sign's Vercel logs show prepare (10:22:05) and commit (10:22:36)
+ * each starting a cold function instance, about a second apiece, inside the seal. Never cancel or recover.
+ */
+export const SEAL_WARM_ROUTES = ['prepare', 'compose', 'commit'] as const;
+
+/**
+ * Wake bChatX's seal routes while he draws, so the press doesn't pay their cold starts: one GET each (the routes are
+ * POST-only, so the answer is a 405 and nothing is read or written; only the function instance starts). Fire and
+ * forget: returns at once, never throws, never rejects, and the seal itself never depends on it.
+ */
+export function warmSealRoutes(get: (path: string) => Promise<unknown>): void {
+  for (const r of SEAL_WARM_ROUTES)
+    void Promise.resolve()
+      .then(() => get(`/api/bitsign/nds/seal/${r}`))
+      .catch(() => undefined);
+}
+
 /** The broadcast receipt may hold the seal this long at most; then commit goes ahead regardless. */
 export const RECEIPT_TIMEOUT_MS = 5_000;
 /**
