@@ -127,7 +127,7 @@ const CELL = 'flex-1 basis-0 min-w-0 h-14 rounded-xl flex items-center justify-c
  * Today's BSV price; opens Portfolio vs market. With `change` the small line shows today's % change in green / red
  * instead of "per BSV".
  */
-const PriceCell = ({ rate, onOpen, change }: { rate: number; onOpen: () => void; change?: number | null }) => (
+export const PriceCell = ({ rate, onOpen, change }: { rate: number; onOpen: () => void; change?: number | null }) => (
   <button
     type="button"
     onClick={onOpen}
@@ -141,7 +141,11 @@ const PriceCell = ({ rate, onOpen, change }: { rate: number; onOpen: () => void;
         per BSV
       </span>
     ) : (
-      <span className="text-[10px] font-bold" style={{ color: change >= 0 ? '#2ecc71' : '#F04438' }}>
+      // bw-daychange: light packs repaint it in their checked success / danger ink (themes.css).
+      <span
+        className={`bw-daychange ${change >= 0 ? 'is-up' : 'is-down'} text-[10px] font-bold`}
+        style={{ color: change >= 0 ? '#2ecc71' : '#F04438' }}
+      >
         {change >= 0 ? '+' : ''}
         {change.toFixed(2)}% today
       </span>
