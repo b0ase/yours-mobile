@@ -172,6 +172,8 @@ export const answerDrawRequest = (path: DrawAnswer) => {
   const [p, ...rest] = pending;
   if (!p) return;
   pending = rest;
+  // Settled with a drawing or a decline: nothing is kept. Only a Review answer keeps the drawing (keepDrawing).
+  if (path !== DRAW_REVIEW) kept = null;
   answered++;
   p.resolve(path);
   listeners.forEach((f) => f());
@@ -185,14 +187,22 @@ export const onDrawRequest = (f: () => void) => {
   };
 };
 
-// The drawing kept over a Review: one slot, for one page and document, handed back once.
-let kept: { key: string; strokes: SigStroke[] } | null = null;
-const keptKey = (req: Pick<DrawRequest, 'origin' | 'docHash'>) => `${req.origin}\n${req.docHash}`;
-export const keepDrawing = (req: DrawRequest, strokes: SigStroke[]) => {
-  kept = strokes.length ? { key: keptKey(req), strokes } : null;
+// The drawing kept over a Review: one slot, for one account, page and document, handed back once, and only for a
+// few minutes. Cleared as soon as a request settles with a drawing or a decline (answerDrawRequest).
+export const KEPT_DRAWING_TTL_MS = 5 * 60_000;
+let kept: { key: string; strokes: SigStroke[]; until: number } | null = null;
+const keptKey = (req: Pick<DrawRequest, 'origin' | 'docHash'>, account: string) =>
+  `${account}\n${req.origin}\n${req.docHash}`;
+export const keepDrawing = (req: DrawRequest, strokes: SigStroke[], account: string, now = Date.now()) => {
+  kept = strokes.length ? { key: keptKey(req, account), strokes, until: now + KEPT_DRAWING_TTL_MS } : null;
 };
-export const takeKeptDrawing = (req: Pick<DrawRequest, 'origin' | 'docHash'>): SigStroke[] | undefined => {
-  if (!kept || kept.key !== keptKey(req)) return undefined;
+export const takeKeptDrawing = (
+  req: Pick<DrawRequest, 'origin' | 'docHash'>,
+  account: string,
+  now = Date.now(),
+): SigStroke[] | undefined => {
+  if (kept && now > kept.until) kept = null;
+  if (!kept || kept.key !== keptKey(req, account)) return undefined;
   const { strokes } = kept;
   kept = null;
   return strokes;

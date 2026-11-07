@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { SignaturePad } from '../signature/SignaturePad';
+import { useServiceContext } from '../../hooks/useServiceContext';
 import {
   DRAW_REVIEW,
   answerDrawRequest,
@@ -33,9 +34,12 @@ export function BitsignHost() {
     f();
     return onDrawRequest(f);
   }, []);
-  // Taken once per request (its sequence number): the drawing kept over this page's last Review, if any.
+  // Taken once per request (its sequence number): the drawing kept over this page's last Review, if any, for the
+  // active account only.
+  const { chromeStorageService } = useServiceContext();
+  const account = chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey ?? '';
   const seq = drawRequestSeq();
-  const kept = useMemo(() => (req ? takeKeptDrawing(req) : undefined), [req, seq]); // eslint-disable-line react-hooks/exhaustive-deps
+  const kept = useMemo(() => (req ? takeKeptDrawing(req, account) : undefined), [req, seq]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!req) return null;
   const who = req.signerHandle ? (req.signerHandle.startsWith('$') ? req.signerHandle : `$${req.signerHandle}`) : '';
   return (
@@ -48,7 +52,7 @@ export function BitsignHost() {
       onReview={
         req.review
           ? (strokes) => {
-              keepDrawing(req, strokes);
+              keepDrawing(req, strokes, account);
               answerDrawRequest(DRAW_REVIEW);
             }
           : undefined

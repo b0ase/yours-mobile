@@ -120,6 +120,10 @@ describe('one press: "Sign & seal · ~N sats"', () => {
     expect(page).toMatch(/onReview=\{\(strokes\) => \{\s*kept\.current = strokes;\s*setView\('review'\);/);
     expect(page).toContain('initialStrokes={kept.current}');
     expect(page).toContain('data-testid="seal-back-to-pad"');
+    // A newer version starts clean: no old drawing pre-fills a version not yet seen.
+    expect(page).toMatch(
+      /onClick=\{\(\) => \{\s*kept\.current = undefined;\s*setView\('pad'\);\s*setReload\(\(n\) => n \+ 1\);/,
+    );
     // The short hash, to compare with the desktop.
     expect(page).toContain('Document {shortDocHash}');
     // No second sign button on the page, no in-page canvas.

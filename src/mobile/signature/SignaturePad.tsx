@@ -182,7 +182,13 @@ export const SignaturePad = ({
           <RotateCw size={36} aria-hidden="true" />
           <div className="bw-sigpad-title">Turn your phone sideways to sign</div>
           {details}
+          {/* Rotation lock on: not a trap. Review (the document) and Cancel, as in the landscape column. */}
           <div className="bw-sigpad-btns">
+            {onReview && (
+              <button type="button" onClick={() => onReview(strokes)}>
+                Review
+              </button>
+            )}
             <button type="button" onClick={onCancel}>
               Cancel
             </button>

@@ -56,6 +56,12 @@ describe('SignaturePad wiring', () => {
     expect(src).toContain('bw-sigpad-side');
     expect(css).toMatch(/\.bw-sigpad\.is-sideways \.bw-sigpad-side \{[^}]*flex-direction: column/);
   });
+  test('portrait with rotation lock is not a trap: the turn prompt offers Review as well as Cancel', () => {
+    const turn = src.slice(src.indexOf("mode === 'turn' ?"), src.indexOf(') : sideways ?'));
+    expect(turn).toContain('Turn your phone sideways to sign');
+    expect(turn).toMatch(/onReview && \(\s*<button type="button" onClick=\{\(\) => onReview\(strokes\)\}>\s*Review/);
+    expect(turn).toContain('Cancel');
+  });
   test('Review keeps the drawing; the pad can start from a kept drawing', () => {
     expect(src).toMatch(/onReview\?: \(strokes: SigStroke\[\]\) => void/);
     expect(src).toMatch(/initialStrokes\?: SigStroke\[\]/);

@@ -623,7 +623,11 @@ export const NativeSealPage = () => {
             <button
               type="button"
               data-testid="seal-open-latest"
-              onClick={() => setReload((n) => n + 1)}
+              onClick={() => {
+                kept.current = undefined;
+                setView('pad');
+                setReload((n) => n + 1);
+              }}
               className="min-h-12 w-full rounded-lg text-[15px] font-semibold"
               style={{ background: '#F5B800', color: '#0b0b0d' }}
             >
