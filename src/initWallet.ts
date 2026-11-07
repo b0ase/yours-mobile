@@ -89,6 +89,7 @@ import {
   FULL_PASS_NEXT_SLICE_MS,
   paymentYields,
   requestFullPass,
+  requestTailPass,
   withDeadlines,
   withFullPassMode,
 } from './services/fullPass';
@@ -583,6 +584,8 @@ export const initWallet = async (
         console.warn('[deviceSync] pulling the backup again from the start (a full pass, in slices)');
       if (r === 'deep')
         console.warn('[deviceSync] pulling the last 48 hours of the backup again (the daily deep pull)');
+      if (r === 'abandoned')
+        console.warn('[deviceSync] a pull from the start had stopped moving: given up, the ordinary pulls run again');
     } catch (e) {
       console.warn('[deviceSync] a full pass could not be asked for:', e);
     }
@@ -721,9 +724,26 @@ export const initWallet = async (
         admitPrompt = { from: Date.now(), until: Date.now() + PROMPT_ADMIT_MS };
         // Once a day (and on a store's first open, or when a failure asked) the pull starts from the beginning; such
         // a pass runs in slices so payments never wait on it (services/fullPass.ts).
-        await fullPassIfDue(
-          (reader as { getSettings?: () => { storageIdentityKey?: string } }).getSettings?.()?.storageIdentityKey,
-        );
+        const backupSik = (reader as { getSettings?: () => { storageIdentityKey?: string } }).getSettings?.()
+          ?.storageIdentityKey;
+        await fullPassIfDue(backupSik);
+        // Rows another copy pushed late, with times older than the cursor (extension, 6 Nov 2026: 8734977f never
+        // arrived): every TAIL_CHECK_EVERY_MS, found by the backup's insert order with one-row probes, and pulled from
+        // the first one (services/pullTail.ts). Its own deadlines; never while a pass is under way.
+        const own = ownStore();
+        if (own && backupSik) {
+          const plan = await requestTailPass({
+            manager: storage,
+            store: own as never,
+            identityKey,
+            readerSik: backupSik,
+            reader: withDeadlines(reader as object) as never,
+          }).catch(() => 'unknown');
+          if (plan === 'tail')
+            console.warn(
+              '[deviceSync] the backup has rows this device never had (pushed late): pulling from the first',
+            );
+        }
         // Each backup request has a deadline, so a stalled backup frees the storage locks in seconds (review 23, M2).
         const bounded = withDeadlines(reader as object) as Parameters<typeof storage.syncFromReader>[1];
         // Own payments go first (fullPass afterPage): a pull that ended for one carries on in this run after it.
