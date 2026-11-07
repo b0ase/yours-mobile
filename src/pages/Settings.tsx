@@ -41,8 +41,10 @@ import {
   X as XIcon,
   Play,
   Wallet,
+  ScanFace,
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
+import { getPlatform } from '../platform';
 import { requestIgnoreBattery } from '../mobile/spaces/battery';
 import { FaEnvelope } from 'react-icons/fa';
 import { Button } from '../components/Button';
@@ -388,6 +390,24 @@ export const Settings = () => {
   const [customFeeRate, setCustomFeeRate] = useState(currentAccount.account?.settings.customFeeRate ?? FEE_PER_KB);
   const [displayCurrency, setDisplayCurrencyState] = useState<DisplayCurrency>(getDisplayCurrency);
   // 0 = Never (the default): chat, Spaces, feed and mail need the wallet to stay open.
+  // Face ID / Touch ID / fingerprint (mobile/biometricUnlock.ts). Absent on the extension and on devices without it.
+  const quick = getPlatform().quickUnlock;
+  const [quickOn, setQuickOn] = useState<boolean>();
+  const [quickBusy, setQuickBusy] = useState(false);
+  useEffect(() => {
+    if (quick?.enable) void quick.isAvailable().then(setQuickOn, () => setQuickOn(false));
+  }, [quick]);
+  const toggleQuickUnlock = async () => {
+    if (!quick?.enable || quickBusy) return;
+    setQuickBusy(true);
+    try {
+      if (quickOn) await quick.disable?.();
+      else await quick.enable();
+      setQuickOn(await quick.isAvailable().catch(() => false));
+    } finally {
+      setQuickBusy(false);
+    }
+  };
   const [lockTimeout, setLockTimeout] = useState(() => lockTimeoutMinutes(currentAccount.account?.settings));
   const [selectedAccountIdentityAddress, setSelectedAccountIdentityAddress] = useState<string | undefined>();
 
@@ -1084,8 +1104,20 @@ export const Settings = () => {
           description="Backup seed, download JSON, or QR code"
           onClick={() => setPage('export-keys-options')}
           isFirst
-          isLast={!usbSupported}
+          isLast={!usbSupported && !quick?.enable}
         />
+        {quick?.enable && quick.settingLabel && (
+          <>
+            <Divider />
+            <SettingRow
+              icon={<ScanFace size={16} />}
+              label={quick.settingLabel}
+              description="Your password still works and is still needed for backups"
+              right={<ToggleSwitch theme={theme} on={!!quickOn} onChange={() => void toggleQuickUnlock()} />}
+              isLast={!usbSupported}
+            />
+          </>
+        )}
         {usbSupported && (
           <>
             <Divider />
