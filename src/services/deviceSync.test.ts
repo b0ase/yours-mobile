@@ -3,6 +3,7 @@ import {
   BACKOFF_MS,
   PUSH_DELAY_MS,
   SLOW_SYNC_MS,
+  WAIT_BACKOFF_MS,
   backupBeforeSend,
   createDeviceSync,
   notifyOnWalletChanges,
@@ -392,5 +393,36 @@ describe('device sync: after waiting for an own payment, the turn is checked aga
     expect(await r.finish()).toEqual({ ok: false, error: 'a site action is in progress; sync deferred' });
     expect(r.calls).toEqual([]);
     expect(r.sync.state().pendingPush).toBe(true);
+  });
+});
+
+describe('a push that waits for a transaction to move on retries soon (services/pushParents.ts)', () => {
+  test('"push waits for" is retried within a minute, however many times it failed, not on the 30-minute back-off', async () => {
+    let waits = true;
+    const { sync, c } = harness({
+      push: async () => {
+        if (waits) throw new Error(`push waits for ${'ab'.repeat(32)} (unsigned)`);
+      },
+    });
+    for (let i = 0; i < 8; i++) {
+      await sync.syncNow();
+      expect(c.pending()).toEqual([WAIT_BACKOFF_MS]);
+    }
+    expect(WAIT_BACKOFF_MS).toBeLessThanOrEqual(60_000);
+    waits = false;
+    expect((await sync.syncNow()).ok).toBe(true);
+    expect(sync.state().failures).toBe(0);
+  });
+
+  test('any other failure still climbs the usual back-off', async () => {
+    const { sync, c } = harness({
+      push: async () => {
+        throw new Error('WERR_INTERNAL: An internal error has occurred.');
+      },
+    });
+    await sync.syncNow();
+    expect(c.pending()).toEqual([BACKOFF_MS[0]]);
+    await sync.syncNow();
+    expect(c.pending()).toEqual([BACKOFF_MS[1]]);
   });
 });

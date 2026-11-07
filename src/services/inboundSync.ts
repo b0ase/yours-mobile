@@ -54,6 +54,7 @@ import {
 import { BSV20, BSV21 } from '@1sat/templates';
 import { WalletPermissionsManager } from '@bsv/wallet-toolbox-client';
 import type { SpendState } from './unsentExpiry';
+import { readPushPage, type ParentStore, type PushArgs, type PushPage } from './pushParents';
 import {
   afterPage,
   beforePage,
@@ -1477,66 +1478,6 @@ export async function unfiledTransactions(
   return [...unfiled];
 }
 
-/** Entities a page carries after its outputs (getSyncChunk's order). */
-const AFTER_OUTPUTS = [
-  'txLabelMaps',
-  'outputTagMaps',
-  'certificates',
-  'certificateFields',
-  'commissions',
-  'provenTxReqs',
-] as const;
-
-/**
- * The same gap going the other way: this device's pages to a backup. A transaction this device took in from a backup
- * keeps its old time, so a push from the backup's cursor never sends it, while the coins under it (spent since, newer)
- * are sent; the backup's merge can't file them and refuses the push (setActive's propagate, updateBackups). Each push
- * page therefore carries the transactions its coins are filed under.
- *  - Only so the backup can file them (review 23, L1): each goes as keepTx sends a kept row, with the epoch as its time,
- *    no proof id, no expiry state and no input BEEF, so the backup's copy (found by txid) is never changed by it: a
- *    completed transaction is never set back to unproven or failed. Such a parent is always older than the backup's
- *    cursor for this device, so the backup holds it already (it came from there) or was sent it before; a backup that
- *    lacks one anyway inserts it, and another copy that then meets it unfiled rewinds once to take it in.
- *  - Within the page's limits (L2): at most a quarter of its items and of its rough size go to parents; the page's
- *    outputs end where that runs out (with nothing after them), and the next page goes on from there.
- *  - Only in a toolbox sync to a backup (L3): an export, a USB backup or a Repair Sync index reads the store as it is.
- */
-async function withParentTransactions(store: DeviceStore, args: SyncArgs, chunk: SyncChunk) {
-  const outputs = chunk?.outputs ?? [];
-  if (!outputs.length) return;
-  const onPage = new Set((chunk.transactions ?? []).map((t) => t?.transactionId));
-  const budget = Math.max(64_000, Math.floor((args?.maxRoughSize ?? 10_000_000) / 4));
-  const maxParents = Math.max(1, Math.floor((args?.maxItems ?? 1_000) / 4));
-  const added = new Set<number>();
-  const parents: TxRow[] = [];
-  let used = 0;
-  for (let i = 0; i < outputs.length; i++) {
-    const id = outputs[i]?.transactionId;
-    if (typeof id !== 'number' || onPage.has(id) || added.has(id)) continue;
-    const t = (await store.findTransactions({ partial: { transactionId: id } }))[0];
-    if (!t) continue;
-    const size = (t.rawTx?.length ?? 0) + 512;
-    if (parents.length && (used + size > budget || parents.length >= maxParents)) {
-      chunk.outputs = outputs.slice(0, i);
-      for (const k of AFTER_OUTPUTS) {
-        const rows = (chunk as Record<string, unknown[] | undefined>)[k];
-        if (rows) rows.length = 0; // fetched again after the rest of the outputs
-      }
-      break;
-    }
-    parents.push({
-      ...t,
-      updated_at: new Date(0),
-      provenTxId: undefined,
-      noSendExpiryState: undefined,
-      inputBEEF: undefined,
-    } as TxRow);
-    added.add(id);
-    used += size;
-  }
-  if (parents.length) (chunk.transactions ?? (chunk.transactions = [])).push(...parents);
-}
-
 // ── installation ──
 
 /**
@@ -1575,7 +1516,7 @@ type GetSyncChunk = (this: DeviceStore, args: unknown) => Promise<SyncChunk>;
  * Wrap processSyncChunk on the device store class (StorageIdb) so every merge for a registered account is checked first,
  * including the one the wallet factory runs before initWallet can touch the instance. A merge into a registered device
  * store for an account with no check is refused. Anything else passes as before. A device store's pages to a backup
- * carry the transactions their coins are filed under (withParentTransactions). Idempotent; returns the uninstall.
+ * carry the rows their own are filed under (services/pushParents.ts). Idempotent; returns the uninstall.
  */
 export function installInboundSyncGuard(cls: { prototype: object }): () => void {
   const proto = cls.prototype as Record<string | symbol, unknown>;
@@ -1588,13 +1529,25 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
   const read = proto.getSyncChunk as GetSyncChunk | undefined;
   if (typeof read === 'function') {
     proto[READER] = read;
+    /**
+     * The same gap going the other way: this device's pages to a backup. A transaction this device took in from a backup
+     * keeps its old time, so a push from the backup's cursor never sends it, while the coins under it (spent since, newer)
+     * are sent; the backup's merge can't file them and refuses the push (setActive's propagate, updateBackups). Each push
+     * page therefore carries the rows its own are filed under (services/pushParents.ts: review 23's L1 and L2 kept).
+     * Only in a toolbox sync to another store (L3): an export, a USB backup or a Repair Sync index reads the store as it is.
+     * Not tied to the account's registration (owner's iPhone, 7 Nov 2026: the failing push page carried no parent at all
+     * while this check waited on it): the store's own identity says what a push from it is.
+     */
     proto.getSyncChunk = async function (this: DeviceStore, args: unknown) {
-      const chunk = await read.call(this, args);
-      const sik = this.getSettings?.()?.storageIdentityKey;
-      const a = args as SyncArgs;
-      if (sik && deviceStores.has(sik) && a?.includeNextCheckpoint === true && a.fromStorageIdentityKey === sik)
-        await withParentTransactions(this, a, chunk);
-      return chunk;
+      // A provider stand-in in tests (_mergeUnchecked) serves pages as wallet.1sat.app does: as they are.
+      const own = (this as unknown as Record<string, unknown>).processSyncChunk;
+      if (Object.prototype.hasOwnProperty.call(this, 'processSyncChunk') && own === original)
+        return (await read.call(this, args)) as SyncChunk;
+      return (await readPushPage(
+        this as unknown as ParentStore,
+        args as PushArgs,
+        async (a) => (await read.call(this, a)) as PushPage,
+      )) as SyncChunk;
     };
   }
   // A pull starts a little before the newest time it has seen (review 23, M1): a row another copy pushed a few minutes

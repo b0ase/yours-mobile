@@ -58,6 +58,12 @@ export const TIMEOUT_BACKOFF_CAP_MS = 240_000;
 /** The backup didn't answer in time, or is still answering an earlier request (services/pushView.ts, fullPass.ts). */
 export const isBackupTimeout = (e: unknown): boolean =>
   /did not answer in time|still answering an earlier request/.test(errText(e));
+/**
+ * A push that waits for a transaction to move on (services/pushParents.ts: unsigned or unprocessed until it goes out,
+ * or the wallet-open abandoned-task sweep fails it) is retried this soon, however many times it waited.
+ */
+export const WAIT_BACKOFF_MS = 60_000;
+export const isPushWait = (e: unknown): boolean => /push waits for /.test(errText(e));
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -142,8 +148,9 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
       failures++;
       pendingPush = true;
       // A backup that answered too slowly (or is still answering): retry within TIMEOUT_BACKOFF_CAP_MS, never at the
-      // 30-minute end of the ladder. A Store payment's pushNow never waits for the back-off either way.
-      const wait = retryLater(isBackupTimeout(e) ? TIMEOUT_BACKOFF_CAP_MS : Infinity);
+      // 30-minute end of the ladder. A push that waits for a transaction to move on: within WAIT_BACKOFF_MS. A Store
+      // payment's pushNow never waits for the back-off either way.
+      const wait = retryLater(isPushWait(e) ? WAIT_BACKOFF_MS : isBackupTimeout(e) ? TIMEOUT_BACKOFF_CAP_MS : Infinity);
       log(`[deviceSync] ${mode} failed (retry in ${Math.round(wait / 60_000)} min):`, syncErrorDetail(e));
       return { ok: false, error: errText(e) };
     }
