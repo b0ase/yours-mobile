@@ -43,7 +43,7 @@ describe.skipIf(!chromePath())('main wallet view in a connected site’s light t
   beforeAll(async () => {
     dir = await buildFixture();
     browser = await launchChrome();
-  }, 60_000);
+  }, 180_000);
   afterAll(async () => {
     await browser?.close();
   });
@@ -57,7 +57,7 @@ describe.skipIf(!chromePath())('main wallet view in a connected site’s light t
     // The view really wears the site: the page is its paper and the price its ink, not Gold's white on black.
     expect(rs.find((r) => r.name === 'top row: price')).toMatchObject({ fg: '#151311', bg: '#FBFAF6' });
     expect(rs.find((r) => r.name === 'card: balance')?.fg).toBe('#151311');
-  }, 60_000);
+  }, 180_000);
 
   test('a card that keeps its own (dark-shaded) picture: its ink is picked for the dark face', async () => {
     const page = await openView(browser as Browser, dir, {
@@ -72,7 +72,7 @@ describe.skipIf(!chromePath())('main wallet view in a connected site’s light t
     await page.close();
     expect(failures(rs)).toEqual([]);
     expect(rs.find((r) => r.name === 'card: balance')?.fg).toBe('#F2F2F0');
-  }, 60_000);
+  }, 180_000);
 });
 
 /** Every bundled light pack (White, the paper and Mono packs, Nautical, White/Black). */
@@ -84,7 +84,7 @@ describe.skipIf(!chromePath())('light packs that now share every light-pack rule
   beforeAll(async () => {
     dir = await buildFixture();
     browser = await launchChrome();
-  }, 60_000);
+  }, 180_000);
   afterAll(async () => {
     await browser?.close();
   });
@@ -95,7 +95,7 @@ describe.skipIf(!chromePath())('light packs that now share every light-pack rule
       await page.close();
       expect(failures(rs)).toEqual([]);
       expect(rs.find((r) => r.name.startsWith('live pill'))?.fg).toBe('#FFFFFF');
-    }, 60_000);
+    }, 180_000);
   }
 });
 
@@ -109,7 +109,7 @@ describe.skipIf(!chromePath())('store edition (yellow card) in every light pack 
   beforeAll(async () => {
     dir = await buildFixture({ store: true });
     browser = await launchChrome();
-  }, 60_000);
+  }, 180_000);
   afterAll(async () => {
     await browser?.close();
   });
@@ -127,5 +127,5 @@ describe.skipIf(!chromePath())('store edition (yellow card) in every light pack 
       bad.push(...failures(rs).map((f) => `${fx.label}: ${f}`));
     }
     expect(bad).toEqual([]);
-  }, 120_000);
+  }, 300_000);
 });

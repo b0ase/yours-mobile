@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { contrast, mix } from './colour';
+import { contrast, hslToHex, mix } from './colour';
 import {
   DARK_CARD_GROUND,
   DARK_CARD_INK,
@@ -164,5 +164,47 @@ describe('darkGroundInks', () => {
   test('Gold keeps its own gold on the dark card', () => {
     const gold = ACCENTS.find((a) => a.id === 'gold') as Accent;
     expect(darkGroundInks(gold).hi).toBe(gold.hi.toUpperCase());
+  });
+});
+
+describe('guardLook: 10,000 random light themes (fixed seed)', () => {
+  // Re-review of 83eab062: moving a stop to suit the on-accent ink could re-lighten hi after it was darkened for the
+  // paper, so hi-coloured text (Scan, links, active tabs) fell to 3.7-4.5:1 on paper in ~6% of mid-tone themes.
+  const rand = (() => {
+    let t = 0x5eed1234;
+    return () => {
+      t = (t + 0x6d2b79f5) | 0;
+      let r = Math.imul(t ^ (t >>> 15), 1 | t);
+      r = (r + Math.imul(r ^ (r >>> 7), 61 | r)) ^ r;
+      return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    };
+  })();
+  const between = (lo: number, hi: number) => lo + (hi - lo) * rand();
+  test('hi reads on the paper and the on-accent ink reads on every accent stop', () => {
+    const bad: string[] = [];
+    for (let i = 0; i < 10_000; i++) {
+      const h = between(0, 360);
+      const bg = hslToHex({ h: between(0, 360), s: between(0, 60), l: between(88, 99) });
+      const surface = hslToHex({ h: between(0, 360), s: between(0, 40), l: between(93, 100) });
+      const accent = hslToHex({ h, s: between(30, 100), l: between(20, 70) });
+      const hi = hslToHex({ h: h + between(-20, 20), s: between(30, 100), l: between(20, 75) });
+      const g = guardLook({
+        ...ARTECHEX,
+        accent,
+        hi,
+        lo: mix(accent, bg, 0.3),
+        on: contrastPick(accent),
+        bg,
+        surface,
+        surface2: mix(surface, ARTECHEX.text, 0.06),
+        nav: bg,
+      });
+      const paper = Math.min(...[g.bg, g.surface, g.surface2].map((c) => contrast(g.hi, c)));
+      const onStops = Math.min(...[g.accent, g.hi, g.lo].map((c) => contrast(g.on, c)));
+      if (paper < TEXT_RATIO || onStops < TEXT_RATIO)
+        bad.push(`${accent}/${hi} on ${bg}: hi ${paper.toFixed(2)}, on ${onStops.toFixed(2)}`);
+    }
+    expect(bad.slice(0, 10)).toEqual([]);
+    expect(bad.length).toBe(0);
   });
 });

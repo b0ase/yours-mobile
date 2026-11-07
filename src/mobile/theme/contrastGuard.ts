@@ -38,25 +38,26 @@ export function guardInk(fg: string, bgs: string | readonly string[], kind: InkK
 /**
  * A whole look, guarded: body and secondary text, accent ink (Scan, active tabs, links: text, so 4.5:1), the accent
  * itself (icons and fills: 3:1), success / danger, and the ink on the accent's three stops. The ink on the stops is
- * picked AFTER the stops are guarded (the stops painted are the guarded ones), and a stop that still leaves that ink
- * under 4.5:1 is moved away from it until it reads.
+ * picked AFTER the stops are guarded (the stops painted are the guarded ones); when no ink reads on all of them,
+ * the ink is white and accent and lo are darkened to match, while hi keeps its paper-safe shade.
  */
 export function guardLook(a: Accent): Accent {
   const grounds = [a.bg, a.surface, a.surface2];
+  // hi is also text on the paper (Scan, links, active tabs): guarded for the paper first, and never lightened again.
   const hi = guardInk(a.hi, grounds);
   const accent = guardInk(a.accent, [a.bg, a.surface], 'icon');
-  // The ink that reads on all three stops; else the one for accent and hi (hi is also text on the paper, so it keeps
-  // its darkness), and the lighter lo stop is moved to match.
+  const reads = (on: string, stops: string[]) => stops.every((c) => contrast(on, c) >= TEXT_RATIO);
+  // The ink that reads on all three stops as they are; otherwise white, which reads on a hi dark enough for the
+  // paper, with accent and lo darkened to match (only darker, so they keep their own contrast on the paper).
   const all = pickReadable([a.on], [accent, hi, a.lo], TEXT_RATIO);
-  const on = [accent, hi, a.lo].every((c) => contrast(all, c) >= TEXT_RATIO)
-    ? all
-    : pickReadable([a.on], [accent, hi], TEXT_RATIO);
-  const fill = (stop: string) => guardInk(stop, on);
+  const white = '#FFFFFF';
+  const on = reads(all, [accent, hi, a.lo]) ? all : reads(white, [hi]) ? white : pickReadable([a.on], [accent, hi]);
+  const fill = (stop: string) => (on === white ? guardInk(stop, white) : stop);
   return {
     ...a,
     text: same(a.text, guardInk(a.text, grounds)),
     muted: same(a.muted, guardInk(a.muted, grounds)),
-    hi: same(a.hi, fill(hi)),
+    hi: same(a.hi, hi),
     accent: same(a.accent, fill(accent)),
     lo: same(a.lo, fill(a.lo)),
     on: same(a.on, on),

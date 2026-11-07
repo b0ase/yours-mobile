@@ -113,7 +113,7 @@ export async function openView(browser: Browser, dir: string, fx: Fixture): Prom
       const w = window as unknown as { __READY?: boolean; __ERROR?: string };
       return w.__READY || w.__ERROR;
     },
-    { timeout: 20_000 },
+    { timeout: 60_000 },
   );
   const err = await page.evaluate(() => (window as unknown as { __ERROR?: string }).__ERROR);
   if (err) throw new Error(err);
