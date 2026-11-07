@@ -16,6 +16,11 @@ export const BASE_TIMEOUT_MS = 30_000;
 /** Allow for a slow uplink: ~0.5 Mbit/s (16 s per MB) on top of the base wait. */
 export const MS_PER_MB = 16_000;
 export const MAX_TIMEOUT_MS = 10 * 60_000;
+/**
+ * A broadcast this slow is logged ("[payTiming] broadcast took …", services/payTiming.ts): the owner's seal on 7 Nov
+ * 2026 spent ~25 s in one createAction and nothing told the broadcaster's wait apart from the storage queue.
+ */
+export const SLOW_BROADCAST_MS = 2_000;
 
 export function broadcastTimeoutMs(bytes: number): number {
   if (!Number.isFinite(bytes) || bytes <= 0) return BASE_TIMEOUT_MS;
@@ -30,7 +35,13 @@ type StackServices = { postBeef: PostBeef; arcade?: { timeout?: number } };
  * Wrap services.postBeef so each broadcast's timeout fits its size. Returns false when the services object has
  * no arcade client to tune (left untouched).
  */
-export function sizeAwareBroadcast(services: unknown, log: (m: string) => void = console.log): boolean {
+export function sizeAwareBroadcast(
+  services: unknown,
+  log: (m: string) => void = console.log,
+  timing: { now?: () => number; slowLog?: (m: string) => void } = {},
+): boolean {
+  const now = timing.now ?? Date.now;
+  const slowLog = timing.slowLog ?? ((m: string) => console.warn(m));
   const s = services as StackServices | null;
   if (!s || typeof s.postBeef !== 'function' || !s.arcade || typeof s.arcade.timeout !== 'number') return false;
   const arcade = s.arcade;
@@ -47,10 +58,14 @@ export function sizeAwareBroadcast(services: unknown, log: (m: string) => void =
     if (timeout > BASE_TIMEOUT_MS) log(`[broadcast] ${bytes} bytes: timeout ${Math.round(timeout / 1000)} s`);
     inFlight++;
     arcade.timeout = Math.max(arcade.timeout ?? BASE_TIMEOUT_MS, timeout);
+    const t0 = now();
     try {
       return await original(beef, txids, logger);
     } finally {
       if (--inFlight === 0) arcade.timeout = BASE_TIMEOUT_MS;
+      const took = now() - t0;
+      if (took >= SLOW_BROADCAST_MS)
+        slowLog(`[payTiming] broadcast took ${took} ms (${bytes} bytes, ${String(txids?.[0] ?? '').slice(0, 12)}…)`);
     }
   };
   return true;

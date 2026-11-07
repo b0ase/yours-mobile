@@ -25,18 +25,33 @@ export type DeviceSyncDeps = {
   applies: () => boolean;
   /** Connect the configured backup if it isn't connected; resolves true when one is connected. */
   ensureBackup: () => Promise<boolean>;
-  /** Bring the backup's changes into this device's store. */
-  pull: () => Promise<void>;
-  /** Copy this device's changes to the backup. */
-  push: () => Promise<void>;
+  /**
+   * Bring the backup's changes into this device's store. 'yielded': it ended after a merged page to let an own payment
+   * go first (fullPass afterPage); the run pulls again from that checkpoint once the payment has finished.
+   */
+  pull: () => Promise<void | 'yielded'>;
+  /**
+   * Copy this device's changes to the backup. 'yielded': it stopped after a committed page to let an own payment go
+   * first (services/pushView.ts); the run pushes again from the backup's checkpoint once the payment has finished.
+   */
+  push: () => Promise<void | 'yielded'>;
+  /** Own payments go first (services/ownPayments.ts): a run starts, and a yielded push carries on, once `idle`. */
+  yieldTo?: { idle: () => Promise<void> };
   /** A connected site is part-way through a multi-step action: don't take storage locks now. */
   busy?: () => boolean;
   log?: (...a: unknown[]) => void;
   setTimer?: (fn: () => void, ms: number) => unknown;
   clearTimer?: (t: unknown) => void;
+  /** Tests: the clock a run is timed on (SLOW_SYNC_MS). */
+  now?: () => number;
 };
 
 export const PUSH_DELAY_MS = 20_000;
+/**
+ * A run this long is logged with its pull and push times: it holds the storage locks a payment queues behind (owner's
+ * seal, 7 Nov 2026: one createAction took ~25 s just after the app opened, when the open-time sync runs).
+ */
+export const SLOW_SYNC_MS = 2_000;
 export const BACKOFF_MS = [60_000, 120_000, 240_000, 480_000, 960_000, 1_800_000];
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -45,6 +60,7 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
   const setTimer = deps.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
   const clearTimer = deps.clearTimer ?? ((t) => clearTimeout(t as ReturnType<typeof setTimeout>));
   const log = deps.log ?? (() => undefined);
+  const now = deps.now ?? Date.now;
   let running: Promise<DeviceSyncResult> | null = null;
   let runningMode: 'full' | 'push' | null = null;
   /** A full sync asked for while a push runs: it starts when that push ends (review 20, L6). */
@@ -67,15 +83,34 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
       schedule(PUSH_DELAY_MS);
       return { ok: false, error: 'a site action is in progress; sync deferred' };
     }
+    const idle = () => deps.yieldTo?.idle() ?? Promise.resolve();
     try {
+      // An own payment running now goes first: this run takes the storage queue after it (services/ownPayments.ts).
+      await idle();
       if (!(await deps.ensureBackup())) throw new Error('backup storage is not connected');
       let pulled = false;
+      const t0 = now();
+      let yields = 0;
       if (mode === 'full') {
-        await deps.pull();
+        // A pull that yielded to an own payment carries on here, after it, from its checkpoint.
+        while ((await deps.pull()) === 'yielded') {
+          yields++;
+          await idle();
+        }
         pulled = true;
       }
+      const t1 = now();
       pendingPush = false;
-      await deps.push();
+      for (;;) {
+        await idle();
+        if ((await deps.push()) !== 'yielded') break;
+        yields++; // stopped after a committed page for an own payment: carry on from the backup's checkpoint
+      }
+      const t2 = now();
+      if (t2 - t0 >= SLOW_SYNC_MS)
+        log(
+          `[deviceSync] ${mode} took ${t2 - t0} ms (${pulled ? `pull ${t1 - t0} ms, ` : ''}push ${t2 - t1} ms${yields ? `, let own payments go first ${yields}×` : ''})`,
+        );
       failures = 0;
       if (!pendingPush) lastPushOkAt = Date.now();
       return { ok: true, pulled, pushed: true };
@@ -168,10 +203,11 @@ export type DeviceSync = ReturnType<typeof createDeviceSync>;
  * open after the release, and fail with "the backup took too long" (final review 18, F-A). Admission runs outside every
  * storage lock and retries on its own timer, the alarm and app focus, so nothing depends on it finishing in the pull.
  */
-export function pullThenAdmitSoon(merge: () => Promise<void>, admitSoon: () => void): () => Promise<void> {
+export function pullThenAdmitSoon<R>(merge: () => Promise<R>, admitSoon: () => void): () => Promise<R> {
   return async () => {
-    await merge();
+    const r = await merge();
     admitSoon();
+    return r;
   };
 }
 

@@ -40,6 +40,7 @@ import {
   sealKey,
   sealStateHere,
   signedFieldIds,
+  warmSealRoutes,
   type PendingSeal,
   type PendingSealStore,
   type SealLedger,
@@ -393,6 +394,10 @@ export const NativeSealPage = () => {
         c.done = true;
       });
     coinCheck.current = c;
+    // And wake bChatX's seal routes while he draws (nativeSeal.warmSealRoutes: ~1 s cold start each, 7 Nov 2026).
+    // No session token on these: a warm-up needs none.
+    const warm = new BchatClient(defaultHttp(isNative));
+    warmSealRoutes((path) => warm.request('GET', path, undefined, false));
   }, [padShown]);
   /**
    * Read at the press. The wait is on the wall clock with an ~8 s cap and none at all while a heal or sync holds the

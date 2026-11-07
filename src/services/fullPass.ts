@@ -28,6 +28,7 @@
  *    resumes it and never starts a new one. It never sets a backup aside on its own.
  */
 import { EntitySyncState } from '@bsv/wallet-toolbox-client';
+import { ownPayments, type OwnPaymentGate } from './ownPayments';
 
 const HOUR = 3_600_000;
 /** A true full pass, weekly (review 23 re-check: the cost schedule). */
@@ -314,12 +315,28 @@ export function beforePage(deviceSik: string, page: PageKind, now = Date.now()):
   return 'go';
 }
 
-/** For the guard, after a merged page: 'yield' ends this sync (its slice is used up; the checkpoint has the page). */
-export function afterPage(deviceSik: string, now = Date.now()): 'yield' | 'go' {
+/**
+ * For the guard, after a merged page: 'yield' ends this sync (its slice is used up, or an own payment is waiting; the
+ * checkpoint has the page). A device-sync pull ('slice') lets a payment from the wallet's own pages go first (owner's
+ * seal, 7 Nov 2026: services/ownPayments.ts); the next slice carries on once it has finished.
+ */
+export function afterPage(
+  deviceSik: string,
+  now = Date.now(),
+  payments: Pick<OwnPaymentGate, 'waiting'> = ownPayments,
+): 'yield' | 'go' {
   if (restoring > 0 || !modes.get(deviceSik)) return 'go';
+  if (modes.get(deviceSik) === 'slice' && payments.waiting()) {
+    paymentYieldCount++;
+    return 'yield';
+  }
   const start = sliceStart.get(deviceSik);
   return start !== undefined && now - start >= sliceMs ? 'yield' : 'go';
 }
+
+/** Pulls ended for an own payment so far: the device-sync pull compares it before and after to carry on at once. */
+let paymentYieldCount = 0;
+export const paymentYields = () => paymentYieldCount;
 
 let sliceMs = FULL_PASS_SLICE_MS;
 /** Test hook: the slice length (ms); no argument restores the default. */

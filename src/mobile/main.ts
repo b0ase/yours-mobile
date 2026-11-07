@@ -117,9 +117,10 @@ worker.addEventListener('message', (e) => {
   } else if (e.data?.t === 'console') {
     console[e.data.level as 'error' | 'warn' | 'log']('[background]', e.data.text);
     // Private test builds only (owner's re-test, 6 Nov 2026): keep the sync lines where a container copy can read them.
+    // And the payment timings (services/payTiming.ts, 7 Nov 2026: a 25 s seal payment nobody could explain).
     if (
       import.meta.env.VITE_CHANNEL === 'ios-private' &&
-      /^\[(deviceActive|deviceSync|inbound-sync|fullPass)/.test(String(e.data.text))
+      /^\[(deviceActive|deviceSync|inbound-sync|fullPass|payTiming)/.test(String(e.data.text))
     )
       try {
         const k = 'bwx.diag.syncLog';
