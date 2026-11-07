@@ -28,7 +28,7 @@
  *    resumes it and never starts a new one. It never sets a backup aside on its own.
  */
 import { EntitySyncState } from '@bsv/wallet-toolbox-client';
-import { findTailOffsets, highestIds, mergedIds, type GetSyncChunk } from './pullTail';
+import { TAIL_ENTITIES, findTailOffsets, highestIds, mergedIds, type GetSyncChunk } from './pullTail';
 
 const HOUR = 3_600_000;
 /** A true full pass, weekly (review 23 re-check: the cost schedule). */
@@ -92,6 +92,8 @@ export type FullPassMark = {
   tailSeen?: Record<string, number>;
   /** Per entity: the backup's row count at the last check (pullTail TailMemo.counts). */
   tailCounts?: Record<string, number>;
+  /** A tail pass ends where this entity begins (one too large to check: pullTail skipped). */
+  tailUntil?: string;
   /** The cursor when this pass from the start was started (ms): put back if the pass is abandoned. */
   fromWhen?: number;
   /** A pass from the start: its offsets as last seen, and how long (wallet uptime) they have not moved. */
@@ -203,13 +205,19 @@ const countsKey = (row: SyncStateRow) => {
 export const lastGoodWhen = (row: SyncStateRow): number | undefined => {
   const mark = markOf(row);
   if (typeof mark.fromWhen === 'number') return mark.fromWhen;
-  const m = parse(row.syncMap) ?? {};
-  const times = ['transaction', 'output']
-    .map((k) => (m[k] && typeof m[k] === 'object' ? (m[k] as { maxUpdated_at?: unknown }).maxUpdated_at : undefined))
+  const m = (parse(row.syncMap) ?? {}) as Record<string, { count?: number; maxUpdated_at?: unknown } | undefined>;
+  // Third review: the pass raised the newest times of the entities it read (early coins spent recently put the
+  // output max near now). Prefer transaction/output it never reached (after the last entity with an offset), whose
+  // times are from before the pass; and go back the deep pull's 48 h either way.
+  const order: string[] = TAIL_ENTITIES.map((e) => e.name);
+  const current = order.reduce((at, name, i) => ((m[name]?.count ?? 0) > 0 ? i : at), -1);
+  const unreached = ['transaction', 'output'].filter((k) => order.indexOf(k) > current);
+  const times = (unreached.length ? unreached : ['transaction', 'output'])
+    .map((k) => m[k]?.maxUpdated_at)
     .filter((t): t is string | Date => t != null)
-    .map((t) => new Date(t).getTime())
+    .map((t) => new Date(t as string | Date).getTime())
     .filter((t) => Number.isFinite(t));
-  return times.length ? Math.min(...times) : undefined;
+  return times.length ? Math.min(...times) - DEEP_OVERLAP_MS : undefined;
 };
 
 /**
@@ -544,6 +552,7 @@ export async function requestTailPass(o: {
         tailFromWhen: from,
         tailSeen: found.memo.seen,
         tailCounts: found.memo.counts,
+        tailUntil: found.skipped,
       });
     });
     return 'tail';
@@ -564,10 +573,12 @@ export const finishTail = (store: SyncStateStore, row: SyncStateRow, now = Date.
   write(store, row, (ss) => {
     const mark = markOf(row);
     if (typeof mark.tailFromWhen === 'number') ss.when = new Date(mark.tailFromWhen);
+    resetCounts(ss); // a pass ended at tailUntil stops before the toolbox's own end (which resets them)
     setMark(ss, {
       ...mark,
       tailStartedAt: undefined,
       tailFromWhen: undefined,
+      tailUntil: undefined,
       tailDoneAt: now,
       tailSeen: { ...(mark.tailSeen ?? {}), ...highestIds(mergedIds(row.syncMap)) },
     });
@@ -582,5 +593,5 @@ export const abandonTail = (store: SyncStateStore, row: SyncStateRow, patch: Ful
     const mark = markOf(row);
     if (typeof mark.tailFromWhen === 'number') ss.when = new Date(mark.tailFromWhen);
     resetCounts(ss);
-    setMark(ss, { ...mark, tailStartedAt: undefined, tailFromWhen: undefined, ...patch });
+    setMark(ss, { ...mark, tailStartedAt: undefined, tailFromWhen: undefined, tailUntil: undefined, ...patch });
   });

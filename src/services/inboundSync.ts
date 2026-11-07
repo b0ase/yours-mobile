@@ -52,6 +52,7 @@ import {
   type WalletProtocol,
 } from '@bsv/sdk';
 import { BSV20, BSV21 } from '@1sat/templates';
+import { TAIL_ENTITIES } from './pullTail';
 import { WalletPermissionsManager } from '@bsv/wallet-toolbox-client';
 import type { SpendState } from './unsentExpiry';
 import {
@@ -1643,6 +1644,18 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
       more();
       return { done: true, inserts: 0, updates: 0 }; // not merged: the checkpoint stays where it was
     }
+    // A tail pass that ends where an entity too large to check begins (pullTail skipped): once the backup reaches it,
+    // its rows (and every later entity's) are left out of this page, and the pass ends here.
+    let endsHere = false;
+    if (tail && mark.tailUntil) {
+      const from = TAIL_ENTITIES.findIndex((e) => e.name === mark.tailUntil);
+      const rows = chunk as unknown as Record<string, unknown[] | undefined>;
+      for (const e of from < 0 ? [] : TAIL_ENTITIES.slice(from))
+        if (rows[e.key]?.length) {
+          rows[e.key] = [];
+          endsHere = true;
+        }
+    }
     const unfiled = await unfiledTransactions(this, args, chunk, row);
     if (unfiled.length) {
       const id = typeof row?.syncStateId === 'number' ? row : undefined;
@@ -1702,7 +1715,7 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
         // scheduling only
       }
     if (!merged) return merged;
-    if (merged.done) {
+    if (merged.done || endsHere) {
       rewound.delete(passKey);
       if (tail) {
         // A tail pass completed: the cursor goes back where it was; recorded as a tail pass, never as a full one.
@@ -1721,7 +1734,7 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
               : { deepDoneAt: now, deepStartedAt: undefined },
           );
       }
-      return merged;
+      return endsHere ? { ...merged, done: true } : merged;
     }
     // The same overlap as the checkpoint this pass started from (getSyncCheckpoint below, for the same stores): one
     // cursor per pass.

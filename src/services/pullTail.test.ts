@@ -95,10 +95,14 @@ describe("findTailOffsets: the first backup row this device never merged, by the
       logs.push(m),
     );
     expect(b.maxOffset()).toBeLessThanOrEqual(TAIL_OFFSET_CAP);
-    // No tail pass then (it could not skip that entity either); the weekly full pass covers it.
-    expect(r.tail).toBeNull();
+    // The earlier entities are still checked: a tail for them, ending where the oversized one begins.
+    expect(offsetOf(r, 'provenTx')).toBe(1);
+    expect(offsetOf(r, 'output')).toBe(0); // never paged past: the pass stops when it gets there (tailUntil)
     expect(r.skipped).toBe('output');
     expect(logs.join(' ')).toContain('output');
+    // Nothing missing before it: no tail at all.
+    const none = await findTailOffsets(b.get, {}, { provenTx: [1, 2], output: huge }, {}, () => undefined);
+    expect(none.tail).toBeNull();
   });
   test("RB's wallet size (extension copy, 7 Nov: 395 proofs, 430 txs, 1,735 outputs, 942 label links, 852 tag links, 395 requests): a few dozen probes", async () => {
     const rows = {

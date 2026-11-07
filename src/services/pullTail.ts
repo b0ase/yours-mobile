@@ -39,6 +39,9 @@ export const TAIL_ENTITIES = [
 
 /** Above this offset a probe is not sent (the smallest backup profile caps offsets at 100k): the check fails. */
 export const TAIL_OFFSET_CAP = 100_000;
+let tailOffsetCap = TAIL_OFFSET_CAP;
+/** Tests: the cap (no argument restores it). */
+export const _setTailOffsetCap = (n?: number) => void (tailOffsetCap = n ?? TAIL_OFFSET_CAP);
 
 export type GetSyncChunk = (args: Record<string, unknown>) => Promise<Record<string, unknown>>;
 
@@ -81,11 +84,16 @@ export async function findTailOffsets(
   merged: Record<string, number[]>,
   memo: TailMemo = {},
   log: (m: string) => void = (m) => console.warn(m),
-): Promise<{ tail: { name: string; offset: number }[] | null; memo: Required<TailMemo>; skipped?: string }> {
+): Promise<{
+  tail: { name: string; offset: number }[] | null;
+  memo: Required<TailMemo>;
+  /** The first entity too large to check: the tail pass ends where it begins (the guard's tailUntil). */
+  skipped?: string;
+}> {
   const counts: number[] = [];
   /** The row of entity `i` at `offset` (earlier entities skipped by their counts): its id, `true` (no id), or none. */
   const probe = async (i: number, offset: number): Promise<number | true | undefined> => {
-    if (offset > TAIL_OFFSET_CAP) throw new PastCap();
+    if (offset > tailOffsetCap) throw new PastCap();
     const offsets = TAIL_ENTITIES.map((e, j) => ({ name: e.name, offset: j < i ? counts[j] : j === i ? offset : 0 }));
     const chunk = await get({ ...base, since: undefined, maxItems: 1, maxRoughSize: 10_000_000, offsets });
     const e = TAIL_ENTITIES[i];
@@ -108,7 +116,7 @@ export async function findTailOffsets(
       hi = guess;
       while (await exists(i, hi)) {
         lo = hi;
-        hi = Math.min(TAIL_OFFSET_CAP + 1, Math.max(hi + 1, hi * 2));
+        hi = Math.min(tailOffsetCap + 1, Math.max(hi + 1, hi * 2));
       }
     } else if (guess > known) {
       hi = guess - 1; // shrunk (rows purged): between known and the guess
@@ -116,7 +124,7 @@ export async function findTailOffsets(
       hi = Math.max(known, 0);
       while (await exists(i, hi)) {
         lo = hi;
-        hi = Math.min(TAIL_OFFSET_CAP + 1, Math.max(hi + 1, hi * 2));
+        hi = Math.min(tailOffsetCap + 1, Math.max(hi + 1, hi * 2));
       }
     }
     while (hi - lo > 1) {
@@ -137,7 +145,7 @@ export async function findTailOffsets(
     let hi = Math.max(1, guess);
     while (!(await above(hi))) {
       lo = hi;
-      hi = Math.min(TAIL_OFFSET_CAP + 1, hi * 2);
+      hi = Math.min(tailOffsetCap + 1, hi * 2);
     }
     while (hi - lo > 1) {
       const mid = (lo + hi) >> 1;
@@ -161,7 +169,7 @@ export async function findTailOffsets(
       // the weekly full pass.
       skipped = e.name;
       log(
-        `[tail-check] ${e.name} has more than ${TAIL_OFFSET_CAP} rows on the backup: it and the tables after it are left to the weekly full pass`,
+        `[tail-check] ${e.name} has more than ${tailOffsetCap} rows on the backup: it and the tables after it are left to the weekly full pass`,
       );
     }
   }
@@ -203,12 +211,14 @@ export async function findTailOffsets(
     } else starts.set(e.name, tail);
   }
   const memoOut = { seen, counts: outCounts };
-  // An entity too large to skip by offset: no tail pass at all (it would have to page past that entity too).
-  if (skipped) return { tail: null, memo: memoOut, skipped };
-  if (!starts.size) return { tail: null, memo: memoOut };
+  if (!starts.size) return { tail: null, memo: memoOut, ...(skipped ? { skipped } : {}) };
+  // An entity too large to skip by offset: it and the ones after it start at 0, and the pass stops when the backup
+  // reaches it (inbound guard, tailUntil); the earlier entities still get their tail.
+  const until = skipped ? TAIL_ENTITIES.findIndex((e) => e.name === skipped) : TAIL_ENTITIES.length;
   return {
-    tail: TAIL_ENTITIES.map((e, i) => ({ name: e.name, offset: starts.get(e.name) ?? counts[i] })),
+    tail: TAIL_ENTITIES.map((e, i) => ({ name: e.name, offset: i >= until ? 0 : (starts.get(e.name) ?? counts[i]) })),
     memo: memoOut,
+    ...(skipped ? { skipped } : {}),
   };
 }
 

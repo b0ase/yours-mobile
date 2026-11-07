@@ -15,6 +15,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test
 import { KeyDeriver, P2PKH, PrivateKey, Random, Transaction, Utils } from '@bsv/sdk';
 import { StorageIdb, StorageProvider, WalletStorageManager } from '@bsv/wallet-toolbox-client';
 import * as IS from '../services/inboundSync';
+import { _setTailOffsetCap } from '../services/pullTail';
 import {
   FULL_PASS_EVERY_MS,
   _setFullPassSlice,
@@ -1097,7 +1098,8 @@ describe('review of 8d59e33b: a stuck pass, an offset cap, an unfiled tail', () 
         expect(plan).toBe('abandoned');
         d.o.failAfterPages = undefined;
         const st = await d.state();
-        expect(+new Date(st.when as string)).toBe(expected); // hours before the pass, never the basket's months
+        // The deep pull's 48 h before the newest transaction/output time: never the basket's months.
+        expect(+new Date(st.when as string)).toBe(expected - 48 * 3_600_000);
         expect(st.when == null).toBe(false);
         expect(passUnderWay(st)).toBe(false);
         expect(markOf(st).startedAt).toBeUndefined();
@@ -1178,6 +1180,72 @@ describe('review of 8d59e33b: a stuck pass, an offset cap, an unfiled tail', () 
       expect((await d.state()).when == null).toBe(false);
     } finally {
       d.o.failAfterPages = undefined;
+      d.off();
+    }
+  });
+
+  test(
+    'an older-build pass stopped mid-outputs, early coins touched recently: the fallback goes 48 h back and no output is skipped',
+    async () => {
+      const d = await phoneWith(400);
+      try {
+        await d.pullToEnd();
+        const N = Date.now();
+        const HOUR = 3_600_000;
+        const outs = (await d.backup.findOutputs({ partial: {} })).sort((a, b) => a.outputId - b.outputId);
+        const txs = (await d.backup.findTransactions({ partial: {}, noRawTx: true })).sort(
+          (a, b) => a.transactionId - b.transactionId,
+        );
+        const lateX = outs[outs.length - 3];
+        // Another device changed coin X (late in the backup's order) an hour after this device's cursor.
+        await d.backup.updateOutput(lateX.outputId, { spendable: false, updated_at: new Date(N + HOUR) } as never);
+        // Early rows touched recently: the stuck pass reads them, so the newest times it saw are 5 h on.
+        await d.backup.updateOutput(outs[1].outputId, { updated_at: new Date(N + 5 * HOUR) } as never);
+        await d.backup.updateTransaction(txs[0].transactionId, { updated_at: new Date(N + 5 * HOUR) } as never);
+        // A pass from the start on the old build (no saved cursor) reads every transaction and the first outputs.
+        await d.sm.runAsSync(async () => rewind(d.phone as never, await d.state(), N, { onDemandAt: N }));
+        await updateMark(d.phone as never, await d.state(), { fromWhen: undefined });
+        _setFullPassSlice(0);
+        const outputCount = async () =>
+          (JSON.parse(String((await d.state()).syncMap)) as Record<string, { count: number }>).output.count;
+        for (let i = 0; i < 50 && (await outputCount()) === 0; i++) await d.pull(N);
+        expect(await outputCount()).toBeGreaterThan(0);
+        expect(await outputCount()).toBeLessThan(outs.length - 3); // X not reached
+        d.o.failAfterPages = d.stats.pages; // then it stalls
+        let plan = '';
+        for (let m = 1; m <= 40 && plan !== 'abandoned'; m++) plan = await ask(d, N + m * 60_000);
+        expect(plan).toBe('abandoned');
+        expect(+new Date((await d.state()).when as string)).toBeLessThanOrEqual(N + 5 * HOUR - 48 * HOUR);
+        d.o.failAfterPages = undefined;
+        _setFullPassSlice();
+        await d.pullToEnd();
+        const x = (await d.phone.findOutputs({ partial: { txid: lateX.txid, vout: lateX.vout } }))[0];
+        expect(+x.updated_at!).toBeGreaterThanOrEqual(N + HOUR); // X's change arrived
+      } finally {
+        d.o.failAfterPages = undefined;
+        _setFullPassSlice();
+        d.off();
+      }
+    },
+    T,
+  );
+
+  test('an entity too large to skip: the earlier ones still get their tail, and the pass ends where it begins', async () => {
+    const d = await phoneWith(400);
+    try {
+      await d.pullToEnd();
+      const late = await latePush(d.backup, d.kd.identityKey, 34 * 60_000, 4_321);
+      d.built.txids.add(late);
+      _setTailOffsetCap(200); // proofs and transactions (~100) fit; outputs (401) count as oversized here
+      expect(await tailCheck(d, Date.now())).toBe('tail');
+      await d.pullToEnd();
+      expect((await d.phone.findTransactions({ partial: { txid: late }, noRawTx: true })).length).toBe(1);
+      const st = await d.state();
+      expect(passUnderWay(st)).toBe(false); // ended cleanly at the outputs, offsets reset
+      expect(st.when == null).toBe(false);
+      expect(markOf(st).tailStartedAt).toBeUndefined();
+    } finally {
+      _setTailOffsetCap();
       d.off();
     }
   });
