@@ -356,3 +356,41 @@ describe('device sync: a pull that let an own payment go first carries on in the
     expect(calls).toEqual(['pull1', 'pull2', 'push']);
   });
 });
+
+describe('device sync: after waiting for an own payment, the turn is checked again (review 7 Nov 2026, #4)', () => {
+  const waitingRun = (after: { applies?: boolean; busy?: boolean }) => {
+    let release = () => {};
+    let applies = true;
+    let busy = false;
+    const calls: string[] = [];
+    const { sync } = harness({
+      applies: () => applies,
+      busy: () => busy,
+      pull: async () => void calls.push('pull'),
+      push: async () => void calls.push('push'),
+      yieldTo: { idle: () => new Promise<void>((r) => (release = r)) },
+    });
+    const done = sync.syncNow();
+    return {
+      calls,
+      sync,
+      finish: async () => {
+        applies = after.applies ?? true; // the account switched or the wallet locked during the payment
+        busy = after.busy ?? false; // a dApp chain started during the payment
+        release();
+        return done;
+      },
+    };
+  };
+  test('no longer applies (account switch, lock): nothing pulled or pushed', async () => {
+    const r = waitingRun({ applies: false });
+    expect(await r.finish()).toEqual({ ok: true, pulled: false, pushed: false });
+    expect(r.calls).toEqual([]);
+  });
+  test('a site chain is busy now: deferred, nothing taken, the push stays pending', async () => {
+    const r = waitingRun({ busy: true });
+    expect(await r.finish()).toEqual({ ok: false, error: 'a site action is in progress; sync deferred' });
+    expect(r.calls).toEqual([]);
+    expect(r.sync.state().pendingPush).toBe(true);
+  });
+});

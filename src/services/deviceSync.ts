@@ -53,6 +53,11 @@ export const PUSH_DELAY_MS = 20_000;
  */
 export const SLOW_SYNC_MS = 2_000;
 export const BACKOFF_MS = [60_000, 120_000, 240_000, 480_000, 960_000, 1_800_000];
+/** A push that failed on a deadline (services/pushView.ts) is retried within this, whatever the failure count. */
+export const TIMEOUT_BACKOFF_CAP_MS = 240_000;
+/** The backup didn't answer in time, or is still answering an earlier request (services/pushView.ts, fullPass.ts). */
+export const isBackupTimeout = (e: unknown): boolean =>
+  /did not answer in time|still answering an earlier request/.test(errText(e));
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -71,40 +76,59 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
   /** When a push last went through (ms), 0 before the first: "Up to date" needs one with nothing waiting. */
   let lastPushOkAt = 0;
 
-  const retryLater = () => {
-    const wait = BACKOFF_MS[Math.min(failures - 1, BACKOFF_MS.length - 1)];
+  const retryLater = (capMs = Infinity) => {
+    const wait = Math.min(capMs, BACKOFF_MS[Math.min(failures - 1, BACKOFF_MS.length - 1)]);
     schedule(wait);
     return wait;
   };
 
-  const run = async (mode: 'full' | 'push'): Promise<DeviceSyncResult> => {
+  /** Not this device's turn to sync (checked at the start and again after every wait for an own payment). */
+  const notNow = (): DeviceSyncResult | null => {
     if (!deps.applies()) return { ok: true, pulled: false, pushed: false };
     if (deps.busy?.()) {
       schedule(PUSH_DELAY_MS);
       return { ok: false, error: 'a site action is in progress; sync deferred' };
     }
+    return null;
+  };
+
+  const run = async (mode: 'full' | 'push'): Promise<DeviceSyncResult> => {
     const idle = () => deps.yieldTo?.idle() ?? Promise.resolve();
-    try {
-      // An own payment running now goes first: this run takes the storage queue after it (services/ownPayments.ts).
+    /** Own payments first (services/ownPayments.ts), then the account, lock and dApp-chain checks again. */
+    const myTurn = async () => {
       await idle();
+      return notNow();
+    };
+    const first = notNow();
+    if (first) return first;
+    try {
+      // An own payment running now goes first: this run takes the storage queue after it.
+      const before = await myTurn();
+      if (before) return before;
       if (!(await deps.ensureBackup())) throw new Error('backup storage is not connected');
       let pulled = false;
       const t0 = now();
       let yields = 0;
       if (mode === 'full') {
-        // A pull that yielded to an own payment carries on here, after it, from its checkpoint.
+        // A pull that yielded to an own payment (after a merged page) carries on here, after it, from its checkpoint.
         while ((await deps.pull()) === 'yielded') {
           yields++;
-          await idle();
+          const stop = await myTurn();
+          if (stop) return stop;
         }
         pulled = true;
       }
       const t1 = now();
       pendingPush = false;
+      // A push cycle is never paused (services/pushView.ts); a payment goes first before it or between backups.
       for (;;) {
-        await idle();
+        const stop = await myTurn();
+        if (stop) {
+          pendingPush = true;
+          return stop;
+        }
         if ((await deps.push()) !== 'yielded') break;
-        yields++; // stopped after a committed page for an own payment: carry on from the backup's checkpoint
+        yields++;
       }
       const t2 = now();
       if (t2 - t0 >= SLOW_SYNC_MS)
@@ -117,7 +141,9 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
     } catch (e) {
       failures++;
       pendingPush = true;
-      const wait = retryLater();
+      // A backup that answered too slowly (or is still answering): retry within TIMEOUT_BACKOFF_CAP_MS, never at the
+      // 30-minute end of the ladder. A Store payment's pushNow never waits for the back-off either way.
+      const wait = retryLater(isBackupTimeout(e) ? TIMEOUT_BACKOFF_CAP_MS : Infinity);
       log(`[deviceSync] ${mode} failed (retry in ${Math.round(wait / 60_000)} min):`, syncErrorDetail(e));
       return { ok: false, error: errText(e) };
     }

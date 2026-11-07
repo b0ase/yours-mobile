@@ -324,6 +324,25 @@ describe('the real initWallet wiring', () => {
     expect(pull).toMatch(/await fullPassIfDue\([\s\S]*withDeadlines\(reader/);
   });
 
+  test('the device-sync push is makeBackupPush over every backup; own payments go first only before or between cycles (7 Nov 2026)', () => {
+    const src = readFileSync(new URL('./initWallet.ts', import.meta.url), 'utf8');
+    const push = src.slice(
+      src.indexOf('  const backupPush = makeBackupPush({'),
+      src.indexOf('  const deviceSync = createDeviceSync({'),
+    );
+    expect(push).toMatch(/backups: \(\) => managed\._backups \?\? \[\]/);
+    expect(push).toMatch(/waiting: ownPayments\.waiting/);
+    expect(push).toMatch(/inFlightFor:/);
+    const sync = src.slice(
+      src.indexOf('  const deviceSync = createDeviceSync({'),
+      src.indexOf('    log: (...a) => console.warn(...a),\n  });'),
+    );
+    expect(sync).toMatch(/push: async \(\) => \{\s*return backupPush\(\);/);
+    expect(sync).toMatch(/yieldTo: ownPayments/);
+    // Never a paused cycle: the old mid-page yield (onYield) is gone from the push.
+    expect(src).not.toContain('onYield');
+  });
+
   test('a heal leaves a pass from the start to the device-sync pulls, and a failed one asks for a full pass (review 23, M2)', () => {
     const src = readFileSync(new URL('./initWallet.ts', import.meta.url), 'utf8');
     const heal = src.slice(src.indexOf('    setDeviceActive: async () => {'), src.indexOf('  if (!keepActive)'));
