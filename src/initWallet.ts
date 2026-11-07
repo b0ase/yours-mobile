@@ -86,6 +86,8 @@ import {
 } from './services/inboundSync';
 import { syncErrorDetail, tagStorageClientErrors } from './services/syncErrorDetail';
 import { FULL_PASS_NEXT_SLICE_MS, requestFullPass, withDeadlines, withFullPassMode } from './services/fullPass';
+import { ownPayments } from './services/ownPayments';
+import { pushView } from './services/pushView';
 import { isPhone, onWifi } from './services/networkKind';
 import { chromeEnvelopeBackend, EnvelopeStore, guardEnvelopes } from './services/envelopes';
 import { ENVELOPES_ENABLED } from './mobile/storeBuild';
@@ -708,8 +710,17 @@ export const initWallet = async (
       () => admitIn(0),
     ),
     push: async () => {
-      await storage.updateBackups();
+      // updateBackups, one backup at a time through the push view (services/pushView.ts): a deadline on each request,
+      // and own payments go first (owner's seal, 7 Nov 2026). A yield leaves the rest for the next push.
+      const auth = await storage.getAuth(true);
+      let yielded = false;
+      for (const b of managed._backups ?? []) {
+        const view = pushView(b.storage as object, { waiting: ownPayments.waiting, onYield: () => (yielded = true) });
+        await storage.syncToWriter(auth, view as Parameters<typeof storage.syncToWriter>[1]);
+        if (yielded) return 'yielded';
+      }
     },
+    yieldTo: ownPayments,
     busy: chainActive,
     log: (...a) => console.warn(...a),
   });

@@ -27,8 +27,13 @@ export type DeviceSyncDeps = {
   ensureBackup: () => Promise<boolean>;
   /** Bring the backup's changes into this device's store. */
   pull: () => Promise<void>;
-  /** Copy this device's changes to the backup. */
-  push: () => Promise<void>;
+  /**
+   * Copy this device's changes to the backup. 'yielded': it stopped after a committed page to let an own payment go
+   * first (services/pushView.ts); the run pushes again from the backup's checkpoint once the payment has finished.
+   */
+  push: () => Promise<void | 'yielded'>;
+  /** Own payments go first (services/ownPayments.ts): a run starts, and a yielded push carries on, once `idle`. */
+  yieldTo?: { idle: () => Promise<void> };
   /** A connected site is part-way through a multi-step action: don't take storage locks now. */
   busy?: () => boolean;
   log?: (...a: unknown[]) => void;
@@ -75,20 +80,31 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
       schedule(PUSH_DELAY_MS);
       return { ok: false, error: 'a site action is in progress; sync deferred' };
     }
+    const idle = () => deps.yieldTo?.idle() ?? Promise.resolve();
     try {
+      // An own payment running now goes first: this run takes the storage queue after it (services/ownPayments.ts).
+      await idle();
       if (!(await deps.ensureBackup())) throw new Error('backup storage is not connected');
       let pulled = false;
       const t0 = now();
       if (mode === 'full') {
+        // A pull that yielded to a payment ends its slice there; the next slice (fullPass onMore) carries it on.
         await deps.pull();
         pulled = true;
       }
       const t1 = now();
       pendingPush = false;
-      await deps.push();
+      let yields = 0;
+      for (;;) {
+        await idle();
+        if ((await deps.push()) !== 'yielded') break;
+        yields++; // stopped after a committed page for an own payment: carry on from the backup's checkpoint
+      }
       const t2 = now();
       if (t2 - t0 >= SLOW_SYNC_MS)
-        log(`[deviceSync] ${mode} took ${t2 - t0} ms (${pulled ? `pull ${t1 - t0} ms, ` : ''}push ${t2 - t1} ms)`);
+        log(
+          `[deviceSync] ${mode} took ${t2 - t0} ms (${pulled ? `pull ${t1 - t0} ms, ` : ''}push ${t2 - t1} ms${yields ? `, let own payments go first ${yields}×` : ''})`,
+        );
       failures = 0;
       if (!pendingPush) lastPushOkAt = Date.now();
       return { ok: true, pulled, pushed: true };

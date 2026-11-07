@@ -186,6 +186,7 @@ import {
 } from './services/autoCoinResync';
 import { withCoinResyncLock } from './services/coinResyncLock';
 import { payTimer } from './services/payTiming';
+import { ownPayments } from './services/ownPayments';
 import type {
   ListOutputsArgs,
   RelinquishOutputArgs,
@@ -6741,6 +6742,8 @@ if (!(
     let ownMintIntent: MintIntent | undefined;
     // Own payments only: where the time goes, one warn line (services/payTiming.ts; owner's seal, 7 Nov 2026).
     const timing = message.originator === ADMIN_ORIGINATOR ? payTimer() : null;
+    // And they go first: the device sync lets go of the storage queue at its next page (services/ownPayments.ts).
+    const endOwnPayment = message.originator === ADMIN_ORIGINATOR ? ownPayments.begin() : null;
     try {
       const w = message.originator === ADMIN_ORIGINATOR ? await ensureWallet() : await walletForSiteRequest();
       await ensureUsbSeen('build and sign a transaction', message.originator);
@@ -7076,6 +7079,8 @@ if (!(
         detail: message.originator !== ADMIN_ORIGINATOR ? undefined : `${String((error as { code?: unknown })?.code ?? errorName)}\n${errorStack?.split('\n').slice(0, 6).join('\n') ?? ''}`,
       });
     } finally {
+      // Succeeded, failed or refused: the device sync carries on from its checkpoint.
+      endOwnPayment?.();
       releasePayeeMark?.();
       releaseMicropay?.();
       if (ownMintIntent && mintIntents.get(ownMintIntent.origin) === ownMintIntent) mintIntents.delete(ownMintIntent.origin);
