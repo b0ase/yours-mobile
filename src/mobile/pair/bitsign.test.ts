@@ -32,16 +32,22 @@ describe('bitsign.capabilities', () => {
   test('replies drawSignature:true without showing anything', async () => {
     let asked = false;
     const r = await handleBitsignCall(BITSIGN_CAPABILITIES, {}, ORIGIN, async () => ((asked = true), null));
-    expect(r).toEqual({ result: { drawSignature: true, oneApprovalSeal: true } });
+    expect(r).toEqual({ result: { drawSignature: true, review: true, oneApprovalSeal: true } });
     expect(asked).toBe(false);
   });
 });
 
 describe('validateDrawRequest', () => {
   test('accepts a good request; optional fields default to empty', () => {
-    expect(validateDrawRequest(good, ORIGIN)).toEqual(good);
+    expect(validateDrawRequest(good, ORIGIN)).toEqual({ ...good, review: false });
     const { ref: _r, fieldLabel: _f, signerHandle: _s, ...min } = good;
-    expect(validateDrawRequest(min, ORIGIN)).toEqual({ ...min, ref: '', fieldLabel: '', signerHandle: '' });
+    expect(validateDrawRequest(min, ORIGIN)).toEqual({
+      ...min,
+      ref: '',
+      fieldLabel: '',
+      signerHandle: '',
+      review: false,
+    });
   });
   test.each([
     ['origin mismatch', { ...good, origin: 'https://evil.example' }],

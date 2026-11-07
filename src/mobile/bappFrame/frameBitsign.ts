@@ -15,13 +15,16 @@
  * the same answer in the browser's { success, data } shape (dappBitsign.test.ts).
  */
 import { BCHAT_ORIGINS } from '../../services/bchatOrigin';
+import { FRAME_BITSIGN_CAPABILITIES } from './frameBridge';
 import {
   BAD_REQUEST_CODE,
+  BITSIGN_CAPABILITIES,
   BITSIGN_DRAW,
   askDrawSignature,
   handleBitsignCall,
   isBitsignAction,
   type BitsignReply,
+  type DrawAnswer,
   type DrawRequest,
 } from '../pair/bitsign';
 
@@ -39,6 +42,15 @@ export const parseFrameBitsignRequest = (data: unknown, origin: string): FrameBi
   if (typeof d.call !== 'string' || !isBitsignAction(d.call)) return null;
   return { id: d.id, call: d.call, args: d.args ?? {} };
 };
+
+/**
+ * In the frame, bitsign.capabilities from bChatX is answered by the pad (drawSignature: true), but bChatX's frame
+ * sign-in reads `frameSession` from the same answer (bit-sign frame-session-client.ts): add the frame's own flags.
+ */
+export const withFrameCapabilities = (call: string, reply: BitsignReply): BitsignReply =>
+  call === BITSIGN_CAPABILITIES && 'result' in reply
+    ? { result: { ...FRAME_BITSIGN_CAPABILITIES, ...(reply.result as Record<string, unknown>) } }
+    : reply;
 
 /** handleBitsignCall's reply as an XDM response. */
 export const bitsignToXdm = (id: string, reply: BitsignReply) =>
@@ -67,7 +79,7 @@ export const answerDappBitsign = async (
   origin: string,
   type: string,
   params: unknown,
-  deps: { ask?: (req: DrawRequest) => Promise<string | null>; cover?: (on: boolean) => void } = {},
+  deps: { ask?: (req: DrawRequest) => Promise<DrawAnswer>; cover?: (on: boolean) => void } = {},
 ): Promise<DappBitsignReply | null> => {
   if (!isBitsignAction(type)) return null;
   if (!(BCHAT_ORIGINS as readonly string[]).includes(origin))

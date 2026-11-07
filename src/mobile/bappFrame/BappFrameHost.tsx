@@ -16,7 +16,7 @@ import {
 import { IMMERSIVE_BUTTON_MS, useImmersiveViewport } from './immersive';
 import { reportSessionSpend } from '../wallet/live/liveBus';
 import { handleBitsignCall } from '../pair/bitsign';
-import { bitsignToXdm, parseFrameBitsignRequest } from './frameBitsign';
+import { bitsignToXdm, parseFrameBitsignRequest, withFrameCapabilities } from './frameBitsign';
 import { SESSION_SPEND_TYPE } from '../wallet/live/liveLogic';
 import {
   FRAME_BITSIGN_CAPABILITIES,
@@ -149,7 +149,7 @@ export const BappFrameHost = () => {
       const sig = parseFrameBitsignRequest(e.data, e.origin);
       if (sig) {
         void handleBitsignCall(sig.call, sig.args, e.origin).then((reply) =>
-          win.postMessage(bitsignToXdm(sig.id, reply), e.origin),
+          win.postMessage(bitsignToXdm(sig.id, withFrameCapabilities(sig.call, reply)), e.origin),
         );
         return;
       }

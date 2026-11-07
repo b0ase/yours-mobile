@@ -6,12 +6,15 @@
  *   payment are approved on ONE sheet, services/sealPass.ts; the site still makes the same two calls).
  * - `bitsign.drawSignature` → full-screen pad (BitsignHost) → `{ svg, width: 1000, height: 250 }`, or
  *   `{ code: ERR_PERMISSION_DENIED, message: 'declined' }` on Cancel / close.
+ * - Review (owner, 7 Nov 2026): capabilities also say `review: true`; a page that sends `review: true` gets a Review
+ *   button on the pad, which answers `{ action: 'review' }` (the page shows the document, then asks again). The
+ *   drawing is kept for that page and document until the next ask (keepDrawing / takeKeptDrawing), never sent.
  *
  * Neither action touches keys, spends or broadcasts: the reply is only the drawing. The seal itself goes through
  * the normal createSignature / createAction approvals afterwards. Repeats of the same request id (relay reconnect)
  * are deduped by ReplyBook in sessions.ts: one pad, one answer.
  */
-import { SIG_H, SIG_VIEWBOX, SIG_W, isValidSignature } from '../signature/signature';
+import { SIG_H, SIG_VIEWBOX, SIG_W, isValidSignature, type SigStroke } from '../signature/signature';
 import { USER_DENIED_CODE } from '../../services/userDenied';
 import { ONE_APPROVAL_SEAL } from '../../services/sealPass';
 import { NATIVE_SEAL_ENABLED } from '../storeBuild';
@@ -32,7 +35,13 @@ export type DrawRequest = {
   fieldLabel: string;
   signerHandle: string;
   origin: string;
+  /** The page takes a Review answer ({ action: 'review' }). */
+  review: boolean;
 };
+
+/** The pad's Review answer (ask resolves to it): the page shows the document, then asks again. */
+export const DRAW_REVIEW: unique symbol = Symbol('bitsign.review');
+export type DrawAnswer = string | null | typeof DRAW_REVIEW;
 
 const HASH_RE = /^[0-9a-f]{64}$/;
 // No control characters (newlines, bidi tricks) in anything we show.
@@ -56,6 +65,7 @@ export const validateDrawRequest = (params: unknown, sessionOrigin: string): Dra
     fieldLabel: (p.fieldLabel as string) ?? '',
     signerHandle: (p.signerHandle as string) ?? '',
     origin: p.origin,
+    review: p.review === true,
   };
 };
 
@@ -145,20 +155,20 @@ export const checkStrictSvg = (svg: unknown): string | null => {
 };
 
 /** The pad request shown by BitsignHost; resolves to the pad's path, or null when declined. */
-type Pending = { req: DrawRequest; resolve: (path: string | null) => void };
+type Pending = { req: DrawRequest; resolve: (answer: DrawAnswer) => void };
 let pending: Pending[] = [];
 let answered = 0;
 const listeners = new Set<() => void>();
 
 /** Queue a pad for the user (one at a time, oldest first). */
-export const askDrawSignature = (req: DrawRequest): Promise<string | null> =>
+export const askDrawSignature = (req: DrawRequest): Promise<DrawAnswer> =>
   new Promise((resolve) => {
     pending.push({ req, resolve });
     listeners.forEach((f) => f());
   });
 export const currentDrawRequest = (): DrawRequest | null => pending[0]?.req ?? null;
-/** Answer the request on screen (path from the pad, or null for Cancel / close). */
-export const answerDrawRequest = (path: string | null) => {
+/** Answer the request on screen (path from the pad, DRAW_REVIEW for Review, or null for Cancel / close). */
+export const answerDrawRequest = (path: DrawAnswer) => {
   const [p, ...rest] = pending;
   if (!p) return;
   pending = rest;
@@ -175,6 +185,19 @@ export const onDrawRequest = (f: () => void) => {
   };
 };
 
+// The drawing kept over a Review: one slot, for one page and document, handed back once.
+let kept: { key: string; strokes: SigStroke[] } | null = null;
+const keptKey = (req: Pick<DrawRequest, 'origin' | 'docHash'>) => `${req.origin}\n${req.docHash}`;
+export const keepDrawing = (req: DrawRequest, strokes: SigStroke[]) => {
+  kept = strokes.length ? { key: keptKey(req), strokes } : null;
+};
+export const takeKeptDrawing = (req: Pick<DrawRequest, 'origin' | 'docHash'>): SigStroke[] | undefined => {
+  if (!kept || kept.key !== keptKey(req)) return undefined;
+  const { strokes } = kept;
+  kept = null;
+  return strokes;
+};
+
 export type BitsignReply = { result: unknown } | { error: { code: string; message: string } };
 
 /** Handle one bitsign.* call from a paired site. `ask` shows the pad (tests pass their own). */
@@ -182,14 +205,15 @@ export async function handleBitsignCall(
   action: string,
   params: unknown,
   sessionOrigin: string,
-  ask: (req: DrawRequest) => Promise<string | null> = askDrawSignature,
+  ask: (req: DrawRequest) => Promise<DrawAnswer> = askDrawSignature,
 ): Promise<BitsignReply> {
   if (action === BITSIGN_CAPABILITIES)
-    return { result: { drawSignature: true, [ONE_APPROVAL_SEAL]: NATIVE_SEAL_ENABLED } };
+    return { result: { drawSignature: true, review: true, [ONE_APPROVAL_SEAL]: NATIVE_SEAL_ENABLED } };
   const req = validateDrawRequest(params, sessionOrigin);
   if (typeof req === 'string') return { error: { code: BAD_REQUEST_CODE, message: req } };
   const path = await ask(req);
-  const svg = path ? signatureSvg(path) : '';
+  if (path === DRAW_REVIEW && req.review) return { result: { action: 'review' } };
+  const svg = typeof path === 'string' && path ? signatureSvg(path) : '';
   if (!svg || checkStrictSvg(svg)) return { error: { code: USER_DENIED_CODE, message: DECLINED } };
   return { result: { svg, width: SIG_W, height: SIG_H } };
 }
