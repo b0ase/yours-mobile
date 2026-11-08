@@ -133,9 +133,12 @@ const handoverStore = (rows) => {
     putHandover: async (r) => void handovers.set(r.alias, { ...r }),
     deleteHandover: async (a) => void handovers.delete(a),
     handoversFor: async (k) => [...handovers.values()].filter((h) => h.to_key === k),
-    moveAlias: async (a, k) => {
+    // Production semantics: moves only while the name still points at the releasing key.
+    moveAlias: async (a, k, from) => {
       const r = await s.getAlias(a);
+      if (!r || r.identity_key !== from) return false;
       r.identity_key = k;
+      return true;
     },
   });
 };

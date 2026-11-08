@@ -5,6 +5,7 @@ import { PrivateKey, ProtoWallet, Utils } from '@bsv/sdk';
 import pm from '../lib/paymail.js';
 import social from '../lib/social.js';
 import np from '../lib/nameProof.js';
+import { aliasWrites } from './fixtures/aliasWrites.js';
 
 const AUD = 'li-test-client';
 const ENV = { PAYMAIL_DOMAIN: 'pay.test', SOCIAL_SEAL_KEY: 'cd'.repeat(32), LINKEDIN_CLIENT_ID: AUD };
@@ -38,13 +39,9 @@ const memStore = () => {
     listByKey: async (k) => [...aliases.values()].filter((r) => r.identity_key === k),
     getAliasByKeyKind: async (k, kind) =>
       [...aliases.values()].find((r) => r.identity_key === k && (r.kind ?? 'plain') === kind) ?? null,
+    // Test seeding only: the production store has no upsert on names (b-Aware #F-237).
     upsertAlias: async (r) => (aliases.set(r.alias, { ...r }), r),
-    renameAlias: async (from, to) => {
-      const r = aliases.get(from);
-      aliases.delete(from);
-      aliases.set(to, { ...r, alias: to });
-      for (const p of pays.values()) if (p.alias === from) p.alias = to;
-    },
+    ...aliasWrites(aliases, { pays }),
     forwards: new Map(),
     getForward: async function (a) {
       return this.forwards.get(a) ?? null;

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { PrivateKey, ProtoWallet, Utils } from '@bsv/sdk';
 import pm from '../lib/paymail.js';
 import dn from '../lib/displayName.js';
+import { aliasWrites } from './fixtures/aliasWrites.js';
 
 const ENV = { PAYMAIL_DOMAIN: 'pay.test' };
 
@@ -16,7 +17,7 @@ const memStore = () => {
       null,
     getAliasByKeyKind: async (k, kind) =>
       [...aliases.values()].find((r) => r.identity_key === k && (r.kind ?? 'plain') === kind) ?? null,
-    upsertAlias: async (r) => (aliases.set(r.alias, { ...r }), r),
+    ...aliasWrites(aliases),
     setDisplayNameByKey: async (k, name) => {
       for (const r of aliases.values()) if (r.identity_key === k) r.display_name = name;
     },

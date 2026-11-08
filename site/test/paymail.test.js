@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { KeyDeriver, P2PKH, PrivateKey, ProtoWallet, Script, Transaction, Utils } from '@bsv/sdk';
 import pm from '../lib/paymail.js';
 import nameFee from '../lib/nameFee.js';
+import { aliasWrites } from './fixtures/aliasWrites.js';
 
 const ENV = { PAYMAIL_DOMAIN: 'pay.test' };
 
@@ -35,13 +36,9 @@ const memStore = () => {
     listByKey: async (k) => [...aliases.values()].filter((r) => r.identity_key === k),
     getAliasByKeyKind: async (k, kind) =>
       [...aliases.values()].find((r) => r.identity_key === k && (r.kind ?? 'plain') === kind) ?? null,
+    // Test seeding only: the production store has no upsert on names (b-Aware #F-237).
     upsertAlias: async (r) => (aliases.set(r.alias, { ...r }), r),
-    renameAlias: async (from, to) => {
-      const r = aliases.get(from);
-      aliases.delete(from);
-      aliases.set(to, { ...r, alias: to });
-      for (const p of pays.values()) if (p.alias === from) p.alias = to;
-    },
+    ...aliasWrites(aliases, { pays }),
     forwards: new Map(),
     getForward: async function (a) {
       return this.forwards.get(a) ?? null;
@@ -938,6 +935,130 @@ describe('name pricing (owner, 27 Oct 2026): by length, 5+ free, 4 $10, 3 $100, 
     const bare = payTx(20_000_000);
     const h = pm.makeHandlers({ store: priceStore(), env: FENV, feeChain: mockChain([bare]) });
     expect((await h.register({}, await u.sign('register', { alias: 'abcd', feeTxid: bare.id('hex') })))[0]).toBe(402);
+  });
+
+  test('#F-237: a paid claim that loses the race gets 409, keeps no name and its payment is not consumed', async () => {
+    const victim = user();
+    const late = user();
+    const latePay = payTx(16_000_000, FEE_ADDR, [late.identityKey, 'abcd']);
+    const victimPay = payTx(16_000_000, FEE_ADDR, [victim.identityKey, 'abcd']);
+    const store = priceStore();
+    store.releaseFeeTx = async (r) => {
+      store.fees.delete(r.txid);
+      store.receipts = store.receipts.filter((x) => x.txid !== r.txid);
+    };
+    // The late claimant's request has read "abcd" as free and recorded its fee; the victim's INSERT lands first.
+    const insert = store.insertAlias;
+    store.insertAlias = async (row) => {
+      if (row.identity_key === late.identityKey)
+        await insert({ kind: 'plain', alias: 'abcd', identity_key: victim.identityKey });
+      return insert(row);
+    };
+    const h = pm.makeHandlers({ store, env: FENV, feeChain: mockChain([latePay, victimPay]) });
+    const [s, r] = await h.register({}, await late.sign('register', { alias: 'abcd', feeTxid: latePay.id('hex') }));
+    expect(s).toBe(409);
+    expect(r.error).toMatch(/^That name was just taken/);
+    expect(r.feeTxid).toBe(latePay.id('hex'));
+    expect(r.feeUnused).toBe(true);
+    expect(store.aliases.get('abcd').identity_key).toBe(victim.identityKey);
+    // Not consumed: no receipt, the txid is free again, no claim event counted against the wallet.
+    expect(store.receipts).toEqual([]);
+    expect(store.fees.has(latePay.id('hex'))).toBe(false);
+    expect(store.events).toEqual([]);
+  });
+
+  test('#F-237: a paid rename into a name just taken gets 409; the old name, its forward state and the fee are untouched', async () => {
+    const u = user();
+    const other = user();
+    const pay = payTx(16_000_000, FEE_ADDR, [u.identityKey, 'abcd']);
+    const store = priceStore();
+    store.releaseFeeTx = async (r) => {
+      store.fees.delete(r.txid);
+      store.receipts = store.receipts.filter((x) => x.txid !== r.txid);
+    };
+    const h = pm.makeHandlers({ store, env: FENV, feeChain: mockChain([pay]) });
+    expect((await h.register({}, await u.sign('register', { alias: 'oldname' })))[0]).toBe(200);
+    store.events.length = 0;
+    const rename = store.renameAlias;
+    store.renameAlias = async (from, to, key) => {
+      await store.insertAlias({ kind: 'plain', alias: 'abcd', identity_key: other.identityKey });
+      return rename(from, to, key);
+    };
+    const [s, r] = await h.register({}, await u.sign('register', { alias: 'abcd', feeTxid: pay.id('hex') }));
+    expect(s).toBe(409);
+    expect(r.error).toMatch(/^That name was just taken/);
+    expect(store.aliases.get('oldname').identity_key).toBe(u.identityKey);
+    expect(store.aliases.get('abcd').identity_key).toBe(other.identityKey);
+    expect(await store.getForward('oldname')).toBeNull(); // the forward written before the rename is undone
+    expect(store.receipts).toEqual([]);
+    expect(store.events).toEqual([]);
+  });
+});
+
+describe('#F-237: no window in renames, and owner updates are filtered by key', () => {
+  test('while a rename is in flight the old name is never claimable (forward first, then rename)', async () => {
+    const store = memStore();
+    const h = pm.makeHandlers({ store, env: ENV });
+    const owner = user();
+    const attacker = user();
+    expect((await h.register({}, await owner.sign('register', { alias: 'oldname' })))[0]).toBe(200);
+    const order = [];
+    const putForward = store.putForward;
+    store.putForward = async function (r) {
+      order.push(`forward:${r.from_alias}`);
+      return putForward.call(this, r);
+    };
+    // Pause the owner's rename right after the row moved, and let the attacker try the old name in that moment.
+    const rename = store.renameAlias;
+    let attempt;
+    store.renameAlias = async (from, to, key) => {
+      order.push(`rename:${from}`);
+      const out = await rename(from, to, key);
+      attempt = await h.register({}, await attacker.sign('register', { alias: 'oldname' }));
+      return out;
+    };
+    expect((await h.register({}, await owner.sign('register', { alias: 'newname' })))[0]).toBe(200);
+    expect(order).toEqual(['forward:oldname', 'rename:oldname']);
+    expect(attempt[0]).toBe(409);
+    expect(store.aliases.has('oldname')).toBe(false);
+    // The old name still pays the owner (via the forward).
+    const [, pki] = await h.pki({ handle: 'oldname@pay.test' });
+    expect(pki.pubkey).toBe(owner.identityKey);
+    expect(pki.forward).toBeTruthy();
+  });
+
+  test("an owner's profile update is a PATCH by alias AND key: a name that moved meanwhile is not taken back", async () => {
+    const store = memStore();
+    const h = pm.makeHandlers({ store, env: ENV });
+    const a = user();
+    const b = user();
+    expect((await h.register({}, await a.sign('register', { alias: 'movingname', name: 'Alice' })))[0]).toBe(200);
+    // Between the request's read (it still belongs to A) and its write, the name is handed over to B.
+    const update = store.updateOwnAlias;
+    store.updateOwnAlias = async (alias, key, patch) => {
+      store.aliases.get(alias).identity_key = b.identityKey;
+      return update(alias, key, patch);
+    };
+    const [s, r] = await h.register({}, await a.sign('register', { alias: 'movingname', name: 'Mallory' }));
+    expect(s).toBe(409);
+    expect(r.error).toBe('That name is no longer on this wallet');
+    expect(store.aliases.get('movingname').identity_key).toBe(b.identityKey);
+    expect(store.aliases.get('movingname').display_name).toBe('Alice');
+  });
+
+  test('an own profile update still works and never touches identity_key', async () => {
+    const store = memStore();
+    const h = pm.makeHandlers({ store, env: ENV });
+    const a = user();
+    expect((await h.register({}, await a.sign('register', { alias: 'mine1' })))[0]).toBe(200);
+    const seen = [];
+    const update = store.updateOwnAlias;
+    store.updateOwnAlias = async (alias, key, patch) => (seen.push([alias, key, patch]), update(alias, key, patch));
+    expect((await h.register({}, await a.sign('register', { alias: 'mine1', name: 'New Name' })))[0]).toBe(200);
+    expect(seen.length).toBe(1);
+    expect(seen[0][1]).toBe(a.identityKey);
+    expect(seen[0][2]).not.toHaveProperty('identity_key');
+    expect(store.aliases.get('mine1').display_name).toBe('New Name');
   });
 });
 
