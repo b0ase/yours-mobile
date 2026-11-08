@@ -210,7 +210,7 @@ describe('#3 payment_held: received, held for a compliance review', () => {
     expect('message' in o && o.message).toBe(`${HELD_MESSAGE} Transaction ${TXA}.`);
     const s = payState(store, 'o');
     expect(s.kind).toBe('held');
-    expect(PAY_BUTTON.held).toBeNull();
+    expect(PAY_BUTTON.held).toBe('Check again'); // re-claims only, never pays
     expect(payNoteFor(s)).toContain(HELD_MESSAGE);
     expect(payNoteFor(s)).not.toMatch(/refund/i);
     expect((await checkPayment(d, 'o'))!.kind).toBe('held');

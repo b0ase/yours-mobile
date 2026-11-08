@@ -24,7 +24,8 @@
  *     Stale sheet: open the sheet on the phone, pay and claim from another window or device, then tap Pay in the old
  *     sheet: nothing is sent (bit-sign answers payment_pending, or this device shows Paid with the txid).
  *  6. Held: when bit-sign holds a payment for a compliance review, the card says "Your payment was received and is
- *     held for a compliance review. Don't pay again." with the txid, no button, also after a reload.
+ *     held for a compliance review. Don't pay again." with the txid, also after a reload; its only button is Check
+ *     again (re-claims, never pays): once the directors clear it the card says Paid; once returned, the returned note.
  *  Also: airplane mode while approving → "can't confirm" → Check payment later (finds it, or warns with Cancel
  *  first); a txid unseen for over an hour → "Search my wallet again" (claims if the wallet still has it, warns
  *  before paying again only if the wallet shows it failed).
@@ -65,7 +66,10 @@ import {
   deviceStore,
   dropKnownOrphans,
   findOrphanPayment,
+  failedKey,
   heldMessage,
+  holdLiftedMessage,
+  holdLiftedOnQuote,
   openedOver,
   orphanMessage,
   payAndClaim,
@@ -243,7 +247,8 @@ const OfferCard = ({
   // This device's record of a payment for this offer (payFlow). Once the offer shows that very payment, it is done.
   let pay: PayState | null = role === 'investor' ? payState(store, offer.id) : null;
   if (pay && pay.kind !== 'none' && offer.paymentTxid && pay.rec.txid === offer.paymentTxid) pay = { kind: 'none' };
-  const payLabel = step === 'Pay' && pay ? PAY_BUTTON[pay.kind] : null;
+  // A held payment can be checked again whatever the offer's status says (it never pays).
+  const payLabel = pay && (step === 'Pay' || pay.kind === 'held') ? PAY_BUTTON[pay.kind] : null;
   const deps: PayDeps = {
     store,
     listActions: (a) => apiContext.wallet.listActions(a) as ReturnType<ListActionsFn>,
@@ -318,12 +323,42 @@ const OfferCard = ({
     if (!w && opened.kind !== 'none') w = CHECK_FIRST_MESSAGE;
     setSheet({ quote: q, warning: w, opened, fetchedAt: clocksNow() });
   };
+  /** "Check again" on a hold the quote route reported: still held → unchanged; quoting again → the hold is gone. */
+  const recheckHoldByQuote = async (txid: string) => {
+    try {
+      await api.quote(offer.id, await shareLockKey(apiContext, offer.id));
+    } catch (e) {
+      if (paymentHeld(e)) {
+        addSnackbar(heldMessage(txid), 'info');
+        return;
+      }
+      const waiting = quotePaymentPending(e);
+      if (waiting) {
+        store.remove(failedKey(offer.id));
+        adoptServerPending(store, offer.id, waiting);
+        report(await checkPayment(deps, offer.id));
+        return;
+      }
+      // Paid or closed meanwhile: the offer itself now says so.
+      addSnackbar(e instanceof Error ? e.message : 'bShares did not answer.', 'error');
+      onDone();
+      return;
+    }
+    holdLiftedOnQuote(store, offer.id, txid);
+    addSnackbar(holdLiftedMessage(txid), 'info');
+  };
   /** Pay (nothing recorded: confirm first) or Check payment / Try the claim again (claims only, never pays). */
   const runPay = async () => {
     if (payingNow.has(offer.id)) return;
     payingNow.add(offer.id);
     setBusy(true);
     try {
+      const st = payState(store, offer.id);
+      if (st.kind === 'held' && !st.rec.quote_id) {
+        // A hold seen on the quote route: ask the quote route again (it never pays).
+        await recheckHoldByQuote(st.rec.txid);
+        return;
+      }
       const o = await checkPayment(deps, offer.id);
       if (!o) await openSheet(null);
       else if (o.kind === 'check-first') await openSheet(o.message);
@@ -555,17 +590,18 @@ const OfferCard = ({
           <pre className="m-0 whitespace-pre-wrap text-[11px] text-white">{offer.boardMinuteText}</pre>
         </details>
       )}
-      {step === 'Pay'
-        ? payLabel && (
-            <Btn onClick={runPay} busy={busy} testId="bshares-pay">
-              {payLabel}
-            </Btn>
-          )
-        : step && (
-            <Btn onClick={run} busy={busy}>
-              {step}
-            </Btn>
-          )}
+      {payLabel ? (
+        <Btn onClick={runPay} busy={busy} testId="bshares-pay">
+          {payLabel}
+        </Btn>
+      ) : (
+        step &&
+        step !== 'Pay' && (
+          <Btn onClick={run} busy={busy}>
+            {step}
+          </Btn>
+        )
+      )}
       {sheet && (
         <PayConfirmSheet
           company={me.company}

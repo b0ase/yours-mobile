@@ -404,6 +404,8 @@ export const returnedMessage = (txid: string, refundTxid: string) =>
   `Your payment ${txid} was returned by the company${refundTxid ? ` (refund ${refundTxid})` : ''}.`;
 export const HELD_MESSAGE = "Your payment was received and is held for a compliance review. Don't pay again.";
 export const heldMessage = (txid: string) => (txid ? `${HELD_MESSAGE} Transaction ${txid}.` : HELD_MESSAGE);
+export const holdLiftedMessage = (txid: string) =>
+  `bShares no longer shows transaction ${txid} as held. Check with the directors before paying again.`;
 export const CHECK_FIRST_MESSAGE = 'An earlier payment may have gone out. Check your history before paying again.';
 export const CHECK_UNCHECKED_MESSAGE =
   "We couldn't look through your wallet for it, and an earlier payment may have gone out. Check your history before paying again.";
@@ -690,7 +692,7 @@ export const PAY_BUTTON: Record<PayState['kind'], string | null> = {
   pending: 'Check payment',
   stale: 'Search my wallet again',
   reclaim: 'Try the claim again',
-  held: null,
+  held: 'Check again',
   final: null,
 };
 
@@ -809,6 +811,50 @@ async function claimWith(d: PayDeps, offerId: string, a: Attempt, prior: FailedC
  * wallet as sent → claim it again. Gone from a complete listing → marked abandoned and the person may pay again,
  * warned. bit-sign verified it (fromServer) → only claimed. Never pays.
  */
+/**
+ * "Check again" on a held payment: re-claims with the stored quote_id + txid (never pays) and applies the answer.
+ * Accepted → the claimed marker (Paid). payment_returned → records cleared, the returned note. refund_due → the
+ * refund note. Anything else (still held, or a refusal that can't be acted on) → the held record unchanged.
+ * A hold seen on the quote route has no quote_id to claim with: the page asks the quote route instead.
+ */
+async function recheckHeld(d: PayDeps, offerId: string, f: FailedClaim): Promise<PayOutcome> {
+  const unchanged: PayOutcome = { kind: 'held', message: heldMessage(f.txid), txid: f.txid };
+  if (!f.quote_id) return unchanged;
+  let answer: ClaimAnswer | null;
+  try {
+    answer = await d.claim({ quote_id: f.quote_id, txid: f.txid, ...(f.rawtx ? { rawtx: f.rawtx } : {}) });
+  } catch (e) {
+    const v = claimVerdict(e);
+    const data = errorData(e);
+    const paid = str(data?.payment_txid).toLowerCase() || f.txid;
+    if (v.kind === 'returned') {
+      clearAll(d, offerId);
+      return { kind: 'returned', message: returnedMessage(paid, str(data?.refund_txid).toLowerCase()), txid: paid };
+    }
+    if (v.kind === 'refund') {
+      clearAll(d, offerId);
+      return { kind: 'refund', message: refundRecorded(paid), txid: paid };
+    }
+    return unchanged;
+  }
+  if (answer?.status === 'refund_due' || answer?.refund_due === true) {
+    clearAll(d, offerId);
+    return { kind: 'refund', message: refundRecorded(f.txid), txid: f.txid };
+  }
+  d.store.set(claimedKey(offerId), JSON.stringify({ txid: f.txid, at: (d.now ?? Date.now)() }));
+  d.store.remove(failedKey(offerId));
+  return { kind: 'claimed' };
+}
+
+/**
+ * The quote route's answer to "Check again" on a hold seen there (no quote_id): still held → unchanged; quoting again
+ * → the hold is gone: the txid is kept as an unrecorded payment, so the card warns and paying again needs the warning.
+ */
+export function holdLiftedOnQuote(store: PayStore, offerId: string, txid: string, now: () => number = Date.now) {
+  store.remove(failedKey(offerId));
+  return recordOrphan(store, offerId, txid, now);
+}
+
 async function searchAgain(d: PayDeps, offerId: string, a: Attempt): Promise<PayOutcome> {
   if (a.fromServer) return claimWith(d, offerId, a, null);
   // Both ways: the memo (bShares actions) and the txid itself (every action, no label filter). Abandoned only when
@@ -832,7 +878,7 @@ export async function checkPayment(d: PayDeps, offerId: string): Promise<PayOutc
   const s = payState(d.store, offerId, (d.now ?? Date.now)());
   if (s.kind === 'none') return null;
   if (s.kind === 'claimed') return { kind: 'claimed', message: paidNote(s.rec.txid) };
-  if (s.kind === 'held') return { kind: 'held', message: heldMessage(s.rec.txid), txid: s.rec.txid };
+  if (s.kind === 'held') return recheckHeld(d, offerId, s.rec);
   if (s.kind === 'final') return { kind: 'final', message: failedMessage(s.rec), txid: s.rec.txid };
   if (s.kind === 'reclaim') return claimWith(d, offerId, { ...s.rec, memo: '', memo_script: '', startedAt: 0 }, s.rec);
   if (s.kind === 'stale') return searchAgain(d, offerId, s.rec);

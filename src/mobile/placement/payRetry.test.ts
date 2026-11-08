@@ -558,13 +558,17 @@ describe('bShares Pay: second re-review (page)', () => {
     },
   });
 
-  test('claim 409 payment_held: the held message with the txid, no button, the same on a later load', async () => {
-    claimReplies = [heldReply('01' + 'a'.repeat(62))];
+  test('claim 409 payment_held: the held message with the txid, only "Check again", the same on a later load', async () => {
+    claimReplies = [heldReply('01' + 'a'.repeat(62)), heldReply('01' + 'a'.repeat(62))];
     await tapPay();
     expect(snacks.at(-1)).toBe(`${HELD} Transaction ${'01' + 'a'.repeat(62)}.`);
-    expect(await tapPay()).toBe(false);
     slots.length = 0;
-    const v = await render();
+    let v = await render();
+    expect(v.text).toContain('Check again');
+    expect(v.text).not.toMatch(/\bPay\b(?! again)/);
+    await tapPay(); // Check again: still held → unchanged, nothing paid
+    slots.length = 0;
+    v = await render();
     expect(v.text).toContain(HELD);
     // (the page's static overpayment term mentions refunds; the payment's own words never do)
     expect(v.text).not.toMatch(/directors will refund|refund transaction|Try the claim again/);
@@ -581,7 +585,7 @@ describe('bShares Pay: second re-review (page)', () => {
     expect(snacks.at(-1)).toBe(`${HELD} Transaction ${t}.`);
     slots.length = 0;
     const v = await render();
-    expect(v.buttons.has('bshares-pay')).toBe(false);
+    expect(v.text).toContain('Check again');
     expect(v.text).toContain(HELD);
   });
 
@@ -786,5 +790,67 @@ describe('bShares Pay: final check, stale sheets (page)', () => {
     expect(created).toBe(0);
     expect(snacks.at(-1)).toContain(t);
     expect((await render()).text).toContain('Check payment');
+  });
+});
+
+describe('bShares Pay: "Check again" on a held payment (page)', () => {
+  const TX1 = '01' + 'a'.repeat(62);
+  const held: Res = {
+    status: 409,
+    data: { error: 'held', code: 'payment_held', retryable: false, payment_held: true, payment_txid: TX1 },
+  };
+  test('the directors cleared it: Check again re-claims the same quote + txid → Paid; nothing paid again', async () => {
+    claimReplies = [held, { status: 200, data: { ok: true, already_claimed: true } }];
+    await tapPay();
+    await tapPay(); // Check again
+    expect(created).toBe(1);
+    expect(claims().map((c) => [c.quote_id, c.txid])).toEqual([
+      ['q1', TX1],
+      ['q1', TX1],
+    ]);
+    slots.length = 0;
+    const v = await render();
+    expect(v.text).toContain(`Paid: transaction ${TX1}`);
+    expect(v.text).not.toContain('held for a compliance review');
+    expect(v.buttons.has('bshares-pay')).toBe(false);
+  });
+
+  test('the company returned it: Check again → the returned note, records cleared', async () => {
+    const rf = 'ee'.repeat(32);
+    claimReplies = [
+      held,
+      {
+        status: 409,
+        data: {
+          error: 'returned',
+          code: 'payment_returned',
+          payment_returned: true,
+          payment_txid: TX1,
+          refund_txid: rf,
+        },
+      },
+    ];
+    await tapPay();
+    await tapPay();
+    expect(snacks.at(-1)).toBe(`Your payment ${TX1} was returned by the company (refund ${rf}).`);
+    expect(records()).toEqual([]);
+    expect(created).toBe(1);
+  });
+
+  test('a hold the quote route reported (no quote): Check again asks the quote route; lifted → warned, never paid', async () => {
+    const t = 'cd'.repeat(32);
+    quoteReplies = [
+      { status: 409, data: { error: 'held', code: 'payment_held', payment_held: true, payment_txid: t } },
+    ];
+    await tapPay();
+    await tapPay(); // Check again: the quote route now quotes (default reply)
+    expect(created).toBe(0);
+    expect(snacks.at(-1)).toBe(
+      `bShares no longer shows transaction ${t} as held. Check with the directors before paying again.`,
+    );
+    slots.length = 0;
+    const v = await render();
+    expect(v.text).toContain('Check payment');
+    expect(v.text).toContain(t);
   });
 });
