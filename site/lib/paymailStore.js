@@ -355,6 +355,14 @@ function supabaseStore(env = process.env, f = fetch) {
           },
         )) ?? []
       ).length > 0,
+    // Forwards of OTHER keys from a name `key` owns (unlink): stale by definition while the row is `key`'s.
+    deleteForeignForwards: (from, key) => {
+      if (!key) throw new Error('deleteForeignForwards needs the owner key');
+      return req(`bwallet_paymail_forwards?from_alias=eq.${q(from)}&identity_key=neq.${q(key)}`, {
+        method: 'DELETE',
+        headers: { Prefer: 'return=minimal' },
+      });
+    },
     // Remove `key`'s own forward from `from`; with `to` / `expiresAt`, only while it still has exactly those (a hold
     // this request made and nobody touched since).
     deleteOwnForward: (from, key, { to, expiresAt } = {}) =>

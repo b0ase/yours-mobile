@@ -954,14 +954,20 @@ function makeHandlers({
   /**
    * After a rename that did NOT happen. The hold is removed only when THIS request created it and nobody has touched
    * it since (same target, same expiry stamp), and the old name is still a live row of this wallet (its row answers
-   * again). If the old name has gone (another request of this wallet renamed or removed it), the hold stays and is
-   * pointed at the wallet's current name if it still points at this request's failed target.
+   * again). If the old name is now ANOTHER key's live row (handed over while this request ran), this wallet's hold
+   * from it is stale by definition: the one this request wrote (its mark) is removed. If the old name has gone
+   * (another request of this wallet renamed or removed it), the hold stays and is pointed at the wallet's current
+   * name if it still points at this request's failed target.
    */
   const dropHold = async (hold, from, to, key) => {
     if (!hold) return;
     const still = await store.getAlias(from).catch(() => null);
     if (still && String(still.identity_key).toLowerCase() === key) {
       if (hold.created) await store.deleteOwnForward(from, key, { to, expiresAt: hold.expiresAt });
+      return;
+    }
+    if (still) {
+      await store.deleteOwnForward(from, key, { to, expiresAt: hold.expiresAt });
       return;
     }
     const main = await store.getAliasByKey(key).catch(() => null);
@@ -1220,9 +1226,6 @@ function makeHandlers({
         throw e;
       }
       if (!moved) return [409, { error: 'The name changed hands since the release' }];
-      // The name now belongs to `to`: forwards the old owner still held from it (rename holds, removed-name
-      // forwards) are dropped, or they would block the new owner's own rename and outlive an unlink.
-      await store.deleteForward?.(alias);
       const b = {
         alias,
         identity_key: to,
@@ -1233,7 +1236,15 @@ function makeHandlers({
         release_sig: h.release_sig,
         release_ts: Number(h.release_ts),
       };
+      // The new owner's binding first: if anything after the move failed before it, the old owner's binding would
+      // stay and `bind` would refuse the new owner for good (the handover is already spent).
       await store.putBinding(b);
+      // The name now belongs to `to`: forwards the old owner still held from it (rename holds, removed-name
+      // forwards) are dropped, or they would block the new owner's own rename and outlive an unlink. Best effort:
+      // holdName and unlink also treat another key's forward from a row the caller owns as stale.
+      await Promise.resolve(store.deleteForward?.(alias)).catch((e) =>
+        console.error('handover: forward cleanup failed', alias, String(e && e.message ? e.message : e).slice(0, 200)),
+      );
       await store.logName({
         alias,
         identity_key: to,
@@ -1864,6 +1875,9 @@ function makeHandlers({
           409,
           { error: 'A payment to this name is still arriving. Open the wallet to collect it, then try again.' },
         ];
+      // While the row is ours, any OTHER key's forward from this name is stale (a leftover from before a handover):
+      // dropped first, so the name really is free for anyone afterwards.
+      await store.deleteForeignForwards?.(alias, key);
       // Filtered by this key throughout: a name that moved meanwhile is not deleted (#F-237 review).
       const gone = await store.deleteAlias(alias, key);
       if (gone === 'blocked')

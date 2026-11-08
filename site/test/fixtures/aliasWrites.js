@@ -5,6 +5,7 @@
 //  - holdForward(row): insert-if-absent (ignore-duplicates), true only when this call created it;
 //  - repointOwnForward(from, key, to, { expiresAt, onlyIfTo }): only key's own forward (and only while → onlyIfTo);
 //  - deleteOwnForward(from, key, { to, expiresAt }): only key's own forward (and only while it has exactly those);
+//  - deleteForeignForwards(from, key): only OTHER keys' forwards from the name;
 //  - deleteAlias(alias, key): 'gone' unless the row is key's; 'blocked' (nothing deleted) while another key's payment
 //    records reference the name (the FK is ON DELETE RESTRICT); else key's own payments + the row; 'ok'.
 // `aliases` is the fake's Map; `pays` (optional) its payments Map; `forwards` (optional) a Map or a getter.
@@ -50,6 +51,11 @@ export const aliasWrites = (aliases, { pays, forwards } = {}) => ({
     const fw = m.get(from);
     if (fw && fw.identity_key === key && (!to || fw.to_alias === to) && (!expiresAt || fw.expires_at === expiresAt))
       m.delete(from);
+  },
+  deleteForeignForwards: async function (from, key) {
+    const m = forwards || this.forwards;
+    const fw = m.get(from);
+    if (fw && fw.identity_key !== key) m.delete(from);
   },
   deleteAlias: async (alias, key) => {
     if (!key) throw new Error('deleteAlias needs the owner key');

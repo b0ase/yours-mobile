@@ -503,3 +503,72 @@ describe("#F-237 re-review: handovers, bindings and unlink keep other wallets' r
     expect(store.aliases.get('given').identity_key).toBe(b.identityKey);
   });
 });
+
+// ---- #F-237 third review of 0efc4ed3 (8 Nov 2026) -------------------------------------------------------------------
+describe('#F-237 third review: no hold of the old owner survives a handover that lands mid-rename', () => {
+  test('K releases aaaaa to B, then renames; B accepts mid-rename: no K forward stays, and unlink frees it', async () => {
+    const store = namesStore();
+    const h = pm.makeHandlers({ store, env: ENV });
+    const k = user();
+    const b = user();
+    const l = user();
+    expect((await h.register({}, await k.sign('register', { alias: 'aaaaa' })))[0]).toBe(200);
+    expect(
+      (await h['handover-release']({}, await k.sign('release', { alias: 'aaaaa', to: b.identityKey, seq: '1' })))[0],
+    ).toBe(200);
+    const acceptBody = await b.sign('bind', { alias: 'aaaaa', seq: '1' });
+    // K's rename has read its name (mine = aaaaa); B accepts before K's hold is written.
+    const holdForward = store.holdForward;
+    let accepted = null;
+    store.holdForward = async function (r) {
+      if (!accepted && r.from_alias === 'aaaaa') accepted = await h['handover-accept']({}, acceptBody);
+      return holdForward.call(this, r);
+    };
+    const [ks] = await h.register({}, await k.sign('register', { alias: 'kkkkk2' }));
+    expect(accepted[0]).toBe(200);
+    expect(ks).toBe(409);
+    expect(store.aliases.get('aaaaa').identity_key).toBe(b.identityKey);
+    expect(store.forwards.has('aaaaa')).toBe(false);
+    // B unlinks: the name is free for anyone, not quietly K's again.
+    expect((await h.unlink({}, await b.sign('unlink', { alias: 'aaaaa' })))[0]).toBe(200);
+    expect((await h.register({}, await l.sign('register', { alias: 'aaaaa' })))[0]).toBe(200);
+  });
+
+  test("unlink drops another key's forward from the name first, so the name is free for anyone", async () => {
+    const store = namesStore();
+    const h = pm.makeHandlers({ store, env: ENV });
+    const b = user();
+    const k = user();
+    const l = user();
+    expect((await h.register({}, await b.sign('register', { alias: 'leftname1' })))[0]).toBe(200);
+    // A stale forward of another key from B's live name (a leftover from before a handover).
+    await store.putForward({
+      from_alias: 'leftname1',
+      to_alias: 'otherplace1',
+      identity_key: k.identityKey,
+      expires_at: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+    expect((await h.unlink({}, await b.sign('unlink', { alias: 'leftname1' })))[0]).toBe(200);
+    expect(store.forwards.has('leftname1')).toBe(false);
+    expect((await h.register({}, await l.sign('register', { alias: 'leftname1' })))[0]).toBe(200);
+  });
+});
+
+describe('#F-237 third review: a handover always leaves the new owner able to bind', () => {
+  test("the new owner's binding is written before the forward cleanup, and a failed cleanup doesn't fail the accept", async () => {
+    const store = namesStore();
+    const h = pm.makeHandlers({ store, env: ENV });
+    const a = user();
+    const b = user();
+    expect((await h.register({}, await a.sign('register', { alias: 'gift2' })))[0]).toBe(200);
+    expect((await h.bind({}, await a.sign('bind', { alias: 'gift2', seq: '1' })))[0]).toBe(200);
+    store.deleteForward = async () => {
+      throw new Error('supabase 503');
+    };
+    const [s] = await handOver(h, 'gift2', a, b, 2);
+    expect(s).toBe(200);
+    expect(store.aliases.get('gift2').identity_key).toBe(b.identityKey);
+    expect(store.bindings.get('gift2').identity_key).toBe(b.identityKey);
+    expect((await h.bind({}, await b.sign('bind', { alias: 'gift2', seq: '3' })))[0]).toBe(200);
+  });
+});
