@@ -608,7 +608,7 @@ export const BUREAU_ENABLED: boolean = !(
  * NativeSealPage chunk; with it off, a sign link or a document button opens bChatX's own page, as before the merge.
  * The background's one-Seal-sheet pass (services/sealPass.ts) is off too: background.ts writes this check out as a
  * literal at each seal site, and bit-sign is told oneApprovalSeal: false (it keeps its own two prompts).
- * Store grep: `Review & sign|Seal & pay|Sign & seal|bitsign seal`.
+ * Store grep: `Review & sign|Seal & pay|Sign & seal ·|Tap Sign & seal again|SealPasses`.
  */
 export const NATIVE_SEAL_ENABLED: boolean = !(
   import.meta.env.VITE_STORE_BUILD === '1' ||
