@@ -846,11 +846,32 @@ describe('bShares Pay: "Check again" on a held payment (page)', () => {
     await tapPay(); // Check again: the quote route now quotes (default reply)
     expect(created).toBe(0);
     expect(snacks.at(-1)).toBe(
-      `bShares no longer shows transaction ${t} as held. Check with the directors before paying again.`,
+      `The company has resolved the review of transaction ${t}; ask the directors before paying again.`,
     );
     slots.length = 0;
     const v = await render();
     expect(v.text).toContain('Check payment');
     expect(v.text).toContain(t);
+  });
+});
+
+describe('bShares Pay: only a real paid answer counts (page)', () => {
+  test('an HTML 200 from something in the way: not Paid, the payment stays, Check payment claims again', async () => {
+    claimReplies = [
+      { status: 200, data: '<html><body>Sign in to the Wi-Fi</body></html>' },
+      { status: 200, data: { ok: true } },
+    ];
+    await tapPay();
+    expect(created).toBe(1);
+    slots.length = 0;
+    let v = await render();
+    expect(v.text).toContain('Check payment');
+    expect(v.text).not.toContain('Paid: transaction');
+    await tapPay();
+    expect(created).toBe(1);
+    expect(claims().length).toBe(2);
+    slots.length = 0;
+    v = await render();
+    expect(v.text).toContain('Paid: transaction');
   });
 });

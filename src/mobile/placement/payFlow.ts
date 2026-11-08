@@ -405,7 +405,24 @@ export const returnedMessage = (txid: string, refundTxid: string) =>
 export const HELD_MESSAGE = "Your payment was received and is held for a compliance review. Don't pay again.";
 export const heldMessage = (txid: string) => (txid ? `${HELD_MESSAGE} Transaction ${txid}.` : HELD_MESSAGE);
 export const holdLiftedMessage = (txid: string) =>
-  `bShares no longer shows transaction ${txid} as held. Check with the directors before paying again.`;
+  `The company has resolved the review of transaction ${txid}; ask the directors before paying again.`;
+export const UNCONFIRMED_ANSWER_MESSAGE =
+  "bShares answered, but not with a confirmation of your payment (a network page in the way?). Your payment is saved on this device: try again shortly. Don't pay again.";
+
+const PAID_STATUSES = new Set(['paid', 'approved', 'issued']);
+/**
+ * A real "paid" answer: a parsed JSON object with ok === true, or an offer whose status is paid / approved / issued.
+ * Never just any 2xx: an HTML or empty 200 (a proxy, a captive portal) proves nothing.
+ */
+export const isPaidAnswer = (a: unknown): boolean =>
+  !!a &&
+  typeof a === 'object' &&
+  !Array.isArray(a) &&
+  ((a as { ok?: unknown }).ok === true || PAID_STATUSES.has(str((a as { status?: unknown }).status)));
+const isRefundAnswer = (a: unknown): boolean =>
+  !!a &&
+  typeof a === 'object' &&
+  ((a as { status?: unknown }).status === 'refund_due' || (a as { refund_due?: unknown }).refund_due === true);
 export const CHECK_FIRST_MESSAGE = 'An earlier payment may have gone out. Check your history before paying again.';
 export const CHECK_UNCHECKED_MESSAGE =
   "We couldn't look through your wallet for it, and an earlier payment may have gone out. Check your history before paying again.";
@@ -782,9 +799,11 @@ async function claimWith(d: PayDeps, offerId: string, a: Attempt, prior: FailedC
     if (v.kind === 'held') return { kind: 'held', message: heldMessage(paid), txid: paid };
     return { kind: v.kind, message: failedMessage(failed), txid };
   }
+  const refundDue = isRefundAnswer(answer);
+  // Not a real answer (HTML / empty 200 from something in the way): unknown, retried later; every record stays.
+  if (!refundDue && !isPaidAnswer(answer)) return { kind: 'retry', message: UNCONFIRMED_ANSWER_MESSAGE, txid };
   // Claimed: only this attempt is done. Any earlier attempt without a txid is looked for once; one that also went
   // out is kept (marked extra) for the directors to refund, never claimed or paid over.
-  const refundDue = answer?.status === 'refund_due' || answer?.refund_due === true;
   if (!refundDue) d.store.set(claimedKey(offerId), JSON.stringify({ txid, at: (d.now ?? Date.now)() }));
   d.store.remove(failedKey(offerId));
   updateAttempt(d.store, offerId, a, () => null);
@@ -837,10 +856,12 @@ async function recheckHeld(d: PayDeps, offerId: string, f: FailedClaim): Promise
     }
     return unchanged;
   }
-  if (answer?.status === 'refund_due' || answer?.refund_due === true) {
+  if (isRefundAnswer(answer)) {
     clearAll(d, offerId);
     return { kind: 'refund', message: refundRecorded(f.txid), txid: f.txid };
   }
+  // Only a real paid answer clears the hold (an HTML / empty 200 proves nothing): otherwise unchanged.
+  if (!isPaidAnswer(answer)) return { ...unchanged, message: `${UNCONFIRMED_ANSWER_MESSAGE} ${heldMessage(f.txid)}` };
   d.store.set(claimedKey(offerId), JSON.stringify({ txid: f.txid, at: (d.now ?? Date.now)() }));
   d.store.remove(failedKey(offerId));
   return { kind: 'claimed' };
