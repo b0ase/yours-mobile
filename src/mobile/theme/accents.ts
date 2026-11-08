@@ -732,7 +732,7 @@ export const ACCENTS: readonly Accent[] = [
     blurb: 'White, navy and signal red',
     scheme: 'light',
     accent: '#C8102E',
-    hi: '#B00E28',
+    hi: '#A80D26',
     lo: '#9E0C24',
     on: '#FFFFFF',
     bg: '#F7F9FC',
