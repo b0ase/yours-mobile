@@ -654,7 +654,8 @@ function matchOutputs(tx, expected) {
  *   updatePayment(reference, patch)       listInbox(identityKey) → rows (status 'received')
  *   countRecentPayments(alias, sinceIso) → number
  *   deleteByKey(identityKey) → { aliases, payments } (counts)
- *   deleteBinding(alias), deleteBindingsByKey(identityKey) (signed name bindings of released names)
+ *   deleteAlias(alias, key) → 'ok'|'gone'|'blocked'
+ *   deleteBinding(alias, key), deleteBindingsByKey(identityKey) (signed name bindings of released names)
  * `broadcast(tx, beefHex)` is optional (best-effort).
  */
 /**
@@ -922,6 +923,48 @@ function makeHandlers({
     };
   };
 
+  /**
+   * Hold `from` for this wallet while it is renamed away (#F-237): a forward to `to`, written BEFORE the rename,
+   * so the name always answers (its row, then the forward) and is never free to claim. Never written over an
+   * existing forward: if one is there it is another request of this same wallet (a double submit, a second device)
+   * and is pointed at this request's new name instead. Each request stamps the hold's expiry (exactly 90 days, to
+   * the millisecond) with random microsecond digits, a request mark: a hold this request made is recognised only
+   * while nobody else has touched it (two requests of one wallet in the same millisecond share a mark 1 in 1000
+   * times). Resolves { created, expiresAt } or null.
+   */
+  const holdName = async (from, to, key) => {
+    const micro = String(Math.floor(Math.random() * 1000)).padStart(3, '0');
+    const expiresAt = new Date(now() + FORWARD_MS).toISOString().replace(/Z$/, `${micro}Z`);
+    const row = { from_alias: from, to_alias: to, identity_key: key, expires_at: expiresAt };
+    for (let i = 0; i < 2; i++) {
+      if (await store.holdForward(row)) return { created: true, expiresAt };
+      if (await store.repointOwnForward(from, key, to, { expiresAt })) return { created: false, expiresAt };
+      // Another key's forward from a live row of ours can only be an expired leftover: drop exactly that row and
+      // try once more. Anything else (a live forward of another key) refuses the rename.
+      const fw = await store.getForward(from).catch(() => null);
+      if (!fw) continue;
+      if (!(fw.expires_at && Date.parse(fw.expires_at) <= now())) break;
+      await store.deleteOwnForward(from, fw.identity_key, { to: fw.to_alias, expiresAt: fw.expires_at });
+    }
+    return null;
+  };
+  /**
+   * After a rename that did NOT happen. The hold is removed only when THIS request created it and nobody has touched
+   * it since (same target, same expiry stamp), and the old name is still a live row of this wallet (its row answers
+   * again). If the old name has gone (another request of this wallet renamed or removed it), the hold stays and is
+   * pointed at the wallet's current name if it still points at this request's failed target.
+   */
+  const dropHold = async (hold, from, to, key) => {
+    if (!hold) return;
+    const still = await store.getAlias(from).catch(() => null);
+    if (still && String(still.identity_key).toLowerCase() === key) {
+      if (hold.created) await store.deleteOwnForward(from, key, { to, expiresAt: hold.expiresAt });
+      return;
+    }
+    const main = await store.getAliasByKey(key).catch(() => null);
+    if (main && main.alias !== to) await store.repointOwnForward(from, key, main.alias, { onlyIfTo: to });
+  };
+
   // Provable names (docs/PROVABLE-NAMES.md): the provider keys archived in the public name log, oldest first.
   const archivedKeys = async (provider) =>
     ((store.providerKeys && (await store.providerKeys(nameProof.jwksAlias(provider)).catch(() => []))) || [])
@@ -1133,9 +1176,9 @@ function makeHandlers({
       const sigErr = await verifySignedOnce(body, 'release-cancel', now());
       if (sigErr) return [401, { error: sigErr }];
       const alias = String(body.fields?.alias || '').toLowerCase();
-      const h = await store.getHandover(alias);
-      if (!h || h.from_key !== String(body.identityKey).toLowerCase()) return [404, { error: 'No handover to cancel' }];
-      await store.deleteHandover(alias);
+      // One atomic DELETE by alias + releasing key: an accept racing it either got the row first or finds none.
+      const h = await store.cancelHandover(alias, String(body.identityKey).toLowerCase());
+      if (!h) return [404, { error: 'No handover to cancel' }];
       return [200, { cancelled: alias }];
     },
 
@@ -1155,8 +1198,11 @@ function makeHandlers({
       const to = String(body.identityKey).toLowerCase();
       const alias = String(body.fields?.alias || '').toLowerCase();
       const seq = Number(body.fields?.seq);
-      const h = await store.getHandover(alias);
-      if (!h || h.to_key !== to || Number(h.seq) !== seq) return [404, { error: 'No handover of that name to you' }];
+      if (!Number.isInteger(seq) || seq < 1) return [404, { error: 'No handover of that name to you' }];
+      // Claimed (deleted) first, atomically: a cancel or a second accept racing this one finds nothing. Once claimed
+      // it is spent, even if the move below is refused (the release no longer matches the name).
+      const h = await store.claimHandover(alias, to, seq);
+      if (!h) return [404, { error: 'No handover of that name to you' }];
       const row = await store.getAlias(alias);
       if (!row || String(row.identity_key).toLowerCase() !== h.from_key)
         return [409, { error: 'The name changed hands since the release' }];
@@ -1184,7 +1230,6 @@ function makeHandlers({
         signature: b.signature,
         note: `handover: release ${h.release_sig} at ${h.release_ts}; accept at ${body.timestamp}`,
       });
-      await store.deleteHandover(alias);
       return [200, { binding: bindingOut(b) }];
     },
 
@@ -1530,63 +1575,70 @@ function makeHandlers({
         if (paid.error) return paid.error;
         fee = paid.fee;
       }
-      const profile = {
-        ord_address: f.ordAddress || null,
-        // Keep what's there when an update leaves a field out.
-        // A display name is never blank (owner, 15 Oct 2026): what they typed, else the wallet's
-        // current name (every name on one key shares it), else the alias as typed ("mike" → "Mike").
-        display_name:
-          cleanDisplayName(f.name) ||
-          cleanDisplayName(ownsIt ? taken.display_name : '') ||
-          cleanDisplayName((await store.getAliasByKey(identityKey))?.display_name) ||
-          defaultDisplayName(alias),
-        avatar: String(f.avatar || '').slice(0, 512) || (ownsIt ? taken.avatar : null) || null,
-      };
-      // b-Aware #F-237: everything above is a READ, and other requests run in between (rate limits, the fee
-      // check's chain lookups). So the write itself decides: never an upsert that could land on a row another
-      // wallet wrote meanwhile.
-      //  - their own name: a PATCH filtered by alias AND this identity key (0 rows: it isn't theirs any more);
-      //  - a rename: the old name's forward is written FIRST, then the row is renamed (filtered by this key), so the
-      //    old name always answers (row, then forward) and is never free to claim; a clash on the new name undoes
-      //    the forward;
-      //  - a new name: a plain INSERT; a clash on the alias primary key means someone just took it.
+      // From here a paid fee is recorded: any failure before the name is written puts the payment back (it can only
+      // ever pay for this alias + this wallet, so releasing it is safe).
       let row;
-      if (ownsIt) {
-        row = await store.updateOwnAlias(alias, identityKey, profile);
-        if (!row) return [409, { error: 'That name is no longer on this wallet' }];
-      } else if (mine && mine.alias !== alias && (mine.kind ?? 'plain') === kind) {
-        // The old name keeps receiving for 90 days, then is released. A name that is now reserved
-        // (anti-impersonation, 28 Oct 2026) gets no forward: it stops resolving at once (only its designated
-        // owner may claim a reserved name, so there is no window). Old forwards stay.
-        const holdOld = !!store.putForward && !reservedBase(mine.alias);
-        if (holdOld)
-          await store.putForward({
-            from_alias: mine.alias,
-            to_alias: alias,
-            identity_key: identityKey,
-            expires_at: new Date(now() + FORWARD_MS).toISOString(),
-          });
-        const renamed = await store.renameAlias(mine.alias, alias, identityKey);
-        if (renamed !== 'ok') {
-          if (holdOld) await store.deleteOwnForward?.(mine.alias, identityKey);
-          if (renamed === 'taken') return [409, await releaseNameFee(fee)];
-          await releaseNameFee(fee);
-          return [409, { error: 'Your name changed on another device. Reload and try again.' }];
+      try {
+        const profile = {
+          ord_address: f.ordAddress || null,
+          // Keep what's there when an update leaves a field out.
+          // A display name is never blank (owner, 15 Oct 2026): what they typed, else the wallet's
+          // current name (every name on one key shares it), else the alias as typed ("mike" → "Mike").
+          display_name:
+            cleanDisplayName(f.name) ||
+            cleanDisplayName(ownsIt ? taken.display_name : '') ||
+            cleanDisplayName((await store.getAliasByKey(identityKey))?.display_name) ||
+            defaultDisplayName(alias),
+          avatar: String(f.avatar || '').slice(0, 512) || (ownsIt ? taken.avatar : null) || null,
+        };
+        // b-Aware #F-237: everything above is a READ, and other requests run in between (rate limits, the fee
+        // check's chain lookups). So the write itself decides: never an upsert that could land on a row another
+        // wallet wrote meanwhile.
+        //  - their own name: a PATCH filtered by alias AND this identity key (0 rows: it isn't theirs any more);
+        //  - a rename: the old name's hold (a forward) is written FIRST, never over an existing one, then the row is
+        //    renamed (filtered by this key), so the old name always answers (row, then forward) and is never free to
+        //    claim; a failed rename removes only a hold this request made while the old row is still this wallet's;
+        //  - a new name: a plain INSERT; a clash on the alias primary key means someone just took it.
+        if (ownsIt) {
+          row = await store.updateOwnAlias(alias, identityKey, profile);
+          if (!row) return [409, { error: 'That name is no longer on this wallet' }];
+        } else if (mine && mine.alias !== alias && (mine.kind ?? 'plain') === kind) {
+          // The old name keeps receiving for 90 days, then is released. A name that is now reserved
+          // (anti-impersonation, 28 Oct 2026) gets no forward: it stops resolving at once (only its designated
+          // owner may claim a reserved name, so there is no window). Old forwards stay.
+          const holdOld = !!store.holdForward && !reservedBase(mine.alias);
+          const hold = holdOld ? await holdName(mine.alias, alias, identityKey) : null;
+          if (holdOld && !hold) {
+            await releaseNameFee(fee);
+            return [409, { error: 'Your old name is busy. Try again in a moment.' }];
+          }
+          const renamed = await store.renameAlias(mine.alias, alias, identityKey);
+          if (renamed !== 'ok') {
+            await dropHold(hold, mine.alias, alias, identityKey);
+            if (renamed === 'taken') return [409, await releaseNameFee(fee)];
+            await releaseNameFee(fee);
+            return [409, { error: 'Your name changed on another device. Reload and try again.' }];
+          }
+          // This request won: the old name's hold points at this new name, whoever created it.
+          if (holdOld) await store.repointOwnForward(mine.alias, identityKey, alias);
+          if (store.putForward) {
+            if (fwd) await store.deleteForward(alias);
+            await store.retargetForwards?.(mine.alias, alias);
+          }
+          row = await store.updateOwnAlias(alias, identityKey, profile);
+          if (!row) return [409, { error: 'That name is no longer on this wallet' }];
+        } else {
+          row = await store.insertAlias({ kind, alias, identity_key: identityKey, ...profile });
+          if (!row) return [409, await releaseNameFee(fee)];
+          // A held name of this wallet's own (renamed / removed < 90 days ago) is a live row again.
+          if (fwd) await store.deleteForward?.(alias);
         }
-        if (store.putForward) {
-          if (fwd) await store.deleteForward(alias);
-          await store.retargetForwards?.(mine.alias, alias);
-        }
-        row = await store.updateOwnAlias(alias, identityKey, profile);
-        if (!row) return [409, { error: 'That name is no longer on this wallet' }];
-      } else {
-        row = await store.insertAlias({ kind, alias, identity_key: identityKey, ...profile });
-        if (!row) return [409, await releaseNameFee(fee)];
-        // A held name of this wallet's own (renamed / removed < 90 days ago) is a live row again.
-        if (fwd) await store.deleteForward?.(alias);
+      } catch (e) {
+        if (fee) await releaseNameFee(fee);
+        throw e;
       }
       // Before migrations/20261024_paymail_ord_proof.sql runs there is no column: the name still registers, unproven.
-      if (ordProof && store.setOrdProof) await store.setOrdProof(alias, ordProof).catch(() => {});
+      if (ordProof && store.setOrdProof) await store.setOrdProof(alias, identityKey, ordProof).catch(() => {});
       // A name they typed is the wallet's name on every one of its paymails.
       if (cleanDisplayName(f.name) && store.setDisplayNameByKey)
         await store.setDisplayNameByKey(identityKey, row.display_name);
@@ -1782,9 +1834,18 @@ function makeHandlers({
           409,
           { error: 'A payment to this name is still arriving. Open the wallet to collect it, then try again.' },
         ];
-      await store.deleteAlias(alias);
-      // The name is free for anyone now: drop its signed binding so the next owner can bind it (darkasep112).
-      await store.deleteBinding?.(alias);
+      // Filtered by this key throughout: a name that moved meanwhile is not deleted (#F-237 review).
+      const gone = await store.deleteAlias(alias, key);
+      if (gone === 'blocked')
+        return [
+          409,
+          { error: 'This name still has payment records from a previous owner. Ask support to release it.' },
+        ];
+      if (gone !== 'ok') return [409, { error: 'That name is not on this wallet any more' }];
+      // The name is free for anyone now: drop the binding this wallet signed so the next owner can bind it
+      // (darkasep112), and any forward it still held from that name.
+      await store.deleteBinding?.(alias, key);
+      await store.deleteOwnForward?.(alias, key);
       return [200, { unlinked: handleOf(alias) }];
     },
 
@@ -1851,6 +1912,7 @@ function makeHandlers({
           const out = await releaseNameFee(paid.fee);
           return [409, paid.fee ? out : { error: 'Could not add that name yet' }];
         }
+        if (paid.fee) await releaseNameFee(paid.fee);
         throw e;
       }
       if (!row) return [500, { error: 'server-error' }];
@@ -1886,19 +1948,16 @@ function makeHandlers({
         return [404, { error: 'That name is not on this wallet' }];
       const main = await store.getAliasByKeyKind?.(key, 'plain');
       if (!main || main.alias === alias) return [409, { error: 'Make another name main first' }];
-      // Forward first, so there is no moment when the name answers nothing.
+      // Forward first, so there is no moment when the name answers nothing (and never over another request's hold).
       await store.retargetForwards?.(alias, main.alias);
-      await store.putForward({
-        from_alias: alias,
-        to_alias: main.alias,
-        identity_key: key,
-        expires_at: new Date(now() + FORWARD_MS).toISOString(),
-      });
+      const hold = await holdName(alias, main.alias, key);
+      if (!hold) return [409, { error: 'That name is busy. Try again in a moment.' }];
       const renamed = await store.renameAlias(alias, `rm-${Utils.toHex(Random(14))}`, key);
       if (renamed !== 'ok') {
-        await store.deleteOwnForward?.(alias, key);
+        await dropHold(hold, alias, main.alias, key);
         return [409, { error: 'That name changed on another device. Reload and try again.' }];
       }
+      await store.repointOwnForward(alias, key, main.alias);
       return [200, { removed: handleOf(alias), forwardsTo: handleOf(main.alias) }];
     },
 

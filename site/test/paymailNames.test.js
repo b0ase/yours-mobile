@@ -200,6 +200,24 @@ const memStore = () => {
       forwards.set(r.from_alias, { ...r });
     },
     deleteForward: async (a) => void forwards.delete(a),
+    holdForward: async (r) => {
+      ops.push(`forward:${r.from_alias}`);
+      if (forwards.has(r.from_alias)) return false;
+      forwards.set(r.from_alias, { ...r });
+      return true;
+    },
+    repointOwnForward: async (from, key, to, { expiresAt, onlyIfTo } = {}) => {
+      const fw = forwards.get(from);
+      if (!fw || fw.identity_key !== key || (onlyIfTo && fw.to_alias !== onlyIfTo)) return false;
+      fw.to_alias = to;
+      if (expiresAt) fw.expires_at = expiresAt;
+      return true;
+    },
+    deleteOwnForward: async (from, key, { to, expiresAt } = {}) => {
+      const fw = forwards.get(from);
+      if (fw && fw.identity_key === key && (!to || fw.to_alias === to) && (!expiresAt || fw.expires_at === expiresAt))
+        forwards.delete(from);
+    },
     retargetForwards: async (from, to) => {
       for (const r of forwards.values()) if (r.to_alias === from) r.to_alias = to;
     },
@@ -318,9 +336,11 @@ describe('several names per wallet', () => {
       two: { alias: 'two', identity_key: u.identityKey, kind: 'plain', is_primary: false },
     };
     const { f, calls } = fakeFetch((c) => {
-      // PostgREST answers a return=representation PATCH with the rows it changed.
+      // PostgREST answers a return=representation write with the rows it wrote.
       if (c.method === 'PATCH' && c.url.includes('aliases?alias=eq.two&identity_key=eq.'))
         return [200, [{ ...rows.two, ...JSON.parse(c.body) }]];
+      if (c.method === 'POST' && c.url.includes('bwallet_paymail_forwards')) return [201, [JSON.parse(c.body)]];
+      if (c.method === 'PATCH' && c.url.includes('bwallet_paymail_forwards')) return [200, [{}]];
       if (c.method !== 'GET') return [204, undefined];
       if (c.url.includes('bwallet_paymail_forwards')) return [200, []];
       if (c.url.includes('kind=eq.plain&is_primary=is.true')) return [200, [rows.one]];

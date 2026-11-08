@@ -18,10 +18,6 @@ const memStore = () => {
       [...aliases.values()].find((r) => r.identity_key === k) ??
       null,
     countUncollected: async (a) => [...pays.values()].filter((p) => p.alias === a && p.status === 'received').length,
-    deleteAlias: async (a) => {
-      for (const [r, p] of pays) if (p.alias === a) pays.delete(r);
-      aliases.delete(a);
-    },
     appsStore: new Map(),
     getApps: async function (k) {
       return this.appsStore.get(k) ?? [];
@@ -975,6 +971,26 @@ describe('name pricing (owner, 27 Oct 2026): by length, 5+ free, 4 $10, 3 $100, 
     expect(store.events).toEqual([]);
   });
 
+  test('#F-237 review: a paid claim whose name write throws puts the payment back', async () => {
+    const u = user();
+    const pay = payTx(16_000_000, FEE_ADDR, [u.identityKey, 'abcd']);
+    const store = priceStore();
+    store.releaseFeeTx = async (r) => {
+      store.fees.delete(r.txid);
+      store.receipts = store.receipts.filter((x) => x.txid !== r.txid);
+    };
+    store.insertAlias = async () => {
+      throw new Error('supabase 500');
+    };
+    const h = pm.makeHandlers({ store, env: FENV, feeChain: mockChain([pay]) });
+    await expect(h.register({}, await u.sign('register', { alias: 'abcd', feeTxid: pay.id('hex') }))).rejects.toThrow(
+      'supabase 500',
+    );
+    expect(store.receipts).toEqual([]);
+    expect(store.fees.has(pay.id('hex'))).toBe(false);
+    expect(store.aliases.has('abcd')).toBe(false);
+  });
+
   test('#F-237: a paid rename into a name just taken gets 409; the old name, its forward state and the fee are untouched', async () => {
     const u = user();
     const other = user();
@@ -1011,10 +1027,10 @@ describe('#F-237: no window in renames, and owner updates are filtered by key', 
     const attacker = user();
     expect((await h.register({}, await owner.sign('register', { alias: 'oldname' })))[0]).toBe(200);
     const order = [];
-    const putForward = store.putForward;
-    store.putForward = async function (r) {
+    const holdForward = store.holdForward;
+    store.holdForward = async function (r) {
       order.push(`forward:${r.from_alias}`);
-      return putForward.call(this, r);
+      return holdForward.call(this, r);
     };
     // Pause the owner's rename right after the row moved, and let the attacker try the old name in that moment.
     const rename = store.renameAlias;
@@ -1093,7 +1109,10 @@ describe('b_feedback 67: destinations the payer can check', () => {
 
   test('ord answers carry the owner-signed proof; a bad proof is refused', async () => {
     const store = memStore();
-    store.setOrdProof = async (alias, proof) => void (store.aliases.get(alias).ord_proof = proof);
+    store.setOrdProof = async (alias, key, proof) => {
+      const r = store.aliases.get(alias);
+      if (r && r.identity_key === key) r.ord_proof = proof;
+    };
     const h = pm.makeHandlers({ store, env: ENV });
     const u = user();
     const ord = PrivateKey.fromRandom().toAddress();

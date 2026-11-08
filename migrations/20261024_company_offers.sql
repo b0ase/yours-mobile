@@ -9,9 +9,14 @@
 -- The company alias itself is a reserved paymail name, so it is provisioned by hand, AFTER this file, with the
 -- company identity PUBLIC key passed in at run time (never written into git):
 --   ssh hetzner "docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 -v alias=bcorp -v key=<company identity public key>" <<'SQL'
+--   begin;
+--   -- Needed once migrations/20261108_paymail_alias_key_guard.sql has run (it refuses identity_key changes
+--   -- otherwise); harmless before. Transaction-local: it ends with the commit.
+--   set local bwallet.allow_key_change = 'on';
 --   insert into public.bwallet_paymail_aliases (alias, identity_key, display_name)
 --     values (:'alias', :'key', null)
 --     on conflict (alias) do update set identity_key = excluded.identity_key, updated_at = now();
+--   commit;
 --   SQL
 -- and the site env PAYMAIL_COMPANIES set in Vercel (name, number, director identity public keys).
 begin;

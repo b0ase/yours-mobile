@@ -1,6 +1,7 @@
 -- b-Aware #F-237 defence in depth: a name's identity_key changes ONLY through a signed handover.
 -- NOT RUN YET. Owner review, then (owner, not automated):
 --   ssh hetzner "docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1" < migrations/20261108_paymail_alias_key_guard.sql
+--   (the file ends with notify pgrst, 'reload schema' so PostgREST sees bwallet_move_alias at once)
 --
 -- What it does
 --   1. A BEFORE UPDATE trigger on bwallet_paymail_aliases refuses any change to identity_key unless the
@@ -20,16 +21,20 @@
 --
 -- Manual edits by us (psql) that really must re-point a name:
 --   begin; set local bwallet.allow_key_change = 'on'; update public.bwallet_paymail_aliases set ... ; commit;
---   (the name log records them as actor 'admin', as before.)
+--   (the name log records them as actor 'admin', as before.) The runbook in migrations/20261024_company_offers.sql
+--   (company alias provisioning) uses this form.
 --
 -- Assumes migration STEP A (is_primary) has run: paymailStore already reads is_primary in production.
 -- Check after applying: there must be no other SECURITY DEFINER function or "exec SQL" RPC exposed to PostgREST that
 -- could call set_config('bwallet.allow_key_change', ...) on a caller's behalf.
 --
--- Rollback:
+-- Rollback (the site keeps working: moveAlias falls back to its guarded PATCH when the RPC is gone):
+--   begin;
 --   drop trigger if exists bwallet_alias_key_guard on public.bwallet_paymail_aliases;
 --   drop function if exists public.bwallet_alias_key_guard();
 --   drop function if exists public.bwallet_move_alias(text, text, text);
+--   commit;
+--   notify pgrst, 'reload schema';
 begin;
 
 create or replace function public.bwallet_alias_key_guard() returns trigger
@@ -58,7 +63,61 @@ declare
   has_main boolean;
   n integer;
 begin
-  if p_from !~ '^0[23][0-9a-f]{64}$' or p_to !~ '^0[23][0-9a-f]{64}$' or p_from = p_to then
+  -- Keys are stored lower-case (the column checks ^0[23][0-9a-f]{64}$); the server lower-cases them too, so normalise
+  -- here the same way rather than refuse an upper-case hex key.
+  p_from := lower(p_from);
+  p_to := lower(p_to);
+  if p_from !~ '^0[23][0-9a-f]{64}
+    raise exception 'bwallet_move_alias: bad keys' using errcode = '22023';
+  end if;
+  select exists (
+    select 1 from public.bwallet_paymail_aliases
+     where identity_key = p_to and kind = 'plain' and is_primary is true
+  ) into has_main;
+  perform set_config('bwallet.allow_key_change', 'on', true);
+  perform set_config('bwallet.name_note', 'handover', true);
+  update public.bwallet_paymail_aliases
+     set identity_key = p_to, is_primary = not has_main, updated_at = now()
+   where alias = p_alias::citext and identity_key = p_from;
+  get diagnostics n = row_count;
+  -- Transaction-local anyway; cleared at once so nothing later in the same transaction rides on it.
+  perform set_config('bwallet.allow_key_change', '', true);
+  perform set_config('bwallet.name_note', '', true);
+  return n > 0;
+end $$;
+
+revoke all on function public.bwallet_move_alias(text, text, text) from public, anon, authenticated;
+grant execute on function public.bwallet_move_alias(text, text, text) to service_role;
+revoke all on function public.bwallet_alias_key_guard() from public, anon, authenticated;
+
+commit;
+notify pgrst, 'reload schema';
+ or p_to !~ '^0[23][0-9a-f]{64}
+    raise exception 'bwallet_move_alias: bad keys' using errcode = '22023';
+  end if;
+  select exists (
+    select 1 from public.bwallet_paymail_aliases
+     where identity_key = p_to and kind = 'plain' and is_primary is true
+  ) into has_main;
+  perform set_config('bwallet.allow_key_change', 'on', true);
+  perform set_config('bwallet.name_note', 'handover', true);
+  update public.bwallet_paymail_aliases
+     set identity_key = p_to, is_primary = not has_main, updated_at = now()
+   where alias = p_alias::citext and identity_key = p_from;
+  get diagnostics n = row_count;
+  -- Transaction-local anyway; cleared at once so nothing later in the same transaction rides on it.
+  perform set_config('bwallet.allow_key_change', '', true);
+  perform set_config('bwallet.name_note', '', true);
+  return n > 0;
+end $$;
+
+revoke all on function public.bwallet_move_alias(text, text, text) from public, anon, authenticated;
+grant execute on function public.bwallet_move_alias(text, text, text) to service_role;
+revoke all on function public.bwallet_alias_key_guard() from public, anon, authenticated;
+
+commit;
+notify pgrst, 'reload schema';
+ or p_from = p_to then
     raise exception 'bwallet_move_alias: bad keys' using errcode = '22023';
   end if;
   select exists (

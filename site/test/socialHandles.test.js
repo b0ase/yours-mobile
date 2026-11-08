@@ -21,10 +21,6 @@ const memStore = () => {
       [...aliases.values()].find((r) => r.identity_key === k) ??
       null,
     countUncollected: async (a) => [...pays.values()].filter((p) => p.alias === a && p.status === 'received').length,
-    deleteAlias: async (a) => {
-      for (const [r, p] of pays) if (p.alias === a) pays.delete(r);
-      aliases.delete(a);
-    },
     appsStore: new Map(),
     getApps: async function (k) {
       return this.appsStore.get(k) ?? [];
