@@ -67,11 +67,15 @@ off needs Face ID, fingerprint or the passcode too.
 
 The BRC-100 results don't change.
 
-| Outcome                     | The call                                                                       |
-| --------------------------- | ------------------------------------------------------------------------------ |
-| Passed                      | Goes on to the wallet as normal                                                |
-| Cancelled                   | Rejects with `Permission denied.`, `code: 'ERR_PERMISSION_DENIED'`, status 403 |
-| Prompt not answered in 60 s | Rejects with `code: 'ERR_USER_VERIFICATION_TIMEOUT'`, status 408               |
+| Outcome                                      | The call                                                                       |
+| -------------------------------------------- | ------------------------------------------------------------------------------ |
+| Passed                                       | Goes on to the wallet as normal                                                |
+| Cancelled                                    | Rejects with `Permission denied.`, `code: 'ERR_PERMISSION_DENIED'`, status 403 |
+| Prompt lost (app came back, no answer, 10 s) | Rejects with `code: 'ERR_USER_VERIFICATION_LOST'`, status 410                  |
+| Native prompt never answered (10 min cap)    | Rejects with `code: 'ERR_USER_VERIFICATION_TIMEOUT'`, status 408               |
+
+There is no clock on the person (BRC-219): while the Face ID / passcode prompt or the wallet password sheet is up, the
+call waits. The 10 minute cap exists only because a native prompt can fail to appear with no callback at all.
 
 ### `window.CWI.getLastVerification()`
 
@@ -102,20 +106,24 @@ Every site call through the phone and web wallet bridge (`handleSiteCall` in `sr
 hard time limit:
 
 - `createAction` / `signAction`: 300 s. Building and broadcasting are included.
-- Everything else: 120 s. This covers an unlock plus an approval sheet.
+- Everything else: 120 s.
 
-When the limit runs out, the bridge first tells the background (`SITE_CALL_TIMED_OUT`, wallet pages only). The
-background closes every open sheet of that site (permission bundles, manifest, counterparty), so none can be approved
-late. Then:
+When the limit runs out, the bridge first tells the background (`SITE_CALL_TIMED_OUT`, wallet pages only). If the
+person is still being asked (one of the site's sheets is on screen, or the unlock / setup screen is up), the
+background answers `asking` and closes nothing: the bridge keeps waiting for the answer however long it takes
+(BRC-219). Otherwise the background closes every open sheet of that site (permission bundles, manifest,
+counterparty), so none can be approved late. Then:
 
 - If a sheet was closed, or the call wasn't a payment, the site gets `code: 'ERR_WALLET_TIMEOUT'` (status 504).
 - If a `createAction` / `signAction` of that site is still running with no sheet left to close, it was already
   approved and may still broadcast. The site is **not** told it timed out: the bridge waits for the real answer. No
   payment ever goes out after a site received `ERR_WALLET_TIMEOUT`.
 
-Every sheet also expires unanswered after 60 s: spend, protocol, basket, certificate, the manifest (grouped) and
-counterparty sheets, in the phone wallet and in the extension (`PROMPT_EXPIRY_MS`, `services/promptWatchdog.ts`).
-Before this, only spend sheets expired. So the 120 s / 300 s limit is a backstop.
+Sheets no longer expire (BRC-219, 8 Nov 2026; `services/promptLiveness.ts`). A sheet that is up waits for Allow or
+Deny. A request still fails clearly when its sheet was never shown (`ERR_PROMPT_NOT_SHOWN`), when its sheet or the
+unlock screen was closed, or when the page that asked was closed or left (`ERR_PROMPT_CALLER_GONE`, extension). A
+site's Retry of the same `createAction` while the first waits joins it: one sheet, one payment, one answer for both.
+So the 120 s / 300 s limit only catches a step that hangs with nothing on screen.
 
 Test: `src/mobile/dappBrowser.gate.test.ts` plays the bChatX sequence against a wallet whose `createSignature` never
 answers.

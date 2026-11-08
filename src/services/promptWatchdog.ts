@@ -19,6 +19,7 @@
  */
 
 import { PRE_APPROVAL_CODED } from './preApprovalTimeout';
+import { PROMPT_CALLER_GONE_CODE, PROMPT_CALLER_GONE_MESSAGE } from './promptLiveness';
 import { WALLET_SETUP_CODED } from './walletSetupWait';
 
 export const PROMPT_NOT_SHOWN_CODE = 'ERR_PROMPT_NOT_SHOWN';
@@ -33,14 +34,17 @@ export function promptNotShownError(): Error & { code: string; status: number } 
 }
 
 /**
- * A payment sheet nobody answered within PROMPT_EXPIRY_MS expires (TokenBlaster #105 retries the same createAction
- * after 20 s). Only requests not yet approved or signed: the expiry rejects the permission request itself, so the
- * wallet never builds the transaction; it has nothing to do with noSend / unsent release logic.
+ * A sheet that is up never expires on a timer (BRC-219, services/promptLiveness.ts): the 60 s PROMPT_EXPIRY_MS is gone.
+ * A site's Retry of the same createAction while the first waits joins it (services/createActionDedupe.ts), so a
+ * sheet left open cannot turn into two sheets or two payments.
+ *
+ * ERR_PROMPT_EXPIRED is now used only when the phone/web bridge gave up on a site's call while nothing was asking the
+ * person (background.ts cancelSitePrompts): it rejects the permission request itself, before anything is built or
+ * signed; it has nothing to do with noSend / unsent release logic.
  */
 export const PROMPT_EXPIRED_CODE = 'ERR_PROMPT_EXPIRED';
 export const PROMPT_EXPIRED_MESSAGE =
   'This payment request expired before it was approved. Nothing was paid; try again.';
-export const PROMPT_EXPIRY_MS = 60_000;
 
 /**
  * A site request queued behind another sheet the user can see waits its turn, but not forever: after PROMPT_BUSY_MS
@@ -66,9 +70,10 @@ const CODED: [string, string, number][] = [
   [PROMPT_NOT_SHOWN_MESSAGE, PROMPT_NOT_SHOWN_CODE, 503],
   [PROMPT_EXPIRED_MESSAGE, PROMPT_EXPIRED_CODE, 408],
   [PROMPT_BUSY_MESSAGE, PROMPT_BUSY_CODE, 409],
+  [PROMPT_CALLER_GONE_MESSAGE, PROMPT_CALLER_GONE_CODE, 410],
 ];
 
-/** Adds the code to a `{ success: false, error }` reply whose error is a coded failure (not shown, expired, pre-approval timeout). */
+/** Adds the code to a `{ success: false, error }` reply whose error is a coded failure (not shown, busy, caller gone, pre-approval). */
 export function withPromptNotShownCode<R>(response: R): R {
   const r = response as { success?: unknown; error?: unknown; code?: unknown } | null | undefined;
   if (!r || typeof r !== 'object' || r.success !== false || r.code !== undefined) return response;

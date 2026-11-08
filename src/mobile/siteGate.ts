@@ -8,7 +8,11 @@
  * - One prompt per user action: a pass covers the same site's signs for GRACE_MS and at most ONE payment after it
  *   (sign-and-seal = createSignature + createAction = one prompt). Every payment after a payment asks again.
  *   Calls from one origin are checked one at a time, in order.
- * - Cancel → the standard denial (ERR_PERMISSION_DENIED). No answer within timeoutMs → ERR_USER_VERIFICATION_TIMEOUT.
+ * - Cancel → the standard denial (ERR_PERMISSION_DENIED).
+ * - No clock on the person (BRC-219): while the OS prompt or the password sheet is up, the call waits for the answer.
+ *   The OS prompt fails only when it is lost: the app comes back on screen and the prompt has not answered within
+ *   RESUME_GRACE_MS (ERR_USER_VERIFICATION_LOST), or the native call never answers at all within the long safety cap
+ *   VERIFY_TIMEOUT_MS (ERR_USER_VERIFICATION_TIMEOUT). The password sheet is the wallet's own and has no limit.
  * - No biometrics and no passcode, or the setting off → no prompt (the wallet's own approval sheets still apply);
  *   recorded as verifiedBy 'none'.
  * - getLastVerification(origin): the origin's most recent gated call, non-secret, for the site to show.
@@ -34,11 +38,26 @@ export const GATE_REASON: Record<GateKind, string> = {
 
 /** A pass covers the same site's follow-on calls for this long (one user action, e.g. sign then seal). */
 export const GRACE_MS = 30_000;
-/** The system prompt must be answered within this long. */
-export const VERIFY_TIMEOUT_MS = 60_000;
+/**
+ * Safety cap on the NATIVE prompt call only (was 60 s, a clock on the person; BRC-219). Kept because the native call
+ * can hang with no callback at all: Android's BiometricPrompt silently does nothing when authenticate() lands after
+ * the activity saved its state (app being backgrounded at that moment), and iOS LAContext started while the app is not
+ * active may never call back. In both cases nothing is on screen. Ten minutes is far beyond any real answer; ordinary
+ * lifecycle loss is caught much sooner by the resume check (RESUME_GRACE_MS).
+ */
+export const VERIFY_TIMEOUT_MS = 10 * 60_000;
+/**
+ * Mobile continuity (BRC-219): the app went to the background and came back with the OS prompt still unanswered.
+ * Both platforms answer a prompt that backgrounding dismissed (iOS systemCancel, Android ERROR_CANCELED) at once, so
+ * still nothing this long after the app is back on screen means the prompt was lost.
+ */
+export const RESUME_GRACE_MS = 10_000;
 
 export const VERIFICATION_TIMEOUT_CODE = 'ERR_USER_VERIFICATION_TIMEOUT';
 export const VERIFICATION_TIMEOUT_MESSAGE = "bWalletX didn't get a Face ID, fingerprint or passcode answer in time.";
+export const VERIFICATION_LOST_CODE = 'ERR_USER_VERIFICATION_LOST';
+export const VERIFICATION_LOST_MESSAGE =
+  'The Face ID, fingerprint or passcode prompt closed when bWalletX left the screen. Nothing was signed or paid; try again.';
 
 /**
  * Non-standard call a site makes to ask the SAME gate before an act that is not itself a wallet call: the bChatX
@@ -66,8 +85,15 @@ export type GateDeps = {
    * unavailable OS prompt asks for the password instead of passing as 'none' (owner, 30 Oct 2026).
    */
   passwordAuth?: (reason: string, host: string) => Promise<boolean>;
+  /**
+   * Calls `fn` each time the app comes back on screen after being in the background; returns the unsubscribe. Used
+   * only while the OS prompt is up (mobile continuity). Omitted: no resume check (tests, non-phone builds).
+   */
+  onResume?: (fn: () => void) => () => void;
   now?: () => number;
+  /** Safety cap on the native prompt call (VERIFY_TIMEOUT_MS). */
   timeoutMs?: number;
+  resumeGraceMs?: number;
   graceMs?: number;
   setTimer?: (fn: () => void, ms: number) => unknown;
   clearTimer?: (h: unknown) => void;
@@ -75,6 +101,8 @@ export type GateDeps = {
 
 const timeoutError = () =>
   Object.assign(new Error(VERIFICATION_TIMEOUT_MESSAGE), { code: VERIFICATION_TIMEOUT_CODE, status: 408 });
+const lostError = () =>
+  Object.assign(new Error(VERIFICATION_LOST_MESSAGE), { code: VERIFICATION_LOST_CODE, status: 410 });
 
 const hostOf = (origin: string) => {
   try {
@@ -87,6 +115,7 @@ const hostOf = (origin: string) => {
 export const createSiteGate = (deps: GateDeps) => {
   const now = deps.now ?? Date.now;
   const timeoutMs = deps.timeoutMs ?? VERIFY_TIMEOUT_MS;
+  const resumeGraceMs = deps.resumeGraceMs ?? RESUME_GRACE_MS;
   const graceMs = deps.graceMs ?? GRACE_MS;
   const setTimer = deps.setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
   const clearTimer = deps.clearTimer ?? ((h: unknown) => clearTimeout(h as ReturnType<typeof setTimeout>));
@@ -100,60 +129,58 @@ export const createSiteGate = (deps: GateDeps) => {
   const ask = (origin: string, kind: GateKind): Promise<VerifiedBy> =>
     new Promise<VerifiedBy>((resolve, reject) => {
       let done = false;
-      const h = setTimer(() => {
-        if (done) return;
-        done = true;
-        reject(timeoutError());
-      }, timeoutMs);
+      // The native prompt's watchers: the safety cap and, after a return to the foreground, the resume check.
+      const cap = setTimer(() => finish(() => reject(timeoutError())), timeoutMs);
+      let resumeCheck: unknown;
+      let unsubscribe: (() => void) | undefined;
+      const stopNativeWatch = () => {
+        clearTimer(cap);
+        if (resumeCheck !== undefined) clearTimer(resumeCheck);
+        unsubscribe?.();
+        unsubscribe = undefined;
+      };
       const finish = (fn: () => void) => {
         if (done) return;
         done = true;
-        clearTimer(h);
+        stopNativeWatch();
         fn();
       };
+      unsubscribe = deps.onResume?.(() => {
+        if (done) return;
+        if (resumeCheck !== undefined) clearTimer(resumeCheck);
+        resumeCheck = setTimer(() => finish(() => reject(lostError())), resumeGraceMs);
+      });
       Promise.resolve()
         .then(() => deps.auth(GATE_REASON[kind], hostOf(origin)))
         .then(
-          (r) =>
-            finish(() => {
-              if (r.status === 'ok') resolve(r.method);
-              else if (r.status === 'cancelled') reject(userDeniedError());
-              else fallback();
-            }),
+          (r) => {
+            if (done) return;
+            if (r.status === 'ok') finish(() => resolve(r.method));
+            else if (r.status === 'cancelled') finish(() => reject(userDeniedError()));
+            else fallback();
+          },
           // A broken native call is treated like no biometrics: the password fallback (or, with none wired, today's
           // approval sheets) guards the request.
-          () => finish(fallback),
+          () => {
+            if (!done) fallback();
+          },
         );
       function fallback() {
-        if (!deps.passwordAuth) return resolve('none');
-        // The password sheet is the user's answer: still inside the same time limit.
-        done = false;
-        const h2 = setTimer(() => {
-          if (done) return;
-          done = true;
-          reject(timeoutError());
-        }, timeoutMs);
+        // The native prompt is over: its cap and resume check no longer apply.
+        stopNativeWatch();
+        if (!deps.passwordAuth) return finish(() => resolve('none'));
+        // The wallet's own password sheet: an in-app sheet that stays up across backgrounding and always answers
+        // (Confirm, Cancel, or five wrong tries), so it waits for the person with no time limit (BRC-219).
         deps.passwordAuth(GATE_REASON[kind], hostOf(origin)).then(
-          (ok) => {
-            if (done) return;
-            done = true;
-            clearTimer(h2);
-            if (ok) resolve('password');
-            else reject(userDeniedError());
-          },
-          () => {
-            if (done) return;
-            done = true;
-            clearTimer(h2);
-            reject(userDeniedError());
-          },
+          (ok) => finish(() => (ok ? resolve('password') : reject(userDeniedError()))),
+          () => finish(() => reject(userDeniedError())),
         );
       }
     });
 
   /**
-   * Resolves with how the user was verified (or null for an ungated call); rejects with the denial or the timeout
-   * error. Never hangs: the prompt is capped at timeoutMs.
+   * Resolves with how the user was verified (or null for an ungated call); rejects with the denial, or with the lost /
+   * timeout error when the OS prompt is gone (see `ask`). Waits for the person while a prompt is up.
    */
   const check = async (origin: string, call: string): Promise<VerifiedBy | null> => {
     const g = gateFor(call);

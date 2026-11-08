@@ -4,8 +4,9 @@ import {
   FUNDING_TIMEOUT_CODE,
   FUNDING_TIMEOUT_MESSAGE,
   SingleFlight,
-  WALLET_LOCKED_TIMEOUT_CODE,
+  UNLOCK_NOT_SHOWN_CODE,
   WALLET_NOT_READY_CODE,
+  WALLET_SETTLE_MS,
   fundingTimeoutError,
   walletWithDeadline,
   withStepTimeout,
@@ -186,7 +187,7 @@ describe('walletWithDeadline', () => {
     expect((s.e as { code: string }).code).toBe(WALLET_NOT_READY_CODE);
   });
 
-  test('locked: the unlock UI is shown at once and the person gets 60 s in all', async () => {
+  test('BRC-219 locked: the unlock UI is shown at once and waits for the person, with no clock, while it is up', async () => {
     const c = clock();
     let unlockShown = false;
     const d = deferred<string>();
@@ -196,15 +197,58 @@ describe('walletWithDeadline', () => {
         ready: () => undefined,
         open: () => ((unlockShown = true), d.p),
         awaitingUnlock: () => true,
+        unlockShown: () => true,
       }),
     );
     expect(unlockShown).toBe(true);
-    c.advance(30_000);
+    c.advance(60 * 60_000); // an hour reading, away from the desk, ...
     await flush();
     expect(s.done).toBe(false);
-    c.advance(30_000);
+    expect(c.pending()).toBe(0); // no timer left running on the person
+    d.resolve('w');
     await flush();
-    expect((s.e as { code: string }).code).toBe(WALLET_LOCKED_TIMEOUT_CODE);
+    expect(s.v).toBe('w');
+  });
+
+  test('BRC-219 locked: the unlock screen closed fails the call (the waiter is rejected), not a timer', async () => {
+    const c = clock();
+    const d = deferred<string>();
+    const s = settle(walletWithDeadline({ ...c, ready: () => undefined, open: () => d.p, awaitingUnlock: () => true }));
+    c.advance(10 * 60_000);
+    await flush();
+    expect(s.done).toBe(false);
+    d.reject(new Error('User dismissed the unlock request'));
+    await flush();
+    expect((s.e as Error).message).toBe('User dismissed the unlock request');
+  });
+
+  test('BRC-219 locked: an unlock screen that never appeared fails at the settle deadline (ERR_UNLOCK_NOT_SHOWN)', async () => {
+    const c = clock();
+    const s = settle(
+      walletWithDeadline({
+        ...c,
+        ready: () => undefined,
+        open: () => deferred<string>().p,
+        awaitingUnlock: () => true,
+        unlockShown: () => false,
+      }),
+    );
+    c.advance(WALLET_SETTLE_MS - 1);
+    await flush();
+    expect(s.done).toBe(false);
+    c.advance(1);
+    await flush();
+    expect((s.e as { code: string }).code).toBe(UNLOCK_NOT_SHOWN_CODE);
+    expect(withPromptNotShownCode({ success: false, error: (s.e as Error).message })).toMatchObject({
+      code: UNLOCK_NOT_SHOWN_CODE,
+      status: 503,
+    });
+  });
+
+  test('BRC-219: no unlock wall clock left in the module', () => {
+    const m = src('./preApprovalTimeout.ts');
+    expect(/UNLOCK_WAIT_MS\s*=/.test(m)).toBe(false);
+    expect(m.includes('walletLockedTimeoutError')).toBe(false);
   });
 
   test('locked then unlocked in time: resolves with the wallet', async () => {

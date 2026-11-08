@@ -9,11 +9,13 @@
  * - Waiting for the wallet to settle is capped at WALLET_SETTLE_MS (8 s) -> ERR_WALLET_NOT_READY (503). The clock starts
  *   only once the background is warm: it is handling the request, and its startup read (the warm-up) has answered.
  *   A cold-waking MV3 service worker is not charged for its own wake; the warm-up itself is capped at WARM_UP_CAP_MS.
- * - A locked wallet shows the unlock UI at once (ensureWallet does that); the person then has PROMPT_EXPIRY_MS-like
- *   UNLOCK_WAIT_MS to unlock -> ERR_WALLET_LOCKED_TIMEOUT (408). Typing a password is not held to 5 s.
+ * - A locked wallet shows the unlock UI at once (ensureWallet does that). While the unlock screen is up the person has
+ *   as long as they need (BRC-219, services/promptLiveness.ts): no clock runs. The call fails only when the unlock
+ *   screen is gone (window, panel or in-page sheet closed: background.ts rejects the waiters) or never appeared
+ *   (`unlockShown` false at the settle deadline -> ERR_UNLOCK_NOT_SHOWN, 503). The old 60 s UNLOCK_WAIT_MS is gone.
  * - Funding preparation is capped at STEP_TIMEOUT_MS -> ERR_FUNDING_TIMEOUT (504).
  *
- * Every deadline here runs strictly before approval, building or signing. A timeout only stops the site's call
+ * Every deadline here runs strictly before any prompt, approval, building or signing. A timeout only stops the site's call
  * waiting: it aborts nothing, and the step it stopped waiting for (an unlock, a deposit sweep the wallet already
  * broadcast) is left to finish on its own. noSend / unsent release logic is elsewhere and untouched.
  */
@@ -23,16 +25,17 @@ export const STEP_TIMEOUT_MS = 5000;
 export const WALLET_SETTLE_MS = 8000;
 /** Upper bound on the warm-up itself, so a worker that never finishes starting still answers. */
 export const WARM_UP_CAP_MS = 30_000;
-export const UNLOCK_WAIT_MS = 60_000;
 
 export type CodedError = Error & { code: string; status: number };
 
 export const WALLET_NOT_READY_CODE = 'ERR_WALLET_NOT_READY';
 export const WALLET_NOT_READY_MESSAGE =
   'bWalletX is still starting up and could not take this request yet. Nothing was paid; try again in a moment.';
+/** No longer sent (BRC-219: no clock on the unlock screen). Exported so code that checks for it keeps compiling. */
 export const WALLET_LOCKED_TIMEOUT_CODE = 'ERR_WALLET_LOCKED_TIMEOUT';
-export const WALLET_LOCKED_TIMEOUT_MESSAGE =
-  'bWalletX is locked and was not unlocked in time. Nothing was paid; unlock bWalletX, then try again.';
+export const UNLOCK_NOT_SHOWN_CODE = 'ERR_UNLOCK_NOT_SHOWN';
+export const UNLOCK_NOT_SHOWN_MESSAGE =
+  'bWalletX is locked and could not show its unlock screen. Nothing was paid; open bWalletX, unlock it, then try again.';
 export const FUNDING_TIMEOUT_CODE = 'ERR_FUNDING_TIMEOUT';
 export const FUNDING_TIMEOUT_MESSAGE =
   'bWalletX took too long to get your balance ready for this payment. Nothing was paid; try again.';
@@ -41,13 +44,13 @@ const coded = (message: string, code: string, status: number): CodedError =>
   Object.assign(new Error(message), { code, status });
 
 export const walletNotReadyError = () => coded(WALLET_NOT_READY_MESSAGE, WALLET_NOT_READY_CODE, 503);
-export const walletLockedTimeoutError = () => coded(WALLET_LOCKED_TIMEOUT_MESSAGE, WALLET_LOCKED_TIMEOUT_CODE, 408);
+export const unlockNotShownError = () => coded(UNLOCK_NOT_SHOWN_MESSAGE, UNLOCK_NOT_SHOWN_CODE, 503);
 export const fundingTimeoutError = () => coded(FUNDING_TIMEOUT_MESSAGE, FUNDING_TIMEOUT_CODE, 504);
 
 /** [message, code, status] rows so a `{success:false, error}` reply can carry the code (promptWatchdog.ts). */
 export const PRE_APPROVAL_CODED: [string, string, number][] = [
   [WALLET_NOT_READY_MESSAGE, WALLET_NOT_READY_CODE, 503],
-  [WALLET_LOCKED_TIMEOUT_MESSAGE, WALLET_LOCKED_TIMEOUT_CODE, 408],
+  [UNLOCK_NOT_SHOWN_MESSAGE, UNLOCK_NOT_SHOWN_CODE, 503],
   [FUNDING_TIMEOUT_MESSAGE, FUNDING_TIMEOUT_CODE, 504],
 ];
 
@@ -98,29 +101,33 @@ export interface WalletWaitDeps<W> extends Timers {
   ready: () => W | undefined;
   /** ensureWallet(): resolves when the wallet is open; shows the unlock UI itself when the wallet is locked. */
   open: () => Promise<W>;
-  /** True while the unlock UI is up and waiting for the person (pendingWalletWaiters is non-empty). */
+  /** True while the call waits for the person to unlock (pendingWalletWaiters is non-empty). */
   awaitingUnlock: () => boolean;
   /**
-   * True while the wallet setup window (Create / Restore) is up because no wallet exists yet. Setting up takes longer
-   * than typing a password, so the unlock deadline does not apply: the setup wait has its own (services/walletSetupWait.ts).
+   * True while something can show the unlock screen (a wallet panel, the prompt window or the in-page sheet). Asked
+   * once, at the settle deadline: false there means the unlock screen never appeared -> ERR_UNLOCK_NOT_SHOWN.
+   * Omitted: assumed shown.
+   */
+  unlockShown?: () => boolean;
+  /**
+   * True while the wallet setup window (Create / Restore) is up because no wallet exists yet. The setup wait handles
+   * that window itself (services/walletSetupWait.ts).
    */
   awaitingSetup?: () => boolean;
   /** Cheap warm-up (the background's startup read). The settle clock starts once it settles. */
   warmUp?: () => Promise<unknown>;
   warmUpCapMs?: number;
   stepMs?: number;
-  unlockMs?: number;
 }
 
 /**
  * The wallet for a site's request, with deadlines: open now -> at once; settling -> up to stepMs; locked -> the
- * unlock UI is already showing, and the person has up to unlockMs in all.
+ * unlock UI is already showing, and the person has as long as they need while it is up (BRC-219).
  */
 export function walletWithDeadline<W>(deps: WalletWaitDeps<W>): Promise<W> {
   const now = deps.ready();
   if (now) return Promise.resolve(now);
   const stepMs = deps.stepMs ?? WALLET_SETTLE_MS;
-  const unlockMs = deps.unlockMs ?? UNLOCK_WAIT_MS;
   const opening = deps.open();
   return new Promise<W>((resolve, reject) => {
     let done = false;
@@ -144,8 +151,10 @@ export function walletWithDeadline<W>(deps: WalletWaitDeps<W>): Promise<W> {
           if (done) return;
           if (deps.awaitingSetup?.()) return; // the setup wait rejects on its own deadline, close or timeout
           if (!deps.awaitingUnlock()) return finish(() => reject(walletNotReadyError()));
-          // The unlock UI is up: give the person the rest of the unlock window.
-          h = setT(deps, () => finish(() => reject(walletLockedTimeoutError())), Math.max(0, unlockMs - stepMs));
+          // Waiting on the person to unlock: no clock while the unlock screen is up (BRC-219). Closing it rejects the
+          // waiter (background.ts); one that never appeared fails here.
+          if (deps.unlockShown && !deps.unlockShown()) return finish(() => reject(unlockNotShownError()));
+          h = undefined;
         },
         stepMs,
       );

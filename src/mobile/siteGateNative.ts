@@ -16,9 +16,29 @@ export const nativeAuth = async (reason: string, host: string): Promise<AuthResu
   return r?.available === false ? { status: 'unavailable' } : { status: 'cancelled' };
 };
 
+/**
+ * Back on screen after being in the background (the WebView's page visibility; mobile continuity in siteGate.ts). Only
+ * a hidden -> visible change counts. A system screen that does hide the page (Android's device-credential screen on
+ * some versions) answers as it closes, well inside RESUME_GRACE_MS.
+ */
+export const onAppResume = (fn: () => void): (() => void) => {
+  if (typeof document === 'undefined') return () => undefined;
+  let wasHidden = document.visibilityState === 'hidden';
+  const onChange = () => {
+    if (document.visibilityState === 'hidden') wasHidden = true;
+    else if (wasHidden) {
+      wasHidden = false;
+      fn();
+    }
+  };
+  document.addEventListener('visibilitychange', onChange);
+  return () => document.removeEventListener('visibilitychange', onChange);
+};
+
 export const siteGate = createSiteGate({
   enabled: () => canDeviceOwnerAuth() && loadPrefs().confirmWithBiometrics,
   auth: nativeAuth,
   // No biometrics and no passcode (or a failed prompt): the wallet password, never a silent pass.
   passwordAuth: askWalletPassword,
+  onResume: onAppResume,
 });

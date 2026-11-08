@@ -47,7 +47,14 @@ import {
   needsPairApproval,
   pairKey,
 } from './services/frameAccess';
-import { PAIR_MIRROR_KEY, isPairedOriginator, pairedGrantAllowed, setPairMirror, takePendingFor } from './services/pairedPromptGuard';
+import {
+  PAIR_MIRROR_KEY,
+  hasPendingFor,
+  isPairedOriginator,
+  pairedGrantAllowed,
+  setPairMirror,
+  takePendingFor,
+} from './services/pairedPromptGuard';
 import {
   addGrant,
   isSpendingAuthAction,
@@ -128,6 +135,7 @@ import {
   fundingTimeoutError,
   SingleFlight,
   STEP_TIMEOUT_MS,
+  unlockNotShownError,
   walletWithDeadline,
   withStepTimeout,
 } from './services/preApprovalTimeout';
@@ -137,7 +145,6 @@ import { mirrorToMiner } from './mobile/minerMirror';
 import { panelUnlockMessages, shouldPushPrompt, type ShownPrompt } from './services/promptQueue';
 import { CreateActionDedupe, createActionKey } from './services/createActionDedupe';
 import {
-  PROMPT_EXPIRY_MS,
   PromptWatchdog,
   promptBusyError,
   promptExpiredError,
@@ -146,6 +153,12 @@ import {
   withPromptNotShownCode,
   type WatchedPrompt,
 } from './services/promptWatchdog';
+import {
+  SiteCallTabs,
+  promptCallerGoneError,
+  siteStillAsking,
+  unlockSurfaceGone,
+} from './services/promptLiveness';
 import { RequestParams, ResponseEventDetail, YoursEventName } from './inject';
 import { recordCall, recordPayment, requestedSats, updateConnectionLog } from './mobile/wallet/connectionLog';
 import { CWIEventName } from './cwi';
@@ -231,6 +244,7 @@ import {
   denyOneSatPromptsFor,
   getPendingOneSatPrompt,
   handleOneSatPermissionResponse,
+  hasOneSatPromptFor,
   initOneSatPromptBridge,
 } from './services/oneSatPrompt';
 import type { PromptKind, UsbCheckRequest } from './promptProtocol';
@@ -566,6 +580,9 @@ chrome.runtime.onConnect.addListener((port) => {
         promptInPanel = false;
         denyAllPendingPrompts();
       }
+      // The panel was showing its own unlock screen for a waiting site (showUnlockUi): closed, nothing else can show
+      // it, so the waiting calls fail now rather than wait on a screen that is gone (BRC-219; no unlock clock).
+      failUnlockWaitersIfSurfaceGone();
     });
   }
 });
@@ -1220,6 +1237,8 @@ const walletForSiteRequest = (originator?: string): Promise<WalletInterface> =>
     ready: () => (masterBackupGate.active ? undefined : accountContext?.wallet),
     open: () => ensureWallet(false, originator),
     awaitingUnlock: () => pendingWalletWaiters.length > 0,
+    // BRC-219: no clock on the unlock screen while it is up; one that never appeared fails at the settle deadline.
+    unlockShown: () => activePopupPorts.size > 0 || popupWindowId !== undefined || inPageSheet !== undefined,
     awaitingSetup: () => walletSetupActive && pendingWalletWaiters.length > 0,
     // A cold-woken worker is not charged for its wake: the settle clock starts after its startup read answers.
     warmUp: () => startupInitPromise,
@@ -1455,10 +1474,7 @@ const askSealSheet = (originator: string, seal: SealSheet): Promise<void> =>
       seal,
     } as unknown as BundledRequest & BundleRequest;
     pendingPermissionRequests.set(requestID, { request, resolve, reject });
-    // Unanswered, it expires like every other sheet (nothing was signed or paid).
-    setTimeout(() => {
-      if (pendingPermissionRequests.has(requestID)) expireSpendRequest(requestID);
-    }, PROMPT_EXPIRY_MS);
+    // Like every sheet, it waits for the person's answer (BRC-219: no expiry); a closed surface or caller fails it.
     try {
       permissionBundler.add(request);
     } catch (error) {
@@ -1512,6 +1528,24 @@ const pendingWalletWaiters: {
   resolve: (wallet: WalletInterface) => void;
   reject: (error: Error) => void;
 }[] = [];
+
+/**
+ * Site calls wait on the unlock screen with no clock (BRC-219). If nothing can show it any more (no panel, no prompt
+ * window, no in-page sheet), they fail, the same way as closing the unlock window does (denyAllPendingPrompts).
+ */
+const failUnlockWaitersIfSurfaceGone = (err: Error = new Error('User dismissed the unlock request')) => {
+  const gone = unlockSurfaceGone({
+    waiting: pendingWalletWaiters.length,
+    setup: walletSetupActive,
+    unlocking: !!(reinitPromise ?? initInFlight),
+    panels: activePopupPorts.size,
+    popupWindow: popupWindowId !== undefined,
+    inPageSheet: inPageSheet !== undefined,
+  });
+  if (!gone) return;
+  console.warn('[background] the unlock screen is gone: failing', pendingWalletWaiters.length, 'waiting call(s)');
+  for (const waiter of pendingWalletWaiters.splice(0)) waiter.reject(err);
+};
 
 /**
  * Gated dApp calls (sign, spend, reveal) waiting for the user to confirm a
@@ -1582,6 +1616,18 @@ const pendingMintPrivateRequests = new Map<string, { request: MintPrivatePrompt;
 const pendingTwetchRequests = new Map<string, { request: TwetchPrompt; resolve: (allow: boolean) => void }>();
 /** bChatX / bit-sign waiting on the link-addresses sheet (services/proveHoldingsSite.ts). True only on Allow. */
 const pendingProveHoldings = new Map<string, { request: ProveHoldingsPrompt; resolve: (allow: boolean) => void }>();
+/**
+ * The site's other sheets, which wait for their own answer and are not closed by the bridge (1Sat, envelopes, private
+ * mints, Twetch, holdings). While one is up the person is still being asked (BRC-219, cancelSitePrompts).
+ */
+const hasOtherSheetsFor = (originator: string): boolean =>
+  hasOneSatPromptFor(originator) ||
+  hasPendingFor(pendingStreamGrantRequests, originator) ||
+  hasPendingFor(pendingMintPrivateRequests, originator) ||
+  hasPendingFor(pendingTwetchRequests, originator) ||
+  hasPendingFor(pendingProveHoldings, originator);
+// Which tabs have a site's call waiting for its answer (services/promptLiveness.ts): a closed tab closes its sheets.
+const siteCallTabs = new SiteCallTabs();
 /** bChatX waiting on the swap sheet (services/swapSite.ts). Resolves true only on Approve. */
 const pendingSwapRequests = new Map<string, { request: SwapPrompt; resolve: (allow: boolean) => void }>();
 /** A family site waiting on the theme offer sheet (services/themeOfferSite.ts). Resolves with the user's answer. */
@@ -2029,18 +2075,18 @@ let showUnlockUi: () => void = () => {
 };
 // Prompt watchdog (services/promptWatchdog.ts): set up with the prompt UI in the service worker.
 let watchPrompt: (p: WatchedPrompt) => void = () => undefined;
-// A payment sheet not answered within PROMPT_EXPIRY_MS expires (services/promptWatchdog.ts). Set in the worker.
-let expireSpendRequest: (requestID: string, kind?: 'permission' | 'groupedPermission' | 'counterpartyPermission') => void =
-  () => undefined;
 /**
- * The phone/web bridge gave up on a site's call (ERR_WALLET_TIMEOUT, mobile/siteGate.ts): close that site's open
- * sheets so none can be approved late. `committed`: a createAction/signAction of that site is still running with no
- * sheet left to close, i.e. it was already approved, so the bridge waits for its real answer instead of saying
- * "timed out" while a payment may still go out. Set in the worker.
+ * The phone/web bridge's ceiling hit for a site's call (ERR_WALLET_TIMEOUT, mobile/siteGate.ts). `asking`: the person
+ * can still answer it (one of the site's sheets is on screen, or the unlock / setup screen is up), so nothing is closed
+ * and the bridge keeps waiting (BRC-219). Otherwise close that site's open sheets so none can be approved late.
+ * `committed`: a createAction/signAction of that site is still running with no sheet left to close, i.e. it was
+ * already approved, so the bridge waits for its real answer instead of saying "timed out" while a payment may still
+ * go out. Set in the worker.
  */
-let cancelSitePrompts: (originator: string) => { cancelled: number; committed: boolean } = () => ({
+let cancelSitePrompts: (originator: string) => { cancelled: number; committed: boolean; asking: boolean } = () => ({
   cancelled: 0,
   committed: false,
+  asking: false,
 });
 // Running createAction / signAction calls per site originator (for cancelSitePrompts).
 const payCallsInFlight = new Map<string, number>();
@@ -2228,16 +2274,9 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
           return;
         }
         pendingPermissionRequests.set(request.requestID, { request, resolve, reject });
-        // Unanswered sheets expire: a retried call (TokenBlaster #105) never meets an old sheet still open, and a
-        // site's sign never waits for ever on a sheet (bChatX "Sealing…", 29 Oct 2026: protocol, basket and
-        // certificate sheets too, not only payments). This rejects the permission request only; nothing has been
-        // built or signed yet.
-        {
-          const id = request.requestID;
-          setTimeout(() => {
-            if (pendingPermissionRequests.has(id)) expireSpendRequest(id);
-          }, PROMPT_EXPIRY_MS);
-        }
+        // BRC-219: no expiry. The sheet waits for the person's Allow or Deny. It fails only if it was never shown
+        // (prompt watchdog), its surface was closed (denyAllPendingPrompts) or the page that asked is gone
+        // (failSitePromptsCallerGone). A site's Retry of the same createAction joins the first (createActionDedupe).
         if (!bundle) {
           // Queued behind this site's open sheet: companions are asked when its sheet opens (askCompanionsFor).
           // That sheet must really be on screen, or this request would wait forever (TokenBlaster, 26 Oct 2026):
@@ -2371,11 +2410,7 @@ const showGroupedPermissionPrompt = async (request: GroupedPermissionRequest): P
   }
   return new Promise((resolve, reject) => {
     pendingGroupedPermissionRequests.set(request.requestID, { request, resolve, reject });
-    // The manifest sheet expires like every other sheet (29 Oct 2026).
-    setTimeout(() => {
-      if (pendingGroupedPermissionRequests.has(request.requestID))
-        expireSpendRequest(request.requestID, 'groupedPermission');
-    }, PROMPT_EXPIRY_MS);
+    // Waits for the person like every other sheet (BRC-219: no expiry).
     showPromptUi('groupedPermission', request.requestID);
   });
 };
@@ -2387,10 +2422,6 @@ const showCounterpartyPermissionPrompt = async (request: CounterpartyPermissionR
   }
   return new Promise((resolve, reject) => {
     pendingCounterpartyPermissionRequests.set(request.requestID, { request, resolve, reject });
-    setTimeout(() => {
-      if (pendingCounterpartyPermissionRequests.has(request.requestID))
-        expireSpendRequest(request.requestID, 'counterpartyPermission');
-    }, PROMPT_EXPIRY_MS);
     showPromptUi('counterpartyPermission', request.requestID);
   });
 };
@@ -2466,6 +2497,9 @@ if (isInServiceWorker) {
           });
         } else if (kind === 'usbCheck') {
           failPendingUsbChecks(USB_KEY_ABSENT_MESSAGE);
+        } else if (kind === 'unlock') {
+          // The unlock window could not open: the waiting calls fail now (never shown), unless a panel shows it.
+          failUnlockWaitersIfSurfaceGone(unlockNotShownError());
         }
       },
     );
@@ -2707,17 +2741,9 @@ if (isInServiceWorker) {
     log: (msg, p) => console.warn(msg, p.kind, p.requestID),
   });
   watchPrompt = (p) => promptWatchdog.watch(p);
-  expireSpendRequest = (id, kind = 'permission') => {
-    const bundle = kind === 'permission' ? permissionBundler.findByRequest(id) : undefined;
-    const p: WatchedPrompt = bundle ? { kind: 'bundle', requestID: bundle.id } : { kind, requestID: id };
-    console.warn('[background] sheet expired unanswered', p.kind, p.requestID);
-    promptWatchdog.forget(p);
-    failUnshownPrompt(p, promptExpiredError());
-    // An open sheet reloads and finds its request gone, so its Allow can no longer approve it.
-    notifyPromptWindow(p.kind as PromptKind, p.requestID);
-  };
 
-  cancelSitePrompts = (originator) => {
+  /** The open permission sheets of one site (a bundle counted once). */
+  const sitePrompts = (originator: string): WatchedPrompt[] => {
     const site = normalizeOriginator(originator);
     const mine = (o: unknown) => typeof o === 'string' && normalizeOriginator(o) === site;
     const prompts: WatchedPrompt[] = [];
@@ -2734,16 +2760,56 @@ if (isInServiceWorker) {
       if (mine(request.originator)) prompts.push({ kind: 'groupedPermission', requestID: id });
     for (const [id, { request }] of pendingCounterpartyPermissionRequests)
       if (mine(request.originator)) prompts.push({ kind: 'counterpartyPermission', requestID: id });
+    return prompts;
+  };
+
+  /** Close these sheets with `err` (never approves). An open sheet reloads, finds its request gone, and its Allow can no longer approve it. */
+  const closePrompts = (prompts: WatchedPrompt[], err: Error) => {
     for (const p of prompts) {
       promptWatchdog.forget(p);
-      failUnshownPrompt(p, promptExpiredError());
+      failUnshownPrompt(p, err);
       notifyPromptWindow(p.kind as PromptKind, p.requestID);
     }
+  };
+
+  cancelSitePrompts = (originator) => {
+    const prompts = sitePrompts(originator);
+    // BRC-219: the person can still answer this call. A sheet the watchdog no longer watches has been confirmed on
+    // screen (or waits behind one that is); the unlock / setup screen counts too. Keep it open; the bridge waits.
+    const asking = siteStillAsking({
+      shownSheets: prompts.filter((p) => !promptWatchdog.watching(p)).length,
+      otherSheets: hasOtherSheetsFor(originator) ? 1 : 0,
+      walletWaiters: pendingWalletWaiters.length,
+    });
+    if (asking) {
+      console.log('[background] site call ceiling: the person is still being asked; keeping', prompts.length, 'sheet(s)');
+      return { cancelled: 0, committed: false, asking: true };
+    }
+    closePrompts(prompts, promptExpiredError());
     const running = payCallsInFlight.get(permissionSite(originator)) ?? 0;
     console.warn('[background] site call timed out: closed', prompts.length, 'sheet(s); pay calls running', running);
     // Each closed sheet stops at most one payment; any running beyond that were already approved.
-    return { cancelled: prompts.length, committed: running > prompts.length };
+    return { cancelled: prompts.length, committed: running > prompts.length, asking: false };
   };
+
+  /**
+   * The page that asked is gone (its tab closed or loaded another page): its sheets can never deliver an answer, and
+   * an Allow on one would pay for a caller that no longer exists. Close them with ERR_PROMPT_CALLER_GONE (BRC-219
+   * lifecycle error; never approves). Only when no other tab of the site is still waiting (siteCallTabs).
+   */
+  const failSitePromptsCallerGone = (originator: string) => {
+    const prompts = sitePrompts(originator);
+    if (prompts.length === 0) return;
+    console.warn('[background] the page that asked is gone: closing', prompts.length, 'sheet(s) of', siteHost(originator));
+    closePrompts(prompts, promptCallerGoneError());
+  };
+  const onSiteTabGone = (tabId: number) => {
+    for (const site of siteCallTabs.tabGone(tabId)) failSitePromptsCallerGone(site);
+  };
+  chrome.tabs?.onRemoved?.addListener((tabId) => onSiteTabGone(tabId));
+  chrome.tabs?.onUpdated?.addListener((tabId, info) => {
+    if (info.status === 'loading') onSiteTabGone(tabId);
+  });
 
   showUnlockUi = () => {
     sheetFirst.notePromptShown();
@@ -2780,7 +2846,19 @@ if (isInServiceWorker) {
   chrome.runtime.onMessage.addListener(function onRuntimeMessage(message: any, sender, answer: CallbackResponse) {
     // Every refusal by the user carries code ERR_PERMISSION_DENIED (services/userDenied.ts), so a site can tell
     // "declined" from "failed" on every path (extension, phone dApp browser, bApp frames, pairing).
-    const sendResponse: CallbackResponse = (response) => answer(withPromptNotShownCode(withDenialCode(response)));
+    // A site's call from a browser tab is counted until it is answered: if the tab closes or leaves the page first,
+    // the site's sheets are closed (BRC-219 lifecycle; services/promptLiveness.ts). Extension only (no tabs elsewhere).
+    const endTabCall =
+      typeof message?.originator === 'string' &&
+      message.originator &&
+      sender.tab?.id !== undefined &&
+      !isExtensionSender(sender, chrome.runtime.id)
+        ? siteCallTabs.begin(sender.tab.id, normalizeOriginator(message.originator))
+        : () => undefined;
+    const sendResponse: CallbackResponse = (response) => {
+      endTabCall();
+      answer(withPromptNotShownCode(withDenialCode(response)));
+    };
     console.log(
       '[background] Received message:',
       message.action,
@@ -3895,8 +3973,9 @@ if (!(
     };
 
     let gateAsk: Promise<boolean> | undefined;
-    // A site's call never waits silently on the wallet: settling is capped at 5 s, a locked wallet shows its unlock
-    // UI at once and the person has 60 s to unlock (services/preApprovalTimeout.ts). Our own pages wait as before.
+    // A site's call never waits silently on the wallet: settling is capped at 8 s, and a locked wallet shows its unlock
+    // UI at once and waits for the person while it is up (services/preApprovalTimeout.ts, BRC-219). Our own pages
+    // wait as before.
     (isFromExtension ? ensureWallet(true) : walletForSiteRequest(message.originator))
       .then(() => {
         console.log('[background] ensureWallet resolved for action:', message.action);
@@ -3972,7 +4051,12 @@ if (!(
               runDappRequest(processCWICreateAction(message, sendResponse));
               return true;
             }
-            const key = createActionKey(message.originator, message.params ?? {});
+            // Same site, same tab, every argument the same (a different request is never merged).
+            const key = createActionKey(
+              message.originator,
+              message.params ?? {},
+              sender.tab?.id !== undefined ? `tab:${sender.tab.id}` : '',
+            );
             const respond = createActionDedupe.begin(key, sendResponse);
             if (!respond) {
               console.log('[createAction] identical call already running: joined it');

@@ -15,7 +15,7 @@
  */
 
 import type { PromptRequest } from '@1sat/permission-module';
-import { takePendingFor } from './pairedPromptGuard';
+import { hasPendingFor, takePendingFor } from './pairedPromptGuard';
 
 export interface OneSatPromptStorageEntry {
   requestID: string;
@@ -104,6 +104,9 @@ export const denyOneSatPromptsFor = (originator: string): string[] =>
     entry.resolve(false);
     return id;
   });
+
+/** A 1Sat sheet from `originator` is waiting for the person (BRC-219: the phone/web bridge keeps waiting for it). */
+export const hasOneSatPromptFor = (originator: string): boolean => hasPendingFor(pending, originator);
 
 const generateRequestID = (): string => {
   const bytes = crypto.getRandomValues(new Uint8Array(8));

@@ -27,8 +27,14 @@ export const __setSiteGateForTests = (g: typeof siteGate, ceiling?: typeof ceili
   if (ceiling) ceilingFor = ceiling;
 };
 
-type TimeoutAnswer = { success?: boolean; data?: { cancelled?: number; committed?: boolean } } | undefined;
-/** Tells the background a site's call timed out (it closes that site's sheets). Wallet page context only. */
+type TimeoutAnswer =
+  | { success?: boolean; data?: { cancelled?: number; committed?: boolean; asking?: boolean } }
+  | undefined;
+/**
+ * Tells the background a site's call hit its ceiling. If the person can still answer it (a sheet, the unlock or setup
+ * screen is up) the background says `asking` and closes nothing; otherwise it closes that site's sheets. Wallet page
+ * context only.
+ */
 let siteTimedOut: (originator: string) => Promise<TimeoutAnswer> = async () => undefined;
 export const setSiteTimeoutNotifier = (fn: typeof siteTimedOut) => {
   siteTimedOut = fn;
@@ -163,11 +169,24 @@ export const handleSiteCall = async (origin: string, url: string, type: string, 
       return { success: false, error: err.message || 'Not confirmed', code: err.code, status: err.status };
     }
   // originator is derived from the verified origin, as content.ts derives it from window.location.host.
-  // Every call settles: a step that never answers (bChatX's endless "Sealing…", 29 Oct 2026) becomes a timeout.
+  // Every call settles: a step that never answers (bChatX's endless "Sealing…", 29 Oct 2026) becomes a timeout, unless
+  // the person is being asked about it (BRC-219): then it waits for their answer, however long they take.
   const work = Promise.resolve(
     chrome.runtime.sendMessage({ action: type, params: params ?? {}, originator: key.originator }),
   );
-  const first = await withSiteCeiling(work, ceilingFor(type));
+  let first = await withSiteCeiling(work, ceilingFor(type));
+  let data: NonNullable<TimeoutAnswer>['data'];
+  while ((first as { code?: unknown } | undefined)?.code === SITE_CALL_TIMEOUT_CODE) {
+    // Ceiling hit. A sheet (or the unlock screen) for this site still up means the wallet is asking the person: keep
+    // waiting. Nothing up: close this site's open sheets so nothing can be approved after the site is told "timed out".
+    const answer = await withSiteCeiling(
+      siteTimedOut(key.originator).catch(() => undefined),
+      5_000,
+    ).catch(() => undefined);
+    data = (answer as TimeoutAnswer)?.data;
+    if (!data?.asking) break;
+    first = await withSiteCeiling(work, ceilingFor(type));
+  }
   // The person approved this site's one Seal sheet (services/sealPass.ts): its seal payment, next, rides the same
   // Face ID however long the sheet was read. The marker is the background's, never the site's, and is not passed on.
   if (type === 'createSignature' && (first as { sealApproved?: unknown } | undefined)?.sealApproved === true) {
@@ -177,15 +196,9 @@ export const handleSiteCall = async (origin: string, url: string, type: string, 
     return rest;
   }
   if ((first as { code?: unknown } | undefined)?.code !== SITE_CALL_TIMEOUT_CODE) return first;
-  // Timed out: close this site's open sheets so nothing can be approved after the site was told "timed out".
-  const answer = await withSiteCeiling(
-    siteTimedOut(key.originator).catch(() => undefined),
-    5_000,
-  ).catch(() => undefined);
-  const data = (answer as TimeoutAnswer)?.data;
   // A payment already approved (no sheet left to close) may still broadcast: never report a timeout for it, wait
-  // for its real answer (owner, 29 Oct 2026). Unknown (no answer): sheets expire at 60 s, long before the 300 s
-  // limit, so anything still running was approved; wait too.
+  // for its real answer (owner, 29 Oct 2026). Unknown (the background did not answer): it may still be running, so
+  // wait too.
   if (gateFor(type)?.kind === 'pay' && (data?.committed || !data)) return work;
   return first;
 };

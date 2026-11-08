@@ -26,12 +26,15 @@ let handleSiteCall: typeof import('./dappBrowser').handleSiteCall;
 const reached: string[] = [];
 const timedOut: string[] = [];
 let committed = false;
+// BRC-219: the background says a sheet of the site is still on screen (the person is being asked).
+let asking = false;
 beforeAll(async () => {
   const m = await import('./dappBrowser');
   handleSiteCall = m.handleSiteCall;
   m.__setSiteGateForTests(fakeGate, () => 50);
   m.setSiteTimeoutNotifier(async (o) => {
     timedOut.push(o);
+    if (asking) return { success: true, data: { cancelled: 0, committed: false, asking: true } };
     return { success: true, data: { cancelled: committed ? 0 : 1, committed } };
   });
   m.initDappBrowser(() => ({
@@ -43,6 +46,9 @@ beforeAll(async () => {
         // A payment approved and still broadcasting when the limit hits: answers a bit later.
         if (msg.action === 'createAction')
           return new Promise((r) => setTimeout(() => r({ success: true, data: { txid: 'ab' } }), 120));
+        // A sheet the person reads for a while (several ceilings), then Allows.
+        if (msg.action === 'encrypt')
+          return new Promise((r) => setTimeout(() => r({ success: true, data: { ciphertext: [9] } }), 260));
         return Promise.resolve({ success: true, data: { publicKey: '02ab' } });
       },
     },
@@ -104,5 +110,31 @@ describe('handleSiteCall settles every step', () => {
     committed = true;
     expect(await handleSiteCall(ORIGIN, URL_, 'createAction', {})).toEqual({ success: true, data: { txid: 'ab' } });
     committed = false;
+  });
+});
+
+describe('BRC-219: the bridge waits while the person is being asked', () => {
+  test('a sheet on screen past the ceiling: no timeout, the real answer comes back; nothing on screen still times out', async () => {
+    asking = true;
+    timedOut.length = 0;
+    const r = await handleSiteCall(ORIGIN, URL_, 'encrypt', { plaintext: [1], protocolID: [1, 'x'], keyID: '1' });
+    asking = false;
+    expect(r).toEqual({ success: true, data: { ciphertext: [9] } });
+    // The ceiling (50 ms here) hit several times; each time the background said "still asking" and closed nothing.
+    expect(timedOut.length).toBeGreaterThan(1);
+    // Nothing asking any more: the ceiling still ends a step that hangs with nothing on screen.
+    expect(await handleSiteCall(ORIGIN, URL_, 'createSignature', { data: [1] })).toMatchObject({
+      code: 'ERR_WALLET_TIMEOUT',
+    });
+  });
+
+  test('a payment sheet on screen past the 300 s ceiling is not closed: the real answer comes back', async () => {
+    asking = true;
+    committed = false;
+    timedOut.length = 0;
+    const r = await handleSiteCall(ORIGIN, URL_, 'createAction', {});
+    asking = false;
+    expect(r).toEqual({ success: true, data: { txid: 'ab' } });
+    expect(timedOut.length).toBeGreaterThan(0);
   });
 });

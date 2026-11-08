@@ -3,8 +3,11 @@ import {
   createSiteGate,
   gateFor,
   GATE_REASON,
+  RESUME_GRACE_MS,
   SITE_CALL_TIMEOUT_CODE,
+  VERIFICATION_LOST_CODE,
   VERIFICATION_TIMEOUT_CODE,
+  VERIFY_TIMEOUT_MS,
   withSiteCeiling,
   type AuthResult,
 } from './siteGate';
@@ -168,15 +171,64 @@ describe('site gate', () => {
     expect(calls.length).toBe(2);
   });
 
-  test('timeout: rejects with a coded error instead of hanging', async () => {
+  test('BRC-219: an OS prompt that is up is not failed at 60 s; only the long native safety cap ends it', async () => {
     const { gate, t } = gateWith(() => new Promise(() => undefined));
     const p = gate.check(SITE, 'createSignature').catch((e) => e);
+    let settled = false;
+    void p.then(() => (settled = true));
     for (let i = 0; i < 10; i++) await Promise.resolve();
-    expect(t.list[0].ms).toBe(60_000);
+    // One timer only, and it is the 10 minute safety cap, not a 60 s clock on the person.
+    expect(t.list.filter((x) => x.live).map((x) => x.ms)).toEqual([VERIFY_TIMEOUT_MS]);
+    expect(VERIFY_TIMEOUT_MS).toBe(10 * 60_000);
+    expect(settled).toBe(false);
     t.fireAll();
     const err = await p;
     expect(err.code).toBe(VERIFICATION_TIMEOUT_CODE);
     expect(err.status).toBe(408);
+  });
+
+  test('BRC-219 mobile continuity: back on screen with the prompt unanswered -> a clear lifecycle error; answered -> passes', async () => {
+    const t = timers();
+    let resume: (() => void) | undefined;
+    let unsubscribed = false;
+    const gate = createSiteGate({
+      enabled: () => true,
+      auth: () => new Promise(() => undefined), // the OS dropped the prompt and never called back
+      onResume: (fn) => ((resume = fn), () => (unsubscribed = true)),
+      setTimer: t.setTimer,
+      clearTimer: t.clearTimer,
+    });
+    const p = gate.check(SITE, 'createAction').catch((e) => e);
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    expect(resume).toBeDefined();
+    resume!();
+    const check = t.list.find((x) => x.live && x.ms === RESUME_GRACE_MS);
+    expect(check).toBeDefined();
+    check!.live = false;
+    check!.fn();
+    const err = await p;
+    expect(err.code).toBe(VERIFICATION_LOST_CODE);
+    expect(err.status).toBe(410);
+    expect(unsubscribed).toBe(true);
+    expect(t.list.some((x) => x.live)).toBe(false); // the safety cap is cleared too
+
+    // Back on screen and the prompt does answer within the grace: it passes, no lost error.
+    const t2 = timers();
+    let resume2: (() => void) | undefined;
+    let answer: ((r: AuthResult) => void) | undefined;
+    const gate2 = createSiteGate({
+      enabled: () => true,
+      auth: () => new Promise<AuthResult>((r) => (answer = r)),
+      onResume: (fn) => ((resume2 = fn), () => undefined),
+      setTimer: t2.setTimer,
+      clearTimer: t2.clearTimer,
+    });
+    const p2 = gate2.check(SITE, 'createAction');
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    resume2!();
+    answer!({ status: 'ok', method: 'biometric' });
+    expect(await p2).toBe('biometric');
+    expect(t2.list.some((x) => x.live)).toBe(false);
   });
 
   test('no biometrics and no passcode: no prompt result, verifiedBy none', async () => {
@@ -280,15 +332,22 @@ describe('Sign and Seal sheets (owner, 30 Oct 2026)', () => {
     await expect(gate.check(SITE, 'createSignature')).rejects.toMatchObject({ code: USER_DENIED_CODE });
   });
 
-  test('an unanswered password sheet times out like the OS prompt', async () => {
+  test('BRC-219: the wallet password sheet waits for the person with no time limit', async () => {
+    let answer: ((ok: boolean) => void) | undefined;
     const { gate, t } = withPassword(
       async () => ({ status: 'unavailable' }),
-      () => new Promise<boolean>(() => {}),
+      () => new Promise<boolean>((r) => (answer = r)),
     );
+    let settled = false;
     const p = gate.check(SITE, 'createSignature');
+    void p.then(() => (settled = true));
     await new Promise((r) => setTimeout(r, 0));
+    expect(t.list.some((x) => x.live)).toBe(false); // no clock on the password sheet
     t.fireAll();
-    await expect(p).rejects.toMatchObject({ code: VERIFICATION_TIMEOUT_CODE });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(settled).toBe(false);
+    answer!(true);
+    expect(await p).toBe('password');
   });
 
   test('a password pass covers the follow-on seal like a biometric one', async () => {

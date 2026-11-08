@@ -32,7 +32,11 @@ export type Recipient = { to: string; satoshis: number };
 const MAX_POSSIBLE_SATOSHIS = 0x775f05a073fff;
 /** The line the toolbox appends after the site's outputs when storage charges for the action. */
 const SERVICE_CHARGE = 'Storage service charge';
-/** A run older than this no longer holds its site: sheets expire after 60 s (promptWatchdog.ts PROMPT_EXPIRY_MS). */
+/**
+ * A run older than this no longer holds its site. Sheets no longer expire (BRC-219), so a sheet left open past this
+ * while the same site starts a conflicting payment loses its run: its Allow then fails spendApprovalMatches and is
+ * refused (never paid). Fail-safe; see the BRC-219 notes in services/promptLiveness.ts.
+ */
 export const SPEND_RUN_HOLD_MS = 180_000;
 
 /** background.ts: a paying sheet always lists its payees; a payment the wallet cannot tie to its outputs is refused. */
