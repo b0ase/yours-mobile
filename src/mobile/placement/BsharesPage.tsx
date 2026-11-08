@@ -10,8 +10,8 @@ import { Lock, ShieldCheck } from 'lucide-react';
 import { TopNav } from '../../components/TopNav';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
-import { issueShareToken, payTreasury, shareLockKey } from './actions';
-import { OVERPAYMENT_TERM, allotmentMinute, excessRefundDue, type ExcessChoice } from './minute';
+import { issueShareToken, payTreasury, payableProblem, shareLockKey } from './actions';
+import { OVERPAYMENT_TERM, allotmentMinute, excessRefundDue } from './minute';
 import {
   STATUS_LABEL,
   tickerLabel,
@@ -26,7 +26,24 @@ import {
 import { DEFAULT_LOCK_MONTHS, shareLabel } from './scripts';
 import { useBshares, useCompanies } from './useBshares';
 import { CompanySetup, CreateCompany } from './CompanySetup';
-import type { BsharesApi } from './api';
+import type { BsharesApi, PlacementQuote } from './api';
+import { PayConfirmSheet } from './PayConfirmSheet';
+import {
+  OTHER_DEVICE_NOTE,
+  PAY_BUTTON,
+  adoptServerPending,
+  checkPayment,
+  deviceStore,
+  paidButUnclaimed,
+  payAndClaim,
+  payState,
+  quotePaymentPending,
+  reclaimMessage,
+  type ListActionsFn,
+  type PayDeps,
+  type PayOutcome,
+  type PayState,
+} from './payFlow';
 
 const GOLD = '#F5B800';
 const MUTED = '#98A2B3';
@@ -66,9 +83,20 @@ const Field = ({
   </label>
 );
 
-const Btn = ({ onClick, children, busy }: { onClick: () => void; children: React.ReactNode; busy?: boolean }) => (
+const Btn = ({
+  onClick,
+  children,
+  busy,
+  testId,
+}: {
+  onClick: () => void;
+  children: React.ReactNode;
+  busy?: boolean;
+  testId?: string;
+}) => (
   <button
     type="button"
+    data-testid={testId}
     disabled={busy}
     onClick={onClick}
     className="rounded-xl px-4 py-2 text-sm font-bold border-0 cursor-pointer disabled:opacity-50"
@@ -137,18 +165,19 @@ const NewTranche = ({ api, onDone }: { api: BsharesApi; onDone: () => void }) =>
   );
 };
 
-/** bit-sign claim codes worth retrying with the same payment (bshares-invest-rules InvestErrorCode). */
-const RETRYABLE_CLAIM = new Set([
-  'not_seen',
-  'not_confirmed',
-  'rate_limited',
-  'internal',
-  'excess_choice',
-  'unauthenticated',
-]);
+/** Offers with a Pay or Check payment in progress on this device (a second tap never starts a second payment). */
+const payingNow = new Set<string>();
 
-const paidButUnclaimed = (txid: string, reason: string) =>
-  `Your payment was sent but could not be matched to this offer (${reason}). Don't pay again: ask the company's directors to refund transaction ${txid}.`;
+/** The line under an investor's offer about this device's payment record (none: the second-device note). */
+const payNote = (pay: PayState): string => {
+  if (pay.kind === 'none') return OTHER_DEVICE_NOTE;
+  if (pay.kind === 'reclaim') return reclaimMessage(pay.rec.txid, pay.rec.reason);
+  if (pay.kind === 'final') return paidButUnclaimed(pay.rec.txid, pay.rec.reason);
+  if (pay.rec.txid)
+    return `Your payment went out: transaction ${pay.rec.txid}. Don't pay again: tap Check payment to claim it.`;
+  const at = pay.rec.startedAt ? ` at ${new Date(pay.rec.startedAt).toLocaleString('en-GB')}` : '';
+  return `A payment was started on this device${at}. Don't pay again: tap Check payment to look for it first.`;
+};
 
 const OfferCard = ({
   offer,
@@ -165,63 +194,88 @@ const OfferCard = ({
   const { addSnackbar } = useSnackbar();
   const [busy, setBusy] = useState(false);
   const [minuteNo, setMinuteNo] = useState('');
-  const [excessChoice, setExcessChoice] = useState<ExcessChoice>('refund');
+  const [sheet, setSheet] = useState<{ quote: PlacementQuote; warning: string | null } | null>(null);
+  const [, setSeen] = useState(0);
   const role = me.role === 'director' ? 'director' : 'investor';
   const step = nextStep(offer, role);
+  const store = deviceStore();
+  // This device's record of a payment for this offer (payFlow). Once the offer shows that very payment, it is done.
+  let pay: PayState | null = role === 'investor' ? payState(store, offer.id) : null;
+  if (pay && pay.kind !== 'none' && offer.paymentTxid && pay.rec.txid === offer.paymentTxid) pay = { kind: 'none' };
+  const payLabel = step === 'Pay' && pay ? PAY_BUTTON[pay.kind] : null;
+  const deps: PayDeps = {
+    store,
+    listActions: (a) => apiContext.wallet.listActions(a) as ReturnType<ListActionsFn>,
+    // The wallet pays the exact quote, so there is never an excess to choose about: always 'refund'.
+    claim: (c) => api.claim(offer.id, { ...c, excessChoice: 'refund' }),
+  };
+  const report = (o: PayOutcome | null) => {
+    if (!o || o.kind === 'check-first') return;
+    if (o.kind === 'claimed') addSnackbar('Payment claimed. The directors approve the allotment next.', 'success');
+    else if (o.kind === 'refund') addSnackbar(o.message, 'info');
+    else addSnackbar(o.message, 'error');
+    if (o.kind === 'claimed' || o.kind === 'refund') onDone();
+  };
+  /**
+   * The quote, checked, then the confirm sheet. Nothing is paid here. When bit-sign already holds a payment for this
+   * offer waiting for its block (payment_pending, e.g. paid from another device), that payment becomes this device's
+   * record instead and the button turns into Check payment: no sheet, no second payment.
+   */
+  const openSheet = async (warning: string | null) => {
+    let q: PlacementQuote;
+    try {
+      q = await api.quote(offer.id, await shareLockKey(apiContext, offer.id));
+    } catch (e) {
+      const waiting = quotePaymentPending(e);
+      if (!waiting) throw e;
+      adoptServerPending(store, offer.id, waiting);
+      addSnackbar(waiting.message, 'info');
+      return;
+    }
+    const bad = payableProblem(me.company, offer, q);
+    if (bad) throw new Error(bad);
+    setSheet({ quote: q, warning });
+  };
+  /** Pay (nothing recorded: confirm first) or Check payment / Try the claim again (claims only, never pays). */
+  const runPay = async () => {
+    if (payingNow.has(offer.id)) return;
+    payingNow.add(offer.id);
+    setBusy(true);
+    try {
+      const o = await checkPayment(deps, offer.id);
+      if (!o) await openSheet(null);
+      else if (o.kind === 'check-first') await openSheet(o.message);
+      else report(o);
+    } catch (e) {
+      addSnackbar(e instanceof Error ? e.message : 'Failed', 'error');
+    } finally {
+      payingNow.delete(offer.id);
+      setBusy(false);
+      setSeen((n) => n + 1);
+    }
+  };
+  /** Pay in the confirm sheet: the record is saved, then the wallet pays, then the claim. */
+  const confirmPay = async () => {
+    const s = sheet;
+    setSheet(null);
+    if (!s || payingNow.has(offer.id)) return;
+    payingNow.add(offer.id);
+    setBusy(true);
+    try {
+      report(await payAndClaim(deps, offer.id, s.quote, () => payTreasury(apiContext, me.company, offer, s.quote)));
+    } catch (e) {
+      addSnackbar(e instanceof Error ? e.message : 'Failed', 'error');
+    } finally {
+      payingNow.delete(offer.id);
+      setBusy(false);
+      setSeen((n) => n + 1);
+    }
+  };
   const run = async () => {
     setBusy(true);
     try {
       if (step === 'Accept') await api.accept(offer.id, await shareLockKey(apiContext, offer.id));
-      else if (step === 'Pay') {
-        // A paid-but-unconfirmed claim is kept so a retry re-claims instead of paying twice.
-        const key = `bshares-claim:${offer.id}`;
-        const failedKey = `bshares-claim-failed:${offer.id}`;
-        let failed: { txid: string; reason: string } | null = null;
-        try {
-          failed = JSON.parse(localStorage.getItem(failedKey) || 'null');
-        } catch {
-          failed = null;
-        }
-        // A payment the server refused for good: never pay a second time from here.
-        if (failed) throw new Error(paidButUnclaimed(failed.txid, failed.reason));
-        let pending: { quote_id: string; txid: string } | null = null;
-        try {
-          pending = JSON.parse(localStorage.getItem(key) || 'null');
-        } catch {
-          pending = null;
-        }
-        if (!pending) {
-          const q = await api.quote(offer.id, await shareLockKey(apiContext, offer.id));
-          const txid = await payTreasury(apiContext, me.company, offer, q);
-          pending = { quote_id: q.quote_id, txid };
-          try {
-            localStorage.setItem(key, JSON.stringify(pending));
-          } catch {
-            /* storage off: the claim below still runs once */
-          }
-        }
-        try {
-          await api.claim(offer.id, { ...pending, excessChoice });
-        } catch (e) {
-          const code = (e as { data?: { code?: string } }).data?.code;
-          // Retryable (or no answer at all): keep the claim so the next tap re-claims the same payment.
-          if (!code || RETRYABLE_CLAIM.has(code)) throw e;
-          // Refused for good: stop replaying a dead claim, and keep the txid so the user can ask for a refund.
-          const reason = e instanceof Error ? e.message : code;
-          try {
-            localStorage.setItem(failedKey, JSON.stringify({ txid: pending.txid, reason }));
-            localStorage.removeItem(key);
-          } catch {
-            /* ignore */
-          }
-          throw new Error(paidButUnclaimed(pending.txid, reason));
-        }
-        try {
-          localStorage.removeItem(key);
-        } catch {
-          /* ignore */
-        }
-      } else if (step === 'Approve allotment') {
+      else if (step === 'Approve allotment') {
         const no = Number(minuteNo);
         if (!Number.isInteger(no) || no < 1) throw new Error('Enter the next board minute number');
         await api.approve(offer.id, await shareLockKey(apiContext, offer.id), no);
@@ -307,26 +361,10 @@ const OfferCard = ({
         {pounds(offer.pricePence)} a share · {bsv(offer.sats)} at {pounds(offer.gbpPerBsvPence)}/BSV ({offer.rateDate})
         · locked 2-of-2, yours alone after {offer.lockMonths} months
       </p>
-      {step === 'Pay' && (
-        <fieldset className="m-0 p-0 border-0 flex flex-col gap-1 text-xs" style={{ color: MUTED }}>
-          <legend className="text-white text-sm mb-1">{OVERPAYMENT_TERM}</legend>
-          {(
-            [
-              ['refund', 'Refund any excess to me in BSV'],
-              ['premium', 'Treat any excess as share premium (no extra shares)'],
-            ] as const
-          ).map(([v, label]) => (
-            <label key={v} className="flex items-center gap-2">
-              <input
-                type="radio"
-                name={`excess-${offer.id}`}
-                checked={excessChoice === v}
-                onChange={() => setExcessChoice(v)}
-              />
-              {label}
-            </label>
-          ))}
-        </fieldset>
+      {pay && (step === 'Pay' || pay.kind === 'final') && (
+        <p className="m-0 text-xs break-words" style={{ color: MUTED }} role="note">
+          {payNote(pay)}
+        </p>
       )}
       {offer.excessSats ? (
         <p className="m-0 text-xs" style={{ color: MUTED }}>
@@ -361,10 +399,26 @@ const OfferCard = ({
           <pre className="m-0 whitespace-pre-wrap text-[11px] text-white">{offer.boardMinuteText}</pre>
         </details>
       )}
-      {step && (
-        <Btn onClick={run} busy={busy}>
-          {step}
-        </Btn>
+      {step === 'Pay'
+        ? payLabel && (
+            <Btn onClick={runPay} busy={busy} testId="bshares-pay">
+              {payLabel}
+            </Btn>
+          )
+        : step && (
+            <Btn onClick={run} busy={busy}>
+              {step}
+            </Btn>
+          )}
+      {sheet && (
+        <PayConfirmSheet
+          company={me.company}
+          offer={offer}
+          quote={sheet.quote}
+          warning={sheet.warning}
+          onPay={confirmPay}
+          onCancel={() => setSheet(null)}
+        />
       )}
       <details>
         <summary className="text-xs cursor-pointer" style={{ color: MUTED }}>

@@ -38,7 +38,17 @@ export type PlacementQuote = {
   outputs: { lockingScript: string; satoshis: number }[];
   memo: string;
   memo_script: string;
+  /** The issuer's terms for this offer, which the investor agrees to by paying (shown before signing). */
+  terms_text?: string;
+  terms_hash?: string;
+  offer?: { treasury?: { m: number; n: number } };
 };
+
+/**
+ * What a claim answers: the offer (now paid). A payment that arrives too late to allot may be recorded for a refund
+ * instead (status 'refund_due', or a refund_due flag): the money is safe, the directors refund it.
+ */
+export type ClaimAnswer = Partial<PlacementOffer> & { ok?: boolean; already_claimed?: boolean; refund_due?: boolean };
 
 export class BsharesApi {
   constructor(
@@ -147,9 +157,13 @@ export class BsharesApi {
    */
   quote = (id: string, investorPubKey: string) =>
     this.call<PlacementQuote>('POST', `/offers/${encodeURIComponent(id)}/quote`, { investorPubKey });
-  /** `excessChoice` is the investor's answer to the offer's overpayment term, made at payment time. */
-  claim = (id: string, c: { quote_id: string; txid: string; excessChoice: ExcessChoice }) =>
-    this.call<PlacementOffer>('POST', `/offers/${encodeURIComponent(id)}/claim`, c);
+  /**
+   * Claims a paid quote. `rawtx` (BEEF or raw tx hex) lets bit-sign check, and broadcast if needed, the very
+   * transaction the wallet signed. `excessChoice` answers the overpayment term; the wallet pays the exact quote, so
+   * there is never an excess and it is always 'refund'.
+   */
+  claim = (id: string, c: { quote_id: string; txid: string; rawtx?: string; excessChoice: ExcessChoice }) =>
+    this.call<ClaimAnswer>('POST', `/offers/${encodeURIComponent(id)}/claim`, c);
   /** Single-director resolution: bit-sign writes the minute (BCORP-BM-<date>-<NNN>) from the allotment data. */
   approve = (id: string, directorPubKey: string, minuteNumber: number) =>
     this.call<PlacementOffer>('POST', `/offers/${encodeURIComponent(id)}/approve`, { directorPubKey, minuteNumber });
