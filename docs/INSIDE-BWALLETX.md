@@ -26,35 +26,35 @@ project), branded by host (`src/lib/app-hosts.ts`: `BCHAT_HOSTS`, `BCHATX_HOSTS`
 bit-sign). So "the bitcoinchat.online vault" and "the bit-sign vault" are the same rows. There
 is one migration, not two.
 
-| What | Where |
-|---|---|
-| Documents | `bit_sign_signatures` (one row per item: DOCUMENT, SEALED_DOCUMENT, TLDRAW, PUBLISHED_DOCUMENT, CAMERA, VIDEO) |
-| File bytes | In Postgres, in the `encrypted_payload` text column. Not Supabase storage, not on chain. `original_pdf_url` / `signed_pdf_url` are unused (0 rows). |
-| Sharing | `document_access_grants`: the document key wrapped to each recipient |
-| Your E2E key | One ECDH P-256 keypair per account. Private half stored only wrapped ("envelopes") |
-| Envelopes | `passphrase` (Argon2id over a passphrase, in `unified_users`) and `brc100-wallet` (the wallet's own BRC-100 `encrypt`, `e2e_key_envelopes`, protocolID `[2,'bchat documents']`, keyID `e2e-private-key-v1`, counterparty `self`) |
-| On chain | Seals only (hashes / txids), never the document |
+| What         | Where                                                                                                                                                                                                                            |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Documents    | `bit_sign_signatures` (one row per item: DOCUMENT, SEALED_DOCUMENT, TLDRAW, PUBLISHED_DOCUMENT, CAMERA, VIDEO)                                                                                                                   |
+| File bytes   | In Postgres, in the `encrypted_payload` text column. Not Supabase storage, not on chain. `original_pdf_url` / `signed_pdf_url` are unused (0 rows).                                                                              |
+| Sharing      | `document_access_grants`: the document key wrapped to each recipient                                                                                                                                                             |
+| Your E2E key | One ECDH P-256 keypair per account. Private half stored only wrapped ("envelopes")                                                                                                                                               |
+| Envelopes    | `passphrase` (Argon2id over a passphrase, in `unified_users`) and `brc100-wallet` (the wallet's own BRC-100 `encrypt`, `e2e_key_envelopes`, protocolID `[2,'bchat documents']`, keyID `e2e-private-key-v1`, counterparty `self`) |
+| On chain     | Seals only (hashes / txids), never the document                                                                                                                                                                                  |
 
 Two encryption cases exist in the data:
 
-| Case | Meaning | Who can read it |
-|---|---|---|
-| **v0** | Stored in the clear (drafts, part-signed docs, accounts without an E2E key) | The server, and the owner after sign-in |
+| Case   | Meaning                                                                                                                                                                                                                                                                    | Who can read it                                                                  |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| **v0** | Stored in the clear (drafts, part-signed docs, accounts without an E2E key)                                                                                                                                                                                                | The server, and the owner after sign-in                                          |
 | **v2** | Random AES-256-GCM key per document, wrapped to each party's E2E public key (ECDH + HKDF + AES-KW). Sealed instruments are encrypted by the server to all parties at seal time with throwaway keys. `standard` adds a wrap to an offline recovery key; `private` does not. | Only holders of a matching E2E private key (and the recovery key for `standard`) |
 
 Counts (live rows, `deleted_at is null`):
 
-| Measure | Count |
-|---|---|
-| Documents | 273 (47 MB of stored payload) |
-| Accounts that own documents | 17 (23 distinct handles) |
-| v0, plaintext | 257 documents, 17 accounts |
-| v2, end-to-end | 16 documents, 1 account |
-| By type | DOCUMENT 112, SEALED_DOCUMENT 89, TLDRAW 64, PUBLISHED_DOCUMENT 6, CAMERA 1, VIDEO 1 |
-| Access grants | 148 grants over 123 documents |
-| Accounts with a passphrase envelope | 58 (all 17 document owners have one) |
-| Accounts with a `brc100-wallet` envelope | 3 (none of them own documents yet) |
-| Document owners with a linked `bwallet` credential | 1 of 23 handles (also 1 with `yours`) |
+| Measure                                            | Count                                                                                |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Documents                                          | 273 (47 MB of stored payload)                                                        |
+| Accounts that own documents                        | 17 (23 distinct handles)                                                             |
+| v0, plaintext                                      | 257 documents, 17 accounts                                                           |
+| v2, end-to-end                                     | 16 documents, 1 account                                                              |
+| By type                                            | DOCUMENT 112, SEALED_DOCUMENT 89, TLDRAW 64, PUBLISHED_DOCUMENT 6, CAMERA 1, VIDEO 1 |
+| Access grants                                      | 148 grants over 123 documents                                                        |
+| Accounts with a passphrase envelope                | 58 (all 17 document owners have one)                                                 |
+| Accounts with a `brc100-wallet` envelope           | 3 (none of them own documents yet)                                                   |
+| Document owners with a linked `bwallet` credential | 1 of 23 handles (also 1 with `yours`)                                                |
 
 What this means: almost everything is v0, so the server can already read it and migration needs
 no old secret. The v2 set is one account. The `brc100-wallet` envelope already exists, so a
@@ -62,22 +62,22 @@ wallet unlocking the bit-sign key is a solved problem; we reuse it rather than i
 
 ### 2.2 bWalletX today
 
-| Piece | State |
-|---|---|
-| Native Chat tab | `/m/chat` (Chatrooms, DMs, Calls; Spaces links in). See `NATIVE-CHAT-PLAN.md`. |
-| bChat tile | `src/mobile/bapps.ts`, `url: https://www.bitcoinchat.online`, `noFrame: true`. Interim branch `fix/bchatx-tile` (509cb5a) points it at `https://www.bchatx.com`. |
-| Tiles in the extension | `BrowserPage.tsx`: `if (IS_EXTENSION) chrome.tabs.create({ url })`, so a tile opens a normal tab next to the side panel |
-| Tiles on phones / web | `openBapp(name, url)`; `noFrame` means full screen instead of the wallet frame |
-| BRC-100 encrypt / decrypt | Available to the wallet itself and to sites (`encrypt`/`decrypt` with protocolID, keyID, counterparty; `encryptForCounterparty` in `@1sat/actions`) |
-| Documents / files store | **None.** No documents section exists. |
+| Piece                     | State                                                                                                                                                            |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Native Chat tab           | `/m/chat` (Chatrooms, DMs, Calls; Spaces links in). See `NATIVE-CHAT-PLAN.md`.                                                                                   |
+| bChat tile                | `src/mobile/bapps.ts`, `url: https://www.bitcoinchat.online`, `noFrame: true`. Interim branch `fix/bchatx-tile` (509cb5a) points it at `https://www.bchatx.com`. |
+| Tiles in the extension    | `BrowserPage.tsx`: `if (IS_EXTENSION) chrome.tabs.create({ url })`, so a tile opens a normal tab next to the side panel                                          |
+| Tiles on phones / web     | `openBapp(name, url)`; `noFrame` means full screen instead of the wallet frame                                                                                   |
+| BRC-100 encrypt / decrypt | Available to the wallet itself and to sites (`encrypt`/`decrypt` with protocolID, keyID, counterparty; `encryptForCounterparty` in `@1sat/actions`)              |
+| Documents / files store   | **None.** No documents section exists.                                                                                                                           |
 
 ## 3. The bChat tile, per surface
 
-| Surface | Tile does | Why |
-|---|---|---|
-| iOS / Android | Opens the wallet's own Chat tab (`/m/chat`) | Chat is native already; no website needed |
-| Web wallet (web.bwalletx.com) | Opens `/m/chat` in place | Same app, same route |
-| Chrome extension side panel | Opens `https://www.bchatx.com` in a tab next to the panel, signed in through the extension | The panel is too narrow for a full chat; Chrome is the browser |
+| Surface                       | Tile does                                                                                  | Why                                                            |
+| ----------------------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
+| iOS / Android                 | Opens the wallet's own Chat tab (`/m/chat`)                                                | Chat is native already; no website needed                      |
+| Web wallet (web.bwalletx.com) | Opens `/m/chat` in place                                                                   | Same app, same route                                           |
+| Chrome extension side panel   | Opens `https://www.bchatx.com` in a tab next to the panel, signed in through the extension | The panel is too narrow for a full chat; Chrome is the browser |
 
 Change: the tile gets a `route: '/m/chat'` for app surfaces and keeps `url` (bchatx.com) for the
 extension. Ship 509cb5a first; it is correct for the extension and harmless elsewhere until the
@@ -145,13 +145,13 @@ A new **Documents** section (inside Profile or More, not a new bottom tab).
 
 ### 5.2 Per encryption case
 
-| Case | Docs / accounts | What the user does | Automatic? |
-|---|---|---|---|
-| v0 plaintext | 257 / 17 | Sign in with bWalletX once | **Yes.** The API returns the plaintext to the signed-in owner; the wallet encrypts it on device. |
-| v2, account already has a `brc100-wallet` envelope for this wallet | 0 today | Nothing | **Yes.** The wallet opens the bit-sign E2E key, unwraps each document key, re-wraps to itself. |
-| v2, passphrase envelope only | 16 / 1 | Type the old bit-sign passphrase **once** | After that, yes. We also store a `brc100-wallet` envelope for bWalletX so it is never asked again. |
-| v2, lost passphrase, `standard` | (count at dry run) | Contact support | Recovery-key path, owner-run, per document |
-| v2, lost passphrase, `private` | (count at dry run) | Nothing we can do | No. Unreadable by design; the UI says so plainly. |
+| Case                                                               | Docs / accounts    | What the user does                        | Automatic?                                                                                         |
+| ------------------------------------------------------------------ | ------------------ | ----------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| v0 plaintext                                                       | 257 / 17           | Sign in with bWalletX once                | **Yes.** The API returns the plaintext to the signed-in owner; the wallet encrypts it on device.   |
+| v2, account already has a `brc100-wallet` envelope for this wallet | 0 today            | Nothing                                   | **Yes.** The wallet opens the bit-sign E2E key, unwraps each document key, re-wraps to itself.     |
+| v2, passphrase envelope only                                       | 16 / 1             | Type the old bit-sign passphrase **once** | After that, yes. We also store a `brc100-wallet` envelope for bWalletX so it is never asked again. |
+| v2, lost passphrase, `standard`                                    | (count at dry run) | Contact support                           | Recovery-key path, owner-run, per document                                                         |
+| v2, lost passphrase, `private`                                     | (count at dry run) | Nothing we can do                         | No. Unreadable by design; the UI says so plainly.                                                  |
 
 Cheapest correct step for v2: **add a bWalletX envelope to the existing bit-sign key**
 (`e2e-key-envelopes.ts` already does this) instead of re-encrypting documents. That keeps every
@@ -188,11 +188,11 @@ wallet's own scheme is then optional and only for documents nobody else shares.
 
 ## 7. What the websites become
 
-| Site | Becomes |
-|---|---|
-| bChatX.com | The desktop / web view of the wallet's chat, rooms and shared documents, and the front door for people without bWalletX ("get the wallet", plus a limited guest mode). See bit-sign branch `docs/bchatx-redesign`, `docs/BCHATX-REDESIGN.md`. |
-| bitcoinchat.online | Redirects to bchatx.com once bChatX ships (same app, so sessions carry over). |
-| bit-sign.online | Contracts, KYC and the signing ceremony, for people and companies that need a full-screen document desk. Its Home vault becomes a view of bWalletX Documents for wallet users; the old vault stays for accounts that never link a wallet. |
+| Site               | Becomes                                                                                                                                                                                                                                       |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| bChatX.com         | The desktop / web view of the wallet's chat, rooms and shared documents, and the front door for people without bWalletX ("get the wallet", plus a limited guest mode). See bit-sign branch `docs/bchatx-redesign`, `docs/BCHATX-REDESIGN.md`. |
+| bitcoinchat.online | Redirects to bchatx.com once bChatX ships (same app, so sessions carry over).                                                                                                                                                                 |
+| bit-sign.online    | Contracts, KYC and the signing ceremony, for people and companies that need a full-screen document desk. Its Home vault becomes a view of bWalletX Documents for wallet users; the old vault stays for accounts that never link a wallet.     |
 
 ## 8. Phases
 
@@ -216,16 +216,16 @@ Each phase ships on its own.
 
 ## 9. Risks
 
-| Risk | Mitigation |
-|---|---|
-| Lost seed phrase = lost documents | Same as money today. Say it at upload; offer an optional recovery wrap (like bit-sign `standard`) as owner question 2 |
-| Re-encrypting shared docs locks out counterparties | Never re-encrypt shared or sealed docs; use the envelope (5.2, 5.3) |
-| Changing protocolID / keyID later locks every file | Store them per record, read them back on open, test pinned |
-| Security level 2 prompts on every open | Wallet itself is the caller for its own Documents, so no per-site prompt; bChatX opens via the extension with a per-site grant |
-| Removing a room member does not unshare what they already saw | Plain UI copy; new versions are not wrapped to them |
-| Storage cost and size (47 MB in Postgres today) | Move ciphertext to object storage before Phase 6 |
-| App store review of a "file vault" | Keep it framed as documents attached to chats and contracts; no generic file hosting |
-| Server sees v0 plaintext during migration | It already stores it; migration is the moment that stops |
+| Risk                                                          | Mitigation                                                                                                                     |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Lost seed phrase = lost documents                             | Same as money today. Say it at upload; offer an optional recovery wrap (like bit-sign `standard`) as owner question 2          |
+| Re-encrypting shared docs locks out counterparties            | Never re-encrypt shared or sealed docs; use the envelope (5.2, 5.3)                                                            |
+| Changing protocolID / keyID later locks every file            | Store them per record, read them back on open, test pinned                                                                     |
+| Security level 2 prompts on every open                        | Wallet itself is the caller for its own Documents, so no per-site prompt; bChatX opens via the extension with a per-site grant |
+| Removing a room member does not unshare what they already saw | Plain UI copy; new versions are not wrapped to them                                                                            |
+| Storage cost and size (47 MB in Postgres today)               | Move ciphertext to object storage before Phase 6                                                                               |
+| App store review of a "file vault"                            | Keep it framed as documents attached to chats and contracts; no generic file hosting                                           |
+| Server sees v0 plaintext during migration                     | It already stores it; migration is the moment that stops                                                                       |
 
 ## 10. Owner questions
 

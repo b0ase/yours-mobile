@@ -12,18 +12,18 @@ Earlier owner notes: "'airdrops' are token spam in a mailbox which should receiv
 
 ## Sources (use what exists, don't reinvent)
 
-| Source | What bMail takes |
-|---|---|
-| `docs/BPHONE-PLAN.md`, `src/mobile/calls/rateCard.ts`, `QuoteSheet.tsx` | **The pattern**: a public rate card per identity key on the paymail server (BSV priced in dollars and paid in sats, MNEE, or a BSV-21 token); a **quote sheet** before anything is sent; pay wallet to wallet, 0% fee; **receipts**; store gating (`storeBuild.ts`) |
-| `docs/PAID-INBOX-PLAN.md` (owner, 8 Oct) | Price to reach me, sort by paid with friends free and on top (§2), pay to open with a 14-day nLockTime refund (§3), friend loops (§4). Split-or-steal (§5) stays parked behind legal advice |
-| `src/mobile/airdrops/` | Today's inbox: `AirdropsInbox`, `useAirdrops`, `inbox.ts` (seen / kept / hidden / hiddenIssuers / onlyKnown), `note.ts` (≤280-char OP_RETURN note), `poison.ts` (look-alike guard) |
-| bit-sign `docs/NPG-DOCUMENT-STANDARD.md`, `src/lib/nds.ts`, `nds-builder.ts`, `nds-compose.ts` | **.nds.html**: an HTML document with a `application/npg-sig-manifest+json` manifest (`signatureFields[]`, roles, `canonical` hash) and `data-sig-anchor` places for each signature |
-| bit-sign `src/components/SovereignSignature.tsx`, `NdsSigningView.tsx`, `DocumentCanvas.tsx` | **Drawn (written) signature**: canvas → `{svg, json}`, sanitised (`sanitizeSignatureSvg`) and placed on its anchor |
-| bit-sign `docs/SIGN-AND-SEAL-PLAN.md`, `src/lib/bwalletx-seal.ts`, `nds-seal-core.ts`, `brc100-inscribe.ts`, `seal.ts` | **Sign and seal with bWalletX**: identity-key signature + BRC-100 `createAction` OP_RETURN seal; **only hashes on chain**, never content (`assertNoContent`) |
-| bit-sign `docs/ESCROW-DESIGN.md` (design, not built) | **Escrow block in the NDS manifest**: `2of2-timeout`, `2of3-arbiter`, `payer-timeout`, CLTV deadline, `onTimeout` refund-payer / release-payee |
-| bit-sign `co-sign-request`, `return-to-sender`, `document-vault.ts`, `envelope-void.ts`, `room-allocations.ts`, `offer-terms.ts` | Ask someone to sign; send the signed copy back; the document vault; voiding (not deleting) an envelope; allocation arithmetic with a consent rule; structured "X of Y for Z" terms |
-| bWalletX `TIME-LOCK-PLAN.md`, `POTS-SUBSCRIPTIONS-PLAN.md`, `BSPACES-PLAN.md` | Lock scripts; 1¢/day subscriptions; signed-but-unbroadcast spends |
-| `bitcoin-email` repo (old $bMail demo) | Ideas only: postal stamp tiers, minimum-payment filter, read receipts as a signed spend. Its code (CryptoJS, HandCash, mocked send) is not reused |
+| Source                                                                                                                           | What bMail takes                                                                                                                                                                                                                                                    |
+| -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs/BPHONE-PLAN.md`, `src/mobile/calls/rateCard.ts`, `QuoteSheet.tsx`                                                          | **The pattern**: a public rate card per identity key on the paymail server (BSV priced in dollars and paid in sats, MNEE, or a BSV-21 token); a **quote sheet** before anything is sent; pay wallet to wallet, 0% fee; **receipts**; store gating (`storeBuild.ts`) |
+| `docs/PAID-INBOX-PLAN.md` (owner, 8 Oct)                                                                                         | Price to reach me, sort by paid with friends free and on top (§2), pay to open with a 14-day nLockTime refund (§3), friend loops (§4). Split-or-steal (§5) stays parked behind legal advice                                                                         |
+| `src/mobile/airdrops/`                                                                                                           | Today's inbox: `AirdropsInbox`, `useAirdrops`, `inbox.ts` (seen / kept / hidden / hiddenIssuers / onlyKnown), `note.ts` (≤280-char OP_RETURN note), `poison.ts` (look-alike guard)                                                                                  |
+| bit-sign `docs/NPG-DOCUMENT-STANDARD.md`, `src/lib/nds.ts`, `nds-builder.ts`, `nds-compose.ts`                                   | **.nds.html**: an HTML document with a `application/npg-sig-manifest+json` manifest (`signatureFields[]`, roles, `canonical` hash) and `data-sig-anchor` places for each signature                                                                                  |
+| bit-sign `src/components/SovereignSignature.tsx`, `NdsSigningView.tsx`, `DocumentCanvas.tsx`                                     | **Drawn (written) signature**: canvas → `{svg, json}`, sanitised (`sanitizeSignatureSvg`) and placed on its anchor                                                                                                                                                  |
+| bit-sign `docs/SIGN-AND-SEAL-PLAN.md`, `src/lib/bwalletx-seal.ts`, `nds-seal-core.ts`, `brc100-inscribe.ts`, `seal.ts`           | **Sign and seal with bWalletX**: identity-key signature + BRC-100 `createAction` OP_RETURN seal; **only hashes on chain**, never content (`assertNoContent`)                                                                                                        |
+| bit-sign `docs/ESCROW-DESIGN.md` (design, not built)                                                                             | **Escrow block in the NDS manifest**: `2of2-timeout`, `2of3-arbiter`, `payer-timeout`, CLTV deadline, `onTimeout` refund-payer / release-payee                                                                                                                      |
+| bit-sign `co-sign-request`, `return-to-sender`, `document-vault.ts`, `envelope-void.ts`, `room-allocations.ts`, `offer-terms.ts` | Ask someone to sign; send the signed copy back; the document vault; voiding (not deleting) an envelope; allocation arithmetic with a consent rule; structured "X of Y for Z" terms                                                                                  |
+| bWalletX `TIME-LOCK-PLAN.md`, `POTS-SUBSCRIPTIONS-PLAN.md`, `BSPACES-PLAN.md`                                                    | Lock scripts; 1¢/day subscriptions; signed-but-unbroadcast spends                                                                                                                                                                                                   |
+| `bitcoin-email` repo (old $bMail demo)                                                                                           | Ideas only: postal stamp tiers, minimum-payment filter, read receipts as a signed spend. Its code (CryptoJS, HandCash, mocked send) is not reused                                                                                                                   |
 
 bMail uses **BRC-100 wallet calls only** (bWalletX first; any BRC-100 wallet works).
 
@@ -31,23 +31,23 @@ bMail uses **BRC-100 wallet calls only** (bWalletX first; any BRC-100 wallet wor
 
 Like bPhone, each use gets a line on a rate card. The **recipient** sets prices for what reaches them; the **sender** sets prices on what they ask for (an invoice, a contract fee). Every row is the same envelope with a different `kind` and different things attached.
 
-| People use email for… | bMail kind | Money it carries | Permission / signature | Rate card line (suggested default) |
-|---|---|---|---|---|
-| Personal letters, friends, family | `letter` | none between friends; postage from strangers | sender signs envelope | Friends free · strangers: **Penny post** (1¢, the same default for everyone) |
-| Introductions, cold outreach, pitches | `letter` (stranger) | **postage**, ranked by amount; optional pay to open | — | price to reach me; "pay only if opened" suggested |
-| Replies you want back (quotes, RSVPs, answers) | any + **reply paid** | sender prepays the reply | — | sender chooses (e.g. 5¢) |
-| Invoices, bills, payment requests | `request` | amount asked; **Pay** button | sender signs the request | free to people you've dealt with; else postage |
-| Receipts | `receipt` | none (records a payment) | signed by the payee | free (automatic from our sends, bPhone, shops) |
-| Contracts, agreements, terms, NDAs | `contract` (.nds.html) | optional pay on signing, escrow, fee | click-wrap accept or drawn signature, sealed | sender may set a signing fee; recipient's postage applies |
-| Approvals, sign-offs, permissions | `approval` | optional | one-tap signed Approve / Decline | free between friends |
-| Tickets, invites, bookings | `ticket` | the ticket token itself | holding = entry | free (issuer pays the ticket) |
-| Newsletters, subscriptions | `issue` | subscription (1¢/day pot) | you subscribed = allowed | rank with friends; unsubscribe = stop paying |
-| Notifications from apps | `notice` | none | app's key, signed | free, but Requests unless the app is kept |
-| File sending (documents, photos, media) | any + attachment | optional pay to open | encrypted to recipient | postage; large files may require pay to open |
-| Job applications, CVs | `letter` + attachment | postage (shows seriousness) | — | recipient's price (e.g. recruiters set $1) |
-| Support / customer service | `letter` | postage optional | — | businesses may set 0 for customers, a price for strangers |
-| Token sends, gifts, airdrops | `drop` | the tokens | — | unstamped → Requests |
-| Token allocations (team, contributors, community) | `allocation` | utility tokens, optionally time-locked | allocation terms accepted by click-wrap | sender pays; no postage between parties to the allocation |
+| People use email for…                             | bMail kind             | Money it carries                                    | Permission / signature                       | Rate card line (suggested default)                                           |
+| ------------------------------------------------- | ---------------------- | --------------------------------------------------- | -------------------------------------------- | ---------------------------------------------------------------------------- |
+| Personal letters, friends, family                 | `letter`               | none between friends; postage from strangers        | sender signs envelope                        | Friends free · strangers: **Penny post** (1¢, the same default for everyone) |
+| Introductions, cold outreach, pitches             | `letter` (stranger)    | **postage**, ranked by amount; optional pay to open | —                                            | price to reach me; "pay only if opened" suggested                            |
+| Replies you want back (quotes, RSVPs, answers)    | any + **reply paid**   | sender prepays the reply                            | —                                            | sender chooses (e.g. 5¢)                                                     |
+| Invoices, bills, payment requests                 | `request`              | amount asked; **Pay** button                        | sender signs the request                     | free to people you've dealt with; else postage                               |
+| Receipts                                          | `receipt`              | none (records a payment)                            | signed by the payee                          | free (automatic from our sends, bPhone, shops)                               |
+| Contracts, agreements, terms, NDAs                | `contract` (.nds.html) | optional pay on signing, escrow, fee                | click-wrap accept or drawn signature, sealed | sender may set a signing fee; recipient's postage applies                    |
+| Approvals, sign-offs, permissions                 | `approval`             | optional                                            | one-tap signed Approve / Decline             | free between friends                                                         |
+| Tickets, invites, bookings                        | `ticket`               | the ticket token itself                             | holding = entry                              | free (issuer pays the ticket)                                                |
+| Newsletters, subscriptions                        | `issue`                | subscription (1¢/day pot)                           | you subscribed = allowed                     | rank with friends; unsubscribe = stop paying                                 |
+| Notifications from apps                           | `notice`               | none                                                | app's key, signed                            | free, but Requests unless the app is kept                                    |
+| File sending (documents, photos, media)           | any + attachment       | optional pay to open                                | encrypted to recipient                       | postage; large files may require pay to open                                 |
+| Job applications, CVs                             | `letter` + attachment  | postage (shows seriousness)                         | —                                            | recipient's price (e.g. recruiters set $1)                                   |
+| Support / customer service                        | `letter`               | postage optional                                    | —                                            | businesses may set 0 for customers, a price for strangers                    |
+| Token sends, gifts, airdrops                      | `drop`                 | the tokens                                          | —                                            | unstamped → Requests                                                         |
+| Token allocations (team, contributors, community) | `allocation`           | utility tokens, optionally time-locked              | allocation terms accepted by click-wrap      | sender pays; no postage between parties to the allocation                    |
 
 Same as bPhone: prices in **dollars, paid in sats** (or MNEE or a BSV-21 token), **wallet to wallet**, fee **0%**, and the sender always sees a **quote sheet** before anything leaves the wallet.
 
@@ -103,18 +103,19 @@ One card per identity key, stored next to the bPhone card on the paymail server 
 
 A contract is mail whose body is an **.nds.html** document from the bit-sign vault (or made in bMail from a template), with the NDS manifest saying what this recipient must do. bMail is the **delivery and the tap**; bit-sign stays the system of record (vault, seal, verify page).
 
-| Feature | Exists in bit-sign | How it attaches to a mail | What the recipient taps |
-|---|---|---|---|
-| **.nds.html document** | `nds.ts`, `nds-builder.ts`, vault, `co-sign-request` | Encrypted attachment; the envelope carries the manifest hash and this recipient's `signatureFields`. Row shows "Contract · 1 signature needed" | **Read**, then the action below |
-| **Click-wrap accept** | No click-wrap code yet. Parts exist: the `bwallet sign in` signature scheme (`bwallet-signin.ts`) and NDS fields | A manifest field `{type:'accept', role}` and the terms' canonical hash. Accept = identity-key `createSignature` over the doc hash, sealed with a BRC-100 OP_RETURN (hash only) | **I agree** (after scrolling the terms) → quote sheet if a payment is attached → done |
-| **Drawn / written signature** | `SovereignSignature.tsx` (canvas → SVG), `NdsSigningView.tsx`, anchors, `nds-compose.ts` | Field `{type:'drawn', anchor}`; the wallet opens the same canvas, or hands off to bit-sign's signing view in the in-app browser | **Sign here** (draw) → **Sign and seal** (SIGN-AND-SEAL-PLAN) |
-| **Payment on signing** | `brc100-inscribe.ts` `createAction`; `offer-terms.ts` | Manifest `payment` block (amount, asset, payee). The seal and the payment are **one `createAction`**, so signing and paying cannot come apart | **Sign and pay $X** |
-| **Time locks / escrow** | `ESCROW-DESIGN.md` (designed, not built): `2of2-timeout`, `2of3-arbiter`, `payer-timeout`, CLTV, `onTimeout` | Manifest `escrow` block; signing funds the lock; the thread shows "Escrow funded · releases on delivery, or refunds 1 Dec" | **Fund escrow** (payer) · later **Release** / **Refund** / **Ask arbiter** in the same thread |
-| **Token allocations** | `room-allocations.ts` (arithmetic + consent rule), NDS `token` block | An `allocation` mail: handles and token amounts (utility tokens), optional vesting by time lock. Recipients accept by click-wrap; tokens are sent (or locked) when the last required party accepts | **Accept allocation** → tokens arrive, or "Locked until 1 Jun" |
-| **Return to sender** | `return-to-sender` route | The signed, sealed copy goes back to the sender as a reply in the same thread, with the seal txid | Nothing: automatic after sealing |
-| **Void** | `envelope-void.ts` (void, not delete) | The sender can void an unsigned contract; the recipient's copy shows "Voided by sender" and is kept | — |
+| Feature                       | Exists in bit-sign                                                                                               | How it attaches to a mail                                                                                                                                                                          | What the recipient taps                                                                       |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| **.nds.html document**        | `nds.ts`, `nds-builder.ts`, vault, `co-sign-request`                                                             | Encrypted attachment; the envelope carries the manifest hash and this recipient's `signatureFields`. Row shows "Contract · 1 signature needed"                                                     | **Read**, then the action below                                                               |
+| **Click-wrap accept**         | No click-wrap code yet. Parts exist: the `bwallet sign in` signature scheme (`bwallet-signin.ts`) and NDS fields | A manifest field `{type:'accept', role}` and the terms' canonical hash. Accept = identity-key `createSignature` over the doc hash, sealed with a BRC-100 OP_RETURN (hash only)                     | **I agree** (after scrolling the terms) → quote sheet if a payment is attached → done         |
+| **Drawn / written signature** | `SovereignSignature.tsx` (canvas → SVG), `NdsSigningView.tsx`, anchors, `nds-compose.ts`                         | Field `{type:'drawn', anchor}`; the wallet opens the same canvas, or hands off to bit-sign's signing view in the in-app browser                                                                    | **Sign here** (draw) → **Sign and seal** (SIGN-AND-SEAL-PLAN)                                 |
+| **Payment on signing**        | `brc100-inscribe.ts` `createAction`; `offer-terms.ts`                                                            | Manifest `payment` block (amount, asset, payee). The seal and the payment are **one `createAction`**, so signing and paying cannot come apart                                                      | **Sign and pay $X**                                                                           |
+| **Time locks / escrow**       | `ESCROW-DESIGN.md` (designed, not built): `2of2-timeout`, `2of3-arbiter`, `payer-timeout`, CLTV, `onTimeout`     | Manifest `escrow` block; signing funds the lock; the thread shows "Escrow funded · releases on delivery, or refunds 1 Dec"                                                                         | **Fund escrow** (payer) · later **Release** / **Refund** / **Ask arbiter** in the same thread |
+| **Token allocations**         | `room-allocations.ts` (arithmetic + consent rule), NDS `token` block                                             | An `allocation` mail: handles and token amounts (utility tokens), optional vesting by time lock. Recipients accept by click-wrap; tokens are sent (or locked) when the last required party accepts | **Accept allocation** → tokens arrive, or "Locked until 1 Jun"                                |
+| **Return to sender**          | `return-to-sender` route                                                                                         | The signed, sealed copy goes back to the sender as a reply in the same thread, with the seal txid                                                                                                  | Nothing: automatic after sealing                                                              |
+| **Void**                      | `envelope-void.ts` (void, not delete)                                                                            | The sender can void an unsigned contract; the recipient's copy shows "Voided by sender" and is kept                                                                                                | —                                                                                             |
 
 Rules:
+
 - **Hashes only on chain** (bit-sign `assertNoContent`). Document bodies travel encrypted (message box, bDrive or the bit-sign vault).
 - **Contracts always need an explicit tap**; nothing is accepted by opening.
 - **Utility only.** Token allocations in bMail are for utility tokens (access, credits, tickets, rewards for work). Anything share-like (DocToken / $403, KYC-gated instruments) is **out of bMail's scope** and stays in bit-sign's own flow; bMail may only deliver a link to it. Copy never says "investment", "returns", "equity" or "yield".
@@ -128,16 +129,17 @@ The `b` agent drafts the contract.
 
 The lifecycle, one mail thread:
 
-| Step | Who | What happens |
-|---|---|---|
-| **Drafted** | Sender + `b` | In Compose, "Ask b to draft": b writes the `.nds.html` (terms, parties by $handle, amounts, dates, signature fields) from a plain request ("an NDA with $alice", "a £200 logo job, half up front"). The sender edits it in place. |
-| **Signed** | Sender | The sender draws their signature (bit-sign's `SovereignSignature` pad, brought into the wallet) and the wallet signs the document hash with the sender's identity key. |
-| **Sealed** | Wallet | The document is BRC-2 encrypted to the recipient, its hash goes on chain with the stamp (§3), so the content is fixed before it is opened. |
-| **Delivered** | bMail | Sent **Signed delivery** (§6a), so opening produces a receipt: who opened it, when, at what identity level. |
-| **Accepted** | Recipient | One sheet: read the document, draw a signature (or click-to-accept for simple terms), and the wallet signs the same hash. Any payment on signing (deposit, first instalment) goes in the **same transaction** as the acceptance. |
-| **Countersigned copy** | Both | Both signatures + the on-chain hashes make the final copy; it is filed in both parties' bit-sign vaults and threaded in bMail. Declines and deadlines (§6a) are recorded the same way. |
+| Step                   | Who          | What happens                                                                                                                                                                                                                      |
+| ---------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Drafted**            | Sender + `b` | In Compose, "Ask b to draft": b writes the `.nds.html` (terms, parties by $handle, amounts, dates, signature fields) from a plain request ("an NDA with $alice", "a £200 logo job, half up front"). The sender edits it in place. |
+| **Signed**             | Sender       | The sender draws their signature (bit-sign's `SovereignSignature` pad, brought into the wallet) and the wallet signs the document hash with the sender's identity key.                                                            |
+| **Sealed**             | Wallet       | The document is BRC-2 encrypted to the recipient, its hash goes on chain with the stamp (§3), so the content is fixed before it is opened.                                                                                        |
+| **Delivered**          | bMail        | Sent **Signed delivery** (§6a), so opening produces a receipt: who opened it, when, at what identity level.                                                                                                                       |
+| **Accepted**           | Recipient    | One sheet: read the document, draw a signature (or click-to-accept for simple terms), and the wallet signs the same hash. Any payment on signing (deposit, first instalment) goes in the **same transaction** as the acceptance.  |
+| **Countersigned copy** | Both         | Both signatures + the on-chain hashes make the final copy; it is filed in both parties' bit-sign vaults and threaded in bMail. Declines and deadlines (§6a) are recorded the same way.                                            |
 
 Notes:
+
 - The drawn signature is the human mark; the key signature is the proof. Both are stored with the document.
 - Required identity level per field (e.g. "signer must be level 3") comes from the document and is checked on accept.
 - b drafts, never signs. Every signature is a person's tap.
@@ -156,12 +158,12 @@ The Mint (`bcorp-mint`, bitcoin-mint.com: Design / Print / Stamp / Mint) can des
 
 The sender picks a service, like Royal Mail's. Pay to open and signed delivery are separate options.
 
-| Sender picks | What it proves | Payment |
-|---|---|---|
-| **Standard** (Penny post) | It was delivered | Stamp only |
-| **Signed delivery** | **Who** opened it and **when** | None needed beyond the stamp |
-| **Pay to open** | The recipient was paid for their attention | Released on open, refunded after 14 days unopened |
-| **Signed + pay to open** | Both | Both |
+| Sender picks              | What it proves                             | Payment                                           |
+| ------------------------- | ------------------------------------------ | ------------------------------------------------- |
+| **Standard** (Penny post) | It was delivered                           | Stamp only                                        |
+| **Signed delivery**       | **Who** opened it and **when**             | None needed beyond the stamp                      |
+| **Pay to open**           | The recipient was paid for their attention | Released on open, refunded after 14 days unopened |
+| **Signed + pay to open**  | Both                                       | Both                                              |
 
 **Signed delivery is mostly identity, not money.** Opening is a tap that signs a receipt (message id, content hash, a
 recent block hash for "not before"; the mined block gives "not later than"). The weight of the receipt depends on the
@@ -202,6 +204,7 @@ Postage can be paid in PNEE (Penny Notes, 1 unit = 1¢; see PENNY-NOTES.md) as w
 PNEE works best when our products price in it (bMail stamps, likes and like-to-fund, bPhone minutes, room entry, tips).
 
 How bCorp sells them, in two steps:
+
 1. **First: prepaid stamps.** Sold at 1¢, spendable only on our services, no cash-out, like Royal Mail stamps. That
    is generally a voucher, not e-money.
 2. **Later: real PNEE notes from bCorp's own vaults.** Revenue buys BSV, the BSV is locked in a public vault, the
@@ -246,10 +249,12 @@ Wording: lists, sends, postage. No personal data is ever sold or shown.
 Built in 5.1.90 (`test/5.1.90`, commit 64b97a9).
 
 **Swiping never moves money.**
+
 - **Postage (the stamp)** is checked and internalized into the wallet when the mail arrives (`client.ts` verifyPostage/internalize). It's yours from then on, even if the mail is spam. Deleting the mail doesn't refund it.
 - **Reply-paid credit** belongs to the recipient. A refund is due only when the mail carried a reply deadline that passed without a reply. That's documented here and not built yet; it needs a deadline field in the envelope first.
 
 **Tokens and airdrops are never burned and never swept automatically.**
+
 - Tokens and NFTs from a sender you haven't accepted go to **Quarantine**. They are left out of your balance, the home and token lists, send pickers, agent views and sweeps. They're never spent together with your own coins, because that would link your coins to the sender on chain.
 - Quarantine is a tab in bMail. Each token shows plain facts we already have: who sent it, the amount, the verified-issuer badge and the note as plain text. There's no investment wording.
   - **Keep** moves the token into your normal holdings. It stays at the same address.
@@ -268,6 +273,7 @@ Built in 5.1.90 (`test/5.1.90`, commit 64b97a9).
 **Delete sends mail to the Bin.** Deleted mail stays in the Bin tab for 30 days with **Restore**. After that its content (the decrypted copy and the sealed ciphertext) is erased from this device. A small record remains so a refresh can't bring the mail back. Money and tokens are untouched.
 
 **Gaps (not enforced yet):**
+
 - Quarantine works per token id, because @1sat/actions `sendBsv21` picks token UTXOs by token id and can't leave out single outputs. If someone airdrops more of a token you already hold, those outputs aren't quarantined and can be spent with yours. Fixing this needs an exclude-outpoints option in `sendBsv21` (or a separate toolbox basket/tag).
 - Unsolicited **plain BSV** (dust) in the default basket isn't quarantined. wallet-toolbox `createAction` coin selection has no exclusion hook, so dust can still be spent with your coins. This needs a toolbox change, such as moving dust out of the funding basket or marking it non-spendable.
 - NFT galleries and NFT send screens other than the agent sweep don't filter quarantined NFTs yet.
@@ -278,20 +284,20 @@ Built in 5.1.90 (`test/5.1.90`, commit 64b97a9).
 
 ## 7. Phases
 
-| # | What | State |
-|---|---|---|
+| #                         | What                                                                                                                                                                                                                                                                                          | State                                                                                                    |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | **B0 · tonight → 5.1.90** | Rename Airdrops → **bMail** (mailbox icon); tabs **Inbox · Requests · Sent**; **compose with pay to send** (postage + quote sheet); **reply paid**; **weighted sort** (friends on top, then by postage, "Newest" toggle); price to reach me (simple mode: postage is the recipient's on send) | **Being built now on `feat/bmail-basic` by another agent.** This plan describes it; it does not build it |
-| B1 | Sealed mail (BRC-2), signed envelopes, Open / Reply / Block, friends list, Sent › Receipts | next |
-| B2 | **Pay to open**: lock + 14-day refund, signed delivery (identity level on the receipt), "Opened at…" in Sent; deadline mail refunds return stamps when the deadline passes | after B1 |
-| B3 | **Contracts from bit-sign**: .nds.html in mail, click-wrap accept, drawn signature, Sign and seal from bWalletX, return to sender, void | after bit-sign Sign and seal lands |
-| B3a | `.nds.html` as a native attachment; finger-drawn signature pad in the wallet; "Ask b to draft" in Compose; signed → sealed → delivered → accepted thread (§4a) | with B3 |
-| B4 | **Payment on signing**; invoices and receipts as kinds | — |
-| B5 | **Escrow / time locks** in contracts (shared builder with B2; ESCROW-DESIGN models) | needs the bit-sign escrow review |
-| B6 | **Token allocations** (utility) with optional vesting locks; approvals and access grants | — |
-| B1b | Requests sorted by holders / forwards; forwarding carries the note (§6b); PNEE stamps as prepaid postage (§6c) | after B1 |
-| B8 | Opt-in mailing lists on the Exchange; pay per send, members paid postage; b buys sends (§6d) | after stamps + Exchange listing |
-| Later | Subscriptions as mail (1¢/day), pay-per-read, friendship funds, per-kind prices, published envelope spec for other wallets | — |
-| Parked | Stamp issuance / collectible stamps (§6); split-or-steal (PAID-INBOX-PLAN §5) | — |
+| B1                        | Sealed mail (BRC-2), signed envelopes, Open / Reply / Block, friends list, Sent › Receipts                                                                                                                                                                                                    | next                                                                                                     |
+| B2                        | **Pay to open**: lock + 14-day refund, signed delivery (identity level on the receipt), "Opened at…" in Sent; deadline mail refunds return stamps when the deadline passes                                                                                                                    | after B1                                                                                                 |
+| B3                        | **Contracts from bit-sign**: .nds.html in mail, click-wrap accept, drawn signature, Sign and seal from bWalletX, return to sender, void                                                                                                                                                       | after bit-sign Sign and seal lands                                                                       |
+| B3a                       | `.nds.html` as a native attachment; finger-drawn signature pad in the wallet; "Ask b to draft" in Compose; signed → sealed → delivered → accepted thread (§4a)                                                                                                                                | with B3                                                                                                  |
+| B4                        | **Payment on signing**; invoices and receipts as kinds                                                                                                                                                                                                                                        | —                                                                                                        |
+| B5                        | **Escrow / time locks** in contracts (shared builder with B2; ESCROW-DESIGN models)                                                                                                                                                                                                           | needs the bit-sign escrow review                                                                         |
+| B6                        | **Token allocations** (utility) with optional vesting locks; approvals and access grants                                                                                                                                                                                                      | —                                                                                                        |
+| B1b                       | Requests sorted by holders / forwards; forwarding carries the note (§6b); PNEE stamps as prepaid postage (§6c)                                                                                                                                                                                | after B1                                                                                                 |
+| B8                        | Opt-in mailing lists on the Exchange; pay per send, members paid postage; b buys sends (§6d)                                                                                                                                                                                                  | after stamps + Exchange listing                                                                          |
+| Later                     | Subscriptions as mail (1¢/day), pay-per-read, friendship funds, per-kind prices, published envelope spec for other wallets                                                                                                                                                                    | —                                                                                                        |
+| Parked                    | Stamp issuance / collectible stamps (§6); split-or-steal (PAID-INBOX-PLAN §5)                                                                                                                                                                                                                 | —                                                                                                        |
 
 Store build: B0–B1 plain messaging. Paid features follow the bPhone rule: **bWalletX only** until reviewed (`storeBuild.ts`).
 
@@ -307,8 +313,8 @@ Store build: B0–B1 plain messaging. Paid features follow the bPhone rule: **bW
 
 Answered 9 Oct and folded in: Penny post 1¢ default, tier multiples, built-in stamp designs, receipts only for Certified / pay to open, "Requests", B0 in 5.1.90.
 
-1. **Postage in B0: simple or escrowed?** (a) Postage is the recipient's when sent (simple, tonight); (b) every stranger's postage is pay to open from day one. *Suggested: (a) tonight; pay to open as an option in B2.*
-2. **Reply paid default.** (a) Off, the sender ticks it; (b) on for mail to strangers; (c) on for everything with postage. *Suggested: (a).*
+1. **Postage in B0: simple or escrowed?** (a) Postage is the recipient's when sent (simple, tonight); (b) every stranger's postage is pay to open from day one. _Suggested: (a) tonight; pay to open as an option in B2._
+2. **Reply paid default.** (a) Off, the sender ticks it; (b) on for mail to strangers; (c) on for everything with postage. _Suggested: (a)._
 3. ~~Unused return stamp~~ Answered: the recipient keeps it; it refunds only on mail with a deadline (§6a).
-4. **Where contracts are signed.** (a) Click-wrap in the wallet, drawn signatures hand off to bit-sign's signing view; (b) both in the wallet. *Suggested: (a) first, (b) later.*
-5. **Token allocations in bMail.** (a) Utility tokens only; anything share-like stays in bit-sign; (b) leave allocations out of bMail for now. *Suggested: (a).*
+4. **Where contracts are signed.** (a) Click-wrap in the wallet, drawn signatures hand off to bit-sign's signing view; (b) both in the wallet. _Suggested: (a) first, (b) later._
+5. **Token allocations in bMail.** (a) Utility tokens only; anything share-like stays in bit-sign; (b) leave allocations out of bMail for now. _Suggested: (a)._

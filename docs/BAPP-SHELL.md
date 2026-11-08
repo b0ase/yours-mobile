@@ -7,7 +7,7 @@ screenshots in `docs/bapp-shell/`.
 
 Owner, 8 Oct 2026: bMovies inside bWallet shows four tabs (Home · Feed · Market · Chat — the Wallet tab
 is hidden in-wallet) under the wallet's own top bar. Two bottom bars' worth of ideas, one of them
-truncated, looks wrong. bApps should *dovetail* with bWalletX: same five slots, same place, same
+truncated, looks wrong. bApps should _dovetail_ with bWalletX: same five slots, same place, same
 look, scoped to the app. The app's own Home moves to the top-left.
 
 ## 1. The standard
@@ -20,13 +20,13 @@ Every bApp — on its own website and inside bWalletX — uses one 5-slot bar:
 
 Each slot is **scoped to the app** that is open:
 
-| Slot | Wallet's meaning | Inside a bApp (bMovies) |
-|------|------------------|--------------------------|
-| Wallet | your coins & tokens | your bMovies holdings: film tokens, earnings, royalties, ordinals |
-| Exchange | token market | film token market: TRADE + MINT (pitch a film = mint its token) |
-| (b) | b agent, hold-to-talk | b in bMovies context: "make me a movie" → `bct_offers` agent job → pay-b-to-build plan; hold-to-talk same as wallet |
-| Feed | all BSV posts | the films feed (trailers, releases; Twatch comments later) |
-| Chat | rooms & DMs | film rooms (one per film token, token-gated where set) |
+| Slot     | Wallet's meaning      | Inside a bApp (bMovies)                                                                                             |
+| -------- | --------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Wallet   | your coins & tokens   | your bMovies holdings: film tokens, earnings, royalties, ordinals                                                   |
+| Exchange | token market          | film token market: TRADE + MINT (pitch a film = mint its token)                                                     |
+| (b)      | b agent, hold-to-talk | b in bMovies context: "make me a movie" → `bct_offers` agent job → pay-b-to-build plan; hold-to-talk same as wallet |
+| Feed     | all BSV posts         | the films feed (trailers, releases; Twatch comments later)                                                          |
+| Chat     | rooms & DMs           | film rooms (one per film token, token-gated where set)                                                              |
 
 Visual spec = the wallet Dock exactly: bar 88px, bg `#0A0B0D`, 1px top hairline `#1C1C1E`, icons
 20px, active `#FFD24D`, inactive `#F2F2F0`, labels 10px, centre (b) 52px black disc with 2px gold
@@ -53,6 +53,7 @@ Drawer (from left): bMovies Home · Studio · Timeline · Channels · Commission
                     ───────────
                     ☰ bWalletX menu · ← Back to wallet
 ```
+
 Pro: one left button, cleanest. Con: wallet menu is two taps away; easy to "lose" the wallet.
 
 **Option 2 — Both: ☰ stays far-left, app icon sits next to it (recommended).**
@@ -67,6 +68,7 @@ Pro: one left button, cleanest. Con: wallet menu is two taps away; easy to "lose
 │ Wallet Exch  (b)  Feed Chat │ scoped bar; small "bMovies" chip on active slot
 └─────────────────────────────┘
 ```
+
 The ✕ (right) closes the bApp and the bar returns to wallet scope. Long-press (b) offers "Ask b about
 the wallet instead".
 
@@ -79,6 +81,7 @@ Web (bmovies.app with no wallet, bChatX-style): same 28+56 header, ☰ becomes t
 Desktop extension side panel (~400px): identical to phone (it is a phone-width column).
 
 Desktop web (≥900px): bChatX pattern — bar becomes a left rail, app drawer is a permanent left column:
+
 ```
 ┌──────┬──────────────┬─────────────────────────────┐
 │(🎬)  │ bMovies Home │                             │
@@ -99,11 +102,20 @@ The wallet still owns the top bar.
 
 **(B) Wallet renders the bar, app declares sections** — manifest at `/.well-known/bapp.json` (or
 `<meta name="bapp-sections">`), e.g.
+
 ```json
-{ "name":"bMovies","icon":"/icon.png","home":"/home",
-  "slots":{"wallet":"/wallet","exchange":"/market","feed":"/feed","chat":"/chat","b":"agent"},
-  "drawer":[{"label":"Studio","href":"/studio"},{"label":"Timeline","href":"/timeline"}] }
+{
+  "name": "bMovies",
+  "icon": "/icon.png",
+  "home": "/home",
+  "slots": { "wallet": "/wallet", "exchange": "/market", "feed": "/feed", "chat": "/chat", "b": "agent" },
+  "drawer": [
+    { "label": "Studio", "href": "/studio" },
+    { "label": "Timeline", "href": "/timeline" }
+  ]
+}
 ```
+
 The native dock and top bar drive the app via `postMessage({type:'bapp:navigate', slot})`; the app
 reports `bapp:active {slot}` back so the right tab lights up. The app hides its own nav when it sees
 the `bWalletInset/48` UA token (or `?bwx=1`).
@@ -112,14 +124,14 @@ the `bWalletInset/48` UA token (or `?bwx=1`).
 `bapp.json`, renders the bar on the web, and when it detects the wallet (UA token / XDM parent) it
 renders nothing and speaks `bapp:*` messages instead.
 
-| | A | B | C |
-|---|---|---|---|
-| Consistency | good if apps update the package | perfect in-wallet | perfect in-wallet, good on web |
-| Effort | low wallet, medium per app | medium wallet, low per app | medium wallet + package once, low per app |
-| Works on web w/o wallet | yes | no (app needs own bar anyway) | yes |
-| Native feel | web bar inside webview; haptics/hold-to-talk duplicated | native dock, real haptics, native hold-to-talk | native |
-| Security | none new | `postMessage` — wallet accepts `bapp:*` only from the frame/browser it opened and the manifest's exact origin; app accepts `bapp:navigate` only from `event.source === window.parent` with the wallet origin; slots map to same-origin paths only (no URLs from messages) | as B |
-| Store edition | app-drawn UI inside our chrome — fine | wallet-drawn — safest for review | as B |
+|                         | A                                                       | B                                                                                                                                                                                                                                                                         | C                                         |
+| ----------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| Consistency             | good if apps update the package                         | perfect in-wallet                                                                                                                                                                                                                                                         | perfect in-wallet, good on web            |
+| Effort                  | low wallet, medium per app                              | medium wallet, low per app                                                                                                                                                                                                                                                | medium wallet + package once, low per app |
+| Works on web w/o wallet | yes                                                     | no (app needs own bar anyway)                                                                                                                                                                                                                                             | yes                                       |
+| Native feel             | web bar inside webview; haptics/hold-to-talk duplicated | native dock, real haptics, native hold-to-talk                                                                                                                                                                                                                            | native                                    |
+| Security                | none new                                                | `postMessage` — wallet accepts `bapp:*` only from the frame/browser it opened and the manifest's exact origin; app accepts `bapp:navigate` only from `event.source === window.parent` with the wallet origin; slots map to same-origin paths only (no URLs from messages) | as B                                      |
+| Store edition           | app-drawn UI inside our chrome — fine                   | wallet-drawn — safest for review                                                                                                                                                                                                                                          | as B                                      |
 
 **Recommendation: C.** One manifest, one package. In the wallet the dock is native (hold-to-talk, b
 agent, haptics all work the same as at home); on the web the identical bar is drawn by the package.
@@ -127,19 +139,19 @@ Third-party BRC-100 bApps that ship no manifest keep today's behaviour (wallet d
 
 ## 3. bMovies mapping
 
-| Today (bMovies) | New place | Notes |
-|---|---|---|
-| Home tab (V2Home: identity, verb row Pitch/Pump/Produce/Profit, studio menu) | Top-left app drawer → "Home" | Home is the drawer's first item and the default landing screen |
-| Wallet tab (V2Wallet, ActiveWalletTokens, WalletOrdinals, connections) | **Wallet** slot | In-wallet: film holdings + earnings only; BSV balance stays in the wallet's own Wallet |
-| Market tab (V2Market, order sheet) | **Exchange** slot | |
-| MINT / Pitch, TickerMint, ChannelMintCard | **Exchange** slot → "Mint" sub-tab | Pitch = mint |
-| TRADE | **Exchange** slot | |
-| Feed tab (V2Feed) | **Feed** slot | Twatch comments later |
-| Chat tab (V2Chat, V2TokenChat, RoomCommissionBoard) | **Chat** slot | Commission board as a room tab |
-| 'b' agent (re-homed in Home › MORE) | **(b)** slot | "make me a movie" → `bct_offers` job → pay-b plan |
-| MAKE / Produce / V2Studio | Drawer → Studio; also reachable from (b) | |
-| Timeline (V2TimelineSheet), Channels, Commission, Profile (ProfileGrid, CV), Settings | Drawer | |
-| Upload (UploadCard) | Drawer → Studio, and (b) "upload a film" | |
+| Today (bMovies)                                                                       | New place                                | Notes                                                                                  |
+| ------------------------------------------------------------------------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------- |
+| Home tab (V2Home: identity, verb row Pitch/Pump/Produce/Profit, studio menu)          | Top-left app drawer → "Home"             | Home is the drawer's first item and the default landing screen                         |
+| Wallet tab (V2Wallet, ActiveWalletTokens, WalletOrdinals, connections)                | **Wallet** slot                          | In-wallet: film holdings + earnings only; BSV balance stays in the wallet's own Wallet |
+| Market tab (V2Market, order sheet)                                                    | **Exchange** slot                        |                                                                                        |
+| MINT / Pitch, TickerMint, ChannelMintCard                                             | **Exchange** slot → "Mint" sub-tab       | Pitch = mint                                                                           |
+| TRADE                                                                                 | **Exchange** slot                        |                                                                                        |
+| Feed tab (V2Feed)                                                                     | **Feed** slot                            | Twatch comments later                                                                  |
+| Chat tab (V2Chat, V2TokenChat, RoomCommissionBoard)                                   | **Chat** slot                            | Commission board as a room tab                                                         |
+| 'b' agent (re-homed in Home › MORE)                                                   | **(b)** slot                             | "make me a movie" → `bct_offers` job → pay-b plan                                      |
+| MAKE / Produce / V2Studio                                                             | Drawer → Studio; also reachable from (b) |                                                                                        |
+| Timeline (V2TimelineSheet), Channels, Commission, Profile (ProfileGrid, CV), Settings | Drawer                                   |                                                                                        |
+| Upload (UploadCard)                                                                   | Drawer → Studio, and (b) "upload a film" |                                                                                        |
 
 Removed/merged: the separate Home bottom tab; the duplicated verb rows; in-wallet "Wallet tab hidden"
 special case (no longer needed — the slot is scoped, not duplicated); V2BottomNav replaced by the
@@ -170,16 +182,17 @@ want to see more of". Feeds differ per app; the mechanic is shared.
 **Definition.** Feed = the app's trending items. **Like = a small, fixed purchase of that item's
 token**, which funds it. Ranking weights funding (likes paid, holders, recent backing) over views.
 
-| bApp | Item in the feed | A Like funds |
-|---|---|---|
-| bMovies | films, clips | the film's $TICKER (made, extended, sequelled) |
-| bMusic | tracks, artists | the track or artist token |
-| bArt | pieces | the piece or the artist |
-| bBooks | books, chapters | the next chapter |
-| bGame | games, matches | the game or the player |
-| bChat | posts, rooms | the poster or the room token (paid likes already live, blog 024) |
+| bApp    | Item in the feed | A Like funds                                                     |
+| ------- | ---------------- | ---------------------------------------------------------------- |
+| bMovies | films, clips     | the film's $TICKER (made, extended, sequelled)                   |
+| bMusic  | tracks, artists  | the track or artist token                                        |
+| bArt    | pieces           | the piece or the artist                                          |
+| bBooks  | books, chapters  | the next chapter                                                 |
+| bGame   | games, matches   | the game or the player                                           |
+| bChat   | posts, rooms     | the poster or the room token (paid likes already live, blog 024) |
 
 **Shared mechanics (in the shell package, so every app behaves the same):**
+
 - Like amount set once in bWalletX: **default 1¢** (owner, 8 Oct 2026), user-adjustable, daily cap **$1 (100 likes)** by default (decided), adjustable in Settings like b's limit. Pay in BSV, or in **one PNEE** (the wallet's USD¢ penny token) when the user holds PNEEs — a Like is literally one penny. One tap, no sheet
   under the cap; above it, the normal bWalletX approval.
 - The live balance ticks down (`bwallet:session-spend` / optimistic spend, docs/LIVE-BALANCE.md);
@@ -202,14 +215,14 @@ flow in `@bwalletx/connect/shell` (2–3 days), bMovies first, then bChat's paid
 
 ## 5. Phases
 
-| # | Ship | Effort |
-|---|------|--------|
-| 0 | This doc + mockup; owner picks options | done |
-| 1 | `bapp.json` schema + `@bwalletx/connect/shell` package (web bar + drawer, Dock tokens) | 2–3 days |
-| 2 | bMovies adopts package on web (`/v2` first, behind flag), drawer replaces Home tab | 2–3 days (bmovies repo) |
-| 3 | Wallet: read manifest on bApp open; scoped native dock + app icon button in TopNav; `bapp:navigate/active` with origin checks; hide app bar via `bWalletInset` | 3–4 days |
-| 4 | (b) scoping: pass `{app, slot}` context to b agent; bMovies "make me a movie" job flow | 2–3 days |
-| 5 | bChatX, TokenBlaster, bit-sign adopt; docs in BAPP-FRAME.md | 1 day each |
+| #   | Ship                                                                                                                                                           | Effort                  |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| 0   | This doc + mockup; owner picks options                                                                                                                         | done                    |
+| 1   | `bapp.json` schema + `@bwalletx/connect/shell` package (web bar + drawer, Dock tokens)                                                                         | 2–3 days                |
+| 2   | bMovies adopts package on web (`/v2` first, behind flag), drawer replaces Home tab                                                                             | 2–3 days (bmovies repo) |
+| 3   | Wallet: read manifest on bApp open; scoped native dock + app icon button in TopNav; `bapp:navigate/active` with origin checks; hide app bar via `bWalletInset` | 3–4 days                |
+| 4   | (b) scoping: pass `{app, slot}` context to b agent; bMovies "make me a movie" job flow                                                                         | 2–3 days                |
+| 5   | bChatX, TokenBlaster, bit-sign adopt; docs in BAPP-FRAME.md                                                                                                    | 1 day each              |
 
 Each phase ships alone: 1–2 improve the web app without the wallet; 3 works with any manifest app.
 
@@ -223,7 +236,6 @@ Each phase ships alone: 1–2 improve the web app without the wallet; 3 works wi
 ## Owner questions
 
 - Like-to-fund: default Like = 1¢ (PNEE when held), daily cap $1 (100 likes) — both decided. Payee split per item (creator vs token treasury)? Free reactions in store builds?
-
 
 1. Option 2 (☰ + app icon) or Option 1 (app icon replaces ☰)?
 2. Inside a bApp, should the Wallet slot show the app's holdings only, or app holdings with a link

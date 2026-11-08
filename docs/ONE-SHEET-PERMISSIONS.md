@@ -10,6 +10,7 @@ Status: PLAN. Nothing has been built yet.
 ## 1. The rule
 
 **One action, one sheet, one tap.**
+
 - **Connect**: one sheet that lists everything the app asks for. Each line is ticked by default and can be unticked. One button: **Connect**.
 - **Pay**: one sheet with the amount, who gets it and what it's for. One button: **Pay**.
 - **Connect and pay**: one sheet with both. One button: **Connect & pay**.
@@ -18,18 +19,19 @@ Status: PLAN. Nothing has been built yet.
 
 ## 2. What happens today (verified in code)
 
-| Cause | Where | Effect |
-|---|---|---|
-| One callback per permission type | `src/background.ts` `bindPermissionCallbacks`: protocol, basket, certificate and spending each call `showPermissionPrompt` | A single `createAction` can raise 2–4 prompts in a row (spend + basket + protocol for the token + counterparty) |
-| The grouped sheet only appears when the site publishes a BRC-73 `manifest.json` | `onGroupedPermissionRequested` → `GroupedPermissionRequest.tsx` | Almost no site does, so the one good sheet is rarely seen |
-| 1Sat asset modules have their own prompt | `createAssetPermissionModules` → `OneSatPermissionRequest.tsx` | Another sheet on top for ordinals and BSV-21 |
-| Counterparty pacts have a separate prompt | `CounterpartyPermissionRequest.tsx` | One more |
-| Window or panel | `showPromptUi`: the side panel only if it's **already open**, otherwise `chrome.windows.create` popup (392×567) | Usually a separate Yours-style window |
-| The spending line is unticked by default in the grouped sheet | `GroupedPermissionRequest.tsx` `spendingChecked = false` | Even after the grouped sheet, the first payment prompts again |
+| Cause                                                                           | Where                                                                                                                      | Effect                                                                                                          |
+| ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| One callback per permission type                                                | `src/background.ts` `bindPermissionCallbacks`: protocol, basket, certificate and spending each call `showPermissionPrompt` | A single `createAction` can raise 2–4 prompts in a row (spend + basket + protocol for the token + counterparty) |
+| The grouped sheet only appears when the site publishes a BRC-73 `manifest.json` | `onGroupedPermissionRequested` → `GroupedPermissionRequest.tsx`                                                            | Almost no site does, so the one good sheet is rarely seen                                                       |
+| 1Sat asset modules have their own prompt                                        | `createAssetPermissionModules` → `OneSatPermissionRequest.tsx`                                                             | Another sheet on top for ordinals and BSV-21                                                                    |
+| Counterparty pacts have a separate prompt                                       | `CounterpartyPermissionRequest.tsx`                                                                                        | One more                                                                                                        |
+| Window or panel                                                                 | `showPromptUi`: the side panel only if it's **already open**, otherwise `chrome.windows.create` popup (392×567)            | Usually a separate Yours-style window                                                                           |
+| The spending line is unticked by default in the grouped sheet                   | `GroupedPermissionRequest.tsx` `spendingChecked = false`                                                                   | Even after the grouped sheet, the first payment prompts again                                                   |
 
 ## 3. The design
 
 ### 3a. Merge window (background)
+
 - Requests from the same origin within **~400 ms** (and every request a single
   `createAction` / `connect` call triggers) go into one **pending bundle**, not separate prompts.
 - When the bundle settles, show **one** grouped sheet built from it, using the existing
@@ -41,6 +43,7 @@ Status: PLAN. Nothing has been built yet.
   queueing a new window.
 
 ### 3b. A grouped sheet for every site
+
 - If the site has no `manifest.json`, the wallet **builds** the list from the bundle, plus a
   standard **connect set**:
   - identity key
@@ -52,6 +55,7 @@ Status: PLAN. Nothing has been built yet.
   bChatX and TokenBlaster adopt it first.
 
 ### 3c. Sheet layout (one screen, no scrolling for the common case)
+
 ```
 [app icon]  bmovies.app wants to connect
   ✓ See your name and identity key
@@ -63,6 +67,7 @@ Status: PLAN. Nothing has been built yet.
 [ Deny ]                       [ Connect & pay ]
   ▸ Details (protocol IDs, baskets, counterparty, raw sats)
 ```
+
 - Plain words first. The protocol, basket and certificate names go in **Details**.
 - Risky permissions are **never** pre-ticked and get a red line:
   - spending over the cap
@@ -72,6 +77,7 @@ Status: PLAN. Nothing has been built yet.
 - The same component is used on extension, web and mobile.
 
 ### 3d. Always inside the wallet
+
 - **Extension:** `chrome.sidePanel.open` needs a user gesture, and a site's button click
   doesn't always count. Order of attempts:
   1. If the panel is open, show the sheet there (as today).
@@ -114,6 +120,7 @@ own look being consistent everywhere (extension, phone, web, bApps), not from co
    allowance = 0 sheets.
 
 Tests:
+
 - Unit tests for the bundler, covering grouping, a partial untick and requests arriving
   mid-sheet.
 - A Playwright test on the test site: one sheet per action, no `chrome.windows.create` call.

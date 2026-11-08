@@ -14,12 +14,13 @@ their preferred 'b' context? Assuming that they start with bWalletX and everythi
 inside bweb': their personal 'web on bitcoin', where agents build it for them however they like... as
 long as they pay?"
 
-**bWeb** is the name for *your* set of bApps as you have shaped them: which apps sit in your bar, how
+**bWeb** is the name for _your_ set of bApps as you have shaped them: which apps sit in your bar, how
 each one looks, what its feed shows, the small tools b built for you, and any personal versions of
 apps b forked for you. It lives inside bWalletX and follows your wallet to every device.
 
 Facts it rests on:
-- Every bApp except bChat (server) and bMovies is open source (MIT) and has a token planned ($b*,
+
+- Every bApp except bChat (server) and bMovies is open source (MIT) and has a token planned ($b\*,
   1B supply). Spot check 8 Oct: bitcoin-writer, bitcoin-music, bitcoin-spreadsheet, bitcoin-art,
   bitcoin-books are all PUBLIC on `bitcoin-apps-suite`.
 - bApps already describe themselves with `/.well-known/bapp.json` (BAPP-SHELL §2) and run framed
@@ -28,18 +29,18 @@ Facts it rests on:
 
 ## 2. Three layers
 
-| Layer | What you get | Who does it | Cost | Time |
-|---|---|---|---|---|
-| 1. Settings | Your overrides of each app's bapp.json: bar order, slots, feeds, theme, Like amount and cap | You, in a settings screen | Free | Instant |
-| 2. Ask b | b edits your config, or builds a small sandboxed view/plugin inside the app's frame | b (small paid job) | XS tier (~$1–10) | Minutes |
-| 3. Your own fork | b forks the open-source bApp into your own version with its own preview URL | b (pay-b-to-build job) | S/M tier ($40–150) + daily hosting from a pot | Hours to days |
+| Layer            | What you get                                                                                | Who does it               | Cost                                          | Time          |
+| ---------------- | ------------------------------------------------------------------------------------------- | ------------------------- | --------------------------------------------- | ------------- |
+| 1. Settings      | Your overrides of each app's bapp.json: bar order, slots, feeds, theme, Like amount and cap | You, in a settings screen | Free                                          | Instant       |
+| 2. Ask b         | b edits your config, or builds a small sandboxed view/plugin inside the app's frame         | b (small paid job)        | XS tier (~$1–10)                              | Minutes       |
+| 3. Your own fork | b forks the open-source bApp into your own version with its own preview URL                 | b (pay-b-to-build job)    | S/M tier ($40–150) + daily hosting from a pot | Hours to days |
 
 Each layer is a superset of the one before; most users never leave layer 1.
 
 ### Layer 1: Settings, no code
 
-User story: *"I want bWriter's Feed to show only poetry, Like to cost 1¢ and never more than 50¢ a
-day, and bMusic before bArt in my bar."*
+User story: _"I want bWriter's Feed to show only poetry, Like to cost 1¢ and never more than 50¢ a
+day, and bMusic before bArt in my bar."_
 
 ```
 ┌─────────────────────────────┐
@@ -56,11 +57,12 @@ day, and bMusic before bArt in my bar."*
 │ (b) "Ask b to change more"  │
 └─────────────────────────────┘
 ```
+
 Also a top-level "My bWeb" screen: the list of your bApps, drag to reorder, toggle on/off.
 
 ### Layer 2: Ask b (small paid job)
 
-User story: *"b, add a word-count goal widget to bWriter that turns gold at 1,000 words."*
+User story: _"b, add a word-count goal widget to bWriter that turns gold at 1,000 words."_
 
 ```
  You ▸ add a word-count goal widget to bWriter
@@ -73,12 +75,13 @@ User story: *"b, add a word-count goal widget to bWriter that turns gold at 1,00
        └─────────────────────────────────┘
  b   ▸ Done. Live in bWriter → drawer → Word goal. [Undo]
 ```
+
 Small jobs are config edits (free of code risk) or plugins under the sandbox in §4. Undo = remove the
 entry from your config.
 
 ### Layer 3: Your own fork (pay-b-to-build)
 
-User story: *"I want bMusic with a DJ-crossfade mode. Make me my own version."*
+User story: _"I want bMusic with a DJ-crossfade mode. Make me my own version."_
 
 ```
  b ▸ ┌ Quote: your bMusic fork ───────────┐
@@ -90,6 +93,7 @@ User story: *"I want bMusic with a DJ-crossfade mode. Make me my own version."*
      └────────────────────────────────────┘
  b ▸ Preview: https://bmusic--alice.bweb.site  [Open] [Make default]
 ```
+
 "Make default" swaps the tile in your bWeb to your fork. Upstream PR offered; if merged you get
 build-pool tokens as a funder (§6).
 
@@ -120,6 +124,7 @@ source; your file only says what differs.
 ```
 
 Rules:
+
 - Overrides only touch fields the app allows (`bapp.json` gets an `overridable` list). Slots stay
   same-origin paths, as in BAPP-SHELL. Fork origins must be on our fork domain.
 - Signed by the wallet identity key (BRC-100 `createSignature`); the wallet ignores a config whose
@@ -137,29 +142,29 @@ Rules:
 
 Plugins are small HTML/JS bundles b writes, stored content-addressed (`sha256`) on our CDN.
 
-| Guard | How |
-|---|---|
-| Separate origin | Served from `plugins.bweb.site/<sha>` (never the app's or wallet's origin) |
-| iframe sandbox | `sandbox="allow-scripts"` only: no same-origin, forms, popups, top navigation |
-| CSP | `default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'` |
-| No keys | Plugins never get BRC-100. They speak a tiny `bweb:*` postMessage API to the wallet only |
+| Guard             | How                                                                                                                                                                                     |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Separate origin   | Served from `plugins.bweb.site/<sha>` (never the app's or wallet's origin)                                                                                                              |
+| iframe sandbox    | `sandbox="allow-scripts"` only: no same-origin, forms, popups, top navigation                                                                                                           |
+| CSP               | `default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'`                                                                     |
+| No keys           | Plugins never get BRC-100. They speak a tiny `bweb:*` postMessage API to the wallet only                                                                                                |
 | Capability grants | Declared in config (`grants`) and shown on the quote. Examples: `doc.length.read`, `feed.items.read`, `ui.badge.write`. The host app exposes these; the wallet relays only granted ones |
-| Payments | Plugin can *ask* (`bweb:requestPayment {sats, memo}`); the wallet shows its own approval sheet; per-plugin daily cap; default off |
-| Checks | b's output passes a static scan (no `eval`, no network, size limit) and a reviewer bot before it goes live; owner review for anything asking for payment |
+| Payments          | Plugin can _ask_ (`bweb:requestPayment {sats, memo}`); the wallet shows its own approval sheet; per-plugin daily cap; default off                                                       |
+| Checks            | b's output passes a static scan (no `eval`, no network, size limit) and a reviewer bot before it goes live; owner review for anything asking for payment                                |
 
 Same message rules as BAPP-FRAME: exact source window, exact origin, allowlisted message names.
 
 ## 5. Forks
 
-| Topic | Plan |
-|---|---|
-| Where code lives | GitHub org `bweb-forks`, repo `<user>-<app>`, MIT kept, upstream link in README |
-| Hosting | One Vercel project per fork on `<app>--<handle>.bweb.site`; preview URL per PR |
-| Who pays | A **hosting pot** (POTS plan): default 1¢/day per fork. Pot empty for 30 days → fork paused (code kept, URL shows "paused") |
-| Updates | Nightly rebase bot: rebase on upstream; tests pass → auto-deploy; conflict → b offers a priced fix job, or you stay pinned |
-| Upstream | Every change b makes is offered as an upstream PR first (pay-b-to-build §7 "forks paying upstream"). Merged → you are recorded as funder |
-| Attribution | `Co-Authored-By` with your verified GitHub login if linked; on-chain job receipt (quote hash, escrow txid, PR, merge commit) |
-| Closed parts | bChat server, bit-sign server, keys/payments/escrow, bMovies (unless opened) never fork. bMovies is config-only (layer 1–2) |
+| Topic            | Plan                                                                                                                                     |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Where code lives | GitHub org `bweb-forks`, repo `<user>-<app>`, MIT kept, upstream link in README                                                          |
+| Hosting          | One Vercel project per fork on `<app>--<handle>.bweb.site`; preview URL per PR                                                           |
+| Who pays         | A **hosting pot** (POTS plan): default 1¢/day per fork. Pot empty for 30 days → fork paused (code kept, URL shows "paused")              |
+| Updates          | Nightly rebase bot: rebase on upstream; tests pass → auto-deploy; conflict → b offers a priced fix job, or you stay pinned               |
+| Upstream         | Every change b makes is offered as an upstream PR first (pay-b-to-build §7 "forks paying upstream"). Merged → you are recorded as funder |
+| Attribution      | `Co-Authored-By` with your verified GitHub login if linked; on-chain job receipt (quote hash, escrow txid, PR, merge commit)             |
+| Closed parts     | bChat server, bit-sign server, keys/payments/escrow, bMovies (unless opened) never fork. bMovies is config-only (layer 1–2)              |
 
 ## 6. Tokens
 
@@ -178,6 +183,7 @@ Same message rules as BAPP-FRAME: exact source window, exact origin, allowlisted
 ## 7. Flagship: friend movies
 
 The best demo of "your web, built by b, if you pay" (pay-b-to-build §11b):
+
 1. In your friend-group room inside bWalletX: "b, a heist movie starring me, Sam and Priya, in Lisbon."
 2. b quotes; cast = people who must consent. Each signs their own per-film consent in their own wallet.
 3. Room crowdfunds into escrow. bMovies agent produces; progress cards in the room.
@@ -190,49 +196,51 @@ views, not forks.
 
 ## 8. Which bApps first
 
-| bApp | Why | Layers |
-|---|---|---|
-| **bWriter** (`bitcoin-writer`, public, Live) | Clear personal value (themes, feed of writing, small widgets); simple codebase to fork | 1, 2, 3 |
-| **bSheets** (`bitcoin-spreadsheet`, public, Live) | Plugins are natural (custom functions, charts); forks for teams | 1, 2, 3 |
-| **bMovies** (closed) | Owner's flagship; friend movies | 1 only at first, then 2 |
+| bApp                                              | Why                                                                                    | Layers                  |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------- | ----------------------- |
+| **bWriter** (`bitcoin-writer`, public, Live)      | Clear personal value (themes, feed of writing, small widgets); simple codebase to fork | 1, 2, 3                 |
+| **bSheets** (`bitcoin-spreadsheet`, public, Live) | Plugins are natural (custom functions, charts); forks for teams                        | 1, 2, 3                 |
+| **bMovies** (closed)                              | Owner's flagship; friend movies                                                        | 1 only at first, then 2 |
 
 bMusic is the next fork candidate once the first two work.
 
 ## 9. Safety and abuse
 
-| Risk | Answer |
-|---|---|
-| Plugin steals keys or money | No BRC-100 in plugins; separate origin; CSP with no network; payments only via wallet sheet with caps |
+| Risk                                            | Answer                                                                                                                                                                                                                                                 |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Plugin steals keys or money                     | No BRC-100 in plugins; separate origin; CSP with no network; payments only via wallet sheet with caps                                                                                                                                                  |
 | Fork used for phishing ("bWalletX login" clone) | Forks live only on `*.bweb.site` with a visible "personal fork by $handle" banner; wallet shows fork origin in the top bar; takedown in one click from the registry; forks can't touch the wallet's `bapp:*` slot messages without the manifest origin |
-| Harmful user-built views shared publicly | Personal by default; sharing a plugin/fork publicly needs review and report button; content rules as bChat |
-| Spam jobs / cost blowouts | Quote first, escrow, daily caps, per-user job limit |
-| Store edition (iOS/Play) | Store edition shows layer 1 and installed plugins only; buying layer 2/3 jobs happens on the web/extension (no in-app purchase of digital code). Forks open as web content in the browser, not as new "apps" |
-| Data leaks via config | Config is encrypted to the user; apps never see it |
+| Harmful user-built views shared publicly        | Personal by default; sharing a plugin/fork publicly needs review and report button; content rules as bChat                                                                                                                                             |
+| Spam jobs / cost blowouts                       | Quote first, escrow, daily caps, per-user job limit                                                                                                                                                                                                    |
+| Store edition (iOS/Play)                        | Store edition shows layer 1 and installed plugins only; buying layer 2/3 jobs happens on the web/extension (no in-app purchase of digital code). Forks open as web content in the browser, not as new "apps"                                           |
+| Data leaks via config                           | Config is encrypted to the user; apps never see it                                                                                                                                                                                                     |
 
 ## 10. Costs and pricing
 
-| Item | Price | Our cost |
-|---|---|---|
-| Layer 1 | Free | Tiny (encrypted blob storage) |
-| Layer 2 plugin / config job | XS: 1¢–$10 by size | $0.05–3 Claude |
-| Layer 3 fork + change | S $40 / M $150 (pay-b-to-build tiers) | $5–60 Claude + review |
-| Fork hosting | 1¢/day from a pot | Vercel hobby-ish per project; watch project limits |
-| Rebase conflict fix | XS/S job | as above |
+| Item                        | Price                                 | Our cost                                           |
+| --------------------------- | ------------------------------------- | -------------------------------------------------- |
+| Layer 1                     | Free                                  | Tiny (encrypted blob storage)                      |
+| Layer 2 plugin / config job | XS: 1¢–$10 by size                    | $0.05–3 Claude                                     |
+| Layer 3 fork + change       | S $40 / M $150 (pay-b-to-build tiers) | $5–60 Claude + review                              |
+| Fork hosting                | 1¢/day from a pot                     | Vercel hobby-ish per project; watch project limits |
+| Rebase conflict fix         | XS/S job                              | as above                                           |
+
 Platform fee 1% to `$bitsign` as in pay-b-to-build. Check current Claude prices before fixing tiers.
 
 ## 11. Phases
 
-| # | Ship | Effort |
-|---|------|--------|
-| 0 | This doc; owner answers §12 | done |
-| 1 | Layer 1: `overridable` in bapp.json schema; per-user config (sign, encrypt, store, sync); "Make it yours" sheet + "My bWeb" list; wallet applies theme/slots/feed/Like to framed bApps. bWriter first | 4–5 days (needs BAPP-SHELL phases 1 and 3) |
-| 2 | b edits config by chat (free/XS): "put bMusic first", "Like 2¢" | 1–2 days |
-| 3 | Plugin sandbox host (`plugins.bweb.site`, CSP, `bweb:*` API, grants) + bWriter/bSheets grant sets | 4–5 days |
-| 4 | b builds plugins as XS jobs (quote → pay → scan → live) | 3–4 days |
-| 5 | Forks: `bweb-forks` org, per-fork Vercel + preview URL, hosting pot, "make default" | 5–7 days (after pay-b-to-build phases 1–2) |
-| 6 | Rebase bot + upstream PR flow + build-pool funder transfers | 3–4 days |
-| 7 | Build rooms gated by bApp tokens; roadmap ranking | 2–3 days (reuses ballot work) |
-| 8 | Friend movies in rooms (pay-b-to-build §11b) | per that plan |
+| #   | Ship                                                                                                                                                                                                  | Effort                                     |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| 0   | This doc; owner answers §12                                                                                                                                                                           | done                                       |
+| 1   | Layer 1: `overridable` in bapp.json schema; per-user config (sign, encrypt, store, sync); "Make it yours" sheet + "My bWeb" list; wallet applies theme/slots/feed/Like to framed bApps. bWriter first | 4–5 days (needs BAPP-SHELL phases 1 and 3) |
+| 2   | b edits config by chat (free/XS): "put bMusic first", "Like 2¢"                                                                                                                                       | 1–2 days                                   |
+| 3   | Plugin sandbox host (`plugins.bweb.site`, CSP, `bweb:*` API, grants) + bWriter/bSheets grant sets                                                                                                     | 4–5 days                                   |
+| 4   | b builds plugins as XS jobs (quote → pay → scan → live)                                                                                                                                               | 3–4 days                                   |
+| 5   | Forks: `bweb-forks` org, per-fork Vercel + preview URL, hosting pot, "make default"                                                                                                                   | 5–7 days (after pay-b-to-build phases 1–2) |
+| 6   | Rebase bot + upstream PR flow + build-pool funder transfers                                                                                                                                           | 3–4 days                                   |
+| 7   | Build rooms gated by bApp tokens; roadmap ranking                                                                                                                                                     | 2–3 days (reuses ballot work)              |
+| 8   | Friend movies in rooms (pay-b-to-build §11b)                                                                                                                                                          | per that plan                              |
+
 Each phase ships on its own; stop after any one and the earlier ones still work.
 
 **First build step:** add `overridable` to the bapp.json schema in `@bwalletx/connect/shell` and

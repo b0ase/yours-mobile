@@ -17,20 +17,20 @@ Both are separate repos. They open inside bWalletX through the bApp shell and ne
 
 ## 0. What already exists (read before building)
 
-| Thing | Where | What we reuse |
-|---|---|---|
-| bApp shell: five slots, manifest, `<bwalletx-bar>`, `<bwalletx-topbar>`, `<bwalletx-drawer>` | `bwalletx-connect` (`docs/SHELL-PROTOCOL.md`, `schema/bapp.schema.json`, `validateManifest()`); `docs/bapp-shell` branch `BAPP-SHELL.md` | Manifest at `/.well-known/bapp.json`, slots never hidden (greyed when `enabled:false`), ☰ + app icon top-left |
-| In-frame bApps | `docs/BAPP-FRAME.md` | BRC-100 over XDM (`new WalletClient('auto')`), CSP `frame-ancestors` for `capacitor://localhost https://localhost` |
-| bit-sign document vault | `bit-sign/src/lib/document-vault.ts` | Random envelope key → AES-256-GCM; envelope key wrapped per reader (self-grant + grants). Note: all 208 existing docs are `encryption_version: 0` (plaintext) |
-| Sealing signed instruments | `bit-sign/src/lib/vault-encryption-server.ts`, `docs/SIGN-AND-SEAL-PLAN.md` | Sign in the clear, then encrypt to the signers and put the hash on chain |
-| Recovery without the platform | `bit-sign/docs/SCOPE-2026-09-10-document-recovery-envelope.md`, `DESIGN-privacy-and-key-custody.md` | Lesson: today opening a doc needs four rows in our Postgres. bVault must not repeat that |
-| bit-sign "Bit-Trust" | `bit-sign/docs/PRD-bit-trust-on-chain-dissolution-encryption.md`, `SPEC-bit-trust-artefacts.md` | Multi-sig trusts with trustees, on-chain creation deed, role-encrypted entries (trustees / beneficiaries / observers), dissolution. Same idea of roles; different job (a live container, not an estate plan) |
-| Escrow release models | `bit-sign/docs/ESCROW-DESIGN.md` | `2of2-timeout`, `2of3-arbiter`, CLTV branches; the shape for a later on-chain heir lock |
-| Lock BSV | `docs/TIME-LOCK-PLAN.md` | 1Sat `Lock` template: owner-only after a height. Locks to the owner, so it cannot pay an heir by itself |
-| Pots | `docs/POTS-SUBSCRIPTIONS-PLAN.md` | Pre-signed payments pattern |
-| USB key | `docs/usb-key-security.md` | "USB key", never "hardware wallet"; possession factor only |
-| bMail contracts | `docs/bmail` branch `BMAIL.md` §4a | Signed `.nds.html` contracts, sealed to the recipient; "file to vault" lands in bVault |
-| b0ase "bit-trust" | `b0ase.com/docs/BIT_TRUST_AND_ECOSYSTEM_DESIGN.md` | A token trust fund for grants. **Name clash only**; unrelated to bTrust |
+| Thing                                                                                        | Where                                                                                                                                    | What we reuse                                                                                                                                                                                                |
+| -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| bApp shell: five slots, manifest, `<bwalletx-bar>`, `<bwalletx-topbar>`, `<bwalletx-drawer>` | `bwalletx-connect` (`docs/SHELL-PROTOCOL.md`, `schema/bapp.schema.json`, `validateManifest()`); `docs/bapp-shell` branch `BAPP-SHELL.md` | Manifest at `/.well-known/bapp.json`, slots never hidden (greyed when `enabled:false`), ☰ + app icon top-left                                                                                               |
+| In-frame bApps                                                                               | `docs/BAPP-FRAME.md`                                                                                                                     | BRC-100 over XDM (`new WalletClient('auto')`), CSP `frame-ancestors` for `capacitor://localhost https://localhost`                                                                                           |
+| bit-sign document vault                                                                      | `bit-sign/src/lib/document-vault.ts`                                                                                                     | Random envelope key → AES-256-GCM; envelope key wrapped per reader (self-grant + grants). Note: all 208 existing docs are `encryption_version: 0` (plaintext)                                                |
+| Sealing signed instruments                                                                   | `bit-sign/src/lib/vault-encryption-server.ts`, `docs/SIGN-AND-SEAL-PLAN.md`                                                              | Sign in the clear, then encrypt to the signers and put the hash on chain                                                                                                                                     |
+| Recovery without the platform                                                                | `bit-sign/docs/SCOPE-2026-09-10-document-recovery-envelope.md`, `DESIGN-privacy-and-key-custody.md`                                      | Lesson: today opening a doc needs four rows in our Postgres. bVault must not repeat that                                                                                                                     |
+| bit-sign "Bit-Trust"                                                                         | `bit-sign/docs/PRD-bit-trust-on-chain-dissolution-encryption.md`, `SPEC-bit-trust-artefacts.md`                                          | Multi-sig trusts with trustees, on-chain creation deed, role-encrypted entries (trustees / beneficiaries / observers), dissolution. Same idea of roles; different job (a live container, not an estate plan) |
+| Escrow release models                                                                        | `bit-sign/docs/ESCROW-DESIGN.md`                                                                                                         | `2of2-timeout`, `2of3-arbiter`, CLTV branches; the shape for a later on-chain heir lock                                                                                                                      |
+| Lock BSV                                                                                     | `docs/TIME-LOCK-PLAN.md`                                                                                                                 | 1Sat `Lock` template: owner-only after a height. Locks to the owner, so it cannot pay an heir by itself                                                                                                      |
+| Pots                                                                                         | `docs/POTS-SUBSCRIPTIONS-PLAN.md`                                                                                                        | Pre-signed payments pattern                                                                                                                                                                                  |
+| USB key                                                                                      | `docs/usb-key-security.md`                                                                                                               | "USB key", never "hardware wallet"; possession factor only                                                                                                                                                   |
+| bMail contracts                                                                              | `docs/bmail` branch `BMAIL.md` §4a                                                                                                       | Signed `.nds.html` contracts, sealed to the recipient; "file to vault" lands in bVault                                                                                                                       |
+| b0ase "bit-trust"                                                                            | `b0ase.com/docs/BIT_TRUST_AND_ECOSYSTEM_DESIGN.md`                                                                                       | A token trust fund for grants. **Name clash only**; unrelated to bTrust                                                                                                                                      |
 
 ## 1. Shared rules for both bApps
 
@@ -75,12 +75,12 @@ seed phrases, hardware-wallet backups, 2FA recovery codes) they can't afford to 
 
 ### Data model
 
-| Record | Fields | Where |
-|---|---|---|
-| `vault_item` | id, owner identity pubkey, kind (`file`/`note`/`backup`), encrypted metadata (name, tags, mime), blob ref, size, created, updated, optional `stamp_txid` | Postgres (our server) |
-| blob | AES-256-GCM ciphertext + IV | object store; optional UHRP copy |
-| `item_key` | content key wrapped (BRC-2) to the owner; later also to bTrust recipients | Postgres |
-| `vault_index` | encrypted list of item ids + names for fast search | Postgres, one per user |
+| Record        | Fields                                                                                                                                                   | Where                            |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| `vault_item`  | id, owner identity pubkey, kind (`file`/`note`/`backup`), encrypted metadata (name, tags, mime), blob ref, size, created, updated, optional `stamp_txid` | Postgres (our server)            |
+| blob          | AES-256-GCM ciphertext + IV                                                                                                                              | object store; optional UHRP copy |
+| `item_key`    | content key wrapped (BRC-2) to the owner; later also to bTrust recipients                                                                                | Postgres                         |
+| `vault_index` | encrypted list of item ids + names for fast search                                                                                                       | Postgres, one per user           |
 
 Server sees: who owns how many items, sizes, dates. Not names, not content.
 
@@ -98,11 +98,11 @@ Server sees: who owns how many items, sizes, dates. Not names, not content.
   "icon": "/icon.png",
   "home": "/",
   "slots": {
-    "wallet":   { "enabled": true,  "path": "/storage" },
+    "wallet": { "enabled": true, "path": "/storage" },
     "exchange": { "enabled": false },
-    "b":        { "enabled": true },
-    "feed":     { "enabled": false },
-    "chat":     { "enabled": false }
+    "b": { "enabled": true },
+    "feed": { "enabled": false },
+    "chat": { "enabled": false }
   },
   "drawer": [
     { "label": "Vault", "path": "/" },
@@ -126,7 +126,7 @@ has no market or public feed.
 ### Screens (v1)
 
 1. **My plan**: status (Active / Grace / Releasing / Released), next check-in due, list of releases.
-2. **Releases**: each says *what* (bVault items) → *who* (a $handle or identity key) → *when* (rule).
+2. **Releases**: each says _what_ (bVault items) → _who_ (a $handle or identity key) → _when_ (rule).
 3. **Rules**: dead-man's switch interval (e.g. 6 months), grace period (e.g. 30 days), reminders
    (push, bMail, email), and how many trustees must confirm (e.g. 2 of 3).
 4. **Trustees**: invite by $handle; each accepts by signing with their identity key.
@@ -148,12 +148,12 @@ Fixed-date releases ("give my daughter X on 1 Jan 2035") use the same path witho
 
 ### Data model
 
-| Record | Fields | Where |
-|---|---|---|
-| `plan` | id, owner pubkey, status, check-in interval, grace, threshold k, last check-in, version, optional `stamp_txid` | our server |
-| `release` | plan id, bVault item id, recipient pubkey, rule (`deadman`/`date`), held wrap (ciphertext) | our server |
-| `trustee` | plan id, pubkey, accepted signature, confirmations | our server |
-| `checkin` | plan id, signed timestamp | our server |
+| Record    | Fields                                                                                                         | Where      |
+| --------- | -------------------------------------------------------------------------------------------------------------- | ---------- |
+| `plan`    | id, owner pubkey, status, check-in interval, grace, threshold k, last check-in, version, optional `stamp_txid` | our server |
+| `release` | plan id, bVault item id, recipient pubkey, rule (`deadman`/`date`), held wrap (ciphertext)                     | our server |
+| `trustee` | plan id, pubkey, accepted signature, confirmations                                                             | our server |
+| `checkin` | plan id, signed timestamp                                                                                      | our server |
 
 ### Wallet use
 
@@ -170,11 +170,11 @@ stamps. Later: on-chain heir lock (phase T3).
   "icon": "/icon.png",
   "home": "/",
   "slots": {
-    "wallet":   { "enabled": true,  "path": "/assets" },
+    "wallet": { "enabled": true, "path": "/assets" },
     "exchange": { "enabled": false },
-    "b":        { "enabled": true },
-    "feed":     { "enabled": false },
-    "chat":     { "enabled": true,  "path": "/trustees" }
+    "b": { "enabled": true },
+    "feed": { "enabled": false },
+    "chat": { "enabled": true, "path": "/trustees" }
   },
   "drawer": [
     { "label": "My plan", "path": "/" },
@@ -213,18 +213,18 @@ in their real will. (Same caution as bit-sign: published is not audited.)
 
 ## 5. Threat model
 
-| Threat | Answer |
-|---|---|
-| Lost phone | Items are encrypted to wallet keys; restore the wallet seed on a new device and everything opens. Export recovery files are the backstop if we disappear |
-| Lost seed | We can't help, by design. Onboarding says so; recommend a paper or USB-key backup and, with bTrust, naming a trusted person |
-| Our server breached | Attacker gets ciphertext and wraps. bVault: nothing readable. bTrust: held wraps only open for the named recipients, so a breach could at worst cause an **early release to the right people**, not a leak to strangers |
-| Our server (or staff) releases early or never | v1 trusts our server for timing. Mitigate with trustee threshold, signed audit log, and T2: split release so trustees hold shares and our server can't release alone |
-| False death claim | A release needs: missed check-in **and** grace period **and** k of n trustee confirmations. Any check-in cancels |
-| Trustee collusion | Threshold > 1 and owner reminders throughout grace; trustees can only release what the owner chose to the people the owner chose, never to themselves unless named |
-| Coercion ("unlock your vault") | Out of scope for crypto. Later: a decoy vault / duress PIN as an option. Plan copy is honest about this |
-| Seed phrases / keys of other chains | Stored only as encrypted items; the template warns that opening one exposes it. We never use them. Balances come from the public address only |
-| Explorer lookups reveal holdings | User picks the provider, lookups from the device, several providers, balances can be turned off |
-| Malicious bApp page | The bApp never holds keys; every decrypt goes through the wallet's permission prompt keyed on origin |
+| Threat                                        | Answer                                                                                                                                                                                                                  |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Lost phone                                    | Items are encrypted to wallet keys; restore the wallet seed on a new device and everything opens. Export recovery files are the backstop if we disappear                                                                |
+| Lost seed                                     | We can't help, by design. Onboarding says so; recommend a paper or USB-key backup and, with bTrust, naming a trusted person                                                                                             |
+| Our server breached                           | Attacker gets ciphertext and wraps. bVault: nothing readable. bTrust: held wraps only open for the named recipients, so a breach could at worst cause an **early release to the right people**, not a leak to strangers |
+| Our server (or staff) releases early or never | v1 trusts our server for timing. Mitigate with trustee threshold, signed audit log, and T2: split release so trustees hold shares and our server can't release alone                                                    |
+| False death claim                             | A release needs: missed check-in **and** grace period **and** k of n trustee confirmations. Any check-in cancels                                                                                                        |
+| Trustee collusion                             | Threshold > 1 and owner reminders throughout grace; trustees can only release what the owner chose to the people the owner chose, never to themselves unless named                                                      |
+| Coercion ("unlock your vault")                | Out of scope for crypto. Later: a decoy vault / duress PIN as an option. Plan copy is honest about this                                                                                                                 |
+| Seed phrases / keys of other chains           | Stored only as encrypted items; the template warns that opening one exposes it. We never use them. Balances come from the public address only                                                                           |
+| Explorer lookups reveal holdings              | User picks the provider, lookups from the device, several providers, balances can be turned off                                                                                                                         |
+| Malicious bApp page                           | The bApp never holds keys; every decrypt goes through the wallet's permission prompt keyed on origin                                                                                                                    |
 
 ## 6. BTC, Solana and other chains
 
@@ -254,12 +254,12 @@ Owner: generate fresh BTC / Solana keys, put money in, and lock them so they are
 A BSV timelock on an encrypted key proves only that the encrypted copy wasn't released early. So "provable" must come
 from each chain's own lock, which binds even the key holder:
 
-| Chain | Native lock | bVault's part |
-|---|---|---|
-| BTC | `OP_CHECKLOCKTIMEVERIFY` address (block height or date) | Builds the locked address on the device; user funds it; anyone can verify on any explorer |
-| Solana | Stake account **lockup** (epoch/date) | Stake with lockup: provably locked, earns staking rewards meanwhile |
-| ETH / EVM | Minimal audited timelock contract | Deposit; withdrawable only after the date |
-| BSV | Existing Lock BSV | As today |
+| Chain     | Native lock                                             | bVault's part                                                                             |
+| --------- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| BTC       | `OP_CHECKLOCKTIMEVERIFY` address (block height or date) | Builds the locked address on the device; user funds it; anyone can verify on any explorer |
+| Solana    | Stake account **lockup** (epoch/date)                   | Stake with lockup: provably locked, earns staking rewards meanwhile                       |
+| ETH / EVM | Minimal audited timelock contract                       | Deposit; withdrawable only after the date                                                 |
+| BSV       | Existing Lock BSV                                       | As today                                                                                  |
 
 - bVault stores the unlock details (key + lock script / account / contract) as an encrypted item, with a watch-only
   balance (§6).
@@ -272,17 +272,17 @@ from each chain's own lock, which binds even the key holder:
 
 ## 7. Phases (smallest first)
 
-| Phase | What ships |
-|---|---|
-| **V1** | bVault: upload files, backup-note templates, list/search/view, export recovery file, inside bWalletX via the shell |
-| V1b | Other-chain key items + watch-only balance from the public address/xpub (BTC, Solana first) |
-| V1c | Timelocked savings on any chain (§6a): BTC CLTV address, Solana stake lockup, EVM timelock; lock terms hashed on BSV; optional tlock "sealed until" |
-| V2 | bMail "file to vault" Inbox; optional hash stamp; UHRP mirror |
-| V3 | bit-sign vault migration |
-| **T1** | bTrust: dead-man's switch releasing chosen bVault items to named people, with grace and k-of-n trustees |
-| T2 | Fixed-date releases; split release so trustees hold shares (our server can't release alone); signed audit log |
-| T3 | Coins: an on-chain heir lock (owner can spend any time; heir after a height; owner refreshes by re-locking). New script in the ESCROW-DESIGN style, tested like TIME-LOCK-PLAN |
-| Later | Duress/decoy vault; shared family vaults; separate multi-chain wallet bApp if wanted |
+| Phase  | What ships                                                                                                                                                                     |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **V1** | bVault: upload files, backup-note templates, list/search/view, export recovery file, inside bWalletX via the shell                                                             |
+| V1b    | Other-chain key items + watch-only balance from the public address/xpub (BTC, Solana first)                                                                                    |
+| V1c    | Timelocked savings on any chain (§6a): BTC CLTV address, Solana stake lockup, EVM timelock; lock terms hashed on BSV; optional tlock "sealed until"                            |
+| V2     | bMail "file to vault" Inbox; optional hash stamp; UHRP mirror                                                                                                                  |
+| V3     | bit-sign vault migration                                                                                                                                                       |
+| **T1** | bTrust: dead-man's switch releasing chosen bVault items to named people, with grace and k-of-n trustees                                                                        |
+| T2     | Fixed-date releases; split release so trustees hold shares (our server can't release alone); signed audit log                                                                  |
+| T3     | Coins: an on-chain heir lock (owner can spend any time; heir after a height; owner refreshes by re-locking). New script in the ESCROW-DESIGN style, tested like TIME-LOCK-PLAN |
+| Later  | Duress/decoy vault; shared family vaults; separate multi-chain wallet bApp if wanted                                                                                           |
 
 ## 8. Owner answers (9 Oct)
 
