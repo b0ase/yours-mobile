@@ -939,11 +939,14 @@ function makeHandlers({
     for (let i = 0; i < 2; i++) {
       if (await store.holdForward(row)) return { created: true, expiresAt };
       if (await store.repointOwnForward(from, key, to, { expiresAt })) return { created: false, expiresAt };
-      // Another key's forward from a live row of ours can only be an expired leftover: drop exactly that row and
-      // try once more. Anything else (a live forward of another key) refuses the rename.
+      // A forward of ANOTHER key from a name whose row is ours is stale, expired or not: a leftover from before a
+      // handover (or a database edit). Re-check the row, drop exactly that forward and try once more. If the row is
+      // not ours (any more), refuse.
       const fw = await store.getForward(from).catch(() => null);
       if (!fw) continue;
-      if (!(fw.expires_at && Date.parse(fw.expires_at) <= now())) break;
+      if (String(fw.identity_key).toLowerCase() === key) continue;
+      const owned = await store.getAlias(from).catch(() => null);
+      if (!owned || String(owned.identity_key).toLowerCase() !== key) break;
       await store.deleteOwnForward(from, fw.identity_key, { to: fw.to_alias, expiresAt: fw.expires_at });
     }
     return null;
@@ -1206,9 +1209,20 @@ function makeHandlers({
       const row = await store.getAlias(alias);
       if (!row || String(row.identity_key).toLowerCase() !== h.from_key)
         return [409, { error: 'The name changed hands since the release' }];
-      // Explicit: moves only while the name still points at the releasing key (no blind PATCH by alias).
-      if (!(await store.moveAlias(alias, to, h.from_key)))
-        return [409, { error: 'The name changed hands since the release' }];
+      // Explicit: moves only while the name still points at the releasing key (no blind PATCH by alias). A refused
+      // move spends the handover (the release no longer matches the name); a move that FAILED (an error) puts the
+      // claimed handover back, unless a new one was written meanwhile, so the recipient can accept again.
+      let moved;
+      try {
+        moved = await store.moveAlias(alias, to, h.from_key);
+      } catch (e) {
+        await store.restoreHandover?.(h).catch(() => {});
+        throw e;
+      }
+      if (!moved) return [409, { error: 'The name changed hands since the release' }];
+      // The name now belongs to `to`: forwards the old owner still held from it (rename holds, removed-name
+      // forwards) are dropped, or they would block the new owner's own rename and outlive an unlink.
+      await store.deleteForward?.(alias);
       const b = {
         alias,
         identity_key: to,
@@ -1578,6 +1592,9 @@ function makeHandlers({
       // From here a paid fee is recorded: any failure before the name is written puts the payment back (it can only
       // ever pay for this alias + this wallet, so releasing it is safe).
       let row;
+      let written = false; // the name write itself committed (a later error must not put the fee back)
+      let hold = null;
+      let holdFrom = null;
       try {
         const profile = {
           ord_address: f.ordAddress || null,
@@ -1607,20 +1624,26 @@ function makeHandlers({
           // (anti-impersonation, 28 Oct 2026) gets no forward: it stops resolving at once (only its designated
           // owner may claim a reserved name, so there is no window). Old forwards stay.
           const holdOld = !!store.holdForward && !reservedBase(mine.alias);
-          const hold = holdOld ? await holdName(mine.alias, alias, identityKey) : null;
+          holdFrom = mine.alias;
+          hold = holdOld ? await holdName(mine.alias, alias, identityKey) : null;
           if (holdOld && !hold) {
             await releaseNameFee(fee);
             return [409, { error: 'Your old name is busy. Try again in a moment.' }];
           }
           const renamed = await store.renameAlias(mine.alias, alias, identityKey);
           if (renamed !== 'ok') {
-            await dropHold(hold, mine.alias, alias, identityKey);
+            const h0 = hold;
+            hold = null;
+            await dropHold(h0, mine.alias, alias, identityKey);
             if (renamed === 'taken') return [409, await releaseNameFee(fee)];
             await releaseNameFee(fee);
             return [409, { error: 'Your name changed on another device. Reload and try again.' }];
           }
+          written = true;
           // This request won: the old name's hold points at this new name, whoever created it.
           if (holdOld) await store.repointOwnForward(mine.alias, identityKey, alias);
+          // A name taken fresh carries no signed binding of another wallet (darkasep112).
+          await store.deleteForeignBindings?.(alias, identityKey);
           if (store.putForward) {
             if (fwd) await store.deleteForward(alias);
             await store.retargetForwards?.(mine.alias, alias);
@@ -1630,11 +1653,18 @@ function makeHandlers({
         } else {
           row = await store.insertAlias({ kind, alias, identity_key: identityKey, ...profile });
           if (!row) return [409, await releaseNameFee(fee)];
+          written = true;
+          // A name taken fresh carries no signed binding of another wallet (darkasep112).
+          await store.deleteForeignBindings?.(alias, identityKey);
           // A held name of this wallet's own (renamed / removed < 90 days ago) is a live row again.
           if (fwd) await store.deleteForward?.(alias);
         }
       } catch (e) {
-        if (fee) await releaseNameFee(fee);
+        // Only while nothing was written: once the name is theirs, the fee paid for it.
+        if (!written) {
+          if (hold) await dropHold(hold, holdFrom, alias, identityKey).catch(() => {});
+          if (fee) await releaseNameFee(fee);
+        }
         throw e;
       }
       // Before migrations/20261024_paymail_ord_proof.sql runs there is no column: the name still registers, unproven.
@@ -1903,21 +1933,32 @@ function makeHandlers({
       // Priced by the name (owner, 27 Oct 2026): 5+ characters free, shorter ones paid and receipted.
       const paid = await payForName({ alias, key, body, kind: 'extra' });
       if (paid.error) return paid.error;
-      let row;
+      let written = false; // the name row committed: from then on the fee paid for it
       try {
-        row = await store.insertExtraAlias({ alias, identity_key: key });
-      } catch (e) {
-        // A plain INSERT: a clash means the name was just taken (or a pre-STEP B per-key index). Not consumed.
-        if (/supabase 409/.test(String(e && e.message))) {
-          const out = await releaseNameFee(paid.fee);
-          return [409, paid.fee ? out : { error: 'Could not add that name yet' }];
+        let row;
+        try {
+          row = await store.insertExtraAlias({ alias, identity_key: key });
+        } catch (e) {
+          // A plain INSERT: a clash means the name was just taken (or a pre-STEP B per-key index). Not consumed.
+          if (/supabase 409/.test(String(e && e.message))) {
+            const out = await releaseNameFee(paid.fee);
+            return [409, paid.fee ? out : { error: 'Could not add that name yet' }];
+          }
+          throw e;
         }
-        if (paid.fee) await releaseNameFee(paid.fee);
+        if (!row) {
+          if (paid.fee) await releaseNameFee(paid.fee);
+          return [500, { error: 'server-error' }];
+        }
+        written = true;
+        // A name taken fresh carries no signed binding of another wallet (darkasep112).
+        await store.deleteForeignBindings?.(alias, key);
+        if (fwd) await store.deleteForward?.(alias);
+        await store.recordNameEvent?.({ identity_key: key, alias, kind: 'claim', ip_hash: ipHash });
+      } catch (e) {
+        if (!written && paid.fee) await releaseNameFee(paid.fee);
         throw e;
       }
-      if (!row) return [500, { error: 'server-error' }];
-      if (fwd) await store.deleteForward?.(alias);
-      await store.recordNameEvent?.({ identity_key: key, alias, kind: 'claim', ip_hash: ipHash });
       return [200, { added: handleOf(alias) }];
     },
 

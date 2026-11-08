@@ -229,6 +229,15 @@ function supabaseStore(env = process.env, f = fetch) {
     getBinding: (alias) => one(`bwallet_name_bindings?alias=eq.${q(alias)}&limit=1`),
     // A released name (unlink / delete wallet) keeps no signed binding, or its next owner could never bind it
     // (b-Aware 25 Oct 2026, darkasep112: bind answered 409 "signed by another wallet" forever).
+    // A name just taken fresh (INSERT / rename into it) by `key`: any binding another key signed for it is stale and
+    // would stop the new owner binding it (darkasep112). Only rows of OTHER keys are removed.
+    deleteForeignBindings: (alias, key) => {
+      if (!key) throw new Error('deleteForeignBindings needs the new owner key');
+      return req(`bwallet_name_bindings?alias=eq.${q(alias)}&identity_key=neq.${q(key)}`, {
+        method: 'DELETE',
+        headers: { Prefer: 'return=minimal' },
+      });
+    },
     // Only the binding `key` signed (unlink of one of its names).
     deleteBinding: (alias, key) => {
       if (!key) throw new Error('deleteBinding needs the owner key');
@@ -298,6 +307,20 @@ function supabaseStore(env = process.env, f = fetch) {
           headers: { Prefer: 'return=representation' },
         })
       )?.[0] ?? null,
+    // A claimed handover whose move then FAILED (an error, not a refusal) is put back, never over a newer release.
+    restoreHandover: (row) =>
+      req('bwallet_name_handovers?on_conflict=alias', {
+        method: 'POST',
+        headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
+        body: JSON.stringify({
+          alias: row.alias,
+          from_key: row.from_key,
+          to_key: row.to_key,
+          seq: row.seq,
+          release_sig: row.release_sig,
+          release_ts: row.release_ts,
+        }),
+      }),
     cancelHandover: async (alias, fromKey) =>
       (
         await req(`bwallet_name_handovers?alias=eq.${q(alias)}&from_key=eq.${q(fromKey)}`, {
@@ -484,11 +507,21 @@ function supabaseStore(env = process.env, f = fetch) {
         headers: { Prefer: 'return=minimal' },
         body: JSON.stringify({ display_name: name, updated_at: new Date().toISOString() }),
       }),
-    // Unlink one of `key`'s names. Only `key`'s own payment records and only a row that still points at `key` are
-    // deleted. 'ok'; 'gone' (0 rows: not, or no longer, this wallet's); 'blocked' (payment records of another key
-    // still reference the name: FK ON DELETE RESTRICT).
+    // Unlink one of `key`'s names. Nothing is deleted until both checks pass: the row still points at `key`, and no
+    // payment record of ANOTHER key (a previous owner's, on a handed-over name) references it (FK ON DELETE RESTRICT
+    // would refuse the row anyway, after this key's own records were already gone). Then only `key`'s own payment
+    // records and the row (still filtered by `key`) are deleted.
+    // 'ok'; 'gone' (not, or no longer, this wallet's); 'blocked' (another key's payment records reference it).
     deleteAlias: async (alias, key) => {
       if (!key) throw new Error('deleteAlias needs the owner key');
+      const mine = await one(
+        `bwallet_paymail_aliases?alias=eq.${q(alias)}&identity_key=eq.${q(key)}&select=alias&limit=1`,
+      );
+      if (!mine) return 'gone';
+      const foreign = await one(
+        `bwallet_paymail_payments?alias=eq.${q(alias)}&identity_key=neq.${q(key)}&select=reference&limit=1`,
+      );
+      if (foreign) return 'blocked';
       await req(`bwallet_paymail_payments?alias=eq.${q(alias)}&identity_key=eq.${q(key)}`, {
         method: 'DELETE',
         headers: { Prefer: 'return=minimal' },

@@ -991,6 +991,57 @@ describe('name pricing (owner, 27 Oct 2026): by length, 5+ free, 4 $10, 3 $100, 
     expect(store.aliases.has('abcd')).toBe(false);
   });
 
+  test('#F-237 re-review L1: an error AFTER the paid name was written keeps the fee (it paid for the name)', async () => {
+    const u = user();
+    const pay = payTx(16_000_000, FEE_ADDR, [u.identityKey, 'abcd']);
+    const store = priceStore();
+    store.releaseFeeTx = async (r) => {
+      store.fees.delete(r.txid);
+      store.receipts = store.receipts.filter((x) => x.txid !== r.txid);
+    };
+    const h = pm.makeHandlers({ store, env: FENV, feeChain: mockChain([pay]) });
+    expect((await h.register({}, await u.sign('register', { alias: 'oldname' })))[0]).toBe(200);
+    // The rename commits; the profile write after it fails.
+    store.updateOwnAlias = async () => {
+      throw new Error('supabase 500');
+    };
+    await expect(h.register({}, await u.sign('register', { alias: 'abcd', feeTxid: pay.id('hex') }))).rejects.toThrow(
+      'supabase 500',
+    );
+    expect(store.aliases.get('abcd').identity_key).toBe(u.identityKey);
+    expect(store.receipts.map((r) => r.txid)).toEqual([pay.id('hex')]);
+    expect(store.fees.has(pay.id('hex'))).toBe(true);
+  });
+
+  test('#F-237 re-review L1: names-add keeps the fee once the row is in; puts it back when nothing was written', async () => {
+    const u = user();
+    const pay = payTx(16_000_000, FEE_ADDR, [u.identityKey, 'wxyz']);
+    const store = priceStore();
+    store.releaseFeeTx = async (r) => {
+      store.fees.delete(r.txid);
+      store.receipts = store.receipts.filter((x) => x.txid !== r.txid);
+    };
+    const h = pm.makeHandlers({ store, env: FENV, feeChain: mockChain([pay]) });
+    expect((await h.register({}, await u.sign('register', { alias: 'mainname' })))[0]).toBe(200);
+    // Nothing written (the insert answered no row): 500 and the payment is not consumed.
+    const insert = store.insertExtraAlias;
+    store.insertExtraAlias = async () => null;
+    expect((await h['names-add']({}, await u.sign('names-add', { alias: 'wxyz', feeTxid: pay.id('hex') })))[0]).toBe(
+      500,
+    );
+    expect(store.receipts).toEqual([]);
+    // Written, then a later step fails: the fee stays with the name.
+    store.insertExtraAlias = insert;
+    store.recordNameEvent = async () => {
+      throw new Error('supabase 500');
+    };
+    await expect(
+      h['names-add']({}, await u.sign('names-add', { alias: 'wxyz', feeTxid: pay.id('hex') }, Date.now() + 1)),
+    ).rejects.toThrow('supabase 500');
+    expect(store.aliases.get('wxyz').identity_key).toBe(u.identityKey);
+    expect(store.receipts.map((r) => r.txid)).toEqual([pay.id('hex')]);
+  });
+
   test('#F-237: a paid rename into a name just taken gets 409; the old name, its forward state and the fee are untouched', async () => {
     const u = user();
     const other = user();

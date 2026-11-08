@@ -252,18 +252,43 @@ describe('#F-237 review: unlink, ord proof and store filters are by key', () => 
   };
   const KEY = '02' + 'a'.repeat(64);
 
-  test('store.deleteAlias: payments and row filtered by key; 0 rows → gone; FK clash → blocked', async () => {
-    const ok = fake((c) => (c.url.includes('aliases') ? [200, [{ alias: 'n1' }]] : [204, undefined]));
+  // A fake PostgREST for deleteAlias: `owned` = the row is KEY's; `foreign` = another key's payment records exist.
+  const unlinkDb = ({ owned = true, foreign = false, rowDelete = [200, [{ alias: 'n1' }]] } = {}) =>
+    fake((c) => {
+      if (c.method === 'GET' && c.url.includes('bwallet_paymail_aliases')) return [200, owned ? [{ alias: 'n1' }] : []];
+      if (c.method === 'GET' && c.url.includes('bwallet_paymail_payments'))
+        return [200, foreign ? [{ reference: 'r1' }] : []];
+      if (c.method === 'DELETE' && c.url.includes('bwallet_paymail_aliases')) return rowDelete;
+      return [204, undefined];
+    });
+  const writes = (calls) => calls.filter((c) => c.method !== 'GET').map((c) => c.url.replace(/^.*\/rest\/v1\//, ''));
+
+  test("store.deleteAlias: checks first; only then this key's payments and row, both filtered by key", async () => {
+    const ok = unlinkDb();
     expect(await storeLib.supabaseStore(DB_ENV, ok.f).deleteAlias('n1', KEY)).toBe('ok');
-    expect(ok.calls.map((c) => [c.method, c.url.replace(/^.*\/rest\/v1\//, '')])).toEqual([
-      ['DELETE', `bwallet_paymail_payments?alias=eq.n1&identity_key=eq.${KEY}`],
-      ['DELETE', `bwallet_paymail_aliases?alias=eq.n1&identity_key=eq.${KEY}`],
+    expect(ok.calls.filter((c) => c.method === 'GET').map((c) => c.url)).toEqual([
+      expect.stringContaining(`bwallet_paymail_aliases?alias=eq.n1&identity_key=eq.${KEY}`),
+      expect.stringContaining(`bwallet_paymail_payments?alias=eq.n1&identity_key=neq.${KEY}`),
     ]);
-    const none = fake((c) => (c.url.includes('aliases') ? [200, []] : [204, undefined]));
-    expect(await storeLib.supabaseStore(DB_ENV, none.f).deleteAlias('n1', KEY)).toBe('gone');
-    const fk = fake((c) => (c.url.includes('aliases') ? [409, { code: '23503' }] : [204, undefined]));
-    expect(await storeLib.supabaseStore(DB_ENV, fk.f).deleteAlias('n1', KEY)).toBe('blocked');
+    expect(writes(ok.calls)).toEqual([
+      `bwallet_paymail_payments?alias=eq.n1&identity_key=eq.${KEY}`,
+      `bwallet_paymail_aliases?alias=eq.n1&identity_key=eq.${KEY}`,
+    ]);
     await expect(storeLib.supabaseStore(DB_ENV, ok.f).deleteAlias('n1')).rejects.toThrow();
+  });
+
+  test("#F-237 re-review M1: store.deleteAlias deletes NOTHING when the row isn't ours or a previous owner's payments exist", async () => {
+    const gone = unlinkDb({ owned: false });
+    expect(await storeLib.supabaseStore(DB_ENV, gone.f).deleteAlias('n1', KEY)).toBe('gone');
+    expect(writes(gone.calls)).toEqual([]);
+    const blocked = unlinkDb({ foreign: true });
+    expect(await storeLib.supabaseStore(DB_ENV, blocked.f).deleteAlias('n1', KEY)).toBe('blocked');
+    expect(writes(blocked.calls)).toEqual([]);
+    // A row that moved between the checks and the delete: 'gone'; an FK clash on the row delete: 'blocked'.
+    const raced = unlinkDb({ rowDelete: [200, []] });
+    expect(await storeLib.supabaseStore(DB_ENV, raced.f).deleteAlias('n1', KEY)).toBe('gone');
+    const fk = unlinkDb({ rowDelete: [409, { code: '23503' }] });
+    expect(await storeLib.supabaseStore(DB_ENV, fk.f).deleteAlias('n1', KEY)).toBe('blocked');
   });
 
   test('store.deleteBinding and store.setOrdProof are filtered by key', async () => {
@@ -297,5 +322,184 @@ describe('#F-237 review: unlink, ord proof and store filters are by key', () => 
     expect(calls.map((c) => c.method)).toEqual(['DELETE', 'DELETE']);
     expect(calls[0].url).toContain(`bwallet_name_handovers?alias=eq.n1&to_key=eq.${KEY}&seq=eq.3`);
     expect(calls[1].url).toContain(`bwallet_name_handovers?alias=eq.n1&from_key=eq.${KEY}`);
+  });
+});
+
+// ---- #F-237 re-review of da48fa98 (8 Nov 2026) ----------------------------------------------------------------------
+// memStore plus signed bindings and two-party handovers, with production semantics.
+const namesStore = () => {
+  const s = memStore();
+  s.bindings = new Map();
+  s.handovers = new Map();
+  s.log = [];
+  return Object.assign(s, {
+    getBinding: async (a) => s.bindings.get(a) ?? null,
+    putBinding: async (b) => void s.bindings.set(b.alias, { ...b }),
+    deleteBinding: async (a, k) => {
+      if (s.bindings.get(a)?.identity_key === k) s.bindings.delete(a);
+    },
+    deleteForeignBindings: async (a, k) => {
+      if (s.bindings.has(a) && s.bindings.get(a).identity_key !== k) s.bindings.delete(a);
+    },
+    logName: async (r) => void s.log.push(r),
+    getHandover: async (a) => s.handovers.get(a) ?? null,
+    putHandover: async (r) => void s.handovers.set(r.alias, { ...r }),
+    handoversFor: async (k) => [...s.handovers.values()].filter((x) => x.to_key === k),
+    claimHandover: async (a, to, seq) => {
+      const x = s.handovers.get(a);
+      if (!x || x.to_key !== to || Number(x.seq) !== Number(seq)) return null;
+      s.handovers.delete(a);
+      return x;
+    },
+    cancelHandover: async (a, from) => {
+      const x = s.handovers.get(a);
+      if (!x || x.from_key !== from) return null;
+      s.handovers.delete(a);
+      return x;
+    },
+    restoreHandover: async (r) => {
+      if (!s.handovers.has(r.alias)) s.handovers.set(r.alias, { ...r });
+    },
+    moveAlias: async (a, to, from) => {
+      const r = s.aliases.get(a);
+      if (!r || r.identity_key !== from) return false;
+      r.identity_key = to;
+      return true;
+    },
+  });
+};
+
+const handOver = async (h, alias, from, to, seq = 1) => {
+  expect(
+    (await h['handover-release']({}, await from.sign('release', { alias, to: to.identityKey, seq: String(seq) })))[0],
+  ).toBe(200);
+  return h['handover-accept']({}, await to.sign('bind', { alias, seq: String(seq) }));
+};
+
+describe('#F-237 re-review: leftover holds never survive a handover (H2)', () => {
+  // K sends two renames; L takes both targets mid-flight; both fail, leaving K's hold on aaaaa (row still K's).
+  const leftover = async () => {
+    const store = namesStore();
+    const h = pm.makeHandlers({ store, env: ENV });
+    const k = user();
+    const l = user();
+    const b = user();
+    expect((await h.register({}, await k.sign('register', { alias: 'aaaaa' })))[0]).toBe(200);
+    const rename = store.renameAlias;
+    const both = deferred();
+    let arrived = 0;
+    store.renameAlias = async (from, to, key) => {
+      if (++arrived === 2) {
+        for (const t of ['ccccc1', 'ccccc2'])
+          await store.insertAlias({ kind: 'plain', alias: t, identity_key: l.identityKey });
+        both.resolve();
+      }
+      await both.promise;
+      return rename(from, to, key);
+    };
+    const b1 = await k.sign('register', { alias: 'ccccc1' });
+    const b2 = await k.sign('register', { alias: 'ccccc2' }, Date.now() + 1);
+    const out = await Promise.all([h.register({}, b1), h.register({}, b2)]);
+    expect(out.map((r) => r[0])).toEqual([409, 409]);
+    store.renameAlias = rename;
+    expect(store.aliases.get('aaaaa').identity_key).toBe(k.identityKey);
+    return { store, h, k, l, b };
+  };
+
+  test('after the handover the new owner can rename, and the old owner has no forward from the name', async () => {
+    const { store, h, k, b } = await leftover();
+    expect((await handOver(h, 'aaaaa', k, b))[0]).toBe(200);
+    expect(store.forwards.has('aaaaa')).toBe(false);
+    const [s, r] = await h.register({}, await b.sign('register', { alias: 'bbbbb1' }));
+    expect([s, r.error]).toEqual([200, undefined]);
+    expect(store.forwards.get('aaaaa').identity_key).toBe(b.identityKey);
+  });
+
+  test('after the handover and an unlink by the new owner, the name is free for anyone', async () => {
+    const { h, k, l, b } = await leftover();
+    expect((await handOver(h, 'aaaaa', k, b))[0]).toBe(200);
+    expect((await h.unlink({}, await b.sign('unlink', { alias: 'aaaaa' })))[0]).toBe(200);
+    expect((await h.register({}, await l.sign('register', { alias: 'aaaaa' })))[0]).toBe(200);
+    expect((await h.pki({ handle: 'aaaaa@pay.test' }))[1].pubkey).toBe(l.identityKey);
+  });
+
+  test("another key's live forward from a name whose row is ours is stale: the rename proceeds", async () => {
+    const store = namesStore();
+    const h = pm.makeHandlers({ store, env: ENV });
+    const k = user();
+    const old = user();
+    expect((await h.register({}, await k.sign('register', { alias: 'mine5' })))[0]).toBe(200);
+    // A leftover from a previous owner (pre-fix handover, or a database edit), not expired.
+    await store.putForward({
+      from_alias: 'mine5',
+      to_alias: 'elsewhere',
+      identity_key: old.identityKey,
+      expires_at: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+    const [s, r] = await h.register({}, await k.sign('register', { alias: 'mine6' }));
+    expect([s, r.error]).toEqual([200, undefined]);
+    expect(store.forwards.get('mine5')).toMatchObject({ identity_key: k.identityKey, to_alias: 'mine6' });
+  });
+});
+
+describe("#F-237 re-review: handovers, bindings and unlink keep other wallets' records", () => {
+  test('L2: a move that FAILS puts the claimed handover back; the recipient can accept again', async () => {
+    const store = namesStore();
+    const h = pm.makeHandlers({ store, env: ENV });
+    const a = user();
+    const b = user();
+    expect((await h.register({}, await a.sign('register', { alias: 'gift1' })))[0]).toBe(200);
+    expect(
+      (await h['handover-release']({}, await a.sign('release', { alias: 'gift1', to: b.identityKey, seq: '1' })))[0],
+    ).toBe(200);
+    const move = store.moveAlias;
+    store.moveAlias = async () => {
+      throw new Error('supabase 503');
+    };
+    await expect(h['handover-accept']({}, await b.sign('bind', { alias: 'gift1', seq: '1' }))).rejects.toThrow(
+      'supabase 503',
+    );
+    expect((await h['handovers-for']({ key: b.identityKey }))[1].handovers.length).toBe(1);
+    store.moveAlias = move;
+    expect(
+      (await h['handover-accept']({}, await b.sign('bind', { alias: 'gift1', seq: '1' }, Date.now() + 1)))[0],
+    ).toBe(200);
+    expect(store.aliases.get('gift1').identity_key).toBe(b.identityKey);
+  });
+
+  test("L3: a name taken fresh drops another wallet's stale binding, so its new owner can bind it", async () => {
+    const store = namesStore();
+    const h = pm.makeHandlers({ store, env: ENV });
+    const prev = user();
+    const next = user();
+    // A binding left by a previous owner (e.g. signed before an admin move, then the name was released).
+    store.bindings.set('reborn', {
+      alias: 'reborn',
+      identity_key: prev.identityKey,
+      seq: 4,
+      signature: 'ab'.repeat(32),
+      signed_at: new Date().toISOString(),
+    });
+    expect((await h.register({}, await next.sign('register', { alias: 'reborn' })))[0]).toBe(200);
+    expect(store.bindings.has('reborn')).toBe(false);
+    expect((await h.bind({}, await next.sign('bind', { alias: 'reborn', seq: '1' })))[0]).toBe(200);
+  });
+
+  test("M1: unlinking a handed-over name with a previous owner's payment records deletes nothing", async () => {
+    const store = namesStore();
+    const h = pm.makeHandlers({ store, env: ENV });
+    const a = user();
+    const b = user();
+    expect((await h.register({}, await a.sign('register', { alias: 'given' })))[0]).toBe(200);
+    store.pays.set('ref-a', { reference: 'ref-a', alias: 'given', identity_key: a.identityKey, status: 'collected' });
+    expect((await handOver(h, 'given', a, b))[0]).toBe(200);
+    store.pays.set('ref-b', { reference: 'ref-b', alias: 'given', identity_key: b.identityKey, status: 'collected' });
+    const [s, r] = await h.unlink({}, await b.sign('unlink', { alias: 'given' }));
+    expect(s).toBe(409);
+    expect(r.error).toMatch(/previous owner/);
+    // Nothing was deleted: the new owner's own history (listHistory restore) and the row are intact.
+    expect(store.pays.has('ref-b')).toBe(true);
+    expect(store.pays.has('ref-a')).toBe(true);
+    expect(store.aliases.get('given').identity_key).toBe(b.identityKey);
   });
 });
