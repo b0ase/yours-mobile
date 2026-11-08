@@ -87,7 +87,7 @@ async function idb(name: string, svc: never) {
 
 /** A copy of the wallet: its own store active, wallet.1sat.app as its backup. */
 async function device(name: string, kd: KeyDeriver, backup: StorageIdb, svc: never) {
-  const s = await idb(`merge6nov-${name}-${++dbn}`, svc); // its own names: fake-indexeddb is shared across files
+  const s = await idb(`fullpassguard-${name}-${++dbn}`, svc); // its own names: fake-indexeddb is shared across files
   const sm = new WalletStorageManager(kd.identityKey, s, [backup]);
   await sm.makeAvailable();
   await sm.setActive(s.getSettings().storageIdentityKey);
@@ -226,7 +226,7 @@ async function owner() {
   const svc = services(chain);
   const root = PrivateKey.fromRandom();
   const kd = new KeyDeriver(root);
-  const backup = await idb(`merge6nov-wallet-1sat-${++dbn}`, svc);
+  const backup = await idb(`fullpassguard-wallet-1sat-${++dbn}`, svc);
   IS._mergeUnchecked(backup); // wallet.1sat.app: in the app a StorageClient, never a guarded device store
   const phone = await device('phone', kd, backup, svc);
   const ext = await device('extension', kd, backup, svc);
@@ -317,6 +317,7 @@ beforeAll(() => {
 afterAll(() => {
   uninstall();
   _setPullOverlap();
+  IS._resetInboundVerifiers(); // the device-store set outlives this file: bun shares modules across test files
 });
 
 describe('review 24 R1: a full pass never re-queues a coin the device lowered', () => {

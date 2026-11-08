@@ -132,7 +132,7 @@ async function idb(name: string, sik: string, svc: never) {
 /** wallet.1sat.app: one store; every device connects to it with its own client. */
 type Server = { store: StorageIdb; sik: string; connectMs: number; down: boolean; hang?: Promise<void> };
 async function server(svc: never): Promise<Server> {
-  const name = `remote-${++dbn}`;
+  const name = `notactive-remote-${++dbn}`; // its own names: fake-indexeddb is shared across files
   const sik = `1sat-cli-${name}`;
   return { store: await idb(name, sik, svc), sik, connectMs: 0, down: false };
 }
@@ -183,7 +183,7 @@ function connect(srv: Server) {
 
 type Device = { db: string; sik: string };
 const newDevice = (name: string): Device => {
-  const db = `${name}-${++dbn}`;
+  const db = `notactive-${name}-${++dbn}`; // its own names: fake-indexeddb is shared across files
   return { db, sik: `yours-${db}` };
 };
 
