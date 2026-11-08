@@ -61,8 +61,16 @@ const memStore = () => {
     deleteByKey: async (k) => {
       let a = 0;
       let p = 0;
-      for (const [key, r] of aliases) if (r.identity_key === k) (aliases.delete(key), a++);
-      for (const [ref, r] of pays) if (r.identity_key === k) (pays.delete(ref), p++);
+      for (const [key, r] of aliases)
+        if (r.identity_key === k) {
+          aliases.delete(key);
+          a++;
+        }
+      for (const [ref, r] of pays)
+        if (r.identity_key === k) {
+          pays.delete(ref);
+          p++;
+        }
       return { aliases: a, payments: p };
     },
   };

@@ -34,7 +34,11 @@ const store = (rows) => {
     deleteAlias: async (a) => void aliases.delete(a),
     deleteByKey: async (k) => {
       let n = 0;
-      for (const [a, r] of aliases) if (r.identity_key === k) (aliases.delete(a), n++);
+      for (const [a, r] of aliases)
+        if (r.identity_key === k) {
+          aliases.delete(a);
+          n++;
+        }
       return { aliases: n, payments: 0 };
     },
     deleteBinding: async (a) => void bindings.delete(a),

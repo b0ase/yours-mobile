@@ -725,8 +725,9 @@ function makeHandlers({
       }),
   // Chain access for the 1 cent name fee (lib/nameFee.js); tests inject a mock.
   feeChain = nameFee.chain,
-  // Owner of a bit-sign name (lib: bitsignHandleOwner). Tests inject their own.
-  handleOwner = (alias, identityKey) => bitsignHandleOwner(alias, identityKey, env),
+  // Owner of a bit-sign name (lib: bitsignHandleOwner). Tests inject their own. No handler reads it today;
+  // the option is still accepted, bound as _handleOwner so lint passes.
+  handleOwner: _handleOwner = (alias, identityKey) => bitsignHandleOwner(alias, identityKey, env),
   // Company offers (lib/offerReceipts.js): USD/BSV at receipt and the director's push. Off under tests unless injected.
   offerRate = env.NODE_ENV === 'test' || process.env.NODE_ENV === 'test'
     ? async () => null
