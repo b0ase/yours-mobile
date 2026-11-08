@@ -23,6 +23,7 @@ const refused = (code: string, extra: Record<string, unknown> = {}) =>
   new ChatApiError(`refused ${code}`, 409, { error: `refused ${code}`, code, ...extra });
 const Q = { quote_id: 'q1', memo: 'bitsign-bshares n', memo_script: '006A11AA' };
 const TX = 'cd'.repeat(32);
+const NONE = { kind: 'none' } as const;
 const none: ListActionsFn = async () => ({ totalActions: 0, actions: [] });
 
 describe('claimVerdict', () => {
@@ -50,7 +51,7 @@ describe('claimVerdict', () => {
       expect(claimVerdict(refused(c, { retryable: false })).kind).toBe('reclaim');
   });
   test('proof the payment can never match is final', () => {
-    for (const c of ['no_memo', 'underpaid', 'txid_used', 'quote_expired'])
+    for (const c of ['no_memo', 'underpaid', 'txid_used'])
       expect(claimVerdict(refused(c, { retryable: false })).kind).toBe('final');
   });
   test('without the flag, the built-in waits still retry', () =>
@@ -91,27 +92,33 @@ describe('payAndClaim', () => {
     const d = deps({
       store: { ...memoStore(), get: () => null, set: () => undefined, remove: () => undefined } as never,
     });
-    const o = await payAndClaim(d, 'o', Q, async () => (paid++, { txid: TX }));
+    const o = await payAndClaim(d, 'o', Q, async () => (paid++, { txid: TX }), NONE);
     expect(o.kind).toBe('not-sent');
     expect(paid).toBe(0);
   });
 
-  test('never pays over a payment that has a txid or a refused claim: it claims instead', async () => {
+  test('never pays over a payment that has a txid or a refused claim: nothing paid, the record kept', async () => {
     let paid = 0;
     const claimed: string[] = [];
     const d = deps({ claim: async (c) => (claimed.push(c.txid), { ok: true }) });
+    const pay = async () => (paid++, { txid: 'ee'.repeat(32) });
     d.store.set(
       'bshares-claim-failed:o',
       JSON.stringify({ quote_id: 'q0', txid: TX, code: 'offer_changed', reason: 'r' }),
     );
-    expect((await payAndClaim(d, 'o', Q, async () => (paid++, { txid: 'ee'.repeat(32) }))).kind).toBe('claimed');
+    expect((await payAndClaim(d, 'o', Q, pay, NONE)).kind).toBe('changed');
+    d.store.remove('bshares-claim-failed:o');
     d.store.set(
       'bshares-claim:o',
       JSON.stringify({ quote_id: 'q0', txid: TX, memo: '', memo_script: '', startedAt: 1 }),
     );
-    expect((await payAndClaim(d, 'o', Q, async () => (paid++, { txid: 'ee'.repeat(32) }))).kind).toBe('claimed');
+    expect((await payAndClaim(d, 'o', Q, pay, NONE)).kind).toBe('changed');
+    expect((await payAndClaim(d, 'o', Q, pay, { kind: 'attempt', quote_id: 'q0', txid: TX, startedAt: 1 })).kind).toBe(
+      'changed',
+    );
     expect(paid).toBe(0);
-    expect(claimed).toEqual([TX, TX]);
+    expect(claimed).toEqual([]);
+    expect(readPending(d.store, 'o')).toMatchObject({ quote_id: 'q0', txid: TX });
   });
 
   test('a rawtx too big for storage is dropped from the record, the txid kept, the claim still carries it', async () => {
@@ -123,7 +130,7 @@ describe('payAndClaim', () => {
         throw new Error('Network request failed');
       },
     });
-    const o = await payAndClaim(d, 'o', Q, async () => ({ txid: TX, rawtx: 'ab'.repeat(500) }));
+    const o = await payAndClaim(d, 'o', Q, async () => ({ txid: TX, rawtx: 'ab'.repeat(500) }), NONE);
     expect(o.kind).toBe('retry');
     expect(readPending(base, 'o')).toMatchObject({ txid: TX });
     expect(readPending(base, 'o')!.rawtx).toBeUndefined();
@@ -150,7 +157,11 @@ describe('findPaidAction', () => {
       seen.push(a.offset),
       { totalActions: 103, actions: pages[a.offset / 100] }
     );
-    expect(await findPaidAction(list, '006a11aa')).toEqual({ found: true, txid: 'ab'.repeat(32) });
+    expect(await findPaidAction(list, '006a11aa')).toEqual({
+      found: true,
+      txid: 'ab'.repeat(32),
+      memo_script: '006a11aa',
+    });
     expect(seen).toEqual([0, 100]);
   });
   test('the whole list read without it: not found; an error or no memo: null (could not check)', async () => {

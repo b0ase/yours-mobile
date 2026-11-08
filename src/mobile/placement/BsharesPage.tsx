@@ -3,6 +3,27 @@
  * The first register in testing is The Bitcoin Corporation Ltd. RESTRICTED to registered members and the director
  * (docs/BCORP-PLACEMENT.md). Never in a store build: the route is lazy and dropped there (PLACEMENT_ENABLED).
  * Tranche size, price and the BSV rate are typed in by the director; nothing here is a cap-table number.
+ *
+ * Pay (investor) never pays twice: see payFlow.ts. Owner's 1p phone test (bWalletX build, bit-sign
+ * fix/sec-bshares-m5 deployed, BSHARES_INVEST_ENABLED=1, a 1p tranche with issuer terms; Accept it first):
+ *  1. Normal pay: the card says "If you already paid on another device, don't pay again". Tap Pay: the sheet shows
+ *     about 1¢ with the sats under it, "to <Company> treasury (m-of-n)" and the terms (scroll). Cancel is first and
+ *     focused; Cancel pays nothing. Tap Pay, then Pay 1¢, approve in the wallet: "Waiting for one confirmation…".
+ *     The button is now Check payment with the txid. After a block, Check payment → "Payment claimed", status Paid.
+ *  2. Kill right after the wallet approval (new offer): reopen; the card says a payment was started; Check payment
+ *     finds it in the wallet by its memo and claims it. No second wallet approval.
+ *  3. Decline in the wallet: nothing is recorded; the button is Pay again, with no warning.
+ *  4. Leave the sheet open over 10 minutes, then tap Pay in it: "That quote was more than 8 minutes old…" and the
+ *     sheet shows again with a fresh quote; only the second Pay pays.
+ *  5. Second tab or device: open the sheet in two windows; pay in one. In the other, Pay in its sheet says "Another
+ *     payment for this offer was just started…" and nothing is sent. On another device (no record there), Pay says
+ *     the payment is waiting (quote 409 payment_pending) and turns into Check payment with that txid; it only claims.
+ *     A device whose wallet already holds an unrecorded bShares payment to this treasury warns before any sheet pays.
+ *  6. Held: when bit-sign holds a payment for a compliance review, the card says "Your payment was received and is
+ *     held for a compliance review. Don't pay again." with the txid, no button, also after a reload.
+ *  Also: airplane mode while approving → "can't confirm" → Check payment later (finds it, or warns with Cancel
+ *  first); a txid unseen for over an hour → "Search my wallet again" (claims if the wallet still has it, warns
+ *  before paying again only if the wallet shows it failed).
  */
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -29,17 +50,27 @@ import { CompanySetup, CreateCompany } from './CompanySetup';
 import type { BsharesApi, PlacementQuote } from './api';
 import { PayConfirmSheet } from './PayConfirmSheet';
 import {
-  OTHER_DEVICE_NOTE,
+  CHANGED_MESSAGE,
+  CHECK_FIRST_MESSAGE,
   PAY_BUTTON,
+  QUOTE_REFRESHED_MESSAGE,
   adoptServerPending,
   checkPayment,
   deviceStore,
-  paidButUnclaimed,
+  findOrphanPayment,
+  heldMessage,
+  openedOver,
+  orphanMessage,
   payAndClaim,
+  payNoteFor,
   payState,
+  paymentHeld,
   quotePaymentPending,
-  reclaimMessage,
+  quoteTooOld,
+  recordHeld,
+  recordOrphan,
   type ListActionsFn,
+  type OpenedOver,
   type PayDeps,
   type PayOutcome,
   type PayState,
@@ -168,16 +199,10 @@ const NewTranche = ({ api, onDone }: { api: BsharesApi; onDone: () => void }) =>
 /** Offers with a Pay or Check payment in progress on this device (a second tap never starts a second payment). */
 const payingNow = new Set<string>();
 
-/** The line under an investor's offer about this device's payment record (none: the second-device note). */
-const payNote = (pay: PayState): string => {
-  if (pay.kind === 'none') return OTHER_DEVICE_NOTE;
-  if (pay.kind === 'reclaim') return reclaimMessage(pay.rec.txid, pay.rec.reason);
-  if (pay.kind === 'final') return paidButUnclaimed(pay.rec.txid, pay.rec.reason);
-  if (pay.rec.txid)
-    return `Your payment went out: transaction ${pay.rec.txid}. Don't pay again: tap Check payment to claim it.`;
-  const at = pay.rec.startedAt ? ` at ${new Date(pay.rec.startedAt).toLocaleString('en-GB')}` : '';
-  return `A payment was started on this device${at}. Don't pay again: tap Check payment to look for it first.`;
-};
+/** A monotonic clock for the quote's age (a changed device clock can't make an old quote look fresh). */
+const monoNow = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
+type SheetState = { quote: PlacementQuote; warning: string | null; opened: OpenedOver; fetchedAt: number };
 
 const OfferCard = ({
   offer,
@@ -194,7 +219,7 @@ const OfferCard = ({
   const { addSnackbar } = useSnackbar();
   const [busy, setBusy] = useState(false);
   const [minuteNo, setMinuteNo] = useState('');
-  const [sheet, setSheet] = useState<{ quote: PlacementQuote; warning: string | null } | null>(null);
+  const [sheet, setSheet] = useState<SheetState | null>(null);
   const [, setSeen] = useState(0);
   const role = me.role === 'director' ? 'director' : 'investor';
   const step = nextStep(offer, role);
@@ -212,29 +237,55 @@ const OfferCard = ({
   const report = (o: PayOutcome | null) => {
     if (!o || o.kind === 'check-first') return;
     if (o.kind === 'claimed') addSnackbar('Payment claimed. The directors approve the allotment next.', 'success');
-    else if (o.kind === 'refund') addSnackbar(o.message, 'info');
+    else if (o.kind === 'refund' || o.kind === 'held' || o.kind === 'returned') addSnackbar(o.message, 'info');
     else addSnackbar(o.message, 'error');
-    if (o.kind === 'claimed' || o.kind === 'refund') onDone();
+    if (o.kind === 'claimed' || o.kind === 'refund' || o.kind === 'returned') onDone();
   };
   /**
-   * The quote, checked, then the confirm sheet. Nothing is paid here. When bit-sign already holds a payment for this
-   * offer waiting for its block (payment_pending, e.g. paid from another device), that payment becomes this device's
-   * record instead and the button turns into Check payment: no sheet, no second payment.
+   * The quote, checked, then the confirm sheet. Nothing is paid here.
+   * - bit-sign already holds a payment for this offer waiting for its block (payment_pending, e.g. paid from another
+   *   device): that payment becomes this device's record and is claimed; no sheet, no second payment.
+   * - bit-sign holds a payment for a compliance review (payment_held): recorded and said; no sheet, no button.
+   * - Nothing recorded here: the wallet's own recent actions are scanned for a bShares payment to this treasury; one
+   *   found is recorded (the button becomes Check payment) and the sheet opens with the warning.
+   * The sheet remembers the state it was opened over: paying goes ahead only if the record is still exactly that.
    */
   const openSheet = async (warning: string | null) => {
     let q: PlacementQuote;
     try {
       q = await api.quote(offer.id, await shareLockKey(apiContext, offer.id));
     } catch (e) {
+      const held = paymentHeld(e);
+      if (held) {
+        recordHeld(store, offer.id, held.txid);
+        addSnackbar(heldMessage(held.txid), 'info');
+        return;
+      }
       const waiting = quotePaymentPending(e);
       if (!waiting) throw e;
       adoptServerPending(store, offer.id, waiting);
       addSnackbar(waiting.message, 'info');
+      report(await checkPayment(deps, offer.id));
       return;
     }
     const bad = payableProblem(me.company, offer, q);
     if (bad) throw new Error(bad);
-    setSheet({ quote: q, warning });
+    let w = warning;
+    const t = me.company.treasury;
+    if (!w && t && payState(store, offer.id).kind === 'none') {
+      const known = new Set(me.offers.map((o) => o.paymentTxid?.toLowerCase() ?? '').filter(Boolean));
+      const orphan = await findOrphanPayment(deps.listActions, t.lockingScriptHex, offer.sats, known);
+      if (orphan && recordOrphan(store, offer.id, orphan)) w = orphanMessage(orphan);
+    }
+    const opened = openedOver(store, offer.id);
+    if (!opened) {
+      // A payment to claim appeared meanwhile (another tab): no sheet may pay over it.
+      addSnackbar(CHANGED_MESSAGE, 'error');
+      return;
+    }
+    // Never a sheet without the warning over a recorded attempt.
+    if (!w && opened.kind !== 'none') w = CHECK_FIRST_MESSAGE;
+    setSheet({ quote: q, warning: w, opened, fetchedAt: monoNow() });
   };
   /** Pay (nothing recorded: confirm first) or Check payment / Try the claim again (claims only, never pays). */
   const runPay = async () => {
@@ -262,7 +313,15 @@ const OfferCard = ({
     payingNow.add(offer.id);
     setBusy(true);
     try {
-      report(await payAndClaim(deps, offer.id, s.quote, () => payTreasury(apiContext, me.company, offer, s.quote)));
+      if (quoteTooOld(s.fetchedAt, monoNow())) {
+        // Sheet left open: a fresh quote, shown again; the person confirms that one.
+        addSnackbar(QUOTE_REFRESHED_MESSAGE, 'info');
+        await openSheet(s.warning);
+        return;
+      }
+      report(
+        await payAndClaim(deps, offer.id, s.quote, () => payTreasury(apiContext, me.company, offer, s.quote), s.opened),
+      );
     } catch (e) {
       addSnackbar(e instanceof Error ? e.message : 'Failed', 'error');
     } finally {
@@ -361,9 +420,9 @@ const OfferCard = ({
         {pounds(offer.pricePence)} a share · {bsv(offer.sats)} at {pounds(offer.gbpPerBsvPence)}/BSV ({offer.rateDate})
         · locked 2-of-2, yours alone after {offer.lockMonths} months
       </p>
-      {pay && (step === 'Pay' || pay.kind === 'final') && (
+      {pay && (step === 'Pay' || pay.kind === 'final' || pay.kind === 'held') && (
         <p className="m-0 text-xs break-words" style={{ color: MUTED }} role="note">
-          {payNote(pay)}
+          {payNoteFor(pay)}
         </p>
       )}
       {offer.excessSats ? (

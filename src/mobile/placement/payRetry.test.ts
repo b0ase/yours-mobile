@@ -53,7 +53,7 @@ type Args = {
   labels?: string[];
   options?: Record<string, unknown>;
 };
-type Listed = { txid: string; status: string; outputs: { lockingScript: string }[] };
+type Listed = { txid: string; status: string; outputs: { lockingScript: string; satoshis?: number }[] };
 let created = 0;
 const walletActions: Listed[] = [];
 const createArgs: Args[] = [];
@@ -61,7 +61,11 @@ const nextTxid = () => `${String(++created).padStart(2, '0')}`.padEnd(64, 'a');
 /** The wallet records the action (as the toolbox does) and answers with its txid. */
 const payOk = async (a: Args) => {
   const txid = nextTxid();
-  walletActions.push({ txid, status: 'unproven', outputs: a.outputs.map((o) => ({ lockingScript: o.lockingScript })) });
+  walletActions.push({
+    txid,
+    status: 'unproven',
+    outputs: a.outputs.map((o) => ({ lockingScript: o.lockingScript, satoshis: o.satoshis })),
+  });
   return { txid };
 };
 let createImpl: (a: Args) => Promise<{ txid: string; tx?: number[] }> = payOk;
@@ -77,6 +81,11 @@ const wallet = {
 mock.module('../../hooks/useServiceContext', () => ({
   useServiceContext: () => ({ apiContext: { wallet, services: undefined } }),
 }));
+
+// ── a monotonic clock the tests can move (the quote's age) ──────────────────────────────────────────────────────
+const realMono = performance.now.bind(performance);
+let monoAhead = 0;
+Object.defineProperty(performance, 'now', { configurable: true, value: () => realMono() + monoAhead });
 
 // ── bit-sign over a fake Http ───────────────────────────────────────────────────────────────────────────────────
 type Res = { status: number; data: unknown };
@@ -197,6 +206,7 @@ beforeEach(async () => {
   createArgs.length = 0;
   createImpl = payOk;
   listImpl = async () => ({ totalActions: walletActions.length, actions: walletActions });
+  monoAhead = 0;
 });
 
 const notConfirmed: Res = {
@@ -514,16 +524,180 @@ describe('bShares Pay: across devices (review #6)', () => {
         },
       },
     ];
-    await tapPay();
+    claimReplies = [notConfirmed];
+    await tapPay(); // the quote says payment_pending: adopted and claimed at once, nothing paid
     expect(created).toBe(0);
-    expect(snacks.at(-1)).toContain("Don't pay again");
+    expect(snacks).toContain(
+      `A payment for this offer (${other}) is waiting for its confirmation. Don't pay again: check the payment.`,
+    );
+    expect(claims()).toEqual([expect.objectContaining({ quote_id: 'q-other', txid: other })]);
     slots.length = 0;
     const v = await render();
     expect(v.text).toContain('Check payment');
     expect(v.text).toContain(other);
     await tapPay();
     expect(created).toBe(0);
-    expect(claims()).toEqual([expect.objectContaining({ quote_id: 'q-other', txid: other })]);
+    expect(claims().length).toBe(2);
+    expect(claims()[1]).toMatchObject({ quote_id: 'q-other', txid: other });
     expect(store.size).toBe(0);
+  });
+});
+
+describe('bShares Pay: second re-review (page)', () => {
+  const HELD = "Your payment was received and is held for a compliance review. Don't pay again.";
+  const heldReply = (txid: string): Res => ({
+    status: 409,
+    data: {
+      error: `Your payment ${txid} was received and is held for a compliance review. Don't pay again.`,
+      code: 'payment_held',
+      retryable: false,
+      payment_held: true,
+      payment_txid: txid,
+    },
+  });
+
+  test('claim 409 payment_held: the held message with the txid, no button, the same on a later load', async () => {
+    claimReplies = [heldReply('01' + 'a'.repeat(62))];
+    await tapPay();
+    expect(snacks.at(-1)).toBe(`${HELD} Transaction ${'01' + 'a'.repeat(62)}.`);
+    expect(await tapPay()).toBe(false);
+    slots.length = 0;
+    const v = await render();
+    expect(v.text).toContain(HELD);
+    // (the page's static overpayment term mentions refunds; the payment's own words never do)
+    expect(v.text).not.toMatch(/directors will refund|refund transaction|Try the claim again/);
+    expect(created).toBe(1);
+  });
+
+  test('quote 409 payment_held (no record here): held message, no sheet, nothing paid, no Pay button after', async () => {
+    const t = 'cd'.repeat(32);
+    quoteReplies = [
+      { status: 409, data: { error: 'held', code: 'payment_held', payment_held: true, payment_txid: t } },
+    ];
+    await tapPay();
+    expect(created).toBe(0);
+    expect(snacks.at(-1)).toBe(`${HELD} Transaction ${t}.`);
+    slots.length = 0;
+    const v = await render();
+    expect(v.buttons.has('bshares-pay')).toBe(false);
+    expect(v.text).toContain(HELD);
+  });
+
+  test('claim 503 sanctions_unavailable: the record stays, Check payment re-claims, never pays', async () => {
+    claimReplies = [
+      {
+        status: 503,
+        data: {
+          error:
+            "Sanctions screening is unavailable right now. Your payment 01aa is safe: claim again shortly. Don't pay again.",
+          code: 'sanctions_unavailable',
+          retryable: true,
+        },
+      },
+    ];
+    await tapPay();
+    slots.length = 0;
+    expect((await render()).text).toContain('Check payment');
+    await tapPay();
+    expect(created).toBe(1);
+    expect(claims().length).toBe(2);
+    expect(store.size).toBe(0);
+  });
+
+  test('quote 503 sanctions_unavailable with no record: a plain try-later error, nothing stored, Pay stays', async () => {
+    quoteReplies = [
+      {
+        status: 503,
+        data: {
+          error: 'Sanctions screening is unavailable right now.',
+          code: 'sanctions_unavailable',
+          retryable: true,
+        },
+      },
+    ];
+    await tapPay();
+    expect(snacks.at(-1)).toBe('Sanctions screening is unavailable right now.');
+    expect(store.size).toBe(0);
+    expect(created).toBe(0);
+    slots.length = 0;
+    expect((await render()).buttons.has('bshares-pay')).toBe(true);
+  });
+
+  test('sheet left open over 8 minutes: a fresh quote is fetched and shown; only that one is paid', async () => {
+    slots.length = 0;
+    await (await render()).buttons.get('bshares-pay')!();
+    monoAhead = 9 * 60_000;
+    await (await render()).buttons.get('bshares-sheet-pay')!();
+    expect(created).toBe(0);
+    expect(quotes).toBe(2);
+    expect(snacks.at(-1)).toContain('more than 8 minutes old');
+    await (await render()).buttons.get('bshares-sheet-pay')!();
+    expect(created).toBe(1);
+    expect(claims()[0].quote_id).toBe('q2');
+  });
+
+  test('nothing recorded, but the wallet already paid this treasury with a bShares memo: warned, Check payment', async () => {
+    const t = 'ef'.repeat(32);
+    walletActions.push({
+      txid: t,
+      status: 'completed',
+      outputs: [
+        { lockingScript: T, satoshis: 1000 },
+        { lockingScript: memoScript('bitsign-bshares old'), satoshis: 0 },
+      ],
+    });
+    slots.length = 0;
+    await (await render()).buttons.get('bshares-pay')!();
+    const v = await render();
+    expect(v.text).toContain(t);
+    expect(v.text).toContain('An earlier payment may have gone out');
+    expect(v.buttons.has('bshares-sheet-pay')).toBe(false);
+    await v.buttons.get('bshares-sheet-cancel')!();
+    const after = await render();
+    expect(after.text).toContain('Check payment');
+    expect(after.text).toContain(t);
+    expect(created).toBe(0);
+  });
+
+  test('claim 409 payment_returned: says both txids, records cleared, no Check payment for it', async () => {
+    const rf = 'ee'.repeat(32);
+    const tx = '01' + 'a'.repeat(62);
+    claimReplies = [
+      {
+        status: 409,
+        data: {
+          error: `Your payment ${tx} was returned by the company (refund ${rf}).`,
+          code: 'payment_returned',
+          payment_returned: true,
+          payment_txid: tx,
+          refund_txid: rf,
+          already_claimed: true,
+          retryable: false,
+        },
+      },
+    ];
+    await tapPay();
+    expect(snacks.at(-1)).toBe(`Your payment ${tx} was returned by the company (refund ${rf}).`);
+    expect(store.size).toBe(0);
+    slots.length = 0;
+    expect((await render()).text).not.toContain('Check payment');
+    expect(created).toBe(1);
+  });
+
+  test("two windows: B's no-warning sheet is refused once A has started paying", async () => {
+    // B opens its sheet first (nothing recorded)…
+    slots.length = 0;
+    await (await render()).buttons.get('bshares-pay')!();
+    const bPay = (await render()).buttons.get('bshares-sheet-pay')!;
+    // …then A (another window: same storage) pays and is waiting for its block.
+    const bSlots = [...slots];
+    claimReplies = [notConfirmed];
+    await tapPay();
+    expect(created).toBe(1);
+    slots.length = 0;
+    slots.push(...bSlots);
+    await bPay();
+    expect(created).toBe(1);
+    expect(snacks.at(-1)).toContain('Nothing was sent');
   });
 });
