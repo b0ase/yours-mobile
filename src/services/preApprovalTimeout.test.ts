@@ -306,9 +306,7 @@ describe('background wiring', () => {
   const bg = src('../background.ts');
   test('site requests use the deadline wallet; our own pages do not', () => {
     // BRC-219: the wait is also ended if the caller goes (CallerRegistry.guard).
-    expect(bg).toContain(
-      '(isFromExtension ? ensureWallet(true) : callers.guard(liveToken, walletForSiteRequest(message.originator)))',
-    );
+    expect(bg).toContain('callers.guard(liveToken, walletForSiteRequest(message.originator, liveToken))');
   });
   test('funding preparation is capped, before signing', () => {
     const i = bg.indexOf('withStepTimeout(prep, STEP_TIMEOUT_MS, fundingTimeoutError)');

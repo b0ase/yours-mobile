@@ -30,6 +30,7 @@ import {
   recipientsForSheet,
   releaseSpendRuns,
   spendApprovalMatches,
+  spendRunCaller,
   spendSheetSettled,
 } from './services/spendRecipients';
 import { permissionSite } from './services/permissionSite';
@@ -159,6 +160,8 @@ import {
   LIVE_PORT_NAME,
   TrackedSheets,
   attachLivePort,
+  dropTokenWaiters,
+  sheetHooksFor,
   withCallerGoneSignal,
   promptCallerGoneError,
   siteStillAsking,
@@ -1245,10 +1248,10 @@ export const getWallet = (): WalletInterface | null => {
  * while the wallet is still auto-initializing from a persisted passKey.
  */
 /** ensureWallet for a site's request, with the pre-approval deadlines (services/preApprovalTimeout.ts). */
-const walletForSiteRequest = (originator?: string): Promise<WalletInterface> =>
+const walletForSiteRequest = (originator?: string, token?: string): Promise<WalletInterface> =>
   walletWithDeadline<WalletInterface>({
     ready: () => (masterBackupGate.active ? undefined : accountContext?.wallet),
-    open: () => ensureWallet(false, originator),
+    open: () => ensureWallet(false, originator, token),
     awaitingUnlock: () => pendingWalletWaiters.length > 0,
     // BRC-219: no clock on the unlock screen while it is up; one that never appeared fails at the settle deadline.
     unlockShown: () => activePopupPorts.size > 0 || popupWindowId !== undefined || inPageSheet !== undefined,
@@ -1293,7 +1296,11 @@ const resolveWalletWaiters = () => {
   for (const waiter of pendingWalletWaiters.splice(0)) waiter.resolve(wallet);
 };
 
-const ensureWallet = async (suppressPopup = false, originator?: string): Promise<WalletInterface> => {
+const ensureWallet = async (
+  suppressPopup = false,
+  originator?: string,
+  token?: string,
+): Promise<WalletInterface> => {
   await startupInitPromise;
   // During a master backup, wait for it (and the original account to reopen) instead of failing (masterBackupGate.ts).
   if (masterBackupGate.active) await masterBackupGate.wait();
@@ -1337,7 +1344,7 @@ const ensureWallet = async (suppressPopup = false, originator?: string): Promise
   }
   walletSetupActive = false;
   return new Promise((resolve, reject) => {
-    pendingWalletWaiters.push({ resolve, reject });
+    pendingWalletWaiters.push({ resolve, reject, token });
     if (pendingWalletWaiters.length === 1) {
       showUnlockUi();
     }
@@ -1363,18 +1370,17 @@ const liveTokenOf = (message: unknown): string | undefined => {
 const askedAgain = new AskedAgain();
 // Set in the worker: closes sheets whose caller went away (ERR_PROMPT_CALLER_GONE; never approves).
 let closeSheetsCallerGone: (refs: SheetRef[]) => void = () => undefined;
-const sheetHooks: SheetHooks = {
+const sheetHooks: SheetHooks = sheetHooksFor(callers, {
   siteOf: (o) => permissionSite(o),
-  raised: (ref) => {
-    // Raised for a call whose caller is already gone (its port closed first): close it before anyone can Allow.
-    if (callers.raise(ref)) queueMicrotask(() => closeSheetsCallerGone([ref]));
-  },
+  // A payment sheet is owned by exactly the call whose createAction raised it (its run carries the call's token).
+  paymentOwner: (kind, id) => (kind === 'permission' ? spendRunCaller(id) : undefined),
+  // Raised for a call whose caller is already gone: closed before anyone can Allow.
+  close: (refs) => closeSheetsCallerGone(refs),
+  // A payment's sheet answered or closed: its run stops holding the site (spendRecipients.ts spendSheetSettled).
   settled: (kind, id) => {
-    callers.settle(kind, id);
-    // A payment's sheet answered or closed: its run stops holding the site (spendRecipients.ts spendSheetSettled).
     if (kind === 'permission') spendSheetSettled(id);
   },
-};
+});
 
 // Pending permission requests waiting for user approval
 const pendingPermissionRequests = new TrackedSheets<{
@@ -1565,7 +1571,21 @@ const askFramePair = (originator: string, topHost: string): Promise<void> =>
 const pendingWalletWaiters: {
   resolve: (wallet: WalletInterface) => void;
   reject: (error: Error) => void;
+  /** The liveness token of the site call waiting, so a caller that leaves takes its waiter with it (BRC-219). */
+  token?: string;
 }[] = [];
+
+/**
+ * The call `token` lost its caller while waiting on the unlock screen (CallerRegistry.guard already answered it):
+ * drop its waiter. If nobody else waits, the unlock window or in-page sheet opened for it closes (the panel's own
+ * lock screen is the wallet itself and stays).
+ */
+const dropUnlockWaiter = (token: string | undefined) => {
+  const { removed, left } = dropTokenWaiters(pendingWalletWaiters, token);
+  if (!removed) return;
+  console.log('[background] the caller left the unlock screen; waiters left:', left);
+  if (left === 0) closeDappPopupIfNoUi();
+};
 
 /**
  * Site calls wait on the unlock screen with no clock (BRC-219). If nothing can show it any more (no panel, no prompt
@@ -4077,7 +4097,12 @@ if (!(
     // UI at once and waits for the person while it is up (services/preApprovalTimeout.ts, BRC-219). Our own pages
     // wait as before.
     // The caller going away ends the wait at once (unlock included): no dead call is left to resume on unlock.
-    (isFromExtension ? ensureWallet(true) : callers.guard(liveToken, walletForSiteRequest(message.originator)))
+    (isFromExtension
+      ? ensureWallet(true)
+      : callers.guard(liveToken, walletForSiteRequest(message.originator, liveToken)).catch((e: unknown) => {
+          if (callers.isDead(liveToken)) dropUnlockWaiter(liveToken);
+          throw e;
+        }))
       .then(() => {
         console.log('[background] ensureWallet resolved for action:', message.action);
         // Connections log (History › Connections): which outside site or app called, and what.
@@ -7095,8 +7120,10 @@ if (!(
       );
       const args = withCallerGoneSignal(
         delayed ? withDelayedBroadcast(message.params) : isAdmin ? message.params : withBroadcastNow(message.params),
-        // BRC-219: the payment-run wait (spendRecipients.ts) stops if this call's caller goes, so it never asks.
+        // BRC-219: the payment-run wait (spendRecipients.ts) stops if this call's caller goes, so it never asks; and
+        // its run carries the call's token, so the payment sheet is owned by exactly this call.
         liveTokenOf(message) ? callers.whenGone(liveTokenOf(message)!) : undefined,
+        liveTokenOf(message),
       );
       if (delayed) console.log(`[createAction] ${bytes} bytes: sending in the background`);
 

@@ -45,8 +45,10 @@ type Call = { site: string; action: string; owners: Set<string>; dead: boolean }
  * usual case); when two documents of one site had calls in flight as the sheet was raised, it fails closed (the live
  * one gets a clear error and can ask again) rather than leave a sheet that could pay for a caller that is gone.
  *
- * A dead call is never a candidate for a sheet raised after it died (re-review, 8 Nov 2026): the live page's sheet
- * is owned by the live calls. Only when NO live call could own a new sheet, and a dead one could, is it closed at once
+ * A payment sheet is bound to its own call (third review, 8 Nov 2026): the payment run of that call's createAction
+ * carries its token (CALLER_TOKEN on the args), so its owner is exact, never guessed. For other sheets, a dead call is
+ * never a candidate for a sheet raised after it died (re-review, 8 Nov 2026): the live page's sheet is owned by the
+ * live calls. Only when NO live call could own a new sheet, and a dead one could, is it closed at once
  * (the dead call's own late request). Dead calls are also made to end promptly: `whenGone` / `guard` let the
  * background reject a dead call's pre-approval waits (unlock, funding, the payment-run wait), so a reload while locked
  * does not leave a second, ownerless call to resume on unlock.
@@ -86,9 +88,16 @@ export class CallerRegistry {
   }
 
   /**
-   * A sheet was raised. Returns true when it must be closed at once: a call that could own it has lost its caller.
+   * A sheet was raised. Returns true when it must be closed at once. `owner`: the call that raised it, when known
+   * (payment sheets); otherwise its owners are guessed from the site's calls in flight (see the class comment).
    */
-  raise(ref: SheetRef): boolean {
+  raise(ref: SheetRef, owner?: string): boolean {
+    // A payment sheet bound to its own call (spendRecipients.ts: the run of that call's createAction carries its
+    // token): owned by exactly that call and the callers who joined it. Already dead -> close at once.
+    if (owner && (this.calls.has(owner) || this.gone.has(owner))) {
+      this.sheets.set(this.key(ref.kind, ref.id), { ref, candidates: new Set([owner]) });
+      return this.isDead(owner);
+    }
     const site = [...this.calls].filter(([, c]) => c.site === ref.site);
     // A payment sheet comes from a createAction; if none is in flight, any of the site's calls may own it.
     const pays = ref.payment ? site.filter(([, c]) => c.action === 'createAction') : [];
@@ -176,6 +185,24 @@ export class CallerRegistry {
   }
 }
 
+/**
+ * Remove the waiters of the call `token` from a wait list (background.ts pendingWalletWaiters) without answering them
+ * (the call was already answered by CallerRegistry.guard). Returns how many were removed and how many are left.
+ */
+export const dropTokenWaiters = <W extends { token?: string }>(
+  list: W[],
+  token: string | undefined,
+): { removed: number; left: number } => {
+  if (!token) return { removed: 0, left: list.length };
+  let removed = 0;
+  for (let i = list.length - 1; i >= 0; i--)
+    if (list[i].token === token) {
+      list.splice(i, 1);
+      removed++;
+    }
+  return { removed, left: list.length };
+};
+
 /** What background.ts needs from a chrome.runtime.Port for the liveness port. */
 export type LivePortLike = {
   onMessage: { addListener: (fn: (m: unknown) => void) => void };
@@ -205,10 +232,44 @@ export const attachLivePort = (port: LivePortLike, registry: CallerRegistry, clo
  */
 export const CALLER_GONE_SIGNAL: unique symbol = Symbol.for('bwalletx.callerGone');
 
-export const withCallerGoneSignal = <T extends object>(args: T, gone: Promise<void> | undefined): T => {
+/** The liveness token of the call these createAction args belong to (same carriage as CALLER_GONE_SIGNAL). */
+export const CALLER_TOKEN: unique symbol = Symbol.for('bwalletx.callerToken');
+
+export const withCallerGoneSignal = <T extends object>(args: T, gone: Promise<void> | undefined, token?: string): T => {
   if (gone) (args as Record<symbol, unknown>)[CALLER_GONE_SIGNAL] = gone;
+  if (token) (args as Record<symbol, unknown>)[CALLER_TOKEN] = token;
   return args;
 };
+
+export const callerTokenOf = (args: unknown): string | undefined => {
+  const t = args && typeof args === 'object' ? (args as Record<symbol, unknown>)[CALLER_TOKEN] : undefined;
+  return typeof t === 'string' ? t : undefined;
+};
+
+/**
+ * The hooks every tracked sheet map in background.ts uses: raise into the registry (a payment sheet with the exact
+ * owner `paymentOwner` reports: its run's call), close at once what the registry says to, settle on answer.
+ */
+export const sheetHooksFor = (
+  registry: CallerRegistry,
+  opts: {
+    siteOf: (originator: string) => string;
+    paymentOwner: (kind: string, id: string) => string | undefined;
+    close: (refs: SheetRef[]) => void;
+    settled?: (kind: string, id: string) => void;
+    defer?: (fn: () => void) => void;
+  },
+): SheetHooks => ({
+  siteOf: opts.siteOf,
+  raised: (ref) => {
+    const owner = ref.payment ? opts.paymentOwner(ref.kind, ref.id) : undefined;
+    if (registry.raise(ref, owner)) (opts.defer ?? queueMicrotask)(() => opts.close([ref]));
+  },
+  settled: (kind, id) => {
+    registry.settle(kind, id);
+    opts.settled?.(kind, id);
+  },
+});
 
 export const callerGoneSignalOf = (args: unknown): Promise<void> | undefined => {
   const g = args && typeof args === 'object' ? (args as Record<symbol, unknown>)[CALLER_GONE_SIGNAL] : undefined;

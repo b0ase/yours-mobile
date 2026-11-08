@@ -26,7 +26,7 @@
  */
 import { Hash, Utils } from '@bsv/sdk';
 import { permissionSite } from './permissionSite';
-import { callerGoneSignalOf, promptCallerGoneError } from './promptLiveness';
+import { callerGoneSignalOf, callerTokenOf, promptCallerGoneError } from './promptLiveness';
 
 export type Recipient = { to: string; satoshis: number };
 
@@ -70,6 +70,10 @@ type Run = {
    * hangs, a look-alike payment still gets its own sheet: its slot is taken, so no request can be mistaken for it.
    */
   answered: boolean;
+  /** The liveness token of the site call this run belongs to (promptLiveness.ts CALLER_TOKEN), if it carried one. */
+  token?: string;
+  /** Its bound requests whose sheets have settled (spendSheetSettled). */
+  settledIDs: Set<string>;
   done: Promise<void>;
   finish: () => void;
   wake: Promise<void>;
@@ -291,9 +295,21 @@ const unbound = (run: Run) => !run.fullID && !run.preID;
 export const spendSheetSettled = (requestID: string): void => {
   const run = bound.get(requestID);
   if (!run || run.answered) return;
+  run.settledIDs.add(requestID);
+  // Every sheet bound to the run must be answered. A solo (module) run's prefunding sheet comes first and its full
+  // sheet may follow: it keeps holding the site until that one is answered too, or two look-alike full requests could
+  // meet and both be refused (third review, Low 3).
+  if (![run.fullID, run.preID].every((id) => !id || run.settledIDs.has(id))) return;
+  if (run.solo && !run.fullID) return;
   run.answered = true;
   run.wakeUp();
 };
+
+/**
+ * The site call a payment request belongs to (its run's liveness token), so its sheet is owned by exactly that call
+ * (promptLiveness.ts CallerRegistry.raise). Undefined when unbound or the call carried no token.
+ */
+export const spendRunCaller = (requestID: string): string | undefined => bound.get(requestID)?.token;
 
 /** The run stops holding its site and is never shown again. Until its action ends it stays a ghost. */
 const release = (run: Run) => {
@@ -360,6 +376,8 @@ export function guardSpendRecipients<T extends object>(
       startedAt: 0,
       released: false,
       answered: false,
+      token: callerTokenOf(args),
+      settledIDs: new Set<string>(),
       done: new Promise<void>((r) => {
         finish = r;
       }),
