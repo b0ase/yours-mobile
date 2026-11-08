@@ -138,7 +138,7 @@ describe('#1 two tabs never pay twice (compare-and-set)', () => {
     const store = memoStore();
     let releaseA!: () => void;
     const gate = new Promise<void>((r) => (releaseA = r));
-    const d: PayDeps = { store, listActions: none, claim: async () => waiting() };
+    const d: PayDeps = { store, listActions: none, claim: async () => waiting(), lock: async (_n, fn) => fn() };
     const a = payAndClaim(
       d,
       'o',
@@ -230,9 +230,10 @@ describe('#4 quote_expired and the quote age', () => {
     expect(payState(store, 'o').kind).toBe('reclaim');
   });
   test('quoteTooOld: by the monotonic clock, over 8 minutes, or a clock that ran backwards', () => {
-    expect(quoteTooOld(1000, 1000 + QUOTE_MAX_AGE_MS)).toBe(false);
-    expect(quoteTooOld(1000, 1000 + QUOTE_MAX_AGE_MS + 1)).toBe(true);
-    expect(quoteTooOld(1000, 500)).toBe(true);
+    const at = (mono: number, wall = 5_000) => ({ mono, wall });
+    expect(quoteTooOld(at(1000), at(1000 + QUOTE_MAX_AGE_MS))).toBe(false);
+    expect(quoteTooOld(at(1000), at(1000 + QUOTE_MAX_AGE_MS + 1))).toBe(true);
+    expect(quoteTooOld(at(1000), at(500))).toBe(true);
   });
 });
 
@@ -382,7 +383,7 @@ describe('#7 the remaining claim answers', () => {
     t += NOT_SEEN_DEAD_MS + 1;
     const o = await checkPayment(d, 'o');
     expect(o!.kind).toBe('check-first');
-    expect(o && 'message' in o && o.message).toContain('failed or was abandoned');
+    expect(o && 'message' in o && o.message).toContain("We can't find transaction");
     const opened = openedOver(store, 'o')!;
     expect(opened).toMatchObject({ kind: 'attempt', quote_id: 'qa', txid: TXA });
     let pays = 0;

@@ -12,6 +12,8 @@
  *     The button is now Check payment with the txid. After a block, Check payment → "Payment claimed", status Paid.
  *  2. Kill right after the wallet approval (new offer): reopen; the card says a payment was started; Check payment
  *     finds it in the wallet by its memo and claims it. No second wallet approval.
+ *     Then, on a payment that IS in the wallet but the network hasn't shown for over an hour, "Search my wallet
+ *     again" finds it (by memo or by txid) and claims it again: it is never marked abandoned and Pay never shows.
  *  3. Decline in the wallet: nothing is recorded; the button is Pay again, with no warning.
  *  4. Leave the sheet open over 10 minutes, then tap Pay in it: "That quote was more than 8 minutes old…" and the
  *     sheet shows again with a fresh quote; only the second Pay pays.
@@ -56,7 +58,9 @@ import {
   QUOTE_REFRESHED_MESSAGE,
   adoptServerPending,
   checkPayment,
+  clocksNow,
   deviceStore,
+  dropKnownOrphans,
   findOrphanPayment,
   heldMessage,
   openedOver,
@@ -69,6 +73,8 @@ import {
   quoteTooOld,
   recordHeld,
   recordOrphan,
+  recordedTxids,
+  sameOpened,
   type ListActionsFn,
   type OpenedOver,
   type PayDeps,
@@ -199,10 +205,13 @@ const NewTranche = ({ api, onDone }: { api: BsharesApi; onDone: () => void }) =>
 /** Offers with a Pay or Check payment in progress on this device (a second tap never starts a second payment). */
 const payingNow = new Set<string>();
 
-/** A monotonic clock for the quote's age (a changed device clock can't make an old quote look fresh). */
-const monoNow = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
-
-type SheetState = { quote: PlacementQuote; warning: string | null; opened: OpenedOver; fetchedAt: number };
+type SheetState = {
+  quote: PlacementQuote;
+  warning: string | null;
+  opened: OpenedOver;
+  /** When the quote was fetched, by both clocks (quoteTooOld). */
+  fetchedAt: { mono: number; wall: number };
+};
 
 const OfferCard = ({
   offer,
@@ -224,6 +233,9 @@ const OfferCard = ({
   const role = me.role === 'director' ? 'director' : 'investor';
   const step = nextStep(offer, role);
   const store = deviceStore();
+  // A payment an offer now shows is no orphan: that warning clears.
+  const paymentTxids = new Set(me.offers.map((o) => o.paymentTxid?.toLowerCase() ?? '').filter(Boolean));
+  if (role === 'investor') dropKnownOrphans(store, offer.id, paymentTxids);
   // This device's record of a payment for this offer (payFlow). Once the offer shows that very payment, it is done.
   let pay: PayState | null = role === 'investor' ? payState(store, offer.id) : null;
   if (pay && pay.kind !== 'none' && offer.paymentTxid && pay.rec.txid === offer.paymentTxid) pay = { kind: 'none' };
@@ -234,9 +246,24 @@ const OfferCard = ({
     // The wallet pays the exact quote, so there is never an excess to choose about: always 'refund'.
     claim: (c) => api.claim(offer.id, { ...c, excessChoice: 'refund' }),
   };
+  // Another tab or window changed this offer's record: re-render, and close a sheet opened over the old state.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== null && !e.key.startsWith('bshares-claim')) return;
+      setSeen((n) => n + 1);
+      if (sheet && !sameOpened(openedOver(deviceStore(), offer.id), sheet.opened)) {
+        setSheet(null);
+        addSnackbar(CHANGED_MESSAGE, 'error');
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [offer.id, sheet, addSnackbar]);
   const report = (o: PayOutcome | null) => {
     if (!o || o.kind === 'check-first') return;
-    if (o.kind === 'claimed') addSnackbar('Payment claimed. The directors approve the allotment next.', 'success');
+    if (o.kind === 'claimed' && o.message) addSnackbar(o.message, 'info');
+    else if (o.kind === 'claimed') addSnackbar('Payment claimed. The directors approve the allotment next.', 'success');
     else if (o.kind === 'refund' || o.kind === 'held' || o.kind === 'returned') addSnackbar(o.message, 'info');
     else addSnackbar(o.message, 'error');
     if (o.kind === 'claimed' || o.kind === 'refund' || o.kind === 'returned') onDone();
@@ -273,7 +300,7 @@ const OfferCard = ({
     let w = warning;
     const t = me.company.treasury;
     if (!w && t && payState(store, offer.id).kind === 'none') {
-      const known = new Set(me.offers.map((o) => o.paymentTxid?.toLowerCase() ?? '').filter(Boolean));
+      const known = new Set([...paymentTxids, ...recordedTxids(store, offer.id)]);
       const orphan = await findOrphanPayment(deps.listActions, t.lockingScriptHex, offer.sats, known);
       if (orphan && recordOrphan(store, offer.id, orphan)) w = orphanMessage(orphan);
     }
@@ -285,7 +312,7 @@ const OfferCard = ({
     }
     // Never a sheet without the warning over a recorded attempt.
     if (!w && opened.kind !== 'none') w = CHECK_FIRST_MESSAGE;
-    setSheet({ quote: q, warning: w, opened, fetchedAt: monoNow() });
+    setSheet({ quote: q, warning: w, opened, fetchedAt: clocksNow() });
   };
   /** Pay (nothing recorded: confirm first) or Check payment / Try the claim again (claims only, never pays). */
   const runPay = async () => {
@@ -313,7 +340,7 @@ const OfferCard = ({
     payingNow.add(offer.id);
     setBusy(true);
     try {
-      if (quoteTooOld(s.fetchedAt, monoNow())) {
+      if (quoteTooOld(s.fetchedAt, clocksNow())) {
         // Sheet left open: a fresh quote, shown again; the person confirms that one.
         addSnackbar(QUOTE_REFRESHED_MESSAGE, 'info');
         await openSheet(s.warning);
@@ -420,11 +447,15 @@ const OfferCard = ({
         {pounds(offer.pricePence)} a share · {bsv(offer.sats)} at {pounds(offer.gbpPerBsvPence)}/BSV ({offer.rateDate})
         · locked 2-of-2, yours alone after {offer.lockMonths} months
       </p>
-      {pay && (step === 'Pay' || pay.kind === 'final' || pay.kind === 'held') && (
-        <p className="m-0 text-xs break-words" style={{ color: MUTED }} role="note">
-          {payNoteFor(pay)}
-        </p>
-      )}
+      {pay &&
+        (step === 'Pay' ||
+          pay.kind === 'final' ||
+          pay.kind === 'held' ||
+          (pay.kind === 'pending' && !!pay.rec.extra)) && (
+          <p className="m-0 text-xs break-words" style={{ color: MUTED }} role="note">
+            {payNoteFor(pay)}
+          </p>
+        )}
       {offer.excessSats ? (
         <p className="m-0 text-xs" style={{ color: MUTED }}>
           Paid {bsv(offer.paidSats ?? offer.sats)}: {bsv(offer.excessSats)} over, as{' '}

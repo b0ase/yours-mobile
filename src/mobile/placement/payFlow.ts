@@ -36,6 +36,8 @@ export type Attempt = {
   abandoned?: boolean;
   /** First time the claim said the network can't see the txid (not_seen). */
   notSeenSince?: number;
+  /** Found in the wallet after another attempt was claimed: a second payment, for the directors to refund. */
+  extra?: boolean;
 };
 /** The stored pending record: the latest attempt, plus the earlier ones. */
 export type PendingPay = Attempt & { earlier?: Attempt[] };
@@ -54,6 +56,8 @@ export interface PayStore {
   get(key: string): string | null;
   set(key: string, value: string): void;
   remove(key: string): void;
+  /** Every key (to find this device's records for other offers); optional. */
+  keys?(): string[];
 }
 
 /** This device's localStorage; every call guarded (private mode, storage off, quota). Writes are read back. */
@@ -79,6 +83,13 @@ export const deviceStore = (): PayStore => ({
       /* ignore */
     }
   },
+  keys: () => {
+    try {
+      return Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i) ?? '').filter(Boolean);
+    } catch {
+      return [];
+    }
+  },
 });
 
 export const pendingKey = (offerId: string) => `bshares-claim:${offerId}`;
@@ -92,9 +103,18 @@ export const NOT_SEEN_DEAD_MS = 60 * 60_000;
 export const QUOTE_INVALID_ASK_AFTER = 3;
 /** A quote older than this (bit-sign's TTL is 10 minutes) is fetched again before the sheet is shown or confirmed. */
 export const QUOTE_MAX_AGE_MS = 8 * 60_000;
-/** Monotonic age check (performance.now()), so a changed device clock can't make an old quote look fresh. */
-export const quoteTooOld = (fetchedAtMono: number, nowMono: number) =>
-  !(nowMono - fetchedAtMono >= 0 && nowMono - fetchedAtMono <= QUOTE_MAX_AGE_MS);
+const ageOk = (from: number, to: number) => to - from >= 0 && to - from <= QUOTE_MAX_AGE_MS;
+/**
+ * Too old when EITHER clock says over 8 minutes, or either ran backwards: performance.now() can't be fooled by a
+ * changed device clock, Date.now() keeps counting while the device sleeps (performance.now() may pause).
+ */
+export const quoteTooOld = (fetched: { mono: number; wall: number }, now: { mono: number; wall: number }) =>
+  !(ageOk(fetched.mono, now.mono) && ageOk(fetched.wall, now.wall));
+/** Both clocks, now. */
+export const clocksNow = () => ({
+  mono: typeof performance !== 'undefined' ? performance.now() : Date.now(),
+  wall: Date.now(),
+});
 
 const parse = (raw: string | null): Record<string, unknown> | null => {
   try {
@@ -119,6 +139,7 @@ function toAttempt(o: Record<string, unknown>): Attempt | null {
   if (o.fromServer === true) a.fromServer = true;
   if (o.orphan === true) a.orphan = true;
   if (o.abandoned === true) a.abandoned = true;
+  if (o.extra === true) a.extra = true;
   if (num(o.notSeenSince)) a.notSeenSince = num(o.notSeenSince);
   // Something to claim (quote) or to look for (memo / txid); a record from before 8 Nov had quote_id + txid only.
   return a.quote_id || a.txid ? a : null;
@@ -318,6 +339,26 @@ export function recordOrphan(store: PayStore, offerId: string, txid: string, now
   ]);
 }
 
+/** Every txid this device's records hold for OTHER offers (so the scan never blames this offer for them). */
+export function recordedTxids(store: PayStore, exceptOfferId: string): Set<string> {
+  const out = new Set<string>();
+  for (const k of store.keys?.() ?? []) {
+    const m = /^bshares-claim(?:-failed)?:(.+)$/.exec(k);
+    if (!m || m[1] === exceptOfferId) continue;
+    for (const a of readAttempts(store, m[1])) if (a.txid) out.add(a.txid);
+    const f = readFailed(store, m[1]);
+    if (f?.txid) out.add(f.txid.toLowerCase());
+  }
+  return out;
+}
+
+/** Drops orphan attempts whose txid an offer now shows as its payment (the warning clears). */
+export function dropKnownOrphans(store: PayStore, offerId: string, paymentTxids: ReadonlySet<string>): void {
+  const all = readAttempts(store, offerId);
+  const keep = all.filter((a) => !(a.orphan && a.txid && paymentTxids.has(a.txid)));
+  if (keep.length !== all.length) writeAttempts(store, offerId, keep);
+}
+
 export type ClaimVerdict = {
   kind: 'retry' | 'reclaim' | 'final' | 'refund' | 'held' | 'returned';
   code: string;
@@ -377,7 +418,9 @@ export const askDirectorsMessage = (txid: string) =>
 export const staleMessage = (txid: string) =>
   `The network still can't see transaction ${txid} after an hour. Don't pay again yet: tap Search my wallet again.`;
 export const abandonedMessage = (txid: string) =>
-  `Your wallet no longer shows transaction ${txid} as sent: it failed or was abandoned. ${CHECK_FIRST_MESSAGE}`;
+  `We can't find transaction ${txid} in this wallet as sent: it may have failed or been abandoned. ${CHECK_FIRST_MESSAGE}`;
+export const extraPaymentMessage = (txid: string) =>
+  `An earlier attempt also went out: ask the directors to refund transaction ${txid}.`;
 export const orphanMessage = (txid: string) =>
   `This wallet already has a bShares payment to this treasury (transaction ${txid}) that this device has no record of. ${CHECK_FIRST_MESSAGE}`;
 const retryMessage = (reason: string, button: string) =>
@@ -434,6 +477,47 @@ export async function findPaidAction(
       if (r.actions.length < PAGE || offset + r.actions.length >= r.totalActions) break;
     }
     return { found: false };
+  } catch {
+    return null;
+  }
+}
+
+/** Newest-first pages of every action read when looking a txid up directly (bounded; past it → couldn't check). */
+const TXID_PAGE = 1000;
+const TXID_MAX_PAGES = 10;
+
+/**
+ * This txid among ALL the wallet's actions (no label filter), newest first: 'sent' when listed with a sent status,
+ * 'absent' when the whole list was read without it (listActions already leaves failed ones out), null when it
+ * couldn't be checked (an error, or more actions than the bound).
+ */
+export async function findTxidAction(listActions: ListActionsFn, txid: string): Promise<'sent' | 'absent' | null> {
+  const want = txid.toLowerCase();
+  try {
+    const head = await listActions({
+      labels: [],
+      includeOutputs: false,
+      includeOutputLockingScripts: false,
+      limit: 1,
+      offset: 0,
+    });
+    const total = head.totalActions;
+    for (let page = 0; page < TXID_MAX_PAGES; page++) {
+      const end = total - page * TXID_PAGE;
+      if (end <= 0) return 'absent';
+      const offset = Math.max(0, end - TXID_PAGE);
+      const r = await listActions({
+        labels: [],
+        includeOutputs: false,
+        includeOutputLockingScripts: false,
+        limit: end - offset,
+        offset,
+      });
+      const hit = r.actions.find((x) => x.txid?.toLowerCase() === want);
+      if (hit) return NOT_OUT.has(hit.status) ? 'absent' : 'sent';
+      if (offset === 0) return 'absent';
+    }
+    return null;
   } catch {
     return null;
   }
@@ -500,16 +584,41 @@ export async function findOrphanPayment(
 
 // ── The flow ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Runs `fn` holding an exclusive lock named `name`, if it is free right now; null when another holder has it.
+ * Browsers: navigator.locks (Web Locks, across every tab and window of this origin).
+ */
+export type PayLock = <T>(name: string, fn: () => Promise<T>) => Promise<T | null>;
+
+type LockManagerLike = {
+  request: (name: string, opts: { ifAvailable: boolean }, cb: (lock: unknown) => unknown) => Promise<unknown>;
+};
+/** navigator.locks with ifAvailable, or null where the browser has none (then payAndClaim's settle check is used). */
+export function webLock(): PayLock | null {
+  const locks = (globalThis as { navigator?: { locks?: LockManagerLike } }).navigator?.locks;
+  if (!locks || typeof locks.request !== 'function') return null;
+  return <T>(name: string, fn: () => Promise<T>) =>
+    locks.request(name, { ifAvailable: true }, (lock) => (lock ? fn() : null)) as Promise<T | null>;
+}
+
+/** Without Web Locks: after writing its attempt, a tab waits this long and pays only if its attempt is still latest. */
+export const SETTLE_MS = 150;
+
 export type PayDeps = {
   store: PayStore;
   listActions: ListActionsFn;
   /** The claim call (the page adds the offer id and excessChoice). */
   claim: (c: { quote_id: string; txid: string; rawtx?: string }) => Promise<ClaimAnswer>;
   now?: () => number;
+  /** The cross-tab lock: undefined → navigator.locks when there is one; null → none (the settle check). */
+  lock?: PayLock | null;
+  /** The settle wait without a lock (tests shorten it). */
+  settleMs?: number;
 };
 
 export type PayOutcome =
-  | { kind: 'claimed' }
+  /** `message`: an earlier attempt also went out (a second payment, for the directors to refund). */
+  | { kind: 'claimed'; message?: string }
   | { kind: 'refund'; message: string; txid: string }
   | { kind: 'held'; message: string; txid: string }
   /** The company already refunded it (payment_returned): records cleared, no button for it. */
@@ -539,7 +648,7 @@ export type PayState =
 
 /** The attempt to claim: the latest with a quote and a txid that isn't abandoned. */
 const claimable = (all: Attempt[]) =>
-  [...all].reverse().find((a) => !!a.txid && !!a.quote_id && !a.orphan && !a.abandoned) ?? null;
+  [...all].reverse().find((a) => !!a.txid && !!a.quote_id && !a.orphan && !a.abandoned && !a.extra) ?? null;
 
 export function payState(store: PayStore, offerId: string, now: number = Date.now()): PayState {
   const f = readFailed(store, offerId);
@@ -553,7 +662,7 @@ export function payState(store: PayStore, offerId: string, now: number = Date.no
   if (!all.length) return { kind: 'none' };
   const c = claimable(all);
   if (c && c.notSeenSince && now - c.notSeenSince > NOT_SEEN_DEAD_MS) return { kind: 'stale', rec: c, all };
-  return { kind: 'pending', rec: c ?? all[all.length - 1], all };
+  return { kind: 'pending', rec: c ?? all.find((a) => a.extra) ?? all[all.length - 1], all };
 }
 
 /** The button for each state; null = no button (a payment that can only be refunded, or is held). */
@@ -572,6 +681,7 @@ export function payNoteFor(s: PayState): string {
   if (s.kind === 'held' || s.kind === 'reclaim' || s.kind === 'final') return failedMessage(s.rec);
   if (s.kind === 'stale') return staleMessage(s.rec.txid!);
   const a = s.rec;
+  if (a.extra && a.txid) return extraPaymentMessage(a.txid);
   if (a.orphan && a.txid) return orphanMessage(a.txid);
   if (a.txid && !a.abandoned)
     return `Your payment went out: transaction ${a.txid}. Don't pay again: tap Check payment to claim it.`;
@@ -595,7 +705,7 @@ export function openedOver(store: PayStore, offerId: string): OpenedOver | null 
   return { kind: 'attempt', quote_id: a.quote_id, txid: a.txid ?? '', startedAt: a.startedAt };
 }
 
-const sameOpened = (a: OpenedOver | null, b: OpenedOver) =>
+export const sameOpened = (a: OpenedOver | null, b: OpenedOver) =>
   !!a &&
   a.kind === b.kind &&
   (a.kind === 'none' ||
@@ -650,10 +760,26 @@ async function claimWith(d: PayDeps, offerId: string, a: Attempt, prior: FailedC
     if (v.kind === 'held') return { kind: 'held', message: heldMessage(paid), txid: paid };
     return { kind: v.kind, message: failedMessage(failed), txid };
   }
-  clearAll(d, offerId);
+  // Claimed: only this attempt is done. Any earlier attempt without a txid is looked for once; one that also went
+  // out is kept (marked extra) for the directors to refund, never claimed or paid over.
+  d.store.remove(failedKey(offerId));
+  updateAttempt(d.store, offerId, a, () => null);
+  const others = readAttempts(d.store, offerId).filter((x) => !x.txid && x.memo_script);
+  let extra = '';
+  if (others.length) {
+    const found = await findPaidAction(
+      d.listActions,
+      others.map((x) => x.memo_script),
+    );
+    if (found?.found && found.txid !== txid) {
+      const o = others.find((x) => x.memo_script === found.memo_script)!;
+      updateAttempt(d.store, offerId, o, (x) => ({ ...x, txid: found.txid, extra: true }));
+      extra = extraPaymentMessage(found.txid);
+    }
+  }
   if (answer?.status === 'refund_due' || answer?.refund_due === true)
-    return { kind: 'refund', message: refundRecorded(txid), txid };
-  return { kind: 'claimed' };
+    return { kind: 'refund', message: extra ? `${refundRecorded(txid)} ${extra}` : refundRecorded(txid), txid };
+  return extra ? { kind: 'claimed', message: extra } : { kind: 'claimed' };
 }
 
 /**
@@ -663,9 +789,14 @@ async function claimWith(d: PayDeps, offerId: string, a: Attempt, prior: FailedC
  */
 async function searchAgain(d: PayDeps, offerId: string, a: Attempt): Promise<PayOutcome> {
   if (a.fromServer) return claimWith(d, offerId, a, null);
-  const r = await findPaidAction(d.listActions, a.memo_script);
-  if (r === null) return { kind: 'retry', message: `${CHECK_UNCHECKED_MESSAGE} Don't pay again yet.`, txid: a.txid! };
-  if (r.found) return claimWith(d, offerId, { ...a, notSeenSince: a.notSeenSince }, null);
+  // Both ways: the memo (bShares actions) and the txid itself (every action, no label filter). Abandoned only when
+  // both lookups read to the end and neither shows it with a sent status.
+  const byMemo = a.memo_script ? await findPaidAction(d.listActions, a.memo_script) : ({ found: false } as const);
+  if (byMemo?.found) return claimWith(d, offerId, a, null);
+  const byTxid = await findTxidAction(d.listActions, a.txid!);
+  if (byTxid === 'sent') return claimWith(d, offerId, a, null);
+  if (byMemo === null || byTxid === null)
+    return { kind: 'retry', message: `${CHECK_UNCHECKED_MESSAGE} Don't pay again yet.`, txid: a.txid! };
   updateAttempt(d.store, offerId, a, (x) => ({ ...x, abandoned: true }));
   return { kind: 'check-first', message: abandonedMessage(a.txid!) };
 }
@@ -730,23 +861,45 @@ export async function payAndClaim(
   opened: OpenedOver,
 ): Promise<PayOutcome> {
   const now = (d.now ?? Date.now)();
-  if (!sameOpened(openedOver(d.store, offerId), opened)) return { kind: 'changed', message: CHANGED_MESSAGE };
+  const changed: PayOutcome = { kind: 'changed', message: CHANGED_MESSAGE };
   const attempt: Attempt = {
     quote_id: q.quote_id,
     memo: q.memo,
     memo_script: q.memo_script.toLowerCase(),
     startedAt: now,
   };
-  const before = readAttempts(d.store, offerId);
-  if (!writeAttempts(d.store, offerId, [...before, attempt])) {
-    // Put back exactly what was there (the write may have half-happened); never drop an earlier attempt.
-    writeAttempts(d.store, offerId, before);
-    return { kind: 'not-sent', message: NO_RECORD_MESSAGE };
-  }
+  const lock = d.lock === undefined ? webLock() : d.lock;
+  type Started = { done: PayOutcome } | { paid: { txid: string; rawtx?: string } } | { error: unknown };
+  // Check + write + createAction as one step: under the cross-tab lock, or (no lock) checked again after a settle.
+  const start = async (): Promise<Started> => {
+    if (!sameOpened(openedOver(d.store, offerId), opened)) return { done: changed };
+    const before = readAttempts(d.store, offerId);
+    if (!writeAttempts(d.store, offerId, [...before, attempt])) {
+      // Take back only our own attempt if it half-landed; whatever else is there now (another tab's) stays.
+      updateAttempt(d.store, offerId, attempt, () => null);
+      return { done: { kind: 'not-sent', message: NO_RECORD_MESSAGE } };
+    }
+    if (!lock) {
+      await new Promise((r) => setTimeout(r, d.settleMs ?? SETTLE_MS));
+      const latest = readAttempts(d.store, offerId).at(-1);
+      if (latest?.quote_id !== attempt.quote_id || latest.startedAt !== attempt.startedAt) {
+        // Another tab wrote meanwhile: this one steps back without paying.
+        updateAttempt(d.store, offerId, attempt, () => null);
+        return { done: changed };
+      }
+    }
+    try {
+      return { paid: await pay() };
+    } catch (error) {
+      return { error };
+    }
+  };
+  const started = lock ? ((await lock(`bshares-pay:${offerId}`, start)) ?? { done: changed }) : await start();
+  if ('done' in started) return started.done;
   let paid: { txid: string; rawtx?: string };
-  try {
-    paid = await pay();
-  } catch (e) {
+  if ('paid' in started) paid = started.paid;
+  else {
+    const e = started.error;
     const found = await findPaidAction(d.listActions, attempt.memo_script);
     if (found?.found) {
       const withTx = { ...attempt, txid: found.txid };
