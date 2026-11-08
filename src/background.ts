@@ -30,6 +30,7 @@ import {
   recipientsForSheet,
   releaseSpendRuns,
   spendApprovalMatches,
+  spendSheetSettled,
 } from './services/spendRecipients';
 import { permissionSite } from './services/permissionSite';
 import type { AccentId } from './mobile/theme/accents';
@@ -157,6 +158,8 @@ import {
   CallerRegistry,
   LIVE_PORT_NAME,
   TrackedSheets,
+  attachLivePort,
+  withCallerGoneSignal,
   promptCallerGoneError,
   siteStillAsking,
   unlockSurfaceGone,
@@ -552,14 +555,7 @@ chrome.runtime.onConnect.addListener((port) => {
   // in that call's message. It disconnects when the calling document, browser or frame goes away; then the sheets
   // that call could own are closed. The port carries nothing else.
   if (port.name === LIVE_PORT_NAME) {
-    let token: string | undefined;
-    port.onMessage.addListener((m: unknown) => {
-      const t = (m as { token?: unknown } | null)?.token;
-      if (token === undefined && typeof t === 'string' && t.length > 0 && t.length <= 100) token = t;
-    });
-    port.onDisconnect.addListener(() => {
-      if (token !== undefined) closeSheetsCallerGone(callers.callerGone(token));
-    });
+    attachLivePort(port, callers, (refs) => closeSheetsCallerGone(refs));
     return;
   }
   if (port.name === 'extension-popup') {
@@ -1358,6 +1354,11 @@ type CallbackResponse = (response: ResponseEventDetail) => void;
  * recorded without touching each call site.
  */
 const callers = new CallerRegistry();
+/** The liveness token a site call carried (set by content.ts / the phone sessions), if any. */
+const liveTokenOf = (message: unknown): string | undefined => {
+  const t = (message as { liveToken?: unknown } | null)?.liveToken;
+  return typeof t === 'string' && t.length > 0 && t.length <= 100 ? t : undefined;
+};
 // Payment sheets per site and outputs, so a repeat says "this site asked for this same payment … ago".
 const askedAgain = new AskedAgain();
 // Set in the worker: closes sheets whose caller went away (ERR_PROMPT_CALLER_GONE; never approves).
@@ -1368,7 +1369,11 @@ const sheetHooks: SheetHooks = {
     // Raised for a call whose caller is already gone (its port closed first): close it before anyone can Allow.
     if (callers.raise(ref)) queueMicrotask(() => closeSheetsCallerGone([ref]));
   },
-  settled: (kind, id) => callers.settle(kind, id),
+  settled: (kind, id) => {
+    callers.settle(kind, id);
+    // A payment's sheet answered or closed: its run stops holding the site (spendRecipients.ts spendSheetSettled).
+    if (kind === 'permission') spendSheetSettled(id);
+  },
 };
 
 // Pending permission requests waiting for user approval
@@ -4071,7 +4076,8 @@ if (!(
     // A site's call never waits silently on the wallet: settling is capped at 8 s, and a locked wallet shows its unlock
     // UI at once and waits for the person while it is up (services/preApprovalTimeout.ts, BRC-219). Our own pages
     // wait as before.
-    (isFromExtension ? ensureWallet(true) : walletForSiteRequest(message.originator))
+    // The caller going away ends the wait at once (unlock included): no dead call is left to resume on unlock.
+    (isFromExtension ? ensureWallet(true) : callers.guard(liveToken, walletForSiteRequest(message.originator)))
       .then(() => {
         console.log('[background] ensureWallet resolved for action:', message.action);
         // Connections log (History › Connections): which outside site or app called, and what.
@@ -7067,7 +7073,9 @@ if (!(
           }),
         );
         const t0 = Date.now();
-        fundingSnap = isAdmin ? await prep : await withStepTimeout(prep, STEP_TIMEOUT_MS, fundingTimeoutError);
+        fundingSnap = isAdmin
+          ? await prep
+          : await callers.guard(liveTokenOf(message), withStepTimeout(prep, STEP_TIMEOUT_MS, fundingTimeoutError));
         console.log(`[createAction] funding preparation took ${Date.now() - t0} ms`);
         timing?.mark('funding');
       } else {
@@ -7085,11 +7093,11 @@ if (!(
         bytes,
         isAdmin ? message.params.options : { ...(message.params.options ?? {}), acceptDelayedBroadcast: undefined },
       );
-      const args = delayed
-        ? withDelayedBroadcast(message.params)
-        : isAdmin
-          ? message.params
-          : withBroadcastNow(message.params);
+      const args = withCallerGoneSignal(
+        delayed ? withDelayedBroadcast(message.params) : isAdmin ? message.params : withBroadcastNow(message.params),
+        // BRC-219: the payment-run wait (spendRecipients.ts) stops if this call's caller goes, so it never asks.
+        liveTokenOf(message) ? callers.whenGone(liveTokenOf(message)!) : undefined,
+      );
       if (delayed) console.log(`[createAction] ${bytes} bytes: sending in the background`);
 
       let result: Awaited<ReturnType<typeof signer.createAction>>;

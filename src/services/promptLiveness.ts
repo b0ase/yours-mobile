@@ -41,9 +41,15 @@ type Call = { site: string; action: string; owners: Set<string>; dead: boolean }
  * that answers leaves every candidate set (it was not waiting on that sheet).
  *
  * When a caller goes, its calls die unless another caller joined them (a deduped Retry: alive while one of its own
- * callers is). Every open sheet with a dead candidate is closed: exact when one call could own it (the usual case);
- * when two documents of one site had calls in flight as the sheet was raised, it fails closed (the live one gets a
- * clear error and can ask again) rather than leave a sheet that could pay for a caller that is gone.
+ * callers is). Every open sheet with a candidate that just died is closed: exact when one call could own it (the
+ * usual case); when two documents of one site had calls in flight as the sheet was raised, it fails closed (the live
+ * one gets a clear error and can ask again) rather than leave a sheet that could pay for a caller that is gone.
+ *
+ * A dead call is never a candidate for a sheet raised after it died (re-review, 8 Nov 2026): the live page's sheet
+ * is owned by the live calls. Only when NO live call could own a new sheet, and a dead one could, is it closed at once
+ * (the dead call's own late request). Dead calls are also made to end promptly: `whenGone` / `guard` let the
+ * background reject a dead call's pre-approval waits (unlock, funding, the payment-run wait), so a reload while locked
+ * does not leave a second, ownerless call to resume on unlock.
  *
  * Only calls that carry a token and will be answered are counted; nothing else (no per-site, per-tab counting).
  */
@@ -52,6 +58,7 @@ export class CallerRegistry {
   private sheets = new Map<string, { ref: SheetRef; candidates: Set<string> }>();
   private gone = new Set<string>();
   private goneOrder: string[] = [];
+  private goneWaiters = new Map<string, (() => void)[]>();
 
   private key = (kind: string, id: string) => `${kind}\u0000${id}`;
 
@@ -74,6 +81,7 @@ export class CallerRegistry {
   /** The call was answered. */
   end(token: string): void {
     this.calls.delete(token);
+    this.goneWaiters.delete(token);
     for (const s of this.sheets.values()) s.candidates.delete(token);
   }
 
@@ -84,9 +92,44 @@ export class CallerRegistry {
     const site = [...this.calls].filter(([, c]) => c.site === ref.site);
     // A payment sheet comes from a createAction; if none is in flight, any of the site's calls may own it.
     const pays = ref.payment ? site.filter(([, c]) => c.action === 'createAction') : [];
-    const candidates = new Set((pays.length ? pays : site).map(([token]) => token));
-    this.sheets.set(this.key(ref.kind, ref.id), { ref, candidates });
-    return [...candidates].some((t) => this.calls.get(t)?.dead);
+    const owners = pays.length ? pays : site;
+    // Owned by the calls still wanted: a call that died before this sheet existed is not one of its owners.
+    const live = owners.filter(([, c]) => !c.dead).map(([token]) => token);
+    this.sheets.set(this.key(ref.kind, ref.id), { ref, candidates: new Set(live) });
+    // Nothing alive could own it, but a dead call could: it is that call's own late request. Close it at once.
+    return live.length === 0 && owners.length > 0;
+  }
+
+  /** True when the call `token` has lost every caller (or its caller left before it started). */
+  isDead(token: string | undefined): boolean {
+    if (!token) return false;
+    const c = this.calls.get(token);
+    return c ? c.dead : this.gone.has(token);
+  }
+
+  /** Resolves when the call `token` loses its last caller (at once if it already has). Never rejects. */
+  whenGone(token: string): Promise<void> {
+    if (this.isDead(token)) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      const list = this.goneWaiters.get(token) ?? [];
+      list.push(resolve);
+      this.goneWaiters.set(token, list);
+    });
+  }
+
+  /**
+   * `work` for the call `token`, or a prompt ERR_PROMPT_CALLER_GONE rejection if its caller goes first. For waits
+   * BEFORE any sheet (unlock, funding): the waiting step itself is left to finish on its own; the call ends now.
+   */
+  guard<T>(token: string | undefined, work: Promise<T>): Promise<T> {
+    if (!token) return work;
+    if (this.isDead(token)) return Promise.reject(promptCallerGoneError());
+    return Promise.race([
+      work,
+      this.whenGone(token).then(() => {
+        throw promptCallerGoneError();
+      }),
+    ]);
   }
 
   /** The sheet was answered or closed. */
@@ -106,6 +149,11 @@ export class CallerRegistry {
         c.dead = true;
         died.add(id);
       }
+    }
+    for (const id of died) {
+      const waiters = this.goneWaiters.get(id) ?? [];
+      this.goneWaiters.delete(id);
+      for (const w of waiters) w();
     }
     if (died.size === 0) return [];
     const close: SheetRef[] = [];
@@ -127,6 +175,45 @@ export class CallerRegistry {
     return [...this.sheets.values()].map((s) => s.ref);
   }
 }
+
+/** What background.ts needs from a chrome.runtime.Port for the liveness port. */
+export type LivePortLike = {
+  onMessage: { addListener: (fn: (m: unknown) => void) => void };
+  onDisconnect: { addListener: (fn: () => void) => void };
+};
+
+/**
+ * background.ts onConnect for a 'bwx-live' port: the port names its call's token in its first message; when it
+ * disconnects (the calling document, browser or frame went away) that call loses this caller, and the sheets it
+ * could own are handed to `close`. The port carries nothing else.
+ */
+export const attachLivePort = (port: LivePortLike, registry: CallerRegistry, close: (refs: SheetRef[]) => void) => {
+  let token: string | undefined;
+  port.onMessage.addListener((m) => {
+    const t = (m as { token?: unknown } | null)?.token;
+    if (token === undefined && typeof t === 'string' && t.length > 0 && t.length <= 100) token = t;
+  });
+  port.onDisconnect.addListener(() => {
+    if (token !== undefined) close(registry.callerGone(token));
+  });
+};
+
+/**
+ * Carried on a site's createAction arguments (an enumerable symbol, so copies made with spread keep it and JSON
+ * drops it): a promise that resolves when that call's caller is gone. spendRecipients.ts stops waiting behind a
+ * look-alike payment then, so a dead call never goes on to raise a sheet.
+ */
+export const CALLER_GONE_SIGNAL: unique symbol = Symbol.for('bwalletx.callerGone');
+
+export const withCallerGoneSignal = <T extends object>(args: T, gone: Promise<void> | undefined): T => {
+  if (gone) (args as Record<symbol, unknown>)[CALLER_GONE_SIGNAL] = gone;
+  return args;
+};
+
+export const callerGoneSignalOf = (args: unknown): Promise<void> | undefined => {
+  const g = args && typeof args === 'object' ? (args as Record<symbol, unknown>)[CALLER_GONE_SIGNAL] : undefined;
+  return g instanceof Promise ? (g as Promise<void>) : undefined;
+};
 
 /**
  * "This site asked again" (BRC-219 review, 8 Nov 2026). With no expiry, a Retry that is not identical (a fresh

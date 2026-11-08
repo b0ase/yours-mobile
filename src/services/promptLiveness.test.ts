@@ -10,6 +10,7 @@ import {
   CallerRegistry,
   PROMPT_CALLER_GONE_CODE,
   TrackedSheets,
+  attachLivePort,
   promptCallerGoneError,
   siteStillAsking,
   unlockSurfaceGone,
@@ -184,5 +185,88 @@ describe('siteStillAsking', () => {
     expect(siteStillAsking(none)).toBe(false);
     expect(siteStillAsking({ ...none, shownSheets: 1 })).toBe(true);
     expect(siteStillAsking({ ...none, walletWaiters: 1 })).toBe(true);
+  });
+});
+
+/** A chrome.runtime.Port stand-in: the content script posts its token; Chrome disconnects it when the page goes. */
+const fakePort = () => {
+  let onMsg: (m: unknown) => void = () => undefined;
+  let onDisc: () => void = () => undefined;
+  return {
+    port: {
+      onMessage: { addListener: (fn: (m: unknown) => void) => (onMsg = fn) },
+      onDisconnect: { addListener: (fn: () => void) => (onDisc = fn) },
+    },
+    post: (m: unknown) => onMsg(m),
+    unload: () => onDisc(),
+  };
+};
+const deferred = <T>() => {
+  let resolve!: (v: T) => void;
+  const p = new Promise<T>((r) => (resolve = r));
+  return { p, resolve };
+};
+const flush = () => new Promise((r) => setTimeout(r, 0));
+
+describe('re-review: a reload while locked, through the background wiring (onConnect -> callerGone -> close)', () => {
+  /** One site call as background.ts runs it: register, wait for unlock under guard, then ask (raise a payment sheet). */
+  const siteCall = (w: ReturnType<typeof wired>, token: string, unlock: Promise<void>, sheetID: string) => {
+    const p = fakePort();
+    attachLivePort(p.port, w.reg, (refs) => {
+      for (const r of refs) if (w.sheets.delete(r.id)) w.closed.push(r.id);
+    });
+    p.post({ token });
+    w.reg.start(token, 'game.example', 'createAction');
+    const answered = w.reg
+      .guard(token, unlock)
+      .then(() => {
+        w.sheets.set(sheetID, { request: { originator: 'game.example', type: 'spending' } });
+        return 'asked';
+      })
+      .catch((e: { code?: string }) => e.code)
+      .finally(() => w.reg.end(token)); // sendResponse
+    return { ...p, answered };
+  };
+
+  test('locked, the page reloads and retries: the old call ends at once, and after unlock the new sheet stays', async () => {
+    const w = wired();
+    const unlock = deferred<void>();
+    const old = siteCall(w, 'doc-old', unlock.p, 'spend-old');
+    old.unload(); // reload instead of unlocking
+    expect(await old.answered).toBe(PROMPT_CALLER_GONE_CODE); // (a) its unlock wait was rejected promptly
+    expect(w.reg.inFlight('game.example')).toBe(0);
+    const fresh = siteCall(w, 'doc-new', unlock.p, 'spend-new');
+    unlock.resolve();
+    expect(await fresh.answered).toBe('asked');
+    await flush();
+    expect(w.closed).toEqual([]);
+    expect(w.sheets.has('spend-old')).toBe(false); // the dead call never asked
+    expect(w.allow('spend-new')).toBe(true); // the live page's payment is approvable
+  });
+
+  test("a dead call that hangs (never answers) does not close the live page's later sheets", () => {
+    const w = wired();
+    const hung = fakePort();
+    attachLivePort(hung.port, w.reg, () => undefined);
+    hung.post({ token: 'doc-old' });
+    w.reg.start('doc-old', 'game.example', 'createAction'); // e.g. the never-answering step, past every wait
+    hung.unload();
+    w.reg.start('doc-new', 'game.example', 'createAction');
+    w.sheets.set('spend-new', { request: { originator: 'game.example', type: 'spending' } });
+    expect(w.closed).toEqual([]); // (b) a call that died before the sheet existed is not its owner
+    expect(w.allow('spend-new')).toBe(true);
+  });
+
+  test('a live candidate that dies later still closes the sheet it could own', () => {
+    const w = wired();
+    const p = fakePort();
+    attachLivePort(p.port, w.reg, (refs) => {
+      for (const r of refs) if (w.sheets.delete(r.id)) w.closed.push(r.id);
+    });
+    p.post({ token: 'doc-1' });
+    w.reg.start('doc-1', 'game.example', 'createAction');
+    w.sheets.set('spend-1', { request: { originator: 'game.example', type: 'spending' } });
+    p.unload();
+    expect(w.closed).toEqual(['spend-1']);
   });
 });

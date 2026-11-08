@@ -26,6 +26,7 @@
  */
 import { Hash, Utils } from '@bsv/sdk';
 import { permissionSite } from './permissionSite';
+import { callerGoneSignalOf, promptCallerGoneError } from './promptLiveness';
 
 export type Recipient = { to: string; satoshis: number };
 
@@ -64,8 +65,15 @@ type Run = {
   preID?: string;
   startedAt: number;
   released: boolean;
+  /**
+   * Its sheet was answered (or closed): from now on it holds nothing. If it was approved and its build or broadcast
+   * hangs, a look-alike payment still gets its own sheet: its slot is taken, so no request can be mistaken for it.
+   */
+  answered: boolean;
   done: Promise<void>;
   finish: () => void;
+  wake: Promise<void>;
+  wakeUp: () => void;
 };
 
 const runs = new Map<string, Run[]>();
@@ -272,8 +280,20 @@ export const noteModuleOutputs = (originator: unknown, outputs: Output[] | undef
   run.noted = true;
 };
 
-/** No sheet of this run is up (or answered and building): only such a run may be released on the clock. */
+/** No sheet of this run has been raised yet: only such a run may be released on the clock. */
 const unbound = (run: Run) => !run.fullID && !run.preID;
+
+/**
+ * background.ts: a spending request's sheet was answered or closed (its pending entry settled). Its run stops holding
+ * the site: a waiting look-alike goes ahead to its own sheet even if this payment's build or broadcast hangs. Nothing
+ * here approves or refuses anything.
+ */
+export const spendSheetSettled = (requestID: string): void => {
+  const run = bound.get(requestID);
+  if (!run || run.answered) return;
+  run.answered = true;
+  run.wakeUp();
+};
 
 /** The run stops holding its site and is never shown again. Until its action ends it stays a ghost. */
 const release = (run: Run) => {
@@ -327,6 +347,7 @@ export function guardSpendRecipients<T extends object>(
     const solo = schemes.length > 0;
     // Read now: the manager encrypts descriptions and modules may rewrite outputs in place.
     let finish: () => void = () => undefined;
+    let wakeUp: () => void = () => undefined;
     const run: Run = {
       site,
       sats: outputs.map(satsOf),
@@ -338,19 +359,31 @@ export function guardSpendRecipients<T extends object>(
       noted: false,
       startedAt: 0,
       released: false,
+      answered: false,
       done: new Promise<void>((r) => {
         finish = r;
       }),
       finish: () => finish(),
+      wake: new Promise<void>((r) => {
+        wakeUp = r;
+      }),
+      wakeUp: () => wakeUp(),
     };
+    // The caller of this call went away (promptLiveness.ts CALLER_GONE_SIGNAL): stop waiting, never raise a sheet.
+    const gone = callerGoneSignalOf(args);
+    let callerLeft = false;
+    void gone?.then(() => {
+      callerLeft = true;
+    });
     // Wait for every running action of this site that a sheet could confuse with this one. Checked and joined in
     // the same turn, so two callers never both find the way clear. Only a run with no sheet bound to it (stuck before
     // it asked) is dropped after holdMs. A run whose sheet is up holds the site until its action ends: the sheet is
     // answered, or closed because its caller went away (BRC-219: sheets have no clock, so neither does this hold).
     for (;;) {
+      if (callerLeft) throw promptCallerGoneError();
       const now = Date.now();
       for (const r of runs.get(site) ?? []) if (unbound(r) && now - r.startedAt > holdMs) release(r);
-      const blocking = (runs.get(site) ?? []).filter((r) => conflicts(r, run));
+      const blocking = (runs.get(site) ?? []).filter((r) => !r.answered && conflicts(r, run));
       if (blocking.length === 0) break;
       const releasable = blocking.filter(unbound);
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -362,9 +395,15 @@ export function guardSpendRecipients<T extends object>(
             }),
           ]
         : [];
-      await Promise.race([...blocking.map((r) => r.done), ...clock]);
+      await Promise.race([
+        ...blocking.map((r) => r.done),
+        ...blocking.map((r) => r.wake),
+        ...clock,
+        ...(gone ? [gone] : []),
+      ]);
       clearTimeout(timer);
     }
+    if (callerLeft) throw promptCallerGoneError();
     run.startedAt = Date.now();
     runs.set(site, [...(runs.get(site) ?? []), run]);
     try {

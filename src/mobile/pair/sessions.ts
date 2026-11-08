@@ -24,7 +24,25 @@ import {
 } from '../../pair/protocol';
 import { inOrder } from '../../pair/in-order';
 import { claimRid, planReturn, type ReturnPlan } from '../../pair/returnTo';
-import { handleSiteCall } from '../dappBrowser';
+import { SiteCallSession, handleSiteCall } from '../dappBrowser';
+
+/**
+ * BRC-219 caller-gone for paired sites: one SiteCallSession per pairing channel, ended when the pairing ends (the user
+ * disconnects it, the site sends its close frame, the channel changes hands, or it lapses). Ending it answers every
+ * call still waiting and closes the sheets those calls could own. A dropped socket is NOT the caller going away: the
+ * site's tab comes back and resends the same id, and ReplyBook re-sends the answer (iOS kills the site's socket while
+ * the user is in bWallet), so a sheet stays up across a reconnect by design.
+ */
+const pairCalls = new Map<string, SiteCallSession>();
+const callsFor = (c: string): SiteCallSession => {
+  let s = pairCalls.get(c);
+  if (!s || s.ended) pairCalls.set(c, (s = new SiteCallSession()));
+  return s;
+};
+const endCallsFor = (c: string) => {
+  pairCalls.get(c)?.end();
+  pairCalls.delete(c);
+};
 import { isMintPrivateCode } from '../../services/mintPrivateAction';
 import { legacyPairedOrigin, pairedOrigin } from '../../services/originKey';
 import { pairedKeyHost, setProvenPairingCheck } from '../../services/crossSiteSignGuard';
@@ -264,6 +282,7 @@ const dropLapsed = (dropped: StoredSession[], kept: StoredSession[]) => {
   const origins = [...new Set(dropped.map(keyOf))].filter((o) => !inUse.has(o));
   if (origins.length) writeQueue([...readQueue(), ...origins]);
   for (const s of dropped) {
+    endCallsFor(s.c);
     replies.forget(s.c);
     const l = live.get(s.c);
     if (!l) continue;
@@ -459,7 +478,7 @@ async function onRequest(l: Live, id: string, action: string, params: unknown) {
     if (login) return reply(l, { t: 'res', id, ...login });
     // The relay's origin is a claim, not proof (audit H1): run under the paired key, never the site's own grants.
     const as = keyOf(l.stored); // this pairing's own key: never shared with another channel claiming the host
-    const r = (await handleSiteCall(as, as + '/', action, params, true)) as {
+    const r = (await handleSiteCall(as, as + '/', action, params, true, callsFor(l.stored.c))) as {
       success?: boolean;
       data?: unknown;
       error?: string;
@@ -575,6 +594,7 @@ function connect(c: string) {
 /** Disconnect a site: tell it, forget the key, and withdraw every grant and allowance the pairing was given. */
 export function forget(c: string, notify = true) {
   forgetLogin(c);
+  endCallsFor(c);
   const stored = load().find((s) => s.c === c);
   const l = live.get(c);
   if (l) {
