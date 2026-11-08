@@ -8,6 +8,8 @@ import npgx2 from './editionArt/npgx-card-2.webp';
 import scammersCard from './editionArt/scammerscartel-dj-card.webp';
 import { LEANNE_CARD_ART } from '../theme/leanneArtX';
 import { TOKENBLASTER_CARD_ART } from '../theme/tokenblasterShopX';
+import dojo1 from './editionArt/bdojox-card-1.webp';
+import dojo2 from './editionArt/bdojox-card-2.webp';
 
 /**
  * Artist edition card art (owner, 16 Oct 2026). VexVoid: a still of the VexVoid point field (the same formulas as the
@@ -23,6 +25,7 @@ export const EDITION_PATTERN_IDS = [
   'leannethedark',
   'tokenblaster',
   'terrornode',
+  'bdojox',
   ...EMOJI_PACK_IDS,
 ] as const satisfies readonly CardPatternId[];
 export type EditionPatternId = (typeof EDITION_PATTERN_IDS)[number];
@@ -65,12 +68,14 @@ export function vexFieldSvg(variant = 0): string {
 }
 
 const RASTER: Record<
-  'npg' | 'npgx' | 'scammerscartel' | 'leannethedark' | 'tokenblaster' | 'terrornode',
+  'npg' | 'npgx' | 'scammerscartel' | 'bdojox' | 'leannethedark' | 'tokenblaster' | 'terrornode',
   readonly string[]
 > = {
   // TokenBlaster's own card art (tokenblaster.lol/brand), empty in a store build.
   tokenblaster: TOKENBLASTER_CARD_ART.tokenblaster ?? [],
   terrornode: TOKENBLASTER_CARD_ART.terrornode ?? [],
+  // bDojoX: our own red/blue torii and white katakana-style wordmark on navy (scripts/bdojox-art.mjs).
+  bdojox: [dojo1, dojo2],
   // Scammers Cartel: a crop of the community's own DJ raccoon banner (scammerscartel.com hero-poster).
   scammerscartel: [scammersCard],
   // Leanne The Dark's card art (leanneArtX.ts), empty in a store build.
