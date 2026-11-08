@@ -224,6 +224,13 @@ const RESERVED = new Set([
   'centbee',
   // Held for the owner (10 Oct 2026); assign it to his wallet by hand when he wants it.
   'richard',
+  // ArtechEx (owner, 8 Nov 2026): artechex@ for the ArtechEx chat agent; the partners' first names.
+  // Held by bCorp's key until each is assigned to its owner's wallet by hand (richard is above).
+  'artechex',
+  'henry',
+  'admir',
+  'andres',
+  'oleg',
   // Messaging, names and terminal products (owner, 27 Oct 2026: bitchatX.com, bMessageX.com, bNamesX).
   'bnet',
   'bms',
