@@ -21,6 +21,8 @@
  *     payment for this offer was just started…" and nothing is sent. On another device (no record there), Pay says
  *     the payment is waiting (quote 409 payment_pending) and turns into Check payment with that txid; it only claims.
  *     A device whose wallet already holds an unrecorded bShares payment to this treasury warns before any sheet pays.
+ *     Stale sheet: open the sheet on the phone, pay and claim from another window or device, then tap Pay in the old
+ *     sheet: nothing is sent (bit-sign answers payment_pending, or this device shows Paid with the txid).
  *  6. Held: when bit-sign holds a payment for a compliance review, the card says "Your payment was received and is
  *     held for a compliance review. Don't pay again." with the txid, no button, also after a reload.
  *  Also: airplane mode while approving → "can't confirm" → Check payment later (finds it, or warns with Cancel
@@ -52,6 +54,7 @@ import { CompanySetup, CreateCompany } from './CompanySetup';
 import type { BsharesApi, PlacementQuote } from './api';
 import { PayConfirmSheet } from './PayConfirmSheet';
 import {
+  AMOUNT_CHANGED_MESSAGE,
   CHANGED_MESSAGE,
   CHECK_FIRST_MESSAGE,
   PAY_BUTTON,
@@ -71,6 +74,7 @@ import {
   paymentHeld,
   quotePaymentPending,
   quoteTooOld,
+  readAttempts,
   recordHeld,
   recordOrphan,
   recordedTxids,
@@ -332,6 +336,55 @@ const OfferCard = ({
       setSeen((n) => n + 1);
     }
   };
+  /**
+   * At Pay time, inside the cross-tab lock and before anything is written or paid: a fresh quote from bit-sign (it
+   * refuses while the offer is paid or closed, or a payment is pending or held) whose amount and treasury must match
+   * the sheet's, and the wallet scan again (a payment made meanwhile, e.g. on another device). null = go ahead.
+   */
+  const freshCheck = (s: SheetState) => async (): Promise<PayOutcome | null> => {
+    let q2: PlacementQuote;
+    try {
+      q2 = await api.quote(offer.id, await shareLockKey(apiContext, offer.id));
+    } catch (e) {
+      const held = paymentHeld(e);
+      if (held) {
+        recordHeld(store, offer.id, held.txid);
+        return { kind: 'held', message: heldMessage(held.txid), txid: held.txid };
+      }
+      const waiting = quotePaymentPending(e);
+      if (waiting) {
+        adoptServerPending(store, offer.id, waiting);
+        return { kind: 'changed', message: waiting.message };
+      }
+      return {
+        kind: 'not-sent',
+        message: `${e instanceof Error ? e.message : 'bShares did not answer.'} Nothing was sent.`,
+      };
+    }
+    const was = s.quote.outputs[0];
+    const now = q2.outputs[0];
+    if (
+      !was ||
+      !now ||
+      q2.outputs.length !== s.quote.outputs.length ||
+      now.satoshis !== was.satoshis ||
+      now.lockingScript.toLowerCase() !== was.lockingScript.toLowerCase()
+    )
+      return { kind: 'requote', message: AMOUNT_CHANGED_MESSAGE, quote: q2 };
+    const bad = payableProblem(me.company, offer, q2);
+    if (bad) return { kind: 'not-sent', message: `${bad}. Nothing was sent.` };
+    const t = me.company.treasury;
+    if (t) {
+      const known = new Set([
+        ...paymentTxids,
+        ...recordedTxids(store, offer.id),
+        ...readAttempts(store, offer.id).map((a) => a.txid ?? ''),
+      ]);
+      const orphan = await findOrphanPayment(deps.listActions, t.lockingScriptHex, offer.sats, known);
+      if (orphan && recordOrphan(store, offer.id, orphan)) return { kind: 'changed', message: orphanMessage(orphan) };
+    }
+    return null;
+  };
   /** Pay in the confirm sheet: the record is saved, then the wallet pays, then the claim. */
   const confirmPay = async () => {
     const s = sheet;
@@ -346,9 +399,21 @@ const OfferCard = ({
         await openSheet(s.warning);
         return;
       }
-      report(
-        await payAndClaim(deps, offer.id, s.quote, () => payTreasury(apiContext, me.company, offer, s.quote), s.opened),
+      const o = await payAndClaim(
+        deps,
+        offer.id,
+        s.quote,
+        () => payTreasury(apiContext, me.company, offer, s.quote),
+        s.opened,
+        freshCheck(s),
       );
+      if (o.kind === 'requote') {
+        // A different amount (or treasury) now: nothing paid; the sheet again with the fresh quote, or a reload when
+        // this card's offer is out of date.
+        addSnackbar(o.message, 'info');
+        if (payableProblem(me.company, offer, o.quote)) onDone();
+        else setSheet({ ...s, quote: o.quote, fetchedAt: clocksNow() });
+      } else report(o);
     } catch (e) {
       addSnackbar(e instanceof Error ? e.message : 'Failed', 'error');
     } finally {
@@ -451,6 +516,7 @@ const OfferCard = ({
         (step === 'Pay' ||
           pay.kind === 'final' ||
           pay.kind === 'held' ||
+          pay.kind === 'claimed' ||
           (pay.kind === 'pending' && !!pay.rec.extra)) && (
           <p className="m-0 text-xs break-words" style={{ color: MUTED }} role="note">
             {payNoteFor(pay)}

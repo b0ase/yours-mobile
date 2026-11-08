@@ -91,7 +91,7 @@ Object.defineProperty(performance, 'now', { configurable: true, value: () => rea
 type Res = { status: number; data: unknown };
 const calls: { path: string; body: unknown }[] = [];
 let claimReplies: (Res | Error)[] = [];
-let quoteReplies: Res[] = [];
+let quoteReplies: (Res | null)[] = [];
 let quotes = 0;
 const http = async (req: { url: string; body?: unknown }): Promise<Res> => {
   const path = new URL(req.url).pathname.replace('/api/bitsign/bshares', '');
@@ -187,6 +187,8 @@ async function tapPay(): Promise<boolean> {
   return true;
 }
 
+/** This device's payment records for the offer (pending / failed), not the "claimed" marker. */
+const records = () => [...store.keys()].filter((k) => /^bshares-claim(-failed)?:/.test(k));
 const claims = () =>
   calls
     .filter((c) => c.path.endsWith('/claim'))
@@ -221,10 +223,10 @@ describe('bShares Pay: a retry claims, never pays twice (audit M5)', () => {
     await tapPay();
     await tapPay();
     expect(created).toBe(1);
-    expect(quotes).toBe(1);
+    expect(quotes).toBe(2); // the sheet's quote, and the fresh check when Pay was tapped
     expect(claims().length).toBe(2);
     expect(claims()[1]).toMatchObject({ txid: claims()[0].txid, quote_id: claims()[0].quote_id });
-    expect(store.size).toBe(0); // pending cleared once claimed
+    expect(records()).toEqual([]); // pending cleared once claimed
   });
 
   test('claim answer lost (network error): the next tap re-claims, no second payment', async () => {
@@ -312,7 +314,7 @@ describe('bShares Pay: the record comes first (review #1)', () => {
     await tapPay(); // relaunched
     expect(created).toBe(1);
     expect(claims().map((c) => c.txid)).toEqual([walletActions[0].txid]);
-    expect(store.size).toBe(0);
+    expect(records()).toEqual([]);
   });
 
   test('"can\'t confirm" but the wallet has it: claimed at once with that txid', async () => {
@@ -323,7 +325,7 @@ describe('bShares Pay: the record comes first (review #1)', () => {
     await tapPay();
     expect(created).toBe(1);
     expect(claims().map((c) => c.txid)).toEqual([walletActions[0].txid]);
-    expect(store.size).toBe(0);
+    expect(records()).toEqual([]);
   });
 
   test('StorageMaybeSentError is "maybe sent", never "failed, pay again"', async () => {
@@ -382,7 +384,7 @@ describe('bShares Pay: the record comes first (review #1)', () => {
       throw new Error('User denied the request');
     };
     await tapPay();
-    expect(store.size).toBe(0);
+    expect(records()).toEqual([]);
     createImpl = payOk;
     await tapPay();
     expect(created).toBe(1);
@@ -417,7 +419,7 @@ describe('bShares Pay: confirm before signing (review #3)', () => {
     expect(v.buttons.has('bshares-sheet-cancel')).toBe(true);
     await v.buttons.get('bshares-sheet-cancel')!();
     expect(created).toBe(0);
-    expect(store.size).toBe(0);
+    expect(records()).toEqual([]);
     expect((await render()).buttons.has('bshares-sheet-pay')).toBe(false);
   });
 
@@ -454,7 +456,7 @@ describe('bShares Pay: claims that may clear up stay claimable (review #4)', () 
       expect(created).toBe(1);
       expect(claims().length).toBe(2);
       expect(claims()[1]).toMatchObject({ quote_id: 'q1', txid: '01' + 'a'.repeat(62) });
-      expect(store.size).toBe(0);
+      expect(records()).toEqual([]);
     });
 
   test("the server's retryable flag wins over the built-in list", async () => {
@@ -483,7 +485,7 @@ describe('bShares Pay: claims that may clear up stay claimable (review #4)', () 
     await tapPay();
     expect(snacks.at(-1)).toContain('Your payment was recorded; the directors will refund it');
     expect(snacks.at(-1)).toContain('01' + 'a'.repeat(62));
-    expect(store.size).toBe(0);
+    expect(records()).toEqual([]);
     expect(created).toBe(1);
   });
 
@@ -491,7 +493,7 @@ describe('bShares Pay: claims that may clear up stay claimable (review #4)', () 
     claimReplies = [{ status: 200, data: { ok: true, already_claimed: true, status: 'refund_due' } }];
     await tapPay();
     expect(snacks.at(-1)).toContain('Your payment was recorded; the directors will refund it');
-    expect(store.size).toBe(0);
+    expect(records()).toEqual([]);
   });
 });
 
@@ -539,7 +541,7 @@ describe('bShares Pay: across devices (review #6)', () => {
     expect(created).toBe(0);
     expect(claims().length).toBe(2);
     expect(claims()[1]).toMatchObject({ quote_id: 'q-other', txid: other });
-    expect(store.size).toBe(0);
+    expect(records()).toEqual([]);
   });
 });
 
@@ -601,7 +603,7 @@ describe('bShares Pay: second re-review (page)', () => {
     await tapPay();
     expect(created).toBe(1);
     expect(claims().length).toBe(2);
-    expect(store.size).toBe(0);
+    expect(records()).toEqual([]);
   });
 
   test('quote 503 sanctions_unavailable with no record: a plain try-later error, nothing stored, Pay stays', async () => {
@@ -617,7 +619,7 @@ describe('bShares Pay: second re-review (page)', () => {
     ];
     await tapPay();
     expect(snacks.at(-1)).toBe('Sanctions screening is unavailable right now.');
-    expect(store.size).toBe(0);
+    expect(records()).toEqual([]);
     expect(created).toBe(0);
     slots.length = 0;
     expect((await render()).buttons.has('bshares-pay')).toBe(true);
@@ -678,7 +680,7 @@ describe('bShares Pay: second re-review (page)', () => {
     ];
     await tapPay();
     expect(snacks.at(-1)).toBe(`Your payment ${tx} was returned by the company (refund ${rf}).`);
-    expect(store.size).toBe(0);
+    expect(records()).toEqual([]);
     slots.length = 0;
     expect((await render()).text).not.toContain('Check payment');
     expect(created).toBe(1);
@@ -699,5 +701,90 @@ describe('bShares Pay: second re-review (page)', () => {
     await bPay();
     expect(created).toBe(1);
     expect(snacks.at(-1)).toContain('Nothing was sent');
+  });
+});
+
+describe('bShares Pay: final check, stale sheets (page)', () => {
+  const TX1 = '01' + 'a'.repeat(62);
+  test('after a claim the card says Paid, with no Pay button, also after a relaunch', async () => {
+    await tapPay();
+    expect(created).toBe(1);
+    slots.length = 0;
+    const v = await render();
+    expect(v.buttons.has('bshares-pay')).toBe(false);
+    expect(v.text).toContain(`Paid: transaction ${TX1}`);
+    expect(await tapPay()).toBe(false);
+    expect(created).toBe(1);
+  });
+
+  test('a sheet opened before another device paid: the Pay-time quote says payment_pending → nothing paid', async () => {
+    const other = 'bb'.repeat(32);
+    quoteReplies = [
+      null, // the sheet's quote
+      {
+        status: 409,
+        data: {
+          error: `A payment for this offer (${other}) is waiting for its confirmation. Don't pay again: check the payment.`,
+          code: 'payment_pending',
+          txid: other,
+          quote_id: 'q-other',
+        },
+      },
+    ];
+    await tapPay();
+    expect(created).toBe(0);
+    expect(snacks.at(-1)).toContain("Don't pay again");
+    slots.length = 0;
+    const v = await render();
+    expect(v.text).toContain('Check payment');
+    expect(v.text).toContain(other);
+  });
+
+  test('the Pay-time quote says payment_held → nothing paid, the held message', async () => {
+    quoteReplies = [
+      null,
+      { status: 409, data: { error: 'held', code: 'payment_held', payment_held: true, payment_txid: TX1 } },
+    ];
+    await tapPay();
+    expect(created).toBe(0);
+    expect(snacks.at(-1)).toContain('held for a compliance review');
+  });
+
+  test('the Pay-time quote has another amount → nothing paid, "The amount changed"', async () => {
+    const memo = 'bitsign-bshares n9';
+    quoteReplies = [
+      null,
+      {
+        status: 200,
+        data: {
+          quote_id: 'q9',
+          expires_at: '',
+          outputs: [{ lockingScript: T, satoshis: 1500 }],
+          memo,
+          memo_script: memoScript(memo),
+        },
+      },
+    ];
+    await tapPay();
+    expect(created).toBe(0);
+    expect(snacks.at(-1)).toContain('The amount changed');
+  });
+
+  test('a payment appears in the wallet between the sheet and Pay → nothing paid, warned, Check payment', async () => {
+    const t = 'ef'.repeat(32);
+    slots.length = 0;
+    await (await render()).buttons.get('bshares-pay')!();
+    walletActions.push({
+      txid: t,
+      status: 'completed',
+      outputs: [
+        { lockingScript: T, satoshis: 1000 },
+        { lockingScript: memoScript('bitsign-bshares other'), satoshis: 0 },
+      ],
+    });
+    await (await render()).buttons.get('bshares-sheet-pay')!();
+    expect(created).toBe(0);
+    expect(snacks.at(-1)).toContain(t);
+    expect((await render()).text).toContain('Check payment');
   });
 });

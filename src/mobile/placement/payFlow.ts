@@ -94,6 +94,14 @@ export const deviceStore = (): PayStore => ({
 
 export const pendingKey = (offerId: string) => `bshares-claim:${offerId}`;
 export const failedKey = (offerId: string) => `bshares-claim-failed:${offerId}`;
+/** Set once a claim for this offer succeeded: no sheet may pay for it again from this device (stale sheets). */
+export const claimedKey = (offerId: string) => `bshares-claimed:${offerId}`;
+
+/** The txid a claim for this offer succeeded with on this device, or null. */
+export function readClaimed(store: PayStore, offerId: string): string | null {
+  const o = parse(store.get(claimedKey(offerId)));
+  return o && str(o.txid) ? str(o.txid).toLowerCase() : null;
+}
 
 /** A stored rawtx/BEEF above this many characters is left out (the claim works without it; review #6). */
 export const RAWTX_STORE_MAX = 150_000;
@@ -405,6 +413,7 @@ export const NO_RECORD_MESSAGE =
   "This device couldn't save a record of the payment, so it wasn't started: without one, a retry could pay twice. Nothing was sent.";
 export const CHANGED_MESSAGE =
   'Another payment for this offer was just started or recorded on this device (another tab or window?). Nothing was sent: check it before paying again.';
+export const AMOUNT_CHANGED_MESSAGE = 'The amount changed since the sheet opened. Check it and tap Pay again.';
 export const QUOTE_REFRESHED_MESSAGE =
   'That quote was more than 8 minutes old, so a fresh one was fetched. Check it and tap Pay again.';
 export const OTHER_DEVICE_NOTE = "If you already paid on another device, don't pay again: check there first.";
@@ -419,6 +428,8 @@ export const staleMessage = (txid: string) =>
   `The network still can't see transaction ${txid} after an hour. Don't pay again yet: tap Search my wallet again.`;
 export const abandonedMessage = (txid: string) =>
   `We can't find transaction ${txid} in this wallet as sent: it may have failed or been abandoned. ${CHECK_FIRST_MESSAGE}`;
+export const paidNote = (txid: string) =>
+  `Paid: transaction ${txid} is claimed for this offer. The directors approve the allotment next. Don't pay again.`;
 export const extraPaymentMessage = (txid: string) =>
   `An earlier attempt also went out: ask the directors to refund transaction ${txid}.`;
 export const orphanMessage = (txid: string) =>
@@ -635,11 +646,15 @@ export type PayOutcome =
   /** A payment was started (or found) but can't be claimed: ask before paying again (Cancel first). */
   | { kind: 'check-first'; message: string }
   /** The record changed since the sheet was opened (another tab): nothing paid; look again. */
-  | { kind: 'changed'; message: string };
+  | { kind: 'changed'; message: string }
+  /** The fresh quote at Pay time differs from the sheet's: nothing paid; show the sheet again with it. */
+  | { kind: 'requote'; message: string; quote: PlacementQuote };
 
 /** What the Pay area shows for this offer on this device. */
 export type PayState =
   | { kind: 'none' }
+  /** A claim for this offer succeeded on this device: Paid; nothing more to do here. */
+  | { kind: 'claimed'; rec: { txid: string } }
   | { kind: 'pending'; rec: Attempt; all: Attempt[] }
   | { kind: 'stale'; rec: Attempt; all: Attempt[] }
   | { kind: 'reclaim'; rec: FailedClaim }
@@ -659,6 +674,9 @@ export function payState(store: PayStore, offerId: string, now: number = Date.no
         ? { kind: 'reclaim', rec: f }
         : { kind: 'final', rec: f };
   const all = readAttempts(store, offerId);
+  const paidTxid = readClaimed(store, offerId);
+  // Claimed: Paid, unless an earlier attempt also went out (then that note, for the directors to refund).
+  if (paidTxid && !all.some((a) => a.extra)) return { kind: 'claimed', rec: { txid: paidTxid } };
   if (!all.length) return { kind: 'none' };
   const c = claimable(all);
   if (c && c.notSeenSince && now - c.notSeenSince > NOT_SEEN_DEAD_MS) return { kind: 'stale', rec: c, all };
@@ -668,6 +686,7 @@ export function payState(store: PayStore, offerId: string, now: number = Date.no
 /** The button for each state; null = no button (a payment that can only be refunded, or is held). */
 export const PAY_BUTTON: Record<PayState['kind'], string | null> = {
   none: 'Pay',
+  claimed: null,
   pending: 'Check payment',
   stale: 'Search my wallet again',
   reclaim: 'Try the claim again',
@@ -678,6 +697,7 @@ export const PAY_BUTTON: Record<PayState['kind'], string | null> = {
 /** The line under the offer for this state (none: the second-device note). */
 export function payNoteFor(s: PayState): string {
   if (s.kind === 'none') return OTHER_DEVICE_NOTE;
+  if (s.kind === 'claimed') return paidNote(s.rec.txid);
   if (s.kind === 'held' || s.kind === 'reclaim' || s.kind === 'final') return failedMessage(s.rec);
   if (s.kind === 'stale') return staleMessage(s.rec.txid!);
   const a = s.rec;
@@ -695,7 +715,7 @@ export type OpenedOver = { kind: 'none' } | { kind: 'attempt'; quote_id: string;
 
 /** The state a sheet opened now is over. null: there is a claimable payment, so no sheet may pay. */
 export function openedOver(store: PayStore, offerId: string): OpenedOver | null {
-  if (readFailed(store, offerId)) return null;
+  if (readFailed(store, offerId) || readClaimed(store, offerId)) return null;
   const all = readAttempts(store, offerId);
   if (!all.length) return { kind: 'none' };
   // A payment with a txid is only ever claimed; a stale one may be paid over only once "Search my wallet again" found
@@ -762,6 +782,8 @@ async function claimWith(d: PayDeps, offerId: string, a: Attempt, prior: FailedC
   }
   // Claimed: only this attempt is done. Any earlier attempt without a txid is looked for once; one that also went
   // out is kept (marked extra) for the directors to refund, never claimed or paid over.
+  const refundDue = answer?.status === 'refund_due' || answer?.refund_due === true;
+  if (!refundDue) d.store.set(claimedKey(offerId), JSON.stringify({ txid, at: (d.now ?? Date.now)() }));
   d.store.remove(failedKey(offerId));
   updateAttempt(d.store, offerId, a, () => null);
   const others = readAttempts(d.store, offerId).filter((x) => !x.txid && x.memo_script);
@@ -777,7 +799,7 @@ async function claimWith(d: PayDeps, offerId: string, a: Attempt, prior: FailedC
       extra = extraPaymentMessage(found.txid);
     }
   }
-  if (answer?.status === 'refund_due' || answer?.refund_due === true)
+  if (refundDue)
     return { kind: 'refund', message: extra ? `${refundRecorded(txid)} ${extra}` : refundRecorded(txid), txid };
   return extra ? { kind: 'claimed', message: extra } : { kind: 'claimed' };
 }
@@ -809,6 +831,7 @@ async function searchAgain(d: PayDeps, offerId: string, a: Attempt): Promise<Pay
 export async function checkPayment(d: PayDeps, offerId: string): Promise<PayOutcome | null> {
   const s = payState(d.store, offerId, (d.now ?? Date.now)());
   if (s.kind === 'none') return null;
+  if (s.kind === 'claimed') return { kind: 'claimed', message: paidNote(s.rec.txid) };
   if (s.kind === 'held') return { kind: 'held', message: heldMessage(s.rec.txid), txid: s.rec.txid };
   if (s.kind === 'final') return { kind: 'final', message: failedMessage(s.rec), txid: s.rec.txid };
   if (s.kind === 'reclaim') return claimWith(d, offerId, { ...s.rec, memo: '', memo_script: '', startedAt: 0 }, s.rec);
@@ -859,6 +882,12 @@ export async function payAndClaim(
   q: Pick<PlacementQuote, 'quote_id' | 'memo' | 'memo_script'>,
   pay: () => Promise<{ txid: string; rawtx?: string }>,
   opened: OpenedOver,
+  /**
+   * Runs inside the lock, before anything is written or paid: a fresh look at the server (quote/status) and the
+   * wallet. null = go ahead; an outcome = stop with it (offer paid or closed, a payment pending or held, the amount
+   * changed, an unrecorded payment found). The state is compared again afterwards.
+   */
+  fresh?: () => Promise<PayOutcome | null>,
 ): Promise<PayOutcome> {
   const now = (d.now ?? Date.now)();
   const changed: PayOutcome = { kind: 'changed', message: CHANGED_MESSAGE };
@@ -873,6 +902,11 @@ export async function payAndClaim(
   // Check + write + createAction as one step: under the cross-tab lock, or (no lock) checked again after a settle.
   const start = async (): Promise<Started> => {
     if (!sameOpened(openedOver(d.store, offerId), opened)) return { done: changed };
+    if (fresh) {
+      const stop = await fresh();
+      if (stop) return { done: stop };
+      if (!sameOpened(openedOver(d.store, offerId), opened)) return { done: changed };
+    }
     const before = readAttempts(d.store, offerId);
     if (!writeAttempts(d.store, offerId, [...before, attempt])) {
       // Take back only our own attempt if it half-landed; whatever else is there now (another tab's) stays.

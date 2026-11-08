@@ -346,7 +346,7 @@ describe('#5 a claim drops only its own attempt', () => {
     const s = payState(store, 'o');
     expect(s).toMatchObject({ kind: 'pending', rec: { txid: TXA, extra: true } });
     expect(payNoteFor(s)).toContain('ask the directors to refund transaction');
-    // never claimed again, and no sheet pays over it without the warning
-    expect(openedOver(store, 'o')).toMatchObject({ kind: 'attempt' });
+    // never claimed again, and (the offer is claimed) no sheet pays for this offer again
+    expect(openedOver(store, 'o')).toBeNull();
   });
 });
