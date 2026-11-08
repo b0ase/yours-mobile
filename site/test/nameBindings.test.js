@@ -31,13 +31,25 @@ const store = (rows) => {
     bindings,
     getAlias: async (a) => aliases.get(a) ?? null,
     countUncollected: async () => 0,
-    deleteAlias: async (a) => void aliases.delete(a),
+    deleteAlias: async (a, k) => {
+      if (!k) throw new Error('deleteAlias needs the owner key');
+      if (aliases.get(a)?.identity_key !== k) return 'gone';
+      aliases.delete(a);
+      return 'ok';
+    },
     deleteByKey: async (k) => {
       let n = 0;
-      for (const [a, r] of aliases) if (r.identity_key === k) (aliases.delete(a), n++);
+      for (const [a, r] of aliases)
+        if (r.identity_key === k) {
+          aliases.delete(a);
+          n++;
+        }
       return { aliases: n, payments: 0 };
     },
-    deleteBinding: async (a) => void bindings.delete(a),
+    deleteBinding: async (a, k) => {
+      if (!k) throw new Error('deleteBinding needs the owner key');
+      if (bindings.get(a)?.identity_key === k) bindings.delete(a);
+    },
     deleteBindingsByKey: async (k) => {
       for (const [a, b] of bindings) if (b.identity_key === k) bindings.delete(a);
     },
@@ -132,10 +144,26 @@ const handoverStore = (rows) => {
     getHandover: async (a) => handovers.get(a) ?? null,
     putHandover: async (r) => void handovers.set(r.alias, { ...r }),
     deleteHandover: async (a) => void handovers.delete(a),
+    // Production semantics: one DELETE filtered by everything signed for; resolves the row or null.
+    claimHandover: async (a, to, seq) => {
+      const x = handovers.get(a);
+      if (!x || x.to_key !== to || Number(x.seq) !== Number(seq)) return null;
+      handovers.delete(a);
+      return x;
+    },
+    cancelHandover: async (a, from) => {
+      const x = handovers.get(a);
+      if (!x || x.from_key !== from) return null;
+      handovers.delete(a);
+      return x;
+    },
     handoversFor: async (k) => [...handovers.values()].filter((h) => h.to_key === k),
-    moveAlias: async (a, k) => {
+    // Production semantics: moves only while the name still points at the releasing key.
+    moveAlias: async (a, k, from) => {
       const r = await s.getAlias(a);
+      if (!r || r.identity_key !== from) return false;
       r.identity_key = k;
+      return true;
     },
   });
 };
@@ -175,6 +203,29 @@ describe('two-party handover (no operator recovery)', () => {
     (await s.getAlias('npg')).identity_key = c.identityKey;
     expect((await h.bind({}, await c.sign('bind', { alias: 'npg', seq: '3' })))[0]).toBe(409);
     expect(await verify((await h.pki({ handle: 'npg@pay.test' }))[1])).toBe('unsigned');
+  });
+
+  test('#F-237 review: an accept and a cancel racing never both win (handover consumed atomically)', async () => {
+    const a = user();
+    const b = user();
+    const s = handoverStore([{ alias: 'npg', identity_key: a.identityKey, kind: 'plain' }]);
+    const h = pm.makeHandlers({ store: s, env: ENV });
+    await h.bind({}, await a.sign('bind', { alias: 'npg', seq: '1' }));
+    await h['handover-release']({}, await a.sign('release', { alias: 'npg', to: b.identityKey, seq: '2' }));
+    const cancelBody = await a.sign('release-cancel', { alias: 'npg' });
+    // The owner's cancel lands while the accept is between reading the handover and moving the name.
+    const getAlias = s.getAlias;
+    let cancel = null;
+    s.getAlias = async (x) => {
+      if (!cancel) cancel = await h['handover-cancel']({}, cancelBody);
+      return getAlias(x);
+    };
+    const [st] = await h['handover-accept']({}, await b.sign('bind', { alias: 'npg', seq: '2' }));
+    const moved = (await getAlias('npg')).identity_key === b.identityKey;
+    expect(cancel).not.toBeNull();
+    // Exactly one wins: a cancel told 200 means the name did not move, and vice versa.
+    expect(cancel[0] === 200).toBe(!moved);
+    expect(st === 200).toBe(moved);
   });
 
   test('the owner can cancel a release before it is accepted', async () => {

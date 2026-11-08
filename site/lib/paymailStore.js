@@ -15,10 +15,20 @@ function supabaseStore(env = process.env, f = fetch) {
   const q = encodeURIComponent;
   const req = async (path, init = {}) => {
     const r = await f(`${url}/rest/v1/${path}`, { ...init, headers: h(init.headers) });
-    if (!r.ok) throw new Error(`supabase ${r.status}`);
+    if (!r.ok) {
+      // status + PostgREST's error body (code / message / details), so a caller can tell a unique-key clash
+      // (409, 23505) from other failures. The body names the constraint, never data from the service key.
+      const e = new Error(`supabase ${r.status}`);
+      e.status = r.status;
+      e.body = String((await r.text().catch(() => '')) || '').slice(0, 500);
+      throw e;
+    }
     const t = await r.text();
     return t ? JSON.parse(t) : null;
   };
+  // A 409 from PostgREST on bwallet_paymail_aliases whose clash is the alias primary key (the name itself).
+  const aliasTaken = (e) =>
+    e && e.status === 409 && /bwallet_paymail_aliases_pkey|Key \(alias\)/i.test(String(e.body || ''));
   const one = async (path) => (await req(path))?.[0] ?? null;
   return {
     getAlias: (alias) => one(`bwallet_paymail_aliases?alias=eq.${q(alias)}&limit=1`),
@@ -66,28 +76,67 @@ function supabaseStore(env = process.env, f = fetch) {
     // Verified social names (alias ends .x / .gmail), for the bWalletX Market "X Accounts" filter.
     listSocial: async (suffix) =>
       (await req(`bwallet_paymail_aliases?kind=eq.${q(suffix)}&select=alias,display_name&limit=5000`)) || [],
-    upsertAlias: async (row) =>
-      (
-        await req('bwallet_paymail_aliases?on_conflict=alias', {
-          method: 'POST',
-          headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
-          // kind: 'plain' | 'x' | 'gmail' (migrations/20261004_bwallet_paymail_social_names.sql)
-          body: JSON.stringify({ ...row, updated_at: new Date().toISOString() }),
-        })
-      )[0],
+    // b-Aware #F-237: names are NEVER written with an upsert (on_conflict + merge-duplicates). An upsert that
+    // landed on a row another wallet had just inserted silently re-pointed that name's identity_key.
+    //
+    // A NEW name: a plain INSERT. Resolves the row, or null when the name (alias primary key) is already taken.
+    // Any other unique clash (one primary per key + kind) throws with status 409.
+    insertAlias: async (row) => {
+      try {
+        return (
+          (
+            await req('bwallet_paymail_aliases', {
+              method: 'POST',
+              headers: { Prefer: 'return=representation' },
+              // kind: 'plain' | 'x' | 'gmail' (migrations/20261004_bwallet_paymail_social_names.sql)
+              body: JSON.stringify({ ...row, updated_at: new Date().toISOString() }),
+            })
+          )?.[0] ?? null
+        );
+      } catch (e) {
+        if (aliasTaken(e)) return null;
+        throw e;
+      }
+    },
+    // The owner's own profile update. Only a row that still points at `key` is touched (alias AND identity_key in
+    // the filter), and identity_key / alias / kind are never in the patch. Resolves the row, or null for 0 rows
+    // (the name is not, or no longer, this wallet's).
+    updateOwnAlias: async (alias, key, patch) => {
+      const { ord_address, display_name, avatar } = patch || {};
+      return (
+        (
+          await req(`bwallet_paymail_aliases?alias=eq.${q(alias)}&identity_key=eq.${q(key)}`, {
+            method: 'PATCH',
+            headers: { Prefer: 'return=representation' },
+            body: JSON.stringify({ ord_address, display_name, avatar, updated_at: new Date().toISOString() }),
+          })
+        )?.[0] ?? null
+      );
+    },
     // migrations/20261024_paymail_ord_proof.sql: the owner's signature over their ordinal address.
-    setOrdProof: (alias, proof) =>
-      req(`bwallet_paymail_aliases?alias=eq.${q(alias)}`, {
+    // Only on a row that still points at `key` (the wallet that signed the proof).
+    setOrdProof: (alias, key, proof) =>
+      req(`bwallet_paymail_aliases?alias=eq.${q(alias)}&identity_key=eq.${q(key)}`, {
         method: 'PATCH',
         headers: { Prefer: 'return=minimal' },
         body: JSON.stringify({ ord_proof: proof }),
       }),
-    renameAlias: (from, to) =>
-      req(`bwallet_paymail_aliases?alias=eq.${q(from)}`, {
-        method: 'PATCH',
-        headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify({ alias: to, updated_at: new Date().toISOString() }),
-      }),
+    // Rename one of `key`'s names (payments follow: FK on update cascade). 'ok', 'taken' when `to` is already a
+    // name (alias primary key clash), or 'gone' when `from` no longer points at `key` (0 rows).
+    renameAlias: async (from, to, key) => {
+      if (!key) throw new Error('renameAlias needs the owner key');
+      try {
+        const rows = await req(`bwallet_paymail_aliases?alias=eq.${q(from)}&identity_key=eq.${q(key)}`, {
+          method: 'PATCH',
+          headers: { Prefer: 'return=representation' },
+          body: JSON.stringify({ alias: to, updated_at: new Date().toISOString() }),
+        });
+        return rows && rows.length ? 'ok' : 'gone';
+      } catch (e) {
+        if (aliasTaken(e)) return 'taken';
+        throw e;
+      }
+    },
     // Name forwards (migrations/20261009_bwallet_paymail_forwards.sql): old/extra name -> main name.
     getForward: (from) => one(`bwallet_paymail_forwards?from_alias=eq.${q(from)}&limit=1`),
     putForward: (row) =>
@@ -180,8 +229,23 @@ function supabaseStore(env = process.env, f = fetch) {
     getBinding: (alias) => one(`bwallet_name_bindings?alias=eq.${q(alias)}&limit=1`),
     // A released name (unlink / delete wallet) keeps no signed binding, or its next owner could never bind it
     // (b-Aware 25 Oct 2026, darkasep112: bind answered 409 "signed by another wallet" forever).
-    deleteBinding: (alias) =>
-      req(`bwallet_name_bindings?alias=eq.${q(alias)}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } }),
+    // A name just taken fresh (INSERT / rename into it) by `key`: any binding another key signed for it is stale and
+    // would stop the new owner binding it (darkasep112). Only rows of OTHER keys are removed.
+    deleteForeignBindings: (alias, key) => {
+      if (!key) throw new Error('deleteForeignBindings needs the new owner key');
+      return req(`bwallet_name_bindings?alias=eq.${q(alias)}&identity_key=neq.${q(key)}`, {
+        method: 'DELETE',
+        headers: { Prefer: 'return=minimal' },
+      });
+    },
+    // Only the binding `key` signed (unlink of one of its names).
+    deleteBinding: (alias, key) => {
+      if (!key) throw new Error('deleteBinding needs the owner key');
+      return req(`bwallet_name_bindings?alias=eq.${q(alias)}&identity_key=eq.${q(key)}`, {
+        method: 'DELETE',
+        headers: { Prefer: 'return=minimal' },
+      });
+    },
     deleteBindingsByKey: (k) =>
       req(`bwallet_name_bindings?identity_key=eq.${q(k)}`, {
         method: 'DELETE',
@@ -234,26 +298,125 @@ function supabaseStore(env = process.env, f = fetch) {
         headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
         body: JSON.stringify(row),
       }),
-    deleteHandover: (alias) =>
-      req(`bwallet_name_handovers?alias=eq.${q(alias)}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } }),
+    // A handover is consumed atomically: one DELETE filtered by everything the caller signed for; whoever gets the
+    // row (accept or cancel) wins, the other sees nothing. Resolves the row, or null.
+    claimHandover: async (alias, toKey, seq) =>
+      (
+        await req(`bwallet_name_handovers?alias=eq.${q(alias)}&to_key=eq.${q(toKey)}&seq=eq.${Number(seq)}`, {
+          method: 'DELETE',
+          headers: { Prefer: 'return=representation' },
+        })
+      )?.[0] ?? null,
+    // A claimed handover whose move then FAILED (an error, not a refusal) is put back, never over a newer release.
+    restoreHandover: (row) =>
+      req('bwallet_name_handovers?on_conflict=alias', {
+        method: 'POST',
+        headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
+        body: JSON.stringify({
+          alias: row.alias,
+          from_key: row.from_key,
+          to_key: row.to_key,
+          seq: row.seq,
+          release_sig: row.release_sig,
+          release_ts: row.release_ts,
+        }),
+      }),
+    cancelHandover: async (alias, fromKey) =>
+      (
+        await req(`bwallet_name_handovers?alias=eq.${q(alias)}&from_key=eq.${q(fromKey)}`, {
+          method: 'DELETE',
+          headers: { Prefer: 'return=representation' },
+        })
+      )?.[0] ?? null,
     handoversFor: async (key) =>
       (await req(`bwallet_name_handovers?to_key=eq.${q(key)}&select=alias,from_key,to_key,seq,created_at`)) ?? [],
-    /** Point a name at a new key (the trigger logs it). Main name only if the new key has no main plain name. */
-    moveAlias: async (alias, key) => {
-      const hasMain = await one(
-        `bwallet_paymail_aliases?identity_key=eq.${q(key)}&kind=eq.plain&is_primary=eq.true&select=alias&limit=1`,
-      );
-      await req(`bwallet_paymail_aliases?alias=eq.${q(alias)}`, {
-        method: 'PATCH',
+    // The hold on a name being renamed away (#F-237): written BEFORE the rename, never over an existing forward
+    // (ignore-duplicates). Resolves true only when THIS call created it.
+    holdForward: async (row) =>
+      (
+        (await req('bwallet_paymail_forwards?on_conflict=from_alias', {
+          method: 'POST',
+          headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
+          body: JSON.stringify(row),
+        })) ?? []
+      ).length > 0,
+    // Point `key`'s own forward from `from` at `to` (and, if given, a new expiry). `onlyIfTo`: only while it still
+    // points there. Resolves true when a row changed.
+    repointOwnForward: async (from, key, to, { expiresAt, onlyIfTo } = {}) =>
+      (
+        (await req(
+          `bwallet_paymail_forwards?from_alias=eq.${q(from)}&identity_key=eq.${q(key)}${
+            onlyIfTo ? `&to_alias=eq.${q(onlyIfTo)}` : ''
+          }`,
+          {
+            method: 'PATCH',
+            headers: { Prefer: 'return=representation' },
+            body: JSON.stringify(expiresAt ? { to_alias: to, expires_at: expiresAt } : { to_alias: to }),
+          },
+        )) ?? []
+      ).length > 0,
+    // Forwards of OTHER keys from a name `key` owns (unlink): stale by definition while the row is `key`'s.
+    deleteForeignForwards: (from, key) => {
+      if (!key) throw new Error('deleteForeignForwards needs the owner key');
+      return req(`bwallet_paymail_forwards?from_alias=eq.${q(from)}&identity_key=neq.${q(key)}`, {
+        method: 'DELETE',
         headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify({ identity_key: key, is_primary: !hasMain, updated_at: new Date().toISOString() }),
       });
+    },
+    // Remove `key`'s own forward from `from`; with `to` / `expiresAt`, only while it still has exactly those (a hold
+    // this request made and nobody touched since).
+    deleteOwnForward: (from, key, { to, expiresAt } = {}) =>
+      req(
+        `bwallet_paymail_forwards?from_alias=eq.${q(from)}&identity_key=eq.${q(key)}${to ? `&to_alias=eq.${q(to)}` : ''}${
+          expiresAt ? `&expires_at=eq.${q(expiresAt)}` : ''
+        }`,
+        { method: 'DELETE', headers: { Prefer: 'return=minimal' } },
+      ),
+    /**
+     * The ONLY code path that changes a name's identity_key: a signed two-party handover (handover-accept).
+     * Moves `alias` from `fromKey` to `toKey` only while it still points at `fromKey`. Resolves true when it
+     * moved, false when the name changed hands since the release. Main name only if the new key has none.
+     * Uses the bwallet_move_alias RPC (migrations/20261108_paymail_alias_key_guard.sql: the only way past the
+     * trigger that refuses identity_key changes); before that migration runs, the same guarded PATCH.
+     */
+    moveAlias: async (alias, toKey, fromKey) => {
+      if (!fromKey) throw new Error('moveAlias needs the current owner key');
+      // Keys are stored lower-case; the RPC normalises the same way.
+      toKey = String(toKey).toLowerCase();
+      fromKey = String(fromKey).toLowerCase();
+      try {
+        return (
+          (await req('rpc/bwallet_move_alias', {
+            method: 'POST',
+            body: JSON.stringify({ p_alias: alias, p_from: fromKey, p_to: toKey }),
+          })) === true
+        );
+      } catch (e) {
+        // PGRST202 / 404: the function isn't there yet (migration not run). Anything else is a real failure.
+        if (!(e && (e.status === 404 || /PGRST202/.test(String(e.body || ''))))) throw e;
+      }
+      const hasMain = await one(
+        `bwallet_paymail_aliases?identity_key=eq.${q(toKey)}&kind=eq.plain&is_primary=eq.true&select=alias&limit=1`,
+      );
+      const rows = await req(`bwallet_paymail_aliases?alias=eq.${q(alias)}&identity_key=eq.${q(fromKey)}`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify({ identity_key: toKey, is_primary: !hasMain, updated_at: new Date().toISOString() }),
+      });
+      return !!(rows && rows.length);
     },
     recordNameEvent: (row) =>
       req('bwallet_paymail_name_events', {
         method: 'POST',
         headers: { Prefer: 'return=minimal' },
         body: JSON.stringify(row),
+      }),
+    // A fee recorded for a name that was then lost to a racing claim (#F-237): released so the same fee tx (it
+    // commits to this alias + key) can still pay for this name. Only that exact receipt row is deleted.
+    releaseFeeTx: ({ txid, identity_key, alias }) =>
+      req(`bwallet_paymail_name_fees?txid=eq.${q(txid)}&identity_key=eq.${q(identity_key)}&alias=eq.${q(alias)}`, {
+        method: 'DELETE',
+        headers: { Prefer: 'return=minimal' },
       }),
     // true when this txid had not paid for a name before (and is now recorded), false when reused.
     useFeeTx: async (row) =>
@@ -352,15 +515,35 @@ function supabaseStore(env = process.env, f = fetch) {
         headers: { Prefer: 'return=minimal' },
         body: JSON.stringify({ display_name: name, updated_at: new Date().toISOString() }),
       }),
-    deleteAlias: async (alias) => {
-      await req(`bwallet_paymail_payments?alias=eq.${q(alias)}`, {
+    // Unlink one of `key`'s names. Nothing is deleted until both checks pass: the row still points at `key`, and no
+    // payment record of ANOTHER key (a previous owner's, on a handed-over name) references it (FK ON DELETE RESTRICT
+    // would refuse the row anyway, after this key's own records were already gone). Then only `key`'s own payment
+    // records and the row (still filtered by `key`) are deleted.
+    // 'ok'; 'gone' (not, or no longer, this wallet's); 'blocked' (another key's payment records reference it).
+    deleteAlias: async (alias, key) => {
+      if (!key) throw new Error('deleteAlias needs the owner key');
+      const mine = await one(
+        `bwallet_paymail_aliases?alias=eq.${q(alias)}&identity_key=eq.${q(key)}&select=alias&limit=1`,
+      );
+      if (!mine) return 'gone';
+      const foreign = await one(
+        `bwallet_paymail_payments?alias=eq.${q(alias)}&identity_key=neq.${q(key)}&select=reference&limit=1`,
+      );
+      if (foreign) return 'blocked';
+      await req(`bwallet_paymail_payments?alias=eq.${q(alias)}&identity_key=eq.${q(key)}`, {
         method: 'DELETE',
         headers: { Prefer: 'return=minimal' },
       });
-      await req(`bwallet_paymail_aliases?alias=eq.${q(alias)}`, {
-        method: 'DELETE',
-        headers: { Prefer: 'return=minimal' },
-      });
+      try {
+        const rows = await req(`bwallet_paymail_aliases?alias=eq.${q(alias)}&identity_key=eq.${q(key)}`, {
+          method: 'DELETE',
+          headers: { Prefer: 'return=representation' },
+        });
+        return rows && rows.length ? 'ok' : 'gone';
+      } catch (e) {
+        if (e && e.status === 409) return 'blocked';
+        throw e;
+      }
     },
     deleteByKey: async (k) => {
       const del = async (table) =>

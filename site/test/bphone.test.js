@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { PrivateKey, ProtoWallet, Utils } from '@bsv/sdk';
 import pm from '../lib/paymail.js';
 import { cleanBookingRequest, cleanProfile, cleanRate } from '../lib/bphone.js';
+import { aliasWrites } from './fixtures/aliasWrites.js';
 
 const ENV = { PAYMAIL_DOMAIN: 'pay.test' };
 
@@ -18,7 +19,7 @@ const memStore = () => {
     getAliasByKeyKind: async (k, kind) =>
       [...aliases.values()].find((r) => r.identity_key === k && (r.kind ?? 'plain') === kind) ?? null,
     listByKey: async (k) => [...aliases.values()].filter((r) => r.identity_key === k),
-    upsertAlias: async (r) => (aliases.set(r.alias, { ...r }), r),
+    ...aliasWrites(aliases),
     getBphone: async (k) => profiles.get(k) ?? null,
     setBphone: async (k, profile) =>
       void profiles.set(k, {

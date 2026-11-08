@@ -70,6 +70,90 @@ describe('paymailStore: primary names', () => {
   });
 });
 
+describe('paymailStore: name writes never merge (b-Aware #F-237)', () => {
+  const KEY = '02' + 'a'.repeat(64);
+  const OTHER = '03' + 'b'.repeat(64);
+  const PKEY_409 = {
+    code: '23505',
+    message: 'duplicate key value violates unique constraint "bwallet_paymail_aliases_pkey"',
+    details: 'Key (alias)=(alice) already exists.',
+  };
+
+  test('no request to bwallet_paymail_aliases uses on_conflict / merge-duplicates (source check)', () => {
+    const src = require('node:fs').readFileSync(require.resolve('../lib/paymailStore.js'), 'utf8');
+    expect(src).not.toMatch(/bwallet_paymail_aliases\?on_conflict/);
+    expect(src).not.toMatch(/upsertAlias/);
+    // Every merge-duplicates request names another table.
+    for (const m of src.matchAll(/req\('([a-z_]+)\?on_conflict[^']*',\s*\{[^}]*merge-duplicates/g))
+      expect(m[1]).not.toBe('bwallet_paymail_aliases');
+  });
+
+  test('insertAlias: a plain POST; an alias clash resolves null; any other clash throws', async () => {
+    const ok = fakeFetch(() => [201, [{ alias: 'alice' }]]);
+    expect(await storeLib.supabaseStore(ENV, ok.f).insertAlias({ alias: 'alice', identity_key: KEY })).toEqual({
+      alias: 'alice',
+    });
+    expect(ok.calls[0].method).toBe('POST');
+    expect(ok.calls[0].url).toMatch(/\/rest\/v1\/bwallet_paymail_aliases$/);
+    const taken = fakeFetch(() => [409, PKEY_409]);
+    expect(await storeLib.supabaseStore(ENV, taken.f).insertAlias({ alias: 'alice', identity_key: KEY })).toBeNull();
+    const other = fakeFetch(() => [409, { code: '23505', message: 'violates "bwallet_paymail_aliases_key_kind"' }]);
+    await expect(
+      storeLib.supabaseStore(ENV, other.f).insertAlias({ alias: 'alice', identity_key: KEY }),
+    ).rejects.toThrow('supabase 409');
+  });
+
+  test('updateOwnAlias: PATCH filtered by alias AND identity_key; never sends identity_key/alias/kind', async () => {
+    const { f, calls } = fakeFetch(() => [200, []]);
+    const s = storeLib.supabaseStore(ENV, f);
+    const out = await s.updateOwnAlias('alice', KEY, {
+      identity_key: OTHER,
+      alias: 'bob',
+      kind: 'x',
+      display_name: 'Alice',
+      avatar: null,
+      ord_address: null,
+    });
+    expect(out).toBeNull(); // 0 rows: not theirs
+    expect(calls[0].method).toBe('PATCH');
+    expect(calls[0].url).toContain(`bwallet_paymail_aliases?alias=eq.alice&identity_key=eq.${KEY}`);
+    const body = JSON.parse(calls[0].body);
+    expect(body).not.toHaveProperty('identity_key');
+    expect(body).not.toHaveProperty('alias');
+    expect(body).not.toHaveProperty('kind');
+    expect(body.display_name).toBe('Alice');
+  });
+
+  test("renameAlias: filtered by the owner's key; 'taken' on an alias clash, 'gone' on 0 rows", async () => {
+    const ok = fakeFetch(() => [200, [{ alias: 'new' }]]);
+    expect(await storeLib.supabaseStore(ENV, ok.f).renameAlias('old', 'new', KEY)).toBe('ok');
+    expect(ok.calls[0].url).toContain(`aliases?alias=eq.old&identity_key=eq.${KEY}`);
+    expect(await storeLib.supabaseStore(ENV, fakeFetch(() => [409, PKEY_409]).f).renameAlias('old', 'new', KEY)).toBe(
+      'taken',
+    );
+    expect(await storeLib.supabaseStore(ENV, fakeFetch(() => [200, []]).f).renameAlias('old', 'new', KEY)).toBe('gone');
+    await expect(storeLib.supabaseStore(ENV, ok.f).renameAlias('old', 'new')).rejects.toThrow();
+  });
+
+  test('moveAlias: the RPC first; before the migration, a PATCH filtered by the releasing key', async () => {
+    const rpc = fakeFetch(() => [200, true]);
+    expect(await storeLib.supabaseStore(ENV, rpc.f).moveAlias('alice', OTHER, KEY)).toBe(true);
+    expect(rpc.calls.length).toBe(1);
+    expect(rpc.calls[0].url).toContain('/rpc/bwallet_move_alias');
+    expect(JSON.parse(rpc.calls[0].body)).toEqual({ p_alias: 'alice', p_from: KEY, p_to: OTHER });
+    const old = fakeFetch((c) =>
+      c.url.includes('/rpc/') ? [404, { code: 'PGRST202' }] : c.method === 'PATCH' ? [200, []] : [200, []],
+    );
+    expect(await storeLib.supabaseStore(ENV, old.f).moveAlias('alice', OTHER, KEY)).toBe(false);
+    const patch = old.calls.find((c) => c.method === 'PATCH');
+    expect(patch.url).toContain(`aliases?alias=eq.alice&identity_key=eq.${KEY}`);
+    // A real RPC failure is not papered over by the fallback.
+    const boom = fakeFetch(() => [500, {}]);
+    await expect(storeLib.supabaseStore(ENV, boom.f).moveAlias('alice', OTHER, KEY)).rejects.toThrow('supabase 500');
+    await expect(storeLib.supabaseStore(ENV, rpc.f).moveAlias('alice', OTHER)).rejects.toThrow();
+  });
+});
+
 // In-memory store with is_primary, shaped like supabaseStore. Any DELETE of an alias fails the test.
 const memStore = () => {
   const aliases = new Map();
@@ -98,11 +182,14 @@ const memStore = () => {
       if (from) aliases.get(from).is_primary = false;
       aliases.get(to).is_primary = true;
     },
-    renameAlias: async (from, to) => {
+    renameAlias: async (from, to, key) => {
       ops.push(`rename:${from}`);
       const r = aliases.get(from);
+      if (!r || r.identity_key !== key) return 'gone';
+      if (aliases.has(to)) return 'taken';
       aliases.delete(from);
       aliases.set(to, { ...r, alias: to });
+      return 'ok';
     },
     deleteAlias: async () => {
       throw new Error('remove must never delete an alias');
@@ -113,6 +200,24 @@ const memStore = () => {
       forwards.set(r.from_alias, { ...r });
     },
     deleteForward: async (a) => void forwards.delete(a),
+    holdForward: async (r) => {
+      ops.push(`forward:${r.from_alias}`);
+      if (forwards.has(r.from_alias)) return false;
+      forwards.set(r.from_alias, { ...r });
+      return true;
+    },
+    repointOwnForward: async (from, key, to, { expiresAt, onlyIfTo } = {}) => {
+      const fw = forwards.get(from);
+      if (!fw || fw.identity_key !== key || (onlyIfTo && fw.to_alias !== onlyIfTo)) return false;
+      fw.to_alias = to;
+      if (expiresAt) fw.expires_at = expiresAt;
+      return true;
+    },
+    deleteOwnForward: async (from, key, { to, expiresAt } = {}) => {
+      const fw = forwards.get(from);
+      if (fw && fw.identity_key === key && (!to || fw.to_alias === to) && (!expiresAt || fw.expires_at === expiresAt))
+        forwards.delete(from);
+    },
     retargetForwards: async (from, to) => {
       for (const r of forwards.values()) if (r.to_alias === from) r.to_alias = to;
     },
@@ -231,6 +336,11 @@ describe('several names per wallet', () => {
       two: { alias: 'two', identity_key: u.identityKey, kind: 'plain', is_primary: false },
     };
     const { f, calls } = fakeFetch((c) => {
+      // PostgREST answers a return=representation write with the rows it wrote.
+      if (c.method === 'PATCH' && c.url.includes('aliases?alias=eq.two&identity_key=eq.'))
+        return [200, [{ ...rows.two, ...JSON.parse(c.body) }]];
+      if (c.method === 'POST' && c.url.includes('bwallet_paymail_forwards')) return [201, [JSON.parse(c.body)]];
+      if (c.method === 'PATCH' && c.url.includes('bwallet_paymail_forwards')) return [200, [{}]];
       if (c.method !== 'GET') return [204, undefined];
       if (c.url.includes('bwallet_paymail_forwards')) return [200, []];
       if (c.url.includes('kind=eq.plain&is_primary=is.true')) return [200, [rows.one]];
