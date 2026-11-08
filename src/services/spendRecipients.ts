@@ -17,9 +17,10 @@
  *    own outputs, and its prefunding request (no line items) is the site's only run, so both list them. An asset
  *    module rewrites the outputs: the spend gate notes what it really sends (noteModuleOutputs) and that is listed;
  *  - Allow is checked again (spendApprovalMatches): the list and hash on the request must be its bound run's;
- *  - a run that never ends stops holding its site after SPEND_RUN_HOLD_MS, or when the wallet closes
- *    (releaseSpendRuns). A released run is never shown, and until its action ends any request that could be its
- *    own is refused unless every possible owner pays the same outputs.
+ *  - a run with no sheet bound to it that never ends stops holding its site after SPEND_RUN_HOLD_MS, or when the
+ *    wallet closes (releaseSpendRuns). A run whose sheet is up is never released on the clock (BRC-219): it ends when
+ *    its sheet is answered or closed (caller gone). A released run is never shown, and until its action ends any
+ *    request that could be its own is refused unless every possible owner pays the same outputs.
  * A request that matches no run gets no list (background.ts then refuses it: a paying sheet always lists its payees);
  * one matching runs with different payees is refused.
  */
@@ -33,9 +34,8 @@ const MAX_POSSIBLE_SATOSHIS = 0x775f05a073fff;
 /** The line the toolbox appends after the site's outputs when storage charges for the action. */
 const SERVICE_CHARGE = 'Storage service charge';
 /**
- * A run older than this no longer holds its site. Sheets no longer expire (BRC-219), so a sheet left open past this
- * while the same site starts a conflicting payment loses its run: its Allow then fails spendApprovalMatches and is
- * refused (never paid). Fail-safe; see the BRC-219 notes in services/promptLiveness.ts.
+ * A run with no sheet bound to it (stuck before it asked) stops holding its site after this. A run whose sheet is up
+ * holds until that sheet is answered or closed: sheets have no clock (BRC-219), so neither does their run.
  */
 export const SPEND_RUN_HOLD_MS = 180_000;
 
@@ -272,6 +272,9 @@ export const noteModuleOutputs = (originator: unknown, outputs: Output[] | undef
   run.noted = true;
 };
 
+/** No sheet of this run is up (or answered and building): only such a run may be released on the clock. */
+const unbound = (run: Run) => !run.fullID && !run.preID;
+
 /** The run stops holding its site and is never shown again. Until its action ends it stays a ghost. */
 const release = (run: Run) => {
   if (run.released) return;
@@ -341,20 +344,25 @@ export function guardSpendRecipients<T extends object>(
       finish: () => finish(),
     };
     // Wait for every running action of this site that a sheet could confuse with this one. Checked and joined in
-    // the same turn, so two callers never both find the way clear. A run held past holdMs is dropped.
+    // the same turn, so two callers never both find the way clear. Only a run with no sheet bound to it (stuck before
+    // it asked) is dropped after holdMs. A run whose sheet is up holds the site until its action ends: the sheet is
+    // answered, or closed because its caller went away (BRC-219: sheets have no clock, so neither does this hold).
     for (;;) {
       const now = Date.now();
-      for (const r of runs.get(site) ?? []) if (now - r.startedAt > holdMs) release(r);
+      for (const r of runs.get(site) ?? []) if (unbound(r) && now - r.startedAt > holdMs) release(r);
       const blocking = (runs.get(site) ?? []).filter((r) => conflicts(r, run));
       if (blocking.length === 0) break;
-      const oldest = Math.min(...blocking.map((r) => r.startedAt));
+      const releasable = blocking.filter(unbound);
       let timer: ReturnType<typeof setTimeout> | undefined;
-      await Promise.race([
-        ...blocking.map((r) => r.done),
-        new Promise<void>((r) => {
-          timer = setTimeout(r, Math.max(1, oldest + holdMs - now + 1));
-        }),
-      ]);
+      const clock = releasable.length
+        ? [
+            new Promise<void>((r) => {
+              const oldest = Math.min(...releasable.map((x) => x.startedAt));
+              timer = setTimeout(r, Math.max(1, oldest + holdMs - now + 1));
+            }),
+          ]
+        : [];
+      await Promise.race([...blocking.map((r) => r.done), ...clock]);
       clearTimeout(timer);
     }
     run.startedAt = Date.now();

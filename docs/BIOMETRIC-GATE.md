@@ -121,9 +121,12 @@ counterparty), so none can be approved late. Then:
 
 Sheets no longer expire (BRC-219, 8 Nov 2026; `services/promptLiveness.ts`). A sheet that is up waits for Allow or
 Deny. A request still fails clearly when its sheet was never shown (`ERR_PROMPT_NOT_SHOWN`), when its sheet or the
-unlock screen was closed, or when the page that asked was closed or left (`ERR_PROMPT_CALLER_GONE`, extension). A
-site's Retry of the same `createAction` while the first waits joins it: one sheet, one payment, one answer for both.
-So the 120 s / 300 s limit only catches a step that hangs with nothing on screen.
+unlock screen was closed, or when its caller is gone (`ERR_PROMPT_CALLER_GONE`, status 410): in the extension the
+page that asked was closed, reloaded or navigated to another page (one liveness port per call); on the phone the
+dApp browser or the bApp frame that asked was closed. Its sheets close before Allow can act. A site's Retry of the
+same `createAction` while the first waits joins it: one sheet, one payment, one answer for both. A Retry that is not
+identical gets its own sheet after the first is answered, marked "This site asked for this same payment … ago". So
+the 120 s / 300 s limit only catches a step that hangs with nothing on screen.
 
 Test: `src/mobile/dappBrowser.gate.test.ts` plays the bChatX sequence against a wallet whose `createSignature` never
 answers.

@@ -15,7 +15,8 @@
  */
 
 import type { PromptRequest } from '@1sat/permission-module';
-import { hasPendingFor, takePendingFor } from './pairedPromptGuard';
+import { takePendingFor } from './pairedPromptGuard';
+import { TrackedSheets, type SheetHooks } from './promptLiveness';
 
 export interface OneSatPromptStorageEntry {
   requestID: string;
@@ -28,7 +29,7 @@ interface PendingEntry {
   reject: (err: unknown) => void;
 }
 
-const pending = new Map<string, PendingEntry>();
+let pending: Map<string, PendingEntry> = new Map();
 
 let bridgeReady = false;
 let showPromptRef: (requestID: string) => void = () => {};
@@ -37,9 +38,18 @@ let showPromptRef: (requestID: string) => void = () => {};
  * Wire the prompt bridge to the extension's prompt-window launcher.
  * Must be called from background once during init.
  */
-export const initOneSatPromptBridge = (deps: { showPrompt: (requestID: string) => void }): void => {
+export const initOneSatPromptBridge = (deps: {
+  showPrompt: (requestID: string) => void;
+  sheets?: SheetHooks;
+}): void => {
   showPromptRef = deps.showPrompt;
   bridgeReady = true;
+  // BRC-219 caller-gone: 1Sat sheets are tracked like every other sheet (services/promptLiveness.ts).
+  if (deps.sheets && !(pending instanceof TrackedSheets)) {
+    const tracked = new TrackedSheets<PendingEntry>('oneSatPermission', deps.sheets);
+    for (const [k, v] of pending) tracked.set(k, v);
+    pending = tracked;
+  }
 };
 
 /**
@@ -104,9 +114,6 @@ export const denyOneSatPromptsFor = (originator: string): string[] =>
     entry.resolve(false);
     return id;
   });
-
-/** A 1Sat sheet from `originator` is waiting for the person (BRC-219: the phone/web bridge keeps waiting for it). */
-export const hasOneSatPromptFor = (originator: string): boolean => hasPendingFor(pending, originator);
 
 const generateRequestID = (): string => {
   const bytes = crypto.getRandomValues(new Uint8Array(8));

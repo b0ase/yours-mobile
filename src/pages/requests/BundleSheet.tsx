@@ -11,6 +11,7 @@ import { sendMessageAsync } from '../../utils/chromeHelpers';
 import { confirmUsbForApproval } from '../../services/usbPresence';
 import {
   ALLOWANCE_CHOICES_USD,
+  askedAgainText,
   buildSheetModel,
   DEFAULT_ALLOWANCE_USD,
   sheetCanTrust,
@@ -198,6 +199,17 @@ export const BundleSheet = (props: {
   const name = siteName(request.originator);
   const many = model.lines.length + (model.payment ? 1 : 0) > 1;
   const payLabel = model.payment ? dollarsInline(model.payment.satoshis, price) : '';
+  // "This site asked for this same payment … ago" (BRC-219 review): read before Allow, on every pay layout.
+  const askedAgainNote = model.payment?.askedAgain ? (
+    <p
+      className="m-0"
+      role="alert"
+      data-testid="payment-asked-again"
+      style={{ fontSize: 13, fontWeight: 600, color: CARD.gold }}
+    >
+      {askedAgainText(model.payment.askedAgain)}
+    </p>
+  ) : null;
   const allowanceSetsUsd = showAllowance && allowanceOn && allowanceUsd > 0 ? allowanceUsd : 0;
   const reconnect = request.items.some((r) => r.reconnect);
   // A site framed by another asking for the first time inside it (services/frameAccess.ts).
@@ -359,6 +371,7 @@ export const BundleSheet = (props: {
           Labels: {model.payment.labels.join(', ')}
         </p>
       ) : null}
+      {askedAgainNote}
       {showAllowance && (
         <div className="flex items-center gap-3" style={{ minHeight: 44 }}>
           <input
@@ -547,6 +560,7 @@ export const BundleSheet = (props: {
             ) : null}
           </div>
         </div>
+        {askedAgainNote}
         <div className="flex items-center gap-2" style={{ fontSize: 14, color: CARD.soft }}>
           <Check size={18} />
           {allowanceSetsUsd > 0

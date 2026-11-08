@@ -49,7 +49,6 @@ import {
 } from './services/frameAccess';
 import {
   PAIR_MIRROR_KEY,
-  hasPendingFor,
   isPairedOriginator,
   pairedGrantAllowed,
   setPairMirror,
@@ -154,10 +153,15 @@ import {
   type WatchedPrompt,
 } from './services/promptWatchdog';
 import {
-  SiteCallTabs,
+  AskedAgain,
+  CallerRegistry,
+  LIVE_PORT_NAME,
+  TrackedSheets,
   promptCallerGoneError,
   siteStillAsking,
   unlockSurfaceGone,
+  type SheetHooks,
+  type SheetRef,
 } from './services/promptLiveness';
 import { RequestParams, ResponseEventDetail, YoursEventName } from './inject';
 import { recordCall, recordPayment, requestedSats, updateConnectionLog } from './mobile/wallet/connectionLog';
@@ -244,7 +248,6 @@ import {
   denyOneSatPromptsFor,
   getPendingOneSatPrompt,
   handleOneSatPermissionResponse,
-  hasOneSatPromptFor,
   initOneSatPromptBridge,
 } from './services/oneSatPrompt';
 import type { PromptKind, UsbCheckRequest } from './promptProtocol';
@@ -545,6 +548,20 @@ let reinitPromise: Promise<WalletInterface | null> | null = null;
 // When it closes, the port disconnects automatically. No timers needed.
 const activePopupPorts = new Set<chrome.runtime.Port>();
 chrome.runtime.onConnect.addListener((port) => {
+  // BRC-219 caller-gone (services/cwiForward.ts, mobile/dappBrowser.ts): one port per site call, named by the token
+  // in that call's message. It disconnects when the calling document, browser or frame goes away; then the sheets
+  // that call could own are closed. The port carries nothing else.
+  if (port.name === LIVE_PORT_NAME) {
+    let token: string | undefined;
+    port.onMessage.addListener((m: unknown) => {
+      const t = (m as { token?: unknown } | null)?.token;
+      if (token === undefined && typeof t === 'string' && t.length > 0 && t.length <= 100) token = t;
+    });
+    port.onDisconnect.addListener(() => {
+      if (token !== undefined) closeSheetsCallerGone(callers.callerGone(token));
+    });
+    return;
+  }
   if (port.name === 'extension-popup') {
     activePopupPorts.add(port);
     // A panel that just (re)connected gets whatever is pending, at once: the prompt we opened it for, else the
@@ -1335,15 +1352,31 @@ console.log('Yours Wallet Background Script Running!');
 
 type CallbackResponse = (response: ResponseEventDetail) => void;
 
+/**
+ * BRC-219 caller-gone (services/promptLiveness.ts): which site calls are still wanted by their caller, and which open
+ * sheets could belong to each. Every pending-sheet map below is a TrackedSheets, so raising and answering a sheet is
+ * recorded without touching each call site.
+ */
+const callers = new CallerRegistry();
+// Payment sheets per site and outputs, so a repeat says "this site asked for this same payment … ago".
+const askedAgain = new AskedAgain();
+// Set in the worker: closes sheets whose caller went away (ERR_PROMPT_CALLER_GONE; never approves).
+let closeSheetsCallerGone: (refs: SheetRef[]) => void = () => undefined;
+const sheetHooks: SheetHooks = {
+  siteOf: (o) => permissionSite(o),
+  raised: (ref) => {
+    // Raised for a call whose caller is already gone (its port closed first): close it before anyone can Allow.
+    if (callers.raise(ref)) queueMicrotask(() => closeSheetsCallerGone([ref]));
+  },
+  settled: (kind, id) => callers.settle(kind, id),
+};
+
 // Pending permission requests waiting for user approval
-const pendingPermissionRequests = new Map<
-  string,
-  {
-    request: PermissionRequest & { requestID: string };
-    resolve: () => void;
-    reject: (error: Error) => void;
-  }
->();
+const pendingPermissionRequests = new TrackedSheets<{
+  request: PermissionRequest & { requestID: string };
+  resolve: () => void;
+  reject: (error: Error) => void;
+}>('permission', sheetHooks);
 
 // One sheet per action (docs/ONE-SHEET-PERMISSIONS.md): single permission requests from one site are
 // merged into one bundle and shown as one sheet. Each request stays in pendingPermissionRequests and is
@@ -1606,32 +1639,35 @@ const settleStreamPass = (pass: StreamPassRun, spend: { at: number; sats: number
   })).catch((e: unknown) => console.warn('[createAction] stream hold not settled:', e));
 };
 /** Sites waiting on the "Allow <site> to stream up to $X/hour" sheet. */
-const pendingStreamGrantRequests = new Map<
-  string,
-  { request: StreamGrantPrompt; resolve: (capSatsPerHour: number | null) => void }
->();
+const pendingStreamGrantRequests = new TrackedSheets<{
+  request: StreamGrantPrompt;
+  resolve: (capSatsPerHour: number | null) => void;
+}>('streamGrant', sheetHooks);
 /** Sites waiting on the "Lock N posts to you" sheet (services/mintPrivateSite.ts). Resolves true only on Allow. */
-const pendingMintPrivateRequests = new Map<string, { request: MintPrivatePrompt; resolve: (allow: boolean) => void }>();
+const pendingMintPrivateRequests = new TrackedSheets<{ request: MintPrivatePrompt; resolve: (allow: boolean) => void }>(
+  'mintPrivate',
+  sheetHooks,
+);
 /** Sites waiting on the Twetch sign-in / post sheet (services/twetchSite.ts). Resolves true only on Allow. */
-const pendingTwetchRequests = new Map<string, { request: TwetchPrompt; resolve: (allow: boolean) => void }>();
+const pendingTwetchRequests = new TrackedSheets<{ request: TwetchPrompt; resolve: (allow: boolean) => void }>(
+  'twetch',
+  sheetHooks,
+);
 /** bChatX / bit-sign waiting on the link-addresses sheet (services/proveHoldingsSite.ts). True only on Allow. */
-const pendingProveHoldings = new Map<string, { request: ProveHoldingsPrompt; resolve: (allow: boolean) => void }>();
-/**
- * The site's other sheets, which wait for their own answer and are not closed by the bridge (1Sat, envelopes, private
- * mints, Twetch, holdings). While one is up the person is still being asked (BRC-219, cancelSitePrompts).
- */
-const hasOtherSheetsFor = (originator: string): boolean =>
-  hasOneSatPromptFor(originator) ||
-  hasPendingFor(pendingStreamGrantRequests, originator) ||
-  hasPendingFor(pendingMintPrivateRequests, originator) ||
-  hasPendingFor(pendingTwetchRequests, originator) ||
-  hasPendingFor(pendingProveHoldings, originator);
-// Which tabs have a site's call waiting for its answer (services/promptLiveness.ts): a closed tab closes its sheets.
-const siteCallTabs = new SiteCallTabs();
+const pendingProveHoldings = new TrackedSheets<{ request: ProveHoldingsPrompt; resolve: (allow: boolean) => void }>(
+  'proveHoldings',
+  sheetHooks,
+);
 /** bChatX waiting on the swap sheet (services/swapSite.ts). Resolves true only on Approve. */
-const pendingSwapRequests = new Map<string, { request: SwapPrompt; resolve: (allow: boolean) => void }>();
+const pendingSwapRequests = new TrackedSheets<{ request: SwapPrompt; resolve: (allow: boolean) => void }>(
+  'swap',
+  sheetHooks,
+);
 /** A family site waiting on the theme offer sheet (services/themeOfferSite.ts). Resolves with the user's answer. */
-const pendingThemeOffers = new Map<string, { request: ThemeOfferPrompt; resolve: (a: ThemeOfferResult) => void }>();
+const pendingThemeOffers = new TrackedSheets<{ request: ThemeOfferPrompt; resolve: (a: ThemeOfferResult) => void }>(
+  'themeOffer',
+  sheetHooks,
+);
 const failPendingStreamGrants = () => {
   for (const p of pendingStreamGrantRequests.values()) p.resolve(null);
   pendingStreamGrantRequests.clear();
@@ -1657,23 +1693,17 @@ let masterBackupInFlight = false;
 /** Wallet requests that land during the backup wait here; released once the original account is open again. */
 const masterBackupGate = createMasterBackupGate();
 
-const pendingGroupedPermissionRequests = new Map<
-  string,
-  {
-    request: GroupedPermissionRequest;
-    resolve: () => void;
-    reject: (error: Error) => void;
-  }
->();
+const pendingGroupedPermissionRequests = new TrackedSheets<{
+  request: GroupedPermissionRequest;
+  resolve: () => void;
+  reject: (error: Error) => void;
+}>('groupedPermission', sheetHooks);
 
-const pendingCounterpartyPermissionRequests = new Map<
-  string,
-  {
-    request: CounterpartyPermissionRequest;
-    resolve: () => void;
-    reject: (error: Error) => void;
-  }
->();
+const pendingCounterpartyPermissionRequests = new TrackedSheets<{
+  request: CounterpartyPermissionRequest;
+  resolve: () => void;
+  reject: (error: Error) => void;
+}>('counterpartyPermission', sheetHooks);
 
 let popupWindowId: number | undefined;
 let denyAllPendingPrompts: () => void = () => undefined;
@@ -2261,6 +2291,10 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
             if (shown) {
               (request as BundleRequest).recipients = shown.recipients;
               (request as BundleRequest).recipientsHash = shown.hash;
+              // The same payment this site asked for a moment ago (a Retry that is not identical): the sheet says so,
+              // so approving it twice is a choice made knowingly (BRC-219 review; services/promptLiveness.ts).
+              const again = askedAgain.note(permSite, shown.hash);
+              if (again !== null) (request as BundleRequest).askedAgain = { secondsAgo: again };
             }
             // Its own action's new labels (services/labelsOnSpend.ts), matched the same way.
             const labels = takeLabelsForSheet(permSite, request as BundleRequest);
@@ -2774,12 +2808,22 @@ if (isInServiceWorker) {
 
   cancelSitePrompts = (originator) => {
     const prompts = sitePrompts(originator);
-    // BRC-219: the person can still answer this call. A sheet the watchdog no longer watches has been confirmed on
-    // screen (or waits behind one that is); the unlock / setup screen counts too. Keep it open; the bridge waits.
+    const site = permissionSite(originator);
+    // BRC-219: the person can still answer this call only if a sheet of THIS site is on screen right now (the prompt
+    // UI loaded it: shownPrompt), or the unlock / setup screen is up. A sheet that was never shown, or waits behind
+    // another site's, does not count: the bridge then closes the site's sheets as before.
+    const onScreen = shownPrompt ? getPendingPromptPayload(shownPrompt.kind, shownPrompt.requestID) : undefined;
+    const onScreenPayload = onScreen as { originator?: unknown; request?: { originator?: unknown } } | undefined;
+    // 1Sat sheets carry the site inside `request`.
+    const onScreenSite = onScreenPayload?.originator ?? onScreenPayload?.request?.originator;
     const asking = siteStillAsking({
-      shownSheets: prompts.filter((p) => !promptWatchdog.watching(p)).length,
-      otherSheets: hasOtherSheetsFor(originator) ? 1 : 0,
-      walletWaiters: pendingWalletWaiters.length,
+      shownSheets: typeof onScreenSite === 'string' && permissionSite(onScreenSite) === site ? 1 : 0,
+      otherSheets: 0,
+      walletWaiters:
+        pendingWalletWaiters.length > 0 &&
+        (activePopupPorts.size > 0 || popupWindowId !== undefined || inPageSheet !== undefined)
+          ? pendingWalletWaiters.length
+          : 0,
     });
     if (asking) {
       console.log('[background] site call ceiling: the person is still being asked; keeping', prompts.length, 'sheet(s)');
@@ -2793,23 +2837,70 @@ if (isInServiceWorker) {
   };
 
   /**
-   * The page that asked is gone (its tab closed or loaded another page): its sheets can never deliver an answer, and
-   * an Allow on one would pay for a caller that no longer exists. Close them with ERR_PROMPT_CALLER_GONE (BRC-219
-   * lifecycle error; never approves). Only when no other tab of the site is still waiting (siteCallTabs).
+   * BRC-219 caller-gone: the page, browser or frame that made the call is gone, so these sheets can never deliver an
+   * answer, and an Allow on one would pay or sign for nobody. Each is closed with ERR_PROMPT_CALLER_GONE (or the
+   * sheet's own "declined" answer), never approved. An open sheet reloads: a bundle that lost a line shows what is
+   * left (and an Allow tapped on the old one grants nothing: its seenHash no longer matches); one that is gone moves on.
    */
-  const failSitePromptsCallerGone = (originator: string) => {
-    const prompts = sitePrompts(originator);
-    if (prompts.length === 0) return;
-    console.warn('[background] the page that asked is gone: closing', prompts.length, 'sheet(s) of', siteHost(originator));
-    closePrompts(prompts, promptCallerGoneError());
+  closeSheetsCallerGone = (refs) => {
+    if (refs.length === 0) return;
+    const err = promptCallerGoneError();
+    for (const ref of refs) {
+      console.warn('[background] caller gone: closing sheet', ref.kind, ref.id, siteHost(ref.site));
+      const clearShown = (kind: string, id: string) => {
+        if (shownPrompt?.kind === kind && shownPrompt.requestID === id) shownPrompt = undefined;
+      };
+      switch (ref.kind) {
+        case 'permission': {
+          if (!pendingPermissionRequests.has(ref.id)) break;
+          const bundle = permissionBundler.findByRequest(ref.id);
+          promptWatchdog.forget({ kind: 'permission', requestID: ref.id });
+          failUnshownPrompt({ kind: 'permission', requestID: ref.id }, err);
+          if (bundle && permissionBundler.get(bundle.id)) notifyPromptUpdated('bundle', bundle.id);
+          else if (bundle) {
+            promptWatchdog.forget({ kind: 'bundle', requestID: bundle.id });
+            clearShown('bundle', bundle.id);
+            notifyPromptWindow('bundle', bundle.id);
+          } else notifyPromptWindow('permission', ref.id);
+          break;
+        }
+        case 'groupedPermission':
+        case 'counterpartyPermission': {
+          const p: WatchedPrompt = { kind: ref.kind, requestID: ref.id };
+          promptWatchdog.forget(p);
+          failUnshownPrompt(p, err);
+          notifyPromptWindow(ref.kind, ref.id);
+          break;
+        }
+        case 'oneSatPermission':
+          handleOneSatPermissionResponse(ref.id, false);
+          clearShown(ref.kind, ref.id);
+          notifyPromptWindow(ref.kind, ref.id);
+          break;
+        default: {
+          // The site sheets that answer through their own resolve: stream grant (null), theme offer ('declined'),
+          // private mint, Twetch, holdings and swap (false). Same answer as closing their window.
+          const maps: Record<string, Map<string, { resolve: (v: never) => void }>> = {
+            streamGrant: pendingStreamGrantRequests as never,
+            mintPrivate: pendingMintPrivateRequests as never,
+            twetch: pendingTwetchRequests as never,
+            proveHoldings: pendingProveHoldings as never,
+            swap: pendingSwapRequests as never,
+            themeOffer: pendingThemeOffers as never,
+          };
+          const map = maps[ref.kind];
+          const entry = map?.get(ref.id);
+          if (!map || !entry) break;
+          map.delete(ref.id);
+          const answer = ref.kind === 'streamGrant' ? null : ref.kind === 'themeOffer' ? 'declined' : false;
+          (entry.resolve as (v: unknown) => void)(answer);
+          clearShown(ref.kind, ref.id);
+          notifyPromptWindow(ref.kind as PromptKind, ref.id);
+        }
+      }
+    }
+    closeDappPopupIfNoUi();
   };
-  const onSiteTabGone = (tabId: number) => {
-    for (const site of siteCallTabs.tabGone(tabId)) failSitePromptsCallerGone(site);
-  };
-  chrome.tabs?.onRemoved?.addListener((tabId) => onSiteTabGone(tabId));
-  chrome.tabs?.onUpdated?.addListener((tabId, info) => {
-    if (info.status === 'loading') onSiteTabGone(tabId);
-  });
 
   showUnlockUi = () => {
     sheetFirst.notePromptShown();
@@ -2831,6 +2922,7 @@ if (isInServiceWorker) {
   // bridge before initWallet (called on unlock) registers the module.
   initOneSatPromptBridge({
     showPrompt: (requestID) => showPromptUi('oneSatPermission', requestID),
+    sheets: sheetHooks,
   });
 
   // Passkey hand-off from web.bwalletx.com (VITE_SEEDLESS=1 builds only; notes/extension-passkey-handoff.md). The
@@ -2846,17 +2938,20 @@ if (isInServiceWorker) {
   chrome.runtime.onMessage.addListener(function onRuntimeMessage(message: any, sender, answer: CallbackResponse) {
     // Every refusal by the user carries code ERR_PERMISSION_DENIED (services/userDenied.ts), so a site can tell
     // "declined" from "failed" on every path (extension, phone dApp browser, bApp frames, pairing).
-    // A site's call from a browser tab is counted until it is answered: if the tab closes or leaves the page first,
-    // the site's sheets are closed (BRC-219 lifecycle; services/promptLiveness.ts). Extension only (no tabs elsewhere).
-    const endTabCall =
+    // BRC-219 caller-gone: a site call that carries a liveness token (one port per call; services/cwiForward.ts) is
+    // registered until it is answered, so the sheets it could own close if its caller goes first. Only such calls
+    // are counted: they are always answered here (services/promptLiveness.ts CallerRegistry).
+    const liveToken =
+      typeof message?.liveToken === 'string' &&
+      message.liveToken.length <= 100 &&
       typeof message?.originator === 'string' &&
       message.originator &&
-      sender.tab?.id !== undefined &&
       !isExtensionSender(sender, chrome.runtime.id)
-        ? siteCallTabs.begin(sender.tab.id, normalizeOriginator(message.originator))
-        : () => undefined;
+        ? (message.liveToken as string)
+        : undefined;
+    if (liveToken) callers.start(liveToken, permissionSite(message.originator), String(message.action ?? ''));
     const sendResponse: CallbackResponse = (response) => {
-      endTabCall();
+      if (liveToken) callers.end(liveToken);
       answer(withPromptNotShownCode(withDenialCode(response)));
     };
     console.log(
@@ -4060,8 +4155,12 @@ if (!(
             const respond = createActionDedupe.begin(key, sendResponse);
             if (!respond) {
               console.log('[createAction] identical call already running: joined it');
+              // One call, two callers: its sheet stays while either caller is still there (BRC-219).
+              const first = dedupeLiveTokens.get(key);
+              if (first && liveToken) callers.join(first, liveToken);
               return true;
             }
+            if (liveToken) dedupeLiveTokens.set(key, liveToken);
             const donePayCall = trackPayCall(message.originator);
             // The site's next payment after a Seal sheet: its spend rides that sheet only if it is that seal
             // (services/sealPass.ts). Either way this call uses the pass up.
@@ -4074,6 +4173,7 @@ if (!(
             const donePay = () => {
               if (sealSiteKey) sealPasses?.endAction(sealSiteKey);
               donePayCall();
+              if (liveToken && dedupeLiveTokens.get(key) === liveToken) dedupeLiveTokens.delete(key);
             };
             runDappRequest(processCWICreateAction(message, respond).finally(donePay));
             return true;
@@ -6810,6 +6910,8 @@ if (!(
   };
 
   const createActionDedupe = new CreateActionDedupe<ResponseEventDetail>();
+  // The liveness token of the call each running dedupe key belongs to, so a joined Retry becomes one of its callers.
+  const dedupeLiveTokens = new Map<string, string>();
   const fundingPrepFlight = new SingleFlight<FundingSnapshot>();
 
   const processCWICreateAction = async (

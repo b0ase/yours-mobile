@@ -18,6 +18,68 @@ import {
 import { siteGate as nativeSiteGate } from './siteGateNative';
 import type { SiteGate } from './siteGate';
 import { answerDappBitsign } from './bappFrame/frameBitsign';
+import { LIVE_PORT_NAME, PROMPT_CALLER_GONE_CODE, PROMPT_CALLER_GONE_MESSAGE } from '../services/promptLiveness';
+import type { LivePort } from '../services/cwiForward';
+
+/** The reply a call gets when the browser page or frame that made it is gone (BRC-219 caller-gone). */
+export const callerGoneReply = () => ({
+  success: false as const,
+  error: PROMPT_CALLER_GONE_MESSAGE,
+  code: PROMPT_CALLER_GONE_CODE,
+  status: 410,
+});
+
+/**
+ * One caller on the phone: the full-screen dApp browser (until it closes) or one bApp frame (until it closes or its
+ * app changes). BRC-219 caller-gone: each of its wallet calls opens a liveness port to the background, and end()
+ * answers every call still waiting with ERR_PROMPT_CALLER_GONE and closes those ports, so the background closes the
+ * sheets those calls could own before anyone can Allow them. A page cannot reach this: it lives in the wallet.
+ */
+export class SiteCallSession {
+  private calls = new Set<{ port?: LivePort; gone: () => void }>();
+  private done = false;
+  get ended(): boolean {
+    return this.done;
+  }
+  /** Track one call. Returns the function to call once it settled. */
+  track(port: LivePort | undefined, gone: () => void): () => void {
+    const c = { port, gone };
+    this.calls.add(c);
+    return () => {
+      if (!this.calls.delete(c)) return;
+      try {
+        port?.disconnect();
+      } catch {
+        /* already gone */
+      }
+    };
+  }
+  end(): void {
+    if (this.done) return;
+    this.done = true;
+    for (const c of [...this.calls]) {
+      this.calls.delete(c);
+      c.gone();
+      try {
+        c.port?.disconnect();
+      } catch {
+        /* already gone */
+      }
+    }
+  }
+  get waiting(): number {
+    return this.calls.size;
+  }
+}
+
+const liveToken = (): string => {
+  const c = globalThis.crypto as Crypto | undefined;
+  if (c?.randomUUID) return c.randomUUID();
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+};
+
+// The full-screen browser's session: ended (and replaced) when the browser closes.
+let browserSession = new SiteCallSession();
 
 // Swappable for tests only (dappBrowser.gate.test.ts).
 let siteGate: Pick<SiteGate, 'check' | 'lastVerification'> & Partial<Pick<SiteGate, 'extendPass'>> = nativeSiteGate;
@@ -130,8 +192,16 @@ let contextFactory: ContextFactory | undefined;
  * WebView's frame info, or a postMessage from our own bApp iframe). Returns the wallet's
  * { success, data, error } reply. Shared by the full-screen browser and in-frame bApps.
  */
-export const handleSiteCall = async (origin: string, url: string, type: string, params: unknown, paired = false) => {
+export const handleSiteCall = async (
+  origin: string,
+  url: string,
+  type: string,
+  params: unknown,
+  paired = false,
+  session?: SiteCallSession,
+) => {
   if (!contextFactory) throw new Error('Wallet not ready');
+  if (session?.ended) return callerGoneReply();
   const o = new URL(origin);
   // Phone-paired sessions have their own permission key (originKey.ts pairedOrigin); only they may use it.
   if (isPairedHost(o.hostname) !== paired) throw new Error('Reserved originator');
@@ -168,12 +238,35 @@ export const handleSiteCall = async (origin: string, url: string, type: string, 
       const err = e as { message?: string; code?: string; status?: number };
       return { success: false, error: err.message || 'Not confirmed', code: err.code, status: err.status };
     }
+  // The browser or frame went away while Face ID was up: the wallet is never asked.
+  if (session?.ended) return callerGoneReply();
+  // BRC-219 caller-gone: this call's liveness port, closed when it settles or when its session ends.
+  let port: LivePort | undefined;
+  const token = liveToken();
+  if (session)
+    try {
+      port = chrome.runtime.connect?.({ name: LIVE_PORT_NAME });
+      port?.postMessage({ token });
+    } catch {
+      port = undefined;
+    }
   // originator is derived from the verified origin, as content.ts derives it from window.location.host.
   // Every call settles: a step that never answers (bChatX's endless "Sealing…", 29 Oct 2026) becomes a timeout, unless
-  // the person is being asked about it (BRC-219): then it waits for their answer, however long they take.
-  const work = Promise.resolve(
-    chrome.runtime.sendMessage({ action: type, params: params ?? {}, originator: key.originator }),
+  // the person is being asked about it (BRC-219): then it waits for their answer, however long they take. The caller
+  // going away (browser closed, frame closed) ends the wait at once with ERR_PROMPT_CALLER_GONE.
+  const sent = Promise.resolve(
+    chrome.runtime.sendMessage({
+      action: type,
+      params: params ?? {},
+      originator: key.originator,
+      ...(port ? { liveToken: token } : {}),
+    }),
   );
+  let untrack: () => void = () => undefined;
+  const work: Promise<unknown> = session
+    ? Promise.race([sent, new Promise((resolve) => (untrack = session.track(port, () => resolve(callerGoneReply()))))])
+    : sent;
+  void work.finally(() => untrack()).catch(() => undefined);
   let first = await withSiteCeiling(work, ceilingFor(type));
   let data: NonNullable<TimeoutAnswer>['data'];
   while ((first as { code?: unknown } | undefined)?.code === SITE_CALL_TIMEOUT_CODE) {
@@ -203,16 +296,26 @@ export const handleSiteCall = async (origin: string, url: string, type: string, 
   return first;
 };
 
-export const initDappBrowser = (createContext: ContextFactory) => {
-  contextFactory = createContext;
-  if (!isNative) return;
+type NativeBrowser = Pick<typeof YoursNative, 'addListener' | 'browserRespond'>;
 
-  void YoursNative.addListener('browserClosed', () => {
+/** `native` is the phone shell (tests pass a stand-in to drive the real handlers below). */
+export const initDappBrowser = (
+  createContext: ContextFactory,
+  native: { isNative: boolean; YoursNative: NativeBrowser } = { isNative, YoursNative },
+) => {
+  contextFactory = createContext;
+  if (!native.isNative) return;
+  const shell = native.YoursNative;
+
+  void shell.addListener('browserClosed', () => {
     open = false;
     hiddenForOverlay = false;
+    // BRC-219 caller-gone: every call the closed browser made is answered now and its sheets close.
+    browserSession.end();
+    browserSession = new SiteCallSession();
   });
 
-  void YoursNative.addListener('browserRequest', async (req) => {
+  void shell.addListener('browserRequest', async (req) => {
     let response: unknown;
     try {
       const { type, params } = JSON.parse(req.payload) as { type: string; params?: unknown };
@@ -231,11 +334,11 @@ export const initDappBrowser = (createContext: ContextFactory) => {
       else
         response =
           (await answerDappBitsign(req.origin, type, params, { cover: sheetOverBrowser })) ??
-          (await handleSiteCall(req.origin, req.url ?? '', type, params));
+          (await handleSiteCall(req.origin, req.url ?? '', type, params, false, browserSession));
     } catch (error) {
       response = { success: false, error: error instanceof Error ? error.message : String(error) };
     }
-    await YoursNative.browserRespond({
+    await shell.browserRespond({
       requestId: req.requestId,
       response: JSON.stringify(response ?? { success: false, error: 'No response from wallet' }),
     });

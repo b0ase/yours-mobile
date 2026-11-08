@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { ChevronLeft, Maximize2, Monitor, RotateCw, Smartphone, X } from 'lucide-react';
 import { BAPPS } from '../bapps';
 import { pushBackCloser } from '../backStack';
-import { handleSiteCall, lastUrlFor } from '../dappBrowser';
+import { SiteCallSession, handleSiteCall, lastUrlFor } from '../dappBrowser';
 import {
   BAPP_FRAME_ALLOWLIST,
   bappFullScreen,
@@ -98,6 +98,9 @@ export const BappFrameHost = () => {
   // Wallet bridge (BRC-100 XDM): only our iframe, only its allowlisted origin.
   useEffect(() => {
     if (!session) return;
+    // BRC-219 caller-gone: this frame's wallet calls. Closing the frame (or switching app) answers every call still
+    // waiting and closes the sheets they could own, so nothing can be approved for a frame that is gone.
+    const calls = new SiteCallSession();
     // One wallet-drawn sheet at a time; a second ask while one is open is refused.
     const confirm = (text: string) =>
       askRef.current
@@ -167,7 +170,7 @@ export const BappFrameHost = () => {
         return;
       }
       const pageUrl = lastUrlFor(e.origin) ?? session.url;
-      handleSiteCall(e.origin, pageUrl, req.call, req.args)
+      handleSiteCall(e.origin, pageUrl, req.call, req.args, false, calls)
         .catch((error: unknown) => ({ success: false, error: error instanceof Error ? error.message : String(error) }))
         .then((reply) => win.postMessage(toXdmResponse(req.id, reply), e.origin));
     };
@@ -178,6 +181,7 @@ export const BappFrameHost = () => {
       : () => {};
     return () => {
       window.removeEventListener('message', onMessage);
+      calls.end();
       offAgents();
       // The app went away: an open question is answered "no".
       askRef.current?.resolve(false);

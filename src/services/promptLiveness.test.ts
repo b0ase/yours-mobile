@@ -1,54 +1,73 @@
 /**
  * BRC-219 (Wallet Permission Prompt Liveness): no clock on a prompt that is up; a pending request fails only when its
- * prompt was never shown, its surface is gone, or its caller is gone.
+ * prompt was never shown, its surface is gone, or its caller is gone. These drive the caller-gone registry and the
+ * tracked sheet maps background.ts uses (every pending-sheet map is a TrackedSheets wired to one CallerRegistry).
  */
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'fs';
 import {
+  ASKED_AGAIN_MS,
+  AskedAgain,
+  CallerRegistry,
   PROMPT_CALLER_GONE_CODE,
-  SiteCallTabs,
+  TrackedSheets,
   promptCallerGoneError,
   siteStillAsking,
   unlockSurfaceGone,
+  type SheetRef,
 } from './promptLiveness';
 import { withPromptNotShownCode } from './promptWatchdog';
 
-const bg = readFileSync(new URL('../background.ts', import.meta.url), 'utf8');
+/** The background's wiring in miniature: a tracked map, the registry, and the closer (here: delete + record). */
+const wired = () => {
+  const reg = new CallerRegistry();
+  const closed: string[] = [];
+  const granted: string[] = [];
+  const close = (refs: SheetRef[]) => {
+    for (const r of refs) if (sheets.delete(r.id)) closed.push(r.id);
+  };
+  const sheets: TrackedSheets<{ request: { originator?: string; type?: string } }> = new TrackedSheets('permission', {
+    siteOf: (o) => o,
+    raised: (ref) => {
+      if (reg.raise(ref)) close([ref]);
+    },
+    settled: (kind, id) => reg.settle(kind, id),
+  });
+  /** processPermissionResponse: Allow grants only a request that is still pending. */
+  const allow = (id: string) => {
+    if (!sheets.has(id)) return false;
+    sheets.delete(id);
+    granted.push(id);
+    return true;
+  };
+  return { reg, sheets, closed, granted, allow, gone: (t: string) => close(reg.callerGone(t)) };
+};
 
-describe('SiteCallTabs: the page that asked is gone', () => {
-  test('a closed tab with a waiting call reports its site', () => {
-    const t = new SiteCallTabs();
-    t.begin(7, 'tokenblaster.lol');
-    expect(t.tabGone(7)).toEqual(['tokenblaster.lol']);
-    expect(t.waiting(7)).toBe(0);
+describe('caller gone: Allow racing a tab close', () => {
+  test('the tab closes first: its payment sheet is closed, and the Allow that arrives next grants nothing', () => {
+    const w = wired();
+    w.reg.start('tabA-doc1', 'shop.example', 'createAction');
+    w.sheets.set('spend-1', { request: { originator: 'shop.example', type: 'spending' } });
+    w.gone('tabA-doc1'); // port disconnect processed before the Allow message
+    expect(w.allow('spend-1')).toBe(false);
+    expect(w.granted).toEqual([]);
+    expect(w.closed).toEqual(['spend-1']);
   });
 
-  test('answered calls are not counted: a closed tab with nothing waiting reports nothing', () => {
-    const t = new SiteCallTabs();
-    const end = t.begin(7, 'tokenblaster.lol');
-    end();
-    end(); // idempotent
-    expect(t.tabGone(7)).toEqual([]);
+  test('the spending request arrives after the caller left: closed at once, never shown long enough to Allow', () => {
+    const w = wired();
+    w.reg.start('doc1', 'shop.example', 'createAction');
+    w.gone('doc1'); // nothing to close yet: the call is still building
+    w.sheets.set('spend-late', { request: { originator: 'shop.example', type: 'spending' } });
+    expect(w.closed).toEqual(['spend-late']);
+    expect(w.allow('spend-late')).toBe(false);
   });
 
-  test('another tab of the same site still waiting: its sheets stay (the sheet cannot say which tab asked)', () => {
-    const t = new SiteCallTabs();
-    t.begin(7, 'tokenblaster.lol');
-    const other = t.begin(8, 'tokenblaster.lol');
-    expect(t.tabGone(7)).toEqual([]);
-    other();
-    t.begin(9, 'tokenblaster.lol');
-    expect(t.tabGone(9)).toEqual(['tokenblaster.lol']);
-  });
-
-  test('only the sites of the closed tab; an end() after the tab went away is harmless', () => {
-    const t = new SiteCallTabs();
-    const late = t.begin(7, 'a.example');
-    t.begin(7, 'b.example');
-    t.begin(8, 'c.example');
-    expect(t.tabGone(7).sort()).toEqual(['a.example', 'b.example']);
-    late();
-    expect(t.waiting(8)).toBe(1);
+  test('a port that closes before its call is even registered still counts (gone first, then start)', () => {
+    const w = wired();
+    w.gone('doc-quick');
+    expect(w.reg.start('doc-quick', 'shop.example', 'createAction')).toBe(false);
+    w.sheets.set('spend-q', { request: { originator: 'shop.example', type: 'spending' } });
+    expect(w.closed).toEqual(['spend-q']);
   });
 
   test('the caller-gone error carries its code to the site', () => {
@@ -61,53 +80,109 @@ describe('SiteCallTabs: the page that asked is gone', () => {
   });
 });
 
+describe('caller gone: no per-site counting (the count leak)', () => {
+  test("another document's never-answered call does not keep a closed document's sheet alive", () => {
+    const w = wired();
+    // Tab A posts something that is never answered (it never even becomes a call), and makes one call that hangs.
+    w.reg.start('tabA', 'shop.example', 'getPublicKey');
+    // Tab B pays.
+    w.reg.start('tabB', 'shop.example', 'createAction');
+    w.sheets.set('spend-B', { request: { originator: 'shop.example', type: 'spending' } });
+    w.gone('tabB');
+    expect(w.closed).toEqual(['spend-B']);
+    expect(w.allow('spend-B')).toBe(false);
+  });
+
+  test("a payment sheet is owned by the site's createAction calls only: another document's read does not own it", () => {
+    const w = wired();
+    w.reg.start('tabA', 'shop.example', 'listOutputs');
+    w.reg.start('tabB', 'shop.example', 'createAction');
+    w.sheets.set('spend-B', { request: { originator: 'shop.example', type: 'spending' } });
+    w.gone('tabA'); // tab A closes: B's payment is untouched
+    expect(w.closed).toEqual([]);
+    expect(w.allow('spend-B')).toBe(true);
+  });
+
+  test('an answered call owns nothing any more; another site is never touched', () => {
+    const w = wired();
+    w.reg.start('doc1', 'shop.example', 'createAction');
+    w.reg.start('doc2', 'other.example', 'createAction');
+    w.sheets.set('other', { request: { originator: 'other.example', type: 'spending' } });
+    w.reg.end('doc1');
+    w.gone('doc1');
+    expect(w.closed).toEqual([]);
+    expect(w.reg.inFlight('shop.example')).toBe(0);
+  });
+});
+
+describe('caller gone: a joined (deduped) request', () => {
+  test('the tab reloads while its Retry joined from the new page: the sheet stays; both gone closes it', () => {
+    const w = wired();
+    w.reg.start('doc-old', 'game.example', 'createAction');
+    w.sheets.set('spend-1', { request: { originator: 'game.example', type: 'spending' } });
+    w.reg.start('doc-new', 'game.example', 'createAction');
+    w.reg.join('doc-old', 'doc-new'); // createActionDedupe: one call, two callers
+    w.gone('doc-old'); // the old page unloaded
+    expect(w.closed).toEqual([]);
+    expect(w.sheets.has('spend-1')).toBe(true);
+    w.gone('doc-new');
+    expect(w.closed).toEqual(['spend-1']);
+  });
+});
+
+describe('TrackedSheets behaves like a Map and reports raise / settle once', () => {
+  test('set of a new id raises; re-set does not; delete and clear settle', () => {
+    const raised: string[] = [];
+    const settled: string[] = [];
+    const m = new TrackedSheets<{ request: { originator?: string; type?: string } }>('swap', {
+      siteOf: (o) => o.toUpperCase(),
+      raised: (r) => raised.push(`${r.kind}:${r.id}:${r.site}:${r.payment ? 'pay' : '-'}`),
+      settled: (k, id) => settled.push(`${k}:${id}`),
+    });
+    m.set('a', { request: { originator: 'x.example', type: 'spending' } });
+    m.set('a', { request: { originator: 'x.example' } });
+    m.set('b', { request: { originator: 'y.example' } });
+    expect(m.size).toBe(2);
+    expect(m.delete('a')).toBe(true);
+    expect(m.delete('a')).toBe(false);
+    m.clear();
+    expect(raised).toEqual(['swap:a:X.EXAMPLE:pay', 'swap:b:Y.EXAMPLE:-']);
+    expect(settled).toEqual(['swap:a', 'swap:b']);
+  });
+});
+
+describe('AskedAgain: a payment this site already asked for says so', () => {
+  test('same site and outputs within the window -> seconds since; otherwise null', () => {
+    let now = 1_000_000;
+    const a = new AskedAgain(() => now);
+    expect(a.note('game.example', 'h1')).toBeNull();
+    now += 20_000;
+    expect(a.note('game.example', 'h1')).toBe(20);
+    expect(a.note('game.example', 'h2')).toBeNull();
+    expect(a.note('other.example', 'h1')).toBeNull();
+    now += ASKED_AGAIN_MS + 1;
+    expect(a.note('game.example', 'h1')).toBeNull();
+  });
+});
+
 describe('unlockSurfaceGone: no clock on the unlock screen, only its loss', () => {
   const up = { waiting: 1, setup: false, unlocking: false, panels: 0, popupWindow: false, inPageSheet: false };
-  test('nothing can show it any more -> gone', () => {
+  test('nothing can show it any more -> gone; anything up, setup or an unlock finishing -> not', () => {
     expect(unlockSurfaceGone(up)).toBe(true);
-  });
-  test('a panel, the prompt window or the in-page sheet still up -> keep waiting', () => {
     expect(unlockSurfaceGone({ ...up, panels: 1 })).toBe(false);
     expect(unlockSurfaceGone({ ...up, popupWindow: true })).toBe(false);
     expect(unlockSurfaceGone({ ...up, inPageSheet: true })).toBe(false);
-  });
-  test('nobody waiting, setup (its own wait) or an unlock already finishing -> not failed here', () => {
     expect(unlockSurfaceGone({ ...up, waiting: 0 })).toBe(false);
     expect(unlockSurfaceGone({ ...up, setup: true })).toBe(false);
     expect(unlockSurfaceGone({ ...up, unlocking: true })).toBe(false);
   });
 });
 
-describe('siteStillAsking: the bridge ceiling never closes a sheet the person can still answer', () => {
-  test('any shown sheet, other sheet or unlock/setup waiter -> still asking', () => {
+describe('siteStillAsking', () => {
+  test('a sheet of the site on screen, or the unlock screen up -> still asking', () => {
     const none = { shownSheets: 0, otherSheets: 0, walletWaiters: 0 };
     expect(siteStillAsking(none)).toBe(false);
     expect(siteStillAsking({ ...none, shownSheets: 1 })).toBe(true);
-    expect(siteStillAsking({ ...none, otherSheets: 1 })).toBe(true);
     expect(siteStillAsking({ ...none, walletWaiters: 1 })).toBe(true);
-  });
-});
-
-describe('background wiring (BRC-219)', () => {
-  test('site calls from a tab are counted until answered; a closed or reloaded tab closes its site sheets', () => {
-    expect(bg).toContain('? siteCallTabs.begin(sender.tab.id, normalizeOriginator(message.originator))');
-    expect(bg).toMatch(/const sendResponse: CallbackResponse = \(response\) => \{\s*endTabCall\(\);/);
-    expect(bg).toContain('chrome.tabs?.onRemoved?.addListener((tabId) => onSiteTabGone(tabId));');
-    expect(bg).toContain("if (info.status === 'loading') onSiteTabGone(tabId);");
-    expect(bg).toContain('closePrompts(prompts, promptCallerGoneError());');
-  });
-
-  test('the unlock waiters fail when its panel closes with nothing else showing it, or its window cannot open', () => {
-    expect(bg).toMatch(/port\.onDisconnect\.addListener\(\(\) => \{[\s\S]*?failUnlockWaitersIfSurfaceGone\(\);/);
-    expect(bg).toContain("} else if (kind === 'unlock') {");
-    expect(bg).toContain('failUnlockWaitersIfSurfaceGone(unlockNotShownError());');
-    expect(bg).toContain(
-      'unlockShown: () => activePopupPorts.size > 0 || popupWindowId !== undefined || inPageSheet !== undefined,',
-    );
-  });
-
-  test('the bridge ceiling asks first: a sheet the watchdog confirmed on screen keeps the call waiting', () => {
-    expect(bg).toContain('shownSheets: prompts.filter((p) => !promptWatchdog.watching(p)).length,');
-    expect(bg).toContain('walletWaiters: pendingWalletWaiters.length,');
   });
 });

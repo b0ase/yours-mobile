@@ -108,19 +108,6 @@ export const pairedGrantAllowed = (
   });
 };
 
-/** True when some pending entry's request came from `originator` (compared normalized). Removes nothing. */
-export const hasPendingFor = <T extends { request: { originator?: string } }>(
-  map: Map<string, T>,
-  originator: string,
-): boolean => {
-  const want = norm(originator);
-  for (const entry of map.values()) {
-    const o = entry.request.originator;
-    if (o && norm(o) === want) return true;
-  }
-  return false;
-};
-
 /** Remove and return every pending entry whose request came from `originator` (compared normalized). */
 export const takePendingFor = <T extends { request: { originator?: string } }>(
   map: Map<string, T>,

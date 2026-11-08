@@ -37,6 +37,11 @@ export interface BundleRequest {
   recipients?: { to: string; satoshis: number }[];
   /** sha256 of the scripts + amounts of the action those recipients were read from; Allow checks it (0xrard). */
   recipientsHash?: string;
+  /**
+   * This site asked for exactly this payment (same scripts and amounts) `secondsAgo` seconds ago (BRC-219 review:
+   * a Retry that is not identical gets its own sheet; approving both pays twice). Shown on the sheet; refuses nothing.
+   */
+  askedAgain?: { secondsAgo: number };
   reason?: string;
   /**
    * Joined the sheet while it was on screen (live sheet). Shown as "New: …", never pre-ticked, and never covered
@@ -384,7 +389,15 @@ export interface SheetPayment {
   labels?: string[];
   /** Where the outputs go: an address, "data (OP_RETURN)" or "a custom script", with sats (N3-3). */
   recipients?: { to: string; satoshis: number }[];
+  /** The site asked for this same payment `secondsAgo` seconds ago (askedAgainText). */
+  askedAgain?: { secondsAgo: number };
 }
+
+/** The plain warning a payment that this site already asked for carries (BRC-219 review: a Retry can pay twice). */
+export const askedAgainText = (a: { secondsAgo: number }): string => {
+  const ago = a.secondsAgo < 90 ? `${a.secondsAgo} s` : `${Math.round(a.secondsAgo / 60)} min`;
+  return `This site asked for this same payment ${ago} ago. If you already paid it, paying again pays twice.`;
+};
 
 export interface SheetModel {
   originator: string;
@@ -571,6 +584,7 @@ export const buildSheetModel = (bundle: Pick<PermissionBundle, 'originator' | 'i
           ...(r.recipients?.length || r.recipientsHash !== undefined
             ? { recipients: (r.recipients ?? []).map((x) => ({ ...x })) }
             : {}),
+          ...(r.askedAgain ? { askedAgain: { ...r.askedAgain } } : {}),
         };
       } else {
         // A second (or live-added) spend: shown as its own line, never pre-ticked.
@@ -578,9 +592,11 @@ export const buildSheetModel = (bundle: Pick<PermissionBundle, 'originator' | 'i
           requestID: r.requestID,
           text: `${r.addedLive ? 'New: pay' : 'Also pay'} ${sats.toLocaleString()} sats`,
           // Its payees too, every one, largest first (0xrard: never hide where money goes).
-          detail: [lineDetail(r), ...sortedRecipients(r.recipients).map((x) => `to ${x.to}: ${x.satoshis} sats`)].join(
-            ' · ',
-          ),
+          detail: [
+            ...(r.askedAgain ? [askedAgainText(r.askedAgain)] : []),
+            lineDetail(r),
+            ...sortedRecipients(r.recipients).map((x) => `to ${x.to}: ${x.satoshis} sats`),
+          ].join(' · '),
           risky: true,
           checked: false,
           ...(r.addedLive ? { isNew: true } : {}),
