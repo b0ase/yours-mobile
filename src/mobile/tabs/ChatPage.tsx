@@ -926,7 +926,7 @@ const Conversation = ({
               {look.name} look · from {look.host}
             </div>
           )}
-          <div className="flex items-center gap-2 text-[11px] min-w-0">
+          <div className="flex flex-wrap items-center gap-x-2 text-[11px] min-w-0">
             <span
               className={`shrink-0 max-w-full ${ELLIPSIS}`}
               style={{ color: look ? look.text : MUTED, opacity: look ? 0.85 : undefined }}

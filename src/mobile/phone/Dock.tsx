@@ -14,7 +14,6 @@ import { itemIcon, itemLabel } from './icons';
 import { useThemedIcon } from '../brand/bappIcons';
 import { TabBadge } from '../../components/TabBadge';
 import { useLandscapeRail } from './landscape';
-import { lookNavPreview } from '../look/look';
 
 /**
  * The phone layout's dock (docs/PHONE-LAYOUT-PLAN.md §5, §14): left slots · the b · right slots, which scroll
@@ -281,8 +280,6 @@ export const Dock = ({
   dots,
 }: Props) => {
   const reduce = useReducedMotion();
-  // Look preview (look/look.ts): the b's tap opens Ask b. Off by default: tap = Home, as today.
-  const bTap = lookNavPreview() ? onAgent : onHome;
   // Phone on its side: the same tiles and b, stacked in a rail on the left (landscape.ts, mobile.css).
   const rail = useLandscapeRail();
   // <html data-rail> while the rail is on screen: mobile.css moves the top bar and pages beside it.
@@ -504,7 +501,7 @@ export const Dock = ({
         >
           {left.map((it, i) => tile(it, i))}
           {empty && addTile}
-          <HomeButton onHome={bTap} onAgent={onAgent} disabled={arranging} />
+          <HomeButton onHome={onHome} onAgent={onAgent} disabled={arranging} />
           {right.map((it, i) => tile(it, left.length + i))}
         </nav>
       ) : (
@@ -522,7 +519,7 @@ export const Dock = ({
               {left.map((it, i) => tile(it, i))}
               {empty && addTile}
             </div>
-            <HomeButton onHome={bTap} onAgent={onAgent} disabled={arranging} />
+            <HomeButton onHome={onHome} onAgent={onAgent} disabled={arranging} />
             <div
               ref={scroller}
               onScroll={measure}
