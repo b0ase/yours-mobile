@@ -1,3 +1,5 @@
+import { bwLook, lookNavPreview } from '../look/look';
+import { AppsGlyph } from '../look/AppsButton';
 import { routeFor } from './tabs';
 import { twetchStoreFor } from '../twetch/twetchLink';
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
@@ -82,6 +84,7 @@ const BAR_BG: string | undefined = undefined;
 const ICON = '#F2F2F0';
 const ACCENT = 'var(--bw-accent)';
 const RING = '1px solid #2A2A2C';
+const appsInTopRow = lookNavPreview() && bwLook() === 'quiet';
 const PAIR_LABEL = IS_EXTENSION ? 'Connect the CLI / an AI assistant' : 'Scan to connect a website';
 
 /** Padlock with a coin: Lock BSV (time-locks), not "lock the app". */
@@ -361,7 +364,7 @@ const TopNavBar = () => {
               top: 'var(--wallet-inset-top)',
               // One row always: five slots, six when a bApp's own button is in (bMail…). A fixed 5-column grid
               // wrapped the sixth (Lock BSV) onto a second row over the page's back button (18 Oct 2026).
-              gridTemplateColumns: `repeat(${bapp ? 6 : 5}, minmax(0, 1fr))`,
+              gridTemplateColumns: `repeat(${(bapp ? 6 : 5) + (appsInTopRow ? 1 : 0)}, minmax(0, 1fr))`,
             }}
           >
             <MenuAvatarButton
@@ -370,6 +373,18 @@ const TopNavBar = () => {
               onOpen={() => setDrawer(true)}
               onLongPress={() => setSheet('accounts')}
             />
+            {/* Apps button preview, quiet direction only (look/look.ts). */}
+            {appsInTopRow && (
+              <button
+                type="button"
+                aria-label="Apps"
+                onClick={() => navigate('/home')}
+                className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
+                style={{ border: RING }}
+              >
+                <AppsGlyph size={16} color={ACCENT} />
+              </button>
+            )}
             <button
               type="button"
               aria-label="Calls"

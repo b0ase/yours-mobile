@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { ChatRoom } from './messages';
 import {
   amountLabel,
+  roomHoldLine,
   atLeast,
   buildTokenRoomList,
   holdingFromLookup,
@@ -55,6 +56,12 @@ describe('holding parsing', () => {
     expect(atLeast('9007199254740993', '9007199254740993')).toBe(true);
     expect(atLeast('9007199254740992', '9007199254740993')).toBe(false);
     expect(atLeast('garbage', '1')).toBe(false);
+  });
+  test('room hold line: grouped digits, no repeated ticker', () => {
+    const gate = { key: `bsv21:${FILM}`, symbol: 'FILM', dec: 0, minRaw: '1' };
+    expect(roomHoldLine(1, '1000000', gate)).toBe('1 holder · you hold 1,000,000');
+    expect(roomHoldLine(1234, '250', { ...gate, dec: 2 })).toBe('1,234 holders · you hold 2.5');
+    expect(roomHoldLine(3, '2', { ...gate, key: 'coll:x' })).toBe('3 holders · you hold 2 items');
   });
   test('labels', () => {
     const gate = { key: `bsv21:${FILM}`, symbol: 'FILM', dec: 2, minRaw: '100' };

@@ -1,0 +1,612 @@
+/* Wallet look (look/look.ts): true black, a designed dock, lighter chat chrome. Everything is scoped to the Gold base
+   (:not([data-bw-pack])), so full packs (White, Nautical, NPG…) keep exactly the look the owner approved. The !importants
+   override inline styles that packs still rely on. Three directions: quiet (default), gold, float. */
+
+/* ── One black: the page, the bars and the safe area are all the same colour ── */
+html:not([data-bw-pack]) {
+  --bw-bg: #000;
+  --bw-pack-bg: #000;
+  --bw-surface: #101010;
+  --bw-card: #101010;
+  --bw-card2: #191918;
+  --bw-line: #242321;
+  --bw-muted: #9c9a92;
+  --bw-hair: rgb(255 255 255 / 0.09);
+  --bw-tile-off: #9c9a92;
+  --bw-black: #000;
+  --bw-panel: #0c0c0c;
+  --bw-field: #141413;
+  --bw-chip: #191918;
+}
+html:not([data-bw-pack]) body,
+html:not([data-bw-pack]) #root {
+  background-color: var(--bw-black);
+}
+
+/* ── Dock ── */
+html:not([data-bw-pack]) nav[data-phone-dock][data-bw-bottom-nav] {
+  background: var(--bw-black) !important;
+  border-top: 1px solid var(--bw-hair) !important;
+}
+/* The bar carries on under the home indicator, so no strip shows below it. */
+html:not([data-bw-pack]) nav[data-phone-dock][data-bw-bottom-nav]::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  height: env(safe-area-inset-bottom, 0px);
+  background: inherit;
+}
+html:not([data-bw-pack]) nav[data-phone-rail] {
+  background: var(--bw-black) !important;
+  border-right: 1px solid var(--bw-hair) !important;
+}
+html:not([data-bw-pack]) .bw-dock-dots:empty {
+  display: none;
+}
+html:not([data-bw-pack]) .bw-tile {
+  gap: 3px;
+  padding-block: 0;
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
+}
+html:not([data-bw-pack]) .bw-tile-ico:not(.is-app) {
+  background: transparent !important;
+  border: 0 !important;
+  width: 40px;
+  height: 28px;
+}
+html:not([data-bw-pack]) .bw-tile-ico.is-app,
+html:not([data-bw-pack]) .bw-tile-ico.is-app img {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+}
+html:not([data-bw-pack]) .bw-tile-ico svg:not(.bw-keep) {
+  width: 23px;
+  height: 23px;
+  stroke: var(--bw-tile-off);
+  stroke-width: 1.75;
+  transition:
+    transform 120ms ease-out,
+    stroke 120ms ease-out,
+    fill 120ms ease-out;
+}
+html:not([data-bw-pack]) .bw-tile-lbl {
+  color: var(--bw-tile-off) !important;
+  font-size: 10.5px;
+  font-weight: 500 !important;
+  letter-spacing: 0.01em;
+  transition: color 120ms ease-out;
+}
+html:not([data-bw-pack]) .bw-tile[data-active] .bw-tile-lbl {
+  color: var(--bw-accent-hi) !important;
+  font-weight: 650 !important;
+}
+html:not([data-bw-pack]) .bw-tile[data-active] .bw-tile-ico svg:not(.bw-keep) {
+  stroke: var(--bw-accent-hi);
+  stroke-width: 2.1;
+  fill: rgb(var(--bw-accent-hi-rgb) / 0.22);
+}
+html:not([data-bw-pack]) .bw-tile:active .bw-tile-ico {
+  transform: scale(0.88);
+}
+html:not([data-bw-pack]) .bw-tile-ico {
+  transition: transform 110ms ease-out;
+}
+html:not([data-bw-pack]) .bw-tile:focus-visible .bw-tile-ico {
+  box-shadow: 0 0 0 2px rgb(var(--bw-accent-hi-rgb) / 0.7);
+  border-radius: 10px;
+}
+
+/* ── Top row: icons without their rings; the account picture keeps its own ── */
+html:not([data-bw-pack]) .bw-topnav > button,
+html:not([data-bw-pack]) .bw-topnav > div > button[aria-label='Calls'],
+html:not([data-bw-pack]) .bw-topnav > button[aria-label] {
+  border-color: transparent !important;
+  background: transparent !important;
+}
+
+/* ── Group room: the same black everywhere, hairlines between, nothing cold ── */
+html:not([data-bw-pack]) .bw-room-view {
+  background: var(--bw-black) !important;
+}
+html:not([data-bw-pack]) .bw-room-head:not([data-room-look]) {
+  background: var(--bw-black) !important;
+  border-bottom: 1px solid var(--bw-hair) !important;
+  padding-top: 4px !important;
+  padding-bottom: 4px;
+  row-gap: 0;
+}
+html:not([data-bw-pack]) .bw-room-head > button[aria-label='Back'] {
+  padding: 6px;
+}
+html:not([data-bw-pack]) .bw-room-head .bw-room-tools button:not(.bw-golive) {
+  padding: 6px !important;
+}
+html:not([data-bw-pack]) .bw-room-head .bw-room-tools {
+  gap: 0;
+  min-height: 32px;
+}
+html:not([data-bw-pack]) .bw-room-head .bw-room-tools svg {
+  width: 18px;
+  height: 18px;
+}
+.bw-golive {
+  flex-shrink: 0;
+  white-space: nowrap;
+  transition: transform 110ms ease-out;
+}
+.bw-golive:active {
+  transform: scale(0.95);
+}
+@media (max-width: 359px) {
+  .bw-golive-text {
+    display: none;
+  }
+}
+html:not([data-bw-pack]) .bw-room-day {
+  background: transparent !important;
+  color: var(--bw-muted) !important;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0 !important;
+}
+html:not([data-bw-pack]) .bw-room-event {
+  background: transparent !important;
+  color: var(--bw-muted) !important;
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 0 8px !important;
+  max-width: 88%;
+}
+html:not([data-bw-pack]) .bw-composer {
+  background: var(--bw-black) !important;
+  border-top: 1px solid var(--bw-hair) !important;
+  padding-top: 6px;
+}
+html:not([data-bw-pack]) .bw-composer {
+  padding-bottom: 6px !important;
+}
+html:not([data-bw-pack]) .bw-composer-plus {
+  background: transparent !important;
+  border-color: transparent !important;
+}
+html:not([data-bw-pack]) .bw-composer-b {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+html:not([data-bw-pack]) .bw-composer-input {
+  background: var(--bw-field) !important;
+  border-color: transparent !important;
+}
+html:not([data-bw-pack]) .bw-composer-send:disabled {
+  background: var(--bw-chip) !important;
+  opacity: 1;
+}
+html:not([data-bw-pack]) .bw-composer-send:disabled svg {
+  stroke: var(--bw-muted);
+}
+
+/* ── Wallet screen ── */
+html:not([data-bw-pack]) .bw-card {
+  background: var(--bw-panel) !important;
+  box-shadow: inset 0 0 0 1px var(--bw-hair) !important;
+  border-color: transparent !important;
+}
+html:not([data-bw-pack]) .bw-home-panel {
+  background: var(--bw-panel);
+  border-color: var(--bw-hair);
+}
+
+/* Motion: nothing animates for those who asked. */
+@media (prefers-reduced-motion: reduce) {
+  html:not([data-bw-pack]) .bw-tile-ico,
+  html:not([data-bw-pack]) .bw-tile-ico svg,
+  .bw-golive {
+    transition: none;
+  }
+}
+
+/* ══ Direction 1: quiet (Telegram-grade). Low, flat, one thin gold state. ══ */
+html[data-phone-layout]:root:not([data-bw-pack]):not([data-rail])[data-bw-look='quiet'] {
+  --dock-h: 3.875rem; /* 62px */
+}
+html[data-bw-look='quiet']:not([data-bw-pack]) .bw-dock-b {
+  width: 46px !important;
+  height: 46px !important;
+  background: var(--bw-black) !important;
+  box-shadow: 0 0 0 1.5px var(--bw-accent-hi) !important;
+}
+html[data-bw-look='quiet']:not([data-bw-pack]) .bw-dock-b img {
+  width: 25px;
+  height: 25px;
+}
+
+/* Quiet: the one filled gold on a room's screen is the send arrow, so Go live is an outline here. */
+html[data-bw-look='quiet']:not([data-bw-pack]) .bw-golive {
+  background: transparent !important;
+  color: var(--bw-accent-hi) !important;
+  box-shadow: inset 0 0 0 1px rgb(var(--bw-accent-hi-rgb) / 0.4);
+}
+
+/* The message list's warm glow reads as a second black beside the bars. */
+html:not([data-bw-pack]) .bw-room-list:not([data-room-look]) {
+  background: var(--bw-black) !important;
+}
+
+/* ══ Slab and Chamfer: the two angular directions (owner, 8 Nov 2026: "more angular buttons… a different feel").
+   One button system: every small button is --bw-btn-h tall with the same padding, every wallet action --bw-act-h.
+   Black surfaces with hairlines instead of filled cards, one filled gold action per screen. ══ */
+html:is([data-bw-look='slab'], [data-bw-look='chamfer']):not([data-bw-pack]) {
+  --bw-btn-h: 30px;
+  --bw-btn-px: 11px;
+  --bw-btn-fs: 12px;
+  --bw-act-h: 46px;
+  --bw-tile-h: 54px;
+  --bw-row-py: 6px;
+  --bw-hair2: rgb(255 255 255 / 0.16);
+  --bw-gold-hair: rgb(var(--bw-accent-hi-rgb) / 0.5);
+}
+html[data-phone-layout]:root:not([data-bw-pack]):not([data-rail])[data-bw-look='slab'] {
+  --dock-h: 4rem; /* 64px */
+}
+html[data-phone-layout]:root:not([data-bw-pack]):not([data-rail])[data-bw-look='chamfer'] {
+  --dock-h: 4.25rem; /* 68px */
+}
+
+/* The small button: Go live is the reference, Invites and the room's icons follow it. */
+html:is([data-bw-look='slab'], [data-bw-look='chamfer']):not([data-bw-pack])
+  :is(.bw-golive, .bw-room-invites, .bw-home-edit, .bw-wcard-getname) {
+  height: var(--bw-btn-h) !important;
+  min-height: var(--bw-btn-h);
+  padding: 0 var(--bw-btn-px) !important;
+  font-size: var(--bw-btn-fs) !important;
+  line-height: 1 !important;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-width: 0 !important;
+}
+html:is([data-bw-look='slab'], [data-bw-look='chamfer']):not([data-bw-pack]) .bw-room-invites {
+  box-shadow: inset 0 0 0 1px var(--bw-gold-hair);
+}
+html:is([data-bw-look='slab'], [data-bw-look='chamfer']):not([data-bw-pack]) .bw-room-head .bw-room-tools {
+  padding-block: var(--bw-row-py);
+  min-height: calc(var(--bw-btn-h) + 2 * var(--bw-row-py));
+  gap: 2px;
+}
+html:is([data-bw-look='slab'], [data-bw-look='chamfer']):not([data-bw-pack])
+  .bw-room-head
+  .bw-room-tools
+  button:not(.bw-golive, .bw-room-invites) {
+  width: var(--bw-btn-h);
+  height: var(--bw-btn-h);
+  padding: 0 !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+html:is([data-bw-look='slab'], [data-bw-look='chamfer']):not([data-bw-pack]) .bw-home-edit {
+  background: transparent !important;
+  color: var(--bw-muted) !important;
+  box-shadow: inset 0 0 0 1px var(--bw-hair);
+}
+
+html:is([data-bw-look='slab'], [data-bw-look='chamfer']):not([data-bw-pack]) .bw-wcard-scan > span {
+  height: var(--bw-btn-h);
+  padding: 0 var(--bw-btn-px);
+  border-width: 1px;
+  font-size: var(--bw-btn-fs);
+  background: transparent;
+}
+html:is([data-bw-look='slab'], [data-bw-look='chamfer']):not([data-bw-pack]) .bw-handle-card {
+  background: var(--bw-black) !important;
+  border-color: var(--bw-hair) !important;
+}
+/* Wallet: hairlines on black. Buy BSV steps back so Receive is the one filled gold button. */
+html:is([data-bw-look='slab'], [data-bw-look='chamfer']):not([data-bw-pack]) .bw-toprow > *,
+html:is([data-bw-look='slab'], [data-bw-look='chamfer']):not([data-bw-pack]) .bw-swaprow > * {
+  background: var(--bw-black) !important;
+  border-color: var(--bw-hair) !important;
+  box-shadow: none !important;
+}
+html:is([data-bw-look='slab'], [data-bw-look='chamfer']):not([data-bw-pack]) .bw-toprow > * {
+  min-height: var(--bw-tile-h);
+}
+html:is([data-bw-look='slab'], [data-bw-look='chamfer']):not([data-bw-pack]) .bw-toprow > button:nth-child(2) {
+  border-color: var(--bw-gold-hair) !important;
+  color: var(--bw-accent-hi) !important;
+}
+html:is([data-bw-look='slab'], [data-bw-look='chamfer']):not([data-bw-pack]) .bw-backup-banner {
+  background: var(--bw-black) !important;
+  color: var(--bw-text) !important;
+  box-shadow:
+    inset 2px 0 0 #e5484d,
+    inset 0 0 0 1px rgb(229 72 77 / 0.35);
+  width: 92%;
+}
+html:is([data-bw-look='slab'], [data-bw-look='chamfer']):not([data-bw-pack]) .bw-backup-banner svg {
+  color: #e5484d;
+}
+html:is([data-bw-look='slab'], [data-bw-look='chamfer']):not([data-bw-pack]) .bw-sendrow {
+  width: 92%;
+  gap: 8px;
+}
+html:is([data-bw-look='slab'], [data-bw-look='chamfer']):not([data-bw-pack]) .bw-sendrow .bw-pill {
+  height: var(--bw-act-h);
+  padding-block: 0;
+  background: var(--bw-black) !important;
+  color: var(--bw-text) !important;
+  box-shadow: inset 0 0 0 1px var(--bw-hair2);
+  font-size: 14px !important;
+}
+html:is([data-bw-look='slab'], [data-bw-look='chamfer']):not([data-bw-pack]) .bw-sendrow > .bw-pill:first-child {
+  background: var(--bw-accent-hi) !important;
+  color: #000 !important;
+  box-shadow: none;
+}
+html:is([data-bw-look='slab'], [data-bw-look='chamfer']):not([data-bw-pack]) .bw-wcard-usd {
+  font-size: clamp(38px, 12.5vw, 50px);
+  letter-spacing: -0.035em;
+  font-variant-numeric: tabular-nums;
+}
+html:is([data-bw-look='slab'], [data-bw-look='chamfer']):not([data-bw-pack]) .bw-wcard-face {
+  box-shadow: none;
+}
+html:is([data-bw-look='slab'], [data-bw-look='chamfer']):not([data-bw-pack]) .bw-composer-input {
+  min-height: 40px;
+}
+html:is([data-bw-look='slab'], [data-bw-look='chamfer']):not([data-bw-pack]) .bw-composer-send:not(:disabled) svg {
+  stroke: #000;
+}
+/* Ask b: the strip that says the apps are underneath. */
+.bw-apps-cue {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 26px;
+  flex-shrink: 0;
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--bw-accent-hi);
+  background: var(--bw-black);
+  border-top: 1px solid var(--bw-hair, var(--bw-line));
+}
+.bw-apps-cue svg {
+  animation: bw-apps-cue 1.8s ease-in-out infinite;
+}
+@keyframes bw-apps-cue {
+  50% {
+    transform: translateY(-2px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bw-apps-cue svg {
+    animation: none;
+  }
+}
+
+/* ── Slab: crisp near-square, hairlines, a gold rule marks where you are ── */
+html[data-bw-look='slab']:not([data-bw-pack]) {
+  --bw-r: 3px;
+}
+html[data-bw-look='slab']:not([data-bw-pack])
+  :is(
+    .bw-golive,
+    .bw-room-invites,
+    .bw-home-edit,
+    .bw-wcard-getname,
+    .bw-toprow > *,
+    .bw-swaprow > *,
+    .bw-backup-banner,
+    .bw-pill,
+    .bw-card,
+    .bw-home-panel,
+    .bw-composer-input,
+    .bw-composer-plus,
+    .bw-composer-b,
+    .bw-composer-send,
+    .bw-wcard-face,
+    .bw-wcard-face button,
+    .bw-wcard-scan > span,
+    .bw-wcard-unit,
+    .bw-swaprow button,
+    .bw-handle-card,
+    .bw-apps-cue,
+    .askb-bar,
+    .askb-send
+  ) {
+  border-radius: var(--bw-r) !important;
+}
+html[data-bw-look='slab']:not([data-bw-pack]) .bw-tile-ico::before {
+  content: '';
+  position: absolute;
+  top: -9px;
+  left: 50%;
+  width: 26px;
+  height: 2px;
+  transform: translateX(-50%);
+  background: transparent;
+}
+html[data-bw-look='slab']:not([data-bw-pack]) .bw-tile[data-active] .bw-tile-ico::before {
+  background: var(--bw-accent-hi);
+}
+html[data-bw-look='slab']:not([data-bw-pack]) .bw-tile[data-active] .bw-tile-ico svg:not(.bw-keep) {
+  fill: none;
+}
+html[data-bw-look='slab']:not([data-bw-pack]) .bw-dock-b {
+  width: 46px !important;
+  height: 46px !important;
+  border-radius: var(--bw-r) !important;
+  background: var(--bw-black) !important;
+  box-shadow: inset 0 0 0 1px var(--bw-accent-hi) !important;
+}
+html[data-bw-look='slab']:not([data-bw-pack]) .bw-dock-b img {
+  width: 26px;
+  height: 26px;
+}
+
+/* ── Chamfer: cut corners, an instrument panel. Corners are clipped, so hairlines are a 1px inset layer. ── */
+html[data-bw-look='chamfer']:not([data-bw-pack]) {
+  --cut: 7px;
+  --bw-cut: polygon(
+    var(--cut) 0,
+    100% 0,
+    100% calc(100% - var(--cut)),
+    calc(100% - var(--cut)) 100%,
+    0 100%,
+    0 var(--cut)
+  );
+  --bw-tile-off: #8f8c84;
+}
+html[data-bw-look='chamfer']:not([data-bw-pack])
+  :is(
+    .bw-golive,
+    .bw-room-invites,
+    .bw-home-edit,
+    .bw-wcard-getname,
+    .bw-toprow > *,
+    .bw-swaprow > *,
+    .bw-backup-banner,
+    .bw-pill,
+    .bw-card,
+    .bw-home-panel,
+    .bw-composer-input,
+    .bw-composer-plus,
+    .bw-composer-send,
+    .bw-wcard-scan > span,
+    .bw-swaprow button,
+    .bw-handle-card,
+    .askb-bar,
+    .askb-send
+  ) {
+  border-radius: 0 !important;
+  clip-path: var(--bw-cut);
+}
+html[data-bw-look='chamfer']:not([data-bw-pack]) .bw-wcard-unit,
+html[data-bw-look='chamfer']:not([data-bw-pack]) .bw-wcard-unit button {
+  border-radius: 0 !important;
+}
+html[data-bw-look='chamfer']:not([data-bw-pack]) :is(.bw-card, .bw-home-panel, .bw-handle-card, .bw-wcard-face) {
+  --cut: 12px;
+}
+html[data-bw-look='chamfer']:not([data-bw-pack]) .bw-wcard-face {
+  border-radius: 0 !important;
+  border: 0 !important;
+  clip-path: var(--bw-cut);
+}
+/* The clipped outline: the element is painted in the hairline colour, a black layer sits 1px inside it. */
+html[data-bw-look='chamfer']:not([data-bw-pack])
+  :is(
+    .bw-toprow > *,
+    .bw-swaprow > *,
+    .bw-backup-banner,
+    .bw-card,
+    .bw-home-panel,
+    .bw-handle-card,
+    .bw-room-invites,
+    .bw-home-edit,
+    .bw-sendrow > .bw-pill:not(:first-child),
+    .askb-bar
+  ) {
+  position: relative;
+  isolation: isolate;
+  border-width: 0 !important;
+  box-shadow: none !important;
+  background: var(--bw-edge, var(--bw-hair2)) !important;
+}
+html[data-bw-look='chamfer']:not([data-bw-pack])
+  :is(
+    .bw-toprow > *,
+    .bw-swaprow > *,
+    .bw-backup-banner,
+    .bw-card,
+    .bw-home-panel,
+    .bw-handle-card,
+    .bw-room-invites,
+    .bw-home-edit,
+    .bw-sendrow > .bw-pill:not(:first-child),
+    .askb-bar
+  )::before {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  z-index: -1;
+  background: var(--bw-black);
+  clip-path: var(--bw-cut);
+}
+html[data-bw-look='chamfer']:not([data-bw-pack]) :is(.bw-toprow > button:nth-child(2), .bw-room-invites) {
+  --bw-edge: var(--bw-gold-hair);
+}
+html[data-bw-look='chamfer']:not([data-bw-pack]) .bw-backup-banner {
+  --bw-edge: rgb(229 72 77 / 0.55);
+}
+html[data-bw-look='chamfer']:not([data-bw-pack]) nav[data-phone-dock][data-bw-bottom-nav] {
+  border-top: 1px solid var(--bw-gold-hair) !important;
+}
+html[data-bw-look='chamfer']:not([data-bw-pack]) .bw-tile-lbl {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+html[data-bw-look='chamfer']:not([data-bw-pack]) .bw-tile-ico:not(.is-app) {
+  width: 44px;
+  height: 28px;
+  --cut: 6px;
+  clip-path: var(--bw-cut);
+  border-radius: 0 !important;
+}
+html[data-bw-look='chamfer']:not([data-bw-pack]) .bw-tile[data-active] .bw-tile-ico:not(.is-app) {
+  background: var(--bw-accent-hi) !important;
+}
+html[data-bw-look='chamfer']:not([data-bw-pack]) .bw-tile[data-active] .bw-tile-ico svg:not(.bw-keep) {
+  stroke: #000;
+  fill: none;
+}
+/* The b: an octagon plate behind the glyph. The button itself isn't clipped, so the hold-to-talk ring still shows. */
+html[data-bw-look='chamfer']:not([data-bw-pack]) .bw-dock-b {
+  width: 50px !important;
+  height: 50px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  isolation: isolate;
+}
+html[data-bw-look='chamfer']:not([data-bw-pack]) .bw-dock-b::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(160deg, var(--bw-accent-hi), var(--bw-accent-lo));
+  clip-path: polygon(
+    13px 0,
+    calc(100% - 13px) 0,
+    100% 13px,
+    100% calc(100% - 13px),
+    calc(100% - 13px) 100%,
+    13px 100%,
+    0 calc(100% - 13px),
+    0 13px
+  );
+}
+html[data-bw-look='chamfer']:not([data-bw-pack]) .bw-dock-b img {
+  width: 28px;
+  height: 28px;
+  filter: brightness(0);
+}
+html[data-bw-look='chamfer']:not([data-bw-pack]) .bw-wcard-sats {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 11px;
+}
+html[data-bw-look='chamfer']:not([data-bw-pack]) .bw-composer-b {
+  border-radius: 0 !important;
+}

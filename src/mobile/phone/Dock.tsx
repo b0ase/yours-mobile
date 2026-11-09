@@ -14,6 +14,7 @@ import { itemIcon, itemLabel } from './icons';
 import { useThemedIcon } from '../brand/bappIcons';
 import { TabBadge } from '../../components/TabBadge';
 import { useLandscapeRail } from './landscape';
+import { lookNavPreview } from '../look/look';
 
 /**
  * The phone layout's dock (docs/PHONE-LAYOUT-PLAN.md §5, §14): left slots · the b · right slots, which scroll
@@ -118,11 +119,12 @@ const Tile = ({
           if (fired.current) return void (fired.current = false);
           onTap();
         }}
-        className={`flex flex-col items-center gap-1 w-full py-1 bg-transparent border-0 select-none ${arranging ? `bw-jiggle${alt ? ' bw-jiggle-alt' : ''}` : ''}`}
+        data-active={active ? '' : undefined}
+        className={`bw-tile flex flex-col items-center gap-1 w-full py-1 bg-transparent border-0 select-none ${arranging ? `bw-jiggle${alt ? ' bw-jiggle-alt' : ''}` : ''}`}
         style={{ WebkitTouchCallout: 'none' }}
       >
         <span
-          className={`relative flex h-10 w-10 items-center justify-center ${isApp ? 'rounded-[11px]' : 'rounded-2xl'}`}
+          className={`bw-tile-ico relative flex h-10 w-10 items-center justify-center ${isApp ? 'is-app rounded-[11px]' : 'rounded-2xl'}`}
           style={
             isApp
               ? // Apps look like their Apps-page tile: the icon fills the rounded square (BrowserPage TileIcon).
@@ -147,7 +149,7 @@ const Tile = ({
           {badge && <TabBadge text={badge} />}
         </span>
         <span
-          className="w-full overflow-hidden text-ellipsis whitespace-nowrap text-center text-[10px] leading-tight"
+          className="bw-tile-lbl w-full overflow-hidden text-ellipsis whitespace-nowrap text-center text-[10px] leading-tight"
           style={{ color: active ? GOLD : MUTED, fontWeight: active ? 700 : 500 }}
         >
           {label}
@@ -279,6 +281,8 @@ export const Dock = ({
   dots,
 }: Props) => {
   const reduce = useReducedMotion();
+  // Look preview (look/look.ts): the b's tap opens Ask b. Off by default: tap = Home, as today.
+  const bTap = lookNavPreview() ? onAgent : onHome;
   // Phone on its side: the same tiles and b, stacked in a rail on the left (landscape.ts, mobile.css).
   const rail = useLandscapeRail();
   // <html data-rail> while the rail is on screen: mobile.css moves the top bar and pages beside it.
@@ -500,7 +504,7 @@ export const Dock = ({
         >
           {left.map((it, i) => tile(it, i))}
           {empty && addTile}
-          <HomeButton onHome={onHome} onAgent={onAgent} disabled={arranging} />
+          <HomeButton onHome={bTap} onAgent={onAgent} disabled={arranging} />
           {right.map((it, i) => tile(it, left.length + i))}
         </nav>
       ) : (
@@ -512,13 +516,13 @@ export const Dock = ({
           style={{ height: 'var(--dock-h)', background: '#0A0B0D', borderTop: '1px solid #1C1C1E' }}
           onContextMenu={(e) => e.preventDefault()}
         >
-          <div className="h-4 shrink-0">{dots}</div>
-          <div className="flex-1 min-h-0 flex items-center px-1">
+          <div className="bw-dock-dots h-4 shrink-0">{dots}</div>
+          <div className="bw-dock-row flex-1 min-h-0 flex items-center px-1">
             <div className="flex-1 flex items-center justify-around min-w-0">
               {left.map((it, i) => tile(it, i))}
               {empty && addTile}
             </div>
-            <HomeButton onHome={onHome} onAgent={onAgent} disabled={arranging} />
+            <HomeButton onHome={bTap} onAgent={onAgent} disabled={arranging} />
             <div
               ref={scroller}
               onScroll={measure}
