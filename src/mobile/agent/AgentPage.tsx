@@ -43,18 +43,21 @@ const AgentPage = () => {
       }}
     >
       <TopNav />
-      <div
-        className={`flex items-center gap-2 py-1 shrink-0 ${opening ? 'px-4' : 'px-2'}`}
-        style={{ borderBottom: `1px solid ${LINE}`, minHeight: opening ? '2.75rem' : undefined }}
-      >
-        {!opening && (
-          <button aria-label="Back" onClick={close} className="p-2">
-            <ArrowLeft size={20} color="#fff" />
-          </button>
-        )}
-        <img src={bGlyph} alt="" width={22} height={22} />
-        <h1 className="text-lg font-bold text-white shrink-0">Ask b</h1>
-      </div>
+      {/* Phone (owner, 9 Nov 2026): no title row; this page is the home of the app, with nowhere to go back to. */}
+      {!phone && (
+        <div
+          className={`flex items-center gap-2 py-1 shrink-0 ${opening ? 'px-4' : 'px-2'}`}
+          style={{ borderBottom: `1px solid ${LINE}`, minHeight: opening ? '2.75rem' : undefined }}
+        >
+          {!opening && (
+            <button aria-label="Back" onClick={close} className="p-2">
+              <ArrowLeft size={20} color="#fff" />
+            </button>
+          )}
+          <img src={bGlyph} alt="" width={22} height={22} />
+          <h1 className="text-lg font-bold text-white shrink-0">Ask b</h1>
+        </div>
+      )}
       {appsReach && <AppsBar onGo={toApps} />}
       <AgentConversation />
     </div>
