@@ -18,7 +18,7 @@ import { assertOrdLockV2 } from '../market/ordlockVersion';
 import { appendAgentLog, getAgentAccount } from './agentAccounts';
 import { serialSpend } from './spendQueue';
 import { checkAgentAction, getLoadedStrategy, getPaperBook, type ActionRequest, type StrategyAction } from './strategy';
-import { describeRules } from './describeRules';
+import { describeRules, inactiveRuleNotices, paperRuleGaps } from './describeRules';
 import { heldBsv21Balances } from '../airdrops/heldBalances';
 import { parseRoom, roomMarket, roomMeta, type Listing } from '../market/indexer';
 import { MODULE_FINISHES, purchaseContext, walletOutpoint } from '../market/walletOutpoint';
@@ -77,10 +77,16 @@ export const listingPriceUsd = (l: Pick<Listing, 'perTokenSats'>, bsvUsd: number
 export const agentAccountPrompt = (id: string | undefined, name: string) => {
   if (!id || !getAgentAccount(id)) return '';
   const l = getLoadedStrategy(id);
+  const inactive = l ? inactiveRuleNotices(l.strategy.rules) : [];
+  const paperGaps = l?.mode === 'paper' ? paperRuleGaps(l.strategy.rules) : [];
   const strategy = l
     ? `Loaded strategy: "${l.strategy.name}" v${l.strategy.version}, ${l.mode === 'paper' ? 'PAPER mode (pretend money, nothing is signed)' : 'LIVE (real money)'}.
 Goals: ${l.strategy.goals}
 Rules the wallet enforces (you cannot change them): ${describeRules(l.strategy.rules).join('; ')}.${
+        inactive.length
+          ? ` NOT enforced, so never tell the user these protect them, and tell them so if it matters: ${inactive.join(' ')}`
+          : ''
+      }${paperGaps.length ? ` ${paperGaps.join(' ')}` : ''}${
         l.mode === 'paper' ? ` Paper cash: $${getPaperBook(id).cashUsd.toFixed(2)}.` : ''
       }`
     : 'No strategy is loaded, so the user is driving: only act when they ask you to in this chat.';

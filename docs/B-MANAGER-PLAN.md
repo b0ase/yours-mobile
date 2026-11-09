@@ -24,7 +24,7 @@ Agent accounts today (`src/mobile/agents/agentAccounts.ts`, SMART-WALLET-SPEC §
 as agent; balance = budget; `stopped`, `dailyCapUsd`, labels, ghost colour, `kind: 'agent' | 'pot'`; a per-account
 activity log (`AgentLogEntry`: at, action, detail, usd, txid, rule; 500 entries, localStorage); global Stop all;
 `checkAgentSpend` gate. Strategies (`strategy.ts`, `docs/STRATEGY-FORMAT.md`) add hard rules (per-trade, per-day,
-total, price bounds, stop conditions) that the AI can never widen. The CLI (`bwalletx-cli`) runs the same gate
+total, price bounds, stop conditions; `stop.downPct` isn't active yet) that the AI can never widen. The CLI (`bwalletx-cli`) runs the same gate
 (`gate.ts`: kill switch → cap → 30 spends/hour → strategy → paper fill) and logs to `~/.bwalletx/log/<name>.jsonl`.
 Paired CLI accounts keep keys on the phone. bAgents (`docs/BAGENTS-PLAN.md`) already defines the `BWX` agent
 calls (`agents.list`, `agents.log`, `stop`, `resume`, `setCap`…) with "stop is one tap, raising needs the

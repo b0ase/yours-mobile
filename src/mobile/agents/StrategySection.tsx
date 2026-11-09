@@ -1,4 +1,5 @@
-import { describeRules } from './describeRules';
+import { LOAD_STRATEGY_BLURB } from './describeRules';
+import { StrategyRuleNotes } from './StrategyRuleNotes';
 import { useRef, useState } from 'react';
 import { FileUp } from 'lucide-react';
 import {
@@ -86,14 +87,7 @@ export const StrategySection = ({ id }: { id: string }) => {
         <div className="text-xs whitespace-pre-wrap" style={{ color: '#D0D5DD' }}>
           {s.goals}
         </div>
-        <ul className="m-0 pl-4 text-xs flex flex-col gap-0.5" style={{ color: MUTED }}>
-          {describeRules(s.rules).map((l) => (
-            <li key={l}>{l}</li>
-          ))}
-        </ul>
-        <div className="text-[11px]" style={{ color: MUTED }}>
-          The wallet checks these rules before anything is signed. The agent can't change them.
-        </div>
+        <StrategyRuleNotes rules={s.rules} paper={!live} />
         {book && (
           <div className="rounded-lg px-3 py-2 text-xs" style={{ background: 'var(--bw-bg)', color: '#D0D5DD' }}>
             Paper money: ${book.cashUsd.toFixed(2)} cash
@@ -167,8 +161,7 @@ export const StrategySection = ({ id }: { id: string }) => {
     <div className={section} style={{ background: CARD }}>
       <div className="text-sm font-bold text-white">Load strategy</div>
       <div className="text-xs" style={{ color: MUTED }}>
-        A strategy is a file of goals for the agent and rules the wallet enforces: which tokens, how much per trade and
-        per day, buy and sell prices, when to stop. It starts on paper (pretend money) until you choose Run live.
+        {LOAD_STRATEGY_BLURB}
       </div>
       <input
         ref={file}

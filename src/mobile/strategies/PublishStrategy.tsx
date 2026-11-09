@@ -6,6 +6,7 @@ import { MARKET_ENABLED } from '../storeBuild';
 import { EXAMPLE_STRATEGIES } from './examples';
 import { publishStrategy } from './market';
 import { rememberStrategy } from './myStrategies';
+import { InactiveRuleNotices } from '../agents/StrategyRuleNotes';
 import { publishProblems, sealStrategy, SPEC_LABELS, STRATEGY_DISCLAIMER } from './strategyNft';
 
 const GOLD = 'var(--bw-accent)';
@@ -95,6 +96,7 @@ export const PublishStrategy = ({ strategy, onClose }: { strategy: Strategy; onC
       <div className="text-xs" style={{ color: MUTED }}>
         Buyers see the description and spec. The program itself is encrypted: only owners of a copy can open and run it.
       </div>
+      <InactiveRuleNotices rules={s.rules} />
       <label className="text-xs flex flex-col gap-1" style={{ color: MUTED }}>
         Start from an example
         <select value={exampleId} onChange={(e) => pickExample(e.target.value)} className={input} style={style}>

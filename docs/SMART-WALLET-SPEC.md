@@ -78,7 +78,8 @@ A strategy file contains:
 
 **Enforcement.** Rules and the spec's limits are checked by the wallet before any action is signed. If
 the AI asks for something outside them, the action is refused and logged. The AI chooses _when_ and
-_whether_ within the rules; it can never widen them.
+_whether_ within the rules; it can never widen them. Exceptions today are listed in STRATEGY-FORMAT.md: `stop.downPct`
+isn't active yet, and minting from a paired CLI and exported keys are outside these checks.
 
 **Loading.** Account › **Load strategy** (app) or `bwalletx strategy load` (CLI). One strategy per account
 at a time; an agent on several accounts can run a different one in each.
@@ -169,7 +170,7 @@ A third Market section beside Tokens and NFTs.
 | **Seller's risk rating** | Low · Medium · High · Experimental |
 | Most it will spend       | $10/day, $200 total                |
 | How often it acts        | A few times a day                  |
-| When it stops            | Holds 100k tokens, or down 30%     |
+| When it stops            | Holds 100k tokens                  |
 | Needs                    | Agent account with at least $50    |
 | Version / changes        | v1.2: tighter stop                 |
 
