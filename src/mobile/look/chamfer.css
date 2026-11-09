@@ -226,6 +226,14 @@ html:not([data-bw-pack]) .bw-wcard-scan > span {
 .bw-dock-dots:empty {
   display: none;
 }
+/* Owner, 9 Nov 2026: the b and the tab names sit lower in the bar. Offsets, so the row's layout and tap areas stay put. */
+nav[data-phone-dock][data-bw-bottom-nav] .bw-dock-b {
+  top: 8px;
+}
+nav[data-phone-dock][data-bw-bottom-nav] .bw-tile-lbl {
+  position: relative;
+  top: 6px;
+}
 .bw-tile {
   gap: 3px;
   padding-block: 0;
