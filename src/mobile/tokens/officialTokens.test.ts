@@ -30,4 +30,18 @@ describe('official tokens', () => {
     expect(i.status).toBe('verified');
     expect(issuerLabel(i)).toEqual({ text: 'Issued by bWalletX · official', verified: true });
   });
+  test('gives every MoneyButton deploy the real logo when it has no icon of its own', () => {
+    for (const id of [
+      '936a9effd2fc85c47ab205cab1ae94a5d1888f8349429ac1e2c769e1e0ba5572_0',
+      '52bc729cd8ee3d42066c259251577b5ad1547edf082afbd1bd6cb79f4eafbfc1_1',
+      '2ccf7aa34cb78a393bb948630d3749b945f832480c04c1a6e8f7fea31cb67b5b_0',
+    ]) {
+      expect(tokenIconUrl(id, 'MONEYBUTTON', undefined)).toContain('cd1b6edc');
+      expect(officialToken(id)).toBeNull();
+    }
+  });
+
+  test('keeps the placeholder for a same-named token with another id', () => {
+    expect(tokenIconUrl('ab'.repeat(32) + '_0', 'MONEYBUTTON', undefined)).toBe(placeholderTokenIcon('MONEYBUTTON'));
+  });
 });

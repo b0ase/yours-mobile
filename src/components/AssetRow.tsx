@@ -1,8 +1,9 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { useTheme } from '../hooks/useTheme';
 import { formatLargeNumber, formatUSD } from '../utils/format';
 import { Show } from './Show';
+import { placeholderTokenIcon } from '../mobile/tokens/officialTokens';
 import { BSV_DECIMAL_CONVERSION } from '../utils/constants';
 
 /** `icon`: render as a compact round icon button with `label` as aria-label and tooltip (PNEEs' lock, 10 Oct 2026). */
@@ -99,6 +100,8 @@ export const AssetRow = (props: AssetRowProps) => {
   // "Get MNEE", worded and placed as in Yours (owner, 6 Oct 2026).
   const button = action ?? (isMNEE && onGetMneeClick ? { label: 'Get MNEE', onClick: onGetMneeClick } : undefined);
   const { theme } = useTheme();
+  // An icon that won't load shows the letter placeholder, never a blank.
+  const [failedIcon, setFailedIcon] = useState('');
   const isDisplaySat = isLock && balance < 0.0001;
   const displayDecimals = decimals ?? (isDisplaySat ? 0 : 3);
   // At zero the buttons replace the balance, centred like Yours' Get MNEE.
@@ -123,7 +126,12 @@ export const AssetRow = (props: AssetRowProps) => {
       {/* Left: icon + name */}
       <div className="flex items-center flex-1 min-w-0 ml-3">
         <Show when={!!icon && icon.length > 0}>
-          <img src={icon} className="w-9 h-9 rounded-full object-cover flex-shrink-0" alt={ticker} />
+          <img
+            src={icon === failedIcon ? placeholderTokenIcon(ticker) : icon}
+            onError={() => setFailedIcon(icon)}
+            className="w-9 h-9 rounded-full object-cover flex-shrink-0"
+            alt={ticker}
+          />
         </Show>
         <div className="flex flex-col items-start ml-3 min-w-0">
           <span className="text-sm font-semibold leading-tight max-w-full truncate" style={{ color: theme.color.global.contrast }}>
