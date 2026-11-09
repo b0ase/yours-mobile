@@ -43,7 +43,8 @@ describe('everyOutput', () => {
   test('throws when the total says there is more than can be read', async () => {
     const read = (async () => ({ outputs: [1, 2], totalOutputs: 3 })) as never;
     let n = 0;
-    const thenEmpty = (async () => (n++ ? { outputs: [], totalOutputs: 3 } : { outputs: [1, 2], totalOutputs: 3 })) as never;
+    const thenEmpty = (async () =>
+      n++ ? { outputs: [], totalOutputs: 3 } : { outputs: [1, 2], totalOutputs: 3 }) as never;
     await expect(everyOutput({}, thenEmpty, { basket: 'lock' }, ADMIN)).rejects.toThrow(OUTPUTS_UNREADABLE);
     // A listing that repeats its first page for ever still ends, refused.
     await expect(everyOutput({}, read, { basket: 'lock' }, ADMIN)).rejects.toThrow(OUTPUTS_UNREADABLE);

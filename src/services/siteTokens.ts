@@ -79,7 +79,6 @@ const isProtocol = (p: unknown, want: WalletProtocol) =>
   p[1].trim().toLowerCase() === want[1];
 const isReceiveProtocol = (p: unknown) => isProtocol(p, SITE_TOKEN_RECEIVE) || isProtocol(p, SITE_ORDINAL_RECEIVE);
 
-
 /** The keyID the wallet mints for a receive key: the 1Sat wallets' own `${tokenId}-${ms}` (seed recovery scans it). */
 export const receiveKeyID = (tokenId: string, ms: number) => `${tokenId}-${ms}`;
 

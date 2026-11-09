@@ -44,9 +44,7 @@ const OTHER_TOKEN = `${'cd'.repeat(32)}_1`;
  * asks ensureBasketAccess for every basketed output (like the toolbox) and returns a signable tx whose token inputs
  * come from listOutputs, signAction records the spends it was given.
  */
-const setup = (
-  opts: { approve?: boolean | ((r: any) => boolean); bare?: boolean; listing?: (a: any) => any } = {},
-) => {
+const setup = (opts: { approve?: boolean | ((r: any) => boolean); bare?: boolean; listing?: (a: any) => any } = {}) => {
   const proto = new ProtoWallet(PrivateKey.fromRandom());
   const calls: string[] = [];
   const signed: Record<number, unknown>[] = [];
@@ -399,7 +397,7 @@ describe('site tokens: selling', () => {
     }
   });
 
-  test("this guard alone passes on canonical inputs, with or without a delivery", async () => {
+  test('this guard alone passes on canonical inputs, with or without a delivery', async () => {
     const op = `${'cd'.repeat(32)}.3`;
     const named = [{ outpoint: `${'CD'.repeat(32)}_3`, inputDescription: 'site money', unlockingScriptLength: 108 }];
     const plain = setup({ bare: true });

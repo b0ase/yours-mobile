@@ -344,7 +344,12 @@ describe('coins a site names are compared in one canonical form', () => {
       adminOriginator: ADMIN,
     });
     const pm = new WalletPermissionsManager(
-      { listOutputs: async (a: { basket: string }) => ({ outputs: baskets[a.basket] ?? [], totalOutputs: (baskets[a.basket] ?? []).length }) } as never,
+      {
+        listOutputs: async (a: { basket: string }) => ({
+          outputs: baskets[a.basket] ?? [],
+          totalOutputs: (baskets[a.basket] ?? []).length,
+        }),
+      } as never,
       ADMIN,
       { permissionModules: modules as never, encryptWalletMetadata: false },
     );
@@ -357,7 +362,9 @@ describe('coins a site names are compared in one canonical form', () => {
         createAction: (a: unknown, o?: string) => Promise<unknown>;
       };
       for (const vout of [0, 1, 2])
-        await expect(m.createAction({ inputs: [{ outpoint: `${T}.${vout}` }] }, SITE)).rejects.toThrow(OWN_COIN_REFUSAL);
+        await expect(m.createAction({ inputs: [{ outpoint: `${T}.${vout}` }] }, SITE)).rejects.toThrow(
+          OWN_COIN_REFUSAL,
+        );
       expect(created).toHaveLength(0);
       await m.createAction({ inputs: [{ outpoint: `${'cd'.repeat(32)}.0` }] }, SITE);
       expect(created).toHaveLength(1);
