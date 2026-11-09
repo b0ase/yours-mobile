@@ -2502,7 +2502,8 @@ html.ww-on .bw-cdes {
 .bw-wcard-front .bw-wcard-addrslot {
   margin-right: 20px;
 }
-.bw-wcard-front .bw-wcard-addrrow .bw-wcard-copyicon {
+.bw-wcard-front .bw-wcard-addrrow .bw-wcard-copyicon,
+.bw-wcard-idline .bw-wcard-copyicon {
   margin: -14px -8px -14px -14px;
 }
 
@@ -3751,4 +3752,39 @@ html[data-rail] .bw-dock-pad:has(> .bw-bcar) > .bw-sendrow {
    sideways scroll; taps, long-presses and the bars' own pointer gestures are unaffected. */
 [data-bw-bottom-nav] {
   touch-action: pan-x;
+}
+
+/* Card front layout (design review, owner 9 Nov 2026): one left and one right edge, the top and bottom space equal. The
+   paymail row is a direct child of the face, so the face's space-between keeps it midway between avatar and balance. */
+.bw-wcard-idline {
+  padding-left: 0;
+  gap: 2px;
+}
+.bw-wcard-avatarbtn {
+  position: relative;
+  z-index: 3;
+}
+.bw-wcard-holder {
+  gap: 10px;
+}
+.bw-wcard-handle.is-paymail {
+  font-size: clamp(14px, 4.1vw, 17px);
+  line-height: 1.2;
+}
+.bw-wcard-addrline {
+  margin-bottom: 0;
+}
+.bw-wcard-tr,
+.bw-wcard-addrline > .bw-wcard-unit {
+  margin-right: 0;
+}
+.bw-wcard-penflip {
+  right: 8px;
+}
+.bw-wcard-front .bw-wcard-addr {
+  display: block;
+  font-size: 11px;
+}
+.bw-wcard-front .bw-wcard-sats {
+  margin-top: 8px;
 }
