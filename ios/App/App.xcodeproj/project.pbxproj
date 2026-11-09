@@ -7,6 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		C0DE5EED0000000000000100 /* NCModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE5EED0000000000000200 /* NCModels.swift */; };
+		C0DE5EED0000000000000101 /* NCLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE5EED0000000000000201 /* NCLayout.swift */; };
+		C0DE5EED0000000000000102 /* NCCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE5EED0000000000000202 /* NCCache.swift */; };
+		C0DE5EED0000000000000103 /* NCRoomViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE5EED0000000000000203 /* NCRoomViewController.swift */; };
+		C0DE5EED0000000000000104 /* NCListViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE5EED0000000000000204 /* NCListViewController.swift */; };
+		C0DE5EED0000000000000105 /* NativeChatPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE5EED0000000000000205 /* NativeChatPlugin.swift */; };
 		A5FF572F82A0FB3EE7D2F911 /* YoursNativePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF04218407516DE1D58B3DE7 /* YoursNativePlugin.swift */; };
 		B7A1C0DE5EED000000000001 /* PasskeysPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7A1C0DE5EED000000000002 /* PasskeysPlugin.swift */; };
 		B7A1C0DE5EED000000000003 /* AppBadgePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7A1C0DE5EED000000000004 /* AppBadgePlugin.swift */; };
@@ -22,6 +28,12 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		C0DE5EED0000000000000200 /* NCModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCModels.swift; sourceTree = "<group>"; };
+		C0DE5EED0000000000000201 /* NCLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCLayout.swift; sourceTree = "<group>"; };
+		C0DE5EED0000000000000202 /* NCCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCCache.swift; sourceTree = "<group>"; };
+		C0DE5EED0000000000000203 /* NCRoomViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCRoomViewController.swift; sourceTree = "<group>"; };
+		C0DE5EED0000000000000204 /* NCListViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCListViewController.swift; sourceTree = "<group>"; };
+		C0DE5EED0000000000000205 /* NativeChatPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeChatPlugin.swift; sourceTree = "<group>"; };
 		B7A1C0DE5EED000000000002 /* PasskeysPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasskeysPlugin.swift; sourceTree = "<group>"; };
 		B7A1C0DE5EED000000000004 /* AppBadgePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppBadgePlugin.swift; sourceTree = "<group>"; };
 		FF04218407516DE1D58B3DE7 /* YoursNativePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YoursNativePlugin.swift; sourceTree = "<group>"; };
@@ -74,6 +86,7 @@
 				FF04218407516DE1D58B3DE7 /* YoursNativePlugin.swift */,
 				B7A1C0DE5EED000000000002 /* PasskeysPlugin.swift */,
 				B7A1C0DE5EED000000000004 /* AppBadgePlugin.swift */,
+				C0DE5EED0000000000000300 /* NativeChat */,
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
@@ -84,6 +97,19 @@
 				50B271D01FEDC1A000F3C39B /* public */,
 			);
 			path = App;
+			sourceTree = "<group>";
+		};
+		C0DE5EED0000000000000300 /* NativeChat */ = {
+			isa = PBXGroup;
+			children = (
+				C0DE5EED0000000000000200 /* NCModels.swift */,
+				C0DE5EED0000000000000201 /* NCLayout.swift */,
+				C0DE5EED0000000000000202 /* NCCache.swift */,
+				C0DE5EED0000000000000203 /* NCRoomViewController.swift */,
+				C0DE5EED0000000000000204 /* NCListViewController.swift */,
+				C0DE5EED0000000000000205 /* NativeChatPlugin.swift */,
+			);
+			path = NativeChat;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -172,6 +198,12 @@
 				A5FF572F82A0FB3EE7D2F911 /* YoursNativePlugin.swift in Sources */,
 				B7A1C0DE5EED000000000001 /* PasskeysPlugin.swift in Sources */,
 				B7A1C0DE5EED000000000003 /* AppBadgePlugin.swift in Sources */,
+				C0DE5EED0000000000000100 /* NCModels.swift in Sources */,
+				C0DE5EED0000000000000101 /* NCLayout.swift in Sources */,
+				C0DE5EED0000000000000102 /* NCCache.swift in Sources */,
+				C0DE5EED0000000000000103 /* NCRoomViewController.swift in Sources */,
+				C0DE5EED0000000000000104 /* NCListViewController.swift in Sources */,
+				C0DE5EED0000000000000105 /* NativeChatPlugin.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

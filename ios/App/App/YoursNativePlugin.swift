@@ -15,6 +15,8 @@ class YoursBridgeViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(YoursNativePlugin())
         bridge?.registerPluginInstance(PasskeysPlugin())
         bridge?.registerPluginInstance(AppBadgePlugin())
+        // Inert until JS turns the switch on (src/mobile/nativeChat/flag.ts).
+        bridge?.registerPluginInstance(NativeChatPlugin())
         installBridgeGate()
     }
 
