@@ -236,6 +236,7 @@ import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { getErrorMessage } from '../../utils/tools';
 import { asMenuItem, TAB_TAP } from './tabs';
+import { NativeChatMount } from '../nativeChat/NativeChatMount';
 import { ChatTabs, SegmentRow, SegmentTitle } from '../feed/ChatSegments';
 import { useChatDisplayName } from '../feed/chatDisplayName';
 import {
@@ -3870,6 +3871,7 @@ const ChatPage = () => (
       dms={(header) => <DmsPage header={header} Conversation={DmConversation} />}
     />
     <UndoToastHost />
+    <NativeChatMount />
   </>
 );
 
