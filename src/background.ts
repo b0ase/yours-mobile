@@ -6598,7 +6598,17 @@ if (!(
       sealSite = message.originator && message.originator !== ADMIN_ORIGINATOR ? permissionSite(message.originator) : '';
       // While an approved seal's own signature is being made, no other seal-protocol signature from the site may
       // share its one answer (services/sealPass.ts signing).
-      if (sealSite && isSealProtocol(message.params?.protocolID) && sealPasses?.signing(sealSite))
+      // Literal env (storeBuild.ts NATIVE_SEAL_ENABLED): a store bundle carries no seal protocol name (review 24 S1).
+      if (
+        !(
+          import.meta.env.VITE_STORE_BUILD === '1' ||
+          import.meta.env.VITE_CHANNEL === 'ios-store' ||
+          import.meta.env.VITE_CHANNEL === 'android-play'
+        ) &&
+        sealSite &&
+        isSealProtocol(message.params?.protocolID) &&
+        sealPasses?.signing(sealSite)
+      )
         throw new Error(SEAL_BUSY_REFUSAL);
       // Store builds: no Seal sheet (storeBuild.ts NATIVE_SEAL_ENABLED written out, literal env, review 24 S1); the
       // sign asks as before.
