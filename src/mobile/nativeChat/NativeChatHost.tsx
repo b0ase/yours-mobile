@@ -128,6 +128,22 @@ const NativeChatHost = () => {
     return () => window.removeEventListener(TAB_TAP, onTap);
   }, []);
 
+  // Back out of the full WebView room: the native list returns on its own.
+  const classicRoom = useRef(false);
+  useEffect(() => {
+    if (!classic || !classicRoom.current) return;
+    let seen = false;
+    const t = window.setInterval(() => {
+      const open = !!document.querySelector('.bw-room-view');
+      if (open) seen = true;
+      else if (seen) {
+        classicRoom.current = false;
+        setClassic(false);
+      }
+    }, 250);
+    return () => window.clearInterval(t);
+  }, [classic]);
+
   // Web overlays over the list; polled because a sheet can come from anywhere in the DOM. Skipped inside a room,
   // which is full screen and owns the display.
   useEffect(() => {
@@ -178,6 +194,7 @@ const NativeChatHost = () => {
     (ticker: string) => {
       closeSession();
       void NativeChat.popToList();
+      classicRoom.current = true;
       setClassic(true);
       requestRoomLink({ ref: ticker, invite: null, door: null });
     },

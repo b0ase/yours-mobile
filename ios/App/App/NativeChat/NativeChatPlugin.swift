@@ -126,13 +126,23 @@ final class NativeChatCoordinator: NSObject, UINavigationControllerDelegate, UIG
 
     func applyRoom(ticker: String, from: Int, rows delta: [NCRow], hasMore: Bool, cacheable: Bool, loading: Bool, error: String, composer: NCComposerState) {
         let base = memory[ticker] ?? []
-        let rows = Array(base.prefix(max(0, from))) + delta
+        // JS has nothing yet and is still fetching: keep what the cache put on screen.
+        let rows = (delta.isEmpty && from == 0 && loading && !base.isEmpty) ? base : Array(base.prefix(max(0, from))) + delta
         remember(ticker, rows)
         if cacheable { cache.save(me: me, ticker: ticker, rows: rows) } else { cache.remove(me: me, ticker: ticker) }
         if let vc = currentRoom, vc.room.ticker == ticker {
             vc.apply(rows: rows, hasMore: hasMore, loading: loading, error: error, composer: composer)
         }
     }
+
+    #if DEBUG
+    func debugDropMemory() {
+        memory.removeAll()
+        memoryOrder.removeAll()
+    }
+    func debugRoom(_ ticker: String) -> NCRoom? { list?.room(ticker) }
+    var debugCurrentRoom: NCRoomViewController? { currentRoom }
+    #endif
 
     func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool { (nav?.viewControllers.count ?? 0) > 1 }
 
@@ -147,14 +157,20 @@ final class NativeChatCoordinator: NSObject, UINavigationControllerDelegate, UIG
 public class NativeChatPlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "NativeChatPlugin"
     public let jsName = "NativeChat"
-    public let pluginMethods: [CAPPluginMethod] = [
-        CAPPluginMethod(name: "show", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "hide", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "setRooms", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "setRoom", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "popToList", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "clearCache", returnType: CAPPluginReturnPromise),
-    ]
+    public let pluginMethods: [CAPPluginMethod] = {
+        var m: [CAPPluginMethod] = [
+            CAPPluginMethod(name: "show", returnType: CAPPluginReturnPromise),
+            CAPPluginMethod(name: "hide", returnType: CAPPluginReturnPromise),
+            CAPPluginMethod(name: "setRooms", returnType: CAPPluginReturnPromise),
+            CAPPluginMethod(name: "setRoom", returnType: CAPPluginReturnPromise),
+            CAPPluginMethod(name: "popToList", returnType: CAPPluginReturnPromise),
+            CAPPluginMethod(name: "clearCache", returnType: CAPPluginReturnPromise),
+        ]
+        #if DEBUG
+        m.append(CAPPluginMethod(name: "benchStart", returnType: CAPPluginReturnPromise)!)
+        #endif
+        return m
+    }()
 
     static let coordinator = NativeChatCoordinator()
 
@@ -217,6 +233,16 @@ public class NativeChatPlugin: CAPPlugin, CAPBridgedPlugin {
             call.resolve()
         }
     }
+
+    #if DEBUG
+    @objc func benchStart(_ call: CAPPluginCall) {
+        let mode = call.getString("mode") ?? "native"
+        DispatchQueue.main.async {
+            NCBench.start(mode: mode)
+            call.resolve()
+        }
+    }
+    #endif
 
     @objc func clearCache(_ call: CAPPluginCall) {
         DispatchQueue.main.async {

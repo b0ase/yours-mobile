@@ -231,6 +231,10 @@ final class NCComposerView: UIView, UITextViewDelegate {
     }
 
     @objc private func classicTapped() { onClassic?() }
+
+    #if DEBUG
+    func debugFocus() { textView.becomeFirstResponder() }
+    #endif
 }
 
 /// One group room. Opens on what the cache has, in the first frame; the bridge updates it after.
@@ -479,10 +483,27 @@ final class NCRoomViewController: UIViewController, UICollectionViewDataSource, 
         else { statusLabel.text = nil }
     }
 
+    /// The first row on screen that isn't a day separator, and where it sits relative to the top of the list.
+    /// Day separators change places when an older page lands, so they can't anchor.
+    private func visibleAnchor() -> (id: String, y: CGFloat)? {
+        guard !rows.isEmpty, let attrs = chatLayout.layoutAttributesForElements(in: collection.bounds) else { return nil }
+        for a in attrs where rows[a.indexPath.item].type != "day" && a.frame.maxY >= collection.bounds.minY {
+            return (rows[a.indexPath.item].id, a.frame.minY - collection.contentOffset.y)
+        }
+        return nil
+    }
+
+    private func restore(_ anchor: (id: String, y: CGFloat)) {
+        guard let i = rows.firstIndex(where: { $0.id == anchor.id }),
+            let a = chatLayout.layoutAttributesForItem(at: IndexPath(item: i, section: 0))
+        else { return }
+        collection.contentOffset.y = min(bottomOffset, max(0, a.frame.minY - anchor.y))
+    }
+
     private func commit(_ newRows: [NCRow], _ newLayouts: [NCCellLayout]) {
         let change = NCChange.classify(old: rows.map(\.id), new: newRows.map(\.id))
         let oldTotal = chatLayout.totalHeight
-        let oldOffset = collection.contentOffset.y
+        let anchor = visibleAnchor()
         rows = newRows
         layouts = newLayouts
         chatLayout.setHeights(newLayouts.map(\.height))
@@ -493,7 +514,7 @@ final class NCRoomViewController: UIViewController, UICollectionViewDataSource, 
             UIView.performWithoutAnimation {
                 collection.reloadData()
                 collection.layoutIfNeeded()
-                collection.contentOffset.y = oldOffset + (chatLayout.totalHeight - oldTotal)
+                if let anchor { restore(anchor) }
             }
             olderAskedAt = -1
         case .appended(let n) where n <= 3 && stick && oldTotal > 0:
@@ -518,6 +539,9 @@ final class NCRoomViewController: UIViewController, UICollectionViewDataSource, 
             if stick || !didInitialScroll {
                 didInitialScroll = true
                 scrollToBottom(animated: false)
+            } else if let anchor {
+                // An older page whose day separator moved, or an edit above: the row you're reading stays put.
+                UIView.performWithoutAnimation { restore(anchor) }
             }
         }
         updateStatus(newRowsEmpty: rows.isEmpty)
@@ -564,6 +588,15 @@ final class NCRoomViewController: UIViewController, UICollectionViewDataSource, 
         stick = true
         coordinator?.emit(["type": "send", "ticker": room.ticker, "text": text])
     }
+
+    #if DEBUG
+    var debugCollection: UICollectionView? { collection }
+    func debugSend(_ t: String) { sendText(t) }
+    var debugRowCount: Int { rows.count }
+    func debugRowId(_ i: Int) -> String { rows[i].id }
+    func debugIndex(id: String) -> Int? { rows.firstIndex { $0.id == id } }
+    func debugFocusComposer() { composer.debugFocus() }
+    #endif
 
     private func openClassic() { coordinator?.emit(["type": "classicRoom", "ticker": room.ticker]) }
     @objc private func classicTapped() { openClassic() }
