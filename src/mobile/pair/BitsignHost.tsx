@@ -57,7 +57,17 @@ export function BitsignHost() {
             }
           : undefined
       }
-      saveLabel={req.review ? 'Sign & seal' : 'Done'}
+      // NATIVE_SEAL_ENABLED written out (literal env) so a store bundle drops the words (review 24 S1).
+      saveLabel={
+        req.review &&
+        !(
+          import.meta.env.VITE_STORE_BUILD === '1' ||
+          import.meta.env.VITE_CHANNEL === 'ios-store' ||
+          import.meta.env.VITE_CHANNEL === 'android-play'
+        )
+          ? 'Sign & seal'
+          : 'Done'
+      }
       turnInfo={{ title: req.title || 'Document', code: `#${req.docHash.slice(0, 8)}`, signer: who || undefined }}
       note={
         req.review
