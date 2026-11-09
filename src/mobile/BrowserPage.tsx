@@ -17,6 +17,7 @@ import { FAV_KEY, FAVOURITES_CHANGED, mergeFavouriteExtras } from './phone/homeF
 import {
   APP_SCREENS_KEY,
   defaultScreens,
+  appendToBapps,
   gatherBapps,
   ownIconsFirst,
   parseScreens,
@@ -35,7 +36,7 @@ import {
   setDefaultBuilder,
   useAppScreens,
 } from './phone/appScreensStore';
-import { useDock } from './phone/dockStore';
+import { getDock, useDock } from './phone/dockStore';
 import { screenById, type ScreenId } from './phone/screens';
 import { SCREEN_ICON, screenLabel } from './phone/icons';
 import { PHONE_APPS_TOP, PHONE_GO } from './phone/events';
@@ -73,8 +74,8 @@ import bgPoster from './brand/bg/liquid-gold.jpg';
 import { VideoBackground } from './ui/VideoBackground';
 import { IS_EXTENSION } from './extension';
 import { openInExtensionTab } from './bappFrame/extensionTab';
-import { BappsStore, type StoreItem } from './BappsStore';
-import { builtinStandard } from './bappStandard';
+import { ADULT_ICON, ADULT_NAME, AdultGate, readAdultOk } from './AdultGate';
+import { BX_APPS, COMMERCIAL_APPS, visibleApps, withoutDuplicates, type StoreApp } from './bappStandard';
 
 /** Home's "Live now" Spaces row: bWalletX only, a lazy chunk behind the inlined flag. */
 const LiveSpacesBarLazy = BSPACES_ENABLED
@@ -177,6 +178,8 @@ type Tile = {
   desc?: string;
   /** Phone layout: a strip screen shown as a Home tile (Wallet, Exchange, Feed, Chat…), not a web app. */
   screen?: ScreenId;
+  /** 18+ (NPGX): shows as "Adults only" and opens only after the 18+ confirmation. Absent from store bundles. */
+  adult?: boolean;
 };
 
 const ICON = 'h-[60px] w-[60px] rounded-[16px]';
@@ -284,6 +287,23 @@ const B_ICON_URLS = new Set(ALL_BAPP_ICON_SLUGS.map((slug) => bappIconUrl(slug))
 const hasOwnIcon = (t: Tile) => t.key !== AGENT_KEY && !!t.icon && !B_ICON_URLS.has(t.icon);
 /** Every bApp, own-artwork icons first, then the gold-b ones (each group in catalogue order). */
 const BAPPS_GROUPED: Tile[] = ownIconsFirst([...SYS_TILES, ...BAPP_TILES], hasOwnIcon);
+/** Tiles for bApps-standard entries (bappStandard.ts) the catalogue above doesn't already list. Store gating: visibleApps. */
+const standardTile = (a: StoreApp): Tile => ({
+  key: `s:${a.id}`,
+  name: a.name,
+  url: a.url,
+  // Its own logo, else the bApp icon set (bnewsx → the bnews glyph; no glyph yet → its initial in its colour).
+  icon: a.logo ?? bappIconUrl(a.id.replace(/x$/, ''), 64, { label: a.name, color: a.color }),
+  adult: a.adult,
+  desc: a.verb,
+  bapp: a.standard.inWallet
+    ? { name: a.name, url: a.url, verb: a.verb, group: 'featured', status: 'live' }
+    : { name: a.name, url: a.url, verb: a.verb, group: 'featured', status: 'live', noFrame: true },
+});
+const STANDARD_TILES: Tile[] = withoutDuplicates(
+  visibleApps([...BX_APPS, ...COMMERCIAL_APPS], STORE_BUILD),
+  BAPPS_GROUPED,
+).map(standardTile);
 const OTHER_TILES: Tile[] = apps.map((a) => ({ key: `o:${a.link}`, name: a.name, url: a.link, icon: a.icon }));
 
 // BSVRadar + Metanet app store apps, grouped, minus any host already in OTHER_TILES.
@@ -518,7 +538,7 @@ const ArrangeGrid = ({
   );
 };
 
-const ALL_TILES = [...BAPP_TILES, ...OTHER_TILES, ...RADAR_SECTIONS.flatMap((g) => g.tiles)];
+const ALL_TILES = [...BAPP_TILES, ...STANDARD_TILES, ...OTHER_TILES, ...RADAR_SECTIONS.flatMap((g) => g.tiles)];
 allowFrameUrls(ALL_TILES.filter((t) => !t.bapp?.noFrame && !t.url.startsWith('/')).map((t) => t.url));
 
 // Favourites: tile URLs, persisted once the user changes them; until then the default set.
@@ -640,6 +660,9 @@ const BrowserPage = ({
   const { chromeStorageService } = useServiceContext();
   const accountKey = chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey ?? '';
   const [recent, setRecent] = useState(readRecent);
+  // 18+ tiles stay "Adults only" until confirmed on this device (AdultGate.tsx).
+  const [adultOk, setAdultOk] = useState(readAdultOk);
+  const [confirmingAdult, setConfirmingAdult] = useState<string | null>(null);
   const [favourites, setFavourites] = useState(readFavourites);
   // The dock puts an app back on Home when it leaves the dock (phone/homeFavourites.ts).
   useEffect(() => {
@@ -772,6 +795,7 @@ const BrowserPage = ({
   }, [offScreen]);
 
   const go = (url: string, bapp?: BApp) => {
+    if (!adultOk && ALL_TILES.find((t) => t.url === url)?.adult) return setConfirmingAdult(url);
     setError('');
     setThemeSite(familySite(url));
     rememberRecent(url);
@@ -798,6 +822,11 @@ const BrowserPage = ({
     go(url);
   };
 
+  /** An 18+ tile before the confirmation: no name, no art, and holding it asks the same question as tapping it. */
+  const shown = (t: Tile): Tile =>
+    t.adult && !adultOk ? { ...t, name: ADULT_NAME, icon: ADULT_ICON, desc: undefined } : t;
+  const infoFor = (t: Tile) => (t.adult && !adultOk ? setConfirmingAdult(t.url) : setInfo(t));
+
   // Entrance: the grid settles from slightly zoomed-in, like an iOS home screen after unlock
   // (transform/opacity only). A gentler version replays when the switch picks a page.
   const grid = (i: number, tiles: Tile[]) => {
@@ -811,12 +840,12 @@ const BrowserPage = ({
         animate={reduce ? { opacity: 1 } : { opacity: 1, scale: 1 }}
         transition={reduce ? { duration: 0.2 } : { type: 'spring', stiffness: 260, damping: 28, mass: 0.9 }}
       >
-        {tiles.map((t) => (
+        {tiles.map(shown).map((t) => (
           <AppTile
             key={t.key}
             tile={t}
             onOpen={() => (isSys(t) ? navigate(t.url) : go(t.url, t.bapp))}
-            onInfo={() => (isSys(t) ? navigate(t.url) : setInfo(t))}
+            onInfo={() => (isSys(t) ? navigate(t.url) : infoFor(t))}
             onArrange={
               i === 0
                 ? () => {
@@ -840,7 +869,7 @@ const BrowserPage = ({
     if (flow)
       return tiles.length ? (
         <div className="grid grid-cols-4 gap-x-3 gap-y-5 items-start justify-items-center">
-          {tiles.map((t) => (
+          {tiles.map(shown).map((t) => (
             <AppTile
               key={t.key}
               tile={t}
@@ -851,7 +880,7 @@ const BrowserPage = ({
                     ? navigate(t.url)
                     : go(t.url, t.bapp)
               }
-              onInfo={() => setInfo(t)}
+              onInfo={() => infoFor(t)}
               onArrange={() => {
                 setInfo(null);
                 setArrangeIdx(flow.section);
@@ -872,7 +901,7 @@ const BrowserPage = ({
           className="grid grid-cols-4 gap-x-3 items-start justify-items-center"
           style={{ gridTemplateRows: `repeat(${HOME_ROWS}, minmax(0, 1fr))`, height: HOME_PAGE_H, minHeight: '28rem' }}
         >
-          {first.map((t) => (
+          {first.map(shown).map((t) => (
             <AppTile
               key={t.key}
               tile={t}
@@ -883,7 +912,7 @@ const BrowserPage = ({
                     ? navigate(t.url)
                     : go(t.url, t.bapp)
               }
-              onInfo={() => setInfo(t)}
+              onInfo={() => infoFor(t)}
               onArrange={() => {
                 setInfo(null);
                 setArranging(true);
@@ -1001,7 +1030,7 @@ const BrowserPage = ({
       </div>
       {/* The catalogue: every app not on a screen or in the dock. Touch and hold to place one. */}
       {[
-        { label: 'More bApps', tiles: BAPPS_GROUPED.filter((t) => !SYS_TILES.includes(t)) },
+        { label: 'More bApps', tiles: [...BAPPS_GROUPED.filter((t) => !SYS_TILES.includes(t)), ...STANDARD_TILES] },
         { label: 'More apps', tiles: OTHER_TILES },
         ...RADAR_SECTIONS.map((g) => ({ label: g.label, tiles: g.tiles })),
       ]
@@ -1046,43 +1075,11 @@ const BrowserPage = ({
           >
             {screenTitle(x, i)}
           </button>
-          {/* The bApps section is the tiered bApps screen (search, badges, tiers); other sections keep their tiles. */}
-          {/^bapps$/i.test(screenTitle(x, i).trim()) ? bappsStore() : screenBody(i, true)}
+          {screenBody(i, true)}
         </div>
       ))}
       {homeExtras()}
     </>
-  );
-
-  /** Tiered bApps screen (owner, 23 Oct 2026): b*X, commercial, built-ins, standard-meeting community apps. */
-  const bappsStore = () => (
-    <BappsStore
-      open={(url, name) => go(url, { name, url } as BApp)}
-      builtins={BAPPS_GROUPED.map(
-        (t): StoreItem => ({
-          key: t.key,
-          name: t.name,
-          verb: t.bapp?.verb,
-          url: t.url,
-          icon: t.icon,
-          demo: t.demo,
-          standard: t.bapp ? builtinStandard(t.bapp) : undefined,
-          onOpen: () => (isSys(t) ? navigate(t.url) : go(t.url, t.bapp)),
-        }),
-      )}
-      community={[...OTHER_TILES, ...OTHER_SECTIONS.flatMap((g) => g.tiles)].map(
-        (t): StoreItem => ({
-          key: t.key,
-          name: t.name,
-          verb: t.desc,
-          url: t.url,
-          icon: t.icon,
-          // Third-party apps: no token, room or theme pack registered with us, no in-wallet BRC-100 check yet.
-          standard: { token: null, room: null, theme: familySite(t.url)?.id ?? null, inWallet: false },
-          onOpen: () => go(t.url),
-        }),
-      )}
-    />
   );
 
   const note = (text: string) => <p className="text-[10px] leading-relaxed text-[#98A2B3] text-center px-2">{text}</p>;
@@ -1160,8 +1157,14 @@ const BrowserPage = ({
       return (
         <>
           {TOKENBLASTER_ENABLED && <TerrornodeHero onPlay={(u) => go(u)} />}
-          {bappsStore()}
-          {note(`Open a bApp to use it inside your wallet. ${UNOFFICIAL_NOTICE}`)}
+          {/* Owner, 9 Nov 2026: the icon grid again (with his icons), not the card directory of 23 Oct. */}
+          {grid(
+            1,
+            [...BAPPS_GROUPED, ...STANDARD_TILES].filter((t) => SYS_TILES.includes(t) || !favourites.includes(t.url)),
+          )}
+          {note(
+            `Touch and hold an app for details${phone ? ' or to add it to the Dock' : ''}. Grey dot = demo. ${UNOFFICIAL_NOTICE}`,
+          )}
         </>
       );
     }
@@ -1202,6 +1205,16 @@ const BrowserPage = ({
       style={{ height: '100%', background: screen === undefined ? '#010101' : 'transparent' }}
     >
       {addingApp && <AddAppSheet store={userApps} onClose={() => setAddingApp(false)} />}
+      {confirmingAdult && (
+        <AdultGate
+          name={ALL_TILES.find((t) => t.url === confirmingAdult)?.name ?? ''}
+          onCancel={() => setConfirmingAdult(null)}
+          onConfirm={() => {
+            setAdultOk(true);
+            setConfirmingAdult(null);
+          }}
+        />
+      )}
       {screen === undefined && <VideoBackground src={bgVideo} poster={bgPoster} />}
       <TopNav />
       {screen !== undefined ? (
@@ -1531,7 +1544,8 @@ const BrowserPage = ({
 // The first app-screens layout (or the migration from Home favourites + the bApps and Games pages).
 /** Screen key of a bApp tile: the wallet's own tiles (Ask b, bPics, bSpaces) by key, bApps by URL (keyTile). */
 const screenKeyOf = (t: Tile) => (SYS_TILES.includes(t) ? t.key : t.url);
-const BAPP_KEYS = BAPPS_GROUPED.map(screenKeyOf);
+const STANDARD_KEYS = STANDARD_TILES.map((t) => t.url);
+const BAPP_KEYS = [...BAPPS_GROUPED.map(screenKeyOf), ...STANDARD_KEYS];
 const OWN_ICON_KEYS = new Set(BAPPS_GROUPED.filter(hasOwnIcon).map(screenKeyOf));
 const oneBappsSection = (s: ReturnType<typeof defaultScreens>) =>
   gatherBapps(s, BAPP_KEYS, (k) => OWN_ICON_KEYS.has(k));
@@ -1566,6 +1580,21 @@ try {
         ),
       );
     localStorage.setItem(WALLET_SCREENS_FLAG, '1');
+  }
+} catch {
+  /* storage unavailable: the default layout below already has them */
+}
+
+// Existing layouts: the bApps-standard entries (bFriendsX, bDojoX, NPG…) join the end of the bApps section, once.
+const STANDARD_TILES_FLAG = 'bwallet:bapps-standard-tiles:v1';
+try {
+  if (!localStorage.getItem(STANDARD_TILES_FLAG)) {
+    const saved = parseScreens(localStorage.getItem(APP_SCREENS_KEY));
+    if (saved) {
+      const dockUrls = new Set(getDock().flatMap((i) => (i.kind === 'app' ? [i.url] : [])));
+      localStorage.setItem(APP_SCREENS_KEY, serialiseScreens(appendToBapps(saved, STANDARD_KEYS, dockUrls)));
+    }
+    localStorage.setItem(STANDARD_TILES_FLAG, '1');
   }
 } catch {
   /* storage unavailable: the default layout below already has them */

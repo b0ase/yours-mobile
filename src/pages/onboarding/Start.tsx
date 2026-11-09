@@ -14,6 +14,9 @@ import { ObsidianBackdrop } from '../../mobile/ui/ObsidianBackdrop';
 import { SEEDLESS_ENABLED } from '../../mobile/passkey/prf';
 import { SeedlessWelcome } from '../../mobile/passkey/SeedlessWelcome';
 import { SignupLinkPanel } from '../../mobile/social/SignupLinkPanel';
+import { phoneLayoutOn } from '../../mobile/phone/flag';
+import { hasLanded } from '../../mobile/phone/pageEl';
+import { startRoute, WALLET_ROUTE } from '../../mobile/phone/screens';
 import { setupHost, setupReason } from '../../services/walletSetupWait';
 
 /** Set when a site's request opened this screen (background showWalletSetupUi): the asking site's host. */
@@ -54,7 +57,10 @@ export const Start = () => {
   useEffect(() => {
     if (encryptedKeys) {
       setShowStart(false);
-      navigate('/bsv-wallet');
+      const to = startRoute(phoneLayoutOn(), hasLanded());
+      // Ask b replaces this route, so it is the bottom of the history and shows no Back (mobile/agent/AgentPage.tsx).
+      if (to === WALLET_ROUTE) navigate(to);
+      else navigate(to, { replace: true, state: { opening: true } });
       return;
     }
     setShowStart(true);

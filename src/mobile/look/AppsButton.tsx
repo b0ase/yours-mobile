@@ -1,10 +1,10 @@
 import { useEffect, type RefObject } from 'react';
-import { ChevronUp } from 'lucide-react';
+import { LayoutGrid } from 'lucide-react';
 
-/** The strip at the foot of Ask b that says the apps are underneath; a tap does what the swipe does. */
-export const AppsCue = ({ onGo }: { onGo: () => void }) => (
-  <button type="button" className="bw-apps-cue" aria-label="Apps. Swipe up" onClick={onGo}>
-    <ChevronUp size={13} aria-hidden />
+/** Owner, 9 Nov 2026: the Apps button is a full-width gold bar at the top of the b screen, under its header. */
+export const AppsBar = ({ onGo }: { onGo: () => void }) => (
+  <button type="button" className="bw-apps-bar" onClick={onGo}>
+    <LayoutGrid size={15} aria-hidden />
     Apps
   </button>
 );
@@ -37,7 +37,7 @@ export const useSwipeUpToApps = (on: boolean, go: () => void, root: RefObject<HT
       const up = start.y - p.clientY;
       const side = Math.abs(p.clientX - start.x);
       if (up < -10 || (side > 12 && side > up)) return void (start = null);
-      if (up > 8) e.preventDefault(); // at the end already: the cue moves, the list doesn't rubber-band
+      if (up > 8) e.preventDefault(); // at the end already: the list doesn't rubber-band
     };
     const up = (e: TouchEvent) => {
       const p = e.changedTouches[0];

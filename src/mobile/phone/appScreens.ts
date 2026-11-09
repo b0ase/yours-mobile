@@ -75,6 +75,23 @@ export const reconcile = (s: AppScreensState, dockKeys: ReadonlySet<string>, req
   return next;
 };
 
+/**
+ * Tiles new to the catalogue join the end of an existing bApps section, once, so someone's arrangement keeps its order.
+ * Keys already placed anywhere (or in `skip`: the dock) stay where they are. No bApps section: nothing changes.
+ */
+export const appendToBapps = (
+  s: AppScreensState,
+  keys: readonly string[],
+  skip: ReadonlySet<string> = new Set(),
+): AppScreensState => {
+  const i = s.screens.findIndex((x) => x.title?.trim().toLowerCase() === BAPPS_TITLE.toLowerCase());
+  if (i < 0) return s;
+  const taken = allKeys(s);
+  const fresh = keys.filter((k) => !taken.has(k) && !skip.has(k));
+  if (!fresh.length) return s;
+  return state(s.screens.map((x, n) => (n === i ? { ...x, items: [...x.items, ...fresh] } : x)));
+};
+
 /** Saved JSON → screens; missing or corrupt → null (the caller builds the default / migrates). */
 export const parseScreens = (raw: string | null): AppScreensState | null => {
   if (!raw) return null;
