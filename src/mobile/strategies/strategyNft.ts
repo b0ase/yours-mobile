@@ -16,7 +16,7 @@ import { parseStrategy } from '../agents/strategy';
 
 export const STRATEGY_CONTENT_TYPE = 'application/vnd.bwalletx.strategy+json';
 export const ENVELOPE_FORMAT = 'bwalletx.strategy-nft/1';
-export const STRATEGY_DISCLAIMER = `Strategies are programs written and sold by users. ${APP_NAME} doesn’t review, rate or recommend them.`;
+export const STRATEGY_DISCLAIMER = `Strategies are programs written and sold by users. ${APP_NAME} doesn’t review, rate or recommend them. A stop written as “down X%” isn’t active in the app yet.`;
 export const MAX_COPIES = 10_000;
 
 export type SaleTerms = { priceUsd: number; copies: number; payTo: string };

@@ -71,7 +71,8 @@ export const ExportForCli = ({ id, name }: { id: string; name: string }) => {
       <div className="text-xs" style={{ color: MUTED }}>
         Export this agent account for the bWalletX CLI and MCP (<span className="font-mono">bwalletx key import</span>),
         to run it on a laptop or server. The file is locked with a passphrase you choose. Your other accounts are never
-        included.
+        included. Once exported, the keys sign on that computer: this wallet’s strategy rules, caps and Stop can’t limit
+        them there.
       </div>
       {!open ? (
         <button

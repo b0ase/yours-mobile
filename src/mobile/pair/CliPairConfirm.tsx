@@ -142,7 +142,7 @@ export const CliPairConfirm = ({
             trade,
             setTrade,
             'Buy tokens and load strategies',
-            'Within the account’s limits and its strategy’s rules',
+            'Within the account’s limits and its strategy’s rules, except the percent stop, which isn’t active yet',
           )}
         {agent && toggle(send, setSend, 'Send BSV', "To anyone, up to the account's daily cap")}
         {toggle(mint, setMint, 'Mint NFTs', 'Photos, music, video, PDFs: signed here, within the limits below')}

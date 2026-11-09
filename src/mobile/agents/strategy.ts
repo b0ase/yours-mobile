@@ -1,7 +1,9 @@
 /**
  * Strategies (docs/SMART-WALLET-SPEC.md §3). A strategy is a JSON file loaded into an agent account:
  *   - goals: plain language the AI reads;
- *   - rules: exact limits the wallet checks before any agent action is signed (the AI can never widen them);
+ *   - rules: exact limits the wallet checks before b or a paired computer buys or sends (the AI can never widen them).
+ *     stop.downPct isn't enforced yet: nothing supplies the account value it needs (describeRules.ts inactiveRuleNotices).
+ *     Minting from a paired computer and keys exported to a computer are outside these checks;
  *   - spec + version/changelog: what gets published when it is sold (§7.2).
  * One strategy per account. It runs "paper" (live prices, pretend money, nothing signed) or "live".
  * Pure helpers + localStorage, like agentAccounts.ts; nothing here signs.
@@ -41,7 +43,7 @@ export type StrategyRules = {
   maxTotalUsd?: number;
   /** Sends only to these addresses / paymails. Required when "send" is allowed. */
   sendTo?: string[];
-  /** Stop conditions: once met, every action is refused until the strategy is reloaded. */
+  /** Stop conditions: once met, every action is refused until the strategy is reloaded. downPct is not enforced yet. */
   stop?: { holdTokens?: number; downPct?: number };
 };
 
