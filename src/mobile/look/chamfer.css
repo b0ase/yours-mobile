@@ -222,7 +222,7 @@ html:not([data-bw-pack]) .bw-wcard-scan > span {
   font-size: 11px;
 }
 
-/* ── Dock: no rings, a cut plate marks the current tab. The b is left exactly as it was. ── */
+/* ── Dock: no rings, and no plate (owner, 9 Nov 2026): the current tab is lit gold. The b is left exactly as it was. ── */
 .bw-dock-dots:empty {
   display: none;
 }
@@ -238,19 +238,6 @@ html:not([data-bw-pack]) .bw-wcard-scan > span {
   width: 44px;
   height: 28px;
 }
-/* The plate is a layer behind the icon, so the clip can't cut the unread badge hanging off the corner. */
-.bw-tile[data-active] .bw-tile-ico:not(.is-app)::before {
-  --ch-leg: 6px;
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  background: var(--bw-accent-hi);
-  clip-path: var(--bw-cut);
-}
-.bw-tile-ico:not(.is-app) {
-  isolation: isolate;
-}
 .bw-tile-ico.is-app,
 .bw-tile-ico.is-app img {
   width: 28px;
@@ -264,7 +251,7 @@ html:not([data-bw-pack]) .bw-wcard-scan > span {
   stroke-width: 1.75;
 }
 .bw-tile[data-active] .bw-tile-ico:not(.is-app) > svg {
-  stroke: var(--bw-on-accent);
+  stroke: var(--bw-accent-hi);
   stroke-width: 2;
 }
 .bw-tile-lbl {
