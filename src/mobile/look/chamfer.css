@@ -398,7 +398,9 @@ html:not([data-bw-pack]) .bw-toprow > button:nth-child(2) {
   background: var(--bw-black) !important;
   color: var(--bw-accent-hi) !important;
 }
+/* Owner, 9 Nov 2026: Receive, Mint and Lock were blending into the page. */
 html:not([data-bw-pack]) .bw-sendrow .bw-pill {
+  --ch-edge: rgb(var(--bw-accent-hi-rgb) / 0.7);
   background: var(--bw-black) !important;
   color: var(--bw-text) !important;
   box-shadow: inset 0 0 0 1px var(--ch-edge);

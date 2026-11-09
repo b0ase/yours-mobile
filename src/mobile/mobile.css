@@ -450,11 +450,6 @@ body,
   background: #0b0b0c;
 }
 /* Scan's gold ink vanished on the yellow card: black ring and text, as the rest of this card's ink. */
-.bw-wcard.is-yellow .bw-wcard-scan > span {
-  color: #0b0b0c;
-  border-color: rgb(11 11 12 / 0.75);
-  background: rgb(11 11 12 / 0.08);
-}
 .bw-wcard.is-yellow .bw-wcard-retry {
   color: #0b0b0c;
   background: rgba(0, 0, 0, 0.08);
@@ -1345,12 +1340,13 @@ body,
   justify-content: center;
   font-size: 13px;
   font-weight: 700;
-  color: var(--bw-accent-hi);
-  border: 1.5px solid rgb(var(--bw-accent-hi-rgb) / 0.8);
-  background: rgb(var(--bw-accent-hi-rgb) / 0.12);
+  /* Owner, 9 Nov 2026: legible whatever art is behind it, so its own dark plate and fixed gold in every theme. */
+  color: #f9dd63;
+  border: 1.5px solid #f9dd63;
+  background: rgb(11 11 12 / 0.86);
 }
 .bw-wcard-scan:active > span {
-  background: rgb(var(--bw-accent-hi-rgb) / 0.18);
+  background: rgb(11 11 12 / 0.7);
 }
 .bw-wcard-unit {
   display: inline-flex;
