@@ -5,7 +5,8 @@ import { FEEDS } from './feeds';
 describe('feed icons', () => {
   test('real logos where we have them, the bApp icon set otherwise', () => {
     for (const [id, file] of [
-      ['bnews', /bnews\.svg/],
+      ['bnews', /bnewsx\.png/],
+      ['bmovies', /bmoviesx\.png/],
       ['writer', /bwriter\.png/],
       ['bgame', /bgames\.png/],
       ['src-twetch', /twetch\.png/],

@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import { useAvatarPlayback } from '../names/useAvatarPlayback';
 import { setFeedLatest } from '../tabs/tabBadges';
 import {
@@ -1665,12 +1666,21 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
   const [pins, setPins] = useState<FeedId[]>(loadPins);
   const [allFeeds, setAllFeeds] = useState(false);
   const news = feed === 'bnews';
+  const navigate = useNavigate();
   // One app picked in the row: just its posts, newest first, none of Home's filters.
   const appSource = sourceOfFeed(feed);
   const source: Source | 'all' = appSource ?? 'all';
   const tab: Tab = appSource ? 'foryou' : homeTab;
   const pickFeed = (picked: FeedId) => {
-    const id = migrateFeedId(picked);
+    const next = migrateFeedId(picked);
+    // The bApps tile opens the app browser (owner, 9 Nov 2026).
+    if (next === 'bapps') {
+      setAllFeeds(false);
+      navigate('/m/apps');
+      return;
+    }
+    // Tapping the open app again goes back to every app.
+    const id = next === feed ? 'home' : next;
     setFeed(id);
     setAllFeeds(false);
     saveNewsMode(id === 'bnews');
