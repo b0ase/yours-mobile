@@ -226,13 +226,15 @@ html:not([data-bw-pack]) .bw-wcard-scan > span {
 .bw-dock-dots:empty {
   display: none;
 }
-/* Owner, 9 Nov 2026: the b and the tab names sit lower in the bar. Offsets, so the row's layout and tap areas stay put. */
+/* Owner, 9 Nov 2026: the b and the tab names sit lower in the bar. The b's 56px with ring must stay inside the 68px dock
+   (it clips at the dock's edge). The names move by real layout, because the right-hand tiles sit in an overflow scroller:
+   padding balances the bigger gap so the icons stay where they were. */
 nav[data-phone-dock][data-bw-bottom-nav] .bw-dock-b {
-  top: 8px;
+  top: 4px;
 }
-nav[data-phone-dock][data-bw-bottom-nav] .bw-tile-lbl {
-  position: relative;
-  top: 6px;
+nav[data-phone-dock][data-bw-bottom-nav] .bw-tile {
+  gap: 9px;
+  padding-top: 6px;
 }
 .bw-tile {
   gap: 3px;
