@@ -550,7 +550,10 @@ const Shell = () => {
               pending && indexingEnabled() ? walletBadgeLabel(LABELS.wallet ?? 'Wallet', pending) : undefined,
           }}
           onOpen={open}
-          onHome={goHome}
+          // Owner, 9 Nov 2026: the b opens Ask b; the apps are one swipe up from there (look/AppsButton.tsx).
+          onHome={() => {
+            if (!pathname.startsWith('/m/ask-b')) navigate('/m/ask-b');
+          }}
           onAgent={() => navigate('/m/ask-b')}
           onChange={(next) => {
             // An app leaving the dock goes to the first free slot on the app screens (never lost). Page tiles

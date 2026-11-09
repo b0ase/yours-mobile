@@ -238,6 +238,35 @@ html:not([data-bw-pack]) .bw-wcard-scan > span {
   width: 44px;
   height: 28px;
 }
+.bw-apps-cue {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 26px;
+  flex-shrink: 0;
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--bw-accent-hi);
+  background: var(--bw-bg);
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--bw-accent-hi) 18%, transparent);
+}
+.bw-apps-cue svg {
+  animation: bw-apps-cue 1.8s ease-in-out infinite;
+}
+@keyframes bw-apps-cue {
+  50% {
+    transform: translateY(-2px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bw-apps-cue svg {
+    animation: none;
+  }
+}
 .bw-tile-ico.is-app,
 .bw-tile-ico.is-app img {
   width: 28px;

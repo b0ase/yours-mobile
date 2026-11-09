@@ -19,7 +19,7 @@ import { useLandscapeRail } from './landscape';
  * The phone layout's dock (docs/PHONE-LAYOUT-PLAN.md §5, §14): left slots · the b · right slots, which scroll
  * sideways when there are more, with a fade on the side that has more. A sibling of the page, never inside it,
  * so its sideways scroll can't turn into a page swipe (PhoneShell also ignores touches that start here).
- * The big b in the centre: tap = HOME (the app grid), press and hold = talk to b (HomeButton).
+ * The big b in the centre: tap = Ask b (PhoneShell's onHome), press and hold = talk to b (HomeButton).
  * Long-press a tile to arrange: tap a tile to pick it, then move it left/right or remove it; + adds; Reset
  * restores the default. An empty dock shows a dashed + tile, so arranging is never out of reach (owner, 15 Oct 2026).
  */
