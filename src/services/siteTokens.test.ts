@@ -1,4 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- test doubles return loosely typed wallet results */
+import { WalletPermissionsManager } from '@bsv/wallet-toolbox-client';
+import { createAssetPermissionModules } from '@1sat/permission-module';
 import { describe, expect, test } from 'bun:test';
 import {
   LockingScript,
@@ -42,7 +44,7 @@ const OTHER_TOKEN = `${'cd'.repeat(32)}_1`;
  * asks ensureBasketAccess for every basketed output (like the toolbox) and returns a signable tx whose token inputs
  * come from listOutputs, signAction records the spends it was given.
  */
-const setup = (opts: { approve?: boolean | ((r: any) => boolean) } = {}) => {
+const setup = (opts: { approve?: boolean | ((r: any) => boolean); bare?: boolean; listing?: (a: any) => any } = {}) => {
   const proto = new ProtoWallet(PrivateKey.fromRandom());
   const calls: string[] = [];
   const signed: Record<number, unknown>[] = [];
@@ -68,6 +70,7 @@ const setup = (opts: { approve?: boolean | ((r: any) => boolean) } = {}) => {
     },
     async listOutputs(a: { basket: string }, o?: string) {
       calls.push(`listOutputs:${a.basket}:${o}`);
+      if (opts.listing) return opts.listing(a);
       return { outputs: a.basket === 'bsv21' ? held.map((h) => ({ ...h, spendable: true })) : [] };
     },
     async relinquishOutput(a: { basket: string }, o?: string) {
@@ -127,7 +130,7 @@ const setup = (opts: { approve?: boolean | ((r: any) => boolean) } = {}) => {
       return { accepted: true };
     },
   };
-  const wallet = guardSiteTokens(guardReservedBaskets(guardReservedProtocols(m, ADMIN), ADMIN), {
+  const wallet = guardSiteTokens(opts.bare ? m : guardReservedBaskets(guardReservedProtocols(m, ADMIN), ADMIN), {
     adminOriginator: ADMIN,
     normalize: (o) => o,
     prompt: async (r) => {
@@ -373,6 +376,123 @@ describe('site tokens: selling', () => {
     expect(unlock.unlockingScript.length).toBeGreaterThan(100);
     // The unlock carries the coin's own key.
     expect(unlock.unlockingScript.endsWith(coin.publicKey)).toBe(true);
+  });
+
+  test('every spelling of a token coin gets the same sheet and is built in canonical form', async () => {
+    const respell = [
+      (o: string) => o.toUpperCase(),
+      (o: string) => `${o.slice(0, 8).toUpperCase()}${o.slice(8)}`,
+      (o: string) => o.toUpperCase().replace('.', '_'),
+      (o: string) => o.replace('.', '_'),
+    ];
+    for (const spell of respell) {
+      const { wallet, hold, prompts, signed, last } = setup();
+      const coin = await hold(TOKEN, 500n);
+      const res = await wallet.createAction(sellArgs(spell(coin.outpoint)), SITE);
+      expect(prompts).toHaveLength(1);
+      expect(JSON.stringify(prompts[0])).toContain('Leaves your wallet');
+      expect(last().inputs[0].outpoint).toBe(coin.outpoint);
+      await wallet.signAction({ reference: res.signableTransaction.reference, spends: {} }, SITE);
+      expect((signed[0][0] as { unlockingScript: string }).unlockingScript.endsWith(coin.publicKey)).toBe(true);
+    }
+  });
+
+  test('this guard alone passes on canonical inputs, with or without a delivery', async () => {
+    const op = `${'cd'.repeat(32)}.3`;
+    const named = [{ outpoint: `${'CD'.repeat(32)}_3`, inputDescription: 'site money', unlockingScriptLength: 108 }];
+    const plain = setup({ bare: true });
+    await plain.wallet.createAction({ description: 'x', inputs: named }, SITE);
+    expect(plain.last().inputs).toEqual([{ ...named[0], outpoint: op }]);
+
+    const buying = setup({ bare: true });
+    const k = await receive(buying.wallet);
+    const lockingScript = bsv21(TOKEN, 7n, PublicKey.fromString(k.publicKey).toAddress()).toHex();
+    await buying.wallet.createAction(
+      { description: 'buy', inputs: named, outputs: [{ lockingScript, satoshis: 1, basket: 'bsv21' }] },
+      SITE,
+    );
+    expect(buying.last().inputs).toEqual([{ ...named[0], outpoint: op }]);
+    expect(buying.last().outputs[0].customInstructions).toBeDefined();
+  });
+
+  test('when the wallet cannot list its token coins, a named input is refused, not treated as no coins', async () => {
+    const { wallet, prompts, calls } = setup({
+      listing: async (a) => {
+        if (a.basket === 'p 1sat bsv21') throw new Error('down');
+        return { outputs: [] };
+      },
+    });
+    const op = `${'cd'.repeat(32)}.0`;
+    await expect(wallet.createAction(sellArgs(op), SITE)).rejects.toThrow('down');
+    expect(prompts).toHaveLength(0);
+    expect(calls.filter((c) => c.startsWith('createAction'))).toHaveLength(0);
+  });
+
+  test('a token coin beyond the first page still gets the sheet', async () => {
+    const T = 'ef'.repeat(32);
+    const ci = JSON.stringify({ id: TOKEN, amt: '1', protocolID: [1, 'x'], keyID: 'k' });
+    const all = Array.from({ length: 12_000 }, (_, i) => ({ outpoint: `${T}.${i}`, customInstructions: ci }));
+    const { wallet, prompts } = setup({
+      listing: async (a) =>
+        a.basket === 'bsv21'
+          ? { outputs: all.slice(a.offset, a.offset + a.limit), totalOutputs: all.length }
+          : { outputs: [], totalOutputs: 0 },
+    });
+    await wallet.createAction(sellArgs(`${T}.11999`), SITE).catch(() => undefined);
+    expect(prompts).toHaveLength(1);
+  });
+
+  test("with the real manager: a coin in the old token basket gets the sheet, and other inputs aren't refused", async () => {
+    const T = 'ef'.repeat(32);
+    const ci = JSON.stringify({ id: TOKEN, amt: '1', protocolID: [1, 'x'], keyID: 'k' });
+    const modules = createAssetPermissionModules({
+      wallet: {} as never,
+      promptHandler: async () => false,
+      adminOriginator: ADMIN,
+    });
+    const pm = new WalletPermissionsManager(
+      {
+        listOutputs: async (a: { basket: string }) =>
+          a.basket === 'p 1sat bsv21'
+            ? { outputs: [{ outpoint: `${T}.0`, customInstructions: ci }], totalOutputs: 1 }
+            : { outputs: [], totalOutputs: 0 },
+      } as never,
+      ADMIN,
+      { permissionModules: modules as never, encryptWalletMetadata: false },
+    );
+    try {
+      (pm as unknown as Record<string, unknown>).createAction = async () => ({ txid: 'x' });
+      const prompts: unknown[] = [];
+      const wallet = guardSiteTokens(pm, {
+        adminOriginator: ADMIN,
+        normalize: (o) => o,
+        prompt: async (r) => (prompts.push(r), true),
+      }) as unknown as Record<string, (a: unknown, o?: string) => Promise<any>>;
+      await expect(wallet.createAction(sellArgs(`${'cd'.repeat(32)}.0`), SITE)).resolves.toEqual({ txid: 'x' });
+      expect(prompts).toHaveLength(0);
+      await wallet.createAction(sellArgs(`${T}.0`), SITE).catch(() => undefined);
+      expect(prompts).toHaveLength(1);
+    } finally {
+      for (const mod of Object.values(modules) as { dispose?: () => void }[]) mod.dispose?.();
+    }
+  });
+
+  test('declining the sheet stops every spelling', async () => {
+    const { wallet, hold, calls } = setup({ approve: false });
+    const coin = await hold(TOKEN, 500n);
+    await expect(wallet.createAction(sellArgs(coin.outpoint.toUpperCase()), SITE)).rejects.toThrow(SELL_REJECTED);
+    expect(calls.filter((c) => c.startsWith('createAction'))).toHaveLength(0);
+  });
+
+  test('an input the wallet cannot read is refused before anything is listed or built', async () => {
+    const { wallet, hold, calls, prompts } = setup();
+    const coin = await hold(TOKEN, 500n);
+    const before = calls.length;
+    for (const outpoint of [`${coin.outpoint}0`, ` ${coin.outpoint}`, coin.outpoint.replace('.', ':')])
+      await expect(wallet.createAction(sellArgs(outpoint), SITE)).rejects.toThrow(/can't read/);
+    await expect(wallet.createAction({ ...sellArgs(''), inputs: 'x' } as never, SITE)).rejects.toThrow(/can't read/);
+    expect(calls.slice(before)).toEqual([]);
+    expect(prompts).toHaveLength(0);
   });
 
   test('ATTACK: a site cannot label tokens it sends elsewhere as change back to you', async () => {

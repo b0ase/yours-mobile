@@ -7,6 +7,8 @@
  * The permissions manager upstream reserves only 'default' and names starting 'admin'.
  */
 import { DEPOSIT_BASKET } from '@1sat/types';
+import { canonicalInputs, canonicalOutpoint, hasNoTxid } from './canonicalOutpoint';
+import { everyOutput } from './everyOutput';
 import { takeTokenInsertionTicket } from './siteTokens';
 
 /** Same value as permissionBundle.TRUST_SITE_BASKET (not imported: permissionBundle imports this file). */
@@ -50,17 +52,28 @@ export const OWN_COIN_REFUSAL = "A site can't spend your wallet's own coins, ord
 
 /** Baskets whose coins a site's createAction may never name: all reserved ones but the tokens (sold via siteTokens). */
 const SITE_SELLABLE = new Set(['bsv21', 'p 1sat bsv21']);
-const normOutpoint = (op: string) => (op.length > 64 && op[64] === '_' ? `${op.slice(0, 64)}.${op.slice(65)}` : op);
-type ListFn = (a: unknown, o?: string) => Promise<{ outputs?: { outpoint?: string }[] }>;
+/** Old basket names an account may still hold coins under. Not reserved by name; their coins still can't be named. */
+const LEGACY_COIN_BASKETS = ['ordinals', 'p 1sat ordinals', 'p 1sat opns', 'p 1sat lock', 'bsv20'];
+type ListFn = (a: unknown, o?: string) => Promise<{ outputs?: { outpoint?: string }[]; totalOutputs?: number }>;
 
-/** Outpoints of the wallet's own coins in reserved baskets. null when a listing failed (refuse: can't tell). */
+/** Canonical outpoints of the wallet's own coins in reserved baskets. null when a listing failed or holds a row it can't read (refuse: can't tell). */
 const walletOutpoints = async (list: ListFn, self: unknown, admin: string): Promise<Set<string> | null> => {
   const out = new Set<string>();
-  for (const basket of RESERVED) {
+  for (const basket of [...RESERVED, ...LEGACY_COIN_BASKETS]) {
     if (SITE_SELLABLE.has(basket) || basket.startsWith('bwalletx.')) continue;
     try {
-      const r = await list.call(self, { basket, limit: 10000 }, admin);
-      for (const o of r?.outputs ?? []) if (typeof o.outpoint === 'string') out.add(normOutpoint(o.outpoint));
+      const rows = await everyOutput<{ outpoint?: string }>(
+        self as object,
+        (a, o) => list.call(self, a, o),
+        { basket },
+        admin,
+      );
+      for (const o of rows) {
+        if (hasNoTxid(o.outpoint)) continue;
+        const op = canonicalOutpoint(o.outpoint);
+        if (op === null) return null;
+        out.add(op);
+      }
     } catch {
       return null;
     }
@@ -156,16 +169,15 @@ export function guardReservedBaskets<T extends object>(manager: T, adminOriginat
   const create = m.createAction;
   const list = m.listOutputs;
   if (typeof create === 'function' && typeof list === 'function') {
-    m.createAction = async (args: { inputs?: { outpoint?: unknown }[] }, originator?: string) => {
-      const named = (args?.inputs ?? [])
-        .map((i) => (typeof i?.outpoint === 'string' ? normOutpoint(i.outpoint) : ''))
-        .filter(Boolean);
-      if (originator !== adminOriginator && named.length) {
+    const forward = create as (a: unknown, o?: string) => Promise<unknown>;
+    m.createAction = async (args: { inputs?: unknown }, originator?: string) => {
+      if (originator === adminOriginator) return forward.call(manager, args, originator);
+      const inputs = canonicalInputs(args?.inputs);
+      if (inputs?.length) {
         const own = await walletOutpoints(list as ListFn, manager, adminOriginator);
-        const hit = named.find((op) => own === null || own.has(op));
-        if (hit !== undefined) throw new Error(OWN_COIN_REFUSAL);
+        if (own === null || inputs.some((i) => own.has(i.outpoint))) throw new Error(OWN_COIN_REFUSAL);
       }
-      return (create as (a: unknown, o?: string) => Promise<unknown>).call(manager, args, originator);
+      return forward.call(manager, inputs ? { ...args, inputs } : args, originator);
     };
   }
   // A 'p <scheme> …' basket goes to its permission module, not ensureBasketAccess: refuse a reserved one first.

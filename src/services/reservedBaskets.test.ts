@@ -6,7 +6,9 @@ import {
   trustedBasketsFrom,
   type BundleRequest,
 } from './permissionBundle';
-import { Wallet as ToolboxWallet, sdk } from '@bsv/wallet-toolbox-client';
+import { Wallet as ToolboxWallet, WalletPermissionsManager, sdk } from '@bsv/wallet-toolbox-client';
+import { createAssetPermissionModules } from '@1sat/permission-module';
+import { parseWalletOutpoint } from '@bsv/sdk/wallet/validationHelpers';
 import { lineDetailForTest } from './permissionBundle';
 import {
   basketDisplayName,
@@ -214,6 +216,225 @@ describe("b-Aware 25 Oct: a site can't name the wallet's own coins as inputs", (
     await expect(m.createAction({ inputs: [{ outpoint: `${T}.9` }] }, 'site.example')).rejects.toThrow(
       OWN_COIN_REFUSAL,
     );
+  });
+});
+
+describe('coins a site names are compared in one canonical form', () => {
+  const T = 'ab'.repeat(32);
+  const SITE = 'site.example';
+  const OWN = `${T}.0`;
+  const make = (listed: unknown[] = [{ outpoint: OWN }]) => {
+    const created: { inputs?: Record<string, unknown>[] }[] = [];
+    const m = {
+      listOutputs: async (a: { basket: string }) => ({ outputs: a.basket === '1sat' ? listed : [] }),
+      createAction: async (a: (typeof created)[number]) => (created.push(a), { txid: 'x' }),
+    };
+    return { m: guardReservedBaskets(m, ADMIN), created };
+  };
+  const spellings = [
+    `${T.toUpperCase()}.0`,
+    `${T.slice(0, 10).toUpperCase()}${T.slice(10)}.0`,
+    `${T.toUpperCase()}_0`,
+    `${T}_0`,
+  ];
+
+  test('the SDK reads each spelling as the same coin', () => {
+    for (const op of spellings.filter((o) => o.includes('.'))) expect(parseWalletOutpoint(op).txid).toBe(T);
+  });
+
+  test("every spelling of the wallet's own coin is refused before createAction", async () => {
+    for (const op of spellings) {
+      const { m, created } = make();
+      await expect(m.createAction({ inputs: [{ outpoint: op }] }, SITE)).rejects.toThrow(OWN_COIN_REFUSAL);
+      expect(created).toHaveLength(0);
+    }
+  });
+
+  test('however the wallet lists its coin, the comparison still matches', async () => {
+    for (const listed of [`${T.toUpperCase()}.0`, `${T}_0`]) {
+      const { m, created } = make([{ outpoint: listed }]);
+      await expect(m.createAction({ inputs: [{ outpoint: OWN }] }, SITE)).rejects.toThrow(OWN_COIN_REFUSAL);
+      expect(created).toHaveLength(0);
+    }
+  });
+
+  test('an outpoint the wallet cannot read is refused, never passed on', async () => {
+    const cd = 'cd'.repeat(32);
+    const bad: unknown[] = [
+      ` ${cd}.0`,
+      `${cd}.0 `,
+      `${cd}.0\n`,
+      `${cd}.00`,
+      `${cd}.01`,
+      `${cd}.+1`,
+      `${cd}.1e0`,
+      `${cd}.0x1`,
+      `${cd}.-1`,
+      `${cd}.4294967296`,
+      `${cd}:0`,
+      `${cd}._0`,
+      `${cd}.`,
+      cd,
+      `0x${cd}.0`,
+      `${cd.slice(1)}.0`,
+      `${cd}c.0`,
+      `${'zz'.repeat(32)}.0`,
+      '',
+      0,
+      null,
+      undefined,
+      {},
+      [`${cd}.0`],
+    ];
+    for (const outpoint of bad) {
+      const { m, created } = make();
+      await expect(m.createAction({ inputs: [{ outpoint }] }, SITE)).rejects.toThrow(/can't read/);
+      expect(created).toHaveLength(0);
+    }
+    for (const inputs of ['x', 1, {}, { length: 1, 0: { outpoint: `${cd}.0` } }, [null], ['x']]) {
+      const { m, created } = make();
+      await expect(m.createAction({ inputs } as never, SITE)).rejects.toThrow(/can't read/);
+      expect(created).toHaveLength(0);
+    }
+  });
+
+  test("an unreadable row in the wallet's own listing refuses named inputs", async () => {
+    for (const outpoint of ['not-an-outpoint', `${T}.00`, undefined]) {
+      const { m, created } = make([{ outpoint }]);
+      await expect(m.createAction({ inputs: [{ outpoint: `${'cd'.repeat(32)}.0` }] }, SITE)).rejects.toThrow(
+        OWN_COIN_REFUSAL,
+      );
+      expect(created).toHaveLength(0);
+    }
+  });
+
+  test('a row with no txid yet is skipped: no site can name it, and it must not block the rest', async () => {
+    for (const outpoint of ['null.3', 'undefined.3', 'null_3']) {
+      const { m, created } = make([{ outpoint }, { outpoint: OWN }]);
+      await m.createAction({ inputs: [{ outpoint: `${'cd'.repeat(32)}.0` }] }, SITE);
+      expect(created).toHaveLength(1);
+      await expect(m.createAction({ inputs: [{ outpoint: OWN }] }, SITE)).rejects.toThrow(OWN_COIN_REFUSAL);
+    }
+  });
+
+  test("coins still in the old basket names can't be named", async () => {
+    for (const basket of ['ordinals', 'p 1sat ordinals', 'p 1sat opns', 'p 1sat lock', 'bsv20']) {
+      const created: unknown[] = [];
+      const m = guardReservedBaskets(
+        {
+          listOutputs: async (a: { basket: string }) => ({ outputs: a.basket === basket ? [{ outpoint: OWN }] : [] }),
+          createAction: async (a: unknown) => (created.push(a), { txid: 'x' }),
+        },
+        ADMIN,
+      );
+      await expect(m.createAction({ inputs: [{ outpoint: OWN }] }, SITE)).rejects.toThrow(OWN_COIN_REFUSAL);
+      expect(created).toHaveLength(0);
+    }
+  });
+
+  test('with the real manager: old "p 1sat" coins are found, and other inputs are not refused', async () => {
+    const baskets: Record<string, { outpoint: string }[]> = {
+      'p 1sat ordinals': [{ outpoint: OWN }],
+      'p 1sat opns': [{ outpoint: `${T}.1` }],
+      'p 1sat lock': [{ outpoint: `${T}.2` }],
+    };
+    const modules = createAssetPermissionModules({
+      wallet: {} as never,
+      promptHandler: async () => false,
+      adminOriginator: ADMIN,
+    });
+    const pm = new WalletPermissionsManager(
+      {
+        listOutputs: async (a: { basket: string }) => ({
+          outputs: baskets[a.basket] ?? [],
+          totalOutputs: (baskets[a.basket] ?? []).length,
+        }),
+      } as never,
+      ADMIN,
+      { permissionModules: modules as never, encryptWalletMetadata: false },
+    );
+    try {
+      // Why these are not read through the manager: its module refuses the old names, even for the wallet.
+      await expect(pm.listOutputs({ basket: 'p 1sat ordinals' }, ADMIN)).rejects.toThrow();
+      const created: unknown[] = [];
+      (pm as unknown as Record<string, unknown>).createAction = async (a: unknown) => (created.push(a), { txid: 'x' });
+      const m = guardReservedBaskets(pm, ADMIN) as unknown as {
+        createAction: (a: unknown, o?: string) => Promise<unknown>;
+      };
+      for (const vout of [0, 1, 2])
+        await expect(m.createAction({ inputs: [{ outpoint: `${T}.${vout}` }] }, SITE)).rejects.toThrow(
+          OWN_COIN_REFUSAL,
+        );
+      expect(created).toHaveLength(0);
+      await m.createAction({ inputs: [{ outpoint: `${'cd'.repeat(32)}.0` }] }, SITE);
+      expect(created).toHaveLength(1);
+    } finally {
+      for (const mod of Object.values(modules) as { dispose?: () => void }[]) mod.dispose?.();
+    }
+  });
+
+  test('a coin beyond the first page of a basket is still found', async () => {
+    const all = Array.from({ length: 15_000 }, (_, i) => ({ outpoint: `${T}.${i}` }));
+    const created: unknown[] = [];
+    const m = guardReservedBaskets(
+      {
+        listOutputs: async (a: { basket: string; limit: number; offset?: number }) =>
+          a.basket === '1sat'
+            ? { outputs: all.slice(a.offset ?? 0, (a.offset ?? 0) + a.limit), totalOutputs: all.length }
+            : { outputs: [], totalOutputs: 0 },
+        createAction: async (a: unknown) => (created.push(a), { txid: 'x' }),
+      },
+      ADMIN,
+    );
+    await expect(m.createAction({ inputs: [{ outpoint: `${T}.14999` }] }, SITE)).rejects.toThrow(OWN_COIN_REFUSAL);
+    expect(created).toHaveLength(0);
+  });
+
+  test('a basket that says it holds more than can be read refuses named inputs', async () => {
+    const created: unknown[] = [];
+    const m = guardReservedBaskets(
+      {
+        listOutputs: async (a: { basket: string; offset?: number }) =>
+          a.basket === '1sat' ? { outputs: a.offset ? [] : [{ outpoint: OWN }], totalOutputs: 2 } : { outputs: [] },
+        createAction: async (a: unknown) => (created.push(a), { txid: 'x' }),
+      },
+      ADMIN,
+    );
+    await expect(m.createAction({ inputs: [{ outpoint: `${'cd'.repeat(32)}.0` }] }, SITE)).rejects.toThrow(
+      OWN_COIN_REFUSAL,
+    );
+    expect(created).toHaveLength(0);
+  });
+
+  test("a site's own coin goes on in canonical form, its other fields and the caller's args untouched", async () => {
+    const cd = 'cd'.repeat(32);
+    const { m, created } = make();
+    const input = { outpoint: `${cd.toUpperCase()}_7`, inputDescription: 'mine', unlockingScriptLength: 108 };
+    const args = { description: 'x', inputs: [input] };
+    await m.createAction(args, SITE);
+    expect(created[0]).toEqual({
+      description: 'x',
+      inputs: [{ outpoint: `${cd}.7`, inputDescription: 'mine', unlockingScriptLength: 108 }],
+    });
+    expect(input.outpoint).toBe(`${cd.toUpperCase()}_7`);
+    expect(args.inputs[0]).toBe(input);
+  });
+
+  test('the highest output index still passes; no inputs at all is left alone', async () => {
+    const cd = 'cd'.repeat(32);
+    const { m, created } = make();
+    await m.createAction({ inputs: [{ outpoint: `${cd}.4294967295` }] }, SITE);
+    const none = { description: 'wallet funds this' };
+    await m.createAction(none, SITE);
+    expect(created[0].inputs?.[0].outpoint).toBe(`${cd}.4294967295`);
+    expect(created[1]).toBe(none);
+  });
+
+  test("the wallet's own calls are not rewritten or refused here", async () => {
+    const { m, created } = make();
+    const args = { inputs: [{ outpoint: `${T.toUpperCase()}.0` }] };
+    await m.createAction(args, ADMIN);
+    expect(created[0]).toBe(args);
   });
 });
 
