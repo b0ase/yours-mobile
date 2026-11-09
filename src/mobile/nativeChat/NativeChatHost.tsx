@@ -5,7 +5,7 @@
  * The WebView Chat page stays mounted underneath: it owns sign-in, the rooms fetch and every sheet, and it is what a
  * room falls back to for anything the native screen doesn't draw yet.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useInPeek } from '../phone/pageEl';
 import { TAB_TAP } from '../tabs/tabs';
@@ -71,12 +71,24 @@ const NativeChatHost = () => {
   roomsRef.current = rooms;
   const sessionRef = useRef<NativeRoomSession | null>(null);
   const sentRows = useRef(new Map<string, NativeRow[]>());
-  const visible = !!handle && !inPeek && !classic && !overlay;
+  const [roomsError, setRoomsError] = useState('');
+  const listRows = useMemo(() => {
+    if (!handle || !rooms) return null;
+    const unread = openTicker ? rooms.map((r) => (r.ticker === openTicker ? { ...r, unread: 0 } : r)) : rooms;
+    return roomRows(unread, handle, prefs);
+  }, [rooms, prefs, handle, openTicker]);
+  // With nothing to draw the WebView list stays up (it also has public and token rooms), never an empty native screen.
+  const nothingToDraw = !!listRows && listRows.length === 0 && !openTicker;
+  const visible = !!handle && !inPeek && !classic && !overlay && !nothingToDraw && (!!listRows || !!openTicker);
 
   useEffect(warmThreadCache, []);
   useEffect(() => onRooms(setRooms), []);
   useEffect(() => {
-    if (handle) void fetchRooms(client, identity).catch(() => undefined);
+    if (handle)
+      void fetchRooms(client, identity).then(
+        () => setRoomsError(''),
+        (e: unknown) => setRoomsError(e instanceof Error ? e.message : String(e)),
+      );
   }, [client, handle, identity]);
 
   // Show / hide, and the rect between the web bars.
@@ -112,10 +124,8 @@ const NativeChatHost = () => {
 
   // Rooms list → native.
   useEffect(() => {
-    if (!handle || !rooms) return;
-    const unread = openTicker ? rooms.map((r) => (r.ticker === openTicker ? { ...r, unread: 0 } : r)) : rooms;
-    void NativeChat.setRooms({ roomsJson: JSON.stringify(roomRows(unread, handle, prefs)) });
-  }, [rooms, prefs, handle, openTicker]);
+    if (listRows) void NativeChat.setRooms({ roomsJson: JSON.stringify(listRows) });
+  }, [listRows]);
 
   // Chat tab tapped: back to the native list (and out of the full-room fallback).
   useEffect(() => {
@@ -297,6 +307,15 @@ const NativeChatHost = () => {
         style={{ visibility: 'hidden', pointerEvents: 'none' }}
         aria-hidden
       />
+      {/* Test builds only, until we know why the native list came back empty (owner, 9 Nov 2026). */}
+      {nothingToDraw && !inPeek && !classic && !overlay && (
+        <div
+          className="fixed left-0 right-0 text-center text-[10px] pointer-events-none"
+          style={{ bottom: 'calc(env(safe-area-inset-bottom) + 72px)', color: '#9a9a9a', zIndex: 40 }}
+        >
+          Native list: {rooms?.length ?? 0} received, 0 shown{roomsError ? `, ${roomsError}` : ''}
+        </div>
+      )}
       {openTicker && openRoomRow && sessionRef.current && (
         <RoomLive ticker={openTicker} roomId={openRoomRow.id} poll={sessionRef.current.poll} />
       )}
