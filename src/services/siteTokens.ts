@@ -36,6 +36,8 @@
 import { OP, P2PKH, PublicKey, Script, Transaction, Utils, type WalletInterface, type WalletProtocol } from '@bsv/sdk';
 import type { PromptRequest } from '@1sat/permission-module';
 import { ONESAT, bsv21, tokenOutputTags, tokenSpends } from '../mobile/market/launchpad/tokens';
+import { canonicalInputs, canonicalOutpoint } from './canonicalOutpoint';
+import { everyOutput } from './everyOutput';
 import { randomIdTag } from './tokenSendHeal';
 
 /** The receive-key request protocol (a name only: the key answered is a wallet token key, see above). */
@@ -77,7 +79,6 @@ const isProtocol = (p: unknown, want: WalletProtocol) =>
   p[1].trim().toLowerCase() === want[1];
 const isReceiveProtocol = (p: unknown) => isProtocol(p, SITE_TOKEN_RECEIVE) || isProtocol(p, SITE_ORDINAL_RECEIVE);
 
-const normOutpoint = (op: string) => (op.length > 64 && op[64] === '_' ? `${op.slice(0, 64)}.${op.slice(65)}` : op);
 
 /** The keyID the wallet mints for a receive key: the 1Sat wallets' own `${tokenId}-${ms}` (seed recovery scans it). */
 export const receiveKeyID = (tokenId: string, ms: number) => `${tokenId}-${ms}`;
@@ -631,18 +632,20 @@ export function guardSiteTokens<T extends object>(wallet: T, deps: SiteTokenDeps
   const walletTokenCoins = async (): Promise<Map<string, TokenCoinRec>> => {
     const out = new Map<string, TokenCoinRec>();
     for (const basket of TOKEN_BASKETS) {
-      const r = await call<{
-        outputs: {
-          outpoint: string;
-          satoshis?: number;
-          spendable?: boolean;
-          customInstructions?: string;
-          tags?: string[];
-        }[];
-      }>('listOutputs', { basket, includeCustomInstructions: true, includeTags: true, limit: 10000 }, admin).catch(
-        () => null,
+      // A failure throws: "couldn't read" must never read as "holds no token coins" and skip the sheet.
+      const rows = await everyOutput<{
+        outpoint: string;
+        satoshis?: number;
+        spendable?: boolean;
+        customInstructions?: string;
+        tags?: string[];
+      }>(
+        wallet,
+        (a, o) => call('listOutputs', a, o),
+        { basket, includeCustomInstructions: true, includeTags: true },
+        admin,
       );
-      for (const o of r?.outputs ?? []) {
+      for (const o of rows) {
         if (o.spendable === false) continue;
         let ci: Record<string, unknown> = {};
         try {
@@ -652,8 +655,10 @@ export function guardSiteTokens<T extends object>(wallet: T, deps: SiteTokenDeps
         }
         if (!Array.isArray(ci.protocolID) || typeof ci.keyID !== 'string' || typeof ci.id !== 'string') continue;
         const amtRaw = typeof ci.amt === 'string' && /^\d{1,40}$/.test(ci.amt) ? ci.amt : '0';
-        out.set(normOutpoint(o.outpoint), {
-          outpoint: normOutpoint(o.outpoint),
+        const outpoint = canonicalOutpoint(o.outpoint);
+        if (outpoint === null) continue;
+        out.set(outpoint, {
+          outpoint,
           satoshis: typeof o.satoshis === 'number' ? o.satoshis : 1,
           amtRaw,
           id: ci.id.replace('.', '_'),
@@ -726,9 +731,11 @@ export function guardSiteTokens<T extends object>(wallet: T, deps: SiteTokenDeps
     w.createAction = async (args: CreateArgs, originator?: string) => {
       if (!outside(originator)) return call('createAction', args, originator);
       const site = deps.normalize(originator!);
+      // Refused here if unreadable; everything below, and every guard inside this one, sees only the canonical form.
+      const inputs = canonicalInputs<NonNullable<CreateArgs['inputs']>[number]>(args?.inputs);
       // 2. Deliveries into the token basket: rewrite the record, or refuse.
       const deliveries: Record<string, number> = {};
-      let next: CreateArgs = args;
+      let next: CreateArgs = inputs ? { ...args, inputs } : args;
       if (args?.outputs?.some((o) => deliveryBasket(o?.basket, o?.lockingScript))) {
         const outputs: Out[] = [];
         for (const o of args.outputs) {
@@ -747,12 +754,11 @@ export function guardSiteTokens<T extends object>(wallet: T, deps: SiteTokenDeps
           outputs.push({ ...o, basket, ...rec });
           deliveries[basket] = (deliveries[basket] ?? 0) + 1;
         }
-        next = { ...args, outputs };
+        next = { ...next, outputs };
       }
       // 3. Wallet token coins named as inputs.
-      const named = (args?.inputs ?? []).map((i) => (typeof i?.outpoint === 'string' ? normOutpoint(i.outpoint) : ''));
-      const coins = named.some(Boolean) ? await walletTokenCoins() : new Map<string, TokenCoinRec>();
-      const sold = named.map((op) => coins.get(op)).filter((c): c is TokenCoinRec => !!c);
+      const coins = inputs?.length ? await walletTokenCoins() : new Map<string, TokenCoinRec>();
+      const sold = (inputs ?? []).map((i) => coins.get(i.outpoint)).filter((c): c is TokenCoinRec => !!c);
       const wantsAuto = sold.length > 0 && next.options?.signAndProcess !== false;
       if (sold.length > 0) {
         if (!(await deps.prompt(sellSheet(originator!, next, sold)))) throw new Error(SELL_REJECTED);
@@ -771,8 +777,8 @@ export function guardSiteTokens<T extends object>(wallet: T, deps: SiteTokenDeps
       const tx = Transaction.fromAtomicBEEF(signable.tx);
       const uses: PendingSell['uses'] = [];
       tx.inputs.forEach((inp, index) => {
-        const op = `${inp.sourceTXID ?? inp.sourceTransaction?.id('hex')}.${inp.sourceOutputIndex}`;
-        const c = coins.get(op);
+        const op = canonicalOutpoint(`${inp.sourceTXID ?? inp.sourceTransaction?.id('hex')}.${inp.sourceOutputIndex}`);
+        const c = op === null ? undefined : coins.get(op);
         if (c && sold.includes(c)) uses.push({ index, protocolID: c.protocolID, keyID: c.keyID });
       });
       if (uses.length !== sold.length) {
