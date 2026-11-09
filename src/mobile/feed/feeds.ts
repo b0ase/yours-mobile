@@ -16,6 +16,7 @@
  * 'bdrive' pins are dropped by cleanPins because they are no longer FeedIds in FEEDS.
  */
 import { BEX_REEL_ENABLED, BMOVIES_FEED_ENABLED, TOKENBLASTER_ENABLED } from '../storeBuild';
+import type { Source } from './sources';
 
 /** A feed id: the built-in 'home' (Following | For you inside) or a bApp's bChatX brand slug ('bnews', 'bmusic', …). */
 export type FeedId = string;
@@ -25,7 +26,21 @@ export type FeedGroup = 'core' | 'bapps' | 'other';
 export type FeedDef = { id: FeedId; label: string; hint: string; group: FeedGroup; color: string };
 
 /** Feeds with their own view in FeedPage; everything else is a generic bChatX brand-account feed. */
-export const CUSTOM_VIEWS: readonly FeedId[] = ['home', 'bapps', 'bnews', 'bmovies', 'bexchange'];
+export const CUSTOM_VIEWS: readonly FeedId[] = [
+  'home',
+  'bapps',
+  'bnews',
+  'bmovies',
+  'bexchange',
+  'src-bchat',
+  'src-twetch',
+  'src-treechat',
+  'src-peck',
+  'src-fwetch',
+  'src-coingeek',
+  'src-hodlocker',
+  'src-relayx',
+];
 
 /** Old saved ids for Home's filters (before Following and For you were one chip) → 'home'. */
 export const LEGACY_HOME_IDS: readonly string[] = ['following', 'foryou'];
@@ -69,6 +84,15 @@ export const FEED_COLORS: Record<FeedId, string> = {
   bitcoincode: '#99D52A',
   bitcoinos: '#C2C2C2',
   bapps: GOLD,
+  // The apps posts come from: brand colours, the blues lifted so their names read on black.
+  'src-bchat': '#FFFFFF',
+  'src-twetch': '#4C8DFF',
+  'src-treechat': '#8C80E4',
+  'src-peck': '#E8A33D',
+  'src-fwetch': '#F0B81A',
+  'src-coingeek': '#2E9BFF',
+  'src-hodlocker': '#F7931A',
+  'src-relayx': '#5C93FA',
 };
 
 /** The colour for a feed: its own, else gold. */
@@ -108,6 +132,21 @@ const BAPP_ENTRIES: Entry[] = [
   ['bitcoincode', 'bCode'],
   ['bitcoinos', 'Bitcoin OS'],
 ];
+
+/** The apps posts come from (owner, 9 Nov 2026): each is a stop in the row, and the feed shows just that app. */
+const SOURCE_ENTRIES: Entry[] = [
+  ['src-bchat', 'bChat', 'Posts from bChat'],
+  ['src-twetch', 'Twetch', 'Posts from Twetch'],
+  ['src-treechat', 'Treechat', 'Posts from Treechat'],
+  ['src-peck', 'Peck', 'Posts from Peck'],
+  ['src-fwetch', 'Fwetch', 'Posts from Fwetch'],
+  ['src-coingeek', 'CoinGeek', 'Articles from CoinGeek'],
+  ['src-hodlocker', 'Hodlocker', 'Posts from Hodlocker'],
+  ['src-relayx', 'RelayX', 'Posts from RelayX'],
+];
+
+/** Which app a feed shows, or null for every other feed. */
+export const sourceOfFeed = (id: FeedId): Source | null => (id.startsWith('src-') ? (id.slice(4) as Source) : null);
 
 /** Ventures and the rest, by bChatX brand slug. cherryx and aigf are deliberately absent. */
 const OTHER_ENTRIES: Entry[] = [
@@ -163,6 +202,7 @@ export const FEEDS: readonly FeedDef[] = [
   { id: 'home', label: 'Home', hint: 'Following and For you', group: 'core' as const, color: GOLD },
   ...BAPP_ENTRIES.map(def('bapps')),
   ...OTHER_ENTRIES.map(def('other')),
+  ...SOURCE_ENTRIES.map(def('core')),
 ];
 
 /** The "All feeds" sheet's sections. */
@@ -171,8 +211,15 @@ export const feedGroups = (feeds: readonly FeedDef[] = FEEDS) => [
   { id: 'other' as const, label: 'Other', feeds: feeds.filter((f) => f.group === 'other') },
 ];
 
-/** Always at the front of the row: Home, then bApps (owner, 15 Oct 2026), then the red / green / blue suite. */
-export const FIXED_ROW: readonly FeedId[] = ['home', 'bapps', 'bmovies', 'bnews', 'bmusic'];
+/** Always at the front of the row: Home, bApps (owner, 15 Oct 2026), the red / green / blue suite, then the post apps. */
+export const FIXED_ROW: readonly FeedId[] = [
+  'home',
+  'bapps',
+  'bmovies',
+  'bnews',
+  'bmusic',
+  ...SOURCE_ENTRIES.map(([id]) => id),
+];
 
 /** The fixed order of the other $b* bApps in the row, after the pins (any bApp not listed follows, in FEEDS order). */
 export const BAPP_ROW_ORDER: readonly FeedId[] = [

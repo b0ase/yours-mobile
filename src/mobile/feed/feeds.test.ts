@@ -124,7 +124,7 @@ describe('feed row', () => {
   test('swiping steps through the full row, plus the open feed when it is not in it', () => {
     expect(stepFeed([], 'home', 1)).toBe(rowFeeds([])[1]);
     expect(stepFeed([], 'home', -1)).toBeNull();
-    expect(stepFeed(['bsocial'], 'bmusic', 1)).toBe('bsocial');
+    expect(stepFeed(['bsocial'], 'src-relayx', 1)).toBe('bsocial');
     const row = rowFeeds([]);
     expect(stepFeed([], row[row.length - 1], 1)).toBeNull();
     // The swipe walks the full row.
