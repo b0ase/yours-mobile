@@ -49,6 +49,9 @@ const ALL_SLUGS = [
   'bdns',
   'bedu',
   'bmaps',
+  'bphone',
+  'bmedia',
+  'block',
 ];
 
 /** Well-formed SVG: parses as XML with an <svg> root (DOMParser where present, else tag balance). */

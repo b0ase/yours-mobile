@@ -449,6 +449,12 @@ body,
   color: #ffd24d;
   background: #0b0b0c;
 }
+/* Scan's gold ink vanished on the yellow card: black ring and text, as the rest of this card's ink. */
+.bw-wcard.is-yellow .bw-wcard-scan > span {
+  color: #0b0b0c;
+  border-color: rgb(11 11 12 / 0.75);
+  background: rgb(11 11 12 / 0.08);
+}
 .bw-wcard.is-yellow .bw-wcard-retry {
   color: #0b0b0c;
   background: rgba(0, 0, 0, 0.08);
@@ -841,7 +847,10 @@ body,
   background: linear-gradient(135deg, var(--bw-accent-hi), var(--bw-accent-lo));
   border: 0;
   border-radius: 999px;
-  padding: 5px 10px;
+  /* The same height as Scan beside it (.bw-wcard-scan > span); the margin keeps the header row's height. */
+  height: 34px;
+  margin-block: -3px;
+  padding: 0 12px;
   cursor: pointer;
 }
 .bw-wcard-since {
@@ -1387,6 +1396,15 @@ body,
 .bw-wcard-addrline > .bw-wcard-unit {
   flex-shrink: 0;
   margin-right: -4px;
+}
+/* 320px wide: the card is 169px tall, so the $/BSV switch needs this room to stay inside the card's edge. */
+@media (max-width: 359px) {
+  .bw-wcard-front {
+    padding-block: 9px;
+  }
+  .bw-wcard-addrline {
+    margin-bottom: 0;
+  }
 }
 /* 44px tap target around each small pill. */
 .bw-wcard-unit button {

@@ -20,6 +20,10 @@ export const GLYPHS = {
   bbooks:
     '<path d="M12 6.5C10 5 7 4.5 3 5v13.5c4-.5 7 0 9 1.5 2-1.5 5-2 9-1.5V5c-4-.5-7 0-9 1.5z"/><path d="M12 6.5V20"/>',
   bwriter: '<path d="M20 4C11.5 5 6 10 5 20"/><path d="M20 4c-1 7-5 11-12.5 11.5"/>',
+  bphone:
+    '<path d="M6.5 3.5h3L11 8 9 9.5a12 12 0 0 0 5.5 5.5l1.5-2 4.5 1.5v3a2 2 0 0 1-2 2A15.5 15.5 0 0 1 4.5 5.5a2 2 0 0 1 2-2z"/>',
+  bmedia: '<circle cx="12" cy="12" r="9"/><path d="M10 8.5v7l5.5-3.5z"/>',
+  block: '<rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>',
   bmail: '<rect x="3" y="5.5" width="18" height="13" rx="2"/><path d="M3.5 7l8.5 6.5L20.5 7"/>',
   bsocial:
     '<circle cx="9" cy="9" r="3"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><path d="M15 6.2a3 3 0 0 1 0 5.6M17 14a5.5 5.5 0 0 1 3.5 5"/>',

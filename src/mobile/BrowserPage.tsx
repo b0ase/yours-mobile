@@ -46,6 +46,7 @@ import bpicsGlyph from './brand/bpics-glyph.svg';
 import { ArrowRight, Clock, Github, Globe, Lock, Plus, Search, Star, X } from 'lucide-react';
 import { BAPP_GROUPS, bappsIn, type BApp } from './bapps';
 import { ALL_BAPP_ICON_SLUGS, bappIconUrl, useThemedIcon } from './brand/bappIcons';
+import { CALLS_ROUTE } from './calls/route';
 import { RADAR_APPS, RADAR_GROUPS } from './radarApps';
 import { GAME_SOURCES, gamesFor } from './games/gamesCatalog';
 import { AddAppSheet } from './apps/AddAppSheet';
@@ -265,7 +266,16 @@ const BSPACES_KEY = 'sys:bspaces';
 const BSPACES_TILE: Tile = { key: BSPACES_KEY, name: 'bSpaces', url: '/m/spaces', icon: bspacesGlyph };
 /** bPics (owner, 12 Oct 2026; src/mobile/bpics): mint your photos as ordinals, browse shared ones. Both editions. */
 const BPICS_TILE: Tile = { key: 'sys:bpics', name: 'bPics', url: '/m/bpics', icon: bpicsGlyph };
-const SYS_TILES: Tile[] = BSPACES_ENABLED ? [AGENT_TILE, BPICS_TILE, BSPACES_TILE] : [AGENT_TILE, BPICS_TILE];
+/** The wallet's own screens as bApps (owner, 9 Nov 2026), both editions. bMail is already one: bMailX in bapps.ts. */
+const WALLET_SCREEN_TILES: Tile[] = [
+  { key: 'sys:bphone', name: 'bPhone', url: CALLS_ROUTE, icon: bappIconUrl('bphone') },
+  { key: 'sys:media', name: 'Media Player', url: '/m/media', icon: bappIconUrl('bmedia') },
+  { key: 'sys:lock', name: 'Lock', url: '/m/lock', icon: bappIconUrl('block') },
+];
+const SYS_TILES: Tile[] = [
+  ...(BSPACES_ENABLED ? [AGENT_TILE, BPICS_TILE, BSPACES_TILE] : [AGENT_TILE, BPICS_TILE]),
+  ...WALLET_SCREEN_TILES,
+];
 /** Wallet screens rather than web apps: they open by route. */
 const isSys = (t: Tile) => t.key.startsWith('sys:');
 /** Generated bApp-icon-set images (gold b badge); a tile without an icon also draws a gold-b monogram. */
@@ -1536,6 +1546,29 @@ try {
   }
 } catch {
   /* storage unavailable: the default layout below already has one bApps section */
+}
+
+// Existing layouts: the wallet's own screens join the bApps section, once, with nothing to arrange by hand. New layouts
+// get them from the default below.
+const WALLET_SCREENS_FLAG = 'bwallet:bapps-wallet-screens:v1';
+try {
+  if (!localStorage.getItem(WALLET_SCREENS_FLAG)) {
+    const saved = parseScreens(localStorage.getItem(APP_SCREENS_KEY));
+    if (saved)
+      localStorage.setItem(
+        APP_SCREENS_KEY,
+        serialiseScreens(
+          gatherBapps(
+            saved,
+            WALLET_SCREEN_TILES.map((t) => t.key),
+            () => false,
+          ),
+        ),
+      );
+    localStorage.setItem(WALLET_SCREENS_FLAG, '1');
+  }
+} catch {
+  /* storage unavailable: the default layout below already has them */
 }
 
 setDefaultBuilder(() =>

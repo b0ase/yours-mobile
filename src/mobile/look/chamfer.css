@@ -5,9 +5,11 @@
    Paint cost (owner's first priority is speed). Two techniques, by where the shape sits:
    - On the plain page: a static gradient that paints the page colour over two corners. No clip, no extra layer, and the
      focus outline survives.
-   - On art or an unknown ground (the card's Scan, the room header's two buttons, the composer, the active tab):
+   - On art or an unknown ground (the room header's two buttons, the composer, the active tab):
      clip-path, only on a handful of static elements. Never on list rows, the card face or anything animated: repeated
-     rows (.bw-card) are plain small-radius boxes. */
+     rows (.bw-card) are plain small-radius boxes.
+   The wallet's credit card keeps its own rounded corners and pill buttons (owner, 9 Nov 2026): no Chamfer rule here
+   touches the card, its face or anything on it (mobile.css .bw-wcard*, balanceCards.css .bw-bc). */
 
 :root {
   /* One button system: a row's buttons share a height and padding. */
@@ -112,31 +114,17 @@ html:not([data-bw-pack]) #root {
   --ch-c: 8px;
 }
 /* The clipped few. */
-:is(
-  .bw-golive,
-  .bw-room-invites,
-  .bw-wcard-getname,
-  .bw-wcard-scan > span,
-  .bw-composer-input,
-  .bw-composer-plus,
-  .bw-composer-send
-) {
+:is(.bw-golive, .bw-room-invites, .bw-composer-input, .bw-composer-plus, .bw-composer-send) {
   border-radius: 0 !important;
   clip-path: var(--bw-cut);
 }
-/* Repeated rows, the balance cards and their swipe clip: small corners, nothing clipped. */
-:is(.bw-card, .bw-bc, .bw-token-swipe .bw-swipe:has(.bw-card)) {
-  border-radius: var(--bw-corner) !important;
-}
-.bw-wcard-face,
-.bw-wcard-unit,
-.bw-wcard-unit button {
+/* Repeated rows and their swipe clip: small corners, nothing clipped. */
+:is(.bw-card, .bw-token-swipe .bw-swipe:has(.bw-card)) {
   border-radius: var(--bw-corner) !important;
 }
 
 /* Focus: clip-path removes an outline, so the clipped few ring on the inside. */
-:is(.bw-golive, .bw-room-invites, .bw-wcard-getname, .bw-composer-plus, .bw-composer-send):focus-visible,
-.bw-wcard-scan:focus-visible > span {
+:is(.bw-golive, .bw-room-invites, .bw-composer-plus, .bw-composer-send):focus-visible {
   outline: none;
   box-shadow: inset 0 0 0 2px var(--bw-text) !important;
 }
@@ -154,7 +142,7 @@ html:not([data-bw-pack]) #root {
 }
 
 /* ── Buttons ── */
-:is(.bw-golive, .bw-room-invites, .bw-home-edit, .bw-wcard-getname) {
+:is(.bw-golive, .bw-room-invites, .bw-home-edit) {
   height: var(--bw-btn-h) !important;
   min-height: var(--bw-btn-h);
   padding: 0 var(--bw-btn-px) !important;
@@ -175,23 +163,10 @@ html:not([data-bw-pack]) #root {
   .bw-golive-text {
     display: none;
   }
-  .bw-wcard-usd {
-    font-size: 32px !important;
-  }
 }
 /* On an unknown ground: a tinted plate, so no outline has to follow the cut. */
 .bw-room-invites {
   background: var(--bw-tint-plate) !important;
-}
-.bw-wcard-scan > span {
-  height: var(--bw-btn-h);
-  padding: 0 var(--bw-btn-px);
-  border-width: 0;
-  font-size: var(--bw-btn-fs);
-  background: var(--bw-tint-plate);
-}
-html:not([data-bw-pack]) .bw-wcard-scan > span {
-  background: rgb(0 0 0 / 0.55);
 }
 .bw-home-edit {
   background: transparent !important;
@@ -201,6 +176,8 @@ html:not([data-bw-pack]) .bw-wcard-scan > span {
 .bw-toprow > * {
   height: var(--bw-tile-h) !important;
 }
+/* Two rows: Send · Receive, Mint · Lock (order-* in the markup). A button this build or an error leaves out never leaves
+   a hole: its partner takes the whole row. */
 .bw-sendrow {
   width: 92%;
   gap: 8px;
@@ -210,16 +187,13 @@ html:not([data-bw-pack]) .bw-wcard-scan > span {
   padding-block: 0;
   font-size: 14px !important;
 }
-.bw-wcard-usd {
-  font-size: clamp(38px, 12.5vw, 50px);
-  letter-spacing: -0.035em;
-  font-variant-numeric: tabular-nums;
+.bw-sendrow:not(:has(.bw-act-mint)) > .bw-act-lock,
+.bw-sendrow:not(:has(.bw-act-lock)) > .bw-act-mint {
+  grid-column: 1 / -1;
 }
-.bw-wcard-sats {
-  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  font-size: 11px;
+.bw-sendrow > p {
+  grid-column: 1 / -1;
+  order: 5;
 }
 
 /* ── Dock: no rings, and no plate (owner, 9 Nov 2026): the current tab is lit gold. The b is left exactly as it was. ── */
@@ -311,6 +285,10 @@ nav[data-phone-dock][data-bw-bottom-nav] .bw-tile {
 .bw-topnav > button {
   border-color: transparent !important;
   background: transparent !important;
+}
+.bw-topnav > .bw-topnav-apps[aria-pressed='true'] {
+  border-color: var(--bw-accent) !important;
+  background: color-mix(in srgb, var(--bw-accent) 20%, transparent) !important;
 }
 html:not([data-bw-pack]) nav[data-phone-dock][data-bw-bottom-nav] {
   background: var(--bw-black) !important;
@@ -420,7 +398,7 @@ html:not([data-bw-pack]) .bw-card {
   box-shadow: inset 0 0 0 1px var(--bw-hair) !important;
   border-color: transparent !important;
 }
-/* Buy BSV steps back: the one filled gold button on the screen is Send (the row's markup is Receive, Send, Mint). */
+/* Buy BSV steps back: the one filled gold button on the screen is Send. */
 html:not([data-bw-pack]) .bw-toprow > button:nth-child(2) {
   --ch-edge: var(--bw-gold-hair);
   border-color: var(--bw-gold-hair) !important;
@@ -432,7 +410,7 @@ html:not([data-bw-pack]) .bw-sendrow .bw-pill {
   color: var(--bw-text) !important;
   box-shadow: inset 0 0 0 1px var(--ch-edge);
 }
-html:not([data-bw-pack]) .bw-sendrow > .bw-pill:nth-child(2) {
+html:not([data-bw-pack]) .bw-sendrow > .bw-act-send {
   --ch-edge: transparent;
   background: var(--bw-accent-hi) !important;
   color: #000 !important;
@@ -450,29 +428,10 @@ html:not([data-bw-pack]) .bw-backup-banner {
 html:not([data-bw-pack]) .bw-backup-banner svg {
   color: #e5484d;
 }
-/* The card face turns in 3D, so its cut is painted, never clipped: Gold only (packs keep their outlined cards). */
-html:not([data-bw-pack]) .bw-wcard-face {
-  border: 0 !important;
-  border-radius: 0 !important;
-  box-shadow: none;
-}
-html:not([data-bw-pack]) .bw-wcard-face::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  pointer-events: none;
-  --ch-c: 9px;
-  background:
-    linear-gradient(135deg, var(--ch-bg) var(--ch-c), transparent calc(var(--ch-c) + 0.5px)) left top / 20px 20px
-      no-repeat,
-    linear-gradient(315deg, var(--ch-bg) var(--ch-c), transparent calc(var(--ch-c) + 0.5px)) right bottom / 20px 20px
-      no-repeat;
-}
 
 /* Packs draw outlines on these, and a clip would break the outline at the cut: small square corners instead. */
 :root[data-bw-pack] :is(.bw-composer-input, .bw-composer-plus, .bw-composer-send),
-:root[data-bw-tone='mono'] :is(.bw-golive, .bw-wcard-getname) {
+:root[data-bw-tone='mono'] .bw-golive {
   clip-path: none;
   border-radius: var(--bw-corner) !important;
 }
