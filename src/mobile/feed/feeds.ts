@@ -211,11 +211,9 @@ export const feedGroups = (feeds: readonly FeedDef[] = FEEDS) => [
   { id: 'other' as const, label: 'Other', feeds: feeds.filter((f) => f.group === 'other') },
 ];
 
-/**
- * Always at the front of the row: the post apps (owner, 9 Nov 2026), bApps (opens the app browser), then the red / green /
- * blue suite. Home has no tile: it is the feed of every app, reached by tapping the open app again or swiping back.
- */
+/** Always at the front of the row: Home, the post apps (owner, 9 Nov 2026), bApps (opens the app browser), then the red / green / blue suite. */
 export const FIXED_ROW: readonly FeedId[] = [
+  'home',
   ...SOURCE_ENTRIES.map(([id]) => id),
   'bapps',
   'bmovies',
@@ -258,9 +256,7 @@ export const hasCustomView = (id: FeedId) => CUSTOM_VIEWS.includes(id);
 export const cleanPins = (raw: unknown, feeds: readonly FeedDef[] = FEEDS): FeedId[] =>
   (Array.isArray(raw) ? (raw as unknown[]) : [])
     .map((v) => (typeof v === 'string' ? migrateFeedId(v) : v))
-    .filter(
-      (v, i, a): v is FeedId => isFeedId(v, feeds) && v !== 'home' && !FIXED_ROW.includes(v) && a.indexOf(v) === i,
-    )
+    .filter((v, i, a): v is FeedId => isFeedId(v, feeds) && !FIXED_ROW.includes(v) && a.indexOf(v) === i)
     .slice(0, MAX_PINNED);
 
 /** Pin (to the end of the pins, in pin order) or unpin a feed. Fixed feeds are always in the row. */
@@ -303,9 +299,9 @@ export const rowFeeds = (pins: FeedId[], feeds: readonly FeedDef[] = FEEDS): Fee
   ];
 };
 
-/** The swipe order: Home, the row without bApps (that tile leaves Feed), then the open feed when opened from All feeds. */
+/** The swipe order: the row without bApps (that tile leaves Feed), then the open feed when opened from All feeds. */
 export const swipeOrder = (pins: FeedId[], current: FeedId): FeedId[] => {
-  const order = ['home', ...rowFeeds(pins).filter((id) => id !== 'bapps')];
+  const order = rowFeeds(pins).filter((id) => id !== 'bapps');
   return order.includes(current) ? order : [...order, current];
 };
 

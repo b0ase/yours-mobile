@@ -99,12 +99,12 @@ describe('feed row', () => {
     expect(movePin(['a', 'b', 'c'], 'a', 1)).toEqual(['b', 'a', 'c']);
     expect(movePin(['a'], 'z', 1)).toEqual(['a']);
     expect(MAX_PINNED).toBeGreaterThanOrEqual(FEEDS.length);
-    const many = FEEDS.filter((f) => f.id !== 'home' && !FIXED_ROW.includes(f.id)).map((f) => f.id);
+    const many = FEEDS.filter((f) => !FIXED_ROW.includes(f.id)).map((f) => f.id);
     expect(cleanPins(many)).toEqual(many);
   });
   test('Following and For you are one Home chip; old ids migrate to it', () => {
-    expect(FIXED_ROW[0]).toBe('src-bchat');
-    expect(FIXED_ROW).not.toContain('home');
+    expect(FIXED_ROW[0]).toBe('home');
+    expect(FIXED_ROW[1]).toBe('src-bchat');
     expect(FEEDS.some((f) => f.id === 'following' || f.id === 'foryou')).toBe(false);
     expect(migrateFeedId('following')).toBe('home');
     expect(migrateFeedId('foryou')).toBe('home');
@@ -123,7 +123,7 @@ describe('feed row', () => {
     expect(loadPins(store)).toEqual(['bradio']);
   });
   test('swiping steps through the full row, plus the open feed when it is not in it', () => {
-    expect(stepFeed([], 'home', 1)).toBe(rowFeeds([])[0]);
+    expect(stepFeed([], 'home', 1)).toBe(rowFeeds([])[1]);
     expect(stepFeed([], 'src-bchat', -1)).toBe('home');
     expect(stepFeed([], 'src-relayx', 1)).toBe('bmovies');
     expect(stepFeed([], 'home', -1)).toBeNull();
@@ -134,7 +134,7 @@ describe('feed row', () => {
     let id: string | null = 'home';
     let n = 1;
     while ((id = stepFeed([], id, 1))) n++;
-    expect(n).toBe(row.length); // Home in, the bApps tile out
+    expect(n).toBe(row.length - 1); // the bApps tile leaves Feed, so a swipe skips it
     expect(stepFeed([], 'vexvoid', -1)).toBe(row[row.length - 1]);
   });
   test('a left swipe is next, a right swipe previous, a scroll is neither', () => {
