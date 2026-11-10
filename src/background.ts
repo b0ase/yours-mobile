@@ -7130,10 +7130,14 @@ if (!(
       const w = await ensureWallet();
       await ensureUsbSeen('sign a transaction', message.originator);
 
-      markChainStep();
+      const site = !!message.originator && message.originator !== ADMIN_ORIGINATOR;
+      // Only a connected SITE's multi-step action holds the wallet's background work (services/dappChain.ts). The
+      // wallet's own pages (token / ordinal / lock / OpNS sends all sign through signAction) marked it too, so for 5
+      // minutes after any of them every device sync was deferred and a Store payment's backup-before-send failed with
+      // "a site action is in progress" (incident 10 Nov 2026). Own createActions were already excluded.
+      if (site) markChainStep();
       // Big: the background sender uploads it (services/bigDelayed.ts).
       const bytes = (await signableBytes(message.params.reference)) + signActionBytes(message.params);
-      const site = !!message.originator && message.originator !== ADMIN_ORIGINATOR;
       // As createAction: a site's acceptDelayedBroadcast is not honoured; small sends go out now (withBroadcastNow).
       const delayed = shouldDelay(
         bytes,
@@ -7166,7 +7170,7 @@ if (!(
       await withRepeatGuard((g) => g.signed(message.params.reference, result?.txid));
       // The step that broadcasts the batch ends the chain; otherwise it stays active for the next step.
       if (result?.sendWithResults?.length) endChain();
-      else markChainStep();
+      else if (site) markChainStep();
       sendResponse({
         type: CWIEventName.SIGN_ACTION,
         success: true,

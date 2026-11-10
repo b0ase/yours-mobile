@@ -99,6 +99,8 @@ export const HistoryScreen = ({
   // Wide web (desktop.bwalletx.com): the dialog fills the page and transactions are a table. Phone layout unchanged.
   const wide = !inline && typeof document !== 'undefined' && document.documentElement.classList.contains('ww-on');
   const [refreshing, setRefreshing] = useState(false);
+  /** Signed-but-never-sent payments the wallet holds (not on chain, so not listed): explain the banner with them. */
+  const [unsent, setUnsent] = useState<{ count: number; sats: number } | null>(null);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30_000);
@@ -124,6 +126,7 @@ export const HistoryScreen = ({
           identityAddress: addrs?.identityAddress,
           apiContext,
           onProgress: quiet ? () => undefined : setProgress,
+          onUnsent: setUnsent,
           now,
         });
         const loaded = { rows, at: now };
@@ -161,13 +164,20 @@ export const HistoryScreen = ({
   const sum = totals(rows);
   const bal = data ? balances(data.rows, range) : null;
   // Only a range that runs to now can be checked against the wallet's balance.
-  const incomplete =
-    !!data &&
-    historyLooksIncomplete(
-      sum,
-      range.to === null || range.to >= data.at - 60_000 ? (bal?.closing ?? null) : null,
-      category === 'all' ? loadLastBalance(addrs?.identityAddress) : null,
-    );
+  const closingNow = data && (range.to === null || range.to >= data.at - 60_000) ? (bal?.closing ?? null) : null;
+  const walletBalance = category === 'all' ? loadLastBalance(addrs?.identityAddress) : null;
+  const incomplete = !!data && historyLooksIncomplete(sum, closingNow, walletBalance);
+  // The gap is exactly what signed-but-never-sent payments hold (10 Nov 2026): say so, instead of "incomplete"
+  // through every Refresh (a Refresh reads the same chain, so it could never clear it).
+  const heldByUnsent =
+    incomplete &&
+    !!unsent?.count &&
+    closingNow !== null &&
+    walletBalance !== null &&
+    !historyLooksIncomplete(sum, closingNow - unsent.sats, walletBalance)
+      ? unsent
+      : null;
+  const gap = closingNow !== null && walletBalance !== null ? closingNow - walletBalance : null;
   const stem = fileStem(accountName, range);
   const hidden = data ? hiddenByRange(data.rows, range) : 0;
 
@@ -393,7 +403,24 @@ export const HistoryScreen = ({
               className="text-xs mt-2 rounded-lg p-2"
               style={{ color: GOLD, border: `1px solid ${GOLD}` }}
             >
-              <div>History may be incomplete. Refresh it, or run Repair Sync (Settings &gt; Troubleshooting).</div>
+              {heldByUnsent ? (
+                <div>
+                  History matches the network.{' '}
+                  {heldByUnsent.count === 1 ? '1 payment' : `${heldByUnsent.count} payments`} your wallet signed but
+                  never sent {heldByUnsent.count === 1 ? 'holds' : 'hold'} {fmtBsv(heldByUnsent.sats)} of your balance.{' '}
+                  {heldByUnsent.count === 1 ? "It isn't" : "They aren't"} on the network, so{' '}
+                  {heldByUnsent.count === 1 ? "it isn't" : "they aren't"} listed here. A Store payment is given back the
+                  next time you open the Store; any other is given back within a day if it never goes out.
+                </div>
+              ) : (
+                <div>
+                  History may be incomplete
+                  {gap !== null && Math.abs(gap) > 0
+                    ? `: it differs from your wallet balance by ${fmtBsv(Math.abs(gap))}`
+                    : ''}
+                  . Refresh it, or run Repair Sync (Settings &gt; Troubleshooting).
+                </div>
+              )}
               {/* A visible button: pull-to-refresh doesn't exist in the Chrome extension (owner, 11 Oct 2026). */}
               <button
                 type="button"

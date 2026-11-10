@@ -23,6 +23,7 @@ import {
   localOutbox,
   pruneOutbox,
   recordNewPayment,
+  releaseNeverSent,
   sendStorePayment,
   signStorePayment,
   softPut,
@@ -32,6 +33,7 @@ import {
   type IntentAnswer,
   type OutboxEntry,
   type StorePayDeps,
+  UNSENT_RELEASE_MIN_AGE_MS,
 } from './storePay';
 
 /**
@@ -190,6 +192,7 @@ export function withStoreDeps(ctx: OneSatContext, f: Fetch, deps: StorePayDeps):
       }),
     actionStatus:
       deps.actionStatus ?? (async (txid) => (await recentActions(wallet, 300)).find((a) => a.txid === txid)?.status),
+    storeHeardOf: deps.storeHeardOf ?? ((e) => storeHeardOf(ctx, f, { kind: e.kind, quoteId: e.quoteId }, e.txid)),
   };
 }
 
@@ -300,6 +303,7 @@ export const payQuote = async (
     label: 'theme edition',
     state: 'signed',
     at: now(deps),
+    intentAt: null,
   };
   await recordNewPayment(entry, deps);
   return finishOrder(ctx, f, entry, deps);
@@ -465,6 +469,7 @@ export const payBuyQuote = async (
     label,
     state: 'signed',
     at: now(deps),
+    intentAt: null,
   };
   await recordNewPayment(entry, deps);
   const res = await finishBuy(ctx, f, entry, deps);
@@ -500,7 +505,10 @@ export type SettleReport = {
   settledOld: string[];
   /** Sent Store payments found in the wallet with no outbox entry, claimed from their memo (F2). */
   reclaimed: string[];
-  /** Unsent Store payments that never reached the outbox, the Store or the network, released (06c M2). */
+  /**
+   * Unsent Store payments released: ones that never reached the outbox, the Store or the network (06c M2), and outbox
+   * entries never sent and never told to the Store (backup failed; 10 Nov 2026).
+   */
   released: string[];
 };
 
@@ -562,8 +570,10 @@ export const localClaimed = (identityKey: string): ClaimedSet => {
 /**
  * Finish the Store payments this device started, and settle older ones (P0, 3 Nov 2026; review 4 Nov 2026). Runs when
  * the Store opens.
- *  - Signed but not sent (its backup failed, the Store was unreachable, or the app closed): back up, tell the Store,
- *    send through the wallet, claim.
+ *  - Signed, never sent and never told to the Store (its backup failed, or the app closed first): released, never sent
+ *    (releaseNeverSent: wallet 'nosend', the chain has no copy over ~30 s, the Store never heard of it). The buyer was
+ *    told nothing was paid; a new Pay makes a new payment (10 Nov 2026).
+ *  - Signed and told to the Store but not sent (the Store was unreachable): back up, tell the Store, send, claim.
  *  - Refused so far: re-checked against the chain; claimed if the network has it; cleared only after a day, when the
  *    wallet holds no live action for it and the chain still doesn't have it after ~30 s of retries.
  *  - Sent but not confirmed (claim failed, or 202 pending): claim again, at most every RECLAIM_EVERY_MS.
@@ -601,6 +611,18 @@ async function settleOnce(
   const handled = new Set<string>();
   for (const e of pruneOutbox(deps.outbox, t)) {
     handled.add(e.txid);
+    // Never sent and never told to the Store (its backup failed, or the app closed first): the buyer was told
+    // "nothing was paid", so it is released, never sent without a new Pay (owner, 10 Nov 2026). A young one may be
+    // a Pay still backing it up: left to that Pay.
+    if (e.state === 'signed' && (e.intentAt === null || e.intentAt === undefined)) {
+      if (t - e.at < UNSENT_RELEASE_MIN_AGE_MS) {
+        report.kept.push(e.txid);
+        continue;
+      }
+      const r = await releaseNeverSent(ctx.wallet as unknown as UnsentWallet, e, deps, { retryWindow: true });
+      (r === 'kept' ? report.kept : report.released).push(e.txid);
+      continue;
+    }
     if (e.state === 'pending' && e.claimedAt && t - e.claimedAt < RECLAIM_EVERY_MS) {
       report.pending.push(e.txid);
       continue;
