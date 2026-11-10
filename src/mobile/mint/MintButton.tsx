@@ -155,7 +155,7 @@ export const MintButton = ({ exchangeRate = 0 }: { exchangeRate?: number }) => {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="order-3 flex flex-1 items-center justify-center gap-2 py-3 font-semibold text-sm outline-none cursor-pointer bw-pill bw-pill-gold"
+        className="bw-act-mint order-3 flex flex-1 items-center justify-center gap-2 py-3 font-semibold text-sm outline-none cursor-pointer bw-pill bw-pill-gold"
       >
         <Sparkles size={16} strokeWidth={2.5} />
         Mint

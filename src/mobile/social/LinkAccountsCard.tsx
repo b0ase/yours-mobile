@@ -25,7 +25,7 @@ export const LinkAccountsCard = ({ owner }: { owner: string }) => {
   if (count || dismissed) return null;
   return (
     <div
-      className="relative flex items-center gap-3 w-[92%] mt-3 rounded-2xl px-4 py-3 cursor-pointer"
+      className="bw-handle-card relative flex items-center gap-3 w-[92%] mt-3 rounded-2xl px-4 py-3 cursor-pointer"
       style={{ background: 'var(--bw-surface)', border: '1px solid var(--bw-line, #3a2f0c)' }}
       onClick={() => setOpen(true)}
       role="button"

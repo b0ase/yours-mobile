@@ -4,6 +4,7 @@
  * room header when it has none (docs/BSPACES-PLAN.md). Everyone else sees nothing until it is live.
  */
 import { lazy, useRef, Suspense, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Mic, Radio } from 'lucide-react';
 import type { OneSatContext } from '@1sat/actions';
 import type { BchatClient } from '../chat/api';
@@ -42,6 +43,7 @@ export const LiveBanner = ({
   autoOpen = false,
   openSignal = 0,
   onCallable,
+  slot = null,
 }: {
   client: BchatClient;
   /** The wallet, for the inline "Claim admin" fallback when starting is refused. */
@@ -60,6 +62,8 @@ export const LiveBanner = ({
   openSignal?: number;
   /** What `openSignal` would do here now: join, start, or nothing. */
   onCallable?: (what: 'join' | 'start' | null) => void;
+  /** The room header's button row: Start a Space shows as a Go live pill there instead of its own bar. */
+  slot?: HTMLElement | null;
 }) => {
   const [state, setState] = useState<SpaceState | null>(null);
   /** Live per the public route, when the member-gated read failed (see BchatClient.spaceLivePublic). */
@@ -223,7 +227,23 @@ export const LiveBanner = ({
           </span>
         </button>
       ) : (
-        host && (
+        host &&
+        (slot ? (
+          // Beside the room's buttons, so the bar doesn't cost a whole row (owner, 8 Nov 2026).
+          createPortal(
+            <button
+              type="button"
+              aria-label="Start a Space. Go live"
+              onClick={() => setNaming(true)}
+              className="bw-golive flex items-center gap-1 rounded-full pl-2 pr-2.5 h-7 text-xs font-bold active:opacity-70"
+              style={{ background: GOLD, color: '#010101' }}
+            >
+              <Mic size={13} color="currentColor" />
+              <span className="bw-golive-text">Go live</span>
+            </button>,
+            slot,
+          )
+        ) : (
           <div
             className="flex items-center gap-3 px-3 py-2"
             style={{ background: '#0d0b04', borderBottom: `1px solid color-mix(in srgb, ${GOLD} 20%, transparent)` }}
@@ -238,7 +258,7 @@ export const LiveBanner = ({
               Go live
             </button>
           </div>
-        )
+        ))
       )}
 
       {naming && (

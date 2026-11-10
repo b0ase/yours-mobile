@@ -71,6 +71,14 @@ describe('Mint sheet catalog (bWalletX build)', () => {
     }
   });
 
+  test('the bAvatar is in the Mint menu and opens its sheet', () => {
+    expect(MINT_SECTIONS.find((s) => s.id === 'money')?.cards).toContain('bavatar');
+    expect(mintCard('bavatar')?.soon).toBeUndefined();
+    expect(mintCard('bavatar')?.cta).toEqual({ go: '/m/bmint/mint/bavatar' });
+    expect(src('../bmint/BmintPage.tsx')).toContain("type === 'bavatar'");
+    expect(src('../tabs/TopNav.tsx')).not.toContain('BavatarMintSheet');
+  });
+
   test('Link an account is not open yet; Upload your archive is live', () => {
     expect(mintCard('link')?.soon).toBe(true);
     expect(mintCard('upload')?.soon).toBeUndefined();
@@ -121,7 +129,18 @@ describe('Mint sheet catalog (store build)', () => {
     for (const gone of ['link', 'currency', 'agent', 'sell', 'keep', 'heirs', 'picture', 'card', 'tickets', 'contract'])
       expect(ids).not.toContain(gone);
     expect(ids).toEqual(
-      expect.arrayContaining(['upload', 'art', 'music', 'videos', 'movies', '3d', 'books', 'website', 'name']),
+      expect.arrayContaining([
+        'upload',
+        'art',
+        'music',
+        'videos',
+        'movies',
+        '3d',
+        'books',
+        'website',
+        'name',
+        'bavatar',
+      ]),
     );
     for (const c of cards) {
       expect(c.soon).toBeUndefined();

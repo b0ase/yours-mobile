@@ -1,16 +1,15 @@
 import { accentById } from '../theme/accents';
-import { useRef, useState } from 'react';
+import { useRef } from 'react';
 import { Menu } from 'lucide-react';
 import { AccountAvatar } from '../names/AccountAvatar';
 import { useAvatar } from '../names/useAvatar';
 import { useAccentId } from '../theme/useAccent';
-import { countMenuOpen, showMenuHint } from './menuHint';
 
 const LONG_PRESS_MS = 500;
 
 /**
- * Top-left of the bar (owner-approved, 16 Oct 2026): the user's bAvatar replaces ☰.
- * Tap = the same menu ☰ opened; long-press = the account switcher. A tiny ☰ badge shows until 3 opens.
+ * Top-left of the bar: ☰ and the user's bAvatar, one button (owner, 9 Nov 2026: the avatar alone hid where settings are).
+ * Tap = the menu; long-press = the account switcher.
  * No router hooks here (see outsideRouter.test.ts).
  */
 export const MenuAvatarButton = ({
@@ -27,7 +26,6 @@ export const MenuAvatarButton = ({
   const src = useAvatar(identityAddress);
   const accentId = useAccentId();
   const white = accentId === 'white' || !!accentById(accentId).paper;
-  const [hint, setHint] = useState(showMenuHint);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longFired = useRef(false);
   const clear = () => {
@@ -49,8 +47,6 @@ export const MenuAvatarButton = ({
       longFired.current = false;
       return;
     }
-    countMenuOpen();
-    setHint(showMenuHint());
     onOpen();
   };
   return (
@@ -63,26 +59,16 @@ export const MenuAvatarButton = ({
       onPointerLeave={clear}
       onPointerCancel={clear}
       onContextMenu={(e) => e.preventDefault()}
-      className="relative w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer p-0 box-border select-none"
-      style={{ border: white ? '1px solid #000' : ring, WebkitTouchCallout: 'none' }}
+      className="h-9 flex items-center gap-1.5 bg-transparent border-0 cursor-pointer p-0 box-border select-none"
+      style={{ WebkitTouchCallout: 'none' }}
     >
-      <AccountAvatar src={src} size={32} ring={false} place="list" />
-      {hint && (
-        <span
-          aria-hidden
-          className="absolute flex items-center justify-center rounded-full"
-          style={{
-            right: -2,
-            bottom: -2,
-            width: 14,
-            height: 14,
-            background: 'var(--bw-pack-bg, #010101)',
-            border: white ? '1px solid #000' : ring,
-          }}
-        >
-          <Menu size={9} color="var(--bw-accent)" strokeWidth={3} />
-        </span>
-      )}
+      <Menu size={20} color="var(--bw-accent)" strokeWidth={2.25} aria-hidden />
+      <span
+        className="w-9 h-9 rounded-full flex items-center justify-center box-border"
+        style={{ border: white ? '1px solid #000' : ring }}
+      >
+        <AccountAvatar src={src} size={32} ring={false} place="list" />
+      </span>
     </button>
   );
 };

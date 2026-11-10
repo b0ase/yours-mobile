@@ -195,6 +195,7 @@ const NewSpaceSheet = BSPACES_ENABLED
   : null;
 import {
   amountLabel,
+  roomHoldLine,
   buildTokenRoomList,
   holdingFromLookup,
   holdingsFromRooms,
@@ -431,6 +432,8 @@ const Conversation = ({
   );
   const [bizOpen, setBizOpen] = useState(false);
   const title = entryTitle(entry, room) ?? roomTitle(room, me);
+  // Where LiveBanner's Go live goes (the header's button row).
+  const [liveSlot, setLiveSlot] = useState<HTMLSpanElement | null>(null);
   useBackClose(true, onBack);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   // Admin-only events (event_payload.audience === 'admins') are for the room admin / issuer only.
@@ -923,19 +926,26 @@ const Conversation = ({
               {look.name} look · from {look.host}
             </div>
           )}
-          <div className="text-[11px]" style={{ color: look ? look.text : MUTED, opacity: look ? 0.85 : undefined }}>
-            {!online
-              ? 'waiting for network…'
-              : entry
-                ? `${entry.gate.key.startsWith('coll:') ? entry.gate.symbol : `$${entry.gate.symbol}`} · ${members} holder${members === 1 ? '' : 's'} · you hold ${amountLabel(entry.holding.amountRaw, entry.gate)}`
-                : openRoom
-                  ? `${members} member${members === 1 ? '' : 's'} · ${openRoom.visibility === 'public' ? 'Public' : 'Invite only'}${openRoom.closed ? ' · Closed' : ''}`
-                  : `${members} member${members === 1 ? '' : 's'} · $${room.ticker}`}
+          <div className="flex flex-wrap items-center gap-x-2 text-[11px] min-w-0">
+            <span
+              className={`shrink-0 max-w-full ${ELLIPSIS}`}
+              style={{ color: look ? look.text : MUTED, opacity: look ? 0.85 : undefined }}
+            >
+              {!online
+                ? 'waiting for network…'
+                : entry
+                  ? roomHoldLine(members, entry.holding.amountRaw, entry.gate)
+                  : openRoom
+                    ? `${members} member${members === 1 ? '' : 's'} · ${openRoom.visibility === 'public' ? 'Public' : 'Invite only'}${openRoom.closed ? ' · Closed' : ''}`
+                    : `${members} member${members === 1 ? '' : 's'} · $${room.ticker}`}
+            </span>
+            {entry && entry.key.startsWith('bsv21:') && <IssuerBadge tokenId={entry.holding.id} compact />}
           </div>
-          {entry && entry.key.startsWith('bsv21:') && <IssuerBadge tokenId={entry.holding.id} compact />}
           <LinkedTokenChip metadata={room.metadata} color={look?.text} />
         </div>
-        <div className="flex basis-full items-center justify-end gap-1">
+        <div className="bw-room-tools flex basis-full items-center justify-end gap-1">
+          {/* LiveBanner puts Go live here, so Start a Space doesn't cost its own row. */}
+          <span ref={setLiveSlot} className="bw-golive-slot mr-auto flex items-center" />
           {peer && <UserSafetyButton client={client} handle={peer} onBlocked={onBack} />}
           {bell && <RoomBell ticker={room.ticker} />}
           {openRoom && (
@@ -993,7 +1003,7 @@ const Conversation = ({
           {onXInvites && (
             <button
               onClick={onXInvites}
-              className="px-2.5 py-1 rounded-full text-xs font-semibold active:opacity-60"
+              className="bw-room-invites px-2.5 py-1 rounded-full text-xs font-semibold active:opacity-60"
               style={{ border: `1px solid ${GOLD}`, color: GOLD }}
             >
               Invites
@@ -1025,6 +1035,7 @@ const Conversation = ({
           autoOpen={autoJoinSpace}
           openSignal={spaceSignal}
           onCallable={setSpaceCall}
+          slot={liveSlot}
         />
       )}
       {WIDE_ON && (
@@ -1160,7 +1171,10 @@ const Conversation = ({
         {items.map((it) =>
           it.type === 'day' ? (
             <div key={it.key} className="flex justify-center my-3">
-              <span className="text-[11px] px-3 py-1 rounded-full" style={{ background: '#1a1a1a', color: '#c9c3ad' }}>
+              <span
+                className="bw-room-day text-[11px] px-3 py-1 rounded-full"
+                style={{ background: '#1a1a1a', color: '#c9c3ad' }}
+              >
                 {it.label}
               </span>
             </div>
@@ -1212,7 +1226,7 @@ const Conversation = ({
           ) : it.message.kind === 'event' ? (
             <div key={it.key} className="flex flex-col items-center my-2">
               <span
-                className="text-[11px] px-3 py-1 rounded-xl text-center max-w-[85%]"
+                className="bw-room-event text-[11px] px-3 py-1 rounded-xl text-center max-w-[85%]"
                 style={{ background: '#141414', color: MUTED }}
               >
                 {it.message.body || 'Room update'}

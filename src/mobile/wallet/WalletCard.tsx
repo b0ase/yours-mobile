@@ -526,42 +526,17 @@ const WalletCardInner = ({
                     <AccountAvatar src={avatar} size={31} id={id} />
                   </button>
                 )}
-                {t.tag ? (
+                {fingerprint && (
                   <>
-                    {/* Copy sits LEFT of the paymail (owner rule); the front shows the FULL bWalletX paymail
-                        (owner, 13 Oct 2026) so it never reads as a universal BSV handle. */}
-                    <button
-                      type="button"
-                      onClick={copy(t.copy)}
-                      aria-label={`Copy ${t.copy}`}
-                      className="bw-wcard-icon"
+                    {/* Fingerprint only: not selectable, not copyable (the full key is on the back). */}
+                    <span
+                      className="bw-wcard-idtext bw-wcard-fingerprint"
+                      {...idLinePress}
+                      aria-label={`Identity key fingerprint ${fingerprint}. Long-press for the identity map`}
                     >
-                      <Copy size={15} color="var(--bw-wcard-muted, #98A2B3)" />
-                    </button>
-                    <span className={`bw-wcard-handle${t.front.includes('@') ? ' is-paymail' : ''}`} title={t.front}>
-                      {t.front}
+                      {fingerprint}
                     </span>
-                    {verified && (
-                      <span
-                        aria-label="Verified identity"
-                        title="Verified identity"
-                        style={{ color: 'var(--bw-wcard-ok, #2ecc71)' }}
-                      >
-                        <Check size={13} strokeWidth={3} />
-                      </span>
-                    )}
                   </>
-                ) : (
-                  <button
-                    type="button"
-                    className="bw-wcard-getname"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setHandleOpen(true);
-                    }}
-                  >
-                    Get your $name
-                  </button>
                 )}
               </div>
               <div className="bw-wcard-tr">
@@ -584,17 +559,45 @@ const WalletCardInner = ({
                 </button>
               </div>
             </div>
-            {fingerprint && (
-              <div className="bw-wcard-idline">
-                {/* Fingerprint only: not selectable, not copyable (the full key is on the back). */}
-                <span
-                  className="bw-wcard-idtext bw-wcard-fingerprint"
-                  {...idLinePress}
-                  aria-label={`Identity key fingerprint ${fingerprint}. Long-press for the identity map`}
+          </div>
+          {/* Its own row (owner, 9 Nov 2026): the full paymail fits, with even space above and below. */}
+          <div className="bw-wcard-idline">
+            {t.tag ? (
+              <>
+                {/* Copy sits LEFT of the paymail (owner rule); the front shows the FULL bWalletX paymail
+                        (owner, 13 Oct 2026) so it never reads as a universal BSV handle. */}
+                <button
+                  type="button"
+                  onClick={copy(t.copy)}
+                  aria-label={`Copy ${t.copy}`}
+                  className="bw-wcard-icon bw-wcard-copyicon"
                 >
-                  {fingerprint}
+                  <Copy size={14} color="var(--bw-wcard-muted, #98A2B3)" />
+                </button>
+                <span className={`bw-wcard-handle${t.front.includes('@') ? ' is-paymail' : ''}`} title={t.front}>
+                  {t.front}
                 </span>
-              </div>
+                {verified && (
+                  <span
+                    aria-label="Verified identity"
+                    title="Verified identity"
+                    style={{ color: 'var(--bw-wcard-ok, #2ecc71)' }}
+                  >
+                    <Check size={13} strokeWidth={3} />
+                  </span>
+                )}
+              </>
+            ) : (
+              <button
+                type="button"
+                className="bw-wcard-getname"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setHandleOpen(true);
+                }}
+              >
+                Get your $name
+              </button>
             )}
           </div>
           <div className="bw-wcard-centre">
@@ -697,7 +700,7 @@ const WalletCardInner = ({
                         <Copy size={14} color="var(--bw-wcard-muted, #98A2B3)" aria-hidden="true" />
                       </button>
                       <span className="bw-wcard-addr" aria-label="Your BSV address">
-                        {receiveAddress}
+                        {`${receiveAddress.slice(0, 12)}…${receiveAddress.slice(-10)}`}
                       </span>
                     </div>
                   )}
