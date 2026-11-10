@@ -1253,6 +1253,83 @@ describe('review of f5c38ec1: a Store open racing a Pay on the same never-sent e
   });
 });
 
+describe('re-review: a hung claim intent never holds the payment lock', () => {
+  test('the intent hangs: after the timeout it is "store unreachable" (nothing sent, intentAt kept); a second Pay waiting on the lock then sends it once', async () => {
+    const chain: Chain = { post: 'success', seen: new Set(), mined: new Set(), posted: [] };
+    const { w } = await oneCoin(chain);
+    let intents = 0;
+    let firstAborted = false;
+    let intentCalled!: () => void;
+    const firstIntent = new Promise<void>((r) => (intentCalled = r));
+    const f = (async (url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as { fields: Record<string, string> };
+      if (body.fields?.intent === '1' && ++intents === 1) {
+        intentCalled();
+        // Hangs for good; only the abort signal ends it.
+        return new Promise<Response>((_, bad) =>
+          init?.signal?.addEventListener('abort', () => {
+            firstAborted = true;
+            bad(new Error('aborted'));
+          }),
+        );
+      }
+      if (body.fields?.intent === '1')
+        return new Response(JSON.stringify({ txid: body.fields.txid, pending: true, intent: true }), { status: 202 });
+      return new Response(JSON.stringify({ pack: 'emoji-cool', txid: body.fields.txid }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const { deps } = depsFor(chain, { intentTimeoutMs: 80 });
+    const first = api.payBuyQuote({ wallet: w.wallet } as never, f, buyQuote() as never, { deps }).then(
+      () => null,
+      (x: unknown) => x as StorePayError,
+    );
+    await firstIntent;
+    // The buyer taps Pay again while the first intent hangs: this Pay waits on the payment's lock.
+    const second = api.payBuyQuote({ wallet: w.wallet } as never, f, buyQuote('c'.repeat(32)) as never, { deps });
+    const e = await first;
+    expect([e?.code, e?.sent]).toEqual(['store_unreachable', false]);
+    expect(firstAborted).toBe(true);
+    expect(chain.posted).toEqual([]);
+    const res = await second;
+    const [kept] = [res];
+    // The same payment, told again and sent once; never a second payment, never released.
+    expect(chain.posted).toEqual([kept.txid]);
+    expect(intents).toBe(2);
+    expect((await txRow(w, kept.txid))?.status).toBe('unproven');
+  });
+
+  test('a timed-out intent leaves intentAt written: a Store open never releases it, it re-sends the intent and finishes it', async () => {
+    const chain: Chain = { post: 'success', seen: new Set(), mined: new Set(), posted: [] };
+    const { w } = await oneCoin(chain);
+    let hang = true;
+    let intents = 0;
+    const f = (async (url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as { fields: Record<string, string> };
+      if (body.fields?.intent === '1') {
+        intents++;
+        if (hang) return new Promise<Response>(() => undefined); // ignores the signal entirely
+        return new Response(JSON.stringify({ txid: body.fields.txid, pending: true, intent: true }), { status: 202 });
+      }
+      return new Response(JSON.stringify({ pack: 'emoji-cool', txid: body.fields.txid }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const { deps } = depsFor(chain, { intentTimeoutMs: 50 });
+    const e = await api.payBuyQuote({ wallet: w.wallet } as never, f, buyQuote() as never, { deps }).then(
+      () => null,
+      (x: unknown) => x as StorePayError,
+    );
+    expect(e?.code).toBe('store_unreachable');
+    const [kept] = deps.outbox.all();
+    expect(kept.state).toBe('signed');
+    expect(typeof kept.intentAt).toBe('number');
+    deps.outbox.put({ ...kept, at: Date.now() - 10 * 60_000 });
+    hang = false;
+    const report = await api.settleStorePayments({ wallet: w.wallet } as never, f, { deps, log: () => undefined });
+    expect(report.released).toEqual([]);
+    expect(report.finished).toEqual([kept.txid]);
+    expect(intents).toBe(2);
+    expect(chain.posted).toEqual([kept.txid]);
+  });
+});
+
 describe('review of f5c38ec1: an older payment (more than 300 newer actions) is never taken for released', () => {
   test('read from the last 300 actions it is "unknown" and kept; read by txid it is nosend and released', async () => {
     const chain: Chain = { post: 'success', seen: new Set(), mined: new Set(), posted: [] };

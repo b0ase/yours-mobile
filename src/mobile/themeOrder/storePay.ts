@@ -158,6 +158,8 @@ export type StorePayDeps = {
   storeHeardOf?: (e: OutboxEntry) => Promise<'yes' | 'no' | 'unclear'>;
   /** The per-txid lock (withPayLock by default; tests may pass their own). */
   lock?: <T>(txid: string, fn: () => Promise<T>) => Promise<T>;
+  /** How long the claim intent may take (INTENT_TIMEOUT_MS); a hung one would hold the payment's lock. */
+  intentTimeoutMs?: number;
   /**
    * Tell the wallet's broadcaster wrapper this txid may already be on the network, before re-posting a payment that was
    * 'sending' when the app died (services/refusalRecheck.ts markMayBeOut; 06c M1).
@@ -262,6 +264,16 @@ async function deadEntry(entry: OutboxEntry, deps: StorePayDeps): Promise<boolea
   });
   return v === 'missing';
 }
+
+/**
+ * The claim intent is answered within this, or it counts as "the Store couldn't be reached" (re-review of the lock: a
+ * hung request held the payment's withPayLock until the page closed, and every later Pay of it waited). Its intentAt
+ * is already written, so the entry is never released as "never told"; the next Pay or Store open sends the intent
+ * again (the Store answers a repeat for the same txid as before) and only then broadcasts.
+ */
+export const INTENT_TIMEOUT_MS = 20_000;
+/** sendStorePayment's own backstop runs this long after INTENT_TIMEOUT_MS, so the request's abort comes first. */
+export const INTENT_GRACE_MS = 2_000;
 
 /** A Store open leaves a never-sent entry this young alone: a Pay may be backing it up right now (60 s limit). */
 export const UNSENT_RELEASE_MIN_AGE_MS = 3 * 60_000;
@@ -445,9 +457,19 @@ export async function sendStorePayment(
             throw storeError('outbox_failed', false);
           }
         }
-        const i = await deps
-          .intent(e)
-          .catch((x: unknown): IntentAnswer => ({ ok: false, refused: false, error: String(x) }));
+        // The default intent aborts its request at intentTimeoutMs (api.ts post); this is the backstop for one that
+        // doesn't, a moment later.
+        const intentMs = (deps.intentTimeoutMs ?? INTENT_TIMEOUT_MS) + INTENT_GRACE_MS;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const i = await Promise.race([
+          deps.intent(e).catch((x: unknown): IntentAnswer => ({ ok: false, refused: false, error: String(x) })),
+          new Promise<IntentAnswer>((ok) => {
+            timer = setTimeout(
+              () => ok({ ok: false, refused: false, error: `the Store did not answer within ${intentMs / 1000} s` }),
+              intentMs,
+            );
+          }),
+        ]).finally(() => clearTimeout(timer));
         if (!i.ok && i.refused) {
           log(`[bwx-store] ${e.txid}: the Store refused it before any broadcast (${i.code ?? i.error}); released`);
           deps.outbox.drop(e.txid);

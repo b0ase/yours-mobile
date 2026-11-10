@@ -313,3 +313,22 @@ describe('final check (LOW): a first post that ends without a verdict is marked 
     expect(marked).toEqual([]);
   });
 });
+
+describe('re-review: an intent dep that never answers is given up on (the backstop), and the lock is free again', () => {
+  test('store_unreachable after intentTimeoutMs + INTENT_GRACE_MS; nothing sent; intentAt written; the lock is free', async () => {
+    const { withPayLock, INTENT_GRACE_MS } = await import('./storePay');
+    let sends = 0;
+    const w = { abortAction: async () => undefined, createAction: async () => (sends++, {}) };
+    const d = base({ intent: () => new Promise(() => undefined), intentTimeoutMs: 10 });
+    d.outbox.put(entry({ intentAt: null }));
+    const t0 = Date.now();
+    await expect(sendStorePayment(w, entry({ intentAt: null }), d)).rejects.toMatchObject({
+      code: 'store_unreachable',
+      sent: false,
+    });
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(10 + INTENT_GRACE_MS - 50);
+    expect(sends).toBe(0);
+    expect(typeof d.outbox.all()[0].intentAt).toBe('number');
+    expect(await withPayLock(T, async () => 'free')).toBe('free');
+  }, 10_000);
+});

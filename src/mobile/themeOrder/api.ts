@@ -33,6 +33,7 @@ import {
   type IntentAnswer,
   type OutboxEntry,
   type StorePayDeps,
+  INTENT_TIMEOUT_MS,
   UNSENT_RELEASE_MIN_AGE_MS,
 } from './storePay';
 
@@ -185,7 +186,15 @@ export function withStoreDeps(ctx: OneSatContext, f: Fetch, deps: StorePayDeps):
             store: STORE_PROTOCOL,
             intent: '1',
           });
-          await post(f, claimOp(e.kind), { ...signed, rawtx: e.beefHex });
+          // Aborted at the same deadline sendStorePayment gives up at, so a hung request doesn't linger either.
+          await post(
+            f,
+            claimOp(e.kind),
+            { ...signed, rawtx: e.beefHex },
+            {
+              timeoutMs: deps.intentTimeoutMs ?? INTENT_TIMEOUT_MS,
+            },
+          );
           return { ok: true };
         } catch (err) {
           const status = (err as { status?: number }).status;
@@ -221,13 +230,29 @@ export function withStoreDeps(ctx: OneSatContext, f: Fetch, deps: StorePayDeps):
   };
 }
 
-const post = async <T>(f: Fetch, op: string, body: unknown): Promise<T> => {
+const post = async <T>(f: Fetch, op: string, body: unknown, o: { timeoutMs?: number } = {}): Promise<T> => {
   if (!BWALLET_PAYMAIL_API) throw new ThemeOrderError('Orders open soon', 'not_configured', 503);
-  const r = await f(`${BWALLET_PAYMAIL_API}/api/theme-orders/${op}`, {
+  // With a deadline: aborted (AbortController, as names/paymailDomains.ts probes), and given up on even if the fetch
+  // ignores the signal. A timeout is a plain Error, never a ThemeOrderError: callers read it as "unreachable".
+  const ctl = o.timeoutMs && typeof AbortController !== 'undefined' ? new AbortController() : undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const request = f(`${BWALLET_PAYMAIL_API}/api/theme-orders/${op}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    ...(ctl ? { signal: ctl.signal } : {}),
   });
+  const r = o.timeoutMs
+    ? await Promise.race([
+        request,
+        new Promise<never>((_, bad) => {
+          timer = setTimeout(() => {
+            ctl?.abort();
+            bad(new Error(`the Store did not answer within ${o.timeoutMs! / 1000} s`));
+          }, o.timeoutMs);
+        }),
+      ]).finally(() => clearTimeout(timer))
+    : await request;
   const j = await r.json().catch(() => ({}));
   if (!r.ok) {
     const code = String(j?.error || `http_${r.status}`);
