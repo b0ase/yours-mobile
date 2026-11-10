@@ -622,7 +622,7 @@ const ExchangePage = () => {
 
   return (
     <div
-      className="flex w-full flex-col items-center overflow-y-auto pb-36"
+      className="bw-exchange flex w-full flex-col items-center overflow-y-auto pb-36"
       style={{ height: '100%', background: 'var(--bw-bg)' }}
     >
       <div className="w-full max-w-[1100px] px-4 pt-4 flex flex-col gap-4">

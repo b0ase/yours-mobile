@@ -3402,7 +3402,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
 
   return (
     <div
-      className="flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36"
+      className="bw-chatlist flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36"
       style={{ height: '100%', background: BG }}
       onScroll={onListScroll}
     >

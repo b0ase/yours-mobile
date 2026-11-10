@@ -781,7 +781,7 @@ export const AgentConversation = ({
 
   const empty = messages.length === 0 && !busy;
   return (
-    <div className="relative w-full flex-1 min-h-0 flex flex-col">
+    <div className="bw-askchat relative w-full flex-1 min-h-0 flex flex-col">
       {/* Empty chat: the pool fills the whole section, edge to edge, and the composer floats over it (owner, 12 Oct 2026). */}
       {empty && (
         <div className="absolute inset-0 z-0">

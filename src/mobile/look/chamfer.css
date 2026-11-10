@@ -434,3 +434,61 @@ html:not([data-bw-pack]) .bw-backup-banner svg {
 html:root .bw-sendrow > .bw-pill.bw-pill.bw-pill {
   border-radius: 0 !important;
 }
+
+/* ── The rounded leftovers (owner, 10 Nov 2026): Exchange, chat list, chat room, sheets, Ask b ──
+   Screens write Tailwind radii (rounded-xl…) in the markup, so these rules match the utility by class token inside a
+   screen's root (.bw-exchange, .bw-chatlist, .bw-room-view, .bw-askchat) or a sheet. Same two techniques as above:
+   - Panels, inputs, bubbles and anything that may carry a border or repeat: the small --bw-corner box, no clip.
+   - Filled buttons (no `border` class) and sheets: the clipped cut, static elements only.
+   Left round on purpose: the wallet credit card and its pills, the b button (.askb-bar's talk b, the dock b), avatars,
+   count badges and any rounded-full without a text-button shape (icon hit areas, dots, tags). */
+:is(.bw-exchange, .bw-chatlist, .bw-room-view, .bw-askchat, [class~='rounded-t-3xl'])
+  :is(
+    [class~='rounded'],
+    [class~='rounded-md'],
+    [class~='rounded-lg'],
+    [class~='rounded-xl'],
+    [class~='rounded-2xl'],
+    [class~='rounded-3xl']
+  ) {
+  border-radius: var(--bw-corner) !important;
+}
+/* Filled buttons: cut corners. A bordered button would lose its outline at the cut, so it keeps the small corner above. */
+:is(.bw-exchange, .bw-chatlist, .bw-room-view, .bw-askchat, [class~='rounded-t-3xl'])
+  button:is([class~='rounded-xl'], [class~='rounded-2xl'], [class~='rounded-full'][class*='px-3']):not(
+    [class~='border'],
+    [class~='p-2'],
+    [style*='border']
+  ),
+.askb-send,
+.askb-tools button,
+.yours-sheet-secondary,
+.bw-idwarn-cancel {
+  border-radius: 0 !important;
+  clip-path: var(--bw-cut);
+}
+.askb-send:focus-visible,
+.askb-tools button:focus-visible,
+.yours-sheet-secondary:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--bw-text) !important;
+}
+/* Ask b: the bar and its reply bubbles. The bar has a border, so a small corner; its b button stays circular. */
+.askb-bar,
+.askb-bubble {
+  border-radius: var(--bw-corner) !important;
+}
+/* Sheets: the top two corners are cut (leg 12px); the bottom meets the screen edge. Static, so a clip is cheap. */
+:is(.yours-sheet, .fr-sheet, .bw-cdes-confirm > div, [class~='rounded-t-3xl']) {
+  --bw-cut-top: polygon(12px 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 0 100%, 0 12px);
+  border-radius: 0 !important;
+  clip-path: var(--bw-cut-top);
+}
+/* A sheet that floats (wide layout) is cut at all four corners. */
+html.ww-on .yours-sheet {
+  clip-path: var(--bw-cut);
+}
+/* Dialogs and notices: small corner, bordered. */
+:is(.bw-idwarn-card, .yours-toast) {
+  border-radius: var(--bw-corner) !important;
+}
