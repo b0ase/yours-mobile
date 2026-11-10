@@ -290,6 +290,7 @@ import {
 } from './services/reservedProtocols';
 import { healIndexFundActions } from './mobile/tokens/indexFundHeal';
 import { continuesChain, endChain, isAlreadyProcessedAbort, markChainStep, startsChain } from './services/dappChain';
+import { actionStatusByTxid, type TxidStatusStorage } from './services/actionStatusByTxid';
 import { HOSTED_YOURS_IMAGE } from './utils/constants';
 import { WalletBackupService } from './backup/WalletBackupService';
 import { repairStaleAccounts, usbRekey, type UsbRekeyRequest } from './services/usbRekeyBackground';
@@ -3211,6 +3212,7 @@ if (!(
       'STORAGE_SYNC_BACKUPS',
       'STORE_BACKUP_BEFORE_SEND',
       'STORE_MAY_BE_OUT',
+      'STORE_ACTION_STATUS',
       'STORAGE_MOVE_STATUS',
       'STORAGE_MOVE_TO_DEVICE',
       'STORAGE_REPAIR_WALLET',
@@ -3593,6 +3595,27 @@ if (!(
             () => sendResponse({ type: 'STORE_MAY_BE_OUT', success: true }),
             (e: unknown) => sendResponse({ type: 'STORE_MAY_BE_OUT', success: false, error: String(e) }),
           );
+          return true;
+        case 'STORE_ACTION_STATUS':
+          // A Store payment's status read by txid, not from the last 300 actions (services/actionStatusByTxid.ts).
+          // Any failure is an error answer: the Store then reads "can't tell", never "released".
+          (async () => {
+            try {
+              await ensureWallet(true);
+              if (!accountContext) throw new Error('Wallet not initialized');
+              const status = await actionStatusByTxid(
+                accountContext.storage as unknown as TxidStatusStorage,
+                String((message as { txid?: unknown }).txid ?? ''),
+              );
+              sendResponse({ type: 'STORE_ACTION_STATUS', success: true, data: { status } });
+            } catch (error) {
+              sendResponse({
+                type: 'STORE_ACTION_STATUS',
+                success: false,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          })();
           return true;
         case 'STORAGE_MOVE_STATUS':
           // Not before the wallet is open: without an account context the store looked "not on this device", so the
@@ -7130,10 +7153,16 @@ if (!(
       const w = await ensureWallet();
       await ensureUsbSeen('sign a transaction', message.originator);
 
-      markChainStep();
+      const site = !!message.originator && message.originator !== ADMIN_ORIGINATOR;
+      // Only a connected SITE's multi-step action holds the wallet's background work (services/dappChain.ts). The
+      // wallet's own pages (token / ordinal / lock / OpNS sends all sign through signAction) marked it too, so for 5
+      // minutes after any of them every device sync was deferred and a Store payment's backup-before-send failed with
+      // "a site action is in progress" (incident 10 Nov 2026). Own createActions were already excluded.
+      // As createAction decides it (isAdmin): anything but the wallet's own pages, a missing originator included.
+      const chainStep = message.originator !== ADMIN_ORIGINATOR;
+      if (chainStep) markChainStep();
       // Big: the background sender uploads it (services/bigDelayed.ts).
       const bytes = (await signableBytes(message.params.reference)) + signActionBytes(message.params);
-      const site = !!message.originator && message.originator !== ADMIN_ORIGINATOR;
       // As createAction: a site's acceptDelayedBroadcast is not honoured; small sends go out now (withBroadcastNow).
       const delayed = shouldDelay(
         bytes,
@@ -7166,7 +7195,7 @@ if (!(
       await withRepeatGuard((g) => g.signed(message.params.reference, result?.txid));
       // The step that broadcasts the batch ends the chain; otherwise it stays active for the next step.
       if (result?.sendWithResults?.length) endChain();
-      else markChainStep();
+      else if (chainStep) markChainStep();
       sendResponse({
         type: CWIEventName.SIGN_ACTION,
         success: true,

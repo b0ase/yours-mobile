@@ -93,6 +93,14 @@ const reset = () => {
   as(undefined, 0);
 };
 const opened = () => FakeWS.all.filter((s) => s.readyState === 1).length;
+/**
+ * A revived pairing opens its socket only after an async key derivation (sessions.ts connect): under a loaded full
+ * suite that took longer than one fixed 25 ms wait and the revive test saw 0 sockets (failed once, 10 Nov 2026).
+ * Poll for it instead, up to ~2 s.
+ */
+const untilOpened = async (n: number) => {
+  for (let i = 0; i < 80 && opened() < n; i++) await settle();
+};
 // The app starts pairing once at launch; do it here so no test depends on another having called it (bun --randomize).
 sessions.initPairing();
 
@@ -127,8 +135,11 @@ describe('Pairings are bound to the account that made them (b-Aware report)', ()
     for (const s of FakeWS.all) s.close();
     as(undefined, 2);
     as(A, 2);
-    await settle();
-    expect(opened()).toBe(1);
+    await untilOpened(1);
+    await settle(); // and nothing more opens
+    // Named, so a failure says which channel's socket was missing or extra.
+    const live = FakeWS.all.filter((s) => s.readyState === 1).map((s) => s.url.split('/v1/c/')[1]?.slice(0, 22));
+    expect(live).toEqual(['CCCCCCCCCCCCCCCCCCCCCC']);
     expect(stored().map((s) => s.c)).toEqual(['CCCCCCCCCCCCCCCCCCCCCC']);
   });
 

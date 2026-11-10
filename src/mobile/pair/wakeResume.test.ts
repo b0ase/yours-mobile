@@ -108,7 +108,15 @@ const pair = async (channel: string) => {
   await settle();
   const hello = JSON.parse(ws.sent[0]) as { k: string };
   const { key } = await deriveSession(siteKey, hello.k, channel);
-  return { site: new Sealer(key, 'site'), phone: new Sealer(key, 'site') };
+  // This pairing's own socket. Never `FakeWS.all.at(-1)` after an await: the resume test's wake reopens every pairing
+  // still held, each after an async key derivation, so another channel's socket can be appended at any later moment
+  // (the full suite failed once at the rejoin test reading WAKEAAAA's or WAKEBBBB's socket with WAKEEEEE's key).
+  return { site: new Sealer(key, 'site'), phone: new Sealer(key, 'site'), ws };
+};
+/** Poll until `cond` holds (up to ~2 s) instead of trusting one fixed 25 ms wait under a loaded suite. */
+const until = async (cond: () => Promise<boolean> | boolean, ms = 2_000) => {
+  const end = Date.now() + ms;
+  while (!(await cond()) && Date.now() < end) await settle();
 };
 /** Everything the phone sent on a socket, opened with a fresh reader (counters start at 0 per reader). */
 const readAll = async (key: Sealer, ws: FakeWS): Promise<PairMessage[]> => {
@@ -150,8 +158,7 @@ describe('phone pairing after the phone sleeps', () => {
   });
 
   test('resume after sleep with a valid session: fresh socket, call answered, no re-approval', async () => {
-    const { site, phone } = await pair('WAKEBBBBBBBBBBBBBBBBBB');
-    const before = FakeWS.all.at(-1)!;
+    const { site, phone, ws: before } = await pair('WAKEBBBBBBBBBBBBBBBBBB');
     visibility = 'hidden';
     sessions.onPairVisibility();
     const realNow = Date.now;
@@ -177,8 +184,7 @@ describe('phone pairing after the phone sleeps', () => {
   });
 
   test('the site rejoining the channel (its socket died while the user was in bWallet) gets ready again', async () => {
-    const { site, phone } = await pair('WAKEEEEEEEEEEEEEEEEEEE');
-    const ws = FakeWS.all.at(-1)!;
+    const { site, phone, ws } = await pair('WAKEEEEEEEEEEEEEEEEEEE');
     // `phone` only opens frames newer than the last it read, so each count is of new frames only.
     const count = async () => (await readAll(phone, ws)).filter((m) => m.t === 'ready').length;
     await count();
@@ -187,8 +193,9 @@ describe('phone pairing after the phone sleeps', () => {
     await settle();
     expect(await count()).toBe(0);
     ws.deliver({ t: 'relay', peer: 'joined', role: 'site' });
-    await settle();
-    expect(await count()).toBe(1);
+    let ready = 0;
+    await until(async () => (ready += await count()) > 0);
+    expect(ready).toBe(1);
     // The resumed site's call is answered on the same session.
     const id = await ask(site, ws);
     expect((await readAll(phone, ws)).find((m) => m.t === 'res' && m.id === id)).toEqual({
@@ -199,8 +206,7 @@ describe('phone pairing after the phone sleeps', () => {
   });
 
   test('an expired session answers REPAIR_NEEDED and closes, never "Permission denied."', async () => {
-    const { site, phone } = await pair('WAKECCCCCCCCCCCCCCCCCC');
-    const ws = FakeWS.all.at(-1)!;
+    const { site, phone, ws } = await pair('WAKECCCCCCCCCCCCCCCCCC');
     const all = JSON.parse(mem.get(KEY)!) as Array<{ c: string; lastUsed: number }>;
     mem.set(
       KEY,
@@ -225,8 +231,7 @@ describe('phone pairing after the phone sleeps', () => {
   });
 
   test('a real No from the user is still ERR_PERMISSION_DENIED', async () => {
-    const { site, phone } = await pair('WAKEDDDDDDDDDDDDDDDDDD');
-    const ws = FakeWS.all.at(-1)!;
+    const { site, phone, ws } = await pair('WAKEDDDDDDDDDDDDDDDDDD');
     siteCall = async () => ({ success: false, error: 'Permission denied.', code: 'ERR_PERMISSION_DENIED' });
     try {
       const id = await ask(site, ws);

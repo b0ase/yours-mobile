@@ -444,6 +444,7 @@ async function payUntil(
     label: 'Cool',
     state: 'signed',
     at: clockMs,
+    intentAt: null,
   };
   // 2 outbox write
   deps.outbox.put(entry);
@@ -451,7 +452,9 @@ async function payUntil(
   // 3 backup push
   expect((await deps.backup()).ok).toBe(true);
   if (k <= 3) return { q, entry, txid: signed.txid };
-  // 4 claim intent (real server: records the txid, posts nothing)
+  // 4 claim intent (real server: records the txid, posts nothing); sendStorePayment records intentAt first
+  entry.intentAt = clockMs;
+  deps.outbox.put(entry);
   const full = api.withStoreDeps({ wallet: w.wallet } as never, srv.client, deps);
   expect(await full.intent!(entry)).toEqual({ ok: true });
   if (k <= 4) return { q, entry, txid: signed.txid };
@@ -499,7 +502,36 @@ const rowOf = (srv: ReturnType<typeof realServer>, quoteId: string) =>
   srv.store.rows.find((r) => r.quote_id === quoteId) as { status: string; txid: string | null } | undefined;
 
 describe('06c: kill after every step of the Store pay sequence, restart, open the Store (real client + server + toolbox)', () => {
-  for (const k of [2, 3, 4, 5, 7, 8]) {
+  // Killed before the Store was told (after step 2 or 3): never sent; the Store open releases it (10 Nov 2026).
+  for (const k of [2, 3]) {
+    test(`kill after step ${k} (the Store never told): nothing is ever broadcast; the Store open releases it, the coin comes back`, async () => {
+      clockMs = realNow();
+      const net = newNet();
+      const { w, coin } = await oneCoin(net);
+      const srv = realServer(net);
+      const { deps } = storeDeps(net);
+      const { q, txid } = await payUntil(w, net, srv, deps, k);
+      const w2 = await restart(w);
+      expect(await changeKept(w2, txid!)).toBe(true);
+      // A Store open within a few minutes leaves it to a Pay that may still be running.
+      const young = await storeOpen(w2, srv, deps);
+      expect(young.report.kept).toEqual([txid]);
+      expect((await txRow(w2, txid!))?.status).toBe('nosend');
+      clockMs += 4 * 60_000;
+      const open1 = await storeOpen(w2, srv, deps);
+      expect(open1.report.released).toEqual([txid]);
+      expect(net.walletPosts).toEqual([]);
+      expect(rowOf(srv, q.quote_id)?.txid ?? null).toBeNull();
+      expect(deps.outbox.all()).toEqual([]);
+      expect((await txRow(w2, txid!))?.status).toBe('failed');
+      // Its change rows (derivations) are kept, not deleted: recoverable should the tx ever appear.
+      expect(await changeKept(w2, txid!)).toBe(true);
+      // The coin funds the next send again.
+      expect(await nextSend(w2)).toContain(coin);
+    });
+  }
+
+  for (const k of [4, 5, 7, 8]) {
     test(`kill after step ${k}: one payment, change kept, coin never re-spent while out, paid only once seen`, async () => {
       clockMs = realNow();
       // The 5916dd14 world: WhatsOnChain lags, 1sat-stack does not feed GorillaPool ARC, ARC answers ANNOUNCED.

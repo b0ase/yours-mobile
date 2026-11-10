@@ -23,6 +23,7 @@ import {
   localOutbox,
   pruneOutbox,
   recordNewPayment,
+  releaseNeverSent,
   sendStorePayment,
   signStorePayment,
   softPut,
@@ -32,6 +33,8 @@ import {
   type IntentAnswer,
   type OutboxEntry,
   type StorePayDeps,
+  INTENT_TIMEOUT_MS,
+  UNSENT_RELEASE_MIN_AGE_MS,
 } from './storePay';
 
 /**
@@ -131,6 +134,31 @@ async function recentActions(w: ActionsWallet, n: number, withOutputs = false) {
   return actions;
 }
 
+/** How many recent actions the fallback status read covers. */
+export const ACTION_STATUS_WINDOW = 300;
+
+/**
+ * The wallet's status for a txid, read BY TXID (background STORE_ACTION_STATUS: services/actionStatusByTxid.ts).
+ * undefined = the store holds no live action with that txid. When the background can't answer, falls back to the
+ * last ACTION_STATUS_WINDOW actions (listActions, which leaves 'failed' out); a txid not among them is then
+ * 'unknown' unless every action was read, so an older payment is never mistaken for a released one.
+ */
+export async function actionStatusOf(wallet: ActionsWallet, txid: string): Promise<string | undefined> {
+  try {
+    const r = await sendMessageAsync<{ success?: boolean; data?: { status?: string | null } } | undefined>({
+      action: 'STORE_ACTION_STATUS',
+      txid,
+    });
+    if (r?.success && r.data && 'status' in r.data) return r.data.status ?? undefined;
+  } catch {
+    /* no background here (tests, a wallet in the page): read the action list */
+  }
+  const head = await wallet.listActions({ labels: [], limit: 1 });
+  const found = (await recentActions(wallet, ACTION_STATUS_WINDOW)).find((a) => a.txid === txid);
+  if (found) return found.status;
+  return head.totalActions <= ACTION_STATUS_WINDOW ? undefined : 'unknown';
+}
+
 const claimAction = (kind: OutboxEntry['kind']) => (kind === 'buy' ? 'theme-buy-claim' : 'theme-orders-claim');
 const claimOp = (kind: OutboxEntry['kind']) => (kind === 'buy' ? 'buy-claim' : 'claim');
 
@@ -141,7 +169,8 @@ const claimOp = (kind: OutboxEntry['kind']) => (kind === 'buy' ? 'buy-claim' : '
  *    anything else = unreachable (keep it, try later);
  *  - releaseUnsent: a payment the Store refused before any broadcast (or that couldn't be saved) is released once the
  *    chain confirms it never went out (unsentGuard releaseAfterHandoff: ~30 s of clean 404s), in the background;
- *  - actionStatus: the wallet's status for a txid, undefined when storage has no such action (F3).
+ *  - actionStatus: the wallet's status for a txid, read by txid; undefined when storage has no such action (F3),
+ *    'unknown' when it can't tell (actionStatusOf).
  */
 export function withStoreDeps(ctx: OneSatContext, f: Fetch, deps: StorePayDeps): StorePayDeps {
   const wallet = ctx.wallet as unknown as ActionsWallet;
@@ -157,7 +186,15 @@ export function withStoreDeps(ctx: OneSatContext, f: Fetch, deps: StorePayDeps):
             store: STORE_PROTOCOL,
             intent: '1',
           });
-          await post(f, claimOp(e.kind), { ...signed, rawtx: e.beefHex });
+          // Aborted at the same deadline sendStorePayment gives up at, so a hung request doesn't linger either.
+          await post(
+            f,
+            claimOp(e.kind),
+            { ...signed, rawtx: e.beefHex },
+            {
+              timeoutMs: deps.intentTimeoutMs ?? INTENT_TIMEOUT_MS,
+            },
+          );
           return { ok: true };
         } catch (err) {
           const status = (err as { status?: number }).status;
@@ -188,18 +225,34 @@ export function withStoreDeps(ctx: OneSatContext, f: Fetch, deps: StorePayDeps):
         await markMayBeOut(txid);
         await sendMessageAsync({ action: 'STORE_MAY_BE_OUT', txid }).catch(() => undefined);
       }),
-    actionStatus:
-      deps.actionStatus ?? (async (txid) => (await recentActions(wallet, 300)).find((a) => a.txid === txid)?.status),
+    actionStatus: deps.actionStatus ?? ((txid) => actionStatusOf(wallet, txid)),
+    storeHeardOf: deps.storeHeardOf ?? ((e) => storeHeardOf(ctx, f, { kind: e.kind, quoteId: e.quoteId }, e.txid)),
   };
 }
 
-const post = async <T>(f: Fetch, op: string, body: unknown): Promise<T> => {
+const post = async <T>(f: Fetch, op: string, body: unknown, o: { timeoutMs?: number } = {}): Promise<T> => {
   if (!BWALLET_PAYMAIL_API) throw new ThemeOrderError('Orders open soon', 'not_configured', 503);
-  const r = await f(`${BWALLET_PAYMAIL_API}/api/theme-orders/${op}`, {
+  // With a deadline: aborted (AbortController, as names/paymailDomains.ts probes), and given up on even if the fetch
+  // ignores the signal. A timeout is a plain Error, never a ThemeOrderError: callers read it as "unreachable".
+  const ctl = o.timeoutMs && typeof AbortController !== 'undefined' ? new AbortController() : undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const request = f(`${BWALLET_PAYMAIL_API}/api/theme-orders/${op}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    ...(ctl ? { signal: ctl.signal } : {}),
   });
+  const r = o.timeoutMs
+    ? await Promise.race([
+        request,
+        new Promise<never>((_, bad) => {
+          timer = setTimeout(() => {
+            ctl?.abort();
+            bad(new Error(`the Store did not answer within ${o.timeoutMs! / 1000} s`));
+          }, o.timeoutMs);
+        }),
+      ]).finally(() => clearTimeout(timer))
+    : await request;
   const j = await r.json().catch(() => ({}));
   if (!r.ok) {
     const code = String(j?.error || `http_${r.status}`);
@@ -300,6 +353,7 @@ export const payQuote = async (
     label: 'theme edition',
     state: 'signed',
     at: now(deps),
+    intentAt: null,
   };
   await recordNewPayment(entry, deps);
   return finishOrder(ctx, f, entry, deps);
@@ -465,6 +519,7 @@ export const payBuyQuote = async (
     label,
     state: 'signed',
     at: now(deps),
+    intentAt: null,
   };
   await recordNewPayment(entry, deps);
   const res = await finishBuy(ctx, f, entry, deps);
@@ -500,7 +555,10 @@ export type SettleReport = {
   settledOld: string[];
   /** Sent Store payments found in the wallet with no outbox entry, claimed from their memo (F2). */
   reclaimed: string[];
-  /** Unsent Store payments that never reached the outbox, the Store or the network, released (06c M2). */
+  /**
+   * Unsent Store payments released: ones that never reached the outbox, the Store or the network (06c M2), and outbox
+   * entries never sent and never told to the Store (backup failed; 10 Nov 2026).
+   */
   released: string[];
 };
 
@@ -562,8 +620,10 @@ export const localClaimed = (identityKey: string): ClaimedSet => {
 /**
  * Finish the Store payments this device started, and settle older ones (P0, 3 Nov 2026; review 4 Nov 2026). Runs when
  * the Store opens.
- *  - Signed but not sent (its backup failed, the Store was unreachable, or the app closed): back up, tell the Store,
- *    send through the wallet, claim.
+ *  - Signed, never sent and never told to the Store (its backup failed, or the app closed first): released, never sent
+ *    (releaseNeverSent: wallet 'nosend', the chain has no copy over ~30 s, the Store never heard of it). The buyer was
+ *    told nothing was paid; a new Pay makes a new payment (10 Nov 2026).
+ *  - Signed and told to the Store but not sent (the Store was unreachable): back up, tell the Store, send, claim.
  *  - Refused so far: re-checked against the chain; claimed if the network has it; cleared only after a day, when the
  *    wallet holds no live action for it and the chain still doesn't have it after ~30 s of retries.
  *  - Sent but not confirmed (claim failed, or 202 pending): claim again, at most every RECLAIM_EVERY_MS.
@@ -601,6 +661,35 @@ async function settleOnce(
   const handled = new Set<string>();
   for (const e of pruneOutbox(deps.outbox, t)) {
     handled.add(e.txid);
+    // Never sent and never told to the Store (its backup failed, or the app closed first): the buyer was told
+    // "nothing was paid", so it is released, never sent without a new Pay (owner, 10 Nov 2026). A young one may be
+    // a Pay still backing it up: left to that Pay.
+    // Nothing is parked for good: an entry kept here (the chain or the Store gave no clear answer) is asked again on
+    // every Store open, until it is released, finished, or pruned after OUTBOX_KEEP_MS (unsentExpiry still frees its
+    // coins then). Written before intentAt existed and the Store HAS heard of it (the old store_unreachable case): it
+    // was told, so it is finished as before.
+    if (e.state === 'signed' && (e.intentAt === null || e.intentAt === undefined)) {
+      if (t - e.at < UNSENT_RELEASE_MIN_AGE_MS) {
+        report.kept.push(e.txid);
+        continue;
+      }
+      const heard =
+        e.intentAt === undefined ? await deps.storeHeardOf!(e).catch(() => 'unclear' as const) : ('no' as const);
+      if (heard === 'unclear') {
+        log(`[bwx-store] ${e.txid}: the Store gave no clear answer about it; asked again next time`);
+        report.kept.push(e.txid);
+        continue;
+      }
+      if (heard === 'no') {
+        const r = await releaseNeverSent(ctx.wallet as unknown as UnsentWallet, e, deps, {
+          retryWindow: true,
+          storeHeard: 'no',
+        });
+        (r === 'kept' ? report.kept : report.released).push(e.txid);
+        continue;
+      }
+      // heard === 'yes': told before intentAt existed; finished below like any told payment.
+    }
     if (e.state === 'pending' && e.claimedAt && t - e.claimedAt < RECLAIM_EVERY_MS) {
       report.pending.push(e.txid);
       continue;

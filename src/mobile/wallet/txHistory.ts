@@ -35,6 +35,25 @@ export type LocalInfo = {
    * tx it funded this is the only place the amount shows up.
    */
   satoshis?: number;
+  /** The wallet's status for it ('nosend' = signed, never sent: not on chain, so never a History row). */
+  status?: string;
+};
+
+/**
+ * Payments the wallet signed but never sent ('nosend'): they hold part of the wallet balance, yet the chain has no
+ * copy, so History (built from the chain) can't list them and its closing balance is higher than the wallet's by
+ * their amount (owner, 10 Nov 2026: two unsent Store payments kept "History may be incomplete" up through every
+ * Refresh). Pure.
+ */
+export const unsentHeld = (local: Map<string, LocalInfo>): { count: number; sats: number } => {
+  let count = 0;
+  let sats = 0;
+  for (const i of local.values())
+    if (i.status === 'nosend' && typeof i.satoshis === 'number' && i.satoshis < 0) {
+      count++;
+      sats += -i.satoshis;
+    }
+  return { count, sats };
 };
 
 export type HistoryRow = {
