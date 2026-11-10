@@ -7135,7 +7135,9 @@ if (!(
       // wallet's own pages (token / ordinal / lock / OpNS sends all sign through signAction) marked it too, so for 5
       // minutes after any of them every device sync was deferred and a Store payment's backup-before-send failed with
       // "a site action is in progress" (incident 10 Nov 2026). Own createActions were already excluded.
-      if (site) markChainStep();
+      // As createAction decides it (isAdmin): anything but the wallet's own pages, a missing originator included.
+      const chainStep = message.originator !== ADMIN_ORIGINATOR;
+      if (chainStep) markChainStep();
       // Big: the background sender uploads it (services/bigDelayed.ts).
       const bytes = (await signableBytes(message.params.reference)) + signActionBytes(message.params);
       // As createAction: a site's acceptDelayedBroadcast is not honoured; small sends go out now (withBroadcastNow).
@@ -7170,7 +7172,7 @@ if (!(
       await withRepeatGuard((g) => g.signed(message.params.reference, result?.txid));
       // The step that broadcasts the batch ends the chain; otherwise it stays active for the next step.
       if (result?.sendWithResults?.length) endChain();
-      else if (site) markChainStep();
+      else if (chainStep) markChainStep();
       sendResponse({
         type: CWIEventName.SIGN_ACTION,
         success: true,
