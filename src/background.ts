@@ -290,6 +290,7 @@ import {
 } from './services/reservedProtocols';
 import { healIndexFundActions } from './mobile/tokens/indexFundHeal';
 import { continuesChain, endChain, isAlreadyProcessedAbort, markChainStep, startsChain } from './services/dappChain';
+import { actionStatusByTxid, type TxidStatusStorage } from './services/actionStatusByTxid';
 import { HOSTED_YOURS_IMAGE } from './utils/constants';
 import { WalletBackupService } from './backup/WalletBackupService';
 import { repairStaleAccounts, usbRekey, type UsbRekeyRequest } from './services/usbRekeyBackground';
@@ -3211,6 +3212,7 @@ if (!(
       'STORAGE_SYNC_BACKUPS',
       'STORE_BACKUP_BEFORE_SEND',
       'STORE_MAY_BE_OUT',
+      'STORE_ACTION_STATUS',
       'STORAGE_MOVE_STATUS',
       'STORAGE_MOVE_TO_DEVICE',
       'STORAGE_REPAIR_WALLET',
@@ -3593,6 +3595,27 @@ if (!(
             () => sendResponse({ type: 'STORE_MAY_BE_OUT', success: true }),
             (e: unknown) => sendResponse({ type: 'STORE_MAY_BE_OUT', success: false, error: String(e) }),
           );
+          return true;
+        case 'STORE_ACTION_STATUS':
+          // A Store payment's status read by txid, not from the last 300 actions (services/actionStatusByTxid.ts).
+          // Any failure is an error answer: the Store then reads "can't tell", never "released".
+          (async () => {
+            try {
+              await ensureWallet(true);
+              if (!accountContext) throw new Error('Wallet not initialized');
+              const status = await actionStatusByTxid(
+                accountContext.storage as unknown as TxidStatusStorage,
+                String((message as { txid?: unknown }).txid ?? ''),
+              );
+              sendResponse({ type: 'STORE_ACTION_STATUS', success: true, data: { status } });
+            } catch (error) {
+              sendResponse({
+                type: 'STORE_ACTION_STATUS',
+                success: false,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          })();
           return true;
         case 'STORAGE_MOVE_STATUS':
           // Not before the wallet is open: without an account context the store looked "not on this device", so the

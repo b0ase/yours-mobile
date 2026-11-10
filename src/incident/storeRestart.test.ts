@@ -26,6 +26,7 @@ import { forceLegacyActionBatch, requireLegacyForNoSend } from '../services/acti
 import { recheckRefusals } from '../services/refusalRecheck';
 import { LocalStoreNeededError, requireLocalStoreForChange } from '../services/localFirst';
 import { sendThroughWallet, type ChainLookup } from '../services/unsentGuard';
+import { actionStatusByTxid, type TxidStatusStorage } from '../services/actionStatusByTxid';
 import {
   localOutbox,
   memoryOutbox,
@@ -937,7 +938,8 @@ describe("INCIDENT 10 Nov 2026: the owner's two Store payments whose backup fail
    * new), the backup push fails, "Nothing was paid" is shown and the payment is KEPT unsent. Each held ~$1 of the
    * balance, neither showed in History, and nothing would free them but the 24 h expiry.
    */
-  async function ownersState(o: { storeHeard?: 'yes' | 'no' } = {}) {
+  async function ownersState(o: { storeHeard?: 'yes' | 'no' | 'unclear' } = {}) {
+    let heard = o.storeHeard ?? 'no';
     const chain: Chain = { post: 'success', seen: new Set(), mined: new Set(), posted: [] };
     const { w, coin: coinA } = await oneCoin(chain);
     const coinB = await addCoin(w, chain, OWNER_COIN);
@@ -982,13 +984,16 @@ describe("INCIDENT 10 Nov 2026: the owner's two Store payments whose backup fail
     const server = storeServer(
       (op, b) =>
         b.rawtx === undefined
-          ? o.storeHeard === 'yes'
+          ? heard === 'yes'
             ? [202, { pack: 'x', txid: b.fields.txid, pending: true }]
-            : [202, { pack: 'x', txid: b.fields.txid, pending: true, unverified: true }]
+            : heard === 'unclear'
+              ? [503, { error: 'server-error' }]
+              : [202, { pack: 'x', txid: b.fields.txid, pending: true, unverified: true }]
           : [200, { pack: 'x', txid: b.fields.txid }],
       { chain },
     );
-    return { chain, w1, before, locked, outbox, entries, server, coins: [coinA, coinB] };
+    const setHeard = (h: typeof heard) => void (heard = h);
+    return { chain, w1, before, locked, outbox, entries, server, coins: [coinA, coinB], setHeard };
   }
 
   test('the next release frees both on Store open: balance restored, nothing broadcast, the Store never told, change rows kept', async () => {
@@ -1036,16 +1041,41 @@ describe("INCIDENT 10 Nov 2026: the owner's two Store payments whose backup fail
     expect(await w1.wallet.balance()).toBe(before);
   });
 
-  test('an old entry the Store HAS heard of (an intent may have reached it) is never released here', async () => {
-    const { chain, w1, locked, outbox, entries, server } = await ownersState({ storeHeard: 'yes' });
+  test('an old entry the Store HAS heard of (the old store_unreachable case) was told: finished as before, never released', async () => {
+    const { chain, w1, outbox, entries, server } = await ownersState({ storeHeard: 'yes' });
     const { deps } = depsFor(chain, { outbox });
     const report = await api.settleStorePayments({ wallet: w1.wallet } as never, server.f, {
       deps,
       log: () => undefined,
     });
+    const both = entries.map((e) => e.txid).sort();
     expect(report.released).toEqual([]);
-    expect(report.kept.sort()).toEqual(entries.map((e) => e.txid).sort());
+    expect(report.finished.sort()).toEqual(both);
+    // Backed up, the Store told (intent) before each broadcast, then sent and claimed.
+    expect(
+      server
+        .intents()
+        .map((c) => c.txid)
+        .sort(),
+    ).toEqual(both);
+    expect([...chain.posted].sort()).toEqual(both);
+    for (const t of both) expect((await txRow(w1, t))?.status).toBe('unproven');
+  });
+
+  test('the Store gives no clear answer about an old entry: kept, and asked again on the next open (never parked)', async () => {
+    const { chain, w1, before, locked, outbox, entries, server, setHeard } = await ownersState({
+      storeHeard: 'unclear',
+    });
+    const { deps } = depsFor(chain, { outbox });
+    const open = () =>
+      api.settleStorePayments({ wallet: w1.wallet } as never, server.f, { deps, log: () => undefined });
+    const r1 = await open();
+    expect(r1.kept.sort()).toEqual(entries.map((e) => e.txid).sort());
     expect(await w1.wallet.balance()).toBe(locked);
+    setHeard('no');
+    const r2 = await open();
+    expect(r2.released.sort()).toEqual(entries.map((e) => e.txid).sort());
+    expect(await w1.wallet.balance()).toBe(before);
     expect(chain.posted).toEqual([]);
   });
 
@@ -1060,6 +1090,15 @@ describe("INCIDENT 10 Nov 2026: the owner's two Store payments whose backup fail
       });
       expect(report.released).toEqual([]);
       expect(await w1.wallet.balance()).toBe(locked);
+      if (verdict === 'unclear') {
+        // Not parked: the next open, with the chain answering cleanly, releases them.
+        const again = await api.settleStorePayments({ wallet: w1.wallet } as never, server.f, {
+          deps: { ...deps, lookups: [lookupOf(chain)], releaseLookups: [lookupOf(chain)] },
+          log: () => undefined,
+        });
+        expect(again.released.length).toBe(2);
+        expect(chain.posted).toEqual([]);
+      }
     }
   });
 
@@ -1090,6 +1129,182 @@ describe("INCIDENT 10 Nov 2026: the owner's two Store payments whose backup fail
     expect(chain.posted).toEqual([]);
     expect(server.calls).toEqual([]);
     expect(deps.outbox.all()).toEqual([]);
+  });
+});
+
+describe('review of f5c38ec1: a Store open racing a Pay on the same never-sent entry (one lock per txid)', () => {
+  /** A payment kept unsent (backup failed while the chain could not be asked), its entry aged past the 3 min wait. */
+  async function keptOld() {
+    const chain: Chain = { post: 'success', seen: new Set(), mined: new Set(), posted: [] };
+    const { w, coin } = await oneCoin(chain);
+    const unclear: ChainLookup = async () => 'unclear';
+    const outbox = memoryOutbox();
+    const { deps: failing } = depsFor(chain, {
+      outbox,
+      backup: async () => ({ ok: false, error: 'offline' }),
+      lookups: [unclear],
+      releaseLookups: [unclear],
+    });
+    const server = storeServer(
+      (op, b) =>
+        b.rawtx === undefined
+          ? [202, { pack: 'emoji-cool', txid: b.fields.txid, pending: true, unverified: true }]
+          : [202, { pack: 'emoji-cool', txid: b.fields.txid, pending: true }],
+      { chain },
+    );
+    const e = await api
+      .payBuyQuote({ wallet: w.wallet } as never, server.f, buyQuote() as never, { deps: failing })
+      .then(
+        () => null,
+        (x: unknown) => x as StorePayError,
+      );
+    expect(e?.code).toBe('backup_failed');
+    const [kept] = outbox.all();
+    outbox.put({ ...kept, at: Date.now() - 10 * 60_000 });
+    return { chain, w, coin, outbox, server, first: kept.txid };
+  }
+  const gate = () => {
+    let open!: () => void;
+    const p = new Promise<void>((r) => (open = r));
+    return { p, open };
+  };
+  const until = async (cond: () => boolean) => {
+    for (let i = 0; i < 400 && !cond(); i++) await new Promise((r) => setTimeout(r, 5));
+    expect(cond()).toBe(true);
+  };
+  /** The wallet as settle sees it, with abortAction observed (and optionally held). */
+  const watched = (w: Wallet, hold?: Promise<void>) => {
+    const seen = { aborts: [] as string[] };
+    const wallet = new Proxy(w, {
+      get(t, p) {
+        if (p === 'abortAction')
+          return async (a: { reference: string }) => {
+            seen.aborts.push(a.reference);
+            if (hold) await hold;
+            return t.abortAction(a);
+          };
+        const v = Reflect.get(t, p, t) as unknown;
+        return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(t) : v;
+      },
+    });
+    return { wallet, seen };
+  };
+
+  test('the Pay wins: settle, still checking the chain, finds the Store told and never aborts or drops it', async () => {
+    const { chain, w, outbox, server, first } = await keptOld();
+    const g = gate();
+    let checking = false;
+    const slow: ChainLookup = async () => {
+      checking = true;
+      await g.p;
+      return 'missing';
+    };
+    const { deps: settleDeps } = depsFor(chain, { outbox, lookups: [slow], releaseLookups: [slow] });
+    const { wallet, seen } = watched(w.wallet);
+    const settling = api.settleStorePayments({ wallet } as never, server.f, { deps: settleDeps, log: () => undefined });
+    await until(() => checking);
+    // Meanwhile the buyer taps Pay again with the backup working: the kept payment is backed up, told, sent.
+    const { deps: payDeps } = depsFor(chain, { outbox });
+    const res = await api.payBuyQuote({ wallet: w.wallet } as never, server.f, buyQuote('c'.repeat(32)) as never, {
+      deps: payDeps,
+    });
+    expect(res.txid).toBe(first);
+    g.open();
+    const report = await settling;
+    expect(report.released).toEqual([]);
+    expect(report.kept).toEqual([first]);
+    expect(seen.aborts).toEqual([]);
+    expect((await txRow(w, first))?.status).toBe('unproven');
+    expect(chain.posted).toEqual([first]);
+    expect(server.intents().map((c) => c.txid)).toEqual([first]);
+    // The entry (now told and pending) is still in the outbox: settle never dropped it.
+    expect(outbox.all().map((x) => [x.txid, x.state])).toEqual([[first, 'pending']]);
+  });
+
+  test('the release wins: the Pay waits for it, finds the payment released, and makes a new one; the Store never hears of the first', async () => {
+    const { chain, w, coin, outbox, server, first } = await keptOld();
+    const g = gate();
+    const { deps: settleDeps } = depsFor(chain, { outbox });
+    const { wallet, seen } = watched(w.wallet, g.p);
+    const settling = api.settleStorePayments({ wallet } as never, server.f, { deps: settleDeps, log: () => undefined });
+    await until(() => seen.aborts.length > 0);
+    // Settle holds the lock in its abort; the Pay starts now and must wait for it.
+    const { deps: payDeps } = depsFor(chain, { outbox });
+    const paying = api.payBuyQuote({ wallet: w.wallet } as never, server.f, buyQuote('c'.repeat(32)) as never, {
+      deps: payDeps,
+    });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(chain.posted).toEqual([]);
+    expect(server.intents()).toEqual([]);
+    g.open();
+    const report = await settling;
+    expect(report.released).toEqual([first]);
+    const res = await paying;
+    expect(res.txid).not.toBe(first);
+    expect(chain.posted).toEqual([res.txid]);
+    expect(server.calls.filter((c) => c.txid === first && c.rawtx !== undefined)).toEqual([]);
+    expect((await txRow(w, first))?.status).toBe('failed');
+    // The released coin funded the new payment.
+    const second = outbox.all().find((x) => x.txid === res.txid)!;
+    const ins = Transaction.fromAtomicBEEF(Utils.toArray(second.beefHex, 'hex')).inputs.map(
+      (i) => `${i.sourceTXID}.${i.sourceOutputIndex}`,
+    );
+    expect(ins).toContain(coin);
+  });
+});
+
+describe('review of f5c38ec1: an older payment (more than 300 newer actions) is never taken for released', () => {
+  test('read from the last 300 actions it is "unknown" and kept; read by txid it is nosend and released', async () => {
+    const chain: Chain = { post: 'success', seen: new Set(), mined: new Set(), posted: [] };
+    const { w, coinSats } = await oneCoin(chain);
+    const unclear: ChainLookup = async () => 'unclear';
+    const outbox = memoryOutbox();
+    const server = storeServer(() => [202, { pack: 'x', pending: true, unverified: true }], { chain });
+    const { deps: failing } = depsFor(chain, {
+      outbox,
+      backup: async () => ({ ok: false, error: 'offline' }),
+      lookups: [unclear],
+      releaseLookups: [unclear],
+    });
+    await api
+      .payBuyQuote({ wallet: w.wallet } as never, server.f, buyQuote() as never, { deps: failing })
+      .catch(() => undefined);
+    const [kept] = outbox.all();
+    outbox.put({ ...kept, at: Date.now() - 10 * 60_000 });
+    // 301 newer actions (completed, nothing to do with this payment).
+    const [user] = (await w.s.findUsers({ partial: {} })) as unknown as { userId: number }[];
+    const at = new Date();
+    for (let i = 0; i < 301; i++)
+      await w.s.insertTransaction({
+        created_at: at,
+        updated_at: at,
+        transactionId: 0,
+        userId: user.userId,
+        status: 'completed',
+        reference: `filler-${i}`,
+        isOutgoing: false,
+        satoshis: 0,
+        description: `filler ${i}`,
+        txid: i.toString(16).padStart(64, '0'),
+      } as never);
+    expect(await api.actionStatusOf(w.wallet as never, kept.txid)).toBe('unknown');
+    const { deps } = depsFor(chain, { outbox });
+    const r1 = await api.settleStorePayments({ wallet: w.wallet } as never, server.f, { deps, log: () => undefined });
+    expect(r1.kept).toEqual([kept.txid]);
+    expect(outbox.all().map((x) => x.txid)).toEqual([kept.txid]);
+    expect((await txRow(w, kept.txid))?.status).toBe('nosend');
+    // By txid (as the background answers STORE_ACTION_STATUS): nosend, so it is released for real.
+    const manager = (w.wallet as unknown as { storage: TxidStatusStorage }).storage;
+    expect(await actionStatusByTxid(manager, kept.txid)).toBe('nosend');
+    const byTxid = async (t: string) => (await actionStatusByTxid(manager, t)) ?? undefined;
+    const r2 = await api.settleStorePayments({ wallet: w.wallet } as never, server.f, {
+      deps: { ...deps, actionStatus: byTxid },
+      log: () => undefined,
+    });
+    expect(r2.released).toEqual([kept.txid]);
+    expect(await actionStatusByTxid(manager, kept.txid)).toBe('failed');
+    expect(await w.wallet.balance()).toBe(coinSats);
+    expect(chain.posted).toEqual([]);
   });
 });
 

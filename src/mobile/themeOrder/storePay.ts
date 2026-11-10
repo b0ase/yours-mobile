@@ -156,6 +156,8 @@ export type StorePayDeps = {
    * before releasing an entry written before intentAt existed. Absent: such entries are never released here.
    */
   storeHeardOf?: (e: OutboxEntry) => Promise<'yes' | 'no' | 'unclear'>;
+  /** The per-txid lock (withPayLock by default; tests may pass their own). */
+  lock?: <T>(txid: string, fn: () => Promise<T>) => Promise<T>;
   /**
    * Tell the wallet's broadcaster wrapper this txid may already be on the network, before re-posting a payment that was
    * 'sending' when the app died (services/refusalRecheck.ts markMayBeOut; 06c M1).
@@ -177,8 +179,11 @@ export const STORE_PAY_MESSAGES = {
   // Owner, 10 Nov 2026: twice told "nothing was paid" while the unsent payment kept ~$1 of his balance locked. A
   // payment that could not be backed up is now released at once (backup_failed_released). Only when the chain can't be
   // asked (offline) is it kept, and then the next Store open releases it; it is never sent without a new Pay.
+  // Kept only when the network can't be checked right now. Said as it is: the Store releases it on an open a few
+  // minutes later once the network (and, for an older payment, the Store) confirm it never arrived; unsentExpiry
+  // releases any unsent payment about a day after the wallet first saw it, at a wallet open, on the same checks.
   backup_failed:
-    "Your wallet couldn't save its backup, so the payment was not sent. Nothing was paid. The amount is held for now and comes back to your balance the next time you open the Store, or tap Pay to try again.",
+    "Your wallet couldn't save its backup, so the payment was not sent. Nothing was paid. Its amount is held until the wallet can confirm the network never got it: open the Store again in a few minutes while online, or it is released by itself about a day from now when the wallet opens. You can also tap Pay to try again.",
   backup_failed_released:
     "Your wallet couldn't save its backup, so the payment was not sent. Nothing was paid and your balance is back. Try again in a moment.",
   outbox_failed: "This device couldn't save the payment, so it was not sent. Nothing was paid. Try again in a moment.",
@@ -274,24 +279,48 @@ export type UnsentRelease =
   /** Kept as it was: something could not be shown safe. */
   | 'kept';
 
+/** A Web Locks API, as navigator.locks offers it (shared by every tab, popup and side panel of the extension). */
+type Locks = { request: <T>(name: string, options: object, cb: () => Promise<T>) => Promise<T> };
+const localLocks = new Map<string, Promise<unknown>>();
+/**
+ * One lock per Store payment txid around everything that decides "never told the Store" (review of f5c38ec1, MAJOR):
+ * a Pay's signed → intent span, and a release's re-check → abort → drop. navigator.locks where there is one, so other
+ * tabs and the popup queue too; else an in-process queue. Not re-entrant: never take it twice in one call chain.
+ */
+export function withPayLock<T>(txid: string, fn: () => Promise<T>): Promise<T> {
+  const locks = (globalThis as { navigator?: { locks?: Locks } }).navigator?.locks;
+  if (locks && typeof locks.request === 'function') return locks.request(`bwx-store-pay:${txid}`, {}, fn);
+  const before = localLocks.get(txid) ?? Promise.resolve();
+  const run = before.then(fn, fn);
+  const tail = run.catch(() => undefined);
+  localLocks.set(txid, tail);
+  void tail.then(() => {
+    if (localLocks.get(txid) === tail) localLocks.delete(txid);
+  });
+  return run;
+}
+
 /**
  * Release a Store payment that never left this device (10 Nov 2026: the owner's two payments whose backup failed kept
  * ~$1 each locked, out of History, with nothing to free them but a 24 h expiry). Released only when ALL hold:
  *  - the outbox entry is 'signed' and the Store was never told (intentAt null), or, for an entry written before
- *    intentAt existed, the Store says it has never heard of this txid;
- *  - the wallet holds it as 'nosend' (not sending / unproven / completed);
- *  - every chain lookup says it isn't there: one snapshot (`retryWindow: false`, used right after signing, when the
- *    BEEF has never left the device), or every lookup on every retry over ~30 s (`retryWindow: true`, Store open);
- *  - just before the release, the entry is still there and still never told (a Pay running meanwhile wins).
+ *    intentAt existed, the Store says it has never heard of this txid (`storeHeard` when the caller already asked);
+ *  - the wallet holds it as 'nosend', read by txid ('unknown' = can't tell: kept);
+ *  - every chain lookup says it isn't there: one snapshot (`retryWindow: false`, right after signing, when the BEEF
+ *    has never left the device), or every lookup on every retry over ~30 s (`retryWindow: true`, Store open);
+ *  - INSIDE the payment's lock (withPayLock), just before the release: the entry is still there, still 'signed', has no
+ *    intentAt, and the wallet still holds it as 'nosend'. A Pay writes intentAt under that same lock before the BEEF
+ *    leaves for the Store, so a Pay and a release can never both win. `locked`: the caller holds the lock already.
  * The release is the toolbox's abortAction ('nosend' → 'failed': inputs spendable again; the change rows are kept,
  * marked unspendable, so recoverByTxid can still restore them if the tx ever appears). The entry is dropped only after
- * the wallet confirms it no longer holds the payment as unsent. Nothing is built, signed or broadcast. Never throws.
+ * the wallet confirms it no longer holds the payment as unsent, and never when it has an intentAt. Nothing is built,
+ * signed or broadcast. Never throws.
  */
 export async function releaseNeverSent(
   wallet: Pick<UnsentWallet, 'abortAction'>,
   entry: OutboxEntry,
   deps: StorePayDeps,
-  o: { retryWindow: boolean },
+  o: { retryWindow: boolean; locked?: boolean; storeHeard?: 'yes' | 'no' | 'unclear' },
 ): Promise<UnsentRelease> {
   const log = deps.log ?? ((m: string) => console.warn(m));
   const txid = entry.txid;
@@ -299,11 +328,13 @@ export async function releaseNeverSent(
     log(`[bwx-store] ${txid}: unsent payment kept, not released (${why})`);
     return 'kept';
   };
+  const untold = (e: OutboxEntry | undefined) => !!e && (neverLeftDevice(e) || intentUnknown(e));
+  const statusOf = (t: string) => (deps.actionStatus ? deps.actionStatus(t).catch(() => 'unknown') : 'unknown');
   try {
-    if (!neverLeftDevice(entry) && !intentUnknown(entry)) return keep('it may have reached the Store');
+    if (!untold(entry)) return keep('it may have reached the Store');
     if (!deps.actionStatus) return keep("the wallet's status for it can't be read");
-    const status = await deps.actionStatus(txid).catch(() => 'unknown');
-    // listActions leaves 'failed' out: undefined is "released before, or older than the recent actions read".
+    const status = await statusOf(txid);
+    // undefined: storage holds no live action for it (released before, or gone). 'unknown': can't tell.
     if (status !== 'nosend' && status !== undefined && status !== 'failed')
       return keep(`the wallet holds it as ${status}`);
     const lookups = deps.releaseLookups ?? releaseLookups();
@@ -312,23 +343,33 @@ export async function releaseNeverSent(
       : !(await chainMayHave(txid, lookups));
     if (!missing) return keep('the chain may have it, or could not be asked');
     if (intentUnknown(entry)) {
-      const heard = deps.storeHeardOf ? await deps.storeHeardOf(entry).catch(() => 'unclear' as const) : 'unclear';
+      const heard =
+        o.storeHeard ??
+        (deps.storeHeardOf ? await deps.storeHeardOf(entry).catch(() => 'unclear' as const) : 'unclear');
       if (heard !== 'no') return keep(`written before intents were recorded and the Store answered "${heard}"`);
     }
-    const now = deps.outbox.all().find((x) => x.txid === txid);
-    if (!now || (!neverLeftDevice(now) && !intentUnknown(now))) return keep('a Pay changed it meanwhile');
-    if (status !== 'nosend') {
+    const decide = async (): Promise<UnsentRelease> => {
+      // Re-read everything a Pay could have changed, now that no Pay can change it.
+      const cur = () => deps.outbox.all().find((x) => x.txid === txid);
+      if (!untold(cur())) return keep('a Pay changed it meanwhile');
+      const now = await statusOf(txid);
+      if (now === undefined || now === 'failed') {
+        if (!untold(cur())) return keep('a Pay changed it meanwhile');
+        deps.outbox.drop(txid);
+        log(`[bwx-store] ${txid}: never sent and no longer held by the wallet as unsent; cleared`);
+        return 'cleared';
+      }
+      if (now !== 'nosend') return keep(`the wallet holds it as ${now}`);
+      const r = (await wallet.abortAction({ reference: txid })) as { aborted?: boolean } | undefined;
+      if (r && r.aborted === false) return keep('the wallet would not release it (the network may know it)');
+      const after = await statusOf(txid);
+      if (after !== undefined && after !== 'failed') return keep(`still ${after} after the release`);
+      if (!untold(cur())) return keep('changed during the release; the entry is left as it is');
       deps.outbox.drop(txid);
-      log(`[bwx-store] ${txid}: never sent and no longer held by the wallet as unsent; cleared`);
-      return 'cleared';
-    }
-    const r = (await wallet.abortAction({ reference: txid })) as { aborted?: boolean } | undefined;
-    if (r && r.aborted === false) return keep('the wallet would not release it (the network may know it)');
-    const after = await deps.actionStatus(txid).catch(() => 'unknown');
-    if (after === 'nosend' || after === 'unknown') return keep(`still ${after} after the release`);
-    deps.outbox.drop(txid);
-    log(`[bwx-store] ${txid}: never sent (the Store was never told, the chain has no copy); released, coins back`);
-    return 'released';
+      log(`[bwx-store] ${txid}: never sent (the Store was never told, the chain has no copy); released, coins back`);
+      return 'released';
+    };
+    return o.locked ? await decide() : await (deps.lock ?? withPayLock)(txid, decide);
   } catch (e) {
     return keep(`release failed: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -365,55 +406,65 @@ export async function sendStorePayment(
   }
 
   if (entry.state === 'signed') {
-    // Released meanwhile (unsentExpiry's deadline, Repair Sync, a Store open): never back it up, tell the Store about
-    // it or send it. A Store told about a released payment would refuse the next one for this item for an hour.
-    if (await deadEntry(entry, deps)) {
-      log(`[bwx-store] ${entry.txid}: never sent and the wallet no longer holds it; cleared`);
-      deps.outbox.drop(entry.txid);
-      throw storeError('cleared', false);
-    }
-    const inOutbox = () => deps.outbox.all().some((x) => x.txid === entry.txid);
-    const keptBefore = inOutbox();
-    const b = await deps.backup().catch((e: unknown): BackupAnswer => ({ ok: false, error: String(e) }));
-    if (!b.ok) {
-      log(`[bwx-store] ${entry.txid}: backup failed (${b.error}); not sent`);
-      // Nothing has left this device: give the coins back now instead of holding them for a later send (10 Nov 2026).
-      const r = await releaseNeverSent(wallet, entry, deps, { retryWindow: false });
-      if (r !== 'kept') throw storeError('backup_failed_released', false);
-      throw storeError('backup_failed', false);
-    }
-    // A Store open (or another Pay) may have released it while the backup ran.
-    if (keptBefore && !inOutbox()) {
-      log(`[bwx-store] ${entry.txid}: released while its backup ran; not sent`);
-      throw storeError('cleared', false);
-    }
-    if (deps.intent) {
-      // Recorded BEFORE the BEEF leaves for the Store: from here this payment is never released as "never sent".
-      if (!entry.intentAt) {
-        entry = { ...entry, intentAt: now };
-        try {
-          deps.outbox.put(entry);
-        } catch (e) {
-          log(
-            `[bwx-store] ${entry.txid}: outbox write failed (${e instanceof Error ? e.message : String(e)}); not sent`,
-          );
-          throw storeError('outbox_failed', false);
+    const inOutbox = () => deps.outbox.all().find((x) => x.txid === entry.txid);
+    const keptBefore = !!inOutbox();
+    // The signed → intent span holds the payment's lock: a Store open's release waits for it, and it waits for a
+    // release already deciding (review of f5c38ec1, MAJOR). Inside, everything is read again.
+    entry = await (deps.lock ?? withPayLock)(entry.txid, async () => {
+      const cur = inOutbox();
+      if (keptBefore && !cur) {
+        log(`[bwx-store] ${entry.txid}: released by a Store open meanwhile; not sent`);
+        throw storeError('cleared', false);
+      }
+      let e: OutboxEntry = cur ? { ...entry, ...cur } : entry;
+      // Another Pay moved it on meanwhile: carry on from where that left it, outside this span.
+      if (e.state !== 'signed') return e;
+      // Released meanwhile (unsentExpiry's deadline, Repair Sync): never back it up, tell the Store about it or send
+      // it. A Store told about a released payment would refuse the next one for this item for an hour.
+      if (await deadEntry(e, deps)) {
+        log(`[bwx-store] ${e.txid}: never sent and the wallet no longer holds it; cleared`);
+        deps.outbox.drop(e.txid);
+        throw storeError('cleared', false);
+      }
+      const b = await deps.backup().catch((x: unknown): BackupAnswer => ({ ok: false, error: String(x) }));
+      if (!b.ok) {
+        log(`[bwx-store] ${e.txid}: backup failed (${b.error}); not sent`);
+        // Nothing has left this device: give the coins back now instead of holding them for a later send.
+        const r = await releaseNeverSent(wallet, e, deps, { retryWindow: false, locked: true });
+        if (r !== 'kept') throw storeError('backup_failed_released', false);
+        throw storeError('backup_failed', false);
+      }
+      if (deps.intent) {
+        // Recorded BEFORE the BEEF leaves for the Store: from here this payment is never released as "never sent".
+        if (!e.intentAt) {
+          e = { ...e, intentAt: now };
+          try {
+            deps.outbox.put(e);
+          } catch (x) {
+            log(`[bwx-store] ${e.txid}: outbox write failed (${x instanceof Error ? x.message : String(x)}); not sent`);
+            throw storeError('outbox_failed', false);
+          }
+        }
+        const i = await deps
+          .intent(e)
+          .catch((x: unknown): IntentAnswer => ({ ok: false, refused: false, error: String(x) }));
+        if (!i.ok && i.refused) {
+          log(`[bwx-store] ${e.txid}: the Store refused it before any broadcast (${i.code ?? i.error}); released`);
+          deps.outbox.drop(e.txid);
+          await deps.releaseUnsent?.(e.txid).catch(() => undefined);
+          throw storeError('intent_refused', false, i.error || STORE_PAY_MESSAGES.intent_refused);
+        }
+        if (!i.ok) {
+          log(`[bwx-store] ${e.txid}: the Store couldn't be reached (${i.error}); not sent, kept unsent`);
+          throw storeError('store_unreachable', false);
         }
       }
-      const i = await deps
-        .intent(entry)
-        .catch((e: unknown): IntentAnswer => ({ ok: false, refused: false, error: String(e) }));
-      if (!i.ok && i.refused) {
-        log(`[bwx-store] ${entry.txid}: the Store refused it before any broadcast (${i.code ?? i.error}); released`);
-        deps.outbox.drop(entry.txid);
-        await deps.releaseUnsent?.(entry.txid).catch(() => undefined);
-        throw storeError('intent_refused', false, i.error || STORE_PAY_MESSAGES.intent_refused);
-      }
-      if (!i.ok) {
-        log(`[bwx-store] ${entry.txid}: the Store couldn't be reached (${i.error}); not sent, kept unsent`);
-        throw storeError('store_unreachable', false);
-      }
-    }
+      return e;
+    });
+    // Another Pay moved it on while this one waited for the lock.
+    if (entry.state === 'refused') return sendStorePayment(wallet, entry, deps);
+    if (entry.state === 'sent') return 'sent';
+    if (entry.state === 'pending') return 'pending';
   }
   // A payment that was already 'sending' when the app died may be out (06c M1): its refusal must not free the coin.
   if (entry.state === 'sending')

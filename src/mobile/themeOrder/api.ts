@@ -133,6 +133,31 @@ async function recentActions(w: ActionsWallet, n: number, withOutputs = false) {
   return actions;
 }
 
+/** How many recent actions the fallback status read covers. */
+export const ACTION_STATUS_WINDOW = 300;
+
+/**
+ * The wallet's status for a txid, read BY TXID (background STORE_ACTION_STATUS: services/actionStatusByTxid.ts).
+ * undefined = the store holds no live action with that txid. When the background can't answer, falls back to the
+ * last ACTION_STATUS_WINDOW actions (listActions, which leaves 'failed' out); a txid not among them is then
+ * 'unknown' unless every action was read, so an older payment is never mistaken for a released one.
+ */
+export async function actionStatusOf(wallet: ActionsWallet, txid: string): Promise<string | undefined> {
+  try {
+    const r = await sendMessageAsync<{ success?: boolean; data?: { status?: string | null } } | undefined>({
+      action: 'STORE_ACTION_STATUS',
+      txid,
+    });
+    if (r?.success && r.data && 'status' in r.data) return r.data.status ?? undefined;
+  } catch {
+    /* no background here (tests, a wallet in the page): read the action list */
+  }
+  const head = await wallet.listActions({ labels: [], limit: 1 });
+  const found = (await recentActions(wallet, ACTION_STATUS_WINDOW)).find((a) => a.txid === txid);
+  if (found) return found.status;
+  return head.totalActions <= ACTION_STATUS_WINDOW ? undefined : 'unknown';
+}
+
 const claimAction = (kind: OutboxEntry['kind']) => (kind === 'buy' ? 'theme-buy-claim' : 'theme-orders-claim');
 const claimOp = (kind: OutboxEntry['kind']) => (kind === 'buy' ? 'buy-claim' : 'claim');
 
@@ -143,7 +168,8 @@ const claimOp = (kind: OutboxEntry['kind']) => (kind === 'buy' ? 'buy-claim' : '
  *    anything else = unreachable (keep it, try later);
  *  - releaseUnsent: a payment the Store refused before any broadcast (or that couldn't be saved) is released once the
  *    chain confirms it never went out (unsentGuard releaseAfterHandoff: ~30 s of clean 404s), in the background;
- *  - actionStatus: the wallet's status for a txid, undefined when storage has no such action (F3).
+ *  - actionStatus: the wallet's status for a txid, read by txid; undefined when storage has no such action (F3),
+ *    'unknown' when it can't tell (actionStatusOf).
  */
 export function withStoreDeps(ctx: OneSatContext, f: Fetch, deps: StorePayDeps): StorePayDeps {
   const wallet = ctx.wallet as unknown as ActionsWallet;
@@ -190,8 +216,7 @@ export function withStoreDeps(ctx: OneSatContext, f: Fetch, deps: StorePayDeps):
         await markMayBeOut(txid);
         await sendMessageAsync({ action: 'STORE_MAY_BE_OUT', txid }).catch(() => undefined);
       }),
-    actionStatus:
-      deps.actionStatus ?? (async (txid) => (await recentActions(wallet, 300)).find((a) => a.txid === txid)?.status),
+    actionStatus: deps.actionStatus ?? ((txid) => actionStatusOf(wallet, txid)),
     storeHeardOf: deps.storeHeardOf ?? ((e) => storeHeardOf(ctx, f, { kind: e.kind, quoteId: e.quoteId }, e.txid)),
   };
 }
@@ -614,14 +639,31 @@ async function settleOnce(
     // Never sent and never told to the Store (its backup failed, or the app closed first): the buyer was told
     // "nothing was paid", so it is released, never sent without a new Pay (owner, 10 Nov 2026). A young one may be
     // a Pay still backing it up: left to that Pay.
+    // Nothing is parked for good: an entry kept here (the chain or the Store gave no clear answer) is asked again on
+    // every Store open, until it is released, finished, or pruned after OUTBOX_KEEP_MS (unsentExpiry still frees its
+    // coins then). Written before intentAt existed and the Store HAS heard of it (the old store_unreachable case): it
+    // was told, so it is finished as before.
     if (e.state === 'signed' && (e.intentAt === null || e.intentAt === undefined)) {
       if (t - e.at < UNSENT_RELEASE_MIN_AGE_MS) {
         report.kept.push(e.txid);
         continue;
       }
-      const r = await releaseNeverSent(ctx.wallet as unknown as UnsentWallet, e, deps, { retryWindow: true });
-      (r === 'kept' ? report.kept : report.released).push(e.txid);
-      continue;
+      const heard =
+        e.intentAt === undefined ? await deps.storeHeardOf!(e).catch(() => 'unclear' as const) : ('no' as const);
+      if (heard === 'unclear') {
+        log(`[bwx-store] ${e.txid}: the Store gave no clear answer about it; asked again next time`);
+        report.kept.push(e.txid);
+        continue;
+      }
+      if (heard === 'no') {
+        const r = await releaseNeverSent(ctx.wallet as unknown as UnsentWallet, e, deps, {
+          retryWindow: true,
+          storeHeard: 'no',
+        });
+        (r === 'kept' ? report.kept : report.released).push(e.txid);
+        continue;
+      }
+      // heard === 'yes': told before intentAt existed; finished below like any told payment.
     }
     if (e.state === 'pending' && e.claimedAt && t - e.claimedAt < RECLAIM_EVERY_MS) {
       report.pending.push(e.txid);

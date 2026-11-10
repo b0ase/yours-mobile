@@ -286,6 +286,8 @@ describe('06c M1: a payment that was already being sent is marked "may be out" b
     expect(await sendStorePayment(w, entry({ state: 'sending' }), d)).toBe('sent');
     expect(order).toEqual(['mark abab', 'send']);
     order.length = 0;
+    // A new payment (the outbox's entry for T says 'sent' now, and the outbox is what the send trusts).
+    d.outbox.drop(T);
     expect(await sendStorePayment(w, entry({ state: 'signed' }), d)).toBe('sent');
     expect(order).toEqual(['send']);
   });
