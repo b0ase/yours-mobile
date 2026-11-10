@@ -195,6 +195,7 @@ const bubbles = () => document.querySelectorAll('.bw-chat-bubble').length;
 type Open = { ticker: string; client: any; id: number } | null;
 let setOpen: (o: Open) => void = () => {};
 
+// eslint-disable-next-line react-refresh/only-export-components
 const Harness = () => {
   const [o, set] = useState<Open>(null);
   setOpen = set;
