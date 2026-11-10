@@ -16,6 +16,7 @@ const SWIPE_PX = 72;
  * message box, so reading older replies and typing are untouched: the same rule as pull-down-to-b, which only starts
  * from the top of the apps page. PhoneShell's own gesture doesn't run here (this isn't an app screen).
  */
+// eslint-disable-next-line react-refresh/only-export-components -- the hook lives beside the bar it opens
 export const useSwipeUpToApps = (on: boolean, go: () => void, root: RefObject<HTMLElement>) => {
   useEffect(() => {
     const el = root.current;

@@ -126,6 +126,9 @@ ${END}`;
  */
 export const CSS_KEEP: Record<string, string> = {
   '@theme': 'sweep tab Tailwind theme token, not a fill',
+  '.bw-wcard-scan > span':
+    'Scan pill: its own dark plate and fixed gold so it reads on any card art, in every pack (owner, 9 Nov 2026)',
+  '.bw-wcard-scan:active > span': 'Scan pill pressed state: same plate, a little lighter',
   '.bw-home-slide': 'Store showcase card: a photo stage behind cover art, dark in every pack',
   '.bw-home-nav': 'Store showcase arrows sit on the cover art (media stage), dark in every pack',
   '.bwallet-web-banner': 'hazard tape (yellow and black) in every pack, by design',

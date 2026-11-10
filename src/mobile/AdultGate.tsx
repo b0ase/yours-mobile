@@ -9,6 +9,7 @@ const ADULT_UI: boolean = !(
 );
 
 /** The tile face before the confirmation: no name, no art. Empty in a store build, which has no adult tile. */
+// eslint-disable-next-line react-refresh/only-export-components -- plain values read by the Apps page, kept beside the gate
 export const ADULT_ICON = ADULT_UI
   ? `data:image/svg+xml,${encodeURIComponent(
       '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 60"><rect width="60" height="60" fill="#3A0A0E"/><text x="30" y="38" text-anchor="middle" font-family="sans-serif" font-size="22" font-weight="800" fill="#ff5a5a">18+</text></svg>',
@@ -16,8 +17,10 @@ export const ADULT_ICON = ADULT_UI
   : '';
 
 /** The tile's name before the confirmation; a literal so a store bundle never carries it. */
+// eslint-disable-next-line react-refresh/only-export-components -- plain values read by the Apps page, kept beside the gate
 export const ADULT_NAME = ADULT_UI ? 'Adults only' : '';
 
+// eslint-disable-next-line react-refresh/only-export-components -- plain values read by the Apps page, kept beside the gate
 export const readAdultOk = () => {
   try {
     return localStorage.getItem(ADULT_OK_KEY) === '1';
