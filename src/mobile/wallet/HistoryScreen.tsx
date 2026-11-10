@@ -409,8 +409,10 @@ export const HistoryScreen = ({
                   {heldByUnsent.count === 1 ? '1 payment' : `${heldByUnsent.count} payments`} your wallet signed but
                   never sent {heldByUnsent.count === 1 ? 'holds' : 'hold'} {fmtBsv(heldByUnsent.sats)} of your balance.{' '}
                   {heldByUnsent.count === 1 ? "It isn't" : "They aren't"} on the network, so{' '}
-                  {heldByUnsent.count === 1 ? "it isn't" : "they aren't"} listed here. A Store payment is given back the
-                  next time you open the Store; any other is given back within a day if it never goes out.
+                  {heldByUnsent.count === 1 ? "it isn't" : "they aren't"} listed here.{' '}
+                  {heldByUnsent.count === 1 ? 'It is' : 'They are'} given back once the wallet confirms the network
+                  never got it: a Store payment when you open the Store a few minutes after it was made (online), and
+                  any payment by itself about a day after it was made, the next time the wallet opens.
                 </div>
               ) : (
                 <div>
