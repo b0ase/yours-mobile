@@ -116,7 +116,10 @@ function openTicket(ticket, secret, env = process.env, now = Date.now()) {
     suggested_handle: suggestedHandleFor(t.p, t.name),
     // Provable names (docs/PROVABLE-NAMES.md): the provider-signed ID token whose nonce binds proof_key. Only when
     // the sign-in was started with a proof_key; never an access or refresh token.
-    ...(t.it ? { id_token: t.it, proof_key: t.pk } : {}),
+    ...(t.it ? { id_token: t.it } : {}),
+    // The wallet key the sign-in was started for (start's proof_key), sealed in, so a ticket proves "this X / Google
+    // account, for THIS wallet". Names held for an X account (lib/xHolds.js) accept a ticket only with it.
+    ...(t.pk ? { proof_key: t.pk } : {}),
   };
 }
 
@@ -172,7 +175,8 @@ function start({ provider, verifier_hash: vh, return_to, proof_key }, env = proc
       client_id: env.X_CLIENT_ID,
       redirect_uri: redirectUri('x', env),
       scope: 'users.read tweet.read',
-      state: seal({ p: 'x', vh, v, e, r }, env),
+      // pk: bound into the ticket (lib/xHolds.js needs it for a held name); X has no ID token to carry it.
+      state: seal({ p: 'x', vh, v, e, r, pk }, env),
       code_challenge: challenge,
       code_challenge_method: 'S256',
     }).toString();
@@ -324,7 +328,8 @@ async function callback(provider, q, env = process.env, f = fetch, now = Date.no
         a: user.a,
         vh: st.vh,
         e: now + TTL_MS,
-        ...(idToken ? { it: idToken, pk: st.pk } : {}),
+        ...(idToken ? { it: idToken } : {}),
+        ...(st.pk ? { pk: st.pk } : {}),
       },
       env,
     );

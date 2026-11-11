@@ -63,6 +63,10 @@ const ROUTES = {
   'handovers-for': ['GET', 'handovers-for'],
   // Paid-name receipts as CSV (admin only: x-admin-secret = PAYMAIL_ADMIN_SECRET).
   'name-fees-export': ['GET', 'name-fees-export'],
+  // Names held for an X account (lib/xHolds.js): public status read; admin create / release (x-admin-secret).
+  'x-hold': ['GET', 'x-hold'],
+  'x-hold-put': ['POST', 'x-hold-put'],
+  'x-hold-release': ['POST', 'x-hold-release'],
 };
 
 const hits = new Map();
