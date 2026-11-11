@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import {
   coldStartRedirect,
   LANDING,
@@ -35,6 +36,11 @@ describe('phone layout screens', () => {
     expect(startRoute(true, false, true)).toBe('/bsv-wallet');
     // Classic / wide layout.
     expect(startRoute(false, false, false)).toBe('/bsv-wallet');
+  });
+
+  test('only the phone app opens on Ask b: the extension popup and a web reload open on the Wallet (review, 11 Nov)', () => {
+    const start = readFileSync(new URL('../../pages/onboarding/Start.tsx', import.meta.url), 'utf8');
+    expect(start).toContain('startRoute(phoneLayoutOn() && isNative, hasLanded())');
   });
 
   test('strip order: Wallet · Exchange · HOME · Apps · Games · People · Feed · Chat', () => {

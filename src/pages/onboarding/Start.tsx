@@ -17,6 +17,7 @@ import { SignupLinkPanel } from '../../mobile/social/SignupLinkPanel';
 import { phoneLayoutOn } from '../../mobile/phone/flag';
 import { hasLanded } from '../../mobile/phone/pageEl';
 import { startRoute, WALLET_ROUTE } from '../../mobile/phone/screens';
+import { isNative } from '../../mobile/native';
 import { setupHost, setupReason } from '../../services/walletSetupWait';
 
 /** Set when a site's request opened this screen (background showWalletSetupUi): the asking site's host. */
@@ -57,7 +58,9 @@ export const Start = () => {
   useEffect(() => {
     if (encryptedKeys) {
       setShowStart(false);
-      const to = startRoute(phoneLayoutOn(), hasLanded());
+      // Only the phone app opens on the b: the extension popup and a web reload start a fresh page each time, so
+      // `landed` is always false there and they would land on Ask b on every open.
+      const to = startRoute(phoneLayoutOn() && isNative, hasLanded());
       // Ask b replaces this route, so it is the bottom of the history and shows no Back (mobile/agent/AgentPage.tsx).
       if (to === WALLET_ROUTE) navigate(to);
       else navigate(to, { replace: true, state: { opening: true } });
