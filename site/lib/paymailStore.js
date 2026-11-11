@@ -208,6 +208,40 @@ function supabaseStore(env = process.env, f = fetch) {
       (await req(
         `bwallet_social_links?identity_key=eq.${q(key)}&select=provider,account,handle,identity_key,signature,signed_at&order=created_at.asc&limit=20`,
       )) ?? [],
+    // Names held for an X account (migrations/20261111_paymail_x_holds.sql). Before the migration runs the table is
+    // missing: reads answer null (no hold), so names follow the normal rules; the admin write fails loudly.
+    getXHold: async (alias) => {
+      try {
+        return await one(`bwallet_paymail_x_holds?alias=eq.${q(alias)}&limit=1`);
+      } catch (e) {
+        if (e && (e.status === 404 || /PGRST205|42P01/.test(String(e.body || '')))) return null;
+        throw e;
+      }
+    },
+    // A new hold only: a plain INSERT (an existing hold for the alias is a 409, never overwritten here).
+    insertXHold: async (row) =>
+      (
+        await req('bwallet_paymail_x_holds', {
+          method: 'POST',
+          headers: { Prefer: 'return=representation' },
+          body: JSON.stringify(row),
+        })
+      )?.[0] ?? null,
+    releaseXHold: async (alias, at) =>
+      (
+        await req(`bwallet_paymail_x_holds?alias=eq.${q(alias)}&released_at=is.null&claimed_at=is.null`, {
+          method: 'PATCH',
+          headers: { Prefer: 'return=representation' },
+          body: JSON.stringify({ released_at: at }),
+        })
+      )?.[0] ?? null,
+    // The first claim under a hold is recorded once: only an unclaimed row is updated.
+    markXHoldClaimed: (alias, key, at) =>
+      req(`bwallet_paymail_x_holds?alias=eq.${q(alias)}&claimed_at=is.null`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({ claimed_at: at, claimed_key: key }),
+      }),
     // Signed name bindings + the public append-only log (migrations/20261017_name_bindings.sql).
     // Company offers (migrations/20261024_company_offers.sql). A receipt is insert-only: no code path updates it.
     getOffer: (ref) => one(`company_offers?ref=eq.${q(ref)}&limit=1`),

@@ -60,3 +60,23 @@ describe('migrations/20261108_paymail_alias_key_guard.sql', () => {
     );
   });
 });
+
+describe('migrations/20261111_paymail_x_holds.sql', () => {
+  const sql = read('20261111_paymail_x_holds.sql');
+  const body = code(sql);
+
+  test('one transaction, idempotent, RLS on, nothing for anon / authenticated', () => {
+    expect(body.match(/^begin;$/gm)?.length).toBe(1);
+    expect(body.match(/^commit;$/gm)?.length).toBe(1);
+    expect(sql.trimEnd().endsWith("commit;\nnotify pgrst, 'reload schema';")).toBe(true);
+    expect((body.match(/'/g) || []).length % 2).toBe(0);
+    expect(body).toContain('create table if not exists public.bwallet_paymail_x_holds (');
+    expect(body).toContain('alter table public.bwallet_paymail_x_holds enable row level security;');
+    expect(body).toContain('revoke all on public.bwallet_paymail_x_holds from anon, authenticated;');
+  });
+
+  test('bound by the numeric X id; the @name is words only', () => {
+    expect(body).toContain("x_user_id text not null check (x_user_id ~ '^[0-9]{1,25}$')");
+    expect(body).toContain("x_handle text not null default '' check (x_handle ~ '^[a-z0-9_]{0,15}$')");
+  });
+});
