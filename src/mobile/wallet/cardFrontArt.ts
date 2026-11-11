@@ -1,4 +1,5 @@
 import { bavatarSvg } from '../bavatar/bavatar';
+import { bavatarVariant } from '../names/avatar';
 import { currentAccentId } from '../theme/accent';
 import { accentById } from '../theme/accents';
 import { tintSvg } from '../theme/tint';
@@ -24,12 +25,14 @@ export function cardFrontArtUri(identityPubKey: string | null | undefined, yello
   if (!KEY_RE.test(key)) return '';
   // Default art follows the app accent (Theme → App colours); a user picture/NFT never comes through here.
   const accent = currentAccentId();
-  const ck = accent + accentById(accent).accent + ':' + key;
+  // The design this account minted (0 = the original), so the card matches its bAvatar everywhere else.
+  const variant = bavatarVariant(key);
+  const ck = accent + accentById(accent).accent + ':' + key + '#' + variant;
   let uri = cache.get(ck);
   if (!uri) {
     uri =
       'data:image/svg+xml;charset=utf-8,' +
-      encodeURIComponent(tintSvg(bavatarSvg(key, { size: 512, label: '' }), accent));
+      encodeURIComponent(tintSvg(bavatarSvg(key, { size: 512, label: '', variant }), accent));
     cache.set(ck, uri);
   }
   return uri;

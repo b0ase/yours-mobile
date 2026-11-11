@@ -12,10 +12,10 @@ import { PrivacyChoice } from '../private/PrivacyChoice';
 import { setBavatarVariant } from '../names/avatar';
 import { MAX_VARIANT } from './bavatar';
 import {
+  bavatarArt,
   bavatarClient,
   bavatarLabel,
   bavatarNumber,
-  bavatarMintSvg,
   currentVariant,
   FOUNDING,
   hasMinted,
@@ -73,9 +73,10 @@ export default function BavatarMintSheet({ onClose }: { onClose: () => void }) {
   }, [apiContext, identityKey]);
 
   const mine = state.k === 'ready' || state.k === 'minting' ? state.mine : null;
-  // Free and local: the preview is drawn on this device; nothing is sent until "Mint".
+  // Free and local: the preview is drawn on this device; nothing is sent until "Mint". The art alone, because
+  // the tall two-sided card was cropped off-centre by the square hero (owner, 8 Nov 2026).
   const preview = useMemo(
-    () => (mine ? svgDataUri(bavatarMintSvg(identityKey, mine.handle, mine.number, variant)) : ''),
+    () => (mine ? svgDataUri(bavatarArt(identityKey, variant)) : ''),
     [mine, identityKey, variant],
   );
   const offer = mine ? mintOffer(mine, variant) : null;
@@ -123,7 +124,8 @@ export default function BavatarMintSheet({ onClose }: { onClose: () => void }) {
           <MintHero
             image={preview || undefined}
             alt={mine ? bavatarLabel(mine.handle, mine.number) : 'Your bAvatar'}
-            number={num}
+            number={replacing && !isCurrent ? undefined : num}
+            whole
           />
         }
         title={
