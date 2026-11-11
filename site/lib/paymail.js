@@ -792,7 +792,8 @@ function makeHandlers({
     if (exact) return { hold: exact, near: false };
     if (!store.listXHolds || !ALIAS_RE.test(alias)) return null;
     for (const h of await store.listXHolds())
-      if (h.alias !== alias && xHolds.nearHold(alias, h.alias) && (await holdLive(h))) return { hold: h, near: true };
+      if (h.alias !== alias && xHolds.holdGuardsNear(h) && xHolds.nearHold(alias, h.alias) && (await holdLive(h)))
+        return { hold: h, near: true };
     return null;
   };
   const holdRefusal = (gate) => (gate.near ? xHolds.nearMessage(gate.hold) : xHolds.holdMessage(gate.hold));
@@ -1877,7 +1878,8 @@ function makeHandlers({
       return [200, out];
     },
     // Admin only (x-admin-secret = PAYMAIL_ADMIN_SECRET): hold a FREE plain name for an X account by its numeric id.
-    // Body { alias, x_user_id, x_handle?, days? (default 90, 0 = no end), note? }. Never overwrites a hold or a name.
+    // Body { alias, x_user_id, x_handle?, days? (default 90, 0 = no end), note?, near? (default true: near variants such
+    // as kurtt / kurtjr are held too; false for a common word) }. Never overwrites a hold or a name.
     'x-hold-put': async (_q, body, ctx = {}) => {
       if (!adminOk(ctx.adminSecret, env)) return [401, { error: 'unauthorized' }];
       if (!store.insertXHold || !store.getXHold) return [501, { error: 'holds not available' }];

@@ -10,17 +10,39 @@
 //             proof for 10 minutes; bound to one key, a copied ticket can't claim the name for any other wallet).
 //             A ticket without proof_key never proves a hold.
 //
-// Near variants (security review, 11 Nov 2026): while a hold of 4+ characters is live, names that read as it are
-// held too (nearHold): the same name after brandGuard's look-alike fold (ku-rt, ku_rt, 0→o, 1→l/i, rn→m…),
-// the name with up to 3 characters added before or after it (kurtt, kurtjr, kurtw, kurt0, thekurt, kurt99), or with
-// one letter doubled (kuurt, kurrt). The holder may take them; everyone else is refused with a plain message.
+// Near variants (security review, 11 Nov 2026): while a hold of 4+ characters is live AND its `near` option is on
+// (the default; switch it off for a hold on a common word, so `mark` doesn't block `marker`), names that read as it
+// are held too (nearHold): the same name after HOLD_FOLD below (ku-rt, ku_rt, k1rt, kirt…), the name with up to 3
+// characters added before or after it (kurtt, kurtjr, kurtw, kurt0, thekurt, kurt99), or with one letter doubled
+// (kuurt, kurrt). The holder may take them; everyone else is refused with a plain message.
 // ⚠ NEVER the @name. X @names change hands; the numeric id does not. x_handle is kept for words on a page only.
 //
 // Pure rules + one async proof check over an injected store, so it is unit-testable (test/xHolds.test.js).
 'use strict';
 const crypto = require('crypto');
 const social = require('./social');
-const { lookalikes } = require('./brandGuard');
+
+/**
+ * HOLD_FOLD: the one look-alike mapping for held names, IDENTICAL to bChatX's foldLookalike (bit-sign
+ * src/lib/lookalike-handles.ts) so a name is near a hold on both sides or on neither (re-review, 11 Nov 2026):
+ * lower case, `-` and `_` dropped, then 0→o, 1→l AND i→l, 3→e, 5→s, 4→a, then rn→m, vv→w. Both alias patterns are
+ * ASCII a-z0-9_- only, so no Unicode step is needed. Shared vectors: test/xHolds.test.js and bit-sign
+ * x-paymail-hold-selftest.mts (FOLD_VECTORS) must stay the same list.
+ */
+function holdFold(s) {
+  return String(s ?? '')
+    .trim()
+    .replace(/^[$@]/, '')
+    .toLowerCase()
+    .replace(/[-_]/g, '')
+    .replace(/0/g, 'o')
+    .replace(/[1i]/g, 'l')
+    .replace(/3/g, 'e')
+    .replace(/5/g, 's')
+    .replace(/4/g, 'a')
+    .replace(/rn/g, 'm')
+    .replace(/vv/g, 'w');
+}
 
 const X_ID_RE = /^[0-9]{1,25}$/;
 const X_HANDLE_RE = /^[a-z0-9_]{1,15}$/;
@@ -57,16 +79,15 @@ function nearHold(alias, held) {
   const a = String(alias || '').toLowerCase();
   const h = String(held || '').toLowerCase();
   if (!a || !h || a === h || h.length < NEAR_MIN_LEN) return false;
-  const hf = lookalikes(h);
-  for (const f of lookalikes(a)) {
-    for (const x of hf) {
-      if (f === x) return true;
-      if (f.length > x.length && f.length - x.length <= AFFIX_MAX && (f.startsWith(x) || f.endsWith(x))) return true;
-      if (f.length === x.length + 1 && undoubleOnce(f).has(x)) return true;
-    }
-  }
-  return false;
+  const f = holdFold(a);
+  const x = holdFold(h);
+  if (!f || !x) return false;
+  if (f === x) return true;
+  if (f.length > x.length && f.length - x.length <= AFFIX_MAX && (f.startsWith(x) || f.endsWith(x))) return true;
+  return f.length === x.length + 1 && undoubleOnce(f).has(x);
 }
+/** Does this hold guard its near variants? On unless the row says `near = false`. */
+const holdGuardsNear = (hold) => !!hold && hold.near !== false;
 
 const at = (h) => (X_HANDLE_RE.test(String(h || '')) ? `@${h}` : 'someone on X');
 /** The plain refusal everybody else gets. */
@@ -134,12 +155,16 @@ function holdRow(body, { validAlias, now = Date.now() }) {
   if (!Number.isInteger(days) || days < 0 || days > MAX_HOLD_DAYS)
     return { error: `days must be a whole number from 0 to ${MAX_HOLD_DAYS}` };
   const note = String(b.note || '').slice(0, 200);
+  // Near variants on by default; `near: false` for a hold on a common word (mark → marker stays free).
+  if (b.near !== undefined && typeof b.near !== 'boolean') return { error: 'near must be true or false' };
+  const near = b.near !== false;
   return {
     row: {
       alias,
       x_user_id: xUserId,
       x_handle: xHandle,
       note,
+      near,
       expires_at: days ? new Date(now + days * 86_400_000).toISOString() : null,
     },
   };
@@ -167,6 +192,8 @@ module.exports = {
   holderMessage,
   nearMessage,
   nearHold,
+  holdFold,
+  holdGuardsNear,
   proveHold,
   keyHoldsIt,
   holdRow,

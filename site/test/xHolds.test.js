@@ -2,6 +2,8 @@
 // The hold decides who may register a paymail name, so every path that creates a name is exercised here.
 import { describe, expect, test } from 'bun:test';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { PrivateKey, ProtoWallet, Utils } from '@bsv/sdk';
 import pm from '../lib/paymail.js';
 import nameFee from '../lib/nameFee.js';
@@ -427,6 +429,61 @@ describe('near variants (security review, 11 Nov 2026)', () => {
     await holdKurt(h);
     s.holds.get('kurt').expires_at = new Date(Date.now() - 1).toISOString();
     expect((await h.register({}, await user().sign('register', { alias: 'kurtt' })))[0]).toBe(200);
+  });
+});
+
+describe('per-hold near option + the shared fold (re-review, 11 Nov 2026)', () => {
+  test('near on (default): mark blocks marker; near off: marker is free, mark itself still held', async () => {
+    const on = store();
+    const h1 = pm.makeHandlers({ store: on, env: ENV });
+    expect((await h1['x-hold-put']({}, { alias: 'mark', x_user_id: '42' }, { adminSecret: ADMIN }))[0]).toBe(200);
+    expect(on.holds.get('mark').near).toBe(true);
+    expect((await h1.register({}, await user().sign('register', { alias: 'marker' })))[0]).toBe(403);
+
+    const off = store();
+    const h2 = pm.makeHandlers({ store: off, env: ENV });
+    expect(
+      (await h2['x-hold-put']({}, { alias: 'mark', x_user_id: '42', near: false }, { adminSecret: ADMIN }))[0],
+    ).toBe(200);
+    expect(off.holds.get('mark').near).toBe(false);
+    expect((await h2.register({}, await user().sign('register', { alias: 'marker' })))[0]).toBe(200);
+    expect((await h2.available({ alias: 'marks' }))[1].status).toBe('free');
+    expect((await h2.register({}, await user().sign('register', { alias: 'mark' })))[0]).toBe(403);
+    // A row from before the column existed (near undefined) guards its variants: on is the default.
+    expect(xHolds.holdGuardsNear({ alias: 'kurt' })).toBe(true);
+    expect(xHolds.holdGuardsNear({ alias: 'kurt', near: false })).toBe(false);
+    const put = (b) => h2['x-hold-put']({}, b, { adminSecret: ADMIN });
+    expect((await put({ alias: 'kurt', x_user_id: KURT_ID, near: 'no' }))[0]).toBe(400);
+  });
+
+  // ⚠ The same list as bit-sign x-paymail-hold-selftest.mts FOLD_VECTORS: both sides fold held names identically.
+  const FOLD_VECTORS = [
+    ['Kurt', 'kurt'],
+    ['ku-rt', 'kurt'],
+    ['ku_rt', 'kurt'],
+    ['kurt0', 'kurto'],
+    ['k1rt', 'klrt'],
+    ['kirt', 'klrt'],
+    ['klrt', 'klrt'],
+    ['kurt3', 'kurte'],
+    ['kur5t', 'kurst'],
+    ['4kurt', 'akurt'],
+    ['kurnt', 'kumt'],
+    ['vvkurt', 'wkurt'],
+    ['$kurt', 'kurt'],
+  ];
+  test('holdFold matches the shared vectors (1 and i both fold to l)', () => {
+    for (const [input, folded] of FOLD_VECTORS) expect([input, xHolds.holdFold(input)]).toEqual([input, folded]);
+    expect(xHolds.nearHold('k1rtx', 'kirt')).toBe(true);
+    expect(xHolds.nearHold('klrt', 'kirt')).toBe(true);
+  });
+
+  test('scripts/x-hold-kurt.sql holds kurt, kurtwuckert and kurtwuckertjr for the one X id, near on', () => {
+    const sql = fs.readFileSync(path.join(import.meta.dir, '..', '..', 'scripts', 'x-hold-kurt.sql'), 'utf8');
+    for (const a of ['kurt', 'kurtwuckert', 'kurtwuckertjr'])
+      expect(sql).toMatch(new RegExp(`\\('${a}',\\s+'304746564', 'kurtwuckertjr', '[^']*', true,`));
+    expect(sql).toContain('for a in kurt kurtwuckert kurtwuckertjr; do');
+    expect(sql).not.toMatch(/x-admin-secret: [^$]/);
   });
 });
 

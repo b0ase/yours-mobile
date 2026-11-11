@@ -78,5 +78,6 @@ describe('migrations/20261111_paymail_x_holds.sql', () => {
   test('bound by the numeric X id; the @name is words only', () => {
     expect(body).toContain("x_user_id text not null check (x_user_id ~ '^[0-9]{1,25}$')");
     expect(body).toContain("x_handle text not null default '' check (x_handle ~ '^[a-z0-9_]{0,15}$')");
+    expect(body).toContain('near boolean not null default true,');
   });
 });
